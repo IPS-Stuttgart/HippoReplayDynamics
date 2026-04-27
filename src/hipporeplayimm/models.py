@@ -21,6 +21,7 @@ class EventScore:
     n_time: int
     n_spikes: int
     diagnostics: dict[str, float | int | str] = field(default_factory=dict)
+    terminal_log_posterior: np.ndarray | None = None
 
 
 class ReplayModel(Protocol):
@@ -35,9 +36,16 @@ class RandomModel:
     name: str = "random"
 
     def score(self, emissions: LogEmissionTensor, bin_centers: np.ndarray) -> EventScore:
-        del bin_centers
+        terminal_log_posterior = _normalize_log_weights(emissions.log_likelihood[-1])
         logp = float(np.sum(logsumexp(emissions.log_likelihood, axis=1) - np.log(emissions.n_bins)))
-        return EventScore(self.name, logp, emissions.n_time, emissions.n_spikes)
+        return EventScore(
+            self.name,
+            logp,
+            emissions.n_time,
+            emissions.n_spikes,
+            diagnostics=_posterior_diagnostics(terminal_log_posterior, bin_centers),
+            terminal_log_posterior=terminal_log_posterior,
+        )
 
 
 @dataclass
@@ -45,9 +53,18 @@ class StationaryModel:
     name: str = "stationary"
 
     def score(self, emissions: LogEmissionTensor, bin_centers: np.ndarray) -> EventScore:
-        del bin_centers
+        terminal_log_posterior = _normalize_log_weights(
+            np.sum(emissions.log_likelihood, axis=0) - np.log(emissions.n_bins)
+        )
         logp = float(logsumexp(np.sum(emissions.log_likelihood, axis=0) - np.log(emissions.n_bins)))
-        return EventScore(self.name, logp, emissions.n_time, emissions.n_spikes)
+        return EventScore(
+            self.name,
+            logp,
+            emissions.n_time,
+            emissions.n_spikes,
+            diagnostics=_posterior_diagnostics(terminal_log_posterior, bin_centers),
+            terminal_log_posterior=terminal_log_posterior,
+        )
 
 
 @dataclass
@@ -66,7 +83,15 @@ class DiffusionModel:
         for time_index in range(1, emissions.n_time):
             log_alpha = emissions.log_likelihood[time_index] + _log_sparse_matvec(log_alpha, transition)
         logp = float(logsumexp(log_alpha))
-        return EventScore(self.name, logp, emissions.n_time, emissions.n_spikes)
+        terminal_log_posterior = _normalize_log_weights(log_alpha)
+        return EventScore(
+            self.name,
+            logp,
+            emissions.n_time,
+            emissions.n_spikes,
+            diagnostics=_posterior_diagnostics(terminal_log_posterior, bin_centers),
+            terminal_log_posterior=terminal_log_posterior,
+        )
 
 
 @dataclass
@@ -111,15 +136,27 @@ class CandidateKinematicModel:
         if len(candidates) != emissions.n_time:
             raise ValueError("candidate_indices must contain one array per emission time bin")
         if self.mode != "imm":
-            logp, mass = self._score_static_pair(emissions, bin_centers, candidates, self.mode)
+            logp, mass, terminal_log_posterior = self._score_static_pair(
+                emissions,
+                bin_centers,
+                candidates,
+                self.mode,
+            )
         else:
-            logp, mass = self._score_imm(emissions, bin_centers, candidates)
+            logp, mass, terminal_log_posterior = self._score_imm(
+                emissions,
+                bin_centers,
+                candidates,
+            )
+        diagnostics = {"mean_candidate_log_mass": float(np.mean(mass))}
+        diagnostics.update(_posterior_diagnostics(terminal_log_posterior, bin_centers))
         return EventScore(
             str(self.name),
             float(logp),
             emissions.n_time,
             emissions.n_spikes,
-            diagnostics={"mean_candidate_log_mass": float(np.mean(mass))},
+            diagnostics=diagnostics,
+            terminal_log_posterior=terminal_log_posterior,
         )
 
     def _score_static_pair(
@@ -128,7 +165,7 @@ class CandidateKinematicModel:
         bin_centers: np.ndarray,
         candidates: list[np.ndarray],
         mode: str,
-    ) -> tuple[float, list[float]]:
+    ) -> tuple[float, list[float], np.ndarray]:
         masses = _candidate_log_masses(emissions, candidates)
         first = candidates[0]
         second = candidates[1]
@@ -159,14 +196,18 @@ class CandidateKinematicModel:
                 velocity_decay=self.velocity_decay,
             )
             prev_prev, prev = prev, curr
-        return float(logsumexp(log_pair)), masses
+        return float(logsumexp(log_pair)), masses, _pair_terminal_posterior(
+            log_pair,
+            prev,
+            bin_centers.shape[0],
+        )
 
     def _score_imm(
         self,
         emissions: LogEmissionTensor,
         bin_centers: np.ndarray,
         candidates: list[np.ndarray],
-    ) -> tuple[float, list[float]]:
+    ) -> tuple[float, list[float], np.ndarray]:
         masses = _candidate_log_masses(emissions, candidates)
         modes = ("stationary", "diffusion", "momentum", "jump")
         transition_modes = _mode_transition_matrix(len(modes), self.mode_stickiness)
@@ -213,7 +254,11 @@ class CandidateKinematicModel:
                 )
             log_alpha = np.stack(next_alpha, axis=0)
             prev_prev, prev = prev, curr
-        return float(logsumexp(log_alpha)), masses
+        return float(logsumexp(log_alpha)), masses, _pair_terminal_posterior(
+            log_alpha,
+            prev,
+            bin_centers.shape[0],
+        )
 
 
 def score_model(model: ReplayModel, emissions: LogEmissionTensor, bin_centers: np.ndarray) -> EventScore:
@@ -234,6 +279,42 @@ def _candidate_log_masses(emissions: LogEmissionTensor, candidates: list[np.ndar
             float(logsumexp(emissions.log_likelihood[time_index, curr]) - logsumexp(emissions.log_likelihood[time_index]))
         )
     return masses
+
+
+def _normalize_log_weights(log_weights: np.ndarray) -> np.ndarray:
+    return log_weights - logsumexp(log_weights)
+
+
+def _posterior_diagnostics(
+    terminal_log_posterior: np.ndarray,
+    bin_centers: np.ndarray,
+) -> dict[str, float | int]:
+    posterior = np.exp(terminal_log_posterior)
+    endpoint = posterior @ bin_centers
+    map_bin = int(np.argmax(terminal_log_posterior))
+    entropy = float(-np.sum(posterior * terminal_log_posterior))
+    return {
+        "decoded_endpoint_x": float(endpoint[0]),
+        "decoded_endpoint_y": float(endpoint[1]),
+        "decoded_map_x": float(bin_centers[map_bin, 0]),
+        "decoded_map_y": float(bin_centers[map_bin, 1]),
+        "decoded_map_bin": map_bin,
+        "terminal_posterior_entropy": entropy,
+    }
+
+
+def _pair_terminal_posterior(
+    log_pair_or_modes: np.ndarray,
+    current_indices: np.ndarray,
+    n_bins: int,
+) -> np.ndarray:
+    if log_pair_or_modes.ndim == 3:
+        collapsed = logsumexp(log_pair_or_modes, axis=(0, 1))
+    else:
+        collapsed = logsumexp(log_pair_or_modes, axis=0)
+    log_posterior = np.full(n_bins, LOG_ZERO, dtype=float)
+    log_posterior[current_indices] = collapsed
+    return _normalize_log_weights(log_posterior)
 
 
 def _log_transition_matrix(bin_centers: np.ndarray, sigma_cm: float, max_step_sigma: float) -> list[tuple[np.ndarray, np.ndarray]]:

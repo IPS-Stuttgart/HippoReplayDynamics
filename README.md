@@ -10,6 +10,8 @@ The raw dataset is expected to remain outside the repository, for example:
 hipporeplayimm inspect D:\Uni-Data\DataSetFromPfeifferFoster
 hipporeplayimm benchmark D:\Uni-Data\DataSetFromPfeifferFoster --max-events 25 --output results
 hipporeplayimm decode-event D:\Uni-Data\DataSetFromPfeifferFoster --session Rat1/Open1 --event-id 0
+hipporeplayimm ground-truth D:\Uni-Data\DataSetFromPfeifferFoster --output results\behavioral_ground_truth.csv
+hipporeplayimm compare-ground-truth D:\Uni-Data\DataSetFromPfeifferFoster --scores results\event_scores.csv --ground-truth results\behavioral_ground_truth.csv --output results\ground_truth_comparison.csv
 ```
 
 The first implementation focuses on the eight `Rat1-4/Open1-2` sessions. It
@@ -31,3 +33,16 @@ predictive density as the primary metric.
 The candidate-pruned models use the same candidate sets for train and joint
 likelihoods during held-out scoring, so `log p(train, test) - log p(train)` is
 well-defined under the same approximate state support.
+
+## Behavioral Ground-Truth Proxy
+
+The real data do not contain latent replay trajectories as ground truth.
+`hipporeplayimm ground-truth` derives a behavioral proxy from open-field well
+fills and positions: a well filled at row `i` in `Well_Sequence.mat` is assigned
+the median animal position just before row `i + 1`, then each run ripple is
+labeled by the first valid post-ripple well visit.
+
+`hipporeplayimm compare-ground-truth` merges this table with benchmark scores
+and adds event-by-model fields such as decoded endpoint, decoded well,
+`goal_correct`, `endpoint_error_cm`, `true_well_posterior`, and
+`true_well_rank`.

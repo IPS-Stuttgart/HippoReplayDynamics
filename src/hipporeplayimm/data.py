@@ -220,6 +220,8 @@ def _as_two_dimensional(value: Any, name: str) -> np.ndarray:
     if arr.size == 0:
         return np.empty((0, 2), dtype=float)
     if arr.ndim == 1:
+        if name == "Ripple_Events" and arr.shape[0] == 6:
+            return arr.reshape(1, 6)
         if arr.shape[0] == 2:
             return arr.reshape(1, 2)
         return arr.reshape(-1, 1)

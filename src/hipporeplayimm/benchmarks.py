@@ -1,0 +1,175 @@
+"""Open-field held-out likelihood benchmarks."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from pathlib import Path
+
+import numpy as np
+import pandas as pd
+
+from .data import ReplaySession, load_open_field_sessions
+from .encoding import EmissionConfig, EncodingConfig, build_emissions, fit_place_field_encoding
+from .models import CandidateKinematicModel, RandomModel, StationaryModel
+
+
+@dataclass(frozen=True)
+class BenchmarkConfig:
+    encoding: EncodingConfig = field(default_factory=EncodingConfig)
+    emissions: EmissionConfig = field(default_factory=EmissionConfig)
+    test_cell_fraction: float = 0.25
+    max_events_per_session: int | None = None
+    candidate_top_k: int = 64
+    random_seed: int = 1
+    event_epoch: str = "run"
+    models: tuple[str, ...] = ("random", "stationary", "diffusion", "momentum", "imm")
+
+
+@dataclass
+class BenchmarkResult:
+    rows: pd.DataFrame
+
+    def summary(self) -> pd.DataFrame:
+        if self.rows.empty:
+            return pd.DataFrame()
+        grouped = self.rows.groupby("model", as_index=False)
+        return grouped.agg(
+            events=("heldout_log_likelihood", "count"),
+            mean_heldout_log_likelihood=("heldout_log_likelihood", "mean"),
+            mean_delta_vs_best_static=("delta_vs_best_static", "mean"),
+            mean_bits_per_spike_vs_best_static=("bits_per_spike_vs_best_static", "mean"),
+        )
+
+    def to_csv(self, path: str | Path) -> None:
+        self.rows.to_csv(path, index=False)
+
+
+def run_open_field_benchmark(root: str | Path, config: BenchmarkConfig | None = None) -> BenchmarkResult:
+    """Run held-out open-field benchmark across Rat1-4 Open1-2 sessions."""
+
+    config = BenchmarkConfig() if config is None else config
+    sessions = load_open_field_sessions(root)
+    rows = []
+    for session in sessions:
+        rows.extend(_score_session(session, config))
+    frame = pd.DataFrame(rows)
+    if not frame.empty:
+        frame = _add_relative_metrics(frame)
+    return BenchmarkResult(frame)
+
+
+def bootstrap_delta_ci(
+    rows: pd.DataFrame,
+    model: str = "imm",
+    value_column: str = "delta_vs_best_static",
+    n_bootstrap: int = 1000,
+    random_seed: int = 1,
+) -> tuple[float, float]:
+    """Paired bootstrap CI over event-level deltas."""
+
+    values = rows.loc[rows["model"] == model, value_column].dropna().to_numpy(dtype=float)
+    if values.size == 0:
+        return (float("nan"), float("nan"))
+    rng = np.random.default_rng(random_seed)
+    means = np.empty(n_bootstrap, dtype=float)
+    for idx in range(n_bootstrap):
+        sample = rng.choice(values, size=values.size, replace=True)
+        means[idx] = float(np.mean(sample))
+    return (float(np.quantile(means, 0.025)), float(np.quantile(means, 0.975)))
+
+
+def _score_session(session: ReplaySession, config: BenchmarkConfig) -> list[dict[str, object]]:
+    encoding = fit_place_field_encoding(session, config.encoding)
+    train_cells, test_cells = _split_cells(encoding.cell_ids, config.test_cell_fraction, config.random_seed)
+    if test_cells.size == 0 or train_cells.size == 0:
+        return []
+    train_encoding = encoding.select_cells(train_cells)
+    joint_encoding = encoding.select_cells(np.concatenate([train_cells, test_cells]))
+    event_indices = _event_indices(session, config)
+    model_objects = _build_models(config)
+    rows: list[dict[str, object]] = []
+    for event_index in event_indices:
+        train_emissions = build_emissions(session, train_encoding, int(event_index), config.emissions)
+        joint_emissions = build_emissions(session, joint_encoding, int(event_index), config.emissions)
+        if train_emissions.n_time == 0 or joint_emissions.n_time == 0:
+            continue
+        for model_name, model in model_objects.items():
+            if isinstance(model, CandidateKinematicModel):
+                candidates = model.candidate_indices(train_emissions)
+                train_score = model.score(train_emissions, encoding.bin_centers, candidate_indices=candidates)
+                joint_score = model.score(joint_emissions, encoding.bin_centers, candidate_indices=candidates)
+            else:
+                train_score = model.score(train_emissions, encoding.bin_centers)
+                joint_score = model.score(joint_emissions, encoding.bin_centers)
+            heldout = joint_score.log_likelihood - train_score.log_likelihood
+            rows.append(
+                {
+                    "session": session.session_id,
+                    "event_index": int(event_index),
+                    "model": model_name,
+                    "heldout_log_likelihood": float(heldout),
+                    "joint_log_likelihood": float(joint_score.log_likelihood),
+                    "train_log_likelihood": float(train_score.log_likelihood),
+                    "test_spikes": int(joint_emissions.n_spikes - train_emissions.n_spikes),
+                    "n_time": int(train_emissions.n_time),
+                    **{
+                        f"diagnostic_{key}": value
+                        for key, value in joint_score.diagnostics.items()
+                    },
+                }
+            )
+    return rows
+
+
+def _event_indices(session: ReplaySession, config: BenchmarkConfig) -> np.ndarray:
+    if config.event_epoch == "run":
+        indices = session.ripple_indices_in_run()
+    elif config.event_epoch == "all":
+        indices = np.arange(session.ripple_count, dtype=int)
+    else:
+        raise ValueError("event_epoch must be 'run' or 'all'")
+    if config.max_events_per_session is not None:
+        indices = indices[: config.max_events_per_session]
+    return indices
+
+
+def _split_cells(cell_ids: np.ndarray, test_fraction: float, random_seed: int) -> tuple[np.ndarray, np.ndarray]:
+    if not 0.0 < test_fraction < 1.0:
+        raise ValueError("test_cell_fraction must be in (0, 1)")
+    rng = np.random.default_rng(random_seed)
+    shuffled = np.asarray(cell_ids, dtype=int).copy()
+    rng.shuffle(shuffled)
+    n_test = max(1, int(round(shuffled.size * test_fraction)))
+    n_test = min(n_test, shuffled.size - 1) if shuffled.size > 1 else 0
+    test = np.sort(shuffled[:n_test])
+    train = np.sort(shuffled[n_test:])
+    return train, test
+
+
+def _build_models(config: BenchmarkConfig) -> dict[str, object]:
+    available = {
+        "random": RandomModel(),
+        "stationary": StationaryModel(),
+        "diffusion": CandidateKinematicModel(mode="diffusion", top_k=config.candidate_top_k),
+        "momentum": CandidateKinematicModel(mode="momentum", top_k=config.candidate_top_k),
+        "imm": CandidateKinematicModel(mode="imm", top_k=config.candidate_top_k),
+    }
+    return {name: available[name] for name in config.models}
+
+
+def _add_relative_metrics(frame: pd.DataFrame) -> pd.DataFrame:
+    static_models = {"random", "stationary", "diffusion", "momentum"}
+    best_static = (
+        frame[frame["model"].isin(static_models)]
+        .groupby(["session", "event_index"])["heldout_log_likelihood"]
+        .max()
+        .rename("best_static_heldout_log_likelihood")
+        .reset_index()
+    )
+    merged = frame.merge(best_static, on=["session", "event_index"], how="left")
+    merged["delta_vs_best_static"] = (
+        merged["heldout_log_likelihood"] - merged["best_static_heldout_log_likelihood"]
+    )
+    denom = np.maximum(merged["test_spikes"].to_numpy(dtype=float), 1.0)
+    merged["bits_per_spike_vs_best_static"] = merged["delta_vs_best_static"] / np.log(2.0) / denom
+    return merged

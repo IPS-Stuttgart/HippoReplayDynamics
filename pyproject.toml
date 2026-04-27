@@ -1,0 +1,40 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "hipporeplayimm"
+version = "0.1.0"
+description = "IMM and state-space replay benchmarks for Pfeiffer/Foster hippocampal open-field data"
+readme = "README.md"
+requires-python = ">=3.11,<3.15"
+dependencies = [
+    "numpy",
+    "scipy",
+    "h5py",
+    "pandas",
+    "matplotlib",
+    "pyrecest @ git+https://github.com/FlorianPfaff/PyRecEst.git",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8"]
+
+[project.scripts]
+hipporeplayimm = "hipporeplayimm.cli:main"
+
+[project.urls]
+Repository = "https://github.com/FlorianPfaff/hipporeplayimm"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+line-length = 100
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "--basetemp=.pytest_tmp"

@@ -53,7 +53,7 @@ class EncodingModel:
         return (len(self.x_edges) - 1, len(self.y_edges) - 1)
 
     def select_cells(self, cell_ids: Iterable[int]) -> "EncodingModel":
-        requested = np.asarray(list(cell_ids), dtype=int)
+        requested = np.asarray(sorted(set(cell_ids)), dtype=int)
         indices = [int(np.flatnonzero(self.cell_ids == cell_id)[0]) for cell_id in requested]
         return EncodingModel(
             x_edges=self.x_edges,

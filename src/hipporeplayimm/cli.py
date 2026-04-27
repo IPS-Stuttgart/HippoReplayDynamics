@@ -10,6 +10,11 @@ import pandas as pd
 from .benchmarks import BenchmarkConfig, bootstrap_delta_ci, run_open_field_benchmark
 from .data import load_open_field_sessions
 from .encoding import build_emissions, fit_place_field_encoding
+from .ground_truth import (
+    GroundTruthConfig,
+    compare_scores_to_ground_truth,
+    generate_behavioral_ground_truth,
+)
 from .models import CandidateKinematicModel, RandomModel, StationaryModel
 
 
@@ -33,6 +38,24 @@ def main(argv: list[str] | None = None) -> int:
     decode_parser.add_argument("--event-id", type=int, required=True)
     decode_parser.add_argument("--candidate-top-k", type=int, default=64)
 
+    ground_truth_parser = subparsers.add_parser("ground-truth")
+    ground_truth_parser.add_argument("root")
+    ground_truth_parser.add_argument("--output", required=True)
+    ground_truth_parser.add_argument("--max-events", type=int)
+    ground_truth_parser.add_argument("--visit-radius-cm", type=float, default=10.0)
+    ground_truth_parser.add_argument("--min-dwell-s", type=float, default=0.2)
+    ground_truth_parser.add_argument("--future-horizon-s", type=float, default=30.0)
+
+    compare_parser = subparsers.add_parser("compare-ground-truth")
+    compare_parser.add_argument("root")
+    compare_parser.add_argument("--scores", required=True)
+    compare_parser.add_argument("--output", required=True)
+    compare_parser.add_argument("--ground-truth")
+    compare_parser.add_argument("--candidate-top-k", type=int, default=64)
+    compare_parser.add_argument("--visit-radius-cm", type=float, default=10.0)
+    compare_parser.add_argument("--min-dwell-s", type=float, default=0.2)
+    compare_parser.add_argument("--future-horizon-s", type=float, default=30.0)
+
     args = parser.parse_args(argv)
     if args.command == "inspect":
         return _inspect(args.root)
@@ -40,6 +63,10 @@ def main(argv: list[str] | None = None) -> int:
         return _benchmark(args)
     if args.command == "decode-event":
         return _decode_event(args)
+    if args.command == "ground-truth":
+        return _ground_truth(args)
+    if args.command == "compare-ground-truth":
+        return _compare_ground_truth(args)
     raise ValueError(args.command)
 
 
@@ -109,6 +136,76 @@ def _decode_event(args: argparse.Namespace) -> int:
         )
     print(pd.DataFrame(rows).to_string(index=False))
     return 0
+
+
+def _ground_truth(args: argparse.Namespace) -> int:
+    config = _ground_truth_config_from_args(args)
+    frame = generate_behavioral_ground_truth(
+        args.root,
+        config=config,
+        max_events_per_session=args.max_events,
+    )
+    output = Path(args.output)
+    output.parent.mkdir(parents=True, exist_ok=True)
+    frame.to_csv(output, index=False)
+    print(_ground_truth_summary(frame).to_string(index=False))
+    return 0
+
+
+def _compare_ground_truth(args: argparse.Namespace) -> int:
+    config = _ground_truth_config_from_args(args)
+    frame = compare_scores_to_ground_truth(
+        args.root,
+        args.scores,
+        ground_truth=args.ground_truth,
+        ground_truth_config=config,
+        candidate_top_k=args.candidate_top_k,
+    )
+    output = Path(args.output)
+    output.parent.mkdir(parents=True, exist_ok=True)
+    frame.to_csv(output, index=False)
+    print(_comparison_summary(frame).to_string(index=False))
+    return 0
+
+
+def _ground_truth_config_from_args(args: argparse.Namespace) -> GroundTruthConfig:
+    return GroundTruthConfig(
+        visit_radius_cm=args.visit_radius_cm,
+        min_dwell_s=args.min_dwell_s,
+        future_horizon_s=args.future_horizon_s,
+    )
+
+
+def _ground_truth_summary(frame: pd.DataFrame) -> pd.DataFrame:
+    if frame.empty:
+        return pd.DataFrame()
+    return (
+        frame.groupby("session", as_index=False)
+        .agg(
+            events=("event_index", "count"),
+            valid_labels=("valid_label", "sum"),
+            median_time_to_arrival_s=("time_to_arrival_s", "median"),
+        )
+        .sort_values("session")
+    )
+
+
+def _comparison_summary(frame: pd.DataFrame) -> pd.DataFrame:
+    if frame.empty:
+        return pd.DataFrame()
+    valid = frame[frame["valid_label"].fillna(False)]
+    if valid.empty:
+        return pd.DataFrame()
+    return (
+        valid.groupby("model", as_index=False)
+        .agg(
+            rows=("event_index", "count"),
+            goal_accuracy=("goal_correct", "mean"),
+            median_endpoint_error_cm=("endpoint_error_cm", "median"),
+            mean_true_well_posterior=("true_well_posterior", "mean"),
+        )
+        .sort_values("model")
+    )
 
 
 if __name__ == "__main__":

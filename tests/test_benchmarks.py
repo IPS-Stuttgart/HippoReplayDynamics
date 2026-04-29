@@ -1,7 +1,12 @@
 import numpy as np
 import pandas as pd
 
-from hipporeplayimm.benchmarks import BenchmarkResult, bootstrap_delta_ci
+from hipporeplayimm.benchmarks import (
+    BenchmarkConfig,
+    BenchmarkResult,
+    _build_models,
+    bootstrap_delta_ci,
+)
 
 
 def test_benchmark_summary_and_bootstrap_ci():
@@ -20,3 +25,11 @@ def test_benchmark_summary_and_bootstrap_ci():
     assert set(summary["model"]) == {"diffusion", "imm"}
     assert np.isfinite(ci[0])
     assert np.isfinite(ci[1])
+
+
+def test_build_models_includes_opt_in_pyrecest_model():
+    models = _build_models(
+        BenchmarkConfig(models=("pyrecest-goal-particle",), pyrecest_particles=64)
+    )
+
+    assert set(models) == {"pyrecest-goal-particle"}

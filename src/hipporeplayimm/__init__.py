@@ -18,6 +18,7 @@ from .models import (
     StationaryModel,
     score_model,
 )
+from .pyrecest_models import PyRecEstGoalParticleModel
 
 __all__ = [
     "BenchmarkConfig",
@@ -28,6 +29,7 @@ __all__ = [
     "EncodingModel",
     "EventScore",
     "GroundTruthConfig",
+    "PyRecEstGoalParticleModel",
     "RandomModel",
     "ReplaySession",
     "StationaryModel",

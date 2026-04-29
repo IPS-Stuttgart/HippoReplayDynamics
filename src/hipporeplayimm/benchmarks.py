@@ -11,6 +11,7 @@ import pandas as pd
 from .data import ReplaySession, load_open_field_sessions
 from .encoding import EmissionConfig, EncodingConfig, build_emissions, fit_place_field_encoding
 from .models import CandidateKinematicModel, RandomModel, StationaryModel
+from .pyrecest_models import PyRecEstGoalParticleModel
 
 
 @dataclass(frozen=True)
@@ -20,6 +21,7 @@ class BenchmarkConfig:
     test_cell_fraction: float = 0.25
     max_events_per_session: int | None = None
     candidate_top_k: int = 64
+    pyrecest_particles: int = 512
     random_seed: int = 1
     event_epoch: str = "run"
     models: tuple[str, ...] = ("random", "stationary", "diffusion", "momentum", "imm")
@@ -86,7 +88,7 @@ def _score_session(session: ReplaySession, config: BenchmarkConfig) -> list[dict
     train_encoding = encoding.select_cells(train_cells)
     joint_encoding = encoding.select_cells(np.concatenate([train_cells, test_cells]))
     event_indices = _event_indices(session, config)
-    model_objects = _build_models(config)
+    model_objects = _build_models(config, session=session)
     rows: list[dict[str, object]] = []
     for event_index in event_indices:
         train_emissions = build_emissions(session, train_encoding, int(event_index), config.emissions)
@@ -146,15 +148,35 @@ def _split_cells(cell_ids: np.ndarray, test_fraction: float, random_seed: int) -
     return train, test
 
 
-def _build_models(config: BenchmarkConfig) -> dict[str, object]:
+def _build_models(
+    config: BenchmarkConfig,
+    session: ReplaySession | None = None,
+) -> dict[str, object]:
+    goal_candidates = _session_goal_candidates(session) if session is not None else None
     available = {
         "random": RandomModel(),
         "stationary": StationaryModel(),
         "diffusion": CandidateKinematicModel(mode="diffusion", top_k=config.candidate_top_k),
         "momentum": CandidateKinematicModel(mode="momentum", top_k=config.candidate_top_k),
         "imm": CandidateKinematicModel(mode="imm", top_k=config.candidate_top_k),
+        "pyrecest-goal-particle": PyRecEstGoalParticleModel(
+            candidate_goals=goal_candidates,
+            n_particles=config.pyrecest_particles,
+            random_seed=config.random_seed,
+        ),
     }
     return {name: available[name] for name in config.models}
+
+
+def _session_goal_candidates(session: ReplaySession | None) -> np.ndarray | None:
+    if session is None:
+        return None
+    from .ground_truth import infer_well_locations
+
+    wells = infer_well_locations(session)
+    if wells.empty:
+        return None
+    return wells[["well_x", "well_y"]].to_numpy(dtype=float)
 
 
 def _add_relative_metrics(frame: pd.DataFrame) -> pd.DataFrame:

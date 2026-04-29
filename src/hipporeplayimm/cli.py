@@ -17,6 +17,7 @@ from .ground_truth import (
 )
 from .sweeps import (
     PyRecEstSweepConfig,
+    pareto_aggregate_sweep_summary,
     pareto_sweep_summary,
     run_pyrecest_parameter_sweep,
     write_pyrecest_sweep_outputs,
@@ -80,6 +81,10 @@ def main(argv: list[str] | None = None) -> int:
     sweep_parser.add_argument("--max-events", type=int, default=1)
     sweep_parser.add_argument("--candidate-top-k", type=int, default=64)
     sweep_parser.add_argument("--random-seed", type=int, default=1)
+    sweep_parser.add_argument(
+        "--random-seeds",
+        help="Comma-separated random seeds to run; overrides --random-seed.",
+    )
     sweep_parser.add_argument("--event-epoch", choices=("run", "all"), default="run")
     sweep_parser.add_argument(
         "--pyrecest-models",
@@ -241,6 +246,11 @@ def _sweep_pyrecest(args: argparse.Namespace) -> int:
         max_events_per_session=args.max_events,
         candidate_top_k=args.candidate_top_k,
         random_seed=args.random_seed,
+        random_seeds=(
+            _parse_int_values(args.random_seeds)
+            if args.random_seeds
+            else (args.random_seed,)
+        ),
         event_epoch=args.event_epoch,
         baseline_models=_parse_optional_models(args.baseline_models),
         pyrecest_models=_parse_models(args.pyrecest_models),
@@ -271,7 +281,14 @@ def _sweep_pyrecest(args: argparse.Namespace) -> int:
     )
     result = run_pyrecest_parameter_sweep(args.root, config)
     write_pyrecest_sweep_outputs(result, args.output)
-    print(pareto_sweep_summary(result.summary).to_string(index=False))
+    if result.aggregate_summary.empty:
+        print(pareto_sweep_summary(result.summary).to_string(index=False))
+    else:
+        print(
+            pareto_aggregate_sweep_summary(result.aggregate_summary).to_string(
+                index=False
+            )
+        )
     return 0
 
 

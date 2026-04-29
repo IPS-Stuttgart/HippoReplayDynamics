@@ -1,11 +1,15 @@
 import itertools
 
 import numpy as np
+import pytest
 from scipy.special import logsumexp
 
 from hipporeplayimm.encoding import LogEmissionTensor
 from hipporeplayimm.models import CandidateKinematicModel, DiffusionModel
-from hipporeplayimm.pyrecest_models import PyRecEstGoalParticleModel
+from hipporeplayimm.pyrecest_models import (
+    PyRecEstGoalParticleIMMModel,
+    PyRecEstGoalParticleModel,
+)
 
 
 def test_diffusion_matches_bruteforce_tiny_grid():
@@ -96,3 +100,44 @@ def test_pyrecest_goal_particle_model_scores_synthetic_event():
     assert score.terminal_log_posterior is not None
     assert np.allclose(logsumexp(score.terminal_log_posterior), 0.0)
     assert score.diagnostics["pyrecest_candidate_goals"] == 2
+
+
+def test_pyrecest_goal_particle_imm_model_scores_synthetic_event():
+    filters = pytest.importorskip("pyrecest.filters")
+    if not hasattr(filters, "GoalConditionedReplayParticleIMMFilter"):
+        pytest.skip("GoalConditionedReplayParticleIMMFilter is not installed")
+
+    centers = np.array([[0.0, 0.0], [1.0, 0.0], [2.0, 0.0], [3.0, 0.0]])
+    log_likelihood = np.log(
+        np.array(
+            [
+                [0.70, 0.20, 0.08, 0.02],
+                [0.15, 0.65, 0.15, 0.05],
+                [0.05, 0.15, 0.65, 0.15],
+            ]
+        )
+    )
+    emissions = LogEmissionTensor(
+        log_likelihood=log_likelihood,
+        spike_counts=np.zeros((3, 1), dtype=int),
+        times=np.array([0.0, 0.02, 0.04]),
+        dt=0.02,
+        cell_ids=np.array([1]),
+        n_spikes=0,
+    )
+    model = PyRecEstGoalParticleIMMModel(
+        candidate_goals=np.array([[0.0, 0.0], [3.0, 0.0]]),
+        n_particles=128,
+        random_seed=0,
+        jump_probability=0.0,
+        goal_reset_probability=0.0,
+        mode_stickiness=0.9,
+    )
+
+    score = model.score(emissions, centers)
+
+    assert np.isfinite(score.log_likelihood)
+    assert score.terminal_log_posterior is not None
+    assert np.allclose(logsumexp(score.terminal_log_posterior), 0.0)
+    assert score.diagnostics["pyrecest_candidate_goals"] == 2
+    assert "pyrecest_most_likely_mode" in score.diagnostics

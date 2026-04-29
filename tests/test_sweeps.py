@@ -24,8 +24,33 @@ def test_pyrecest_parameter_grid_cartesian_product():
     rows = pyrecest_parameter_grid(config)
 
     assert len(rows) == 8
+    assert rows[0]["pyrecest_model"] == "pyrecest-goal-particle"
     assert rows[0]["pyrecest_particles"] == 64
     assert rows[-1]["pyrecest_jump_probability"] == 0.03
+
+
+def test_pyrecest_parameter_grid_can_include_particle_imm_model():
+    config = PyRecEstSweepConfig(
+        pyrecest_models=("pyrecest-goal-particle", "pyrecest-goal-particle-imm"),
+        particles=(64,),
+        alphas=(0.8,),
+        betas=(1.0,),
+        process_noise_sigmas_cm_s=(30.0,),
+        position_jump_sigmas_cm=(10.0,),
+        jump_probabilities=(0.0,),
+        goal_reset_probabilities=(0.0,),
+        initial_velocity_sigmas_cm_s=(120.0,),
+        imm_mode_stickinesses=(0.9, 0.98),
+    )
+
+    rows = pyrecest_parameter_grid(config)
+
+    assert len(rows) == 4
+    assert {row["pyrecest_model"] for row in rows} == {
+        "pyrecest-goal-particle",
+        "pyrecest-goal-particle-imm",
+    }
+    assert {row["pyrecest_imm_mode_stickiness"] for row in rows} == {0.9, 0.98}
 
 
 def test_ground_truth_summary_metrics_uses_valid_rows():
@@ -51,6 +76,28 @@ def test_ground_truth_summary_metrics_uses_valid_rows():
     assert metrics["goal_accuracy"] == 0.5
     assert metrics["median_endpoint_error_cm"] == 15.0
     assert metrics["mean_true_well_posterior"] == 0.5
+
+
+def test_ground_truth_summary_metrics_can_select_particle_imm_model():
+    comparison = pd.DataFrame(
+        {
+            "model": ["pyrecest-goal-particle", "pyrecest-goal-particle-imm"],
+            "valid_label": [True, True],
+            "goal_correct": [False, True],
+            "endpoint_error_cm": [20.0, 5.0],
+            "true_well_posterior": [0.1, 0.8],
+            "true_well_rank": [2.0, 1.0],
+        }
+    )
+
+    metrics = _ground_truth_summary_metrics(
+        comparison,
+        model="pyrecest-goal-particle-imm",
+    )
+
+    assert metrics["valid_goal_rows"] == 1
+    assert metrics["goal_accuracy"] == 1.0
+    assert metrics["median_endpoint_error_cm"] == 5.0
 
 
 def test_sorted_sweep_summary_prefers_goal_accuracy_then_likelihood():

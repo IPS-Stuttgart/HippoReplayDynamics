@@ -75,6 +75,7 @@ class PyRecEstGoalParticleModel:
             "pyrecest_last_goal_remap_fraction": float(filter_.last_goal_remap_fraction),
         }
         diagnostics.update(_goal_diagnostics(filter_, goals))
+        diagnostics.update(_mode_diagnostics(filter_))
         diagnostics.update(_posterior_diagnostics(terminal_log_posterior, bin_centers))
         return EventScore(
             self.name,
@@ -129,6 +130,63 @@ class PyRecEstGoalParticleModel:
             np.eye(position_dim) * self.position_jump_sigma_cm**2,
         )
         return process_noise, position_jump
+
+
+@dataclass
+class PyRecEstGoalParticleIMMModel(PyRecEstGoalParticleModel):
+    """Goal-conditioned PyRecEst particle IMM replay scorer."""
+
+    mode_stickiness: float = 0.95
+    stationary_velocity_decay: float = 0.0
+    diffusion_velocity_decay: float = 0.0
+    momentum_velocity_decay: float = 0.95
+    jump_fraction: float = 0.9
+    jump_velocity_decay: float = 0.25
+    name: str = "pyrecest-goal-particle-imm"
+
+    def _build_filter(
+        self,
+        bin_centers: np.ndarray,
+        candidate_goals: np.ndarray,
+        dt: float,
+        rng: np.random.Generator,
+    ):
+        try:
+            from pyrecest.filters import GoalConditionedReplayParticleIMMFilter
+        except ImportError as exc:
+            raise ImportError(
+                "pyrecest-goal-particle-imm requires "
+                "pyrecest.filters.GoalConditionedReplayParticleIMMFilter. "
+                "Install a PyRecEst version containing FlorianPfaff/PyRecEst#1927."
+            ) from exc
+
+        positions = _sample_rows(bin_centers, self.n_particles, rng)
+        velocities = rng.normal(
+            0.0,
+            self.initial_velocity_sigma_cm_s,
+            size=(self.n_particles, bin_centers.shape[1]),
+        )
+        goals = _sample_rows(candidate_goals, self.n_particles, rng)
+        filter_ = GoalConditionedReplayParticleIMMFilter(
+            n_particles=self.n_particles,
+            position_dim=bin_centers.shape[1],
+            dt=dt,
+            alpha=self.alpha,
+            beta=self.beta,
+            candidate_goals=candidate_goals,
+            mode_stickiness=self.mode_stickiness,
+            stationary_velocity_decay=self.stationary_velocity_decay,
+            diffusion_velocity_decay=self.diffusion_velocity_decay,
+            momentum_velocity_decay=self.momentum_velocity_decay,
+            jump_fraction=self.jump_fraction,
+            jump_velocity_decay=self.jump_velocity_decay,
+        )
+        filter_.set_state_components(
+            positions=positions,
+            velocities=velocities,
+            goals=goals,
+        )
+        return filter_
 
 
 def _event_seed(random_seed: int, emissions: LogEmissionTensor) -> int:
@@ -258,3 +316,21 @@ def _goal_diagnostics(filter_, goals: np.ndarray) -> dict[str, float | int]:
         ),
         "pyrecest_most_likely_goal_probability": float(goal_weights[idx]),
     }
+
+
+def _mode_diagnostics(filter_) -> dict[str, float | str]:
+    if not hasattr(filter_, "mode_probabilities"):
+        return {}
+    probabilities = np.asarray(filter_.mode_probabilities, dtype=float)
+    names = tuple(getattr(filter_, "mode_names", ()))
+    diagnostics: dict[str, float | str] = {
+        f"pyrecest_mode_{name}_probability": float(probability)
+        for name, probability in zip(names, probabilities, strict=False)
+    }
+    if hasattr(filter_, "most_likely_mode"):
+        diagnostics["pyrecest_most_likely_mode"] = str(filter_.most_likely_mode())
+    if hasattr(filter_, "last_mode_transition_fraction"):
+        diagnostics["pyrecest_last_mode_transition_fraction"] = float(
+            filter_.last_mode_transition_fraction
+        )
+    return diagnostics

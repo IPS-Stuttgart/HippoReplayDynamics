@@ -11,7 +11,7 @@ import pandas as pd
 from .data import ReplaySession, load_open_field_sessions
 from .encoding import EmissionConfig, EncodingConfig, build_emissions, fit_place_field_encoding
 from .models import CandidateKinematicModel, RandomModel, StationaryModel
-from .pyrecest_models import PyRecEstGoalParticleModel
+from .pyrecest_models import PyRecEstGoalParticleIMMModel, PyRecEstGoalParticleModel
 
 
 @dataclass(frozen=True)
@@ -29,6 +29,12 @@ class BenchmarkConfig:
     pyrecest_jump_probability: float = 0.03
     pyrecest_goal_reset_probability: float = 0.02
     pyrecest_initial_velocity_sigma_cm_s: float = 120.0
+    pyrecest_imm_mode_stickiness: float = 0.95
+    pyrecest_imm_stationary_velocity_decay: float = 0.0
+    pyrecest_imm_diffusion_velocity_decay: float = 0.0
+    pyrecest_imm_momentum_velocity_decay: float = 0.95
+    pyrecest_imm_jump_fraction: float = 0.9
+    pyrecest_imm_jump_velocity_decay: float = 0.25
     random_seed: int = 1
     event_epoch: str = "run"
     models: tuple[str, ...] = ("random", "stationary", "diffusion", "momentum", "imm")
@@ -176,6 +182,24 @@ def _build_models(
             jump_probability=config.pyrecest_jump_probability,
             goal_reset_probability=config.pyrecest_goal_reset_probability,
             initial_velocity_sigma_cm_s=config.pyrecest_initial_velocity_sigma_cm_s,
+            random_seed=config.random_seed,
+        ),
+        "pyrecest-goal-particle-imm": PyRecEstGoalParticleIMMModel(
+            candidate_goals=goal_candidates,
+            n_particles=config.pyrecest_particles,
+            alpha=config.pyrecest_alpha,
+            beta=config.pyrecest_beta,
+            process_noise_sigma_cm_s=config.pyrecest_process_noise_sigma_cm_s,
+            position_jump_sigma_cm=config.pyrecest_position_jump_sigma_cm,
+            jump_probability=config.pyrecest_jump_probability,
+            goal_reset_probability=config.pyrecest_goal_reset_probability,
+            initial_velocity_sigma_cm_s=config.pyrecest_initial_velocity_sigma_cm_s,
+            mode_stickiness=config.pyrecest_imm_mode_stickiness,
+            stationary_velocity_decay=config.pyrecest_imm_stationary_velocity_decay,
+            diffusion_velocity_decay=config.pyrecest_imm_diffusion_velocity_decay,
+            momentum_velocity_decay=config.pyrecest_imm_momentum_velocity_decay,
+            jump_fraction=config.pyrecest_imm_jump_fraction,
+            jump_velocity_decay=config.pyrecest_imm_jump_velocity_decay,
             random_seed=config.random_seed,
         ),
     }

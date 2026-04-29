@@ -18,6 +18,7 @@ from .ground_truth import (
 
 
 PYRECEST_SWEEP_PARAMETER_COLUMNS = (
+    "pyrecest_model",
     "pyrecest_particles",
     "pyrecest_alpha",
     "pyrecest_beta",
@@ -26,6 +27,12 @@ PYRECEST_SWEEP_PARAMETER_COLUMNS = (
     "pyrecest_jump_probability",
     "pyrecest_goal_reset_probability",
     "pyrecest_initial_velocity_sigma_cm_s",
+    "pyrecest_imm_mode_stickiness",
+    "pyrecest_imm_stationary_velocity_decay",
+    "pyrecest_imm_diffusion_velocity_decay",
+    "pyrecest_imm_momentum_velocity_decay",
+    "pyrecest_imm_jump_fraction",
+    "pyrecest_imm_jump_velocity_decay",
 )
 
 
@@ -38,6 +45,7 @@ class PyRecEstSweepConfig:
     random_seed: int = 1
     event_epoch: str = "run"
     baseline_models: tuple[str, ...] = ("random", "stationary")
+    pyrecest_models: tuple[str, ...] = ("pyrecest-goal-particle",)
     particles: tuple[int, ...] = (128,)
     alphas: tuple[float, ...] = (0.80,)
     betas: tuple[float, ...] = (1.00,)
@@ -46,6 +54,12 @@ class PyRecEstSweepConfig:
     jump_probabilities: tuple[float, ...] = (0.03,)
     goal_reset_probabilities: tuple[float, ...] = (0.02,)
     initial_velocity_sigmas_cm_s: tuple[float, ...] = (120.0,)
+    imm_mode_stickinesses: tuple[float, ...] = (0.95,)
+    imm_stationary_velocity_decays: tuple[float, ...] = (0.0,)
+    imm_diffusion_velocity_decays: tuple[float, ...] = (0.0,)
+    imm_momentum_velocity_decays: tuple[float, ...] = (0.95,)
+    imm_jump_fractions: tuple[float, ...] = (0.9,)
+    imm_jump_velocity_decays: tuple[float, ...] = (0.25,)
     include_ground_truth: bool = True
     ground_truth: GroundTruthConfig = field(default_factory=GroundTruthConfig)
 
@@ -114,11 +128,34 @@ def run_pyrecest_parameter_sweep(
                 pyrecest_initial_velocity_sigma_cm_s=float(
                     parameters["pyrecest_initial_velocity_sigma_cm_s"]
                 ),
+                pyrecest_imm_mode_stickiness=float(
+                    parameters["pyrecest_imm_mode_stickiness"]
+                ),
+                pyrecest_imm_stationary_velocity_decay=float(
+                    parameters["pyrecest_imm_stationary_velocity_decay"]
+                ),
+                pyrecest_imm_diffusion_velocity_decay=float(
+                    parameters["pyrecest_imm_diffusion_velocity_decay"]
+                ),
+                pyrecest_imm_momentum_velocity_decay=float(
+                    parameters["pyrecest_imm_momentum_velocity_decay"]
+                ),
+                pyrecest_imm_jump_fraction=float(
+                    parameters["pyrecest_imm_jump_fraction"]
+                ),
+                pyrecest_imm_jump_velocity_decay=float(
+                    parameters["pyrecest_imm_jump_velocity_decay"]
+                ),
             )
             comparison = _with_sweep_columns(comparison, sweep_id, parameters)
             if not comparison.empty:
                 comparison_frames.append(comparison)
-            summary_row.update(_ground_truth_summary_metrics(comparison))
+            summary_row.update(
+                _ground_truth_summary_metrics(
+                    comparison,
+                    model=str(parameters["pyrecest_model"]),
+                )
+            )
         summary_rows.append(summary_row)
 
     return PyRecEstSweepResult(
@@ -148,9 +185,10 @@ def write_pyrecest_sweep_outputs(result: PyRecEstSweepResult, output: str | Path
         )
 
 
-def pyrecest_parameter_grid(config: PyRecEstSweepConfig) -> list[dict[str, float | int]]:
+def pyrecest_parameter_grid(config: PyRecEstSweepConfig) -> list[dict[str, object]]:
     """Return the cartesian product of PyRecEst sweep parameters."""
 
+    _validate_nonempty(config.pyrecest_models, "pyrecest_models")
     _validate_nonempty(config.particles, "particles")
     _validate_nonempty(config.alphas, "alphas")
     _validate_nonempty(config.betas, "betas")
@@ -162,9 +200,25 @@ def pyrecest_parameter_grid(config: PyRecEstSweepConfig) -> list[dict[str, float
         config.initial_velocity_sigmas_cm_s,
         "initial_velocity_sigmas_cm_s",
     )
+    _validate_nonempty(config.imm_mode_stickinesses, "imm_mode_stickinesses")
+    _validate_nonempty(
+        config.imm_stationary_velocity_decays,
+        "imm_stationary_velocity_decays",
+    )
+    _validate_nonempty(
+        config.imm_diffusion_velocity_decays,
+        "imm_diffusion_velocity_decays",
+    )
+    _validate_nonempty(
+        config.imm_momentum_velocity_decays,
+        "imm_momentum_velocity_decays",
+    )
+    _validate_nonempty(config.imm_jump_fractions, "imm_jump_fractions")
+    _validate_nonempty(config.imm_jump_velocity_decays, "imm_jump_velocity_decays")
 
-    rows: list[dict[str, float | int]] = []
+    rows: list[dict[str, object]] = []
     for values in product(
+        config.pyrecest_models,
         config.particles,
         config.alphas,
         config.betas,
@@ -173,6 +227,12 @@ def pyrecest_parameter_grid(config: PyRecEstSweepConfig) -> list[dict[str, float
         config.jump_probabilities,
         config.goal_reset_probabilities,
         config.initial_velocity_sigmas_cm_s,
+        config.imm_mode_stickinesses,
+        config.imm_stationary_velocity_decays,
+        config.imm_diffusion_velocity_decays,
+        config.imm_momentum_velocity_decays,
+        config.imm_jump_fractions,
+        config.imm_jump_velocity_decays,
     ):
         row = dict(zip(PYRECEST_SWEEP_PARAMETER_COLUMNS, values, strict=True))
         rows.append(row)
@@ -196,14 +256,15 @@ def sorted_sweep_summary(summary: pd.DataFrame) -> pd.DataFrame:
 
 def _benchmark_config(
     config: PyRecEstSweepConfig,
-    parameters: dict[str, float | int],
+    parameters: dict[str, object],
 ) -> BenchmarkConfig:
+    pyrecest_model = str(parameters["pyrecest_model"])
     return BenchmarkConfig(
         max_events_per_session=config.max_events_per_session,
         candidate_top_k=config.candidate_top_k,
         random_seed=config.random_seed,
         event_epoch=config.event_epoch,
-        models=tuple(dict.fromkeys((*config.baseline_models, "pyrecest-goal-particle"))),
+        models=tuple(dict.fromkeys((*config.baseline_models, pyrecest_model))),
         pyrecest_particles=int(parameters["pyrecest_particles"]),
         pyrecest_alpha=float(parameters["pyrecest_alpha"]),
         pyrecest_beta=float(parameters["pyrecest_beta"]),
@@ -220,13 +281,29 @@ def _benchmark_config(
         pyrecest_initial_velocity_sigma_cm_s=float(
             parameters["pyrecest_initial_velocity_sigma_cm_s"]
         ),
+        pyrecest_imm_mode_stickiness=float(
+            parameters["pyrecest_imm_mode_stickiness"]
+        ),
+        pyrecest_imm_stationary_velocity_decay=float(
+            parameters["pyrecest_imm_stationary_velocity_decay"]
+        ),
+        pyrecest_imm_diffusion_velocity_decay=float(
+            parameters["pyrecest_imm_diffusion_velocity_decay"]
+        ),
+        pyrecest_imm_momentum_velocity_decay=float(
+            parameters["pyrecest_imm_momentum_velocity_decay"]
+        ),
+        pyrecest_imm_jump_fraction=float(parameters["pyrecest_imm_jump_fraction"]),
+        pyrecest_imm_jump_velocity_decay=float(
+            parameters["pyrecest_imm_jump_velocity_decay"]
+        ),
     )
 
 
 def _with_sweep_columns(
     frame: pd.DataFrame,
     sweep_id: int,
-    parameters: dict[str, float | int],
+    parameters: dict[str, object],
 ) -> pd.DataFrame:
     output = frame.copy()
     output.insert(0, "sweep_id", sweep_id)
@@ -237,7 +314,7 @@ def _with_sweep_columns(
 
 def _benchmark_summary_row(
     sweep_id: int,
-    parameters: dict[str, float | int],
+    parameters: dict[str, object],
     benchmark: BenchmarkResult,
 ) -> dict[str, object]:
     row: dict[str, object] = {
@@ -251,7 +328,7 @@ def _benchmark_summary_row(
     summary = benchmark.summary()
     if summary.empty:
         return row
-    model_summary = summary[summary["model"] == "pyrecest-goal-particle"]
+    model_summary = summary[summary["model"] == str(parameters["pyrecest_model"])]
     if model_summary.empty:
         return row
     values = model_summary.iloc[0]
@@ -270,7 +347,10 @@ def _benchmark_summary_row(
     return row
 
 
-def _ground_truth_summary_metrics(comparison: pd.DataFrame) -> dict[str, float | int]:
+def _ground_truth_summary_metrics(
+    comparison: pd.DataFrame,
+    model: str = "pyrecest-goal-particle",
+) -> dict[str, float | int]:
     if comparison.empty or "valid_label" not in comparison.columns:
         return {
             "valid_goal_rows": 0,
@@ -280,7 +360,7 @@ def _ground_truth_summary_metrics(comparison: pd.DataFrame) -> dict[str, float |
             "median_true_well_rank": np.nan,
         }
     if "model" in comparison.columns:
-        comparison = comparison[comparison["model"] == "pyrecest-goal-particle"]
+        comparison = comparison[comparison["model"] == model]
     valid = comparison[comparison["valid_label"].fillna(False)]
     if valid.empty:
         return {

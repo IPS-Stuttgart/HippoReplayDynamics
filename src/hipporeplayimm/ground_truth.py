@@ -219,6 +219,12 @@ def compare_scores_to_ground_truth(
     pyrecest_jump_probability: float = 0.03,
     pyrecest_goal_reset_probability: float = 0.02,
     pyrecest_initial_velocity_sigma_cm_s: float = 120.0,
+    pyrecest_imm_mode_stickiness: float = 0.95,
+    pyrecest_imm_stationary_velocity_decay: float = 0.0,
+    pyrecest_imm_diffusion_velocity_decay: float = 0.0,
+    pyrecest_imm_momentum_velocity_decay: float = 0.95,
+    pyrecest_imm_jump_fraction: float = 0.9,
+    pyrecest_imm_jump_velocity_decay: float = 0.25,
 ) -> pd.DataFrame:
     """Merge event scores with next-well behavioral correctness metrics."""
 
@@ -239,6 +245,12 @@ def compare_scores_to_ground_truth(
         pyrecest_jump_probability=pyrecest_jump_probability,
         pyrecest_goal_reset_probability=pyrecest_goal_reset_probability,
         pyrecest_initial_velocity_sigma_cm_s=pyrecest_initial_velocity_sigma_cm_s,
+        pyrecest_imm_mode_stickiness=pyrecest_imm_mode_stickiness,
+        pyrecest_imm_stationary_velocity_decay=pyrecest_imm_stationary_velocity_decay,
+        pyrecest_imm_diffusion_velocity_decay=pyrecest_imm_diffusion_velocity_decay,
+        pyrecest_imm_momentum_velocity_decay=pyrecest_imm_momentum_velocity_decay,
+        pyrecest_imm_jump_fraction=pyrecest_imm_jump_fraction,
+        pyrecest_imm_jump_velocity_decay=pyrecest_imm_jump_velocity_decay,
         models=model_names,
     )
     encoding_config = EncodingConfig() if encoding_config is None else encoding_config

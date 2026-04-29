@@ -35,6 +35,15 @@ PYRECEST_SWEEP_PARAMETER_COLUMNS = (
     "pyrecest_imm_jump_velocity_decay",
 )
 
+PYRECEST_SWEEP_PARETO_OBJECTIVES = {
+    "goal_accuracy": "max",
+    "mean_delta_vs_best_static": "max",
+    "mean_bits_per_spike_vs_best_static": "max",
+    "mean_true_well_posterior": "max",
+    "median_endpoint_error_cm": "min",
+    "median_true_well_rank": "min",
+}
+
 
 @dataclass(frozen=True)
 class PyRecEstSweepConfig:
@@ -183,6 +192,9 @@ def write_pyrecest_sweep_outputs(result: PyRecEstSweepResult, output: str | Path
             output_path / "ground_truth_comparison.csv",
             index=False,
         )
+    pareto = pareto_sweep_summary(result.summary)
+    if not pareto.empty:
+        pareto.to_csv(output_path / "pareto_summary.csv", index=False)
 
 
 def pyrecest_parameter_grid(config: PyRecEstSweepConfig) -> list[dict[str, object]]:
@@ -252,6 +264,31 @@ def sorted_sweep_summary(summary: pd.DataFrame) -> pd.DataFrame:
     if not sort_columns:
         return summary
     return summary.sort_values(sort_columns, ascending=[False] * len(sort_columns))
+
+
+def pareto_sweep_summary(
+    summary: pd.DataFrame,
+    objectives: dict[str, str] | None = None,
+) -> pd.DataFrame:
+    """Return nondominated sweep rows across available objective columns."""
+
+    if summary.empty:
+        return summary
+    objectives = PYRECEST_SWEEP_PARETO_OBJECTIVES if objectives is None else objectives
+    objective_columns = [column for column in objectives if column in summary.columns]
+    if not objective_columns:
+        return sorted_sweep_summary(summary)
+
+    values = _objective_matrix(summary, objectives, objective_columns)
+    finite_objective = np.any(np.isfinite(values), axis=1)
+    keep = np.zeros(summary.shape[0], dtype=bool)
+    finite_indices = np.flatnonzero(finite_objective)
+    for row_index in finite_indices:
+        keep[row_index] = not _is_dominated(values[row_index], values[finite_indices])
+    pareto = summary.loc[keep].copy()
+    if pareto.empty:
+        return pareto
+    return sorted_sweep_summary(pareto)
 
 
 def _benchmark_config(
@@ -383,6 +420,30 @@ def _concat_or_empty(frames: list[pd.DataFrame]) -> pd.DataFrame:
     if not frames:
         return pd.DataFrame()
     return pd.concat(frames, ignore_index=True)
+
+
+def _objective_matrix(
+    summary: pd.DataFrame,
+    objectives: dict[str, str],
+    objective_columns: list[str],
+) -> np.ndarray:
+    columns = []
+    for column in objective_columns:
+        direction = objectives[column]
+        values = pd.to_numeric(summary[column], errors="coerce").to_numpy(dtype=float)
+        if direction == "max":
+            columns.append(values)
+        elif direction == "min":
+            columns.append(-values)
+        else:
+            raise ValueError("objective directions must be 'max' or 'min'")
+    return np.nan_to_num(np.column_stack(columns), nan=-np.inf)
+
+
+def _is_dominated(candidate: np.ndarray, all_values: np.ndarray) -> bool:
+    better_or_equal = np.all(all_values >= candidate, axis=1)
+    strictly_better = np.any(all_values > candidate, axis=1)
+    return bool(np.any(better_or_equal & strictly_better))
 
 
 def _validate_nonempty(values: tuple[object, ...], name: str) -> None:

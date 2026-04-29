@@ -17,8 +17,8 @@ from .ground_truth import (
 )
 from .sweeps import (
     PyRecEstSweepConfig,
+    pareto_sweep_summary,
     run_pyrecest_parameter_sweep,
-    sorted_sweep_summary,
     write_pyrecest_sweep_outputs,
 )
 
@@ -271,7 +271,7 @@ def _sweep_pyrecest(args: argparse.Namespace) -> int:
     )
     result = run_pyrecest_parameter_sweep(args.root, config)
     write_pyrecest_sweep_outputs(result, args.output)
-    print(sorted_sweep_summary(result.summary).to_string(index=False))
+    print(pareto_sweep_summary(result.summary).to_string(index=False))
     return 0
 
 

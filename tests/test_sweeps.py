@@ -3,9 +3,12 @@ import pandas as pd
 
 from hipporeplayimm.sweeps import (
     PyRecEstSweepConfig,
+    PyRecEstSweepResult,
     _ground_truth_summary_metrics,
+    pareto_sweep_summary,
     pyrecest_parameter_grid,
     sorted_sweep_summary,
+    write_pyrecest_sweep_outputs,
 )
 
 
@@ -112,3 +115,41 @@ def test_sorted_sweep_summary_prefers_goal_accuracy_then_likelihood():
     sorted_summary = sorted_sweep_summary(summary)
 
     assert list(sorted_summary["sweep_id"]) == [2, 1, 0]
+
+
+def test_pareto_sweep_summary_keeps_nondominated_tradeoffs():
+    summary = pd.DataFrame(
+        {
+            "sweep_id": [0, 1, 2, 3],
+            "goal_accuracy": [0.4, 0.1, 0.2, 0.3],
+            "mean_delta_vs_best_static": [-4.0, 1.7, -10.0, -5.0],
+            "median_endpoint_error_cm": [53.0, 56.0, 90.0, 54.0],
+            "mean_true_well_posterior": [0.15, 0.05, 0.02, 0.10],
+        }
+    )
+
+    pareto = pareto_sweep_summary(summary)
+
+    assert set(pareto["sweep_id"]) == {0, 1}
+    assert list(pareto["sweep_id"]) == [0, 1]
+
+
+def test_write_pyrecest_sweep_outputs_writes_pareto_summary(tmp_path):
+    result = PyRecEstSweepResult(
+        summary=pd.DataFrame(
+            {
+                "sweep_id": [0, 1],
+                "goal_accuracy": [0.3, 0.2],
+                "mean_delta_vs_best_static": [0.0, -1.0],
+                "median_endpoint_error_cm": [20.0, 25.0],
+            }
+        ),
+        event_scores=pd.DataFrame({"sweep_id": [0], "model": ["stationary"]}),
+        ground_truth_comparison=pd.DataFrame(),
+        behavioral_ground_truth=None,
+    )
+
+    write_pyrecest_sweep_outputs(result, tmp_path)
+
+    pareto = pd.read_csv(tmp_path / "pareto_summary.csv")
+    assert list(pareto["sweep_id"]) == [0]

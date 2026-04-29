@@ -64,8 +64,10 @@ hipporeplayimm sweep-pyrecest D:\Uni-Data\DataSetFromPfeifferFoster `
   --output results\pyrecest_sweep
 ```
 
-The sweep writes `sweep_summary.csv`, `event_scores.csv`, and, unless
-`--skip-ground-truth` is passed, behavioral ground-truth comparison tables.
+The sweep writes `sweep_summary.csv`, `pareto_summary.csv`, `event_scores.csv`,
+and, unless `--skip-ground-truth` is passed, behavioral ground-truth comparison
+tables. The CLI prints the Pareto summary so likelihood, goal accuracy, endpoint
+error, and true-well posterior tradeoffs stay visible.
 
 ## Behavioral Ground-Truth Proxy
 

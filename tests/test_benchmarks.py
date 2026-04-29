@@ -33,3 +33,11 @@ def test_build_models_includes_opt_in_pyrecest_model():
     )
 
     assert set(models) == {"pyrecest-goal-particle"}
+
+
+def test_build_models_includes_opt_in_pyrecest_imm_model():
+    models = _build_models(
+        BenchmarkConfig(models=("pyrecest-goal-particle-imm",), pyrecest_particles=64)
+    )
+
+    assert set(models) == {"pyrecest-goal-particle-imm"}

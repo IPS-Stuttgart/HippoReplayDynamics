@@ -82,6 +82,11 @@ def main(argv: list[str] | None = None) -> int:
     sweep_parser.add_argument("--random-seed", type=int, default=1)
     sweep_parser.add_argument("--event-epoch", choices=("run", "all"), default="run")
     sweep_parser.add_argument(
+        "--pyrecest-models",
+        default="pyrecest-goal-particle",
+        help="Comma-separated PyRecEst replay models to sweep.",
+    )
+    sweep_parser.add_argument(
         "--baseline-models",
         default="random,stationary",
         help=(
@@ -97,6 +102,12 @@ def main(argv: list[str] | None = None) -> int:
     sweep_parser.add_argument("--jump-probability", default="0.03")
     sweep_parser.add_argument("--goal-reset-probability", default="0.02")
     sweep_parser.add_argument("--initial-velocity-sigma-cm-s", default="120.0")
+    sweep_parser.add_argument("--imm-mode-stickiness", default="0.95")
+    sweep_parser.add_argument("--imm-stationary-velocity-decay", default="0.0")
+    sweep_parser.add_argument("--imm-diffusion-velocity-decay", default="0.0")
+    sweep_parser.add_argument("--imm-momentum-velocity-decay", default="0.95")
+    sweep_parser.add_argument("--imm-jump-fraction", default="0.9")
+    sweep_parser.add_argument("--imm-jump-velocity-decay", default="0.25")
     sweep_parser.add_argument("--skip-ground-truth", action="store_true")
     sweep_parser.add_argument("--visit-radius-cm", type=float, default=10.0)
     sweep_parser.add_argument("--min-dwell-s", type=float, default=0.2)
@@ -232,6 +243,7 @@ def _sweep_pyrecest(args: argparse.Namespace) -> int:
         random_seed=args.random_seed,
         event_epoch=args.event_epoch,
         baseline_models=_parse_optional_models(args.baseline_models),
+        pyrecest_models=_parse_models(args.pyrecest_models),
         particles=_parse_int_values(args.particles),
         alphas=_parse_float_values(args.alpha),
         betas=_parse_float_values(args.beta),
@@ -242,6 +254,18 @@ def _sweep_pyrecest(args: argparse.Namespace) -> int:
         initial_velocity_sigmas_cm_s=_parse_float_values(
             args.initial_velocity_sigma_cm_s
         ),
+        imm_mode_stickinesses=_parse_float_values(args.imm_mode_stickiness),
+        imm_stationary_velocity_decays=_parse_float_values(
+            args.imm_stationary_velocity_decay
+        ),
+        imm_diffusion_velocity_decays=_parse_float_values(
+            args.imm_diffusion_velocity_decay
+        ),
+        imm_momentum_velocity_decays=_parse_float_values(
+            args.imm_momentum_velocity_decay
+        ),
+        imm_jump_fractions=_parse_float_values(args.imm_jump_fraction),
+        imm_jump_velocity_decays=_parse_float_values(args.imm_jump_velocity_decay),
         include_ground_truth=not args.skip_ground_truth,
         ground_truth=_ground_truth_config_from_args(args),
     )
@@ -259,7 +283,29 @@ def _add_pyrecest_scalar_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--pyrecest-position-jump-sigma-cm", type=float, default=25.0)
     parser.add_argument("--pyrecest-jump-probability", type=float, default=0.03)
     parser.add_argument("--pyrecest-goal-reset-probability", type=float, default=0.02)
-    parser.add_argument("--pyrecest-initial-velocity-sigma-cm-s", type=float, default=120.0)
+    parser.add_argument(
+        "--pyrecest-initial-velocity-sigma-cm-s",
+        type=float,
+        default=120.0,
+    )
+    parser.add_argument("--pyrecest-imm-mode-stickiness", type=float, default=0.95)
+    parser.add_argument(
+        "--pyrecest-imm-stationary-velocity-decay",
+        type=float,
+        default=0.0,
+    )
+    parser.add_argument(
+        "--pyrecest-imm-diffusion-velocity-decay",
+        type=float,
+        default=0.0,
+    )
+    parser.add_argument(
+        "--pyrecest-imm-momentum-velocity-decay",
+        type=float,
+        default=0.95,
+    )
+    parser.add_argument("--pyrecest-imm-jump-fraction", type=float, default=0.9)
+    parser.add_argument("--pyrecest-imm-jump-velocity-decay", type=float, default=0.25)
 
 
 def _pyrecest_scalar_kwargs(args: argparse.Namespace) -> dict[str, float | int]:
@@ -272,6 +318,18 @@ def _pyrecest_scalar_kwargs(args: argparse.Namespace) -> dict[str, float | int]:
         "pyrecest_jump_probability": args.pyrecest_jump_probability,
         "pyrecest_goal_reset_probability": args.pyrecest_goal_reset_probability,
         "pyrecest_initial_velocity_sigma_cm_s": args.pyrecest_initial_velocity_sigma_cm_s,
+        "pyrecest_imm_mode_stickiness": args.pyrecest_imm_mode_stickiness,
+        "pyrecest_imm_stationary_velocity_decay": (
+            args.pyrecest_imm_stationary_velocity_decay
+        ),
+        "pyrecest_imm_diffusion_velocity_decay": (
+            args.pyrecest_imm_diffusion_velocity_decay
+        ),
+        "pyrecest_imm_momentum_velocity_decay": (
+            args.pyrecest_imm_momentum_velocity_decay
+        ),
+        "pyrecest_imm_jump_fraction": args.pyrecest_imm_jump_fraction,
+        "pyrecest_imm_jump_velocity_decay": args.pyrecest_imm_jump_velocity_decay,
     }
 
 

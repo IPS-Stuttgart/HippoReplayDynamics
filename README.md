@@ -31,6 +31,9 @@ predictive density as the primary metric.
   and jump/fragmented modes.
 - `pyrecest-goal-particle`: PyRecEst-backed goal-conditioned particle replay
   filter using well-derived candidate goals when session metadata are available.
+- `pyrecest-goal-particle-imm`: PyRecEst-backed goal-conditioned particle IMM
+  filter with per-particle switching among stationary, diffusion, momentum,
+  goal-directed, and jump dynamics.
 
 The candidate-pruned models use the same candidate sets for train and joint
 likelihoods during held-out scoring, so `log p(train, test) - log p(train)` is
@@ -40,13 +43,25 @@ The PyRecEst goal-conditioned particle model is opt-in because it is stochastic
 and more expensive:
 
 ```powershell
-hipporeplayimm benchmark D:\Uni-Data\DataSetFromPfeifferFoster --max-events 25 --models random,stationary,imm,pyrecest-goal-particle --pyrecest-particles 512 --output results\pyrecest_smoke
+hipporeplayimm benchmark D:\Uni-Data\DataSetFromPfeifferFoster `
+  --max-events 25 `
+  --models random,stationary,imm,pyrecest-goal-particle,pyrecest-goal-particle-imm `
+  --pyrecest-particles 512 `
+  --output results\pyrecest_smoke
 ```
 
 Small reproducible PyRecEst parameter sweeps can be run with:
 
 ```powershell
-hipporeplayimm sweep-pyrecest D:\Uni-Data\DataSetFromPfeifferFoster --max-events 5 --particles 128,512 --alpha 0.6,0.8 --position-jump-sigma-cm 10,25 --jump-probability 0.0,0.03 --output results\pyrecest_sweep
+hipporeplayimm sweep-pyrecest D:\Uni-Data\DataSetFromPfeifferFoster `
+  --max-events 5 `
+  --pyrecest-models pyrecest-goal-particle,pyrecest-goal-particle-imm `
+  --particles 128,512 `
+  --alpha 0.6,0.8 `
+  --position-jump-sigma-cm 10,25 `
+  --jump-probability 0.0,0.03 `
+  --imm-mode-stickiness 0.9,0.98 `
+  --output results\pyrecest_sweep
 ```
 
 The sweep writes `sweep_summary.csv`, `event_scores.csv`, and, unless

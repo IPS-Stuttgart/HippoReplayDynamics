@@ -32,7 +32,31 @@ def test_pyrecest_parameter_grid_cartesian_product():
     assert rows[0]["random_seed"] == 1
     assert rows[0]["pyrecest_model"] == "pyrecest-goal-particle"
     assert rows[0]["pyrecest_particles"] == 64
+    assert rows[0]["pyrecest_position_proposal_probability"] == 0.0
     assert rows[-1]["pyrecest_jump_probability"] == 0.03
+
+
+def test_pyrecest_parameter_grid_expands_position_proposal_probabilities():
+    config = PyRecEstSweepConfig(
+        particles=(64,),
+        alphas=(0.8,),
+        betas=(1.0,),
+        process_noise_sigmas_cm_s=(30.0,),
+        position_jump_sigmas_cm=(10.0,),
+        jump_probabilities=(0.0,),
+        goal_reset_probabilities=(0.0,),
+        position_proposal_probabilities=(0.0, 0.5, 1.0),
+        initial_velocity_sigmas_cm_s=(120.0,),
+    )
+
+    rows = pyrecest_parameter_grid(config)
+
+    assert len(rows) == 3
+    assert [row["pyrecest_position_proposal_probability"] for row in rows] == [
+        0.0,
+        0.5,
+        1.0,
+    ]
 
 
 def test_pyrecest_parameter_grid_can_include_particle_imm_model():

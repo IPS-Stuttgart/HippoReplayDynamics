@@ -9,6 +9,7 @@ from hipporeplayimm.models import CandidateKinematicModel, DiffusionModel
 from hipporeplayimm.pyrecest_models import (
     PyRecEstGoalParticleIMMModel,
     PyRecEstGoalParticleModel,
+    _grid_proposal_weights,
 )
 
 
@@ -100,6 +101,56 @@ def test_pyrecest_goal_particle_model_scores_synthetic_event():
     assert score.terminal_log_posterior is not None
     assert np.allclose(logsumexp(score.terminal_log_posterior), 0.0)
     assert score.diagnostics["pyrecest_candidate_goals"] == 2
+    assert score.diagnostics["pyrecest_position_proposal_probability"] == 0.0
+
+
+def test_grid_proposal_weights_normalize_finite_likelihoods():
+    weights = _grid_proposal_weights(np.array([0.0, -np.inf, np.log(3.0)]))
+
+    assert np.allclose(weights, np.array([0.25, 0.0, 0.75]))
+
+
+def test_pyrecest_goal_particle_model_uses_position_proposal_when_available():
+    filters = pytest.importorskip("pyrecest.filters")
+    particle_filter = getattr(filters, "GoalConditionedReplayParticleFilter", None)
+    if particle_filter is None or not hasattr(
+        particle_filter,
+        "update_position_likelihood_with_proposal",
+    ):
+        pytest.skip("PyRecEst position proposal rejuvenation is not installed")
+
+    centers = np.array([[0.0, 0.0], [1.0, 0.0], [2.0, 0.0], [3.0, 0.0]])
+    log_likelihood = np.log(
+        np.array(
+            [
+                [0.70, 0.20, 0.08, 0.02],
+                [0.15, 0.65, 0.15, 0.05],
+                [0.05, 0.15, 0.65, 0.15],
+            ]
+        )
+    )
+    emissions = LogEmissionTensor(
+        log_likelihood=log_likelihood,
+        spike_counts=np.zeros((3, 1), dtype=int),
+        times=np.array([0.0, 0.02, 0.04]),
+        dt=0.02,
+        cell_ids=np.array([1]),
+        n_spikes=0,
+    )
+    model = PyRecEstGoalParticleModel(
+        candidate_goals=np.array([[0.0, 0.0], [3.0, 0.0]]),
+        n_particles=128,
+        random_seed=0,
+        jump_probability=0.0,
+        goal_reset_probability=0.0,
+        position_proposal_probability=1.0,
+    )
+
+    score = model.score(emissions, centers)
+
+    assert np.isfinite(score.log_likelihood)
+    assert score.diagnostics["pyrecest_position_proposal_probability"] == 1.0
+    assert score.diagnostics["pyrecest_last_position_proposal_fraction"] == 1.0
 
 
 def test_pyrecest_goal_particle_imm_model_scores_synthetic_event():

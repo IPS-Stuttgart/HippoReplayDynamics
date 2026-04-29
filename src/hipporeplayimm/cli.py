@@ -106,6 +106,7 @@ def main(argv: list[str] | None = None) -> int:
     sweep_parser.add_argument("--position-jump-sigma-cm", default="25.0")
     sweep_parser.add_argument("--jump-probability", default="0.03")
     sweep_parser.add_argument("--goal-reset-probability", default="0.02")
+    sweep_parser.add_argument("--position-proposal-probability", default="0.0")
     sweep_parser.add_argument("--initial-velocity-sigma-cm-s", default="120.0")
     sweep_parser.add_argument("--imm-mode-stickiness", default="0.95")
     sweep_parser.add_argument("--imm-stationary-velocity-decay", default="0.0")
@@ -261,6 +262,9 @@ def _sweep_pyrecest(args: argparse.Namespace) -> int:
         position_jump_sigmas_cm=_parse_float_values(args.position_jump_sigma_cm),
         jump_probabilities=_parse_float_values(args.jump_probability),
         goal_reset_probabilities=_parse_float_values(args.goal_reset_probability),
+        position_proposal_probabilities=_parse_float_values(
+            args.position_proposal_probability
+        ),
         initial_velocity_sigmas_cm_s=_parse_float_values(
             args.initial_velocity_sigma_cm_s
         ),
@@ -301,6 +305,11 @@ def _add_pyrecest_scalar_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--pyrecest-jump-probability", type=float, default=0.03)
     parser.add_argument("--pyrecest-goal-reset-probability", type=float, default=0.02)
     parser.add_argument(
+        "--pyrecest-position-proposal-probability",
+        type=float,
+        default=0.0,
+    )
+    parser.add_argument(
         "--pyrecest-initial-velocity-sigma-cm-s",
         type=float,
         default=120.0,
@@ -334,6 +343,9 @@ def _pyrecest_scalar_kwargs(args: argparse.Namespace) -> dict[str, float | int]:
         "pyrecest_position_jump_sigma_cm": args.pyrecest_position_jump_sigma_cm,
         "pyrecest_jump_probability": args.pyrecest_jump_probability,
         "pyrecest_goal_reset_probability": args.pyrecest_goal_reset_probability,
+        "pyrecest_position_proposal_probability": (
+            args.pyrecest_position_proposal_probability
+        ),
         "pyrecest_initial_velocity_sigma_cm_s": args.pyrecest_initial_velocity_sigma_cm_s,
         "pyrecest_imm_mode_stickiness": args.pyrecest_imm_mode_stickiness,
         "pyrecest_imm_stationary_velocity_decay": (

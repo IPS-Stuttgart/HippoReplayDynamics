@@ -27,6 +27,7 @@ PYRECEST_SWEEP_PARAMETER_COLUMNS = (
     "pyrecest_position_jump_sigma_cm",
     "pyrecest_jump_probability",
     "pyrecest_goal_reset_probability",
+    "pyrecest_position_proposal_probability",
     "pyrecest_initial_velocity_sigma_cm_s",
     "pyrecest_imm_mode_stickiness",
     "pyrecest_imm_stationary_velocity_decay",
@@ -85,6 +86,7 @@ class PyRecEstSweepConfig:
     position_jump_sigmas_cm: tuple[float, ...] = (25.0,)
     jump_probabilities: tuple[float, ...] = (0.03,)
     goal_reset_probabilities: tuple[float, ...] = (0.02,)
+    position_proposal_probabilities: tuple[float, ...] = (0.0,)
     initial_velocity_sigmas_cm_s: tuple[float, ...] = (120.0,)
     imm_mode_stickinesses: tuple[float, ...] = (0.95,)
     imm_stationary_velocity_decays: tuple[float, ...] = (0.0,)
@@ -157,6 +159,9 @@ def run_pyrecest_parameter_sweep(
                 pyrecest_jump_probability=float(parameters["pyrecest_jump_probability"]),
                 pyrecest_goal_reset_probability=float(
                     parameters["pyrecest_goal_reset_probability"]
+                ),
+                pyrecest_position_proposal_probability=float(
+                    parameters["pyrecest_position_proposal_probability"]
                 ),
                 pyrecest_initial_velocity_sigma_cm_s=float(
                     parameters["pyrecest_initial_velocity_sigma_cm_s"]
@@ -251,6 +256,10 @@ def pyrecest_parameter_grid(config: PyRecEstSweepConfig) -> list[dict[str, objec
     _validate_nonempty(config.jump_probabilities, "jump_probabilities")
     _validate_nonempty(config.goal_reset_probabilities, "goal_reset_probabilities")
     _validate_nonempty(
+        config.position_proposal_probabilities,
+        "position_proposal_probabilities",
+    )
+    _validate_nonempty(
         config.initial_velocity_sigmas_cm_s,
         "initial_velocity_sigmas_cm_s",
     )
@@ -281,6 +290,7 @@ def pyrecest_parameter_grid(config: PyRecEstSweepConfig) -> list[dict[str, objec
         config.position_jump_sigmas_cm,
         config.jump_probabilities,
         config.goal_reset_probabilities,
+        config.position_proposal_probabilities,
         config.initial_velocity_sigmas_cm_s,
         config.imm_mode_stickinesses,
         config.imm_stationary_velocity_decays,
@@ -404,6 +414,9 @@ def _benchmark_config(
         pyrecest_jump_probability=float(parameters["pyrecest_jump_probability"]),
         pyrecest_goal_reset_probability=float(
             parameters["pyrecest_goal_reset_probability"]
+        ),
+        pyrecest_position_proposal_probability=float(
+            parameters["pyrecest_position_proposal_probability"]
         ),
         pyrecest_initial_velocity_sigma_cm_s=float(
             parameters["pyrecest_initial_velocity_sigma_cm_s"]

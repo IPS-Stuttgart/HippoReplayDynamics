@@ -15,6 +15,12 @@ from .ground_truth import (
     compare_scores_to_ground_truth,
     generate_behavioral_ground_truth,
 )
+from .sweeps import (
+    PyRecEstSweepConfig,
+    run_pyrecest_parameter_sweep,
+    sorted_sweep_summary,
+    write_pyrecest_sweep_outputs,
+)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -35,7 +41,7 @@ def main(argv: list[str] | None = None) -> int:
         default="random,stationary,diffusion,momentum,imm",
         help="Comma-separated model names to benchmark.",
     )
-    benchmark_parser.add_argument("--pyrecest-particles", type=int, default=512)
+    _add_pyrecest_scalar_arguments(benchmark_parser)
 
     decode_parser = subparsers.add_parser("decode-event")
     decode_parser.add_argument("root")
@@ -47,7 +53,7 @@ def main(argv: list[str] | None = None) -> int:
         default="random,stationary,diffusion,momentum,imm",
         help="Comma-separated model names to score.",
     )
-    decode_parser.add_argument("--pyrecest-particles", type=int, default=512)
+    _add_pyrecest_scalar_arguments(decode_parser)
 
     ground_truth_parser = subparsers.add_parser("ground-truth")
     ground_truth_parser.add_argument("root")
@@ -63,10 +69,38 @@ def main(argv: list[str] | None = None) -> int:
     compare_parser.add_argument("--output", required=True)
     compare_parser.add_argument("--ground-truth")
     compare_parser.add_argument("--candidate-top-k", type=int, default=64)
-    compare_parser.add_argument("--pyrecest-particles", type=int, default=512)
+    _add_pyrecest_scalar_arguments(compare_parser)
     compare_parser.add_argument("--visit-radius-cm", type=float, default=10.0)
     compare_parser.add_argument("--min-dwell-s", type=float, default=0.2)
     compare_parser.add_argument("--future-horizon-s", type=float, default=30.0)
+
+    sweep_parser = subparsers.add_parser("sweep-pyrecest")
+    sweep_parser.add_argument("root")
+    sweep_parser.add_argument("--output", required=True)
+    sweep_parser.add_argument("--max-events", type=int, default=1)
+    sweep_parser.add_argument("--candidate-top-k", type=int, default=64)
+    sweep_parser.add_argument("--random-seed", type=int, default=1)
+    sweep_parser.add_argument("--event-epoch", choices=("run", "all"), default="run")
+    sweep_parser.add_argument(
+        "--baseline-models",
+        default="random,stationary",
+        help=(
+            "Comma-separated static/legacy models to include in each sweep run; "
+            "use 'none' to skip."
+        ),
+    )
+    sweep_parser.add_argument("--particles", default="128")
+    sweep_parser.add_argument("--alpha", default="0.8")
+    sweep_parser.add_argument("--beta", default="1.0")
+    sweep_parser.add_argument("--process-noise-sigma-cm-s", default="60.0")
+    sweep_parser.add_argument("--position-jump-sigma-cm", default="25.0")
+    sweep_parser.add_argument("--jump-probability", default="0.03")
+    sweep_parser.add_argument("--goal-reset-probability", default="0.02")
+    sweep_parser.add_argument("--initial-velocity-sigma-cm-s", default="120.0")
+    sweep_parser.add_argument("--skip-ground-truth", action="store_true")
+    sweep_parser.add_argument("--visit-radius-cm", type=float, default=10.0)
+    sweep_parser.add_argument("--min-dwell-s", type=float, default=0.2)
+    sweep_parser.add_argument("--future-horizon-s", type=float, default=30.0)
 
     args = parser.parse_args(argv)
     if args.command == "inspect":
@@ -79,6 +113,8 @@ def main(argv: list[str] | None = None) -> int:
         return _ground_truth(args)
     if args.command == "compare-ground-truth":
         return _compare_ground_truth(args)
+    if args.command == "sweep-pyrecest":
+        return _sweep_pyrecest(args)
     raise ValueError(args.command)
 
 
@@ -106,8 +142,8 @@ def _benchmark(args: argparse.Namespace) -> int:
     config = BenchmarkConfig(
         max_events_per_session=args.max_events,
         candidate_top_k=args.candidate_top_k,
-        pyrecest_particles=args.pyrecest_particles,
         models=_parse_models(args.models),
+        **_pyrecest_scalar_kwargs(args),
     )
     result = run_open_field_benchmark(args.root, config)
     print(result.summary().to_string(index=False))
@@ -133,8 +169,8 @@ def _decode_event(args: argparse.Namespace) -> int:
     rows = []
     config = BenchmarkConfig(
         candidate_top_k=args.candidate_top_k,
-        pyrecest_particles=args.pyrecest_particles,
         models=_parse_models(args.models),
+        **_pyrecest_scalar_kwargs(args),
     )
     for model in _build_models(config, session=session).values():
         score = model.score(emissions, encoding.bin_centers)
@@ -172,7 +208,7 @@ def _compare_ground_truth(args: argparse.Namespace) -> int:
         ground_truth=args.ground_truth,
         ground_truth_config=config,
         candidate_top_k=args.candidate_top_k,
-        pyrecest_particles=args.pyrecest_particles,
+        **_pyrecest_scalar_kwargs(args),
     )
     output = Path(args.output)
     output.parent.mkdir(parents=True, exist_ok=True)
@@ -189,11 +225,82 @@ def _ground_truth_config_from_args(args: argparse.Namespace) -> GroundTruthConfi
     )
 
 
+def _sweep_pyrecest(args: argparse.Namespace) -> int:
+    config = PyRecEstSweepConfig(
+        max_events_per_session=args.max_events,
+        candidate_top_k=args.candidate_top_k,
+        random_seed=args.random_seed,
+        event_epoch=args.event_epoch,
+        baseline_models=_parse_optional_models(args.baseline_models),
+        particles=_parse_int_values(args.particles),
+        alphas=_parse_float_values(args.alpha),
+        betas=_parse_float_values(args.beta),
+        process_noise_sigmas_cm_s=_parse_float_values(args.process_noise_sigma_cm_s),
+        position_jump_sigmas_cm=_parse_float_values(args.position_jump_sigma_cm),
+        jump_probabilities=_parse_float_values(args.jump_probability),
+        goal_reset_probabilities=_parse_float_values(args.goal_reset_probability),
+        initial_velocity_sigmas_cm_s=_parse_float_values(
+            args.initial_velocity_sigma_cm_s
+        ),
+        include_ground_truth=not args.skip_ground_truth,
+        ground_truth=_ground_truth_config_from_args(args),
+    )
+    result = run_pyrecest_parameter_sweep(args.root, config)
+    write_pyrecest_sweep_outputs(result, args.output)
+    print(sorted_sweep_summary(result.summary).to_string(index=False))
+    return 0
+
+
+def _add_pyrecest_scalar_arguments(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--pyrecest-particles", type=int, default=512)
+    parser.add_argument("--pyrecest-alpha", type=float, default=0.80)
+    parser.add_argument("--pyrecest-beta", type=float, default=1.00)
+    parser.add_argument("--pyrecest-process-noise-sigma-cm-s", type=float, default=60.0)
+    parser.add_argument("--pyrecest-position-jump-sigma-cm", type=float, default=25.0)
+    parser.add_argument("--pyrecest-jump-probability", type=float, default=0.03)
+    parser.add_argument("--pyrecest-goal-reset-probability", type=float, default=0.02)
+    parser.add_argument("--pyrecest-initial-velocity-sigma-cm-s", type=float, default=120.0)
+
+
+def _pyrecest_scalar_kwargs(args: argparse.Namespace) -> dict[str, float | int]:
+    return {
+        "pyrecest_particles": args.pyrecest_particles,
+        "pyrecest_alpha": args.pyrecest_alpha,
+        "pyrecest_beta": args.pyrecest_beta,
+        "pyrecest_process_noise_sigma_cm_s": args.pyrecest_process_noise_sigma_cm_s,
+        "pyrecest_position_jump_sigma_cm": args.pyrecest_position_jump_sigma_cm,
+        "pyrecest_jump_probability": args.pyrecest_jump_probability,
+        "pyrecest_goal_reset_probability": args.pyrecest_goal_reset_probability,
+        "pyrecest_initial_velocity_sigma_cm_s": args.pyrecest_initial_velocity_sigma_cm_s,
+    }
+
+
+def _parse_int_values(value: str) -> tuple[int, ...]:
+    return tuple(int(item) for item in _split_csv_values(value))
+
+
+def _parse_float_values(value: str) -> tuple[float, ...]:
+    return tuple(float(item) for item in _split_csv_values(value))
+
+
+def _split_csv_values(value: str) -> tuple[str, ...]:
+    values = tuple(item.strip() for item in value.split(",") if item.strip())
+    if not values:
+        raise ValueError("comma-separated value list must contain at least one value")
+    return values
+
+
 def _parse_models(value: str) -> tuple[str, ...]:
     models = tuple(model.strip() for model in value.split(",") if model.strip())
     if not models:
         raise ValueError("--models must contain at least one model name")
     return models
+
+
+def _parse_optional_models(value: str) -> tuple[str, ...]:
+    if value.strip().lower() in {"", "none"}:
+        return ()
+    return _parse_models(value)
 
 
 def _ground_truth_summary(frame: pd.DataFrame) -> pd.DataFrame:

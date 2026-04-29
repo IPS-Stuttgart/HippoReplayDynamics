@@ -22,6 +22,13 @@ class BenchmarkConfig:
     max_events_per_session: int | None = None
     candidate_top_k: int = 64
     pyrecest_particles: int = 512
+    pyrecest_alpha: float = 0.80
+    pyrecest_beta: float = 1.00
+    pyrecest_process_noise_sigma_cm_s: float = 60.0
+    pyrecest_position_jump_sigma_cm: float = 25.0
+    pyrecest_jump_probability: float = 0.03
+    pyrecest_goal_reset_probability: float = 0.02
+    pyrecest_initial_velocity_sigma_cm_s: float = 120.0
     random_seed: int = 1
     event_epoch: str = "run"
     models: tuple[str, ...] = ("random", "stationary", "diffusion", "momentum", "imm")
@@ -162,6 +169,13 @@ def _build_models(
         "pyrecest-goal-particle": PyRecEstGoalParticleModel(
             candidate_goals=goal_candidates,
             n_particles=config.pyrecest_particles,
+            alpha=config.pyrecest_alpha,
+            beta=config.pyrecest_beta,
+            process_noise_sigma_cm_s=config.pyrecest_process_noise_sigma_cm_s,
+            position_jump_sigma_cm=config.pyrecest_position_jump_sigma_cm,
+            jump_probability=config.pyrecest_jump_probability,
+            goal_reset_probability=config.pyrecest_goal_reset_probability,
+            initial_velocity_sigma_cm_s=config.pyrecest_initial_velocity_sigma_cm_s,
             random_seed=config.random_seed,
         ),
     }

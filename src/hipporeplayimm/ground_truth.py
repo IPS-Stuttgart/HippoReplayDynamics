@@ -211,6 +211,7 @@ def compare_scores_to_ground_truth(
     encoding_config: EncodingConfig | None = None,
     emission_config: EmissionConfig | None = None,
     candidate_top_k: int = 64,
+    pyrecest_particles: int = 512,
 ) -> pd.DataFrame:
     """Merge event scores with next-well behavioral correctness metrics."""
 
@@ -220,8 +221,12 @@ def compare_scores_to_ground_truth(
         return scores_frame
     sessions = {session.session_id: session for session in load_open_field_sessions(root)}
     decoded_rows: list[dict[str, object]] = []
-    model_config = BenchmarkConfig(candidate_top_k=candidate_top_k)
-    models = _build_models(model_config)
+    model_names = tuple(str(model_name) for model_name in scores_frame["model"].dropna().unique())
+    model_config = BenchmarkConfig(
+        candidate_top_k=candidate_top_k,
+        pyrecest_particles=pyrecest_particles,
+        models=model_names,
+    )
     encoding_config = EncodingConfig() if encoding_config is None else encoding_config
     emission_config = EmissionConfig() if emission_config is None else emission_config
 
@@ -229,6 +234,7 @@ def compare_scores_to_ground_truth(
         session = sessions.get(str(session_id))
         if session is None:
             continue
+        models = _build_models(model_config, session=session)
         wells = infer_well_locations(session, ground_truth_config)
         encoding = fit_place_field_encoding(session, encoding_config)
         for event_index, event_scores in session_scores.groupby("event_index", sort=False):

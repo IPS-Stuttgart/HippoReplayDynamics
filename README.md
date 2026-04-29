@@ -29,10 +29,19 @@ predictive density as the primary metric.
 - `momentum`: candidate-pruned second-order dynamics with velocity persistence.
 - `imm`: candidate-pruned switching model over stationary, diffusion, momentum,
   and jump/fragmented modes.
+- `pyrecest-goal-particle`: PyRecEst-backed goal-conditioned particle replay
+  filter using well-derived candidate goals when session metadata are available.
 
 The candidate-pruned models use the same candidate sets for train and joint
 likelihoods during held-out scoring, so `log p(train, test) - log p(train)` is
 well-defined under the same approximate state support.
+
+The PyRecEst goal-conditioned particle model is opt-in because it is stochastic
+and more expensive:
+
+```powershell
+hipporeplayimm benchmark D:\Uni-Data\DataSetFromPfeifferFoster --max-events 25 --models random,stationary,imm,pyrecest-goal-particle --pyrecest-particles 512 --output results\pyrecest_smoke
+```
 
 ## Behavioral Ground-Truth Proxy
 

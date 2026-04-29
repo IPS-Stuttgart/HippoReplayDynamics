@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from .benchmarks import BenchmarkConfig, bootstrap_delta_ci, run_open_field_benchmark
+from .benchmarks import BenchmarkConfig, _build_models, bootstrap_delta_ci, run_open_field_benchmark
 from .data import load_open_field_sessions
 from .encoding import build_emissions, fit_place_field_encoding
 from .ground_truth import (
@@ -15,7 +15,6 @@ from .ground_truth import (
     compare_scores_to_ground_truth,
     generate_behavioral_ground_truth,
 )
-from .models import CandidateKinematicModel, RandomModel, StationaryModel
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -31,12 +30,24 @@ def main(argv: list[str] | None = None) -> int:
     benchmark_parser.add_argument("--output")
     benchmark_parser.add_argument("--max-events", type=int)
     benchmark_parser.add_argument("--candidate-top-k", type=int, default=64)
+    benchmark_parser.add_argument(
+        "--models",
+        default="random,stationary,diffusion,momentum,imm",
+        help="Comma-separated model names to benchmark.",
+    )
+    benchmark_parser.add_argument("--pyrecest-particles", type=int, default=512)
 
     decode_parser = subparsers.add_parser("decode-event")
     decode_parser.add_argument("root")
     decode_parser.add_argument("--session", required=True)
     decode_parser.add_argument("--event-id", type=int, required=True)
     decode_parser.add_argument("--candidate-top-k", type=int, default=64)
+    decode_parser.add_argument(
+        "--models",
+        default="random,stationary,diffusion,momentum,imm",
+        help="Comma-separated model names to score.",
+    )
+    decode_parser.add_argument("--pyrecest-particles", type=int, default=512)
 
     ground_truth_parser = subparsers.add_parser("ground-truth")
     ground_truth_parser.add_argument("root")
@@ -52,6 +63,7 @@ def main(argv: list[str] | None = None) -> int:
     compare_parser.add_argument("--output", required=True)
     compare_parser.add_argument("--ground-truth")
     compare_parser.add_argument("--candidate-top-k", type=int, default=64)
+    compare_parser.add_argument("--pyrecest-particles", type=int, default=512)
     compare_parser.add_argument("--visit-radius-cm", type=float, default=10.0)
     compare_parser.add_argument("--min-dwell-s", type=float, default=0.2)
     compare_parser.add_argument("--future-horizon-s", type=float, default=30.0)
@@ -94,6 +106,8 @@ def _benchmark(args: argparse.Namespace) -> int:
     config = BenchmarkConfig(
         max_events_per_session=args.max_events,
         candidate_top_k=args.candidate_top_k,
+        pyrecest_particles=args.pyrecest_particles,
+        models=_parse_models(args.models),
     )
     result = run_open_field_benchmark(args.root, config)
     print(result.summary().to_string(index=False))
@@ -116,15 +130,13 @@ def _decode_event(args: argparse.Namespace) -> int:
     session = sessions[args.session]
     encoding = fit_place_field_encoding(session)
     emissions = build_emissions(session, encoding, args.event_id)
-    models = [
-        RandomModel(),
-        StationaryModel(),
-        CandidateKinematicModel(mode="diffusion", top_k=args.candidate_top_k),
-        CandidateKinematicModel(mode="momentum", top_k=args.candidate_top_k),
-        CandidateKinematicModel(mode="imm", top_k=args.candidate_top_k),
-    ]
     rows = []
-    for model in models:
+    config = BenchmarkConfig(
+        candidate_top_k=args.candidate_top_k,
+        pyrecest_particles=args.pyrecest_particles,
+        models=_parse_models(args.models),
+    )
+    for model in _build_models(config, session=session).values():
         score = model.score(emissions, encoding.bin_centers)
         rows.append(
             {
@@ -160,6 +172,7 @@ def _compare_ground_truth(args: argparse.Namespace) -> int:
         ground_truth=args.ground_truth,
         ground_truth_config=config,
         candidate_top_k=args.candidate_top_k,
+        pyrecest_particles=args.pyrecest_particles,
     )
     output = Path(args.output)
     output.parent.mkdir(parents=True, exist_ok=True)
@@ -174,6 +187,13 @@ def _ground_truth_config_from_args(args: argparse.Namespace) -> GroundTruthConfi
         min_dwell_s=args.min_dwell_s,
         future_horizon_s=args.future_horizon_s,
     )
+
+
+def _parse_models(value: str) -> tuple[str, ...]:
+    models = tuple(model.strip() for model in value.split(",") if model.strip())
+    if not models:
+        raise ValueError("--models must contain at least one model name")
+    return models
 
 
 def _ground_truth_summary(frame: pd.DataFrame) -> pd.DataFrame:

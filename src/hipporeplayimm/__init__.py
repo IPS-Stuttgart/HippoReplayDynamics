@@ -19,6 +19,12 @@ from .models import (
     score_model,
 )
 from .pyrecest_models import PyRecEstGoalParticleModel
+from .sweeps import (
+    PyRecEstSweepConfig,
+    PyRecEstSweepResult,
+    run_pyrecest_parameter_sweep,
+    write_pyrecest_sweep_outputs,
+)
 
 __all__ = [
     "BenchmarkConfig",
@@ -30,6 +36,8 @@ __all__ = [
     "EventScore",
     "GroundTruthConfig",
     "PyRecEstGoalParticleModel",
+    "PyRecEstSweepConfig",
+    "PyRecEstSweepResult",
     "RandomModel",
     "ReplaySession",
     "StationaryModel",
@@ -41,5 +49,7 @@ __all__ = [
     "label_session_behavioral_ground_truth",
     "load_open_field_sessions",
     "run_open_field_benchmark",
+    "run_pyrecest_parameter_sweep",
     "score_model",
+    "write_pyrecest_sweep_outputs",
 ]

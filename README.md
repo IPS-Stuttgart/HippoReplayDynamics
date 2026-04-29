@@ -43,6 +43,15 @@ and more expensive:
 hipporeplayimm benchmark D:\Uni-Data\DataSetFromPfeifferFoster --max-events 25 --models random,stationary,imm,pyrecest-goal-particle --pyrecest-particles 512 --output results\pyrecest_smoke
 ```
 
+Small reproducible PyRecEst parameter sweeps can be run with:
+
+```powershell
+hipporeplayimm sweep-pyrecest D:\Uni-Data\DataSetFromPfeifferFoster --max-events 5 --particles 128,512 --alpha 0.6,0.8 --position-jump-sigma-cm 10,25 --jump-probability 0.0,0.03 --output results\pyrecest_sweep
+```
+
+The sweep writes `sweep_summary.csv`, `event_scores.csv`, and, unless
+`--skip-ground-truth` is passed, behavioral ground-truth comparison tables.
+
 ## Behavioral Ground-Truth Proxy
 
 The real data do not contain latent replay trajectories as ground truth.

@@ -212,6 +212,13 @@ def compare_scores_to_ground_truth(
     emission_config: EmissionConfig | None = None,
     candidate_top_k: int = 64,
     pyrecest_particles: int = 512,
+    pyrecest_alpha: float = 0.80,
+    pyrecest_beta: float = 1.00,
+    pyrecest_process_noise_sigma_cm_s: float = 60.0,
+    pyrecest_position_jump_sigma_cm: float = 25.0,
+    pyrecest_jump_probability: float = 0.03,
+    pyrecest_goal_reset_probability: float = 0.02,
+    pyrecest_initial_velocity_sigma_cm_s: float = 120.0,
 ) -> pd.DataFrame:
     """Merge event scores with next-well behavioral correctness metrics."""
 
@@ -225,6 +232,13 @@ def compare_scores_to_ground_truth(
     model_config = BenchmarkConfig(
         candidate_top_k=candidate_top_k,
         pyrecest_particles=pyrecest_particles,
+        pyrecest_alpha=pyrecest_alpha,
+        pyrecest_beta=pyrecest_beta,
+        pyrecest_process_noise_sigma_cm_s=pyrecest_process_noise_sigma_cm_s,
+        pyrecest_position_jump_sigma_cm=pyrecest_position_jump_sigma_cm,
+        pyrecest_jump_probability=pyrecest_jump_probability,
+        pyrecest_goal_reset_probability=pyrecest_goal_reset_probability,
+        pyrecest_initial_velocity_sigma_cm_s=pyrecest_initial_velocity_sigma_cm_s,
         models=model_names,
     )
     encoding_config = EncodingConfig() if encoding_config is None else encoding_config

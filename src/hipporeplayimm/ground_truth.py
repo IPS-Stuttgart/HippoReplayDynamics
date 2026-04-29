@@ -225,6 +225,7 @@ def compare_scores_to_ground_truth(
     pyrecest_imm_momentum_velocity_decay: float = 0.95,
     pyrecest_imm_jump_fraction: float = 0.9,
     pyrecest_imm_jump_velocity_decay: float = 0.25,
+    random_seed: int = 1,
 ) -> pd.DataFrame:
     """Merge event scores with next-well behavioral correctness metrics."""
 
@@ -251,6 +252,7 @@ def compare_scores_to_ground_truth(
         pyrecest_imm_momentum_velocity_decay=pyrecest_imm_momentum_velocity_decay,
         pyrecest_imm_jump_fraction=pyrecest_imm_jump_fraction,
         pyrecest_imm_jump_velocity_decay=pyrecest_imm_jump_velocity_decay,
+        random_seed=random_seed,
         models=model_names,
     )
     encoding_config = EncodingConfig() if encoding_config is None else encoding_config

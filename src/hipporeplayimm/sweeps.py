@@ -18,6 +18,7 @@ from .ground_truth import (
 
 
 PYRECEST_SWEEP_PARAMETER_COLUMNS = (
+    "random_seed",
     "pyrecest_model",
     "pyrecest_particles",
     "pyrecest_alpha",
@@ -35,6 +36,22 @@ PYRECEST_SWEEP_PARAMETER_COLUMNS = (
     "pyrecest_imm_jump_velocity_decay",
 )
 
+PYRECEST_SWEEP_AGGREGATE_GROUP_COLUMNS = tuple(
+    column for column in PYRECEST_SWEEP_PARAMETER_COLUMNS if column != "random_seed"
+)
+
+PYRECEST_SWEEP_AGGREGATE_METRIC_COLUMNS = (
+    "events",
+    "mean_heldout_log_likelihood",
+    "mean_delta_vs_best_static",
+    "mean_bits_per_spike_vs_best_static",
+    "valid_goal_rows",
+    "goal_accuracy",
+    "median_endpoint_error_cm",
+    "mean_true_well_posterior",
+    "median_true_well_rank",
+)
+
 PYRECEST_SWEEP_PARETO_OBJECTIVES = {
     "goal_accuracy": "max",
     "mean_delta_vs_best_static": "max",
@@ -42,6 +59,11 @@ PYRECEST_SWEEP_PARETO_OBJECTIVES = {
     "mean_true_well_posterior": "max",
     "median_endpoint_error_cm": "min",
     "median_true_well_rank": "min",
+}
+
+PYRECEST_SWEEP_AGGREGATE_PARETO_OBJECTIVES = {
+    f"{column}_mean": direction
+    for column, direction in PYRECEST_SWEEP_PARETO_OBJECTIVES.items()
 }
 
 
@@ -52,6 +74,7 @@ class PyRecEstSweepConfig:
     max_events_per_session: int | None = 1
     candidate_top_k: int = 64
     random_seed: int = 1
+    random_seeds: tuple[int, ...] | None = None
     event_epoch: str = "run"
     baseline_models: tuple[str, ...] = ("random", "stationary")
     pyrecest_models: tuple[str, ...] = ("pyrecest-goal-particle",)
@@ -81,6 +104,7 @@ class PyRecEstSweepResult:
     event_scores: pd.DataFrame
     ground_truth_comparison: pd.DataFrame
     behavioral_ground_truth: pd.DataFrame | None
+    aggregate_summary: pd.DataFrame = field(default_factory=pd.DataFrame)
 
 
 def run_pyrecest_parameter_sweep(
@@ -155,6 +179,7 @@ def run_pyrecest_parameter_sweep(
                 pyrecest_imm_jump_velocity_decay=float(
                     parameters["pyrecest_imm_jump_velocity_decay"]
                 ),
+                random_seed=int(parameters["random_seed"]),
             )
             comparison = _with_sweep_columns(comparison, sweep_id, parameters)
             if not comparison.empty:
@@ -167,11 +192,13 @@ def run_pyrecest_parameter_sweep(
             )
         summary_rows.append(summary_row)
 
+    summary = pd.DataFrame(summary_rows)
     return PyRecEstSweepResult(
-        summary=pd.DataFrame(summary_rows),
+        summary=summary,
         event_scores=_concat_or_empty(score_frames),
         ground_truth_comparison=_concat_or_empty(comparison_frames),
         behavioral_ground_truth=ground_truth,
+        aggregate_summary=aggregate_sweep_summary(summary),
     )
 
 
@@ -195,11 +222,26 @@ def write_pyrecest_sweep_outputs(result: PyRecEstSweepResult, output: str | Path
     pareto = pareto_sweep_summary(result.summary)
     if not pareto.empty:
         pareto.to_csv(output_path / "pareto_summary.csv", index=False)
+    aggregate = (
+        aggregate_sweep_summary(result.summary)
+        if result.aggregate_summary.empty
+        else result.aggregate_summary
+    )
+    if not aggregate.empty:
+        aggregate.to_csv(output_path / "aggregate_summary.csv", index=False)
+        pareto_aggregate = pareto_aggregate_sweep_summary(aggregate)
+        if not pareto_aggregate.empty:
+            pareto_aggregate.to_csv(
+                output_path / "pareto_aggregate_summary.csv",
+                index=False,
+            )
 
 
 def pyrecest_parameter_grid(config: PyRecEstSweepConfig) -> list[dict[str, object]]:
     """Return the cartesian product of PyRecEst sweep parameters."""
 
+    random_seeds = config.random_seeds or (config.random_seed,)
+    _validate_nonempty(random_seeds, "random_seeds")
     _validate_nonempty(config.pyrecest_models, "pyrecest_models")
     _validate_nonempty(config.particles, "particles")
     _validate_nonempty(config.alphas, "alphas")
@@ -230,6 +272,7 @@ def pyrecest_parameter_grid(config: PyRecEstSweepConfig) -> list[dict[str, objec
 
     rows: list[dict[str, object]] = []
     for values in product(
+        random_seeds,
         config.pyrecest_models,
         config.particles,
         config.alphas,
@@ -258,7 +301,12 @@ def sorted_sweep_summary(summary: pd.DataFrame) -> pd.DataFrame:
         return summary
     sort_columns = [
         column
-        for column in ("goal_accuracy", "mean_heldout_log_likelihood")
+        for column in (
+            "goal_accuracy",
+            "goal_accuracy_mean",
+            "mean_heldout_log_likelihood",
+            "mean_heldout_log_likelihood_mean",
+        )
         if column in summary.columns
     ]
     if not sort_columns:
@@ -291,6 +339,48 @@ def pareto_sweep_summary(
     return sorted_sweep_summary(pareto)
 
 
+def aggregate_sweep_summary(
+    summary: pd.DataFrame,
+    group_columns: tuple[str, ...] = PYRECEST_SWEEP_AGGREGATE_GROUP_COLUMNS,
+    metric_columns: tuple[str, ...] = PYRECEST_SWEEP_AGGREGATE_METRIC_COLUMNS,
+) -> pd.DataFrame:
+    """Aggregate seed-level sweep rows by hyperparameter setting."""
+
+    if summary.empty or "random_seed" not in summary.columns:
+        return pd.DataFrame()
+    available_groups = [column for column in group_columns if column in summary.columns]
+    available_metrics = [column for column in metric_columns if column in summary.columns]
+    if not available_groups or not available_metrics:
+        return pd.DataFrame()
+
+    rows: list[dict[str, object]] = []
+    for group_values, group in summary.groupby(
+        available_groups,
+        dropna=False,
+        sort=False,
+    ):
+        if len(available_groups) == 1:
+            group_values = (group_values,)
+        row = dict(zip(available_groups, group_values, strict=True))
+        seed_values = _sorted_numeric_values(group["random_seed"])
+        row["random_seed_count"] = len(seed_values)
+        row["random_seeds"] = ",".join(str(seed) for seed in seed_values)
+        row["sweep_replicates"] = int(group.shape[0])
+        for column in available_metrics:
+            row.update(_aggregate_metric(column, group[column]))
+        rows.append(row)
+    return pd.DataFrame(rows)
+
+
+def pareto_aggregate_sweep_summary(aggregate: pd.DataFrame) -> pd.DataFrame:
+    """Return nondominated aggregate rows using mean objective columns."""
+
+    return pareto_sweep_summary(
+        aggregate,
+        objectives=PYRECEST_SWEEP_AGGREGATE_PARETO_OBJECTIVES,
+    )
+
+
 def _benchmark_config(
     config: PyRecEstSweepConfig,
     parameters: dict[str, object],
@@ -299,7 +389,7 @@ def _benchmark_config(
     return BenchmarkConfig(
         max_events_per_session=config.max_events_per_session,
         candidate_top_k=config.candidate_top_k,
-        random_seed=config.random_seed,
+        random_seed=int(parameters["random_seed"]),
         event_epoch=config.event_epoch,
         models=tuple(dict.fromkeys((*config.baseline_models, pyrecest_model))),
         pyrecest_particles=int(parameters["pyrecest_particles"]),
@@ -420,6 +510,34 @@ def _concat_or_empty(frames: list[pd.DataFrame]) -> pd.DataFrame:
     if not frames:
         return pd.DataFrame()
     return pd.concat(frames, ignore_index=True)
+
+
+def _aggregate_metric(column: str, values: pd.Series) -> dict[str, float | int]:
+    finite_values = pd.to_numeric(values, errors="coerce").dropna().to_numpy(dtype=float)
+    n = int(finite_values.size)
+    if n == 0:
+        return {
+            f"{column}_n": 0,
+            f"{column}_mean": np.nan,
+            f"{column}_std": np.nan,
+            f"{column}_ci95_low": np.nan,
+            f"{column}_ci95_high": np.nan,
+        }
+    mean = float(np.mean(finite_values))
+    std = float(np.std(finite_values, ddof=1)) if n > 1 else 0.0
+    half_width = 1.96 * std / np.sqrt(n) if n > 1 else 0.0
+    return {
+        f"{column}_n": n,
+        f"{column}_mean": mean,
+        f"{column}_std": std,
+        f"{column}_ci95_low": mean - half_width,
+        f"{column}_ci95_high": mean + half_width,
+    }
+
+
+def _sorted_numeric_values(values: pd.Series) -> list[int]:
+    numeric = pd.to_numeric(values, errors="coerce").dropna().astype(int)
+    return sorted(set(int(value) for value in numeric))
 
 
 def _objective_matrix(

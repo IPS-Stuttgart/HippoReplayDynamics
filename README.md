@@ -55,6 +55,7 @@ Small reproducible PyRecEst parameter sweeps can be run with:
 ```powershell
 hipporeplayimm sweep-pyrecest D:\Uni-Data\DataSetFromPfeifferFoster `
   --max-events 5 `
+  --random-seeds 1,2,3 `
   --pyrecest-models pyrecest-goal-particle,pyrecest-goal-particle-imm `
   --particles 128,512 `
   --alpha 0.6,0.8 `
@@ -64,10 +65,12 @@ hipporeplayimm sweep-pyrecest D:\Uni-Data\DataSetFromPfeifferFoster `
   --output results\pyrecest_sweep
 ```
 
-The sweep writes `sweep_summary.csv`, `pareto_summary.csv`, `event_scores.csv`,
-and, unless `--skip-ground-truth` is passed, behavioral ground-truth comparison
-tables. The CLI prints the Pareto summary so likelihood, goal accuracy, endpoint
-error, and true-well posterior tradeoffs stay visible.
+The sweep writes per-seed `sweep_summary.csv`, per-seed `pareto_summary.csv`,
+seed-aggregated `aggregate_summary.csv`, seed-aggregated
+`pareto_aggregate_summary.csv`, `event_scores.csv`, and, unless
+`--skip-ground-truth` is passed, behavioral ground-truth comparison tables. The
+CLI prints the aggregate Pareto summary so likelihood, goal accuracy, endpoint
+error, and true-well posterior tradeoffs stay visible across stochastic seeds.
 
 ## Behavioral Ground-Truth Proxy
 

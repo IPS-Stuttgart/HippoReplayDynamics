@@ -25,6 +25,7 @@ class PyRecEstGoalParticleModel:
     position_jump_sigma_cm: float = 25.0
     jump_probability: float = 0.03
     goal_reset_probability: float = 0.02
+    position_proposal_probability: float = 0.0
     random_seed: int = 1
     name: str = "pyrecest-goal-particle"
 
@@ -33,6 +34,10 @@ class PyRecEstGoalParticleModel:
             raise ValueError("emissions must contain at least one time bin")
         if self.n_particles <= 0:
             raise ValueError("n_particles must be positive")
+        _validate_probability(
+            self.position_proposal_probability,
+            "position_proposal_probability",
+        )
 
         seed = _event_seed(self.random_seed, emissions)
         rng = np.random.default_rng(seed)
@@ -59,7 +64,9 @@ class PyRecEstGoalParticleModel:
             logp += _update_filter_from_grid_likelihood(
                 filter_,
                 emissions.log_likelihood[time_index],
+                bin_centers,
                 bin_tree,
+                position_proposal_probability=self.position_proposal_probability,
             )
 
         terminal_log_posterior = _particle_position_log_posterior(
@@ -71,9 +78,16 @@ class PyRecEstGoalParticleModel:
         diagnostics = {
             "pyrecest_particles": int(self.n_particles),
             "pyrecest_candidate_goals": int(goals.shape[0]),
+            "pyrecest_position_proposal_probability": float(
+                self.position_proposal_probability
+            ),
             "pyrecest_last_jump_fraction": float(filter_.last_jump_fraction),
             "pyrecest_last_goal_remap_fraction": float(filter_.last_goal_remap_fraction),
         }
+        if hasattr(filter_, "last_position_proposal_fraction"):
+            diagnostics["pyrecest_last_position_proposal_fraction"] = float(
+                filter_.last_position_proposal_fraction
+            )
         diagnostics.update(_goal_diagnostics(filter_, goals))
         diagnostics.update(_mode_diagnostics(filter_))
         diagnostics.update(_posterior_diagnostics(terminal_log_posterior, bin_centers))
@@ -237,7 +251,10 @@ def _sample_rows(rows: np.ndarray, n_samples: int, rng: np.random.Generator) -> 
 def _update_filter_from_grid_likelihood(
     filter_,
     log_likelihood: np.ndarray,
+    bin_centers: np.ndarray,
     bin_tree: cKDTree,
+    *,
+    position_proposal_probability: float = 0.0,
 ) -> float:
     particle_log_likelihood = _nearest_grid_values(
         filter_.position_particles,
@@ -249,11 +266,39 @@ def _update_filter_from_grid_likelihood(
         raise ValueError("all particle log-likelihoods are non-finite")
     max_log = float(np.max(particle_log_likelihood[finite]))
     scaled = np.exp(np.clip(particle_log_likelihood - max_log, -745.0, 0.0))
-    update_log = filter_.update_position_likelihood(
-        lambda _positions: scaled,
-        return_log_marginal=True,
-    )
+    if position_proposal_probability > 0.0:
+        if not hasattr(filter_, "update_position_likelihood_with_proposal"):
+            raise ImportError(
+                "position proposal rejuvenation requires "
+                "pyrecest.filters.GoalConditionedReplayParticleFilter."
+                "update_position_likelihood_with_proposal from FlorianPfaff/PyRecEst#1928"
+            )
+        update_log = filter_.update_position_likelihood_with_proposal(
+            lambda _positions: scaled,
+            position_proposal=bin_centers,
+            proposal_weights=_grid_proposal_weights(log_likelihood),
+            proposal_probability=position_proposal_probability,
+            return_log_marginal=True,
+        )
+    else:
+        update_log = filter_.update_position_likelihood(
+            lambda _positions: scaled,
+            return_log_marginal=True,
+        )
     return max_log + float(update_log)
+
+
+def _grid_proposal_weights(log_likelihood: np.ndarray) -> np.ndarray:
+    values = np.asarray(log_likelihood, dtype=float)
+    finite = np.isfinite(values)
+    if not np.any(finite):
+        raise ValueError("all grid log-likelihoods are non-finite")
+    weights = np.zeros(values.shape, dtype=float)
+    weights[finite] = np.exp(values[finite] - float(logsumexp(values[finite])))
+    total = float(np.sum(weights))
+    if total <= 0.0:
+        raise ValueError("grid proposal weights have no mass")
+    return weights / total
 
 
 def _nearest_grid_values(
@@ -334,3 +379,8 @@ def _mode_diagnostics(filter_) -> dict[str, float | str]:
             filter_.last_mode_transition_fraction
         )
     return diagnostics
+
+
+def _validate_probability(probability: float, name: str) -> None:
+    if not 0.0 <= float(probability) <= 1.0:
+        raise ValueError(f"{name} must lie in [0, 1]")

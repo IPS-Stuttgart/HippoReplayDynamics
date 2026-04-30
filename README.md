@@ -31,9 +31,12 @@ predictive density as the primary metric.
   and jump/fragmented modes.
 - `pyrecest-goal-particle`: PyRecEst-backed goal-conditioned particle replay
   filter using well-derived candidate goals when session metadata are available.
+  It can optionally rejuvenate position particles from the current decoded grid
+  likelihood when PyRecEst provides the proposal API.
 - `pyrecest-goal-particle-imm`: PyRecEst-backed goal-conditioned particle IMM
   filter with per-particle switching among stationary, diffusion, momentum,
-  goal-directed, and jump dynamics.
+  goal-directed, and jump dynamics. The same optional position proposal knob is
+  available for the particle IMM.
 
 The candidate-pruned models use the same candidate sets for train and joint
 likelihoods during held-out scoring, so `log p(train, test) - log p(train)` is
@@ -58,6 +61,7 @@ hipporeplayimm sweep-pyrecest D:\Uni-Data\DataSetFromPfeifferFoster `
   --random-seeds 1,2,3 `
   --pyrecest-models pyrecest-goal-particle,pyrecest-goal-particle-imm `
   --particles 128,512 `
+  --position-proposal-probability 0.0,0.5,1.0 `
   --alpha 0.6,0.8 `
   --position-jump-sigma-cm 10,25 `
   --jump-probability 0.0,0.03 `

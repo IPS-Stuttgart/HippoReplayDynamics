@@ -29,10 +29,15 @@ def test_benchmark_summary_and_bootstrap_ci():
 
 def test_build_models_includes_opt_in_pyrecest_model():
     models = _build_models(
-        BenchmarkConfig(models=("pyrecest-goal-particle",), pyrecest_particles=64)
+        BenchmarkConfig(
+            models=("pyrecest-goal-particle",),
+            pyrecest_particles=64,
+            pyrecest_position_proposal_probability=0.5,
+        )
     )
 
     assert set(models) == {"pyrecest-goal-particle"}
+    assert models["pyrecest-goal-particle"].position_proposal_probability == 0.5
 
 
 def test_build_models_includes_opt_in_pyrecest_imm_model():

@@ -28,6 +28,7 @@ class BenchmarkConfig:
     pyrecest_position_jump_sigma_cm: float = 25.0
     pyrecest_jump_probability: float = 0.03
     pyrecest_goal_reset_probability: float = 0.02
+    pyrecest_position_proposal_probability: float = 0.0
     pyrecest_initial_velocity_sigma_cm_s: float = 120.0
     pyrecest_imm_mode_stickiness: float = 0.95
     pyrecest_imm_stationary_velocity_decay: float = 0.0
@@ -181,6 +182,7 @@ def _build_models(
             position_jump_sigma_cm=config.pyrecest_position_jump_sigma_cm,
             jump_probability=config.pyrecest_jump_probability,
             goal_reset_probability=config.pyrecest_goal_reset_probability,
+            position_proposal_probability=config.pyrecest_position_proposal_probability,
             initial_velocity_sigma_cm_s=config.pyrecest_initial_velocity_sigma_cm_s,
             random_seed=config.random_seed,
         ),
@@ -193,6 +195,7 @@ def _build_models(
             position_jump_sigma_cm=config.pyrecest_position_jump_sigma_cm,
             jump_probability=config.pyrecest_jump_probability,
             goal_reset_probability=config.pyrecest_goal_reset_probability,
+            position_proposal_probability=config.pyrecest_position_proposal_probability,
             initial_velocity_sigma_cm_s=config.pyrecest_initial_velocity_sigma_cm_s,
             mode_stickiness=config.pyrecest_imm_mode_stickiness,
             stationary_velocity_decay=config.pyrecest_imm_stationary_velocity_decay,

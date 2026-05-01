@@ -2,48 +2,19 @@
 name: Track Pfeiffer-Foster replay event
 
 on:
-  workflow_dispatch:
-    inputs:
-      dataset-root:
-        description: "Dataset path after extraction"
-        required: true
-        default: "data/DataSetFromPfeifferFoster"
-      session:
-        description: "Session ID, e.g. Rat1/Open1"
-        required: true
-        default: "Rat1/Open1"
-      event-id:
-        description: "Ripple event index"
-        required: true
-        default: "0"
-      model:
-        description: "Replay model"
-        required: true
-        type: choice
-        default: "imm"
-        options:
-          - random
-          - stationary
-          - diffusion
-          - momentum
-          - imm
-          - pyrecest-goal-particle
-          - pyrecest-goal-particle-imm
-      candidate-top-k:
-        description: "Candidate spatial bins per time bin"
-        required: true
-        default: "64"
-      pyrecest-particles:
-        description: "Particle count for PyRecEst-backed models"
-        required: true
-        default: "512"
-      time-bin-s:
-        description: "Ripple decoding time-bin width in seconds"
-        required: true
-        default: "0.02"
+  workflow_dispatch: {}
 
 permissions:
   contents: read
+
+env:
+  DATASET_ROOT: data/DataSetFromPfeifferFoster
+  SESSION: Rat1/Open1
+  EVENT_ID: "0"
+  MODEL: imm
+  CANDIDATE_TOP_K: "64"
+  PYRECEST_PARTICLES: "512"
+  TIME_BIN_S: "0.02"
 
 jobs:
   track-event:
@@ -82,24 +53,24 @@ jobs:
 
       - name: Inspect sessions
         run: |
-          hipporeplayimm inspect "${{ inputs.dataset-root }}"
+          hipporeplayimm inspect "${DATASET_ROOT}"
 
       - name: Track replay event
         run: |
           python scripts/track_event.py \
-            --dataset-root "${{ inputs.dataset-root }}" \
-            --session "${{ inputs.session }}" \
-            --event-id "${{ inputs.event-id }}" \
-            --model "${{ inputs.model }}" \
-            --candidate-top-k "${{ inputs.candidate-top-k }}" \
-            --pyrecest-particles "${{ inputs.pyrecest-particles }}" \
-            --time-bin-s "${{ inputs.time-bin-s }}" \
+            --dataset-root "${DATASET_ROOT}" \
+            --session "${SESSION}" \
+            --event-id "${EVENT_ID}" \
+            --model "${MODEL}" \
+            --candidate-top-k "${CANDIDATE_TOP_K}" \
+            --pyrecest-particles "${PYRECEST_PARTICLES}" \
+            --time-bin-s "${TIME_BIN_S}" \
             --output results/tracks
 
       - name: Upload tracking results
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: replay-track-${{ inputs.event-id }}-${{ inputs.model }}
+          name: replay-track-${{ env.EVENT_ID }}-${{ env.MODEL }}
           path: results/tracks/
           if-no-files-found: error

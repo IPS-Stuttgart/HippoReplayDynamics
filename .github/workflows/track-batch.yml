@@ -97,6 +97,6 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: replay-track-batch-${{ env.SESSION }}-${{ env.EVENTS }}
+          name: replay-track-batch-rat1-open1-events-0-25
           path: results/track-batch/
           if-no-files-found: error

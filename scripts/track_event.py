@@ -10,8 +10,32 @@ import numpy as np
 import pandas as pd
 
 from hipporeplayimm.benchmarks import BenchmarkConfig, _build_models
-from hipporeplayimm.data import load_open_field_sessions
+from hipporeplayimm.data import load_replay_session
 from hipporeplayimm.encoding import EmissionConfig, LogEmissionTensor, build_emissions, fit_place_field_encoding
+
+
+_REQUIRED_SESSION_FILES = (
+    "Position_Data.mat",
+    "Ripple_Events.mat",
+    "Spike_Data.mat",
+    "Epochs.mat",
+)
+
+
+def _session_path(dataset_root: str | Path, session_id: str) -> Path:
+    """Resolve a Rat/Open session ID to one session directory."""
+    parts = session_id.replace("\\", "/").split("/")
+    if len(parts) != 2 or not all(parts):
+        raise ValueError("session must have the form 'RatN/OpenM', for example 'Rat1/Open1'")
+    return Path(dataset_root) / parts[0] / parts[1]
+
+
+def _validate_session_files(session_path: Path) -> None:
+    """Fail early with a clear message if the requested session is incomplete."""
+    missing = [name for name in _REQUIRED_SESSION_FILES if not (session_path / name).exists()]
+    if missing:
+        joined = ", ".join(missing)
+        raise FileNotFoundError(f"Requested session {session_path} is missing required file(s): {joined}")
 
 
 def _prefix_emissions(emissions: LogEmissionTensor, stop: int) -> LogEmissionTensor:
@@ -70,12 +94,12 @@ def _trajectory_from_prefix_scores(model: object, emissions: LogEmissionTensor, 
 
 
 def run_tracking(args: argparse.Namespace) -> None:
-    sessions = {session.session_id: session for session in load_open_field_sessions(args.dataset_root)}
-    if args.session not in sessions:
-        available = ", ".join(sorted(sessions))
-        raise KeyError(f"Unknown session {args.session!r}. Available sessions: {available}")
+    session_path = _session_path(args.dataset_root, args.session)
+    if not session_path.is_dir():
+        raise FileNotFoundError(f"Requested session directory does not exist: {session_path}")
+    _validate_session_files(session_path)
 
-    session = sessions[args.session]
+    session = load_replay_session(session_path)
     encoding = fit_place_field_encoding(session)
     emissions = build_emissions(session, encoding, int(args.event_id), EmissionConfig(time_bin_s=args.time_bin_s))
     config = BenchmarkConfig(

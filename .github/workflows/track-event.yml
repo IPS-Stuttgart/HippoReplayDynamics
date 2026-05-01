@@ -51,9 +51,19 @@ jobs:
           unzip -q data/dataset.zip -d data
           find data -maxdepth 3 -type d | sort | sed -n '1,80p'
 
-      - name: Inspect sessions
+      - name: Check requested session
         run: |
-          hipporeplayimm inspect "${DATASET_ROOT}"
+          set -euo pipefail
+          session_dir="${DATASET_ROOT}/${SESSION}"
+          echo "Checking requested session directory: ${session_dir}"
+          test -d "${session_dir}"
+          for required_file in Position_Data.mat Ripple_Events.mat Spike_Data.mat Epochs.mat; do
+            test -f "${session_dir}/${required_file}" || {
+              echo "Missing ${session_dir}/${required_file}" >&2
+              exit 1
+            }
+          done
+          find "${session_dir}" -maxdepth 1 -type f | sort
 
       - name: Track replay event
         run: |

@@ -8,10 +8,17 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+from scipy.special import logsumexp
 
 from hipporeplayimm.benchmarks import BenchmarkConfig, _build_models
 from hipporeplayimm.data import load_replay_session
 from hipporeplayimm.encoding import EmissionConfig, LogEmissionTensor, build_emissions, fit_place_field_encoding
+from hipporeplayimm.models import (
+    CandidateKinematicModel,
+    _advance_pair_log_alpha,
+    _init_pair_log_alpha,
+    _mode_transition_matrix,
+)
 
 
 _REQUIRED_SESSION_FILES = (
@@ -20,6 +27,7 @@ _REQUIRED_SESSION_FILES = (
     "Spike_Data.mat",
     "Epochs.mat",
 )
+_IMM_MODES = ("stationary", "diffusion", "momentum", "jump")
 
 
 def _session_path(dataset_root: str | Path, session_id: str) -> Path:
@@ -50,6 +58,103 @@ def _prefix_emissions(emissions: LogEmissionTensor, stop: int) -> LogEmissionTen
     )
 
 
+def _mode_probability_row(modes: tuple[str, ...], probabilities: np.ndarray) -> dict[str, float | str]:
+    """Return flat per-mode probability columns for trajectory CSV rows."""
+    probabilities = np.asarray(probabilities, dtype=float)
+    total = float(probabilities.sum())
+    if total <= 0.0:
+        raise ValueError("mode probabilities must have positive total mass")
+    probabilities = probabilities / total
+    row: dict[str, float | str] = {
+        f"mode_{mode}_probability": float(probability)
+        for mode, probability in zip(modes, probabilities, strict=True)
+    }
+    row["most_likely_mode"] = modes[int(np.argmax(probabilities))]
+    return row
+
+
+def _imm_mode_probabilities_for_prefix(
+    model: object,
+    emissions: LogEmissionTensor,
+    bin_centers: np.ndarray,
+) -> dict[str, float | str]:
+    """Compute terminal deterministic grid-IMM mode probabilities for one prefix.
+
+    CandidateKinematicModel.score currently returns the terminal spatial posterior,
+    but not the collapsed mode masses.  The tracking scripts need per-time-bin mode
+    probabilities for diagnostic figures, so this mirrors the IMM recursion and
+    collapses the final log-alpha tensor over candidate states.
+    """
+    if not isinstance(model, CandidateKinematicModel) or model.mode != "imm":
+        return {}
+    if emissions.n_time <= 1:
+        return _mode_probability_row(_IMM_MODES, np.full(len(_IMM_MODES), 1.0 / len(_IMM_MODES)))
+
+    candidates = model.candidate_indices(emissions)
+    first = candidates[0]
+    second = candidates[1]
+    transition_modes = _mode_transition_matrix(len(_IMM_MODES), model.mode_stickiness)
+    by_mode = [
+        _init_pair_log_alpha(
+            emissions,
+            first,
+            second,
+            bin_centers,
+            model.diffusion_sigma_cm,
+            mode=mode,
+            stationary_sigma_cm=model.stationary_sigma_cm,
+        )
+        for mode in _IMM_MODES
+    ]
+    log_alpha = np.stack(by_mode, axis=0) - np.log(len(_IMM_MODES))
+    prev_prev = first
+    prev = second
+
+    for time_index in range(2, emissions.n_time):
+        curr = candidates[time_index]
+        next_alpha = []
+        for dst_mode_index, dst_mode in enumerate(_IMM_MODES):
+            mixed_prev = logsumexp(
+                log_alpha + np.log(transition_modes[:, dst_mode_index])[:, None, None],
+                axis=0,
+            )
+            next_alpha.append(
+                _advance_pair_log_alpha(
+                    mixed_prev,
+                    prev_prev,
+                    prev,
+                    curr,
+                    emissions.log_likelihood[time_index, curr],
+                    bin_centers,
+                    mode=dst_mode,
+                    stationary_sigma_cm=model.stationary_sigma_cm,
+                    diffusion_sigma_cm=model.diffusion_sigma_cm,
+                    momentum_sigma_cm=model.momentum_sigma_cm,
+                    velocity_decay=model.velocity_decay,
+                )
+            )
+        log_alpha = np.stack(next_alpha, axis=0)
+        prev_prev, prev = prev, curr
+
+    log_mode_mass = logsumexp(log_alpha, axis=(1, 2))
+    probabilities = np.exp(log_mode_mass - logsumexp(log_mode_mass))
+    return _mode_probability_row(_IMM_MODES, probabilities)
+
+
+def _copy_score_diagnostics(
+    row: dict[str, float | int | str],
+    diagnostics: dict[str, float | int | str],
+) -> None:
+    """Copy selected model diagnostics into one trajectory-row dictionary."""
+    for key, value in diagnostics.items():
+        if key.startswith("mode_") or key == "most_likely_mode":
+            row[key] = value
+        elif key.startswith("pyrecest_mode_") or key == "pyrecest_most_likely_mode":
+            row[key] = value
+        elif key.startswith("pyrecest_") or key.startswith("decoded_"):
+            row[f"diagnostic_{key}"] = value
+
+
 def _trajectory_from_prefix_scores(model: object, emissions: LogEmissionTensor, bin_centers: np.ndarray) -> tuple[pd.DataFrame, np.ndarray]:
     """Track by repeatedly scoring prefixes and saving each terminal posterior.
 
@@ -62,7 +167,8 @@ def _trajectory_from_prefix_scores(model: object, emissions: LogEmissionTensor, 
     log_posteriors = np.empty((emissions.n_time, bin_centers.shape[0]), dtype=float)
 
     for time_index in range(emissions.n_time):
-        score = model.score(_prefix_emissions(emissions, time_index + 1), bin_centers)
+        prefix = _prefix_emissions(emissions, time_index + 1)
+        score = model.score(prefix, bin_centers)
         if score.terminal_log_posterior is None:
             raise RuntimeError(f"Model {score.model_name} did not return a terminal posterior.")
         log_posterior = np.asarray(score.terminal_log_posterior, dtype=float)
@@ -85,9 +191,8 @@ def _trajectory_from_prefix_scores(model: object, emissions: LogEmissionTensor, 
             "spikes_in_bin": int(emissions.spike_counts[time_index].sum()),
             "prefix_log_likelihood": float(score.log_likelihood),
         }
-        for key, value in score.diagnostics.items():
-            if key.startswith("pyrecest_") or key.startswith("decoded_"):
-                row[f"diagnostic_{key}"] = value
+        _copy_score_diagnostics(row, score.diagnostics)
+        row.update(_imm_mode_probabilities_for_prefix(model, prefix, bin_centers))
         rows.append(row)
 
     return pd.DataFrame(rows), log_posteriors

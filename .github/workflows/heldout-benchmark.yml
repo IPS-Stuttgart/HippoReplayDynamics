@@ -2,21 +2,58 @@
 name: Benchmark Pfeiffer-Foster held-out likelihood
 
 on:
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      dataset_root:
+        description: "Dataset path after extraction"
+        required: true
+        default: "data/DataSetFromPfeifferFoster"
+      session:
+        description: "Session ID, e.g. Rat1/Open1"
+        required: true
+        default: "Rat1/Open1"
+      events:
+        description: "Event ids/ranges, e.g. 0-25 or 0-25,30"
+        required: true
+        default: "0-25"
+      models:
+        description: "Space-separated models"
+        required: true
+        default: "random stationary diffusion momentum imm"
+      candidate_top_k:
+        description: "Candidate spatial bins per time bin"
+        required: true
+        default: "64"
+      pyrecest_particles:
+        description: "Particle count for PyRecEst-backed models"
+        required: true
+        default: "512"
+      test_cell_fraction:
+        description: "Fraction of cells held out for likelihood evaluation"
+        required: true
+        default: "0.25"
+      random_seed:
+        description: "Random seed for train/test cell split"
+        required: true
+        default: "1"
+      time_bin_s:
+        description: "Ripple decoding time-bin width in seconds"
+        required: true
+        default: "0.02"
 
 permissions:
   contents: read
 
 env:
-  DATASET_ROOT: data/DataSetFromPfeifferFoster
-  SESSION: Rat1/Open1
-  EVENTS: 0-25
-  MODELS: random stationary diffusion momentum imm
-  CANDIDATE_TOP_K: "64"
-  PYRECEST_PARTICLES: "512"
-  TEST_CELL_FRACTION: "0.25"
-  RANDOM_SEED: "1"
-  TIME_BIN_S: "0.02"
+  DATASET_ROOT: ${{ inputs.dataset_root }}
+  SESSION: ${{ inputs.session }}
+  EVENTS: ${{ inputs.events }}
+  MODELS: ${{ inputs.models }}
+  CANDIDATE_TOP_K: ${{ inputs.candidate_top_k }}
+  PYRECEST_PARTICLES: ${{ inputs.pyrecest_particles }}
+  TEST_CELL_FRACTION: ${{ inputs.test_cell_fraction }}
+  RANDOM_SEED: ${{ inputs.random_seed }}
+  TIME_BIN_S: ${{ inputs.time_bin_s }}
 
 jobs:
   heldout-benchmark:
@@ -103,6 +140,6 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: heldout-benchmark-rat1-open1-events-0-25
+          name: heldout-benchmark-seed-${{ env.RANDOM_SEED }}
           path: results/heldout-benchmark/
           if-no-files-found: error

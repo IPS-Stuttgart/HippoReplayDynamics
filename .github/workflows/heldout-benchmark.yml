@@ -1,0 +1,108 @@
+---
+name: Benchmark Pfeiffer-Foster held-out likelihood
+
+on:
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+env:
+  DATASET_ROOT: data/DataSetFromPfeifferFoster
+  SESSION: Rat1/Open1
+  EVENTS: 0-25
+  MODELS: random stationary diffusion momentum imm
+  CANDIDATE_TOP_K: "64"
+  PYRECEST_PARTICLES: "512"
+  TEST_CELL_FRACTION: "0.25"
+  RANDOM_SEED: "1"
+  TIME_BIN_S: "0.02"
+
+jobs:
+  heldout-benchmark:
+    name: Held-out replay benchmark
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Install package
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e .
+
+      - name: Download dataset
+        env:
+          DATA_FULL_URL: ${{ secrets.DATA_FULL_URL }}
+        run: |
+          set -euo pipefail
+          if [ -z "${DATA_FULL_URL}" ]; then
+            echo "Repository secret DATA_FULL_URL is not set." >&2
+            exit 1
+          fi
+          mkdir -p data
+          curl --fail --location --show-error --silent "${DATA_FULL_URL%/}/download" --output data/dataset.zip
+          unzip -q data/dataset.zip -d data
+          find data -maxdepth 3 -type d | sort | sed -n '1,80p'
+
+      - name: Check requested session
+        run: |
+          set -euo pipefail
+          session_dir="${DATASET_ROOT}/${SESSION}"
+          echo "Checking requested session directory: ${session_dir}"
+          test -d "${session_dir}"
+          for required_file in Position_Data.mat Ripple_Events.mat Spike_Data.mat Epochs.mat; do
+            test -f "${session_dir}/${required_file}" || {
+              echo "Missing ${session_dir}/${required_file}" >&2
+              exit 1
+            }
+          done
+          find "${session_dir}" -maxdepth 1 -type f | sort
+
+      - name: Run held-out benchmark
+        run: |
+          python scripts/benchmark_session.py \
+            --dataset-root "${DATASET_ROOT}" \
+            --session "${SESSION}" \
+            --events "${EVENTS}" \
+            --models ${MODELS} \
+            --candidate-top-k "${CANDIDATE_TOP_K}" \
+            --pyrecest-particles "${PYRECEST_PARTICLES}" \
+            --test-cell-fraction "${TEST_CELL_FRACTION}" \
+            --random-seed "${RANDOM_SEED}" \
+            --time-bin-s "${TIME_BIN_S}" \
+            --output results/heldout-benchmark \
+            --continue-on-error
+
+      - name: Show held-out benchmark summary
+        if: always()
+        run: |
+          if [ -f results/heldout-benchmark/summary.csv ]; then
+            python - <<'PY'
+          import pandas as pd
+          scores = pd.read_csv("results/heldout-benchmark/event_scores.csv")
+          summary = pd.read_csv("results/heldout-benchmark/summary.csv")
+          print(summary.to_string(index=False))
+          print("\nRows:", len(scores))
+          if "status" in scores.columns:
+              print("Failures:", int((scores["status"] != "success").sum()))
+          PY
+          else
+            echo "No held-out benchmark summary was generated."
+          fi
+
+      - name: Upload held-out benchmark results
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: heldout-benchmark-rat1-open1-events-0-25
+          path: results/heldout-benchmark/
+          if-no-files-found: error

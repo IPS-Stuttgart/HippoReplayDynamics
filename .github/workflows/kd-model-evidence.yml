@@ -1,0 +1,177 @@
+---
+name: Benchmark KD-aligned replay model evidence
+
+on:
+  workflow_dispatch:
+    inputs:
+      dataset_root:
+        description: "Dataset path after extraction"
+        required: true
+        default: "data/DataSetFromPfeifferFoster"
+      session:
+        description: "Session ID, e.g. Rat1/Open1"
+        required: true
+        default: "Rat1/Open1"
+      events:
+        description: "Event IDs/ranges, all, run, or run:0-25"
+        required: true
+        default: "run"
+      models:
+        description: "Space-separated KD reference models"
+        required: true
+        default: "random stationary stationary-gaussian diffusion momentum"
+      time_bin_ms:
+        description: "Ripple decoding time-bin width in milliseconds"
+        required: true
+        default: "3"
+      bin_size_cm:
+        description: "Spatial bin width in centimeters"
+        required: true
+        default: "4"
+      n_bins:
+        description: "Number of bins per spatial dimension"
+        required: true
+        default: "50"
+      likelihood:
+        description: "Emission likelihood family"
+        required: true
+        default: "poisson"
+      grid_preset:
+        description: "Parameter grid preset: kd or smoke"
+        required: true
+        default: "kd"
+      max_events:
+        description: "Optional maximum number of selected events"
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+env:
+  DATASET_ROOT: ${{ inputs.dataset_root }}
+  SESSION: ${{ inputs.session }}
+  EVENTS: ${{ inputs.events }}
+  MODELS: ${{ inputs.models }}
+  TIME_BIN_MS: ${{ inputs.time_bin_ms }}
+  BIN_SIZE_CM: ${{ inputs.bin_size_cm }}
+  N_BINS: ${{ inputs.n_bins }}
+  LIKELIHOOD: ${{ inputs.likelihood }}
+  GRID_PRESET: ${{ inputs.grid_preset }}
+  MAX_EVENTS: ${{ inputs.max_events }}
+
+jobs:
+  kd-model-evidence:
+    name: KD-aligned model-evidence benchmark
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Install package
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e .
+
+      - name: Download dataset
+        env:
+          DATA_FULL_URL: ${{ secrets.DATA_FULL_URL }}
+        run: |
+          set -euo pipefail
+          if [ -z "${DATA_FULL_URL}" ]; then
+            echo "Repository secret DATA_FULL_URL is not set." >&2
+            exit 1
+          fi
+          mkdir -p data
+          curl --fail --location --show-error --silent "${DATA_FULL_URL%/}/download" --output data/dataset.zip
+          unzip -q data/dataset.zip -d data
+          find data -maxdepth 3 -type d | sort | sed -n '1,80p'
+
+      - name: Check requested session
+        run: |
+          set -euo pipefail
+          session_dir="${DATASET_ROOT}/${SESSION}"
+          echo "Checking requested session directory: ${session_dir}"
+          test -d "${session_dir}"
+          for required_file in Position_Data.mat Ripple_Events.mat Spike_Data.mat Epochs.mat; do
+            test -f "${session_dir}/${required_file}" || {
+              echo "Missing ${session_dir}/${required_file}" >&2
+              exit 1
+            }
+          done
+          find "${session_dir}" -maxdepth 1 -type f | sort
+
+      - name: Run KD-aligned model-evidence benchmark
+        run: |
+          set -euo pipefail
+          max_events_args=()
+          if [ -n "${MAX_EVENTS}" ]; then
+            max_events_args+=(--max-events "${MAX_EVENTS}")
+          fi
+          python scripts/benchmark_kd_model_evidence.py \
+            --dataset-root "${DATASET_ROOT}" \
+            --session "${SESSION}" \
+            --events "${EVENTS}" \
+            --models "${MODELS}" \
+            --time-bin-ms "${TIME_BIN_MS}" \
+            --bin-size-cm "${BIN_SIZE_CM}" \
+            --n-bins "${N_BINS}" \
+            --likelihood "${LIKELIHOOD}" \
+            --grid-preset "${GRID_PRESET}" \
+            "${max_events_args[@]}" \
+            --output results/kd-model-evidence
+
+      - name: Validate KD output files
+        run: |
+          set -euo pipefail
+          for required_file in \
+            event_model_evidence.csv \
+            model_evidence_summary.csv \
+            best_model_counts.csv \
+            gridsearch_best_params.csv \
+            marginalized_model_evidence.csv \
+            random_effects_model_probabilities.csv; do
+            test -s "results/kd-model-evidence/${required_file}" || {
+              echo "Missing results/kd-model-evidence/${required_file}" >&2
+              exit 1
+            }
+          done
+
+      - name: Show KD model-evidence summary
+        if: always()
+        run: |
+          if [ -f results/kd-model-evidence/model_evidence_summary.csv ]; then
+            python - <<'PY'
+          import pandas as pd
+          scores = pd.read_csv("results/kd-model-evidence/event_model_evidence.csv")
+          summary = pd.read_csv("results/kd-model-evidence/model_evidence_summary.csv")
+          counts = pd.read_csv("results/kd-model-evidence/best_model_counts.csv")
+          random_effects = pd.read_csv("results/kd-model-evidence/random_effects_model_probabilities.csv")
+          print(summary.to_string(index=False))
+          print("\nBest-model counts:")
+          print(counts.to_string(index=False))
+          print("\nRandom-effects model probabilities:")
+          print(random_effects.to_string(index=False))
+          print("\nRows:", len(scores))
+          if "status" in scores.columns:
+              print("Failures:", int((scores["status"] != "success").sum()))
+          PY
+          else
+            echo "No KD model-evidence summary was generated."
+          fi
+
+      - name: Upload KD model-evidence results
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: kd-model-evidence-${{ github.run_id }}
+          path: results/kd-model-evidence/
+          if-no-files-found: error

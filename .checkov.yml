@@ -1,0 +1,4 @@
+# CKV_GHA_7 forbids workflow_dispatch inputs. These inputs are intentional for
+# manually parameterized research benchmark workflows.
+skip-check:
+  - CKV_GHA_7

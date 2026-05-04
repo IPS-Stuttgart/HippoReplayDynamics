@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 import numpy as np
@@ -27,12 +28,12 @@ from hipporeplayimm.kd_reference import (
     kd_random_log_evidence,
     kd_diffusion_log_evidence_from_transition,
     kd_momentum_log_evidence_from_transitions,
-    kd_stationary_gaussian_log_evidence_from_latent,
+    kd_stationary_gaussian_log_evidence_from_transitions,
     kd_stationary_log_evidence,
     marginalize_grid_log_evidence,
     momentum_transition_1d,
     random_effects_model_probabilities,
-    stationary_gaussian_log_latent,
+    stationary_gaussian_transition_1d,
 )
 
 
@@ -116,6 +117,82 @@ def _family(model: str) -> str:
     return "other"
 
 
+def _chunks(length: int, chunk_size: int):
+    for start in range(0, length, chunk_size):
+        yield start, min(start + chunk_size, length)
+
+
+def _score_momentum_grid(
+    emissions_by_event,
+    sd_grid: np.ndarray,
+    decay_grid: np.ndarray,
+    *,
+    initial_sd_m_per_s: float,
+    n_bins: int,
+    bin_size_cm: float,
+    n_jobs: int,
+    event_chunk_size: int,
+) -> np.ndarray:
+    grid_values = np.empty((len(emissions_by_event), len(sd_grid), len(decay_grid)), dtype=float)
+    event_chunk_size = max(1, min(event_chunk_size, len(emissions_by_event)))
+    n_jobs = max(1, n_jobs)
+    for chunk_number, (chunk_start, chunk_stop) in enumerate(_chunks(len(emissions_by_event), event_chunk_size), start=1):
+        chunk = emissions_by_event[chunk_start:chunk_stop]
+        tasks = [
+            (sd_index, decay_index, float(sd), float(decay))
+            for sd_index, sd in enumerate(sd_grid)
+            for decay_index, decay in enumerate(decay_grid)
+        ]
+        if n_jobs == 1:
+            for sd_index, decay_index, values in (
+                _score_momentum_param_chunk(task, chunk, initial_sd_m_per_s, n_bins, bin_size_cm)
+                for task in tasks
+            ):
+                grid_values[chunk_start:chunk_stop, sd_index, decay_index] = values
+        else:
+            with ThreadPoolExecutor(max_workers=n_jobs) as executor:
+                futures = [
+                    executor.submit(_score_momentum_param_chunk, task, chunk, initial_sd_m_per_s, n_bins, bin_size_cm)
+                    for task in tasks
+                ]
+                for future in as_completed(futures):
+                    sd_index, decay_index, values = future.result()
+                    grid_values[chunk_start:chunk_stop, sd_index, decay_index] = values
+        print(
+            f"  Momentum chunk {chunk_number}: events {chunk_start}-{chunk_stop - 1}, {len(tasks)} grid points",
+            flush=True,
+        )
+    return grid_values
+
+
+def _score_momentum_param_chunk(task, emissions_chunk, initial_sd_m_per_s: float, n_bins: int, bin_size_cm: float):
+    sd_index, decay_index, sd, decay = task
+    values = np.empty(len(emissions_chunk), dtype=float)
+    initial_cache: dict[float, np.ndarray] = {}
+    transition_cache: dict[float, np.ndarray] = {}
+    for event_index, emissions in enumerate(emissions_chunk):
+        if emissions.n_time == 1:
+            values[event_index] = kd_random_log_evidence(emissions.log_likelihood)
+            continue
+        dt = float(emissions.dt)
+        if dt not in initial_cache:
+            initial_sd_meters = initial_sd_m_per_s * dt
+            initial_cache[dt] = diffusion_transition_1d(n_bins, initial_sd_meters, bin_size_cm, dt=1.0)
+        if dt not in transition_cache:
+            adjusted_decay = decay
+            adjusted_sd = sd
+            if adjusted_decay > 1.0:
+                adjusted_decay, adjusted_sd = adjusted_momentum_parameters(adjusted_decay, adjusted_sd, dt)
+            transition_cache[dt] = momentum_transition_1d(n_bins, adjusted_sd, adjusted_decay, bin_size_cm, dt)
+        values[event_index] = kd_momentum_log_evidence_from_transitions(
+            emissions.log_likelihood,
+            n_bins,
+            initial_cache[dt],
+            transition_cache[dt],
+        )
+    return sd_index, decay_index, values
+
+
 def _score(args) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     if args.likelihood != "poisson":
         raise ValueError("KD alignment currently supports only --likelihood poisson")
@@ -152,9 +229,14 @@ def _score(args) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame
         elif model == "stationary-gaussian":
             grid_values = np.empty((len(emissions_by_event), len(grid.stationary_gaussian_sd_meters)), dtype=float)
             for sd_index, sd in enumerate(grid.stationary_gaussian_sd_meters):
-                latent = stationary_gaussian_log_latent(args.n_bins, args.n_bins, sd, args.bin_size_cm)
+                transition = stationary_gaussian_transition_1d(args.n_bins, sd, args.bin_size_cm)
                 for event_index, emissions in enumerate(emissions_by_event):
-                    grid_values[event_index, sd_index] = kd_stationary_gaussian_log_evidence_from_latent(emissions.log_likelihood, latent)
+                    grid_values[event_index, sd_index] = kd_stationary_gaussian_log_evidence_from_transitions(
+                        emissions.log_likelihood,
+                        args.n_bins,
+                        args.n_bins,
+                        transition,
+                    )
             prior, _ = empirical_grid_prior({"sd_meters": grid.stationary_gaussian_sd_meters}, grid_values)
             values = marginalize_grid_log_evidence(grid_values, prior)
             grid_rows.extend(best_grid_params(model, event_ids, {"sd_meters": grid.stationary_gaussian_sd_meters}, grid_values))
@@ -176,32 +258,16 @@ def _score(args) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame
             values = marginalize_grid_log_evidence(grid_values, prior)
             grid_rows.extend(best_grid_params(model, event_ids, {"sd_meters": grid.diffusion_sd_meters}, grid_values))
         elif model == "momentum":
-            grid_values = np.empty((len(emissions_by_event), len(grid.momentum_sd_meters), len(grid.momentum_decay)), dtype=float)
-            initial_cache: dict[float, np.ndarray] = {}
-            transition_cache: dict[tuple[float, float, float], np.ndarray] = {}
-            for sd_index, sd in enumerate(grid.momentum_sd_meters):
-                for decay_index, decay in enumerate(grid.momentum_decay):
-                    for event_index, emissions in enumerate(emissions_by_event):
-                        if emissions.n_time == 1:
-                            grid_values[event_index, sd_index, decay_index] = kd_random_log_evidence(emissions.log_likelihood)
-                            continue
-                        dt = float(emissions.dt)
-                        if dt not in initial_cache:
-                            initial_sd_meters = grid.momentum_initial_sd_m_per_s * dt
-                            initial_cache[dt] = diffusion_transition_1d(args.n_bins, initial_sd_meters, args.bin_size_cm, dt=1.0)
-                        key = (float(sd), float(decay), dt)
-                        if key not in transition_cache:
-                            adjusted_decay = float(decay)
-                            adjusted_sd = float(sd)
-                            if adjusted_decay > 1.0:
-                                adjusted_decay, adjusted_sd = adjusted_momentum_parameters(adjusted_decay, adjusted_sd, dt)
-                            transition_cache[key] = momentum_transition_1d(args.n_bins, adjusted_sd, adjusted_decay, args.bin_size_cm, dt)
-                        grid_values[event_index, sd_index, decay_index] = kd_momentum_log_evidence_from_transitions(
-                            emissions.log_likelihood,
-                            args.n_bins,
-                            initial_cache[dt],
-                            transition_cache[key],
-                        )
+            grid_values = _score_momentum_grid(
+                emissions_by_event,
+                grid.momentum_sd_meters,
+                grid.momentum_decay,
+                initial_sd_m_per_s=grid.momentum_initial_sd_m_per_s,
+                n_bins=args.n_bins,
+                bin_size_cm=args.bin_size_cm,
+                n_jobs=args.n_jobs,
+                event_chunk_size=args.event_chunk_size,
+            )
             grid_params = {"sd_meters": grid.momentum_sd_meters, "decay": grid.momentum_decay}
             prior, _ = empirical_grid_prior(grid_params, grid_values)
             values = marginalize_grid_log_evidence(grid_values, prior)
@@ -226,6 +292,8 @@ def _score(args) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame
                     "kd_time_bin_ms": float(args.time_bin_ms),
                     "kd_bin_size_cm": float(args.bin_size_cm),
                     "kd_n_bins": int(args.n_bins),
+                    "kd_n_jobs": int(args.n_jobs),
+                    "kd_event_chunk_size": int(args.event_chunk_size),
                 }
             )
             marginalized_rows.append(
@@ -325,6 +393,8 @@ def main() -> int:
     p.add_argument("--likelihood", choices=("poisson",), default="poisson")
     p.add_argument("--grid-preset", choices=("kd", "smoke"), default="kd")
     p.add_argument("--max-events", type=int, default=None)
+    p.add_argument("--n-jobs", type=int, default=1)
+    p.add_argument("--event-chunk-size", type=int, default=16)
     p.add_argument("--place-field-smoothing-cm", type=float, default=4.0)
     p.add_argument("--min-speed-cm-s", type=float, default=5.0)
     p.add_argument("--output", default="results/kd-model-evidence")

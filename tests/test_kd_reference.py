@@ -6,9 +6,13 @@ from hipporeplayimm.kd_reference import (
     empirical_grid_prior,
     kd_momentum_log_evidence,
     kd_random_log_evidence,
+    kd_stationary_gaussian_log_evidence_from_latent,
+    kd_stationary_gaussian_log_evidence_from_transitions,
     kd_stationary_log_evidence,
     marginalize_grid_log_evidence,
     momentum_transition_1d,
+    stationary_gaussian_log_latent,
+    stationary_gaussian_transition_1d,
 )
 
 
@@ -49,6 +53,25 @@ def test_diffusion_transition_columns_normalize():
 
     assert np.allclose(transition.sum(axis=0), 1.0)
     assert np.all(transition >= 0.0)
+
+
+def test_stationary_gaussian_separable_evidence_matches_dense_latent():
+    log_emissions = np.log(
+        np.array(
+            [
+                [0.2, 0.8, 1.0, 0.5],
+                [1.5, 0.4, 0.3, 0.8],
+                [0.7, 1.1, 0.6, 0.2],
+            ]
+        )
+    )
+    latent = stationary_gaussian_log_latent(n_bins_x=2, n_bins_y=2, sd_meters=0.1, bin_size_cm=4.0)
+    transition = stationary_gaussian_transition_1d(n_bins=2, sd_meters=0.1, bin_size_cm=4.0)
+
+    dense = kd_stationary_gaussian_log_evidence_from_latent(log_emissions, latent)
+    separable = kd_stationary_gaussian_log_evidence_from_transitions(log_emissions, 2, 2, transition)
+
+    assert np.isclose(separable, dense)
 
 
 def test_momentum_transition_normalizes_and_changes_with_decay():

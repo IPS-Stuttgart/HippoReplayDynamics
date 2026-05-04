@@ -212,8 +212,27 @@ def kd_stationary_log_evidence(log_emissions: np.ndarray) -> float:
 
 
 def kd_stationary_gaussian_log_evidence(log_emissions: np.ndarray, n_bins_x: int, n_bins_y: int, sd_meters: float, bin_size_cm: float) -> float:
-    latent = stationary_gaussian_log_latent(n_bins_x, n_bins_y, sd_meters, bin_size_cm)
-    return kd_stationary_gaussian_log_evidence_from_latent(log_emissions, latent)
+    transition_x = stationary_gaussian_transition_1d(n_bins_x, sd_meters, bin_size_cm)
+    transition_y = stationary_gaussian_transition_1d(n_bins_y, sd_meters, bin_size_cm)
+    return kd_stationary_gaussian_log_evidence_from_transitions(log_emissions, n_bins_x, n_bins_y, transition_x, transition_y)
+
+
+def kd_stationary_gaussian_log_evidence_from_transitions(
+    log_emissions: np.ndarray,
+    n_bins_x: int,
+    n_bins_y: int,
+    transition_x: np.ndarray,
+    transition_y: np.ndarray | None = None,
+) -> float:
+    transition_y = transition_x if transition_y is None else transition_y
+    log_terms = np.zeros((n_bins_x, n_bins_y), dtype=float)
+    for time_index in range(log_emissions.shape[0]):
+        emission, offset = _scaled_emission(log_emissions, time_index)
+        weighted = transition_x.T @ emission.reshape(n_bins_x, n_bins_y) @ transition_y
+        if np.any(weighted <= 0.0):
+            weighted = np.maximum(weighted, np.finfo(float).tiny)
+        log_terms += np.log(weighted) + offset
+    return float(logsumexp(log_terms.reshape(-1) - np.log(log_emissions.shape[1])))
 
 
 def kd_stationary_gaussian_log_evidence_from_latent(log_emissions: np.ndarray, latent: np.ndarray) -> float:
@@ -272,9 +291,19 @@ def stationary_gaussian_log_latent(n_bins_x: int, n_bins_y: int, sd_meters: floa
     return latent
 
 
+def stationary_gaussian_transition_1d(n_bins: int, sd_meters: float, bin_size_cm: float) -> np.ndarray:
+    sd_bins = meters_to_bins(sd_meters, bin_size_cm)
+    variance = max(sd_bins * sd_bins, np.finfo(float).tiny)
+    return _gaussian_transition_1d(n_bins, variance)
+
+
 def diffusion_transition_1d(n_bins: int, sd_meters: float, bin_size_cm: float, dt: float) -> np.ndarray:
     sd_bins = meters_to_bins(sd_meters, bin_size_cm)
     variance = max(sd_bins * sd_bins * dt, np.finfo(float).tiny)
+    return _gaussian_transition_1d(n_bins, variance)
+
+
+def _gaussian_transition_1d(n_bins: int, variance: float) -> np.ndarray:
     current = np.arange(n_bins)
     transition = np.empty((n_bins, n_bins), dtype=float)
     for prev in range(n_bins):
@@ -391,7 +420,8 @@ def random_effects_model_probabilities(log_evidence: np.ndarray, models: list[st
 
 
 def meters_to_bins(value_meters: float | np.ndarray, bin_size_cm: float) -> float | np.ndarray:
-    return np.asarray(value_meters) * 100.0 / bin_size_cm
+    converted = np.asarray(value_meters) * 100.0 / bin_size_cm
+    return float(converted) if converted.shape == () else converted
 
 
 def adjusted_momentum_parameters(theta: float, sigma: float, delta_t: float) -> tuple[float, float]:

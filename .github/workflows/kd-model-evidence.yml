@@ -44,6 +44,14 @@ on:
         description: "Optional maximum number of selected events"
         required: false
         default: ""
+      n_jobs:
+        description: "Parallel worker threads for grid scoring"
+        required: true
+        default: "2"
+      event_chunk_size:
+        description: "Events per momentum scoring chunk"
+        required: true
+        default: "16"
 
 permissions:
   contents: read
@@ -59,6 +67,11 @@ env:
   LIKELIHOOD: ${{ inputs.likelihood }}
   GRID_PRESET: ${{ inputs.grid_preset }}
   MAX_EVENTS: ${{ inputs.max_events }}
+  N_JOBS: ${{ inputs.n_jobs }}
+  EVENT_CHUNK_SIZE: ${{ inputs.event_chunk_size }}
+  OMP_NUM_THREADS: "1"
+  OPENBLAS_NUM_THREADS: "1"
+  MKL_NUM_THREADS: "1"
 
 jobs:
   kd-model-evidence:
@@ -126,6 +139,8 @@ jobs:
             --n-bins "${N_BINS}" \
             --likelihood "${LIKELIHOOD}" \
             --grid-preset "${GRID_PRESET}" \
+            --n-jobs "${N_JOBS}" \
+            --event-chunk-size "${EVENT_CHUNK_SIZE}" \
             "${max_events_args[@]}" \
             --output results/kd-model-evidence
 

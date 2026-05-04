@@ -133,16 +133,39 @@ def _score_momentum_grid(
     n_jobs: int,
     event_chunk_size: int,
 ) -> np.ndarray:
-    grid_values = np.empty((len(emissions_by_event), len(sd_grid), len(decay_grid)), dtype=float)
+    tasks = [
+        (sd_index, decay_index, float(sd), float(decay))
+        for sd_index, sd in enumerate(sd_grid)
+        for decay_index, decay in enumerate(decay_grid)
+    ]
+    return _score_momentum_tasks(
+        emissions_by_event,
+        tasks,
+        grid_shape=(len(sd_grid), len(decay_grid)),
+        initial_sd_m_per_s=initial_sd_m_per_s,
+        n_bins=n_bins,
+        bin_size_cm=bin_size_cm,
+        n_jobs=n_jobs,
+        event_chunk_size=event_chunk_size,
+    )
+
+
+def _score_momentum_tasks(
+    emissions_by_event,
+    tasks: list[tuple[int, int, float, float]],
+    *,
+    grid_shape: tuple[int, int],
+    initial_sd_m_per_s: float,
+    n_bins: int,
+    bin_size_cm: float,
+    n_jobs: int,
+    event_chunk_size: int,
+) -> np.ndarray:
+    grid_values = np.full((len(emissions_by_event), *grid_shape), np.nan, dtype=float)
     event_chunk_size = max(1, min(event_chunk_size, len(emissions_by_event)))
     n_jobs = max(1, n_jobs)
     for chunk_number, (chunk_start, chunk_stop) in enumerate(_chunks(len(emissions_by_event), event_chunk_size), start=1):
         chunk = emissions_by_event[chunk_start:chunk_stop]
-        tasks = [
-            (sd_index, decay_index, float(sd), float(decay))
-            for sd_index, sd in enumerate(sd_grid)
-            for decay_index, decay in enumerate(decay_grid)
-        ]
         if n_jobs == 1:
             for sd_index, decay_index, values in (
                 _score_momentum_param_chunk(task, chunk, initial_sd_m_per_s, n_bins, bin_size_cm)
@@ -315,6 +338,84 @@ def _score(args) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame
     return df, pd.DataFrame(grid_rows), pd.DataFrame(marginalized_rows), random_effects
 
 
+def _write_momentum_shard(args, outpath: Path) -> None:
+    if args.likelihood != "poisson":
+        raise ValueError("KD alignment currently supports only --likelihood poisson")
+    if args.momentum_shard_count < 1:
+        raise ValueError("--momentum-shard-count must be positive")
+    if args.momentum_shard_index < 0 or args.momentum_shard_index >= args.momentum_shard_count:
+        raise ValueError("--momentum-shard-index must be in 0..momentum_shard_count-1")
+    session_dir = _session_path(args.dataset_root, args.session)
+    _check_session(session_dir)
+    session = load_replay_session(session_dir)
+    event_ids = _events(args.events, session, args.max_events)
+    grid = grid_config_for_preset(args.grid_preset)
+    encoding = fit_kd_place_field_encoding(
+        session,
+        KDEncodingConfig(
+            bin_size_cm=args.bin_size_cm,
+            n_bins_x=args.n_bins,
+            n_bins_y=args.n_bins,
+            smoothing_sigma_cm=args.place_field_smoothing_cm,
+            min_speed_cm_s=args.min_speed_cm_s,
+        ),
+    )
+    emissions_by_event = [
+        build_kd_emissions(session, encoding, int(event_id), time_bin_s=args.time_bin_ms / 1000.0)
+        for event_id in event_ids
+    ]
+    all_tasks = [
+        (sd_index, decay_index, float(sd), float(decay))
+        for sd_index, sd in enumerate(grid.momentum_sd_meters)
+        for decay_index, decay in enumerate(grid.momentum_decay)
+    ]
+    shard_tasks = [
+        task for task_index, task in enumerate(all_tasks)
+        if task_index % args.momentum_shard_count == args.momentum_shard_index
+    ]
+    start = time.perf_counter()
+    values = _score_momentum_tasks(
+        emissions_by_event,
+        shard_tasks,
+        grid_shape=(len(grid.momentum_sd_meters), len(grid.momentum_decay)),
+        initial_sd_m_per_s=grid.momentum_initial_sd_m_per_s,
+        n_bins=args.n_bins,
+        bin_size_cm=args.bin_size_cm,
+        n_jobs=args.n_jobs,
+        event_chunk_size=args.event_chunk_size,
+    )
+    runtime_s = time.perf_counter() - start
+    sd_indices = np.array([task[0] for task in shard_tasks], dtype=int)
+    decay_indices = np.array([task[1] for task in shard_tasks], dtype=int)
+    outpath.parent.mkdir(parents=True, exist_ok=True)
+    np.savez_compressed(
+        outpath,
+        session=session.session_id,
+        event_ids=np.asarray(event_ids, dtype=int),
+        n_time=np.asarray([emissions.n_time for emissions in emissions_by_event], dtype=int),
+        n_spikes=np.asarray([emissions.n_spikes for emissions in emissions_by_event], dtype=int),
+        sd_meters=grid.momentum_sd_meters,
+        decay=grid.momentum_decay,
+        sd_indices=sd_indices,
+        decay_indices=decay_indices,
+        values=values[:, sd_indices, decay_indices],
+        runtime_s=np.asarray(runtime_s, dtype=float),
+        shard_index=np.asarray(args.momentum_shard_index, dtype=int),
+        shard_count=np.asarray(args.momentum_shard_count, dtype=int),
+        kd_grid_preset=args.grid_preset,
+        kd_time_bin_ms=np.asarray(args.time_bin_ms, dtype=float),
+        kd_bin_size_cm=np.asarray(args.bin_size_cm, dtype=float),
+        kd_n_bins=np.asarray(args.n_bins, dtype=int),
+        kd_n_jobs=np.asarray(args.n_jobs, dtype=int),
+        kd_event_chunk_size=np.asarray(args.event_chunk_size, dtype=int),
+    )
+    print(
+        f"Wrote momentum shard {args.momentum_shard_index}/{args.momentum_shard_count}: "
+        f"{len(event_ids)} events, {len(shard_tasks)} grid points, {runtime_s:.1f}s",
+        flush=True,
+    )
+
+
 def _add_evidence_columns(df: pd.DataFrame) -> pd.DataFrame:
     groups = []
     for _, g in df.groupby(["session", "event_index"], sort=False):
@@ -395,10 +496,16 @@ def main() -> int:
     p.add_argument("--max-events", type=int, default=None)
     p.add_argument("--n-jobs", type=int, default=1)
     p.add_argument("--event-chunk-size", type=int, default=16)
+    p.add_argument("--momentum-shard-index", type=int, default=0)
+    p.add_argument("--momentum-shard-count", type=int, default=1)
+    p.add_argument("--momentum-shard-output", default=None)
     p.add_argument("--place-field-smoothing-cm", type=float, default=4.0)
     p.add_argument("--min-speed-cm-s", type=float, default=5.0)
     p.add_argument("--output", default="results/kd-model-evidence")
     args = p.parse_args()
+    if args.momentum_shard_output:
+        _write_momentum_shard(args, Path(args.momentum_shard_output))
+        return 0
     df, grid_params, marginalized, random_effects = _score(args)
     if df.empty:
         raise RuntimeError("No scores were generated.")

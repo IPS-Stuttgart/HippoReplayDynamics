@@ -1,0 +1,281 @@
+---
+name: Benchmark KD-aligned replay model evidence sharded
+
+on:
+  workflow_dispatch:
+    inputs:
+      dataset_root:
+        description: "Dataset path after extraction"
+        required: true
+        default: "data/DataSetFromPfeifferFoster"
+      session:
+        description: "Session ID, e.g. Rat1/Open1"
+        required: true
+        default: "Rat1/Open1"
+      events:
+        description: "Event IDs/ranges, all, run, or run:0-25"
+        required: true
+        default: "run"
+      time_bin_ms:
+        description: "Ripple decoding time-bin width in milliseconds"
+        required: true
+        default: "3"
+      bin_size_cm:
+        description: "Spatial bin width in centimeters"
+        required: true
+        default: "4"
+      n_bins:
+        description: "Number of bins per spatial dimension"
+        required: true
+        default: "50"
+      likelihood:
+        description: "Emission likelihood family"
+        required: true
+        default: "poisson"
+      grid_preset:
+        description: "Parameter grid preset: kd or smoke"
+        required: true
+        default: "kd"
+      max_events:
+        description: "Optional maximum number of selected events"
+        required: false
+        default: ""
+      n_jobs:
+        description: "Parallel worker threads inside each shard"
+        required: true
+        default: "1"
+      event_chunk_size:
+        description: "Events per momentum scoring chunk"
+        required: true
+        default: "4"
+
+permissions:
+  contents: read
+
+env:
+  DATASET_ROOT: ${{ inputs.dataset_root }}
+  SESSION: ${{ inputs.session }}
+  EVENTS: ${{ inputs.events }}
+  TIME_BIN_MS: ${{ inputs.time_bin_ms }}
+  BIN_SIZE_CM: ${{ inputs.bin_size_cm }}
+  N_BINS: ${{ inputs.n_bins }}
+  LIKELIHOOD: ${{ inputs.likelihood }}
+  GRID_PRESET: ${{ inputs.grid_preset }}
+  MAX_EVENTS: ${{ inputs.max_events }}
+  N_JOBS: ${{ inputs.n_jobs }}
+  EVENT_CHUNK_SIZE: ${{ inputs.event_chunk_size }}
+  OMP_NUM_THREADS: "1"
+  OPENBLAS_NUM_THREADS: "1"
+  MKL_NUM_THREADS: "1"
+
+jobs:
+  base-models:
+    name: KD base models
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Install package
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e .
+
+      - name: Download dataset
+        env:
+          DATA_FULL_URL: ${{ secrets.DATA_FULL_URL }}
+        run: |
+          set -euo pipefail
+          if [ -z "${DATA_FULL_URL}" ]; then
+            echo "Repository secret DATA_FULL_URL is not set." >&2
+            exit 1
+          fi
+          mkdir -p data
+          curl --fail --location --show-error --silent "${DATA_FULL_URL%/}/download" --output data/dataset.zip
+          unzip -q data/dataset.zip -d data
+
+      - name: Run non-momentum KD models
+        run: |
+          set -euo pipefail
+          max_events_args=()
+          if [ -n "${MAX_EVENTS}" ]; then
+            max_events_args+=(--max-events "${MAX_EVENTS}")
+          fi
+          python scripts/benchmark_kd_model_evidence.py \
+            --dataset-root "${DATASET_ROOT}" \
+            --session "${SESSION}" \
+            --events "${EVENTS}" \
+            --models "random stationary stationary-gaussian diffusion" \
+            --time-bin-ms "${TIME_BIN_MS}" \
+            --bin-size-cm "${BIN_SIZE_CM}" \
+            --n-bins "${N_BINS}" \
+            --likelihood "${LIKELIHOOD}" \
+            --grid-preset "${GRID_PRESET}" \
+            --n-jobs "${N_JOBS}" \
+            --event-chunk-size "${EVENT_CHUNK_SIZE}" \
+            "${max_events_args[@]}" \
+            --output results/kd-base
+
+      - name: Upload base scores
+        uses: actions/upload-artifact@v7
+        with:
+          name: kd-base-${{ github.run_id }}
+          path: results/kd-base/
+          if-no-files-found: error
+
+  momentum-shard:
+    name: KD momentum shard ${{ matrix.shard_index }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    strategy:
+      fail-fast: false
+      matrix:
+        shard_index: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Install package
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e .
+
+      - name: Download dataset
+        env:
+          DATA_FULL_URL: ${{ secrets.DATA_FULL_URL }}
+        run: |
+          set -euo pipefail
+          if [ -z "${DATA_FULL_URL}" ]; then
+            echo "Repository secret DATA_FULL_URL is not set." >&2
+            exit 1
+          fi
+          mkdir -p data
+          curl --fail --location --show-error --silent "${DATA_FULL_URL%/}/download" --output data/dataset.zip
+          unzip -q data/dataset.zip -d data
+
+      - name: Run momentum grid shard
+        run: |
+          set -euo pipefail
+          max_events_args=()
+          if [ -n "${MAX_EVENTS}" ]; then
+            max_events_args+=(--max-events "${MAX_EVENTS}")
+          fi
+          mkdir -p results/momentum-shard
+          python scripts/benchmark_kd_model_evidence.py \
+            --dataset-root "${DATASET_ROOT}" \
+            --session "${SESSION}" \
+            --events "${EVENTS}" \
+            --time-bin-ms "${TIME_BIN_MS}" \
+            --bin-size-cm "${BIN_SIZE_CM}" \
+            --n-bins "${N_BINS}" \
+            --likelihood "${LIKELIHOOD}" \
+            --grid-preset "${GRID_PRESET}" \
+            --n-jobs "${N_JOBS}" \
+            --event-chunk-size "${EVENT_CHUNK_SIZE}" \
+            --momentum-shard-index "${{ matrix.shard_index }}" \
+            --momentum-shard-count "10" \
+            --momentum-shard-output "results/momentum-shard/momentum_grid_shard_${{ matrix.shard_index }}.npz" \
+            "${max_events_args[@]}"
+
+      - name: Upload momentum shard
+        uses: actions/upload-artifact@v7
+        with:
+          name: kd-momentum-shard-${{ github.run_id }}-${{ matrix.shard_index }}
+          path: results/momentum-shard/
+          if-no-files-found: error
+
+  aggregate:
+    name: Aggregate KD sharded evidence
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    needs: [base-models, momentum-shard]
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Install package
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e .
+
+      - name: Download base scores
+        uses: actions/download-artifact@v7
+        with:
+          name: kd-base-${{ github.run_id }}
+          path: artifacts/base
+
+      - name: Download momentum shards
+        uses: actions/download-artifact@v7
+        with:
+          pattern: kd-momentum-shard-${{ github.run_id }}-*
+          path: artifacts/shards
+
+      - name: Aggregate sharded KD model evidence
+        run: |
+          python scripts/aggregate_kd_model_evidence_shards.py \
+            --base-dir artifacts/base \
+            --shard-glob "artifacts/shards/*/*.npz" \
+            --output results/kd-model-evidence
+
+      - name: Validate KD output files
+        run: |
+          set -euo pipefail
+          for required_file in \
+            event_model_evidence.csv \
+            model_evidence_summary.csv \
+            best_model_counts.csv \
+            gridsearch_best_params.csv \
+            marginalized_model_evidence.csv \
+            random_effects_model_probabilities.csv; do
+            test -s "results/kd-model-evidence/${required_file}" || {
+              echo "Missing results/kd-model-evidence/${required_file}" >&2
+              exit 1
+            }
+          done
+
+      - name: Show KD model-evidence summary
+        run: |
+          python - <<'PY'
+          import pandas as pd
+          scores = pd.read_csv("results/kd-model-evidence/event_model_evidence.csv")
+          summary = pd.read_csv("results/kd-model-evidence/model_evidence_summary.csv")
+          counts = pd.read_csv("results/kd-model-evidence/best_model_counts.csv")
+          random_effects = pd.read_csv("results/kd-model-evidence/random_effects_model_probabilities.csv")
+          print(summary.to_string(index=False))
+          print("\nBest-model counts:")
+          print(counts.to_string(index=False))
+          print("\nRandom-effects model probabilities:")
+          print(random_effects.to_string(index=False))
+          print("\nRows:", len(scores))
+          if "status" in scores.columns:
+              print("Failures:", int((scores["status"] != "success").sum()))
+          PY
+
+      - name: Upload KD model-evidence results
+        uses: actions/upload-artifact@v7
+        with:
+          name: kd-model-evidence-sharded-${{ github.run_id }}
+          path: results/kd-model-evidence/
+          if-no-files-found: error

@@ -1,0 +1,160 @@
+---
+name: Benchmark Pfeiffer-Foster replay model evidence
+
+on:
+  workflow_dispatch:
+    inputs:
+      dataset_root:
+        description: "Dataset path after extraction"
+        required: true
+        default: "data/DataSetFromPfeifferFoster"
+      session:
+        description: "Session ID, e.g. Rat1/Open1"
+        required: true
+        default: "Rat1/Open1"
+      events:
+        description: "Event IDs/ranges, all, run, or run:0-25"
+        required: true
+        default: "0-25"
+      models:
+        description: "Space-separated models"
+        required: true
+        default: "random stationary stationary-gaussian diffusion momentum imm"
+      candidate_top_k:
+        description: "Candidate spatial bins per time bin"
+        required: true
+        default: "64"
+      stationary_sigma_cm:
+        description: "Gaussian stationary transition sigma in cm"
+        required: true
+        default: "2.0"
+      diffusion_sigma_cm:
+        description: "Diffusion transition sigma in cm"
+        required: true
+        default: "12.0"
+      momentum_sigma_cm:
+        description: "Momentum transition sigma in cm"
+        required: true
+        default: "12.0"
+      velocity_decay:
+        description: "Momentum velocity decay"
+        required: true
+        default: "0.95"
+      mode_stickiness:
+        description: "IMM mode-transition stickiness"
+        required: true
+        default: "0.94"
+      time_bin_s:
+        description: "Ripple decoding time-bin width in seconds"
+        required: true
+        default: "0.02"
+
+permissions:
+  contents: read
+
+env:
+  DATASET_ROOT: ${{ inputs.dataset_root }}
+  SESSION: ${{ inputs.session }}
+  EVENTS: ${{ inputs.events }}
+  MODELS: ${{ inputs.models }}
+  CANDIDATE_TOP_K: ${{ inputs.candidate_top_k }}
+  STATIONARY_SIGMA_CM: ${{ inputs.stationary_sigma_cm }}
+  DIFFUSION_SIGMA_CM: ${{ inputs.diffusion_sigma_cm }}
+  MOMENTUM_SIGMA_CM: ${{ inputs.momentum_sigma_cm }}
+  VELOCITY_DECAY: ${{ inputs.velocity_decay }}
+  MODE_STICKINESS: ${{ inputs.mode_stickiness }}
+  TIME_BIN_S: ${{ inputs.time_bin_s }}
+
+jobs:
+  model-evidence:
+    name: Replay model-evidence benchmark
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Install package
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e .
+
+      - name: Download dataset
+        env:
+          DATA_FULL_URL: ${{ secrets.DATA_FULL_URL }}
+        run: |
+          set -euo pipefail
+          if [ -z "${DATA_FULL_URL}" ]; then
+            echo "Repository secret DATA_FULL_URL is not set." >&2
+            exit 1
+          fi
+          mkdir -p data
+          curl --fail --location --show-error --silent "${DATA_FULL_URL%/}/download" --output data/dataset.zip
+          unzip -q data/dataset.zip -d data
+          find data -maxdepth 3 -type d | sort | sed -n '1,80p'
+
+      - name: Check requested session
+        run: |
+          set -euo pipefail
+          session_dir="${DATASET_ROOT}/${SESSION}"
+          echo "Checking requested session directory: ${session_dir}"
+          test -d "${session_dir}"
+          for required_file in Position_Data.mat Ripple_Events.mat Spike_Data.mat Epochs.mat; do
+            test -f "${session_dir}/${required_file}" || {
+              echo "Missing ${session_dir}/${required_file}" >&2
+              exit 1
+            }
+          done
+          find "${session_dir}" -maxdepth 1 -type f | sort
+
+      - name: Run model-evidence benchmark
+        run: |
+          python scripts/benchmark_model_evidence.py \
+            --dataset-root "${DATASET_ROOT}" \
+            --session "${SESSION}" \
+            --events "${EVENTS}" \
+            --models "${MODELS}" \
+            --candidate-top-k "${CANDIDATE_TOP_K}" \
+            --stationary-sigma-cm "${STATIONARY_SIGMA_CM}" \
+            --diffusion-sigma-cm "${DIFFUSION_SIGMA_CM}" \
+            --momentum-sigma-cm "${MOMENTUM_SIGMA_CM}" \
+            --velocity-decay "${VELOCITY_DECAY}" \
+            --mode-stickiness "${MODE_STICKINESS}" \
+            --time-bin-s "${TIME_BIN_S}" \
+            --output results/model-evidence \
+            --continue-on-error
+
+      - name: Show model-evidence summary
+        if: always()
+        run: |
+          if [ -f results/model-evidence/model_evidence_summary.csv ]; then
+            python - <<'PY'
+          import pandas as pd
+          scores = pd.read_csv("results/model-evidence/event_model_evidence.csv")
+          summary = pd.read_csv("results/model-evidence/model_evidence_summary.csv")
+          counts = pd.read_csv("results/model-evidence/best_model_counts.csv")
+          print(summary.to_string(index=False))
+          print("\nBest-model counts:")
+          print(counts.to_string(index=False))
+          print("\nRows:", len(scores))
+          if "status" in scores.columns:
+              print("Failures:", int((scores["status"] != "success").sum()))
+          PY
+          else
+            echo "No model-evidence summary was generated."
+          fi
+
+      - name: Upload model-evidence results
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: model-evidence-${{ github.run_id }}
+          path: results/model-evidence/
+          if-no-files-found: error

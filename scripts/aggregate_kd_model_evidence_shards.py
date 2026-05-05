@@ -19,41 +19,106 @@ from hipporeplayimm.kd_reference import (
 )
 
 
+def _np_scalar(value) -> object:
+    array = np.asarray(value)
+    return array.item() if array.shape == () else value
+
+
+def _load_npz(path: Path) -> dict[str, object]:
+    with np.load(path, allow_pickle=False) as shard:
+        return {
+            "path": path,
+            "session": str(_np_scalar(shard["session"])),
+            "event_ids": np.array(shard["event_ids"], dtype=int, copy=True),
+            "n_time": np.array(shard["n_time"], dtype=int, copy=True),
+            "n_spikes": np.array(shard["n_spikes"], dtype=int, copy=True),
+            "sd_meters": np.array(shard["sd_meters"], dtype=float, copy=True),
+            "decay": np.array(shard["decay"], dtype=float, copy=True),
+            "sd_indices": np.array(shard["sd_indices"], dtype=int, copy=True),
+            "decay_indices": np.array(shard["decay_indices"], dtype=int, copy=True),
+            "values": np.array(shard["values"], dtype=float, copy=True),
+            "runtime_s": float(_np_scalar(shard["runtime_s"])),
+            "kd_grid_preset": str(_np_scalar(shard["kd_grid_preset"])),
+            "kd_time_bin_ms": float(_np_scalar(shard["kd_time_bin_ms"])),
+            "kd_bin_size_cm": float(_np_scalar(shard["kd_bin_size_cm"])),
+            "kd_n_bins": int(_np_scalar(shard["kd_n_bins"])),
+            "kd_n_jobs": int(_np_scalar(shard["kd_n_jobs"])),
+            "kd_event_chunk_size": int(_np_scalar(shard["kd_event_chunk_size"])),
+        }
+
+
+def _check_same(reference: dict[str, object], shard: dict[str, object], keys: tuple[str, ...]) -> None:
+    for key in keys:
+        if shard[key] != reference[key]:
+            raise ValueError(f"Momentum shard metadata differs for {key}: {shard['path']}")
+
+
 def _load_momentum_grid(shard_paths: list[Path]) -> tuple[np.ndarray, dict[str, np.ndarray], dict[str, object]]:
     if not shard_paths:
         raise FileNotFoundError("No momentum shard files matched.")
-    first = np.load(shard_paths[0], allow_pickle=False)
-    event_ids = first["event_ids"]
+
+    shards = [_load_npz(path) for path in shard_paths]
+    first = shards[0]
     sd_meters = first["sd_meters"]
     decay = first["decay"]
+    event_ids = np.asarray(sorted({int(event_id) for shard in shards for event_id in shard["event_ids"]}), dtype=int)
+    if event_ids.size == 0:
+        raise ValueError("Momentum shard files did not contain any events.")
+    event_row = {int(event_id): row_index for row_index, event_id in enumerate(event_ids)}
     grid = np.full((event_ids.shape[0], sd_meters.shape[0], decay.shape[0]), np.nan, dtype=float)
-    runtimes = []
+    n_time = np.full(event_ids.shape[0], -1, dtype=int)
+    n_spikes = np.full(event_ids.shape[0], -1, dtype=int)
+    runtime_s_by_event = np.zeros(event_ids.shape[0], dtype=float)
     metadata: dict[str, object] = {
-        "session": str(first["session"]),
+        "session": first["session"],
         "event_ids": event_ids,
-        "n_time": first["n_time"],
-        "n_spikes": first["n_spikes"],
-        "kd_grid_preset": str(first["kd_grid_preset"]),
-        "kd_time_bin_ms": float(first["kd_time_bin_ms"]),
-        "kd_bin_size_cm": float(first["kd_bin_size_cm"]),
-        "kd_n_bins": int(first["kd_n_bins"]),
-        "kd_n_jobs": int(first["kd_n_jobs"]),
-        "kd_event_chunk_size": int(first["kd_event_chunk_size"]),
+        "kd_grid_preset": first["kd_grid_preset"],
+        "kd_time_bin_ms": first["kd_time_bin_ms"],
+        "kd_bin_size_cm": first["kd_bin_size_cm"],
+        "kd_n_bins": first["kd_n_bins"],
+        "kd_n_jobs": first["kd_n_jobs"],
+        "kd_event_chunk_size": first["kd_event_chunk_size"],
     }
-    for path in shard_paths:
-        shard = np.load(path, allow_pickle=False)
-        if not np.array_equal(shard["event_ids"], event_ids):
-            raise ValueError(f"Event IDs differ in {path}")
+    for shard in shards:
+        _check_same(
+            first,
+            shard,
+            (
+                "session",
+                "kd_grid_preset",
+                "kd_time_bin_ms",
+                "kd_bin_size_cm",
+                "kd_n_bins",
+                "kd_n_jobs",
+                "kd_event_chunk_size",
+            ),
+        )
         if not np.array_equal(shard["sd_meters"], sd_meters) or not np.array_equal(shard["decay"], decay):
-            raise ValueError(f"Momentum grid differs in {path}")
+            raise ValueError(f"Momentum grid differs in {shard['path']}")
         values = shard["values"]
-        for column, (sd_index, decay_index) in enumerate(zip(shard["sd_indices"], shard["decay_indices"], strict=True)):
-            grid[:, int(sd_index), int(decay_index)] = values[:, column]
-        runtimes.append(float(shard["runtime_s"]))
+        if values.shape != (shard["event_ids"].shape[0], shard["sd_indices"].shape[0]):
+            raise ValueError(f"Unexpected momentum values shape in {shard['path']}: {values.shape}")
+        per_event_runtime = float(shard["runtime_s"]) / max(shard["event_ids"].shape[0], 1)
+        for local_row, event_id in enumerate(shard["event_ids"]):
+            row = event_row[int(event_id)]
+            if n_time[row] == -1:
+                n_time[row] = int(shard["n_time"][local_row])
+                n_spikes[row] = int(shard["n_spikes"][local_row])
+            elif n_time[row] != int(shard["n_time"][local_row]) or n_spikes[row] != int(shard["n_spikes"][local_row]):
+                raise ValueError(f"Event metadata differs for event {int(event_id)} in {shard['path']}")
+            runtime_s_by_event[row] = max(runtime_s_by_event[row], per_event_runtime)
+            for column, (sd_index, decay_index) in enumerate(zip(shard["sd_indices"], shard["decay_indices"], strict=True)):
+                target = grid[row, int(sd_index), int(decay_index)]
+                value = float(values[local_row, column])
+                if np.isfinite(target) and not np.isclose(target, value):
+                    raise ValueError(f"Conflicting momentum score for event {int(event_id)}, grid ({sd_index}, {decay_index})")
+                grid[row, int(sd_index), int(decay_index)] = value
     missing = np.argwhere(~np.isfinite(grid))
     if missing.size:
         raise ValueError(f"Momentum shards did not cover {missing.shape[0]} event/grid entries.")
-    metadata["runtime_s"] = max(runtimes) if runtimes else 0.0
+    metadata["n_time"] = n_time
+    metadata["n_spikes"] = n_spikes
+    metadata["runtime_s_by_event"] = runtime_s_by_event
     return grid, {"sd_meters": sd_meters, "decay": decay}, metadata
 
 
@@ -61,7 +126,7 @@ def _momentum_rows(log_evidence: np.ndarray, metadata: dict[str, object]) -> lis
     event_ids = np.asarray(metadata["event_ids"], dtype=int)
     n_time = np.asarray(metadata["n_time"], dtype=int)
     n_spikes = np.asarray(metadata["n_spikes"], dtype=int)
-    runtime_s = float(metadata["runtime_s"]) / max(event_ids.shape[0], 1)
+    runtime_s_by_event = np.asarray(metadata["runtime_s_by_event"], dtype=float)
     rows = []
     for row_index, event_id in enumerate(event_ids):
         rows.append(
@@ -74,7 +139,7 @@ def _momentum_rows(log_evidence: np.ndarray, metadata: dict[str, object]) -> lis
                 "log_evidence": float(log_evidence[row_index]),
                 "n_time": int(n_time[row_index]),
                 "n_spikes": int(n_spikes[row_index]),
-                "runtime_s": runtime_s,
+                "runtime_s": float(runtime_s_by_event[row_index]),
                 "error": "",
                 "kd_grid_preset": metadata["kd_grid_preset"],
                 "kd_time_bin_ms": metadata["kd_time_bin_ms"],
@@ -93,6 +158,15 @@ def aggregate(base_dir: Path, shard_glob: str, outdir: Path) -> None:
     base_marginalized = pd.read_csv(base_dir / "marginalized_model_evidence.csv")
     shard_paths = sorted(Path(path) for path in glob.glob(shard_glob))
     momentum_grid, momentum_params, metadata = _load_momentum_grid(shard_paths)
+    base_event_ids = set(base_scores["event_index"].astype(int).unique())
+    momentum_event_ids = set(np.asarray(metadata["event_ids"], dtype=int))
+    if base_event_ids != momentum_event_ids:
+        missing_in_base = sorted(momentum_event_ids - base_event_ids)
+        missing_in_momentum = sorted(base_event_ids - momentum_event_ids)
+        raise ValueError(
+            "Base scores and momentum shards cover different events. "
+            f"Missing in base: {missing_in_base[:20]}; missing in momentum: {missing_in_momentum[:20]}"
+        )
     prior, _ = empirical_grid_prior(momentum_params, momentum_grid)
     momentum_evidence = marginalize_grid_log_evidence(momentum_grid, prior)
     momentum_scores = pd.DataFrame(_momentum_rows(momentum_evidence, metadata))

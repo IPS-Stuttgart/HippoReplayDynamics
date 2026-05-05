@@ -1,0 +1,384 @@
+---
+name: Benchmark KD-aligned replay model evidence event-sharded
+
+on:
+  workflow_dispatch:
+    inputs:
+      dataset_root:
+        description: "Dataset path after extraction"
+        required: true
+        default: "data/DataSetFromPfeifferFoster"
+      session:
+        description: "Session ID, e.g. Rat1/Open1"
+        required: true
+        default: "Rat1/Open1"
+      events:
+        description: "Event IDs/ranges, all, run, or run:0-25"
+        required: true
+        default: "run"
+      time_bin_ms:
+        description: "Ripple decoding time-bin width in milliseconds"
+        required: true
+        default: "3"
+      bin_size_cm:
+        description: "Spatial bin width in centimeters"
+        required: true
+        default: "4"
+      n_bins:
+        description: "Number of bins per spatial dimension"
+        required: true
+        default: "50"
+      likelihood:
+        description: "Emission likelihood family"
+        required: true
+        default: "poisson"
+      grid_preset:
+        description: "Parameter grid preset: kd or smoke"
+        required: true
+        default: "kd"
+      max_events:
+        description: "Optional maximum number of selected events"
+        required: false
+        default: ""
+      n_jobs:
+        description: "Parallel worker threads inside each shard"
+        required: true
+        default: "1"
+      event_chunk_size:
+        description: "Events per momentum scoring chunk inside each shard"
+        required: true
+        default: "4"
+      event_shard_count:
+        description: "Target number of event shards for momentum scoring"
+        required: true
+        default: "8"
+      momentum_shard_count:
+        description: "Number of momentum parameter-grid shards"
+        required: true
+        default: "10"
+
+permissions:
+  contents: read
+
+env:
+  DATASET_ROOT: ${{ inputs.dataset_root }}
+  SESSION: ${{ inputs.session }}
+  EVENTS: ${{ inputs.events }}
+  TIME_BIN_MS: ${{ inputs.time_bin_ms }}
+  BIN_SIZE_CM: ${{ inputs.bin_size_cm }}
+  N_BINS: ${{ inputs.n_bins }}
+  LIKELIHOOD: ${{ inputs.likelihood }}
+  GRID_PRESET: ${{ inputs.grid_preset }}
+  MAX_EVENTS: ${{ inputs.max_events }}
+  N_JOBS: ${{ inputs.n_jobs }}
+  EVENT_CHUNK_SIZE: ${{ inputs.event_chunk_size }}
+  EVENT_SHARD_COUNT: ${{ inputs.event_shard_count }}
+  MOMENTUM_SHARD_COUNT: ${{ inputs.momentum_shard_count }}
+  OMP_NUM_THREADS: "1"
+  OPENBLAS_NUM_THREADS: "1"
+  MKL_NUM_THREADS: "1"
+
+jobs:
+  plan-event-shards:
+    name: Plan KD event shards
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    outputs:
+      event_matrix: ${{ steps.plan.outputs.event_matrix }}
+      grid_shard_indices: ${{ steps.plan.outputs.grid_shard_indices }}
+      event_count: ${{ steps.plan.outputs.event_count }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Install package
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e .
+
+      - name: Download dataset
+        env:
+          DATA_FULL_URL: ${{ secrets.DATA_FULL_URL }}
+        run: |
+          set -euo pipefail
+          if [ -z "${DATA_FULL_URL}" ]; then
+            echo "Repository secret DATA_FULL_URL is not set." >&2
+            exit 1
+          fi
+          mkdir -p data
+          curl --fail --location --show-error --silent "${DATA_FULL_URL%/}/download" --output data/dataset.zip
+          unzip -q data/dataset.zip -d data
+
+      - name: Plan event shards
+        id: plan
+        run: |
+          set -euo pipefail
+          max_events_args=()
+          if [ -n "${MAX_EVENTS}" ]; then
+            max_events_args+=(--max-events "${MAX_EVENTS}")
+          fi
+          mkdir -p results/kd-event-shard-plan
+          python scripts/plan_kd_event_shards.py \
+            --dataset-root "${DATASET_ROOT}" \
+            --session "${SESSION}" \
+            --events "${EVENTS}" \
+            --event-shard-count "${EVENT_SHARD_COUNT}" \
+            --momentum-shard-count "${MOMENTUM_SHARD_COUNT}" \
+            "${max_events_args[@]}" \
+            --output results/kd-event-shard-plan/plan.json
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          plan = json.loads(Path("results/kd-event-shard-plan/plan.json").read_text(encoding="utf-8"))
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+              output.write(f"event_matrix={json.dumps(plan['event_matrix'], separators=(',', ':'))}\n")
+              output.write(f"grid_shard_indices={json.dumps(plan['grid_shard_indices'], separators=(',', ':'))}\n")
+              output.write(f"event_count={plan['event_count']}\n")
+          print(f"Planned {plan['event_count']} events across {plan['event_shard_count']} event shards and {plan['momentum_shard_count']} momentum grid shards.")
+          PY
+
+      - name: Upload event-shard plan
+        uses: actions/upload-artifact@v7
+        with:
+          name: kd-event-shard-plan-${{ github.run_id }}
+          path: results/kd-event-shard-plan/
+          if-no-files-found: error
+
+  base-models:
+    name: KD base models
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    needs: plan-event-shards
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Install package
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e .
+
+      - name: Download dataset
+        env:
+          DATA_FULL_URL: ${{ secrets.DATA_FULL_URL }}
+        run: |
+          set -euo pipefail
+          if [ -z "${DATA_FULL_URL}" ]; then
+            echo "Repository secret DATA_FULL_URL is not set." >&2
+            exit 1
+          fi
+          mkdir -p data
+          curl --fail --location --show-error --silent "${DATA_FULL_URL%/}/download" --output data/dataset.zip
+          unzip -q data/dataset.zip -d data
+
+      - name: Run non-momentum KD models
+        run: |
+          set -euo pipefail
+          max_events_args=()
+          if [ -n "${MAX_EVENTS}" ]; then
+            max_events_args+=(--max-events "${MAX_EVENTS}")
+          fi
+          python scripts/benchmark_kd_model_evidence.py \
+            --dataset-root "${DATASET_ROOT}" \
+            --session "${SESSION}" \
+            --events "${EVENTS}" \
+            --models "random stationary stationary-gaussian diffusion" \
+            --time-bin-ms "${TIME_BIN_MS}" \
+            --bin-size-cm "${BIN_SIZE_CM}" \
+            --n-bins "${N_BINS}" \
+            --likelihood "${LIKELIHOOD}" \
+            --grid-preset "${GRID_PRESET}" \
+            --n-jobs "${N_JOBS}" \
+            --event-chunk-size "${EVENT_CHUNK_SIZE}" \
+            "${max_events_args[@]}" \
+            --output results/kd-base
+
+      - name: Upload base scores
+        uses: actions/upload-artifact@v7
+        with:
+          name: kd-base-event-sharded-${{ github.run_id }}
+          path: results/kd-base/
+          if-no-files-found: error
+
+  momentum-shard:
+    name: KD momentum event ${{ matrix.event.event_shard_index }} grid ${{ matrix.grid_shard_index }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    needs: plan-event-shards
+    strategy:
+      fail-fast: false
+      matrix:
+        event: ${{ fromJson(needs.plan-event-shards.outputs.event_matrix) }}
+        grid_shard_index: ${{ fromJson(needs.plan-event-shards.outputs.grid_shard_indices) }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Install package
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e .
+
+      - name: Download dataset
+        env:
+          DATA_FULL_URL: ${{ secrets.DATA_FULL_URL }}
+        run: |
+          set -euo pipefail
+          if [ -z "${DATA_FULL_URL}" ]; then
+            echo "Repository secret DATA_FULL_URL is not set." >&2
+            exit 1
+          fi
+          mkdir -p data
+          curl --fail --location --show-error --silent "${DATA_FULL_URL%/}/download" --output data/dataset.zip
+          unzip -q data/dataset.zip -d data
+
+      - name: Run momentum event/grid shard
+        env:
+          EVENT_SHARD_INDEX: ${{ matrix.event.event_shard_index }}
+          GRID_SHARD_INDEX: ${{ matrix.grid_shard_index }}
+          SHARD_EVENTS: ${{ matrix.event.events_spec }}
+        run: |
+          set -euo pipefail
+          mkdir -p results/momentum-shard
+          python scripts/benchmark_kd_model_evidence.py \
+            --dataset-root "${DATASET_ROOT}" \
+            --session "${SESSION}" \
+            --events "${SHARD_EVENTS}" \
+            --time-bin-ms "${TIME_BIN_MS}" \
+            --bin-size-cm "${BIN_SIZE_CM}" \
+            --n-bins "${N_BINS}" \
+            --likelihood "${LIKELIHOOD}" \
+            --grid-preset "${GRID_PRESET}" \
+            --n-jobs "${N_JOBS}" \
+            --event-chunk-size "${EVENT_CHUNK_SIZE}" \
+            --momentum-shard-index "${GRID_SHARD_INDEX}" \
+            --momentum-shard-count "${MOMENTUM_SHARD_COUNT}" \
+            --momentum-shard-output "results/momentum-shard/momentum_event_${EVENT_SHARD_INDEX}_grid_${GRID_SHARD_INDEX}.npz"
+
+      - name: Upload momentum event/grid shard
+        uses: actions/upload-artifact@v7
+        with:
+          name: kd-momentum-event-shard-${{ github.run_id }}-${{ matrix.event.event_shard_index }}-${{ matrix.grid_shard_index }}
+          path: results/momentum-shard/
+          if-no-files-found: error
+
+  aggregate:
+    name: Aggregate KD event-sharded evidence
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    needs: [plan-event-shards, base-models, momentum-shard]
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Install package
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e .
+
+      - name: Download base scores
+        uses: actions/download-artifact@v7
+        with:
+          name: kd-base-event-sharded-${{ github.run_id }}
+          path: artifacts/base
+
+      - name: Download momentum event/grid shards
+        uses: actions/download-artifact@v7
+        with:
+          pattern: kd-momentum-event-shard-${{ github.run_id }}-*
+          path: artifacts/shards
+
+      - name: Aggregate event-sharded KD model evidence
+        run: |
+          python scripts/aggregate_kd_model_evidence_shards.py \
+            --base-dir artifacts/base \
+            --shard-glob "artifacts/shards/*/*.npz" \
+            --output results/kd-model-evidence
+
+      - name: Validate KD output files and row count
+        env:
+          EXPECTED_EVENTS: ${{ needs.plan-event-shards.outputs.event_count }}
+        run: |
+          set -euo pipefail
+          for required_file in \
+            event_model_evidence.csv \
+            model_evidence_summary.csv \
+            best_model_counts.csv \
+            gridsearch_best_params.csv \
+            marginalized_model_evidence.csv \
+            random_effects_model_probabilities.csv; do
+            test -s "results/kd-model-evidence/${required_file}" || {
+              echo "Missing results/kd-model-evidence/${required_file}" >&2
+              exit 1
+            }
+          done
+          python - <<'PY'
+          import os
+          import pandas as pd
+
+          scores = pd.read_csv("results/kd-model-evidence/event_model_evidence.csv")
+          expected_events = int(os.environ["EXPECTED_EVENTS"])
+          observed_events = int(scores["event_index"].nunique())
+          expected_rows = expected_events * 5
+          if observed_events != expected_events:
+              raise SystemExit(f"Expected {expected_events} events, observed {observed_events}")
+          if len(scores) != expected_rows:
+              raise SystemExit(f"Expected {expected_rows} rows, observed {len(scores)}")
+          if "status" in scores and int((scores["status"] != "success").sum()) != 0:
+              raise SystemExit("KD event-sharded output contains failed rows")
+          print(f"Validated {len(scores)} rows across {observed_events} events.")
+          PY
+
+      - name: Show KD model-evidence summary
+        run: |
+          python - <<'PY'
+          import pandas as pd
+          scores = pd.read_csv("results/kd-model-evidence/event_model_evidence.csv")
+          summary = pd.read_csv("results/kd-model-evidence/model_evidence_summary.csv")
+          counts = pd.read_csv("results/kd-model-evidence/best_model_counts.csv")
+          random_effects = pd.read_csv("results/kd-model-evidence/random_effects_model_probabilities.csv")
+          print(summary.to_string(index=False))
+          print("\nBest-model counts:")
+          print(counts.to_string(index=False))
+          print("\nRandom-effects model probabilities:")
+          print(random_effects.to_string(index=False))
+          print("\nRows:", len(scores))
+          print("Failures:", int((scores["status"] != "success").sum()) if "status" in scores else 0)
+          PY
+
+      - name: Upload KD model-evidence results
+        uses: actions/upload-artifact@v7
+        with:
+          name: kd-model-evidence-event-sharded-${{ github.run_id }}
+          path: results/kd-model-evidence/
+          if-no-files-found: error

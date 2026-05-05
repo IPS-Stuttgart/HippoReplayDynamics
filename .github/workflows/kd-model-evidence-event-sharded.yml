@@ -60,6 +60,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: kd-event-sharded-${{ github.repository }}-${{ inputs.session }}-${{ inputs.events }}-${{ inputs.max_events }}-${{ inputs.grid_preset }}
+  cancel-in-progress: false
+
 env:
   DATASET_ROOT: ${{ inputs.dataset_root }}
   SESSION: ${{ inputs.session }}
@@ -223,6 +227,7 @@ jobs:
     needs: plan-event-shards
     strategy:
       fail-fast: false
+      max-parallel: 10
       matrix:
         event: ${{ fromJson(needs.plan-event-shards.outputs.event_matrix) }}
         grid_shard_index: ${{ fromJson(needs.plan-event-shards.outputs.grid_shard_indices) }}

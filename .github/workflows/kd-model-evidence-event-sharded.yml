@@ -49,9 +49,9 @@ on:
         required: true
         default: "4"
       event_shard_count:
-        description: "Target number of event shards for momentum scoring"
+        description: "Target event shards for momentum scoring; 16 is safer for full sessions"
         required: true
-        default: "8"
+        default: "16"
       momentum_shard_count:
         description: "Number of momentum parameter-grid shards"
         required: true

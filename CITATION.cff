@@ -1,0 +1,32 @@
+cff-version: 1.2.0
+message: "If you use HippoReplayIMM, please cite it using the metadata below."
+title: "HippoReplayIMM: IMM benchmarks for hippocampal replay motion models"
+type: software
+authors:
+  - family-names: "Pfaff"
+    given-names: "Florian"
+    affiliation: "Institute of Industrial Automation and Software Engineering (IAS), University of Stuttgart"
+    email: "pfaff@ias.uni-stuttgart.de"
+repository-code: "https://github.com/IPS-Stuttgart/HippoReplayIMM"
+url: "https://github.com/IPS-Stuttgart/HippoReplayIMM"
+version: "0.1.0"
+license: "MIT"
+abstract: >
+  HippoReplayIMM is a standalone Python package for benchmarking motion-model
+  and interacting-multiple-model interpretations of hippocampal replay in the
+  Pfeiffer/Foster open-field dataset.
+keywords:
+  - hippocampal replay
+  - interacting multiple models
+  - motion models
+  - Bayesian filtering
+  - neuroscience
+preferred-citation:
+  type: software
+  title: "HippoReplayIMM: IMM benchmarks for hippocampal replay motion models"
+  authors:
+    - family-names: "Pfaff"
+      given-names: "Florian"
+  year: 2026
+  url: "https://github.com/IPS-Stuttgart/HippoReplayIMM"
+  license: "MIT"

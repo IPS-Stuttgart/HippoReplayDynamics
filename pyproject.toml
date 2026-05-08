@@ -16,7 +16,7 @@ dependencies = [
     "mpmath",
     "pandas",
     "matplotlib",
-    "pyrecest @ git+https://github.com/FlorianPfaff/PyRecEst.git",
+    "pyrecest @ git+https://github.com/FlorianPfaff/PyRecEst.git@main",
 ]
 
 [project.optional-dependencies]

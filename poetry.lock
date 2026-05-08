@@ -1197,8 +1197,8 @@ pytorch-support = ["torch"]
 [package.source]
 type = "git"
 url = "https://github.com/FlorianPfaff/PyRecEst.git"
-reference = "HEAD"
-resolved_reference = "12d0140c43a3aef494a6a2616a9bf62b1d12f4a6"
+reference = "main"
+resolved_reference = "d41f8f1ecfef7d448e41d1aa03623b83e57d9072"
 
 [[package]]
 name = "pyshtools"
@@ -1645,4 +1645,4 @@ dev = ["pytest"]
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.11,<3.15"
-content-hash = "3f03feb57f15f1d26767649cd35b25cbfbcd7e68316f7d69922ea809467fc8a8"
+content-hash = "9f06d24141f1b7ebbdb85b89fb9a6a2671bbbd87ba1272a8dc9e15bf9f041575"

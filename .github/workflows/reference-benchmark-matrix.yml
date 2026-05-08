@@ -1,0 +1,363 @@
+---
+name: Reference benchmark matrix
+
+on:
+  workflow_dispatch:
+    inputs:
+      dataset_root:
+        description: "Dataset path after extraction"
+        required: true
+        default: "data/DataSetFromPfeifferFoster"
+      heldout_events:
+        description: "Held-out explicit event IDs/ranges, e.g. 0-25 or 0-25,30"
+        required: true
+        default: "0-25"
+      evidence_events:
+        description: "Model-evidence events: all, run, run:0-25, or explicit ranges"
+        required: true
+        default: "run"
+      run_heldout:
+        description: "Run held-out predictive likelihood matrix"
+        required: true
+        type: boolean
+        default: true
+      include_pyrecest_heldout:
+        description: "Include PyRecEst particle models in held-out matrix"
+        required: true
+        type: boolean
+        default: false
+      run_project_evidence:
+        description: "Run project-native approximate model-evidence matrix"
+        required: true
+        type: boolean
+        default: true
+      run_kd_smoke:
+        description: "Run KD-aligned smoke evidence matrix"
+        required: true
+        type: boolean
+        default: true
+      kd_max_events:
+        description: "Maximum events for KD smoke runs; empty means no limit"
+        required: false
+        default: "5"
+      candidate_top_k:
+        description: "Candidate spatial bins per time bin"
+        required: true
+        default: "64"
+      pyrecest_particles:
+        description: "Particle count for PyRecEst-backed models"
+        required: true
+        default: "512"
+      test_cell_fraction:
+        description: "Fraction of cells held out for likelihood evaluation"
+        required: true
+        default: "0.25"
+      random_seed:
+        description: "Random seed for train/test split"
+        required: true
+        default: "1"
+      time_bin_s:
+        description: "Project-native decoding time-bin width in seconds"
+        required: true
+        default: "0.02"
+      kd_time_bin_ms:
+        description: "KD-aligned decoding time-bin width in milliseconds"
+        required: true
+        default: "3"
+      kd_bin_size_cm:
+        description: "KD-aligned spatial bin width in centimeters"
+        required: true
+        default: "4"
+      kd_n_bins:
+        description: "KD-aligned number of bins per spatial dimension"
+        required: true
+        default: "50"
+      kd_n_jobs:
+        description: "Parallel worker threads for KD smoke grid scoring"
+        required: true
+        default: "1"
+      kd_event_chunk_size:
+        description: "Events per KD momentum scoring chunk"
+        required: true
+        default: "4"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: reference-benchmark-matrix-${{ github.repository }}-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  DATASET_ROOT: ${{ inputs.dataset_root }}
+  OMP_NUM_THREADS: "1"
+  OPENBLAS_NUM_THREADS: "1"
+  MKL_NUM_THREADS: "1"
+
+jobs:
+  heldout:
+    name: Held-out ${{ matrix.session }}
+    if: ${{ inputs.run_heldout }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      max-parallel: 2
+      matrix:
+        include:
+          - session: Rat1/Open1
+            slug: rat1-open1
+          - session: Rat1/Open2
+            slug: rat1-open2
+          - session: Rat2/Open1
+            slug: rat2-open1
+          - session: Rat2/Open2
+            slug: rat2-open2
+          - session: Rat3/Open1
+            slug: rat3-open1
+          - session: Rat3/Open2
+            slug: rat3-open2
+          - session: Rat4/Open1
+            slug: rat4-open1
+          - session: Rat4/Open2
+            slug: rat4-open2
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Install package
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e .
+
+      - name: Download dataset
+        env:
+          DATA_FULL_URL: ${{ secrets.DATA_FULL_URL }}
+        run: |
+          set -euo pipefail
+          if [ -z "${DATA_FULL_URL}" ]; then
+            echo "Repository secret DATA_FULL_URL is not set." >&2
+            exit 1
+          fi
+          mkdir -p data
+          curl --fail --location --show-error --silent "${DATA_FULL_URL%/}/download" --output data/dataset.zip
+          unzip -q data/dataset.zip -d data
+
+      - name: Check requested session
+        env:
+          SESSION: ${{ matrix.session }}
+        run: |
+          set -euo pipefail
+          session_dir="${DATASET_ROOT}/${SESSION}"
+          echo "Checking requested session directory: ${session_dir}"
+          test -d "${session_dir}"
+          for required_file in Position_Data.mat Ripple_Events.mat Spike_Data.mat Epochs.mat; do
+            test -f "${session_dir}/${required_file}" || {
+              echo "Missing ${session_dir}/${required_file}" >&2
+              exit 1
+            }
+          done
+
+      - name: Run held-out benchmark
+        env:
+          SESSION: ${{ matrix.session }}
+          INCLUDE_PYRECEST: ${{ inputs.include_pyrecest_heldout }}
+        run: |
+          set -euo pipefail
+          models="random stationary diffusion momentum imm"
+          if [ "${INCLUDE_PYRECEST}" = "true" ]; then
+            models="${models} pyrecest-goal-particle pyrecest-goal-particle-imm"
+          fi
+          python scripts/benchmark_session.py \
+            --dataset-root "${DATASET_ROOT}" \
+            --session "${SESSION}" \
+            --events "${{ inputs.heldout_events }}" \
+            --models ${models} \
+            --candidate-top-k "${{ inputs.candidate_top_k }}" \
+            --pyrecest-particles "${{ inputs.pyrecest_particles }}" \
+            --test-cell-fraction "${{ inputs.test_cell_fraction }}" \
+            --random-seed "${{ inputs.random_seed }}" \
+            --time-bin-s "${{ inputs.time_bin_s }}" \
+            --output "results/heldout/${{ matrix.slug }}" \
+            --continue-on-error
+
+      - name: Upload held-out benchmark results
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: reference-heldout-${{ matrix.slug }}-seed-${{ inputs.random_seed }}
+          path: results/heldout/${{ matrix.slug }}/
+          if-no-files-found: error
+
+  project-evidence:
+    name: Project evidence ${{ matrix.session }}
+    if: ${{ inputs.run_project_evidence }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      max-parallel: 2
+      matrix:
+        include:
+          - session: Rat1/Open1
+            slug: rat1-open1
+          - session: Rat1/Open2
+            slug: rat1-open2
+          - session: Rat2/Open1
+            slug: rat2-open1
+          - session: Rat2/Open2
+            slug: rat2-open2
+          - session: Rat3/Open1
+            slug: rat3-open1
+          - session: Rat3/Open2
+            slug: rat3-open2
+          - session: Rat4/Open1
+            slug: rat4-open1
+          - session: Rat4/Open2
+            slug: rat4-open2
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Install package
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e .
+
+      - name: Download dataset
+        env:
+          DATA_FULL_URL: ${{ secrets.DATA_FULL_URL }}
+        run: |
+          set -euo pipefail
+          if [ -z "${DATA_FULL_URL}" ]; then
+            echo "Repository secret DATA_FULL_URL is not set." >&2
+            exit 1
+          fi
+          mkdir -p data
+          curl --fail --location --show-error --silent "${DATA_FULL_URL%/}/download" --output data/dataset.zip
+          unzip -q data/dataset.zip -d data
+
+      - name: Run project-native model-evidence benchmark
+        env:
+          SESSION: ${{ matrix.session }}
+        run: |
+          set -euo pipefail
+          python scripts/benchmark_model_evidence.py \
+            --dataset-root "${DATASET_ROOT}" \
+            --session "${SESSION}" \
+            --events "${{ inputs.evidence_events }}" \
+            --models "random stationary stationary-gaussian diffusion momentum imm" \
+            --candidate-top-k "${{ inputs.candidate_top_k }}" \
+            --time-bin-s "${{ inputs.time_bin_s }}" \
+            --output "results/project-evidence/${{ matrix.slug }}" \
+            --continue-on-error
+
+      - name: Upload project-native model-evidence results
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: reference-project-evidence-${{ matrix.slug }}
+          path: results/project-evidence/${{ matrix.slug }}/
+          if-no-files-found: error
+
+  kd-smoke:
+    name: KD smoke ${{ matrix.session }}
+    if: ${{ inputs.run_kd_smoke }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    strategy:
+      fail-fast: false
+      max-parallel: 2
+      matrix:
+        include:
+          - session: Rat1/Open1
+            slug: rat1-open1
+          - session: Rat1/Open2
+            slug: rat1-open2
+          - session: Rat2/Open1
+            slug: rat2-open1
+          - session: Rat2/Open2
+            slug: rat2-open2
+          - session: Rat3/Open1
+            slug: rat3-open1
+          - session: Rat3/Open2
+            slug: rat3-open2
+          - session: Rat4/Open1
+            slug: rat4-open1
+          - session: Rat4/Open2
+            slug: rat4-open2
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Install package
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e .
+
+      - name: Download dataset
+        env:
+          DATA_FULL_URL: ${{ secrets.DATA_FULL_URL }}
+        run: |
+          set -euo pipefail
+          if [ -z "${DATA_FULL_URL}" ]; then
+            echo "Repository secret DATA_FULL_URL is not set." >&2
+            exit 1
+          fi
+          mkdir -p data
+          curl --fail --location --show-error --silent "${DATA_FULL_URL%/}/download" --output data/dataset.zip
+          unzip -q data/dataset.zip -d data
+
+      - name: Run KD-aligned smoke model-evidence benchmark
+        env:
+          SESSION: ${{ matrix.session }}
+          KD_MAX_EVENTS: ${{ inputs.kd_max_events }}
+        run: |
+          set -euo pipefail
+          max_events_args=()
+          if [ -n "${KD_MAX_EVENTS}" ]; then
+            max_events_args+=(--max-events "${KD_MAX_EVENTS}")
+          fi
+          python scripts/benchmark_kd_model_evidence.py \
+            --dataset-root "${DATASET_ROOT}" \
+            --session "${SESSION}" \
+            --events "${{ inputs.evidence_events }}" \
+            --models "random stationary stationary-gaussian diffusion momentum" \
+            --time-bin-ms "${{ inputs.kd_time_bin_ms }}" \
+            --bin-size-cm "${{ inputs.kd_bin_size_cm }}" \
+            --n-bins "${{ inputs.kd_n_bins }}" \
+            --likelihood poisson \
+            --grid-preset smoke \
+            --n-jobs "${{ inputs.kd_n_jobs }}" \
+            --event-chunk-size "${{ inputs.kd_event_chunk_size }}" \
+            "${max_events_args[@]}" \
+            --output "results/kd-smoke/${{ matrix.slug }}"
+
+      - name: Upload KD smoke results
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: reference-kd-smoke-${{ matrix.slug }}
+          path: results/kd-smoke/${{ matrix.slug }}/
+          if-no-files-found: error

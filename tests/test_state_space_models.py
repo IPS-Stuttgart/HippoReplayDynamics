@@ -4,7 +4,8 @@ import numpy as np
 from scipy.special import logsumexp
 
 from hipporeplayimm.encoding import LogEmissionTensor
-from hipporeplayimm.state_space import StateSpaceDecoderConfig, StateSpaceReplayModel
+from hipporeplayimm.sorted_spike_state_space import SortedSpikeStateSpaceReplayModel
+from hipporeplayimm.state_space import StateSpaceDecoderConfig
 
 
 def _synthetic_emissions() -> LogEmissionTensor:
@@ -41,7 +42,7 @@ def test_state_space_diffusion_matches_bruteforce_tiny_grid():
         diffusion_sigma_cm_sqrt_s=1.0,
         max_step_sigma=10.0,
     )
-    score = StateSpaceReplayModel(mode="diffusion", config=config).score(emissions, centers)
+    score = SortedSpikeStateSpaceReplayModel(mode="diffusion", config=config).score(emissions, centers)
 
     transition = np.empty((2, 2))
     for src in range(2):
@@ -66,9 +67,10 @@ def test_state_space_modes_return_full_trajectory_posteriors():
 
     for mode in ("stationary", "fragmented", "jump", "diffusion", "imm", "momentum"):
         config = StateSpaceDecoderConfig(mode=mode, momentum_candidate_top_k=4)
-        score = StateSpaceReplayModel(mode=mode, config=config).score(emissions, centers)
+        score = SortedSpikeStateSpaceReplayModel(mode=mode, config=config).score(emissions, centers)
 
         assert np.isfinite(score.log_likelihood)
+        assert score.model_name == f"sorted-spike-state-space-{mode}"
         assert score.trajectory_log_posterior is not None
         assert score.trajectory_log_posterior.shape == (emissions.n_time, emissions.n_bins)
         assert score.terminal_log_posterior is not None

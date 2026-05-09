@@ -12,6 +12,7 @@ from .data import ReplaySession, load_open_field_sessions
 from .encoding import EmissionConfig, EncodingConfig, build_emissions, fit_place_field_encoding
 from .models import CandidateKinematicModel, RandomModel, StationaryModel
 from .pyrecest_models import PyRecEstGoalParticleIMMModel, PyRecEstGoalParticleModel
+from .state_space import StateSpaceReplayModel
 
 
 @dataclass(frozen=True)
@@ -173,6 +174,12 @@ def _build_models(
         "diffusion": CandidateKinematicModel(mode="diffusion", top_k=config.candidate_top_k),
         "momentum": CandidateKinematicModel(mode="momentum", top_k=config.candidate_top_k),
         "imm": CandidateKinematicModel(mode="imm", top_k=config.candidate_top_k),
+        "state-space-stationary": StateSpaceReplayModel(mode="stationary"),
+        "state-space-diffusion": StateSpaceReplayModel(mode="diffusion"),
+        "state-space-fragmented": StateSpaceReplayModel(mode="fragmented"),
+        "state-space-jump": StateSpaceReplayModel(mode="jump"),
+        "state-space-momentum": StateSpaceReplayModel(mode="momentum"),
+        "state-space-imm": StateSpaceReplayModel(mode="imm"),
         "pyrecest-goal-particle": PyRecEstGoalParticleModel(
             candidate_goals=goal_candidates,
             n_particles=config.pyrecest_particles,

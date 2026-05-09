@@ -1,0 +1,80 @@
+---
+name: Download Pfeiffer-Foster dataset
+description: Download and normalize the private Pfeiffer-Foster dataset from OwnCloud WebDAV.
+
+inputs:
+  dataset-root:
+    description: Directory where DataSetFromPfeifferFoster should be available.
+    required: true
+  webdav-url:
+    description: OwnCloud public WebDAV endpoint.
+    required: true
+  webdav-key:
+    description: OwnCloud public share key.
+    required: true
+  webdav-password:
+    description: OwnCloud public share password.
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Install rclone without sudo
+      shell: bash
+      env:
+        ACTION_PATH: ${{ github.action_path }}
+      run: |
+        set -euo pipefail
+        if ! command -v rclone >/dev/null 2>&1; then
+          mkdir -p "$RUNNER_TEMP/rclone-bin" "$RUNNER_TEMP/rclone-download"
+          curl -fsSL https://downloads.rclone.org/rclone-current-linux-amd64.zip \
+            -o "$RUNNER_TEMP/rclone-download/rclone.zip"
+          python "${ACTION_PATH}/install_rclone.py"
+          echo "$RUNNER_TEMP/rclone-bin" >> "$GITHUB_PATH"
+          export PATH="$RUNNER_TEMP/rclone-bin:$PATH"
+        fi
+        rclone version
+
+    - name: Download dataset via rclone
+      shell: bash
+      env:
+        ACTION_PATH: ${{ github.action_path }}
+        DATASET_ROOT: ${{ inputs.dataset-root }}
+        PFEIFFERFOSTER_WEBDAV_URL: ${{ inputs.webdav-url }}
+        PFEIFFERFOSTER_DATA_KEY: ${{ inputs.webdav-key }}
+        PFEIFFERFOSTER_DATA_PASSWORD: ${{ inputs.webdav-password }}
+      run: |
+        set -euo pipefail
+        if [ -z "${PFEIFFERFOSTER_WEBDAV_URL}" ] ||
+           [ -z "${PFEIFFERFOSTER_DATA_KEY}" ] ||
+           [ -z "${PFEIFFERFOSTER_DATA_PASSWORD}" ]; then
+          echo "Repository secrets PFEIFFERFOSTER_WEBDAV_URL, PFEIFFERFOSTER_DATA_KEY, and PFEIFFERFOSTER_DATA_PASSWORD must be set." >&2
+          exit 1
+        fi
+        echo "::add-mask::${PFEIFFERFOSTER_WEBDAV_URL}"
+        echo "::add-mask::${PFEIFFERFOSTER_DATA_KEY}"
+        echo "::add-mask::${PFEIFFERFOSTER_DATA_PASSWORD}"
+        case "${DATASET_ROOT}" in
+          ""|"."|"/")
+            echo "Refusing unsafe dataset-root: '${DATASET_ROOT}'" >&2
+            exit 1
+            ;;
+        esac
+
+        staging_dir="${RUNNER_TEMP}/pfeiffer-foster-webdav"
+        rm -rf "${staging_dir}" "${DATASET_ROOT}"
+        mkdir -p "${staging_dir}" "$(dirname "${DATASET_ROOT}")"
+
+        obscured_password="$(rclone obscure "${PFEIFFERFOSTER_DATA_PASSWORD}")"
+        echo "::add-mask::${obscured_password}"
+        rclone copy ":webdav:" "${staging_dir}" \
+          --webdav-url "${PFEIFFERFOSTER_WEBDAV_URL}" \
+          --webdav-vendor owncloud \
+          --webdav-user "${PFEIFFERFOSTER_DATA_KEY}" \
+          --webdav-pass "${obscured_password}" \
+          --stats 30s \
+          --stats-one-line
+
+        python "${ACTION_PATH}/normalize_dataset.py"
+
+        find "${DATASET_ROOT}" -maxdepth 3 -type d | sort | sed -n '1,80p'

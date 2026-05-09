@@ -147,6 +147,8 @@ def _inspect(root: str) -> int:
             "spikes": session.spikes.shape[0],
             "cells": session.cell_ids.shape[0],
             "excitatory_cells": session.excitatory_neurons.shape[0],
+            "spike_mark_features": 0 if session.spike_marks is None else session.spike_marks.n_features,
+            "spike_mark_source": "" if session.spike_marks is None else f"{session.spike_marks.source_file}:{session.spike_marks.source_variable}",
             "ripples": session.ripple_count,
             "run_ripples": session.ripple_indices_in_run().shape[0],
         }

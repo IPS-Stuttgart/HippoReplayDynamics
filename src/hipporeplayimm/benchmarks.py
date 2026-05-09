@@ -115,6 +115,10 @@ def _score_session(session: ReplaySession, config: BenchmarkConfig) -> list[dict
                 candidates = model.candidate_indices(train_emissions)
                 train_score = model.score(train_emissions, encoding.bin_centers, candidate_indices=candidates)
                 joint_score = model.score(joint_emissions, encoding.bin_centers, candidate_indices=candidates)
+            elif isinstance(model, SortedSpikeStateSpaceReplayModel) and model.mode == "momentum":
+                candidates = model.candidate_indices(train_emissions)
+                train_score = model.score(train_emissions, encoding.bin_centers, candidate_indices=candidates)
+                joint_score = model.score(joint_emissions, encoding.bin_centers, candidate_indices=candidates)
             else:
                 train_score = model.score(train_emissions, encoding.bin_centers)
                 joint_score = model.score(joint_emissions, encoding.bin_centers)

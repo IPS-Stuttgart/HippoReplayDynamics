@@ -22,6 +22,7 @@ class EventScore:
     n_spikes: int
     diagnostics: dict[str, float | int | str] = field(default_factory=dict)
     terminal_log_posterior: np.ndarray | None = None
+    trajectory_log_posterior: np.ndarray | None = None
 
 
 class ReplayModel(Protocol):

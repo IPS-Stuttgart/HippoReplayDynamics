@@ -12,6 +12,7 @@ from .data import ReplaySession, load_open_field_sessions
 from .encoding import EmissionConfig, EncodingConfig, build_emissions, fit_place_field_encoding
 from .models import CandidateKinematicModel, RandomModel, StationaryModel
 from .pyrecest_models import PyRecEstGoalParticleIMMModel, PyRecEstGoalParticleModel
+from .sorted_spike_state_space import SortedSpikeStateSpaceReplayModel
 
 
 @dataclass(frozen=True)
@@ -173,6 +174,18 @@ def _build_models(
         "diffusion": CandidateKinematicModel(mode="diffusion", top_k=config.candidate_top_k),
         "momentum": CandidateKinematicModel(mode="momentum", top_k=config.candidate_top_k),
         "imm": CandidateKinematicModel(mode="imm", top_k=config.candidate_top_k),
+        "sorted-spike-state-space-stationary": SortedSpikeStateSpaceReplayModel(mode="stationary"),
+        "sorted-spike-state-space-diffusion": SortedSpikeStateSpaceReplayModel(mode="diffusion"),
+        "sorted-spike-state-space-fragmented": SortedSpikeStateSpaceReplayModel(mode="fragmented"),
+        "sorted-spike-state-space-jump": SortedSpikeStateSpaceReplayModel(mode="jump"),
+        "sorted-spike-state-space-momentum": SortedSpikeStateSpaceReplayModel(mode="momentum"),
+        "sorted-spike-state-space-imm": SortedSpikeStateSpaceReplayModel(mode="imm"),
+        "state-space-stationary": SortedSpikeStateSpaceReplayModel(mode="stationary", name="state-space-stationary"),
+        "state-space-diffusion": SortedSpikeStateSpaceReplayModel(mode="diffusion", name="state-space-diffusion"),
+        "state-space-fragmented": SortedSpikeStateSpaceReplayModel(mode="fragmented", name="state-space-fragmented"),
+        "state-space-jump": SortedSpikeStateSpaceReplayModel(mode="jump", name="state-space-jump"),
+        "state-space-momentum": SortedSpikeStateSpaceReplayModel(mode="momentum", name="state-space-momentum"),
+        "state-space-imm": SortedSpikeStateSpaceReplayModel(mode="imm", name="state-space-imm"),
         "pyrecest-goal-particle": PyRecEstGoalParticleModel(
             candidate_goals=goal_candidates,
             n_particles=config.pyrecest_particles,

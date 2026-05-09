@@ -9,7 +9,7 @@ import pandas as pd
 
 from .benchmarks import BenchmarkConfig, _build_models, bootstrap_delta_ci, run_open_field_benchmark
 from .data import load_open_field_sessions
-from .encoding import build_emissions, fit_place_field_encoding
+from .encoding import EmissionConfig, build_emissions, fit_place_field_encoding
 from .ground_truth import (
     GroundTruthConfig,
     compare_scores_to_ground_truth,
@@ -37,6 +37,7 @@ def main(argv: list[str] | None = None) -> int:
     benchmark_parser.add_argument("--output")
     benchmark_parser.add_argument("--max-events", type=int)
     benchmark_parser.add_argument("--candidate-top-k", type=int, default=64)
+    benchmark_parser.add_argument("--time-bin-ms", type=float, default=20.0)
     benchmark_parser.add_argument(
         "--models",
         default="random,stationary,diffusion,momentum,imm",
@@ -49,6 +50,7 @@ def main(argv: list[str] | None = None) -> int:
     decode_parser.add_argument("--session", required=True)
     decode_parser.add_argument("--event-id", type=int, required=True)
     decode_parser.add_argument("--candidate-top-k", type=int, default=64)
+    decode_parser.add_argument("--time-bin-ms", type=float, default=20.0)
     decode_parser.add_argument(
         "--models",
         default="random,stationary,diffusion,momentum,imm",
@@ -70,6 +72,7 @@ def main(argv: list[str] | None = None) -> int:
     compare_parser.add_argument("--output", required=True)
     compare_parser.add_argument("--ground-truth")
     compare_parser.add_argument("--candidate-top-k", type=int, default=64)
+    compare_parser.add_argument("--time-bin-ms", type=float, default=20.0)
     _add_pyrecest_scalar_arguments(compare_parser)
     compare_parser.add_argument("--visit-radius-cm", type=float, default=10.0)
     compare_parser.add_argument("--min-dwell-s", type=float, default=0.2)
@@ -144,6 +147,8 @@ def _inspect(root: str) -> int:
             "spikes": session.spikes.shape[0],
             "cells": session.cell_ids.shape[0],
             "excitatory_cells": session.excitatory_neurons.shape[0],
+            "spike_mark_features": 0 if session.spike_marks is None else session.spike_marks.n_features,
+            "spike_mark_source": "" if session.spike_marks is None else f"{session.spike_marks.source_file}:{session.spike_marks.source_variable}",
             "ripples": session.ripple_count,
             "run_ripples": session.ripple_indices_in_run().shape[0],
         }
@@ -157,6 +162,7 @@ def _benchmark(args: argparse.Namespace) -> int:
     if args.preset != "open-field-loso":
         raise ValueError("Only --preset open-field-loso is currently implemented")
     config = BenchmarkConfig(
+        emissions=EmissionConfig(time_bin_s=args.time_bin_ms / 1000.0),
         max_events_per_session=args.max_events,
         candidate_top_k=args.candidate_top_k,
         models=_parse_models(args.models),
@@ -182,9 +188,11 @@ def _decode_event(args: argparse.Namespace) -> int:
         raise KeyError(f"Unknown session {args.session!r}; available: {available}")
     session = sessions[args.session]
     encoding = fit_place_field_encoding(session)
-    emissions = build_emissions(session, encoding, args.event_id)
+    emission_config = EmissionConfig(time_bin_s=args.time_bin_ms / 1000.0)
+    emissions = build_emissions(session, encoding, args.event_id, emission_config)
     rows = []
     config = BenchmarkConfig(
+        emissions=emission_config,
         candidate_top_k=args.candidate_top_k,
         models=_parse_models(args.models),
         **_pyrecest_scalar_kwargs(args),
@@ -224,6 +232,7 @@ def _compare_ground_truth(args: argparse.Namespace) -> int:
         args.scores,
         ground_truth=args.ground_truth,
         ground_truth_config=config,
+        emission_config=EmissionConfig(time_bin_s=args.time_bin_ms / 1000.0),
         candidate_top_k=args.candidate_top_k,
         **_pyrecest_scalar_kwargs(args),
     )

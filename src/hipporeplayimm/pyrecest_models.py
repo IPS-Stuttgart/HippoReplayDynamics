@@ -40,27 +40,16 @@ class PyRecEstGoalParticleModel:
         )
 
         seed = _event_seed(self.random_seed, emissions)
-        rng = np.random.default_rng(seed)
         np.random.seed(seed)
 
         bin_tree = cKDTree(bin_centers)
         goals = _coerce_candidate_goals(self.candidate_goals, bin_centers)
-        filter_ = self._build_filter(bin_centers, goals, emissions.dt, rng)
-        process_noise, position_jump = self._build_noise_distributions(bin_centers.shape[1])
+        filter_ = self._build_filter(bin_centers, goals, emissions.dt)
 
         logp = 0.0
         for time_index in range(emissions.n_time):
             if time_index > 0:
-                filter_.predict_replay(
-                    dt=emissions.dt,
-                    alpha=self.alpha,
-                    beta=self.beta,
-                    process_noise=process_noise,
-                    position_jump_distribution=position_jump,
-                    jump_probability=self.jump_probability,
-                    goal_reset_probability=self.goal_reset_probability,
-                    use_semi_implicit_position_update=True,
-                )
+                filter_.predict_replay(use_semi_implicit_position_update=True)
             logp += _update_filter_from_grid_likelihood(
                 filter_,
                 emissions.log_likelihood[time_index],
@@ -83,11 +72,10 @@ class PyRecEstGoalParticleModel:
             ),
             "pyrecest_last_jump_fraction": float(filter_.last_jump_fraction),
             "pyrecest_last_goal_remap_fraction": float(filter_.last_goal_remap_fraction),
-        }
-        if hasattr(filter_, "last_position_proposal_fraction"):
-            diagnostics["pyrecest_last_position_proposal_fraction"] = float(
+            "pyrecest_last_position_proposal_fraction": float(
                 filter_.last_position_proposal_fraction
-            )
+            ),
+        }
         diagnostics.update(_goal_diagnostics(filter_, goals))
         diagnostics.update(_mode_diagnostics(filter_))
         diagnostics.update(_posterior_diagnostics(terminal_log_posterior, bin_centers))
@@ -105,31 +93,28 @@ class PyRecEstGoalParticleModel:
         bin_centers: np.ndarray,
         candidate_goals: np.ndarray,
         dt: float,
-        rng: np.random.Generator,
     ):
         from pyrecest.filters import GoalConditionedReplayParticleFilter
 
-        positions = _sample_rows(bin_centers, self.n_particles, rng)
-        velocities = rng.normal(
-            0.0,
+        position_prior, velocity_prior = _initial_replay_priors(
+            bin_centers,
             self.initial_velocity_sigma_cm_s,
-            size=(self.n_particles, bin_centers.shape[1]),
         )
-        goals = _sample_rows(candidate_goals, self.n_particles, rng)
-        filter_ = GoalConditionedReplayParticleFilter(
+        process_noise, position_jump = self._build_noise_distributions(bin_centers.shape[1])
+        return GoalConditionedReplayParticleFilter(
             n_particles=self.n_particles,
             position_dim=bin_centers.shape[1],
             dt=dt,
             alpha=self.alpha,
             beta=self.beta,
+            initial_position_distribution=position_prior,
+            initial_velocity_distribution=velocity_prior,
             candidate_goals=candidate_goals,
+            process_noise=process_noise,
+            position_jump_distribution=position_jump,
+            jump_probability=self.jump_probability,
+            goal_reset_probability=self.goal_reset_probability,
         )
-        filter_.set_state_components(
-            positions=positions,
-            velocities=velocities,
-            goals=goals,
-        )
-        return filter_
 
     def _build_noise_distributions(self, position_dim: int):
         from pyrecest.distributions import GaussianDistribution
@@ -163,31 +148,27 @@ class PyRecEstGoalParticleIMMModel(PyRecEstGoalParticleModel):
         bin_centers: np.ndarray,
         candidate_goals: np.ndarray,
         dt: float,
-        rng: np.random.Generator,
     ):
-        try:
-            from pyrecest.filters import GoalConditionedReplayParticleIMMFilter
-        except ImportError as exc:
-            raise ImportError(
-                "pyrecest-goal-particle-imm requires "
-                "pyrecest.filters.GoalConditionedReplayParticleIMMFilter. "
-                "Install a PyRecEst version containing FlorianPfaff/PyRecEst#1927."
-            ) from exc
+        from pyrecest.filters import GoalConditionedReplayParticleIMMFilter
 
-        positions = _sample_rows(bin_centers, self.n_particles, rng)
-        velocities = rng.normal(
-            0.0,
+        position_prior, velocity_prior = _initial_replay_priors(
+            bin_centers,
             self.initial_velocity_sigma_cm_s,
-            size=(self.n_particles, bin_centers.shape[1]),
         )
-        goals = _sample_rows(candidate_goals, self.n_particles, rng)
-        filter_ = GoalConditionedReplayParticleIMMFilter(
+        process_noise, position_jump = self._build_noise_distributions(bin_centers.shape[1])
+        return GoalConditionedReplayParticleIMMFilter(
             n_particles=self.n_particles,
             position_dim=bin_centers.shape[1],
             dt=dt,
             alpha=self.alpha,
             beta=self.beta,
+            initial_position_distribution=position_prior,
+            initial_velocity_distribution=velocity_prior,
             candidate_goals=candidate_goals,
+            process_noise=process_noise,
+            position_jump_distribution=position_jump,
+            jump_probability=self.jump_probability,
+            goal_reset_probability=self.goal_reset_probability,
             mode_stickiness=self.mode_stickiness,
             stationary_velocity_decay=self.stationary_velocity_decay,
             diffusion_velocity_decay=self.diffusion_velocity_decay,
@@ -195,12 +176,22 @@ class PyRecEstGoalParticleIMMModel(PyRecEstGoalParticleModel):
             jump_fraction=self.jump_fraction,
             jump_velocity_decay=self.jump_velocity_decay,
         )
-        filter_.set_state_components(
-            positions=positions,
-            velocities=velocities,
-            goals=goals,
-        )
-        return filter_
+
+
+def _initial_replay_priors(
+    bin_centers: np.ndarray,
+    initial_velocity_sigma_cm_s: float,
+):
+    from pyrecest.distributions import GaussianDistribution, LinearDiracDistribution
+
+    bin_centers = np.asarray(bin_centers, dtype=float)
+    position_dim = bin_centers.shape[1]
+    position_prior = LinearDiracDistribution(bin_centers)
+    velocity_prior = GaussianDistribution(
+        np.zeros(position_dim, dtype=float),
+        np.eye(position_dim) * float(initial_velocity_sigma_cm_s) ** 2,
+    )
+    return position_prior, velocity_prior
 
 
 def _event_seed(random_seed: int, emissions: LogEmissionTensor) -> int:
@@ -243,11 +234,6 @@ def _farthest_point_subset(points: np.ndarray, max_points: int) -> np.ndarray:
     return points[np.asarray(selected, dtype=int)]
 
 
-def _sample_rows(rows: np.ndarray, n_samples: int, rng: np.random.Generator) -> np.ndarray:
-    indices = rng.integers(0, rows.shape[0], size=n_samples)
-    return np.asarray(rows[indices], dtype=float)
-
-
 def _update_filter_from_grid_likelihood(
     filter_,
     log_likelihood: np.ndarray,
@@ -267,12 +253,6 @@ def _update_filter_from_grid_likelihood(
     max_log = float(np.max(particle_log_likelihood[finite]))
     scaled = np.exp(np.clip(particle_log_likelihood - max_log, -745.0, 0.0))
     if position_proposal_probability > 0.0:
-        if not hasattr(filter_, "update_position_likelihood_with_proposal"):
-            raise ImportError(
-                "position proposal rejuvenation requires "
-                "pyrecest.filters.GoalConditionedReplayParticleFilter."
-                "update_position_likelihood_with_proposal from FlorianPfaff/PyRecEst#1928"
-            )
         update_log = filter_.update_position_likelihood_with_proposal(
             lambda _positions: scaled,
             position_proposal=bin_centers,

@@ -75,3 +75,4 @@ def test_state_space_modes_return_full_trajectory_posteriors():
         assert np.allclose(score.terminal_log_posterior, score.trajectory_log_posterior[-1])
         assert np.allclose(logsumexp(score.trajectory_log_posterior, axis=1), 0.0)
         assert score.diagnostics["state_space_trajectory_posterior"] == 1
+        assert score.diagnostics["state_space_observation_model"] == "sorted-spike-poisson"

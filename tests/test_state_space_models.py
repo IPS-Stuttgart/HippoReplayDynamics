@@ -78,3 +78,38 @@ def test_state_space_modes_return_full_trajectory_posteriors():
         assert np.allclose(logsumexp(score.trajectory_log_posterior, axis=1), 0.0)
         assert score.diagnostics["state_space_trajectory_posterior"] == 1
         assert score.diagnostics["state_space_observation_model"] == "sorted-spike-poisson"
+
+
+def test_state_space_momentum_can_reuse_external_candidate_support():
+    emissions = LogEmissionTensor(
+        log_likelihood=np.log(
+            np.array(
+                [
+                    [0.05, 0.05, 0.05, 0.85],
+                    [0.05, 0.05, 0.05, 0.85],
+                    [0.05, 0.05, 0.05, 0.85],
+                ]
+            )
+        ),
+        spike_counts=np.zeros((3, 1), dtype=int),
+        times=np.array([0.0, 0.003, 0.006]),
+        dt=0.003,
+        cell_ids=np.array([1]),
+        n_spikes=0,
+    )
+    centers = np.array([[0.0, 0.0], [1.0, 0.0], [2.0, 0.0], [3.0, 0.0]])
+    model = SortedSpikeStateSpaceReplayModel(
+        mode="momentum",
+        config=StateSpaceDecoderConfig(mode="momentum", momentum_candidate_top_k=1),
+    )
+    fixed_support = [np.array([0]), np.array([1]), np.array([2])]
+
+    default_score = model.score(emissions, centers)
+    fixed_score = model.score(emissions, centers, candidate_indices=fixed_support)
+
+    assert np.isfinite(fixed_score.log_likelihood)
+    assert not np.isclose(default_score.log_likelihood, fixed_score.log_likelihood)
+    assert fixed_score.diagnostics["state_space_fixed_candidate_support"] == 1
+    assert fixed_score.trajectory_log_posterior is not None
+    for time_index, expected_bin in enumerate((0, 1, 2)):
+        assert int(np.argmax(fixed_score.trajectory_log_posterior[time_index])) == expected_bin

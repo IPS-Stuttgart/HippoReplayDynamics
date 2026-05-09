@@ -1,0 +1,101 @@
+name: Prepare HippoReplayIMM dataset
+description: Restore, download, cache, and extract the shared HippoReplayIMM dataset archive.
+
+inputs:
+  dataset-url:
+    description: URL or OwnCloud base URL for the dataset archive.
+    required: true
+  cache-version:
+    description: Dataset cache version. Bump this to force a fresh cache.
+    required: false
+    default: v1
+  archive-path:
+    description: Workspace archive path used on GitHub-hosted runners.
+    required: false
+    default: data/dataset.zip
+  extract-dir:
+    description: Workspace directory where the dataset archive is extracted.
+    required: false
+    default: data
+
+outputs:
+  archive-path:
+    description: Resolved dataset archive path.
+    value: ${{ steps.resolve.outputs.archive-path }}
+  dataset-root:
+    description: Directory where the dataset archive was extracted.
+    value: ${{ steps.resolve.outputs.dataset-root }}
+  cache-hit:
+    description: Whether a local or Actions cache hit supplied the archive.
+    value: ${{ steps.resolve.outputs.local-cache-hit == 'true' || steps.restore.outputs.cache-hit == 'true' }}
+
+runs:
+  using: composite
+  steps:
+    - name: Resolve dataset paths
+      id: resolve
+      shell: bash
+      run: |
+        set -euo pipefail
+        archive_path="${{ inputs.archive-path }}"
+        dataset_root="${{ inputs.extract-dir }}"
+        if [ "${RUNNER_ENVIRONMENT:-}" = "self-hosted" ]; then
+          archive_path="${HOME}/.cache/datasets/hipporeplayimm/${{ inputs.cache-version }}/dataset.zip"
+          dataset_root="${GITHUB_WORKSPACE}/${{ inputs.extract-dir }}"
+        fi
+        mkdir -p "$(dirname "${archive_path}")" "${dataset_root}"
+        if [ -s "${archive_path}" ]; then
+          echo "local-cache-hit=true" >> "$GITHUB_OUTPUT"
+          echo "Dataset archive cache hit at ${archive_path}"
+        else
+          echo "local-cache-hit=false" >> "$GITHUB_OUTPUT"
+          echo "Dataset archive cache miss at ${archive_path}"
+        fi
+        echo "archive-path=${archive_path}" >> "$GITHUB_OUTPUT"
+        echo "dataset-root=${dataset_root}" >> "$GITHUB_OUTPUT"
+
+    - name: Restore dataset archive cache
+      id: restore
+      if: ${{ runner.environment != 'self-hosted' && steps.resolve.outputs.local-cache-hit != 'true' }}
+      uses: actions/cache/restore@v5
+      with:
+        path: ${{ steps.resolve.outputs.archive-path }}
+        key: hipporeplayimm-dataset-${{ runner.os }}-${{ inputs.cache-version }}
+
+    - name: Download dataset archive
+      if: ${{ steps.resolve.outputs.local-cache-hit != 'true' && (runner.environment == 'self-hosted' || steps.restore.outputs.cache-hit != 'true') }}
+      shell: bash
+      env:
+        DATA_FULL_URL: ${{ inputs.dataset-url }}
+        ARCHIVE_PATH: ${{ steps.resolve.outputs.archive-path }}
+      run: |
+        set -euo pipefail
+        if [ -z "${DATA_FULL_URL}" ]; then
+          echo "Dataset URL is required." >&2
+          exit 1
+        fi
+        mkdir -p "$(dirname "${ARCHIVE_PATH}")"
+        curl --fail --location --show-error --silent "${DATA_FULL_URL%/}/download" --output "${ARCHIVE_PATH}"
+
+    - name: Save dataset archive cache
+      if: ${{ runner.environment != 'self-hosted' && steps.resolve.outputs.local-cache-hit != 'true' && steps.restore.outputs.cache-hit != 'true' }}
+      uses: actions/cache/save@v5
+      continue-on-error: true
+      with:
+        path: ${{ steps.resolve.outputs.archive-path }}
+        key: hipporeplayimm-dataset-${{ runner.os }}-${{ inputs.cache-version }}
+
+    - name: Extract dataset archive
+      shell: bash
+      env:
+        ARCHIVE_PATH: ${{ steps.resolve.outputs.archive-path }}
+        DATASET_ROOT: ${{ steps.resolve.outputs.dataset-root }}
+      run: |
+        set -euo pipefail
+        if [ ! -s "${ARCHIVE_PATH}" ]; then
+          echo "Dataset archive is missing or empty: ${ARCHIVE_PATH}" >&2
+          exit 1
+        fi
+        mkdir -p "${DATASET_ROOT}"
+        unzip -oq "${ARCHIVE_PATH}" -d "${DATASET_ROOT}"
+        find "${DATASET_ROOT}" -maxdepth 3 -type d | sort | sed -n '1,80p'

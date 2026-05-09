@@ -137,40 +137,11 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -e .
 
-      - name: Restore dataset cache
-        id: dataset-cache
-        uses: actions/cache/restore@v5
+      - name: Prepare dataset
+        uses: ./.github/actions/prepare-dataset
         with:
-          path: data/dataset.zip
-          key: hipporeplayimm-dataset-${{ runner.os }}-v1
-
-      - name: Download dataset
-        if: ${{ steps.dataset-cache.outputs.cache-hit != 'true' }}
-        env:
-          DATA_FULL_URL: ${{ secrets.DATA_FULL_URL }}
-        run: |
-          set -euo pipefail
-          if [ -z "${DATA_FULL_URL}" ]; then
-            echo "Repository secret DATA_FULL_URL is not set." >&2
-            exit 1
-          fi
-          mkdir -p data
-          curl --fail --location --show-error --silent "${DATA_FULL_URL%/}/download" --output data/dataset.zip
-
-      - name: Save dataset cache
-        if: ${{ steps.dataset-cache.outputs.cache-hit != 'true' && hashFiles('data/dataset.zip') != '' }}
-        uses: actions/cache/save@v5
-        continue-on-error: true
-        with:
-          path: data/dataset.zip
-          key: ${{ steps.dataset-cache.outputs.cache-primary-key }}
-
-      - name: Extract dataset
-        run: |
-          set -euo pipefail
-          mkdir -p data
-          unzip -q data/dataset.zip -d data
-          find data -maxdepth 3 -type d | sort | sed -n '1,80p'
+          dataset-url: ${{ secrets.DATA_FULL_URL }}
+          cache-version: v1
 
       - name: Check requested session
         env:
@@ -260,40 +231,11 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -e .
 
-      - name: Restore dataset cache
-        id: dataset-cache
-        uses: actions/cache/restore@v5
+      - name: Prepare dataset
+        uses: ./.github/actions/prepare-dataset
         with:
-          path: data/dataset.zip
-          key: hipporeplayimm-dataset-${{ runner.os }}-v1
-
-      - name: Download dataset
-        if: ${{ steps.dataset-cache.outputs.cache-hit != 'true' }}
-        env:
-          DATA_FULL_URL: ${{ secrets.DATA_FULL_URL }}
-        run: |
-          set -euo pipefail
-          if [ -z "${DATA_FULL_URL}" ]; then
-            echo "Repository secret DATA_FULL_URL is not set." >&2
-            exit 1
-          fi
-          mkdir -p data
-          curl --fail --location --show-error --silent "${DATA_FULL_URL%/}/download" --output data/dataset.zip
-
-      - name: Save dataset cache
-        if: ${{ steps.dataset-cache.outputs.cache-hit != 'true' && hashFiles('data/dataset.zip') != '' }}
-        uses: actions/cache/save@v5
-        continue-on-error: true
-        with:
-          path: data/dataset.zip
-          key: ${{ steps.dataset-cache.outputs.cache-primary-key }}
-
-      - name: Extract dataset
-        run: |
-          set -euo pipefail
-          mkdir -p data
-          unzip -q data/dataset.zip -d data
-          find data -maxdepth 3 -type d | sort | sed -n '1,80p'
+          dataset-url: ${{ secrets.DATA_FULL_URL }}
+          cache-version: v1
 
       - name: Run project-native model-evidence benchmark
         env:
@@ -360,40 +302,11 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -e .
 
-      - name: Restore dataset cache
-        id: dataset-cache
-        uses: actions/cache/restore@v5
+      - name: Prepare dataset
+        uses: ./.github/actions/prepare-dataset
         with:
-          path: data/dataset.zip
-          key: hipporeplayimm-dataset-${{ runner.os }}-v1
-
-      - name: Download dataset
-        if: ${{ steps.dataset-cache.outputs.cache-hit != 'true' }}
-        env:
-          DATA_FULL_URL: ${{ secrets.DATA_FULL_URL }}
-        run: |
-          set -euo pipefail
-          if [ -z "${DATA_FULL_URL}" ]; then
-            echo "Repository secret DATA_FULL_URL is not set." >&2
-            exit 1
-          fi
-          mkdir -p data
-          curl --fail --location --show-error --silent "${DATA_FULL_URL%/}/download" --output data/dataset.zip
-
-      - name: Save dataset cache
-        if: ${{ steps.dataset-cache.outputs.cache-hit != 'true' && hashFiles('data/dataset.zip') != '' }}
-        uses: actions/cache/save@v5
-        continue-on-error: true
-        with:
-          path: data/dataset.zip
-          key: ${{ steps.dataset-cache.outputs.cache-primary-key }}
-
-      - name: Extract dataset
-        run: |
-          set -euo pipefail
-          mkdir -p data
-          unzip -q data/dataset.zip -d data
-          find data -maxdepth 3 -type d | sort | sed -n '1,80p'
+          dataset-url: ${{ secrets.DATA_FULL_URL }}
+          cache-version: v1
 
       - name: Run KD-aligned smoke model-evidence benchmark
         env:

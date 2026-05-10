@@ -1,0 +1,61 @@
+---
+name: Prepare Pfeiffer-Foster dataset cache
+
+on:
+  workflow_dispatch:
+    inputs:
+      runs_on_json:
+        description: JSON runs-on value, e.g. ["ubuntu-latest"] or ["self-hosted","linux","datasets"]
+        required: true
+        default: '["ubuntu-latest"]'
+      dataset_root:
+        description: Repository-relative dataset path used on GitHub-hosted runners
+        required: true
+        default: data/DataSetFromPfeifferFoster
+      session:
+        description: Session to validate after restore/download
+        required: true
+        default: Rat1/Open1
+      cache_version:
+        description: Dataset cache version suffix
+        required: true
+        default: v1
+      local_cache_root:
+        description: Optional persistent path for self-hosted runners
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+env:
+  DATASET_CACHE_KEY: hipporeplayimm-dataset-${{ runner.os }}-rclone-${{ inputs.cache_version }}
+
+jobs:
+  prepare-pfeiffer-foster-cache:
+    name: Prepare Pfeiffer-Foster dataset cache
+    runs-on: ${{ fromJson(inputs.runs_on_json) }}
+    timeout-minutes: 180
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Ensure Pfeiffer-Foster dataset
+        id: dataset
+        uses: ./.github/actions/ensure-pfeiffer-foster-dataset
+        with:
+          dataset-root: ${{ inputs.dataset_root }}
+          session: ${{ inputs.session }}
+          cache-key: ${{ env.DATASET_CACHE_KEY }}
+          local-cache-root: ${{ inputs.local_cache_root }}
+          webdav-url: ${{ secrets.PFEIFFERFOSTER_WEBDAV_URL }}
+          webdav-key: ${{ secrets.PFEIFFERFOSTER_DATA_KEY }}
+          webdav-password: ${{ secrets.PFEIFFERFOSTER_DATA_PASSWORD }}
+
+      - name: Report prepared dataset
+        run: |
+          set -euo pipefail
+          echo "Dataset root: ${{ steps.dataset.outputs.dataset-root }}"
+          echo "Dataset source: ${{ steps.dataset.outputs.source }}"
+          du -sh "${DATASET_ROOT}"

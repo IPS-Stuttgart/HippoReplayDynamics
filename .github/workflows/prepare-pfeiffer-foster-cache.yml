@@ -28,14 +28,13 @@ on:
 permissions:
   contents: read
 
-env:
-  DATASET_CACHE_KEY: hipporeplayimm-dataset-${{ runner.os }}-rclone-${{ inputs.cache_version }}
-
 jobs:
   prepare-pfeiffer-foster-cache:
     name: Prepare Pfeiffer-Foster dataset cache
     runs-on: ${{ fromJson(inputs.runs_on_json) }}
     timeout-minutes: 180
+    env:
+      DATASET_CACHE_KEY: hipporeplayimm-dataset-${{ runner.os }}-rclone-${{ inputs.cache_version }}
 
     steps:
       - name: Checkout repository

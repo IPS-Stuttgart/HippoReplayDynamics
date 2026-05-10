@@ -58,7 +58,18 @@ class StateSpaceReplayModel:
         elif self.config.mode != self.mode:
             self.config = replace(self.config, mode=self.mode)
 
-    def score(self, emissions: LogEmissionTensor, bin_centers: np.ndarray) -> EventScore:
+    def candidate_indices(self, emissions: LogEmissionTensor) -> list[np.ndarray]:
+        """Return the candidate support used by the pruned momentum recursion."""
+
+        assert self.config is not None
+        return [_top_candidate_indices(row, self.config.momentum_candidate_top_k) for row in emissions.log_likelihood]
+
+    def score(
+        self,
+        emissions: LogEmissionTensor,
+        bin_centers: np.ndarray,
+        candidate_indices: list[np.ndarray] | None = None,
+    ) -> EventScore:
         if emissions.n_time == 0:
             raise ValueError("emissions must contain at least one time bin")
         if emissions.n_bins != bin_centers.shape[0]:
@@ -95,17 +106,21 @@ class StateSpaceReplayModel:
             }
         else:
             transition_sigma_cm = _per_bin_sigma(self.config.momentum_sigma_cm_sqrt_s, emissions.dt)
+            candidates = self.candidate_indices(emissions) if candidate_indices is None else candidate_indices
+            _validate_candidate_indices(candidates, emissions.n_time, emissions.n_bins)
             logp, trajectory, masses = _score_momentum_candidates(
                 emissions,
                 bin_centers,
+                candidates,
                 sigma_cm=transition_sigma_cm,
                 initial_sigma_cm=_per_bin_sigma(self.config.momentum_initial_sigma_cm_sqrt_s, emissions.dt),
                 velocity_decay=self.config.momentum_velocity_decay,
-                top_k=self.config.momentum_candidate_top_k,
             )
             extra = {
                 "mean_candidate_log_mass": float(np.mean(masses)),
                 "state_space_momentum_candidate_top_k": int(self.config.momentum_candidate_top_k),
+                "state_space_momentum_candidate_support": "derived" if candidate_indices is None else "provided",
+                "state_space_momentum_trajectory_posterior": "smoothed_pair_marginal",
             }
 
         terminal = trajectory[-1]
@@ -263,17 +278,16 @@ def _apply_transition_backward(transition: csr_matrix | None, values: np.ndarray
 def _score_momentum_candidates(
     emissions: LogEmissionTensor,
     bin_centers: np.ndarray,
+    candidates: list[np.ndarray],
     *,
     sigma_cm: float,
     initial_sigma_cm: float,
     velocity_decay: float,
-    top_k: int,
 ) -> tuple[float, np.ndarray, list[float]]:
     if emissions.n_time == 1:
         logp, trajectory = _score_fragmented(emissions)
         return logp, trajectory, [0.0]
 
-    candidates = [_top_candidate_indices(row, top_k) for row in emissions.log_likelihood]
     masses = _candidate_log_masses(emissions.log_likelihood, candidates)
     log_pair = _init_pair_log_alpha(
         emissions.log_likelihood,
@@ -282,11 +296,7 @@ def _score_momentum_candidates(
         bin_centers,
         sigma_cm=initial_sigma_cm,
     )
-    trajectory = np.full((emissions.n_time, emissions.n_bins), LOG_ZERO, dtype=float)
-    first_pair = log_pair - logsumexp(log_pair)
-    trajectory[0, candidates[0]] = logsumexp(first_pair, axis=1)
-    trajectory[1, candidates[1]] = logsumexp(first_pair, axis=0)
-
+    pair_alphas = [log_pair]
     for time_index in range(2, emissions.n_time):
         log_pair = _advance_momentum_pair(
             log_pair,
@@ -298,10 +308,32 @@ def _score_momentum_candidates(
             sigma_cm=sigma_cm,
             velocity_decay=velocity_decay,
         )
-        current_pair = log_pair - logsumexp(log_pair)
-        trajectory[time_index, candidates[time_index]] = logsumexp(current_pair, axis=0)
+        pair_alphas.append(log_pair)
 
-    return float(logsumexp(log_pair)), trajectory, masses
+    logp = float(logsumexp(pair_alphas[-1]))
+    pair_betas = [np.zeros_like(pair_alphas[-1]) for _ in pair_alphas]
+    for pair_index in range(len(pair_alphas) - 2, -1, -1):
+        curr_time = pair_index + 2
+        pair_betas[pair_index] = _backward_momentum_pair(
+            pair_betas[pair_index + 1],
+            candidates[pair_index],
+            candidates[pair_index + 1],
+            candidates[curr_time],
+            emissions.log_likelihood[curr_time, candidates[curr_time]],
+            bin_centers,
+            sigma_cm=sigma_cm,
+            velocity_decay=velocity_decay,
+        )
+
+    trajectory = np.full((emissions.n_time, emissions.n_bins), LOG_ZERO, dtype=float)
+    for pair_index, (alpha, beta) in enumerate(zip(pair_alphas, pair_betas, strict=True)):
+        pair_log_posterior = alpha + beta - logp
+        if pair_index == 0:
+            trajectory[0, candidates[0]] = logsumexp(pair_log_posterior, axis=1)
+        trajectory[pair_index + 1, candidates[pair_index + 1]] = logsumexp(pair_log_posterior, axis=0)
+    for time_index in range(emissions.n_time):
+        trajectory[time_index] -= logsumexp(trajectory[time_index])
+    return logp, trajectory, masses
 
 
 def _top_candidate_indices(log_emission: np.ndarray, top_k: int) -> np.ndarray:
@@ -309,6 +341,19 @@ def _top_candidate_indices(log_emission: np.ndarray, top_k: int) -> np.ndarray:
         return np.arange(log_emission.shape[0], dtype=int)
     selected = np.argpartition(log_emission, -top_k)[-top_k:]
     return selected[np.argsort(log_emission[selected])[::-1]]
+
+
+def _validate_candidate_indices(candidates: list[np.ndarray], n_time: int, n_bins: int) -> None:
+    if len(candidates) != n_time:
+        raise ValueError("candidate_indices must contain one array per emission time bin")
+    for time_index, curr in enumerate(candidates):
+        arr = np.asarray(curr)
+        if arr.ndim != 1:
+            raise ValueError(f"candidate_indices[{time_index}] must be one-dimensional")
+        if arr.size == 0:
+            raise ValueError(f"candidate_indices[{time_index}] must not be empty")
+        if np.any((arr < 0) | (arr >= n_bins)):
+            raise ValueError(f"candidate_indices[{time_index}] contains an out-of-range bin")
 
 
 def _candidate_log_masses(log_likelihood: np.ndarray, candidates: list[np.ndarray]) -> list[float]:
@@ -353,6 +398,32 @@ def _advance_momentum_pair(
         log_kernel = _pairwise_gaussian_log_prob(predictions, coords_curr, sigma_cm)
         log_kernel -= logsumexp(log_kernel, axis=1, keepdims=True)
         output[prev_col] = logsumexp(log_pair[:, prev_col][:, None] + log_kernel, axis=0) + curr_emission
+    return output
+
+
+def _backward_momentum_pair(
+    next_beta: np.ndarray,
+    prev_prev: np.ndarray,
+    prev: np.ndarray,
+    curr: np.ndarray,
+    curr_emission: np.ndarray,
+    bin_centers: np.ndarray,
+    *,
+    sigma_cm: float,
+    velocity_decay: float,
+) -> np.ndarray:
+    coords_prev_prev = bin_centers[prev_prev]
+    coords_prev = bin_centers[prev]
+    coords_curr = bin_centers[curr]
+    output = np.full((len(prev_prev), len(prev)), LOG_ZERO, dtype=float)
+    for prev_col in range(len(prev)):
+        predictions = coords_prev[prev_col][None, :] + velocity_decay * (
+            coords_prev[prev_col][None, :] - coords_prev_prev
+        )
+        log_kernel = _pairwise_gaussian_log_prob(predictions, coords_curr, sigma_cm)
+        log_kernel -= logsumexp(log_kernel, axis=1, keepdims=True)
+        continuation = curr_emission[None, :] + next_beta[prev_col][None, :]
+        output[:, prev_col] = logsumexp(log_kernel + continuation, axis=1)
     return output
 
 

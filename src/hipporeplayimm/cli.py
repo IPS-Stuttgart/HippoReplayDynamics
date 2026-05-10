@@ -5,16 +5,18 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 
 from .benchmarks import BenchmarkConfig, _build_models, bootstrap_delta_ci, run_open_field_benchmark
 from .data import load_open_field_sessions
-from .encoding import EmissionConfig, build_emissions, fit_place_field_encoding
+from .encoding import EmissionConfig, EncodingConfig, build_emissions, fit_place_field_encoding
 from .ground_truth import (
     GroundTruthConfig,
     compare_scores_to_ground_truth,
     generate_behavioral_ground_truth,
 )
+from .position_validation import PositionDecodingConfig, run_position_decoding_validation
 from .sweeps import (
     PyRecEstSweepConfig,
     pareto_aggregate_sweep_summary,
@@ -51,6 +53,7 @@ def main(argv: list[str] | None = None) -> int:
     decode_parser.add_argument("--event-id", type=int, required=True)
     decode_parser.add_argument("--candidate-top-k", type=int, default=64)
     decode_parser.add_argument("--time-bin-ms", type=float, default=20.0)
+    decode_parser.add_argument("--output")
     decode_parser.add_argument(
         "--models",
         default="random,stationary,diffusion,momentum,imm",
@@ -77,6 +80,19 @@ def main(argv: list[str] | None = None) -> int:
     compare_parser.add_argument("--visit-radius-cm", type=float, default=10.0)
     compare_parser.add_argument("--min-dwell-s", type=float, default=0.2)
     compare_parser.add_argument("--future-horizon-s", type=float, default=30.0)
+
+    validate_parser = subparsers.add_parser("validate-position")
+    validate_parser.add_argument("root")
+    validate_parser.add_argument("--output", required=True)
+    validate_parser.add_argument("--session")
+    validate_parser.add_argument("--decode-bin-s", type=float, default=0.25)
+    validate_parser.add_argument("--n-folds", type=int, default=5)
+    validate_parser.add_argument("--max-windows", type=int)
+    validate_parser.add_argument("--random-seed", type=int, default=1)
+    validate_parser.add_argument("--min-spikes-per-window", type=int, default=0)
+    validate_parser.add_argument("--bin-size-cm", type=float, default=4.0)
+    validate_parser.add_argument("--smoothing-sigma-bins", type=float, default=1.5)
+    validate_parser.add_argument("--min-speed-cm-s", type=float, default=5.0)
 
     sweep_parser = subparsers.add_parser("sweep-pyrecest")
     sweep_parser.add_argument("root")
@@ -133,6 +149,8 @@ def main(argv: list[str] | None = None) -> int:
         return _ground_truth(args)
     if args.command == "compare-ground-truth":
         return _compare_ground_truth(args)
+    if args.command == "validate-position":
+        return _validate_position(args)
     if args.command == "sweep-pyrecest":
         return _sweep_pyrecest(args)
     raise ValueError(args.command)
@@ -149,12 +167,33 @@ def _inspect(root: str) -> int:
             "excitatory_cells": session.excitatory_neurons.shape[0],
             "spike_mark_features": 0 if session.spike_marks is None else session.spike_marks.n_features,
             "spike_mark_source": "" if session.spike_marks is None else f"{session.spike_marks.source_file}:{session.spike_marks.source_variable}",
+            "clusterless_mark_likelihood": "not_implemented",
             "ripples": session.ripple_count,
             "run_ripples": session.ripple_indices_in_run().shape[0],
         }
         for session in sessions
     ]
     print(pd.DataFrame(rows).to_string(index=False))
+    return 0
+
+
+def _validate_position(args: argparse.Namespace) -> int:
+    config = PositionDecodingConfig(
+        encoding=EncodingConfig(
+            bin_size_cm=args.bin_size_cm,
+            smoothing_sigma_bins=args.smoothing_sigma_bins,
+            min_speed_cm_s=args.min_speed_cm_s,
+        ),
+        decode_bin_s=args.decode_bin_s,
+        n_folds=args.n_folds,
+        max_windows_per_session=args.max_windows,
+        random_seed=args.random_seed,
+        min_spikes_per_window=args.min_spikes_per_window,
+        session=args.session,
+    )
+    result = run_position_decoding_validation(args.root, config)
+    result.write(args.output)
+    print(result.summary.to_string(index=False))
     return 0
 
 
@@ -197,6 +236,7 @@ def _decode_event(args: argparse.Namespace) -> int:
         models=_parse_models(args.models),
         **_pyrecest_scalar_kwargs(args),
     )
+    posterior_artifacts: list[tuple[str, object]] = []
     for model in _build_models(config, session=session).values():
         score = model.score(emissions, encoding.bin_centers)
         rows.append(
@@ -207,7 +247,29 @@ def _decode_event(args: argparse.Namespace) -> int:
                 **score.diagnostics,
             }
         )
-    print(pd.DataFrame(rows).to_string(index=False))
+        if score.trajectory_log_posterior is not None:
+            posterior_artifacts.append((score.model_name, score.trajectory_log_posterior))
+    frame = pd.DataFrame(rows)
+    print(frame.to_string(index=False))
+    if args.output:
+        output = Path(args.output)
+        output.mkdir(parents=True, exist_ok=True)
+        frame.to_csv(output / "event_scores.csv", index=False)
+        safe_session = args.session.replace("/", "_").replace("\\", "_")
+        for model_name, trajectory_log_posterior in posterior_artifacts:
+            safe_model = model_name.replace("/", "_").replace("\\", "_")
+            np.savez_compressed(
+                output / f"{safe_session}_event{int(args.event_id):04d}_{safe_model}_posterior.npz",
+                log_posteriors=np.asarray(trajectory_log_posterior, dtype=float),
+                trajectory_log_posteriors=np.asarray(trajectory_log_posterior, dtype=float),
+                times=emissions.times,
+                bin_centers=encoding.bin_centers,
+                x_edges=encoding.x_edges,
+                y_edges=encoding.y_edges,
+                grid_shape=np.asarray(encoding.grid_shape, dtype=int),
+                cell_ids=encoding.cell_ids,
+                spike_counts=emissions.spike_counts,
+            )
     return 0
 
 

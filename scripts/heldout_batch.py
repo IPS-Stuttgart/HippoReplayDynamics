@@ -10,10 +10,16 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from hipporeplayimm.benchmarks import BenchmarkConfig, _add_relative_metrics, _build_models, _split_cells
+from hipporeplayimm.benchmarks import (
+    BenchmarkConfig,
+    _add_relative_metrics,
+    _build_models,
+    _score_train_joint_model,
+    _session_mark_diagnostics,
+    _split_cells,
+)
 from hipporeplayimm.data import load_replay_session
 from hipporeplayimm.encoding import EmissionConfig, build_emissions, fit_place_field_encoding
-from hipporeplayimm.models import CandidateKinematicModel
 
 _REQUIRED_FILES = ("Position_Data.mat", "Ripple_Events.mat", "Spike_Data.mat", "Epochs.mat")
 
@@ -65,13 +71,12 @@ def score_event_model(
     if train_emissions.n_time == 0 or joint_emissions.n_time == 0:
         raise ValueError("Event produced zero emission bins.")
 
-    if isinstance(model, CandidateKinematicModel):
-        candidates = model.candidate_indices(train_emissions)
-        train_score = model.score(train_emissions, bin_centers, candidate_indices=candidates)
-        joint_score = model.score(joint_emissions, bin_centers, candidate_indices=candidates)
-    else:
-        train_score = model.score(train_emissions, bin_centers)
-        joint_score = model.score(joint_emissions, bin_centers)
+    train_score, joint_score = _score_train_joint_model(
+        model,
+        train_emissions,
+        joint_emissions,
+        bin_centers,
+    )
 
     heldout = float(joint_score.log_likelihood - train_score.log_likelihood)
     test_spikes = int(joint_emissions.n_spikes - train_emissions.n_spikes)
@@ -81,7 +86,8 @@ def score_event_model(
         "session": session.session_id,
         "event_index": int(event_id),
         "event_id": int(event_id),
-        "model": model_name,
+        "model": joint_score.model_name,
+        "requested_model": model_name,
         "heldout_log_likelihood": heldout,
         "heldout_log_likelihood_per_spike": heldout / denom,
         "heldout_bits_per_spike": heldout / np.log(2.0) / denom,
@@ -92,6 +98,7 @@ def score_event_model(
         "joint_spikes": int(joint_emissions.n_spikes),
         "n_time": int(train_emissions.n_time),
         "error": "",
+        **_session_mark_diagnostics(session),
     }
     row.update({f"diagnostic_{key}": value for key, value in joint_score.diagnostics.items()})
     return row

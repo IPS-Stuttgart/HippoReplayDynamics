@@ -111,28 +111,25 @@ def _score_session(session: ReplaySession, config: BenchmarkConfig) -> list[dict
         if train_emissions.n_time == 0 or joint_emissions.n_time == 0:
             continue
         for model_name, model in model_objects.items():
-            if isinstance(model, CandidateKinematicModel):
-                candidates = model.candidate_indices(train_emissions)
-                train_score = model.score(train_emissions, encoding.bin_centers, candidate_indices=candidates)
-                joint_score = model.score(joint_emissions, encoding.bin_centers, candidate_indices=candidates)
-            elif isinstance(model, SortedSpikeStateSpaceReplayModel) and model.mode == "momentum":
-                candidates = model.candidate_indices(train_emissions)
-                train_score = model.score(train_emissions, encoding.bin_centers, candidate_indices=candidates)
-                joint_score = model.score(joint_emissions, encoding.bin_centers, candidate_indices=candidates)
-            else:
-                train_score = model.score(train_emissions, encoding.bin_centers)
-                joint_score = model.score(joint_emissions, encoding.bin_centers)
+            train_score, joint_score = _score_train_joint_model(
+                model,
+                train_emissions,
+                joint_emissions,
+                encoding.bin_centers,
+            )
             heldout = joint_score.log_likelihood - train_score.log_likelihood
             rows.append(
                 {
                     "session": session.session_id,
                     "event_index": int(event_index),
-                    "model": model_name,
+                    "model": joint_score.model_name,
+                    "requested_model": model_name,
                     "heldout_log_likelihood": float(heldout),
                     "joint_log_likelihood": float(joint_score.log_likelihood),
                     "train_log_likelihood": float(train_score.log_likelihood),
                     "test_spikes": int(joint_emissions.n_spikes - train_emissions.n_spikes),
                     "n_time": int(train_emissions.n_time),
+                    **_session_mark_diagnostics(session),
                     **{
                         f"diagnostic_{key}": value
                         for key, value in joint_score.diagnostics.items()
@@ -140,6 +137,24 @@ def _score_session(session: ReplaySession, config: BenchmarkConfig) -> list[dict
                 }
             )
     return rows
+
+
+def _score_train_joint_model(model, train_emissions, joint_emissions, bin_centers):
+    if hasattr(model, "candidate_indices"):
+        candidates = model.candidate_indices(train_emissions)
+        train_score = model.score(train_emissions, bin_centers, candidate_indices=candidates)
+        joint_score = model.score(joint_emissions, bin_centers, candidate_indices=candidates)
+        return train_score, joint_score
+    return model.score(train_emissions, bin_centers), model.score(joint_emissions, bin_centers)
+
+
+def _session_mark_diagnostics(session: ReplaySession) -> dict[str, object]:
+    marks = session.spike_marks
+    return {
+        "spike_mark_features": 0 if marks is None else marks.n_features,
+        "spike_mark_source": "" if marks is None else f"{marks.source_file}:{marks.source_variable}",
+        "clusterless_mark_likelihood_available": False,
+    }
 
 
 def _event_indices(session: ReplaySession, config: BenchmarkConfig) -> np.ndarray:

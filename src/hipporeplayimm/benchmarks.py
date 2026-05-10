@@ -140,7 +140,10 @@ def _score_session(session: ReplaySession, config: BenchmarkConfig) -> list[dict
 
 
 def _score_train_joint_model(model, train_emissions, joint_emissions, bin_centers):
-    if hasattr(model, "candidate_indices"):
+    candidate_aware = isinstance(model, CandidateKinematicModel) or (
+        isinstance(model, SortedSpikeStateSpaceReplayModel) and model.mode == "momentum"
+    )
+    if candidate_aware:
         candidates = model.candidate_indices(train_emissions)
         train_score = model.score(train_emissions, bin_centers, candidate_indices=candidates)
         joint_score = model.score(joint_emissions, bin_centers, candidate_indices=candidates)
@@ -149,7 +152,7 @@ def _score_train_joint_model(model, train_emissions, joint_emissions, bin_center
 
 
 def _session_mark_diagnostics(session: ReplaySession) -> dict[str, object]:
-    marks = session.spike_marks
+    marks = getattr(session, "spike_marks", None)
     return {
         "spike_mark_features": 0 if marks is None else marks.n_features,
         "spike_mark_source": "" if marks is None else f"{marks.source_file}:{marks.source_variable}",

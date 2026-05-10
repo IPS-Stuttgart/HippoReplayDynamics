@@ -33,8 +33,6 @@ jobs:
     name: Prepare Pfeiffer-Foster dataset cache
     runs-on: ${{ fromJson(inputs.runs_on_json) }}
     timeout-minutes: 180
-    env:
-      DATASET_CACHE_KEY: hipporeplayimm-dataset-${{ runner.os }}-rclone-${{ inputs.cache_version }}
 
     steps:
       - name: Checkout repository
@@ -46,7 +44,7 @@ jobs:
         with:
           dataset-root: ${{ inputs.dataset_root }}
           session: ${{ inputs.session }}
-          cache-key: ${{ env.DATASET_CACHE_KEY }}
+          cache-key: hipporeplayimm-dataset-${{ runner.os }}-rclone-${{ inputs.cache_version }}
           local-cache-root: ${{ inputs.local_cache_root }}
           webdav-url: ${{ secrets.PFEIFFERFOSTER_WEBDAV_URL }}
           webdav-key: ${{ secrets.PFEIFFERFOSTER_DATA_KEY }}

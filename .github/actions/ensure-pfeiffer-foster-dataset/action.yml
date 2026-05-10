@@ -1,0 +1,157 @@
+---
+name: Ensure Pfeiffer-Foster dataset
+description: Restore, download, or reuse a local self-hosted Pfeiffer-Foster dataset cache.
+
+inputs:
+  dataset-root:
+    description: Repository-relative dataset path used on GitHub-hosted runners.
+    required: true
+  session:
+    description: Session to validate, e.g. Rat1/Open1. Leave empty to validate any session.
+    required: false
+    default: Rat1/Open1
+  cache-key:
+    description: GitHub Actions cache key for the normalized Pfeiffer-Foster dataset.
+    required: true
+  local-cache-root:
+    description: Persistent dataset path for self-hosted runners. Empty uses a repository-specific default under $HOME/github-runner/.cache/datasets.
+    required: false
+    default: ""
+  webdav-url:
+    description: OwnCloud public WebDAV endpoint.
+    required: true
+  webdav-key:
+    description: OwnCloud public share key.
+    required: true
+  webdav-password:
+    description: OwnCloud public share password.
+    required: true
+
+outputs:
+  dataset-root:
+    description: Dataset path selected for subsequent workflow steps.
+    value: ${{ steps.resolve.outputs.dataset-root }}
+  cache-hit:
+    description: true when a local self-hosted cache or GitHub Actions cache was used.
+    value: ${{ steps.finish.outputs.cache-hit }}
+  source:
+    description: local, github-cache, or download.
+    value: ${{ steps.finish.outputs.source }}
+
+runs:
+  using: composite
+  steps:
+    - name: Resolve dataset target path
+      id: resolve
+      shell: bash
+      run: |
+        set -euo pipefail
+        repo_dataset_root='${{ inputs.dataset-root }}'
+        local_cache_root='${{ inputs.local-cache-root }}'
+        if [ '${{ runner.environment }}' = 'self-hosted' ]; then
+          if [ -z "${local_cache_root}" ]; then
+            local_cache_root="$HOME/github-runner/.cache/datasets/hipporeplayimm/pfeiffer-foster"
+          fi
+          dataset_root="${local_cache_root}"
+        else
+          dataset_root="${repo_dataset_root}"
+        fi
+        mkdir -p "$(dirname "${dataset_root}")"
+        echo "dataset-root=${dataset_root}" >> "$GITHUB_OUTPUT"
+        echo "DATASET_ROOT=${dataset_root}" >> "$GITHUB_ENV"
+        echo "Using Pfeiffer/Foster dataset root: ${dataset_root}"
+
+    - name: Check local self-hosted dataset cache
+      id: local-cache
+      if: ${{ runner.environment == 'self-hosted' }}
+      shell: bash
+      env:
+        DATASET_ROOT: ${{ steps.resolve.outputs.dataset-root }}
+        SESSION: ${{ inputs.session }}
+        ACTION_PATH: ${{ github.action_path }}
+      run: |
+        set -euo pipefail
+        if python "${ACTION_PATH}/validate_dataset.py" \
+          --dataset-root "${DATASET_ROOT}" \
+          --session "${SESSION}"; then
+          echo "hit=true" >> "$GITHUB_OUTPUT"
+          echo "Self-hosted local dataset cache is valid: ${DATASET_ROOT}"
+        else
+          echo "hit=false" >> "$GITHUB_OUTPUT"
+          echo "No valid self-hosted local dataset cache at ${DATASET_ROOT}"
+        fi
+
+    - name: Restore dataset from GitHub Actions cache
+      id: github-cache
+      if: ${{ steps.local-cache.outputs.hit != 'true' }}
+      uses: actions/cache/restore@v5
+      with:
+        path: ${{ steps.resolve.outputs.dataset-root }}
+        key: ${{ inputs.cache-key }}
+
+    - name: Validate restored dataset cache
+      if: ${{ steps.local-cache.outputs.hit != 'true' && steps.github-cache.outputs.cache-hit == 'true' }}
+      shell: bash
+      env:
+        DATASET_ROOT: ${{ steps.resolve.outputs.dataset-root }}
+        SESSION: ${{ inputs.session }}
+        ACTION_PATH: ${{ github.action_path }}
+      run: |
+        set -euo pipefail
+        python "${ACTION_PATH}/validate_dataset.py" \
+          --dataset-root "${DATASET_ROOT}" \
+          --session "${SESSION}" \
+          --write-manifest
+        find "${DATASET_ROOT}" -maxdepth 3 -type d | sort | sed -n '1,80p'
+
+    - name: Download Pfeiffer-Foster dataset
+      if: ${{ steps.local-cache.outputs.hit != 'true' && steps.github-cache.outputs.cache-hit != 'true' }}
+      uses: ./.github/actions/download-pfeiffer-foster
+      with:
+        dataset-root: ${{ steps.resolve.outputs.dataset-root }}
+        webdav-url: ${{ inputs.webdav-url }}
+        webdav-key: ${{ inputs.webdav-key }}
+        webdav-password: ${{ inputs.webdav-password }}
+
+    - name: Validate downloaded dataset
+      if: ${{ steps.local-cache.outputs.hit != 'true' && steps.github-cache.outputs.cache-hit != 'true' }}
+      shell: bash
+      env:
+        DATASET_ROOT: ${{ steps.resolve.outputs.dataset-root }}
+        SESSION: ${{ inputs.session }}
+        ACTION_PATH: ${{ github.action_path }}
+      run: |
+        set -euo pipefail
+        python "${ACTION_PATH}/validate_dataset.py" \
+          --dataset-root "${DATASET_ROOT}" \
+          --session "${SESSION}" \
+          --write-manifest
+        find "${DATASET_ROOT}" -maxdepth 3 -type d | sort | sed -n '1,80p'
+
+    - name: Save dataset to GitHub Actions cache
+      if: ${{ steps.local-cache.outputs.hit != 'true' && steps.github-cache.outputs.cache-hit != 'true' }}
+      uses: actions/cache/save@v5
+      continue-on-error: true
+      with:
+        path: ${{ steps.resolve.outputs.dataset-root }}
+        key: ${{ inputs.cache-key }}
+
+    - name: Finalize dataset selection
+      id: finish
+      shell: bash
+      run: |
+        set -euo pipefail
+        if [ '${{ steps.local-cache.outputs.hit }}' = 'true' ]; then
+          source=local
+          hit=true
+        elif [ '${{ steps.github-cache.outputs.cache-hit }}' = 'true' ]; then
+          source=github-cache
+          hit=true
+        else
+          source=download
+          hit=false
+        fi
+        echo "source=${source}" >> "$GITHUB_OUTPUT"
+        echo "cache-hit=${hit}" >> "$GITHUB_OUTPUT"
+        echo "Pfeiffer/Foster dataset source: ${source}"
+        echo "Pfeiffer/Foster dataset root: ${{ steps.resolve.outputs.dataset-root }}"

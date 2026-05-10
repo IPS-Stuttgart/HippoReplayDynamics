@@ -6,6 +6,10 @@ inputs:
   dataset-root:
     description: Directory where DataSetFromPfeifferFoster should be available.
     required: true
+  local-cache-root:
+    description: Persistent dataset path for self-hosted runners. Empty uses $HOME/github-runner/.cache/datasets/hipporeplayimm/pfeiffer-foster.
+    required: false
+    default: ""
   webdav-url:
     description: OwnCloud public WebDAV endpoint.
     required: true
@@ -19,7 +23,65 @@ inputs:
 runs:
   using: composite
   steps:
+    - name: Check self-hosted local dataset cache
+      id: local-cache
+      shell: bash
+      env:
+        DATASET_ROOT: ${{ inputs.dataset-root }}
+        INPUT_LOCAL_CACHE_ROOT: ${{ inputs.local-cache-root }}
+        RUNNER_ENVIRONMENT: ${{ runner.environment }}
+      run: |
+        set -euo pipefail
+
+        has_valid_session() {
+          local root="$1"
+          shopt -s nullglob
+          local session
+          for session in "${root}"/Rat*/Open*; do
+            if [ -f "${session}/Position_Data.mat" ] && \
+               [ -f "${session}/Ripple_Events.mat" ] && \
+               [ -f "${session}/Spike_Data.mat" ] && \
+               [ -f "${session}/Epochs.mat" ]; then
+              return 0
+            fi
+          done
+          return 1
+        }
+
+        if [ "${RUNNER_ENVIRONMENT}" != "self-hosted" ]; then
+          echo "hit=false" >> "$GITHUB_OUTPUT"
+          echo "local-cache-root=" >> "$GITHUB_OUTPUT"
+          exit 0
+        fi
+
+        local_cache_root="${INPUT_LOCAL_CACHE_ROOT}"
+        if [ -z "${local_cache_root}" ]; then
+          local_cache_root="$HOME/github-runner/.cache/datasets/hipporeplayimm/pfeiffer-foster"
+        fi
+        echo "local-cache-root=${local_cache_root}" >> "$GITHUB_OUTPUT"
+
+        if has_valid_session "${local_cache_root}"; then
+          echo "hit=true" >> "$GITHUB_OUTPUT"
+          echo "Using self-hosted Pfeiffer/Foster dataset cache: ${local_cache_root}"
+          case "${DATASET_ROOT}" in
+            ""|"."|"/")
+              echo "Refusing unsafe dataset-root: '${DATASET_ROOT}'" >&2
+              exit 1
+              ;;
+          esac
+          if [ "$(realpath -m "${DATASET_ROOT}")" != "$(realpath -m "${local_cache_root}")" ]; then
+            rm -rf "${DATASET_ROOT}"
+            mkdir -p "${DATASET_ROOT}"
+            cp -a --reflink=auto "${local_cache_root}/." "${DATASET_ROOT}/"
+          fi
+          find "${DATASET_ROOT}" -maxdepth 3 -type d | sort | sed -n '1,80p'
+        else
+          echo "hit=false" >> "$GITHUB_OUTPUT"
+          echo "No valid self-hosted Pfeiffer/Foster dataset cache at ${local_cache_root}"
+        fi
+
     - name: Install rclone without sudo
+      if: ${{ steps.local-cache.outputs.hit != 'true' }}
       shell: bash
       env:
         ACTION_PATH: ${{ github.action_path }}
@@ -36,6 +98,7 @@ runs:
         rclone version
 
     - name: Download dataset via rclone
+      if: ${{ steps.local-cache.outputs.hit != 'true' }}
       shell: bash
       env:
         ACTION_PATH: ${{ github.action_path }}
@@ -78,3 +141,25 @@ runs:
         python "${ACTION_PATH}/normalize_dataset.py"
 
         find "${DATASET_ROOT}" -maxdepth 3 -type d | sort | sed -n '1,80p'
+
+    - name: Persist self-hosted local dataset cache
+      if: ${{ steps.local-cache.outputs.hit != 'true' && runner.environment == 'self-hosted' }}
+      shell: bash
+      env:
+        DATASET_ROOT: ${{ inputs.dataset-root }}
+        LOCAL_CACHE_ROOT: ${{ steps.local-cache.outputs.local-cache-root }}
+      run: |
+        set -euo pipefail
+        if [ -z "${LOCAL_CACHE_ROOT}" ]; then
+          exit 0
+        fi
+        if [ "$(realpath -m "${DATASET_ROOT}")" = "$(realpath -m "${LOCAL_CACHE_ROOT}")" ]; then
+          exit 0
+        fi
+        tmp_cache="${LOCAL_CACHE_ROOT}.tmp-${GITHUB_RUN_ID:-manual}"
+        rm -rf "${tmp_cache}"
+        mkdir -p "${tmp_cache}"
+        cp -a --reflink=auto "${DATASET_ROOT}/." "${tmp_cache}/"
+        rm -rf "${LOCAL_CACHE_ROOT}"
+        mv "${tmp_cache}" "${LOCAL_CACHE_ROOT}"
+        echo "Persisted self-hosted Pfeiffer/Foster dataset cache at ${LOCAL_CACHE_ROOT}"

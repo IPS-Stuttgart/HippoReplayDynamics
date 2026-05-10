@@ -20,12 +20,13 @@ from hipporeplayimm.benchmarks import (
     BenchmarkResult,
     _add_relative_metrics,
     _build_models,
+    _score_train_joint_model,
+    _session_mark_diagnostics,
     _split_cells,
     bootstrap_delta_ci,
 )
 from hipporeplayimm.data import load_replay_session
 from hipporeplayimm.encoding import EmissionConfig, build_emissions, fit_place_field_encoding
-from hipporeplayimm.models import CandidateKinematicModel
 
 
 _REQUIRED_SESSION_FILES = (
@@ -145,22 +146,12 @@ def score_explicit_events(args: argparse.Namespace) -> BenchmarkResult:
         for model_name, model in model_objects.items():
             start_time = time.perf_counter()
             try:
-                if isinstance(model, CandidateKinematicModel):
-                    candidates = model.candidate_indices(train_emissions)
-                    train_score = model.score(
-                        train_emissions,
-                        encoding.bin_centers,
-                        candidate_indices=candidates,
-                    )
-                    joint_score = model.score(
-                        joint_emissions,
-                        encoding.bin_centers,
-                        candidate_indices=candidates,
-                    )
-                else:
-                    train_score = model.score(train_emissions, encoding.bin_centers)
-                    joint_score = model.score(joint_emissions, encoding.bin_centers)
-
+                train_score, joint_score = _score_train_joint_model(
+                    model,
+                    train_emissions,
+                    joint_emissions,
+                    encoding.bin_centers,
+                )
                 runtime_s = time.perf_counter() - start_time
                 heldout = joint_score.log_likelihood - train_score.log_likelihood
                 test_spikes = int(joint_emissions.n_spikes - train_emissions.n_spikes)
@@ -171,7 +162,8 @@ def score_explicit_events(args: argparse.Namespace) -> BenchmarkResult:
                         "status": "success",
                         "session": session.session_id,
                         "event_index": int(event_id),
-                        "model": model_name,
+                        "model": joint_score.model_name,
+                        "requested_model": model_name,
                         "heldout_log_likelihood": float(heldout),
                         "heldout_bits_per_spike": bits_per_spike,
                         "joint_log_likelihood": float(joint_score.log_likelihood),
@@ -180,6 +172,7 @@ def score_explicit_events(args: argparse.Namespace) -> BenchmarkResult:
                         "n_time": int(train_emissions.n_time),
                         "runtime_s": runtime_s,
                         "error": "",
+                        **_session_mark_diagnostics(session),
                         **{
                             f"diagnostic_{key}": value
                             for key, value in joint_score.diagnostics.items()

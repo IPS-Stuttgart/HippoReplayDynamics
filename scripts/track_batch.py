@@ -14,7 +14,7 @@ from hipporeplayimm.benchmarks import BenchmarkConfig, _build_models
 from hipporeplayimm.data import load_replay_session
 from hipporeplayimm.encoding import EmissionConfig, build_emissions, fit_place_field_encoding
 
-from track_event import _session_path, _trajectory_from_prefix_scores, _validate_session_files
+from track_event import _TRACK_MODEL_CHOICES, _session_path, _trajectory_from_prefix_scores, _validate_session_files
 
 
 def parse_event_ids(spec: str) -> list[int]:
@@ -176,6 +176,7 @@ def run_batch(args: argparse.Namespace) -> Path:
         )
         for model_name in args.models:
             model = models[model_name]
+            output_model_name = str(getattr(model, "name", model_name))
             start_time = time.perf_counter()
             try:
                 trajectory, log_posteriors = _trajectory_from_prefix_scores(
@@ -184,7 +185,7 @@ def run_batch(args: argparse.Namespace) -> Path:
                     encoding.bin_centers,
                 )
                 runtime_s = time.perf_counter() - start_time
-                safe_model = _safe_name(model_name)
+                safe_model = _safe_name(output_model_name)
                 stem = f"{safe_session}_event{int(event_id):04d}_{safe_model}"
                 csv_path = trajectory_dir / f"{stem}_trajectory.csv"
                 npz_path = posterior_dir / f"{stem}_posterior.npz"
@@ -199,12 +200,13 @@ def run_batch(args: argparse.Namespace) -> Path:
                     grid_shape=np.asarray(encoding.grid_shape, dtype=int),
                     cell_ids=encoding.cell_ids,
                     spike_counts=emissions.spike_counts,
+                    trajectory_log_posteriors=log_posteriors,
                 )
                 rows.append(
                     _summary_row(
                         session=args.session,
                         event_id=event_id,
-                        model_name=model_name,
+                        model_name=output_model_name,
                         trajectory=trajectory,
                         runtime_s=runtime_s,
                         csv_path=csv_path,
@@ -245,15 +247,7 @@ def main() -> int:
         "--models",
         nargs="+",
         default=["stationary", "diffusion", "momentum", "imm"],
-        choices=(
-            "random",
-            "stationary",
-            "diffusion",
-            "momentum",
-            "imm",
-            "pyrecest-goal-particle",
-            "pyrecest-goal-particle-imm",
-        ),
+        choices=_TRACK_MODEL_CHOICES,
     )
     parser.add_argument("--candidate-top-k", default=64, type=int)
     parser.add_argument("--pyrecest-particles", default=512, type=int)

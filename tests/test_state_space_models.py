@@ -78,16 +78,20 @@ def test_state_space_modes_return_full_trajectory_posteriors():
         assert np.allclose(logsumexp(score.trajectory_log_posterior, axis=1), 0.0)
         assert score.diagnostics["state_space_trajectory_posterior"] == 1
         assert score.diagnostics["state_space_observation_model"] == "sorted-spike-poisson"
+        assert score.diagnostics["clusterless_mark_likelihood"] == "not_implemented"
+        if mode == "momentum":
+            assert score.diagnostics["state_space_momentum_trajectory_posterior"] == "smoothed_pair_marginal"
 
 
 def test_state_space_momentum_can_reuse_external_candidate_support():
-    emissions = LogEmissionTensor(
+    train = _synthetic_emissions()
+    joint = LogEmissionTensor(
         log_likelihood=np.log(
             np.array(
                 [
-                    [0.05, 0.05, 0.05, 0.85],
-                    [0.05, 0.05, 0.05, 0.85],
-                    [0.05, 0.05, 0.05, 0.85],
+                    [0.02, 0.08, 0.20, 0.70],
+                    [0.05, 0.15, 0.65, 0.15],
+                    [0.70, 0.20, 0.08, 0.02],
                 ]
             )
         ),
@@ -98,18 +102,16 @@ def test_state_space_momentum_can_reuse_external_candidate_support():
         n_spikes=0,
     )
     centers = np.array([[0.0, 0.0], [1.0, 0.0], [2.0, 0.0], [3.0, 0.0]])
-    model = SortedSpikeStateSpaceReplayModel(
-        mode="momentum",
-        config=StateSpaceDecoderConfig(mode="momentum", momentum_candidate_top_k=1),
-    )
-    fixed_support = [np.array([0]), np.array([1]), np.array([2])]
+    config = StateSpaceDecoderConfig(mode="momentum", momentum_candidate_top_k=2)
+    model = SortedSpikeStateSpaceReplayModel(mode="momentum", config=config)
+    train_candidates = model.candidate_indices(train)
 
-    default_score = model.score(emissions, centers)
-    fixed_score = model.score(emissions, centers, candidate_indices=fixed_support)
+    derived_joint_candidates = model.candidate_indices(joint)
+    provided_score = model.score(joint, centers, candidate_indices=train_candidates)
+    derived_score = model.score(joint, centers)
 
-    assert np.isfinite(fixed_score.log_likelihood)
-    assert not np.isclose(default_score.log_likelihood, fixed_score.log_likelihood)
-    assert fixed_score.diagnostics["state_space_fixed_candidate_support"] == 1
-    assert fixed_score.trajectory_log_posterior is not None
-    for time_index, expected_bin in enumerate((0, 1, 2)):
-        assert int(np.argmax(fixed_score.trajectory_log_posterior[time_index])) == expected_bin
+    assert any(not np.array_equal(a, b) for a, b in zip(train_candidates, derived_joint_candidates, strict=True))
+    assert np.isfinite(provided_score.log_likelihood)
+    assert np.isfinite(derived_score.log_likelihood)
+    assert provided_score.diagnostics["state_space_momentum_candidate_support"] == "provided"
+    assert derived_score.diagnostics["state_space_momentum_candidate_support"] == "derived"

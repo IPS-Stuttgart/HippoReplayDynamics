@@ -28,6 +28,27 @@ _REQUIRED_SESSION_FILES = (
     "Epochs.mat",
 )
 _IMM_MODES = ("stationary", "diffusion", "momentum", "jump")
+_TRACK_MODEL_CHOICES = (
+    "random",
+    "stationary",
+    "diffusion",
+    "momentum",
+    "imm",
+    "sorted-spike-state-space-stationary",
+    "sorted-spike-state-space-diffusion",
+    "sorted-spike-state-space-fragmented",
+    "sorted-spike-state-space-jump",
+    "sorted-spike-state-space-momentum",
+    "sorted-spike-state-space-imm",
+    "state-space-stationary",
+    "state-space-diffusion",
+    "state-space-fragmented",
+    "state-space-jump",
+    "state-space-momentum",
+    "state-space-imm",
+    "pyrecest-goal-particle",
+    "pyrecest-goal-particle-imm",
+)
 
 
 def _session_path(dataset_root: str | Path, session_id: str) -> Path:
@@ -155,17 +176,56 @@ def _copy_score_diagnostics(
             row[f"diagnostic_{key}"] = value
 
 
-def _trajectory_from_prefix_scores(model: object, emissions: LogEmissionTensor, bin_centers: np.ndarray) -> tuple[pd.DataFrame, np.ndarray]:
-    """Track by repeatedly scoring prefixes and saving each terminal posterior.
+def _trajectory_rows_from_log_posteriors(
+    *,
+    log_posteriors: np.ndarray,
+    emissions: LogEmissionTensor,
+    bin_centers: np.ndarray,
+    score,
+    likelihood_column: str,
+) -> pd.DataFrame:
+    rows: list[dict[str, float | int | str]] = []
+    for time_index, log_posterior in enumerate(log_posteriors):
+        normalized = np.asarray(log_posterior, dtype=float) - logsumexp(log_posterior)
+        posterior = np.exp(normalized)
+        mean_xy = posterior @ bin_centers
+        map_bin = int(np.argmax(normalized))
+        row: dict[str, float | int | str] = {
+            "time_index": time_index,
+            "time_s": float(emissions.times[time_index]),
+            "posterior_mean_x": float(mean_xy[0]),
+            "posterior_mean_y": float(mean_xy[1]),
+            "map_x": float(bin_centers[map_bin, 0]),
+            "map_y": float(bin_centers[map_bin, 1]),
+            "map_bin": map_bin,
+            "map_probability": float(posterior[map_bin]),
+            "posterior_entropy": float(-np.sum(posterior * normalized)),
+            "spikes_in_bin": int(emissions.spike_counts[time_index].sum()),
+            likelihood_column: float(score.log_likelihood),
+        }
+        _copy_score_diagnostics(row, score.diagnostics)
+        rows.append(row)
+    return pd.DataFrame(rows)
 
-    This intentionally reuses the repository's existing model implementations,
-    so the workflow tracks with exactly the same dynamics used by event scoring.
-    Ripple events are short, so the quadratic prefix computation is acceptable
-    for manually dispatched exploratory runs.
-    """
+
+def _trajectory_from_prefix_scores(model: object, emissions: LogEmissionTensor, bin_centers: np.ndarray) -> tuple[pd.DataFrame, np.ndarray]:
+    """Track with full trajectory posteriors when available, otherwise score prefixes."""
+    full_score = model.score(emissions, bin_centers)
+    if full_score.trajectory_log_posterior is not None:
+        log_posteriors = np.asarray(full_score.trajectory_log_posterior, dtype=float)
+        return (
+            _trajectory_rows_from_log_posteriors(
+                log_posteriors=log_posteriors,
+                emissions=emissions,
+                bin_centers=bin_centers,
+                score=full_score,
+                likelihood_column="event_log_likelihood",
+            ),
+            log_posteriors,
+        )
+
     rows: list[dict[str, float | int | str]] = []
     log_posteriors = np.empty((emissions.n_time, bin_centers.shape[0]), dtype=float)
-
     for time_index in range(emissions.n_time):
         prefix = _prefix_emissions(emissions, time_index + 1)
         score = model.score(prefix, bin_centers)
@@ -218,7 +278,8 @@ def run_tracking(args: argparse.Namespace) -> None:
     output_dir = Path(args.output)
     output_dir.mkdir(parents=True, exist_ok=True)
     safe_session = args.session.replace("/", "_").replace("\\", "_")
-    safe_model = args.model.replace("/", "_").replace("\\", "_")
+    output_model = str(getattr(model, "name", args.model))
+    safe_model = output_model.replace("/", "_").replace("\\", "_")
     stem = f"{safe_session}_event{int(args.event_id):04d}_{safe_model}"
 
     csv_path = output_dir / f"{stem}_trajectory.csv"
@@ -234,6 +295,7 @@ def run_tracking(args: argparse.Namespace) -> None:
         grid_shape=np.asarray(encoding.grid_shape, dtype=int),
         cell_ids=encoding.cell_ids,
         spike_counts=emissions.spike_counts,
+        trajectory_log_posteriors=log_posteriors,
     )
     print(f"Wrote trajectory CSV: {csv_path}")
     print(f"Wrote posterior NPZ: {npz_path}")
@@ -247,7 +309,7 @@ def main() -> int:
     parser.add_argument(
         "--model",
         default="imm",
-        choices=("random", "stationary", "diffusion", "momentum", "imm", "pyrecest-goal-particle", "pyrecest-goal-particle-imm"),
+        choices=_TRACK_MODEL_CHOICES,
     )
     parser.add_argument("--candidate-top-k", default=64, type=int)
     parser.add_argument("--pyrecest-particles", default=512, type=int)

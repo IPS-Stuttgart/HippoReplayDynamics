@@ -107,35 +107,16 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -e .
 
-      - name: Restore dataset cache
-        id: dataset-cache
-        uses: actions/cache/restore@v5
-        with:
-          path: ${{ env.DATASET_ROOT }}
-          key: hipporeplayimm-dataset-${{ runner.os }}-rclone-v1
-
-      - name: Download dataset
-        if: ${{ steps.dataset-cache.outputs.cache-hit != 'true' }}
-        uses: ./.github/actions/download-pfeiffer-foster
+      - name: Ensure Pfeiffer-Foster dataset
+        id: dataset
+        uses: ./.github/actions/ensure-pfeiffer-foster-dataset
         with:
           dataset-root: ${{ env.DATASET_ROOT }}
+          session: ${{ env.SESSION }}
+          cache-key: hipporeplayimm-dataset-${{ runner.os }}-rclone-v1
           webdav-url: ${{ secrets.PFEIFFERFOSTER_WEBDAV_URL }}
           webdav-key: ${{ secrets.PFEIFFERFOSTER_DATA_KEY }}
           webdav-password: ${{ secrets.PFEIFFERFOSTER_DATA_PASSWORD }}
-
-      - name: Save dataset cache
-        if: ${{ steps.dataset-cache.outputs.cache-hit != 'true' }}
-        uses: actions/cache/save@v5
-        continue-on-error: true
-        with:
-          path: ${{ env.DATASET_ROOT }}
-          key: ${{ steps.dataset-cache.outputs.cache-primary-key }}
-
-      - name: Show cached dataset tree
-        if: ${{ steps.dataset-cache.outputs.cache-hit == 'true' }}
-        run: |
-          set -euo pipefail
-          find "${DATASET_ROOT}" -maxdepth 3 -type d | sort | sed -n '1,80p'
 
       - name: Plan event shards
         id: plan
@@ -195,35 +176,16 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -e .
 
-      - name: Restore dataset cache
-        id: dataset-cache
-        uses: actions/cache/restore@v5
-        with:
-          path: ${{ env.DATASET_ROOT }}
-          key: hipporeplayimm-dataset-${{ runner.os }}-rclone-v1
-
-      - name: Download dataset
-        if: ${{ steps.dataset-cache.outputs.cache-hit != 'true' }}
-        uses: ./.github/actions/download-pfeiffer-foster
+      - name: Ensure Pfeiffer-Foster dataset
+        id: dataset
+        uses: ./.github/actions/ensure-pfeiffer-foster-dataset
         with:
           dataset-root: ${{ env.DATASET_ROOT }}
+          session: ${{ env.SESSION }}
+          cache-key: hipporeplayimm-dataset-${{ runner.os }}-rclone-v1
           webdav-url: ${{ secrets.PFEIFFERFOSTER_WEBDAV_URL }}
           webdav-key: ${{ secrets.PFEIFFERFOSTER_DATA_KEY }}
           webdav-password: ${{ secrets.PFEIFFERFOSTER_DATA_PASSWORD }}
-
-      - name: Save dataset cache
-        if: ${{ steps.dataset-cache.outputs.cache-hit != 'true' }}
-        uses: actions/cache/save@v5
-        continue-on-error: true
-        with:
-          path: ${{ env.DATASET_ROOT }}
-          key: ${{ steps.dataset-cache.outputs.cache-primary-key }}
-
-      - name: Show cached dataset tree
-        if: ${{ steps.dataset-cache.outputs.cache-hit == 'true' }}
-        run: |
-          set -euo pipefail
-          find "${DATASET_ROOT}" -maxdepth 3 -type d | sort | sed -n '1,80p'
 
       - name: Run non-momentum KD models
         run: |
@@ -281,35 +243,16 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -e .
 
-      - name: Restore dataset cache
-        id: dataset-cache
-        uses: actions/cache/restore@v5
-        with:
-          path: ${{ env.DATASET_ROOT }}
-          key: hipporeplayimm-dataset-${{ runner.os }}-rclone-v1
-
-      - name: Download dataset
-        if: ${{ steps.dataset-cache.outputs.cache-hit != 'true' }}
-        uses: ./.github/actions/download-pfeiffer-foster
+      - name: Ensure Pfeiffer-Foster dataset
+        id: dataset
+        uses: ./.github/actions/ensure-pfeiffer-foster-dataset
         with:
           dataset-root: ${{ env.DATASET_ROOT }}
+          session: ${{ env.SESSION }}
+          cache-key: hipporeplayimm-dataset-${{ runner.os }}-rclone-v1
           webdav-url: ${{ secrets.PFEIFFERFOSTER_WEBDAV_URL }}
           webdav-key: ${{ secrets.PFEIFFERFOSTER_DATA_KEY }}
           webdav-password: ${{ secrets.PFEIFFERFOSTER_DATA_PASSWORD }}
-
-      - name: Save dataset cache
-        if: ${{ steps.dataset-cache.outputs.cache-hit != 'true' }}
-        uses: actions/cache/save@v5
-        continue-on-error: true
-        with:
-          path: ${{ env.DATASET_ROOT }}
-          key: ${{ steps.dataset-cache.outputs.cache-primary-key }}
-
-      - name: Show cached dataset tree
-        if: ${{ steps.dataset-cache.outputs.cache-hit == 'true' }}
-        run: |
-          set -euo pipefail
-          find "${DATASET_ROOT}" -maxdepth 3 -type d | sort | sed -n '1,80p'
 
       - name: Run momentum event/grid shard
         env:

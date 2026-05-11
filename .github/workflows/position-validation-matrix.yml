@@ -1,0 +1,352 @@
+---
+name: Position validation parameter matrix
+
+on:
+  workflow_dispatch:
+    inputs:
+      dataset_root:
+        description: "Dataset path after download or cache restore"
+        required: true
+        default: "data/DataSetFromPfeifferFoster"
+      sessions:
+        description: "Whitespace- or comma-separated sessions to validate"
+        required: true
+        default: "Rat3/Open1 Rat3/Open2"
+      decode_bin_s_values:
+        description: "Whitespace- or comma-separated decode window widths in seconds"
+        required: true
+        default: "0.5 0.75 1.0"
+      bin_size_cm_values:
+        description: "Whitespace- or comma-separated place-field spatial bin sizes in cm"
+        required: true
+        default: "6.0"
+      smoothing_sigma_bins_values:
+        description: "Whitespace- or comma-separated place-field smoothing sigmas in bins"
+        required: true
+        default: "2.0 2.5 3.0"
+      min_speed_cm_s_values:
+        description: "Whitespace- or comma-separated movement thresholds in cm/s"
+        required: true
+        default: "5.0"
+      n_folds:
+        description: "Number of temporal cross-validation folds"
+        required: true
+        default: "5"
+      max_windows:
+        description: "Maximum windows per session; leave empty for all windows"
+        required: false
+        default: "500"
+      min_spikes_per_window:
+        description: "Minimum spikes required for a decoded window"
+        required: true
+        default: "0"
+      local_cache_root:
+        description: "Optional self-hosted persistent dataset cache path"
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: position-validation-matrix-${{ github.repository }}-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  DATASET_ROOT: ${{ inputs.dataset_root }}
+  N_FOLDS: ${{ inputs.n_folds }}
+  MAX_WINDOWS: ${{ inputs.max_windows }}
+  MIN_SPIKES_PER_WINDOW: ${{ inputs.min_spikes_per_window }}
+  LOCAL_CACHE_ROOT: ${{ inputs.local_cache_root }}
+
+jobs:
+  plan-matrix:
+    name: Plan parameter matrix
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      matrix: ${{ steps.plan.outputs.matrix }}
+      count: ${{ steps.plan.outputs.count }}
+
+    steps:
+      - name: Build validation matrix
+        id: plan
+        env:
+          SESSIONS: ${{ inputs.sessions }}
+          DECODE_BIN_S_VALUES: ${{ inputs.decode_bin_s_values }}
+          BIN_SIZE_CM_VALUES: ${{ inputs.bin_size_cm_values }}
+          SMOOTHING_SIGMA_BINS_VALUES: ${{ inputs.smoothing_sigma_bins_values }}
+          MIN_SPEED_CM_S_VALUES: ${{ inputs.min_speed_cm_s_values }}
+        run: |
+          set -euo pipefail
+          mkdir -p results/position-validation-matrix-plan
+          python - <<'PY'
+          import csv
+          import itertools
+          import json
+          import os
+          import re
+          from pathlib import Path
+
+          def split_values(name: str) -> list[str]:
+              raw = os.environ[name]
+              values = [item.strip() for item in re.split(r"[\s,]+", raw) if item.strip()]
+              if not values:
+                  raise SystemExit(f"{name} must contain at least one value")
+              return values
+
+          def validate_float(name: str, values: list[str]) -> None:
+              for value in values:
+                  try:
+                      float(value)
+                  except ValueError as exc:
+                      raise SystemExit(f"{name} contains non-numeric value {value!r}") from exc
+
+          def slug(value: str) -> str:
+              return re.sub(r"[^A-Za-z0-9]+", "-", value).strip("-").lower()
+
+          sessions = split_values("SESSIONS")
+          decode_values = split_values("DECODE_BIN_S_VALUES")
+          bin_values = split_values("BIN_SIZE_CM_VALUES")
+          smoothing_values = split_values("SMOOTHING_SIGMA_BINS_VALUES")
+          speed_values = split_values("MIN_SPEED_CM_S_VALUES")
+          for name, values in (
+              ("DECODE_BIN_S_VALUES", decode_values),
+              ("BIN_SIZE_CM_VALUES", bin_values),
+              ("SMOOTHING_SIGMA_BINS_VALUES", smoothing_values),
+              ("MIN_SPEED_CM_S_VALUES", speed_values),
+          ):
+              validate_float(name, values)
+
+          rows = []
+          for session, decode_bin_s, bin_size_cm, smoothing_sigma_bins, min_speed_cm_s in itertools.product(
+              sessions, decode_values, bin_values, smoothing_values, speed_values
+          ):
+              matrix_id = (
+                  f"{slug(session)}-"
+                  f"bin{slug(decode_bin_s)}-"
+                  f"space{slug(bin_size_cm)}-"
+                  f"smooth{slug(smoothing_sigma_bins)}-"
+                  f"speed{slug(min_speed_cm_s)}"
+              )
+              rows.append(
+                  {
+                      "id": matrix_id,
+                      "session": session,
+                      "decode_bin_s": decode_bin_s,
+                      "bin_size_cm": bin_size_cm,
+                      "smoothing_sigma_bins": smoothing_sigma_bins,
+                      "min_speed_cm_s": min_speed_cm_s,
+                  }
+              )
+
+          out_dir = Path("results/position-validation-matrix-plan")
+          (out_dir / "matrix.json").write_text(json.dumps(rows, indent=2), encoding="utf-8")
+          with (out_dir / "matrix.csv").open("w", newline="", encoding="utf-8") as handle:
+              writer = csv.DictWriter(handle, fieldnames=list(rows[0]))
+              writer.writeheader()
+              writer.writerows(rows)
+
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+              output.write(f"matrix={json.dumps({'include': rows}, separators=(',', ':'))}\n")
+              output.write(f"count={len(rows)}\n")
+          print(f"Planned {len(rows)} position-validation configurations.")
+          PY
+
+      - name: Upload matrix plan
+        uses: actions/upload-artifact@v7
+        with:
+          name: position-validation-matrix-plan-${{ github.run_id }}
+          path: results/position-validation-matrix-plan/
+          if-no-files-found: error
+
+  position-validation:
+    name: ${{ matrix.session }} bin=${{ matrix.decode_bin_s }} smooth=${{ matrix.smoothing_sigma_bins }}
+    needs: plan-matrix
+    if: ${{ needs.plan-matrix.outputs.count != '0' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    strategy:
+      fail-fast: false
+      max-parallel: 4
+      matrix: ${{ fromJSON(needs.plan-matrix.outputs.matrix) }}
+
+    env:
+      SESSION: ${{ matrix.session }}
+      MATRIX_ID: ${{ matrix.id }}
+      DECODE_BIN_S: ${{ matrix.decode_bin_s }}
+      BIN_SIZE_CM: ${{ matrix.bin_size_cm }}
+      SMOOTHING_SIGMA_BINS: ${{ matrix.smoothing_sigma_bins }}
+      MIN_SPEED_CM_S: ${{ matrix.min_speed_cm_s }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Install package
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e .
+
+      - name: Ensure Pfeiffer-Foster dataset
+        id: dataset
+        uses: ./.github/actions/ensure-pfeiffer-foster-dataset
+        with:
+          dataset-root: ${{ env.DATASET_ROOT }}
+          session: ${{ env.SESSION }}
+          cache-key: hipporeplayimm-dataset-${{ runner.os }}-rclone-v1
+          local-cache-root: ${{ env.LOCAL_CACHE_ROOT }}
+          webdav-url: ${{ secrets.PFEIFFERFOSTER_WEBDAV_URL }}
+          webdav-key: ${{ secrets.PFEIFFERFOSTER_DATA_KEY }}
+          webdav-password: ${{ secrets.PFEIFFERFOSTER_DATA_PASSWORD }}
+
+      - name: Run position decoding validation
+        run: |
+          set -euo pipefail
+          out_dir="results/position-validation-matrix/${MATRIX_ID}"
+          mkdir -p "${out_dir}"
+          max_windows_args=()
+          if [ -n "${MAX_WINDOWS}" ]; then
+            max_windows_args+=(--max-windows "${MAX_WINDOWS}")
+          fi
+          hipporeplayimm validate-position "${DATASET_ROOT}" \
+            --session "${SESSION}" \
+            --output "${out_dir}" \
+            --decode-bin-s "${DECODE_BIN_S}" \
+            --n-folds "${N_FOLDS}" \
+            --min-spikes-per-window "${MIN_SPIKES_PER_WINDOW}" \
+            --bin-size-cm "${BIN_SIZE_CM}" \
+            --smoothing-sigma-bins "${SMOOTHING_SIGMA_BINS}" \
+            --min-speed-cm-s "${MIN_SPEED_CM_S}" \
+            "${max_windows_args[@]}"
+
+      - name: Annotate result tables
+        if: always()
+        run: |
+          python - <<'PY'
+          import os
+          from pathlib import Path
+
+          import pandas as pd
+
+          out_dir = Path("results/position-validation-matrix") / os.environ["MATRIX_ID"]
+          metadata = {
+              "matrix_id": os.environ["MATRIX_ID"],
+              "requested_session": os.environ["SESSION"],
+              "decode_bin_s": float(os.environ["DECODE_BIN_S"]),
+              "n_folds_requested": int(float(os.environ["N_FOLDS"])),
+              "max_windows": os.environ["MAX_WINDOWS"],
+              "min_spikes_per_window": int(float(os.environ["MIN_SPIKES_PER_WINDOW"])),
+              "bin_size_cm": float(os.environ["BIN_SIZE_CM"]),
+              "smoothing_sigma_bins": float(os.environ["SMOOTHING_SIGMA_BINS"]),
+              "min_speed_cm_s": float(os.environ["MIN_SPEED_CM_S"]),
+          }
+          for name in (
+              "position_decoding_summary.csv",
+              "position_decoding_scores.csv",
+              "position_decoding_samples.csv",
+          ):
+              path = out_dir / name
+              if not path.exists():
+                  continue
+              frame = pd.read_csv(path)
+              for key, value in metadata.items():
+                  frame[key] = value
+              if name == "position_decoding_summary.csv" and not frame.empty:
+                  frame["passes_posterior_mean_15cm"] = frame["median_posterior_mean_error_cm"].astype(float) < 15.0
+                  frame["passes_posterior_mean_20cm"] = frame["median_posterior_mean_error_cm"].astype(float) < 20.0
+                  frame["passes_map_20cm"] = frame["median_map_error_cm"].astype(float) < 20.0
+                  frame["passes_smoke_gate"] = (
+                      frame["passes_posterior_mean_15cm"]
+                      & frame["passes_map_20cm"]
+                      & frame["mean_true_bin_probability"].notna()
+                      & (frame["mean_spikes_per_window"].astype(float) > 0.0)
+                      & (frame["folds"].astype(int) == int(float(os.environ["N_FOLDS"])))
+                  )
+              frame.to_csv(path, index=False)
+          PY
+
+      - name: Show position validation summary
+        if: always()
+        run: |
+          summary="results/position-validation-matrix/${MATRIX_ID}/position_decoding_summary.csv"
+          if [ -f "${summary}" ]; then
+            python - <<'PY'
+          import os
+          import pandas as pd
+          path = f"results/position-validation-matrix/{os.environ['MATRIX_ID']}/position_decoding_summary.csv"
+          print(pd.read_csv(path).to_string(index=False))
+          PY
+          else
+            echo "No position validation summary was generated."
+            find "results/position-validation-matrix/${MATRIX_ID}" -maxdepth 2 -type f | sort || true
+          fi
+
+      - name: Upload position validation result
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: position-validation-matrix-${{ matrix.id }}
+          path: results/position-validation-matrix/${{ matrix.id }}/
+          if-no-files-found: warn
+
+  aggregate:
+    name: Aggregate matrix summaries
+    needs:
+      - plan-matrix
+      - position-validation
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Download matrix artifacts
+        uses: actions/download-artifact@v7
+        with:
+          path: artifacts/position-validation-matrix
+          pattern: position-validation-matrix-*
+
+      - name: Aggregate matrix summaries
+        run: |
+          set -euo pipefail
+          mkdir -p results/position-validation-matrix-summary
+          python - <<'PY'
+          from pathlib import Path
+
+          import pandas as pd
+
+          root = Path("artifacts/position-validation-matrix")
+          summary_paths = sorted(root.glob("**/position_decoding_summary.csv"))
+          if not summary_paths:
+              raise SystemExit("No position_decoding_summary.csv files found")
+          summary = pd.concat((pd.read_csv(path) for path in summary_paths), ignore_index=True)
+          sort_cols = [
+              "session",
+              "median_posterior_mean_error_cm",
+              "median_map_error_cm",
+              "decode_bin_s",
+              "smoothing_sigma_bins",
+          ]
+          ranked = summary.sort_values(sort_cols, kind="stable")
+          best = ranked.groupby("session", as_index=False).head(1)
+          out_dir = Path("results/position-validation-matrix-summary")
+          summary.to_csv(out_dir / "position_validation_matrix_summary.csv", index=False)
+          ranked.to_csv(out_dir / "position_validation_matrix_ranked.csv", index=False)
+          best.to_csv(out_dir / "position_validation_matrix_best_by_session.csv", index=False)
+          print("Best configuration by session:")
+          print(best.to_string(index=False))
+          PY
+
+      - name: Upload aggregate matrix summary
+        uses: actions/upload-artifact@v7
+        with:
+          name: position-validation-matrix-summary-${{ github.run_id }}
+          path: results/position-validation-matrix-summary/
+          if-no-files-found: error

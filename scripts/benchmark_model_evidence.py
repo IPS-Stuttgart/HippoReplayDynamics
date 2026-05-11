@@ -18,12 +18,32 @@ import pandas as pd
 from scipy.special import logsumexp
 
 from hipporeplayimm.data import load_replay_session
-from hipporeplayimm.encoding import EmissionConfig, build_emissions, fit_place_field_encoding
+from hipporeplayimm.encoding import (
+    EmissionConfig,
+    EncodingConfig,
+    build_emissions,
+    fit_place_field_encoding,
+)
 from hipporeplayimm.models import CandidateKinematicModel, RandomModel, StationaryModel
+from hipporeplayimm.sorted_spike_state_space import SortedSpikeStateSpaceReplayModel
 
 _REQUIRED = ("Position_Data.mat", "Ripple_Events.mat", "Spike_Data.mat", "Epochs.mat")
-_TRAJ = {"diffusion", "momentum", "imm"}
-_NONTRAJ = {"random", "stationary", "stationary-gaussian"}
+_TRAJ = {
+    "diffusion",
+    "momentum",
+    "imm",
+    "sorted-spike-state-space-diffusion",
+    "sorted-spike-state-space-fragmented",
+    "sorted-spike-state-space-jump",
+    "sorted-spike-state-space-momentum",
+    "sorted-spike-state-space-imm",
+}
+_NONTRAJ = {
+    "random",
+    "stationary",
+    "stationary-gaussian",
+    "sorted-spike-state-space-stationary",
+}
 _ALIASES = {"stationary_gaussian": "stationary-gaussian"}
 
 
@@ -106,6 +126,12 @@ def _models(args) -> dict[str, object]:
             mode="imm", top_k=args.candidate_top_k, stationary_sigma_cm=args.stationary_sigma_cm,
             diffusion_sigma_cm=args.diffusion_sigma_cm, momentum_sigma_cm=args.momentum_sigma_cm,
             velocity_decay=args.velocity_decay, mode_stickiness=args.mode_stickiness, name="imm"),
+        "sorted-spike-state-space-stationary": SortedSpikeStateSpaceReplayModel(mode="stationary"),
+        "sorted-spike-state-space-diffusion": SortedSpikeStateSpaceReplayModel(mode="diffusion"),
+        "sorted-spike-state-space-fragmented": SortedSpikeStateSpaceReplayModel(mode="fragmented"),
+        "sorted-spike-state-space-jump": SortedSpikeStateSpaceReplayModel(mode="jump"),
+        "sorted-spike-state-space-momentum": SortedSpikeStateSpaceReplayModel(mode="momentum"),
+        "sorted-spike-state-space-imm": SortedSpikeStateSpaceReplayModel(mode="imm"),
     }
     missing = sorted(set(names) - set(available))
     if missing:
@@ -126,7 +152,16 @@ def _score(args) -> pd.DataFrame:
     _check_session(session_dir)
     session = load_replay_session(session_dir)
     event_ids = _events(args.events, session)
-    encoding = fit_place_field_encoding(session)
+    if args.max_events is not None:
+        event_ids = event_ids[: args.max_events]
+    encoding = fit_place_field_encoding(
+        session,
+        EncodingConfig(
+            bin_size_cm=args.bin_size_cm,
+            smoothing_sigma_bins=args.smoothing_sigma_bins,
+            min_speed_cm_s=args.min_speed_cm_s,
+        ),
+    )
     models = _models(args)
     emissions_cfg = EmissionConfig(time_bin_s=args.time_bin_s)
     rows: list[dict[str, object]] = []
@@ -143,11 +178,16 @@ def _score(args) -> pd.DataFrame:
                     result = model.score(emissions, encoding.bin_centers, candidate_indices=cand)
                 else:
                     result = model.score(emissions, encoding.bin_centers)
+                model_name = str(result.model_name)
                 row = {
                     "status": "success", "session": session.session_id, "event_index": int(event_id),
-                    "model": name, "model_family": _family(name), "log_evidence": float(result.log_likelihood),
+                    "model": model_name, "requested_model": name, "model_family": _family(model_name), "log_evidence": float(result.log_likelihood),
                     "n_time": int(result.n_time), "n_spikes": int(result.n_spikes),
                     "runtime_s": float(time.perf_counter() - start), "error": "",
+                    "bin_size_cm": float(args.bin_size_cm),
+                    "smoothing_sigma_bins": float(args.smoothing_sigma_bins),
+                    "min_speed_cm_s": float(args.min_speed_cm_s),
+                    "time_bin_s": float(args.time_bin_s),
                 }
                 row.update({f"diagnostic_{k}": v for k, v in result.diagnostics.items()})
                 rows.append(row)
@@ -155,9 +195,13 @@ def _score(args) -> pd.DataFrame:
             except Exception as exc:
                 rows.append({
                     "status": "failure", "session": session.session_id, "event_index": int(event_id),
-                    "model": name, "model_family": _family(name), "log_evidence": np.nan,
+                    "model": name, "requested_model": name, "model_family": _family(name), "log_evidence": np.nan,
                     "n_time": int(emissions.n_time), "n_spikes": int(emissions.n_spikes),
                     "runtime_s": float(time.perf_counter() - start), "error": f"{type(exc).__name__}: {exc}",
+                    "bin_size_cm": float(args.bin_size_cm),
+                    "smoothing_sigma_bins": float(args.smoothing_sigma_bins),
+                    "min_speed_cm_s": float(args.min_speed_cm_s),
+                    "time_bin_s": float(args.time_bin_s),
                 })
                 if not args.continue_on_error:
                     raise
@@ -249,6 +293,7 @@ def main() -> int:
     p.add_argument("--dataset-root", required=True)
     p.add_argument("--session", required=True)
     p.add_argument("--events", default="0-25")
+    p.add_argument("--max-events", type=int, default=None)
     p.add_argument("--models", default="random stationary stationary-gaussian diffusion momentum imm")
     p.add_argument("--candidate-top-k", type=int, default=64)
     p.add_argument("--stationary-sigma-cm", type=float, default=2.0)
@@ -257,6 +302,9 @@ def main() -> int:
     p.add_argument("--velocity-decay", type=float, default=0.95)
     p.add_argument("--mode-stickiness", type=float, default=0.94)
     p.add_argument("--time-bin-s", type=float, default=0.02)
+    p.add_argument("--bin-size-cm", type=float, default=4.0)
+    p.add_argument("--smoothing-sigma-bins", type=float, default=1.5)
+    p.add_argument("--min-speed-cm-s", type=float, default=5.0)
     p.add_argument("--output", default="results/model-evidence")
     p.add_argument("--continue-on-error", action="store_true")
     args = p.parse_args()

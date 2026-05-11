@@ -64,9 +64,16 @@ main target for 1-3 ms replay-bin experiments:
 hipporeplayimm benchmark D:\Uni-Data\DataSetFromPfeifferFoster `
   --max-events 25 `
   --time-bin-ms 3 `
+  --bin-size-cm 6.0 `
+  --smoothing-sigma-bins 2.5 `
+  --min-speed-cm-s 5.0 `
   --models random,stationary,sorted-spike-state-space-diffusion,sorted-spike-state-space-momentum,sorted-spike-state-space-imm `
   --output results\state_space_smoke
 ```
+
+The model-evidence workflow exposes the same encoder settings. The validated
+behavioral-decoding settings used for the first state-space replay smoke run are
+`--bin-size-cm 6.0`, `--smoothing-sigma-bins 2.5`, and `--min-speed-cm-s 5.0`.
 
 `decode-event --output` writes `event_scores.csv` plus posterior `.npz`
 artifacts for models that expose `trajectory_log_posterior`. The batch tracking

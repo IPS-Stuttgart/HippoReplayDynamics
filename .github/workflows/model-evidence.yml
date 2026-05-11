@@ -16,6 +16,10 @@ on:
         description: "Event IDs/ranges, all, run, or run:0-25"
         required: true
         default: "0-25"
+      max_events:
+        description: "Maximum selected events to score; empty means no cap"
+        required: false
+        default: ""
       models:
         description: "Space-separated models"
         required: true
@@ -48,6 +52,18 @@ on:
         description: "Ripple decoding time-bin width in seconds"
         required: true
         default: "0.02"
+      bin_size_cm:
+        description: "Place-field spatial bin size in centimeters"
+        required: true
+        default: "4.0"
+      smoothing_sigma_bins:
+        description: "Place-field smoothing sigma in spatial bins"
+        required: true
+        default: "1.5"
+      min_speed_cm_s:
+        description: "Minimum speed for place-field training in cm/s"
+        required: true
+        default: "5.0"
 
 permissions:
   contents: read
@@ -56,6 +72,7 @@ env:
   DATASET_ROOT: ${{ inputs.dataset_root }}
   SESSION: ${{ inputs.session }}
   EVENTS: ${{ inputs.events }}
+  MAX_EVENTS: ${{ inputs.max_events }}
   MODELS: ${{ inputs.models }}
   CANDIDATE_TOP_K: ${{ inputs.candidate_top_k }}
   STATIONARY_SIGMA_CM: ${{ inputs.stationary_sigma_cm }}
@@ -64,6 +81,9 @@ env:
   VELOCITY_DECAY: ${{ inputs.velocity_decay }}
   MODE_STICKINESS: ${{ inputs.mode_stickiness }}
   TIME_BIN_S: ${{ inputs.time_bin_s }}
+  BIN_SIZE_CM: ${{ inputs.bin_size_cm }}
+  SMOOTHING_SIGMA_BINS: ${{ inputs.smoothing_sigma_bins }}
+  MIN_SPEED_CM_S: ${{ inputs.min_speed_cm_s }}
 
 jobs:
   model-evidence:
@@ -99,10 +119,16 @@ jobs:
 
       - name: Run model-evidence benchmark
         run: |
+          set -euo pipefail
+          max_events_args=()
+          if [ -n "${MAX_EVENTS}" ]; then
+            max_events_args+=(--max-events "${MAX_EVENTS}")
+          fi
           python scripts/benchmark_model_evidence.py \
             --dataset-root "${DATASET_ROOT}" \
             --session "${SESSION}" \
             --events "${EVENTS}" \
+            "${max_events_args[@]}" \
             --models "${MODELS}" \
             --candidate-top-k "${CANDIDATE_TOP_K}" \
             --stationary-sigma-cm "${STATIONARY_SIGMA_CM}" \
@@ -111,6 +137,9 @@ jobs:
             --velocity-decay "${VELOCITY_DECAY}" \
             --mode-stickiness "${MODE_STICKINESS}" \
             --time-bin-s "${TIME_BIN_S}" \
+            --bin-size-cm "${BIN_SIZE_CM}" \
+            --smoothing-sigma-bins "${SMOOTHING_SIGMA_BINS}" \
+            --min-speed-cm-s "${MIN_SPEED_CM_S}" \
             --output results/model-evidence \
             --continue-on-error
 

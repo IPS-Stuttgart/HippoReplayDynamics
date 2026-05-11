@@ -1,0 +1,334 @@
+---
+name: Benchmark replay model evidence event-sharded
+
+on:
+  workflow_dispatch:
+    inputs:
+      dataset_root:
+        description: "Dataset path after download or cache restore"
+        required: true
+        default: "data/DataSetFromPfeifferFoster"
+      session:
+        description: "Session ID, e.g. Rat1/Open1"
+        required: true
+        default: "Rat1/Open1"
+      events:
+        description: "Event IDs/ranges, all, run, or run:0-25"
+        required: true
+        default: "run"
+      max_events:
+        description: "Maximum selected events to score; empty means no cap"
+        required: false
+        default: ""
+      models:
+        description: "Space-separated models"
+        required: true
+        default: "sorted-spike-state-space-stationary sorted-spike-state-space-diffusion sorted-spike-state-space-momentum sorted-spike-state-space-fragmented sorted-spike-state-space-imm"
+      event_shard_count:
+        description: "Target number of event shards"
+        required: true
+        default: "16"
+      candidate_top_k:
+        description: "Candidate spatial bins per time bin for candidate-pruned models"
+        required: true
+        default: "64"
+      stationary_sigma_cm:
+        description: "Gaussian stationary transition sigma in cm"
+        required: true
+        default: "2.0"
+      diffusion_sigma_cm:
+        description: "Diffusion transition sigma in cm"
+        required: true
+        default: "12.0"
+      momentum_sigma_cm:
+        description: "Momentum transition sigma in cm"
+        required: true
+        default: "12.0"
+      velocity_decay:
+        description: "Momentum velocity decay"
+        required: true
+        default: "0.95"
+      mode_stickiness:
+        description: "IMM mode-transition stickiness"
+        required: true
+        default: "0.94"
+      time_bin_s:
+        description: "Ripple decoding time-bin width in seconds"
+        required: true
+        default: "0.003"
+      bin_size_cm:
+        description: "Place-field spatial bin size in centimeters"
+        required: true
+        default: "6.0"
+      smoothing_sigma_bins:
+        description: "Place-field smoothing sigma in spatial bins"
+        required: true
+        default: "2.5"
+      min_speed_cm_s:
+        description: "Minimum speed for place-field training in cm/s"
+        required: true
+        default: "5.0"
+      local_cache_root:
+        description: "Optional self-hosted persistent dataset cache path"
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+concurrency:
+  group: model-evidence-event-sharded-${{ github.repository }}-${{ inputs.session }}-${{ inputs.events }}-${{ inputs.max_events }}-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  DATASET_ROOT: ${{ inputs.dataset_root }}
+  SESSION: ${{ inputs.session }}
+  EVENTS: ${{ inputs.events }}
+  MAX_EVENTS: ${{ inputs.max_events }}
+  MODELS: ${{ inputs.models }}
+  EVENT_SHARD_COUNT: ${{ inputs.event_shard_count }}
+  CANDIDATE_TOP_K: ${{ inputs.candidate_top_k }}
+  STATIONARY_SIGMA_CM: ${{ inputs.stationary_sigma_cm }}
+  DIFFUSION_SIGMA_CM: ${{ inputs.diffusion_sigma_cm }}
+  MOMENTUM_SIGMA_CM: ${{ inputs.momentum_sigma_cm }}
+  VELOCITY_DECAY: ${{ inputs.velocity_decay }}
+  MODE_STICKINESS: ${{ inputs.mode_stickiness }}
+  TIME_BIN_S: ${{ inputs.time_bin_s }}
+  BIN_SIZE_CM: ${{ inputs.bin_size_cm }}
+  SMOOTHING_SIGMA_BINS: ${{ inputs.smoothing_sigma_bins }}
+  MIN_SPEED_CM_S: ${{ inputs.min_speed_cm_s }}
+  LOCAL_CACHE_ROOT: ${{ inputs.local_cache_root }}
+  OMP_NUM_THREADS: "1"
+  OPENBLAS_NUM_THREADS: "1"
+  MKL_NUM_THREADS: "1"
+
+jobs:
+  plan-event-shards:
+    name: Plan event shards
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    outputs:
+      event_matrix: ${{ steps.plan.outputs.event_matrix }}
+      event_count: ${{ steps.plan.outputs.event_count }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Install package
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e .
+
+      - name: Ensure Pfeiffer-Foster dataset
+        id: dataset
+        uses: ./.github/actions/ensure-pfeiffer-foster-dataset
+        with:
+          dataset-root: ${{ env.DATASET_ROOT }}
+          session: ${{ env.SESSION }}
+          cache-key: hipporeplayimm-dataset-${{ runner.os }}-rclone-v1
+          local-cache-root: ${{ env.LOCAL_CACHE_ROOT }}
+          webdav-url: ${{ secrets.PFEIFFERFOSTER_WEBDAV_URL }}
+          webdav-key: ${{ secrets.PFEIFFERFOSTER_DATA_KEY }}
+          webdav-password: ${{ secrets.PFEIFFERFOSTER_DATA_PASSWORD }}
+
+      - name: Plan event shards
+        id: plan
+        run: |
+          set -euo pipefail
+          max_events_args=()
+          if [ -n "${MAX_EVENTS}" ]; then
+            max_events_args+=(--max-events "${MAX_EVENTS}")
+          fi
+          mkdir -p results/model-evidence-event-shard-plan
+          python scripts/plan_model_evidence_event_shards.py \
+            --dataset-root "${DATASET_ROOT}" \
+            --session "${SESSION}" \
+            --events "${EVENTS}" \
+            --event-shard-count "${EVENT_SHARD_COUNT}" \
+            "${max_events_args[@]}" \
+            --output results/model-evidence-event-shard-plan/plan.json
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          plan = json.loads(Path("results/model-evidence-event-shard-plan/plan.json").read_text(encoding="utf-8"))
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+              output.write(f"event_matrix={json.dumps(plan['event_matrix'], separators=(',', ':'))}\n")
+              output.write(f"event_count={plan['event_count']}\n")
+          print(f"Planned {plan['event_count']} events across {plan['event_shard_count']} event shards.")
+          PY
+
+      - name: Upload event-shard plan
+        uses: actions/upload-artifact@v7
+        with:
+          name: model-evidence-event-shard-plan-${{ github.run_id }}
+          path: results/model-evidence-event-shard-plan/
+          if-no-files-found: error
+
+  model-evidence-shard:
+    name: Model evidence shard ${{ matrix.event.event_shard_index }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    needs: plan-event-shards
+    strategy:
+      fail-fast: false
+      max-parallel: 8
+      matrix:
+        event: ${{ fromJson(needs.plan-event-shards.outputs.event_matrix) }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Install package
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e .
+
+      - name: Ensure Pfeiffer-Foster dataset
+        id: dataset
+        uses: ./.github/actions/ensure-pfeiffer-foster-dataset
+        with:
+          dataset-root: ${{ env.DATASET_ROOT }}
+          session: ${{ env.SESSION }}
+          cache-key: hipporeplayimm-dataset-${{ runner.os }}-rclone-v1
+          local-cache-root: ${{ env.LOCAL_CACHE_ROOT }}
+          webdav-url: ${{ secrets.PFEIFFERFOSTER_WEBDAV_URL }}
+          webdav-key: ${{ secrets.PFEIFFERFOSTER_DATA_KEY }}
+          webdav-password: ${{ secrets.PFEIFFERFOSTER_DATA_PASSWORD }}
+
+      - name: Run model-evidence shard
+        env:
+          EVENT_SHARD_INDEX: ${{ matrix.event.event_shard_index }}
+          SHARD_EVENTS: ${{ matrix.event.events_spec }}
+        run: |
+          set -euo pipefail
+          out_dir="results/model-evidence-shard-${EVENT_SHARD_INDEX}"
+          python scripts/benchmark_model_evidence.py \
+            --dataset-root "${DATASET_ROOT}" \
+            --session "${SESSION}" \
+            --events "${SHARD_EVENTS}" \
+            --models "${MODELS}" \
+            --candidate-top-k "${CANDIDATE_TOP_K}" \
+            --stationary-sigma-cm "${STATIONARY_SIGMA_CM}" \
+            --diffusion-sigma-cm "${DIFFUSION_SIGMA_CM}" \
+            --momentum-sigma-cm "${MOMENTUM_SIGMA_CM}" \
+            --velocity-decay "${VELOCITY_DECAY}" \
+            --mode-stickiness "${MODE_STICKINESS}" \
+            --time-bin-s "${TIME_BIN_S}" \
+            --bin-size-cm "${BIN_SIZE_CM}" \
+            --smoothing-sigma-bins "${SMOOTHING_SIGMA_BINS}" \
+            --min-speed-cm-s "${MIN_SPEED_CM_S}" \
+            --output "${out_dir}" \
+            --continue-on-error
+
+      - name: Upload model-evidence shard
+        uses: actions/upload-artifact@v7
+        with:
+          name: model-evidence-event-shard-${{ github.run_id }}-${{ matrix.event.event_shard_index }}
+          path: results/model-evidence-shard-${{ matrix.event.event_shard_index }}/
+          if-no-files-found: error
+
+  aggregate:
+    name: Aggregate model evidence
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    needs: [plan-event-shards, model-evidence-shard]
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Install package
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e .
+
+      - name: Download model-evidence shards
+        uses: actions/download-artifact@v7
+        with:
+          pattern: model-evidence-event-shard-${{ github.run_id }}-*
+          path: artifacts/model-evidence-shards
+
+      - name: Aggregate model-evidence shards
+        run: |
+          set -euo pipefail
+          python scripts/aggregate_model_evidence_shards.py \
+            --shard-glob "artifacts/model-evidence-shards/**/event_model_evidence.csv" \
+            --output results/model-evidence
+
+      - name: Validate aggregate output
+        env:
+          EXPECTED_EVENTS: ${{ needs.plan-event-shards.outputs.event_count }}
+        run: |
+          set -euo pipefail
+          for required_file in \
+            event_model_evidence.csv \
+            model_evidence_summary.csv \
+            best_model_counts.csv \
+            event_model_pivot_log_evidence.csv \
+            event_model_pivot_relative_log_evidence.csv \
+            event_model_pivot_model_probability.csv; do
+            test -s "results/model-evidence/${required_file}" || {
+              echo "Missing results/model-evidence/${required_file}" >&2
+              exit 1
+            }
+          done
+          python - <<'PY'
+          import os
+          import pandas as pd
+
+          scores = pd.read_csv("results/model-evidence/event_model_evidence.csv")
+          expected_events = int(os.environ["EXPECTED_EVENTS"])
+          expected_models = len(os.environ["MODELS"].split())
+          observed_events = int(scores["event_index"].nunique())
+          expected_rows = expected_events * expected_models
+          if observed_events != expected_events:
+              raise SystemExit(f"Expected {expected_events} events, observed {observed_events}")
+          if len(scores) != expected_rows:
+              raise SystemExit(f"Expected {expected_rows} rows, observed {len(scores)}")
+          if "status" in scores and int((scores["status"] != "success").sum()) != 0:
+              raise SystemExit("Event-sharded model evidence contains failed rows")
+          print(f"Validated {len(scores)} rows across {observed_events} events and {expected_models} models.")
+          PY
+
+      - name: Show model-evidence summary
+        run: |
+          python - <<'PY'
+          import pandas as pd
+          scores = pd.read_csv("results/model-evidence/event_model_evidence.csv")
+          summary = pd.read_csv("results/model-evidence/model_evidence_summary.csv")
+          counts = pd.read_csv("results/model-evidence/best_model_counts.csv")
+          print(summary.to_string(index=False))
+          print("\nBest-model counts:")
+          print(counts.to_string(index=False))
+          print("\nRows:", len(scores))
+          print("Failures:", int((scores["status"] != "success").sum()) if "status" in scores else 0)
+          PY
+
+      - name: Upload model-evidence results
+        uses: actions/upload-artifact@v7
+        with:
+          name: model-evidence-event-sharded-${{ github.run_id }}
+          path: results/model-evidence/
+          if-no-files-found: error

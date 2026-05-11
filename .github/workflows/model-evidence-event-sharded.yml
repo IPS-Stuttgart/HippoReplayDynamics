@@ -63,7 +63,7 @@ on:
       smoothing_sigma_bins:
         description: "Place-field smoothing sigma in spatial bins"
         required: true
-        default: "2.5"
+        default: "2.0"
       min_speed_cm_s:
         description: "Minimum speed for place-field training in cm/s"
         required: true

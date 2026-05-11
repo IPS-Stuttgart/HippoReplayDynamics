@@ -65,15 +65,17 @@ hipporeplayimm benchmark D:\Uni-Data\DataSetFromPfeifferFoster `
   --max-events 25 `
   --time-bin-ms 3 `
   --bin-size-cm 6.0 `
-  --smoothing-sigma-bins 2.5 `
+  --smoothing-sigma-bins 2.0 `
   --min-speed-cm-s 5.0 `
   --models random,stationary,sorted-spike-state-space-diffusion,sorted-spike-state-space-momentum,sorted-spike-state-space-imm `
   --output results\state_space_smoke
 ```
 
 The model-evidence workflow exposes the same encoder settings. The validated
-behavioral-decoding settings used for the first state-space replay smoke run are
-`--bin-size-cm 6.0`, `--smoothing-sigma-bins 2.5`, and `--min-speed-cm-s 5.0`.
+behavioral-decoding settings are `--decode-bin-s 1.0`, `--bin-size-cm 6.0`,
+`--smoothing-sigma-bins 2.0`, and `--min-speed-cm-s 5.0`. These settings passed
+the Rat3/Open1 and Rat3/Open2 position-validation matrix with median
+posterior-mean errors below 15 cm and median MAP errors below 20 cm.
 For full sessions, use the manual `Benchmark replay model evidence
 event-sharded` workflow so momentum-dominated state-space runs are split across
 event shards and aggregated into the standard model-evidence CSV schema.
@@ -133,9 +135,11 @@ Example smoke run:
 ```powershell
 hipporeplayimm validate-position D:\Uni-Data\DataSetFromPfeifferFoster `
   --session Rat1/Open1 `
-  --decode-bin-s 0.25 `
+  --decode-bin-s 1.0 `
   --n-folds 5 `
   --max-windows 1000 `
+  --bin-size-cm 6.0 `
+  --smoothing-sigma-bins 2.0 `
   --output results\position_validation_rat1_open1
 ```
 

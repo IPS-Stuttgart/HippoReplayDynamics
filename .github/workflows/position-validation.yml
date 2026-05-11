@@ -23,7 +23,7 @@ on:
       decode_bin_s:
         description: "Behavior decoding window width in seconds"
         required: true
-        default: "0.25"
+        default: "1.0"
       n_folds:
         description: "Number of temporal cross-validation folds"
         required: true
@@ -39,11 +39,11 @@ on:
       bin_size_cm:
         description: "Place-field spatial bin size in cm"
         required: true
-        default: "4.0"
+        default: "6.0"
       smoothing_sigma_bins:
         description: "Place-field smoothing sigma in spatial bins"
         required: true
-        default: "1.5"
+        default: "2.0"
       min_speed_cm_s:
         description: "Minimum speed for movement/training frames in cm/s"
         required: true

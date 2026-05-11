@@ -16,7 +16,14 @@ from .ground_truth import (
     compare_scores_to_ground_truth,
     generate_behavioral_ground_truth,
 )
-from .position_validation import PositionDecodingConfig, run_position_decoding_validation
+from .position_validation import (
+    VALIDATED_POSITION_BIN_SIZE_CM,
+    VALIDATED_POSITION_DECODE_BIN_S,
+    VALIDATED_POSITION_MIN_SPEED_CM_S,
+    VALIDATED_POSITION_SMOOTHING_SIGMA_BINS,
+    PositionDecodingConfig,
+    run_position_decoding_validation,
+)
 from .sweeps import (
     PyRecEstSweepConfig,
     pareto_aggregate_sweep_summary,
@@ -88,14 +95,14 @@ def main(argv: list[str] | None = None) -> int:
     validate_parser.add_argument("root")
     validate_parser.add_argument("--output", required=True)
     validate_parser.add_argument("--session")
-    validate_parser.add_argument("--decode-bin-s", type=float, default=0.25)
+    validate_parser.add_argument("--decode-bin-s", type=float, default=VALIDATED_POSITION_DECODE_BIN_S)
     validate_parser.add_argument("--n-folds", type=int, default=5)
     validate_parser.add_argument("--max-windows", type=int)
     validate_parser.add_argument("--random-seed", type=int, default=1)
     validate_parser.add_argument("--min-spikes-per-window", type=int, default=0)
-    validate_parser.add_argument("--bin-size-cm", type=float, default=4.0)
-    validate_parser.add_argument("--smoothing-sigma-bins", type=float, default=1.5)
-    validate_parser.add_argument("--min-speed-cm-s", type=float, default=5.0)
+    validate_parser.add_argument("--bin-size-cm", type=float, default=VALIDATED_POSITION_BIN_SIZE_CM)
+    validate_parser.add_argument("--smoothing-sigma-bins", type=float, default=VALIDATED_POSITION_SMOOTHING_SIGMA_BINS)
+    validate_parser.add_argument("--min-speed-cm-s", type=float, default=VALIDATED_POSITION_MIN_SPEED_CM_S)
 
     sweep_parser = subparsers.add_parser("sweep-pyrecest")
     sweep_parser.add_argument("root")
@@ -381,9 +388,9 @@ def _sweep_pyrecest(args: argparse.Namespace) -> int:
 
 
 def _add_encoding_arguments(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("--bin-size-cm", type=float, default=4.0)
-    parser.add_argument("--smoothing-sigma-bins", type=float, default=1.5)
-    parser.add_argument("--min-speed-cm-s", type=float, default=5.0)
+    parser.add_argument("--bin-size-cm", type=float, default=VALIDATED_POSITION_BIN_SIZE_CM)
+    parser.add_argument("--smoothing-sigma-bins", type=float, default=VALIDATED_POSITION_SMOOTHING_SIGMA_BINS)
+    parser.add_argument("--min-speed-cm-s", type=float, default=VALIDATED_POSITION_MIN_SPEED_CM_S)
 
 
 def _add_pyrecest_scalar_arguments(parser: argparse.ArgumentParser) -> None:

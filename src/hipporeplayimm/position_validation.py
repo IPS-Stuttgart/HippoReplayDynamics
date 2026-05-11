@@ -23,13 +23,28 @@ from .encoding import (
     _times_in_intervals,
 )
 
+VALIDATED_POSITION_DECODE_BIN_S = 1.0
+VALIDATED_POSITION_BIN_SIZE_CM = 6.0
+VALIDATED_POSITION_SMOOTHING_SIGMA_BINS = 2.0
+VALIDATED_POSITION_MIN_SPEED_CM_S = 5.0
+
+
+def validated_position_encoding_config() -> EncodingConfig:
+    """Return behavior-decoding encoder settings validated on Rat3/Open1-2."""
+
+    return EncodingConfig(
+        bin_size_cm=VALIDATED_POSITION_BIN_SIZE_CM,
+        smoothing_sigma_bins=VALIDATED_POSITION_SMOOTHING_SIGMA_BINS,
+        min_speed_cm_s=VALIDATED_POSITION_MIN_SPEED_CM_S,
+    )
+
 
 @dataclass(frozen=True)
 class PositionDecodingConfig:
     """Configuration for behavioral position-decoding validation."""
 
-    encoding: EncodingConfig = field(default_factory=EncodingConfig)
-    decode_bin_s: float = 0.25
+    encoding: EncodingConfig = field(default_factory=validated_position_encoding_config)
+    decode_bin_s: float = VALIDATED_POSITION_DECODE_BIN_S
     n_folds: int = 5
     max_windows_per_session: int | None = None
     random_seed: int = 1

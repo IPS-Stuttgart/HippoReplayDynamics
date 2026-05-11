@@ -1,0 +1,191 @@
+---
+name: Validate position decoding
+
+on:
+  workflow_dispatch:
+    inputs:
+      dataset_root:
+        description: "Dataset path after download or cache restore"
+        required: true
+        default: "data/DataSetFromPfeifferFoster"
+      session:
+        description: "Session for smoke validation and dataset validation, e.g. Rat1/Open1. Leave empty for full validation over all sessions."
+        required: false
+        default: "Rat1/Open1"
+      mode:
+        description: "Run mode"
+        required: true
+        type: choice
+        options:
+          - smoke
+          - full
+        default: smoke
+      decode_bin_s:
+        description: "Behavior decoding window width in seconds"
+        required: true
+        default: "0.25"
+      n_folds:
+        description: "Number of temporal cross-validation folds"
+        required: true
+        default: "5"
+      max_windows:
+        description: "Maximum windows per session; leave empty for all windows"
+        required: false
+        default: "500"
+      min_spikes_per_window:
+        description: "Minimum spikes required for a decoded window"
+        required: true
+        default: "0"
+      bin_size_cm:
+        description: "Place-field spatial bin size in cm"
+        required: true
+        default: "4.0"
+      smoothing_sigma_bins:
+        description: "Place-field smoothing sigma in spatial bins"
+        required: true
+        default: "1.5"
+      min_speed_cm_s:
+        description: "Minimum speed for movement/training frames in cm/s"
+        required: true
+        default: "5.0"
+      local_cache_root:
+        description: "Optional self-hosted persistent dataset cache path"
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+env:
+  DATASET_ROOT: ${{ inputs.dataset_root }}
+  SESSION: ${{ inputs.session }}
+  MODE: ${{ inputs.mode }}
+  DECODE_BIN_S: ${{ inputs.decode_bin_s }}
+  N_FOLDS: ${{ inputs.n_folds }}
+  MAX_WINDOWS: ${{ inputs.max_windows }}
+  MIN_SPIKES_PER_WINDOW: ${{ inputs.min_spikes_per_window }}
+  BIN_SIZE_CM: ${{ inputs.bin_size_cm }}
+  SMOOTHING_SIGMA_BINS: ${{ inputs.smoothing_sigma_bins }}
+  MIN_SPEED_CM_S: ${{ inputs.min_speed_cm_s }}
+  LOCAL_CACHE_ROOT: ${{ inputs.local_cache_root }}
+
+jobs:
+  position-validation:
+    name: Position decoding validation (${{ inputs.mode }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Install package
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e .
+
+      - name: Ensure Pfeiffer-Foster dataset
+        id: dataset
+        uses: ./.github/actions/ensure-pfeiffer-foster-dataset
+        with:
+          dataset-root: ${{ env.DATASET_ROOT }}
+          session: ${{ env.SESSION || 'Rat1/Open1' }}
+          cache-key: hipporeplayimm-dataset-${{ runner.os }}-rclone-v1
+          local-cache-root: ${{ env.LOCAL_CACHE_ROOT }}
+          webdav-url: ${{ secrets.PFEIFFERFOSTER_WEBDAV_URL }}
+          webdav-key: ${{ secrets.PFEIFFERFOSTER_DATA_KEY }}
+          webdav-password: ${{ secrets.PFEIFFERFOSTER_DATA_PASSWORD }}
+
+      - name: Run position decoding validation
+        run: |
+          set -euo pipefail
+          out_dir="results/position-validation-${MODE}"
+          mkdir -p "${out_dir}"
+          args=(
+            "${DATASET_ROOT}"
+            --output "${out_dir}"
+            --decode-bin-s "${DECODE_BIN_S}"
+            --n-folds "${N_FOLDS}"
+            --min-spikes-per-window "${MIN_SPIKES_PER_WINDOW}"
+            --bin-size-cm "${BIN_SIZE_CM}"
+            --smoothing-sigma-bins "${SMOOTHING_SIGMA_BINS}"
+            --min-speed-cm-s "${MIN_SPEED_CM_S}"
+          )
+          if [ "${MODE}" = "smoke" ]; then
+            args+=(--session "${SESSION:-Rat1/Open1}")
+          fi
+          if [ -n "${MAX_WINDOWS}" ]; then
+            args+=(--max-windows "${MAX_WINDOWS}")
+          fi
+          hipporeplayimm validate-position "${args[@]}"
+
+      - name: Show position validation summary
+        if: always()
+        run: |
+          summary="results/position-validation-${MODE}/position_decoding_summary.csv"
+          scores="results/position-validation-${MODE}/position_decoding_scores.csv"
+          samples="results/position-validation-${MODE}/position_decoding_samples.csv"
+          if [ -f "${summary}" ]; then
+            python - <<'PY'
+          import os
+          import pandas as pd
+          mode = os.environ["MODE"]
+          root = f"results/position-validation-{mode}"
+          summary = pd.read_csv(f"{root}/position_decoding_summary.csv")
+          print(summary.to_string(index=False))
+          for name in ("position_decoding_scores.csv", "position_decoding_samples.csv"):
+              path = f"{root}/{name}"
+              if os.path.exists(path):
+                  frame = pd.read_csv(path)
+                  print(f"\n{name}: {len(frame)} rows")
+          PY
+          else
+            echo "No position validation summary was generated."
+            find "results" -maxdepth 3 -type f | sort || true
+          fi
+
+      - name: Check smoke acceptance gate
+        if: ${{ inputs.mode == 'smoke' }}
+        run: |
+          python - <<'PY'
+          import pandas as pd
+          summary = pd.read_csv("results/position-validation-smoke/position_decoding_summary.csv")
+          if summary.empty:
+              raise SystemExit("position validation summary is empty")
+          required = {
+              "median_posterior_mean_error_cm",
+              "median_map_error_cm",
+              "mean_true_bin_probability",
+              "mean_spikes_per_window",
+              "folds",
+          }
+          missing = required - set(summary.columns)
+          if missing:
+              raise SystemExit(f"missing required summary columns: {sorted(missing)}")
+          row = summary.iloc[0]
+          checks = {
+              "median_posterior_mean_error_cm < 15": float(row["median_posterior_mean_error_cm"]) < 15.0,
+              "median_map_error_cm < 20": float(row["median_map_error_cm"]) < 20.0,
+              "mean_true_bin_probability finite": pd.notna(row["mean_true_bin_probability"]),
+              "mean_spikes_per_window nonzero": float(row["mean_spikes_per_window"]) > 0.0,
+              "folds equals requested": int(row["folds"]) == int(float("${{ inputs.n_folds }}")),
+          }
+          failed = [name for name, ok in checks.items() if not ok]
+          if failed:
+              raise SystemExit("Position validation smoke gate failed: " + ", ".join(failed))
+          print("Position validation smoke gate passed")
+          PY
+
+      - name: Upload position validation results
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: position-validation-${{ env.MODE }}
+          path: results/position-validation-${{ env.MODE }}/
+          if-no-files-found: error

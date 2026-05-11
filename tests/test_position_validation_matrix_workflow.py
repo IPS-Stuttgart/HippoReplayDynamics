@@ -12,3 +12,4 @@ def test_position_validation_matrix_workflow_uploads_ranked_summary():
     assert "position_validation_matrix_ranked.csv" in workflow
     assert "position_validation_matrix_best_by_session.csv" in workflow
     assert "pattern: position-validation-matrix-*" in workflow
+    assert "Install aggregate dependencies" in workflow

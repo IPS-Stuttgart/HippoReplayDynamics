@@ -46,6 +46,7 @@ class PositionDecodingResult:
         output = Path(output_dir)
         output.mkdir(parents=True, exist_ok=True)
         self.samples.to_csv(output / "position_decoding_samples.csv", index=False)
+        self.samples.to_csv(output / "position_decoding_scores.csv", index=False)
         self.summary.to_csv(output / "position_decoding_summary.csv", index=False)
 
 

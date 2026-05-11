@@ -7,6 +7,7 @@ def test_position_validation_matrix_workflow_uploads_ranked_summary():
     assert "name: Position validation parameter matrix" in workflow
     assert "sessions:" in workflow
     assert "decode_bin_s_values:" in workflow
+    assert 'default: "1.0 0.75 0.5"' in workflow
     assert "smoothing_sigma_bins_values:" in workflow
     assert "passes_smoke_gate" in workflow
     assert "position_validation_matrix_ranked.csv" in workflow

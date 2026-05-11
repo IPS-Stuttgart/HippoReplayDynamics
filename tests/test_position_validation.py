@@ -5,6 +5,7 @@ from hipporeplayimm.encoding import EncodingConfig
 from hipporeplayimm.position_validation import (
     PositionDecodingConfig,
     summarize_position_decoding,
+    validated_position_encoding_config,
     validate_session_position_decoding,
 )
 
@@ -56,3 +57,14 @@ def test_validate_session_position_decoding_returns_finite_cv_metrics(tmp_path):
     assert set(samples["observation_model"]) == {"sorted-spike-poisson"}
     assert set(samples["clusterless_mark_likelihood"]) == {"not_implemented"}
     assert summary.loc[0, "decode_windows"] == 9
+
+
+def test_position_decoding_config_defaults_use_validated_settings():
+    config = PositionDecodingConfig()
+    encoding = validated_position_encoding_config()
+
+    assert config.decode_bin_s == 1.0
+    assert config.encoding == encoding
+    assert encoding.bin_size_cm == 6.0
+    assert encoding.smoothing_sigma_bins == 2.0
+    assert encoding.min_speed_cm_s == 5.0

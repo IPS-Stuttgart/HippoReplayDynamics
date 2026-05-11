@@ -25,6 +25,11 @@ from hipporeplayimm.encoding import (
     fit_place_field_encoding,
 )
 from hipporeplayimm.models import CandidateKinematicModel, RandomModel, StationaryModel
+from hipporeplayimm.position_validation import (
+    VALIDATED_POSITION_BIN_SIZE_CM,
+    VALIDATED_POSITION_MIN_SPEED_CM_S,
+    VALIDATED_POSITION_SMOOTHING_SIGMA_BINS,
+)
 from hipporeplayimm.sorted_spike_state_space import SortedSpikeStateSpaceReplayModel
 
 _REQUIRED = ("Position_Data.mat", "Ripple_Events.mat", "Spike_Data.mat", "Epochs.mat")
@@ -302,9 +307,9 @@ def main() -> int:
     p.add_argument("--velocity-decay", type=float, default=0.95)
     p.add_argument("--mode-stickiness", type=float, default=0.94)
     p.add_argument("--time-bin-s", type=float, default=0.02)
-    p.add_argument("--bin-size-cm", type=float, default=4.0)
-    p.add_argument("--smoothing-sigma-bins", type=float, default=1.5)
-    p.add_argument("--min-speed-cm-s", type=float, default=5.0)
+    p.add_argument("--bin-size-cm", type=float, default=VALIDATED_POSITION_BIN_SIZE_CM)
+    p.add_argument("--smoothing-sigma-bins", type=float, default=VALIDATED_POSITION_SMOOTHING_SIGMA_BINS)
+    p.add_argument("--min-speed-cm-s", type=float, default=VALIDATED_POSITION_MIN_SPEED_CM_S)
     p.add_argument("--output", default="results/model-evidence")
     p.add_argument("--continue-on-error", action="store_true")
     args = p.parse_args()

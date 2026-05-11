@@ -74,6 +74,9 @@ hipporeplayimm benchmark D:\Uni-Data\DataSetFromPfeifferFoster `
 The model-evidence workflow exposes the same encoder settings. The validated
 behavioral-decoding settings used for the first state-space replay smoke run are
 `--bin-size-cm 6.0`, `--smoothing-sigma-bins 2.5`, and `--min-speed-cm-s 5.0`.
+For full sessions, use the manual `Benchmark replay model evidence
+event-sharded` workflow so momentum-dominated state-space runs are split across
+event shards and aggregated into the standard model-evidence CSV schema.
 
 `decode-event --output` writes `event_scores.csv` plus posterior `.npz`
 artifacts for models that expose `trajectory_log_posterior`. The batch tracking

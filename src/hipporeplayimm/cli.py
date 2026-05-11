@@ -45,6 +45,7 @@ def main(argv: list[str] | None = None) -> int:
         default="random,stationary,diffusion,momentum,imm",
         help="Comma-separated model names to benchmark.",
     )
+    _add_encoding_arguments(benchmark_parser)
     _add_pyrecest_scalar_arguments(benchmark_parser)
 
     decode_parser = subparsers.add_parser("decode-event")
@@ -59,6 +60,7 @@ def main(argv: list[str] | None = None) -> int:
         default="random,stationary,diffusion,momentum,imm",
         help="Comma-separated model names to score.",
     )
+    _add_encoding_arguments(decode_parser)
     _add_pyrecest_scalar_arguments(decode_parser)
 
     ground_truth_parser = subparsers.add_parser("ground-truth")
@@ -76,6 +78,7 @@ def main(argv: list[str] | None = None) -> int:
     compare_parser.add_argument("--ground-truth")
     compare_parser.add_argument("--candidate-top-k", type=int, default=64)
     compare_parser.add_argument("--time-bin-ms", type=float, default=20.0)
+    _add_encoding_arguments(compare_parser)
     _add_pyrecest_scalar_arguments(compare_parser)
     compare_parser.add_argument("--visit-radius-cm", type=float, default=10.0)
     compare_parser.add_argument("--min-dwell-s", type=float, default=0.2)
@@ -201,6 +204,7 @@ def _benchmark(args: argparse.Namespace) -> int:
     if args.preset != "open-field-loso":
         raise ValueError("Only --preset open-field-loso is currently implemented")
     config = BenchmarkConfig(
+        encoding=_encoding_config_from_args(args),
         emissions=EmissionConfig(time_bin_s=args.time_bin_ms / 1000.0),
         max_events_per_session=args.max_events,
         candidate_top_k=args.candidate_top_k,
@@ -226,7 +230,7 @@ def _decode_event(args: argparse.Namespace) -> int:
         available = ", ".join(sorted(sessions))
         raise KeyError(f"Unknown session {args.session!r}; available: {available}")
     session = sessions[args.session]
-    encoding = fit_place_field_encoding(session)
+    encoding = fit_place_field_encoding(session, _encoding_config_from_args(args))
     emission_config = EmissionConfig(time_bin_s=args.time_bin_ms / 1000.0)
     emissions = build_emissions(session, encoding, args.event_id, emission_config)
     rows = []
@@ -294,6 +298,7 @@ def _compare_ground_truth(args: argparse.Namespace) -> int:
         args.scores,
         ground_truth=args.ground_truth,
         ground_truth_config=config,
+        encoding_config=_encoding_config_from_args(args),
         emission_config=EmissionConfig(time_bin_s=args.time_bin_ms / 1000.0),
         candidate_top_k=args.candidate_top_k,
         **_pyrecest_scalar_kwargs(args),
@@ -310,6 +315,14 @@ def _ground_truth_config_from_args(args: argparse.Namespace) -> GroundTruthConfi
         visit_radius_cm=args.visit_radius_cm,
         min_dwell_s=args.min_dwell_s,
         future_horizon_s=args.future_horizon_s,
+    )
+
+
+def _encoding_config_from_args(args: argparse.Namespace) -> EncodingConfig:
+    return EncodingConfig(
+        bin_size_cm=args.bin_size_cm,
+        smoothing_sigma_bins=args.smoothing_sigma_bins,
+        min_speed_cm_s=args.min_speed_cm_s,
     )
 
 
@@ -365,6 +378,12 @@ def _sweep_pyrecest(args: argparse.Namespace) -> int:
             )
         )
     return 0
+
+
+def _add_encoding_arguments(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--bin-size-cm", type=float, default=4.0)
+    parser.add_argument("--smoothing-sigma-bins", type=float, default=1.5)
+    parser.add_argument("--min-speed-cm-s", type=float, default=5.0)
 
 
 def _add_pyrecest_scalar_arguments(parser: argparse.ArgumentParser) -> None:

@@ -1,0 +1,132 @@
+---
+name: Select state-space replay parameters
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_repo:
+        description: "Repository containing both sweep-summary artifacts"
+        required: true
+        default: "IPS-Stuttgart/HippoReplayIMM"
+      evidence_run_id:
+        description: "State-space evidence sweep workflow run ID"
+        required: true
+        default: ""
+      evidence_artifact_name:
+        description: "State-space evidence sweep summary artifact name"
+        required: true
+        default: "state-space-evidence-sweep-summary-<run_id>"
+      recovery_run_id:
+        description: "Simulation recovery sweep workflow run ID"
+        required: true
+        default: ""
+      recovery_artifact_name:
+        description: "Simulation recovery sweep summary artifact name"
+        required: true
+        default: "simulation-recovery-sweep-summary-<run_id>"
+      min_momentum_recovery_accuracy:
+        description: "Minimum synthetic momentum recovery accuracy"
+        required: true
+        default: "0.5"
+      min_overall_recovery_accuracy:
+        description: "Minimum synthetic overall recovery accuracy"
+        required: true
+        default: "0.5"
+      max_failures:
+        description: "Maximum allowed failed synthetic recovery events"
+        required: true
+        default: "0"
+      output_dir:
+        description: "Output directory for parameter-selection CSVs"
+        required: true
+        default: "results/state-space-parameter-selection"
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: select-state-space-parameters-${{ github.repository }}-${{ inputs.evidence_run_id }}-${{ inputs.recovery_run_id }}
+  cancel-in-progress: false
+
+env:
+  SOURCE_REPO: ${{ inputs.source_repo }}
+  EVIDENCE_RUN_ID: ${{ inputs.evidence_run_id }}
+  EVIDENCE_ARTIFACT_NAME: ${{ inputs.evidence_artifact_name }}
+  RECOVERY_RUN_ID: ${{ inputs.recovery_run_id }}
+  RECOVERY_ARTIFACT_NAME: ${{ inputs.recovery_artifact_name }}
+  MIN_MOMENTUM_RECOVERY_ACCURACY: ${{ inputs.min_momentum_recovery_accuracy }}
+  MIN_OVERALL_RECOVERY_ACCURACY: ${{ inputs.min_overall_recovery_accuracy }}
+  MAX_FAILURES: ${{ inputs.max_failures }}
+  OUTPUT_DIR: ${{ inputs.output_dir }}
+
+jobs:
+  select:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check inputs
+        run: |
+          set -euo pipefail
+          test -n "$EVIDENCE_RUN_ID"
+          test -n "$RECOVERY_RUN_ID"
+          test "$EVIDENCE_ARTIFACT_NAME" != "state-space-evidence-sweep-summary-<run_id>"
+          test "$RECOVERY_ARTIFACT_NAME" != "simulation-recovery-sweep-summary-<run_id>"
+
+      - name: Check out repository
+        uses: actions/checkout@v5
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install pandas
+
+      - name: Download evidence sweep summary
+        uses: actions/download-artifact@v7
+        with:
+          repository: ${{ env.SOURCE_REPO }}
+          run-id: ${{ env.EVIDENCE_RUN_ID }}
+          name: ${{ env.EVIDENCE_ARTIFACT_NAME }}
+          path: artifacts/evidence
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Download simulation recovery sweep summary
+        uses: actions/download-artifact@v7
+        with:
+          repository: ${{ env.SOURCE_REPO }}
+          run-id: ${{ env.RECOVERY_RUN_ID }}
+          name: ${{ env.RECOVERY_ARTIFACT_NAME }}
+          path: artifacts/recovery
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Select state-space parameters
+        run: |
+          python scripts/select_state_space_parameters.py \
+            --evidence artifacts/evidence \
+            --recovery artifacts/recovery \
+            --output "$OUTPUT_DIR" \
+            --min-momentum-recovery-accuracy "$MIN_MOMENTUM_RECOVERY_ACCURACY" \
+            --min-overall-recovery-accuracy "$MIN_OVERALL_RECOVERY_ACCURACY" \
+            --max-failures "$MAX_FAILURES"
+          test -f "$OUTPUT_DIR/state_space_parameter_decision_table.csv"
+          test -f "$OUTPUT_DIR/state_space_parameter_candidates.csv"
+          test -f "$OUTPUT_DIR/state_space_parameter_recommendation.csv"
+          test -f "$OUTPUT_DIR/state_space_parameter_selection_manifest.json"
+          test -f "$OUTPUT_DIR/state_space_selected_workflow_inputs.yml"
+          test -f "$OUTPUT_DIR/state_space_selected_cli_args.txt"
+
+      - name: Upload parameter selection
+        uses: actions/upload-artifact@v4
+        with:
+          name: state-space-parameter-selection-${{ github.run_id }}
+          path: |
+            ${{ env.OUTPUT_DIR }}/state_space_parameter_decision_table.csv
+            ${{ env.OUTPUT_DIR }}/state_space_parameter_candidates.csv
+            ${{ env.OUTPUT_DIR }}/state_space_parameter_recommendation.csv
+            ${{ env.OUTPUT_DIR }}/state_space_parameter_selection_manifest.json
+            ${{ env.OUTPUT_DIR }}/state_space_selected_workflow_inputs.yml
+            ${{ env.OUTPUT_DIR }}/state_space_selected_cli_args.txt

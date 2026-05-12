@@ -1,0 +1,458 @@
+---
+name: State-space replay evidence parameter sweep
+
+on:
+  workflow_dispatch:
+    inputs:
+      dataset_root:
+        description: "Dataset path after download or cache restore"
+        required: true
+        default: "data/DataSetFromPfeifferFoster"
+      session:
+        description: "Session ID, e.g. Rat1/Open1"
+        required: true
+        default: "Rat1/Open1"
+      events:
+        description: "Event IDs/ranges, all, run, or run:0-25"
+        required: true
+        default: "run"
+      max_events:
+        description: "Maximum selected events to score; empty means no cap"
+        required: false
+        default: "25"
+      models:
+        description: "Space-separated state-space models"
+        required: true
+        default: "sorted-spike-state-space-diffusion sorted-spike-state-space-momentum sorted-spike-state-space-imm"
+      state_space_diffusion_sigma_cm_sqrt_s_values:
+        description: "Whitespace- or comma-separated diffusion noise values in cm/sqrt(s)"
+        required: true
+        default: "40 60 85 110"
+      state_space_momentum_sigma_cm_sqrt_s_values:
+        description: "Whitespace- or comma-separated momentum noise values in cm/sqrt(s)"
+        required: true
+        default: "40 60 85 110"
+      state_space_momentum_initial_sigma_cm_sqrt_s_values:
+        description: "Whitespace- or comma-separated momentum initial transition noise values in cm/sqrt(s)"
+        required: true
+        default: "85"
+      state_space_momentum_velocity_decay_values:
+        description: "Whitespace- or comma-separated momentum velocity decay values"
+        required: true
+        default: "0.8 0.9 0.95 0.98"
+      state_space_momentum_candidate_top_k_values:
+        description: "Whitespace- or comma-separated momentum candidate support sizes"
+        required: true
+        default: "128"
+      state_space_stationary_sigma_cm:
+        description: "State-space stationary transition sigma in cm"
+        required: true
+        default: "2.0"
+      state_space_max_step_sigma:
+        description: "State-space Gaussian transition truncation radius in sigmas"
+        required: true
+        default: "4.0"
+      state_space_imm_mode_stickiness:
+        description: "State-space IMM mode-transition stickiness"
+        required: true
+        default: "0.95"
+      time_bin_s:
+        description: "Ripple decoding time-bin width in seconds"
+        required: true
+        default: "0.003"
+      bin_size_cm:
+        description: "Place-field spatial bin size in centimeters"
+        required: true
+        default: "6.0"
+      smoothing_sigma_bins:
+        description: "Place-field smoothing sigma in spatial bins"
+        required: true
+        default: "2.0"
+      min_speed_cm_s:
+        description: "Minimum speed for place-field training in cm/s"
+        required: true
+        default: "5.0"
+      local_cache_root:
+        description: "Optional self-hosted persistent dataset cache path"
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: state-space-evidence-sweep-${{ github.repository }}-${{ inputs.session }}-${{ inputs.events }}-${{ inputs.max_events }}-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  DATASET_ROOT: ${{ inputs.dataset_root }}
+  SESSION: ${{ inputs.session }}
+  EVENTS: ${{ inputs.events }}
+  MAX_EVENTS: ${{ inputs.max_events }}
+  MODELS: ${{ inputs.models }}
+  STATE_SPACE_STATIONARY_SIGMA_CM: ${{ inputs.state_space_stationary_sigma_cm }}
+  STATE_SPACE_MAX_STEP_SIGMA: ${{ inputs.state_space_max_step_sigma }}
+  STATE_SPACE_IMM_MODE_STICKINESS: ${{ inputs.state_space_imm_mode_stickiness }}
+  TIME_BIN_S: ${{ inputs.time_bin_s }}
+  BIN_SIZE_CM: ${{ inputs.bin_size_cm }}
+  SMOOTHING_SIGMA_BINS: ${{ inputs.smoothing_sigma_bins }}
+  MIN_SPEED_CM_S: ${{ inputs.min_speed_cm_s }}
+  LOCAL_CACHE_ROOT: ${{ inputs.local_cache_root }}
+  OMP_NUM_THREADS: "1"
+  OPENBLAS_NUM_THREADS: "1"
+  MKL_NUM_THREADS: "1"
+
+jobs:
+  plan-matrix:
+    name: Plan state-space sweep
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      matrix: ${{ steps.plan.outputs.matrix }}
+      count: ${{ steps.plan.outputs.count }}
+
+    steps:
+      - name: Build state-space parameter matrix
+        id: plan
+        env:
+          DIFFUSION_VALUES: ${{ inputs.state_space_diffusion_sigma_cm_sqrt_s_values }}
+          MOMENTUM_VALUES: ${{ inputs.state_space_momentum_sigma_cm_sqrt_s_values }}
+          MOMENTUM_INITIAL_VALUES: ${{ inputs.state_space_momentum_initial_sigma_cm_sqrt_s_values }}
+          DECAY_VALUES: ${{ inputs.state_space_momentum_velocity_decay_values }}
+          TOP_K_VALUES: ${{ inputs.state_space_momentum_candidate_top_k_values }}
+        run: |
+          set -euo pipefail
+          mkdir -p results/state-space-evidence-sweep-plan
+          python - <<'PY'
+          import csv
+          import itertools
+          import json
+          import os
+          import re
+          from pathlib import Path
+
+          def split_values(name: str) -> list[str]:
+              values = [item.strip() for item in re.split(r"[\s,]+", os.environ[name]) if item.strip()]
+              if not values:
+                  raise SystemExit(f"{name} must contain at least one value")
+              return values
+
+          def validate_float(name: str, values: list[str]) -> None:
+              for value in values:
+                  try:
+                      float(value)
+                  except ValueError as exc:
+                      raise SystemExit(f"{name} contains non-numeric value {value!r}") from exc
+
+          def validate_int(name: str, values: list[str]) -> None:
+              for value in values:
+                  try:
+                      parsed = int(value)
+                  except ValueError as exc:
+                      raise SystemExit(f"{name} contains non-integer value {value!r}") from exc
+                  if parsed <= 0:
+                      raise SystemExit(f"{name} values must be positive")
+
+          def slug(value: str) -> str:
+              return re.sub(r"[^A-Za-z0-9]+", "-", value).strip("-").lower()
+
+          diffusion_values = split_values("DIFFUSION_VALUES")
+          momentum_values = split_values("MOMENTUM_VALUES")
+          momentum_initial_values = split_values("MOMENTUM_INITIAL_VALUES")
+          decay_values = split_values("DECAY_VALUES")
+          top_k_values = split_values("TOP_K_VALUES")
+          for name, values in (
+              ("DIFFUSION_VALUES", diffusion_values),
+              ("MOMENTUM_VALUES", momentum_values),
+              ("MOMENTUM_INITIAL_VALUES", momentum_initial_values),
+              ("DECAY_VALUES", decay_values),
+          ):
+              validate_float(name, values)
+          validate_int("TOP_K_VALUES", top_k_values)
+
+          rows = []
+          for diffusion, momentum, momentum_initial, decay, top_k in itertools.product(
+              diffusion_values, momentum_values, momentum_initial_values, decay_values, top_k_values
+          ):
+              matrix_id = (
+                  f"d{slug(diffusion)}-"
+                  f"m{slug(momentum)}-"
+                  f"mi{slug(momentum_initial)}-"
+                  f"decay{slug(decay)}-"
+                  f"k{slug(top_k)}"
+              )
+              rows.append(
+                  {
+                      "id": matrix_id,
+                      "state_space_diffusion_sigma_cm_sqrt_s": diffusion,
+                      "state_space_momentum_sigma_cm_sqrt_s": momentum,
+                      "state_space_momentum_initial_sigma_cm_sqrt_s": momentum_initial,
+                      "state_space_momentum_velocity_decay": decay,
+                      "state_space_momentum_candidate_top_k": top_k,
+                  }
+              )
+          if len(rows) > 256:
+              raise SystemExit(f"Matrix has {len(rows)} jobs; reduce inputs to 256 or fewer")
+
+          out_dir = Path("results/state-space-evidence-sweep-plan")
+          (out_dir / "matrix.json").write_text(json.dumps(rows, indent=2), encoding="utf-8")
+          with (out_dir / "matrix.csv").open("w", newline="", encoding="utf-8") as handle:
+              writer = csv.DictWriter(handle, fieldnames=list(rows[0]))
+              writer.writeheader()
+              writer.writerows(rows)
+
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+              output.write(f"matrix={json.dumps({'include': rows}, separators=(',', ':'))}\n")
+              output.write(f"count={len(rows)}\n")
+          print(f"Planned {len(rows)} state-space evidence configurations.")
+          PY
+
+      - name: Upload state-space sweep plan
+        uses: actions/upload-artifact@v7
+        with:
+          name: state-space-evidence-sweep-plan-${{ github.run_id }}
+          path: results/state-space-evidence-sweep-plan/
+          if-no-files-found: error
+
+  evidence-sweep:
+    name: d=${{ matrix.state_space_diffusion_sigma_cm_sqrt_s }} m=${{ matrix.state_space_momentum_sigma_cm_sqrt_s }} decay=${{ matrix.state_space_momentum_velocity_decay }}
+    needs: plan-matrix
+    if: ${{ needs.plan-matrix.outputs.count != '0' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    strategy:
+      fail-fast: false
+      max-parallel: 4
+      matrix: ${{ fromJSON(needs.plan-matrix.outputs.matrix) }}
+
+    env:
+      MATRIX_ID: ${{ matrix.id }}
+      STATE_SPACE_DIFFUSION_SIGMA_CM_SQRT_S: ${{ matrix.state_space_diffusion_sigma_cm_sqrt_s }}
+      STATE_SPACE_MOMENTUM_SIGMA_CM_SQRT_S: ${{ matrix.state_space_momentum_sigma_cm_sqrt_s }}
+      STATE_SPACE_MOMENTUM_INITIAL_SIGMA_CM_SQRT_S: ${{ matrix.state_space_momentum_initial_sigma_cm_sqrt_s }}
+      STATE_SPACE_MOMENTUM_VELOCITY_DECAY: ${{ matrix.state_space_momentum_velocity_decay }}
+      STATE_SPACE_MOMENTUM_CANDIDATE_TOP_K: ${{ matrix.state_space_momentum_candidate_top_k }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Install package
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e .
+
+      - name: Ensure Pfeiffer-Foster dataset
+        id: dataset
+        uses: ./.github/actions/ensure-pfeiffer-foster-dataset
+        with:
+          dataset-root: ${{ env.DATASET_ROOT }}
+          session: ${{ env.SESSION }}
+          cache-key: hipporeplayimm-dataset-${{ runner.os }}-rclone-v1
+          local-cache-root: ${{ env.LOCAL_CACHE_ROOT }}
+          webdav-url: ${{ secrets.PFEIFFERFOSTER_WEBDAV_URL }}
+          webdav-key: ${{ secrets.PFEIFFERFOSTER_DATA_KEY }}
+          webdav-password: ${{ secrets.PFEIFFERFOSTER_DATA_PASSWORD }}
+
+      - name: Run state-space evidence configuration
+        run: |
+          set -euo pipefail
+          out_dir="results/state-space-evidence-sweep/${MATRIX_ID}"
+          max_events_args=()
+          if [ -n "${MAX_EVENTS}" ]; then
+            max_events_args+=(--max-events "${MAX_EVENTS}")
+          fi
+          python scripts/benchmark_model_evidence.py \
+            --dataset-root "${DATASET_ROOT}" \
+            --session "${SESSION}" \
+            --events "${EVENTS}" \
+            "${max_events_args[@]}" \
+            --models "${MODELS}" \
+            --state-space-stationary-sigma-cm "${STATE_SPACE_STATIONARY_SIGMA_CM}" \
+            --state-space-diffusion-sigma-cm-sqrt-s "${STATE_SPACE_DIFFUSION_SIGMA_CM_SQRT_S}" \
+            --state-space-max-step-sigma "${STATE_SPACE_MAX_STEP_SIGMA}" \
+            --state-space-imm-mode-stickiness "${STATE_SPACE_IMM_MODE_STICKINESS}" \
+            --state-space-momentum-sigma-cm-sqrt-s "${STATE_SPACE_MOMENTUM_SIGMA_CM_SQRT_S}" \
+            --state-space-momentum-initial-sigma-cm-sqrt-s "${STATE_SPACE_MOMENTUM_INITIAL_SIGMA_CM_SQRT_S}" \
+            --state-space-momentum-velocity-decay "${STATE_SPACE_MOMENTUM_VELOCITY_DECAY}" \
+            --state-space-momentum-candidate-top-k "${STATE_SPACE_MOMENTUM_CANDIDATE_TOP_K}" \
+            --time-bin-s "${TIME_BIN_S}" \
+            --bin-size-cm "${BIN_SIZE_CM}" \
+            --smoothing-sigma-bins "${SMOOTHING_SIGMA_BINS}" \
+            --min-speed-cm-s "${MIN_SPEED_CM_S}" \
+            --output "${out_dir}" \
+            --continue-on-error
+
+      - name: Annotate sweep outputs
+        if: always()
+        run: |
+          python - <<'PY'
+          import os
+          from pathlib import Path
+
+          import pandas as pd
+
+          out_dir = Path("results/state-space-evidence-sweep") / os.environ["MATRIX_ID"]
+          metadata = {
+              "matrix_id": os.environ["MATRIX_ID"],
+              "requested_session": os.environ["SESSION"],
+              "events_spec": os.environ["EVENTS"],
+              "max_events": os.environ["MAX_EVENTS"],
+              "models_requested": os.environ["MODELS"],
+              "state_space_stationary_sigma_cm": float(os.environ["STATE_SPACE_STATIONARY_SIGMA_CM"]),
+              "state_space_diffusion_sigma_cm_sqrt_s": float(os.environ["STATE_SPACE_DIFFUSION_SIGMA_CM_SQRT_S"]),
+              "state_space_max_step_sigma": float(os.environ["STATE_SPACE_MAX_STEP_SIGMA"]),
+              "state_space_imm_mode_stickiness": float(os.environ["STATE_SPACE_IMM_MODE_STICKINESS"]),
+              "state_space_momentum_sigma_cm_sqrt_s": float(os.environ["STATE_SPACE_MOMENTUM_SIGMA_CM_SQRT_S"]),
+              "state_space_momentum_initial_sigma_cm_sqrt_s": float(os.environ["STATE_SPACE_MOMENTUM_INITIAL_SIGMA_CM_SQRT_S"]),
+              "state_space_momentum_velocity_decay": float(os.environ["STATE_SPACE_MOMENTUM_VELOCITY_DECAY"]),
+              "state_space_momentum_candidate_top_k": int(os.environ["STATE_SPACE_MOMENTUM_CANDIDATE_TOP_K"]),
+              "time_bin_s": float(os.environ["TIME_BIN_S"]),
+              "bin_size_cm": float(os.environ["BIN_SIZE_CM"]),
+              "smoothing_sigma_bins": float(os.environ["SMOOTHING_SIGMA_BINS"]),
+              "min_speed_cm_s": float(os.environ["MIN_SPEED_CM_S"]),
+          }
+          for path in out_dir.glob("*.csv"):
+              frame = pd.read_csv(path)
+              for key, value in metadata.items():
+                  frame[key] = value
+              frame.to_csv(path, index=False)
+          PY
+
+      - name: Upload state-space evidence result
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: state-space-evidence-sweep-${{ matrix.id }}
+          path: results/state-space-evidence-sweep/${{ matrix.id }}/
+          if-no-files-found: warn
+
+  aggregate:
+    name: Aggregate state-space sweep
+    needs:
+      - plan-matrix
+      - evidence-sweep
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+
+      - name: Install aggregate dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install pandas
+
+      - name: Download state-space sweep artifacts
+        uses: actions/download-artifact@v7
+        with:
+          path: artifacts/state-space-evidence-sweep
+          pattern: state-space-evidence-sweep-*
+
+      - name: Aggregate state-space sweep summaries
+        run: |
+          set -euo pipefail
+          mkdir -p results/state-space-evidence-sweep-summary
+          python - <<'PY'
+          from pathlib import Path
+
+          import pandas as pd
+
+          root = Path("artifacts/state-space-evidence-sweep")
+          score_paths = sorted(root.glob("**/event_model_evidence.csv"))
+          summary_paths = sorted(root.glob("**/model_evidence_summary.csv"))
+          if not score_paths:
+              raise SystemExit("No event_model_evidence.csv files found")
+          scores = pd.concat((pd.read_csv(path) for path in score_paths), ignore_index=True)
+          summaries = pd.concat((pd.read_csv(path) for path in summary_paths), ignore_index=True)
+          out_dir = Path("results/state-space-evidence-sweep-summary")
+
+          scores.to_csv(out_dir / "state_space_evidence_sweep_event_scores.csv", index=False)
+          summaries.to_csv(out_dir / "state_space_evidence_sweep_model_summaries.csv", index=False)
+
+          key_cols = [
+              "matrix_id",
+              "requested_session",
+              "events_spec",
+              "max_events",
+              "state_space_diffusion_sigma_cm_sqrt_s",
+              "state_space_momentum_sigma_cm_sqrt_s",
+              "state_space_momentum_initial_sigma_cm_sqrt_s",
+              "state_space_momentum_velocity_decay",
+              "state_space_momentum_candidate_top_k",
+          ]
+          pivot = scores.pivot_table(
+              index=key_cols + ["session", "event_index"],
+              columns="model",
+              values="log_evidence",
+              aggfunc="first",
+          ).reset_index()
+          momentum_col = "sorted-spike-state-space-momentum"
+          diffusion_col = "sorted-spike-state-space-diffusion"
+          imm_col = "sorted-spike-state-space-imm"
+          if momentum_col in pivot and diffusion_col in pivot:
+              pivot["momentum_minus_diffusion_log_evidence"] = pivot[momentum_col] - pivot[diffusion_col]
+              pivot["momentum_beats_diffusion"] = pivot["momentum_minus_diffusion_log_evidence"] > 0.0
+          if momentum_col in pivot and imm_col in pivot:
+              pivot["momentum_minus_imm_log_evidence"] = pivot[momentum_col] - pivot[imm_col]
+              pivot["momentum_beats_imm"] = pivot["momentum_minus_imm_log_evidence"] > 0.0
+
+          metrics = []
+          for matrix_id, group in pivot.groupby("matrix_id", sort=False):
+              row = {col: group.iloc[0][col] for col in key_cols}
+              row["events"] = int(group["event_index"].nunique())
+              if "momentum_minus_diffusion_log_evidence" in group:
+                  row["mean_momentum_minus_diffusion_log_evidence"] = float(group["momentum_minus_diffusion_log_evidence"].mean())
+                  row["median_momentum_minus_diffusion_log_evidence"] = float(group["momentum_minus_diffusion_log_evidence"].median())
+                  row["momentum_beats_diffusion_events"] = int(group["momentum_beats_diffusion"].sum())
+              if "momentum_minus_imm_log_evidence" in group:
+                  row["mean_momentum_minus_imm_log_evidence"] = float(group["momentum_minus_imm_log_evidence"].mean())
+                  row["median_momentum_minus_imm_log_evidence"] = float(group["momentum_minus_imm_log_evidence"].median())
+                  row["momentum_beats_imm_events"] = int(group["momentum_beats_imm"].sum())
+              metrics.append(row)
+          comparison = pd.DataFrame(metrics)
+          sort_cols = [
+              "momentum_beats_diffusion_events",
+              "median_momentum_minus_diffusion_log_evidence",
+              "mean_momentum_minus_diffusion_log_evidence",
+          ]
+          present_sort_cols = [col for col in sort_cols if col in comparison.columns]
+          ranked = (
+              comparison.sort_values(present_sort_cols, ascending=[False] * len(present_sort_cols), kind="stable")
+              if present_sort_cols
+              else comparison
+          )
+          comparison.to_csv(out_dir / "state_space_evidence_sweep_config_comparison.csv", index=False)
+          ranked.to_csv(out_dir / "state_space_evidence_sweep_config_ranked.csv", index=False)
+
+          momentum_summaries = summaries[summaries["model"] == momentum_col]
+          if not momentum_summaries.empty:
+              momentum_ranked = momentum_summaries.sort_values(
+                  ["wins", "median_relative_log_evidence", "mean_relative_log_evidence"],
+                  ascending=[False, False, False],
+                  kind="stable",
+              )
+              momentum_ranked.to_csv(out_dir / "state_space_evidence_sweep_momentum_ranked.csv", index=False)
+              print("Best momentum configurations:")
+              print(momentum_ranked.head(10).to_string(index=False))
+          print("\nBest paired momentum-vs-diffusion configurations:")
+          print(ranked.head(10).to_string(index=False))
+          PY
+
+      - name: Upload aggregate state-space sweep summary
+        uses: actions/upload-artifact@v7
+        with:
+          name: state-space-evidence-sweep-summary-${{ github.run_id }}
+          path: results/state-space-evidence-sweep-summary/
+          if-no-files-found: error

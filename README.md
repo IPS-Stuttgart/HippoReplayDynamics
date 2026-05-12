@@ -104,6 +104,31 @@ posterior-mean errors below 15 cm and median MAP errors below 20 cm.
 For full sessions, use the manual `Benchmark replay model evidence
 event-sharded` workflow so momentum-dominated state-space runs are split across
 event shards and aggregated into the standard model-evidence CSV schema.
+The `diffusion_sigma_cm` and `momentum_sigma_cm` workflow inputs configure only
+the older candidate-pruned models. For `sorted-spike-state-space-*` models, use
+the explicit `state_space_*` workflow inputs, whose defaults reproduce the
+original state-space settings: diffusion and momentum noise `85 cm/sqrt(s)`,
+momentum velocity decay `0.95`, and momentum candidate support `128` bins.
+Use the manual `State-space replay evidence parameter sweep` workflow for a
+small reproducible dynamics sweep over state-space diffusion noise, momentum
+noise, initial momentum noise, velocity decay, and momentum candidate support.
+The default sweep is capped to 25 `Rat1/Open1` run events and uploads ranked
+momentum-vs-diffusion comparison tables.
+Use the manual `Simulation recovery parameter sweep` workflow as the matching
+synthetic-identifiability check. Its default grid simulates known diffusion and
+momentum events from the fitted sorted-spike Poisson encoder and ranks settings
+by momentum recovery accuracy before those settings are trusted on real replay.
+After both sweeps finish, use the manual `Select state-space replay parameters`
+workflow to join the evidence and recovery summary artifacts. It uploads a
+decision table, the configurations passing the recovery gate, and one
+recommended parameter row, plus a JSON provenance manifest, workflow-input YAML,
+and CLI arguments for the selected settings, so real-event evidence is not tuned
+without synthetic identifiability.
+Use the manual `Compare model-evidence runs` workflow to compare KD-aligned and
+state-space model-evidence artifacts by canonical dynamics labels. The default
+inputs compare the KD-aligned event-sharded run `25435692734` against the
+state-space event-sharded run `25744259285` and upload best-model agreement,
+canonical crosstabs, and paired relative-evidence tables.
 
 `decode-event --output` writes `event_scores.csv` plus posterior `.npz`
 artifacts for models that expose `trajectory_log_posterior`. The batch tracking

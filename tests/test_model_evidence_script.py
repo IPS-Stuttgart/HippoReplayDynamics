@@ -33,6 +33,14 @@ def test_model_evidence_accepts_sorted_spike_state_space_models():
         momentum_sigma_cm=12.0,
         velocity_decay=0.95,
         mode_stickiness=0.94,
+        state_space_stationary_sigma_cm=1.5,
+        state_space_diffusion_sigma_cm_sqrt_s=42.0,
+        state_space_max_step_sigma=3.0,
+        state_space_imm_mode_stickiness=0.91,
+        state_space_momentum_sigma_cm_sqrt_s=43.0,
+        state_space_momentum_initial_sigma_cm_sqrt_s=44.0,
+        state_space_momentum_velocity_decay=0.8,
+        state_space_momentum_candidate_top_k=17,
     )
 
     models = _models(args)
@@ -45,6 +53,12 @@ def test_model_evidence_accepts_sorted_spike_state_space_models():
     assert models["sorted-spike-state-space-diffusion"].name == "sorted-spike-state-space-diffusion"
     assert models["sorted-spike-state-space-momentum"].name == "sorted-spike-state-space-momentum"
     assert models["sorted-spike-state-space-imm"].name == "sorted-spike-state-space-imm"
+    assert models["sorted-spike-state-space-diffusion"].config.diffusion_sigma_cm_sqrt_s == 42.0
+    assert models["sorted-spike-state-space-momentum"].config.momentum_sigma_cm_sqrt_s == 43.0
+    assert models["sorted-spike-state-space-momentum"].config.momentum_initial_sigma_cm_sqrt_s == 44.0
+    assert models["sorted-spike-state-space-momentum"].config.momentum_velocity_decay == 0.8
+    assert models["sorted-spike-state-space-momentum"].config.momentum_candidate_top_k == 17
+    assert models["sorted-spike-state-space-imm"].config.imm_mode_stickiness == 0.91
 
 
 def test_model_evidence_classifies_state_space_families():

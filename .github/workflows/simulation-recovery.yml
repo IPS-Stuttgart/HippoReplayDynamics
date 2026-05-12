@@ -40,6 +40,42 @@ on:
         description: "Synthetic replay time-bin width in milliseconds"
         required: true
         default: "3.0"
+      state_space_sigma_cm_sqrt_s:
+        description: "Shared state-space noise in cm/sqrt(s), used when specific noise inputs are empty"
+        required: true
+        default: "85.0"
+      state_space_stationary_sigma_cm:
+        description: "State-space stationary transition sigma in cm"
+        required: true
+        default: "2.0"
+      state_space_diffusion_sigma_cm_sqrt_s:
+        description: "State-space diffusion noise in cm/sqrt(s); empty uses shared noise"
+        required: false
+        default: ""
+      state_space_max_step_sigma:
+        description: "State-space Gaussian transition truncation radius in sigmas"
+        required: true
+        default: "4.0"
+      state_space_imm_mode_stickiness:
+        description: "State-space IMM mode-transition stickiness"
+        required: true
+        default: "0.95"
+      state_space_momentum_sigma_cm_sqrt_s:
+        description: "State-space momentum process noise in cm/sqrt(s); empty uses shared noise"
+        required: false
+        default: ""
+      state_space_momentum_initial_sigma_cm_sqrt_s:
+        description: "State-space momentum initial transition noise in cm/sqrt(s); empty uses shared noise"
+        required: false
+        default: ""
+      state_space_momentum_velocity_decay:
+        description: "State-space momentum velocity decay"
+        required: true
+        default: "0.95"
+      state_space_momentum_candidate_top_k:
+        description: "State-space momentum candidate spatial bins per time bin"
+        required: true
+        default: "128"
       bin_size_cm:
         description: "Place-field spatial bin size in centimeters"
         required: true
@@ -70,6 +106,15 @@ env:
   MODELS: ${{ inputs.models }}
   RANDOM_SEED: ${{ inputs.random_seed }}
   TIME_BIN_MS: ${{ inputs.time_bin_ms }}
+  STATE_SPACE_SIGMA_CM_SQRT_S: ${{ inputs.state_space_sigma_cm_sqrt_s }}
+  STATE_SPACE_STATIONARY_SIGMA_CM: ${{ inputs.state_space_stationary_sigma_cm }}
+  STATE_SPACE_DIFFUSION_SIGMA_CM_SQRT_S: ${{ inputs.state_space_diffusion_sigma_cm_sqrt_s }}
+  STATE_SPACE_MAX_STEP_SIGMA: ${{ inputs.state_space_max_step_sigma }}
+  STATE_SPACE_IMM_MODE_STICKINESS: ${{ inputs.state_space_imm_mode_stickiness }}
+  STATE_SPACE_MOMENTUM_SIGMA_CM_SQRT_S: ${{ inputs.state_space_momentum_sigma_cm_sqrt_s }}
+  STATE_SPACE_MOMENTUM_INITIAL_SIGMA_CM_SQRT_S: ${{ inputs.state_space_momentum_initial_sigma_cm_sqrt_s }}
+  STATE_SPACE_MOMENTUM_VELOCITY_DECAY: ${{ inputs.state_space_momentum_velocity_decay }}
+  STATE_SPACE_MOMENTUM_CANDIDATE_TOP_K: ${{ inputs.state_space_momentum_candidate_top_k }}
   BIN_SIZE_CM: ${{ inputs.bin_size_cm }}
   SMOOTHING_SIGMA_BINS: ${{ inputs.smoothing_sigma_bins }}
   MIN_SPEED_CM_S: ${{ inputs.min_speed_cm_s }}
@@ -111,6 +156,23 @@ jobs:
       - name: Run simulation recovery benchmark
         run: |
           set -euo pipefail
+          state_space_args=(
+            --state-space-sigma-cm-sqrt-s "${STATE_SPACE_SIGMA_CM_SQRT_S}"
+            --state-space-stationary-sigma-cm "${STATE_SPACE_STATIONARY_SIGMA_CM}"
+            --state-space-max-step-sigma "${STATE_SPACE_MAX_STEP_SIGMA}"
+            --state-space-imm-mode-stickiness "${STATE_SPACE_IMM_MODE_STICKINESS}"
+            --state-space-momentum-velocity-decay "${STATE_SPACE_MOMENTUM_VELOCITY_DECAY}"
+            --state-space-momentum-candidate-top-k "${STATE_SPACE_MOMENTUM_CANDIDATE_TOP_K}"
+          )
+          if [ -n "${STATE_SPACE_DIFFUSION_SIGMA_CM_SQRT_S}" ]; then
+            state_space_args+=(--state-space-diffusion-sigma-cm-sqrt-s "${STATE_SPACE_DIFFUSION_SIGMA_CM_SQRT_S}")
+          fi
+          if [ -n "${STATE_SPACE_MOMENTUM_SIGMA_CM_SQRT_S}" ]; then
+            state_space_args+=(--state-space-momentum-sigma-cm-sqrt-s "${STATE_SPACE_MOMENTUM_SIGMA_CM_SQRT_S}")
+          fi
+          if [ -n "${STATE_SPACE_MOMENTUM_INITIAL_SIGMA_CM_SQRT_S}" ]; then
+            state_space_args+=(--state-space-momentum-initial-sigma-cm-sqrt-s "${STATE_SPACE_MOMENTUM_INITIAL_SIGMA_CM_SQRT_S}")
+          fi
           hipporeplayimm simulate-recovery "${DATASET_ROOT}" \
             --session "${SESSION}" \
             --events "${EVENTS}" \
@@ -120,6 +182,7 @@ jobs:
             --models "${MODELS}" \
             --random-seed "${RANDOM_SEED}" \
             --time-bin-ms "${TIME_BIN_MS}" \
+            "${state_space_args[@]}" \
             --bin-size-cm "${BIN_SIZE_CM}" \
             --smoothing-sigma-bins "${SMOOTHING_SIGMA_BINS}" \
             --min-speed-cm-s "${MIN_SPEED_CM_S}" \

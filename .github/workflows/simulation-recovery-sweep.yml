@@ -1,0 +1,469 @@
+---
+name: Simulation recovery parameter sweep
+
+on:
+  workflow_dispatch:
+    inputs:
+      dataset_root:
+        description: "Dataset path after download or cache restore"
+        required: true
+        default: "data/DataSetFromPfeifferFoster"
+      session:
+        description: "Session ID, e.g. Rat1/Open1"
+        required: true
+        default: "Rat1/Open1"
+      events:
+        description: "Template event IDs/ranges, all, run, or run:0-25"
+        required: true
+        default: "run"
+      max_template_events:
+        description: "Maximum selected real ripple templates"
+        required: true
+        default: "25"
+      events_per_model:
+        description: "Synthetic events generated for each true dynamics model"
+        required: true
+        default: "6"
+      true_models:
+        description: "Space-separated true dynamics to simulate"
+        required: true
+        default: "diffusion momentum"
+      models:
+        description: "Space-separated scoring models"
+        required: true
+        default: "sorted-spike-state-space-diffusion sorted-spike-state-space-momentum sorted-spike-state-space-imm"
+      random_seed:
+        description: "Base simulation random seed; matrix jobs add their index"
+        required: true
+        default: "1"
+      state_space_diffusion_sigma_cm_sqrt_s_values:
+        description: "Whitespace- or comma-separated diffusion noise values in cm/sqrt(s)"
+        required: true
+        default: "60 85 110"
+      state_space_momentum_sigma_cm_sqrt_s_values:
+        description: "Whitespace- or comma-separated momentum noise values in cm/sqrt(s)"
+        required: true
+        default: "60 85 110"
+      state_space_momentum_initial_sigma_cm_sqrt_s_values:
+        description: "Whitespace- or comma-separated momentum initial transition noise values in cm/sqrt(s)"
+        required: true
+        default: "85"
+      state_space_momentum_velocity_decay_values:
+        description: "Whitespace- or comma-separated momentum velocity decay values"
+        required: true
+        default: "0.8 0.95 0.98"
+      state_space_momentum_candidate_top_k_values:
+        description: "Whitespace- or comma-separated momentum candidate support sizes"
+        required: true
+        default: "128"
+      state_space_stationary_sigma_cm:
+        description: "State-space stationary transition sigma in cm"
+        required: true
+        default: "2.0"
+      state_space_max_step_sigma:
+        description: "State-space Gaussian transition truncation radius in sigmas"
+        required: true
+        default: "4.0"
+      state_space_imm_mode_stickiness:
+        description: "State-space IMM mode-transition stickiness"
+        required: true
+        default: "0.95"
+      time_bin_ms:
+        description: "Synthetic replay time-bin width in milliseconds"
+        required: true
+        default: "3.0"
+      bin_size_cm:
+        description: "Place-field spatial bin size in centimeters"
+        required: true
+        default: "6.0"
+      smoothing_sigma_bins:
+        description: "Place-field smoothing sigma in spatial bins"
+        required: true
+        default: "2.0"
+      min_speed_cm_s:
+        description: "Minimum speed for place-field training in cm/s"
+        required: true
+        default: "5.0"
+      local_cache_root:
+        description: "Optional self-hosted persistent dataset cache path"
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: simulation-recovery-sweep-${{ github.repository }}-${{ inputs.session }}-${{ inputs.events }}-${{ inputs.max_template_events }}-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  DATASET_ROOT: ${{ inputs.dataset_root }}
+  SESSION: ${{ inputs.session }}
+  EVENTS: ${{ inputs.events }}
+  MAX_TEMPLATE_EVENTS: ${{ inputs.max_template_events }}
+  EVENTS_PER_MODEL: ${{ inputs.events_per_model }}
+  TRUE_MODELS: ${{ inputs.true_models }}
+  MODELS: ${{ inputs.models }}
+  BASE_RANDOM_SEED: ${{ inputs.random_seed }}
+  STATE_SPACE_STATIONARY_SIGMA_CM: ${{ inputs.state_space_stationary_sigma_cm }}
+  STATE_SPACE_MAX_STEP_SIGMA: ${{ inputs.state_space_max_step_sigma }}
+  STATE_SPACE_IMM_MODE_STICKINESS: ${{ inputs.state_space_imm_mode_stickiness }}
+  TIME_BIN_MS: ${{ inputs.time_bin_ms }}
+  BIN_SIZE_CM: ${{ inputs.bin_size_cm }}
+  SMOOTHING_SIGMA_BINS: ${{ inputs.smoothing_sigma_bins }}
+  MIN_SPEED_CM_S: ${{ inputs.min_speed_cm_s }}
+  LOCAL_CACHE_ROOT: ${{ inputs.local_cache_root }}
+  OMP_NUM_THREADS: "1"
+  OPENBLAS_NUM_THREADS: "1"
+  MKL_NUM_THREADS: "1"
+
+jobs:
+  plan-matrix:
+    name: Plan simulation recovery sweep
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      matrix: ${{ steps.plan.outputs.matrix }}
+      count: ${{ steps.plan.outputs.count }}
+
+    steps:
+      - name: Build simulation recovery parameter matrix
+        id: plan
+        env:
+          DIFFUSION_VALUES: ${{ inputs.state_space_diffusion_sigma_cm_sqrt_s_values }}
+          MOMENTUM_VALUES: ${{ inputs.state_space_momentum_sigma_cm_sqrt_s_values }}
+          MOMENTUM_INITIAL_VALUES: ${{ inputs.state_space_momentum_initial_sigma_cm_sqrt_s_values }}
+          DECAY_VALUES: ${{ inputs.state_space_momentum_velocity_decay_values }}
+          TOP_K_VALUES: ${{ inputs.state_space_momentum_candidate_top_k_values }}
+        run: |
+          set -euo pipefail
+          mkdir -p results/simulation-recovery-sweep-plan
+          python - <<'PY'
+          import csv
+          import itertools
+          import json
+          import os
+          import re
+          from pathlib import Path
+
+          def split_values(name: str) -> list[str]:
+              values = [item.strip() for item in re.split(r"[\s,]+", os.environ[name]) if item.strip()]
+              if not values:
+                  raise SystemExit(f"{name} must contain at least one value")
+              return values
+
+          def validate_float(name: str, values: list[str]) -> None:
+              for value in values:
+                  try:
+                      float(value)
+                  except ValueError as exc:
+                      raise SystemExit(f"{name} contains non-numeric value {value!r}") from exc
+
+          def validate_int(name: str, values: list[str]) -> None:
+              for value in values:
+                  try:
+                      parsed = int(value)
+                  except ValueError as exc:
+                      raise SystemExit(f"{name} contains non-integer value {value!r}") from exc
+                  if parsed <= 0:
+                      raise SystemExit(f"{name} values must be positive")
+
+          def slug(value: str) -> str:
+              return re.sub(r"[^A-Za-z0-9]+", "-", value).strip("-").lower()
+
+          diffusion_values = split_values("DIFFUSION_VALUES")
+          momentum_values = split_values("MOMENTUM_VALUES")
+          momentum_initial_values = split_values("MOMENTUM_INITIAL_VALUES")
+          decay_values = split_values("DECAY_VALUES")
+          top_k_values = split_values("TOP_K_VALUES")
+          for name, values in (
+              ("DIFFUSION_VALUES", diffusion_values),
+              ("MOMENTUM_VALUES", momentum_values),
+              ("MOMENTUM_INITIAL_VALUES", momentum_initial_values),
+              ("DECAY_VALUES", decay_values),
+          ):
+              validate_float(name, values)
+          validate_int("TOP_K_VALUES", top_k_values)
+
+          rows = []
+          for index, (diffusion, momentum, momentum_initial, decay, top_k) in enumerate(
+              itertools.product(diffusion_values, momentum_values, momentum_initial_values, decay_values, top_k_values)
+          ):
+              matrix_id = (
+                  f"d{slug(diffusion)}-"
+                  f"m{slug(momentum)}-"
+                  f"mi{slug(momentum_initial)}-"
+                  f"decay{slug(decay)}-"
+                  f"k{slug(top_k)}"
+              )
+              rows.append(
+                  {
+                      "matrix_index": index,
+                      "id": matrix_id,
+                      "state_space_diffusion_sigma_cm_sqrt_s": diffusion,
+                      "state_space_momentum_sigma_cm_sqrt_s": momentum,
+                      "state_space_momentum_initial_sigma_cm_sqrt_s": momentum_initial,
+                      "state_space_momentum_velocity_decay": decay,
+                      "state_space_momentum_candidate_top_k": top_k,
+                  }
+              )
+          if len(rows) > 256:
+              raise SystemExit(f"Matrix has {len(rows)} jobs; reduce inputs to 256 or fewer")
+
+          out_dir = Path("results/simulation-recovery-sweep-plan")
+          (out_dir / "matrix.json").write_text(json.dumps(rows, indent=2), encoding="utf-8")
+          with (out_dir / "matrix.csv").open("w", newline="", encoding="utf-8") as handle:
+              writer = csv.DictWriter(handle, fieldnames=list(rows[0]))
+              writer.writeheader()
+              writer.writerows(rows)
+
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+              output.write(f"matrix={json.dumps({'include': rows}, separators=(',', ':'))}\n")
+              output.write(f"count={len(rows)}\n")
+          print(f"Planned {len(rows)} simulation recovery configurations.")
+          PY
+
+      - name: Upload simulation recovery sweep plan
+        uses: actions/upload-artifact@v7
+        with:
+          name: simulation-recovery-sweep-plan-${{ github.run_id }}
+          path: results/simulation-recovery-sweep-plan/
+          if-no-files-found: error
+
+  simulation-recovery-sweep:
+    name: d=${{ matrix.state_space_diffusion_sigma_cm_sqrt_s }} m=${{ matrix.state_space_momentum_sigma_cm_sqrt_s }} decay=${{ matrix.state_space_momentum_velocity_decay }}
+    needs: plan-matrix
+    if: ${{ needs.plan-matrix.outputs.count != '0' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    strategy:
+      fail-fast: false
+      max-parallel: 4
+      matrix: ${{ fromJSON(needs.plan-matrix.outputs.matrix) }}
+
+    env:
+      MATRIX_INDEX: ${{ matrix.matrix_index }}
+      MATRIX_ID: ${{ matrix.id }}
+      STATE_SPACE_DIFFUSION_SIGMA_CM_SQRT_S: ${{ matrix.state_space_diffusion_sigma_cm_sqrt_s }}
+      STATE_SPACE_MOMENTUM_SIGMA_CM_SQRT_S: ${{ matrix.state_space_momentum_sigma_cm_sqrt_s }}
+      STATE_SPACE_MOMENTUM_INITIAL_SIGMA_CM_SQRT_S: ${{ matrix.state_space_momentum_initial_sigma_cm_sqrt_s }}
+      STATE_SPACE_MOMENTUM_VELOCITY_DECAY: ${{ matrix.state_space_momentum_velocity_decay }}
+      STATE_SPACE_MOMENTUM_CANDIDATE_TOP_K: ${{ matrix.state_space_momentum_candidate_top_k }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Install package
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e .
+
+      - name: Ensure Pfeiffer-Foster dataset
+        id: dataset
+        uses: ./.github/actions/ensure-pfeiffer-foster-dataset
+        with:
+          dataset-root: ${{ env.DATASET_ROOT }}
+          session: ${{ env.SESSION }}
+          cache-key: hipporeplayimm-dataset-${{ runner.os }}-rclone-v1
+          local-cache-root: ${{ env.LOCAL_CACHE_ROOT }}
+          webdav-url: ${{ secrets.PFEIFFERFOSTER_WEBDAV_URL }}
+          webdav-key: ${{ secrets.PFEIFFERFOSTER_DATA_KEY }}
+          webdav-password: ${{ secrets.PFEIFFERFOSTER_DATA_PASSWORD }}
+
+      - name: Run simulation recovery configuration
+        run: |
+          set -euo pipefail
+          out_dir="results/simulation-recovery-sweep/${MATRIX_ID}"
+          random_seed=$((BASE_RANDOM_SEED + MATRIX_INDEX))
+          hipporeplayimm simulate-recovery "${DATASET_ROOT}" \
+            --session "${SESSION}" \
+            --events "${EVENTS}" \
+            --max-template-events "${MAX_TEMPLATE_EVENTS}" \
+            --events-per-model "${EVENTS_PER_MODEL}" \
+            --true-models "${TRUE_MODELS}" \
+            --models "${MODELS}" \
+            --random-seed "${random_seed}" \
+            --time-bin-ms "${TIME_BIN_MS}" \
+            --state-space-stationary-sigma-cm "${STATE_SPACE_STATIONARY_SIGMA_CM}" \
+            --state-space-diffusion-sigma-cm-sqrt-s "${STATE_SPACE_DIFFUSION_SIGMA_CM_SQRT_S}" \
+            --state-space-max-step-sigma "${STATE_SPACE_MAX_STEP_SIGMA}" \
+            --state-space-imm-mode-stickiness "${STATE_SPACE_IMM_MODE_STICKINESS}" \
+            --state-space-momentum-sigma-cm-sqrt-s "${STATE_SPACE_MOMENTUM_SIGMA_CM_SQRT_S}" \
+            --state-space-momentum-initial-sigma-cm-sqrt-s "${STATE_SPACE_MOMENTUM_INITIAL_SIGMA_CM_SQRT_S}" \
+            --state-space-momentum-velocity-decay "${STATE_SPACE_MOMENTUM_VELOCITY_DECAY}" \
+            --state-space-momentum-candidate-top-k "${STATE_SPACE_MOMENTUM_CANDIDATE_TOP_K}" \
+            --bin-size-cm "${BIN_SIZE_CM}" \
+            --smoothing-sigma-bins "${SMOOTHING_SIGMA_BINS}" \
+            --min-speed-cm-s "${MIN_SPEED_CM_S}" \
+            --output "${out_dir}" \
+            --continue-on-error
+
+      - name: Annotate recovery outputs
+        if: always()
+        run: |
+          python - <<'PY'
+          import os
+          from pathlib import Path
+
+          import pandas as pd
+
+          out_dir = Path("results/simulation-recovery-sweep") / os.environ["MATRIX_ID"]
+          metadata = {
+              "matrix_id": os.environ["MATRIX_ID"],
+              "matrix_index": int(os.environ["MATRIX_INDEX"]),
+              "requested_session": os.environ["SESSION"],
+              "events_spec": os.environ["EVENTS"],
+              "max_template_events": int(os.environ["MAX_TEMPLATE_EVENTS"]),
+              "events_per_model": int(os.environ["EVENTS_PER_MODEL"]),
+              "true_models_requested": os.environ["TRUE_MODELS"],
+              "models_requested": os.environ["MODELS"],
+              "state_space_stationary_sigma_cm": float(os.environ["STATE_SPACE_STATIONARY_SIGMA_CM"]),
+              "state_space_diffusion_sigma_cm_sqrt_s": float(os.environ["STATE_SPACE_DIFFUSION_SIGMA_CM_SQRT_S"]),
+              "state_space_max_step_sigma": float(os.environ["STATE_SPACE_MAX_STEP_SIGMA"]),
+              "state_space_imm_mode_stickiness": float(os.environ["STATE_SPACE_IMM_MODE_STICKINESS"]),
+              "state_space_momentum_sigma_cm_sqrt_s": float(os.environ["STATE_SPACE_MOMENTUM_SIGMA_CM_SQRT_S"]),
+              "state_space_momentum_initial_sigma_cm_sqrt_s": float(os.environ["STATE_SPACE_MOMENTUM_INITIAL_SIGMA_CM_SQRT_S"]),
+              "state_space_momentum_velocity_decay": float(os.environ["STATE_SPACE_MOMENTUM_VELOCITY_DECAY"]),
+              "state_space_momentum_candidate_top_k": int(os.environ["STATE_SPACE_MOMENTUM_CANDIDATE_TOP_K"]),
+              "time_bin_ms": float(os.environ["TIME_BIN_MS"]),
+              "bin_size_cm": float(os.environ["BIN_SIZE_CM"]),
+              "smoothing_sigma_bins": float(os.environ["SMOOTHING_SIGMA_BINS"]),
+              "min_speed_cm_s": float(os.environ["MIN_SPEED_CM_S"]),
+          }
+          for path in out_dir.glob("*.csv"):
+              frame = pd.read_csv(path)
+              for key, value in metadata.items():
+                  frame[key] = value
+              frame.to_csv(path, index=False)
+          PY
+
+      - name: Upload simulation recovery sweep result
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: simulation-recovery-sweep-${{ matrix.id }}
+          path: results/simulation-recovery-sweep/${{ matrix.id }}/
+          if-no-files-found: warn
+
+  aggregate:
+    name: Aggregate simulation recovery sweep
+    needs:
+      - plan-matrix
+      - simulation-recovery-sweep
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+
+      - name: Install aggregate dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install pandas
+
+      - name: Download simulation recovery sweep artifacts
+        uses: actions/download-artifact@v7
+        with:
+          path: artifacts/simulation-recovery-sweep
+          pattern: simulation-recovery-sweep-*
+
+      - name: Aggregate simulation recovery sweep summaries
+        run: |
+          set -euo pipefail
+          mkdir -p results/simulation-recovery-sweep-summary
+          python - <<'PY'
+          from pathlib import Path
+
+          import pandas as pd
+
+          root = Path("artifacts/simulation-recovery-sweep")
+          score_paths = sorted(root.glob("**/simulation_recovery_event_scores.csv"))
+          summary_paths = sorted(root.glob("**/simulation_recovery_summary.csv"))
+          confusion_paths = sorted(root.glob("**/simulation_recovery_confusion_matrix.csv"))
+          if not score_paths:
+              raise SystemExit("No simulation_recovery_event_scores.csv files found")
+          scores = pd.concat((pd.read_csv(path) for path in score_paths), ignore_index=True)
+          summaries = pd.concat((pd.read_csv(path) for path in summary_paths), ignore_index=True)
+          confusions = pd.concat((pd.read_csv(path) for path in confusion_paths), ignore_index=True)
+          out_dir = Path("results/simulation-recovery-sweep-summary")
+          scores.to_csv(out_dir / "simulation_recovery_sweep_event_scores.csv", index=False)
+          summaries.to_csv(out_dir / "simulation_recovery_sweep_summary.csv", index=False)
+          confusions.to_csv(out_dir / "simulation_recovery_sweep_confusion_matrix.csv", index=False)
+
+          key_cols = [
+              "matrix_id",
+              "requested_session",
+              "events_spec",
+              "max_template_events",
+              "events_per_model",
+              "state_space_diffusion_sigma_cm_sqrt_s",
+              "state_space_momentum_sigma_cm_sqrt_s",
+              "state_space_momentum_initial_sigma_cm_sqrt_s",
+              "state_space_momentum_velocity_decay",
+              "state_space_momentum_candidate_top_k",
+          ]
+          rows = []
+          failures = scores.assign(is_failure=scores["status"] != "success").groupby("matrix_id", as_index=False)["is_failure"].sum()
+          for matrix_id, group in summaries.groupby("matrix_id", sort=False):
+              row = {col: group.iloc[0][col] for col in key_cols}
+              by_true = group.set_index("true_model")
+              row["failures"] = int(failures.loc[failures["matrix_id"] == matrix_id, "is_failure"].iloc[0])
+              if "overall" in by_true.index:
+                  row["overall_recovery_accuracy"] = float(by_true.loc["overall", "recovery_accuracy"])
+                  row["overall_recovered_events"] = int(by_true.loc["overall", "recovered_events"])
+                  row["overall_simulated_events"] = int(by_true.loc["overall", "simulated_events"])
+              for true_model in ("diffusion", "momentum", "stationary", "fragmented"):
+                  if true_model in by_true.index:
+                      row[f"{true_model}_recovery_accuracy"] = float(by_true.loc[true_model, "recovery_accuracy"])
+                      row[f"{true_model}_recovered_events"] = int(by_true.loc[true_model, "recovered_events"])
+                      row[f"{true_model}_most_common_best_model"] = str(by_true.loc[true_model, "most_common_best_model"])
+              rows.append(row)
+          comparison = pd.DataFrame(rows)
+          sort_cols = [
+              "momentum_recovery_accuracy",
+              "overall_recovery_accuracy",
+              "diffusion_recovery_accuracy",
+              "failures",
+          ]
+          present = [col for col in sort_cols if col in comparison.columns]
+          ascending_by_col = {
+              "momentum_recovery_accuracy": False,
+              "overall_recovery_accuracy": False,
+              "diffusion_recovery_accuracy": False,
+              "failures": True,
+          }
+          ascending = [ascending_by_col[col] for col in present]
+          ranked = comparison.sort_values(present, ascending=ascending, kind="stable") if present else comparison
+          comparison.to_csv(out_dir / "simulation_recovery_sweep_config_comparison.csv", index=False)
+          ranked.to_csv(out_dir / "simulation_recovery_sweep_config_ranked.csv", index=False)
+          if "momentum_recovery_accuracy" in comparison.columns:
+              momentum_ranked = comparison.sort_values(
+                  ["momentum_recovery_accuracy", "overall_recovery_accuracy", "failures"],
+                  ascending=[False, False, True],
+                  kind="stable",
+              )
+              momentum_ranked.to_csv(out_dir / "simulation_recovery_sweep_momentum_ranked.csv", index=False)
+              print("Best momentum recovery configurations:")
+              print(momentum_ranked.head(10).to_string(index=False))
+          print("\nBest overall recovery configurations:")
+          print(ranked.head(10).to_string(index=False))
+          PY
+
+      - name: Upload aggregate simulation recovery sweep summary
+        uses: actions/upload-artifact@v7
+        with:
+          name: simulation-recovery-sweep-summary-${{ github.run_id }}
+          path: results/simulation-recovery-sweep-summary/
+          if-no-files-found: error

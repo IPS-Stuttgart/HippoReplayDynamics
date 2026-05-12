@@ -124,6 +124,12 @@ def main(argv: list[str] | None = None) -> int:
     recovery_parser.add_argument("--random-seed", type=int, default=1)
     recovery_parser.add_argument("--time-bin-ms", type=float, default=3.0)
     recovery_parser.add_argument("--state-space-sigma-cm-sqrt-s", type=float, default=85.0)
+    recovery_parser.add_argument("--state-space-stationary-sigma-cm", type=float, default=2.0)
+    recovery_parser.add_argument("--state-space-diffusion-sigma-cm-sqrt-s", type=float, default=None)
+    recovery_parser.add_argument("--state-space-max-step-sigma", type=float, default=4.0)
+    recovery_parser.add_argument("--state-space-imm-mode-stickiness", type=float, default=0.95)
+    recovery_parser.add_argument("--state-space-momentum-sigma-cm-sqrt-s", type=float, default=None)
+    recovery_parser.add_argument("--state-space-momentum-initial-sigma-cm-sqrt-s", type=float, default=None)
     recovery_parser.add_argument("--state-space-momentum-velocity-decay", type=float, default=0.95)
     recovery_parser.add_argument("--state-space-momentum-candidate-top-k", type=int, default=128)
     recovery_parser.add_argument("--candidate-top-k", type=int, default=64)
@@ -241,10 +247,14 @@ def _validate_position(args: argparse.Namespace) -> int:
 
 
 def _simulate_recovery(args: argparse.Namespace) -> int:
+    shared_sigma = args.state_space_sigma_cm_sqrt_s
     state_space = StateSpaceDecoderConfig(
-        diffusion_sigma_cm_sqrt_s=args.state_space_sigma_cm_sqrt_s,
-        momentum_sigma_cm_sqrt_s=args.state_space_sigma_cm_sqrt_s,
-        momentum_initial_sigma_cm_sqrt_s=args.state_space_sigma_cm_sqrt_s,
+        stationary_sigma_cm=args.state_space_stationary_sigma_cm,
+        diffusion_sigma_cm_sqrt_s=args.state_space_diffusion_sigma_cm_sqrt_s or shared_sigma,
+        max_step_sigma=args.state_space_max_step_sigma,
+        imm_mode_stickiness=args.state_space_imm_mode_stickiness,
+        momentum_sigma_cm_sqrt_s=args.state_space_momentum_sigma_cm_sqrt_s or shared_sigma,
+        momentum_initial_sigma_cm_sqrt_s=args.state_space_momentum_initial_sigma_cm_sqrt_s or shared_sigma,
         momentum_velocity_decay=args.state_space_momentum_velocity_decay,
         momentum_candidate_top_k=args.state_space_momentum_candidate_top_k,
     )

@@ -29,9 +29,9 @@ on:
         required: true
         default: "5"
       max_windows:
-        description: "Maximum windows per session; leave empty for all windows"
+        description: "Maximum windows per session; empty means smoke uses 500 and full is uncapped"
         required: false
-        default: "500"
+        default: ""
       min_spikes_per_window:
         description: "Minimum spikes required for a decoded window"
         required: true
@@ -117,12 +117,17 @@ jobs:
             --smoothing-sigma-bins "${SMOOTHING_SIGMA_BINS}"
             --min-speed-cm-s "${MIN_SPEED_CM_S}"
           )
+          effective_max_windows="${MAX_WINDOWS}"
+          if [ -z "${effective_max_windows}" ] && [ "${MODE}" = "smoke" ]; then
+            effective_max_windows="500"
+          fi
           if [ "${MODE}" = "smoke" ]; then
             args+=(--session "${SESSION:-Rat1/Open1}")
           fi
-          if [ -n "${MAX_WINDOWS}" ]; then
-            args+=(--max-windows "${MAX_WINDOWS}")
+          if [ -n "${effective_max_windows}" ]; then
+            args+=(--max-windows "${effective_max_windows}")
           fi
+          echo "Position-validation max windows per session: ${effective_max_windows:-uncapped}"
           hipporeplayimm validate-position "${args[@]}"
 
       - name: Show position validation summary

@@ -114,6 +114,10 @@ small reproducible dynamics sweep over state-space diffusion noise, momentum
 noise, initial momentum noise, velocity decay, and momentum candidate support.
 The default sweep is capped to 25 `Rat1/Open1` run events and uploads ranked
 momentum-vs-diffusion comparison tables.
+Use the manual `Simulation recovery parameter sweep` workflow as the matching
+synthetic-identifiability check. Its default grid simulates known diffusion and
+momentum events from the fitted sorted-spike Poisson encoder and ranks settings
+by momentum recovery accuracy before those settings are trusted on real replay.
 
 `decode-event --output` writes `event_scores.csv` plus posterior `.npz`
 artifacts for models that expose `trajectory_log_posterior`. The batch tracking

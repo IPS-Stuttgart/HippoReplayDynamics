@@ -118,6 +118,11 @@ Use the manual `Simulation recovery parameter sweep` workflow as the matching
 synthetic-identifiability check. Its default grid simulates known diffusion and
 momentum events from the fitted sorted-spike Poisson encoder and ranks settings
 by momentum recovery accuracy before those settings are trusted on real replay.
+After both sweeps finish, use the manual `Select state-space replay parameters`
+workflow to join the evidence and recovery summary artifacts. It uploads a
+decision table, the configurations passing the recovery gate, and one
+recommended parameter row, so real-event evidence is not tuned without synthetic
+identifiability.
 Use the manual `Compare model-evidence runs` workflow to compare KD-aligned and
 state-space model-evidence artifacts by canonical dynamics labels. The default
 inputs compare the KD-aligned event-sharded run `25435692734` against the

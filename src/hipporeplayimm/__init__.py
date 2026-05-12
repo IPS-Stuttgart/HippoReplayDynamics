@@ -19,6 +19,11 @@ from .models import (
     score_model,
 )
 from .pyrecest_models import PyRecEstGoalParticleModel
+from .simulation_recovery import (
+    SimulationRecoveryConfig,
+    SimulationRecoveryResult,
+    run_session_simulation_recovery,
+)
 from .sweeps import (
     PyRecEstSweepConfig,
     PyRecEstSweepResult,
@@ -40,6 +45,8 @@ __all__ = [
     "PyRecEstSweepResult",
     "RandomModel",
     "ReplaySession",
+    "SimulationRecoveryConfig",
+    "SimulationRecoveryResult",
     "StationaryModel",
     "build_emissions",
     "compare_scores_to_ground_truth",
@@ -50,6 +57,7 @@ __all__ = [
     "load_open_field_sessions",
     "run_open_field_benchmark",
     "run_pyrecest_parameter_sweep",
+    "run_session_simulation_recovery",
     "score_model",
     "write_pyrecest_sweep_outputs",
 ]

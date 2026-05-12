@@ -118,6 +118,11 @@ Use the manual `Simulation recovery parameter sweep` workflow as the matching
 synthetic-identifiability check. Its default grid simulates known diffusion and
 momentum events from the fitted sorted-spike Poisson encoder and ranks settings
 by momentum recovery accuracy before those settings are trusted on real replay.
+Use the manual `Compare model-evidence runs` workflow to compare KD-aligned and
+state-space model-evidence artifacts by canonical dynamics labels. The default
+inputs compare the KD-aligned event-sharded run `25435692734` against the
+state-space event-sharded run `25744259285` and upload best-model agreement,
+canonical crosstabs, and paired relative-evidence tables.
 
 `decode-event --output` writes `event_scores.csv` plus posterior `.npz`
 artifacts for models that expose `trajectory_log_posterior`. The batch tracking

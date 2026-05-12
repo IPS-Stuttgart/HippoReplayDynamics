@@ -91,6 +91,14 @@ def test_select_parameters_prefers_recovered_momentum_config(tmp_path):
     assert (output / "state_space_parameter_decision_table.csv").exists()
     assert (output / "state_space_parameter_candidates.csv").exists()
     assert (output / "state_space_parameter_recommendation.csv").exists()
+    workflow_inputs = (output / "state_space_selected_workflow_inputs.yml").read_text(encoding="utf-8")
+    assert "state_space_diffusion_sigma_cm_sqrt_s: 60.0" in workflow_inputs
+    assert "state_space_momentum_velocity_decay: 0.95" in workflow_inputs
+    assert "state_space_momentum_candidate_top_k: 128" in workflow_inputs
+    cli_args = (output / "state_space_selected_cli_args.txt").read_text(encoding="utf-8")
+    assert "--state-space-diffusion-sigma-cm-sqrt-s 60.0" in cli_args
+    assert "--state-space-momentum-velocity-decay 0.95" in cli_args
+    assert "--state-space-momentum-candidate-top-k 128" in cli_args
 
 
 def test_select_parameters_falls_back_when_no_config_passes_gate(tmp_path):
@@ -130,3 +138,5 @@ def test_select_parameters_falls_back_when_no_config_passes_gate(tmp_path):
     recommendation = tables["recommendation"].iloc[0]
     assert not bool(recommendation["passes_recovery_gate"])
     assert "No configuration passed" in recommendation["recommendation_note"]
+    assert (output / "state_space_selected_workflow_inputs.yml").exists()
+    assert (output / "state_space_selected_cli_args.txt").exists()

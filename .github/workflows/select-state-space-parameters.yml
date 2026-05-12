@@ -115,6 +115,8 @@ jobs:
           test -f "$OUTPUT_DIR/state_space_parameter_decision_table.csv"
           test -f "$OUTPUT_DIR/state_space_parameter_candidates.csv"
           test -f "$OUTPUT_DIR/state_space_parameter_recommendation.csv"
+          test -f "$OUTPUT_DIR/state_space_selected_workflow_inputs.yml"
+          test -f "$OUTPUT_DIR/state_space_selected_cli_args.txt"
 
       - name: Upload parameter selection
         uses: actions/upload-artifact@v4
@@ -124,3 +126,5 @@ jobs:
             ${{ env.OUTPUT_DIR }}/state_space_parameter_decision_table.csv
             ${{ env.OUTPUT_DIR }}/state_space_parameter_candidates.csv
             ${{ env.OUTPUT_DIR }}/state_space_parameter_recommendation.csv
+            ${{ env.OUTPUT_DIR }}/state_space_selected_workflow_inputs.yml
+            ${{ env.OUTPUT_DIR }}/state_space_selected_cli_args.txt

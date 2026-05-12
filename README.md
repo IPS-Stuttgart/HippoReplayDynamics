@@ -121,7 +121,8 @@ by momentum recovery accuracy before those settings are trusted on real replay.
 After both sweeps finish, use the manual `Select state-space replay parameters`
 workflow to join the evidence and recovery summary artifacts. It uploads a
 decision table, the configurations passing the recovery gate, and one
-recommended parameter row, so real-event evidence is not tuned without synthetic
+recommended parameter row, plus workflow-input YAML and CLI arguments for the
+selected settings, so real-event evidence is not tuned without synthetic
 identifiability.
 Use the manual `Compare model-evidence runs` workflow to compare KD-aligned and
 state-space model-evidence artifacts by canonical dynamics labels. The default

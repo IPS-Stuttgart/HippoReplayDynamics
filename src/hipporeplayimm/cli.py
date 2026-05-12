@@ -24,6 +24,14 @@ from .position_validation import (
     PositionDecodingConfig,
     run_position_decoding_validation,
 )
+from .simulation_recovery import (
+    DEFAULT_SCORING_MODELS,
+    DEFAULT_TRUE_MODELS,
+    SimulationRecoveryConfig,
+    parse_model_list,
+    run_session_simulation_recovery,
+)
+from .state_space import StateSpaceDecoderConfig
 from .sweeps import (
     PyRecEstSweepConfig,
     pareto_aggregate_sweep_summary,
@@ -104,6 +112,29 @@ def main(argv: list[str] | None = None) -> int:
     validate_parser.add_argument("--smoothing-sigma-bins", type=float, default=VALIDATED_POSITION_SMOOTHING_SIGMA_BINS)
     validate_parser.add_argument("--min-speed-cm-s", type=float, default=VALIDATED_POSITION_MIN_SPEED_CM_S)
 
+    recovery_parser = subparsers.add_parser("simulate-recovery")
+    recovery_parser.add_argument("root")
+    recovery_parser.add_argument("--session", required=True)
+    recovery_parser.add_argument("--output", required=True)
+    recovery_parser.add_argument("--events", default="run")
+    recovery_parser.add_argument("--max-template-events", type=int, default=25)
+    recovery_parser.add_argument("--events-per-model", type=int, default=25)
+    recovery_parser.add_argument("--true-models", default=" ".join(DEFAULT_TRUE_MODELS))
+    recovery_parser.add_argument("--models", default=" ".join(DEFAULT_SCORING_MODELS))
+    recovery_parser.add_argument("--random-seed", type=int, default=1)
+    recovery_parser.add_argument("--time-bin-ms", type=float, default=3.0)
+    recovery_parser.add_argument("--state-space-sigma-cm-sqrt-s", type=float, default=85.0)
+    recovery_parser.add_argument("--state-space-momentum-velocity-decay", type=float, default=0.95)
+    recovery_parser.add_argument("--state-space-momentum-candidate-top-k", type=int, default=128)
+    recovery_parser.add_argument("--candidate-top-k", type=int, default=64)
+    recovery_parser.add_argument("--stationary-sigma-cm", type=float, default=2.0)
+    recovery_parser.add_argument("--diffusion-sigma-cm", type=float, default=12.0)
+    recovery_parser.add_argument("--momentum-sigma-cm", type=float, default=12.0)
+    recovery_parser.add_argument("--velocity-decay", type=float, default=0.95)
+    recovery_parser.add_argument("--mode-stickiness", type=float, default=0.94)
+    recovery_parser.add_argument("--continue-on-error", action="store_true")
+    _add_encoding_arguments(recovery_parser)
+
     sweep_parser = subparsers.add_parser("sweep-pyrecest")
     sweep_parser.add_argument("root")
     sweep_parser.add_argument("--output", required=True)
@@ -161,6 +192,8 @@ def main(argv: list[str] | None = None) -> int:
         return _compare_ground_truth(args)
     if args.command == "validate-position":
         return _validate_position(args)
+    if args.command == "simulate-recovery":
+        return _simulate_recovery(args)
     if args.command == "sweep-pyrecest":
         return _sweep_pyrecest(args)
     raise ValueError(args.command)
@@ -204,6 +237,42 @@ def _validate_position(args: argparse.Namespace) -> int:
     result = run_position_decoding_validation(args.root, config)
     result.write(args.output)
     print(result.summary.to_string(index=False))
+    return 0
+
+
+def _simulate_recovery(args: argparse.Namespace) -> int:
+    state_space = StateSpaceDecoderConfig(
+        diffusion_sigma_cm_sqrt_s=args.state_space_sigma_cm_sqrt_s,
+        momentum_sigma_cm_sqrt_s=args.state_space_sigma_cm_sqrt_s,
+        momentum_initial_sigma_cm_sqrt_s=args.state_space_sigma_cm_sqrt_s,
+        momentum_velocity_decay=args.state_space_momentum_velocity_decay,
+        momentum_candidate_top_k=args.state_space_momentum_candidate_top_k,
+    )
+    config = SimulationRecoveryConfig(
+        true_models=parse_model_list(args.true_models),
+        scoring_models=parse_model_list(args.models),
+        events=args.events,
+        max_template_events=args.max_template_events,
+        events_per_model=args.events_per_model,
+        random_seed=args.random_seed,
+        time_bin_s=args.time_bin_ms / 1000.0,
+        encoding=_encoding_config_from_args(args),
+        state_space=state_space,
+        candidate_top_k=args.candidate_top_k,
+        stationary_sigma_cm=args.stationary_sigma_cm,
+        diffusion_sigma_cm=args.diffusion_sigma_cm,
+        momentum_sigma_cm=args.momentum_sigma_cm,
+        velocity_decay=args.velocity_decay,
+        mode_stickiness=args.mode_stickiness,
+        continue_on_error=args.continue_on_error,
+    )
+    result = run_session_simulation_recovery(args.root, args.session, config)
+    result.write(args.output)
+    print(result.summary.to_string(index=False))
+    print("\nConfusion matrix:")
+    print(result.confusion_matrix.to_string(index=False))
+    print(f"\nRows: {len(result.event_scores)}")
+    print(f"Failures: {int((result.event_scores['status'] != 'success').sum())}")
     return 0
 
 

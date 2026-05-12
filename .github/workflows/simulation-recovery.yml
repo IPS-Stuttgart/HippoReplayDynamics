@@ -1,0 +1,170 @@
+---
+name: Simulate replay recovery
+
+on:
+  workflow_dispatch:
+    inputs:
+      dataset_root:
+        description: "Dataset path after download or cache restore"
+        required: true
+        default: "data/DataSetFromPfeifferFoster"
+      session:
+        description: "Session ID, e.g. Rat1/Open1"
+        required: true
+        default: "Rat1/Open1"
+      events:
+        description: "Template event IDs/ranges, all, run, or run:0-25"
+        required: true
+        default: "run"
+      max_template_events:
+        description: "Maximum selected real ripple templates"
+        required: true
+        default: "25"
+      events_per_model:
+        description: "Synthetic events generated for each true dynamics model"
+        required: true
+        default: "25"
+      true_models:
+        description: "Space-separated true dynamics to simulate"
+        required: true
+        default: "stationary diffusion momentum fragmented"
+      models:
+        description: "Space-separated scoring models"
+        required: true
+        default: "sorted-spike-state-space-stationary sorted-spike-state-space-diffusion sorted-spike-state-space-momentum sorted-spike-state-space-fragmented sorted-spike-state-space-imm"
+      random_seed:
+        description: "Simulation random seed"
+        required: true
+        default: "1"
+      time_bin_ms:
+        description: "Synthetic replay time-bin width in milliseconds"
+        required: true
+        default: "3.0"
+      bin_size_cm:
+        description: "Place-field spatial bin size in centimeters"
+        required: true
+        default: "6.0"
+      smoothing_sigma_bins:
+        description: "Place-field smoothing sigma in spatial bins"
+        required: true
+        default: "2.0"
+      min_speed_cm_s:
+        description: "Minimum speed for place-field training in cm/s"
+        required: true
+        default: "5.0"
+      local_cache_root:
+        description: "Optional self-hosted persistent dataset cache path"
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+env:
+  DATASET_ROOT: ${{ inputs.dataset_root }}
+  SESSION: ${{ inputs.session }}
+  EVENTS: ${{ inputs.events }}
+  MAX_TEMPLATE_EVENTS: ${{ inputs.max_template_events }}
+  EVENTS_PER_MODEL: ${{ inputs.events_per_model }}
+  TRUE_MODELS: ${{ inputs.true_models }}
+  MODELS: ${{ inputs.models }}
+  RANDOM_SEED: ${{ inputs.random_seed }}
+  TIME_BIN_MS: ${{ inputs.time_bin_ms }}
+  BIN_SIZE_CM: ${{ inputs.bin_size_cm }}
+  SMOOTHING_SIGMA_BINS: ${{ inputs.smoothing_sigma_bins }}
+  MIN_SPEED_CM_S: ${{ inputs.min_speed_cm_s }}
+  LOCAL_CACHE_ROOT: ${{ inputs.local_cache_root }}
+
+jobs:
+  simulation-recovery:
+    name: Synthetic replay recovery
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Install package
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e .
+
+      - name: Ensure Pfeiffer-Foster dataset
+        id: dataset
+        uses: ./.github/actions/ensure-pfeiffer-foster-dataset
+        with:
+          dataset-root: ${{ env.DATASET_ROOT }}
+          session: ${{ env.SESSION }}
+          cache-key: hipporeplayimm-dataset-${{ runner.os }}-rclone-v1
+          local-cache-root: ${{ env.LOCAL_CACHE_ROOT }}
+          webdav-url: ${{ secrets.PFEIFFERFOSTER_WEBDAV_URL }}
+          webdav-key: ${{ secrets.PFEIFFERFOSTER_DATA_KEY }}
+          webdav-password: ${{ secrets.PFEIFFERFOSTER_DATA_PASSWORD }}
+
+      - name: Run simulation recovery benchmark
+        run: |
+          set -euo pipefail
+          hipporeplayimm simulate-recovery "${DATASET_ROOT}" \
+            --session "${SESSION}" \
+            --events "${EVENTS}" \
+            --max-template-events "${MAX_TEMPLATE_EVENTS}" \
+            --events-per-model "${EVENTS_PER_MODEL}" \
+            --true-models "${TRUE_MODELS}" \
+            --models "${MODELS}" \
+            --random-seed "${RANDOM_SEED}" \
+            --time-bin-ms "${TIME_BIN_MS}" \
+            --bin-size-cm "${BIN_SIZE_CM}" \
+            --smoothing-sigma-bins "${SMOOTHING_SIGMA_BINS}" \
+            --min-speed-cm-s "${MIN_SPEED_CM_S}" \
+            --output results/simulation-recovery \
+            --continue-on-error
+
+      - name: Validate simulation recovery outputs
+        run: |
+          set -euo pipefail
+          for required_file in \
+            simulation_recovery_event_scores.csv \
+            simulation_recovery_confusion_matrix.csv \
+            simulation_recovery_summary.csv \
+            simulation_recovery_settings.yml; do
+            test -s "results/simulation-recovery/${required_file}" || {
+              echo "Missing results/simulation-recovery/${required_file}" >&2
+              exit 1
+            }
+          done
+          python - <<'PY'
+          import os
+          import pandas as pd
+
+          scores = pd.read_csv("results/simulation-recovery/simulation_recovery_event_scores.csv")
+          summary = pd.read_csv("results/simulation-recovery/simulation_recovery_summary.csv")
+          confusion = pd.read_csv("results/simulation-recovery/simulation_recovery_confusion_matrix.csv")
+          true_models = [x for x in os.environ["TRUE_MODELS"].replace(",", " ").split() if x]
+          scoring_models = [x for x in os.environ["MODELS"].replace(",", " ").split() if x]
+          expected_rows = len(true_models) * int(os.environ["EVENTS_PER_MODEL"]) * len(scoring_models)
+          print(summary.to_string(index=False))
+          print("\nConfusion matrix:")
+          print(confusion.to_string(index=False))
+          print("\nRows:", len(scores))
+          if len(scores) != expected_rows:
+              raise SystemExit(f"Expected {expected_rows} score rows, found {len(scores)}")
+          failures = int((scores["status"] != "success").sum())
+          print("Failures:", failures)
+          if failures:
+              raise SystemExit("Simulation recovery output contains failed rows")
+          PY
+
+      - name: Upload simulation recovery results
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: simulation-recovery-${{ github.run_id }}
+          path: results/simulation-recovery/
+          if-no-files-found: error

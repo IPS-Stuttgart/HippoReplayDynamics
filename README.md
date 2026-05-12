@@ -11,6 +11,7 @@ hipporeplayimm inspect D:\Uni-Data\DataSetFromPfeifferFoster
 hipporeplayimm benchmark D:\Uni-Data\DataSetFromPfeifferFoster --max-events 25 --output results
 hipporeplayimm decode-event D:\Uni-Data\DataSetFromPfeifferFoster --session Rat1/Open1 --event-id 0 --output results\decode_event
 hipporeplayimm validate-position D:\Uni-Data\DataSetFromPfeifferFoster --session Rat1/Open1 --output results\position_validation
+hipporeplayimm simulate-recovery D:\Uni-Data\DataSetFromPfeifferFoster --session Rat1/Open1 --output results\simulation_recovery
 hipporeplayimm ground-truth D:\Uni-Data\DataSetFromPfeifferFoster --output results\behavioral_ground_truth.csv
 hipporeplayimm compare-ground-truth D:\Uni-Data\DataSetFromPfeifferFoster --scores results\event_scores.csv --ground-truth results\behavioral_ground_truth.csv --output results\ground_truth_comparison.csv
 ```
@@ -70,6 +71,30 @@ hipporeplayimm benchmark D:\Uni-Data\DataSetFromPfeifferFoster `
   --models random,stationary,sorted-spike-state-space-diffusion,sorted-spike-state-space-momentum,sorted-spike-state-space-imm `
   --output results\state_space_smoke
 ```
+
+Synthetic replay-dynamics recovery can be run with the same validated encoder
+settings. It generates Poisson spike-count emissions from fitted place fields
+under known latent dynamics and then scores those synthetic events with the
+state-space model-evidence stack:
+
+```powershell
+hipporeplayimm simulate-recovery D:\Uni-Data\DataSetFromPfeifferFoster `
+  --session Rat1/Open1 `
+  --events run `
+  --max-template-events 25 `
+  --events-per-model 25 `
+  --time-bin-ms 3 `
+  --bin-size-cm 6.0 `
+  --smoothing-sigma-bins 2.0 `
+  --min-speed-cm-s 5.0 `
+  --output results\simulation_recovery_rat1_open1
+```
+
+The recovery benchmark writes `simulation_recovery_event_scores.csv`,
+`simulation_recovery_confusion_matrix.csv`, `simulation_recovery_summary.csv`,
+and `simulation_recovery_settings.yml`. The manual `Simulate replay recovery`
+workflow runs the same command on GitHub Actions and uploads these files as a
+`simulation-recovery-<run_id>` artifact.
 
 The model-evidence workflow exposes the same encoder settings. The validated
 behavioral-decoding settings are `--decode-bin-s 1.0`, `--bin-size-cm 6.0`,

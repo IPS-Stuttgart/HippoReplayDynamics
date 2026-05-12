@@ -16,5 +16,6 @@ def test_select_state_space_parameters_workflow_downloads_summaries_and_uploads_
     assert "state_space_parameter_decision_table.csv" in workflow
     assert "state_space_parameter_candidates.csv" in workflow
     assert "state_space_parameter_recommendation.csv" in workflow
+    assert "state_space_parameter_selection_manifest.json" in workflow
     assert "state_space_selected_workflow_inputs.yml" in workflow
     assert "state_space_selected_cli_args.txt" in workflow

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pandas as pd
@@ -91,6 +92,17 @@ def test_select_parameters_prefers_recovered_momentum_config(tmp_path):
     assert (output / "state_space_parameter_decision_table.csv").exists()
     assert (output / "state_space_parameter_candidates.csv").exists()
     assert (output / "state_space_parameter_recommendation.csv").exists()
+    manifest = json.loads((output / "state_space_parameter_selection_manifest.json").read_text(encoding="utf-8"))
+    assert manifest["schema_version"] == 1
+    assert manifest["recovery_gate"] == {
+        "max_failures": 0,
+        "min_momentum_recovery_accuracy": 0.5,
+        "min_overall_recovery_accuracy": 0.5,
+    }
+    assert manifest["row_counts"]["candidate_rows"] == 1
+    assert manifest["selected_parameters"]["state_space_diffusion_sigma_cm_sqrt_s"] == 60.0
+    assert manifest["recommendation"]["evidence_matrix_id"] == "evidence-b"
+    assert manifest["recommendation"]["recovery_matrix_id"] == "recovery-b"
     workflow_inputs = (output / "state_space_selected_workflow_inputs.yml").read_text(encoding="utf-8")
     assert "state_space_diffusion_sigma_cm_sqrt_s: 60.0" in workflow_inputs
     assert "state_space_momentum_velocity_decay: 0.95" in workflow_inputs
@@ -140,3 +152,6 @@ def test_select_parameters_falls_back_when_no_config_passes_gate(tmp_path):
     assert "No configuration passed" in recommendation["recommendation_note"]
     assert (output / "state_space_selected_workflow_inputs.yml").exists()
     assert (output / "state_space_selected_cli_args.txt").exists()
+    manifest = json.loads((output / "state_space_parameter_selection_manifest.json").read_text(encoding="utf-8"))
+    assert manifest["row_counts"]["candidate_rows"] == 0
+    assert not manifest["recommendation"]["passes_recovery_gate"]

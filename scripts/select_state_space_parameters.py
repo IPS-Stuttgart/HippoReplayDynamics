@@ -4,6 +4,8 @@
 from __future__ import annotations
 
 import argparse
+import json
+import math
 from pathlib import Path
 
 import pandas as pd
@@ -74,6 +76,17 @@ def select_parameters(
     candidates.to_csv(out_dir / "state_space_parameter_candidates.csv", index=False)
     recommendation.to_csv(out_dir / "state_space_parameter_recommendation.csv", index=False)
     _write_selected_parameter_files(recommendation, out_dir)
+    _write_selection_manifest(
+        evidence=evidence,
+        recovery=recovery,
+        output_dir=out_dir,
+        decision=ranked,
+        candidates=candidates,
+        recommendation=recommendation,
+        min_momentum_recovery_accuracy=min_momentum_recovery_accuracy,
+        min_overall_recovery_accuracy=min_overall_recovery_accuracy,
+        max_failures=max_failures,
+    )
     return {
         "decision": ranked,
         "candidates": candidates,
@@ -199,6 +212,65 @@ def _write_selected_parameter_files(recommendation: pd.DataFrame, out_dir: Path)
     continuation = " \\" + "\n  "
     cli_text = continuation.join(args) + "\n"
     cli_path.write_text(cli_text, encoding="utf-8")
+
+
+def _write_selection_manifest(
+    *,
+    evidence: str | Path,
+    recovery: str | Path,
+    output_dir: Path,
+    decision: pd.DataFrame,
+    candidates: pd.DataFrame,
+    recommendation: pd.DataFrame,
+    min_momentum_recovery_accuracy: float,
+    min_overall_recovery_accuracy: float,
+    max_failures: int,
+) -> None:
+    selected_row = None if recommendation.empty else _json_ready(recommendation.iloc[0].to_dict())
+    manifest = {
+        "schema_version": 1,
+        "input_paths": {
+            "evidence": str(evidence),
+            "recovery": str(recovery),
+        },
+        "recovery_gate": {
+            "min_momentum_recovery_accuracy": min_momentum_recovery_accuracy,
+            "min_overall_recovery_accuracy": min_overall_recovery_accuracy,
+            "max_failures": max_failures,
+        },
+        "parameter_columns": PARAMETER_COLUMNS,
+        "row_counts": {
+            "decision_rows": int(len(decision)),
+            "candidate_rows": int(len(candidates)),
+            "recommendation_rows": int(len(recommendation)),
+        },
+        "selected_parameters": None if selected_row is None else {col: selected_row[col] for col in PARAMETER_COLUMNS},
+        "recommendation": selected_row,
+    }
+    path = output_dir / "state_space_parameter_selection_manifest.json"
+    path.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+
+def _json_ready(value: object) -> object:
+    if isinstance(value, dict):
+        return {str(key): _json_ready(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_json_ready(item) for item in value]
+    if pd.isna(value):
+        return None
+    try:
+        scalar = value.item()
+    except AttributeError:
+        scalar = value
+    if isinstance(scalar, bool):
+        return bool(scalar)
+    if isinstance(scalar, float):
+        if not math.isfinite(scalar):
+            return None
+        return float(scalar)
+    if isinstance(scalar, int):
+        return int(scalar)
+    return scalar
 
 
 def _format_parameter_value(value: object) -> str:

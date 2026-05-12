@@ -109,6 +109,11 @@ the older candidate-pruned models. For `sorted-spike-state-space-*` models, use
 the explicit `state_space_*` workflow inputs, whose defaults reproduce the
 original state-space settings: diffusion and momentum noise `85 cm/sqrt(s)`,
 momentum velocity decay `0.95`, and momentum candidate support `128` bins.
+Use the manual `State-space replay evidence parameter sweep` workflow for a
+small reproducible dynamics sweep over state-space diffusion noise, momentum
+noise, initial momentum noise, velocity decay, and momentum candidate support.
+The default sweep is capped to 25 `Rat1/Open1` run events and uploads ranked
+momentum-vs-diffusion comparison tables.
 
 `decode-event --output` writes `event_scores.csv` plus posterior `.npz`
 artifacts for models that expose `trajectory_log_posterior`. The batch tracking

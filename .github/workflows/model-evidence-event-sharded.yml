@@ -52,6 +52,38 @@ on:
         description: "IMM mode-transition stickiness"
         required: true
         default: "0.94"
+      state_space_stationary_sigma_cm:
+        description: "State-space stationary transition sigma in cm"
+        required: true
+        default: "2.0"
+      state_space_diffusion_sigma_cm_sqrt_s:
+        description: "State-space diffusion noise in cm/sqrt(s)"
+        required: true
+        default: "85.0"
+      state_space_max_step_sigma:
+        description: "State-space Gaussian transition truncation radius in sigmas"
+        required: true
+        default: "4.0"
+      state_space_imm_mode_stickiness:
+        description: "State-space IMM mode-transition stickiness"
+        required: true
+        default: "0.95"
+      state_space_momentum_sigma_cm_sqrt_s:
+        description: "State-space momentum process noise in cm/sqrt(s)"
+        required: true
+        default: "85.0"
+      state_space_momentum_initial_sigma_cm_sqrt_s:
+        description: "State-space momentum initial transition noise in cm/sqrt(s)"
+        required: true
+        default: "85.0"
+      state_space_momentum_velocity_decay:
+        description: "State-space momentum velocity decay"
+        required: true
+        default: "0.95"
+      state_space_momentum_candidate_top_k:
+        description: "State-space momentum candidate spatial bins per time bin"
+        required: true
+        default: "128"
       time_bin_s:
         description: "Ripple decoding time-bin width in seconds"
         required: true
@@ -93,6 +125,14 @@ env:
   MOMENTUM_SIGMA_CM: ${{ inputs.momentum_sigma_cm }}
   VELOCITY_DECAY: ${{ inputs.velocity_decay }}
   MODE_STICKINESS: ${{ inputs.mode_stickiness }}
+  STATE_SPACE_STATIONARY_SIGMA_CM: ${{ inputs.state_space_stationary_sigma_cm }}
+  STATE_SPACE_DIFFUSION_SIGMA_CM_SQRT_S: ${{ inputs.state_space_diffusion_sigma_cm_sqrt_s }}
+  STATE_SPACE_MAX_STEP_SIGMA: ${{ inputs.state_space_max_step_sigma }}
+  STATE_SPACE_IMM_MODE_STICKINESS: ${{ inputs.state_space_imm_mode_stickiness }}
+  STATE_SPACE_MOMENTUM_SIGMA_CM_SQRT_S: ${{ inputs.state_space_momentum_sigma_cm_sqrt_s }}
+  STATE_SPACE_MOMENTUM_INITIAL_SIGMA_CM_SQRT_S: ${{ inputs.state_space_momentum_initial_sigma_cm_sqrt_s }}
+  STATE_SPACE_MOMENTUM_VELOCITY_DECAY: ${{ inputs.state_space_momentum_velocity_decay }}
+  STATE_SPACE_MOMENTUM_CANDIDATE_TOP_K: ${{ inputs.state_space_momentum_candidate_top_k }}
   TIME_BIN_S: ${{ inputs.time_bin_s }}
   BIN_SIZE_CM: ${{ inputs.bin_size_cm }}
   SMOOTHING_SIGMA_BINS: ${{ inputs.smoothing_sigma_bins }}
@@ -229,6 +269,14 @@ jobs:
             --momentum-sigma-cm "${MOMENTUM_SIGMA_CM}" \
             --velocity-decay "${VELOCITY_DECAY}" \
             --mode-stickiness "${MODE_STICKINESS}" \
+            --state-space-stationary-sigma-cm "${STATE_SPACE_STATIONARY_SIGMA_CM}" \
+            --state-space-diffusion-sigma-cm-sqrt-s "${STATE_SPACE_DIFFUSION_SIGMA_CM_SQRT_S}" \
+            --state-space-max-step-sigma "${STATE_SPACE_MAX_STEP_SIGMA}" \
+            --state-space-imm-mode-stickiness "${STATE_SPACE_IMM_MODE_STICKINESS}" \
+            --state-space-momentum-sigma-cm-sqrt-s "${STATE_SPACE_MOMENTUM_SIGMA_CM_SQRT_S}" \
+            --state-space-momentum-initial-sigma-cm-sqrt-s "${STATE_SPACE_MOMENTUM_INITIAL_SIGMA_CM_SQRT_S}" \
+            --state-space-momentum-velocity-decay "${STATE_SPACE_MOMENTUM_VELOCITY_DECAY}" \
+            --state-space-momentum-candidate-top-k "${STATE_SPACE_MOMENTUM_CANDIDATE_TOP_K}" \
             --time-bin-s "${TIME_BIN_S}" \
             --bin-size-cm "${BIN_SIZE_CM}" \
             --smoothing-sigma-bins "${SMOOTHING_SIGMA_BINS}" \

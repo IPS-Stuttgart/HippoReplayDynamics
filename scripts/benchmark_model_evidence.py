@@ -31,6 +31,7 @@ from hipporeplayimm.position_validation import (
     VALIDATED_POSITION_SMOOTHING_SIGMA_BINS,
 )
 from hipporeplayimm.sorted_spike_state_space import SortedSpikeStateSpaceReplayModel
+from hipporeplayimm.state_space import StateSpaceDecoderConfig
 
 _REQUIRED = ("Position_Data.mat", "Ripple_Events.mat", "Spike_Data.mat", "Epochs.mat")
 _TRAJ = {
@@ -112,6 +113,23 @@ def _models(args) -> dict[str, object]:
             names.append(name)
     if not names:
         raise ValueError("no models selected")
+
+    def state_space_model(mode: str) -> SortedSpikeStateSpaceReplayModel:
+        return SortedSpikeStateSpaceReplayModel(
+            mode=mode,
+            config=StateSpaceDecoderConfig(
+                mode=mode,
+                stationary_sigma_cm=args.state_space_stationary_sigma_cm,
+                diffusion_sigma_cm_sqrt_s=args.state_space_diffusion_sigma_cm_sqrt_s,
+                max_step_sigma=args.state_space_max_step_sigma,
+                imm_mode_stickiness=args.state_space_imm_mode_stickiness,
+                momentum_sigma_cm_sqrt_s=args.state_space_momentum_sigma_cm_sqrt_s,
+                momentum_initial_sigma_cm_sqrt_s=args.state_space_momentum_initial_sigma_cm_sqrt_s,
+                momentum_velocity_decay=args.state_space_momentum_velocity_decay,
+                momentum_candidate_top_k=args.state_space_momentum_candidate_top_k,
+            ),
+        )
+
     available = {
         "random": RandomModel(),
         "stationary": StationaryModel(),
@@ -131,12 +149,12 @@ def _models(args) -> dict[str, object]:
             mode="imm", top_k=args.candidate_top_k, stationary_sigma_cm=args.stationary_sigma_cm,
             diffusion_sigma_cm=args.diffusion_sigma_cm, momentum_sigma_cm=args.momentum_sigma_cm,
             velocity_decay=args.velocity_decay, mode_stickiness=args.mode_stickiness, name="imm"),
-        "sorted-spike-state-space-stationary": SortedSpikeStateSpaceReplayModel(mode="stationary"),
-        "sorted-spike-state-space-diffusion": SortedSpikeStateSpaceReplayModel(mode="diffusion"),
-        "sorted-spike-state-space-fragmented": SortedSpikeStateSpaceReplayModel(mode="fragmented"),
-        "sorted-spike-state-space-jump": SortedSpikeStateSpaceReplayModel(mode="jump"),
-        "sorted-spike-state-space-momentum": SortedSpikeStateSpaceReplayModel(mode="momentum"),
-        "sorted-spike-state-space-imm": SortedSpikeStateSpaceReplayModel(mode="imm"),
+        "sorted-spike-state-space-stationary": state_space_model("stationary"),
+        "sorted-spike-state-space-diffusion": state_space_model("diffusion"),
+        "sorted-spike-state-space-fragmented": state_space_model("fragmented"),
+        "sorted-spike-state-space-jump": state_space_model("jump"),
+        "sorted-spike-state-space-momentum": state_space_model("momentum"),
+        "sorted-spike-state-space-imm": state_space_model("imm"),
     }
     missing = sorted(set(names) - set(available))
     if missing:
@@ -306,6 +324,14 @@ def main() -> int:
     p.add_argument("--momentum-sigma-cm", type=float, default=12.0)
     p.add_argument("--velocity-decay", type=float, default=0.95)
     p.add_argument("--mode-stickiness", type=float, default=0.94)
+    p.add_argument("--state-space-stationary-sigma-cm", type=float, default=2.0)
+    p.add_argument("--state-space-diffusion-sigma-cm-sqrt-s", type=float, default=85.0)
+    p.add_argument("--state-space-max-step-sigma", type=float, default=4.0)
+    p.add_argument("--state-space-imm-mode-stickiness", type=float, default=0.95)
+    p.add_argument("--state-space-momentum-sigma-cm-sqrt-s", type=float, default=85.0)
+    p.add_argument("--state-space-momentum-initial-sigma-cm-sqrt-s", type=float, default=85.0)
+    p.add_argument("--state-space-momentum-velocity-decay", type=float, default=0.95)
+    p.add_argument("--state-space-momentum-candidate-top-k", type=int, default=128)
     p.add_argument("--time-bin-s", type=float, default=0.02)
     p.add_argument("--bin-size-cm", type=float, default=VALIDATED_POSITION_BIN_SIZE_CM)
     p.add_argument("--smoothing-sigma-bins", type=float, default=VALIDATED_POSITION_SMOOTHING_SIGMA_BINS)

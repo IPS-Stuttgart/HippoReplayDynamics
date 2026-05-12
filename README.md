@@ -104,6 +104,11 @@ posterior-mean errors below 15 cm and median MAP errors below 20 cm.
 For full sessions, use the manual `Benchmark replay model evidence
 event-sharded` workflow so momentum-dominated state-space runs are split across
 event shards and aggregated into the standard model-evidence CSV schema.
+The `diffusion_sigma_cm` and `momentum_sigma_cm` workflow inputs configure only
+the older candidate-pruned models. For `sorted-spike-state-space-*` models, use
+the explicit `state_space_*` workflow inputs, whose defaults reproduce the
+original state-space settings: diffusion and momentum noise `85 cm/sqrt(s)`,
+momentum velocity decay `0.95`, and momentum candidate support `128` bins.
 
 `decode-event --output` writes `event_scores.csv` plus posterior `.npz`
 artifacts for models that expose `trajectory_log_posterior`. The batch tracking

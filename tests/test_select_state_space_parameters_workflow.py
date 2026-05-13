@@ -10,6 +10,8 @@ def test_select_state_space_parameters_workflow_downloads_summaries_and_uploads_
     assert "state-space-evidence-sweep-summary-<run_id>" in workflow
     assert "simulation-recovery-sweep-summary-<run_id>" in workflow
     assert "actions/download-artifact@v7" in workflow
+    assert "actions/upload-artifact@v7" in workflow
+    assert "actions/upload-artifact@v4" not in workflow
     assert "scripts/select_state_space_parameters.py" in workflow
     assert "--min-momentum-recovery-accuracy" in workflow
     assert "--min-overall-recovery-accuracy" in workflow

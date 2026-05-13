@@ -10,6 +10,8 @@ def test_compare_model_evidence_runs_workflow_downloads_two_artifacts_and_upload
     assert "left_artifact_name:" in workflow
     assert "right_artifact_name:" in workflow
     assert "actions/download-artifact@v7" in workflow
+    assert "actions/upload-artifact@v7" in workflow
+    assert "actions/upload-artifact@v4" not in workflow
     assert "scripts/compare_model_evidence_runs.py" in workflow
     assert "--left artifacts/left" in workflow
     assert "--right artifacts/right" in workflow

@@ -105,7 +105,7 @@ jobs:
           test -f "$OUTPUT_DIR/model_evidence_run_comparison_summary.csv"
 
       - name: Upload comparison tables
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: model-evidence-run-comparison-${{ github.run_id }}
           path: |

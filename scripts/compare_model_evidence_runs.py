@@ -60,14 +60,16 @@ def compare_runs(left_dir: str | Path, right_dir: str | Path, *, left_label: str
     relative.to_csv(out_dir / "shared_model_relative_evidence_comparison.csv", index=False)
     relative_summary = _relative_evidence_summary(relative, left_label, right_label)
     relative_summary.to_csv(out_dir / "shared_model_relative_evidence_summary.csv", index=False)
+    session_comparison = _session_model_evidence_comparison(event_comparison, relative, left_label, right_label)
+    session_comparison.to_csv(out_dir / "session_model_evidence_comparison.csv", index=False)
 
     summary = pd.DataFrame(
         [
             {
                 "left_label": left_label,
                 "right_label": right_label,
-                "left_events": int(left["event_index"].nunique()),
-                "right_events": int(right["event_index"].nunique()),
+                "left_events": _event_count(left),
+                "right_events": _event_count(right),
                 "matched_events": int(len(event_comparison)),
                 "canonical_best_agreements": int(event_comparison["canonical_best_agree"].sum()),
                 "canonical_best_agreement_fraction": float(event_comparison["canonical_best_agree"].mean())
@@ -84,6 +86,7 @@ def compare_runs(left_dir: str | Path, right_dir: str | Path, *, left_label: str
         "cross_tab": cross_tab,
         "relative": relative,
         "relative_summary": relative_summary,
+        "session_comparison": session_comparison,
         "summary": summary,
     }
 
@@ -113,6 +116,10 @@ def _add_relative_log_evidence(frame: pd.DataFrame) -> pd.DataFrame:
         group["relative_log_evidence"] = group["log_evidence"] - group["log_evidence"].max()
         groups.append(group)
     return pd.concat(groups, ignore_index=True)
+
+
+def _event_count(frame: pd.DataFrame) -> int:
+    return int(frame[["session", "event_index"]].drop_duplicates().shape[0])
 
 
 def _event_best(frame: pd.DataFrame, label: str) -> pd.DataFrame:
@@ -199,6 +206,57 @@ def _relative_evidence_summary(relative: pd.DataFrame, left_label: str, right_la
     )
 
 
+def _session_model_evidence_comparison(
+    event_comparison: pd.DataFrame,
+    relative: pd.DataFrame,
+    left_label: str,
+    right_label: str,
+) -> pd.DataFrame:
+    sessions = pd.DataFrame({"session": sorted(event_comparison["session"].dropna().unique())}).set_index("session")
+    for label in [left_label, right_label]:
+        model_col = f"{label}_canonical_best_model"
+        for model in ["diffusion", "momentum"]:
+            counts = (
+                event_comparison.loc[event_comparison[model_col] == model]
+                .groupby("session")
+                .size()
+                .rename(f"{label}_{model}_wins")
+            )
+            sessions = sessions.join(counts, how="left")
+
+    for label in [left_label, right_label]:
+        for model in ["diffusion", "momentum"]:
+            col = f"{label}_{model}_wins"
+            sessions[col] = sessions[col].fillna(0).astype(int)
+
+    sessions["momentum_win_delta"] = sessions[f"{right_label}_momentum_wins"] - sessions[f"{left_label}_momentum_wins"]
+    sessions["canonical_best_agreement_fraction"] = event_comparison.groupby("session")["canonical_best_agree"].mean()
+
+    delta_col = f"{right_label}_minus_{left_label}_relative_log_evidence"
+    if delta_col in relative.columns:
+        momentum_delta = (
+            relative.loc[relative["canonical_model"] == "momentum"]
+            .groupby("session")[delta_col]
+            .mean()
+            .rename("mean_momentum_relative_evidence_delta")
+        )
+        sessions = sessions.join(momentum_delta, how="left")
+    else:
+        sessions["mean_momentum_relative_evidence_delta"] = float("nan")
+
+    columns = [
+        "session",
+        f"{left_label}_diffusion_wins",
+        f"{right_label}_diffusion_wins",
+        f"{left_label}_momentum_wins",
+        f"{right_label}_momentum_wins",
+        "momentum_win_delta",
+        "canonical_best_agreement_fraction",
+        "mean_momentum_relative_evidence_delta",
+    ]
+    return sessions.reset_index()[columns]
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Compare two replay model-evidence artifact directories.")
     parser.add_argument("--left", required=True, help="Left artifact directory containing event_model_evidence.csv")
@@ -214,6 +272,8 @@ def main() -> int:
     print(tables["counts"].to_string(index=False))
     print("\nShared relative-evidence summary:")
     print(tables["relative_summary"].to_string(index=False))
+    print("\nSession model-evidence comparison:")
+    print(tables["session_comparison"].to_string(index=False))
     return 0
 
 

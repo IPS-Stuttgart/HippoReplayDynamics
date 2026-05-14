@@ -69,6 +69,8 @@ def test_compare_runs_writes_best_model_and_relative_evidence_tables(tmp_path):
 
     summary = tables["summary"].iloc[0]
     assert summary["matched_events"] == 2
+    assert summary["left_events"] == 2
+    assert summary["right_events"] == 2
     assert summary["canonical_best_agreements"] == 1
     assert summary["canonical_best_agreement_fraction"] == 0.5
 
@@ -83,7 +85,22 @@ def test_compare_runs_writes_best_model_and_relative_evidence_tables(tmp_path):
     assert set(relative["canonical_model"]) == {"diffusion", "momentum"}
     assert set(relative["matched_events"]) == {2}
 
+    session_comparison = pd.read_csv(output / "session_model_evidence_comparison.csv")
+    assert session_comparison.to_dict(orient="records") == [
+        {
+            "session": "Rat1/Open1",
+            "kd_diffusion_wins": 1,
+            "state_diffusion_wins": 2,
+            "kd_momentum_wins": 1,
+            "state_momentum_wins": 0,
+            "momentum_win_delta": -1,
+            "canonical_best_agreement_fraction": 0.5,
+            "mean_momentum_relative_evidence_delta": -1.0,
+        }
+    ]
+
     assert (output / "event_best_model_comparison.csv").exists()
     assert (output / "best_model_canonical_crosstab.csv").exists()
     assert (output / "shared_model_relative_evidence_comparison.csv").exists()
+    assert (output / "session_model_evidence_comparison.csv").exists()
     assert (output / "model_evidence_run_comparison_summary.csv").exists()

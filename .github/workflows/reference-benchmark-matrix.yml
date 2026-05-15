@@ -60,6 +60,10 @@ on:
         description: "Project-native decoding time-bin width in seconds"
         required: true
         default: "0.02"
+      spike_rate_scale:
+        description: "Multiplicative scale applied to Poisson place-field rates during ripple scoring"
+        required: true
+        default: "1.0"
       kd_time_bin_ms:
         description: "KD-aligned decoding time-bin width in milliseconds"
         required: true
@@ -168,6 +172,7 @@ jobs:
             --test-cell-fraction "${{ inputs.test_cell_fraction }}" \
             --random-seed "${{ inputs.random_seed }}" \
             --time-bin-s "${{ inputs.time_bin_s }}" \
+            --spike-rate-scale "${{ inputs.spike_rate_scale }}" \
             --output "results/heldout/${{ matrix.slug }}" \
             --continue-on-error
 
@@ -244,6 +249,7 @@ jobs:
             --models "random stationary stationary-gaussian diffusion momentum imm" \
             --candidate-top-k "${{ inputs.candidate_top_k }}" \
             --time-bin-s "${{ inputs.time_bin_s }}" \
+            --spike-rate-scale "${{ inputs.spike_rate_scale }}" \
             --output "results/project-evidence/${{ matrix.slug }}" \
             --continue-on-error
 
@@ -327,6 +333,7 @@ jobs:
             --bin-size-cm "${{ inputs.kd_bin_size_cm }}" \
             --n-bins "${{ inputs.kd_n_bins }}" \
             --likelihood poisson \
+            --spike-rate-scale "${{ inputs.spike_rate_scale }}" \
             --grid-preset smoke \
             --n-jobs "${{ inputs.kd_n_jobs }}" \
             --event-chunk-size "${{ inputs.kd_event_chunk_size }}" \

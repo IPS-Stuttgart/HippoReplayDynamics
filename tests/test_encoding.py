@@ -1,7 +1,8 @@
 import numpy as np
+import pytest
 
 from hipporeplayimm.data import ReplaySession
-from hipporeplayimm.encoding import EncodingConfig, fit_place_field_encoding
+from hipporeplayimm.encoding import EmissionConfig, EncodingConfig, EncodingModel, build_emissions, fit_place_field_encoding
 
 
 def test_fit_place_field_encoding_recovers_peak_near_spike_location(tmp_path):
@@ -47,6 +48,63 @@ def test_select_cells_keeps_cell_ids_sorted_for_searchsorted():
     selected = encoding.select_cells([2, 1])
 
     assert selected.cell_ids.tolist() == [1, 2]
+
+
+def test_build_emissions_applies_spike_rate_scale_to_expected_counts():
+    session = _single_ripple_session()
+    encoding = _two_bin_encoding()
+
+    emissions = build_emissions(
+        session,
+        encoding,
+        0,
+        EmissionConfig(time_bin_s=1.0, spike_rate_scale=3.0),
+    )
+
+    expected = np.array([2.0, 4.0]) * 3.0
+    np.testing.assert_allclose(emissions.log_likelihood[0], np.log(expected) - expected)
+
+
+def test_build_emissions_rejects_nonpositive_spike_rate_scale():
+    with pytest.raises(ValueError, match="spike_rate_scale"):
+        build_emissions(
+            _single_ripple_session(),
+            _two_bin_encoding(),
+            0,
+            EmissionConfig(time_bin_s=1.0, spike_rate_scale=0.0),
+        )
+
+
+def _single_ripple_session() -> ReplaySession:
+    return ReplaySession(
+        rat="RatX",
+        name="OpenX",
+        path=None,
+        position=np.array([[0.0, 0.0, 0.0, 0.0], [1.0, 1.0, 0.0, 0.0]]),
+        spikes=np.array([[0.5, 1.0]]),
+        tetrode_cell_ids=np.array([[1, 1]]),
+        excitatory_neurons=np.array([1]),
+        inhibitory_neurons=np.array([]),
+        ripple_events=np.array([[0.0, 1.0, 0.5, 0.0, 0.0, 0.0]]),
+        run_times=np.array([[0.0, 1.0]]),
+        sleep_box_immobile_times=np.empty((0, 2)),
+        sleep_times=np.empty((0, 2)),
+        rem_times=np.empty((0, 2)),
+        well_sequence=None,
+        metadata={},
+    )
+
+
+def _two_bin_encoding() -> EncodingModel:
+    return EncodingModel(
+        x_edges=np.array([0.0, 1.0, 2.0]),
+        y_edges=np.array([0.0, 1.0]),
+        bin_centers=np.array([[0.5, 0.5], [1.5, 0.5]]),
+        rates_hz=np.array([[2.0, 4.0]]),
+        occupancy_s=np.ones(2),
+        cell_ids=np.array([1]),
+        config=EncodingConfig(),
+    )
 
 
 def _linear_session_with_two_cells():

@@ -16,6 +16,7 @@ env:
   CANDIDATE_TOP_K: "64"
   PYRECEST_PARTICLES: "512"
   TIME_BIN_S: "0.02"
+  SPIKE_RATE_SCALE: "1.0"
   TEST_CELL_FRACTION: "0.25"
   RANDOM_SEED: "1"
 
@@ -62,6 +63,7 @@ jobs:
             --candidate-top-k "${CANDIDATE_TOP_K}" \
             --pyrecest-particles "${PYRECEST_PARTICLES}" \
             --time-bin-s "${TIME_BIN_S}" \
+            --spike-rate-scale "${SPIKE_RATE_SCALE}" \
             --test-cell-fraction "${TEST_CELL_FRACTION}" \
             --random-seed "${RANDOM_SEED}" \
             --output results/heldout-batch \

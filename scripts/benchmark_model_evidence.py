@@ -186,7 +186,10 @@ def _score(args) -> pd.DataFrame:
         ),
     )
     models = _models(args)
-    emissions_cfg = EmissionConfig(time_bin_s=args.time_bin_s)
+    emissions_cfg = EmissionConfig(
+        time_bin_s=args.time_bin_s,
+        spike_rate_scale=args.spike_rate_scale,
+    )
     rows: list[dict[str, object]] = []
 
     for event_id in event_ids:
@@ -211,6 +214,7 @@ def _score(args) -> pd.DataFrame:
                     "smoothing_sigma_bins": float(args.smoothing_sigma_bins),
                     "min_speed_cm_s": float(args.min_speed_cm_s),
                     "time_bin_s": float(args.time_bin_s),
+                    "spike_rate_scale": float(args.spike_rate_scale),
                 }
                 row.update({f"diagnostic_{k}": v for k, v in result.diagnostics.items()})
                 rows.append(row)
@@ -225,6 +229,7 @@ def _score(args) -> pd.DataFrame:
                     "smoothing_sigma_bins": float(args.smoothing_sigma_bins),
                     "min_speed_cm_s": float(args.min_speed_cm_s),
                     "time_bin_s": float(args.time_bin_s),
+                    "spike_rate_scale": float(args.spike_rate_scale),
                 })
                 if not args.continue_on_error:
                     raise
@@ -333,6 +338,12 @@ def main() -> int:
     p.add_argument("--state-space-momentum-velocity-decay", type=float, default=0.95)
     p.add_argument("--state-space-momentum-candidate-top-k", type=int, default=128)
     p.add_argument("--time-bin-s", type=float, default=0.02)
+    p.add_argument(
+        "--spike-rate-scale",
+        type=float,
+        default=1.0,
+        help="Multiplicative scale applied to Poisson place-field rates during ripple scoring.",
+    )
     p.add_argument("--bin-size-cm", type=float, default=VALIDATED_POSITION_BIN_SIZE_CM)
     p.add_argument("--smoothing-sigma-bins", type=float, default=VALIDATED_POSITION_SMOOTHING_SIGMA_BINS)
     p.add_argument("--min-speed-cm-s", type=float, default=VALIDATED_POSITION_MIN_SPEED_CM_S)

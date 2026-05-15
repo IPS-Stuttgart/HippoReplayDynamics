@@ -11,6 +11,7 @@ from hipporeplayimm.kd_reference import (
     kd_stationary_log_evidence,
     marginalize_grid_log_evidence,
     momentum_transition_1d,
+    poisson_log_emissions,
     stationary_gaussian_log_latent,
     stationary_gaussian_transition_1d,
 )
@@ -46,6 +47,21 @@ def test_kd_stationary_evidence_integrates_one_latent_position_across_time():
     expected = logsumexp(np.sum(log_emissions, axis=0) - np.log(log_emissions.shape[1]))
 
     assert np.isclose(kd_stationary_log_evidence(log_emissions), expected)
+
+
+def test_kd_poisson_emissions_apply_spike_rate_scale():
+    spike_counts = np.array([[1, 0], [0, 2]])
+    rates_hz = np.array([[2.0, 4.0], [3.0, 5.0]])
+    scaled = poisson_log_emissions(spike_counts, rates_hz, dt=0.5, spike_rate_scale=2.0)
+    expected_counts = rates_hz * 0.5 * 2.0
+
+    expected = (
+        spike_counts @ np.log(expected_counts)
+        - expected_counts.sum(axis=0)[None, :]
+        - np.array([0.0, np.log(2.0)])[:, None]
+    )
+
+    np.testing.assert_allclose(scaled, expected)
 
 
 def test_diffusion_transition_columns_normalize():

@@ -32,6 +32,10 @@ on:
         description: "Emission likelihood family"
         required: true
         default: "poisson"
+      spike_rate_scale:
+        description: "Multiplicative scale applied to Poisson place-field rates during ripple scoring"
+        required: true
+        default: "1.0"
       grid_preset:
         description: "Parameter grid preset: kd or smoke"
         required: true
@@ -61,7 +65,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: kd-event-sharded-${{ github.repository }}-${{ inputs.session }}-${{ inputs.events }}-${{ inputs.max_events }}-${{ inputs.grid_preset }}
+  group: kd-event-sharded-${{ github.repository }}-${{ inputs.session }}-${{ inputs.events }}-${{ inputs.max_events }}-${{ inputs.grid_preset }}-${{ inputs.spike_rate_scale }}
   cancel-in-progress: false
 
 env:
@@ -72,6 +76,7 @@ env:
   BIN_SIZE_CM: ${{ inputs.bin_size_cm }}
   N_BINS: ${{ inputs.n_bins }}
   LIKELIHOOD: ${{ inputs.likelihood }}
+  SPIKE_RATE_SCALE: ${{ inputs.spike_rate_scale }}
   GRID_PRESET: ${{ inputs.grid_preset }}
   MAX_EVENTS: ${{ inputs.max_events }}
   N_JOBS: ${{ inputs.n_jobs }}
@@ -203,6 +208,7 @@ jobs:
             --bin-size-cm "${BIN_SIZE_CM}" \
             --n-bins "${N_BINS}" \
             --likelihood "${LIKELIHOOD}" \
+            --spike-rate-scale "${SPIKE_RATE_SCALE}" \
             --grid-preset "${GRID_PRESET}" \
             --n-jobs "${N_JOBS}" \
             --event-chunk-size "${EVENT_CHUNK_SIZE}" \
@@ -270,6 +276,7 @@ jobs:
             --bin-size-cm "${BIN_SIZE_CM}" \
             --n-bins "${N_BINS}" \
             --likelihood "${LIKELIHOOD}" \
+            --spike-rate-scale "${SPIKE_RATE_SCALE}" \
             --grid-preset "${GRID_PRESET}" \
             --n-jobs "${N_JOBS}" \
             --event-chunk-size "${EVENT_CHUNK_SIZE}" \

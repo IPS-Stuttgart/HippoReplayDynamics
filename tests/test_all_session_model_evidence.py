@@ -18,6 +18,8 @@ def test_all_session_model_evidence_workflow_exports_expected_outputs():
     assert "Rat1/Open1 Rat1/Open2 Rat2/Open1 Rat2/Open2 Rat3/Open1 Rat3/Open2 Rat4/Open1 Rat4/Open2" in workflow
     assert "scripts/plan_model_evidence_event_shards.py" in workflow
     assert "scripts/aggregate_all_session_model_evidence.py" in workflow
+    assert "spike_rate_scale:" in workflow
+    assert "--spike-rate-scale" in workflow
     assert "all_sessions_model_evidence_summary.csv" in workflow
     assert "session_model_evidence_summary.csv" in workflow
     assert "random_effects_model_probabilities.csv" in workflow

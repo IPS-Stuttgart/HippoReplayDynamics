@@ -113,7 +113,7 @@ def score_explicit_events(args: argparse.Namespace) -> BenchmarkResult:
         )
 
     config = BenchmarkConfig(
-        emissions=EmissionConfig(time_bin_s=args.time_bin_s),
+        emissions=EmissionConfig(time_bin_s=args.time_bin_s, spike_rate_scale=args.spike_rate_scale),
         test_cell_fraction=args.test_cell_fraction,
         candidate_top_k=args.candidate_top_k,
         pyrecest_particles=args.pyrecest_particles,
@@ -263,6 +263,7 @@ def main() -> int:
     parser.add_argument("--test-cell-fraction", default=0.25, type=float)
     parser.add_argument("--random-seed", default=1, type=int)
     parser.add_argument("--time-bin-s", default=0.02, type=float)
+    parser.add_argument("--spike-rate-scale", default=1.0, type=float)
     parser.add_argument("--output", default="results/heldout-benchmark")
     parser.add_argument(
         "--continue-on-error",

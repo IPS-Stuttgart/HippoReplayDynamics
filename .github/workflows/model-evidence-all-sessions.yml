@@ -68,6 +68,10 @@ on:
         description: "Ripple decoding time-bin width in seconds"
         required: true
         default: "0.003"
+      spike_rate_scale:
+        description: "Multiplicative scale applied to Poisson place-field rates during ripple scoring"
+        required: true
+        default: "1.0"
       bin_size_cm:
         description: "Place-field spatial bin size in centimeters"
         required: true
@@ -89,7 +93,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: model-evidence-all-sessions-${{ github.repository }}-${{ inputs.sessions }}-${{ inputs.events }}-${{ inputs.max_events }}-${{ github.ref }}
+  group: model-evidence-all-sessions-${{ github.repository }}-${{ inputs.sessions }}-${{ inputs.events }}-${{ inputs.max_events }}-${{ inputs.spike_rate_scale }}-${{ github.ref }}
   cancel-in-progress: false
 
 env:
@@ -109,6 +113,7 @@ env:
   STATE_SPACE_MOMENTUM_VELOCITY_DECAY: ${{ inputs.state_space_momentum_velocity_decay }}
   STATE_SPACE_MOMENTUM_CANDIDATE_TOP_K: ${{ inputs.state_space_momentum_candidate_top_k }}
   TIME_BIN_S: ${{ inputs.time_bin_s }}
+  SPIKE_RATE_SCALE: ${{ inputs.spike_rate_scale }}
   BIN_SIZE_CM: ${{ inputs.bin_size_cm }}
   SMOOTHING_SIGMA_BINS: ${{ inputs.smoothing_sigma_bins }}
   MIN_SPEED_CM_S: ${{ inputs.min_speed_cm_s }}
@@ -286,6 +291,7 @@ jobs:
             --state-space-momentum-velocity-decay "${STATE_SPACE_MOMENTUM_VELOCITY_DECAY}" \
             --state-space-momentum-candidate-top-k "${STATE_SPACE_MOMENTUM_CANDIDATE_TOP_K}" \
             --time-bin-s "${TIME_BIN_S}" \
+            --spike-rate-scale "${SPIKE_RATE_SCALE}" \
             --bin-size-cm "${BIN_SIZE_CM}" \
             --smoothing-sigma-bins "${SMOOTHING_SIGMA_BINS}" \
             --min-speed-cm-s "${MIN_SPEED_CM_S}" \

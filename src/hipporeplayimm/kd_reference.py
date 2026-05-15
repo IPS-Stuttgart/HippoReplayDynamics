@@ -13,7 +13,7 @@ from typing import Iterable
 
 import numpy as np
 from scipy.ndimage import gaussian_filter
-from scipy.special import gammaln, logsumexp
+from scipy.special import logsumexp
 from scipy.stats import invgamma, multivariate_normal
 
 from .data import ReplaySession, RippleEvent
@@ -23,6 +23,7 @@ from .encoding import (
     _clean_position,
     _frame_durations,
     _interp_positions,
+    _poisson_log_emissions,
     _positions_to_flat_bins,
     _speed_cm_s,
     _times_in_intervals,
@@ -165,6 +166,7 @@ def build_kd_emissions(
     encoding: EncodingModel,
     ripple: RippleEvent | int,
     time_bin_s: float,
+    spike_rate_scale: float = 1.0,
 ) -> LogEmissionTensor:
     ripple_event = session.ripple(ripple) if isinstance(ripple, int) else ripple
     edges = np.arange(ripple_event.start, ripple_event.end, time_bin_s)
@@ -187,7 +189,12 @@ def build_kd_emissions(
         valid &= (rows >= 0) & (rows < encoding.cell_ids.shape[0])
         valid[valid] &= encoding.cell_ids[rows[valid]] == spike_cell_ids[valid]
         np.add.at(counts, (time_bins[valid].astype(int), rows[valid]), 1)
-    log_likelihood = poisson_log_emissions(counts, encoding.rates_hz, dt)
+    log_likelihood = poisson_log_emissions(
+        counts,
+        encoding.rates_hz,
+        dt,
+        spike_rate_scale=spike_rate_scale,
+    )
     return LogEmissionTensor(
         log_likelihood=log_likelihood,
         spike_counts=counts,
@@ -198,9 +205,19 @@ def build_kd_emissions(
     )
 
 
-def poisson_log_emissions(spike_counts: np.ndarray, rates_hz: np.ndarray, dt: float) -> np.ndarray:
-    expected = np.maximum(rates_hz * dt, np.finfo(float).tiny)
-    return spike_counts @ np.log(expected) - expected.sum(axis=0)[None, :] - gammaln(spike_counts + 1).sum(axis=1)[:, None]
+def poisson_log_emissions(
+    spike_counts: np.ndarray,
+    rates_hz: np.ndarray,
+    dt: float,
+    *,
+    spike_rate_scale: float = 1.0,
+) -> np.ndarray:
+    return _poisson_log_emissions(
+        spike_counts,
+        rates_hz,
+        dt,
+        spike_rate_scale=spike_rate_scale,
+    )
 
 
 def kd_random_log_evidence(log_emissions: np.ndarray) -> float:

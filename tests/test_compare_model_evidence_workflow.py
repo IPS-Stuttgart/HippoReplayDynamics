@@ -17,4 +17,5 @@ def test_compare_model_evidence_runs_workflow_downloads_two_artifacts_and_upload
     assert "--right artifacts/right" in workflow
     assert "event_best_model_comparison.csv" in workflow
     assert "shared_model_relative_evidence_summary.csv" in workflow
+    assert "session_model_evidence_comparison.csv" in workflow
     assert "model-evidence-run-comparison-" in workflow

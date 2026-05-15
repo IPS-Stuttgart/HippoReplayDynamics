@@ -61,12 +61,50 @@ def test_model_evidence_accepts_sorted_spike_state_space_models():
     assert models["sorted-spike-state-space-imm"].config.imm_mode_stickiness == 0.91
 
 
+def test_model_evidence_accepts_clusterless_state_space_models():
+    args = argparse.Namespace(
+        models="clusterless-state-space-diffusion clusterless-state-space-momentum clusterless-state-space-imm",
+        candidate_top_k=64,
+        stationary_sigma_cm=2.0,
+        diffusion_sigma_cm=12.0,
+        momentum_sigma_cm=12.0,
+        velocity_decay=0.95,
+        mode_stickiness=0.94,
+        state_space_stationary_sigma_cm=1.5,
+        state_space_diffusion_sigma_cm_sqrt_s=42.0,
+        state_space_max_step_sigma=3.0,
+        state_space_imm_mode_stickiness=0.91,
+        state_space_momentum_sigma_cm_sqrt_s=43.0,
+        state_space_momentum_initial_sigma_cm_sqrt_s=44.0,
+        state_space_momentum_velocity_decay=0.8,
+        state_space_momentum_candidate_top_k=17,
+    )
+
+    models = _models(args)
+
+    assert list(models) == [
+        "clusterless-state-space-diffusion",
+        "clusterless-state-space-momentum",
+        "clusterless-state-space-imm",
+    ]
+    assert models["clusterless-state-space-diffusion"].name == "clusterless-state-space-diffusion"
+    assert models["clusterless-state-space-momentum"].name == "clusterless-state-space-momentum"
+    assert models["clusterless-state-space-imm"].name == "clusterless-state-space-imm"
+    assert models["clusterless-state-space-diffusion"].config.diffusion_sigma_cm_sqrt_s == 42.0
+    assert models["clusterless-state-space-momentum"].config.momentum_sigma_cm_sqrt_s == 43.0
+
+
 def test_model_evidence_classifies_state_space_families():
     assert _family("sorted-spike-state-space-stationary") == "nontrajectory"
     assert _family("sorted-spike-state-space-diffusion") == "trajectory"
     assert _family("sorted-spike-state-space-fragmented") == "trajectory"
     assert _family("sorted-spike-state-space-momentum") == "trajectory"
     assert _family("sorted-spike-state-space-imm") == "trajectory"
+    assert _family("clusterless-state-space-stationary") == "nontrajectory"
+    assert _family("clusterless-state-space-diffusion") == "trajectory"
+    assert _family("clusterless-state-space-fragmented") == "trajectory"
+    assert _family("clusterless-state-space-momentum") == "trajectory"
+    assert _family("clusterless-state-space-imm") == "trajectory"
 
 
 def test_model_evidence_run_event_selection_uses_session_event_ids():

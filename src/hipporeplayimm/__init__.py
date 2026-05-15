@@ -1,6 +1,13 @@
 """State-space and IMM replay benchmarks for hippocampal open-field data."""
 
 from .benchmarks import BenchmarkConfig, BenchmarkResult, run_open_field_benchmark
+from .clusterless import (
+    ClusterlessMarkConfig,
+    ClusterlessMarkEncoding,
+    ClusterlessStateSpaceReplayModel,
+    build_clusterless_mark_emissions,
+    fit_clusterless_mark_encoding,
+)
 from .data import ReplaySession, load_open_field_sessions
 from .encoding import EncodingConfig, EncodingModel, build_emissions, fit_place_field_encoding
 from .ground_truth import (
@@ -35,6 +42,9 @@ __all__ = [
     "BenchmarkConfig",
     "BenchmarkResult",
     "CandidateKinematicModel",
+    "ClusterlessMarkConfig",
+    "ClusterlessMarkEncoding",
+    "ClusterlessStateSpaceReplayModel",
     "DiffusionModel",
     "EncodingConfig",
     "EncodingModel",
@@ -49,8 +59,10 @@ __all__ = [
     "SimulationRecoveryResult",
     "StationaryModel",
     "build_emissions",
+    "build_clusterless_mark_emissions",
     "compare_scores_to_ground_truth",
     "fit_place_field_encoding",
+    "fit_clusterless_mark_encoding",
     "generate_behavioral_ground_truth",
     "infer_well_locations",
     "label_session_behavioral_ground_truth",

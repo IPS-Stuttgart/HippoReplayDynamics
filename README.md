@@ -39,6 +39,13 @@ predictive density as the primary metric.
   Momentum uses a candidate-pruned second-order recursion and reports that its
   trajectory posterior is candidate-supported. The older `state-space-*` aliases
   are accepted but benchmark output uses the explicit `sorted-spike-*` names.
+- `clusterless-state-space-stationary`, `clusterless-state-space-diffusion`,
+  `clusterless-state-space-fragmented`, `clusterless-state-space-jump`,
+  `clusterless-state-space-momentum`, and `clusterless-state-space-imm`:
+  state-space baselines using clusterless marked-point-process emissions when
+  spike-mark features are present. The first implementation uses a
+  position-dependent spike-intensity model and a diagonal-Gaussian mark
+  likelihood fit from run-period spike marks.
 - `pyrecest-goal-particle`: PyRecEst-backed goal-conditioned particle replay
   filter using well-derived candidate goals when session metadata are available.
   It can optionally rejuvenate position particles from the current decoded grid
@@ -52,10 +59,11 @@ The candidate-pruned models use the same candidate sets for train and joint
 likelihoods during held-out scoring, so `log p(train, test) - log p(train)` is
 well-defined under the same approximate state support.
 
-The state-space models currently use sorted-unit spike identities and Poisson
-place-field emissions. `inspect`, benchmarks, and position-validation outputs
-report detected spike-mark features, but the clusterless marked-point-process
-likelihood is explicitly marked `not_implemented`.
+The sorted-spike state-space models use sorted-unit spike identities and Poisson
+place-field emissions. The `clusterless-state-space-*` models instead use
+detected spike marks and report `clusterless_mark_likelihood=diagonal-gaussian`
+in diagnostics. Position-validation still validates the sorted-spike Poisson
+encoder.
 
 Replay bin width can be changed with `--time-bin-ms` in `benchmark`,
 `decode-event`, and `compare-ground-truth`; the state-space baselines are the
@@ -129,6 +137,17 @@ state-space model-evidence artifacts by canonical dynamics labels. The default
 inputs compare the KD-aligned event-sharded run `25435692734` against the
 state-space event-sharded run `25744259285` and upload best-model agreement,
 canonical crosstabs, and paired relative-evidence tables.
+
+Clusterless state-space evidence can be run with the same model-evidence
+workflows by replacing the model list, for example:
+
+```text
+clusterless-state-space-stationary clusterless-state-space-diffusion clusterless-state-space-momentum clusterless-state-space-imm
+```
+
+The workflows expose `clusterless_mark_smoothing_sigma_bins`,
+`clusterless_mark_prior_count`, and `clusterless_mark_variance_floor` for the
+Gaussian mark model.
 
 `decode-event --output` writes `event_scores.csv` plus posterior `.npz`
 artifacts for models that expose `trajectory_log_posterior`. The batch tracking

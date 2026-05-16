@@ -1,4 +1,5 @@
 """Duration-aware replay dynamics for partial replay bins."""
+# ruff: noqa: E701, E702
 from __future__ import annotations
 import itertools
 import numpy as np

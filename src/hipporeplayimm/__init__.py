@@ -1,4 +1,5 @@
 """State-space and IMM replay benchmarks for hippocampal open-field data."""
+# ruff: noqa: E402
 
 from . import ground_truth as _ground_truth
 from . import score_metadata as _score_metadata
@@ -46,7 +47,7 @@ _ground_truth._emission_config_for_scores = _score_metadata.emission_config_for_
 # emissions include a partial final bin.
 _apply_duration_dynamics_patch()
 _apply_state_space_imm_duration_patch()
-from .encoding import build_emissions as build_emissions  # noqa: E402,F401
+from .encoding import build_emissions as build_emissions  # noqa: E402,F401,F811
 
 # Keep synthetic recovery summaries from mixing exact evidences with truncated
 # candidate lower bounds.

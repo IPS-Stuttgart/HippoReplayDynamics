@@ -11,6 +11,7 @@ TRUNCATED_EVIDENCE_SUPPORT = "truncated_full_grid"
 EVIDENCE_SUPPORT_DIAGNOSTIC_COLUMNS = (
     "diagnostic_candidate_evidence_support",
     "diagnostic_state_space_momentum_evidence_support",
+    "diagnostic_state_space_imm_evidence_support",
 )
 
 

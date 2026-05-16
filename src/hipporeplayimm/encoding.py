@@ -189,17 +189,16 @@ def build_emissions(
 
     config = EmissionConfig() if config is None else config
     ripple_event = session.ripple(ripple) if isinstance(ripple, int) else ripple
-    edges = np.arange(ripple_event.start, ripple_event.end + config.time_bin_s, config.time_bin_s)
-    if edges.shape[0] < 2:
-        edges = np.array([ripple_event.start, ripple_event.end], dtype=float)
-    times = edges[:-1] + 0.5 * np.diff(edges)
-    dt = float(np.median(np.diff(edges)))
+    edges = _time_bin_edges(ripple_event.start, ripple_event.end, config.time_bin_s)
+    bin_durations = np.diff(edges)
+    times = edges[:-1] + 0.5 * bin_durations
+    dt = float(np.median(bin_durations))
     spikes = session.spikes
     counts = np.zeros((times.shape[0], encoding.n_cells), dtype=int)
     if spikes.size and encoding.n_cells:
         keep = (
-            (spikes[:, 0] >= edges[0])
-            & (spikes[:, 0] < edges[-1])
+            (spikes[:, 0] >= ripple_event.start)
+            & (spikes[:, 0] < ripple_event.end)
             & np.isin(spikes[:, 1].astype(int), encoding.cell_ids)
         )
         spike_times = spikes[keep, 0]
@@ -214,7 +213,7 @@ def build_emissions(
     log_likelihood = _poisson_log_emissions(
         counts,
         encoding.rates_hz,
-        dt,
+        bin_durations,
         spike_rate_scale=config.spike_rate_scale,
     )
     return LogEmissionTensor(
@@ -230,18 +229,59 @@ def build_emissions(
 def _poisson_log_emissions(
     spike_counts: np.ndarray,
     rates_hz: np.ndarray,
-    dt: float,
+    dt: float | np.ndarray,
     *,
     spike_rate_scale: float = 1.0,
 ) -> np.ndarray:
     if spike_rate_scale <= 0.0:
         raise ValueError("spike_rate_scale must be positive")
-    expected = np.maximum(rates_hz * dt * spike_rate_scale, np.finfo(float).tiny)
+    dt_array = np.asarray(dt, dtype=float)
+    if dt_array.ndim == 0:
+        if float(dt_array) <= 0.0:
+            raise ValueError("dt must be positive")
+        expected = np.maximum(rates_hz * float(dt_array) * spike_rate_scale, np.finfo(float).tiny)
+        return (
+            spike_counts @ np.log(expected)
+            - expected.sum(axis=0)[None, :]
+            - gammaln(spike_counts + 1).sum(axis=1)[:, None]
+        )
+
+    if dt_array.ndim != 1 or dt_array.shape[0] != spike_counts.shape[0]:
+        raise ValueError("dt must be a scalar or one duration per time bin")
+    if np.any(dt_array <= 0.0):
+        raise ValueError("all bin durations must be positive")
+
+    expected = np.maximum(
+        dt_array[:, None, None] * rates_hz[None, :, :] * spike_rate_scale,
+        np.finfo(float).tiny,
+    )
     return (
-        spike_counts @ np.log(expected)
-        - expected.sum(axis=0)[None, :]
+        np.einsum("tc,tcb->tb", spike_counts, np.log(expected), optimize=True)
+        - expected.sum(axis=1)
         - gammaln(spike_counts + 1).sum(axis=1)[:, None]
     )
+
+
+def _time_bin_edges(start: float, end: float, time_bin_s: float) -> np.ndarray:
+    start = float(start)
+    end = float(end)
+    time_bin_s = float(time_bin_s)
+    if not np.isfinite(start) or not np.isfinite(end):
+        raise ValueError("ripple start and end must be finite")
+    if not np.isfinite(time_bin_s) or time_bin_s <= 0.0:
+        raise ValueError("time_bin_s must be finite and positive")
+    if end <= start:
+        raise ValueError("ripple end must be greater than ripple start")
+
+    duration = end - start
+    n_complete = int(np.floor(duration / time_bin_s))
+    edges = start + np.arange(n_complete + 1, dtype=float) * time_bin_s
+    tolerance = 16.0 * np.finfo(float).eps * max(abs(start), abs(end), abs(duration), 1.0)
+    if edges.shape[0] == 1 or edges[-1] < end - tolerance:
+        edges = np.append(edges, end)
+    else:
+        edges[-1] = end
+    return edges
 
 
 def _clean_position(position: np.ndarray) -> np.ndarray:

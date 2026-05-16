@@ -54,6 +54,8 @@ def main(argv: list[str] | None = None) -> int:
     benchmark_parser.add_argument("--output")
     benchmark_parser.add_argument("--max-events", type=int)
     benchmark_parser.add_argument("--candidate-top-k", type=int, default=64)
+    benchmark_parser.add_argument("--test-cell-fraction", type=float, default=0.25)
+    benchmark_parser.add_argument("--random-seed", type=int, default=1)
     benchmark_parser.add_argument("--time-bin-ms", type=float, default=20.0)
     benchmark_parser.add_argument("--spike-rate-scale", type=float, default=1.0)
     benchmark_parser.add_argument(
@@ -94,6 +96,8 @@ def main(argv: list[str] | None = None) -> int:
     compare_parser.add_argument("--output", required=True)
     compare_parser.add_argument("--ground-truth")
     compare_parser.add_argument("--candidate-top-k", type=int, default=64)
+    compare_parser.add_argument("--test-cell-fraction", type=float, default=0.25)
+    compare_parser.add_argument("--random-seed", type=int, default=1)
     compare_parser.add_argument("--time-bin-ms", type=float, default=20.0)
     compare_parser.add_argument("--spike-rate-scale", type=float, default=1.0)
     _add_encoding_arguments(compare_parser)
@@ -296,6 +300,8 @@ def _benchmark(args: argparse.Namespace) -> int:
         encoding=_encoding_config_from_args(args),
         emissions=_emission_config_from_args(args),
         max_events_per_session=args.max_events,
+        test_cell_fraction=args.test_cell_fraction,
+        random_seed=args.random_seed,
         candidate_top_k=args.candidate_top_k,
         models=_parse_models(args.models),
         **_pyrecest_scalar_kwargs(args),
@@ -389,7 +395,9 @@ def _compare_ground_truth(args: argparse.Namespace) -> int:
         ground_truth_config=config,
         encoding_config=_encoding_config_from_args(args),
         emission_config=_emission_config_from_args(args),
+        test_cell_fraction=args.test_cell_fraction,
         candidate_top_k=args.candidate_top_k,
+        random_seed=args.random_seed,
         **_pyrecest_scalar_kwargs(args),
     )
     output = Path(args.output)

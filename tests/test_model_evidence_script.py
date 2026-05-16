@@ -3,6 +3,7 @@ import importlib.util
 from pathlib import Path
 
 import numpy as np
+import pandas as pd
 
 _SCRIPT = Path(__file__).resolve().parents[1] / "scripts" / "benchmark_model_evidence.py"
 _SPEC = importlib.util.spec_from_file_location("benchmark_model_evidence", _SCRIPT)
@@ -12,6 +13,7 @@ assert _SPEC.loader is not None
 _SPEC.loader.exec_module(benchmark_model_evidence)
 
 _events = benchmark_model_evidence._events
+_add_evidence_columns = benchmark_model_evidence._add_evidence_columns
 _family = benchmark_model_evidence._family
 _models = benchmark_model_evidence._models
 
@@ -72,3 +74,50 @@ def test_model_evidence_classifies_state_space_families():
 def test_model_evidence_run_event_selection_uses_session_event_ids():
     assert _events("run", _SessionStub()) == [2, 4, 6, 8]
     assert _events("run:1-2", _SessionStub()) == [4, 6]
+
+
+def test_model_evidence_excludes_truncated_lower_bounds_from_exact_probabilities():
+    scored = _add_evidence_columns(
+        pd.DataFrame(
+            [
+                _score_row("random", 0.0),
+                _score_row("stationary", -2.0),
+                _score_row(
+                    "momentum",
+                    100.0,
+                    diagnostic_candidate_evidence_support="truncated_full_grid",
+                ),
+            ]
+        )
+    )
+
+    random = scored[scored["model"] == "random"].iloc[0]
+    momentum = scored[scored["model"] == "momentum"].iloc[0]
+
+    assert bool(random["is_best_model"])
+    assert random["best_model"] == "random"
+    assert not bool(momentum["evidence_comparable"])
+    assert not bool(momentum["is_best_model"])
+    assert pd.isna(momentum["relative_log_evidence"])
+    assert pd.isna(momentum["model_probability"])
+    assert momentum["best_truncated_lower_bound_model"] == "momentum"
+    assert bool(momentum["is_best_truncated_lower_bound"])
+    assert momentum["truncated_relative_log_evidence"] == 0.0
+
+
+def _score_row(model: str, log_evidence: float, **extra: object) -> dict[str, object]:
+    row = {
+        "status": "success",
+        "session": "RatX/OpenY",
+        "event_index": 0,
+        "model": model,
+        "requested_model": model,
+        "model_family": _family(model),
+        "log_evidence": log_evidence,
+        "n_time": 3,
+        "n_spikes": 5,
+        "runtime_s": 0.0,
+        "error": "",
+    }
+    row.update(extra)
+    return row

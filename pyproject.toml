@@ -40,6 +40,9 @@ check_untyped_defs = true
 [tool.ruff]
 line-length = 180
 
+[tool.ruff.lint]
+extend-ignore = ["E402", "E701", "E702", "F811"]
+
 [tool.isort]
 profile = "black"
 

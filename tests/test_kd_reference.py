@@ -1,7 +1,13 @@
+from pathlib import Path
+
 import numpy as np
 from scipy.special import logsumexp
 
+from hipporeplayimm.data import ReplaySession, RippleEvent
+from hipporeplayimm.encoding import EncodingModel
 from hipporeplayimm.kd_reference import (
+    KDEncodingConfig,
+    build_kd_emissions,
     diffusion_transition_1d,
     empirical_grid_prior,
     kd_momentum_log_evidence,
@@ -15,6 +21,40 @@ from hipporeplayimm.kd_reference import (
     stationary_gaussian_log_latent,
     stationary_gaussian_transition_1d,
 )
+
+
+def _one_cell_encoding(rate_hz: float = 10.0) -> EncodingModel:
+    return EncodingModel(
+        x_edges=np.array([0.0, 4.0]),
+        y_edges=np.array([0.0, 4.0]),
+        bin_centers=np.array([[2.0, 2.0]]),
+        rates_hz=np.array([[rate_hz]]),
+        occupancy_s=np.array([1.0]),
+        cell_ids=np.array([1]),
+        config=KDEncodingConfig(),
+    )
+
+
+def _session_with_ripple(spikes: np.ndarray, ripple: RippleEvent) -> ReplaySession:
+    return ReplaySession(
+        rat="rat",
+        name="session",
+        path=Path("."),
+        position=np.array([[0.0, 0.0, 0.0], [1.0, 0.0, 0.0]]),
+        spikes=np.asarray(spikes, dtype=float),
+        tetrode_cell_ids=np.empty((0, 2)),
+        excitatory_neurons=np.array([1]),
+        inhibitory_neurons=np.array([], dtype=int),
+        ripple_events=np.array(
+            [[ripple.start, ripple.end, ripple.peak, ripple.raw_power, ripple.z_power_session, ripple.z_power_epoch]]
+        ),
+        run_times=np.empty((0, 2)),
+        sleep_box_immobile_times=np.empty((0, 2)),
+        sleep_times=np.empty((0, 2)),
+        rem_times=np.empty((0, 2)),
+        well_sequence=None,
+        metadata={},
+    )
 
 
 def test_kd_random_evidence_averages_independent_time_bin_emissions():
@@ -139,3 +179,35 @@ def test_grid_marginalization_returns_finite_log_evidence_per_event():
 
     assert marginalized.shape == (grid.shape[0],)
     assert np.all(np.isfinite(marginalized))
+
+
+def test_build_kd_emissions_keeps_last_full_bin_when_duration_is_multiple():
+    ripple = RippleEvent(start=0.0, end=0.1, peak=0.05, raw_power=0.0, z_power_session=0.0, z_power_epoch=0.0)
+    session = _session_with_ripple(np.array([[0.09, 1.0], [0.101, 1.0]]), ripple)
+
+    emissions = build_kd_emissions(session, _one_cell_encoding(), ripple, time_bin_s=0.02)
+
+    assert emissions.n_time == 5
+    assert np.allclose(emissions.times, np.array([0.01, 0.03, 0.05, 0.07, 0.09]))
+    assert np.array_equal(emissions.spike_counts[:, 0], np.array([0, 0, 0, 0, 1]))
+    assert emissions.n_spikes == 1
+
+
+def test_build_kd_emissions_includes_partial_ripple_tail_without_counting_after_end():
+    ripple = RippleEvent(start=0.0, end=0.053, peak=0.026, raw_power=0.0, z_power_session=0.0, z_power_epoch=0.0)
+    session = _session_with_ripple(np.array([[0.051, 1.0], [0.054, 1.0]]), ripple)
+    encoding = _one_cell_encoding(rate_hz=10.0)
+
+    emissions = build_kd_emissions(session, encoding, ripple, time_bin_s=0.02)
+
+    assert emissions.n_time == 3
+    assert np.allclose(emissions.times, np.array([0.01, 0.03, 0.0465]))
+    assert np.array_equal(emissions.spike_counts[:, 0], np.array([0, 0, 1]))
+    assert emissions.n_spikes == 1
+
+    expected_log_likelihood = poisson_log_emissions(
+        np.array([[0], [0], [1]]),
+        encoding.rates_hz,
+        np.array([0.02, 0.02, 0.013]),
+    )
+    assert np.allclose(emissions.log_likelihood, expected_log_likelihood)

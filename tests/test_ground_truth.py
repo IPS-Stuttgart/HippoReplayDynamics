@@ -5,8 +5,10 @@ import pandas as pd
 import pytest
 
 from hipporeplayimm.data import ReplaySession
+from hipporeplayimm.encoding import EncodingConfig, EncodingModel, LogEmissionTensor
 from hipporeplayimm.ground_truth import (
     GroundTruthConfig,
+    _add_ground_truth_metrics,
     assign_endpoint_to_well,
     compare_scores_to_ground_truth,
     first_post_ripple_well_visit,
@@ -14,6 +16,7 @@ from hipporeplayimm.ground_truth import (
     label_session_behavioral_ground_truth,
     well_posterior_masses,
 )
+from hipporeplayimm.models import EventScore
 
 
 def test_shifted_well_coordinate_inference():
@@ -126,6 +129,168 @@ def test_compare_scores_to_ground_truth_preserves_score_columns(tmp_path: Path):
     assert "heldout_log_likelihood" in comparison.columns
     assert "goal_correct" in comparison.columns
     assert len(comparison) == 1
+
+
+def test_compare_scores_to_ground_truth_uses_benchmark_split_and_train_candidates(
+    monkeypatch, tmp_path: Path
+):
+    times = np.linspace(0.0, 1.0, 11)
+    position = np.column_stack(
+        [times, np.zeros_like(times), np.zeros_like(times), np.zeros_like(times)]
+    )
+    session = _session(
+        tmp_path,
+        position=position,
+        well_sequence=np.array([[0.0, 1.0], [0.5, 2.0], [1.0, 1.0]]),
+        ripple_events=np.array([[0.2, 0.24, 0.22, 1.0, 1.0, 1.0]]),
+    )
+    bin_centers = np.array([[0.0, 0.0], [10.0, 0.0]])
+    encoding = EncodingModel(
+        x_edges=np.array([-1.0, 5.0, 11.0]),
+        y_edges=np.array([-1.0, 1.0]),
+        bin_centers=bin_centers,
+        rates_hz=np.ones((4, 2)),
+        occupancy_s=np.ones(2),
+        cell_ids=np.array([1, 2, 3, 4]),
+        config=EncodingConfig(),
+    )
+    wells = pd.DataFrame(
+        {
+            "well_id": [1, 2],
+            "well_x": [0.0, 10.0],
+            "well_y": [0.0, 0.0],
+            "n_estimates": [1, 1],
+        }
+    )
+    scores = pd.DataFrame(
+        {
+            "session": ["Rat1/Open1"],
+            "event_index": [0],
+            "model": ["diffusion"],
+            "requested_model": ["diffusion"],
+            "heldout_log_likelihood": [0.0],
+            "train_log_likelihood": [0.0],
+            "joint_log_likelihood": [0.0],
+            "train_cell_ids": ["1,2,3"],
+            "test_cell_ids": ["4"],
+        }
+    )
+    ground_truth = pd.DataFrame(
+        {
+            "session": ["Rat1/Open1"],
+            "event_index": [0],
+            "ripple_peak": [0.22],
+            "active_goal_id": [np.nan],
+            "true_well_id": [2],
+            "true_well_x": [10.0],
+            "true_well_y": [0.0],
+            "arrival_time": [0.5],
+            "time_to_arrival_s": [0.28],
+            "valid_label": [True],
+            "exclude_reason": [""],
+        }
+    )
+
+    built_cell_ids: list[tuple[int, ...]] = []
+    seen: dict[str, object] = {}
+
+    def fake_build_emissions(session_arg, encoding_arg, event_index_arg, emission_config_arg):
+        del session_arg, event_index_arg, emission_config_arg
+        built_cell_ids.append(tuple(int(cell_id) for cell_id in encoding_arg.cell_ids))
+        return LogEmissionTensor(
+            log_likelihood=np.array([[0.0, -1.0], [-1.0, 0.0]]),
+            spike_counts=np.zeros((2, encoding_arg.n_cells), dtype=int),
+            times=np.array([0.21, 0.23]),
+            dt=0.02,
+            cell_ids=encoding_arg.cell_ids,
+            n_spikes=0,
+        )
+
+    class FakeCandidateModel:
+        name = "diffusion"
+
+        def candidate_indices(self, emissions):
+            seen["candidate_cells"] = tuple(int(cell_id) for cell_id in emissions.cell_ids)
+            return [np.array([0]), np.array([1])]
+
+        def score(self, emissions, bin_centers_arg, candidate_indices=None):
+            del bin_centers_arg
+            seen["score_cells"] = tuple(int(cell_id) for cell_id in emissions.cell_ids)
+            seen["candidate_indices"] = candidate_indices
+            return EventScore(
+                "diffusion",
+                0.0,
+                emissions.n_time,
+                emissions.n_spikes,
+                terminal_log_posterior=np.log(np.array([0.25, 0.75])),
+            )
+
+    monkeypatch.setattr(
+        "hipporeplayimm.ground_truth.load_open_field_sessions",
+        lambda _root: [session],
+    )
+    monkeypatch.setattr(
+        "hipporeplayimm.ground_truth.fit_place_field_encoding",
+        lambda _session, _config: encoding,
+    )
+    monkeypatch.setattr("hipporeplayimm.ground_truth.build_emissions", fake_build_emissions)
+    monkeypatch.setattr(
+        "hipporeplayimm.ground_truth.infer_well_locations",
+        lambda _session, _config=None: wells,
+    )
+    monkeypatch.setattr(
+        "hipporeplayimm.ground_truth._build_models",
+        lambda _config, session=None: {"diffusion": FakeCandidateModel()},
+    )
+
+    comparison = compare_scores_to_ground_truth(
+        tmp_path,
+        scores,
+        ground_truth=ground_truth,
+    )
+
+    assert built_cell_ids == [(1, 2, 3), (1, 2, 3, 4)]
+    assert seen["candidate_cells"] == (1, 2, 3)
+    assert seen["score_cells"] == (1, 2, 3, 4)
+    assert [arr.tolist() for arr in seen["candidate_indices"]] == [[0], [1]]
+    assert comparison.loc[0, "decoded_well_id"] == 2
+    assert bool(comparison.loc[0, "goal_correct"])
+
+
+def test_ground_truth_metrics_treat_missing_valid_label_as_invalid():
+    comparison = pd.DataFrame(
+        {
+            "session": ["Rat1/Open1", "Rat1/Open1", "Rat1/Open1"],
+            "event_index": [0, 1, 2],
+            "model": ["random", "random", "random"],
+            "true_well_id": [np.nan, 2.0, 1.0],
+            "true_well_x": [np.nan, 10.0, 0.0],
+            "true_well_y": [np.nan, 0.0, 0.0],
+            "valid_label": [np.nan, True, "False"],
+            "decoded_endpoint_x": [0.0, 10.0, 0.0],
+            "decoded_endpoint_y": [0.0, 0.0, 0.0],
+            "decoded_well_id": [1.0, 2.0, 1.0],
+            "well_1_posterior": [0.8, 0.2, 0.9],
+            "well_2_posterior": [0.2, 0.8, 0.1],
+        }
+    )
+
+    result = _add_ground_truth_metrics(
+        comparison,
+        decoded=pd.DataFrame(),
+        gt_frame=pd.DataFrame(),
+    )
+
+    assert pd.isna(result.loc[0, "goal_correct"])
+    assert pd.isna(result.loc[0, "endpoint_error_cm"])
+    assert pd.isna(result.loc[0, "true_well_posterior"])
+    assert pd.isna(result.loc[0, "true_well_rank"])
+    assert bool(result.loc[1, "goal_correct"])
+    assert result.loc[1, "true_well_posterior"] == pytest.approx(0.8)
+    assert result.loc[1, "true_well_rank"] == 1
+    assert pd.isna(result.loc[2, "goal_correct"])
+    assert pd.isna(result.loc[2, "true_well_posterior"])
+    assert pd.isna(result.loc[2, "true_well_rank"])
 
 
 def _session(

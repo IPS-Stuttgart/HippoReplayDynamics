@@ -5,7 +5,7 @@ from scipy.special import logsumexp
 
 from hipporeplayimm.encoding import LogEmissionTensor
 from hipporeplayimm.sorted_spike_state_space import SortedSpikeStateSpaceReplayModel
-from hipporeplayimm.state_space import StateSpaceDecoderConfig
+from hipporeplayimm.state_space import StateSpaceDecoderConfig, StateSpaceReplayModel
 
 
 def _synthetic_emissions() -> LogEmissionTensor:
@@ -81,6 +81,54 @@ def test_state_space_modes_return_full_trajectory_posteriors():
         assert score.diagnostics["clusterless_mark_likelihood"] == "not_implemented"
         if mode == "momentum":
             assert score.diagnostics["state_space_momentum_trajectory_posterior"] == "smoothed_pair_marginal"
+
+
+def test_state_space_momentum_pruned_support_uses_full_grid_normalization():
+    centers = np.array([[0.0, 0.0], [1.0, 0.0]])
+    emissions = LogEmissionTensor(
+        log_likelihood=np.array(
+            [
+                [0.0, -10.0],
+                [0.0, -10.0],
+                [0.0, -10.0],
+            ]
+        ),
+        spike_counts=np.zeros((3, 1), dtype=int),
+        times=np.array([0.0, 1.0, 2.0]),
+        dt=1.0,
+        cell_ids=np.array([1]),
+        n_spikes=0,
+    )
+    config = StateSpaceDecoderConfig(
+        mode="momentum",
+        momentum_candidate_top_k=1,
+        momentum_initial_sigma_cm_sqrt_s=1.0,
+        momentum_sigma_cm_sqrt_s=1.0,
+    )
+    model = StateSpaceReplayModel(mode="momentum", config=config)
+    candidates = model.candidate_indices(emissions)
+
+    score = model.score(emissions, centers)
+
+    src0 = int(candidates[0][0])
+    dst1 = int(candidates[1][0])
+    dst2 = int(candidates[2][0])
+    weights01 = np.exp(-0.5 * np.sum((centers - centers[src0]) ** 2, axis=1))
+    predicted = centers[dst1] + config.momentum_velocity_decay * (centers[dst1] - centers[src0])
+    weights12 = np.exp(-0.5 * np.sum((centers - predicted) ** 2, axis=1))
+    expected = (
+        emissions.log_likelihood[0, src0]
+        - np.log(emissions.n_bins)
+        + np.log(weights01[dst1] / weights01.sum())
+        + emissions.log_likelihood[1, dst1]
+        + np.log(weights12[dst2] / weights12.sum())
+        + emissions.log_likelihood[2, dst2]
+    )
+
+    assert np.allclose(score.log_likelihood, expected)
+    assert score.trajectory_log_posterior is not None
+    assert np.allclose(logsumexp(score.trajectory_log_posterior, axis=1), 0.0)
+    assert score.diagnostics["state_space_momentum_evidence_support"] == "truncated_full_grid"
 
 
 def test_state_space_momentum_can_reuse_external_candidate_support():

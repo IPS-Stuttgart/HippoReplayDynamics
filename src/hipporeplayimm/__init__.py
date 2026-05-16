@@ -29,6 +29,7 @@ from .models import (
     score_model,
 )
 from .pyrecest_models import PyRecEstGoalParticleModel
+from .state_space_imm_duration import apply_state_space_imm_duration_patch as _apply_state_space_imm_duration_patch
 from .sweeps import (
     PyRecEstSweepConfig,
     PyRecEstSweepResult,
@@ -44,6 +45,7 @@ _ground_truth._emission_config_for_scores = _score_metadata.emission_config_for_
 # Ensure replay dynamics use center-to-center transition durations when replay
 # emissions include a partial final bin.
 _apply_duration_dynamics_patch()
+_apply_state_space_imm_duration_patch()
 from .encoding import build_emissions as build_emissions  # noqa: E402,F401
 
 # Keep synthetic recovery summaries from mixing exact evidences with truncated

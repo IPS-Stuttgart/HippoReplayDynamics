@@ -68,6 +68,70 @@ def test_imm_scores_stationary_to_momentum_synthetic_event():
     assert score.diagnostics["mean_candidate_log_mass"] == 0.0
 
 
+def test_candidate_diffusion_full_support_matches_exact_diffusion():
+    centers = np.array([[0.0, 0.0], [1.0, 0.0], [2.0, 0.0]])
+    emissions = LogEmissionTensor(
+        log_likelihood=np.log(
+            np.array(
+                [
+                    [0.60, 0.30, 0.10],
+                    [0.20, 0.60, 0.20],
+                    [0.10, 0.30, 0.60],
+                ]
+            )
+        ),
+        spike_counts=np.zeros((3, 1), dtype=int),
+        times=np.array([0.0, 1.0, 2.0]),
+        dt=1.0,
+        cell_ids=np.array([1]),
+        n_spikes=0,
+    )
+
+    exact = DiffusionModel(sigma_cm=1.0, max_step_sigma=10.0).score(emissions, centers)
+    candidate = CandidateKinematicModel(mode="diffusion", top_k=centers.shape[0], diffusion_sigma_cm=1.0).score(emissions, centers)
+
+    assert np.allclose(candidate.log_likelihood, exact.log_likelihood)
+    assert candidate.diagnostics["mean_candidate_log_mass"] == 0.0
+    assert candidate.diagnostics["candidate_evidence_support"] == "truncated_full_grid"
+
+
+def test_candidate_diffusion_pruned_support_uses_full_grid_normalization():
+    centers = np.array([[0.0, 0.0], [1.0, 0.0]])
+    emissions = LogEmissionTensor(
+        log_likelihood=np.array(
+            [
+                [0.0, -10.0],
+                [0.0, -10.0],
+                [0.0, -10.0],
+            ]
+        ),
+        spike_counts=np.zeros((3, 1), dtype=int),
+        times=np.array([0.0, 1.0, 2.0]),
+        dt=1.0,
+        cell_ids=np.array([1]),
+        n_spikes=0,
+    )
+    model = CandidateKinematicModel(mode="diffusion", top_k=1, diffusion_sigma_cm=1.0)
+    candidates = model.candidate_indices(emissions)
+
+    score = model.score(emissions, centers)
+
+    src0 = int(candidates[0][0])
+    dst1 = int(candidates[1][0])
+    dst2 = int(candidates[2][0])
+    weights01 = np.exp(-0.5 * np.sum((centers - centers[src0]) ** 2, axis=1))
+    weights12 = np.exp(-0.5 * np.sum((centers - centers[dst1]) ** 2, axis=1))
+    expected = (
+        emissions.log_likelihood[0, src0]
+        - np.log(emissions.n_bins)
+        + np.log(weights01[dst1] / weights01.sum())
+        + emissions.log_likelihood[1, dst1]
+        + np.log(weights12[dst2] / weights12.sum())
+        + emissions.log_likelihood[2, dst2]
+    )
+    assert np.allclose(score.log_likelihood, expected)
+
+
 def test_pyrecest_goal_particle_model_scores_synthetic_event():
     centers = np.array([[0.0, 0.0], [1.0, 0.0], [2.0, 0.0], [3.0, 0.0]])
     log_likelihood = np.log(

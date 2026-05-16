@@ -39,8 +39,10 @@ class StateSpaceReplayModel:
     Supported modes are ``stationary``, ``diffusion``, ``fragmented``/``jump``,
     ``imm``, and ``momentum``. The first-order models use exact full-grid
     forward-backward recursions. The momentum model uses candidate-pruned
-    second-order dynamics for scalability and returns candidate-supported
-    per-bin posterior marginals.
+    second-order dynamics for scalability. Its candidate recursion keeps
+    full-grid prior and transition normalizers and drops off-support paths, so
+    its evidence is a conservative truncated full-grid evidence. It returns
+    candidate-supported per-bin posterior marginals.
     """
 
     mode: str = "diffusion"
@@ -121,6 +123,7 @@ class StateSpaceReplayModel:
                 "state_space_momentum_candidate_top_k": int(self.config.momentum_candidate_top_k),
                 "state_space_momentum_candidate_support": "derived" if candidate_indices is None else "provided",
                 "state_space_momentum_trajectory_posterior": "smoothed_pair_marginal",
+                "state_space_momentum_evidence_support": "truncated_full_grid",
             }
 
         terminal = trajectory[-1]
@@ -378,9 +381,14 @@ def _init_pair_log_alpha(
     *,
     sigma_cm: float,
 ) -> np.ndarray:
-    log_kernel = _pairwise_gaussian_log_prob(bin_centers[first], bin_centers[second], sigma_cm)
-    log_kernel -= logsumexp(log_kernel, axis=1, keepdims=True)
-    return log_likelihood[0, first][:, None] - np.log(len(first)) + log_kernel + log_likelihood[1, second][None, :]
+    log_kernel = _full_grid_normalized_pairwise_gaussian_log_prob(
+        bin_centers[first],
+        bin_centers[second],
+        bin_centers,
+        sigma_cm,
+    )
+    n_bins = log_likelihood.shape[1]
+    return log_likelihood[0, first][:, None] - np.log(n_bins) + log_kernel + log_likelihood[1, second][None, :]
 
 
 def _advance_momentum_pair(
@@ -402,8 +410,12 @@ def _advance_momentum_pair(
         predictions = coords_prev[prev_col][None, :] + velocity_decay * (
             coords_prev[prev_col][None, :] - coords_prev_prev
         )
-        log_kernel = _pairwise_gaussian_log_prob(predictions, coords_curr, sigma_cm)
-        log_kernel -= logsumexp(log_kernel, axis=1, keepdims=True)
+        log_kernel = _full_grid_normalized_pairwise_gaussian_log_prob(
+            predictions,
+            coords_curr,
+            bin_centers,
+            sigma_cm,
+        )
         output[prev_col] = logsumexp(log_pair[:, prev_col][:, None] + log_kernel, axis=0) + curr_emission
     return output
 
@@ -427,8 +439,12 @@ def _backward_momentum_pair(
         predictions = coords_prev[prev_col][None, :] + velocity_decay * (
             coords_prev[prev_col][None, :] - coords_prev_prev
         )
-        log_kernel = _pairwise_gaussian_log_prob(predictions, coords_curr, sigma_cm)
-        log_kernel -= logsumexp(log_kernel, axis=1, keepdims=True)
+        log_kernel = _full_grid_normalized_pairwise_gaussian_log_prob(
+            predictions,
+            coords_curr,
+            bin_centers,
+            sigma_cm,
+        )
         continuation = curr_emission[None, :] + next_beta[prev_col][None, :]
         output[:, prev_col] = logsumexp(log_kernel + continuation, axis=1)
     return output
@@ -455,6 +471,23 @@ def _gaussian_transition_matrix(bin_centers: np.ndarray, sigma_cm: float, max_st
         cols.extend([src] * len(dst))
         data.extend(float(value) for value in weights)
     return csr_matrix((data, (rows, cols)), shape=(n_bins, n_bins))
+
+
+def _full_grid_normalized_pairwise_gaussian_log_prob(
+    predicted: np.ndarray,
+    observed: np.ndarray,
+    all_observed: np.ndarray,
+    sigma_cm: float,
+) -> np.ndarray:
+    """Evaluate candidate log transitions with full-grid normalization."""
+
+    log_kernel = _pairwise_gaussian_log_prob(predicted, observed, sigma_cm)
+    log_normalizer = logsumexp(
+        _pairwise_gaussian_log_prob(predicted, all_observed, sigma_cm),
+        axis=1,
+        keepdims=True,
+    )
+    return log_kernel - log_normalizer
 
 
 def _pairwise_gaussian_log_prob(predicted: np.ndarray, observed: np.ndarray, sigma_cm: float) -> np.ndarray:

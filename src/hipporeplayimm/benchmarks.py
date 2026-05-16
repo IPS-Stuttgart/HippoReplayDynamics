@@ -274,10 +274,43 @@ def _session_goal_candidates(session: ReplaySession | None) -> np.ndarray | None
     return wells[["well_x", "well_y"]].to_numpy(dtype=float)
 
 
+_BEST_STATIC_BASELINE_MODELS = frozenset(
+    {
+        "random",
+        "stationary",
+        "diffusion",
+        "momentum",
+    }
+)
+
+_STATE_SPACE_STATIC_BASELINE_MODES = frozenset(
+    {
+        "stationary",
+        "diffusion",
+        "fragmented",
+        "jump",
+        "momentum",
+    }
+)
+
+
+def _is_best_static_baseline_model(model_name: object) -> bool:
+    """Return whether a model belongs in the best-static held-out baseline."""
+
+    model = str(model_name)
+    if model in _BEST_STATIC_BASELINE_MODELS:
+        return True
+    for prefix in ("sorted-spike-state-space-", "state-space-"):
+        if model.startswith(prefix):
+            mode = model.removeprefix(prefix)
+            return mode in _STATE_SPACE_STATIC_BASELINE_MODES
+    return False
+
+
 def _add_relative_metrics(frame: pd.DataFrame) -> pd.DataFrame:
-    static_models = {"random", "stationary", "diffusion", "momentum"}
+    static_mask = frame["model"].map(_is_best_static_baseline_model)
     best_static = (
-        frame[frame["model"].isin(static_models)]
+        frame[static_mask]
         .groupby(["session", "event_index"])["heldout_log_likelihood"]
         .max()
         .rename("best_static_heldout_log_likelihood")

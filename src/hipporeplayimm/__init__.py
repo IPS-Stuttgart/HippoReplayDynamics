@@ -5,6 +5,7 @@ from . import score_metadata as _score_metadata
 from . import simulation_recovery as _simulation_recovery
 from .benchmarks import BenchmarkConfig, BenchmarkResult, run_open_field_benchmark
 from .data import ReplaySession, load_open_field_sessions
+from .duration_dynamics import apply_duration_dynamics_patch as _apply_duration_dynamics_patch
 from .encoding import EncodingConfig, EncodingModel, build_emissions, fit_place_field_encoding
 from .evidence_reporting import patch_simulation_recovery_module as _patch_simulation_recovery_module
 from .ground_truth import (
@@ -34,6 +35,11 @@ from .sweeps import (
 # model-evidence score tables that used short metadata column names.
 _ground_truth._encoding_config_for_scores = _score_metadata.encoding_config_for_scores
 _ground_truth._emission_config_for_scores = _score_metadata.emission_config_for_scores
+
+# Ensure replay dynamics use center-to-center transition durations when replay
+# emissions include a partial final bin.
+_apply_duration_dynamics_patch()
+from .encoding import build_emissions as build_emissions  # noqa: E402,F401
 
 # Keep synthetic recovery summaries from mixing exact evidences with truncated
 # candidate lower bounds.

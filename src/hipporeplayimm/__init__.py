@@ -3,6 +3,11 @@
 from . import ground_truth as _ground_truth
 from . import score_metadata as _score_metadata
 from . import simulation_recovery as _simulation_recovery
+
+# Keep score-table metadata and post-hoc decoding consistent before public
+# symbols are imported from the patched modules.
+_score_metadata.apply_model_hyperparam_patch()
+
 from .benchmarks import BenchmarkConfig, BenchmarkResult, run_open_field_benchmark
 from .data import ReplaySession, load_open_field_sessions
 from .duration_dynamics import apply_duration_dynamics_patch as _apply_duration_dynamics_patch

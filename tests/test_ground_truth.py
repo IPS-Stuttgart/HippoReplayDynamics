@@ -8,6 +8,7 @@ from hipporeplayimm.data import ReplaySession
 from hipporeplayimm.encoding import EncodingConfig, EncodingModel, LogEmissionTensor
 from hipporeplayimm.ground_truth import (
     GroundTruthConfig,
+    _add_ground_truth_metrics,
     assign_endpoint_to_well,
     compare_scores_to_ground_truth,
     first_post_ripple_well_visit,
@@ -254,6 +255,42 @@ def test_compare_scores_to_ground_truth_uses_benchmark_split_and_train_candidate
     assert [arr.tolist() for arr in seen["candidate_indices"]] == [[0], [1]]
     assert comparison.loc[0, "decoded_well_id"] == 2
     assert bool(comparison.loc[0, "goal_correct"])
+
+
+def test_ground_truth_metrics_treat_missing_valid_label_as_invalid():
+    comparison = pd.DataFrame(
+        {
+            "session": ["Rat1/Open1", "Rat1/Open1", "Rat1/Open1"],
+            "event_index": [0, 1, 2],
+            "model": ["random", "random", "random"],
+            "true_well_id": [np.nan, 2.0, 1.0],
+            "true_well_x": [np.nan, 10.0, 0.0],
+            "true_well_y": [np.nan, 0.0, 0.0],
+            "valid_label": [np.nan, True, "False"],
+            "decoded_endpoint_x": [0.0, 10.0, 0.0],
+            "decoded_endpoint_y": [0.0, 0.0, 0.0],
+            "decoded_well_id": [1.0, 2.0, 1.0],
+            "well_1_posterior": [0.8, 0.2, 0.9],
+            "well_2_posterior": [0.2, 0.8, 0.1],
+        }
+    )
+
+    result = _add_ground_truth_metrics(
+        comparison,
+        decoded=pd.DataFrame(),
+        gt_frame=pd.DataFrame(),
+    )
+
+    assert pd.isna(result.loc[0, "goal_correct"])
+    assert pd.isna(result.loc[0, "endpoint_error_cm"])
+    assert pd.isna(result.loc[0, "true_well_posterior"])
+    assert pd.isna(result.loc[0, "true_well_rank"])
+    assert bool(result.loc[1, "goal_correct"])
+    assert result.loc[1, "true_well_posterior"] == pytest.approx(0.8)
+    assert result.loc[1, "true_well_rank"] == 1
+    assert pd.isna(result.loc[2, "goal_correct"])
+    assert pd.isna(result.loc[2, "true_well_posterior"])
+    assert pd.isna(result.loc[2, "true_well_rank"])
 
 
 def _session(

@@ -8,12 +8,8 @@ import numpy as np
 
 from .encoding import LogEmissionTensor
 from .models import EventScore, _posterior_diagnostics
-from .state_space_candidates import (
-    _score_imm_candidates,
-)
-from .state_space_candidates_momentum import (
-    _score_momentum_candidates,
-)
+from .state_space_candidates import _score_imm_candidates
+from .state_space_candidates_momentum import _score_momentum_candidates
 from .state_space_first_order import (
     _forward_backward_first_order,
     _score_first_order_imm,

@@ -656,7 +656,7 @@ def _add_ground_truth_metrics(
     valid = comparison.get("valid_label")
     if true_ids is None or decoded_ids is None:
         return comparison
-    valid_bool = valid.fillna(False).astype(bool) if valid is not None else pd.Series(False, index=comparison.index)
+    valid_bool = _valid_label_mask(valid, comparison.index)
     comparison["goal_correct"] = np.where(
         valid_bool,
         decoded_ids.astype("float64") == true_ids.astype("float64"),
@@ -668,12 +668,17 @@ def _add_ground_truth_metrics(
     true_masses: list[float] = []
     true_ranks: list[float] = []
     posterior_columns = [col for col in comparison.columns if col.startswith("well_") and col.endswith("_posterior")]
-    for row in comparison.itertuples(index=False):
-        if not bool(getattr(row, "valid_label", False)):
+    for is_valid, row in zip(valid_bool.to_numpy(dtype=bool), comparison.itertuples(index=False)):
+        if not is_valid:
             true_masses.append(np.nan)
             true_ranks.append(np.nan)
             continue
-        true_well_id = int(getattr(row, "true_well_id"))
+        true_well_value = getattr(row, "true_well_id", np.nan)
+        if pd.isna(true_well_value):
+            true_masses.append(np.nan)
+            true_ranks.append(np.nan)
+            continue
+        true_well_id = int(true_well_value)
         true_col = f"well_{true_well_id}_posterior"
         mass = float(getattr(row, true_col, np.nan)) if true_col in comparison.columns else np.nan
         masses = [
@@ -689,6 +694,20 @@ def _add_ground_truth_metrics(
     comparison["true_well_posterior"] = true_masses
     comparison["true_well_rank"] = true_ranks
     return comparison
+
+
+def _valid_label_mask(valid: pd.Series | None, index: pd.Index) -> pd.Series:
+    """Return a boolean validity mask, treating missing labels as invalid."""
+
+    if valid is None:
+        return pd.Series(False, index=index, dtype=bool)
+    parsed: list[bool] = []
+    for value in valid:
+        if pd.isna(value):
+            parsed.append(False)
+        else:
+            parsed.append(_parse_bool(value))
+    return pd.Series(parsed, index=index, dtype=bool)
 
 
 def _event_indices(session: ReplaySession, event_epoch: str) -> np.ndarray:

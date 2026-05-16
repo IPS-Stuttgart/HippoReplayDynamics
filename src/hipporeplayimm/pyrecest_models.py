@@ -8,6 +8,7 @@ import numpy as np
 from scipy.spatial import cKDTree
 from scipy.special import logsumexp
 
+from .duration_dynamics import transition_durations_s
 from .encoding import LogEmissionTensor
 from .models import EventScore, LOG_ZERO, _posterior_diagnostics
 
@@ -44,12 +45,17 @@ class PyRecEstGoalParticleModel:
 
         bin_tree = cKDTree(bin_centers)
         goals = _coerce_candidate_goals(self.candidate_goals, bin_centers)
-        filter_ = self._build_filter(bin_centers, goals, emissions.dt)
+        transition_durations = transition_durations_s(emissions)
+        filter_dt = _representative_filter_dt(emissions, transition_durations)
+        filter_ = self._build_filter(bin_centers, goals, filter_dt)
 
         logp = 0.0
         for time_index in range(emissions.n_time):
             if time_index > 0:
-                filter_.predict_replay(use_semi_implicit_position_update=True)
+                filter_.predict_replay(
+                    dt=float(transition_durations[time_index - 1]),
+                    use_semi_implicit_position_update=True,
+                )
             logp += _update_filter_from_grid_likelihood(
                 filter_,
                 emissions.log_likelihood[time_index],
@@ -67,6 +73,8 @@ class PyRecEstGoalParticleModel:
         diagnostics = {
             "pyrecest_particles": int(self.n_particles),
             "pyrecest_candidate_goals": int(goals.shape[0]),
+            "pyrecest_time_bin_s": float(filter_dt),
+            "pyrecest_transition_durations": _format_transition_durations(transition_durations),
             "pyrecest_position_proposal_probability": float(
                 self.position_proposal_probability
             ),
@@ -296,10 +304,7 @@ def _nearest_grid_values(
     return output
 
 
-def _nearest_bin_indices(
-    positions: np.ndarray,
-    bin_tree: cKDTree,
-) -> np.ndarray:
+def _nearest_bin_indices(positions: np.ndarray, bin_tree: cKDTree) -> np.ndarray:
     positions = np.asarray(positions, dtype=float)
     _, indices = bin_tree.query(positions, k=1)
     return np.asarray(indices, dtype=int)
@@ -359,6 +364,32 @@ def _mode_diagnostics(filter_) -> dict[str, float | str]:
             filter_.last_mode_transition_fraction
         )
     return diagnostics
+
+
+def _representative_filter_dt(
+    emissions: LogEmissionTensor,
+    transition_durations: np.ndarray,
+) -> float:
+    """Return the positive scalar dt needed to initialize a PyRecEst filter.
+
+    Prediction uses the per-step transition durations.  The scalar stored on the
+    PyRecEst filter is only the fallback used by that library when a prediction
+    call does not pass an explicit dt.
+    """
+
+    base_dt = getattr(emissions.dt, "base", emissions.dt)
+    dt = float(base_dt)
+    if not np.isfinite(dt) or dt <= 0.0:
+        if transition_durations.size == 0:
+            raise ValueError("emissions.dt must be finite and positive")
+        dt = float(np.median(transition_durations))
+    if not np.isfinite(dt) or dt <= 0.0:
+        raise ValueError("PyRecEst filter dt must be finite and positive")
+    return dt
+
+
+def _format_transition_durations(transition_durations: np.ndarray) -> str:
+    return ",".join(f"{float(duration):.12g}" for duration in transition_durations)
 
 
 def _validate_probability(probability: float, name: str) -> None:

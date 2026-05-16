@@ -1,7 +1,7 @@
 import numpy as np
 
 from hipporeplayimm.data import ReplaySession
-from hipporeplayimm.encoding import EncodingConfig, fit_place_field_encoding
+from hipporeplayimm.encoding import EncodingConfig, EmissionConfig, EncodingModel, build_emissions, fit_place_field_encoding
 
 
 def test_fit_place_field_encoding_recovers_peak_near_spike_location(tmp_path):
@@ -47,6 +47,50 @@ def test_select_cells_keeps_cell_ids_sorted_for_searchsorted():
     selected = encoding.select_cells([2, 1])
 
     assert selected.cell_ids.tolist() == [1, 2]
+
+
+def test_build_emissions_clips_to_ripple_end_and_uses_partial_bin_duration():
+    session = ReplaySession(
+        rat="RatX",
+        name="OpenX",
+        path=None,
+        position=np.empty((0, 4)),
+        spikes=np.array([[0.049, 1.0], [0.054, 1.0]]),
+        tetrode_cell_ids=np.array([[1, 1]]),
+        excitatory_neurons=np.array([1]),
+        inhibitory_neurons=np.array([]),
+        ripple_events=np.array([[0.0, 0.053, 0.0265, 0.0, 0.0, 0.0]]),
+        run_times=np.empty((0, 2)),
+        sleep_box_immobile_times=np.empty((0, 2)),
+        sleep_times=np.empty((0, 2)),
+        rem_times=np.empty((0, 2)),
+        well_sequence=None,
+        metadata={},
+    )
+    encoding = EncodingModel(
+        x_edges=np.array([0.0, 1.0]),
+        y_edges=np.array([0.0, 1.0]),
+        bin_centers=np.array([[0.5, 0.5]]),
+        rates_hz=np.array([[10.0]]),
+        occupancy_s=np.array([1.0]),
+        cell_ids=np.array([1]),
+        config=EncodingConfig(),
+    )
+
+    emissions = build_emissions(
+        session,
+        encoding,
+        0,
+        EmissionConfig(time_bin_s=0.02),
+    )
+
+    assert emissions.spike_counts[:, 0].tolist() == [0, 0, 1]
+    assert emissions.n_spikes == 1
+    assert np.allclose(emissions.times, np.array([0.01, 0.03, 0.0465]))
+    assert np.isclose(emissions.dt, 0.02)
+
+    expected_log_likelihood = np.array([-0.2, -0.2, np.log(0.13) - 0.13])
+    assert np.allclose(emissions.log_likelihood[:, 0], expected_log_likelihood)
 
 
 def _linear_session_with_two_cells():

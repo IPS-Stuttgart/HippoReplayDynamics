@@ -102,6 +102,11 @@ class CandidateKinematicModel:
     `mode="diffusion"` or `mode="momentum"` gives a static candidate-pruned
     motion model. `mode="imm"` switches between stationary, diffusion,
     momentum, and jump dynamics.
+
+    Candidate pruning truncates the path sum for tractability. Priors and
+    transition kernels are still normalized over the full spatial grid, so
+    returned log likelihoods are conservative truncated full-grid evidences,
+    not support-conditioned evidences.
     """
 
     mode: str = "imm"
@@ -149,7 +154,10 @@ class CandidateKinematicModel:
                 bin_centers,
                 candidates,
             )
-        diagnostics = {"mean_candidate_log_mass": float(np.mean(mass))}
+        diagnostics = {
+            "mean_candidate_log_mass": float(np.mean(mass)),
+            "candidate_evidence_support": "truncated_full_grid",
+        }
         diagnostics.update(_posterior_diagnostics(terminal_log_posterior, bin_centers))
         return EventScore(
             str(self.name),
@@ -175,9 +183,10 @@ class CandidateKinematicModel:
             first,
             second,
             bin_centers,
-            self.diffusion_sigma_cm,
             mode=mode,
             stationary_sigma_cm=self.stationary_sigma_cm,
+            diffusion_sigma_cm=self.diffusion_sigma_cm,
+            momentum_sigma_cm=self.momentum_sigma_cm,
         )
         prev_prev = first
         prev = second
@@ -222,9 +231,10 @@ class CandidateKinematicModel:
                     first,
                     second,
                     bin_centers,
-                    self.diffusion_sigma_cm,
                     mode=mode,
                     stationary_sigma_cm=self.stationary_sigma_cm,
+                    diffusion_sigma_cm=self.diffusion_sigma_cm,
+                    momentum_sigma_cm=self.momentum_sigma_cm,
                 )
             )
         log_alpha = np.stack(by_mode, axis=0) - np.log(len(modes))
@@ -348,21 +358,34 @@ def _init_pair_log_alpha(
     first: np.ndarray,
     second: np.ndarray,
     bin_centers: np.ndarray,
-    sigma_cm: float,
+    *,
     mode: str = "diffusion",
     stationary_sigma_cm: float = 2.0,
+    diffusion_sigma_cm: float = 12.0,
+    momentum_sigma_cm: float = 12.0,
 ) -> np.ndarray:
     first_ll = emissions.log_likelihood[0, first]
     second_ll = emissions.log_likelihood[1, second]
     coords_first = bin_centers[first]
     coords_second = bin_centers[second]
+    if mode == "jump":
+        log_kernel = np.full((len(first), len(second)), -np.log(emissions.n_bins), dtype=float)
+        return first_ll[:, None] - np.log(emissions.n_bins) + log_kernel + second_ll[None, :]
     if mode == "stationary":
         sigma = stationary_sigma_cm
+    elif mode == "diffusion":
+        sigma = diffusion_sigma_cm
+    elif mode == "momentum":
+        sigma = momentum_sigma_cm
     else:
-        sigma = sigma_cm
-    log_kernel = _pairwise_gaussian_log_prob(coords_first, coords_second, sigma)
-    log_kernel = log_kernel - logsumexp(log_kernel, axis=1, keepdims=True)
-    return first_ll[:, None] - np.log(len(first)) + log_kernel + second_ll[None, :]
+        raise ValueError(f"Unknown kinematic mode: {mode}")
+    log_kernel = _full_grid_normalized_pairwise_gaussian_log_prob(
+        coords_first,
+        coords_second,
+        bin_centers,
+        sigma,
+    )
+    return first_ll[:, None] - np.log(emissions.n_bins) + log_kernel + second_ll[None, :]
 
 
 def _advance_pair_log_alpha(
@@ -385,35 +408,61 @@ def _advance_pair_log_alpha(
     output = np.full((len(prev), len(curr)), LOG_ZERO, dtype=float)
     if mode == "jump":
         collapsed_by_prev = logsumexp(log_pair, axis=0)
-        uniform = -np.log(len(curr))
+        uniform = -np.log(bin_centers.shape[0])
         return collapsed_by_prev[:, None] + uniform + curr_emission[None, :]
     for prev_col in range(len(prev)):
         if mode == "stationary":
             predicted = coords_prev[prev_col][None, :]
             sigma = stationary_sigma_cm
             previous_mass = logsumexp(log_pair[:, prev_col])
-            log_kernel = _gaussian_log_prob(predicted, coords_curr, sigma)
+            log_kernel = _full_grid_normalized_pairwise_gaussian_log_prob(
+                predicted,
+                coords_curr,
+                bin_centers,
+                sigma,
+            )[0]
         elif mode == "diffusion":
             predicted = coords_prev[prev_col][None, :]
             sigma = diffusion_sigma_cm
             previous_mass = logsumexp(log_pair[:, prev_col])
-            log_kernel = _gaussian_log_prob(predicted, coords_curr, sigma)
+            log_kernel = _full_grid_normalized_pairwise_gaussian_log_prob(
+                predicted,
+                coords_curr,
+                bin_centers,
+                sigma,
+            )[0]
         elif mode == "momentum":
             predictions = coords_prev[prev_col][None, :] + velocity_decay * (
                 coords_prev[prev_col][None, :] - coords_prev_prev
             )
-            sigma = momentum_sigma_cm
-            log_kernel_by_source = _pairwise_gaussian_log_prob(predictions, coords_curr, sigma)
-            values = log_pair[:, prev_col][:, None] + (
-                log_kernel_by_source - logsumexp(log_kernel_by_source, axis=1, keepdims=True)
+            log_kernel_by_source = _full_grid_normalized_pairwise_gaussian_log_prob(
+                predictions,
+                coords_curr,
+                bin_centers,
+                momentum_sigma_cm,
             )
+            values = log_pair[:, prev_col][:, None] + log_kernel_by_source
             output[prev_col] = logsumexp(values, axis=0) + curr_emission
             continue
         else:
             raise ValueError(f"Unknown kinematic mode: {mode}")
-        log_kernel = log_kernel - logsumexp(log_kernel)
         output[prev_col] = previous_mass + log_kernel + curr_emission
     return output
+
+
+def _full_grid_normalized_pairwise_gaussian_log_prob(
+    predicted: np.ndarray,
+    observed: np.ndarray,
+    all_observed: np.ndarray,
+    sigma: float,
+) -> np.ndarray:
+    log_kernel = _pairwise_gaussian_log_prob(predicted, observed, sigma)
+    log_normalizer = logsumexp(
+        _pairwise_gaussian_log_prob(predicted, all_observed, sigma),
+        axis=1,
+        keepdims=True,
+    )
+    return log_kernel - log_normalizer
 
 
 def _gaussian_log_prob(predicted: np.ndarray, observed: np.ndarray, sigma: float) -> np.ndarray:

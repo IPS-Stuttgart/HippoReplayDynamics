@@ -9,7 +9,7 @@ import numpy as np
 import pandas as pd
 from scipy.special import logsumexp
 
-from .benchmarks import BenchmarkConfig, _build_models
+from .benchmarks import BenchmarkConfig, _build_models, _split_cells
 from .data import ReplaySession, load_open_field_sessions
 from .encoding import EmissionConfig, EncodingConfig, build_emissions, fit_place_field_encoding
 
@@ -210,6 +210,7 @@ def compare_scores_to_ground_truth(
     ground_truth_config: GroundTruthConfig | None = None,
     encoding_config: EncodingConfig | None = None,
     emission_config: EmissionConfig | None = None,
+    test_cell_fraction: float = 0.25,
     candidate_top_k: int = 64,
     pyrecest_particles: int = 512,
     pyrecest_alpha: float = 0.80,
@@ -234,10 +235,34 @@ def compare_scores_to_ground_truth(
     gt_frame = _load_or_generate_ground_truth(root, ground_truth, ground_truth_config)
     if scores_frame.empty:
         return scores_frame
+
+    benchmark_decode = _score_table_is_heldout_benchmark(scores_frame)
+    encoding_config = _encoding_config_for_scores(
+        scores_frame,
+        EncodingConfig() if encoding_config is None else encoding_config,
+    )
+    emission_config = _emission_config_for_scores(
+        scores_frame,
+        EmissionConfig() if emission_config is None else emission_config,
+    )
+    test_cell_fraction = _unique_float_from_column(
+        scores_frame,
+        "benchmark_test_cell_fraction",
+        test_cell_fraction,
+    )
+    random_seed = _unique_int_from_column(
+        scores_frame,
+        "benchmark_random_seed",
+        random_seed,
+    )
+
     sessions = {session.session_id: session for session in load_open_field_sessions(root)}
     decoded_rows: list[dict[str, object]] = []
-    model_names = tuple(str(model_name) for model_name in scores_frame["model"].dropna().unique())
+    model_names = _model_names_for_scores(scores_frame)
     model_config = BenchmarkConfig(
+        encoding=encoding_config,
+        emissions=emission_config,
+        test_cell_fraction=test_cell_fraction,
         candidate_top_k=candidate_top_k,
         pyrecest_particles=pyrecest_particles,
         pyrecest_alpha=pyrecest_alpha,
@@ -257,8 +282,6 @@ def compare_scores_to_ground_truth(
         random_seed=random_seed,
         models=model_names,
     )
-    encoding_config = EncodingConfig() if encoding_config is None else encoding_config
-    emission_config = EmissionConfig() if emission_config is None else emission_config
 
     for session_id, session_scores in scores_frame.groupby("session", sort=False):
         session = sessions.get(str(session_id))
@@ -267,14 +290,49 @@ def compare_scores_to_ground_truth(
         models = _build_models(model_config, session=session)
         wells = infer_well_locations(session, ground_truth_config)
         encoding = fit_place_field_encoding(session, encoding_config)
+        if benchmark_decode:
+            train_cells, test_cells = _cell_split_for_score_rows(
+                session_scores,
+                encoding,
+                model_config,
+            )
+            train_encoding = encoding.select_cells(train_cells)
+            joint_encoding = encoding.select_cells(np.concatenate([train_cells, test_cells]))
         for event_index, event_scores in session_scores.groupby("event_index", sort=False):
-            emissions = build_emissions(session, encoding, int(event_index), emission_config)
+            if benchmark_decode:
+                train_emissions = build_emissions(
+                    session,
+                    train_encoding,
+                    int(event_index),
+                    emission_config,
+                )
+                joint_emissions = build_emissions(
+                    session,
+                    joint_encoding,
+                    int(event_index),
+                    emission_config,
+                )
+                if train_emissions.n_time == 0 or joint_emissions.n_time == 0:
+                    continue
+            else:
+                emissions = build_emissions(session, encoding, int(event_index), emission_config)
+                if emissions.n_time == 0:
+                    continue
             for score_row in event_scores.itertuples(index=False):
                 model_name = str(getattr(score_row, "model"))
-                model = models.get(model_name)
+                requested_model = _requested_model_name(score_row, model_name)
+                model = models.get(requested_model) or models.get(model_name)
                 if model is None:
                     continue
-                score = model.score(emissions, encoding.bin_centers)
+                if benchmark_decode:
+                    score = _score_joint_for_ground_truth(
+                        model,
+                        train_emissions,
+                        joint_emissions,
+                        encoding.bin_centers,
+                    )
+                else:
+                    score = model.score(emissions, encoding.bin_centers)
                 decoded_rows.append(
                     _decoded_row(
                         str(session_id),
@@ -290,6 +348,230 @@ def compare_scores_to_ground_truth(
     comparison = comparison.merge(decoded, on=["session", "event_index", "model"], how="left")
     comparison = _add_ground_truth_metrics(comparison, decoded, gt_frame)
     return comparison
+
+
+def _score_table_is_heldout_benchmark(scores_frame: pd.DataFrame) -> bool:
+    return {
+        "heldout_log_likelihood",
+        "train_log_likelihood",
+        "joint_log_likelihood",
+    }.issubset(scores_frame.columns)
+
+
+def _model_names_for_scores(scores_frame: pd.DataFrame) -> tuple[str, ...]:
+    names: list[str] = []
+    for column in ("requested_model", "model"):
+        if column not in scores_frame.columns:
+            continue
+        for value in scores_frame[column].dropna():
+            model_name = str(value)
+            if model_name and model_name not in names:
+                names.append(model_name)
+    return tuple(names)
+
+
+def _requested_model_name(score_row: object, fallback: str) -> str:
+    value = getattr(score_row, "requested_model", None)
+    if value is None or pd.isna(value):
+        return fallback
+    return str(value)
+
+
+def _score_joint_for_ground_truth(
+    model,
+    train_emissions,
+    joint_emissions,
+    bin_centers: np.ndarray,
+):
+    if hasattr(model, "candidate_indices"):
+        candidates = model.candidate_indices(train_emissions)
+        return model.score(joint_emissions, bin_centers, candidate_indices=candidates)
+    return model.score(joint_emissions, bin_centers)
+
+
+def _cell_split_for_score_rows(
+    session_scores: pd.DataFrame,
+    encoding,
+    config: BenchmarkConfig,
+) -> tuple[np.ndarray, np.ndarray]:
+    train_cells = _cell_ids_from_score_column(session_scores, "train_cell_ids")
+    test_cells = _cell_ids_from_score_column(session_scores, "test_cell_ids")
+    if train_cells is not None or test_cells is not None:
+        if train_cells is None or test_cells is None:
+            raise ValueError("score rows must provide both train_cell_ids and test_cell_ids")
+        if train_cells.size == 0 or test_cells.size == 0:
+            raise ValueError("train_cell_ids and test_cell_ids must both be non-empty")
+        if np.intersect1d(train_cells, test_cells).size:
+            raise ValueError("train_cell_ids and test_cell_ids must not overlap")
+        _validate_cell_ids_in_encoding(train_cells, encoding, "train_cell_ids")
+        _validate_cell_ids_in_encoding(test_cells, encoding, "test_cell_ids")
+        return np.sort(train_cells), np.sort(test_cells)
+
+    test_cell_fraction = _unique_float_from_column(
+        session_scores,
+        "benchmark_test_cell_fraction",
+        config.test_cell_fraction,
+    )
+    random_seed = _unique_int_from_column(
+        session_scores,
+        "benchmark_random_seed",
+        config.random_seed,
+    )
+    return _split_cells(encoding.cell_ids, test_cell_fraction, random_seed)
+
+
+def _cell_ids_from_score_column(
+    session_scores: pd.DataFrame,
+    column: str,
+) -> np.ndarray | None:
+    if column not in session_scores.columns:
+        return None
+    parsed: list[tuple[int, ...]] = []
+    for value in session_scores[column]:
+        ids = _parse_cell_ids(value)
+        if ids is not None:
+            parsed.append(tuple(int(cell_id) for cell_id in ids))
+    if not parsed:
+        return None
+    unique = set(parsed)
+    if len(unique) != 1:
+        raise ValueError(f"{column} differs within a session score table")
+    return np.asarray(next(iter(unique)), dtype=int)
+
+
+def _parse_cell_ids(value: object) -> np.ndarray | None:
+    if value is None:
+        return None
+    if isinstance(value, np.ndarray):
+        return np.asarray(value, dtype=int)
+    if isinstance(value, (list, tuple, set)):
+        return np.asarray(list(value), dtype=int)
+    if pd.isna(value):
+        return None
+    text = str(value).strip()
+    if not text or text.lower() == "nan":
+        return None
+    text = text.strip("[]()").replace(",", " ")
+    return np.asarray([int(float(piece)) for piece in text.split()], dtype=int)
+
+
+def _validate_cell_ids_in_encoding(cell_ids: np.ndarray, encoding, column: str) -> None:
+    missing = np.setdiff1d(cell_ids, encoding.cell_ids)
+    if missing.size:
+        missing_text = ",".join(str(int(cell_id)) for cell_id in missing)
+        raise ValueError(f"{column} contains cell IDs not present in the encoding: {missing_text}")
+
+
+def _encoding_config_for_scores(
+    scores_frame: pd.DataFrame,
+    fallback: EncodingConfig,
+) -> EncodingConfig:
+    return EncodingConfig(
+        bin_size_cm=_unique_float_from_column(scores_frame, "encoding_bin_size_cm", fallback.bin_size_cm),
+        smoothing_sigma_bins=_unique_float_from_column(
+            scores_frame,
+            "encoding_smoothing_sigma_bins",
+            fallback.smoothing_sigma_bins,
+        ),
+        min_speed_cm_s=_unique_float_from_column(
+            scores_frame,
+            "encoding_min_speed_cm_s",
+            fallback.min_speed_cm_s,
+        ),
+        min_occupancy_s=_unique_float_from_column(
+            scores_frame,
+            "encoding_min_occupancy_s",
+            fallback.min_occupancy_s,
+        ),
+        rate_floor_hz=_unique_float_from_column(
+            scores_frame,
+            "encoding_rate_floor_hz",
+            fallback.rate_floor_hz,
+        ),
+        arena_padding_cm=_unique_float_from_column(
+            scores_frame,
+            "encoding_arena_padding_cm",
+            fallback.arena_padding_cm,
+        ),
+        use_excitatory=_unique_bool_from_column(
+            scores_frame,
+            "encoding_use_excitatory",
+            fallback.use_excitatory,
+        ),
+    )
+
+
+def _emission_config_for_scores(
+    scores_frame: pd.DataFrame,
+    fallback: EmissionConfig,
+) -> EmissionConfig:
+    return EmissionConfig(
+        time_bin_s=_unique_float_from_column(
+            scores_frame,
+            "emission_time_bin_s",
+            fallback.time_bin_s,
+        )
+    )
+
+
+def _unique_float_from_column(frame: pd.DataFrame, column: str, default: float) -> float:
+    values: list[float] = []
+    if column in frame.columns:
+        for value in frame[column].dropna():
+            text = str(value).strip()
+            if text:
+                values.append(float(value))
+    if not values:
+        return float(default)
+    first = values[0]
+    if any(not np.isclose(value, first) for value in values[1:]):
+        raise ValueError(f"{column} contains multiple values")
+    return float(first)
+
+
+def _unique_int_from_column(frame: pd.DataFrame, column: str, default: int) -> int:
+    values: list[int] = []
+    if column in frame.columns:
+        for value in frame[column].dropna():
+            text = str(value).strip()
+            if text:
+                values.append(int(float(value)))
+    if not values:
+        return int(default)
+    first = values[0]
+    if any(value != first for value in values[1:]):
+        raise ValueError(f"{column} contains multiple values")
+    return int(first)
+
+
+def _unique_bool_from_column(frame: pd.DataFrame, column: str, default: bool) -> bool:
+    values: list[bool] = []
+    if column in frame.columns:
+        for value in frame[column].dropna():
+            text = str(value).strip()
+            if text:
+                values.append(_parse_bool(value))
+    if not values:
+        return bool(default)
+    first = values[0]
+    if any(value != first for value in values[1:]):
+        raise ValueError(f"{column} contains multiple values")
+    return bool(first)
+
+
+def _parse_bool(value: object) -> bool:
+    if isinstance(value, (bool, np.bool_)):
+        return bool(value)
+    if isinstance(value, (int, np.integer)):
+        return bool(value)
+    if isinstance(value, (float, np.floating)) and not np.isnan(value):
+        return bool(value)
+    text = str(value).strip().lower()
+    if text in {"1", "true", "yes"}:
+        return True
+    if text in {"0", "false", "no"}:
+        return False
+    raise ValueError(f"cannot parse boolean value {value!r}")
 
 
 def _decoded_row(
@@ -374,7 +656,7 @@ def _add_ground_truth_metrics(
     valid = comparison.get("valid_label")
     if true_ids is None or decoded_ids is None:
         return comparison
-    valid_bool = valid.fillna(False).astype(bool) if valid is not None else pd.Series(False, index=comparison.index)
+    valid_bool = _valid_label_mask(valid, comparison.index)
     comparison["goal_correct"] = np.where(
         valid_bool,
         decoded_ids.astype("float64") == true_ids.astype("float64"),
@@ -386,12 +668,17 @@ def _add_ground_truth_metrics(
     true_masses: list[float] = []
     true_ranks: list[float] = []
     posterior_columns = [col for col in comparison.columns if col.startswith("well_") and col.endswith("_posterior")]
-    for row in comparison.itertuples(index=False):
-        if not bool(getattr(row, "valid_label", False)):
+    for is_valid, row in zip(valid_bool.to_numpy(dtype=bool), comparison.itertuples(index=False)):
+        if not is_valid:
             true_masses.append(np.nan)
             true_ranks.append(np.nan)
             continue
-        true_well_id = int(getattr(row, "true_well_id"))
+        true_well_value = getattr(row, "true_well_id", np.nan)
+        if pd.isna(true_well_value):
+            true_masses.append(np.nan)
+            true_ranks.append(np.nan)
+            continue
+        true_well_id = int(true_well_value)
         true_col = f"well_{true_well_id}_posterior"
         mass = float(getattr(row, true_col, np.nan)) if true_col in comparison.columns else np.nan
         masses = [
@@ -407,6 +694,20 @@ def _add_ground_truth_metrics(
     comparison["true_well_posterior"] = true_masses
     comparison["true_well_rank"] = true_ranks
     return comparison
+
+
+def _valid_label_mask(valid: pd.Series | None, index: pd.Index) -> pd.Series:
+    """Return a boolean validity mask, treating missing labels as invalid."""
+
+    if valid is None:
+        return pd.Series(False, index=index, dtype=bool)
+    parsed: list[bool] = []
+    for value in valid:
+        if pd.isna(value):
+            parsed.append(False)
+        else:
+            parsed.append(_parse_bool(value))
+    return pd.Series(parsed, index=index, dtype=bool)
 
 
 def _event_indices(session: ReplaySession, event_epoch: str) -> np.ndarray:

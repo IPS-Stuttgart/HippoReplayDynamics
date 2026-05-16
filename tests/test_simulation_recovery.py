@@ -128,8 +128,38 @@ def test_build_scoring_models_and_model_parser_accept_space_or_comma_lists():
     assert list(models) == ["sorted-spike-state-space-stationary", "sorted-spike-state-space-momentum"]
 
 
-def _row(event_index: int, true_model: str, model: str, log_evidence: float) -> dict[str, object]:
-    return {
+def test_recovery_summary_does_not_mix_truncated_lower_bounds_with_exact_evidence():
+    rows = pd.DataFrame(
+        [
+            _row(0, "momentum", "sorted-spike-state-space-diffusion", -1.0),
+            _row(
+                0,
+                "momentum",
+                "sorted-spike-state-space-momentum",
+                100.0,
+                diagnostic_state_space_momentum_evidence_support="truncated_full_grid",
+            ),
+        ]
+    )
+    scored = add_evidence_columns(rows)
+
+    momentum = scored[scored["model"] == "sorted-spike-state-space-momentum"].iloc[0]
+    diffusion = scored[scored["model"] == "sorted-spike-state-space-diffusion"].iloc[0]
+
+    assert bool(diffusion["is_best_model"])
+    assert diffusion["best_model"] == "sorted-spike-state-space-diffusion"
+    assert not bool(momentum["evidence_comparable"])
+    assert not bool(momentum["is_best_model"])
+    assert pd.isna(momentum["model_probability"])
+    assert momentum["best_truncated_lower_bound_model"] == "sorted-spike-state-space-momentum"
+
+    summary = recovery_summary(scored)
+    overall = summary[summary["true_model"] == "overall"].iloc[0]
+    assert overall["recovered_events"] == 0
+
+
+def _row(event_index: int, true_model: str, model: str, log_evidence: float, **extra: object) -> dict[str, object]:
+    row = {
         "status": "success",
         "session": "RatX/OpenY",
         "event_index": event_index,
@@ -140,3 +170,5 @@ def _row(event_index: int, true_model: str, model: str, log_evidence: float) -> 
         "n_time": 3,
         "n_spikes": 5,
     }
+    row.update(extra)
+    return row

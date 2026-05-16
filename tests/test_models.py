@@ -68,6 +68,74 @@ def test_imm_scores_stationary_to_momentum_synthetic_event():
     assert score.diagnostics["mean_candidate_log_mass"] == 0.0
 
 
+def test_candidate_jump_initial_pair_is_full_grid_uniform():
+    centers = np.array([[0.0, 0.0], [1.0, 0.0], [10.0, 0.0]])
+    emissions = LogEmissionTensor(
+        log_likelihood=np.log(
+            np.array(
+                [
+                    [0.98, 0.01, 0.01],
+                    [1.0 / 3.0, 1.0 / 3.0, 1.0 / 3.0],
+                ]
+            )
+        ),
+        spike_counts=np.zeros((2, 1), dtype=int),
+        times=np.array([0.0, 1.0]),
+        dt=1.0,
+        cell_ids=np.array([1]),
+        n_spikes=0,
+    )
+    model = CandidateKinematicModel(
+        mode="jump",
+        top_k=3,
+        diffusion_sigma_cm=0.1,
+    )
+
+    score = model.score(emissions, centers)
+
+    assert np.allclose(
+        np.exp(score.terminal_log_posterior),
+        np.full(centers.shape[0], 1.0 / centers.shape[0]),
+    )
+
+
+def test_candidate_momentum_initial_pair_uses_momentum_sigma_not_diffusion_sigma():
+    centers = np.array([[0.0, 0.0], [1.0, 0.0], [4.0, 0.0]])
+    emissions = LogEmissionTensor(
+        log_likelihood=np.log(
+            np.array(
+                [
+                    [0.80, 0.10, 0.10],
+                    [0.10, 0.45, 0.45],
+                ]
+            )
+        ),
+        spike_counts=np.zeros((2, 1), dtype=int),
+        times=np.array([0.0, 1.0]),
+        dt=1.0,
+        cell_ids=np.array([1]),
+        n_spikes=0,
+    )
+    narrow_diffusion = CandidateKinematicModel(
+        mode="momentum",
+        top_k=3,
+        diffusion_sigma_cm=0.2,
+        momentum_sigma_cm=2.0,
+    )
+    broad_diffusion = CandidateKinematicModel(
+        mode="momentum",
+        top_k=3,
+        diffusion_sigma_cm=10.0,
+        momentum_sigma_cm=2.0,
+    )
+
+    narrow_score = narrow_diffusion.score(emissions, centers)
+    broad_score = broad_diffusion.score(emissions, centers)
+
+    assert np.allclose(narrow_score.log_likelihood, broad_score.log_likelihood)
+    assert np.allclose(narrow_score.terminal_log_posterior, broad_score.terminal_log_posterior)
+
+
 def test_candidate_diffusion_full_support_matches_exact_diffusion():
     centers = np.array([[0.0, 0.0], [1.0, 0.0], [2.0, 0.0]])
     emissions = LogEmissionTensor(

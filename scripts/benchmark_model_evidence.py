@@ -17,6 +17,12 @@ import numpy as np
 import pandas as pd
 from scipy.special import logsumexp
 
+from hipporeplayimm.clusterless import (
+    ClusterlessMarkConfig,
+    ClusterlessStateSpaceReplayModel,
+    build_clusterless_mark_emissions,
+    fit_clusterless_mark_encoding,
+)
 from hipporeplayimm.data import load_replay_session
 from hipporeplayimm.encoding import (
     EmissionConfig,
@@ -47,12 +53,18 @@ _TRAJ = {
     "sorted-spike-state-space-jump",
     "sorted-spike-state-space-momentum",
     "sorted-spike-state-space-imm",
+    "clusterless-state-space-diffusion",
+    "clusterless-state-space-fragmented",
+    "clusterless-state-space-jump",
+    "clusterless-state-space-momentum",
+    "clusterless-state-space-imm",
 }
 _NONTRAJ = {
     "random",
     "stationary",
     "stationary-gaussian",
     "sorted-spike-state-space-stationary",
+    "clusterless-state-space-stationary",
 }
 _ALIASES = {"stationary_gaussian": "stationary-gaussian"}
 
@@ -134,6 +146,22 @@ def _models(args) -> dict[str, object]:
             ),
         )
 
+    def clusterless_state_space_model(mode: str) -> ClusterlessStateSpaceReplayModel:
+        return ClusterlessStateSpaceReplayModel(
+            mode=mode,
+            config=StateSpaceDecoderConfig(
+                mode=mode,
+                stationary_sigma_cm=args.state_space_stationary_sigma_cm,
+                diffusion_sigma_cm_sqrt_s=args.state_space_diffusion_sigma_cm_sqrt_s,
+                max_step_sigma=args.state_space_max_step_sigma,
+                imm_mode_stickiness=args.state_space_imm_mode_stickiness,
+                momentum_sigma_cm_sqrt_s=args.state_space_momentum_sigma_cm_sqrt_s,
+                momentum_initial_sigma_cm_sqrt_s=args.state_space_momentum_initial_sigma_cm_sqrt_s,
+                momentum_velocity_decay=args.state_space_momentum_velocity_decay,
+                momentum_candidate_top_k=args.state_space_momentum_candidate_top_k,
+            ),
+        )
+
     available = {
         "random": RandomModel(),
         "stationary": StationaryModel(),
@@ -159,6 +187,12 @@ def _models(args) -> dict[str, object]:
         "sorted-spike-state-space-jump": state_space_model("jump"),
         "sorted-spike-state-space-momentum": state_space_model("momentum"),
         "sorted-spike-state-space-imm": state_space_model("imm"),
+        "clusterless-state-space-stationary": clusterless_state_space_model("stationary"),
+        "clusterless-state-space-diffusion": clusterless_state_space_model("diffusion"),
+        "clusterless-state-space-fragmented": clusterless_state_space_model("fragmented"),
+        "clusterless-state-space-jump": clusterless_state_space_model("jump"),
+        "clusterless-state-space-momentum": clusterless_state_space_model("momentum"),
+        "clusterless-state-space-imm": clusterless_state_space_model("imm"),
     }
     missing = sorted(set(names) - set(available))
     if missing:
@@ -190,21 +224,46 @@ def _score(args) -> pd.DataFrame:
         ),
     )
     models = _models(args)
+    has_clusterless = any(isinstance(model, ClusterlessStateSpaceReplayModel) for model in models.values())
+    clusterless_encoding = None
+    if has_clusterless:
+        clusterless_encoding = fit_clusterless_mark_encoding(
+            session,
+            ClusterlessMarkConfig(
+                encoding=EncodingConfig(
+                    bin_size_cm=args.bin_size_cm,
+                    smoothing_sigma_bins=args.smoothing_sigma_bins,
+                    min_speed_cm_s=args.min_speed_cm_s,
+                ),
+                mark_smoothing_sigma_bins=args.clusterless_mark_smoothing_sigma_bins,
+                mark_prior_count=args.clusterless_mark_prior_count,
+                mark_variance_floor=args.clusterless_mark_variance_floor,
+            ),
+        )
     emissions_cfg = EmissionConfig(time_bin_s=args.time_bin_s)
     rows: list[dict[str, object]] = []
 
     for event_id in event_ids:
-        emissions = build_emissions(session, encoding, int(event_id), emissions_cfg)
-        if emissions.n_time == 0:
+        sorted_emissions = build_emissions(session, encoding, int(event_id), emissions_cfg)
+        clusterless_emissions = (
+            build_clusterless_mark_emissions(session, clusterless_encoding, int(event_id), emissions_cfg)
+            if clusterless_encoding is not None
+            else None
+        )
+        if sorted_emissions.n_time == 0:
             continue
         for name, model in models.items():
             start = time.perf_counter()
+            use_clusterless = isinstance(model, ClusterlessStateSpaceReplayModel)
+            emissions = clusterless_emissions if use_clusterless else sorted_emissions
+            bin_centers = clusterless_encoding.bin_centers if use_clusterless and clusterless_encoding is not None else encoding.bin_centers
+            assert emissions is not None
             try:
                 if isinstance(model, CandidateKinematicModel):
                     cand = model.candidate_indices(emissions)
-                    result = model.score(emissions, encoding.bin_centers, candidate_indices=cand)
+                    result = model.score(emissions, bin_centers, candidate_indices=cand)
                 else:
-                    result = model.score(emissions, encoding.bin_centers)
+                    result = model.score(emissions, bin_centers)
                 model_name = str(result.model_name)
                 row = {
                     "status": "success", "session": session.session_id, "event_index": int(event_id),
@@ -213,8 +272,17 @@ def _score(args) -> pd.DataFrame:
                     "n_spikes": int(result.n_spikes), "runtime_s": float(time.perf_counter() - start),
                     "error": "", "bin_size_cm": float(args.bin_size_cm),
                     "smoothing_sigma_bins": float(args.smoothing_sigma_bins),
-                    "min_speed_cm_s": float(args.min_speed_cm_s), "time_bin_s": float(args.time_bin_s),
+                    "min_speed_cm_s": float(args.min_speed_cm_s),
+                    "time_bin_s": float(args.time_bin_s),
+                    "clusterless_mark_smoothing_sigma_bins": float(args.clusterless_mark_smoothing_sigma_bins),
+                    "clusterless_mark_prior_count": float(args.clusterless_mark_prior_count),
+                    "clusterless_mark_variance_floor": float(args.clusterless_mark_variance_floor),
                 }
+                if use_clusterless and clusterless_encoding is not None:
+                    row.update({
+                        "clusterless_mark_features": int(clusterless_encoding.n_features),
+                        "clusterless_spike_mark_source": clusterless_encoding.spike_mark_source,
+                    })
                 row.update({f"diagnostic_{k}": v for k, v in result.diagnostics.items()})
                 rows.append(row)
                 print(f"Scored {session.session_id} event {event_id} with {name}", flush=True)
@@ -226,7 +294,11 @@ def _score(args) -> pd.DataFrame:
                     "runtime_s": float(time.perf_counter() - start), "error": f"{type(exc).__name__}: {exc}",
                     "bin_size_cm": float(args.bin_size_cm),
                     "smoothing_sigma_bins": float(args.smoothing_sigma_bins),
-                    "min_speed_cm_s": float(args.min_speed_cm_s), "time_bin_s": float(args.time_bin_s),
+                    "min_speed_cm_s": float(args.min_speed_cm_s),
+                    "time_bin_s": float(args.time_bin_s),
+                    "clusterless_mark_smoothing_sigma_bins": float(args.clusterless_mark_smoothing_sigma_bins),
+                    "clusterless_mark_prior_count": float(args.clusterless_mark_prior_count),
+                    "clusterless_mark_variance_floor": float(args.clusterless_mark_variance_floor),
                 })
                 if not args.continue_on_error:
                     raise
@@ -381,6 +453,9 @@ def main() -> int:
     p.add_argument("--state-space-momentum-initial-sigma-cm-sqrt-s", type=float, default=85.0)
     p.add_argument("--state-space-momentum-velocity-decay", type=float, default=0.95)
     p.add_argument("--state-space-momentum-candidate-top-k", type=int, default=128)
+    p.add_argument("--clusterless-mark-smoothing-sigma-bins", type=float, default=1.0)
+    p.add_argument("--clusterless-mark-prior-count", type=float, default=1.0)
+    p.add_argument("--clusterless-mark-variance-floor", type=float, default=1.0)
     p.add_argument("--time-bin-s", type=float, default=0.02)
     p.add_argument("--bin-size-cm", type=float, default=VALIDATED_POSITION_BIN_SIZE_CM)
     p.add_argument("--smoothing-sigma-bins", type=float, default=VALIDATED_POSITION_SMOOTHING_SIGMA_BINS)

@@ -195,7 +195,8 @@ def _session_mark_diagnostics(session: ReplaySession) -> dict[str, object]:
     return {
         "spike_mark_features": 0 if marks is None else marks.n_features,
         "spike_mark_source": "" if marks is None else f"{marks.source_file}:{marks.source_variable}",
-        "clusterless_mark_likelihood_available": False,
+        "clusterless_mark_likelihood_available": bool(marks is not None and marks.n_features > 0),
+        "clusterless_mark_likelihood": "diagonal-gaussian" if marks is not None and marks.n_features > 0 else "",
     }
 
 

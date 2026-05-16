@@ -30,6 +30,10 @@ from hipporeplayimm.encoding import (
     build_emissions,
     fit_place_field_encoding,
 )
+from hipporeplayimm.evidence_reporting import (
+    TRUNCATED_EVIDENCE_SUPPORT,
+    ensure_evidence_support_columns as _ensure_evidence_support_columns,
+)
 from hipporeplayimm.models import CandidateKinematicModel, RandomModel, StationaryModel
 from hipporeplayimm.position_validation import (
     VALIDATED_POSITION_BIN_SIZE_CM,
@@ -263,10 +267,10 @@ def _score(args) -> pd.DataFrame:
                 model_name = str(result.model_name)
                 row = {
                     "status": "success", "session": session.session_id, "event_index": int(event_id),
-                    "model": model_name, "requested_model": name, "model_family": _family(model_name), "log_evidence": float(result.log_likelihood),
-                    "n_time": int(result.n_time), "n_spikes": int(result.n_spikes),
-                    "runtime_s": float(time.perf_counter() - start), "error": "",
-                    "bin_size_cm": float(args.bin_size_cm),
+                    "model": model_name, "requested_model": name, "model_family": _family(model_name),
+                    "log_evidence": float(result.log_likelihood), "n_time": int(result.n_time),
+                    "n_spikes": int(result.n_spikes), "runtime_s": float(time.perf_counter() - start),
+                    "error": "", "bin_size_cm": float(args.bin_size_cm),
                     "smoothing_sigma_bins": float(args.smoothing_sigma_bins),
                     "min_speed_cm_s": float(args.min_speed_cm_s),
                     "time_bin_s": float(args.time_bin_s),
@@ -304,70 +308,114 @@ def _score(args) -> pd.DataFrame:
 def _add_evidence_columns(df: pd.DataFrame) -> pd.DataFrame:
     if df.empty:
         return df
+    df = _ensure_evidence_support_columns(df)
     groups = []
     for _, g in df.groupby(["session", "event_index"], sort=False):
         g = g.copy()
-        ok = g["status"] == "success"
-        s = g[ok]
-        if s.empty:
-            g["relative_log_evidence"] = np.nan
-            g["model_probability"] = np.nan
-            g["is_best_model"] = False
-            g["best_model"] = ""
-            groups.append(g)
-            continue
-        vals = s["log_evidence"].to_numpy(float)
-        maxv = float(np.max(vals))
-        probs = np.exp(vals - logsumexp(vals))
-        best = str(s.iloc[int(np.argmax(vals))]["model"])
+        s = g[g["status"] == "success"]
         g["relative_log_evidence"] = np.nan
         g["model_probability"] = np.nan
-        g.loc[s.index, "relative_log_evidence"] = vals - maxv
-        g.loc[s.index, "model_probability"] = probs
-        g["is_best_model"] = g["model"] == best
-        g["best_model"] = best
+        g["is_best_model"] = False
+        g["best_model"] = ""
+        g["best_trajectory_model"] = ""
+        g["delta_vs_trajectory_best"] = np.nan
+        g["best_nontrajectory_model"] = ""
+        g["delta_vs_nontrajectory_best"] = np.nan
+        g["truncated_relative_log_evidence"] = np.nan
+        g["is_best_truncated_lower_bound"] = False
+        g["best_truncated_lower_bound_model"] = ""
+        if s.empty:
+            groups.append(g)
+            continue
+
+        exact = s[s["evidence_comparable"].fillna(False).astype(bool)]
+        if not exact.empty:
+            vals = exact["log_evidence"].to_numpy(float)
+            maxv = float(np.max(vals))
+            probs = np.exp(vals - logsumexp(vals))
+            best_index = exact.index[int(np.argmax(vals))]
+            best = str(g.loc[best_index, "model"])
+            g.loc[exact.index, "relative_log_evidence"] = vals - maxv
+            g.loc[exact.index, "model_probability"] = probs
+            g.loc[best_index, "is_best_model"] = True
+            g["best_model"] = best
+
         for family, col in (("trajectory", "best_trajectory_model"), ("nontrajectory", "best_nontrajectory_model")):
-            subset = s[s["model_family"] == family]
-            if subset.empty:
-                g[col] = ""
-                g[f"delta_vs_{family}_best"] = np.nan
-            else:
+            subset = exact[exact["model_family"] == family]
+            if not subset.empty:
                 bidx = int(np.argmax(subset["log_evidence"].to_numpy(float)))
                 bname = str(subset.iloc[bidx]["model"])
                 blog = float(subset.iloc[bidx]["log_evidence"])
                 g[col] = bname
-                g[f"delta_vs_{family}_best"] = g["log_evidence"] - blog
+                g.loc[exact.index, f"delta_vs_{family}_best"] = g.loc[exact.index, "log_evidence"] - blog
+
+        truncated = s[s["evidence_support"].eq(TRUNCATED_EVIDENCE_SUPPORT)]
+        if not truncated.empty:
+            lower_bounds = truncated["log_evidence"].to_numpy(float)
+            max_lower_bound = float(np.max(lower_bounds))
+            best_truncated_index = truncated.index[int(np.argmax(lower_bounds))]
+            best_truncated = str(g.loc[best_truncated_index, "model"])
+            g.loc[truncated.index, "truncated_relative_log_evidence"] = lower_bounds - max_lower_bound
+            g.loc[best_truncated_index, "is_best_truncated_lower_bound"] = True
+            g["best_truncated_lower_bound_model"] = best_truncated
         groups.append(g)
     return pd.concat(groups, ignore_index=True).sort_values(["event_index", "model"]).reset_index(drop=True)
 
 
 def _summary(df: pd.DataFrame) -> pd.DataFrame:
+    df = _ensure_evidence_support_columns(df)
     ok = df[df["status"] == "success"]
     if ok.empty:
         return pd.DataFrame()
-    out = ok.groupby(["model", "model_family"], as_index=False).agg(
+    ok = ok.copy()
+    if "is_best_truncated_lower_bound" not in ok:
+        ok["is_best_truncated_lower_bound"] = False
+    if "truncated_relative_log_evidence" not in ok:
+        ok["truncated_relative_log_evidence"] = np.nan
+    out = ok.groupby(["model", "model_family", "evidence_support", "evidence_comparable"], as_index=False).agg(
         events=("event_index", "count"), wins=("is_best_model", "sum"),
+        truncated_lower_bound_wins=("is_best_truncated_lower_bound", "sum"),
         mean_log_evidence=("log_evidence", "mean"), median_log_evidence=("log_evidence", "median"),
         mean_relative_log_evidence=("relative_log_evidence", "mean"),
         median_relative_log_evidence=("relative_log_evidence", "median"),
         mean_model_probability=("model_probability", "mean"),
         median_model_probability=("model_probability", "median"),
+        mean_truncated_relative_log_evidence=("truncated_relative_log_evidence", "mean"),
+        median_truncated_relative_log_evidence=("truncated_relative_log_evidence", "median"),
         mean_runtime_s=("runtime_s", "mean"),
     )
     out["win_fraction"] = out["wins"] / out["events"].clip(lower=1)
-    return out.sort_values(["wins", "mean_log_evidence"], ascending=[False, False])
+    out["truncated_lower_bound_win_fraction"] = out["truncated_lower_bound_wins"] / out["events"].clip(lower=1)
+    return out.sort_values(
+        ["evidence_comparable", "wins", "truncated_lower_bound_wins", "mean_log_evidence"],
+        ascending=[False, False, False, False],
+    )
 
 
 def _counts(df: pd.DataFrame) -> pd.DataFrame:
+    df = _ensure_evidence_support_columns(df)
     ok = df[df["status"] == "success"]
     if ok.empty:
         return pd.DataFrame()
     base = ok.drop_duplicates(["session", "event_index"])
     rows = []
-    for col in ("best_model", "best_trajectory_model", "best_nontrajectory_model"):
-        vc = base[col].value_counts().rename_axis("model").reset_index(name="events")
+    for col in (
+        "best_model",
+        "best_trajectory_model",
+        "best_nontrajectory_model",
+        "best_truncated_lower_bound_model",
+    ):
+        if col not in base:
+            continue
+        values = base[col].dropna().astype(str)
+        values = values[values != ""]
+        if values.empty:
+            continue
+        vc = values.value_counts().rename_axis("model").reset_index(name="events")
         vc["comparison"] = col
         rows.extend(vc.to_dict("records"))
+    if not rows:
+        return pd.DataFrame(columns=["comparison", "model", "events"])
     return pd.DataFrame(rows)[["comparison", "model", "events"]]
 
 
@@ -377,7 +425,10 @@ def _write(df: pd.DataFrame, outdir: Path) -> None:
     _summary(df).to_csv(outdir / "model_evidence_summary.csv", index=False)
     _counts(df).to_csv(outdir / "best_model_counts.csv", index=False)
     ok = df[df["status"] == "success"]
-    for metric in ("log_evidence", "relative_log_evidence", "model_probability"):
+    metrics = ["log_evidence", "relative_log_evidence", "model_probability"]
+    if "truncated_relative_log_evidence" in ok:
+        metrics.append("truncated_relative_log_evidence")
+    for metric in metrics:
         ok.pivot_table(index=["session", "event_index"], columns="model", values=metric, aggfunc="first").reset_index().to_csv(outdir / f"event_model_pivot_{metric}.csv", index=False)
 
 

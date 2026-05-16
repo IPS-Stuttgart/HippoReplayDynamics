@@ -167,11 +167,10 @@ def build_kd_emissions(
     time_bin_s: float,
 ) -> LogEmissionTensor:
     ripple_event = session.ripple(ripple) if isinstance(ripple, int) else ripple
-    edges = np.arange(ripple_event.start, ripple_event.end, time_bin_s)
-    if edges.shape[0] < 2:
-        edges = np.array([ripple_event.start, ripple_event.end], dtype=float)
-    times = edges[:-1] + 0.5 * np.diff(edges)
-    dt = float(np.median(np.diff(edges)))
+    edges = _ripple_time_edges(ripple_event.start, ripple_event.end, time_bin_s)
+    bin_durations = np.diff(edges)
+    times = edges[:-1] + 0.5 * bin_durations
+    dt = float(np.median(bin_durations))
     counts = np.zeros((times.shape[0], encoding.n_cells), dtype=int)
     if session.spikes.size and encoding.n_cells:
         keep = (
@@ -187,7 +186,7 @@ def build_kd_emissions(
         valid &= (rows >= 0) & (rows < encoding.cell_ids.shape[0])
         valid[valid] &= encoding.cell_ids[rows[valid]] == spike_cell_ids[valid]
         np.add.at(counts, (time_bins[valid].astype(int), rows[valid]), 1)
-    log_likelihood = poisson_log_emissions(counts, encoding.rates_hz, dt)
+    log_likelihood = poisson_log_emissions(counts, encoding.rates_hz, bin_durations)
     return LogEmissionTensor(
         log_likelihood=log_likelihood,
         spike_counts=counts,
@@ -198,9 +197,47 @@ def build_kd_emissions(
     )
 
 
-def poisson_log_emissions(spike_counts: np.ndarray, rates_hz: np.ndarray, dt: float) -> np.ndarray:
-    expected = np.maximum(rates_hz * dt, np.finfo(float).tiny)
-    return spike_counts @ np.log(expected) - expected.sum(axis=0)[None, :] - gammaln(spike_counts + 1).sum(axis=1)[:, None]
+def _ripple_time_edges(start: float, end: float, time_bin_s: float) -> np.ndarray:
+    if time_bin_s <= 0.0:
+        raise ValueError("time_bin_s must be positive")
+    if end <= start:
+        raise ValueError("ripple end must be greater than ripple start")
+
+    duration = float(end) - float(start)
+    n_full_bins = int(np.floor(duration / time_bin_s))
+    edges = float(start) + np.arange(n_full_bins + 1, dtype=float) * time_bin_s
+    tolerance = max(
+        np.finfo(float).eps * max(abs(float(start)), abs(float(end)), 1.0) * 16.0,
+        time_bin_s * 1e-9,
+    )
+    if edges[-1] > end and not np.isclose(edges[-1], end, rtol=0.0, atol=tolerance):
+        edges = edges[edges < end]
+    if not np.isclose(edges[-1], end, rtol=0.0, atol=tolerance):
+        edges = np.append(edges, float(end))
+    else:
+        edges[-1] = float(end)
+    return edges
+
+
+def poisson_log_emissions(spike_counts: np.ndarray, rates_hz: np.ndarray, dt: float | np.ndarray) -> np.ndarray:
+    dt_array = np.asarray(dt, dtype=float)
+    if dt_array.ndim == 0:
+        if float(dt_array) <= 0.0:
+            raise ValueError("dt must be positive")
+        expected = np.maximum(rates_hz * float(dt_array), np.finfo(float).tiny)
+        return spike_counts @ np.log(expected) - expected.sum(axis=0)[None, :] - gammaln(spike_counts + 1).sum(axis=1)[:, None]
+
+    if dt_array.ndim != 1 or dt_array.shape[0] != spike_counts.shape[0]:
+        raise ValueError("dt must be a scalar or one duration per time bin")
+    if np.any(dt_array <= 0.0):
+        raise ValueError("all bin durations must be positive")
+
+    expected = np.maximum(dt_array[:, None, None] * rates_hz[None, :, :], np.finfo(float).tiny)
+    return (
+        np.einsum("tc,tcb->tb", spike_counts, np.log(expected), optimize=True)
+        - expected.sum(axis=1)
+        - gammaln(spike_counts + 1).sum(axis=1)[:, None]
+    )
 
 
 def kd_random_log_evidence(log_emissions: np.ndarray) -> float:

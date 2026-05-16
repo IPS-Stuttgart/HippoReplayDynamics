@@ -188,17 +188,16 @@ def build_emissions(
 
     config = EmissionConfig() if config is None else config
     ripple_event = session.ripple(ripple) if isinstance(ripple, int) else ripple
-    edges = np.arange(ripple_event.start, ripple_event.end + config.time_bin_s, config.time_bin_s)
-    if edges.shape[0] < 2:
-        edges = np.array([ripple_event.start, ripple_event.end], dtype=float)
-    times = edges[:-1] + 0.5 * np.diff(edges)
-    dt = float(np.median(np.diff(edges)))
+    edges = _time_bin_edges(ripple_event.start, ripple_event.end, config.time_bin_s)
+    bin_durations = np.diff(edges)
+    times = edges[:-1] + 0.5 * bin_durations
+    dt = float(np.median(bin_durations))
     spikes = session.spikes
     counts = np.zeros((times.shape[0], encoding.n_cells), dtype=int)
     if spikes.size and encoding.n_cells:
         keep = (
-            (spikes[:, 0] >= edges[0])
-            & (spikes[:, 0] < edges[-1])
+            (spikes[:, 0] >= ripple_event.start)
+            & (spikes[:, 0] < ripple_event.end)
             & np.isin(spikes[:, 1].astype(int), encoding.cell_ids)
         )
         spike_times = spikes[keep, 0]
@@ -210,9 +209,10 @@ def build_emissions(
         valid[valid] &= encoding.cell_ids[rows[valid]] == spike_cell_ids[valid]
         np.add.at(counts, (time_bins[valid].astype(int), rows[valid]), 1)
 
-    expected = encoding.rates_hz * dt
-    log_expected = np.log(expected)
-    log_likelihood = counts @ log_expected - expected.sum(axis=0)[None, :]
+    rates_hz = np.maximum(encoding.rates_hz, np.finfo(float).tiny)
+    log_likelihood = counts @ np.log(rates_hz)
+    log_likelihood += counts.sum(axis=1)[:, None] * np.log(bin_durations)[:, None]
+    log_likelihood -= bin_durations[:, None] * rates_hz.sum(axis=0)[None, :]
     log_likelihood -= gammaln(counts + 1).sum(axis=1)[:, None]
     return LogEmissionTensor(
         log_likelihood=log_likelihood,
@@ -222,6 +222,28 @@ def build_emissions(
         cell_ids=encoding.cell_ids,
         n_spikes=int(counts.sum()),
     )
+
+
+def _time_bin_edges(start: float, end: float, time_bin_s: float) -> np.ndarray:
+    start = float(start)
+    end = float(end)
+    time_bin_s = float(time_bin_s)
+    if not np.isfinite(start) or not np.isfinite(end):
+        raise ValueError("ripple start and end must be finite")
+    if not np.isfinite(time_bin_s) or time_bin_s <= 0.0:
+        raise ValueError("time_bin_s must be finite and positive")
+    if end <= start:
+        raise ValueError("ripple end must be greater than ripple start")
+
+    duration = end - start
+    n_complete = int(np.floor(duration / time_bin_s))
+    edges = start + np.arange(n_complete + 1, dtype=float) * time_bin_s
+    tolerance = 16.0 * np.finfo(float).eps * max(abs(start), abs(end), abs(duration), 1.0)
+    if edges.shape[0] == 1 or edges[-1] < end - tolerance:
+        edges = np.append(edges, end)
+    else:
+        edges[-1] = end
+    return edges
 
 
 def _clean_position(position: np.ndarray) -> np.ndarray:

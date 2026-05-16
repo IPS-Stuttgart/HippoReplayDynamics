@@ -129,6 +129,9 @@ def _score_session(session: ReplaySession, config: BenchmarkConfig) -> list[dict
                     "train_log_likelihood": float(train_score.log_likelihood),
                     "test_spikes": int(joint_emissions.n_spikes - train_emissions.n_spikes),
                     "n_time": int(train_emissions.n_time),
+                    "train_cell_ids": _format_cell_ids(train_cells),
+                    "test_cell_ids": _format_cell_ids(test_cells),
+                    **_benchmark_config_metadata(config),
                     **_session_mark_diagnostics(session),
                     **{
                         f"diagnostic_{key}": value
@@ -146,6 +149,25 @@ def _score_train_joint_model(model, train_emissions, joint_emissions, bin_center
         joint_score = model.score(joint_emissions, bin_centers, candidate_indices=candidates)
         return train_score, joint_score
     return model.score(train_emissions, bin_centers), model.score(joint_emissions, bin_centers)
+
+
+def _format_cell_ids(cell_ids: np.ndarray) -> str:
+    return ",".join(str(int(cell_id)) for cell_id in np.asarray(cell_ids, dtype=int))
+
+
+def _benchmark_config_metadata(config: BenchmarkConfig) -> dict[str, object]:
+    return {
+        "benchmark_test_cell_fraction": float(config.test_cell_fraction),
+        "benchmark_random_seed": int(config.random_seed),
+        "encoding_bin_size_cm": float(config.encoding.bin_size_cm),
+        "encoding_smoothing_sigma_bins": float(config.encoding.smoothing_sigma_bins),
+        "encoding_min_speed_cm_s": float(config.encoding.min_speed_cm_s),
+        "encoding_min_occupancy_s": float(config.encoding.min_occupancy_s),
+        "encoding_rate_floor_hz": float(config.encoding.rate_floor_hz),
+        "encoding_arena_padding_cm": float(config.encoding.arena_padding_cm),
+        "encoding_use_excitatory": bool(config.encoding.use_excitatory),
+        "emission_time_bin_s": float(config.emissions.time_bin_s),
+    }
 
 
 def _session_mark_diagnostics(session: ReplaySession) -> dict[str, object]:
@@ -253,10 +275,43 @@ def _session_goal_candidates(session: ReplaySession | None) -> np.ndarray | None
     return wells[["well_x", "well_y"]].to_numpy(dtype=float)
 
 
+_BEST_STATIC_BASELINE_MODELS = frozenset(
+    {
+        "random",
+        "stationary",
+        "diffusion",
+        "momentum",
+    }
+)
+
+_STATE_SPACE_STATIC_BASELINE_MODES = frozenset(
+    {
+        "stationary",
+        "diffusion",
+        "fragmented",
+        "jump",
+        "momentum",
+    }
+)
+
+
+def _is_best_static_baseline_model(model_name: object) -> bool:
+    """Return whether a model belongs in the best-static held-out baseline."""
+
+    model = str(model_name)
+    if model in _BEST_STATIC_BASELINE_MODELS:
+        return True
+    for prefix in ("sorted-spike-state-space-", "state-space-"):
+        if model.startswith(prefix):
+            mode = model.removeprefix(prefix)
+            return mode in _STATE_SPACE_STATIC_BASELINE_MODES
+    return False
+
+
 def _add_relative_metrics(frame: pd.DataFrame) -> pd.DataFrame:
-    static_models = {"random", "stationary", "diffusion", "momentum"}
+    static_mask = frame["model"].map(_is_best_static_baseline_model)
     best_static = (
-        frame[frame["model"].isin(static_models)]
+        frame[static_mask]
         .groupby(["session", "event_index"])["heldout_log_likelihood"]
         .max()
         .rename("best_static_heldout_log_likelihood")

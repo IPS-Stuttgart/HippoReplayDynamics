@@ -5,21 +5,48 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 
 import numpy as np
-from scipy.sparse import csr_matrix
-from scipy.special import logsumexp
 
 from .encoding import LogEmissionTensor
 from .models import EventScore, LOG_ZERO, _normalize_log_weights, _posterior_diagnostics
+from .state_space_candidates import (
+    _advance_imm_pair_log_alpha,
+    _backward_imm_pair,
+    _backward_imm_pair_for_mode,
+    _init_imm_pair_log_alpha,
+    _score_imm_candidates,
+)
+from .state_space_candidates_momentum import (
+    _advance_momentum_pair,
+    _backward_momentum_pair,
+    _init_pair_log_alpha,
+    _score_momentum_candidates,
+)
+from .state_space_first_order import (
+    _apply_transition,
+    _apply_transition_backward,
+    _forward_backward_first_order,
+    _score_first_order_imm,
+    _score_fragmented,
+    _score_stationary,
+)
+from .state_space_utils import (
+    _as_log_probs,
+    _candidate_log_masses,
+    _full_grid_normalized_pairwise_gaussian_log_prob,
+    _gaussian_transition_matrix,
+    _mean_entropy,
+    _mode_transition_matrix,
+    _pairwise_gaussian_log_prob,
+    _per_bin_sigma,
+    _scaled_emissions,
+    _top_candidate_indices,
+    _validate_candidate_indices,
+)
 
 
 @dataclass(frozen=True)
 class StateSpaceDecoderConfig:
-    """Configuration for state-space replay baselines.
-
-    Diffusion and momentum noise are specified in cm/sqrt(s). They are converted
-    to per-bin standard deviations using the emission tensor's ``dt`` so that the
-    same model can be evaluated with 1--3 ms replay bins.
-    """
+    """Configuration for state-space replay baselines."""
 
     mode: str = "diffusion"
     stationary_sigma_cm: float = 2.0
@@ -34,21 +61,7 @@ class StateSpaceDecoderConfig:
 
 @dataclass
 class StateSpaceReplayModel:
-    """Replay decoder baseline returning a posterior for every replay bin.
-
-    Supported modes are ``stationary``, ``diffusion``, ``fragmented``/``jump``,
-    ``first-order-imm``, ``momentum``, and ``imm``. The first-order models use
-    exact full-grid forward-backward recursions. ``first-order-imm`` is the
-    legacy exact first-order switcher over stationary, diffusion, and
-    fragmented/jump dynamics. ``momentum`` and ``imm`` use candidate-pruned
-    second-order dynamics for scalability. ``imm`` switches among stationary,
-    diffusion, momentum, and jump modes.
-
-    Candidate recursions keep full-grid prior and transition normalizers and
-    drop off-support paths, so their evidences are conservative truncated
-    full-grid evidences. They return candidate-supported per-bin posterior
-    marginals.
-    """
+    """Replay decoder baseline returning a posterior for every replay bin."""
 
     mode: str = "diffusion"
     config: StateSpaceDecoderConfig | None = None
@@ -128,10 +141,7 @@ class StateSpaceReplayModel:
         elif self.mode == "imm":
             transition_sigma_cm = _per_bin_sigma(self.config.diffusion_sigma_cm_sqrt_s, emissions.dt)
             momentum_transition_sigma_cm = _per_bin_sigma(self.config.momentum_sigma_cm_sqrt_s, emissions.dt)
-            momentum_initial_sigma_cm = _per_bin_sigma(
-                self.config.momentum_initial_sigma_cm_sqrt_s,
-                emissions.dt,
-            )
+            momentum_initial_sigma_cm = _per_bin_sigma(self.config.momentum_initial_sigma_cm_sqrt_s, emissions.dt)
             candidates = self.candidate_indices(emissions) if candidate_indices is None else candidate_indices
             _validate_candidate_indices(candidates, emissions.n_time, emissions.n_bins)
             logp, trajectory, mode_post, masses = _score_imm_candidates(
@@ -213,667 +223,37 @@ class StateSpaceReplayModel:
         )
 
 
-def _per_bin_sigma(sigma_cm_sqrt_s: float, dt_s: float) -> float:
-    return max(float(sigma_cm_sqrt_s) * np.sqrt(max(float(dt_s), np.finfo(float).tiny)), np.finfo(float).eps)
-
-
-def _score_stationary(emissions: LogEmissionTensor) -> tuple[float, np.ndarray]:
-    log_weights = np.sum(emissions.log_likelihood, axis=0) - np.log(emissions.n_bins)
-    logp = float(logsumexp(log_weights))
-    posterior = _normalize_log_weights(log_weights)
-    return logp, np.repeat(posterior[None, :], emissions.n_time, axis=0)
-
-
-def _score_fragmented(emissions: LogEmissionTensor) -> tuple[float, np.ndarray]:
-    scaled, offsets = _scaled_emissions(emissions.log_likelihood)
-    row_sums = scaled.sum(axis=1)
-    if np.any(row_sums <= 0.0):
-        raise ValueError("at least one emission row has no finite likelihood mass")
-    logp = float(np.sum(np.log(row_sums / emissions.n_bins) + offsets))
-    return logp, _as_log_probs(scaled / row_sums[:, None])
-
-
-def _forward_backward_first_order(log_likelihood: np.ndarray, transition: csr_matrix) -> tuple[float, np.ndarray]:
-    n_time, n_bins = log_likelihood.shape
-    scaled, offsets = _scaled_emissions(log_likelihood)
-    filtered = np.zeros((n_time, n_bins), dtype=float)
-    scales = np.zeros(n_time, dtype=float)
-
-    alpha = scaled[0] / n_bins
-    scales[0] = float(alpha.sum())
-    if scales[0] <= 0.0:
-        raise ValueError("first emission row has no finite likelihood mass")
-    alpha /= scales[0]
-    filtered[0] = alpha
-    logp = float(np.log(scales[0]) + offsets[0])
-
-    for time_index in range(1, n_time):
-        alpha = np.asarray(transition @ alpha, dtype=float) * scaled[time_index]
-        scales[time_index] = float(alpha.sum())
-        if scales[time_index] <= 0.0:
-            raise ValueError(f"emission row {time_index} has no finite predicted mass")
-        alpha /= scales[time_index]
-        filtered[time_index] = alpha
-        logp += float(np.log(scales[time_index]) + offsets[time_index])
-
-    smoothed = np.zeros_like(filtered)
-    beta = np.ones(n_bins, dtype=float)
-    smoothed[-1] = filtered[-1]
-    for time_index in range(n_time - 1, 0, -1):
-        beta = np.asarray(transition.T @ (scaled[time_index] * beta), dtype=float) / scales[time_index]
-        gamma = filtered[time_index - 1] * beta
-        total = float(gamma.sum())
-        smoothed[time_index - 1] = gamma / total if total > 0.0 else filtered[time_index - 1]
-    return logp, _as_log_probs(smoothed)
-
-
-def _score_first_order_imm(
-    log_likelihood: np.ndarray,
-    bin_centers: np.ndarray,
-    *,
-    stationary_sigma_cm: float,
-    diffusion_sigma_cm: float,
-    max_step_sigma: float,
-    mode_stickiness: float,
-) -> tuple[float, np.ndarray, np.ndarray]:
-    modes = ("stationary", "diffusion", "fragmented")
-    n_modes = len(modes)
-    n_time, n_bins = log_likelihood.shape
-    transitions = {
-        "stationary": _gaussian_transition_matrix(bin_centers, stationary_sigma_cm, max_step_sigma),
-        "diffusion": _gaussian_transition_matrix(bin_centers, diffusion_sigma_cm, max_step_sigma),
-        "fragmented": None,
-    }
-    mode_transition = _mode_transition_matrix(n_modes, mode_stickiness)
-    scaled, offsets = _scaled_emissions(log_likelihood)
-    filtered = np.zeros((n_time, n_modes, n_bins), dtype=float)
-    scales = np.zeros(n_time, dtype=float)
-
-    alpha = np.tile(scaled[0] / (n_bins * n_modes), (n_modes, 1))
-    scales[0] = float(alpha.sum())
-    if scales[0] <= 0.0:
-        raise ValueError("first emission row has no finite likelihood mass")
-    alpha /= scales[0]
-    filtered[0] = alpha
-    logp = float(np.log(scales[0]) + offsets[0])
-
-    for time_index in range(1, n_time):
-        predicted = np.zeros_like(alpha)
-        for dst_idx, dst_mode in enumerate(modes):
-            dst = np.zeros(n_bins, dtype=float)
-            for src_idx in range(n_modes):
-                dst += mode_transition[src_idx, dst_idx] * _apply_transition(transitions[dst_mode], alpha[src_idx])
-            predicted[dst_idx] = dst
-        alpha = predicted * scaled[time_index][None, :]
-        scales[time_index] = float(alpha.sum())
-        if scales[time_index] <= 0.0:
-            raise ValueError(f"emission row {time_index} has no finite predicted mass")
-        alpha /= scales[time_index]
-        filtered[time_index] = alpha
-        logp += float(np.log(scales[time_index]) + offsets[time_index])
-
-    smoothed = np.zeros_like(filtered)
-    beta = np.ones((n_modes, n_bins), dtype=float)
-    smoothed[-1] = filtered[-1]
-    for time_index in range(n_time - 1, 0, -1):
-        beta_prev = np.zeros_like(beta)
-        for src_idx in range(n_modes):
-            for dst_idx, dst_mode in enumerate(modes):
-                beta_prev[src_idx] += mode_transition[src_idx, dst_idx] * _apply_transition_backward(
-                    transitions[dst_mode], scaled[time_index] * beta[dst_idx]
-                )
-        beta = beta_prev / scales[time_index]
-        gamma = filtered[time_index - 1] * beta
-        total = float(gamma.sum())
-        smoothed[time_index - 1] = gamma / total if total > 0.0 else filtered[time_index - 1]
-
-    return logp, _as_log_probs(smoothed.sum(axis=1)), smoothed.sum(axis=2)
-
-
-def _apply_transition(transition: csr_matrix | None, weights: np.ndarray) -> np.ndarray:
-    if transition is None:
-        return np.full(weights.shape, float(weights.sum()) / weights.shape[0], dtype=float)
-    return np.asarray(transition @ weights, dtype=float)
-
-
-def _apply_transition_backward(transition: csr_matrix | None, values: np.ndarray) -> np.ndarray:
-    if transition is None:
-        return np.full(values.shape, float(values.sum()) / values.shape[0], dtype=float)
-    return np.asarray(transition.T @ values, dtype=float)
-
-
-def _score_imm_candidates(
-    emissions: LogEmissionTensor,
-    bin_centers: np.ndarray,
-    *,
-    stationary_sigma_cm: float,
-    diffusion_sigma_cm: float,
-    momentum_sigma_cm: float,
-    momentum_initial_sigma_cm: float,
-    velocity_decay: float,
-    mode_stickiness: float,
-    candidate_indices: list[np.ndarray],
-) -> tuple[float, np.ndarray, np.ndarray, list[float]]:
-    """Candidate-pruned four-mode IMM over stationary/diffusion/momentum/jump."""
-
-    modes = ("stationary", "diffusion", "momentum", "jump")
-    if emissions.n_time == 1:
-        logp, trajectory = _score_fragmented(emissions)
-        mode_post = np.full((1, len(modes)), 1.0 / len(modes), dtype=float)
-        return logp, trajectory, mode_post, [0.0]
-
-    mode_transition = _mode_transition_matrix(len(modes), mode_stickiness)
-    with np.errstate(divide="ignore"):
-        log_mode_transition = np.log(mode_transition)
-
-    masses = _candidate_log_masses(emissions.log_likelihood, candidate_indices)
-    first = candidate_indices[0]
-    second = candidate_indices[1]
-    by_mode = [
-        _init_imm_pair_log_alpha(
-            emissions.log_likelihood,
-            first,
-            second,
-            bin_centers,
-            mode=mode,
-            stationary_sigma_cm=stationary_sigma_cm,
-            diffusion_sigma_cm=diffusion_sigma_cm,
-            momentum_initial_sigma_cm=momentum_initial_sigma_cm,
-        )
-        for mode in modes
-    ]
-    log_pair = np.stack(by_mode, axis=0) - np.log(len(modes))
-    pair_alphas = [log_pair]
-
-    for time_index in range(2, emissions.n_time):
-        prev_prev = candidate_indices[time_index - 2]
-        prev = candidate_indices[time_index - 1]
-        curr = candidate_indices[time_index]
-        next_alpha = []
-        for dst_mode_index, dst_mode in enumerate(modes):
-            mixed_prev = logsumexp(
-                log_pair + log_mode_transition[:, dst_mode_index][:, None, None],
-                axis=0,
-            )
-            next_alpha.append(
-                _advance_imm_pair_log_alpha(
-                    mixed_prev,
-                    prev_prev,
-                    prev,
-                    curr,
-                    emissions.log_likelihood[time_index, curr],
-                    bin_centers,
-                    mode=dst_mode,
-                    stationary_sigma_cm=stationary_sigma_cm,
-                    diffusion_sigma_cm=diffusion_sigma_cm,
-                    momentum_sigma_cm=momentum_sigma_cm,
-                    velocity_decay=velocity_decay,
-                )
-            )
-        log_pair = np.stack(next_alpha, axis=0)
-        pair_alphas.append(log_pair)
-
-    logp = float(logsumexp(pair_alphas[-1]))
-    pair_betas = [np.zeros_like(pair_alphas[-1]) for _ in pair_alphas]
-    for pair_index in range(len(pair_alphas) - 2, -1, -1):
-        curr_time = pair_index + 2
-        pair_betas[pair_index] = _backward_imm_pair(
-            pair_betas[pair_index + 1],
-            candidate_indices[pair_index],
-            candidate_indices[pair_index + 1],
-            candidate_indices[curr_time],
-            emissions.log_likelihood[curr_time, candidate_indices[curr_time]],
-            bin_centers,
-            modes=modes,
-            mode_transition=mode_transition,
-            stationary_sigma_cm=stationary_sigma_cm,
-            diffusion_sigma_cm=diffusion_sigma_cm,
-            momentum_sigma_cm=momentum_sigma_cm,
-            velocity_decay=velocity_decay,
-        )
-
-    trajectory = np.full((emissions.n_time, emissions.n_bins), LOG_ZERO, dtype=float)
-    mode_log_posterior = np.full((emissions.n_time, len(modes)), LOG_ZERO, dtype=float)
-    for pair_index, (alpha, beta) in enumerate(zip(pair_alphas, pair_betas, strict=True)):
-        pair_log_posterior = alpha + beta - logp
-        if pair_index == 0:
-            trajectory[0, candidate_indices[0]] = logsumexp(pair_log_posterior, axis=(0, 2))
-            mode_log_posterior[0] = logsumexp(pair_log_posterior, axis=(1, 2))
-        trajectory[pair_index + 1, candidate_indices[pair_index + 1]] = logsumexp(
-            pair_log_posterior,
-            axis=(0, 1),
-        )
-        mode_log_posterior[pair_index + 1] = logsumexp(pair_log_posterior, axis=(1, 2))
-    for time_index in range(emissions.n_time):
-        trajectory[time_index] -= logsumexp(trajectory[time_index])
-    mode_log_posterior -= logsumexp(mode_log_posterior, axis=1)[:, None]
-    return logp, trajectory, np.exp(mode_log_posterior), masses
-
-
-def _init_imm_pair_log_alpha(
-    log_likelihood: np.ndarray,
-    first: np.ndarray,
-    second: np.ndarray,
-    bin_centers: np.ndarray,
-    *,
-    mode: str,
-    stationary_sigma_cm: float,
-    diffusion_sigma_cm: float,
-    momentum_initial_sigma_cm: float,
-) -> np.ndarray:
-    n_bins = log_likelihood.shape[1]
-    if mode == "jump":
-        log_kernel = np.full((len(first), len(second)), -np.log(n_bins), dtype=float)
-    else:
-        if mode == "stationary":
-            sigma_cm = stationary_sigma_cm
-        elif mode == "diffusion":
-            sigma_cm = diffusion_sigma_cm
-        elif mode == "momentum":
-            sigma_cm = momentum_initial_sigma_cm
-        else:
-            raise ValueError(f"Unknown IMM mode: {mode}")
-        log_kernel = _full_grid_normalized_pairwise_gaussian_log_prob(
-            bin_centers[first],
-            bin_centers[second],
-            bin_centers,
-            sigma_cm,
-        )
-    return log_likelihood[0, first][:, None] - np.log(n_bins) + log_kernel + log_likelihood[1, second][None, :]
-
-
-def _advance_imm_pair_log_alpha(
-    log_pair: np.ndarray,
-    prev_prev: np.ndarray,
-    prev: np.ndarray,
-    curr: np.ndarray,
-    curr_emission: np.ndarray,
-    bin_centers: np.ndarray,
-    *,
-    mode: str,
-    stationary_sigma_cm: float,
-    diffusion_sigma_cm: float,
-    momentum_sigma_cm: float,
-    velocity_decay: float,
-) -> np.ndarray:
-    coords_prev_prev = bin_centers[prev_prev]
-    coords_prev = bin_centers[prev]
-    coords_curr = bin_centers[curr]
-    output = np.full((len(prev), len(curr)), LOG_ZERO, dtype=float)
-    if mode == "jump":
-        collapsed_by_prev = logsumexp(log_pair, axis=0)
-        return collapsed_by_prev[:, None] - np.log(bin_centers.shape[0]) + curr_emission[None, :]
-    for prev_col in range(len(prev)):
-        if mode == "stationary":
-            previous_mass = logsumexp(log_pair[:, prev_col])
-            log_kernel = _full_grid_normalized_pairwise_gaussian_log_prob(
-                coords_prev[prev_col][None, :],
-                coords_curr,
-                bin_centers,
-                stationary_sigma_cm,
-            )[0]
-            output[prev_col] = previous_mass + log_kernel + curr_emission
-        elif mode == "diffusion":
-            previous_mass = logsumexp(log_pair[:, prev_col])
-            log_kernel = _full_grid_normalized_pairwise_gaussian_log_prob(
-                coords_prev[prev_col][None, :],
-                coords_curr,
-                bin_centers,
-                diffusion_sigma_cm,
-            )[0]
-            output[prev_col] = previous_mass + log_kernel + curr_emission
-        elif mode == "momentum":
-            predictions = coords_prev[prev_col][None, :] + velocity_decay * (
-                coords_prev[prev_col][None, :] - coords_prev_prev
-            )
-            log_kernel = _full_grid_normalized_pairwise_gaussian_log_prob(
-                predictions,
-                coords_curr,
-                bin_centers,
-                momentum_sigma_cm,
-            )
-            output[prev_col] = logsumexp(log_pair[:, prev_col][:, None] + log_kernel, axis=0) + curr_emission
-        else:
-            raise ValueError(f"Unknown IMM mode: {mode}")
-    return output
-
-
-def _backward_imm_pair(
-    next_beta: np.ndarray,
-    prev_prev: np.ndarray,
-    prev: np.ndarray,
-    curr: np.ndarray,
-    curr_emission: np.ndarray,
-    bin_centers: np.ndarray,
-    *,
-    modes: tuple[str, ...],
-    mode_transition: np.ndarray,
-    stationary_sigma_cm: float,
-    diffusion_sigma_cm: float,
-    momentum_sigma_cm: float,
-    velocity_decay: float,
-) -> np.ndarray:
-    dst_terms = np.stack(
-        [
-            _backward_imm_pair_for_mode(
-                next_beta[dst_idx],
-                prev_prev,
-                prev,
-                curr,
-                curr_emission,
-                bin_centers,
-                mode=dst_mode,
-                stationary_sigma_cm=stationary_sigma_cm,
-                diffusion_sigma_cm=diffusion_sigma_cm,
-                momentum_sigma_cm=momentum_sigma_cm,
-                velocity_decay=velocity_decay,
-            )
-            for dst_idx, dst_mode in enumerate(modes)
-        ],
-        axis=0,
-    )
-    with np.errstate(divide="ignore"):
-        log_mode_transition = np.log(mode_transition)
-    output = np.full((len(modes), len(prev_prev), len(prev)), LOG_ZERO, dtype=float)
-    for src_idx in range(len(modes)):
-        output[src_idx] = logsumexp(dst_terms + log_mode_transition[src_idx, :, None, None], axis=0)
-    return output
-
-
-def _backward_imm_pair_for_mode(
-    next_beta: np.ndarray,
-    prev_prev: np.ndarray,
-    prev: np.ndarray,
-    curr: np.ndarray,
-    curr_emission: np.ndarray,
-    bin_centers: np.ndarray,
-    *,
-    mode: str,
-    stationary_sigma_cm: float,
-    diffusion_sigma_cm: float,
-    momentum_sigma_cm: float,
-    velocity_decay: float,
-) -> np.ndarray:
-    if mode == "momentum":
-        return _backward_momentum_pair(
-            next_beta,
-            prev_prev,
-            prev,
-            curr,
-            curr_emission,
-            bin_centers,
-            sigma_cm=momentum_sigma_cm,
-            velocity_decay=velocity_decay,
-        )
-
-    output = np.full((len(prev_prev), len(prev)), LOG_ZERO, dtype=float)
-    if mode == "jump":
-        values_by_prev = logsumexp(-np.log(bin_centers.shape[0]) + curr_emission[None, :] + next_beta, axis=1)
-        output[:, :] = values_by_prev[None, :]
-        return output
-
-    if mode == "stationary":
-        sigma_cm = stationary_sigma_cm
-    elif mode == "diffusion":
-        sigma_cm = diffusion_sigma_cm
-    else:
-        raise ValueError(f"Unknown IMM mode: {mode}")
-
-    coords_prev = bin_centers[prev]
-    coords_curr = bin_centers[curr]
-    for prev_col in range(len(prev)):
-        log_kernel = _full_grid_normalized_pairwise_gaussian_log_prob(
-            coords_prev[prev_col][None, :],
-            coords_curr,
-            bin_centers,
-            sigma_cm,
-        )[0]
-        output[:, prev_col] = logsumexp(log_kernel + curr_emission + next_beta[prev_col])
-    return output
-
-
-def _score_momentum_candidates(
-    emissions: LogEmissionTensor,
-    bin_centers: np.ndarray,
-    candidates: list[np.ndarray],
-    *,
-    sigma_cm: float,
-    initial_sigma_cm: float,
-    velocity_decay: float,
-) -> tuple[float, np.ndarray, list[float]]:
-    if emissions.n_time == 1:
-        logp, trajectory = _score_fragmented(emissions)
-        return logp, trajectory, [0.0]
-
-    masses = _candidate_log_masses(emissions.log_likelihood, candidates)
-    log_pair = _init_pair_log_alpha(
-        emissions.log_likelihood,
-        candidates[0],
-        candidates[1],
-        bin_centers,
-        sigma_cm=initial_sigma_cm,
-    )
-    pair_alphas = [log_pair]
-    for time_index in range(2, emissions.n_time):
-        log_pair = _advance_momentum_pair(
-            log_pair,
-            candidates[time_index - 2],
-            candidates[time_index - 1],
-            candidates[time_index],
-            emissions.log_likelihood[time_index, candidates[time_index]],
-            bin_centers,
-            sigma_cm=sigma_cm,
-            velocity_decay=velocity_decay,
-        )
-        pair_alphas.append(log_pair)
-
-    logp = float(logsumexp(pair_alphas[-1]))
-    pair_betas = [np.zeros_like(pair_alphas[-1]) for _ in pair_alphas]
-    for pair_index in range(len(pair_alphas) - 2, -1, -1):
-        curr_time = pair_index + 2
-        pair_betas[pair_index] = _backward_momentum_pair(
-            pair_betas[pair_index + 1],
-            candidates[pair_index],
-            candidates[pair_index + 1],
-            candidates[curr_time],
-            emissions.log_likelihood[curr_time, candidates[curr_time]],
-            bin_centers,
-            sigma_cm=sigma_cm,
-            velocity_decay=velocity_decay,
-        )
-
-    trajectory = np.full((emissions.n_time, emissions.n_bins), LOG_ZERO, dtype=float)
-    for pair_index, (alpha, beta) in enumerate(zip(pair_alphas, pair_betas, strict=True)):
-        pair_log_posterior = alpha + beta - logp
-        if pair_index == 0:
-            trajectory[0, candidates[0]] = logsumexp(pair_log_posterior, axis=1)
-        trajectory[pair_index + 1, candidates[pair_index + 1]] = logsumexp(pair_log_posterior, axis=0)
-    for time_index in range(emissions.n_time):
-        trajectory[time_index] -= logsumexp(trajectory[time_index])
-    return logp, trajectory, masses
-
-
-def _top_candidate_indices(log_emission: np.ndarray, top_k: int) -> np.ndarray:
-    if top_k <= 0 or top_k >= log_emission.shape[0]:
-        return np.arange(log_emission.shape[0], dtype=int)
-    selected = np.argpartition(log_emission, -top_k)[-top_k:]
-    return selected[np.argsort(log_emission[selected])[::-1]]
-
-
-def _validate_candidate_indices(candidates: list[np.ndarray], n_time: int, n_bins: int) -> None:
-    if len(candidates) != n_time:
-        raise ValueError("candidate_indices must contain one array per emission time bin")
-    for time_index, curr in enumerate(candidates):
-        arr = np.asarray(curr)
-        if arr.ndim != 1:
-            raise ValueError(f"candidate_indices[{time_index}] must be one-dimensional")
-        if arr.size == 0:
-            raise ValueError(f"candidate_indices[{time_index}] must not be empty")
-        if np.any((arr < 0) | (arr >= n_bins)):
-            raise ValueError(f"candidate_indices[{time_index}] contains an out-of-range bin")
-
-
-def _candidate_log_masses(log_likelihood: np.ndarray, candidates: list[np.ndarray]) -> list[float]:
-    return [
-        float(logsumexp(log_likelihood[time_index, curr]) - logsumexp(log_likelihood[time_index]))
-        for time_index, curr in enumerate(candidates)
-    ]
-
-
-def _init_pair_log_alpha(
-    log_likelihood: np.ndarray,
-    first: np.ndarray,
-    second: np.ndarray,
-    bin_centers: np.ndarray,
-    *,
-    sigma_cm: float,
-) -> np.ndarray:
-    log_kernel = _full_grid_normalized_pairwise_gaussian_log_prob(
-        bin_centers[first],
-        bin_centers[second],
-        bin_centers,
-        sigma_cm,
-    )
-    n_bins = log_likelihood.shape[1]
-    return log_likelihood[0, first][:, None] - np.log(n_bins) + log_kernel + log_likelihood[1, second][None, :]
-
-
-def _advance_momentum_pair(
-    log_pair: np.ndarray,
-    prev_prev: np.ndarray,
-    prev: np.ndarray,
-    curr: np.ndarray,
-    curr_emission: np.ndarray,
-    bin_centers: np.ndarray,
-    *,
-    sigma_cm: float,
-    velocity_decay: float,
-) -> np.ndarray:
-    coords_prev_prev = bin_centers[prev_prev]
-    coords_prev = bin_centers[prev]
-    coords_curr = bin_centers[curr]
-    output = np.full((len(prev), len(curr)), LOG_ZERO, dtype=float)
-    for prev_col in range(len(prev)):
-        predictions = coords_prev[prev_col][None, :] + velocity_decay * (
-            coords_prev[prev_col][None, :] - coords_prev_prev
-        )
-        log_kernel = _full_grid_normalized_pairwise_gaussian_log_prob(
-            predictions,
-            coords_curr,
-            bin_centers,
-            sigma_cm,
-        )
-        output[prev_col] = logsumexp(log_pair[:, prev_col][:, None] + log_kernel, axis=0) + curr_emission
-    return output
-
-
-def _backward_momentum_pair(
-    next_beta: np.ndarray,
-    prev_prev: np.ndarray,
-    prev: np.ndarray,
-    curr: np.ndarray,
-    curr_emission: np.ndarray,
-    bin_centers: np.ndarray,
-    *,
-    sigma_cm: float,
-    velocity_decay: float,
-) -> np.ndarray:
-    coords_prev_prev = bin_centers[prev_prev]
-    coords_prev = bin_centers[prev]
-    coords_curr = bin_centers[curr]
-    output = np.full((len(prev_prev), len(prev)), LOG_ZERO, dtype=float)
-    for prev_col in range(len(prev)):
-        predictions = coords_prev[prev_col][None, :] + velocity_decay * (
-            coords_prev[prev_col][None, :] - coords_prev_prev
-        )
-        log_kernel = _full_grid_normalized_pairwise_gaussian_log_prob(
-            predictions,
-            coords_curr,
-            bin_centers,
-            sigma_cm,
-        )
-        continuation = curr_emission[None, :] + next_beta[prev_col][None, :]
-        output[:, prev_col] = logsumexp(log_kernel + continuation, axis=1)
-    return output
-
-
-def _gaussian_transition_matrix(bin_centers: np.ndarray, sigma_cm: float, max_step_sigma: float) -> csr_matrix:
-    if sigma_cm <= 0.0:
-        raise ValueError("sigma_cm must be positive")
-    n_bins = bin_centers.shape[0]
-    radius2 = (sigma_cm * max_step_sigma) ** 2
-    rows: list[int] = []
-    cols: list[int] = []
-    data: list[float] = []
-    for src, center in enumerate(bin_centers):
-        delta = bin_centers - center[None, :]
-        dist2 = np.sum(delta * delta, axis=1)
-        keep = dist2 <= radius2
-        if not np.any(keep):
-            keep[int(np.argmin(dist2))] = True
-        dst = np.flatnonzero(keep)
-        weights = np.exp(-0.5 * dist2[dst] / (sigma_cm * sigma_cm))
-        weights /= float(weights.sum())
-        rows.extend(int(idx) for idx in dst)
-        cols.extend([src] * len(dst))
-        data.extend(float(value) for value in weights)
-    return csr_matrix((data, (rows, cols)), shape=(n_bins, n_bins))
-
-
-def _full_grid_normalized_pairwise_gaussian_log_prob(
-    predicted: np.ndarray,
-    observed: np.ndarray,
-    all_observed: np.ndarray,
-    sigma_cm: float,
-) -> np.ndarray:
-    """Evaluate candidate log transitions with full-grid normalization."""
-
-    log_kernel = _pairwise_gaussian_log_prob(predicted, observed, sigma_cm)
-    log_normalizer = logsumexp(
-        _pairwise_gaussian_log_prob(predicted, all_observed, sigma_cm),
-        axis=1,
-        keepdims=True,
-    )
-    return log_kernel - log_normalizer
-
-
-def _pairwise_gaussian_log_prob(predicted: np.ndarray, observed: np.ndarray, sigma_cm: float) -> np.ndarray:
-    delta = predicted[:, None, :] - observed[None, :, :]
-    dist2 = np.sum(delta * delta, axis=2)
-    return -0.5 * dist2 / (sigma_cm * sigma_cm)
-
-
-def _scaled_emissions(log_likelihood: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-    values = np.asarray(log_likelihood, dtype=float)
-    finite = np.isfinite(values)
-    if not np.all(np.any(finite, axis=1)):
-        raise ValueError("every emission row must contain at least one finite value")
-    offsets = np.max(np.where(finite, values, -np.inf), axis=1)
-    shifted = np.where(finite, values - offsets[:, None], -np.inf)
-    scaled = np.exp(np.clip(shifted, -745.0, 0.0))
-    scaled[~finite] = 0.0
-    return scaled, offsets
-
-
-def _as_log_probs(probabilities: np.ndarray) -> np.ndarray:
-    probs = np.asarray(probabilities, dtype=float)
-    out = np.full(probs.shape, LOG_ZERO, dtype=float)
-    positive = probs > 0.0
-    out[positive] = np.log(probs[positive])
-    return out - logsumexp(out, axis=1)[:, None]
-
-
-def _mean_entropy(trajectory_log_posterior: np.ndarray) -> float:
-    posterior = np.exp(trajectory_log_posterior)
-    return float(np.mean(-np.sum(posterior * trajectory_log_posterior, axis=1)))
-
-
-def _mode_transition_matrix(n_modes: int, stickiness: float) -> np.ndarray:
-    if n_modes < 2:
-        return np.ones((n_modes, n_modes), dtype=float)
-    if not 0.0 <= stickiness <= 1.0:
-        raise ValueError("mode_stickiness must be in [0, 1]")
-    off_diag = (1.0 - stickiness) / (n_modes - 1)
-    matrix = np.full((n_modes, n_modes), off_diag, dtype=float)
-    np.fill_diagonal(matrix, stickiness)
-    return matrix
+__all__ = [
+    "EventScore",
+    "LOG_ZERO",
+    "StateSpaceDecoderConfig",
+    "StateSpaceReplayModel",
+    "_advance_imm_pair_log_alpha",
+    "_advance_momentum_pair",
+    "_apply_transition",
+    "_apply_transition_backward",
+    "_as_log_probs",
+    "_backward_imm_pair",
+    "_backward_imm_pair_for_mode",
+    "_backward_momentum_pair",
+    "_candidate_log_masses",
+    "_forward_backward_first_order",
+    "_full_grid_normalized_pairwise_gaussian_log_prob",
+    "_gaussian_transition_matrix",
+    "_init_imm_pair_log_alpha",
+    "_init_pair_log_alpha",
+    "_mean_entropy",
+    "_mode_transition_matrix",
+    "_normalize_log_weights",
+    "_pairwise_gaussian_log_prob",
+    "_per_bin_sigma",
+    "_posterior_diagnostics",
+    "_scaled_emissions",
+    "_score_first_order_imm",
+    "_score_fragmented",
+    "_score_imm_candidates",
+    "_score_momentum_candidates",
+    "_score_stationary",
+    "_top_candidate_indices",
+    "_validate_candidate_indices",
+]

@@ -37,12 +37,17 @@ class StateSpaceReplayModel:
     """Replay decoder baseline returning a posterior for every replay bin.
 
     Supported modes are ``stationary``, ``diffusion``, ``fragmented``/``jump``,
-    ``imm``, and ``momentum``. The first-order models use exact full-grid
-    forward-backward recursions. The momentum model uses candidate-pruned
-    second-order dynamics for scalability. Its candidate recursion keeps
-    full-grid prior and transition normalizers and drops off-support paths, so
-    its evidence is a conservative truncated full-grid evidence. It returns
-    candidate-supported per-bin posterior marginals.
+    ``first-order-imm``, ``momentum``, and ``imm``. The first-order models use
+    exact full-grid forward-backward recursions. ``first-order-imm`` is the
+    legacy exact first-order switcher over stationary, diffusion, and
+    fragmented/jump dynamics. ``momentum`` and ``imm`` use candidate-pruned
+    second-order dynamics for scalability. ``imm`` switches among stationary,
+    diffusion, momentum, and jump modes.
+
+    Candidate recursions keep full-grid prior and transition normalizers and
+    drop off-support paths, so their evidences are conservative truncated
+    full-grid evidences. They return candidate-supported per-bin posterior
+    marginals.
     """
 
     mode: str = "diffusion"
@@ -50,7 +55,15 @@ class StateSpaceReplayModel:
     name: str | None = None
 
     def __post_init__(self) -> None:
-        allowed = {"stationary", "diffusion", "fragmented", "jump", "imm", "momentum"}
+        allowed = {
+            "stationary",
+            "diffusion",
+            "fragmented",
+            "jump",
+            "first-order-imm",
+            "imm",
+            "momentum",
+        }
         if self.mode not in allowed:
             raise ValueError(f"mode must be one of {sorted(allowed)}")
         if self.name is None:
@@ -61,7 +74,7 @@ class StateSpaceReplayModel:
             self.config = replace(self.config, mode=self.mode)
 
     def candidate_indices(self, emissions: LogEmissionTensor) -> list[np.ndarray]:
-        """Return the candidate support used by the pruned momentum recursion."""
+        """Return the candidate support used by pruned momentum/IMM recursions."""
 
         assert self.config is not None
         return [_top_candidate_indices(row, self.config.momentum_candidate_top_k) for row in emissions.log_likelihood]
@@ -91,9 +104,9 @@ class StateSpaceReplayModel:
             transition = _gaussian_transition_matrix(bin_centers, transition_sigma_cm, self.config.max_step_sigma)
             logp, trajectory = _forward_backward_first_order(emissions.log_likelihood, transition)
             extra = {}
-        elif self.mode == "imm":
+        elif self.mode == "first-order-imm":
             transition_sigma_cm = _per_bin_sigma(self.config.diffusion_sigma_cm_sqrt_s, emissions.dt)
-            logp, trajectory, mode_post = _score_imm(
+            logp, trajectory, mode_post = _score_first_order_imm(
                 emissions.log_likelihood,
                 bin_centers,
                 stationary_sigma_cm=self.config.stationary_sigma_cm,
@@ -106,7 +119,50 @@ class StateSpaceReplayModel:
                 f"state_space_mode_{name}_terminal_probability": float(mode_post[-1, idx])
                 for idx, name in enumerate(names)
             }
-        else:
+            extra.update(
+                {
+                    "state_space_imm_modes": ",".join(names),
+                    "state_space_imm_evidence_support": "exact_full_grid",
+                }
+            )
+        elif self.mode == "imm":
+            transition_sigma_cm = _per_bin_sigma(self.config.diffusion_sigma_cm_sqrt_s, emissions.dt)
+            momentum_transition_sigma_cm = _per_bin_sigma(self.config.momentum_sigma_cm_sqrt_s, emissions.dt)
+            momentum_initial_sigma_cm = _per_bin_sigma(
+                self.config.momentum_initial_sigma_cm_sqrt_s,
+                emissions.dt,
+            )
+            candidates = self.candidate_indices(emissions) if candidate_indices is None else candidate_indices
+            _validate_candidate_indices(candidates, emissions.n_time, emissions.n_bins)
+            logp, trajectory, mode_post, masses = _score_imm_candidates(
+                emissions,
+                bin_centers,
+                stationary_sigma_cm=self.config.stationary_sigma_cm,
+                diffusion_sigma_cm=transition_sigma_cm,
+                momentum_sigma_cm=momentum_transition_sigma_cm,
+                momentum_initial_sigma_cm=momentum_initial_sigma_cm,
+                velocity_decay=self.config.momentum_velocity_decay,
+                mode_stickiness=self.config.imm_mode_stickiness,
+                candidate_indices=candidates,
+            )
+            names = ("stationary", "diffusion", "momentum", "jump")
+            extra = {
+                f"state_space_mode_{name}_terminal_probability": float(mode_post[-1, idx])
+                for idx, name in enumerate(names)
+            }
+            extra.update(
+                {
+                    "mean_candidate_log_mass": float(np.mean(masses)),
+                    "state_space_imm_modes": ",".join(names),
+                    "state_space_imm_candidate_top_k": int(self.config.momentum_candidate_top_k),
+                    "state_space_imm_candidate_support": "derived" if candidate_indices is None else "provided",
+                    "state_space_imm_trajectory_posterior": "smoothed_pair_marginal",
+                    "state_space_imm_evidence_support": "truncated_full_grid",
+                    "state_space_momentum_transition_sigma_cm": float(momentum_transition_sigma_cm),
+                    "state_space_momentum_initial_transition_sigma_cm": float(momentum_initial_sigma_cm),
+                }
+            )
+        elif self.mode == "momentum":
             transition_sigma_cm = _per_bin_sigma(self.config.momentum_sigma_cm_sqrt_s, emissions.dt)
             candidates = self.candidate_indices(emissions) if candidate_indices is None else candidate_indices
             _validate_candidate_indices(candidates, emissions.n_time, emissions.n_bins)
@@ -125,6 +181,8 @@ class StateSpaceReplayModel:
                 "state_space_momentum_trajectory_posterior": "smoothed_pair_marginal",
                 "state_space_momentum_evidence_support": "truncated_full_grid",
             }
+        else:  # pragma: no cover - __post_init__ validates this.
+            raise ValueError(f"Unsupported state-space mode: {self.mode}")
 
         terminal = trajectory[-1]
         diagnostics: dict[str, float | int | str] = {
@@ -209,7 +267,7 @@ def _forward_backward_first_order(log_likelihood: np.ndarray, transition: csr_ma
     return logp, _as_log_probs(smoothed)
 
 
-def _score_imm(
+def _score_first_order_imm(
     log_likelihood: np.ndarray,
     bin_centers: np.ndarray,
     *,
@@ -254,7 +312,6 @@ def _score_imm(
         filtered[time_index] = alpha
         logp += float(np.log(scales[time_index]) + offsets[time_index])
 
-    # Backward smoothing over the joint mode-position state.
     smoothed = np.zeros_like(filtered)
     beta = np.ones((n_modes, n_bins), dtype=float)
     smoothed[-1] = filtered[-1]
@@ -283,6 +340,296 @@ def _apply_transition_backward(transition: csr_matrix | None, values: np.ndarray
     if transition is None:
         return np.full(values.shape, float(values.sum()) / values.shape[0], dtype=float)
     return np.asarray(transition.T @ values, dtype=float)
+
+
+def _score_imm_candidates(
+    emissions: LogEmissionTensor,
+    bin_centers: np.ndarray,
+    *,
+    stationary_sigma_cm: float,
+    diffusion_sigma_cm: float,
+    momentum_sigma_cm: float,
+    momentum_initial_sigma_cm: float,
+    velocity_decay: float,
+    mode_stickiness: float,
+    candidate_indices: list[np.ndarray],
+) -> tuple[float, np.ndarray, np.ndarray, list[float]]:
+    """Candidate-pruned four-mode IMM over stationary/diffusion/momentum/jump."""
+
+    modes = ("stationary", "diffusion", "momentum", "jump")
+    if emissions.n_time == 1:
+        logp, trajectory = _score_fragmented(emissions)
+        mode_post = np.full((1, len(modes)), 1.0 / len(modes), dtype=float)
+        return logp, trajectory, mode_post, [0.0]
+
+    mode_transition = _mode_transition_matrix(len(modes), mode_stickiness)
+    with np.errstate(divide="ignore"):
+        log_mode_transition = np.log(mode_transition)
+
+    masses = _candidate_log_masses(emissions.log_likelihood, candidate_indices)
+    first = candidate_indices[0]
+    second = candidate_indices[1]
+    by_mode = [
+        _init_imm_pair_log_alpha(
+            emissions.log_likelihood,
+            first,
+            second,
+            bin_centers,
+            mode=mode,
+            stationary_sigma_cm=stationary_sigma_cm,
+            diffusion_sigma_cm=diffusion_sigma_cm,
+            momentum_initial_sigma_cm=momentum_initial_sigma_cm,
+        )
+        for mode in modes
+    ]
+    log_pair = np.stack(by_mode, axis=0) - np.log(len(modes))
+    pair_alphas = [log_pair]
+
+    for time_index in range(2, emissions.n_time):
+        prev_prev = candidate_indices[time_index - 2]
+        prev = candidate_indices[time_index - 1]
+        curr = candidate_indices[time_index]
+        next_alpha = []
+        for dst_mode_index, dst_mode in enumerate(modes):
+            mixed_prev = logsumexp(
+                log_pair + log_mode_transition[:, dst_mode_index][:, None, None],
+                axis=0,
+            )
+            next_alpha.append(
+                _advance_imm_pair_log_alpha(
+                    mixed_prev,
+                    prev_prev,
+                    prev,
+                    curr,
+                    emissions.log_likelihood[time_index, curr],
+                    bin_centers,
+                    mode=dst_mode,
+                    stationary_sigma_cm=stationary_sigma_cm,
+                    diffusion_sigma_cm=diffusion_sigma_cm,
+                    momentum_sigma_cm=momentum_sigma_cm,
+                    velocity_decay=velocity_decay,
+                )
+            )
+        log_pair = np.stack(next_alpha, axis=0)
+        pair_alphas.append(log_pair)
+
+    logp = float(logsumexp(pair_alphas[-1]))
+    pair_betas = [np.zeros_like(pair_alphas[-1]) for _ in pair_alphas]
+    for pair_index in range(len(pair_alphas) - 2, -1, -1):
+        curr_time = pair_index + 2
+        pair_betas[pair_index] = _backward_imm_pair(
+            pair_betas[pair_index + 1],
+            candidate_indices[pair_index],
+            candidate_indices[pair_index + 1],
+            candidate_indices[curr_time],
+            emissions.log_likelihood[curr_time, candidate_indices[curr_time]],
+            bin_centers,
+            modes=modes,
+            mode_transition=mode_transition,
+            stationary_sigma_cm=stationary_sigma_cm,
+            diffusion_sigma_cm=diffusion_sigma_cm,
+            momentum_sigma_cm=momentum_sigma_cm,
+            velocity_decay=velocity_decay,
+        )
+
+    trajectory = np.full((emissions.n_time, emissions.n_bins), LOG_ZERO, dtype=float)
+    mode_log_posterior = np.full((emissions.n_time, len(modes)), LOG_ZERO, dtype=float)
+    for pair_index, (alpha, beta) in enumerate(zip(pair_alphas, pair_betas, strict=True)):
+        pair_log_posterior = alpha + beta - logp
+        if pair_index == 0:
+            trajectory[0, candidate_indices[0]] = logsumexp(pair_log_posterior, axis=(0, 2))
+            mode_log_posterior[0] = logsumexp(pair_log_posterior, axis=(1, 2))
+        trajectory[pair_index + 1, candidate_indices[pair_index + 1]] = logsumexp(
+            pair_log_posterior,
+            axis=(0, 1),
+        )
+        mode_log_posterior[pair_index + 1] = logsumexp(pair_log_posterior, axis=(1, 2))
+    for time_index in range(emissions.n_time):
+        trajectory[time_index] -= logsumexp(trajectory[time_index])
+    mode_log_posterior -= logsumexp(mode_log_posterior, axis=1)[:, None]
+    return logp, trajectory, np.exp(mode_log_posterior), masses
+
+
+def _init_imm_pair_log_alpha(
+    log_likelihood: np.ndarray,
+    first: np.ndarray,
+    second: np.ndarray,
+    bin_centers: np.ndarray,
+    *,
+    mode: str,
+    stationary_sigma_cm: float,
+    diffusion_sigma_cm: float,
+    momentum_initial_sigma_cm: float,
+) -> np.ndarray:
+    n_bins = log_likelihood.shape[1]
+    if mode == "jump":
+        log_kernel = np.full((len(first), len(second)), -np.log(n_bins), dtype=float)
+    else:
+        if mode == "stationary":
+            sigma_cm = stationary_sigma_cm
+        elif mode == "diffusion":
+            sigma_cm = diffusion_sigma_cm
+        elif mode == "momentum":
+            sigma_cm = momentum_initial_sigma_cm
+        else:
+            raise ValueError(f"Unknown IMM mode: {mode}")
+        log_kernel = _full_grid_normalized_pairwise_gaussian_log_prob(
+            bin_centers[first],
+            bin_centers[second],
+            bin_centers,
+            sigma_cm,
+        )
+    return log_likelihood[0, first][:, None] - np.log(n_bins) + log_kernel + log_likelihood[1, second][None, :]
+
+
+def _advance_imm_pair_log_alpha(
+    log_pair: np.ndarray,
+    prev_prev: np.ndarray,
+    prev: np.ndarray,
+    curr: np.ndarray,
+    curr_emission: np.ndarray,
+    bin_centers: np.ndarray,
+    *,
+    mode: str,
+    stationary_sigma_cm: float,
+    diffusion_sigma_cm: float,
+    momentum_sigma_cm: float,
+    velocity_decay: float,
+) -> np.ndarray:
+    coords_prev_prev = bin_centers[prev_prev]
+    coords_prev = bin_centers[prev]
+    coords_curr = bin_centers[curr]
+    output = np.full((len(prev), len(curr)), LOG_ZERO, dtype=float)
+    if mode == "jump":
+        collapsed_by_prev = logsumexp(log_pair, axis=0)
+        return collapsed_by_prev[:, None] - np.log(bin_centers.shape[0]) + curr_emission[None, :]
+    for prev_col in range(len(prev)):
+        if mode == "stationary":
+            previous_mass = logsumexp(log_pair[:, prev_col])
+            log_kernel = _full_grid_normalized_pairwise_gaussian_log_prob(
+                coords_prev[prev_col][None, :],
+                coords_curr,
+                bin_centers,
+                stationary_sigma_cm,
+            )[0]
+            output[prev_col] = previous_mass + log_kernel + curr_emission
+        elif mode == "diffusion":
+            previous_mass = logsumexp(log_pair[:, prev_col])
+            log_kernel = _full_grid_normalized_pairwise_gaussian_log_prob(
+                coords_prev[prev_col][None, :],
+                coords_curr,
+                bin_centers,
+                diffusion_sigma_cm,
+            )[0]
+            output[prev_col] = previous_mass + log_kernel + curr_emission
+        elif mode == "momentum":
+            predictions = coords_prev[prev_col][None, :] + velocity_decay * (
+                coords_prev[prev_col][None, :] - coords_prev_prev
+            )
+            log_kernel = _full_grid_normalized_pairwise_gaussian_log_prob(
+                predictions,
+                coords_curr,
+                bin_centers,
+                momentum_sigma_cm,
+            )
+            output[prev_col] = logsumexp(log_pair[:, prev_col][:, None] + log_kernel, axis=0) + curr_emission
+        else:
+            raise ValueError(f"Unknown IMM mode: {mode}")
+    return output
+
+
+def _backward_imm_pair(
+    next_beta: np.ndarray,
+    prev_prev: np.ndarray,
+    prev: np.ndarray,
+    curr: np.ndarray,
+    curr_emission: np.ndarray,
+    bin_centers: np.ndarray,
+    *,
+    modes: tuple[str, ...],
+    mode_transition: np.ndarray,
+    stationary_sigma_cm: float,
+    diffusion_sigma_cm: float,
+    momentum_sigma_cm: float,
+    velocity_decay: float,
+) -> np.ndarray:
+    dst_terms = np.stack(
+        [
+            _backward_imm_pair_for_mode(
+                next_beta[dst_idx],
+                prev_prev,
+                prev,
+                curr,
+                curr_emission,
+                bin_centers,
+                mode=dst_mode,
+                stationary_sigma_cm=stationary_sigma_cm,
+                diffusion_sigma_cm=diffusion_sigma_cm,
+                momentum_sigma_cm=momentum_sigma_cm,
+                velocity_decay=velocity_decay,
+            )
+            for dst_idx, dst_mode in enumerate(modes)
+        ],
+        axis=0,
+    )
+    with np.errstate(divide="ignore"):
+        log_mode_transition = np.log(mode_transition)
+    output = np.full((len(modes), len(prev_prev), len(prev)), LOG_ZERO, dtype=float)
+    for src_idx in range(len(modes)):
+        output[src_idx] = logsumexp(dst_terms + log_mode_transition[src_idx, :, None, None], axis=0)
+    return output
+
+
+def _backward_imm_pair_for_mode(
+    next_beta: np.ndarray,
+    prev_prev: np.ndarray,
+    prev: np.ndarray,
+    curr: np.ndarray,
+    curr_emission: np.ndarray,
+    bin_centers: np.ndarray,
+    *,
+    mode: str,
+    stationary_sigma_cm: float,
+    diffusion_sigma_cm: float,
+    momentum_sigma_cm: float,
+    velocity_decay: float,
+) -> np.ndarray:
+    if mode == "momentum":
+        return _backward_momentum_pair(
+            next_beta,
+            prev_prev,
+            prev,
+            curr,
+            curr_emission,
+            bin_centers,
+            sigma_cm=momentum_sigma_cm,
+            velocity_decay=velocity_decay,
+        )
+
+    output = np.full((len(prev_prev), len(prev)), LOG_ZERO, dtype=float)
+    if mode == "jump":
+        values_by_prev = logsumexp(-np.log(bin_centers.shape[0]) + curr_emission[None, :] + next_beta, axis=1)
+        output[:, :] = values_by_prev[None, :]
+        return output
+
+    if mode == "stationary":
+        sigma_cm = stationary_sigma_cm
+    elif mode == "diffusion":
+        sigma_cm = diffusion_sigma_cm
+    else:
+        raise ValueError(f"Unknown IMM mode: {mode}")
+
+    coords_prev = bin_centers[prev]
+    coords_curr = bin_centers[curr]
+    for prev_col in range(len(prev)):
+        log_kernel = _full_grid_normalized_pairwise_gaussian_log_prob(
+            coords_prev[prev_col][None, :],
+            coords_curr,
+            bin_centers,
+            sigma_cm,
+        )[0]
+        output[:, prev_col] = logsumexp(log_kernel + curr_emission + next_beta[prev_col])
+    return output
 
 
 def _score_momentum_candidates(

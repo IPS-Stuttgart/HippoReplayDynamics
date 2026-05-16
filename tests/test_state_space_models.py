@@ -65,7 +65,7 @@ def test_state_space_modes_return_full_trajectory_posteriors():
     emissions = _synthetic_emissions()
     centers = np.array([[0.0, 0.0], [1.0, 0.0], [2.0, 0.0], [3.0, 0.0]])
 
-    for mode in ("stationary", "fragmented", "jump", "diffusion", "imm", "momentum"):
+    for mode in ("stationary", "fragmented", "jump", "diffusion", "first-order-imm", "imm", "momentum"):
         config = StateSpaceDecoderConfig(mode=mode, momentum_candidate_top_k=4)
         score = SortedSpikeStateSpaceReplayModel(mode=mode, config=config).score(emissions, centers)
 
@@ -81,6 +81,14 @@ def test_state_space_modes_return_full_trajectory_posteriors():
         assert score.diagnostics["clusterless_mark_likelihood"] == "not_implemented"
         if mode == "momentum":
             assert score.diagnostics["state_space_momentum_trajectory_posterior"] == "smoothed_pair_marginal"
+        if mode == "imm":
+            assert score.diagnostics["state_space_imm_modes"] == "stationary,diffusion,momentum,jump"
+            assert score.diagnostics["state_space_imm_evidence_support"] == "truncated_full_grid"
+            assert "state_space_mode_momentum_terminal_probability" in score.diagnostics
+            assert "state_space_mode_jump_terminal_probability" in score.diagnostics
+        if mode == "first-order-imm":
+            assert score.diagnostics["state_space_imm_modes"] == "stationary,diffusion,fragmented"
+            assert score.diagnostics["state_space_imm_evidence_support"] == "exact_full_grid"
 
 
 def test_state_space_momentum_pruned_support_uses_full_grid_normalization():
@@ -163,3 +171,78 @@ def test_state_space_momentum_can_reuse_external_candidate_support():
     assert np.isfinite(derived_score.log_likelihood)
     assert provided_score.diagnostics["state_space_momentum_candidate_support"] == "provided"
     assert derived_score.diagnostics["state_space_momentum_candidate_support"] == "derived"
+
+
+def test_state_space_four_mode_imm_matches_bruteforce_tiny_grid():
+    emissions = LogEmissionTensor(
+        log_likelihood=np.log(np.array([[0.7, 0.3], [0.2, 0.8], [0.4, 0.6]])),
+        spike_counts=np.zeros((3, 1), dtype=int),
+        times=np.array([0.0, 1.0, 2.0]),
+        dt=1.0,
+        cell_ids=np.array([1]),
+        n_spikes=0,
+    )
+    centers = np.array([[0.0, 0.0], [1.0, 0.0]])
+    config = StateSpaceDecoderConfig(
+        mode="imm",
+        stationary_sigma_cm=1.0,
+        diffusion_sigma_cm_sqrt_s=1.0,
+        imm_mode_stickiness=0.8,
+        momentum_sigma_cm_sqrt_s=1.0,
+        momentum_initial_sigma_cm_sqrt_s=1.0,
+        momentum_velocity_decay=0.9,
+        momentum_candidate_top_k=2,
+    )
+    score = StateSpaceReplayModel(mode="imm", config=config).score(emissions, centers)
+
+    modes = ("stationary", "diffusion", "momentum", "jump")
+    transition = np.full((4, 4), (1.0 - config.imm_mode_stickiness) / 3.0)
+    np.fill_diagonal(transition, config.imm_mode_stickiness)
+
+    def kernel_log(mode: str, src: int, prev: int, dst: int, *, initial: bool = False) -> float:
+        if mode == "jump":
+            return -np.log(centers.shape[0])
+        if initial:
+            sigma = (
+                config.stationary_sigma_cm
+                if mode == "stationary"
+                else config.diffusion_sigma_cm_sqrt_s
+                if mode == "diffusion"
+                else config.momentum_initial_sigma_cm_sqrt_s
+            )
+            predicted = centers[src]
+        elif mode == "stationary":
+            sigma = config.stationary_sigma_cm
+            predicted = centers[prev]
+        elif mode == "diffusion":
+            sigma = config.diffusion_sigma_cm_sqrt_s
+            predicted = centers[prev]
+        elif mode == "momentum":
+            sigma = config.momentum_sigma_cm_sqrt_s
+            predicted = centers[prev] + config.momentum_velocity_decay * (centers[prev] - centers[src])
+        else:
+            raise AssertionError(mode)
+        weights = np.exp(-0.5 * np.sum((centers - predicted) ** 2, axis=1) / (sigma * sigma))
+        return float(np.log(weights[dst] / weights.sum()))
+
+    brute_terms = []
+    for x0, x1, x2 in itertools.product(range(2), repeat=3):
+        for m1_idx, mode1 in enumerate(modes):
+            for m2_idx, mode2 in enumerate(modes):
+                brute_terms.append(
+                    -np.log(2.0)
+                    + emissions.log_likelihood[0, x0]
+                    - np.log(len(modes))
+                    + kernel_log(mode1, x0, x0, x1, initial=True)
+                    + emissions.log_likelihood[1, x1]
+                    + np.log(transition[m1_idx, m2_idx])
+                    + kernel_log(mode2, x0, x1, x2)
+                    + emissions.log_likelihood[2, x2]
+                )
+
+    assert np.allclose(score.log_likelihood, logsumexp(brute_terms))
+    assert score.diagnostics["state_space_imm_modes"] == "stationary,diffusion,momentum,jump"
+    terminal_probs = [score.diagnostics[f"state_space_mode_{mode}_terminal_probability"] for mode in modes]
+    assert np.allclose(sum(terminal_probs), 1.0)
+    assert score.trajectory_log_posterior is not None
+    assert np.allclose(logsumexp(score.trajectory_log_posterior, axis=1), 0.0)

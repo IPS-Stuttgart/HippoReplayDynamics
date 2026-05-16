@@ -11,7 +11,7 @@ import numpy as np
 import pandas as pd
 from scipy.special import logsumexp
 
-from benchmark_model_evidence import _add_evidence_columns, _counts, _summary, _write
+from benchmark_model_evidence import _add_evidence_columns, _counts, _ensure_evidence_support_columns, _summary, _write
 
 
 def _load_score_files(shard_glob: str) -> list[Path]:
@@ -45,22 +45,33 @@ def _load_combined(shard_glob: str) -> pd.DataFrame:
 
 
 def session_model_evidence_summary(df: pd.DataFrame) -> pd.DataFrame:
+    df = _ensure_evidence_support_columns(df)
     ok = df[df["status"] == "success"]
     if ok.empty:
         return pd.DataFrame()
-    out = ok.groupby(["session", "model", "model_family"], as_index=False).agg(
-        events=("event_index", "count"),
-        wins=("is_best_model", "sum"),
-        mean_log_evidence=("log_evidence", "mean"),
-        median_log_evidence=("log_evidence", "median"),
+    ok = ok.copy()
+    if "is_best_truncated_lower_bound" not in ok:
+        ok["is_best_truncated_lower_bound"] = False
+    if "truncated_relative_log_evidence" not in ok:
+        ok["truncated_relative_log_evidence"] = np.nan
+    out = ok.groupby(["session", "model", "model_family", "evidence_support", "evidence_comparable"], as_index=False).agg(
+        events=("event_index", "count"), wins=("is_best_model", "sum"),
+        truncated_lower_bound_wins=("is_best_truncated_lower_bound", "sum"),
+        mean_log_evidence=("log_evidence", "mean"), median_log_evidence=("log_evidence", "median"),
         mean_relative_log_evidence=("relative_log_evidence", "mean"),
         median_relative_log_evidence=("relative_log_evidence", "median"),
         mean_model_probability=("model_probability", "mean"),
         median_model_probability=("model_probability", "median"),
+        mean_truncated_relative_log_evidence=("truncated_relative_log_evidence", "mean"),
+        median_truncated_relative_log_evidence=("truncated_relative_log_evidence", "median"),
         mean_runtime_s=("runtime_s", "mean"),
     )
     out["win_fraction"] = out["wins"] / out["events"].clip(lower=1)
-    return out.sort_values(["session", "wins", "mean_log_evidence"], ascending=[True, False, False])
+    out["truncated_lower_bound_win_fraction"] = out["truncated_lower_bound_wins"] / out["events"].clip(lower=1)
+    return out.sort_values(
+        ["session", "evidence_comparable", "wins", "truncated_lower_bound_wins", "mean_log_evidence"],
+        ascending=[True, False, False, False, False],
+    )
 
 
 def session_best_model_counts(df: pd.DataFrame) -> pd.DataFrame:
@@ -70,8 +81,19 @@ def session_best_model_counts(df: pd.DataFrame) -> pd.DataFrame:
     base = ok.drop_duplicates(["session", "event_index"])
     rows: list[dict[str, object]] = []
     for session, session_frame in base.groupby("session", sort=True):
-        for col in ("best_model", "best_trajectory_model", "best_nontrajectory_model"):
-            counts = session_frame[col].value_counts().rename_axis("model").reset_index(name="events")
+        for col in (
+            "best_model",
+            "best_trajectory_model",
+            "best_nontrajectory_model",
+            "best_truncated_lower_bound_model",
+        ):
+            if col not in session_frame:
+                continue
+            values = session_frame[col].dropna().astype(str)
+            values = values[values != ""]
+            if values.empty:
+                continue
+            counts = values.value_counts().rename_axis("model").reset_index(name="events")
             counts["session"] = session
             counts["comparison"] = col
             rows.extend(counts.to_dict("records"))
@@ -83,13 +105,13 @@ def session_best_model_counts(df: pd.DataFrame) -> pd.DataFrame:
 def random_effects_model_probabilities(df: pd.DataFrame) -> pd.DataFrame:
     """Return a compact random-effects-style model probability table by session.
 
-    Each session votes for the model with the largest summed log evidence across
-    its successfully scored events. The reported random-effects probability is a
-    Dirichlet(1) posterior mean over these session-level model wins. The table
-    also includes a fixed-effects posterior over the summed session log evidence.
+    Each session votes for the exact-comparable model with the largest summed
+    log evidence across successfully scored events. Truncated lower-bound rows
+    are excluded from the random-effects and fixed-effects probability columns.
     """
 
-    ok = df[df["status"] == "success"].copy()
+    df = _ensure_evidence_support_columns(df)
+    ok = df[(df["status"] == "success") & df["evidence_comparable"]].copy()
     if ok.empty:
         return pd.DataFrame()
     per_session = ok.groupby(["session", "model"], as_index=False).agg(
@@ -133,10 +155,7 @@ def aggregate_all_sessions(shard_glob: str, outdir: Path) -> pd.DataFrame:
     combined = _load_combined(shard_glob)
     outdir.mkdir(parents=True, exist_ok=True)
 
-    # Backwards-compatible single-run outputs.
     _write(combined, outdir)
-
-    # Explicit all-session outputs for paper-side consumption.
     combined.to_csv(outdir / "all_sessions_event_model_evidence.csv", index=False)
     _summary(combined).to_csv(outdir / "all_sessions_model_evidence_summary.csv", index=False)
     _counts(combined).to_csv(outdir / "all_sessions_best_model_counts.csv", index=False)

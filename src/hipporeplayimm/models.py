@@ -183,9 +183,10 @@ class CandidateKinematicModel:
             first,
             second,
             bin_centers,
-            self.diffusion_sigma_cm,
             mode=mode,
             stationary_sigma_cm=self.stationary_sigma_cm,
+            diffusion_sigma_cm=self.diffusion_sigma_cm,
+            momentum_sigma_cm=self.momentum_sigma_cm,
         )
         prev_prev = first
         prev = second
@@ -230,9 +231,10 @@ class CandidateKinematicModel:
                     first,
                     second,
                     bin_centers,
-                    self.diffusion_sigma_cm,
                     mode=mode,
                     stationary_sigma_cm=self.stationary_sigma_cm,
+                    diffusion_sigma_cm=self.diffusion_sigma_cm,
+                    momentum_sigma_cm=self.momentum_sigma_cm,
                 )
             )
         log_alpha = np.stack(by_mode, axis=0) - np.log(len(modes))
@@ -356,9 +358,11 @@ def _init_pair_log_alpha(
     first: np.ndarray,
     second: np.ndarray,
     bin_centers: np.ndarray,
-    sigma_cm: float,
+    *,
     mode: str = "diffusion",
     stationary_sigma_cm: float = 2.0,
+    diffusion_sigma_cm: float = 12.0,
+    momentum_sigma_cm: float = 12.0,
 ) -> np.ndarray:
     first_ll = emissions.log_likelihood[0, first]
     second_ll = emissions.log_likelihood[1, second]
@@ -369,8 +373,12 @@ def _init_pair_log_alpha(
         return first_ll[:, None] - np.log(emissions.n_bins) + log_kernel + second_ll[None, :]
     if mode == "stationary":
         sigma = stationary_sigma_cm
+    elif mode == "diffusion":
+        sigma = diffusion_sigma_cm
+    elif mode == "momentum":
+        sigma = momentum_sigma_cm
     else:
-        sigma = sigma_cm
+        raise ValueError(f"Unknown kinematic mode: {mode}")
     log_kernel = _full_grid_normalized_pairwise_gaussian_log_prob(
         coords_first,
         coords_second,

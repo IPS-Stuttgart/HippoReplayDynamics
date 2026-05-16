@@ -3,7 +3,7 @@ name: Apply ground-truth model hyperparameter fix
 on:
   push:
     branches:
-      - fix/ground-truth-model-hyperparams-run
+      - main
 
 permissions:
   contents: write

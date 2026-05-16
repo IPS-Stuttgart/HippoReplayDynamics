@@ -16,5 +16,8 @@ def test_state_space_evidence_sweep_workflow_defines_parameter_grid_and_summary_
     assert "--state-space-momentum-velocity-decay" in workflow
     assert "state_space_evidence_sweep_config_ranked.csv" in workflow
     assert "state_space_evidence_sweep_momentum_ranked.csv" in workflow
+    assert "scripts/marginalize_state_space_sweep.py" in workflow
+    assert "state_space_marginalized_model_evidence_summary.csv" in workflow
+    assert "state_space_marginalized_prior_weights.csv" in workflow
     assert "momentum_minus_diffusion_log_evidence" in workflow
     assert "pattern: state-space-evidence-sweep-*" in workflow

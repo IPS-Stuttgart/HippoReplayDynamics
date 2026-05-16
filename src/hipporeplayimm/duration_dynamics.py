@@ -70,12 +70,12 @@ def apply_duration_dynamics_patch():
 def _patch_builders(enc,kd):
     if not getattr(enc.build_emissions,'_duration_wrapped',False):
         orig=enc.build_emissions
-        def f(*a,**k): return attach_duration_metadata(orig(*a,**k))
-        f._duration_wrapped=True; enc.build_emissions=f
+        def enc_build_emissions(*a, _orig=orig, **k): return attach_duration_metadata(_orig(*a,**k))
+        enc_build_emissions._duration_wrapped=True; enc.build_emissions=enc_build_emissions
     if not getattr(kd.build_kd_emissions,'_duration_wrapped',False):
         orig=kd.build_kd_emissions
-        def f(*a,**k): return attach_duration_metadata(orig(*a,**k))
-        f._duration_wrapped=True; kd.build_kd_emissions=f
+        def kd_build_emissions(*a, _orig=orig, **k): return attach_duration_metadata(_orig(*a,**k))
+        kd_build_emissions._duration_wrapped=True; kd.build_kd_emissions=kd_build_emissions
 
 def _patch_state_space(ss):
     def fb(loglik,trans):
@@ -190,9 +190,9 @@ def _patch_state_space(ss):
 
 def _patch_kd(kd):
     od=kd.diffusion_transition_1d; om=kd.momentum_transition_1d; oa=kd.adjusted_momentum_parameters
-    def diff1(n,sd,bin_cm,dt):
+    def diff1(n_bins,sd_meters,bin_size_cm,dt):
         ds=_dur_from_dt(dt)
-        return [od(n,sd,bin_cm,float(d)) for d in ds] if ds is not None else od(n,sd,bin_cm,dt)
+        return [od(n_bins,sd_meters,bin_size_cm,float(d)) for d in ds] if ds is not None else od(n_bins,sd_meters,bin_size_cm,dt)
     def first_var(loge,nx,ny,trans):
         e,o=kd._scaled_emission(loge,0); a=e.reshape(nx,ny)/loge.shape[1]; c=float(a.sum()); lp=np.log(c)+o; a/=c
         for i in range(1,loge.shape[0]):
@@ -201,13 +201,13 @@ def _patch_kd(kd):
             lp+=np.log(c)+o; a/=c
         return float(lp)
     def kde_from(loge,nx,ny,trans): return first_var(loge,nx,ny,trans) if isinstance(trans,(list,tuple)) else kd._first_order_separable_log_evidence(loge,nx,ny,trans)
-    def kde(loge,nx,ny,sd,bin_cm,dt): return kde_from(loge,nx,ny,diff1(nx,sd,bin_cm,dt))
-    def adj(th,sig,dt):
+    def kde(log_emissions,n_bins_x,n_bins_y,sd_meters,bin_size_cm,dt): return kde_from(log_emissions,n_bins_x,n_bins_y,diff1(n_bins_x,sd_meters,bin_size_cm,dt))
+    def adj(theta,sd_meters,dt):
         ds=_dur_from_dt(dt)
-        return oa(th,sig,float(np.median(ds))) if ds is not None and len(ds) else oa(th,sig,dt)
-    def mom1(n,sd,decay,bin_cm,dt):
+        return oa(theta,sd_meters,float(np.median(ds))) if ds is not None and len(ds) else oa(theta,sd_meters,dt)
+    def mom1(n_bins,sd_meters,decay,bin_size_cm,dt):
         ds=_dur_from_dt(dt)
-        return [om(n,sd,decay,bin_cm,float(d)) for d in ds[1:]] if ds is not None else om(n,sd,decay,bin_cm,dt)
+        return [om(n_bins,sd_meters,decay,bin_size_cm,float(d)) for d in ds[1:]] if ds is not None else om(n_bins,sd_meters,decay,bin_size_cm,dt)
     def second_var(loge,n,init,trans):
         if loge.shape[0]==1: return kd.kd_random_log_evidence(loge)
         e0,o0=kd._scaled_emission(loge,0); a0=e0.reshape(n,n)/loge.shape[1]; c=float(a0.sum()); lp=np.log(c)+o0; a0/=c
@@ -220,11 +220,11 @@ def _patch_kd(kd):
             lp+=np.log(c)+o; a/=c
         return float(lp)
     def kdm_from(loge,n,init,trans): return second_var(loge,n,init,trans) if isinstance(trans,(list,tuple)) else kd._second_order_separable_log_evidence(loge,n,init,trans)
-    def kdm(loge,nx,ny,sd,decay,init_sd,bin_cm,dt):
-        if nx!=ny: raise ValueError('KD momentum scorer currently requires a square grid')
-        if loge.shape[0]==1: return kd.kd_random_log_evidence(loge)
-        ds=_dur_from_dt(dt); adj_decay,adj_sd=(adj(decay,sd,dt) if decay>1 else (decay,sd)); first=float(ds[0]) if ds is not None and len(ds) else float(dt)
-        init=od(nx,init_sd*first,bin_cm,dt=1.0); trans=([om(nx,adj_sd,adj_decay,bin_cm,float(d)) for d in ds[1:]] if ds is not None else om(nx,adj_sd,adj_decay,bin_cm,dt))
-        return kdm_from(loge,nx,init,trans)
+    def kdm(log_emissions,n_bins_x,n_bins_y,sd_meters,decay,initial_sd_m_per_s,bin_size_cm,dt):
+        if n_bins_x!=n_bins_y: raise ValueError('KD momentum scorer currently requires a square grid')
+        if log_emissions.shape[0]==1: return kd.kd_random_log_evidence(log_emissions)
+        ds=_dur_from_dt(dt); adj_decay,adj_sd=(adj(decay,sd_meters,dt) if decay>1 else (decay,sd_meters)); first=float(ds[0]) if ds is not None and len(ds) else float(dt)
+        init=od(n_bins_x,initial_sd_m_per_s*first,bin_size_cm,dt=1.0); trans=([om(n_bins_x,adj_sd,adj_decay,bin_size_cm,float(d)) for d in ds[1:]] if ds is not None else om(n_bins_x,adj_sd,adj_decay,bin_size_cm,dt))
+        return kdm_from(log_emissions,n_bins_x,init,trans)
     kd.diffusion_transition_1d=diff1; kd.kd_diffusion_log_evidence_from_transition=kde_from; kd.kd_diffusion_log_evidence=kde
     kd.adjusted_momentum_parameters=adj; kd.momentum_transition_1d=mom1; kd.kd_momentum_log_evidence_from_transitions=kdm_from; kd.kd_momentum_log_evidence=kdm

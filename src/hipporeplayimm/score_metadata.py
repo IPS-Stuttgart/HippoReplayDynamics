@@ -450,7 +450,7 @@ def apply_model_hyperparam_patch() -> None:
             session = sessions.get(str(session_id))
             if session is None:
                 continue
-            models = build_models(model_config, session=session)
+            models = gt._build_models(model_config, session=session)
             wells = gt.infer_well_locations(session, ground_truth_config)
             encoding = gt.fit_place_field_encoding(session, encoding_config)
             if benchmark_decode:

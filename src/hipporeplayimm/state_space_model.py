@@ -7,38 +7,19 @@ from dataclasses import dataclass, replace
 import numpy as np
 
 from .encoding import LogEmissionTensor
-from .models import EventScore, LOG_ZERO, _normalize_log_weights, _posterior_diagnostics
-from .state_space_candidates import (
-    _advance_imm_pair_log_alpha,
-    _backward_imm_pair,
-    _backward_imm_pair_for_mode,
-    _init_imm_pair_log_alpha,
-    _score_imm_candidates,
-)
-from .state_space_candidates_momentum import (
-    _advance_momentum_pair,
-    _backward_momentum_pair,
-    _init_pair_log_alpha,
-    _score_momentum_candidates,
-)
+from .models import EventScore, _posterior_diagnostics
+from .state_space_candidates import _score_imm_candidates
+from .state_space_candidates_momentum import _score_momentum_candidates
 from .state_space_first_order import (
-    _apply_transition,
-    _apply_transition_backward,
     _forward_backward_first_order,
     _score_first_order_imm,
     _score_fragmented,
     _score_stationary,
 )
 from .state_space_utils import (
-    _as_log_probs,
-    _candidate_log_masses,
-    _full_grid_normalized_pairwise_gaussian_log_prob,
     _gaussian_transition_matrix,
     _mean_entropy,
-    _mode_transition_matrix,
-    _pairwise_gaussian_log_prob,
     _per_bin_sigma,
-    _scaled_emissions,
     _top_candidate_indices,
     _validate_candidate_indices,
 )

@@ -121,9 +121,10 @@ def _imm_mode_probabilities_for_prefix(
             first,
             second,
             bin_centers,
-            model.diffusion_sigma_cm,
             mode=mode,
             stationary_sigma_cm=model.stationary_sigma_cm,
+            diffusion_sigma_cm=model.diffusion_sigma_cm,
+            momentum_sigma_cm=model.momentum_sigma_cm,
         )
         for mode in _IMM_MODES
     ]

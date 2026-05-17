@@ -44,6 +44,42 @@ def test_clusterless_emissions_use_mark_likelihood_to_localize_spikes():
     assert emissions.log_likelihood[0, left_bin] > emissions.log_likelihood[0, right_bin]
 
 
+def test_clusterless_encoding_excludes_ripple_intervals_by_default():
+    session = _clusterless_session()
+    base_kwargs = dict(
+        bin_size_cm=10.0,
+        smoothing_sigma_bins=0.0,
+        min_speed_cm_s=0.0,
+        arena_padding_cm=5.0,
+    )
+    clusterless_kwargs = dict(
+        mark_smoothing_sigma_bins=0.0,
+        mark_prior_count=0.0,
+        mark_variance_floor=0.05,
+    )
+
+    excluded = fit_clusterless_mark_encoding(
+        session,
+        ClusterlessMarkConfig(
+            encoding=EncodingConfig(**base_kwargs, exclude_ripple_intervals=True),
+            **clusterless_kwargs,
+        ),
+    )
+    included = fit_clusterless_mark_encoding(
+        session,
+        ClusterlessMarkConfig(
+            encoding=EncodingConfig(**base_kwargs, exclude_ripple_intervals=False),
+            **clusterless_kwargs,
+        ),
+    )
+    left_bin = int(np.argmin(np.linalg.norm(excluded.bin_centers - np.array([0.0, 0.0]), axis=1)))
+
+    assert excluded.effective_spike_count[left_bin] == pytest.approx(3.0)
+    assert included.effective_spike_count[left_bin] == pytest.approx(4.0)
+    assert included.mark_mean[left_bin, 0] == pytest.approx(0.0125)
+    assert excluded.mark_mean[left_bin, 0] == pytest.approx(0.0)
+
+
 def test_clusterless_encoding_requires_spike_marks():
     session = _clusterless_session()
     session.spike_marks = None

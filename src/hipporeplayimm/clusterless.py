@@ -14,6 +14,7 @@ from .encoding import (
     EncodingConfig,
     LogEmissionTensor,
     _clean_position,
+    _encoding_exclusion_intervals,
     _frame_durations,
     _interp_positions,
     _make_grid,
@@ -120,7 +121,9 @@ def fit_clusterless_mark_encoding(
     xy = position[:, 1:3]
     speed = _speed_cm_s(times, xy)
     in_run = _times_in_intervals(times, session.run_times)
-    movement = in_run & (speed >= encoding_config.min_speed_cm_s)
+    excluded_intervals = _encoding_exclusion_intervals(session, encoding_config)
+    in_excluded_interval = _times_in_intervals(times, excluded_intervals)
+    movement = in_run & ~in_excluded_interval & (speed >= encoding_config.min_speed_cm_s)
 
     x_edges, y_edges, centers = _make_grid(xy, encoding_config)
     grid_shape = (len(x_edges) - 1, len(y_edges) - 1)
@@ -135,7 +138,13 @@ def fit_clusterless_mark_encoding(
     mark_speed = np.interp(mark_times, times, speed)
     mark_bins = _positions_to_flat_bins(mark_xy, x_edges, y_edges)
     mark_in_run = _times_in_intervals(mark_times, session.run_times)
-    keep = mark_in_run & (mark_speed >= encoding_config.min_speed_cm_s) & (mark_bins >= 0)
+    mark_in_excluded_interval = _times_in_intervals(mark_times, excluded_intervals)
+    keep = (
+        mark_in_run
+        & ~mark_in_excluded_interval
+        & (mark_speed >= encoding_config.min_speed_cm_s)
+        & (mark_bins >= 0)
+    )
     mark_times = mark_times[keep]
     mark_values = mark_values[keep]
     mark_bins = mark_bins[keep].astype(int)

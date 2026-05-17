@@ -1,6 +1,7 @@
 """State-space and IMM replay benchmarks for hippocampal open-field data."""
 # ruff: noqa: E402
 
+from . import clusterless_ground_truth as _clusterless_ground_truth
 from . import ground_truth as _ground_truth
 from . import score_metadata as _score_metadata
 from . import simulation_recovery as _simulation_recovery
@@ -8,6 +9,7 @@ from . import simulation_recovery as _simulation_recovery
 # Keep score-table metadata and post-hoc decoding consistent before public
 # symbols are imported from the patched modules.
 _score_metadata.apply_model_hyperparam_patch()
+_clusterless_ground_truth.apply_clusterless_ground_truth_patch()
 
 from .benchmarks import BenchmarkConfig, BenchmarkResult, run_open_field_benchmark
 from .clusterless import (

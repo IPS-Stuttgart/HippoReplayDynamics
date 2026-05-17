@@ -23,8 +23,15 @@ def _write_event_model_evidence(path: Path, rows: list[dict[str, object]]) -> No
     pd.DataFrame(rows).to_csv(path / "event_model_evidence.csv", index=False)
 
 
-def _row(event_id: int, model: str, family: str, log_evidence: float) -> dict[str, object]:
-    return {
+def _row(
+    event_id: int,
+    model: str,
+    family: str,
+    log_evidence: float,
+    *,
+    evidence_support: str | None = None,
+) -> dict[str, object]:
+    row = {
         "status": "success",
         "session": "RatX/OpenY",
         "event_index": event_id,
@@ -41,6 +48,14 @@ def _row(event_id: int, model: str, family: str, log_evidence: float) -> dict[st
         "min_speed_cm_s": 5.0,
         "time_bin_s": 0.003,
     }
+    if evidence_support is not None:
+        if model.endswith("momentum"):
+            row["diagnostic_state_space_momentum_evidence_support"] = evidence_support
+        elif model.endswith("imm"):
+            row["diagnostic_state_space_imm_evidence_support"] = evidence_support
+        else:
+            row["diagnostic_candidate_evidence_support"] = evidence_support
+    return row
 
 
 def test_aggregate_model_evidence_shards_recomputes_summary(tmp_path):
@@ -77,3 +92,46 @@ def test_aggregate_model_evidence_shards_recomputes_summary(tmp_path):
         "sorted-spike-state-space-momentum": 1,
         "sorted-spike-state-space-diffusion": 1,
     }
+    assert (out_dir / "evidence_support_summary.csv").is_file()
+    assert (out_dir / "event_evidence_support_audit.csv").is_file()
+    assert (out_dir / "pairwise_evidence_support_audit.csv").is_file()
+    assert (out_dir / "evidence_support_warnings.txt").is_file()
+
+
+def test_aggregate_model_evidence_shards_flags_mixed_evidence_support(tmp_path):
+    shard_root = tmp_path / "shards"
+    out_dir = tmp_path / "out"
+    _write_event_model_evidence(
+        shard_root / "shard0",
+        [
+            _row(10, "sorted-spike-state-space-stationary", "nontrajectory", -12.0),
+            _row(10, "sorted-spike-state-space-diffusion", "trajectory", -9.0),
+            _row(
+                10,
+                "sorted-spike-state-space-momentum",
+                "trajectory",
+                -8.0,
+                evidence_support="truncated_full_grid",
+            ),
+        ],
+    )
+
+    aggregate(str(shard_root / "**" / "event_model_evidence.csv"), out_dir)
+
+    support = pd.read_csv(out_dir / "evidence_support_summary.csv")
+    events = pd.read_csv(out_dir / "event_evidence_support_audit.csv")
+    pairwise = pd.read_csv(out_dir / "pairwise_evidence_support_audit.csv")
+    warnings = (out_dir / "evidence_support_warnings.txt").read_text(encoding="utf-8")
+
+    support_by_model = support.set_index("model")["evidence_support"].to_dict()
+    assert support_by_model["sorted-spike-state-space-diffusion"] == "exact_full_grid"
+    assert support_by_model["sorted-spike-state-space-momentum"] == "truncated_full_grid"
+    assert events.loc[0, "has_mixed_exact_truncated"]
+
+    mixed = pairwise[pairwise["mixes_exact_and_truncated"]]
+    assert not mixed.empty
+    assert {
+        "sorted-spike-state-space-diffusion",
+        "sorted-spike-state-space-momentum",
+    } <= set(mixed[["model_a", "model_b"]].to_numpy().ravel())
+    assert "candidate-pruned truncated lower bounds" in warnings

@@ -10,6 +10,7 @@ from pathlib import Path
 import pandas as pd
 
 from benchmark_model_evidence import _add_evidence_columns, _counts, _summary, _write
+from model_evidence_support_audit import write_evidence_support_audit
 
 
 def _load_score_files(shard_glob: str) -> list[Path]:
@@ -42,6 +43,7 @@ def aggregate(shard_glob: str, outdir: Path) -> pd.DataFrame:
 
     combined = _add_evidence_columns(combined.drop(columns=["source_shard_file"]))
     _write(combined, outdir)
+    write_evidence_support_audit(combined, outdir)
     return combined
 
 

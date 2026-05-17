@@ -3,13 +3,16 @@ import sys
 
 import numpy as np
 import pandas as pd
+import pytest
 
 sys.path.insert(0, str(Path("scripts").resolve()))
 from audit_model_evidence_support import (  # noqa: E402
     EXACT_EVIDENCE_SUPPORT,
     TRUNCATED_EVIDENCE_SUPPORT,
+    assert_no_mixed_support,
     ensure_evidence_support_columns,
     evidence_support_summary,
+    mixed_support_violations,
     paired_delta_summary,
     pooled_paired_delta_summary,
     write_audit,
@@ -128,6 +131,30 @@ def test_pooled_paired_delta_summary_aggregates_events():
     assert np.isclose(row["positive_fraction"], 0.5)
 
 
+def test_mixed_support_violations_are_detected():
+    violations = mixed_support_violations(paired_delta_summary(_toy_scores()))
+
+    assert not violations.empty
+    assert set(violations["comparison_support"]) == {"truncated_lower_bound_vs_exact"}
+
+
+def test_assert_no_mixed_support_accepts_like_with_like():
+    like_with_like = pd.DataFrame(
+        {
+            "session": ["Rat1/Open1", "Rat1/Open1"],
+            "comparison": ["a_minus_b", "c_minus_d"],
+            "comparison_support": [EXACT_EVIDENCE_SUPPORT, TRUNCATED_EVIDENCE_SUPPORT],
+            "left_model": ["a", "c"],
+            "right_model": ["b", "d"],
+            "events": [2, 2],
+            "positive_events": [1, 1],
+            "mean_delta": [0.0, 0.0],
+        }
+    )
+
+    assert_no_mixed_support(like_with_like)
+
+
 def test_write_audit_writes_expected_csvs(tmp_path):
     input_csv = tmp_path / "all_sessions_event_model_evidence.csv"
     output_dir = tmp_path / "audit"
@@ -138,3 +165,15 @@ def test_write_audit_writes_expected_csvs(tmp_path):
     assert (output_dir / "evidence_support_summary.csv").is_file()
     assert (output_dir / "session_paired_delta_summary.csv").is_file()
     assert (output_dir / "pooled_paired_delta_summary.csv").is_file()
+    assert (output_dir / "mixed_support_violations.csv").is_file()
+
+
+def test_write_audit_can_fail_on_mixed_support(tmp_path):
+    input_csv = tmp_path / "all_sessions_event_model_evidence.csv"
+    output_dir = tmp_path / "audit"
+    _toy_scores().to_csv(input_csv, index=False)
+
+    with pytest.raises(ValueError, match="mixed evidence support"):
+        write_audit(input_csv, output_dir, fail_on_mixed_support=True)
+
+    assert (output_dir / "mixed_support_violations.csv").is_file()

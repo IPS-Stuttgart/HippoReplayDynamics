@@ -20,6 +20,7 @@ from .encoding import (
     _make_grid,
     _positions_to_flat_bins,
     _speed_cm_s,
+    _time_bin_edges,
     _times_in_intervals,
 )
 from .models import EventScore
@@ -232,16 +233,19 @@ def build_clusterless_mark_emissions(
     if marks is None or marks.n_features == 0:
         raise ValueError("Session does not contain spike marks for clusterless emission scoring.")
     ripple_event = session.ripple(ripple) if isinstance(ripple, int) else ripple
-    edges = np.arange(ripple_event.start, ripple_event.end + config.time_bin_s, config.time_bin_s)
-    if edges.shape[0] < 2:
-        edges = np.array([ripple_event.start, ripple_event.end], dtype=float)
-    times = edges[:-1] + 0.5 * np.diff(edges)
-    dt = float(np.median(np.diff(edges)))
+    edges = _time_bin_edges(ripple_event.start, ripple_event.end, config.time_bin_s)
+    bin_durations = np.diff(edges)
+    times = edges[:-1] + 0.5 * bin_durations
+    dt = float(np.median(bin_durations))
     counts = np.zeros(times.shape[0], dtype=int)
-    log_likelihood = np.tile(-encoding.rate_hz[None, :] * dt, (times.shape[0], 1))
+    log_likelihood = -encoding.rate_hz[None, :] * bin_durations[:, None]
 
     mark_times, mark_values = _marks_for_config(session, encoding.config)
-    keep = (mark_times >= edges[0]) & (mark_times < edges[-1]) & np.all(np.isfinite(mark_values), axis=1)
+    keep = (
+        (mark_times >= ripple_event.start)
+        & (mark_times < ripple_event.end)
+        & np.all(np.isfinite(mark_values), axis=1)
+    )
     if np.any(keep):
         mark_times = mark_times[keep]
         mark_values = mark_values[keep]
@@ -254,7 +258,7 @@ def build_clusterless_mark_emissions(
         for local_index, time_bin in enumerate(time_bins):
             log_likelihood[time_bin] += log_rate + mark_log_likelihood[local_index]
         np.add.at(counts, time_bins, 1)
-    log_likelihood += (counts * np.log(dt) - gammaln(counts + 1))[:, None]
+    log_likelihood += (counts * np.log(bin_durations) - gammaln(counts + 1))[:, None]
 
     return LogEmissionTensor(
         log_likelihood=log_likelihood,

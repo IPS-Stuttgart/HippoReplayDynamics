@@ -314,6 +314,12 @@ _STATE_SPACE_STATIC_BASELINE_MODES = frozenset(
     }
 )
 
+_STATE_SPACE_STATIC_BASELINE_PREFIXES = (
+    "sorted-spike-state-space-",
+    "state-space-",
+    "clusterless-state-space-",
+)
+
 
 def _is_best_static_baseline_model(model_name: object) -> bool:
     """Return whether a model belongs in the best-static held-out baseline."""
@@ -321,7 +327,7 @@ def _is_best_static_baseline_model(model_name: object) -> bool:
     model = str(model_name)
     if model in _BEST_STATIC_BASELINE_MODELS:
         return True
-    for prefix in ("sorted-spike-state-space-", "state-space-"):
+    for prefix in _STATE_SPACE_STATIC_BASELINE_PREFIXES:
         if model.startswith(prefix):
             mode = model.removeprefix(prefix)
             return mode in _STATE_SPACE_STATIC_BASELINE_MODES

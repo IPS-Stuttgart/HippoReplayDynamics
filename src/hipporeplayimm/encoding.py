@@ -27,6 +27,7 @@ class EncodingConfig:
 @dataclass(frozen=True)
 class EmissionConfig:
     time_bin_s: float = 0.02
+    spike_rate_scale: float = 1.0
 
 
 @dataclass
@@ -218,11 +219,12 @@ def build_emissions(
         valid[valid] &= encoding.cell_ids[rows[valid]] == spike_cell_ids[valid]
         np.add.at(counts, (time_bins[valid].astype(int), rows[valid]), 1)
 
-    rates_hz = np.maximum(encoding.rates_hz, np.finfo(float).tiny)
-    log_likelihood = counts @ np.log(rates_hz)
-    log_likelihood += counts.sum(axis=1)[:, None] * np.log(bin_durations)[:, None]
-    log_likelihood -= bin_durations[:, None] * rates_hz.sum(axis=0)[None, :]
-    log_likelihood -= gammaln(counts + 1).sum(axis=1)[:, None]
+    log_likelihood = _poisson_log_emissions(
+        counts,
+        encoding.rates_hz,
+        bin_durations,
+        spike_rate_scale=config.spike_rate_scale,
+    )
     return LogEmissionTensor(
         log_likelihood=log_likelihood,
         spike_counts=counts,
@@ -230,6 +232,42 @@ def build_emissions(
         dt=dt,
         cell_ids=encoding.cell_ids,
         n_spikes=int(counts.sum()),
+    )
+
+
+def _poisson_log_emissions(
+    spike_counts: np.ndarray,
+    rates_hz: np.ndarray,
+    dt: float | np.ndarray,
+    *,
+    spike_rate_scale: float = 1.0,
+) -> np.ndarray:
+    if spike_rate_scale <= 0.0:
+        raise ValueError("spike_rate_scale must be positive")
+    dt_array = np.asarray(dt, dtype=float)
+    if dt_array.ndim == 0:
+        if float(dt_array) <= 0.0:
+            raise ValueError("dt must be positive")
+        expected = np.maximum(rates_hz * float(dt_array) * spike_rate_scale, np.finfo(float).tiny)
+        return (
+            spike_counts @ np.log(expected)
+            - expected.sum(axis=0)[None, :]
+            - gammaln(spike_counts + 1).sum(axis=1)[:, None]
+        )
+
+    if dt_array.ndim != 1 or dt_array.shape[0] != spike_counts.shape[0]:
+        raise ValueError("dt must be a scalar or one duration per time bin")
+    if np.any(dt_array <= 0.0):
+        raise ValueError("all bin durations must be positive")
+
+    expected = np.maximum(
+        dt_array[:, None, None] * rates_hz[None, :, :] * spike_rate_scale,
+        np.finfo(float).tiny,
+    )
+    return (
+        np.einsum("tc,tcb->tb", spike_counts, np.log(expected), optimize=True)
+        - expected.sum(axis=1)
+        - gammaln(spike_counts + 1).sum(axis=1)[:, None]
     )
 
 

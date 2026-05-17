@@ -172,7 +172,7 @@ def run_batch(args: argparse.Namespace) -> Path:
             session,
             encoding,
             int(event_id),
-            EmissionConfig(time_bin_s=args.time_bin_s),
+            EmissionConfig(time_bin_s=args.time_bin_s, spike_rate_scale=args.spike_rate_scale),
         )
         for model_name in args.models:
             model = models[model_name]
@@ -252,6 +252,7 @@ def main() -> int:
     parser.add_argument("--candidate-top-k", default=64, type=int)
     parser.add_argument("--pyrecest-particles", default=512, type=int)
     parser.add_argument("--time-bin-s", default=0.02, type=float)
+    parser.add_argument("--spike-rate-scale", default=1.0, type=float)
     parser.add_argument("--output", default="results/track-batch")
     parser.add_argument(
         "--continue-on-error",

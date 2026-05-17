@@ -240,7 +240,10 @@ def _score(args) -> pd.DataFrame:
                 mark_variance_floor=args.clusterless_mark_variance_floor,
             ),
         )
-    emissions_cfg = EmissionConfig(time_bin_s=args.time_bin_s)
+    emissions_cfg = EmissionConfig(
+        time_bin_s=args.time_bin_s,
+        spike_rate_scale=args.spike_rate_scale,
+    )
     rows: list[dict[str, object]] = []
 
     for event_id in event_ids:
@@ -274,6 +277,7 @@ def _score(args) -> pd.DataFrame:
                     "smoothing_sigma_bins": float(args.smoothing_sigma_bins),
                     "min_speed_cm_s": float(args.min_speed_cm_s),
                     "time_bin_s": float(args.time_bin_s),
+                    "spike_rate_scale": float(args.spike_rate_scale),
                     "clusterless_mark_smoothing_sigma_bins": float(args.clusterless_mark_smoothing_sigma_bins),
                     "clusterless_mark_prior_count": float(args.clusterless_mark_prior_count),
                     "clusterless_mark_variance_floor": float(args.clusterless_mark_variance_floor),
@@ -296,6 +300,7 @@ def _score(args) -> pd.DataFrame:
                     "smoothing_sigma_bins": float(args.smoothing_sigma_bins),
                     "min_speed_cm_s": float(args.min_speed_cm_s),
                     "time_bin_s": float(args.time_bin_s),
+                    "spike_rate_scale": float(args.spike_rate_scale),
                     "clusterless_mark_smoothing_sigma_bins": float(args.clusterless_mark_smoothing_sigma_bins),
                     "clusterless_mark_prior_count": float(args.clusterless_mark_prior_count),
                     "clusterless_mark_variance_floor": float(args.clusterless_mark_variance_floor),
@@ -457,6 +462,12 @@ def main() -> int:
     p.add_argument("--clusterless-mark-prior-count", type=float, default=1.0)
     p.add_argument("--clusterless-mark-variance-floor", type=float, default=1.0)
     p.add_argument("--time-bin-s", type=float, default=0.02)
+    p.add_argument(
+        "--spike-rate-scale",
+        type=float,
+        default=1.0,
+        help="Multiplicative scale applied to Poisson place-field rates during ripple scoring.",
+    )
     p.add_argument("--bin-size-cm", type=float, default=VALIDATED_POSITION_BIN_SIZE_CM)
     p.add_argument("--smoothing-sigma-bins", type=float, default=VALIDATED_POSITION_SMOOTHING_SIGMA_BINS)
     p.add_argument("--min-speed-cm-s", type=float, default=VALIDATED_POSITION_MIN_SPEED_CM_S)

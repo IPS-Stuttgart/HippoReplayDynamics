@@ -236,7 +236,13 @@ def _score(args) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame
         ),
     )
     emissions_by_event = [
-        build_kd_emissions(session, encoding, int(event_id), time_bin_s=args.time_bin_ms / 1000.0)
+        build_kd_emissions(
+            session,
+            encoding,
+            int(event_id),
+            time_bin_s=args.time_bin_ms / 1000.0,
+            spike_rate_scale=args.spike_rate_scale,
+        )
         for event_id in event_ids
     ]
     rows: list[dict[str, object]] = []
@@ -317,6 +323,7 @@ def _score(args) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame
                     "kd_n_bins": int(args.n_bins),
                     "kd_n_jobs": int(args.n_jobs),
                     "kd_event_chunk_size": int(args.event_chunk_size),
+                    "kd_spike_rate_scale": float(args.spike_rate_scale),
                 }
             )
             marginalized_rows.append(
@@ -361,7 +368,13 @@ def _write_momentum_shard(args, outpath: Path) -> None:
         ),
     )
     emissions_by_event = [
-        build_kd_emissions(session, encoding, int(event_id), time_bin_s=args.time_bin_ms / 1000.0)
+        build_kd_emissions(
+            session,
+            encoding,
+            int(event_id),
+            time_bin_s=args.time_bin_ms / 1000.0,
+            spike_rate_scale=args.spike_rate_scale,
+        )
         for event_id in event_ids
     ]
     all_tasks = [
@@ -408,6 +421,7 @@ def _write_momentum_shard(args, outpath: Path) -> None:
         kd_n_bins=np.asarray(args.n_bins, dtype=int),
         kd_n_jobs=np.asarray(args.n_jobs, dtype=int),
         kd_event_chunk_size=np.asarray(args.event_chunk_size, dtype=int),
+        kd_spike_rate_scale=np.asarray(args.spike_rate_scale, dtype=float),
     )
     print(
         f"Wrote momentum shard {args.momentum_shard_index}/{args.momentum_shard_count}: "
@@ -492,6 +506,12 @@ def main() -> int:
     p.add_argument("--bin-size-cm", type=float, default=4.0)
     p.add_argument("--n-bins", type=int, default=50)
     p.add_argument("--likelihood", choices=("poisson",), default="poisson")
+    p.add_argument(
+        "--spike-rate-scale",
+        type=float,
+        default=1.0,
+        help="Multiplicative scale applied to Poisson place-field rates during ripple scoring.",
+    )
     p.add_argument("--grid-preset", choices=("kd", "smoke"), default="kd")
     p.add_argument("--max-events", type=int, default=None)
     p.add_argument("--n-jobs", type=int, default=1)

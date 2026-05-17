@@ -267,7 +267,12 @@ def run_tracking(args: argparse.Namespace) -> None:
 
     session = load_replay_session(session_path)
     encoding = fit_place_field_encoding(session)
-    emissions = build_emissions(session, encoding, int(args.event_id), EmissionConfig(time_bin_s=args.time_bin_s))
+    emissions = build_emissions(
+        session,
+        encoding,
+        int(args.event_id),
+        EmissionConfig(time_bin_s=args.time_bin_s, spike_rate_scale=args.spike_rate_scale),
+    )
     config = BenchmarkConfig(
         candidate_top_k=args.candidate_top_k,
         pyrecest_particles=args.pyrecest_particles,
@@ -315,6 +320,7 @@ def main() -> int:
     parser.add_argument("--candidate-top-k", default=64, type=int)
     parser.add_argument("--pyrecest-particles", default=512, type=int)
     parser.add_argument("--time-bin-s", default=0.02, type=float)
+    parser.add_argument("--spike-rate-scale", default=1.0, type=float)
     parser.add_argument("--output", default="results/tracks")
     run_tracking(parser.parse_args())
     return 0

@@ -114,11 +114,15 @@ def test_clusterless_encoding_excludes_ripple_intervals_by_default():
         ),
     )
     left_bin = int(np.argmin(np.linalg.norm(excluded.bin_centers - np.array([0.0, 0.0]), axis=1)))
+    right_bin = int(np.argmin(np.linalg.norm(excluded.bin_centers - np.array([10.0, 0.0]), axis=1)))
 
     assert excluded.effective_spike_count[left_bin] == pytest.approx(3.0)
-    assert included.effective_spike_count[left_bin] == pytest.approx(4.0)
-    assert included.mark_mean[left_bin, 0] == pytest.approx(0.0125)
+    assert included.effective_spike_count[left_bin] == pytest.approx(3.0)
     assert excluded.mark_mean[left_bin, 0] == pytest.approx(0.0)
+    assert excluded.effective_spike_count[right_bin] == pytest.approx(3.0)
+    assert included.effective_spike_count[right_bin] == pytest.approx(4.0)
+    assert excluded.mark_mean[right_bin, 0] == pytest.approx(10.0)
+    assert included.mark_mean[right_bin, 0] == pytest.approx(7.5125)
 
 
 def test_clusterless_encoding_requires_spike_marks():

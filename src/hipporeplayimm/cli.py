@@ -57,6 +57,7 @@ def main(argv: list[str] | None = None) -> int:
     benchmark_parser.add_argument("--test-cell-fraction", type=float, default=0.25)
     benchmark_parser.add_argument("--random-seed", type=int, default=1)
     benchmark_parser.add_argument("--time-bin-ms", type=float, default=20.0)
+    benchmark_parser.add_argument("--spike-rate-scale", type=float, default=1.0)
     benchmark_parser.add_argument(
         "--models",
         default="random,stationary,diffusion,momentum,imm",
@@ -71,6 +72,7 @@ def main(argv: list[str] | None = None) -> int:
     decode_parser.add_argument("--event-id", type=int, required=True)
     decode_parser.add_argument("--candidate-top-k", type=int, default=64)
     decode_parser.add_argument("--time-bin-ms", type=float, default=20.0)
+    decode_parser.add_argument("--spike-rate-scale", type=float, default=1.0)
     decode_parser.add_argument("--output")
     decode_parser.add_argument(
         "--models",
@@ -97,6 +99,7 @@ def main(argv: list[str] | None = None) -> int:
     compare_parser.add_argument("--test-cell-fraction", type=float, default=0.25)
     compare_parser.add_argument("--random-seed", type=int, default=1)
     compare_parser.add_argument("--time-bin-ms", type=float, default=20.0)
+    compare_parser.add_argument("--spike-rate-scale", type=float, default=1.0)
     _add_encoding_arguments(compare_parser)
     _add_pyrecest_scalar_arguments(compare_parser)
     compare_parser.add_argument("--visit-radius-cm", type=float, default=10.0)
@@ -295,7 +298,7 @@ def _benchmark(args: argparse.Namespace) -> int:
         raise ValueError("Only --preset open-field-loso is currently implemented")
     config = BenchmarkConfig(
         encoding=_encoding_config_from_args(args),
-        emissions=EmissionConfig(time_bin_s=args.time_bin_ms / 1000.0),
+        emissions=_emission_config_from_args(args),
         max_events_per_session=args.max_events,
         test_cell_fraction=args.test_cell_fraction,
         random_seed=args.random_seed,
@@ -333,7 +336,7 @@ def _decode_event(args: argparse.Namespace) -> int:
         raise KeyError(f"Unknown session {args.session!r}; available: {available}")
     session = sessions[args.session]
     encoding = fit_place_field_encoding(session, _encoding_config_from_args(args))
-    emission_config = EmissionConfig(time_bin_s=args.time_bin_ms / 1000.0)
+    emission_config = _emission_config_from_args(args)
     emissions = build_emissions(session, encoding, args.event_id, emission_config)
     rows = []
     config = BenchmarkConfig(
@@ -401,7 +404,7 @@ def _compare_ground_truth(args: argparse.Namespace) -> int:
         ground_truth=args.ground_truth,
         ground_truth_config=config,
         encoding_config=_encoding_config_from_args(args),
-        emission_config=EmissionConfig(time_bin_s=args.time_bin_ms / 1000.0),
+        emission_config=_emission_config_from_args(args),
         test_cell_fraction=args.test_cell_fraction,
         candidate_top_k=args.candidate_top_k,
         random_seed=args.random_seed,
@@ -427,6 +430,13 @@ def _encoding_config_from_args(args: argparse.Namespace) -> EncodingConfig:
         bin_size_cm=args.bin_size_cm,
         smoothing_sigma_bins=args.smoothing_sigma_bins,
         min_speed_cm_s=args.min_speed_cm_s,
+    )
+
+
+def _emission_config_from_args(args: argparse.Namespace) -> EmissionConfig:
+    return EmissionConfig(
+        time_bin_s=args.time_bin_ms / 1000.0,
+        spike_rate_scale=args.spike_rate_scale,
     )
 
 

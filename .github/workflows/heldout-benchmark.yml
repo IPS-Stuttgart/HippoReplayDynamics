@@ -40,6 +40,10 @@ on:
         description: "Ripple decoding time-bin width in seconds"
         required: true
         default: "0.02"
+      spike_rate_scale:
+        description: "Multiplicative scale applied to Poisson place-field rates during ripple scoring"
+        required: true
+        default: "1.0"
 
 permissions:
   contents: read
@@ -54,6 +58,7 @@ env:
   TEST_CELL_FRACTION: ${{ inputs.test_cell_fraction }}
   RANDOM_SEED: ${{ inputs.random_seed }}
   TIME_BIN_S: ${{ inputs.time_bin_s }}
+  SPIKE_RATE_SCALE: ${{ inputs.spike_rate_scale }}
 
 jobs:
   heldout-benchmark:
@@ -99,6 +104,7 @@ jobs:
             --test-cell-fraction "${TEST_CELL_FRACTION}" \
             --random-seed "${RANDOM_SEED}" \
             --time-bin-s "${TIME_BIN_S}" \
+            --spike-rate-scale "${SPIKE_RATE_SCALE}" \
             --output results/heldout-benchmark \
             --continue-on-error
 

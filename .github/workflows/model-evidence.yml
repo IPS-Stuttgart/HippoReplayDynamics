@@ -96,6 +96,10 @@ on:
         description: "Ripple decoding time-bin width in seconds"
         required: true
         default: "0.02"
+      spike_rate_scale:
+        description: "Multiplicative scale applied to Poisson place-field rates during ripple scoring"
+        required: true
+        default: "1.0"
       bin_size_cm:
         description: "Place-field spatial bin size in centimeters"
         required: true
@@ -136,6 +140,7 @@ env:
   CLUSTERLESS_MARK_PRIOR_COUNT: ${{ inputs.clusterless_mark_prior_count }}
   CLUSTERLESS_MARK_VARIANCE_FLOOR: ${{ inputs.clusterless_mark_variance_floor }}
   TIME_BIN_S: ${{ inputs.time_bin_s }}
+  SPIKE_RATE_SCALE: ${{ inputs.spike_rate_scale }}
   BIN_SIZE_CM: ${{ inputs.bin_size_cm }}
   SMOOTHING_SIGMA_BINS: ${{ inputs.smoothing_sigma_bins }}
   MIN_SPEED_CM_S: ${{ inputs.min_speed_cm_s }}
@@ -203,6 +208,7 @@ jobs:
             --clusterless-mark-prior-count "${CLUSTERLESS_MARK_PRIOR_COUNT}" \
             --clusterless-mark-variance-floor "${CLUSTERLESS_MARK_VARIANCE_FLOOR}" \
             --time-bin-s "${TIME_BIN_S}" \
+            --spike-rate-scale "${SPIKE_RATE_SCALE}" \
             --bin-size-cm "${BIN_SIZE_CM}" \
             --smoothing-sigma-bins "${SMOOTHING_SIGMA_BINS}" \
             --min-speed-cm-s "${MIN_SPEED_CM_S}" \

@@ -44,6 +44,9 @@ def _load_npz(path: Path) -> dict[str, object]:
             "kd_n_bins": int(_np_scalar(shard["kd_n_bins"])),
             "kd_n_jobs": int(_np_scalar(shard["kd_n_jobs"])),
             "kd_event_chunk_size": int(_np_scalar(shard["kd_event_chunk_size"])),
+            "kd_spike_rate_scale": float(_np_scalar(shard["kd_spike_rate_scale"]))
+            if "kd_spike_rate_scale" in shard.files
+            else 1.0,
         }
 
 
@@ -78,6 +81,7 @@ def _load_momentum_grid(shard_paths: list[Path]) -> tuple[np.ndarray, dict[str, 
         "kd_n_bins": first["kd_n_bins"],
         "kd_n_jobs": first["kd_n_jobs"],
         "kd_event_chunk_size": first["kd_event_chunk_size"],
+        "kd_spike_rate_scale": first["kd_spike_rate_scale"],
     }
     for shard in shards:
         _check_same(
@@ -91,6 +95,7 @@ def _load_momentum_grid(shard_paths: list[Path]) -> tuple[np.ndarray, dict[str, 
                 "kd_n_bins",
                 "kd_n_jobs",
                 "kd_event_chunk_size",
+                "kd_spike_rate_scale",
             ),
         )
         if not np.array_equal(shard["sd_meters"], sd_meters) or not np.array_equal(shard["decay"], decay):
@@ -147,6 +152,7 @@ def _momentum_rows(log_evidence: np.ndarray, metadata: dict[str, object]) -> lis
                 "kd_n_bins": metadata["kd_n_bins"],
                 "kd_n_jobs": metadata["kd_n_jobs"],
                 "kd_event_chunk_size": metadata["kd_event_chunk_size"],
+                "kd_spike_rate_scale": metadata["kd_spike_rate_scale"],
             }
         )
     return rows

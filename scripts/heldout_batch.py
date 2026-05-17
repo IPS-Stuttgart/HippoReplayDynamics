@@ -216,7 +216,7 @@ def run(args: argparse.Namespace) -> None:
         models=tuple(args.models),
     )
     models = _build_models(config, session=session)
-    emission_config = EmissionConfig(time_bin_s=args.time_bin_s)
+    emission_config = EmissionConfig(time_bin_s=args.time_bin_s, spike_rate_scale=args.spike_rate_scale)
 
     rows = []
     for event_id in events:
@@ -279,6 +279,7 @@ def main() -> int:
     parser.add_argument("--candidate-top-k", default=64, type=int)
     parser.add_argument("--pyrecest-particles", default=512, type=int)
     parser.add_argument("--time-bin-s", default=0.02, type=float)
+    parser.add_argument("--spike-rate-scale", default=1.0, type=float)
     parser.add_argument("--test-cell-fraction", default=0.25, type=float)
     parser.add_argument("--random-seed", default=1, type=int)
     parser.add_argument("--output", default="results/heldout-batch")

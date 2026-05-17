@@ -44,6 +44,47 @@ def test_clusterless_emissions_use_mark_likelihood_to_localize_spikes():
     assert emissions.log_likelihood[0, left_bin] > emissions.log_likelihood[0, right_bin]
 
 
+def test_clusterless_emissions_clip_bins_to_ripple_end_and_ignore_post_ripple_marks():
+    session = _clusterless_session()
+    old_marks = session.spike_marks
+    assert old_marks is not None
+    session.spike_marks = SpikeMarkData(
+        times=np.append(old_marks.times, 5.1),
+        marks=np.vstack([old_marks.marks, [[0.0]]]),
+        source_file=old_marks.source_file,
+        source_variable=old_marks.source_variable,
+        feature_names=old_marks.feature_names,
+        cell_ids=np.append(old_marks.cell_ids, 1) if old_marks.cell_ids is not None else None,
+    )
+    encoding = fit_clusterless_mark_encoding(
+        session,
+        ClusterlessMarkConfig(
+            encoding=EncodingConfig(
+                bin_size_cm=10.0,
+                smoothing_sigma_bins=0.0,
+                min_speed_cm_s=0.0,
+                arena_padding_cm=5.0,
+            ),
+            mark_smoothing_sigma_bins=0.0,
+            mark_prior_count=0.1,
+            mark_variance_floor=0.05,
+        ),
+    )
+
+    emissions = build_clusterless_mark_emissions(
+        session,
+        encoding,
+        0,
+        EmissionConfig(time_bin_s=0.6),
+    )
+
+    assert emissions.times == pytest.approx(np.array([4.3, 4.8]))
+    assert emissions.dt == pytest.approx(0.5)
+    assert emissions.n_spikes == 1
+    assert emissions.spike_counts[:, 0].tolist() == [1, 0]
+    assert np.allclose(emissions.log_likelihood[-1], -encoding.rate_hz * 0.4)
+
+
 def test_clusterless_encoding_excludes_ripple_intervals_by_default():
     session = _clusterless_session()
     base_kwargs = dict(

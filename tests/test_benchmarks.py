@@ -7,9 +7,14 @@ from hipporeplayimm.benchmarks import (
     _add_relative_metrics,
     _build_models,
     _is_best_static_baseline_model,
+    _score_session,
     bootstrap_delta_ci,
 )
+from hipporeplayimm.clusterless import ClusterlessStateSpaceReplayModel
+from hipporeplayimm.data import ReplaySession, SpikeMarkData
+from hipporeplayimm.encoding import EmissionConfig, EncodingConfig
 from hipporeplayimm.evidence_reporting import TRUNCATED_EVIDENCE_SUPPORT
+from hipporeplayimm.models import EventScore
 
 
 def test_benchmark_summary_and_bootstrap_ci():
@@ -55,6 +60,53 @@ def test_state_space_aliases_canonicalize_sorted_spike_model_name():
     models = _build_models(BenchmarkConfig(models=("state-space-diffusion",)))
 
     assert models["state-space-diffusion"].name == "sorted-spike-state-space-diffusion"
+
+
+def test_build_models_includes_clusterless_state_space_model():
+    models = _build_models(BenchmarkConfig(models=("clusterless-state-space-diffusion",)))
+
+    assert isinstance(models["clusterless-state-space-diffusion"], ClusterlessStateSpaceReplayModel)
+
+
+def test_score_session_uses_clusterless_emissions_for_clusterless_models(monkeypatch):
+    seen_cell_ids: list[tuple[int, ...]] = []
+
+    def score_spy(self, emissions, bin_centers, candidate_indices=None):
+        del candidate_indices
+        seen_cell_ids.append(tuple(int(cell_id) for cell_id in emissions.cell_ids))
+        return EventScore(
+            str(self.name),
+            float(emissions.n_spikes),
+            emissions.n_time,
+            emissions.n_spikes,
+            diagnostics={"captured_cell_ids": ",".join(str(int(x)) for x in emissions.cell_ids)},
+            terminal_log_posterior=np.zeros(emissions.n_bins),
+        )
+
+    monkeypatch.setattr(ClusterlessStateSpaceReplayModel, "score", score_spy)
+
+    rows = _score_session(
+        _clusterless_benchmark_session(),
+        BenchmarkConfig(
+            encoding=EncodingConfig(
+                bin_size_cm=10.0,
+                smoothing_sigma_bins=0.0,
+                min_speed_cm_s=0.0,
+                arena_padding_cm=5.0,
+            ),
+            emissions=EmissionConfig(time_bin_s=0.5),
+            test_cell_fraction=0.5,
+            random_seed=0,
+            max_events_per_session=1,
+            models=("clusterless-state-space-diffusion",),
+        ),
+    )
+
+    assert len(rows) == 1
+    assert seen_cell_ids == [(0,), (0,)]
+    assert rows[0]["model"] == "clusterless-state-space-diffusion"
+    assert rows[0]["test_spikes"] == 1
+    assert rows[0]["diagnostic_captured_cell_ids"] == "0"
 
 
 def test_best_static_baseline_includes_state_space_single_mode_models():
@@ -208,3 +260,39 @@ def test_benchmark_summary_separates_exact_and_truncated_support():
     assert summary.loc["diffusion", "evidence_support"] == TRUNCATED_EVIDENCE_SUPPORT
     assert np.isnan(summary.loc["diffusion", "mean_delta_vs_best_static"])
     assert summary.loc["diffusion", "mean_lower_bound_delta_vs_best_static"] == 7.0
+
+
+def _clusterless_benchmark_session() -> ReplaySession:
+    position_times = np.linspace(0.0, 6.0, 61)
+    x = np.where(position_times < 3.0, 0.0, 10.0)
+    y = np.zeros_like(x)
+    position = np.column_stack([position_times, x, y, np.zeros_like(x)])
+    mark_times = np.array([0.5, 1.0, 3.5, 4.2, 4.4])
+    cell_ids = np.array([1, 1, 2, 2, 1])
+    marks = np.array([[0.0], [0.1], [10.0], [10.1], [0.05]])
+    spikes = np.column_stack([mark_times, cell_ids])
+    return ReplaySession(
+        rat="RatX",
+        name="OpenX",
+        path=None,
+        position=position,
+        spikes=spikes,
+        tetrode_cell_ids=np.array([[1, 1], [1, 2]]),
+        excitatory_neurons=np.array([1, 2]),
+        inhibitory_neurons=np.array([]),
+        ripple_events=np.array([[4.0, 5.0, 4.5, 0.0, 0.0, 0.0]]),
+        run_times=np.array([[0.0, 6.0]]),
+        sleep_box_immobile_times=np.empty((0, 2)),
+        sleep_times=np.empty((0, 2)),
+        rem_times=np.empty((0, 2)),
+        well_sequence=None,
+        metadata={},
+        spike_marks=SpikeMarkData(
+            times=mark_times,
+            marks=marks,
+            source_file="Spike_Data.mat",
+            source_variable="Spike_Amplitude_Marks",
+            feature_names=("amp",),
+            cell_ids=cell_ids,
+        ),
+    )

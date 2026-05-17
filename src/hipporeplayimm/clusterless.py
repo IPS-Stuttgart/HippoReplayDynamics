@@ -229,6 +229,8 @@ def build_clusterless_mark_emissions(
     """Build marked-point-process log emissions for one ripple."""
 
     config = EmissionConfig() if config is None else config
+    if config.spike_rate_scale <= 0.0:
+        raise ValueError("spike_rate_scale must be positive")
     marks = session.spike_marks
     if marks is None or marks.n_features == 0:
         raise ValueError("Session does not contain spike marks for clusterless emission scoring.")
@@ -238,7 +240,11 @@ def build_clusterless_mark_emissions(
     times = edges[:-1] + 0.5 * bin_durations
     dt = float(np.median(bin_durations))
     counts = np.zeros(times.shape[0], dtype=int)
-    log_likelihood = -encoding.rate_hz[None, :] * bin_durations[:, None]
+    scaled_rate_hz = np.maximum(
+        encoding.rate_hz * float(config.spike_rate_scale),
+        np.finfo(float).tiny,
+    )
+    log_likelihood = -scaled_rate_hz[None, :] * bin_durations[:, None]
 
     mark_times, mark_values = _marks_for_config(session, encoding.config)
     keep = (
@@ -253,7 +259,7 @@ def build_clusterless_mark_emissions(
         valid = (time_bins >= 0) & (time_bins < counts.shape[0])
         time_bins = time_bins[valid].astype(int)
         mark_values = mark_values[valid]
-        log_rate = np.log(np.maximum(encoding.rate_hz, np.finfo(float).tiny))
+        log_rate = np.log(scaled_rate_hz)
         mark_log_likelihood = encoding.log_mark_likelihood(mark_values)
         for local_index, time_bin in enumerate(time_bins):
             log_likelihood[time_bin] += log_rate + mark_log_likelihood[local_index]

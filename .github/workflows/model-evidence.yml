@@ -80,6 +80,18 @@ on:
         description: "State-space momentum candidate spatial bins per time bin"
         required: true
         default: "128"
+      clusterless_mark_smoothing_sigma_bins:
+        description: "Clusterless mark-parameter smoothing sigma in spatial bins"
+        required: true
+        default: "1.0"
+      clusterless_mark_prior_count:
+        description: "Clusterless Gaussian mark prior pseudo-count"
+        required: true
+        default: "1.0"
+      clusterless_mark_variance_floor:
+        description: "Clusterless Gaussian mark variance floor"
+        required: true
+        default: "1.0"
       time_bin_s:
         description: "Ripple decoding time-bin width in seconds"
         required: true
@@ -124,6 +136,9 @@ env:
   STATE_SPACE_MOMENTUM_INITIAL_SIGMA_CM_SQRT_S: ${{ inputs.state_space_momentum_initial_sigma_cm_sqrt_s }}
   STATE_SPACE_MOMENTUM_VELOCITY_DECAY: ${{ inputs.state_space_momentum_velocity_decay }}
   STATE_SPACE_MOMENTUM_CANDIDATE_TOP_K: ${{ inputs.state_space_momentum_candidate_top_k }}
+  CLUSTERLESS_MARK_SMOOTHING_SIGMA_BINS: ${{ inputs.clusterless_mark_smoothing_sigma_bins }}
+  CLUSTERLESS_MARK_PRIOR_COUNT: ${{ inputs.clusterless_mark_prior_count }}
+  CLUSTERLESS_MARK_VARIANCE_FLOOR: ${{ inputs.clusterless_mark_variance_floor }}
   TIME_BIN_S: ${{ inputs.time_bin_s }}
   SPIKE_RATE_SCALE: ${{ inputs.spike_rate_scale }}
   BIN_SIZE_CM: ${{ inputs.bin_size_cm }}
@@ -189,6 +204,9 @@ jobs:
             --state-space-momentum-initial-sigma-cm-sqrt-s "${STATE_SPACE_MOMENTUM_INITIAL_SIGMA_CM_SQRT_S}" \
             --state-space-momentum-velocity-decay "${STATE_SPACE_MOMENTUM_VELOCITY_DECAY}" \
             --state-space-momentum-candidate-top-k "${STATE_SPACE_MOMENTUM_CANDIDATE_TOP_K}" \
+            --clusterless-mark-smoothing-sigma-bins "${CLUSTERLESS_MARK_SMOOTHING_SIGMA_BINS}" \
+            --clusterless-mark-prior-count "${CLUSTERLESS_MARK_PRIOR_COUNT}" \
+            --clusterless-mark-variance-floor "${CLUSTERLESS_MARK_VARIANCE_FLOOR}" \
             --time-bin-s "${TIME_BIN_S}" \
             --spike-rate-scale "${SPIKE_RATE_SCALE}" \
             --bin-size-cm "${BIN_SIZE_CM}" \

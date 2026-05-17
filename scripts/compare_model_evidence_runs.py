@@ -18,6 +18,8 @@ def canonical_model_name(model: str) -> str:
     name = str(model).strip().lower()
     if name.startswith("sorted-spike-state-space-"):
         name = name.removeprefix("sorted-spike-state-space-")
+    elif name.startswith("clusterless-state-space-"):
+        name = name.removeprefix("clusterless-state-space-")
     elif name.startswith("state-space-"):
         name = name.removeprefix("state-space-")
     if name == "jump":

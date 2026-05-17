@@ -73,7 +73,7 @@ jobs:
           test "$RECOVERY_ARTIFACT_NAME" != "simulation-recovery-sweep-summary-<run_id>"
 
       - name: Check out repository
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
 
       - name: Set up Python
         uses: actions/setup-python@v6

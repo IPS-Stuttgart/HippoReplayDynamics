@@ -309,8 +309,18 @@ def _benchmark(args: argparse.Namespace) -> int:
     result = run_open_field_benchmark(args.root, config)
     print(result.summary().to_string(index=False))
     if not result.rows.empty and "imm" in set(result.rows["model"]):
-        ci_low, ci_high = bootstrap_delta_ci(result.rows, model="imm")
-        print(f"IMM mean delta bootstrap 95% CI: [{ci_low:.3f}, {ci_high:.3f}]")
+        value_column = "delta_vs_best_static"
+        label = "IMM mean delta vs exact best static bootstrap 95% CI"
+        imm_mask = result.rows["model"].eq("imm")
+        if (
+            result.rows.loc[imm_mask, value_column].dropna().empty
+            and "lower_bound_delta_vs_best_static" in result.rows
+        ):
+            value_column = "lower_bound_delta_vs_best_static"
+            label = "IMM lower-bound mean delta vs exact best static bootstrap 95% CI"
+        ci_low, ci_high = bootstrap_delta_ci(result.rows, model="imm", value_column=value_column)
+        if np.isfinite(ci_low) and np.isfinite(ci_high):
+            print(f"{label}: [{ci_low:.3f}, {ci_high:.3f}]")
     if args.output:
         output = Path(args.output)
         output.mkdir(parents=True, exist_ok=True)

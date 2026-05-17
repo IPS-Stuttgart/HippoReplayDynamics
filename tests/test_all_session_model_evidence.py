@@ -20,6 +20,8 @@ def test_all_session_model_evidence_workflow_exports_expected_outputs():
     assert "scripts/aggregate_all_session_model_evidence.py" in workflow
     assert "spike_rate_scale:" in workflow
     assert "--spike-rate-scale" in workflow
+    assert "clusterless_mark_smoothing_sigma_bins:" in workflow
+    assert "--clusterless-mark-smoothing-sigma-bins" in workflow
     assert "all_sessions_model_evidence_summary.csv" in workflow
     assert "session_model_evidence_summary.csv" in workflow
     assert "random_effects_model_probabilities.csv" in workflow

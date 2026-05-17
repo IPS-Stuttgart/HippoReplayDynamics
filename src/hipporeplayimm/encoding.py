@@ -21,6 +21,7 @@ class EncodingConfig:
     rate_floor_hz: float = 1e-4
     arena_padding_cm: float = 2.0
     use_excitatory: bool = True
+    exclude_ripple_intervals: bool = True
 
 
 @dataclass(frozen=True)
@@ -101,7 +102,7 @@ class LogEmissionTensor:
 
 
 def fit_place_field_encoding(session: ReplaySession, config: EncodingConfig | None = None) -> EncodingModel:
-    """Fit occupancy-normalized Poisson rates from movement periods."""
+    """Fit occupancy-normalized Poisson rates from non-replay movement periods."""
 
     config = EncodingConfig() if config is None else config
     position = _clean_position(session.position)
@@ -109,7 +110,9 @@ def fit_place_field_encoding(session: ReplaySession, config: EncodingConfig | No
     xy = position[:, 1:3]
     speed = _speed_cm_s(times, xy)
     in_run = _times_in_intervals(times, session.run_times)
-    movement = in_run & (speed >= config.min_speed_cm_s)
+    excluded_intervals = _encoding_exclusion_intervals(session, config)
+    in_excluded_interval = _times_in_intervals(times, excluded_intervals)
+    movement = in_run & ~in_excluded_interval & (speed >= config.min_speed_cm_s)
 
     x_edges, y_edges, centers = _make_grid(xy, config)
     grid_shape = (len(x_edges) - 1, len(y_edges) - 1)
@@ -135,8 +138,14 @@ def fit_place_field_encoding(session: ReplaySession, config: EncodingConfig | No
         spike_xy = _interp_positions(times, xy, spike_times)
         spike_speed = np.interp(spike_times, times, speed)
         spike_in_run = _times_in_intervals(spike_times, session.run_times)
+        spike_in_excluded_interval = _times_in_intervals(spike_times, excluded_intervals)
         spike_bins = _positions_to_flat_bins(spike_xy, x_edges, y_edges)
-        keep_spikes = spike_in_run & (spike_speed >= config.min_speed_cm_s) & (spike_bins >= 0)
+        keep_spikes = (
+            spike_in_run
+            & ~spike_in_excluded_interval
+            & (spike_speed >= config.min_speed_cm_s)
+            & (spike_bins >= 0)
+        )
         kept_cell_ids = spike_cell_ids[keep_spikes]
         kept_bins = spike_bins[keep_spikes].astype(int)
         rows = np.searchsorted(cell_ids, kept_cell_ids)
@@ -343,3 +352,22 @@ def _times_in_intervals(times: np.ndarray, intervals: np.ndarray) -> np.ndarray:
     for start, end in intervals:
         mask |= (times >= start) & (times <= end)
     return mask
+
+
+def _encoding_exclusion_intervals(session: ReplaySession, config: EncodingConfig) -> np.ndarray:
+    if not config.exclude_ripple_intervals:
+        return np.empty((0, 2), dtype=float)
+    return _ripple_intervals(session)
+
+
+def _ripple_intervals(session: ReplaySession) -> np.ndarray:
+    """Return finite, positive-duration ripple intervals as start/end pairs."""
+
+    events = np.asarray(session.ripple_events, dtype=float)
+    if events.size == 0:
+        return np.empty((0, 2), dtype=float)
+    events = np.atleast_2d(events)
+    intervals = events[:, :2]
+    finite = np.isfinite(intervals).all(axis=1)
+    positive_duration = intervals[:, 1] > intervals[:, 0]
+    return np.asarray(intervals[finite & positive_duration], dtype=float)

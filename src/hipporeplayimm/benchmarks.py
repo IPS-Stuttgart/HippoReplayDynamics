@@ -10,6 +10,10 @@ import pandas as pd
 
 from .data import ReplaySession, load_open_field_sessions
 from .encoding import EmissionConfig, EncodingConfig, build_emissions, fit_place_field_encoding
+from .evidence_reporting import (
+    TRUNCATED_EVIDENCE_SUPPORT,
+    ensure_evidence_support_columns,
+)
 from .models import CandidateKinematicModel, RandomModel, StationaryModel
 from .pyrecest_models import PyRecEstGoalParticleIMMModel, PyRecEstGoalParticleModel
 from .sorted_spike_state_space import SortedSpikeStateSpaceReplayModel
@@ -49,12 +53,28 @@ class BenchmarkResult:
     def summary(self) -> pd.DataFrame:
         if self.rows.empty:
             return pd.DataFrame()
-        grouped = self.rows.groupby("model", as_index=False)
+        rows = ensure_evidence_support_columns(self.rows)
+        metric_defaults = {
+            "delta_vs_best_static": np.nan,
+            "bits_per_spike_vs_best_static": np.nan,
+            "lower_bound_delta_vs_best_static": np.nan,
+            "lower_bound_bits_per_spike_vs_best_static": np.nan,
+            "delta_vs_best_static_truncated_lower_bound": np.nan,
+            "bits_per_spike_vs_best_static_truncated_lower_bound": np.nan,
+        }
+        for column, default in metric_defaults.items():
+            if column not in rows:
+                rows[column] = default
+        grouped = rows.groupby(["model", "evidence_support", "evidence_comparable"], as_index=False)
         return grouped.agg(
             events=("heldout_log_likelihood", "count"),
             mean_heldout_log_likelihood=("heldout_log_likelihood", "mean"),
             mean_delta_vs_best_static=("delta_vs_best_static", "mean"),
             mean_bits_per_spike_vs_best_static=("bits_per_spike_vs_best_static", "mean"),
+            mean_lower_bound_delta_vs_best_static=("lower_bound_delta_vs_best_static", "mean"),
+            mean_lower_bound_bits_per_spike_vs_best_static=("lower_bound_bits_per_spike_vs_best_static", "mean"),
+            mean_delta_vs_best_static_truncated_lower_bound=("delta_vs_best_static_truncated_lower_bound", "mean"),
+            mean_bits_per_spike_vs_best_static_truncated_lower_bound=("bits_per_spike_vs_best_static_truncated_lower_bound", "mean"),
         )
 
     def to_csv(self, path: str | Path) -> None:
@@ -175,7 +195,8 @@ def _session_mark_diagnostics(session: ReplaySession) -> dict[str, object]:
     return {
         "spike_mark_features": 0 if marks is None else marks.n_features,
         "spike_mark_source": "" if marks is None else f"{marks.source_file}:{marks.source_variable}",
-        "clusterless_mark_likelihood_available": False,
+        "clusterless_mark_likelihood_available": bool(marks is not None and marks.n_features > 0),
+        "clusterless_mark_likelihood": "diagonal-gaussian" if marks is not None and marks.n_features > 0 else "",
     }
 
 
@@ -308,18 +329,75 @@ def _is_best_static_baseline_model(model_name: object) -> bool:
 
 
 def _add_relative_metrics(frame: pd.DataFrame) -> pd.DataFrame:
+    frame = ensure_evidence_support_columns(frame)
     static_mask = frame["model"].map(_is_best_static_baseline_model)
+    exact_static_mask = static_mask & frame["evidence_comparable"].fillna(False).astype(bool)
     best_static = (
-        frame[static_mask]
+        frame[exact_static_mask]
         .groupby(["session", "event_index"])["heldout_log_likelihood"]
         .max()
         .rename("best_static_heldout_log_likelihood")
         .reset_index()
     )
-    merged = frame.merge(best_static, on=["session", "event_index"], how="left")
-    merged["delta_vs_best_static"] = (
-        merged["heldout_log_likelihood"] - merged["best_static_heldout_log_likelihood"]
+    truncated_static_mask = static_mask & frame["evidence_support"].eq(TRUNCATED_EVIDENCE_SUPPORT)
+    best_static_truncated_lower_bound = (
+        frame[truncated_static_mask]
+        .groupby(["session", "event_index"])["heldout_log_likelihood"]
+        .max()
+        .rename("best_static_truncated_lower_bound_heldout_log_likelihood")
+        .reset_index()
     )
-    denom = np.maximum(merged["test_spikes"].to_numpy(dtype=float), 1.0)
-    merged["bits_per_spike_vs_best_static"] = merged["delta_vs_best_static"] / np.log(2.0) / denom
+    merged = frame.merge(best_static, on=["session", "event_index"], how="left")
+    merged = merged.merge(
+        best_static_truncated_lower_bound,
+        on=["session", "event_index"],
+        how="left",
+    )
+    denom = pd.Series(
+        np.maximum(merged["test_spikes"].to_numpy(dtype=float), 1.0),
+        index=merged.index,
+    )
+
+    has_exact_static_baseline = merged["best_static_heldout_log_likelihood"].notna()
+    exact_rows = merged["evidence_comparable"].fillna(False).astype(bool) & has_exact_static_baseline
+    merged["delta_vs_best_static"] = np.nan
+    merged.loc[exact_rows, "delta_vs_best_static"] = (
+        merged.loc[exact_rows, "heldout_log_likelihood"]
+        - merged.loc[exact_rows, "best_static_heldout_log_likelihood"]
+    )
+    merged["bits_per_spike_vs_best_static"] = np.nan
+    merged.loc[exact_rows, "bits_per_spike_vs_best_static"] = (
+        merged.loc[exact_rows, "delta_vs_best_static"] / np.log(2.0) / denom.loc[exact_rows]
+    )
+
+    truncated_rows = merged["evidence_support"].eq(TRUNCATED_EVIDENCE_SUPPORT)
+    truncated_vs_exact_rows = truncated_rows & has_exact_static_baseline
+    merged["lower_bound_delta_vs_best_static"] = np.nan
+    merged.loc[truncated_vs_exact_rows, "lower_bound_delta_vs_best_static"] = (
+        merged.loc[truncated_vs_exact_rows, "heldout_log_likelihood"]
+        - merged.loc[truncated_vs_exact_rows, "best_static_heldout_log_likelihood"]
+    )
+    merged["lower_bound_bits_per_spike_vs_best_static"] = np.nan
+    merged.loc[truncated_vs_exact_rows, "lower_bound_bits_per_spike_vs_best_static"] = (
+        merged.loc[truncated_vs_exact_rows, "lower_bound_delta_vs_best_static"]
+        / np.log(2.0)
+        / denom.loc[truncated_vs_exact_rows]
+    )
+
+    has_truncated_static_baseline = merged["best_static_truncated_lower_bound_heldout_log_likelihood"].notna()
+    truncated_vs_truncated_rows = truncated_rows & has_truncated_static_baseline
+    merged["delta_vs_best_static_truncated_lower_bound"] = np.nan
+    merged.loc[truncated_vs_truncated_rows, "delta_vs_best_static_truncated_lower_bound"] = (
+        merged.loc[truncated_vs_truncated_rows, "heldout_log_likelihood"]
+        - merged.loc[
+            truncated_vs_truncated_rows,
+            "best_static_truncated_lower_bound_heldout_log_likelihood",
+        ]
+    )
+    merged["bits_per_spike_vs_best_static_truncated_lower_bound"] = np.nan
+    merged.loc[truncated_vs_truncated_rows, "bits_per_spike_vs_best_static_truncated_lower_bound"] = (
+        merged.loc[truncated_vs_truncated_rows, "delta_vs_best_static_truncated_lower_bound"]
+        / np.log(2.0)
+        / denom.loc[truncated_vs_truncated_rows]
+    )
     return merged

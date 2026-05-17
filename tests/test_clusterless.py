@@ -85,6 +85,55 @@ def test_clusterless_emissions_clip_bins_to_ripple_end_and_ignore_post_ripple_ma
     assert np.allclose(emissions.log_likelihood[-1], -encoding.rate_hz * 0.4)
 
 
+def test_clusterless_emissions_apply_spike_rate_scale_to_intensity():
+    session = _clusterless_session()
+    encoding = fit_clusterless_mark_encoding(
+        session,
+        ClusterlessMarkConfig(
+            encoding=EncodingConfig(
+                bin_size_cm=10.0,
+                smoothing_sigma_bins=0.0,
+                min_speed_cm_s=0.0,
+                arena_padding_cm=5.0,
+            ),
+            mark_smoothing_sigma_bins=0.0,
+            mark_prior_count=0.1,
+            mark_variance_floor=0.05,
+        ),
+    )
+
+    base = build_clusterless_mark_emissions(
+        session,
+        encoding,
+        0,
+        EmissionConfig(time_bin_s=0.6, spike_rate_scale=1.0),
+    )
+    scaled = build_clusterless_mark_emissions(
+        session,
+        encoding,
+        0,
+        EmissionConfig(time_bin_s=0.6, spike_rate_scale=2.0),
+    )
+
+    expected_delta = np.empty_like(base.log_likelihood)
+    expected_delta[0] = np.log(2.0) - encoding.rate_hz * 0.6
+    expected_delta[1] = -encoding.rate_hz * 0.4
+    assert np.allclose(scaled.log_likelihood - base.log_likelihood, expected_delta)
+
+
+def test_clusterless_emissions_reject_nonpositive_spike_rate_scale():
+    session = _clusterless_session()
+    encoding = fit_clusterless_mark_encoding(session)
+
+    with pytest.raises(ValueError, match="spike_rate_scale must be positive"):
+        build_clusterless_mark_emissions(
+            session,
+            encoding,
+            0,
+            EmissionConfig(time_bin_s=1.0, spike_rate_scale=0.0),
+        )
+
+
 def test_clusterless_encoding_excludes_ripple_intervals_by_default():
     session = _clusterless_session()
     base_kwargs = dict(

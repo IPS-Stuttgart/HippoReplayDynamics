@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Audit exact versus candidate-supported model-evidence summaries.
 
-This utility is intentionally independent of the all-session aggregator.  It can
+This utility is intentionally independent of the all-session aggregator. It can
 be run on existing ``event_model_evidence.csv`` or
 ``all_sessions_event_model_evidence.csv`` artifacts to generate paper-side
 checks that do not mix exact full-grid evidences with candidate-supported
@@ -19,6 +19,7 @@ import pandas as pd
 
 EXACT_EVIDENCE_SUPPORT = "exact_full_grid"
 TRUNCATED_EVIDENCE_SUPPORT = "truncated_full_grid"
+SAFE_COMPARISON_SUPPORTS = frozenset({EXACT_EVIDENCE_SUPPORT, TRUNCATED_EVIDENCE_SUPPORT})
 _SUPPORT_DIAGNOSTICS = (
     "diagnostic_candidate_evidence_support",
     "diagnostic_state_space_momentum_evidence_support",
@@ -257,6 +258,46 @@ def paired_delta_summary(df: pd.DataFrame) -> pd.DataFrame:
     return pd.DataFrame(out)[columns].sort_values(["comparison", "comparison_support", "session"])
 
 
+def mixed_support_violations(delta_table: pd.DataFrame) -> pd.DataFrame:
+    """Return paired-delta rows that mix exact evidence and lower bounds.
+
+    Rows with ``comparison_support`` equal to ``exact_full_grid`` or
+    ``truncated_full_grid`` compare like with like. All other support labels mean
+    that one side is exact and the other is a lower bound, or that a support type
+    is unknown. Those comparisons may be useful diagnostics, but they should not
+    be interpreted as ordinary paired model-evidence deltas.
+    """
+
+    columns = [
+        "session",
+        "comparison",
+        "comparison_support",
+        "left_model",
+        "right_model",
+        "events",
+        "positive_events",
+        "mean_delta",
+    ]
+    if delta_table.empty or "comparison_support" not in delta_table:
+        return pd.DataFrame(columns=columns)
+    unsafe = ~delta_table["comparison_support"].isin(SAFE_COMPARISON_SUPPORTS)
+    return delta_table.loc[unsafe, [col for col in columns if col in delta_table.columns]].reset_index(drop=True)
+
+
+def assert_no_mixed_support(delta_table: pd.DataFrame) -> None:
+    """Raise ``ValueError`` when paired deltas mix exact evidence and lower bounds."""
+
+    violations = mixed_support_violations(delta_table)
+    if violations.empty:
+        return
+    preview = violations.head(20).to_string(index=False)
+    raise ValueError(
+        "Paired model-evidence deltas contain mixed evidence support. "
+        "Do not use these rows as ordinary paired evidence comparisons.\n"
+        + preview
+    )
+
+
 def wilson_interval(successes: int, total: int, z: float = 1.959963984540054) -> tuple[float, float]:
     if total <= 0:
         return (float("nan"), float("nan"))
@@ -323,28 +364,43 @@ def pooled_paired_delta_summary(delta_table: pd.DataFrame) -> pd.DataFrame:
     return pd.DataFrame(rows)[columns]
 
 
-def write_audit(input_csv: Path, output_dir: Path) -> None:
+def write_audit(input_csv: Path, output_dir: Path, *, fail_on_mixed_support: bool = False) -> None:
     scores = pd.read_csv(input_csv)
     output_dir.mkdir(parents=True, exist_ok=True)
     support = evidence_support_summary(scores)
     session_delta = paired_delta_summary(scores)
     pooled_delta = pooled_paired_delta_summary(session_delta)
+    violations = mixed_support_violations(session_delta)
     support.to_csv(output_dir / "evidence_support_summary.csv", index=False)
     session_delta.to_csv(output_dir / "session_paired_delta_summary.csv", index=False)
     pooled_delta.to_csv(output_dir / "pooled_paired_delta_summary.csv", index=False)
+    violations.to_csv(output_dir / "mixed_support_violations.csv", index=False)
     print("Evidence-support summary:")
     print(support.to_string(index=False))
     if not pooled_delta.empty:
         print("\nPooled paired deltas:")
         print(pooled_delta.to_string(index=False))
+    if not violations.empty:
+        print("\nMixed-support paired deltas:")
+        print(violations.to_string(index=False))
+    if fail_on_mixed_support:
+        assert_no_mixed_support(session_delta)
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Audit exact/truncated support in model-evidence artifacts.")
     parser.add_argument("input_csv", type=Path, help="event_model_evidence.csv or all_sessions_event_model_evidence.csv")
     parser.add_argument("--output", type=Path, default=Path("results/model-evidence-support-audit"))
+    parser.add_argument(
+        "--fail-on-mixed-support",
+        action="store_true",
+        help=(
+            "Exit nonzero if any paired-delta row mixes exact evidence with "
+            "candidate-supported truncated lower bounds."
+        ),
+    )
     args = parser.parse_args()
-    write_audit(args.input_csv, args.output)
+    write_audit(args.input_csv, args.output, fail_on_mixed_support=args.fail_on_mixed_support)
     return 0
 
 

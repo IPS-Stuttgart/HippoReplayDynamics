@@ -34,6 +34,7 @@ def _base_row(event_index: int, model: str, log_evidence: float) -> dict[str, ob
         "smoothing_sigma_bins": 2.0,
         "min_speed_cm_s": 5.0,
         "time_bin_s": 0.003,
+        "spike_rate_scale": 1.0,
     }
 
 
@@ -76,6 +77,7 @@ def test_marginalize_state_space_sweep_writes_marginalized_tables(tmp_path: Path
         & (event_model_evidence["model"] == "sorted-spike-state-space-diffusion-marginalized")
     ].iloc[0]
     assert np.isclose(diffusion_event0["log_evidence"], logsumexp([0.0, -2.0]) - np.log(2.0))
+    assert diffusion_event0["diagnostic_state_space_marginalized_observation_parameters"] == ""
 
     best_params = pd.read_csv(out_dir / "state_space_marginalized_gridsearch_best_params.csv")
     momentum_event0 = best_params[
@@ -89,3 +91,38 @@ def test_marginalize_state_space_sweep_writes_marginalized_tables(tmp_path: Path
     assert np.allclose(priors.groupby("marginalized_model")["prior_weight"].sum().to_numpy(), 1.0)
     assert (out_dir / "state_space_marginalized_model_evidence_summary.csv").exists()
     assert (out_dir / "state_space_marginalized_best_model_counts.csv").exists()
+
+
+def test_marginalize_state_space_sweep_auto_marginalizes_observation_hyperparameters(tmp_path: Path):
+    rows = []
+    log_values = {
+        (50.0, 0.5): -4.0,
+        (50.0, 1.0): 0.0,
+        (60.0, 0.5): -1.0,
+        (60.0, 1.0): -2.0,
+    }
+    for (diffusion_sigma, spike_rate_scale), log_evidence in log_values.items():
+        row = _base_row(0, "sorted-spike-state-space-diffusion", log_evidence)
+        row["state_space_diffusion_sigma_cm_sqrt_s"] = diffusion_sigma
+        row["spike_rate_scale"] = spike_rate_scale
+        rows.append(row)
+    input_csv = tmp_path / "state_space_evidence_sweep_event_scores.csv"
+    pd.DataFrame(rows).to_csv(input_csv, index=False)
+
+    out_dir = tmp_path / "marginalized"
+    tables = marginalize_state_space_sweep.marginalize_sweep(input_csv, out_dir, models=("diffusion",), prior="uniform")
+
+    event_model_evidence = tables["event_model_evidence"]
+    event0 = event_model_evidence.iloc[0]
+    assert np.isclose(event0["log_evidence"], logsumexp(list(log_values.values())) - np.log(4.0))
+    assert event0["diagnostic_state_space_marginalized_observation_parameters"] == "spike_rate_scale"
+    assert event0["diagnostic_state_space_marginalization_grid_points"] == 4
+    assert pd.isna(event0["spike_rate_scale"])
+
+    best_params = tables["gridsearch_best_params"].iloc[0]
+    assert best_params["best_state_space_diffusion_sigma_cm_sqrt_s"] == 50.0
+    assert best_params["best_spike_rate_scale"] == 1.0
+
+    prior_weights = tables["prior_weights"]
+    assert "spike_rate_scale" in prior_weights.columns
+    assert np.isclose(prior_weights["prior_weight"].sum(), 1.0)

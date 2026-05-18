@@ -232,5 +232,3 @@ Processing linters on [4] parallel cores… (can be decreased with variable PARA
 [0m- Documentation: https://megalinter.io/9.5.0/custom-flavors/
 - Command: `npx mega-linter-runner@9.5.0 --custom-flavor-setup --custom-flavor-linters PYTHON_RUFF,JSON_V8R,JSON_PRETTIER,MARKDOWN_MARKDOWNLINT,MARKDOWN_MARKDOWN_TABLE_FORMATTER,REPOSITORY_CHECKOV,REPOSITORY_GIT_DIFF,REPOSITORY_GITLEAKS,REPOSITORY_OSV_SCANNER,REPOSITORY_SECRETLINT,REPOSITORY_SYFT,REPOSITORY_TRIVY_SBOM,REPOSITORY_TRUFFLEHOG,YAML_PRETTIER,YAML_YAMLLINT,YAML_V8R`
 
-[Updated Sources Reporter] copied 6 fixed source files in folder /github/workspace/megalinter-reports/updated_sources.
-[32m✅ Successfully linted all files without errors[0m

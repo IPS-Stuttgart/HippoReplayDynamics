@@ -6,7 +6,8 @@ from dataclasses import dataclass
 
 import numpy as np
 from scipy.ndimage import gaussian_filter
-from scipy.special import gammaln
+from scipy.special import gammaln, logsumexp
+from scipy.spatial import cKDTree
 
 from .data import ReplaySession, RippleEvent
 from .encoding import (
@@ -26,10 +27,23 @@ from .encoding import (
 from .models import EventScore
 from .state_space import StateSpaceDecoderConfig, StateSpaceReplayModel
 
+_DIAGONAL_GAUSSIAN = "diagonal-gaussian"
+_LOCAL_KDE = "local-kde"
+_MARK_LIKELIHOOD_ALIASES = {
+    "diag": _DIAGONAL_GAUSSIAN,
+    "diag-gaussian": _DIAGONAL_GAUSSIAN,
+    "diagonal": _DIAGONAL_GAUSSIAN,
+    "diagonal-gaussian": _DIAGONAL_GAUSSIAN,
+    "gaussian": _DIAGONAL_GAUSSIAN,
+    "kde": _LOCAL_KDE,
+    "local-kde": _LOCAL_KDE,
+    "local_kde": _LOCAL_KDE,
+}
+
 
 @dataclass(frozen=True)
 class ClusterlessMarkConfig:
-    """Configuration for Gaussian marked-point-process encoding."""
+    """Configuration for clusterless marked-point-process encoding."""
 
     encoding: EncodingConfig | None = None
     mark_smoothing_sigma_bins: float = 1.0
@@ -37,6 +51,10 @@ class ClusterlessMarkConfig:
     mark_variance_floor: float = 1.0
     rate_floor_hz: float = 1e-4
     use_excitatory: bool = True
+    mark_likelihood: str = _LOCAL_KDE
+    mark_kde_bandwidth: float | None = None
+    mark_kde_spatial_sigma_bins: float | None = None
+    mark_kde_max_neighbors: int = 256
 
 
 @dataclass
@@ -54,6 +72,11 @@ class ClusterlessMarkEncoding:
     mark_feature_names: tuple[str, ...]
     spike_mark_source: str
     config: ClusterlessMarkConfig
+    mark_likelihood: str
+    mark_kde_values: np.ndarray | None = None
+    mark_kde_neighbor_indices: np.ndarray | None = None
+    mark_kde_log_weights: np.ndarray | None = None
+    mark_kde_variance: np.ndarray | None = None
 
     @property
     def n_bins(self) -> int:
@@ -68,15 +91,56 @@ class ClusterlessMarkEncoding:
         return (len(self.x_edges) - 1, len(self.y_edges) - 1)
 
     def log_mark_likelihood(self, marks: np.ndarray) -> np.ndarray:
+        marks = self._coerce_marks(marks)
+        if self.mark_likelihood == _LOCAL_KDE:
+            return self._log_mark_likelihood_local_kde(marks)
+        return self._log_mark_likelihood_diagonal_gaussian(marks)
+
+    def _coerce_marks(self, marks: np.ndarray) -> np.ndarray:
         marks = np.asarray(marks, dtype=float)
         if marks.ndim == 1:
             marks = marks[None, :]
+        if marks.ndim != 2:
+            raise ValueError("marks must be one- or two-dimensional")
         if marks.shape[1] != self.n_features:
             raise ValueError(f"Expected {self.n_features} mark features, got {marks.shape[1]}")
+        return marks
+
+    def _log_mark_likelihood_diagonal_gaussian(self, marks: np.ndarray) -> np.ndarray:
         diff = marks[:, None, :] - self.mark_mean[None, :, :]
         log_norm = np.sum(np.log(2.0 * np.pi * self.mark_variance), axis=1)
         quad = np.sum(diff * diff / self.mark_variance[None, :, :], axis=2)
         return -0.5 * (quad + log_norm[None, :])
+
+    def _log_mark_likelihood_local_kde(self, marks: np.ndarray) -> np.ndarray:
+        if (
+            self.mark_kde_values is None
+            or self.mark_kde_neighbor_indices is None
+            or self.mark_kde_log_weights is None
+            or self.mark_kde_variance is None
+        ):
+            raise ValueError("Local mark KDE parameters are missing from the clusterless encoding.")
+        kde_values = np.asarray(self.mark_kde_values, dtype=float)
+        indices = np.asarray(self.mark_kde_neighbor_indices, dtype=int)
+        log_weights = np.asarray(self.mark_kde_log_weights, dtype=float)
+        variance = np.asarray(self.mark_kde_variance, dtype=float)
+        if variance.shape[0] != self.n_features:
+            raise ValueError("Local mark KDE bandwidth dimensionality does not match the mark features.")
+
+        log_norm = float(np.sum(np.log(2.0 * np.pi * variance)))
+        output = np.empty((marks.shape[0], self.n_bins), dtype=float)
+        for bin_index in range(self.n_bins):
+            support = indices[bin_index]
+            weights = log_weights[bin_index]
+            valid = (support >= 0) & np.isfinite(weights)
+            if not np.any(valid):
+                output[:, bin_index] = self._log_mark_likelihood_diagonal_gaussian(marks)[:, bin_index]
+                continue
+            support_values = kde_values[support[valid]]
+            diff = marks[:, None, :] - support_values[None, :, :]
+            quad = np.sum(diff * diff / variance[None, None, :], axis=2)
+            output[:, bin_index] = logsumexp(weights[valid][None, :] - 0.5 * (quad + log_norm), axis=1)
+        return output
 
 
 @dataclass
@@ -86,9 +150,11 @@ class ClusterlessStateSpaceReplayModel(StateSpaceReplayModel):
     mode: str = "diffusion"
     config: StateSpaceDecoderConfig | None = None
     name: str | None = None
+    mark_likelihood: str = _LOCAL_KDE
 
     def __post_init__(self) -> None:
         super().__post_init__()
+        self.mark_likelihood = _normalize_mark_likelihood(self.mark_likelihood)
         if self.name is None or self.name.startswith("state-space-"):
             self.name = f"clusterless-state-space-{self.mode}"
 
@@ -99,9 +165,14 @@ class ClusterlessStateSpaceReplayModel(StateSpaceReplayModel):
         candidate_indices: list[np.ndarray] | None = None,
     ) -> EventScore:
         score = super().score(emissions, bin_centers, candidate_indices=candidate_indices)
+        metadata = getattr(emissions, "metadata", {}) or {}
         score.model_name = str(self.name)
         score.diagnostics["state_space_observation_model"] = "clusterless-marked-point-process"
-        score.diagnostics["clusterless_mark_likelihood"] = "diagonal-gaussian"
+        score.diagnostics["clusterless_mark_likelihood"] = str(metadata.get("clusterless_mark_likelihood", self.mark_likelihood))
+        if "clusterless_mark_kde_bandwidth" in metadata:
+            score.diagnostics["clusterless_mark_kde_bandwidth"] = metadata["clusterless_mark_kde_bandwidth"]
+        if "clusterless_mark_kde_max_neighbors" in metadata:
+            score.diagnostics["clusterless_mark_kde_max_neighbors"] = metadata["clusterless_mark_kde_max_neighbors"]
         return score
 
 
@@ -112,6 +183,8 @@ def fit_clusterless_mark_encoding(
     """Fit clusterless marked-point-process parameters from behavioral run periods."""
 
     config = ClusterlessMarkConfig() if config is None else config
+    mark_likelihood = _normalize_mark_likelihood(config.mark_likelihood)
+    _validate_mark_config(config)
     encoding_config = EncodingConfig() if config.encoding is None else config.encoding
     marks = session.spike_marks
     if marks is None or marks.n_features == 0:
@@ -203,6 +276,19 @@ def fit_clusterless_mark_encoding(
         mean[no_support] = global_mean
         variance[no_support] = global_variance
 
+    kde_values = None
+    kde_neighbor_indices = None
+    kde_log_weights = None
+    kde_variance = None
+    if mark_likelihood == _LOCAL_KDE:
+        kde_neighbor_indices, kde_log_weights = _local_kde_support(
+            mark_bins,
+            grid_shape,
+            config,
+        )
+        kde_values = np.asarray(mark_values, dtype=float).copy()
+        kde_variance = _mark_kde_variance(mark_values, config)
+
     occupancy_denominator = np.maximum(smooth_occupancy, encoding_config.min_occupancy_s)
     rate_hz = np.maximum(smooth_count / occupancy_denominator, config.rate_floor_hz)
     return ClusterlessMarkEncoding(
@@ -217,6 +303,11 @@ def fit_clusterless_mark_encoding(
         mark_feature_names=marks.feature_names,
         spike_mark_source=f"{marks.source_file}:{marks.source_variable}",
         config=config,
+        mark_likelihood=mark_likelihood,
+        mark_kde_values=kde_values,
+        mark_kde_neighbor_indices=kde_neighbor_indices,
+        mark_kde_log_weights=kde_log_weights,
+        mark_kde_variance=kde_variance,
     )
 
 
@@ -266,7 +357,7 @@ def build_clusterless_mark_emissions(
         np.add.at(counts, time_bins, 1)
     log_likelihood += (counts * np.log(bin_durations) - gammaln(counts + 1))[:, None]
 
-    return LogEmissionTensor(
+    emissions = LogEmissionTensor(
         log_likelihood=log_likelihood,
         spike_counts=counts[:, None],
         times=times,
@@ -274,6 +365,97 @@ def build_clusterless_mark_emissions(
         cell_ids=np.array([0], dtype=int),
         n_spikes=int(counts.sum()),
     )
+    emissions.metadata = {
+        "clusterless_mark_likelihood": encoding.mark_likelihood,
+        "clusterless_mark_kde_bandwidth": _format_float_array(encoding.mark_kde_variance),
+        "clusterless_mark_kde_max_neighbors": _kde_neighbor_count(encoding),
+    }
+    return emissions
+
+
+def _validate_mark_config(config: ClusterlessMarkConfig) -> None:
+    _normalize_mark_likelihood(config.mark_likelihood)
+    if config.mark_smoothing_sigma_bins < 0.0:
+        raise ValueError("mark_smoothing_sigma_bins must be nonnegative")
+    if config.mark_prior_count < 0.0:
+        raise ValueError("mark_prior_count must be nonnegative")
+    if config.mark_variance_floor <= 0.0:
+        raise ValueError("mark_variance_floor must be positive")
+    if config.rate_floor_hz <= 0.0:
+        raise ValueError("rate_floor_hz must be positive")
+    if config.mark_kde_bandwidth is not None and config.mark_kde_bandwidth <= 0.0:
+        raise ValueError("mark_kde_bandwidth must be positive when provided")
+    if config.mark_kde_spatial_sigma_bins is not None and config.mark_kde_spatial_sigma_bins < 0.0:
+        raise ValueError("mark_kde_spatial_sigma_bins must be nonnegative when provided")
+    if int(config.mark_kde_max_neighbors) < 1:
+        raise ValueError("mark_kde_max_neighbors must be at least one")
+
+
+def _normalize_mark_likelihood(value: str) -> str:
+    key = str(value).strip().lower().replace("_", "-")
+    if key not in _MARK_LIKELIHOOD_ALIASES:
+        allowed = ", ".join(sorted({_DIAGONAL_GAUSSIAN, _LOCAL_KDE}))
+        raise ValueError(f"Unknown clusterless mark likelihood {value!r}; expected one of: {allowed}")
+    return _MARK_LIKELIHOOD_ALIASES[key]
+
+
+def _local_kde_support(
+    mark_bins: np.ndarray,
+    grid_shape: tuple[int, int],
+    config: ClusterlessMarkConfig,
+) -> tuple[np.ndarray, np.ndarray]:
+    mark_bins = np.asarray(mark_bins, dtype=int)
+    n_marks = int(mark_bins.shape[0])
+    n_bins = int(grid_shape[0] * grid_shape[1])
+    support_size = min(int(config.mark_kde_max_neighbors), n_marks)
+    mark_coords = np.column_stack(np.unravel_index(mark_bins, grid_shape)).astype(float)
+    bin_coords = np.column_stack(np.unravel_index(np.arange(n_bins), grid_shape)).astype(float)
+    distances, indices = cKDTree(mark_coords).query(bin_coords, k=support_size)
+    if support_size == 1:
+        distances = distances[:, None]
+        indices = indices[:, None]
+
+    spatial_sigma = config.mark_kde_spatial_sigma_bins
+    if spatial_sigma is None:
+        spatial_sigma = config.mark_smoothing_sigma_bins
+    spatial_sigma = float(spatial_sigma)
+    if spatial_sigma > 0.0:
+        weights = np.exp(-0.5 * (distances / spatial_sigma) ** 2)
+    else:
+        weights = (distances <= 0.0).astype(float)
+
+    prior = max(float(config.mark_prior_count), 0.0)
+    if prior > 0.0:
+        weights = weights + prior / support_size
+    empty = np.sum(weights, axis=1) <= np.finfo(float).tiny
+    if np.any(empty):
+        weights[empty] = 1.0
+    log_weights = np.log(weights) - np.log(np.sum(weights, axis=1, keepdims=True))
+    return np.asarray(indices, dtype=int), np.asarray(log_weights, dtype=float)
+
+
+def _mark_kde_variance(mark_values: np.ndarray, config: ClusterlessMarkConfig) -> np.ndarray:
+    values = np.asarray(mark_values, dtype=float)
+    if config.mark_kde_bandwidth is None:
+        n_marks = max(int(values.shape[0]), 1)
+        n_features = max(int(values.shape[1]), 1)
+        scale = n_marks ** (-1.0 / (n_features + 4.0))
+        bandwidth = np.sqrt(np.maximum(np.var(values, axis=0), config.mark_variance_floor)) * scale
+    else:
+        bandwidth = np.full(values.shape[1], float(config.mark_kde_bandwidth), dtype=float)
+    return np.maximum(bandwidth * bandwidth, config.mark_variance_floor)
+
+
+def _format_float_array(value: np.ndarray | None) -> str:
+    if value is None:
+        return ""
+    return ",".join(f"{float(x):.6g}" for x in np.asarray(value, dtype=float).reshape(-1))
+
+
+def _kde_neighbor_count(encoding: ClusterlessMarkEncoding) -> int:
+    if encoding.mark_kde_neighbor_indices is None:
+        return 0
+    return int(encoding.mark_kde_neighbor_indices.shape[1])
 
 
 def _training_marks(

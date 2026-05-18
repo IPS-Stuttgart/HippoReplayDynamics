@@ -1,7 +1,8 @@
-"""State-space replay decoder public import surface."""
+'''State-space replay decoder public import surface.'''
 
 from __future__ import annotations
 
+from .goal_state_space import GoalStateSpaceReplayModel
 from .models import EventScore, LOG_ZERO, _normalize_log_weights, _posterior_diagnostics
 from .state_space_model import (
     StateSpaceDecoderConfig,
@@ -45,6 +46,7 @@ from .state_space_utils import (
 
 __all__ = [
     "EventScore",
+    "GoalStateSpaceReplayModel",
     "LOG_ZERO",
     "StateSpaceDecoderConfig",
     "StateSpaceReplayModel",

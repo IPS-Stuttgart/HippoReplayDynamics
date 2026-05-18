@@ -10,19 +10,8 @@ from pathlib import Path
 import pandas as pd
 
 from benchmark_model_evidence import _add_evidence_columns, _counts, _summary, _write
+from model_evidence_settings import _validate_constant_settings
 from model_evidence_support_audit import write_evidence_support_audit
-
-_CONSTANT_SETTING_COLUMNS = (
-    "bin_size_cm",
-    "smoothing_sigma_bins",
-    "min_speed_cm_s",
-    "time_bin_s",
-    "spike_rate_scale",
-    "clusterless_mark_smoothing_sigma_bins",
-    "clusterless_mark_prior_count",
-    "clusterless_mark_variance_floor",
-    "clusterless_rate_floor_hz",
-)
 
 
 def _load_score_files(shard_glob: str) -> list[Path]:
@@ -30,26 +19,6 @@ def _load_score_files(shard_glob: str) -> list[Path]:
     if not paths:
         raise FileNotFoundError(f"No model-evidence shard CSVs matched: {shard_glob}")
     return paths
-
-
-def _validate_constant_settings(combined: pd.DataFrame) -> None:
-    """Reject aggregates that silently mix incompatible benchmark settings."""
-
-    inconsistent: dict[str, list[str]] = {}
-    for column in _CONSTANT_SETTING_COLUMNS:
-        if column not in combined.columns:
-            continue
-        values = combined[column].dropna().unique()
-        if len(values) > 1:
-            inconsistent[column] = sorted(str(value) for value in values)
-
-    if not inconsistent:
-        return
-
-    lines = ["Model-evidence shards mix incompatible run settings:"]
-    for column, values in sorted(inconsistent.items()):
-        lines.append(f"- {column}: {', '.join(values)}")
-    raise ValueError("\n".join(lines))
 
 
 def aggregate(shard_glob: str, outdir: Path) -> pd.DataFrame:

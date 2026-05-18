@@ -12,6 +12,7 @@ import pandas as pd
 from scipy.special import logsumexp
 
 from benchmark_model_evidence import _add_evidence_columns, _counts, _ensure_evidence_support_columns, _summary, _write
+from model_evidence_settings import _validate_constant_settings
 
 
 def _load_score_files(shard_glob: str) -> list[Path]:
@@ -41,6 +42,7 @@ def _load_combined(shard_glob: str) -> pd.DataFrame:
             "All-session model-evidence shards contain duplicate event/model rows:\n"
             + duplicate_rows.head(20).to_string(index=False)
         )
+    _validate_constant_settings(combined)
     return _add_evidence_columns(combined.drop(columns=["source_shard_file"]))
 
 

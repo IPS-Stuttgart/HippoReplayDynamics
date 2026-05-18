@@ -1,10 +1,15 @@
 import itertools
 
 import numpy as np
+import pandas as pd
 import pytest
 from scipy.special import logsumexp
 
 from hipporeplayimm.encoding import LogEmissionTensor
+from hipporeplayimm.evidence_reporting import (
+    DEGENERATE_SINGLE_BIN_EVIDENCE_SUPPORT,
+    ensure_evidence_support_columns,
+)
 from hipporeplayimm.models import CandidateKinematicModel, DiffusionModel
 from hipporeplayimm.pyrecest_models import (
     PyRecEstGoalParticleIMMModel,
@@ -161,6 +166,42 @@ def test_candidate_diffusion_full_support_matches_exact_diffusion():
     assert np.allclose(candidate.log_likelihood, exact.log_likelihood)
     assert candidate.diagnostics["mean_candidate_log_mass"] == 0.0
     assert candidate.diagnostics["candidate_evidence_support"] == "truncated_full_grid"
+
+
+def test_candidate_single_bin_is_marked_degenerate_and_not_comparable():
+    centers = np.array([[0.0, 0.0], [1.0, 0.0], [2.0, 0.0]])
+    log_likelihood = np.log(np.array([[0.2, 0.7, 0.1]]))
+    emissions = LogEmissionTensor(
+        log_likelihood=log_likelihood,
+        spike_counts=np.zeros((1, 1), dtype=int),
+        times=np.array([0.0]),
+        dt=1.0,
+        cell_ids=np.array([1]),
+        n_spikes=0,
+    )
+    model = CandidateKinematicModel(mode="imm", top_k=3)
+
+    score = model.score(emissions, centers)
+
+    expected_random_marginal = float(logsumexp(log_likelihood[0]) - np.log(centers.shape[0]))
+    assert score.model_name == "imm"
+    assert np.allclose(score.log_likelihood, expected_random_marginal)
+    assert score.diagnostics["candidate_evidence_support"] == DEGENERATE_SINGLE_BIN_EVIDENCE_SUPPORT
+    assert score.diagnostics["candidate_degenerate_reason"] == "single_time_bin_random_marginal"
+
+    scored = ensure_evidence_support_columns(
+        pd.DataFrame(
+            [
+                {
+                    "status": "success",
+                    "model": score.model_name,
+                    "diagnostic_candidate_evidence_support": score.diagnostics["candidate_evidence_support"],
+                }
+            ]
+        )
+    )
+    assert scored.loc[0, "evidence_support"] == DEGENERATE_SINGLE_BIN_EVIDENCE_SUPPORT
+    assert not bool(scored.loc[0, "evidence_comparable"])
 
 
 def test_candidate_diffusion_pruned_support_uses_full_grid_normalization():

@@ -3,7 +3,11 @@
 from __future__ import annotations
 
 from .models import EventScore, LOG_ZERO, _normalize_log_weights, _posterior_diagnostics
-from .state_space_model import StateSpaceDecoderConfig, StateSpaceReplayModel
+from .state_space_model import (
+    StateSpaceDecoderConfig,
+    StateSpaceReplayModel,
+    _augment_candidates_with_momentum_predictions,
+)
 from .state_space_candidates import (
     _advance_imm_pair_log_alpha,
     _backward_imm_pair,
@@ -49,6 +53,7 @@ __all__ = [
     "_apply_transition",
     "_apply_transition_backward",
     "_as_log_probs",
+    "_augment_candidates_with_momentum_predictions",
     "_backward_imm_pair",
     "_backward_imm_pair_for_mode",
     "_backward_momentum_pair",

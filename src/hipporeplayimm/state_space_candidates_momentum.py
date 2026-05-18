@@ -19,9 +19,10 @@ def _score_momentum_candidates(
     bin_centers: np.ndarray,
     candidates: list[np.ndarray],
     *,
-    sigma_cm: float,
+    sigma_cm: float | np.ndarray,
     initial_sigma_cm: float,
-    velocity_decay: float,
+    velocity_decay: float | np.ndarray,
+    time_scales: float | np.ndarray = 1.0,
 ) -> tuple[float, np.ndarray, list[float]]:
     if emissions.n_time == 1:
         logp, trajectory = _score_fragmented(emissions)
@@ -37,6 +38,7 @@ def _score_momentum_candidates(
     )
     pair_alphas = [log_pair]
     for time_index in range(2, emissions.n_time):
+        transition_index = time_index - 1
         log_pair = _advance_momentum_pair(
             log_pair,
             candidates[time_index - 2],
@@ -44,14 +46,16 @@ def _score_momentum_candidates(
             candidates[time_index],
             emissions.log_likelihood[time_index, candidates[time_index]],
             bin_centers,
-            sigma_cm=sigma_cm,
-            velocity_decay=velocity_decay,
+            sigma_cm=_value_at(sigma_cm, transition_index),
+            velocity_decay=_value_at(velocity_decay, transition_index),
+            time_scale=_value_at(time_scales, transition_index),
         )
         pair_alphas.append(log_pair)
 
     logp = float(logsumexp(pair_alphas[-1]))
     pair_betas = [np.zeros_like(pair_alphas[-1]) for _ in pair_alphas]
     for pair_index in range(len(pair_alphas) - 2, -1, -1):
+        transition_index = pair_index + 1
         curr_time = pair_index + 2
         pair_betas[pair_index] = _backward_momentum_pair(
             pair_betas[pair_index + 1],
@@ -60,8 +64,9 @@ def _score_momentum_candidates(
             candidates[curr_time],
             emissions.log_likelihood[curr_time, candidates[curr_time]],
             bin_centers,
-            sigma_cm=sigma_cm,
-            velocity_decay=velocity_decay,
+            sigma_cm=_value_at(sigma_cm, transition_index),
+            velocity_decay=_value_at(velocity_decay, transition_index),
+            time_scale=_value_at(time_scales, transition_index),
         )
 
     trajectory = np.full((emissions.n_time, emissions.n_bins), LOG_ZERO, dtype=float)
@@ -103,13 +108,15 @@ def _advance_momentum_pair(
     *,
     sigma_cm: float,
     velocity_decay: float,
+    time_scale: float = 1.0,
 ) -> np.ndarray:
     coords_prev_prev = bin_centers[prev_prev]
     coords_prev = bin_centers[prev]
     coords_curr = bin_centers[curr]
     output = np.full((len(prev), len(curr)), LOG_ZERO, dtype=float)
+    coefficient = float(velocity_decay) * float(time_scale)
     for prev_col in range(len(prev)):
-        predictions = coords_prev[prev_col][None, :] + velocity_decay * (
+        predictions = coords_prev[prev_col][None, :] + coefficient * (
             coords_prev[prev_col][None, :] - coords_prev_prev
         )
         log_kernel = _full_grid_normalized_pairwise_gaussian_log_prob(
@@ -132,13 +139,15 @@ def _backward_momentum_pair(
     *,
     sigma_cm: float,
     velocity_decay: float,
+    time_scale: float = 1.0,
 ) -> np.ndarray:
     coords_prev_prev = bin_centers[prev_prev]
     coords_prev = bin_centers[prev]
     coords_curr = bin_centers[curr]
     output = np.full((len(prev_prev), len(prev)), LOG_ZERO, dtype=float)
+    coefficient = float(velocity_decay) * float(time_scale)
     for prev_col in range(len(prev)):
-        predictions = coords_prev[prev_col][None, :] + velocity_decay * (
+        predictions = coords_prev[prev_col][None, :] + coefficient * (
             coords_prev[prev_col][None, :] - coords_prev_prev
         )
         log_kernel = _full_grid_normalized_pairwise_gaussian_log_prob(
@@ -150,3 +159,10 @@ def _backward_momentum_pair(
         continuation = curr_emission[None, :] + next_beta[prev_col][None, :]
         output[:, prev_col] = logsumexp(log_kernel + continuation, axis=1)
     return output
+
+
+def _value_at(value: float | np.ndarray, index: int) -> float:
+    array = np.asarray(value, dtype=float)
+    if array.ndim == 0:
+        return float(array)
+    return float(array[index])

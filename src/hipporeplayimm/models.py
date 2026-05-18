@@ -12,6 +12,7 @@ from .encoding import LogEmissionTensor
 
 
 LOG_ZERO = -1.0e300
+DEGENERATE_SINGLE_BIN_EVIDENCE_SUPPORT = "degenerate_single_bin"
 
 
 @dataclass
@@ -136,8 +137,7 @@ class CandidateKinematicModel:
         candidate_indices: list[np.ndarray] | None = None,
     ) -> EventScore:
         if emissions.n_time == 1:
-            base = RandomModel(name=str(self.name)).score(emissions, bin_centers)
-            return base
+            return self._score_single_bin(emissions, bin_centers)
         candidates = self.candidate_indices(emissions) if candidate_indices is None else candidate_indices
         if len(candidates) != emissions.n_time:
             raise ValueError("candidate_indices must contain one array per emission time bin")
@@ -166,6 +166,36 @@ class CandidateKinematicModel:
             emissions.n_spikes,
             diagnostics=diagnostics,
             terminal_log_posterior=terminal_log_posterior,
+        )
+
+    def _score_single_bin(self, emissions: LogEmissionTensor, bin_centers: np.ndarray) -> EventScore:
+        """Score a one-bin event without letting it enter dynamic comparisons.
+
+        Candidate kinematic models are path models: diffusion, momentum, and IMM
+        need at least a pair of positions to express dynamics.  For a single
+        time bin the only well-defined likelihood is the random one-bin marginal.
+        Keep the requested model name for traceability, but tag the support so
+        reporting code treats the row as non-comparable rather than as a genuine
+        dynamic-model evidence.
+        """
+
+        base = RandomModel(name=str(self.name)).score(emissions, bin_centers)
+        diagnostics = dict(base.diagnostics)
+        diagnostics.update(
+            {
+                "candidate_evidence_support": DEGENERATE_SINGLE_BIN_EVIDENCE_SUPPORT,
+                "candidate_degenerate_reason": "single_time_bin_random_marginal",
+                "candidate_required_min_time_bins": 2,
+            }
+        )
+        return EventScore(
+            str(self.name),
+            base.log_likelihood,
+            base.n_time,
+            base.n_spikes,
+            diagnostics=diagnostics,
+            terminal_log_posterior=base.terminal_log_posterior,
+            trajectory_log_posterior=base.trajectory_log_posterior,
         )
 
     def _score_static_pair(

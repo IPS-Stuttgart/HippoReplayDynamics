@@ -146,8 +146,11 @@ clusterless-state-space-stationary clusterless-state-space-diffusion clusterless
 ```
 
 The workflows expose `clusterless_mark_smoothing_sigma_bins`,
-`clusterless_mark_prior_count`, and `clusterless_mark_variance_floor` for the
-Gaussian mark model.
+`clusterless_mark_prior_count`, `clusterless_mark_variance_floor`, and
+`clusterless_rate_floor_hz` for the Gaussian mark and spike-intensity model.
+The event-sharded aggregator rejects attempts to combine shards with different
+clusterless or encoder settings, including spike-rate scale and clusterless rate
+floor, so aggregate model-evidence tables remain provenance-consistent.
 
 `decode-event --output` writes `event_scores.csv` plus posterior `.npz`
 artifacts for models that expose `trajectory_log_posterior`. The batch tracking

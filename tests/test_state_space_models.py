@@ -100,7 +100,7 @@ def test_state_space_modes_return_full_trajectory_posteriors():
 
 def test_adaptive_candidate_support_adds_forward_and_backward_predictions():
     centers = np.arange(7.0)[:, None]
-    base = [np.array([0]), np.array([1]), np.array([5]), np.array([6])]
+    base = [np.array([0]), np.array([4]), np.array([5]), np.array([6])]
 
     candidates = _augment_candidates_with_momentum_predictions(
         base,
@@ -110,8 +110,8 @@ def test_adaptive_candidate_support_adds_forward_and_backward_predictions():
     )
 
     assert set(candidates[0]) == {0, 3}
-    assert set(candidates[1]) == {1, 4}
-    assert set(candidates[2]) == {2, 5}
+    assert set(candidates[1]) == {4}
+    assert set(candidates[2]) == {5, 6}
     assert set(candidates[3]) == {6}
 
 
@@ -121,7 +121,7 @@ def test_state_space_model_uses_adaptive_candidate_support_when_bin_centers_give
         log_likelihood=np.array(
             [
                 [0.0, -5.0, -5.0, -5.0, -5.0, -5.0, -5.0],
-                [-5.0, 0.0, -5.0, -5.0, -5.0, -5.0, -5.0],
+                [-5.0, -5.0, -5.0, -5.0, 0.0, -5.0, -5.0],
                 [-5.0, -5.0, -5.0, -5.0, -5.0, 0.0, -5.0],
                 [-5.0, -5.0, -5.0, -5.0, -5.0, -5.0, 0.0],
             ]
@@ -143,9 +143,9 @@ def test_state_space_model_uses_adaptive_candidate_support_when_bin_centers_give
     adaptive = model.candidate_indices(emissions, centers)
     score = model.score(emissions, centers)
 
-    assert [list(row) for row in emission_only] == [[0], [1], [5], [6]]
-    assert 2 in adaptive[2]
+    assert [list(row) for row in emission_only] == [[0], [4], [5], [6]]
     assert 3 in adaptive[0]
+    assert 6 in adaptive[2]
     assert score.diagnostics["state_space_momentum_predicted_candidate_top_k"] == 1
     assert score.diagnostics["mean_candidate_count"] > 1.0
 

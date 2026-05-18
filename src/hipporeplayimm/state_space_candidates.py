@@ -7,11 +7,12 @@ from scipy.special import logsumexp
 
 from .encoding import LogEmissionTensor
 from .models import LOG_ZERO
+from .state_space_candidates_momentum import _backward_momentum_pair, _value_at
 from .state_space_first_order import _score_fragmented
-from .state_space_candidates_momentum import _backward_momentum_pair
 from .state_space_utils import (
     _candidate_log_masses,
     _full_grid_normalized_pairwise_gaussian_log_prob,
+    _mode_transition_matrix,
 )
 
 
@@ -20,12 +21,13 @@ def _score_imm_candidates(
     bin_centers: np.ndarray,
     *,
     stationary_sigma_cm: float,
-    diffusion_sigma_cm: float,
-    momentum_sigma_cm: float,
+    diffusion_sigma_cm: float | np.ndarray,
+    momentum_sigma_cm: float | np.ndarray,
     momentum_initial_sigma_cm: float,
-    velocity_decay: float,
+    velocity_decay: float | np.ndarray,
     mode_stickiness: float,
     candidate_indices: list[np.ndarray],
+    time_scales: float | np.ndarray = 1.0,
 ) -> tuple[float, np.ndarray, np.ndarray, list[float]]:
     """Candidate-pruned four-mode IMM over stationary/diffusion/momentum/jump."""
 
@@ -50,7 +52,7 @@ def _score_imm_candidates(
             bin_centers,
             mode=mode,
             stationary_sigma_cm=stationary_sigma_cm,
-            diffusion_sigma_cm=diffusion_sigma_cm,
+            diffusion_sigma_cm=_value_at(diffusion_sigma_cm, 0),
             momentum_initial_sigma_cm=momentum_initial_sigma_cm,
         )
         for mode in modes
@@ -59,6 +61,7 @@ def _score_imm_candidates(
     pair_alphas = [log_pair]
 
     for time_index in range(2, emissions.n_time):
+        transition_index = time_index - 1
         prev_prev = candidate_indices[time_index - 2]
         prev = candidate_indices[time_index - 1]
         curr = candidate_indices[time_index]
@@ -78,9 +81,10 @@ def _score_imm_candidates(
                     bin_centers,
                     mode=dst_mode,
                     stationary_sigma_cm=stationary_sigma_cm,
-                    diffusion_sigma_cm=diffusion_sigma_cm,
-                    momentum_sigma_cm=momentum_sigma_cm,
-                    velocity_decay=velocity_decay,
+                    diffusion_sigma_cm=_value_at(diffusion_sigma_cm, transition_index),
+                    momentum_sigma_cm=_value_at(momentum_sigma_cm, transition_index),
+                    velocity_decay=_value_at(velocity_decay, transition_index),
+                    time_scale=_value_at(time_scales, transition_index),
                 )
             )
         log_pair = np.stack(next_alpha, axis=0)
@@ -89,6 +93,7 @@ def _score_imm_candidates(
     logp = float(logsumexp(pair_alphas[-1]))
     pair_betas = [np.zeros_like(pair_alphas[-1]) for _ in pair_alphas]
     for pair_index in range(len(pair_alphas) - 2, -1, -1):
+        transition_index = pair_index + 1
         curr_time = pair_index + 2
         pair_betas[pair_index] = _backward_imm_pair(
             pair_betas[pair_index + 1],
@@ -100,9 +105,10 @@ def _score_imm_candidates(
             modes=modes,
             mode_transition=mode_transition,
             stationary_sigma_cm=stationary_sigma_cm,
-            diffusion_sigma_cm=diffusion_sigma_cm,
-            momentum_sigma_cm=momentum_sigma_cm,
-            velocity_decay=velocity_decay,
+            diffusion_sigma_cm=_value_at(diffusion_sigma_cm, transition_index),
+            momentum_sigma_cm=_value_at(momentum_sigma_cm, transition_index),
+            velocity_decay=_value_at(velocity_decay, transition_index),
+            time_scale=_value_at(time_scales, transition_index),
         )
 
     trajectory = np.full((emissions.n_time, emissions.n_bins), LOG_ZERO, dtype=float)
@@ -168,6 +174,7 @@ def _advance_imm_pair_log_alpha(
     diffusion_sigma_cm: float,
     momentum_sigma_cm: float,
     velocity_decay: float,
+    time_scale: float = 1.0,
 ) -> np.ndarray:
     coords_prev_prev = bin_centers[prev_prev]
     coords_prev = bin_centers[prev]
@@ -196,7 +203,8 @@ def _advance_imm_pair_log_alpha(
             )[0]
             output[prev_col] = previous_mass + log_kernel + curr_emission
         elif mode == "momentum":
-            predictions = coords_prev[prev_col][None, :] + velocity_decay * (
+            coefficient = float(velocity_decay) * float(time_scale)
+            predictions = coords_prev[prev_col][None, :] + coefficient * (
                 coords_prev[prev_col][None, :] - coords_prev_prev
             )
             log_kernel = _full_grid_normalized_pairwise_gaussian_log_prob(
@@ -225,6 +233,7 @@ def _backward_imm_pair(
     diffusion_sigma_cm: float,
     momentum_sigma_cm: float,
     velocity_decay: float,
+    time_scale: float = 1.0,
 ) -> np.ndarray:
     dst_terms = np.stack(
         [
@@ -240,6 +249,7 @@ def _backward_imm_pair(
                 diffusion_sigma_cm=diffusion_sigma_cm,
                 momentum_sigma_cm=momentum_sigma_cm,
                 velocity_decay=velocity_decay,
+                time_scale=time_scale,
             )
             for dst_idx, dst_mode in enumerate(modes)
         ],
@@ -266,6 +276,7 @@ def _backward_imm_pair_for_mode(
     diffusion_sigma_cm: float,
     momentum_sigma_cm: float,
     velocity_decay: float,
+    time_scale: float = 1.0,
 ) -> np.ndarray:
     if mode == "momentum":
         return _backward_momentum_pair(
@@ -277,6 +288,7 @@ def _backward_imm_pair_for_mode(
             bin_centers,
             sigma_cm=momentum_sigma_cm,
             velocity_decay=velocity_decay,
+            time_scale=time_scale,
         )
 
     output = np.full((len(prev_prev), len(prev)), LOG_ZERO, dtype=float)
@@ -303,14 +315,3 @@ def _backward_imm_pair_for_mode(
         )[0]
         output[:, prev_col] = logsumexp(log_kernel + curr_emission + next_beta[prev_col])
     return output
-
-
-def _mode_transition_matrix(n_modes: int, stickiness: float) -> np.ndarray:
-    if n_modes < 2:
-        return np.ones((n_modes, n_modes), dtype=float)
-    if not 0.0 <= stickiness <= 1.0:
-        raise ValueError("mode_stickiness must be in [0, 1]")
-    off_diag = (1.0 - stickiness) / (n_modes - 1)
-    matrix = np.full((n_modes, n_modes), off_diag, dtype=float)
-    np.fill_diagonal(matrix, stickiness)
-    return matrix

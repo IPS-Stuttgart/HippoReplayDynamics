@@ -43,6 +43,7 @@ class StateSpaceDecoderConfig:
     momentum_initial_sigma_cm_sqrt_s: float = 85.0
     momentum_velocity_decay: float = 0.95
     momentum_candidate_top_k: int = 128
+    momentum_predicted_candidate_top_k: int = 8
 
 
 @dataclass
@@ -86,11 +87,30 @@ class StateSpaceReplayModel:
         elif self.config.mode != self.mode:
             self.config = replace(self.config, mode=self.mode)
 
-    def candidate_indices(self, emissions: LogEmissionTensor) -> list[np.ndarray]:
-        """Return the candidate support used by pruned momentum/IMM recursions."""
+    def candidate_indices(self, emissions: LogEmissionTensor, bin_centers: np.ndarray | None = None) -> list[np.ndarray]:
+        """Return the candidate support used by pruned momentum/IMM recursions.
+
+        The base support is the per-bin emission top-k set. When
+        ``momentum_predicted_candidate_top_k`` is positive and ``bin_centers`` is
+        supplied, each time bin is enlarged by nearest grid states to forward-
+        and backward-momentum predictions built from the top adjacent emission
+        candidates. This keeps deterministic emission support while recovering
+        dynamically plausible states whose local emission rank is too low for
+        the fixed top-k beam. The augmentation is bounded by the prediction top-k
+        and never changes externally supplied candidate supports.
+        """
 
         assert self.config is not None
-        return [_top_candidate_indices(row, self.config.momentum_candidate_top_k) for row in emissions.log_likelihood]
+        base = [_top_candidate_indices(row, self.config.momentum_candidate_top_k) for row in emissions.log_likelihood]
+        predicted_top_k = int(self.config.momentum_predicted_candidate_top_k)
+        if predicted_top_k <= 0 or bin_centers is None or emissions.n_time < 3:
+            return base
+        return _augment_candidates_with_momentum_predictions(
+            base,
+            bin_centers,
+            predicted_top_k=predicted_top_k,
+            velocity_decay=float(self.config.momentum_velocity_decay),
+        )
 
     def score(
         self,
@@ -145,7 +165,7 @@ class StateSpaceReplayModel:
                 self.config.momentum_initial_sigma_cm_sqrt_s,
                 emissions.dt,
             )
-            candidates = self.candidate_indices(emissions) if candidate_indices is None else candidate_indices
+            candidates = self.candidate_indices(emissions, bin_centers) if candidate_indices is None else candidate_indices
             _validate_candidate_indices(candidates, emissions.n_time, emissions.n_bins)
             logp, trajectory, mode_post, masses = _score_imm_candidates(
                 emissions,
@@ -166,8 +186,10 @@ class StateSpaceReplayModel:
             extra.update(
                 {
                     "mean_candidate_log_mass": float(np.mean(masses)),
+                    "mean_candidate_count": float(np.mean([len(curr) for curr in candidates])),
                     "state_space_imm_modes": ",".join(names),
                     "state_space_imm_candidate_top_k": int(self.config.momentum_candidate_top_k),
+                    "state_space_imm_predicted_candidate_top_k": int(self.config.momentum_predicted_candidate_top_k),
                     "state_space_imm_candidate_support": "derived" if candidate_indices is None else "provided",
                     "state_space_imm_trajectory_posterior": "smoothed_pair_marginal",
                     "state_space_imm_evidence_support": "truncated_full_grid",
@@ -177,7 +199,7 @@ class StateSpaceReplayModel:
             )
         elif self.mode == "momentum":
             transition_sigma_cm = _per_bin_sigma(self.config.momentum_sigma_cm_sqrt_s, emissions.dt)
-            candidates = self.candidate_indices(emissions) if candidate_indices is None else candidate_indices
+            candidates = self.candidate_indices(emissions, bin_centers) if candidate_indices is None else candidate_indices
             _validate_candidate_indices(candidates, emissions.n_time, emissions.n_bins)
             logp, trajectory, masses = _score_momentum_candidates(
                 emissions,
@@ -189,7 +211,9 @@ class StateSpaceReplayModel:
             )
             extra = {
                 "mean_candidate_log_mass": float(np.mean(masses)),
+                "mean_candidate_count": float(np.mean([len(curr) for curr in candidates])),
                 "state_space_momentum_candidate_top_k": int(self.config.momentum_candidate_top_k),
+                "state_space_momentum_predicted_candidate_top_k": int(self.config.momentum_predicted_candidate_top_k),
                 "state_space_momentum_candidate_support": "derived" if candidate_indices is None else "provided",
                 "state_space_momentum_trajectory_posterior": "smoothed_pair_marginal",
                 "state_space_momentum_evidence_support": "truncated_full_grid",
@@ -224,3 +248,54 @@ class StateSpaceReplayModel:
             terminal_log_posterior=terminal,
             trajectory_log_posterior=trajectory,
         )
+
+
+def _augment_candidates_with_momentum_predictions(
+    candidates: list[np.ndarray],
+    bin_centers: np.ndarray,
+    *,
+    predicted_top_k: int,
+    velocity_decay: float,
+) -> list[np.ndarray]:
+    """Union emission candidates with states nearest to bounded momentum predictions."""
+
+    if predicted_top_k <= 0:
+        return [np.asarray(curr, dtype=int).copy() for curr in candidates]
+    top_k = max(1, int(predicted_top_k))
+    augmented = [set(int(idx) for idx in np.asarray(curr, dtype=int)) for curr in candidates]
+
+    for time_index in range(2, len(candidates)):
+        prev_prev = np.asarray(candidates[time_index - 2], dtype=int)[:top_k]
+        prev = np.asarray(candidates[time_index - 1], dtype=int)[:top_k]
+        if prev_prev.size == 0 or prev.size == 0:
+            continue
+        predictions = bin_centers[prev][None, :, :] + velocity_decay * (
+            bin_centers[prev][None, :, :] - bin_centers[prev_prev][:, None, :]
+        )
+        _add_nearest_predictions(augmented[time_index], bin_centers, predictions)
+
+    if abs(velocity_decay) > np.finfo(float).eps:
+        for time_index in range(len(candidates) - 2):
+            nxt = np.asarray(candidates[time_index + 1], dtype=int)[:top_k]
+            nxt_nxt = np.asarray(candidates[time_index + 2], dtype=int)[:top_k]
+            if nxt.size == 0 or nxt_nxt.size == 0:
+                continue
+            predictions = bin_centers[nxt][None, :, :] - (
+                bin_centers[nxt_nxt][:, None, :] - bin_centers[nxt][None, :, :]
+            ) / velocity_decay
+            _add_nearest_predictions(augmented[time_index], bin_centers, predictions)
+
+    return [np.fromiter(sorted(curr), dtype=int) for curr in augmented]
+
+
+def _add_nearest_predictions(
+    target: set[int],
+    bin_centers: np.ndarray,
+    predictions: np.ndarray,
+) -> None:
+    flat = predictions.reshape(-1, bin_centers.shape[1])
+    if flat.size == 0:
+        return
+    for predicted in flat:
+        dist2 = np.sum((bin_centers - predicted[None, :]) ** 2, axis=1)
+        target.add(int(np.argmin(dist2)))

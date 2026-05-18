@@ -96,6 +96,10 @@ on:
         description: "Clusterless Gaussian mark variance floor"
         required: true
         default: "1.0"
+      clusterless_rate_floor_hz:
+        description: "Clusterless spike-intensity rate floor in Hz"
+        required: true
+        default: "0.0001"
       time_bin_s:
         description: "Ripple decoding time-bin width in seconds"
         required: true
@@ -152,6 +156,7 @@ env:
   CLUSTERLESS_MARK_SMOOTHING_SIGMA_BINS: ${{ inputs.clusterless_mark_smoothing_sigma_bins }}
   CLUSTERLESS_MARK_PRIOR_COUNT: ${{ inputs.clusterless_mark_prior_count }}
   CLUSTERLESS_MARK_VARIANCE_FLOOR: ${{ inputs.clusterless_mark_variance_floor }}
+  CLUSTERLESS_RATE_FLOOR_HZ: ${{ inputs.clusterless_rate_floor_hz }}
   TIME_BIN_S: ${{ inputs.time_bin_s }}
   SPIKE_RATE_SCALE: ${{ inputs.spike_rate_scale }}
   BIN_SIZE_CM: ${{ inputs.bin_size_cm }}
@@ -300,6 +305,7 @@ jobs:
             --clusterless-mark-smoothing-sigma-bins "${CLUSTERLESS_MARK_SMOOTHING_SIGMA_BINS}" \
             --clusterless-mark-prior-count "${CLUSTERLESS_MARK_PRIOR_COUNT}" \
             --clusterless-mark-variance-floor "${CLUSTERLESS_MARK_VARIANCE_FLOOR}" \
+            --clusterless-rate-floor-hz "${CLUSTERLESS_RATE_FLOOR_HZ}" \
             --time-bin-s "${TIME_BIN_S}" \
             --spike-rate-scale "${SPIKE_RATE_SCALE}" \
             --bin-size-cm "${BIN_SIZE_CM}" \

@@ -208,6 +208,20 @@ def _family(model: str) -> str:
     return "other"
 
 
+def _clusterless_mark_config(args) -> ClusterlessMarkConfig:
+    return ClusterlessMarkConfig(
+        encoding=EncodingConfig(
+            bin_size_cm=args.bin_size_cm,
+            smoothing_sigma_bins=args.smoothing_sigma_bins,
+            min_speed_cm_s=args.min_speed_cm_s,
+        ),
+        mark_smoothing_sigma_bins=args.clusterless_mark_smoothing_sigma_bins,
+        mark_prior_count=args.clusterless_mark_prior_count,
+        mark_variance_floor=args.clusterless_mark_variance_floor,
+        rate_floor_hz=args.clusterless_rate_floor_hz,
+    )
+
+
 def _score(args) -> pd.DataFrame:
     session_dir = _session_path(args.dataset_root, args.session)
     _check_session(session_dir)
@@ -228,17 +242,7 @@ def _score(args) -> pd.DataFrame:
     clusterless_encoding = None
     if has_clusterless:
         clusterless_encoding = fit_clusterless_mark_encoding(
-            session,
-            ClusterlessMarkConfig(
-                encoding=EncodingConfig(
-                    bin_size_cm=args.bin_size_cm,
-                    smoothing_sigma_bins=args.smoothing_sigma_bins,
-                    min_speed_cm_s=args.min_speed_cm_s,
-                ),
-                mark_smoothing_sigma_bins=args.clusterless_mark_smoothing_sigma_bins,
-                mark_prior_count=args.clusterless_mark_prior_count,
-                mark_variance_floor=args.clusterless_mark_variance_floor,
-            ),
+            session, _clusterless_mark_config(args),
         )
     emissions_cfg = EmissionConfig(
         time_bin_s=args.time_bin_s,
@@ -281,13 +285,14 @@ def _score(args) -> pd.DataFrame:
                     "clusterless_mark_smoothing_sigma_bins": float(args.clusterless_mark_smoothing_sigma_bins),
                     "clusterless_mark_prior_count": float(args.clusterless_mark_prior_count),
                     "clusterless_mark_variance_floor": float(args.clusterless_mark_variance_floor),
+                    "clusterless_rate_floor_hz": float(args.clusterless_rate_floor_hz),
                 }
                 if use_clusterless and clusterless_encoding is not None:
                     row.update({
                         "clusterless_mark_features": int(clusterless_encoding.n_features),
                         "clusterless_spike_mark_source": clusterless_encoding.spike_mark_source,
                     })
-                row.update({f"diagnostic_{k}": v for k, v in result.diagnostics.items()})
+                row.update({f"diagnostic_{key}": value for key, value in result.diagnostics.items()})
                 rows.append(row)
                 print(f"Scored {session.session_id} event {event_id} with {name}", flush=True)
             except Exception as exc:
@@ -304,6 +309,7 @@ def _score(args) -> pd.DataFrame:
                     "clusterless_mark_smoothing_sigma_bins": float(args.clusterless_mark_smoothing_sigma_bins),
                     "clusterless_mark_prior_count": float(args.clusterless_mark_prior_count),
                     "clusterless_mark_variance_floor": float(args.clusterless_mark_variance_floor),
+                    "clusterless_rate_floor_hz": float(args.clusterless_rate_floor_hz),
                 })
                 if not args.continue_on_error:
                     raise
@@ -461,6 +467,7 @@ def main() -> int:
     p.add_argument("--clusterless-mark-smoothing-sigma-bins", type=float, default=1.0)
     p.add_argument("--clusterless-mark-prior-count", type=float, default=1.0)
     p.add_argument("--clusterless-mark-variance-floor", type=float, default=1.0)
+    p.add_argument("--clusterless-rate-floor-hz", type=float, default=1e-4)
     p.add_argument("--time-bin-s", type=float, default=0.02)
     p.add_argument(
         "--spike-rate-scale",

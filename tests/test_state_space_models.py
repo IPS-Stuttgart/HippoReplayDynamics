@@ -5,7 +5,11 @@ from scipy.special import logsumexp
 
 from hipporeplayimm.encoding import LogEmissionTensor
 from hipporeplayimm.sorted_spike_state_space import SortedSpikeStateSpaceReplayModel
-from hipporeplayimm.state_space import StateSpaceDecoderConfig, StateSpaceReplayModel
+from hipporeplayimm.state_space import (
+    StateSpaceDecoderConfig,
+    StateSpaceReplayModel,
+    _augment_candidates_with_momentum_predictions,
+)
 
 
 def _synthetic_emissions() -> LogEmissionTensor:
@@ -81,14 +85,69 @@ def test_state_space_modes_return_full_trajectory_posteriors():
         assert score.diagnostics["clusterless_mark_likelihood"] == "not_implemented"
         if mode == "momentum":
             assert score.diagnostics["state_space_momentum_trajectory_posterior"] == "smoothed_pair_marginal"
+            assert score.diagnostics["state_space_momentum_predicted_candidate_top_k"] == 8
+            assert score.diagnostics["mean_candidate_count"] == 4.0
         if mode == "imm":
             assert score.diagnostics["state_space_imm_modes"] == "stationary,diffusion,momentum,jump"
             assert score.diagnostics["state_space_imm_evidence_support"] == "truncated_full_grid"
+            assert score.diagnostics["state_space_imm_predicted_candidate_top_k"] == 8
             assert "state_space_mode_momentum_terminal_probability" in score.diagnostics
             assert "state_space_mode_jump_terminal_probability" in score.diagnostics
         if mode == "first-order-imm":
             assert score.diagnostics["state_space_imm_modes"] == "stationary,diffusion,fragmented"
             assert score.diagnostics["state_space_imm_evidence_support"] == "exact_full_grid"
+
+
+def test_adaptive_candidate_support_adds_forward_and_backward_predictions():
+    centers = np.arange(7.0)[:, None]
+    base = [np.array([0]), np.array([1]), np.array([5]), np.array([6])]
+
+    candidates = _augment_candidates_with_momentum_predictions(
+        base,
+        centers,
+        predicted_top_k=1,
+        velocity_decay=1.0,
+    )
+
+    assert set(candidates[0]) == {0, 3}
+    assert set(candidates[1]) == {1, 4}
+    assert set(candidates[2]) == {2, 5}
+    assert set(candidates[3]) == {6}
+
+
+def test_state_space_model_uses_adaptive_candidate_support_when_bin_centers_given():
+    centers = np.arange(7.0)[:, None]
+    emissions = LogEmissionTensor(
+        log_likelihood=np.array(
+            [
+                [0.0, -5.0, -5.0, -5.0, -5.0, -5.0, -5.0],
+                [-5.0, 0.0, -5.0, -5.0, -5.0, -5.0, -5.0],
+                [-5.0, -5.0, -5.0, -5.0, -5.0, 0.0, -5.0],
+                [-5.0, -5.0, -5.0, -5.0, -5.0, -5.0, 0.0],
+            ]
+        ),
+        spike_counts=np.zeros((4, 1), dtype=int),
+        times=np.arange(4, dtype=float),
+        dt=1.0,
+        cell_ids=np.array([1]),
+        n_spikes=0,
+    )
+    config = StateSpaceDecoderConfig(
+        mode="momentum",
+        momentum_candidate_top_k=1,
+        momentum_predicted_candidate_top_k=1,
+    )
+    model = StateSpaceReplayModel(mode="momentum", config=config)
+
+    emission_only = model.candidate_indices(emissions)
+    adaptive = model.candidate_indices(emissions, centers)
+    score = model.score(emissions, centers)
+
+    assert [list(row) for row in emission_only] == [[0], [1], [5], [6]]
+    assert 2 in adaptive[2]
+    assert 3 in adaptive[0]
+    assert score.diagnostics["state_space_momentum_predicted_candidate_top_k"] == 1
+    assert score.diagnostics["mean_candidate_count"] > 1.0
 
 
 def test_state_space_momentum_pruned_support_uses_full_grid_normalization():
@@ -110,6 +169,7 @@ def test_state_space_momentum_pruned_support_uses_full_grid_normalization():
     config = StateSpaceDecoderConfig(
         mode="momentum",
         momentum_candidate_top_k=1,
+        momentum_predicted_candidate_top_k=0,
         momentum_initial_sigma_cm_sqrt_s=1.0,
         momentum_sigma_cm_sqrt_s=1.0,
     )

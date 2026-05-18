@@ -5,7 +5,9 @@ The state-space evidence sweep scores point-estimate configurations. This
 script turns those grid scores into Bayesian model-evidence rows by integrating
 over the selected parameter grid, mirroring the KD-style workflow while keeping
 the sorted-spike state-space implementation separate from the KD reference
-implementation.
+implementation. Observation hyperparameters can be folded into the same grid so
+rates/binning/smoothing choices are marginalized rather than selected by a
+single point estimate.
 """
 
 from __future__ import annotations
@@ -24,6 +26,32 @@ from hipporeplayimm.kd_reference import empirical_grid_prior
 
 _EVENT_KEY = ["session", "event_index"]
 _DEFAULT_MODELS = ("diffusion", "momentum")
+_OBSERVATION_PARAMETER_COLUMNS = (
+    "time_bin_s",
+    "spike_rate_scale",
+    "bin_size_cm",
+    "smoothing_sigma_bins",
+    "min_speed_cm_s",
+    "clusterless_mark_smoothing_sigma_bins",
+    "clusterless_mark_prior_count",
+    "clusterless_mark_variance_floor",
+    "clusterless_rate_floor_hz",
+)
+_OUTPUT_METADATA_COLUMNS = (
+    "n_time",
+    "n_spikes",
+    "runtime_s",
+    "bin_size_cm",
+    "smoothing_sigma_bins",
+    "min_speed_cm_s",
+    "time_bin_s",
+    "spike_rate_scale",
+    "clusterless_mark_smoothing_sigma_bins",
+    "clusterless_mark_prior_count",
+    "clusterless_mark_variance_floor",
+    "clusterless_rate_floor_hz",
+)
+_INTEGER_METADATA_COLUMNS = {"n_time", "n_spikes"}
 
 
 @dataclass(frozen=True)
@@ -55,7 +83,14 @@ _MODEL_SPECS = {
 }
 
 
-def marginalize_sweep(input_csv: str | Path, output: str | Path, *, models: tuple[str, ...] = _DEFAULT_MODELS, prior: str = "empirical") -> dict[str, pd.DataFrame]:
+def marginalize_sweep(
+    input_csv: str | Path,
+    output: str | Path,
+    *,
+    models: tuple[str, ...] = _DEFAULT_MODELS,
+    prior: str = "empirical",
+    observation_parameters: str = "auto",
+) -> dict[str, pd.DataFrame]:
     scores = pd.read_csv(input_csv)
     if scores.empty:
         raise ValueError("state-space sweep scores are empty")
@@ -65,7 +100,7 @@ def marginalize_sweep(input_csv: str | Path, output: str | Path, *, models: tupl
 
     for model in models:
         spec = _MODEL_SPECS[_canonical_model(model)]
-        grid, event_table, param_values, source = _grid_for_model(scores, spec)
+        grid, event_table, param_values, source = _grid_for_model(scores, spec, observation_parameters=observation_parameters)
         weights, prior_kind = _prior_for_grid(grid, spec, param_values, prior)
         marginalized = logsumexp(grid + np.log(np.maximum(weights, np.finfo(float).tiny))[None, ...], axis=tuple(range(1, grid.ndim)))
         rows.extend(_marginalized_rows(spec, event_table, source, param_values, marginalized, prior_kind))
@@ -106,48 +141,110 @@ def _canonical_model(model: str) -> str:
     return name
 
 
-def _grid_for_model(scores: pd.DataFrame, spec: _ModelSpec) -> tuple[np.ndarray, pd.DataFrame, dict[str, np.ndarray], pd.DataFrame]:
-    missing = [col for col in (*_EVENT_KEY, "model", "log_evidence", *spec.param_cols) if col not in scores.columns]
-    if missing:
-        raise ValueError(f"sweep scores are missing columns needed for {spec.short_name}: {missing}")
+def _grid_for_model(
+    scores: pd.DataFrame,
+    spec: _ModelSpec,
+    *,
+    observation_parameters: str,
+) -> tuple[np.ndarray, pd.DataFrame, dict[str, np.ndarray], pd.DataFrame]:
+    if observation_parameters not in {"auto", "all", "none"}:
+        raise ValueError("observation_parameters must be one of: auto, all, none")
+    missing_base = [col for col in (*_EVENT_KEY, "model", "log_evidence", *spec.param_cols) if col not in scores.columns]
+    if missing_base:
+        raise ValueError(f"sweep scores are missing columns needed for {spec.short_name}: {missing_base}")
     source = scores[scores["model"] == spec.source_model].copy()
     if "status" in source.columns:
         source = source[source["status"] == "success"].copy()
     if source.empty:
         raise ValueError(f"no successful rows for {spec.source_model}")
 
+    param_cols = _parameter_columns_for_model(source, spec, observation_parameters)
+    missing = [col for col in param_cols if col not in source.columns]
+    if missing:
+        raise ValueError(f"sweep scores are missing columns needed for {spec.short_name}: {missing}")
+
     grouped = (
-        source.groupby([*_EVENT_KEY, *spec.param_cols], dropna=False, as_index=False)
-        .agg(
-            log_evidence=("log_evidence", _unique_log_evidence),
-            n_source_rows=("log_evidence", "count"),
-            n_time=("n_time", "first"),
-            n_spikes=("n_spikes", "first"),
-            runtime_s=("runtime_s", "sum"),
-            bin_size_cm=("bin_size_cm", "first"),
-            smoothing_sigma_bins=("smoothing_sigma_bins", "first"),
-            min_speed_cm_s=("min_speed_cm_s", "first"),
-            time_bin_s=("time_bin_s", "first"),
-        )
-        .sort_values([*_EVENT_KEY, *spec.param_cols])
+        source.groupby([*_EVENT_KEY, *param_cols], dropna=False, as_index=False)
+        .agg(**_aggregation_columns(source, param_cols))
+        .sort_values([*_EVENT_KEY, *param_cols])
         .reset_index(drop=True)
     )
     event_table = grouped[_EVENT_KEY].drop_duplicates().sort_values(_EVENT_KEY).reset_index(drop=True)
-    param_values = {col: np.asarray(sorted(grouped[col].dropna().unique()), dtype=float) for col in spec.param_cols}
+    param_values = {col: _sorted_numeric_values(grouped[col], col) for col in param_cols}
+    empty_params = [col for col, values in param_values.items() if values.size == 0]
+    if empty_params:
+        raise ValueError(f"{spec.source_model} has no finite values for parameter columns: {empty_params}")
+
     shape = (len(event_table), *(len(values) for values in param_values.values()))
     grid = np.full(shape, np.nan, dtype=float)
     event_index = {tuple(row): idx for idx, row in enumerate(event_table[_EVENT_KEY].itertuples(index=False, name=None))}
     param_index = {col: {float(value): idx for idx, value in enumerate(values)} for col, values in param_values.items()}
     for row in grouped.itertuples(index=False):
         event = tuple(getattr(row, col) for col in _EVENT_KEY)
-        params = tuple(param_index[col][float(getattr(row, col))] for col in spec.param_cols)
+        params = tuple(param_index[col][float(getattr(row, col))] for col in param_cols)
         grid[(event_index[event], *params)] = float(row.log_evidence)
     missing_count = int(np.isnan(grid).sum())
     if missing_count:
         raise ValueError(f"{spec.source_model} grid has {missing_count} missing event/parameter scores")
-    source_lookup = grouped.drop_duplicates(_EVENT_KEY).set_index(_EVENT_KEY)
-    representatives = event_table.join(source_lookup, on=_EVENT_KEY, how="left", rsuffix="_source")
-    return grid, event_table, param_values, representatives
+    return grid, event_table, param_values, _event_representatives(grouped, event_table)
+
+
+def _parameter_columns_for_model(source: pd.DataFrame, spec: _ModelSpec, observation_parameters: str) -> tuple[str, ...]:
+    cols: list[str] = list(spec.param_cols)
+    if observation_parameters == "none":
+        return tuple(cols)
+    for col in _OBSERVATION_PARAMETER_COLUMNS:
+        if col not in source.columns:
+            continue
+        values = _numeric_values(source[col])
+        include = observation_parameters == "all" or values.size > 1
+        if include and col not in cols:
+            cols.append(col)
+    return tuple(cols)
+
+
+def _numeric_values(series: pd.Series) -> np.ndarray:
+    values = pd.to_numeric(series, errors="coerce").dropna().to_numpy(float)
+    return np.unique(values) if values.size else np.asarray([], dtype=float)
+
+
+def _sorted_numeric_values(series: pd.Series, column: str) -> np.ndarray:
+    values = _numeric_values(series)
+    if values.size and not np.all(np.isfinite(values)):
+        raise ValueError(f"parameter column {column!r} contains non-finite values")
+    return np.asarray(sorted(float(value) for value in values), dtype=float)
+
+
+def _aggregation_columns(source: pd.DataFrame, param_cols: tuple[str, ...]) -> dict[str, tuple[str, object]]:
+    blocked = {*_EVENT_KEY, "model", *param_cols}
+    agg: dict[str, tuple[str, object]] = {"log_evidence": ("log_evidence", _unique_log_evidence)}
+    if "runtime_s" in source.columns and "runtime_s" not in blocked:
+        agg["runtime_s"] = ("runtime_s", "sum")
+    for col in _OUTPUT_METADATA_COLUMNS:
+        if col in source.columns and col not in blocked and col not in agg:
+            agg[col] = (col, "first")
+    return agg
+
+
+def _event_representatives(grouped: pd.DataFrame, event_table: pd.DataFrame) -> pd.DataFrame:
+    rows: list[dict[str, object]] = []
+    for event in event_table.itertuples(index=False):
+        mask = np.ones(len(grouped), dtype=bool)
+        for col, value in zip(_EVENT_KEY, event, strict=True):
+            mask &= grouped[col].to_numpy() == value
+        group = grouped.loc[mask]
+        row: dict[str, object] = {col: value for col, value in zip(_EVENT_KEY, event, strict=True)}
+        for col in _OUTPUT_METADATA_COLUMNS:
+            if col not in grouped.columns:
+                continue
+            numeric = pd.to_numeric(group[col], errors="coerce")
+            if col == "runtime_s":
+                row[col] = float(numeric.fillna(0.0).sum())
+                continue
+            values = np.unique(numeric.dropna().to_numpy(float))
+            row[col] = float(values[0]) if values.size == 1 else np.nan
+        rows.append(row)
+    return pd.DataFrame(rows)
 
 
 def _unique_log_evidence(values: pd.Series) -> float:
@@ -164,32 +261,55 @@ def _prior_for_grid(grid: np.ndarray, spec: _ModelSpec, param_values: dict[str, 
     if prior == "uniform":
         return np.full(shape, 1.0 / max(1, int(np.prod(shape))), dtype=float), "uniform"
 
-    varying = [idx for idx, col in enumerate(spec.param_cols) if param_values[col].shape[0] > 1]
-    squeezed = np.squeeze(grid, axis=tuple(idx + 1 for idx, col in enumerate(spec.param_cols) if param_values[col].shape[0] == 1))
+    param_cols = tuple(param_values)
+    dynamic_varying = [idx for idx, col in enumerate(param_cols) if col in spec.param_cols and param_values[col].shape[0] > 1]
     try:
-        if len(varying) == 1:
-            col = spec.param_cols[varying[0]]
-            prior_values, _ = empirical_grid_prior({"sd_meters": param_values[col]}, squeezed)
-            return _expand_prior(prior_values, spec, param_values, varying), "empirical"
-        if len(varying) == 2:
-            varying_cols = [spec.param_cols[idx] for idx in varying]
+        if len(dynamic_varying) == 1:
+            collapsed = _collapse_grid_to_parameter_axes(grid, dynamic_varying)
+            col = param_cols[dynamic_varying[0]]
+            prior_values, _ = empirical_grid_prior({"sd_meters": param_values[col]}, collapsed)
+            return _expand_prior(prior_values, param_values, dynamic_varying), _empirical_prior_kind(param_cols)
+        if len(dynamic_varying) == 2:
+            varying_cols = [param_cols[idx] for idx in dynamic_varying]
             sigma_col = next((col for col in varying_cols if "sigma" in col), None)
             decay_col = next((col for col in varying_cols if "decay" in col), None)
             if sigma_col is not None and decay_col is not None:
-                prior_values, _ = empirical_grid_prior({"sd_meters": param_values[sigma_col], "decay": param_values[decay_col]}, squeezed)
-                return _expand_prior(prior_values, spec, param_values, varying), "empirical"
+                collapsed = _collapse_grid_to_parameter_axes(grid, dynamic_varying)
+                if varying_cols != [sigma_col, decay_col]:
+                    source_axes = [varying_cols.index(sigma_col) + 1, varying_cols.index(decay_col) + 1]
+                    collapsed = np.moveaxis(collapsed, source_axes, [1, 2])
+                prior_values, _ = empirical_grid_prior({"sd_meters": param_values[sigma_col], "decay": param_values[decay_col]}, collapsed)
+                target_axes = [param_cols.index(sigma_col), param_cols.index(decay_col)]
+                return _expand_prior(prior_values, param_values, target_axes), _empirical_prior_kind(param_cols)
     except Exception:
         pass
     return np.full(shape, 1.0 / max(1, int(np.prod(shape))), dtype=float), "uniform_fallback"
 
 
-def _expand_prior(prior_values: np.ndarray, spec: _ModelSpec, param_values: dict[str, np.ndarray], varying: list[int]) -> np.ndarray:
-    target_shape = tuple(param_values[col].shape[0] for col in spec.param_cols)
-    reshape = [1] * len(spec.param_cols)
+def _collapse_grid_to_parameter_axes(grid: np.ndarray, keep_param_axes: list[int]) -> np.ndarray:
+    keep_grid_axes = {axis + 1 for axis in keep_param_axes}
+    collapsed = grid
+    for axis in range(grid.ndim - 1, 0, -1):
+        if axis not in keep_grid_axes:
+            n_values = collapsed.shape[axis]
+            collapsed = logsumexp(collapsed - np.log(float(max(n_values, 1))), axis=axis)
+    return collapsed
+
+
+def _empirical_prior_kind(param_cols: tuple[str, ...]) -> str:
+    if any(col in _OBSERVATION_PARAMETER_COLUMNS for col in param_cols):
+        return "empirical_dynamic_uniform_observation"
+    return "empirical"
+
+
+def _expand_prior(prior_values: np.ndarray, param_values: dict[str, np.ndarray], varying: list[int]) -> np.ndarray:
+    param_cols = tuple(param_values)
+    target_shape = tuple(param_values[col].shape[0] for col in param_cols)
+    reshape = [1] * len(param_cols)
     for axis, size in zip(varying, prior_values.shape, strict=True):
         reshape[axis] = size
-    prior = prior_values.reshape(reshape)
-    return np.broadcast_to(prior, target_shape).astype(float) / float(np.sum(prior))
+    prior = np.broadcast_to(prior_values.reshape(reshape), target_shape).astype(float)
+    return prior / float(np.sum(prior))
 
 
 def _marginalized_rows(
@@ -201,39 +321,46 @@ def _marginalized_rows(
     prior_kind: str,
 ) -> list[dict[str, object]]:
     rows: list[dict[str, object]] = []
+    param_cols = tuple(param_values)
+    observation_cols = tuple(col for col in param_cols if col in _OBSERVATION_PARAMETER_COLUMNS)
+    dynamics_cols = tuple(col for col in param_cols if col not in observation_cols)
     grid_points = int(np.prod([len(values) for values in param_values.values()]))
     grid_description = ";".join(f"{col}={','.join(f'{value:g}' for value in values)}" for col, values in param_values.items())
     for row_index, event in event_table.iterrows():
         representative = source.iloc[row_index]
-        rows.append(
-            {
-                "status": "success",
-                "session": event["session"],
-                "event_index": int(event["event_index"]),
-                "model": spec.output_model,
-                "requested_model": spec.output_model,
-                "model_family": "trajectory",
-                "log_evidence": float(marginalized[row_index]),
-                "n_time": int(representative["n_time"]),
-                "n_spikes": int(representative["n_spikes"]),
-                "runtime_s": float(representative["runtime_s"]),
-                "error": "",
-                "bin_size_cm": float(representative["bin_size_cm"]),
-                "smoothing_sigma_bins": float(representative["smoothing_sigma_bins"]),
-                "min_speed_cm_s": float(representative["min_speed_cm_s"]),
-                "time_bin_s": float(representative["time_bin_s"]),
-                "diagnostic_state_space_marginalized_source_model": spec.source_model,
-                "diagnostic_state_space_marginalization_prior": prior_kind,
-                "diagnostic_state_space_marginalization_grid_points": grid_points,
-                "diagnostic_state_space_marginalization_grid": grid_description,
-            }
-        )
+        row: dict[str, object] = {
+            "status": "success",
+            "session": event["session"],
+            "event_index": int(event["event_index"]),
+            "model": spec.output_model,
+            "requested_model": spec.output_model,
+            "model_family": "trajectory",
+            "log_evidence": float(marginalized[row_index]),
+            "error": "",
+            "diagnostic_state_space_marginalized_source_model": spec.source_model,
+            "diagnostic_state_space_marginalization_prior": prior_kind,
+            "diagnostic_state_space_marginalization_grid_points": grid_points,
+            "diagnostic_state_space_marginalized_dynamics_parameters": " ".join(dynamics_cols),
+            "diagnostic_state_space_marginalized_observation_parameters": " ".join(observation_cols),
+            "diagnostic_state_space_marginalization_grid": grid_description,
+        }
+        for col in _OUTPUT_METADATA_COLUMNS:
+            if col not in source.columns:
+                continue
+            value = representative[col]
+            if pd.isna(value):
+                row[col] = np.nan
+            elif col in _INTEGER_METADATA_COLUMNS:
+                row[col] = int(value)
+            else:
+                row[col] = float(value)
+        rows.append(row)
     return rows
 
 
 def _best_parameter_rows(spec: _ModelSpec, event_table: pd.DataFrame, grid: np.ndarray, param_values: dict[str, np.ndarray]) -> list[dict[str, object]]:
     rows: list[dict[str, object]] = []
-    param_cols = list(spec.param_cols)
+    param_cols = list(param_values)
     for event_row, event in event_table.iterrows():
         flat_best = int(np.nanargmax(grid[event_row].reshape(-1)))
         indices = np.unravel_index(flat_best, grid.shape[1:])
@@ -260,7 +387,7 @@ def _prior_rows(spec: _ModelSpec, param_values: dict[str, np.ndarray], prior: np
             "prior": prior_kind,
             "prior_weight": float(prior[indices]),
         }
-        for col, idx in zip(spec.param_cols, indices, strict=True):
+        for col, idx in zip(param_values, indices, strict=True):
             row[col] = float(param_values[col][idx])
         rows.append(row)
     return rows
@@ -272,9 +399,19 @@ def main() -> int:
     parser.add_argument("--output", default="results/state-space-marginalized-evidence")
     parser.add_argument("--models", default=" ".join(_DEFAULT_MODELS), help="Models to marginalize: diffusion momentum")
     parser.add_argument("--prior", choices=("empirical", "uniform"), default="empirical")
+    parser.add_argument(
+        "--observation-parameters",
+        choices=("auto", "all", "none"),
+        default="auto",
+        help=(
+            "Observation hyperparameters to include in the marginalization grid: "
+            "auto includes present columns with multiple values, all includes present columns even if singleton, "
+            "and none reproduces dynamics-only marginalization."
+        ),
+    )
     args = parser.parse_args()
     models = tuple(_canonical_model(item) for item in args.models.replace(",", " ").split() if item.strip())
-    tables = marginalize_sweep(args.input, args.output, models=models, prior=args.prior)
+    tables = marginalize_sweep(args.input, args.output, models=models, prior=args.prior, observation_parameters=args.observation_parameters)
     print(tables["model_evidence_summary"].to_string(index=False))
     print("\nBest-model counts:")
     print(tables["best_model_counts"].to_string(index=False))

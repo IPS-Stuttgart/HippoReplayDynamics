@@ -1,7 +1,8 @@
-"""State-space and IMM replay benchmarks for hippocampal open-field data."""
+'''State-space and IMM replay benchmarks for hippocampal open-field data.'''
 # ruff: noqa: E402
 
 from . import clusterless_ground_truth as _clusterless_ground_truth
+from . import goal_state_space_integration as _goal_state_space_integration
 from . import ground_truth as _ground_truth
 from . import pyrecest_score_metadata as _pyrecest_score_metadata
 from . import score_metadata as _score_metadata
@@ -12,6 +13,7 @@ from . import simulation_recovery as _simulation_recovery
 _score_metadata.apply_model_hyperparam_patch()
 _clusterless_ground_truth.apply_clusterless_ground_truth_patch()
 _pyrecest_score_metadata.apply_pyrecest_score_metadata_patch()
+_goal_state_space_integration.apply_goal_state_space_patch()
 
 from .benchmarks import BenchmarkConfig, BenchmarkResult, run_open_field_benchmark
 from .clusterless import (
@@ -25,6 +27,7 @@ from .data import ReplaySession, load_open_field_sessions
 from .duration_dynamics import apply_duration_dynamics_patch as _apply_duration_dynamics_patch
 from .encoding import EncodingConfig, EncodingModel, build_emissions, fit_place_field_encoding
 from .evidence_reporting import patch_simulation_recovery_module as _patch_simulation_recovery_module
+from .goal_state_space import GoalStateSpaceReplayModel
 from .ground_truth import (
     GroundTruthConfig,
     compare_scores_to_ground_truth,
@@ -68,37 +71,38 @@ SimulationRecoveryResult = _simulation_recovery.SimulationRecoveryResult
 run_session_simulation_recovery = _simulation_recovery.run_session_simulation_recovery
 
 __all__ = [
-    "BenchmarkConfig",
-    "BenchmarkResult",
-    "CandidateKinematicModel",
-    "ClusterlessMarkConfig",
-    "ClusterlessMarkEncoding",
-    "ClusterlessStateSpaceReplayModel",
-    "DiffusionModel",
-    "EncodingConfig",
-    "EncodingModel",
-    "EventScore",
-    "GroundTruthConfig",
-    "PyRecEstGoalParticleModel",
-    "PyRecEstSweepConfig",
-    "PyRecEstSweepResult",
-    "RandomModel",
-    "ReplaySession",
-    "SimulationRecoveryConfig",
-    "SimulationRecoveryResult",
-    "StationaryModel",
-    "build_emissions",
-    "build_clusterless_mark_emissions",
-    "compare_scores_to_ground_truth",
-    "fit_place_field_encoding",
-    "fit_clusterless_mark_encoding",
-    "generate_behavioral_ground_truth",
-    "infer_well_locations",
-    "label_session_behavioral_ground_truth",
-    "load_open_field_sessions",
-    "run_open_field_benchmark",
-    "run_pyrecest_parameter_sweep",
-    "run_session_simulation_recovery",
-    "score_model",
-    "write_pyrecest_sweep_outputs",
+    'BenchmarkConfig',
+    'BenchmarkResult',
+    'CandidateKinematicModel',
+    'ClusterlessMarkConfig',
+    'ClusterlessMarkEncoding',
+    'ClusterlessStateSpaceReplayModel',
+    'DiffusionModel',
+    'EncodingConfig',
+    'EncodingModel',
+    'EventScore',
+    'GoalStateSpaceReplayModel',
+    'GroundTruthConfig',
+    'PyRecEstGoalParticleModel',
+    'PyRecEstSweepConfig',
+    'PyRecEstSweepResult',
+    'RandomModel',
+    'ReplaySession',
+    'SimulationRecoveryConfig',
+    'SimulationRecoveryResult',
+    'StationaryModel',
+    'build_emissions',
+    'build_clusterless_mark_emissions',
+    'compare_scores_to_ground_truth',
+    'fit_place_field_encoding',
+    'fit_clusterless_mark_encoding',
+    'generate_behavioral_ground_truth',
+    'infer_well_locations',
+    'label_session_behavioral_ground_truth',
+    'load_open_field_sessions',
+    'run_open_field_benchmark',
+    'run_pyrecest_parameter_sweep',
+    'run_session_simulation_recovery',
+    'score_model',
+    'write_pyrecest_sweep_outputs',
 ]

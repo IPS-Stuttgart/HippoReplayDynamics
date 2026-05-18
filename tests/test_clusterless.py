@@ -123,7 +123,20 @@ def test_clusterless_emissions_apply_spike_rate_scale_to_intensity():
 
 def test_clusterless_emissions_reject_nonpositive_spike_rate_scale():
     session = _clusterless_session()
-    encoding = fit_clusterless_mark_encoding(session)
+    encoding = fit_clusterless_mark_encoding(
+        session,
+        ClusterlessMarkConfig(
+            encoding=EncodingConfig(
+                bin_size_cm=10.0,
+                smoothing_sigma_bins=0.0,
+                min_speed_cm_s=0.0,
+                arena_padding_cm=5.0,
+            ),
+            mark_smoothing_sigma_bins=0.0,
+            mark_prior_count=0.1,
+            mark_variance_floor=0.05,
+        ),
+    )
 
     with pytest.raises(ValueError, match="spike_rate_scale must be positive"):
         build_clusterless_mark_emissions(

@@ -43,7 +43,7 @@ class StateSpaceDecoderConfig:
     momentum_initial_sigma_cm_sqrt_s: float = 85.0
     momentum_velocity_decay: float = 0.95
     momentum_candidate_top_k: int = 128
-    momentum_predicted_candidate_top_k: int = 0
+    momentum_predicted_candidate_top_k: int = 8
 
 
 @dataclass
@@ -92,11 +92,12 @@ class StateSpaceReplayModel:
 
         The base support is the per-bin emission top-k set. When
         ``momentum_predicted_candidate_top_k`` is positive and ``bin_centers`` is
-        supplied, each interior time bin is enlarged by states close to
-        forward- and backward-momentum predictions from neighbouring emission
+        supplied, each time bin is enlarged by nearest grid states to forward-
+        and backward-momentum predictions built from the top adjacent emission
         candidates. This keeps deterministic emission support while recovering
         dynamically plausible states whose local emission rank is too low for
-        the fixed top-k beam.
+        the fixed top-k beam. The augmentation is bounded by the prediction top-k
+        and never changes externally supplied candidate supports.
         """
 
         assert self.config is not None
@@ -256,33 +257,33 @@ def _augment_candidates_with_momentum_predictions(
     predicted_top_k: int,
     velocity_decay: float,
 ) -> list[np.ndarray]:
-    """Union emission candidates with nearest states to momentum predictions."""
+    """Union emission candidates with states nearest to bounded momentum predictions."""
 
     if predicted_top_k <= 0:
         return [np.asarray(curr, dtype=int).copy() for curr in candidates]
-    n_bins = bin_centers.shape[0]
-    top_k = min(int(predicted_top_k), n_bins)
+    top_k = max(1, int(predicted_top_k))
     augmented = [set(int(idx) for idx in np.asarray(curr, dtype=int)) for curr in candidates]
 
     for time_index in range(2, len(candidates)):
-        prev_prev = np.asarray(candidates[time_index - 2], dtype=int)
-        prev = np.asarray(candidates[time_index - 1], dtype=int)
-        _add_nearest_predictions(
-            augmented[time_index],
-            bin_centers,
-            bin_centers[prev][None, :, :] + velocity_decay * (bin_centers[prev][None, :, :] - bin_centers[prev_prev][:, None, :]),
-            top_k,
+        prev_prev = np.asarray(candidates[time_index - 2], dtype=int)[:top_k]
+        prev = np.asarray(candidates[time_index - 1], dtype=int)[:top_k]
+        if prev_prev.size == 0 or prev.size == 0:
+            continue
+        predictions = bin_centers[prev][None, :, :] + velocity_decay * (
+            bin_centers[prev][None, :, :] - bin_centers[prev_prev][:, None, :]
         )
+        _add_nearest_predictions(augmented[time_index], bin_centers, predictions)
 
-    for time_index in range(len(candidates) - 2):
-        nxt = np.asarray(candidates[time_index + 1], dtype=int)
-        nxt_nxt = np.asarray(candidates[time_index + 2], dtype=int)
-        _add_nearest_predictions(
-            augmented[time_index],
-            bin_centers,
-            bin_centers[nxt][None, :, :] - (bin_centers[nxt_nxt][:, None, :] - bin_centers[nxt][None, :, :]) / max(velocity_decay, np.finfo(float).eps),
-            top_k,
-        )
+    if abs(velocity_decay) > np.finfo(float).eps:
+        for time_index in range(len(candidates) - 2):
+            nxt = np.asarray(candidates[time_index + 1], dtype=int)[:top_k]
+            nxt_nxt = np.asarray(candidates[time_index + 2], dtype=int)[:top_k]
+            if nxt.size == 0 or nxt_nxt.size == 0:
+                continue
+            predictions = bin_centers[nxt][None, :, :] - (
+                bin_centers[nxt_nxt][:, None, :] - bin_centers[nxt][None, :, :]
+            ) / velocity_decay
+            _add_nearest_predictions(augmented[time_index], bin_centers, predictions)
 
     return [np.fromiter(sorted(curr), dtype=int) for curr in augmented]
 
@@ -291,15 +292,10 @@ def _add_nearest_predictions(
     target: set[int],
     bin_centers: np.ndarray,
     predictions: np.ndarray,
-    top_k: int,
 ) -> None:
     flat = predictions.reshape(-1, bin_centers.shape[1])
     if flat.size == 0:
         return
     for predicted in flat:
         dist2 = np.sum((bin_centers - predicted[None, :]) ** 2, axis=1)
-        if top_k >= bin_centers.shape[0]:
-            nearest = np.arange(bin_centers.shape[0], dtype=int)
-        else:
-            nearest = np.argpartition(dist2, top_k - 1)[:top_k]
-        target.update(int(idx) for idx in nearest)
+        target.add(int(np.argmin(dist2)))

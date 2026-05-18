@@ -14,6 +14,13 @@ _CONSTANT_SETTING_COLUMNS = (
     "clusterless_mark_prior_count",
     "clusterless_mark_variance_floor",
     "clusterless_rate_floor_hz",
+    "clusterless_mark_likelihood",
+    "clusterless_mark_kde_bandwidth",
+    "clusterless_mark_kde_spatial_sigma_bins",
+    "clusterless_mark_kde_max_neighbors",
+    "diagnostic_clusterless_mark_likelihood",
+    "diagnostic_clusterless_mark_kde_bandwidth",
+    "diagnostic_clusterless_mark_kde_max_neighbors",
 )
 
 

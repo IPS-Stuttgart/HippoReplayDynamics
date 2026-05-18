@@ -72,7 +72,12 @@ def emission_config_for_scores(
             scores_frame,
             ("emission_time_bin_s", "time_bin_s"),
             fallback.time_bin_s,
-        )
+        ),
+        spike_rate_scale=_unique_float_from_columns(
+            scores_frame,
+            ("emission_spike_rate_scale", "spike_rate_scale"),
+            fallback.spike_rate_scale,
+        ),
     )
 
 
@@ -239,6 +244,7 @@ def apply_model_hyperparam_patch() -> None:
             "encoding_arena_padding_cm": float(config.encoding.arena_padding_cm),
             "encoding_use_excitatory": bool(config.encoding.use_excitatory),
             "emission_time_bin_s": float(config.emissions.time_bin_s),
+            "emission_spike_rate_scale": float(config.emissions.spike_rate_scale),
             "candidate_top_k": int(cfg(config, "candidate_top_k", 64)),
             "candidate_stationary_sigma_cm": float(cfg(config, "stationary_sigma_cm", 2.0)),
             "candidate_diffusion_sigma_cm": float(cfg(config, "diffusion_sigma_cm", 12.0)),

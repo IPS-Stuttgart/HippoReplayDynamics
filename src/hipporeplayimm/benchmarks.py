@@ -231,11 +231,18 @@ def _score_session(session: ReplaySession, config: BenchmarkConfig) -> list[dict
 
 def _score_train_joint_model(model, train_emissions, joint_emissions, bin_centers):
     if hasattr(model, "candidate_indices"):
-        candidates = model.candidate_indices(train_emissions)
+        candidates = _candidate_indices_for_model(model, train_emissions, bin_centers)
         train_score = model.score(train_emissions, bin_centers, candidate_indices=candidates)
         joint_score = model.score(joint_emissions, bin_centers, candidate_indices=candidates)
         return train_score, joint_score
     return model.score(train_emissions, bin_centers), model.score(joint_emissions, bin_centers)
+
+
+def _candidate_indices_for_model(model, emissions, bin_centers):
+    try:
+        return model.candidate_indices(emissions, bin_centers)
+    except TypeError:
+        return model.candidate_indices(emissions)
 
 
 def _is_clusterless_model(model: object) -> bool:
@@ -527,8 +534,9 @@ def _add_relative_metrics(frame: pd.DataFrame) -> pd.DataFrame:
         / denom.loc[truncated_vs_exact_rows]
     )
 
-    has_truncated_static_baseline = merged["best_static_truncated_lower_bound_heldout_log_likelihood"].notna()
-    truncated_vs_truncated_rows = truncated_rows & has_truncated_static_baseline
+    truncated_vs_truncated_rows = truncated_rows & merged[
+        "best_static_truncated_lower_bound_heldout_log_likelihood"
+    ].notna()
     merged["delta_vs_best_static_truncated_lower_bound"] = np.nan
     merged.loc[truncated_vs_truncated_rows, "delta_vs_best_static_truncated_lower_bound"] = (
         merged.loc[truncated_vs_truncated_rows, "heldout_log_likelihood"]

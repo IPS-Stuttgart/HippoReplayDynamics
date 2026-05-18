@@ -17,10 +17,10 @@ from .state_space_first_order import (
     _score_stationary,
 )
 from .state_space_utils import (
+    _adaptive_candidate_indices,
     _gaussian_transition_matrix,
     _mean_entropy,
     _per_bin_sigma,
-    _top_candidate_indices,
     _validate_candidate_indices,
 )
 
@@ -32,6 +32,15 @@ class StateSpaceDecoderConfig:
     Diffusion and momentum noise are specified in cm/sqrt(s). They are converted
     to per-bin standard deviations using the emission tensor's ``dt`` so that the
     same model can be evaluated with 1--3 ms replay bins.
+
+    Second-order momentum and IMM modes are candidate-pruned for scalability.
+    ``momentum_candidate_top_k`` is the minimum number of emission-ranked bins
+    retained per time bin.  ``momentum_candidate_min_mass`` adaptively expands
+    high-uncertainty rows until the normalized emission mass reaches the given
+    fraction, and ``momentum_candidate_halo_radius_cm`` optionally adds spatial
+    neighbors around selected bins.  Priors and transitions are still normalized
+    on the full grid, so expanded supports remain conservative truncated
+    full-grid evidences.
     """
 
     mode: str = "diffusion"
@@ -43,6 +52,9 @@ class StateSpaceDecoderConfig:
     momentum_initial_sigma_cm_sqrt_s: float = 85.0
     momentum_velocity_decay: float = 0.95
     momentum_candidate_top_k: int = 128
+    momentum_candidate_min_mass: float = 0.995
+    momentum_candidate_max_count: int = 256
+    momentum_candidate_halo_radius_cm: float = 0.0
 
 
 @dataclass
@@ -86,11 +98,25 @@ class StateSpaceReplayModel:
         elif self.config.mode != self.mode:
             self.config = replace(self.config, mode=self.mode)
 
-    def candidate_indices(self, emissions: LogEmissionTensor) -> list[np.ndarray]:
+    def candidate_indices(
+        self,
+        emissions: LogEmissionTensor,
+        bin_centers: np.ndarray | None = None,
+    ) -> list[np.ndarray]:
         """Return the candidate support used by pruned momentum/IMM recursions."""
 
         assert self.config is not None
-        return [_top_candidate_indices(row, self.config.momentum_candidate_top_k) for row in emissions.log_likelihood]
+        return [
+            _adaptive_candidate_indices(
+                row,
+                self.config.momentum_candidate_top_k,
+                min_mass=self.config.momentum_candidate_min_mass,
+                max_candidates=self.config.momentum_candidate_max_count,
+                halo_bin_centers=bin_centers,
+                halo_radius_cm=self.config.momentum_candidate_halo_radius_cm,
+            )
+            for row in emissions.log_likelihood
+        ]
 
     def score(
         self,
@@ -145,7 +171,7 @@ class StateSpaceReplayModel:
                 self.config.momentum_initial_sigma_cm_sqrt_s,
                 emissions.dt,
             )
-            candidates = self.candidate_indices(emissions) if candidate_indices is None else candidate_indices
+            candidates = self.candidate_indices(emissions, bin_centers) if candidate_indices is None else candidate_indices
             _validate_candidate_indices(candidates, emissions.n_time, emissions.n_bins)
             logp, trajectory, mode_post, masses = _score_imm_candidates(
                 emissions,
@@ -173,11 +199,12 @@ class StateSpaceReplayModel:
                     "state_space_imm_evidence_support": "truncated_full_grid",
                     "state_space_momentum_transition_sigma_cm": float(momentum_transition_sigma_cm),
                     "state_space_momentum_initial_transition_sigma_cm": float(momentum_initial_sigma_cm),
+                    **_candidate_support_diagnostics("state_space_imm", self.config, candidates),
                 }
             )
         elif self.mode == "momentum":
             transition_sigma_cm = _per_bin_sigma(self.config.momentum_sigma_cm_sqrt_s, emissions.dt)
-            candidates = self.candidate_indices(emissions) if candidate_indices is None else candidate_indices
+            candidates = self.candidate_indices(emissions, bin_centers) if candidate_indices is None else candidate_indices
             _validate_candidate_indices(candidates, emissions.n_time, emissions.n_bins)
             logp, trajectory, masses = _score_momentum_candidates(
                 emissions,
@@ -193,6 +220,7 @@ class StateSpaceReplayModel:
                 "state_space_momentum_candidate_support": "derived" if candidate_indices is None else "provided",
                 "state_space_momentum_trajectory_posterior": "smoothed_pair_marginal",
                 "state_space_momentum_evidence_support": "truncated_full_grid",
+                **_candidate_support_diagnostics("state_space_momentum", self.config, candidates),
             }
         else:  # pragma: no cover - __post_init__ validates this.
             raise ValueError(f"Unsupported state-space mode: {self.mode}")
@@ -224,3 +252,19 @@ class StateSpaceReplayModel:
             terminal_log_posterior=terminal,
             trajectory_log_posterior=trajectory,
         )
+
+
+def _candidate_support_diagnostics(
+    prefix: str,
+    config: StateSpaceDecoderConfig,
+    candidates: list[np.ndarray],
+) -> dict[str, float | int]:
+    counts = np.asarray([len(curr) for curr in candidates], dtype=float)
+    return {
+        f"{prefix}_candidate_min_mass": float(config.momentum_candidate_min_mass),
+        f"{prefix}_candidate_max_count": int(config.momentum_candidate_max_count),
+        f"{prefix}_candidate_halo_radius_cm": float(config.momentum_candidate_halo_radius_cm),
+        f"{prefix}_mean_candidate_count": float(np.mean(counts)),
+        f"{prefix}_min_candidate_count": int(np.min(counts)),
+        f"{prefix}_max_candidate_count": int(np.max(counts)),
+    }

@@ -8,6 +8,7 @@ from scipy.special import logsumexp
 
 EXACT_EVIDENCE_SUPPORT = "exact_full_grid"
 TRUNCATED_EVIDENCE_SUPPORT = "truncated_full_grid"
+DEGENERATE_SINGLE_BIN_EVIDENCE_SUPPORT = "degenerate_single_bin"
 EVIDENCE_SUPPORT_DIAGNOSTIC_COLUMNS = (
     "diagnostic_candidate_evidence_support",
     "diagnostic_state_space_momentum_evidence_support",
@@ -16,7 +17,7 @@ EVIDENCE_SUPPORT_DIAGNOSTIC_COLUMNS = (
 
 
 def evidence_support_from_row(row: pd.Series) -> str:
-    """Infer whether a score is exact evidence or a truncated lower bound."""
+    """Infer whether a score is exact evidence, a lower bound, or non-comparable."""
 
     status = row.get("status", "success")
     if pd.notna(status) and str(status) != "success":
@@ -30,6 +31,8 @@ def evidence_support_from_row(row: pd.Series) -> str:
             return TRUNCATED_EVIDENCE_SUPPORT
         if text == EXACT_EVIDENCE_SUPPORT:
             return EXACT_EVIDENCE_SUPPORT
+        if text == DEGENERATE_SINGLE_BIN_EVIDENCE_SUPPORT:
+            return DEGENERATE_SINGLE_BIN_EVIDENCE_SUPPORT
     return EXACT_EVIDENCE_SUPPORT
 
 

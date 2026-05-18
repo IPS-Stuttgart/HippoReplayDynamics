@@ -6,6 +6,7 @@ from dataclasses import dataclass, replace
 
 import numpy as np
 
+from .duration_dynamics import _decays, _ps, _pss, _rep, _scales, transition_durations_s
 from .encoding import LogEmissionTensor
 from .models import EventScore, _posterior_diagnostics
 from .state_space_candidates import _score_imm_candidates
@@ -19,7 +20,6 @@ from .state_space_first_order import (
 from .state_space_utils import (
     _gaussian_transition_matrix,
     _mean_entropy,
-    _per_bin_sigma,
     _top_candidate_indices,
     _validate_candidate_indices,
 )
@@ -30,8 +30,9 @@ class StateSpaceDecoderConfig:
     """Configuration for state-space replay baselines.
 
     Diffusion and momentum noise are specified in cm/sqrt(s). They are converted
-    to per-bin standard deviations using the emission tensor's ``dt`` so that the
-    same model can be evaluated with 1--3 ms replay bins.
+    to per-transition standard deviations using emission centre-to-centre
+    transition durations so the same model can be evaluated with irregular or
+    partial replay bins.
     """
 
     mode: str = "diffusion"
@@ -104,6 +105,8 @@ class StateSpaceReplayModel:
             raise ValueError("emissions.n_bins must match bin_centers rows")
         assert self.config is not None
 
+        transition_durations = transition_durations_s(emissions)
+
         if self.mode == "stationary":
             logp, trajectory = _score_stationary(emissions)
             transition_sigma_cm = 0.0
@@ -113,17 +116,38 @@ class StateSpaceReplayModel:
             transition_sigma_cm = float("inf")
             extra = {}
         elif self.mode == "diffusion":
-            transition_sigma_cm = _per_bin_sigma(self.config.diffusion_sigma_cm_sqrt_s, emissions.dt)
-            transition = _gaussian_transition_matrix(bin_centers, transition_sigma_cm, self.config.max_step_sigma)
-            logp, trajectory = _forward_backward_first_order(emissions.log_likelihood, transition)
+            transition_sigmas_cm = _pss(
+                self.config.diffusion_sigma_cm_sqrt_s,
+                transition_durations,
+                float(emissions.dt),
+            )
+            transition_sigma_cm = _rep(
+                self.config.diffusion_sigma_cm_sqrt_s,
+                transition_durations,
+                float(emissions.dt),
+            )
+            transitions = [
+                _gaussian_transition_matrix(bin_centers, float(sigma), self.config.max_step_sigma)
+                for sigma in transition_sigmas_cm
+            ]
+            logp, trajectory = _forward_backward_first_order(emissions.log_likelihood, transitions)
             extra = {}
         elif self.mode == "first-order-imm":
-            transition_sigma_cm = _per_bin_sigma(self.config.diffusion_sigma_cm_sqrt_s, emissions.dt)
+            transition_sigmas_cm = _pss(
+                self.config.diffusion_sigma_cm_sqrt_s,
+                transition_durations,
+                float(emissions.dt),
+            )
+            transition_sigma_cm = _rep(
+                self.config.diffusion_sigma_cm_sqrt_s,
+                transition_durations,
+                float(emissions.dt),
+            )
             logp, trajectory, mode_post = _score_first_order_imm(
                 emissions.log_likelihood,
                 bin_centers,
                 stationary_sigma_cm=self.config.stationary_sigma_cm,
-                diffusion_sigma_cm=transition_sigma_cm,
+                diffusion_sigma_cm=transition_sigmas_cm,
                 max_step_sigma=self.config.max_step_sigma,
                 mode_stickiness=self.config.imm_mode_stickiness,
             )
@@ -139,22 +163,47 @@ class StateSpaceReplayModel:
                 }
             )
         elif self.mode == "imm":
-            transition_sigma_cm = _per_bin_sigma(self.config.diffusion_sigma_cm_sqrt_s, emissions.dt)
-            momentum_transition_sigma_cm = _per_bin_sigma(self.config.momentum_sigma_cm_sqrt_s, emissions.dt)
-            momentum_initial_sigma_cm = _per_bin_sigma(
-                self.config.momentum_initial_sigma_cm_sqrt_s,
-                emissions.dt,
+            diffusion_sigmas_cm = _pss(
+                self.config.diffusion_sigma_cm_sqrt_s,
+                transition_durations,
+                float(emissions.dt),
             )
+            transition_sigma_cm = _rep(
+                self.config.diffusion_sigma_cm_sqrt_s,
+                transition_durations,
+                float(emissions.dt),
+            )
+            momentum_sigmas_cm = _pss(
+                self.config.momentum_sigma_cm_sqrt_s,
+                transition_durations,
+                float(emissions.dt),
+            )
+            momentum_transition_sigma_cm = _rep(
+                self.config.momentum_sigma_cm_sqrt_s,
+                transition_durations,
+                float(emissions.dt),
+            )
+            momentum_initial_sigma_cm = _ps(
+                self.config.momentum_initial_sigma_cm_sqrt_s,
+                transition_durations[0] if len(transition_durations) else float(emissions.dt),
+            )
+            velocity_decays = _decays(
+                self.config.momentum_velocity_decay,
+                transition_durations,
+                float(emissions.dt),
+            )
+            time_scales = _scales(transition_durations)
             candidates = self.candidate_indices(emissions) if candidate_indices is None else candidate_indices
             _validate_candidate_indices(candidates, emissions.n_time, emissions.n_bins)
             logp, trajectory, mode_post, masses = _score_imm_candidates(
                 emissions,
                 bin_centers,
                 stationary_sigma_cm=self.config.stationary_sigma_cm,
-                diffusion_sigma_cm=transition_sigma_cm,
-                momentum_sigma_cm=momentum_transition_sigma_cm,
+                diffusion_sigma_cm=diffusion_sigmas_cm,
+                momentum_sigma_cm=momentum_sigmas_cm,
                 momentum_initial_sigma_cm=momentum_initial_sigma_cm,
-                velocity_decay=self.config.momentum_velocity_decay,
+                velocity_decay=velocity_decays,
+                time_scales=time_scales,
                 mode_stickiness=self.config.imm_mode_stickiness,
                 candidate_indices=candidates,
             )
@@ -176,16 +225,36 @@ class StateSpaceReplayModel:
                 }
             )
         elif self.mode == "momentum":
-            transition_sigma_cm = _per_bin_sigma(self.config.momentum_sigma_cm_sqrt_s, emissions.dt)
+            transition_sigmas_cm = _pss(
+                self.config.momentum_sigma_cm_sqrt_s,
+                transition_durations,
+                float(emissions.dt),
+            )
+            transition_sigma_cm = _rep(
+                self.config.momentum_sigma_cm_sqrt_s,
+                transition_durations,
+                float(emissions.dt),
+            )
+            momentum_initial_sigma_cm = _ps(
+                self.config.momentum_initial_sigma_cm_sqrt_s,
+                transition_durations[0] if len(transition_durations) else float(emissions.dt),
+            )
+            velocity_decays = _decays(
+                self.config.momentum_velocity_decay,
+                transition_durations,
+                float(emissions.dt),
+            )
+            time_scales = _scales(transition_durations)
             candidates = self.candidate_indices(emissions) if candidate_indices is None else candidate_indices
             _validate_candidate_indices(candidates, emissions.n_time, emissions.n_bins)
             logp, trajectory, masses = _score_momentum_candidates(
                 emissions,
                 bin_centers,
                 candidates,
-                sigma_cm=transition_sigma_cm,
-                initial_sigma_cm=_per_bin_sigma(self.config.momentum_initial_sigma_cm_sqrt_s, emissions.dt),
-                velocity_decay=self.config.momentum_velocity_decay,
+                sigma_cm=transition_sigmas_cm,
+                initial_sigma_cm=momentum_initial_sigma_cm,
+                velocity_decay=velocity_decays,
+                time_scales=time_scales,
             )
             extra = {
                 "mean_candidate_log_mass": float(np.mean(masses)),
@@ -201,6 +270,7 @@ class StateSpaceReplayModel:
         diagnostics: dict[str, float | int | str] = {
             "state_space_mode": str(self.mode),
             "state_space_time_bin_s": float(emissions.dt),
+            "state_space_transition_durations": _format_transition_durations(transition_durations),
             "state_space_trajectory_posterior": 1,
             "state_space_trajectory_time_bins": int(emissions.n_time),
             "state_space_stationary_sigma_cm": float(self.config.stationary_sigma_cm),
@@ -224,3 +294,7 @@ class StateSpaceReplayModel:
             terminal_log_posterior=terminal,
             trajectory_log_posterior=trajectory,
         )
+
+
+def _format_transition_durations(durations: np.ndarray) -> str:
+    return ",".join(f"{duration:.12g}" for duration in durations)

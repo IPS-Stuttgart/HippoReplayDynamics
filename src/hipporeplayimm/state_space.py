@@ -26,6 +26,7 @@ from .state_space_first_order import (
     _score_stationary,
 )
 from .state_space_utils import (
+    _adaptive_candidate_indices,
     _as_log_probs,
     _candidate_log_masses,
     _full_grid_normalized_pairwise_gaussian_log_prob,
@@ -44,6 +45,7 @@ __all__ = [
     "LOG_ZERO",
     "StateSpaceDecoderConfig",
     "StateSpaceReplayModel",
+    "_adaptive_candidate_indices",
     "_advance_imm_pair_log_alpha",
     "_advance_momentum_pair",
     "_apply_transition",

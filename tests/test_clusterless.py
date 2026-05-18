@@ -42,6 +42,70 @@ def test_clusterless_emissions_use_mark_likelihood_to_localize_spikes():
     assert emissions.n_spikes == 1
     assert emissions.spike_counts.shape == (1, 1)
     assert emissions.log_likelihood[0, left_bin] > emissions.log_likelihood[0, right_bin]
+    assert emissions.metadata["clusterless_mark_likelihood"] == "local-kde"
+
+
+def test_clusterless_local_kde_preserves_multimodal_mark_structure():
+    session = _multimodal_clusterless_session()
+    common = dict(
+        encoding=EncodingConfig(
+            bin_size_cm=10.0,
+            smoothing_sigma_bins=0.0,
+            min_speed_cm_s=0.0,
+            arena_padding_cm=5.0,
+        ),
+        mark_smoothing_sigma_bins=0.0,
+        mark_prior_count=0.0,
+        mark_variance_floor=0.01,
+    )
+    kde_encoding = fit_clusterless_mark_encoding(
+        session,
+        ClusterlessMarkConfig(
+            **common,
+            mark_likelihood="local-kde",
+            mark_kde_spatial_sigma_bins=0.0,
+            mark_kde_bandwidth=0.2,
+            mark_kde_max_neighbors=4,
+        ),
+    )
+    gaussian_encoding = fit_clusterless_mark_encoding(
+        session,
+        ClusterlessMarkConfig(**common, mark_likelihood="diagonal-gaussian"),
+    )
+    left_bin = int(np.argmin(np.linalg.norm(kde_encoding.bin_centers - np.array([0.0, 0.0]), axis=1)))
+
+    kde_logp = kde_encoding.log_mark_likelihood(np.array([[0.05], [5.05]]))[:, left_bin]
+    gaussian_logp = gaussian_encoding.log_mark_likelihood(np.array([[0.05], [5.05]]))[:, left_bin]
+
+    assert kde_encoding.mark_likelihood == "local-kde"
+    assert kde_logp[0] > kde_logp[1]
+    assert gaussian_encoding.mark_likelihood == "diagonal-gaussian"
+    assert gaussian_logp[1] > gaussian_logp[0]
+
+
+def test_clusterless_diagonal_gaussian_mark_likelihood_remains_available():
+    session = _clusterless_session()
+    encoding = fit_clusterless_mark_encoding(
+        session,
+        ClusterlessMarkConfig(
+            encoding=EncodingConfig(
+                bin_size_cm=10.0,
+                smoothing_sigma_bins=0.0,
+                min_speed_cm_s=0.0,
+                arena_padding_cm=5.0,
+            ),
+            mark_likelihood="diagonal-gaussian",
+            mark_smoothing_sigma_bins=0.0,
+            mark_prior_count=0.1,
+            mark_variance_floor=0.05,
+        ),
+    )
+
+    likelihood = encoding.log_mark_likelihood(np.array([[0.0]]))
+
+    assert encoding.mark_likelihood == "diagonal-gaussian"
+    assert likelihood.shape == (1, encoding.n_bins)
+    assert encoding.mark_kde_neighbor_indices is None
 
 
 def test_clusterless_emissions_clip_bins_to_ripple_end_and_ignore_post_ripple_marks():
@@ -68,6 +132,7 @@ def test_clusterless_emissions_clip_bins_to_ripple_end_and_ignore_post_ripple_ma
             mark_smoothing_sigma_bins=0.0,
             mark_prior_count=0.1,
             mark_variance_floor=0.05,
+            mark_likelihood="diagonal-gaussian",
         ),
     )
 
@@ -99,6 +164,7 @@ def test_clusterless_emissions_apply_spike_rate_scale_to_intensity():
             mark_smoothing_sigma_bins=0.0,
             mark_prior_count=0.1,
             mark_variance_floor=0.05,
+            mark_likelihood="diagonal-gaussian",
         ),
     )
 
@@ -156,6 +222,7 @@ def test_clusterless_encoding_excludes_ripple_intervals_by_default():
         arena_padding_cm=5.0,
     )
     clusterless_kwargs = dict(
+        mark_likelihood="diagonal-gaussian",
         mark_smoothing_sigma_bins=0.0,
         mark_prior_count=0.0,
         mark_variance_floor=0.05,
@@ -195,6 +262,13 @@ def test_clusterless_encoding_requires_spike_marks():
         fit_clusterless_mark_encoding(session)
 
 
+def test_clusterless_encoding_rejects_unknown_mark_likelihood():
+    session = _clusterless_session()
+
+    with pytest.raises(ValueError, match="Unknown clusterless mark likelihood"):
+        fit_clusterless_mark_encoding(session, ClusterlessMarkConfig(mark_likelihood="not-a-model"))
+
+
 def test_clusterless_state_space_model_reports_clusterless_diagnostics():
     emissions = LogEmissionTensor(
         log_likelihood=np.log(np.array([[0.7, 0.3], [0.2, 0.8]])),
@@ -217,7 +291,7 @@ def test_clusterless_state_space_model_reports_clusterless_diagnostics():
     assert score.trajectory_log_posterior is not None
     assert np.allclose(logsumexp(score.trajectory_log_posterior, axis=1), 0.0)
     assert score.diagnostics["state_space_observation_model"] == "clusterless-marked-point-process"
-    assert score.diagnostics["clusterless_mark_likelihood"] == "diagonal-gaussian"
+    assert score.diagnostics["clusterless_mark_likelihood"] == "local-kde"
 
 
 def _clusterless_session() -> ReplaySession:
@@ -254,3 +328,20 @@ def _clusterless_session() -> ReplaySession:
             cell_ids=cell_ids,
         ),
     )
+
+
+def _multimodal_clusterless_session() -> ReplaySession:
+    session = _clusterless_session()
+    mark_times = np.array([0.2, 0.4, 0.6, 0.8, 3.2, 3.4, 3.6, 3.8, 4.2])
+    cell_ids = np.ones(mark_times.shape[0], dtype=int)
+    marks = np.array([[0.0], [0.1], [10.0], [10.1], [4.9], [5.0], [5.1], [5.2], [0.05]])
+    session.spikes = np.column_stack([mark_times, cell_ids])
+    session.spike_marks = SpikeMarkData(
+        times=mark_times,
+        marks=marks,
+        source_file="Spike_Data.mat",
+        source_variable="Spike_Amplitude_Marks",
+        feature_names=("amp",),
+        cell_ids=cell_ids,
+    )
+    return session

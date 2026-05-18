@@ -6,12 +6,14 @@ from . import ground_truth as _ground_truth
 from . import pyrecest_score_metadata as _pyrecest_score_metadata
 from . import score_metadata as _score_metadata
 from . import simulation_recovery as _simulation_recovery
+from . import spike_rate_metadata as _spike_rate_metadata
 
 # Keep score-table metadata and post-hoc decoding consistent before public
 # symbols are imported from the patched modules.
 _score_metadata.apply_model_hyperparam_patch()
 _clusterless_ground_truth.apply_clusterless_ground_truth_patch()
 _pyrecest_score_metadata.apply_pyrecest_score_metadata_patch()
+_spike_rate_metadata.apply_spike_rate_metadata_patch()
 
 from .benchmarks import BenchmarkConfig, BenchmarkResult, run_open_field_benchmark
 from .clusterless import (

@@ -56,10 +56,37 @@ from .sweeps import (
 _ground_truth._encoding_config_for_scores = _score_metadata.encoding_config_for_scores
 _ground_truth._emission_config_for_scores = _score_metadata.emission_config_for_scores
 
+
+def _synchronize_duration_patched_emission_builders() -> None:
+    """Update modules that imported emission builders before duration patching.
+
+    Package imports intentionally load benchmark and ground-truth entry points
+    before the duration dynamics patch is installed. Those modules import
+    ``build_emissions`` by value, so their aliases would otherwise continue to
+    point at the unwrapped builder and silently drop transition-duration
+    metadata for partial final bins.
+    """
+
+    import sys
+
+    from . import encoding as _encoding_module
+    from . import kd_reference as _kd_reference_module
+
+    for module in list(sys.modules.values()):
+        module_name = getattr(module, "__name__", "")
+        if not module_name.startswith("hipporeplayimm"):
+            continue
+        if hasattr(module, "build_emissions"):
+            module.build_emissions = _encoding_module.build_emissions
+        if hasattr(module, "build_kd_emissions"):
+            module.build_kd_emissions = _kd_reference_module.build_kd_emissions
+
+
 # Ensure replay dynamics use center-to-center transition durations when replay
 # emissions include a partial final bin.
 _apply_duration_dynamics_patch()
 _apply_state_space_imm_duration_patch()
+_synchronize_duration_patched_emission_builders()
 from .encoding import build_emissions as build_emissions  # noqa: E402,F401,F811
 
 # Keep synthetic recovery summaries from mixing exact evidences with truncated

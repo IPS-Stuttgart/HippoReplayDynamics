@@ -44,6 +44,52 @@ def test_clusterless_emissions_use_mark_likelihood_to_localize_spikes():
     assert emissions.log_likelihood[0, left_bin] > emissions.log_likelihood[0, right_bin]
 
 
+def test_clusterless_grouped_gaussian_mixture_uses_tetrode_specific_marks():
+    session = _clusterless_tetrode_session()
+    encoding = fit_clusterless_mark_encoding(
+        session,
+        ClusterlessMarkConfig(
+            encoding=EncodingConfig(
+                bin_size_cm=10.0,
+                smoothing_sigma_bins=0.0,
+                min_speed_cm_s=0.0,
+                arena_padding_cm=5.0,
+            ),
+            mark_smoothing_sigma_bins=0.0,
+            mark_prior_count=0.1,
+            mark_variance_floor=0.05,
+            mark_likelihood="grouped-gaussian-mixture",
+            mark_group_by="tetrode",
+        ),
+    )
+
+    emissions = build_clusterless_mark_emissions(
+        session,
+        encoding,
+        0,
+        EmissionConfig(time_bin_s=1.0),
+    )
+    left_bin = int(np.argmin(np.linalg.norm(encoding.bin_centers - np.array([0.0, 0.0]), axis=1)))
+    right_bin = int(np.argmin(np.linalg.norm(encoding.bin_centers - np.array([10.0, 0.0]), axis=1)))
+    model = ClusterlessStateSpaceReplayModel(
+        mode="diffusion",
+        config=StateSpaceDecoderConfig(mode="diffusion", diffusion_sigma_cm_sqrt_s=1.0, max_step_sigma=10.0),
+    )
+    score = model.score(emissions, encoding.bin_centers)
+
+    assert encoding.group_ids is not None
+    assert encoding.group_rate_hz is not None
+    assert encoding.group_ids.tolist() == [1, 2]
+    assert encoding.group_rate_hz.shape == (2, encoding.n_bins)
+    assert emissions.n_spikes == 1
+    assert emissions.spike_counts.shape == (1, 2)
+    assert emissions.cell_ids.tolist() == [1, 2]
+    assert emissions.log_likelihood[0, left_bin] > emissions.log_likelihood[0, right_bin]
+    assert score.diagnostics["clusterless_mark_likelihood"] == "grouped-gaussian-mixture"
+    assert score.diagnostics["clusterless_mark_group_by"] == "tetrode"
+    assert score.diagnostics["clusterless_mark_groups"] == 2
+
+
 def test_clusterless_emissions_clip_bins_to_ripple_end_and_ignore_post_ripple_marks():
     session = _clusterless_session()
     old_marks = session.spike_marks
@@ -237,6 +283,58 @@ def _clusterless_session() -> ReplaySession:
         spikes=spikes,
         tetrode_cell_ids=np.array([[1, 1]]),
         excitatory_neurons=np.array([1]),
+        inhibitory_neurons=np.array([]),
+        ripple_events=np.array([[4.0, 5.0, 4.5, 0.0, 0.0, 0.0]]),
+        run_times=np.array([[0.0, 5.0]]),
+        sleep_box_immobile_times=np.empty((0, 2)),
+        sleep_times=np.empty((0, 2)),
+        rem_times=np.empty((0, 2)),
+        well_sequence=None,
+        metadata={},
+        spike_marks=SpikeMarkData(
+            times=mark_times,
+            marks=marks,
+            source_file="Spike_Data.mat",
+            source_variable="Spike_Amplitude_Marks",
+            feature_names=("amp",),
+            cell_ids=cell_ids,
+        ),
+    )
+
+
+def _clusterless_tetrode_session() -> ReplaySession:
+    position_times = np.linspace(0.0, 5.0, 51)
+    x = np.where(position_times < 2.5, 0.0, 10.0)
+    y = np.zeros_like(x)
+    position = np.column_stack([position_times, x, y, np.zeros_like(x)])
+    mark_times = np.array([0.2, 0.4, 0.6, 0.25, 0.45, 0.65, 3.2, 3.4, 3.6, 3.25, 3.45, 3.65, 4.2])
+    cell_ids = np.array([1, 1, 1, 2, 2, 2, 1, 1, 1, 2, 2, 2, 2])
+    marks = np.array(
+        [
+            [0.0],
+            [0.1],
+            [-0.1],
+            [10.0],
+            [10.1],
+            [9.9],
+            [10.0],
+            [10.2],
+            [9.8],
+            [0.0],
+            [0.1],
+            [-0.1],
+            [10.05],
+        ]
+    )
+    spikes = np.column_stack([mark_times, cell_ids])
+    return ReplaySession(
+        rat="RatX",
+        name="OpenX",
+        path=None,
+        position=position,
+        spikes=spikes,
+        tetrode_cell_ids=np.array([[1, 1], [2, 2]]),
+        excitatory_neurons=np.array([1, 2]),
         inhibitory_neurons=np.array([]),
         ripple_events=np.array([[4.0, 5.0, 4.5, 0.0, 0.0, 0.0]]),
         run_times=np.array([[0.0, 5.0]]),

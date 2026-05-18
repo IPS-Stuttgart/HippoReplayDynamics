@@ -3,7 +3,7 @@
 The replay emission builders use each time bin's own observation duration for
 Poisson likelihoods. State-space dynamics, however, should use the elapsed time
 between emission-bin centres. This module centralizes that transition-duration
-logic so models can consume it natively instead of monkey-patching builders or
+logic so models can consume it natively instead of monkey-patching model
 scorers at import time.
 """
 
@@ -30,25 +30,37 @@ def transition_durations_s(emissions) -> np.ndarray:
 
 
 def attach_duration_metadata(emissions):
-    """Attach validated transition durations to an emission tensor.
-
-    This is kept for backwards compatibility with earlier releases where
-    duration support was installed through runtime patches. It no longer wraps
-    methods or mutates ``dt``.
-    """
+    """Attach validated transition durations to an emission tensor."""
 
     emissions.transition_durations = transition_durations_s(emissions)
     return emissions
 
 
 def apply_duration_dynamics_patch() -> None:
-    """Backward-compatible no-op.
+    """Install backwards-compatible emission-metadata wrappers only.
 
-    Duration-aware dynamics are implemented directly in the model recursions.
-    Existing callers may still invoke this function safely.
+    State-space duration dynamics are implemented directly in the model
+    recursions. The small builder wrapper remains for modules that imported
+    ``build_emissions`` before package initialization synchronized aliases.
     """
 
-    return None
+    import hipporeplayimm.encoding as encoding
+    import hipporeplayimm.kd_reference as kd_reference
+
+    _wrap_builder(encoding, "build_emissions")
+    _wrap_builder(kd_reference, "build_kd_emissions")
+
+
+def _wrap_builder(module, name: str) -> None:
+    builder = getattr(module, name)
+    if getattr(builder, "_duration_metadata_wrapped", False):
+        return
+
+    def wrapped(*args, _builder=builder, **kwargs):
+        return attach_duration_metadata(_builder(*args, **kwargs))
+
+    wrapped._duration_metadata_wrapped = True
+    setattr(module, name, wrapped)
 
 
 def _check_transition_durations(values, n_transitions: int, name: str) -> np.ndarray:

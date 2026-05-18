@@ -13,6 +13,7 @@ assert _SPEC.loader is not None
 _SPEC.loader.exec_module(benchmark_model_evidence)
 
 _events = benchmark_model_evidence._events
+_clusterless_mark_config = benchmark_model_evidence._clusterless_mark_config
 _add_evidence_columns = benchmark_model_evidence._add_evidence_columns
 _family = benchmark_model_evidence._family
 _models = benchmark_model_evidence._models
@@ -94,6 +95,27 @@ def test_model_evidence_accepts_clusterless_state_space_models():
     assert models["clusterless-state-space-imm"].name == "clusterless-state-space-imm"
     assert models["clusterless-state-space-diffusion"].config.diffusion_sigma_cm_sqrt_s == 42.0
     assert models["clusterless-state-space-momentum"].config.momentum_sigma_cm_sqrt_s == 43.0
+
+
+def test_model_evidence_clusterless_config_records_rate_floor():
+    args = argparse.Namespace(
+        bin_size_cm=6.0,
+        smoothing_sigma_bins=2.0,
+        min_speed_cm_s=5.0,
+        clusterless_mark_smoothing_sigma_bins=1.5,
+        clusterless_mark_prior_count=0.25,
+        clusterless_mark_variance_floor=0.75,
+        clusterless_rate_floor_hz=1e-3,
+    )
+
+    config = _clusterless_mark_config(args)
+
+    assert config.encoding is not None
+    assert config.encoding.bin_size_cm == 6.0
+    assert config.mark_smoothing_sigma_bins == 1.5
+    assert config.mark_prior_count == 0.25
+    assert config.mark_variance_floor == 0.75
+    assert config.rate_floor_hz == 1e-3
 
 
 def test_model_evidence_classifies_state_space_families():

@@ -114,7 +114,7 @@ def test_state_space_momentum_pruned_support_uses_full_grid_normalization():
         momentum_sigma_cm_sqrt_s=1.0,
     )
     model = StateSpaceReplayModel(mode="momentum", config=config)
-    candidates = model.candidate_indices(emissions)
+    candidates = model.candidate_indices(emissions, centers)
 
     score = model.score(emissions, centers)
 
@@ -158,11 +158,15 @@ def test_state_space_momentum_can_reuse_external_candidate_support():
         n_spikes=0,
     )
     centers = np.array([[0.0, 0.0], [1.0, 0.0], [2.0, 0.0], [3.0, 0.0]])
-    config = StateSpaceDecoderConfig(mode="momentum", momentum_candidate_top_k=2)
+    config = StateSpaceDecoderConfig(
+        mode="momentum",
+        momentum_candidate_top_k=2,
+        momentum_candidate_min_mass=0.0,
+    )
     model = SortedSpikeStateSpaceReplayModel(mode="momentum", config=config)
-    train_candidates = model.candidate_indices(train)
+    train_candidates = model.candidate_indices(train, centers)
 
-    derived_joint_candidates = model.candidate_indices(joint)
+    derived_joint_candidates = model.candidate_indices(joint, centers)
     provided_score = model.score(joint, centers, candidate_indices=train_candidates)
     derived_score = model.score(joint, centers)
 
@@ -171,6 +175,69 @@ def test_state_space_momentum_can_reuse_external_candidate_support():
     assert np.isfinite(derived_score.log_likelihood)
     assert provided_score.diagnostics["state_space_momentum_candidate_support"] == "provided"
     assert derived_score.diagnostics["state_space_momentum_candidate_support"] == "derived"
+
+
+def test_state_space_candidate_support_expands_to_emission_mass():
+    emissions = LogEmissionTensor(
+        log_likelihood=np.log(
+            np.array(
+                [
+                    [0.50, 0.30, 0.19, 0.01],
+                    [0.40, 0.30, 0.20, 0.10],
+                    [0.70, 0.20, 0.08, 0.02],
+                ]
+            )
+        ),
+        spike_counts=np.zeros((3, 1), dtype=int),
+        times=np.array([0.0, 0.003, 0.006]),
+        dt=0.003,
+        cell_ids=np.array([1]),
+        n_spikes=0,
+    )
+    centers = np.array([[0.0, 0.0], [1.0, 0.0], [2.0, 0.0], [3.0, 0.0]])
+    config = StateSpaceDecoderConfig(
+        mode="momentum",
+        momentum_candidate_top_k=1,
+        momentum_candidate_min_mass=0.80,
+        momentum_candidate_max_count=4,
+    )
+
+    candidates = StateSpaceReplayModel(mode="momentum", config=config).candidate_indices(emissions, centers)
+
+    assert np.array_equal(candidates[0], np.array([0, 1]))
+    assert np.array_equal(candidates[1], np.array([0, 1, 2]))
+    assert np.array_equal(candidates[2], np.array([0, 1]))
+
+
+def test_state_space_candidate_support_adds_spatial_halo():
+    emissions = LogEmissionTensor(
+        log_likelihood=np.log(
+            np.array(
+                [
+                    [0.90, 0.09, 0.009, 0.001],
+                    [0.90, 0.09, 0.009, 0.001],
+                    [0.90, 0.09, 0.009, 0.001],
+                ]
+            )
+        ),
+        spike_counts=np.zeros((3, 1), dtype=int),
+        times=np.array([0.0, 0.003, 0.006]),
+        dt=0.003,
+        cell_ids=np.array([1]),
+        n_spikes=0,
+    )
+    centers = np.array([[0.0, 0.0], [1.0, 0.0], [2.0, 0.0], [3.0, 0.0]])
+    config = StateSpaceDecoderConfig(
+        mode="momentum",
+        momentum_candidate_top_k=1,
+        momentum_candidate_min_mass=0.0,
+        momentum_candidate_max_count=0,
+        momentum_candidate_halo_radius_cm=1.01,
+    )
+
+    candidates = StateSpaceReplayModel(mode="momentum", config=config).candidate_indices(emissions, centers)
+
+    assert set(candidates[0]) == {0, 1}
 
 
 def test_state_space_four_mode_imm_matches_bruteforce_tiny_grid():

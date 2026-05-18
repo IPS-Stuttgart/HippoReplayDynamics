@@ -1,6 +1,10 @@
+from types import SimpleNamespace
+
+import numpy as np
 import pandas as pd
 import pytest
 
+import hipporeplayimm.ground_truth as gt
 from hipporeplayimm.benchmarks import BenchmarkConfig, _benchmark_config_metadata
 from hipporeplayimm.encoding import EmissionConfig, EncodingConfig
 from hipporeplayimm.ground_truth import _emission_config_for_scores, _encoding_config_for_scores
@@ -96,6 +100,107 @@ def test_score_metadata_recovers_pyrecest_hyperparameters_from_aliases():
     assert kwargs["pyrecest_process_noise_sigma_cm_s"] == pytest.approx(11.0)
     assert kwargs["pyrecest_imm_mode_stickiness"] == pytest.approx(0.61)
     assert kwargs["pyrecest_imm_jump_velocity_decay"] == pytest.approx(0.25)
+
+
+def test_compare_ground_truth_restores_pyrecest_metadata_from_saved_scores(monkeypatch):
+    scores = pd.DataFrame(
+        {
+            "session": ["s1"],
+            "event_index": [0],
+            "model": ["pyrecest-goal-particle-imm"],
+            "pyrecest_particles": [73],
+            "diagnostic_pyrecest_alpha": [0.42],
+            "pyrecest_beta": [1.25],
+            "diagnostic_pyrecest_process_noise_sigma_cm_s": [11.0],
+            "pyrecest_position_jump_sigma_cm": [12.0],
+            "diagnostic_pyrecest_jump_probability": [0.13],
+            "pyrecest_goal_reset_probability": [0.14],
+            "diagnostic_pyrecest_position_proposal_probability": [0.15],
+            "pyrecest_initial_velocity_sigma_cm_s": [16.0],
+            "diagnostic_pyrecest_imm_mode_stickiness": [0.61],
+            "pyrecest_imm_stationary_velocity_decay": [0.21],
+            "diagnostic_pyrecest_imm_diffusion_velocity_decay": [0.22],
+            "pyrecest_imm_momentum_velocity_decay": [0.23],
+            "diagnostic_pyrecest_imm_jump_fraction": [0.24],
+            "pyrecest_imm_jump_velocity_decay": [0.25],
+        }
+    )
+    ground_truth = pd.DataFrame(
+        {
+            "session": ["s1"],
+            "event_index": [0],
+            "true_well_id": [np.nan],
+            "true_well_x": [np.nan],
+            "true_well_y": [np.nan],
+            "valid_label": [False],
+        }
+    )
+    captured_configs = []
+
+    class FakeEncoding:
+        bin_centers = np.asarray([[0.0, 0.0], [1.0, 0.0]])
+        cell_ids = np.asarray([1, 2])
+
+    class FakeModel:
+        def score(self, emissions, bin_centers):
+            del emissions, bin_centers
+            return SimpleNamespace(
+                terminal_log_posterior=np.log(np.asarray([0.25, 0.75]))
+            )
+
+    def fake_build_models(config, session=None):
+        del session
+        captured_configs.append(config)
+        return {"pyrecest-goal-particle-imm": FakeModel()}
+
+    monkeypatch.setattr(gt, "_load_or_generate_ground_truth", lambda *args, **kwargs: ground_truth)
+    monkeypatch.setattr(gt, "load_open_field_sessions", lambda root: [SimpleNamespace(session_id="s1")])
+    monkeypatch.setattr(gt, "fit_place_field_encoding", lambda *args, **kwargs: FakeEncoding())
+    monkeypatch.setattr(gt, "build_emissions", lambda *args, **kwargs: SimpleNamespace(n_time=1))
+    monkeypatch.setattr(
+        gt,
+        "infer_well_locations",
+        lambda *args, **kwargs: pd.DataFrame(columns=["well_id", "well_x", "well_y"]),
+    )
+    monkeypatch.setattr(gt, "_build_models", fake_build_models)
+
+    gt.compare_scores_to_ground_truth(
+        "unused-root",
+        scores,
+        pyrecest_particles=999,
+        pyrecest_alpha=0.99,
+        pyrecest_beta=0.98,
+        pyrecest_process_noise_sigma_cm_s=97.0,
+        pyrecest_position_jump_sigma_cm=96.0,
+        pyrecest_jump_probability=0.95,
+        pyrecest_goal_reset_probability=0.94,
+        pyrecest_position_proposal_probability=0.93,
+        pyrecest_initial_velocity_sigma_cm_s=92.0,
+        pyrecest_imm_mode_stickiness=0.91,
+        pyrecest_imm_stationary_velocity_decay=0.90,
+        pyrecest_imm_diffusion_velocity_decay=0.89,
+        pyrecest_imm_momentum_velocity_decay=0.88,
+        pyrecest_imm_jump_fraction=0.87,
+        pyrecest_imm_jump_velocity_decay=0.86,
+    )
+
+    assert len(captured_configs) == 1
+    config = captured_configs[0]
+    assert config.pyrecest_particles == 73
+    assert config.pyrecest_alpha == pytest.approx(0.42)
+    assert config.pyrecest_beta == pytest.approx(1.25)
+    assert config.pyrecest_process_noise_sigma_cm_s == pytest.approx(11.0)
+    assert config.pyrecest_position_jump_sigma_cm == pytest.approx(12.0)
+    assert config.pyrecest_jump_probability == pytest.approx(0.13)
+    assert config.pyrecest_goal_reset_probability == pytest.approx(0.14)
+    assert config.pyrecest_position_proposal_probability == pytest.approx(0.15)
+    assert config.pyrecest_initial_velocity_sigma_cm_s == pytest.approx(16.0)
+    assert config.pyrecest_imm_mode_stickiness == pytest.approx(0.61)
+    assert config.pyrecest_imm_stationary_velocity_decay == pytest.approx(0.21)
+    assert config.pyrecest_imm_diffusion_velocity_decay == pytest.approx(0.22)
+    assert config.pyrecest_imm_momentum_velocity_decay == pytest.approx(0.23)
+    assert config.pyrecest_imm_jump_fraction == pytest.approx(0.24)
+    assert config.pyrecest_imm_jump_velocity_decay == pytest.approx(0.25)
 
 
 def test_score_metadata_rejects_conflicting_pyrecest_aliases():

@@ -68,14 +68,13 @@ def pyrecest_config_kwargs_for_scores(scores: pd.DataFrame, defaults: dict[str, 
 def apply_pyrecest_score_metadata_patch() -> None:
     from . import benchmarks as bench
     from . import ground_truth as gt
-    from .pyrecest_models import PyRecEstGoalParticleModel
+    from .pyrecest_models import PyRecEstGoalParticleIMMModel, PyRecEstGoalParticleModel
 
     if getattr(gt, "_pyrecest_score_metadata_patch_applied", False):
         return
 
     base_metadata = bench._benchmark_config_metadata
     base_compare = gt.compare_scores_to_ground_truth
-    base_score = PyRecEstGoalParticleModel.score
 
     def benchmark_config_metadata(config) -> dict[str, object]:
         metadata = dict(base_metadata(config))
@@ -88,14 +87,21 @@ def apply_pyrecest_score_metadata_patch() -> None:
         kwargs.update(pyrecest_config_kwargs_for_scores(frame, defaults))
         return base_compare(root, frame, **kwargs)
 
-    def score_with_metadata(self, emissions, bin_centers):
-        result = base_score(self, emissions, bin_centers)
-        result.diagnostics.update(_model_diagnostics(self))
-        return result
+    def _score_with_metadata(base_score):
+        def score_with_metadata(self, emissions, bin_centers):
+            result = base_score(self, emissions, bin_centers)
+            result.diagnostics.update(_model_diagnostics(self))
+            return result
+
+        score_with_metadata._pyrecest_metadata_wrapped = True
+        return score_with_metadata
 
     bench._benchmark_config_metadata = benchmark_config_metadata
     gt.compare_scores_to_ground_truth = compare_scores_to_ground_truth
-    PyRecEstGoalParticleModel.score = score_with_metadata
+    if not getattr(PyRecEstGoalParticleModel.score, "_pyrecest_metadata_wrapped", False):
+        PyRecEstGoalParticleModel.score = _score_with_metadata(PyRecEstGoalParticleModel.score)
+    if not getattr(PyRecEstGoalParticleIMMModel.score, "_pyrecest_metadata_wrapped", False):
+        PyRecEstGoalParticleIMMModel.score = _score_with_metadata(PyRecEstGoalParticleIMMModel.score)
     gt._pyrecest_score_metadata_patch_applied = True
 
 

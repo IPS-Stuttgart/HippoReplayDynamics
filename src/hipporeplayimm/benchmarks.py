@@ -137,7 +137,7 @@ def _score_session(session: ReplaySession, config: BenchmarkConfig) -> list[dict
     has_clusterless_models = any(_is_clusterless_model(model) for model in model_objects.values())
     clusterless_train_session: ReplaySession | None = None
     clusterless_joint_session: ReplaySession | None = None
-    clusterless_joint_encoding = None
+    clusterless_train_encoding = None
     if has_clusterless_models:
         clusterless_train_session = _session_with_mark_cell_subset(
             session,
@@ -150,11 +150,12 @@ def _score_session(session: ReplaySession, config: BenchmarkConfig) -> list[dict
             role="joint",
         )
         clusterless_config = _clusterless_mark_config(config)
-        # Use one joint observation model for both terms in
-        # log p(train + test) - log p(train), so the train contribution cancels
-        # under identical clusterless rate and mark-likelihood parameters.
-        clusterless_joint_encoding = fit_clusterless_mark_encoding(
-            clusterless_joint_session,
+        # Fit the marked-point-process observation model only on the train
+        # subset, then reuse it for both terms in log p(train + test)-log p(train).
+        # This keeps the subtraction under identical parameters without letting
+        # held-out test marks affect rate or mark-likelihood estimates.
+        clusterless_train_encoding = fit_clusterless_mark_encoding(
+            clusterless_train_session,
             clusterless_config,
         )
 
@@ -170,16 +171,16 @@ def _score_session(session: ReplaySession, config: BenchmarkConfig) -> list[dict
         if has_clusterless_models:
             assert clusterless_train_session is not None
             assert clusterless_joint_session is not None
-            assert clusterless_joint_encoding is not None
+            assert clusterless_train_encoding is not None
             clusterless_train_emissions = build_clusterless_mark_emissions(
                 clusterless_train_session,
-                clusterless_joint_encoding,
+                clusterless_train_encoding,
                 int(event_index),
                 config.emissions,
             )
             clusterless_joint_emissions = build_clusterless_mark_emissions(
                 clusterless_joint_session,
-                clusterless_joint_encoding,
+                clusterless_train_encoding,
                 int(event_index),
                 config.emissions,
             )
@@ -187,10 +188,10 @@ def _score_session(session: ReplaySession, config: BenchmarkConfig) -> list[dict
             if _is_clusterless_model(model):
                 assert clusterless_train_emissions is not None
                 assert clusterless_joint_emissions is not None
-                assert clusterless_joint_encoding is not None
+                assert clusterless_train_encoding is not None
                 model_train_emissions = clusterless_train_emissions
                 model_joint_emissions = clusterless_joint_emissions
-                model_bin_centers = clusterless_joint_encoding.bin_centers
+                model_bin_centers = clusterless_train_encoding.bin_centers
             else:
                 model_train_emissions = train_emissions
                 model_joint_emissions = joint_emissions

@@ -53,11 +53,24 @@ def test_validate_constant_settings_rejects_mixed_clusterless_hyperparameters():
         _validate_constant_settings(frame)
 
 
+def test_validate_constant_settings_rejects_mixed_clusterless_rate_floor():
+    frame = pd.DataFrame(
+        [
+            _row(event_index=0, clusterless_rate_floor_hz=1e-4),
+            _row(event_index=1, clusterless_rate_floor_hz=1e-3),
+        ]
+    )
+
+    with pytest.raises(ValueError, match="clusterless_rate_floor_hz"):
+        _validate_constant_settings(frame)
+
+
 def _row(
     *,
     event_index: int,
     spike_rate_scale: float = 1.0,
     clusterless_mark_prior_count: float = 1.0,
+    clusterless_rate_floor_hz: float = 1e-4,
 ) -> dict[str, object]:
     return {
         "status": "success",
@@ -79,4 +92,5 @@ def _row(
         "clusterless_mark_smoothing_sigma_bins": 1.0,
         "clusterless_mark_prior_count": clusterless_mark_prior_count,
         "clusterless_mark_variance_floor": 1.0,
+        "clusterless_rate_floor_hz": clusterless_rate_floor_hz,
     }

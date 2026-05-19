@@ -6,6 +6,14 @@ from dataclasses import dataclass, replace
 
 import numpy as np
 
+from .candidate_support import (
+    DEFAULT_CANDIDATE_MIN_LOG_MASS,
+    _adaptive_candidate_indices,
+    _augment_candidates_with_spatial_halo,
+    _candidate_min_mass_diagnostic,
+    _top_candidate_indices,
+)
+from .duration_dynamics import _decays, _ps, _pss, _rep, _scales, transition_durations_s
 from .encoding import LogEmissionTensor
 from .models import EventScore, _posterior_diagnostics
 from .state_space_candidates import _score_imm_candidates
@@ -19,8 +27,6 @@ from .state_space_first_order import (
 from .state_space_utils import (
     _gaussian_transition_matrix,
     _mean_entropy,
-    _per_bin_sigma,
-    _top_candidate_indices,
     _validate_candidate_indices,
 )
 
@@ -43,6 +49,9 @@ class StateSpaceDecoderConfig:
     momentum_initial_sigma_cm_sqrt_s: float = 85.0
     momentum_velocity_decay: float = 0.95
     momentum_candidate_top_k: int = 128
+    momentum_candidate_min_log_mass: float | None = DEFAULT_CANDIDATE_MIN_LOG_MASS
+    momentum_candidate_max_k: int | None = 512
+    momentum_candidate_halo_radius_cm: float = 0.0
     momentum_predicted_candidate_top_k: int = 8
 
 
@@ -123,6 +132,8 @@ class StateSpaceReplayModel:
         if emissions.n_bins != bin_centers.shape[0]:
             raise ValueError("emissions.n_bins must match bin_centers rows")
         assert self.config is not None
+        durations = transition_durations_s(emissions)
+        nominal_dt_s = float(emissions.dt)
 
         if self.mode == "stationary":
             logp, trajectory = _score_stationary(emissions)
@@ -133,17 +144,26 @@ class StateSpaceReplayModel:
             transition_sigma_cm = float("inf")
             extra = {}
         elif self.mode == "diffusion":
-            transition_sigma_cm = _per_bin_sigma(self.config.diffusion_sigma_cm_sqrt_s, emissions.dt)
-            transition = _gaussian_transition_matrix(bin_centers, transition_sigma_cm, self.config.max_step_sigma)
-            logp, trajectory = _forward_backward_first_order(emissions.log_likelihood, transition)
+            diffusion_sigmas_cm = _pss(self.config.diffusion_sigma_cm_sqrt_s, durations, nominal_dt_s)
+            transition_sigma_cm = _rep(self.config.diffusion_sigma_cm_sqrt_s, durations, nominal_dt_s)
+            transitions = [
+                _gaussian_transition_matrix(bin_centers, float(sigma), self.config.max_step_sigma)
+                for sigma in diffusion_sigmas_cm
+            ]
+            logp, trajectory = _forward_backward_first_order(emissions.log_likelihood, transitions)
             extra = {}
         elif self.mode == "first-order-imm":
-            transition_sigma_cm = _per_bin_sigma(self.config.diffusion_sigma_cm_sqrt_s, emissions.dt)
+            diffusion_sigmas_cm = _pss(self.config.diffusion_sigma_cm_sqrt_s, durations, nominal_dt_s)
+            transition_sigma_cm = _rep(self.config.diffusion_sigma_cm_sqrt_s, durations, nominal_dt_s)
+            diffusion_transitions = [
+                _gaussian_transition_matrix(bin_centers, float(sigma), self.config.max_step_sigma)
+                for sigma in diffusion_sigmas_cm
+            ]
             logp, trajectory, mode_post = _score_first_order_imm(
                 emissions.log_likelihood,
                 bin_centers,
                 stationary_sigma_cm=self.config.stationary_sigma_cm,
-                diffusion_sigma_cm=transition_sigma_cm,
+                diffusion_transitions=diffusion_transitions,
                 max_step_sigma=self.config.max_step_sigma,
                 mode_stickiness=self.config.imm_mode_stickiness,
             )
@@ -159,22 +179,25 @@ class StateSpaceReplayModel:
                 }
             )
         elif self.mode == "imm":
-            transition_sigma_cm = _per_bin_sigma(self.config.diffusion_sigma_cm_sqrt_s, emissions.dt)
-            momentum_transition_sigma_cm = _per_bin_sigma(self.config.momentum_sigma_cm_sqrt_s, emissions.dt)
-            momentum_initial_sigma_cm = _per_bin_sigma(
-                self.config.momentum_initial_sigma_cm_sqrt_s,
-                emissions.dt,
-            )
+            diffusion_sigmas_cm = _pss(self.config.diffusion_sigma_cm_sqrt_s, durations, nominal_dt_s)
+            transition_sigma_cm = _rep(self.config.diffusion_sigma_cm_sqrt_s, durations, nominal_dt_s)
+            momentum_sigmas_cm = _pss(self.config.momentum_sigma_cm_sqrt_s, durations, nominal_dt_s)
+            momentum_transition_sigma_cm = _rep(self.config.momentum_sigma_cm_sqrt_s, durations, nominal_dt_s)
+            initial_duration_s = float(durations[0]) if durations.size else nominal_dt_s
+            momentum_initial_sigma_cm = _ps(self.config.momentum_initial_sigma_cm_sqrt_s, initial_duration_s)
+            momentum_decay_coefficients = _decays(
+                self.config.momentum_velocity_decay, durations, nominal_dt_s
+            ) * _scales(durations)
             candidates = self.candidate_indices(emissions, bin_centers) if candidate_indices is None else candidate_indices
             _validate_candidate_indices(candidates, emissions.n_time, emissions.n_bins)
             logp, trajectory, mode_post, masses = _score_imm_candidates(
                 emissions,
                 bin_centers,
                 stationary_sigma_cm=self.config.stationary_sigma_cm,
-                diffusion_sigma_cm=transition_sigma_cm,
-                momentum_sigma_cm=momentum_transition_sigma_cm,
+                diffusion_sigma_cm=diffusion_sigmas_cm,
+                momentum_sigma_cm=momentum_sigmas_cm,
                 momentum_initial_sigma_cm=momentum_initial_sigma_cm,
-                velocity_decay=self.config.momentum_velocity_decay,
+                velocity_decay=momentum_decay_coefficients,
                 mode_stickiness=self.config.imm_mode_stickiness,
                 candidate_indices=candidates,
             )
@@ -189,8 +212,23 @@ class StateSpaceReplayModel:
                     "mean_candidate_count": float(np.mean([len(curr) for curr in candidates])),
                     "state_space_imm_modes": ",".join(names),
                     "state_space_imm_candidate_top_k": int(self.config.momentum_candidate_top_k),
+                    "state_space_imm_candidate_min_mass": _candidate_min_mass_diagnostic(
+                        self.config.momentum_candidate_min_log_mass
+                    ),
+                    "state_space_imm_candidate_max_k": (
+                        int(self.config.momentum_candidate_max_k)
+                        if self.config.momentum_candidate_max_k and self.config.momentum_candidate_max_k > 0
+                        else int(emissions.n_bins)
+                    ),
+                    "state_space_imm_candidate_halo_radius_cm": float(
+                        self.config.momentum_candidate_halo_radius_cm
+                    ),
                     "state_space_imm_predicted_candidate_top_k": int(self.config.momentum_predicted_candidate_top_k),
-                    "state_space_imm_candidate_support": "derived" if candidate_indices is None else "provided",
+                    "state_space_imm_candidate_support": (
+                        _state_space_candidate_support_label(self.config)
+                        if candidate_indices is None
+                        else "provided"
+                    ),
                     "state_space_imm_trajectory_posterior": "smoothed_pair_marginal",
                     "state_space_imm_evidence_support": "truncated_full_grid",
                     "state_space_momentum_transition_sigma_cm": float(momentum_transition_sigma_cm),
@@ -198,23 +236,44 @@ class StateSpaceReplayModel:
                 }
             )
         elif self.mode == "momentum":
-            transition_sigma_cm = _per_bin_sigma(self.config.momentum_sigma_cm_sqrt_s, emissions.dt)
+            momentum_sigmas_cm = _pss(self.config.momentum_sigma_cm_sqrt_s, durations, nominal_dt_s)
+            transition_sigma_cm = _rep(self.config.momentum_sigma_cm_sqrt_s, durations, nominal_dt_s)
+            initial_duration_s = float(durations[0]) if durations.size else nominal_dt_s
+            momentum_initial_sigma_cm = _ps(self.config.momentum_initial_sigma_cm_sqrt_s, initial_duration_s)
+            momentum_decay_coefficients = _decays(
+                self.config.momentum_velocity_decay, durations, nominal_dt_s
+            ) * _scales(durations)
             candidates = self.candidate_indices(emissions, bin_centers) if candidate_indices is None else candidate_indices
             _validate_candidate_indices(candidates, emissions.n_time, emissions.n_bins)
             logp, trajectory, masses = _score_momentum_candidates(
                 emissions,
                 bin_centers,
                 candidates,
-                sigma_cm=transition_sigma_cm,
-                initial_sigma_cm=_per_bin_sigma(self.config.momentum_initial_sigma_cm_sqrt_s, emissions.dt),
-                velocity_decay=self.config.momentum_velocity_decay,
+                sigma_cm=momentum_sigmas_cm,
+                initial_sigma_cm=momentum_initial_sigma_cm,
+                velocity_decay=momentum_decay_coefficients,
             )
             extra = {
                 "mean_candidate_log_mass": float(np.mean(masses)),
                 "mean_candidate_count": float(np.mean([len(curr) for curr in candidates])),
                 "state_space_momentum_candidate_top_k": int(self.config.momentum_candidate_top_k),
+                "state_space_momentum_candidate_min_mass": _candidate_min_mass_diagnostic(
+                    self.config.momentum_candidate_min_log_mass
+                ),
+                "state_space_momentum_candidate_max_k": (
+                    int(self.config.momentum_candidate_max_k)
+                    if self.config.momentum_candidate_max_k and self.config.momentum_candidate_max_k > 0
+                    else int(emissions.n_bins)
+                ),
+                "state_space_momentum_candidate_halo_radius_cm": float(
+                    self.config.momentum_candidate_halo_radius_cm
+                ),
                 "state_space_momentum_predicted_candidate_top_k": int(self.config.momentum_predicted_candidate_top_k),
-                "state_space_momentum_candidate_support": "derived" if candidate_indices is None else "provided",
+                "state_space_momentum_candidate_support": (
+                    _state_space_candidate_support_label(self.config)
+                    if candidate_indices is None
+                    else "provided"
+                ),
                 "state_space_momentum_trajectory_posterior": "smoothed_pair_marginal",
                 "state_space_momentum_evidence_support": "truncated_full_grid",
             }
@@ -225,6 +284,7 @@ class StateSpaceReplayModel:
         diagnostics: dict[str, float | int | str] = {
             "state_space_mode": str(self.mode),
             "state_space_time_bin_s": float(emissions.dt),
+            "state_space_transition_durations": ",".join(f"{duration:.12g}" for duration in durations),
             "state_space_trajectory_posterior": 1,
             "state_space_trajectory_time_bins": int(emissions.n_time),
             "state_space_stationary_sigma_cm": float(self.config.stationary_sigma_cm),
@@ -248,6 +308,17 @@ class StateSpaceReplayModel:
             terminal_log_posterior=terminal,
             trajectory_log_posterior=trajectory,
         )
+
+
+def _state_space_candidate_support_label(config: StateSpaceDecoderConfig) -> str:
+    adaptive = (
+        config.momentum_candidate_min_log_mass is not None
+        or config.momentum_candidate_halo_radius_cm > 0.0
+        or config.momentum_predicted_candidate_top_k > 0
+    )
+    if adaptive:
+        return "adaptive"
+    return "top_k"
 
 
 def _augment_candidates_with_momentum_predictions(

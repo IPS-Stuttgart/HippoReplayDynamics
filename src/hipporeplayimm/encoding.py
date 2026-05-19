@@ -91,6 +91,26 @@ class LogEmissionTensor:
     dt: float
     cell_ids: np.ndarray
     n_spikes: int
+    transition_durations: np.ndarray | None = None
+
+    def __post_init__(self) -> None:
+        """Validate optional center-to-center transition durations.
+
+        ``dt`` remains the representative bin duration for metadata and legacy
+        callers. ``transition_durations`` carries the native dynamics clock used
+        between consecutive emission bins, which matters when the final replay
+        bin is shorter than the nominal bin width.
+        """
+
+        if self.transition_durations is None:
+            return
+        durations = np.asarray(self.transition_durations, dtype=float)
+        expected_shape = (max(self.n_time - 1, 0),)
+        if durations.shape != expected_shape:
+            raise ValueError(f"transition_durations must have shape {expected_shape}, got {durations.shape}")
+        if not np.all(np.isfinite(durations)) or np.any(durations <= 0.0):
+            raise ValueError("transition_durations must contain finite positive values")
+        self.transition_durations = durations
 
     @property
     def n_time(self) -> int:
@@ -232,6 +252,7 @@ def build_emissions(
         dt=dt,
         cell_ids=encoding.cell_ids,
         n_spikes=int(counts.sum()),
+        transition_durations=np.diff(times),
     )
 
 

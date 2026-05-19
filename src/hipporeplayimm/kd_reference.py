@@ -24,6 +24,7 @@ from .encoding import (
     _frame_durations,
     _interp_positions,
     _positions_to_flat_bins,
+    _ripple_intervals,
     _speed_cm_s,
     _times_in_intervals,
 )
@@ -45,6 +46,7 @@ class KDEncodingConfig:
     rate_floor_hz: float = 1e-4
     min_peak_rate_hz: float = 2.0
     use_excitatory: bool = True
+    exclude_ripple_intervals: bool = True
 
 
 @dataclass(frozen=True)
@@ -90,7 +92,13 @@ def fit_kd_place_field_encoding(session: ReplaySession, config: KDEncodingConfig
     xy = position[:, 1:3]
     speed = _speed_cm_s(times, xy)
     in_run = _times_in_intervals(times, session.run_times)
-    movement = in_run & (speed >= config.min_speed_cm_s)
+    excluded_intervals = (
+        _ripple_intervals(session)
+        if config.exclude_ripple_intervals
+        else np.empty((0, 2), dtype=float)
+    )
+    in_excluded_interval = _times_in_intervals(times, excluded_intervals)
+    movement = in_run & ~in_excluded_interval & (speed >= config.min_speed_cm_s)
 
     x_edges = _fixed_edges(xy[:, 0], config.bin_size_cm, config.n_bins_x)
     y_edges = _fixed_edges(xy[:, 1], config.bin_size_cm, config.n_bins_y)
@@ -120,8 +128,14 @@ def fit_kd_place_field_encoding(session: ReplaySession, config: KDEncodingConfig
         spike_xy = _interp_positions(times, xy, spike_times)
         spike_speed = np.interp(spike_times, times, speed)
         spike_in_run = _times_in_intervals(spike_times, session.run_times)
+        spike_in_excluded_interval = _times_in_intervals(spike_times, excluded_intervals)
         spike_bins = _positions_to_flat_bins(spike_xy, x_edges, y_edges)
-        keep_spikes = spike_in_run & (spike_speed >= config.min_speed_cm_s) & (spike_bins >= 0)
+        keep_spikes = (
+            spike_in_run
+            & ~spike_in_excluded_interval
+            & (spike_speed >= config.min_speed_cm_s)
+            & (spike_bins >= 0)
+        )
         kept_cell_ids = spike_cell_ids[keep_spikes]
         kept_bins = spike_bins[keep_spikes].astype(int)
         rows = np.searchsorted(cell_ids, kept_cell_ids)

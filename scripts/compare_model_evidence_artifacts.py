@@ -54,7 +54,7 @@ def compare_artifacts(
     left_label: str = "left",
     right_label: str = "right",
     output: str | Path = "results/model-evidence-artifact-comparison",
-    exact_only: bool = False,
+    exact_only: bool = True,
 ) -> dict[str, pd.DataFrame]:
     """Compare two model-evidence artifacts and write CSV summaries."""
 
@@ -132,7 +132,7 @@ def find_score_file(root: str | Path) -> Path:
     raise FileNotFoundError(f"No score CSV found under {path}; searched: {searched}")
 
 
-def load_scores(root: str | Path, run_label: str, *, exact_only: bool = False) -> pd.DataFrame:
+def load_scores(root: str | Path, run_label: str, *, exact_only: bool = True) -> pd.DataFrame:
     """Load and normalize one model-evidence artifact."""
 
     source = find_score_file(root)
@@ -154,11 +154,9 @@ def load_scores(root: str | Path, run_label: str, *, exact_only: bool = False) -
 
 
 def add_relative_log_evidence(frame: pd.DataFrame) -> pd.DataFrame:
-    """Add within-event relative log evidence if not already available."""
+    """Compute within-event relative log evidence for the retained rows."""
 
     out = frame.copy()
-    if "relative_log_evidence" in out:
-        return out
     if out.empty:
         out["relative_log_evidence"] = pd.Series(dtype=float)
         return out
@@ -395,10 +393,19 @@ def main() -> int:
     parser.add_argument("--left-label", default="left")
     parser.add_argument("--right-label", default="right")
     parser.add_argument("--output", default="results/model-evidence-artifact-comparison")
-    parser.add_argument(
+    support_group = parser.add_mutually_exclusive_group()
+    support_group.add_argument(
         "--exact-only",
+        dest="exact_only",
         action="store_true",
-        help="Compare only rows marked exact_full_grid/evidence_comparable.",
+        default=True,
+        help="Compare only rows marked exact_full_grid/evidence_comparable. This is the default.",
+    )
+    support_group.add_argument(
+        "--include-lower-bounds",
+        dest="exact_only",
+        action="store_false",
+        help="Include truncated lower-bound rows for diagnostic comparisons.",
     )
     args = parser.parse_args()
 

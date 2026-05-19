@@ -43,7 +43,6 @@ def _check(v,n,name):
 def attach_duration_metadata(em):
     ds=transition_durations_s(em)
     em.transition_durations=ds
-    em.dt=DurationFloat(float(em.dt),ds)
     return em
 
 def _ps(sig,dt): return max(float(sig)*np.sqrt(max(float(dt),np.finfo(float).tiny)),np.finfo(float).eps)
@@ -61,12 +60,14 @@ def _scales(ds):
 def _t(trans,i): return trans[i] if isinstance(trans,(list,tuple)) else trans
 
 def apply_duration_dynamics_patch():
-    import hipporeplayimm.encoding as enc
-    import hipporeplayimm.kd_reference as kd
-    import hipporeplayimm.state_space as ss
-    if getattr(ss,'_duration_dynamics_patch_applied',False): return
-    _patch_builders(enc,kd); _patch_state_space(ss); _patch_kd(kd)
-    ss._duration_dynamics_patch_applied=True
+    """Deprecated compatibility shim.
+
+    Duration-aware emissions and state-space transitions are native now: emission
+    builders populate ``LogEmissionTensor.transition_durations`` and
+    ``StateSpaceReplayModel`` consumes them directly. The old monkey patch is
+    intentionally no longer installed from package import.
+    """
+    return None
 
 def _patch_builders(enc,kd):
     if not getattr(enc.build_emissions,'_duration_wrapped',False):

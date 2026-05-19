@@ -13,6 +13,8 @@ from pathlib import Path
 
 import pandas as pd
 
+from audit_model_evidence_support import ensure_evidence_support_columns
+
 
 def canonical_model_name(model: str) -> str:
     name = str(model).strip().lower()
@@ -29,9 +31,17 @@ def canonical_model_name(model: str) -> str:
     return name
 
 
-def compare_runs(left_dir: str | Path, right_dir: str | Path, *, left_label: str, right_label: str, output: str | Path) -> dict[str, pd.DataFrame]:
-    left = _load_event_scores(left_dir, left_label)
-    right = _load_event_scores(right_dir, right_label)
+def compare_runs(
+    left_dir: str | Path,
+    right_dir: str | Path,
+    *,
+    left_label: str,
+    right_label: str,
+    output: str | Path,
+    exact_only: bool = True,
+) -> dict[str, pd.DataFrame]:
+    left = _load_event_scores(left_dir, left_label, exact_only=exact_only)
+    right = _load_event_scores(right_dir, right_label, exact_only=exact_only)
     out_dir = Path(output)
     out_dir.mkdir(parents=True, exist_ok=True)
 
@@ -70,6 +80,7 @@ def compare_runs(left_dir: str | Path, right_dir: str | Path, *, left_label: str
             {
                 "left_label": left_label,
                 "right_label": right_label,
+                "exact_only": bool(exact_only),
                 "left_events": _event_count(left),
                 "right_events": _event_count(right),
                 "matched_events": int(len(event_comparison)),
@@ -93,7 +104,7 @@ def compare_runs(left_dir: str | Path, right_dir: str | Path, *, left_label: str
     }
 
 
-def _load_event_scores(root: str | Path, run_label: str) -> pd.DataFrame:
+def _load_event_scores(root: str | Path, run_label: str, *, exact_only: bool = True) -> pd.DataFrame:
     path = Path(root) / "event_model_evidence.csv"
     if not path.exists():
         raise FileNotFoundError(f"{path} does not exist")
@@ -104,20 +115,25 @@ def _load_event_scores(root: str | Path, run_label: str) -> pd.DataFrame:
         raise ValueError(f"{path} is missing columns: {sorted(missing)}")
     if "status" in frame.columns:
         frame = frame[frame["status"] == "success"].copy()
+    frame = ensure_evidence_support_columns(frame)
+    if exact_only:
+        comparable = frame.get("evidence_comparable", pd.Series(False, index=frame.index))
+        frame = frame[comparable.fillna(False).astype(bool)].copy()
     frame["run_label"] = run_label
     frame["canonical_model"] = frame["model"].map(canonical_model_name)
-    if "relative_log_evidence" not in frame.columns:
-        frame = _add_relative_log_evidence(frame)
-    return frame
+    return _add_relative_log_evidence(frame)
 
 
 def _add_relative_log_evidence(frame: pd.DataFrame) -> pd.DataFrame:
-    groups = []
-    for _, group in frame.groupby(["session", "event_index"], sort=False):
-        group = group.copy()
-        group["relative_log_evidence"] = group["log_evidence"] - group["log_evidence"].max()
-        groups.append(group)
-    return pd.concat(groups, ignore_index=True)
+    out = frame.copy()
+    if out.empty:
+        out["relative_log_evidence"] = pd.Series(dtype=float)
+        return out
+    out["relative_log_evidence"] = (
+        out["log_evidence"]
+        - out.groupby(["session", "event_index"])["log_evidence"].transform("max")
+    )
+    return out
 
 
 def _event_count(frame: pd.DataFrame) -> int:
@@ -266,9 +282,30 @@ def main() -> int:
     parser.add_argument("--left-label", default="left")
     parser.add_argument("--right-label", default="right")
     parser.add_argument("--output", default="results/model-evidence-comparison")
+    support_group = parser.add_mutually_exclusive_group()
+    support_group.add_argument(
+        "--exact-only",
+        dest="exact_only",
+        action="store_true",
+        default=True,
+        help="Compare only exact full-grid evidence rows. This is the default.",
+    )
+    support_group.add_argument(
+        "--include-lower-bounds",
+        dest="exact_only",
+        action="store_false",
+        help="Include truncated lower-bound rows for diagnostic comparisons.",
+    )
     args = parser.parse_args()
 
-    tables = compare_runs(args.left, args.right, left_label=args.left_label, right_label=args.right_label, output=args.output)
+    tables = compare_runs(
+        args.left,
+        args.right,
+        left_label=args.left_label,
+        right_label=args.right_label,
+        output=args.output,
+        exact_only=args.exact_only,
+    )
     print(tables["summary"].to_string(index=False))
     print("\nCanonical best-model counts:")
     print(tables["counts"].to_string(index=False))

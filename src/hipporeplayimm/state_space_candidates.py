@@ -8,7 +8,7 @@ from scipy.special import logsumexp
 from .encoding import LogEmissionTensor
 from .models import LOG_ZERO
 from .state_space_first_order import _score_fragmented
-from .state_space_candidates_momentum import _backward_momentum_pair
+from .state_space_candidates_momentum import _as_transition_values, _backward_momentum_pair
 from .state_space_utils import (
     _candidate_log_masses,
     _full_grid_normalized_pairwise_gaussian_log_prob,
@@ -34,6 +34,9 @@ def _score_imm_candidates(
         logp, trajectory = _score_fragmented(emissions)
         mode_post = np.full((1, len(modes)), 1.0 / len(modes), dtype=float)
         return logp, trajectory, mode_post, [0.0]
+    diffusion_sigmas_cm = _as_transition_values(diffusion_sigma_cm, emissions.n_time - 1, "diffusion_sigma_cm")
+    momentum_sigmas_cm = _as_transition_values(momentum_sigma_cm, emissions.n_time - 1, "momentum_sigma_cm")
+    velocity_decays = _as_transition_values(velocity_decay, emissions.n_time - 1, "velocity_decay")
 
     mode_transition = _mode_transition_matrix(len(modes), mode_stickiness)
     with np.errstate(divide="ignore"):
@@ -50,7 +53,7 @@ def _score_imm_candidates(
             bin_centers,
             mode=mode,
             stationary_sigma_cm=stationary_sigma_cm,
-            diffusion_sigma_cm=diffusion_sigma_cm,
+            diffusion_sigma_cm=float(diffusion_sigmas_cm[0]),
             momentum_initial_sigma_cm=momentum_initial_sigma_cm,
         )
         for mode in modes
@@ -59,6 +62,7 @@ def _score_imm_candidates(
     pair_alphas = [log_pair]
 
     for time_index in range(2, emissions.n_time):
+        transition_index = time_index - 1
         prev_prev = candidate_indices[time_index - 2]
         prev = candidate_indices[time_index - 1]
         curr = candidate_indices[time_index]
@@ -78,9 +82,9 @@ def _score_imm_candidates(
                     bin_centers,
                     mode=dst_mode,
                     stationary_sigma_cm=stationary_sigma_cm,
-                    diffusion_sigma_cm=diffusion_sigma_cm,
-                    momentum_sigma_cm=momentum_sigma_cm,
-                    velocity_decay=velocity_decay,
+                    diffusion_sigma_cm=float(diffusion_sigmas_cm[transition_index]),
+                    momentum_sigma_cm=float(momentum_sigmas_cm[transition_index]),
+                    velocity_decay=float(velocity_decays[transition_index]),
                 )
             )
         log_pair = np.stack(next_alpha, axis=0)
@@ -90,6 +94,7 @@ def _score_imm_candidates(
     pair_betas = [np.zeros_like(pair_alphas[-1]) for _ in pair_alphas]
     for pair_index in range(len(pair_alphas) - 2, -1, -1):
         curr_time = pair_index + 2
+        transition_index = curr_time - 1
         pair_betas[pair_index] = _backward_imm_pair(
             pair_betas[pair_index + 1],
             candidate_indices[pair_index],
@@ -100,9 +105,9 @@ def _score_imm_candidates(
             modes=modes,
             mode_transition=mode_transition,
             stationary_sigma_cm=stationary_sigma_cm,
-            diffusion_sigma_cm=diffusion_sigma_cm,
-            momentum_sigma_cm=momentum_sigma_cm,
-            velocity_decay=velocity_decay,
+            diffusion_sigma_cm=float(diffusion_sigmas_cm[transition_index]),
+            momentum_sigma_cm=float(momentum_sigmas_cm[transition_index]),
+            velocity_decay=float(velocity_decays[transition_index]),
         )
 
     trajectory = np.full((emissions.n_time, emissions.n_bins), LOG_ZERO, dtype=float)

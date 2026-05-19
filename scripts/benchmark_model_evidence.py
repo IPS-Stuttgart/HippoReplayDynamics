@@ -219,6 +219,11 @@ def _clusterless_mark_config(args) -> ClusterlessMarkConfig:
         mark_prior_count=args.clusterless_mark_prior_count,
         mark_variance_floor=args.clusterless_mark_variance_floor,
         rate_floor_hz=args.clusterless_rate_floor_hz,
+        group_marks_by_tetrode=not args.clusterless_no_tetrode_groups,
+        mark_likelihood=args.clusterless_mark_likelihood,
+        mark_kde_bandwidth=args.clusterless_mark_kde_bandwidth,
+        mark_kde_spatial_sigma_bins=args.clusterless_mark_kde_spatial_sigma_bins,
+        mark_kde_max_neighbors=args.clusterless_mark_kde_max_neighbors,
     )
 
 
@@ -286,6 +291,11 @@ def _score(args) -> pd.DataFrame:
                     "clusterless_mark_prior_count": float(args.clusterless_mark_prior_count),
                     "clusterless_mark_variance_floor": float(args.clusterless_mark_variance_floor),
                     "clusterless_rate_floor_hz": float(args.clusterless_rate_floor_hz),
+                    "clusterless_mark_likelihood": str(args.clusterless_mark_likelihood),
+                    "clusterless_mark_kde_bandwidth": np.nan if args.clusterless_mark_kde_bandwidth is None else float(args.clusterless_mark_kde_bandwidth),
+                    "clusterless_mark_kde_spatial_sigma_bins": np.nan if args.clusterless_mark_kde_spatial_sigma_bins is None else float(args.clusterless_mark_kde_spatial_sigma_bins),
+                    "clusterless_mark_kde_max_neighbors": int(args.clusterless_mark_kde_max_neighbors),
+                    "clusterless_group_marks_by_tetrode": bool(not args.clusterless_no_tetrode_groups),
                 }
                 if use_clusterless and clusterless_encoding is not None:
                     row.update({
@@ -310,6 +320,11 @@ def _score(args) -> pd.DataFrame:
                     "clusterless_mark_prior_count": float(args.clusterless_mark_prior_count),
                     "clusterless_mark_variance_floor": float(args.clusterless_mark_variance_floor),
                     "clusterless_rate_floor_hz": float(args.clusterless_rate_floor_hz),
+                    "clusterless_mark_likelihood": str(args.clusterless_mark_likelihood),
+                    "clusterless_mark_kde_bandwidth": np.nan if args.clusterless_mark_kde_bandwidth is None else float(args.clusterless_mark_kde_bandwidth),
+                    "clusterless_mark_kde_spatial_sigma_bins": np.nan if args.clusterless_mark_kde_spatial_sigma_bins is None else float(args.clusterless_mark_kde_spatial_sigma_bins),
+                    "clusterless_mark_kde_max_neighbors": int(args.clusterless_mark_kde_max_neighbors),
+                    "clusterless_group_marks_by_tetrode": bool(not args.clusterless_no_tetrode_groups),
                 })
                 if not args.continue_on_error:
                     raise
@@ -468,6 +483,13 @@ def main() -> int:
     p.add_argument("--clusterless-mark-prior-count", type=float, default=1.0)
     p.add_argument("--clusterless-mark-variance-floor", type=float, default=1.0)
     p.add_argument("--clusterless-rate-floor-hz", type=float, default=1e-4)
+    p.add_argument("--clusterless-mark-likelihood", choices=("local-kde", "diagonal-gaussian"), default="local-kde")
+    p.add_argument("--clusterless-mark-kde-bandwidth", type=float, default=None)
+    p.add_argument("--clusterless-mark-kde-spatial-sigma-bins", type=float, default=None)
+    p.add_argument("--clusterless-mark-kde-max-neighbors", type=int, default=256)
+    p.add_argument(
+        "--clusterless-no-tetrode-groups", action="store_true",
+        help="Pool clusterless mark likelihood support across tetrodes/cells instead of conditioning on inferred mark groups.")
     p.add_argument("--time-bin-s", type=float, default=0.02)
     p.add_argument(
         "--spike-rate-scale",

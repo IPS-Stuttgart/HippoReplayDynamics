@@ -26,7 +26,6 @@ from .clusterless import (
     fit_clusterless_mark_encoding,
 )
 from .data import ReplaySession, load_open_field_sessions
-from .duration_dynamics import apply_duration_dynamics_patch as _apply_duration_dynamics_patch
 from .encoding import EncodingConfig, EncodingModel, build_emissions, fit_place_field_encoding
 from .evidence_reporting import patch_simulation_recovery_module as _patch_simulation_recovery_module
 from .goal_state_space import GoalStateSpaceReplayModel
@@ -46,7 +45,6 @@ from .models import (
     score_model,
 )
 from .pyrecest_models import PyRecEstGoalParticleModel
-from .state_space_imm_duration import apply_state_space_imm_duration_patch as _apply_state_space_imm_duration_patch
 from .sweeps import (
     PyRecEstSweepConfig,
     PyRecEstSweepResult,
@@ -85,11 +83,7 @@ def _synchronize_duration_patched_emission_builders() -> None:
             module.build_kd_emissions = _kd_reference_module.build_kd_emissions
 
 
-# Ensure replay dynamics use center-to-center transition durations when replay
-# emissions include a partial final bin.
-_apply_duration_dynamics_patch()
-_apply_state_space_imm_duration_patch()
-_synchronize_duration_patched_emission_builders()
+# Duration-aware emissions and state-space transitions are native.
 from .encoding import build_emissions as build_emissions  # noqa: E402,F401,F811
 
 # Keep synthetic recovery summaries from mixing exact evidences with truncated

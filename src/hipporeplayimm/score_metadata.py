@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace as dataclass_replace
 from pathlib import Path
 
 import numpy as np
@@ -102,7 +102,7 @@ def apply_model_hyperparam_patch() -> None:
         return
 
     @dataclass(frozen=True)
-    class BenchmarkConfig:
+    class BenchmarkConfig(bench.BenchmarkConfig):
         encoding: EncodingConfig = field(default_factory=EncodingConfig)
         emissions: EmissionConfig = field(default_factory=EmissionConfig)
         test_cell_fraction: float = 0.25
@@ -121,6 +121,7 @@ def apply_model_hyperparam_patch() -> None:
         state_space_momentum_initial_sigma_cm_sqrt_s: float = 85.0
         state_space_momentum_velocity_decay: float = 0.95
         state_space_momentum_candidate_top_k: int = 128
+        state_space_momentum_predicted_candidate_top_k: int = 8
         pyrecest_particles: int = 512
         pyrecest_alpha: float = 0.80
         pyrecest_beta: float = 1.00
@@ -152,14 +153,18 @@ def apply_model_hyperparam_patch() -> None:
             momentum_sigma_cm=cfg(config, "momentum_sigma_cm", 12.0),
             velocity_decay=cfg(config, "velocity_decay", 0.95),
             mode_stickiness=cfg(config, "mode_stickiness", 0.94),
+            candidate_min_log_mass=cfg(config, "candidate_min_log_mass", None),
+            candidate_max_k=cfg(config, "candidate_max_k", None),
+            candidate_halo_radius_cm=cfg(config, "candidate_halo_radius_cm", 0.0),
             name=name,
         )
 
     def state_space_model(config, mode: str, name: str | None = None):
-        return SortedSpikeStateSpaceReplayModel(
-            mode=mode,
-            name=name,
-            config=StateSpaceDecoderConfig(
+        base_state_space = getattr(config, "state_space", None)
+        if isinstance(base_state_space, StateSpaceDecoderConfig) and base_state_space != StateSpaceDecoderConfig():
+            decoder_config = dataclass_replace(base_state_space, mode=mode)
+        else:
+            decoder_config = StateSpaceDecoderConfig(
                 mode=mode,
                 stationary_sigma_cm=cfg(config, "state_space_stationary_sigma_cm", 2.0),
                 diffusion_sigma_cm_sqrt_s=cfg(config, "state_space_diffusion_sigma_cm_sqrt_s", 85.0),
@@ -173,7 +178,16 @@ def apply_model_hyperparam_patch() -> None:
                 ),
                 momentum_velocity_decay=cfg(config, "state_space_momentum_velocity_decay", 0.95),
                 momentum_candidate_top_k=cfg(config, "state_space_momentum_candidate_top_k", 128),
-            ),
+                momentum_predicted_candidate_top_k=cfg(
+                    config,
+                    "state_space_momentum_predicted_candidate_top_k",
+                    8,
+                ),
+            )
+        return SortedSpikeStateSpaceReplayModel(
+            mode=mode,
+            name=name,
+            config=decoder_config,
         )
 
     def build_models(config, session=None):

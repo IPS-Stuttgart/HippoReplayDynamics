@@ -83,6 +83,45 @@ def test_clusterless_local_kde_preserves_multimodal_mark_structure():
     assert gaussian_logp[1] > gaussian_logp[0]
 
 
+def test_clusterless_local_kde_conditions_on_tetrode_group_ids():
+    session = _two_tetrode_clusterless_session()
+    encoding = fit_clusterless_mark_encoding(
+        session,
+        ClusterlessMarkConfig(
+            encoding=EncodingConfig(
+                bin_size_cm=10.0,
+                smoothing_sigma_bins=0.0,
+                min_speed_cm_s=0.0,
+                arena_padding_cm=5.0,
+            ),
+            mark_smoothing_sigma_bins=0.0,
+            mark_prior_count=0.0,
+            mark_variance_floor=0.01,
+            mark_likelihood="local-kde",
+            mark_kde_spatial_sigma_bins=0.0,
+            mark_kde_bandwidth=0.1,
+            mark_kde_max_neighbors=2,
+        ),
+    )
+    left_bin = int(np.argmin(np.linalg.norm(encoding.bin_centers - np.array([0.0, 0.0]), axis=1)))
+
+    grouped_logp = encoding.log_mark_likelihood(
+        np.array([[10.05], [10.05]]),
+        mark_group_ids=np.array([2, 1]),
+    )[:, left_bin]
+    emissions = build_clusterless_mark_emissions(
+        session,
+        encoding,
+        0,
+        EmissionConfig(time_bin_s=1.0),
+    )
+
+    assert encoding.mark_kde_group_ids is not None
+    assert set(encoding.mark_kde_group_ids.tolist()) == {1, 2}
+    assert grouped_logp[0] > grouped_logp[1] + 100.0
+    assert emissions.metadata["clusterless_mark_group_count"] == 2
+
+
 def test_clusterless_diagonal_gaussian_mark_likelihood_remains_available():
     session = _clusterless_session()
     encoding = fit_clusterless_mark_encoding(
@@ -311,6 +350,45 @@ def _clusterless_session() -> ReplaySession:
         spikes=spikes,
         tetrode_cell_ids=np.array([[1, 1]]),
         excitatory_neurons=np.array([1]),
+        inhibitory_neurons=np.array([]),
+        ripple_events=np.array([[4.0, 5.0, 4.5, 0.0, 0.0, 0.0]]),
+        run_times=np.array([[0.0, 5.0]]),
+        sleep_box_immobile_times=np.empty((0, 2)),
+        sleep_times=np.empty((0, 2)),
+        rem_times=np.empty((0, 2)),
+        well_sequence=None,
+        metadata={},
+        spike_marks=SpikeMarkData(
+            times=mark_times,
+            marks=marks,
+            source_file="Spike_Data.mat",
+            source_variable="Spike_Amplitude_Marks",
+            feature_names=("amp",),
+            cell_ids=cell_ids,
+        ),
+    )
+
+
+def _two_tetrode_clusterless_session() -> ReplaySession:
+    position_times = np.linspace(0.0, 5.0, 51)
+    position = np.column_stack([
+        position_times,
+        np.zeros_like(position_times),
+        np.zeros_like(position_times),
+        np.zeros_like(position_times),
+    ])
+    mark_times = np.array([0.2, 0.4, 0.6, 0.8, 4.2])
+    cell_ids = np.array([1, 1, 2, 2, 2])
+    marks = np.array([[0.0], [0.1], [10.0], [10.1], [10.05]])
+    spikes = np.column_stack([mark_times, cell_ids])
+    return ReplaySession(
+        rat="RatX",
+        name="OpenX",
+        path=None,
+        position=position,
+        spikes=spikes,
+        tetrode_cell_ids=np.array([[1, 1], [2, 2]]),
+        excitatory_neurons=np.array([1, 2]),
         inhibitory_neurons=np.array([]),
         ripple_events=np.array([[4.0, 5.0, 4.5, 0.0, 0.0, 0.0]]),
         run_times=np.array([[0.0, 5.0]]),

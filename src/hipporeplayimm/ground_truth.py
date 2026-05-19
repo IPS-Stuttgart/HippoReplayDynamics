@@ -12,6 +12,7 @@ from scipy.special import logsumexp
 from .benchmarks import BenchmarkConfig, _build_models, _split_cells
 from .data import ReplaySession, load_open_field_sessions
 from .encoding import EmissionConfig, EncodingConfig, build_emissions, fit_place_field_encoding
+from .state_space import StateSpaceDecoderConfig
 
 
 @dataclass(frozen=True)
@@ -227,6 +228,7 @@ def compare_scores_to_ground_truth(
     pyrecest_imm_momentum_velocity_decay: float = 0.95,
     pyrecest_imm_jump_fraction: float = 0.9,
     pyrecest_imm_jump_velocity_decay: float = 0.25,
+    state_space_config: StateSpaceDecoderConfig | None = None,
     random_seed: int = 1,
 ) -> pd.DataFrame:
     """Merge event scores with next-well behavioral correctness metrics."""
@@ -244,6 +246,10 @@ def compare_scores_to_ground_truth(
     emission_config = _emission_config_for_scores(
         scores_frame,
         EmissionConfig() if emission_config is None else emission_config,
+    )
+    state_space_config = _state_space_config_for_scores(
+        scores_frame,
+        StateSpaceDecoderConfig() if state_space_config is None else state_space_config,
     )
     test_cell_fraction = _unique_float_from_column(
         scores_frame,
@@ -280,6 +286,7 @@ def compare_scores_to_ground_truth(
         pyrecest_imm_jump_fraction=pyrecest_imm_jump_fraction,
         pyrecest_imm_jump_velocity_decay=pyrecest_imm_jump_velocity_decay,
         random_seed=random_seed,
+        state_space=state_space_config,
         models=model_names,
     )
 
@@ -384,9 +391,16 @@ def _score_joint_for_ground_truth(
     bin_centers: np.ndarray,
 ):
     if hasattr(model, "candidate_indices"):
-        candidates = model.candidate_indices(train_emissions)
+        candidates = _candidate_indices_for_ground_truth(model, train_emissions, bin_centers)
         return model.score(joint_emissions, bin_centers, candidate_indices=candidates)
     return model.score(joint_emissions, bin_centers)
+
+
+def _candidate_indices_for_ground_truth(model, emissions, bin_centers: np.ndarray):
+    try:
+        return model.candidate_indices(emissions, bin_centers)
+    except TypeError:
+        return model.candidate_indices(emissions)
 
 
 def _cell_split_for_score_rows(
@@ -510,7 +524,66 @@ def _emission_config_for_scores(
             scores_frame,
             "emission_time_bin_s",
             fallback.time_bin_s,
-        )
+        ),
+        spike_rate_scale=_unique_float_from_columns(
+            scores_frame,
+            ("emission_spike_rate_scale", "spike_rate_scale"),
+            fallback.spike_rate_scale,
+        ),
+    )
+
+
+def _state_space_config_for_scores(
+    scores_frame: pd.DataFrame,
+    fallback: StateSpaceDecoderConfig,
+) -> StateSpaceDecoderConfig:
+    return StateSpaceDecoderConfig(
+        mode=fallback.mode,
+        stationary_sigma_cm=_unique_float_from_columns(
+            scores_frame,
+            ("state_space_stationary_sigma_cm", "diagnostic_state_space_stationary_sigma_cm"),
+            fallback.stationary_sigma_cm,
+        ),
+        diffusion_sigma_cm_sqrt_s=_unique_float_from_columns(
+            scores_frame,
+            ("state_space_diffusion_sigma_cm_sqrt_s", "diagnostic_state_space_diffusion_sigma_cm_sqrt_s"),
+            fallback.diffusion_sigma_cm_sqrt_s,
+        ),
+        max_step_sigma=_unique_float_from_columns(
+            scores_frame,
+            ("state_space_max_step_sigma", "diagnostic_state_space_max_step_sigma"),
+            fallback.max_step_sigma,
+        ),
+        imm_mode_stickiness=_unique_float_from_columns(
+            scores_frame,
+            ("state_space_imm_mode_stickiness", "diagnostic_state_space_imm_mode_stickiness"),
+            fallback.imm_mode_stickiness,
+        ),
+        momentum_sigma_cm_sqrt_s=_unique_float_from_columns(
+            scores_frame,
+            ("state_space_momentum_sigma_cm_sqrt_s", "diagnostic_state_space_momentum_sigma_cm_sqrt_s"),
+            fallback.momentum_sigma_cm_sqrt_s,
+        ),
+        momentum_initial_sigma_cm_sqrt_s=_unique_float_from_columns(
+            scores_frame,
+            ("state_space_momentum_initial_sigma_cm_sqrt_s", "diagnostic_state_space_momentum_initial_sigma_cm_sqrt_s"),
+            fallback.momentum_initial_sigma_cm_sqrt_s,
+        ),
+        momentum_velocity_decay=_unique_float_from_columns(
+            scores_frame,
+            ("state_space_momentum_velocity_decay", "diagnostic_state_space_momentum_velocity_decay"),
+            fallback.momentum_velocity_decay,
+        ),
+        momentum_candidate_top_k=_unique_int_from_columns(
+            scores_frame,
+            ("state_space_momentum_candidate_top_k", "diagnostic_state_space_momentum_candidate_top_k", "diagnostic_state_space_imm_candidate_top_k"),
+            fallback.momentum_candidate_top_k,
+        ),
+        momentum_predicted_candidate_top_k=_unique_int_from_columns(
+            scores_frame,
+            ("state_space_momentum_predicted_candidate_top_k", "diagnostic_state_space_momentum_predicted_candidate_top_k", "diagnostic_state_space_imm_predicted_candidate_top_k"),
+            fallback.momentum_predicted_candidate_top_k,
+        ),
     )
 
 
@@ -529,6 +602,22 @@ def _unique_float_from_column(frame: pd.DataFrame, column: str, default: float) 
     return float(first)
 
 
+def _unique_float_from_columns(frame: pd.DataFrame, columns: tuple[str, ...], default: float) -> float:
+    values: list[float] = []
+    for column in columns:
+        if column in frame.columns:
+            for value in frame[column].dropna():
+                text = str(value).strip()
+                if text:
+                    values.append(float(value))
+    if not values:
+        return float(default)
+    first = values[0]
+    if any(not np.isclose(value, first) for value in values[1:]):
+        raise ValueError(f"{', '.join(columns)} contains multiple values")
+    return float(first)
+
+
 def _unique_int_from_column(frame: pd.DataFrame, column: str, default: int) -> int:
     values: list[int] = []
     if column in frame.columns:
@@ -541,6 +630,22 @@ def _unique_int_from_column(frame: pd.DataFrame, column: str, default: int) -> i
     first = values[0]
     if any(value != first for value in values[1:]):
         raise ValueError(f"{column} contains multiple values")
+    return int(first)
+
+
+def _unique_int_from_columns(frame: pd.DataFrame, columns: tuple[str, ...], default: int) -> int:
+    values: list[int] = []
+    for column in columns:
+        if column in frame.columns:
+            for value in frame[column].dropna():
+                text = str(value).strip()
+                if text:
+                    values.append(int(float(value)))
+    if not values:
+        return int(default)
+    first = values[0]
+    if any(value != first for value in values[1:]):
+        raise ValueError(f"{', '.join(columns)} contains multiple values")
     return int(first)
 
 

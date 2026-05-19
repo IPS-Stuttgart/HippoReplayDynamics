@@ -1,6 +1,7 @@
 import numpy as np
 import pandas as pd
 
+import hipporeplayimm.benchmarks as benchmarks_module
 from hipporeplayimm.benchmarks import (
     BenchmarkConfig,
     BenchmarkResult,
@@ -15,6 +16,7 @@ from hipporeplayimm.data import ReplaySession, SpikeMarkData
 from hipporeplayimm.encoding import EmissionConfig, EncodingConfig
 from hipporeplayimm.evidence_reporting import TRUNCATED_EVIDENCE_SUPPORT
 from hipporeplayimm.models import EventScore
+from hipporeplayimm.state_space import StateSpaceDecoderConfig
 
 
 def test_benchmark_summary_and_bootstrap_ci():
@@ -62,6 +64,30 @@ def test_state_space_aliases_canonicalize_sorted_spike_model_name():
     assert models["state-space-diffusion"].name == "sorted-spike-state-space-diffusion"
 
 
+def test_build_models_applies_benchmark_state_space_config():
+    state_space = StateSpaceDecoderConfig(
+        diffusion_sigma_cm_sqrt_s=42.0,
+        momentum_sigma_cm_sqrt_s=43.0,
+        momentum_candidate_top_k=7,
+        momentum_predicted_candidate_top_k=3,
+    )
+
+    models = _build_models(
+        BenchmarkConfig(
+            models=(
+                "sorted-spike-state-space-diffusion",
+                "clusterless-state-space-momentum",
+            ),
+            state_space=state_space,
+        )
+    )
+
+    assert models["sorted-spike-state-space-diffusion"].config.diffusion_sigma_cm_sqrt_s == 42.0
+    assert models["clusterless-state-space-momentum"].config.momentum_sigma_cm_sqrt_s == 43.0
+    assert models["clusterless-state-space-momentum"].config.momentum_candidate_top_k == 7
+    assert models["clusterless-state-space-momentum"].config.momentum_predicted_candidate_top_k == 3
+
+
 def test_build_models_includes_clusterless_state_space_model():
     models = _build_models(BenchmarkConfig(models=("clusterless-state-space-diffusion",)))
 
@@ -69,14 +95,25 @@ def test_build_models_includes_clusterless_state_space_model():
 
 
 def test_score_session_uses_clusterless_emissions_for_clusterless_models(monkeypatch):
+    fit_cell_ids: list[tuple[int, ...]] = []
     seen_cell_ids: list[tuple[int, ...]] = []
+    original_fit_clusterless_mark_encoding = benchmarks_module.fit_clusterless_mark_encoding
+
+    def fit_spy(session, config):
+        marks = session.spike_marks
+        assert marks is not None
+        assert marks.cell_ids is not None
+        fit_cell_ids.append(tuple(sorted(int(cell_id) for cell_id in set(marks.cell_ids))))
+        return original_fit_clusterless_mark_encoding(session, config)
+
+    monkeypatch.setattr(benchmarks_module, "fit_clusterless_mark_encoding", fit_spy)
 
     def score_spy(self, emissions, bin_centers, candidate_indices=None):
         del candidate_indices
         seen_cell_ids.append(tuple(int(cell_id) for cell_id in emissions.cell_ids))
         return EventScore(
             str(self.name),
-            float(emissions.n_spikes),
+            100.0 + float(emissions.n_spikes),
             emissions.n_time,
             emissions.n_spikes,
             diagnostics={"captured_cell_ids": ",".join(str(int(x)) for x in emissions.cell_ids)},
@@ -103,8 +140,13 @@ def test_score_session_uses_clusterless_emissions_for_clusterless_models(monkeyp
     )
 
     assert len(rows) == 1
+    assert fit_cell_ids == [(2,)]
     assert seen_cell_ids == [(0,), (0,)]
     assert rows[0]["model"] == "clusterless-state-space-diffusion"
+    # Clusterless held-out likelihood must be the direct test-mark score under
+    # the train-fitted encoder.  A buggy joint-minus-train aggregate subtraction
+    # would cancel the 100.0 offset and return 1.0 for this spy score.
+    assert rows[0]["heldout_log_likelihood"] == 101.0
     assert rows[0]["test_spikes"] == 1
     assert rows[0]["diagnostic_captured_cell_ids"] == "0"
 

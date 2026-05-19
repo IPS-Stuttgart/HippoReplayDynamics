@@ -11,6 +11,7 @@ import numpy as np
 import pandas as pd
 from scipy.special import gammaln, logsumexp
 
+from .candidate_support import DEFAULT_CANDIDATE_MIN_LOG_MASS
 from .data import ReplaySession, load_replay_session
 from .encoding import EncodingConfig, EncodingModel, LogEmissionTensor, fit_place_field_encoding
 from .models import CandidateKinematicModel, RandomModel, StationaryModel
@@ -71,6 +72,9 @@ class SimulationRecoveryConfig:
     )
     state_space: StateSpaceDecoderConfig = field(default_factory=StateSpaceDecoderConfig)
     candidate_top_k: int = 64
+    candidate_min_log_mass: float | None = DEFAULT_CANDIDATE_MIN_LOG_MASS
+    candidate_max_k: int | None = 256
+    candidate_halo_radius_cm: float = 0.0
     stationary_sigma_cm: float = 2.0
     diffusion_sigma_cm: float = 12.0
     momentum_sigma_cm: float = 12.0
@@ -151,10 +155,10 @@ def run_session_simulation_recovery(
                 start = time.perf_counter()
                 try:
                     if isinstance(model, CandidateKinematicModel):
-                        candidates = model.candidate_indices(emissions)
+                        candidates = model.candidate_indices(emissions, encoding.bin_centers)
                         score = model.score(emissions, encoding.bin_centers, candidate_indices=candidates)
                     elif isinstance(model, SortedSpikeStateSpaceReplayModel) and model.mode == "momentum":
-                        candidates = model.candidate_indices(emissions)
+                        candidates = model.candidate_indices(emissions, encoding.bin_centers)
                         score = model.score(emissions, encoding.bin_centers, candidate_indices=candidates)
                     else:
                         score = model.score(emissions, encoding.bin_centers)
@@ -394,6 +398,11 @@ def recovery_summary(event_scores: pd.DataFrame) -> pd.DataFrame:
 
 
 def build_scoring_models(config: SimulationRecoveryConfig) -> dict[str, object]:
+    candidate_kwargs = {
+        "candidate_min_log_mass": config.candidate_min_log_mass,
+        "candidate_max_k": config.candidate_max_k,
+        "candidate_halo_radius_cm": config.candidate_halo_radius_cm,
+    }
     available: dict[str, object] = {
         "random": RandomModel(),
         "stationary": StationaryModel(),
@@ -405,6 +414,7 @@ def build_scoring_models(config: SimulationRecoveryConfig) -> dict[str, object]:
             momentum_sigma_cm=config.momentum_sigma_cm,
             velocity_decay=config.velocity_decay,
             mode_stickiness=config.mode_stickiness,
+            **candidate_kwargs,
             name="stationary-gaussian",
         ),
         "diffusion": CandidateKinematicModel(
@@ -415,6 +425,7 @@ def build_scoring_models(config: SimulationRecoveryConfig) -> dict[str, object]:
             momentum_sigma_cm=config.momentum_sigma_cm,
             velocity_decay=config.velocity_decay,
             mode_stickiness=config.mode_stickiness,
+            **candidate_kwargs,
             name="diffusion",
         ),
         "momentum": CandidateKinematicModel(
@@ -425,6 +436,7 @@ def build_scoring_models(config: SimulationRecoveryConfig) -> dict[str, object]:
             momentum_sigma_cm=config.momentum_sigma_cm,
             velocity_decay=config.velocity_decay,
             mode_stickiness=config.mode_stickiness,
+            **candidate_kwargs,
             name="momentum",
         ),
         "imm": CandidateKinematicModel(
@@ -435,6 +447,7 @@ def build_scoring_models(config: SimulationRecoveryConfig) -> dict[str, object]:
             momentum_sigma_cm=config.momentum_sigma_cm,
             velocity_decay=config.velocity_decay,
             mode_stickiness=config.mode_stickiness,
+            **candidate_kwargs,
             name="imm",
         ),
     }
@@ -579,6 +592,9 @@ def _settings(
         "encoding": asdict(config.encoding),
         "state_space": asdict(config.state_space),
         "candidate_top_k": config.candidate_top_k,
+        "candidate_min_log_mass": config.candidate_min_log_mass,
+        "candidate_max_k": config.candidate_max_k,
+        "candidate_halo_radius_cm": config.candidate_halo_radius_cm,
         "stationary_sigma_cm": config.stationary_sigma_cm,
         "diffusion_sigma_cm": config.diffusion_sigma_cm,
         "momentum_sigma_cm": config.momentum_sigma_cm,

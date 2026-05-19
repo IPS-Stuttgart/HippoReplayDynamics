@@ -5,6 +5,7 @@ import pandas as pd
 import pytest
 from scipy.special import logsumexp
 
+from hipporeplayimm.candidate_support import _adaptive_candidate_indices
 from hipporeplayimm.encoding import LogEmissionTensor
 from hipporeplayimm.evidence_reporting import (
     DEGENERATE_SINGLE_BIN_EVIDENCE_SUPPORT,
@@ -239,6 +240,62 @@ def test_candidate_diffusion_pruned_support_uses_full_grid_normalization():
         + emissions.log_likelihood[2, dst2]
     )
     assert np.allclose(score.log_likelihood, expected)
+
+
+def test_adaptive_candidate_indices_expand_until_requested_mass():
+    row = np.log(np.array([0.50, 0.30, 0.15, 0.05]))
+
+    candidates = _adaptive_candidate_indices(
+        row,
+        top_k=1,
+        min_log_mass=np.log(0.90),
+        max_candidates=None,
+    )
+
+    assert candidates.tolist() == [0, 1, 2]
+
+
+def test_adaptive_candidate_indices_respect_max_candidates_cap():
+    row = np.log(np.array([0.50, 0.30, 0.15, 0.05]))
+
+    candidates = _adaptive_candidate_indices(
+        row,
+        top_k=1,
+        min_log_mass=np.log(0.99),
+        max_candidates=2,
+    )
+
+    assert candidates.tolist() == [0, 1]
+
+
+def test_candidate_kinematic_model_adds_adaptive_mass_and_spatial_halo():
+    centers = np.array([[0.0, 0.0], [1.0, 0.0], [2.0, 0.0], [8.0, 0.0]])
+    emissions = LogEmissionTensor(
+        log_likelihood=np.log(
+            np.array(
+                [
+                    [0.90, 0.05, 0.04, 0.01],
+                    [0.05, 0.90, 0.04, 0.01],
+                ]
+            )
+        ),
+        spike_counts=np.zeros((2, 1), dtype=int),
+        times=np.array([0.0, 1.0]),
+        dt=1.0,
+        cell_ids=np.array([1]),
+        n_spikes=0,
+    )
+    model = CandidateKinematicModel(
+        mode="diffusion",
+        top_k=1,
+        candidate_min_log_mass=np.log(0.90),
+        candidate_halo_radius_cm=1.1,
+    )
+
+    candidates = model.candidate_indices(emissions, centers)
+
+    assert candidates[0].tolist() == [0, 1]
+    assert candidates[1].tolist() == [0, 1, 2]
 
 
 def test_pyrecest_goal_particle_model_scores_synthetic_event():

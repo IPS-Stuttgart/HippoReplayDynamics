@@ -8,6 +8,11 @@ from typing import Protocol
 import numpy as np
 from scipy.special import logsumexp
 
+from .candidate_support import (
+    _adaptive_candidate_indices,
+    _augment_candidates_with_spatial_halo,
+    _candidate_min_mass_diagnostic,
+)
 from .encoding import LogEmissionTensor
 
 
@@ -112,6 +117,9 @@ class CandidateKinematicModel:
 
     mode: str = "imm"
     top_k: int = 64
+    candidate_min_log_mass: float | None = None
+    candidate_max_k: int | None = None
+    candidate_halo_radius_cm: float = 0.0
     stationary_sigma_cm: float = 2.0
     diffusion_sigma_cm: float = 12.0
     momentum_sigma_cm: float = 12.0
@@ -127,8 +135,27 @@ class CandidateKinematicModel:
         if self.name is None:
             self.name = self.mode
 
-    def candidate_indices(self, emissions: LogEmissionTensor) -> list[np.ndarray]:
-        return [_top_candidate_indices(row, self.top_k) for row in emissions.log_likelihood]
+    def candidate_indices(
+        self,
+        emissions: LogEmissionTensor,
+        bin_centers: np.ndarray | None = None,
+    ) -> list[np.ndarray]:
+        candidates = [
+            _adaptive_candidate_indices(
+                row,
+                self.top_k,
+                min_log_mass=self.candidate_min_log_mass,
+                max_candidates=self.candidate_max_k,
+            )
+            for row in emissions.log_likelihood
+        ]
+        if bin_centers is None or self.candidate_halo_radius_cm <= 0.0:
+            return candidates
+        return _augment_candidates_with_spatial_halo(
+            candidates,
+            bin_centers,
+            radius_cm=self.candidate_halo_radius_cm,
+        )
 
     def score(
         self,
@@ -138,7 +165,7 @@ class CandidateKinematicModel:
     ) -> EventScore:
         if emissions.n_time == 1:
             return self._score_single_bin(emissions, bin_centers)
-        candidates = self.candidate_indices(emissions) if candidate_indices is None else candidate_indices
+        candidates = self.candidate_indices(emissions, bin_centers) if candidate_indices is None else candidate_indices
         if len(candidates) != emissions.n_time:
             raise ValueError("candidate_indices must contain one array per emission time bin")
         if self.mode != "imm":
@@ -156,8 +183,18 @@ class CandidateKinematicModel:
             )
         diagnostics = {
             "mean_candidate_log_mass": float(np.mean(mass)),
+            "mean_candidate_count": float(np.mean([len(curr) for curr in candidates])),
+            "candidate_top_k": int(self.top_k),
+            "candidate_min_mass": _candidate_min_mass_diagnostic(self.candidate_min_log_mass),
+            "candidate_max_k": int(self.candidate_max_k) if self.candidate_max_k and self.candidate_max_k > 0 else int(emissions.n_bins),
+            "candidate_halo_radius_cm": float(self.candidate_halo_radius_cm),
             "candidate_evidence_support": "truncated_full_grid",
         }
+        diagnostics["candidate_support"] = (
+            "adaptive"
+            if self.candidate_min_log_mass is not None or self.candidate_halo_radius_cm > 0.0
+            else "top_k"
+        )
         diagnostics.update(_posterior_diagnostics(terminal_log_posterior, bin_centers))
         return EventScore(
             str(self.name),

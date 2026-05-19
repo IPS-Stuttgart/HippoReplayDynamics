@@ -32,7 +32,10 @@ def _score_fragmented(emissions: LogEmissionTensor) -> tuple[float, np.ndarray]:
     return logp, _as_log_probs(scaled / row_sums[:, None])
 
 
-def _forward_backward_first_order(log_likelihood: np.ndarray, transition: csr_matrix) -> tuple[float, np.ndarray]:
+def _forward_backward_first_order(
+    log_likelihood: np.ndarray,
+    transition: csr_matrix | list[csr_matrix] | tuple[csr_matrix, ...],
+) -> tuple[float, np.ndarray]:
     n_time, n_bins = log_likelihood.shape
     scaled, offsets = _scaled_emissions(log_likelihood)
     filtered = np.zeros((n_time, n_bins), dtype=float)
@@ -47,7 +50,8 @@ def _forward_backward_first_order(log_likelihood: np.ndarray, transition: csr_ma
     logp = float(np.log(scales[0]) + offsets[0])
 
     for time_index in range(1, n_time):
-        alpha = np.asarray(transition @ alpha, dtype=float) * scaled[time_index]
+        transition_t = _transition_at(transition, time_index - 1)
+        alpha = np.asarray(transition_t @ alpha, dtype=float) * scaled[time_index]
         scales[time_index] = float(alpha.sum())
         if scales[time_index] <= 0.0:
             raise ValueError(f"emission row {time_index} has no finite predicted mass")
@@ -59,7 +63,8 @@ def _forward_backward_first_order(log_likelihood: np.ndarray, transition: csr_ma
     beta = np.ones(n_bins, dtype=float)
     smoothed[-1] = filtered[-1]
     for time_index in range(n_time - 1, 0, -1):
-        beta = np.asarray(transition.T @ (scaled[time_index] * beta), dtype=float) / scales[time_index]
+        transition_t = _transition_at(transition, time_index - 1)
+        beta = np.asarray(transition_t.T @ (scaled[time_index] * beta), dtype=float) / scales[time_index]
         gamma = filtered[time_index - 1] * beta
         total = float(gamma.sum())
         smoothed[time_index - 1] = gamma / total if total > 0.0 else filtered[time_index - 1]
@@ -71,16 +76,21 @@ def _score_first_order_imm(
     bin_centers: np.ndarray,
     *,
     stationary_sigma_cm: float,
-    diffusion_sigma_cm: float,
+    diffusion_sigma_cm: float | None = None,
+    diffusion_transitions: csr_matrix | list[csr_matrix] | tuple[csr_matrix, ...] | None = None,
     max_step_sigma: float,
     mode_stickiness: float,
 ) -> tuple[float, np.ndarray, np.ndarray]:
     modes = ("stationary", "diffusion", "fragmented")
     n_modes = len(modes)
     n_time, n_bins = log_likelihood.shape
+    if diffusion_transitions is None:
+        if diffusion_sigma_cm is None:
+            raise ValueError("diffusion_sigma_cm or diffusion_transitions must be provided")
+        diffusion_transitions = _gaussian_transition_matrix(bin_centers, diffusion_sigma_cm, max_step_sigma)
     transitions = {
         "stationary": _gaussian_transition_matrix(bin_centers, stationary_sigma_cm, max_step_sigma),
-        "diffusion": _gaussian_transition_matrix(bin_centers, diffusion_sigma_cm, max_step_sigma),
+        "diffusion": diffusion_transitions,
         "fragmented": None,
     }
     mode_transition = _mode_transition_matrix(n_modes, mode_stickiness)
@@ -101,7 +111,9 @@ def _score_first_order_imm(
         for dst_idx, dst_mode in enumerate(modes):
             dst = np.zeros(n_bins, dtype=float)
             for src_idx in range(n_modes):
-                dst += mode_transition[src_idx, dst_idx] * _apply_transition(transitions[dst_mode], alpha[src_idx])
+                dst += mode_transition[src_idx, dst_idx] * _apply_transition(
+                    transitions[dst_mode], alpha[src_idx], time_index - 1
+                )
             predicted[dst_idx] = dst
         alpha = predicted * scaled[time_index][None, :]
         scales[time_index] = float(alpha.sum())
@@ -119,7 +131,7 @@ def _score_first_order_imm(
         for src_idx in range(n_modes):
             for dst_idx, dst_mode in enumerate(modes):
                 beta_prev[src_idx] += mode_transition[src_idx, dst_idx] * _apply_transition_backward(
-                    transitions[dst_mode], scaled[time_index] * beta[dst_idx]
+                    transitions[dst_mode], scaled[time_index] * beta[dst_idx], time_index - 1
                 )
         beta = beta_prev / scales[time_index]
         gamma = filtered[time_index - 1] * beta
@@ -129,13 +141,28 @@ def _score_first_order_imm(
     return logp, _as_log_probs(smoothed.sum(axis=1)), smoothed.sum(axis=2)
 
 
-def _apply_transition(transition: csr_matrix | None, weights: np.ndarray) -> np.ndarray:
+def _apply_transition(
+    transition: csr_matrix | list[csr_matrix] | tuple[csr_matrix, ...] | None,
+    weights: np.ndarray,
+    transition_index: int = 0,
+) -> np.ndarray:
     if transition is None:
         return np.full(weights.shape, float(weights.sum()) / weights.shape[0], dtype=float)
-    return np.asarray(transition @ weights, dtype=float)
+    return np.asarray(_transition_at(transition, transition_index) @ weights, dtype=float)
 
 
-def _apply_transition_backward(transition: csr_matrix | None, values: np.ndarray) -> np.ndarray:
+def _apply_transition_backward(
+    transition: csr_matrix | list[csr_matrix] | tuple[csr_matrix, ...] | None,
+    values: np.ndarray,
+    transition_index: int = 0,
+) -> np.ndarray:
     if transition is None:
         return np.full(values.shape, float(values.sum()) / values.shape[0], dtype=float)
-    return np.asarray(transition.T @ values, dtype=float)
+    return np.asarray(_transition_at(transition, transition_index).T @ values, dtype=float)
+
+
+def _transition_at(
+    transition: csr_matrix | list[csr_matrix] | tuple[csr_matrix, ...],
+    transition_index: int,
+) -> csr_matrix:
+    return transition[transition_index] if isinstance(transition, (list, tuple)) else transition

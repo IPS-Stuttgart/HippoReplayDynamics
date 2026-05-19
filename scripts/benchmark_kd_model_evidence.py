@@ -233,6 +233,7 @@ def _score(args) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame
             n_bins_y=args.n_bins,
             smoothing_sigma_cm=args.place_field_smoothing_cm,
             min_speed_cm_s=args.min_speed_cm_s,
+            exclude_ripple_intervals=not args.include_ripple_intervals_in_encoding,
         ),
     )
     emissions_by_event = [
@@ -324,6 +325,9 @@ def _score(args) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame
                     "kd_n_jobs": int(args.n_jobs),
                     "kd_event_chunk_size": int(args.event_chunk_size),
                     "kd_spike_rate_scale": float(args.spike_rate_scale),
+                    "kd_exclude_ripple_intervals": bool(
+                        not args.include_ripple_intervals_in_encoding
+                    ),
                 }
             )
             marginalized_rows.append(
@@ -365,6 +369,7 @@ def _write_momentum_shard(args, outpath: Path) -> None:
             n_bins_y=args.n_bins,
             smoothing_sigma_cm=args.place_field_smoothing_cm,
             min_speed_cm_s=args.min_speed_cm_s,
+            exclude_ripple_intervals=not args.include_ripple_intervals_in_encoding,
         ),
     )
     emissions_by_event = [
@@ -422,6 +427,10 @@ def _write_momentum_shard(args, outpath: Path) -> None:
         kd_n_jobs=np.asarray(args.n_jobs, dtype=int),
         kd_event_chunk_size=np.asarray(args.event_chunk_size, dtype=int),
         kd_spike_rate_scale=np.asarray(args.spike_rate_scale, dtype=float),
+        kd_exclude_ripple_intervals=np.asarray(
+            not args.include_ripple_intervals_in_encoding,
+            dtype=bool,
+        ),
     )
     print(
         f"Wrote momentum shard {args.momentum_shard_index}/{args.momentum_shard_count}: "
@@ -521,6 +530,14 @@ def main() -> int:
     p.add_argument("--momentum-shard-output", default=None)
     p.add_argument("--place-field-smoothing-cm", type=float, default=4.0)
     p.add_argument("--min-speed-cm-s", type=float, default=5.0)
+    p.add_argument(
+        "--include-ripple-intervals-in-encoding",
+        action="store_true",
+        help=(
+            "Preserve legacy KD behavior by fitting place fields on movement "
+            "frames/spikes inside ripple intervals."
+        ),
+    )
     p.add_argument("--output", default="results/kd-model-evidence")
     args = p.parse_args()
     if args.momentum_shard_output:

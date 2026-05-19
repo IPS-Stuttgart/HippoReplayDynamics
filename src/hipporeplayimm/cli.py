@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import argparse
+from dataclasses import replace
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
 
 from .benchmarks import BenchmarkConfig, _build_models, bootstrap_delta_ci, run_open_field_benchmark
+from .candidate_support import _candidate_min_log_mass_from_probability
 from .data import load_open_field_sessions
 from .encoding import EmissionConfig, EncodingConfig, build_emissions, fit_place_field_encoding
 from .ground_truth import (
@@ -32,6 +34,7 @@ from .simulation_recovery import (
     run_session_simulation_recovery,
 )
 from .state_space import StateSpaceDecoderConfig
+from .state_space_selection import load_state_space_decoder_config
 from .sweeps import (
     PyRecEstSweepConfig,
     pareto_aggregate_sweep_summary,
@@ -58,12 +61,14 @@ def main(argv: list[str] | None = None) -> int:
     benchmark_parser.add_argument("--random-seed", type=int, default=1)
     benchmark_parser.add_argument("--time-bin-ms", type=float, default=20.0)
     benchmark_parser.add_argument("--spike-rate-scale", type=float, default=1.0)
+    _add_candidate_support_arguments(benchmark_parser)
     benchmark_parser.add_argument(
         "--models",
         default="random,stationary,diffusion,momentum,imm",
         help="Comma-separated model names to benchmark.",
     )
     _add_encoding_arguments(benchmark_parser)
+    _add_state_space_arguments(benchmark_parser)
     _add_pyrecest_scalar_arguments(benchmark_parser)
 
     decode_parser = subparsers.add_parser("decode-event")
@@ -73,6 +78,7 @@ def main(argv: list[str] | None = None) -> int:
     decode_parser.add_argument("--candidate-top-k", type=int, default=64)
     decode_parser.add_argument("--time-bin-ms", type=float, default=20.0)
     decode_parser.add_argument("--spike-rate-scale", type=float, default=1.0)
+    _add_candidate_support_arguments(decode_parser)
     decode_parser.add_argument("--output")
     decode_parser.add_argument(
         "--models",
@@ -80,6 +86,7 @@ def main(argv: list[str] | None = None) -> int:
         help="Comma-separated model names to score.",
     )
     _add_encoding_arguments(decode_parser)
+    _add_state_space_arguments(decode_parser)
     _add_pyrecest_scalar_arguments(decode_parser)
 
     ground_truth_parser = subparsers.add_parser("ground-truth")
@@ -101,6 +108,7 @@ def main(argv: list[str] | None = None) -> int:
     compare_parser.add_argument("--time-bin-ms", type=float, default=20.0)
     compare_parser.add_argument("--spike-rate-scale", type=float, default=1.0)
     _add_encoding_arguments(compare_parser)
+    _add_state_space_arguments(compare_parser)
     _add_pyrecest_scalar_arguments(compare_parser)
     compare_parser.add_argument("--visit-radius-cm", type=float, default=10.0)
     compare_parser.add_argument("--min-dwell-s", type=float, default=0.2)
@@ -139,7 +147,11 @@ def main(argv: list[str] | None = None) -> int:
     recovery_parser.add_argument("--state-space-momentum-initial-sigma-cm-sqrt-s", type=float, default=None)
     recovery_parser.add_argument("--state-space-momentum-velocity-decay", type=float, default=0.95)
     recovery_parser.add_argument("--state-space-momentum-candidate-top-k", type=int, default=128)
+    recovery_parser.add_argument("--state-space-momentum-candidate-min-mass", type=float, default=0.995)
+    recovery_parser.add_argument("--state-space-momentum-candidate-max-k", type=int, default=512)
+    recovery_parser.add_argument("--state-space-momentum-candidate-halo-radius-cm", type=float, default=0.0)
     recovery_parser.add_argument("--candidate-top-k", type=int, default=64)
+    _add_candidate_support_arguments(recovery_parser)
     recovery_parser.add_argument("--stationary-sigma-cm", type=float, default=2.0)
     recovery_parser.add_argument("--diffusion-sigma-cm", type=float, default=12.0)
     recovery_parser.add_argument("--momentum-sigma-cm", type=float, default=12.0)
@@ -264,6 +276,9 @@ def _simulate_recovery(args: argparse.Namespace) -> int:
         momentum_initial_sigma_cm_sqrt_s=args.state_space_momentum_initial_sigma_cm_sqrt_s or shared_sigma,
         momentum_velocity_decay=args.state_space_momentum_velocity_decay,
         momentum_candidate_top_k=args.state_space_momentum_candidate_top_k,
+        momentum_candidate_min_log_mass=_candidate_min_log_mass_from_probability(args.state_space_momentum_candidate_min_mass),
+        momentum_candidate_max_k=None if args.state_space_momentum_candidate_max_k <= 0 else args.state_space_momentum_candidate_max_k,
+        momentum_candidate_halo_radius_cm=args.state_space_momentum_candidate_halo_radius_cm,
     )
     config = SimulationRecoveryConfig(
         true_models=parse_model_list(args.true_models),
@@ -276,6 +291,7 @@ def _simulate_recovery(args: argparse.Namespace) -> int:
         encoding=_encoding_config_from_args(args),
         state_space=state_space,
         candidate_top_k=args.candidate_top_k,
+        **_candidate_support_kwargs(args),
         stationary_sigma_cm=args.stationary_sigma_cm,
         diffusion_sigma_cm=args.diffusion_sigma_cm,
         momentum_sigma_cm=args.momentum_sigma_cm,
@@ -303,7 +319,10 @@ def _benchmark(args: argparse.Namespace) -> int:
         test_cell_fraction=args.test_cell_fraction,
         random_seed=args.random_seed,
         candidate_top_k=args.candidate_top_k,
+        **_candidate_support_kwargs(args),
         models=_parse_models(args.models),
+        state_space=_state_space_config_from_args(args),
+        state_space_parameter_source=_state_space_parameter_source_from_args(args),
         **_pyrecest_scalar_kwargs(args),
     )
     result = run_open_field_benchmark(args.root, config)
@@ -342,7 +361,10 @@ def _decode_event(args: argparse.Namespace) -> int:
     config = BenchmarkConfig(
         emissions=emission_config,
         candidate_top_k=args.candidate_top_k,
+        **_candidate_support_kwargs(args),
         models=_parse_models(args.models),
+        state_space=_state_space_config_from_args(args),
+        state_space_parameter_source=_state_space_parameter_source_from_args(args),
         **_pyrecest_scalar_kwargs(args),
     )
     posterior_artifacts: list[tuple[str, object]] = []
@@ -408,6 +430,7 @@ def _compare_ground_truth(args: argparse.Namespace) -> int:
         test_cell_fraction=args.test_cell_fraction,
         candidate_top_k=args.candidate_top_k,
         random_seed=args.random_seed,
+        state_space_config=_state_space_config_from_args(args),
         **_pyrecest_scalar_kwargs(args),
     )
     output = Path(args.output)
@@ -498,6 +521,94 @@ def _add_encoding_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--bin-size-cm", type=float, default=VALIDATED_POSITION_BIN_SIZE_CM)
     parser.add_argument("--smoothing-sigma-bins", type=float, default=VALIDATED_POSITION_SMOOTHING_SIGMA_BINS)
     parser.add_argument("--min-speed-cm-s", type=float, default=VALIDATED_POSITION_MIN_SPEED_CM_S)
+
+
+def _add_candidate_support_arguments(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--candidate-min-mass",
+        type=float,
+        default=0.995,
+        help=(
+            "Minimum local emission probability mass to cover with adaptive "
+            "candidate support; use <=0 to keep fixed top-k support."
+        ),
+    )
+    parser.add_argument(
+        "--candidate-max-k",
+        type=int,
+        default=256,
+        help="Maximum adaptive candidates per time bin; use <=0 for no cap.",
+    )
+    parser.add_argument(
+        "--candidate-halo-radius-cm",
+        type=float,
+        default=0.0,
+        help=(
+            "Optional spatial halo radius added around derived candidates; "
+            "0 disables halo expansion."
+        ),
+    )
+
+
+def _candidate_support_kwargs(args: argparse.Namespace) -> dict[str, float | int | None]:
+    return {
+        "candidate_min_log_mass": _candidate_min_log_mass_from_probability(args.candidate_min_mass),
+        "candidate_max_k": None if args.candidate_max_k <= 0 else args.candidate_max_k,
+        "candidate_halo_radius_cm": args.candidate_halo_radius_cm,
+    }
+
+
+_STATE_SPACE_ARG_FIELDS = {
+    "state_space_stationary_sigma_cm": "stationary_sigma_cm",
+    "state_space_diffusion_sigma_cm_sqrt_s": "diffusion_sigma_cm_sqrt_s",
+    "state_space_max_step_sigma": "max_step_sigma",
+    "state_space_imm_mode_stickiness": "imm_mode_stickiness",
+    "state_space_momentum_sigma_cm_sqrt_s": "momentum_sigma_cm_sqrt_s",
+    "state_space_momentum_initial_sigma_cm_sqrt_s": "momentum_initial_sigma_cm_sqrt_s",
+    "state_space_momentum_velocity_decay": "momentum_velocity_decay",
+    "state_space_momentum_candidate_top_k": "momentum_candidate_top_k",
+    "state_space_momentum_predicted_candidate_top_k": "momentum_predicted_candidate_top_k",
+}
+
+
+def _add_state_space_arguments(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--state-space-parameter-selection",
+        help=(
+            "Directory or artifact produced by scripts/select_state_space_parameters.py; "
+            "selected values seed the state-space decoder config before explicit overrides."
+        ),
+    )
+    parser.add_argument("--state-space-stationary-sigma-cm", type=float)
+    parser.add_argument("--state-space-diffusion-sigma-cm-sqrt-s", type=float)
+    parser.add_argument("--state-space-max-step-sigma", type=float)
+    parser.add_argument("--state-space-imm-mode-stickiness", type=float)
+    parser.add_argument("--state-space-momentum-sigma-cm-sqrt-s", type=float)
+    parser.add_argument("--state-space-momentum-initial-sigma-cm-sqrt-s", type=float)
+    parser.add_argument("--state-space-momentum-velocity-decay", type=float)
+    parser.add_argument("--state-space-momentum-candidate-top-k", type=int)
+    parser.add_argument("--state-space-momentum-predicted-candidate-top-k", type=int)
+
+
+def _state_space_config_from_args(args: argparse.Namespace) -> StateSpaceDecoderConfig:
+    config = StateSpaceDecoderConfig()
+    selection = getattr(args, "state_space_parameter_selection", None)
+    if selection:
+        config = load_state_space_decoder_config(selection, base=config)
+
+    overrides: dict[str, float | int] = {}
+    for arg_name, field_name in _STATE_SPACE_ARG_FIELDS.items():
+        value = getattr(args, arg_name, None)
+        if value is not None:
+            overrides[field_name] = value
+    return replace(config, **overrides) if overrides else config
+
+
+def _state_space_parameter_source_from_args(args: argparse.Namespace) -> str:
+    selection = getattr(args, "state_space_parameter_selection", None)
+    if not selection:
+        return ""
+    return str(Path(selection))
 
 
 def _add_pyrecest_scalar_arguments(parser: argparse.ArgumentParser) -> None:

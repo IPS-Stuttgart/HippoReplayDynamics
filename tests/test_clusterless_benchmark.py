@@ -16,9 +16,9 @@ class _DummyEncoding:
         return self
 
 
-def test_clusterless_benchmark_scores_train_with_joint_encoder(monkeypatch):
+def test_clusterless_benchmark_scores_train_and_joint_with_train_encoder(monkeypatch):
     session = _two_cell_clusterless_session()
-    joint_encoder = SimpleNamespace(bin_centers=np.array([[0.0, 0.0], [10.0, 0.0]]))
+    train_encoder = SimpleNamespace(bin_centers=np.array([[0.0, 0.0], [10.0, 0.0]]))
     fitted_cell_sets = []
     emission_calls = []
 
@@ -35,7 +35,7 @@ def test_clusterless_benchmark_scores_train_with_joint_encoder(monkeypatch):
     def fake_fit_clusterless_mark_encoding(session, config):
         assert session.spike_marks is not None
         fitted_cell_sets.append(tuple(np.unique(session.spike_marks.cell_ids).tolist()))
-        return joint_encoder
+        return train_encoder
 
     def fake_build_clusterless_mark_emissions(session, encoding, ripple, config):
         assert session.spike_marks is not None
@@ -43,7 +43,7 @@ def test_clusterless_benchmark_scores_train_with_joint_encoder(monkeypatch):
         return _dummy_emissions(session.spike_marks.times.size)
 
     def fake_score_train_joint_model(model, train_emissions, joint_emissions, bin_centers):
-        assert bin_centers is joint_encoder.bin_centers
+        assert bin_centers is train_encoder.bin_centers
         return (
             SimpleNamespace(log_likelihood=1.0, model_name=model.name, diagnostics={}),
             SimpleNamespace(log_likelihood=3.0, model_name=model.name, diagnostics={}),
@@ -65,12 +65,13 @@ def test_clusterless_benchmark_scores_train_with_joint_encoder(monkeypatch):
     )
 
     assert len(rows) == 1
-    assert fitted_cell_sets == [(1, 2)]
+    assert len(fitted_cell_sets) == 1
+    assert fitted_cell_sets[0] in {(1,), (2,)}
     assert len(emission_calls) == 2
-    assert emission_calls[0][0] in {(1,), (2,)}
+    assert emission_calls[0][0] == fitted_cell_sets[0]
     assert emission_calls[1][0] == (1, 2)
-    assert emission_calls[0][1] is joint_encoder
-    assert emission_calls[1][1] is joint_encoder
+    assert emission_calls[0][1] is train_encoder
+    assert emission_calls[1][1] is train_encoder
     assert rows[0]["heldout_log_likelihood"] == 2.0
 
 

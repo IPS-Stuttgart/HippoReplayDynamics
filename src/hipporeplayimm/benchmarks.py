@@ -8,6 +8,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+from .candidate_support import DEFAULT_CANDIDATE_MIN_LOG_MASS
 from .clusterless import (
     ClusterlessMarkConfig,
     ClusterlessStateSpaceReplayModel,
@@ -23,6 +24,7 @@ from .evidence_reporting import (
 from .models import CandidateKinematicModel, RandomModel, StationaryModel
 from .pyrecest_models import PyRecEstGoalParticleIMMModel, PyRecEstGoalParticleModel
 from .sorted_spike_state_space import SortedSpikeStateSpaceReplayModel
+from .state_space import StateSpaceDecoderConfig
 
 
 @dataclass(frozen=True)
@@ -32,6 +34,11 @@ class BenchmarkConfig:
     test_cell_fraction: float = 0.25
     max_events_per_session: int | None = None
     candidate_top_k: int = 64
+    candidate_min_log_mass: float | None = DEFAULT_CANDIDATE_MIN_LOG_MASS
+    candidate_max_k: int | None = 256
+    candidate_halo_radius_cm: float = 0.0
+    state_space: StateSpaceDecoderConfig = field(default_factory=StateSpaceDecoderConfig)
+    state_space_parameter_source: str = ""
     clusterless_mark_smoothing_sigma_bins: float = 1.0
     clusterless_mark_prior_count: float = 1.0
     clusterless_mark_variance_floor: float = 1.0
@@ -127,7 +134,7 @@ def bootstrap_delta_ci(
 
 def _score_session(session: ReplaySession, config: BenchmarkConfig) -> list[dict[str, object]]:
     encoding = fit_place_field_encoding(session, config.encoding)
-    model_objects = _build_models(config, session=session)
+    model_objects = _build_models(config, session)
     train_cells, test_cells = _split_cells(encoding.cell_ids, config.test_cell_fraction, config.random_seed)
     if test_cells.size == 0 or train_cells.size == 0:
         return []
@@ -135,9 +142,14 @@ def _score_session(session: ReplaySession, config: BenchmarkConfig) -> list[dict
     joint_encoding = encoding.select_cells(np.concatenate([train_cells, test_cells]))
 
     has_clusterless_models = any(_is_clusterless_model(model) for model in model_objects.values())
+    has_candidate_clusterless_models = any(
+        _uses_direct_clusterless_heldout(model)
+        for model in model_objects.values()
+    )
     clusterless_train_session: ReplaySession | None = None
     clusterless_joint_session: ReplaySession | None = None
-    clusterless_joint_encoding = None
+    clusterless_test_session: ReplaySession | None = None
+    clusterless_train_encoding = None
     if has_clusterless_models:
         clusterless_train_session = _session_with_mark_cell_subset(
             session,
@@ -149,12 +161,19 @@ def _score_session(session: ReplaySession, config: BenchmarkConfig) -> list[dict
             np.concatenate([train_cells, test_cells]),
             role="joint",
         )
+        if has_candidate_clusterless_models:
+            clusterless_test_session = _session_with_mark_cell_subset(
+                session,
+                test_cells,
+                role="test",
+            )
         clusterless_config = _clusterless_mark_config(config)
-        # Use one joint observation model for both terms in
-        # log p(train + test) - log p(train), so the train contribution cancels
-        # under identical clusterless rate and mark-likelihood parameters.
-        clusterless_joint_encoding = fit_clusterless_mark_encoding(
-            clusterless_joint_session,
+        # Fit the clusterless observation model only from the training-cell
+        # subset. Reuse those train-fitted parameters for both score terms, so
+        # log p(train + test) - log p(train) is algebraically consistent
+        # without fitting mark/rate parameters to held-out test-cell marks.
+        clusterless_train_encoding = fit_clusterless_mark_encoding(
+            clusterless_train_session,
             clusterless_config,
         )
 
@@ -167,19 +186,28 @@ def _score_session(session: ReplaySession, config: BenchmarkConfig) -> list[dict
             continue
         clusterless_train_emissions = None
         clusterless_joint_emissions = None
+        clusterless_test_emissions = None
         if has_clusterless_models:
             assert clusterless_train_session is not None
             assert clusterless_joint_session is not None
-            assert clusterless_joint_encoding is not None
+            assert clusterless_train_encoding is not None
             clusterless_train_emissions = build_clusterless_mark_emissions(
                 clusterless_train_session,
-                clusterless_joint_encoding,
+                clusterless_train_encoding,
                 int(event_index),
                 config.emissions,
             )
+            if has_candidate_clusterless_models:
+                assert clusterless_test_session is not None
+                clusterless_test_emissions = build_clusterless_mark_emissions(
+                    clusterless_test_session,
+                    clusterless_train_encoding,
+                    int(event_index),
+                    config.emissions,
+                )
             clusterless_joint_emissions = build_clusterless_mark_emissions(
                 clusterless_joint_session,
-                clusterless_joint_encoding,
+                clusterless_train_encoding,
                 int(event_index),
                 config.emissions,
             )
@@ -187,21 +215,38 @@ def _score_session(session: ReplaySession, config: BenchmarkConfig) -> list[dict
             if _is_clusterless_model(model):
                 assert clusterless_train_emissions is not None
                 assert clusterless_joint_emissions is not None
-                assert clusterless_joint_encoding is not None
+                assert clusterless_train_encoding is not None
                 model_train_emissions = clusterless_train_emissions
                 model_joint_emissions = clusterless_joint_emissions
-                model_bin_centers = clusterless_joint_encoding.bin_centers
+                model_bin_centers = clusterless_train_encoding.bin_centers
             else:
                 model_train_emissions = train_emissions
                 model_joint_emissions = joint_emissions
                 model_bin_centers = encoding.bin_centers
-            train_score, joint_score = _score_train_joint_model(
-                model,
-                model_train_emissions,
-                model_joint_emissions,
-                model_bin_centers,
-            )
-            heldout = joint_score.log_likelihood - train_score.log_likelihood
+            if _uses_direct_clusterless_heldout(model):
+                assert clusterless_test_emissions is not None
+                candidates = _candidate_indices_for_model(model, model_train_emissions, model_bin_centers)
+                train_score = model.score(
+                    model_train_emissions,
+                    model_bin_centers,
+                    candidate_indices=candidates,
+                )
+                joint_score = model.score(
+                    clusterless_test_emissions,
+                    model_bin_centers,
+                    candidate_indices=candidates,
+                )
+                heldout = float(joint_score.log_likelihood)
+                test_spikes = int(clusterless_test_emissions.n_spikes)
+            else:
+                train_score, joint_score = _score_train_joint_model(
+                    model,
+                    model_train_emissions,
+                    model_joint_emissions,
+                    model_bin_centers,
+                )
+                heldout = joint_score.log_likelihood - train_score.log_likelihood
+                test_spikes = max(0, int(model_joint_emissions.n_spikes) - int(model_train_emissions.n_spikes))
             rows.append(
                 {
                     "session": session.session_id,
@@ -211,7 +256,7 @@ def _score_session(session: ReplaySession, config: BenchmarkConfig) -> list[dict
                     "heldout_log_likelihood": float(heldout),
                     "joint_log_likelihood": float(joint_score.log_likelihood),
                     "train_log_likelihood": float(train_score.log_likelihood),
-                    "test_spikes": int(model_joint_emissions.n_spikes - model_train_emissions.n_spikes),
+                    "test_spikes": test_spikes,
                     "n_time": int(model_train_emissions.n_time),
                     "train_cell_ids": _format_cell_ids(train_cells),
                     "test_cell_ids": _format_cell_ids(test_cells),
@@ -244,6 +289,14 @@ def _candidate_indices_for_model(model, emissions, bin_centers):
 
 def _is_clusterless_model(model: object) -> bool:
     return isinstance(model, ClusterlessStateSpaceReplayModel)
+
+
+def _uses_direct_clusterless_heldout(model: object) -> bool:
+    return (
+        _is_clusterless_model(model)
+        and hasattr(model, "candidate_indices")
+        and getattr(model, "mode", "") != "stationary"
+    )
 
 
 def _clusterless_mark_config(config: BenchmarkConfig) -> ClusterlessMarkConfig:
@@ -312,6 +365,22 @@ def _benchmark_config_metadata(config: BenchmarkConfig) -> dict[str, object]:
         "encoding_arena_padding_cm": float(config.encoding.arena_padding_cm),
         "encoding_use_excitatory": bool(config.encoding.use_excitatory),
         "emission_time_bin_s": float(config.emissions.time_bin_s),
+        "emission_spike_rate_scale": float(config.emissions.spike_rate_scale),
+        "candidate_min_log_mass": "" if config.candidate_min_log_mass is None else float(config.candidate_min_log_mass),
+        "candidate_max_k": 0 if config.candidate_max_k is None else int(config.candidate_max_k),
+        "candidate_halo_radius_cm": float(config.candidate_halo_radius_cm),
+        "state_space_parameter_source": str(config.state_space_parameter_source),
+        "state_space_stationary_sigma_cm": float(config.state_space.stationary_sigma_cm),
+        "state_space_diffusion_sigma_cm_sqrt_s": float(config.state_space.diffusion_sigma_cm_sqrt_s),
+        "state_space_max_step_sigma": float(config.state_space.max_step_sigma),
+        "state_space_imm_mode_stickiness": float(config.state_space.imm_mode_stickiness),
+        "state_space_momentum_sigma_cm_sqrt_s": float(config.state_space.momentum_sigma_cm_sqrt_s),
+        "state_space_momentum_initial_sigma_cm_sqrt_s": float(
+            config.state_space.momentum_initial_sigma_cm_sqrt_s
+        ),
+        "state_space_momentum_velocity_decay": float(config.state_space.momentum_velocity_decay),
+        "state_space_momentum_candidate_top_k": int(config.state_space.momentum_candidate_top_k),
+        "state_space_momentum_predicted_candidate_top_k": int(config.state_space.momentum_predicted_candidate_top_k),
         "clusterless_mark_smoothing_sigma_bins": float(
             getattr(config, "clusterless_mark_smoothing_sigma_bins", 1.0)
         ),
@@ -326,7 +395,7 @@ def _benchmark_config_metadata(config: BenchmarkConfig) -> dict[str, object]:
 
 
 def _session_mark_diagnostics(session: ReplaySession) -> dict[str, object]:
-    marks = session.spike_marks
+    marks = getattr(session, "spike_marks", None)
     return {
         "spike_mark_features": 0 if marks is None else marks.n_features,
         "spike_mark_source": "" if marks is None else f"{marks.source_file}:{marks.source_variable}",
@@ -365,30 +434,53 @@ def _build_models(
     session: ReplaySession | None = None,
 ) -> dict[str, object]:
     goal_candidates = _session_goal_candidates(session) if session is not None else None
+    candidate_kwargs = {
+        "top_k": config.candidate_top_k,
+        "candidate_min_log_mass": config.candidate_min_log_mass,
+        "candidate_max_k": config.candidate_max_k,
+        "candidate_halo_radius_cm": config.candidate_halo_radius_cm,
+    }
+
+    def sorted_state_space_model(
+        mode: str,
+        name: str | None = None,
+    ) -> SortedSpikeStateSpaceReplayModel:
+        return SortedSpikeStateSpaceReplayModel(
+            mode=mode,
+            config=config.state_space,
+            name=name,
+        )
+
+    def clusterless_state_space_model(mode: str) -> ClusterlessStateSpaceReplayModel:
+        return ClusterlessStateSpaceReplayModel(
+            mode=mode,
+            config=config.state_space,
+        )
+
     available = {
         "random": RandomModel(),
         "stationary": StationaryModel(),
-        "diffusion": CandidateKinematicModel(mode="diffusion", top_k=config.candidate_top_k),
-        "momentum": CandidateKinematicModel(mode="momentum", top_k=config.candidate_top_k),
-        "imm": CandidateKinematicModel(mode="imm", top_k=config.candidate_top_k),
-        "sorted-spike-state-space-stationary": SortedSpikeStateSpaceReplayModel(mode="stationary"),
-        "sorted-spike-state-space-diffusion": SortedSpikeStateSpaceReplayModel(mode="diffusion"),
-        "sorted-spike-state-space-fragmented": SortedSpikeStateSpaceReplayModel(mode="fragmented"),
-        "sorted-spike-state-space-jump": SortedSpikeStateSpaceReplayModel(mode="jump"),
-        "sorted-spike-state-space-momentum": SortedSpikeStateSpaceReplayModel(mode="momentum"),
-        "sorted-spike-state-space-imm": SortedSpikeStateSpaceReplayModel(mode="imm"),
-        "state-space-stationary": SortedSpikeStateSpaceReplayModel(mode="stationary", name="state-space-stationary"),
-        "state-space-diffusion": SortedSpikeStateSpaceReplayModel(mode="diffusion", name="state-space-diffusion"),
-        "state-space-fragmented": SortedSpikeStateSpaceReplayModel(mode="fragmented", name="state-space-fragmented"),
-        "state-space-jump": SortedSpikeStateSpaceReplayModel(mode="jump", name="state-space-jump"),
-        "state-space-momentum": SortedSpikeStateSpaceReplayModel(mode="momentum", name="state-space-momentum"),
-        "state-space-imm": SortedSpikeStateSpaceReplayModel(mode="imm", name="state-space-imm"),
-        "clusterless-state-space-stationary": ClusterlessStateSpaceReplayModel(mode="stationary"),
-        "clusterless-state-space-diffusion": ClusterlessStateSpaceReplayModel(mode="diffusion"),
-        "clusterless-state-space-fragmented": ClusterlessStateSpaceReplayModel(mode="fragmented"),
-        "clusterless-state-space-jump": ClusterlessStateSpaceReplayModel(mode="jump"),
-        "clusterless-state-space-momentum": ClusterlessStateSpaceReplayModel(mode="momentum"),
-        "clusterless-state-space-imm": ClusterlessStateSpaceReplayModel(mode="imm"),
+        "diffusion": CandidateKinematicModel(mode="diffusion", **candidate_kwargs),
+        "momentum": CandidateKinematicModel(mode="momentum", **candidate_kwargs),
+        "imm": CandidateKinematicModel(mode="imm", **candidate_kwargs),
+        "sorted-spike-state-space-stationary": sorted_state_space_model("stationary"),
+        "sorted-spike-state-space-diffusion": sorted_state_space_model("diffusion"),
+        "sorted-spike-state-space-fragmented": sorted_state_space_model("fragmented"),
+        "sorted-spike-state-space-jump": sorted_state_space_model("jump"),
+        "sorted-spike-state-space-momentum": sorted_state_space_model("momentum"),
+        "sorted-spike-state-space-imm": sorted_state_space_model("imm"),
+        "state-space-stationary": sorted_state_space_model("stationary", name="state-space-stationary"),
+        "state-space-diffusion": sorted_state_space_model("diffusion", name="state-space-diffusion"),
+        "state-space-fragmented": sorted_state_space_model("fragmented", name="state-space-fragmented"),
+        "state-space-jump": sorted_state_space_model("jump", name="state-space-jump"),
+        "state-space-momentum": sorted_state_space_model("momentum", name="state-space-momentum"),
+        "state-space-imm": sorted_state_space_model("imm", name="state-space-imm"),
+        "clusterless-state-space-stationary": clusterless_state_space_model("stationary"),
+        "clusterless-state-space-diffusion": clusterless_state_space_model("diffusion"),
+        "clusterless-state-space-fragmented": clusterless_state_space_model("fragmented"),
+        "clusterless-state-space-jump": clusterless_state_space_model("jump"),
+        "clusterless-state-space-momentum": clusterless_state_space_model("momentum"),
+        "clusterless-state-space-imm": clusterless_state_space_model("imm"),
         "pyrecest-goal-particle": PyRecEstGoalParticleModel(
             candidate_goals=goal_candidates,
             n_particles=config.pyrecest_particles,

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace as dataclass_replace
 from types import SimpleNamespace
 
 import numpy as np
@@ -161,9 +162,11 @@ def _compare_clusterless_scores_to_ground_truth(gt, root, scores_frame: pd.DataF
 
 
 def _clusterless_state_space_model(config: object, mode: str) -> ClusterlessStateSpaceReplayModel:
-    return ClusterlessStateSpaceReplayModel(
-        mode=mode,
-        config=StateSpaceDecoderConfig(
+    base_state_space = getattr(config, "state_space", None)
+    if isinstance(base_state_space, StateSpaceDecoderConfig) and base_state_space != StateSpaceDecoderConfig():
+        decoder_config = dataclass_replace(base_state_space, mode=mode)
+    else:
+        decoder_config = StateSpaceDecoderConfig(
             mode=mode,
             stationary_sigma_cm=_cfg(config, "state_space_stationary_sigma_cm", 2.0),
             diffusion_sigma_cm_sqrt_s=_cfg(config, "state_space_diffusion_sigma_cm_sqrt_s", 85.0),
@@ -177,7 +180,15 @@ def _clusterless_state_space_model(config: object, mode: str) -> ClusterlessStat
             ),
             momentum_velocity_decay=_cfg(config, "state_space_momentum_velocity_decay", 0.95),
             momentum_candidate_top_k=_cfg(config, "state_space_momentum_candidate_top_k", 128),
-        ),
+            momentum_predicted_candidate_top_k=_cfg(
+                config,
+                "state_space_momentum_predicted_candidate_top_k",
+                8,
+            ),
+        )
+    return ClusterlessStateSpaceReplayModel(
+        mode=mode,
+        config=decoder_config,
     )
 
 

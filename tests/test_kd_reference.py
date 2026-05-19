@@ -10,6 +10,7 @@ from hipporeplayimm.kd_reference import (
     build_kd_emissions,
     diffusion_transition_1d,
     empirical_grid_prior,
+    fit_kd_place_field_encoding,
     kd_momentum_log_evidence,
     kd_random_log_evidence,
     kd_stationary_gaussian_log_evidence_from_latent,
@@ -49,6 +50,33 @@ def _session_with_ripple(spikes: np.ndarray, ripple: RippleEvent) -> ReplaySessi
             [[ripple.start, ripple.end, ripple.peak, ripple.raw_power, ripple.z_power_session, ripple.z_power_epoch]]
         ),
         run_times=np.empty((0, 2)),
+        sleep_box_immobile_times=np.empty((0, 2)),
+        sleep_times=np.empty((0, 2)),
+        rem_times=np.empty((0, 2)),
+        well_sequence=None,
+        metadata={},
+    )
+
+
+def _session_for_kd_encoding() -> ReplaySession:
+    return ReplaySession(
+        rat="rat",
+        name="session",
+        path=Path("."),
+        position=np.array(
+            [
+                [0.0, 0.5, 0.5],
+                [1.0, 4.5, 0.5],
+                [2.0, 8.5, 0.5],
+                [3.0, 12.5, 0.5],
+            ]
+        ),
+        spikes=np.array([[0.5, 1.0], [1.5, 1.0], [3.0, 1.0]]),
+        tetrode_cell_ids=np.empty((0, 2)),
+        excitatory_neurons=np.array([1]),
+        inhibitory_neurons=np.array([], dtype=int),
+        ripple_events=np.array([[1.0, 2.0, 1.5, 0.0, 0.0, 0.0]]),
+        run_times=np.array([[0.0, 3.0]]),
         sleep_box_immobile_times=np.empty((0, 2)),
         sleep_times=np.empty((0, 2)),
         rem_times=np.empty((0, 2)),
@@ -211,3 +239,36 @@ def test_build_kd_emissions_includes_partial_ripple_tail_without_counting_after_
         np.array([0.02, 0.02, 0.013]),
     )
     assert np.allclose(emissions.log_likelihood, expected_log_likelihood)
+
+
+def test_fit_kd_place_field_encoding_excludes_ripple_intervals_by_default():
+    session = _session_for_kd_encoding()
+    base_config = KDEncodingConfig(
+        bin_size_cm=4.0,
+        n_bins_x=4,
+        n_bins_y=1,
+        smoothing_sigma_cm=0.0,
+        min_speed_cm_s=0.0,
+        min_peak_rate_hz=0.0,
+        rate_floor_hz=0.0,
+    )
+
+    excluded = fit_kd_place_field_encoding(session, base_config)
+    included = fit_kd_place_field_encoding(
+        session,
+        KDEncodingConfig(
+            bin_size_cm=4.0,
+            n_bins_x=4,
+            n_bins_y=1,
+            smoothing_sigma_cm=0.0,
+            min_speed_cm_s=0.0,
+            min_peak_rate_hz=0.0,
+            rate_floor_hz=0.0,
+            exclude_ripple_intervals=False,
+        ),
+    )
+
+    np.testing.assert_allclose(excluded.occupancy_s, np.array([1.0, 0.0, 0.0, 1.0]))
+    np.testing.assert_allclose(included.occupancy_s, np.ones(4))
+    np.testing.assert_allclose(excluded.rates_hz[0], np.array([1.0, 0.0, 0.0, 1.0]))
+    np.testing.assert_allclose(included.rates_hz[0], np.array([1.0, 1.0, 0.0, 1.0]))

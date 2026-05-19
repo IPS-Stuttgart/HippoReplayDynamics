@@ -26,6 +26,8 @@ def _score_momentum_candidates(
     if emissions.n_time == 1:
         logp, trajectory = _score_fragmented(emissions)
         return logp, trajectory, [0.0]
+    sigmas_cm = _as_transition_values(sigma_cm, emissions.n_time - 1, "sigma_cm")
+    velocity_decays = _as_transition_values(velocity_decay, emissions.n_time - 1, "velocity_decay")
 
     masses = _candidate_log_masses(emissions.log_likelihood, candidates)
     log_pair = _init_pair_log_alpha(
@@ -37,6 +39,7 @@ def _score_momentum_candidates(
     )
     pair_alphas = [log_pair]
     for time_index in range(2, emissions.n_time):
+        transition_index = time_index - 1
         log_pair = _advance_momentum_pair(
             log_pair,
             candidates[time_index - 2],
@@ -44,8 +47,8 @@ def _score_momentum_candidates(
             candidates[time_index],
             emissions.log_likelihood[time_index, candidates[time_index]],
             bin_centers,
-            sigma_cm=sigma_cm,
-            velocity_decay=velocity_decay,
+            sigma_cm=float(sigmas_cm[transition_index]),
+            velocity_decay=float(velocity_decays[transition_index]),
         )
         pair_alphas.append(log_pair)
 
@@ -53,6 +56,7 @@ def _score_momentum_candidates(
     pair_betas = [np.zeros_like(pair_alphas[-1]) for _ in pair_alphas]
     for pair_index in range(len(pair_alphas) - 2, -1, -1):
         curr_time = pair_index + 2
+        transition_index = curr_time - 1
         pair_betas[pair_index] = _backward_momentum_pair(
             pair_betas[pair_index + 1],
             candidates[pair_index],
@@ -60,8 +64,8 @@ def _score_momentum_candidates(
             candidates[curr_time],
             emissions.log_likelihood[curr_time, candidates[curr_time]],
             bin_centers,
-            sigma_cm=sigma_cm,
-            velocity_decay=velocity_decay,
+            sigma_cm=float(sigmas_cm[transition_index]),
+            velocity_decay=float(velocity_decays[transition_index]),
         )
 
     trajectory = np.full((emissions.n_time, emissions.n_bins), LOG_ZERO, dtype=float)
@@ -150,3 +154,15 @@ def _backward_momentum_pair(
         continuation = curr_emission[None, :] + next_beta[prev_col][None, :]
         output[:, prev_col] = logsumexp(log_kernel + continuation, axis=1)
     return output
+
+
+def _as_transition_values(value: float | np.ndarray, n_transitions: int, name: str) -> np.ndarray:
+    values = np.asarray(value, dtype=float)
+    if values.ndim == 0:
+        return np.full(n_transitions, float(values), dtype=float)
+    expected_shape = (n_transitions,)
+    if values.shape != expected_shape:
+        raise ValueError(f"{name} must be scalar or have shape {expected_shape}, got {values.shape}")
+    if not np.all(np.isfinite(values)):
+        raise ValueError(f"{name} must contain finite values")
+    return values

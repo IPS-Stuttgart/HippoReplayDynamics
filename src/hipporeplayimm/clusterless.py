@@ -391,12 +391,16 @@ def _validate_mark_config(config: ClusterlessMarkConfig) -> None:
         raise ValueError("mark_kde_max_neighbors must be at least one")
 
 
-def _normalize_mark_likelihood(value: str) -> str:
+def normalize_mark_likelihood(value: str) -> str:
     key = str(value).strip().lower().replace("_", "-")
     if key not in _MARK_LIKELIHOOD_ALIASES:
         allowed = ", ".join(sorted({_DIAGONAL_GAUSSIAN, _LOCAL_KDE}))
         raise ValueError(f"Unknown clusterless mark likelihood {value!r}; expected one of: {allowed}")
     return _MARK_LIKELIHOOD_ALIASES[key]
+
+
+def _normalize_mark_likelihood(value: str) -> str:
+    return normalize_mark_likelihood(value)
 
 
 def _local_kde_support(

@@ -95,6 +95,50 @@ def test_state_space_four_mode_imm_uses_transition_durations():
     assert score.diagnostics["state_space_transition_durations"] == "1,4"
 
 
+def test_duration_patched_state_space_scores_keep_momentum_candidate_augmentation():
+    """Derived supports must pass bin centers into candidate augmentation.
+
+    The duration-aware score monkey-patches replace ``StateSpaceReplayModel.score``.
+    Without forwarding ``bin_centers`` to ``candidate_indices``, momentum-based
+    models silently fall back to pure emission top-k supports and ignore the
+    configured momentum-prediction candidate augmentation.
+    """
+
+    emissions = LogEmissionTensor(
+        log_likelihood=np.log(
+            np.array(
+                [
+                    [0.90, 0.05, 0.03, 0.02],
+                    [0.05, 0.90, 0.03, 0.02],
+                    [0.90, 0.05, 0.03, 0.02],
+                ],
+                dtype=float,
+            )
+        ),
+        spike_counts=np.zeros((3, 1), dtype=int),
+        times=np.array([0.0, 1.0, 2.0]),
+        dt=1.0,
+        cell_ids=np.array([1]),
+        n_spikes=0,
+    )
+    centers = np.array([[0.0, 0.0], [1.0, 0.0], [2.0, 0.0], [3.0, 0.0]])
+
+    for mode, support_key in (
+        ("momentum", "state_space_momentum_candidate_support"),
+        ("imm", "state_space_imm_candidate_support"),
+    ):
+        config = StateSpaceDecoderConfig(
+            mode=mode,
+            momentum_candidate_top_k=1,
+            momentum_predicted_candidate_top_k=1,
+            momentum_velocity_decay=1.0,
+        )
+        score = StateSpaceReplayModel(mode=mode, config=config).score(emissions, centers)
+
+        assert score.diagnostics[support_key] == "derived"
+        assert score.diagnostics["mean_candidate_count"] > config.momentum_candidate_top_k
+
+
 def test_duration_patch_updates_imported_build_emissions_aliases():
     import hipporeplayimm.benchmarks as benchmarks
     import hipporeplayimm.encoding as encoding

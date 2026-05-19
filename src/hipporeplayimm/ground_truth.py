@@ -9,7 +9,12 @@ import numpy as np
 import pandas as pd
 from scipy.special import logsumexp
 
-from .benchmarks import BenchmarkConfig, _build_models, _split_cells
+from .benchmarks import (
+    BenchmarkConfig,
+    _build_models,
+    _candidate_indices_for_model,
+    _split_cells,
+)
 from .data import ReplaySession, load_open_field_sessions
 from .encoding import EmissionConfig, EncodingConfig, build_emissions, fit_place_field_encoding
 
@@ -384,7 +389,7 @@ def _score_joint_for_ground_truth(
     bin_centers: np.ndarray,
 ):
     if hasattr(model, "candidate_indices"):
-        candidates = model.candidate_indices(train_emissions)
+        candidates = _candidate_indices_for_model(model, train_emissions, bin_centers)
         return model.score(joint_emissions, bin_centers, candidate_indices=candidates)
     return model.score(joint_emissions, bin_centers)
 

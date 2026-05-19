@@ -107,6 +107,7 @@ def _compare_clusterless_scores_to_ground_truth(gt, root, scores_frame: pd.DataF
         state_space_momentum_velocity_decay=kwargs.get("state_space_momentum_velocity_decay", 0.95),
         state_space_momentum_candidate_top_k=kwargs.get("state_space_momentum_candidate_top_k", 128),
         clusterless_mark_smoothing_sigma_bins=kwargs.get("clusterless_mark_smoothing_sigma_bins", 1.0),
+        clusterless_mark_likelihood=kwargs.get("clusterless_mark_likelihood", "local-kde"),
         clusterless_mark_prior_count=kwargs.get("clusterless_mark_prior_count", 1.0),
         clusterless_mark_variance_floor=kwargs.get("clusterless_mark_variance_floor", 1.0),
         clusterless_rate_floor_hz=kwargs.get("clusterless_rate_floor_hz", 1e-4),
@@ -127,6 +128,7 @@ def _compare_clusterless_scores_to_ground_truth(gt, root, scores_frame: pd.DataF
                 mark_smoothing_sigma_bins=model_config.clusterless_mark_smoothing_sigma_bins,
                 mark_prior_count=model_config.clusterless_mark_prior_count,
                 mark_variance_floor=model_config.clusterless_mark_variance_floor,
+                mark_likelihood=model_config.clusterless_mark_likelihood,
                 rate_floor_hz=model_config.clusterless_rate_floor_hz,
                 use_excitatory=encoding_config.use_excitatory,
             ),
@@ -178,6 +180,7 @@ def _clusterless_state_space_model(config: object, mode: str) -> ClusterlessStat
             momentum_velocity_decay=_cfg(config, "state_space_momentum_velocity_decay", 0.95),
             momentum_candidate_top_k=_cfg(config, "state_space_momentum_candidate_top_k", 128),
         ),
+        mark_likelihood=_cfg(config, "clusterless_mark_likelihood", "local-kde"),
     )
 
 
@@ -235,6 +238,15 @@ def _clusterless_model_config_for_scores(scores_frame: pd.DataFrame, *, model_na
             scores_frame,
             ("clusterless_mark_smoothing_sigma_bins",),
             defaults["clusterless_mark_smoothing_sigma_bins"],
+        ),
+        clusterless_mark_likelihood=_score_metadata._unique_string_from_columns(
+            scores_frame,
+            (
+                "clusterless_mark_likelihood_configured",
+                "diagnostic_clusterless_mark_likelihood",
+                "clusterless_mark_likelihood",
+            ),
+            defaults["clusterless_mark_likelihood"],
         ),
         clusterless_mark_prior_count=_score_metadata._unique_float_from_columns(
             scores_frame,

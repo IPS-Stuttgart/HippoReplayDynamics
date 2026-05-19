@@ -129,3 +129,46 @@ def test_four_mode_imm_uses_transition_durations_for_partial_bins():
     assert score.diagnostics["state_space_imm_modes"] == "stationary,diffusion,momentum,jump"
     assert score.trajectory_log_posterior is not None
     assert np.allclose(logsumexp(score.trajectory_log_posterior, axis=1), 0.0)
+
+
+def test_four_mode_imm_duration_derives_candidates_with_bin_centers(monkeypatch):
+    emissions = LogEmissionTensor(
+        log_likelihood=np.log(
+            np.array(
+                [
+                    [0.99, 0.005, 0.003, 0.002],
+                    [0.005, 0.99, 0.003, 0.002],
+                    [0.002, 0.003, 0.005, 0.99],
+                ],
+                dtype=float,
+            )
+        ),
+        spike_counts=np.zeros((3, 1), dtype=int),
+        times=np.array([0.0, 1.0, 2.0]),
+        dt=1.0,
+        cell_ids=np.array([1]),
+        n_spikes=0,
+    )
+    centers = np.array([[0.0, 0.0], [1.0, 0.0], [2.0, 0.0], [3.0, 0.0]], dtype=float)
+    config = StateSpaceDecoderConfig(
+        mode="imm",
+        stationary_sigma_cm=0.5,
+        diffusion_sigma_cm_sqrt_s=0.5,
+        momentum_sigma_cm_sqrt_s=0.5,
+        momentum_initial_sigma_cm_sqrt_s=0.5,
+        momentum_velocity_decay=1.0,
+        momentum_candidate_top_k=1,
+        momentum_predicted_candidate_top_k=1,
+    )
+    original_candidate_indices = StateSpaceReplayModel.candidate_indices
+    seen: dict[str, object | None] = {}
+
+    def recording_candidate_indices(self, got_emissions, got_bin_centers=None):
+        seen["emissions"] = got_emissions
+        seen["bin_centers"] = got_bin_centers
+        return original_candidate_indices(self, got_emissions, got_bin_centers)
+
+    monkeypatch.setattr(StateSpaceReplayModel, "candidate_indices", recording_candidate_indices)
+    StateSpaceReplayModel(mode="imm", config=config).score(emissions, centers)
+    assert seen["emissions"] is emissions
+    assert seen["bin_centers"] is centers

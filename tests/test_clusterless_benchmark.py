@@ -72,6 +72,29 @@ def test_clusterless_benchmark_scores_train_with_joint_encoder(monkeypatch):
     assert emission_calls[0][1] is joint_encoder
     assert emission_calls[1][1] is joint_encoder
     assert rows[0]["heldout_log_likelihood"] == 2.0
+    assert rows[0]["clusterless_mark_likelihood"] == "local-kde"
+    assert rows[0]["clusterless_mark_likelihood_configured"] == "local-kde"
+
+
+def test_clusterless_mark_likelihood_metadata_tracks_config_alias():
+    session = _two_cell_clusterless_session()
+    config = benchmarks.BenchmarkConfig(clusterless_mark_likelihood="diag")
+
+    diagnostics = benchmarks._session_mark_diagnostics(session, config)
+
+    assert diagnostics["clusterless_mark_likelihood_available"] is True
+    assert diagnostics["clusterless_mark_likelihood"] == "diagonal-gaussian"
+
+
+def test_clusterless_models_receive_configured_mark_likelihood_alias():
+    config = benchmarks.BenchmarkConfig(
+        models=("clusterless-state-space-stationary",),
+        clusterless_mark_likelihood="kde",
+    )
+
+    model = benchmarks._build_models(config)["clusterless-state-space-stationary"]
+
+    assert model.mark_likelihood == "local-kde"
 
 
 def _dummy_emissions(n_spikes: int) -> LogEmissionTensor:

@@ -209,8 +209,9 @@ def test_compare_scores_to_ground_truth_uses_benchmark_split_and_train_candidate
     class FakeCandidateModel:
         name = "diffusion"
 
-        def candidate_indices(self, emissions):
+        def candidate_indices(self, emissions, bin_centers_arg):
             seen["candidate_cells"] = tuple(int(cell_id) for cell_id in emissions.cell_ids)
+            seen["candidate_bin_centers"] = np.array(bin_centers_arg, copy=True)
             return [np.array([0]), np.array([1])]
 
         def score(self, emissions, bin_centers_arg, candidate_indices=None):
@@ -251,6 +252,7 @@ def test_compare_scores_to_ground_truth_uses_benchmark_split_and_train_candidate
 
     assert built_cell_ids == [(1, 2, 3), (1, 2, 3, 4)]
     assert seen["candidate_cells"] == (1, 2, 3)
+    np.testing.assert_allclose(seen["candidate_bin_centers"], bin_centers)
     assert seen["score_cells"] == (1, 2, 3, 4)
     assert [arr.tolist() for arr in seen["candidate_indices"]] == [[0], [1]]
     assert comparison.loc[0, "decoded_well_id"] == 2

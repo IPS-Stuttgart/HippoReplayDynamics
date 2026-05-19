@@ -16,6 +16,7 @@ from hipporeplayimm.pyrecest_models import (
     PyRecEstGoalParticleModel,
     _grid_proposal_weights,
 )
+from hipporeplayimm.state_space import StateSpaceDecoderConfig, StateSpaceReplayModel
 
 
 def test_diffusion_matches_bruteforce_tiny_grid():
@@ -239,6 +240,40 @@ def test_candidate_diffusion_pruned_support_uses_full_grid_normalization():
         + emissions.log_likelihood[2, dst2]
     )
     assert np.allclose(score.log_likelihood, expected)
+
+
+@pytest.mark.parametrize("mode", ["momentum", "imm"])
+def test_duration_state_space_candidate_derivation_receives_bin_centers(monkeypatch, mode):
+    centers = np.array([[0.0, 0.0], [1.0, 0.0], [2.0, 0.0], [3.0, 0.0]])
+    emissions = LogEmissionTensor(
+        log_likelihood=np.log(
+            np.array(
+                [
+                    [0.70, 0.20, 0.08, 0.02],
+                    [0.15, 0.65, 0.15, 0.05],
+                    [0.05, 0.15, 0.65, 0.15],
+                ]
+            )
+        ),
+        spike_counts=np.zeros((3, 1), dtype=int),
+        times=np.array([0.0, 1.0, 2.0]),
+        dt=1.0,
+        cell_ids=np.array([1]),
+        n_spikes=0,
+    )
+    seen_bin_centers = []
+
+    def candidate_indices_spy(self, observed_emissions, observed_bin_centers=None):
+        seen_bin_centers.append(observed_bin_centers)
+        return [np.arange(observed_emissions.n_bins) for _ in range(observed_emissions.n_time)]
+
+    monkeypatch.setattr(StateSpaceReplayModel, "candidate_indices", candidate_indices_spy)
+    model = StateSpaceReplayModel(mode=mode, config=StateSpaceDecoderConfig(mode=mode))
+
+    score = model.score(emissions, centers)
+
+    assert np.isfinite(score.log_likelihood)
+    assert seen_bin_centers and seen_bin_centers[0] is centers
 
 
 def test_pyrecest_goal_particle_model_scores_synthetic_event():

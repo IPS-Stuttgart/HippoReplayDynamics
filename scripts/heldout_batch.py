@@ -13,13 +13,25 @@ import pandas as pd
 from hipporeplayimm.benchmarks import (
     BenchmarkConfig,
     _add_relative_metrics,
+    _benchmark_config_metadata,
     _build_models,
+    _format_cell_ids,
     _score_train_joint_model,
     _session_mark_diagnostics,
     _split_cells,
 )
 from hipporeplayimm.data import load_replay_session
-from hipporeplayimm.encoding import EmissionConfig, build_emissions, fit_place_field_encoding
+from hipporeplayimm.encoding import (
+    EmissionConfig,
+    EncodingConfig,
+    build_emissions,
+    fit_place_field_encoding,
+)
+from hipporeplayimm.position_validation import (
+    VALIDATED_POSITION_BIN_SIZE_CM,
+    VALIDATED_POSITION_MIN_SPEED_CM_S,
+    VALIDATED_POSITION_SMOOTHING_SIGMA_BINS,
+)
 
 _REQUIRED_FILES = ("Position_Data.mat", "Ripple_Events.mat", "Spike_Data.mat", "Epochs.mat")
 
@@ -55,6 +67,28 @@ def validate_session(path: Path) -> None:
         raise FileNotFoundError(f"{path} is missing required file(s): {', '.join(missing)}")
 
 
+def heldout_metadata(
+    config: BenchmarkConfig,
+    train_cells: np.ndarray,
+    test_cells: np.ndarray,
+) -> dict[str, object]:
+    """Return run metadata needed to reconstruct held-out benchmark rows."""
+
+    metadata = dict(_benchmark_config_metadata(config))
+    metadata.update(
+        {
+            "benchmark_candidate_top_k": int(config.candidate_top_k),
+            "benchmark_pyrecest_particles": int(config.pyrecest_particles),
+            "benchmark_models": ",".join(str(model) for model in config.models),
+            "emission_spike_rate_scale": float(config.emissions.spike_rate_scale),
+            "train_cell_ids": _format_cell_ids(train_cells),
+            "test_cell_ids": _format_cell_ids(test_cells),
+        }
+    )
+    return metadata
+
+
+
 def score_event_model(
     *,
     session,
@@ -65,6 +99,7 @@ def score_event_model(
     joint_encoding,
     bin_centers: np.ndarray,
     emissions: EmissionConfig,
+    metadata: dict[str, object],
 ) -> dict[str, object]:
     train_emissions = build_emissions(session, train_encoding, int(event_id), emissions)
     joint_emissions = build_emissions(session, joint_encoding, int(event_id), emissions)
@@ -99,18 +134,26 @@ def score_event_model(
         "n_time": int(train_emissions.n_time),
         "error": "",
         **_session_mark_diagnostics(session),
+        **metadata,
     }
     row.update({f"diagnostic_{key}": value for key, value in joint_score.diagnostics.items()})
     return row
 
 
-def failure_row(session: str, event_id: int, model_name: str, error: Exception) -> dict[str, object]:
-    return {
+def failure_row(
+    session: str,
+    event_id: int,
+    model_name: str,
+    error: Exception,
+    metadata: dict[str, object] | None = None,
+) -> dict[str, object]:
+    row = {
         "status": "failure",
         "session": session,
         "event_index": int(event_id),
         "event_id": int(event_id),
         "model": model_name,
+        "requested_model": model_name,
         "heldout_log_likelihood": np.nan,
         "heldout_log_likelihood_per_spike": np.nan,
         "heldout_bits_per_spike": np.nan,
@@ -123,6 +166,9 @@ def failure_row(session: str, event_id: int, model_name: str, error: Exception) 
         "runtime_s": np.nan,
         "error": f"{type(error).__name__}: {error}",
     }
+    if metadata:
+        row.update(metadata)
+    return row
 
 
 def model_summary(success: pd.DataFrame) -> pd.DataFrame:
@@ -202,21 +248,31 @@ def run(args: argparse.Namespace) -> None:
     validate_session(path)
 
     session = load_replay_session(path)
-    encoding = fit_place_field_encoding(session)
-    train_cells, test_cells = _split_cells(encoding.cell_ids, args.test_cell_fraction, args.random_seed)
-    if train_cells.size == 0 or test_cells.size == 0:
-        raise ValueError("Held-out split produced an empty train or test cell set.")
-
-    train_encoding = encoding.select_cells(train_cells)
-    joint_encoding = encoding.select_cells(np.concatenate([train_cells, test_cells]))
+    encoding_config = EncodingConfig(
+        bin_size_cm=args.bin_size_cm,
+        smoothing_sigma_bins=args.smoothing_sigma_bins,
+        min_speed_cm_s=args.min_speed_cm_s,
+    )
+    emission_config = EmissionConfig(time_bin_s=args.time_bin_s, spike_rate_scale=args.spike_rate_scale)
     config = BenchmarkConfig(
+        encoding=encoding_config,
+        emissions=emission_config,
+        test_cell_fraction=args.test_cell_fraction,
         candidate_top_k=args.candidate_top_k,
         pyrecest_particles=args.pyrecest_particles,
         random_seed=args.random_seed,
         models=tuple(args.models),
     )
+
+    encoding = fit_place_field_encoding(session, config.encoding)
+    train_cells, test_cells = _split_cells(encoding.cell_ids, config.test_cell_fraction, config.random_seed)
+    if train_cells.size == 0 or test_cells.size == 0:
+        raise ValueError("Held-out split produced an empty train or test cell set.")
+
+    train_encoding = encoding.select_cells(train_cells)
+    joint_encoding = encoding.select_cells(np.concatenate([train_cells, test_cells]))
     models = _build_models(config, session=session)
-    emission_config = EmissionConfig(time_bin_s=args.time_bin_s, spike_rate_scale=args.spike_rate_scale)
+    metadata = heldout_metadata(config, train_cells, test_cells)
 
     rows = []
     for event_id in events:
@@ -234,12 +290,13 @@ def run(args: argparse.Namespace) -> None:
                     joint_encoding=joint_encoding,
                     bin_centers=encoding.bin_centers,
                     emissions=emission_config,
+                    metadata=metadata,
                 )
                 row["runtime_s"] = float(time.perf_counter() - start)
                 rows.append(row)
                 print(f"Scored {args.session} event {event_id} with {model_name}: {row['heldout_log_likelihood']:.3f}")
             except Exception as exc:
-                rows.append(failure_row(args.session, event_id, model_name, exc))
+                rows.append(failure_row(args.session, event_id, model_name, exc, metadata=metadata))
                 print(f"Failed {args.session} event {event_id} with {model_name}: {exc}", flush=True)
                 if not args.continue_on_error:
                     raise
@@ -280,6 +337,9 @@ def main() -> int:
     parser.add_argument("--pyrecest-particles", default=512, type=int)
     parser.add_argument("--time-bin-s", default=0.02, type=float)
     parser.add_argument("--spike-rate-scale", default=1.0, type=float)
+    parser.add_argument("--bin-size-cm", default=VALIDATED_POSITION_BIN_SIZE_CM, type=float)
+    parser.add_argument("--smoothing-sigma-bins", default=VALIDATED_POSITION_SMOOTHING_SIGMA_BINS, type=float)
+    parser.add_argument("--min-speed-cm-s", default=VALIDATED_POSITION_MIN_SPEED_CM_S, type=float)
     parser.add_argument("--test-cell-fraction", default=0.25, type=float)
     parser.add_argument("--random-seed", default=1, type=int)
     parser.add_argument("--output", default="results/heldout-batch")

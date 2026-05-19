@@ -73,6 +73,7 @@ def apply_state_space_imm_duration_patch() -> None:
         extra.update(
             {
                 "mean_candidate_log_mass": float(np.mean(masses)),
+                "mean_candidate_count": float(np.mean([len(curr) for curr in candidates])),
                 "state_space_imm_modes": ",".join(names),
                 "state_space_imm_candidate_top_k": int(self.config.momentum_candidate_top_k),
                 "state_space_imm_candidate_support": "derived" if candidate_indices is None else "provided",

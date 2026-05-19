@@ -8,6 +8,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+from .clusterless import normalize_mark_likelihood
 from .encoding import EmissionConfig, EncodingConfig
 
 
@@ -108,6 +109,11 @@ def apply_model_hyperparam_patch() -> None:
         test_cell_fraction: float = 0.25
         max_events_per_session: int | None = None
         candidate_top_k: int = 64
+        clusterless_mark_smoothing_sigma_bins: float = 1.0
+        clusterless_mark_likelihood: str = "local-kde"
+        clusterless_mark_prior_count: float = 1.0
+        clusterless_mark_variance_floor: float = 1.0
+        clusterless_rate_floor_hz: float = 1e-4
         stationary_sigma_cm: float = 2.0
         diffusion_sigma_cm: float = 12.0
         momentum_sigma_cm: float = 12.0
@@ -259,6 +265,15 @@ def apply_model_hyperparam_patch() -> None:
             "state_space_momentum_initial_sigma_cm_sqrt_s": float(cfg(config, "state_space_momentum_initial_sigma_cm_sqrt_s", 85.0)),
             "state_space_momentum_velocity_decay": float(cfg(config, "state_space_momentum_velocity_decay", 0.95)),
             "state_space_momentum_candidate_top_k": int(cfg(config, "state_space_momentum_candidate_top_k", 128)),
+            "clusterless_mark_smoothing_sigma_bins": float(
+                cfg(config, "clusterless_mark_smoothing_sigma_bins", 1.0)
+            ),
+            "clusterless_mark_likelihood_configured": normalize_mark_likelihood(
+                str(cfg(config, "clusterless_mark_likelihood", "local-kde"))
+            ),
+            "clusterless_mark_prior_count": float(cfg(config, "clusterless_mark_prior_count", 1.0)),
+            "clusterless_mark_variance_floor": float(cfg(config, "clusterless_mark_variance_floor", 1.0)),
+            "clusterless_rate_floor_hz": float(cfg(config, "clusterless_rate_floor_hz", 1e-4)),
         }
         return base
 
@@ -325,6 +340,17 @@ def apply_model_hyperparam_patch() -> None:
             emissions=emission_config,
             test_cell_fraction=_unique_float_from_column(scores_frame, "benchmark_test_cell_fraction", test_cell_fraction),
             candidate_top_k=_unique_int_from_columns(scores_frame, ("candidate_top_k", "diagnostic_candidate_top_k"), candidate_top_k),
+            clusterless_mark_smoothing_sigma_bins=_unique_float_from_columns(scores_frame, ("clusterless_mark_smoothing_sigma_bins",), 1.0),
+            clusterless_mark_likelihood=normalize_mark_likelihood(
+                _unique_string_from_columns(
+                    scores_frame,
+                    ("clusterless_mark_likelihood_configured", "diagnostic_clusterless_mark_likelihood", "clusterless_mark_likelihood"),
+                    "local-kde",
+                )
+            ),
+            clusterless_mark_prior_count=_unique_float_from_columns(scores_frame, ("clusterless_mark_prior_count",), 1.0),
+            clusterless_mark_variance_floor=_unique_float_from_columns(scores_frame, ("clusterless_mark_variance_floor",), 1.0),
+            clusterless_rate_floor_hz=_unique_float_from_columns(scores_frame, ("clusterless_rate_floor_hz",), 1e-4),
             stationary_sigma_cm=_unique_float_from_columns(scores_frame, ("candidate_stationary_sigma_cm", "stationary_sigma_cm", "diagnostic_candidate_stationary_sigma_cm"), stationary_sigma_cm),
             diffusion_sigma_cm=_unique_float_from_columns(scores_frame, ("candidate_diffusion_sigma_cm", "diffusion_sigma_cm", "diagnostic_candidate_diffusion_sigma_cm"), diffusion_sigma_cm),
             momentum_sigma_cm=_unique_float_from_columns(scores_frame, ("candidate_momentum_sigma_cm", "momentum_sigma_cm", "diagnostic_candidate_momentum_sigma_cm"), momentum_sigma_cm),
@@ -556,6 +582,27 @@ def _unique_int_from_columns(frame: pd.DataFrame, columns: tuple[str, ...], defa
     if any(value != first for value in values[1:]):
         raise ValueError(f"{' / '.join(columns)} contains multiple values")
     return int(first)
+
+
+def _unique_string_from_columns(
+    frame: pd.DataFrame,
+    columns: tuple[str, ...],
+    default: str,
+) -> str:
+    """Return the unique nonempty value from the first populated column."""
+
+    for column in columns:
+        if column not in frame.columns:
+            continue
+        values = [str(value).strip() for value in frame[column].dropna()]
+        values = [value for value in values if value]
+        if not values:
+            continue
+        first = values[0]
+        if any(value != first for value in values[1:]):
+            raise ValueError(f"{column} contains multiple values")
+        return first
+    return str(default)
 
 
 def _unique_bool_from_column(frame: pd.DataFrame, column: str, default: bool) -> bool:

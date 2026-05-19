@@ -14,6 +14,7 @@ from .clusterless import (
     ClusterlessStateSpaceReplayModel,
     build_clusterless_mark_emissions,
     fit_clusterless_mark_encoding,
+    normalize_mark_likelihood,
 )
 from .data import ReplaySession, SpikeMarkData, load_open_field_sessions
 from .encoding import EmissionConfig, EncodingConfig, build_emissions, fit_place_field_encoding
@@ -34,6 +35,7 @@ class BenchmarkConfig:
     max_events_per_session: int | None = None
     candidate_top_k: int = 64
     clusterless_mark_smoothing_sigma_bins: float = 1.0
+    clusterless_mark_likelihood: str = "local-kde"
     clusterless_mark_prior_count: float = 1.0
     clusterless_mark_variance_floor: float = 1.0
     clusterless_rate_floor_hz: float = 1e-4
@@ -256,6 +258,7 @@ def _clusterless_mark_config(config: BenchmarkConfig) -> ClusterlessMarkConfig:
         ),
         mark_prior_count=float(getattr(config, "clusterless_mark_prior_count", 1.0)),
         mark_variance_floor=float(getattr(config, "clusterless_mark_variance_floor", 1.0)),
+        mark_likelihood=_clusterless_mark_likelihood(config),
         rate_floor_hz=float(getattr(config, "clusterless_rate_floor_hz", 1e-4)),
         use_excitatory=bool(encoding_config.use_excitatory),
     )
@@ -316,6 +319,7 @@ def _benchmark_config_metadata(config: BenchmarkConfig) -> dict[str, object]:
         "clusterless_mark_smoothing_sigma_bins": float(
             getattr(config, "clusterless_mark_smoothing_sigma_bins", 1.0)
         ),
+        "clusterless_mark_likelihood_configured": _clusterless_mark_likelihood(config),
         "clusterless_mark_prior_count": float(
             getattr(config, "clusterless_mark_prior_count", 1.0)
         ),
@@ -328,18 +332,18 @@ def _benchmark_config_metadata(config: BenchmarkConfig) -> dict[str, object]:
 
 def _session_mark_diagnostics(
     session: ReplaySession,
-    clusterless_encoding: ClusterlessMarkEncoding | None = None,
+    clusterless_encoding: ClusterlessMarkEncoding | BenchmarkConfig | None = None,
 ) -> dict[str, object]:
     marks = session.spike_marks
     has_marks = bool(marks is not None and marks.n_features > 0)
     if not has_marks:
         mark_likelihood = ""
     elif clusterless_encoding is not None:
-        mark_likelihood = str(clusterless_encoding.mark_likelihood)
+        mark_likelihood = _clusterless_mark_likelihood(clusterless_encoding)
     else:
         # Report the likelihood that would be used by the default clusterless
         # encoder instead of hard-coding the legacy diagonal-Gaussian label.
-        mark_likelihood = str(ClusterlessMarkConfig().mark_likelihood)
+        mark_likelihood = _clusterless_mark_likelihood(None)
 
     return {
         "spike_mark_features": 0 if marks is None else marks.n_features,
@@ -347,6 +351,18 @@ def _session_mark_diagnostics(
         "clusterless_mark_likelihood_available": has_marks,
         "clusterless_mark_likelihood": mark_likelihood,
     }
+
+
+def _clusterless_mark_likelihood(
+    config: ClusterlessMarkEncoding | BenchmarkConfig | None = None,
+) -> str:
+    if config is None:
+        value = ClusterlessMarkConfig().mark_likelihood
+    else:
+        value = getattr(config, "mark_likelihood", None)
+        if value is None:
+            value = getattr(config, "clusterless_mark_likelihood", "local-kde")
+    return normalize_mark_likelihood(str(value))
 
 
 def _event_indices(session: ReplaySession, config: BenchmarkConfig) -> np.ndarray:
@@ -378,6 +394,7 @@ def _build_models(
     config: BenchmarkConfig,
     session: ReplaySession | None = None,
 ) -> dict[str, object]:
+    clusterless_mark_likelihood = _clusterless_mark_likelihood(config)
     goal_candidates = _session_goal_candidates(session) if session is not None else None
     available = {
         "random": RandomModel(),
@@ -397,12 +414,30 @@ def _build_models(
         "state-space-jump": SortedSpikeStateSpaceReplayModel(mode="jump", name="state-space-jump"),
         "state-space-momentum": SortedSpikeStateSpaceReplayModel(mode="momentum", name="state-space-momentum"),
         "state-space-imm": SortedSpikeStateSpaceReplayModel(mode="imm", name="state-space-imm"),
-        "clusterless-state-space-stationary": ClusterlessStateSpaceReplayModel(mode="stationary"),
-        "clusterless-state-space-diffusion": ClusterlessStateSpaceReplayModel(mode="diffusion"),
-        "clusterless-state-space-fragmented": ClusterlessStateSpaceReplayModel(mode="fragmented"),
-        "clusterless-state-space-jump": ClusterlessStateSpaceReplayModel(mode="jump"),
-        "clusterless-state-space-momentum": ClusterlessStateSpaceReplayModel(mode="momentum"),
-        "clusterless-state-space-imm": ClusterlessStateSpaceReplayModel(mode="imm"),
+        "clusterless-state-space-stationary": ClusterlessStateSpaceReplayModel(
+            mode="stationary",
+            mark_likelihood=clusterless_mark_likelihood,
+        ),
+        "clusterless-state-space-diffusion": ClusterlessStateSpaceReplayModel(
+            mode="diffusion",
+            mark_likelihood=clusterless_mark_likelihood,
+        ),
+        "clusterless-state-space-fragmented": ClusterlessStateSpaceReplayModel(
+            mode="fragmented",
+            mark_likelihood=clusterless_mark_likelihood,
+        ),
+        "clusterless-state-space-jump": ClusterlessStateSpaceReplayModel(
+            mode="jump",
+            mark_likelihood=clusterless_mark_likelihood,
+        ),
+        "clusterless-state-space-momentum": ClusterlessStateSpaceReplayModel(
+            mode="momentum",
+            mark_likelihood=clusterless_mark_likelihood,
+        ),
+        "clusterless-state-space-imm": ClusterlessStateSpaceReplayModel(
+            mode="imm",
+            mark_likelihood=clusterless_mark_likelihood,
+        ),
         "pyrecest-goal-particle": PyRecEstGoalParticleModel(
             candidate_goals=goal_candidates,
             n_particles=config.pyrecest_particles,

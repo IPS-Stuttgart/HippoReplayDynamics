@@ -22,6 +22,7 @@ from hipporeplayimm.clusterless import (
     ClusterlessStateSpaceReplayModel,
     build_clusterless_mark_emissions,
     fit_clusterless_mark_encoding,
+    _normalize_mark_likelihood,
 )
 from hipporeplayimm.data import load_replay_session
 from hipporeplayimm.encoding import (
@@ -160,6 +161,7 @@ def _models(args) -> dict[str, object]:
                 momentum_velocity_decay=args.state_space_momentum_velocity_decay,
                 momentum_candidate_top_k=args.state_space_momentum_candidate_top_k,
             ),
+            mark_likelihood=getattr(args, "clusterless_mark_likelihood", "local-kde"),
         )
 
     available = {
@@ -219,7 +221,29 @@ def _clusterless_mark_config(args) -> ClusterlessMarkConfig:
         mark_prior_count=args.clusterless_mark_prior_count,
         mark_variance_floor=args.clusterless_mark_variance_floor,
         rate_floor_hz=args.clusterless_rate_floor_hz,
+        mark_likelihood=_normalize_mark_likelihood(
+            getattr(args, "clusterless_mark_likelihood", "local-kde")
+        ),
+        mark_kde_bandwidth=getattr(args, "clusterless_mark_kde_bandwidth", None),
+        mark_kde_spatial_sigma_bins=getattr(args, "clusterless_mark_kde_spatial_sigma_bins", None),
+        mark_kde_max_neighbors=int(getattr(args, "clusterless_mark_kde_max_neighbors", 256)),
     )
+
+
+def _clusterless_run_metadata(args, encoding=None) -> dict[str, object]:
+    """Return clusterless provenance fields exactly as used by the run."""
+
+    mark_likelihood = (
+        str(encoding.mark_likelihood)
+        if encoding is not None
+        else _normalize_mark_likelihood(getattr(args, "clusterless_mark_likelihood", "local-kde"))
+    )
+    return {
+        "clusterless_mark_likelihood": mark_likelihood,
+        "clusterless_mark_kde_bandwidth": getattr(args, "clusterless_mark_kde_bandwidth", None),
+        "clusterless_mark_kde_spatial_sigma_bins": getattr(args, "clusterless_mark_kde_spatial_sigma_bins", None),
+        "clusterless_mark_kde_max_neighbors": int(getattr(args, "clusterless_mark_kde_max_neighbors", 256)),
+    }
 
 
 def _score(args) -> pd.DataFrame:
@@ -286,6 +310,7 @@ def _score(args) -> pd.DataFrame:
                     "clusterless_mark_prior_count": float(args.clusterless_mark_prior_count),
                     "clusterless_mark_variance_floor": float(args.clusterless_mark_variance_floor),
                     "clusterless_rate_floor_hz": float(args.clusterless_rate_floor_hz),
+                    **_clusterless_run_metadata(args, clusterless_encoding),
                 }
                 if use_clusterless and clusterless_encoding is not None:
                     row.update({
@@ -310,6 +335,7 @@ def _score(args) -> pd.DataFrame:
                     "clusterless_mark_prior_count": float(args.clusterless_mark_prior_count),
                     "clusterless_mark_variance_floor": float(args.clusterless_mark_variance_floor),
                     "clusterless_rate_floor_hz": float(args.clusterless_rate_floor_hz),
+                    **_clusterless_run_metadata(args, clusterless_encoding),
                 })
                 if not args.continue_on_error:
                     raise
@@ -465,9 +491,33 @@ def main() -> int:
     p.add_argument("--state-space-momentum-velocity-decay", type=float, default=0.95)
     p.add_argument("--state-space-momentum-candidate-top-k", type=int, default=128)
     p.add_argument("--clusterless-mark-smoothing-sigma-bins", type=float, default=1.0)
+    p.add_argument(
+        "--clusterless-mark-likelihood",
+        choices=("local-kde", "diagonal-gaussian"),
+        default="local-kde",
+        help="Clusterless mark likelihood model to use for marked-point-process scoring.",
+    )
     p.add_argument("--clusterless-mark-prior-count", type=float, default=1.0)
     p.add_argument("--clusterless-mark-variance-floor", type=float, default=1.0)
     p.add_argument("--clusterless-rate-floor-hz", type=float, default=1e-4)
+    p.add_argument(
+        "--clusterless-mark-kde-bandwidth",
+        type=float,
+        default=None,
+        help="Optional per-feature KDE bandwidth for local-kde clusterless mark likelihood.",
+    )
+    p.add_argument(
+        "--clusterless-mark-kde-spatial-sigma-bins",
+        type=float,
+        default=None,
+        help="Optional spatial kernel width, in position bins, for local-kde mark support.",
+    )
+    p.add_argument(
+        "--clusterless-mark-kde-max-neighbors",
+        type=int,
+        default=256,
+        help="Maximum number of training marks used per position bin by local-kde scoring.",
+    )
     p.add_argument("--time-bin-s", type=float, default=0.02)
     p.add_argument(
         "--spike-rate-scale",

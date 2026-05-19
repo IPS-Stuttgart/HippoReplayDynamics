@@ -13,6 +13,7 @@ import pandas as pd
 from hipporeplayimm.benchmarks import (
     BenchmarkConfig,
     _add_relative_metrics,
+    _benchmark_config_metadata,
     _build_models,
     _score_train_joint_model,
     _session_mark_diagnostics,
@@ -65,6 +66,7 @@ def score_event_model(
     joint_encoding,
     bin_centers: np.ndarray,
     emissions: EmissionConfig,
+    metadata: dict[str, object],
 ) -> dict[str, object]:
     train_emissions = build_emissions(session, train_encoding, int(event_id), emissions)
     joint_emissions = build_emissions(session, joint_encoding, int(event_id), emissions)
@@ -97,6 +99,7 @@ def score_event_model(
         "train_spikes": int(train_emissions.n_spikes),
         "joint_spikes": int(joint_emissions.n_spikes),
         "n_time": int(train_emissions.n_time),
+        **metadata,
         "error": "",
         **_session_mark_diagnostics(session),
     }
@@ -104,8 +107,15 @@ def score_event_model(
     return row
 
 
-def failure_row(session: str, event_id: int, model_name: str, error: Exception) -> dict[str, object]:
-    return {
+def failure_row(
+    session: str,
+    event_id: int,
+    model_name: str,
+    error: Exception,
+    *,
+    metadata: dict[str, object] | None = None,
+) -> dict[str, object]:
+    row = {
         "status": "failure",
         "session": session,
         "event_index": int(event_id),
@@ -117,12 +127,35 @@ def failure_row(session: str, event_id: int, model_name: str, error: Exception) 
         "joint_log_likelihood": np.nan,
         "train_log_likelihood": np.nan,
         "test_spikes": 0,
+        "requested_model": model_name,
         "train_spikes": 0,
         "joint_spikes": 0,
         "n_time": 0,
         "runtime_s": np.nan,
         "error": f"{type(error).__name__}: {error}",
     }
+    if metadata:
+        row.update(metadata)
+    return row
+
+
+def _format_cell_ids(cell_ids: np.ndarray) -> str:
+    return ",".join(str(int(cell_id)) for cell_id in np.asarray(cell_ids, dtype=int))
+
+
+def _heldout_batch_metadata(
+    config: BenchmarkConfig,
+    train_cells: np.ndarray,
+    test_cells: np.ndarray,
+) -> dict[str, object]:
+    """Return provenance metadata needed for faithful post-hoc decoding."""
+
+    metadata = {
+        "train_cell_ids": _format_cell_ids(train_cells),
+        "test_cell_ids": _format_cell_ids(test_cells),
+    }
+    metadata.update(_benchmark_config_metadata(config))
+    return metadata
 
 
 def model_summary(success: pd.DataFrame) -> pd.DataFrame:
@@ -209,14 +242,17 @@ def run(args: argparse.Namespace) -> None:
 
     train_encoding = encoding.select_cells(train_cells)
     joint_encoding = encoding.select_cells(np.concatenate([train_cells, test_cells]))
+    emission_config = EmissionConfig(time_bin_s=args.time_bin_s, spike_rate_scale=args.spike_rate_scale)
     config = BenchmarkConfig(
         candidate_top_k=args.candidate_top_k,
         pyrecest_particles=args.pyrecest_particles,
         random_seed=args.random_seed,
+        test_cell_fraction=args.test_cell_fraction,
+        emissions=emission_config,
         models=tuple(args.models),
     )
     models = _build_models(config, session=session)
-    emission_config = EmissionConfig(time_bin_s=args.time_bin_s, spike_rate_scale=args.spike_rate_scale)
+    row_metadata = _heldout_batch_metadata(config, train_cells, test_cells)
 
     rows = []
     for event_id in events:
@@ -234,12 +270,13 @@ def run(args: argparse.Namespace) -> None:
                     joint_encoding=joint_encoding,
                     bin_centers=encoding.bin_centers,
                     emissions=emission_config,
+                    metadata=row_metadata,
                 )
                 row["runtime_s"] = float(time.perf_counter() - start)
                 rows.append(row)
                 print(f"Scored {args.session} event {event_id} with {model_name}: {row['heldout_log_likelihood']:.3f}")
             except Exception as exc:
-                rows.append(failure_row(args.session, event_id, model_name, exc))
+                rows.append(failure_row(args.session, event_id, model_name, exc, metadata=row_metadata))
                 print(f"Failed {args.session} event {event_id} with {model_name}: {exc}", flush=True)
                 if not args.continue_on_error:
                     raise

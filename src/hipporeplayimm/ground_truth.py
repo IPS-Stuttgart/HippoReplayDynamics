@@ -9,7 +9,19 @@ import numpy as np
 import pandas as pd
 from scipy.special import logsumexp
 
-from .benchmarks import BenchmarkConfig, _build_models, _split_cells
+from .benchmarks import (
+    BenchmarkConfig,
+    _build_models,
+    _candidate_indices_for_model,
+    _clusterless_mark_config,
+    _is_clusterless_model,
+    _session_with_mark_cell_subset,
+    _split_cells,
+)
+from .clusterless import (
+    build_clusterless_mark_emissions,
+    fit_clusterless_mark_encoding,
+)
 from .data import ReplaySession, load_open_field_sessions
 from .encoding import EmissionConfig, EncodingConfig, build_emissions, fit_place_field_encoding
 
@@ -212,6 +224,10 @@ def compare_scores_to_ground_truth(
     emission_config: EmissionConfig | None = None,
     test_cell_fraction: float = 0.25,
     candidate_top_k: int = 64,
+    clusterless_mark_smoothing_sigma_bins: float = 1.0,
+    clusterless_mark_prior_count: float = 1.0,
+    clusterless_mark_variance_floor: float = 1.0,
+    clusterless_rate_floor_hz: float = 1e-4,
     pyrecest_particles: int = 512,
     pyrecest_alpha: float = 0.80,
     pyrecest_beta: float = 1.00,
@@ -255,6 +271,24 @@ def compare_scores_to_ground_truth(
         "benchmark_random_seed",
         random_seed,
     )
+    clusterless_mark_smoothing_sigma_bins = _unique_float_from_column(
+        scores_frame,
+        "clusterless_mark_smoothing_sigma_bins",
+        clusterless_mark_smoothing_sigma_bins,
+    )
+    clusterless_mark_prior_count = _unique_float_from_column(
+        scores_frame,
+        "clusterless_mark_prior_count",
+        clusterless_mark_prior_count,
+    )
+    clusterless_mark_variance_floor = _unique_float_from_column(
+        scores_frame,
+        "clusterless_mark_variance_floor",
+        clusterless_mark_variance_floor,
+    )
+    clusterless_rate_floor_hz = _unique_float_from_column(
+        scores_frame, "clusterless_rate_floor_hz", clusterless_rate_floor_hz
+    )
 
     sessions = {session.session_id: session for session in load_open_field_sessions(root)}
     decoded_rows: list[dict[str, object]] = []
@@ -264,6 +298,10 @@ def compare_scores_to_ground_truth(
         emissions=emission_config,
         test_cell_fraction=test_cell_fraction,
         candidate_top_k=candidate_top_k,
+        clusterless_mark_smoothing_sigma_bins=clusterless_mark_smoothing_sigma_bins,
+        clusterless_mark_prior_count=clusterless_mark_prior_count,
+        clusterless_mark_variance_floor=clusterless_mark_variance_floor,
+        clusterless_rate_floor_hz=clusterless_rate_floor_hz,
         pyrecest_particles=pyrecest_particles,
         pyrecest_alpha=pyrecest_alpha,
         pyrecest_beta=pyrecest_beta,
@@ -290,6 +328,11 @@ def compare_scores_to_ground_truth(
         models = _build_models(model_config, session=session)
         wells = infer_well_locations(session, ground_truth_config)
         encoding = fit_place_field_encoding(session, encoding_config)
+        has_clusterless_models = any(_is_clusterless_model(model) for model in models.values())
+        clusterless_train_session = None
+        clusterless_joint_session = None
+        clusterless_joint_encoding = None
+        clusterless_full_encoding = None
         if benchmark_decode:
             train_cells, test_cells = _cell_split_for_score_rows(
                 session_scores,
@@ -298,6 +341,26 @@ def compare_scores_to_ground_truth(
             )
             train_encoding = encoding.select_cells(train_cells)
             joint_encoding = encoding.select_cells(np.concatenate([train_cells, test_cells]))
+            if has_clusterless_models:
+                clusterless_train_session = _session_with_mark_cell_subset(
+                    session,
+                    train_cells,
+                    role="train",
+                )
+                clusterless_joint_session = _session_with_mark_cell_subset(
+                    session,
+                    np.concatenate([train_cells, test_cells]),
+                    role="joint",
+                )
+                clusterless_joint_encoding = fit_clusterless_mark_encoding(
+                    clusterless_joint_session,
+                    _clusterless_mark_config(model_config),
+                )
+        elif has_clusterless_models:
+            clusterless_full_encoding = fit_clusterless_mark_encoding(
+                session,
+                _clusterless_mark_config(model_config),
+            )
         for event_index, event_scores in session_scores.groupby("event_index", sort=False):
             if benchmark_decode:
                 train_emissions = build_emissions(
@@ -314,9 +377,43 @@ def compare_scores_to_ground_truth(
                 )
                 if train_emissions.n_time == 0 or joint_emissions.n_time == 0:
                     continue
+                clusterless_train_emissions = None
+                clusterless_joint_emissions = None
+                if has_clusterless_models:
+                    assert clusterless_train_session is not None
+                    assert clusterless_joint_session is not None
+                    assert clusterless_joint_encoding is not None
+                    clusterless_train_emissions = build_clusterless_mark_emissions(
+                        clusterless_train_session,
+                        clusterless_joint_encoding,
+                        int(event_index),
+                        emission_config,
+                    )
+                    clusterless_joint_emissions = build_clusterless_mark_emissions(
+                        clusterless_joint_session,
+                        clusterless_joint_encoding,
+                        int(event_index),
+                        emission_config,
+                    )
+                    if (
+                        clusterless_train_emissions.n_time == 0
+                        or clusterless_joint_emissions.n_time == 0
+                    ):
+                        continue
             else:
                 emissions = build_emissions(session, encoding, int(event_index), emission_config)
-                if emissions.n_time == 0:
+                clusterless_emissions = None
+                if has_clusterless_models:
+                    assert clusterless_full_encoding is not None
+                    clusterless_emissions = build_clusterless_mark_emissions(
+                        session,
+                        clusterless_full_encoding,
+                        int(event_index),
+                        emission_config,
+                    )
+                if emissions.n_time == 0 or (
+                    clusterless_emissions is not None and clusterless_emissions.n_time == 0
+                ):
                     continue
             for score_row in event_scores.itertuples(index=False):
                 model_name = str(getattr(score_row, "model"))
@@ -325,21 +422,44 @@ def compare_scores_to_ground_truth(
                 if model is None:
                     continue
                 if benchmark_decode:
-                    score = _score_joint_for_ground_truth(
-                        model,
-                        train_emissions,
-                        joint_emissions,
-                        encoding.bin_centers,
-                    )
+                    if _is_clusterless_model(model):
+                        assert clusterless_train_emissions is not None
+                        assert clusterless_joint_emissions is not None
+                        assert clusterless_joint_encoding is not None
+                        score = _score_joint_for_ground_truth(
+                            model,
+                            clusterless_train_emissions,
+                            clusterless_joint_emissions,
+                            clusterless_joint_encoding.bin_centers,
+                        )
+                        decoded_bin_centers = clusterless_joint_encoding.bin_centers
+                    else:
+                        score = _score_joint_for_ground_truth(
+                            model,
+                            train_emissions,
+                            joint_emissions,
+                            encoding.bin_centers,
+                        )
+                        decoded_bin_centers = encoding.bin_centers
                 else:
-                    score = model.score(emissions, encoding.bin_centers)
+                    if _is_clusterless_model(model):
+                        assert clusterless_emissions is not None
+                        assert clusterless_full_encoding is not None
+                        score = model.score(
+                            clusterless_emissions,
+                            clusterless_full_encoding.bin_centers,
+                        )
+                        decoded_bin_centers = clusterless_full_encoding.bin_centers
+                    else:
+                        score = model.score(emissions, encoding.bin_centers)
+                        decoded_bin_centers = encoding.bin_centers
                 decoded_rows.append(
                     _decoded_row(
                         str(session_id),
                         int(event_index),
                         model_name,
                         score.terminal_log_posterior,
-                        encoding.bin_centers,
+                        decoded_bin_centers,
                         wells,
                     )
                 )
@@ -384,7 +504,7 @@ def _score_joint_for_ground_truth(
     bin_centers: np.ndarray,
 ):
     if hasattr(model, "candidate_indices"):
-        candidates = model.candidate_indices(train_emissions)
+        candidates = _candidate_indices_for_model(model, train_emissions, bin_centers)
         return model.score(joint_emissions, bin_centers, candidate_indices=candidates)
     return model.score(joint_emissions, bin_centers)
 
@@ -510,7 +630,12 @@ def _emission_config_for_scores(
             scores_frame,
             "emission_time_bin_s",
             fallback.time_bin_s,
-        )
+        ),
+        spike_rate_scale=_unique_float_from_column(
+            scores_frame,
+            "emission_spike_rate_scale",
+            fallback.spike_rate_scale,
+        ),
     )
 
 

@@ -13,6 +13,7 @@ from .clusterless import (
     ClusterlessStateSpaceReplayModel,
     build_clusterless_mark_emissions,
     fit_clusterless_mark_encoding,
+    _normalize_mark_likelihood,
 )
 from .data import ReplaySession, SpikeMarkData, load_open_field_sessions
 from .encoding import EmissionConfig, EncodingConfig, build_emissions, fit_place_field_encoding
@@ -32,10 +33,14 @@ class BenchmarkConfig:
     test_cell_fraction: float = 0.25
     max_events_per_session: int | None = None
     candidate_top_k: int = 64
+    clusterless_mark_likelihood: str = "local-kde"
     clusterless_mark_smoothing_sigma_bins: float = 1.0
     clusterless_mark_prior_count: float = 1.0
     clusterless_mark_variance_floor: float = 1.0
     clusterless_rate_floor_hz: float = 1e-4
+    clusterless_mark_kde_bandwidth: float | None = None
+    clusterless_mark_kde_spatial_sigma_bins: float | None = None
+    clusterless_mark_kde_max_neighbors: int = 256
     pyrecest_particles: int = 512
     pyrecest_alpha: float = 0.80
     pyrecest_beta: float = 1.00
@@ -256,6 +261,12 @@ def _clusterless_mark_config(config: BenchmarkConfig) -> ClusterlessMarkConfig:
         mark_prior_count=float(getattr(config, "clusterless_mark_prior_count", 1.0)),
         mark_variance_floor=float(getattr(config, "clusterless_mark_variance_floor", 1.0)),
         rate_floor_hz=float(getattr(config, "clusterless_rate_floor_hz", 1e-4)),
+        mark_likelihood=_normalize_mark_likelihood(
+            getattr(config, "clusterless_mark_likelihood", "local-kde")
+        ),
+        mark_kde_bandwidth=getattr(config, "clusterless_mark_kde_bandwidth", None),
+        mark_kde_spatial_sigma_bins=getattr(config, "clusterless_mark_kde_spatial_sigma_bins", None),
+        mark_kde_max_neighbors=int(getattr(config, "clusterless_mark_kde_max_neighbors", 256)),
         use_excitatory=bool(encoding_config.use_excitatory),
     )
 
@@ -301,6 +312,9 @@ def _format_cell_ids(cell_ids: np.ndarray) -> str:
 
 
 def _benchmark_config_metadata(config: BenchmarkConfig) -> dict[str, object]:
+    clusterless_mark_likelihood = _normalize_mark_likelihood(
+        getattr(config, "clusterless_mark_likelihood", "local-kde")
+    )
     return {
         "benchmark_test_cell_fraction": float(config.test_cell_fraction),
         "benchmark_random_seed": int(config.random_seed),
@@ -312,6 +326,7 @@ def _benchmark_config_metadata(config: BenchmarkConfig) -> dict[str, object]:
         "encoding_arena_padding_cm": float(config.encoding.arena_padding_cm),
         "encoding_use_excitatory": bool(config.encoding.use_excitatory),
         "emission_time_bin_s": float(config.emissions.time_bin_s),
+        "clusterless_mark_likelihood": clusterless_mark_likelihood,
         "clusterless_mark_smoothing_sigma_bins": float(
             getattr(config, "clusterless_mark_smoothing_sigma_bins", 1.0)
         ),
@@ -322,6 +337,15 @@ def _benchmark_config_metadata(config: BenchmarkConfig) -> dict[str, object]:
             getattr(config, "clusterless_mark_variance_floor", 1.0)
         ),
         "clusterless_rate_floor_hz": float(getattr(config, "clusterless_rate_floor_hz", 1e-4)),
+        "clusterless_mark_kde_bandwidth": getattr(
+            config, "clusterless_mark_kde_bandwidth", None
+        ),
+        "clusterless_mark_kde_spatial_sigma_bins": getattr(
+            config, "clusterless_mark_kde_spatial_sigma_bins", None
+        ),
+        "clusterless_mark_kde_max_neighbors": int(
+            getattr(config, "clusterless_mark_kde_max_neighbors", 256)
+        ),
     }
 
 
@@ -331,7 +355,6 @@ def _session_mark_diagnostics(session: ReplaySession) -> dict[str, object]:
         "spike_mark_features": 0 if marks is None else marks.n_features,
         "spike_mark_source": "" if marks is None else f"{marks.source_file}:{marks.source_variable}",
         "clusterless_mark_likelihood_available": bool(marks is not None and marks.n_features > 0),
-        "clusterless_mark_likelihood": "diagonal-gaussian" if marks is not None and marks.n_features > 0 else "",
     }
 
 

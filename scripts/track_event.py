@@ -12,6 +12,7 @@ from scipy.special import logsumexp
 
 from hipporeplayimm.benchmarks import BenchmarkConfig, _build_models
 from hipporeplayimm.data import load_replay_session
+from hipporeplayimm.duration_dynamics import transition_durations_s
 from hipporeplayimm.encoding import EmissionConfig, LogEmissionTensor, build_emissions, fit_place_field_encoding
 from hipporeplayimm.models import (
     CandidateKinematicModel,
@@ -69,14 +70,18 @@ def _validate_session_files(session_path: Path) -> None:
 
 def _prefix_emissions(emissions: LogEmissionTensor, stop: int) -> LogEmissionTensor:
     """Return emissions restricted to time bins [0, stop)."""
-    return LogEmissionTensor(
+    if stop < 0 or stop > emissions.n_time:
+        raise ValueError(f"prefix stop must be between 0 and {emissions.n_time}, got {stop}")
+    prefix = LogEmissionTensor(
         log_likelihood=emissions.log_likelihood[:stop],
         spike_counts=emissions.spike_counts[:stop],
         times=emissions.times[:stop],
-        dt=emissions.dt,
+        dt=float(getattr(emissions.dt, "base", emissions.dt)),
         cell_ids=emissions.cell_ids,
         n_spikes=int(emissions.spike_counts[:stop].sum()),
     )
+    prefix.transition_durations = transition_durations_s(emissions)[: max(stop - 1, 0)]
+    return prefix
 
 
 def _mode_probability_row(modes: tuple[str, ...], probabilities: np.ndarray) -> dict[str, float | str]:

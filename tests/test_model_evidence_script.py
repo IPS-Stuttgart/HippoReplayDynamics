@@ -14,6 +14,7 @@ _SPEC.loader.exec_module(benchmark_model_evidence)
 
 _events = benchmark_model_evidence._events
 _clusterless_mark_config = benchmark_model_evidence._clusterless_mark_config
+_clusterless_run_metadata = benchmark_model_evidence._clusterless_run_metadata
 _add_evidence_columns = benchmark_model_evidence._add_evidence_columns
 _family = benchmark_model_evidence._family
 _models = benchmark_model_evidence._models
@@ -81,6 +82,7 @@ def test_model_evidence_accepts_clusterless_state_space_models():
         state_space_momentum_initial_sigma_cm_sqrt_s=44.0,
         state_space_momentum_velocity_decay=0.8,
         state_space_momentum_candidate_top_k=17,
+        clusterless_mark_likelihood="diagonal-gaussian",
     )
 
     models = _models(args)
@@ -95,6 +97,7 @@ def test_model_evidence_accepts_clusterless_state_space_models():
     assert models["clusterless-state-space-imm"].name == "clusterless-state-space-imm"
     assert models["clusterless-state-space-diffusion"].config.diffusion_sigma_cm_sqrt_s == 42.0
     assert models["clusterless-state-space-momentum"].config.momentum_sigma_cm_sqrt_s == 43.0
+    assert models["clusterless-state-space-diffusion"].mark_likelihood == "diagonal-gaussian"
 
 
 def test_model_evidence_clusterless_config_records_rate_floor():
@@ -106,6 +109,10 @@ def test_model_evidence_clusterless_config_records_rate_floor():
         clusterless_mark_prior_count=0.25,
         clusterless_mark_variance_floor=0.75,
         clusterless_rate_floor_hz=1e-3,
+        clusterless_mark_likelihood="kde",
+        clusterless_mark_kde_bandwidth=2.25,
+        clusterless_mark_kde_spatial_sigma_bins=1.25,
+        clusterless_mark_kde_max_neighbors=9,
     )
 
     config = _clusterless_mark_config(args)
@@ -116,6 +123,25 @@ def test_model_evidence_clusterless_config_records_rate_floor():
     assert config.mark_prior_count == 0.25
     assert config.mark_variance_floor == 0.75
     assert config.rate_floor_hz == 1e-3
+    assert config.mark_likelihood == "local-kde"
+    assert config.mark_kde_bandwidth == 2.25
+    assert config.mark_kde_spatial_sigma_bins == 1.25
+    assert config.mark_kde_max_neighbors == 9
+
+
+def test_model_evidence_records_normalized_clusterless_run_metadata():
+    args = argparse.Namespace(
+        clusterless_mark_likelihood="kde",
+        clusterless_mark_kde_bandwidth=None,
+        clusterless_mark_kde_spatial_sigma_bins=2.0,
+        clusterless_mark_kde_max_neighbors=11,
+    )
+
+    metadata = _clusterless_run_metadata(args)
+
+    assert metadata["clusterless_mark_likelihood"] == "local-kde"
+    assert metadata["clusterless_mark_kde_spatial_sigma_bins"] == 2.0
+    assert metadata["clusterless_mark_kde_max_neighbors"] == 11
 
 
 def test_model_evidence_classifies_state_space_families():

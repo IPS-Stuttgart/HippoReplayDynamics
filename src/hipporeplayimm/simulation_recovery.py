@@ -13,7 +13,7 @@ from scipy.special import gammaln, logsumexp
 
 from .data import ReplaySession, load_replay_session
 from .encoding import EncodingConfig, EncodingModel, LogEmissionTensor, fit_place_field_encoding
-from .models import CandidateKinematicModel, RandomModel, StationaryModel
+from .models import CandidateKinematicModel, EventScore, RandomModel, ReplayModel, StationaryModel
 from .position_validation import (
     VALIDATED_POSITION_BIN_SIZE_CM,
     VALIDATED_POSITION_MIN_SPEED_CM_S,
@@ -150,14 +150,7 @@ def run_session_simulation_recovery(
             for requested_model, model in scoring_models.items():
                 start = time.perf_counter()
                 try:
-                    if isinstance(model, CandidateKinematicModel):
-                        candidates = model.candidate_indices(emissions)
-                        score = model.score(emissions, encoding.bin_centers, candidate_indices=candidates)
-                    elif isinstance(model, SortedSpikeStateSpaceReplayModel) and model.mode == "momentum":
-                        candidates = model.candidate_indices(emissions)
-                        score = model.score(emissions, encoding.bin_centers, candidate_indices=candidates)
-                    else:
-                        score = model.score(emissions, encoding.bin_centers)
+                    score = _score_simulated_event_model(model, emissions, encoding.bin_centers)
                     model_name = str(score.model_name)
                     row = {
                         "status": "success",
@@ -227,6 +220,25 @@ def run_session_simulation_recovery(
     summary = recovery_summary(event_scores)
     settings = _settings(session, config, template_event_ids, encoding)
     return SimulationRecoveryResult(event_scores, confusion, summary, settings)
+
+
+def _score_simulated_event_model(
+    model: ReplayModel,
+    emissions: LogEmissionTensor,
+    bin_centers: np.ndarray,
+) -> EventScore:
+    """Score a simulated event with the correct candidate-support policy.
+
+    Legacy candidate-kinematic models use an explicitly materialized
+    emission-only support. State-space momentum/IMM models must derive their
+    support inside ``score(..., bin_centers)``, because their adaptive candidate
+    expansion needs spatial bin centers for forward/backward momentum
+    predictions.
+    """
+    if isinstance(model, CandidateKinematicModel):
+        candidates = model.candidate_indices(emissions)
+        return model.score(emissions, bin_centers, candidate_indices=candidates)
+    return model.score(emissions, bin_centers)
 
 
 def simulate_replay_event(

@@ -4,6 +4,7 @@ import numpy as np
 from scipy.special import logsumexp
 
 from hipporeplayimm.encoding import LogEmissionTensor
+from hipporeplayimm.simulation_recovery import _score_simulated_event_model
 from hipporeplayimm.sorted_spike_state_space import SortedSpikeStateSpaceReplayModel
 from hipporeplayimm.state_space import (
     StateSpaceDecoderConfig,
@@ -148,6 +149,39 @@ def test_state_space_model_uses_adaptive_candidate_support_when_bin_centers_give
     assert 6 in adaptive[2]
     assert score.diagnostics["state_space_momentum_predicted_candidate_top_k"] == 1
     assert score.diagnostics["mean_candidate_count"] > 1.0
+
+
+def test_simulation_recovery_momentum_scoring_uses_adaptive_candidate_support():
+    centers = np.arange(7.0)[:, None]
+    emissions = LogEmissionTensor(
+        log_likelihood=np.array(
+            [
+                [0.0, -5.0, -5.0, -5.0, -5.0, -5.0, -5.0],
+                [-5.0, -5.0, -5.0, -5.0, 0.0, -5.0, -5.0],
+                [-5.0, -5.0, -5.0, -5.0, -5.0, 0.0, -5.0],
+                [-5.0, -5.0, -5.0, -5.0, -5.0, -5.0, 0.0],
+            ]
+        ),
+        spike_counts=np.zeros((4, 1), dtype=int),
+        times=np.arange(4, dtype=float),
+        dt=1.0,
+        cell_ids=np.array([1]),
+        n_spikes=0,
+    )
+    config = StateSpaceDecoderConfig(
+        mode="momentum",
+        momentum_candidate_top_k=1,
+        momentum_predicted_candidate_top_k=1,
+    )
+    model = SortedSpikeStateSpaceReplayModel(mode="momentum", config=config)
+    emission_only = model.candidate_indices(emissions)
+
+    score = _score_simulated_event_model(model, emissions, centers)
+
+    assert [list(row) for row in emission_only] == [[0], [4], [5], [6]]
+    assert score.diagnostics["state_space_momentum_candidate_support"] == "derived"
+    assert score.diagnostics["state_space_momentum_predicted_candidate_top_k"] == 1
+    assert score.diagnostics["mean_candidate_count"] > np.mean([len(row) for row in emission_only])
 
 
 def test_state_space_momentum_pruned_support_uses_full_grid_normalization():

@@ -114,6 +114,48 @@ def test_duration_patch_updates_imported_build_emissions_aliases():
     np.testing.assert_allclose(emissions.transition_durations, np.array([0.02, 0.0165]))
 
 
+def test_duration_patched_second_order_models_pass_bin_centers_to_candidate_indices():
+    centers = np.array([[0.0, 0.0], [1.0, 0.0], [3.0, 0.0]])
+
+    for mode in ("momentum", "imm"):
+        emissions = LogEmissionTensor(
+            log_likelihood=np.log(
+                np.array(
+                    [
+                        [0.60, 0.30, 0.10],
+                        [0.20, 0.70, 0.10],
+                        [0.05, 0.30, 0.65],
+                    ]
+                )
+            ),
+            spike_counts=np.zeros((3, 1), dtype=int),
+            times=np.array([0.0, 1.0, 5.0]),
+            dt=1.0,
+            cell_ids=np.array([1]),
+            n_spikes=0,
+        )
+        config = StateSpaceDecoderConfig(
+            mode=mode,
+            stationary_sigma_cm=1.0,
+            diffusion_sigma_cm_sqrt_s=1.0,
+            momentum_sigma_cm_sqrt_s=1.0,
+            momentum_initial_sigma_cm_sqrt_s=1.0,
+            momentum_velocity_decay=1.0,
+            momentum_candidate_top_k=1,
+            momentum_predicted_candidate_top_k=1,
+        )
+        model = StateSpaceReplayModel(mode=mode, config=config)
+        observed = {}
+
+        def candidate_indices(emissions_arg, bin_centers_arg=None):
+            observed["bin_centers"] = bin_centers_arg
+            return [np.arange(emissions_arg.n_bins, dtype=int) for _ in range(emissions_arg.n_time)]
+
+        model.candidate_indices = candidate_indices
+        model.score(emissions, centers)
+        assert observed["bin_centers"] is centers
+
+
 def _single_partial_bin_ripple_session() -> ReplaySession:
     return ReplaySession(
         rat="RatX",

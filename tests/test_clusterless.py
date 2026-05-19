@@ -2,6 +2,7 @@ import numpy as np
 import pytest
 from scipy.special import logsumexp
 
+from hipporeplayimm.benchmarks import _session_mark_diagnostics
 from hipporeplayimm.clusterless import (
     ClusterlessMarkConfig,
     ClusterlessStateSpaceReplayModel,
@@ -106,6 +107,37 @@ def test_clusterless_diagonal_gaussian_mark_likelihood_remains_available():
     assert encoding.mark_likelihood == "diagonal-gaussian"
     assert likelihood.shape == (1, encoding.n_bins)
     assert encoding.mark_kde_neighbor_indices is None
+
+
+def test_session_mark_diagnostics_reports_actual_clusterless_likelihood():
+    session = _clusterless_session()
+
+    default_diagnostics = _session_mark_diagnostics(session)
+
+    assert default_diagnostics["clusterless_mark_likelihood_available"] is True
+    assert default_diagnostics["clusterless_mark_likelihood"] == "local-kde"
+
+    gaussian_encoding = fit_clusterless_mark_encoding(
+        session,
+        ClusterlessMarkConfig(
+            encoding=EncodingConfig(
+                bin_size_cm=10.0,
+                smoothing_sigma_bins=0.0,
+                min_speed_cm_s=0.0,
+                arena_padding_cm=5.0,
+            ),
+            mark_likelihood="diagonal-gaussian",
+            mark_smoothing_sigma_bins=0.0,
+            mark_prior_count=0.1,
+            mark_variance_floor=0.05,
+        ),
+    )
+
+    gaussian_diagnostics = _session_mark_diagnostics(session, gaussian_encoding)
+
+    assert gaussian_encoding.mark_likelihood == "diagonal-gaussian"
+    assert gaussian_diagnostics["clusterless_mark_likelihood_available"] is True
+    assert gaussian_diagnostics["clusterless_mark_likelihood"] == "diagonal-gaussian"
 
 
 def test_clusterless_emissions_clip_bins_to_ripple_end_and_ignore_post_ripple_marks():

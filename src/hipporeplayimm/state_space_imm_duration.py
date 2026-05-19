@@ -5,6 +5,7 @@ import numpy as np
 from scipy.special import logsumexp
 
 from .duration_dynamics import (
+    _candidate_indices_for_model,
     _decays,
     _ps,
     _pss,
@@ -36,7 +37,7 @@ def apply_state_space_imm_duration_patch() -> None:
 
         durations = transition_durations_s(emissions)
         attach_duration_metadata(emissions)
-        candidates = self.candidate_indices(emissions) if candidate_indices is None else candidate_indices
+        candidates = _candidate_indices_for_model(self, emissions, bin_centers) if candidate_indices is None else candidate_indices
         ss._validate_candidate_indices(candidates, emissions.n_time, emissions.n_bins)
 
         diffusion_sigmas = _pss(self.config.diffusion_sigma_cm_sqrt_s, durations, float(emissions.dt))

@@ -10,6 +10,7 @@ import pandas as pd
 
 from .clusterless import (
     ClusterlessMarkConfig,
+    ClusterlessMarkEncoding,
     ClusterlessStateSpaceReplayModel,
     build_clusterless_mark_emissions,
     fit_clusterless_mark_encoding,
@@ -137,7 +138,7 @@ def _score_session(session: ReplaySession, config: BenchmarkConfig) -> list[dict
     has_clusterless_models = any(_is_clusterless_model(model) for model in model_objects.values())
     clusterless_train_session: ReplaySession | None = None
     clusterless_joint_session: ReplaySession | None = None
-    clusterless_joint_encoding = None
+    clusterless_joint_encoding: ClusterlessMarkEncoding | None = None
     if has_clusterless_models:
         clusterless_train_session = _session_with_mark_cell_subset(
             session,
@@ -216,7 +217,7 @@ def _score_session(session: ReplaySession, config: BenchmarkConfig) -> list[dict
                     "train_cell_ids": _format_cell_ids(train_cells),
                     "test_cell_ids": _format_cell_ids(test_cells),
                     **_benchmark_config_metadata(config),
-                    **_session_mark_diagnostics(session),
+                    **_session_mark_diagnostics(session, clusterless_joint_encoding),
                     **{
                         f"diagnostic_{key}": value
                         for key, value in joint_score.diagnostics.items()
@@ -325,13 +326,26 @@ def _benchmark_config_metadata(config: BenchmarkConfig) -> dict[str, object]:
     }
 
 
-def _session_mark_diagnostics(session: ReplaySession) -> dict[str, object]:
+def _session_mark_diagnostics(
+    session: ReplaySession,
+    clusterless_encoding: ClusterlessMarkEncoding | None = None,
+) -> dict[str, object]:
     marks = session.spike_marks
+    has_marks = bool(marks is not None and marks.n_features > 0)
+    if not has_marks:
+        mark_likelihood = ""
+    elif clusterless_encoding is not None:
+        mark_likelihood = str(clusterless_encoding.mark_likelihood)
+    else:
+        # Report the likelihood that would be used by the default clusterless
+        # encoder instead of hard-coding the legacy diagonal-Gaussian label.
+        mark_likelihood = str(ClusterlessMarkConfig().mark_likelihood)
+
     return {
         "spike_mark_features": 0 if marks is None else marks.n_features,
         "spike_mark_source": "" if marks is None else f"{marks.source_file}:{marks.source_variable}",
-        "clusterless_mark_likelihood_available": bool(marks is not None and marks.n_features > 0),
-        "clusterless_mark_likelihood": "diagonal-gaussian" if marks is not None and marks.n_features > 0 else "",
+        "clusterless_mark_likelihood_available": has_marks,
+        "clusterless_mark_likelihood": mark_likelihood,
     }
 
 

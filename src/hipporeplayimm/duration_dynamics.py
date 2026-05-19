@@ -60,6 +60,12 @@ def _scales(ds):
 
 def _t(trans,i): return trans[i] if isinstance(trans,(list,tuple)) else trans
 
+def _candidate_indices_for_model(model,emissions,bin_centers):
+    try:
+        return model.candidate_indices(emissions,bin_centers)
+    except TypeError:
+        return model.candidate_indices(emissions)
+
 def apply_duration_dynamics_patch():
     import hipporeplayimm.encoding as enc
     import hipporeplayimm.kd_reference as kd
@@ -171,7 +177,7 @@ def _patch_state_space(ss):
             lp,tr,mp=apply_fimm(em.log_likelihood,centers,stationary_sigma_cm=self.config.stationary_sigma_cm,diffusion_transitions=mats,max_step_sigma=self.config.max_step_sigma,mode_stickiness=self.config.imm_mode_stickiness)
             names=('stationary','diffusion','fragmented'); extra={f'state_space_mode_{n}_terminal_probability':float(mp[-1,i]) for i,n in enumerate(names)}; extra.update({'state_space_imm_modes':','.join(names),'state_space_imm_evidence_support':'exact_full_grid'})
         elif self.mode in {'momentum','imm'}:
-            c=self.candidate_indices(em) if candidate_indices is None else candidate_indices; ss._validate_candidate_indices(c,em.n_time,em.n_bins)
+            c=_candidate_indices_for_model(self,em,centers) if candidate_indices is None else candidate_indices; ss._validate_candidate_indices(c,em.n_time,em.n_bins)
             if self.mode=='imm':
                 from hipporeplayimm.state_space_imm_duration import _score_imm_duration
                 dsig=_pss(self.config.diffusion_sigma_cm_sqrt_s,ds,float(em.dt)); ts=_rep(self.config.diffusion_sigma_cm_sqrt_s,ds,float(em.dt))

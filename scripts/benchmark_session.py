@@ -19,6 +19,7 @@ from hipporeplayimm.benchmarks import (
     BenchmarkConfig,
     BenchmarkResult,
     _add_relative_metrics,
+    _benchmark_config_metadata,
     _build_models,
     _score_train_joint_model,
     _session_mark_diagnostics,
@@ -113,7 +114,12 @@ def score_explicit_events(args: argparse.Namespace) -> BenchmarkResult:
         )
 
     config = BenchmarkConfig(
-        emissions=EmissionConfig(time_bin_s=args.time_bin_s, spike_rate_scale=args.spike_rate_scale),
+        emissions=EmissionConfig(
+            time_bin_s=args.time_bin_s,
+            spike_rate_scale=args.spike_rate_scale,
+            likelihood_temperature=args.emission_likelihood_temperature,
+            negative_binomial_overdispersion=args.emission_negative_binomial_overdispersion,
+        ),
         test_cell_fraction=args.test_cell_fraction,
         candidate_top_k=args.candidate_top_k,
         pyrecest_particles=args.pyrecest_particles,
@@ -172,6 +178,7 @@ def score_explicit_events(args: argparse.Namespace) -> BenchmarkResult:
                         "n_time": int(train_emissions.n_time),
                         "runtime_s": runtime_s,
                         "error": "",
+                        **_benchmark_config_metadata(config),
                         **_session_mark_diagnostics(session),
                         **{
                             f"diagnostic_{key}": value
@@ -264,6 +271,18 @@ def main() -> int:
     parser.add_argument("--random-seed", default=1, type=int)
     parser.add_argument("--time-bin-s", default=0.02, type=float)
     parser.add_argument("--spike-rate-scale", default=1.0, type=float)
+    parser.add_argument(
+        "--emission-likelihood-temperature",
+        type=float,
+        default=1.0,
+        help="Divide emission log likelihoods by this positive temperature; values >1 flatten the emission model.",
+    )
+    parser.add_argument(
+        "--emission-negative-binomial-overdispersion",
+        type=float,
+        default=0.0,
+        help="Use a negative-binomial sorted-spike count model with variance mean + alpha * mean**2; 0 keeps the Poisson model.",
+    )
     parser.add_argument("--output", default="results/heldout-benchmark")
     parser.add_argument(
         "--continue-on-error",

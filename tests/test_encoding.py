@@ -134,6 +134,54 @@ def test_build_emissions_applies_spike_rate_scale_to_expected_counts():
     np.testing.assert_allclose(emissions.log_likelihood[0], np.log(expected) - expected)
 
 
+def test_build_emissions_applies_likelihood_temperature():
+    session = _single_ripple_session()
+    encoding = _two_bin_encoding()
+
+    base = build_emissions(
+        session,
+        encoding,
+        0,
+        EmissionConfig(time_bin_s=1.0),
+    )
+    tempered = build_emissions(
+        session,
+        encoding,
+        0,
+        EmissionConfig(time_bin_s=1.0, likelihood_temperature=2.0),
+    )
+
+    np.testing.assert_allclose(tempered.log_likelihood, base.log_likelihood / 2.0)
+
+
+def test_build_emissions_supports_negative_binomial_overdispersion():
+    session = _single_ripple_session()
+    encoding = _two_bin_encoding()
+
+    emissions = build_emissions(
+        session,
+        encoding,
+        0,
+        EmissionConfig(time_bin_s=1.0, negative_binomial_overdispersion=0.5),
+    )
+
+    mean = np.array([2.0, 4.0])
+    size = 1.0 / 0.5
+    expected = (
+        np.log(size)
+        + size * (np.log(size) - np.log(size + mean))
+        + np.log(mean) - np.log(size + mean)
+    )
+    np.testing.assert_allclose(emissions.log_likelihood[0], expected)
+
+
+def test_build_emissions_rejects_invalid_emission_calibration():
+    with pytest.raises(ValueError, match="likelihood_temperature"):
+        build_emissions(_single_ripple_session(), _two_bin_encoding(), 0, EmissionConfig(time_bin_s=1.0, likelihood_temperature=0.0))
+    with pytest.raises(ValueError, match="negative_binomial_overdispersion"):
+        build_emissions(_single_ripple_session(), _two_bin_encoding(), 0, EmissionConfig(time_bin_s=1.0, negative_binomial_overdispersion=-0.1))
+
+
 def test_build_emissions_rejects_nonpositive_spike_rate_scale():
     with pytest.raises(ValueError, match="spike_rate_scale"):
         build_emissions(

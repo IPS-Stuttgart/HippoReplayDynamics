@@ -16,6 +16,8 @@ from .encoding import (
     LogEmissionTensor,
     _clean_position,
     _encoding_exclusion_intervals,
+    _apply_likelihood_temperature,
+    _validate_emission_calibration,
     _frame_durations,
     _interp_positions,
     _make_grid,
@@ -320,8 +322,14 @@ def build_clusterless_mark_emissions(
     """Build marked-point-process log emissions for one ripple."""
 
     config = EmissionConfig() if config is None else config
-    if config.spike_rate_scale <= 0.0:
-        raise ValueError("spike_rate_scale must be positive")
+    if not np.isfinite(config.spike_rate_scale) or config.spike_rate_scale <= 0.0:
+        raise ValueError("spike_rate_scale must be finite and positive")
+    _validate_emission_calibration(
+        likelihood_temperature=config.likelihood_temperature,
+        negative_binomial_overdispersion=config.negative_binomial_overdispersion,
+    )
+    if config.negative_binomial_overdispersion > 0.0:
+        raise ValueError("negative_binomial_overdispersion is only implemented for sorted-spike emissions")
     marks = session.spike_marks
     if marks is None or marks.n_features == 0:
         raise ValueError("Session does not contain spike marks for clusterless emission scoring.")
@@ -356,6 +364,7 @@ def build_clusterless_mark_emissions(
             log_likelihood[time_bin] += log_rate + mark_log_likelihood[local_index]
         np.add.at(counts, time_bins, 1)
     log_likelihood += (counts * np.log(bin_durations) - gammaln(counts + 1))[:, None]
+    log_likelihood = _apply_likelihood_temperature(log_likelihood, config.likelihood_temperature)
 
     emissions = LogEmissionTensor(
         log_likelihood=log_likelihood,

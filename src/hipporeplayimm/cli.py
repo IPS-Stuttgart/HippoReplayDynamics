@@ -69,6 +69,7 @@ def main(argv: list[str] | None = None) -> int:
     benchmark_parser.add_argument("--random-seed", type=int, default=1)
     benchmark_parser.add_argument("--time-bin-ms", type=float, default=20.0)
     benchmark_parser.add_argument("--spike-rate-scale", type=float, default=1.0)
+    _add_emission_calibration_arguments(benchmark_parser)
     benchmark_parser.add_argument(
         "--models",
         default="random,stationary,diffusion,momentum,imm",
@@ -84,6 +85,7 @@ def main(argv: list[str] | None = None) -> int:
     decode_parser.add_argument("--candidate-top-k", type=int, default=64)
     decode_parser.add_argument("--time-bin-ms", type=float, default=20.0)
     decode_parser.add_argument("--spike-rate-scale", type=float, default=1.0)
+    _add_emission_calibration_arguments(decode_parser)
     decode_parser.add_argument("--output")
     decode_parser.add_argument(
         "--models",
@@ -111,6 +113,7 @@ def main(argv: list[str] | None = None) -> int:
     compare_parser.add_argument("--random-seed", type=int, default=1)
     compare_parser.add_argument("--time-bin-ms", type=float, default=20.0)
     compare_parser.add_argument("--spike-rate-scale", type=float, default=1.0)
+    _add_emission_calibration_arguments(compare_parser)
     _add_encoding_arguments(compare_parser)
     _add_pyrecest_scalar_arguments(compare_parser)
     compare_parser.add_argument("--visit-radius-cm", type=float, default=10.0)
@@ -505,6 +508,8 @@ def _emission_config_from_args(args: argparse.Namespace) -> EmissionConfig:
     return EmissionConfig(
         time_bin_s=args.time_bin_ms / 1000.0,
         spike_rate_scale=args.spike_rate_scale,
+        likelihood_temperature=args.emission_likelihood_temperature,
+        negative_binomial_overdispersion=args.emission_negative_binomial_overdispersion,
     )
 
 
@@ -566,6 +571,21 @@ def _add_encoding_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--bin-size-cm", type=float, default=VALIDATED_POSITION_BIN_SIZE_CM)
     parser.add_argument("--smoothing-sigma-bins", type=float, default=VALIDATED_POSITION_SMOOTHING_SIGMA_BINS)
     parser.add_argument("--min-speed-cm-s", type=float, default=VALIDATED_POSITION_MIN_SPEED_CM_S)
+
+
+def _add_emission_calibration_arguments(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--emission-likelihood-temperature",
+        type=float,
+        default=1.0,
+        help="Divide emission log likelihoods by this positive temperature; values >1 flatten the emission model.",
+    )
+    parser.add_argument(
+        "--emission-negative-binomial-overdispersion",
+        type=float,
+        default=0.0,
+        help="Use a negative-binomial count model with variance mean + alpha * mean**2; 0 keeps the Poisson model.",
+    )
 
 
 def _add_pyrecest_scalar_arguments(parser: argparse.ArgumentParser) -> None:

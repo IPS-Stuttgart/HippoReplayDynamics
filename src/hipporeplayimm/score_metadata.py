@@ -78,6 +78,16 @@ def emission_config_for_scores(
             ("emission_spike_rate_scale", "spike_rate_scale"),
             fallback.spike_rate_scale,
         ),
+        likelihood_temperature=_unique_float_from_columns(
+            scores_frame,
+            ("emission_likelihood_temperature", "likelihood_temperature"),
+            fallback.likelihood_temperature,
+        ),
+        negative_binomial_overdispersion=_unique_float_from_columns(
+            scores_frame,
+            ("emission_negative_binomial_overdispersion", "negative_binomial_overdispersion"),
+            fallback.negative_binomial_overdispersion,
+        ),
     )
 
 
@@ -245,6 +255,8 @@ def apply_model_hyperparam_patch() -> None:
             "encoding_use_excitatory": bool(config.encoding.use_excitatory),
             "emission_time_bin_s": float(config.emissions.time_bin_s),
             "emission_spike_rate_scale": float(config.emissions.spike_rate_scale),
+            "emission_likelihood_temperature": float(config.emissions.likelihood_temperature),
+            "emission_negative_binomial_overdispersion": float(config.emissions.negative_binomial_overdispersion),
             "candidate_top_k": int(cfg(config, "candidate_top_k", 64)),
             "candidate_stationary_sigma_cm": float(cfg(config, "stationary_sigma_cm", 2.0)),
             "candidate_diffusion_sigma_cm": float(cfg(config, "diffusion_sigma_cm", 12.0)),

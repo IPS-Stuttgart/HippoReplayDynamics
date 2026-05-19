@@ -516,6 +516,16 @@ def _emission_config_for_scores(
             ("emission_spike_rate_scale", "spike_rate_scale"),
             fallback.spike_rate_scale,
         ),
+        likelihood_temperature=_unique_float_from_columns(
+            scores_frame,
+            ("emission_likelihood_temperature", "likelihood_temperature"),
+            fallback.likelihood_temperature,
+        ),
+        negative_binomial_overdispersion=_unique_float_from_columns(
+            scores_frame,
+            ("emission_negative_binomial_overdispersion", "negative_binomial_overdispersion"),
+            fallback.negative_binomial_overdispersion,
+        ),
     )
 
 
@@ -540,7 +550,7 @@ def _unique_float_from_columns(
         return float(default)
     first = values[0]
     if any(not np.isclose(value, first) for value in values[1:]):
-        raise ValueError(f"{column} contains multiple values")
+        raise ValueError(f"{' / '.join(columns)} contains multiple values")
     return float(first)
 
 

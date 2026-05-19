@@ -247,6 +247,8 @@ def _score(args) -> pd.DataFrame:
     emissions_cfg = EmissionConfig(
         time_bin_s=args.time_bin_s,
         spike_rate_scale=args.spike_rate_scale,
+        likelihood_temperature=args.emission_likelihood_temperature,
+        negative_binomial_overdispersion=args.emission_negative_binomial_overdispersion,
     )
     rows: list[dict[str, object]] = []
 
@@ -282,6 +284,8 @@ def _score(args) -> pd.DataFrame:
                     "min_speed_cm_s": float(args.min_speed_cm_s),
                     "time_bin_s": float(args.time_bin_s),
                     "spike_rate_scale": float(args.spike_rate_scale),
+                    "emission_likelihood_temperature": float(args.emission_likelihood_temperature),
+                    "emission_negative_binomial_overdispersion": float(args.emission_negative_binomial_overdispersion),
                     "clusterless_mark_smoothing_sigma_bins": float(args.clusterless_mark_smoothing_sigma_bins),
                     "clusterless_mark_prior_count": float(args.clusterless_mark_prior_count),
                     "clusterless_mark_variance_floor": float(args.clusterless_mark_variance_floor),
@@ -306,6 +310,8 @@ def _score(args) -> pd.DataFrame:
                     "min_speed_cm_s": float(args.min_speed_cm_s),
                     "time_bin_s": float(args.time_bin_s),
                     "spike_rate_scale": float(args.spike_rate_scale),
+                    "emission_likelihood_temperature": float(args.emission_likelihood_temperature),
+                    "emission_negative_binomial_overdispersion": float(args.emission_negative_binomial_overdispersion),
                     "clusterless_mark_smoothing_sigma_bins": float(args.clusterless_mark_smoothing_sigma_bins),
                     "clusterless_mark_prior_count": float(args.clusterless_mark_prior_count),
                     "clusterless_mark_variance_floor": float(args.clusterless_mark_variance_floor),
@@ -474,6 +480,18 @@ def main() -> int:
         type=float,
         default=1.0,
         help="Multiplicative scale applied to Poisson place-field rates during ripple scoring.",
+    )
+    p.add_argument(
+        "--emission-likelihood-temperature",
+        type=float,
+        default=1.0,
+        help="Divide emission log likelihoods by this positive temperature; values >1 flatten the emission model.",
+    )
+    p.add_argument(
+        "--emission-negative-binomial-overdispersion",
+        type=float,
+        default=0.0,
+        help="Use a negative-binomial sorted-spike count model with variance mean + alpha * mean**2; 0 keeps the Poisson model.",
     )
     p.add_argument("--bin-size-cm", type=float, default=VALIDATED_POSITION_BIN_SIZE_CM)
     p.add_argument("--smoothing-sigma-bins", type=float, default=VALIDATED_POSITION_SMOOTHING_SIGMA_BINS)

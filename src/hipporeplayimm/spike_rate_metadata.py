@@ -41,6 +41,16 @@ def apply_spike_rate_metadata_patch() -> None:
                 ("emission_spike_rate_scale", "spike_rate_scale"),
                 fallback.spike_rate_scale,
             ),
+            likelihood_temperature=_unique_float_from_columns(
+                scores_frame,
+                ("emission_likelihood_temperature", "likelihood_temperature"),
+                fallback.likelihood_temperature,
+            ),
+            negative_binomial_overdispersion=_unique_float_from_columns(
+                scores_frame,
+                ("emission_negative_binomial_overdispersion", "negative_binomial_overdispersion"),
+                fallback.negative_binomial_overdispersion,
+            ),
         )
 
     score_meta.emission_config_for_scores = emission_config_for_scores
@@ -52,6 +62,8 @@ def apply_spike_rate_metadata_patch() -> None:
         def benchmark_config_metadata(config) -> dict[str, object]:
             metadata = dict(base_metadata(config))
             metadata["emission_spike_rate_scale"] = float(config.emissions.spike_rate_scale)
+            metadata["emission_likelihood_temperature"] = float(config.emissions.likelihood_temperature)
+            metadata["emission_negative_binomial_overdispersion"] = float(config.emissions.negative_binomial_overdispersion)
             return metadata
 
         benchmark_config_metadata._spike_rate_metadata_wrapped = True

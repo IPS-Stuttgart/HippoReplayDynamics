@@ -338,6 +338,9 @@ def _benchmark_config_metadata(config: BenchmarkConfig) -> dict[str, object]:
         "encoding_arena_padding_cm": float(config.encoding.arena_padding_cm),
         "encoding_use_excitatory": bool(config.encoding.use_excitatory),
         "emission_time_bin_s": float(config.emissions.time_bin_s),
+        "emission_spike_rate_scale": float(config.emissions.spike_rate_scale),
+        "emission_likelihood_temperature": float(config.emissions.likelihood_temperature),
+        "emission_negative_binomial_overdispersion": float(config.emissions.negative_binomial_overdispersion),
         "clusterless_mark_smoothing_sigma_bins": float(
             getattr(config, "clusterless_mark_smoothing_sigma_bins", 1.0)
         ),

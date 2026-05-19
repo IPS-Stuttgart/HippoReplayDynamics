@@ -28,6 +28,8 @@ class EncodingConfig:
 class EmissionConfig:
     time_bin_s: float = 0.02
     spike_rate_scale: float = 1.0
+    likelihood_temperature: float = 1.0
+    negative_binomial_overdispersion: float = 0.0
 
 
 @dataclass
@@ -229,6 +231,8 @@ def build_emissions(
         encoding.rates_hz,
         bin_durations,
         spike_rate_scale=config.spike_rate_scale,
+        likelihood_temperature=config.likelihood_temperature,
+        negative_binomial_overdispersion=config.negative_binomial_overdispersion,
     )
     return LogEmissionTensor(
         log_likelihood=log_likelihood,
@@ -246,19 +250,26 @@ def _poisson_log_emissions(
     dt: float | np.ndarray,
     *,
     spike_rate_scale: float = 1.0,
+    likelihood_temperature: float = 1.0,
+    negative_binomial_overdispersion: float = 0.0,
 ) -> np.ndarray:
-    if spike_rate_scale <= 0.0:
-        raise ValueError("spike_rate_scale must be positive")
+    if not np.isfinite(spike_rate_scale) or spike_rate_scale <= 0.0:
+        raise ValueError("spike_rate_scale must be finite and positive")
+    _validate_emission_calibration(
+        likelihood_temperature=likelihood_temperature,
+        negative_binomial_overdispersion=negative_binomial_overdispersion,
+    )
     dt_array = np.asarray(dt, dtype=float)
     if dt_array.ndim == 0:
         if float(dt_array) <= 0.0:
             raise ValueError("dt must be positive")
         expected = np.maximum(rates_hz * float(dt_array) * spike_rate_scale, np.finfo(float).tiny)
-        return (
-            spike_counts @ np.log(expected)
-            - expected.sum(axis=0)[None, :]
-            - gammaln(spike_counts + 1).sum(axis=1)[:, None]
+        log_likelihood = _count_log_emissions(
+            spike_counts,
+            expected,
+            negative_binomial_overdispersion=negative_binomial_overdispersion,
         )
+        return _apply_likelihood_temperature(log_likelihood, likelihood_temperature)
 
     if dt_array.ndim != 1 or dt_array.shape[0] != spike_counts.shape[0]:
         raise ValueError("dt must be a scalar or one duration per time bin")
@@ -269,11 +280,77 @@ def _poisson_log_emissions(
         dt_array[:, None, None] * rates_hz[None, :, :] * spike_rate_scale,
         np.finfo(float).tiny,
     )
-    return (
-        np.einsum("tc,tcb->tb", spike_counts, np.log(expected), optimize=True)
-        - expected.sum(axis=1)
-        - gammaln(spike_counts + 1).sum(axis=1)[:, None]
+    log_likelihood = _count_log_emissions(
+        spike_counts,
+        expected,
+        negative_binomial_overdispersion=negative_binomial_overdispersion,
     )
+    return _apply_likelihood_temperature(log_likelihood, likelihood_temperature)
+
+
+def _count_log_emissions(
+    spike_counts: np.ndarray,
+    expected: np.ndarray,
+    *,
+    negative_binomial_overdispersion: float,
+) -> np.ndarray:
+    """Return per-time/bin count log likelihoods for Poisson or NB emissions."""
+
+    if negative_binomial_overdispersion == 0.0:
+        if expected.ndim == 2:
+            return (
+                spike_counts @ np.log(expected)
+                - expected.sum(axis=0)[None, :]
+                - gammaln(spike_counts + 1).sum(axis=1)[:, None]
+            )
+        if expected.ndim == 3:
+            return (
+                np.einsum("tc,tcb->tb", spike_counts, np.log(expected), optimize=True)
+                - expected.sum(axis=1)
+                - gammaln(spike_counts + 1).sum(axis=1)[:, None]
+            )
+        raise ValueError("expected must be two- or three-dimensional")
+
+    counts = np.asarray(spike_counts, dtype=float)[:, :, None]
+    expected_3d = expected[None, :, :] if expected.ndim == 2 else expected
+    return _negative_binomial_log_emissions(
+        counts,
+        expected_3d,
+        negative_binomial_overdispersion,
+    ).sum(axis=1)
+
+
+def _negative_binomial_log_emissions(
+    counts: np.ndarray,
+    expected: np.ndarray,
+    negative_binomial_overdispersion: float,
+) -> np.ndarray:
+    """Negative-binomial log PMF with variance mean + alpha * mean**2."""
+
+    size = 1.0 / float(negative_binomial_overdispersion)
+    mean = np.maximum(np.asarray(expected, dtype=float), np.finfo(float).tiny)
+    return (
+        gammaln(counts + size)
+        - gammaln(size)
+        - gammaln(counts + 1.0)
+        + size * (np.log(size) - np.log(size + mean))
+        + counts * (np.log(mean) - np.log(size + mean))
+    )
+
+
+def _validate_emission_calibration(
+    *,
+    likelihood_temperature: float,
+    negative_binomial_overdispersion: float,
+) -> None:
+    if not np.isfinite(likelihood_temperature) or likelihood_temperature <= 0.0:
+        raise ValueError("likelihood_temperature must be finite and positive")
+    if not np.isfinite(negative_binomial_overdispersion) or negative_binomial_overdispersion < 0.0:
+        raise ValueError("negative_binomial_overdispersion must be finite and nonnegative")
+
+
+def _apply_likelihood_temperature(log_likelihood: np.ndarray, likelihood_temperature: float) -> np.ndarray:
+    return np.asarray(log_likelihood, dtype=float) / float(likelihood_temperature)
 
 
 def _time_bin_edges(start: float, end: float, time_bin_s: float) -> np.ndarray:

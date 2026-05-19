@@ -8,7 +8,8 @@ CSV file or an artifact directory containing one of:
 * all_sessions_event_model_evidence.csv
 
 It canonicalizes model names across KD-aligned, sorted-spike state-space, and
-clusterless state-space runs; optionally filters to exact-comparable evidence;
+clusterless state-space runs; defaults to exact-comparable evidence so truncated
+candidate lower bounds do not participate in best-model comparisons;
 and writes compact tables that answer whether a rerun changed the model story.
 """
 
@@ -54,7 +55,7 @@ def compare_artifacts(
     left_label: str = "left",
     right_label: str = "right",
     output: str | Path = "results/model-evidence-artifact-comparison",
-    exact_only: bool = False,
+    exact_only: bool = True,
 ) -> dict[str, pd.DataFrame]:
     """Compare two model-evidence artifacts and write CSV summaries."""
 
@@ -132,7 +133,7 @@ def find_score_file(root: str | Path) -> Path:
     raise FileNotFoundError(f"No score CSV found under {path}; searched: {searched}")
 
 
-def load_scores(root: str | Path, run_label: str, *, exact_only: bool = False) -> pd.DataFrame:
+def load_scores(root: str | Path, run_label: str, *, exact_only: bool = True) -> pd.DataFrame:
     """Load and normalize one model-evidence artifact."""
 
     source = find_score_file(root)
@@ -145,7 +146,8 @@ def load_scores(root: str | Path, run_label: str, *, exact_only: bool = False) -
         frame = frame[frame["status"].eq("success")].copy()
     frame = ensure_evidence_support_columns(frame)
     if exact_only:
-        frame = frame[frame["evidence_comparable"].fillna(False).astype(bool)].copy()
+        comparable = frame.get("evidence_comparable", pd.Series(False, index=frame.index))
+        frame = frame[comparable.fillna(False).astype(bool)].copy()
     frame["source_score_file"] = str(source)
     frame["run_label"] = run_label
     frame["canonical_model"] = frame["model"].map(canonical_model_name)
@@ -154,11 +156,9 @@ def load_scores(root: str | Path, run_label: str, *, exact_only: bool = False) -
 
 
 def add_relative_log_evidence(frame: pd.DataFrame) -> pd.DataFrame:
-    """Add within-event relative log evidence if not already available."""
+    """Recompute within-event relative log evidence on the selected rows."""
 
     out = frame.copy()
-    if "relative_log_evidence" in out:
-        return out
     if out.empty:
         out["relative_log_evidence"] = pd.Series(dtype=float)
         return out
@@ -395,10 +395,18 @@ def main() -> int:
     parser.add_argument("--left-label", default="left")
     parser.add_argument("--right-label", default="right")
     parser.add_argument("--output", default="results/model-evidence-artifact-comparison")
+    parser.set_defaults(exact_only=True)
     parser.add_argument(
         "--exact-only",
+        dest="exact_only",
         action="store_true",
-        help="Compare only rows marked exact_full_grid/evidence_comparable.",
+        help="Compare only rows marked exact_full_grid/evidence_comparable; this is the default.",
+    )
+    parser.add_argument(
+        "--include-non-comparable-evidence",
+        dest="exact_only",
+        action="store_false",
+        help="Include truncated lower-bound and other non-comparable evidence rows for diagnostics.",
     )
     args = parser.parse_args()
 

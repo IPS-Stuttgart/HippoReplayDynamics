@@ -106,6 +106,10 @@ def _compare_clusterless_scores_to_ground_truth(gt, root, scores_frame: pd.DataF
         ),
         state_space_momentum_velocity_decay=kwargs.get("state_space_momentum_velocity_decay", 0.95),
         state_space_momentum_candidate_top_k=kwargs.get("state_space_momentum_candidate_top_k", 128),
+        state_space_momentum_predicted_candidate_top_k=kwargs.get(
+            "state_space_momentum_predicted_candidate_top_k",
+            8,
+        ),
         clusterless_mark_smoothing_sigma_bins=kwargs.get("clusterless_mark_smoothing_sigma_bins", 1.0),
         clusterless_mark_prior_count=kwargs.get("clusterless_mark_prior_count", 1.0),
         clusterless_mark_variance_floor=kwargs.get("clusterless_mark_variance_floor", 1.0),
@@ -177,6 +181,11 @@ def _clusterless_state_space_model(config: object, mode: str) -> ClusterlessStat
             ),
             momentum_velocity_decay=_cfg(config, "state_space_momentum_velocity_decay", 0.95),
             momentum_candidate_top_k=_cfg(config, "state_space_momentum_candidate_top_k", 128),
+            momentum_predicted_candidate_top_k=_cfg(
+                config,
+                "state_space_momentum_predicted_candidate_top_k",
+                8,
+            ),
         ),
     )
 
@@ -230,6 +239,15 @@ def _clusterless_model_config_for_scores(scores_frame: pd.DataFrame, *, model_na
                 "diagnostic_state_space_imm_candidate_top_k",
             ),
             defaults["state_space_momentum_candidate_top_k"],
+        ),
+        state_space_momentum_predicted_candidate_top_k=_score_metadata._unique_int_from_columns(
+            scores_frame,
+            (
+                "state_space_momentum_predicted_candidate_top_k",
+                "diagnostic_state_space_momentum_predicted_candidate_top_k",
+                "diagnostic_state_space_imm_predicted_candidate_top_k",
+            ),
+            defaults["state_space_momentum_predicted_candidate_top_k"],
         ),
         clusterless_mark_smoothing_sigma_bins=_score_metadata._unique_float_from_columns(
             scores_frame,

@@ -257,6 +257,127 @@ def test_compare_scores_to_ground_truth_uses_benchmark_split_and_train_candidate
     assert bool(comparison.loc[0, "goal_correct"])
 
 
+def test_compare_scores_to_ground_truth_preserves_state_space_candidate_augmentation(
+    monkeypatch, tmp_path: Path
+):
+    times = np.linspace(0.0, 1.0, 11)
+    position = np.column_stack(
+        [times, np.zeros_like(times), np.zeros_like(times), np.zeros_like(times)]
+    )
+    session = _session(
+        tmp_path,
+        position=position,
+        well_sequence=np.array([[0.0, 1.0], [0.5, 2.0], [1.0, 1.0]]),
+        ripple_events=np.array([[0.2, 0.24, 0.22, 1.0, 1.0, 1.0]]),
+    )
+    encoding = EncodingModel(
+        x_edges=np.array([-1.0, 5.0, 11.0]),
+        y_edges=np.array([-1.0, 1.0]),
+        bin_centers=np.array([[0.0, 0.0], [10.0, 0.0]]),
+        rates_hz=np.ones((2, 2)),
+        occupancy_s=np.ones(2),
+        cell_ids=np.array([1, 2]),
+        config=EncodingConfig(),
+    )
+    wells = pd.DataFrame(
+        {
+            "well_id": [1, 2],
+            "well_x": [0.0, 10.0],
+            "well_y": [0.0, 0.0],
+            "n_estimates": [1, 1],
+        }
+    )
+    scores = pd.DataFrame(
+        {
+            "session": ["Rat1/Open1"],
+            "event_index": [0],
+            "model": ["state-space-momentum"],
+            "requested_model": ["state-space-momentum"],
+            "log_evidence": [0.0],
+            "diagnostic_state_space_momentum_predicted_candidate_top_k": [3],
+        }
+    )
+    ground_truth = pd.DataFrame(
+        {
+            "session": ["Rat1/Open1"],
+            "event_index": [0],
+            "ripple_peak": [0.22],
+            "active_goal_id": [np.nan],
+            "true_well_id": [2],
+            "true_well_x": [10.0],
+            "true_well_y": [0.0],
+            "arrival_time": [0.5],
+            "time_to_arrival_s": [0.28],
+            "valid_label": [True],
+            "exclude_reason": [""],
+        }
+    )
+
+    captured: dict[str, object] = {}
+
+    def fake_build_emissions(
+        session_arg, encoding_arg, event_index_arg, emission_config_arg
+    ):
+        del session_arg, encoding_arg, event_index_arg, emission_config_arg
+        return LogEmissionTensor(
+            log_likelihood=np.array([[0.0, -1.0], [-1.0, 0.0]]),
+            spike_counts=np.zeros((2, 2), dtype=int),
+            times=np.array([0.21, 0.23]),
+            dt=0.02,
+            cell_ids=np.array([1, 2]),
+            n_spikes=0,
+        )
+
+    class FakeStateSpaceModel:
+        def score(self, emissions, bin_centers_arg):
+            del emissions, bin_centers_arg
+            return EventScore(
+                "state-space-momentum",
+                0.0,
+                2,
+                0,
+                terminal_log_posterior=np.log(np.array([0.25, 0.75])),
+            )
+
+    def fake_build_models(config, session=None):
+        del session
+        captured["predicted_top_k"] = (
+            config.state_space_momentum_predicted_candidate_top_k
+        )
+        return {"state-space-momentum": FakeStateSpaceModel()}
+
+    monkeypatch.setattr(
+        "hipporeplayimm.ground_truth.load_open_field_sessions",
+        lambda _root: [session],
+    )
+    monkeypatch.setattr(
+        "hipporeplayimm.ground_truth.fit_place_field_encoding",
+        lambda _session, _config: encoding,
+    )
+    monkeypatch.setattr(
+        "hipporeplayimm.ground_truth.build_emissions",
+        fake_build_emissions,
+    )
+    monkeypatch.setattr(
+        "hipporeplayimm.ground_truth.infer_well_locations",
+        lambda _session, _config=None: wells,
+    )
+    monkeypatch.setattr(
+        "hipporeplayimm.ground_truth._build_models",
+        fake_build_models,
+    )
+
+    comparison = compare_scores_to_ground_truth(
+        tmp_path,
+        scores,
+        ground_truth=ground_truth,
+    )
+
+    assert captured["predicted_top_k"] == 3
+    assert comparison.loc[0, "decoded_well_id"] == 2
+    assert bool(comparison.loc[0, "goal_correct"])
+
+
 def test_ground_truth_metrics_treat_missing_valid_label_as_invalid():
     comparison = pd.DataFrame(
         {

@@ -121,6 +121,7 @@ def apply_model_hyperparam_patch() -> None:
         state_space_momentum_initial_sigma_cm_sqrt_s: float = 85.0
         state_space_momentum_velocity_decay: float = 0.95
         state_space_momentum_candidate_top_k: int = 128
+        state_space_momentum_predicted_candidate_top_k: int = 8
         pyrecest_particles: int = 512
         pyrecest_alpha: float = 0.80
         pyrecest_beta: float = 1.00
@@ -173,6 +174,11 @@ def apply_model_hyperparam_patch() -> None:
                 ),
                 momentum_velocity_decay=cfg(config, "state_space_momentum_velocity_decay", 0.95),
                 momentum_candidate_top_k=cfg(config, "state_space_momentum_candidate_top_k", 128),
+                momentum_predicted_candidate_top_k=cfg(
+                    config,
+                    "state_space_momentum_predicted_candidate_top_k",
+                    8,
+                ),
             ),
         )
 
@@ -259,6 +265,9 @@ def apply_model_hyperparam_patch() -> None:
             "state_space_momentum_initial_sigma_cm_sqrt_s": float(cfg(config, "state_space_momentum_initial_sigma_cm_sqrt_s", 85.0)),
             "state_space_momentum_velocity_decay": float(cfg(config, "state_space_momentum_velocity_decay", 0.95)),
             "state_space_momentum_candidate_top_k": int(cfg(config, "state_space_momentum_candidate_top_k", 128)),
+            "state_space_momentum_predicted_candidate_top_k": int(
+                cfg(config, "state_space_momentum_predicted_candidate_top_k", 8)
+            ),
         }
         return base
 
@@ -302,6 +311,7 @@ def apply_model_hyperparam_patch() -> None:
         state_space_momentum_initial_sigma_cm_sqrt_s: float,
         state_space_momentum_velocity_decay: float,
         state_space_momentum_candidate_top_k: int,
+        state_space_momentum_predicted_candidate_top_k: int,
         pyrecest_particles: int,
         pyrecest_alpha: float,
         pyrecest_beta: float,
@@ -338,6 +348,15 @@ def apply_model_hyperparam_patch() -> None:
             state_space_momentum_initial_sigma_cm_sqrt_s=_unique_float_from_columns(scores_frame, ("state_space_momentum_initial_sigma_cm_sqrt_s", "diagnostic_state_space_momentum_initial_sigma_cm_sqrt_s"), state_space_momentum_initial_sigma_cm_sqrt_s),
             state_space_momentum_velocity_decay=_unique_float_from_columns(scores_frame, ("state_space_momentum_velocity_decay", "diagnostic_state_space_momentum_velocity_decay"), state_space_momentum_velocity_decay),
             state_space_momentum_candidate_top_k=_unique_int_from_columns(scores_frame, ("state_space_momentum_candidate_top_k", "diagnostic_state_space_momentum_candidate_top_k", "diagnostic_state_space_imm_candidate_top_k"), state_space_momentum_candidate_top_k),
+            state_space_momentum_predicted_candidate_top_k=_unique_int_from_columns(
+                scores_frame,
+                (
+                    "state_space_momentum_predicted_candidate_top_k",
+                    "diagnostic_state_space_momentum_predicted_candidate_top_k",
+                    "diagnostic_state_space_imm_predicted_candidate_top_k",
+                ),
+                state_space_momentum_predicted_candidate_top_k,
+            ),
             pyrecest_particles=pyrecest_particles,
             pyrecest_alpha=pyrecest_alpha,
             pyrecest_beta=pyrecest_beta,
@@ -380,6 +399,7 @@ def apply_model_hyperparam_patch() -> None:
         state_space_momentum_initial_sigma_cm_sqrt_s: float = 85.0,
         state_space_momentum_velocity_decay: float = 0.95,
         state_space_momentum_candidate_top_k: int = 128,
+        state_space_momentum_predicted_candidate_top_k: int = 8,
         pyrecest_particles: int = 512,
         pyrecest_alpha: float = 0.80,
         pyrecest_beta: float = 1.00,
@@ -431,6 +451,7 @@ def apply_model_hyperparam_patch() -> None:
             state_space_momentum_initial_sigma_cm_sqrt_s=state_space_momentum_initial_sigma_cm_sqrt_s,
             state_space_momentum_velocity_decay=state_space_momentum_velocity_decay,
             state_space_momentum_candidate_top_k=state_space_momentum_candidate_top_k,
+            state_space_momentum_predicted_candidate_top_k=state_space_momentum_predicted_candidate_top_k,
             pyrecest_particles=pyrecest_particles,
             pyrecest_alpha=pyrecest_alpha,
             pyrecest_beta=pyrecest_beta,

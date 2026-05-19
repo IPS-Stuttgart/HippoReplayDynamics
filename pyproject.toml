@@ -26,7 +26,7 @@ dev = ["pytest>=8"]
 hipporeplayimm = "hipporeplayimm.cli:main"
 
 [project.urls]
-Repository = "https://github.com/FlorianPfaff/hipporeplayimm"
+Repository = "https://github.com/IPS-Stuttgart/HippoReplayIMM"
 
 [tool.setuptools]
 package-dir = {"" = "src"}

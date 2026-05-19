@@ -11,6 +11,11 @@ import pandas as pd
 from .benchmarks import BenchmarkConfig, _build_models, bootstrap_delta_ci, run_open_field_benchmark
 from .data import load_open_field_sessions
 from .encoding import EmissionConfig, EncodingConfig, build_emissions, fit_place_field_encoding
+from .goal_state_space_integration import (
+    DEFAULT_GOAL_DRIFT_SPEED_CM_S,
+    DEFAULT_GOAL_MAX_STEP_SIGMA,
+    DEFAULT_GOAL_TRANSITION_SIGMA_CM_SQRT_S,
+)
 from .ground_truth import (
     GroundTruthConfig,
     compare_scores_to_ground_truth,
@@ -65,6 +70,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     _add_encoding_arguments(benchmark_parser)
     _add_pyrecest_scalar_arguments(benchmark_parser)
+    _add_goal_state_space_arguments(benchmark_parser)
 
     decode_parser = subparsers.add_parser("decode-event")
     decode_parser.add_argument("root")
@@ -81,6 +87,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     _add_encoding_arguments(decode_parser)
     _add_pyrecest_scalar_arguments(decode_parser)
+    _add_goal_state_space_arguments(decode_parser)
 
     ground_truth_parser = subparsers.add_parser("ground-truth")
     ground_truth_parser.add_argument("root")
@@ -102,6 +109,7 @@ def main(argv: list[str] | None = None) -> int:
     compare_parser.add_argument("--spike-rate-scale", type=float, default=1.0)
     _add_encoding_arguments(compare_parser)
     _add_pyrecest_scalar_arguments(compare_parser)
+    _add_goal_state_space_arguments(compare_parser)
     compare_parser.add_argument("--visit-radius-cm", type=float, default=10.0)
     compare_parser.add_argument("--min-dwell-s", type=float, default=0.2)
     compare_parser.add_argument("--future-horizon-s", type=float, default=30.0)
@@ -305,6 +313,7 @@ def _benchmark(args: argparse.Namespace) -> int:
         candidate_top_k=args.candidate_top_k,
         models=_parse_models(args.models),
         **_pyrecest_scalar_kwargs(args),
+        **_goal_state_space_kwargs(args),
     )
     result = run_open_field_benchmark(args.root, config)
     print(result.summary().to_string(index=False))
@@ -344,6 +353,7 @@ def _decode_event(args: argparse.Namespace) -> int:
         candidate_top_k=args.candidate_top_k,
         models=_parse_models(args.models),
         **_pyrecest_scalar_kwargs(args),
+        **_goal_state_space_kwargs(args),
     )
     posterior_artifacts: list[tuple[str, object]] = []
     for model in _build_models(config, session=session).values():
@@ -409,6 +419,7 @@ def _compare_ground_truth(args: argparse.Namespace) -> int:
         candidate_top_k=args.candidate_top_k,
         random_seed=args.random_seed,
         **_pyrecest_scalar_kwargs(args),
+        **_goal_state_space_kwargs(args),
     )
     output = Path(args.output)
     output.parent.mkdir(parents=True, exist_ok=True)
@@ -538,6 +549,27 @@ def _add_pyrecest_scalar_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--pyrecest-imm-jump-velocity-decay", type=float, default=0.25)
 
 
+def _add_goal_state_space_arguments(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--goal-state-space-transition-sigma-cm-sqrt-s",
+        type=float,
+        default=DEFAULT_GOAL_TRANSITION_SIGMA_CM_SQRT_S,
+        help="Goal-state-space diffusion scale in cm/sqrt(s).",
+    )
+    parser.add_argument(
+        "--goal-state-space-drift-speed-cm-s",
+        type=float,
+        default=DEFAULT_GOAL_DRIFT_SPEED_CM_S,
+        help="Goal-directed drift speed in cm/s.",
+    )
+    parser.add_argument(
+        "--goal-state-space-max-step-sigma",
+        type=float,
+        default=DEFAULT_GOAL_MAX_STEP_SIGMA,
+        help="Transition truncation radius in diffusion standard deviations.",
+    )
+
+
 def _pyrecest_scalar_kwargs(args: argparse.Namespace) -> dict[str, float | int]:
     return {
         "pyrecest_particles": args.pyrecest_particles,
@@ -563,6 +595,16 @@ def _pyrecest_scalar_kwargs(args: argparse.Namespace) -> dict[str, float | int]:
         ),
         "pyrecest_imm_jump_fraction": args.pyrecest_imm_jump_fraction,
         "pyrecest_imm_jump_velocity_decay": args.pyrecest_imm_jump_velocity_decay,
+    }
+
+
+def _goal_state_space_kwargs(args: argparse.Namespace) -> dict[str, float]:
+    return {
+        "goal_state_space_transition_sigma_cm_sqrt_s": (
+            args.goal_state_space_transition_sigma_cm_sqrt_s
+        ),
+        "goal_state_space_drift_speed_cm_s": args.goal_state_space_drift_speed_cm_s,
+        "goal_state_space_max_step_sigma": args.goal_state_space_max_step_sigma,
     }
 
 

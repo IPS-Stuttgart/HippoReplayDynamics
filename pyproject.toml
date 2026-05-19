@@ -16,7 +16,7 @@ dependencies = [
     "mpmath",
     "pandas",
     "matplotlib",
-    "pyrecest==2.2.1",
+    "pyrecest==2.2.2",
 ]
 
 [project.optional-dependencies]

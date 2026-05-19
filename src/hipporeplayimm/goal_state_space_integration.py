@@ -8,10 +8,36 @@ from types import SimpleNamespace
 from .goal_state_space import GoalStateSpaceReplayModel
 
 DEFAULT_GOAL_TRANSITION_SIGMA_CM_SQRT_S = 85.0
+DEFAULT_GOAL_LATERAL_SIGMA_SCALE = 1.0
+DEFAULT_GOAL_DIFFUSION_MIXTURE_WEIGHT = 0.0
 DEFAULT_GOAL_DRIFT_SPEED_CM_S = 400.0
 DEFAULT_GOAL_MAX_STEP_SIGMA = 4.0
+DEFAULT_GOAL_RESET_PROBABILITY = 0.0
+DEFAULT_GOAL_RESET_INITIAL_POSITION_PRIOR_WEIGHT = 0.0
+DEFAULT_GOAL_COMPONENT_SWITCH_PROBABILITY = 0.0
+DEFAULT_GOAL_INITIAL_POSITION_PRIOR_DIRECTION_MODE = 'all'
+DEFAULT_GOAL_TERMINAL_PRIOR_SIGMA_CM = 0.0
+DEFAULT_GOAL_TERMINAL_PRIOR_WEIGHT = 1.0
+DEFAULT_GOAL_INITIAL_PRIOR_SIGMA_CM = 0.0
+DEFAULT_GOAL_INITIAL_PRIOR_WEIGHT = 1.0
+DEFAULT_GOAL_TOWARD_DIRECTION_PRIOR_WEIGHT = 0.5
+DEFAULT_GOAL_REVERSE_TERMINAL_POSITION_PRIOR_WEIGHT = 1.0
+DEFAULT_GOAL_FORWARD_BIASED_TOWARD_DIRECTION_PRIOR_WEIGHT = 0.9
+DEFAULT_GOAL_REVERSE_BIASED_TOWARD_DIRECTION_PRIOR_WEIGHT = 0.1
+DEFAULT_GOAL_SWITCHING_COMPONENT_SWITCH_PROBABILITY = 0.03
 GOAL_STATE_SPACE_MODEL_NAMES = frozenset(
-    {'sorted-spike-state-space-goal', 'state-space-goal'}
+    {
+        'sorted-spike-state-space-goal',
+        'sorted-spike-state-space-goal-bidirectional',
+        'sorted-spike-state-space-goal-forward-biased',
+        'sorted-spike-state-space-goal-forward-biased-switching',
+        'sorted-spike-state-space-goal-reverse-biased',
+        'state-space-goal',
+        'state-space-goal-bidirectional',
+        'state-space-goal-forward-biased',
+        'state-space-goal-forward-biased-switching',
+        'state-space-goal-reverse-biased',
+    }
 )
 GOAL_EVIDENCE_DIAGNOSTIC_COLUMN = 'diagnostic_goal_state_space_evidence_support'
 
@@ -33,8 +59,20 @@ def apply_goal_state_space_patch() -> None:
     @dataclass(frozen=True)
     class BenchmarkConfig(base_benchmark_config):
         goal_state_space_transition_sigma_cm_sqrt_s: float = DEFAULT_GOAL_TRANSITION_SIGMA_CM_SQRT_S
+        goal_state_space_lateral_sigma_scale: float = DEFAULT_GOAL_LATERAL_SIGMA_SCALE
+        goal_state_space_diffusion_mixture_weight: float = DEFAULT_GOAL_DIFFUSION_MIXTURE_WEIGHT
         goal_state_space_drift_speed_cm_s: float = DEFAULT_GOAL_DRIFT_SPEED_CM_S
         goal_state_space_max_step_sigma: float = DEFAULT_GOAL_MAX_STEP_SIGMA
+        goal_state_space_reset_probability: float = DEFAULT_GOAL_RESET_PROBABILITY
+        goal_state_space_reset_initial_position_prior_weight: float = DEFAULT_GOAL_RESET_INITIAL_POSITION_PRIOR_WEIGHT
+        goal_state_space_component_switch_probability: float = DEFAULT_GOAL_COMPONENT_SWITCH_PROBABILITY
+        goal_state_space_initial_position_prior_direction_mode: str = DEFAULT_GOAL_INITIAL_POSITION_PRIOR_DIRECTION_MODE
+        goal_state_space_terminal_prior_sigma_cm: float = DEFAULT_GOAL_TERMINAL_PRIOR_SIGMA_CM
+        goal_state_space_terminal_goal_prior_weight: float = DEFAULT_GOAL_TERMINAL_PRIOR_WEIGHT
+        goal_state_space_initial_goal_prior_sigma_cm: float = DEFAULT_GOAL_INITIAL_PRIOR_SIGMA_CM
+        goal_state_space_initial_goal_prior_weight: float = DEFAULT_GOAL_INITIAL_PRIOR_WEIGHT
+        goal_state_space_toward_direction_prior_weight: float = DEFAULT_GOAL_TOWARD_DIRECTION_PRIOR_WEIGHT
+        goal_state_space_reverse_terminal_position_prior_weight: float = DEFAULT_GOAL_REVERSE_TERMINAL_POSITION_PRIOR_WEIGHT
 
     def build_models(config: object, session=None) -> dict[str, object]:
         model_names = tuple(str(name) for name in getattr(config, 'models'))
@@ -76,7 +114,7 @@ def apply_goal_state_space_patch() -> None:
     bench._goal_state_space_patch_applied = True
 
 
-def goal_state_space_metadata_for_config(config: object) -> dict[str, float]:
+def goal_state_space_metadata_for_config(config: object) -> dict[str, object]:
     return {
         'goal_state_space_transition_sigma_cm_sqrt_s': float(
             _cfg(
@@ -92,11 +130,95 @@ def goal_state_space_metadata_for_config(config: object) -> dict[str, float]:
                 DEFAULT_GOAL_DRIFT_SPEED_CM_S,
             )
         ),
+        'goal_state_space_lateral_sigma_scale': float(
+            _cfg(
+                config,
+                'goal_state_space_lateral_sigma_scale',
+                DEFAULT_GOAL_LATERAL_SIGMA_SCALE,
+            )
+        ),
+        'goal_state_space_diffusion_mixture_weight': float(
+            _cfg(
+                config,
+                'goal_state_space_diffusion_mixture_weight',
+                DEFAULT_GOAL_DIFFUSION_MIXTURE_WEIGHT,
+            )
+        ),
         'goal_state_space_max_step_sigma': float(
             _cfg(
                 config,
                 'goal_state_space_max_step_sigma',
                 DEFAULT_GOAL_MAX_STEP_SIGMA,
+            )
+        ),
+        'goal_state_space_reset_probability': float(
+            _cfg(
+                config,
+                'goal_state_space_reset_probability',
+                DEFAULT_GOAL_RESET_PROBABILITY,
+            )
+        ),
+        'goal_state_space_reset_initial_position_prior_weight': float(
+            _cfg(
+                config,
+                'goal_state_space_reset_initial_position_prior_weight',
+                DEFAULT_GOAL_RESET_INITIAL_POSITION_PRIOR_WEIGHT,
+            )
+        ),
+        'goal_state_space_component_switch_probability': float(
+            _cfg(
+                config,
+                'goal_state_space_component_switch_probability',
+                DEFAULT_GOAL_COMPONENT_SWITCH_PROBABILITY,
+            )
+        ),
+        'goal_state_space_initial_position_prior_direction_mode': str(
+            _cfg(
+                config,
+                'goal_state_space_initial_position_prior_direction_mode',
+                DEFAULT_GOAL_INITIAL_POSITION_PRIOR_DIRECTION_MODE,
+            )
+        ),
+        'goal_state_space_terminal_prior_sigma_cm': float(
+            _cfg(
+                config,
+                'goal_state_space_terminal_prior_sigma_cm',
+                DEFAULT_GOAL_TERMINAL_PRIOR_SIGMA_CM,
+            )
+        ),
+        'goal_state_space_terminal_goal_prior_weight': float(
+            _cfg(
+                config,
+                'goal_state_space_terminal_goal_prior_weight',
+                DEFAULT_GOAL_TERMINAL_PRIOR_WEIGHT,
+            )
+        ),
+        'goal_state_space_initial_goal_prior_sigma_cm': float(
+            _cfg(
+                config,
+                'goal_state_space_initial_goal_prior_sigma_cm',
+                DEFAULT_GOAL_INITIAL_PRIOR_SIGMA_CM,
+            )
+        ),
+        'goal_state_space_initial_goal_prior_weight': float(
+            _cfg(
+                config,
+                'goal_state_space_initial_goal_prior_weight',
+                DEFAULT_GOAL_INITIAL_PRIOR_WEIGHT,
+            )
+        ),
+        'goal_state_space_toward_direction_prior_weight': float(
+            _cfg(
+                config,
+                'goal_state_space_toward_direction_prior_weight',
+                DEFAULT_GOAL_TOWARD_DIRECTION_PRIOR_WEIGHT,
+            )
+        ),
+        'goal_state_space_reverse_terminal_position_prior_weight': float(
+            _cfg(
+                config,
+                'goal_state_space_reverse_terminal_position_prior_weight',
+                DEFAULT_GOAL_REVERSE_TERMINAL_POSITION_PRIOR_WEIGHT,
             )
         ),
     }
@@ -117,6 +239,20 @@ def _goal_state_space_model(
                 DEFAULT_GOAL_TRANSITION_SIGMA_CM_SQRT_S,
             )
         ),
+        lateral_sigma_scale=float(
+            _cfg(
+                config,
+                'goal_state_space_lateral_sigma_scale',
+                DEFAULT_GOAL_LATERAL_SIGMA_SCALE,
+            )
+        ),
+        diffusion_mixture_weight=float(
+            _cfg(
+                config,
+                'goal_state_space_diffusion_mixture_weight',
+                DEFAULT_GOAL_DIFFUSION_MIXTURE_WEIGHT,
+            )
+        ),
         drift_speed_cm_s=float(
             _cfg(
                 config,
@@ -131,6 +267,71 @@ def _goal_state_space_model(
                 DEFAULT_GOAL_MAX_STEP_SIGMA,
             )
         ),
+        reset_probability=float(
+            _cfg(
+                config,
+                'goal_state_space_reset_probability',
+                DEFAULT_GOAL_RESET_PROBABILITY,
+            )
+        ),
+        reset_initial_position_prior_weight=float(
+            _cfg(
+                config,
+                'goal_state_space_reset_initial_position_prior_weight',
+                DEFAULT_GOAL_RESET_INITIAL_POSITION_PRIOR_WEIGHT,
+            )
+        ),
+        component_switch_probability=_component_switch_probability_for_goal_model_name(
+            name,
+            config,
+        ),
+        initial_position_prior_direction_mode=str(
+            _cfg(
+                config,
+                'goal_state_space_initial_position_prior_direction_mode',
+                DEFAULT_GOAL_INITIAL_POSITION_PRIOR_DIRECTION_MODE,
+            )
+        ),
+        terminal_goal_prior_sigma_cm=float(
+            _cfg(
+                config,
+                'goal_state_space_terminal_prior_sigma_cm',
+                DEFAULT_GOAL_TERMINAL_PRIOR_SIGMA_CM,
+            )
+        ),
+        terminal_goal_prior_weight=float(
+            _cfg(
+                config,
+                'goal_state_space_terminal_goal_prior_weight',
+                DEFAULT_GOAL_TERMINAL_PRIOR_WEIGHT,
+            )
+        ),
+        initial_goal_prior_sigma_cm=float(
+            _cfg(
+                config,
+                'goal_state_space_initial_goal_prior_sigma_cm',
+                DEFAULT_GOAL_INITIAL_PRIOR_SIGMA_CM,
+            )
+        ),
+        initial_goal_prior_weight=float(
+            _cfg(
+                config,
+                'goal_state_space_initial_goal_prior_weight',
+                DEFAULT_GOAL_INITIAL_PRIOR_WEIGHT,
+            )
+        ),
+        toward_direction_prior_weight=_toward_direction_prior_weight_for_goal_model_name(
+            name,
+            config,
+        ),
+        reverse_terminal_position_prior_weight=float(
+            _cfg(
+                config,
+                'goal_state_space_reverse_terminal_position_prior_weight',
+                DEFAULT_GOAL_REVERSE_TERMINAL_POSITION_PRIOR_WEIGHT,
+            )
+        ),
+        direction_mode=_direction_mode_for_goal_model_name(name),
         name=name,
     )
 
@@ -145,6 +346,45 @@ def _copy_config_with_models(config: object, models: tuple[str, ...]) -> object:
 
 def _is_goal_model_name(name: str) -> bool:
     return name in GOAL_STATE_SPACE_MODEL_NAMES
+
+
+def _direction_mode_for_goal_model_name(name: str) -> str:
+    if (
+        name.endswith('-goal-bidirectional')
+        or name.endswith('-goal-forward-biased')
+        or name.endswith('-goal-forward-biased-switching')
+        or name.endswith('-goal-reverse-biased')
+    ):
+        return 'bidirectional'
+    return 'toward'
+
+
+def _toward_direction_prior_weight_for_goal_model_name(name: str, config: object) -> float:
+    if name.endswith('-goal-forward-biased-switching'):
+        return DEFAULT_GOAL_FORWARD_BIASED_TOWARD_DIRECTION_PRIOR_WEIGHT
+    if name.endswith('-goal-forward-biased'):
+        return DEFAULT_GOAL_FORWARD_BIASED_TOWARD_DIRECTION_PRIOR_WEIGHT
+    if name.endswith('-goal-reverse-biased'):
+        return DEFAULT_GOAL_REVERSE_BIASED_TOWARD_DIRECTION_PRIOR_WEIGHT
+    return float(
+        _cfg(
+            config,
+            'goal_state_space_toward_direction_prior_weight',
+            DEFAULT_GOAL_TOWARD_DIRECTION_PRIOR_WEIGHT,
+        )
+    )
+
+
+def _component_switch_probability_for_goal_model_name(name: str, config: object) -> float:
+    if name.endswith('-goal-forward-biased-switching'):
+        return DEFAULT_GOAL_SWITCHING_COMPONENT_SWITCH_PROBABILITY
+    return float(
+        _cfg(
+            config,
+            'goal_state_space_component_switch_probability',
+            DEFAULT_GOAL_COMPONENT_SWITCH_PROBABILITY,
+        )
+    )
 
 
 def _cfg(config: object, name: str, default):

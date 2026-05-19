@@ -23,7 +23,7 @@ on:
       models:
         description: "Space-separated models"
         required: true
-        default: "sorted-spike-state-space-stationary sorted-spike-state-space-diffusion sorted-spike-state-space-momentum sorted-spike-state-space-fragmented sorted-spike-state-space-imm"
+        default: "sorted-spike-state-space-stationary sorted-spike-state-space-diffusion sorted-spike-state-space-goal sorted-spike-state-space-goal-bidirectional sorted-spike-state-space-goal-forward-biased sorted-spike-state-space-goal-forward-biased-switching sorted-spike-state-space-momentum sorted-spike-state-space-fragmented sorted-spike-state-space-imm"
       event_shard_count:
         description: "Target number of event shards"
         required: true
@@ -76,6 +76,70 @@ on:
         description: "State-space momentum velocity decay"
         required: true
         default: "0.95"
+      goal_state_space_active_goal_prior_weight:
+        description: "Goal-state-space prior probability assigned to the task well active at ripple peak; 0 disables the prior"
+        required: true
+        default: "0.0"
+      goal_state_space_reset_probability:
+        description: "Goal-state-space per-bin uniform position reset probability; 0 disables resets"
+        required: true
+        default: "0.0"
+      goal_state_space_lateral_sigma_scale:
+        description: "Goal-state-space transition noise scale perpendicular to the source-goal axis; 1 keeps isotropic transitions"
+        required: true
+        default: "1.0"
+      goal_state_space_diffusion_mixture_weight:
+        description: "Goal-state-space transition mixture weight for zero-drift diffusion"
+        required: true
+        default: "0.0"
+      goal_state_space_reset_initial_position_prior_weight:
+        description: "Goal-state-space reset destination blend toward the event initial-position prior"
+        required: true
+        default: "0.0"
+      goal_state_space_component_switch_probability:
+        description: "Goal-state-space per-transition latent goal/direction component switch probability"
+        required: true
+        default: "0.0"
+      goal_state_space_initial_position_prior_direction_mode:
+        description: "Goal-state-space components receiving the ripple-position initial prior: all, toward, or away"
+        required: true
+        default: "all"
+      goal_state_space_terminal_prior_sigma_cm:
+        description: "Goal-state-space terminal goal prior sigma in cm; 0 disables the terminal prior"
+        required: true
+        default: "0.0"
+      goal_state_space_terminal_goal_prior_weight:
+        description: "Goal-state-space terminal goal prior factor blend weight"
+        required: true
+        default: "1.0"
+      goal_state_space_initial_goal_prior_sigma_cm:
+        description: "Goal-state-space initial goal prior sigma in cm for away/reverse components; 0 disables the prior"
+        required: true
+        default: "0.0"
+      goal_state_space_initial_goal_prior_weight:
+        description: "Goal-state-space initial goal prior factor blend weight"
+        required: true
+        default: "1.0"
+      goal_state_space_toward_direction_prior_weight:
+        description: "Goal-state-space bidirectional prior weight for toward-goal components"
+        required: true
+        default: "0.5"
+      goal_state_space_ripple_position_prior_sigma_cm:
+        description: "Goal-state-space Gaussian initial-position prior sigma around ripple-peak position; 0 disables the prior"
+        required: true
+        default: "0.0"
+      goal_state_space_ripple_position_prior_weight:
+        description: "Goal-state-space ripple-position initial-prior mixture weight; 1 uses the full Gaussian prior"
+        required: true
+        default: "1.0"
+      goal_state_space_reverse_terminal_position_prior_sigma_cm:
+        description: "Goal-state-space reverse terminal position prior sigma around ripple-peak position; 0 disables the prior"
+        required: true
+        default: "0.0"
+      goal_state_space_reverse_terminal_position_prior_weight:
+        description: "Goal-state-space reverse terminal position prior mixture weight"
+        required: true
+        default: "1.0"
       clusterless_rate_floor_hz:
         description: "Clusterless spike-intensity rate floor in Hz"
         required: true
@@ -133,6 +197,25 @@ env:
   STATE_SPACE_MOMENTUM_INITIAL_SIGMA_CM_SQRT_S: "85.0"
   STATE_SPACE_MOMENTUM_VELOCITY_DECAY: ${{ inputs.state_space_momentum_velocity_decay }}
   STATE_SPACE_MOMENTUM_CANDIDATE_TOP_K: "128"
+  GOAL_STATE_SPACE_TRANSITION_SIGMA_CM_SQRT_S: "85.0"
+  GOAL_STATE_SPACE_DRIFT_SPEED_CM_S: "400.0"
+  GOAL_STATE_SPACE_LATERAL_SIGMA_SCALE: ${{ inputs.goal_state_space_lateral_sigma_scale }}
+  GOAL_STATE_SPACE_DIFFUSION_MIXTURE_WEIGHT: ${{ inputs.goal_state_space_diffusion_mixture_weight }}
+  GOAL_STATE_SPACE_MAX_STEP_SIGMA: "4.0"
+  GOAL_STATE_SPACE_RESET_PROBABILITY: ${{ inputs.goal_state_space_reset_probability }}
+  GOAL_STATE_SPACE_RESET_INITIAL_POSITION_PRIOR_WEIGHT: ${{ inputs.goal_state_space_reset_initial_position_prior_weight }}
+  GOAL_STATE_SPACE_COMPONENT_SWITCH_PROBABILITY: ${{ inputs.goal_state_space_component_switch_probability }}
+  GOAL_STATE_SPACE_INITIAL_POSITION_PRIOR_DIRECTION_MODE: ${{ inputs.goal_state_space_initial_position_prior_direction_mode }}
+  GOAL_STATE_SPACE_TERMINAL_PRIOR_SIGMA_CM: ${{ inputs.goal_state_space_terminal_prior_sigma_cm }}
+  GOAL_STATE_SPACE_TERMINAL_GOAL_PRIOR_WEIGHT: ${{ inputs.goal_state_space_terminal_goal_prior_weight }}
+  GOAL_STATE_SPACE_INITIAL_GOAL_PRIOR_SIGMA_CM: ${{ inputs.goal_state_space_initial_goal_prior_sigma_cm }}
+  GOAL_STATE_SPACE_INITIAL_GOAL_PRIOR_WEIGHT: ${{ inputs.goal_state_space_initial_goal_prior_weight }}
+  GOAL_STATE_SPACE_TOWARD_DIRECTION_PRIOR_WEIGHT: ${{ inputs.goal_state_space_toward_direction_prior_weight }}
+  GOAL_STATE_SPACE_ACTIVE_GOAL_PRIOR_WEIGHT: ${{ inputs.goal_state_space_active_goal_prior_weight }}
+  GOAL_STATE_SPACE_RIPPLE_POSITION_PRIOR_SIGMA_CM: ${{ inputs.goal_state_space_ripple_position_prior_sigma_cm }}
+  GOAL_STATE_SPACE_RIPPLE_POSITION_PRIOR_WEIGHT: ${{ inputs.goal_state_space_ripple_position_prior_weight }}
+  GOAL_STATE_SPACE_REVERSE_TERMINAL_POSITION_PRIOR_SIGMA_CM: ${{ inputs.goal_state_space_reverse_terminal_position_prior_sigma_cm }}
+  GOAL_STATE_SPACE_REVERSE_TERMINAL_POSITION_PRIOR_WEIGHT: ${{ inputs.goal_state_space_reverse_terminal_position_prior_weight }}
   CLUSTERLESS_MARK_SMOOTHING_SIGMA_BINS: "1.0"
   CLUSTERLESS_MARK_PRIOR_COUNT: "1.0"
   CLUSTERLESS_MARK_VARIANCE_FLOOR: "1.0"
@@ -282,6 +365,25 @@ jobs:
             --state-space-momentum-initial-sigma-cm-sqrt-s "${STATE_SPACE_MOMENTUM_INITIAL_SIGMA_CM_SQRT_S}" \
             --state-space-momentum-velocity-decay "${STATE_SPACE_MOMENTUM_VELOCITY_DECAY}" \
             --state-space-momentum-candidate-top-k "${STATE_SPACE_MOMENTUM_CANDIDATE_TOP_K}" \
+            --goal-state-space-transition-sigma-cm-sqrt-s "${GOAL_STATE_SPACE_TRANSITION_SIGMA_CM_SQRT_S}" \
+            --goal-state-space-drift-speed-cm-s "${GOAL_STATE_SPACE_DRIFT_SPEED_CM_S}" \
+            --goal-state-space-lateral-sigma-scale "${GOAL_STATE_SPACE_LATERAL_SIGMA_SCALE}" \
+            --goal-state-space-diffusion-mixture-weight "${GOAL_STATE_SPACE_DIFFUSION_MIXTURE_WEIGHT}" \
+            --goal-state-space-max-step-sigma "${GOAL_STATE_SPACE_MAX_STEP_SIGMA}" \
+            --goal-state-space-reset-probability "${GOAL_STATE_SPACE_RESET_PROBABILITY}" \
+            --goal-state-space-reset-initial-position-prior-weight "${GOAL_STATE_SPACE_RESET_INITIAL_POSITION_PRIOR_WEIGHT}" \
+            --goal-state-space-component-switch-probability "${GOAL_STATE_SPACE_COMPONENT_SWITCH_PROBABILITY}" \
+            --goal-state-space-initial-position-prior-direction-mode "${GOAL_STATE_SPACE_INITIAL_POSITION_PRIOR_DIRECTION_MODE}" \
+            --goal-state-space-terminal-prior-sigma-cm "${GOAL_STATE_SPACE_TERMINAL_PRIOR_SIGMA_CM}" \
+            --goal-state-space-terminal-goal-prior-weight "${GOAL_STATE_SPACE_TERMINAL_GOAL_PRIOR_WEIGHT}" \
+            --goal-state-space-initial-goal-prior-sigma-cm "${GOAL_STATE_SPACE_INITIAL_GOAL_PRIOR_SIGMA_CM}" \
+            --goal-state-space-initial-goal-prior-weight "${GOAL_STATE_SPACE_INITIAL_GOAL_PRIOR_WEIGHT}" \
+            --goal-state-space-toward-direction-prior-weight "${GOAL_STATE_SPACE_TOWARD_DIRECTION_PRIOR_WEIGHT}" \
+            --goal-state-space-active-goal-prior-weight "${GOAL_STATE_SPACE_ACTIVE_GOAL_PRIOR_WEIGHT}" \
+            --goal-state-space-ripple-position-prior-sigma-cm "${GOAL_STATE_SPACE_RIPPLE_POSITION_PRIOR_SIGMA_CM}" \
+            --goal-state-space-ripple-position-prior-weight "${GOAL_STATE_SPACE_RIPPLE_POSITION_PRIOR_WEIGHT}" \
+            --goal-state-space-reverse-terminal-position-prior-sigma-cm "${GOAL_STATE_SPACE_REVERSE_TERMINAL_POSITION_PRIOR_SIGMA_CM}" \
+            --goal-state-space-reverse-terminal-position-prior-weight "${GOAL_STATE_SPACE_REVERSE_TERMINAL_POSITION_PRIOR_WEIGHT}" \
             --clusterless-mark-smoothing-sigma-bins "${CLUSTERLESS_MARK_SMOOTHING_SIGMA_BINS}" \
             --clusterless-mark-prior-count "${CLUSTERLESS_MARK_PRIOR_COUNT}" \
             --clusterless-mark-variance-floor "${CLUSTERLESS_MARK_VARIANCE_FLOOR}" \

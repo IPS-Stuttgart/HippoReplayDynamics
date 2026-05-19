@@ -10,6 +10,25 @@ _REQUIRED_WORKFLOW_FLAGS = {
     "--clusterless-mark-prior-count",
     "--clusterless-mark-variance-floor",
     "--clusterless-rate-floor-hz",
+    "--goal-state-space-transition-sigma-cm-sqrt-s",
+    "--goal-state-space-drift-speed-cm-s",
+    "--goal-state-space-lateral-sigma-scale",
+    "--goal-state-space-diffusion-mixture-weight",
+    "--goal-state-space-max-step-sigma",
+    "--goal-state-space-reset-probability",
+    "--goal-state-space-reset-initial-position-prior-weight",
+    "--goal-state-space-component-switch-probability",
+    "--goal-state-space-initial-position-prior-direction-mode",
+    "--goal-state-space-terminal-prior-sigma-cm",
+    "--goal-state-space-terminal-goal-prior-weight",
+    "--goal-state-space-initial-goal-prior-sigma-cm",
+    "--goal-state-space-initial-goal-prior-weight",
+    "--goal-state-space-toward-direction-prior-weight",
+    "--goal-state-space-active-goal-prior-weight",
+    "--goal-state-space-ripple-position-prior-sigma-cm",
+    "--goal-state-space-ripple-position-prior-weight",
+    "--goal-state-space-reverse-terminal-position-prior-sigma-cm",
+    "--goal-state-space-reverse-terminal-position-prior-weight",
     "--spike-rate-scale",
     "--time-bin-s",
     "--bin-size-cm",
@@ -33,6 +52,12 @@ def test_event_sharded_workflow_wires_clusterless_and_encoder_knobs():
     missing = _REQUIRED_WORKFLOW_FLAGS - workflow_flags
 
     assert not missing, f"Workflow does not pass expected benchmark flags: {sorted(missing)}"
+
+
+def test_event_sharded_workflow_includes_goal_state_space_by_default():
+    text = WORKFLOW.read_text(encoding="utf-8")
+
+    assert "sorted-spike-state-space-goal" in text
 
 
 def _workflow_benchmark_flags() -> set[str]:

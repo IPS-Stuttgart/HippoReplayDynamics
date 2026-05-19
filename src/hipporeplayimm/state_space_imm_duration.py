@@ -36,7 +36,7 @@ def apply_state_space_imm_duration_patch() -> None:
 
         durations = transition_durations_s(emissions)
         attach_duration_metadata(emissions)
-        candidates = self.candidate_indices(emissions) if candidate_indices is None else candidate_indices
+        candidates = self.candidate_indices(emissions, bin_centers) if candidate_indices is None else candidate_indices
         ss._validate_candidate_indices(candidates, emissions.n_time, emissions.n_bins)
 
         diffusion_sigmas = _pss(self.config.diffusion_sigma_cm_sqrt_s, durations, float(emissions.dt))
@@ -72,8 +72,10 @@ def apply_state_space_imm_duration_patch() -> None:
         extra.update(
             {
                 "mean_candidate_log_mass": float(np.mean(masses)),
+                "mean_candidate_count": float(np.mean([len(curr) for curr in candidates])),
                 "state_space_imm_modes": ",".join(names),
                 "state_space_imm_candidate_top_k": int(self.config.momentum_candidate_top_k),
+                "state_space_imm_predicted_candidate_top_k": int(self.config.momentum_predicted_candidate_top_k),
                 "state_space_imm_candidate_support": "derived" if candidate_indices is None else "provided",
                 "state_space_imm_trajectory_posterior": "smoothed_pair_marginal",
                 "state_space_imm_evidence_support": "truncated_full_grid",

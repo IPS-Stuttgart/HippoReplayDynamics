@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 import time
+from dataclasses import replace
 from pathlib import Path
 
 import numpy as np
@@ -34,6 +35,28 @@ from hipporeplayimm.evidence_reporting import (
     TRUNCATED_EVIDENCE_SUPPORT,
     ensure_evidence_support_columns as _ensure_evidence_support_columns,
 )
+from hipporeplayimm.goal_state_space import GoalStateSpaceReplayModel
+from hipporeplayimm.goal_state_space_integration import (
+    DEFAULT_GOAL_COMPONENT_SWITCH_PROBABILITY,
+    DEFAULT_GOAL_DIFFUSION_MIXTURE_WEIGHT,
+    DEFAULT_GOAL_DRIFT_SPEED_CM_S,
+    DEFAULT_GOAL_FORWARD_BIASED_TOWARD_DIRECTION_PRIOR_WEIGHT,
+    DEFAULT_GOAL_INITIAL_POSITION_PRIOR_DIRECTION_MODE,
+    DEFAULT_GOAL_INITIAL_PRIOR_SIGMA_CM,
+    DEFAULT_GOAL_INITIAL_PRIOR_WEIGHT,
+    DEFAULT_GOAL_LATERAL_SIGMA_SCALE,
+    DEFAULT_GOAL_MAX_STEP_SIGMA,
+    DEFAULT_GOAL_REVERSE_BIASED_TOWARD_DIRECTION_PRIOR_WEIGHT,
+    DEFAULT_GOAL_REVERSE_TERMINAL_POSITION_PRIOR_WEIGHT,
+    DEFAULT_GOAL_RESET_INITIAL_POSITION_PRIOR_WEIGHT,
+    DEFAULT_GOAL_RESET_PROBABILITY,
+    DEFAULT_GOAL_SWITCHING_COMPONENT_SWITCH_PROBABILITY,
+    DEFAULT_GOAL_TERMINAL_PRIOR_SIGMA_CM,
+    DEFAULT_GOAL_TERMINAL_PRIOR_WEIGHT,
+    DEFAULT_GOAL_TOWARD_DIRECTION_PRIOR_WEIGHT,
+    DEFAULT_GOAL_TRANSITION_SIGMA_CM_SQRT_S,
+)
+from hipporeplayimm.ground_truth import active_goal_at_time, infer_well_locations
 from hipporeplayimm.models import CandidateKinematicModel, RandomModel, StationaryModel
 from hipporeplayimm.position_validation import (
     VALIDATED_POSITION_BIN_SIZE_CM,
@@ -51,8 +74,18 @@ _TRAJ = {
     "sorted-spike-state-space-diffusion",
     "sorted-spike-state-space-fragmented",
     "sorted-spike-state-space-jump",
+    "sorted-spike-state-space-goal",
+    "sorted-spike-state-space-goal-bidirectional",
+    "sorted-spike-state-space-goal-forward-biased",
+    "sorted-spike-state-space-goal-forward-biased-switching",
+    "sorted-spike-state-space-goal-reverse-biased",
     "sorted-spike-state-space-momentum",
     "sorted-spike-state-space-imm",
+    "state-space-goal",
+    "state-space-goal-bidirectional",
+    "state-space-goal-forward-biased",
+    "state-space-goal-forward-biased-switching",
+    "state-space-goal-reverse-biased",
     "clusterless-state-space-diffusion",
     "clusterless-state-space-fragmented",
     "clusterless-state-space-jump",
@@ -121,7 +154,7 @@ def _events(spec: str, session) -> list[int]:
     return out
 
 
-def _models(args) -> dict[str, object]:
+def _models(args, session=None) -> dict[str, object]:
     names = []
     for raw in args.models.replace(",", " ").split():
         name = _ALIASES.get(raw.strip().lower(), raw.strip().lower())
@@ -162,6 +195,74 @@ def _models(args) -> dict[str, object]:
             ),
         )
 
+    def goal_state_space_model(name: str) -> GoalStateSpaceReplayModel:
+        return GoalStateSpaceReplayModel(
+            candidate_goals=_session_goal_candidates(session),
+            transition_sigma_cm_sqrt_s=args.goal_state_space_transition_sigma_cm_sqrt_s,
+            lateral_sigma_scale=float(
+                getattr(
+                    args,
+                    "goal_state_space_lateral_sigma_scale",
+                    DEFAULT_GOAL_LATERAL_SIGMA_SCALE,
+                )
+            ),
+            diffusion_mixture_weight=float(
+                getattr(
+                    args,
+                    "goal_state_space_diffusion_mixture_weight",
+                    DEFAULT_GOAL_DIFFUSION_MIXTURE_WEIGHT,
+                )
+            ),
+            drift_speed_cm_s=args.goal_state_space_drift_speed_cm_s,
+            max_step_sigma=args.goal_state_space_max_step_sigma,
+            reset_probability=float(getattr(args, "goal_state_space_reset_probability", 0.0)),
+            reset_initial_position_prior_weight=float(
+                getattr(
+                    args,
+                    "goal_state_space_reset_initial_position_prior_weight",
+                    DEFAULT_GOAL_RESET_INITIAL_POSITION_PRIOR_WEIGHT,
+                )
+            ),
+            component_switch_probability=_goal_component_switch_probability(name, args),
+            initial_position_prior_direction_mode=str(
+                getattr(
+                    args,
+                    "goal_state_space_initial_position_prior_direction_mode",
+                    DEFAULT_GOAL_INITIAL_POSITION_PRIOR_DIRECTION_MODE,
+                )
+            ),
+            terminal_goal_prior_sigma_cm=float(
+                getattr(args, "goal_state_space_terminal_prior_sigma_cm", 0.0)
+            ),
+            terminal_goal_prior_weight=float(
+                getattr(
+                    args,
+                    "goal_state_space_terminal_goal_prior_weight",
+                    DEFAULT_GOAL_TERMINAL_PRIOR_WEIGHT,
+                )
+            ),
+            initial_goal_prior_sigma_cm=float(
+                getattr(args, "goal_state_space_initial_goal_prior_sigma_cm", 0.0)
+            ),
+            initial_goal_prior_weight=float(
+                getattr(
+                    args,
+                    "goal_state_space_initial_goal_prior_weight",
+                    DEFAULT_GOAL_INITIAL_PRIOR_WEIGHT,
+                )
+            ),
+            toward_direction_prior_weight=_goal_toward_direction_prior_weight(name, args),
+            reverse_terminal_position_prior_weight=float(
+                getattr(
+                    args,
+                    "goal_state_space_reverse_terminal_position_prior_weight",
+                    DEFAULT_GOAL_REVERSE_TERMINAL_POSITION_PRIOR_WEIGHT,
+                )
+            ),
+            direction_mode=_goal_direction_mode(name),
+            name=name,
+        )
+
     available = {
         "random": RandomModel(),
         "stationary": StationaryModel(),
@@ -185,8 +286,34 @@ def _models(args) -> dict[str, object]:
         "sorted-spike-state-space-diffusion": state_space_model("diffusion"),
         "sorted-spike-state-space-fragmented": state_space_model("fragmented"),
         "sorted-spike-state-space-jump": state_space_model("jump"),
+        "sorted-spike-state-space-goal": goal_state_space_model("sorted-spike-state-space-goal"),
+        "sorted-spike-state-space-goal-bidirectional": goal_state_space_model(
+            "sorted-spike-state-space-goal-bidirectional"
+        ),
+        "sorted-spike-state-space-goal-forward-biased": goal_state_space_model(
+            "sorted-spike-state-space-goal-forward-biased"
+        ),
+        "sorted-spike-state-space-goal-forward-biased-switching": goal_state_space_model(
+            "sorted-spike-state-space-goal-forward-biased-switching"
+        ),
+        "sorted-spike-state-space-goal-reverse-biased": goal_state_space_model(
+            "sorted-spike-state-space-goal-reverse-biased"
+        ),
         "sorted-spike-state-space-momentum": state_space_model("momentum"),
         "sorted-spike-state-space-imm": state_space_model("imm"),
+        "state-space-goal": goal_state_space_model("state-space-goal"),
+        "state-space-goal-bidirectional": goal_state_space_model(
+            "state-space-goal-bidirectional"
+        ),
+        "state-space-goal-forward-biased": goal_state_space_model(
+            "state-space-goal-forward-biased"
+        ),
+        "state-space-goal-forward-biased-switching": goal_state_space_model(
+            "state-space-goal-forward-biased-switching"
+        ),
+        "state-space-goal-reverse-biased": goal_state_space_model(
+            "state-space-goal-reverse-biased"
+        ),
         "clusterless-state-space-stationary": clusterless_state_space_model("stationary"),
         "clusterless-state-space-diffusion": clusterless_state_space_model("diffusion"),
         "clusterless-state-space-fragmented": clusterless_state_space_model("fragmented"),
@@ -198,6 +325,202 @@ def _models(args) -> dict[str, object]:
     if missing:
         raise ValueError(f"unknown models: {missing}; available: {sorted(available)}")
     return {name: available[name] for name in dict.fromkeys(names)}
+
+
+def _session_goal_candidates(session) -> np.ndarray | None:
+    if session is None:
+        return None
+    wells = _session_goal_table(session)
+    if wells.empty:
+        return None
+    return wells[["well_x", "well_y"]].to_numpy(dtype=float)
+
+
+def _goal_direction_mode(model_name: str) -> str:
+    if (
+        model_name.endswith("-goal-bidirectional")
+        or model_name.endswith("-goal-forward-biased")
+        or model_name.endswith("-goal-forward-biased-switching")
+        or model_name.endswith("-goal-reverse-biased")
+    ):
+        return "bidirectional"
+    return "toward"
+
+
+def _goal_toward_direction_prior_weight(model_name: str, args) -> float:
+    if model_name.endswith("-goal-forward-biased-switching"):
+        return DEFAULT_GOAL_FORWARD_BIASED_TOWARD_DIRECTION_PRIOR_WEIGHT
+    if model_name.endswith("-goal-forward-biased"):
+        return DEFAULT_GOAL_FORWARD_BIASED_TOWARD_DIRECTION_PRIOR_WEIGHT
+    if model_name.endswith("-goal-reverse-biased"):
+        return DEFAULT_GOAL_REVERSE_BIASED_TOWARD_DIRECTION_PRIOR_WEIGHT
+    return float(
+        getattr(
+            args,
+            "goal_state_space_toward_direction_prior_weight",
+            DEFAULT_GOAL_TOWARD_DIRECTION_PRIOR_WEIGHT,
+        )
+    )
+
+
+def _goal_component_switch_probability(model_name: str, args) -> float:
+    if model_name.endswith("-goal-forward-biased-switching"):
+        return DEFAULT_GOAL_SWITCHING_COMPONENT_SWITCH_PROBABILITY
+    return float(
+        getattr(
+            args,
+            "goal_state_space_component_switch_probability",
+            DEFAULT_GOAL_COMPONENT_SWITCH_PROBABILITY,
+        )
+    )
+
+
+def _session_goal_table(session) -> pd.DataFrame:
+    wells = infer_well_locations(session)
+    if wells.empty:
+        return wells
+    return wells.sort_values("well_id").reset_index(drop=True)
+
+
+def _goal_prior_weights_for_event(args, session, event_id: int, n_goals: int) -> np.ndarray | None:
+    active_weight = float(getattr(args, "goal_state_space_active_goal_prior_weight", 0.0))
+    if active_weight < 0.0 or active_weight > 1.0:
+        raise ValueError("--goal-state-space-active-goal-prior-weight must be in [0, 1]")
+    if active_weight <= 0.0:
+        return None
+    wells = _session_goal_table(session)
+    if wells.empty or len(wells) != n_goals:
+        return None
+    active_goal_id = active_goal_at_time(session, session.ripple(int(event_id)).peak)
+    if active_goal_id is None:
+        return None
+    matches = np.flatnonzero(wells["well_id"].to_numpy(dtype=int) == int(active_goal_id))
+    if matches.size != 1:
+        return None
+    if n_goals == 1:
+        return np.ones(1, dtype=float)
+    weights = np.full(n_goals, (1.0 - active_weight) / (n_goals - 1), dtype=float)
+    weights[int(matches[0])] = active_weight
+    return weights
+
+
+def _initial_position_prior_weights_for_event(
+    args,
+    session,
+    event_id: int,
+    bin_centers: np.ndarray,
+) -> np.ndarray | None:
+    return _position_prior_weights_for_event(
+        args,
+        session,
+        event_id,
+        bin_centers,
+        sigma_attr="goal_state_space_ripple_position_prior_sigma_cm",
+        weight_attr="goal_state_space_ripple_position_prior_weight",
+        sigma_flag="--goal-state-space-ripple-position-prior-sigma-cm",
+        weight_flag="--goal-state-space-ripple-position-prior-weight",
+    )
+
+
+def _reverse_terminal_position_prior_weights_for_event(
+    args,
+    session,
+    event_id: int,
+    bin_centers: np.ndarray,
+) -> np.ndarray | None:
+    return _position_prior_weights_for_event(
+        args,
+        session,
+        event_id,
+        bin_centers,
+        sigma_attr="goal_state_space_reverse_terminal_position_prior_sigma_cm",
+        weight_attr="goal_state_space_reverse_terminal_position_prior_weight",
+        sigma_flag="--goal-state-space-reverse-terminal-position-prior-sigma-cm",
+        weight_flag="--goal-state-space-reverse-terminal-position-prior-weight",
+    )
+
+
+def _position_prior_weights_for_event(
+    args,
+    session,
+    event_id: int,
+    bin_centers: np.ndarray,
+    *,
+    sigma_attr: str,
+    weight_attr: str,
+    sigma_flag: str,
+    weight_flag: str,
+) -> np.ndarray | None:
+    sigma_cm = float(getattr(args, sigma_attr, 0.0))
+    prior_weight = float(getattr(args, weight_attr, 1.0))
+    if sigma_cm < 0.0:
+        raise ValueError(f"{sigma_flag} must be non-negative")
+    if prior_weight < 0.0 or prior_weight > 1.0:
+        raise ValueError(f"{weight_flag} must be in [0, 1]")
+    if sigma_cm <= 0.0 or prior_weight <= 0.0:
+        return None
+    centers = np.asarray(bin_centers, dtype=float)
+    position = _position_at_time(session, session.ripple(int(event_id)).peak, centers.shape[1])
+    if position is None:
+        return None
+    delta = centers - position[None, :]
+    distances2 = np.sum(delta * delta, axis=1)
+    weights = np.exp(-0.5 * distances2 / (sigma_cm * sigma_cm))
+    if not np.all(np.isfinite(weights)) or float(weights.sum()) <= 0.0:
+        return None
+    gaussian = weights / float(weights.sum())
+    if prior_weight >= 1.0:
+        return gaussian
+    uniform = np.full(centers.shape[0], 1.0 / centers.shape[0], dtype=float)
+    blended = (1.0 - prior_weight) * uniform + prior_weight * gaussian
+    return blended / float(blended.sum())
+
+
+def _position_at_time(session, time_s: float, position_dim: int) -> np.ndarray | None:
+    position = np.asarray(session.position, dtype=float)
+    if position.ndim != 2 or position.shape[1] < position_dim + 1 or position.shape[0] == 0:
+        return None
+    keep = np.all(np.isfinite(position[:, : position_dim + 1]), axis=1)
+    if not np.any(keep):
+        return None
+    clean = position[keep]
+    index = int(np.argmin(np.abs(clean[:, 0] - float(time_s))))
+    return clean[index, 1 : position_dim + 1]
+
+
+def _model_for_event(args, session, event_id: int, model: object, bin_centers: np.ndarray) -> object:
+    if not isinstance(model, GoalStateSpaceReplayModel):
+        return model
+    candidate_goals = model.candidate_goals
+    goal_prior = None
+    if candidate_goals is None:
+        goal_prior = None
+    else:
+        goal_prior = _goal_prior_weights_for_event(args, session, event_id, len(candidate_goals))
+    initial_position_prior = _initial_position_prior_weights_for_event(
+        args,
+        session,
+        event_id,
+        bin_centers,
+    )
+    reverse_terminal_position_prior = _reverse_terminal_position_prior_weights_for_event(
+        args,
+        session,
+        event_id,
+        bin_centers,
+    )
+    if (
+        goal_prior is None
+        and initial_position_prior is None
+        and reverse_terminal_position_prior is None
+    ):
+        return model
+    return replace(
+        model,
+        goal_prior_weights=goal_prior,
+        initial_position_prior_weights=initial_position_prior,
+        reverse_terminal_position_prior_weights=reverse_terminal_position_prior,
+    )
 
 
 def _family(model: str) -> str:
@@ -237,7 +560,7 @@ def _score(args) -> pd.DataFrame:
             min_speed_cm_s=args.min_speed_cm_s,
         ),
     )
-    models = _models(args)
+    models = _models(args, session=session)
     has_clusterless = any(isinstance(model, ClusterlessStateSpaceReplayModel) for model in models.values())
     clusterless_encoding = None
     if has_clusterless:
@@ -264,13 +587,14 @@ def _score(args) -> pd.DataFrame:
             use_clusterless = isinstance(model, ClusterlessStateSpaceReplayModel)
             emissions = clusterless_emissions if use_clusterless else sorted_emissions
             bin_centers = clusterless_encoding.bin_centers if use_clusterless and clusterless_encoding is not None else encoding.bin_centers
+            event_model = _model_for_event(args, session, int(event_id), model, bin_centers)
             assert emissions is not None
             try:
-                if isinstance(model, CandidateKinematicModel):
-                    cand = model.candidate_indices(emissions)
-                    result = model.score(emissions, bin_centers, candidate_indices=cand)
+                if isinstance(event_model, CandidateKinematicModel):
+                    cand = event_model.candidate_indices(emissions)
+                    result = event_model.score(emissions, bin_centers, candidate_indices=cand)
                 else:
-                    result = model.score(emissions, bin_centers)
+                    result = event_model.score(emissions, bin_centers)
                 model_name = str(result.model_name)
                 row = {
                     "status": "success", "session": session.session_id, "event_index": int(event_id),
@@ -286,6 +610,97 @@ def _score(args) -> pd.DataFrame:
                     "clusterless_mark_prior_count": float(args.clusterless_mark_prior_count),
                     "clusterless_mark_variance_floor": float(args.clusterless_mark_variance_floor),
                     "clusterless_rate_floor_hz": float(args.clusterless_rate_floor_hz),
+                    "goal_state_space_transition_sigma_cm_sqrt_s": float(args.goal_state_space_transition_sigma_cm_sqrt_s),
+                    "goal_state_space_lateral_sigma_scale": float(
+                        getattr(
+                            args,
+                            "goal_state_space_lateral_sigma_scale",
+                            DEFAULT_GOAL_LATERAL_SIGMA_SCALE,
+                        )
+                    ),
+                    "goal_state_space_diffusion_mixture_weight": float(
+                        getattr(
+                            args,
+                            "goal_state_space_diffusion_mixture_weight",
+                            DEFAULT_GOAL_DIFFUSION_MIXTURE_WEIGHT,
+                        )
+                    ),
+                    "goal_state_space_drift_speed_cm_s": float(args.goal_state_space_drift_speed_cm_s),
+                    "goal_state_space_max_step_sigma": float(args.goal_state_space_max_step_sigma),
+                    "goal_state_space_reset_probability": float(
+                        getattr(args, "goal_state_space_reset_probability", 0.0)
+                    ),
+                    "goal_state_space_reset_initial_position_prior_weight": float(
+                        getattr(
+                            args,
+                            "goal_state_space_reset_initial_position_prior_weight",
+                            DEFAULT_GOAL_RESET_INITIAL_POSITION_PRIOR_WEIGHT,
+                        )
+                    ),
+                    "goal_state_space_component_switch_probability": float(
+                        getattr(
+                            args,
+                            "goal_state_space_component_switch_probability",
+                            DEFAULT_GOAL_COMPONENT_SWITCH_PROBABILITY,
+                        )
+                    ),
+                    "goal_state_space_initial_position_prior_direction_mode": str(
+                        getattr(
+                            args,
+                            "goal_state_space_initial_position_prior_direction_mode",
+                            DEFAULT_GOAL_INITIAL_POSITION_PRIOR_DIRECTION_MODE,
+                        )
+                    ),
+                    "goal_state_space_terminal_prior_sigma_cm": float(
+                        getattr(args, "goal_state_space_terminal_prior_sigma_cm", 0.0)
+                    ),
+                    "goal_state_space_terminal_goal_prior_weight": float(
+                        getattr(
+                            args,
+                            "goal_state_space_terminal_goal_prior_weight",
+                            DEFAULT_GOAL_TERMINAL_PRIOR_WEIGHT,
+                        )
+                    ),
+                    "goal_state_space_initial_goal_prior_sigma_cm": float(
+                        getattr(args, "goal_state_space_initial_goal_prior_sigma_cm", 0.0)
+                    ),
+                    "goal_state_space_initial_goal_prior_weight": float(
+                        getattr(
+                            args,
+                            "goal_state_space_initial_goal_prior_weight",
+                            DEFAULT_GOAL_INITIAL_PRIOR_WEIGHT,
+                        )
+                    ),
+                    "goal_state_space_toward_direction_prior_weight": float(
+                        getattr(
+                            args,
+                            "goal_state_space_toward_direction_prior_weight",
+                            DEFAULT_GOAL_TOWARD_DIRECTION_PRIOR_WEIGHT,
+                        )
+                    ),
+                    "goal_state_space_active_goal_prior_weight": float(
+                        getattr(args, "goal_state_space_active_goal_prior_weight", 0.0)
+                    ),
+                    "goal_state_space_ripple_position_prior_sigma_cm": float(
+                        getattr(args, "goal_state_space_ripple_position_prior_sigma_cm", 0.0)
+                    ),
+                    "goal_state_space_ripple_position_prior_weight": float(
+                        getattr(args, "goal_state_space_ripple_position_prior_weight", 1.0)
+                    ),
+                    "goal_state_space_reverse_terminal_position_prior_sigma_cm": float(
+                        getattr(
+                            args,
+                            "goal_state_space_reverse_terminal_position_prior_sigma_cm",
+                            0.0,
+                        )
+                    ),
+                    "goal_state_space_reverse_terminal_position_prior_weight": float(
+                        getattr(
+                            args,
+                            "goal_state_space_reverse_terminal_position_prior_weight",
+                            DEFAULT_GOAL_REVERSE_TERMINAL_POSITION_PRIOR_WEIGHT,
+                        )
+                    ),
                 }
                 if use_clusterless and clusterless_encoding is not None:
                     row.update({
@@ -310,6 +725,97 @@ def _score(args) -> pd.DataFrame:
                     "clusterless_mark_prior_count": float(args.clusterless_mark_prior_count),
                     "clusterless_mark_variance_floor": float(args.clusterless_mark_variance_floor),
                     "clusterless_rate_floor_hz": float(args.clusterless_rate_floor_hz),
+                    "goal_state_space_transition_sigma_cm_sqrt_s": float(args.goal_state_space_transition_sigma_cm_sqrt_s),
+                    "goal_state_space_lateral_sigma_scale": float(
+                        getattr(
+                            args,
+                            "goal_state_space_lateral_sigma_scale",
+                            DEFAULT_GOAL_LATERAL_SIGMA_SCALE,
+                        )
+                    ),
+                    "goal_state_space_diffusion_mixture_weight": float(
+                        getattr(
+                            args,
+                            "goal_state_space_diffusion_mixture_weight",
+                            DEFAULT_GOAL_DIFFUSION_MIXTURE_WEIGHT,
+                        )
+                    ),
+                    "goal_state_space_drift_speed_cm_s": float(args.goal_state_space_drift_speed_cm_s),
+                    "goal_state_space_max_step_sigma": float(args.goal_state_space_max_step_sigma),
+                    "goal_state_space_reset_probability": float(
+                        getattr(args, "goal_state_space_reset_probability", 0.0)
+                    ),
+                    "goal_state_space_reset_initial_position_prior_weight": float(
+                        getattr(
+                            args,
+                            "goal_state_space_reset_initial_position_prior_weight",
+                            DEFAULT_GOAL_RESET_INITIAL_POSITION_PRIOR_WEIGHT,
+                        )
+                    ),
+                    "goal_state_space_component_switch_probability": float(
+                        getattr(
+                            args,
+                            "goal_state_space_component_switch_probability",
+                            DEFAULT_GOAL_COMPONENT_SWITCH_PROBABILITY,
+                        )
+                    ),
+                    "goal_state_space_initial_position_prior_direction_mode": str(
+                        getattr(
+                            args,
+                            "goal_state_space_initial_position_prior_direction_mode",
+                            DEFAULT_GOAL_INITIAL_POSITION_PRIOR_DIRECTION_MODE,
+                        )
+                    ),
+                    "goal_state_space_terminal_prior_sigma_cm": float(
+                        getattr(args, "goal_state_space_terminal_prior_sigma_cm", 0.0)
+                    ),
+                    "goal_state_space_terminal_goal_prior_weight": float(
+                        getattr(
+                            args,
+                            "goal_state_space_terminal_goal_prior_weight",
+                            DEFAULT_GOAL_TERMINAL_PRIOR_WEIGHT,
+                        )
+                    ),
+                    "goal_state_space_initial_goal_prior_sigma_cm": float(
+                        getattr(args, "goal_state_space_initial_goal_prior_sigma_cm", 0.0)
+                    ),
+                    "goal_state_space_initial_goal_prior_weight": float(
+                        getattr(
+                            args,
+                            "goal_state_space_initial_goal_prior_weight",
+                            DEFAULT_GOAL_INITIAL_PRIOR_WEIGHT,
+                        )
+                    ),
+                    "goal_state_space_toward_direction_prior_weight": float(
+                        getattr(
+                            args,
+                            "goal_state_space_toward_direction_prior_weight",
+                            DEFAULT_GOAL_TOWARD_DIRECTION_PRIOR_WEIGHT,
+                        )
+                    ),
+                    "goal_state_space_active_goal_prior_weight": float(
+                        getattr(args, "goal_state_space_active_goal_prior_weight", 0.0)
+                    ),
+                    "goal_state_space_ripple_position_prior_sigma_cm": float(
+                        getattr(args, "goal_state_space_ripple_position_prior_sigma_cm", 0.0)
+                    ),
+                    "goal_state_space_ripple_position_prior_weight": float(
+                        getattr(args, "goal_state_space_ripple_position_prior_weight", 1.0)
+                    ),
+                    "goal_state_space_reverse_terminal_position_prior_sigma_cm": float(
+                        getattr(
+                            args,
+                            "goal_state_space_reverse_terminal_position_prior_sigma_cm",
+                            0.0,
+                        )
+                    ),
+                    "goal_state_space_reverse_terminal_position_prior_weight": float(
+                        getattr(
+                            args,
+                            "goal_state_space_reverse_terminal_position_prior_weight",
+                            DEFAULT_GOAL_REVERSE_TERMINAL_POSITION_PRIOR_WEIGHT,
+                        )
+                    ),
                 })
                 if not args.continue_on_error:
                     raise
@@ -464,6 +970,167 @@ def main() -> int:
     p.add_argument("--state-space-momentum-initial-sigma-cm-sqrt-s", type=float, default=85.0)
     p.add_argument("--state-space-momentum-velocity-decay", type=float, default=0.95)
     p.add_argument("--state-space-momentum-candidate-top-k", type=int, default=128)
+    p.add_argument(
+        "--goal-state-space-transition-sigma-cm-sqrt-s",
+        type=float,
+        default=DEFAULT_GOAL_TRANSITION_SIGMA_CM_SQRT_S,
+    )
+    p.add_argument(
+        "--goal-state-space-drift-speed-cm-s",
+        type=float,
+        default=DEFAULT_GOAL_DRIFT_SPEED_CM_S,
+    )
+    p.add_argument(
+        "--goal-state-space-lateral-sigma-scale",
+        type=float,
+        default=DEFAULT_GOAL_LATERAL_SIGMA_SCALE,
+        help=(
+            "Scale applied to goal-state-space transition noise perpendicular "
+            "to the source-goal axis; 1 keeps isotropic Gaussian transitions."
+        ),
+    )
+    p.add_argument(
+        "--goal-state-space-diffusion-mixture-weight",
+        type=float,
+        default=DEFAULT_GOAL_DIFFUSION_MIXTURE_WEIGHT,
+        help=(
+            "Mixture weight in [0, 1] for adding a zero-drift diffusion "
+            "transition to each goal-directed transition."
+        ),
+    )
+    p.add_argument(
+        "--goal-state-space-max-step-sigma",
+        type=float,
+        default=DEFAULT_GOAL_MAX_STEP_SIGMA,
+    )
+    p.add_argument(
+        "--goal-state-space-reset-probability",
+        type=float,
+        default=DEFAULT_GOAL_RESET_PROBABILITY,
+        help=(
+            "Per-time-bin probability that goal-state-space dynamics reset "
+            "position to the uniform spatial prior while keeping the latent goal fixed."
+        ),
+    )
+    p.add_argument(
+        "--goal-state-space-reset-initial-position-prior-weight",
+        type=float,
+        default=DEFAULT_GOAL_RESET_INITIAL_POSITION_PRIOR_WEIGHT,
+        help=(
+            "Blend weight in [0, 1] for drawing goal-state-space reset "
+            "positions from the event initial-position prior instead of uniform space."
+        ),
+    )
+    p.add_argument(
+        "--goal-state-space-component-switch-probability",
+        type=float,
+        default=DEFAULT_GOAL_COMPONENT_SWITCH_PROBABILITY,
+        help=(
+            "Per-transition probability of redrawing the latent goal/direction "
+            "component from its prior while preserving predicted position."
+        ),
+    )
+    p.add_argument(
+        "--goal-state-space-initial-position-prior-direction-mode",
+        choices=("all", "toward", "away"),
+        default=DEFAULT_GOAL_INITIAL_POSITION_PRIOR_DIRECTION_MODE,
+        help=(
+            "Which goal-state-space direction components receive the "
+            "event initial-position prior; 'all' preserves the original "
+            "component-agnostic prior."
+        ),
+    )
+    p.add_argument(
+        "--goal-state-space-terminal-prior-sigma-cm",
+        type=float,
+        default=DEFAULT_GOAL_TERMINAL_PRIOR_SIGMA_CM,
+        help=(
+            "If positive, apply a mean-one terminal likelihood factor centered "
+            "on each candidate goal for toward-goal components."
+        ),
+    )
+    p.add_argument(
+        "--goal-state-space-terminal-goal-prior-weight",
+        type=float,
+        default=DEFAULT_GOAL_TERMINAL_PRIOR_WEIGHT,
+        help=(
+            "Blend weight in [0, 1] for the terminal goal prior factor; "
+            "1 uses the full mean-one factor and 0 disables it."
+        ),
+    )
+    p.add_argument(
+        "--goal-state-space-initial-goal-prior-sigma-cm",
+        type=float,
+        default=DEFAULT_GOAL_INITIAL_PRIOR_SIGMA_CM,
+        help=(
+            "If positive, apply a mean-one initial likelihood factor centered "
+            "on each candidate goal for away-from-goal components."
+        ),
+    )
+    p.add_argument(
+        "--goal-state-space-initial-goal-prior-weight",
+        type=float,
+        default=DEFAULT_GOAL_INITIAL_PRIOR_WEIGHT,
+        help=(
+            "Blend weight in [0, 1] for the initial goal prior factor; "
+            "1 uses the full mean-one factor and 0 disables it."
+        ),
+    )
+    p.add_argument(
+        "--goal-state-space-toward-direction-prior-weight",
+        type=float,
+        default=DEFAULT_GOAL_TOWARD_DIRECTION_PRIOR_WEIGHT,
+        help=(
+            "For bidirectional goal-state-space models, prior probability "
+            "assigned to toward-goal components within each candidate goal."
+        ),
+    )
+    p.add_argument(
+        "--goal-state-space-active-goal-prior-weight",
+        type=float,
+        default=0.0,
+        help=(
+            "If positive, assign this prior probability to the well active at "
+            "the ripple peak for goal-state-space models and spread the "
+            "remaining mass uniformly across other inferred wells."
+        ),
+    )
+    p.add_argument(
+        "--goal-state-space-ripple-position-prior-sigma-cm",
+        type=float,
+        default=0.0,
+        help=(
+            "If positive, initialize goal-state-space models from a Gaussian "
+            "position prior centered on the animal's position at ripple peak."
+        ),
+    )
+    p.add_argument(
+        "--goal-state-space-ripple-position-prior-weight",
+        type=float,
+        default=1.0,
+        help=(
+            "Mixture weight in [0, 1] for the ripple-position initial prior; "
+            "values below 1 blend it with the uniform initial spatial prior."
+        ),
+    )
+    p.add_argument(
+        "--goal-state-space-reverse-terminal-position-prior-sigma-cm",
+        type=float,
+        default=0.0,
+        help=(
+            "If positive, apply a terminal position prior centered on the "
+            "animal's ripple-peak position to away/reverse goal components."
+        ),
+    )
+    p.add_argument(
+        "--goal-state-space-reverse-terminal-position-prior-weight",
+        type=float,
+        default=DEFAULT_GOAL_REVERSE_TERMINAL_POSITION_PRIOR_WEIGHT,
+        help=(
+            "Mixture weight in [0, 1] for the reverse terminal position prior; "
+            "1 uses the full mean-one prior factor and 0 disables it."
+        ),
+    )
     p.add_argument("--clusterless-mark-smoothing-sigma-bins", type=float, default=1.0)
     p.add_argument("--clusterless-mark-prior-count", type=float, default=1.0)
     p.add_argument("--clusterless-mark-variance-floor", type=float, default=1.0)

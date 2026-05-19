@@ -12,6 +12,11 @@ from scipy.special import logsumexp
 from .benchmarks import BenchmarkConfig, _build_models, _split_cells
 from .data import ReplaySession, load_open_field_sessions
 from .encoding import EmissionConfig, EncodingConfig, build_emissions, fit_place_field_encoding
+from .goal_state_space_integration import (
+    DEFAULT_GOAL_DRIFT_SPEED_CM_S,
+    DEFAULT_GOAL_MAX_STEP_SIGMA,
+    DEFAULT_GOAL_TRANSITION_SIGMA_CM_SQRT_S,
+)
 
 
 @dataclass(frozen=True)
@@ -227,6 +232,9 @@ def compare_scores_to_ground_truth(
     pyrecest_imm_momentum_velocity_decay: float = 0.95,
     pyrecest_imm_jump_fraction: float = 0.9,
     pyrecest_imm_jump_velocity_decay: float = 0.25,
+    goal_state_space_transition_sigma_cm_sqrt_s: float = DEFAULT_GOAL_TRANSITION_SIGMA_CM_SQRT_S,
+    goal_state_space_drift_speed_cm_s: float = DEFAULT_GOAL_DRIFT_SPEED_CM_S,
+    goal_state_space_max_step_sigma: float = DEFAULT_GOAL_MAX_STEP_SIGMA,
     random_seed: int = 1,
 ) -> pd.DataFrame:
     """Merge event scores with next-well behavioral correctness metrics."""
@@ -255,6 +263,12 @@ def compare_scores_to_ground_truth(
         "benchmark_random_seed",
         random_seed,
     )
+    goal_state_space_kwargs = _goal_state_space_kwargs_for_scores(
+        scores_frame,
+        transition_sigma_cm_sqrt_s=goal_state_space_transition_sigma_cm_sqrt_s,
+        drift_speed_cm_s=goal_state_space_drift_speed_cm_s,
+        max_step_sigma=goal_state_space_max_step_sigma,
+    )
 
     sessions = {session.session_id: session for session in load_open_field_sessions(root)}
     decoded_rows: list[dict[str, object]] = []
@@ -279,6 +293,15 @@ def compare_scores_to_ground_truth(
         pyrecest_imm_momentum_velocity_decay=pyrecest_imm_momentum_velocity_decay,
         pyrecest_imm_jump_fraction=pyrecest_imm_jump_fraction,
         pyrecest_imm_jump_velocity_decay=pyrecest_imm_jump_velocity_decay,
+        goal_state_space_transition_sigma_cm_sqrt_s=goal_state_space_kwargs[
+            "goal_state_space_transition_sigma_cm_sqrt_s"
+        ],
+        goal_state_space_drift_speed_cm_s=goal_state_space_kwargs[
+            "goal_state_space_drift_speed_cm_s"
+        ],
+        goal_state_space_max_step_sigma=goal_state_space_kwargs[
+            "goal_state_space_max_step_sigma"
+        ],
         random_seed=random_seed,
         models=model_names,
     )
@@ -512,6 +535,39 @@ def _emission_config_for_scores(
             fallback.time_bin_s,
         )
     )
+
+
+def _goal_state_space_kwargs_for_scores(
+    scores_frame: pd.DataFrame,
+    *,
+    transition_sigma_cm_sqrt_s: float,
+    drift_speed_cm_s: float,
+    max_step_sigma: float,
+) -> dict[str, float]:
+    """Recover exact goal-state-space hyperparameters from a score table.
+
+    This keeps post-hoc ground-truth decoding consistent with the benchmark run
+    that produced the scores. If the score table predates these metadata
+    columns, the caller-provided defaults are used.
+    """
+
+    return {
+        "goal_state_space_transition_sigma_cm_sqrt_s": _unique_float_from_column(
+            scores_frame,
+            "goal_state_space_transition_sigma_cm_sqrt_s",
+            transition_sigma_cm_sqrt_s,
+        ),
+        "goal_state_space_drift_speed_cm_s": _unique_float_from_column(
+            scores_frame,
+            "goal_state_space_drift_speed_cm_s",
+            drift_speed_cm_s,
+        ),
+        "goal_state_space_max_step_sigma": _unique_float_from_column(
+            scores_frame,
+            "goal_state_space_max_step_sigma",
+            max_step_sigma,
+        ),
+    }
 
 
 def _unique_float_from_column(frame: pd.DataFrame, column: str, default: float) -> float:

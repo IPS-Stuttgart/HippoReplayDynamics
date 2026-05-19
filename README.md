@@ -33,12 +33,47 @@ predictive density as the primary metric.
   and jump/fragmented modes.
 - `sorted-spike-state-space-stationary`, `sorted-spike-state-space-diffusion`,
   `sorted-spike-state-space-fragmented`, `sorted-spike-state-space-jump`,
+  `sorted-spike-state-space-goal`,
+  `sorted-spike-state-space-goal-bidirectional`,
+  `sorted-spike-state-space-goal-forward-biased`,
+  `sorted-spike-state-space-goal-forward-biased-switching`,
+  `sorted-spike-state-space-goal-reverse-biased`,
   `sorted-spike-state-space-momentum`, and `sorted-spike-state-space-imm`:
   sorted-spike Poisson state-space baselines intended for 1-3 ms replay bins.
   The first-order modes return full forward/backward trajectory posteriors.
   Momentum uses a candidate-pruned second-order recursion and reports that its
-  trajectory posterior is candidate-supported. The older `state-space-*` aliases
-  are accepted but benchmark output uses the explicit `sorted-spike-*` names.
+  trajectory posterior is candidate-supported. The goal model is an exact
+  first-order mixture over inferred candidate wells. It can optionally use an
+  event-specific prior that favors the task well active at the ripple peak and
+  an initial-position prior centered on the ripple-peak animal position. A
+  direction mode can restrict that start prior to toward or away components,
+  which lets bidirectional runs use a forward start anchor without penalizing
+  reverse components.
+  small reset probability can also be swept to tolerate fragmented position
+  jumps while keeping the latent goal fixed. The bidirectional goal model
+  marginalizes over forward and reverse sweeps relative to the same goal. A
+  terminal goal prior can be swept to reward trajectories that end near their
+  candidate well, and an initial goal prior can be swept to reward reverse
+  sweep components that start near their candidate well. Reverse sweep
+  components can also use a terminal position prior centered on the animal's
+  ripple-peak position. A direction prior can be swept to change the
+  bidirectional model's forward/reverse mixture weight.
+  The forward-biased and reverse-biased goal aliases are bidirectional variants
+  with fixed toward-direction prior weights of `0.9` and `0.1`, respectively,
+  for direct model-comparison runs. The forward-biased-switching alias also
+  fixes the component-switch probability at `0.03`, which was the best
+  single-event smoke setting before full-session validation. The goal
+  transition can also use a lateral
+  sigma scale below `1.0` to make directed sweeps sharper perpendicular to the
+  source-goal axis while preserving the along-axis transition noise.
+  A diffusion-mixture transition weight can add a zero-drift local diffusion
+  component inside each latent goal, which helps test replay events with pauses
+  or weakly directed bins without using a full position reset.
+  A component-switch probability can be swept to allow the latent goal or
+  direction component to change between bins while preserving the predicted
+  position distribution.
+  The older `state-space-*` aliases are accepted but benchmark output uses the
+  explicit `sorted-spike-*` names.
 - `clusterless-state-space-stationary`, `clusterless-state-space-diffusion`,
   `clusterless-state-space-fragmented`, `clusterless-state-space-jump`,
   `clusterless-state-space-momentum`, and `clusterless-state-space-imm`:
@@ -76,7 +111,7 @@ hipporeplayimm benchmark D:\Uni-Data\DataSetFromPfeifferFoster `
   --bin-size-cm 6.0 `
   --smoothing-sigma-bins 2.0 `
   --min-speed-cm-s 5.0 `
-  --models random,stationary,sorted-spike-state-space-diffusion,sorted-spike-state-space-momentum,sorted-spike-state-space-imm `
+  --models random,stationary,sorted-spike-state-space-diffusion,sorted-spike-state-space-goal,sorted-spike-state-space-goal-bidirectional,sorted-spike-state-space-goal-forward-biased,sorted-spike-state-space-goal-forward-biased-switching,sorted-spike-state-space-momentum,sorted-spike-state-space-imm `
   --output results\state_space_smoke
 ```
 
@@ -117,6 +152,54 @@ the older candidate-pruned models. For `sorted-spike-state-space-*` models, use
 the explicit `state_space_*` workflow inputs, whose defaults reproduce the
 original state-space settings: diffusion and momentum noise `85 cm/sqrt(s)`,
 momentum velocity decay `0.95`, and momentum candidate support `128` bins.
+The event-sharded workflow also exposes
+`goal_state_space_reset_probability`; values above `0` add a per-bin uniform
+position reset to the goal-state-space dynamics while keeping the latent goal
+fixed. `goal_state_space_reset_initial_position_prior_weight` can blend reset
+destinations toward the event initial-position prior when a ripple-position
+start prior is enabled. It exposes
+`goal_state_space_terminal_prior_sigma_cm`; values above `0` add a mean-one
+terminal likelihood factor around each candidate goal for toward-goal dynamics.
+`goal_state_space_terminal_goal_prior_weight` can soften that factor when the
+terminal anchor overcommits.
+It exposes `goal_state_space_initial_goal_prior_sigma_cm`; values above `0` add
+a mean-one initial likelihood factor around each candidate goal for
+away-from-goal dynamics, which makes the bidirectional model less dependent on a
+uniform reverse-sweep start. `goal_state_space_initial_goal_prior_weight` can
+soften the matching reverse-sweep start anchor.
+It exposes `goal_state_space_toward_direction_prior_weight`; values above `0.5`
+favor toward-goal components in bidirectional goal models, while values below
+`0.5` favor away-from-goal components.
+It exposes `goal_state_space_lateral_sigma_scale`; values below `1.0` make
+goal-conditioned transitions narrower perpendicular to the source-goal axis and
+can improve evidence for straight directed sweeps.
+It exposes `goal_state_space_diffusion_mixture_weight`; values above `0` mix a
+zero-drift diffusion transition into the goal-directed transition so the same
+goal component can absorb local pauses or slow bins.
+It exposes `goal_state_space_component_switch_probability`; values above `0`
+let the exact recursion redraw the latent goal/direction component between
+time bins, which can help events whose evidence changes target or sweep
+direction mid-event.
+It exposes
+`goal_state_space_active_goal_prior_weight`; values above `0` assign that prior
+probability to the well active at the ripple peak for goal-state-space models,
+with the remaining mass spread over other inferred wells.
+It also exposes `goal_state_space_ripple_position_prior_sigma_cm`; values above
+`0` initialize the goal-state-space model from a Gaussian prior around the
+animal's ripple-peak position. The companion
+`goal_state_space_ripple_position_prior_weight` blends that Gaussian with the
+uniform spatial start prior, so values below `1` keep a weaker behavioral-start
+anchor when the full ripple-position prior overcommits.
+`goal_state_space_initial_position_prior_direction_mode` controls whether this
+start prior applies to `all`, `toward`, or `away` components. The `toward`
+setting is useful when bidirectional goal models should compare forward sweeps
+against reverse sweeps without forcing reverse components to start at the
+animal's ripple position.
+For reverse replay hypotheses, `goal_state_space_reverse_terminal_position_prior_sigma_cm`
+adds the matching terminal position prior around the ripple-peak animal
+position to away-from-goal components, and
+`goal_state_space_reverse_terminal_position_prior_weight` softens that terminal
+anchor.
 Use the manual `State-space replay evidence parameter sweep` workflow for a
 small reproducible dynamics sweep over state-space diffusion noise, momentum
 noise, initial momentum noise, velocity decay, and momentum candidate support.
@@ -150,7 +233,8 @@ The workflows expose `clusterless_mark_smoothing_sigma_bins`,
 `clusterless_rate_floor_hz` for the Gaussian mark and spike-intensity model.
 The event-sharded aggregator rejects attempts to combine shards with different
 clusterless or encoder settings, including spike-rate scale and clusterless rate
-floor, so aggregate model-evidence tables remain provenance-consistent.
+floor, plus goal prior settings, so aggregate model-evidence tables remain
+provenance-consistent.
 
 `decode-event --output` writes `event_scores.csv` plus posterior `.npz`
 artifacts for models that expose `trajectory_log_posterior`. The batch tracking

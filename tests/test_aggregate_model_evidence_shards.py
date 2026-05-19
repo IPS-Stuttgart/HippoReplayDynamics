@@ -65,10 +65,224 @@ def test_validate_constant_settings_rejects_mixed_clusterless_rate_floor():
         _validate_constant_settings(frame)
 
 
+def test_validate_constant_settings_rejects_mixed_goal_prior_weight():
+    frame = pd.DataFrame(
+        [
+            _row(event_index=0, goal_state_space_active_goal_prior_weight=0.0),
+            _row(event_index=1, goal_state_space_active_goal_prior_weight=0.7),
+        ]
+    )
+
+    with pytest.raises(ValueError, match="goal_state_space_active_goal_prior_weight"):
+        _validate_constant_settings(frame)
+
+
+def test_validate_constant_settings_rejects_mixed_goal_reset_probability():
+    frame = pd.DataFrame(
+        [
+            _row(event_index=0, goal_state_space_reset_probability=0.0),
+            _row(event_index=1, goal_state_space_reset_probability=0.05),
+        ]
+    )
+
+    with pytest.raises(ValueError, match="goal_state_space_reset_probability"):
+        _validate_constant_settings(frame)
+
+
+def test_validate_constant_settings_rejects_mixed_goal_lateral_sigma_scale():
+    frame = pd.DataFrame(
+        [
+            _row(event_index=0, goal_state_space_lateral_sigma_scale=1.0),
+            _row(event_index=1, goal_state_space_lateral_sigma_scale=0.5),
+        ]
+    )
+
+    with pytest.raises(ValueError, match="goal_state_space_lateral_sigma_scale"):
+        _validate_constant_settings(frame)
+
+
+def test_validate_constant_settings_rejects_mixed_goal_diffusion_mixture_weight():
+    frame = pd.DataFrame(
+        [
+            _row(event_index=0, goal_state_space_diffusion_mixture_weight=0.0),
+            _row(event_index=1, goal_state_space_diffusion_mixture_weight=0.25),
+        ]
+    )
+
+    with pytest.raises(ValueError, match="goal_state_space_diffusion_mixture_weight"):
+        _validate_constant_settings(frame)
+
+
+def test_validate_constant_settings_rejects_mixed_reset_initial_position_prior_weight():
+    frame = pd.DataFrame(
+        [
+            _row(event_index=0, goal_state_space_reset_initial_position_prior_weight=0.0),
+            _row(event_index=1, goal_state_space_reset_initial_position_prior_weight=1.0),
+        ]
+    )
+
+    with pytest.raises(ValueError, match="goal_state_space_reset_initial_position_prior_weight"):
+        _validate_constant_settings(frame)
+
+
+def test_validate_constant_settings_rejects_mixed_component_switch_probability():
+    frame = pd.DataFrame(
+        [
+            _row(event_index=0, goal_state_space_component_switch_probability=0.0),
+            _row(event_index=1, goal_state_space_component_switch_probability=0.05),
+        ]
+    )
+
+    with pytest.raises(ValueError, match="goal_state_space_component_switch_probability"):
+        _validate_constant_settings(frame)
+
+
+def test_validate_constant_settings_rejects_mixed_initial_position_prior_direction_mode():
+    frame = pd.DataFrame(
+        [
+            _row(event_index=0, goal_state_space_initial_position_prior_direction_mode="all"),
+            _row(event_index=1, goal_state_space_initial_position_prior_direction_mode="toward"),
+        ]
+    )
+
+    with pytest.raises(ValueError, match="goal_state_space_initial_position_prior_direction_mode"):
+        _validate_constant_settings(frame)
+
+
+def test_validate_constant_settings_rejects_mixed_terminal_goal_prior_sigma():
+    frame = pd.DataFrame(
+        [
+            _row(event_index=0, goal_state_space_terminal_prior_sigma_cm=0.0),
+            _row(event_index=1, goal_state_space_terminal_prior_sigma_cm=20.0),
+        ]
+    )
+
+    with pytest.raises(ValueError, match="goal_state_space_terminal_prior_sigma_cm"):
+        _validate_constant_settings(frame)
+
+
+def test_validate_constant_settings_rejects_mixed_terminal_goal_prior_weight():
+    frame = pd.DataFrame(
+        [
+            _row(event_index=0, goal_state_space_terminal_goal_prior_weight=0.5),
+            _row(event_index=1, goal_state_space_terminal_goal_prior_weight=1.0),
+        ]
+    )
+
+    with pytest.raises(ValueError, match="goal_state_space_terminal_goal_prior_weight"):
+        _validate_constant_settings(frame)
+
+
+def test_validate_constant_settings_rejects_mixed_initial_goal_prior_sigma():
+    frame = pd.DataFrame(
+        [
+            _row(event_index=0, goal_state_space_initial_goal_prior_sigma_cm=0.0),
+            _row(event_index=1, goal_state_space_initial_goal_prior_sigma_cm=20.0),
+        ]
+    )
+
+    with pytest.raises(ValueError, match="goal_state_space_initial_goal_prior_sigma_cm"):
+        _validate_constant_settings(frame)
+
+
+def test_validate_constant_settings_rejects_mixed_initial_goal_prior_weight():
+    frame = pd.DataFrame(
+        [
+            _row(event_index=0, goal_state_space_initial_goal_prior_weight=0.5),
+            _row(event_index=1, goal_state_space_initial_goal_prior_weight=1.0),
+        ]
+    )
+
+    with pytest.raises(ValueError, match="goal_state_space_initial_goal_prior_weight"):
+        _validate_constant_settings(frame)
+
+
+def test_validate_constant_settings_rejects_mixed_toward_direction_prior_weight():
+    frame = pd.DataFrame(
+        [
+            _row(event_index=0, goal_state_space_toward_direction_prior_weight=0.5),
+            _row(event_index=1, goal_state_space_toward_direction_prior_weight=0.8),
+        ]
+    )
+
+    with pytest.raises(ValueError, match="goal_state_space_toward_direction_prior_weight"):
+        _validate_constant_settings(frame)
+
+
+def test_validate_constant_settings_rejects_mixed_ripple_position_prior_sigma():
+    frame = pd.DataFrame(
+        [
+            _row(event_index=0, goal_state_space_ripple_position_prior_sigma_cm=0.0),
+            _row(event_index=1, goal_state_space_ripple_position_prior_sigma_cm=20.0),
+        ]
+    )
+
+    with pytest.raises(ValueError, match="goal_state_space_ripple_position_prior_sigma_cm"):
+        _validate_constant_settings(frame)
+
+
+def test_validate_constant_settings_rejects_mixed_ripple_position_prior_weight():
+    frame = pd.DataFrame(
+        [
+            _row(event_index=0, goal_state_space_ripple_position_prior_weight=0.5),
+            _row(event_index=1, goal_state_space_ripple_position_prior_weight=1.0),
+        ]
+    )
+
+    with pytest.raises(ValueError, match="goal_state_space_ripple_position_prior_weight"):
+        _validate_constant_settings(frame)
+
+
+def test_validate_constant_settings_rejects_mixed_reverse_terminal_position_prior_sigma():
+    frame = pd.DataFrame(
+        [
+            _row(event_index=0, goal_state_space_reverse_terminal_position_prior_sigma_cm=0.0),
+            _row(event_index=1, goal_state_space_reverse_terminal_position_prior_sigma_cm=20.0),
+        ]
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="goal_state_space_reverse_terminal_position_prior_sigma_cm",
+    ):
+        _validate_constant_settings(frame)
+
+
+def test_validate_constant_settings_rejects_mixed_reverse_terminal_position_prior_weight():
+    frame = pd.DataFrame(
+        [
+            _row(event_index=0, goal_state_space_reverse_terminal_position_prior_weight=0.5),
+            _row(event_index=1, goal_state_space_reverse_terminal_position_prior_weight=1.0),
+        ]
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="goal_state_space_reverse_terminal_position_prior_weight",
+    ):
+        _validate_constant_settings(frame)
+
+
 def _row(
     *,
     event_index: int,
     spike_rate_scale: float = 1.0,
+    goal_state_space_lateral_sigma_scale: float = 1.0,
+    goal_state_space_diffusion_mixture_weight: float = 0.0,
+    goal_state_space_reset_probability: float = 0.0,
+    goal_state_space_reset_initial_position_prior_weight: float = 0.0,
+    goal_state_space_component_switch_probability: float = 0.0,
+    goal_state_space_initial_position_prior_direction_mode: str = "all",
+    goal_state_space_terminal_prior_sigma_cm: float = 0.0,
+    goal_state_space_terminal_goal_prior_weight: float = 1.0,
+    goal_state_space_initial_goal_prior_sigma_cm: float = 0.0,
+    goal_state_space_initial_goal_prior_weight: float = 1.0,
+    goal_state_space_toward_direction_prior_weight: float = 0.5,
+    goal_state_space_active_goal_prior_weight: float = 0.0,
+    goal_state_space_ripple_position_prior_sigma_cm: float = 0.0,
+    goal_state_space_ripple_position_prior_weight: float = 1.0,
+    goal_state_space_reverse_terminal_position_prior_sigma_cm: float = 0.0,
+    goal_state_space_reverse_terminal_position_prior_weight: float = 1.0,
     clusterless_mark_prior_count: float = 1.0,
     clusterless_rate_floor_hz: float = 1e-4,
 ) -> dict[str, object]:
@@ -89,6 +303,28 @@ def _row(
         "min_speed_cm_s": 5.0,
         "time_bin_s": 0.003,
         "spike_rate_scale": spike_rate_scale,
+        "goal_state_space_lateral_sigma_scale": goal_state_space_lateral_sigma_scale,
+        "goal_state_space_diffusion_mixture_weight": goal_state_space_diffusion_mixture_weight,
+        "goal_state_space_reset_probability": goal_state_space_reset_probability,
+        "goal_state_space_reset_initial_position_prior_weight": goal_state_space_reset_initial_position_prior_weight,
+        "goal_state_space_component_switch_probability": goal_state_space_component_switch_probability,
+        "goal_state_space_initial_position_prior_direction_mode": (
+            goal_state_space_initial_position_prior_direction_mode
+        ),
+        "goal_state_space_terminal_prior_sigma_cm": goal_state_space_terminal_prior_sigma_cm,
+        "goal_state_space_terminal_goal_prior_weight": goal_state_space_terminal_goal_prior_weight,
+        "goal_state_space_initial_goal_prior_sigma_cm": goal_state_space_initial_goal_prior_sigma_cm,
+        "goal_state_space_initial_goal_prior_weight": goal_state_space_initial_goal_prior_weight,
+        "goal_state_space_toward_direction_prior_weight": goal_state_space_toward_direction_prior_weight,
+        "goal_state_space_active_goal_prior_weight": goal_state_space_active_goal_prior_weight,
+        "goal_state_space_ripple_position_prior_sigma_cm": goal_state_space_ripple_position_prior_sigma_cm,
+        "goal_state_space_ripple_position_prior_weight": goal_state_space_ripple_position_prior_weight,
+        "goal_state_space_reverse_terminal_position_prior_sigma_cm": (
+            goal_state_space_reverse_terminal_position_prior_sigma_cm
+        ),
+        "goal_state_space_reverse_terminal_position_prior_weight": (
+            goal_state_space_reverse_terminal_position_prior_weight
+        ),
         "clusterless_mark_smoothing_sigma_bins": 1.0,
         "clusterless_mark_prior_count": clusterless_mark_prior_count,
         "clusterless_mark_variance_floor": 1.0,

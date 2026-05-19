@@ -334,11 +334,13 @@ def _posterior_diagnostics(
     endpoint = posterior @ bin_centers
     map_bin = int(np.argmax(terminal_log_posterior))
     entropy = float(-np.sum(posterior * terminal_log_posterior))
+    endpoint_y = endpoint[1] if endpoint.shape[0] > 1 else 0.0
+    map_y = bin_centers[map_bin, 1] if bin_centers.shape[1] > 1 else 0.0
     return {
         "decoded_endpoint_x": float(endpoint[0]),
-        "decoded_endpoint_y": float(endpoint[1]),
+        "decoded_endpoint_y": float(endpoint_y),
         "decoded_map_x": float(bin_centers[map_bin, 0]),
-        "decoded_map_y": float(bin_centers[map_bin, 1]),
+        "decoded_map_y": float(map_y),
         "decoded_map_bin": map_bin,
         "terminal_posterior_entropy": entropy,
     }

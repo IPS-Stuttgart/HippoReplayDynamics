@@ -330,15 +330,20 @@ def _posterior_diagnostics(
     terminal_log_posterior: np.ndarray,
     bin_centers: np.ndarray,
 ) -> dict[str, float | int]:
+    centers = np.asarray(bin_centers, dtype=float)
+    if centers.ndim != 2 or centers.shape[1] < 1:
+        raise ValueError("bin_centers must have shape (n_bins, position_dim)")
     posterior = np.exp(terminal_log_posterior)
-    endpoint = posterior @ bin_centers
+    endpoint = posterior @ centers
     map_bin = int(np.argmax(terminal_log_posterior))
     entropy = float(-np.sum(posterior * terminal_log_posterior))
+    endpoint_y = float(endpoint[1]) if centers.shape[1] > 1 else 0.0
+    map_y = float(centers[map_bin, 1]) if centers.shape[1] > 1 else 0.0
     return {
         "decoded_endpoint_x": float(endpoint[0]),
-        "decoded_endpoint_y": float(endpoint[1]),
-        "decoded_map_x": float(bin_centers[map_bin, 0]),
-        "decoded_map_y": float(bin_centers[map_bin, 1]),
+        "decoded_endpoint_y": endpoint_y,
+        "decoded_map_x": float(centers[map_bin, 0]),
+        "decoded_map_y": map_y,
         "decoded_map_bin": map_bin,
         "terminal_posterior_entropy": entropy,
     }

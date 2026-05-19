@@ -26,21 +26,36 @@ def apply_state_space_imm_duration_patch() -> None:
     previous_score = ss.StateSpaceReplayModel.score
 
     def score(self, emissions, bin_centers, candidate_indices=None):
+        centers = _as_xy_bin_centers(bin_centers)
         if self.mode != "imm":
-            return previous_score(self, emissions, bin_centers, candidate_indices)
+            derived_candidates = None
+            if self.mode == "momentum" and candidate_indices is None:
+                derived_candidates = self.candidate_indices(emissions, centers)
+                candidate_indices = derived_candidates
+            event_score = previous_score(self, emissions, centers, candidate_indices)
+            if self.mode == "momentum":
+                candidates = derived_candidates if derived_candidates is not None else candidate_indices
+                if candidates is not None:
+                    event_score.diagnostics.setdefault(
+                        "mean_candidate_count",
+                        float(np.mean([len(curr) for curr in candidates])),
+                    )
+                event_score.diagnostics.setdefault(
+                    "state_space_momentum_predicted_candidate_top_k",
+                    int(self.config.momentum_predicted_candidate_top_k),
+                )
+                if derived_candidates is not None:
+                    event_score.diagnostics["state_space_momentum_candidate_support"] = "derived"
+            return event_score
         if emissions.n_time == 0:
             raise ValueError("emissions must contain at least one time bin")
-        if emissions.n_bins != bin_centers.shape[0]:
+        if emissions.n_bins != centers.shape[0]:
             raise ValueError("emissions.n_bins must match bin_centers rows")
         assert self.config is not None
 
         durations = transition_durations_s(emissions)
         attach_duration_metadata(emissions)
-        candidates = (
-            self.candidate_indices(emissions, bin_centers)
-            if candidate_indices is None
-            else candidate_indices
-        )
+        candidates = self.candidate_indices(emissions, centers) if candidate_indices is None else candidate_indices
         ss._validate_candidate_indices(candidates, emissions.n_time, emissions.n_bins)
 
         diffusion_sigmas = _pss(self.config.diffusion_sigma_cm_sqrt_s, durations, float(emissions.dt))
@@ -57,7 +72,7 @@ def apply_state_space_imm_duration_patch() -> None:
         logp, trajectory, mode_post, masses = _score_imm_duration(
             ss,
             emissions,
-            bin_centers,
+            centers,
             candidates,
             stationary_sigma_cm=self.config.stationary_sigma_cm,
             diffusion_sigmas_cm=diffusion_sigmas,
@@ -79,9 +94,7 @@ def apply_state_space_imm_duration_patch() -> None:
                 "mean_candidate_count": float(np.mean([len(curr) for curr in candidates])),
                 "state_space_imm_modes": ",".join(names),
                 "state_space_imm_candidate_top_k": int(self.config.momentum_candidate_top_k),
-                "state_space_imm_predicted_candidate_top_k": int(
-                    self.config.momentum_predicted_candidate_top_k
-                ),
+                "state_space_imm_predicted_candidate_top_k": int(self.config.momentum_predicted_candidate_top_k),
                 "state_space_imm_candidate_support": "derived" if candidate_indices is None else "provided",
                 "state_space_imm_trajectory_posterior": "smoothed_pair_marginal",
                 "state_space_imm_evidence_support": "truncated_full_grid",
@@ -108,7 +121,7 @@ def apply_state_space_imm_duration_patch() -> None:
             "mean_trajectory_posterior_entropy": ss._mean_entropy(trajectory),
             **extra,
         }
-        diagnostics.update(ss._posterior_diagnostics(terminal, bin_centers))
+        diagnostics.update(ss._posterior_diagnostics(terminal, centers))
         return ss.EventScore(
             str(self.name),
             float(logp),
@@ -226,3 +239,12 @@ def _score_imm_duration(
         trajectory[time_index] -= logsumexp(trajectory[time_index])
     mode_log_posterior -= logsumexp(mode_log_posterior, axis=1)[:, None]
     return logp, trajectory, np.exp(mode_log_posterior), masses
+
+
+def _as_xy_bin_centers(bin_centers):
+    centers = np.asarray(bin_centers, dtype=float)
+    if centers.ndim != 2:
+        raise ValueError("bin_centers must have shape (n_bins, position_dim)")
+    if centers.shape[1] == 1:
+        return np.column_stack([centers[:, 0], np.zeros(centers.shape[0], dtype=float)])
+    return centers

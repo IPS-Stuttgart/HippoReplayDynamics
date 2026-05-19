@@ -112,6 +112,10 @@ def _load_event_scores(root: str | Path, run_label: str) -> pd.DataFrame:
 
 
 def _add_relative_log_evidence(frame: pd.DataFrame) -> pd.DataFrame:
+    if frame.empty:
+        frame = frame.copy()
+        frame["relative_log_evidence"] = pd.Series(index=frame.index, dtype=float)
+        return frame
     groups = []
     for _, group in frame.groupby(["session", "event_index"], sort=False):
         group = group.copy()

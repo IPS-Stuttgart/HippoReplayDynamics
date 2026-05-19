@@ -70,6 +70,44 @@ def test_fit_place_field_encoding_can_include_ripples_for_legacy_reproduction(tm
     assert peak[0] > 65.0
 
 
+def test_fit_place_field_encoding_handles_no_selected_cells_with_smoothing(tmp_path):
+    times = np.linspace(0.0, 1.0, 11)
+    x = np.linspace(0.0, 10.0, times.size)
+    y = np.zeros_like(x)
+    session = _session_without_spikes(np.column_stack([times, x, y, np.zeros_like(x)]), tmp_path)
+
+    encoding = fit_place_field_encoding(
+        session,
+        EncodingConfig(bin_size_cm=5.0, smoothing_sigma_bins=1.0, min_speed_cm_s=0.0),
+    )
+
+    assert encoding.cell_ids.size == 0
+    assert encoding.rates_hz.shape == (0, encoding.n_bins)
+
+
+def test_fit_place_field_encoding_handles_single_position_sample_without_spikes(tmp_path):
+    session = _session_without_spikes(
+        np.array([[0.0, 2.0, 3.0, 0.0]]),
+        tmp_path,
+    )
+
+    encoding = fit_place_field_encoding(
+        session,
+        EncodingConfig(bin_size_cm=5.0, smoothing_sigma_bins=0.0, min_speed_cm_s=0.0),
+    )
+
+    assert encoding.n_bins > 0
+    assert encoding.cell_ids.size == 0
+    assert encoding.rates_hz.shape == (0, encoding.n_bins)
+
+
+def test_fit_place_field_encoding_rejects_empty_position_samples(tmp_path):
+    session = _session_without_spikes(np.empty((0, 4)), tmp_path)
+
+    with pytest.raises(ValueError, match="finite position"):
+        fit_place_field_encoding(session)
+
+
 def test_select_cells_keeps_cell_ids_sorted_for_searchsorted():
     encoding = fit_place_field_encoding(
         _linear_session_with_two_cells(),
@@ -226,6 +264,26 @@ def _linear_session_with_ripple_spikes(path):
         inhibitory_neurons=np.array([]),
         ripple_events=np.array([[7.0, 8.0, 7.5, 0.0, 0.0, 0.0]]),
         run_times=np.array([[0.0, 10.0]]),
+        sleep_box_immobile_times=np.empty((0, 2)),
+        sleep_times=np.empty((0, 2)),
+        rem_times=np.empty((0, 2)),
+        well_sequence=None,
+        metadata={},
+    )
+
+
+def _session_without_spikes(position: np.ndarray, path) -> ReplaySession:
+    return ReplaySession(
+        rat="RatX",
+        name="OpenX",
+        path=path,
+        position=position,
+        spikes=np.empty((0, 2)),
+        tetrode_cell_ids=np.empty((0, 2), dtype=int),
+        excitatory_neurons=np.array([], dtype=int),
+        inhibitory_neurons=np.array([], dtype=int),
+        ripple_events=np.empty((0, 6)),
+        run_times=np.array([[0.0, 1.0]]),
         sleep_box_immobile_times=np.empty((0, 2)),
         sleep_times=np.empty((0, 2)),
         rem_times=np.empty((0, 2)),

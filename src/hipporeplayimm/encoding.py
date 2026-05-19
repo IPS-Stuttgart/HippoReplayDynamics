@@ -106,6 +106,8 @@ def fit_place_field_encoding(session: ReplaySession, config: EncodingConfig | No
 
     config = EncodingConfig() if config is None else config
     position = _clean_position(session.position)
+    if position.shape[0] == 0:
+        raise ValueError("cannot fit place-field encoding without finite position samples")
     times = position[:, 0]
     xy = position[:, 1:3]
     speed = _speed_cm_s(times, xy)
@@ -160,16 +162,19 @@ def fit_place_field_encoding(session: ReplaySession, config: EncodingConfig | No
             sigma=config.smoothing_sigma_bins,
             mode="constant",
         ).reshape(-1)
-        smooth_counts = np.vstack(
-            [
-                gaussian_filter(
-                    row.reshape(grid_shape),
-                    sigma=config.smoothing_sigma_bins,
-                    mode="constant",
-                ).reshape(-1)
-                for row in counts
-            ]
-        )
+        if counts.shape[0]:
+            smooth_counts = np.vstack(
+                [
+                    gaussian_filter(
+                        row.reshape(grid_shape),
+                        sigma=config.smoothing_sigma_bins,
+                        mode="constant",
+                    ).reshape(-1)
+                    for row in counts
+                ]
+            )
+        else:
+            smooth_counts = np.empty_like(counts)
     else:
         smooth_occupancy = occupancy
         smooth_counts = counts
@@ -321,6 +326,8 @@ def _positions_to_flat_bins(xy: np.ndarray, x_edges: np.ndarray, y_edges: np.nda
 
 
 def _speed_cm_s(times: np.ndarray, xy: np.ndarray) -> np.ndarray:
+    if times.shape[0] < 2:
+        return np.zeros(times.shape, dtype=float)
     dt = np.gradient(times)
     dx = np.gradient(xy[:, 0])
     dy = np.gradient(xy[:, 1])
@@ -330,6 +337,8 @@ def _speed_cm_s(times: np.ndarray, xy: np.ndarray) -> np.ndarray:
 
 
 def _frame_durations(times: np.ndarray) -> np.ndarray:
+    if times.shape[0] == 0:
+        return np.empty_like(times, dtype=float)
     durations = np.empty_like(times, dtype=float)
     diffs = np.diff(times)
     median = float(np.median(diffs)) if diffs.size else 1.0 / 30.0

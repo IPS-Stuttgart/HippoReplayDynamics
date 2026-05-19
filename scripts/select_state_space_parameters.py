@@ -6,7 +6,9 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import re
 from pathlib import Path
+from typing import Sequence
 
 import pandas as pd
 
@@ -19,6 +21,32 @@ PARAMETER_COLUMNS = [
     "state_space_momentum_candidate_top_k",
 ]
 
+SESSION_COLUMN_CANDIDATES = ["requested_session", "session"]
+
+EVIDENCE_COUNT_COLUMNS = [
+    "momentum_beats_diffusion_events",
+    "momentum_beats_imm_events",
+]
+EVIDENCE_MEAN_COLUMNS = [
+    "mean_momentum_minus_diffusion_log_evidence",
+    "mean_momentum_minus_imm_log_evidence",
+]
+EVIDENCE_MEDIAN_COLUMNS = [
+    "median_momentum_minus_diffusion_log_evidence",
+    "median_momentum_minus_imm_log_evidence",
+]
+RECOVERY_COUNT_COLUMNS = [
+    "failures",
+    "momentum_recovered_events",
+    "overall_recovered_events",
+    "overall_simulated_events",
+]
+RECOVERY_ACCURACY_COLUMNS = [
+    "overall_recovery_accuracy",
+    "momentum_recovery_accuracy",
+    "diffusion_recovery_accuracy",
+]
+
 
 def select_parameters(
     evidence: str | Path,
@@ -28,12 +56,112 @@ def select_parameters(
     min_momentum_recovery_accuracy: float = 0.5,
     min_overall_recovery_accuracy: float = 0.5,
     max_failures: int = 0,
+    leave_one_session_out: bool = False,
+    session_column: str = "requested_session",
+    holdout_sessions: Sequence[str] | None = None,
 ) -> dict[str, pd.DataFrame]:
     evidence_frame = _load_table(evidence, "state_space_evidence_sweep_config_ranked.csv")
     recovery_frame = _load_table(recovery, "simulation_recovery_sweep_config_ranked.csv")
-    evidence_frame = _prepare_evidence(evidence_frame)
-    recovery_frame = _prepare_recovery(recovery_frame)
 
+    tables = _select_from_frames(
+        evidence_frame,
+        recovery_frame,
+        min_momentum_recovery_accuracy=min_momentum_recovery_accuracy,
+        min_overall_recovery_accuracy=min_overall_recovery_accuracy,
+        max_failures=max_failures,
+    )
+    ranked = tables["decision"]
+    candidates = tables["candidates"]
+    recommendation = tables["recommendation"]
+
+    out_dir = Path(output)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    ranked.to_csv(out_dir / "state_space_parameter_decision_table.csv", index=False)
+    candidates.to_csv(out_dir / "state_space_parameter_candidates.csv", index=False)
+    recommendation.to_csv(out_dir / "state_space_parameter_recommendation.csv", index=False)
+    _write_selected_parameter_files(recommendation, out_dir)
+
+    loso_recommendations = pd.DataFrame()
+    if leave_one_session_out:
+        loso_recommendations = _select_leave_one_session_out(
+            evidence_frame,
+            recovery_frame,
+            session_column=session_column,
+            holdout_sessions=holdout_sessions,
+            min_momentum_recovery_accuracy=min_momentum_recovery_accuracy,
+            min_overall_recovery_accuracy=min_overall_recovery_accuracy,
+            max_failures=max_failures,
+        )
+        loso_recommendations.to_csv(out_dir / "state_space_loso_parameter_recommendations.csv", index=False)
+        _write_loso_parameter_files(loso_recommendations, out_dir)
+
+    _write_selection_manifest(
+        evidence=evidence,
+        recovery=recovery,
+        output_dir=out_dir,
+        decision=ranked,
+        candidates=candidates,
+        recommendation=recommendation,
+        min_momentum_recovery_accuracy=min_momentum_recovery_accuracy,
+        min_overall_recovery_accuracy=min_overall_recovery_accuracy,
+        max_failures=max_failures,
+        leave_one_session_out=leave_one_session_out,
+        session_column=session_column,
+        holdout_sessions=holdout_sessions,
+        loso_recommendations=loso_recommendations,
+    )
+    result = {
+        "decision": ranked,
+        "candidates": candidates,
+        "recommendation": recommendation,
+    }
+    if leave_one_session_out:
+        result["leave_one_session_out"] = loso_recommendations
+    return result
+
+
+def _select_from_frames(
+    evidence_frame: pd.DataFrame,
+    recovery_frame: pd.DataFrame,
+    *,
+    min_momentum_recovery_accuracy: float,
+    min_overall_recovery_accuracy: float,
+    max_failures: int,
+) -> dict[str, pd.DataFrame]:
+    evidence_prepared = _aggregate_evidence(_prepare_evidence(evidence_frame))
+    recovery_prepared = _aggregate_recovery(_prepare_recovery(recovery_frame))
+    decision = _build_decision_table(
+        evidence_prepared,
+        recovery_prepared,
+        min_momentum_recovery_accuracy=min_momentum_recovery_accuracy,
+        min_overall_recovery_accuracy=min_overall_recovery_accuracy,
+        max_failures=max_failures,
+    )
+
+    ranked = _rank_decision_table(decision)
+    ranked.insert(0, "recommendation_rank", range(1, len(ranked) + 1))
+    candidates = ranked[ranked["is_recommendable"]].copy()
+    recommendation = candidates.head(1).copy()
+    if recommendation.empty and not ranked.empty:
+        recommendation = ranked.head(1).copy()
+        recommendation["recommendation_note"] = "No configuration passed the recovery gate; showing the best available row."
+    elif not recommendation.empty:
+        recommendation["recommendation_note"] = "Top configuration passing the recovery gate."
+    return {
+        "decision": ranked,
+        "candidates": candidates,
+        "recommendation": recommendation,
+    }
+
+
+def _build_decision_table(
+    evidence_frame: pd.DataFrame,
+    recovery_frame: pd.DataFrame,
+    *,
+    min_momentum_recovery_accuracy: float,
+    min_overall_recovery_accuracy: float,
+    max_failures: int,
+) -> pd.DataFrame:
     decision = evidence_frame.merge(
         recovery_frame,
         on=PARAMETER_COLUMNS,
@@ -59,39 +187,81 @@ def select_parameters(
     decision["recovery_gate"] = decision["passes_recovery_gate"].map({True: "pass", False: "fail"})
     decision.loc[~decision["has_recovery"], "recovery_gate"] = "missing-recovery"
     decision.loc[~decision["has_evidence"], "recovery_gate"] = "missing-evidence"
+    return decision
 
-    ranked = _rank_decision_table(decision)
-    ranked.insert(0, "recommendation_rank", range(1, len(ranked) + 1))
-    candidates = ranked[ranked["is_recommendable"]].copy()
-    recommendation = candidates.head(1).copy()
-    if recommendation.empty and not ranked.empty:
-        recommendation = ranked.head(1).copy()
-        recommendation["recommendation_note"] = "No configuration passed the recovery gate; showing the best available row."
-    elif not recommendation.empty:
-        recommendation["recommendation_note"] = "Top configuration passing the recovery gate."
 
-    out_dir = Path(output)
-    out_dir.mkdir(parents=True, exist_ok=True)
-    ranked.to_csv(out_dir / "state_space_parameter_decision_table.csv", index=False)
-    candidates.to_csv(out_dir / "state_space_parameter_candidates.csv", index=False)
-    recommendation.to_csv(out_dir / "state_space_parameter_recommendation.csv", index=False)
-    _write_selected_parameter_files(recommendation, out_dir)
-    _write_selection_manifest(
-        evidence=evidence,
-        recovery=recovery,
-        output_dir=out_dir,
-        decision=ranked,
-        candidates=candidates,
-        recommendation=recommendation,
-        min_momentum_recovery_accuracy=min_momentum_recovery_accuracy,
-        min_overall_recovery_accuracy=min_overall_recovery_accuracy,
-        max_failures=max_failures,
-    )
-    return {
-        "decision": ranked,
-        "candidates": candidates,
-        "recommendation": recommendation,
-    }
+def _select_leave_one_session_out(
+    evidence_frame: pd.DataFrame,
+    recovery_frame: pd.DataFrame,
+    *,
+    session_column: str,
+    holdout_sessions: Sequence[str] | None,
+    min_momentum_recovery_accuracy: float,
+    min_overall_recovery_accuracy: float,
+    max_failures: int,
+) -> pd.DataFrame:
+    if session_column not in evidence_frame.columns:
+        available = [col for col in SESSION_COLUMN_CANDIDATES if col in evidence_frame.columns]
+        detail = f" Available session-like columns: {available}." if available else ""
+        raise ValueError(f"Cannot run leave-one-session-out selection: {session_column!r} is absent from evidence.{detail}")
+
+    holdouts = _resolve_holdout_sessions(evidence_frame[session_column], holdout_sessions)
+    rows: list[dict[str, object]] = []
+    for holdout in holdouts:
+        evidence_sessions = evidence_frame[session_column].astype(str)
+        train_mask = evidence_sessions != str(holdout)
+        train_evidence = evidence_frame.loc[train_mask].copy()
+        train_sessions = _join_unique(train_evidence[session_column]) if not train_evidence.empty else ""
+        row_prefix = {
+            "held_out_session": str(holdout),
+            "train_session_count": int(train_evidence[session_column].nunique()) if not train_evidence.empty else 0,
+            "train_sessions": train_sessions,
+            "selection_scope": f"train_without_{holdout}",
+        }
+        if train_evidence.empty:
+            rows.append(
+                {
+                    **row_prefix,
+                    "recommendation_note": "No training sessions were available after holding out this session.",
+                }
+            )
+            continue
+
+        train_recovery = recovery_frame.copy()
+        if session_column in train_recovery.columns:
+            recovery_sessions = train_recovery[session_column].astype(str)
+            filtered_recovery = train_recovery.loc[recovery_sessions != str(holdout)].copy()
+            if not filtered_recovery.empty:
+                train_recovery = filtered_recovery
+
+        tables = _select_from_frames(
+            train_evidence,
+            train_recovery,
+            min_momentum_recovery_accuracy=min_momentum_recovery_accuracy,
+            min_overall_recovery_accuracy=min_overall_recovery_accuracy,
+            max_failures=max_failures,
+        )
+        recommendation = tables["recommendation"]
+        if recommendation.empty:
+            rows.append({**row_prefix, "recommendation_note": "No recommendation was available for this fold."})
+            continue
+        rows.append({**row_prefix, **recommendation.iloc[0].to_dict()})
+    if not rows:
+        return pd.DataFrame()
+    result = pd.DataFrame(rows)
+    preferred_order = [
+        "held_out_session",
+        "train_session_count",
+        "train_sessions",
+        "selection_scope",
+        "recommendation_rank",
+        *PARAMETER_COLUMNS,
+        "is_recommendable",
+        "recovery_gate",
+        "recommendation_note",
+    ]
+    ordered = [col for col in preferred_order if col in result.columns]
+    return result[ordered + [col for col in result.columns if col not in ordered]]
 
 
 def _load_table(path: str | Path, default_name: str) -> pd.DataFrame:
@@ -113,7 +283,7 @@ def _prepare_evidence(frame: pd.DataFrame) -> pd.DataFrame:
     if "events" in frame and "momentum_beats_diffusion_events" in frame:
         events = frame["events"].replace(0, pd.NA)
         frame["momentum_beats_diffusion_event_fraction"] = frame["momentum_beats_diffusion_events"] / events
-    keep = PARAMETER_COLUMNS + [
+    keep = PARAMETER_COLUMNS + _present_session_columns(frame) + [
         col
         for col in [
             "matrix_id",
@@ -133,7 +303,7 @@ def _prepare_evidence(frame: pd.DataFrame) -> pd.DataFrame:
 def _prepare_recovery(frame: pd.DataFrame) -> pd.DataFrame:
     frame = frame.copy()
     _normalize_parameter_columns(frame)
-    keep = PARAMETER_COLUMNS + [
+    keep = PARAMETER_COLUMNS + _present_session_columns(frame) + [
         col
         for col in [
             "matrix_id",
@@ -157,6 +327,106 @@ def _normalize_parameter_columns(frame: pd.DataFrame) -> None:
             frame[col] = pd.to_numeric(frame[col], errors="raise").astype("int64")
         else:
             frame[col] = pd.to_numeric(frame[col], errors="raise").round(8)
+
+
+def _present_session_columns(frame: pd.DataFrame) -> list[str]:
+    return [col for col in SESSION_COLUMN_CANDIDATES if col in frame.columns]
+
+
+def _aggregate_evidence(frame: pd.DataFrame) -> pd.DataFrame:
+    if frame.empty or not frame.duplicated(PARAMETER_COLUMNS).any():
+        return frame
+
+    rows: list[dict[str, object]] = []
+    for _, group in frame.groupby(PARAMETER_COLUMNS, sort=False, dropna=False):
+        row: dict[str, object] = {col: group.iloc[0][col] for col in PARAMETER_COLUMNS}
+        if "evidence_matrix_id" in group:
+            row["evidence_matrix_id"] = _join_unique(group["evidence_matrix_id"])
+        for col in _present_session_columns(group):
+            row[f"evidence_{col}s"] = _join_unique(group[col])
+        if "events" in group:
+            row["events"] = int(pd.to_numeric(group["events"], errors="coerce").fillna(0).sum())
+        for col in EVIDENCE_COUNT_COLUMNS:
+            if col in group:
+                row[col] = int(pd.to_numeric(group[col], errors="coerce").fillna(0).sum())
+        if "events" in row and row["events"]:
+            if "momentum_beats_diffusion_events" in row:
+                row["momentum_beats_diffusion_event_fraction"] = row["momentum_beats_diffusion_events"] / row["events"]
+        elif "momentum_beats_diffusion_event_fraction" in group:
+            row["momentum_beats_diffusion_event_fraction"] = _weighted_average(
+                group["momentum_beats_diffusion_event_fraction"]
+            )
+        weights = group["events"] if "events" in group else None
+        for col in EVIDENCE_MEAN_COLUMNS:
+            if col in group:
+                row[col] = _weighted_average(group[col], weights)
+        for col in EVIDENCE_MEDIAN_COLUMNS:
+            if col in group:
+                row[col] = _median(group[col])
+        rows.append(row)
+    return pd.DataFrame(rows)
+
+
+def _aggregate_recovery(frame: pd.DataFrame) -> pd.DataFrame:
+    if frame.empty or not frame.duplicated(PARAMETER_COLUMNS).any():
+        return frame
+
+    rows: list[dict[str, object]] = []
+    for _, group in frame.groupby(PARAMETER_COLUMNS, sort=False, dropna=False):
+        row: dict[str, object] = {col: group.iloc[0][col] for col in PARAMETER_COLUMNS}
+        if "recovery_matrix_id" in group:
+            row["recovery_matrix_id"] = _join_unique(group["recovery_matrix_id"])
+        for col in _present_session_columns(group):
+            row[f"recovery_{col}s"] = _join_unique(group[col])
+        for col in RECOVERY_COUNT_COLUMNS:
+            if col in group:
+                row[col] = int(pd.to_numeric(group[col], errors="coerce").fillna(0).sum())
+        weights = group["overall_simulated_events"] if "overall_simulated_events" in group else None
+        for col in RECOVERY_ACCURACY_COLUMNS:
+            if col in group:
+                row[col] = _weighted_average(group[col], weights)
+        if "momentum_most_common_best_model" in group:
+            modes = group["momentum_most_common_best_model"].dropna().mode()
+            row["momentum_most_common_best_model"] = None if modes.empty else modes.iloc[0]
+        rows.append(row)
+    return pd.DataFrame(rows)
+
+
+def _join_unique(values: pd.Series) -> str:
+    unique = sorted({str(value) for value in values.dropna() if str(value)})
+    return ";".join(unique)
+
+
+def _weighted_average(values: pd.Series, weights: pd.Series | None = None) -> float:
+    numeric = pd.to_numeric(values, errors="coerce")
+    valid = numeric.notna()
+    if not valid.any():
+        return float("nan")
+    if weights is not None:
+        numeric_weights = pd.to_numeric(weights, errors="coerce").fillna(0.0)
+        positive = valid & (numeric_weights > 0)
+        total_weight = numeric_weights[positive].sum()
+        if total_weight > 0:
+            return float((numeric[positive] * numeric_weights[positive]).sum() / total_weight)
+    return float(numeric[valid].mean())
+
+
+def _median(values: pd.Series) -> float:
+    numeric = pd.to_numeric(values, errors="coerce").dropna()
+    if numeric.empty:
+        return float("nan")
+    return float(numeric.median())
+
+
+def _resolve_holdout_sessions(values: pd.Series, requested: Sequence[str] | None) -> list[str]:
+    available = [str(value) for value in values.dropna().unique()]
+    if requested:
+        requested_set = [str(value) for value in requested]
+        missing = sorted(set(requested_set) - set(available))
+        if missing:
+            raise ValueError(f"Requested hold-out sessions are absent from evidence: {missing}")
+        return requested_set
+    return sorted(available)
 
 
 def _rank_decision_table(frame: pd.DataFrame) -> pd.DataFrame:
@@ -214,6 +484,31 @@ def _write_selected_parameter_files(recommendation: pd.DataFrame, out_dir: Path)
     cli_path.write_text(cli_text, encoding="utf-8")
 
 
+def _write_loso_parameter_files(recommendations: pd.DataFrame, out_dir: Path) -> None:
+    yaml_path = out_dir / "state_space_loso_selected_workflow_inputs.yml"
+    cli_path = out_dir / "state_space_loso_selected_cli_args.txt"
+    if recommendations.empty:
+        yaml_path.write_text("# No leave-one-session-out recommendations were available.\n", encoding="utf-8")
+        cli_path.write_text("# No leave-one-session-out recommendations were available.\n", encoding="utf-8")
+        return
+
+    yaml_lines = [
+        "# Leave-one-session-out state-space workflow inputs generated by select_state_space_parameters.py\n"
+    ]
+    cli_blocks: list[str] = []
+    for _, row in recommendations.iterrows():
+        if any(col not in row or pd.isna(row[col]) for col in PARAMETER_COLUMNS):
+            continue
+        held_out = str(row["held_out_session"])
+        values = {col: _format_parameter_value(row[col]) for col in PARAMETER_COLUMNS}
+        yaml_lines.append(f"{json.dumps(held_out)}:\n")
+        yaml_lines.extend(f"  {col}: {value}\n" for col, value in values.items())
+        args = [f"--{col.replace('_', '-')} {value}" for col, value in values.items()]
+        cli_blocks.append(f"# held_out_session={held_out}\n" + (" \\\n  ".join(args)) + "\n")
+    yaml_path.write_text("".join(yaml_lines), encoding="utf-8")
+    cli_path.write_text("\n".join(cli_blocks), encoding="utf-8")
+
+
 def _write_selection_manifest(
     *,
     evidence: str | Path,
@@ -225,6 +520,10 @@ def _write_selection_manifest(
     min_momentum_recovery_accuracy: float,
     min_overall_recovery_accuracy: float,
     max_failures: int,
+    leave_one_session_out: bool = False,
+    session_column: str | None = None,
+    holdout_sessions: Sequence[str] | None = None,
+    loso_recommendations: pd.DataFrame | None = None,
 ) -> None:
     selected_row = None if recommendation.empty else _json_ready(recommendation.iloc[0].to_dict())
     manifest = {
@@ -247,6 +546,18 @@ def _write_selection_manifest(
         "selected_parameters": None if selected_row is None else {col: selected_row[col] for col in PARAMETER_COLUMNS},
         "recommendation": selected_row,
     }
+    if leave_one_session_out:
+        manifest["leave_one_session_out"] = {
+            "enabled": True,
+            "session_column": session_column,
+            "requested_holdout_sessions": None if holdout_sessions is None else [str(value) for value in holdout_sessions],
+            "folds": 0 if loso_recommendations is None else int(len(loso_recommendations)),
+            "output_files": [
+                "state_space_loso_parameter_recommendations.csv",
+                "state_space_loso_selected_workflow_inputs.yml",
+                "state_space_loso_selected_cli_args.txt",
+            ],
+        }
     path = output_dir / "state_space_parameter_selection_manifest.json"
     path.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
@@ -291,6 +602,11 @@ def _format_parameter_value(value: object) -> str:
     return str(scalar)
 
 
+def _parse_holdout_sessions(value: str) -> list[str] | None:
+    sessions = [item.strip() for item in re.split(r"[,\s]+", value) if item.strip()]
+    return sessions or None
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(
         description="Join state-space evidence and simulation-recovery sweeps into a parameter decision table."
@@ -301,6 +617,21 @@ def main() -> int:
     parser.add_argument("--min-momentum-recovery-accuracy", type=float, default=0.5)
     parser.add_argument("--min-overall-recovery-accuracy", type=float, default=0.5)
     parser.add_argument("--max-failures", type=int, default=0)
+    parser.add_argument(
+        "--leave-one-session-out",
+        action="store_true",
+        help="Also select parameters separately for each held-out session using only the remaining sessions.",
+    )
+    parser.add_argument(
+        "--session-column",
+        default="requested_session",
+        help="Evidence column used to define leave-one-session-out folds.",
+    )
+    parser.add_argument(
+        "--holdout-sessions",
+        default="",
+        help="Optional comma- or whitespace-separated subset of sessions to hold out.",
+    )
     args = parser.parse_args()
 
     tables = select_parameters(
@@ -310,11 +641,17 @@ def main() -> int:
         min_momentum_recovery_accuracy=args.min_momentum_recovery_accuracy,
         min_overall_recovery_accuracy=args.min_overall_recovery_accuracy,
         max_failures=args.max_failures,
+        leave_one_session_out=args.leave_one_session_out,
+        session_column=args.session_column,
+        holdout_sessions=_parse_holdout_sessions(args.holdout_sessions),
     )
     print("Top parameter rows:")
     print(tables["decision"].head(10).to_string(index=False))
     print("\nRecommendation:")
     print(tables["recommendation"].to_string(index=False))
+    if args.leave_one_session_out:
+        print("\nLeave-one-session-out recommendations:")
+        print(tables["leave_one_session_out"].to_string(index=False))
     return 0
 
 

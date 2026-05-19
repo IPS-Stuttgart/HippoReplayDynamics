@@ -15,6 +15,33 @@ def _write_event_scores(path: Path, rows: list[dict[str, object]]) -> None:
     pd.DataFrame(rows).to_csv(path / "event_model_evidence.csv", index=False)
 
 
+def test_compare_runs_handles_empty_successful_score_tables(tmp_path):
+    left = tmp_path / "left"
+    right = tmp_path / "right"
+    output = tmp_path / "comparison"
+    failed_row = {
+        "session": "Rat1/Open1",
+        "event_index": 0,
+        "model": "momentum",
+        "log_evidence": 0.0,
+        "status": "error",
+    }
+    _write_event_scores(left, [failed_row])
+    _write_event_scores(right, [failed_row])
+
+    tables = compare_runs(left, right, left_label="left", right_label="right", output=output)
+
+    summary = tables["summary"].iloc[0]
+    assert summary["left_events"] == 0
+    assert summary["right_events"] == 0
+    assert summary["matched_events"] == 0
+    assert summary["canonical_best_agreements"] == 0
+    assert pd.isna(summary["canonical_best_agreement_fraction"])
+    assert tables["event_comparison"].empty
+    assert tables["relative"].empty
+    assert (output / "model_evidence_run_comparison_summary.csv").exists()
+
+
 def test_canonical_model_name_maps_state_space_aliases():
     assert canonical_model_name("sorted-spike-state-space-momentum") == "momentum"
     assert canonical_model_name("clusterless-state-space-momentum") == "momentum"

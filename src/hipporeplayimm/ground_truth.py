@@ -506,17 +506,32 @@ def _emission_config_for_scores(
     fallback: EmissionConfig,
 ) -> EmissionConfig:
     return EmissionConfig(
-        time_bin_s=_unique_float_from_column(
+        time_bin_s=_unique_float_from_columns(
             scores_frame,
-            "emission_time_bin_s",
+            ("emission_time_bin_s", "time_bin_s"),
             fallback.time_bin_s,
-        )
+        ),
+        spike_rate_scale=_unique_float_from_columns(
+            scores_frame,
+            ("emission_spike_rate_scale", "spike_rate_scale"),
+            fallback.spike_rate_scale,
+        ),
     )
 
 
 def _unique_float_from_column(frame: pd.DataFrame, column: str, default: float) -> float:
+    return _unique_float_from_columns(frame, (column,), default)
+
+
+def _unique_float_from_columns(
+    frame: pd.DataFrame,
+    columns: tuple[str, ...],
+    default: float,
+) -> float:
     values: list[float] = []
-    if column in frame.columns:
+    for column in columns:
+        if column not in frame.columns:
+            continue
         for value in frame[column].dropna():
             text = str(value).strip()
             if text:

@@ -8,7 +8,18 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from .benchmarks import BenchmarkConfig, _build_models, bootstrap_delta_ci, run_open_field_benchmark
+from .benchmarks import (
+    BenchmarkConfig,
+    _build_models,
+    _clusterless_mark_config,
+    _is_clusterless_model,
+    bootstrap_delta_ci,
+    run_open_field_benchmark,
+)
+from .clusterless import (
+    build_clusterless_mark_emissions,
+    fit_clusterless_mark_encoding,
+)
 from .data import load_open_field_sessions
 from .encoding import EmissionConfig, EncodingConfig, build_emissions, fit_place_field_encoding
 from .ground_truth import (
@@ -335,19 +346,63 @@ def _decode_event(args: argparse.Namespace) -> int:
         available = ", ".join(sorted(sessions))
         raise KeyError(f"Unknown session {args.session!r}; available: {available}")
     session = sessions[args.session]
-    encoding = fit_place_field_encoding(session, _encoding_config_from_args(args))
+
+    encoding_config = _encoding_config_from_args(args)
     emission_config = _emission_config_from_args(args)
-    emissions = build_emissions(session, encoding, args.event_id, emission_config)
-    rows = []
+    requested_models = _parse_models(args.models)
     config = BenchmarkConfig(
+        encoding=encoding_config,
         emissions=emission_config,
         candidate_top_k=args.candidate_top_k,
-        models=_parse_models(args.models),
+        models=requested_models,
         **_pyrecest_scalar_kwargs(args),
     )
-    posterior_artifacts: list[tuple[str, object]] = []
-    for model in _build_models(config, session=session).values():
-        score = model.score(emissions, encoding.bin_centers)
+    model_objects = _build_models(config, session=session)
+    has_clusterless_models = any(_is_clusterless_model(model) for model in model_objects.values())
+    has_sorted_spike_models = any(
+        not _is_clusterless_model(model) for model in model_objects.values()
+    )
+
+    sorted_encoding = None
+    sorted_emissions = None
+    if has_sorted_spike_models:
+        sorted_encoding = fit_place_field_encoding(session, encoding_config)
+        sorted_emissions = build_emissions(
+            session,
+            sorted_encoding,
+            args.event_id,
+            emission_config,
+        )
+
+    clusterless_encoding = None
+    clusterless_emissions = None
+    if has_clusterless_models:
+        clusterless_encoding = fit_clusterless_mark_encoding(
+            session,
+            _clusterless_mark_config(config),
+        )
+        clusterless_emissions = build_clusterless_mark_emissions(
+            session,
+            clusterless_encoding,
+            args.event_id,
+            emission_config,
+        )
+
+    rows = []
+    posterior_artifacts: list[tuple[str, object, object, object]] = []
+    for model in model_objects.values():
+        if _is_clusterless_model(model):
+            assert clusterless_emissions is not None
+            assert clusterless_encoding is not None
+            model_emissions = clusterless_emissions
+            model_encoding = clusterless_encoding
+        else:
+            assert sorted_emissions is not None
+            assert sorted_encoding is not None
+            model_emissions = sorted_emissions
+            model_encoding = sorted_encoding
+
+        score = model.score(model_emissions, model_encoding.bin_centers)
         rows.append(
             {
                 "model": score.model_name,
@@ -357,7 +412,14 @@ def _decode_event(args: argparse.Namespace) -> int:
             }
         )
         if score.trajectory_log_posterior is not None:
-            posterior_artifacts.append((score.model_name, score.trajectory_log_posterior))
+            posterior_artifacts.append(
+                (
+                    score.model_name,
+                    score.trajectory_log_posterior,
+                    model_emissions,
+                    model_encoding,
+                )
+            )
     frame = pd.DataFrame(rows)
     print(frame.to_string(index=False))
     if args.output:
@@ -365,19 +427,25 @@ def _decode_event(args: argparse.Namespace) -> int:
         output.mkdir(parents=True, exist_ok=True)
         frame.to_csv(output / "event_scores.csv", index=False)
         safe_session = args.session.replace("/", "_").replace("\\", "_")
-        for model_name, trajectory_log_posterior in posterior_artifacts:
+        for (
+            model_name,
+            trajectory_log_posterior,
+            model_emissions,
+            model_encoding,
+        ) in posterior_artifacts:
             safe_model = model_name.replace("/", "_").replace("\\", "_")
+            cell_ids = getattr(model_encoding, "cell_ids", model_emissions.cell_ids)
             np.savez_compressed(
                 output / f"{safe_session}_event{int(args.event_id):04d}_{safe_model}_posterior.npz",
                 log_posteriors=np.asarray(trajectory_log_posterior, dtype=float),
                 trajectory_log_posteriors=np.asarray(trajectory_log_posterior, dtype=float),
-                times=emissions.times,
-                bin_centers=encoding.bin_centers,
-                x_edges=encoding.x_edges,
-                y_edges=encoding.y_edges,
-                grid_shape=np.asarray(encoding.grid_shape, dtype=int),
-                cell_ids=encoding.cell_ids,
-                spike_counts=emissions.spike_counts,
+                times=model_emissions.times,
+                bin_centers=model_encoding.bin_centers,
+                x_edges=model_encoding.x_edges,
+                y_edges=model_encoding.y_edges,
+                grid_shape=np.asarray(model_encoding.grid_shape, dtype=int),
+                cell_ids=cell_ids,
+                spike_counts=model_emissions.spike_counts,
             )
     return 0
 

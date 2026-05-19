@@ -11,6 +11,7 @@ import pandas as pd
 from .clusterless import (
     ClusterlessMarkConfig,
     ClusterlessStateSpaceReplayModel,
+    _normalize_mark_likelihood,
     build_clusterless_mark_emissions,
     fit_clusterless_mark_encoding,
 )
@@ -36,6 +37,10 @@ class BenchmarkConfig:
     clusterless_mark_prior_count: float = 1.0
     clusterless_mark_variance_floor: float = 1.0
     clusterless_rate_floor_hz: float = 1e-4
+    clusterless_mark_likelihood: str = "local-kde"
+    clusterless_mark_kde_bandwidth: float | None = None
+    clusterless_mark_kde_spatial_sigma_bins: float | None = None
+    clusterless_mark_kde_max_neighbors: int = 256
     pyrecest_particles: int = 512
     pyrecest_alpha: float = 0.80
     pyrecest_beta: float = 1.00
@@ -246,6 +251,11 @@ def _is_clusterless_model(model: object) -> bool:
     return isinstance(model, ClusterlessStateSpaceReplayModel)
 
 
+def _clusterless_mark_likelihood(config: BenchmarkConfig) -> str:
+    value = getattr(config, "clusterless_mark_likelihood", "local-kde")
+    return _normalize_mark_likelihood(value)
+
+
 def _clusterless_mark_config(config: BenchmarkConfig) -> ClusterlessMarkConfig:
     encoding_config = config.encoding
     return ClusterlessMarkConfig(
@@ -257,6 +267,16 @@ def _clusterless_mark_config(config: BenchmarkConfig) -> ClusterlessMarkConfig:
         mark_variance_floor=float(getattr(config, "clusterless_mark_variance_floor", 1.0)),
         rate_floor_hz=float(getattr(config, "clusterless_rate_floor_hz", 1e-4)),
         use_excitatory=bool(encoding_config.use_excitatory),
+        mark_likelihood=_clusterless_mark_likelihood(config),
+        mark_kde_bandwidth=_optional_float(
+            getattr(config, "clusterless_mark_kde_bandwidth", None)
+        ),
+        mark_kde_spatial_sigma_bins=_optional_float(
+            getattr(config, "clusterless_mark_kde_spatial_sigma_bins", None)
+        ),
+        mark_kde_max_neighbors=int(
+            getattr(config, "clusterless_mark_kde_max_neighbors", 256)
+        ),
     )
 
 
@@ -300,6 +320,12 @@ def _format_cell_ids(cell_ids: np.ndarray) -> str:
     return ",".join(str(int(cell_id)) for cell_id in np.asarray(cell_ids, dtype=int))
 
 
+def _optional_float(value: object) -> float | None:
+    if value is None:
+        return None
+    return float(value)
+
+
 def _benchmark_config_metadata(config: BenchmarkConfig) -> dict[str, object]:
     return {
         "benchmark_test_cell_fraction": float(config.test_cell_fraction),
@@ -322,6 +348,16 @@ def _benchmark_config_metadata(config: BenchmarkConfig) -> dict[str, object]:
             getattr(config, "clusterless_mark_variance_floor", 1.0)
         ),
         "clusterless_rate_floor_hz": float(getattr(config, "clusterless_rate_floor_hz", 1e-4)),
+        "clusterless_mark_likelihood": _clusterless_mark_likelihood(config),
+        "clusterless_mark_kde_bandwidth": _optional_float(
+            getattr(config, "clusterless_mark_kde_bandwidth", None)
+        ),
+        "clusterless_mark_kde_spatial_sigma_bins": _optional_float(
+            getattr(config, "clusterless_mark_kde_spatial_sigma_bins", None)
+        ),
+        "clusterless_mark_kde_max_neighbors": int(
+            getattr(config, "clusterless_mark_kde_max_neighbors", 256)
+        ),
     }
 
 
@@ -331,7 +367,6 @@ def _session_mark_diagnostics(session: ReplaySession) -> dict[str, object]:
         "spike_mark_features": 0 if marks is None else marks.n_features,
         "spike_mark_source": "" if marks is None else f"{marks.source_file}:{marks.source_variable}",
         "clusterless_mark_likelihood_available": bool(marks is not None and marks.n_features > 0),
-        "clusterless_mark_likelihood": "diagonal-gaussian" if marks is not None and marks.n_features > 0 else "",
     }
 
 
@@ -365,6 +400,9 @@ def _build_models(
     session: ReplaySession | None = None,
 ) -> dict[str, object]:
     goal_candidates = _session_goal_candidates(session) if session is not None else None
+    clusterless_kwargs = {
+        "mark_likelihood": _clusterless_mark_likelihood(config),
+    }
     available = {
         "random": RandomModel(),
         "stationary": StationaryModel(),
@@ -383,12 +421,12 @@ def _build_models(
         "state-space-jump": SortedSpikeStateSpaceReplayModel(mode="jump", name="state-space-jump"),
         "state-space-momentum": SortedSpikeStateSpaceReplayModel(mode="momentum", name="state-space-momentum"),
         "state-space-imm": SortedSpikeStateSpaceReplayModel(mode="imm", name="state-space-imm"),
-        "clusterless-state-space-stationary": ClusterlessStateSpaceReplayModel(mode="stationary"),
-        "clusterless-state-space-diffusion": ClusterlessStateSpaceReplayModel(mode="diffusion"),
-        "clusterless-state-space-fragmented": ClusterlessStateSpaceReplayModel(mode="fragmented"),
-        "clusterless-state-space-jump": ClusterlessStateSpaceReplayModel(mode="jump"),
-        "clusterless-state-space-momentum": ClusterlessStateSpaceReplayModel(mode="momentum"),
-        "clusterless-state-space-imm": ClusterlessStateSpaceReplayModel(mode="imm"),
+        "clusterless-state-space-stationary": ClusterlessStateSpaceReplayModel(mode="stationary", **clusterless_kwargs),
+        "clusterless-state-space-diffusion": ClusterlessStateSpaceReplayModel(mode="diffusion", **clusterless_kwargs),
+        "clusterless-state-space-fragmented": ClusterlessStateSpaceReplayModel(mode="fragmented", **clusterless_kwargs),
+        "clusterless-state-space-jump": ClusterlessStateSpaceReplayModel(mode="jump", **clusterless_kwargs),
+        "clusterless-state-space-momentum": ClusterlessStateSpaceReplayModel(mode="momentum", **clusterless_kwargs),
+        "clusterless-state-space-imm": ClusterlessStateSpaceReplayModel(mode="imm", **clusterless_kwargs),
         "pyrecest-goal-particle": PyRecEstGoalParticleModel(
             candidate_goals=goal_candidates,
             n_particles=config.pyrecest_particles,

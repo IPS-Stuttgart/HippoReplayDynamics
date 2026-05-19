@@ -110,8 +110,14 @@ def _compare_clusterless_scores_to_ground_truth(gt, root, scores_frame: pd.DataF
         clusterless_mark_prior_count=kwargs.get("clusterless_mark_prior_count", 1.0),
         clusterless_mark_variance_floor=kwargs.get("clusterless_mark_variance_floor", 1.0),
         clusterless_rate_floor_hz=kwargs.get("clusterless_rate_floor_hz", 1e-4),
+        test_cell_fraction=kwargs.get("test_cell_fraction", 0.25),
+        random_seed=kwargs.get("random_seed", 1),
     )
     gt_frame = gt._load_or_generate_ground_truth(root, ground_truth, ground_truth_config)
+    benchmark_decode = gt._score_table_is_heldout_benchmark(scores_frame)
+    bench = None
+    if benchmark_decode:
+        from . import benchmarks as bench
     sessions = {session.session_id: session for session in gt.load_open_field_sessions(root)}
     decoded_rows: list[dict[str, object]] = []
     for session_id, session_scores in scores_frame.groupby("session", sort=False):
@@ -120,8 +126,28 @@ def _compare_clusterless_scores_to_ground_truth(gt, root, scores_frame: pd.DataF
             continue
         models = gt._build_models(_copy_config_with_models(model_config, gt._model_names_for_scores(session_scores)), session=session)
         wells = gt.infer_well_locations(session, ground_truth_config)
+        clusterless_session = session
+        clusterless_train_session = None
+        if benchmark_decode:
+            assert bench is not None
+            encoding = gt.fit_place_field_encoding(session, encoding_config)
+            train_cells, test_cells = gt._cell_split_for_score_rows(
+                session_scores,
+                encoding,
+                model_config,
+            )
+            clusterless_train_session = bench._session_with_mark_cell_subset(
+                session,
+                train_cells,
+                role="train",
+            )
+            clusterless_session = bench._session_with_mark_cell_subset(
+                session,
+                np.concatenate([train_cells, test_cells]),
+                role="joint",
+            )
         clusterless_encoding = fit_clusterless_mark_encoding(
-            session,
+            clusterless_session,
             ClusterlessMarkConfig(
                 encoding=encoding_config,
                 mark_smoothing_sigma_bins=model_config.clusterless_mark_smoothing_sigma_bins,
@@ -132,16 +158,46 @@ def _compare_clusterless_scores_to_ground_truth(gt, root, scores_frame: pd.DataF
             ),
         )
         for event_index, event_scores in session_scores.groupby("event_index", sort=False):
-            emissions = build_clusterless_mark_emissions(session, clusterless_encoding, int(event_index), emission_config)
-            if emissions.n_time == 0:
-                continue
+            if benchmark_decode:
+                assert clusterless_train_session is not None
+                train_emissions = build_clusterless_mark_emissions(
+                    clusterless_train_session,
+                    clusterless_encoding,
+                    int(event_index),
+                    emission_config,
+                )
+                joint_emissions = build_clusterless_mark_emissions(
+                    clusterless_session,
+                    clusterless_encoding,
+                    int(event_index),
+                    emission_config,
+                )
+                if train_emissions.n_time == 0 or joint_emissions.n_time == 0:
+                    continue
+            else:
+                emissions = build_clusterless_mark_emissions(
+                    clusterless_session,
+                    clusterless_encoding,
+                    int(event_index),
+                    emission_config,
+                )
+                if emissions.n_time == 0:
+                    continue
             for score_row in event_scores.itertuples(index=False):
                 model_name = str(getattr(score_row, "model"))
                 requested_model = gt._requested_model_name(score_row, model_name)
                 model = models.get(requested_model) or models.get(model_name)
                 if model is None:
                     continue
-                score = model.score(emissions, clusterless_encoding.bin_centers)
+                if benchmark_decode:
+                    score = _score_clusterless_joint_for_ground_truth(
+                        model,
+                        train_emissions,
+                        joint_emissions,
+                        clusterless_encoding.bin_centers,
+                    )
+                else:
+                    score = model.score(emissions, clusterless_encoding.bin_centers)
                 decoded_rows.append(
                     gt._decoded_row(
                         str(session_id),
@@ -158,6 +214,23 @@ def _compare_clusterless_scores_to_ground_truth(gt, root, scores_frame: pd.DataF
     comparison = scores_frame.merge(gt_frame, on=["session", "event_index"], how="left")
     comparison = comparison.merge(decoded, on=["session", "event_index", "model"], how="left")
     return gt._add_ground_truth_metrics(comparison, decoded, gt_frame)
+
+
+def _score_clusterless_joint_for_ground_truth(
+    model,
+    train_emissions,
+    joint_emissions,
+    bin_centers: np.ndarray,
+):
+    """Score held-out clusterless posteriors with benchmark-matched support."""
+
+    if hasattr(model, "candidate_indices"):
+        try:
+            candidates = model.candidate_indices(train_emissions, bin_centers)
+        except TypeError:
+            candidates = model.candidate_indices(train_emissions)
+        return model.score(joint_emissions, bin_centers, candidate_indices=candidates)
+    return model.score(joint_emissions, bin_centers)
 
 
 def _clusterless_state_space_model(config: object, mode: str) -> ClusterlessStateSpaceReplayModel:
@@ -184,6 +257,14 @@ def _clusterless_state_space_model(config: object, mode: str) -> ClusterlessStat
 def _clusterless_model_config_for_scores(scores_frame: pd.DataFrame, *, model_names: tuple[str, ...], **defaults) -> SimpleNamespace:
     return SimpleNamespace(
         models=model_names,
+        test_cell_fraction=_score_metadata._unique_float_from_columns(
+            scores_frame,
+            ("benchmark_test_cell_fraction",),
+            defaults["test_cell_fraction"],
+        ),
+        random_seed=_score_metadata._unique_int_from_columns(
+            scores_frame, ("benchmark_random_seed",), defaults["random_seed"]
+        ),
         state_space_stationary_sigma_cm=_score_metadata._unique_float_from_columns(
             scores_frame,
             ("state_space_stationary_sigma_cm", "diagnostic_state_space_stationary_sigma_cm"),

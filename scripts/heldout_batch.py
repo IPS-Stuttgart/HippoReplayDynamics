@@ -13,7 +13,9 @@ import pandas as pd
 from hipporeplayimm.benchmarks import (
     BenchmarkConfig,
     _add_relative_metrics,
+    _benchmark_config_metadata,
     _build_models,
+    _format_cell_ids,
     _score_train_joint_model,
     _session_mark_diagnostics,
     _split_cells,
@@ -53,6 +55,18 @@ def validate_session(path: Path) -> None:
     missing = [name for name in _REQUIRED_FILES if not (path / name).exists()]
     if missing:
         raise FileNotFoundError(f"{path} is missing required file(s): {', '.join(missing)}")
+
+
+def _heldout_score_metadata(
+    config: BenchmarkConfig,
+    train_cells: np.ndarray,
+    test_cells: np.ndarray,
+) -> dict[str, object]:
+    return {
+        "train_cell_ids": _format_cell_ids(train_cells),
+        "test_cell_ids": _format_cell_ids(test_cells),
+        **_benchmark_config_metadata(config),
+    }
 
 
 def score_event_model(
@@ -111,6 +125,7 @@ def failure_row(session: str, event_id: int, model_name: str, error: Exception) 
         "event_index": int(event_id),
         "event_id": int(event_id),
         "model": model_name,
+        "requested_model": model_name,
         "heldout_log_likelihood": np.nan,
         "heldout_log_likelihood_per_spike": np.nan,
         "heldout_bits_per_spike": np.nan,
@@ -209,14 +224,17 @@ def run(args: argparse.Namespace) -> None:
 
     train_encoding = encoding.select_cells(train_cells)
     joint_encoding = encoding.select_cells(np.concatenate([train_cells, test_cells]))
+    emission_config = EmissionConfig(time_bin_s=args.time_bin_s, spike_rate_scale=args.spike_rate_scale)
     config = BenchmarkConfig(
+        emissions=emission_config,
+        test_cell_fraction=args.test_cell_fraction,
         candidate_top_k=args.candidate_top_k,
         pyrecest_particles=args.pyrecest_particles,
         random_seed=args.random_seed,
         models=tuple(args.models),
     )
     models = _build_models(config, session=session)
-    emission_config = EmissionConfig(time_bin_s=args.time_bin_s, spike_rate_scale=args.spike_rate_scale)
+    score_metadata = _heldout_score_metadata(config, train_cells, test_cells)
 
     rows = []
     for event_id in events:
@@ -236,10 +254,13 @@ def run(args: argparse.Namespace) -> None:
                     emissions=emission_config,
                 )
                 row["runtime_s"] = float(time.perf_counter() - start)
+                row.update(score_metadata)
                 rows.append(row)
                 print(f"Scored {args.session} event {event_id} with {model_name}: {row['heldout_log_likelihood']:.3f}")
             except Exception as exc:
-                rows.append(failure_row(args.session, event_id, model_name, exc))
+                row = failure_row(args.session, event_id, model_name, exc)
+                row.update(score_metadata)
+                rows.append(row)
                 print(f"Failed {args.session} event {event_id} with {model_name}: {exc}", flush=True)
                 if not args.continue_on_error:
                     raise

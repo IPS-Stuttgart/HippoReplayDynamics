@@ -20,6 +20,45 @@ def _top_candidate_indices(log_emission: np.ndarray, top_k: int) -> np.ndarray:
     return selected[np.argsort(log_emission[selected])[::-1]]
 
 
+def _mass_retaining_candidate_indices(
+    log_emission: np.ndarray,
+    mass_threshold: float,
+    *,
+    min_k: int = 1,
+    max_k: int = 0,
+) -> np.ndarray:
+    """Return emission candidates that retain a target normalized mass.
+
+    ``max_k <= 0`` means unbounded. The returned indices are sorted by
+    decreasing emission log-likelihood, matching ``_top_candidate_indices``.
+    This selector is useful for replay bins whose emission posterior is much
+    flatter than average: it keeps enough states to retain the requested mass
+    instead of forcing every bin through the same fixed-size beam.
+    """
+
+    values = np.asarray(log_emission, dtype=float)
+    if values.ndim != 1:
+        raise ValueError("log_emission must be one-dimensional")
+    if not 0.0 < float(mass_threshold) <= 1.0:
+        raise ValueError("mass_threshold must be in (0, 1]")
+    finite = np.isfinite(values)
+    if not np.any(finite):
+        raise ValueError("log_emission must contain at least one finite value")
+    n_bins = values.shape[0]
+    min_count = min(n_bins, max(1, int(min_k)))
+    max_count = (
+        n_bins if max_k <= 0 else min(n_bins, max(min_count, int(max_k)))
+    )
+    order = np.argsort(np.where(finite, values, -np.inf))[::-1]
+    ordered_values = np.where(finite[order], values[order], -np.inf)
+    cumulative_mass = np.cumsum(np.exp(ordered_values - logsumexp(ordered_values)))
+    mass_count = int(
+        np.searchsorted(cumulative_mass, float(mass_threshold), side="left") + 1
+    )
+    count = min(max(min_count, mass_count), max_count)
+    return np.asarray(order[:count], dtype=int)
+
+
 def _validate_candidate_indices(candidates: list[np.ndarray], n_time: int, n_bins: int) -> None:
     if len(candidates) != n_time:
         raise ValueError("candidate_indices must contain one array per emission time bin")

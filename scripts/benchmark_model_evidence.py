@@ -143,6 +143,9 @@ def _models(args) -> dict[str, object]:
                 momentum_initial_sigma_cm_sqrt_s=args.state_space_momentum_initial_sigma_cm_sqrt_s,
                 momentum_velocity_decay=args.state_space_momentum_velocity_decay,
                 momentum_candidate_top_k=args.state_space_momentum_candidate_top_k,
+                momentum_candidate_mass_threshold=args.state_space_momentum_candidate_mass_threshold,
+                momentum_candidate_min_k=args.state_space_momentum_candidate_min_k,
+                momentum_candidate_max_k=args.state_space_momentum_candidate_max_k,
             ),
         )
 
@@ -159,6 +162,9 @@ def _models(args) -> dict[str, object]:
                 momentum_initial_sigma_cm_sqrt_s=args.state_space_momentum_initial_sigma_cm_sqrt_s,
                 momentum_velocity_decay=args.state_space_momentum_velocity_decay,
                 momentum_candidate_top_k=args.state_space_momentum_candidate_top_k,
+                momentum_candidate_mass_threshold=args.state_space_momentum_candidate_mass_threshold,
+                momentum_candidate_min_k=args.state_space_momentum_candidate_min_k,
+                momentum_candidate_max_k=args.state_space_momentum_candidate_max_k,
             ),
         )
 
@@ -470,6 +476,24 @@ def main() -> int:
     p.add_argument("--state-space-momentum-initial-sigma-cm-sqrt-s", type=float, default=85.0)
     p.add_argument("--state-space-momentum-velocity-decay", type=float, default=0.95)
     p.add_argument("--state-space-momentum-candidate-top-k", type=int, default=128)
+    p.add_argument(
+        "--state-space-momentum-candidate-mass-threshold",
+        type=float,
+        default=None,
+        help="Enable adaptive candidate support retaining this normalized emission mass.",
+    )
+    p.add_argument(
+        "--state-space-momentum-candidate-min-k",
+        type=int,
+        default=1,
+        help="Minimum per-bin support when adaptive candidate support is enabled.",
+    )
+    p.add_argument(
+        "--state-space-momentum-candidate-max-k",
+        type=int,
+        default=0,
+        help="Maximum adaptive per-bin support; 0 means unbounded.",
+    )
     p.add_argument("--clusterless-mark-smoothing-sigma-bins", type=float, default=1.0)
     p.add_argument("--clusterless-mark-prior-count", type=float, default=1.0)
     p.add_argument("--clusterless-mark-variance-floor", type=float, default=1.0)

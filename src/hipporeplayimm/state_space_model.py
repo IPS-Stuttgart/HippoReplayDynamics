@@ -18,6 +18,7 @@ from .state_space_first_order import (
 )
 from .state_space_utils import (
     _gaussian_transition_matrix,
+    _mass_retaining_candidate_indices,
     _mean_entropy,
     _per_bin_sigma,
     _top_candidate_indices,
@@ -43,6 +44,9 @@ class StateSpaceDecoderConfig:
     momentum_initial_sigma_cm_sqrt_s: float = 85.0
     momentum_velocity_decay: float = 0.95
     momentum_candidate_top_k: int = 128
+    momentum_candidate_mass_threshold: float | None = None
+    momentum_candidate_min_k: int = 1
+    momentum_candidate_max_k: int = 0
     momentum_predicted_candidate_top_k: int = 8
 
 
@@ -90,18 +94,36 @@ class StateSpaceReplayModel:
     def candidate_indices(self, emissions: LogEmissionTensor, bin_centers: np.ndarray | None = None) -> list[np.ndarray]:
         """Return the candidate support used by pruned momentum/IMM recursions.
 
-        The base support is the per-bin emission top-k set. When
-        ``momentum_predicted_candidate_top_k`` is positive and ``bin_centers`` is
-        supplied, each time bin is enlarged by nearest grid states to forward-
-        and backward-momentum predictions built from the top adjacent emission
-        candidates. This keeps deterministic emission support while recovering
-        dynamically plausible states whose local emission rank is too low for
-        the fixed top-k beam. The augmentation is bounded by the prediction top-k
-        and never changes externally supplied candidate supports.
+        The base support is either the per-bin emission top-k set or, when
+        ``momentum_candidate_mass_threshold`` is finite, the smallest emission
+        support retaining that normalized mass subject to the configured
+        min/max bounds. When ``momentum_predicted_candidate_top_k`` is positive
+        and ``bin_centers`` is supplied, each time bin is enlarged by nearest
+        grid states to forward- and backward-momentum predictions built from
+        the top adjacent emission candidates. This keeps deterministic emission
+        support while recovering dynamically plausible states whose local
+        emission rank is too low for the fixed top-k beam. The augmentation is
+        bounded by the prediction top-k and never changes externally supplied
+        candidate supports.
         """
 
         assert self.config is not None
-        base = [_top_candidate_indices(row, self.config.momentum_candidate_top_k) for row in emissions.log_likelihood]
+        mass_threshold = self.config.momentum_candidate_mass_threshold
+        if mass_threshold is None or not np.isfinite(float(mass_threshold)):
+            base = [
+                _top_candidate_indices(row, self.config.momentum_candidate_top_k)
+                for row in emissions.log_likelihood
+            ]
+        else:
+            base = [
+                _mass_retaining_candidate_indices(
+                    row,
+                    float(mass_threshold),
+                    min_k=self.config.momentum_candidate_min_k,
+                    max_k=self.config.momentum_candidate_max_k,
+                )
+                for row in emissions.log_likelihood
+            ]
         predicted_top_k = int(self.config.momentum_predicted_candidate_top_k)
         if predicted_top_k <= 0 or bin_centers is None or emissions.n_time < 3:
             return base
@@ -186,13 +208,13 @@ class StateSpaceReplayModel:
             extra.update(
                 {
                     "mean_candidate_log_mass": float(np.mean(masses)),
+                    "min_candidate_log_mass": float(np.min(masses)),
                     "mean_candidate_count": float(np.mean([len(curr) for curr in candidates])),
                     "state_space_imm_modes": ",".join(names),
-                    "state_space_imm_candidate_top_k": int(self.config.momentum_candidate_top_k),
-                    "state_space_imm_predicted_candidate_top_k": int(self.config.momentum_predicted_candidate_top_k),
                     "state_space_imm_candidate_support": "derived" if candidate_indices is None else "provided",
                     "state_space_imm_trajectory_posterior": "smoothed_pair_marginal",
                     "state_space_imm_evidence_support": "truncated_full_grid",
+                    **_candidate_support_config_diagnostics("state_space_imm", self.config),
                     "state_space_momentum_transition_sigma_cm": float(momentum_transition_sigma_cm),
                     "state_space_momentum_initial_transition_sigma_cm": float(momentum_initial_sigma_cm),
                 }
@@ -211,12 +233,12 @@ class StateSpaceReplayModel:
             )
             extra = {
                 "mean_candidate_log_mass": float(np.mean(masses)),
+                "min_candidate_log_mass": float(np.min(masses)),
                 "mean_candidate_count": float(np.mean([len(curr) for curr in candidates])),
-                "state_space_momentum_candidate_top_k": int(self.config.momentum_candidate_top_k),
-                "state_space_momentum_predicted_candidate_top_k": int(self.config.momentum_predicted_candidate_top_k),
                 "state_space_momentum_candidate_support": "derived" if candidate_indices is None else "provided",
                 "state_space_momentum_trajectory_posterior": "smoothed_pair_marginal",
                 "state_space_momentum_evidence_support": "truncated_full_grid",
+                **_candidate_support_config_diagnostics("state_space_momentum", self.config),
             }
         else:  # pragma: no cover - __post_init__ validates this.
             raise ValueError(f"Unsupported state-space mode: {self.mode}")
@@ -248,6 +270,28 @@ class StateSpaceReplayModel:
             terminal_log_posterior=terminal,
             trajectory_log_posterior=trajectory,
         )
+
+
+def _candidate_support_config_diagnostics(
+    prefix: str,
+    config: StateSpaceDecoderConfig,
+) -> dict[str, float | int]:
+    """Return diagnostics describing how candidate support was generated."""
+
+    mass_threshold = config.momentum_candidate_mass_threshold
+    if mass_threshold is None or not np.isfinite(float(mass_threshold)):
+        threshold_value = float("nan")
+    else:
+        threshold_value = float(mass_threshold)
+    return {
+        f"{prefix}_candidate_top_k": int(config.momentum_candidate_top_k),
+        f"{prefix}_candidate_mass_threshold": threshold_value,
+        f"{prefix}_candidate_min_k": int(config.momentum_candidate_min_k),
+        f"{prefix}_candidate_max_k": int(config.momentum_candidate_max_k),
+        f"{prefix}_predicted_candidate_top_k": int(
+            config.momentum_predicted_candidate_top_k
+        ),
+    }
 
 
 def _augment_candidates_with_momentum_predictions(

@@ -9,6 +9,7 @@ from hipporeplayimm.state_space import (
     StateSpaceDecoderConfig,
     StateSpaceReplayModel,
     _augment_candidates_with_momentum_predictions,
+    _mass_retaining_candidate_indices,
 )
 
 
@@ -148,6 +149,57 @@ def test_state_space_model_uses_adaptive_candidate_support_when_bin_centers_give
     assert 6 in adaptive[2]
     assert score.diagnostics["state_space_momentum_predicted_candidate_top_k"] == 1
     assert score.diagnostics["mean_candidate_count"] > 1.0
+
+
+def test_mass_retaining_candidate_support_respects_threshold_and_bounds():
+    log_emission = np.log(np.array([0.50, 0.30, 0.15, 0.04, 0.01]))
+
+    selected = _mass_retaining_candidate_indices(log_emission, 0.95)
+    capped = _mass_retaining_candidate_indices(log_emission, 0.999, max_k=3)
+    forced_minimum = _mass_retaining_candidate_indices(log_emission, 0.50, min_k=4)
+
+    assert list(selected) == [0, 1, 2]
+    assert list(capped) == [0, 1, 2]
+    assert list(forced_minimum) == [0, 1, 2, 3]
+
+
+def test_state_space_model_can_use_mass_retaining_candidate_support():
+    centers = np.arange(4.0)[:, None]
+    emissions = LogEmissionTensor(
+        log_likelihood=np.log(
+            np.array(
+                [
+                    [0.70, 0.20, 0.09, 0.01],
+                    [0.40, 0.35, 0.15, 0.10],
+                    [0.97, 0.01, 0.01, 0.01],
+                ]
+            )
+        ),
+        spike_counts=np.zeros((3, 1), dtype=int),
+        times=np.array([0.0, 1.0, 2.0]),
+        dt=1.0,
+        cell_ids=np.array([1]),
+        n_spikes=0,
+    )
+    config = StateSpaceDecoderConfig(
+        mode="momentum",
+        momentum_candidate_top_k=1,
+        momentum_candidate_mass_threshold=0.90,
+        momentum_candidate_min_k=1,
+        momentum_candidate_max_k=3,
+        momentum_predicted_candidate_top_k=0,
+    )
+    model = StateSpaceReplayModel(mode="momentum", config=config)
+
+    candidates = model.candidate_indices(emissions, centers)
+    score = model.score(emissions, centers)
+
+    assert [list(row) for row in candidates] == [[0, 1], [0, 1, 2], [0]]
+    assert score.diagnostics["state_space_momentum_candidate_top_k"] == 1
+    assert score.diagnostics["state_space_momentum_candidate_mass_threshold"] == 0.90
+    assert score.diagnostics["state_space_momentum_candidate_max_k"] == 3
+    assert score.diagnostics["mean_candidate_count"] == 2.0
+    assert score.diagnostics["min_candidate_log_mass"] <= score.diagnostics["mean_candidate_log_mass"]
 
 
 def test_state_space_momentum_pruned_support_uses_full_grid_normalization():

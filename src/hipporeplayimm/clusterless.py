@@ -55,6 +55,7 @@ class ClusterlessMarkConfig:
     mark_kde_bandwidth: float | None = None
     mark_kde_spatial_sigma_bins: float | None = None
     mark_kde_max_neighbors: int = 256
+    group_marks_by_tetrode: bool = True
 
 
 @dataclass
@@ -77,6 +78,9 @@ class ClusterlessMarkEncoding:
     mark_kde_neighbor_indices: np.ndarray | None = None
     mark_kde_log_weights: np.ndarray | None = None
     mark_kde_variance: np.ndarray | None = None
+    mark_kde_group_ids: np.ndarray | None = None
+    mark_group_labels: np.ndarray | None = None
+    mark_group_rate_hz: np.ndarray | None = None
 
     @property
     def n_bins(self) -> int:
@@ -90,10 +94,17 @@ class ClusterlessMarkEncoding:
     def grid_shape(self) -> tuple[int, int]:
         return (len(self.x_edges) - 1, len(self.y_edges) - 1)
 
-    def log_mark_likelihood(self, marks: np.ndarray) -> np.ndarray:
+    @property
+    def n_mark_groups(self) -> int:
+        if self.mark_group_labels is None:
+            return 1
+        return int(np.asarray(self.mark_group_labels).reshape(-1).shape[0])
+
+    def log_mark_likelihood(self, marks: np.ndarray, group_ids: np.ndarray | None = None) -> np.ndarray:
         marks = self._coerce_marks(marks)
+        group_ids = self._coerce_mark_group_ids(group_ids, marks.shape[0])
         if self.mark_likelihood == _LOCAL_KDE:
-            return self._log_mark_likelihood_local_kde(marks)
+            return self._log_mark_likelihood_local_kde(marks, group_ids=group_ids)
         return self._log_mark_likelihood_diagonal_gaussian(marks)
 
     def _coerce_marks(self, marks: np.ndarray) -> np.ndarray:
@@ -106,13 +117,25 @@ class ClusterlessMarkEncoding:
             raise ValueError(f"Expected {self.n_features} mark features, got {marks.shape[1]}")
         return marks
 
+    def _coerce_mark_group_ids(self, group_ids: np.ndarray | None, n_marks: int) -> np.ndarray | None:
+        if group_ids is None:
+            return None
+        coerced = np.asarray(group_ids, dtype=int).reshape(-1)
+        if coerced.shape[0] != n_marks:
+            raise ValueError(f"Expected {n_marks} mark group ids, got {coerced.shape[0]}")
+        return coerced
+
     def _log_mark_likelihood_diagonal_gaussian(self, marks: np.ndarray) -> np.ndarray:
         diff = marks[:, None, :] - self.mark_mean[None, :, :]
         log_norm = np.sum(np.log(2.0 * np.pi * self.mark_variance), axis=1)
         quad = np.sum(diff * diff / self.mark_variance[None, :, :], axis=2)
         return -0.5 * (quad + log_norm[None, :])
 
-    def _log_mark_likelihood_local_kde(self, marks: np.ndarray) -> np.ndarray:
+    def _log_mark_likelihood_local_kde(
+        self,
+        marks: np.ndarray,
+        group_ids: np.ndarray | None = None,
+    ) -> np.ndarray:
         if (
             self.mark_kde_values is None
             or self.mark_kde_neighbor_indices is None
@@ -129,17 +152,38 @@ class ClusterlessMarkEncoding:
 
         log_norm = float(np.sum(np.log(2.0 * np.pi * variance)))
         output = np.empty((marks.shape[0], self.n_bins), dtype=float)
+        grouped_kde_ids = None if self.mark_kde_group_ids is None else np.asarray(self.mark_kde_group_ids, dtype=int)
+        fallback = None
         for bin_index in range(self.n_bins):
             support = indices[bin_index]
             weights = log_weights[bin_index]
             valid = (support >= 0) & np.isfinite(weights)
             if not np.any(valid):
-                output[:, bin_index] = self._log_mark_likelihood_diagonal_gaussian(marks)[:, bin_index]
+                if fallback is None:
+                    fallback = self._log_mark_likelihood_diagonal_gaussian(marks)
+                output[:, bin_index] = fallback[:, bin_index]
                 continue
-            support_values = kde_values[support[valid]]
+            support_indices = support[valid]
+            support_values = kde_values[support_indices]
+            support_weights = weights[valid]
+            if group_ids is not None and grouped_kde_ids is not None:
+                if fallback is None:
+                    fallback = self._log_mark_likelihood_diagonal_gaussian(marks)
+                support_groups = grouped_kde_ids[support_indices]
+                for mark_index, group_id in enumerate(group_ids):
+                    same_group = support_groups == group_id
+                    if not np.any(same_group):
+                        output[mark_index, bin_index] = fallback[mark_index, bin_index]
+                        continue
+                    diff = marks[mark_index, None, :] - support_values[same_group]
+                    quad = np.sum(diff * diff / variance[None, :], axis=1)
+                    output[mark_index, bin_index] = logsumexp(
+                        support_weights[same_group] - 0.5 * (quad + log_norm)
+                    )
+                continue
             diff = marks[:, None, :] - support_values[None, :, :]
             quad = np.sum(diff * diff / variance[None, None, :], axis=2)
-            output[:, bin_index] = logsumexp(weights[valid][None, :] - 0.5 * (quad + log_norm), axis=1)
+            output[:, bin_index] = logsumexp(support_weights[None, :] - 0.5 * (quad + log_norm), axis=1)
         return output
 
 
@@ -173,6 +217,12 @@ class ClusterlessStateSpaceReplayModel(StateSpaceReplayModel):
             score.diagnostics["clusterless_mark_kde_bandwidth"] = metadata["clusterless_mark_kde_bandwidth"]
         if "clusterless_mark_kde_max_neighbors" in metadata:
             score.diagnostics["clusterless_mark_kde_max_neighbors"] = metadata["clusterless_mark_kde_max_neighbors"]
+        if "clusterless_group_marks_by_tetrode" in metadata:
+            score.diagnostics["clusterless_group_marks_by_tetrode"] = metadata["clusterless_group_marks_by_tetrode"]
+        if "clusterless_mark_group_count" in metadata:
+            score.diagnostics["clusterless_mark_group_count"] = metadata["clusterless_mark_group_count"]
+        if "clusterless_mark_groups" in metadata:
+            score.diagnostics["clusterless_mark_groups"] = metadata["clusterless_mark_groups"]
         return score
 
 
@@ -207,7 +257,7 @@ def fit_clusterless_mark_encoding(
     valid_frames = movement & (flat_bins >= 0)
     np.add.at(occupancy, flat_bins[valid_frames], dt[valid_frames])
 
-    mark_times, mark_values = _training_marks(session, encoding_config, config)
+    mark_times, mark_values, mark_group_ids = _training_marks(session, encoding_config, config)
     mark_xy = _interp_positions(times, xy, mark_times)
     mark_speed = np.interp(mark_times, times, speed)
     mark_bins = _positions_to_flat_bins(mark_xy, x_edges, y_edges)
@@ -221,9 +271,11 @@ def fit_clusterless_mark_encoding(
     )
     mark_times = mark_times[keep]
     mark_values = mark_values[keep]
+    mark_group_ids = mark_group_ids[keep]
     mark_bins = mark_bins[keep].astype(int)
     finite_rows = np.all(np.isfinite(mark_values), axis=1)
     mark_values = mark_values[finite_rows]
+    mark_group_ids = mark_group_ids[finite_rows].astype(int)
     mark_bins = mark_bins[finite_rows]
     if mark_values.shape[0] == 0:
         raise ValueError("No finite run-period spike marks were available for clusterless encoding.")
@@ -276,10 +328,18 @@ def fit_clusterless_mark_encoding(
         mean[no_support] = global_mean
         variance[no_support] = global_variance
 
+    mark_group_labels, smooth_group_count = _smooth_mark_group_counts(
+        mark_bins,
+        mark_group_ids,
+        grid_shape,
+        config,
+    )
+
     kde_values = None
     kde_neighbor_indices = None
     kde_log_weights = None
     kde_variance = None
+    kde_group_ids = None
     if mark_likelihood == _LOCAL_KDE:
         kde_neighbor_indices, kde_log_weights = _local_kde_support(
             mark_bins,
@@ -288,9 +348,16 @@ def fit_clusterless_mark_encoding(
         )
         kde_values = np.asarray(mark_values, dtype=float).copy()
         kde_variance = _mark_kde_variance(mark_values, config)
+        if config.group_marks_by_tetrode:
+            kde_group_ids = np.asarray(mark_group_ids, dtype=int).copy()
 
     occupancy_denominator = np.maximum(smooth_occupancy, encoding_config.min_occupancy_s)
-    rate_hz = np.maximum(smooth_count / occupancy_denominator, config.rate_floor_hz)
+    group_rate_floor_hz = config.rate_floor_hz / max(int(mark_group_labels.shape[0]), 1)
+    group_rate_hz = np.maximum(
+        smooth_group_count / occupancy_denominator[None, :],
+        group_rate_floor_hz,
+    )
+    rate_hz = np.maximum(np.sum(group_rate_hz, axis=0), config.rate_floor_hz)
     return ClusterlessMarkEncoding(
         x_edges=x_edges,
         y_edges=y_edges,
@@ -308,6 +375,9 @@ def fit_clusterless_mark_encoding(
         mark_kde_neighbor_indices=kde_neighbor_indices,
         mark_kde_log_weights=kde_log_weights,
         mark_kde_variance=kde_variance,
+        mark_kde_group_ids=kde_group_ids,
+        mark_group_labels=mark_group_labels,
+        mark_group_rate_hz=group_rate_hz,
     )
 
 
@@ -335,9 +405,13 @@ def build_clusterless_mark_emissions(
         encoding.rate_hz * float(config.spike_rate_scale),
         np.finfo(float).tiny,
     )
-    log_likelihood = -scaled_rate_hz[None, :] * bin_durations[:, None]
+    scaled_group_rate_hz, group_labels = _scaled_group_rate_hz(
+        encoding,
+        float(config.spike_rate_scale),
+    )
+    log_likelihood = -np.sum(scaled_group_rate_hz, axis=0)[None, :] * bin_durations[:, None]
 
-    mark_times, mark_values = _marks_for_config(session, encoding.config)
+    mark_times, mark_values, mark_group_ids = _marks_for_config(session, encoding.config)
     keep = (
         (mark_times >= ripple_event.start)
         & (mark_times < ripple_event.end)
@@ -346,14 +420,21 @@ def build_clusterless_mark_emissions(
     if np.any(keep):
         mark_times = mark_times[keep]
         mark_values = mark_values[keep]
+        mark_group_ids = mark_group_ids[keep]
         time_bins = np.searchsorted(edges, mark_times, side="right") - 1
         valid = (time_bins >= 0) & (time_bins < counts.shape[0])
         time_bins = time_bins[valid].astype(int)
         mark_values = mark_values[valid]
-        log_rate = np.log(scaled_rate_hz)
-        mark_log_likelihood = encoding.log_mark_likelihood(mark_values)
+        mark_group_ids = mark_group_ids[valid].astype(int)
+        log_rate = _log_rate_by_mark_group(
+            scaled_group_rate_hz,
+            group_labels,
+            mark_group_ids,
+            fallback_rate_hz=scaled_rate_hz,
+        )
+        mark_log_likelihood = encoding.log_mark_likelihood(mark_values, group_ids=mark_group_ids)
         for local_index, time_bin in enumerate(time_bins):
-            log_likelihood[time_bin] += log_rate + mark_log_likelihood[local_index]
+            log_likelihood[time_bin] += log_rate[local_index] + mark_log_likelihood[local_index]
         np.add.at(counts, time_bins, 1)
     log_likelihood += (counts * np.log(bin_durations) - gammaln(counts + 1))[:, None]
 
@@ -369,6 +450,9 @@ def build_clusterless_mark_emissions(
         "clusterless_mark_likelihood": encoding.mark_likelihood,
         "clusterless_mark_kde_bandwidth": _format_float_array(encoding.mark_kde_variance),
         "clusterless_mark_kde_max_neighbors": _kde_neighbor_count(encoding),
+        "clusterless_group_marks_by_tetrode": bool(encoding.config.group_marks_by_tetrode),
+        "clusterless_mark_group_count": int(encoding.n_mark_groups),
+        "clusterless_mark_groups": _format_int_array(encoding.mark_group_labels),
     }
     return emissions
 
@@ -446,10 +530,77 @@ def _mark_kde_variance(mark_values: np.ndarray, config: ClusterlessMarkConfig) -
     return np.maximum(bandwidth * bandwidth, config.mark_variance_floor)
 
 
+def _smooth_mark_group_counts(
+    mark_bins: np.ndarray,
+    mark_group_ids: np.ndarray,
+    grid_shape: tuple[int, int],
+    config: ClusterlessMarkConfig,
+) -> tuple[np.ndarray, np.ndarray]:
+    n_bins = int(grid_shape[0] * grid_shape[1])
+    if config.group_marks_by_tetrode:
+        group_ids = np.asarray(mark_group_ids, dtype=int).reshape(-1)
+    else:
+        group_ids = np.zeros(np.asarray(mark_bins).shape[0], dtype=int)
+    labels = np.unique(group_ids)
+    if labels.size == 0:
+        labels = np.array([0], dtype=int)
+    raw_group_count = np.zeros((labels.shape[0], n_bins), dtype=float)
+    for group_index, label in enumerate(labels):
+        in_group = group_ids == label
+        if np.any(in_group):
+            np.add.at(raw_group_count[group_index], np.asarray(mark_bins, dtype=int)[in_group], 1.0)
+    sigma = float(config.mark_smoothing_sigma_bins)
+    if sigma <= 0.0:
+        return labels.astype(int), raw_group_count
+    smooth_group_count = np.vstack(
+        [
+            gaussian_filter(row.reshape(grid_shape), sigma=sigma, mode="constant").reshape(-1)
+            for row in raw_group_count
+        ]
+    )
+    return labels.astype(int), smooth_group_count
+
+
+def _scaled_group_rate_hz(
+    encoding: ClusterlessMarkEncoding,
+    spike_rate_scale: float,
+) -> tuple[np.ndarray, np.ndarray]:
+    if encoding.mark_group_rate_hz is None or encoding.mark_group_labels is None:
+        return (
+            np.maximum(encoding.rate_hz[None, :] * spike_rate_scale, np.finfo(float).tiny),
+            np.array([0], dtype=int),
+        )
+    return (
+        np.maximum(np.asarray(encoding.mark_group_rate_hz, dtype=float) * spike_rate_scale, np.finfo(float).tiny),
+        np.asarray(encoding.mark_group_labels, dtype=int).reshape(-1),
+    )
+
+
+def _log_rate_by_mark_group(
+    scaled_group_rate_hz: np.ndarray,
+    group_labels: np.ndarray,
+    mark_group_ids: np.ndarray,
+    *,
+    fallback_rate_hz: np.ndarray,
+) -> np.ndarray:
+    output = np.empty((int(mark_group_ids.shape[0]), int(fallback_rate_hz.shape[0])), dtype=float)
+    for mark_index, group_id in enumerate(np.asarray(mark_group_ids, dtype=int).reshape(-1)):
+        matches = np.flatnonzero(group_labels == group_id)
+        rate = fallback_rate_hz if matches.size == 0 else scaled_group_rate_hz[int(matches[0])]
+        output[mark_index] = np.log(np.maximum(rate, np.finfo(float).tiny))
+    return output
+
+
 def _format_float_array(value: np.ndarray | None) -> str:
     if value is None:
         return ""
     return ",".join(f"{float(x):.6g}" for x in np.asarray(value, dtype=float).reshape(-1))
+
+
+def _format_int_array(value: np.ndarray | None) -> str:
+    if value is None:
+        return ""
+    return ",".join(str(int(x)) for x in np.asarray(value, dtype=int).reshape(-1))
 
 
 def _kde_neighbor_count(encoding: ClusterlessMarkEncoding) -> int:
@@ -462,29 +613,31 @@ def _training_marks(
     session: ReplaySession,
     encoding_config: EncodingConfig,
     clusterless_config: ClusterlessMarkConfig,
-) -> tuple[np.ndarray, np.ndarray]:
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     marks = session.spike_marks
     if marks is None:
         raise ValueError("Session does not contain spike marks.")
-    mark_times, mark_values = _all_event_marks(session)
+    mark_times, mark_values, mark_group_ids = _all_event_marks(session, clusterless_config)
     if _use_excitatory_marks(clusterless_config, encoding_config) and marks.cell_ids is not None and session.excitatory_neurons.size:
         keep = np.isin(marks.cell_ids.astype(int), session.excitatory_neurons.astype(int))
         mark_times = mark_times[keep]
         mark_values = mark_values[keep]
-    return mark_times, mark_values
+        mark_group_ids = mark_group_ids[keep]
+    return mark_times, mark_values, mark_group_ids
 
 
-def _marks_for_config(session: ReplaySession, config: ClusterlessMarkConfig) -> tuple[np.ndarray, np.ndarray]:
+def _marks_for_config(session: ReplaySession, config: ClusterlessMarkConfig) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     marks = session.spike_marks
     if marks is None:
         raise ValueError("Session does not contain spike marks.")
-    mark_times, mark_values = _all_event_marks(session)
+    mark_times, mark_values, mark_group_ids = _all_event_marks(session, config)
     encoding_config = EncodingConfig() if config.encoding is None else config.encoding
     if _use_excitatory_marks(config, encoding_config) and marks.cell_ids is not None and session.excitatory_neurons.size:
         keep = np.isin(marks.cell_ids.astype(int), session.excitatory_neurons.astype(int))
         mark_times = mark_times[keep]
         mark_values = mark_values[keep]
-    return mark_times, mark_values
+        mark_group_ids = mark_group_ids[keep]
+    return mark_times, mark_values, mark_group_ids
 
 
 def _use_excitatory_marks(
@@ -494,8 +647,38 @@ def _use_excitatory_marks(
     return bool(clusterless_config.use_excitatory and encoding_config.use_excitatory)
 
 
-def _all_event_marks(session: ReplaySession) -> tuple[np.ndarray, np.ndarray]:
+def _all_event_marks(
+    session: ReplaySession,
+    config: ClusterlessMarkConfig,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     marks = session.spike_marks
     if marks is None:
         raise ValueError("Session does not contain spike marks.")
-    return np.asarray(marks.times, dtype=float), np.asarray(marks.marks, dtype=float)
+    return (
+        np.asarray(marks.times, dtype=float),
+        np.asarray(marks.marks, dtype=float),
+        _spike_mark_group_ids(session, config),
+    )
+
+
+def _spike_mark_group_ids(session: ReplaySession, config: ClusterlessMarkConfig) -> np.ndarray:
+    marks = session.spike_marks
+    if marks is None:
+        raise ValueError("Session does not contain spike marks.")
+    if not config.group_marks_by_tetrode or marks.cell_ids is None:
+        return np.zeros(marks.n_spikes, dtype=int)
+    cell_to_tetrode = _cell_to_tetrode_map(session.tetrode_cell_ids)
+    if not cell_to_tetrode:
+        return np.zeros(marks.n_spikes, dtype=int)
+    return np.asarray([cell_to_tetrode.get(int(cell_id), -1) for cell_id in marks.cell_ids], dtype=int)
+
+
+def _cell_to_tetrode_map(tetrode_cell_ids: np.ndarray) -> dict[int, int]:
+    values = np.asarray(tetrode_cell_ids)
+    if values.ndim != 2 or values.shape[1] < 2:
+        return {}
+    mapping: dict[int, int] = {}
+    for row in values:
+        if np.all(np.isfinite(row[:2])):
+            mapping[int(row[1])] = int(row[0])
+    return mapping

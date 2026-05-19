@@ -8,6 +8,7 @@ from hipporeplayimm.encoding import EncodingModel
 from hipporeplayimm.kd_reference import (
     KDEncodingConfig,
     build_kd_emissions,
+    fit_kd_place_field_encoding,
     diffusion_transition_1d,
     empirical_grid_prior,
     kd_momentum_log_evidence,
@@ -55,6 +56,49 @@ def _session_with_ripple(spikes: np.ndarray, ripple: RippleEvent) -> ReplaySessi
         well_sequence=None,
         metadata={},
     )
+
+
+def _kd_encoding_session_with_ripple_spike() -> ReplaySession:
+    ripple = RippleEvent(start=0.15, end=0.25, peak=0.2, raw_power=0.0, z_power_session=0.0, z_power_epoch=0.0)
+    return ReplaySession(
+        rat="rat",
+        name="session",
+        path=Path("."),
+        position=np.array(
+            [
+                [0.0, 0.0, 0.0],
+                [0.1, 10.0, 0.0],
+                [0.2, 20.0, 0.0],
+                [0.3, 30.0, 0.0],
+                [0.4, 40.0, 0.0],
+            ]
+        ),
+        spikes=np.array([[0.2, 1.0]]),
+        tetrode_cell_ids=np.empty((0, 2)),
+        excitatory_neurons=np.array([1]),
+        inhibitory_neurons=np.array([], dtype=int),
+        ripple_events=np.array(
+            [[ripple.start, ripple.end, ripple.peak, ripple.raw_power, ripple.z_power_session, ripple.z_power_epoch]]
+        ),
+        run_times=np.array([[0.0, 0.4]]),
+        sleep_box_immobile_times=np.empty((0, 2)),
+        sleep_times=np.empty((0, 2)),
+        rem_times=np.empty((0, 2)),
+        well_sequence=None,
+        metadata={},
+    )
+
+
+def test_fit_kd_place_field_encoding_excludes_ripple_intervals_by_default():
+    session = _kd_encoding_session_with_ripple_spike()
+    config = dict(smoothing_sigma_cm=0.0, min_peak_rate_hz=2.0)
+
+    filtered = fit_kd_place_field_encoding(session, KDEncodingConfig(**config))
+    legacy = fit_kd_place_field_encoding(session, KDEncodingConfig(**config, exclude_ripple_intervals=False))
+
+    assert 1 not in filtered.cell_ids
+    assert np.array_equal(legacy.cell_ids, np.array([1]))
+    assert np.isclose(float(legacy.rates_hz.max()), 10.0)
 
 
 def test_kd_random_evidence_averages_independent_time_bin_emissions():

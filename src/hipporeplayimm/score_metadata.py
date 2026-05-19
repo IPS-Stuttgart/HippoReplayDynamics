@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 import numpy as np
@@ -94,6 +94,7 @@ def apply_model_hyperparam_patch() -> None:
     from . import benchmarks as bench
     from . import ground_truth as gt
     from . import models as model_mod
+    from .clusterless import ClusterlessStateSpaceReplayModel
     from .pyrecest_models import PyRecEstGoalParticleIMMModel, PyRecEstGoalParticleModel
     from .sorted_spike_state_space import SortedSpikeStateSpaceReplayModel
     from .state_space import StateSpaceDecoderConfig
@@ -101,13 +102,11 @@ def apply_model_hyperparam_patch() -> None:
     if getattr(bench, "_model_hyperparam_patch_applied", False):
         return
 
+    base_benchmark_config = bench.BenchmarkConfig
+    base_benchmark_metadata = bench._benchmark_config_metadata
+
     @dataclass(frozen=True)
-    class BenchmarkConfig:
-        encoding: EncodingConfig = field(default_factory=EncodingConfig)
-        emissions: EmissionConfig = field(default_factory=EmissionConfig)
-        test_cell_fraction: float = 0.25
-        max_events_per_session: int | None = None
-        candidate_top_k: int = 64
+    class BenchmarkConfig(base_benchmark_config):
         stationary_sigma_cm: float = 2.0
         diffusion_sigma_cm: float = 12.0
         momentum_sigma_cm: float = 12.0
@@ -121,27 +120,47 @@ def apply_model_hyperparam_patch() -> None:
         state_space_momentum_initial_sigma_cm_sqrt_s: float = 85.0
         state_space_momentum_velocity_decay: float = 0.95
         state_space_momentum_candidate_top_k: int = 128
-        pyrecest_particles: int = 512
-        pyrecest_alpha: float = 0.80
-        pyrecest_beta: float = 1.00
-        pyrecest_process_noise_sigma_cm_s: float = 60.0
-        pyrecest_position_jump_sigma_cm: float = 25.0
-        pyrecest_jump_probability: float = 0.03
-        pyrecest_goal_reset_probability: float = 0.02
-        pyrecest_position_proposal_probability: float = 0.0
-        pyrecest_initial_velocity_sigma_cm_s: float = 120.0
-        pyrecest_imm_mode_stickiness: float = 0.95
-        pyrecest_imm_stationary_velocity_decay: float = 0.0
-        pyrecest_imm_diffusion_velocity_decay: float = 0.0
-        pyrecest_imm_momentum_velocity_decay: float = 0.95
-        pyrecest_imm_jump_fraction: float = 0.9
-        pyrecest_imm_jump_velocity_decay: float = 0.25
-        random_seed: int = 1
-        event_epoch: str = "run"
-        models: tuple[str, ...] = ("random", "stationary", "diffusion", "momentum", "imm")
+        state_space_momentum_candidate_min_log_mass: float | None = None
+        state_space_momentum_predicted_candidate_top_k: int = 8
+        state_space_momentum_prediction_halo_cm: float = 0.0
 
     def cfg(config, name: str, default):
         return getattr(config, name, default)
+
+    def state_space_config(config, mode: str) -> StateSpaceDecoderConfig:
+        nested = getattr(config, "state_space", None)
+        if nested is not None:
+            return replace(nested, mode=mode)
+        return StateSpaceDecoderConfig(
+            mode=mode,
+            stationary_sigma_cm=cfg(config, "state_space_stationary_sigma_cm", 2.0),
+            diffusion_sigma_cm_sqrt_s=cfg(config, "state_space_diffusion_sigma_cm_sqrt_s", 85.0),
+            max_step_sigma=cfg(config, "state_space_max_step_sigma", 4.0),
+            imm_mode_stickiness=cfg(config, "state_space_imm_mode_stickiness", 0.95),
+            momentum_sigma_cm_sqrt_s=cfg(config, "state_space_momentum_sigma_cm_sqrt_s", 85.0),
+            momentum_initial_sigma_cm_sqrt_s=cfg(
+                config,
+                "state_space_momentum_initial_sigma_cm_sqrt_s",
+                85.0,
+            ),
+            momentum_velocity_decay=cfg(config, "state_space_momentum_velocity_decay", 0.95),
+            momentum_candidate_top_k=cfg(config, "state_space_momentum_candidate_top_k", 128),
+            momentum_candidate_min_log_mass=cfg(
+                config,
+                "state_space_momentum_candidate_min_log_mass",
+                None,
+            ),
+            momentum_predicted_candidate_top_k=cfg(
+                config,
+                "state_space_momentum_predicted_candidate_top_k",
+                8,
+            ),
+            momentum_prediction_halo_cm=cfg(
+                config,
+                "state_space_momentum_prediction_halo_cm",
+                0.0,
+            ),
+        )
 
     def candidate_model(config, mode: str, name: str | None = None):
         return model_mod.CandidateKinematicModel(
@@ -159,25 +178,20 @@ def apply_model_hyperparam_patch() -> None:
         return SortedSpikeStateSpaceReplayModel(
             mode=mode,
             name=name,
-            config=StateSpaceDecoderConfig(
-                mode=mode,
-                stationary_sigma_cm=cfg(config, "state_space_stationary_sigma_cm", 2.0),
-                diffusion_sigma_cm_sqrt_s=cfg(config, "state_space_diffusion_sigma_cm_sqrt_s", 85.0),
-                max_step_sigma=cfg(config, "state_space_max_step_sigma", 4.0),
-                imm_mode_stickiness=cfg(config, "state_space_imm_mode_stickiness", 0.95),
-                momentum_sigma_cm_sqrt_s=cfg(config, "state_space_momentum_sigma_cm_sqrt_s", 85.0),
-                momentum_initial_sigma_cm_sqrt_s=cfg(
-                    config,
-                    "state_space_momentum_initial_sigma_cm_sqrt_s",
-                    85.0,
-                ),
-                momentum_velocity_decay=cfg(config, "state_space_momentum_velocity_decay", 0.95),
-                momentum_candidate_top_k=cfg(config, "state_space_momentum_candidate_top_k", 128),
-            ),
+            config=state_space_config(config, mode),
         )
 
     def build_models(config, session=None):
         goal_candidates = bench._session_goal_candidates(session) if session is not None else None
+        clusterless_mark_likelihood = str(cfg(config, "clusterless_mark_likelihood", "local-kde"))
+
+        def clusterless_state_space_model(mode: str):
+            return ClusterlessStateSpaceReplayModel(
+                mode=mode,
+                config=state_space_config(config, mode),
+                mark_likelihood=clusterless_mark_likelihood,
+            )
+
         available = {
             "random": model_mod.RandomModel(),
             "stationary": model_mod.StationaryModel(),
@@ -197,6 +211,12 @@ def apply_model_hyperparam_patch() -> None:
             "state-space-jump": state_space_model(config, "jump", "state-space-jump"),
             "state-space-momentum": state_space_model(config, "momentum", "state-space-momentum"),
             "state-space-imm": state_space_model(config, "imm", "state-space-imm"),
+            "clusterless-state-space-stationary": clusterless_state_space_model("stationary"),
+            "clusterless-state-space-diffusion": clusterless_state_space_model("diffusion"),
+            "clusterless-state-space-fragmented": clusterless_state_space_model("fragmented"),
+            "clusterless-state-space-jump": clusterless_state_space_model("jump"),
+            "clusterless-state-space-momentum": clusterless_state_space_model("momentum"),
+            "clusterless-state-space-imm": clusterless_state_space_model("imm"),
             "pyrecest-goal-particle": PyRecEstGoalParticleModel(
                 candidate_goals=goal_candidates,
                 n_particles=cfg(config, "pyrecest_particles", 512),
@@ -233,33 +253,41 @@ def apply_model_hyperparam_patch() -> None:
         return {name: available[name] for name in config.models}
 
     def benchmark_config_metadata(config) -> dict[str, object]:
-        base = {
-            "benchmark_test_cell_fraction": float(config.test_cell_fraction),
-            "benchmark_random_seed": int(config.random_seed),
-            "encoding_bin_size_cm": float(config.encoding.bin_size_cm),
-            "encoding_smoothing_sigma_bins": float(config.encoding.smoothing_sigma_bins),
-            "encoding_min_speed_cm_s": float(config.encoding.min_speed_cm_s),
-            "encoding_min_occupancy_s": float(config.encoding.min_occupancy_s),
-            "encoding_rate_floor_hz": float(config.encoding.rate_floor_hz),
-            "encoding_arena_padding_cm": float(config.encoding.arena_padding_cm),
-            "encoding_use_excitatory": bool(config.encoding.use_excitatory),
-            "emission_time_bin_s": float(config.emissions.time_bin_s),
-            "emission_spike_rate_scale": float(config.emissions.spike_rate_scale),
+        state_space = getattr(config, "state_space", None)
+        if state_space is None:
+            state_space = state_space_config(config, "diffusion")
+        base = dict(base_benchmark_metadata(config))
+        base.update(
+            {
             "candidate_top_k": int(cfg(config, "candidate_top_k", 64)),
             "candidate_stationary_sigma_cm": float(cfg(config, "stationary_sigma_cm", 2.0)),
             "candidate_diffusion_sigma_cm": float(cfg(config, "diffusion_sigma_cm", 12.0)),
             "candidate_momentum_sigma_cm": float(cfg(config, "momentum_sigma_cm", 12.0)),
             "candidate_velocity_decay": float(cfg(config, "velocity_decay", 0.95)),
             "candidate_mode_stickiness": float(cfg(config, "mode_stickiness", 0.94)),
-            "state_space_stationary_sigma_cm": float(cfg(config, "state_space_stationary_sigma_cm", 2.0)),
-            "state_space_diffusion_sigma_cm_sqrt_s": float(cfg(config, "state_space_diffusion_sigma_cm_sqrt_s", 85.0)),
-            "state_space_max_step_sigma": float(cfg(config, "state_space_max_step_sigma", 4.0)),
-            "state_space_imm_mode_stickiness": float(cfg(config, "state_space_imm_mode_stickiness", 0.95)),
-            "state_space_momentum_sigma_cm_sqrt_s": float(cfg(config, "state_space_momentum_sigma_cm_sqrt_s", 85.0)),
-            "state_space_momentum_initial_sigma_cm_sqrt_s": float(cfg(config, "state_space_momentum_initial_sigma_cm_sqrt_s", 85.0)),
-            "state_space_momentum_velocity_decay": float(cfg(config, "state_space_momentum_velocity_decay", 0.95)),
-            "state_space_momentum_candidate_top_k": int(cfg(config, "state_space_momentum_candidate_top_k", 128)),
-        }
+            "state_space_stationary_sigma_cm": float(state_space.stationary_sigma_cm),
+            "state_space_diffusion_sigma_cm_sqrt_s": float(state_space.diffusion_sigma_cm_sqrt_s),
+            "state_space_max_step_sigma": float(state_space.max_step_sigma),
+            "state_space_imm_mode_stickiness": float(state_space.imm_mode_stickiness),
+            "state_space_momentum_sigma_cm_sqrt_s": float(state_space.momentum_sigma_cm_sqrt_s),
+            "state_space_momentum_initial_sigma_cm_sqrt_s": float(
+                state_space.momentum_initial_sigma_cm_sqrt_s
+            ),
+            "state_space_momentum_velocity_decay": float(state_space.momentum_velocity_decay),
+            "state_space_momentum_candidate_top_k": int(state_space.momentum_candidate_top_k),
+            "state_space_momentum_candidate_min_log_mass": (
+                ""
+                if state_space.momentum_candidate_min_log_mass is None
+                else float(state_space.momentum_candidate_min_log_mass)
+            ),
+            "state_space_momentum_predicted_candidate_top_k": int(
+                state_space.momentum_predicted_candidate_top_k
+            ),
+            "state_space_momentum_prediction_halo_cm": float(
+                state_space.momentum_prediction_halo_cm
+            ),
+            }
+        )
         return base
 
     original_candidate_score = model_mod.CandidateKinematicModel.score

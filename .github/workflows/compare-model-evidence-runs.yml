@@ -90,20 +90,22 @@ jobs:
           path: artifacts/right
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Compare model-evidence runs
+      - name: Compare exact model-evidence artifacts
         run: |
-          python scripts/compare_model_evidence_runs.py \
+          python scripts/compare_model_evidence_artifacts.py \
             --left artifacts/left \
             --right artifacts/right \
             --left-label "$LEFT_LABEL" \
             --right-label "$RIGHT_LABEL" \
-            --output "$OUTPUT_DIR"
+            --output "$OUTPUT_DIR" \
+            --exact-only
           test -f "$OUTPUT_DIR/event_best_model_comparison.csv"
-          test -f "$OUTPUT_DIR/best_model_counts_comparison.csv"
-          test -f "$OUTPUT_DIR/best_model_canonical_crosstab.csv"
-          test -f "$OUTPUT_DIR/shared_model_relative_evidence_summary.csv"
-          test -f "$OUTPUT_DIR/session_model_evidence_comparison.csv"
-          test -f "$OUTPUT_DIR/model_evidence_run_comparison_summary.csv"
+          test -f "$OUTPUT_DIR/canonical_best_model_crosstab.csv"
+          test -f "$OUTPUT_DIR/evidence_support_counts.csv"
+          test -f "$OUTPUT_DIR/shared_relative_evidence.csv"
+          test -f "$OUTPUT_DIR/shared_relative_evidence_summary.csv"
+          test -f "$OUTPUT_DIR/session_story_shift_summary.csv"
+          test -f "$OUTPUT_DIR/model_evidence_artifact_comparison_summary.csv"
 
       - name: Upload comparison tables
         uses: actions/upload-artifact@v7
@@ -111,9 +113,9 @@ jobs:
           name: model-evidence-run-comparison-${{ github.run_id }}
           path: |
             ${{ env.OUTPUT_DIR }}/event_best_model_comparison.csv
-            ${{ env.OUTPUT_DIR }}/best_model_counts_comparison.csv
-            ${{ env.OUTPUT_DIR }}/best_model_canonical_crosstab.csv
-            ${{ env.OUTPUT_DIR }}/shared_model_relative_evidence_comparison.csv
-            ${{ env.OUTPUT_DIR }}/shared_model_relative_evidence_summary.csv
-            ${{ env.OUTPUT_DIR }}/session_model_evidence_comparison.csv
-            ${{ env.OUTPUT_DIR }}/model_evidence_run_comparison_summary.csv
+            ${{ env.OUTPUT_DIR }}/canonical_best_model_crosstab.csv
+            ${{ env.OUTPUT_DIR }}/evidence_support_counts.csv
+            ${{ env.OUTPUT_DIR }}/shared_relative_evidence.csv
+            ${{ env.OUTPUT_DIR }}/shared_relative_evidence_summary.csv
+            ${{ env.OUTPUT_DIR }}/session_story_shift_summary.csv
+            ${{ env.OUTPUT_DIR }}/model_evidence_artifact_comparison_summary.csv

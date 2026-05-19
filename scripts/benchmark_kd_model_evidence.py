@@ -13,12 +13,12 @@ import pandas as pd
 from scipy.special import logsumexp
 
 from hipporeplayimm.data import load_replay_session
+from hipporeplayimm.duration_dynamics import transition_durations_s
 from hipporeplayimm.kd_reference import (
     KDEncodingConfig,
     KD_MODELS,
     NONTRAJECTORY_MODELS,
     TRAJECTORY_MODELS,
-    adjusted_momentum_parameters,
     best_grid_params,
     build_kd_emissions,
     diffusion_transition_1d,
@@ -27,11 +27,10 @@ from hipporeplayimm.kd_reference import (
     grid_config_for_preset,
     kd_random_log_evidence,
     kd_diffusion_log_evidence_from_transition,
-    kd_momentum_log_evidence_from_transitions,
+    kd_momentum_log_evidence,
     kd_stationary_gaussian_log_evidence_from_transitions,
     kd_stationary_log_evidence,
     marginalize_grid_log_evidence,
-    momentum_transition_1d,
     random_effects_model_probabilities,
     stationary_gaussian_transition_1d,
 )
@@ -191,27 +190,16 @@ def _score_momentum_tasks(
 def _score_momentum_param_chunk(task, emissions_chunk, initial_sd_m_per_s: float, n_bins: int, bin_size_cm: float):
     sd_index, decay_index, sd, decay = task
     values = np.empty(len(emissions_chunk), dtype=float)
-    initial_cache: dict[float, np.ndarray] = {}
-    transition_cache: dict[float, np.ndarray] = {}
     for event_index, emissions in enumerate(emissions_chunk):
-        if emissions.n_time == 1:
-            values[event_index] = kd_random_log_evidence(emissions.log_likelihood)
-            continue
-        dt = float(emissions.dt)
-        if dt not in initial_cache:
-            initial_sd_meters = initial_sd_m_per_s * dt
-            initial_cache[dt] = diffusion_transition_1d(n_bins, initial_sd_meters, bin_size_cm, dt=1.0)
-        if dt not in transition_cache:
-            adjusted_decay = decay
-            adjusted_sd = sd
-            if adjusted_decay > 1.0:
-                adjusted_decay, adjusted_sd = adjusted_momentum_parameters(adjusted_decay, adjusted_sd, dt)
-            transition_cache[dt] = momentum_transition_1d(n_bins, adjusted_sd, adjusted_decay, bin_size_cm, dt)
-        values[event_index] = kd_momentum_log_evidence_from_transitions(
+        values[event_index] = kd_momentum_log_evidence(
             emissions.log_likelihood,
             n_bins,
-            initial_cache[dt],
-            transition_cache[dt],
+            n_bins,
+            sd,
+            decay,
+            initial_sd_m_per_s,
+            bin_size_cm,
+            transition_durations_s(emissions),
         )
     return sd_index, decay_index, values
 
@@ -233,6 +221,7 @@ def _score(args) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame
             n_bins_y=args.n_bins,
             smoothing_sigma_cm=args.place_field_smoothing_cm,
             min_speed_cm_s=args.min_speed_cm_s,
+            exclude_ripple_intervals=not args.include_ripple_intervals_in_encoding,
         ),
     )
     emissions_by_event = [
@@ -274,9 +263,10 @@ def _score(args) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame
             transition_cache: dict[tuple[float, float], np.ndarray] = {}
             for sd_index, sd in enumerate(grid.diffusion_sd_meters):
                 for event_index, emissions in enumerate(emissions_by_event):
-                    key = (float(sd), float(emissions.dt))
+                    durations = transition_durations_s(emissions)
+                    key = (float(sd), tuple(float(duration) for duration in durations))
                     if key not in transition_cache:
-                        transition_cache[key] = diffusion_transition_1d(args.n_bins, float(sd), args.bin_size_cm, emissions.dt)
+                        transition_cache[key] = diffusion_transition_1d(args.n_bins, float(sd), args.bin_size_cm, durations)
                     grid_values[event_index, sd_index] = kd_diffusion_log_evidence_from_transition(
                         emissions.log_likelihood,
                         args.n_bins,
@@ -324,6 +314,7 @@ def _score(args) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame
                     "kd_n_jobs": int(args.n_jobs),
                     "kd_event_chunk_size": int(args.event_chunk_size),
                     "kd_spike_rate_scale": float(args.spike_rate_scale),
+                    "kd_exclude_ripple_intervals": bool(not args.include_ripple_intervals_in_encoding),
                 }
             )
             marginalized_rows.append(
@@ -365,6 +356,7 @@ def _write_momentum_shard(args, outpath: Path) -> None:
             n_bins_y=args.n_bins,
             smoothing_sigma_cm=args.place_field_smoothing_cm,
             min_speed_cm_s=args.min_speed_cm_s,
+            exclude_ripple_intervals=not args.include_ripple_intervals_in_encoding,
         ),
     )
     emissions_by_event = [
@@ -422,6 +414,7 @@ def _write_momentum_shard(args, outpath: Path) -> None:
         kd_n_jobs=np.asarray(args.n_jobs, dtype=int),
         kd_event_chunk_size=np.asarray(args.event_chunk_size, dtype=int),
         kd_spike_rate_scale=np.asarray(args.spike_rate_scale, dtype=float),
+        kd_exclude_ripple_intervals=np.asarray(not args.include_ripple_intervals_in_encoding, dtype=bool),
     )
     print(
         f"Wrote momentum shard {args.momentum_shard_index}/{args.momentum_shard_count}: "
@@ -521,6 +514,14 @@ def main() -> int:
     p.add_argument("--momentum-shard-output", default=None)
     p.add_argument("--place-field-smoothing-cm", type=float, default=4.0)
     p.add_argument("--min-speed-cm-s", type=float, default=5.0)
+    p.add_argument(
+        "--include-ripple-intervals-in-encoding",
+        action="store_true",
+        help=(
+            "Use the legacy KD reference behavior that fits place fields from run frames/spikes "
+            "inside ripple intervals instead of excluding ripple intervals."
+        ),
+    )
     p.add_argument("--output", default="results/kd-model-evidence")
     args = p.parse_args()
     if args.momentum_shard_output:

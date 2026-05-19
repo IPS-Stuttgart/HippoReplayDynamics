@@ -16,7 +16,8 @@ from .duration_dynamics import (
 
 
 def apply_state_space_imm_duration_patch() -> None:
-    """Patch four-mode state-space IMM to use per-transition durations."""
+    """Backward-compatible no-op; duration-aware IMM is now first-class."""
+    return None
 
     import hipporeplayimm.state_space as ss
 

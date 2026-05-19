@@ -8,6 +8,7 @@ from hipporeplayimm.sorted_spike_state_space import SortedSpikeStateSpaceReplayM
 from hipporeplayimm.state_space import (
     StateSpaceDecoderConfig,
     StateSpaceReplayModel,
+    _adaptive_top_candidate_indices,
     _augment_candidates_with_momentum_predictions,
 )
 
@@ -113,6 +114,31 @@ def test_adaptive_candidate_support_adds_forward_and_backward_predictions():
     assert set(candidates[1]) == {4}
     assert set(candidates[2]) == {5, 6}
     assert set(candidates[3]) == {6}
+
+
+def test_adaptive_candidate_support_can_target_emission_log_mass():
+    log_emission = np.log(np.array([0.80, 0.10, 0.05, 0.03, 0.02]))
+
+    fixed = _adaptive_top_candidate_indices(log_emission, 1)
+    adaptive = _adaptive_top_candidate_indices(log_emission, 1, min_log_mass=np.log(0.95))
+
+    assert list(fixed) == [0]
+    assert list(adaptive) == [0, 1, 2]
+
+
+def test_prediction_halo_adds_local_grid_support():
+    centers = np.arange(8.0)[:, None]
+    base = [np.array([0]), np.array([2]), np.array([0])]
+
+    candidates = _augment_candidates_with_momentum_predictions(
+        base,
+        centers,
+        predicted_top_k=1,
+        velocity_decay=1.0,
+        prediction_halo_cm=1.1,
+    )
+
+    assert {3, 4, 5}.issubset(set(candidates[2]))
 
 
 def test_state_space_model_uses_adaptive_candidate_support_when_bin_centers_given():

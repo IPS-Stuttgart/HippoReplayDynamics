@@ -91,6 +91,7 @@ class LogEmissionTensor:
     dt: float
     cell_ids: np.ndarray
     n_spikes: int
+    transition_durations: np.ndarray | None = None
 
     @property
     def n_time(self) -> int:
@@ -232,6 +233,7 @@ def build_emissions(
         dt=dt,
         cell_ids=encoding.cell_ids,
         n_spikes=int(counts.sum()),
+        transition_durations=np.diff(times),
     )
 
 

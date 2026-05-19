@@ -241,6 +241,48 @@ def test_candidate_diffusion_pruned_support_uses_full_grid_normalization():
     assert np.allclose(score.log_likelihood, expected)
 
 
+def test_candidate_kinematic_model_uses_adaptive_mass_and_prediction_support():
+    centers = np.arange(8.0)[:, None]
+    emissions = LogEmissionTensor(
+        log_likelihood=np.log(
+            np.array(
+                [
+                    [0.80, 0.10, 0.05, 0.03, 0.01, 0.005, 0.003, 0.002],
+                    [0.05, 0.10, 0.80, 0.02, 0.01, 0.008, 0.007, 0.005],
+                    [0.70, 0.10, 0.05, 0.04, 0.03, 0.02, 0.01, 0.05],
+                ]
+            )
+        ),
+        spike_counts=np.zeros((3, 1), dtype=int),
+        times=np.arange(3, dtype=float),
+        dt=1.0,
+        cell_ids=np.array([1]),
+        n_spikes=0,
+    )
+    fixed = CandidateKinematicModel(
+        mode="momentum",
+        top_k=1,
+        predicted_candidate_top_k=0,
+    )
+    adaptive = CandidateKinematicModel(
+        mode="momentum",
+        top_k=1,
+        candidate_min_log_mass=np.log(0.90),
+        predicted_candidate_top_k=1,
+        prediction_halo_cm=1.1,
+    )
+
+    fixed_candidates = fixed.candidate_indices(emissions, centers)
+    adaptive_candidates = adaptive.candidate_indices(emissions, centers)
+    score = adaptive.score(emissions, centers)
+
+    assert [len(curr) for curr in fixed_candidates] == [1, 1, 1]
+    assert all(len(curr) > 1 for curr in adaptive_candidates)
+    assert {3, 4, 5}.issubset(set(adaptive_candidates[2]))
+    assert score.diagnostics["candidate_predicted_top_k"] == 1
+    assert score.diagnostics["mean_candidate_count"] > 1.0
+
+
 def test_pyrecest_goal_particle_model_scores_synthetic_event():
     centers = np.array([[0.0, 0.0], [1.0, 0.0], [2.0, 0.0], [3.0, 0.0]])
     log_likelihood = np.log(

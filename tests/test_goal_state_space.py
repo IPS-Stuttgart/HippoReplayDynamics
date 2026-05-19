@@ -1,9 +1,11 @@
 import itertools
+from types import SimpleNamespace
 
 import numpy as np
 from scipy.special import logsumexp
 
 from hipporeplayimm.benchmarks import BenchmarkConfig, _build_models
+from hipporeplayimm.cli import _goal_state_space_kwargs
 from hipporeplayimm.encoding import LogEmissionTensor
 from hipporeplayimm.goal_state_space import GoalStateSpaceReplayModel
 
@@ -100,3 +102,24 @@ def test_benchmark_registry_includes_goal_state_space_models():
     assert isinstance(models['sorted-spike-state-space-goal'], GoalStateSpaceReplayModel)
     assert models['sorted-spike-state-space-goal'].drift_speed_cm_s == 123.0
     assert models['state-space-goal'].name == 'state-space-goal'
+
+
+def test_goal_state_space_cli_kwargs_reach_benchmark_model():
+    args = SimpleNamespace(
+        goal_state_space_transition_sigma_cm_sqrt_s=42.0,
+        goal_state_space_drift_speed_cm_s=321.0,
+        goal_state_space_max_step_sigma=7.0,
+    )
+
+    kwargs = _goal_state_space_kwargs(args)
+    config = BenchmarkConfig(models=('state-space-goal',), **kwargs)
+    model = _build_models(config, session=None)['state-space-goal']
+
+    assert kwargs == {
+        'goal_state_space_transition_sigma_cm_sqrt_s': 42.0,
+        'goal_state_space_drift_speed_cm_s': 321.0,
+        'goal_state_space_max_step_sigma': 7.0,
+    }
+    assert model.transition_sigma_cm_sqrt_s == 42.0
+    assert model.drift_speed_cm_s == 321.0
+    assert model.max_step_sigma == 7.0

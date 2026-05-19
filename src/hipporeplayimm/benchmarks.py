@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 
@@ -23,6 +24,7 @@ from .evidence_reporting import (
 from .models import CandidateKinematicModel, RandomModel, StationaryModel
 from .pyrecest_models import PyRecEstGoalParticleIMMModel, PyRecEstGoalParticleModel
 from .sorted_spike_state_space import SortedSpikeStateSpaceReplayModel
+from .state_space_model import StateSpaceDecoderConfig
 
 
 @dataclass(frozen=True)
@@ -32,10 +34,15 @@ class BenchmarkConfig:
     test_cell_fraction: float = 0.25
     max_events_per_session: int | None = None
     candidate_top_k: int = 64
+    state_space: StateSpaceDecoderConfig | None = None
+    clusterless_mark_likelihood: str = "local-kde"
     clusterless_mark_smoothing_sigma_bins: float = 1.0
     clusterless_mark_prior_count: float = 1.0
     clusterless_mark_variance_floor: float = 1.0
     clusterless_rate_floor_hz: float = 1e-4
+    clusterless_mark_kde_bandwidth: float | None = None
+    clusterless_mark_kde_spatial_sigma_bins: float | None = None
+    clusterless_mark_kde_max_neighbors: int = 256
     pyrecest_particles: int = 512
     pyrecest_alpha: float = 0.80
     pyrecest_beta: float = 1.00
@@ -51,6 +58,10 @@ class BenchmarkConfig:
     pyrecest_imm_momentum_velocity_decay: float = 0.95
     pyrecest_imm_jump_fraction: float = 0.9
     pyrecest_imm_jump_velocity_decay: float = 0.25
+    position_validated_encoding_configs: Mapping[str, EncodingConfig] = field(default_factory=dict)
+    position_validated_encoding_source: str = ""
+    allow_missing_position_validated_encoding: bool = False
+    heldout_cell_splits: int = 1
     random_seed: int = 1
     event_epoch: str = "run"
     models: tuple[str, ...] = ("random", "stationary", "diffusion", "momentum", "imm")
@@ -98,7 +109,7 @@ def run_open_field_benchmark(root: str | Path, config: BenchmarkConfig | None = 
     sessions = load_open_field_sessions(root)
     rows = []
     for session in sessions:
-        rows.extend(_score_session(session, config))
+        rows.extend(_score_session_repeated_cell_splits(session, config))
     frame = pd.DataFrame(rows)
     if not frame.empty:
         frame = _add_relative_metrics(frame)
@@ -125,7 +136,68 @@ def bootstrap_delta_ci(
     return (float(np.quantile(means, 0.025)), float(np.quantile(means, 0.975)))
 
 
+def _config_for_session(config: BenchmarkConfig, session_id: str) -> BenchmarkConfig:
+    configs = config.position_validated_encoding_configs
+    if not configs:
+        return config
+    if session_id in configs:
+        encoding = configs[session_id]
+    elif "__default__" in configs:
+        encoding = configs["__default__"]
+    elif config.allow_missing_position_validated_encoding:
+        return config
+    else:
+        available = ", ".join(sorted(str(key) for key in configs))
+        raise KeyError(
+            f"No position-validation encoder config found for session {session_id!r}. "
+            f"Available sessions: {available}"
+        )
+    return replace(config, encoding=encoding)
+
+
+def _score_session_repeated_cell_splits(
+    session: ReplaySession,
+    config: BenchmarkConfig,
+) -> list[dict[str, object]]:
+    """Score one session for one or more independent held-out cell splits."""
+
+    n_splits = _validate_heldout_cell_splits(config.heldout_cell_splits)
+    rows: list[dict[str, object]] = []
+    for split_index in range(n_splits):
+        split_seed = _heldout_split_seed(config.random_seed, split_index)
+        split_config = replace(config, random_seed=split_seed)
+        split_rows = _score_session(session, split_config)
+        for row in split_rows:
+            row["heldout_split_index"] = int(split_index)
+            row["heldout_split_seed"] = int(split_seed)
+        rows.extend(split_rows)
+    return rows
+
+
+def _validate_heldout_cell_splits(n_splits: int) -> int:
+    """Validate and normalize the requested number of held-out splits."""
+
+    try:
+        value = int(n_splits)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("heldout_cell_splits must be an integer >= 1") from exc
+    if value < 1:
+        raise ValueError("heldout_cell_splits must be >= 1")
+    return value
+
+
+def _heldout_split_seed(random_seed: int, split_index: int) -> int:
+    """Return the deterministic RNG seed for a held-out split repeat."""
+
+    if split_index < 0:
+        raise ValueError("split_index must be non-negative")
+    # The first repeat is exactly the historical split, preserving existing
+    # default results; later repeats are deterministic seed offsets.
+    return int(random_seed) + int(split_index)
+
+
 def _score_session(session: ReplaySession, config: BenchmarkConfig) -> list[dict[str, object]]:
+    config = _config_for_session(config, session.session_id)
     encoding = fit_place_field_encoding(session, config.encoding)
     model_objects = _build_models(config, session=session)
     train_cells, test_cells = _split_cells(encoding.cell_ids, config.test_cell_fraction, config.random_seed)
@@ -250,6 +322,7 @@ def _clusterless_mark_config(config: BenchmarkConfig) -> ClusterlessMarkConfig:
     encoding_config = config.encoding
     return ClusterlessMarkConfig(
         encoding=encoding_config,
+        mark_likelihood=str(getattr(config, "clusterless_mark_likelihood", "local-kde")),
         mark_smoothing_sigma_bins=float(
             getattr(config, "clusterless_mark_smoothing_sigma_bins", 1.0)
         ),
@@ -257,6 +330,13 @@ def _clusterless_mark_config(config: BenchmarkConfig) -> ClusterlessMarkConfig:
         mark_variance_floor=float(getattr(config, "clusterless_mark_variance_floor", 1.0)),
         rate_floor_hz=float(getattr(config, "clusterless_rate_floor_hz", 1e-4)),
         use_excitatory=bool(encoding_config.use_excitatory),
+        mark_kde_bandwidth=_optional_float(
+            getattr(config, "clusterless_mark_kde_bandwidth", None)
+        ),
+        mark_kde_spatial_sigma_bins=_optional_float(
+            getattr(config, "clusterless_mark_kde_spatial_sigma_bins", None)
+        ),
+        mark_kde_max_neighbors=int(getattr(config, "clusterless_mark_kde_max_neighbors", 256)),
     )
 
 
@@ -300,9 +380,33 @@ def _format_cell_ids(cell_ids: np.ndarray) -> str:
     return ",".join(str(int(cell_id)) for cell_id in np.asarray(cell_ids, dtype=int))
 
 
+def _optional_float(value: object) -> float | None:
+    if value is None:
+        return None
+    if isinstance(value, str) and value.strip() == "":
+        return None
+    return float(value)
+
+
+def _format_optional_float(value: object) -> str:
+    parsed = _optional_float(value)
+    if parsed is None:
+        return ""
+    return f"{parsed:.6g}"
+
+
+def _state_space_config(config: BenchmarkConfig) -> StateSpaceDecoderConfig:
+    state_space = getattr(config, "state_space", None)
+    if state_space is None:
+        return StateSpaceDecoderConfig()
+    return state_space
+
+
 def _benchmark_config_metadata(config: BenchmarkConfig) -> dict[str, object]:
+    state_space = _state_space_config(config)
     return {
         "benchmark_test_cell_fraction": float(config.test_cell_fraction),
+        "benchmark_heldout_cell_splits": int(config.heldout_cell_splits),
         "benchmark_random_seed": int(config.random_seed),
         "encoding_bin_size_cm": float(config.encoding.bin_size_cm),
         "encoding_smoothing_sigma_bins": float(config.encoding.smoothing_sigma_bins),
@@ -311,7 +415,13 @@ def _benchmark_config_metadata(config: BenchmarkConfig) -> dict[str, object]:
         "encoding_rate_floor_hz": float(config.encoding.rate_floor_hz),
         "encoding_arena_padding_cm": float(config.encoding.arena_padding_cm),
         "encoding_use_excitatory": bool(config.encoding.use_excitatory),
+        "position_validated_encoding": bool(config.position_validated_encoding_configs),
+        "position_validated_encoding_source": str(config.position_validated_encoding_source),
+        "position_validated_encoding_sessions": ",".join(
+            sorted(str(key) for key in config.position_validated_encoding_configs)
+        ),
         "emission_time_bin_s": float(config.emissions.time_bin_s),
+        "clusterless_mark_likelihood": str(getattr(config, "clusterless_mark_likelihood", "local-kde")),
         "clusterless_mark_smoothing_sigma_bins": float(
             getattr(config, "clusterless_mark_smoothing_sigma_bins", 1.0)
         ),
@@ -322,6 +432,34 @@ def _benchmark_config_metadata(config: BenchmarkConfig) -> dict[str, object]:
             getattr(config, "clusterless_mark_variance_floor", 1.0)
         ),
         "clusterless_rate_floor_hz": float(getattr(config, "clusterless_rate_floor_hz", 1e-4)),
+        "clusterless_mark_kde_bandwidth": _format_optional_float(
+            getattr(config, "clusterless_mark_kde_bandwidth", None)
+        ),
+        "clusterless_mark_kde_spatial_sigma_bins": _format_optional_float(
+            getattr(config, "clusterless_mark_kde_spatial_sigma_bins", None)
+        ),
+        "clusterless_mark_kde_max_neighbors": int(
+            getattr(config, "clusterless_mark_kde_max_neighbors", 256)
+        ),
+        "state_space_stationary_sigma_cm": float(state_space.stationary_sigma_cm),
+        "state_space_diffusion_sigma_cm_sqrt_s": float(state_space.diffusion_sigma_cm_sqrt_s),
+        "state_space_max_step_sigma": float(state_space.max_step_sigma),
+        "state_space_imm_mode_stickiness": float(state_space.imm_mode_stickiness),
+        "state_space_momentum_sigma_cm_sqrt_s": float(state_space.momentum_sigma_cm_sqrt_s),
+        "state_space_momentum_initial_sigma_cm_sqrt_s": float(
+            state_space.momentum_initial_sigma_cm_sqrt_s
+        ),
+        "state_space_momentum_velocity_decay": float(state_space.momentum_velocity_decay),
+        "state_space_momentum_candidate_top_k": int(state_space.momentum_candidate_top_k),
+        "state_space_momentum_candidate_min_log_mass": _format_optional_float(
+            state_space.momentum_candidate_min_log_mass
+        ),
+        "state_space_momentum_predicted_candidate_top_k": int(
+            state_space.momentum_predicted_candidate_top_k
+        ),
+        "state_space_momentum_prediction_halo_cm": float(
+            state_space.momentum_prediction_halo_cm
+        ),
     }
 
 
@@ -331,7 +469,6 @@ def _session_mark_diagnostics(session: ReplaySession) -> dict[str, object]:
         "spike_mark_features": 0 if marks is None else marks.n_features,
         "spike_mark_source": "" if marks is None else f"{marks.source_file}:{marks.source_variable}",
         "clusterless_mark_likelihood_available": bool(marks is not None and marks.n_features > 0),
-        "clusterless_mark_likelihood": "diagonal-gaussian" if marks is not None and marks.n_features > 0 else "",
     }
 
 
@@ -365,30 +502,47 @@ def _build_models(
     session: ReplaySession | None = None,
 ) -> dict[str, object]:
     goal_candidates = _session_goal_candidates(session) if session is not None else None
+    clusterless_mark_likelihood = str(getattr(config, "clusterless_mark_likelihood", "local-kde"))
+    state_space = _state_space_config(config)
+
+    def state_space_model(mode: str, name: str | None = None) -> SortedSpikeStateSpaceReplayModel:
+        return SortedSpikeStateSpaceReplayModel(
+            mode=mode,
+            name=name,
+            config=replace(state_space, mode=mode),
+        )
+
+    def clusterless_state_space_model(mode: str) -> ClusterlessStateSpaceReplayModel:
+        return ClusterlessStateSpaceReplayModel(
+            mode=mode,
+            config=replace(state_space, mode=mode),
+            mark_likelihood=clusterless_mark_likelihood,
+        )
+
     available = {
         "random": RandomModel(),
         "stationary": StationaryModel(),
         "diffusion": CandidateKinematicModel(mode="diffusion", top_k=config.candidate_top_k),
         "momentum": CandidateKinematicModel(mode="momentum", top_k=config.candidate_top_k),
         "imm": CandidateKinematicModel(mode="imm", top_k=config.candidate_top_k),
-        "sorted-spike-state-space-stationary": SortedSpikeStateSpaceReplayModel(mode="stationary"),
-        "sorted-spike-state-space-diffusion": SortedSpikeStateSpaceReplayModel(mode="diffusion"),
-        "sorted-spike-state-space-fragmented": SortedSpikeStateSpaceReplayModel(mode="fragmented"),
-        "sorted-spike-state-space-jump": SortedSpikeStateSpaceReplayModel(mode="jump"),
-        "sorted-spike-state-space-momentum": SortedSpikeStateSpaceReplayModel(mode="momentum"),
-        "sorted-spike-state-space-imm": SortedSpikeStateSpaceReplayModel(mode="imm"),
-        "state-space-stationary": SortedSpikeStateSpaceReplayModel(mode="stationary", name="state-space-stationary"),
-        "state-space-diffusion": SortedSpikeStateSpaceReplayModel(mode="diffusion", name="state-space-diffusion"),
-        "state-space-fragmented": SortedSpikeStateSpaceReplayModel(mode="fragmented", name="state-space-fragmented"),
-        "state-space-jump": SortedSpikeStateSpaceReplayModel(mode="jump", name="state-space-jump"),
-        "state-space-momentum": SortedSpikeStateSpaceReplayModel(mode="momentum", name="state-space-momentum"),
-        "state-space-imm": SortedSpikeStateSpaceReplayModel(mode="imm", name="state-space-imm"),
-        "clusterless-state-space-stationary": ClusterlessStateSpaceReplayModel(mode="stationary"),
-        "clusterless-state-space-diffusion": ClusterlessStateSpaceReplayModel(mode="diffusion"),
-        "clusterless-state-space-fragmented": ClusterlessStateSpaceReplayModel(mode="fragmented"),
-        "clusterless-state-space-jump": ClusterlessStateSpaceReplayModel(mode="jump"),
-        "clusterless-state-space-momentum": ClusterlessStateSpaceReplayModel(mode="momentum"),
-        "clusterless-state-space-imm": ClusterlessStateSpaceReplayModel(mode="imm"),
+        "sorted-spike-state-space-stationary": state_space_model("stationary"),
+        "sorted-spike-state-space-diffusion": state_space_model("diffusion"),
+        "sorted-spike-state-space-fragmented": state_space_model("fragmented"),
+        "sorted-spike-state-space-jump": state_space_model("jump"),
+        "sorted-spike-state-space-momentum": state_space_model("momentum"),
+        "sorted-spike-state-space-imm": state_space_model("imm"),
+        "state-space-stationary": state_space_model("stationary", "state-space-stationary"),
+        "state-space-diffusion": state_space_model("diffusion", "state-space-diffusion"),
+        "state-space-fragmented": state_space_model("fragmented", "state-space-fragmented"),
+        "state-space-jump": state_space_model("jump", "state-space-jump"),
+        "state-space-momentum": state_space_model("momentum", "state-space-momentum"),
+        "state-space-imm": state_space_model("imm", "state-space-imm"),
+        "clusterless-state-space-stationary": clusterless_state_space_model("stationary"),
+        "clusterless-state-space-diffusion": clusterless_state_space_model("diffusion"),
+        "clusterless-state-space-fragmented": clusterless_state_space_model("fragmented"),
+        "clusterless-state-space-jump": clusterless_state_space_model("jump"),
+        "clusterless-state-space-momentum": clusterless_state_space_model("momentum"),
+        "clusterless-state-space-imm": clusterless_state_space_model("imm"),
         "pyrecest-goal-particle": PyRecEstGoalParticleModel(
             candidate_goals=goal_candidates,
             n_particles=config.pyrecest_particles,
@@ -475,13 +629,24 @@ def _is_best_static_baseline_model(model_name: object) -> bool:
     return False
 
 
+def _heldout_event_group_columns(frame: pd.DataFrame) -> list[str]:
+    """Columns that identify one comparable held-out scoring problem."""
+
+    columns = ["session", "event_index"]
+    for column in ("heldout_split_index", "heldout_split_seed"):
+        if column in frame.columns:
+            columns.append(column)
+    return columns
+
+
 def _add_relative_metrics(frame: pd.DataFrame) -> pd.DataFrame:
     frame = ensure_evidence_support_columns(frame)
+    event_group_columns = _heldout_event_group_columns(frame)
     static_mask = frame["model"].map(_is_best_static_baseline_model)
     exact_static_mask = static_mask & frame["evidence_comparable"].fillna(False).astype(bool)
     best_static = (
         frame[exact_static_mask]
-        .groupby(["session", "event_index"])["heldout_log_likelihood"]
+        .groupby(event_group_columns)["heldout_log_likelihood"]
         .max()
         .rename("best_static_heldout_log_likelihood")
         .reset_index()
@@ -489,15 +654,15 @@ def _add_relative_metrics(frame: pd.DataFrame) -> pd.DataFrame:
     truncated_static_mask = static_mask & frame["evidence_support"].eq(TRUNCATED_EVIDENCE_SUPPORT)
     best_static_truncated_lower_bound = (
         frame[truncated_static_mask]
-        .groupby(["session", "event_index"])["heldout_log_likelihood"]
+        .groupby(event_group_columns)["heldout_log_likelihood"]
         .max()
         .rename("best_static_truncated_lower_bound_heldout_log_likelihood")
         .reset_index()
     )
-    merged = frame.merge(best_static, on=["session", "event_index"], how="left")
+    merged = frame.merge(best_static, on=event_group_columns, how="left")
     merged = merged.merge(
         best_static_truncated_lower_bound,
-        on=["session", "event_index"],
+        on=event_group_columns,
         how="left",
     )
     denom = pd.Series(

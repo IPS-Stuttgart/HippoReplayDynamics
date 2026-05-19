@@ -12,10 +12,13 @@ def test_compare_model_evidence_runs_workflow_downloads_two_artifacts_and_upload
     assert "actions/download-artifact@v7" in workflow
     assert "actions/upload-artifact@v7" in workflow
     assert "actions/upload-artifact@v4" not in workflow
-    assert "scripts/compare_model_evidence_runs.py" in workflow
+    assert "scripts/compare_model_evidence_artifacts.py" in workflow
+    assert "--exact-only" in workflow
     assert "--left artifacts/left" in workflow
     assert "--right artifacts/right" in workflow
     assert "event_best_model_comparison.csv" in workflow
-    assert "shared_model_relative_evidence_summary.csv" in workflow
-    assert "session_model_evidence_comparison.csv" in workflow
+    assert "canonical_best_model_crosstab.csv" in workflow
+    assert "evidence_support_counts.csv" in workflow
+    assert "shared_relative_evidence_summary.csv" in workflow
+    assert "session_story_shift_summary.csv" in workflow
     assert "model-evidence-run-comparison-" in workflow

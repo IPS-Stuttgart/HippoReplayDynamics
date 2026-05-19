@@ -39,6 +39,7 @@ from hipporeplayimm.position_validation import (
     VALIDATED_POSITION_BIN_SIZE_CM,
     VALIDATED_POSITION_MIN_SPEED_CM_S,
     VALIDATED_POSITION_SMOOTHING_SIGMA_BINS,
+    load_position_validated_encoding_configs,
 )
 from hipporeplayimm.sorted_spike_state_space import SortedSpikeStateSpaceReplayModel
 from hipporeplayimm.state_space import StateSpaceDecoderConfig
@@ -149,6 +150,7 @@ def _models(args) -> dict[str, object]:
     def clusterless_state_space_model(mode: str) -> ClusterlessStateSpaceReplayModel:
         return ClusterlessStateSpaceReplayModel(
             mode=mode,
+            mark_likelihood=args.clusterless_mark_likelihood,
             config=StateSpaceDecoderConfig(
                 mode=mode,
                 stationary_sigma_cm=args.state_space_stationary_sigma_cm,
@@ -208,17 +210,53 @@ def _family(model: str) -> str:
     return "other"
 
 
-def _clusterless_mark_config(args) -> ClusterlessMarkConfig:
+def _clusterless_mark_config(
+    args,
+    encoding_config: EncodingConfig | None = None,
+) -> ClusterlessMarkConfig:
+    encoding_config = _base_encoding_config(args) if encoding_config is None else encoding_config
     return ClusterlessMarkConfig(
-        encoding=EncodingConfig(
-            bin_size_cm=args.bin_size_cm,
-            smoothing_sigma_bins=args.smoothing_sigma_bins,
-            min_speed_cm_s=args.min_speed_cm_s,
-        ),
+        encoding=encoding_config,
+        mark_likelihood=args.clusterless_mark_likelihood,
         mark_smoothing_sigma_bins=args.clusterless_mark_smoothing_sigma_bins,
         mark_prior_count=args.clusterless_mark_prior_count,
         mark_variance_floor=args.clusterless_mark_variance_floor,
         rate_floor_hz=args.clusterless_rate_floor_hz,
+        mark_kde_bandwidth=args.clusterless_mark_kde_bandwidth,
+        mark_kde_spatial_sigma_bins=args.clusterless_mark_kde_spatial_sigma_bins,
+        mark_kde_max_neighbors=args.clusterless_mark_kde_max_neighbors,
+    )
+
+
+def _base_encoding_config(args) -> EncodingConfig:
+    return EncodingConfig(
+        bin_size_cm=args.bin_size_cm,
+        smoothing_sigma_bins=args.smoothing_sigma_bins,
+        min_speed_cm_s=args.min_speed_cm_s,
+    )
+
+
+def _position_validated_encoding_config(
+    args,
+    session_id: str,
+    base_encoding: EncodingConfig,
+) -> EncodingConfig:
+    if not args.position_validation_encoder_config:
+        return base_encoding
+    configs = load_position_validated_encoding_configs(
+        args.position_validation_encoder_config,
+        base_encoding=base_encoding,
+    )
+    if session_id in configs:
+        return configs[session_id]
+    if "__default__" in configs:
+        return configs["__default__"]
+    if args.allow_missing_position_validation_config:
+        return base_encoding
+    available = ", ".join(sorted(configs))
+    raise KeyError(
+        f"No position-validation encoder config found for session {session_id!r}. "
+        f"Available sessions: {available}"
     )
 
 
@@ -229,20 +267,19 @@ def _score(args) -> pd.DataFrame:
     event_ids = _events(args.events, session)
     if args.max_events is not None:
         event_ids = event_ids[: args.max_events]
-    encoding = fit_place_field_encoding(
-        session,
-        EncodingConfig(
-            bin_size_cm=args.bin_size_cm,
-            smoothing_sigma_bins=args.smoothing_sigma_bins,
-            min_speed_cm_s=args.min_speed_cm_s,
-        ),
+    base_encoding = _base_encoding_config(args)
+    encoding_config = _position_validated_encoding_config(
+        args,
+        session.session_id,
+        base_encoding,
     )
+    encoding = fit_place_field_encoding(session, encoding_config)
     models = _models(args)
     has_clusterless = any(isinstance(model, ClusterlessStateSpaceReplayModel) for model in models.values())
     clusterless_encoding = None
     if has_clusterless:
         clusterless_encoding = fit_clusterless_mark_encoding(
-            session, _clusterless_mark_config(args),
+            session, _clusterless_mark_config(args, encoding_config),
         )
     emissions_cfg = EmissionConfig(
         time_bin_s=args.time_bin_s,
@@ -267,7 +304,7 @@ def _score(args) -> pd.DataFrame:
             assert emissions is not None
             try:
                 if isinstance(model, CandidateKinematicModel):
-                    cand = model.candidate_indices(emissions)
+                    cand = model.candidate_indices(emissions, bin_centers)
                     result = model.score(emissions, bin_centers, candidate_indices=cand)
                 else:
                     result = model.score(emissions, bin_centers)
@@ -277,15 +314,23 @@ def _score(args) -> pd.DataFrame:
                     "model": model_name, "requested_model": name, "model_family": _family(model_name),
                     "log_evidence": float(result.log_likelihood), "n_time": int(result.n_time),
                     "n_spikes": int(result.n_spikes), "runtime_s": float(time.perf_counter() - start),
-                    "error": "", "bin_size_cm": float(args.bin_size_cm),
-                    "smoothing_sigma_bins": float(args.smoothing_sigma_bins),
-                    "min_speed_cm_s": float(args.min_speed_cm_s),
+                    "error": "", "bin_size_cm": float(encoding_config.bin_size_cm),
+                    "smoothing_sigma_bins": float(encoding_config.smoothing_sigma_bins),
+                    "min_speed_cm_s": float(encoding_config.min_speed_cm_s),
+                    "position_validated_encoding": bool(args.position_validation_encoder_config),
+                    "position_validated_encoding_source": str(
+                        args.position_validation_encoder_config or ""
+                    ),
                     "time_bin_s": float(args.time_bin_s),
                     "spike_rate_scale": float(args.spike_rate_scale),
+                    "clusterless_mark_likelihood": args.clusterless_mark_likelihood,
                     "clusterless_mark_smoothing_sigma_bins": float(args.clusterless_mark_smoothing_sigma_bins),
                     "clusterless_mark_prior_count": float(args.clusterless_mark_prior_count),
                     "clusterless_mark_variance_floor": float(args.clusterless_mark_variance_floor),
                     "clusterless_rate_floor_hz": float(args.clusterless_rate_floor_hz),
+                    "clusterless_mark_kde_bandwidth": args.clusterless_mark_kde_bandwidth,
+                    "clusterless_mark_kde_spatial_sigma_bins": args.clusterless_mark_kde_spatial_sigma_bins,
+                    "clusterless_mark_kde_max_neighbors": int(args.clusterless_mark_kde_max_neighbors),
                 }
                 if use_clusterless and clusterless_encoding is not None:
                     row.update({
@@ -301,15 +346,23 @@ def _score(args) -> pd.DataFrame:
                     "model": name, "requested_model": name, "model_family": _family(name), "log_evidence": np.nan,
                     "n_time": int(emissions.n_time), "n_spikes": int(emissions.n_spikes),
                     "runtime_s": float(time.perf_counter() - start), "error": f"{type(exc).__name__}: {exc}",
-                    "bin_size_cm": float(args.bin_size_cm),
-                    "smoothing_sigma_bins": float(args.smoothing_sigma_bins),
-                    "min_speed_cm_s": float(args.min_speed_cm_s),
+                    "bin_size_cm": float(encoding_config.bin_size_cm),
+                    "smoothing_sigma_bins": float(encoding_config.smoothing_sigma_bins),
+                    "min_speed_cm_s": float(encoding_config.min_speed_cm_s),
+                    "position_validated_encoding": bool(args.position_validation_encoder_config),
+                    "position_validated_encoding_source": str(
+                        args.position_validation_encoder_config or ""
+                    ),
                     "time_bin_s": float(args.time_bin_s),
                     "spike_rate_scale": float(args.spike_rate_scale),
+                    "clusterless_mark_likelihood": args.clusterless_mark_likelihood,
                     "clusterless_mark_smoothing_sigma_bins": float(args.clusterless_mark_smoothing_sigma_bins),
                     "clusterless_mark_prior_count": float(args.clusterless_mark_prior_count),
                     "clusterless_mark_variance_floor": float(args.clusterless_mark_variance_floor),
                     "clusterless_rate_floor_hz": float(args.clusterless_rate_floor_hz),
+                    "clusterless_mark_kde_bandwidth": args.clusterless_mark_kde_bandwidth,
+                    "clusterless_mark_kde_spatial_sigma_bins": args.clusterless_mark_kde_spatial_sigma_bins,
+                    "clusterless_mark_kde_max_neighbors": int(args.clusterless_mark_kde_max_neighbors),
                 })
                 if not args.continue_on_error:
                     raise
@@ -464,10 +517,37 @@ def main() -> int:
     p.add_argument("--state-space-momentum-initial-sigma-cm-sqrt-s", type=float, default=85.0)
     p.add_argument("--state-space-momentum-velocity-decay", type=float, default=0.95)
     p.add_argument("--state-space-momentum-candidate-top-k", type=int, default=128)
+    p.add_argument(
+        "--clusterless-mark-likelihood",
+        choices=("diagonal-gaussian", "local-kde"),
+        default="local-kde",
+        help=(
+            "Clusterless mark likelihood. 'local-kde' preserves multimodal mark "
+            "structure; 'diagonal-gaussian' reproduces the older smoothed moment model."
+        ),
+    )
     p.add_argument("--clusterless-mark-smoothing-sigma-bins", type=float, default=1.0)
     p.add_argument("--clusterless-mark-prior-count", type=float, default=1.0)
     p.add_argument("--clusterless-mark-variance-floor", type=float, default=1.0)
     p.add_argument("--clusterless-rate-floor-hz", type=float, default=1e-4)
+    p.add_argument(
+        "--clusterless-mark-kde-bandwidth",
+        type=float,
+        default=None,
+        help="Optional absolute per-feature local-KDE bandwidth; omit for Silverman-style global bandwidth.",
+    )
+    p.add_argument(
+        "--clusterless-mark-kde-spatial-sigma-bins",
+        type=float,
+        default=None,
+        help="Spatial kernel width for selecting/weighting local KDE mark support; defaults to mark smoothing sigma.",
+    )
+    p.add_argument(
+        "--clusterless-mark-kde-max-neighbors",
+        type=int,
+        default=256,
+        help="Maximum run-period marks retained per spatial bin for local-KDE mark likelihood.",
+    )
     p.add_argument("--time-bin-s", type=float, default=0.02)
     p.add_argument(
         "--spike-rate-scale",
@@ -478,6 +558,21 @@ def main() -> int:
     p.add_argument("--bin-size-cm", type=float, default=VALIDATED_POSITION_BIN_SIZE_CM)
     p.add_argument("--smoothing-sigma-bins", type=float, default=VALIDATED_POSITION_SMOOTHING_SIGMA_BINS)
     p.add_argument("--min-speed-cm-s", type=float, default=VALIDATED_POSITION_MIN_SPEED_CM_S)
+    p.add_argument(
+        "--position-validation-encoder-config",
+        help=(
+            "CSV from validate-position or the position-validation matrix; "
+            "the selected row for --session supplies replay encoder settings."
+        ),
+    )
+    p.add_argument(
+        "--allow-missing-position-validation-config",
+        action="store_true",
+        help=(
+            "Fall back to CLI encoder settings when --session is missing from "
+            "the validation CSV."
+        ),
+    )
     p.add_argument("--output", default="results/model-evidence")
     p.add_argument("--continue-on-error", action="store_true")
     args = p.parse_args()

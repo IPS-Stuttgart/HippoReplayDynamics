@@ -8,6 +8,10 @@ from typing import Protocol
 import numpy as np
 from scipy.special import logsumexp
 
+from .candidate_support import (
+    adaptive_top_candidate_indices as _adaptive_top_candidate_indices,
+    augment_candidates_with_momentum_predictions as _augment_candidates_with_momentum_predictions,
+)
 from .encoding import LogEmissionTensor
 
 
@@ -112,6 +116,9 @@ class CandidateKinematicModel:
 
     mode: str = "imm"
     top_k: int = 64
+    predicted_candidate_top_k: int = 8
+    candidate_min_log_mass: float | None = None
+    prediction_halo_cm: float = 0.0
     stationary_sigma_cm: float = 2.0
     diffusion_sigma_cm: float = 12.0
     momentum_sigma_cm: float = 12.0
@@ -127,8 +134,28 @@ class CandidateKinematicModel:
         if self.name is None:
             self.name = self.mode
 
-    def candidate_indices(self, emissions: LogEmissionTensor) -> list[np.ndarray]:
-        return [_top_candidate_indices(row, self.top_k) for row in emissions.log_likelihood]
+    def candidate_indices(
+        self,
+        emissions: LogEmissionTensor,
+        bin_centers: np.ndarray | None = None,
+    ) -> list[np.ndarray]:
+        candidates = [
+            _adaptive_top_candidate_indices(
+                row,
+                self.top_k,
+                min_log_mass=self.candidate_min_log_mass,
+            )
+            for row in emissions.log_likelihood
+        ]
+        if self.mode in {"momentum", "imm"} and bin_centers is not None and emissions.n_time >= 3:
+            return _augment_candidates_with_momentum_predictions(
+                candidates,
+                bin_centers,
+                predicted_top_k=int(self.predicted_candidate_top_k),
+                velocity_decay=float(self.velocity_decay),
+                prediction_halo_cm=float(self.prediction_halo_cm),
+            )
+        return candidates
 
     def score(
         self,
@@ -138,7 +165,7 @@ class CandidateKinematicModel:
     ) -> EventScore:
         if emissions.n_time == 1:
             return self._score_single_bin(emissions, bin_centers)
-        candidates = self.candidate_indices(emissions) if candidate_indices is None else candidate_indices
+        candidates = self.candidate_indices(emissions, bin_centers) if candidate_indices is None else candidate_indices
         if len(candidates) != emissions.n_time:
             raise ValueError("candidate_indices must contain one array per emission time bin")
         if self.mode != "imm":
@@ -156,7 +183,15 @@ class CandidateKinematicModel:
             )
         diagnostics = {
             "mean_candidate_log_mass": float(np.mean(mass)),
+            "mean_candidate_count": float(np.mean([len(curr) for curr in candidates])),
             "candidate_evidence_support": "truncated_full_grid",
+            "candidate_support": "derived" if candidate_indices is None else "provided",
+            "candidate_top_k": int(self.top_k),
+            "candidate_predicted_top_k": int(self.predicted_candidate_top_k),
+            "candidate_min_log_mass": (
+                "" if self.candidate_min_log_mass is None else float(self.candidate_min_log_mass)
+            ),
+            "candidate_prediction_halo_cm": float(self.prediction_halo_cm),
         }
         diagnostics.update(_posterior_diagnostics(terminal_log_posterior, bin_centers))
         return EventScore(
@@ -334,11 +369,13 @@ def _posterior_diagnostics(
     endpoint = posterior @ bin_centers
     map_bin = int(np.argmax(terminal_log_posterior))
     entropy = float(-np.sum(posterior * terminal_log_posterior))
+    endpoint_y = float(endpoint[1]) if endpoint.shape[0] > 1 else 0.0
+    map_y = float(bin_centers[map_bin, 1]) if bin_centers.shape[1] > 1 else 0.0
     return {
         "decoded_endpoint_x": float(endpoint[0]),
-        "decoded_endpoint_y": float(endpoint[1]),
+        "decoded_endpoint_y": endpoint_y,
         "decoded_map_x": float(bin_centers[map_bin, 0]),
-        "decoded_map_y": float(bin_centers[map_bin, 1]),
+        "decoded_map_y": map_y,
         "decoded_map_bin": map_bin,
         "terminal_posterior_entropy": entropy,
     }

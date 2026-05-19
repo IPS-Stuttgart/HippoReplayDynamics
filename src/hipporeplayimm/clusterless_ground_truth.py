@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from types import SimpleNamespace
 
 import numpy as np
@@ -163,20 +164,43 @@ def _compare_clusterless_scores_to_ground_truth(gt, root, scores_frame: pd.DataF
 def _clusterless_state_space_model(config: object, mode: str) -> ClusterlessStateSpaceReplayModel:
     return ClusterlessStateSpaceReplayModel(
         mode=mode,
-        config=StateSpaceDecoderConfig(
-            mode=mode,
-            stationary_sigma_cm=_cfg(config, "state_space_stationary_sigma_cm", 2.0),
-            diffusion_sigma_cm_sqrt_s=_cfg(config, "state_space_diffusion_sigma_cm_sqrt_s", 85.0),
-            max_step_sigma=_cfg(config, "state_space_max_step_sigma", 4.0),
-            imm_mode_stickiness=_cfg(config, "state_space_imm_mode_stickiness", 0.95),
-            momentum_sigma_cm_sqrt_s=_cfg(config, "state_space_momentum_sigma_cm_sqrt_s", 85.0),
-            momentum_initial_sigma_cm_sqrt_s=_cfg(
-                config,
-                "state_space_momentum_initial_sigma_cm_sqrt_s",
-                85.0,
-            ),
-            momentum_velocity_decay=_cfg(config, "state_space_momentum_velocity_decay", 0.95),
-            momentum_candidate_top_k=_cfg(config, "state_space_momentum_candidate_top_k", 128),
+        config=_clusterless_state_space_config(config, mode),
+        mark_likelihood=str(_cfg(config, "clusterless_mark_likelihood", "local-kde")),
+    )
+
+
+def _clusterless_state_space_config(config: object, mode: str) -> StateSpaceDecoderConfig:
+    nested = getattr(config, "state_space", None)
+    if nested is not None:
+        return replace(nested, mode=mode)
+    return StateSpaceDecoderConfig(
+        mode=mode,
+        stationary_sigma_cm=_cfg(config, "state_space_stationary_sigma_cm", 2.0),
+        diffusion_sigma_cm_sqrt_s=_cfg(config, "state_space_diffusion_sigma_cm_sqrt_s", 85.0),
+        max_step_sigma=_cfg(config, "state_space_max_step_sigma", 4.0),
+        imm_mode_stickiness=_cfg(config, "state_space_imm_mode_stickiness", 0.95),
+        momentum_sigma_cm_sqrt_s=_cfg(config, "state_space_momentum_sigma_cm_sqrt_s", 85.0),
+        momentum_initial_sigma_cm_sqrt_s=_cfg(
+            config,
+            "state_space_momentum_initial_sigma_cm_sqrt_s",
+            85.0,
+        ),
+        momentum_velocity_decay=_cfg(config, "state_space_momentum_velocity_decay", 0.95),
+        momentum_candidate_top_k=_cfg(config, "state_space_momentum_candidate_top_k", 128),
+        momentum_candidate_min_log_mass=_cfg(
+            config,
+            "state_space_momentum_candidate_min_log_mass",
+            None,
+        ),
+        momentum_predicted_candidate_top_k=_cfg(
+            config,
+            "state_space_momentum_predicted_candidate_top_k",
+            8,
+        ),
+        momentum_prediction_halo_cm=_cfg(
+            config,
+            "state_space_momentum_prediction_halo_cm",
+            0.0,
         ),
     )
 

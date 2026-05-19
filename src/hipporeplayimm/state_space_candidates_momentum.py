@@ -13,6 +13,12 @@ from .state_space_utils import (
     _full_grid_normalized_pairwise_gaussian_log_prob,
 )
 
+def _transition_parameter(value: float | np.ndarray, transition_index: int) -> float:
+    arr = np.asarray(value, dtype=float)
+    if arr.ndim == 0:
+        return float(arr)
+    return float(arr[transition_index])
+
 
 def _score_momentum_candidates(
     emissions: LogEmissionTensor,
@@ -37,6 +43,7 @@ def _score_momentum_candidates(
     )
     pair_alphas = [log_pair]
     for time_index in range(2, emissions.n_time):
+        transition_index = time_index - 1
         log_pair = _advance_momentum_pair(
             log_pair,
             candidates[time_index - 2],
@@ -44,8 +51,8 @@ def _score_momentum_candidates(
             candidates[time_index],
             emissions.log_likelihood[time_index, candidates[time_index]],
             bin_centers,
-            sigma_cm=sigma_cm,
-            velocity_decay=velocity_decay,
+            sigma_cm=_transition_parameter(sigma_cm, transition_index),
+            velocity_decay=_transition_parameter(velocity_decay, transition_index),
         )
         pair_alphas.append(log_pair)
 
@@ -53,6 +60,7 @@ def _score_momentum_candidates(
     pair_betas = [np.zeros_like(pair_alphas[-1]) for _ in pair_alphas]
     for pair_index in range(len(pair_alphas) - 2, -1, -1):
         curr_time = pair_index + 2
+        transition_index = pair_index + 1
         pair_betas[pair_index] = _backward_momentum_pair(
             pair_betas[pair_index + 1],
             candidates[pair_index],
@@ -60,8 +68,8 @@ def _score_momentum_candidates(
             candidates[curr_time],
             emissions.log_likelihood[curr_time, candidates[curr_time]],
             bin_centers,
-            sigma_cm=sigma_cm,
-            velocity_decay=velocity_decay,
+            sigma_cm=_transition_parameter(sigma_cm, transition_index),
+            velocity_decay=_transition_parameter(velocity_decay, transition_index),
         )
 
     trajectory = np.full((emissions.n_time, emissions.n_bins), LOG_ZERO, dtype=float)

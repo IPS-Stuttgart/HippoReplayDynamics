@@ -5,6 +5,7 @@ from hipporeplayimm.benchmarks import (
     BenchmarkConfig,
     BenchmarkResult,
     _add_relative_metrics,
+    _benchmark_config_metadata,
     _build_models,
     _is_best_static_baseline_model,
     _score_session,
@@ -15,6 +16,7 @@ from hipporeplayimm.data import ReplaySession, SpikeMarkData
 from hipporeplayimm.encoding import EmissionConfig, EncodingConfig
 from hipporeplayimm.evidence_reporting import TRUNCATED_EVIDENCE_SUPPORT
 from hipporeplayimm.models import EventScore
+from hipporeplayimm.state_space import StateSpaceDecoderConfig
 
 
 def test_benchmark_summary_and_bootstrap_ci():
@@ -60,6 +62,42 @@ def test_state_space_aliases_canonicalize_sorted_spike_model_name():
     models = _build_models(BenchmarkConfig(models=("state-space-diffusion",)))
 
     assert models["state-space-diffusion"].name == "sorted-spike-state-space-diffusion"
+
+
+def test_build_models_threads_state_space_config_to_state_space_models():
+    state_space = StateSpaceDecoderConfig(
+        diffusion_sigma_cm_sqrt_s=42.0,
+        momentum_sigma_cm_sqrt_s=43.0,
+        momentum_initial_sigma_cm_sqrt_s=44.0,
+        momentum_velocity_decay=0.75,
+        momentum_candidate_top_k=17,
+        momentum_predicted_candidate_top_k=5,
+    )
+    models = _build_models(
+        BenchmarkConfig(
+            models=("state-space-momentum", "clusterless-state-space-imm"),
+            state_space=state_space,
+        )
+    )
+
+    sorted_model = models["state-space-momentum"]
+    clusterless_model = models["clusterless-state-space-imm"]
+
+    assert sorted_model.config.mode == "momentum"
+    assert sorted_model.config.momentum_candidate_top_k == 17
+    assert sorted_model.config.momentum_predicted_candidate_top_k == 5
+    assert sorted_model.config.momentum_velocity_decay == 0.75
+    assert clusterless_model.config.mode == "imm"
+    assert clusterless_model.config.momentum_sigma_cm_sqrt_s == 43.0
+
+
+def test_benchmark_metadata_records_state_space_config():
+    metadata = _benchmark_config_metadata(
+        BenchmarkConfig(state_space=StateSpaceDecoderConfig(diffusion_sigma_cm_sqrt_s=42.0, momentum_candidate_top_k=17))
+    )
+
+    assert metadata["state_space_diffusion_sigma_cm_sqrt_s"] == 42.0
+    assert metadata["state_space_momentum_candidate_top_k"] == 17
 
 
 def test_build_models_includes_clusterless_state_space_model():

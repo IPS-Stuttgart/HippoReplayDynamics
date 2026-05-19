@@ -215,6 +215,17 @@ hipporeplayimm validate-position D:\Uni-Data\DataSetFromPfeifferFoster `
   --output results\position_validation_rat1_open1
 ```
 
+Replay benchmarks can consume a validation summary or the matrix workflow's
+`position_validation_matrix_best_by_session.csv` so behavioral decoding selects
+the place-field encoder before replay evidence is scored:
+
+```powershell
+hipporeplayimm benchmark D:\Uni-Data\DataSetFromPfeifferFoster `
+  --position-validation-encoder-config results\position_validation_matrix_best_by_session.csv `
+  --models random,stationary,sorted-spike-state-space-diffusion,sorted-spike-state-space-momentum,sorted-spike-state-space-imm `
+  --output results\validated_encoder_replay
+```
+
 ## Behavioral Ground-Truth Proxy
 
 The real data do not contain latent replay trajectories as ground truth.

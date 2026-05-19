@@ -7,6 +7,7 @@ from .models import EventScore, LOG_ZERO, _normalize_log_weights, _posterior_dia
 from .state_space_model import (
     StateSpaceDecoderConfig,
     StateSpaceReplayModel,
+    _adaptive_top_candidate_indices,
     _augment_candidates_with_momentum_predictions,
 )
 from .state_space_candidates import (
@@ -50,6 +51,7 @@ __all__ = [
     "LOG_ZERO",
     "StateSpaceDecoderConfig",
     "StateSpaceReplayModel",
+    "_adaptive_top_candidate_indices",
     "_advance_imm_pair_log_alpha",
     "_advance_momentum_pair",
     "_apply_transition",

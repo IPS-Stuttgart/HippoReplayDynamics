@@ -1,9 +1,11 @@
 import numpy as np
+import pandas as pd
 
 from hipporeplayimm.data import ReplaySession
 from hipporeplayimm.encoding import EncodingConfig
 from hipporeplayimm.position_validation import (
     PositionDecodingConfig,
+    select_position_validated_encoding_configs,
     summarize_position_decoding,
     validated_position_encoding_config,
     validate_session_position_decoding,
@@ -57,6 +59,10 @@ def test_validate_session_position_decoding_returns_finite_cv_metrics(tmp_path):
     assert set(samples["observation_model"]) == {"sorted-spike-poisson"}
     assert set(samples["clusterless_mark_likelihood"]) == {"not_implemented"}
     assert summary.loc[0, "decode_windows"] == 9
+    assert summary.loc[0, "decode_bin_s"] == 1.0
+    assert summary.loc[0, "bin_size_cm"] == 10.0
+    assert summary.loc[0, "smoothing_sigma_bins"] == 0.5
+    assert summary.loc[0, "min_speed_cm_s"] == 0.0
 
 
 def test_position_decoding_config_defaults_use_validated_settings():
@@ -68,3 +74,44 @@ def test_position_decoding_config_defaults_use_validated_settings():
     assert encoding.bin_size_cm == 6.0
     assert encoding.smoothing_sigma_bins == 2.0
     assert encoding.min_speed_cm_s == 5.0
+
+
+def test_select_position_validated_encoding_configs_prefers_best_passing_row():
+    frame = pd.DataFrame(
+        [
+            {
+                "session": "RatX/Open1",
+                "bin_size_cm": 8.0,
+                "smoothing_sigma_bins": 1.0,
+                "min_speed_cm_s": 4.0,
+                "passes_smoke_gate": False,
+                "median_posterior_mean_error_cm": 1.0,
+            },
+            {
+                "session": "RatX/Open1",
+                "bin_size_cm": 6.0,
+                "smoothing_sigma_bins": 2.0,
+                "min_speed_cm_s": 5.0,
+                "passes_smoke_gate": True,
+                "median_posterior_mean_error_cm": 10.0,
+            },
+            {
+                "session": "RatX/Open1",
+                "bin_size_cm": 4.0,
+                "smoothing_sigma_bins": 2.5,
+                "min_speed_cm_s": 6.0,
+                "passes_smoke_gate": True,
+                "median_posterior_mean_error_cm": 8.0,
+            },
+        ]
+    )
+    base = EncodingConfig(min_occupancy_s=0.5, rate_floor_hz=0.25)
+
+    configs = select_position_validated_encoding_configs(frame, base_encoding=base)
+
+    selected = configs["RatX/Open1"]
+    assert selected.bin_size_cm == 4.0
+    assert selected.smoothing_sigma_bins == 2.5
+    assert selected.min_speed_cm_s == 6.0
+    assert selected.min_occupancy_s == 0.5
+    assert selected.rate_floor_hz == 0.25

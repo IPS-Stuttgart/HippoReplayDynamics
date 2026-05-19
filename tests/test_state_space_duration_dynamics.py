@@ -95,7 +95,7 @@ def test_state_space_four_mode_imm_uses_transition_durations():
     assert score.diagnostics["state_space_transition_durations"] == "1,4"
 
 
-def test_duration_patch_updates_imported_build_emissions_aliases():
+def test_build_emissions_attach_transition_duration_metadata_for_imported_aliases():
     import hipporeplayimm.benchmarks as benchmarks
     import hipporeplayimm.encoding as encoding
     import hipporeplayimm.ground_truth as ground_truth

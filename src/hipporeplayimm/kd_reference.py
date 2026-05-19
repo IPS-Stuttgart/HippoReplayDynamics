@@ -24,6 +24,7 @@ from .encoding import (
     _frame_durations,
     _interp_positions,
     _positions_to_flat_bins,
+    _ripple_intervals,
     _speed_cm_s,
     _times_in_intervals,
 )
@@ -45,6 +46,7 @@ class KDEncodingConfig:
     rate_floor_hz: float = 1e-4
     min_peak_rate_hz: float = 2.0
     use_excitatory: bool = True
+    exclude_ripple_intervals: bool = True
 
 
 @dataclass(frozen=True)
@@ -90,7 +92,13 @@ def fit_kd_place_field_encoding(session: ReplaySession, config: KDEncodingConfig
     xy = position[:, 1:3]
     speed = _speed_cm_s(times, xy)
     in_run = _times_in_intervals(times, session.run_times)
-    movement = in_run & (speed >= config.min_speed_cm_s)
+    excluded_intervals = (
+        _ripple_intervals(session)
+        if config.exclude_ripple_intervals
+        else np.empty((0, 2), dtype=float)
+    )
+    in_excluded_interval = _times_in_intervals(times, excluded_intervals)
+    movement = in_run & ~in_excluded_interval & (speed >= config.min_speed_cm_s)
 
     x_edges = _fixed_edges(xy[:, 0], config.bin_size_cm, config.n_bins_x)
     y_edges = _fixed_edges(xy[:, 1], config.bin_size_cm, config.n_bins_y)
@@ -120,8 +128,14 @@ def fit_kd_place_field_encoding(session: ReplaySession, config: KDEncodingConfig
         spike_xy = _interp_positions(times, xy, spike_times)
         spike_speed = np.interp(spike_times, times, speed)
         spike_in_run = _times_in_intervals(spike_times, session.run_times)
+        spike_in_excluded_interval = _times_in_intervals(spike_times, excluded_intervals)
         spike_bins = _positions_to_flat_bins(spike_xy, x_edges, y_edges)
-        keep_spikes = spike_in_run & (spike_speed >= config.min_speed_cm_s) & (spike_bins >= 0)
+        keep_spikes = (
+            spike_in_run
+            & ~spike_in_excluded_interval
+            & (spike_speed >= config.min_speed_cm_s)
+            & (spike_bins >= 0)
+        )
         kept_cell_ids = spike_cell_ids[keep_spikes]
         kept_bins = spike_bins[keep_spikes].astype(int)
         rows = np.searchsorted(cell_ids, kept_cell_ids)
@@ -200,6 +214,7 @@ def build_kd_emissions(
         dt=dt,
         cell_ids=encoding.cell_ids,
         n_spikes=int(counts.sum()),
+        transition_durations=np.diff(times),
     )
 
 
@@ -293,13 +308,22 @@ def kd_stationary_gaussian_log_evidence_from_latent(log_emissions: np.ndarray, l
     log_terms = [logsumexp(log_emissions[t, :, None] + latent, axis=0) for t in range(log_emissions.shape[0])]
     return float(logsumexp(np.sum(log_terms, axis=0) - np.log(log_emissions.shape[1])))
 
+def _transition_at(transition: np.ndarray | list[np.ndarray] | tuple[np.ndarray, ...], transition_index: int) -> np.ndarray:
+    if isinstance(transition, (list, tuple)):
+        return transition[transition_index]
+    return transition
 
-def kd_diffusion_log_evidence(log_emissions: np.ndarray, n_bins_x: int, n_bins_y: int, sd_meters: float, bin_size_cm: float, dt: float) -> float:
+def kd_diffusion_log_evidence(log_emissions: np.ndarray, n_bins_x: int, n_bins_y: int, sd_meters: float, bin_size_cm: float, dt: float | np.ndarray) -> float:
     transition = diffusion_transition_1d(n_bins_x, sd_meters, bin_size_cm, dt)
     return kd_diffusion_log_evidence_from_transition(log_emissions, n_bins_x, n_bins_y, transition)
 
 
-def kd_diffusion_log_evidence_from_transition(log_emissions: np.ndarray, n_bins_x: int, n_bins_y: int, transition: np.ndarray) -> float:
+def kd_diffusion_log_evidence_from_transition(
+    log_emissions: np.ndarray,
+    n_bins_x: int,
+    n_bins_y: int,
+    transition: np.ndarray | list[np.ndarray] | tuple[np.ndarray, ...],
+) -> float:
     return _first_order_separable_log_evidence(log_emissions, n_bins_x, n_bins_y, transition)
 
 
@@ -311,21 +335,40 @@ def kd_momentum_log_evidence(
     decay: float,
     initial_sd_m_per_s: float,
     bin_size_cm: float,
-    dt: float,
+    dt: float | np.ndarray,
 ) -> float:
     if n_bins_x != n_bins_y:
         raise ValueError("KD momentum scorer currently requires a square grid")
     if log_emissions.shape[0] == 1:
         return kd_random_log_evidence(log_emissions)
-    if decay > 1.0:
-        decay, sd_meters = adjusted_momentum_parameters(decay, sd_meters, dt)
-    initial_sd_meters = initial_sd_m_per_s * dt
+    durations = np.asarray(dt, dtype=float)
+    if durations.ndim == 0:
+        transition_durations = np.full(log_emissions.shape[0] - 1, float(durations), dtype=float)
+    elif durations.ndim == 1:
+        transition_durations = durations
+    else:
+        raise ValueError("dt must be scalar or one duration per transition")
+    if transition_durations.shape != (log_emissions.shape[0] - 1,):
+        raise ValueError("dt must be scalar or one duration per transition")
+    if np.any(transition_durations <= 0.0) or not np.all(np.isfinite(transition_durations)):
+        raise ValueError("transition durations must be finite and positive")
+    adjustment_dt = float(np.median(transition_durations))
+    adjusted_decay = float(decay)
+    adjusted_sd = float(sd_meters)
+    if adjusted_decay > 1.0:
+        adjusted_decay, adjusted_sd = adjusted_momentum_parameters(adjusted_decay, adjusted_sd, adjustment_dt)
+    initial_sd_meters = initial_sd_m_per_s * float(transition_durations[0])
     initial = diffusion_transition_1d(n_bins_x, initial_sd_meters, bin_size_cm, dt=1.0)
-    transition = momentum_transition_1d(n_bins_x, sd_meters, decay, bin_size_cm, dt)
+    transition = momentum_transition_1d(n_bins_x, adjusted_sd, adjusted_decay, bin_size_cm, transition_durations[1:])
     return kd_momentum_log_evidence_from_transitions(log_emissions, n_bins_x, initial, transition)
 
 
-def kd_momentum_log_evidence_from_transitions(log_emissions: np.ndarray, n_bins: int, initial: np.ndarray, transition: np.ndarray) -> float:
+def kd_momentum_log_evidence_from_transitions(
+    log_emissions: np.ndarray,
+    n_bins: int,
+    initial: np.ndarray,
+    transition: np.ndarray | list[np.ndarray] | tuple[np.ndarray, ...],
+) -> float:
     if log_emissions.shape[0] == 1:
         return kd_random_log_evidence(log_emissions)
     return _second_order_separable_log_evidence(log_emissions, n_bins, initial, transition)
@@ -351,7 +394,13 @@ def stationary_gaussian_transition_1d(n_bins: int, sd_meters: float, bin_size_cm
     return _gaussian_transition_1d(n_bins, variance)
 
 
-def diffusion_transition_1d(n_bins: int, sd_meters: float, bin_size_cm: float, dt: float) -> np.ndarray:
+def diffusion_transition_1d(n_bins: int, sd_meters: float, bin_size_cm: float, dt: float | np.ndarray):
+    dt_array = np.asarray(dt, dtype=float)
+    if dt_array.ndim == 1:
+        return [diffusion_transition_1d(n_bins, sd_meters, bin_size_cm, float(value)) for value in dt_array]
+    if dt_array.ndim != 0:
+        raise ValueError("dt must be scalar or one-dimensional")
+    dt = float(dt_array)
     sd_bins = meters_to_bins(sd_meters, bin_size_cm)
     variance = max(sd_bins * sd_bins * dt, np.finfo(float).tiny)
     return _gaussian_transition_1d(n_bins, variance)
@@ -370,7 +419,13 @@ def _gaussian_transition_1d(n_bins: int, variance: float) -> np.ndarray:
     return transition
 
 
-def momentum_transition_1d(n_bins: int, sd_meters: float, decay: float, bin_size_cm: float, dt: float) -> np.ndarray:
+def momentum_transition_1d(n_bins: int, sd_meters: float, decay: float, bin_size_cm: float, dt: float | np.ndarray):
+    dt_array = np.asarray(dt, dtype=float)
+    if dt_array.ndim == 1:
+        return [momentum_transition_1d(n_bins, sd_meters, decay, bin_size_cm, float(value)) for value in dt_array]
+    if dt_array.ndim != 0:
+        raise ValueError("dt must be scalar or one-dimensional")
+    dt = float(dt_array)
     sd_bins = meters_to_bins(sd_meters, bin_size_cm)
     if decay <= 0.0:
         raise ValueError("momentum decay must be positive")
@@ -528,7 +583,8 @@ def _first_order_separable_log_evidence(log_emissions: np.ndarray, n_bins_x: int
     alpha /= conditional
     for time_index in range(1, log_emissions.shape[0]):
         emission, offset = _scaled_emission(log_emissions, time_index)
-        predicted = transition @ alpha @ transition.T
+        step_transition = _transition_at(transition, time_index - 1)
+        predicted = step_transition @ alpha @ step_transition.T
         alpha = predicted * emission.reshape(n_bins_x, n_bins_y)
         conditional = float(alpha.sum())
         if conditional <= 0.0:
@@ -557,8 +613,9 @@ def _second_order_separable_log_evidence(log_emissions: np.ndarray, n_bins: int,
     for time_index in range(2, log_emissions.shape[0]):
         emission, offset = _scaled_emission(log_emissions, time_index)
         emission_grid = emission.reshape(n_bins, n_bins)
-        y_sum = np.einsum("jbq,abpq->abpj", transition, alpha_t, optimize=True)
-        predicted = np.einsum("iap,abpj->ijab", transition, y_sum, optimize=True)
+        step_transition = _transition_at(transition, time_index - 2)
+        y_sum = np.einsum("jbq,abpq->abpj", step_transition, alpha_t, optimize=True)
+        predicted = np.einsum("iap,abpj->ijab", step_transition, y_sum, optimize=True)
         alpha_t = predicted * emission_grid[:, :, None, None]
         conditional = float(alpha_t.sum())
         if conditional <= 0.0:

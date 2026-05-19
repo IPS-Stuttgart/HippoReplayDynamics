@@ -12,6 +12,12 @@ from scipy.special import logsumexp
 from .benchmarks import BenchmarkConfig, _build_models, _split_cells
 from .data import ReplaySession, load_open_field_sessions
 from .encoding import EmissionConfig, EncodingConfig, build_emissions, fit_place_field_encoding
+from .goal_state_space_integration import (
+    DEFAULT_GOAL_DRIFT_SPEED_CM_S,
+    DEFAULT_GOAL_MAX_STEP_SIGMA,
+    DEFAULT_GOAL_TRANSITION_SIGMA_CM_SQRT_S,
+)
+from .state_space_model import StateSpaceDecoderConfig
 
 
 @dataclass(frozen=True)
@@ -212,6 +218,7 @@ def compare_scores_to_ground_truth(
     emission_config: EmissionConfig | None = None,
     test_cell_fraction: float = 0.25,
     candidate_top_k: int = 64,
+    state_space_config: StateSpaceDecoderConfig | None = None,
     pyrecest_particles: int = 512,
     pyrecest_alpha: float = 0.80,
     pyrecest_beta: float = 1.00,
@@ -227,6 +234,9 @@ def compare_scores_to_ground_truth(
     pyrecest_imm_momentum_velocity_decay: float = 0.95,
     pyrecest_imm_jump_fraction: float = 0.9,
     pyrecest_imm_jump_velocity_decay: float = 0.25,
+    goal_state_space_transition_sigma_cm_sqrt_s: float = DEFAULT_GOAL_TRANSITION_SIGMA_CM_SQRT_S,
+    goal_state_space_drift_speed_cm_s: float = DEFAULT_GOAL_DRIFT_SPEED_CM_S,
+    goal_state_space_max_step_sigma: float = DEFAULT_GOAL_MAX_STEP_SIGMA,
     random_seed: int = 1,
 ) -> pd.DataFrame:
     """Merge event scores with next-well behavioral correctness metrics."""
@@ -245,6 +255,10 @@ def compare_scores_to_ground_truth(
         scores_frame,
         EmissionConfig() if emission_config is None else emission_config,
     )
+    state_space_config = _state_space_config_for_scores(
+        scores_frame,
+        StateSpaceDecoderConfig() if state_space_config is None else state_space_config,
+    )
     test_cell_fraction = _unique_float_from_column(
         scores_frame,
         "benchmark_test_cell_fraction",
@@ -255,6 +269,21 @@ def compare_scores_to_ground_truth(
         "benchmark_random_seed",
         random_seed,
     )
+    goal_state_space_transition_sigma_cm_sqrt_s = _unique_float_from_column(
+        scores_frame,
+        "goal_state_space_transition_sigma_cm_sqrt_s",
+        goal_state_space_transition_sigma_cm_sqrt_s,
+    )
+    goal_state_space_drift_speed_cm_s = _unique_float_from_column(
+        scores_frame,
+        "goal_state_space_drift_speed_cm_s",
+        goal_state_space_drift_speed_cm_s,
+    )
+    goal_state_space_max_step_sigma = _unique_float_from_column(
+        scores_frame,
+        "goal_state_space_max_step_sigma",
+        goal_state_space_max_step_sigma,
+    )
 
     sessions = {session.session_id: session for session in load_open_field_sessions(root)}
     decoded_rows: list[dict[str, object]] = []
@@ -264,6 +293,7 @@ def compare_scores_to_ground_truth(
         emissions=emission_config,
         test_cell_fraction=test_cell_fraction,
         candidate_top_k=candidate_top_k,
+        state_space=state_space_config,
         pyrecest_particles=pyrecest_particles,
         pyrecest_alpha=pyrecest_alpha,
         pyrecest_beta=pyrecest_beta,
@@ -279,6 +309,9 @@ def compare_scores_to_ground_truth(
         pyrecest_imm_momentum_velocity_decay=pyrecest_imm_momentum_velocity_decay,
         pyrecest_imm_jump_fraction=pyrecest_imm_jump_fraction,
         pyrecest_imm_jump_velocity_decay=pyrecest_imm_jump_velocity_decay,
+        goal_state_space_transition_sigma_cm_sqrt_s=goal_state_space_transition_sigma_cm_sqrt_s,
+        goal_state_space_drift_speed_cm_s=goal_state_space_drift_speed_cm_s,
+        goal_state_space_max_step_sigma=goal_state_space_max_step_sigma,
         random_seed=random_seed,
         models=model_names,
     )
@@ -384,7 +417,10 @@ def _score_joint_for_ground_truth(
     bin_centers: np.ndarray,
 ):
     if hasattr(model, "candidate_indices"):
-        candidates = model.candidate_indices(train_emissions)
+        try:
+            candidates = model.candidate_indices(train_emissions, bin_centers)
+        except TypeError:
+            candidates = model.candidate_indices(train_emissions)
         return model.score(joint_emissions, bin_centers, candidate_indices=candidates)
     return model.score(joint_emissions, bin_centers)
 
@@ -511,6 +547,27 @@ def _emission_config_for_scores(
             "emission_time_bin_s",
             fallback.time_bin_s,
         )
+    )
+
+
+def _state_space_config_for_scores(
+    scores_frame: pd.DataFrame,
+    fallback: StateSpaceDecoderConfig,
+) -> StateSpaceDecoderConfig:
+    return StateSpaceDecoderConfig(
+        stationary_sigma_cm=_unique_float_from_column(scores_frame, "state_space_stationary_sigma_cm", fallback.stationary_sigma_cm),
+        diffusion_sigma_cm_sqrt_s=_unique_float_from_column(scores_frame, "state_space_diffusion_sigma_cm_sqrt_s", fallback.diffusion_sigma_cm_sqrt_s),
+        max_step_sigma=_unique_float_from_column(scores_frame, "state_space_max_step_sigma", fallback.max_step_sigma),
+        imm_mode_stickiness=_unique_float_from_column(scores_frame, "state_space_imm_mode_stickiness", fallback.imm_mode_stickiness),
+        momentum_sigma_cm_sqrt_s=_unique_float_from_column(scores_frame, "state_space_momentum_sigma_cm_sqrt_s", fallback.momentum_sigma_cm_sqrt_s),
+        momentum_initial_sigma_cm_sqrt_s=_unique_float_from_column(
+            scores_frame,
+            "state_space_momentum_initial_sigma_cm_sqrt_s",
+            fallback.momentum_initial_sigma_cm_sqrt_s,
+        ),
+        momentum_velocity_decay=_unique_float_from_column(scores_frame, "state_space_momentum_velocity_decay", fallback.momentum_velocity_decay),
+        momentum_candidate_top_k=_unique_int_from_column(scores_frame, "state_space_momentum_candidate_top_k", fallback.momentum_candidate_top_k),
+        momentum_predicted_candidate_top_k=_unique_int_from_column(scores_frame, "state_space_momentum_predicted_candidate_top_k", fallback.momentum_predicted_candidate_top_k),
     )
 
 

@@ -21,6 +21,7 @@ from hipporeplayimm.benchmarks import (
     _add_relative_metrics,
     _build_models,
     _score_train_joint_model,
+    _heldout_split_seed,
     _session_mark_diagnostics,
     _split_cells,
     bootstrap_delta_ci,
@@ -112,9 +113,31 @@ def score_explicit_events(args: argparse.Namespace) -> BenchmarkResult:
             f"Event ids outside available range 0..{session.ripple_count - 1}: {invalid}"
         )
 
+    heldout_cell_splits = int(getattr(args, "heldout_cell_splits", 1))
+    if heldout_cell_splits < 1:
+        raise ValueError("heldout_cell_splits must be >= 1")
+    if heldout_cell_splits > 1:
+        split_frames = []
+        for split_index in range(heldout_cell_splits):
+            split_args = argparse.Namespace(**vars(args))
+            split_args.heldout_cell_splits = 1
+            split_args.random_seed = _heldout_split_seed(args.random_seed, split_index)
+            split_result = score_explicit_events(split_args)
+            split_frame = split_result.rows.copy()
+            if not split_frame.empty:
+                split_frame["heldout_split_index"] = int(split_index)
+                split_frame["heldout_split_seed"] = int(split_args.random_seed)
+                split_frame["benchmark_heldout_cell_splits"] = int(heldout_cell_splits)
+            split_frames.append(split_frame)
+        frame = pd.concat(split_frames, ignore_index=True) if split_frames else pd.DataFrame()
+        if not frame.empty:
+            frame = frame.sort_values(["heldout_split_index", "event_index", "model"]).reset_index(drop=True)
+        return BenchmarkResult(frame)
+
     config = BenchmarkConfig(
         emissions=EmissionConfig(time_bin_s=args.time_bin_s, spike_rate_scale=args.spike_rate_scale),
         test_cell_fraction=args.test_cell_fraction,
+        heldout_cell_splits=heldout_cell_splits,
         candidate_top_k=args.candidate_top_k,
         pyrecest_particles=args.pyrecest_particles,
         random_seed=args.random_seed,
@@ -220,6 +243,10 @@ def write_outputs(result: BenchmarkResult, output_dir: Path) -> None:
 
     if not result.rows.empty:
         success = result.rows[result.rows["status"] == "success"]
+        pivot_index = ["session", "event_index"]
+        for column in ("heldout_split_index", "heldout_split_seed"):
+            if column in success.columns:
+                pivot_index.append(column)
         for metric in (
             "heldout_log_likelihood",
             "heldout_bits_per_spike",
@@ -228,7 +255,7 @@ def write_outputs(result: BenchmarkResult, output_dir: Path) -> None:
         ):
             if metric in success.columns:
                 pivot = success.pivot_table(
-                    index=["session", "event_index"],
+                    index=pivot_index,
                     columns="model",
                     values=metric,
                     aggfunc="first",
@@ -262,6 +289,7 @@ def main() -> int:
     parser.add_argument("--pyrecest-particles", default=512, type=int)
     parser.add_argument("--test-cell-fraction", default=0.25, type=float)
     parser.add_argument("--random-seed", default=1, type=int)
+    parser.add_argument("--heldout-cell-splits", default=1, type=int)
     parser.add_argument("--time-bin-s", default=0.02, type=float)
     parser.add_argument("--spike-rate-scale", default=1.0, type=float)
     parser.add_argument("--output", default="results/heldout-benchmark")

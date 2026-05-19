@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 import numpy as np
@@ -135,6 +135,7 @@ def validate_session_position_decoding(
                 min_spikes=config.min_spikes_per_window,
             )
             if row is not None:
+                row.update(_position_validation_config_metadata(config))
                 rows.append(row)
     return pd.DataFrame(rows)
 
@@ -215,6 +216,7 @@ def fit_place_field_encoding_for_position_mask(
 def summarize_position_decoding(samples: pd.DataFrame) -> pd.DataFrame:
     if samples.empty:
         return pd.DataFrame()
+    samples = _ensure_position_validation_summary_columns(samples)
     return (
         samples.groupby("session", as_index=False)
         .agg(
@@ -229,9 +231,229 @@ def summarize_position_decoding(samples: pd.DataFrame) -> pd.DataFrame:
             spatial_bins=("n_position_bins", "first"),
             spike_mark_features=("spike_mark_features", "first"),
             clusterless_mark_likelihood=("clusterless_mark_likelihood", "first"),
+            decode_bin_s=("decode_bin_s", "first"),
+            n_folds_requested=("n_folds", "first"),
+            min_spikes_per_window=("min_spikes_per_window", "first"),
+            bin_size_cm=("bin_size_cm", "first"),
+            smoothing_sigma_bins=("smoothing_sigma_bins", "first"),
+            min_speed_cm_s=("min_speed_cm_s", "first"),
+            encoding_min_occupancy_s=("encoding_min_occupancy_s", "first"),
+            encoding_rate_floor_hz=("encoding_rate_floor_hz", "first"),
+            encoding_arena_padding_cm=("encoding_arena_padding_cm", "first"),
+            encoding_use_excitatory=("encoding_use_excitatory", "first"),
         )
         .sort_values("session")
     )
+
+
+_POSITION_VALIDATION_ENCODER_ALIASES = {
+    "bin_size_cm": ("bin_size_cm", "encoding_bin_size_cm"),
+    "smoothing_sigma_bins": (
+        "smoothing_sigma_bins",
+        "encoding_smoothing_sigma_bins",
+    ),
+    "min_speed_cm_s": ("min_speed_cm_s", "encoding_min_speed_cm_s"),
+    "min_occupancy_s": ("encoding_min_occupancy_s", "min_occupancy_s"),
+    "rate_floor_hz": ("encoding_rate_floor_hz", "rate_floor_hz"),
+    "arena_padding_cm": ("encoding_arena_padding_cm", "arena_padding_cm"),
+    "use_excitatory": ("encoding_use_excitatory", "use_excitatory"),
+}
+
+_POSITION_VALIDATION_REQUIRED_ENCODER_FIELDS = (
+    "bin_size_cm",
+    "smoothing_sigma_bins",
+    "min_speed_cm_s",
+)
+
+_POSITION_VALIDATION_OPTIONAL_ENCODER_FIELDS = (
+    "min_occupancy_s",
+    "rate_floor_hz",
+    "arena_padding_cm",
+    "use_excitatory",
+)
+
+_POSITION_VALIDATION_SORT_ASCENDING = (
+    "median_posterior_mean_error_cm",
+    "median_map_error_cm",
+    "median_true_bin_rank",
+)
+
+_POSITION_VALIDATION_SORT_DESCENDING = (
+    "mean_true_bin_probability",
+    "decode_windows",
+)
+
+_POSITION_VALIDATION_SUMMARY_DEFAULTS = {
+    "decode_bin_s": np.nan,
+    "n_folds": np.nan,
+    "min_spikes_per_window": np.nan,
+    "bin_size_cm": np.nan,
+    "smoothing_sigma_bins": np.nan,
+    "min_speed_cm_s": np.nan,
+    "encoding_min_occupancy_s": np.nan,
+    "encoding_rate_floor_hz": np.nan,
+    "encoding_arena_padding_cm": np.nan,
+    "encoding_use_excitatory": np.nan,
+}
+
+
+def load_position_validated_encoding_configs(
+    path: str | Path,
+    *,
+    base_encoding: EncodingConfig | None = None,
+) -> dict[str, EncodingConfig]:
+    """Load behavior-validated replay encoder settings from a CSV table.
+
+    The input can be a ``position_decoding_summary.csv`` written by
+    ``validate-position`` or a ranked/best-by-session summary from the position
+    validation matrix workflow.  When multiple rows exist for one session, rows
+    passing ``passes_smoke_gate`` are preferred and the remaining rows are
+    ranked by position-decoding error.
+    """
+
+    frame = pd.read_csv(path)
+    return select_position_validated_encoding_configs(
+        frame,
+        base_encoding=base_encoding,
+    )
+
+
+def select_position_validated_encoding_configs(
+    frame: pd.DataFrame,
+    *,
+    base_encoding: EncodingConfig | None = None,
+) -> dict[str, EncodingConfig]:
+    """Select one validated ``EncodingConfig`` per session from a results table."""
+
+    if frame.empty:
+        raise ValueError("position-validation encoder table is empty")
+    working = frame.copy()
+    session_column = _position_validation_session_column(working)
+    resolved_columns = _resolve_position_validation_encoder_columns(working)
+    base = EncodingConfig() if base_encoding is None else base_encoding
+    configs: dict[str, EncodingConfig] = {}
+    for session_id, group in working.groupby(session_column, dropna=False, sort=False):
+        row = _select_position_validation_row(group)
+        session_key = "__default__" if pd.isna(session_id) else str(session_id)
+        updates: dict[str, float | bool] = {}
+        for field_name, column in resolved_columns.items():
+            value = row[column]
+            if pd.isna(value):
+                if field_name in _POSITION_VALIDATION_REQUIRED_ENCODER_FIELDS:
+                    raise ValueError(
+                        f"position-validation row for session {session_key!r} "
+                        f"has no finite {column!r} value"
+                    )
+                continue
+            if field_name == "use_excitatory":
+                updates[field_name] = _truthy(value)
+            else:
+                updates[field_name] = float(value)
+        configs[session_key] = replace(base, **updates)
+    if not configs:
+        raise ValueError("no position-validation encoder rows were selected")
+    return configs
+
+
+def _position_validation_config_metadata(config: PositionDecodingConfig) -> dict[str, object]:
+    return {
+        "decode_bin_s": float(config.decode_bin_s),
+        "n_folds": int(config.n_folds),
+        "min_spikes_per_window": int(config.min_spikes_per_window),
+        "bin_size_cm": float(config.encoding.bin_size_cm),
+        "smoothing_sigma_bins": float(config.encoding.smoothing_sigma_bins),
+        "min_speed_cm_s": float(config.encoding.min_speed_cm_s),
+        "encoding_min_occupancy_s": float(config.encoding.min_occupancy_s),
+        "encoding_rate_floor_hz": float(config.encoding.rate_floor_hz),
+        "encoding_arena_padding_cm": float(config.encoding.arena_padding_cm),
+        "encoding_use_excitatory": bool(config.encoding.use_excitatory),
+    }
+
+
+def _ensure_position_validation_summary_columns(samples: pd.DataFrame) -> pd.DataFrame:
+    missing = [column for column in _POSITION_VALIDATION_SUMMARY_DEFAULTS if column not in samples]
+    if not missing:
+        return samples
+    samples = samples.copy()
+    for column in missing:
+        samples[column] = _POSITION_VALIDATION_SUMMARY_DEFAULTS[column]
+    return samples
+
+
+def _position_validation_session_column(frame: pd.DataFrame) -> str:
+    for column in ("session", "requested_session"):
+        if column in frame.columns:
+            return column
+    frame["session"] = "__default__"
+    return "session"
+
+
+def _resolve_position_validation_encoder_columns(frame: pd.DataFrame) -> dict[str, str]:
+    resolved: dict[str, str] = {}
+    missing: list[str] = []
+    for field_name in _POSITION_VALIDATION_REQUIRED_ENCODER_FIELDS:
+        column = _find_position_validation_encoder_column(frame, field_name)
+        if column is None:
+            missing.append("/".join(_POSITION_VALIDATION_ENCODER_ALIASES[field_name]))
+        else:
+            resolved[field_name] = column
+    if missing:
+        raise ValueError(
+            "position-validation encoder table is missing required columns: "
+            + ", ".join(missing)
+        )
+    for field_name in _POSITION_VALIDATION_OPTIONAL_ENCODER_FIELDS:
+        column = _find_position_validation_encoder_column(frame, field_name)
+        if column is not None:
+            resolved[field_name] = column
+    return resolved
+
+
+def _find_position_validation_encoder_column(
+    frame: pd.DataFrame,
+    field_name: str,
+) -> str | None:
+    for column in _POSITION_VALIDATION_ENCODER_ALIASES[field_name]:
+        if column in frame.columns:
+            return column
+    return None
+
+
+def _select_position_validation_row(group: pd.DataFrame) -> pd.Series:
+    candidates = group.copy()
+    if "passes_smoke_gate" in candidates:
+        pass_mask = candidates["passes_smoke_gate"].map(_truthy)
+        if bool(pass_mask.any()):
+            candidates = candidates.loc[pass_mask].copy()
+
+    sort_columns: list[str] = []
+    ascending: list[bool] = []
+    for column in _POSITION_VALIDATION_SORT_ASCENDING:
+        if column in candidates:
+            candidates[column] = pd.to_numeric(candidates[column], errors="coerce")
+            sort_columns.append(column)
+            ascending.append(True)
+    for column in _POSITION_VALIDATION_SORT_DESCENDING:
+        if column in candidates:
+            candidates[column] = pd.to_numeric(candidates[column], errors="coerce")
+            sort_columns.append(column)
+            ascending.append(False)
+    if sort_columns:
+        candidates = candidates.sort_values(
+            sort_columns,
+            ascending=ascending,
+            na_position="last",
+            kind="stable",
+        )
+    return candidates.iloc[0]
+
+
+def _truthy(value: object) -> bool:
+    if pd.isna(value):
+        return False
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "t", "yes", "y"}
+    return bool(value)
 
 
 def _decode_windows(

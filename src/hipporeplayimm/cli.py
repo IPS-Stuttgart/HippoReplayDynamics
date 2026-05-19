@@ -11,6 +11,11 @@ import pandas as pd
 from .benchmarks import BenchmarkConfig, _build_models, bootstrap_delta_ci, run_open_field_benchmark
 from .data import load_open_field_sessions
 from .encoding import EmissionConfig, EncodingConfig, build_emissions, fit_place_field_encoding
+from .goal_state_space_integration import (
+    DEFAULT_GOAL_DRIFT_SPEED_CM_S,
+    DEFAULT_GOAL_MAX_STEP_SIGMA,
+    DEFAULT_GOAL_TRANSITION_SIGMA_CM_SQRT_S,
+)
 from .ground_truth import (
     GroundTruthConfig,
     compare_scores_to_ground_truth,
@@ -22,6 +27,7 @@ from .position_validation import (
     VALIDATED_POSITION_MIN_SPEED_CM_S,
     VALIDATED_POSITION_SMOOTHING_SIGMA_BINS,
     PositionDecodingConfig,
+    load_position_validated_encoding_configs,
     run_position_decoding_validation,
 )
 from .simulation_recovery import (
@@ -54,6 +60,7 @@ def main(argv: list[str] | None = None) -> int:
     benchmark_parser.add_argument("--output")
     benchmark_parser.add_argument("--max-events", type=int)
     benchmark_parser.add_argument("--candidate-top-k", type=int, default=64)
+    _add_candidate_support_arguments(benchmark_parser)
     benchmark_parser.add_argument("--test-cell-fraction", type=float, default=0.25)
     benchmark_parser.add_argument("--random-seed", type=int, default=1)
     benchmark_parser.add_argument("--time-bin-ms", type=float, default=20.0)
@@ -65,12 +72,29 @@ def main(argv: list[str] | None = None) -> int:
     )
     _add_encoding_arguments(benchmark_parser)
     _add_pyrecest_scalar_arguments(benchmark_parser)
+    _add_goal_state_space_arguments(benchmark_parser)
+    benchmark_parser.add_argument(
+        "--position-validation-encoder-config",
+        help=(
+            "CSV from validate-position or the position-validation matrix; "
+            "the best row per session supplies replay encoder settings."
+        ),
+    )
+    benchmark_parser.add_argument(
+        "--allow-missing-position-validation-config",
+        action="store_true",
+        help=(
+            "Fall back to CLI encoder settings for sessions missing from "
+            "the validation CSV."
+        ),
+    )
 
     decode_parser = subparsers.add_parser("decode-event")
     decode_parser.add_argument("root")
     decode_parser.add_argument("--session", required=True)
     decode_parser.add_argument("--event-id", type=int, required=True)
     decode_parser.add_argument("--candidate-top-k", type=int, default=64)
+    _add_candidate_support_arguments(decode_parser)
     decode_parser.add_argument("--time-bin-ms", type=float, default=20.0)
     decode_parser.add_argument("--spike-rate-scale", type=float, default=1.0)
     decode_parser.add_argument("--output")
@@ -81,6 +105,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     _add_encoding_arguments(decode_parser)
     _add_pyrecest_scalar_arguments(decode_parser)
+    _add_goal_state_space_arguments(decode_parser)
 
     ground_truth_parser = subparsers.add_parser("ground-truth")
     ground_truth_parser.add_argument("root")
@@ -102,6 +127,7 @@ def main(argv: list[str] | None = None) -> int:
     compare_parser.add_argument("--spike-rate-scale", type=float, default=1.0)
     _add_encoding_arguments(compare_parser)
     _add_pyrecest_scalar_arguments(compare_parser)
+    _add_goal_state_space_arguments(compare_parser)
     compare_parser.add_argument("--visit-radius-cm", type=float, default=10.0)
     compare_parser.add_argument("--min-dwell-s", type=float, default=0.2)
     compare_parser.add_argument("--future-horizon-s", type=float, default=30.0)
@@ -139,6 +165,9 @@ def main(argv: list[str] | None = None) -> int:
     recovery_parser.add_argument("--state-space-momentum-initial-sigma-cm-sqrt-s", type=float, default=None)
     recovery_parser.add_argument("--state-space-momentum-velocity-decay", type=float, default=0.95)
     recovery_parser.add_argument("--state-space-momentum-candidate-top-k", type=int, default=128)
+    recovery_parser.add_argument("--state-space-momentum-predicted-candidate-top-k", type=int, default=8)
+    recovery_parser.add_argument("--state-space-candidate-min-log-mass", type=float)
+    recovery_parser.add_argument("--state-space-momentum-prediction-halo-cm", type=float, default=0.0)
     recovery_parser.add_argument("--candidate-top-k", type=int, default=64)
     recovery_parser.add_argument("--stationary-sigma-cm", type=float, default=2.0)
     recovery_parser.add_argument("--diffusion-sigma-cm", type=float, default=12.0)
@@ -264,6 +293,9 @@ def _simulate_recovery(args: argparse.Namespace) -> int:
         momentum_initial_sigma_cm_sqrt_s=args.state_space_momentum_initial_sigma_cm_sqrt_s or shared_sigma,
         momentum_velocity_decay=args.state_space_momentum_velocity_decay,
         momentum_candidate_top_k=args.state_space_momentum_candidate_top_k,
+        momentum_candidate_min_log_mass=args.state_space_candidate_min_log_mass,
+        momentum_predicted_candidate_top_k=args.state_space_momentum_predicted_candidate_top_k,
+        momentum_prediction_halo_cm=args.state_space_momentum_prediction_halo_cm,
     )
     config = SimulationRecoveryConfig(
         true_models=parse_model_list(args.true_models),
@@ -296,16 +328,34 @@ def _simulate_recovery(args: argparse.Namespace) -> int:
 def _benchmark(args: argparse.Namespace) -> int:
     if args.preset != "open-field-loso":
         raise ValueError("Only --preset open-field-loso is currently implemented")
+    encoding_config = _encoding_config_from_args(args)
+    position_validated_configs = _position_validated_encoding_configs_from_args(
+        args,
+        encoding_config,
+    )
     config = BenchmarkConfig(
-        encoding=_encoding_config_from_args(args),
+        encoding=encoding_config,
         emissions=_emission_config_from_args(args),
         max_events_per_session=args.max_events,
         test_cell_fraction=args.test_cell_fraction,
         random_seed=args.random_seed,
         candidate_top_k=args.candidate_top_k,
+        **_candidate_support_kwargs(args),
         models=_parse_models(args.models),
         **_pyrecest_scalar_kwargs(args),
+        **_goal_state_space_kwargs(args),
+        position_validated_encoding_configs=position_validated_configs,
+        position_validated_encoding_source=str(
+            args.position_validation_encoder_config or ""
+        ),
+        allow_missing_position_validated_encoding=args.allow_missing_position_validation_config,
     )
+    if position_validated_configs:
+        sessions = ", ".join(sorted(position_validated_configs))
+        print(
+            "Using position-validated replay encoder settings for "
+            f"{len(position_validated_configs)} session(s): {sessions}"
+        )
     result = run_open_field_benchmark(args.root, config)
     print(result.summary().to_string(index=False))
     if not result.rows.empty and "imm" in set(result.rows["model"]):
@@ -342,8 +392,10 @@ def _decode_event(args: argparse.Namespace) -> int:
     config = BenchmarkConfig(
         emissions=emission_config,
         candidate_top_k=args.candidate_top_k,
+        **_candidate_support_kwargs(args),
         models=_parse_models(args.models),
         **_pyrecest_scalar_kwargs(args),
+        **_goal_state_space_kwargs(args),
     )
     posterior_artifacts: list[tuple[str, object]] = []
     for model in _build_models(config, session=session).values():
@@ -409,6 +461,7 @@ def _compare_ground_truth(args: argparse.Namespace) -> int:
         candidate_top_k=args.candidate_top_k,
         random_seed=args.random_seed,
         **_pyrecest_scalar_kwargs(args),
+        **_goal_state_space_kwargs(args),
     )
     output = Path(args.output)
     output.parent.mkdir(parents=True, exist_ok=True)
@@ -438,6 +491,16 @@ def _emission_config_from_args(args: argparse.Namespace) -> EmissionConfig:
         time_bin_s=args.time_bin_ms / 1000.0,
         spike_rate_scale=args.spike_rate_scale,
     )
+
+
+def _position_validated_encoding_configs_from_args(
+    args: argparse.Namespace,
+    base_encoding: EncodingConfig,
+) -> dict[str, EncodingConfig]:
+    path = getattr(args, "position_validation_encoder_config", None)
+    if not path:
+        return {}
+    return load_position_validated_encoding_configs(path, base_encoding=base_encoding)
 
 
 def _sweep_pyrecest(args: argparse.Namespace) -> int:
@@ -500,6 +563,24 @@ def _add_encoding_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--min-speed-cm-s", type=float, default=VALIDATED_POSITION_MIN_SPEED_CM_S)
 
 
+def _add_candidate_support_arguments(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--candidate-predicted-top-k", type=int, default=8)
+    parser.add_argument(
+        "--candidate-min-log-mass",
+        type=float,
+        help="Adaptive legacy candidate support target, e.g. log(0.99); omitted keeps fixed top-k.",
+    )
+    parser.add_argument("--candidate-prediction-halo-cm", type=float, default=0.0)
+    parser.add_argument("--state-space-momentum-candidate-top-k", type=int, default=128)
+    parser.add_argument("--state-space-momentum-predicted-candidate-top-k", type=int, default=8)
+    parser.add_argument(
+        "--state-space-candidate-min-log-mass",
+        type=float,
+        help="Adaptive state-space candidate support target, e.g. log(0.99); omitted keeps fixed top-k.",
+    )
+    parser.add_argument("--state-space-momentum-prediction-halo-cm", type=float, default=0.0)
+
+
 def _add_pyrecest_scalar_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--pyrecest-particles", type=int, default=512)
     parser.add_argument("--pyrecest-alpha", type=float, default=0.80)
@@ -538,6 +619,27 @@ def _add_pyrecest_scalar_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--pyrecest-imm-jump-velocity-decay", type=float, default=0.25)
 
 
+def _add_goal_state_space_arguments(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--goal-state-space-transition-sigma-cm-sqrt-s",
+        type=float,
+        default=DEFAULT_GOAL_TRANSITION_SIGMA_CM_SQRT_S,
+        help="Spatial diffusion scale for the exact goal-conditioned state-space decoder.",
+    )
+    parser.add_argument(
+        "--goal-state-space-drift-speed-cm-s",
+        type=float,
+        default=DEFAULT_GOAL_DRIFT_SPEED_CM_S,
+        help="Goal-directed drift speed for the exact goal-conditioned state-space decoder.",
+    )
+    parser.add_argument(
+        "--goal-state-space-max-step-sigma",
+        type=float,
+        default=DEFAULT_GOAL_MAX_STEP_SIGMA,
+        help="Sparse transition support radius in transition-sigma units for the exact goal-conditioned decoder.",
+    )
+
+
 def _pyrecest_scalar_kwargs(args: argparse.Namespace) -> dict[str, float | int]:
     return {
         "pyrecest_particles": args.pyrecest_particles,
@@ -563,6 +665,14 @@ def _pyrecest_scalar_kwargs(args: argparse.Namespace) -> dict[str, float | int]:
         ),
         "pyrecest_imm_jump_fraction": args.pyrecest_imm_jump_fraction,
         "pyrecest_imm_jump_velocity_decay": args.pyrecest_imm_jump_velocity_decay,
+    }
+
+
+def _goal_state_space_kwargs(args: argparse.Namespace) -> dict[str, float]:
+    return {
+        "goal_state_space_transition_sigma_cm_sqrt_s": args.goal_state_space_transition_sigma_cm_sqrt_s,
+        "goal_state_space_drift_speed_cm_s": args.goal_state_space_drift_speed_cm_s,
+        "goal_state_space_max_step_sigma": args.goal_state_space_max_step_sigma,
     }
 
 

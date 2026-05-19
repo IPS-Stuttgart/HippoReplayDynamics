@@ -7,6 +7,7 @@ from dataclasses import dataclass
 import numpy as np
 from scipy.sparse import csr_matrix
 
+from .duration_dynamics import transition_durations_s
 from .encoding import LogEmissionTensor
 from .evidence_reporting import EXACT_EVIDENCE_SUPPORT
 from .models import EventScore, _posterior_diagnostics
@@ -47,15 +48,22 @@ class GoalStateSpaceReplayModel:
             raise ValueError('max_step_sigma must be positive')
 
         goals = _coerce_candidate_goals(self.candidate_goals, centers)
-        transition_sigma_cm = _per_bin_sigma(self.transition_sigma_cm_sqrt_s, emissions.dt)
-        drift_step_cm = float(self.drift_speed_cm_s) * float(emissions.dt)
+        transition_durations = transition_durations_s(emissions)
+        transition_sigmas_cm = _goal_transition_sigmas_cm(
+            self.transition_sigma_cm_sqrt_s,
+            transition_durations,
+        )
+        drift_steps_cm = _goal_drift_steps_cm(self.drift_speed_cm_s, transition_durations)
         transitions = tuple(
-            _goal_transition_matrix(
-                centers,
-                goal,
-                drift_step_cm=drift_step_cm,
-                sigma_cm=transition_sigma_cm,
-                max_step_sigma=self.max_step_sigma,
+            tuple(
+                _goal_transition_matrix(
+                    centers,
+                    goal,
+                    drift_step_cm=float(drift_steps_cm[transition_index]),
+                    sigma_cm=float(transition_sigmas_cm[transition_index]),
+                    max_step_sigma=self.max_step_sigma,
+                )
+                for transition_index in range(len(transition_durations))
             )
             for goal in goals
         )
@@ -66,6 +74,14 @@ class GoalStateSpaceReplayModel:
         terminal = trajectory[-1]
         terminal_goal_posterior = goal_posteriors[-1]
         best_goal_index = int(np.argmax(terminal_goal_posterior))
+        transition_sigma_cm = _representative_transition_parameter(
+            transition_sigmas_cm,
+            fallback=_per_bin_sigma(self.transition_sigma_cm_sqrt_s, float(emissions.dt)),
+        )
+        drift_step_cm = _representative_transition_parameter(
+            drift_steps_cm,
+            fallback=float(self.drift_speed_cm_s) * float(emissions.dt),
+        )
         diagnostics: dict[str, float | int | str] = {
             'state_space_mode': 'goal',
             'state_space_observation_model': 'sorted-spike-poisson',
@@ -76,8 +92,15 @@ class GoalStateSpaceReplayModel:
             'goal_state_space_candidate_goals': int(goals.shape[0]),
             'goal_state_space_transition_sigma_cm_sqrt_s': float(self.transition_sigma_cm_sqrt_s),
             'goal_state_space_transition_sigma_cm': float(transition_sigma_cm),
+            'goal_state_space_transition_sigma_cm_per_step': _format_float_series(
+                transition_sigmas_cm
+            ),
+            'goal_state_space_transition_durations': _format_float_series(
+                transition_durations
+            ),
             'goal_state_space_drift_speed_cm_s': float(self.drift_speed_cm_s),
             'goal_state_space_drift_step_cm': float(drift_step_cm),
+            'goal_state_space_drift_step_cm_per_step': _format_float_series(drift_steps_cm),
             'goal_state_space_max_step_sigma': float(self.max_step_sigma),
             'goal_state_space_evidence_support': EXACT_EVIDENCE_SUPPORT,
             'goal_state_space_most_likely_goal_index': best_goal_index,
@@ -106,14 +129,20 @@ class GoalStateSpaceReplayModel:
 
 def _forward_backward_goal_mixture(
     log_likelihood: np.ndarray,
-    transitions: tuple[csr_matrix, ...],
+    transitions: tuple[tuple[csr_matrix, ...], ...],
 ) -> tuple[float, np.ndarray, np.ndarray]:
     '''Run exact forward-backward recursion on the augmented goal-position state.'''
 
     if not transitions:
-        raise ValueError('at least one goal transition matrix is required')
+        raise ValueError('at least one goal transition sequence is required')
     n_time, n_bins = log_likelihood.shape
     n_goals = len(transitions)
+    n_transitions = max(n_time - 1, 0)
+    for goal_index, goal_transitions in enumerate(transitions):
+        if len(goal_transitions) != n_transitions:
+            raise ValueError(
+                f'transitions[{goal_index}] must contain one matrix per transition'
+            )
     scaled, offsets = _scaled_emissions(log_likelihood)
     filtered = np.zeros((n_time, n_goals, n_bins), dtype=float)
     scales = np.zeros(n_time, dtype=float)
@@ -128,8 +157,11 @@ def _forward_backward_goal_mixture(
 
     for time_index in range(1, n_time):
         predicted = np.empty_like(alpha)
-        for goal_index, transition in enumerate(transitions):
-            predicted[goal_index] = np.asarray(transition @ alpha[goal_index], dtype=float)
+        for goal_index, goal_transitions in enumerate(transitions):
+            predicted[goal_index] = np.asarray(
+                goal_transitions[time_index - 1] @ alpha[goal_index],
+                dtype=float,
+            )
         alpha = predicted * scaled[time_index][None, :]
         scales[time_index] = float(alpha.sum())
         if scales[time_index] <= 0.0:
@@ -144,8 +176,11 @@ def _forward_backward_goal_mixture(
     for time_index in range(n_time - 1, 0, -1):
         values = scaled[time_index][None, :] * beta
         beta_prev = np.empty_like(beta)
-        for goal_index, transition in enumerate(transitions):
-            beta_prev[goal_index] = np.asarray(transition.T @ values[goal_index], dtype=float)
+        for goal_index, goal_transitions in enumerate(transitions):
+            beta_prev[goal_index] = np.asarray(
+                goal_transitions[time_index - 1].T @ values[goal_index],
+                dtype=float,
+            )
         beta = beta_prev / scales[time_index]
         gamma = filtered[time_index - 1] * beta
         total = float(gamma.sum())
@@ -212,6 +247,37 @@ def _goal_drift_prediction(position: np.ndarray, goal: np.ndarray, drift_step_cm
         return np.asarray(position, dtype=float)
     step = min(float(drift_step_cm), distance)
     return np.asarray(position, dtype=float) + (step / distance) * vector
+
+
+def _goal_transition_sigmas_cm(
+    transition_sigma_cm_sqrt_s: float,
+    transition_durations_s: np.ndarray,
+) -> np.ndarray:
+    return np.asarray(
+        [
+            _per_bin_sigma(transition_sigma_cm_sqrt_s, float(duration_s))
+            for duration_s in transition_durations_s
+        ],
+        dtype=float,
+    )
+
+
+def _goal_drift_steps_cm(
+    drift_speed_cm_s: float,
+    transition_durations_s: np.ndarray,
+) -> np.ndarray:
+    return float(drift_speed_cm_s) * np.asarray(transition_durations_s, dtype=float)
+
+
+def _representative_transition_parameter(values: np.ndarray, *, fallback: float) -> float:
+    arr = np.asarray(values, dtype=float)
+    if arr.size == 0:
+        return float(fallback)
+    return float(np.median(arr))
+
+
+def _format_float_series(values: np.ndarray) -> str:
+    return ','.join(f'{float(value):.12g}' for value in np.asarray(values, dtype=float))
 
 
 def _coerce_candidate_goals(

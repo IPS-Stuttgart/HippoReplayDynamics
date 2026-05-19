@@ -30,6 +30,9 @@ from .duration_dynamics import apply_duration_dynamics_patch as _apply_duration_
 from .encoding import EncodingConfig, EncodingModel, build_emissions, fit_place_field_encoding
 from .evidence_reporting import patch_simulation_recovery_module as _patch_simulation_recovery_module
 from .goal_state_space import GoalStateSpaceReplayModel
+from .ground_truth_candidate_support import (
+    apply_ground_truth_candidate_support_patch as _apply_ground_truth_candidate_support_patch,
+)
 from .ground_truth import (
     GroundTruthConfig,
     compare_scores_to_ground_truth,
@@ -58,6 +61,7 @@ from .sweeps import (
 # model-evidence score tables that used short metadata column names.
 _ground_truth._encoding_config_for_scores = _score_metadata.encoding_config_for_scores
 _ground_truth._emission_config_for_scores = _score_metadata.emission_config_for_scores
+_apply_ground_truth_candidate_support_patch()
 
 
 def _synchronize_duration_patched_emission_builders() -> None:

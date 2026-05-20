@@ -224,13 +224,6 @@ def _models(args, session=None) -> dict[str, object]:
     return {name: available[name] for name in dict.fromkeys(names)}
 
 
-def _session_goal_candidates(session) -> np.ndarray | None:
-    wells = infer_well_locations(session)
-    if wells.empty:
-        return None
-    return wells[["well_x", "well_y"]].to_numpy(dtype=float)
-
-
 def _state_space_mode_stickiness(args) -> float:
     tau_s = float(getattr(args, "state_space_imm_switch_tau_s", 0.0))
     if tau_s <= 0.0:

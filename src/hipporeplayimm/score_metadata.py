@@ -139,6 +139,9 @@ def apply_model_hyperparam_patch() -> None:
         state_space_momentum_initial_sigma_cm_sqrt_s: float = 85.0
         state_space_momentum_velocity_decay: float = 0.95
         state_space_momentum_candidate_top_k: int = 128
+        goal_state_space_transition_sigma_cm_sqrt_s: float = 85.0
+        goal_state_space_drift_speed_cm_s: float = 400.0
+        goal_state_space_max_step_sigma: float = 4.0
         pyrecest_particles: int = 512
         pyrecest_alpha: float = 0.80
         pyrecest_beta: float = 1.00
@@ -279,6 +282,9 @@ def apply_model_hyperparam_patch() -> None:
             "state_space_momentum_initial_sigma_cm_sqrt_s": float(cfg(config, "state_space_momentum_initial_sigma_cm_sqrt_s", 85.0)),
             "state_space_momentum_velocity_decay": float(cfg(config, "state_space_momentum_velocity_decay", 0.95)),
             "state_space_momentum_candidate_top_k": int(cfg(config, "state_space_momentum_candidate_top_k", 128)),
+            "goal_state_space_transition_sigma_cm_sqrt_s": float(cfg(config, "goal_state_space_transition_sigma_cm_sqrt_s", 85.0)),
+            "goal_state_space_drift_speed_cm_s": float(cfg(config, "goal_state_space_drift_speed_cm_s", 400.0)),
+            "goal_state_space_max_step_sigma": float(cfg(config, "goal_state_space_max_step_sigma", 4.0)),
             "clusterless_mark_smoothing_sigma_bins": float(cfg(config, "clusterless_mark_smoothing_sigma_bins", 1.0)),
             "clusterless_mark_prior_count": float(cfg(config, "clusterless_mark_prior_count", 1.0)),
             "clusterless_mark_variance_floor": float(cfg(config, "clusterless_mark_variance_floor", 1.0)),
@@ -332,6 +338,9 @@ def apply_model_hyperparam_patch() -> None:
         state_space_momentum_initial_sigma_cm_sqrt_s: float,
         state_space_momentum_velocity_decay: float,
         state_space_momentum_candidate_top_k: int,
+        goal_state_space_transition_sigma_cm_sqrt_s: float,
+        goal_state_space_drift_speed_cm_s: float,
+        goal_state_space_max_step_sigma: float,
         pyrecest_particles: int,
         pyrecest_alpha: float,
         pyrecest_beta: float,
@@ -368,6 +377,9 @@ def apply_model_hyperparam_patch() -> None:
             state_space_momentum_initial_sigma_cm_sqrt_s=_unique_float_from_columns(scores_frame, ("state_space_momentum_initial_sigma_cm_sqrt_s", "diagnostic_state_space_momentum_initial_sigma_cm_sqrt_s"), state_space_momentum_initial_sigma_cm_sqrt_s),
             state_space_momentum_velocity_decay=_unique_float_from_columns(scores_frame, ("state_space_momentum_velocity_decay", "diagnostic_state_space_momentum_velocity_decay"), state_space_momentum_velocity_decay),
             state_space_momentum_candidate_top_k=_unique_int_from_columns(scores_frame, ("state_space_momentum_candidate_top_k", "diagnostic_state_space_momentum_candidate_top_k", "diagnostic_state_space_imm_candidate_top_k"), state_space_momentum_candidate_top_k),
+            goal_state_space_transition_sigma_cm_sqrt_s=_unique_float_from_columns(scores_frame, ("goal_state_space_transition_sigma_cm_sqrt_s", "diagnostic_goal_state_space_transition_sigma_cm_sqrt_s"), goal_state_space_transition_sigma_cm_sqrt_s),
+            goal_state_space_drift_speed_cm_s=_unique_float_from_columns(scores_frame, ("goal_state_space_drift_speed_cm_s", "diagnostic_goal_state_space_drift_speed_cm_s"), goal_state_space_drift_speed_cm_s),
+            goal_state_space_max_step_sigma=_unique_float_from_columns(scores_frame, ("goal_state_space_max_step_sigma", "diagnostic_goal_state_space_max_step_sigma"), goal_state_space_max_step_sigma),
             pyrecest_particles=pyrecest_particles,
             pyrecest_alpha=pyrecest_alpha,
             pyrecest_beta=pyrecest_beta,
@@ -410,6 +422,9 @@ def apply_model_hyperparam_patch() -> None:
         state_space_momentum_initial_sigma_cm_sqrt_s: float = 85.0,
         state_space_momentum_velocity_decay: float = 0.95,
         state_space_momentum_candidate_top_k: int = 128,
+        goal_state_space_transition_sigma_cm_sqrt_s: float = 85.0,
+        goal_state_space_drift_speed_cm_s: float = 400.0,
+        goal_state_space_max_step_sigma: float = 4.0,
         pyrecest_particles: int = 512,
         pyrecest_alpha: float = 0.80,
         pyrecest_beta: float = 1.00,
@@ -461,6 +476,9 @@ def apply_model_hyperparam_patch() -> None:
             state_space_momentum_initial_sigma_cm_sqrt_s=state_space_momentum_initial_sigma_cm_sqrt_s,
             state_space_momentum_velocity_decay=state_space_momentum_velocity_decay,
             state_space_momentum_candidate_top_k=state_space_momentum_candidate_top_k,
+            goal_state_space_transition_sigma_cm_sqrt_s=goal_state_space_transition_sigma_cm_sqrt_s,
+            goal_state_space_drift_speed_cm_s=goal_state_space_drift_speed_cm_s,
+            goal_state_space_max_step_sigma=goal_state_space_max_step_sigma,
             pyrecest_particles=pyrecest_particles,
             pyrecest_alpha=pyrecest_alpha,
             pyrecest_beta=pyrecest_beta,

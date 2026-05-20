@@ -118,6 +118,14 @@ def apply_model_hyperparam_patch() -> None:
         test_cell_fraction: float = 0.25
         max_events_per_session: int | None = None
         candidate_top_k: int = 64
+        clusterless_mark_smoothing_sigma_bins: float = 1.0
+        clusterless_mark_prior_count: float = 1.0
+        clusterless_mark_variance_floor: float = 1.0
+        clusterless_rate_floor_hz: float = 1e-4
+        clusterless_mark_likelihood: str = "local-kde"
+        clusterless_mark_kde_bandwidth: float | None = None
+        clusterless_mark_kde_spatial_sigma_bins: float | None = None
+        clusterless_mark_kde_max_neighbors: int = 256
         stationary_sigma_cm: float = 2.0
         diffusion_sigma_cm: float = 12.0
         momentum_sigma_cm: float = 12.0
@@ -271,6 +279,16 @@ def apply_model_hyperparam_patch() -> None:
             "state_space_momentum_initial_sigma_cm_sqrt_s": float(cfg(config, "state_space_momentum_initial_sigma_cm_sqrt_s", 85.0)),
             "state_space_momentum_velocity_decay": float(cfg(config, "state_space_momentum_velocity_decay", 0.95)),
             "state_space_momentum_candidate_top_k": int(cfg(config, "state_space_momentum_candidate_top_k", 128)),
+            "clusterless_mark_smoothing_sigma_bins": float(cfg(config, "clusterless_mark_smoothing_sigma_bins", 1.0)),
+            "clusterless_mark_prior_count": float(cfg(config, "clusterless_mark_prior_count", 1.0)),
+            "clusterless_mark_variance_floor": float(cfg(config, "clusterless_mark_variance_floor", 1.0)),
+            "clusterless_rate_floor_hz": float(cfg(config, "clusterless_rate_floor_hz", 1e-4)),
+            "clusterless_mark_likelihood": str(cfg(config, "clusterless_mark_likelihood", "local-kde")),
+            "clusterless_mark_kde_bandwidth": _optional_float_metadata(cfg(config, "clusterless_mark_kde_bandwidth", None)),
+            "clusterless_mark_kde_spatial_sigma_bins": _optional_float_metadata(
+                cfg(config, "clusterless_mark_kde_spatial_sigma_bins", None)
+            ),
+            "clusterless_mark_kde_max_neighbors": int(cfg(config, "clusterless_mark_kde_max_neighbors", 256)),
         }
         return base
 
@@ -547,6 +565,10 @@ def _unique_float_from_columns(
     if any(not np.isclose(value, first) for value in values[1:]):
         raise ValueError(f"{' / '.join(columns)} contains multiple values")
     return float(first)
+
+
+def _optional_float_metadata(value: float | None) -> float | str:
+    return "" if value is None else float(value)
 
 
 def _unique_int_from_column(frame: pd.DataFrame, column: str, default: int) -> int:

@@ -8,6 +8,18 @@ def _scalar_dt(dt):
     """Return the representative bin duration as an ordinary float."""
     return float(getattr(dt,'base',dt))
 
+class DurationFloat(float):
+    """Float dt with optional per-transition durations for compatibility."""
+    def __new__(cls, base, transition_durations=()):
+        obj=float.__new__(cls,float(base))
+        obj.base=float(base)
+        obj.transition_durations=tuple(float(v) for v in transition_durations)
+        return obj
+    def __hash__(self): return hash((self.base,self.transition_durations))
+    def __mul__(self,o): return self.base*o
+    def __rmul__(self,o): return o*self.base
+    def first(self): return self.transition_durations[0] if self.transition_durations else self.base
+
 def _dur_from_dt(dt):
     # Backward compatibility for emissions created by older in-process patches.
     ds=getattr(dt,'transition_durations',None)

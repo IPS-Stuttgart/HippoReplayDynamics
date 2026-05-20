@@ -153,10 +153,10 @@ def run_session_simulation_recovery(
                 start = time.perf_counter()
                 try:
                     if isinstance(model, CandidateKinematicModel):
-                        candidates = model.candidate_indices(emissions)
+                        candidates = _candidate_indices_for_model(model, emissions, encoding.bin_centers)
                         score = model.score(emissions, encoding.bin_centers, candidate_indices=candidates)
                     elif isinstance(model, SortedSpikeStateSpaceReplayModel) and model.mode == "momentum":
-                        candidates = model.candidate_indices(emissions)
+                        candidates = _candidate_indices_for_model(model, emissions, encoding.bin_centers)
                         score = model.score(emissions, encoding.bin_centers, candidate_indices=candidates)
                     else:
                         score = model.score(emissions, encoding.bin_centers)
@@ -465,6 +465,15 @@ def build_scoring_models(config: SimulationRecoveryConfig) -> dict[str, object]:
     if missing:
         raise ValueError(f"unknown scoring models: {missing}; available: {sorted(available)}")
     return {name: available[name] for name in dict.fromkeys(names)}
+
+
+def _candidate_indices_for_model(model: object, emissions: LogEmissionTensor, bin_centers: np.ndarray) -> list[np.ndarray]:
+    """Return candidate support, passing bin centers when a model supports augmentation."""
+
+    try:
+        return model.candidate_indices(emissions, bin_centers)  # type: ignore[attr-defined]
+    except TypeError:
+        return model.candidate_indices(emissions)  # type: ignore[attr-defined]
 
 
 def select_event_indices(session: ReplaySession, spec: str) -> list[int]:

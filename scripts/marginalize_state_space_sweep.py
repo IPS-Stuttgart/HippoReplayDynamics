@@ -110,7 +110,10 @@ def marginalize_sweep(
 
     outdir = Path(output)
     outdir.mkdir(parents=True, exist_ok=True)
-    event_model_evidence = _add_evidence_columns(pd.DataFrame(rows))
+    event_model_evidence = pd.DataFrame(rows)
+    if "runtime_s" not in event_model_evidence:
+        event_model_evidence["runtime_s"] = 0.0
+    event_model_evidence = _add_evidence_columns(event_model_evidence)
     gridsearch_best_params = pd.DataFrame(best_rows)
     prior_weights = pd.DataFrame(prior_rows)
     event_model_evidence.to_csv(outdir / "state_space_marginalized_event_model_evidence.csv", index=False)

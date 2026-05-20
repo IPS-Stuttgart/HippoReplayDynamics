@@ -14,7 +14,6 @@ from hipporeplayimm.accuracy_upgrades import (
     behavioral_well_context,
     build_continuous_time_emissions,
     fit_empirical_transition_matrix,
-    infer_tetrode_ids_from_feature_names,
     leave_one_rat_splits,
     robust_position_filter,
     summarize_tetrode_mark_partitions,

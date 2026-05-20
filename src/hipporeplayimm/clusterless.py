@@ -492,7 +492,7 @@ def build_clusterless_mark_emissions(
 
     config = EmissionConfig() if config is None else config
     if not np.isfinite(config.spike_rate_scale) or config.spike_rate_scale <= 0.0:
-        raise ValueError("spike_rate_scale must be finite and positive")
+        raise ValueError("spike_rate_scale must be positive")
     _validate_emission_calibration(
         likelihood_temperature=config.likelihood_temperature,
         negative_binomial_overdispersion=config.negative_binomial_overdispersion,

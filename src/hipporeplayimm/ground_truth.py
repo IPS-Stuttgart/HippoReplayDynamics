@@ -1249,14 +1249,24 @@ def trajectory_well_posterior_masses(
 
 
 def _well_bin_masks(bin_centers: np.ndarray, wells: pd.DataFrame, radius_cm: float) -> dict[int, np.ndarray]:
+    well_ids = [int(well.well_id) for well in wells.itertuples(index=False)]
+    centers = wells[["well_x", "well_y"]].to_numpy(dtype=float)
+    distances = np.sqrt(
+        np.sum((centers[:, None, :] - bin_centers[None, :, :]) ** 2, axis=2)
+    )
+    mask_matrix = distances <= float(radius_cm)
+    for row_index in range(mask_matrix.shape[0]):
+        if not np.any(mask_matrix[row_index]):
+            mask_matrix[row_index, int(np.argmin(distances[row_index]))] = True
+    for bin_index in range(mask_matrix.shape[1]):
+        owners = np.flatnonzero(mask_matrix[:, bin_index])
+        if owners.size > 1:
+            nearest = owners[int(np.argmin(distances[owners, bin_index]))]
+            mask_matrix[owners, bin_index] = False
+            mask_matrix[nearest, bin_index] = True
     masks: dict[int, np.ndarray] = {}
-    for well in wells.itertuples(index=False):
-        center = np.array([float(well.well_x), float(well.well_y)])
-        distances = np.sqrt(np.sum((bin_centers - center[None, :]) ** 2, axis=1))
-        in_radius = distances <= radius_cm
-        if not np.any(in_radius):
-            in_radius[int(np.argmin(distances))] = True
-        masks[int(well.well_id)] = in_radius
+    for well_id, row in zip(well_ids, mask_matrix, strict=True):
+        masks[well_id] = row
     return masks
 
 

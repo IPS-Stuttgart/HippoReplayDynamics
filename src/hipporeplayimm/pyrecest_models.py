@@ -478,6 +478,8 @@ def _position_proposal_probability(
     )
     if base_probability <= 0.0:
         return 0.0, ess_fraction
+    if base_probability >= 1.0:
+        return float(base_probability), ess_fraction
     if ess_threshold is None:
         return float(base_probability), ess_fraction
     if ess_fraction < float(ess_threshold):

@@ -7,7 +7,7 @@ make existing claims more robust by exposing hidden failure modes.
 ## What is included
 
 | Improvement | Implementation |
-|---|---|
+| --- | --- |
 | Multi-map / wrong-environment controls | `scripts/wrong_map_evidence_controls.py`, `wrong_map_delta_summary` |
 | Cell stability and place-field quality filters | `scripts/place_field_quality_report.py`, `place_field_quality`, `stable_cell_ids` |
 | Event-window sensitivity | `scripts/event_window_sensitivity_plan.py`, `event_window_variants`, `summarize_window_sensitivity` |

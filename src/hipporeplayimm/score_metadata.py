@@ -117,6 +117,9 @@ def apply_model_hyperparam_patch() -> None:
         emissions: EmissionConfig = field(default_factory=EmissionConfig)
         test_cell_fraction: float = 0.25
         max_events_per_session: int | None = None
+        n_cell_splits: int = 1
+        randomize_event_subset: bool = False
+        event_subset_seed: int | None = None
         candidate_top_k: int = 64
         clusterless_mark_smoothing_sigma_bins: float = 1.0
         clusterless_mark_prior_count: float = 1.0
@@ -126,6 +129,7 @@ def apply_model_hyperparam_patch() -> None:
         clusterless_mark_kde_bandwidth: float | None = None
         clusterless_mark_kde_spatial_sigma_bins: float | None = None
         clusterless_mark_kde_max_neighbors: int = 256
+        clusterless_mark_group_by: str = "auto"
         stationary_sigma_cm: float = 2.0
         diffusion_sigma_cm: float = 12.0
         momentum_sigma_cm: float = 12.0
@@ -157,7 +161,9 @@ def apply_model_hyperparam_patch() -> None:
         pyrecest_imm_momentum_velocity_decay: float = 0.95
         pyrecest_imm_jump_fraction: float = 0.9
         pyrecest_imm_jump_velocity_decay: float = 0.25
+        state_space_valid_occupancy_threshold_s: float = 0.0
         random_seed: int = 1
+        random_seeds: tuple[int, ...] | None = None
         event_epoch: str = "run"
         models: tuple[str, ...] = ("random", "stationary", "diffusion", "momentum", "imm")
 
@@ -194,6 +200,7 @@ def apply_model_hyperparam_patch() -> None:
                 ),
                 momentum_velocity_decay=cfg(config, "state_space_momentum_velocity_decay", 0.95),
                 momentum_candidate_top_k=cfg(config, "state_space_momentum_candidate_top_k", 128),
+                valid_occupancy_threshold_s=cfg(config, "state_space_valid_occupancy_threshold_s", 0.0),
             ),
         )
 
@@ -210,12 +217,18 @@ def apply_model_hyperparam_patch() -> None:
             "sorted-spike-state-space-diffusion": state_space_model(config, "diffusion"),
             "sorted-spike-state-space-fragmented": state_space_model(config, "fragmented"),
             "sorted-spike-state-space-jump": state_space_model(config, "jump"),
+            "sorted-spike-state-space-first-order-imm": state_space_model(config, "first-order-imm"),
             "sorted-spike-state-space-momentum": state_space_model(config, "momentum"),
             "sorted-spike-state-space-imm": state_space_model(config, "imm"),
             "state-space-stationary": state_space_model(config, "stationary", "state-space-stationary"),
             "state-space-diffusion": state_space_model(config, "diffusion", "state-space-diffusion"),
             "state-space-fragmented": state_space_model(config, "fragmented", "state-space-fragmented"),
             "state-space-jump": state_space_model(config, "jump", "state-space-jump"),
+            "state-space-first-order-imm": state_space_model(
+                config,
+                "first-order-imm",
+                "state-space-first-order-imm",
+            ),
             "state-space-momentum": state_space_model(config, "momentum", "state-space-momentum"),
             "state-space-imm": state_space_model(config, "imm", "state-space-imm"),
             "pyrecest-goal-particle": PyRecEstGoalParticleModel(
@@ -289,7 +302,7 @@ def apply_model_hyperparam_patch() -> None:
             "clusterless_mark_prior_count": float(cfg(config, "clusterless_mark_prior_count", 1.0)),
             "clusterless_mark_variance_floor": float(cfg(config, "clusterless_mark_variance_floor", 1.0)),
             "clusterless_rate_floor_hz": float(cfg(config, "clusterless_rate_floor_hz", 1e-4)),
-            "clusterless_mark_likelihood": str(cfg(config, "clusterless_mark_likelihood", "local-kde")),
+            "clusterless_mark_likelihood": bench._clusterless_mark_likelihood(config),
             "clusterless_mark_kde_bandwidth": _optional_float_metadata(cfg(config, "clusterless_mark_kde_bandwidth", None)),
             "clusterless_mark_kde_spatial_sigma_bins": _optional_float_metadata(
                 cfg(config, "clusterless_mark_kde_spatial_sigma_bins", None)
@@ -446,6 +459,7 @@ def apply_model_hyperparam_patch() -> None:
         gt_frame = gt._load_or_generate_ground_truth(root, ground_truth, ground_truth_config)
         if scores_frame.empty:
             return scores_frame
+        scores_frame = gt.ensure_evidence_support_columns(scores_frame)
 
         benchmark_decode = gt._score_table_is_heldout_benchmark(scores_frame)
         encoding_config = encoding_config_for_scores(
@@ -500,6 +514,7 @@ def apply_model_hyperparam_patch() -> None:
 
         sessions = {session.session_id: session for session in gt.load_open_field_sessions(root)}
         decoded_rows: list[dict[str, object]] = []
+        average_score_rows: list[dict[str, object]] = []
         for session_id, session_scores in scores_frame.groupby("session", sort=False):
             session = sessions.get(str(session_id))
             if session is None:
@@ -521,6 +536,7 @@ def apply_model_hyperparam_patch() -> None:
                     emissions = gt.build_emissions(session, encoding, int(event_index), emission_config)
                     if emissions.n_time == 0:
                         continue
+                average_components: list[tuple[str, float, np.ndarray]] = []
                 for score_row in event_scores.itertuples(index=False):
                     model_name = str(getattr(score_row, "model"))
                     requested_model = gt._requested_model_name(score_row, model_name)
@@ -542,10 +558,44 @@ def apply_model_hyperparam_patch() -> None:
                             int(event_index),
                             model_name,
                             score.terminal_log_posterior,
+                            getattr(score, "trajectory_log_posterior", None),
                             encoding.bin_centers,
                             wells,
                         )
                     )
+                    log_evidence = gt._score_row_log_evidence(score_row)
+                    if (
+                        log_evidence is not None
+                        and gt._score_row_has_exact_comparable_evidence(score_row)
+                        and score.terminal_log_posterior is not None
+                    ):
+                        average_components.append((model_name, log_evidence, score.terminal_log_posterior))
+                average_log_posterior = gt._bayesian_model_average_log_posterior(average_components)
+                if average_log_posterior is not None:
+                    decoded_rows.append(
+                        gt._decoded_row(
+                            str(session_id),
+                            int(event_index),
+                            "bayesian-model-average",
+                            average_log_posterior,
+                            None,
+                            encoding.bin_centers,
+                            wells,
+                        )
+                    )
+                    average_score_rows.append(
+                        gt._bayesian_model_average_score_row(
+                            event_scores,
+                            average_components,
+                            "bayesian-model-average",
+                        )
+                    )
+        if average_score_rows:
+            scores_frame = pd.concat(
+                [scores_frame, pd.DataFrame(average_score_rows)],
+                ignore_index=True,
+                sort=False,
+            )
         decoded = pd.DataFrame(decoded_rows)
         comparison = scores_frame.merge(gt_frame, on=["session", "event_index"], how="left")
         comparison = comparison.merge(decoded, on=["session", "event_index", "model"], how="left")

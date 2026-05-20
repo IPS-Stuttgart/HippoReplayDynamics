@@ -23,9 +23,7 @@ on:
       models:
         description: "Space-separated models"
         required: true
-        default: >-
-          sorted-spike-state-space-stationary sorted-spike-state-space-diffusion sorted-spike-state-space-fragmented sorted-spike-state-space-first-order-imm sorted-spike-state-space-momentum sorted-spike-state-space-imm sorted-spike-state-space-goal
-          clusterless-state-space-stationary clusterless-state-space-diffusion clusterless-state-space-momentum clusterless-state-space-fragmented clusterless-state-space-imm
+        default: "sorted-spike-state-space-stationary sorted-spike-state-space-diffusion sorted-spike-state-space-fragmented sorted-spike-state-space-first-order-imm sorted-spike-state-space-momentum sorted-spike-state-space-imm sorted-spike-state-space-goal clusterless-state-space-stationary clusterless-state-space-diffusion clusterless-state-space-momentum clusterless-state-space-fragmented clusterless-state-space-imm"
       event_shard_count:
         description: "Target number of event shards"
         required: true
@@ -321,13 +319,6 @@ jobs:
           SHARD_EVENTS: ${{ matrix.event.events_spec }}
         run: |
           set -euo pipefail
-          clusterless_kde_args=()
-          if [ -n "${CLUSTERLESS_MARK_KDE_BANDWIDTH}" ]; then
-            clusterless_kde_args+=(--clusterless-mark-kde-bandwidth "${CLUSTERLESS_MARK_KDE_BANDWIDTH}")
-          fi
-          if [ -n "${CLUSTERLESS_MARK_KDE_SPATIAL_SIGMA_BINS}" ]; then
-            clusterless_kde_args+=(--clusterless-mark-kde-spatial-sigma-bins "${CLUSTERLESS_MARK_KDE_SPATIAL_SIGMA_BINS}")
-          fi
           out_dir="results/model-evidence-shard-${EVENT_SHARD_INDEX}"
           python scripts/benchmark_model_evidence.py \
             --dataset-root "${DATASET_ROOT}" \
@@ -358,8 +349,9 @@ jobs:
             --clusterless-mark-variance-floor "${CLUSTERLESS_MARK_VARIANCE_FLOOR}" \
             --clusterless-rate-floor-hz "${CLUSTERLESS_RATE_FLOOR_HZ}" \
             --clusterless-mark-likelihood "${CLUSTERLESS_MARK_LIKELIHOOD}" \
+            --clusterless-mark-kde-bandwidth "${CLUSTERLESS_MARK_KDE_BANDWIDTH}" \
+            --clusterless-mark-kde-spatial-sigma-bins "${CLUSTERLESS_MARK_KDE_SPATIAL_SIGMA_BINS}" \
             --clusterless-mark-kde-max-neighbors "${CLUSTERLESS_MARK_KDE_MAX_NEIGHBORS}" \
-            "${clusterless_kde_args[@]}" \
             --time-bin-s "${TIME_BIN_S}" \
             --spike-rate-scale "${SPIKE_RATE_SCALE}" \
             --bin-size-cm "${BIN_SIZE_CM}" \

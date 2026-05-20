@@ -31,11 +31,9 @@ from .encoding import (
     EncodingModel,
     LogEmissionTensor,
     _clean_position,
-    _interp_positions,
     _poisson_log_emissions,
     _positions_to_flat_bins,
     _speed_cm_s,
-    _time_bin_edges,
     _times_in_intervals,
     build_emissions,
 )

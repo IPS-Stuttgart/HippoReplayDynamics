@@ -6,7 +6,6 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-import pandas as pd
 
 from hipporeplayimm.candidate_pruning_calibration import score_pruning_gaps
 from hipporeplayimm.data import load_replay_session

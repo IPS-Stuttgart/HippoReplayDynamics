@@ -61,8 +61,9 @@ def _mass_retaining_candidate_indices(
     order = np.argsort(np.where(finite, values, -np.inf))[::-1]
     ordered_values = np.where(finite[order], values[order], -np.inf)
     cumulative_mass = np.cumsum(np.exp(ordered_values - logsumexp(ordered_values)))
+    tolerance = 16.0 * np.finfo(float).eps
     mass_count = int(
-        np.searchsorted(cumulative_mass, float(mass_threshold), side="left") + 1
+        np.searchsorted(cumulative_mass + tolerance, float(mass_threshold), side="left") + 1
     )
     count = min(max(min_count, mass_count), max_count)
     return np.asarray(order[:count], dtype=int)

@@ -145,10 +145,10 @@ class CandidateKinematicModel:
     ) -> EventScore:
         if emissions.n_time == 1:
             if candidate_indices is not None:
-                _validate_candidate_indices(candidate_indices, emissions.n_time, emissions.n_bins)
+                _validate_candidate_support(candidate_indices, emissions.n_time, emissions.n_bins)
             return self._score_single_bin(emissions, bin_centers)
         candidates = self.candidate_indices(emissions) if candidate_indices is None else candidate_indices
-        candidates = _validate_candidate_indices(candidates, emissions.n_time, emissions.n_bins)
+        candidates = _validate_candidate_support(candidates, emissions.n_time, emissions.n_bins)
         if self.mode != "imm":
             logp, mass, terminal_log_posterior, trajectory_log_posterior = self._score_static_pair(
                 emissions,
@@ -333,6 +333,17 @@ class CandidateKinematicModel:
 
 def score_model(model: ReplayModel, emissions: LogEmissionTensor, bin_centers: np.ndarray) -> EventScore:
     return model.score(emissions, bin_centers)
+
+
+def _validate_candidate_support(
+    candidates: list[np.ndarray],
+    n_time: int,
+    n_bins: int,
+) -> list[np.ndarray]:
+    try:
+        return _validate_candidate_indices(candidates, n_time, n_bins)
+    except TypeError as exc:
+        raise ValueError(str(exc)) from exc
 
 
 def _top_candidate_indices(log_emission: np.ndarray, top_k: int) -> np.ndarray:

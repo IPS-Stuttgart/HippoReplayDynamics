@@ -511,14 +511,14 @@ numpy = ">=1.21.2"
 
 [[package]]
 name = "idna"
-version = "3.13"
+version = "3.15"
 description = "Internationalized Domain Names in Applications (IDNA)"
 optional = false
 python-versions = ">=3.8"
 groups = ["main"]
 files = [
-    {file = "idna-3.13-py3-none-any.whl", hash = "sha256:892ea0cde124a99ce773decba204c5552b69c3c67ffd5f232eb7696135bc8bb3"},
-    {file = "idna-3.13.tar.gz", hash = "sha256:585ea8fe5d69b9181ec1afba340451fba6ba764af97026f92a91d4eef164a242"},
+    {file = "idna-3.15-py3-none-any.whl", hash = "sha256:048adeaf8c2d788c40fee287673ccaa74c24ffd8dcf09ffa555a2fbb59f10ac8"},
+    {file = "idna-3.15.tar.gz", hash = "sha256:ca962446ea538f7092a95e057da437618e886f4d349216d2b1e294abfdb65fdc"},
 ]
 
 [package.extras]
@@ -1172,13 +1172,15 @@ diagrams = ["jinja2", "railroad-diagrams"]
 
 [[package]]
 name = "pyrecest"
-version = "2.1.0"
+version = "2.2.2"
 description = "Framework for recursive Bayesian estimation in Python."
 optional = false
-python-versions = ">=3.11,<3.15"
+python-versions = "<3.15,>=3.11"
 groups = ["main"]
-files = []
-develop = false
+files = [
+    {file = "pyrecest-2.2.2-py3-none-any.whl", hash = "sha256:7b95b87cd1a3efc72227e4b7593e287b30631031838a0551dc2aa4aa146fcba7"},
+    {file = "pyrecest-2.2.2.tar.gz", hash = "sha256:d953a7cc17ec45fc170d998958313ea32032fb9a06bcaca9faad094d1bce6eca"},
+]
 
 [package.dependencies]
 beartype = "*"
@@ -1186,19 +1188,13 @@ matplotlib = "*"
 mpmath = "*"
 numpy = "*"
 pyshtools = "*"
-scipy = "^1.17.1"
+scipy = ">=1.17.1,<2.0.0"
 shapely = "*"
 
 [package.extras]
 healpy-support = ["healpy"]
 jax-support = ["autograd", "jax", "jaxlib"]
 pytorch-support = ["torch"]
-
-[package.source]
-type = "git"
-url = "https://github.com/FlorianPfaff/PyRecEst.git"
-reference = "main"
-resolved_reference = "d41f8f1ecfef7d448e41d1aa03623b83e57d9072"
 
 [[package]]
 name = "pyshtools"
@@ -1645,4 +1641,4 @@ dev = ["pytest"]
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.11,<3.15"
-content-hash = "9f06d24141f1b7ebbdb85b89fb9a6a2671bbbd87ba1272a8dc9e15bf9f041575"
+content-hash = "89348a91a09f50527a0c8e2fb9842b7f630c5569641f54f96f1d1f60ff9378b4"

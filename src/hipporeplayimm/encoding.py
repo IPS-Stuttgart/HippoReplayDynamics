@@ -123,7 +123,9 @@ def fit_place_field_encoding(session: ReplaySession, config: EncodingConfig | No
 
     config = EncodingConfig() if config is None else config
     position = _clean_position(session.position)
-    _validate_position_samples(position)
+    selected_spikes = session.excitatory_spikes() if config.use_excitatory else session.spikes
+    if not (position.shape[0] == 1 and np.asarray(selected_spikes).size == 0):
+        _validate_position_samples(position)
     times = position[:, 0]
     xy = position[:, 1:3]
     speed = _speed_cm_s(times, xy)

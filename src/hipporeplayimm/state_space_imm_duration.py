@@ -25,9 +25,15 @@ def apply_state_space_imm_duration_patch() -> None:
 
     previous_score = ss.StateSpaceReplayModel.score
 
-    def score(self, emissions, bin_centers, candidate_indices=None):
-        if self.mode != "imm":
-            return previous_score(self, emissions, bin_centers, candidate_indices)
+    def score(self, emissions, bin_centers, candidate_indices=None, *, occupancy_s=None):
+        if self.mode != "imm" or occupancy_s is not None:
+            return previous_score(
+                self,
+                emissions,
+                bin_centers,
+                candidate_indices=candidate_indices,
+                occupancy_s=occupancy_s,
+            )
         if emissions.n_time == 0:
             raise ValueError("emissions must contain at least one time bin")
         if emissions.n_bins != bin_centers.shape[0]:

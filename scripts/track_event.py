@@ -12,7 +12,7 @@ from scipy.special import logsumexp
 
 from hipporeplayimm.benchmarks import BenchmarkConfig, _build_models
 from hipporeplayimm.data import load_replay_session
-from hipporeplayimm.duration_dynamics import attach_duration_metadata
+from hipporeplayimm.duration_dynamics import DurationFloat, attach_duration_metadata
 from hipporeplayimm.encoding import EmissionConfig, LogEmissionTensor, build_emissions, fit_place_field_encoding
 from hipporeplayimm.models import (
     CandidateKinematicModel,
@@ -84,6 +84,7 @@ def _prefix_emissions(emissions: LogEmissionTensor, stop: int) -> LogEmissionTen
     if transition_durations is not None:
         prefix.transition_durations = np.asarray(transition_durations, dtype=float)[: max(stop - 1, 0)]
         attach_duration_metadata(prefix)
+        prefix.dt = DurationFloat(prefix.dt, prefix.transition_durations)
     return prefix
 
 

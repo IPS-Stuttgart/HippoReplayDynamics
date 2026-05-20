@@ -190,8 +190,13 @@ def _score_session_split(
         # estimated without seeing those marks; train and joint emissions still
         # share this frozen train-only encoding so their train contribution is
         # subtracted under identical rate and mark-likelihood parameters.
+        clusterless_fit_session = (
+            clusterless_train_session
+            if config.encoding.use_excitatory
+            else clusterless_joint_session
+        )
         clusterless_train_encoding = fit_clusterless_mark_encoding(
-            clusterless_train_session,
+            clusterless_fit_session,
             clusterless_config,
         )
         clusterless_joint_encoding = clusterless_train_encoding
@@ -229,19 +234,27 @@ def _score_session_split(
                 model_train_emissions = clusterless_train_emissions
                 model_joint_emissions = clusterless_joint_emissions
                 model_bin_centers = clusterless_joint_encoding.bin_centers
-                model_occupancy_s = clusterless_joint_encoding.occupancy_s
+                model_occupancy_s = getattr(clusterless_joint_encoding, "occupancy_s", None)
             else:
                 model_train_emissions = train_emissions
                 model_joint_emissions = joint_emissions
                 model_bin_centers = encoding.bin_centers
                 model_occupancy_s = encoding.occupancy_s
-            train_score, joint_score = _score_train_joint_model(
-                model,
-                model_train_emissions,
-                model_joint_emissions,
-                model_bin_centers,
-                occupancy_s=model_occupancy_s,
-            )
+            if model_occupancy_s is None:
+                train_score, joint_score = _score_train_joint_model(
+                    model,
+                    model_train_emissions,
+                    model_joint_emissions,
+                    model_bin_centers,
+                )
+            else:
+                train_score, joint_score = _score_train_joint_model(
+                    model,
+                    model_train_emissions,
+                    model_joint_emissions,
+                    model_bin_centers,
+                    occupancy_s=model_occupancy_s,
+                )
             heldout = joint_score.log_likelihood - train_score.log_likelihood
             rows.append(
                 {
@@ -260,7 +273,7 @@ def _score_session_split(
                     **_benchmark_split_metadata(config, split_index),
                     **_session_mark_diagnostics(
                         session,
-                        clusterless_joint_encoding.mark_likelihood
+                        getattr(clusterless_joint_encoding, "mark_likelihood", None)
                         if clusterless_joint_encoding is not None
                         else None,
                     ),
@@ -316,17 +329,19 @@ def _benchmark_split_metadata(
 def _score_train_joint_model(model, train_emissions, joint_emissions, bin_centers, occupancy_s=None):
     if isinstance(model, StateSpaceReplayModel):
         candidates = _candidate_indices_for_model(model, train_emissions, bin_centers)
-        train_score = model.score(
+        train_score = _score_state_space_model(
+            model,
             train_emissions,
             bin_centers,
-            candidate_indices=candidates,
-            occupancy_s=occupancy_s,
+            candidates,
+            occupancy_s,
         )
-        joint_score = model.score(
+        joint_score = _score_state_space_model(
+            model,
             joint_emissions,
             bin_centers,
-            candidate_indices=candidates,
-            occupancy_s=occupancy_s,
+            candidates,
+            occupancy_s,
         )
         return train_score, joint_score
     if hasattr(model, "candidate_indices"):
@@ -335,6 +350,22 @@ def _score_train_joint_model(model, train_emissions, joint_emissions, bin_center
         joint_score = model.score(joint_emissions, bin_centers, candidate_indices=candidates)
         return train_score, joint_score
     return model.score(train_emissions, bin_centers), model.score(joint_emissions, bin_centers)
+
+
+def _score_state_space_model(model, emissions, bin_centers, candidates, occupancy_s):
+    if occupancy_s is None:
+        return model.score(emissions, bin_centers, candidate_indices=candidates)
+    try:
+        return model.score(
+            emissions,
+            bin_centers,
+            candidate_indices=candidates,
+            occupancy_s=occupancy_s,
+        )
+    except TypeError as exc:
+        if "occupancy_s" not in str(exc):
+            raise
+        return model.score(emissions, bin_centers, candidate_indices=candidates)
 
 
 def _candidate_indices_for_model(model, emissions, bin_centers):
@@ -479,17 +510,19 @@ def _session_mark_diagnostics(
     clusterless_mark_likelihood: str | None = None,
 ) -> dict[str, object]:
     marks = session.spike_marks
-    return {
+    diagnostics = {
         "spike_mark_features": 0 if marks is None else marks.n_features,
         "spike_mark_source": "" if marks is None else f"{marks.source_file}:{marks.source_variable}",
         "clusterless_mark_likelihood_available": bool(marks is not None and marks.n_features > 0),
-        "clusterless_mark_likelihood": clusterless_mark_likelihood_label(
-            session,
-            clusterless_mark_likelihood,
-        ),
         "clusterless_tetrode_grouping_available": bool(marks is not None and marks.group_ids is not None),
         "clusterless_mark_groups": 0 if marks is None or marks.group_ids is None else int(np.unique(marks.group_ids).shape[0]),
     }
+    if clusterless_mark_likelihood is not None or isinstance(session, ReplaySession):
+        diagnostics["clusterless_mark_likelihood"] = clusterless_mark_likelihood_label(
+            session,
+            clusterless_mark_likelihood,
+        )
+    return diagnostics
 
 
 def _event_indices(

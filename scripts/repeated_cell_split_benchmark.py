@@ -6,7 +6,6 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-import numpy as np
 import pandas as pd
 
 from hipporeplayimm.benchmarks import BenchmarkConfig, BenchmarkResult, run_open_field_benchmark

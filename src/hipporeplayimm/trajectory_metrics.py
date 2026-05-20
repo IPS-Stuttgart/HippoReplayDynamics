@@ -1,0 +1,94 @@
+"""Trajectory-posterior quality metrics for replay decoding outputs."""
+
+from __future__ import annotations
+
+import numpy as np
+from scipy.special import logsumexp
+
+
+def trajectory_quality_metrics(
+    trajectory_log_posterior: np.ndarray,
+    bin_centers: np.ndarray,
+    times: np.ndarray | None = None,
+    *,
+    prefix: str = "trajectory",
+) -> dict[str, float | int]:
+    """Summarize posterior trajectory geometry and certainty.
+
+    Metrics are based on both posterior-mean and MAP paths.  They are not a
+    substitute for evidence; they flag whether a high-evidence event corresponds
+    to an interpretable path.
+    """
+
+    logp = np.asarray(trajectory_log_posterior, dtype=float)
+    centers = np.asarray(bin_centers, dtype=float)
+    if logp.ndim != 2:
+        raise ValueError("trajectory_log_posterior must have shape (time, bins)")
+    if centers.ndim != 2 or centers.shape[0] != logp.shape[1]:
+        raise ValueError("bin_centers must have shape (bins, position_dim)")
+    normalized = logp - logsumexp(logp, axis=1)[:, None]
+    posterior = np.exp(normalized)
+    mean_path = posterior @ centers
+    map_bins = np.argmax(normalized, axis=1)
+    map_path = centers[map_bins]
+    durations = _transition_durations(times, logp.shape[0])
+    mean_steps = np.linalg.norm(np.diff(mean_path, axis=0), axis=1) if logp.shape[0] > 1 else np.empty(0)
+    map_steps = np.linalg.norm(np.diff(map_path, axis=0), axis=1) if logp.shape[0] > 1 else np.empty(0)
+    displacement = _distance(mean_path[0], mean_path[-1]) if logp.shape[0] else 0.0
+    path_length = float(np.sum(mean_steps))
+    total_time = float(np.sum(durations)) if durations.size else float(max(logp.shape[0] - 1, 1))
+    entropy = -np.sum(posterior * normalized, axis=1)
+    spread = _posterior_spread(posterior, centers, mean_path)
+    return {
+        f"{prefix}_time_bins": int(logp.shape[0]),
+        f"{prefix}_posterior_mean_path_length_cm": path_length,
+        f"{prefix}_posterior_mean_displacement_cm": float(displacement),
+        f"{prefix}_posterior_mean_linearity": _safe_ratio(displacement, path_length),
+        f"{prefix}_posterior_mean_speed_cm_s": _safe_ratio(path_length, total_time),
+        f"{prefix}_direction_consistency": _direction_consistency(mean_path),
+        f"{prefix}_map_path_length_cm": float(np.sum(map_steps)),
+        f"{prefix}_map_step_median_cm": float(np.median(map_steps)) if map_steps.size else 0.0,
+        f"{prefix}_map_step_p95_cm": float(np.quantile(map_steps, 0.95)) if map_steps.size else 0.0,
+        f"{prefix}_mean_entropy": float(np.mean(entropy)) if entropy.size else np.nan,
+        f"{prefix}_terminal_entropy": float(entropy[-1]) if entropy.size else np.nan,
+        f"{prefix}_mean_spread_cm": float(np.mean(spread)) if spread.size else np.nan,
+        f"{prefix}_terminal_spread_cm": float(spread[-1]) if spread.size else np.nan,
+    }
+
+
+def _transition_durations(times: np.ndarray | None, n_time: int) -> np.ndarray:
+    if n_time <= 1:
+        return np.empty(0, dtype=float)
+    if times is None:
+        return np.ones(n_time - 1, dtype=float)
+    arr = np.asarray(times, dtype=float)
+    if arr.shape != (n_time,):
+        return np.ones(n_time - 1, dtype=float)
+    diffs = np.diff(arr)
+    if not np.all(np.isfinite(diffs)) or np.any(diffs <= 0.0):
+        return np.ones(n_time - 1, dtype=float)
+    return diffs
+
+
+def _posterior_spread(posterior: np.ndarray, centers: np.ndarray, mean_path: np.ndarray) -> np.ndarray:
+    delta = centers[None, :, :] - mean_path[:, None, :]
+    dist2 = np.sum(delta * delta, axis=2)
+    return np.sqrt(np.sum(posterior * dist2, axis=1))
+
+
+def _direction_consistency(path: np.ndarray) -> float:
+    steps = np.diff(path, axis=0)
+    lengths = np.linalg.norm(steps, axis=1)
+    keep = lengths > np.finfo(float).eps
+    if not np.any(keep):
+        return 0.0
+    unit = steps[keep] / lengths[keep, None]
+    return float(np.linalg.norm(np.sum(unit, axis=0)) / unit.shape[0])
+
+
+def _distance(left: np.ndarray, right: np.ndarray) -> float:
+    return float(np.linalg.norm(np.asarray(left, dtype=float) - np.asarray(right, dtype=float)))
+
+
+def _safe_ratio(num: float, denom: float) -> float:
+    return float(num / denom) if denom > np.finfo(float).eps else 0.0

@@ -35,8 +35,15 @@ class SortedSpikeStateSpaceReplayModel(StateSpaceReplayModel):
         emissions: LogEmissionTensor,
         bin_centers: np.ndarray,
         candidate_indices: list[np.ndarray] | None = None,
+        *,
+        occupancy_s: np.ndarray | None = None,
     ) -> EventScore:
-        score = super().score(emissions, bin_centers, candidate_indices=candidate_indices)
+        score = super().score(
+            emissions,
+            bin_centers,
+            candidate_indices=candidate_indices,
+            occupancy_s=occupancy_s,
+        )
         score.model_name = str(self.name)
         score.diagnostics["state_space_observation_model"] = "sorted-spike-poisson"
         score.diagnostics["clusterless_mark_likelihood"] = "not_implemented"

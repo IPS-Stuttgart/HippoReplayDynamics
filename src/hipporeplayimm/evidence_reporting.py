@@ -9,11 +9,27 @@ from scipy.special import logsumexp
 EXACT_EVIDENCE_SUPPORT = "exact_full_grid"
 TRUNCATED_EVIDENCE_SUPPORT = "truncated_full_grid"
 DEGENERATE_SINGLE_BIN_EVIDENCE_SUPPORT = "degenerate_single_bin"
+PYRECEST_PARTICLE_EVIDENCE_SUPPORT = "particle_approximation"
 EVIDENCE_SUPPORT_DIAGNOSTIC_COLUMNS = (
     "diagnostic_candidate_evidence_support",
     "diagnostic_state_space_momentum_evidence_support",
     "diagnostic_state_space_imm_evidence_support",
+    "diagnostic_pyrecest_evidence_support",
 )
+
+EVIDENCE_COMPARISON_EXACT = "exact_model_evidence"
+EVIDENCE_COMPARISON_LOWER_BOUND = "truncated_lower_bound"
+EVIDENCE_COMPARISON_DEGENERATE = "degenerate_single_bin"
+EVIDENCE_COMPARISON_NOT_SCORED = "not_scored"
+EVIDENCE_COMPARISON_UNKNOWN = "unknown_noncomparable"
+
+EVIDENCE_COMPARISON_DESCRIPTIONS = {
+    EVIDENCE_COMPARISON_EXACT: "Exact full-grid model evidences: safe to normalize into posterior model probabilities within the event.",
+    EVIDENCE_COMPARISON_LOWER_BOUND: "Truncated candidate-support evidences: lower-bound diagnostics only; do not rank directly against exact full-grid evidences.",
+    EVIDENCE_COMPARISON_DEGENERATE: "Degenerate single-bin evidence: exact for a collapsed state support, but not directly comparable to full-grid state supports.",
+    EVIDENCE_COMPARISON_NOT_SCORED: "Model was not scored successfully for this event.",
+    EVIDENCE_COMPARISON_UNKNOWN: "Evidence support is missing or unknown; treat as non-comparable until classified explicitly.",
+}
 
 
 def evidence_support_from_row(row: pd.Series) -> str:
@@ -33,7 +49,31 @@ def evidence_support_from_row(row: pd.Series) -> str:
             return EXACT_EVIDENCE_SUPPORT
         if text == DEGENERATE_SINGLE_BIN_EVIDENCE_SUPPORT:
             return DEGENERATE_SINGLE_BIN_EVIDENCE_SUPPORT
+        if text == PYRECEST_PARTICLE_EVIDENCE_SUPPORT:
+            return PYRECEST_PARTICLE_EVIDENCE_SUPPORT
     return EXACT_EVIDENCE_SUPPORT
+
+
+def evidence_comparison_from_support(support: object) -> str:
+    """Return the comparison scope implied by an evidence-support label."""
+
+    if support is None:
+        return EVIDENCE_COMPARISON_UNKNOWN
+    try:
+        if pd.isna(support):
+            return EVIDENCE_COMPARISON_UNKNOWN
+    except (TypeError, ValueError):
+        pass
+    text = str(support)
+    if text == EXACT_EVIDENCE_SUPPORT:
+        return EVIDENCE_COMPARISON_EXACT
+    if text == TRUNCATED_EVIDENCE_SUPPORT:
+        return EVIDENCE_COMPARISON_LOWER_BOUND
+    if text == DEGENERATE_SINGLE_BIN_EVIDENCE_SUPPORT:
+        return EVIDENCE_COMPARISON_DEGENERATE
+    if text == "not_scored":
+        return EVIDENCE_COMPARISON_NOT_SCORED
+    return EVIDENCE_COMPARISON_UNKNOWN
 
 
 def ensure_evidence_support_columns(df: pd.DataFrame) -> pd.DataFrame:
@@ -50,6 +90,8 @@ def ensure_evidence_support_columns(df: pd.DataFrame) -> pd.DataFrame:
     else:
         out["evidence_support"] = inferred
     status_ok = out["status"].eq("success") if "status" in out else pd.Series(True, index=out.index)
+    out["evidence_comparison"] = out["evidence_support"].map(evidence_comparison_from_support)
+    out["evidence_comparison_note"] = out["evidence_comparison"].map(EVIDENCE_COMPARISON_DESCRIPTIONS).fillna(EVIDENCE_COMPARISON_DESCRIPTIONS[EVIDENCE_COMPARISON_UNKNOWN])
     out["evidence_comparable"] = status_ok & out["evidence_support"].eq(EXACT_EVIDENCE_SUPPORT)
     return out
 

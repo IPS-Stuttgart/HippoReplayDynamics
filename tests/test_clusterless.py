@@ -45,6 +45,41 @@ def test_clusterless_emissions_use_mark_likelihood_to_localize_spikes():
     assert emissions.metadata["clusterless_mark_likelihood"] == "local-kde"
 
 
+def test_clusterless_tetrode_grouping_uses_group_specific_likelihood_and_rate():
+    session = _grouped_clusterless_session()
+    encoding = fit_clusterless_mark_encoding(
+        session,
+        ClusterlessMarkConfig(
+            encoding=EncodingConfig(
+                bin_size_cm=10.0,
+                smoothing_sigma_bins=0.0,
+                min_speed_cm_s=0.0,
+                arena_padding_cm=5.0,
+            ),
+            mark_likelihood="diagonal-gaussian",
+            mark_group_by="tetrode",
+            mark_smoothing_sigma_bins=0.0,
+            mark_prior_count=0.1,
+            mark_variance_floor=0.05,
+            rate_floor_hz=1e-4,
+        ),
+    )
+
+    emissions = build_clusterless_mark_emissions(
+        session,
+        encoding,
+        0,
+        EmissionConfig(time_bin_s=1.0),
+    )
+    left_bin = int(np.argmin(np.linalg.norm(encoding.bin_centers - np.array([0.0, 0.0]), axis=1)))
+    right_bin = int(np.argmin(np.linalg.norm(encoding.bin_centers - np.array([10.0, 0.0]), axis=1)))
+
+    assert encoding.n_mark_groups == 2
+    assert emissions.metadata["clusterless_mark_group_by"] == "tetrode"
+    assert emissions.metadata["clusterless_mark_groups"] == 2
+    assert emissions.log_likelihood[0, right_bin] > emissions.log_likelihood[0, left_bin]
+
+
 def test_clusterless_local_kde_preserves_multimodal_mark_structure():
     session = _multimodal_clusterless_session()
     common = dict(
@@ -326,6 +361,44 @@ def _clusterless_session() -> ReplaySession:
             source_variable="Spike_Amplitude_Marks",
             feature_names=("amp",),
             cell_ids=cell_ids,
+        ),
+    )
+
+
+def _grouped_clusterless_session() -> ReplaySession:
+    position_times = np.linspace(0.0, 5.0, 51)
+    x = np.where(position_times < 2.5, 0.0, 10.0)
+    y = np.zeros_like(x)
+    position = np.column_stack([position_times, x, y, np.zeros_like(x)])
+    mark_times = np.array([0.2, 0.4, 0.6, 3.2, 3.4, 3.6, 4.2])
+    cell_ids = np.array([1, 1, 1, 2, 2, 2, 2], dtype=int)
+    group_ids = np.array([1, 1, 1, 2, 2, 2, 2], dtype=int)
+    marks = np.array([[0.0], [0.1], [-0.1], [0.0], [0.2], [-0.2], [0.05]])
+    spikes = np.column_stack([mark_times, cell_ids])
+    return ReplaySession(
+        rat="RatX",
+        name="OpenGrouped",
+        path=None,
+        position=position,
+        spikes=spikes,
+        tetrode_cell_ids=np.array([[1, 1], [2, 2]]),
+        excitatory_neurons=np.array([1, 2]),
+        inhibitory_neurons=np.array([]),
+        ripple_events=np.array([[4.0, 5.0, 4.5, 0.0, 0.0, 0.0]]),
+        run_times=np.array([[0.0, 5.0]]),
+        sleep_box_immobile_times=np.empty((0, 2)),
+        sleep_times=np.empty((0, 2)),
+        rem_times=np.empty((0, 2)),
+        well_sequence=None,
+        metadata={},
+        spike_marks=SpikeMarkData(
+            times=mark_times,
+            marks=marks,
+            source_file="Spike_Data.mat",
+            source_variable="Spike_Amplitude_Marks",
+            feature_names=("amp",),
+            cell_ids=cell_ids,
+            group_ids=group_ids,
         ),
     )
 

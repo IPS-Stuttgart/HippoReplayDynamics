@@ -3,6 +3,7 @@ import itertools
 import numpy as np
 import pandas as pd
 import pytest
+from scipy.spatial import cKDTree
 from scipy.special import logsumexp
 
 from hipporeplayimm.encoding import LogEmissionTensor
@@ -15,6 +16,7 @@ from hipporeplayimm.pyrecest_models import (
     PyRecEstGoalParticleIMMModel,
     PyRecEstGoalParticleModel,
     _grid_proposal_weights,
+    _update_filter_from_grid_likelihood,
 )
 
 
@@ -71,6 +73,35 @@ def test_imm_scores_stationary_to_momentum_synthetic_event():
 
     assert np.isfinite(score.log_likelihood)
     assert score.diagnostics["mean_candidate_log_mass"] == 0.0
+
+
+def test_candidate_kinematic_model_validates_external_candidate_support():
+    centers = np.array([[0.0, 0.0], [1.0, 0.0], [2.0, 0.0]])
+    emissions = LogEmissionTensor(
+        log_likelihood=np.log(
+            np.array(
+                [
+                    [0.60, 0.30, 0.10],
+                    [0.20, 0.60, 0.20],
+                    [0.10, 0.30, 0.60],
+                ]
+            )
+        ),
+        spike_counts=np.zeros((3, 1), dtype=int),
+        times=np.array([0.0, 1.0, 2.0]),
+        dt=1.0,
+        cell_ids=np.array([1]),
+        n_spikes=0,
+    )
+    model = CandidateKinematicModel(mode="diffusion", top_k=3, diffusion_sigma_cm=1.0)
+
+    duplicate_candidates = [np.array([0, 1]), np.array([1, 1]), np.array([2])]
+    with pytest.raises(ValueError, match="duplicate"):
+        model.score(emissions, centers, candidate_indices=duplicate_candidates)
+
+    float_candidates = [np.array([0, 1]), np.array([1.0, 2.0]), np.array([2])]
+    with pytest.raises(ValueError, match="integer"):
+        model.score(emissions, centers, candidate_indices=float_candidates)
 
 
 def test_candidate_jump_initial_pair_is_full_grid_uniform():
@@ -281,6 +312,46 @@ def test_grid_proposal_weights_normalize_finite_likelihoods():
     weights = _grid_proposal_weights(np.array([0.0, -np.inf, np.log(3.0)]))
 
     assert np.allclose(weights, np.array([0.25, 0.0, 0.75]))
+
+
+def test_pyrecest_grid_likelihood_callback_uses_requested_positions():
+    class RecordingProposalFilter:
+        def __init__(self) -> None:
+            self.position_particles = np.array([[0.0, 0.0]])
+            self.queried_likelihoods: np.ndarray | None = None
+
+        def update_position_likelihood_with_proposal(
+            self,
+            likelihood_fn,
+            *,
+            position_proposal,
+            proposal_weights,
+            proposal_probability,
+            return_log_marginal,
+        ):
+            assert proposal_weights.shape == (2,)
+            assert proposal_probability == 1.0
+            assert return_log_marginal
+            self.queried_likelihoods = np.asarray(
+                likelihood_fn(position_proposal),
+                dtype=float,
+            )
+            return float(np.log(self.queried_likelihoods[-1]))
+
+    centers = np.array([[0.0, 0.0], [1.0, 0.0]])
+    log_likelihood = np.array([-10.0, 0.0])
+    filter_ = RecordingProposalFilter()
+
+    update_log = _update_filter_from_grid_likelihood(
+        filter_,
+        log_likelihood,
+        centers,
+        cKDTree(centers),
+        position_proposal_probability=1.0,
+    )
+
+    assert np.allclose(filter_.queried_likelihoods, np.array([np.exp(-10.0), 1.0]))
+    assert np.allclose(update_log, 0.0)
 
 
 def test_pyrecest_goal_particle_model_uses_position_proposal_when_available():

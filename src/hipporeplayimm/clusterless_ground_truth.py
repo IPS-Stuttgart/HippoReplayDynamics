@@ -18,6 +18,18 @@ from .encoding import EmissionConfig, EncodingConfig
 from .state_space import StateSpaceDecoderConfig
 
 _CLUSTERLESS_PREFIX = "clusterless-state-space-"
+_CLUSTERLESS_KWARG_NAMES = frozenset(
+    {
+        "clusterless_mark_smoothing_sigma_bins",
+        "clusterless_mark_prior_count",
+        "clusterless_mark_variance_floor",
+        "clusterless_rate_floor_hz",
+        "clusterless_mark_likelihood",
+        "clusterless_mark_kde_bandwidth",
+        "clusterless_mark_kde_spatial_sigma_bins",
+        "clusterless_mark_kde_max_neighbors",
+    }
+)
 
 
 def apply_clusterless_ground_truth_patch() -> None:
@@ -50,13 +62,14 @@ def apply_clusterless_ground_truth_patch() -> None:
             return scores_frame
         scores_frame["_score_order"] = np.arange(len(scores_frame))
         clusterless_mask = _score_frame_clusterless_mask(scores_frame)
+        non_clusterless_kwargs = _drop_clusterless_kwargs(kwargs)
         pieces: list[pd.DataFrame] = []
         if (~clusterless_mask).any():
             pieces.append(
                 base_compare_scores_to_ground_truth(
                     root,
                     scores_frame.loc[~clusterless_mask].copy(),
-                    **kwargs,
+                    **non_clusterless_kwargs,
                 )
             )
         if clusterless_mask.any():
@@ -79,6 +92,10 @@ def apply_clusterless_ground_truth_patch() -> None:
     gt._build_models = build_models
     gt.compare_scores_to_ground_truth = compare_scores_to_ground_truth
     gt._clusterless_ground_truth_patch_applied = True
+
+
+def _drop_clusterless_kwargs(kwargs: dict[str, object]) -> dict[str, object]:
+    return {key: value for key, value in kwargs.items() if key not in _CLUSTERLESS_KWARG_NAMES}
 
 
 def _compare_clusterless_scores_to_ground_truth(gt, root, scores_frame: pd.DataFrame, **kwargs) -> pd.DataFrame:
@@ -110,6 +127,10 @@ def _compare_clusterless_scores_to_ground_truth(gt, root, scores_frame: pd.DataF
         clusterless_mark_prior_count=kwargs.get("clusterless_mark_prior_count", 1.0),
         clusterless_mark_variance_floor=kwargs.get("clusterless_mark_variance_floor", 1.0),
         clusterless_rate_floor_hz=kwargs.get("clusterless_rate_floor_hz", 1e-4),
+        clusterless_mark_likelihood=kwargs.get("clusterless_mark_likelihood", "local-kde"),
+        clusterless_mark_kde_bandwidth=kwargs.get("clusterless_mark_kde_bandwidth", None),
+        clusterless_mark_kde_spatial_sigma_bins=kwargs.get("clusterless_mark_kde_spatial_sigma_bins", None),
+        clusterless_mark_kde_max_neighbors=kwargs.get("clusterless_mark_kde_max_neighbors", 256),
     )
     gt_frame = gt._load_or_generate_ground_truth(root, ground_truth, ground_truth_config)
     sessions = {session.session_id: session for session in gt.load_open_field_sessions(root)}
@@ -128,6 +149,10 @@ def _compare_clusterless_scores_to_ground_truth(gt, root, scores_frame: pd.DataF
                 mark_prior_count=model_config.clusterless_mark_prior_count,
                 mark_variance_floor=model_config.clusterless_mark_variance_floor,
                 rate_floor_hz=model_config.clusterless_rate_floor_hz,
+                mark_likelihood=model_config.clusterless_mark_likelihood,
+                mark_kde_bandwidth=model_config.clusterless_mark_kde_bandwidth,
+                mark_kde_spatial_sigma_bins=model_config.clusterless_mark_kde_spatial_sigma_bins,
+                mark_kde_max_neighbors=model_config.clusterless_mark_kde_max_neighbors,
                 use_excitatory=encoding_config.use_excitatory,
             ),
         )
@@ -148,6 +173,7 @@ def _compare_clusterless_scores_to_ground_truth(gt, root, scores_frame: pd.DataF
                         int(event_index),
                         model_name,
                         score.terminal_log_posterior,
+                        score.trajectory_log_posterior,
                         clusterless_encoding.bin_centers,
                         wells,
                     )
@@ -178,6 +204,7 @@ def _clusterless_state_space_model(config: object, mode: str) -> ClusterlessStat
             momentum_velocity_decay=_cfg(config, "state_space_momentum_velocity_decay", 0.95),
             momentum_candidate_top_k=_cfg(config, "state_space_momentum_candidate_top_k", 128),
         ),
+        mark_likelihood=_cfg(config, "clusterless_mark_likelihood", "local-kde"),
     )
 
 
@@ -251,7 +278,64 @@ def _clusterless_model_config_for_scores(scores_frame: pd.DataFrame, *, model_na
             ("clusterless_rate_floor_hz",),
             defaults["clusterless_rate_floor_hz"],
         ),
+        clusterless_mark_likelihood=_unique_string_from_columns(
+            scores_frame,
+            ("clusterless_mark_likelihood", "diagnostic_clusterless_mark_likelihood"),
+            defaults["clusterless_mark_likelihood"],
+        ),
+        clusterless_mark_kde_bandwidth=_optional_float_from_columns(
+            scores_frame,
+            ("clusterless_mark_kde_bandwidth",),
+            defaults["clusterless_mark_kde_bandwidth"],
+        ),
+        clusterless_mark_kde_spatial_sigma_bins=_optional_float_from_columns(
+            scores_frame,
+            ("clusterless_mark_kde_spatial_sigma_bins",),
+            defaults["clusterless_mark_kde_spatial_sigma_bins"],
+        ),
+        clusterless_mark_kde_max_neighbors=_score_metadata._unique_int_from_columns(
+            scores_frame,
+            (
+                "clusterless_mark_kde_max_neighbors",
+                "diagnostic_clusterless_mark_kde_max_neighbors",
+            ),
+            defaults["clusterless_mark_kde_max_neighbors"],
+        ),
     )
+
+
+def _unique_string_from_columns(frame: pd.DataFrame, columns: tuple[str, ...], default: str) -> str:
+    values: list[str] = []
+    for column in columns:
+        if column not in frame.columns:
+            continue
+        for value in frame[column].dropna():
+            text = str(value).strip()
+            if text:
+                values.append(text)
+    if not values:
+        return str(default)
+    first = values[0]
+    if any(value != first for value in values[1:]):
+        raise ValueError(f"{' / '.join(columns)} contains multiple values")
+    return first
+
+
+def _optional_float_from_columns(frame: pd.DataFrame, columns: tuple[str, ...], default: float | None) -> float | None:
+    values: list[float] = []
+    for column in columns:
+        if column not in frame.columns:
+            continue
+        for value in frame[column].dropna():
+            text = str(value).strip()
+            if text:
+                values.append(float(value))
+    if not values:
+        return default
+    first = values[0]
+    if any(not np.isclose(value, first) for value in values[1:]):
+        raise ValueError(f"{' / '.join(columns)} contains multiple values")
+    return float(first)
 
 
 def _score_frame_clusterless_mask(scores_frame: pd.DataFrame) -> pd.Series:

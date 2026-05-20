@@ -9,6 +9,7 @@ import numpy as np
 from scipy.special import logsumexp
 
 from .encoding import LogEmissionTensor
+from .state_space_utils import _validate_candidate_indices
 
 
 LOG_ZERO = -1.0e300
@@ -38,7 +39,8 @@ class RandomModel:
     name: str = "random"
 
     def score(self, emissions: LogEmissionTensor, bin_centers: np.ndarray) -> EventScore:
-        terminal_log_posterior = _normalize_log_weights(emissions.log_likelihood[-1])
+        trajectory_log_posterior = _normalize_log_weights_by_row(emissions.log_likelihood)
+        terminal_log_posterior = trajectory_log_posterior[-1]
         logp = float(np.sum(logsumexp(emissions.log_likelihood, axis=1) - np.log(emissions.n_bins)))
         return EventScore(
             self.name,
@@ -47,6 +49,7 @@ class RandomModel:
             emissions.n_spikes,
             diagnostics=_posterior_diagnostics(terminal_log_posterior, bin_centers),
             terminal_log_posterior=terminal_log_posterior,
+            trajectory_log_posterior=trajectory_log_posterior,
         )
 
 
@@ -55,10 +58,10 @@ class StationaryModel:
     name: str = "stationary"
 
     def score(self, emissions: LogEmissionTensor, bin_centers: np.ndarray) -> EventScore:
-        terminal_log_posterior = _normalize_log_weights(
-            np.sum(emissions.log_likelihood, axis=0) - np.log(emissions.n_bins)
-        )
-        logp = float(logsumexp(np.sum(emissions.log_likelihood, axis=0) - np.log(emissions.n_bins)))
+        cumulative_log_likelihood = np.cumsum(emissions.log_likelihood, axis=0) - np.log(emissions.n_bins)
+        trajectory_log_posterior = _normalize_log_weights_by_row(cumulative_log_likelihood)
+        terminal_log_posterior = trajectory_log_posterior[-1]
+        logp = float(logsumexp(cumulative_log_likelihood[-1]))
         return EventScore(
             self.name,
             logp,
@@ -66,6 +69,7 @@ class StationaryModel:
             emissions.n_spikes,
             diagnostics=_posterior_diagnostics(terminal_log_posterior, bin_centers),
             terminal_log_posterior=terminal_log_posterior,
+            trajectory_log_posterior=trajectory_log_posterior,
         )
 
 
@@ -82,8 +86,10 @@ class DiffusionModel:
             max_step_sigma=self.max_step_sigma,
         )
         log_alpha = emissions.log_likelihood[0] - np.log(emissions.n_bins)
+        trajectory_log_posterior = [_normalize_log_weights(log_alpha)]
         for time_index in range(1, emissions.n_time):
             log_alpha = emissions.log_likelihood[time_index] + _log_sparse_matvec(log_alpha, transition)
+            trajectory_log_posterior.append(_normalize_log_weights(log_alpha))
         logp = float(logsumexp(log_alpha))
         terminal_log_posterior = _normalize_log_weights(log_alpha)
         return EventScore(
@@ -93,6 +99,7 @@ class DiffusionModel:
             emissions.n_spikes,
             diagnostics=_posterior_diagnostics(terminal_log_posterior, bin_centers),
             terminal_log_posterior=terminal_log_posterior,
+            trajectory_log_posterior=np.stack(trajectory_log_posterior, axis=0),
         )
 
 
@@ -137,19 +144,20 @@ class CandidateKinematicModel:
         candidate_indices: list[np.ndarray] | None = None,
     ) -> EventScore:
         if emissions.n_time == 1:
+            if candidate_indices is not None:
+                _validate_candidate_support(candidate_indices, emissions.n_time, emissions.n_bins)
             return self._score_single_bin(emissions, bin_centers)
         candidates = self.candidate_indices(emissions) if candidate_indices is None else candidate_indices
-        if len(candidates) != emissions.n_time:
-            raise ValueError("candidate_indices must contain one array per emission time bin")
+        candidates = _validate_candidate_support(candidates, emissions.n_time, emissions.n_bins)
         if self.mode != "imm":
-            logp, mass, terminal_log_posterior = self._score_static_pair(
+            logp, mass, terminal_log_posterior, trajectory_log_posterior = self._score_static_pair(
                 emissions,
                 bin_centers,
                 candidates,
                 self.mode,
             )
         else:
-            logp, mass, terminal_log_posterior = self._score_imm(
+            logp, mass, terminal_log_posterior, trajectory_log_posterior = self._score_imm(
                 emissions,
                 bin_centers,
                 candidates,
@@ -166,6 +174,7 @@ class CandidateKinematicModel:
             emissions.n_spikes,
             diagnostics=diagnostics,
             terminal_log_posterior=terminal_log_posterior,
+            trajectory_log_posterior=trajectory_log_posterior,
         )
 
     def _score_single_bin(self, emissions: LogEmissionTensor, bin_centers: np.ndarray) -> EventScore:
@@ -204,7 +213,7 @@ class CandidateKinematicModel:
         bin_centers: np.ndarray,
         candidates: list[np.ndarray],
         mode: str,
-    ) -> tuple[float, list[float], np.ndarray]:
+    ) -> tuple[float, list[float], np.ndarray, np.ndarray]:
         masses = _candidate_log_masses(emissions, candidates)
         first = candidates[0]
         second = candidates[1]
@@ -218,8 +227,13 @@ class CandidateKinematicModel:
             diffusion_sigma_cm=self.diffusion_sigma_cm,
             momentum_sigma_cm=self.momentum_sigma_cm,
         )
+        n_bins = bin_centers.shape[0]
         prev_prev = first
         prev = second
+        trajectory_log_posterior = [
+            _pair_previous_posterior(log_pair, first, n_bins),
+            _pair_terminal_posterior(log_pair, second, n_bins),
+        ]
         for time_index in range(2, emissions.n_time):
             curr = candidates[time_index]
             log_pair = _advance_pair_log_alpha(
@@ -236,10 +250,15 @@ class CandidateKinematicModel:
                 velocity_decay=self.velocity_decay,
             )
             prev_prev, prev = prev, curr
-        return float(logsumexp(log_pair)), masses, _pair_terminal_posterior(
-            log_pair,
-            prev,
-            bin_centers.shape[0],
+            trajectory_log_posterior.append(
+                _pair_terminal_posterior(log_pair, curr, n_bins)
+            )
+        terminal_log_posterior = trajectory_log_posterior[-1]
+        return (
+            float(logsumexp(log_pair)),
+            masses,
+            terminal_log_posterior,
+            np.stack(trajectory_log_posterior, axis=0),
         )
 
     def _score_imm(
@@ -247,7 +266,7 @@ class CandidateKinematicModel:
         emissions: LogEmissionTensor,
         bin_centers: np.ndarray,
         candidates: list[np.ndarray],
-    ) -> tuple[float, list[float], np.ndarray]:
+    ) -> tuple[float, list[float], np.ndarray, np.ndarray]:
         masses = _candidate_log_masses(emissions, candidates)
         modes = ("stationary", "diffusion", "momentum", "jump")
         transition_modes = _mode_transition_matrix(len(modes), self.mode_stickiness)
@@ -268,8 +287,13 @@ class CandidateKinematicModel:
                 )
             )
         log_alpha = np.stack(by_mode, axis=0) - np.log(len(modes))
+        n_bins = bin_centers.shape[0]
         prev_prev = first
         prev = second
+        trajectory_log_posterior = [
+            _pair_previous_posterior(log_alpha, first, n_bins),
+            _pair_terminal_posterior(log_alpha, second, n_bins),
+        ]
         for time_index in range(2, emissions.n_time):
             curr = candidates[time_index]
             next_alpha = []
@@ -295,15 +319,31 @@ class CandidateKinematicModel:
                 )
             log_alpha = np.stack(next_alpha, axis=0)
             prev_prev, prev = prev, curr
-        return float(logsumexp(log_alpha)), masses, _pair_terminal_posterior(
-            log_alpha,
-            prev,
-            bin_centers.shape[0],
+            trajectory_log_posterior.append(
+                _pair_terminal_posterior(log_alpha, curr, n_bins)
+            )
+        terminal_log_posterior = trajectory_log_posterior[-1]
+        return (
+            float(logsumexp(log_alpha)),
+            masses,
+            terminal_log_posterior,
+            np.stack(trajectory_log_posterior, axis=0),
         )
 
 
 def score_model(model: ReplayModel, emissions: LogEmissionTensor, bin_centers: np.ndarray) -> EventScore:
     return model.score(emissions, bin_centers)
+
+
+def _validate_candidate_support(
+    candidates: list[np.ndarray],
+    n_time: int,
+    n_bins: int,
+) -> list[np.ndarray]:
+    try:
+        return _validate_candidate_indices(candidates, n_time, n_bins)
+    except TypeError as exc:
+        raise ValueError(str(exc)) from exc
 
 
 def _top_candidate_indices(log_emission: np.ndarray, top_k: int) -> np.ndarray:
@@ -324,6 +364,10 @@ def _candidate_log_masses(emissions: LogEmissionTensor, candidates: list[np.ndar
 
 def _normalize_log_weights(log_weights: np.ndarray) -> np.ndarray:
     return log_weights - logsumexp(log_weights)
+
+
+def _normalize_log_weights_by_row(log_weights: np.ndarray) -> np.ndarray:
+    return log_weights - logsumexp(log_weights, axis=1, keepdims=True)
 
 
 def _posterior_diagnostics(
@@ -360,6 +404,20 @@ def _pair_terminal_posterior(
         collapsed = logsumexp(log_pair_or_modes, axis=0)
     log_posterior = np.full(n_bins, LOG_ZERO, dtype=float)
     log_posterior[current_indices] = collapsed
+    return _normalize_log_weights(log_posterior)
+
+
+def _pair_previous_posterior(
+    log_pair_or_modes: np.ndarray,
+    previous_indices: np.ndarray,
+    n_bins: int,
+) -> np.ndarray:
+    if log_pair_or_modes.ndim == 3:
+        collapsed = logsumexp(log_pair_or_modes, axis=(0, 2))
+    else:
+        collapsed = logsumexp(log_pair_or_modes, axis=1)
+    log_posterior = np.full(n_bins, LOG_ZERO, dtype=float)
+    log_posterior[previous_indices] = collapsed
     return _normalize_log_weights(log_posterior)
 
 

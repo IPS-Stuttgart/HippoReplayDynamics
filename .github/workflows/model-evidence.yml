@@ -23,7 +23,7 @@ on:
       models:
         description: "Space-separated models"
         required: true
-        default: "random stationary stationary-gaussian diffusion momentum imm"
+        default: "random stationary stationary-gaussian diffusion momentum imm sorted-spike-state-space-stationary sorted-spike-state-space-diffusion sorted-spike-state-space-momentum sorted-spike-state-space-fragmented sorted-spike-state-space-imm sorted-spike-state-space-goal"
       candidate_top_k:
         description: "Candidate spatial bins per time bin"
         required: true
@@ -64,6 +64,10 @@ on:
         description: "State-space IMM mode-transition stickiness"
         required: true
         default: "0.95"
+      state_space_imm_switch_tau_s:
+        description: "Optional state-space IMM mode-switch time constant in seconds; 0 uses state_space_imm_mode_stickiness"
+        required: true
+        default: "0"
       state_space_momentum_sigma_cm_sqrt_s:
         description: "State-space momentum process noise in cm/sqrt(s)"
         required: true
@@ -72,10 +76,58 @@ on:
         description: "State-space momentum velocity decay"
         required: true
         default: "0.95"
+      state_space_momentum_predicted_candidate_top_k:
+        description: "Top adjacent emission candidates used to augment second-order candidate support with momentum predictions"
+        required: true
+        default: "8"
+      goal_state_space_transition_sigma_cm_sqrt_s:
+        description: "Goal state-space transition noise in cm/sqrt(s)"
+        required: true
+        default: "85.0"
+      goal_state_space_drift_speed_cm_s:
+        description: "Goal state-space drift speed toward candidate wells in cm/s"
+        required: true
+        default: "400.0"
+      goal_state_space_max_step_sigma:
+        description: "Goal state-space transition truncation radius in sigmas"
+        required: true
+        default: "4.0"
+      clusterless_mark_smoothing_sigma_bins:
+        description: "Clusterless mark-parameter smoothing sigma in spatial bins"
+        required: true
+        default: "1.0"
+      clusterless_mark_prior_count:
+        description: "Clusterless mark prior pseudo-count"
+        required: true
+        default: "1.0"
+      clusterless_mark_variance_floor:
+        description: "Clusterless mark variance floor"
+        required: true
+        default: "1.0"
+      clusterless_rate_floor_hz:
+        description: "Clusterless spike-intensity rate floor in Hz"
+        required: true
+        default: "0.0001"
+      clusterless_mark_likelihood:
+        description: "Clusterless mark likelihood: local-kde or diagonal-gaussian"
+        required: true
+        default: "local-kde"
+      clusterless_mark_kde_bandwidth:
+        description: "Optional local-KDE mark bandwidth; empty uses Scott-style rule"
+        required: false
+        default: ""
+      clusterless_mark_kde_spatial_sigma_bins:
+        description: "Optional local-KDE spatial support sigma in bins; empty uses clusterless_mark_smoothing_sigma_bins"
+        required: false
+        default: ""
+      clusterless_mark_kde_max_neighbors:
+        description: "Maximum local-KDE mark neighbors per spatial bin"
+        required: true
+        default: "256"
       time_bin_s:
         description: "Ripple decoding time-bin width in seconds"
         required: true
-        default: "0.02"
+        default: "0.003"
       spike_rate_scale:
         description: "Multiplicative scale applied to Poisson place-field rates during ripple scoring"
         required: true
@@ -112,13 +164,23 @@ env:
   STATE_SPACE_DIFFUSION_SIGMA_CM_SQRT_S: ${{ inputs.state_space_diffusion_sigma_cm_sqrt_s }}
   STATE_SPACE_MAX_STEP_SIGMA: ${{ inputs.state_space_max_step_sigma }}
   STATE_SPACE_IMM_MODE_STICKINESS: ${{ inputs.state_space_imm_mode_stickiness }}
+  STATE_SPACE_IMM_SWITCH_TAU_S: ${{ inputs.state_space_imm_switch_tau_s }}
   STATE_SPACE_MOMENTUM_SIGMA_CM_SQRT_S: ${{ inputs.state_space_momentum_sigma_cm_sqrt_s }}
   STATE_SPACE_MOMENTUM_INITIAL_SIGMA_CM_SQRT_S: "85.0"
   STATE_SPACE_MOMENTUM_VELOCITY_DECAY: ${{ inputs.state_space_momentum_velocity_decay }}
   STATE_SPACE_MOMENTUM_CANDIDATE_TOP_K: "128"
-  CLUSTERLESS_MARK_SMOOTHING_SIGMA_BINS: "1.0"
-  CLUSTERLESS_MARK_PRIOR_COUNT: "1.0"
-  CLUSTERLESS_MARK_VARIANCE_FLOOR: "1.0"
+  STATE_SPACE_MOMENTUM_PREDICTED_CANDIDATE_TOP_K: ${{ inputs.state_space_momentum_predicted_candidate_top_k }}
+  GOAL_STATE_SPACE_TRANSITION_SIGMA_CM_SQRT_S: ${{ inputs.goal_state_space_transition_sigma_cm_sqrt_s }}
+  GOAL_STATE_SPACE_DRIFT_SPEED_CM_S: ${{ inputs.goal_state_space_drift_speed_cm_s }}
+  GOAL_STATE_SPACE_MAX_STEP_SIGMA: ${{ inputs.goal_state_space_max_step_sigma }}
+  CLUSTERLESS_MARK_SMOOTHING_SIGMA_BINS: ${{ inputs.clusterless_mark_smoothing_sigma_bins }}
+  CLUSTERLESS_MARK_PRIOR_COUNT: ${{ inputs.clusterless_mark_prior_count }}
+  CLUSTERLESS_MARK_VARIANCE_FLOOR: ${{ inputs.clusterless_mark_variance_floor }}
+  CLUSTERLESS_RATE_FLOOR_HZ: ${{ inputs.clusterless_rate_floor_hz }}
+  CLUSTERLESS_MARK_LIKELIHOOD: ${{ inputs.clusterless_mark_likelihood }}
+  CLUSTERLESS_MARK_KDE_BANDWIDTH: ${{ inputs.clusterless_mark_kde_bandwidth }}
+  CLUSTERLESS_MARK_KDE_SPATIAL_SIGMA_BINS: ${{ inputs.clusterless_mark_kde_spatial_sigma_bins }}
+  CLUSTERLESS_MARK_KDE_MAX_NEIGHBORS: ${{ inputs.clusterless_mark_kde_max_neighbors }}
   TIME_BIN_S: ${{ inputs.time_bin_s }}
   SPIKE_RATE_SCALE: ${{ inputs.spike_rate_scale }}
   BIN_SIZE_CM: ${{ inputs.bin_size_cm }}
@@ -180,13 +242,23 @@ jobs:
             --state-space-diffusion-sigma-cm-sqrt-s "${STATE_SPACE_DIFFUSION_SIGMA_CM_SQRT_S}" \
             --state-space-max-step-sigma "${STATE_SPACE_MAX_STEP_SIGMA}" \
             --state-space-imm-mode-stickiness "${STATE_SPACE_IMM_MODE_STICKINESS}" \
+            --state-space-imm-switch-tau-s "${STATE_SPACE_IMM_SWITCH_TAU_S}" \
             --state-space-momentum-sigma-cm-sqrt-s "${STATE_SPACE_MOMENTUM_SIGMA_CM_SQRT_S}" \
             --state-space-momentum-initial-sigma-cm-sqrt-s "${STATE_SPACE_MOMENTUM_INITIAL_SIGMA_CM_SQRT_S}" \
             --state-space-momentum-velocity-decay "${STATE_SPACE_MOMENTUM_VELOCITY_DECAY}" \
             --state-space-momentum-candidate-top-k "${STATE_SPACE_MOMENTUM_CANDIDATE_TOP_K}" \
+            --state-space-momentum-predicted-candidate-top-k "${STATE_SPACE_MOMENTUM_PREDICTED_CANDIDATE_TOP_K}" \
+            --goal-state-space-transition-sigma-cm-sqrt-s "${GOAL_STATE_SPACE_TRANSITION_SIGMA_CM_SQRT_S}" \
+            --goal-state-space-drift-speed-cm-s "${GOAL_STATE_SPACE_DRIFT_SPEED_CM_S}" \
+            --goal-state-space-max-step-sigma "${GOAL_STATE_SPACE_MAX_STEP_SIGMA}" \
             --clusterless-mark-smoothing-sigma-bins "${CLUSTERLESS_MARK_SMOOTHING_SIGMA_BINS}" \
             --clusterless-mark-prior-count "${CLUSTERLESS_MARK_PRIOR_COUNT}" \
             --clusterless-mark-variance-floor "${CLUSTERLESS_MARK_VARIANCE_FLOOR}" \
+            --clusterless-rate-floor-hz "${CLUSTERLESS_RATE_FLOOR_HZ}" \
+            --clusterless-mark-likelihood "${CLUSTERLESS_MARK_LIKELIHOOD}" \
+            --clusterless-mark-kde-bandwidth "${CLUSTERLESS_MARK_KDE_BANDWIDTH}" \
+            --clusterless-mark-kde-spatial-sigma-bins "${CLUSTERLESS_MARK_KDE_SPATIAL_SIGMA_BINS}" \
+            --clusterless-mark-kde-max-neighbors "${CLUSTERLESS_MARK_KDE_MAX_NEIGHBORS}" \
             --time-bin-s "${TIME_BIN_S}" \
             --spike-rate-scale "${SPIKE_RATE_SCALE}" \
             --bin-size-cm "${BIN_SIZE_CM}" \

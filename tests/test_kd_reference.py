@@ -10,6 +10,7 @@ from hipporeplayimm.kd_reference import (
     build_kd_emissions,
     diffusion_transition_1d,
     empirical_grid_prior,
+    fit_kd_place_field_encoding,
     kd_momentum_log_evidence,
     kd_random_log_evidence,
     kd_stationary_gaussian_log_evidence_from_latent,
@@ -55,6 +56,44 @@ def _session_with_ripple(spikes: np.ndarray, ripple: RippleEvent) -> ReplaySessi
         well_sequence=None,
         metadata={},
     )
+
+
+def test_fit_kd_place_field_encoding_handles_empty_cell_set_with_smoothing():
+    times = np.linspace(0.0, 10.0, 301)
+    x = np.linspace(0.0, 100.0, times.size)
+    y = np.zeros_like(x)
+    position = np.column_stack([times, x, y, np.zeros_like(x)])
+    session = ReplaySession(
+        rat="rat",
+        name="session",
+        path=Path("."),
+        position=position,
+        spikes=np.empty((0, 2)),
+        tetrode_cell_ids=np.empty((0, 2), dtype=int),
+        excitatory_neurons=np.array([], dtype=int),
+        inhibitory_neurons=np.array([], dtype=int),
+        ripple_events=np.empty((0, 6)),
+        run_times=np.array([[0.0, 10.0]]),
+        sleep_box_immobile_times=np.empty((0, 2)),
+        sleep_times=np.empty((0, 2)),
+        rem_times=np.empty((0, 2)),
+        well_sequence=None,
+        metadata={},
+    )
+
+    encoding = fit_kd_place_field_encoding(
+        session,
+        KDEncodingConfig(
+            bin_size_cm=10.0,
+            n_bins_x=12,
+            n_bins_y=2,
+            smoothing_sigma_cm=10.0,
+            min_speed_cm_s=1.0,
+        ),
+    )
+
+    assert encoding.cell_ids.size == 0
+    assert encoding.rates_hz.shape == (0, encoding.n_bins)
 
 
 def test_kd_random_evidence_averages_independent_time_bin_emissions():

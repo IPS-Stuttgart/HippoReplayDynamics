@@ -155,3 +155,108 @@ def test_select_parameters_falls_back_when_no_config_passes_gate(tmp_path):
     manifest = json.loads((output / "state_space_parameter_selection_manifest.json").read_text(encoding="utf-8"))
     assert manifest["row_counts"]["candidate_rows"] == 0
     assert not manifest["recommendation"]["passes_recovery_gate"]
+
+
+def test_select_parameters_writes_leave_one_session_out_recommendations(tmp_path):
+    evidence = tmp_path / "evidence"
+    recovery = tmp_path / "recovery"
+    output = tmp_path / "selection"
+    rat1_favored = _params(40.0, 60.0, 85.0, 0.9, 128)
+    rat2_favored = _params(110.0, 85.0, 85.0, 0.98, 256)
+    _write(
+        evidence,
+        "state_space_evidence_sweep_config_ranked.csv",
+        [
+            {
+                **rat1_favored,
+                "requested_session": "Rat1/Open1",
+                "matrix_id": "rat1-a",
+                "events": 10,
+                "momentum_beats_diffusion_events": 10,
+                "median_momentum_minus_diffusion_log_evidence": 4.0,
+                "mean_momentum_minus_diffusion_log_evidence": 4.5,
+            },
+            {
+                **rat2_favored,
+                "requested_session": "Rat1/Open1",
+                "matrix_id": "rat1-b",
+                "events": 10,
+                "momentum_beats_diffusion_events": 4,
+                "median_momentum_minus_diffusion_log_evidence": -1.0,
+                "mean_momentum_minus_diffusion_log_evidence": -1.5,
+            },
+            {
+                **rat1_favored,
+                "requested_session": "Rat2/Open1",
+                "matrix_id": "rat2-a",
+                "events": 10,
+                "momentum_beats_diffusion_events": 3,
+                "median_momentum_minus_diffusion_log_evidence": -2.0,
+                "mean_momentum_minus_diffusion_log_evidence": -2.5,
+            },
+            {
+                **rat2_favored,
+                "requested_session": "Rat2/Open1",
+                "matrix_id": "rat2-b",
+                "events": 10,
+                "momentum_beats_diffusion_events": 10,
+                "median_momentum_minus_diffusion_log_evidence": 5.0,
+                "mean_momentum_minus_diffusion_log_evidence": 5.5,
+            },
+        ],
+    )
+    _write(
+        recovery,
+        "simulation_recovery_sweep_config_ranked.csv",
+        [
+            {
+                **rat1_favored,
+                "matrix_id": "recovery-a",
+                "failures": 0,
+                "overall_recovery_accuracy": 1.0,
+                "momentum_recovery_accuracy": 1.0,
+                "diffusion_recovery_accuracy": 1.0,
+            },
+            {
+                **rat2_favored,
+                "matrix_id": "recovery-b",
+                "failures": 0,
+                "overall_recovery_accuracy": 1.0,
+                "momentum_recovery_accuracy": 1.0,
+                "diffusion_recovery_accuracy": 1.0,
+            },
+        ],
+    )
+
+    tables = select_parameters(
+        evidence,
+        recovery,
+        output=output,
+        leave_one_session_out=True,
+        session_column="requested_session",
+    )
+
+    loso = tables["leave_one_session_out"].set_index("held_out_session")
+    assert loso.loc["Rat1/Open1", "state_space_diffusion_sigma_cm_sqrt_s"] == rat2_favored[
+        "state_space_diffusion_sigma_cm_sqrt_s"
+    ]
+    assert loso.loc["Rat2/Open1", "state_space_diffusion_sigma_cm_sqrt_s"] == rat1_favored[
+        "state_space_diffusion_sigma_cm_sqrt_s"
+    ]
+    assert loso.loc["Rat1/Open1", "train_sessions"] == "Rat2/Open1"
+    assert loso.loc["Rat2/Open1", "train_sessions"] == "Rat1/Open1"
+    assert (output / "state_space_loso_parameter_recommendations.csv").exists()
+    assert (output / "state_space_loso_selected_workflow_inputs.yml").exists()
+    assert (output / "state_space_loso_selected_cli_args.txt").exists()
+    manifest = json.loads((output / "state_space_parameter_selection_manifest.json").read_text(encoding="utf-8"))
+    assert manifest["leave_one_session_out"] == {
+        "enabled": True,
+        "folds": 2,
+        "output_files": [
+            "state_space_loso_parameter_recommendations.csv",
+            "state_space_loso_selected_workflow_inputs.yml",
+            "state_space_loso_selected_cli_args.txt",
+        ],
+        "requested_holdout_sessions": None,
+        "session_column": "requested_session",
+    }

@@ -28,6 +28,9 @@ class EncodingConfig:
 class EmissionConfig:
     time_bin_s: float = 0.02
     spike_rate_scale: float = 1.0
+    likelihood_temperature: float = 1.0
+    cell_weights: Iterable[float] | np.ndarray | None = None
+    negative_binomial_overdispersion: float = 0.0
 
 
 @dataclass
@@ -56,7 +59,21 @@ class EncodingModel:
 
     def select_cells(self, cell_ids: Iterable[int]) -> "EncodingModel":
         requested = np.asarray(sorted(set(cell_ids)), dtype=int)
-        indices = [int(np.flatnonzero(self.cell_ids == cell_id)[0]) for cell_id in requested]
+        indices: list[int] = []
+        missing: list[int] = []
+        for cell_id in requested:
+            matches = np.flatnonzero(self.cell_ids == cell_id)
+            if matches.size:
+                indices.append(int(matches[0]))
+            else:
+                missing.append(int(cell_id))
+
+        if missing:
+            raise ValueError(
+                "requested cell IDs are not present in encoding model: "
+                f"{missing}; available cell IDs: {self.cell_ids.astype(int).tolist()}"
+            )
+
         return EncodingModel(
             x_edges=self.x_edges,
             y_edges=self.y_edges,
@@ -106,6 +123,9 @@ def fit_place_field_encoding(session: ReplaySession, config: EncodingConfig | No
 
     config = EncodingConfig() if config is None else config
     position = _clean_position(session.position)
+    selected_spikes = session.excitatory_spikes() if config.use_excitatory else session.spikes
+    if not (position.shape[0] == 1 and np.asarray(selected_spikes).size == 0):
+        _validate_position_samples(position)
     times = position[:, 0]
     xy = position[:, 1:3]
     speed = _speed_cm_s(times, xy)
@@ -160,15 +180,10 @@ def fit_place_field_encoding(session: ReplaySession, config: EncodingConfig | No
             sigma=config.smoothing_sigma_bins,
             mode="constant",
         ).reshape(-1)
-        smooth_counts = np.vstack(
-            [
-                gaussian_filter(
-                    row.reshape(grid_shape),
-                    sigma=config.smoothing_sigma_bins,
-                    mode="constant",
-                ).reshape(-1)
-                for row in counts
-            ]
+        smooth_counts = _smooth_count_rows(
+            counts,
+            grid_shape,
+            config.smoothing_sigma_bins,
         )
     else:
         smooth_occupancy = occupancy
@@ -224,6 +239,9 @@ def build_emissions(
         encoding.rates_hz,
         bin_durations,
         spike_rate_scale=config.spike_rate_scale,
+        likelihood_temperature=config.likelihood_temperature,
+        cell_weights=config.cell_weights,
+        negative_binomial_overdispersion=config.negative_binomial_overdispersion,
     )
     return LogEmissionTensor(
         log_likelihood=log_likelihood,
@@ -241,19 +259,29 @@ def _poisson_log_emissions(
     dt: float | np.ndarray,
     *,
     spike_rate_scale: float = 1.0,
+    likelihood_temperature: float = 1.0,
+    cell_weights: Iterable[float] | np.ndarray | None = None,
+    negative_binomial_overdispersion: float = 0.0,
 ) -> np.ndarray:
-    if spike_rate_scale <= 0.0:
-        raise ValueError("spike_rate_scale must be positive")
+    if not np.isfinite(spike_rate_scale) or spike_rate_scale <= 0.0:
+        raise ValueError("spike_rate_scale must be finite and positive")
+    _validate_emission_calibration(
+        likelihood_temperature=likelihood_temperature,
+        negative_binomial_overdispersion=negative_binomial_overdispersion,
+    )
+    weights = _emission_cell_weights(cell_weights, spike_counts.shape[1])
     dt_array = np.asarray(dt, dtype=float)
     if dt_array.ndim == 0:
         if float(dt_array) <= 0.0:
             raise ValueError("dt must be positive")
         expected = np.maximum(rates_hz * float(dt_array) * spike_rate_scale, np.finfo(float).tiny)
-        return (
-            spike_counts @ np.log(expected)
-            - expected.sum(axis=0)[None, :]
-            - gammaln(spike_counts + 1).sum(axis=1)[:, None]
+        log_likelihood = _count_log_emissions(
+            spike_counts,
+            expected,
+            cell_weights=weights,
+            negative_binomial_overdispersion=negative_binomial_overdispersion,
         )
+        return _apply_likelihood_temperature(log_likelihood, likelihood_temperature)
 
     if dt_array.ndim != 1 or dt_array.shape[0] != spike_counts.shape[0]:
         raise ValueError("dt must be a scalar or one duration per time bin")
@@ -264,11 +292,110 @@ def _poisson_log_emissions(
         dt_array[:, None, None] * rates_hz[None, :, :] * spike_rate_scale,
         np.finfo(float).tiny,
     )
-    return (
-        np.einsum("tc,tcb->tb", spike_counts, np.log(expected), optimize=True)
-        - expected.sum(axis=1)
-        - gammaln(spike_counts + 1).sum(axis=1)[:, None]
+    log_likelihood = _count_log_emissions(
+        spike_counts,
+        expected,
+        cell_weights=weights,
+        negative_binomial_overdispersion=negative_binomial_overdispersion,
     )
+    return _apply_likelihood_temperature(log_likelihood, likelihood_temperature)
+
+
+def _count_log_emissions(
+    spike_counts: np.ndarray,
+    expected: np.ndarray,
+    *,
+    cell_weights: np.ndarray,
+    negative_binomial_overdispersion: float,
+) -> np.ndarray:
+    """Return per-time/bin count log likelihoods for Poisson or NB emissions."""
+
+    if negative_binomial_overdispersion == 0.0:
+        if expected.ndim == 2:
+            return (
+                (spike_counts * cell_weights[None, :]) @ np.log(expected)
+                - (cell_weights @ expected)[None, :]
+                - (gammaln(spike_counts + 1) * cell_weights[None, :]).sum(axis=1)[:, None]
+            )
+        if expected.ndim == 3:
+            return (
+                np.einsum(
+                    "tc,tcb,c->tb",
+                    spike_counts,
+                    np.log(expected),
+                    cell_weights,
+                    optimize=True,
+                )
+                - np.einsum("tcb,c->tb", expected, cell_weights, optimize=True)
+                - (gammaln(spike_counts + 1) * cell_weights[None, :]).sum(axis=1)[:, None]
+            )
+        raise ValueError("expected must be two- or three-dimensional")
+
+    counts = np.asarray(spike_counts, dtype=float)[:, :, None]
+    expected_3d = expected[None, :, :] if expected.ndim == 2 else expected
+    log_terms = _negative_binomial_log_emissions(
+        counts,
+        expected_3d,
+        negative_binomial_overdispersion,
+    )
+    return (log_terms * cell_weights[None, :, None]).sum(axis=1)
+
+
+def _emission_cell_weights(
+    cell_weights: Iterable[float] | np.ndarray | None,
+    n_cells: int,
+) -> np.ndarray:
+    """Return validated nonnegative per-cell emission weights."""
+
+    if cell_weights is None:
+        return np.ones(int(n_cells), dtype=float)
+    if np.isscalar(cell_weights):
+        values = [cell_weights]
+    else:
+        values = list(cell_weights)
+    weights = np.asarray(values, dtype=float)
+    if weights.ndim != 1 or weights.shape[0] != int(n_cells):
+        raise ValueError("cell_weights must contain one weight per encoded cell")
+    if not np.all(np.isfinite(weights)):
+        raise ValueError("cell_weights must be finite")
+    if np.any(weights < 0.0):
+        raise ValueError("cell_weights must be nonnegative")
+    if not np.any(weights > 0.0):
+        raise ValueError("cell_weights must include at least one positive weight")
+    return weights
+
+
+def _negative_binomial_log_emissions(
+    counts: np.ndarray,
+    expected: np.ndarray,
+    negative_binomial_overdispersion: float,
+) -> np.ndarray:
+    """Negative-binomial log PMF with variance mean + alpha * mean**2."""
+
+    size = 1.0 / float(negative_binomial_overdispersion)
+    mean = np.maximum(np.asarray(expected, dtype=float), np.finfo(float).tiny)
+    return (
+        gammaln(counts + size)
+        - gammaln(size)
+        - gammaln(counts + 1.0)
+        + size * (np.log(size) - np.log(size + mean))
+        + counts * (np.log(mean) - np.log(size + mean))
+    )
+
+
+def _validate_emission_calibration(
+    *,
+    likelihood_temperature: float,
+    negative_binomial_overdispersion: float,
+) -> None:
+    if not np.isfinite(likelihood_temperature) or likelihood_temperature <= 0.0:
+        raise ValueError("likelihood_temperature must be finite and positive")
+    if not np.isfinite(negative_binomial_overdispersion) or negative_binomial_overdispersion < 0.0:
+        raise ValueError("negative_binomial_overdispersion must be finite and nonnegative")
+
+
+def _apply_likelihood_temperature(log_likelihood: np.ndarray, likelihood_temperature: float) -> np.ndarray:
+    return np.asarray(log_likelihood, dtype=float) / float(likelihood_temperature)
 
 
 def _time_bin_edges(start: float, end: float, time_bin_s: float) -> np.ndarray:
@@ -299,6 +426,13 @@ def _clean_position(position: np.ndarray) -> np.ndarray:
     return arr[keep]
 
 
+def _validate_position_samples(position: np.ndarray) -> None:
+    if position.shape[0] < 2:
+        raise ValueError(
+            "at least two finite position samples are required to fit place fields"
+        )
+
+
 def _make_grid(xy: np.ndarray, config: EncodingConfig) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     x_min, y_min = np.nanmin(xy, axis=0) - config.arena_padding_cm
     x_max, y_max = np.nanmax(xy, axis=0) + config.arena_padding_cm
@@ -320,7 +454,30 @@ def _positions_to_flat_bins(xy: np.ndarray, x_edges: np.ndarray, y_edges: np.nda
     return flat
 
 
+def _smooth_count_rows(
+    counts: np.ndarray,
+    grid_shape: tuple[int, int],
+    sigma: float,
+) -> np.ndarray:
+    """Apply spatial Gaussian smoothing to each cell's count map."""
+
+    if counts.shape[0] == 0:
+        return counts.copy()
+    return np.vstack(
+        [
+            gaussian_filter(
+                row.reshape(grid_shape),
+                sigma=sigma,
+                mode="constant",
+            ).reshape(-1)
+            for row in counts
+        ]
+    )
+
+
 def _speed_cm_s(times: np.ndarray, xy: np.ndarray) -> np.ndarray:
+    if times.shape[0] < 2:
+        return np.zeros(times.shape, dtype=float)
     dt = np.gradient(times)
     dx = np.gradient(xy[:, 0])
     dy = np.gradient(xy[:, 1])
@@ -330,6 +487,8 @@ def _speed_cm_s(times: np.ndarray, xy: np.ndarray) -> np.ndarray:
 
 
 def _frame_durations(times: np.ndarray) -> np.ndarray:
+    if times.shape[0] == 0:
+        return np.empty_like(times, dtype=float)
     durations = np.empty_like(times, dtype=float)
     diffs = np.diff(times)
     median = float(np.median(diffs)) if diffs.size else 1.0 / 30.0

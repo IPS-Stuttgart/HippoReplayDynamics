@@ -2,9 +2,15 @@ import sys
 import types
 
 import numpy as np
+from scipy.spatial import cKDTree
 
 from hipporeplayimm.encoding import LogEmissionTensor
-from hipporeplayimm.pyrecest_models import PyRecEstGoalParticleIMMModel, PyRecEstGoalParticleModel
+from hipporeplayimm.pyrecest_models import (
+    PyRecEstGoalParticleIMMModel,
+    PyRecEstGoalParticleModel,
+    _interpolated_grid_values,
+    _update_filter_from_grid_likelihood,
+)
 
 
 def test_pyrecest_goal_particle_model_passes_transition_durations(monkeypatch):
@@ -45,6 +51,60 @@ def test_pyrecest_goal_particle_imm_model_passes_transition_durations(monkeypatc
     assert np.allclose(imm_filter.prediction_dts, emissions.transition_durations)
     assert np.isfinite(score.log_likelihood)
     assert score.diagnostics["pyrecest_transition_durations"] == "0.01,0.04"
+
+
+def test_grid_likelihood_update_interpolates_particle_positions():
+    centers = np.array(
+        [
+            [0.0, 0.0],
+            [0.0, 1.0],
+            [1.0, 0.0],
+            [1.0, 1.0],
+        ]
+    )
+    log_likelihood = np.array([0.0, 2.0, 1.0, 3.0])
+    filter_ = _DummyLikelihoodFilter(np.array([[0.5, 0.5]]))
+
+    log_marginal = _update_filter_from_grid_likelihood(
+        filter_,
+        log_likelihood,
+        centers,
+        cKDTree(centers),
+    )
+
+    assert np.isclose(log_marginal, 1.5)
+
+
+def test_interpolated_grid_values_falls_back_for_irregular_grids():
+    centers = np.array([[0.0, 0.0], [1.0, 0.0], [3.0, 0.0]])
+    values = np.array([0.0, 1.0, 3.0])
+
+    interpolated = _interpolated_grid_values(
+        np.array([[2.6, 0.0]]),
+        values,
+        centers,
+        cKDTree(centers),
+    )
+
+    assert np.allclose(interpolated, [3.0])
+
+
+class _DummyLikelihoodFilter:
+    def __init__(self, positions):
+        self.position_particles = np.asarray(positions, dtype=float)
+        self.filter_state = types.SimpleNamespace(
+            w=np.full(
+                self.position_particles.shape[0],
+                1.0 / self.position_particles.shape[0],
+            )
+        )
+
+    def update_position_likelihood(self, likelihood, *, return_log_marginal=False):
+        values = np.asarray(likelihood(self.position_particles), dtype=float)
+        marginal = float(np.average(values, weights=self.filter_state.w))
+        if return_log_marginal:
+            return float(np.log(marginal))
+        return self
 
 
 def _pyrecest_duration_test_emissions():

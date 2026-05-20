@@ -1,0 +1,179 @@
+---
+name: PyRecEst particle robustness sweep
+
+on:
+  workflow_dispatch:
+    inputs:
+      dataset_root:
+        description: "Dataset path after download"
+        required: true
+        default: "data/DataSetFromPfeifferFoster"
+      max_events:
+        description: "Run ripples per session used for the sweep"
+        required: true
+        default: "5"
+      event_epoch:
+        description: "Ripple epoch selection"
+        required: true
+        type: choice
+        options:
+          - run
+          - all
+        default: run
+      random_seeds:
+        description: "Comma-separated random seeds for stochastic particle filters"
+        required: true
+        default: "1,2,3"
+      pyrecest_models:
+        description: "Comma-separated PyRecEst models"
+        required: true
+        default: "pyrecest-goal-particle,pyrecest-goal-particle-imm"
+      baseline_models:
+        description: "Comma-separated baseline models; use none to skip"
+        required: true
+        default: "random,stationary"
+      particles:
+        description: "Comma-separated particle counts"
+        required: true
+        default: "2048,8192"
+      position_proposal_probability:
+        description: "Comma-separated proposal rejuvenation probabilities"
+        required: true
+        default: "0.0,0.5"
+      alpha:
+        description: "Comma-separated PyRecEst alpha values"
+        required: true
+        default: "0.8"
+      beta:
+        description: "Comma-separated PyRecEst beta values"
+        required: true
+        default: "1.0"
+      process_noise_sigma_cm_s:
+        description: "Comma-separated process-noise sigmas in cm/s"
+        required: true
+        default: "60.0"
+      position_jump_sigma_cm:
+        description: "Comma-separated position-jump sigmas in cm"
+        required: true
+        default: "25.0"
+      jump_probability:
+        description: "Comma-separated jump probabilities"
+        required: true
+        default: "0.03"
+      goal_reset_probability:
+        description: "Comma-separated goal-reset probabilities"
+        required: true
+        default: "0.02"
+      initial_velocity_sigma_cm_s:
+        description: "Comma-separated initial velocity sigmas in cm/s"
+        required: true
+        default: "120.0"
+      imm_mode_stickiness:
+        description: "Comma-separated IMM mode stickiness values"
+        required: true
+        default: "0.95"
+      skip_ground_truth:
+        description: "Skip behavioral ground-truth comparison"
+        required: true
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+env:
+  DATASET_ROOT: ${{ inputs.dataset_root }}
+  MAX_EVENTS: ${{ inputs.max_events }}
+  EVENT_EPOCH: ${{ inputs.event_epoch }}
+  RANDOM_SEEDS: ${{ inputs.random_seeds }}
+  PYRECEST_MODELS: ${{ inputs.pyrecest_models }}
+  BASELINE_MODELS: ${{ inputs.baseline_models }}
+  PARTICLES: ${{ inputs.particles }}
+  POSITION_PROPOSAL_PROBABILITY: ${{ inputs.position_proposal_probability }}
+  ALPHA: ${{ inputs.alpha }}
+  BETA: ${{ inputs.beta }}
+  PROCESS_NOISE_SIGMA_CM_S: ${{ inputs.process_noise_sigma_cm_s }}
+  POSITION_JUMP_SIGMA_CM: ${{ inputs.position_jump_sigma_cm }}
+  JUMP_PROBABILITY: ${{ inputs.jump_probability }}
+  GOAL_RESET_PROBABILITY: ${{ inputs.goal_reset_probability }}
+  INITIAL_VELOCITY_SIGMA_CM_S: ${{ inputs.initial_velocity_sigma_cm_s }}
+  IMM_MODE_STICKINESS: ${{ inputs.imm_mode_stickiness }}
+
+jobs:
+  pyrecest-particle-sweep:
+    name: PyRecEst particle robustness sweep
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Install package
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e .
+
+      - name: Ensure Pfeiffer-Foster dataset
+        uses: ./.github/actions/ensure-pfeiffer-foster-dataset
+        with:
+          dataset-root: ${{ env.DATASET_ROOT }}
+          session: Rat1/Open1
+          cache-key: hipporeplayimm-dataset-${{ runner.os }}-rclone-v1
+          webdav-url: ${{ secrets.PFEIFFERFOSTER_WEBDAV_URL }}
+          webdav-key: ${{ secrets.PFEIFFERFOSTER_DATA_KEY }}
+          webdav-password: ${{ secrets.PFEIFFERFOSTER_DATA_PASSWORD }}
+
+      - name: Run PyRecEst robustness sweep
+        run: |
+          set -euo pipefail
+          args=(
+            "${DATASET_ROOT}"
+            --max-events "${MAX_EVENTS}"
+            --event-epoch "${EVENT_EPOCH}"
+            --random-seeds "${RANDOM_SEEDS}"
+            --pyrecest-models "${PYRECEST_MODELS}"
+            --baseline-models "${BASELINE_MODELS}"
+            --particles "${PARTICLES}"
+            --position-proposal-probability "${POSITION_PROPOSAL_PROBABILITY}"
+            --alpha "${ALPHA}"
+            --beta "${BETA}"
+            --process-noise-sigma-cm-s "${PROCESS_NOISE_SIGMA_CM_S}"
+            --position-jump-sigma-cm "${POSITION_JUMP_SIGMA_CM}"
+            --jump-probability "${JUMP_PROBABILITY}"
+            --goal-reset-probability "${GOAL_RESET_PROBABILITY}"
+            --initial-velocity-sigma-cm-s "${INITIAL_VELOCITY_SIGMA_CM_S}"
+            --imm-mode-stickiness "${IMM_MODE_STICKINESS}"
+            --output results/pyrecest-particle-sweep
+          )
+          if [ "${{ inputs.skip_ground_truth }}" = "true" ]; then
+            args+=(--skip-ground-truth)
+          fi
+          hipporeplayimm sweep-pyrecest "${args[@]}"
+
+      - name: Show aggregate Pareto summary
+        if: always()
+        run: |
+          if [ -f results/pyrecest-particle-sweep/pareto_aggregate_summary.csv ]; then
+            python - <<'PY'
+          import pandas as pd
+          table = pd.read_csv("results/pyrecest-particle-sweep/pareto_aggregate_summary.csv")
+          print(table.to_string(index=False))
+          PY
+          else
+            echo "No aggregate Pareto summary was generated."
+          fi
+
+      - name: Upload PyRecEst sweep results
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: pyrecest-particle-sweep-${{ github.run_id }}
+          path: results/pyrecest-particle-sweep/
+          if-no-files-found: error

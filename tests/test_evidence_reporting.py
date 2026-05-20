@@ -1,6 +1,8 @@
 import pandas as pd
 
 from hipporeplayimm.evidence_reporting import (
+    EVIDENCE_COMPARISON_EXACT,
+    EVIDENCE_COMPARISON_LOWER_BOUND,
     EXACT_EVIDENCE_SUPPORT,
     TRUNCATED_EVIDENCE_SUPPORT,
     ensure_evidence_support_columns,
@@ -41,11 +43,13 @@ def test_state_space_imm_support_diagnostic_is_truncated_not_exact():
 
     assert diffusion["evidence_support"] == EXACT_EVIDENCE_SUPPORT
     assert bool(diffusion["evidence_comparable"])
+    assert diffusion["evidence_comparison"] == EVIDENCE_COMPARISON_EXACT
     assert bool(diffusion["is_best_model"])
     assert diffusion["best_model"] == "sorted-spike-state-space-diffusion"
 
     assert imm["evidence_support"] == TRUNCATED_EVIDENCE_SUPPORT
     assert not bool(imm["evidence_comparable"])
+    assert imm["evidence_comparison"] == EVIDENCE_COMPARISON_LOWER_BOUND
     assert not bool(imm["is_best_model"])
     assert pd.isna(imm["model_probability"])
     assert imm["truncated_relative_log_evidence"] == 0.0
@@ -69,3 +73,4 @@ def test_state_space_imm_support_column_is_used_by_generic_inference():
 
     assert scored.loc[0, "evidence_support"] == TRUNCATED_EVIDENCE_SUPPORT
     assert not bool(scored.loc[0, "evidence_comparable"])
+    assert scored.loc[0, "evidence_comparison"] == EVIDENCE_COMPARISON_LOWER_BOUND

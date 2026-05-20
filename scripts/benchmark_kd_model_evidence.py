@@ -13,6 +13,7 @@ import pandas as pd
 from scipy.special import logsumexp
 
 from hipporeplayimm.data import load_replay_session
+from hipporeplayimm.duration_dynamics import transition_durations_s
 from hipporeplayimm.kd_reference import (
     KDEncodingConfig,
     KD_MODELS,
@@ -192,26 +193,31 @@ def _score_momentum_param_chunk(task, emissions_chunk, initial_sd_m_per_s: float
     sd_index, decay_index, sd, decay = task
     values = np.empty(len(emissions_chunk), dtype=float)
     initial_cache: dict[float, np.ndarray] = {}
-    transition_cache: dict[float, np.ndarray] = {}
+    transition_cache: dict[tuple[float, ...], object] = {}
     for event_index, emissions in enumerate(emissions_chunk):
         if emissions.n_time == 1:
             values[event_index] = kd_random_log_evidence(emissions.log_likelihood)
             continue
-        dt = float(emissions.dt)
-        if dt not in initial_cache:
-            initial_sd_meters = initial_sd_m_per_s * dt
-            initial_cache[dt] = diffusion_transition_1d(n_bins, initial_sd_meters, bin_size_cm, dt=1.0)
-        if dt not in transition_cache:
+
+        transition_durations = transition_durations_s(emissions)
+        base_dt = float(getattr(emissions.dt, "base", emissions.dt))
+        first_transition_dt = float(transition_durations[0]) if transition_durations.size else base_dt
+        transition_key = tuple(float(value) for value in transition_durations) or (base_dt,)
+
+        if first_transition_dt not in initial_cache:
+            initial_sd_meters = initial_sd_m_per_s * first_transition_dt
+            initial_cache[first_transition_dt] = diffusion_transition_1d(n_bins, initial_sd_meters, bin_size_cm, dt=1.0)
+        if transition_key not in transition_cache:
             adjusted_decay = decay
             adjusted_sd = sd
             if adjusted_decay > 1.0:
-                adjusted_decay, adjusted_sd = adjusted_momentum_parameters(adjusted_decay, adjusted_sd, dt)
-            transition_cache[dt] = momentum_transition_1d(n_bins, adjusted_sd, adjusted_decay, bin_size_cm, dt)
+                adjusted_decay, adjusted_sd = adjusted_momentum_parameters(adjusted_decay, adjusted_sd, emissions.dt)
+            transition_cache[transition_key] = momentum_transition_1d(n_bins, adjusted_sd, adjusted_decay, bin_size_cm, emissions.dt)
         values[event_index] = kd_momentum_log_evidence_from_transitions(
             emissions.log_likelihood,
             n_bins,
-            initial_cache[dt],
-            transition_cache[dt],
+            initial_cache[first_transition_dt],
+            transition_cache[transition_key],
         )
     return sd_index, decay_index, values
 

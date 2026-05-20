@@ -31,9 +31,18 @@ from hipporeplayimm.encoding import (
     fit_place_field_encoding,
 )
 from hipporeplayimm.evidence_reporting import (
+    EXACT_EVIDENCE_SUPPORT,
     TRUNCATED_EVIDENCE_SUPPORT,
     ensure_evidence_support_columns as _ensure_evidence_support_columns,
 )
+from hipporeplayimm.goal_state_space import GoalStateSpaceReplayModel
+from hipporeplayimm.goal_state_space_integration import (
+    DEFAULT_GOAL_DRIFT_SPEED_CM_S,
+    DEFAULT_GOAL_MAX_STEP_SIGMA,
+    DEFAULT_GOAL_TRANSITION_SIGMA_CM_SQRT_S,
+    GOAL_STATE_SPACE_MODEL_NAMES,
+)
+from hipporeplayimm.ground_truth import infer_well_locations
 from hipporeplayimm.models import CandidateKinematicModel, RandomModel, StationaryModel
 from hipporeplayimm.position_validation import (
     VALIDATED_POSITION_BIN_SIZE_CM,
@@ -52,11 +61,15 @@ _TRAJ = {
     "sorted-spike-state-space-fragmented",
     "sorted-spike-state-space-jump",
     "sorted-spike-state-space-momentum",
+    "sorted-spike-state-space-first-order-imm",
     "sorted-spike-state-space-imm",
+    "sorted-spike-state-space-goal",
+    "state-space-goal",
     "clusterless-state-space-diffusion",
     "clusterless-state-space-fragmented",
     "clusterless-state-space-jump",
     "clusterless-state-space-momentum",
+    "clusterless-state-space-first-order-imm",
     "clusterless-state-space-imm",
 }
 _NONTRAJ = {
@@ -121,45 +134,54 @@ def _events(spec: str, session) -> list[int]:
     return out
 
 
-def _models(args) -> dict[str, object]:
+def _models(args, session=None) -> dict[str, object]:
     names = []
     for raw in args.models.replace(",", " ").split():
         name = _ALIASES.get(raw.strip().lower(), raw.strip().lower())
+        if name == "clusterless-state-space-first-order-imm":
+            continue
         if name:
             names.append(name)
     if not names:
         raise ValueError("no models selected")
 
-    def state_space_model(mode: str) -> SortedSpikeStateSpaceReplayModel:
-        return SortedSpikeStateSpaceReplayModel(
+    def state_space_config(mode: str) -> StateSpaceDecoderConfig:
+        return StateSpaceDecoderConfig(
             mode=mode,
-            config=StateSpaceDecoderConfig(
-                mode=mode,
-                stationary_sigma_cm=args.state_space_stationary_sigma_cm,
-                diffusion_sigma_cm_sqrt_s=args.state_space_diffusion_sigma_cm_sqrt_s,
-                max_step_sigma=args.state_space_max_step_sigma,
-                imm_mode_stickiness=args.state_space_imm_mode_stickiness,
-                momentum_sigma_cm_sqrt_s=args.state_space_momentum_sigma_cm_sqrt_s,
-                momentum_initial_sigma_cm_sqrt_s=args.state_space_momentum_initial_sigma_cm_sqrt_s,
-                momentum_velocity_decay=args.state_space_momentum_velocity_decay,
-                momentum_candidate_top_k=args.state_space_momentum_candidate_top_k,
-            ),
+            stationary_sigma_cm=args.state_space_stationary_sigma_cm,
+            diffusion_sigma_cm_sqrt_s=args.state_space_diffusion_sigma_cm_sqrt_s,
+            max_step_sigma=args.state_space_max_step_sigma,
+            imm_mode_stickiness=_state_space_mode_stickiness(args),
+            momentum_sigma_cm_sqrt_s=args.state_space_momentum_sigma_cm_sqrt_s,
+            momentum_initial_sigma_cm_sqrt_s=args.state_space_momentum_initial_sigma_cm_sqrt_s,
+            momentum_velocity_decay=args.state_space_momentum_velocity_decay,
+            momentum_candidate_top_k=args.state_space_momentum_candidate_top_k,
+            momentum_candidate_mass_threshold=getattr(args, "state_space_momentum_candidate_mass_threshold", None),
+            momentum_candidate_min_k=getattr(args, "state_space_momentum_candidate_min_k", 1),
+            momentum_candidate_max_k=getattr(args, "state_space_momentum_candidate_max_k", 0),
+            momentum_predicted_candidate_top_k=getattr(args, "state_space_momentum_predicted_candidate_top_k", 8),
         )
+
+    def state_space_model(mode: str) -> SortedSpikeStateSpaceReplayModel:
+        return SortedSpikeStateSpaceReplayModel(mode=mode, config=state_space_config(mode))
 
     def clusterless_state_space_model(mode: str) -> ClusterlessStateSpaceReplayModel:
         return ClusterlessStateSpaceReplayModel(
             mode=mode,
-            config=StateSpaceDecoderConfig(
-                mode=mode,
-                stationary_sigma_cm=args.state_space_stationary_sigma_cm,
-                diffusion_sigma_cm_sqrt_s=args.state_space_diffusion_sigma_cm_sqrt_s,
-                max_step_sigma=args.state_space_max_step_sigma,
-                imm_mode_stickiness=args.state_space_imm_mode_stickiness,
-                momentum_sigma_cm_sqrt_s=args.state_space_momentum_sigma_cm_sqrt_s,
-                momentum_initial_sigma_cm_sqrt_s=args.state_space_momentum_initial_sigma_cm_sqrt_s,
-                momentum_velocity_decay=args.state_space_momentum_velocity_decay,
-                momentum_candidate_top_k=args.state_space_momentum_candidate_top_k,
-            ),
+            config=state_space_config(mode),
+            mark_likelihood=getattr(args, "clusterless_mark_likelihood", "local-kde"),
+        )
+
+    wants_goal_state_space = any(name in GOAL_STATE_SPACE_MODEL_NAMES for name in names)
+    goal_candidates = _session_goal_candidates(session) if wants_goal_state_space else None
+
+    def goal_state_space_model(name: str) -> GoalStateSpaceReplayModel:
+        return GoalStateSpaceReplayModel(
+            candidate_goals=goal_candidates,
+            transition_sigma_cm_sqrt_s=getattr(args, "goal_state_space_transition_sigma_cm_sqrt_s", DEFAULT_GOAL_TRANSITION_SIGMA_CM_SQRT_S),
+            drift_speed_cm_s=getattr(args, "goal_state_space_drift_speed_cm_s", DEFAULT_GOAL_DRIFT_SPEED_CM_S),
+            max_step_sigma=getattr(args, "goal_state_space_max_step_sigma", DEFAULT_GOAL_MAX_STEP_SIGMA),
+            name=name,
         )
 
     available = {
@@ -186,12 +208,16 @@ def _models(args) -> dict[str, object]:
         "sorted-spike-state-space-fragmented": state_space_model("fragmented"),
         "sorted-spike-state-space-jump": state_space_model("jump"),
         "sorted-spike-state-space-momentum": state_space_model("momentum"),
+        "sorted-spike-state-space-first-order-imm": state_space_model("first-order-imm"),
         "sorted-spike-state-space-imm": state_space_model("imm"),
+        "sorted-spike-state-space-goal": goal_state_space_model("sorted-spike-state-space-goal"),
+        "state-space-goal": goal_state_space_model("state-space-goal"),
         "clusterless-state-space-stationary": clusterless_state_space_model("stationary"),
         "clusterless-state-space-diffusion": clusterless_state_space_model("diffusion"),
         "clusterless-state-space-fragmented": clusterless_state_space_model("fragmented"),
         "clusterless-state-space-jump": clusterless_state_space_model("jump"),
         "clusterless-state-space-momentum": clusterless_state_space_model("momentum"),
+        "clusterless-state-space-first-order-imm": clusterless_state_space_model("first-order-imm"),
         "clusterless-state-space-imm": clusterless_state_space_model("imm"),
     }
     missing = sorted(set(names) - set(available))
@@ -200,12 +226,28 @@ def _models(args) -> dict[str, object]:
     return {name: available[name] for name in dict.fromkeys(names)}
 
 
+def _state_space_mode_stickiness(args) -> float:
+    tau_s = float(getattr(args, "state_space_imm_switch_tau_s", 0.0))
+    if tau_s <= 0.0:
+        return float(args.state_space_imm_mode_stickiness)
+    return float(np.exp(-float(getattr(args, "time_bin_s", 0.02)) / tau_s))
+
+
 def _family(model: str) -> str:
     if model in _TRAJ:
         return "trajectory"
     if model in _NONTRAJ:
         return "nontrajectory"
     return "other"
+
+
+def _session_goal_candidates(session) -> np.ndarray | None:
+    if session is None:
+        return None
+    wells = infer_well_locations(session)
+    if wells.empty:
+        return None
+    return wells[["well_x", "well_y"]].to_numpy(dtype=float)
 
 
 def _clusterless_mark_config(args) -> ClusterlessMarkConfig:
@@ -219,7 +261,35 @@ def _clusterless_mark_config(args) -> ClusterlessMarkConfig:
         mark_prior_count=args.clusterless_mark_prior_count,
         mark_variance_floor=args.clusterless_mark_variance_floor,
         rate_floor_hz=args.clusterless_rate_floor_hz,
+        mark_likelihood=args.clusterless_mark_likelihood,
+        mark_kde_bandwidth=args.clusterless_mark_kde_bandwidth,
+        mark_kde_spatial_sigma_bins=args.clusterless_mark_kde_spatial_sigma_bins,
+        mark_kde_max_neighbors=args.clusterless_mark_kde_max_neighbors,
     )
+
+
+def _optional_float_setting(value: float | None) -> float | str:
+    return "" if value is None else float(value)
+
+
+def _optional_float_argument(value: str | None) -> float | None:
+    if value is None:
+        return None
+    text = str(value).strip().lower()
+    if text in {"", "none", "null"}:
+        return None
+    return float(text)
+
+
+def _state_space_metadata(args) -> dict[str, object]:
+    return {
+        "state_space_momentum_predicted_candidate_top_k": int(getattr(args, "state_space_momentum_predicted_candidate_top_k", 8)),
+        "state_space_imm_switch_tau_s": float(getattr(args, "state_space_imm_switch_tau_s", 0.0)),
+        "state_space_effective_imm_mode_stickiness": float(_state_space_mode_stickiness(args)),
+        "goal_state_space_transition_sigma_cm_sqrt_s": float(getattr(args, "goal_state_space_transition_sigma_cm_sqrt_s", DEFAULT_GOAL_TRANSITION_SIGMA_CM_SQRT_S)),
+        "goal_state_space_drift_speed_cm_s": float(getattr(args, "goal_state_space_drift_speed_cm_s", DEFAULT_GOAL_DRIFT_SPEED_CM_S)),
+        "goal_state_space_max_step_sigma": float(getattr(args, "goal_state_space_max_step_sigma", DEFAULT_GOAL_MAX_STEP_SIGMA)),
+    }
 
 
 def _score(args) -> pd.DataFrame:
@@ -237,7 +307,7 @@ def _score(args) -> pd.DataFrame:
             min_speed_cm_s=args.min_speed_cm_s,
         ),
     )
-    models = _models(args)
+    models = _models(args, session=session)
     has_clusterless = any(isinstance(model, ClusterlessStateSpaceReplayModel) for model in models.values())
     clusterless_encoding = None
     if has_clusterless:
@@ -247,6 +317,8 @@ def _score(args) -> pd.DataFrame:
     emissions_cfg = EmissionConfig(
         time_bin_s=args.time_bin_s,
         spike_rate_scale=args.spike_rate_scale,
+        likelihood_temperature=args.emission_likelihood_temperature,
+        negative_binomial_overdispersion=args.emission_negative_binomial_overdispersion,
     )
     rows: list[dict[str, object]] = []
 
@@ -282,10 +354,17 @@ def _score(args) -> pd.DataFrame:
                     "min_speed_cm_s": float(args.min_speed_cm_s),
                     "time_bin_s": float(args.time_bin_s),
                     "spike_rate_scale": float(args.spike_rate_scale),
+                    "emission_likelihood_temperature": float(args.emission_likelihood_temperature),
+                    "emission_negative_binomial_overdispersion": float(args.emission_negative_binomial_overdispersion),
                     "clusterless_mark_smoothing_sigma_bins": float(args.clusterless_mark_smoothing_sigma_bins),
                     "clusterless_mark_prior_count": float(args.clusterless_mark_prior_count),
                     "clusterless_mark_variance_floor": float(args.clusterless_mark_variance_floor),
                     "clusterless_rate_floor_hz": float(args.clusterless_rate_floor_hz),
+                    "clusterless_mark_likelihood": str(args.clusterless_mark_likelihood),
+                    "clusterless_mark_kde_bandwidth": _optional_float_setting(args.clusterless_mark_kde_bandwidth),
+                    "clusterless_mark_kde_spatial_sigma_bins": _optional_float_setting(args.clusterless_mark_kde_spatial_sigma_bins),
+                    "clusterless_mark_kde_max_neighbors": int(args.clusterless_mark_kde_max_neighbors),
+                    **_state_space_metadata(args),
                 }
                 if use_clusterless and clusterless_encoding is not None:
                     row.update({
@@ -306,10 +385,17 @@ def _score(args) -> pd.DataFrame:
                     "min_speed_cm_s": float(args.min_speed_cm_s),
                     "time_bin_s": float(args.time_bin_s),
                     "spike_rate_scale": float(args.spike_rate_scale),
+                    "emission_likelihood_temperature": float(args.emission_likelihood_temperature),
+                    "emission_negative_binomial_overdispersion": float(args.emission_negative_binomial_overdispersion),
                     "clusterless_mark_smoothing_sigma_bins": float(args.clusterless_mark_smoothing_sigma_bins),
                     "clusterless_mark_prior_count": float(args.clusterless_mark_prior_count),
                     "clusterless_mark_variance_floor": float(args.clusterless_mark_variance_floor),
                     "clusterless_rate_floor_hz": float(args.clusterless_rate_floor_hz),
+                    "clusterless_mark_likelihood": str(args.clusterless_mark_likelihood),
+                    "clusterless_mark_kde_bandwidth": _optional_float_setting(args.clusterless_mark_kde_bandwidth),
+                    "clusterless_mark_kde_spatial_sigma_bins": _optional_float_setting(args.clusterless_mark_kde_spatial_sigma_bins),
+                    "clusterless_mark_kde_max_neighbors": int(args.clusterless_mark_kde_max_neighbors),
+                    **_state_space_metadata(args),
                 })
                 if not args.continue_on_error:
                     raise
@@ -403,6 +489,29 @@ def _summary(df: pd.DataFrame) -> pd.DataFrame:
     )
 
 
+def _summary_for_support(summary: pd.DataFrame, support: str) -> pd.DataFrame:
+    if summary.empty:
+        return summary.copy()
+    return summary[summary["evidence_support"].eq(support)].copy()
+
+
+def _support_counts(df: pd.DataFrame) -> pd.DataFrame:
+    df = _ensure_evidence_support_columns(df)
+    if df.empty:
+        return pd.DataFrame(columns=["evidence_support", "evidence_comparison", "evidence_comparable", "rows", "successful_rows", "events", "models"])
+    return (
+        df.groupby(["evidence_support", "evidence_comparison", "evidence_comparable"], dropna=False)
+        .agg(
+            rows=("model", "size"),
+            successful_rows=("status", lambda status: int(status.eq("success").sum())),
+            events=("event_index", "nunique"),
+            models=("model", "nunique"),
+        )
+        .reset_index()
+        .sort_values(["evidence_comparable", "evidence_support"], ascending=[False, True])
+    )
+
+
 def _counts(df: pd.DataFrame) -> pd.DataFrame:
     df = _ensure_evidence_support_columns(df)
     ok = df[df["status"] == "success"]
@@ -433,8 +542,12 @@ def _counts(df: pd.DataFrame) -> pd.DataFrame:
 def _write(df: pd.DataFrame, outdir: Path) -> None:
     outdir.mkdir(parents=True, exist_ok=True)
     df.to_csv(outdir / "event_model_evidence.csv", index=False)
-    _summary(df).to_csv(outdir / "model_evidence_summary.csv", index=False)
+    summary = _summary(df)
+    summary.to_csv(outdir / "model_evidence_summary.csv", index=False)
+    _summary_for_support(summary, EXACT_EVIDENCE_SUPPORT).to_csv(outdir / "exact_model_evidence_summary.csv", index=False)
+    _summary_for_support(summary, TRUNCATED_EVIDENCE_SUPPORT).to_csv(outdir / "truncated_lower_bound_summary.csv", index=False)
     _counts(df).to_csv(outdir / "best_model_counts.csv", index=False)
+    _support_counts(df).to_csv(outdir / "evidence_support_counts.csv", index=False)
     ok = df[df["status"] == "success"]
     metrics = ["log_evidence", "relative_log_evidence", "model_probability"]
     if "truncated_relative_log_evidence" in ok:
@@ -460,20 +573,73 @@ def main() -> int:
     p.add_argument("--state-space-diffusion-sigma-cm-sqrt-s", type=float, default=85.0)
     p.add_argument("--state-space-max-step-sigma", type=float, default=4.0)
     p.add_argument("--state-space-imm-mode-stickiness", type=float, default=0.95)
+    p.add_argument("--state-space-imm-switch-tau-s", type=float, default=0.0)
     p.add_argument("--state-space-momentum-sigma-cm-sqrt-s", type=float, default=85.0)
     p.add_argument("--state-space-momentum-initial-sigma-cm-sqrt-s", type=float, default=85.0)
     p.add_argument("--state-space-momentum-velocity-decay", type=float, default=0.95)
     p.add_argument("--state-space-momentum-candidate-top-k", type=int, default=128)
+    p.add_argument("--state-space-momentum-predicted-candidate-top-k", type=int, default=8)
+    p.add_argument(
+        "--state-space-momentum-candidate-mass-threshold",
+        type=float,
+        default=None,
+        help="Enable adaptive candidate support retaining this normalized emission mass.",
+    )
+    p.add_argument(
+        "--state-space-momentum-candidate-min-k",
+        type=int,
+        default=1,
+        help="Minimum per-bin support when adaptive candidate support is enabled.",
+    )
+    p.add_argument(
+        "--state-space-momentum-candidate-max-k",
+        type=int,
+        default=0,
+        help="Maximum adaptive per-bin support; 0 means unbounded.",
+    )
     p.add_argument("--clusterless-mark-smoothing-sigma-bins", type=float, default=1.0)
     p.add_argument("--clusterless-mark-prior-count", type=float, default=1.0)
     p.add_argument("--clusterless-mark-variance-floor", type=float, default=1.0)
     p.add_argument("--clusterless-rate-floor-hz", type=float, default=1e-4)
-    p.add_argument("--time-bin-s", type=float, default=0.02)
+    p.add_argument(
+        "--clusterless-mark-likelihood",
+        default="local-kde",
+        help="Clusterless mark likelihood: local-kde or diagonal-gaussian. Aliases accepted by ClusterlessMarkConfig are also valid.",
+    )
+    p.add_argument(
+        "--clusterless-mark-kde-bandwidth",
+        type=_optional_float_argument,
+        default=None,
+        help="Optional scalar mark-space KDE bandwidth. Empty/default uses the data-adaptive bandwidth.",
+    )
+    p.add_argument(
+        "--clusterless-mark-kde-spatial-sigma-bins",
+        type=_optional_float_argument,
+        default=None,
+        help="Optional spatial weighting sigma, in grid bins, for local mark KDE support. Empty/default reuses clusterless mark smoothing sigma.",
+    )
+    p.add_argument("--clusterless-mark-kde-max-neighbors", type=int, default=256)
+    p.add_argument("--goal-state-space-transition-sigma-cm-sqrt-s", type=float, default=DEFAULT_GOAL_TRANSITION_SIGMA_CM_SQRT_S)
+    p.add_argument("--goal-state-space-drift-speed-cm-s", type=float, default=DEFAULT_GOAL_DRIFT_SPEED_CM_S)
+    p.add_argument("--goal-state-space-max-step-sigma", type=float, default=DEFAULT_GOAL_MAX_STEP_SIGMA)
+    p.add_argument("--time-bin-s", type=float, default=0.003)
     p.add_argument(
         "--spike-rate-scale",
         type=float,
         default=1.0,
         help="Multiplicative scale applied to Poisson place-field rates during ripple scoring.",
+    )
+    p.add_argument(
+        "--emission-likelihood-temperature",
+        type=float,
+        default=1.0,
+        help="Divide emission log likelihoods by this positive temperature; values >1 flatten the emission model.",
+    )
+    p.add_argument(
+        "--emission-negative-binomial-overdispersion",
+        type=float,
+        default=0.0,
+        help="Use a negative-binomial sorted-spike count model with variance mean + alpha * mean**2; 0 keeps the Poisson model.",
     )
     p.add_argument("--bin-size-cm", type=float, default=VALIDATED_POSITION_BIN_SIZE_CM)
     p.add_argument("--smoothing-sigma-bins", type=float, default=VALIDATED_POSITION_SMOOTHING_SIGMA_BINS)
@@ -484,9 +650,18 @@ def main() -> int:
     df = _score(args)
     if df.empty:
         raise RuntimeError("No scores were generated.")
-    print(_summary(df).to_string(index=False))
+    summary = _summary(df)
+    print(summary.to_string(index=False))
     print("\nBest-model counts:")
     print(_counts(df).to_string(index=False))
+    support_counts = _support_counts(df)
+    if not support_counts.empty:
+        print("\nEvidence-support counts:")
+        print(support_counts.to_string(index=False))
+        print(
+            "\nInterpretation: exact_full_grid rows are comparable model evidences; "
+            "truncated_full_grid rows are candidate-support lower bounds and must be ranked only within the lower-bound diagnostic group."
+        )
     print(f"\nRows: {len(df)}")
     print(f"Failures: {int((df['status'] != 'success').sum())}")
     _write(df, Path(args.output))

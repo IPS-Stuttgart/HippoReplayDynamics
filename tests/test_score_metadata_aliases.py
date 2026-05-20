@@ -18,6 +18,7 @@ def test_score_metadata_accepts_model_evidence_column_aliases():
             "smoothing_sigma_bins": [2.25],
             "min_speed_cm_s": [7.5],
             "time_bin_s": [0.015],
+            "spike_rate_scale": [2.5],
         }
     )
 
@@ -31,13 +32,14 @@ def test_score_metadata_accepts_model_evidence_column_aliases():
     )
     emission_config = _emission_config_for_scores(
         scores,
-        EmissionConfig(time_bin_s=0.02),
+        EmissionConfig(time_bin_s=0.02, spike_rate_scale=1.0),
     )
 
     assert encoding_config.bin_size_cm == pytest.approx(6.0)
     assert encoding_config.smoothing_sigma_bins == pytest.approx(2.25)
     assert encoding_config.min_speed_cm_s == pytest.approx(7.5)
     assert emission_config.time_bin_s == pytest.approx(0.015)
+    assert emission_config.spike_rate_scale == pytest.approx(2.5)
 
 
 def test_score_metadata_rejects_conflicting_canonical_and_legacy_values():
@@ -50,6 +52,18 @@ def test_score_metadata_rejects_conflicting_canonical_and_legacy_values():
 
     with pytest.raises(ValueError, match="encoding_bin_size_cm"):
         _encoding_config_for_scores(scores, EncodingConfig())
+
+    emission_scores = pd.DataFrame(
+        {
+            "emission_time_bin_s": [0.015],
+            "time_bin_s": [0.020],
+            "emission_spike_rate_scale": [1.0],
+            "spike_rate_scale": [2.0],
+        }
+    )
+
+    with pytest.raises(ValueError, match="emission_time_bin_s"):
+        _emission_config_for_scores(emission_scores, EmissionConfig())
 
 
 def test_benchmark_metadata_includes_pyrecest_hyperparameters():

@@ -13,6 +13,8 @@ from pathlib import Path
 
 import pandas as pd
 
+from hipporeplayimm.evidence_reporting import ensure_evidence_support_columns
+
 
 def canonical_model_name(model: str) -> str:
     name = str(model).strip().lower()
@@ -29,9 +31,17 @@ def canonical_model_name(model: str) -> str:
     return name
 
 
-def compare_runs(left_dir: str | Path, right_dir: str | Path, *, left_label: str, right_label: str, output: str | Path) -> dict[str, pd.DataFrame]:
-    left = _load_event_scores(left_dir, left_label)
-    right = _load_event_scores(right_dir, right_label)
+def compare_runs(
+    left_dir: str | Path,
+    right_dir: str | Path,
+    *,
+    left_label: str,
+    right_label: str,
+    output: str | Path,
+    exact_only: bool = False,
+) -> dict[str, pd.DataFrame]:
+    left = _load_event_scores(left_dir, left_label, exact_only=exact_only)
+    right = _load_event_scores(right_dir, right_label, exact_only=exact_only)
     out_dir = Path(output)
     out_dir.mkdir(parents=True, exist_ok=True)
 
@@ -51,6 +61,15 @@ def compare_runs(left_dir: str | Path, right_dir: str | Path, *, left_label: str
         ignore_index=True,
     )
     counts.to_csv(out_dir / "best_model_counts_comparison.csv", index=False)
+
+    support_counts = pd.concat(
+        [
+            _evidence_support_counts(left, left_label),
+            _evidence_support_counts(right, right_label),
+        ],
+        ignore_index=True,
+    )
+    support_counts.to_csv(out_dir / "evidence_support_counts.csv", index=False)
 
     cross_tab = pd.crosstab(
         event_comparison[f"{left_label}_canonical_best_model"],
@@ -78,6 +97,7 @@ def compare_runs(left_dir: str | Path, right_dir: str | Path, *, left_label: str
                 if len(event_comparison)
                 else float("nan"),
                 "shared_relative_evidence_rows": int(len(relative)),
+                "exact_only": bool(exact_only),
             }
         ]
     )
@@ -85,6 +105,7 @@ def compare_runs(left_dir: str | Path, right_dir: str | Path, *, left_label: str
     return {
         "event_comparison": event_comparison,
         "counts": counts,
+        "support_counts": support_counts,
         "cross_tab": cross_tab,
         "relative": relative,
         "relative_summary": relative_summary,
@@ -93,7 +114,7 @@ def compare_runs(left_dir: str | Path, right_dir: str | Path, *, left_label: str
     }
 
 
-def _load_event_scores(root: str | Path, run_label: str) -> pd.DataFrame:
+def _load_event_scores(root: str | Path, run_label: str, *, exact_only: bool = False) -> pd.DataFrame:
     path = Path(root) / "event_model_evidence.csv"
     if not path.exists():
         raise FileNotFoundError(f"{path} does not exist")
@@ -104,14 +125,48 @@ def _load_event_scores(root: str | Path, run_label: str) -> pd.DataFrame:
         raise ValueError(f"{path} is missing columns: {sorted(missing)}")
     if "status" in frame.columns:
         frame = frame[frame["status"] == "success"].copy()
+    frame = ensure_evidence_support_columns(frame)
+    if exact_only:
+        frame = frame[frame["evidence_comparable"].fillna(False).astype(bool)].copy()
     frame["run_label"] = run_label
     frame["canonical_model"] = frame["model"].map(canonical_model_name)
-    if "relative_log_evidence" not in frame.columns:
-        frame = _add_relative_log_evidence(frame)
+    frame = _add_relative_log_evidence(frame)
     return frame
 
 
+def _evidence_support_counts(frame: pd.DataFrame, label: str) -> pd.DataFrame:
+    columns = [
+        "run_label",
+        "evidence_support",
+        "evidence_comparable",
+        "rows",
+        "session_events",
+        "models",
+    ]
+    if frame.empty:
+        return pd.DataFrame(columns=columns)
+    rows = []
+    for (support, comparable), group in frame.groupby(
+        ["evidence_support", "evidence_comparable"], dropna=False, sort=True
+    ):
+        rows.append(
+            {
+                "run_label": label,
+                "evidence_support": support,
+                "evidence_comparable": bool(comparable),
+                "rows": int(len(group)),
+                "session_events": _event_count(group),
+                "models": int(group["model"].nunique()),
+            }
+        )
+    return pd.DataFrame(rows, columns=columns)
+
+
 def _add_relative_log_evidence(frame: pd.DataFrame) -> pd.DataFrame:
+    if frame.empty:
+        frame = frame.copy()
+        frame["relative_log_evidence"] = pd.Series(index=frame.index, dtype=float)
+        return frame
     groups = []
     for _, group in frame.groupby(["session", "event_index"], sort=False):
         group = group.copy()
@@ -266,10 +321,13 @@ def main() -> int:
     parser.add_argument("--left-label", default="left")
     parser.add_argument("--right-label", default="right")
     parser.add_argument("--output", default="results/model-evidence-comparison")
+    parser.add_argument("--exact-only", action="store_true", help="Compare only exact-comparable evidence rows.")
     args = parser.parse_args()
 
-    tables = compare_runs(args.left, args.right, left_label=args.left_label, right_label=args.right_label, output=args.output)
+    tables = compare_runs(args.left, args.right, left_label=args.left_label, right_label=args.right_label, output=args.output, exact_only=args.exact_only)
     print(tables["summary"].to_string(index=False))
+    print("\nEvidence-support counts:")
+    print(tables["support_counts"].to_string(index=False))
     print("\nCanonical best-model counts:")
     print(tables["counts"].to_string(index=False))
     print("\nShared relative-evidence summary:")

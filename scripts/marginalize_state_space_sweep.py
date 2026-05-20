@@ -22,6 +22,7 @@ import pandas as pd
 from scipy.special import logsumexp
 
 from benchmark_model_evidence import _add_evidence_columns, _counts, _summary
+from hipporeplayimm.evidence_reporting import TRUNCATED_EVIDENCE_SUPPORT
 from hipporeplayimm.kd_reference import empirical_grid_prior
 
 _EVENT_KEY = ["session", "event_index"]
@@ -109,7 +110,10 @@ def marginalize_sweep(
 
     outdir = Path(output)
     outdir.mkdir(parents=True, exist_ok=True)
-    event_model_evidence = _add_evidence_columns(pd.DataFrame(rows))
+    event_model_evidence = pd.DataFrame(rows)
+    if "runtime_s" not in event_model_evidence:
+        event_model_evidence["runtime_s"] = 0.0
+    event_model_evidence = _add_evidence_columns(event_model_evidence)
     gridsearch_best_params = pd.DataFrame(best_rows)
     prior_weights = pd.DataFrame(prior_rows)
     event_model_evidence.to_csv(outdir / "state_space_marginalized_event_model_evidence.csv", index=False)
@@ -328,6 +332,7 @@ def _marginalized_rows(
     grid_description = ";".join(f"{col}={','.join(f'{value:g}' for value in values)}" for col, values in param_values.items())
     for row_index, event in event_table.iterrows():
         representative = source.iloc[row_index]
+        source_support = TRUNCATED_EVIDENCE_SUPPORT if spec.short_name == "momentum" else "exact_full_grid"
         row: dict[str, object] = {
             "status": "success",
             "session": event["session"],
@@ -343,7 +348,13 @@ def _marginalized_rows(
             "diagnostic_state_space_marginalized_dynamics_parameters": " ".join(dynamics_cols),
             "diagnostic_state_space_marginalized_observation_parameters": " ".join(observation_cols),
             "diagnostic_state_space_marginalization_grid": grid_description,
+            "diagnostic_state_space_marginalized_source_evidence_support": source_support,
         }
+        if spec.short_name == "momentum":
+            # The source sorted-spike state-space momentum implementation uses
+            # candidate-pruned second-order recursions, so its marginalized row
+            # remains a truncated full-grid lower bound rather than exact evidence.
+            row["diagnostic_state_space_momentum_evidence_support"] = TRUNCATED_EVIDENCE_SUPPORT
         for col in _OUTPUT_METADATA_COLUMNS:
             if col not in source.columns:
                 continue

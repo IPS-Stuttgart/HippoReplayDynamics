@@ -18,9 +18,12 @@ from .state_space_first_order import (
 )
 from .state_space_utils import (
     _gaussian_transition_matrix,
+    _mass_retaining_candidate_indices,
     _mean_entropy,
     _per_bin_sigma,
+    _restrict_candidates_to_valid_bins,
     _top_candidate_indices,
+    _valid_bin_mask_from_occupancy,
     _validate_candidate_indices,
 )
 
@@ -43,7 +46,11 @@ class StateSpaceDecoderConfig:
     momentum_initial_sigma_cm_sqrt_s: float = 85.0
     momentum_velocity_decay: float = 0.95
     momentum_candidate_top_k: int = 128
+    momentum_candidate_mass_threshold: float | None = None
+    momentum_candidate_min_k: int = 1
+    momentum_candidate_max_k: int = 0
     momentum_predicted_candidate_top_k: int = 8
+    valid_occupancy_threshold_s: float = 0.0
 
 
 @dataclass
@@ -90,18 +97,37 @@ class StateSpaceReplayModel:
     def candidate_indices(self, emissions: LogEmissionTensor, bin_centers: np.ndarray | None = None) -> list[np.ndarray]:
         """Return the candidate support used by pruned momentum/IMM recursions.
 
-        The base support is the per-bin emission top-k set. When
-        ``momentum_predicted_candidate_top_k`` is positive and ``bin_centers`` is
-        supplied, each time bin is enlarged by nearest grid states to forward-
-        and backward-momentum predictions built from the top adjacent emission
-        candidates. This keeps deterministic emission support while recovering
-        dynamically plausible states whose local emission rank is too low for
-        the fixed top-k beam. The augmentation is bounded by the prediction top-k
-        and never changes externally supplied candidate supports.
+        The base support is either the per-bin emission top-k set or, when
+        ``momentum_candidate_mass_threshold`` is finite, the smallest emission
+        support retaining that normalized mass subject to the configured
+        min/max bounds. When ``momentum_predicted_candidate_top_k`` is positive
+        and ``bin_centers`` is supplied, each time bin is enlarged by nearest
+        grid states to forward- and backward-momentum predictions built from
+        the top adjacent emission candidates. This keeps deterministic emission
+        support while recovering dynamically plausible states whose local
+        emission rank is too low for the fixed top-k beam. The augmentation is
+        bounded by the prediction top-k and never changes externally supplied
+        candidate supports.
         """
 
         assert self.config is not None
-        base = [_top_candidate_indices(row, self.config.momentum_candidate_top_k) for row in emissions.log_likelihood]
+        mass_threshold = self.config.momentum_candidate_mass_threshold
+        if mass_threshold is None or not np.isfinite(float(mass_threshold)):
+            base = [
+                _top_candidate_indices(row, self.config.momentum_candidate_top_k)
+                for row in emissions.log_likelihood
+            ]
+        else:
+            base = [
+                _mass_retaining_candidate_indices(
+                    row,
+                    float(mass_threshold),
+                    top_k=self.config.momentum_candidate_top_k,
+                    min_k=self.config.momentum_candidate_min_k,
+                    max_k=self.config.momentum_candidate_max_k,
+                )
+                for row in emissions.log_likelihood
+            ]
         predicted_top_k = int(self.config.momentum_predicted_candidate_top_k)
         if predicted_top_k <= 0 or bin_centers is None or emissions.n_time < 3:
             return base
@@ -117,25 +143,41 @@ class StateSpaceReplayModel:
         emissions: LogEmissionTensor,
         bin_centers: np.ndarray,
         candidate_indices: list[np.ndarray] | None = None,
+        *,
+        occupancy_s: np.ndarray | None = None,
     ) -> EventScore:
         if emissions.n_time == 0:
             raise ValueError("emissions must contain at least one time bin")
         if emissions.n_bins != bin_centers.shape[0]:
             raise ValueError("emissions.n_bins must match bin_centers rows")
         assert self.config is not None
+        valid_bin_mask = _valid_bin_mask_from_occupancy(
+            occupancy_s,
+            self.config.valid_occupancy_threshold_s,
+            emissions.n_bins,
+        )
 
         if self.mode == "stationary":
-            logp, trajectory = _score_stationary(emissions)
+            logp, trajectory = _score_stationary(emissions, valid_bin_mask=valid_bin_mask)
             transition_sigma_cm = 0.0
             extra: dict[str, float | int | str] = {}
         elif self.mode in {"fragmented", "jump"}:
-            logp, trajectory = _score_fragmented(emissions)
+            logp, trajectory = _score_fragmented(emissions, valid_bin_mask=valid_bin_mask)
             transition_sigma_cm = float("inf")
             extra = {}
         elif self.mode == "diffusion":
             transition_sigma_cm = _per_bin_sigma(self.config.diffusion_sigma_cm_sqrt_s, emissions.dt)
-            transition = _gaussian_transition_matrix(bin_centers, transition_sigma_cm, self.config.max_step_sigma)
-            logp, trajectory = _forward_backward_first_order(emissions.log_likelihood, transition)
+            transition = _gaussian_transition_matrix(
+                bin_centers,
+                transition_sigma_cm,
+                self.config.max_step_sigma,
+                valid_bin_mask=valid_bin_mask,
+            )
+            logp, trajectory = _forward_backward_first_order(
+                emissions.log_likelihood,
+                transition,
+                valid_bin_mask=valid_bin_mask,
+            )
             extra = {}
         elif self.mode == "first-order-imm":
             transition_sigma_cm = _per_bin_sigma(self.config.diffusion_sigma_cm_sqrt_s, emissions.dt)
@@ -146,6 +188,7 @@ class StateSpaceReplayModel:
                 diffusion_sigma_cm=transition_sigma_cm,
                 max_step_sigma=self.config.max_step_sigma,
                 mode_stickiness=self.config.imm_mode_stickiness,
+                valid_bin_mask=valid_bin_mask,
             )
             names = ("stationary", "diffusion", "fragmented")
             extra = {
@@ -166,7 +209,12 @@ class StateSpaceReplayModel:
                 emissions.dt,
             )
             candidates = self.candidate_indices(emissions, bin_centers) if candidate_indices is None else candidate_indices
-            _validate_candidate_indices(candidates, emissions.n_time, emissions.n_bins)
+            candidates = _restrict_candidates_to_valid_bins(
+                candidates,
+                emissions.log_likelihood,
+                valid_bin_mask,
+            )
+            candidates = _validate_candidate_indices(candidates, emissions.n_time, emissions.n_bins)
             logp, trajectory, mode_post, masses = _score_imm_candidates(
                 emissions,
                 bin_centers,
@@ -177,6 +225,7 @@ class StateSpaceReplayModel:
                 velocity_decay=self.config.momentum_velocity_decay,
                 mode_stickiness=self.config.imm_mode_stickiness,
                 candidate_indices=candidates,
+                valid_bin_mask=valid_bin_mask,
             )
             names = ("stationary", "diffusion", "momentum", "jump")
             extra = {
@@ -186,13 +235,16 @@ class StateSpaceReplayModel:
             extra.update(
                 {
                     "mean_candidate_log_mass": float(np.mean(masses)),
+                    "min_candidate_log_mass": float(np.min(masses)),
                     "mean_candidate_count": float(np.mean([len(curr) for curr in candidates])),
                     "state_space_imm_modes": ",".join(names),
-                    "state_space_imm_candidate_top_k": int(self.config.momentum_candidate_top_k),
-                    "state_space_imm_predicted_candidate_top_k": int(self.config.momentum_predicted_candidate_top_k),
                     "state_space_imm_candidate_support": "derived" if candidate_indices is None else "provided",
                     "state_space_imm_trajectory_posterior": "smoothed_pair_marginal",
                     "state_space_imm_evidence_support": "truncated_full_grid",
+                    **_candidate_support_config_diagnostics("state_space_imm", self.config),
+                    "state_space_imm_candidate_selection": (
+                        "provided" if candidate_indices is not None else _candidate_selection_label(self.config)
+                    ),
                     "state_space_momentum_transition_sigma_cm": float(momentum_transition_sigma_cm),
                     "state_space_momentum_initial_transition_sigma_cm": float(momentum_initial_sigma_cm),
                 }
@@ -200,7 +252,12 @@ class StateSpaceReplayModel:
         elif self.mode == "momentum":
             transition_sigma_cm = _per_bin_sigma(self.config.momentum_sigma_cm_sqrt_s, emissions.dt)
             candidates = self.candidate_indices(emissions, bin_centers) if candidate_indices is None else candidate_indices
-            _validate_candidate_indices(candidates, emissions.n_time, emissions.n_bins)
+            candidates = _restrict_candidates_to_valid_bins(
+                candidates,
+                emissions.log_likelihood,
+                valid_bin_mask,
+            )
+            candidates = _validate_candidate_indices(candidates, emissions.n_time, emissions.n_bins)
             logp, trajectory, masses = _score_momentum_candidates(
                 emissions,
                 bin_centers,
@@ -208,15 +265,19 @@ class StateSpaceReplayModel:
                 sigma_cm=transition_sigma_cm,
                 initial_sigma_cm=_per_bin_sigma(self.config.momentum_initial_sigma_cm_sqrt_s, emissions.dt),
                 velocity_decay=self.config.momentum_velocity_decay,
+                valid_bin_mask=valid_bin_mask,
             )
             extra = {
                 "mean_candidate_log_mass": float(np.mean(masses)),
+                "min_candidate_log_mass": float(np.min(masses)),
                 "mean_candidate_count": float(np.mean([len(curr) for curr in candidates])),
-                "state_space_momentum_candidate_top_k": int(self.config.momentum_candidate_top_k),
-                "state_space_momentum_predicted_candidate_top_k": int(self.config.momentum_predicted_candidate_top_k),
                 "state_space_momentum_candidate_support": "derived" if candidate_indices is None else "provided",
                 "state_space_momentum_trajectory_posterior": "smoothed_pair_marginal",
                 "state_space_momentum_evidence_support": "truncated_full_grid",
+                **_candidate_support_config_diagnostics("state_space_momentum", self.config),
+                "state_space_momentum_candidate_selection": (
+                    "provided" if candidate_indices is not None else _candidate_selection_label(self.config)
+                ),
             }
         else:  # pragma: no cover - __post_init__ validates this.
             raise ValueError(f"Unsupported state-space mode: {self.mode}")
@@ -234,10 +295,18 @@ class StateSpaceReplayModel:
             "state_space_momentum_sigma_cm_sqrt_s": float(self.config.momentum_sigma_cm_sqrt_s),
             "state_space_momentum_initial_sigma_cm_sqrt_s": float(self.config.momentum_initial_sigma_cm_sqrt_s),
             "state_space_momentum_velocity_decay": float(self.config.momentum_velocity_decay),
+            "state_space_valid_occupancy_threshold_s": float(self.config.valid_occupancy_threshold_s),
             "state_space_transition_sigma_cm": float(transition_sigma_cm),
             "mean_trajectory_posterior_entropy": _mean_entropy(trajectory),
             **extra,
         }
+        if valid_bin_mask is not None:
+            diagnostics.update(
+                {
+                    "state_space_valid_bin_count": int(np.sum(valid_bin_mask)),
+                    "state_space_valid_bin_fraction": float(np.mean(valid_bin_mask)),
+                }
+            )
         diagnostics.update(_posterior_diagnostics(terminal, bin_centers))
         return EventScore(
             str(self.name),
@@ -248,6 +317,36 @@ class StateSpaceReplayModel:
             terminal_log_posterior=terminal,
             trajectory_log_posterior=trajectory,
         )
+
+
+def _candidate_support_config_diagnostics(
+    prefix: str,
+    config: StateSpaceDecoderConfig,
+) -> dict[str, float | int | str]:
+    """Return diagnostics describing how candidate support was generated."""
+
+    mass_threshold = config.momentum_candidate_mass_threshold
+    if mass_threshold is None or not np.isfinite(float(mass_threshold)):
+        threshold_value = float("nan")
+    else:
+        threshold_value = float(mass_threshold)
+    return {
+        f"{prefix}_candidate_top_k": int(config.momentum_candidate_top_k),
+        f"{prefix}_candidate_mass_threshold": threshold_value,
+        f"{prefix}_candidate_min_k": int(config.momentum_candidate_min_k),
+        f"{prefix}_candidate_max_k": int(config.momentum_candidate_max_k),
+        f"{prefix}_candidate_selection": _candidate_selection_label(config),
+        f"{prefix}_predicted_candidate_top_k": int(
+            config.momentum_predicted_candidate_top_k
+        ),
+    }
+
+
+def _candidate_selection_label(config: StateSpaceDecoderConfig) -> str:
+    mass_threshold = config.momentum_candidate_mass_threshold
+    if mass_threshold is not None and np.isfinite(float(mass_threshold)) and float(mass_threshold) > 0.0:
+        return "adaptive_mass"
+    return "top_k"
 
 
 def _augment_candidates_with_momentum_predictions(

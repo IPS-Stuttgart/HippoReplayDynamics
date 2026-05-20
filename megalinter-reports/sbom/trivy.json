@@ -2,10 +2,10 @@
     "$schema": "http://cyclonedx.org/schema/bom-1.6.schema.json",
     "bomFormat": "CycloneDX",
     "specVersion": "1.6",
-    "serialNumber": "urn:uuid:efc6505f-6c65-4610-b231-9c44f5af11b2",
+    "serialNumber": "urn:uuid:278a4e15-1da0-4716-977a-3ac64983dee6",
     "version": 1,
     "metadata": {
-        "timestamp": "2026-05-18T17:08:18+00:00",
+        "timestamp": "2026-05-20T19:47:06+00:00",
         "tools": {
             "components": [
                 {
@@ -20,7 +20,7 @@
             ]
         },
         "component": {
-            "bom-ref": "1ee1b9c2-cd86-415a-bd38-9f68fa5f060b",
+            "bom-ref": "58e49417-fe5d-4f29-8d0a-051bd3af59cf",
             "type": "application",
             "name": ".",
             "properties": [
@@ -33,7 +33,7 @@
     },
     "components": [
         {
-            "bom-ref": "af87d8ac-4d9f-4236-b753-19ea935b9041",
+            "bom-ref": "0852bac2-1a8e-43c7-aec7-ad089875bbac",
             "type": "application",
             "name": "poetry.lock",
             "properties": [
@@ -252,15 +252,15 @@
             ]
         },
         {
-            "bom-ref": "pkg:pypi/idna@3.13",
+            "bom-ref": "pkg:pypi/idna@3.15",
             "type": "library",
             "name": "idna",
-            "version": "3.13",
-            "purl": "pkg:pypi/idna@3.13",
+            "version": "3.15",
+            "purl": "pkg:pypi/idna@3.15",
             "properties": [
                 {
                     "name": "aquasecurity:trivy:PkgID",
-                    "value": "idna@3.13"
+                    "value": "idna@3.15"
                 },
                 {
                     "name": "aquasecurity:trivy:PkgType",
@@ -507,15 +507,15 @@
             ]
         },
         {
-            "bom-ref": "pkg:pypi/pyrecest@2.1.0",
+            "bom-ref": "pkg:pypi/pyrecest@2.2.2",
             "type": "library",
             "name": "pyrecest",
-            "version": "2.1.0",
-            "purl": "pkg:pypi/pyrecest@2.1.0",
+            "version": "2.2.2",
+            "purl": "pkg:pypi/pyrecest@2.2.2",
             "properties": [
                 {
                     "name": "aquasecurity:trivy:PkgID",
-                    "value": "pyrecest@2.1.0"
+                    "value": "pyrecest@2.2.2"
                 },
                 {
                     "name": "aquasecurity:trivy:PkgType",
@@ -730,13 +730,7 @@
     ],
     "dependencies": [
         {
-            "ref": "1ee1b9c2-cd86-415a-bd38-9f68fa5f060b",
-            "dependsOn": [
-                "af87d8ac-4d9f-4236-b753-19ea935b9041"
-            ]
-        },
-        {
-            "ref": "af87d8ac-4d9f-4236-b753-19ea935b9041",
+            "ref": "0852bac2-1a8e-43c7-aec7-ad089875bbac",
             "dependsOn": [
                 "pkg:pypi/beartype@0.22.9",
                 "pkg:pypi/h5py@3.16.0",
@@ -744,9 +738,15 @@
                 "pkg:pypi/mpmath@1.4.1",
                 "pkg:pypi/numpy@2.4.4",
                 "pkg:pypi/pandas@3.0.2",
-                "pkg:pypi/pyrecest@2.1.0",
+                "pkg:pypi/pyrecest@2.2.2",
                 "pkg:pypi/pytest@9.0.3",
                 "pkg:pypi/scipy@1.17.1"
+            ]
+        },
+        {
+            "ref": "58e49417-fe5d-4f29-8d0a-051bd3af59cf",
+            "dependsOn": [
+                "0852bac2-1a8e-43c7-aec7-ad089875bbac"
             ]
         },
         {
@@ -812,7 +812,7 @@
             ]
         },
         {
-            "ref": "pkg:pypi/idna@3.13",
+            "ref": "pkg:pypi/idna@3.15",
             "dependsOn": []
         },
         {
@@ -891,13 +891,14 @@
             "dependsOn": []
         },
         {
-            "ref": "pkg:pypi/pyrecest@2.1.0",
+            "ref": "pkg:pypi/pyrecest@2.2.2",
             "dependsOn": [
                 "pkg:pypi/beartype@0.22.9",
                 "pkg:pypi/matplotlib@3.10.9",
                 "pkg:pypi/mpmath@1.4.1",
                 "pkg:pypi/numpy@2.4.4",
                 "pkg:pypi/pyshtools@4.14.1",
+                "pkg:pypi/scipy@1.17.1",
                 "pkg:pypi/shapely@2.1.2"
             ]
         },
@@ -940,7 +941,7 @@
             "dependsOn": [
                 "pkg:pypi/certifi@2026.4.22",
                 "pkg:pypi/charset-normalizer@3.4.7",
-                "pkg:pypi/idna@3.13",
+                "pkg:pypi/idna@3.15",
                 "pkg:pypi/urllib3@2.7.0"
             ]
         },

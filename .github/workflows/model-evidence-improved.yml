@@ -1,0 +1,238 @@
+---
+name: Benchmark replay model evidence improved
+
+on:
+  workflow_dispatch:
+    inputs:
+      dataset_root:
+        description: "Dataset path after download"
+        required: true
+        default: "data/DataSetFromPfeifferFoster"
+      session:
+        description: "Session ID, e.g. Rat1/Open1"
+        required: true
+        default: "Rat1/Open1"
+      events:
+        description: "Event IDs/ranges, all, run, or run:0-25"
+        required: true
+        default: "run:0-25"
+      max_events:
+        description: "Maximum selected events to score; empty means no cap"
+        required: false
+        default: ""
+      models:
+        description: "Space-separated models"
+        required: true
+        default: "random stationary sorted-spike-state-space-diffusion sorted-spike-state-space-momentum sorted-spike-state-space-imm sorted-spike-state-space-goal sorted-spike-state-space-goal-bidirectional"
+      time_bin_s:
+        description: "Replay decoding time-bin width in seconds"
+        required: true
+        default: "0.003"
+      state_space_momentum_candidate_top_k:
+        description: "Emission top-k support for state-space momentum/IMM"
+        required: true
+        default: "128"
+      state_space_momentum_predicted_candidate_top_k:
+        description: "Momentum-predicted candidate augmentation top-k"
+        required: true
+        default: "8"
+      state_space_imm_switch_tau_s:
+        description: "If >0, set IMM stickiness to exp(-time_bin_s/tau)"
+        required: true
+        default: "0.0"
+      goal_state_space_transition_sigma_cm_sqrt_s:
+        description: "Goal-state transition noise in cm/sqrt(s)"
+        required: true
+        default: "85.0"
+      goal_state_space_drift_speed_cm_s:
+        description: "Goal-state drift speed in cm/s"
+        required: true
+        default: "400.0"
+      goal_state_space_max_step_sigma:
+        description: "Goal-state transition truncation radius in sigmas"
+        required: true
+        default: "4.0"
+      clusterless_mark_likelihood:
+        description: "Clusterless mark likelihood: local-kde or diagonal-gaussian"
+        required: true
+        default: "local-kde"
+      clusterless_mark_kde_bandwidth:
+        description: "Optional scalar KDE mark bandwidth; empty uses data rule"
+        required: false
+        default: ""
+      clusterless_mark_kde_spatial_sigma_bins:
+        description: "Optional spatial KDE sigma in bins; empty uses mark smoothing"
+        required: false
+        default: ""
+      clusterless_mark_kde_max_neighbors:
+        description: "Maximum local-KDE mark neighbors"
+        required: true
+        default: "256"
+      sorted_spike_emission_model:
+        description: "Sorted-spike emission model: poisson or negative-binomial"
+        required: true
+        default: "poisson"
+      replay_gain_mode:
+        description: "Replay gain calibration: none, event, cell, or event-cell"
+        required: true
+        default: "none"
+      replay_gain_prior_count:
+        description: "Pseudo-count strength for replay gain calibration"
+        required: true
+        default: "10.0"
+      replay_gain_max_gain:
+        description: "Maximum multiplicative replay gain"
+        required: true
+        default: "20.0"
+      negative_binomial_dispersion:
+        description: "Gamma-Poisson dispersion for negative-binomial emissions"
+        required: true
+        default: "50.0"
+      null_shuffles:
+        description: "Spatial-bin permutation null shuffles per event/model"
+        required: true
+        default: "0"
+      spike_rate_scale:
+        description: "Global place-field spike-rate scale"
+        required: true
+        default: "1.0"
+      bin_size_cm:
+        description: "Place-field spatial bin size in centimeters"
+        required: true
+        default: "6.0"
+      smoothing_sigma_bins:
+        description: "Place-field smoothing sigma in spatial bins"
+        required: true
+        default: "2.0"
+      min_speed_cm_s:
+        description: "Minimum speed for place-field training in cm/s"
+        required: true
+        default: "5.0"
+
+permissions:
+  contents: read
+
+jobs:
+  model-evidence-improved:
+    name: Improved replay model-evidence benchmark
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Install package
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e .
+
+      - name: Ensure Pfeiffer-Foster dataset
+        uses: ./.github/actions/ensure-pfeiffer-foster-dataset
+        with:
+          dataset-root: ${{ inputs.dataset_root }}
+          session: ${{ inputs.session }}
+          cache-key: hipporeplayimm-dataset-${{ runner.os }}-rclone-v1
+          webdav-url: ${{ secrets.PFEIFFERFOSTER_WEBDAV_URL }}
+          webdav-key: ${{ secrets.PFEIFFERFOSTER_DATA_KEY }}
+          webdav-password: ${{ secrets.PFEIFFERFOSTER_DATA_PASSWORD }}
+
+      - name: Run improved model-evidence benchmark
+        env:
+          DATASET_ROOT: ${{ inputs.dataset_root }}
+          SESSION: ${{ inputs.session }}
+          EVENTS: ${{ inputs.events }}
+          MAX_EVENTS: ${{ inputs.max_events }}
+          MODELS: ${{ inputs.models }}
+          TIME_BIN_S: ${{ inputs.time_bin_s }}
+          STATE_SPACE_MOMENTUM_CANDIDATE_TOP_K: ${{ inputs.state_space_momentum_candidate_top_k }}
+          STATE_SPACE_MOMENTUM_PREDICTED_CANDIDATE_TOP_K: ${{ inputs.state_space_momentum_predicted_candidate_top_k }}
+          STATE_SPACE_IMM_SWITCH_TAU_S: ${{ inputs.state_space_imm_switch_tau_s }}
+          GOAL_STATE_SPACE_TRANSITION_SIGMA_CM_SQRT_S: ${{ inputs.goal_state_space_transition_sigma_cm_sqrt_s }}
+          GOAL_STATE_SPACE_DRIFT_SPEED_CM_S: ${{ inputs.goal_state_space_drift_speed_cm_s }}
+          GOAL_STATE_SPACE_MAX_STEP_SIGMA: ${{ inputs.goal_state_space_max_step_sigma }}
+          CLUSTERLESS_MARK_LIKELIHOOD: ${{ inputs.clusterless_mark_likelihood }}
+          CLUSTERLESS_MARK_KDE_BANDWIDTH: ${{ inputs.clusterless_mark_kde_bandwidth }}
+          CLUSTERLESS_MARK_KDE_SPATIAL_SIGMA_BINS: ${{ inputs.clusterless_mark_kde_spatial_sigma_bins }}
+          CLUSTERLESS_MARK_KDE_MAX_NEIGHBORS: ${{ inputs.clusterless_mark_kde_max_neighbors }}
+          SORTED_SPIKE_EMISSION_MODEL: ${{ inputs.sorted_spike_emission_model }}
+          REPLAY_GAIN_MODE: ${{ inputs.replay_gain_mode }}
+          REPLAY_GAIN_PRIOR_COUNT: ${{ inputs.replay_gain_prior_count }}
+          REPLAY_GAIN_MAX_GAIN: ${{ inputs.replay_gain_max_gain }}
+          NEGATIVE_BINOMIAL_DISPERSION: ${{ inputs.negative_binomial_dispersion }}
+          NULL_SHUFFLES: ${{ inputs.null_shuffles }}
+          SPIKE_RATE_SCALE: ${{ inputs.spike_rate_scale }}
+          BIN_SIZE_CM: ${{ inputs.bin_size_cm }}
+          SMOOTHING_SIGMA_BINS: ${{ inputs.smoothing_sigma_bins }}
+          MIN_SPEED_CM_S: ${{ inputs.min_speed_cm_s }}
+        run: |
+          set -euo pipefail
+          args=()
+          if [ -n "${MAX_EVENTS}" ]; then
+            args+=(--max-events "${MAX_EVENTS}")
+          fi
+          if [ -n "${CLUSTERLESS_MARK_KDE_BANDWIDTH}" ]; then
+            args+=(--clusterless-mark-kde-bandwidth "${CLUSTERLESS_MARK_KDE_BANDWIDTH}")
+          fi
+          if [ -n "${CLUSTERLESS_MARK_KDE_SPATIAL_SIGMA_BINS}" ]; then
+            args+=(--clusterless-mark-kde-spatial-sigma-bins "${CLUSTERLESS_MARK_KDE_SPATIAL_SIGMA_BINS}")
+          fi
+          python scripts/benchmark_model_evidence_improved.py \
+            --dataset-root "${DATASET_ROOT}" \
+            --session "${SESSION}" \
+            --events "${EVENTS}" \
+            "${args[@]}" \
+            --models "${MODELS}" \
+            --time-bin-s "${TIME_BIN_S}" \
+            --state-space-momentum-candidate-top-k "${STATE_SPACE_MOMENTUM_CANDIDATE_TOP_K}" \
+            --state-space-momentum-predicted-candidate-top-k "${STATE_SPACE_MOMENTUM_PREDICTED_CANDIDATE_TOP_K}" \
+            --state-space-imm-switch-tau-s "${STATE_SPACE_IMM_SWITCH_TAU_S}" \
+            --goal-state-space-transition-sigma-cm-sqrt-s "${GOAL_STATE_SPACE_TRANSITION_SIGMA_CM_SQRT_S}" \
+            --goal-state-space-drift-speed-cm-s "${GOAL_STATE_SPACE_DRIFT_SPEED_CM_S}" \
+            --goal-state-space-max-step-sigma "${GOAL_STATE_SPACE_MAX_STEP_SIGMA}" \
+            --clusterless-mark-likelihood "${CLUSTERLESS_MARK_LIKELIHOOD}" \
+            --clusterless-mark-kde-max-neighbors "${CLUSTERLESS_MARK_KDE_MAX_NEIGHBORS}" \
+            --sorted-spike-emission-model "${SORTED_SPIKE_EMISSION_MODEL}" \
+            --replay-gain-mode "${REPLAY_GAIN_MODE}" \
+            --replay-gain-prior-count "${REPLAY_GAIN_PRIOR_COUNT}" \
+            --replay-gain-max-gain "${REPLAY_GAIN_MAX_GAIN}" \
+            --negative-binomial-dispersion "${NEGATIVE_BINOMIAL_DISPERSION}" \
+            --null-shuffles "${NULL_SHUFFLES}" \
+            --spike-rate-scale "${SPIKE_RATE_SCALE}" \
+            --bin-size-cm "${BIN_SIZE_CM}" \
+            --smoothing-sigma-bins "${SMOOTHING_SIGMA_BINS}" \
+            --min-speed-cm-s "${MIN_SPEED_CM_S}" \
+            --output results/model-evidence-improved \
+            --continue-on-error
+
+      - name: Show summary
+        if: always()
+        run: |
+          if [ -f results/model-evidence-improved/model_evidence_summary.csv ]; then
+            python - <<'PY'
+          import pandas as pd
+          scores = pd.read_csv("results/model-evidence-improved/event_model_evidence.csv")
+          summary = pd.read_csv("results/model-evidence-improved/model_evidence_summary.csv")
+          counts = pd.read_csv("results/model-evidence-improved/best_model_counts.csv")
+          print(summary.to_string(index=False))
+          print("\nBest-model counts:")
+          print(counts.to_string(index=False))
+          print("\nRows:", len(scores))
+          if "status" in scores.columns:
+              print("Failures:", int((scores["status"] != "success").sum()))
+          PY
+          fi
+
+      - name: Upload improved model-evidence results
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: model-evidence-improved-${{ github.run_id }}
+          path: results/model-evidence-improved/
+          if-no-files-found: error

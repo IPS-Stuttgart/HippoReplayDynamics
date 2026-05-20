@@ -11,6 +11,7 @@ from .state_space_first_order import _score_fragmented
 from .state_space_utils import (
     _candidate_log_masses,
     _full_grid_normalized_pairwise_gaussian_log_prob,
+    _uniform_log_prior,
 )
 
 
@@ -22,9 +23,10 @@ def _score_momentum_candidates(
     sigma_cm: float,
     initial_sigma_cm: float,
     velocity_decay: float,
+    valid_bin_mask: np.ndarray | None = None,
 ) -> tuple[float, np.ndarray, list[float]]:
     if emissions.n_time == 1:
-        logp, trajectory = _score_fragmented(emissions)
+        logp, trajectory = _score_fragmented(emissions, valid_bin_mask=valid_bin_mask)
         return logp, trajectory, [0.0]
 
     masses = _candidate_log_masses(emissions.log_likelihood, candidates)
@@ -34,6 +36,7 @@ def _score_momentum_candidates(
         candidates[1],
         bin_centers,
         sigma_cm=initial_sigma_cm,
+        valid_bin_mask=valid_bin_mask,
     )
     pair_alphas = [log_pair]
     for time_index in range(2, emissions.n_time):
@@ -46,6 +49,7 @@ def _score_momentum_candidates(
             bin_centers,
             sigma_cm=sigma_cm,
             velocity_decay=velocity_decay,
+            valid_bin_mask=valid_bin_mask,
         )
         pair_alphas.append(log_pair)
 
@@ -62,6 +66,7 @@ def _score_momentum_candidates(
             bin_centers,
             sigma_cm=sigma_cm,
             velocity_decay=velocity_decay,
+            valid_bin_mask=valid_bin_mask,
         )
 
     trajectory = np.full((emissions.n_time, emissions.n_bins), LOG_ZERO, dtype=float)
@@ -82,15 +87,22 @@ def _init_pair_log_alpha(
     bin_centers: np.ndarray,
     *,
     sigma_cm: float,
+    valid_bin_mask: np.ndarray | None = None,
 ) -> np.ndarray:
     log_kernel = _full_grid_normalized_pairwise_gaussian_log_prob(
         bin_centers[first],
         bin_centers[second],
         bin_centers,
         sigma_cm,
+        valid_bin_mask=valid_bin_mask,
     )
     n_bins = log_likelihood.shape[1]
-    return log_likelihood[0, first][:, None] - np.log(n_bins) + log_kernel + log_likelihood[1, second][None, :]
+    return (
+        log_likelihood[0, first][:, None]
+        + _uniform_log_prior(n_bins, valid_bin_mask)[first][:, None]
+        + log_kernel
+        + log_likelihood[1, second][None, :]
+    )
 
 
 def _advance_momentum_pair(
@@ -103,6 +115,7 @@ def _advance_momentum_pair(
     *,
     sigma_cm: float,
     velocity_decay: float,
+    valid_bin_mask: np.ndarray | None = None,
 ) -> np.ndarray:
     coords_prev_prev = bin_centers[prev_prev]
     coords_prev = bin_centers[prev]
@@ -117,6 +130,7 @@ def _advance_momentum_pair(
             coords_curr,
             bin_centers,
             sigma_cm,
+            valid_bin_mask=valid_bin_mask,
         )
         output[prev_col] = logsumexp(log_pair[:, prev_col][:, None] + log_kernel, axis=0) + curr_emission
     return output
@@ -132,6 +146,7 @@ def _backward_momentum_pair(
     *,
     sigma_cm: float,
     velocity_decay: float,
+    valid_bin_mask: np.ndarray | None = None,
 ) -> np.ndarray:
     coords_prev_prev = bin_centers[prev_prev]
     coords_prev = bin_centers[prev]
@@ -146,6 +161,7 @@ def _backward_momentum_pair(
             coords_curr,
             bin_centers,
             sigma_cm,
+            valid_bin_mask=valid_bin_mask,
         )
         continuation = curr_emission[None, :] + next_beta[prev_col][None, :]
         output[:, prev_col] = logsumexp(log_kernel + continuation, axis=1)

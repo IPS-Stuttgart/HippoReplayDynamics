@@ -11,7 +11,9 @@ import pandas as pd
 from .clusterless import (
     ClusterlessMarkConfig,
     ClusterlessStateSpaceReplayModel,
+    _normalize_mark_likelihood,
     build_clusterless_mark_emissions,
+    clusterless_mark_likelihood_label,
     fit_clusterless_mark_encoding,
 )
 from .data import ReplaySession, SpikeMarkData, load_open_field_sessions
@@ -23,6 +25,7 @@ from .evidence_reporting import (
 from .models import CandidateKinematicModel, RandomModel, StationaryModel
 from .pyrecest_models import PyRecEstGoalParticleIMMModel, PyRecEstGoalParticleModel
 from .sorted_spike_state_space import SortedSpikeStateSpaceReplayModel
+from .state_space import StateSpaceDecoderConfig, StateSpaceReplayModel
 
 
 @dataclass(frozen=True)
@@ -31,11 +34,19 @@ class BenchmarkConfig:
     emissions: EmissionConfig = field(default_factory=EmissionConfig)
     test_cell_fraction: float = 0.25
     max_events_per_session: int | None = None
+    n_cell_splits: int = 1
+    randomize_event_subset: bool = False
+    event_subset_seed: int | None = None
     candidate_top_k: int = 64
     clusterless_mark_smoothing_sigma_bins: float = 1.0
     clusterless_mark_prior_count: float = 1.0
     clusterless_mark_variance_floor: float = 1.0
     clusterless_rate_floor_hz: float = 1e-4
+    clusterless_mark_likelihood: str = "local-kde"
+    clusterless_mark_kde_bandwidth: float | None = None
+    clusterless_mark_kde_spatial_sigma_bins: float | None = None
+    clusterless_mark_kde_max_neighbors: int = 256
+    clusterless_mark_group_by: str = "auto"
     pyrecest_particles: int = 512
     pyrecest_alpha: float = 0.80
     pyrecest_beta: float = 1.00
@@ -51,7 +62,9 @@ class BenchmarkConfig:
     pyrecest_imm_momentum_velocity_decay: float = 0.95
     pyrecest_imm_jump_fraction: float = 0.9
     pyrecest_imm_jump_velocity_decay: float = 0.25
+    state_space_valid_occupancy_threshold_s: float = 0.0
     random_seed: int = 1
+    random_seeds: tuple[int, ...] | None = None
     event_epoch: str = "run"
     models: tuple[str, ...] = ("random", "stationary", "diffusion", "momentum", "imm")
 
@@ -97,8 +110,11 @@ def run_open_field_benchmark(root: str | Path, config: BenchmarkConfig | None = 
     config = BenchmarkConfig() if config is None else config
     sessions = load_open_field_sessions(root)
     rows = []
-    for session in sessions:
-        rows.extend(_score_session(session, config))
+    seeds = tuple(config.random_seeds or (config.random_seed,))
+    for seed in seeds:
+        seed_config = replace(config, random_seed=int(seed))
+        for session in sessions:
+            rows.extend(_score_session(session, seed_config))
     frame = pd.DataFrame(rows)
     if not frame.empty:
         frame = _add_relative_metrics(frame)
@@ -127,8 +143,26 @@ def bootstrap_delta_ci(
 
 def _score_session(session: ReplaySession, config: BenchmarkConfig) -> list[dict[str, object]]:
     encoding = fit_place_field_encoding(session, config.encoding)
-    model_objects = _build_models(config, session=session)
-    train_cells, test_cells = _split_cells(encoding.cell_ids, config.test_cell_fraction, config.random_seed)
+    rows: list[dict[str, object]] = []
+    for split_index in range(_n_cell_splits(config)):
+        rows.extend(_score_session_split(session, config, encoding, split_index))
+    return rows
+
+
+def _score_session_split(
+    session: ReplaySession,
+    config: BenchmarkConfig,
+    encoding,
+    split_index: int,
+) -> list[dict[str, object]]:
+    split_seed = _cell_split_seed(config.random_seed, split_index)
+    split_config = replace(config, random_seed=split_seed)
+    model_objects = _build_models(split_config, session=session)
+    train_cells, test_cells = _split_cells(
+        encoding.cell_ids,
+        config.test_cell_fraction,
+        split_seed,
+    )
     if test_cells.size == 0 or train_cells.size == 0:
         return []
     train_encoding = encoding.select_cells(train_cells)
@@ -137,6 +171,7 @@ def _score_session(session: ReplaySession, config: BenchmarkConfig) -> list[dict
     has_clusterless_models = any(_is_clusterless_model(model) for model in model_objects.values())
     clusterless_train_session: ReplaySession | None = None
     clusterless_joint_session: ReplaySession | None = None
+    clusterless_train_encoding = None
     clusterless_joint_encoding = None
     if has_clusterless_models:
         clusterless_train_session = _session_with_mark_cell_subset(
@@ -150,15 +185,23 @@ def _score_session(session: ReplaySession, config: BenchmarkConfig) -> list[dict
             role="joint",
         )
         clusterless_config = _clusterless_mark_config(config)
-        # Use one joint observation model for both terms in
-        # log p(train + test) - log p(train), so the train contribution cancels
-        # under identical clusterless rate and mark-likelihood parameters.
-        clusterless_joint_encoding = fit_clusterless_mark_encoding(
-            clusterless_joint_session,
+        # Fit the clusterless observation model on train cells only.  The
+        # held-out benchmark should evaluate test-cell marks under parameters
+        # estimated without seeing those marks; train and joint emissions still
+        # share this frozen train-only encoding so their train contribution is
+        # subtracted under identical rate and mark-likelihood parameters.
+        clusterless_fit_session = (
+            clusterless_train_session
+            if config.encoding.use_excitatory
+            else clusterless_joint_session
+        )
+        clusterless_train_encoding = fit_clusterless_mark_encoding(
+            clusterless_fit_session,
             clusterless_config,
         )
+        clusterless_joint_encoding = clusterless_train_encoding
 
-    event_indices = _event_indices(session, config)
+    event_indices = _event_indices(session, config, split_index=split_index)
     rows: list[dict[str, object]] = []
     for event_index in event_indices:
         train_emissions = build_emissions(session, train_encoding, int(event_index), config.emissions)
@@ -191,16 +234,27 @@ def _score_session(session: ReplaySession, config: BenchmarkConfig) -> list[dict
                 model_train_emissions = clusterless_train_emissions
                 model_joint_emissions = clusterless_joint_emissions
                 model_bin_centers = clusterless_joint_encoding.bin_centers
+                model_occupancy_s = getattr(clusterless_joint_encoding, "occupancy_s", None)
             else:
                 model_train_emissions = train_emissions
                 model_joint_emissions = joint_emissions
                 model_bin_centers = encoding.bin_centers
-            train_score, joint_score = _score_train_joint_model(
-                model,
-                model_train_emissions,
-                model_joint_emissions,
-                model_bin_centers,
-            )
+                model_occupancy_s = encoding.occupancy_s
+            if model_occupancy_s is None:
+                train_score, joint_score = _score_train_joint_model(
+                    model,
+                    model_train_emissions,
+                    model_joint_emissions,
+                    model_bin_centers,
+                )
+            else:
+                train_score, joint_score = _score_train_joint_model(
+                    model,
+                    model_train_emissions,
+                    model_joint_emissions,
+                    model_bin_centers,
+                    occupancy_s=model_occupancy_s,
+                )
             heldout = joint_score.log_likelihood - train_score.log_likelihood
             rows.append(
                 {
@@ -216,7 +270,13 @@ def _score_session(session: ReplaySession, config: BenchmarkConfig) -> list[dict
                     "train_cell_ids": _format_cell_ids(train_cells),
                     "test_cell_ids": _format_cell_ids(test_cells),
                     **_benchmark_config_metadata(config),
-                    **_session_mark_diagnostics(session),
+                    **_benchmark_split_metadata(config, split_index),
+                    **_session_mark_diagnostics(
+                        session,
+                        getattr(clusterless_joint_encoding, "mark_likelihood", None)
+                        if clusterless_joint_encoding is not None
+                        else None,
+                    ),
                     **{
                         f"diagnostic_{key}": value
                         for key, value in joint_score.diagnostics.items()
@@ -226,13 +286,86 @@ def _score_session(session: ReplaySession, config: BenchmarkConfig) -> list[dict
     return rows
 
 
-def _score_train_joint_model(model, train_emissions, joint_emissions, bin_centers):
+def _n_cell_splits(config: BenchmarkConfig) -> int:
+    n_splits = int(config.n_cell_splits)
+    if n_splits < 1:
+        raise ValueError("n_cell_splits must be at least 1")
+    return n_splits
+
+
+def _cell_split_seed(base_seed: int, split_index: int) -> int:
+    return int(base_seed) + int(split_index)
+
+
+def _event_subset_random_seed(
+    config: BenchmarkConfig,
+    split_index: int,
+) -> int:
+    base_seed = config.event_subset_seed
+    if base_seed is None:
+        base_seed = config.random_seed
+    return int(base_seed) + 1_000_003 * int(split_index)
+
+
+def _benchmark_split_metadata(
+    config: BenchmarkConfig,
+    split_index: int,
+) -> dict[str, object]:
+    return {
+        "benchmark_cell_split_index": int(split_index),
+        "benchmark_cell_split_count": int(config.n_cell_splits),
+        "benchmark_cell_split_seed": int(
+            _cell_split_seed(config.random_seed, split_index)
+        ),
+        "benchmark_randomize_event_subset": bool(config.randomize_event_subset),
+        "benchmark_event_subset_seed": (
+            int(_event_subset_random_seed(config, split_index))
+            if config.randomize_event_subset
+            else np.nan
+        ),
+    }
+
+
+def _score_train_joint_model(model, train_emissions, joint_emissions, bin_centers, occupancy_s=None):
+    if isinstance(model, StateSpaceReplayModel):
+        candidates = _candidate_indices_for_model(model, train_emissions, bin_centers)
+        train_score = _score_state_space_model(
+            model,
+            train_emissions,
+            bin_centers,
+            candidates,
+            occupancy_s,
+        )
+        joint_score = _score_state_space_model(
+            model,
+            joint_emissions,
+            bin_centers,
+            candidates,
+            occupancy_s,
+        )
+        return train_score, joint_score
     if hasattr(model, "candidate_indices"):
         candidates = _candidate_indices_for_model(model, train_emissions, bin_centers)
         train_score = model.score(train_emissions, bin_centers, candidate_indices=candidates)
         joint_score = model.score(joint_emissions, bin_centers, candidate_indices=candidates)
         return train_score, joint_score
     return model.score(train_emissions, bin_centers), model.score(joint_emissions, bin_centers)
+
+
+def _score_state_space_model(model, emissions, bin_centers, candidates, occupancy_s):
+    if occupancy_s is None:
+        return model.score(emissions, bin_centers, candidate_indices=candidates)
+    try:
+        return model.score(
+            emissions,
+            bin_centers,
+            candidate_indices=candidates,
+            occupancy_s=occupancy_s,
+        )
+    except TypeError as exc:
+        if "occupancy_s" not in str(exc):
+            raise
+        return model.score(emissions, bin_centers, candidate_indices=candidates)
 
 
 def _candidate_indices_for_model(model, emissions, bin_centers):
@@ -246,6 +379,11 @@ def _is_clusterless_model(model: object) -> bool:
     return isinstance(model, ClusterlessStateSpaceReplayModel)
 
 
+def _clusterless_mark_likelihood(config: BenchmarkConfig) -> str:
+    value = getattr(config, "clusterless_mark_likelihood", "local-kde")
+    return _normalize_mark_likelihood(value)
+
+
 def _clusterless_mark_config(config: BenchmarkConfig) -> ClusterlessMarkConfig:
     encoding_config = config.encoding
     return ClusterlessMarkConfig(
@@ -257,6 +395,17 @@ def _clusterless_mark_config(config: BenchmarkConfig) -> ClusterlessMarkConfig:
         mark_variance_floor=float(getattr(config, "clusterless_mark_variance_floor", 1.0)),
         rate_floor_hz=float(getattr(config, "clusterless_rate_floor_hz", 1e-4)),
         use_excitatory=bool(encoding_config.use_excitatory),
+        mark_likelihood=_clusterless_mark_likelihood(config),
+        mark_kde_bandwidth=_optional_float(
+            getattr(config, "clusterless_mark_kde_bandwidth", None)
+        ),
+        mark_kde_spatial_sigma_bins=_optional_float(
+            getattr(config, "clusterless_mark_kde_spatial_sigma_bins", None)
+        ),
+        mark_kde_max_neighbors=int(
+            getattr(config, "clusterless_mark_kde_max_neighbors", 256)
+        ),
+        mark_group_by=str(getattr(config, "clusterless_mark_group_by", "auto")),
     )
 
 
@@ -292,6 +441,7 @@ def _session_with_mark_cell_subset(
         source_variable=marks.source_variable,
         feature_names=marks.feature_names,
         cell_ids=mark_cell_ids[keep].copy(),
+        group_ids=None if marks.group_ids is None else np.asarray(marks.group_ids, dtype=int)[keep].copy(),
     )
     return replace(session, spike_marks=filtered_marks)
 
@@ -300,10 +450,21 @@ def _format_cell_ids(cell_ids: np.ndarray) -> str:
     return ",".join(str(int(cell_id)) for cell_id in np.asarray(cell_ids, dtype=int))
 
 
+def _optional_float(value: object) -> float | None:
+    if value is None:
+        return None
+    return float(value)
+
+
 def _benchmark_config_metadata(config: BenchmarkConfig) -> dict[str, object]:
     return {
         "benchmark_test_cell_fraction": float(config.test_cell_fraction),
         "benchmark_random_seed": int(config.random_seed),
+        "benchmark_n_cell_splits": int(config.n_cell_splits),
+        "benchmark_randomize_event_subset": bool(config.randomize_event_subset),
+        "benchmark_event_subset_base_seed": (
+            np.nan if config.event_subset_seed is None else int(config.event_subset_seed)
+        ),
         "encoding_bin_size_cm": float(config.encoding.bin_size_cm),
         "encoding_smoothing_sigma_bins": float(config.encoding.smoothing_sigma_bins),
         "encoding_min_speed_cm_s": float(config.encoding.min_speed_cm_s),
@@ -312,6 +473,9 @@ def _benchmark_config_metadata(config: BenchmarkConfig) -> dict[str, object]:
         "encoding_arena_padding_cm": float(config.encoding.arena_padding_cm),
         "encoding_use_excitatory": bool(config.encoding.use_excitatory),
         "emission_time_bin_s": float(config.emissions.time_bin_s),
+        "emission_spike_rate_scale": float(config.emissions.spike_rate_scale),
+        "emission_likelihood_temperature": float(config.emissions.likelihood_temperature),
+        "emission_negative_binomial_overdispersion": float(config.emissions.negative_binomial_overdispersion),
         "clusterless_mark_smoothing_sigma_bins": float(
             getattr(config, "clusterless_mark_smoothing_sigma_bins", 1.0)
         ),
@@ -322,20 +486,51 @@ def _benchmark_config_metadata(config: BenchmarkConfig) -> dict[str, object]:
             getattr(config, "clusterless_mark_variance_floor", 1.0)
         ),
         "clusterless_rate_floor_hz": float(getattr(config, "clusterless_rate_floor_hz", 1e-4)),
+        "clusterless_mark_likelihood": _clusterless_mark_likelihood(config),
+        "clusterless_mark_kde_bandwidth": _optional_float(
+            getattr(config, "clusterless_mark_kde_bandwidth", None)
+        ),
+        "clusterless_mark_kde_spatial_sigma_bins": _optional_float(
+            getattr(config, "clusterless_mark_kde_spatial_sigma_bins", None)
+        ),
+        "clusterless_mark_kde_max_neighbors": int(
+            getattr(config, "clusterless_mark_kde_max_neighbors", 256)
+        ),
+        "clusterless_mark_group_by": str(
+            getattr(config, "clusterless_mark_group_by", "auto")
+        ),
+        "state_space_valid_occupancy_threshold_s": float(
+            config.state_space_valid_occupancy_threshold_s
+        ),
     }
 
 
-def _session_mark_diagnostics(session: ReplaySession) -> dict[str, object]:
+def _session_mark_diagnostics(
+    session: ReplaySession,
+    clusterless_mark_likelihood: str | None = None,
+) -> dict[str, object]:
     marks = session.spike_marks
-    return {
+    diagnostics = {
         "spike_mark_features": 0 if marks is None else marks.n_features,
         "spike_mark_source": "" if marks is None else f"{marks.source_file}:{marks.source_variable}",
         "clusterless_mark_likelihood_available": bool(marks is not None and marks.n_features > 0),
-        "clusterless_mark_likelihood": "diagonal-gaussian" if marks is not None and marks.n_features > 0 else "",
+        "clusterless_tetrode_grouping_available": bool(marks is not None and marks.group_ids is not None),
+        "clusterless_mark_groups": 0 if marks is None or marks.group_ids is None else int(np.unique(marks.group_ids).shape[0]),
     }
+    if clusterless_mark_likelihood is not None or isinstance(session, ReplaySession):
+        diagnostics["clusterless_mark_likelihood"] = clusterless_mark_likelihood_label(
+            session,
+            clusterless_mark_likelihood,
+        )
+    return diagnostics
 
 
-def _event_indices(session: ReplaySession, config: BenchmarkConfig) -> np.ndarray:
+def _event_indices(
+    session: ReplaySession,
+    config: BenchmarkConfig,
+    *,
+    split_index: int = 0,
+) -> np.ndarray:
     if config.event_epoch == "run":
         indices = session.ripple_indices_in_run()
     elif config.event_epoch == "all":
@@ -343,7 +538,14 @@ def _event_indices(session: ReplaySession, config: BenchmarkConfig) -> np.ndarra
     else:
         raise ValueError("event_epoch must be 'run' or 'all'")
     if config.max_events_per_session is not None:
-        indices = indices[: config.max_events_per_session]
+        max_events = int(config.max_events_per_session)
+        if max_events < 0:
+            raise ValueError("max_events_per_session must be non-negative")
+        if config.randomize_event_subset and max_events < indices.size:
+            rng = np.random.default_rng(_event_subset_random_seed(config, split_index))
+            indices = np.sort(rng.choice(indices, size=max_events, replace=False))
+        else:
+            indices = indices[:max_events]
     return indices
 
 
@@ -365,6 +567,9 @@ def _build_models(
     session: ReplaySession | None = None,
 ) -> dict[str, object]:
     goal_candidates = _session_goal_candidates(session) if session is not None else None
+    clusterless_kwargs = {
+        "mark_likelihood": _clusterless_mark_likelihood(config),
+    }
     available = {
         "random": RandomModel(),
         "stationary": StationaryModel(),
@@ -383,12 +588,12 @@ def _build_models(
         "state-space-jump": SortedSpikeStateSpaceReplayModel(mode="jump", name="state-space-jump"),
         "state-space-momentum": SortedSpikeStateSpaceReplayModel(mode="momentum", name="state-space-momentum"),
         "state-space-imm": SortedSpikeStateSpaceReplayModel(mode="imm", name="state-space-imm"),
-        "clusterless-state-space-stationary": ClusterlessStateSpaceReplayModel(mode="stationary"),
-        "clusterless-state-space-diffusion": ClusterlessStateSpaceReplayModel(mode="diffusion"),
-        "clusterless-state-space-fragmented": ClusterlessStateSpaceReplayModel(mode="fragmented"),
-        "clusterless-state-space-jump": ClusterlessStateSpaceReplayModel(mode="jump"),
-        "clusterless-state-space-momentum": ClusterlessStateSpaceReplayModel(mode="momentum"),
-        "clusterless-state-space-imm": ClusterlessStateSpaceReplayModel(mode="imm"),
+        "clusterless-state-space-stationary": ClusterlessStateSpaceReplayModel(mode="stationary", **clusterless_kwargs),
+        "clusterless-state-space-diffusion": ClusterlessStateSpaceReplayModel(mode="diffusion", **clusterless_kwargs),
+        "clusterless-state-space-fragmented": ClusterlessStateSpaceReplayModel(mode="fragmented", **clusterless_kwargs),
+        "clusterless-state-space-jump": ClusterlessStateSpaceReplayModel(mode="jump", **clusterless_kwargs),
+        "clusterless-state-space-momentum": ClusterlessStateSpaceReplayModel(mode="momentum", **clusterless_kwargs),
+        "clusterless-state-space-imm": ClusterlessStateSpaceReplayModel(mode="imm", **clusterless_kwargs),
         "pyrecest-goal-particle": PyRecEstGoalParticleModel(
             candidate_goals=goal_candidates,
             n_particles=config.pyrecest_particles,
@@ -422,6 +627,14 @@ def _build_models(
             random_seed=config.random_seed,
         ),
     }
+    if config.state_space_valid_occupancy_threshold_s > 0.0:
+        for model in available.values():
+            if isinstance(model, StateSpaceReplayModel):
+                current = model.config or StateSpaceDecoderConfig(mode=model.mode)
+                model.config = replace(
+                    current,
+                    valid_occupancy_threshold_s=config.state_space_valid_occupancy_threshold_s,
+                )
     return {name: available[name] for name in config.models}
 
 
@@ -475,13 +688,21 @@ def _is_best_static_baseline_model(model_name: object) -> bool:
     return False
 
 
+def _benchmark_event_group_columns(frame: pd.DataFrame) -> list[str]:
+    columns = ["session", "event_index"]
+    if "benchmark_cell_split_index" in frame.columns:
+        columns.append("benchmark_cell_split_index")
+    return columns
+
+
 def _add_relative_metrics(frame: pd.DataFrame) -> pd.DataFrame:
     frame = ensure_evidence_support_columns(frame)
+    group_columns = _benchmark_event_group_columns(frame)
     static_mask = frame["model"].map(_is_best_static_baseline_model)
     exact_static_mask = static_mask & frame["evidence_comparable"].fillna(False).astype(bool)
     best_static = (
         frame[exact_static_mask]
-        .groupby(["session", "event_index"])["heldout_log_likelihood"]
+        .groupby(group_columns)["heldout_log_likelihood"]
         .max()
         .rename("best_static_heldout_log_likelihood")
         .reset_index()
@@ -489,15 +710,15 @@ def _add_relative_metrics(frame: pd.DataFrame) -> pd.DataFrame:
     truncated_static_mask = static_mask & frame["evidence_support"].eq(TRUNCATED_EVIDENCE_SUPPORT)
     best_static_truncated_lower_bound = (
         frame[truncated_static_mask]
-        .groupby(["session", "event_index"])["heldout_log_likelihood"]
+        .groupby(group_columns)["heldout_log_likelihood"]
         .max()
         .rename("best_static_truncated_lower_bound_heldout_log_likelihood")
         .reset_index()
     )
-    merged = frame.merge(best_static, on=["session", "event_index"], how="left")
+    merged = frame.merge(best_static, on=group_columns, how="left")
     merged = merged.merge(
         best_static_truncated_lower_bound,
-        on=["session", "event_index"],
+        on=group_columns,
         how="left",
     )
     denom = pd.Series(

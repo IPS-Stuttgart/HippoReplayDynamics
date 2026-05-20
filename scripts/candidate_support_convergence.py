@@ -28,6 +28,14 @@ CANDIDATE_TOP_K_COLUMNS = (
     "diagnostic_candidate_top_k",
     "candidate_top_k",
 )
+CANDIDATE_PREDICTED_TOP_K_COLUMNS = (
+    "diagnostic_state_space_momentum_predicted_candidate_top_k",
+    "diagnostic_state_space_imm_predicted_candidate_top_k",
+    "state_space_momentum_predicted_candidate_top_k",
+    "state_space_imm_predicted_candidate_top_k",
+    "diagnostic_predicted_candidate_top_k",
+    "predicted_candidate_top_k",
+)
 
 
 def _score_file(path: str | Path) -> Path:
@@ -49,9 +57,9 @@ def _event_count(frame: pd.DataFrame) -> int:
     return int(frame.loc[:, EVENT_COLUMNS].drop_duplicates().shape[0])
 
 
-def _candidate_values(frame: pd.DataFrame) -> list[int]:
+def _numeric_unique_values(frame: pd.DataFrame, columns: tuple[str, ...]) -> list[int]:
     values: list[int] = []
-    for column in CANDIDATE_TOP_K_COLUMNS:
+    for column in columns:
         if column not in frame:
             continue
         numeric = pd.to_numeric(frame[column], errors="coerce").dropna().astype(int)
@@ -59,13 +67,27 @@ def _candidate_values(frame: pd.DataFrame) -> list[int]:
     return sorted(set(values))
 
 
+def _candidate_values(frame: pd.DataFrame) -> list[int]:
+    return _numeric_unique_values(frame, CANDIDATE_TOP_K_COLUMNS)
+
+
+def _predicted_candidate_values(frame: pd.DataFrame) -> list[int]:
+    return _numeric_unique_values(frame, CANDIDATE_PREDICTED_TOP_K_COLUMNS)
+
+
+def _format_values(values: list[int]) -> str:
+    return "+".join(str(value) for value in values)
+
+
 def infer_run_label(frame: pd.DataFrame, fallback: str) -> str:
-    values = _candidate_values(frame)
-    if len(values) == 1:
-        return f"top_k={values[0]}"
-    if len(values) > 1:
-        return "top_k=" + "+".join(str(value) for value in values)
-    return fallback
+    parts: list[str] = []
+    top_k_values = _candidate_values(frame)
+    if top_k_values:
+        parts.append(f"top_k={_format_values(top_k_values)}")
+    predicted_values = _predicted_candidate_values(frame)
+    if predicted_values:
+        parts.append(f"pred_k={_format_values(predicted_values)}")
+    return ",".join(parts) if parts else fallback
 
 
 def parse_labels(spec: str | None, n_expected: int) -> list[str] | None:

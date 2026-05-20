@@ -17,14 +17,14 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-EXACT_EVIDENCE_SUPPORT = "exact_full_grid"
-TRUNCATED_EVIDENCE_SUPPORT = "truncated_full_grid"
-SAFE_COMPARISON_SUPPORTS = frozenset({EXACT_EVIDENCE_SUPPORT, TRUNCATED_EVIDENCE_SUPPORT})
-_SUPPORT_DIAGNOSTICS = (
-    "diagnostic_candidate_evidence_support",
-    "diagnostic_state_space_momentum_evidence_support",
-    "diagnostic_state_space_imm_evidence_support",
+from hipporeplayimm.evidence_reporting import (
+    EXACT_EVIDENCE_SUPPORT,
+    TRUNCATED_EVIDENCE_SUPPORT,
+    evidence_support_from_row as _canonical_evidence_support_from_row,
+    ensure_evidence_support_columns as _canonical_ensure_evidence_support_columns,
 )
+
+SAFE_COMPARISON_SUPPORTS = frozenset({EXACT_EVIDENCE_SUPPORT, TRUNCATED_EVIDENCE_SUPPORT})
 _STATE_SPACE_PREFIXES = (
     "clusterless-state-space-",
     "sorted-spike-state-space-",
@@ -35,34 +35,13 @@ _STATE_SPACE_PREFIXES = (
 def infer_evidence_support(row: pd.Series) -> str:
     """Infer evidence support from diagnostic columns used by the benchmark."""
 
-    if str(row.get("status", "success")) != "success":
-        return "not_scored"
-    for column in _SUPPORT_DIAGNOSTICS:
-        value = row.get(column)
-        if pd.isna(value):
-            continue
-        text = str(value)
-        if text in {EXACT_EVIDENCE_SUPPORT, TRUNCATED_EVIDENCE_SUPPORT}:
-            return text
-    return EXACT_EVIDENCE_SUPPORT
+    return _canonical_evidence_support_from_row(row)
 
 
 def ensure_evidence_support_columns(df: pd.DataFrame) -> pd.DataFrame:
     """Add ``evidence_support`` and ``evidence_comparable`` if absent."""
 
-    out = df.copy()
-    if out.empty:
-        return out
-    inferred = out.apply(infer_evidence_support, axis=1)
-    if "evidence_support" in out:
-        existing = out["evidence_support"].astype(object)
-        missing = existing.isna() | existing.astype(str).str.len().eq(0)
-        out["evidence_support"] = existing.where(~missing, inferred)
-    else:
-        out["evidence_support"] = inferred
-    status_ok = out["status"].eq("success") if "status" in out else pd.Series(True, index=out.index)
-    out["evidence_comparable"] = status_ok & out["evidence_support"].eq(EXACT_EVIDENCE_SUPPORT)
-    return out
+    return _canonical_ensure_evidence_support_columns(df)
 
 
 def evidence_support_summary(df: pd.DataFrame) -> pd.DataFrame:

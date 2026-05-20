@@ -29,7 +29,7 @@ class _SessionStub:
 
 def test_model_evidence_accepts_sorted_spike_state_space_models():
     args = argparse.Namespace(
-        models="sorted-spike-state-space-diffusion sorted-spike-state-space-momentum sorted-spike-state-space-imm",
+        models="sorted-spike-state-space-diffusion sorted-spike-state-space-first-order-imm sorted-spike-state-space-momentum sorted-spike-state-space-imm",
         candidate_top_k=64,
         stationary_sigma_cm=2.0,
         diffusion_sigma_cm=12.0,
@@ -44,29 +44,34 @@ def test_model_evidence_accepts_sorted_spike_state_space_models():
         state_space_momentum_initial_sigma_cm_sqrt_s=44.0,
         state_space_momentum_velocity_decay=0.8,
         state_space_momentum_candidate_top_k=17,
+        state_space_momentum_predicted_candidate_top_k=5,
     )
 
     models = _models(args)
 
     assert list(models) == [
         "sorted-spike-state-space-diffusion",
+        "sorted-spike-state-space-first-order-imm",
         "sorted-spike-state-space-momentum",
         "sorted-spike-state-space-imm",
     ]
     assert models["sorted-spike-state-space-diffusion"].name == "sorted-spike-state-space-diffusion"
+    assert models["sorted-spike-state-space-first-order-imm"].name == "sorted-spike-state-space-first-order-imm"
     assert models["sorted-spike-state-space-momentum"].name == "sorted-spike-state-space-momentum"
     assert models["sorted-spike-state-space-imm"].name == "sorted-spike-state-space-imm"
     assert models["sorted-spike-state-space-diffusion"].config.diffusion_sigma_cm_sqrt_s == 42.0
+    assert models["sorted-spike-state-space-first-order-imm"].config.imm_mode_stickiness == 0.91
     assert models["sorted-spike-state-space-momentum"].config.momentum_sigma_cm_sqrt_s == 43.0
     assert models["sorted-spike-state-space-momentum"].config.momentum_initial_sigma_cm_sqrt_s == 44.0
     assert models["sorted-spike-state-space-momentum"].config.momentum_velocity_decay == 0.8
     assert models["sorted-spike-state-space-momentum"].config.momentum_candidate_top_k == 17
+    assert models["sorted-spike-state-space-momentum"].config.momentum_predicted_candidate_top_k == 5
     assert models["sorted-spike-state-space-imm"].config.imm_mode_stickiness == 0.91
 
 
 def test_model_evidence_accepts_clusterless_state_space_models():
     args = argparse.Namespace(
-        models="clusterless-state-space-diffusion clusterless-state-space-momentum clusterless-state-space-imm",
+        models="clusterless-state-space-diffusion clusterless-state-space-first-order-imm clusterless-state-space-momentum clusterless-state-space-imm",
         candidate_top_k=64,
         stationary_sigma_cm=2.0,
         diffusion_sigma_cm=12.0,
@@ -81,6 +86,7 @@ def test_model_evidence_accepts_clusterless_state_space_models():
         state_space_momentum_initial_sigma_cm_sqrt_s=44.0,
         state_space_momentum_velocity_decay=0.8,
         state_space_momentum_candidate_top_k=17,
+        state_space_momentum_predicted_candidate_top_k=5,
     )
 
     models = _models(args)
@@ -95,6 +101,7 @@ def test_model_evidence_accepts_clusterless_state_space_models():
     assert models["clusterless-state-space-imm"].name == "clusterless-state-space-imm"
     assert models["clusterless-state-space-diffusion"].config.diffusion_sigma_cm_sqrt_s == 42.0
     assert models["clusterless-state-space-momentum"].config.momentum_sigma_cm_sqrt_s == 43.0
+    assert models["clusterless-state-space-momentum"].config.momentum_predicted_candidate_top_k == 5
 
 
 def test_model_evidence_clusterless_config_records_rate_floor():
@@ -106,6 +113,10 @@ def test_model_evidence_clusterless_config_records_rate_floor():
         clusterless_mark_prior_count=0.25,
         clusterless_mark_variance_floor=0.75,
         clusterless_rate_floor_hz=1e-3,
+        clusterless_mark_likelihood="local-kde",
+        clusterless_mark_kde_bandwidth=2.5,
+        clusterless_mark_kde_spatial_sigma_bins=3.5,
+        clusterless_mark_kde_max_neighbors=17,
     )
 
     config = _clusterless_mark_config(args)
@@ -116,6 +127,10 @@ def test_model_evidence_clusterless_config_records_rate_floor():
     assert config.mark_prior_count == 0.25
     assert config.mark_variance_floor == 0.75
     assert config.rate_floor_hz == 1e-3
+    assert config.mark_likelihood == "local-kde"
+    assert config.mark_kde_bandwidth == 2.5
+    assert config.mark_kde_spatial_sigma_bins == 3.5
+    assert config.mark_kde_max_neighbors == 17
 
 
 def test_model_evidence_classifies_state_space_families():
@@ -123,11 +138,13 @@ def test_model_evidence_classifies_state_space_families():
     assert _family("sorted-spike-state-space-diffusion") == "trajectory"
     assert _family("sorted-spike-state-space-fragmented") == "trajectory"
     assert _family("sorted-spike-state-space-momentum") == "trajectory"
+    assert _family("sorted-spike-state-space-first-order-imm") == "trajectory"
     assert _family("sorted-spike-state-space-imm") == "trajectory"
     assert _family("clusterless-state-space-stationary") == "nontrajectory"
     assert _family("clusterless-state-space-diffusion") == "trajectory"
     assert _family("clusterless-state-space-fragmented") == "trajectory"
     assert _family("clusterless-state-space-momentum") == "trajectory"
+    assert _family("clusterless-state-space-first-order-imm") == "trajectory"
     assert _family("clusterless-state-space-imm") == "trajectory"
 
 

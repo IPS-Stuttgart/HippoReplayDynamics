@@ -214,7 +214,7 @@ class StateSpaceReplayModel:
                 emissions.log_likelihood,
                 valid_bin_mask,
             )
-            _validate_candidate_indices(candidates, emissions.n_time, emissions.n_bins)
+            candidates = _validate_candidate_indices(candidates, emissions.n_time, emissions.n_bins)
             logp, trajectory, mode_post, masses = _score_imm_candidates(
                 emissions,
                 bin_centers,
@@ -257,7 +257,7 @@ class StateSpaceReplayModel:
                 emissions.log_likelihood,
                 valid_bin_mask,
             )
-            _validate_candidate_indices(candidates, emissions.n_time, emissions.n_bins)
+            candidates = _validate_candidate_indices(candidates, emissions.n_time, emissions.n_bins)
             logp, trajectory, masses = _score_momentum_candidates(
                 emissions,
                 bin_centers,

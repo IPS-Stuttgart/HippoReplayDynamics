@@ -59,7 +59,21 @@ class EncodingModel:
 
     def select_cells(self, cell_ids: Iterable[int]) -> "EncodingModel":
         requested = np.asarray(sorted(set(cell_ids)), dtype=int)
-        indices = [int(np.flatnonzero(self.cell_ids == cell_id)[0]) for cell_id in requested]
+        indices: list[int] = []
+        missing: list[int] = []
+        for cell_id in requested:
+            matches = np.flatnonzero(self.cell_ids == cell_id)
+            if matches.size:
+                indices.append(int(matches[0]))
+            else:
+                missing.append(int(cell_id))
+
+        if missing:
+            raise ValueError(
+                "requested cell IDs are not present in encoding model: "
+                f"{missing}; available cell IDs: {self.cell_ids.astype(int).tolist()}"
+            )
+
         return EncodingModel(
             x_edges=self.x_edges,
             y_edges=self.y_edges,

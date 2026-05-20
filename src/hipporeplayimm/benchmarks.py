@@ -13,6 +13,7 @@ from .clusterless import (
     ClusterlessStateSpaceReplayModel,
     _normalize_mark_likelihood,
     build_clusterless_mark_emissions,
+    clusterless_mark_likelihood_label,
     fit_clusterless_mark_encoding,
 )
 from .data import ReplaySession, SpikeMarkData, load_open_field_sessions
@@ -145,7 +146,7 @@ def _score_session(session: ReplaySession, config: BenchmarkConfig) -> list[dict
     has_clusterless_models = any(_is_clusterless_model(model) for model in model_objects.values())
     clusterless_train_session: ReplaySession | None = None
     clusterless_joint_session: ReplaySession | None = None
-    clusterless_joint_encoding = None
+    clusterless_train_encoding = None
     if has_clusterless_models:
         clusterless_train_session = _session_with_mark_cell_subset(
             session,
@@ -158,11 +159,13 @@ def _score_session(session: ReplaySession, config: BenchmarkConfig) -> list[dict
             role="joint",
         )
         clusterless_config = _clusterless_mark_config(config)
-        # Use one joint observation model for both terms in
-        # log p(train + test) - log p(train), so the train contribution cancels
-        # under identical clusterless rate and mark-likelihood parameters.
-        clusterless_joint_encoding = fit_clusterless_mark_encoding(
-            clusterless_joint_session,
+        # Fit the clusterless observation model on train cells only.  The
+        # held-out benchmark should evaluate test-cell marks under parameters
+        # estimated without seeing those marks; train and joint emissions still
+        # share this frozen train-only encoding so their train contribution is
+        # subtracted under identical rate and mark-likelihood parameters.
+        clusterless_train_encoding = fit_clusterless_mark_encoding(
+            clusterless_train_session,
             clusterless_config,
         )
 
@@ -227,7 +230,12 @@ def _score_session(session: ReplaySession, config: BenchmarkConfig) -> list[dict
                     "train_cell_ids": _format_cell_ids(train_cells),
                     "test_cell_ids": _format_cell_ids(test_cells),
                     **_benchmark_config_metadata(config),
-                    **_session_mark_diagnostics(session),
+                    **_session_mark_diagnostics(
+                        session,
+                        clusterless_joint_encoding.mark_likelihood
+                        if clusterless_joint_encoding is not None
+                        else None,
+                    ),
                     **{
                         f"diagnostic_{key}": value
                         for key, value in joint_score.diagnostics.items()
@@ -393,12 +401,19 @@ def _benchmark_config_metadata(config: BenchmarkConfig) -> dict[str, object]:
     }
 
 
-def _session_mark_diagnostics(session: ReplaySession) -> dict[str, object]:
+def _session_mark_diagnostics(
+    session: ReplaySession,
+    clusterless_mark_likelihood: str | None = None,
+) -> dict[str, object]:
     marks = session.spike_marks
     return {
         "spike_mark_features": 0 if marks is None else marks.n_features,
         "spike_mark_source": "" if marks is None else f"{marks.source_file}:{marks.source_variable}",
         "clusterless_mark_likelihood_available": bool(marks is not None and marks.n_features > 0),
+        "clusterless_mark_likelihood": clusterless_mark_likelihood_label(
+            session,
+            clusterless_mark_likelihood,
+        ),
         "clusterless_tetrode_grouping_available": bool(marks is not None and marks.group_ids is not None),
         "clusterless_mark_groups": 0 if marks is None or marks.group_ids is None else int(np.unique(marks.group_ids).shape[0]),
     }

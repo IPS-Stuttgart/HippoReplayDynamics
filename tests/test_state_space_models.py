@@ -1,6 +1,7 @@
 import itertools
 
 import numpy as np
+import pytest
 from scipy.special import logsumexp
 
 from hipporeplayimm.encoding import LogEmissionTensor
@@ -342,6 +343,25 @@ def test_state_space_momentum_can_reuse_external_candidate_support():
     assert np.isfinite(derived_score.log_likelihood)
     assert provided_score.diagnostics["state_space_momentum_candidate_support"] == "provided"
     assert derived_score.diagnostics["state_space_momentum_candidate_support"] == "derived"
+
+
+def test_state_space_model_rejects_duplicate_or_non_integer_candidate_support():
+    emissions = _synthetic_emissions()
+    centers = np.array([[0.0, 0.0], [1.0, 0.0], [2.0, 0.0], [3.0, 0.0]])
+    config = StateSpaceDecoderConfig(
+        mode="momentum",
+        momentum_candidate_top_k=2,
+        momentum_predicted_candidate_top_k=0,
+    )
+    model = StateSpaceReplayModel(mode="momentum", config=config)
+
+    duplicate_candidates = [np.array([0, 1]), np.array([1, 1]), np.array([2, 3])]
+    with pytest.raises(ValueError, match="duplicate"):
+        model.score(emissions, centers, candidate_indices=duplicate_candidates)
+
+    float_candidates = [np.array([0, 1]), np.array([1.0, 2.0]), np.array([2, 3])]
+    with pytest.raises(ValueError, match="integer"):
+        model.score(emissions, centers, candidate_indices=float_candidates)
 
 
 def test_state_space_four_mode_imm_matches_bruteforce_tiny_grid():

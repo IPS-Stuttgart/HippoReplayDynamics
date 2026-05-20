@@ -6,7 +6,7 @@ import numpy as np
 from scipy.sparse import csr_matrix
 from scipy.special import logsumexp
 
-from .models import LOG_ZERO
+LOG_ZERO = -1.0e300
 
 
 def _per_bin_sigma(sigma_cm_sqrt_s: float, dt_s: float) -> float:
@@ -68,17 +68,31 @@ def _mass_retaining_candidate_indices(
     return np.asarray(order[:count], dtype=int)
 
 
-def _validate_candidate_indices(candidates: list[np.ndarray], n_time: int, n_bins: int) -> None:
+def _validate_candidate_indices(
+    candidates: list[np.ndarray],
+    n_time: int,
+    n_bins: int,
+) -> list[np.ndarray]:
+    """Validate and canonicalize candidate supports as integer index arrays."""
+
     if len(candidates) != n_time:
         raise ValueError("candidate_indices must contain one array per emission time bin")
+    validated: list[np.ndarray] = []
     for time_index, curr in enumerate(candidates):
         arr = np.asarray(curr)
         if arr.ndim != 1:
             raise ValueError(f"candidate_indices[{time_index}] must be one-dimensional")
         if arr.size == 0:
             raise ValueError(f"candidate_indices[{time_index}] must not be empty")
+        if not np.issubdtype(arr.dtype, np.integer):
+            raise ValueError(f"candidate_indices[{time_index}] must contain integer bin indices")
+        arr = arr.astype(np.intp, copy=False)
         if np.any((arr < 0) | (arr >= n_bins)):
             raise ValueError(f"candidate_indices[{time_index}] contains an out-of-range bin")
+        if np.unique(arr).size != arr.size:
+            raise ValueError(f"candidate_indices[{time_index}] contains duplicate bins")
+        validated.append(arr)
+    return validated
 
 
 def _candidate_log_masses(log_likelihood: np.ndarray, candidates: list[np.ndarray]) -> list[float]:

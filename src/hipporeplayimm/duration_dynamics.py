@@ -1,25 +1,16 @@
 """Duration-aware replay dynamics for partial replay bins."""
 # ruff: noqa: E701, E702
 from __future__ import annotations
-import itertools
 import numpy as np
 from scipy.special import logsumexp
 
-_REG={}; _COUNT=itertools.count(1)
-class DurationFloat(float):
-    def __new__(cls,value,durations):
-        ds=tuple(float(x) for x in durations); base=float(value)
-        eps=(next(_COUNT)%1_000_000)*max(abs(base),1.0)*1e-15
-        obj=float.__new__(cls,base+eps); obj.base=base; obj.transition_durations=ds
-        _REG[float(obj)]=ds
-        return obj
-    def __hash__(self): return hash((float(self),self.transition_durations))
-    def __mul__(self,o): return self.first()*o
-    def __rmul__(self,o): return o*self.first()
-    def first(self): return self.transition_durations[0] if self.transition_durations else self.base
+def _scalar_dt(dt):
+    """Return the representative bin duration as an ordinary float."""
+    return float(getattr(dt,'base',dt))
 
 def _dur_from_dt(dt):
-    ds=getattr(dt,'transition_durations',None) or _REG.get(float(dt))
+    # Backward compatibility for emissions created by older in-process patches.
+    ds=getattr(dt,'transition_durations',None)
     return None if ds is None else np.asarray(ds,dtype=float)
 
 def transition_durations_s(em):
@@ -32,7 +23,7 @@ def transition_durations_s(em):
     if t.shape==(em.n_time,) and em.n_time>1:
         d=np.diff(t)
         if np.all(np.isfinite(d)) and np.all(d>0): return d
-    return np.full(n,float(em.dt),dtype=float)
+    return np.full(n,_scalar_dt(em.dt),dtype=float)
 
 def _check(v,n,name):
     a=np.asarray(v,dtype=float)
@@ -43,7 +34,7 @@ def _check(v,n,name):
 def attach_duration_metadata(em):
     ds=transition_durations_s(em)
     em.transition_durations=ds
-    em.dt=DurationFloat(float(em.dt),ds)
+    em.dt=_scalar_dt(em.dt)
     return em
 
 def _ps(sig,dt): return max(float(sig)*np.sqrt(max(float(dt),np.finfo(float).tiny)),np.finfo(float).eps)
@@ -171,7 +162,7 @@ def _patch_state_space(ss):
             lp,tr,mp=apply_fimm(em.log_likelihood,centers,stationary_sigma_cm=self.config.stationary_sigma_cm,diffusion_transitions=mats,max_step_sigma=self.config.max_step_sigma,mode_stickiness=self.config.imm_mode_stickiness)
             names=('stationary','diffusion','fragmented'); extra={f'state_space_mode_{n}_terminal_probability':float(mp[-1,i]) for i,n in enumerate(names)}; extra.update({'state_space_imm_modes':','.join(names),'state_space_imm_evidence_support':'exact_full_grid'})
         elif self.mode in {'momentum','imm'}:
-            c=self.candidate_indices(em,centers) if candidate_indices is None else candidate_indices; ss._validate_candidate_indices(c,em.n_time,em.n_bins)
+            c=self.candidate_indices(em,centers) if candidate_indices is None else candidate_indices; c=ss._validate_candidate_indices(c,em.n_time,em.n_bins)
             if self.mode=='imm':
                 from hipporeplayimm.state_space_imm_duration import _score_imm_duration
                 dsig=_pss(self.config.diffusion_sigma_cm_sqrt_s,ds,float(em.dt)); ts=_rep(self.config.diffusion_sigma_cm_sqrt_s,ds,float(em.dt))

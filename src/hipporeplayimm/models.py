@@ -9,6 +9,7 @@ import numpy as np
 from scipy.special import logsumexp
 
 from .encoding import LogEmissionTensor
+from .state_space_utils import _validate_candidate_indices
 
 
 LOG_ZERO = -1.0e300
@@ -143,10 +144,11 @@ class CandidateKinematicModel:
         candidate_indices: list[np.ndarray] | None = None,
     ) -> EventScore:
         if emissions.n_time == 1:
+            if candidate_indices is not None:
+                _validate_candidate_indices(candidate_indices, emissions.n_time, emissions.n_bins)
             return self._score_single_bin(emissions, bin_centers)
         candidates = self.candidate_indices(emissions) if candidate_indices is None else candidate_indices
-        if len(candidates) != emissions.n_time:
-            raise ValueError("candidate_indices must contain one array per emission time bin")
+        candidates = _validate_candidate_indices(candidates, emissions.n_time, emissions.n_bins)
         if self.mode != "imm":
             logp, mass, terminal_log_posterior, trajectory_log_posterior = self._score_static_pair(
                 emissions,

@@ -119,6 +119,16 @@ def test_select_cells_keeps_cell_ids_sorted_for_searchsorted():
     assert selected.cell_ids.tolist() == [1, 2]
 
 
+def test_select_cells_rejects_missing_cell_ids_with_clear_error():
+    encoding = fit_place_field_encoding(
+        _linear_session_with_two_cells(),
+        EncodingConfig(bin_size_cm=10.0, smoothing_sigma_bins=0.0, min_speed_cm_s=1.0),
+    )
+
+    with pytest.raises(ValueError, match="99"):
+        encoding.select_cells([1, 99])
+
+
 def test_build_emissions_applies_spike_rate_scale_to_expected_counts():
     session = _single_ripple_session()
     encoding = _two_bin_encoding()

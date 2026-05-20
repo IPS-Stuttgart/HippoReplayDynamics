@@ -73,6 +73,35 @@ def test_imm_scores_stationary_to_momentum_synthetic_event():
     assert score.diagnostics["mean_candidate_log_mass"] == 0.0
 
 
+def test_candidate_kinematic_model_validates_external_candidate_support():
+    centers = np.array([[0.0, 0.0], [1.0, 0.0], [2.0, 0.0]])
+    emissions = LogEmissionTensor(
+        log_likelihood=np.log(
+            np.array(
+                [
+                    [0.60, 0.30, 0.10],
+                    [0.20, 0.60, 0.20],
+                    [0.10, 0.30, 0.60],
+                ]
+            )
+        ),
+        spike_counts=np.zeros((3, 1), dtype=int),
+        times=np.array([0.0, 1.0, 2.0]),
+        dt=1.0,
+        cell_ids=np.array([1]),
+        n_spikes=0,
+    )
+    model = CandidateKinematicModel(mode="diffusion", top_k=3, diffusion_sigma_cm=1.0)
+
+    duplicate_candidates = [np.array([0, 1]), np.array([1, 1]), np.array([2])]
+    with pytest.raises(ValueError, match="duplicate"):
+        model.score(emissions, centers, candidate_indices=duplicate_candidates)
+
+    float_candidates = [np.array([0, 1]), np.array([1.0, 2.0]), np.array([2])]
+    with pytest.raises(ValueError, match="integer"):
+        model.score(emissions, centers, candidate_indices=float_candidates)
+
+
 def test_candidate_jump_initial_pair_is_full_grid_uniform():
     centers = np.array([[0.0, 0.0], [1.0, 0.0], [10.0, 0.0]])
     emissions = LogEmissionTensor(

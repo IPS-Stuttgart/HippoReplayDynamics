@@ -595,6 +595,20 @@ def _normalize_mark_likelihood(value: str) -> str:
     return _MARK_LIKELIHOOD_ALIASES[key]
 
 
+def clusterless_mark_likelihood_label(
+    session: ReplaySession,
+    mark_likelihood: str | None = None,
+) -> str:
+    """Return the canonical clusterless mark-likelihood label available for a session."""
+
+    marks = session.spike_marks
+    if marks is None or marks.n_features == 0:
+        return ""
+    if mark_likelihood is None:
+        mark_likelihood = ClusterlessMarkConfig().mark_likelihood
+    return _normalize_mark_likelihood(mark_likelihood)
+
+
 def _normalize_mark_group_by(value: str | None) -> str:
     key = "none" if value is None else str(value).strip().lower().replace("_", "-")
     if key not in _MARK_GROUP_BY_ALIASES:

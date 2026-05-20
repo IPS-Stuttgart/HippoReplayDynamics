@@ -8,9 +8,14 @@ from hipporeplayimm.benchmarks import (
     _build_models,
     _is_best_static_baseline_model,
     _score_session,
+    _session_mark_diagnostics,
     bootstrap_delta_ci,
 )
-from hipporeplayimm.clusterless import ClusterlessStateSpaceReplayModel
+from hipporeplayimm.clusterless import (
+    ClusterlessMarkConfig,
+    ClusterlessStateSpaceReplayModel,
+    fit_clusterless_mark_encoding,
+)
 from hipporeplayimm.data import ReplaySession, SpikeMarkData
 from hipporeplayimm.encoding import EmissionConfig, EncodingConfig
 from hipporeplayimm.evidence_reporting import TRUNCATED_EVIDENCE_SUPPORT
@@ -68,6 +73,19 @@ def test_build_models_includes_clusterless_state_space_model():
     assert isinstance(models["clusterless-state-space-diffusion"], ClusterlessStateSpaceReplayModel)
 
 
+def test_session_mark_diagnostics_reports_available_clusterless_likelihood():
+    diagnostics = _session_mark_diagnostics(_clusterless_benchmark_session())
+
+    assert diagnostics["clusterless_mark_likelihood_available"]
+    assert diagnostics["clusterless_mark_likelihood"] == ClusterlessMarkConfig().mark_likelihood
+
+    diagnostics = _session_mark_diagnostics(
+        _clusterless_benchmark_session(),
+        clusterless_mark_likelihood="diag",
+    )
+    assert diagnostics["clusterless_mark_likelihood"] == "diagonal-gaussian"
+
+
 def test_score_session_uses_clusterless_emissions_for_clusterless_models(monkeypatch):
     seen_cell_ids: list[tuple[int, ...]] = []
 
@@ -107,6 +125,57 @@ def test_score_session_uses_clusterless_emissions_for_clusterless_models(monkeyp
     assert rows[0]["model"] == "clusterless-state-space-diffusion"
     assert rows[0]["test_spikes"] == 1
     assert rows[0]["diagnostic_captured_cell_ids"] == "0"
+    assert rows[0]["clusterless_mark_likelihood"] == ClusterlessMarkConfig().mark_likelihood
+
+
+def test_score_session_fits_clusterless_encoding_on_train_cells_only(monkeypatch):
+    fitted_cell_ids: list[tuple[int, ...]] = []
+
+    def fit_spy(session, config):
+        marks = session.spike_marks
+        assert marks is not None
+        fitted_cell_ids.append(tuple(sorted({int(cell_id) for cell_id in marks.cell_ids})))
+        return fit_clusterless_mark_encoding(session, config)
+
+    def score_stub(self, emissions, bin_centers, candidate_indices=None):
+        del bin_centers, candidate_indices
+        return EventScore(
+            str(self.name),
+            float(emissions.n_spikes),
+            emissions.n_time,
+            emissions.n_spikes,
+            diagnostics={},
+            terminal_log_posterior=np.zeros(emissions.n_bins),
+        )
+
+    monkeypatch.setattr(
+        "hipporeplayimm.benchmarks.fit_clusterless_mark_encoding",
+        fit_spy,
+    )
+    monkeypatch.setattr(ClusterlessStateSpaceReplayModel, "score", score_stub)
+
+    rows = _score_session(
+        _clusterless_benchmark_session(),
+        BenchmarkConfig(
+            encoding=EncodingConfig(
+                bin_size_cm=10.0,
+                smoothing_sigma_bins=0.0,
+                min_speed_cm_s=0.0,
+                arena_padding_cm=5.0,
+            ),
+            emissions=EmissionConfig(time_bin_s=0.5),
+            test_cell_fraction=0.5,
+            random_seed=0,
+            max_events_per_session=1,
+            models=("clusterless-state-space-diffusion",),
+        ),
+    )
+
+    assert len(rows) == 1
+    assert rows[0]["train_cell_ids"] == "2"
+    assert rows[0]["test_cell_ids"] == "1"
+    assert rows[0]["test_spikes"] == 1
+    assert fitted_cell_ids == [(2,)]
 
 
 def test_best_static_baseline_includes_state_space_single_mode_models():

@@ -41,7 +41,7 @@ def apply_state_space_imm_duration_patch() -> None:
             if candidate_indices is None
             else candidate_indices
         )
-        ss._validate_candidate_indices(candidates, emissions.n_time, emissions.n_bins)
+        candidates = ss._validate_candidate_indices(candidates, emissions.n_time, emissions.n_bins)
 
         diffusion_sigmas = _pss(self.config.diffusion_sigma_cm_sqrt_s, durations, float(emissions.dt))
         transition_sigma_cm = _rep(self.config.diffusion_sigma_cm_sqrt_s, durations, float(emissions.dt))

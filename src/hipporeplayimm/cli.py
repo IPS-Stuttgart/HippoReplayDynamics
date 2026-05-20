@@ -18,6 +18,7 @@ from .benchmarks import (
 )
 from .clusterless import (
     build_clusterless_mark_emissions,
+    clusterless_mark_likelihood_label,
     fit_clusterless_mark_encoding,
 )
 from .data import load_open_field_sessions
@@ -249,7 +250,7 @@ def _inspect(root: str) -> int:
             "excitatory_cells": session.excitatory_neurons.shape[0],
             "spike_mark_features": 0 if session.spike_marks is None else session.spike_marks.n_features,
             "spike_mark_source": "" if session.spike_marks is None else f"{session.spike_marks.source_file}:{session.spike_marks.source_variable}",
-            "clusterless_mark_likelihood": "not_implemented",
+            "clusterless_mark_likelihood": clusterless_mark_likelihood_label(session),
             "ripples": session.ripple_count,
             "run_ripples": session.ripple_indices_in_run().shape[0],
         }

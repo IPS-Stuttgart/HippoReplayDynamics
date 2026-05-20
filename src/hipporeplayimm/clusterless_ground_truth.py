@@ -18,6 +18,18 @@ from .encoding import EmissionConfig, EncodingConfig
 from .state_space import StateSpaceDecoderConfig
 
 _CLUSTERLESS_PREFIX = "clusterless-state-space-"
+_CLUSTERLESS_KWARG_NAMES = frozenset(
+    {
+        "clusterless_mark_smoothing_sigma_bins",
+        "clusterless_mark_prior_count",
+        "clusterless_mark_variance_floor",
+        "clusterless_rate_floor_hz",
+        "clusterless_mark_likelihood",
+        "clusterless_mark_kde_bandwidth",
+        "clusterless_mark_kde_spatial_sigma_bins",
+        "clusterless_mark_kde_max_neighbors",
+    }
+)
 
 
 def apply_clusterless_ground_truth_patch() -> None:
@@ -50,13 +62,14 @@ def apply_clusterless_ground_truth_patch() -> None:
             return scores_frame
         scores_frame["_score_order"] = np.arange(len(scores_frame))
         clusterless_mask = _score_frame_clusterless_mask(scores_frame)
+        non_clusterless_kwargs = _drop_clusterless_kwargs(kwargs)
         pieces: list[pd.DataFrame] = []
         if (~clusterless_mask).any():
             pieces.append(
                 base_compare_scores_to_ground_truth(
                     root,
                     scores_frame.loc[~clusterless_mask].copy(),
-                    **kwargs,
+                    **non_clusterless_kwargs,
                 )
             )
         if clusterless_mask.any():
@@ -79,6 +92,10 @@ def apply_clusterless_ground_truth_patch() -> None:
     gt._build_models = build_models
     gt.compare_scores_to_ground_truth = compare_scores_to_ground_truth
     gt._clusterless_ground_truth_patch_applied = True
+
+
+def _drop_clusterless_kwargs(kwargs: dict[str, object]) -> dict[str, object]:
+    return {key: value for key, value in kwargs.items() if key not in _CLUSTERLESS_KWARG_NAMES}
 
 
 def _compare_clusterless_scores_to_ground_truth(gt, root, scores_frame: pd.DataFrame, **kwargs) -> pd.DataFrame:

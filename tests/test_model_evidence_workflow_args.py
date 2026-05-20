@@ -1,8 +1,14 @@
 import re
 from pathlib import Path
 
+import pytest
+
 ROOT = Path(__file__).resolve().parents[1]
-WORKFLOW = ROOT / ".github" / "workflows" / "model-evidence-event-sharded.yml"
+WORKFLOWS = (
+    ROOT / ".github" / "workflows" / "model-evidence.yml",
+    ROOT / ".github" / "workflows" / "model-evidence-event-sharded.yml",
+    ROOT / ".github" / "workflows" / "model-evidence-all-sessions.yml",
+)
 SCRIPT = ROOT / "scripts" / "benchmark_model_evidence.py"
 
 _REQUIRED_WORKFLOW_FLAGS = {
@@ -10,6 +16,10 @@ _REQUIRED_WORKFLOW_FLAGS = {
     "--clusterless-mark-prior-count",
     "--clusterless-mark-variance-floor",
     "--clusterless-rate-floor-hz",
+    "--clusterless-mark-likelihood",
+    "--clusterless-mark-kde-bandwidth",
+    "--clusterless-mark-kde-spatial-sigma-bins",
+    "--clusterless-mark-kde-max-neighbors",
     "--spike-rate-scale",
     "--time-bin-s",
     "--bin-size-cm",
@@ -18,25 +28,27 @@ _REQUIRED_WORKFLOW_FLAGS = {
 }
 
 
-def test_event_sharded_workflow_passes_only_supported_model_evidence_args():
-    workflow_flags = _workflow_benchmark_flags()
+@pytest.mark.parametrize("workflow", WORKFLOWS)
+def test_model_evidence_workflows_pass_only_supported_model_evidence_args(workflow: Path):
+    workflow_flags = _workflow_benchmark_flags(workflow)
     script_flags = _benchmark_script_flags()
 
     unsupported = workflow_flags - script_flags
 
-    assert not unsupported, f"Workflow passes unsupported benchmark flags: {sorted(unsupported)}"
+    assert not unsupported, f"{workflow.name} passes unsupported benchmark flags: {sorted(unsupported)}"
 
 
-def test_event_sharded_workflow_wires_clusterless_and_encoder_knobs():
-    workflow_flags = _workflow_benchmark_flags()
+@pytest.mark.parametrize("workflow", WORKFLOWS)
+def test_model_evidence_workflows_wire_clusterless_and_encoder_knobs(workflow: Path):
+    workflow_flags = _workflow_benchmark_flags(workflow)
 
     missing = _REQUIRED_WORKFLOW_FLAGS - workflow_flags
 
-    assert not missing, f"Workflow does not pass expected benchmark flags: {sorted(missing)}"
+    assert not missing, f"{workflow.name} does not pass expected benchmark flags: {sorted(missing)}"
 
 
 def test_event_sharded_workflow_includes_exact_first_order_imm_default():
-    text = WORKFLOW.read_text(encoding="utf-8")
+    text = (ROOT / ".github" / "workflows" / "model-evidence-event-sharded.yml").read_text(encoding="utf-8")
 
     assert (
         "sorted-spike-state-space-first-order-imm"
@@ -44,8 +56,8 @@ def test_event_sharded_workflow_includes_exact_first_order_imm_default():
     )
 
 
-def _workflow_benchmark_flags() -> set[str]:
-    text = WORKFLOW.read_text(encoding="utf-8")
+def _workflow_benchmark_flags(workflow: Path) -> set[str]:
+    text = workflow.read_text(encoding="utf-8")
     start = text.index("python scripts/benchmark_model_evidence.py")
     end = text.index("--continue-on-error", start) + len("--continue-on-error")
     block = text[start:end]

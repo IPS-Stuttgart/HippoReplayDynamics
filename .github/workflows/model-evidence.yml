@@ -92,6 +92,18 @@ on:
         description: "Goal state-space transition truncation radius in sigmas"
         required: true
         default: "4.0"
+      clusterless_mark_smoothing_sigma_bins:
+        description: "Clusterless mark-parameter smoothing sigma in spatial bins"
+        required: true
+        default: "1.0"
+      clusterless_mark_prior_count:
+        description: "Clusterless mark prior pseudo-count"
+        required: true
+        default: "1.0"
+      clusterless_mark_variance_floor:
+        description: "Clusterless mark variance floor"
+        required: true
+        default: "1.0"
       clusterless_rate_floor_hz:
         description: "Clusterless spike-intensity rate floor in Hz"
         required: true
@@ -161,9 +173,9 @@ env:
   GOAL_STATE_SPACE_TRANSITION_SIGMA_CM_SQRT_S: ${{ inputs.goal_state_space_transition_sigma_cm_sqrt_s }}
   GOAL_STATE_SPACE_DRIFT_SPEED_CM_S: ${{ inputs.goal_state_space_drift_speed_cm_s }}
   GOAL_STATE_SPACE_MAX_STEP_SIGMA: ${{ inputs.goal_state_space_max_step_sigma }}
-  CLUSTERLESS_MARK_SMOOTHING_SIGMA_BINS: "1.0"
-  CLUSTERLESS_MARK_PRIOR_COUNT: "1.0"
-  CLUSTERLESS_MARK_VARIANCE_FLOOR: "1.0"
+  CLUSTERLESS_MARK_SMOOTHING_SIGMA_BINS: ${{ inputs.clusterless_mark_smoothing_sigma_bins }}
+  CLUSTERLESS_MARK_PRIOR_COUNT: ${{ inputs.clusterless_mark_prior_count }}
+  CLUSTERLESS_MARK_VARIANCE_FLOOR: ${{ inputs.clusterless_mark_variance_floor }}
   CLUSTERLESS_RATE_FLOOR_HZ: ${{ inputs.clusterless_rate_floor_hz }}
   CLUSTERLESS_MARK_LIKELIHOOD: ${{ inputs.clusterless_mark_likelihood }}
   CLUSTERLESS_MARK_KDE_BANDWIDTH: ${{ inputs.clusterless_mark_kde_bandwidth }}

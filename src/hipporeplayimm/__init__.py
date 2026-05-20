@@ -89,16 +89,33 @@ def _synchronize_duration_patched_emission_builders() -> None:
             module.build_kd_emissions = _kd_reference_module.build_kd_emissions
 
 
+def apply_runtime_patches() -> None:
+    """Install runtime compatibility patches in the package-defined order.
+
+    The package still applies these patches during import for backward
+    compatibility.  Exposing the operation as an idempotent public hook makes
+    the patch order testable and gives downstream scripts a supported way to
+    refresh module-level aliases after direct lower-level imports.
+    """
+
+    _score_metadata.apply_model_hyperparam_patch()
+    _clusterless_ground_truth.apply_clusterless_ground_truth_patch()
+    _ground_truth._encoding_config_for_scores = _score_metadata.encoding_config_for_scores
+    _ground_truth._emission_config_for_scores = _score_metadata.emission_config_for_scores
+    _apply_ground_truth_candidate_support_patch()
+    _apply_duration_dynamics_patch()
+    _apply_state_space_imm_duration_patch()
+    _synchronize_duration_patched_emission_builders()
+    _patch_simulation_recovery_module(_simulation_recovery)
+
+
 # Ensure replay dynamics use center-to-center transition durations when replay
 # emissions include a partial final bin.
-_apply_duration_dynamics_patch()
-_apply_state_space_imm_duration_patch()
-_synchronize_duration_patched_emission_builders()
+apply_runtime_patches()
 from .encoding import build_emissions as build_emissions  # noqa: E402,F401,F811
 
 # Keep synthetic recovery summaries from mixing exact evidences with truncated
 # candidate lower bounds.
-_patch_simulation_recovery_module(_simulation_recovery)
 SimulationRecoveryConfig = _simulation_recovery.SimulationRecoveryConfig
 SimulationRecoveryResult = _simulation_recovery.SimulationRecoveryResult
 run_session_simulation_recovery = _simulation_recovery.run_session_simulation_recovery
@@ -124,6 +141,7 @@ __all__ = [
     'SimulationRecoveryConfig',
     'SimulationRecoveryResult',
     'StationaryModel',
+    'apply_runtime_patches',
     'build_emissions',
     'build_clusterless_mark_emissions',
     'compare_scores_to_ground_truth',

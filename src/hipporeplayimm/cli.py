@@ -17,6 +17,7 @@ from .benchmarks import (
     run_open_field_benchmark,
 )
 from .clusterless import (
+    ClusterlessMarkConfig,
     build_clusterless_mark_emissions,
     clusterless_mark_likelihood_label,
     fit_clusterless_mark_encoding,
@@ -107,6 +108,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     _add_encoding_arguments(benchmark_parser)
     _add_state_space_arguments(benchmark_parser)
+    _add_clusterless_arguments(benchmark_parser)
     _add_pyrecest_scalar_arguments(benchmark_parser)
 
     decode_parser = subparsers.add_parser("decode-event")
@@ -125,6 +127,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     _add_encoding_arguments(decode_parser)
     _add_state_space_arguments(decode_parser)
+    _add_clusterless_arguments(decode_parser)
     _add_pyrecest_scalar_arguments(decode_parser)
 
     ground_truth_parser = subparsers.add_parser("ground-truth")
@@ -148,6 +151,7 @@ def main(argv: list[str] | None = None) -> int:
     _add_emission_calibration_arguments(compare_parser)
     _add_encoding_arguments(compare_parser)
     _add_state_space_arguments(compare_parser)
+    _add_clusterless_arguments(compare_parser)
     _add_pyrecest_scalar_arguments(compare_parser)
     compare_parser.add_argument("--visit-radius-cm", type=float, default=10.0)
     compare_parser.add_argument("--min-dwell-s", type=float, default=0.2)
@@ -470,6 +474,7 @@ def _benchmark(args: argparse.Namespace) -> int:
         models=_parse_models(args.models),
         clusterless_mark_group_by=args.clusterless_mark_group_by,
         state_space_valid_occupancy_threshold_s=args.state_space_valid_occupancy_threshold_s,
+        **_clusterless_scalar_kwargs(args),
         **_pyrecest_scalar_kwargs(args),
     )
     result = run_open_field_benchmark(args.root, config)
@@ -511,6 +516,7 @@ def _decode_event(args: argparse.Namespace) -> int:
         candidate_top_k=args.candidate_top_k,
         models=requested_models,
         state_space_valid_occupancy_threshold_s=args.state_space_valid_occupancy_threshold_s,
+        **_clusterless_scalar_kwargs(args),
         **_pyrecest_scalar_kwargs(args),
     )
     model_objects = _build_models(config, session=session)
@@ -640,6 +646,7 @@ def _compare_ground_truth(args: argparse.Namespace) -> int:
         candidate_top_k=args.candidate_top_k,
         random_seed=args.random_seed,
         state_space_valid_occupancy_threshold_s=args.state_space_valid_occupancy_threshold_s,
+        **_clusterless_scalar_kwargs(args),
         **_pyrecest_scalar_kwargs(args),
     )
     output = Path(args.output)
@@ -712,6 +719,31 @@ def _add_state_space_arguments(parser: argparse.ArgumentParser) -> None:
             "If positive, state-space priors and transition normalizers are restricted "
             "to spatial bins whose training occupancy is at least this many seconds."
         ),
+    )
+
+
+def _add_clusterless_arguments(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--clusterless-mark-smoothing-sigma-bins", type=float, default=1.0)
+    parser.add_argument("--clusterless-mark-prior-count", type=float, default=1.0)
+    parser.add_argument("--clusterless-mark-variance-floor", type=float, default=1.0)
+    parser.add_argument("--clusterless-rate-floor-hz", type=float, default=1e-4)
+    parser.add_argument("--clusterless-mark-likelihood", choices=("local-kde", "diagonal-gaussian"), default="local-kde")
+    parser.add_argument("--clusterless-mark-kde-bandwidth", type=float, default=None)
+    parser.add_argument("--clusterless-mark-kde-spatial-sigma-bins", type=float, default=None)
+    parser.add_argument("--clusterless-mark-kde-max-neighbors", type=int, default=256)
+
+
+def _clusterless_mark_config_from_args(args: argparse.Namespace) -> ClusterlessMarkConfig:
+    return ClusterlessMarkConfig(
+        encoding=_encoding_config_from_args(args),
+        mark_smoothing_sigma_bins=args.clusterless_mark_smoothing_sigma_bins,
+        mark_prior_count=args.clusterless_mark_prior_count,
+        mark_variance_floor=args.clusterless_mark_variance_floor,
+        rate_floor_hz=args.clusterless_rate_floor_hz,
+        mark_likelihood=args.clusterless_mark_likelihood,
+        mark_kde_bandwidth=args.clusterless_mark_kde_bandwidth,
+        mark_kde_spatial_sigma_bins=args.clusterless_mark_kde_spatial_sigma_bins,
+        mark_kde_max_neighbors=args.clusterless_mark_kde_max_neighbors,
     )
 
 
@@ -853,6 +885,19 @@ def _pyrecest_scalar_kwargs(args: argparse.Namespace) -> dict[str, float | int]:
         ),
         "pyrecest_imm_jump_fraction": args.pyrecest_imm_jump_fraction,
         "pyrecest_imm_jump_velocity_decay": args.pyrecest_imm_jump_velocity_decay,
+    }
+
+
+def _clusterless_scalar_kwargs(args: argparse.Namespace) -> dict[str, float | int | str | None]:
+    return {
+        "clusterless_mark_smoothing_sigma_bins": args.clusterless_mark_smoothing_sigma_bins,
+        "clusterless_mark_prior_count": args.clusterless_mark_prior_count,
+        "clusterless_mark_variance_floor": args.clusterless_mark_variance_floor,
+        "clusterless_rate_floor_hz": args.clusterless_rate_floor_hz,
+        "clusterless_mark_likelihood": args.clusterless_mark_likelihood,
+        "clusterless_mark_kde_bandwidth": args.clusterless_mark_kde_bandwidth,
+        "clusterless_mark_kde_spatial_sigma_bins": args.clusterless_mark_kde_spatial_sigma_bins,
+        "clusterless_mark_kde_max_neighbors": args.clusterless_mark_kde_max_neighbors,
     }
 
 

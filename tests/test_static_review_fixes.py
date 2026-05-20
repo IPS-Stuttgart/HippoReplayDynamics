@@ -6,6 +6,7 @@ import pytest
 from scipy.spatial import cKDTree
 
 from hipporeplayimm.benchmarks import BenchmarkConfig
+from hipporeplayimm.clusterless import _sqrt_optional
 from hipporeplayimm.clusterless_ground_truth import _clusterless_model_config_for_scores
 from hipporeplayimm.duration_dynamics import DurationFloat
 from hipporeplayimm.goal_state_space import _farthest_point_subset as goal_farthest_point_subset
@@ -103,3 +104,8 @@ def test_clusterless_ground_truth_recovers_mark_likelihood_metadata() -> None:
     assert config.clusterless_mark_kde_bandwidth == pytest.approx(2.5)
     assert config.clusterless_mark_kde_spatial_sigma_bins == pytest.approx(1.25)
     assert config.clusterless_mark_kde_max_neighbors == 64
+
+
+def test_clusterless_kde_bandwidth_metadata_reports_bandwidth_not_variance() -> None:
+    effective_variance = np.array([6.25, 9.0])
+    np.testing.assert_allclose(_sqrt_optional(effective_variance), np.array([2.5, 3.0]))

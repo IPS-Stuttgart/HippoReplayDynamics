@@ -560,7 +560,7 @@ def build_clusterless_mark_emissions(
     )
     emissions.metadata = {
         "clusterless_mark_likelihood": encoding.mark_likelihood,
-        "clusterless_mark_kde_bandwidth": _format_float_array(encoding.mark_kde_variance),
+        "clusterless_mark_kde_bandwidth": _format_float_array(_sqrt_optional(encoding.mark_kde_variance)),
         "clusterless_mark_kde_max_neighbors": _kde_neighbor_count(encoding),
         "clusterless_mark_group_by": _normalize_mark_group_by(encoding.config.mark_group_by),
         "clusterless_mark_groups": encoding.n_mark_groups,
@@ -662,6 +662,12 @@ def _mark_kde_variance(mark_values: np.ndarray, config: ClusterlessMarkConfig) -
     else:
         bandwidth = np.full(values.shape[1], float(config.mark_kde_bandwidth), dtype=float)
     return np.maximum(bandwidth * bandwidth, config.mark_variance_floor)
+
+
+def _sqrt_optional(value: np.ndarray | None) -> np.ndarray | None:
+    if value is None:
+        return None
+    return np.sqrt(np.asarray(value, dtype=float))
 
 
 def _grouped_mark_statistics(

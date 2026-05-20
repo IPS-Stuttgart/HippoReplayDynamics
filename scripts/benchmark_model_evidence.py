@@ -278,9 +278,12 @@ def _optional_float_setting(value: float | None) -> float | str:
 
 
 def _optional_float_argument(value: str | None) -> float | None:
-    if value is None or str(value).strip() == "":
+    if value is None:
         return None
-    return float(value)
+    text = str(value).strip().lower()
+    if text in {"", "none", "null"}:
+        return None
+    return float(text)
 
 
 def _state_space_metadata(args) -> dict[str, object]:

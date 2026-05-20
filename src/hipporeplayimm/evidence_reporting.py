@@ -9,10 +9,12 @@ from scipy.special import logsumexp
 EXACT_EVIDENCE_SUPPORT = "exact_full_grid"
 TRUNCATED_EVIDENCE_SUPPORT = "truncated_full_grid"
 DEGENERATE_SINGLE_BIN_EVIDENCE_SUPPORT = "degenerate_single_bin"
+PYRECEST_PARTICLE_EVIDENCE_SUPPORT = "particle_approximation"
 EVIDENCE_SUPPORT_DIAGNOSTIC_COLUMNS = (
     "diagnostic_candidate_evidence_support",
     "diagnostic_state_space_momentum_evidence_support",
     "diagnostic_state_space_imm_evidence_support",
+    "diagnostic_pyrecest_evidence_support",
 )
 
 EVIDENCE_COMPARISON_EXACT = "exact_model_evidence"
@@ -47,6 +49,8 @@ def evidence_support_from_row(row: pd.Series) -> str:
             return EXACT_EVIDENCE_SUPPORT
         if text == DEGENERATE_SINGLE_BIN_EVIDENCE_SUPPORT:
             return DEGENERATE_SINGLE_BIN_EVIDENCE_SUPPORT
+        if text == PYRECEST_PARTICLE_EVIDENCE_SUPPORT:
+            return PYRECEST_PARTICLE_EVIDENCE_SUPPORT
     return EXACT_EVIDENCE_SUPPORT
 
 

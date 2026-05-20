@@ -10,6 +10,7 @@ from scipy.special import logsumexp
 
 from .duration_dynamics import transition_durations_s
 from .encoding import LogEmissionTensor
+from .evidence_reporting import PYRECEST_PARTICLE_EVIDENCE_SUPPORT
 from .models import EventScore, LOG_ZERO, _posterior_diagnostics
 
 
@@ -96,6 +97,7 @@ class PyRecEstGoalParticleModel:
 
         terminal_log_posterior = trajectory_log_posterior[-1]
         diagnostics = {
+            "pyrecest_evidence_support": PYRECEST_PARTICLE_EVIDENCE_SUPPORT,
             "pyrecest_particles": int(self.n_particles),
             "pyrecest_candidate_goals": int(goals.shape[0]),
             "pyrecest_time_bin_s": float(filter_dt),

@@ -143,42 +143,31 @@ def _models(args, session=None) -> dict[str, object]:
     if not names:
         raise ValueError("no models selected")
 
-    def state_space_model(mode: str) -> SortedSpikeStateSpaceReplayModel:
-        return SortedSpikeStateSpaceReplayModel(
+    def state_space_config(mode: str) -> StateSpaceDecoderConfig:
+        return StateSpaceDecoderConfig(
             mode=mode,
-            config=StateSpaceDecoderConfig(
-                mode=mode,
-                stationary_sigma_cm=args.state_space_stationary_sigma_cm,
-                diffusion_sigma_cm_sqrt_s=args.state_space_diffusion_sigma_cm_sqrt_s,
-                max_step_sigma=args.state_space_max_step_sigma,
-                imm_mode_stickiness=args.state_space_imm_mode_stickiness,
-                momentum_sigma_cm_sqrt_s=args.state_space_momentum_sigma_cm_sqrt_s,
-                momentum_initial_sigma_cm_sqrt_s=args.state_space_momentum_initial_sigma_cm_sqrt_s,
-                momentum_velocity_decay=args.state_space_momentum_velocity_decay,
-                momentum_candidate_top_k=args.state_space_momentum_candidate_top_k,
-                momentum_candidate_mass_threshold=args.state_space_momentum_candidate_mass_threshold,
-                momentum_candidate_min_k=args.state_space_momentum_candidate_min_k,
-                momentum_candidate_max_k=args.state_space_momentum_candidate_max_k,
-            ),
+            stationary_sigma_cm=args.state_space_stationary_sigma_cm,
+            diffusion_sigma_cm_sqrt_s=args.state_space_diffusion_sigma_cm_sqrt_s,
+            max_step_sigma=args.state_space_max_step_sigma,
+            imm_mode_stickiness=_state_space_mode_stickiness(args),
+            momentum_sigma_cm_sqrt_s=args.state_space_momentum_sigma_cm_sqrt_s,
+            momentum_initial_sigma_cm_sqrt_s=args.state_space_momentum_initial_sigma_cm_sqrt_s,
+            momentum_velocity_decay=args.state_space_momentum_velocity_decay,
+            momentum_candidate_top_k=args.state_space_momentum_candidate_top_k,
+            momentum_candidate_mass_threshold=getattr(args, "state_space_momentum_candidate_mass_threshold", None),
+            momentum_candidate_min_k=getattr(args, "state_space_momentum_candidate_min_k", 1),
+            momentum_candidate_max_k=getattr(args, "state_space_momentum_candidate_max_k", 0),
+            momentum_predicted_candidate_top_k=getattr(args, "state_space_momentum_predicted_candidate_top_k", 8),
         )
+
+    def state_space_model(mode: str) -> SortedSpikeStateSpaceReplayModel:
+        return SortedSpikeStateSpaceReplayModel(mode=mode, config=state_space_config(mode))
 
     def clusterless_state_space_model(mode: str) -> ClusterlessStateSpaceReplayModel:
         return ClusterlessStateSpaceReplayModel(
             mode=mode,
-            config=StateSpaceDecoderConfig(
-                mode=mode,
-                stationary_sigma_cm=args.state_space_stationary_sigma_cm,
-                diffusion_sigma_cm_sqrt_s=args.state_space_diffusion_sigma_cm_sqrt_s,
-                max_step_sigma=args.state_space_max_step_sigma,
-                imm_mode_stickiness=args.state_space_imm_mode_stickiness,
-                momentum_sigma_cm_sqrt_s=args.state_space_momentum_sigma_cm_sqrt_s,
-                momentum_initial_sigma_cm_sqrt_s=args.state_space_momentum_initial_sigma_cm_sqrt_s,
-                momentum_velocity_decay=args.state_space_momentum_velocity_decay,
-                momentum_candidate_top_k=args.state_space_momentum_candidate_top_k,
-                momentum_candidate_mass_threshold=args.state_space_momentum_candidate_mass_threshold,
-                momentum_candidate_min_k=args.state_space_momentum_candidate_min_k,
-                momentum_candidate_max_k=args.state_space_momentum_candidate_max_k,
-            ),
+            config=state_space_config(mode),
+            mark_likelihood=getattr(args, "clusterless_mark_likelihood", "local-kde"),
         )
 
     wants_goal_state_space = any(name in GOAL_STATE_SPACE_MODEL_NAMES for name in names)
@@ -187,9 +176,9 @@ def _models(args, session=None) -> dict[str, object]:
     def goal_state_space_model(name: str) -> GoalStateSpaceReplayModel:
         return GoalStateSpaceReplayModel(
             candidate_goals=goal_candidates,
-            transition_sigma_cm_sqrt_s=args.goal_state_space_transition_sigma_cm_sqrt_s,
-            drift_speed_cm_s=args.goal_state_space_drift_speed_cm_s,
-            max_step_sigma=args.goal_state_space_max_step_sigma,
+            transition_sigma_cm_sqrt_s=getattr(args, "goal_state_space_transition_sigma_cm_sqrt_s", DEFAULT_GOAL_TRANSITION_SIGMA_CM_SQRT_S),
+            drift_speed_cm_s=getattr(args, "goal_state_space_drift_speed_cm_s", DEFAULT_GOAL_DRIFT_SPEED_CM_S),
+            max_step_sigma=getattr(args, "goal_state_space_max_step_sigma", DEFAULT_GOAL_MAX_STEP_SIGMA),
             name=name,
         )
 
@@ -235,6 +224,20 @@ def _models(args, session=None) -> dict[str, object]:
     return {name: available[name] for name in dict.fromkeys(names)}
 
 
+def _session_goal_candidates(session) -> np.ndarray | None:
+    wells = infer_well_locations(session)
+    if wells.empty:
+        return None
+    return wells[["well_x", "well_y"]].to_numpy(dtype=float)
+
+
+def _state_space_mode_stickiness(args) -> float:
+    tau_s = float(getattr(args, "state_space_imm_switch_tau_s", 0.0))
+    if tau_s <= 0.0:
+        return float(args.state_space_imm_mode_stickiness)
+    return float(np.exp(-float(getattr(args, "time_bin_s", 0.02)) / tau_s))
+
+
 def _family(model: str) -> str:
     if model in _TRAJ:
         return "trajectory"
@@ -272,6 +275,23 @@ def _clusterless_mark_config(args) -> ClusterlessMarkConfig:
 
 def _optional_float_setting(value: float | None) -> float | str:
     return "" if value is None else float(value)
+
+
+def _optional_float_argument(value: str | None) -> float | None:
+    if value is None or str(value).strip() == "":
+        return None
+    return float(value)
+
+
+def _state_space_metadata(args) -> dict[str, object]:
+    return {
+        "state_space_momentum_predicted_candidate_top_k": int(getattr(args, "state_space_momentum_predicted_candidate_top_k", 8)),
+        "state_space_imm_switch_tau_s": float(getattr(args, "state_space_imm_switch_tau_s", 0.0)),
+        "state_space_effective_imm_mode_stickiness": float(_state_space_mode_stickiness(args)),
+        "goal_state_space_transition_sigma_cm_sqrt_s": float(getattr(args, "goal_state_space_transition_sigma_cm_sqrt_s", DEFAULT_GOAL_TRANSITION_SIGMA_CM_SQRT_S)),
+        "goal_state_space_drift_speed_cm_s": float(getattr(args, "goal_state_space_drift_speed_cm_s", DEFAULT_GOAL_DRIFT_SPEED_CM_S)),
+        "goal_state_space_max_step_sigma": float(getattr(args, "goal_state_space_max_step_sigma", DEFAULT_GOAL_MAX_STEP_SIGMA)),
+    }
 
 
 def _score(args) -> pd.DataFrame:
@@ -346,6 +366,7 @@ def _score(args) -> pd.DataFrame:
                     "clusterless_mark_kde_bandwidth": _optional_float_setting(args.clusterless_mark_kde_bandwidth),
                     "clusterless_mark_kde_spatial_sigma_bins": _optional_float_setting(args.clusterless_mark_kde_spatial_sigma_bins),
                     "clusterless_mark_kde_max_neighbors": int(args.clusterless_mark_kde_max_neighbors),
+                    **_state_space_metadata(args),
                 }
                 if use_clusterless and clusterless_encoding is not None:
                     row.update({
@@ -376,6 +397,7 @@ def _score(args) -> pd.DataFrame:
                     "clusterless_mark_kde_bandwidth": _optional_float_setting(args.clusterless_mark_kde_bandwidth),
                     "clusterless_mark_kde_spatial_sigma_bins": _optional_float_setting(args.clusterless_mark_kde_spatial_sigma_bins),
                     "clusterless_mark_kde_max_neighbors": int(args.clusterless_mark_kde_max_neighbors),
+                    **_state_space_metadata(args),
                 })
                 if not args.continue_on_error:
                     raise
@@ -553,10 +575,12 @@ def main() -> int:
     p.add_argument("--state-space-diffusion-sigma-cm-sqrt-s", type=float, default=85.0)
     p.add_argument("--state-space-max-step-sigma", type=float, default=4.0)
     p.add_argument("--state-space-imm-mode-stickiness", type=float, default=0.95)
+    p.add_argument("--state-space-imm-switch-tau-s", type=float, default=0.0)
     p.add_argument("--state-space-momentum-sigma-cm-sqrt-s", type=float, default=85.0)
     p.add_argument("--state-space-momentum-initial-sigma-cm-sqrt-s", type=float, default=85.0)
     p.add_argument("--state-space-momentum-velocity-decay", type=float, default=0.95)
     p.add_argument("--state-space-momentum-candidate-top-k", type=int, default=128)
+    p.add_argument("--state-space-momentum-predicted-candidate-top-k", type=int, default=8)
     p.add_argument(
         "--state-space-momentum-candidate-mass-threshold",
         type=float,
@@ -586,18 +610,21 @@ def main() -> int:
     )
     p.add_argument(
         "--clusterless-mark-kde-bandwidth",
-        type=float,
+        type=_optional_float_argument,
         default=None,
         help="Optional scalar mark-space KDE bandwidth. Empty/default uses the data-adaptive bandwidth.",
     )
     p.add_argument(
         "--clusterless-mark-kde-spatial-sigma-bins",
-        type=float,
+        type=_optional_float_argument,
         default=None,
         help="Optional spatial weighting sigma, in grid bins, for local mark KDE support. Empty/default reuses clusterless mark smoothing sigma.",
     )
     p.add_argument("--clusterless-mark-kde-max-neighbors", type=int, default=256)
-    p.add_argument("--time-bin-s", type=float, default=0.02)
+    p.add_argument("--goal-state-space-transition-sigma-cm-sqrt-s", type=float, default=DEFAULT_GOAL_TRANSITION_SIGMA_CM_SQRT_S)
+    p.add_argument("--goal-state-space-drift-speed-cm-s", type=float, default=DEFAULT_GOAL_DRIFT_SPEED_CM_S)
+    p.add_argument("--goal-state-space-max-step-sigma", type=float, default=DEFAULT_GOAL_MAX_STEP_SIGMA)
+    p.add_argument("--time-bin-s", type=float, default=0.003)
     p.add_argument(
         "--spike-rate-scale",
         type=float,

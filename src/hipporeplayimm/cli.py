@@ -87,6 +87,10 @@ def main(argv: list[str] | None = None) -> int:
     benchmark_parser.add_argument("--candidate-top-k", type=int, default=64)
     benchmark_parser.add_argument("--test-cell-fraction", type=float, default=0.25)
     benchmark_parser.add_argument("--random-seed", type=int, default=1)
+    benchmark_parser.add_argument(
+        "--random-seeds",
+        help="Comma-separated train/test cell split seeds; overrides --random-seed when set.",
+    )
     benchmark_parser.add_argument("--time-bin-ms", type=float, default=20.0)
     benchmark_parser.add_argument("--spike-rate-scale", type=float, default=1.0)
     _add_emission_calibration_arguments(benchmark_parser)
@@ -461,6 +465,7 @@ def _benchmark(args: argparse.Namespace) -> int:
         event_subset_seed=args.event_subset_seed,
         test_cell_fraction=args.test_cell_fraction,
         random_seed=args.random_seed,
+        random_seeds=_parse_int_values(args.random_seeds) if args.random_seeds else None,
         candidate_top_k=args.candidate_top_k,
         models=_parse_models(args.models),
         clusterless_mark_group_by=args.clusterless_mark_group_by,

@@ -64,6 +64,7 @@ class BenchmarkConfig:
     pyrecest_imm_jump_velocity_decay: float = 0.25
     state_space_valid_occupancy_threshold_s: float = 0.0
     random_seed: int = 1
+    random_seeds: tuple[int, ...] | None = None
     event_epoch: str = "run"
     models: tuple[str, ...] = ("random", "stationary", "diffusion", "momentum", "imm")
 
@@ -109,8 +110,11 @@ def run_open_field_benchmark(root: str | Path, config: BenchmarkConfig | None = 
     config = BenchmarkConfig() if config is None else config
     sessions = load_open_field_sessions(root)
     rows = []
-    for session in sessions:
-        rows.extend(_score_session(session, config))
+    seeds = tuple(config.random_seeds or (config.random_seed,))
+    for seed in seeds:
+        seed_config = replace(config, random_seed=int(seed))
+        for session in sessions:
+            rows.extend(_score_session(session, seed_config))
     frame = pd.DataFrame(rows)
     if not frame.empty:
         frame = _add_relative_metrics(frame)

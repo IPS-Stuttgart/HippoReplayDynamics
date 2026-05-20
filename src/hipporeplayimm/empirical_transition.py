@@ -1,0 +1,95 @@
+"""Empirical behavioral-transition state-space replay model."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+
+import numpy as np
+from scipy.sparse import csr_matrix
+
+from .data import ReplaySession
+from .encoding import EncodingModel, LogEmissionTensor, _clean_position, _speed_cm_s, _times_in_intervals
+from .models import EventScore, _posterior_diagnostics
+from .state_space_first_order import _forward_backward_first_order
+from .state_space_utils import _mean_entropy
+
+
+@dataclass
+class EmpiricalTransitionStateSpaceReplayModel:
+    """Exact first-order decoder using a transition matrix fit from behavior."""
+
+    transition: csr_matrix
+    name: str = "sorted-spike-state-space-empirical-transition"
+
+    def score(self, emissions: LogEmissionTensor, bin_centers: np.ndarray) -> EventScore:
+        if emissions.n_bins != self.transition.shape[0] or self.transition.shape[0] != self.transition.shape[1]:
+            raise ValueError("transition matrix shape must match emissions.n_bins")
+        logp, trajectory = _forward_backward_first_order(emissions.log_likelihood, self.transition)
+        terminal = trajectory[-1]
+        diagnostics = {
+            "state_space_mode": "empirical-transition",
+            "state_space_observation_model": "sorted-spike-poisson",
+            "state_space_trajectory_posterior": 1,
+            "state_space_trajectory_time_bins": int(emissions.n_time),
+            "state_space_empirical_transition_nonzeros": int(self.transition.nnz),
+            "state_space_empirical_transition_density": float(self.transition.nnz / max(1, self.transition.shape[0] ** 2)),
+            "state_space_empirical_evidence_support": "exact_full_grid",
+            "mean_trajectory_posterior_entropy": _mean_entropy(trajectory),
+        }
+        diagnostics.update(_posterior_diagnostics(terminal, bin_centers))
+        return EventScore(
+            self.name,
+            float(logp),
+            emissions.n_time,
+            emissions.n_spikes,
+            diagnostics=diagnostics,
+            terminal_log_posterior=terminal,
+            trajectory_log_posterior=trajectory,
+        )
+
+
+def fit_empirical_transition_matrix(
+    session: ReplaySession,
+    encoding: EncodingModel,
+    *,
+    min_speed_cm_s: float | None = None,
+    add_self_loop_count: float = 1.0,
+    teleport_probability: float = 1e-6,
+) -> csr_matrix:
+    """Fit a column-stochastic transition matrix from consecutive run frames."""
+
+    if not 0.0 <= teleport_probability < 1.0:
+        raise ValueError("teleport_probability must lie in [0, 1)")
+    min_speed = encoding.config.min_speed_cm_s if min_speed_cm_s is None else float(min_speed_cm_s)
+    position = _clean_position(session.position)
+    times = position[:, 0]
+    xy = position[:, 1:3]
+    speed = _speed_cm_s(times, xy)
+    in_run = _times_in_intervals(times, session.run_times)
+    bins = encoding.positions_to_flat_bins(xy)
+    valid = in_run & (speed >= min_speed) & (bins >= 0)
+    n_bins = encoding.n_bins
+    counts = np.zeros((n_bins, n_bins), dtype=float)
+    if add_self_loop_count > 0.0:
+        counts += np.eye(n_bins) * float(add_self_loop_count)
+    for idx in range(len(bins) - 1):
+        if valid[idx] and valid[idx + 1]:
+            src = int(bins[idx])
+            dst = int(bins[idx + 1])
+            counts[dst, src] += 1.0
+    empty_cols = counts.sum(axis=0) <= 0.0
+    counts[empty_cols, empty_cols] = 1.0
+    probs = counts / np.maximum(counts.sum(axis=0, keepdims=True), np.finfo(float).tiny)
+    if teleport_probability > 0.0:
+        probs = (1.0 - teleport_probability) * probs + teleport_probability / n_bins
+    return csr_matrix(probs)
+
+
+def fit_empirical_transition_model(
+    session: ReplaySession,
+    encoding: EncodingModel,
+    **kwargs,
+) -> EmpiricalTransitionStateSpaceReplayModel:
+    return EmpiricalTransitionStateSpaceReplayModel(
+        transition=fit_empirical_transition_matrix(session, encoding, **kwargs)
+    )

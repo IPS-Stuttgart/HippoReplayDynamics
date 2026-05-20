@@ -116,6 +116,65 @@ def test_adaptive_candidate_support_adds_forward_and_backward_predictions():
     assert set(candidates[3]) == {6}
 
 
+def test_mass_retaining_candidate_support_tracks_emission_mass_with_bounds():
+    log_emission = np.log(np.array([0.60, 0.25, 0.10, 0.05]))
+
+    adaptive = _mass_retaining_candidate_indices(
+        log_emission,
+        top_k=1,
+        mass_threshold=0.80,
+        min_k=0,
+        max_k=0,
+    )
+    assert list(adaptive) == [0, 1]
+
+    min_limited = _mass_retaining_candidate_indices(
+        log_emission,
+        top_k=1,
+        mass_threshold=0.50,
+        min_k=3,
+        max_k=0,
+    )
+    assert list(min_limited) == [0, 1, 2]
+
+    capped = _mass_retaining_candidate_indices(
+        log_emission,
+        top_k=1,
+        mass_threshold=0.99,
+        min_k=0,
+        max_k=2,
+    )
+    assert list(capped) == [0, 1]
+
+
+def test_state_space_model_uses_mass_retaining_candidate_support():
+    emissions = _synthetic_emissions()
+    centers = np.array([[0.0, 0.0], [1.0, 0.0], [2.0, 0.0], [3.0, 0.0]])
+    config = StateSpaceDecoderConfig(
+        mode="momentum",
+        momentum_candidate_top_k=1,
+        momentum_candidate_mass_threshold=0.85,
+        momentum_candidate_max_k=3,
+        momentum_predicted_candidate_top_k=0,
+    )
+    model = StateSpaceReplayModel(mode="momentum", config=config)
+
+    candidates = model.candidate_indices(emissions)
+    score = model.score(emissions, centers)
+
+    assert [len(row) for row in candidates] == [2, 3, 3]
+    masses = [
+        float(np.exp(logsumexp(emissions.log_likelihood[time_index, row]) - logsumexp(emissions.log_likelihood[time_index])))
+        for time_index, row in enumerate(candidates)
+    ]
+    assert all(mass >= 0.85 for mass in masses)
+    assert np.isfinite(score.log_likelihood)
+    assert score.diagnostics["state_space_momentum_candidate_selection"] == "adaptive_mass"
+    assert score.diagnostics["state_space_momentum_candidate_mass_threshold"] == 0.85
+    assert score.diagnostics["state_space_momentum_candidate_max_k"] == 3
+    assert score.diagnostics["min_candidate_log_mass"] >= np.log(0.85) - 1e-12
+
+
 def test_state_space_model_uses_adaptive_candidate_support_when_bin_centers_given():
     centers = np.arange(7.0)[:, None]
     emissions = LogEmissionTensor(

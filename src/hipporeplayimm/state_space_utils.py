@@ -22,30 +22,39 @@ def _top_candidate_indices(log_emission: np.ndarray, top_k: int) -> np.ndarray:
 
 def _mass_retaining_candidate_indices(
     log_emission: np.ndarray,
-    mass_threshold: float,
+    mass_threshold: float | None = None,
     *,
+    top_k: int | None = None,
     min_k: int = 1,
     max_k: int = 0,
 ) -> np.ndarray:
     """Return emission candidates that retain a target normalized mass.
 
-    ``max_k <= 0`` means unbounded. The returned indices are sorted by
-    decreasing emission log-likelihood, matching ``_top_candidate_indices``.
-    This selector is useful for replay bins whose emission posterior is much
-    flatter than average: it keeps enough states to retain the requested mass
-    instead of forcing every bin through the same fixed-size beam.
+    ``top_k`` is an optional legacy lower bound; when ``mass_threshold`` is
+    disabled it is used as fixed top-k support. ``max_k <= 0`` means unbounded.
+    The returned indices are sorted by decreasing emission log-likelihood,
+    matching ``_top_candidate_indices``.
     """
 
     values = np.asarray(log_emission, dtype=float)
     if values.ndim != 1:
         raise ValueError("log_emission must be one-dimensional")
+    if values.size == 0:
+        return np.empty(0, dtype=int)
+    if mass_threshold is None or float(mass_threshold) <= 0.0:
+        return _top_candidate_indices(values, 0 if top_k is None else int(top_k))
     if not 0.0 < float(mass_threshold) <= 1.0:
         raise ValueError("mass_threshold must be in (0, 1]")
+    if min_k < 0:
+        raise ValueError("min_k must be non-negative")
+    if max_k < 0:
+        raise ValueError("max_k must be non-negative")
     finite = np.isfinite(values)
     if not np.any(finite):
         raise ValueError("log_emission must contain at least one finite value")
     n_bins = values.shape[0]
-    min_count = min(n_bins, max(1, int(min_k)))
+    top_k_minimum = 0 if top_k is None or int(top_k) <= 0 else int(top_k)
+    min_count = min(n_bins, max(1, top_k_minimum, int(min_k)))
     max_count = (
         n_bins if max_k <= 0 else min(n_bins, max(min_count, int(max_k)))
     )

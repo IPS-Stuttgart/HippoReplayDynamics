@@ -775,6 +775,7 @@ def _decoded_row(
             "event_index": event_index,
             "model": model_name,
         }
+    terminal_log_posterior = terminal_log_posterior - logsumexp(terminal_log_posterior)
     posterior = np.exp(terminal_log_posterior)
     endpoint = posterior @ bin_centers
     decoded_well = assign_endpoint_to_well(endpoint, wells)
@@ -792,6 +793,18 @@ def _decoded_row(
         bin_centers,
         wells,
     )
+    max_well_id = _decoded_well_id_from_masses(
+        {well_id: float(summary["max"]) for well_id, summary in trajectory_masses.items()}
+    )
+    trajectory_mean_well_id = _decoded_well_id_from_masses(
+        {well_id: float(summary["trajectory"]) for well_id, summary in trajectory_masses.items()}
+    )
+    integrated_log_posterior = logsumexp(trajectory_log_posterior, axis=0) - np.log(
+        trajectory_log_posterior.shape[0]
+    )
+    integrated_posterior = np.exp(integrated_log_posterior)
+    integrated_endpoint = integrated_posterior @ bin_centers
+    integrated_decoded_well = assign_endpoint_to_well(integrated_endpoint, wells)
     row: dict[str, object] = {
         "session": session_id,
         "event_index": event_index,
@@ -804,11 +817,15 @@ def _decoded_row(
         "initial_decoded_well_id": (
             np.nan if initial_decoded_well is None else int(initial_decoded_well["well_id"])
         ),
-        "max_over_time_decoded_well_id": _decoded_well_id_from_masses(
-            {well_id: float(summary["max"]) for well_id, summary in trajectory_masses.items()}
-        ),
-        "trajectory_mean_decoded_well_id": _decoded_well_id_from_masses(
-            {well_id: float(summary["trajectory"]) for well_id, summary in trajectory_masses.items()}
+        "max_over_time_decoded_well_id": max_well_id,
+        "decoded_max_posterior_well_id": max_well_id,
+        "trajectory_mean_decoded_well_id": trajectory_mean_well_id,
+        "decoded_integrated_endpoint_x": float(integrated_endpoint[0]),
+        "decoded_integrated_endpoint_y": float(integrated_endpoint[1]),
+        "decoded_integrated_well_id": (
+            np.nan
+            if integrated_decoded_well is None
+            else int(integrated_decoded_well["well_id"])
         ),
     }
     for well_id, mass in masses.items():
@@ -816,8 +833,10 @@ def _decoded_row(
     for well_id, summary in trajectory_masses.items():
         row[f"initial_well_{well_id}_posterior"] = float(summary["initial"])
         row[f"max_well_{well_id}_posterior"] = float(summary["max"])
+        row[f"well_{well_id}_max_posterior"] = float(summary["max"])
         row[f"max_well_{well_id}_posterior_time_bin"] = int(summary["max_time_index"])
         row[f"trajectory_well_{well_id}_posterior"] = float(summary["trajectory"])
+        row[f"well_{well_id}_integrated_posterior"] = float(summary["trajectory"])
     return row
 
 
@@ -939,7 +958,9 @@ def _add_ground_truth_metrics(
         ("decoded_well_id", "goal_correct"),
         ("initial_decoded_well_id", "initial_goal_correct"),
         ("max_over_time_decoded_well_id", "max_over_time_goal_correct"),
+        ("decoded_max_posterior_well_id", "goal_correct_max_posterior"),
         ("trajectory_mean_decoded_well_id", "trajectory_mean_goal_correct"),
+        ("decoded_integrated_well_id", "goal_correct_integrated"),
     ):
         if decoded_col in comparison.columns:
             comparison[output_col] = np.where(
@@ -947,9 +968,12 @@ def _add_ground_truth_metrics(
                 comparison[decoded_col].astype("float64") == true_ids.astype("float64"),
                 np.nan,
             )
-    dx = comparison["decoded_endpoint_x"].astype(float) - comparison["true_well_x"].astype(float)
-    dy = comparison["decoded_endpoint_y"].astype(float) - comparison["true_well_y"].astype(float)
-    comparison["endpoint_error_cm"] = np.where(valid_bool, np.sqrt(dx * dx + dy * dy), np.nan)
+    if {"decoded_endpoint_x", "decoded_endpoint_y", "true_well_x", "true_well_y"}.issubset(
+        comparison.columns
+    ):
+        dx = comparison["decoded_endpoint_x"].astype(float) - comparison["true_well_x"].astype(float)
+        dy = comparison["decoded_endpoint_y"].astype(float) - comparison["true_well_y"].astype(float)
+        comparison["endpoint_error_cm"] = np.where(valid_bool, np.sqrt(dx * dx + dy * dy), np.nan)
     _add_true_well_summary_columns(
         comparison,
         valid_bool,
@@ -978,6 +1002,29 @@ def _add_ground_truth_metrics(
         posterior_output="true_trajectory_well_posterior",
         rank_output="true_trajectory_well_rank",
     )
+    if {
+        "decoded_integrated_endpoint_x",
+        "decoded_integrated_endpoint_y",
+        "true_well_x",
+        "true_well_y",
+    }.issubset(comparison.columns):
+        dx = comparison["decoded_integrated_endpoint_x"].astype(float) - comparison["true_well_x"].astype(float)
+        dy = comparison["decoded_integrated_endpoint_y"].astype(float) - comparison["true_well_y"].astype(float)
+        comparison["integrated_endpoint_error_cm"] = np.where(valid_bool, np.sqrt(dx * dx + dy * dy), np.nan)
+    _add_true_well_metric_columns(
+        comparison,
+        valid_bool,
+        suffix="_max_posterior",
+        posterior_output="true_well_max_posterior",
+        rank_output="true_well_max_rank",
+    )
+    _add_true_well_metric_columns(
+        comparison,
+        valid_bool,
+        suffix="_integrated_posterior",
+        posterior_output="true_well_integrated_posterior",
+        rank_output="true_well_integrated_rank",
+    )
     _add_active_well_summary_columns(comparison)
     return comparison
 
@@ -1005,6 +1052,44 @@ def _add_true_well_summary_columns(
             continue
         true_well_id = int(true_well_value)
         true_col = _well_posterior_column(column_prefix, true_well_id)
+        mass = float(getattr(row, true_col, np.nan)) if true_col in comparison.columns else np.nan
+        masses = [
+            float(getattr(row, col))
+            for col in posterior_columns
+            if pd.notna(getattr(row, col))
+        ]
+        rank = np.nan
+        if pd.notna(mass) and masses:
+            rank = 1 + int(np.sum(np.asarray(masses) > mass))
+        true_masses.append(mass)
+        true_ranks.append(rank)
+    comparison[posterior_output] = true_masses
+    comparison[rank_output] = true_ranks
+
+
+def _add_true_well_metric_columns(
+    comparison: pd.DataFrame,
+    valid_bool: pd.Series,
+    *,
+    suffix: str,
+    posterior_output: str,
+    rank_output: str,
+) -> None:
+    posterior_columns = _well_metric_columns(comparison, suffix)
+    true_masses: list[float] = []
+    true_ranks: list[float] = []
+    for is_valid, row in zip(valid_bool.to_numpy(dtype=bool), comparison.itertuples(index=False)):
+        if not is_valid:
+            true_masses.append(np.nan)
+            true_ranks.append(np.nan)
+            continue
+        true_well_value = getattr(row, "true_well_id", np.nan)
+        if pd.isna(true_well_value):
+            true_masses.append(np.nan)
+            true_ranks.append(np.nan)
+            continue
+        true_well_id = int(true_well_value)
+        true_col = f"well_{true_well_id}{suffix}"
         mass = float(getattr(row, true_col, np.nan)) if true_col in comparison.columns else np.nan
         masses = [
             float(getattr(row, col))
@@ -1051,7 +1136,25 @@ def _add_active_well_summary_columns(comparison: pd.DataFrame) -> None:
 
 def _well_posterior_columns(comparison: pd.DataFrame, column_prefix: str) -> list[str]:
     prefix = "well_" if not column_prefix else f"{column_prefix}_well_"
-    return [col for col in comparison.columns if col.startswith(prefix) and col.endswith("_posterior")]
+    columns: list[str] = []
+    for col in comparison.columns:
+        if not col.startswith(prefix) or not col.endswith("_posterior"):
+            continue
+        well_id = col[len(prefix) : -len("_posterior")]
+        if well_id.isdigit():
+            columns.append(col)
+    return columns
+
+
+def _well_metric_columns(comparison: pd.DataFrame, suffix: str) -> list[str]:
+    columns: list[str] = []
+    for col in comparison.columns:
+        if not col.startswith("well_") or not col.endswith(suffix):
+            continue
+        well_id = col[len("well_") : -len(suffix)]
+        if well_id.isdigit():
+            columns.append(col)
+    return columns
 
 
 def _well_posterior_column(column_prefix: str, well_id: int) -> str:

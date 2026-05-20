@@ -29,6 +29,7 @@ class EmissionConfig:
     time_bin_s: float = 0.02
     spike_rate_scale: float = 1.0
     likelihood_temperature: float = 1.0
+    cell_weights: Iterable[float] | np.ndarray | None = None
     negative_binomial_overdispersion: float = 0.0
 
 
@@ -232,6 +233,7 @@ def build_emissions(
         bin_durations,
         spike_rate_scale=config.spike_rate_scale,
         likelihood_temperature=config.likelihood_temperature,
+        cell_weights=config.cell_weights,
         negative_binomial_overdispersion=config.negative_binomial_overdispersion,
     )
     return LogEmissionTensor(
@@ -251,6 +253,7 @@ def _poisson_log_emissions(
     *,
     spike_rate_scale: float = 1.0,
     likelihood_temperature: float = 1.0,
+    cell_weights: Iterable[float] | np.ndarray | None = None,
     negative_binomial_overdispersion: float = 0.0,
 ) -> np.ndarray:
     if not np.isfinite(spike_rate_scale) or spike_rate_scale <= 0.0:
@@ -259,6 +262,7 @@ def _poisson_log_emissions(
         likelihood_temperature=likelihood_temperature,
         negative_binomial_overdispersion=negative_binomial_overdispersion,
     )
+    weights = _emission_cell_weights(cell_weights, spike_counts.shape[1])
     dt_array = np.asarray(dt, dtype=float)
     if dt_array.ndim == 0:
         if float(dt_array) <= 0.0:
@@ -267,6 +271,7 @@ def _poisson_log_emissions(
         log_likelihood = _count_log_emissions(
             spike_counts,
             expected,
+            cell_weights=weights,
             negative_binomial_overdispersion=negative_binomial_overdispersion,
         )
         return _apply_likelihood_temperature(log_likelihood, likelihood_temperature)
@@ -283,6 +288,7 @@ def _poisson_log_emissions(
     log_likelihood = _count_log_emissions(
         spike_counts,
         expected,
+        cell_weights=weights,
         negative_binomial_overdispersion=negative_binomial_overdispersion,
     )
     return _apply_likelihood_temperature(log_likelihood, likelihood_temperature)
@@ -292,6 +298,7 @@ def _count_log_emissions(
     spike_counts: np.ndarray,
     expected: np.ndarray,
     *,
+    cell_weights: np.ndarray,
     negative_binomial_overdispersion: float,
 ) -> np.ndarray:
     """Return per-time/bin count log likelihoods for Poisson or NB emissions."""
@@ -299,25 +306,56 @@ def _count_log_emissions(
     if negative_binomial_overdispersion == 0.0:
         if expected.ndim == 2:
             return (
-                spike_counts @ np.log(expected)
-                - expected.sum(axis=0)[None, :]
-                - gammaln(spike_counts + 1).sum(axis=1)[:, None]
+                (spike_counts * cell_weights[None, :]) @ np.log(expected)
+                - (cell_weights @ expected)[None, :]
+                - (gammaln(spike_counts + 1) * cell_weights[None, :]).sum(axis=1)[:, None]
             )
         if expected.ndim == 3:
             return (
-                np.einsum("tc,tcb->tb", spike_counts, np.log(expected), optimize=True)
-                - expected.sum(axis=1)
-                - gammaln(spike_counts + 1).sum(axis=1)[:, None]
+                np.einsum(
+                    "tc,tcb,c->tb",
+                    spike_counts,
+                    np.log(expected),
+                    cell_weights,
+                    optimize=True,
+                )
+                - np.einsum("tcb,c->tb", expected, cell_weights, optimize=True)
+                - (gammaln(spike_counts + 1) * cell_weights[None, :]).sum(axis=1)[:, None]
             )
         raise ValueError("expected must be two- or three-dimensional")
 
     counts = np.asarray(spike_counts, dtype=float)[:, :, None]
     expected_3d = expected[None, :, :] if expected.ndim == 2 else expected
-    return _negative_binomial_log_emissions(
+    log_terms = _negative_binomial_log_emissions(
         counts,
         expected_3d,
         negative_binomial_overdispersion,
-    ).sum(axis=1)
+    )
+    return (log_terms * cell_weights[None, :, None]).sum(axis=1)
+
+
+def _emission_cell_weights(
+    cell_weights: Iterable[float] | np.ndarray | None,
+    n_cells: int,
+) -> np.ndarray:
+    """Return validated nonnegative per-cell emission weights."""
+
+    if cell_weights is None:
+        return np.ones(int(n_cells), dtype=float)
+    if np.isscalar(cell_weights):
+        values = [cell_weights]
+    else:
+        values = list(cell_weights)
+    weights = np.asarray(values, dtype=float)
+    if weights.ndim != 1 or weights.shape[0] != int(n_cells):
+        raise ValueError("cell_weights must contain one weight per encoded cell")
+    if not np.all(np.isfinite(weights)):
+        raise ValueError("cell_weights must be finite")
+    if np.any(weights < 0.0):
+        raise ValueError("cell_weights must be nonnegative")
+    if not np.any(weights > 0.0):
+        raise ValueError("cell_weights must include at least one positive weight")
+    return weights
 
 
 def _negative_binomial_log_emissions(

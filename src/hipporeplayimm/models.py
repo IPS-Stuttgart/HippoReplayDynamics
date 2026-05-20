@@ -225,11 +225,12 @@ class CandidateKinematicModel:
             diffusion_sigma_cm=self.diffusion_sigma_cm,
             momentum_sigma_cm=self.momentum_sigma_cm,
         )
+        n_bins = bin_centers.shape[0]
         prev_prev = first
         prev = second
         trajectory_log_posterior = [
-            _normalize_log_weights(emissions.log_likelihood[0] - np.log(emissions.n_bins)),
-            _pair_terminal_posterior(log_pair, second, bin_centers.shape[0]),
+            _pair_previous_posterior(log_pair, first, n_bins),
+            _pair_terminal_posterior(log_pair, second, n_bins),
         ]
         for time_index in range(2, emissions.n_time):
             curr = candidates[time_index]
@@ -248,7 +249,7 @@ class CandidateKinematicModel:
             )
             prev_prev, prev = prev, curr
             trajectory_log_posterior.append(
-                _pair_terminal_posterior(log_pair, curr, bin_centers.shape[0])
+                _pair_terminal_posterior(log_pair, curr, n_bins)
             )
         terminal_log_posterior = trajectory_log_posterior[-1]
         return (
@@ -284,11 +285,12 @@ class CandidateKinematicModel:
                 )
             )
         log_alpha = np.stack(by_mode, axis=0) - np.log(len(modes))
+        n_bins = bin_centers.shape[0]
         prev_prev = first
         prev = second
         trajectory_log_posterior = [
-            _normalize_log_weights(emissions.log_likelihood[0] - np.log(emissions.n_bins)),
-            _pair_terminal_posterior(log_alpha, second, bin_centers.shape[0]),
+            _pair_previous_posterior(log_alpha, first, n_bins),
+            _pair_terminal_posterior(log_alpha, second, n_bins),
         ]
         for time_index in range(2, emissions.n_time):
             curr = candidates[time_index]
@@ -316,7 +318,7 @@ class CandidateKinematicModel:
             log_alpha = np.stack(next_alpha, axis=0)
             prev_prev, prev = prev, curr
             trajectory_log_posterior.append(
-                _pair_terminal_posterior(log_alpha, curr, bin_centers.shape[0])
+                _pair_terminal_posterior(log_alpha, curr, n_bins)
             )
         terminal_log_posterior = trajectory_log_posterior[-1]
         return (
@@ -389,6 +391,20 @@ def _pair_terminal_posterior(
         collapsed = logsumexp(log_pair_or_modes, axis=0)
     log_posterior = np.full(n_bins, LOG_ZERO, dtype=float)
     log_posterior[current_indices] = collapsed
+    return _normalize_log_weights(log_posterior)
+
+
+def _pair_previous_posterior(
+    log_pair_or_modes: np.ndarray,
+    previous_indices: np.ndarray,
+    n_bins: int,
+) -> np.ndarray:
+    if log_pair_or_modes.ndim == 3:
+        collapsed = logsumexp(log_pair_or_modes, axis=(0, 2))
+    else:
+        collapsed = logsumexp(log_pair_or_modes, axis=1)
+    log_posterior = np.full(n_bins, LOG_ZERO, dtype=float)
+    log_posterior[previous_indices] = collapsed
     return _normalize_log_weights(log_posterior)
 
 

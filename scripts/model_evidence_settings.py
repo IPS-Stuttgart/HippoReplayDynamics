@@ -10,6 +10,7 @@ _CONSTANT_SETTING_COLUMNS = (
     "min_speed_cm_s",
     "time_bin_s",
     "spike_rate_scale",
+    "emission_likelihood_temperature",
     "clusterless_mark_smoothing_sigma_bins",
     "clusterless_mark_prior_count",
     "clusterless_mark_variance_floor",

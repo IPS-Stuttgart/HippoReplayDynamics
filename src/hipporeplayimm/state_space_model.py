@@ -122,6 +122,7 @@ class StateSpaceReplayModel:
                 _mass_retaining_candidate_indices(
                     row,
                     float(mass_threshold),
+                    top_k=self.config.momentum_candidate_top_k,
                     min_k=self.config.momentum_candidate_min_k,
                     max_k=self.config.momentum_candidate_max_k,
                 )
@@ -241,6 +242,9 @@ class StateSpaceReplayModel:
                     "state_space_imm_trajectory_posterior": "smoothed_pair_marginal",
                     "state_space_imm_evidence_support": "truncated_full_grid",
                     **_candidate_support_config_diagnostics("state_space_imm", self.config),
+                    "state_space_imm_candidate_selection": (
+                        "provided" if candidate_indices is not None else _candidate_selection_label(self.config)
+                    ),
                     "state_space_momentum_transition_sigma_cm": float(momentum_transition_sigma_cm),
                     "state_space_momentum_initial_transition_sigma_cm": float(momentum_initial_sigma_cm),
                 }
@@ -271,6 +275,9 @@ class StateSpaceReplayModel:
                 "state_space_momentum_trajectory_posterior": "smoothed_pair_marginal",
                 "state_space_momentum_evidence_support": "truncated_full_grid",
                 **_candidate_support_config_diagnostics("state_space_momentum", self.config),
+                "state_space_momentum_candidate_selection": (
+                    "provided" if candidate_indices is not None else _candidate_selection_label(self.config)
+                ),
             }
         else:  # pragma: no cover - __post_init__ validates this.
             raise ValueError(f"Unsupported state-space mode: {self.mode}")
@@ -315,7 +322,7 @@ class StateSpaceReplayModel:
 def _candidate_support_config_diagnostics(
     prefix: str,
     config: StateSpaceDecoderConfig,
-) -> dict[str, float | int]:
+) -> dict[str, float | int | str]:
     """Return diagnostics describing how candidate support was generated."""
 
     mass_threshold = config.momentum_candidate_mass_threshold
@@ -328,10 +335,18 @@ def _candidate_support_config_diagnostics(
         f"{prefix}_candidate_mass_threshold": threshold_value,
         f"{prefix}_candidate_min_k": int(config.momentum_candidate_min_k),
         f"{prefix}_candidate_max_k": int(config.momentum_candidate_max_k),
+        f"{prefix}_candidate_selection": _candidate_selection_label(config),
         f"{prefix}_predicted_candidate_top_k": int(
             config.momentum_predicted_candidate_top_k
         ),
     }
+
+
+def _candidate_selection_label(config: StateSpaceDecoderConfig) -> str:
+    mass_threshold = config.momentum_candidate_mass_threshold
+    if mass_threshold is not None and np.isfinite(float(mass_threshold)) and float(mass_threshold) > 0.0:
+        return "adaptive_mass"
+    return "top_k"
 
 
 def _augment_candidates_with_momentum_predictions(

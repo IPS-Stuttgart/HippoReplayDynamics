@@ -61,6 +61,7 @@ class PyRecEstGoalParticleModel:
         filter_ = self._build_filter(bin_centers, goals, filter_dt)
 
         logp = 0.0
+        trajectory_log_posterior: list[np.ndarray] = []
         pre_update_ess_fractions: list[float] = []
         proposal_probabilities: list[float] = []
         for time_index in range(emissions.n_time):
@@ -84,13 +85,16 @@ class PyRecEstGoalParticleModel:
                 likelihood_lookup,
                 position_proposal_probability=proposal_probability,
             )
+            trajectory_log_posterior.append(
+                _particle_position_log_posterior(
+                    filter_.position_particles,
+                    np.asarray(filter_.filter_state.w, dtype=float),
+                    bin_centers,
+                    bin_tree,
+                )
+            )
 
-        terminal_log_posterior = _particle_position_log_posterior(
-            filter_.position_particles,
-            np.asarray(filter_.filter_state.w, dtype=float),
-            bin_centers,
-            bin_tree,
-        )
+        terminal_log_posterior = trajectory_log_posterior[-1]
         diagnostics = {
             "pyrecest_particles": int(self.n_particles),
             "pyrecest_candidate_goals": int(goals.shape[0]),
@@ -127,6 +131,7 @@ class PyRecEstGoalParticleModel:
             emissions.n_spikes,
             diagnostics=diagnostics,
             terminal_log_posterior=terminal_log_posterior,
+            trajectory_log_posterior=np.stack(trajectory_log_posterior, axis=0),
         )
 
     def _build_filter(
@@ -280,10 +285,13 @@ def _update_filter_from_grid_likelihood(
     log_likelihood: np.ndarray,
     bin_centers: np.ndarray,
     bin_tree: cKDTree,
-    likelihood_lookup: "_GridLikelihoodLookup",
+    likelihood_lookup: _GridLikelihoodLookup | None = None,
     *,
     position_proposal_probability: float = 0.0,
 ) -> float:
+    if likelihood_lookup is None:
+        likelihood_lookup = _build_grid_likelihood_lookup(bin_centers, "linear")
+
     def log_likelihood_at(positions: np.ndarray) -> np.ndarray:
         return _grid_log_likelihood_values(
             positions,
@@ -493,6 +501,89 @@ def _grid_proposal_weights(log_likelihood: np.ndarray) -> np.ndarray:
     if total <= 0.0:
         raise ValueError("grid proposal weights have no mass")
     return weights / total
+
+
+def _interpolated_grid_values(
+    positions: np.ndarray,
+    values: np.ndarray,
+    bin_centers: np.ndarray,
+    bin_tree: cKDTree,
+) -> np.ndarray:
+    """Evaluate grid values at particle positions.
+
+    The encoder constructs a complete 2D Cartesian grid in x-major order.  Use
+    bilinear interpolation on that grid so PyRecEst particle updates respond to
+    sub-bin particle motion instead of quantizing every particle to its nearest
+    spatial bin.  Irregular or non-2D grids fall back to nearest-bin lookup.
+    """
+
+    values = np.asarray(values, dtype=float)
+    grid = _regular_2d_grid(values, bin_centers)
+    positions = np.asarray(positions, dtype=float)
+    if grid is None or positions.ndim != 2 or positions.shape[1] != 2:
+        return _nearest_grid_values(positions, values, bin_tree)
+
+    x_axis, y_axis, grid_values = grid
+    grid_values = _replace_nonfinite_grid_values(grid_values)
+    x0, x1, wx = _bracketing_indices(x_axis, positions[:, 0])
+    y0, y1, wy = _bracketing_indices(y_axis, positions[:, 1])
+
+    return (
+        (1.0 - wx) * (1.0 - wy) * grid_values[x0, y0]
+        + wx * (1.0 - wy) * grid_values[x1, y0]
+        + (1.0 - wx) * wy * grid_values[x0, y1]
+        + wx * wy * grid_values[x1, y1]
+    )
+
+
+def _regular_2d_grid(
+    values: np.ndarray,
+    bin_centers: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray] | None:
+    centers = np.asarray(bin_centers, dtype=float)
+    if centers.ndim != 2 or centers.shape[1] != 2:
+        return None
+    if values.ndim != 1 or values.shape[0] != centers.shape[0]:
+        raise ValueError("values must contain one entry per spatial bin")
+
+    x_axis = np.unique(centers[:, 0])
+    y_axis = np.unique(centers[:, 1])
+    if x_axis.size < 2 or y_axis.size < 2:
+        return None
+    if x_axis.size * y_axis.size != centers.shape[0]:
+        return None
+
+    mesh_x, mesh_y = np.meshgrid(x_axis, y_axis, indexing="ij")
+    expected_centers = np.column_stack([mesh_x.reshape(-1), mesh_y.reshape(-1)])
+    if not np.allclose(centers, expected_centers):
+        return None
+    return x_axis, y_axis, values.reshape(x_axis.size, y_axis.size)
+
+
+def _bracketing_indices(
+    axis: np.ndarray,
+    coordinates: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    clipped = np.clip(np.asarray(coordinates, dtype=float), axis[0], axis[-1])
+    upper = np.searchsorted(axis, clipped, side="right")
+    upper = np.clip(upper, 1, axis.size - 1).astype(int)
+    lower = upper - 1
+    span = axis[upper] - axis[lower]
+    weight = np.divide(
+        clipped - axis[lower],
+        span,
+        out=np.zeros_like(clipped, dtype=float),
+        where=span > 0.0,
+    )
+    return lower, upper, weight
+
+
+def _replace_nonfinite_grid_values(values: np.ndarray) -> np.ndarray:
+    if np.all(np.isfinite(values)):
+        return values
+    finite_values = values[np.isfinite(values)]
+    replacement = float(np.min(finite_values)) if finite_values.size else LOG_ZERO
+    return np.where(np.isfinite(values), values, replacement)
 
 
 def _nearest_grid_values(

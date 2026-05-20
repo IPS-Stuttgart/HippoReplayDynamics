@@ -148,6 +148,7 @@ def _compare_clusterless_scores_to_ground_truth(gt, root, scores_frame: pd.DataF
                         int(event_index),
                         model_name,
                         score.terminal_log_posterior,
+                        score.trajectory_log_posterior,
                         clusterless_encoding.bin_centers,
                         wells,
                     )

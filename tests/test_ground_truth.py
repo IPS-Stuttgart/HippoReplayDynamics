@@ -5,10 +5,12 @@ import pandas as pd
 import pytest
 
 from hipporeplayimm.data import ReplaySession
-from hipporeplayimm.encoding import EncodingConfig, EncodingModel, LogEmissionTensor
+from hipporeplayimm.encoding import EmissionConfig, EncodingConfig, EncodingModel, LogEmissionTensor
 from hipporeplayimm.ground_truth import (
     GroundTruthConfig,
     _add_ground_truth_metrics,
+    _decoded_row,
+    _emission_config_for_scores,
     assign_endpoint_to_well,
     compare_scores_to_ground_truth,
     first_post_ripple_well_visit,
@@ -132,6 +134,36 @@ def test_trajectory_well_posterior_mass_summaries():
     assert masses[2]["trajectory"] == pytest.approx(0.45)
 
 
+def test_decoded_row_adds_time_resolved_well_metrics():
+    wells = pd.DataFrame(
+        {
+            "well_id": [1, 2],
+            "well_x": [0.0, 30.0],
+            "well_y": [0.0, 0.0],
+            "n_estimates": [1, 1],
+        }
+    )
+    bin_centers = np.array([[0.0, 0.0], [30.0, 0.0]])
+    terminal_log_posterior = np.log(np.array([0.8, 0.2]))
+    trajectory_log_posterior = np.log(np.array([[0.1, 0.9], [0.8, 0.2]]))
+
+    row = _decoded_row(
+        "Rat1/Open1",
+        0,
+        "diffusion",
+        terminal_log_posterior,
+        trajectory_log_posterior,
+        bin_centers,
+        wells,
+    )
+
+    assert row["decoded_well_id"] == 1
+    assert row["decoded_max_posterior_well_id"] == 2
+    assert row["decoded_integrated_well_id"] == 2
+    assert row["well_2_max_posterior"] == pytest.approx(0.9)
+    assert row["well_2_integrated_posterior"] == pytest.approx(0.55)
+
+
 def test_compare_scores_to_ground_truth_preserves_score_columns(tmp_path: Path):
     root = tmp_path / "dataset"
     session_path = root / "Rat1" / "Open1"
@@ -157,6 +189,30 @@ def test_compare_scores_to_ground_truth_preserves_score_columns(tmp_path: Path):
     assert "heldout_log_likelihood" in comparison.columns
     assert "goal_correct" in comparison.columns
     assert len(comparison) == 1
+
+
+def test_emission_config_for_scores_reads_legacy_event_evidence_metadata():
+    scores = pd.DataFrame(
+        {
+            "time_bin_s": [0.003],
+            "spike_rate_scale": [4.0],
+        }
+    )
+
+    config = _emission_config_for_scores(
+        scores,
+        EmissionConfig(time_bin_s=0.02, spike_rate_scale=1.0),
+    )
+
+    assert config.time_bin_s == pytest.approx(0.003)
+    assert config.spike_rate_scale == pytest.approx(4.0)
+
+
+def test_emission_config_for_scores_rejects_conflicting_metadata():
+    scores = pd.DataFrame({"emission_time_bin_s": [0.02], "time_bin_s": [0.003]})
+
+    with pytest.raises(ValueError, match="emission_time_bin_s / time_bin_s"):
+        _emission_config_for_scores(scores, EmissionConfig())
 
 
 def test_compare_scores_to_ground_truth_uses_benchmark_split_and_train_candidates(
@@ -442,6 +498,51 @@ def test_ground_truth_metrics_treat_missing_valid_label_as_invalid():
     assert pd.isna(result.loc[2, "goal_correct"])
     assert pd.isna(result.loc[2, "true_well_posterior"])
     assert pd.isna(result.loc[2, "true_well_rank"])
+
+
+def test_ground_truth_metrics_rank_terminal_max_and_integrated_separately():
+    comparison = pd.DataFrame(
+        {
+            "session": ["Rat1/Open1"],
+            "event_index": [0],
+            "model": ["diffusion"],
+            "true_well_id": [2.0],
+            "true_well_x": [30.0],
+            "true_well_y": [0.0],
+            "valid_label": [True],
+            "decoded_endpoint_x": [6.0],
+            "decoded_endpoint_y": [0.0],
+            "decoded_well_id": [1.0],
+            "decoded_max_posterior_well_id": [2.0],
+            "decoded_integrated_endpoint_x": [16.5],
+            "decoded_integrated_endpoint_y": [0.0],
+            "decoded_integrated_well_id": [2.0],
+            "well_1_posterior": [0.8],
+            "well_2_posterior": [0.2],
+            "well_1_max_posterior": [0.8],
+            "well_2_max_posterior": [0.9],
+            "well_1_integrated_posterior": [0.45],
+            "well_2_integrated_posterior": [0.55],
+        }
+    )
+
+    result = _add_ground_truth_metrics(
+        comparison,
+        decoded=pd.DataFrame(),
+        gt_frame=pd.DataFrame(),
+    )
+
+    assert not bool(result.loc[0, "goal_correct"])
+    assert bool(result.loc[0, "goal_correct_max_posterior"])
+    assert bool(result.loc[0, "goal_correct_integrated"])
+    assert result.loc[0, "endpoint_error_cm"] == pytest.approx(24.0)
+    assert result.loc[0, "integrated_endpoint_error_cm"] == pytest.approx(13.5)
+    assert result.loc[0, "true_well_posterior"] == pytest.approx(0.2)
+    assert result.loc[0, "true_well_rank"] == 2
+    assert result.loc[0, "true_well_max_posterior"] == pytest.approx(0.9)
+    assert result.loc[0, "true_well_max_rank"] == 1
+    assert result.loc[0, "true_well_integrated_posterior"] == pytest.approx(0.55)
+    assert result.loc[0, "true_well_integrated_rank"] == 1
 
 
 def _session(

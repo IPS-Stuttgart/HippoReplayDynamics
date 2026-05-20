@@ -154,6 +154,32 @@ def test_build_emissions_applies_likelihood_temperature():
     np.testing.assert_allclose(tempered.log_likelihood, base.log_likelihood / 2.0)
 
 
+def test_build_emissions_applies_cell_weights_to_cell_log_terms():
+    session = _two_cell_ripple_session()
+    encoding = _two_cell_two_bin_encoding()
+
+    emissions = build_emissions(
+        session,
+        encoding,
+        0,
+        EmissionConfig(time_bin_s=1.0, cell_weights=[1.0, 0.0]),
+    )
+
+    expected = np.log(np.array([2.0, 4.0])) - np.array([2.0, 4.0])
+    np.testing.assert_allclose(emissions.log_likelihood[0], expected)
+
+
+@pytest.mark.parametrize("cell_weights", ([1.0, 1.0], [-1.0], [0.0], [np.nan]))
+def test_build_emissions_rejects_invalid_cell_weights(cell_weights):
+    with pytest.raises(ValueError, match="cell_weights"):
+        build_emissions(
+            _single_ripple_session(),
+            _two_bin_encoding(),
+            0,
+            EmissionConfig(time_bin_s=1.0, cell_weights=cell_weights),
+        )
+
+
 def test_build_emissions_supports_negative_binomial_overdispersion():
     session = _single_ripple_session()
     encoding = _two_bin_encoding()
@@ -189,6 +215,16 @@ def test_build_emissions_rejects_nonpositive_spike_rate_scale():
             _two_bin_encoding(),
             0,
             EmissionConfig(time_bin_s=1.0, spike_rate_scale=0.0),
+        )
+
+
+def test_build_emissions_rejects_nonpositive_likelihood_temperature():
+    with pytest.raises(ValueError, match="likelihood_temperature"):
+        build_emissions(
+            _single_ripple_session(),
+            _two_bin_encoding(),
+            0,
+            EmissionConfig(time_bin_s=1.0, likelihood_temperature=0.0),
         )
 
 
@@ -256,6 +292,27 @@ def _single_ripple_session() -> ReplaySession:
     )
 
 
+def _two_cell_ripple_session() -> ReplaySession:
+    session = _single_ripple_session()
+    return ReplaySession(
+        rat=session.rat,
+        name=session.name,
+        path=session.path,
+        position=session.position,
+        spikes=np.array([[0.5, 1.0], [0.5, 2.0]]),
+        tetrode_cell_ids=np.array([[1, 1], [1, 2]]),
+        excitatory_neurons=np.array([1, 2]),
+        inhibitory_neurons=np.array([]),
+        ripple_events=session.ripple_events,
+        run_times=session.run_times,
+        sleep_box_immobile_times=session.sleep_box_immobile_times,
+        sleep_times=session.sleep_times,
+        rem_times=session.rem_times,
+        well_sequence=session.well_sequence,
+        metadata=session.metadata,
+    )
+
+
 def _two_bin_encoding() -> EncodingModel:
     return EncodingModel(
         x_edges=np.array([0.0, 1.0, 2.0]),
@@ -265,6 +322,19 @@ def _two_bin_encoding() -> EncodingModel:
         occupancy_s=np.ones(2),
         cell_ids=np.array([1]),
         config=EncodingConfig(),
+    )
+
+
+def _two_cell_two_bin_encoding() -> EncodingModel:
+    encoding = _two_bin_encoding()
+    return EncodingModel(
+        x_edges=encoding.x_edges,
+        y_edges=encoding.y_edges,
+        bin_centers=encoding.bin_centers,
+        rates_hz=np.array([[2.0, 4.0], [8.0, 1.0]]),
+        occupancy_s=encoding.occupancy_s,
+        cell_ids=np.array([1, 2]),
+        config=encoding.config,
     )
 
 

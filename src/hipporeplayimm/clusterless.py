@@ -497,6 +497,11 @@ def build_clusterless_mark_emissions(
         likelihood_temperature=config.likelihood_temperature,
         negative_binomial_overdispersion=config.negative_binomial_overdispersion,
     )
+    if config.cell_weights is not None:
+        raise ValueError(
+            "cell_weights are only supported for sorted-spike emissions; "
+            "use likelihood_temperature to calibrate clusterless emissions"
+        )
     if config.negative_binomial_overdispersion > 0.0:
         raise ValueError("negative_binomial_overdispersion is only implemented for sorted-spike emissions")
     marks = session.spike_marks

@@ -40,8 +40,11 @@ from .state_space_utils import (
     _mode_transition_matrix,
     _pairwise_gaussian_log_prob,
     _per_bin_sigma,
+    _restrict_candidates_to_valid_bins,
     _scaled_emissions,
     _top_candidate_indices,
+    _valid_bin_count,
+    _valid_bin_mask_from_occupancy,
     _validate_candidate_indices,
 )
 
@@ -73,6 +76,7 @@ __all__ = [
     "_pairwise_gaussian_log_prob",
     "_per_bin_sigma",
     "_posterior_diagnostics",
+    "_restrict_candidates_to_valid_bins",
     "_scaled_emissions",
     "_score_first_order_imm",
     "_score_fragmented",
@@ -80,5 +84,7 @@ __all__ = [
     "_score_momentum_candidates",
     "_score_stationary",
     "_top_candidate_indices",
+    "_valid_bin_count",
+    "_valid_bin_mask_from_occupancy",
     "_validate_candidate_indices",
 ]

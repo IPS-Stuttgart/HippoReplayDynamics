@@ -24,6 +24,7 @@ from .evidence_reporting import (
 from .models import CandidateKinematicModel, RandomModel, StationaryModel
 from .pyrecest_models import PyRecEstGoalParticleIMMModel, PyRecEstGoalParticleModel
 from .sorted_spike_state_space import SortedSpikeStateSpaceReplayModel
+from .state_space import StateSpaceDecoderConfig, StateSpaceReplayModel
 
 
 @dataclass(frozen=True)
@@ -41,6 +42,7 @@ class BenchmarkConfig:
     clusterless_mark_kde_bandwidth: float | None = None
     clusterless_mark_kde_spatial_sigma_bins: float | None = None
     clusterless_mark_kde_max_neighbors: int = 256
+    clusterless_mark_group_by: str = "auto"
     pyrecest_particles: int = 512
     pyrecest_alpha: float = 0.80
     pyrecest_beta: float = 1.00
@@ -56,6 +58,7 @@ class BenchmarkConfig:
     pyrecest_imm_momentum_velocity_decay: float = 0.95
     pyrecest_imm_jump_fraction: float = 0.9
     pyrecest_imm_jump_velocity_decay: float = 0.25
+    state_space_valid_occupancy_threshold_s: float = 0.0
     random_seed: int = 1
     event_epoch: str = "run"
     models: tuple[str, ...] = ("random", "stationary", "diffusion", "momentum", "imm")
@@ -196,15 +199,18 @@ def _score_session(session: ReplaySession, config: BenchmarkConfig) -> list[dict
                 model_train_emissions = clusterless_train_emissions
                 model_joint_emissions = clusterless_joint_emissions
                 model_bin_centers = clusterless_joint_encoding.bin_centers
+                model_occupancy_s = clusterless_joint_encoding.occupancy_s
             else:
                 model_train_emissions = train_emissions
                 model_joint_emissions = joint_emissions
                 model_bin_centers = encoding.bin_centers
+                model_occupancy_s = encoding.occupancy_s
             train_score, joint_score = _score_train_joint_model(
                 model,
                 model_train_emissions,
                 model_joint_emissions,
                 model_bin_centers,
+                occupancy_s=model_occupancy_s,
             )
             heldout = joint_score.log_likelihood - train_score.log_likelihood
             rows.append(
@@ -231,7 +237,22 @@ def _score_session(session: ReplaySession, config: BenchmarkConfig) -> list[dict
     return rows
 
 
-def _score_train_joint_model(model, train_emissions, joint_emissions, bin_centers):
+def _score_train_joint_model(model, train_emissions, joint_emissions, bin_centers, occupancy_s=None):
+    if isinstance(model, StateSpaceReplayModel):
+        candidates = _candidate_indices_for_model(model, train_emissions, bin_centers)
+        train_score = model.score(
+            train_emissions,
+            bin_centers,
+            candidate_indices=candidates,
+            occupancy_s=occupancy_s,
+        )
+        joint_score = model.score(
+            joint_emissions,
+            bin_centers,
+            candidate_indices=candidates,
+            occupancy_s=occupancy_s,
+        )
+        return train_score, joint_score
     if hasattr(model, "candidate_indices"):
         candidates = _candidate_indices_for_model(model, train_emissions, bin_centers)
         train_score = model.score(train_emissions, bin_centers, candidate_indices=candidates)
@@ -277,6 +298,7 @@ def _clusterless_mark_config(config: BenchmarkConfig) -> ClusterlessMarkConfig:
         mark_kde_max_neighbors=int(
             getattr(config, "clusterless_mark_kde_max_neighbors", 256)
         ),
+        mark_group_by=str(getattr(config, "clusterless_mark_group_by", "auto")),
     )
 
 
@@ -312,6 +334,7 @@ def _session_with_mark_cell_subset(
         source_variable=marks.source_variable,
         feature_names=marks.feature_names,
         cell_ids=mark_cell_ids[keep].copy(),
+        group_ids=None if marks.group_ids is None else np.asarray(marks.group_ids, dtype=int)[keep].copy(),
     )
     return replace(session, spike_marks=filtered_marks)
 
@@ -361,6 +384,12 @@ def _benchmark_config_metadata(config: BenchmarkConfig) -> dict[str, object]:
         "clusterless_mark_kde_max_neighbors": int(
             getattr(config, "clusterless_mark_kde_max_neighbors", 256)
         ),
+        "clusterless_mark_group_by": str(
+            getattr(config, "clusterless_mark_group_by", "auto")
+        ),
+        "state_space_valid_occupancy_threshold_s": float(
+            config.state_space_valid_occupancy_threshold_s
+        ),
     }
 
 
@@ -370,6 +399,8 @@ def _session_mark_diagnostics(session: ReplaySession) -> dict[str, object]:
         "spike_mark_features": 0 if marks is None else marks.n_features,
         "spike_mark_source": "" if marks is None else f"{marks.source_file}:{marks.source_variable}",
         "clusterless_mark_likelihood_available": bool(marks is not None and marks.n_features > 0),
+        "clusterless_tetrode_grouping_available": bool(marks is not None and marks.group_ids is not None),
+        "clusterless_mark_groups": 0 if marks is None or marks.group_ids is None else int(np.unique(marks.group_ids).shape[0]),
     }
 
 
@@ -463,6 +494,14 @@ def _build_models(
             random_seed=config.random_seed,
         ),
     }
+    if config.state_space_valid_occupancy_threshold_s > 0.0:
+        for model in available.values():
+            if isinstance(model, StateSpaceReplayModel):
+                current = model.config or StateSpaceDecoderConfig(mode=model.mode)
+                model.config = replace(
+                    current,
+                    valid_occupancy_threshold_s=config.state_space_valid_occupancy_threshold_s,
+                )
     return {name: available[name] for name in config.models}
 
 

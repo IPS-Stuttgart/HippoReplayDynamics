@@ -21,7 +21,9 @@ from .state_space_utils import (
     _mass_retaining_candidate_indices,
     _mean_entropy,
     _per_bin_sigma,
+    _restrict_candidates_to_valid_bins,
     _top_candidate_indices,
+    _valid_bin_mask_from_occupancy,
     _validate_candidate_indices,
 )
 
@@ -48,6 +50,7 @@ class StateSpaceDecoderConfig:
     momentum_candidate_min_k: int = 1
     momentum_candidate_max_k: int = 0
     momentum_predicted_candidate_top_k: int = 8
+    valid_occupancy_threshold_s: float = 0.0
 
 
 @dataclass
@@ -139,25 +142,41 @@ class StateSpaceReplayModel:
         emissions: LogEmissionTensor,
         bin_centers: np.ndarray,
         candidate_indices: list[np.ndarray] | None = None,
+        *,
+        occupancy_s: np.ndarray | None = None,
     ) -> EventScore:
         if emissions.n_time == 0:
             raise ValueError("emissions must contain at least one time bin")
         if emissions.n_bins != bin_centers.shape[0]:
             raise ValueError("emissions.n_bins must match bin_centers rows")
         assert self.config is not None
+        valid_bin_mask = _valid_bin_mask_from_occupancy(
+            occupancy_s,
+            self.config.valid_occupancy_threshold_s,
+            emissions.n_bins,
+        )
 
         if self.mode == "stationary":
-            logp, trajectory = _score_stationary(emissions)
+            logp, trajectory = _score_stationary(emissions, valid_bin_mask=valid_bin_mask)
             transition_sigma_cm = 0.0
             extra: dict[str, float | int | str] = {}
         elif self.mode in {"fragmented", "jump"}:
-            logp, trajectory = _score_fragmented(emissions)
+            logp, trajectory = _score_fragmented(emissions, valid_bin_mask=valid_bin_mask)
             transition_sigma_cm = float("inf")
             extra = {}
         elif self.mode == "diffusion":
             transition_sigma_cm = _per_bin_sigma(self.config.diffusion_sigma_cm_sqrt_s, emissions.dt)
-            transition = _gaussian_transition_matrix(bin_centers, transition_sigma_cm, self.config.max_step_sigma)
-            logp, trajectory = _forward_backward_first_order(emissions.log_likelihood, transition)
+            transition = _gaussian_transition_matrix(
+                bin_centers,
+                transition_sigma_cm,
+                self.config.max_step_sigma,
+                valid_bin_mask=valid_bin_mask,
+            )
+            logp, trajectory = _forward_backward_first_order(
+                emissions.log_likelihood,
+                transition,
+                valid_bin_mask=valid_bin_mask,
+            )
             extra = {}
         elif self.mode == "first-order-imm":
             transition_sigma_cm = _per_bin_sigma(self.config.diffusion_sigma_cm_sqrt_s, emissions.dt)
@@ -168,6 +187,7 @@ class StateSpaceReplayModel:
                 diffusion_sigma_cm=transition_sigma_cm,
                 max_step_sigma=self.config.max_step_sigma,
                 mode_stickiness=self.config.imm_mode_stickiness,
+                valid_bin_mask=valid_bin_mask,
             )
             names = ("stationary", "diffusion", "fragmented")
             extra = {
@@ -188,6 +208,11 @@ class StateSpaceReplayModel:
                 emissions.dt,
             )
             candidates = self.candidate_indices(emissions, bin_centers) if candidate_indices is None else candidate_indices
+            candidates = _restrict_candidates_to_valid_bins(
+                candidates,
+                emissions.log_likelihood,
+                valid_bin_mask,
+            )
             _validate_candidate_indices(candidates, emissions.n_time, emissions.n_bins)
             logp, trajectory, mode_post, masses = _score_imm_candidates(
                 emissions,
@@ -199,6 +224,7 @@ class StateSpaceReplayModel:
                 velocity_decay=self.config.momentum_velocity_decay,
                 mode_stickiness=self.config.imm_mode_stickiness,
                 candidate_indices=candidates,
+                valid_bin_mask=valid_bin_mask,
             )
             names = ("stationary", "diffusion", "momentum", "jump")
             extra = {
@@ -222,6 +248,11 @@ class StateSpaceReplayModel:
         elif self.mode == "momentum":
             transition_sigma_cm = _per_bin_sigma(self.config.momentum_sigma_cm_sqrt_s, emissions.dt)
             candidates = self.candidate_indices(emissions, bin_centers) if candidate_indices is None else candidate_indices
+            candidates = _restrict_candidates_to_valid_bins(
+                candidates,
+                emissions.log_likelihood,
+                valid_bin_mask,
+            )
             _validate_candidate_indices(candidates, emissions.n_time, emissions.n_bins)
             logp, trajectory, masses = _score_momentum_candidates(
                 emissions,
@@ -230,6 +261,7 @@ class StateSpaceReplayModel:
                 sigma_cm=transition_sigma_cm,
                 initial_sigma_cm=_per_bin_sigma(self.config.momentum_initial_sigma_cm_sqrt_s, emissions.dt),
                 velocity_decay=self.config.momentum_velocity_decay,
+                valid_bin_mask=valid_bin_mask,
             )
             extra = {
                 "mean_candidate_log_mass": float(np.mean(masses)),
@@ -256,10 +288,18 @@ class StateSpaceReplayModel:
             "state_space_momentum_sigma_cm_sqrt_s": float(self.config.momentum_sigma_cm_sqrt_s),
             "state_space_momentum_initial_sigma_cm_sqrt_s": float(self.config.momentum_initial_sigma_cm_sqrt_s),
             "state_space_momentum_velocity_decay": float(self.config.momentum_velocity_decay),
+            "state_space_valid_occupancy_threshold_s": float(self.config.valid_occupancy_threshold_s),
             "state_space_transition_sigma_cm": float(transition_sigma_cm),
             "mean_trajectory_posterior_entropy": _mean_entropy(trajectory),
             **extra,
         }
+        if valid_bin_mask is not None:
+            diagnostics.update(
+                {
+                    "state_space_valid_bin_count": int(np.sum(valid_bin_mask)),
+                    "state_space_valid_bin_fraction": float(np.mean(valid_bin_mask)),
+                }
+            )
         diagnostics.update(_posterior_diagnostics(terminal, bin_centers))
         return EventScore(
             str(self.name),

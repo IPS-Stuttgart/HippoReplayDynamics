@@ -35,6 +35,7 @@ class SpikeMarkData:
     source_variable: str
     feature_names: tuple[str, ...]
     cell_ids: np.ndarray | None = None
+    group_ids: np.ndarray | None = None
 
     @property
     def n_spikes(self) -> int:
@@ -209,6 +210,10 @@ def _load_spike_marks(session_path: Path, spike_data: dict[str, Any], spikes: np
     spike_count = int(spikes.shape[0])
     spike_times = spikes[:, 0]
     cell_ids = spikes[:, 1].astype(int) if spikes.shape[1] > 1 else None
+    group_ids = _mark_group_ids_from_tetrode_cell_ids(
+        cell_ids,
+        spike_data.get("Tetrode_Cell_IDs", np.empty((0, 2))),
+    )
     for source_file, data in [("Spike_Data.mat", spike_data), *[(p.name, _load_mat_file(p)) for p in _candidate_mark_files(session_path)]]:
         for variable_name, value in _candidate_mark_variables(data):
             marks = _coerce_mark_matrix(value, spike_count=spike_count, spike_times=spike_times)
@@ -220,8 +225,58 @@ def _load_spike_marks(session_path: Path, spike_data: dict[str, Any], spikes: np
                     source_variable=variable_name,
                     feature_names=tuple(f"{variable_name}_{idx}" for idx in range(marks.shape[1])),
                     cell_ids=None if cell_ids is None else np.asarray(cell_ids, dtype=int).copy(),
+                    group_ids=None if group_ids is None else np.asarray(group_ids, dtype=int).copy(),
                 )
     return None
+
+
+def _mark_group_ids_from_tetrode_cell_ids(cell_ids: np.ndarray | None, tetrode_cell_ids: Any) -> np.ndarray | None:
+    """Map spike cell IDs to tetrode/group IDs when the dataset exposes them.
+
+    Pfeiffer/Foster releases commonly provide a ``Tetrode_Cell_IDs`` matrix, but
+    MATLAB files are not perfectly consistent about whether the first or second
+    column stores the within-session cell ID. This helper chooses the column that
+    best overlaps the spike cell IDs and falls back to the original cell ID for
+    unmapped rows so clusterless grouping never silently drops marked spikes.
+    """
+
+    if cell_ids is None:
+        return None
+    arr = np.asarray(tetrode_cell_ids)
+    if arr.size == 0:
+        return None
+    arr = np.squeeze(arr)
+    if arr.ndim == 1:
+        if arr.shape[0] == np.asarray(cell_ids).shape[0]:
+            return np.asarray(arr, dtype=int)
+        return None
+    if arr.ndim != 2:
+        return None
+    if arr.shape[0] == 2 and arr.shape[1] != 2:
+        arr = arr.T
+    if arr.shape[1] < 2:
+        return None
+
+    pairs = np.asarray(arr[:, :2], dtype=float)
+    finite = np.isfinite(pairs).all(axis=1)
+    if not np.any(finite):
+        return None
+    pairs = pairs[finite]
+    spike_cell_ids = np.asarray(cell_ids, dtype=int)
+    unique_spike_cells = np.unique(spike_cell_ids)
+    first_column = pairs[:, 0].astype(int)
+    second_column = pairs[:, 1].astype(int)
+    second_matches_cells = int(np.isin(unique_spike_cells, second_column).sum())
+    first_matches_cells = int(np.isin(unique_spike_cells, first_column).sum())
+    if second_matches_cells == 0 and first_matches_cells == 0:
+        return None
+
+    if second_matches_cells >= first_matches_cells:
+        group_column, cell_column = 0, 1
+    else:
+        group_column, cell_column = 1, 0
+    mapping = {int(row[cell_column]): int(row[group_column]) for row in pairs}
+    return np.asarray([mapping.get(int(cell_id), int(cell_id)) for cell_id in spike_cell_ids], dtype=int)
 
 
 def _candidate_mark_files(session_path: Path) -> list[Path]:

@@ -14,6 +14,7 @@ from hipporeplayimm.ground_truth import (
     first_post_ripple_well_visit,
     infer_well_locations_from_arrays,
     label_session_behavioral_ground_truth,
+    trajectory_well_posterior_masses,
     well_posterior_masses,
 )
 from hipporeplayimm.models import EventScore
@@ -102,6 +103,33 @@ def test_endpoint_assignment_and_true_well_posterior_mass():
     assert assigned is not None
     assert assigned["well_id"] == 2
     assert masses[2] == pytest.approx(0.75)
+
+
+def test_trajectory_well_posterior_mass_summaries():
+    wells = pd.DataFrame(
+        {
+            "well_id": [1, 2],
+            "well_x": [0.0, 10.0],
+            "well_y": [0.0, 0.0],
+            "n_estimates": [1, 1],
+        }
+    )
+    bin_centers = np.array([[0.0, 0.0], [10.0, 0.0]])
+    trajectory_log_posterior = np.log(
+        np.array(
+            [
+                [0.90, 0.10],
+                [0.20, 0.80],
+            ]
+        )
+    )
+
+    masses = trajectory_well_posterior_masses(trajectory_log_posterior, bin_centers, wells, radius_cm=2.0)
+
+    assert masses[1]["initial"] == pytest.approx(0.90)
+    assert masses[2]["max"] == pytest.approx(0.80)
+    assert masses[2]["max_time_index"] == 1
+    assert masses[2]["trajectory"] == pytest.approx(0.45)
 
 
 def test_compare_scores_to_ground_truth_preserves_score_columns(tmp_path: Path):
@@ -223,6 +251,14 @@ def test_compare_scores_to_ground_truth_uses_benchmark_split_and_train_candidate
                 emissions.n_time,
                 emissions.n_spikes,
                 terminal_log_posterior=np.log(np.array([0.25, 0.75])),
+                trajectory_log_posterior=np.log(
+                    np.array(
+                        [
+                            [0.60, 0.40],
+                            [0.25, 0.75],
+                        ]
+                    )
+                ),
             )
 
     monkeypatch.setattr(
@@ -255,6 +291,121 @@ def test_compare_scores_to_ground_truth_uses_benchmark_split_and_train_candidate
     assert [arr.tolist() for arr in seen["candidate_indices"]] == [[0], [1]]
     assert comparison.loc[0, "decoded_well_id"] == 2
     assert bool(comparison.loc[0, "goal_correct"])
+    assert comparison.loc[0, "true_initial_well_posterior"] == pytest.approx(0.40)
+    assert comparison.loc[0, "true_max_well_posterior"] == pytest.approx(0.75)
+    assert comparison.loc[0, "true_trajectory_well_posterior"] == pytest.approx(0.575)
+    assert comparison.loc[0, "true_initial_well_rank"] == 2
+    assert comparison.loc[0, "true_max_well_rank"] == 1
+    assert bool(comparison.loc[0, "max_over_time_goal_correct"])
+    assert bool(comparison.loc[0, "trajectory_mean_goal_correct"])
+
+
+def test_compare_scores_to_ground_truth_adds_exact_bayesian_model_average(
+    monkeypatch,
+    tmp_path: Path,
+):
+    times = np.linspace(0.0, 1.0, 11)
+    position = np.column_stack(
+        [times, np.zeros_like(times), np.zeros_like(times), np.zeros_like(times)]
+    )
+    session = _session(
+        tmp_path,
+        position=position,
+        well_sequence=np.array([[0.0, 1.0], [0.5, 2.0], [1.0, 1.0]]),
+        ripple_events=np.array([[0.2, 0.24, 0.22, 1.0, 1.0, 1.0]]),
+    )
+    bin_centers = np.array([[0.0, 0.0], [30.0, 0.0]])
+    encoding = EncodingModel(
+        x_edges=np.array([-1.0, 15.0, 31.0]),
+        y_edges=np.array([-1.0, 1.0]),
+        bin_centers=bin_centers,
+        rates_hz=np.ones((2, 2)),
+        occupancy_s=np.ones(2),
+        cell_ids=np.array([1, 2]),
+        config=EncodingConfig(),
+    )
+    wells = pd.DataFrame(
+        {
+            "well_id": [1, 2],
+            "well_x": [0.0, 30.0],
+            "well_y": [0.0, 0.0],
+            "n_estimates": [1, 1],
+        }
+    )
+    scores = pd.DataFrame(
+        {
+            "session": ["Rat1/Open1", "Rat1/Open1"],
+            "event_index": [0, 0],
+            "model": ["left", "right"],
+            "requested_model": ["left", "right"],
+            "status": ["success", "success"],
+            "evidence_support": ["exact_full_grid", "exact_full_grid"],
+            "log_evidence": [0.0, np.log(3.0)],
+        }
+    )
+    ground_truth = pd.DataFrame(
+        {
+            "session": ["Rat1/Open1"],
+            "event_index": [0],
+            "ripple_peak": [0.22],
+            "active_goal_id": [np.nan],
+            "true_well_id": [2],
+            "true_well_x": [30.0],
+            "true_well_y": [0.0],
+            "arrival_time": [0.5],
+            "time_to_arrival_s": [0.28],
+            "valid_label": [True],
+            "exclude_reason": [""],
+        }
+    )
+
+    def fake_build_emissions(session_arg, encoding_arg, event_index_arg, emission_config_arg):
+        del session_arg, event_index_arg, emission_config_arg
+        return LogEmissionTensor(
+            log_likelihood=np.zeros((1, 2)),
+            spike_counts=np.zeros((1, encoding_arg.n_cells), dtype=int),
+            times=np.array([0.22]),
+            dt=0.02,
+            cell_ids=encoding_arg.cell_ids,
+            n_spikes=0,
+        )
+
+    class FakeModel:
+        def __init__(self, name: str, posterior: np.ndarray):
+            self.name = name
+            self.posterior = posterior
+
+        def score(self, emissions, bin_centers_arg):
+            del bin_centers_arg
+            return EventScore(
+                self.name,
+                0.0,
+                emissions.n_time,
+                emissions.n_spikes,
+                terminal_log_posterior=np.log(self.posterior),
+            )
+
+    monkeypatch.setattr("hipporeplayimm.ground_truth.load_open_field_sessions", lambda _root: [session])
+    monkeypatch.setattr("hipporeplayimm.ground_truth.fit_place_field_encoding", lambda _session, _config: encoding)
+    monkeypatch.setattr("hipporeplayimm.ground_truth.build_emissions", fake_build_emissions)
+    monkeypatch.setattr("hipporeplayimm.ground_truth.infer_well_locations", lambda _session, _config=None: wells)
+    monkeypatch.setattr(
+        "hipporeplayimm.ground_truth._build_models",
+        lambda _config, session=None: {
+            "left": FakeModel("left", np.array([0.9, 0.1])),
+            "right": FakeModel("right", np.array([0.1, 0.9])),
+        },
+    )
+
+    comparison = compare_scores_to_ground_truth(tmp_path, scores, ground_truth=ground_truth)
+
+    average = comparison[comparison["model"] == "bayesian-model-average"].iloc[0]
+    assert set(comparison["model"]) == {"left", "right", "bayesian-model-average"}
+    assert int(average["bma_component_count"]) == 2
+    assert average["bma_component_models"] == "left,right"
+    assert average["decoded_endpoint_x"] == pytest.approx(21.0)
+    assert average["well_2_posterior"] == pytest.approx(0.7)
+    assert bool(average["goal_correct"])
 
 
 def test_ground_truth_metrics_treat_missing_valid_label_as_invalid():

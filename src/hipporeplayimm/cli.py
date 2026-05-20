@@ -42,7 +42,7 @@ from .simulation_recovery import (
     parse_model_list,
     run_session_simulation_recovery,
 )
-from .state_space import StateSpaceDecoderConfig
+from .state_space import StateSpaceDecoderConfig, StateSpaceReplayModel
 from .sweeps import (
     PyRecEstSweepConfig,
     pareto_aggregate_sweep_summary,
@@ -71,11 +71,18 @@ def main(argv: list[str] | None = None) -> int:
     benchmark_parser.add_argument("--spike-rate-scale", type=float, default=1.0)
     _add_emission_calibration_arguments(benchmark_parser)
     benchmark_parser.add_argument(
+        "--clusterless-mark-group-by",
+        choices=("auto", "none", "tetrode", "cell"),
+        default="auto",
+        help="Clusterless mark-likelihood grouping. 'auto' uses tetrode groups when Tetrode_Cell_IDs are available.",
+    )
+    benchmark_parser.add_argument(
         "--models",
         default="random,stationary,diffusion,momentum,imm",
         help="Comma-separated model names to benchmark.",
     )
     _add_encoding_arguments(benchmark_parser)
+    _add_state_space_arguments(benchmark_parser)
     _add_pyrecest_scalar_arguments(benchmark_parser)
 
     decode_parser = subparsers.add_parser("decode-event")
@@ -93,6 +100,7 @@ def main(argv: list[str] | None = None) -> int:
         help="Comma-separated model names to score.",
     )
     _add_encoding_arguments(decode_parser)
+    _add_state_space_arguments(decode_parser)
     _add_pyrecest_scalar_arguments(decode_parser)
 
     ground_truth_parser = subparsers.add_parser("ground-truth")
@@ -115,6 +123,7 @@ def main(argv: list[str] | None = None) -> int:
     compare_parser.add_argument("--spike-rate-scale", type=float, default=1.0)
     _add_emission_calibration_arguments(compare_parser)
     _add_encoding_arguments(compare_parser)
+    _add_state_space_arguments(compare_parser)
     _add_pyrecest_scalar_arguments(compare_parser)
     compare_parser.add_argument("--visit-radius-cm", type=float, default=10.0)
     compare_parser.add_argument("--min-dwell-s", type=float, default=0.2)
@@ -324,6 +333,8 @@ def _benchmark(args: argparse.Namespace) -> int:
         random_seed=args.random_seed,
         candidate_top_k=args.candidate_top_k,
         models=_parse_models(args.models),
+        clusterless_mark_group_by=args.clusterless_mark_group_by,
+        state_space_valid_occupancy_threshold_s=args.state_space_valid_occupancy_threshold_s,
         **_pyrecest_scalar_kwargs(args),
     )
     result = run_open_field_benchmark(args.root, config)
@@ -364,6 +375,7 @@ def _decode_event(args: argparse.Namespace) -> int:
         emissions=emission_config,
         candidate_top_k=args.candidate_top_k,
         models=requested_models,
+        state_space_valid_occupancy_threshold_s=args.state_space_valid_occupancy_threshold_s,
         **_pyrecest_scalar_kwargs(args),
     )
     model_objects = _build_models(config, session=session)
@@ -411,7 +423,14 @@ def _decode_event(args: argparse.Namespace) -> int:
             model_emissions = sorted_emissions
             model_encoding = sorted_encoding
 
-        score = model.score(model_emissions, model_encoding.bin_centers)
+        if isinstance(model, StateSpaceReplayModel):
+            score = model.score(
+                model_emissions,
+                model_encoding.bin_centers,
+                occupancy_s=model_encoding.occupancy_s,
+            )
+        else:
+            score = model.score(model_emissions, model_encoding.bin_centers)
         rows.append(
             {
                 "model": score.model_name,
@@ -485,6 +504,7 @@ def _compare_ground_truth(args: argparse.Namespace) -> int:
         test_cell_fraction=args.test_cell_fraction,
         candidate_top_k=args.candidate_top_k,
         random_seed=args.random_seed,
+        state_space_valid_occupancy_threshold_s=args.state_space_valid_occupancy_threshold_s,
         **_pyrecest_scalar_kwargs(args),
     )
     output = Path(args.output)
@@ -516,6 +536,18 @@ def _emission_config_from_args(args: argparse.Namespace) -> EmissionConfig:
         spike_rate_scale=args.spike_rate_scale,
         likelihood_temperature=args.emission_likelihood_temperature,
         negative_binomial_overdispersion=args.emission_negative_binomial_overdispersion,
+    )
+
+
+def _add_state_space_arguments(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--state-space-valid-occupancy-threshold-s",
+        type=float,
+        default=0.0,
+        help=(
+            "If positive, state-space priors and transition normalizers are restricted "
+            "to spatial bins whose training occupancy is at least this many seconds."
+        ),
     )
 
 

@@ -12,6 +12,8 @@ from .state_space_candidates_momentum import _backward_momentum_pair
 from .state_space_utils import (
     _candidate_log_masses,
     _full_grid_normalized_pairwise_gaussian_log_prob,
+    _uniform_log_prior,
+    _valid_bin_count,
 )
 
 
@@ -26,12 +28,13 @@ def _score_imm_candidates(
     velocity_decay: float,
     mode_stickiness: float,
     candidate_indices: list[np.ndarray],
+    valid_bin_mask: np.ndarray | None = None,
 ) -> tuple[float, np.ndarray, np.ndarray, list[float]]:
     """Candidate-pruned four-mode IMM over stationary/diffusion/momentum/jump."""
 
     modes = ("stationary", "diffusion", "momentum", "jump")
     if emissions.n_time == 1:
-        logp, trajectory = _score_fragmented(emissions)
+        logp, trajectory = _score_fragmented(emissions, valid_bin_mask=valid_bin_mask)
         mode_post = np.full((1, len(modes)), 1.0 / len(modes), dtype=float)
         return logp, trajectory, mode_post, [0.0]
 
@@ -52,6 +55,7 @@ def _score_imm_candidates(
             stationary_sigma_cm=stationary_sigma_cm,
             diffusion_sigma_cm=diffusion_sigma_cm,
             momentum_initial_sigma_cm=momentum_initial_sigma_cm,
+            valid_bin_mask=valid_bin_mask,
         )
         for mode in modes
     ]
@@ -81,6 +85,7 @@ def _score_imm_candidates(
                     diffusion_sigma_cm=diffusion_sigma_cm,
                     momentum_sigma_cm=momentum_sigma_cm,
                     velocity_decay=velocity_decay,
+                    valid_bin_mask=valid_bin_mask,
                 )
             )
         log_pair = np.stack(next_alpha, axis=0)
@@ -103,6 +108,7 @@ def _score_imm_candidates(
             diffusion_sigma_cm=diffusion_sigma_cm,
             momentum_sigma_cm=momentum_sigma_cm,
             velocity_decay=velocity_decay,
+            valid_bin_mask=valid_bin_mask,
         )
 
     trajectory = np.full((emissions.n_time, emissions.n_bins), LOG_ZERO, dtype=float)
@@ -133,10 +139,15 @@ def _init_imm_pair_log_alpha(
     stationary_sigma_cm: float,
     diffusion_sigma_cm: float,
     momentum_initial_sigma_cm: float,
+    valid_bin_mask: np.ndarray | None = None,
 ) -> np.ndarray:
     n_bins = log_likelihood.shape[1]
     if mode == "jump":
-        log_kernel = np.full((len(first), len(second)), -np.log(n_bins), dtype=float)
+        log_kernel = np.full(
+            (len(first), len(second)),
+            -np.log(_valid_bin_count(n_bins, valid_bin_mask)),
+            dtype=float,
+        )
     else:
         if mode == "stationary":
             sigma_cm = stationary_sigma_cm
@@ -151,8 +162,14 @@ def _init_imm_pair_log_alpha(
             bin_centers[second],
             bin_centers,
             sigma_cm,
+            valid_bin_mask=valid_bin_mask,
         )
-    return log_likelihood[0, first][:, None] - np.log(n_bins) + log_kernel + log_likelihood[1, second][None, :]
+    return (
+        log_likelihood[0, first][:, None]
+        + _uniform_log_prior(n_bins, valid_bin_mask)[first][:, None]
+        + log_kernel
+        + log_likelihood[1, second][None, :]
+    )
 
 
 def _advance_imm_pair_log_alpha(
@@ -168,6 +185,7 @@ def _advance_imm_pair_log_alpha(
     diffusion_sigma_cm: float,
     momentum_sigma_cm: float,
     velocity_decay: float,
+    valid_bin_mask: np.ndarray | None = None,
 ) -> np.ndarray:
     coords_prev_prev = bin_centers[prev_prev]
     coords_prev = bin_centers[prev]
@@ -175,7 +193,11 @@ def _advance_imm_pair_log_alpha(
     output = np.full((len(prev), len(curr)), LOG_ZERO, dtype=float)
     if mode == "jump":
         collapsed_by_prev = logsumexp(log_pair, axis=0)
-        return collapsed_by_prev[:, None] - np.log(bin_centers.shape[0]) + curr_emission[None, :]
+        return (
+            collapsed_by_prev[:, None]
+            - np.log(_valid_bin_count(bin_centers.shape[0], valid_bin_mask))
+            + curr_emission[None, :]
+        )
     for prev_col in range(len(prev)):
         if mode == "stationary":
             previous_mass = logsumexp(log_pair[:, prev_col])
@@ -184,6 +206,7 @@ def _advance_imm_pair_log_alpha(
                 coords_curr,
                 bin_centers,
                 stationary_sigma_cm,
+                valid_bin_mask=valid_bin_mask,
             )[0]
             output[prev_col] = previous_mass + log_kernel + curr_emission
         elif mode == "diffusion":
@@ -193,6 +216,7 @@ def _advance_imm_pair_log_alpha(
                 coords_curr,
                 bin_centers,
                 diffusion_sigma_cm,
+                valid_bin_mask=valid_bin_mask,
             )[0]
             output[prev_col] = previous_mass + log_kernel + curr_emission
         elif mode == "momentum":
@@ -204,6 +228,7 @@ def _advance_imm_pair_log_alpha(
                 coords_curr,
                 bin_centers,
                 momentum_sigma_cm,
+                valid_bin_mask=valid_bin_mask,
             )
             output[prev_col] = logsumexp(log_pair[:, prev_col][:, None] + log_kernel, axis=0) + curr_emission
         else:
@@ -225,6 +250,7 @@ def _backward_imm_pair(
     diffusion_sigma_cm: float,
     momentum_sigma_cm: float,
     velocity_decay: float,
+    valid_bin_mask: np.ndarray | None = None,
 ) -> np.ndarray:
     dst_terms = np.stack(
         [
@@ -240,6 +266,7 @@ def _backward_imm_pair(
                 diffusion_sigma_cm=diffusion_sigma_cm,
                 momentum_sigma_cm=momentum_sigma_cm,
                 velocity_decay=velocity_decay,
+                valid_bin_mask=valid_bin_mask,
             )
             for dst_idx, dst_mode in enumerate(modes)
         ],
@@ -266,6 +293,7 @@ def _backward_imm_pair_for_mode(
     diffusion_sigma_cm: float,
     momentum_sigma_cm: float,
     velocity_decay: float,
+    valid_bin_mask: np.ndarray | None = None,
 ) -> np.ndarray:
     if mode == "momentum":
         return _backward_momentum_pair(
@@ -277,11 +305,17 @@ def _backward_imm_pair_for_mode(
             bin_centers,
             sigma_cm=momentum_sigma_cm,
             velocity_decay=velocity_decay,
+            valid_bin_mask=valid_bin_mask,
         )
 
     output = np.full((len(prev_prev), len(prev)), LOG_ZERO, dtype=float)
     if mode == "jump":
-        values_by_prev = logsumexp(-np.log(bin_centers.shape[0]) + curr_emission[None, :] + next_beta, axis=1)
+        values_by_prev = logsumexp(
+            -np.log(_valid_bin_count(bin_centers.shape[0], valid_bin_mask))
+            + curr_emission[None, :]
+            + next_beta,
+            axis=1,
+        )
         output[:, :] = values_by_prev[None, :]
         return output
 
@@ -300,6 +334,7 @@ def _backward_imm_pair_for_mode(
             coords_curr,
             bin_centers,
             sigma_cm,
+            valid_bin_mask=valid_bin_mask,
         )[0]
         output[:, prev_col] = logsumexp(log_kernel + curr_emission + next_beta[prev_col])
     return output

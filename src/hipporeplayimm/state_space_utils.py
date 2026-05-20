@@ -79,10 +79,90 @@ def _candidate_log_masses(log_likelihood: np.ndarray, candidates: list[np.ndarra
     ]
 
 
-def _gaussian_transition_matrix(bin_centers: np.ndarray, sigma_cm: float, max_step_sigma: float) -> csr_matrix:
+def _coerce_valid_bin_mask(valid_bin_mask: np.ndarray | None, n_bins: int) -> np.ndarray | None:
+    if valid_bin_mask is None:
+        return None
+    mask = np.asarray(valid_bin_mask, dtype=bool)
+    if mask.shape != (n_bins,):
+        raise ValueError("valid_bin_mask must contain one boolean value per spatial bin")
+    if not np.any(mask):
+        raise ValueError("valid_bin_mask must contain at least one valid spatial bin")
+    return mask
+
+
+def _valid_bin_mask_from_occupancy(
+    occupancy_s: np.ndarray | None,
+    min_occupancy_s: float,
+    n_bins: int,
+) -> np.ndarray | None:
+    threshold = float(min_occupancy_s)
+    if threshold <= 0.0 or occupancy_s is None:
+        return None
+    occupancy = np.asarray(occupancy_s, dtype=float)
+    if occupancy.shape != (n_bins,):
+        raise ValueError("occupancy_s must contain one value per spatial bin")
+    mask = np.isfinite(occupancy) & (occupancy >= threshold)
+    if not np.any(mask):
+        raise ValueError("occupancy threshold excludes every spatial bin")
+    return mask
+
+
+def _uniform_log_prior(n_bins: int, valid_bin_mask: np.ndarray | None = None) -> np.ndarray:
+    valid_mask = _coerce_valid_bin_mask(valid_bin_mask, n_bins)
+    log_prior = np.full(n_bins, LOG_ZERO, dtype=float)
+    if valid_mask is None:
+        log_prior.fill(-np.log(n_bins))
+    else:
+        log_prior[valid_mask] = -np.log(int(np.sum(valid_mask)))
+    return log_prior
+
+
+def _uniform_probabilities(n_bins: int, valid_bin_mask: np.ndarray | None = None) -> np.ndarray:
+    valid_mask = _coerce_valid_bin_mask(valid_bin_mask, n_bins)
+    probs = np.zeros(n_bins, dtype=float)
+    if valid_mask is None:
+        probs.fill(1.0 / n_bins)
+    else:
+        probs[valid_mask] = 1.0 / int(np.sum(valid_mask))
+    return probs
+
+
+def _valid_bin_count(n_bins: int, valid_bin_mask: np.ndarray | None = None) -> int:
+    valid_mask = _coerce_valid_bin_mask(valid_bin_mask, n_bins)
+    return n_bins if valid_mask is None else int(np.sum(valid_mask))
+
+
+def _restrict_candidates_to_valid_bins(
+    candidates: list[np.ndarray],
+    log_likelihood: np.ndarray,
+    valid_bin_mask: np.ndarray | None,
+) -> list[np.ndarray]:
+    valid_mask = _coerce_valid_bin_mask(valid_bin_mask, log_likelihood.shape[1])
+    if valid_mask is None:
+        return candidates
+    valid_indices = np.flatnonzero(valid_mask)
+    restricted: list[np.ndarray] = []
+    for time_index, curr in enumerate(candidates):
+        arr = np.asarray(curr, dtype=int)
+        keep = arr[valid_mask[arr]]
+        if keep.size == 0:
+            valid_scores = log_likelihood[time_index, valid_indices]
+            keep = np.asarray([valid_indices[int(np.argmax(valid_scores))]], dtype=int)
+        restricted.append(np.unique(keep.astype(int)))
+    return restricted
+
+
+def _gaussian_transition_matrix(
+    bin_centers: np.ndarray,
+    sigma_cm: float,
+    max_step_sigma: float,
+    valid_bin_mask: np.ndarray | None = None,
+) -> csr_matrix:
     if sigma_cm <= 0.0:
         raise ValueError("sigma_cm must be positive")
     n_bins = bin_centers.shape[0]
+    valid_mask = _coerce_valid_bin_mask(valid_bin_mask, n_bins)
+    allowed = np.arange(n_bins, dtype=int) if valid_mask is None else np.flatnonzero(valid_mask)
     radius2 = (sigma_cm * max_step_sigma) ** 2
     rows: list[int] = []
     cols: list[int] = []
@@ -91,8 +171,10 @@ def _gaussian_transition_matrix(bin_centers: np.ndarray, sigma_cm: float, max_st
         delta = bin_centers - center[None, :]
         dist2 = np.sum(delta * delta, axis=1)
         keep = dist2 <= radius2
+        if valid_mask is not None:
+            keep &= valid_mask
         if not np.any(keep):
-            keep[int(np.argmin(dist2))] = True
+            keep[int(allowed[int(np.argmin(dist2[allowed]))])] = True
         dst = np.flatnonzero(keep)
         weights = np.exp(-0.5 * dist2[dst] / (sigma_cm * sigma_cm))
         weights /= float(weights.sum())
@@ -107,12 +189,18 @@ def _full_grid_normalized_pairwise_gaussian_log_prob(
     observed: np.ndarray,
     all_observed: np.ndarray,
     sigma_cm: float,
+    valid_bin_mask: np.ndarray | None = None,
 ) -> np.ndarray:
     """Evaluate candidate log transitions with full-grid normalization."""
 
     log_kernel = _pairwise_gaussian_log_prob(predicted, observed, sigma_cm)
+    normalizer_support = all_observed
+    if valid_bin_mask is not None:
+        valid_mask = _coerce_valid_bin_mask(valid_bin_mask, all_observed.shape[0])
+        assert valid_mask is not None
+        normalizer_support = all_observed[valid_mask]
     log_normalizer = logsumexp(
-        _pairwise_gaussian_log_prob(predicted, all_observed, sigma_cm),
+        _pairwise_gaussian_log_prob(predicted, normalizer_support, sigma_cm),
         axis=1,
         keepdims=True,
     )

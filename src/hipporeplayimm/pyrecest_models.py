@@ -302,8 +302,6 @@ def _update_filter_from_grid_likelihood(
 
     particle_log_likelihood = log_likelihood_at(filter_.position_particles)
     finite = np.isfinite(particle_log_likelihood)
-    if not np.any(finite):
-        raise ValueError("all particle log-likelihoods are non-finite")
 
     if position_proposal_probability > 0.0:
         finite_grid_values = np.asarray(log_likelihood, dtype=float)[
@@ -311,10 +309,15 @@ def _update_filter_from_grid_likelihood(
         ]
         if finite_grid_values.size == 0:
             raise ValueError("all grid log-likelihoods are non-finite")
-        max_log = float(
-            max(np.max(particle_log_likelihood[finite]), np.max(finite_grid_values))
-        )
+        if np.any(finite):
+            max_log = float(
+                max(np.max(particle_log_likelihood[finite]), np.max(finite_grid_values))
+            )
+        else:
+            max_log = float(np.max(finite_grid_values))
     else:
+        if not np.any(finite):
+            raise ValueError("all particle log-likelihoods are non-finite")
         max_log = float(np.max(particle_log_likelihood[finite]))
 
     def scaled_likelihood(positions: np.ndarray) -> np.ndarray:

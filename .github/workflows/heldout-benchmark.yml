@@ -28,6 +28,62 @@ on:
         description: "Particle count for PyRecEst-backed models"
         required: true
         default: "512"
+      pyrecest_alpha:
+        description: "PyRecEst goal-attraction alpha"
+        required: true
+        default: "0.8"
+      pyrecest_beta:
+        description: "PyRecEst goal-attraction beta"
+        required: true
+        default: "1.0"
+      pyrecest_process_noise_sigma_cm_s:
+        description: "PyRecEst process-noise standard deviation in cm/s"
+        required: true
+        default: "60.0"
+      pyrecest_position_jump_sigma_cm:
+        description: "PyRecEst jump-proposal standard deviation in cm"
+        required: true
+        default: "25.0"
+      pyrecest_jump_probability:
+        description: "PyRecEst per-step jump probability"
+        required: true
+        default: "0.03"
+      pyrecest_goal_reset_probability:
+        description: "PyRecEst per-step goal-reset probability"
+        required: true
+        default: "0.02"
+      pyrecest_position_proposal_probability:
+        description: "Probability of rejuvenating particles from the decoded grid likelihood"
+        required: true
+        default: "0.0"
+      pyrecest_initial_velocity_sigma_cm_s:
+        description: "PyRecEst initial velocity prior standard deviation in cm/s"
+        required: true
+        default: "120.0"
+      pyrecest_imm_mode_stickiness:
+        description: "PyRecEst IMM mode self-transition probability"
+        required: true
+        default: "0.95"
+      pyrecest_imm_stationary_velocity_decay:
+        description: "PyRecEst IMM stationary-mode velocity decay"
+        required: true
+        default: "0.0"
+      pyrecest_imm_diffusion_velocity_decay:
+        description: "PyRecEst IMM diffusion-mode velocity decay"
+        required: true
+        default: "0.0"
+      pyrecest_imm_momentum_velocity_decay:
+        description: "PyRecEst IMM momentum-mode velocity decay"
+        required: true
+        default: "0.95"
+      pyrecest_imm_jump_fraction:
+        description: "PyRecEst IMM jump-mode position-jump fraction"
+        required: true
+        default: "0.9"
+      pyrecest_imm_jump_velocity_decay:
+        description: "PyRecEst IMM jump-mode velocity decay"
+        required: true
+        default: "0.25"
       test_cell_fraction:
         description: "Fraction of cells held out for likelihood evaluation"
         required: true
@@ -55,6 +111,20 @@ env:
   MODELS: ${{ inputs.models }}
   CANDIDATE_TOP_K: ${{ inputs.candidate_top_k }}
   PYRECEST_PARTICLES: ${{ inputs.pyrecest_particles }}
+  PYRECEST_ALPHA: ${{ inputs.pyrecest_alpha }}
+  PYRECEST_BETA: ${{ inputs.pyrecest_beta }}
+  PYRECEST_PROCESS_NOISE_SIGMA_CM_S: ${{ inputs.pyrecest_process_noise_sigma_cm_s }}
+  PYRECEST_POSITION_JUMP_SIGMA_CM: ${{ inputs.pyrecest_position_jump_sigma_cm }}
+  PYRECEST_JUMP_PROBABILITY: ${{ inputs.pyrecest_jump_probability }}
+  PYRECEST_GOAL_RESET_PROBABILITY: ${{ inputs.pyrecest_goal_reset_probability }}
+  PYRECEST_POSITION_PROPOSAL_PROBABILITY: ${{ inputs.pyrecest_position_proposal_probability }}
+  PYRECEST_INITIAL_VELOCITY_SIGMA_CM_S: ${{ inputs.pyrecest_initial_velocity_sigma_cm_s }}
+  PYRECEST_IMM_MODE_STICKINESS: ${{ inputs.pyrecest_imm_mode_stickiness }}
+  PYRECEST_IMM_STATIONARY_VELOCITY_DECAY: ${{ inputs.pyrecest_imm_stationary_velocity_decay }}
+  PYRECEST_IMM_DIFFUSION_VELOCITY_DECAY: ${{ inputs.pyrecest_imm_diffusion_velocity_decay }}
+  PYRECEST_IMM_MOMENTUM_VELOCITY_DECAY: ${{ inputs.pyrecest_imm_momentum_velocity_decay }}
+  PYRECEST_IMM_JUMP_FRACTION: ${{ inputs.pyrecest_imm_jump_fraction }}
+  PYRECEST_IMM_JUMP_VELOCITY_DECAY: ${{ inputs.pyrecest_imm_jump_velocity_decay }}
   TEST_CELL_FRACTION: ${{ inputs.test_cell_fraction }}
   RANDOM_SEED: ${{ inputs.random_seed }}
   TIME_BIN_S: ${{ inputs.time_bin_s }}
@@ -101,6 +171,20 @@ jobs:
             --models ${MODELS} \
             --candidate-top-k "${CANDIDATE_TOP_K}" \
             --pyrecest-particles "${PYRECEST_PARTICLES}" \
+            --pyrecest-alpha "${PYRECEST_ALPHA}" \
+            --pyrecest-beta "${PYRECEST_BETA}" \
+            --pyrecest-process-noise-sigma-cm-s "${PYRECEST_PROCESS_NOISE_SIGMA_CM_S}" \
+            --pyrecest-position-jump-sigma-cm "${PYRECEST_POSITION_JUMP_SIGMA_CM}" \
+            --pyrecest-jump-probability "${PYRECEST_JUMP_PROBABILITY}" \
+            --pyrecest-goal-reset-probability "${PYRECEST_GOAL_RESET_PROBABILITY}" \
+            --pyrecest-position-proposal-probability "${PYRECEST_POSITION_PROPOSAL_PROBABILITY}" \
+            --pyrecest-initial-velocity-sigma-cm-s "${PYRECEST_INITIAL_VELOCITY_SIGMA_CM_S}" \
+            --pyrecest-imm-mode-stickiness "${PYRECEST_IMM_MODE_STICKINESS}" \
+            --pyrecest-imm-stationary-velocity-decay "${PYRECEST_IMM_STATIONARY_VELOCITY_DECAY}" \
+            --pyrecest-imm-diffusion-velocity-decay "${PYRECEST_IMM_DIFFUSION_VELOCITY_DECAY}" \
+            --pyrecest-imm-momentum-velocity-decay "${PYRECEST_IMM_MOMENTUM_VELOCITY_DECAY}" \
+            --pyrecest-imm-jump-fraction "${PYRECEST_IMM_JUMP_FRACTION}" \
+            --pyrecest-imm-jump-velocity-decay "${PYRECEST_IMM_JUMP_VELOCITY_DECAY}" \
             --test-cell-fraction "${TEST_CELL_FRACTION}" \
             --random-seed "${RANDOM_SEED}" \
             --time-bin-s "${TIME_BIN_S}" \

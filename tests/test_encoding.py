@@ -45,6 +45,60 @@ def test_fit_place_field_encoding_recovers_peak_near_spike_location(tmp_path):
     assert 40.0 <= peak[0] <= 60.0
 
 
+@pytest.mark.parametrize(
+    "position",
+    [
+        np.empty((0, 4)),
+        np.array([[0.0, 0.0, 0.0, 0.0]]),
+        np.array(
+            [
+                [0.0, np.nan, 0.0, 0.0],
+                [1.0, 1.0, np.nan, 0.0],
+            ]
+        ),
+    ],
+)
+def test_fit_place_field_encoding_rejects_empty_or_too_short_position(position):
+    session = _single_ripple_session()
+    session.position = position
+
+    with pytest.raises(ValueError, match="at least two finite position samples"):
+        fit_place_field_encoding(session)
+
+
+def test_fit_place_field_encoding_handles_empty_cell_set_with_smoothing(tmp_path):
+    times = np.linspace(0.0, 10.0, 301)
+    x = np.linspace(0.0, 100.0, times.size)
+    y = np.zeros_like(x)
+    position = np.column_stack([times, x, y, np.zeros_like(x)])
+    session = ReplaySession(
+        rat="RatX",
+        name="OpenX",
+        path=tmp_path,
+        position=position,
+        spikes=np.empty((0, 2)),
+        tetrode_cell_ids=np.empty((0, 2), dtype=int),
+        excitatory_neurons=np.array([], dtype=int),
+        inhibitory_neurons=np.array([], dtype=int),
+        ripple_events=np.empty((0, 6)),
+        run_times=np.array([[0.0, 10.0]]),
+        sleep_box_immobile_times=np.empty((0, 2)),
+        sleep_times=np.empty((0, 2)),
+        rem_times=np.empty((0, 2)),
+        well_sequence=None,
+        metadata={},
+    )
+
+    encoding = fit_place_field_encoding(
+        session,
+        EncodingConfig(bin_size_cm=10.0, smoothing_sigma_bins=1.0, min_speed_cm_s=1.0),
+    )
+
+    assert encoding.cell_ids.size == 0
+    assert encoding.rates_hz.shape == (0, encoding.n_bins)
+    assert encoding.occupancy_s.shape == (encoding.n_bins,)
+
+
 def test_fit_place_field_encoding_excludes_ripple_intervals_by_default(tmp_path):
     session = _linear_session_with_ripple_spikes(tmp_path)
     config = EncodingConfig(bin_size_cm=10.0, smoothing_sigma_bins=0.0, min_speed_cm_s=1.0)

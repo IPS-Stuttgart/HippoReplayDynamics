@@ -360,7 +360,7 @@ def test_state_space_model_rejects_duplicate_or_non_integer_candidate_support():
         model.score(emissions, centers, candidate_indices=duplicate_candidates)
 
     float_candidates = [np.array([0, 1]), np.array([1.0, 2.0]), np.array([2, 3])]
-    with pytest.raises(ValueError, match="integer"):
+    with pytest.raises(TypeError, match="integer"):
         model.score(emissions, centers, candidate_indices=float_candidates)
 
 

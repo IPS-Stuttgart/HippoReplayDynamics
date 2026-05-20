@@ -62,6 +62,7 @@ class SimulationRecoveryConfig:
     events_per_model: int = 25
     random_seed: int = 1
     time_bin_s: float = 0.003
+    spike_rate_scale: float = 1.0
     encoding: EncodingConfig = field(
         default_factory=lambda: EncodingConfig(
             bin_size_cm=VALIDATED_POSITION_BIN_SIZE_CM,
@@ -143,6 +144,7 @@ def run_session_simulation_recovery(
                 n_time=n_time,
                 dt=config.time_bin_s,
                 rng=rng,
+                spike_rate_scale=config.spike_rate_scale,
                 state_space=config.state_space,
             )
             expected_model = expected_scoring_model(true_model)
@@ -182,9 +184,12 @@ def run_session_simulation_recovery(
                         "runtime_s": float(time.perf_counter() - start),
                         "error": "",
                         "time_bin_s": float(config.time_bin_s),
+                        "spike_rate_scale": float(config.spike_rate_scale),
                         "bin_size_cm": float(config.encoding.bin_size_cm),
                         "smoothing_sigma_bins": float(config.encoding.smoothing_sigma_bins),
                         "min_speed_cm_s": float(config.encoding.min_speed_cm_s),
+                        "min_occupancy_s": float(config.encoding.min_occupancy_s),
+                        "rate_floor_hz": float(config.encoding.rate_floor_hz),
                     }
                     row.update({f"diagnostic_{key}": value for key, value in score.diagnostics.items()})
                     rows.append(row)
@@ -213,9 +218,12 @@ def run_session_simulation_recovery(
                             "runtime_s": float(time.perf_counter() - start),
                             "error": f"{type(exc).__name__}: {exc}",
                             "time_bin_s": float(config.time_bin_s),
+                            "spike_rate_scale": float(config.spike_rate_scale),
                             "bin_size_cm": float(config.encoding.bin_size_cm),
                             "smoothing_sigma_bins": float(config.encoding.smoothing_sigma_bins),
                             "min_speed_cm_s": float(config.encoding.min_speed_cm_s),
+                            "min_occupancy_s": float(config.encoding.min_occupancy_s),
+                            "rate_floor_hz": float(config.encoding.rate_floor_hz),
                         }
                     )
                     if not config.continue_on_error:
@@ -236,6 +244,7 @@ def simulate_replay_event(
     n_time: int,
     dt: float,
     rng: np.random.Generator,
+    spike_rate_scale: float = 1.0,
     state_space: StateSpaceDecoderConfig | None = None,
 ) -> tuple[LogEmissionTensor, np.ndarray]:
     if n_time <= 0:
@@ -245,9 +254,9 @@ def simulate_replay_event(
     path = simulate_latent_path(encoding, true_model=true_model, n_time=n_time, dt=dt, rng=rng, state_space=state_space)
     counts = np.zeros((n_time, encoding.n_cells), dtype=int)
     for time_index, bin_index in enumerate(path):
-        expected = encoding.rates_hz[:, int(bin_index)] * dt
+        expected = encoding.rates_hz[:, int(bin_index)] * dt * spike_rate_scale
         counts[time_index] = rng.poisson(np.clip(expected, 0.0, None))
-    return emissions_from_counts(encoding, counts, dt=dt), path
+    return emissions_from_counts(encoding, counts, dt=dt, spike_rate_scale=spike_rate_scale), path
 
 
 def simulate_latent_path(
@@ -293,13 +302,21 @@ def simulate_latent_path(
     return path
 
 
-def emissions_from_counts(encoding: EncodingModel, counts: np.ndarray, *, dt: float) -> LogEmissionTensor:
+def emissions_from_counts(
+    encoding: EncodingModel,
+    counts: np.ndarray,
+    *,
+    dt: float,
+    spike_rate_scale: float = 1.0,
+) -> LogEmissionTensor:
     spike_counts = np.asarray(counts, dtype=int)
+    if spike_rate_scale <= 0.0:
+        raise ValueError("spike_rate_scale must be positive")
     if spike_counts.ndim != 2:
         raise ValueError("counts must be a two-dimensional array")
     if spike_counts.shape[1] != encoding.n_cells:
         raise ValueError("counts columns must match encoding.n_cells")
-    expected = encoding.rates_hz * dt
+    expected = encoding.rates_hz * dt * spike_rate_scale
     log_expected = np.log(np.maximum(expected, np.finfo(float).tiny))
     log_likelihood = spike_counts @ log_expected - expected.sum(axis=0)[None, :]
     log_likelihood -= gammaln(spike_counts + 1).sum(axis=1)[:, None]
@@ -575,6 +592,7 @@ def _settings(
         "max_template_events": config.max_template_events,
         "events_per_model": config.events_per_model,
         "random_seed": config.random_seed,
+        "spike_rate_scale": config.spike_rate_scale,
         "time_bin_s": config.time_bin_s,
         "encoding": asdict(config.encoding),
         "state_space": asdict(config.state_space),

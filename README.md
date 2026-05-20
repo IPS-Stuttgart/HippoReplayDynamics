@@ -43,9 +43,10 @@ predictive density as the primary metric.
   `clusterless-state-space-fragmented`, `clusterless-state-space-jump`,
   `clusterless-state-space-momentum`, and `clusterless-state-space-imm`:
   state-space baselines using clusterless marked-point-process emissions when
-  spike-mark features are present. The first implementation uses a
-  position-dependent spike-intensity model and a diagonal-Gaussian mark
-  likelihood fit from run-period spike marks.
+  spike-mark features are present. The default mark model is a spatially local
+  KDE fit from run-period spike marks; `--clusterless-mark-likelihood
+  diagonal-gaussian` keeps the older diagonal-Gaussian approximation available
+  for ablation runs.
 - `pyrecest-goal-particle`: PyRecEst-backed goal-conditioned particle replay
   filter using well-derived candidate goals when session metadata are available.
   It can optionally rejuvenate position particles from the current decoded grid
@@ -61,9 +62,8 @@ well-defined under the same approximate state support.
 
 The sorted-spike state-space models use sorted-unit spike identities and Poisson
 place-field emissions. The `clusterless-state-space-*` models instead use
-detected spike marks and report `clusterless_mark_likelihood=diagonal-gaussian`
-in diagnostics. Position-validation still validates the sorted-spike Poisson
-encoder.
+detected spike marks and report the selected `clusterless_mark_likelihood` in
+diagnostics. Position-validation still validates the sorted-spike Poisson encoder.
 
 Replay bin width can be changed with `--time-bin-ms` in `benchmark`,
 `decode-event`, and `compare-ground-truth`; the state-space baselines are the
@@ -138,19 +138,24 @@ inputs compare the KD-aligned event-sharded run `25435692734` against the
 state-space event-sharded run `25744259285` and upload best-model agreement,
 canonical crosstabs, and paired relative-evidence tables.
 
-Clusterless state-space evidence can be run with the same model-evidence
-workflows by replacing the model list, for example:
+Clusterless state-space evidence is included in the event-sharded workflow
+defaults so local-KDE marked-point-process evidence is scored beside
+sorted-spike Poisson evidence. To run only clusterless models, replace the model
+list, for example:
 
 ```text
 clusterless-state-space-stationary clusterless-state-space-diffusion clusterless-state-space-momentum clusterless-state-space-imm
 ```
 
-The workflows expose `clusterless_mark_smoothing_sigma_bins`,
-`clusterless_mark_prior_count`, `clusterless_mark_variance_floor`, and
-`clusterless_rate_floor_hz` for the Gaussian mark and spike-intensity model.
+The workflows expose `clusterless_mark_likelihood`,
+`clusterless_mark_smoothing_sigma_bins`, `clusterless_mark_prior_count`,
+`clusterless_mark_variance_floor`, `clusterless_rate_floor_hz`,
+`clusterless_mark_kde_bandwidth`, `clusterless_mark_kde_spatial_sigma_bins`, and
+`clusterless_mark_kde_max_neighbors` for local-KDE/Gaussian mark modeling and
+spike-intensity calibration.
 The event-sharded aggregator rejects attempts to combine shards with different
-clusterless or encoder settings, including spike-rate scale and clusterless rate
-floor, so aggregate model-evidence tables remain provenance-consistent.
+clusterless or encoder settings, including spike-rate scale and clusterless KDE
+settings, so aggregate model-evidence tables remain provenance-consistent.
 
 `decode-event --output` writes `event_scores.csv` plus posterior `.npz`
 artifacts for models that expose `trajectory_log_posterior`. The batch tracking
@@ -167,6 +172,12 @@ hipporeplayimm benchmark D:\Uni-Data\DataSetFromPfeifferFoster `
   --output results\pyrecest_smoke
 ```
 
+Do not interpret a single 512-particle PyRecEst run as a stable model ranking.
+For result tables, run multiple particle counts, nonzero position-proposal
+probabilities, and several random seeds, then compare only seed-aggregated
+Pareto summaries. The manual `PyRecEst particle robustness sweep` workflow runs
+this sweep on GitHub Actions and uploads the same CSV artifacts as the CLI.
+
 Small reproducible PyRecEst parameter sweeps can be run with:
 
 ```powershell
@@ -174,7 +185,7 @@ hipporeplayimm sweep-pyrecest D:\Uni-Data\DataSetFromPfeifferFoster `
   --max-events 5 `
   --random-seeds 1,2,3 `
   --pyrecest-models pyrecest-goal-particle,pyrecest-goal-particle-imm `
-  --particles 128,512 `
+  --particles 2048,4096,8192 `
   --position-proposal-probability 0.0,0.5,1.0 `
   --alpha 0.6,0.8 `
   --position-jump-sigma-cm 10,25 `
@@ -189,6 +200,24 @@ seed-aggregated `aggregate_summary.csv`, seed-aggregated
 `--skip-ground-truth` is passed, behavioral ground-truth comparison tables. The
 CLI prints the aggregate Pareto summary so likelihood, goal accuracy, endpoint
 error, and true-well posterior tradeoffs stay visible across stochastic seeds.
+The session-scoped `Benchmark Pfeiffer-Foster held-out likelihood` workflow also
+exposes all PyRecEst scalar parameters for focused debugging runs, but it should
+be treated as a single-seed diagnostic unless the same configuration is repeated
+across several `random_seed` values.
+
+A production-sized sweep can be launched manually from Actions with defaults
+equivalent to:
+
+```text
+random_seeds: 1,2,3
+pyrecest_models: pyrecest-goal-particle,pyrecest-goal-particle-imm
+particles: 2048,8192
+position_proposal_probability: 0.0,0.5
+alpha: 0.8
+position_jump_sigma_cm: 25.0
+jump_probability: 0.03
+imm_mode_stickiness: 0.95
+```
 
 ## Behavioral Position-Decoding Validation
 
@@ -211,9 +240,37 @@ hipporeplayimm validate-position D:\Uni-Data\DataSetFromPfeifferFoster `
   --n-folds 5 `
   --max-windows 1000 `
   --bin-size-cm 6.0 `
+  --min-occupancy-s 0.02 `
+  --rate-floor-hz 1e-4 `
   --smoothing-sigma-bins 2.0 `
   --output results\position_validation_rat1_open1
 ```
+
+## Observation-Model Calibration Sweep
+
+`hipporeplayimm sweep-observation` is the recommended first gate before tuning
+replay dynamics. It sweeps the sorted-spike Poisson encoder and replay-bin
+calibration settings, writes cross-validated behavior-decoding metrics, and
+optionally runs synthetic state-space recovery under the same observation
+settings:
+
+```powershell
+hipporeplayimm sweep-observation D:\Uni-Data\DataSetFromPfeifferFoster `
+  --sessions Rat1/Open1 `
+  --bin-size-cm 4,6 `
+  --smoothing-sigma-bins 1.5,2.0 `
+  --min-occupancy-s 0.01,0.02,0.05 `
+  --rate-floor-hz 1e-5,1e-4 `
+  --time-bin-ms 2,3,5 `
+  --spike-rate-scale 0.5,1.0,2.0 `
+  --max-windows 1000 `
+  --simulation-events-per-model 10 `
+  --output results\observation_sweep_rat1_open1
+```
+
+The primary file is `observation_sweep_summary.csv`. Prefer settings with low
+behavioral posterior-mean/MAP error and acceptable synthetic recovery accuracy
+before interpreting model-evidence differences on real replay events.
 
 ## Behavioral Ground-Truth Proxy
 

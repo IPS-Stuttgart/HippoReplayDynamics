@@ -123,8 +123,7 @@ def fit_place_field_encoding(session: ReplaySession, config: EncodingConfig | No
 
     config = EncodingConfig() if config is None else config
     position = _clean_position(session.position)
-    if position.shape[0] == 0:
-        raise ValueError("cannot fit place-field encoding without finite position samples")
+    _validate_position_samples(position)
     times = position[:, 0]
     xy = position[:, 1:3]
     speed = _speed_cm_s(times, xy)
@@ -179,19 +178,11 @@ def fit_place_field_encoding(session: ReplaySession, config: EncodingConfig | No
             sigma=config.smoothing_sigma_bins,
             mode="constant",
         ).reshape(-1)
-        if counts.shape[0]:
-            smooth_counts = np.vstack(
-                [
-                    gaussian_filter(
-                        row.reshape(grid_shape),
-                        sigma=config.smoothing_sigma_bins,
-                        mode="constant",
-                    ).reshape(-1)
-                    for row in counts
-                ]
-            )
-        else:
-            smooth_counts = np.empty_like(counts)
+        smooth_counts = _smooth_count_rows(
+            counts,
+            grid_shape,
+            config.smoothing_sigma_bins,
+        )
     else:
         smooth_occupancy = occupancy
         smooth_counts = counts
@@ -433,6 +424,13 @@ def _clean_position(position: np.ndarray) -> np.ndarray:
     return arr[keep]
 
 
+def _validate_position_samples(position: np.ndarray) -> None:
+    if position.shape[0] < 2:
+        raise ValueError(
+            "at least two finite position samples are required to fit place fields"
+        )
+
+
 def _make_grid(xy: np.ndarray, config: EncodingConfig) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     x_min, y_min = np.nanmin(xy, axis=0) - config.arena_padding_cm
     x_max, y_max = np.nanmax(xy, axis=0) + config.arena_padding_cm
@@ -452,6 +450,27 @@ def _positions_to_flat_bins(xy: np.ndarray, x_edges: np.ndarray, y_edges: np.nda
     flat = np.full(x_idx.shape, -1, dtype=int)
     flat[valid] = x_idx[valid] * (len(y_edges) - 1) + y_idx[valid]
     return flat
+
+
+def _smooth_count_rows(
+    counts: np.ndarray,
+    grid_shape: tuple[int, int],
+    sigma: float,
+) -> np.ndarray:
+    """Apply spatial Gaussian smoothing to each cell's count map."""
+
+    if counts.shape[0] == 0:
+        return counts.copy()
+    return np.vstack(
+        [
+            gaussian_filter(
+                row.reshape(grid_shape),
+                sigma=sigma,
+                mode="constant",
+            ).reshape(-1)
+            for row in counts
+        ]
+    )
 
 
 def _speed_cm_s(times: np.ndarray, xy: np.ndarray) -> np.ndarray:

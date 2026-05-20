@@ -67,6 +67,22 @@ def test_state_space_aliases_canonicalize_sorted_spike_model_name():
     assert models["state-space-diffusion"].name == "sorted-spike-state-space-diffusion"
 
 
+def test_build_models_includes_exact_first_order_imm_models():
+    models = _build_models(
+        BenchmarkConfig(
+            models=(
+                "sorted-spike-state-space-first-order-imm",
+                "state-space-first-order-imm",
+                "clusterless-state-space-first-order-imm",
+            )
+        )
+    )
+
+    assert models["sorted-spike-state-space-first-order-imm"].name == "sorted-spike-state-space-first-order-imm"
+    assert models["state-space-first-order-imm"].name == "sorted-spike-state-space-first-order-imm"
+    assert isinstance(models["clusterless-state-space-first-order-imm"], ClusterlessStateSpaceReplayModel)
+
+
 def test_build_models_includes_clusterless_state_space_model():
     models = _build_models(BenchmarkConfig(models=("clusterless-state-space-diffusion",)))
 
@@ -194,7 +210,10 @@ def test_best_static_baseline_includes_state_space_single_mode_models():
     assert _is_best_static_baseline_model("clusterless-state-space-jump")
     assert _is_best_static_baseline_model("clusterless-state-space-momentum")
     assert not _is_best_static_baseline_model("imm")
+    assert not _is_best_static_baseline_model("state-space-first-order-imm")
+    assert not _is_best_static_baseline_model("sorted-spike-state-space-first-order-imm")
     assert not _is_best_static_baseline_model("sorted-spike-state-space-imm")
+    assert not _is_best_static_baseline_model("clusterless-state-space-first-order-imm")
     assert not _is_best_static_baseline_model("clusterless-state-space-imm")
     assert not _is_best_static_baseline_model("pyrecest-goal-particle")
     assert not _is_best_static_baseline_model("pyrecest-goal-particle-imm")

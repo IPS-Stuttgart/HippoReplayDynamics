@@ -8,11 +8,13 @@ from hipporeplayimm.data import ReplaySession
 from hipporeplayimm.encoding import EmissionConfig, EncodingConfig, EncodingModel, LogEmissionTensor
 from hipporeplayimm.ground_truth import (
     GroundTruthConfig,
+    GroundTruthSensitivityConfig,
     _add_ground_truth_metrics,
     _decoded_row,
     _emission_config_for_scores,
     assign_endpoint_to_well,
     compare_scores_to_ground_truth,
+    compare_scores_to_ground_truth_sensitivity,
     first_post_ripple_well_visit,
     infer_well_locations_from_arrays,
     label_session_behavioral_ground_truth,
@@ -498,6 +500,86 @@ def test_ground_truth_metrics_treat_missing_valid_label_as_invalid():
     assert pd.isna(result.loc[2, "goal_correct"])
     assert pd.isna(result.loc[2, "true_well_posterior"])
     assert pd.isna(result.loc[2, "true_well_rank"])
+
+
+def test_ground_truth_sensitivity_relabels_without_redecoding(monkeypatch, tmp_path: Path):
+    base_comparison = pd.DataFrame(
+        {
+            "session": ["Rat1/Open1", "Rat1/Open1"],
+            "event_index": [0, 0],
+            "model": ["left", "right"],
+            "log_likelihood": [-3.0, -2.0],
+            "decoded_endpoint_x": [0.0, 10.0],
+            "decoded_endpoint_y": [0.0, 0.0],
+            "decoded_well_id": [1.0, 2.0],
+            "well_1_posterior": [0.9, 0.1],
+            "well_2_posterior": [0.1, 0.9],
+            "true_well_id": [99.0, 99.0],
+            "true_well_x": [99.0, 99.0],
+            "true_well_y": [99.0, 99.0],
+            "valid_label": [True, True],
+            "goal_correct": [False, False],
+        }
+    )
+    compare_calls: list[GroundTruthConfig] = []
+    generated_configs: list[GroundTruthConfig] = []
+
+    def fake_compare_scores_to_ground_truth(root, scores, **kwargs):
+        del root, scores
+        compare_calls.append(kwargs["ground_truth_config"])
+        return base_comparison.copy()
+
+    def fake_generate_behavioral_ground_truth(root, config=None):
+        del root
+        assert config is not None
+        generated_configs.append(config)
+        true_well_id = 1 if config.future_horizon_s < 20.0 else 2
+        true_x = 0.0 if true_well_id == 1 else 10.0
+        return pd.DataFrame(
+            {
+                "session": ["Rat1/Open1"],
+                "event_index": [0],
+                "ripple_peak": [1.0],
+                "active_goal_id": [np.nan],
+                "true_well_id": [true_well_id],
+                "true_well_x": [true_x],
+                "true_well_y": [0.0],
+                "arrival_time": [2.0],
+                "time_to_arrival_s": [1.0],
+                "valid_label": [True],
+                "exclude_reason": [""],
+            }
+        )
+
+    monkeypatch.setattr(
+        "hipporeplayimm.ground_truth.compare_scores_to_ground_truth",
+        fake_compare_scores_to_ground_truth,
+    )
+    monkeypatch.setattr(
+        "hipporeplayimm.ground_truth.generate_behavioral_ground_truth",
+        fake_generate_behavioral_ground_truth,
+    )
+
+    result = compare_scores_to_ground_truth_sensitivity(
+        tmp_path,
+        pd.DataFrame({"session": ["Rat1/Open1"]}),
+        sensitivity_config=GroundTruthSensitivityConfig(
+            visit_radii_cm=(10.0,),
+            min_dwells_s=(0.2,),
+            future_horizons_s=(10.0, 30.0),
+        ),
+    )
+
+    assert len(compare_calls) == 1
+    assert len(generated_configs) == 2
+    assert set(result.rows["true_well_id"]) == {1, 2}
+    assert result.rows["goal_correct"].tolist() == [True, False, False, True]
+    assert set(result.per_setting_summary["future_horizon_s"]) == {10.0, 30.0}
+    robustness = result.robustness_summary.set_index("model")
+    assert robustness.loc["left", "settings"] == 2
+    assert robustness.loc["left", "min_goal_accuracy"] == pytest.approx(0.0)
+    assert robustness.loc["left", "max_goal_accuracy"] == pytest.approx(1.0)
+    assert robustness.loc["right", "goal_accuracy_range"] == pytest.approx(1.0)
 
 
 def test_ground_truth_metrics_rank_terminal_max_and_integrated_separately():

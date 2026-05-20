@@ -31,9 +31,18 @@ from hipporeplayimm.encoding import (
     fit_place_field_encoding,
 )
 from hipporeplayimm.evidence_reporting import (
+    EXACT_EVIDENCE_SUPPORT,
     TRUNCATED_EVIDENCE_SUPPORT,
     ensure_evidence_support_columns as _ensure_evidence_support_columns,
 )
+from hipporeplayimm.goal_state_space import GoalStateSpaceReplayModel
+from hipporeplayimm.goal_state_space_integration import (
+    DEFAULT_GOAL_DRIFT_SPEED_CM_S,
+    DEFAULT_GOAL_MAX_STEP_SIGMA,
+    DEFAULT_GOAL_TRANSITION_SIGMA_CM_SQRT_S,
+    GOAL_STATE_SPACE_MODEL_NAMES,
+)
+from hipporeplayimm.ground_truth import infer_well_locations
 from hipporeplayimm.models import CandidateKinematicModel, RandomModel, StationaryModel
 from hipporeplayimm.position_validation import (
     VALIDATED_POSITION_BIN_SIZE_CM,
@@ -52,11 +61,15 @@ _TRAJ = {
     "sorted-spike-state-space-fragmented",
     "sorted-spike-state-space-jump",
     "sorted-spike-state-space-momentum",
+    "sorted-spike-state-space-first-order-imm",
     "sorted-spike-state-space-imm",
+    "sorted-spike-state-space-goal",
+    "state-space-goal",
     "clusterless-state-space-diffusion",
     "clusterless-state-space-fragmented",
     "clusterless-state-space-jump",
     "clusterless-state-space-momentum",
+    "clusterless-state-space-first-order-imm",
     "clusterless-state-space-imm",
 }
 _NONTRAJ = {
@@ -121,7 +134,7 @@ def _events(spec: str, session) -> list[int]:
     return out
 
 
-def _models(args) -> dict[str, object]:
+def _models(args, session=None) -> dict[str, object]:
     names = []
     for raw in args.models.replace(",", " ").split():
         name = _ALIASES.get(raw.strip().lower(), raw.strip().lower())
@@ -168,6 +181,18 @@ def _models(args) -> dict[str, object]:
             ),
         )
 
+    wants_goal_state_space = any(name in GOAL_STATE_SPACE_MODEL_NAMES for name in names)
+    goal_candidates = _session_goal_candidates(session) if wants_goal_state_space else None
+
+    def goal_state_space_model(name: str) -> GoalStateSpaceReplayModel:
+        return GoalStateSpaceReplayModel(
+            candidate_goals=goal_candidates,
+            transition_sigma_cm_sqrt_s=args.goal_state_space_transition_sigma_cm_sqrt_s,
+            drift_speed_cm_s=args.goal_state_space_drift_speed_cm_s,
+            max_step_sigma=args.goal_state_space_max_step_sigma,
+            name=name,
+        )
+
     available = {
         "random": RandomModel(),
         "stationary": StationaryModel(),
@@ -192,12 +217,16 @@ def _models(args) -> dict[str, object]:
         "sorted-spike-state-space-fragmented": state_space_model("fragmented"),
         "sorted-spike-state-space-jump": state_space_model("jump"),
         "sorted-spike-state-space-momentum": state_space_model("momentum"),
+        "sorted-spike-state-space-first-order-imm": state_space_model("first-order-imm"),
         "sorted-spike-state-space-imm": state_space_model("imm"),
+        "sorted-spike-state-space-goal": goal_state_space_model("sorted-spike-state-space-goal"),
+        "state-space-goal": goal_state_space_model("state-space-goal"),
         "clusterless-state-space-stationary": clusterless_state_space_model("stationary"),
         "clusterless-state-space-diffusion": clusterless_state_space_model("diffusion"),
         "clusterless-state-space-fragmented": clusterless_state_space_model("fragmented"),
         "clusterless-state-space-jump": clusterless_state_space_model("jump"),
         "clusterless-state-space-momentum": clusterless_state_space_model("momentum"),
+        "clusterless-state-space-first-order-imm": clusterless_state_space_model("first-order-imm"),
         "clusterless-state-space-imm": clusterless_state_space_model("imm"),
     }
     missing = sorted(set(names) - set(available))
@@ -214,6 +243,15 @@ def _family(model: str) -> str:
     return "other"
 
 
+def _session_goal_candidates(session) -> np.ndarray | None:
+    if session is None:
+        return None
+    wells = infer_well_locations(session)
+    if wells.empty:
+        return None
+    return wells[["well_x", "well_y"]].to_numpy(dtype=float)
+
+
 def _clusterless_mark_config(args) -> ClusterlessMarkConfig:
     return ClusterlessMarkConfig(
         encoding=EncodingConfig(
@@ -225,7 +263,15 @@ def _clusterless_mark_config(args) -> ClusterlessMarkConfig:
         mark_prior_count=args.clusterless_mark_prior_count,
         mark_variance_floor=args.clusterless_mark_variance_floor,
         rate_floor_hz=args.clusterless_rate_floor_hz,
+        mark_likelihood=args.clusterless_mark_likelihood,
+        mark_kde_bandwidth=args.clusterless_mark_kde_bandwidth,
+        mark_kde_spatial_sigma_bins=args.clusterless_mark_kde_spatial_sigma_bins,
+        mark_kde_max_neighbors=args.clusterless_mark_kde_max_neighbors,
     )
+
+
+def _optional_float_setting(value: float | None) -> float | str:
+    return "" if value is None else float(value)
 
 
 def _score(args) -> pd.DataFrame:
@@ -243,7 +289,7 @@ def _score(args) -> pd.DataFrame:
             min_speed_cm_s=args.min_speed_cm_s,
         ),
     )
-    models = _models(args)
+    models = _models(args, session=session)
     has_clusterless = any(isinstance(model, ClusterlessStateSpaceReplayModel) for model in models.values())
     clusterless_encoding = None
     if has_clusterless:
@@ -296,6 +342,10 @@ def _score(args) -> pd.DataFrame:
                     "clusterless_mark_prior_count": float(args.clusterless_mark_prior_count),
                     "clusterless_mark_variance_floor": float(args.clusterless_mark_variance_floor),
                     "clusterless_rate_floor_hz": float(args.clusterless_rate_floor_hz),
+                    "clusterless_mark_likelihood": str(args.clusterless_mark_likelihood),
+                    "clusterless_mark_kde_bandwidth": _optional_float_setting(args.clusterless_mark_kde_bandwidth),
+                    "clusterless_mark_kde_spatial_sigma_bins": _optional_float_setting(args.clusterless_mark_kde_spatial_sigma_bins),
+                    "clusterless_mark_kde_max_neighbors": int(args.clusterless_mark_kde_max_neighbors),
                 }
                 if use_clusterless and clusterless_encoding is not None:
                     row.update({
@@ -322,6 +372,10 @@ def _score(args) -> pd.DataFrame:
                     "clusterless_mark_prior_count": float(args.clusterless_mark_prior_count),
                     "clusterless_mark_variance_floor": float(args.clusterless_mark_variance_floor),
                     "clusterless_rate_floor_hz": float(args.clusterless_rate_floor_hz),
+                    "clusterless_mark_likelihood": str(args.clusterless_mark_likelihood),
+                    "clusterless_mark_kde_bandwidth": _optional_float_setting(args.clusterless_mark_kde_bandwidth),
+                    "clusterless_mark_kde_spatial_sigma_bins": _optional_float_setting(args.clusterless_mark_kde_spatial_sigma_bins),
+                    "clusterless_mark_kde_max_neighbors": int(args.clusterless_mark_kde_max_neighbors),
                 })
                 if not args.continue_on_error:
                     raise
@@ -415,6 +469,29 @@ def _summary(df: pd.DataFrame) -> pd.DataFrame:
     )
 
 
+def _summary_for_support(summary: pd.DataFrame, support: str) -> pd.DataFrame:
+    if summary.empty:
+        return summary.copy()
+    return summary[summary["evidence_support"].eq(support)].copy()
+
+
+def _support_counts(df: pd.DataFrame) -> pd.DataFrame:
+    df = _ensure_evidence_support_columns(df)
+    if df.empty:
+        return pd.DataFrame(columns=["evidence_support", "evidence_comparison", "evidence_comparable", "rows", "successful_rows", "events", "models"])
+    return (
+        df.groupby(["evidence_support", "evidence_comparison", "evidence_comparable"], dropna=False)
+        .agg(
+            rows=("model", "size"),
+            successful_rows=("status", lambda status: int(status.eq("success").sum())),
+            events=("event_index", "nunique"),
+            models=("model", "nunique"),
+        )
+        .reset_index()
+        .sort_values(["evidence_comparable", "evidence_support"], ascending=[False, True])
+    )
+
+
 def _counts(df: pd.DataFrame) -> pd.DataFrame:
     df = _ensure_evidence_support_columns(df)
     ok = df[df["status"] == "success"]
@@ -445,8 +522,12 @@ def _counts(df: pd.DataFrame) -> pd.DataFrame:
 def _write(df: pd.DataFrame, outdir: Path) -> None:
     outdir.mkdir(parents=True, exist_ok=True)
     df.to_csv(outdir / "event_model_evidence.csv", index=False)
-    _summary(df).to_csv(outdir / "model_evidence_summary.csv", index=False)
+    summary = _summary(df)
+    summary.to_csv(outdir / "model_evidence_summary.csv", index=False)
+    _summary_for_support(summary, EXACT_EVIDENCE_SUPPORT).to_csv(outdir / "exact_model_evidence_summary.csv", index=False)
+    _summary_for_support(summary, TRUNCATED_EVIDENCE_SUPPORT).to_csv(outdir / "truncated_lower_bound_summary.csv", index=False)
     _counts(df).to_csv(outdir / "best_model_counts.csv", index=False)
+    _support_counts(df).to_csv(outdir / "evidence_support_counts.csv", index=False)
     ok = df[df["status"] == "success"]
     metrics = ["log_evidence", "relative_log_evidence", "model_probability"]
     if "truncated_relative_log_evidence" in ok:
@@ -498,6 +579,24 @@ def main() -> int:
     p.add_argument("--clusterless-mark-prior-count", type=float, default=1.0)
     p.add_argument("--clusterless-mark-variance-floor", type=float, default=1.0)
     p.add_argument("--clusterless-rate-floor-hz", type=float, default=1e-4)
+    p.add_argument(
+        "--clusterless-mark-likelihood",
+        default="local-kde",
+        help="Clusterless mark likelihood: local-kde or diagonal-gaussian. Aliases accepted by ClusterlessMarkConfig are also valid.",
+    )
+    p.add_argument(
+        "--clusterless-mark-kde-bandwidth",
+        type=float,
+        default=None,
+        help="Optional scalar mark-space KDE bandwidth. Empty/default uses the data-adaptive bandwidth.",
+    )
+    p.add_argument(
+        "--clusterless-mark-kde-spatial-sigma-bins",
+        type=float,
+        default=None,
+        help="Optional spatial weighting sigma, in grid bins, for local mark KDE support. Empty/default reuses clusterless mark smoothing sigma.",
+    )
+    p.add_argument("--clusterless-mark-kde-max-neighbors", type=int, default=256)
     p.add_argument("--time-bin-s", type=float, default=0.02)
     p.add_argument(
         "--spike-rate-scale",
@@ -526,9 +625,18 @@ def main() -> int:
     df = _score(args)
     if df.empty:
         raise RuntimeError("No scores were generated.")
-    print(_summary(df).to_string(index=False))
+    summary = _summary(df)
+    print(summary.to_string(index=False))
     print("\nBest-model counts:")
     print(_counts(df).to_string(index=False))
+    support_counts = _support_counts(df)
+    if not support_counts.empty:
+        print("\nEvidence-support counts:")
+        print(support_counts.to_string(index=False))
+        print(
+            "\nInterpretation: exact_full_grid rows are comparable model evidences; "
+            "truncated_full_grid rows are candidate-support lower bounds and must be ranked only within the lower-bound diagnostic group."
+        )
     print(f"\nRows: {len(df)}")
     print(f"Failures: {int((df['status'] != 'success').sum())}")
     _write(df, Path(args.output))

@@ -34,6 +34,9 @@ class BenchmarkConfig:
     emissions: EmissionConfig = field(default_factory=EmissionConfig)
     test_cell_fraction: float = 0.25
     max_events_per_session: int | None = None
+    n_cell_splits: int = 1
+    randomize_event_subset: bool = False
+    event_subset_seed: int | None = None
     candidate_top_k: int = 64
     clusterless_mark_smoothing_sigma_bins: float = 1.0
     clusterless_mark_prior_count: float = 1.0
@@ -136,8 +139,26 @@ def bootstrap_delta_ci(
 
 def _score_session(session: ReplaySession, config: BenchmarkConfig) -> list[dict[str, object]]:
     encoding = fit_place_field_encoding(session, config.encoding)
-    model_objects = _build_models(config, session=session)
-    train_cells, test_cells = _split_cells(encoding.cell_ids, config.test_cell_fraction, config.random_seed)
+    rows: list[dict[str, object]] = []
+    for split_index in range(_n_cell_splits(config)):
+        rows.extend(_score_session_split(session, config, encoding, split_index))
+    return rows
+
+
+def _score_session_split(
+    session: ReplaySession,
+    config: BenchmarkConfig,
+    encoding,
+    split_index: int,
+) -> list[dict[str, object]]:
+    split_seed = _cell_split_seed(config.random_seed, split_index)
+    split_config = replace(config, random_seed=split_seed)
+    model_objects = _build_models(split_config, session=session)
+    train_cells, test_cells = _split_cells(
+        encoding.cell_ids,
+        config.test_cell_fraction,
+        split_seed,
+    )
     if test_cells.size == 0 or train_cells.size == 0:
         return []
     train_encoding = encoding.select_cells(train_cells)
@@ -147,6 +168,7 @@ def _score_session(session: ReplaySession, config: BenchmarkConfig) -> list[dict
     clusterless_train_session: ReplaySession | None = None
     clusterless_joint_session: ReplaySession | None = None
     clusterless_train_encoding = None
+    clusterless_joint_encoding = None
     if has_clusterless_models:
         clusterless_train_session = _session_with_mark_cell_subset(
             session,
@@ -168,8 +190,9 @@ def _score_session(session: ReplaySession, config: BenchmarkConfig) -> list[dict
             clusterless_train_session,
             clusterless_config,
         )
+        clusterless_joint_encoding = clusterless_train_encoding
 
-    event_indices = _event_indices(session, config)
+    event_indices = _event_indices(session, config, split_index=split_index)
     rows: list[dict[str, object]] = []
     for event_index in event_indices:
         train_emissions = build_emissions(session, train_encoding, int(event_index), config.emissions)
@@ -230,6 +253,7 @@ def _score_session(session: ReplaySession, config: BenchmarkConfig) -> list[dict
                     "train_cell_ids": _format_cell_ids(train_cells),
                     "test_cell_ids": _format_cell_ids(test_cells),
                     **_benchmark_config_metadata(config),
+                    **_benchmark_split_metadata(config, split_index),
                     **_session_mark_diagnostics(
                         session,
                         clusterless_joint_encoding.mark_likelihood
@@ -243,6 +267,46 @@ def _score_session(session: ReplaySession, config: BenchmarkConfig) -> list[dict
                 }
             )
     return rows
+
+
+def _n_cell_splits(config: BenchmarkConfig) -> int:
+    n_splits = int(config.n_cell_splits)
+    if n_splits < 1:
+        raise ValueError("n_cell_splits must be at least 1")
+    return n_splits
+
+
+def _cell_split_seed(base_seed: int, split_index: int) -> int:
+    return int(base_seed) + int(split_index)
+
+
+def _event_subset_random_seed(
+    config: BenchmarkConfig,
+    split_index: int,
+) -> int:
+    base_seed = config.event_subset_seed
+    if base_seed is None:
+        base_seed = config.random_seed
+    return int(base_seed) + 1_000_003 * int(split_index)
+
+
+def _benchmark_split_metadata(
+    config: BenchmarkConfig,
+    split_index: int,
+) -> dict[str, object]:
+    return {
+        "benchmark_cell_split_index": int(split_index),
+        "benchmark_cell_split_count": int(config.n_cell_splits),
+        "benchmark_cell_split_seed": int(
+            _cell_split_seed(config.random_seed, split_index)
+        ),
+        "benchmark_randomize_event_subset": bool(config.randomize_event_subset),
+        "benchmark_event_subset_seed": (
+            int(_event_subset_random_seed(config, split_index))
+            if config.randomize_event_subset
+            else np.nan
+        ),
+    }
 
 
 def _score_train_joint_model(model, train_emissions, joint_emissions, bin_centers, occupancy_s=None):
@@ -361,6 +425,11 @@ def _benchmark_config_metadata(config: BenchmarkConfig) -> dict[str, object]:
     return {
         "benchmark_test_cell_fraction": float(config.test_cell_fraction),
         "benchmark_random_seed": int(config.random_seed),
+        "benchmark_n_cell_splits": int(config.n_cell_splits),
+        "benchmark_randomize_event_subset": bool(config.randomize_event_subset),
+        "benchmark_event_subset_base_seed": (
+            np.nan if config.event_subset_seed is None else int(config.event_subset_seed)
+        ),
         "encoding_bin_size_cm": float(config.encoding.bin_size_cm),
         "encoding_smoothing_sigma_bins": float(config.encoding.smoothing_sigma_bins),
         "encoding_min_speed_cm_s": float(config.encoding.min_speed_cm_s),
@@ -419,7 +488,12 @@ def _session_mark_diagnostics(
     }
 
 
-def _event_indices(session: ReplaySession, config: BenchmarkConfig) -> np.ndarray:
+def _event_indices(
+    session: ReplaySession,
+    config: BenchmarkConfig,
+    *,
+    split_index: int = 0,
+) -> np.ndarray:
     if config.event_epoch == "run":
         indices = session.ripple_indices_in_run()
     elif config.event_epoch == "all":
@@ -427,7 +501,14 @@ def _event_indices(session: ReplaySession, config: BenchmarkConfig) -> np.ndarra
     else:
         raise ValueError("event_epoch must be 'run' or 'all'")
     if config.max_events_per_session is not None:
-        indices = indices[: config.max_events_per_session]
+        max_events = int(config.max_events_per_session)
+        if max_events < 0:
+            raise ValueError("max_events_per_session must be non-negative")
+        if config.randomize_event_subset and max_events < indices.size:
+            rng = np.random.default_rng(_event_subset_random_seed(config, split_index))
+            indices = np.sort(rng.choice(indices, size=max_events, replace=False))
+        else:
+            indices = indices[:max_events]
     return indices
 
 
@@ -570,13 +651,21 @@ def _is_best_static_baseline_model(model_name: object) -> bool:
     return False
 
 
+def _benchmark_event_group_columns(frame: pd.DataFrame) -> list[str]:
+    columns = ["session", "event_index"]
+    if "benchmark_cell_split_index" in frame.columns:
+        columns.append("benchmark_cell_split_index")
+    return columns
+
+
 def _add_relative_metrics(frame: pd.DataFrame) -> pd.DataFrame:
     frame = ensure_evidence_support_columns(frame)
+    group_columns = _benchmark_event_group_columns(frame)
     static_mask = frame["model"].map(_is_best_static_baseline_model)
     exact_static_mask = static_mask & frame["evidence_comparable"].fillna(False).astype(bool)
     best_static = (
         frame[exact_static_mask]
-        .groupby(["session", "event_index"])["heldout_log_likelihood"]
+        .groupby(group_columns)["heldout_log_likelihood"]
         .max()
         .rename("best_static_heldout_log_likelihood")
         .reset_index()
@@ -584,15 +673,15 @@ def _add_relative_metrics(frame: pd.DataFrame) -> pd.DataFrame:
     truncated_static_mask = static_mask & frame["evidence_support"].eq(TRUNCATED_EVIDENCE_SUPPORT)
     best_static_truncated_lower_bound = (
         frame[truncated_static_mask]
-        .groupby(["session", "event_index"])["heldout_log_likelihood"]
+        .groupby(group_columns)["heldout_log_likelihood"]
         .max()
         .rename("best_static_truncated_lower_bound_heldout_log_likelihood")
         .reset_index()
     )
-    merged = frame.merge(best_static, on=["session", "event_index"], how="left")
+    merged = frame.merge(best_static, on=group_columns, how="left")
     merged = merged.merge(
         best_static_truncated_lower_bound,
-        on=["session", "event_index"],
+        on=group_columns,
         how="left",
     )
     denom = pd.Series(

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from itertools import product
 from pathlib import Path
 
 import numpy as np
@@ -23,6 +24,39 @@ class GroundTruthConfig:
     min_dwell_s: float = 0.2
     future_horizon_s: float = 30.0
     event_epoch: str = "run"
+
+
+@dataclass(frozen=True)
+class GroundTruthSensitivityConfig:
+    """Parameter grid for behavioral-label sensitivity analysis."""
+
+    visit_radii_cm: tuple[float, ...] = (7.5, 10.0, 12.5)
+    min_dwells_s: tuple[float, ...] = (0.1, 0.2, 0.4)
+    future_horizons_s: tuple[float, ...] = (15.0, 30.0, 60.0)
+    well_arrival_window_s: float = 1.0
+    event_epoch: str = "run"
+
+    def ground_truth_configs(self) -> tuple[GroundTruthConfig, ...]:
+        """Expand the sensitivity grid into concrete label configurations."""
+
+        if not self.visit_radii_cm:
+            raise ValueError("visit_radii_cm must contain at least one value")
+        if not self.min_dwells_s:
+            raise ValueError("min_dwells_s must contain at least one value")
+        if not self.future_horizons_s:
+            raise ValueError("future_horizons_s must contain at least one value")
+        return tuple(
+            GroundTruthConfig(
+                well_arrival_window_s=float(self.well_arrival_window_s),
+                visit_radius_cm=float(visit_radius_cm),
+                min_dwell_s=float(min_dwell_s),
+                future_horizon_s=float(future_horizon_s),
+                event_epoch=self.event_epoch,
+            )
+            for visit_radius_cm, min_dwell_s, future_horizon_s in product(
+                self.visit_radii_cm, self.min_dwells_s, self.future_horizons_s
+            )
+        )
 
 
 def generate_behavioral_ground_truth(
@@ -296,8 +330,11 @@ def compare_scores_to_ground_truth(
         models=model_names,
     )
 
-    for session_id, session_scores in scores_frame.groupby("session", sort=False):
-        session = sessions.get(str(session_id))
+    decode_group_columns = _decode_group_columns(scores_frame, benchmark_decode)
+    for group_key, session_scores in scores_frame.groupby(decode_group_columns, sort=False):
+        group_values = _group_key_values(decode_group_columns, group_key)
+        session_id = str(group_values["session"])
+        session = sessions.get(session_id)
         if session is None:
             continue
         models = _build_models(model_config, session=session)
@@ -407,12 +444,288 @@ def compare_scores_to_ground_truth(
     return comparison
 
 
+@dataclass(frozen=True)
+class GroundTruthSensitivityResult:
+    """Event-level and aggregate outputs from behavioral-label sensitivity."""
+
+    rows: pd.DataFrame
+    per_setting_summary: pd.DataFrame
+    robustness_summary: pd.DataFrame
+
+    def write(self, output: str | Path) -> None:
+        """Write sensitivity outputs into a directory."""
+
+        output = Path(output)
+        output.mkdir(parents=True, exist_ok=True)
+        self.rows.to_csv(output / "ground_truth_sensitivity_rows.csv", index=False)
+        self.per_setting_summary.to_csv(
+            output / "ground_truth_sensitivity_by_setting.csv",
+            index=False,
+        )
+        self.robustness_summary.to_csv(
+            output / "ground_truth_sensitivity_robustness.csv",
+            index=False,
+        )
+
+
+def compare_scores_to_ground_truth_sensitivity(
+    root: str | Path,
+    scores: str | Path | pd.DataFrame,
+    *,
+    sensitivity_config: GroundTruthSensitivityConfig | None = None,
+    encoding_config: EncodingConfig | None = None,
+    emission_config: EmissionConfig | None = None,
+    test_cell_fraction: float = 0.25,
+    candidate_top_k: int = 64,
+    pyrecest_particles: int = 512,
+    pyrecest_alpha: float = 0.80,
+    pyrecest_beta: float = 1.00,
+    pyrecest_process_noise_sigma_cm_s: float = 60.0,
+    pyrecest_position_jump_sigma_cm: float = 25.0,
+    pyrecest_jump_probability: float = 0.03,
+    pyrecest_goal_reset_probability: float = 0.02,
+    pyrecest_position_proposal_probability: float = 0.0,
+    pyrecest_initial_velocity_sigma_cm_s: float = 120.0,
+    pyrecest_imm_mode_stickiness: float = 0.95,
+    pyrecest_imm_stationary_velocity_decay: float = 0.0,
+    pyrecest_imm_diffusion_velocity_decay: float = 0.0,
+    pyrecest_imm_momentum_velocity_decay: float = 0.95,
+    pyrecest_imm_jump_fraction: float = 0.9,
+    pyrecest_imm_jump_velocity_decay: float = 0.25,
+    random_seed: int = 1,
+) -> GroundTruthSensitivityResult:
+    """Evaluate behavioral-score robustness across label-parameter settings.
+
+    Decoding is run once using the first grid setting. Each additional setting
+    only regenerates the behavioral proxy labels and recomputes correctness,
+    endpoint-error, and true-well-posterior metrics. This keeps the sensitivity
+    analysis focused on label robustness rather than stochastic decoder noise.
+    """
+
+    sensitivity_config = (
+        GroundTruthSensitivityConfig()
+        if sensitivity_config is None
+        else sensitivity_config
+    )
+    label_configs = sensitivity_config.ground_truth_configs()
+    reference_config = label_configs[0]
+    reference_comparison = compare_scores_to_ground_truth(
+        root,
+        scores,
+        ground_truth_config=reference_config,
+        encoding_config=encoding_config,
+        emission_config=emission_config,
+        test_cell_fraction=test_cell_fraction,
+        candidate_top_k=candidate_top_k,
+        pyrecest_particles=pyrecest_particles,
+        pyrecest_alpha=pyrecest_alpha,
+        pyrecest_beta=pyrecest_beta,
+        pyrecest_process_noise_sigma_cm_s=pyrecest_process_noise_sigma_cm_s,
+        pyrecest_position_jump_sigma_cm=pyrecest_position_jump_sigma_cm,
+        pyrecest_jump_probability=pyrecest_jump_probability,
+        pyrecest_goal_reset_probability=pyrecest_goal_reset_probability,
+        pyrecest_position_proposal_probability=pyrecest_position_proposal_probability,
+        pyrecest_initial_velocity_sigma_cm_s=pyrecest_initial_velocity_sigma_cm_s,
+        pyrecest_imm_mode_stickiness=pyrecest_imm_mode_stickiness,
+        pyrecest_imm_stationary_velocity_decay=pyrecest_imm_stationary_velocity_decay,
+        pyrecest_imm_diffusion_velocity_decay=pyrecest_imm_diffusion_velocity_decay,
+        pyrecest_imm_momentum_velocity_decay=pyrecest_imm_momentum_velocity_decay,
+        pyrecest_imm_jump_fraction=pyrecest_imm_jump_fraction,
+        pyrecest_imm_jump_velocity_decay=pyrecest_imm_jump_velocity_decay,
+        random_seed=random_seed,
+    )
+    score_decode_base = _ground_truth_sensitivity_score_decode_base(
+        reference_comparison
+    )
+    frames: list[pd.DataFrame] = []
+    for label_config in label_configs:
+        gt_frame = generate_behavioral_ground_truth(root, config=label_config)
+        comparison = score_decode_base.merge(
+            gt_frame,
+            on=["session", "event_index"],
+            how="left",
+        )
+        comparison = _add_ground_truth_metrics(
+            comparison,
+            decoded=pd.DataFrame(),
+            gt_frame=gt_frame,
+        )
+        comparison = _add_ground_truth_sensitivity_parameter_columns(
+            comparison,
+            label_config,
+        )
+        frames.append(comparison)
+    rows = pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
+    per_setting_summary = summarize_ground_truth_sensitivity_by_setting(rows)
+    robustness_summary = summarize_ground_truth_sensitivity(rows)
+    return GroundTruthSensitivityResult(
+        rows=rows,
+        per_setting_summary=per_setting_summary,
+        robustness_summary=robustness_summary,
+    )
+
+
+def summarize_ground_truth_sensitivity_by_setting(frame: pd.DataFrame) -> pd.DataFrame:
+    """Summarize behavioral metrics for each model and label setting."""
+
+    columns = [
+        "model",
+        *_GROUND_TRUTH_SENSITIVITY_PARAMETER_COLUMNS,
+        "rows",
+        "goal_accuracy",
+        "active_goal_accuracy",
+        "median_endpoint_error_cm",
+        "mean_true_well_posterior",
+    ]
+    if frame.empty or "valid_label" not in frame.columns or "goal_correct" not in frame.columns:
+        return pd.DataFrame(columns=columns)
+    valid = frame[_valid_label_mask(frame["valid_label"], frame.index).to_numpy(dtype=bool)]
+    if valid.empty:
+        return pd.DataFrame(columns=columns)
+    if "active_goal_correct" not in valid.columns:
+        valid = valid.copy()
+        valid["active_goal_correct"] = np.nan
+    return (
+        valid.groupby(["model", *_GROUND_TRUTH_SENSITIVITY_PARAMETER_COLUMNS], as_index=False)
+        .agg(
+            rows=("event_index", "count"),
+            goal_accuracy=("goal_correct", "mean"),
+            active_goal_accuracy=("active_goal_correct", "mean"),
+            median_endpoint_error_cm=("endpoint_error_cm", "median"),
+            mean_true_well_posterior=("true_well_posterior", "mean"),
+        )
+        .sort_values(["model", *_GROUND_TRUTH_SENSITIVITY_PARAMETER_COLUMNS])
+    )
+
+
+def summarize_ground_truth_sensitivity(frame: pd.DataFrame) -> pd.DataFrame:
+    """Aggregate per-setting summaries into robustness ranges per model."""
+
+    per_setting = summarize_ground_truth_sensitivity_by_setting(frame)
+    columns = [
+        "model",
+        "settings",
+        "min_rows",
+        "max_rows",
+        "min_goal_accuracy",
+        "median_goal_accuracy",
+        "max_goal_accuracy",
+        "goal_accuracy_range",
+        "min_active_goal_accuracy",
+        "median_active_goal_accuracy",
+        "max_active_goal_accuracy",
+        "active_goal_accuracy_range",
+        "min_median_endpoint_error_cm",
+        "median_median_endpoint_error_cm",
+        "max_median_endpoint_error_cm",
+        "min_mean_true_well_posterior",
+        "median_mean_true_well_posterior",
+        "max_mean_true_well_posterior",
+    ]
+    if per_setting.empty:
+        return pd.DataFrame(columns=columns)
+    return (
+        per_setting.groupby("model", as_index=False)
+        .agg(
+            settings=("goal_accuracy", "count"),
+            min_rows=("rows", "min"),
+            max_rows=("rows", "max"),
+            min_goal_accuracy=("goal_accuracy", "min"),
+            median_goal_accuracy=("goal_accuracy", "median"),
+            max_goal_accuracy=("goal_accuracy", "max"),
+            goal_accuracy_range=(
+                "goal_accuracy",
+                lambda values: float(values.max() - values.min()),
+            ),
+            min_active_goal_accuracy=("active_goal_accuracy", "min"),
+            median_active_goal_accuracy=("active_goal_accuracy", "median"),
+            max_active_goal_accuracy=("active_goal_accuracy", "max"),
+            active_goal_accuracy_range=(
+                "active_goal_accuracy",
+                lambda values: float(values.max() - values.min()),
+            ),
+            min_median_endpoint_error_cm=("median_endpoint_error_cm", "min"),
+            median_median_endpoint_error_cm=("median_endpoint_error_cm", "median"),
+            max_median_endpoint_error_cm=("median_endpoint_error_cm", "max"),
+            min_mean_true_well_posterior=("mean_true_well_posterior", "min"),
+            median_mean_true_well_posterior=("mean_true_well_posterior", "median"),
+            max_mean_true_well_posterior=("mean_true_well_posterior", "max"),
+        )
+        .sort_values("model")
+    )
+
+
+_GROUND_TRUTH_COLUMNS_FOR_SENSITIVITY = {
+    "ripple_peak",
+    "active_goal_id",
+    "true_well_id",
+    "true_well_x",
+    "true_well_y",
+    "arrival_time",
+    "time_to_arrival_s",
+    "valid_label",
+    "exclude_reason",
+    "goal_correct",
+    "endpoint_error_cm",
+    "true_well_posterior",
+    "true_well_rank",
+}
+
+_GROUND_TRUTH_SENSITIVITY_PARAMETER_COLUMNS = (
+    "visit_radius_cm",
+    "min_dwell_s",
+    "future_horizon_s",
+    "well_arrival_window_s",
+    "event_epoch",
+)
+
+
+def _ground_truth_sensitivity_score_decode_base(frame: pd.DataFrame) -> pd.DataFrame:
+    return frame.drop(
+        columns=[
+            column
+            for column in _GROUND_TRUTH_COLUMNS_FOR_SENSITIVITY
+            if column in frame.columns
+        ]
+    )
+
+
+def _add_ground_truth_sensitivity_parameter_columns(
+    frame: pd.DataFrame,
+    config: GroundTruthConfig,
+) -> pd.DataFrame:
+    frame = frame.copy()
+    frame["visit_radius_cm"] = float(config.visit_radius_cm)
+    frame["min_dwell_s"] = float(config.min_dwell_s)
+    frame["future_horizon_s"] = float(config.future_horizon_s)
+    frame["well_arrival_window_s"] = float(config.well_arrival_window_s)
+    frame["event_epoch"] = config.event_epoch
+    return frame
+
+
 def _score_table_is_heldout_benchmark(scores_frame: pd.DataFrame) -> bool:
     return {
         "heldout_log_likelihood",
         "train_log_likelihood",
         "joint_log_likelihood",
     }.issubset(scores_frame.columns)
+
+
+def _decode_group_columns(scores_frame: pd.DataFrame, benchmark_decode: bool) -> list[str]:
+    columns = ["session"]
+    if benchmark_decode and "benchmark_cell_split_index" in scores_frame.columns:
+        columns.append("benchmark_cell_split_index")
+    return columns
+
+
+def _group_key_values(columns: list[str], group_key: object) -> dict[str, object]:
+    if len(columns) == 1:
+        values = (group_key,)
+    else:
+        values = tuple(group_key) if isinstance(group_key, tuple) else (group_key,)
+    if len(values) != len(columns):
+        raise ValueError("group key shape does not match group columns")
+    return dict(zip(columns, values))
 
 
 def _model_names_for_scores(scores_frame: pd.DataFrame) -> tuple[str, ...]:
@@ -570,10 +883,15 @@ def _cell_split_for_score_rows(
         "benchmark_test_cell_fraction",
         config.test_cell_fraction,
     )
-    random_seed = _unique_int_from_column(
+    benchmark_random_seed = _unique_int_from_column(
         session_scores,
         "benchmark_random_seed",
         config.random_seed,
+    )
+    random_seed = _unique_int_from_column(
+        session_scores,
+        "benchmark_cell_split_seed",
+        benchmark_random_seed,
     )
     return _split_cells(encoding.cell_ids, test_cell_fraction, random_seed)
 
@@ -968,6 +1286,14 @@ def _add_ground_truth_metrics(
                 comparison[decoded_col].astype("float64") == true_ids.astype("float64"),
                 np.nan,
             )
+    active_goal_ids = comparison.get("active_goal_id")
+    if active_goal_ids is not None:
+        active_valid = valid_bool & active_goal_ids.notna()
+        comparison["active_goal_correct"] = np.where(
+            active_valid,
+            decoded_ids.astype("float64") == active_goal_ids.astype("float64"),
+            np.nan,
+        )
     if {"decoded_endpoint_x", "decoded_endpoint_y", "true_well_x", "true_well_y"}.issubset(
         comparison.columns
     ):

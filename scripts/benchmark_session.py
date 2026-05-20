@@ -123,6 +123,20 @@ def score_explicit_events(args: argparse.Namespace) -> BenchmarkResult:
         test_cell_fraction=args.test_cell_fraction,
         candidate_top_k=args.candidate_top_k,
         pyrecest_particles=args.pyrecest_particles,
+        pyrecest_alpha=args.pyrecest_alpha,
+        pyrecest_beta=args.pyrecest_beta,
+        pyrecest_process_noise_sigma_cm_s=args.pyrecest_process_noise_sigma_cm_s,
+        pyrecest_position_jump_sigma_cm=args.pyrecest_position_jump_sigma_cm,
+        pyrecest_jump_probability=args.pyrecest_jump_probability,
+        pyrecest_goal_reset_probability=args.pyrecest_goal_reset_probability,
+        pyrecest_position_proposal_probability=args.pyrecest_position_proposal_probability,
+        pyrecest_initial_velocity_sigma_cm_s=args.pyrecest_initial_velocity_sigma_cm_s,
+        pyrecest_imm_mode_stickiness=args.pyrecest_imm_mode_stickiness,
+        pyrecest_imm_stationary_velocity_decay=args.pyrecest_imm_stationary_velocity_decay,
+        pyrecest_imm_diffusion_velocity_decay=args.pyrecest_imm_diffusion_velocity_decay,
+        pyrecest_imm_momentum_velocity_decay=args.pyrecest_imm_momentum_velocity_decay,
+        pyrecest_imm_jump_fraction=args.pyrecest_imm_jump_fraction,
+        pyrecest_imm_jump_velocity_decay=args.pyrecest_imm_jump_velocity_decay,
         random_seed=args.random_seed,
         models=tuple(args.models),
     )
@@ -267,6 +281,24 @@ def main() -> int:
     )
     parser.add_argument("--candidate-top-k", default=64, type=int)
     parser.add_argument("--pyrecest-particles", default=512, type=int)
+    parser.add_argument("--pyrecest-alpha", default=0.80, type=float)
+    parser.add_argument("--pyrecest-beta", default=1.00, type=float)
+    parser.add_argument("--pyrecest-process-noise-sigma-cm-s", default=60.0, type=float)
+    parser.add_argument("--pyrecest-position-jump-sigma-cm", default=25.0, type=float)
+    parser.add_argument("--pyrecest-jump-probability", default=0.03, type=float)
+    parser.add_argument("--pyrecest-goal-reset-probability", default=0.02, type=float)
+    parser.add_argument(
+        "--pyrecest-position-proposal-probability",
+        default=0.0,
+        type=float,
+    )
+    parser.add_argument("--pyrecest-initial-velocity-sigma-cm-s", default=120.0, type=float)
+    parser.add_argument("--pyrecest-imm-mode-stickiness", default=0.95, type=float)
+    parser.add_argument("--pyrecest-imm-stationary-velocity-decay", default=0.0, type=float)
+    parser.add_argument("--pyrecest-imm-diffusion-velocity-decay", default=0.0, type=float)
+    parser.add_argument("--pyrecest-imm-momentum-velocity-decay", default=0.95, type=float)
+    parser.add_argument("--pyrecest-imm-jump-fraction", default=0.9, type=float)
+    parser.add_argument("--pyrecest-imm-jump-velocity-decay", default=0.25, type=float)
     parser.add_argument("--test-cell-fraction", default=0.25, type=float)
     parser.add_argument("--random-seed", default=1, type=int)
     parser.add_argument("--time-bin-s", default=0.02, type=float)

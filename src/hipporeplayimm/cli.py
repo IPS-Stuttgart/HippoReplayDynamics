@@ -25,8 +25,15 @@ from .data import load_open_field_sessions
 from .encoding import EmissionConfig, EncodingConfig, build_emissions, fit_place_field_encoding
 from .ground_truth import (
     GroundTruthConfig,
+    GroundTruthSensitivityConfig,
     compare_scores_to_ground_truth,
+    compare_scores_to_ground_truth_sensitivity,
     generate_behavioral_ground_truth,
+)
+from .observation_sweep import (
+    ObservationSweepConfig,
+    run_observation_parameter_sweep,
+    write_observation_sweep_outputs,
 )
 from .position_validation import (
     VALIDATED_POSITION_BIN_SIZE_CM,
@@ -65,6 +72,18 @@ def main(argv: list[str] | None = None) -> int:
     benchmark_parser.add_argument("--preset", default="open-field-loso")
     benchmark_parser.add_argument("--output")
     benchmark_parser.add_argument("--max-events", type=int)
+    benchmark_parser.add_argument(
+        "--n-cell-splits",
+        type=int,
+        default=1,
+        help="Number of independent held-out cell splits to score.",
+    )
+    benchmark_parser.add_argument(
+        "--randomize-event-subset",
+        action="store_true",
+        help="Sample --max-events without replacement instead of taking the first events.",
+    )
+    benchmark_parser.add_argument("--event-subset-seed", type=int)
     benchmark_parser.add_argument("--candidate-top-k", type=int, default=64)
     benchmark_parser.add_argument("--test-cell-fraction", type=float, default=0.25)
     benchmark_parser.add_argument("--random-seed", type=int, default=1)
@@ -130,6 +149,27 @@ def main(argv: list[str] | None = None) -> int:
     compare_parser.add_argument("--min-dwell-s", type=float, default=0.2)
     compare_parser.add_argument("--future-horizon-s", type=float, default=30.0)
 
+    sensitivity_parser = subparsers.add_parser("ground-truth-sensitivity")
+    sensitivity_parser.add_argument("root")
+    sensitivity_parser.add_argument("--scores", required=True)
+    sensitivity_parser.add_argument("--output", required=True)
+    sensitivity_parser.add_argument("--candidate-top-k", type=int, default=64)
+    sensitivity_parser.add_argument("--test-cell-fraction", type=float, default=0.25)
+    sensitivity_parser.add_argument("--random-seed", type=int, default=1)
+    sensitivity_parser.add_argument("--time-bin-ms", type=float, default=20.0)
+    sensitivity_parser.add_argument("--spike-rate-scale", type=float, default=1.0)
+    _add_encoding_arguments(sensitivity_parser)
+    _add_pyrecest_scalar_arguments(sensitivity_parser)
+    sensitivity_parser.add_argument("--visit-radii-cm", default="7.5,10.0,12.5")
+    sensitivity_parser.add_argument("--min-dwells-s", default="0.1,0.2,0.4")
+    sensitivity_parser.add_argument("--future-horizons-s", default="15.0,30.0,60.0")
+    sensitivity_parser.add_argument("--well-arrival-window-s", type=float, default=1.0)
+    sensitivity_parser.add_argument(
+        "--event-epoch",
+        choices=("run", "all"),
+        default="run",
+    )
+
     validate_parser = subparsers.add_parser("validate-position")
     validate_parser.add_argument("root")
     validate_parser.add_argument("--output", required=True)
@@ -142,6 +182,44 @@ def main(argv: list[str] | None = None) -> int:
     validate_parser.add_argument("--bin-size-cm", type=float, default=VALIDATED_POSITION_BIN_SIZE_CM)
     validate_parser.add_argument("--smoothing-sigma-bins", type=float, default=VALIDATED_POSITION_SMOOTHING_SIGMA_BINS)
     validate_parser.add_argument("--min-speed-cm-s", type=float, default=VALIDATED_POSITION_MIN_SPEED_CM_S)
+    validate_parser.add_argument("--min-occupancy-s", type=float, default=EncodingConfig().min_occupancy_s)
+    validate_parser.add_argument("--rate-floor-hz", type=float, default=EncodingConfig().rate_floor_hz)
+
+    observation_parser = subparsers.add_parser("sweep-observation")
+    observation_parser.add_argument("root")
+    observation_parser.add_argument("--output", required=True)
+    observation_parser.add_argument(
+        "--sessions",
+        default="Rat1/Open1",
+        help="Comma-separated session IDs, or 'all' for all loaded sessions.",
+    )
+    observation_parser.add_argument("--decode-bin-s", type=float, default=VALIDATED_POSITION_DECODE_BIN_S)
+    observation_parser.add_argument("--n-folds", type=int, default=5)
+    observation_parser.add_argument("--max-windows", type=int)
+    observation_parser.add_argument("--min-spikes-per-window", type=int, default=0)
+    observation_parser.add_argument("--random-seed", type=int, default=1)
+    observation_parser.add_argument("--bin-size-cm", default=f"{VALIDATED_POSITION_BIN_SIZE_CM:g}")
+    observation_parser.add_argument("--smoothing-sigma-bins", default=f"{VALIDATED_POSITION_SMOOTHING_SIGMA_BINS:g}")
+    observation_parser.add_argument("--min-speed-cm-s", default=f"{VALIDATED_POSITION_MIN_SPEED_CM_S:g}")
+    observation_parser.add_argument("--min-occupancy-s", default=f"{EncodingConfig().min_occupancy_s:g}")
+    observation_parser.add_argument("--rate-floor-hz", default=f"{EncodingConfig().rate_floor_hz:g}")
+    observation_parser.add_argument(
+        "--time-bin-ms",
+        default="3.0",
+        help="Comma-separated replay bin widths, in milliseconds, for synthetic recovery.",
+    )
+    observation_parser.add_argument(
+        "--spike-rate-scale",
+        default="0.5,1.0,2.0",
+        help="Comma-separated replay spike-rate multipliers for synthetic recovery.",
+    )
+    observation_parser.add_argument("--skip-simulation-recovery", action="store_true")
+    observation_parser.add_argument("--simulation-events", default="run")
+    observation_parser.add_argument("--simulation-max-template-events", type=int, default=25)
+    observation_parser.add_argument("--simulation-events-per-model", type=int, default=10)
+    observation_parser.add_argument("--simulation-true-models", default=" ".join(DEFAULT_TRUE_MODELS))
+    observation_parser.add_argument("--simulation-models", default=" ".join(DEFAULT_SCORING_MODELS))
+    observation_parser.add_argument("--simulation-continue-on-error", action="store_true")
 
     recovery_parser = subparsers.add_parser("simulate-recovery")
     recovery_parser.add_argument("root")
@@ -154,6 +232,7 @@ def main(argv: list[str] | None = None) -> int:
     recovery_parser.add_argument("--models", default=" ".join(DEFAULT_SCORING_MODELS))
     recovery_parser.add_argument("--random-seed", type=int, default=1)
     recovery_parser.add_argument("--time-bin-ms", type=float, default=3.0)
+    recovery_parser.add_argument("--spike-rate-scale", type=float, default=1.0)
     recovery_parser.add_argument("--state-space-sigma-cm-sqrt-s", type=float, default=85.0)
     recovery_parser.add_argument("--state-space-stationary-sigma-cm", type=float, default=2.0)
     recovery_parser.add_argument("--state-space-diffusion-sigma-cm-sqrt-s", type=float, default=None)
@@ -230,8 +309,12 @@ def main(argv: list[str] | None = None) -> int:
         return _ground_truth(args)
     if args.command == "compare-ground-truth":
         return _compare_ground_truth(args)
+    if args.command == "ground-truth-sensitivity":
+        return _ground_truth_sensitivity(args)
     if args.command == "validate-position":
         return _validate_position(args)
+    if args.command == "sweep-observation":
+        return _sweep_observation(args)
     if args.command == "simulate-recovery":
         return _simulate_recovery(args)
     if args.command == "sweep-pyrecest":
@@ -266,6 +349,8 @@ def _validate_position(args: argparse.Namespace) -> int:
             bin_size_cm=args.bin_size_cm,
             smoothing_sigma_bins=args.smoothing_sigma_bins,
             min_speed_cm_s=args.min_speed_cm_s,
+            min_occupancy_s=args.min_occupancy_s,
+            rate_floor_hz=args.rate_floor_hz,
         ),
         decode_bin_s=args.decode_bin_s,
         n_folds=args.n_folds,
@@ -276,6 +361,46 @@ def _validate_position(args: argparse.Namespace) -> int:
     )
     result = run_position_decoding_validation(args.root, config)
     result.write(args.output)
+    print(result.summary.to_string(index=False))
+    return 0
+
+
+def _sweep_observation(args: argparse.Namespace) -> int:
+    simulation_max_template_events = (
+        None
+        if args.simulation_max_template_events is not None
+        and args.simulation_max_template_events <= 0
+        else args.simulation_max_template_events
+    )
+    sessions = (
+        None
+        if args.sessions.strip().lower() == "all"
+        else _parse_string_values(args.sessions)
+    )
+    config = ObservationSweepConfig(
+        sessions=sessions,
+        bin_sizes_cm=_parse_float_values(args.bin_size_cm),
+        smoothing_sigmas_bins=_parse_float_values(args.smoothing_sigma_bins),
+        min_speed_cm_s=_parse_float_values(args.min_speed_cm_s),
+        min_occupancy_s=_parse_float_values(args.min_occupancy_s),
+        rate_floor_hz=_parse_float_values(args.rate_floor_hz),
+        time_bin_ms=_parse_float_values(args.time_bin_ms),
+        spike_rate_scales=_parse_float_values(args.spike_rate_scale),
+        decode_bin_s=args.decode_bin_s,
+        n_folds=args.n_folds,
+        max_windows_per_session=args.max_windows,
+        min_spikes_per_window=args.min_spikes_per_window,
+        random_seed=args.random_seed,
+        run_simulation_recovery=not args.skip_simulation_recovery,
+        simulation_events=args.simulation_events,
+        simulation_max_template_events=simulation_max_template_events,
+        simulation_events_per_model=args.simulation_events_per_model,
+        simulation_true_models=parse_model_list(args.simulation_true_models),
+        simulation_scoring_models=parse_model_list(args.simulation_models),
+        simulation_continue_on_error=args.simulation_continue_on_error,
+    )
+    result = run_observation_parameter_sweep(args.root, config)
+    write_observation_sweep_outputs(result, args.output)
     print(result.summary.to_string(index=False))
     return 0
 
@@ -302,6 +427,7 @@ def _simulate_recovery(args: argparse.Namespace) -> int:
         max_template_events=args.max_template_events,
         events_per_model=args.events_per_model,
         random_seed=args.random_seed,
+        spike_rate_scale=args.spike_rate_scale,
         time_bin_s=args.time_bin_ms / 1000.0,
         encoding=_encoding_config_from_args(args),
         state_space=state_space,
@@ -330,6 +456,9 @@ def _benchmark(args: argparse.Namespace) -> int:
         encoding=_encoding_config_from_args(args),
         emissions=_emission_config_from_args(args),
         max_events_per_session=args.max_events,
+        n_cell_splits=args.n_cell_splits,
+        randomize_event_subset=args.randomize_event_subset,
+        event_subset_seed=args.event_subset_seed,
         test_cell_fraction=args.test_cell_fraction,
         random_seed=args.random_seed,
         candidate_top_k=args.candidate_top_k,
@@ -515,6 +644,33 @@ def _compare_ground_truth(args: argparse.Namespace) -> int:
     return 0
 
 
+def _ground_truth_sensitivity(args: argparse.Namespace) -> int:
+    config = GroundTruthSensitivityConfig(
+        visit_radii_cm=_parse_float_values(args.visit_radii_cm),
+        min_dwells_s=_parse_float_values(args.min_dwells_s),
+        future_horizons_s=_parse_float_values(args.future_horizons_s),
+        well_arrival_window_s=args.well_arrival_window_s,
+        event_epoch=args.event_epoch,
+    )
+    result = compare_scores_to_ground_truth_sensitivity(
+        args.root,
+        args.scores,
+        sensitivity_config=config,
+        encoding_config=_encoding_config_from_args(args),
+        emission_config=_emission_config_from_args(args),
+        test_cell_fraction=args.test_cell_fraction,
+        candidate_top_k=args.candidate_top_k,
+        random_seed=args.random_seed,
+        **_pyrecest_scalar_kwargs(args),
+    )
+    result.write(args.output)
+    if result.robustness_summary.empty:
+        print("No valid behavioral labels under any sensitivity setting.")
+    else:
+        print(result.robustness_summary.to_string(index=False))
+    return 0
+
+
 def _ground_truth_config_from_args(args: argparse.Namespace) -> GroundTruthConfig:
     return GroundTruthConfig(
         visit_radius_cm=args.visit_radius_cm,
@@ -528,6 +684,8 @@ def _encoding_config_from_args(args: argparse.Namespace) -> EncodingConfig:
         bin_size_cm=args.bin_size_cm,
         smoothing_sigma_bins=args.smoothing_sigma_bins,
         min_speed_cm_s=args.min_speed_cm_s,
+        min_occupancy_s=args.min_occupancy_s,
+        rate_floor_hz=args.rate_floor_hz,
     )
 
 
@@ -708,6 +866,13 @@ def _split_csv_values(value: str) -> tuple[str, ...]:
     return values
 
 
+def _parse_string_values(value: str) -> tuple[str, ...]:
+    values = tuple(item.strip() for item in value.split(",") if item.strip())
+    if not values:
+        raise ValueError("comma-separated value list must contain at least one value")
+    return values
+
+
 def _parse_models(value: str) -> tuple[str, ...]:
     models = tuple(model.strip() for model in value.split(",") if model.strip())
     if not models:
@@ -741,14 +906,17 @@ def _comparison_summary(frame: pd.DataFrame) -> pd.DataFrame:
     valid = frame[frame["valid_label"].fillna(False)]
     if valid.empty:
         return pd.DataFrame()
+    agg_spec = {
+        "rows": ("event_index", "count"),
+        "goal_accuracy": ("goal_correct", "mean"),
+        "median_endpoint_error_cm": ("endpoint_error_cm", "median"),
+        "mean_true_well_posterior": ("true_well_posterior", "mean"),
+    }
+    if "active_goal_correct" in valid.columns:
+        agg_spec["active_goal_accuracy"] = ("active_goal_correct", "mean")
     return (
         valid.groupby("model", as_index=False)
-        .agg(
-            rows=("event_index", "count"),
-            goal_accuracy=("goal_correct", "mean"),
-            median_endpoint_error_cm=("endpoint_error_cm", "median"),
-            mean_true_well_posterior=("true_well_posterior", "mean"),
-        )
+        .agg(**agg_spec)
         .sort_values("model")
     )
 

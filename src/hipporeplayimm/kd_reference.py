@@ -25,6 +25,7 @@ from .encoding import (
     _interp_positions,
     _positions_to_flat_bins,
     _speed_cm_s,
+    _smooth_count_rows,
     _times_in_intervals,
 )
 
@@ -133,12 +134,7 @@ def fit_kd_place_field_encoding(session: ReplaySession, config: KDEncodingConfig
     occupancy_grid = occupancy.reshape(grid_shape)
     if sigma_bins > 0.0:
         smooth_occupancy = gaussian_filter(occupancy_grid, sigma=sigma_bins, mode="constant").reshape(-1)
-        smooth_counts = np.vstack(
-            [
-                gaussian_filter(row.reshape(grid_shape), sigma=sigma_bins, mode="constant").reshape(-1)
-                for row in counts
-            ]
-        )
+        smooth_counts = _smooth_count_rows(counts, grid_shape, sigma_bins)
     else:
         smooth_occupancy = occupancy
         smooth_counts = counts

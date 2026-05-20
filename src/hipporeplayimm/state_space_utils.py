@@ -85,7 +85,7 @@ def _validate_candidate_indices(
         if arr.size == 0:
             raise ValueError(f"candidate_indices[{time_index}] must not be empty")
         if not np.issubdtype(arr.dtype, np.integer):
-            raise ValueError(f"candidate_indices[{time_index}] must contain integer bin indices")
+            raise TypeError(f"candidate_indices[{time_index}] must contain integer bin indices")
         arr = arr.astype(np.intp, copy=False)
         if np.any((arr < 0) | (arr >= n_bins)):
             raise ValueError(f"candidate_indices[{time_index}] contains an out-of-range bin")

@@ -23,7 +23,9 @@ on:
       models:
         description: "Space-separated models"
         required: true
-        default: "sorted-spike-state-space-stationary sorted-spike-state-space-diffusion sorted-spike-state-space-momentum sorted-spike-state-space-fragmented sorted-spike-state-space-imm"
+        default: >-
+          sorted-spike-state-space-stationary sorted-spike-state-space-diffusion sorted-spike-state-space-fragmented sorted-spike-state-space-first-order-imm sorted-spike-state-space-momentum sorted-spike-state-space-imm
+          clusterless-state-space-stationary clusterless-state-space-diffusion clusterless-state-space-momentum clusterless-state-space-fragmented clusterless-state-space-imm
       event_shard_count:
         description: "Target number of event shards"
         required: true
@@ -76,10 +78,38 @@ on:
         description: "State-space momentum velocity decay"
         required: true
         default: "0.95"
+      clusterless_mark_smoothing_sigma_bins:
+        description: "Clusterless mark moment smoothing sigma in spatial bins"
+        required: true
+        default: "1.0"
+      clusterless_mark_prior_count:
+        description: "Clusterless prior pseudo-count for mark moments and local-KDE support"
+        required: true
+        default: "1.0"
+      clusterless_mark_variance_floor:
+        description: "Clusterless mark variance floor"
+        required: true
+        default: "1.0"
       clusterless_rate_floor_hz:
         description: "Clusterless spike-intensity rate floor in Hz"
         required: true
         default: "0.0001"
+      clusterless_mark_likelihood:
+        description: "Clusterless mark likelihood: local-kde or diagonal-gaussian"
+        required: true
+        default: "local-kde"
+      clusterless_mark_kde_bandwidth:
+        description: "Optional scalar mark-space KDE bandwidth; empty uses data-adaptive bandwidth"
+        required: false
+        default: ""
+      clusterless_mark_kde_spatial_sigma_bins:
+        description: "Optional local-KDE spatial weighting sigma in grid bins; empty reuses mark smoothing sigma"
+        required: false
+        default: ""
+      clusterless_mark_kde_max_neighbors:
+        description: "Maximum run-period marks used per spatial bin for local-KDE mark likelihoods"
+        required: true
+        default: "256"
       time_bin_s:
         description: "Ripple decoding time-bin width in seconds"
         required: true
@@ -133,10 +163,14 @@ env:
   STATE_SPACE_MOMENTUM_INITIAL_SIGMA_CM_SQRT_S: "85.0"
   STATE_SPACE_MOMENTUM_VELOCITY_DECAY: ${{ inputs.state_space_momentum_velocity_decay }}
   STATE_SPACE_MOMENTUM_CANDIDATE_TOP_K: "128"
-  CLUSTERLESS_MARK_SMOOTHING_SIGMA_BINS: "1.0"
-  CLUSTERLESS_MARK_PRIOR_COUNT: "1.0"
-  CLUSTERLESS_MARK_VARIANCE_FLOOR: "1.0"
+  CLUSTERLESS_MARK_SMOOTHING_SIGMA_BINS: ${{ inputs.clusterless_mark_smoothing_sigma_bins }}
+  CLUSTERLESS_MARK_PRIOR_COUNT: ${{ inputs.clusterless_mark_prior_count }}
+  CLUSTERLESS_MARK_VARIANCE_FLOOR: ${{ inputs.clusterless_mark_variance_floor }}
   CLUSTERLESS_RATE_FLOOR_HZ: ${{ inputs.clusterless_rate_floor_hz }}
+  CLUSTERLESS_MARK_LIKELIHOOD: ${{ inputs.clusterless_mark_likelihood }}
+  CLUSTERLESS_MARK_KDE_BANDWIDTH: ${{ inputs.clusterless_mark_kde_bandwidth }}
+  CLUSTERLESS_MARK_KDE_SPATIAL_SIGMA_BINS: ${{ inputs.clusterless_mark_kde_spatial_sigma_bins }}
+  CLUSTERLESS_MARK_KDE_MAX_NEIGHBORS: ${{ inputs.clusterless_mark_kde_max_neighbors }}
   TIME_BIN_S: ${{ inputs.time_bin_s }}
   SPIKE_RATE_SCALE: ${{ inputs.spike_rate_scale }}
   BIN_SIZE_CM: ${{ inputs.bin_size_cm }}
@@ -262,6 +296,13 @@ jobs:
           SHARD_EVENTS: ${{ matrix.event.events_spec }}
         run: |
           set -euo pipefail
+          clusterless_kde_args=()
+          if [ -n "${CLUSTERLESS_MARK_KDE_BANDWIDTH}" ]; then
+            clusterless_kde_args+=(--clusterless-mark-kde-bandwidth "${CLUSTERLESS_MARK_KDE_BANDWIDTH}")
+          fi
+          if [ -n "${CLUSTERLESS_MARK_KDE_SPATIAL_SIGMA_BINS}" ]; then
+            clusterless_kde_args+=(--clusterless-mark-kde-spatial-sigma-bins "${CLUSTERLESS_MARK_KDE_SPATIAL_SIGMA_BINS}")
+          fi
           out_dir="results/model-evidence-shard-${EVENT_SHARD_INDEX}"
           python scripts/benchmark_model_evidence.py \
             --dataset-root "${DATASET_ROOT}" \
@@ -282,10 +323,14 @@ jobs:
             --state-space-momentum-initial-sigma-cm-sqrt-s "${STATE_SPACE_MOMENTUM_INITIAL_SIGMA_CM_SQRT_S}" \
             --state-space-momentum-velocity-decay "${STATE_SPACE_MOMENTUM_VELOCITY_DECAY}" \
             --state-space-momentum-candidate-top-k "${STATE_SPACE_MOMENTUM_CANDIDATE_TOP_K}" \
+            --state-space-momentum-predicted-candidate-top-k "${STATE_SPACE_MOMENTUM_PREDICTED_CANDIDATE_TOP_K}" \
             --clusterless-mark-smoothing-sigma-bins "${CLUSTERLESS_MARK_SMOOTHING_SIGMA_BINS}" \
             --clusterless-mark-prior-count "${CLUSTERLESS_MARK_PRIOR_COUNT}" \
             --clusterless-mark-variance-floor "${CLUSTERLESS_MARK_VARIANCE_FLOOR}" \
             --clusterless-rate-floor-hz "${CLUSTERLESS_RATE_FLOOR_HZ}" \
+            --clusterless-mark-likelihood "${CLUSTERLESS_MARK_LIKELIHOOD}" \
+            --clusterless-mark-kde-max-neighbors "${CLUSTERLESS_MARK_KDE_MAX_NEIGHBORS}" \
+            "${clusterless_kde_args[@]}" \
             --time-bin-s "${TIME_BIN_S}" \
             --spike-rate-scale "${SPIKE_RATE_SCALE}" \
             --bin-size-cm "${BIN_SIZE_CM}" \

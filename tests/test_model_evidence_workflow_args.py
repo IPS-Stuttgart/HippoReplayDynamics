@@ -35,6 +35,15 @@ def test_event_sharded_workflow_wires_clusterless_and_encoder_knobs():
     assert not missing, f"Workflow does not pass expected benchmark flags: {sorted(missing)}"
 
 
+def test_event_sharded_workflow_includes_exact_first_order_imm_default():
+    text = WORKFLOW.read_text(encoding="utf-8")
+
+    assert (
+        "sorted-spike-state-space-first-order-imm"
+        in _workflow_dispatch_default_models(text)
+    )
+
+
 def _workflow_benchmark_flags() -> set[str]:
     text = WORKFLOW.read_text(encoding="utf-8")
     start = text.index("python scripts/benchmark_model_evidence.py")
@@ -46,3 +55,12 @@ def _workflow_benchmark_flags() -> set[str]:
 def _benchmark_script_flags() -> set[str]:
     text = SCRIPT.read_text(encoding="utf-8")
     return set(re.findall(r"add_argument\(\s*[\"'](--[a-z0-9-]+)[\"']", text, flags=re.MULTILINE))
+
+
+def _workflow_dispatch_default_models(text: str) -> str:
+    match = re.search(
+        r"models:\n(?:\s+[^\n]*\n)*?\s+default:\s+\"([^\"]+)\"",
+        text,
+    )
+    assert match is not None
+    return match.group(1)

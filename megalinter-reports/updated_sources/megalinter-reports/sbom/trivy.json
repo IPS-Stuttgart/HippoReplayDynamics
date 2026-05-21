@@ -2,10 +2,10 @@
     "$schema": "http://cyclonedx.org/schema/bom-1.6.schema.json",
     "bomFormat": "CycloneDX",
     "specVersion": "1.6",
-    "serialNumber": "urn:uuid:ef33fe2c-8607-4595-a9ff-a9123e08fabe",
+    "serialNumber": "urn:uuid:278a4e15-1da0-4716-977a-3ac64983dee6",
     "version": 1,
     "metadata": {
-        "timestamp": "2026-05-21T10:15:28+00:00",
+        "timestamp": "2026-05-20T19:47:06+00:00",
         "tools": {
             "components": [
                 {
@@ -20,7 +20,7 @@
             ]
         },
         "component": {
-            "bom-ref": "79d8cd70-146b-42e8-b458-04d24fdea5cb",
+            "bom-ref": "58e49417-fe5d-4f29-8d0a-051bd3af59cf",
             "type": "application",
             "name": ".",
             "properties": [
@@ -33,7 +33,7 @@
     },
     "components": [
         {
-            "bom-ref": "aae71915-c923-4499-9068-5d4f5eabc0f3",
+            "bom-ref": "0852bac2-1a8e-43c7-aec7-ad089875bbac",
             "type": "application",
             "name": "poetry.lock",
             "properties": [
@@ -730,13 +730,7 @@
     ],
     "dependencies": [
         {
-            "ref": "79d8cd70-146b-42e8-b458-04d24fdea5cb",
-            "dependsOn": [
-                "aae71915-c923-4499-9068-5d4f5eabc0f3"
-            ]
-        },
-        {
-            "ref": "aae71915-c923-4499-9068-5d4f5eabc0f3",
+            "ref": "0852bac2-1a8e-43c7-aec7-ad089875bbac",
             "dependsOn": [
                 "pkg:pypi/beartype@0.22.9",
                 "pkg:pypi/h5py@3.16.0",
@@ -747,6 +741,12 @@
                 "pkg:pypi/pyrecest@2.2.2",
                 "pkg:pypi/pytest@9.0.3",
                 "pkg:pypi/scipy@1.17.1"
+            ]
+        },
+        {
+            "ref": "58e49417-fe5d-4f29-8d0a-051bd3af59cf",
+            "dependsOn": [
+                "0852bac2-1a8e-43c7-aec7-ad089875bbac"
             ]
         },
         {

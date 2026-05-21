@@ -1,7 +1,7 @@
 {
     "recommendations": [
-        "AquaSecurityOfficial.trivy-vulnerability-scanner",
         "esbenp.prettier-vscode",
-        "charliermarsh.ruff"
+        "charliermarsh.ruff",
+        "AquaSecurityOfficial.trivy-vulnerability-scanner"
     ]
 }

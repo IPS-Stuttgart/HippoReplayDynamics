@@ -69,7 +69,7 @@ on:
         required: true
         default: "0.95"
       state_space_imm_switch_tau_s:
-        description: "Physical-time IMM switching time constant in seconds; 0 uses the per-bin stickiness input"
+        description: "Optional state-space IMM mode-switch time constant in seconds; 0 uses state_space_imm_mode_stickiness"
         required: true
         default: "0.060"
       state_space_valid_occupancy_threshold_s:
@@ -89,7 +89,7 @@ on:
         required: true
         default: "0.95"
       state_space_momentum_candidate_top_k:
-        description: "Candidate support size for state-space momentum/IMM lower-bound recursions"
+        description: "Emission top-k support for state-space momentum/IMM lower-bound recursions"
         required: true
         default: "256"
       state_space_momentum_candidate_mass_threshold:
@@ -105,7 +105,7 @@ on:
         required: true
         default: "0"
       state_space_momentum_predicted_candidate_top_k:
-        description: "Momentum-predicted support augmentation size; 0 disables augmentation"
+        description: "Top adjacent emission candidates used to augment second-order candidate support with momentum predictions"
         required: true
         default: "16"
       clusterless_rate_floor_hz:

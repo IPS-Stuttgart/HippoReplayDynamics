@@ -18,5 +18,10 @@ DISABLE_LINTERS:
   - MAKEFILE_CHECKMAKE
   - SPELL_LYCHEE
   - REPOSITORY_GRYPE
+  # MegaLinter regenerates megalinter-reports/* during the run. Some of those
+  # generated SBOM files contain alignment whitespace, so git_diff can fail on
+  # report artifacts even when source linters passed. Source-level diff checks
+  # remain covered by the dedicated static CI job.
+  - REPOSITORY_GIT_DIFF
 
-FILTER_REGEX_EXCLUDE: '(^\.github/workflows/)'
+FILTER_REGEX_EXCLUDE: '(^\.github/workflows/|^megalinter-reports/)'

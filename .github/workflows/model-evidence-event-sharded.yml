@@ -23,7 +23,7 @@ on:
       models:
         description: "Space-separated models"
         required: true
-        default: "sorted-spike-state-space-stationary sorted-spike-state-space-diffusion sorted-spike-state-space-fragmented sorted-spike-state-space-first-order-imm sorted-spike-state-space-momentum sorted-spike-state-space-imm sorted-spike-state-space-goal clusterless-state-space-stationary clusterless-state-space-diffusion clusterless-state-space-momentum clusterless-state-space-fragmented clusterless-state-space-imm"
+        default: "sorted-spike-state-space-stationary sorted-spike-state-space-diffusion sorted-spike-state-space-fragmented sorted-spike-state-space-first-order-imm sorted-spike-state-space-momentum sorted-spike-state-space-momentum-bidirectional sorted-spike-state-space-imm sorted-spike-state-space-goal sorted-spike-state-space-goal-bidirectional clusterless-state-space-stationary clusterless-state-space-diffusion clusterless-state-space-momentum clusterless-state-space-fragmented clusterless-state-space-imm"
       event_shard_count:
         description: "Target number of event shards"
         required: true
@@ -68,14 +68,46 @@ on:
         description: "State-space IMM mode-transition stickiness"
         required: true
         default: "0.95"
+      state_space_imm_switch_tau_s:
+        description: "Physical-time IMM switching time constant in seconds; 0 uses the per-bin stickiness input"
+        required: true
+        default: "0.060"
+      state_space_valid_occupancy_threshold_s:
+        description: "Minimum run occupancy in seconds for valid state-space bins; 0 keeps the full grid"
+        required: true
+        default: "0.0"
       state_space_momentum_sigma_cm_sqrt_s:
         description: "State-space momentum process noise in cm/sqrt(s)"
+        required: true
+        default: "85.0"
+      state_space_momentum_initial_sigma_cm_sqrt_s:
+        description: "State-space initial momentum transition noise in cm/sqrt(s)"
         required: true
         default: "85.0"
       state_space_momentum_velocity_decay:
         description: "State-space momentum velocity decay"
         required: true
         default: "0.95"
+      state_space_momentum_candidate_top_k:
+        description: "Candidate support size for state-space momentum/IMM lower-bound recursions"
+        required: true
+        default: "256"
+      state_space_momentum_candidate_mass_threshold:
+        description: "Optional adaptive candidate-support mass threshold; empty keeps fixed top-k"
+        required: false
+        default: ""
+      state_space_momentum_candidate_min_k:
+        description: "Minimum adaptive candidate count per replay bin"
+        required: true
+        default: "1"
+      state_space_momentum_candidate_max_k:
+        description: "Maximum adaptive candidate count per replay bin; 0 means unbounded"
+        required: true
+        default: "0"
+      state_space_momentum_predicted_candidate_top_k:
+        description: "Momentum-predicted support augmentation size; 0 disables augmentation"
+        required: true
+        default: "16"
       clusterless_rate_floor_hz:
         description: "Clusterless spike-intensity rate floor in Hz"
         required: true
@@ -129,12 +161,16 @@ env:
   STATE_SPACE_DIFFUSION_SIGMA_CM_SQRT_S: ${{ inputs.state_space_diffusion_sigma_cm_sqrt_s }}
   STATE_SPACE_MAX_STEP_SIGMA: ${{ inputs.state_space_max_step_sigma }}
   STATE_SPACE_IMM_MODE_STICKINESS: ${{ inputs.state_space_imm_mode_stickiness }}
-  STATE_SPACE_IMM_SWITCH_TAU_S: "0.0"
+  STATE_SPACE_IMM_SWITCH_TAU_S: ${{ inputs.state_space_imm_switch_tau_s }}
+  STATE_SPACE_VALID_OCCUPANCY_THRESHOLD_S: ${{ inputs.state_space_valid_occupancy_threshold_s }}
   STATE_SPACE_MOMENTUM_SIGMA_CM_SQRT_S: ${{ inputs.state_space_momentum_sigma_cm_sqrt_s }}
-  STATE_SPACE_MOMENTUM_INITIAL_SIGMA_CM_SQRT_S: "85.0"
+  STATE_SPACE_MOMENTUM_INITIAL_SIGMA_CM_SQRT_S: ${{ inputs.state_space_momentum_initial_sigma_cm_sqrt_s }}
   STATE_SPACE_MOMENTUM_VELOCITY_DECAY: ${{ inputs.state_space_momentum_velocity_decay }}
-  STATE_SPACE_MOMENTUM_CANDIDATE_TOP_K: "128"
-  STATE_SPACE_MOMENTUM_PREDICTED_CANDIDATE_TOP_K: "8"
+  STATE_SPACE_MOMENTUM_CANDIDATE_TOP_K: ${{ inputs.state_space_momentum_candidate_top_k }}
+  STATE_SPACE_MOMENTUM_CANDIDATE_MASS_THRESHOLD: ${{ inputs.state_space_momentum_candidate_mass_threshold }}
+  STATE_SPACE_MOMENTUM_CANDIDATE_MIN_K: ${{ inputs.state_space_momentum_candidate_min_k }}
+  STATE_SPACE_MOMENTUM_CANDIDATE_MAX_K: ${{ inputs.state_space_momentum_candidate_max_k }}
+  STATE_SPACE_MOMENTUM_PREDICTED_CANDIDATE_TOP_K: ${{ inputs.state_space_momentum_predicted_candidate_top_k }}
   GOAL_STATE_SPACE_TRANSITION_SIGMA_CM_SQRT_S: "85.0"
   GOAL_STATE_SPACE_DRIFT_SPEED_CM_S: "400.0"
   GOAL_STATE_SPACE_MAX_STEP_SIGMA: "4.0"
@@ -288,10 +324,14 @@ jobs:
             --state-space-max-step-sigma "${STATE_SPACE_MAX_STEP_SIGMA}" \
             --state-space-imm-mode-stickiness "${STATE_SPACE_IMM_MODE_STICKINESS}" \
             --state-space-imm-switch-tau-s "${STATE_SPACE_IMM_SWITCH_TAU_S}" \
+            --state-space-valid-occupancy-threshold-s "${STATE_SPACE_VALID_OCCUPANCY_THRESHOLD_S}" \
             --state-space-momentum-sigma-cm-sqrt-s "${STATE_SPACE_MOMENTUM_SIGMA_CM_SQRT_S}" \
             --state-space-momentum-initial-sigma-cm-sqrt-s "${STATE_SPACE_MOMENTUM_INITIAL_SIGMA_CM_SQRT_S}" \
             --state-space-momentum-velocity-decay "${STATE_SPACE_MOMENTUM_VELOCITY_DECAY}" \
             --state-space-momentum-candidate-top-k "${STATE_SPACE_MOMENTUM_CANDIDATE_TOP_K}" \
+            --state-space-momentum-candidate-mass-threshold "${STATE_SPACE_MOMENTUM_CANDIDATE_MASS_THRESHOLD}" \
+            --state-space-momentum-candidate-min-k "${STATE_SPACE_MOMENTUM_CANDIDATE_MIN_K}" \
+            --state-space-momentum-candidate-max-k "${STATE_SPACE_MOMENTUM_CANDIDATE_MAX_K}" \
             --state-space-momentum-predicted-candidate-top-k "${STATE_SPACE_MOMENTUM_PREDICTED_CANDIDATE_TOP_K}" \
             --goal-state-space-transition-sigma-cm-sqrt-s "${GOAL_STATE_SPACE_TRANSITION_SIGMA_CM_SQRT_S}" \
             --goal-state-space-drift-speed-cm-s "${GOAL_STATE_SPACE_DRIFT_SPEED_CM_S}" \
@@ -364,7 +404,9 @@ jobs:
             best_model_counts.csv \
             event_model_pivot_log_evidence.csv \
             event_model_pivot_relative_log_evidence.csv \
-            event_model_pivot_model_probability.csv; do
+            event_model_pivot_model_probability.csv \
+            result_quality_gate_summary.csv \
+            result_quality_model_summary.csv; do
             test -s "results/model-evidence/${required_file}" || {
               echo "Missing results/model-evidence/${required_file}" >&2
               exit 1
@@ -395,9 +437,12 @@ jobs:
           scores = pd.read_csv("results/model-evidence/event_model_evidence.csv")
           summary = pd.read_csv("results/model-evidence/model_evidence_summary.csv")
           counts = pd.read_csv("results/model-evidence/best_model_counts.csv")
+          gates = pd.read_csv("results/model-evidence/result_quality_gate_summary.csv")
           print(summary.to_string(index=False))
           print("\nBest-model counts:")
           print(counts.to_string(index=False))
+          print("\nResult-quality gates:")
+          print(gates.to_string(index=False))
           print("\nRows:", len(scores))
           print("Failures:", int((scores["status"] != "success").sum()) if "status" in scores else 0)
           PY

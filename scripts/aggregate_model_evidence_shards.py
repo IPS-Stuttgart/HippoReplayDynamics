@@ -9,7 +9,15 @@ from pathlib import Path
 
 import pandas as pd
 
-from benchmark_model_evidence import _add_evidence_columns, _counts, _event_group_columns, _summary, _write
+from benchmark_model_evidence import (
+    _add_evidence_columns,
+    _counts,
+    _event_group_columns,
+    _summary,
+    _support_counts,
+    _write,
+)
+from hipporeplayimm.result_quality_gates import quality_gate_summary
 from model_evidence_settings import _validate_constant_settings
 from model_evidence_support_audit import write_evidence_support_audit
 
@@ -59,6 +67,14 @@ def main() -> int:
     print(_summary(combined).to_string(index=False))
     print("\nBest-model counts:")
     print(_counts(combined).to_string(index=False))
+    support = _support_counts(combined)
+    if not support.empty:
+        print("\nEvidence-support counts:")
+        print(support.to_string(index=False))
+    gates = quality_gate_summary(combined)
+    if not gates.empty:
+        print("\nResult-quality gates:")
+        print(gates.to_string(index=False))
     print(f"\nRows: {len(combined)}")
     if "status" in combined:
         print(f"Failures: {int((combined['status'] != 'success').sum())}")

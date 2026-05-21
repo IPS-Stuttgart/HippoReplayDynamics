@@ -583,8 +583,9 @@ def main() -> int:
         "--models",
         default=(
             "random stationary sorted-spike-state-space-diffusion "
-            "sorted-spike-state-space-momentum sorted-spike-state-space-imm "
-            "sorted-spike-state-space-goal sorted-spike-state-space-goal-bidirectional"
+            "sorted-spike-state-space-momentum sorted-spike-state-space-momentum-bidirectional "
+            "sorted-spike-state-space-imm sorted-spike-state-space-goal "
+            "sorted-spike-state-space-goal-bidirectional"
         ),
     )
     parser.add_argument("--candidate-top-k", type=int, default=64)
@@ -597,15 +598,15 @@ def main() -> int:
     parser.add_argument("--state-space-diffusion-sigma-cm-sqrt-s", type=float, default=85.0)
     parser.add_argument("--state-space-max-step-sigma", type=float, default=4.0)
     parser.add_argument("--state-space-imm-mode-stickiness", type=float, default=0.95)
-    parser.add_argument("--state-space-imm-switch-tau-s", type=float, default=0.0)
+    parser.add_argument("--state-space-imm-switch-tau-s", type=float, default=0.060)
     parser.add_argument("--state-space-momentum-sigma-cm-sqrt-s", type=float, default=85.0)
     parser.add_argument("--state-space-momentum-initial-sigma-cm-sqrt-s", type=float, default=85.0)
     parser.add_argument("--state-space-momentum-velocity-decay", type=float, default=0.95)
-    parser.add_argument("--state-space-momentum-candidate-top-k", type=int, default=128)
+    parser.add_argument("--state-space-momentum-candidate-top-k", type=int, default=256)
     parser.add_argument("--state-space-momentum-candidate-mass-threshold", type=float)
     parser.add_argument("--state-space-momentum-candidate-min-k", type=int, default=1)
     parser.add_argument("--state-space-momentum-candidate-max-k", type=int, default=0)
-    parser.add_argument("--state-space-momentum-predicted-candidate-top-k", type=int, default=8)
+    parser.add_argument("--state-space-momentum-predicted-candidate-top-k", type=int, default=16)
     parser.add_argument("--state-space-valid-occupancy-threshold-s", type=float, default=0.0)
     parser.add_argument("--goal-state-space-transition-sigma-cm-sqrt-s", type=float, default=85.0)
     parser.add_argument("--goal-state-space-drift-speed-cm-s", type=float, default=400.0)
@@ -641,7 +642,7 @@ def main() -> int:
     parser.add_argument("--reliability-min-spikes", type=int, default=5)
     parser.add_argument("--reliability-min-time-bins", type=int, default=2)
     parser.add_argument("--reliability-max-terminal-entropy", type=float, default=float("nan"))
-    parser.add_argument("--reliability-min-candidate-log-mass", type=float, default=float("nan"))
+    parser.add_argument("--reliability-min-candidate-log-mass", type=float, default=-0.01)
     parser.add_argument("--null-shuffles", type=int, default=0)
     parser.add_argument("--null-random-seed", type=int, default=1)
     parser.add_argument("--bin-size-cm", type=float, default=VALIDATED_POSITION_BIN_SIZE_CM)

@@ -645,7 +645,7 @@ def main() -> int:
     parser.add_argument("--reliability-min-spikes", type=int, default=5)
     parser.add_argument("--reliability-min-time-bins", type=int, default=2)
     parser.add_argument("--reliability-max-terminal-entropy", type=float, default=float("nan"))
-    parser.add_argument("--reliability-min-candidate-log-mass", type=float, default=float("nan"))
+    parser.add_argument("--reliability-min-candidate-log-mass", type=float, default=-0.01)
     parser.add_argument("--null-shuffles", type=int, default=0)
     parser.add_argument("--null-random-seed", type=int, default=1)
     parser.add_argument("--bin-size-cm", type=float, default=VALIDATED_POSITION_BIN_SIZE_CM)

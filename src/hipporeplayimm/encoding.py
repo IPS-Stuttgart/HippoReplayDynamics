@@ -108,6 +108,8 @@ class LogEmissionTensor:
     dt: float
     cell_ids: np.ndarray
     n_spikes: int
+    bin_durations: np.ndarray | None = None
+    transition_durations: np.ndarray | None = None
 
     @property
     def n_time(self) -> int:
@@ -116,6 +118,30 @@ class LogEmissionTensor:
     @property
     def n_bins(self) -> int:
         return int(self.log_likelihood.shape[1])
+
+    def __post_init__(self) -> None:
+        """Attach explicit bin/transition durations for duration-aware dynamics."""
+
+        if self.bin_durations is None:
+            self.bin_durations = np.full(self.n_time, float(self.dt), dtype=float)
+        else:
+            self.bin_durations = np.asarray(self.bin_durations, dtype=float)
+            if self.bin_durations.shape != (self.n_time,):
+                raise ValueError("bin_durations must contain one duration per emission row")
+        if self.transition_durations is None:
+            if self.n_time <= 1:
+                self.transition_durations = np.empty(0, dtype=float)
+            elif self.times.shape == (self.n_time,):
+                values = np.diff(np.asarray(self.times, dtype=float))
+                self.transition_durations = values if np.all(values > 0.0) else np.full(self.n_time - 1, float(self.dt), dtype=float)
+            elif self.bin_durations is not None:
+                self.transition_durations = 0.5 * (self.bin_durations[:-1] + self.bin_durations[1:])
+            else:
+                self.transition_durations = np.full(self.n_time - 1, float(self.dt), dtype=float)
+        else:
+            self.transition_durations = np.asarray(self.transition_durations, dtype=float)
+            if self.transition_durations.shape != (max(self.n_time - 1, 0),):
+                raise ValueError("transition_durations must contain one duration per adjacent time-bin pair")
 
 
 def fit_place_field_encoding(session: ReplaySession, config: EncodingConfig | None = None) -> EncodingModel:
@@ -250,6 +276,8 @@ def build_emissions(
         dt=dt,
         cell_ids=encoding.cell_ids,
         n_spikes=int(counts.sum()),
+        bin_durations=bin_durations,
+        transition_durations=np.diff(times) if times.shape[0] > 1 else np.empty(0, dtype=float),
     )
 
 

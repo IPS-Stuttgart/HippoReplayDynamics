@@ -92,6 +92,50 @@ def _forward_backward_first_order(
     return logp, _as_log_probs(smoothed)
 
 
+def _forward_backward_first_order_time_varying(
+    log_likelihood: np.ndarray,
+    transitions: list[csr_matrix],
+    valid_bin_mask: np.ndarray | None = None,
+) -> tuple[float, np.ndarray]:
+    """Forward/backward recursion with one transition matrix per step."""
+
+    n_time, n_bins = log_likelihood.shape
+    if len(transitions) != max(n_time - 1, 0):
+        raise ValueError("transitions must contain one matrix per adjacent time-bin pair")
+    scaled, offsets = _scaled_emissions(log_likelihood)
+    filtered = np.zeros((n_time, n_bins), dtype=float)
+    scales = np.zeros(n_time, dtype=float)
+
+    alpha = scaled[0] * _uniform_probabilities(n_bins, valid_bin_mask)
+    scales[0] = float(alpha.sum())
+    if scales[0] <= 0.0:
+        raise ValueError("first emission row has no finite likelihood mass")
+    alpha /= scales[0]
+    filtered[0] = alpha
+    logp = float(np.log(scales[0]) + offsets[0])
+
+    for time_index in range(1, n_time):
+        transition = transitions[time_index - 1]
+        alpha = np.asarray(transition @ alpha, dtype=float) * scaled[time_index]
+        scales[time_index] = float(alpha.sum())
+        if scales[time_index] <= 0.0:
+            raise ValueError(f"emission row {time_index} has no finite predicted mass")
+        alpha /= scales[time_index]
+        filtered[time_index] = alpha
+        logp += float(np.log(scales[time_index]) + offsets[time_index])
+
+    smoothed = np.zeros_like(filtered)
+    beta = np.ones(n_bins, dtype=float)
+    smoothed[-1] = filtered[-1]
+    for time_index in range(n_time - 1, 0, -1):
+        transition = transitions[time_index - 1]
+        beta = np.asarray(transition.T @ (scaled[time_index] * beta), dtype=float) / scales[time_index]
+        gamma = filtered[time_index - 1] * beta
+        total = float(gamma.sum())
+        smoothed[time_index - 1] = gamma / total if total > 0.0 else filtered[time_index - 1]
+    return logp, _as_log_probs(smoothed)
+
+
 def _score_first_order_imm(
     log_likelihood: np.ndarray,
     bin_centers: np.ndarray,

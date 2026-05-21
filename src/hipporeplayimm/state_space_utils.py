@@ -10,7 +10,13 @@ LOG_ZERO = -1.0e300
 
 
 def _per_bin_sigma(sigma_cm_sqrt_s: float, dt_s: float) -> float:
-    return max(float(sigma_cm_sqrt_s) * np.sqrt(max(float(dt_s), np.finfo(float).tiny)), np.finfo(float).eps)
+    sigma = float(sigma_cm_sqrt_s)
+    dt = float(dt_s)
+    if not np.isfinite(sigma) or sigma <= 0.0:
+        raise ValueError("sigma_cm_sqrt_s must be finite and positive")
+    if not np.isfinite(dt) or dt <= 0.0:
+        raise ValueError("dt_s must be finite and positive")
+    return max(sigma * np.sqrt(dt), np.finfo(float).eps)
 
 
 def _top_candidate_indices(log_emission: np.ndarray, top_k: int) -> np.ndarray:

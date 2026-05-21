@@ -221,6 +221,16 @@ def main(argv: list[str] | None = None) -> int:
         default="0.5,1.0,2.0",
         help="Comma-separated replay spike-rate multipliers for synthetic recovery.",
     )
+    observation_parser.add_argument(
+        "--emission-likelihood-temperature",
+        default="1.0,1.5,2.0",
+        help="Comma-separated emission likelihood temperatures for synthetic recovery scoring.",
+    )
+    observation_parser.add_argument(
+        "--emission-negative-binomial-overdispersion",
+        default="0.0,0.03,0.1",
+        help="Comma-separated negative-binomial overdispersion values for synthetic recovery scoring.",
+    )
     observation_parser.add_argument("--skip-simulation-recovery", action="store_true")
     observation_parser.add_argument("--simulation-events", default="run")
     observation_parser.add_argument("--simulation-max-template-events", type=int, default=25)
@@ -241,6 +251,7 @@ def main(argv: list[str] | None = None) -> int:
     recovery_parser.add_argument("--random-seed", type=int, default=1)
     recovery_parser.add_argument("--time-bin-ms", type=float, default=3.0)
     recovery_parser.add_argument("--spike-rate-scale", type=float, default=1.0)
+    _add_emission_calibration_arguments(recovery_parser)
     recovery_parser.add_argument("--state-space-sigma-cm-sqrt-s", type=float, default=85.0)
     recovery_parser.add_argument("--state-space-stationary-sigma-cm", type=float, default=2.0)
     recovery_parser.add_argument("--state-space-diffusion-sigma-cm-sqrt-s", type=float, default=None)
@@ -394,6 +405,12 @@ def _sweep_observation(args: argparse.Namespace) -> int:
         rate_floor_hz=_parse_float_values(args.rate_floor_hz),
         time_bin_ms=_parse_float_values(args.time_bin_ms),
         spike_rate_scales=_parse_float_values(args.spike_rate_scale),
+        likelihood_temperatures=_parse_float_values(
+            args.emission_likelihood_temperature
+        ),
+        negative_binomial_overdispersions=_parse_float_values(
+            args.emission_negative_binomial_overdispersion
+        ),
         decode_bin_s=args.decode_bin_s,
         n_folds=args.n_folds,
         max_windows_per_session=args.max_windows,
@@ -437,6 +454,8 @@ def _simulate_recovery(args: argparse.Namespace) -> int:
         random_seed=args.random_seed,
         spike_rate_scale=args.spike_rate_scale,
         time_bin_s=args.time_bin_ms / 1000.0,
+        likelihood_temperature=args.emission_likelihood_temperature,
+        negative_binomial_overdispersion=args.emission_negative_binomial_overdispersion,
         encoding=_encoding_config_from_args(args),
         state_space=state_space,
         candidate_top_k=args.candidate_top_k,
@@ -473,7 +492,7 @@ def _benchmark(args: argparse.Namespace) -> int:
         candidate_top_k=args.candidate_top_k,
         models=_parse_models(args.models),
         clusterless_mark_group_by=args.clusterless_mark_group_by,
-        state_space_valid_occupancy_threshold_s=args.state_space_valid_occupancy_threshold_s,
+        **_state_space_scalar_kwargs(args),
         **_clusterless_scalar_kwargs(args),
         **_pyrecest_scalar_kwargs(args),
     )
@@ -515,7 +534,7 @@ def _decode_event(args: argparse.Namespace) -> int:
         emissions=emission_config,
         candidate_top_k=args.candidate_top_k,
         models=requested_models,
-        state_space_valid_occupancy_threshold_s=args.state_space_valid_occupancy_threshold_s,
+        **_state_space_scalar_kwargs(args),
         **_clusterless_scalar_kwargs(args),
         **_pyrecest_scalar_kwargs(args),
     )
@@ -645,7 +664,7 @@ def _compare_ground_truth(args: argparse.Namespace) -> int:
         test_cell_fraction=args.test_cell_fraction,
         candidate_top_k=args.candidate_top_k,
         random_seed=args.random_seed,
-        state_space_valid_occupancy_threshold_s=args.state_space_valid_occupancy_threshold_s,
+        **_state_space_scalar_kwargs(args),
         **_clusterless_scalar_kwargs(args),
         **_pyrecest_scalar_kwargs(args),
     )
@@ -692,12 +711,13 @@ def _ground_truth_config_from_args(args: argparse.Namespace) -> GroundTruthConfi
 
 
 def _encoding_config_from_args(args: argparse.Namespace) -> EncodingConfig:
+    defaults = EncodingConfig()
     return EncodingConfig(
         bin_size_cm=args.bin_size_cm,
         smoothing_sigma_bins=args.smoothing_sigma_bins,
         min_speed_cm_s=args.min_speed_cm_s,
-        min_occupancy_s=args.min_occupancy_s,
-        rate_floor_hz=args.rate_floor_hz,
+        min_occupancy_s=getattr(args, "min_occupancy_s", defaults.min_occupancy_s),
+        rate_floor_hz=getattr(args, "rate_floor_hz", defaults.rate_floor_hz),
     )
 
 
@@ -711,10 +731,71 @@ def _emission_config_from_args(args: argparse.Namespace) -> EmissionConfig:
 
 
 def _add_state_space_arguments(parser: argparse.ArgumentParser) -> None:
+    defaults = StateSpaceDecoderConfig()
+    parser.add_argument(
+        "--state-space-stationary-sigma-cm",
+        type=float,
+        default=defaults.stationary_sigma_cm,
+    )
+    parser.add_argument(
+        "--state-space-diffusion-sigma-cm-sqrt-s",
+        type=float,
+        default=defaults.diffusion_sigma_cm_sqrt_s,
+    )
+    parser.add_argument(
+        "--state-space-max-step-sigma",
+        type=float,
+        default=defaults.max_step_sigma,
+    )
+    parser.add_argument(
+        "--state-space-imm-mode-stickiness",
+        type=float,
+        default=defaults.imm_mode_stickiness,
+    )
+    parser.add_argument(
+        "--state-space-momentum-sigma-cm-sqrt-s",
+        type=float,
+        default=defaults.momentum_sigma_cm_sqrt_s,
+    )
+    parser.add_argument(
+        "--state-space-momentum-initial-sigma-cm-sqrt-s",
+        type=float,
+        default=defaults.momentum_initial_sigma_cm_sqrt_s,
+    )
+    parser.add_argument(
+        "--state-space-momentum-velocity-decay",
+        type=float,
+        default=defaults.momentum_velocity_decay,
+    )
+    parser.add_argument(
+        "--state-space-momentum-candidate-top-k",
+        type=int,
+        default=defaults.momentum_candidate_top_k,
+    )
+    parser.add_argument(
+        "--state-space-momentum-candidate-mass-threshold",
+        type=float,
+        default=defaults.momentum_candidate_mass_threshold,
+    )
+    parser.add_argument(
+        "--state-space-momentum-candidate-min-k",
+        type=int,
+        default=defaults.momentum_candidate_min_k,
+    )
+    parser.add_argument(
+        "--state-space-momentum-candidate-max-k",
+        type=int,
+        default=defaults.momentum_candidate_max_k,
+    )
+    parser.add_argument(
+        "--state-space-momentum-predicted-candidate-top-k",
+        type=int,
+        default=defaults.momentum_predicted_candidate_top_k,
+    )
     parser.add_argument(
         "--state-space-valid-occupancy-threshold-s",
         type=float,
-        default=0.0,
+        default=defaults.valid_occupancy_threshold_s,
         help=(
             "If positive, state-space priors and transition normalizers are restricted "
             "to spatial bins whose training occupancy is at least this many seconds."
@@ -802,9 +883,12 @@ def _sweep_pyrecest(args: argparse.Namespace) -> int:
 
 
 def _add_encoding_arguments(parser: argparse.ArgumentParser) -> None:
+    defaults = EncodingConfig()
     parser.add_argument("--bin-size-cm", type=float, default=VALIDATED_POSITION_BIN_SIZE_CM)
     parser.add_argument("--smoothing-sigma-bins", type=float, default=VALIDATED_POSITION_SMOOTHING_SIGMA_BINS)
     parser.add_argument("--min-speed-cm-s", type=float, default=VALIDATED_POSITION_MIN_SPEED_CM_S)
+    parser.add_argument("--min-occupancy-s", type=float, default=defaults.min_occupancy_s)
+    parser.add_argument("--rate-floor-hz", type=float, default=defaults.rate_floor_hz)
 
 
 def _add_emission_calibration_arguments(parser: argparse.ArgumentParser) -> None:
@@ -885,6 +969,26 @@ def _pyrecest_scalar_kwargs(args: argparse.Namespace) -> dict[str, float | int]:
         ),
         "pyrecest_imm_jump_fraction": args.pyrecest_imm_jump_fraction,
         "pyrecest_imm_jump_velocity_decay": args.pyrecest_imm_jump_velocity_decay,
+    }
+
+
+def _state_space_scalar_kwargs(args: argparse.Namespace) -> dict[str, float | int | None]:
+    return {
+        "state_space_valid_occupancy_threshold_s": args.state_space_valid_occupancy_threshold_s,
+        "state_space_stationary_sigma_cm": args.state_space_stationary_sigma_cm,
+        "state_space_diffusion_sigma_cm_sqrt_s": args.state_space_diffusion_sigma_cm_sqrt_s,
+        "state_space_max_step_sigma": args.state_space_max_step_sigma,
+        "state_space_imm_mode_stickiness": args.state_space_imm_mode_stickiness,
+        "state_space_momentum_sigma_cm_sqrt_s": args.state_space_momentum_sigma_cm_sqrt_s,
+        "state_space_momentum_initial_sigma_cm_sqrt_s": (
+            args.state_space_momentum_initial_sigma_cm_sqrt_s
+        ),
+        "state_space_momentum_velocity_decay": args.state_space_momentum_velocity_decay,
+        "state_space_momentum_candidate_top_k": args.state_space_momentum_candidate_top_k,
+        "state_space_momentum_candidate_mass_threshold": args.state_space_momentum_candidate_mass_threshold,
+        "state_space_momentum_candidate_min_k": args.state_space_momentum_candidate_min_k,
+        "state_space_momentum_candidate_max_k": args.state_space_momentum_candidate_max_k,
+        "state_space_momentum_predicted_candidate_top_k": args.state_space_momentum_predicted_candidate_top_k,
     }
 
 

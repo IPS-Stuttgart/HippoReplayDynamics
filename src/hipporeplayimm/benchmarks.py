@@ -74,6 +74,7 @@ class BenchmarkConfig:
     state_space_diffusion_sigma_cm_sqrt_s: float = 85.0
     state_space_max_step_sigma: float = 4.0
     state_space_imm_mode_stickiness: float = 0.95
+    state_space_imm_switch_tau_s: float = 0.0
     state_space_momentum_sigma_cm_sqrt_s: float = 85.0
     state_space_momentum_initial_sigma_cm_sqrt_s: float = 85.0
     state_space_momentum_velocity_decay: float = 0.95
@@ -577,6 +578,12 @@ def _benchmark_config_metadata(config: BenchmarkConfig) -> dict[str, object]:
         "state_space_imm_mode_stickiness": float(
             config.state_space_imm_mode_stickiness
         ),
+        "state_space_imm_switch_tau_s": float(
+            getattr(config, "state_space_imm_switch_tau_s", 0.0)
+        ),
+        "state_space_imm_mode_stickiness_effective": float(
+            _effective_state_space_imm_stickiness(config)
+        ),
         "state_space_momentum_sigma_cm_sqrt_s": float(
             config.state_space_momentum_sigma_cm_sqrt_s
         ),
@@ -693,6 +700,15 @@ def _cell_split_scores_from_encoding(encoding, strategy: str) -> np.ndarray:
     raise ValueError("cell_split_strategy must be one of 'random', 'mean-rate', or 'peak-rate'")
 
 
+def _effective_state_space_imm_stickiness(config: BenchmarkConfig) -> float:
+    """Return per-bin IMM stickiness, optionally from a physical switch time constant."""
+
+    tau_s = float(getattr(config, "state_space_imm_switch_tau_s", 0.0))
+    if tau_s <= 0.0:
+        return float(config.state_space_imm_mode_stickiness)
+    return float(np.exp(-float(config.emissions.time_bin_s) / tau_s))
+
+
 def _state_space_decoder_config(config: BenchmarkConfig, mode: str) -> StateSpaceDecoderConfig:
     """Build a state-space decoder config from benchmark-level sweep knobs."""
 
@@ -701,7 +717,7 @@ def _state_space_decoder_config(config: BenchmarkConfig, mode: str) -> StateSpac
         stationary_sigma_cm=float(config.state_space_stationary_sigma_cm),
         diffusion_sigma_cm_sqrt_s=float(config.state_space_diffusion_sigma_cm_sqrt_s),
         max_step_sigma=float(config.state_space_max_step_sigma),
-        imm_mode_stickiness=float(config.state_space_imm_mode_stickiness),
+        imm_mode_stickiness=_effective_state_space_imm_stickiness(config),
         momentum_sigma_cm_sqrt_s=float(config.state_space_momentum_sigma_cm_sqrt_s),
         momentum_initial_sigma_cm_sqrt_s=float(
             config.state_space_momentum_initial_sigma_cm_sqrt_s

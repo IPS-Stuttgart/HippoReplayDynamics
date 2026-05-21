@@ -31,7 +31,7 @@ from .encoding import (
     _poisson_log_emissions,
     _time_bin_edges,
 )
-from .models import EventScore
+from .models import EventScore, _posterior_diagnostics
 
 
 class ScorableReplayModel(Protocol):
@@ -110,8 +110,16 @@ def build_sorted_emissions_with_replay_calibration(
             rates_hz,
             bin_durations,
             spike_rate_scale=1.0,
+            cell_weights=config.cell_weights,
+            negative_binomial_overdispersion=float(config.negative_binomial_overdispersion),
         )
     else:
+        if config.cell_weights is not None:
+            raise ValueError(
+                "cell_weights are not supported by the replay-calibrated "
+                "Gamma-Poisson emission; use likelihood_temperature or the "
+                "base Poisson/negative-binomial EmissionConfig path instead."
+            )
         log_likelihood = _negative_binomial_log_emissions(
             counts,
             rates_hz,
@@ -136,6 +144,8 @@ def build_sorted_emissions_with_replay_calibration(
         "replay_gain_prior_count": float(calibration.gain_prior_count),
         "replay_gain_max_gain": float(calibration.max_gain),
         "negative_binomial_dispersion": float(calibration.negative_binomial_dispersion),
+        "emission_likelihood_temperature": float(config.likelihood_temperature),
+        "emission_negative_binomial_overdispersion": float(config.negative_binomial_overdispersion),
         **gain_metadata,
     }
     return emissions
@@ -398,9 +408,13 @@ class ReverseTimeReplayModel:
             candidate_indices=reversed_candidates,
         )
         if result.trajectory_log_posterior is not None:
-            result.trajectory_log_posterior = np.asarray(result.trajectory_log_posterior)[::-1].copy()
+            trajectory = np.asarray(result.trajectory_log_posterior, dtype=float)[::-1].copy()
+            result.trajectory_log_posterior = trajectory
+            result.terminal_log_posterior = trajectory[-1].copy()
         result.model_name = str(self.name)
         result.diagnostics = dict(result.diagnostics)
+        if result.terminal_log_posterior is not None:
+            result.diagnostics.update(_posterior_diagnostics(result.terminal_log_posterior, bin_centers))
         result.diagnostics["direction_model"] = "reverse"
         result.diagnostics["reverse_time_base_model"] = str(getattr(self.base_model, "name", "model"))
         return result

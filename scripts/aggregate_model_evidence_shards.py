@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from benchmark_model_evidence import _add_evidence_columns, _counts, _summary, _write
+from benchmark_model_evidence import _add_evidence_columns, _counts, _event_group_columns, _summary, _write
 from model_evidence_settings import _validate_constant_settings
 from model_evidence_support_audit import write_evidence_support_audit
 
@@ -33,7 +33,7 @@ def aggregate(shard_glob: str, outdir: Path) -> pd.DataFrame:
         raise RuntimeError("All model-evidence shard CSVs were empty.")
 
     combined = pd.concat(frames, ignore_index=True)
-    duplicate_key = ["session", "event_index", "model"]
+    duplicate_key = [*_event_group_columns(combined), "model"]
     duplicates = combined.duplicated(duplicate_key, keep=False)
     if duplicates.any():
         duplicate_rows = combined.loc[duplicates, duplicate_key + ["source_shard_file"]]

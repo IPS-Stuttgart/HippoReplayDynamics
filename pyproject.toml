@@ -13,14 +13,21 @@ dependencies = [
     "numpy",
     "scipy",
     "h5py",
-    "mpmath",
     "pandas",
     "matplotlib",
-    "pyrecest==2.2.2",
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8"]
+pyrecest = ["pyrecest==2.2.2"]
+dev = [
+    "pytest>=8",
+    "ruff>=0.8",
+]
+dev-pyrecest = [
+    "pytest>=8",
+    "ruff>=0.8",
+    "pyrecest==2.2.2",
+]
 
 [project.scripts]
 hipporeplayimm = "hipporeplayimm.cli:main"

@@ -273,6 +273,7 @@ def test_candidate_diffusion_pruned_support_uses_full_grid_normalization():
 
 
 def test_pyrecest_goal_particle_model_scores_synthetic_event():
+    pytest.importorskip("pyrecest.filters")
     centers = np.array([[0.0, 0.0], [1.0, 0.0], [2.0, 0.0], [3.0, 0.0]])
     log_likelihood = np.log(
         np.array(

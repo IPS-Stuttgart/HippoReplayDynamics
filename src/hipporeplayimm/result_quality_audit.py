@@ -276,6 +276,14 @@ def _window_summary_if_available(scores: pd.DataFrame, *, group_cols: Sequence[s
 
 
 def _influence_summary(scores: pd.DataFrame) -> pd.DataFrame:
+    columns = [
+        "model",
+        "full_mean",
+        "leave_one_mean",
+        "left_out_group_col",
+        "left_out_group",
+        "influence_delta",
+    ]
     value_col = "relative_log_evidence" if "relative_log_evidence" in scores.columns else "log_evidence"
     frames: list[pd.DataFrame] = []
     if "session" in scores.columns and value_col in scores.columns:
@@ -284,9 +292,12 @@ def _influence_summary(scores: pd.DataFrame) -> pd.DataFrame:
         rat_scores["rat"] = rat_scores["session"].map(rat_from_session)
         frames.append(leave_one_group_influence(rat_scores, group_col="rat", value_col=value_col))
     if not frames:
-        return pd.DataFrame()
-    out = pd.concat([frame for frame in frames if not frame.empty], ignore_index=True)
-    return out if not out.empty else pd.DataFrame()
+        return pd.DataFrame(columns=columns)
+    nonempty = [frame for frame in frames if not frame.empty]
+    if not nonempty:
+        return pd.DataFrame(columns=columns)
+    out = pd.concat(nonempty, ignore_index=True)
+    return out if not out.empty else pd.DataFrame(columns=columns)
 
 
 def _candidate_support_summary(scores: pd.DataFrame) -> pd.DataFrame:

@@ -22,7 +22,7 @@ from hipporeplayimm.accuracy_upgrades import (
     model_probability_diagnostics,
 )
 from hipporeplayimm.advanced_result_diagnostics import (
-    add_evidence_margin_columns,
+    add_evidence_margin_columns as add_advanced_evidence_margin_columns,
     common_support_from_emissions,
 )
 from hipporeplayimm.clusterless import (
@@ -59,6 +59,15 @@ from hipporeplayimm.position_validation import (
 )
 from hipporeplayimm.sorted_spike_state_space import SortedSpikeStateSpaceReplayModel
 from hipporeplayimm.state_space import StateSpaceDecoderConfig
+from hipporeplayimm.result_improvement_extensions import (
+    BidirectionalReplayModel,
+    ReverseTimeReplayModel,
+    score_replay_model_compat,
+)
+from hipporeplayimm.result_quality_gates import (
+    quality_gate_summary,
+    write_result_quality_tables,
+)
 
 _REQUIRED = ("Position_Data.mat", "Ripple_Events.mat", "Spike_Data.mat", "Epochs.mat")
 _TRAJ = {
@@ -69,9 +78,13 @@ _TRAJ = {
     "sorted-spike-state-space-fragmented",
     "sorted-spike-state-space-jump",
     "sorted-spike-state-space-momentum",
+    "sorted-spike-state-space-momentum-reverse",
+    "sorted-spike-state-space-momentum-bidirectional",
     "sorted-spike-state-space-first-order-imm",
     "sorted-spike-state-space-imm",
     "sorted-spike-state-space-goal",
+    "sorted-spike-state-space-goal-reverse",
+    "sorted-spike-state-space-goal-bidirectional",
     "state-space-goal",
     "clusterless-state-space-diffusion",
     "clusterless-state-space-fragmented",
@@ -87,7 +100,10 @@ _NONTRAJ = {
     "sorted-spike-state-space-stationary",
     "clusterless-state-space-stationary",
 }
-_ALIASES = {"stationary_gaussian": "stationary-gaussian"}
+_ALIASES = {
+    "stationary_gaussian": "stationary-gaussian",
+    "sorted-spike-state-space-goal-forward": "sorted-spike-state-space-goal",
+}
 
 
 def _session_path(root: str | Path, session: str) -> Path:
@@ -181,7 +197,10 @@ def _models(args, session=None) -> dict[str, object]:
             mark_likelihood=getattr(args, "clusterless_mark_likelihood", "local-kde"),
         )
 
-    wants_goal_state_space = any(name in GOAL_STATE_SPACE_MODEL_NAMES for name in names)
+    wants_goal_state_space = any(
+        name in GOAL_STATE_SPACE_MODEL_NAMES or name.startswith("sorted-spike-state-space-goal-")
+        for name in names
+    )
     goal_candidates = _session_goal_candidates(session) if wants_goal_state_space else None
 
     def goal_state_space_model(name: str) -> GoalStateSpaceReplayModel:
@@ -192,6 +211,17 @@ def _models(args, session=None) -> dict[str, object]:
             max_step_sigma=getattr(args, "goal_state_space_max_step_sigma", DEFAULT_GOAL_MAX_STEP_SIGMA),
             name=name,
         )
+
+    forward_momentum_state_space = state_space_model("momentum")
+    reverse_momentum_state_space = ReverseTimeReplayModel(
+        state_space_model("momentum"),
+        name="sorted-spike-state-space-momentum-reverse",
+    )
+    forward_goal_state_space = goal_state_space_model("sorted-spike-state-space-goal")
+    reverse_goal_state_space = ReverseTimeReplayModel(
+        goal_state_space_model("sorted-spike-state-space-goal"),
+        name="sorted-spike-state-space-goal-reverse",
+    )
 
     available = {
         "random": RandomModel(),
@@ -216,10 +246,22 @@ def _models(args, session=None) -> dict[str, object]:
         "sorted-spike-state-space-diffusion": state_space_model("diffusion"),
         "sorted-spike-state-space-fragmented": state_space_model("fragmented"),
         "sorted-spike-state-space-jump": state_space_model("jump"),
-        "sorted-spike-state-space-momentum": state_space_model("momentum"),
+        "sorted-spike-state-space-momentum": forward_momentum_state_space,
+        "sorted-spike-state-space-momentum-reverse": reverse_momentum_state_space,
+        "sorted-spike-state-space-momentum-bidirectional": BidirectionalReplayModel(
+            forward_momentum_state_space,
+            reverse_momentum_state_space,
+            name="sorted-spike-state-space-momentum-bidirectional",
+        ),
         "sorted-spike-state-space-first-order-imm": state_space_model("first-order-imm"),
         "sorted-spike-state-space-imm": state_space_model("imm"),
-        "sorted-spike-state-space-goal": goal_state_space_model("sorted-spike-state-space-goal"),
+        "sorted-spike-state-space-goal": forward_goal_state_space,
+        "sorted-spike-state-space-goal-reverse": reverse_goal_state_space,
+        "sorted-spike-state-space-goal-bidirectional": BidirectionalReplayModel(
+            forward_goal_state_space,
+            reverse_goal_state_space,
+            name="sorted-spike-state-space-goal-bidirectional",
+        ),
         "state-space-goal": goal_state_space_model("state-space-goal"),
         "clusterless-state-space-stationary": clusterless_state_space_model("stationary"),
         "clusterless-state-space-diffusion": clusterless_state_space_model("diffusion"),
@@ -365,6 +407,9 @@ def _optional_float_argument(value: str | None) -> float | None:
 def _state_space_metadata(args) -> dict[str, object]:
     return {
         "state_space_momentum_predicted_candidate_top_k": int(getattr(args, "state_space_momentum_predicted_candidate_top_k", 8)),
+        "state_space_momentum_candidate_mass_threshold": _optional_float_setting(getattr(args, "state_space_momentum_candidate_mass_threshold", None)),
+        "state_space_momentum_candidate_min_k": int(getattr(args, "state_space_momentum_candidate_min_k", 1)),
+        "state_space_momentum_candidate_max_k": int(getattr(args, "state_space_momentum_candidate_max_k", 0)),
         "state_space_imm_switch_tau_s": float(getattr(args, "state_space_imm_switch_tau_s", 0.0)),
         "state_space_effective_imm_mode_stickiness": float(_state_space_mode_stickiness(args)),
         "state_space_momentum_velocity_decay_tau_s": float(getattr(args, "state_space_momentum_velocity_decay_tau_s", 0.0)),
@@ -433,7 +478,7 @@ def _score(args) -> pd.DataFrame:
             occupancy_s = clusterless_encoding.occupancy_s if use_clusterless and clusterless_encoding is not None else encoding.occupancy_s
             assert emissions is not None
             try:
-                result = _score_model_with_optional_support(
+                result = score_replay_model_compat(
                     model,
                     emissions,
                     bin_centers,
@@ -587,7 +632,7 @@ def _postprocess_evidence_scores(df: pd.DataFrame) -> pd.DataFrame:
     if out.empty:
         return out
     out = out.drop(columns=[column for column in _EVIDENCE_MARGIN_COLUMNS if column in out.columns])
-    return add_evidence_margin_columns(out, group_cols=_event_group_columns(out))
+    return add_advanced_evidence_margin_columns(out, group_cols=_event_group_columns(out))
 
 
 def _summary(df: pd.DataFrame) -> pd.DataFrame:
@@ -719,6 +764,7 @@ def _write(df: pd.DataFrame, outdir: Path) -> None:
             outdir / f"event_model_pivot_{metric}.csv",
             index=False,
         )
+    write_result_quality_tables(df, outdir)
 
 
 def main() -> int:
@@ -752,7 +798,7 @@ def main() -> int:
     p.add_argument("--state-space-momentum-predicted-candidate-top-k", type=int, default=16)
     p.add_argument(
         "--state-space-momentum-candidate-mass-threshold",
-        type=float,
+        type=_optional_float_argument,
         default=None,
         help="Enable adaptive candidate support retaining this normalized emission mass.",
     )
@@ -851,6 +897,10 @@ def main() -> int:
             "\nInterpretation: exact_full_grid rows are comparable model evidences; "
             "truncated_full_grid rows are candidate-support lower bounds and must be ranked only within the lower-bound diagnostic group."
         )
+    gate_summary = quality_gate_summary(df)
+    if not gate_summary.empty:
+        print("\nResult-quality gates:")
+        print(gate_summary.to_string(index=False))
     margin_counts = _evidence_margin_counts(df)
     if not margin_counts.empty:
         print("\nEvidence-margin counts:")

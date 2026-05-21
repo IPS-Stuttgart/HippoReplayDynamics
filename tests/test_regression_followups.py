@@ -183,6 +183,60 @@ def test_duration_state_space_keeps_duration_metadata_with_occupancy_mask() -> N
     assert score.diagnostics["state_space_valid_bin_count"] == 2
 
 
+def test_duration_state_space_momentum_decay_tau_is_used_by_active_scorer(monkeypatch) -> None:
+    import hipporeplayimm.duration_occupancy as duration_occupancy
+
+    captured_configs: list[object] = []
+    real_duration_adjusted_decays = duration_occupancy._duration_adjusted_decays
+
+    def capture_duration_adjusted_decays(
+        config_or_decay: object,
+        durations: np.ndarray,
+        reference_dt: float,
+    ) -> np.ndarray:
+        captured_configs.append(config_or_decay)
+        return real_duration_adjusted_decays(config_or_decay, durations, reference_dt)
+
+    monkeypatch.setattr(
+        duration_occupancy,
+        "_duration_adjusted_decays",
+        capture_duration_adjusted_decays,
+    )
+    emissions = LogEmissionTensor(
+        log_likelihood=np.zeros((3, 3), dtype=float),
+        spike_counts=np.zeros((3, 1), dtype=int),
+        times=np.array([0.0, 0.02, 0.06], dtype=float),
+        dt=0.02,
+        cell_ids=np.array([1], dtype=int),
+        n_spikes=0,
+    )
+    centers = np.array(
+        [[0.0, 0.0], [1.0, 0.0], [2.0, 0.0]],
+        dtype=float,
+    )
+    model = StateSpaceReplayModel(
+        mode="momentum",
+        config=StateSpaceDecoderConfig(
+            mode="momentum",
+            momentum_velocity_decay=0.25,
+            momentum_velocity_decay_tau_s=0.10,
+        ),
+    )
+
+    score = model.score(emissions, centers)
+
+    assert np.isfinite(score.log_likelihood)
+    assert captured_configs and captured_configs[0] is model.config
+    expected = np.exp(-np.asarray(emissions.transition_durations) / 0.10)
+    decays = real_duration_adjusted_decays(
+        model.config,
+        emissions.transition_durations,
+        emissions.dt,
+    )
+    np.testing.assert_allclose(decays, expected)
+    assert score.diagnostics["state_space_momentum_velocity_decay_tau_s"] == pytest.approx(0.10)
+
+
 def test_state_space_rejects_nonpositive_diffusion_sigma() -> None:
     emissions = LogEmissionTensor(
         log_likelihood=np.zeros((2, 2), dtype=float),

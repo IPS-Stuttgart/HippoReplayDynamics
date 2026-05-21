@@ -18,6 +18,11 @@ python scripts/benchmark_model_evidence_improved.py \
   --output results/model-evidence-improved
 ```
 
+The improved benchmark now writes the same standard post-processing columns as
+the base and event-sharded evidence paths: comparable-evidence flags,
+candidate-support quality labels, event-level evidence-margin categories, and
+model-averaged endpoint summaries when endpoint diagnostics are available.
+
 The improved script exposes the existing exact goal-state-space model, reverse
 and bidirectional wrappers, adaptive state-space momentum candidate support,
 clusterless local-KDE controls, replay-specific emission calibration, spatial

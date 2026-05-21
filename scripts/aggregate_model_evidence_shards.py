@@ -10,9 +10,9 @@ from pathlib import Path
 import pandas as pd
 
 from benchmark_model_evidence import (
-    _add_evidence_columns,
     _counts,
     _event_group_columns,
+    _postprocess_evidence_scores,
     _summary,
     _support_counts,
     _write,
@@ -51,7 +51,7 @@ def aggregate(shard_glob: str, outdir: Path) -> pd.DataFrame:
         )
     _validate_constant_settings(combined)
 
-    combined = _add_evidence_columns(combined.drop(columns=["source_shard_file"]))
+    combined = _postprocess_evidence_scores(combined.drop(columns=["source_shard_file"]))
     _write(combined, outdir)
     write_evidence_support_audit(combined, outdir)
     return combined

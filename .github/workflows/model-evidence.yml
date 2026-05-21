@@ -15,7 +15,7 @@ on:
       events:
         description: "Event IDs/ranges, all, run, or run:0-25"
         required: true
-        default: "0-25"
+        default: "run:0-25"
       max_events:
         description: "Maximum selected events to score; empty means no cap"
         required: false
@@ -23,7 +23,7 @@ on:
       models:
         description: "Space-separated models"
         required: true
-        default: "random stationary stationary-gaussian diffusion momentum imm sorted-spike-state-space-stationary sorted-spike-state-space-diffusion sorted-spike-state-space-momentum sorted-spike-state-space-fragmented sorted-spike-state-space-imm sorted-spike-state-space-goal"
+        default: "random stationary sorted-spike-state-space-diffusion sorted-spike-state-space-momentum sorted-spike-state-space-imm sorted-spike-state-space-goal"
       candidate_top_k:
         description: "Candidate spatial bins per time bin"
         required: true

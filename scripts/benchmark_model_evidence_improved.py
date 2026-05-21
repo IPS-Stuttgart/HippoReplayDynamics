@@ -26,13 +26,13 @@ import numpy as np
 import pandas as pd
 
 from benchmark_model_evidence import (  # reuse the stable writer/reporting helpers
-    _add_evidence_columns,
     _check_session,
     _counts,
     _events,
     _session_path,
     _summary,
     _write,
+    _postprocess_evidence_scores,
 )
 
 from hipporeplayimm.accuracy_upgrades import (
@@ -106,6 +106,14 @@ _ALIASES = {
     "state-space-goal-forward": "state-space-goal",
     "sorted-spike-state-space-goal-forward": "sorted-spike-state-space-goal",
 }
+DEFAULT_IMPROVED_MODELS = (
+    "random stationary sorted-spike-state-space-diffusion "
+    "sorted-spike-state-space-momentum sorted-spike-state-space-imm "
+    "sorted-spike-state-space-goal sorted-spike-state-space-goal-bidirectional"
+)
+DEFAULT_IMPROVED_STATE_SPACE_IMM_SWITCH_TAU_S = 0.060
+DEFAULT_IMPROVED_STATE_SPACE_MOMENTUM_CANDIDATE_TOP_K = 256
+DEFAULT_IMPROVED_STATE_SPACE_MOMENTUM_PREDICTED_CANDIDATE_TOP_K = 16
 
 
 def _family(model: str) -> str:
@@ -507,7 +515,7 @@ def _score(args: argparse.Namespace) -> pd.DataFrame:
                     )
                     if not args.continue_on_error:
                         raise
-    return add_model_averaged_endpoint_columns(_add_evidence_columns(pd.DataFrame(rows)))
+    return add_model_averaged_endpoint_columns(_postprocess_evidence_scores(pd.DataFrame(rows)))
 
 
 def _run_settings(args: argparse.Namespace) -> dict[str, object]:
@@ -581,12 +589,7 @@ def main() -> int:
     parser.add_argument("--max-events", type=int, default=None)
     parser.add_argument(
         "--models",
-        default=(
-            "random stationary sorted-spike-state-space-diffusion "
-            "sorted-spike-state-space-momentum sorted-spike-state-space-momentum-bidirectional "
-            "sorted-spike-state-space-imm sorted-spike-state-space-goal "
-            "sorted-spike-state-space-goal-bidirectional"
-        ),
+        default=DEFAULT_IMPROVED_MODELS,
     )
     parser.add_argument("--candidate-top-k", type=int, default=64)
     parser.add_argument("--stationary-sigma-cm", type=float, default=2.0)
@@ -598,15 +601,15 @@ def main() -> int:
     parser.add_argument("--state-space-diffusion-sigma-cm-sqrt-s", type=float, default=85.0)
     parser.add_argument("--state-space-max-step-sigma", type=float, default=4.0)
     parser.add_argument("--state-space-imm-mode-stickiness", type=float, default=0.95)
-    parser.add_argument("--state-space-imm-switch-tau-s", type=float, default=0.060)
+    parser.add_argument("--state-space-imm-switch-tau-s", type=float, default=DEFAULT_IMPROVED_STATE_SPACE_IMM_SWITCH_TAU_S)
     parser.add_argument("--state-space-momentum-sigma-cm-sqrt-s", type=float, default=85.0)
     parser.add_argument("--state-space-momentum-initial-sigma-cm-sqrt-s", type=float, default=85.0)
     parser.add_argument("--state-space-momentum-velocity-decay", type=float, default=0.95)
-    parser.add_argument("--state-space-momentum-candidate-top-k", type=int, default=256)
+    parser.add_argument("--state-space-momentum-candidate-top-k", type=int, default=DEFAULT_IMPROVED_STATE_SPACE_MOMENTUM_CANDIDATE_TOP_K)
     parser.add_argument("--state-space-momentum-candidate-mass-threshold", type=float)
     parser.add_argument("--state-space-momentum-candidate-min-k", type=int, default=1)
     parser.add_argument("--state-space-momentum-candidate-max-k", type=int, default=0)
-    parser.add_argument("--state-space-momentum-predicted-candidate-top-k", type=int, default=16)
+    parser.add_argument("--state-space-momentum-predicted-candidate-top-k", type=int, default=DEFAULT_IMPROVED_STATE_SPACE_MOMENTUM_PREDICTED_CANDIDATE_TOP_K)
     parser.add_argument("--state-space-valid-occupancy-threshold-s", type=float, default=0.0)
     parser.add_argument("--goal-state-space-transition-sigma-cm-sqrt-s", type=float, default=85.0)
     parser.add_argument("--goal-state-space-drift-speed-cm-s", type=float, default=400.0)

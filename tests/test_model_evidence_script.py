@@ -93,13 +93,16 @@ def test_model_evidence_accepts_clusterless_state_space_models():
 
     assert list(models) == [
         "clusterless-state-space-diffusion",
+        "clusterless-state-space-first-order-imm",
         "clusterless-state-space-momentum",
         "clusterless-state-space-imm",
     ]
     assert models["clusterless-state-space-diffusion"].name == "clusterless-state-space-diffusion"
+    assert models["clusterless-state-space-first-order-imm"].name == "clusterless-state-space-first-order-imm"
     assert models["clusterless-state-space-momentum"].name == "clusterless-state-space-momentum"
     assert models["clusterless-state-space-imm"].name == "clusterless-state-space-imm"
     assert models["clusterless-state-space-diffusion"].config.diffusion_sigma_cm_sqrt_s == 42.0
+    assert models["clusterless-state-space-first-order-imm"].config.imm_mode_stickiness == 0.91
     assert models["clusterless-state-space-momentum"].config.momentum_sigma_cm_sqrt_s == 43.0
     assert models["clusterless-state-space-momentum"].config.momentum_predicted_candidate_top_k == 5
 

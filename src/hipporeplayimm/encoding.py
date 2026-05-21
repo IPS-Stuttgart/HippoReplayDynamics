@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Iterable
 
 import numpy as np
@@ -110,6 +110,7 @@ class LogEmissionTensor:
     n_spikes: int
     bin_durations: np.ndarray | None = None
     transition_durations: np.ndarray | None = None
+    metadata: dict[str, object] = field(default_factory=dict)
 
     @property
     def n_time(self) -> int:

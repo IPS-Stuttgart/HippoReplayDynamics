@@ -8,7 +8,10 @@ from scipy.special import logsumexp
 from .encoding import LogEmissionTensor
 from .models import LOG_ZERO
 from .state_space_first_order import _score_fragmented
-from .state_space_candidates_momentum import _backward_momentum_pair
+from .state_space_candidates_momentum import (
+    _backward_momentum_pair,
+    _transition_parameter_series,
+)
 from .state_space_utils import (
     _candidate_log_masses,
     _full_grid_normalized_pairwise_gaussian_log_prob,
@@ -28,6 +31,9 @@ def _score_imm_candidates(
     velocity_decay: float,
     mode_stickiness: float,
     candidate_indices: list[np.ndarray],
+    diffusion_sigmas_cm: np.ndarray | None = None,
+    momentum_sigmas_cm: np.ndarray | None = None,
+    velocity_decays: np.ndarray | None = None,
     valid_bin_mask: np.ndarray | None = None,
 ) -> tuple[float, np.ndarray, np.ndarray, list[float]]:
     """Candidate-pruned four-mode IMM over stationary/diffusion/momentum/jump."""
@@ -37,6 +43,26 @@ def _score_imm_candidates(
         logp, trajectory = _score_fragmented(emissions, valid_bin_mask=valid_bin_mask)
         mode_post = np.full((1, len(modes)), 1.0 / len(modes), dtype=float)
         return logp, trajectory, mode_post, [0.0]
+
+    n_transitions = emissions.n_time - 1
+    diffusion_sigmas = _transition_parameter_series(
+        diffusion_sigmas_cm,
+        n_transitions,
+        diffusion_sigma_cm,
+        name="diffusion_sigmas_cm",
+    )
+    momentum_sigmas = _transition_parameter_series(
+        momentum_sigmas_cm,
+        n_transitions,
+        momentum_sigma_cm,
+        name="momentum_sigmas_cm",
+    )
+    transition_velocity_decays = _transition_parameter_series(
+        velocity_decays,
+        n_transitions,
+        velocity_decay,
+        name="velocity_decays",
+    )
 
     mode_transition = _mode_transition_matrix(len(modes), mode_stickiness)
     with np.errstate(divide="ignore"):
@@ -53,7 +79,7 @@ def _score_imm_candidates(
             bin_centers,
             mode=mode,
             stationary_sigma_cm=stationary_sigma_cm,
-            diffusion_sigma_cm=diffusion_sigma_cm,
+            diffusion_sigma_cm=float(diffusion_sigmas[0]),
             momentum_initial_sigma_cm=momentum_initial_sigma_cm,
             valid_bin_mask=valid_bin_mask,
         )
@@ -82,9 +108,9 @@ def _score_imm_candidates(
                     bin_centers,
                     mode=dst_mode,
                     stationary_sigma_cm=stationary_sigma_cm,
-                    diffusion_sigma_cm=diffusion_sigma_cm,
-                    momentum_sigma_cm=momentum_sigma_cm,
-                    velocity_decay=velocity_decay,
+                    diffusion_sigma_cm=float(diffusion_sigmas[time_index - 1]),
+                    momentum_sigma_cm=float(momentum_sigmas[time_index - 1]),
+                    velocity_decay=float(transition_velocity_decays[time_index - 1]),
                     valid_bin_mask=valid_bin_mask,
                 )
             )
@@ -105,9 +131,9 @@ def _score_imm_candidates(
             modes=modes,
             mode_transition=mode_transition,
             stationary_sigma_cm=stationary_sigma_cm,
-            diffusion_sigma_cm=diffusion_sigma_cm,
-            momentum_sigma_cm=momentum_sigma_cm,
-            velocity_decay=velocity_decay,
+            diffusion_sigma_cm=float(diffusion_sigmas[curr_time - 1]),
+            momentum_sigma_cm=float(momentum_sigmas[curr_time - 1]),
+            velocity_decay=float(transition_velocity_decays[curr_time - 1]),
             valid_bin_mask=valid_bin_mask,
         )
 

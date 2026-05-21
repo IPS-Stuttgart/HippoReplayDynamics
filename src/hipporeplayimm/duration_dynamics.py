@@ -86,6 +86,8 @@ def _patch_builders(enc,kd):
         kd_build_emissions._duration_wrapped=True; kd.build_kd_emissions=kd_build_emissions
 
 def _patch_state_space(ss):
+    if getattr(ss.StateSpaceReplayModel.score, '_native_duration_occupancy_aware', False):
+        return
     def fb(loglik,trans):
         T,N=loglik.shape; scaled,offs=ss._scaled_emissions(loglik); filt=np.zeros((T,N)); sc=np.zeros(T)
         a=scaled[0]/N; sc[0]=float(a.sum())

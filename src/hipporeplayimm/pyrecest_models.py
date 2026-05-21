@@ -13,6 +13,21 @@ from .encoding import LogEmissionTensor
 from .evidence_reporting import PYRECEST_PARTICLE_EVIDENCE_SUPPORT
 from .models import EventScore, LOG_ZERO, _posterior_diagnostics
 
+PYRECEST_INSTALL_HINT = (
+    "PyRecEst-backed replay models require the optional 'pyrecest' dependency. "
+    "Install it from a checkout with `python -m pip install -e \".[pyrecest]\"` "
+    "or from a package install with `python -m pip install hipporeplayimm[pyrecest]`."
+)
+
+
+def _missing_pyrecest_error() -> RuntimeError:
+    return RuntimeError(PYRECEST_INSTALL_HINT)
+
+
+def _is_missing_pyrecest_exception(exc: ModuleNotFoundError) -> bool:
+    module_name = str(getattr(exc, "name", ""))
+    return module_name == "pyrecest" or module_name.startswith("pyrecest.")
+
 
 @dataclass
 class PyRecEstGoalParticleModel:
@@ -167,7 +182,12 @@ class PyRecEstGoalParticleModel:
         candidate_goals: np.ndarray,
         dt: float,
     ):
-        from pyrecest.filters import GoalConditionedReplayParticleFilter
+        try:
+            from pyrecest.filters import GoalConditionedReplayParticleFilter
+        except ModuleNotFoundError as exc:
+            if _is_missing_pyrecest_exception(exc):
+                raise _missing_pyrecest_error() from exc
+            raise
 
         position_prior, velocity_prior = _initial_replay_priors(
             bin_centers,
@@ -190,7 +210,12 @@ class PyRecEstGoalParticleModel:
         )
 
     def _build_noise_distributions(self, position_dim: int):
-        from pyrecest.distributions import GaussianDistribution
+        try:
+            from pyrecest.distributions import GaussianDistribution
+        except ModuleNotFoundError as exc:
+            if _is_missing_pyrecest_exception(exc):
+                raise _missing_pyrecest_error() from exc
+            raise
 
         zeros = np.zeros(position_dim, dtype=float)
         process_noise = GaussianDistribution(
@@ -222,7 +247,12 @@ class PyRecEstGoalParticleIMMModel(PyRecEstGoalParticleModel):
         candidate_goals: np.ndarray,
         dt: float,
     ):
-        from pyrecest.filters import GoalConditionedReplayParticleIMMFilter
+        try:
+            from pyrecest.filters import GoalConditionedReplayParticleIMMFilter
+        except ModuleNotFoundError as exc:
+            if _is_missing_pyrecest_exception(exc):
+                raise _missing_pyrecest_error() from exc
+            raise
 
         position_prior, velocity_prior = _initial_replay_priors(
             bin_centers,
@@ -255,7 +285,12 @@ def _initial_replay_priors(
     bin_centers: np.ndarray,
     initial_velocity_sigma_cm_s: float,
 ):
-    from pyrecest.distributions import GaussianDistribution, LinearDiracDistribution
+    try:
+        from pyrecest.distributions import GaussianDistribution, LinearDiracDistribution
+    except ModuleNotFoundError as exc:
+        if _is_missing_pyrecest_exception(exc):
+            raise _missing_pyrecest_error() from exc
+        raise
 
     bin_centers = np.asarray(bin_centers, dtype=float)
     position_dim = bin_centers.shape[1]

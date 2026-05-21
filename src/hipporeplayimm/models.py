@@ -16,6 +16,24 @@ LOG_ZERO = -1.0e300
 DEGENERATE_SINGLE_BIN_EVIDENCE_SUPPORT = "degenerate_single_bin"
 
 
+def _validate_positive_parameter(name: str, value: float) -> None:
+    value = float(value)
+    if not np.isfinite(value) or value <= 0.0:
+        raise ValueError(f"{name} must be finite and positive")
+
+
+def _validate_nonnegative_parameter(name: str, value: float) -> None:
+    value = float(value)
+    if not np.isfinite(value) or value < 0.0:
+        raise ValueError(f"{name} must be finite and nonnegative")
+
+
+def _validate_probability_parameter(name: str, value: float) -> None:
+    value = float(value)
+    if not np.isfinite(value) or not 0.0 <= value <= 1.0:
+        raise ValueError(f"{name} must be finite and lie in [0, 1]")
+
+
 @dataclass
 class EventScore:
     model_name: str
@@ -79,6 +97,10 @@ class DiffusionModel:
     max_step_sigma: float = 3.0
     name: str = "diffusion"
 
+    def __post_init__(self) -> None:
+        _validate_positive_parameter("sigma_cm", self.sigma_cm)
+        _validate_positive_parameter("max_step_sigma", self.max_step_sigma)
+
     def score(self, emissions: LogEmissionTensor, bin_centers: np.ndarray) -> EventScore:
         transition = _log_transition_matrix(
             bin_centers,
@@ -131,6 +153,13 @@ class CandidateKinematicModel:
             raise ValueError(
                 "mode must be one of 'stationary', 'diffusion', 'momentum', 'jump', or 'imm'"
             )
+        _validate_positive_parameter("stationary_sigma_cm", self.stationary_sigma_cm)
+        _validate_positive_parameter("diffusion_sigma_cm", self.diffusion_sigma_cm)
+        _validate_positive_parameter("momentum_sigma_cm", self.momentum_sigma_cm)
+        _validate_nonnegative_parameter("velocity_decay", self.velocity_decay)
+        _validate_probability_parameter("mode_stickiness", self.mode_stickiness)
+        if not np.issubdtype(np.asarray(self.top_k).dtype, np.integer):
+            raise TypeError("top_k must be an integer")
         if self.name is None:
             self.name = self.mode
 

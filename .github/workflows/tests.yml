@@ -17,7 +17,8 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  test:
+  static:
+    name: Static checks
     runs-on: ubuntu-latest
     permissions:
       checks: write
@@ -31,6 +32,40 @@ jobs:
         uses: actions/setup-python@v6
         with:
           python-version: "3.13"
+          cache: pip
+
+      - name: Install static-analysis dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+
+      - name: Run syntax-focused Ruff checks
+        run: |
+          python -m ruff check src scripts tests --select E9,F63,F7,F82 --output-format=github
+
+      - name: Compile Python sources
+        run: |
+          python -m compileall -q src scripts tests
+
+  test:
+    name: Tests on Python ${{ matrix.python-version }}
+    runs-on: ubuntu-latest
+    permissions:
+      checks: write
+      pull-requests: write
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13", "3.14"]
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python-version }}
           cache: pip
 
       - name: Install package and test dependencies
@@ -48,9 +83,40 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: python-3.13-test-results
+          name: python-${{ matrix.python-version }}-test-results
           path: junit_test_results.xml
           if-no-files-found: ignore
+
+  test-pyrecest-extra:
+    name: PyRecEst optional-extra smoke test
+    runs-on: ubuntu-latest
+    permissions:
+      checks: write
+      pull-requests: write
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Install package with PyRecEst extra
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev-pyrecest]"
+
+      - name: Run PyRecEst-focused tests
+        run: |
+          python -m pytest --rootdir . -v \
+            tests/test_pyrecest_smoke.py \
+            tests/test_pyrecest_goal_particle_proposals.py \
+            tests/test_pyrecest_duration.py
+        env:
+          PYTHONPATH: ${{ github.workspace }}/src
 
   publish-results:
     needs: test
@@ -64,6 +130,8 @@ jobs:
         uses: actions/download-artifact@v8
         with:
           path: test-results
+          pattern: python-*-test-results
+          merge-multiple: false
 
       - name: Publish test results
         uses: EnricoMi/publish-unit-test-result-action@v2

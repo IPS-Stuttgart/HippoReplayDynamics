@@ -4,6 +4,33 @@
 interacting-multiple-model (IMM) interpretations of hippocampal replay in the
 Pfeiffer/Foster open-field dataset.
 
+## Installation
+
+Install the core package and its development test dependencies from a checkout
+with:
+
+```bash
+python -m pip install -e ".[dev]"
+```
+
+PyRecEst-backed particle models are optional. Install the additional extra only
+when running `pyrecest-goal-particle`, `pyrecest-goal-particle-imm`, or the
+PyRecEst sweep workflows locally:
+
+```bash
+python -m pip install -e ".[pyrecest]"
+```
+
+For local development that also runs the PyRecEst-focused test subset, use:
+
+```bash
+python -m pip install -e ".[dev-pyrecest]"
+```
+
+Without the PyRecEst extra, the core benchmarks, state-space models, clusterless
+models, and non-PyRecEst tests remain available; PyRecEst-specific tests and
+models are skipped or unavailable until the extra is installed.
+
 The raw dataset is expected to remain outside the repository, for example:
 
 ```powershell
@@ -106,7 +133,7 @@ workflow runs the same command on GitHub Actions and uploads these files as a
 
 The model-evidence workflow exposes the same encoder settings. The validated
 behavioral-decoding settings are `--decode-bin-s 1.0`, `--bin-size-cm 6.0`,
-`--smoothing-sigma-bins 2.0`, and `--min-speed-cm-s 5.0`. These settings passed
+`smoothing-sigma-bins 2.0`, and `--min-speed-cm-s 5.0`. These settings passed
 the Rat3/Open1 and Rat3/Open2 position-validation matrix with median
 posterior-mean errors below 15 cm and median MAP errors below 20 cm.
 For full sessions, use the manual `Benchmark replay model evidence

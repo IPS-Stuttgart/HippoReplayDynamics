@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 
 import numpy as np
+from scipy.special import logsumexp
 
 from .encoding import LogEmissionTensor
 from .models import EventScore, _posterior_diagnostics
@@ -46,11 +47,13 @@ class StateSpaceDecoderConfig:
     momentum_sigma_cm_sqrt_s: float = 85.0
     momentum_initial_sigma_cm_sqrt_s: float = 85.0
     momentum_velocity_decay: float = 0.95
+    momentum_velocity_decay_tau_s: float = 0.0
     momentum_candidate_top_k: int = 128
     momentum_candidate_mass_threshold: float | None = None
     momentum_candidate_min_k: int = 1
     momentum_candidate_max_k: int = 0
     momentum_predicted_candidate_top_k: int = 8
+    momentum_candidate_source: str = "emission"
     valid_occupancy_threshold_s: float = 0.0
 
 
@@ -112,11 +115,12 @@ class StateSpaceReplayModel:
         """
 
         assert self.config is not None
+        support_log_values = _candidate_support_log_values(emissions, bin_centers, self.config)
         mass_threshold = self.config.momentum_candidate_mass_threshold
         if mass_threshold is None or not np.isfinite(float(mass_threshold)):
             base = [
                 _top_candidate_indices(row, self.config.momentum_candidate_top_k)
-                for row in emissions.log_likelihood
+                for row in support_log_values
             ]
         else:
             base = [
@@ -127,7 +131,7 @@ class StateSpaceReplayModel:
                     min_k=self.config.momentum_candidate_min_k,
                     max_k=self.config.momentum_candidate_max_k,
                 )
-                for row in emissions.log_likelihood
+                for row in support_log_values
             ]
         predicted_top_k = int(self.config.momentum_predicted_candidate_top_k)
         if predicted_top_k <= 0 or bin_centers is None or emissions.n_time < 3:
@@ -136,7 +140,17 @@ class StateSpaceReplayModel:
             base,
             bin_centers,
             predicted_top_k=predicted_top_k,
-            velocity_decay=float(self.config.momentum_velocity_decay),
+            velocity_decay=_representative_transition_value(
+                _momentum_velocity_decays(
+                    self.config,
+                    _emission_transition_durations(emissions),
+                ),
+                fallback=float(self.config.momentum_velocity_decay),
+            ),
+            velocity_decays=_momentum_velocity_decays(
+                self.config,
+                _emission_transition_durations(emissions),
+            ),
         )
 
     def score(
@@ -238,11 +252,35 @@ class StateSpaceReplayModel:
                 }
             )
         elif self.mode == "imm":
-            transition_sigma_cm = _per_bin_sigma(self.config.diffusion_sigma_cm_sqrt_s, emissions.dt)
-            momentum_transition_sigma_cm = _per_bin_sigma(self.config.momentum_sigma_cm_sqrt_s, emissions.dt)
-            momentum_initial_sigma_cm = _per_bin_sigma(
+            transition_durations = _emission_transition_durations(emissions)
+            diffusion_transition_sigmas_cm = _per_transition_sigmas_cm(
+                self.config.diffusion_sigma_cm_sqrt_s,
+                transition_durations,
+            )
+            momentum_transition_sigmas_cm = _per_transition_sigmas_cm(
+                self.config.momentum_sigma_cm_sqrt_s,
+                transition_durations,
+            )
+            momentum_initial_transition_sigmas_cm = _per_transition_sigmas_cm(
                 self.config.momentum_initial_sigma_cm_sqrt_s,
-                emissions.dt,
+                transition_durations,
+            )
+            velocity_decays = _momentum_velocity_decays(self.config, transition_durations)
+            transition_sigma_cm = _representative_transition_value(
+                diffusion_transition_sigmas_cm,
+                fallback=_per_bin_sigma(self.config.diffusion_sigma_cm_sqrt_s, emissions.dt),
+            )
+            momentum_transition_sigma_cm = _representative_transition_value(
+                momentum_transition_sigmas_cm,
+                fallback=_per_bin_sigma(self.config.momentum_sigma_cm_sqrt_s, emissions.dt),
+            )
+            momentum_initial_sigma_cm = _first_transition_value(
+                momentum_initial_transition_sigmas_cm,
+                fallback=_per_bin_sigma(self.config.momentum_initial_sigma_cm_sqrt_s, emissions.dt),
+            )
+            momentum_velocity_decay = _representative_transition_value(
+                velocity_decays,
+                fallback=float(self.config.momentum_velocity_decay),
             )
             candidates = self.candidate_indices(emissions, bin_centers) if candidate_indices is None else candidate_indices
             candidates = _restrict_candidates_to_valid_bins(
@@ -258,8 +296,11 @@ class StateSpaceReplayModel:
                 diffusion_sigma_cm=transition_sigma_cm,
                 momentum_sigma_cm=momentum_transition_sigma_cm,
                 momentum_initial_sigma_cm=momentum_initial_sigma_cm,
-                velocity_decay=self.config.momentum_velocity_decay,
+                velocity_decay=momentum_velocity_decay,
                 mode_stickiness=self.config.imm_mode_stickiness,
+                diffusion_sigmas_cm=diffusion_transition_sigmas_cm,
+                momentum_sigmas_cm=momentum_transition_sigmas_cm,
+                velocity_decays=velocity_decays,
                 candidate_indices=candidates,
                 valid_bin_mask=valid_bin_mask,
             )
@@ -283,10 +324,22 @@ class StateSpaceReplayModel:
                     ),
                     "state_space_momentum_transition_sigma_cm": float(momentum_transition_sigma_cm),
                     "state_space_momentum_initial_transition_sigma_cm": float(momentum_initial_sigma_cm),
+                    "state_space_momentum_transition_sigma_cm_per_step": _format_float_series(momentum_transition_sigmas_cm),
+                    "state_space_momentum_initial_transition_sigma_cm_per_step": _format_float_series(momentum_initial_transition_sigmas_cm),
+                    "state_space_diffusion_transition_sigma_cm_per_step": _format_float_series(diffusion_transition_sigmas_cm),
+                    "state_space_momentum_velocity_decay_effective": float(momentum_velocity_decay),
+                    "state_space_momentum_velocity_decay_per_step": _format_float_series(velocity_decays),
+                    "state_space_transition_durations_s": _format_float_series(transition_durations),
                 }
             )
         elif self.mode == "momentum":
-            transition_sigma_cm = _per_bin_sigma(self.config.momentum_sigma_cm_sqrt_s, emissions.dt)
+            transition_durations = _emission_transition_durations(emissions)
+            momentum_transition_sigmas_cm = _per_transition_sigmas_cm(self.config.momentum_sigma_cm_sqrt_s, transition_durations)
+            momentum_initial_transition_sigmas_cm = _per_transition_sigmas_cm(self.config.momentum_initial_sigma_cm_sqrt_s, transition_durations)
+            velocity_decays = _momentum_velocity_decays(self.config, transition_durations)
+            transition_sigma_cm = _representative_transition_value(momentum_transition_sigmas_cm, fallback=_per_bin_sigma(self.config.momentum_sigma_cm_sqrt_s, emissions.dt))
+            momentum_initial_sigma_cm = _first_transition_value(momentum_initial_transition_sigmas_cm, fallback=_per_bin_sigma(self.config.momentum_initial_sigma_cm_sqrt_s, emissions.dt))
+            momentum_velocity_decay = _representative_transition_value(velocity_decays, fallback=float(self.config.momentum_velocity_decay))
             candidates = self.candidate_indices(emissions, bin_centers) if candidate_indices is None else candidate_indices
             candidates = _restrict_candidates_to_valid_bins(
                 candidates,
@@ -299,8 +352,10 @@ class StateSpaceReplayModel:
                 bin_centers,
                 candidates,
                 sigma_cm=transition_sigma_cm,
-                initial_sigma_cm=_per_bin_sigma(self.config.momentum_initial_sigma_cm_sqrt_s, emissions.dt),
-                velocity_decay=self.config.momentum_velocity_decay,
+                initial_sigma_cm=momentum_initial_sigma_cm,
+                velocity_decay=momentum_velocity_decay,
+                transition_sigmas_cm=momentum_transition_sigmas_cm,
+                velocity_decays=velocity_decays,
                 valid_bin_mask=valid_bin_mask,
             )
             extra = {
@@ -314,6 +369,13 @@ class StateSpaceReplayModel:
                 "state_space_momentum_candidate_selection": (
                     "provided" if candidate_indices is not None else _candidate_selection_label(self.config)
                 ),
+                "state_space_momentum_transition_sigma_cm": float(transition_sigma_cm),
+                "state_space_momentum_initial_transition_sigma_cm": float(momentum_initial_sigma_cm),
+                "state_space_momentum_transition_sigma_cm_per_step": _format_float_series(momentum_transition_sigmas_cm),
+                "state_space_momentum_initial_transition_sigma_cm_per_step": _format_float_series(momentum_initial_transition_sigmas_cm),
+                "state_space_momentum_velocity_decay_effective": float(momentum_velocity_decay),
+                "state_space_momentum_velocity_decay_per_step": _format_float_series(velocity_decays),
+                "state_space_transition_durations_s": _format_float_series(transition_durations),
             }
         else:  # pragma: no cover - __post_init__ validates this.
             raise ValueError(f"Unsupported state-space mode: {self.mode}")
@@ -331,6 +393,7 @@ class StateSpaceReplayModel:
             "state_space_momentum_sigma_cm_sqrt_s": float(self.config.momentum_sigma_cm_sqrt_s),
             "state_space_momentum_initial_sigma_cm_sqrt_s": float(self.config.momentum_initial_sigma_cm_sqrt_s),
             "state_space_momentum_velocity_decay": float(self.config.momentum_velocity_decay),
+            "state_space_momentum_velocity_decay_tau_s": float(self.config.momentum_velocity_decay_tau_s),
             "state_space_valid_occupancy_threshold_s": float(self.config.valid_occupancy_threshold_s),
             "state_space_transition_sigma_cm": float(transition_sigma_cm),
             "mean_trajectory_posterior_entropy": _mean_entropy(trajectory),
@@ -385,6 +448,8 @@ def _candidate_support_config_diagnostics(
         f"{prefix}_candidate_min_k": int(config.momentum_candidate_min_k),
         f"{prefix}_candidate_max_k": int(config.momentum_candidate_max_k),
         f"{prefix}_candidate_selection": _candidate_selection_label(config),
+        f"{prefix}_candidate_source": _candidate_source_label(config),
+        f"{prefix}_velocity_decay_tau_s": float(config.momentum_velocity_decay_tau_s),
         f"{prefix}_predicted_candidate_top_k": int(
             config.momentum_predicted_candidate_top_k
         ),
@@ -398,12 +463,112 @@ def _candidate_selection_label(config: StateSpaceDecoderConfig) -> str:
     return "top_k"
 
 
+def _candidate_source_label(config: StateSpaceDecoderConfig) -> str:
+    source = str(config.momentum_candidate_source).strip().lower().replace("_", "-")
+    aliases = {
+        "likelihood": "emission",
+        "log-likelihood": "emission",
+        "train-posterior": "posterior",
+        "diffusion-posterior": "posterior",
+        "first-order-posterior": "posterior",
+    }
+    source = aliases.get(source, source)
+    if source not in {"emission", "posterior"}:
+        raise ValueError("momentum_candidate_source must be 'emission' or 'posterior'")
+    return source
+
+
+def _candidate_support_log_values(
+    emissions: LogEmissionTensor,
+    bin_centers: np.ndarray | None,
+    config: StateSpaceDecoderConfig,
+) -> np.ndarray:
+    """Return train-only log support scores used for candidate selection."""
+
+    source = _candidate_source_label(config)
+    if source == "emission" or bin_centers is None:
+        return np.asarray(emissions.log_likelihood, dtype=float)
+    return _diffusion_candidate_log_posterior(emissions, bin_centers, config)
+
+
+def _diffusion_candidate_log_posterior(
+    emissions: LogEmissionTensor,
+    bin_centers: np.ndarray,
+    config: StateSpaceDecoderConfig,
+) -> np.ndarray:
+    """Use the exact first-order diffusion posterior as a leakage-free beam source."""
+
+    if emissions.n_time <= 1:
+        return _normalize_log_rows(emissions.log_likelihood)
+    transition_durations = _emission_transition_durations(emissions)
+    sigmas = _per_transition_sigmas_cm(config.diffusion_sigma_cm_sqrt_s, transition_durations)
+    if sigmas.size and not np.allclose(sigmas, _per_bin_sigma(config.diffusion_sigma_cm_sqrt_s, emissions.dt)):
+        transitions = [
+            _gaussian_transition_matrix(
+                bin_centers,
+                float(sigma_cm),
+                config.max_step_sigma,
+            )
+            for sigma_cm in sigmas
+        ]
+        _, trajectory = _forward_backward_first_order_time_varying(
+            emissions.log_likelihood,
+            transitions,
+        )
+        return trajectory
+    transition = _gaussian_transition_matrix(
+        bin_centers,
+        _per_bin_sigma(config.diffusion_sigma_cm_sqrt_s, emissions.dt),
+        config.max_step_sigma,
+    )
+    _, trajectory = _forward_backward_first_order(emissions.log_likelihood, transition)
+    return trajectory
+
+
+def _normalize_log_rows(values: np.ndarray) -> np.ndarray:
+    out = np.asarray(values, dtype=float).copy()
+    out -= logsumexp(out, axis=1)[:, None]
+    return out
+
+
+def _per_transition_sigmas_cm(sigma_cm_sqrt_s: float, transition_durations: np.ndarray) -> np.ndarray:
+    return np.asarray(
+        [_per_bin_sigma(sigma_cm_sqrt_s, float(duration)) for duration in np.asarray(transition_durations, dtype=float)],
+        dtype=float,
+    )
+
+
+def _momentum_velocity_decays(config: StateSpaceDecoderConfig, transition_durations: np.ndarray) -> np.ndarray:
+    durations = np.asarray(transition_durations, dtype=float)
+    if durations.size == 0:
+        return np.empty(0, dtype=float)
+    tau_s = float(config.momentum_velocity_decay_tau_s)
+    if tau_s > 0.0:
+        return np.exp(-durations / tau_s)
+    return np.full(durations.shape, float(config.momentum_velocity_decay), dtype=float)
+
+
+def _representative_transition_value(values: np.ndarray, *, fallback: float) -> float:
+    arr = np.asarray(values, dtype=float)
+    return float(fallback) if arr.size == 0 else float(np.median(arr))
+
+
+def _first_transition_value(values: np.ndarray, *, fallback: float) -> float:
+    arr = np.asarray(values, dtype=float)
+    return float(fallback) if arr.size == 0 else float(arr[0])
+
+
+def _format_float_series(values: np.ndarray) -> str:
+    return ",".join(f"{float(value):.12g}" for value in np.asarray(values, dtype=float))
+
+
 def _augment_candidates_with_momentum_predictions(
     candidates: list[np.ndarray],
     bin_centers: np.ndarray,
     *,
     predicted_top_k: int,
     velocity_decay: float,
+    velocity_decays: np.ndarray | None = None,
 ) -> list[np.ndarray]:
     """Union emission candidates with states nearest to bounded momentum predictions."""
 
@@ -417,23 +582,35 @@ def _augment_candidates_with_momentum_predictions(
         prev = np.asarray(candidates[time_index - 1], dtype=int)[:top_k]
         if prev_prev.size == 0 or prev.size == 0:
             continue
-        predictions = bin_centers[prev][None, :, :] + velocity_decay * (
+        decay = _transition_decay_at(velocity_decays, time_index - 1, velocity_decay)
+        predictions = bin_centers[prev][None, :, :] + decay * (
             bin_centers[prev][None, :, :] - bin_centers[prev_prev][:, None, :]
         )
         _add_nearest_predictions(augmented[time_index], bin_centers, predictions)
 
-    if abs(velocity_decay) > np.finfo(float).eps:
-        for time_index in range(len(candidates) - 2):
-            nxt = np.asarray(candidates[time_index + 1], dtype=int)[:top_k]
-            nxt_nxt = np.asarray(candidates[time_index + 2], dtype=int)[:top_k]
-            if nxt.size == 0 or nxt_nxt.size == 0:
-                continue
-            predictions = bin_centers[nxt][None, :, :] - (
-                bin_centers[nxt_nxt][:, None, :] - bin_centers[nxt][None, :, :]
-            ) / velocity_decay
-            _add_nearest_predictions(augmented[time_index], bin_centers, predictions)
+    for time_index in range(len(candidates) - 2):
+        decay = _transition_decay_at(velocity_decays, time_index + 1, velocity_decay)
+        if abs(decay) <= np.finfo(float).eps:
+            continue
+        nxt = np.asarray(candidates[time_index + 1], dtype=int)[:top_k]
+        nxt_nxt = np.asarray(candidates[time_index + 2], dtype=int)[:top_k]
+        if nxt.size == 0 or nxt_nxt.size == 0:
+            continue
+        predictions = bin_centers[nxt][None, :, :] - (
+            bin_centers[nxt_nxt][:, None, :] - bin_centers[nxt][None, :, :]
+        ) / decay
+        _add_nearest_predictions(augmented[time_index], bin_centers, predictions)
 
     return [np.fromiter(sorted(curr), dtype=int) for curr in augmented]
+
+
+def _transition_decay_at(values: np.ndarray | None, transition_index: int, fallback: float) -> float:
+    if values is None:
+        return float(fallback)
+    arr = np.asarray(values, dtype=float)
+    if transition_index < 0 or transition_index >= arr.size:
+        return float(fallback)
+    return float(arr[transition_index])
 
 
 def _add_nearest_predictions(

@@ -35,6 +35,10 @@ from hipporeplayimm.evidence_reporting import (
     TRUNCATED_EVIDENCE_SUPPORT,
     ensure_evidence_support_columns as _ensure_evidence_support_columns,
 )
+from hipporeplayimm.accuracy_upgrades import (
+    bootstrap_model_win_probabilities,
+    model_probability_diagnostics,
+)
 from hipporeplayimm.goal_state_space import GoalStateSpaceReplayModel
 from hipporeplayimm.goal_state_space_integration import (
     DEFAULT_GOAL_DRIFT_SPEED_CM_S,
@@ -402,12 +406,23 @@ def _score(args) -> pd.DataFrame:
     return _add_evidence_columns(pd.DataFrame(rows))
 
 
+def _event_group_columns(df: pd.DataFrame) -> list[str]:
+    """Columns that identify one comparable model-choice unit."""
+
+    columns = ["session", "event_index"]
+    for optional in ("window_index", "benchmark_cell_split_index"):
+        if optional in df.columns:
+            columns.append(optional)
+    return columns
+
+
 def _add_evidence_columns(df: pd.DataFrame) -> pd.DataFrame:
     if df.empty:
         return df
     df = _ensure_evidence_support_columns(df)
     groups = []
-    for _, g in df.groupby(["session", "event_index"], sort=False):
+    group_columns = _event_group_columns(df)
+    for _, g in df.groupby(group_columns, sort=False):
         g = g.copy()
         s = g[g["status"] == "success"]
         g["relative_log_evidence"] = np.nan
@@ -456,7 +471,9 @@ def _add_evidence_columns(df: pd.DataFrame) -> pd.DataFrame:
             g.loc[best_truncated_index, "is_best_truncated_lower_bound"] = True
             g["best_truncated_lower_bound_model"] = best_truncated
         groups.append(g)
-    return pd.concat(groups, ignore_index=True).sort_values(["event_index", "model"]).reset_index(drop=True)
+    out = pd.concat(groups, ignore_index=True)
+    sort_columns = [column for column in (*group_columns, "model") if column in out.columns]
+    return out.sort_values(sort_columns).reset_index(drop=True)
 
 
 def _summary(df: pd.DataFrame) -> pd.DataFrame:
@@ -517,7 +534,7 @@ def _counts(df: pd.DataFrame) -> pd.DataFrame:
     ok = df[df["status"] == "success"]
     if ok.empty:
         return pd.DataFrame()
-    base = ok.drop_duplicates(["session", "event_index"])
+    base = ok.drop_duplicates(_event_group_columns(ok))
     rows = []
     for col in (
         "best_model",
@@ -549,11 +566,24 @@ def _write(df: pd.DataFrame, outdir: Path) -> None:
     _counts(df).to_csv(outdir / "best_model_counts.csv", index=False)
     _support_counts(df).to_csv(outdir / "evidence_support_counts.csv", index=False)
     ok = df[df["status"] == "success"]
+    group_columns = _event_group_columns(df)
+    diagnostics = model_probability_diagnostics(ok, group_columns=group_columns)
+    diagnostics.to_csv(outdir / "model_probability_diagnostics.csv", index=False)
+    bootstrap = bootstrap_model_win_probabilities(
+        ok,
+        group_columns=group_columns,
+        n_bootstrap=1000,
+        random_seed=1,
+    )
+    bootstrap.to_csv(outdir / "bootstrap_model_win_probabilities.csv", index=False)
     metrics = ["log_evidence", "relative_log_evidence", "model_probability"]
     if "truncated_relative_log_evidence" in ok:
         metrics.append("truncated_relative_log_evidence")
     for metric in metrics:
-        ok.pivot_table(index=["session", "event_index"], columns="model", values=metric, aggfunc="first").reset_index().to_csv(outdir / f"event_model_pivot_{metric}.csv", index=False)
+        ok.pivot_table(index=group_columns, columns="model", values=metric, aggfunc="first").reset_index().to_csv(
+            outdir / f"event_model_pivot_{metric}.csv",
+            index=False,
+        )
 
 
 def main() -> int:

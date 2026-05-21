@@ -167,7 +167,10 @@ def main(argv: list[str] | None = None) -> int:
     sensitivity_parser.add_argument("--random-seed", type=int, default=1)
     sensitivity_parser.add_argument("--time-bin-ms", type=float, default=20.0)
     sensitivity_parser.add_argument("--spike-rate-scale", type=float, default=1.0)
+    _add_emission_calibration_arguments(sensitivity_parser)
     _add_encoding_arguments(sensitivity_parser)
+    _add_state_space_arguments(sensitivity_parser)
+    _add_clusterless_arguments(sensitivity_parser)
     _add_pyrecest_scalar_arguments(sensitivity_parser)
     sensitivity_parser.add_argument("--visit-radii-cm", default="7.5,10.0,12.5")
     sensitivity_parser.add_argument("--min-dwells-s", default="0.1,0.2,0.4")
@@ -265,6 +268,7 @@ def main(argv: list[str] | None = None) -> int:
     recovery_parser.add_argument("--state-space-momentum-candidate-mass-threshold", type=float, default=None)
     recovery_parser.add_argument("--state-space-momentum-candidate-min-k", type=int, default=1)
     recovery_parser.add_argument("--state-space-momentum-candidate-max-k", type=int, default=0)
+    recovery_parser.add_argument("--state-space-momentum-predicted-candidate-top-k", type=int, default=StateSpaceDecoderConfig().momentum_predicted_candidate_top_k)
     recovery_parser.add_argument("--candidate-top-k", type=int, default=64)
     recovery_parser.add_argument("--stationary-sigma-cm", type=float, default=2.0)
     recovery_parser.add_argument("--diffusion-sigma-cm", type=float, default=12.0)
@@ -445,6 +449,7 @@ def _simulate_recovery(args: argparse.Namespace) -> int:
         momentum_candidate_mass_threshold=args.state_space_momentum_candidate_mass_threshold,
         momentum_candidate_min_k=args.state_space_momentum_candidate_min_k,
         momentum_candidate_max_k=args.state_space_momentum_candidate_max_k,
+        momentum_predicted_candidate_top_k=args.state_space_momentum_predicted_candidate_top_k,
     )
     config = SimulationRecoveryConfig(
         true_models=parse_model_list(args.true_models),
@@ -697,6 +702,8 @@ def _ground_truth_sensitivity(args: argparse.Namespace) -> int:
         test_cell_fraction=args.test_cell_fraction,
         candidate_top_k=args.candidate_top_k,
         random_seed=args.random_seed,
+        **_state_space_scalar_kwargs(args),
+        **_clusterless_scalar_kwargs(args),
         **_pyrecest_scalar_kwargs(args),
     )
     result.write(args.output)

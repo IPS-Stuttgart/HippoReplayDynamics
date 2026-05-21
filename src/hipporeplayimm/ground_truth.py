@@ -10,7 +10,15 @@ import numpy as np
 import pandas as pd
 from scipy.special import logsumexp
 
-from .benchmarks import BenchmarkConfig, _build_models, _split_cells
+from .benchmarks import (
+    BenchmarkConfig,
+    _build_models,
+    _clusterless_mark_config,
+    _is_clusterless_model,
+    _session_with_mark_cell_subset,
+    _split_cells,
+)
+from .clusterless import build_clusterless_mark_emissions, fit_clusterless_mark_encoding
 from .data import ReplaySession, load_open_field_sessions
 from .encoding import EmissionConfig, EncodingConfig, build_emissions, fit_place_field_encoding
 from .evidence_reporting import EXACT_EVIDENCE_SUPPORT, ensure_evidence_support_columns
@@ -272,6 +280,7 @@ def compare_scores_to_ground_truth(
     clusterless_mark_kde_bandwidth: float | None = None,
     clusterless_mark_kde_spatial_sigma_bins: float | None = None,
     clusterless_mark_kde_max_neighbors: int = 256,
+    clusterless_mark_group_by: str = "auto",
     state_space_valid_occupancy_threshold_s: float = 0.0,
     state_space_stationary_sigma_cm: float = 2.0,
     state_space_diffusion_sigma_cm_sqrt_s: float = 85.0,
@@ -287,6 +296,7 @@ def compare_scores_to_ground_truth(
     state_space_momentum_predicted_candidate_top_k: int = 8,
     include_bayesian_model_average: bool = True,
     bayesian_model_average_name: str = "bayesian-model-average",
+    bayesian_model_average_evidence_column: str = "auto",
 ) -> pd.DataFrame:
     """Merge event scores with next-well behavioral correctness metrics."""
 
@@ -428,6 +438,7 @@ def compare_scores_to_ground_truth(
         clusterless_mark_kde_bandwidth=clusterless_mark_kde_bandwidth,
         clusterless_mark_kde_spatial_sigma_bins=clusterless_mark_kde_spatial_sigma_bins,
         clusterless_mark_kde_max_neighbors=clusterless_mark_kde_max_neighbors,
+        clusterless_mark_group_by=clusterless_mark_group_by,
         random_seed=random_seed,
         models=model_names,
     )
@@ -442,6 +453,11 @@ def compare_scores_to_ground_truth(
         models = _build_models(model_config, session=session)
         wells = infer_well_locations(session, ground_truth_config)
         encoding = fit_place_field_encoding(session, encoding_config)
+        has_clusterless_models = any(_is_clusterless_model(model) for model in models.values())
+        clusterless_config = _clusterless_mark_config(model_config) if has_clusterless_models else None
+        clusterless_train_session = None
+        clusterless_joint_session = None
+        clusterless_encoding = None
         if benchmark_decode:
             train_cells, test_cells = _cell_split_for_score_rows(
                 session_scores,
@@ -450,6 +466,13 @@ def compare_scores_to_ground_truth(
             )
             train_encoding = encoding.select_cells(train_cells)
             joint_encoding = encoding.select_cells(np.concatenate([train_cells, test_cells]))
+            if has_clusterless_models:
+                clusterless_train_session = _session_with_mark_cell_subset(session, train_cells, role="train")
+                clusterless_joint_session = _session_with_mark_cell_subset(session, np.concatenate([train_cells, test_cells]), role="joint")
+                clusterless_fit_session = clusterless_train_session if encoding_config.use_excitatory else clusterless_joint_session
+                clusterless_encoding = fit_clusterless_mark_encoding(clusterless_fit_session, clusterless_config)
+        elif has_clusterless_models:
+            clusterless_encoding = fit_clusterless_mark_encoding(session, clusterless_config)
         for event_index, event_scores in session_scores.groupby("event_index", sort=False):
             if benchmark_decode:
                 train_emissions = build_emissions(
@@ -466,10 +489,28 @@ def compare_scores_to_ground_truth(
                 )
                 if train_emissions.n_time == 0 or joint_emissions.n_time == 0:
                     continue
+                clusterless_train_emissions = None
+                clusterless_joint_emissions = None
+                if has_clusterless_models:
+                    assert clusterless_train_session is not None
+                    assert clusterless_joint_session is not None
+                    assert clusterless_encoding is not None
+                    clusterless_train_emissions = build_clusterless_mark_emissions(
+                        clusterless_train_session, clusterless_encoding, int(event_index), emission_config
+                    )
+                    clusterless_joint_emissions = build_clusterless_mark_emissions(
+                        clusterless_joint_session, clusterless_encoding, int(event_index), emission_config
+                    )
             else:
                 emissions = build_emissions(session, encoding, int(event_index), emission_config)
                 if emissions.n_time == 0:
                     continue
+                clusterless_emissions = None
+                if has_clusterless_models:
+                    assert clusterless_encoding is not None
+                    clusterless_emissions = build_clusterless_mark_emissions(
+                        session, clusterless_encoding, int(event_index), emission_config
+                    )
             average_components: list[tuple[str, float, np.ndarray]] = []
             for score_row in event_scores.itertuples(index=False):
                 model_name = str(getattr(score_row, "model"))
@@ -477,7 +518,26 @@ def compare_scores_to_ground_truth(
                 model = models.get(requested_model) or models.get(model_name)
                 if model is None:
                     continue
-                if benchmark_decode:
+                if _is_clusterless_model(model):
+                    assert clusterless_encoding is not None
+                    if benchmark_decode:
+                        assert clusterless_train_emissions is not None
+                        assert clusterless_joint_emissions is not None
+                        score = _score_joint_for_ground_truth(
+                            model,
+                            clusterless_train_emissions,
+                            clusterless_joint_emissions,
+                            clusterless_encoding.bin_centers,
+                            occupancy_s=clusterless_encoding.occupancy_s,
+                        )
+                    else:
+                        assert clusterless_emissions is not None
+                        score = model.score(
+                            clusterless_emissions,
+                            clusterless_encoding.bin_centers,
+                            occupancy_s=clusterless_encoding.occupancy_s,
+                        )
+                elif benchmark_decode:
                     score = _score_joint_for_ground_truth(
                         model,
                         train_emissions,
@@ -505,7 +565,7 @@ def compare_scores_to_ground_truth(
                         wells,
                     )
                 )
-                log_evidence = _score_row_log_evidence(score_row)
+                log_evidence = _score_row_log_evidence(score_row, bayesian_model_average_evidence_column)
                 if (
                     include_bayesian_model_average
                     and log_evidence is not None
@@ -849,15 +909,30 @@ def _requested_model_name(score_row: object, fallback: str) -> str:
     return str(value)
 
 
-def _score_row_log_evidence(score_row: object) -> float | None:
-    value = _score_row_value(score_row, "log_evidence", None)
-    if value is None or pd.isna(value):
-        return None
-    try:
-        out = float(value)
-    except (TypeError, ValueError):
-        return None
-    return out if np.isfinite(out) else None
+def _score_row_log_evidence(score_row: object, evidence_column: str = "auto") -> float | None:
+    """Return the evidence used for posterior model averaging.
+
+    ``auto`` prefers held-out predictive evidence when present, then a generic
+    log_evidence column, then joint evidence. Callers can pass an explicit
+    column name to force a full-event or held-out model average.
+    """
+
+    columns = (
+        ("heldout_log_likelihood", "log_evidence", "joint_log_likelihood")
+        if str(evidence_column).lower() == "auto"
+        else (str(evidence_column),)
+    )
+    for column in columns:
+        value = _score_row_value(score_row, column, None)
+        if value is None or pd.isna(value):
+            continue
+        try:
+            out = float(value)
+        except (TypeError, ValueError):
+            continue
+        if np.isfinite(out):
+            return out
+    return None
 
 
 def _score_row_has_exact_comparable_evidence(score_row: object) -> bool:

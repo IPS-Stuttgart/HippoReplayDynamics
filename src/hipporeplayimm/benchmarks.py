@@ -22,6 +22,13 @@ from .evidence_reporting import (
     TRUNCATED_EVIDENCE_SUPPORT,
     ensure_evidence_support_columns,
 )
+from .result_improvements import (
+    add_candidate_support_quality_columns,
+    hierarchical_bootstrap_ci,
+    paired_sign_flip_p_value,
+    stratified_cell_split,
+    summarize_grouped_model_metrics,
+)
 from .models import CandidateKinematicModel, RandomModel, StationaryModel
 from .pyrecest_models import PyRecEstGoalParticleIMMModel, PyRecEstGoalParticleModel
 from .sorted_spike_state_space import SortedSpikeStateSpaceReplayModel
@@ -79,6 +86,8 @@ class BenchmarkConfig:
     random_seeds: tuple[int, ...] | None = None
     event_epoch: str = "run"
     models: tuple[str, ...] = ("random", "stationary", "diffusion", "momentum", "imm")
+    cell_split_strategy: str = "random"
+    cell_split_strata: int = 4
 
 
 @dataclass
@@ -111,6 +120,22 @@ class BenchmarkResult:
             mean_delta_vs_best_static_truncated_lower_bound=("delta_vs_best_static_truncated_lower_bound", "mean"),
             mean_bits_per_spike_vs_best_static_truncated_lower_bound=("bits_per_spike_vs_best_static_truncated_lower_bound", "mean"),
         )
+
+    def session_summary(self) -> pd.DataFrame:
+        return summarize_grouped_model_metrics(self.rows, ("session",))
+
+    def rat_summary(self) -> pd.DataFrame:
+        rows = self.rows.copy()
+        if rows.empty or "session" not in rows:
+            return pd.DataFrame()
+        rows["rat"] = rows["session"].astype(str).str.split("/", n=1).str[0]
+        return summarize_grouped_model_metrics(rows, ("rat",))
+
+    def split_summary(self) -> pd.DataFrame:
+        return summarize_grouped_model_metrics(self.rows, ("benchmark_cell_split_index",)) if "benchmark_cell_split_index" in self.rows else pd.DataFrame()
+
+    def with_candidate_support_quality(self) -> "BenchmarkResult":
+        return BenchmarkResult(add_candidate_support_quality_columns(self.rows))
 
     def to_csv(self, path: str | Path) -> None:
         self.rows.to_csv(path, index=False)
@@ -153,6 +178,38 @@ def bootstrap_delta_ci(
     return (float(np.quantile(means, 0.025)), float(np.quantile(means, 0.975)))
 
 
+def bootstrap_delta_ci_hierarchical(
+    rows: pd.DataFrame,
+    model: str = "imm",
+    value_column: str = "delta_vs_best_static",
+    n_bootstrap: int = 5000,
+    random_seed: int = 1,
+) -> tuple[float, float]:
+    return hierarchical_bootstrap_ci(
+        rows,
+        model=model,
+        value_column=value_column,
+        n_bootstrap=n_bootstrap,
+        random_seed=random_seed,
+    )
+
+
+def paired_delta_sign_flip_p_value(
+    rows: pd.DataFrame,
+    model: str = "imm",
+    value_column: str = "delta_vs_best_static",
+    n_permutations: int = 10000,
+    random_seed: int = 1,
+) -> float:
+    return paired_sign_flip_p_value(
+        rows,
+        model=model,
+        value_column=value_column,
+        n_permutations=n_permutations,
+        random_seed=random_seed,
+    )
+
+
 def _score_session(session: ReplaySession, config: BenchmarkConfig) -> list[dict[str, object]]:
     encoding = fit_place_field_encoding(session, config.encoding)
     rows: list[dict[str, object]] = []
@@ -170,11 +227,7 @@ def _score_session_split(
     split_seed = _cell_split_seed(config.random_seed, split_index)
     split_config = replace(config, random_seed=split_seed)
     model_objects = _build_models(split_config, session=session)
-    train_cells, test_cells = _split_cells(
-        encoding.cell_ids,
-        config.test_cell_fraction,
-        split_seed,
-    )
+    train_cells, test_cells = _split_cells_from_encoding(encoding, config, split_seed)
     if test_cells.size == 0 or train_cells.size == 0:
         return []
     train_encoding = encoding.select_cells(train_cells)
@@ -507,6 +560,8 @@ def _benchmark_config_metadata(config: BenchmarkConfig) -> dict[str, object]:
         "clusterless_mark_group_by": str(
             getattr(config, "clusterless_mark_group_by", "auto")
         ),
+        "benchmark_cell_split_strategy": str(getattr(config, "cell_split_strategy", "random")),
+        "benchmark_cell_split_strata": int(getattr(config, "cell_split_strata", 4)),
         "state_space_valid_occupancy_threshold_s": float(
             config.state_space_valid_occupancy_threshold_s
         ),
@@ -608,6 +663,36 @@ def _split_cells(cell_ids: np.ndarray, test_fraction: float, random_seed: int) -
     return train, test
 
 
+def _split_cells_from_encoding(encoding, config: BenchmarkConfig, random_seed: int) -> tuple[np.ndarray, np.ndarray]:
+    strategy = str(getattr(config, "cell_split_strategy", "random")).strip().lower()
+    if strategy in {"random", "shuffle"}:
+        return _split_cells(encoding.cell_ids, config.test_cell_fraction, random_seed)
+    scores = _cell_split_scores_from_encoding(encoding, strategy)
+    return stratified_cell_split(
+        encoding.cell_ids,
+        scores,
+        config.test_cell_fraction,
+        random_seed,
+        n_strata=int(getattr(config, "cell_split_strata", 4)),
+    )
+
+
+def _cell_split_scores_from_encoding(encoding, strategy: str) -> np.ndarray:
+    rates = np.asarray(encoding.rates_hz, dtype=float)
+    if rates.ndim != 2 or rates.shape[0] != encoding.cell_ids.shape[0]:
+        return np.zeros(encoding.cell_ids.shape[0], dtype=float)
+    if strategy in {"mean-rate", "mean_rate", "rate", "stratified-rate"}:
+        occupancy = np.asarray(getattr(encoding, "occupancy_s", np.ones(rates.shape[1])), dtype=float)
+        weights = np.clip(occupancy, 0.0, None)
+        if float(weights.sum()) <= 0.0:
+            weights = np.ones(rates.shape[1], dtype=float)
+        weights = weights / float(weights.sum())
+        return rates @ weights
+    if strategy in {"peak-rate", "peak_rate", "place-field-peak"}:
+        return np.max(rates, axis=1)
+    raise ValueError("cell_split_strategy must be one of 'random', 'mean-rate', or 'peak-rate'")
+
+
 def _state_space_decoder_config(config: BenchmarkConfig, mode: str) -> StateSpaceDecoderConfig:
     """Build a state-space decoder config from benchmark-level sweep knobs."""
 
@@ -653,18 +738,21 @@ def _build_models(
         "sorted-spike-state-space-jump": SortedSpikeStateSpaceReplayModel(mode="jump"),
         "sorted-spike-state-space-momentum": SortedSpikeStateSpaceReplayModel(mode="momentum"),
         "sorted-spike-state-space-imm": SortedSpikeStateSpaceReplayModel(mode="imm"),
+        "sorted-spike-state-space-first-order-imm": SortedSpikeStateSpaceReplayModel(mode="first-order-imm"),
         "state-space-stationary": SortedSpikeStateSpaceReplayModel(mode="stationary", name="state-space-stationary"),
         "state-space-diffusion": SortedSpikeStateSpaceReplayModel(mode="diffusion", name="state-space-diffusion"),
         "state-space-fragmented": SortedSpikeStateSpaceReplayModel(mode="fragmented", name="state-space-fragmented"),
         "state-space-jump": SortedSpikeStateSpaceReplayModel(mode="jump", name="state-space-jump"),
         "state-space-momentum": SortedSpikeStateSpaceReplayModel(mode="momentum", name="state-space-momentum"),
         "state-space-imm": SortedSpikeStateSpaceReplayModel(mode="imm", name="state-space-imm"),
+        "state-space-first-order-imm": SortedSpikeStateSpaceReplayModel(mode="first-order-imm", name="state-space-first-order-imm"),
         "clusterless-state-space-stationary": ClusterlessStateSpaceReplayModel(mode="stationary", **clusterless_kwargs),
         "clusterless-state-space-diffusion": ClusterlessStateSpaceReplayModel(mode="diffusion", **clusterless_kwargs),
         "clusterless-state-space-fragmented": ClusterlessStateSpaceReplayModel(mode="fragmented", **clusterless_kwargs),
         "clusterless-state-space-jump": ClusterlessStateSpaceReplayModel(mode="jump", **clusterless_kwargs),
         "clusterless-state-space-momentum": ClusterlessStateSpaceReplayModel(mode="momentum", **clusterless_kwargs),
         "clusterless-state-space-imm": ClusterlessStateSpaceReplayModel(mode="imm", **clusterless_kwargs),
+        "clusterless-state-space-first-order-imm": ClusterlessStateSpaceReplayModel(mode="first-order-imm", **clusterless_kwargs),
         "pyrecest-goal-particle": PyRecEstGoalParticleModel(
             candidate_goals=goal_candidates,
             n_particles=config.pyrecest_particles,

@@ -12,6 +12,7 @@ from .state_space_candidates import _score_imm_candidates
 from .state_space_candidates_momentum import _score_momentum_candidates
 from .state_space_first_order import (
     _forward_backward_first_order,
+    _forward_backward_first_order_time_varying,
     _score_first_order_imm,
     _score_fragmented,
     _score_stationary,
@@ -167,17 +168,39 @@ class StateSpaceReplayModel:
             extra = {}
         elif self.mode == "diffusion":
             transition_sigma_cm = _per_bin_sigma(self.config.diffusion_sigma_cm_sqrt_s, emissions.dt)
-            transition = _gaussian_transition_matrix(
-                bin_centers,
-                transition_sigma_cm,
-                self.config.max_step_sigma,
-                valid_bin_mask=valid_bin_mask,
-            )
-            logp, trajectory = _forward_backward_first_order(
-                emissions.log_likelihood,
-                transition,
-                valid_bin_mask=valid_bin_mask,
-            )
+            transition_durations = _emission_transition_durations(emissions)
+            if transition_durations.size and not np.allclose(transition_durations, float(emissions.dt)):
+                transition_sigmas_cm = [
+                    _per_bin_sigma(self.config.diffusion_sigma_cm_sqrt_s, duration)
+                    for duration in transition_durations
+                ]
+                transitions = [
+                    _gaussian_transition_matrix(
+                        bin_centers,
+                        sigma_cm,
+                        self.config.max_step_sigma,
+                        valid_bin_mask=valid_bin_mask,
+                    )
+                    for sigma_cm in transition_sigmas_cm
+                ]
+                logp, trajectory = _forward_backward_first_order_time_varying(
+                    emissions.log_likelihood,
+                    transitions,
+                    valid_bin_mask=valid_bin_mask,
+                )
+                transition_sigma_cm = float(np.median(transition_sigmas_cm))
+            else:
+                transition = _gaussian_transition_matrix(
+                    bin_centers,
+                    transition_sigma_cm,
+                    self.config.max_step_sigma,
+                    valid_bin_mask=valid_bin_mask,
+                )
+                logp, trajectory = _forward_backward_first_order(
+                    emissions.log_likelihood,
+                    transition,
+                    valid_bin_mask=valid_bin_mask,
+                )
             extra = {}
         elif self.mode == "first-order-imm":
             transition_sigma_cm = _per_bin_sigma(self.config.diffusion_sigma_cm_sqrt_s, emissions.dt)
@@ -317,6 +340,19 @@ class StateSpaceReplayModel:
             terminal_log_posterior=terminal,
             trajectory_log_posterior=trajectory,
         )
+
+
+def _emission_transition_durations(emissions: LogEmissionTensor) -> np.ndarray:
+    values = getattr(emissions, "transition_durations", None)
+    if values is not None:
+        out = np.asarray(values, dtype=float)
+    else:
+        out = np.diff(np.asarray(emissions.times, dtype=float)) if emissions.n_time > 1 else np.empty(0, dtype=float)
+    if out.shape != (max(emissions.n_time - 1, 0),):
+        return np.full(max(emissions.n_time - 1, 0), float(emissions.dt), dtype=float)
+    if not np.all(np.isfinite(out)) or np.any(out <= 0.0):
+        return np.full(max(emissions.n_time - 1, 0), float(emissions.dt), dtype=float)
+    return out
 
 
 def _candidate_support_config_diagnostics(

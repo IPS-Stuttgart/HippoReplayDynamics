@@ -6,6 +6,8 @@ import numpy as np
 import pandas as pd
 from scipy.special import logsumexp
 
+from .result_improvements import add_candidate_support_quality_columns
+
 EXACT_EVIDENCE_SUPPORT = "exact_full_grid"
 TRUNCATED_EVIDENCE_SUPPORT = "truncated_full_grid"
 DEGENERATE_SINGLE_BIN_EVIDENCE_SUPPORT = "degenerate_single_bin"
@@ -93,7 +95,7 @@ def ensure_evidence_support_columns(df: pd.DataFrame) -> pd.DataFrame:
     out["evidence_comparison"] = out["evidence_support"].map(evidence_comparison_from_support)
     out["evidence_comparison_note"] = out["evidence_comparison"].map(EVIDENCE_COMPARISON_DESCRIPTIONS).fillna(EVIDENCE_COMPARISON_DESCRIPTIONS[EVIDENCE_COMPARISON_UNKNOWN])
     out["evidence_comparable"] = status_ok & out["evidence_support"].eq(EXACT_EVIDENCE_SUPPORT)
-    return out
+    return add_candidate_support_quality_columns(out)
 
 
 def simulation_add_evidence_columns(df: pd.DataFrame) -> pd.DataFrame:

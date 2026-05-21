@@ -51,6 +51,7 @@ from .simulation_recovery import (
     parse_model_list,
     run_session_simulation_recovery,
 )
+from .result_improvements import write_benchmark_settings
 from .state_space import StateSpaceDecoderConfig, StateSpaceReplayModel
 from .sweeps import (
     PyRecEstSweepConfig,
@@ -516,6 +517,10 @@ def _benchmark(args: argparse.Namespace) -> int:
         output.mkdir(parents=True, exist_ok=True)
         result.rows.to_csv(output / "event_scores.csv", index=False)
         result.summary().to_csv(output / "summary.csv", index=False)
+        result.session_summary().to_csv(output / "summary_by_session.csv", index=False)
+        result.rat_summary().to_csv(output / "summary_by_rat.csv", index=False)
+        result.split_summary().to_csv(output / "summary_by_split.csv", index=False)
+        write_benchmark_settings(output / "benchmark_settings.yml", config, vars(args), result.rows)
     return 0
 
 

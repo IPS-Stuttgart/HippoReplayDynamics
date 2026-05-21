@@ -557,6 +557,8 @@ def build_clusterless_mark_emissions(
         dt=dt,
         cell_ids=np.array([0], dtype=int),
         n_spikes=int(counts.sum()),
+        bin_durations=bin_durations,
+        transition_durations=np.diff(times) if times.shape[0] > 1 else np.empty(0, dtype=float),
     )
     emissions.metadata = {
         "clusterless_mark_likelihood": encoding.mark_likelihood,

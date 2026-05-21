@@ -331,6 +331,31 @@ def _duration_adjusted_decays(
     return np.asarray([decay ** (float(duration) / reference_dt) for duration in durations], dtype=float)
 
 
+def _duration_adjusted_decays_from_config(config, durations: np.ndarray, reference_dt: float) -> np.ndarray:
+    """Return transition-specific momentum velocity decays.
+
+    Historically the duration-aware scorer scaled a per-bin decay by
+    ``duration / reference_dt``.  That is still the backwards-compatible path.
+    When ``momentum_velocity_decay_tau_s`` is positive, use the physical-time
+    decay ``exp(-duration / tau)`` instead so the same setting is meaningful for
+    1, 2, 3, or 5 ms replay bins.
+    """
+
+    tau_s = float(getattr(config, "momentum_velocity_decay_tau_s", 0.0))
+    if tau_s <= 0.0:
+        return _duration_adjusted_decays(
+            float(getattr(config, "momentum_velocity_decay", 0.95)),
+            durations,
+            reference_dt,
+        )
+    if not np.isfinite(tau_s):
+        raise ValueError("momentum_velocity_decay_tau_s must be finite when positive")
+    durations = np.asarray(durations, dtype=float)
+    if np.any(durations <= 0.0) or not np.all(np.isfinite(durations)):
+        raise ValueError("transition durations must be finite and positive")
+    return np.exp(-durations / tau_s)
+
+
 def _time_scales(durations: np.ndarray) -> np.ndarray:
     scales = np.ones_like(durations, dtype=float)
     if len(durations) > 1:

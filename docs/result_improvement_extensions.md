@@ -47,6 +47,27 @@ For bin-width-invariant IMM tuning, use a physical-time switching parameter:
 When this value is positive, the effective per-bin stickiness is
 `exp(-time_bin_s / tau)` and is written to the output CSV.
 
+Momentum velocity decay can now be expressed in the same physical-time form:
+
+```bash
+--state-space-momentum-velocity-decay-tau-s 0.060
+```
+
+When this value is positive, each transition uses
+`exp(-transition_duration_s / tau)` instead of a fixed per-bin velocity decay.
+This keeps momentum settings comparable across 1, 2, 3, and 5 ms replay bins.
+
+The state-space momentum/IMM beam can also use a train-only first-order
+diffusion posterior as its support source:
+
+```bash
+--state-space-momentum-candidate-source posterior
+```
+
+Use this as a diagnostic beside the default emission-ranked support; it can
+recover dynamically plausible bins whose instantaneous emission rank is too low
+for a fixed top-k beam.
+
 ## Replay emission calibration
 
 The default remains the original Poisson observation model.  Opt-in alternatives
@@ -87,3 +108,40 @@ python scripts/repeated_cell_split_benchmark.py \
 
 This writes per-seed event scores and summary tables plus an across-seed
 aggregate summary.
+
+## Result-quality audit
+
+After a model-evidence run, write a single audit dashboard and diagnostic CSVs:
+
+```bash
+python scripts/audit_model_evidence_results.py \
+  --scores results/model-evidence/event_model_evidence.csv \
+  --output results/model-evidence-audit
+```
+
+The audit adds evidence-margin summaries, model-disagreement events,
+candidate-support quality tables, window-sensitivity tables when window variants
+are present, session/rat influence summaries, null-control recommendations,
+adversarial synthetic case suggestions, and provenance warnings.
+
+If you rerun selected low-margin events with a common candidate support, pass the
+second score table to compare native and common-support evidence:
+
+```bash
+python scripts/audit_model_evidence_results.py \
+  --scores results/model-evidence/event_model_evidence.csv \
+  --common-support-scores results/common-support/event_model_evidence.csv \
+  --output results/model-evidence-audit
+```
+
+Observation-model calibration sweeps can be selected without using real replay
+evidence by passing a validation/recovery summary and optional gates:
+
+```bash
+python scripts/audit_model_evidence_results.py \
+  --scores results/model-evidence/event_model_evidence.csv \
+  --observation-sweep-summary results/observation_sweep_summary.csv \
+  --max-behavior-error-cm 15 \
+  --min-recovery-accuracy 0.60 \
+  --output results/model-evidence-audit
+```

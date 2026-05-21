@@ -23,6 +23,7 @@ from hipporeplayimm.accuracy_upgrades import (
 )
 from hipporeplayimm.advanced_result_diagnostics import (
     add_evidence_margin_columns as add_advanced_evidence_margin_columns,
+    common_support_from_emissions,
 )
 from hipporeplayimm.clusterless import (
     ClusterlessMarkConfig,
@@ -176,11 +177,13 @@ def _models(args, session=None) -> dict[str, object]:
             momentum_sigma_cm_sqrt_s=args.state_space_momentum_sigma_cm_sqrt_s,
             momentum_initial_sigma_cm_sqrt_s=args.state_space_momentum_initial_sigma_cm_sqrt_s,
             momentum_velocity_decay=args.state_space_momentum_velocity_decay,
+            momentum_velocity_decay_tau_s=getattr(args, "state_space_momentum_velocity_decay_tau_s", 0.0),
             momentum_candidate_top_k=args.state_space_momentum_candidate_top_k,
             momentum_candidate_mass_threshold=getattr(args, "state_space_momentum_candidate_mass_threshold", None),
             momentum_candidate_min_k=getattr(args, "state_space_momentum_candidate_min_k", 1),
             momentum_candidate_max_k=getattr(args, "state_space_momentum_candidate_max_k", 0),
             momentum_predicted_candidate_top_k=getattr(args, "state_space_momentum_predicted_candidate_top_k", 8),
+            momentum_candidate_source=getattr(args, "state_space_momentum_candidate_source", "emission"),
             valid_occupancy_threshold_s=getattr(args, "state_space_valid_occupancy_threshold_s", 0.0),
         )
 
@@ -281,6 +284,78 @@ def _state_space_mode_stickiness(args) -> float:
     return float(np.exp(-float(getattr(args, "time_bin_s", 0.02)) / tau_s))
 
 
+def _score_model_with_optional_support(model, emissions, bin_centers, *, occupancy_s=None, candidate_indices=None):
+    """Score a model while preserving optional state-space support controls."""
+
+    candidates = candidate_indices
+    if candidates is None and hasattr(model, "candidate_indices"):
+        try:
+            candidates = model.candidate_indices(emissions, bin_centers)
+        except TypeError:
+            candidates = model.candidate_indices(emissions)
+
+    kwargs: dict[str, object] = {}
+    if candidates is not None:
+        kwargs["candidate_indices"] = candidates
+    if occupancy_s is not None:
+        kwargs["occupancy_s"] = occupancy_s
+    if not kwargs:
+        return model.score(emissions, bin_centers)
+    try:
+        return model.score(emissions, bin_centers, **kwargs)
+    except TypeError as exc:
+        message = str(exc)
+        if "occupancy_s" in message and "candidate_indices" in kwargs:
+            return model.score(
+                emissions,
+                bin_centers,
+                candidate_indices=kwargs["candidate_indices"],
+            )
+        if "candidate_indices" in message and "occupancy_s" in kwargs:
+            return model.score(
+                emissions,
+                bin_centers,
+                occupancy_s=kwargs["occupancy_s"],
+            )
+        if "occupancy_s" not in message and "candidate_indices" not in message:
+            raise
+    return model.score(emissions, bin_centers)
+
+
+def _is_state_space_candidate_model(model: object) -> bool:
+    return isinstance(model, (SortedSpikeStateSpaceReplayModel, ClusterlessStateSpaceReplayModel)) and hasattr(model, "candidate_indices")
+
+
+def _common_state_space_candidates(args, models, emissions, bin_centers):
+    """Build a common union support for state-space candidate diagnostics."""
+
+    top_k = int(getattr(args, "state_space_common_support_top_k", 0))
+    if top_k <= 0:
+        return None
+    union: list[set[int]] | None = None
+    for model in models:
+        if not _is_state_space_candidate_model(model):
+            continue
+        try:
+            candidates = model.candidate_indices(emissions, bin_centers)
+        except TypeError:
+            candidates = model.candidate_indices(emissions)
+        except Exception:
+            continue
+        if union is None:
+            union = [set() for _ in range(len(candidates))]
+        if len(candidates) != len(union):
+            continue
+        for time_index, current in enumerate(candidates):
+            union[time_index].update(int(value) for value in np.asarray(current, dtype=int))
+    extras = None if union is None else [np.fromiter(sorted(current), dtype=int) for current in union]
+    return common_support_from_emissions(
+        emissions.log_likelihood,
+        top_k=top_k,
+        extra_candidate_sets=extras,
+    )
+
+
 def _family(model: str) -> str:
     if model in _TRAJ:
         return "trajectory"
@@ -335,9 +410,12 @@ def _state_space_metadata(args) -> dict[str, object]:
         "state_space_momentum_candidate_mass_threshold": _optional_float_setting(getattr(args, "state_space_momentum_candidate_mass_threshold", None)),
         "state_space_momentum_candidate_min_k": int(getattr(args, "state_space_momentum_candidate_min_k", 1)),
         "state_space_momentum_candidate_max_k": int(getattr(args, "state_space_momentum_candidate_max_k", 0)),
-        "state_space_valid_occupancy_threshold_s": float(getattr(args, "state_space_valid_occupancy_threshold_s", 0.0)),
         "state_space_imm_switch_tau_s": float(getattr(args, "state_space_imm_switch_tau_s", 0.0)),
         "state_space_effective_imm_mode_stickiness": float(_state_space_mode_stickiness(args)),
+        "state_space_momentum_velocity_decay_tau_s": float(getattr(args, "state_space_momentum_velocity_decay_tau_s", 0.0)),
+        "state_space_momentum_candidate_source": str(getattr(args, "state_space_momentum_candidate_source", "emission")),
+        "state_space_valid_occupancy_threshold_s": float(getattr(args, "state_space_valid_occupancy_threshold_s", 0.0)),
+        "state_space_common_support_top_k": int(getattr(args, "state_space_common_support_top_k", 0)),
         "goal_state_space_transition_sigma_cm_sqrt_s": float(getattr(args, "goal_state_space_transition_sigma_cm_sqrt_s", DEFAULT_GOAL_TRANSITION_SIGMA_CM_SQRT_S)),
         "goal_state_space_drift_speed_cm_s": float(getattr(args, "goal_state_space_drift_speed_cm_s", DEFAULT_GOAL_DRIFT_SPEED_CM_S)),
         "goal_state_space_max_step_sigma": float(getattr(args, "goal_state_space_max_step_sigma", DEFAULT_GOAL_MAX_STEP_SIGMA)),
@@ -383,19 +461,30 @@ def _score(args) -> pd.DataFrame:
         )
         if sorted_emissions.n_time == 0:
             continue
+        sorted_common_candidates = _common_state_space_candidates(
+            args,
+            models.values(),
+            sorted_emissions,
+            encoding.bin_centers,
+        )
+        clusterless_common_candidates = None
+        if clusterless_emissions is not None and clusterless_encoding is not None:
+            clusterless_common_candidates = _common_state_space_candidates(args, models.values(), clusterless_emissions, clusterless_encoding.bin_centers)
         for name, model in models.items():
             start = time.perf_counter()
             use_clusterless = isinstance(model, ClusterlessStateSpaceReplayModel)
             emissions = clusterless_emissions if use_clusterless else sorted_emissions
             bin_centers = clusterless_encoding.bin_centers if use_clusterless and clusterless_encoding is not None else encoding.bin_centers
+            occupancy_s = clusterless_encoding.occupancy_s if use_clusterless and clusterless_encoding is not None else encoding.occupancy_s
             assert emissions is not None
             try:
-                occupancy_s = (
-                    clusterless_encoding.occupancy_s
-                    if use_clusterless and clusterless_encoding is not None
-                    else encoding.occupancy_s
+                result = score_replay_model_compat(
+                    model,
+                    emissions,
+                    bin_centers,
+                    occupancy_s=occupancy_s,
+                    candidate_indices=(clusterless_common_candidates if use_clusterless else sorted_common_candidates) if _is_state_space_candidate_model(model) else None,
                 )
-                result = score_replay_model_compat(model, emissions, bin_centers, occupancy_s=occupancy_s)
                 model_name = str(result.model_name)
                 row = {
                     "status": "success", "session": session.session_id, "event_index": int(event_id),
@@ -696,10 +785,15 @@ def main() -> int:
     p.add_argument("--state-space-max-step-sigma", type=float, default=4.0)
     p.add_argument("--state-space-imm-mode-stickiness", type=float, default=0.95)
     p.add_argument("--state-space-imm-switch-tau-s", type=float, default=0.060)
-    p.add_argument("--state-space-valid-occupancy-threshold-s", type=float, default=0.0)
     p.add_argument("--state-space-momentum-sigma-cm-sqrt-s", type=float, default=85.0)
     p.add_argument("--state-space-momentum-initial-sigma-cm-sqrt-s", type=float, default=85.0)
     p.add_argument("--state-space-momentum-velocity-decay", type=float, default=0.95)
+    p.add_argument(
+        "--state-space-momentum-velocity-decay-tau-s",
+        type=float,
+        default=0.0,
+        help="If >0, set per-transition momentum velocity decay to exp(-transition_duration_s/tau).",
+    )
     p.add_argument("--state-space-momentum-candidate-top-k", type=int, default=256)
     p.add_argument("--state-space-momentum-predicted-candidate-top-k", type=int, default=16)
     p.add_argument(
@@ -719,6 +813,24 @@ def main() -> int:
         type=int,
         default=0,
         help="Maximum adaptive per-bin support; 0 means unbounded.",
+    )
+    p.add_argument(
+        "--state-space-momentum-candidate-source",
+        choices=("emission", "posterior"),
+        default="emission",
+        help="Candidate support for momentum/IMM: raw emission support or train-only first-order posterior support.",
+    )
+    p.add_argument(
+        "--state-space-valid-occupancy-threshold-s",
+        type=float,
+        default=0.0,
+        help="If positive, restrict state-space priors and transition normalizers to bins with at least this training occupancy.",
+    )
+    p.add_argument(
+        "--state-space-common-support-top-k",
+        type=int,
+        default=0,
+        help="If >0, score state-space candidate models on a common union support seeded by this emission top-k.",
     )
     p.add_argument("--clusterless-mark-smoothing-sigma-bins", type=float, default=1.0)
     p.add_argument("--clusterless-mark-prior-count", type=float, default=1.0)

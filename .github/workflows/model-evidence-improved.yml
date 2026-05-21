@@ -31,11 +31,15 @@ on:
       state_space_momentum_candidate_top_k:
         description: "Emission top-k support for state-space momentum/IMM"
         required: true
-        default: "128"
+        default: "256"
       state_space_momentum_predicted_candidate_top_k:
         description: "Momentum-predicted candidate augmentation top-k"
         required: true
-        default: "8"
+        default: "16"
+      state_space_imm_switch_tau_s:
+        description: "If >0, set IMM stickiness to exp(-time_bin_s/tau)"
+        required: true
+        default: "0.060"
       goal_state_space_transition_sigma_cm_sqrt_s:
         description: "Goal-state transition noise in cm/sqrt(s)"
         required: true
@@ -149,7 +153,7 @@ jobs:
           TIME_BIN_S: ${{ inputs.time_bin_s }}
           STATE_SPACE_MOMENTUM_CANDIDATE_TOP_K: ${{ inputs.state_space_momentum_candidate_top_k }}
           STATE_SPACE_MOMENTUM_PREDICTED_CANDIDATE_TOP_K: ${{ inputs.state_space_momentum_predicted_candidate_top_k }}
-          STATE_SPACE_IMM_SWITCH_TAU_S: "0.0"
+          STATE_SPACE_IMM_SWITCH_TAU_S: ${{ inputs.state_space_imm_switch_tau_s }}
           GOAL_STATE_SPACE_TRANSITION_SIGMA_CM_SQRT_S: ${{ inputs.goal_state_space_transition_sigma_cm_sqrt_s }}
           GOAL_STATE_SPACE_DRIFT_SPEED_CM_S: ${{ inputs.goal_state_space_drift_speed_cm_s }}
           GOAL_STATE_SPACE_MAX_STEP_SIGMA: ${{ inputs.goal_state_space_max_step_sigma }}

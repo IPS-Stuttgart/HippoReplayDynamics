@@ -22,6 +22,11 @@ from .clusterless import build_clusterless_mark_emissions, fit_clusterless_mark_
 from .data import ReplaySession, load_open_field_sessions
 from .encoding import EmissionConfig, EncodingConfig, build_emissions, fit_place_field_encoding
 from .evidence_reporting import EXACT_EVIDENCE_SUPPORT, ensure_evidence_support_columns
+from .goal_state_space_integration import (
+    DEFAULT_GOAL_DRIFT_SPEED_CM_S,
+    DEFAULT_GOAL_MAX_STEP_SIGMA,
+    DEFAULT_GOAL_TRANSITION_SIGMA_CM_SQRT_S,
+)
 from .state_space import StateSpaceReplayModel
 
 
@@ -286,14 +291,20 @@ def compare_scores_to_ground_truth(
     state_space_diffusion_sigma_cm_sqrt_s: float = 85.0,
     state_space_max_step_sigma: float = 4.0,
     state_space_imm_mode_stickiness: float = 0.95,
+    state_space_imm_switch_tau_s: float = 0.0,
     state_space_momentum_sigma_cm_sqrt_s: float = 85.0,
     state_space_momentum_initial_sigma_cm_sqrt_s: float = 85.0,
     state_space_momentum_velocity_decay: float = 0.95,
+    state_space_momentum_velocity_decay_tau_s: float = 0.0,
     state_space_momentum_candidate_top_k: int = 128,
     state_space_momentum_candidate_mass_threshold: float | None = None,
     state_space_momentum_candidate_min_k: int = 1,
     state_space_momentum_candidate_max_k: int = 0,
     state_space_momentum_predicted_candidate_top_k: int = 8,
+    state_space_momentum_candidate_source: str = "emission",
+    goal_state_space_transition_sigma_cm_sqrt_s: float = DEFAULT_GOAL_TRANSITION_SIGMA_CM_SQRT_S,
+    goal_state_space_drift_speed_cm_s: float = DEFAULT_GOAL_DRIFT_SPEED_CM_S,
+    goal_state_space_max_step_sigma: float = DEFAULT_GOAL_MAX_STEP_SIGMA,
     include_bayesian_model_average: bool = True,
     bayesian_model_average_name: str = "bayesian-model-average",
     bayesian_model_average_evidence_column: str = "auto",
@@ -350,6 +361,11 @@ def compare_scores_to_ground_truth(
         "state_space_imm_mode_stickiness",
         state_space_imm_mode_stickiness,
     )
+    state_space_imm_switch_tau_s = _unique_float_from_column(
+        scores_frame,
+        "state_space_imm_switch_tau_s",
+        state_space_imm_switch_tau_s,
+    )
     state_space_momentum_sigma_cm_sqrt_s = _unique_float_from_column(
         scores_frame,
         "state_space_momentum_sigma_cm_sqrt_s",
@@ -364,6 +380,11 @@ def compare_scores_to_ground_truth(
         scores_frame,
         "state_space_momentum_velocity_decay",
         state_space_momentum_velocity_decay,
+    )
+    state_space_momentum_velocity_decay_tau_s = _unique_float_from_column(
+        scores_frame,
+        "state_space_momentum_velocity_decay_tau_s",
+        state_space_momentum_velocity_decay_tau_s,
     )
     state_space_momentum_candidate_top_k = _unique_int_from_column(
         scores_frame,
@@ -389,6 +410,26 @@ def compare_scores_to_ground_truth(
         scores_frame,
         "state_space_momentum_predicted_candidate_top_k",
         state_space_momentum_predicted_candidate_top_k,
+    )
+    state_space_momentum_candidate_source = _unique_string_from_column(
+        scores_frame,
+        "state_space_momentum_candidate_source",
+        state_space_momentum_candidate_source,
+    )
+    goal_state_space_transition_sigma_cm_sqrt_s = _unique_float_from_column(
+        scores_frame,
+        "goal_state_space_transition_sigma_cm_sqrt_s",
+        goal_state_space_transition_sigma_cm_sqrt_s,
+    )
+    goal_state_space_drift_speed_cm_s = _unique_float_from_column(
+        scores_frame,
+        "goal_state_space_drift_speed_cm_s",
+        goal_state_space_drift_speed_cm_s,
+    )
+    goal_state_space_max_step_sigma = _unique_float_from_column(
+        scores_frame,
+        "goal_state_space_max_step_sigma",
+        goal_state_space_max_step_sigma,
     )
 
     sessions = {session.session_id: session for session in load_open_field_sessions(root)}
@@ -420,16 +461,22 @@ def compare_scores_to_ground_truth(
         state_space_diffusion_sigma_cm_sqrt_s=state_space_diffusion_sigma_cm_sqrt_s,
         state_space_max_step_sigma=state_space_max_step_sigma,
         state_space_imm_mode_stickiness=state_space_imm_mode_stickiness,
+        state_space_imm_switch_tau_s=state_space_imm_switch_tau_s,
         state_space_momentum_sigma_cm_sqrt_s=state_space_momentum_sigma_cm_sqrt_s,
         state_space_momentum_initial_sigma_cm_sqrt_s=(
             state_space_momentum_initial_sigma_cm_sqrt_s
         ),
         state_space_momentum_velocity_decay=state_space_momentum_velocity_decay,
+        state_space_momentum_velocity_decay_tau_s=state_space_momentum_velocity_decay_tau_s,
         state_space_momentum_candidate_top_k=state_space_momentum_candidate_top_k,
         state_space_momentum_candidate_mass_threshold=state_space_momentum_candidate_mass_threshold,
         state_space_momentum_candidate_min_k=state_space_momentum_candidate_min_k,
         state_space_momentum_candidate_max_k=state_space_momentum_candidate_max_k,
         state_space_momentum_predicted_candidate_top_k=state_space_momentum_predicted_candidate_top_k,
+        state_space_momentum_candidate_source=state_space_momentum_candidate_source,
+        goal_state_space_transition_sigma_cm_sqrt_s=goal_state_space_transition_sigma_cm_sqrt_s,
+        goal_state_space_drift_speed_cm_s=goal_state_space_drift_speed_cm_s,
+        goal_state_space_max_step_sigma=goal_state_space_max_step_sigma,
         clusterless_mark_smoothing_sigma_bins=clusterless_mark_smoothing_sigma_bins,
         clusterless_mark_prior_count=clusterless_mark_prior_count,
         clusterless_mark_variance_floor=clusterless_mark_variance_floor,
@@ -654,6 +701,33 @@ def compare_scores_to_ground_truth_sensitivity(
     pyrecest_imm_momentum_velocity_decay: float = 0.95,
     pyrecest_imm_jump_fraction: float = 0.9,
     pyrecest_imm_jump_velocity_decay: float = 0.25,
+    clusterless_mark_smoothing_sigma_bins: float = 1.0,
+    clusterless_mark_prior_count: float = 1.0,
+    clusterless_mark_variance_floor: float = 1.0,
+    clusterless_rate_floor_hz: float = 1e-4,
+    clusterless_mark_likelihood: str = "local-kde",
+    clusterless_mark_kde_bandwidth: float | None = None,
+    clusterless_mark_kde_spatial_sigma_bins: float | None = None,
+    clusterless_mark_kde_max_neighbors: int = 256,
+    state_space_valid_occupancy_threshold_s: float = 0.0,
+    state_space_stationary_sigma_cm: float = 2.0,
+    state_space_diffusion_sigma_cm_sqrt_s: float = 85.0,
+    state_space_max_step_sigma: float = 4.0,
+    state_space_imm_mode_stickiness: float = 0.95,
+    state_space_imm_switch_tau_s: float = 0.0,
+    state_space_momentum_sigma_cm_sqrt_s: float = 85.0,
+    state_space_momentum_initial_sigma_cm_sqrt_s: float = 85.0,
+    state_space_momentum_velocity_decay: float = 0.95,
+    state_space_momentum_velocity_decay_tau_s: float = 0.0,
+    state_space_momentum_candidate_top_k: int = 128,
+    state_space_momentum_candidate_mass_threshold: float | None = None,
+    state_space_momentum_candidate_min_k: int = 1,
+    state_space_momentum_candidate_max_k: int = 0,
+    state_space_momentum_predicted_candidate_top_k: int = 8,
+    state_space_momentum_candidate_source: str = "emission",
+    goal_state_space_transition_sigma_cm_sqrt_s: float = DEFAULT_GOAL_TRANSITION_SIGMA_CM_SQRT_S,
+    goal_state_space_drift_speed_cm_s: float = DEFAULT_GOAL_DRIFT_SPEED_CM_S,
+    goal_state_space_max_step_sigma: float = DEFAULT_GOAL_MAX_STEP_SIGMA,
     random_seed: int = 1,
 ) -> GroundTruthSensitivityResult:
     """Evaluate behavioral-score robustness across label-parameter settings.
@@ -694,6 +768,33 @@ def compare_scores_to_ground_truth_sensitivity(
         pyrecest_imm_momentum_velocity_decay=pyrecest_imm_momentum_velocity_decay,
         pyrecest_imm_jump_fraction=pyrecest_imm_jump_fraction,
         pyrecest_imm_jump_velocity_decay=pyrecest_imm_jump_velocity_decay,
+        clusterless_mark_smoothing_sigma_bins=clusterless_mark_smoothing_sigma_bins,
+        clusterless_mark_prior_count=clusterless_mark_prior_count,
+        clusterless_mark_variance_floor=clusterless_mark_variance_floor,
+        clusterless_rate_floor_hz=clusterless_rate_floor_hz,
+        clusterless_mark_likelihood=clusterless_mark_likelihood,
+        clusterless_mark_kde_bandwidth=clusterless_mark_kde_bandwidth,
+        clusterless_mark_kde_spatial_sigma_bins=clusterless_mark_kde_spatial_sigma_bins,
+        clusterless_mark_kde_max_neighbors=clusterless_mark_kde_max_neighbors,
+        state_space_valid_occupancy_threshold_s=state_space_valid_occupancy_threshold_s,
+        state_space_stationary_sigma_cm=state_space_stationary_sigma_cm,
+        state_space_diffusion_sigma_cm_sqrt_s=state_space_diffusion_sigma_cm_sqrt_s,
+        state_space_max_step_sigma=state_space_max_step_sigma,
+        state_space_imm_mode_stickiness=state_space_imm_mode_stickiness,
+        state_space_imm_switch_tau_s=state_space_imm_switch_tau_s,
+        state_space_momentum_sigma_cm_sqrt_s=state_space_momentum_sigma_cm_sqrt_s,
+        state_space_momentum_initial_sigma_cm_sqrt_s=state_space_momentum_initial_sigma_cm_sqrt_s,
+        state_space_momentum_velocity_decay=state_space_momentum_velocity_decay,
+        state_space_momentum_velocity_decay_tau_s=state_space_momentum_velocity_decay_tau_s,
+        state_space_momentum_candidate_top_k=state_space_momentum_candidate_top_k,
+        state_space_momentum_candidate_mass_threshold=state_space_momentum_candidate_mass_threshold,
+        state_space_momentum_candidate_min_k=state_space_momentum_candidate_min_k,
+        state_space_momentum_candidate_max_k=state_space_momentum_candidate_max_k,
+        state_space_momentum_predicted_candidate_top_k=state_space_momentum_predicted_candidate_top_k,
+        state_space_momentum_candidate_source=state_space_momentum_candidate_source,
+        goal_state_space_transition_sigma_cm_sqrt_s=goal_state_space_transition_sigma_cm_sqrt_s,
+        goal_state_space_drift_speed_cm_s=goal_state_space_drift_speed_cm_s,
+        goal_state_space_max_step_sigma=goal_state_space_max_step_sigma,
         random_seed=random_seed,
     )
     score_decode_base = _ground_truth_sensitivity_score_decode_base(
@@ -1239,6 +1340,21 @@ def _unique_int_from_column(frame: pd.DataFrame, column: str, default: int) -> i
     if any(value != first for value in values[1:]):
         raise ValueError(f"{column} contains multiple values")
     return int(first)
+
+
+def _unique_string_from_column(frame: pd.DataFrame, column: str, default: str) -> str:
+    values: list[str] = []
+    if column in frame.columns:
+        for value in frame[column].dropna():
+            text = str(value).strip()
+            if text:
+                values.append(text)
+    if not values:
+        return str(default)
+    first = values[0]
+    if any(value != first for value in values[1:]):
+        raise ValueError(f"{column} contains multiple values")
+    return str(first)
 
 
 def _unique_bool_from_column(frame: pd.DataFrame, column: str, default: bool) -> bool:

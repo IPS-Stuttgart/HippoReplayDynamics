@@ -233,6 +233,50 @@ class ValidStateDiffusionReplayModel:
         )
 
 
+@dataclass
+class ValidStateGridReplayModel:
+    """Exact first-order graph-walk model over behaviorally valid grid states."""
+
+    valid_mask: np.ndarray
+    grid_shape: tuple[int, int]
+    diagonal_neighbors: bool = True
+    stay_probability: float = 0.0
+    name: str = "valid-state-grid"
+
+    def score(self, emissions: LogEmissionTensor, bin_centers: np.ndarray) -> EventScore:
+        mask = _coerce_mask(self.valid_mask, emissions.n_bins)
+        restricted = restrict_emissions_to_mask(emissions, mask)
+        transition = valid_grid_graph_transition(
+            self.grid_shape,
+            mask,
+            diagonal_neighbors=bool(self.diagonal_neighbors),
+            stay_probability=float(self.stay_probability),
+        )
+        logp, trajectory = _forward_backward_first_order(restricted.log_likelihood, transition)
+        full_trajectory = _expand_log_trajectory(trajectory, mask, emissions.n_bins)
+        terminal = full_trajectory[-1]
+        diagnostics = {
+            "valid_state_bins": int(np.sum(mask)),
+            "valid_state_fraction": float(np.mean(mask)),
+            "valid_state_transition": "grid_graph",
+            "valid_state_grid_shape_x": int(self.grid_shape[0]),
+            "valid_state_grid_shape_y": int(self.grid_shape[1]),
+            "valid_state_grid_diagonal_neighbors": int(bool(self.diagonal_neighbors)),
+            "valid_state_grid_stay_probability": float(self.stay_probability),
+            "mean_trajectory_posterior_entropy": _mean_entropy(full_trajectory),
+        }
+        diagnostics.update(_posterior_diagnostics(terminal, bin_centers))
+        return EventScore(
+            self.name,
+            float(logp),
+            emissions.n_time,
+            emissions.n_spikes,
+            diagnostics=diagnostics,
+            terminal_log_posterior=terminal,
+            trajectory_log_posterior=full_trajectory,
+        )
+
+
 # ---------------------------------------------------------------------------
 # 2. Continuous-time point-process emissions
 # ---------------------------------------------------------------------------
@@ -555,13 +599,14 @@ def bootstrap_model_win_probabilities(
     n_bootstrap: int = 1000,
     random_seed: int = 1,
     evidence_column: str = "log_evidence",
+    group_columns: Sequence[str] = ("session", "event_index"),
 ) -> pd.DataFrame:
     """Bootstrap session/event rows to estimate model win uncertainty."""
 
     if scores.empty:
         return pd.DataFrame()
     rng = np.random.default_rng(random_seed)
-    pivot = scores.pivot_table(index=["session", "event_index"], columns="model", values=evidence_column, aggfunc="first")
+    pivot = scores.pivot_table(index=list(group_columns), columns="model", values=evidence_column, aggfunc="first")
     pivot = pivot.dropna(axis=0, how="all")
     if pivot.empty:
         return pd.DataFrame()
@@ -713,6 +758,7 @@ class TimeReversedReplayModel:
             trajectory = base_score.trajectory_log_posterior[::-1].copy()
             terminal = trajectory[-1]
         diagnostics = dict(base_score.diagnostics)
+        diagnostics.update(_posterior_diagnostics(terminal, bin_centers))
         diagnostics["direction_hypothesis"] = "reverse"
         diagnostics["base_model"] = str(base_score.model_name)
         return EventScore(

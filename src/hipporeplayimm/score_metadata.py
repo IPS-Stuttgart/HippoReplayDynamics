@@ -139,14 +139,17 @@ def apply_model_hyperparam_patch() -> None:
         state_space_diffusion_sigma_cm_sqrt_s: float = 85.0
         state_space_max_step_sigma: float = 4.0
         state_space_imm_mode_stickiness: float = 0.95
+        state_space_imm_switch_tau_s: float = 0.0
         state_space_momentum_sigma_cm_sqrt_s: float = 85.0
         state_space_momentum_initial_sigma_cm_sqrt_s: float = 85.0
         state_space_momentum_velocity_decay: float = 0.95
+        state_space_momentum_velocity_decay_tau_s: float = 0.0
         state_space_momentum_candidate_top_k: int = 128
         state_space_momentum_candidate_mass_threshold: float | None = None
         state_space_momentum_candidate_min_k: int = 1
         state_space_momentum_candidate_max_k: int = 0
         state_space_momentum_predicted_candidate_top_k: int = 8
+        state_space_momentum_candidate_source: str = "emission"
         goal_state_space_transition_sigma_cm_sqrt_s: float = 85.0
         goal_state_space_drift_speed_cm_s: float = 400.0
         goal_state_space_max_step_sigma: float = 4.0
@@ -174,6 +177,13 @@ def apply_model_hyperparam_patch() -> None:
     def cfg(config, name: str, default):
         return getattr(config, name, default)
 
+    def effective_state_space_imm_stickiness(config) -> float:
+        tau_s = float(cfg(config, "state_space_imm_switch_tau_s", 0.0))
+        if tau_s <= 0.0:
+            return float(cfg(config, "state_space_imm_mode_stickiness", 0.95))
+        emissions = cfg(config, "emissions", EmissionConfig())
+        return float(np.exp(-float(emissions.time_bin_s) / tau_s))
+
     def candidate_model(config, mode: str, name: str | None = None):
         return model_mod.CandidateKinematicModel(
             mode=mode,
@@ -195,7 +205,7 @@ def apply_model_hyperparam_patch() -> None:
                 stationary_sigma_cm=cfg(config, "state_space_stationary_sigma_cm", 2.0),
                 diffusion_sigma_cm_sqrt_s=cfg(config, "state_space_diffusion_sigma_cm_sqrt_s", 85.0),
                 max_step_sigma=cfg(config, "state_space_max_step_sigma", 4.0),
-                imm_mode_stickiness=cfg(config, "state_space_imm_mode_stickiness", 0.95),
+                imm_mode_stickiness=effective_state_space_imm_stickiness(config),
                 momentum_sigma_cm_sqrt_s=cfg(config, "state_space_momentum_sigma_cm_sqrt_s", 85.0),
                 momentum_initial_sigma_cm_sqrt_s=cfg(
                     config,
@@ -203,6 +213,7 @@ def apply_model_hyperparam_patch() -> None:
                     85.0,
                 ),
                 momentum_velocity_decay=cfg(config, "state_space_momentum_velocity_decay", 0.95),
+                momentum_velocity_decay_tau_s=cfg(config, "state_space_momentum_velocity_decay_tau_s", 0.0),
                 momentum_candidate_top_k=cfg(config, "state_space_momentum_candidate_top_k", 128),
                 momentum_candidate_mass_threshold=cfg(
                     config,
@@ -212,6 +223,7 @@ def apply_model_hyperparam_patch() -> None:
                 momentum_candidate_min_k=cfg(config, "state_space_momentum_candidate_min_k", 1),
                 momentum_candidate_max_k=cfg(config, "state_space_momentum_candidate_max_k", 0),
                 momentum_predicted_candidate_top_k=cfg(config, "state_space_momentum_predicted_candidate_top_k", 8),
+                momentum_candidate_source=cfg(config, "state_space_momentum_candidate_source", "emission"),
                 valid_occupancy_threshold_s=cfg(config, "state_space_valid_occupancy_threshold_s", 0.0),
             ),
         )
@@ -276,6 +288,11 @@ def apply_model_hyperparam_patch() -> None:
                 random_seed=cfg(config, "random_seed", 1),
             ),
         }
+        unknown_models = tuple(name for name in config.models if name not in available)
+        if unknown_models:
+            allowed = ", ".join(sorted(available))
+            unknown = ", ".join(unknown_models)
+            raise ValueError(f"Unknown model name(s): {unknown}. Allowed models: {allowed}")
         return {name: available[name] for name in config.models}
 
     def benchmark_config_metadata(config) -> dict[str, object]:
@@ -303,9 +320,13 @@ def apply_model_hyperparam_patch() -> None:
             "state_space_diffusion_sigma_cm_sqrt_s": float(cfg(config, "state_space_diffusion_sigma_cm_sqrt_s", 85.0)),
             "state_space_max_step_sigma": float(cfg(config, "state_space_max_step_sigma", 4.0)),
             "state_space_imm_mode_stickiness": float(cfg(config, "state_space_imm_mode_stickiness", 0.95)),
+            "state_space_imm_switch_tau_s": float(cfg(config, "state_space_imm_switch_tau_s", 0.0)),
             "state_space_momentum_sigma_cm_sqrt_s": float(cfg(config, "state_space_momentum_sigma_cm_sqrt_s", 85.0)),
             "state_space_momentum_initial_sigma_cm_sqrt_s": float(cfg(config, "state_space_momentum_initial_sigma_cm_sqrt_s", 85.0)),
             "state_space_momentum_velocity_decay": float(cfg(config, "state_space_momentum_velocity_decay", 0.95)),
+            "state_space_momentum_velocity_decay_tau_s": float(
+                cfg(config, "state_space_momentum_velocity_decay_tau_s", 0.0)
+            ),
             "state_space_momentum_candidate_top_k": int(cfg(config, "state_space_momentum_candidate_top_k", 128)),
             "state_space_momentum_candidate_mass_threshold": _optional_float_metadata(
                 cfg(config, "state_space_momentum_candidate_mass_threshold", None)
@@ -314,6 +335,9 @@ def apply_model_hyperparam_patch() -> None:
             "state_space_momentum_candidate_max_k": int(cfg(config, "state_space_momentum_candidate_max_k", 0)),
             "state_space_momentum_predicted_candidate_top_k": int(
                 cfg(config, "state_space_momentum_predicted_candidate_top_k", 8)
+            ),
+            "state_space_momentum_candidate_source": str(
+                cfg(config, "state_space_momentum_candidate_source", "emission")
             ),
             "state_space_valid_occupancy_threshold_s": float(cfg(config, "state_space_valid_occupancy_threshold_s", 0.0)),
             "goal_state_space_transition_sigma_cm_sqrt_s": float(cfg(config, "goal_state_space_transition_sigma_cm_sqrt_s", 85.0)),
@@ -368,14 +392,17 @@ def apply_model_hyperparam_patch() -> None:
         state_space_diffusion_sigma_cm_sqrt_s: float,
         state_space_max_step_sigma: float,
         state_space_imm_mode_stickiness: float,
+        state_space_imm_switch_tau_s: float,
         state_space_momentum_sigma_cm_sqrt_s: float,
         state_space_momentum_initial_sigma_cm_sqrt_s: float,
         state_space_momentum_velocity_decay: float,
+        state_space_momentum_velocity_decay_tau_s: float,
         state_space_momentum_candidate_top_k: int,
         state_space_momentum_candidate_mass_threshold: float | None,
         state_space_momentum_candidate_min_k: int,
         state_space_momentum_candidate_max_k: int,
         state_space_momentum_predicted_candidate_top_k: int,
+        state_space_momentum_candidate_source: str,
         state_space_valid_occupancy_threshold_s: float,
         goal_state_space_transition_sigma_cm_sqrt_s: float,
         goal_state_space_drift_speed_cm_s: float,
@@ -412,9 +439,18 @@ def apply_model_hyperparam_patch() -> None:
             state_space_diffusion_sigma_cm_sqrt_s=_unique_float_from_columns(scores_frame, ("state_space_diffusion_sigma_cm_sqrt_s", "diagnostic_state_space_diffusion_sigma_cm_sqrt_s"), state_space_diffusion_sigma_cm_sqrt_s),
             state_space_max_step_sigma=_unique_float_from_columns(scores_frame, ("state_space_max_step_sigma", "diagnostic_state_space_max_step_sigma"), state_space_max_step_sigma),
             state_space_imm_mode_stickiness=_unique_float_from_columns(scores_frame, ("state_space_imm_mode_stickiness", "diagnostic_state_space_imm_mode_stickiness"), state_space_imm_mode_stickiness),
+            state_space_imm_switch_tau_s=_unique_float_from_columns(scores_frame, ("state_space_imm_switch_tau_s", "diagnostic_state_space_imm_switch_tau_s"), state_space_imm_switch_tau_s),
             state_space_momentum_sigma_cm_sqrt_s=_unique_float_from_columns(scores_frame, ("state_space_momentum_sigma_cm_sqrt_s", "diagnostic_state_space_momentum_sigma_cm_sqrt_s"), state_space_momentum_sigma_cm_sqrt_s),
             state_space_momentum_initial_sigma_cm_sqrt_s=_unique_float_from_columns(scores_frame, ("state_space_momentum_initial_sigma_cm_sqrt_s", "diagnostic_state_space_momentum_initial_sigma_cm_sqrt_s"), state_space_momentum_initial_sigma_cm_sqrt_s),
             state_space_momentum_velocity_decay=_unique_float_from_columns(scores_frame, ("state_space_momentum_velocity_decay", "diagnostic_state_space_momentum_velocity_decay"), state_space_momentum_velocity_decay),
+            state_space_momentum_velocity_decay_tau_s=_unique_float_from_columns(
+                scores_frame,
+                (
+                    "state_space_momentum_velocity_decay_tau_s",
+                    "diagnostic_state_space_momentum_velocity_decay_tau_s",
+                ),
+                state_space_momentum_velocity_decay_tau_s,
+            ),
             state_space_momentum_candidate_top_k=_unique_int_from_columns(scores_frame, ("state_space_momentum_candidate_top_k", "diagnostic_state_space_momentum_candidate_top_k", "diagnostic_state_space_imm_candidate_top_k"), state_space_momentum_candidate_top_k),
             state_space_momentum_candidate_mass_threshold=_optional_float_from_columns(
                 scores_frame,
@@ -435,6 +471,14 @@ def apply_model_hyperparam_patch() -> None:
                     "diagnostic_state_space_imm_predicted_candidate_top_k",
                 ),
                 state_space_momentum_predicted_candidate_top_k,
+            ),
+            state_space_momentum_candidate_source=_unique_string_from_columns(
+                scores_frame,
+                (
+                    "state_space_momentum_candidate_source",
+                    "diagnostic_state_space_momentum_candidate_source",
+                ),
+                state_space_momentum_candidate_source,
             ),
             state_space_valid_occupancy_threshold_s=_unique_float_from_columns(scores_frame, ("state_space_valid_occupancy_threshold_s", "diagnostic_state_space_valid_occupancy_threshold_s"), state_space_valid_occupancy_threshold_s),
             goal_state_space_transition_sigma_cm_sqrt_s=_unique_float_from_columns(scores_frame, ("goal_state_space_transition_sigma_cm_sqrt_s", "diagnostic_goal_state_space_transition_sigma_cm_sqrt_s"), goal_state_space_transition_sigma_cm_sqrt_s),
@@ -478,14 +522,17 @@ def apply_model_hyperparam_patch() -> None:
         state_space_diffusion_sigma_cm_sqrt_s: float = 85.0,
         state_space_max_step_sigma: float = 4.0,
         state_space_imm_mode_stickiness: float = 0.95,
+        state_space_imm_switch_tau_s: float = 0.0,
         state_space_momentum_sigma_cm_sqrt_s: float = 85.0,
         state_space_momentum_initial_sigma_cm_sqrt_s: float = 85.0,
         state_space_momentum_velocity_decay: float = 0.95,
+        state_space_momentum_velocity_decay_tau_s: float = 0.0,
         state_space_momentum_candidate_top_k: int = 128,
         state_space_momentum_candidate_mass_threshold: float | None = None,
         state_space_momentum_candidate_min_k: int = 1,
         state_space_momentum_candidate_max_k: int = 0,
         state_space_momentum_predicted_candidate_top_k: int = 8,
+        state_space_momentum_candidate_source: str = "emission",
         state_space_valid_occupancy_threshold_s: float = 0.0,
         goal_state_space_transition_sigma_cm_sqrt_s: float = 85.0,
         goal_state_space_drift_speed_cm_s: float = 400.0,
@@ -538,14 +585,17 @@ def apply_model_hyperparam_patch() -> None:
             state_space_diffusion_sigma_cm_sqrt_s=state_space_diffusion_sigma_cm_sqrt_s,
             state_space_max_step_sigma=state_space_max_step_sigma,
             state_space_imm_mode_stickiness=state_space_imm_mode_stickiness,
+            state_space_imm_switch_tau_s=state_space_imm_switch_tau_s,
             state_space_momentum_sigma_cm_sqrt_s=state_space_momentum_sigma_cm_sqrt_s,
             state_space_momentum_initial_sigma_cm_sqrt_s=state_space_momentum_initial_sigma_cm_sqrt_s,
             state_space_momentum_velocity_decay=state_space_momentum_velocity_decay,
+            state_space_momentum_velocity_decay_tau_s=state_space_momentum_velocity_decay_tau_s,
             state_space_momentum_candidate_top_k=state_space_momentum_candidate_top_k,
             state_space_momentum_candidate_mass_threshold=state_space_momentum_candidate_mass_threshold,
             state_space_momentum_candidate_min_k=state_space_momentum_candidate_min_k,
             state_space_momentum_candidate_max_k=state_space_momentum_candidate_max_k,
             state_space_momentum_predicted_candidate_top_k=state_space_momentum_predicted_candidate_top_k,
+            state_space_momentum_candidate_source=state_space_momentum_candidate_source,
             state_space_valid_occupancy_threshold_s=state_space_valid_occupancy_threshold_s,
             goal_state_space_transition_sigma_cm_sqrt_s=goal_state_space_transition_sigma_cm_sqrt_s,
             goal_state_space_drift_speed_cm_s=goal_state_space_drift_speed_cm_s,
@@ -715,6 +765,23 @@ def _optional_float_from_columns(
     if any(not np.isclose(value, first) for value in values[1:]):
         raise ValueError(f"{' / '.join(columns)} contains multiple values")
     return float(first)
+
+
+def _unique_string_from_columns(frame: pd.DataFrame, columns: tuple[str, ...], default: str) -> str:
+    values: list[str] = []
+    for column in columns:
+        if column not in frame.columns:
+            continue
+        for value in frame[column].dropna():
+            text = str(value).strip()
+            if text:
+                values.append(text)
+    if not values:
+        return str(default)
+    first = values[0]
+    if any(value != first for value in values[1:]):
+        raise ValueError(f"{' / '.join(columns)} contains multiple values")
+    return first
 
 
 def _unique_int_from_column(frame: pd.DataFrame, column: str, default: int) -> int:

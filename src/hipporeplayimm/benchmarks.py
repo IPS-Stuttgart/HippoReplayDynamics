@@ -22,6 +22,12 @@ from .evidence_reporting import (
     TRUNCATED_EVIDENCE_SUPPORT,
     ensure_evidence_support_columns,
 )
+from .goal_state_space import GoalStateSpaceReplayModel
+from .goal_state_space_integration import (
+    DEFAULT_GOAL_DRIFT_SPEED_CM_S,
+    DEFAULT_GOAL_MAX_STEP_SIGMA,
+    DEFAULT_GOAL_TRANSITION_SIGMA_CM_SQRT_S,
+)
 from .result_improvements import (
     add_candidate_support_quality_columns,
     hierarchical_bootstrap_ci,
@@ -74,14 +80,20 @@ class BenchmarkConfig:
     state_space_diffusion_sigma_cm_sqrt_s: float = 85.0
     state_space_max_step_sigma: float = 4.0
     state_space_imm_mode_stickiness: float = 0.95
+    state_space_imm_switch_tau_s: float = 0.0
     state_space_momentum_sigma_cm_sqrt_s: float = 85.0
     state_space_momentum_initial_sigma_cm_sqrt_s: float = 85.0
     state_space_momentum_velocity_decay: float = 0.95
+    state_space_momentum_velocity_decay_tau_s: float = 0.0
     state_space_momentum_candidate_top_k: int = 128
     state_space_momentum_candidate_mass_threshold: float | None = None
     state_space_momentum_candidate_min_k: int = 1
     state_space_momentum_candidate_max_k: int = 0
     state_space_momentum_predicted_candidate_top_k: int = 8
+    state_space_momentum_candidate_source: str = "emission"
+    goal_state_space_transition_sigma_cm_sqrt_s: float = DEFAULT_GOAL_TRANSITION_SIGMA_CM_SQRT_S
+    goal_state_space_drift_speed_cm_s: float = DEFAULT_GOAL_DRIFT_SPEED_CM_S
+    goal_state_space_max_step_sigma: float = DEFAULT_GOAL_MAX_STEP_SIGMA
     random_seed: int = 1
     random_seeds: tuple[int, ...] | None = None
     event_epoch: str = "run"
@@ -577,6 +589,12 @@ def _benchmark_config_metadata(config: BenchmarkConfig) -> dict[str, object]:
         "state_space_imm_mode_stickiness": float(
             config.state_space_imm_mode_stickiness
         ),
+        "state_space_imm_switch_tau_s": float(
+            getattr(config, "state_space_imm_switch_tau_s", 0.0)
+        ),
+        "state_space_imm_mode_stickiness_effective": float(
+            _effective_state_space_imm_stickiness(config)
+        ),
         "state_space_momentum_sigma_cm_sqrt_s": float(
             config.state_space_momentum_sigma_cm_sqrt_s
         ),
@@ -585,6 +603,12 @@ def _benchmark_config_metadata(config: BenchmarkConfig) -> dict[str, object]:
         ),
         "state_space_momentum_velocity_decay": float(
             config.state_space_momentum_velocity_decay
+        ),
+        "state_space_momentum_velocity_decay_tau_s": float(
+            config.state_space_momentum_velocity_decay_tau_s
+        ),
+        "state_space_momentum_candidate_source": str(
+            config.state_space_momentum_candidate_source
         ),
         "state_space_momentum_candidate_top_k": int(
             config.state_space_momentum_candidate_top_k
@@ -602,6 +626,15 @@ def _benchmark_config_metadata(config: BenchmarkConfig) -> dict[str, object]:
         ),
         "state_space_momentum_predicted_candidate_top_k": int(
             config.state_space_momentum_predicted_candidate_top_k
+        ),
+        "goal_state_space_transition_sigma_cm_sqrt_s": float(
+            config.goal_state_space_transition_sigma_cm_sqrt_s
+        ),
+        "goal_state_space_drift_speed_cm_s": float(
+            config.goal_state_space_drift_speed_cm_s
+        ),
+        "goal_state_space_max_step_sigma": float(
+            config.goal_state_space_max_step_sigma
         ),
     }
 
@@ -693,6 +726,15 @@ def _cell_split_scores_from_encoding(encoding, strategy: str) -> np.ndarray:
     raise ValueError("cell_split_strategy must be one of 'random', 'mean-rate', or 'peak-rate'")
 
 
+def _effective_state_space_imm_stickiness(config: BenchmarkConfig) -> float:
+    """Return per-bin IMM stickiness, optionally from a physical switch time constant."""
+
+    tau_s = float(getattr(config, "state_space_imm_switch_tau_s", 0.0))
+    if tau_s <= 0.0:
+        return float(config.state_space_imm_mode_stickiness)
+    return float(np.exp(-float(config.emissions.time_bin_s) / tau_s))
+
+
 def _state_space_decoder_config(config: BenchmarkConfig, mode: str) -> StateSpaceDecoderConfig:
     """Build a state-space decoder config from benchmark-level sweep knobs."""
 
@@ -701,12 +743,13 @@ def _state_space_decoder_config(config: BenchmarkConfig, mode: str) -> StateSpac
         stationary_sigma_cm=float(config.state_space_stationary_sigma_cm),
         diffusion_sigma_cm_sqrt_s=float(config.state_space_diffusion_sigma_cm_sqrt_s),
         max_step_sigma=float(config.state_space_max_step_sigma),
-        imm_mode_stickiness=float(config.state_space_imm_mode_stickiness),
+        imm_mode_stickiness=_effective_state_space_imm_stickiness(config),
         momentum_sigma_cm_sqrt_s=float(config.state_space_momentum_sigma_cm_sqrt_s),
         momentum_initial_sigma_cm_sqrt_s=float(
             config.state_space_momentum_initial_sigma_cm_sqrt_s
         ),
         momentum_velocity_decay=float(config.state_space_momentum_velocity_decay),
+        momentum_velocity_decay_tau_s=float(config.state_space_momentum_velocity_decay_tau_s),
         momentum_candidate_top_k=int(config.state_space_momentum_candidate_top_k),
         momentum_candidate_mass_threshold=config.state_space_momentum_candidate_mass_threshold,
         momentum_candidate_min_k=int(config.state_space_momentum_candidate_min_k),
@@ -714,6 +757,7 @@ def _state_space_decoder_config(config: BenchmarkConfig, mode: str) -> StateSpac
         momentum_predicted_candidate_top_k=int(
             config.state_space_momentum_predicted_candidate_top_k
         ),
+        momentum_candidate_source=str(config.state_space_momentum_candidate_source),
         valid_occupancy_threshold_s=float(config.state_space_valid_occupancy_threshold_s),
     )
 
@@ -726,6 +770,16 @@ def _build_models(
     clusterless_kwargs = {
         "mark_likelihood": _clusterless_mark_likelihood(config),
     }
+
+    def goal_state_space_model(name: str) -> GoalStateSpaceReplayModel:
+        return GoalStateSpaceReplayModel(
+            candidate_goals=goal_candidates,
+            transition_sigma_cm_sqrt_s=float(config.goal_state_space_transition_sigma_cm_sqrt_s),
+            drift_speed_cm_s=float(config.goal_state_space_drift_speed_cm_s),
+            max_step_sigma=float(config.goal_state_space_max_step_sigma),
+            name=name,
+        )
+
     available = {
         "random": RandomModel(),
         "stationary": StationaryModel(),
@@ -739,6 +793,8 @@ def _build_models(
         "sorted-spike-state-space-momentum": SortedSpikeStateSpaceReplayModel(mode="momentum"),
         "sorted-spike-state-space-imm": SortedSpikeStateSpaceReplayModel(mode="imm"),
         "sorted-spike-state-space-first-order-imm": SortedSpikeStateSpaceReplayModel(mode="first-order-imm"),
+        "sorted-spike-state-space-goal": goal_state_space_model("sorted-spike-state-space-goal"),
+        "state-space-goal": goal_state_space_model("state-space-goal"),
         "state-space-stationary": SortedSpikeStateSpaceReplayModel(mode="stationary", name="state-space-stationary"),
         "state-space-diffusion": SortedSpikeStateSpaceReplayModel(mode="diffusion", name="state-space-diffusion"),
         "state-space-fragmented": SortedSpikeStateSpaceReplayModel(mode="fragmented", name="state-space-fragmented"),
@@ -786,6 +842,11 @@ def _build_models(
             random_seed=config.random_seed,
         ),
     }
+    unknown_models = tuple(name for name in config.models if name not in available)
+    if unknown_models:
+        allowed = ", ".join(sorted(available))
+        unknown = ", ".join(unknown_models)
+        raise ValueError(f"Unknown model name(s): {unknown}. Allowed models: {allowed}")
     for model in available.values():
         if isinstance(model, StateSpaceReplayModel):
             model.config = _state_space_decoder_config(config, model.mode)

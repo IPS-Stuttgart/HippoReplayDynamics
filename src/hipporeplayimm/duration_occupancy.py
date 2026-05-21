@@ -24,6 +24,10 @@ def apply_duration_occupancy_patch() -> None:
     if getattr(ss, "_duration_occupancy_patch_applied", False):
         return
 
+    if getattr(ss.StateSpaceReplayModel.score, "_native_duration_occupancy_aware", False):
+        ss._duration_occupancy_patch_applied = True
+        return
+
     ss.StateSpaceReplayModel.__duration_occupancy_previous_score__ = ss.StateSpaceReplayModel.score
     ss.StateSpaceReplayModel.score = _score_state_space_duration_with_occupancy
     ss._duration_occupancy_patch_applied = True

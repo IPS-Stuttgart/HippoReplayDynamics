@@ -117,16 +117,19 @@ def _compare_clusterless_scores_to_ground_truth(gt, root, scores_frame: pd.DataF
         state_space_diffusion_sigma_cm_sqrt_s=kwargs.get("state_space_diffusion_sigma_cm_sqrt_s", 85.0),
         state_space_max_step_sigma=kwargs.get("state_space_max_step_sigma", 4.0),
         state_space_imm_mode_stickiness=kwargs.get("state_space_imm_mode_stickiness", 0.95),
+        state_space_imm_switch_tau_s=kwargs.get("state_space_imm_switch_tau_s", 0.0),
         state_space_momentum_sigma_cm_sqrt_s=kwargs.get("state_space_momentum_sigma_cm_sqrt_s", 85.0),
         state_space_momentum_initial_sigma_cm_sqrt_s=kwargs.get(
             "state_space_momentum_initial_sigma_cm_sqrt_s", 85.0
         ),
         state_space_momentum_velocity_decay=kwargs.get("state_space_momentum_velocity_decay", 0.95),
+        state_space_momentum_velocity_decay_tau_s=kwargs.get("state_space_momentum_velocity_decay_tau_s", 0.0),
         state_space_momentum_candidate_top_k=kwargs.get("state_space_momentum_candidate_top_k", 128),
         state_space_momentum_candidate_mass_threshold=kwargs.get("state_space_momentum_candidate_mass_threshold", None),
         state_space_momentum_candidate_min_k=kwargs.get("state_space_momentum_candidate_min_k", 1),
         state_space_momentum_candidate_max_k=kwargs.get("state_space_momentum_candidate_max_k", 0),
         state_space_momentum_predicted_candidate_top_k=kwargs.get("state_space_momentum_predicted_candidate_top_k", 8),
+        state_space_momentum_candidate_source=kwargs.get("state_space_momentum_candidate_source", "emission"),
         state_space_valid_occupancy_threshold_s=kwargs.get("state_space_valid_occupancy_threshold_s", 0.0),
         clusterless_mark_smoothing_sigma_bins=kwargs.get("clusterless_mark_smoothing_sigma_bins", 1.0),
         clusterless_mark_prior_count=kwargs.get("clusterless_mark_prior_count", 1.0),
@@ -207,11 +210,13 @@ def _clusterless_state_space_model(config: object, mode: str) -> ClusterlessStat
                 85.0,
             ),
             momentum_velocity_decay=_cfg(config, "state_space_momentum_velocity_decay", 0.95),
+            momentum_velocity_decay_tau_s=_cfg(config, "state_space_momentum_velocity_decay_tau_s", 0.0),
             momentum_candidate_top_k=_cfg(config, "state_space_momentum_candidate_top_k", 128),
             momentum_candidate_mass_threshold=_cfg(config, "state_space_momentum_candidate_mass_threshold", None),
             momentum_candidate_min_k=_cfg(config, "state_space_momentum_candidate_min_k", 1),
             momentum_candidate_max_k=_cfg(config, "state_space_momentum_candidate_max_k", 0),
             momentum_predicted_candidate_top_k=_cfg(config, "state_space_momentum_predicted_candidate_top_k", 8),
+            momentum_candidate_source=_cfg(config, "state_space_momentum_candidate_source", "emission"),
             valid_occupancy_threshold_s=_cfg(config, "state_space_valid_occupancy_threshold_s", 0.0),
         ),
         mark_likelihood=_cfg(config, "clusterless_mark_likelihood", "local-kde"),
@@ -241,6 +246,11 @@ def _clusterless_model_config_for_scores(scores_frame: pd.DataFrame, *, model_na
             ("state_space_imm_mode_stickiness", "diagnostic_state_space_imm_mode_stickiness"),
             defaults["state_space_imm_mode_stickiness"],
         ),
+        state_space_imm_switch_tau_s=_score_metadata._unique_float_from_columns(
+            scores_frame,
+            ("state_space_imm_switch_tau_s", "diagnostic_state_space_imm_switch_tau_s"),
+            defaults.get("state_space_imm_switch_tau_s", 0.0),
+        ),
         state_space_momentum_sigma_cm_sqrt_s=_score_metadata._unique_float_from_columns(
             scores_frame,
             ("state_space_momentum_sigma_cm_sqrt_s", "diagnostic_state_space_momentum_sigma_cm_sqrt_s"),
@@ -258,6 +268,14 @@ def _clusterless_model_config_for_scores(scores_frame: pd.DataFrame, *, model_na
             scores_frame,
             ("state_space_momentum_velocity_decay", "diagnostic_state_space_momentum_velocity_decay"),
             defaults["state_space_momentum_velocity_decay"],
+        ),
+        state_space_momentum_velocity_decay_tau_s=_score_metadata._unique_float_from_columns(
+            scores_frame,
+            (
+                "state_space_momentum_velocity_decay_tau_s",
+                "diagnostic_state_space_momentum_velocity_decay_tau_s",
+            ),
+            defaults.get("state_space_momentum_velocity_decay_tau_s", 0.0),
         ),
         state_space_momentum_candidate_top_k=_score_metadata._unique_int_from_columns(
             scores_frame,
@@ -291,6 +309,14 @@ def _clusterless_model_config_for_scores(scores_frame: pd.DataFrame, *, model_na
             scores_frame,
             ("state_space_momentum_predicted_candidate_top_k", "diagnostic_state_space_momentum_predicted_candidate_top_k", "diagnostic_state_space_imm_predicted_candidate_top_k"),
             defaults.get("state_space_momentum_predicted_candidate_top_k", 8),
+        ),
+        state_space_momentum_candidate_source=_unique_string_from_columns(
+            scores_frame,
+            (
+                "state_space_momentum_candidate_source",
+                "diagnostic_state_space_momentum_candidate_source",
+            ),
+            defaults.get("state_space_momentum_candidate_source", "emission"),
         ),
         state_space_valid_occupancy_threshold_s=_score_metadata._unique_float_from_columns(
             scores_frame,

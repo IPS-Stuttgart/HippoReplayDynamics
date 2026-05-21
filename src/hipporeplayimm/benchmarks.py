@@ -802,6 +802,11 @@ def _build_models(
             random_seed=config.random_seed,
         ),
     }
+    unknown_models = tuple(name for name in config.models if name not in available)
+    if unknown_models:
+        allowed = ", ".join(sorted(available))
+        unknown = ", ".join(unknown_models)
+        raise ValueError(f"Unknown model name(s): {unknown}. Allowed models: {allowed}")
     for model in available.values():
         if isinstance(model, StateSpaceReplayModel):
             model.config = _state_space_decoder_config(config, model.mode)

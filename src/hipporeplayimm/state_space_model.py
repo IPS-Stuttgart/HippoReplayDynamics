@@ -147,6 +147,19 @@ class StateSpaceReplayModel:
         *,
         occupancy_s: np.ndarray | None = None,
     ) -> EventScore:
+        # Native duration-aware implementation. The historical runtime patch
+        # modules detect the marker below and skip monkey-patching this method.
+        # The legacy scalar-dt body is intentionally left as unreachable fallback
+        # for source compatibility while the patch modules are phased out.
+        from .duration_occupancy import _score_state_space_duration_with_occupancy
+
+        return _score_state_space_duration_with_occupancy(
+            self,
+            emissions,
+            bin_centers,
+            candidate_indices=candidate_indices,
+            occupancy_s=occupancy_s,
+        )
         if emissions.n_time == 0:
             raise ValueError("emissions must contain at least one time bin")
         if emissions.n_bins != bin_centers.shape[0]:
@@ -434,3 +447,6 @@ def _add_nearest_predictions(
     for predicted in flat:
         dist2 = np.sum((bin_centers - predicted[None, :]) ** 2, axis=1)
         target.add(int(np.argmin(dist2)))
+
+
+StateSpaceReplayModel.score._native_duration_occupancy_aware = True  # type: ignore[attr-defined]

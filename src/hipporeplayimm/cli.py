@@ -97,12 +97,6 @@ def main(argv: list[str] | None = None) -> int:
     benchmark_parser.add_argument("--spike-rate-scale", type=float, default=1.0)
     _add_emission_calibration_arguments(benchmark_parser)
     benchmark_parser.add_argument(
-        "--clusterless-mark-group-by",
-        choices=("auto", "none", "tetrode", "cell"),
-        default="auto",
-        help="Clusterless mark-likelihood grouping. 'auto' uses tetrode groups when Tetrode_Cell_IDs are available.",
-    )
-    benchmark_parser.add_argument(
         "--models",
         default="random,stationary,diffusion,momentum,imm",
         help="Comma-separated model names to benchmark.",
@@ -497,7 +491,6 @@ def _benchmark(args: argparse.Namespace) -> int:
         random_seeds=_parse_int_values(args.random_seeds) if args.random_seeds else None,
         candidate_top_k=args.candidate_top_k,
         models=_parse_models(args.models),
-        clusterless_mark_group_by=args.clusterless_mark_group_by,
         **_state_space_scalar_kwargs(args),
         **_clusterless_scalar_kwargs(args),
         **_pyrecest_scalar_kwargs(args),
@@ -821,6 +814,15 @@ def _add_clusterless_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--clusterless-mark-variance-floor", type=float, default=1.0)
     parser.add_argument("--clusterless-rate-floor-hz", type=float, default=1e-4)
     parser.add_argument("--clusterless-mark-likelihood", choices=("local-kde", "diagonal-gaussian"), default="local-kde")
+    parser.add_argument(
+        "--clusterless-mark-group-by",
+        choices=("auto", "none", "tetrode", "cell"),
+        default="auto",
+        help=(
+            "Clusterless mark-likelihood grouping. 'auto' uses tetrode groups "
+            "when Tetrode_Cell_IDs are available."
+        ),
+    )
     parser.add_argument("--clusterless-mark-kde-bandwidth", type=float, default=None)
     parser.add_argument("--clusterless-mark-kde-spatial-sigma-bins", type=float, default=None)
     parser.add_argument("--clusterless-mark-kde-max-neighbors", type=int, default=256)
@@ -834,6 +836,7 @@ def _clusterless_mark_config_from_args(args: argparse.Namespace) -> ClusterlessM
         mark_variance_floor=args.clusterless_mark_variance_floor,
         rate_floor_hz=args.clusterless_rate_floor_hz,
         mark_likelihood=args.clusterless_mark_likelihood,
+        mark_group_by=getattr(args, "clusterless_mark_group_by", "auto"),
         mark_kde_bandwidth=args.clusterless_mark_kde_bandwidth,
         mark_kde_spatial_sigma_bins=args.clusterless_mark_kde_spatial_sigma_bins,
         mark_kde_max_neighbors=args.clusterless_mark_kde_max_neighbors,
@@ -1011,6 +1014,7 @@ def _clusterless_scalar_kwargs(args: argparse.Namespace) -> dict[str, float | in
         "clusterless_mark_variance_floor": args.clusterless_mark_variance_floor,
         "clusterless_rate_floor_hz": args.clusterless_rate_floor_hz,
         "clusterless_mark_likelihood": args.clusterless_mark_likelihood,
+        "clusterless_mark_group_by": getattr(args, "clusterless_mark_group_by", "auto"),
         "clusterless_mark_kde_bandwidth": args.clusterless_mark_kde_bandwidth,
         "clusterless_mark_kde_spatial_sigma_bins": args.clusterless_mark_kde_spatial_sigma_bins,
         "clusterless_mark_kde_max_neighbors": args.clusterless_mark_kde_max_neighbors,

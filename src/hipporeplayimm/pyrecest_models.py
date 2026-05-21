@@ -33,6 +33,31 @@ class PyRecEstGoalParticleModel:
     random_seed: int = 1
     name: str = "pyrecest-goal-particle"
 
+    def __post_init__(self) -> None:
+        _validate_positive_int(self.n_particles, "n_particles")
+        _validate_positive_float(self.initial_velocity_sigma_cm_s, "initial_velocity_sigma_cm_s")
+        _validate_positive_float(self.process_noise_sigma_cm_s, "process_noise_sigma_cm_s")
+        _validate_positive_float(self.position_jump_sigma_cm, "position_jump_sigma_cm")
+        _validate_probability(self.jump_probability, "jump_probability")
+        _validate_probability(self.goal_reset_probability, "goal_reset_probability")
+        _validate_probability(self.position_proposal_probability, "position_proposal_probability")
+        if self.position_proposal_ess_threshold is not None:
+            _validate_probability(self.position_proposal_ess_threshold, "position_proposal_ess_threshold")
+        if str(self.position_likelihood_interpolation).lower() not in {"nearest", "linear"}:
+            raise ValueError("position_likelihood_interpolation must be 'nearest' or 'linear'")
+        if hasattr(self, "mode_stickiness"):
+            _validate_probability(getattr(self, "mode_stickiness"), "mode_stickiness")
+        if hasattr(self, "jump_fraction"):
+            _validate_probability(getattr(self, "jump_fraction"), "jump_fraction")
+        for name in (
+            "stationary_velocity_decay",
+            "diffusion_velocity_decay",
+            "momentum_velocity_decay",
+            "jump_velocity_decay",
+        ):
+            if hasattr(self, name):
+                _validate_nonnegative_float(getattr(self, name), name)
+
     def score(self, emissions: LogEmissionTensor, bin_centers: np.ndarray) -> EventScore:
         if emissions.n_time == 0:
             raise ValueError("emissions must contain at least one time bin")
@@ -699,5 +724,23 @@ def _format_transition_durations(transition_durations: np.ndarray) -> str:
 
 
 def _validate_probability(probability: float, name: str) -> None:
-    if not 0.0 <= float(probability) <= 1.0:
+    value = float(probability)
+    if not np.isfinite(value) or not 0.0 <= value <= 1.0:
         raise ValueError(f"{name} must lie in [0, 1]")
+
+
+def _validate_positive_int(value: int, name: str) -> None:
+    if int(value) != value or int(value) <= 0:
+        raise ValueError(f"{name} must be a positive integer")
+
+
+def _validate_positive_float(value: float, name: str) -> None:
+    value = float(value)
+    if not np.isfinite(value) or value <= 0.0:
+        raise ValueError(f"{name} must be finite and positive")
+
+
+def _validate_nonnegative_float(value: float, name: str) -> None:
+    value = float(value)
+    if not np.isfinite(value) or value < 0.0:
+        raise ValueError(f"{name} must be finite and nonnegative")

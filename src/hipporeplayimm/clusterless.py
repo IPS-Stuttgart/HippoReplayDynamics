@@ -144,6 +144,15 @@ class ClusterlessMarkEncoding:
         numeric_group_ids = raw_group_ids.astype(float, copy=False)
         finite = np.isfinite(numeric_group_ids)
         coerced = np.full(n_marks, np.iinfo(np.int64).min, dtype=int)
+        integer_valued = np.zeros(n_marks, dtype=bool)
+        integer_valued[finite] = np.isclose(
+            numeric_group_ids[finite],
+            np.rint(numeric_group_ids[finite]),
+            rtol=0.0,
+            atol=0.0,
+        )
+        if not np.all(integer_valued[finite]):
+            raise ValueError("mark group IDs must be integer-valued")
         coerced[finite] = numeric_group_ids[finite].astype(int)
         sorted_order = np.argsort(self.group_ids)
         sorted_groups = np.asarray(self.group_ids, dtype=int)[sorted_order]
@@ -559,14 +568,14 @@ def build_clusterless_mark_emissions(
         n_spikes=int(counts.sum()),
         bin_durations=bin_durations,
         transition_durations=np.diff(times) if times.shape[0] > 1 else np.empty(0, dtype=float),
+        metadata={
+            "clusterless_mark_likelihood": encoding.mark_likelihood,
+            "clusterless_mark_kde_bandwidth": _format_float_array(_sqrt_optional(encoding.mark_kde_variance)),
+            "clusterless_mark_kde_max_neighbors": _kde_neighbor_count(encoding),
+            "clusterless_mark_group_by": _normalize_mark_group_by(encoding.config.mark_group_by),
+            "clusterless_mark_groups": encoding.n_mark_groups,
+        },
     )
-    emissions.metadata = {
-        "clusterless_mark_likelihood": encoding.mark_likelihood,
-        "clusterless_mark_kde_bandwidth": _format_float_array(_sqrt_optional(encoding.mark_kde_variance)),
-        "clusterless_mark_kde_max_neighbors": _kde_neighbor_count(encoding),
-        "clusterless_mark_group_by": _normalize_mark_group_by(encoding.config.mark_group_by),
-        "clusterless_mark_groups": encoding.n_mark_groups,
-    }
     return emissions
 
 

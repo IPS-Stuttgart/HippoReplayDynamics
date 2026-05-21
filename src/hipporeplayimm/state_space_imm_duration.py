@@ -23,6 +23,10 @@ def apply_state_space_imm_duration_patch() -> None:
     if getattr(ss, "_state_space_imm_duration_patch_applied", False):
         return
 
+    if getattr(ss.StateSpaceReplayModel.score, "_native_duration_occupancy_aware", False):
+        ss._state_space_imm_duration_patch_applied = True
+        return
+
     previous_score = ss.StateSpaceReplayModel.score
 
     def score(self, emissions, bin_centers, candidate_indices=None, *, occupancy_s=None):

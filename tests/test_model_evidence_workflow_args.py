@@ -56,6 +56,13 @@ def test_event_sharded_workflow_includes_exact_first_order_imm_default():
     )
 
 
+def test_clusterless_first_order_imm_is_not_silently_skipped_by_model_evidence_script():
+    text = SCRIPT.read_text(encoding="utf-8")
+
+    assert 'if name == "clusterless-state-space-first-order-imm"' not in text
+    assert "clusterless-state-space-first-order-imm" in text
+
+
 def _workflow_benchmark_flags(workflow: Path) -> set[str]:
     text = workflow.read_text(encoding="utf-8")
     start = text.index("python scripts/benchmark_model_evidence.py")

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from argparse import ArgumentParser
 from dataclasses import replace
+import inspect
 
 import numpy as np
 import pytest
@@ -144,3 +145,60 @@ def test_state_space_rejects_nonpositive_diffusion_sigma() -> None:
 
     with pytest.raises(ValueError, match="sigma_cm_sqrt_s"):
         model.score(emissions, centers)
+
+
+def test_patched_benchmark_config_accepts_cli_state_space_kwargs() -> None:
+    parser = ArgumentParser()
+    cli._add_state_space_arguments(parser)
+    args = parser.parse_args([])
+
+    config = BenchmarkConfig(**cli._state_space_scalar_kwargs(args))
+
+    defaults = StateSpaceDecoderConfig()
+    assert config.state_space_valid_occupancy_threshold_s == defaults.valid_occupancy_threshold_s
+    assert config.state_space_momentum_candidate_mass_threshold == defaults.momentum_candidate_mass_threshold
+    assert config.state_space_momentum_candidate_min_k == defaults.momentum_candidate_min_k
+    assert config.state_space_momentum_candidate_max_k == defaults.momentum_candidate_max_k
+    assert config.state_space_momentum_predicted_candidate_top_k == defaults.momentum_predicted_candidate_top_k
+
+
+def test_patched_state_space_model_builder_preserves_candidate_support_knobs() -> None:
+    import hipporeplayimm.benchmarks as benchmarks
+
+    config = BenchmarkConfig(
+        models=("state-space-imm",),
+        state_space_momentum_candidate_mass_threshold=0.95,
+        state_space_momentum_candidate_min_k=3,
+        state_space_momentum_candidate_max_k=21,
+        state_space_momentum_predicted_candidate_top_k=5,
+        state_space_valid_occupancy_threshold_s=0.25,
+    )
+
+    model = benchmarks._build_models(config)["state-space-imm"]
+
+    assert model.config.momentum_candidate_mass_threshold == pytest.approx(0.95)
+    assert model.config.momentum_candidate_min_k == 3
+    assert model.config.momentum_candidate_max_k == 21
+    assert model.config.momentum_predicted_candidate_top_k == 5
+    assert model.config.valid_occupancy_threshold_s == pytest.approx(0.25)
+
+
+def test_base_compare_ground_truth_accepts_cli_state_space_kwargs() -> None:
+    import hipporeplayimm.ground_truth as ground_truth
+
+    compare = ground_truth.compare_scores_to_ground_truth
+    for cell in compare.__closure__ or ():
+        value = cell.cell_contents
+        if callable(value) and getattr(value, "__name__", "") == "compare_scores_to_ground_truth":
+            compare = value
+            break
+
+    signature = inspect.signature(compare)
+    if any(param.kind == inspect.Parameter.VAR_KEYWORD for param in signature.parameters.values()):
+        return
+
+    parser = ArgumentParser()
+    cli._add_state_space_arguments(parser)
+    args = parser.parse_args([])
+    for name in cli._state_space_scalar_kwargs(args):
+        assert name in signature.parameters

@@ -142,8 +142,6 @@ def _models(args, session=None) -> dict[str, object]:
     names = []
     for raw in args.models.replace(",", " ").split():
         name = _ALIASES.get(raw.strip().lower(), raw.strip().lower())
-        if name == "clusterless-state-space-first-order-imm":
-            continue
         if name:
             names.append(name)
     if not names:

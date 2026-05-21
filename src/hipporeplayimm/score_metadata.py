@@ -143,6 +143,10 @@ def apply_model_hyperparam_patch() -> None:
         state_space_momentum_initial_sigma_cm_sqrt_s: float = 85.0
         state_space_momentum_velocity_decay: float = 0.95
         state_space_momentum_candidate_top_k: int = 128
+        state_space_momentum_candidate_mass_threshold: float | None = None
+        state_space_momentum_candidate_min_k: int = 1
+        state_space_momentum_candidate_max_k: int = 0
+        state_space_momentum_predicted_candidate_top_k: int = 8
         goal_state_space_transition_sigma_cm_sqrt_s: float = 85.0
         goal_state_space_drift_speed_cm_s: float = 400.0
         goal_state_space_max_step_sigma: float = 4.0
@@ -200,6 +204,14 @@ def apply_model_hyperparam_patch() -> None:
                 ),
                 momentum_velocity_decay=cfg(config, "state_space_momentum_velocity_decay", 0.95),
                 momentum_candidate_top_k=cfg(config, "state_space_momentum_candidate_top_k", 128),
+                momentum_candidate_mass_threshold=cfg(
+                    config,
+                    "state_space_momentum_candidate_mass_threshold",
+                    None,
+                ),
+                momentum_candidate_min_k=cfg(config, "state_space_momentum_candidate_min_k", 1),
+                momentum_candidate_max_k=cfg(config, "state_space_momentum_candidate_max_k", 0),
+                momentum_predicted_candidate_top_k=cfg(config, "state_space_momentum_predicted_candidate_top_k", 8),
                 valid_occupancy_threshold_s=cfg(config, "state_space_valid_occupancy_threshold_s", 0.0),
             ),
         )
@@ -295,6 +307,15 @@ def apply_model_hyperparam_patch() -> None:
             "state_space_momentum_initial_sigma_cm_sqrt_s": float(cfg(config, "state_space_momentum_initial_sigma_cm_sqrt_s", 85.0)),
             "state_space_momentum_velocity_decay": float(cfg(config, "state_space_momentum_velocity_decay", 0.95)),
             "state_space_momentum_candidate_top_k": int(cfg(config, "state_space_momentum_candidate_top_k", 128)),
+            "state_space_momentum_candidate_mass_threshold": _optional_float_metadata(
+                cfg(config, "state_space_momentum_candidate_mass_threshold", None)
+            ),
+            "state_space_momentum_candidate_min_k": int(cfg(config, "state_space_momentum_candidate_min_k", 1)),
+            "state_space_momentum_candidate_max_k": int(cfg(config, "state_space_momentum_candidate_max_k", 0)),
+            "state_space_momentum_predicted_candidate_top_k": int(
+                cfg(config, "state_space_momentum_predicted_candidate_top_k", 8)
+            ),
+            "state_space_valid_occupancy_threshold_s": float(cfg(config, "state_space_valid_occupancy_threshold_s", 0.0)),
             "goal_state_space_transition_sigma_cm_sqrt_s": float(cfg(config, "goal_state_space_transition_sigma_cm_sqrt_s", 85.0)),
             "goal_state_space_drift_speed_cm_s": float(cfg(config, "goal_state_space_drift_speed_cm_s", 400.0)),
             "goal_state_space_max_step_sigma": float(cfg(config, "goal_state_space_max_step_sigma", 4.0)),
@@ -351,6 +372,11 @@ def apply_model_hyperparam_patch() -> None:
         state_space_momentum_initial_sigma_cm_sqrt_s: float,
         state_space_momentum_velocity_decay: float,
         state_space_momentum_candidate_top_k: int,
+        state_space_momentum_candidate_mass_threshold: float | None,
+        state_space_momentum_candidate_min_k: int,
+        state_space_momentum_candidate_max_k: int,
+        state_space_momentum_predicted_candidate_top_k: int,
+        state_space_valid_occupancy_threshold_s: float,
         goal_state_space_transition_sigma_cm_sqrt_s: float,
         goal_state_space_drift_speed_cm_s: float,
         goal_state_space_max_step_sigma: float,
@@ -390,6 +416,27 @@ def apply_model_hyperparam_patch() -> None:
             state_space_momentum_initial_sigma_cm_sqrt_s=_unique_float_from_columns(scores_frame, ("state_space_momentum_initial_sigma_cm_sqrt_s", "diagnostic_state_space_momentum_initial_sigma_cm_sqrt_s"), state_space_momentum_initial_sigma_cm_sqrt_s),
             state_space_momentum_velocity_decay=_unique_float_from_columns(scores_frame, ("state_space_momentum_velocity_decay", "diagnostic_state_space_momentum_velocity_decay"), state_space_momentum_velocity_decay),
             state_space_momentum_candidate_top_k=_unique_int_from_columns(scores_frame, ("state_space_momentum_candidate_top_k", "diagnostic_state_space_momentum_candidate_top_k", "diagnostic_state_space_imm_candidate_top_k"), state_space_momentum_candidate_top_k),
+            state_space_momentum_candidate_mass_threshold=_optional_float_from_columns(
+                scores_frame,
+                (
+                    "state_space_momentum_candidate_mass_threshold",
+                    "diagnostic_state_space_momentum_candidate_mass_threshold",
+                    "diagnostic_state_space_imm_candidate_mass_threshold",
+                ),
+                state_space_momentum_candidate_mass_threshold,
+            ),
+            state_space_momentum_candidate_min_k=_unique_int_from_columns(scores_frame, ("state_space_momentum_candidate_min_k", "diagnostic_state_space_momentum_candidate_min_k", "diagnostic_state_space_imm_candidate_min_k"), state_space_momentum_candidate_min_k),
+            state_space_momentum_candidate_max_k=_unique_int_from_columns(scores_frame, ("state_space_momentum_candidate_max_k", "diagnostic_state_space_momentum_candidate_max_k", "diagnostic_state_space_imm_candidate_max_k"), state_space_momentum_candidate_max_k),
+            state_space_momentum_predicted_candidate_top_k=_unique_int_from_columns(
+                scores_frame,
+                (
+                    "state_space_momentum_predicted_candidate_top_k",
+                    "diagnostic_state_space_momentum_predicted_candidate_top_k",
+                    "diagnostic_state_space_imm_predicted_candidate_top_k",
+                ),
+                state_space_momentum_predicted_candidate_top_k,
+            ),
+            state_space_valid_occupancy_threshold_s=_unique_float_from_columns(scores_frame, ("state_space_valid_occupancy_threshold_s", "diagnostic_state_space_valid_occupancy_threshold_s"), state_space_valid_occupancy_threshold_s),
             goal_state_space_transition_sigma_cm_sqrt_s=_unique_float_from_columns(scores_frame, ("goal_state_space_transition_sigma_cm_sqrt_s", "diagnostic_goal_state_space_transition_sigma_cm_sqrt_s"), goal_state_space_transition_sigma_cm_sqrt_s),
             goal_state_space_drift_speed_cm_s=_unique_float_from_columns(scores_frame, ("goal_state_space_drift_speed_cm_s", "diagnostic_goal_state_space_drift_speed_cm_s"), goal_state_space_drift_speed_cm_s),
             goal_state_space_max_step_sigma=_unique_float_from_columns(scores_frame, ("goal_state_space_max_step_sigma", "diagnostic_goal_state_space_max_step_sigma"), goal_state_space_max_step_sigma),
@@ -435,6 +482,11 @@ def apply_model_hyperparam_patch() -> None:
         state_space_momentum_initial_sigma_cm_sqrt_s: float = 85.0,
         state_space_momentum_velocity_decay: float = 0.95,
         state_space_momentum_candidate_top_k: int = 128,
+        state_space_momentum_candidate_mass_threshold: float | None = None,
+        state_space_momentum_candidate_min_k: int = 1,
+        state_space_momentum_candidate_max_k: int = 0,
+        state_space_momentum_predicted_candidate_top_k: int = 8,
+        state_space_valid_occupancy_threshold_s: float = 0.0,
         goal_state_space_transition_sigma_cm_sqrt_s: float = 85.0,
         goal_state_space_drift_speed_cm_s: float = 400.0,
         goal_state_space_max_step_sigma: float = 4.0,
@@ -490,6 +542,11 @@ def apply_model_hyperparam_patch() -> None:
             state_space_momentum_initial_sigma_cm_sqrt_s=state_space_momentum_initial_sigma_cm_sqrt_s,
             state_space_momentum_velocity_decay=state_space_momentum_velocity_decay,
             state_space_momentum_candidate_top_k=state_space_momentum_candidate_top_k,
+            state_space_momentum_candidate_mass_threshold=state_space_momentum_candidate_mass_threshold,
+            state_space_momentum_candidate_min_k=state_space_momentum_candidate_min_k,
+            state_space_momentum_candidate_max_k=state_space_momentum_candidate_max_k,
+            state_space_momentum_predicted_candidate_top_k=state_space_momentum_predicted_candidate_top_k,
+            state_space_valid_occupancy_threshold_s=state_space_valid_occupancy_threshold_s,
             goal_state_space_transition_sigma_cm_sqrt_s=goal_state_space_transition_sigma_cm_sqrt_s,
             goal_state_space_drift_speed_cm_s=goal_state_space_drift_speed_cm_s,
             goal_state_space_max_step_sigma=goal_state_space_max_step_sigma,
@@ -637,6 +694,27 @@ def _unique_float_from_columns(
 
 def _optional_float_metadata(value: float | None) -> float | str:
     return "" if value is None else float(value)
+
+
+def _optional_float_from_columns(
+    frame: pd.DataFrame,
+    columns: tuple[str, ...],
+    default: float | None,
+) -> float | None:
+    values: list[float] = []
+    for column in columns:
+        if column not in frame.columns:
+            continue
+        for value in frame[column].dropna():
+            text = str(value).strip()
+            if text:
+                values.append(float(value))
+    if not values:
+        return default
+    first = values[0]
+    if any(not np.isclose(value, first) for value in values[1:]):
+        raise ValueError(f"{' / '.join(columns)} contains multiple values")
+    return float(first)
 
 
 def _unique_int_from_column(frame: pd.DataFrame, column: str, default: int) -> int:

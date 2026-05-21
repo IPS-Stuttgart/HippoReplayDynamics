@@ -550,7 +550,7 @@ def add_model_averaged_endpoint_columns(df: pd.DataFrame) -> pd.DataFrame:
         exact = exact.dropna(subset=["model_probability", "diagnostic_decoded_endpoint_x", "diagnostic_decoded_endpoint_y"])
         if exact.empty:
             continue
-        weights = exact["model_probability"].to_numpy(dtype=float)
+        weights = exact["model_probability"].to_numpy(dtype=float, copy=True)
         total = float(np.sum(weights))
         if total <= 0.0:
             continue

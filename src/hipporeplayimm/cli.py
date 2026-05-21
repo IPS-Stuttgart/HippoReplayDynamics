@@ -31,6 +31,11 @@ from .ground_truth import (
     compare_scores_to_ground_truth_sensitivity,
     generate_behavioral_ground_truth,
 )
+from .goal_state_space_integration import (
+    DEFAULT_GOAL_DRIFT_SPEED_CM_S,
+    DEFAULT_GOAL_MAX_STEP_SIGMA,
+    DEFAULT_GOAL_TRANSITION_SIGMA_CM_SQRT_S,
+)
 from .observation_sweep import (
     ObservationSweepConfig,
     run_observation_parameter_sweep,
@@ -109,6 +114,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     _add_encoding_arguments(benchmark_parser)
     _add_state_space_arguments(benchmark_parser)
+    _add_goal_state_space_arguments(benchmark_parser)
     _add_clusterless_arguments(benchmark_parser)
     _add_pyrecest_scalar_arguments(benchmark_parser)
 
@@ -128,6 +134,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     _add_encoding_arguments(decode_parser)
     _add_state_space_arguments(decode_parser)
+    _add_goal_state_space_arguments(decode_parser)
     _add_clusterless_arguments(decode_parser)
     _add_pyrecest_scalar_arguments(decode_parser)
 
@@ -152,6 +159,7 @@ def main(argv: list[str] | None = None) -> int:
     _add_emission_calibration_arguments(compare_parser)
     _add_encoding_arguments(compare_parser)
     _add_state_space_arguments(compare_parser)
+    _add_goal_state_space_arguments(compare_parser)
     _add_clusterless_arguments(compare_parser)
     _add_pyrecest_scalar_arguments(compare_parser)
     compare_parser.add_argument("--visit-radius-cm", type=float, default=10.0)
@@ -170,6 +178,7 @@ def main(argv: list[str] | None = None) -> int:
     _add_emission_calibration_arguments(sensitivity_parser)
     _add_encoding_arguments(sensitivity_parser)
     _add_state_space_arguments(sensitivity_parser)
+    _add_goal_state_space_arguments(sensitivity_parser)
     _add_clusterless_arguments(sensitivity_parser)
     _add_pyrecest_scalar_arguments(sensitivity_parser)
     sensitivity_parser.add_argument("--visit-radii-cm", default="7.5,10.0,12.5")
@@ -499,6 +508,7 @@ def _benchmark(args: argparse.Namespace) -> int:
         models=_parse_models(args.models),
         clusterless_mark_group_by=args.clusterless_mark_group_by,
         **_state_space_scalar_kwargs(args),
+        **_goal_state_space_scalar_kwargs(args),
         **_clusterless_scalar_kwargs(args),
         **_pyrecest_scalar_kwargs(args),
     )
@@ -545,6 +555,7 @@ def _decode_event(args: argparse.Namespace) -> int:
         candidate_top_k=args.candidate_top_k,
         models=requested_models,
         **_state_space_scalar_kwargs(args),
+        **_goal_state_space_scalar_kwargs(args),
         **_clusterless_scalar_kwargs(args),
         **_pyrecest_scalar_kwargs(args),
     )
@@ -675,6 +686,7 @@ def _compare_ground_truth(args: argparse.Namespace) -> int:
         candidate_top_k=args.candidate_top_k,
         random_seed=args.random_seed,
         **_state_space_scalar_kwargs(args),
+        **_goal_state_space_scalar_kwargs(args),
         **_clusterless_scalar_kwargs(args),
         **_pyrecest_scalar_kwargs(args),
     )
@@ -703,6 +715,7 @@ def _ground_truth_sensitivity(args: argparse.Namespace) -> int:
         candidate_top_k=args.candidate_top_k,
         random_seed=args.random_seed,
         **_state_space_scalar_kwargs(args),
+        **_goal_state_space_scalar_kwargs(args),
         **_clusterless_scalar_kwargs(args),
         **_pyrecest_scalar_kwargs(args),
     )
@@ -765,6 +778,11 @@ def _add_state_space_arguments(parser: argparse.ArgumentParser) -> None:
         default=defaults.imm_mode_stickiness,
     )
     parser.add_argument(
+        "--state-space-imm-switch-tau-s",
+        type=float,
+        default=0.0,
+    )
+    parser.add_argument(
         "--state-space-momentum-sigma-cm-sqrt-s",
         type=float,
         default=defaults.momentum_sigma_cm_sqrt_s,
@@ -778,6 +796,11 @@ def _add_state_space_arguments(parser: argparse.ArgumentParser) -> None:
         "--state-space-momentum-velocity-decay",
         type=float,
         default=defaults.momentum_velocity_decay,
+    )
+    parser.add_argument(
+        "--state-space-momentum-velocity-decay-tau-s",
+        type=float,
+        default=defaults.momentum_velocity_decay_tau_s,
     )
     parser.add_argument(
         "--state-space-momentum-candidate-top-k",
@@ -805,6 +828,12 @@ def _add_state_space_arguments(parser: argparse.ArgumentParser) -> None:
         default=defaults.momentum_predicted_candidate_top_k,
     )
     parser.add_argument(
+        "--state-space-momentum-candidate-source",
+        choices=("emission", "posterior"),
+        default=defaults.momentum_candidate_source,
+        help="Candidate support for pruned momentum/IMM: emission top-k/mass, or train-only first-order posterior top-k/mass.",
+    )
+    parser.add_argument(
         "--state-space-valid-occupancy-threshold-s",
         type=float,
         default=defaults.valid_occupancy_threshold_s,
@@ -812,6 +841,24 @@ def _add_state_space_arguments(parser: argparse.ArgumentParser) -> None:
             "If positive, state-space priors and transition normalizers are restricted "
             "to spatial bins whose training occupancy is at least this many seconds."
         ),
+    )
+
+
+def _add_goal_state_space_arguments(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--goal-state-space-transition-sigma-cm-sqrt-s",
+        type=float,
+        default=DEFAULT_GOAL_TRANSITION_SIGMA_CM_SQRT_S,
+    )
+    parser.add_argument(
+        "--goal-state-space-drift-speed-cm-s",
+        type=float,
+        default=DEFAULT_GOAL_DRIFT_SPEED_CM_S,
+    )
+    parser.add_argument(
+        "--goal-state-space-max-step-sigma",
+        type=float,
+        default=DEFAULT_GOAL_MAX_STEP_SIGMA,
     )
 
 
@@ -991,16 +1038,27 @@ def _state_space_scalar_kwargs(args: argparse.Namespace) -> dict[str, float | in
         "state_space_diffusion_sigma_cm_sqrt_s": args.state_space_diffusion_sigma_cm_sqrt_s,
         "state_space_max_step_sigma": args.state_space_max_step_sigma,
         "state_space_imm_mode_stickiness": args.state_space_imm_mode_stickiness,
+        "state_space_imm_switch_tau_s": args.state_space_imm_switch_tau_s,
         "state_space_momentum_sigma_cm_sqrt_s": args.state_space_momentum_sigma_cm_sqrt_s,
         "state_space_momentum_initial_sigma_cm_sqrt_s": (
             args.state_space_momentum_initial_sigma_cm_sqrt_s
         ),
         "state_space_momentum_velocity_decay": args.state_space_momentum_velocity_decay,
+        "state_space_momentum_velocity_decay_tau_s": args.state_space_momentum_velocity_decay_tau_s,
         "state_space_momentum_candidate_top_k": args.state_space_momentum_candidate_top_k,
         "state_space_momentum_candidate_mass_threshold": args.state_space_momentum_candidate_mass_threshold,
         "state_space_momentum_candidate_min_k": args.state_space_momentum_candidate_min_k,
         "state_space_momentum_candidate_max_k": args.state_space_momentum_candidate_max_k,
         "state_space_momentum_predicted_candidate_top_k": args.state_space_momentum_predicted_candidate_top_k,
+        "state_space_momentum_candidate_source": args.state_space_momentum_candidate_source,
+    }
+
+
+def _goal_state_space_scalar_kwargs(args: argparse.Namespace) -> dict[str, float]:
+    return {
+        "goal_state_space_transition_sigma_cm_sqrt_s": args.goal_state_space_transition_sigma_cm_sqrt_s,
+        "goal_state_space_drift_speed_cm_s": args.goal_state_space_drift_speed_cm_s,
+        "goal_state_space_max_step_sigma": args.goal_state_space_max_step_sigma,
     }
 
 

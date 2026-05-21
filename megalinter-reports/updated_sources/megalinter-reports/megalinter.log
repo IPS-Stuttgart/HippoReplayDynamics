@@ -11,8 +11,8 @@ The MegaLinter documentation can be found at:
 ::group::MegaLinter initialization (expand for details)
 MegaLinter will analyze workspace [/github/workspace]
 GITHUB_REPOSITORY: IPS-Stuttgart/HippoReplayIMM
-GITHUB_REF: refs/pull/76/merge
-GITHUB_RUN_ID: 26185911511
+GITHUB_REF: refs/pull/87/merge
+GITHUB_RUN_ID: 26219772565
 PAT: not set
 
 [Activation] ANSIBLE_ANSIBLE_LINT has been set inactive, as none of these files has been found: ['.ansible-lint', '.ansible-lint.yml', '.ansible-lint.yaml', '.config/ansible-lint.yml', '.config/ansible-lint.yaml']
@@ -57,16 +57,16 @@ Listing all files in directory [/github/workspace], then filter with:
 - File names (regex): (.*\.)?Dockerfile, Containerfile, Jenkinsfile, Snakefile
 - Excluding regex: (^\.github/workflows/)
 - Excluding .gitignored files [0]: 
-Kept [148] files on [175] found files
+Kept [157] files on [184] found files
 
 +----MATCHING LINTERS-------------------+-----------------+----------------+------------+
 | Descriptor | Linter                   | Criteria        | Matching files | Format/Fix |
 +------------+--------------------------+-----------------+----------------+------------+
-| PYTHON     | ruff                     | .py|.pyi|.ipynb | 134            | yes        |
+| PYTHON     | ruff                     | .py|.pyi|.ipynb | 142            | yes        |
 | JSON       | v8r                      | .json           | 1              | no         |
 | JSON       | prettier                 | .json           | 1              | yes        |
-| MARKDOWN   | markdownlint             | .md             | 6              | yes        |
-| MARKDOWN   | markdown-table-formatter | .md             | 6              | yes        |
+| MARKDOWN   | markdownlint             | .md             | 7              | yes        |
+| MARKDOWN   | markdown-table-formatter | .md             | 7              | yes        |
 | REPOSITORY | checkov                  |                 | project        | no         |
 | REPOSITORY | git_diff                 |                 | project        | no         |
 | REPOSITORY | gitleaks                 |                 | project        | no         |
@@ -89,7 +89,7 @@ Processing linters on [4] parallel cores… (can be decreased with variable PARA
 - CWD: [/github/workspace]
 - Command: [prettier --write .jscpd.json]
 ::endgroup::
-::group::[32m✅ Linted [JSON] files with [v8r] successfully - (2.24s)[0m (expand for details)
+::group::[32m✅ Linted [JSON] files with [v8r] successfully - (1.71s)[0m (expand for details)
 - Using [v8r v6.0.0] https://megalinter.io/9.5.0/descriptors/json_v8r
 - MegaLinter key: [JSON_V8R]
 - Rules config: identified by [v8r]
@@ -97,38 +97,38 @@ Processing linters on [4] parallel cores… (can be decreased with variable PARA
 - CWD: [/github/workspace]
 - Command: [v8r --ignore-errors .jscpd.json]
 ::endgroup::
-::group::[32m✅ Linted [MARKDOWN] files with [markdownlint] successfully - (0.83s)[0m (expand for details)
+::group::[32m✅ Linted [MARKDOWN] files with [markdownlint] successfully - (0.64s)[0m (expand for details)
 - Using [markdownlint v0.48.0] https://megalinter.io/9.5.0/descriptors/markdown_markdownlint
 - MegaLinter key: [MARKDOWN_MARKDOWNLINT]
 - Rules config: [.markdownlint.json]
-- Number of files analyzed: [6]
+- Number of files analyzed: [7]
 - CWD: [/github/workspace]
-- Command: [markdownlint --fix -c /action/lib/.automation/.markdownlint.json .github/release-notes-instructions.md README.md docs/accuracy_upgrades.md docs/advanced_result_diagnostics.md docs/goal_state_space.md docs/result_improvement_extensions.md]
+- Command: [markdownlint --fix -c /action/lib/.automation/.markdownlint.json .github/release-notes-instructions.md README.md docs/accuracy_upgrades.md docs/advanced_result_diagnostics.md docs/goal_state_space.md docs/recommended_final_result_protocol.md docs/res...(truncated)]
 ::endgroup::
-::group::[32m✅ Linted [MARKDOWN] files with [markdown-table-formatter] successfully - (0.27s)[0m (expand for details)
+::group::[32m✅ Linted [MARKDOWN] files with [markdown-table-formatter] successfully - (0.2s)[0m (expand for details)
 - Using [markdown-table-formatter v1.7.0] https://megalinter.io/9.5.0/descriptors/markdown_markdown_table_formatter
 - MegaLinter key: [MARKDOWN_MARKDOWN_TABLE_FORMATTER]
 - Rules config: identified by [markdown-table-formatter]
-- Number of files analyzed: [6]
+- Number of files analyzed: [7]
 - CWD: [/github/workspace]
-- Command: [markdown-table-formatter .github/release-notes-instructions.md README.md docs/accuracy_upgrades.md docs/advanced_result_diagnostics.md docs/goal_state_space.md docs/result_improvement_extensions.md]
+- Command: [markdown-table-formatter .github/release-notes-instructions.md README.md docs/accuracy_upgrades.md docs/advanced_result_diagnostics.md docs/goal_state_space.md docs/recommended_final_result_protocol.md docs/result_improvement_extensions.md]
 ::endgroup::
 ::group::[32m✅ Linted [PYTHON] files with [ruff] successfully - (0.32s)[0m (expand for details)
 - Using [ruff v0.15.13] https://megalinter.io/9.5.0/descriptors/python_ruff
 - MegaLinter key: [PYTHON_RUFF]
 - Rules config: [.ruff.toml]
-- Number of files analyzed: [134]
+- Number of files analyzed: [142]
 - CWD: [/github/workspace]
 - Command: [ruff check --fix --config /action/lib/.automation/.ruff.toml .github/actions/download-pfeiffer-foster/install_rclone.py .github/actions/download-pfeiffer-foster/normalize_dataset.py .github/actions/ensure-pfeiffer-foster-dataset/validate_dataset.py s...(truncated)]
 ::endgroup::
-::group::[32m✅ Linted [REPOSITORY] files with [checkov] successfully - (20.85s)[0m (expand for details)
+::group::[32m✅ Linted [REPOSITORY] files with [checkov] successfully - (18.1s)[0m (expand for details)
 - Using [checkov v3.2.529] https://megalinter.io/9.5.0/descriptors/repository_checkov
 - MegaLinter key: [REPOSITORY_CHECKOV]
 - Rules config: [/github/workspace/.checkov.yml]
 - CWD: [/github/workspace]
 - Command: [checkov --directory . --config-file /github/workspace/.checkov.yml]
 ::endgroup::
-::group::[32m✅ Linted [REPOSITORY] files with [gitleaks] successfully - (2.42s)[0m (expand for details)
+::group::[32m✅ Linted [REPOSITORY] files with [gitleaks] successfully - (1.69s)[0m (expand for details)
 - Using [gitleaks v8.30.1] https://megalinter.io/9.5.0/descriptors/repository_gitleaks
 - MegaLinter key: [REPOSITORY_GITLEAKS]
 - Rules config: [.gitleaks.toml]
@@ -142,42 +142,42 @@ Processing linters on [4] parallel cores… (can be decreased with variable PARA
 - CWD: [/github/workspace]
 - Command: [git diff --check]
 ::endgroup::
-::group::[32m✅ Linted [REPOSITORY] files with [osv-scanner] successfully - (0.46s)[0m (expand for details)
+::group::[32m✅ Linted [REPOSITORY] files with [osv-scanner] successfully - (0.47s)[0m (expand for details)
 - Using [osv-scanner v2.3.8] https://megalinter.io/9.5.0/descriptors/repository_osv_scanner
 - MegaLinter key: [REPOSITORY_OSV_SCANNER]
 - Rules config: identified by [osv-scanner]
 - CWD: [/github/workspace]
 - Command: [osv-scanner scan source --recursive .]
 ::endgroup::
-::group::[32m✅ Linted [REPOSITORY] files with [secretlint] successfully - (1.08s)[0m (expand for details)
+::group::[32m✅ Linted [REPOSITORY] files with [secretlint] successfully - (0.95s)[0m (expand for details)
 - Using [secretlint v11.7.1] https://megalinter.io/9.5.0/descriptors/repository_secretlint
 - MegaLinter key: [REPOSITORY_SECRETLINT]
 - Rules config: [.secretlintrc.json]
 - CWD: [/github/workspace]
 - Command: [secretlint --secretlintrc /action/lib/.automation/.secretlintrc.json --secretlintignore .gitignore **/*]
 ::endgroup::
-::group::[32m✅ Linted [REPOSITORY] files with [syft] successfully - (2.43s)[0m (expand for details)
+::group::[32m✅ Linted [REPOSITORY] files with [syft] successfully - (1.97s)[0m (expand for details)
 - Using [syft v1.44.0] https://megalinter.io/9.5.0/descriptors/repository_syft
 - MegaLinter key: [REPOSITORY_SYFT]
 - Rules config: identified by [syft]
 - CWD: [/github/workspace]
 - Command: [syft scan .]
 ::endgroup::
-::group::[32m✅ Linted [REPOSITORY] files with [trivy-sbom] successfully - (0.63s)[0m (expand for details)
+::group::[32m✅ Linted [REPOSITORY] files with [trivy-sbom] successfully - (0.45s)[0m (expand for details)
 - Using [trivy-sbom v0.70.0] https://megalinter.io/9.5.0/descriptors/repository_trivy_sbom
 - MegaLinter key: [REPOSITORY_TRIVY_SBOM]
 - Rules config: identified by [trivy-sbom]
 - CWD: [/github/workspace]
 - Command: [trivy fs --format cyclonedx .]
 ::endgroup::
-::group::[32m✅ Linted [REPOSITORY] files with [trufflehog] successfully - (5.16s)[0m (expand for details)
+::group::[32m✅ Linted [REPOSITORY] files with [trufflehog] successfully - (3.6s)[0m (expand for details)
 - Using [trufflehog v3.95.3] https://megalinter.io/9.5.0/descriptors/repository_trufflehog
 - MegaLinter key: [REPOSITORY_TRUFFLEHOG]
 - Rules config: identified by [trufflehog]
 - CWD: [/github/workspace]
 - Command: [trufflehog filesystem . --fail --only-verified --no-update --exclude-paths=/action/lib/.automation/.trufflehogignore]
 ::endgroup::
-::group::[32m✅ Linted [YAML] files with [prettier] successfully - (0.54s)[0m (expand for details)
+::group::[32m✅ Linted [YAML] files with [prettier] successfully - (0.45s)[0m (expand for details)
 - Using [prettier v3.8.3] https://megalinter.io/9.5.0/descriptors/yaml_prettier
 - MegaLinter key: [YAML_PRETTIER]
 - Rules config: identified by [prettier]
@@ -185,7 +185,7 @@ Processing linters on [4] parallel cores… (can be decreased with variable PARA
 - CWD: [/github/workspace]
 - Command: [prettier --write .checkov.yml .github/actions/download-pfeiffer-foster/action.yml .github/actions/ensure-pfeiffer-foster-dataset/action.yml .github/dependabot.yml .mega-linter.yml]
 ::endgroup::
-::group::[32m✅ Linted [YAML] files with [v8r] successfully - (5.77s)[0m (expand for details)
+::group::[32m✅ Linted [YAML] files with [v8r] successfully - (4.01s)[0m (expand for details)
 - Using [v8r v6.0.0] https://megalinter.io/9.5.0/descriptors/yaml_v8r
 - MegaLinter key: [YAML_V8R]
 - Rules config: identified by [v8r]
@@ -193,7 +193,7 @@ Processing linters on [4] parallel cores… (can be decreased with variable PARA
 - CWD: [/github/workspace]
 - Command: [v8r --ignore-errors .checkov.yml .github/actions/download-pfeiffer-foster/action.yml .github/actions/ensure-pfeiffer-foster-dataset/action.yml .github/dependabot.yml .mega-linter.yml]
 ::endgroup::
-::group::[32m✅ Linted [YAML] files with [yamllint] successfully - (0.47s)[0m (expand for details)
+::group::[32m✅ Linted [YAML] files with [yamllint] successfully - (0.39s)[0m (expand for details)
 - Using [yamllint v1.38.0] https://megalinter.io/9.5.0/descriptors/yaml_yamllint
 - MegaLinter key: [YAML_YAMLLINT]
 - Rules config: [.yamllint.yml]
@@ -201,29 +201,29 @@ Processing linters on [4] parallel cores… (can be decreased with variable PARA
 - CWD: [/github/workspace]
 - Command: [yamllint --format standard -c /action/lib/.automation/.yamllint.yml .checkov.yml .github/actions/download-pfeiffer-foster/action.yml .github/actions/ensure-pfeiffer-foster-dataset/action.yml .github/dependabot.yml .mega-linter.yml]
 ::endgroup::
-[GitHub Comment Reporter] Posted summary as comment on IPS-Stuttgart/HippoReplayIMM #PR76
+[GitHub Comment Reporter] Posted summary as comment on IPS-Stuttgart/HippoReplayIMM #PR87
 [MARKDOWN_SUMMARY Reporter] Generated MARKDOWN_SUMMARY report: /github/workspace/megalinter-reports/megalinter-report.md
-[MARKDOWN_SUMMARY Reporter] Also appended to GITHUB_STEP_SUMMARY: /github/file_commands/step_summary_9e12f909-5731-4889-a5b7-0bf18932919c
+[MARKDOWN_SUMMARY Reporter] Also appended to GITHUB_STEP_SUMMARY: /github/file_commands/step_summary_c0b44e27-774a-4c66-b430-2b738ad9cd9f
 
 +----SUMMARY----+--------------------------+---------------+-------+-------+--------+----------+--------------+
 | Descriptor    | Linter                   | Mode          | Files | Fixed | Errors | Warnings | Elapsed time |
 +---------------+--------------------------+---------------+-------+-------+--------+----------+--------------+
 | ✅ JSON       | prettier                 | list_of_files |     1 |     0 |      0 |        0 | 0.3s         |
-| ✅ JSON       | v8r                      | list_of_files |     1 |       |      0 |        0 | 2.24s        |
-| ✅ MARKDOWN   | markdownlint             | list_of_files |     6 |     0 |      0 |        0 | 0.83s        |
-| ✅ MARKDOWN   | markdown-table-formatter | list_of_files |     6 |     1 |      0 |        0 | 0.27s        |
-| ✅ PYTHON     | ruff                     | list_of_files |   134 |     0 |      0 |        0 | 0.32s        |
-| ✅ REPOSITORY | checkov                  | project       |   n/a |       |      0 |        0 | 20.85s       |
-| ✅ REPOSITORY | gitleaks                 | project       |   n/a |       |      0 |        0 | 2.42s        |
+| ✅ JSON       | v8r                      | list_of_files |     1 |       |      0 |        0 | 1.71s        |
+| ✅ MARKDOWN   | markdownlint             | list_of_files |     7 |     0 |      0 |        0 | 0.64s        |
+| ✅ MARKDOWN   | markdown-table-formatter | list_of_files |     7 |     0 |      0 |        0 | 0.2s         |
+| ✅ PYTHON     | ruff                     | list_of_files |   142 |     1 |      0 |        0 | 0.32s        |
+| ✅ REPOSITORY | checkov                  | project       |   n/a |       |      0 |        0 | 18.1s        |
+| ✅ REPOSITORY | gitleaks                 | project       |   n/a |       |      0 |        0 | 1.69s        |
 | ✅ REPOSITORY | git_diff                 | project       |   n/a |       |      0 |        0 | 0.01s        |
-| ✅ REPOSITORY | osv-scanner              | project       |   n/a |       |      0 |        0 | 0.46s        |
-| ✅ REPOSITORY | secretlint               | project       |   n/a |       |      0 |        0 | 1.08s        |
-| ✅ REPOSITORY | syft                     | project       |   n/a |       |      0 |        0 | 2.43s        |
-| ✅ REPOSITORY | trivy-sbom               | project       |   n/a |       |      0 |        0 | 0.63s        |
-| ✅ REPOSITORY | trufflehog               | project       |   n/a |       |      0 |        0 | 5.16s        |
-| ✅ YAML       | prettier                 | list_of_files |     5 |     0 |      0 |        0 | 0.54s        |
-| ✅ YAML       | v8r                      | list_of_files |     5 |       |      0 |        0 | 5.77s        |
-| ✅ YAML       | yamllint                 | list_of_files |     5 |       |      0 |        0 | 0.47s        |
+| ✅ REPOSITORY | osv-scanner              | project       |   n/a |       |      0 |        0 | 0.47s        |
+| ✅ REPOSITORY | secretlint               | project       |   n/a |       |      0 |        0 | 0.95s        |
+| ✅ REPOSITORY | syft                     | project       |   n/a |       |      0 |        0 | 1.97s        |
+| ✅ REPOSITORY | trivy-sbom               | project       |   n/a |       |      0 |        0 | 0.45s        |
+| ✅ REPOSITORY | trufflehog               | project       |   n/a |       |      0 |        0 | 3.6s         |
+| ✅ YAML       | prettier                 | list_of_files |     5 |     0 |      0 |        0 | 0.45s        |
+| ✅ YAML       | v8r                      | list_of_files |     5 |       |      0 |        0 | 4.01s        |
+| ✅ YAML       | yamllint                 | list_of_files |     5 |       |      0 |        0 | 0.39s        |
 +---------------+--------------------------+---------------+-------+-------+--------+----------+--------------+
 
 [34m📣 **MegaLinter 9.5.0 is out!** Discover the new features and security recommendations in the [release announcement](https://github.com/oxsecurity/megalinter/issues/7835). (Skip this info by defining `SECURITY_SUGGESTIONS: false`)[0m

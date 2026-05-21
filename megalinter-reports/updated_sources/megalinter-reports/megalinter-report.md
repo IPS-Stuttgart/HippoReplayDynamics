@@ -5,21 +5,21 @@
 | Descriptor  |                                               Linter                                                |Files|Fixed|Errors|Warnings|Elapsed time|
 |-------------|-----------------------------------------------------------------------------------------------------|----:|----:|-----:|-------:|-----------:|
 |✅ JSON      |[prettier](https://megalinter.io/9.5.0/descriptors/json_prettier)                                    |    1|    0|     0|       0|        0.3s|
-|✅ JSON      |[v8r](https://megalinter.io/9.5.0/descriptors/json_v8r)                                              |    1|     |     0|       0|       2.24s|
-|✅ MARKDOWN  |[markdownlint](https://megalinter.io/9.5.0/descriptors/markdown_markdownlint)                        |    6|    0|     0|       0|       0.83s|
-|✅ MARKDOWN  |[markdown-table-formatter](https://megalinter.io/9.5.0/descriptors/markdown_markdown_table_formatter)|    6|    1|     0|       0|       0.27s|
-|✅ PYTHON    |[ruff](https://megalinter.io/9.5.0/descriptors/python_ruff)                                          |  134|    0|     0|       0|       0.32s|
-|✅ REPOSITORY|[checkov](https://megalinter.io/9.5.0/descriptors/repository_checkov)                                |  yes|     |    no|      no|      20.85s|
-|✅ REPOSITORY|[gitleaks](https://megalinter.io/9.5.0/descriptors/repository_gitleaks)                              |  yes|     |    no|      no|       2.42s|
+|✅ JSON      |[v8r](https://megalinter.io/9.5.0/descriptors/json_v8r)                                              |    1|     |     0|       0|       1.71s|
+|✅ MARKDOWN  |[markdownlint](https://megalinter.io/9.5.0/descriptors/markdown_markdownlint)                        |    7|    0|     0|       0|       0.64s|
+|✅ MARKDOWN  |[markdown-table-formatter](https://megalinter.io/9.5.0/descriptors/markdown_markdown_table_formatter)|    7|    0|     0|       0|        0.2s|
+|✅ PYTHON    |[ruff](https://megalinter.io/9.5.0/descriptors/python_ruff)                                          |  142|    1|     0|       0|       0.32s|
+|✅ REPOSITORY|[checkov](https://megalinter.io/9.5.0/descriptors/repository_checkov)                                |  yes|     |    no|      no|       18.1s|
+|✅ REPOSITORY|[gitleaks](https://megalinter.io/9.5.0/descriptors/repository_gitleaks)                              |  yes|     |    no|      no|       1.69s|
 |✅ REPOSITORY|[git_diff](https://megalinter.io/9.5.0/descriptors/repository_git_diff)                              |  yes|     |    no|      no|       0.01s|
-|✅ REPOSITORY|[osv-scanner](https://megalinter.io/9.5.0/descriptors/repository_osv_scanner)                        |  yes|     |    no|      no|       0.46s|
-|✅ REPOSITORY|[secretlint](https://megalinter.io/9.5.0/descriptors/repository_secretlint)                          |  yes|     |    no|      no|       1.08s|
-|✅ REPOSITORY|[syft](https://megalinter.io/9.5.0/descriptors/repository_syft)                                      |  yes|     |    no|      no|       2.43s|
-|✅ REPOSITORY|[trivy-sbom](https://megalinter.io/9.5.0/descriptors/repository_trivy_sbom)                          |  yes|     |    no|      no|       0.63s|
-|✅ REPOSITORY|[trufflehog](https://megalinter.io/9.5.0/descriptors/repository_trufflehog)                          |  yes|     |    no|      no|       5.16s|
-|✅ YAML      |[prettier](https://megalinter.io/9.5.0/descriptors/yaml_prettier)                                    |    5|    0|     0|       0|       0.54s|
-|✅ YAML      |[v8r](https://megalinter.io/9.5.0/descriptors/yaml_v8r)                                              |    5|     |     0|       0|       5.77s|
-|✅ YAML      |[yamllint](https://megalinter.io/9.5.0/descriptors/yaml_yamllint)                                    |    5|     |     0|       0|       0.47s|
+|✅ REPOSITORY|[osv-scanner](https://megalinter.io/9.5.0/descriptors/repository_osv_scanner)                        |  yes|     |    no|      no|       0.47s|
+|✅ REPOSITORY|[secretlint](https://megalinter.io/9.5.0/descriptors/repository_secretlint)                          |  yes|     |    no|      no|       0.95s|
+|✅ REPOSITORY|[syft](https://megalinter.io/9.5.0/descriptors/repository_syft)                                      |  yes|     |    no|      no|       1.97s|
+|✅ REPOSITORY|[trivy-sbom](https://megalinter.io/9.5.0/descriptors/repository_trivy_sbom)                          |  yes|     |    no|      no|       0.45s|
+|✅ REPOSITORY|[trufflehog](https://megalinter.io/9.5.0/descriptors/repository_trufflehog)                          |  yes|     |    no|      no|        3.6s|
+|✅ YAML      |[prettier](https://megalinter.io/9.5.0/descriptors/yaml_prettier)                                    |    5|    0|     0|       0|       0.45s|
+|✅ YAML      |[v8r](https://megalinter.io/9.5.0/descriptors/yaml_v8r)                                              |    5|     |     0|       0|       4.01s|
+|✅ YAML      |[yamllint](https://megalinter.io/9.5.0/descriptors/yaml_yamllint)                                    |    5|     |     0|       0|       0.39s|
 
 
 ### Notices

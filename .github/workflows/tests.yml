@@ -114,7 +114,10 @@ jobs:
           python -m pytest --rootdir . -v \
             tests/test_pyrecest_smoke.py \
             tests/test_pyrecest_goal_particle_proposals.py \
-            tests/test_pyrecest_duration.py
+            tests/test_pyrecest_duration.py \
+            tests/test_models.py::test_pyrecest_goal_particle_model_scores_synthetic_event \
+            tests/test_models.py::test_pyrecest_goal_particle_model_uses_position_proposal_when_available \
+            tests/test_models.py::test_pyrecest_goal_particle_imm_model_scores_synthetic_event
         env:
           PYTHONPATH: ${{ github.workspace }}/src
 

@@ -144,7 +144,7 @@ def _score_state_space_duration_with_occupancy(
             self.config.momentum_initial_sigma_cm_sqrt_s,
             durations[0] if len(durations) else float(emissions.dt),
         )
-        decays = _duration_adjusted_decays(self.config.momentum_velocity_decay, durations, float(emissions.dt))
+        decays = _duration_adjusted_decays(self.config, durations, float(emissions.dt))
         time_scales = _time_scales(durations)
         logp, trajectory, masses = _score_momentum_duration(
             ss,
@@ -193,7 +193,7 @@ def _score_state_space_duration_with_occupancy(
             self.config.momentum_initial_sigma_cm_sqrt_s,
             durations[0] if len(durations) else float(emissions.dt),
         )
-        decays = _duration_adjusted_decays(self.config.momentum_velocity_decay, durations, float(emissions.dt))
+        decays = _duration_adjusted_decays(self.config, durations, float(emissions.dt))
         time_scales = _time_scales(durations)
         logp, trajectory, mode_post, masses = _score_imm_duration(
             ss,
@@ -248,6 +248,7 @@ def _score_state_space_duration_with_occupancy(
         "state_space_momentum_sigma_cm_sqrt_s": float(self.config.momentum_sigma_cm_sqrt_s),
         "state_space_momentum_initial_sigma_cm_sqrt_s": float(self.config.momentum_initial_sigma_cm_sqrt_s),
         "state_space_momentum_velocity_decay": float(self.config.momentum_velocity_decay),
+        "state_space_momentum_velocity_decay_tau_s": float(self.config.momentum_velocity_decay_tau_s),
         "state_space_valid_occupancy_threshold_s": float(self.config.valid_occupancy_threshold_s),
         "state_space_transition_sigma_cm": float(transition_sigma_cm),
         "mean_trajectory_posterior_entropy": ss._mean_entropy(trajectory),
@@ -305,13 +306,28 @@ def _representative_sigma(sigma_cm_sqrt_s: float, durations: np.ndarray, fallbac
     return _per_bin_sigma(sigma_cm_sqrt_s, dt)
 
 
-def _duration_adjusted_decays(decay: float, durations: np.ndarray, reference_dt: float) -> np.ndarray:
-    decay = float(decay)
-    if not np.isfinite(decay) or decay < 0.0:
-        raise ValueError("momentum_velocity_decay must be finite and nonnegative")
+def _duration_adjusted_decays(
+    config_or_decay: object,
+    durations: np.ndarray,
+    reference_dt: float,
+) -> np.ndarray:
     reference_dt = float(reference_dt)
     if not np.isfinite(reference_dt) or reference_dt <= 0.0:
         raise ValueError("reference dt must be finite and positive")
+
+    durations = np.asarray(durations, dtype=float)
+    if hasattr(config_or_decay, "momentum_velocity_decay"):
+        tau_s = float(getattr(config_or_decay, "momentum_velocity_decay_tau_s", 0.0))
+        if not np.isfinite(tau_s) or tau_s < 0.0:
+            raise ValueError("momentum_velocity_decay_tau_s must be finite and nonnegative")
+        if tau_s > 0.0:
+            return np.asarray(np.exp(-durations / tau_s), dtype=float)
+        decay = float(getattr(config_or_decay, "momentum_velocity_decay"))
+    else:
+        decay = float(config_or_decay)
+
+    if not np.isfinite(decay) or decay < 0.0:
+        raise ValueError("momentum_velocity_decay must be finite and nonnegative")
     return np.asarray([decay ** (float(duration) / reference_dt) for duration in durations], dtype=float)
 
 

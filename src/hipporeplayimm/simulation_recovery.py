@@ -9,10 +9,16 @@ from typing import Iterable
 
 import numpy as np
 import pandas as pd
-from scipy.special import gammaln, logsumexp
+from scipy.special import logsumexp
 
 from .data import ReplaySession, load_replay_session
-from .encoding import EncodingConfig, EncodingModel, LogEmissionTensor, fit_place_field_encoding
+from .encoding import (
+    EncodingConfig,
+    EncodingModel,
+    LogEmissionTensor,
+    _poisson_log_emissions,
+    fit_place_field_encoding,
+)
 from .models import CandidateKinematicModel, RandomModel, StationaryModel
 from .position_validation import (
     VALIDATED_POSITION_BIN_SIZE_CM,
@@ -63,6 +69,8 @@ class SimulationRecoveryConfig:
     random_seed: int = 1
     time_bin_s: float = 0.003
     spike_rate_scale: float = 1.0
+    likelihood_temperature: float = 1.0
+    negative_binomial_overdispersion: float = 0.0
     encoding: EncodingConfig = field(
         default_factory=lambda: EncodingConfig(
             bin_size_cm=VALIDATED_POSITION_BIN_SIZE_CM,
@@ -145,6 +153,8 @@ def run_session_simulation_recovery(
                 dt=config.time_bin_s,
                 rng=rng,
                 spike_rate_scale=config.spike_rate_scale,
+                likelihood_temperature=config.likelihood_temperature,
+                negative_binomial_overdispersion=config.negative_binomial_overdispersion,
                 state_space=config.state_space,
             )
             expected_model = expected_scoring_model(true_model)
@@ -184,6 +194,10 @@ def run_session_simulation_recovery(
                         "runtime_s": float(time.perf_counter() - start),
                         "error": "",
                         "time_bin_s": float(config.time_bin_s),
+                        "likelihood_temperature": float(config.likelihood_temperature),
+                        "negative_binomial_overdispersion": float(
+                            config.negative_binomial_overdispersion
+                        ),
                         "spike_rate_scale": float(config.spike_rate_scale),
                         "bin_size_cm": float(config.encoding.bin_size_cm),
                         "smoothing_sigma_bins": float(config.encoding.smoothing_sigma_bins),
@@ -218,6 +232,10 @@ def run_session_simulation_recovery(
                             "runtime_s": float(time.perf_counter() - start),
                             "error": f"{type(exc).__name__}: {exc}",
                             "time_bin_s": float(config.time_bin_s),
+                            "likelihood_temperature": float(config.likelihood_temperature),
+                            "negative_binomial_overdispersion": float(
+                                config.negative_binomial_overdispersion
+                            ),
                             "spike_rate_scale": float(config.spike_rate_scale),
                             "bin_size_cm": float(config.encoding.bin_size_cm),
                             "smoothing_sigma_bins": float(config.encoding.smoothing_sigma_bins),
@@ -245,6 +263,8 @@ def simulate_replay_event(
     dt: float,
     rng: np.random.Generator,
     spike_rate_scale: float = 1.0,
+    likelihood_temperature: float = 1.0,
+    negative_binomial_overdispersion: float = 0.0,
     state_space: StateSpaceDecoderConfig | None = None,
 ) -> tuple[LogEmissionTensor, np.ndarray]:
     if n_time <= 0:
@@ -256,7 +276,17 @@ def simulate_replay_event(
     for time_index, bin_index in enumerate(path):
         expected = encoding.rates_hz[:, int(bin_index)] * dt * spike_rate_scale
         counts[time_index] = rng.poisson(np.clip(expected, 0.0, None))
-    return emissions_from_counts(encoding, counts, dt=dt, spike_rate_scale=spike_rate_scale), path
+    return (
+        emissions_from_counts(
+            encoding,
+            counts,
+            dt=dt,
+            spike_rate_scale=spike_rate_scale,
+            likelihood_temperature=likelihood_temperature,
+            negative_binomial_overdispersion=negative_binomial_overdispersion,
+        ),
+        path,
+    )
 
 
 def simulate_latent_path(
@@ -308,6 +338,8 @@ def emissions_from_counts(
     *,
     dt: float,
     spike_rate_scale: float = 1.0,
+    likelihood_temperature: float = 1.0,
+    negative_binomial_overdispersion: float = 0.0,
 ) -> LogEmissionTensor:
     spike_counts = np.asarray(counts, dtype=int)
     if spike_rate_scale <= 0.0:
@@ -316,10 +348,14 @@ def emissions_from_counts(
         raise ValueError("counts must be a two-dimensional array")
     if spike_counts.shape[1] != encoding.n_cells:
         raise ValueError("counts columns must match encoding.n_cells")
-    expected = encoding.rates_hz * dt * spike_rate_scale
-    log_expected = np.log(np.maximum(expected, np.finfo(float).tiny))
-    log_likelihood = spike_counts @ log_expected - expected.sum(axis=0)[None, :]
-    log_likelihood -= gammaln(spike_counts + 1).sum(axis=1)[:, None]
+    log_likelihood = _poisson_log_emissions(
+        spike_counts,
+        encoding.rates_hz,
+        dt,
+        spike_rate_scale=spike_rate_scale,
+        likelihood_temperature=likelihood_temperature,
+        negative_binomial_overdispersion=negative_binomial_overdispersion,
+    )
     times = (np.arange(spike_counts.shape[0], dtype=float) + 0.5) * dt
     return LogEmissionTensor(
         log_likelihood=log_likelihood,
@@ -602,6 +638,8 @@ def _settings(
         "events_per_model": config.events_per_model,
         "random_seed": config.random_seed,
         "spike_rate_scale": config.spike_rate_scale,
+        "likelihood_temperature": config.likelihood_temperature,
+        "negative_binomial_overdispersion": config.negative_binomial_overdispersion,
         "time_bin_s": config.time_bin_s,
         "encoding": asdict(config.encoding),
         "state_space": asdict(config.state_space),

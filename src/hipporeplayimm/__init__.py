@@ -27,6 +27,7 @@ from .clusterless import (
 )
 from .data import ReplaySession, load_open_field_sessions
 from .duration_dynamics import apply_duration_dynamics_patch as _apply_duration_dynamics_patch
+from .duration_occupancy import apply_duration_occupancy_patch as _apply_duration_occupancy_patch
 from .encoding import EncodingConfig, EncodingModel, build_emissions, fit_place_field_encoding
 from .evidence_reporting import patch_simulation_recovery_module as _patch_simulation_recovery_module
 from .goal_state_space import GoalStateSpaceReplayModel
@@ -105,6 +106,7 @@ def apply_runtime_patches() -> None:
     _apply_ground_truth_candidate_support_patch()
     _apply_duration_dynamics_patch()
     _apply_state_space_imm_duration_patch()
+    _apply_duration_occupancy_patch()
     _synchronize_duration_patched_emission_builders()
     _patch_simulation_recovery_module(_simulation_recovery)
 

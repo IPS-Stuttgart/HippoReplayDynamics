@@ -49,6 +49,8 @@ class ObservationSweepConfig:
     rate_floor_hz: tuple[float, ...] = (_DEFAULT_ENCODING.rate_floor_hz,)
     time_bin_ms: tuple[float, ...] = (3.0,)
     spike_rate_scales: tuple[float, ...] = (1.0,)
+    likelihood_temperatures: tuple[float, ...] = (1.0,)
+    negative_binomial_overdispersions: tuple[float, ...] = (0.0,)
     decode_bin_s: float = VALIDATED_POSITION_DECODE_BIN_S
     n_folds: int = 5
     max_windows_per_session: int | None = None
@@ -106,6 +108,8 @@ def observation_parameter_grid(config: ObservationSweepConfig) -> list[dict[str,
             config.rate_floor_hz,
             config.time_bin_ms,
             config.spike_rate_scales,
+            config.likelihood_temperatures,
+            config.negative_binomial_overdispersions,
         )
     ):
         (
@@ -116,6 +120,8 @@ def observation_parameter_grid(config: ObservationSweepConfig) -> list[dict[str,
             rate_floor_hz,
             time_bin_ms,
             spike_rate_scale,
+            likelihood_temperature,
+            negative_binomial_overdispersion,
         ) = values
         rows.append(
             {
@@ -128,6 +134,10 @@ def observation_parameter_grid(config: ObservationSweepConfig) -> list[dict[str,
                 "time_bin_ms": float(time_bin_ms),
                 "time_bin_s": float(time_bin_ms) / 1000.0,
                 "spike_rate_scale": float(spike_rate_scale),
+                "emission_likelihood_temperature": float(likelihood_temperature),
+                "emission_negative_binomial_overdispersion": float(
+                    negative_binomial_overdispersion
+                ),
             }
         )
     return rows
@@ -295,6 +305,10 @@ def _run_simulation_recovery_for_session(
         random_seed=config.random_seed,
         time_bin_s=float(params["time_bin_s"]),
         spike_rate_scale=float(params["spike_rate_scale"]),
+        likelihood_temperature=float(params["emission_likelihood_temperature"]),
+        negative_binomial_overdispersion=float(
+            params["emission_negative_binomial_overdispersion"]
+        ),
         encoding=encoding,
         continue_on_error=config.simulation_continue_on_error,
     )
@@ -354,12 +368,17 @@ def _validate_config(config: ObservationSweepConfig) -> None:
         "rate_floor_hz",
         "time_bin_ms",
         "spike_rate_scales",
+        "likelihood_temperatures",
     ):
         values = getattr(config, name)
         if not values:
             raise ValueError(f"{name} must contain at least one value")
         if any(float(value) <= 0.0 for value in values):
             raise ValueError(f"{name} values must be positive")
+    if not config.negative_binomial_overdispersions:
+        raise ValueError("negative_binomial_overdispersions must contain at least one value")
+    if any(float(value) < 0.0 for value in config.negative_binomial_overdispersions):
+        raise ValueError("negative_binomial_overdispersions values must be nonnegative")
     if config.n_folds <= 0:
         raise ValueError("n_folds must be positive")
     if config.decode_bin_s <= 0.0:

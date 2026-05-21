@@ -49,7 +49,11 @@ def attach_duration_metadata(em):
     em.dt=_scalar_dt(em.dt)
     return em
 
-def _ps(sig,dt): return max(float(sig)*np.sqrt(max(float(dt),np.finfo(float).tiny)),np.finfo(float).eps)
+def _ps(sig,dt):
+    s=float(sig); d=float(dt)
+    if not np.isfinite(s) or s<=0.0: raise ValueError('sigma_cm_sqrt_s must be finite and positive')
+    if not np.isfinite(d) or d<=0.0: raise ValueError('dt must be finite and positive')
+    return max(s*np.sqrt(d),np.finfo(float).eps)
 def _pss(sig,ds,dt): return np.asarray([_ps(sig,d) for d in ds],float) if len(ds) else np.empty(0)
 def _rep(sig,ds,dt): return _ps(sig,float(np.median(ds)) if len(ds) else dt)
 def _decays(v,ds,ref):

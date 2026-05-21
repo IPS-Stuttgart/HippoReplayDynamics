@@ -63,6 +63,18 @@ class BenchmarkConfig:
     pyrecest_imm_jump_fraction: float = 0.9
     pyrecest_imm_jump_velocity_decay: float = 0.25
     state_space_valid_occupancy_threshold_s: float = 0.0
+    state_space_stationary_sigma_cm: float = 2.0
+    state_space_diffusion_sigma_cm_sqrt_s: float = 85.0
+    state_space_max_step_sigma: float = 4.0
+    state_space_imm_mode_stickiness: float = 0.95
+    state_space_momentum_sigma_cm_sqrt_s: float = 85.0
+    state_space_momentum_initial_sigma_cm_sqrt_s: float = 85.0
+    state_space_momentum_velocity_decay: float = 0.95
+    state_space_momentum_candidate_top_k: int = 128
+    state_space_momentum_candidate_mass_threshold: float | None = None
+    state_space_momentum_candidate_min_k: int = 1
+    state_space_momentum_candidate_max_k: int = 0
+    state_space_momentum_predicted_candidate_top_k: int = 8
     random_seed: int = 1
     random_seeds: tuple[int, ...] | None = None
     event_epoch: str = "run"
@@ -190,11 +202,7 @@ def _score_session_split(
         # estimated without seeing those marks; train and joint emissions still
         # share this frozen train-only encoding so their train contribution is
         # subtracted under identical rate and mark-likelihood parameters.
-        clusterless_fit_session = (
-            clusterless_train_session
-            if config.encoding.use_excitatory
-            else clusterless_joint_session
-        )
+        clusterless_fit_session = clusterless_train_session
         clusterless_train_encoding = fit_clusterless_mark_encoding(
             clusterless_fit_session,
             clusterless_config,
@@ -502,6 +510,44 @@ def _benchmark_config_metadata(config: BenchmarkConfig) -> dict[str, object]:
         "state_space_valid_occupancy_threshold_s": float(
             config.state_space_valid_occupancy_threshold_s
         ),
+        "state_space_stationary_sigma_cm": float(
+            config.state_space_stationary_sigma_cm
+        ),
+        "state_space_diffusion_sigma_cm_sqrt_s": float(
+            config.state_space_diffusion_sigma_cm_sqrt_s
+        ),
+        "state_space_max_step_sigma": float(
+            config.state_space_max_step_sigma
+        ),
+        "state_space_imm_mode_stickiness": float(
+            config.state_space_imm_mode_stickiness
+        ),
+        "state_space_momentum_sigma_cm_sqrt_s": float(
+            config.state_space_momentum_sigma_cm_sqrt_s
+        ),
+        "state_space_momentum_initial_sigma_cm_sqrt_s": float(
+            config.state_space_momentum_initial_sigma_cm_sqrt_s
+        ),
+        "state_space_momentum_velocity_decay": float(
+            config.state_space_momentum_velocity_decay
+        ),
+        "state_space_momentum_candidate_top_k": int(
+            config.state_space_momentum_candidate_top_k
+        ),
+        "state_space_momentum_candidate_mass_threshold": (
+            np.nan
+            if config.state_space_momentum_candidate_mass_threshold is None
+            else float(config.state_space_momentum_candidate_mass_threshold)
+        ),
+        "state_space_momentum_candidate_min_k": int(
+            config.state_space_momentum_candidate_min_k
+        ),
+        "state_space_momentum_candidate_max_k": int(
+            config.state_space_momentum_candidate_max_k
+        ),
+        "state_space_momentum_predicted_candidate_top_k": int(
+            config.state_space_momentum_predicted_candidate_top_k
+        ),
     }
 
 
@@ -560,6 +606,31 @@ def _split_cells(cell_ids: np.ndarray, test_fraction: float, random_seed: int) -
     test = np.sort(shuffled[:n_test])
     train = np.sort(shuffled[n_test:])
     return train, test
+
+
+def _state_space_decoder_config(config: BenchmarkConfig, mode: str) -> StateSpaceDecoderConfig:
+    """Build a state-space decoder config from benchmark-level sweep knobs."""
+
+    return StateSpaceDecoderConfig(
+        mode=mode,
+        stationary_sigma_cm=float(config.state_space_stationary_sigma_cm),
+        diffusion_sigma_cm_sqrt_s=float(config.state_space_diffusion_sigma_cm_sqrt_s),
+        max_step_sigma=float(config.state_space_max_step_sigma),
+        imm_mode_stickiness=float(config.state_space_imm_mode_stickiness),
+        momentum_sigma_cm_sqrt_s=float(config.state_space_momentum_sigma_cm_sqrt_s),
+        momentum_initial_sigma_cm_sqrt_s=float(
+            config.state_space_momentum_initial_sigma_cm_sqrt_s
+        ),
+        momentum_velocity_decay=float(config.state_space_momentum_velocity_decay),
+        momentum_candidate_top_k=int(config.state_space_momentum_candidate_top_k),
+        momentum_candidate_mass_threshold=config.state_space_momentum_candidate_mass_threshold,
+        momentum_candidate_min_k=int(config.state_space_momentum_candidate_min_k),
+        momentum_candidate_max_k=int(config.state_space_momentum_candidate_max_k),
+        momentum_predicted_candidate_top_k=int(
+            config.state_space_momentum_predicted_candidate_top_k
+        ),
+        valid_occupancy_threshold_s=float(config.state_space_valid_occupancy_threshold_s),
+    )
 
 
 def _build_models(
@@ -627,14 +698,9 @@ def _build_models(
             random_seed=config.random_seed,
         ),
     }
-    if config.state_space_valid_occupancy_threshold_s > 0.0:
-        for model in available.values():
-            if isinstance(model, StateSpaceReplayModel):
-                current = model.config or StateSpaceDecoderConfig(mode=model.mode)
-                model.config = replace(
-                    current,
-                    valid_occupancy_threshold_s=config.state_space_valid_occupancy_threshold_s,
-                )
+    for model in available.values():
+        if isinstance(model, StateSpaceReplayModel):
+            model.config = _state_space_decoder_config(config, model.mode)
     return {name: available[name] for name in config.models}
 
 

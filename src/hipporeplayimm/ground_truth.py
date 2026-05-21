@@ -264,7 +264,27 @@ def compare_scores_to_ground_truth(
     pyrecest_imm_jump_fraction: float = 0.9,
     pyrecest_imm_jump_velocity_decay: float = 0.25,
     random_seed: int = 1,
+    clusterless_mark_smoothing_sigma_bins: float = 1.0,
+    clusterless_mark_prior_count: float = 1.0,
+    clusterless_mark_variance_floor: float = 1.0,
+    clusterless_rate_floor_hz: float = 1e-4,
+    clusterless_mark_likelihood: str = "local-kde",
+    clusterless_mark_kde_bandwidth: float | None = None,
+    clusterless_mark_kde_spatial_sigma_bins: float | None = None,
+    clusterless_mark_kde_max_neighbors: int = 256,
     state_space_valid_occupancy_threshold_s: float = 0.0,
+    state_space_stationary_sigma_cm: float = 2.0,
+    state_space_diffusion_sigma_cm_sqrt_s: float = 85.0,
+    state_space_max_step_sigma: float = 4.0,
+    state_space_imm_mode_stickiness: float = 0.95,
+    state_space_momentum_sigma_cm_sqrt_s: float = 85.0,
+    state_space_momentum_initial_sigma_cm_sqrt_s: float = 85.0,
+    state_space_momentum_velocity_decay: float = 0.95,
+    state_space_momentum_candidate_top_k: int = 128,
+    state_space_momentum_candidate_mass_threshold: float | None = None,
+    state_space_momentum_candidate_min_k: int = 1,
+    state_space_momentum_candidate_max_k: int = 0,
+    state_space_momentum_predicted_candidate_top_k: int = 8,
     include_bayesian_model_average: bool = True,
     bayesian_model_average_name: str = "bayesian-model-average",
 ) -> pd.DataFrame:
@@ -300,6 +320,66 @@ def compare_scores_to_ground_truth(
         "state_space_valid_occupancy_threshold_s",
         state_space_valid_occupancy_threshold_s,
     )
+    state_space_stationary_sigma_cm = _unique_float_from_column(
+        scores_frame,
+        "state_space_stationary_sigma_cm",
+        state_space_stationary_sigma_cm,
+    )
+    state_space_diffusion_sigma_cm_sqrt_s = _unique_float_from_column(
+        scores_frame,
+        "state_space_diffusion_sigma_cm_sqrt_s",
+        state_space_diffusion_sigma_cm_sqrt_s,
+    )
+    state_space_max_step_sigma = _unique_float_from_column(
+        scores_frame,
+        "state_space_max_step_sigma",
+        state_space_max_step_sigma,
+    )
+    state_space_imm_mode_stickiness = _unique_float_from_column(
+        scores_frame,
+        "state_space_imm_mode_stickiness",
+        state_space_imm_mode_stickiness,
+    )
+    state_space_momentum_sigma_cm_sqrt_s = _unique_float_from_column(
+        scores_frame,
+        "state_space_momentum_sigma_cm_sqrt_s",
+        state_space_momentum_sigma_cm_sqrt_s,
+    )
+    state_space_momentum_initial_sigma_cm_sqrt_s = _unique_float_from_column(
+        scores_frame,
+        "state_space_momentum_initial_sigma_cm_sqrt_s",
+        state_space_momentum_initial_sigma_cm_sqrt_s,
+    )
+    state_space_momentum_velocity_decay = _unique_float_from_column(
+        scores_frame,
+        "state_space_momentum_velocity_decay",
+        state_space_momentum_velocity_decay,
+    )
+    state_space_momentum_candidate_top_k = _unique_int_from_column(
+        scores_frame,
+        "state_space_momentum_candidate_top_k",
+        state_space_momentum_candidate_top_k,
+    )
+    state_space_momentum_candidate_mass_threshold = _unique_optional_float_from_column(
+        scores_frame,
+        "state_space_momentum_candidate_mass_threshold",
+        state_space_momentum_candidate_mass_threshold,
+    )
+    state_space_momentum_candidate_min_k = _unique_int_from_column(
+        scores_frame,
+        "state_space_momentum_candidate_min_k",
+        state_space_momentum_candidate_min_k,
+    )
+    state_space_momentum_candidate_max_k = _unique_int_from_column(
+        scores_frame,
+        "state_space_momentum_candidate_max_k",
+        state_space_momentum_candidate_max_k,
+    )
+    state_space_momentum_predicted_candidate_top_k = _unique_int_from_column(
+        scores_frame,
+        "state_space_momentum_predicted_candidate_top_k",
+        state_space_momentum_predicted_candidate_top_k,
+    )
 
     sessions = {session.session_id: session for session in load_open_field_sessions(root)}
     decoded_rows: list[dict[str, object]] = []
@@ -326,6 +406,28 @@ def compare_scores_to_ground_truth(
         pyrecest_imm_jump_fraction=pyrecest_imm_jump_fraction,
         pyrecest_imm_jump_velocity_decay=pyrecest_imm_jump_velocity_decay,
         state_space_valid_occupancy_threshold_s=state_space_valid_occupancy_threshold_s,
+        state_space_stationary_sigma_cm=state_space_stationary_sigma_cm,
+        state_space_diffusion_sigma_cm_sqrt_s=state_space_diffusion_sigma_cm_sqrt_s,
+        state_space_max_step_sigma=state_space_max_step_sigma,
+        state_space_imm_mode_stickiness=state_space_imm_mode_stickiness,
+        state_space_momentum_sigma_cm_sqrt_s=state_space_momentum_sigma_cm_sqrt_s,
+        state_space_momentum_initial_sigma_cm_sqrt_s=(
+            state_space_momentum_initial_sigma_cm_sqrt_s
+        ),
+        state_space_momentum_velocity_decay=state_space_momentum_velocity_decay,
+        state_space_momentum_candidate_top_k=state_space_momentum_candidate_top_k,
+        state_space_momentum_candidate_mass_threshold=state_space_momentum_candidate_mass_threshold,
+        state_space_momentum_candidate_min_k=state_space_momentum_candidate_min_k,
+        state_space_momentum_candidate_max_k=state_space_momentum_candidate_max_k,
+        state_space_momentum_predicted_candidate_top_k=state_space_momentum_predicted_candidate_top_k,
+        clusterless_mark_smoothing_sigma_bins=clusterless_mark_smoothing_sigma_bins,
+        clusterless_mark_prior_count=clusterless_mark_prior_count,
+        clusterless_mark_variance_floor=clusterless_mark_variance_floor,
+        clusterless_rate_floor_hz=clusterless_rate_floor_hz,
+        clusterless_mark_likelihood=clusterless_mark_likelihood,
+        clusterless_mark_kde_bandwidth=clusterless_mark_kde_bandwidth,
+        clusterless_mark_kde_spatial_sigma_bins=clusterless_mark_kde_spatial_sigma_bins,
+        clusterless_mark_kde_max_neighbors=clusterless_mark_kde_max_neighbors,
         random_seed=random_seed,
         models=model_names,
     )
@@ -1028,6 +1130,25 @@ def _unique_float_from_columns(
     if any(not np.isclose(value, first) for value in values[1:]):
         raise ValueError(f"{' / '.join(columns)} contains multiple values")
     return float(first)
+
+
+def _unique_optional_float_from_column(
+    frame: pd.DataFrame,
+    column: str,
+    default: float | None,
+) -> float | None:
+    values: list[float] = []
+    if column in frame.columns:
+        for value in frame[column].dropna():
+            text = str(value).strip()
+            if text:
+                values.append(float(value))
+    if not values:
+        return default
+    first = values[0]
+    if any(not np.isclose(value, first, equal_nan=True) for value in values[1:]):
+        raise ValueError(f"{column} contains multiple values")
+    return None if not np.isfinite(first) else float(first)
 
 
 def _unique_int_from_column(frame: pd.DataFrame, column: str, default: int) -> int:

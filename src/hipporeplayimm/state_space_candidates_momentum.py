@@ -23,6 +23,8 @@ def _score_momentum_candidates(
     sigma_cm: float,
     initial_sigma_cm: float,
     velocity_decay: float,
+    transition_sigmas_cm: np.ndarray | None = None,
+    velocity_decays: np.ndarray | None = None,
     valid_bin_mask: np.ndarray | None = None,
 ) -> tuple[float, np.ndarray, list[float]]:
     if emissions.n_time == 1:
@@ -30,6 +32,18 @@ def _score_momentum_candidates(
         return logp, trajectory, [0.0]
 
     masses = _candidate_log_masses(emissions.log_likelihood, candidates)
+    transition_sigmas = _transition_parameter_series(
+        transition_sigmas_cm,
+        emissions.n_time - 1,
+        sigma_cm,
+        name="transition_sigmas_cm",
+    )
+    transition_velocity_decays = _transition_parameter_series(
+        velocity_decays,
+        emissions.n_time - 1,
+        velocity_decay,
+        name="velocity_decays",
+    )
     log_pair = _init_pair_log_alpha(
         emissions.log_likelihood,
         candidates[0],
@@ -47,8 +61,8 @@ def _score_momentum_candidates(
             candidates[time_index],
             emissions.log_likelihood[time_index, candidates[time_index]],
             bin_centers,
-            sigma_cm=sigma_cm,
-            velocity_decay=velocity_decay,
+            sigma_cm=float(transition_sigmas[time_index - 1]),
+            velocity_decay=float(transition_velocity_decays[time_index - 1]),
             valid_bin_mask=valid_bin_mask,
         )
         pair_alphas.append(log_pair)
@@ -64,8 +78,8 @@ def _score_momentum_candidates(
             candidates[curr_time],
             emissions.log_likelihood[curr_time, candidates[curr_time]],
             bin_centers,
-            sigma_cm=sigma_cm,
-            velocity_decay=velocity_decay,
+            sigma_cm=float(transition_sigmas[curr_time - 1]),
+            velocity_decay=float(transition_velocity_decays[curr_time - 1]),
             valid_bin_mask=valid_bin_mask,
         )
 
@@ -78,6 +92,27 @@ def _score_momentum_candidates(
     for time_index in range(emissions.n_time):
         trajectory[time_index] -= logsumexp(trajectory[time_index])
     return logp, trajectory, masses
+
+
+def _transition_parameter_series(
+    values: np.ndarray | None,
+    n_transitions: int,
+    fallback: float,
+    *,
+    name: str,
+) -> np.ndarray:
+    """Return one scalar transition parameter per adjacent time-bin pair."""
+
+    if n_transitions <= 0:
+        return np.empty(0, dtype=float)
+    if values is None:
+        return np.full(n_transitions, float(fallback), dtype=float)
+    out = np.asarray(values, dtype=float)
+    if out.shape != (n_transitions,):
+        raise ValueError(f"{name} must contain one value per transition")
+    if not np.all(np.isfinite(out)):
+        raise ValueError(f"{name} must be finite")
+    return out
 
 
 def _init_pair_log_alpha(

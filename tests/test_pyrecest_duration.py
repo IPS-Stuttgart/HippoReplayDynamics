@@ -8,7 +8,8 @@ from hipporeplayimm.encoding import LogEmissionTensor
 from hipporeplayimm.pyrecest_models import (
     PyRecEstGoalParticleIMMModel,
     PyRecEstGoalParticleModel,
-    _interpolated_grid_values,
+    _build_grid_likelihood_lookup,
+    _grid_log_likelihood_values,
     _update_filter_from_grid_likelihood,
 )
 
@@ -75,15 +76,17 @@ def test_grid_likelihood_update_interpolates_particle_positions():
     assert np.isclose(log_marginal, 1.5)
 
 
-def test_interpolated_grid_values_falls_back_for_irregular_grids():
+def test_grid_likelihood_lookup_falls_back_for_irregular_grids():
     centers = np.array([[0.0, 0.0], [1.0, 0.0], [3.0, 0.0]])
     values = np.array([0.0, 1.0, 3.0])
+    lookup = _build_grid_likelihood_lookup(centers, "linear")
 
-    interpolated = _interpolated_grid_values(
+    assert lookup.method == "nearest"
+    interpolated = _grid_log_likelihood_values(
         np.array([[2.6, 0.0]]),
         values,
-        centers,
         cKDTree(centers),
+        lookup,
     )
 
     assert np.allclose(interpolated, [3.0])

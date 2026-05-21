@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
+import json
+from datetime import datetime, timezone
 from pathlib import Path
 
 REQUIRED_SESSION_FILES = (
@@ -9,6 +12,8 @@ REQUIRED_SESSION_FILES = (
     "Spike_Data.mat",
     "Epochs.mat",
 )
+OPTIONAL_SESSION_FILES = ("Well_Sequence.mat", "Experiment_Information.mat")
+MANIFEST_NAMES = {"MANIFEST.txt", "dataset_manifest.json"}
 
 
 def session_is_valid(session_dir: Path) -> bool:
@@ -23,6 +28,72 @@ def valid_sessions(dataset_root: Path) -> list[Path]:
         for session in dataset_root.glob("Rat*/Open*")
         if session_is_valid(session)
     )
+
+
+def _sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for block in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(block)
+    return digest.hexdigest()
+
+
+def _tracked_files(dataset_root: Path) -> list[Path]:
+    return sorted(
+        path
+        for path in dataset_root.rglob("*")
+        if path.is_file() and path.name not in MANIFEST_NAMES
+    )
+
+
+def _file_record(path: Path, dataset_root: Path) -> dict[str, object]:
+    stat = path.stat()
+    return {
+        "path": path.relative_to(dataset_root).as_posix(),
+        "size_bytes": stat.st_size,
+        "sha256": _sha256(path),
+    }
+
+
+def _session_record(session_dir: Path, dataset_root: Path) -> dict[str, object]:
+    required_files = []
+    missing_required = []
+    for name in REQUIRED_SESSION_FILES:
+        path = session_dir / name
+        if path.is_file():
+            required_files.append(_file_record(path, dataset_root))
+        else:
+            missing_required.append(name)
+    optional_files = []
+    for name in OPTIONAL_SESSION_FILES:
+        path = session_dir / name
+        if path.is_file():
+            optional_files.append(_file_record(path, dataset_root))
+    return {
+        "session": session_dir.relative_to(dataset_root).as_posix(),
+        "missing_required_files": missing_required,
+        "required_files": required_files,
+        "optional_files": optional_files,
+    }
+
+
+def _write_manifest(dataset_root: Path, files: list[Path]) -> Path:
+    sessions = valid_sessions(dataset_root)
+    manifest = {
+        "dataset_root_name": dataset_root.name,
+        "generated_at_utc": datetime.now(timezone.utc).isoformat(),
+        "session_count": len(sessions),
+        "sessions": [_session_record(session, dataset_root) for session in sessions],
+        "files": [_file_record(path, dataset_root) for path in files],
+        "total_bytes": sum(path.stat().st_size for path in files),
+    }
+    payload = json.dumps(manifest, indent=2, sort_keys=True) + "\n"
+    manifest["manifest_sha256_without_this_field"] = hashlib.sha256(
+        payload.encode("utf-8")
+    ).hexdigest()
+    target = dataset_root / "dataset_manifest.json"
+    target.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    return target
 
 
 def main() -> None:
@@ -52,22 +123,11 @@ def main() -> None:
                 "no Rat*/Open* session with the required .mat files was found."
             )
 
-    files = sorted(path for path in dataset_root.rglob("*") if path.is_file())
+    files = _tracked_files(dataset_root)
     total_bytes = sum(path.stat().st_size for path in files)
     if args.write_manifest:
-        manifest = dataset_root / "MANIFEST.txt"
-        manifest.write_text(
-            "Pfeiffer/Foster dataset cache manifest\n"
-            f"Root: {dataset_root}\n"
-            f"Valid sessions: {len(valid_sessions(dataset_root))}\n"
-            f"Files: {len(files)}\n"
-            f"Bytes: {total_bytes}\n\n"
-            + "\n".join(
-                f"{path.stat().st_size} {path.relative_to(dataset_root)}" for path in files
-            )
-            + "\n",
-            encoding="utf-8",
-        )
+        manifest_path = _write_manifest(dataset_root, files)
+        print(f"Wrote dataset manifest: {manifest_path}")
 
     print(f"Validated Pfeiffer/Foster dataset at {dataset_root}")
     print(f"Checked session(s): {', '.join(str(s.relative_to(dataset_root)) for s in sessions)}")

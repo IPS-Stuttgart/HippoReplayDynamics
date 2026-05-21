@@ -56,6 +56,7 @@ from hipporeplayimm.result_improvement_extensions import (
     ReverseTimeReplayModel,
     add_model_averaged_endpoint_columns,
     build_sorted_emissions_with_replay_calibration,
+    score_replay_model_compat,
     score_spatial_shuffle_nulls,
 )
 from hipporeplayimm.sorted_spike_state_space import SortedSpikeStateSpaceReplayModel
@@ -122,7 +123,11 @@ def _state_space_config(args: argparse.Namespace, mode: str) -> StateSpaceDecode
         momentum_initial_sigma_cm_sqrt_s=args.state_space_momentum_initial_sigma_cm_sqrt_s,
         momentum_velocity_decay=args.state_space_momentum_velocity_decay,
         momentum_candidate_top_k=args.state_space_momentum_candidate_top_k,
+        momentum_candidate_mass_threshold=args.state_space_momentum_candidate_mass_threshold,
+        momentum_candidate_min_k=args.state_space_momentum_candidate_min_k,
+        momentum_candidate_max_k=args.state_space_momentum_candidate_max_k,
         momentum_predicted_candidate_top_k=args.state_space_momentum_predicted_candidate_top_k,
+        valid_occupancy_threshold_s=args.state_space_valid_occupancy_threshold_s,
     )
 
 
@@ -260,6 +265,8 @@ def _clusterless_mark_config(args: argparse.Namespace) -> ClusterlessMarkConfig:
             bin_size_cm=args.bin_size_cm,
             smoothing_sigma_bins=args.smoothing_sigma_bins,
             min_speed_cm_s=args.min_speed_cm_s,
+            min_occupancy_s=args.min_occupancy_s,
+            rate_floor_hz=args.rate_floor_hz,
         ),
         mark_smoothing_sigma_bins=args.clusterless_mark_smoothing_sigma_bins,
         mark_prior_count=args.clusterless_mark_prior_count,
@@ -269,6 +276,7 @@ def _clusterless_mark_config(args: argparse.Namespace) -> ClusterlessMarkConfig:
         mark_kde_bandwidth=args.clusterless_mark_kde_bandwidth,
         mark_kde_spatial_sigma_bins=args.clusterless_mark_kde_spatial_sigma_bins,
         mark_kde_max_neighbors=args.clusterless_mark_kde_max_neighbors,
+        mark_group_by=args.clusterless_mark_group_by,
     )
 
 
@@ -286,6 +294,8 @@ def _score(args: argparse.Namespace) -> pd.DataFrame:
             bin_size_cm=args.bin_size_cm,
             smoothing_sigma_bins=args.smoothing_sigma_bins,
             min_speed_cm_s=args.min_speed_cm_s,
+            min_occupancy_s=args.min_occupancy_s,
+            rate_floor_hz=args.rate_floor_hz,
         ),
     )
     models = _models(args, session)
@@ -294,7 +304,11 @@ def _score(args: argparse.Namespace) -> pd.DataFrame:
     if has_clusterless:
         clusterless_encoding = fit_clusterless_mark_encoding(session, _clusterless_mark_config(args))
 
-    emissions_cfg = EmissionConfig(time_bin_s=args.time_bin_s, spike_rate_scale=args.spike_rate_scale)
+    emissions_cfg = EmissionConfig(
+        time_bin_s=args.time_bin_s,
+        spike_rate_scale=args.spike_rate_scale,
+        likelihood_temperature=args.emission_likelihood_temperature,
+    )
     sorted_calibration = ReplayEmissionCalibration(
         gain_mode=args.replay_gain_mode,
         gain_prior_count=args.replay_gain_prior_count,
@@ -325,8 +339,9 @@ def _score(args: argparse.Namespace) -> pd.DataFrame:
             emissions = clusterless_emissions if use_clusterless else sorted_emissions
             bin_centers = clusterless_encoding.bin_centers if use_clusterless and clusterless_encoding is not None else encoding.bin_centers
             assert emissions is not None
+            occupancy_s = clusterless_encoding.occupancy_s if use_clusterless and clusterless_encoding is not None else encoding.occupancy_s
             try:
-                result = model.score(emissions, bin_centers)
+                result = score_replay_model_compat(model, emissions, bin_centers, occupancy_s=occupancy_s)
                 model_name = str(result.model_name)
                 row: dict[str, object] = {
                     "status": "success",
@@ -364,6 +379,7 @@ def _score(args: argparse.Namespace) -> pd.DataFrame:
                                 observed_log_evidence=float(result.log_likelihood),
                                 n_shuffles=args.null_shuffles,
                                 random_seed=null_seed,
+                                occupancy_s=occupancy_s,
                             ).items()
                         }
                     )
@@ -396,20 +412,34 @@ def _run_settings(args: argparse.Namespace) -> dict[str, object]:
         "bin_size_cm": float(args.bin_size_cm),
         "smoothing_sigma_bins": float(args.smoothing_sigma_bins),
         "min_speed_cm_s": float(args.min_speed_cm_s),
+        "min_occupancy_s": float(args.min_occupancy_s),
+        "rate_floor_hz": float(args.rate_floor_hz),
         "time_bin_s": float(args.time_bin_s),
         "spike_rate_scale": float(args.spike_rate_scale),
+        "emission_likelihood_temperature": float(args.emission_likelihood_temperature),
         "sorted_spike_emission_model": args.sorted_spike_emission_model,
         "replay_gain_mode": args.replay_gain_mode,
         "replay_gain_prior_count": float(args.replay_gain_prior_count),
         "replay_gain_max_gain": float(args.replay_gain_max_gain),
         "negative_binomial_dispersion": float(args.negative_binomial_dispersion),
         "candidate_top_k": int(args.candidate_top_k),
+        "state_space_valid_occupancy_threshold_s": float(args.state_space_valid_occupancy_threshold_s),
+        "state_space_stationary_sigma_cm": float(args.state_space_stationary_sigma_cm),
+        "state_space_diffusion_sigma_cm_sqrt_s": float(args.state_space_diffusion_sigma_cm_sqrt_s),
+        "state_space_max_step_sigma": float(args.state_space_max_step_sigma),
         "state_space_imm_mode_stickiness_input": float(args.state_space_imm_mode_stickiness),
         "state_space_imm_switch_tau_s": float(args.state_space_imm_switch_tau_s),
         "state_space_imm_mode_stickiness_effective": _effective_state_space_imm_stickiness(args),
+        "state_space_momentum_sigma_cm_sqrt_s": float(args.state_space_momentum_sigma_cm_sqrt_s),
+        "state_space_momentum_initial_sigma_cm_sqrt_s": float(args.state_space_momentum_initial_sigma_cm_sqrt_s),
+        "state_space_momentum_velocity_decay": float(args.state_space_momentum_velocity_decay),
         "state_space_momentum_candidate_top_k": int(args.state_space_momentum_candidate_top_k),
+        "state_space_momentum_candidate_mass_threshold": "" if args.state_space_momentum_candidate_mass_threshold is None else float(args.state_space_momentum_candidate_mass_threshold),
+        "state_space_momentum_candidate_min_k": int(args.state_space_momentum_candidate_min_k),
+        "state_space_momentum_candidate_max_k": int(args.state_space_momentum_candidate_max_k),
         "state_space_momentum_predicted_candidate_top_k": int(args.state_space_momentum_predicted_candidate_top_k),
         "clusterless_mark_likelihood": args.clusterless_mark_likelihood,
+        "clusterless_mark_group_by": args.clusterless_mark_group_by,
         "clusterless_mark_smoothing_sigma_bins": float(args.clusterless_mark_smoothing_sigma_bins),
         "clusterless_mark_prior_count": float(args.clusterless_mark_prior_count),
         "clusterless_mark_variance_floor": float(args.clusterless_mark_variance_floor),
@@ -454,11 +484,16 @@ def main() -> int:
     parser.add_argument("--state-space-momentum-initial-sigma-cm-sqrt-s", type=float, default=85.0)
     parser.add_argument("--state-space-momentum-velocity-decay", type=float, default=0.95)
     parser.add_argument("--state-space-momentum-candidate-top-k", type=int, default=128)
+    parser.add_argument("--state-space-momentum-candidate-mass-threshold", type=float)
+    parser.add_argument("--state-space-momentum-candidate-min-k", type=int, default=1)
+    parser.add_argument("--state-space-momentum-candidate-max-k", type=int, default=0)
     parser.add_argument("--state-space-momentum-predicted-candidate-top-k", type=int, default=8)
+    parser.add_argument("--state-space-valid-occupancy-threshold-s", type=float, default=0.0)
     parser.add_argument("--goal-state-space-transition-sigma-cm-sqrt-s", type=float, default=85.0)
     parser.add_argument("--goal-state-space-drift-speed-cm-s", type=float, default=400.0)
     parser.add_argument("--goal-state-space-max-step-sigma", type=float, default=4.0)
     parser.add_argument("--clusterless-mark-likelihood", default="local-kde")
+    parser.add_argument("--clusterless-mark-group-by", choices=("auto", "none", "tetrode", "cell"), default="auto")
     parser.add_argument("--clusterless-mark-smoothing-sigma-bins", type=float, default=1.0)
     parser.add_argument("--clusterless-mark-prior-count", type=float, default=1.0)
     parser.add_argument("--clusterless-mark-variance-floor", type=float, default=1.0)
@@ -468,6 +503,7 @@ def main() -> int:
     parser.add_argument("--clusterless-mark-kde-max-neighbors", type=int, default=256)
     parser.add_argument("--time-bin-s", type=float, default=0.003)
     parser.add_argument("--spike-rate-scale", type=float, default=1.0)
+    parser.add_argument("--emission-likelihood-temperature", type=float, default=1.0)
     parser.add_argument("--sorted-spike-emission-model", choices=("poisson", "negative-binomial", "gamma-poisson"), default="poisson")
     parser.add_argument("--replay-gain-mode", choices=("none", "event", "cell", "event-cell"), default="none")
     parser.add_argument("--replay-gain-prior-count", type=float, default=10.0)
@@ -478,6 +514,8 @@ def main() -> int:
     parser.add_argument("--bin-size-cm", type=float, default=VALIDATED_POSITION_BIN_SIZE_CM)
     parser.add_argument("--smoothing-sigma-bins", type=float, default=VALIDATED_POSITION_SMOOTHING_SIGMA_BINS)
     parser.add_argument("--min-speed-cm-s", type=float, default=VALIDATED_POSITION_MIN_SPEED_CM_S)
+    parser.add_argument("--min-occupancy-s", type=float, default=EncodingConfig().min_occupancy_s)
+    parser.add_argument("--rate-floor-hz", type=float, default=EncodingConfig().rate_floor_hz)
     parser.add_argument("--output", default="results/model-evidence-improved")
     parser.add_argument("--continue-on-error", action="store_true")
     args = parser.parse_args()

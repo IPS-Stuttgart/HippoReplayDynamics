@@ -27,6 +27,7 @@ from .encoding import (
     EmissionConfig,
     EncodingModel,
     LogEmissionTensor,
+    _apply_likelihood_temperature,
     _poisson_log_emissions,
     _time_bin_edges,
 )
@@ -118,6 +119,8 @@ def build_sorted_emissions_with_replay_calibration(
             dispersion=float(calibration.negative_binomial_dispersion),
         )
 
+    log_likelihood = _apply_likelihood_temperature(log_likelihood, config.likelihood_temperature)
+
     emissions = LogEmissionTensor(
         log_likelihood=log_likelihood,
         spike_counts=counts,
@@ -126,6 +129,7 @@ def build_sorted_emissions_with_replay_calibration(
         cell_ids=encoding.cell_ids,
         n_spikes=int(counts.sum()),
     )
+    # Keep these fields explicit so improved evidence runs are auditable after aggregation.
     emissions.metadata = {
         "sorted_spike_emission_model": emission_model,
         "replay_gain_mode": gain_mode,
@@ -306,6 +310,57 @@ def copy_emissions_with_log_likelihood(
     return out
 
 
+def score_replay_model_compat(
+    model: ScorableReplayModel,
+    emissions: LogEmissionTensor,
+    bin_centers: np.ndarray,
+    *,
+    occupancy_s: np.ndarray | None = None,
+    candidate_indices: list[np.ndarray] | None = None,
+) -> EventScore:
+    """Score a replay model while preserving optional state-space controls.
+
+    Several wrappers used by the improved evidence script are intentionally
+    lightweight and do not inherit from ``StateSpaceReplayModel``. This helper
+    centralizes the compatibility path so direct models, wrappers, and null
+    controls all receive candidate supports and occupancy masks when they can
+    use them, while legacy models still score normally.
+    """
+
+    candidates = candidate_indices
+    if candidates is None and hasattr(model, "candidate_indices"):
+        try:
+            candidates = model.candidate_indices(emissions, bin_centers)  # type: ignore[attr-defined]
+        except TypeError:
+            candidates = model.candidate_indices(emissions)  # type: ignore[attr-defined]
+
+    kwargs: dict[str, object] = {}
+    if candidates is not None:
+        kwargs["candidate_indices"] = candidates
+    if occupancy_s is not None:
+        kwargs["occupancy_s"] = occupancy_s
+    if kwargs:
+        try:
+            return model.score(emissions, bin_centers, **kwargs)  # type: ignore[misc]
+        except TypeError as exc:
+            message = str(exc)
+            if "occupancy_s" in message and "candidate_indices" in kwargs:
+                return model.score(
+                    emissions,
+                    bin_centers,
+                    candidate_indices=kwargs["candidate_indices"],  # type: ignore[misc]
+                )
+            if "candidate_indices" in message and "occupancy_s" in kwargs:
+                return model.score(
+                    emissions,
+                    bin_centers,
+                    occupancy_s=kwargs["occupancy_s"],  # type: ignore[misc]
+                )
+            if "occupancy_s" not in message and "candidate_indices" not in message:
+                raise
+    return model.score(emissions, bin_centers)
+
+
 @dataclass
 class ReverseTimeReplayModel:
     """Wrapper that scores an existing model on the time-reversed emission sequence."""
@@ -317,13 +372,31 @@ class ReverseTimeReplayModel:
         if self.name is None:
             self.name = f"{getattr(self.base_model, 'name', 'model')}-reverse"
 
-    def score(self, emissions: LogEmissionTensor, bin_centers: np.ndarray) -> EventScore:
+    def score(
+        self,
+        emissions: LogEmissionTensor,
+        bin_centers: np.ndarray,
+        *,
+        occupancy_s: np.ndarray | None = None,
+        candidate_indices: list[np.ndarray] | None = None,
+    ) -> EventScore:
         reversed_emissions = copy_emissions_with_log_likelihood(
             emissions,
             emissions.log_likelihood,
             reverse_time=True,
         )
-        result = self.base_model.score(reversed_emissions, bin_centers)
+        reversed_candidates = (
+            None
+            if candidate_indices is None
+            else [np.asarray(curr, dtype=int).copy() for curr in candidate_indices[::-1]]
+        )
+        result = score_replay_model_compat(
+            self.base_model,
+            reversed_emissions,
+            bin_centers,
+            occupancy_s=occupancy_s,
+            candidate_indices=reversed_candidates,
+        )
         if result.trajectory_log_posterior is not None:
             result.trajectory_log_posterior = np.asarray(result.trajectory_log_posterior)[::-1].copy()
         result.model_name = str(self.name)
@@ -341,9 +414,22 @@ class BidirectionalReplayModel:
     reverse_model: ScorableReplayModel
     name: str
 
-    def score(self, emissions: LogEmissionTensor, bin_centers: np.ndarray) -> EventScore:
-        forward = self.forward_model.score(emissions, bin_centers)
-        reverse = self.reverse_model.score(emissions, bin_centers)
+    def score(
+        self,
+        emissions: LogEmissionTensor,
+        bin_centers: np.ndarray,
+        *,
+        occupancy_s: np.ndarray | None = None,
+        candidate_indices: list[np.ndarray] | None = None,
+    ) -> EventScore:
+        forward = score_replay_model_compat(
+            self.forward_model,
+            emissions,
+            bin_centers,
+            occupancy_s=occupancy_s,
+            candidate_indices=candidate_indices,
+        )
+        reverse = score_replay_model_compat(self.reverse_model, emissions, bin_centers, occupancy_s=occupancy_s)
         values = np.array([forward.log_likelihood, reverse.log_likelihood], dtype=float)
         logp = float(logsumexp(values) - np.log(2.0))
         weights = np.exp(values - logsumexp(values))
@@ -396,6 +482,7 @@ def score_spatial_shuffle_nulls(
     observed_log_evidence: float,
     n_shuffles: int,
     random_seed: int,
+    occupancy_s: np.ndarray | None = None,
 ) -> dict[str, float | int]:
     """Score spatial-bin permutation controls for one event/model pair."""
 
@@ -408,7 +495,9 @@ def score_spatial_shuffle_nulls(
         perm = rng.permutation(emissions.n_bins)
         shuffled = copy_emissions_with_log_likelihood(emissions, emissions.log_likelihood[:, perm])
         try:
-            null_values.append(float(model.score(shuffled, bin_centers).log_likelihood))
+            null_values.append(
+                float(score_replay_model_compat(model, shuffled, bin_centers, occupancy_s=occupancy_s).log_likelihood)
+            )
         except Exception:
             # Some candidate-pruned models can fail under pathological shuffles;
             # keep null diagnostics conservative and transparent.
@@ -451,7 +540,13 @@ def add_model_averaged_endpoint_columns(df: pd.DataFrame) -> pd.DataFrame:
     out["model_probability_entropy"] = np.nan
     out["model_log_evidence_margin"] = np.nan
     for _, group in out.groupby(["session", "event_index"], sort=False):
-        exact = group[group.get("evidence_comparable", False).fillna(False).astype(bool)].copy()
+        if "evidence_comparable" in group:
+            comparable = group["evidence_comparable"].fillna(False).astype(bool)
+        else:
+            # Ad-hoc CSVs produced before evidence-support columns existed are
+            # still useful for endpoint averaging; renormalize the listed rows.
+            comparable = pd.Series(True, index=group.index)
+        exact = group[comparable].copy()
         exact = exact.dropna(subset=["model_probability", "diagnostic_decoded_endpoint_x", "diagnostic_decoded_endpoint_y"])
         if exact.empty:
             continue

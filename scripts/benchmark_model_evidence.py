@@ -17,6 +17,11 @@ import numpy as np
 import pandas as pd
 from scipy.special import logsumexp
 
+from hipporeplayimm.accuracy_upgrades import (
+    bootstrap_model_win_probabilities,
+    model_probability_diagnostics,
+)
+from hipporeplayimm.advanced_result_diagnostics import add_evidence_margin_columns
 from hipporeplayimm.clusterless import (
     ClusterlessMarkConfig,
     ClusterlessStateSpaceReplayModel,
@@ -34,10 +39,6 @@ from hipporeplayimm.evidence_reporting import (
     EXACT_EVIDENCE_SUPPORT,
     TRUNCATED_EVIDENCE_SUPPORT,
     ensure_evidence_support_columns as _ensure_evidence_support_columns,
-)
-from hipporeplayimm.accuracy_upgrades import (
-    bootstrap_model_win_probabilities,
-    model_probability_diagnostics,
 )
 from hipporeplayimm.goal_state_space import GoalStateSpaceReplayModel
 from hipporeplayimm.goal_state_space_integration import (
@@ -403,17 +404,28 @@ def _score(args) -> pd.DataFrame:
                 })
                 if not args.continue_on_error:
                     raise
-    return _add_evidence_columns(pd.DataFrame(rows))
+    return _postprocess_evidence_scores(pd.DataFrame(rows))
 
 
 def _event_group_columns(df: pd.DataFrame) -> list[str]:
     """Columns that identify one comparable model-choice unit."""
 
     columns = ["session", "event_index"]
-    for optional in ("window_index", "benchmark_cell_split_index"):
+    for optional in ("window_index", "benchmark_cell_split_index", "event_window_variant"):
         if optional in df.columns:
             columns.append(optional)
     return columns
+
+
+_EVIDENCE_MARGIN_COLUMNS = (
+    "best_model_by_evidence",
+    "second_best_model_by_evidence",
+    "best_log_evidence",
+    "second_best_log_evidence",
+    "evidence_margin_to_second_best",
+    "evidence_margin_category",
+    "models_compared",
+)
 
 
 def _add_evidence_columns(df: pd.DataFrame) -> pd.DataFrame:
@@ -474,6 +486,16 @@ def _add_evidence_columns(df: pd.DataFrame) -> pd.DataFrame:
     out = pd.concat(groups, ignore_index=True)
     sort_columns = [column for column in (*group_columns, "model") if column in out.columns]
     return out.sort_values(sort_columns).reset_index(drop=True)
+
+
+def _postprocess_evidence_scores(df: pd.DataFrame) -> pd.DataFrame:
+    """Add standard evidence reporting and event-level evidence margins."""
+
+    out = _add_evidence_columns(df)
+    if out.empty:
+        return out
+    out = out.drop(columns=[column for column in _EVIDENCE_MARGIN_COLUMNS if column in out.columns])
+    return add_evidence_margin_columns(out, group_cols=_event_group_columns(out))
 
 
 def _summary(df: pd.DataFrame) -> pd.DataFrame:
@@ -556,6 +578,26 @@ def _counts(df: pd.DataFrame) -> pd.DataFrame:
     return pd.DataFrame(rows)[["comparison", "model", "events"]]
 
 
+def _evidence_margin_counts(df: pd.DataFrame) -> pd.DataFrame:
+    if df.empty or "evidence_margin_category" not in df:
+        return pd.DataFrame(columns=["evidence_margin_category", "best_model_by_evidence", "events"])
+    key_columns = _event_group_columns(df)
+    required = [*key_columns, "evidence_margin_category", "best_model_by_evidence"]
+    missing = [column for column in required if column not in df]
+    if missing:
+        return pd.DataFrame(columns=["evidence_margin_category", "best_model_by_evidence", "events"])
+    base = df.drop_duplicates(key_columns)[required].copy()
+    base = base[base["evidence_margin_category"].notna()]
+    if base.empty:
+        return pd.DataFrame(columns=["evidence_margin_category", "best_model_by_evidence", "events"])
+    return (
+        base.groupby(["evidence_margin_category", "best_model_by_evidence"], as_index=False)
+        .size()
+        .rename(columns={"size": "events"})
+        .sort_values(["evidence_margin_category", "events"], ascending=[True, False])
+    )
+
+
 def _write(df: pd.DataFrame, outdir: Path) -> None:
     outdir.mkdir(parents=True, exist_ok=True)
     df.to_csv(outdir / "event_model_evidence.csv", index=False)
@@ -565,6 +607,7 @@ def _write(df: pd.DataFrame, outdir: Path) -> None:
     _summary_for_support(summary, TRUNCATED_EVIDENCE_SUPPORT).to_csv(outdir / "truncated_lower_bound_summary.csv", index=False)
     _counts(df).to_csv(outdir / "best_model_counts.csv", index=False)
     _support_counts(df).to_csv(outdir / "evidence_support_counts.csv", index=False)
+    _evidence_margin_counts(df).to_csv(outdir / "evidence_margin_counts.csv", index=False)
     ok = df[df["status"] == "success"]
     group_columns = _event_group_columns(df)
     diagnostics = model_probability_diagnostics(ok, group_columns=group_columns)
@@ -590,9 +633,9 @@ def main() -> int:
     p = argparse.ArgumentParser(description="Run a session-scoped replay model-evidence benchmark.")
     p.add_argument("--dataset-root", required=True)
     p.add_argument("--session", required=True)
-    p.add_argument("--events", default="0-25")
+    p.add_argument("--events", default="run:0-25")
     p.add_argument("--max-events", type=int, default=None)
-    p.add_argument("--models", default="random stationary stationary-gaussian diffusion momentum imm")
+    p.add_argument("--models", default="random stationary sorted-spike-state-space-diffusion sorted-spike-state-space-momentum sorted-spike-state-space-imm sorted-spike-state-space-goal")
     p.add_argument("--candidate-top-k", type=int, default=64)
     p.add_argument("--stationary-sigma-cm", type=float, default=2.0)
     p.add_argument("--diffusion-sigma-cm", type=float, default=12.0)
@@ -603,12 +646,12 @@ def main() -> int:
     p.add_argument("--state-space-diffusion-sigma-cm-sqrt-s", type=float, default=85.0)
     p.add_argument("--state-space-max-step-sigma", type=float, default=4.0)
     p.add_argument("--state-space-imm-mode-stickiness", type=float, default=0.95)
-    p.add_argument("--state-space-imm-switch-tau-s", type=float, default=0.0)
+    p.add_argument("--state-space-imm-switch-tau-s", type=float, default=0.060)
     p.add_argument("--state-space-momentum-sigma-cm-sqrt-s", type=float, default=85.0)
     p.add_argument("--state-space-momentum-initial-sigma-cm-sqrt-s", type=float, default=85.0)
     p.add_argument("--state-space-momentum-velocity-decay", type=float, default=0.95)
-    p.add_argument("--state-space-momentum-candidate-top-k", type=int, default=128)
-    p.add_argument("--state-space-momentum-predicted-candidate-top-k", type=int, default=8)
+    p.add_argument("--state-space-momentum-candidate-top-k", type=int, default=256)
+    p.add_argument("--state-space-momentum-predicted-candidate-top-k", type=int, default=16)
     p.add_argument(
         "--state-space-momentum-candidate-mass-threshold",
         type=float,
@@ -692,6 +735,10 @@ def main() -> int:
             "\nInterpretation: exact_full_grid rows are comparable model evidences; "
             "truncated_full_grid rows are candidate-support lower bounds and must be ranked only within the lower-bound diagnostic group."
         )
+    margin_counts = _evidence_margin_counts(df)
+    if not margin_counts.empty:
+        print("\nEvidence-margin counts:")
+        print(margin_counts.to_string(index=False))
     print(f"\nRows: {len(df)}")
     print(f"Failures: {int((df['status'] != 'success').sum())}")
     _write(df, Path(args.output))

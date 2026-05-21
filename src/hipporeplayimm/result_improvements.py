@@ -142,19 +142,26 @@ def hierarchical_bootstrap_ci(
     if values.empty:
         return (float("nan"), float("nan"))
     rng = np.random.default_rng(random_seed)
-    group_keys = list(values.groupby(list(group_columns), sort=False).groups)
-    if not group_keys:
+    if group_columns:
+        groupby_keys = group_columns[0] if len(group_columns) == 1 else list(group_columns)
+        grouped_values = [
+            group[value_column].to_numpy(dtype=float)
+            for _, group in values.groupby(groupby_keys, sort=False)
+        ]
+    else:
+        grouped_values = [values[value_column].to_numpy(dtype=float)]
+    if not grouped_values:
         return (float("nan"), float("nan"))
     bootstrap_means = np.empty(int(n_bootstrap), dtype=float)
-    grouped = {
-        key: group[value_column].to_numpy(dtype=float)
-        for key, group in values.groupby(list(group_columns), sort=False)
-    }
     for index in range(int(n_bootstrap)):
-        sampled_groups = rng.choice(np.arange(len(group_keys)), size=len(group_keys), replace=True)
+        sampled_groups = rng.choice(
+            np.arange(len(grouped_values)),
+            size=len(grouped_values),
+            replace=True,
+        )
         sampled_values: list[np.ndarray] = []
         for group_index in sampled_groups:
-            curr = grouped[group_keys[int(group_index)]]
+            curr = grouped_values[int(group_index)]
             sampled_values.append(rng.choice(curr, size=curr.size, replace=True))
         merged = np.concatenate(sampled_values) if sampled_values else np.array([], dtype=float)
         bootstrap_means[index] = float(np.mean(merged)) if merged.size else np.nan

@@ -16,7 +16,7 @@ class _DummyEncoding:
         return self
 
 
-def test_clusterless_benchmark_scores_train_and_joint_with_train_fitted_encoder(monkeypatch):
+def test_clusterless_train_fitted_encoder_scores_train_and_joint(monkeypatch):
     session = _two_cell_clusterless_session()
     shared_encoder = SimpleNamespace(bin_centers=np.array([[0.0, 0.0], [10.0, 0.0]]))
     fitted_cell_sets = []

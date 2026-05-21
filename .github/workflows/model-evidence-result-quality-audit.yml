@@ -1,0 +1,98 @@
+---
+name: Audit replay model-evidence result quality
+
+on:
+  workflow_dispatch:
+    inputs:
+      scores_path:
+        description: "Path to event_model_evidence.csv or event_scores.csv in the checked-out workspace"
+        required: true
+        default: "results/model-evidence/event_model_evidence.csv"
+      common_support_scores_path:
+        description: "Optional path to a common-support diagnostic score table"
+        required: false
+        default: ""
+      observation_sweep_summary_path:
+        description: "Optional path to observation_sweep_summary.csv"
+        required: false
+        default: ""
+      max_behavior_error_cm:
+        description: "Optional behavior-validation error gate for calibration selection"
+        required: false
+        default: ""
+      min_recovery_accuracy:
+        description: "Optional synthetic-recovery accuracy gate for calibration selection"
+        required: false
+        default: ""
+      output_dir:
+        description: "Audit output directory"
+        required: true
+        default: "results/model-evidence-result-quality-audit"
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    name: Result-quality audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Install package
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e .
+
+      - name: Run audit
+        env:
+          SCORES_PATH: ${{ inputs.scores_path }}
+          COMMON_SUPPORT_SCORES_PATH: ${{ inputs.common_support_scores_path }}
+          OBSERVATION_SWEEP_SUMMARY_PATH: ${{ inputs.observation_sweep_summary_path }}
+          MAX_BEHAVIOR_ERROR_CM: ${{ inputs.max_behavior_error_cm }}
+          MIN_RECOVERY_ACCURACY: ${{ inputs.min_recovery_accuracy }}
+          OUTPUT_DIR: ${{ inputs.output_dir }}
+        run: |
+          set -euo pipefail
+          args=(--scores "${SCORES_PATH}" --output "${OUTPUT_DIR}")
+          if [ -n "${COMMON_SUPPORT_SCORES_PATH}" ]; then
+            args+=(--common-support-scores "${COMMON_SUPPORT_SCORES_PATH}")
+          fi
+          if [ -n "${OBSERVATION_SWEEP_SUMMARY_PATH}" ]; then
+            args+=(--observation-sweep-summary "${OBSERVATION_SWEEP_SUMMARY_PATH}")
+          fi
+          if [ -n "${MAX_BEHAVIOR_ERROR_CM}" ]; then
+            args+=(--max-behavior-error-cm "${MAX_BEHAVIOR_ERROR_CM}")
+          fi
+          if [ -n "${MIN_RECOVERY_ACCURACY}" ]; then
+            args+=(--min-recovery-accuracy "${MIN_RECOVERY_ACCURACY}")
+          fi
+          python scripts/audit_model_evidence_results.py "${args[@]}"
+
+      - name: Show dashboard
+        if: always()
+        env:
+          OUTPUT_DIR: ${{ inputs.output_dir }}
+        run: |
+          if [ -f "${OUTPUT_DIR}/result_quality_audit.md" ]; then
+            cat "${OUTPUT_DIR}/result_quality_audit.md"
+          else
+            echo "No audit dashboard was generated."
+          fi
+
+      - name: Upload audit results
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: model-evidence-result-quality-audit-${{ github.run_id }}
+          path: ${{ inputs.output_dir }}/
+          if-no-files-found: error

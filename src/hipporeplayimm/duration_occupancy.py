@@ -144,7 +144,7 @@ def _score_state_space_duration_with_occupancy(
             self.config.momentum_initial_sigma_cm_sqrt_s,
             durations[0] if len(durations) else float(emissions.dt),
         )
-        decays = _duration_adjusted_decays(self.config.momentum_velocity_decay, durations, float(emissions.dt))
+        decays = _duration_adjusted_decays_from_config(self.config, durations, float(emissions.dt))
         time_scales = _time_scales(durations)
         logp, trajectory, masses = _score_momentum_duration(
             ss,
@@ -193,7 +193,7 @@ def _score_state_space_duration_with_occupancy(
             self.config.momentum_initial_sigma_cm_sqrt_s,
             durations[0] if len(durations) else float(emissions.dt),
         )
-        decays = _duration_adjusted_decays(self.config.momentum_velocity_decay, durations, float(emissions.dt))
+        decays = _duration_adjusted_decays_from_config(self.config, durations, float(emissions.dt))
         time_scales = _time_scales(durations)
         logp, trajectory, mode_post, masses = _score_imm_duration(
             ss,
@@ -248,6 +248,7 @@ def _score_state_space_duration_with_occupancy(
         "state_space_momentum_sigma_cm_sqrt_s": float(self.config.momentum_sigma_cm_sqrt_s),
         "state_space_momentum_initial_sigma_cm_sqrt_s": float(self.config.momentum_initial_sigma_cm_sqrt_s),
         "state_space_momentum_velocity_decay": float(self.config.momentum_velocity_decay),
+        "state_space_momentum_velocity_decay_tau_s": float(getattr(self.config, "momentum_velocity_decay_tau_s", 0.0)),
         "state_space_valid_occupancy_threshold_s": float(self.config.valid_occupancy_threshold_s),
         "state_space_transition_sigma_cm": float(transition_sigma_cm),
         "mean_trajectory_posterior_entropy": ss._mean_entropy(trajectory),
@@ -313,6 +314,31 @@ def _duration_adjusted_decays(decay: float, durations: np.ndarray, reference_dt:
     if not np.isfinite(reference_dt) or reference_dt <= 0.0:
         raise ValueError("reference dt must be finite and positive")
     return np.asarray([decay ** (float(duration) / reference_dt) for duration in durations], dtype=float)
+
+
+def _duration_adjusted_decays_from_config(config, durations: np.ndarray, reference_dt: float) -> np.ndarray:
+    """Return transition-specific momentum velocity decays.
+
+    Historically the duration-aware scorer scaled a per-bin decay by
+    ``duration / reference_dt``.  That is still the backwards-compatible path.
+    When ``momentum_velocity_decay_tau_s`` is positive, use the physical-time
+    decay ``exp(-duration / tau)`` instead so the same setting is meaningful for
+    1, 2, 3, or 5 ms replay bins.
+    """
+
+    tau_s = float(getattr(config, "momentum_velocity_decay_tau_s", 0.0))
+    if tau_s <= 0.0:
+        return _duration_adjusted_decays(
+            float(getattr(config, "momentum_velocity_decay", 0.95)),
+            durations,
+            reference_dt,
+        )
+    if not np.isfinite(tau_s):
+        raise ValueError("momentum_velocity_decay_tau_s must be finite when positive")
+    durations = np.asarray(durations, dtype=float)
+    if np.any(durations <= 0.0) or not np.all(np.isfinite(durations)):
+        raise ValueError("transition durations must be finite and positive")
+    return np.exp(-durations / tau_s)
 
 
 def _time_scales(durations: np.ndarray) -> np.ndarray:

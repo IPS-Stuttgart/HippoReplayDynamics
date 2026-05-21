@@ -156,11 +156,13 @@ def _state_space_config(args: argparse.Namespace, mode: str) -> StateSpaceDecode
         momentum_sigma_cm_sqrt_s=args.state_space_momentum_sigma_cm_sqrt_s,
         momentum_initial_sigma_cm_sqrt_s=args.state_space_momentum_initial_sigma_cm_sqrt_s,
         momentum_velocity_decay=args.state_space_momentum_velocity_decay,
+        momentum_velocity_decay_tau_s=args.state_space_momentum_velocity_decay_tau_s,
         momentum_candidate_top_k=args.state_space_momentum_candidate_top_k,
         momentum_candidate_mass_threshold=args.state_space_momentum_candidate_mass_threshold,
         momentum_candidate_min_k=args.state_space_momentum_candidate_min_k,
         momentum_candidate_max_k=args.state_space_momentum_candidate_max_k,
         momentum_predicted_candidate_top_k=args.state_space_momentum_predicted_candidate_top_k,
+        momentum_candidate_source=args.state_space_momentum_candidate_source,
         valid_occupancy_threshold_s=args.state_space_valid_occupancy_threshold_s,
     )
 
@@ -545,11 +547,13 @@ def _run_settings(args: argparse.Namespace) -> dict[str, object]:
         "state_space_momentum_sigma_cm_sqrt_s": float(args.state_space_momentum_sigma_cm_sqrt_s),
         "state_space_momentum_initial_sigma_cm_sqrt_s": float(args.state_space_momentum_initial_sigma_cm_sqrt_s),
         "state_space_momentum_velocity_decay": float(args.state_space_momentum_velocity_decay),
+        "state_space_momentum_velocity_decay_tau_s": float(args.state_space_momentum_velocity_decay_tau_s),
         "state_space_momentum_candidate_top_k": int(args.state_space_momentum_candidate_top_k),
         "state_space_momentum_candidate_mass_threshold": "" if args.state_space_momentum_candidate_mass_threshold is None else float(args.state_space_momentum_candidate_mass_threshold),
         "state_space_momentum_candidate_min_k": int(args.state_space_momentum_candidate_min_k),
         "state_space_momentum_candidate_max_k": int(args.state_space_momentum_candidate_max_k),
         "state_space_momentum_predicted_candidate_top_k": int(args.state_space_momentum_predicted_candidate_top_k),
+        "state_space_momentum_candidate_source": str(args.state_space_momentum_candidate_source),
         "clusterless_mark_likelihood": args.clusterless_mark_likelihood,
         "clusterless_mark_group_by": args.clusterless_mark_group_by,
         "clusterless_mark_smoothing_sigma_bins": float(args.clusterless_mark_smoothing_sigma_bins),
@@ -605,11 +609,13 @@ def main() -> int:
     parser.add_argument("--state-space-momentum-sigma-cm-sqrt-s", type=float, default=85.0)
     parser.add_argument("--state-space-momentum-initial-sigma-cm-sqrt-s", type=float, default=85.0)
     parser.add_argument("--state-space-momentum-velocity-decay", type=float, default=0.95)
+    parser.add_argument("--state-space-momentum-velocity-decay-tau-s", type=float, default=0.0)
     parser.add_argument("--state-space-momentum-candidate-top-k", type=int, default=DEFAULT_IMPROVED_STATE_SPACE_MOMENTUM_CANDIDATE_TOP_K)
     parser.add_argument("--state-space-momentum-candidate-mass-threshold", type=float)
     parser.add_argument("--state-space-momentum-candidate-min-k", type=int, default=1)
     parser.add_argument("--state-space-momentum-candidate-max-k", type=int, default=0)
     parser.add_argument("--state-space-momentum-predicted-candidate-top-k", type=int, default=DEFAULT_IMPROVED_STATE_SPACE_MOMENTUM_PREDICTED_CANDIDATE_TOP_K)
+    parser.add_argument("--state-space-momentum-candidate-source", choices=("emission", "posterior"), default="emission")
     parser.add_argument("--state-space-valid-occupancy-threshold-s", type=float, default=0.0)
     parser.add_argument("--goal-state-space-transition-sigma-cm-sqrt-s", type=float, default=85.0)
     parser.add_argument("--goal-state-space-drift-speed-cm-s", type=float, default=400.0)

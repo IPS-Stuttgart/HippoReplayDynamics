@@ -297,7 +297,6 @@ def summarize_overall(
     """Return a one-row overall paper-claim summary."""
 
     row = _summary_row("overall", event_deltas)
-    values = event_deltas["delta_primary_minus_baseline"].to_numpy(float)
     row.update(
         {
             "primary_model": primary_model,

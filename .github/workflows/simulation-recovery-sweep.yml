@@ -59,7 +59,7 @@ on:
       state_space_momentum_predicted_candidate_top_k_values:
         description: "Whitespace- or comma-separated predicted momentum support augmentation sizes; 0 disables augmentation"
         required: true
-        default: "8 16 32"
+        default: "0 4 8"
       state_space_momentum_candidate_source_values:
         description: "Whitespace- or comma-separated momentum/IMM candidate sources: emission or posterior"
         required: true

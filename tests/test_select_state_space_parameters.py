@@ -113,10 +113,68 @@ def test_select_parameters_prefers_recovered_momentum_config(tmp_path):
     assert "state_space_diffusion_sigma_cm_sqrt_s: 60.0" in workflow_inputs
     assert "state_space_momentum_velocity_decay: 0.95" in workflow_inputs
     assert "state_space_momentum_candidate_top_k: 128" in workflow_inputs
+    assert "state_space_momentum_predicted_candidate_top_k: 8" in workflow_inputs
     cli_args = (output / "state_space_selected_cli_args.txt").read_text(encoding="utf-8")
     assert "--state-space-diffusion-sigma-cm-sqrt-s 60.0" in cli_args
     assert "--state-space-momentum-velocity-decay 0.95" in cli_args
     assert "--state-space-momentum-candidate-top-k 128" in cli_args
+    assert "--state-space-momentum-predicted-candidate-top-k 8" in cli_args
+
+
+def test_select_parameters_matches_predicted_candidate_support_dimension(tmp_path):
+    evidence = tmp_path / "evidence"
+    recovery = tmp_path / "recovery"
+    output = tmp_path / "selection"
+    strong_unvalidated_support = _params(85.0, 85.0, 85.0, 0.95, 128, predicted_top_k=0)
+    weaker_validated_support = _params(85.0, 85.0, 85.0, 0.95, 128, predicted_top_k=8)
+    _write(
+        evidence,
+        "state_space_evidence_sweep_config_ranked.csv",
+        [
+            {
+                **strong_unvalidated_support,
+                "matrix_id": "evidence-pk0",
+                "events": 10,
+                "momentum_beats_diffusion_events": 10,
+                "median_momentum_minus_diffusion_log_evidence": 5.0,
+                "mean_momentum_minus_diffusion_log_evidence": 5.5,
+            },
+            {
+                **weaker_validated_support,
+                "matrix_id": "evidence-pk8",
+                "events": 10,
+                "momentum_beats_diffusion_events": 7,
+                "median_momentum_minus_diffusion_log_evidence": 1.0,
+                "mean_momentum_minus_diffusion_log_evidence": 1.5,
+            },
+        ],
+    )
+    _write(
+        recovery,
+        "simulation_recovery_sweep_config_ranked.csv",
+        [
+            {
+                **weaker_validated_support,
+                "matrix_id": "recovery-pk8",
+                "failures": 0,
+                "overall_recovery_accuracy": 0.8,
+                "momentum_recovery_accuracy": 1.0,
+                "diffusion_recovery_accuracy": 0.6,
+            },
+        ],
+    )
+
+    tables = select_parameters(evidence, recovery, output=output, min_momentum_recovery_accuracy=0.5)
+
+    recommendation = tables["recommendation"].iloc[0]
+    assert recommendation["evidence_matrix_id"] == "evidence-pk8"
+    assert recommendation["recovery_matrix_id"] == "recovery-pk8"
+    assert recommendation["state_space_momentum_predicted_candidate_top_k"] == 8
+    unvalidated = tables["decision"][
+        tables["decision"]["evidence_matrix_id"].eq("evidence-pk0")
+    ].iloc[0]
+    assert not bool(unvalidated["has_recovery"])
+    assert unvalidated["recovery_gate"] == "missing-recovery"
 
 
 def test_select_parameters_keeps_candidate_support_dimensions_separate(tmp_path):

@@ -27,6 +27,10 @@ OPTIONAL_PARAMETER_DEFAULTS = {
     "state_space_momentum_predicted_candidate_top_k": 8,
     "state_space_momentum_candidate_source": "emission",
 }
+INTEGER_PARAMETER_COLUMNS = {
+    "state_space_momentum_candidate_top_k",
+    "state_space_momentum_predicted_candidate_top_k",
+}
 PARAMETER_COLUMNS = [
     *BASE_PARAMETER_COLUMNS,
     "state_space_momentum_predicted_candidate_top_k",
@@ -414,10 +418,7 @@ def _normalize_parameter_columns(frame: pd.DataFrame) -> None:
             frame[col] = OPTIONAL_PARAMETER_DEFAULTS[col]
         if col in OPTIONAL_PARAMETER_DEFAULTS:
             frame[col] = frame[col].where(frame[col].notna(), OPTIONAL_PARAMETER_DEFAULTS[col])
-        if col in {
-            "state_space_momentum_candidate_top_k",
-            "state_space_momentum_predicted_candidate_top_k",
-        }:
+        if col in INTEGER_PARAMETER_COLUMNS:
             frame[col] = pd.to_numeric(frame[col], errors="raise").astype("int64")
         elif col == "state_space_momentum_candidate_source":
             frame[col] = frame[col].map(_normalize_candidate_source)

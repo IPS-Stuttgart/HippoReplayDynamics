@@ -10,6 +10,7 @@ from hipporeplayimm.state_space import (
     StateSpaceDecoderConfig,
     StateSpaceReplayModel,
     _augment_candidates_with_momentum_predictions,
+    _candidate_evidence_support_label,
     _mass_retaining_candidate_indices,
 )
 
@@ -87,12 +88,15 @@ def test_state_space_modes_return_full_trajectory_posteriors():
         assert score.diagnostics["clusterless_mark_likelihood"] == "not_implemented"
         if mode == "momentum":
             assert score.diagnostics["state_space_momentum_trajectory_posterior"] == "smoothed_pair_marginal"
+            assert score.diagnostics["state_space_momentum_evidence_support"] == "exact_full_grid"
+            assert score.diagnostics["state_space_momentum_candidate_support"] == "full_grid"
             assert score.diagnostics["state_space_momentum_predicted_candidate_top_k"] == 8
             assert score.diagnostics["state_space_momentum_evidence_support"] == "exact_full_grid"
             assert score.diagnostics["mean_candidate_count"] == 4.0
         if mode == "imm":
             assert score.diagnostics["state_space_imm_modes"] == "stationary,diffusion,momentum,jump"
             assert score.diagnostics["state_space_imm_evidence_support"] == "exact_full_grid"
+            assert score.diagnostics["state_space_imm_candidate_support"] == "full_grid"
             assert score.diagnostics["state_space_imm_predicted_candidate_top_k"] == 8
             assert "state_space_mode_momentum_terminal_probability" in score.diagnostics
             assert "state_space_mode_jump_terminal_probability" in score.diagnostics
@@ -312,6 +316,29 @@ def test_state_space_momentum_pruned_support_uses_full_grid_normalization():
     assert score.diagnostics["state_space_momentum_evidence_support"] == "truncated_full_grid"
 
 
+def test_state_space_momentum_full_candidate_support_is_marked_exact():
+    emissions = _synthetic_emissions()
+    centers = np.array([[0.0, 0.0], [1.0, 0.0], [2.0, 0.0], [3.0, 0.0]])
+    config = StateSpaceDecoderConfig(
+        mode="momentum",
+        momentum_candidate_top_k=0,
+        momentum_predicted_candidate_top_k=0,
+    )
+    model = StateSpaceReplayModel(mode="momentum", config=config)
+
+    candidates = model.candidate_indices(emissions, centers)
+    score = model.score(emissions, centers)
+
+    assert all(
+        np.array_equal(row, np.arange(emissions.n_bins, dtype=int))
+        for row in candidates
+    )
+    assert _candidate_evidence_support_label(candidates, emissions.n_bins) == "exact_full_grid"
+    assert score.diagnostics["state_space_momentum_candidate_selection"] == "full_grid"
+    assert score.diagnostics["state_space_momentum_candidate_support"] == "full_grid"
+    assert score.diagnostics["state_space_momentum_evidence_support"] == "exact_full_grid"
+
+
 def test_state_space_momentum_can_reuse_external_candidate_support():
     train = _synthetic_emissions()
     joint = LogEmissionTensor(
@@ -434,6 +461,7 @@ def test_state_space_four_mode_imm_matches_bruteforce_tiny_grid():
 
     assert np.allclose(score.log_likelihood, logsumexp(brute_terms))
     assert score.diagnostics["state_space_imm_modes"] == "stationary,diffusion,momentum,jump"
+    assert score.diagnostics["state_space_imm_evidence_support"] == "exact_full_grid"
     terminal_probs = [score.diagnostics[f"state_space_mode_{mode}_terminal_probability"] for mode in modes]
     assert np.allclose(sum(terminal_probs), 1.0)
     assert score.trajectory_log_posterior is not None

@@ -3,7 +3,6 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 import pytest
-from scipy.spatial import cKDTree
 
 from hipporeplayimm.benchmarks import BenchmarkConfig
 from hipporeplayimm.clusterless import _sqrt_optional
@@ -13,13 +12,17 @@ from hipporeplayimm.goal_state_space import _farthest_point_subset as goal_farth
 from hipporeplayimm.pyrecest_models import (
     _farthest_point_subset as pyrecest_farthest_point_subset,
 )
-from hipporeplayimm.pyrecest_models import _update_filter_from_grid_likelihood
 
 
 class _ProposalRecordingFilter:
     def __init__(self, position_particles: np.ndarray, proposal_positions: np.ndarray) -> None:
         self.position_particles = position_particles
         self.proposal_positions = proposal_positions
+        self.filter_state = type(
+            "_State",
+            (),
+            {"w": np.ones(self.position_particles.shape[0])},
+        )()
         self.recorded_likelihoods: np.ndarray | None = None
 
     def update_position_likelihood_with_proposal(self, likelihood_fn, **kwargs):
@@ -29,6 +32,8 @@ class _ProposalRecordingFilter:
 
 
 def test_pyrecest_proposal_callback_evaluates_requested_positions() -> None:
+    filters = pytest.importorskip("pyrecest.filters")
+
     bin_centers = np.array([[0.0, 0.0], [1.0, 0.0], [2.0, 0.0]])
     log_likelihood = np.array([-10.0, -5.0, 0.0])
     proposal_positions = np.array([[2.0, 0.0], [0.0, 0.0]])
@@ -37,11 +42,10 @@ def test_pyrecest_proposal_callback_evaluates_requested_positions() -> None:
         proposal_positions=proposal_positions,
     )
 
-    _update_filter_from_grid_likelihood(
+    filters.update_position_grid_likelihood(
         filter_,
         log_likelihood,
         bin_centers,
-        cKDTree(bin_centers),
         position_proposal_probability=1.0,
     )
 

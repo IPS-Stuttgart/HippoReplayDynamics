@@ -407,6 +407,15 @@ jobs:
           path: artifacts/state-space-evidence-sweep
           pattern: state-space-evidence-sweep-*
 
+      - name: Audit state-space sweep artifact completeness
+        run: |
+          set -euo pipefail
+          mkdir -p results/state-space-evidence-sweep-summary
+          python scripts/audit_sweep_completeness.py \
+            --mode state-space-evidence \
+            --artifact-root artifacts/state-space-evidence-sweep \
+            --output results/state-space-evidence-sweep-summary/state_space_evidence_sweep_matrix_completeness.csv
+
       - name: Aggregate state-space sweep summaries
         run: |
           set -euo pipefail
@@ -417,6 +426,19 @@ jobs:
           import pandas as pd
 
           root = Path("artifacts/state-space-evidence-sweep")
+          def merge_completeness(comparison: pd.DataFrame, completeness_path: Path) -> pd.DataFrame:
+              if not completeness_path.exists() or "matrix_id" not in comparison.columns:
+                  return comparison
+              completeness = pd.read_csv(completeness_path)
+              if completeness.empty or "matrix_id" not in completeness.columns:
+                  return comparison
+              merged = completeness.merge(comparison, on="matrix_id", how="left", suffixes=("", "_metric"))
+              for column in list(comparison.columns):
+                  metric_column = f"{column}_metric"
+                  if column in merged.columns and metric_column in merged.columns:
+                      merged[column] = merged[metric_column].combine_first(merged[column])
+                      merged = merged.drop(columns=[metric_column])
+              return merged
           score_paths = sorted(root.glob("**/event_model_evidence.csv"))
           summary_paths = sorted(root.glob("**/model_evidence_summary.csv"))
           if not score_paths:
@@ -471,6 +493,8 @@ jobs:
                   row["momentum_beats_imm_events"] = int(group["momentum_beats_imm"].sum())
               metrics.append(row)
           comparison = pd.DataFrame(metrics)
+          completeness_path = out_dir / "state_space_evidence_sweep_matrix_completeness.csv"
+          comparison = merge_completeness(comparison, completeness_path)
           sort_cols = [
               "momentum_beats_diffusion_events",
               "median_momentum_minus_diffusion_log_evidence",

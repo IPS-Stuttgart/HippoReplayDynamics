@@ -67,6 +67,12 @@ RECOVERY_ACCURACY_COLUMNS = [
     "overall_certified_vs_exact_recovery_accuracy",
     "momentum_certified_vs_exact_recovery_accuracy",
     "diffusion_certified_vs_exact_recovery_accuracy",
+    "overall_oracle_candidate_recovery_accuracy",
+    "momentum_oracle_candidate_recovery_accuracy",
+    "diffusion_oracle_candidate_recovery_accuracy",
+    "overall_oracle_candidate_certified_vs_exact_recovery_accuracy",
+    "momentum_oracle_candidate_certified_vs_exact_recovery_accuracy",
+    "diffusion_oracle_candidate_certified_vs_exact_recovery_accuracy",
 ]
 
 
@@ -220,6 +226,28 @@ def _build_decision_table(
     )
     decision["momentum_recovery_gate_column"] = momentum_gate_col
     decision["overall_recovery_gate_column"] = overall_gate_col
+    decision["diffusion_recovery_gate_column"] = diffusion_gate_col
+    decision["strict_momentum_recovery_accuracy"] = decision.get(
+        "momentum_recovery_accuracy", pd.Series(float("nan"), index=decision.index)
+    )
+    decision["strict_overall_recovery_accuracy"] = decision.get(
+        "overall_recovery_accuracy", pd.Series(float("nan"), index=decision.index)
+    )
+    decision["strict_diffusion_recovery_accuracy"] = decision.get(
+        "diffusion_recovery_accuracy", pd.Series(float("nan"), index=decision.index)
+    )
+    decision["certified_vs_exact_momentum_recovery_accuracy"] = decision.get(
+        "momentum_certified_vs_exact_recovery_accuracy",
+        pd.Series(float("nan"), index=decision.index),
+    )
+    decision["certified_vs_exact_overall_recovery_accuracy"] = decision.get(
+        "overall_certified_vs_exact_recovery_accuracy",
+        pd.Series(float("nan"), index=decision.index),
+    )
+    decision["certified_vs_exact_diffusion_recovery_accuracy"] = decision.get(
+        "diffusion_certified_vs_exact_recovery_accuracy",
+        pd.Series(float("nan"), index=decision.index),
+    )
     candidate_top_k = pd.to_numeric(
         decision.get(
             "state_space_momentum_candidate_top_k",
@@ -235,6 +263,12 @@ def _build_decision_table(
         decision["uses_candidate_pruned_momentum"] & ~decision["certified_recovery_columns_available"] & (decision["recovery_gate_metric"] == "strict"),
         "recovery_gate_warning",
     ] = "Candidate-pruned momentum/IMM recovery is being gated with strict exact-comparable recovery because certified-vs-exact columns are missing."
+    decision.loc[
+        decision["uses_candidate_pruned_momentum"]
+        & (decision["recovery_gate_metric"] == "strict")
+        & decision["certified_recovery_columns_available"],
+        "recovery_gate_warning",
+    ] = "Strict gate was requested even though certified-vs-exact recovery columns are available for candidate-pruned momentum/IMM."
     decision["passes_recovery_gate"] = (
         decision["has_recovery"]
         & (decision.get("failures", pd.Series(0, index=decision.index)).fillna(0) <= max_failures)
@@ -438,6 +472,12 @@ def _prepare_recovery(frame: pd.DataFrame) -> pd.DataFrame:
             "overall_certified_vs_exact_recovery_accuracy",
             "momentum_certified_vs_exact_recovery_accuracy",
             "diffusion_certified_vs_exact_recovery_accuracy",
+            "overall_oracle_candidate_recovery_accuracy",
+            "momentum_oracle_candidate_recovery_accuracy",
+            "diffusion_oracle_candidate_recovery_accuracy",
+            "overall_oracle_candidate_certified_vs_exact_recovery_accuracy",
+            "momentum_oracle_candidate_certified_vs_exact_recovery_accuracy",
+            "diffusion_oracle_candidate_certified_vs_exact_recovery_accuracy",
         ]
         if col in frame.columns
     ]

@@ -100,6 +100,7 @@ class PaperClaimTables:
 
     event_deltas: pd.DataFrame
     session_summary: pd.DataFrame
+    rat_summary: pd.DataFrame
     summary: pd.DataFrame
     manifest: dict[str, object]
 
@@ -108,6 +109,7 @@ class PaperClaimTables:
         out_dir.mkdir(parents=True, exist_ok=True)
         self.event_deltas.to_csv(out_dir / "paper_claim_event_deltas.csv", index=False)
         self.session_summary.to_csv(out_dir / "paper_claim_session_summary.csv", index=False)
+        self.rat_summary.to_csv(out_dir / "paper_claim_rat_summary.csv", index=False)
         self.summary.to_csv(out_dir / "paper_claim_summary.csv", index=False)
         (out_dir / "paper_claims.md").write_text(render_claim_markdown(self), encoding="utf-8")
         (out_dir / "paper_claim_manifest.json").write_text(
@@ -155,6 +157,7 @@ def build_paper_claim_tables(
         value_column=config.value_column,
     )
     session_summary = summarize_sessions(event_deltas)
+    rat_summary = summarize_rats(event_deltas)
     summary = summarize_overall(
         event_deltas,
         primary_model=primary_model,
@@ -172,6 +175,7 @@ def build_paper_claim_tables(
         "value_column": config.value_column,
         "n_input_rows": int(len(scores)),
         "n_paired_events": int(len(event_deltas)),
+        "n_rats": int(rat_summary["group"].nunique()) if not rat_summary.empty else 0,
         "identity_columns": identity_columns(frame),
         "n_bootstrap": int(config.n_bootstrap),
         "random_seed": int(config.random_seed),
@@ -179,6 +183,7 @@ def build_paper_claim_tables(
     return PaperClaimTables(
         event_deltas=event_deltas,
         session_summary=session_summary,
+        rat_summary=rat_summary,
         summary=summary,
         manifest=manifest,
     )
@@ -308,6 +313,17 @@ def summarize_sessions(event_deltas: pd.DataFrame) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
+def summarize_rats(event_deltas: pd.DataFrame) -> pd.DataFrame:
+    """Summarize apparent and certified effects by rat, preserving session nesting."""
+
+    if event_deltas.empty or "session" not in event_deltas:
+        return pd.DataFrame()
+    frame = event_deltas.copy()
+    frame["rat"] = frame["session"].map(_rat_from_session)
+    rows = [_summary_row(str(rat), group) for rat, group in frame.groupby("rat", sort=True)]
+    return pd.DataFrame(rows)
+
+
 def summarize_overall(
     event_deltas: pd.DataFrame,
     *,
@@ -356,6 +372,7 @@ def render_claim_markdown(tables: PaperClaimTables) -> str:
         "apparent_primary_win_fraction",
         ascending=False,
     )
+    rat_rows = tables.rat_summary.sort_values("group") if not tables.rat_summary.empty else pd.DataFrame()
     best_session = "n/a" if session_rows.empty else str(session_rows.iloc[0]["group"])
     worst_session = "n/a" if session_rows.empty else str(session_rows.iloc[-1]["group"])
     return "\n".join(
@@ -399,6 +416,10 @@ def render_claim_markdown(tables: PaperClaimTables) -> str:
             "",
             f"The strongest apparent primary-win session is `{best_session}`; the weakest is `{worst_session}`.",
             "Use `paper_claim_session_summary.csv` for a table suitable for the paper or supplement.",
+            "",
+            "## Rat-level summary",
+            "",
+            f"Rat-level rows available: {0 if rat_rows.empty else int(len(rat_rows))}. Use `paper_claim_rat_summary.csv` for nested reporting.",
             "",
         ]
     )
@@ -459,6 +480,11 @@ def _summary_row(label: str, group: pd.DataFrame) -> dict[str, object]:
         "median_delta_primary_minus_baseline": float(np.median(delta)) if delta.size else float("nan"),
         "sum_delta_primary_minus_baseline": float(np.sum(delta)) if delta.size else float("nan"),
     }
+
+
+def _rat_from_session(session: object) -> str:
+    text = str(session)
+    return text.split("/", 1)[0] if "/" in text else text
 
 
 def _hierarchical_bootstrap_mean_ci(

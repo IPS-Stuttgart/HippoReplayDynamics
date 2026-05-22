@@ -84,7 +84,13 @@ def test_select_parameters_prefers_recovered_momentum_config(tmp_path):
         ],
     )
 
-    tables = select_parameters(evidence, recovery, output=output, min_momentum_recovery_accuracy=0.5)
+    tables = select_parameters(
+        evidence,
+        recovery,
+        output=output,
+        min_momentum_recovery_accuracy=0.5,
+        force_strict_recovery_gate=True,
+    )
 
     recommendation = tables["recommendation"].iloc[0]
     assert recommendation["evidence_matrix_id"] == "evidence-b"
@@ -164,7 +170,13 @@ def test_select_parameters_matches_predicted_candidate_support_dimension(tmp_pat
         ],
     )
 
-    tables = select_parameters(evidence, recovery, output=output, min_momentum_recovery_accuracy=0.5)
+    tables = select_parameters(
+        evidence,
+        recovery,
+        output=output,
+        min_momentum_recovery_accuracy=0.5,
+        force_strict_recovery_gate=True,
+    )
 
     recommendation = tables["recommendation"].iloc[0]
     assert recommendation["evidence_matrix_id"] == "evidence-pk8"
@@ -359,6 +371,59 @@ def test_select_parameters_auto_gate_uses_certified_recovery_columns_when_presen
     assert manifest["recovery_gate"]["resolved_metric"] == "certified-vs-exact"
 
 
+def test_candidate_pruned_strict_gate_is_blocked_without_override(tmp_path):
+    evidence = tmp_path / "evidence"
+    recovery = tmp_path / "recovery"
+    output = tmp_path / "selection"
+    params = _params(60.0, 85.0, 85.0, 0.95, 128)
+    _write(
+        evidence,
+        "state_space_evidence_sweep_config_ranked.csv",
+        [
+            {
+                **params,
+                "matrix_id": "evidence-a",
+                "events": 10,
+                "momentum_beats_diffusion_events": 8,
+                "mean_momentum_minus_diffusion_log_evidence": 2.0,
+            }
+        ],
+    )
+    _write(
+        recovery,
+        "simulation_recovery_sweep_config_ranked.csv",
+        [
+            {
+                **params,
+                "matrix_id": "recovery-a",
+                "failures": 0,
+                "overall_recovery_accuracy": 1.0,
+                "momentum_recovery_accuracy": 1.0,
+                "diffusion_recovery_accuracy": 1.0,
+            }
+        ],
+    )
+
+    tables = select_parameters(
+        evidence, recovery, output=output, min_momentum_recovery_accuracy=0.5
+    )
+
+    decision = tables["decision"].iloc[0]
+    assert decision["recovery_gate"] == "strict-gate-blocked"
+    assert bool(decision["strict_candidate_recovery_gate_blocked"])
+    assert not bool(decision["passes_recovery_gate"])
+    assert tables["candidates"].empty
+
+    forced = select_parameters(
+        evidence,
+        recovery,
+        output=tmp_path / "selection-forced",
+        min_momentum_recovery_accuracy=0.5,
+        force_strict_recovery_gate=True,
+    )
+    assert bool(forced["recommendation"].iloc[0]["passes_recovery_gate"])
+
+
 def test_select_parameters_writes_leave_one_session_out_recommendations(tmp_path):
     evidence = tmp_path / "evidence"
     recovery = tmp_path / "recovery"
@@ -436,6 +501,7 @@ def test_select_parameters_writes_leave_one_session_out_recommendations(tmp_path
         output=output,
         leave_one_session_out=True,
         session_column="requested_session",
+        force_strict_recovery_gate=True,
     )
 
     loso = tables["leave_one_session_out"].set_index("held_out_session")

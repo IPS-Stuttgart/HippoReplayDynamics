@@ -5,6 +5,8 @@ from hipporeplayimm.encoding import EncodingConfig, EncodingModel
 from hipporeplayimm.simulation_recovery import (
     SimulationRecoveryConfig,
     add_evidence_columns,
+    certified_vs_exact_event_recovery,
+    certified_vs_exact_recovery_summary,
     _candidate_indices_with_path,
     _candidate_path_support_diagnostics,
     _recovery_state_space_config,
@@ -197,6 +199,32 @@ def test_recovery_summary_does_not_mix_truncated_lower_bounds_with_exact_evidenc
     summary = recovery_summary(scored)
     overall = summary[summary["true_model"] == "overall"].iloc[0]
     assert overall["recovered_events"] == 0
+
+
+def test_certified_vs_exact_summary_counts_lower_bound_wins_conservatively():
+    rows = pd.DataFrame(
+        [
+            _row(0, "momentum", "sorted-spike-state-space-diffusion", -1.0),
+            _row(
+                0,
+                "momentum",
+                "sorted-spike-state-space-momentum",
+                2.0,
+                diagnostic_state_space_momentum_evidence_support="truncated_full_grid",
+            ),
+        ]
+    )
+    scored = add_evidence_columns(rows)
+
+    events = certified_vs_exact_event_recovery(scored)
+    summary = certified_vs_exact_recovery_summary(scored)
+    momentum = summary[summary["true_model"] == "momentum"].iloc[0]
+
+    assert bool(events.iloc[0]["certified_vs_exact_recovered_expected_model"])
+    assert events.iloc[0]["certified_vs_exact_reason"] == "expected_lower_bound_beats_best_comparable"
+    assert events.iloc[0]["expected_minus_best_comparable_log_evidence"] == 3.0
+    assert momentum["certified_vs_exact_recovered_events"] == 1
+    assert momentum["certified_vs_exact_recovery_accuracy"] == 1.0
 
 
 def _row(event_index: int, true_model: str, model: str, log_evidence: float, **extra: object) -> dict[str, object]:

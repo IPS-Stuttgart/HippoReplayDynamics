@@ -94,11 +94,13 @@ def test_select_parameters_prefers_recovered_momentum_config(tmp_path):
     assert (output / "state_space_parameter_recommendation.csv").exists()
     manifest = json.loads((output / "state_space_parameter_selection_manifest.json").read_text(encoding="utf-8"))
     assert manifest["schema_version"] == 1
-    assert manifest["recovery_gate"] == {
-        "max_failures": 0,
-        "min_momentum_recovery_accuracy": 0.5,
-        "min_overall_recovery_accuracy": 0.5,
-    }
+    assert manifest["recovery_gate"]["max_failures"] == 0
+    assert manifest["recovery_gate"]["min_momentum_recovery_accuracy"] == 0.5
+    assert manifest["recovery_gate"]["min_overall_recovery_accuracy"] == 0.5
+    assert manifest["recovery_gate"]["requested_metric"] == "auto"
+    assert manifest["recovery_gate"]["resolved_metric"] == "strict"
+    assert manifest["recovery_gate"]["momentum_column"] == "momentum_recovery_accuracy"
+    assert manifest["recovery_gate"]["overall_column"] == "overall_recovery_accuracy"
     assert manifest["row_counts"]["candidate_rows"] == 1
     assert manifest["selected_parameters"]["state_space_diffusion_sigma_cm_sqrt_s"] == 60.0
     assert manifest["recommendation"]["evidence_matrix_id"] == "evidence-b"
@@ -155,6 +157,66 @@ def test_select_parameters_falls_back_when_no_config_passes_gate(tmp_path):
     manifest = json.loads((output / "state_space_parameter_selection_manifest.json").read_text(encoding="utf-8"))
     assert manifest["row_counts"]["candidate_rows"] == 0
     assert not manifest["recommendation"]["passes_recovery_gate"]
+
+
+def test_select_parameters_auto_gate_uses_certified_recovery_columns_when_present(tmp_path):
+    evidence = tmp_path / "evidence"
+    recovery = tmp_path / "recovery"
+    output = tmp_path / "selection"
+    strong_evidence_bad_certified = _params(85.0, 85.0, 85.0, 0.95, 128)
+    weaker_evidence_good_certified = _params(60.0, 85.0, 85.0, 0.95, 128)
+    _write(
+        evidence,
+        "state_space_evidence_sweep_config_ranked.csv",
+        [
+            {
+                **strong_evidence_bad_certified,
+                "matrix_id": "evidence-a",
+                "events": 10,
+                "momentum_beats_diffusion_events": 10,
+            },
+            {
+                **weaker_evidence_good_certified,
+                "matrix_id": "evidence-b",
+                "events": 10,
+                "momentum_beats_diffusion_events": 7,
+            },
+        ],
+    )
+    _write(
+        recovery,
+        "simulation_recovery_sweep_config_ranked.csv",
+        [
+            {
+                **strong_evidence_bad_certified,
+                "matrix_id": "recovery-a",
+                "failures": 0,
+                "overall_recovery_accuracy": 0.5,
+                "momentum_recovery_accuracy": 0.0,
+                "overall_certified_vs_exact_recovery_accuracy": 0.4,
+                "momentum_certified_vs_exact_recovery_accuracy": 0.2,
+            },
+            {
+                **weaker_evidence_good_certified,
+                "matrix_id": "recovery-b",
+                "failures": 0,
+                "overall_recovery_accuracy": 0.5,
+                "momentum_recovery_accuracy": 0.0,
+                "overall_certified_vs_exact_recovery_accuracy": 0.8,
+                "momentum_certified_vs_exact_recovery_accuracy": 1.0,
+            },
+        ],
+    )
+
+    tables = select_parameters(evidence, recovery, output=output, min_momentum_recovery_accuracy=0.5)
+
+    recommendation = tables["recommendation"].iloc[0]
+    assert recommendation["evidence_matrix_id"] == "evidence-b"
+    assert recommendation["recovery_gate_metric"] == "certified-vs-exact"
+    assert recommendation["gate_momentum_recovery_accuracy"] == 1.0
+    assert recommendation["momentum_recovery_gate_column"] == "momentum_certified_vs_exact_recovery_accuracy"
+    manifest = json.loads((output / "state_space_parameter_selection_manifest.json").read_text(encoding="utf-8"))
+    assert manifest["recovery_gate"]["resolved_metric"] == "certified-vs-exact"
 
 
 def test_select_parameters_writes_leave_one_session_out_recommendations(tmp_path):

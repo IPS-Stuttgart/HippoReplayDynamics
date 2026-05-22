@@ -98,6 +98,7 @@ class SimulationRecoveryResult:
     confusion_matrix: pd.DataFrame
     summary: pd.DataFrame
     settings: dict[str, object]
+    certified_vs_exact_summary: pd.DataFrame = field(default_factory=pd.DataFrame)
 
     def write(self, output: str | Path) -> None:
         out_dir = Path(output)
@@ -105,6 +106,10 @@ class SimulationRecoveryResult:
         self.event_scores.to_csv(out_dir / "simulation_recovery_event_scores.csv", index=False)
         self.confusion_matrix.to_csv(out_dir / "simulation_recovery_confusion_matrix.csv", index=False)
         self.summary.to_csv(out_dir / "simulation_recovery_summary.csv", index=False)
+        self.certified_vs_exact_summary.to_csv(
+            out_dir / "simulation_recovery_certified_vs_exact_summary.csv",
+            index=False,
+        )
         _write_yaml(out_dir / "simulation_recovery_settings.yml", self.settings)
 
 
@@ -264,8 +269,15 @@ def run_session_simulation_recovery(
     event_scores = add_evidence_columns(pd.DataFrame(rows))
     confusion = confusion_matrix(event_scores, config.scoring_models)
     summary = recovery_summary(event_scores)
+    certified_vs_exact = certified_vs_exact_recovery_summary(event_scores)
     settings = _settings(session, config, template_event_ids, encoding)
-    return SimulationRecoveryResult(event_scores, confusion, summary, settings)
+    return SimulationRecoveryResult(
+        event_scores=event_scores,
+        confusion_matrix=confusion,
+        summary=summary,
+        settings=settings,
+        certified_vs_exact_summary=certified_vs_exact,
+    )
 
 
 def simulate_replay_event(
@@ -536,6 +548,199 @@ def recovery_summary(event_scores: pd.DataFrame) -> pd.DataFrame:
         }
     )
     return pd.DataFrame(rows)
+
+
+def certified_vs_exact_event_recovery(event_scores: pd.DataFrame) -> pd.DataFrame:
+    """Return event-level recovery diagnostics that respect evidence support.
+
+    The ordinary recovery summary intentionally excludes truncated lower-bound
+    rows before choosing an event winner.  That is the right strict default, but
+    it makes a candidate-pruned momentum model structurally unable to recover a
+    true momentum event: its own row is never allowed to be the strict best row.
+
+    This diagnostic adds a conservative second view.  If the expected model has
+    comparable evidence, recovery is the ordinary comparable-evidence decision.
+    If the expected model is a truncated lower bound, it is counted as recovered
+    only when that lower bound is greater than the best comparable exact row.
+    Such a win is certified because the unknown full-grid evidence of the
+    expected model can only be higher than its reported lower bound.  Lower-bound
+    rows are never treated as exact and are not used to disqualify exact rows.
+    """
+
+    if event_scores.empty:
+        return pd.DataFrame()
+
+    rows: list[dict[str, object]] = []
+    for (session, event_index), group in event_scores.groupby(
+        ["session", "event_index"], sort=False
+    ):
+        group = group.copy()
+        first = group.iloc[0]
+        expected_model = str(first.get("expected_model", ""))
+        base: dict[str, object] = {
+            "session": session,
+            "event_index": int(event_index),
+            "true_model": str(first.get("true_model", "")),
+            "expected_model": expected_model,
+            "n_time": _event_scalar(group, "n_time"),
+            "n_spikes": _event_scalar(group, "n_spikes"),
+        }
+
+        scored = group[group["status"] == "success"].copy()
+        if scored.empty:
+            rows.append(
+                {
+                    **base,
+                    "certified_vs_exact_recovered_expected_model": False,
+                    "certified_vs_exact_reason": "no_successful_scores",
+                    "expected_model_log_evidence": np.nan,
+                    "expected_model_evidence_support": "",
+                    "expected_model_evidence_comparable": False,
+                    "best_comparable_model": "",
+                    "best_comparable_log_evidence": np.nan,
+                    "expected_minus_best_comparable_log_evidence": np.nan,
+                }
+            )
+            continue
+
+        finite = np.isfinite(scored["log_evidence"].to_numpy(float))
+        scored = scored.loc[finite].copy()
+        if scored.empty:
+            rows.append(
+                {
+                    **base,
+                    "certified_vs_exact_recovered_expected_model": False,
+                    "certified_vs_exact_reason": "no_finite_scores",
+                    "expected_model_log_evidence": np.nan,
+                    "expected_model_evidence_support": "",
+                    "expected_model_evidence_comparable": False,
+                    "best_comparable_model": "",
+                    "best_comparable_log_evidence": np.nan,
+                    "expected_minus_best_comparable_log_evidence": np.nan,
+                }
+            )
+            continue
+
+        expected_rows = scored[scored["model"].astype(str) == expected_model]
+        comparable_mask = _comparable_mask(scored)
+        comparable_rows = scored.loc[comparable_mask].copy()
+        best_comparable_model = ""
+        best_comparable_log_evidence = np.nan
+        if not comparable_rows.empty:
+            best_comparable = _best_log_evidence_row(comparable_rows)
+            best_comparable_model = str(best_comparable["model"])
+            best_comparable_log_evidence = float(best_comparable["log_evidence"])
+
+        if expected_rows.empty:
+            rows.append(
+                {
+                    **base,
+                    "certified_vs_exact_recovered_expected_model": False,
+                    "certified_vs_exact_reason": "expected_model_not_scored",
+                    "expected_model_log_evidence": np.nan,
+                    "expected_model_evidence_support": "",
+                    "expected_model_evidence_comparable": False,
+                    "best_comparable_model": best_comparable_model,
+                    "best_comparable_log_evidence": best_comparable_log_evidence,
+                    "expected_minus_best_comparable_log_evidence": np.nan,
+                }
+            )
+            continue
+
+        expected = _best_log_evidence_row(expected_rows)
+        expected_log_evidence = float(expected["log_evidence"])
+        expected_support = str(expected.get("evidence_support", ""))
+        raw_expected_comparable = expected.get(
+            "evidence_comparable",
+            _evidence_is_comparable(expected_support),
+        )
+        expected_comparable = (
+            _evidence_is_comparable(expected_support)
+            if pd.isna(raw_expected_comparable)
+            else bool(raw_expected_comparable)
+        )
+        margin = expected_log_evidence - best_comparable_log_evidence
+
+        if expected_comparable:
+            recovered = best_comparable_model == expected_model
+            reason = (
+                "expected_comparable_best"
+                if recovered
+                else "expected_comparable_not_best"
+            )
+        elif not np.isfinite(best_comparable_log_evidence):
+            recovered = False
+            reason = "no_comparable_exact_reference"
+        else:
+            recovered = bool(margin > 0.0)
+            reason = (
+                "expected_lower_bound_beats_best_comparable"
+                if recovered
+                else "expected_lower_bound_not_above_best_comparable"
+            )
+
+        rows.append(
+            {
+                **base,
+                "certified_vs_exact_recovered_expected_model": recovered,
+                "certified_vs_exact_reason": reason,
+                "expected_model_log_evidence": expected_log_evidence,
+                "expected_model_evidence_support": expected_support,
+                "expected_model_evidence_comparable": expected_comparable,
+                "best_comparable_model": best_comparable_model,
+                "best_comparable_log_evidence": best_comparable_log_evidence,
+                "expected_minus_best_comparable_log_evidence": float(margin),
+            }
+        )
+    return pd.DataFrame(rows)
+
+
+def certified_vs_exact_recovery_summary(event_scores: pd.DataFrame) -> pd.DataFrame:
+    """Summarize conservative lower-bound-certified synthetic recovery."""
+
+    events = certified_vs_exact_event_recovery(event_scores)
+    if events.empty:
+        return pd.DataFrame()
+    rows: list[dict[str, object]] = []
+    for true_model, group in events.groupby("true_model", sort=False):
+        rows.append(_certified_vs_exact_summary_row(str(true_model), group))
+    rows.append(_certified_vs_exact_summary_row("overall", events))
+    return pd.DataFrame(rows)
+
+
+def _certified_vs_exact_summary_row(label: str, group: pd.DataFrame) -> dict[str, object]:
+    recovered = group["certified_vs_exact_recovered_expected_model"].fillna(False).astype(bool)
+    margins = pd.to_numeric(
+        group["expected_minus_best_comparable_log_evidence"], errors="coerce"
+    )
+    expected_model = "" if label == "overall" else str(group["expected_model"].iloc[0])
+    return {
+        "true_model": label,
+        "expected_model": expected_model,
+        "simulated_events": int(group["event_index"].nunique()),
+        "certified_vs_exact_recovered_events": int(recovered.sum()),
+        "certified_vs_exact_recovery_accuracy": float(recovered.mean()),
+        "mean_expected_minus_best_comparable_log_evidence": float(margins.mean()),
+        "median_expected_minus_best_comparable_log_evidence": float(margins.median()),
+        "events_without_comparable_exact_reference": int(
+            (group["certified_vs_exact_reason"] == "no_comparable_exact_reference").sum()
+        ),
+    }
+
+
+def _comparable_mask(frame: pd.DataFrame) -> pd.Series:
+    if "evidence_comparable" not in frame.columns:
+        return pd.Series(True, index=frame.index)
+    return frame["evidence_comparable"].fillna(False).astype(bool)
+
+
+def _best_log_evidence_row(frame: pd.DataFrame) -> pd.Series:
+    values = frame["log_evidence"].to_numpy(float)
+    return frame.iloc[int(np.argmax(values))]
+
+
+def _event_scalar(group: pd.DataFrame, column: str) -> object:
+    return group[column].iloc[0] if column in group.columns and not group.empty else np.nan
 
 
 def build_scoring_models(config: SimulationRecoveryConfig) -> dict[str, object]:

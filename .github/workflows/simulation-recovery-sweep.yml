@@ -392,6 +392,7 @@ jobs:
           score_paths = sorted(root.glob("**/simulation_recovery_event_scores.csv"))
           summary_paths = sorted(root.glob("**/simulation_recovery_summary.csv"))
           confusion_paths = sorted(root.glob("**/simulation_recovery_confusion_matrix.csv"))
+          certified_paths = sorted(root.glob("**/simulation_recovery_certified_vs_exact_summary.csv"))
           if not score_paths:
               raise SystemExit("No simulation_recovery_event_scores.csv files found")
           scores = pd.concat((pd.read_csv(path) for path in score_paths), ignore_index=True)
@@ -401,6 +402,13 @@ jobs:
           scores.to_csv(out_dir / "simulation_recovery_sweep_event_scores.csv", index=False)
           summaries.to_csv(out_dir / "simulation_recovery_sweep_summary.csv", index=False)
           confusions.to_csv(out_dir / "simulation_recovery_sweep_confusion_matrix.csv", index=False)
+          certified_summaries = (
+              pd.concat((pd.read_csv(path) for path in certified_paths), ignore_index=True)
+              if certified_paths
+              else pd.DataFrame()
+          )
+          if not certified_summaries.empty:
+              certified_summaries.to_csv(out_dir / "simulation_recovery_sweep_certified_vs_exact_summary.csv", index=False)
 
           key_cols = [
               "matrix_id",
@@ -416,9 +424,14 @@ jobs:
           ]
           rows = []
           failures = scores.assign(is_failure=scores["status"] != "success").groupby("matrix_id", as_index=False)["is_failure"].sum()
+          certified_by_matrix = {
+              matrix_id: group.set_index("true_model")
+              for matrix_id, group in certified_summaries.groupby("matrix_id", sort=False)
+          } if not certified_summaries.empty else {}
           for matrix_id, group in summaries.groupby("matrix_id", sort=False):
               row = {col: group.iloc[0][col] for col in key_cols}
               by_true = group.set_index("true_model")
+              certified = certified_by_matrix.get(matrix_id)
               row["failures"] = int(failures.loc[failures["matrix_id"] == matrix_id, "is_failure"].iloc[0])
               if "overall" in by_true.index:
                   row["overall_recovery_accuracy"] = float(by_true.loc["overall", "recovery_accuracy"])
@@ -429,17 +442,37 @@ jobs:
                       row[f"{true_model}_recovery_accuracy"] = float(by_true.loc[true_model, "recovery_accuracy"])
                       row[f"{true_model}_recovered_events"] = int(by_true.loc[true_model, "recovered_events"])
                       row[f"{true_model}_most_common_best_model"] = str(by_true.loc[true_model, "most_common_best_model"])
+              if certified is not None:
+                  if "overall" in certified.index:
+                      row["overall_certified_vs_exact_recovery_accuracy"] = float(
+                          certified.loc["overall", "certified_vs_exact_recovery_accuracy"]
+                      )
+                      row["overall_certified_vs_exact_recovered_events"] = int(
+                          certified.loc["overall", "certified_vs_exact_recovered_events"]
+                      )
+                  for true_model in ("diffusion", "momentum", "stationary", "fragmented"):
+                      if true_model in certified.index:
+                          row[f"{true_model}_certified_vs_exact_recovery_accuracy"] = float(
+                              certified.loc[true_model, "certified_vs_exact_recovery_accuracy"]
+                          )
+                          row[f"{true_model}_certified_vs_exact_recovered_events"] = int(
+                              certified.loc[true_model, "certified_vs_exact_recovered_events"]
+                          )
               rows.append(row)
           comparison = pd.DataFrame(rows)
           sort_cols = [
+              "momentum_certified_vs_exact_recovery_accuracy",
               "momentum_recovery_accuracy",
+              "overall_certified_vs_exact_recovery_accuracy",
               "overall_recovery_accuracy",
               "diffusion_recovery_accuracy",
               "failures",
           ]
           present = [col for col in sort_cols if col in comparison.columns]
           ascending_by_col = {
+              "momentum_certified_vs_exact_recovery_accuracy": False,
               "momentum_recovery_accuracy": False,
+              "overall_certified_vs_exact_recovery_accuracy": False,
               "overall_recovery_accuracy": False,
               "diffusion_recovery_accuracy": False,
               "failures": True,
@@ -449,9 +482,18 @@ jobs:
           comparison.to_csv(out_dir / "simulation_recovery_sweep_config_comparison.csv", index=False)
           ranked.to_csv(out_dir / "simulation_recovery_sweep_config_ranked.csv", index=False)
           if "momentum_recovery_accuracy" in comparison.columns:
+              momentum_sort_cols = [
+                  col for col in [
+                      "momentum_certified_vs_exact_recovery_accuracy",
+                      "momentum_recovery_accuracy",
+                      "overall_certified_vs_exact_recovery_accuracy",
+                      "overall_recovery_accuracy",
+                      "failures",
+                  ] if col in comparison.columns
+              ]
               momentum_ranked = comparison.sort_values(
-                  ["momentum_recovery_accuracy", "overall_recovery_accuracy", "failures"],
-                  ascending=[False, False, True],
+                  momentum_sort_cols,
+                  ascending=[ascending_by_col[col] for col in momentum_sort_cols],
                   kind="stable",
               )
               momentum_ranked.to_csv(out_dir / "simulation_recovery_sweep_momentum_ranked.csv", index=False)

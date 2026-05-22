@@ -10,7 +10,7 @@ from scipy.spatial import cKDTree
 from .duration_dynamics import transition_durations_s
 from .encoding import LogEmissionTensor
 from .evidence_reporting import PYRECEST_PARTICLE_EVIDENCE_SUPPORT
-from .models import EventScore, LOG_ZERO, _posterior_diagnostics
+from .models import EventScore, _posterior_diagnostics
 
 PYRECEST_INSTALL_HINT = (
     "PyRecEst-backed replay models require the optional 'pyrecest' dependency. "

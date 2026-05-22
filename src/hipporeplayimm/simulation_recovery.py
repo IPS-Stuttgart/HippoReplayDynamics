@@ -110,6 +110,8 @@ class SimulationRecoveryResult:
             out_dir / "simulation_recovery_certified_vs_exact_summary.csv",
             index=False,
         )
+        from .recovery_diagnostics import build_recovery_diagnostic_tables
+        build_recovery_diagnostic_tables(self.event_scores).write(out_dir)
         _write_yaml(out_dir / "simulation_recovery_settings.yml", self.settings)
 
 

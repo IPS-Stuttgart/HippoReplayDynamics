@@ -424,6 +424,8 @@ jobs:
           summary_paths = sorted(root.glob("**/simulation_recovery_summary.csv"))
           confusion_paths = sorted(root.glob("**/simulation_recovery_confusion_matrix.csv"))
           certified_paths = sorted(root.glob("**/simulation_recovery_certified_vs_exact_summary.csv"))
+          diagnostic_event_paths = sorted(root.glob("**/simulation_recovery_diagnostic_event_table.csv"))
+          diagnostic_summary_paths = sorted(root.glob("**/simulation_recovery_diagnostic_summary.csv"))
           if not score_paths:
               raise SystemExit("No simulation_recovery_event_scores.csv files found")
           scores = pd.concat((pd.read_csv(path) for path in score_paths), ignore_index=True)
@@ -440,6 +442,21 @@ jobs:
           )
           if not certified_summaries.empty:
               certified_summaries.to_csv(out_dir / "simulation_recovery_sweep_certified_vs_exact_summary.csv", index=False)
+
+          diagnostic_events = (
+              pd.concat((pd.read_csv(path) for path in diagnostic_event_paths), ignore_index=True)
+              if diagnostic_event_paths
+              else pd.DataFrame()
+          )
+          diagnostic_summaries = (
+              pd.concat((pd.read_csv(path) for path in diagnostic_summary_paths), ignore_index=True)
+              if diagnostic_summary_paths
+              else pd.DataFrame()
+          )
+          if not diagnostic_events.empty:
+              diagnostic_events.to_csv(out_dir / "simulation_recovery_sweep_diagnostic_event_table.csv", index=False)
+          if not diagnostic_summaries.empty:
+              diagnostic_summaries.to_csv(out_dir / "simulation_recovery_sweep_diagnostic_summary.csv", index=False)
 
           key_cols = [
               "matrix_id",

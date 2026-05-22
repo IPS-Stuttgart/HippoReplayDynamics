@@ -137,3 +137,33 @@ Clusterless local-KDE models should pass mark-drift and mark-likelihood
 sensitivity checks before being mixed into the sorted-spike narrative.  PyRecEst
 particle results should be reported as seed/particle-count/proposal aggregated
 Pareto summaries rather than single-seed rankings.
+
+## 9. Diagnose synthetic recovery before selecting parameters
+
+For candidate-pruned momentum/IMM rows, strict recovery is exact-comparable only
+and can exclude the expected model from winning.  Always inspect the diagnostic
+view before interpreting a momentum-recovery failure:
+
+```bash
+python scripts/diagnose_simulation_recovery.py \
+  --scores results/simulation-recovery-sweep-summary/simulation_recovery_sweep_event_scores.csv \
+  --output results/simulation-recovery-diagnostics
+```
+
+Use `simulation_recovery_diagnostic_summary.csv` to separate strict-gate
+exclusion, certified lower-bound recovery, candidate-support loss, and genuinely
+nondecisive lower bounds.
+
+## 10. Build a single paper-pack artifact
+
+After the final evidence, recovery, null-control, and parameter-selection runs,
+collect them into one auditable directory rather than copying tables by hand:
+
+```bash
+python scripts/build_paper_pack.py \
+  --scores results/model-evidence-all-sessions/event_scores.csv \
+  --simulation-recovery-scores results/simulation-recovery-sweep-summary \
+  --primary-model sorted-spike-state-space-momentum \
+  --baseline-model sorted-spike-state-space-diffusion \
+  --output results/paper-pack
+```

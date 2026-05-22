@@ -31,5 +31,7 @@ def test_simulation_recovery_sweep_workflow_defines_recovery_rankings():
     assert "momentum_recovery_accuracy" in workflow
     assert "simulation_recovery_sweep_certified_vs_exact_summary.csv" in workflow
     assert "momentum_certified_vs_exact_recovery_accuracy" in workflow
+    assert "simulation_recovery_diagnostic_event_table.csv" in workflow
+    assert "simulation_recovery_sweep_diagnostic_summary.csv" in workflow
     assert "Matrix has {len(rows)} jobs; reduce inputs to 256 or fewer" in workflow
     assert "pattern: simulation-recovery-sweep-*" in workflow

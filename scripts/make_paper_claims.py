@@ -71,6 +71,15 @@ SCORE_FILENAMES = (
     "model_evidence_event_scores.csv",
     "scores.csv",
 )
+EVIDENCE_SUPPORT_METADATA_COLUMNS = (
+    "evidence_support",
+    "evidence_comparable",
+    "diagnostic_candidate_evidence_support",
+    "diagnostic_state_space_momentum_evidence_support",
+    "diagnostic_state_space_imm_evidence_support",
+    "diagnostic_goal_state_space_evidence_support",
+    "diagnostic_pyrecest_evidence_support",
+)
 
 
 @dataclass(frozen=True)
@@ -82,6 +91,7 @@ class PaperClaimConfig:
     value_column: str = DEFAULT_VALUE_COLUMN
     n_bootstrap: int = 5000
     random_seed: int = 1
+    require_evidence_support: bool = True
 
 
 @dataclass
@@ -132,6 +142,8 @@ def build_paper_claim_tables(
     missing = [col for col in ("session", "event_index", "model", config.value_column) if col not in scores]
     if missing:
         raise KeyError(f"score table is missing required columns: {missing}")
+    if config.require_evidence_support:
+        require_evidence_support_metadata(scores)
 
     frame = ensure_evidence_support_columns(scores)
     primary_model = resolve_model_spec(frame["model"], config.primary_model)
@@ -170,6 +182,17 @@ def build_paper_claim_tables(
         summary=summary,
         manifest=manifest,
     )
+
+
+def require_evidence_support_metadata(scores: pd.DataFrame) -> None:
+    """Require exact/lower-bound support metadata before making headline claims."""
+
+    present = [column for column in EVIDENCE_SUPPORT_METADATA_COLUMNS if column in scores.columns]
+    if not present:
+        raise KeyError(
+            "score table does not contain evidence-support metadata; rerun the benchmark with support-aware scoring "
+            "or pass --allow-missing-evidence-support for exploratory legacy tables"
+        )
 
 
 def paired_event_deltas(
@@ -555,6 +578,11 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--value-column", default=DEFAULT_VALUE_COLUMN)
     parser.add_argument("--n-bootstrap", type=int, default=5000)
     parser.add_argument("--random-seed", type=int, default=1)
+    parser.add_argument(
+        "--allow-missing-evidence-support",
+        action="store_true",
+        help="Allow legacy score tables without exact/lower-bound support metadata. Not recommended for final claims.",
+    )
     return parser.parse_args(argv)
 
 
@@ -569,6 +597,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             value_column=args.value_column,
             n_bootstrap=args.n_bootstrap,
             random_seed=args.random_seed,
+            require_evidence_support=not args.allow_missing_evidence_support,
         ),
     )
     tables.write(args.output)

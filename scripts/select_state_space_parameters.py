@@ -175,6 +175,12 @@ def _select_from_frames(
         recommendation["recommendation_note"] = "No configuration passed the recovery gate; showing the best available row."
     elif not recommendation.empty:
         recommendation["recommendation_note"] = "Top configuration passing the recovery gate."
+    if not recommendation.empty and "recovery_gate_warning" in recommendation:
+        warning = str(recommendation.iloc[0].get("recovery_gate_warning", "")).strip()
+        if warning:
+            recommendation["recommendation_note"] = (
+                recommendation["recommendation_note"].astype(str) + " " + warning
+            )
     return {
         "decision": ranked,
         "candidates": candidates,
@@ -214,6 +220,21 @@ def _build_decision_table(
     )
     decision["momentum_recovery_gate_column"] = momentum_gate_col
     decision["overall_recovery_gate_column"] = overall_gate_col
+    candidate_top_k = pd.to_numeric(
+        decision.get(
+            "state_space_momentum_candidate_top_k",
+            pd.Series(0, index=decision.index),
+        ),
+        errors="coerce",
+    ).fillna(0)
+    certified_columns_available = _certified_recovery_columns_available(decision)
+    decision["uses_candidate_pruned_momentum"] = candidate_top_k > 0
+    decision["certified_recovery_columns_available"] = bool(certified_columns_available)
+    decision["recovery_gate_warning"] = ""
+    decision.loc[
+        decision["uses_candidate_pruned_momentum"] & ~decision["certified_recovery_columns_available"] & (decision["recovery_gate_metric"] == "strict"),
+        "recovery_gate_warning",
+    ] = "Candidate-pruned momentum/IMM recovery is being gated with strict exact-comparable recovery because certified-vs-exact columns are missing."
     decision["passes_recovery_gate"] = (
         decision["has_recovery"]
         & (decision.get("failures", pd.Series(0, index=decision.index)).fillna(0) <= max_failures)
@@ -268,6 +289,17 @@ def _recovery_gate_columns(frame: pd.DataFrame, metric: str) -> tuple[str, str, 
     if normalized == "certified-vs-exact" or (normalized == "auto" and has_certified):
         return (*certified, "certified-vs-exact")
     return (*strict, "strict")
+
+
+def _certified_recovery_columns_available(frame: pd.DataFrame) -> bool:
+    required = (
+        "momentum_certified_vs_exact_recovery_accuracy",
+        "overall_certified_vs_exact_recovery_accuracy",
+    )
+    return all(
+        column in frame.columns and frame[column].notna().any()
+        for column in required
+    )
 
 
 def _select_leave_one_session_out(

@@ -53,6 +53,11 @@ _OUTPUT_METADATA_COLUMNS = (
     "clusterless_rate_floor_hz",
 )
 _INTEGER_METADATA_COLUMNS = {"n_time", "n_spikes"}
+_CATEGORICAL_PARAMETER_COLUMNS = {"state_space_momentum_candidate_source"}
+_OPTIONAL_MOMENTUM_PARAMETER_DEFAULTS = {
+    "state_space_momentum_predicted_candidate_top_k": 8,
+    "state_space_momentum_candidate_source": "emission",
+}
 
 
 @dataclass(frozen=True)
@@ -79,6 +84,8 @@ _MODEL_SPECS = {
             "state_space_momentum_initial_sigma_cm_sqrt_s",
             "state_space_momentum_velocity_decay",
             "state_space_momentum_candidate_top_k",
+            "state_space_momentum_predicted_candidate_top_k",
+            "state_space_momentum_candidate_source",
         ),
     ),
 }
@@ -93,6 +100,7 @@ def marginalize_sweep(
     observation_parameters: str = "auto",
 ) -> dict[str, pd.DataFrame]:
     scores = pd.read_csv(input_csv)
+    scores = _ensure_optional_momentum_parameter_columns(scores)
     if scores.empty:
         raise ValueError("state-space sweep scores are empty")
     rows: list[dict[str, object]] = []
@@ -174,7 +182,7 @@ def _grid_for_model(
         .reset_index(drop=True)
     )
     event_table = grouped[_EVENT_KEY].drop_duplicates().sort_values(_EVENT_KEY).reset_index(drop=True)
-    param_values = {col: _sorted_numeric_values(grouped[col], col) for col in param_cols}
+    param_values = {col: _sorted_parameter_values(grouped[col], col) for col in param_cols}
     empty_params = [col for col, values in param_values.items() if values.size == 0]
     if empty_params:
         raise ValueError(f"{spec.source_model} has no finite values for parameter columns: {empty_params}")
@@ -182,10 +190,10 @@ def _grid_for_model(
     shape = (len(event_table), *(len(values) for values in param_values.values()))
     grid = np.full(shape, np.nan, dtype=float)
     event_index = {tuple(row): idx for idx, row in enumerate(event_table[_EVENT_KEY].itertuples(index=False, name=None))}
-    param_index = {col: {float(value): idx for idx, value in enumerate(values)} for col, values in param_values.items()}
+    param_index = {col: _parameter_index(values, col) for col, values in param_values.items()}
     for row in grouped.itertuples(index=False):
         event = tuple(getattr(row, col) for col in _EVENT_KEY)
-        params = tuple(param_index[col][float(getattr(row, col))] for col in param_cols)
+        params = tuple(param_index[col][_parameter_key(getattr(row, col), col)] for col in param_cols)
         grid[(event_index[event], *params)] = float(row.log_evidence)
     missing_count = int(np.isnan(grid).sum())
     if missing_count:
@@ -212,11 +220,63 @@ def _numeric_values(series: pd.Series) -> np.ndarray:
     return np.unique(values) if values.size else np.asarray([], dtype=float)
 
 
+def _sorted_parameter_values(series: pd.Series, column: str) -> np.ndarray:
+    if column in _CATEGORICAL_PARAMETER_COLUMNS:
+        values = sorted(
+            {_normalize_categorical_parameter(value, column) for value in series.dropna()}
+        )
+        return np.asarray(values, dtype=object)
+    return _sorted_numeric_values(series, column)
+
+
 def _sorted_numeric_values(series: pd.Series, column: str) -> np.ndarray:
     values = _numeric_values(series)
     if values.size and not np.all(np.isfinite(values)):
         raise ValueError(f"parameter column {column!r} contains non-finite values")
     return np.asarray(sorted(float(value) for value in values), dtype=float)
+
+
+def _parameter_index(values: np.ndarray, column: str) -> dict[object, int]:
+    return {_parameter_key(value, column): idx for idx, value in enumerate(values)}
+
+
+def _parameter_key(value: object, column: str) -> object:
+    if column in _CATEGORICAL_PARAMETER_COLUMNS:
+        return _normalize_categorical_parameter(value, column)
+    return float(value)
+
+
+def _normalize_categorical_parameter(value: object, column: str) -> str:
+    if column != "state_space_momentum_candidate_source":
+        return str(value)
+    if pd.isna(value):
+        return "emission"
+    text = str(value).strip().lower().replace("_", "-")
+    aliases = {
+        "": "emission",
+        "none": "emission",
+        "null": "emission",
+        "nan": "emission",
+        "likelihood": "emission",
+        "log-likelihood": "emission",
+        "train-posterior": "posterior",
+        "diffusion-posterior": "posterior",
+        "first-order-posterior": "posterior",
+    }
+    normalized = aliases.get(text, text)
+    if normalized not in {"emission", "posterior"}:
+        raise ValueError("state_space_momentum_candidate_source must be 'emission' or 'posterior'")
+    return normalized
+
+
+def _ensure_optional_momentum_parameter_columns(scores: pd.DataFrame) -> pd.DataFrame:
+    out = scores.copy()
+    for column, default in _OPTIONAL_MOMENTUM_PARAMETER_DEFAULTS.items():
+        if column not in out.columns:
+            out[column] = default
+        else:
+            out[column] = out[column].where(out[column].notna(), default)
+    return out
 
 
 def _aggregation_columns(source: pd.DataFrame, param_cols: tuple[str, ...]) -> dict[str, tuple[str, object]]:
@@ -329,7 +389,7 @@ def _marginalized_rows(
     observation_cols = tuple(col for col in param_cols if col in _OBSERVATION_PARAMETER_COLUMNS)
     dynamics_cols = tuple(col for col in param_cols if col not in observation_cols)
     grid_points = int(np.prod([len(values) for values in param_values.values()]))
-    grid_description = ";".join(f"{col}={','.join(f'{value:g}' for value in values)}" for col, values in param_values.items())
+    grid_description = ";".join(f"{col}={','.join(_format_parameter_value(value) for value in values)}" for col, values in param_values.items())
     for row_index, event in event_table.iterrows():
         representative = source.iloc[row_index]
         source_support = TRUNCATED_EVIDENCE_SUPPORT if spec.short_name == "momentum" else "exact_full_grid"
@@ -383,7 +443,7 @@ def _best_parameter_rows(spec: _ModelSpec, event_table: pd.DataFrame, grid: np.n
             "best_log_evidence": float(grid[(event_row, *indices)]),
         }
         for col, idx in zip(param_cols, indices, strict=True):
-            row[f"best_{col}"] = float(param_values[col][idx])
+            row[f"best_{col}"] = _parameter_output_value(param_values[col][idx])
         rows.append(row)
     return rows
 
@@ -399,9 +459,27 @@ def _prior_rows(spec: _ModelSpec, param_values: dict[str, np.ndarray], prior: np
             "prior_weight": float(prior[indices]),
         }
         for col, idx in zip(param_values, indices, strict=True):
-            row[col] = float(param_values[col][idx])
+            row[col] = _parameter_output_value(param_values[col][idx])
         rows.append(row)
     return rows
+
+
+def _parameter_output_value(value: object) -> object:
+    if isinstance(value, str):
+        return value
+    try:
+        scalar = value.item()
+    except AttributeError:
+        scalar = value
+    if isinstance(scalar, (int, np.integer)):
+        return int(scalar)
+    if isinstance(scalar, (float, np.floating)):
+        return float(scalar)
+    return scalar
+
+
+def _format_parameter_value(value: object) -> str:
+    return str(value) if isinstance(value, str) else f"{float(value):g}"
 
 
 def main() -> int:

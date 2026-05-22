@@ -93,6 +93,61 @@ def test_marginalize_state_space_sweep_writes_marginalized_tables(tmp_path: Path
     assert (out_dir / "state_space_marginalized_best_model_counts.csv").exists()
 
 
+def test_marginalize_state_space_sweep_keeps_candidate_support_axes(tmp_path: Path):
+    rows = []
+    values = {
+        (8, "emission"): -3.0,
+        (16, "emission"): -2.0,
+        (8, "posterior"): -1.0,
+        (16, "posterior"): 0.0,
+    }
+    for (predicted_top_k, candidate_source), log_evidence in values.items():
+        row = _base_row(0, "sorted-spike-state-space-momentum", log_evidence)
+        row["state_space_momentum_sigma_cm_sqrt_s"] = 85.0
+        row["state_space_momentum_initial_sigma_cm_sqrt_s"] = 85.0
+        row["state_space_momentum_velocity_decay"] = 0.95
+        row["state_space_momentum_candidate_top_k"] = 128
+        row["state_space_momentum_predicted_candidate_top_k"] = predicted_top_k
+        row["state_space_momentum_candidate_source"] = candidate_source
+        rows.append(row)
+
+    input_csv = tmp_path / "state_space_evidence_sweep_event_scores.csv"
+    pd.DataFrame(rows).to_csv(input_csv, index=False)
+
+    out_dir = tmp_path / "marginalized"
+    tables = marginalize_state_space_sweep.marginalize_sweep(
+        input_csv,
+        out_dir,
+        models=("momentum",),
+        prior="uniform",
+    )
+
+    event0 = tables["event_model_evidence"].iloc[0]
+    assert np.isclose(
+        event0["log_evidence"],
+        logsumexp(list(values.values())) - np.log(len(values)),
+    )
+    assert event0["diagnostic_state_space_marginalization_grid_points"] == 4
+    assert "state_space_momentum_candidate_source" in event0[
+        "diagnostic_state_space_marginalized_dynamics_parameters"
+    ]
+
+    best_params = tables["gridsearch_best_params"].iloc[0]
+    assert best_params["best_state_space_momentum_predicted_candidate_top_k"] == 16
+    assert best_params["best_state_space_momentum_candidate_source"] == "posterior"
+
+    prior_weights = tables["prior_weights"]
+    assert set(prior_weights["state_space_momentum_candidate_source"]) == {
+        "emission",
+        "posterior",
+    }
+    assert set(prior_weights["state_space_momentum_predicted_candidate_top_k"]) == {
+        8.0,
+        16.0,
+    }
+    assert np.isclose(prior_weights["prior_weight"].sum(), 1.0)
+
+
 def test_marginalize_state_space_sweep_auto_marginalizes_observation_hyperparameters(tmp_path: Path):
     rows = []
     log_values = {

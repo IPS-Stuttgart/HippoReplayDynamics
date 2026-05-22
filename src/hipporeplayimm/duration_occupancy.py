@@ -303,6 +303,35 @@ def _duration_candidates(ss, model, emissions, bin_centers, candidate_indices, v
     return ss._validate_candidate_indices(candidates, emissions.n_time, emissions.n_bins)
 
 
+def _candidate_evidence_support(
+    candidates,
+    n_bins: int,
+    valid_bin_mask: np.ndarray | None,
+) -> str:
+    """Classify candidate recursions as exact only when support is the full grid.
+
+    Momentum and four-mode IMM recursions are lower-bound evidences when their
+    second-order path support is pruned.  When every time bin contains every
+    spatial state allowed by the occupancy mask, the same recursions are exact
+    full-grid dynamic programs and should be allowed into comparable-evidence
+    summaries.
+    """
+
+    if valid_bin_mask is None:
+        expected = int(n_bins)
+        for current in candidates:
+            if np.unique(np.asarray(current, dtype=int)).size != expected:
+                return "truncated_full_grid"
+        return "exact_full_grid"
+
+    valid = np.flatnonzero(np.asarray(valid_bin_mask, dtype=bool))
+    for current in candidates:
+        arr = np.unique(np.asarray(current, dtype=int))
+        if arr.size != valid.size or not np.array_equal(np.sort(arr), valid):
+            return "truncated_full_grid"
+    return "exact_full_grid"
+
+
 def _per_bin_sigma(sigma_cm_sqrt_s: float, dt_s: float) -> float:
     sigma = float(sigma_cm_sqrt_s)
     dt = float(dt_s)

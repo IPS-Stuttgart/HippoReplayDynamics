@@ -91,6 +91,7 @@ def test_state_space_modes_return_full_trajectory_posteriors():
             assert score.diagnostics["state_space_momentum_evidence_support"] == "exact_full_grid"
             assert score.diagnostics["state_space_momentum_candidate_support"] == "full_grid"
             assert score.diagnostics["state_space_momentum_predicted_candidate_top_k"] == 8
+            assert score.diagnostics["state_space_momentum_evidence_support"] == "exact_full_grid"
             assert score.diagnostics["mean_candidate_count"] == 4.0
         if mode == "imm":
             assert score.diagnostics["state_space_imm_modes"] == "stationary,diffusion,momentum,jump"

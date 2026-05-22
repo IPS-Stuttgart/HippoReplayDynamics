@@ -13,21 +13,28 @@ from typing import Sequence
 import pandas as pd
 
 
-DEFAULT_PARAMETER_VALUES = {
-    # Older sweep artifacts predate this column; 8 is StateSpaceDecoderConfig's default.
+BASE_PARAMETER_COLUMNS = [
+    "state_space_diffusion_sigma_cm_sqrt_s",
+    "state_space_momentum_sigma_cm_sqrt_s",
+    "state_space_momentum_initial_sigma_cm_sqrt_s",
+    "state_space_momentum_velocity_decay",
+    "state_space_momentum_candidate_top_k",
+]
+OPTIONAL_PARAMETER_DEFAULTS = {
+    # Older recovery/evidence artifacts predate these support controls.  Default
+    # them explicitly so historical rows remain loadable while new sweeps are
+    # not accidentally pooled across different candidate-support mechanisms.
     "state_space_momentum_predicted_candidate_top_k": 8,
+    "state_space_momentum_candidate_source": "emission",
 }
 INTEGER_PARAMETER_COLUMNS = {
     "state_space_momentum_candidate_top_k",
     "state_space_momentum_predicted_candidate_top_k",
 }
 PARAMETER_COLUMNS = [
-    "state_space_diffusion_sigma_cm_sqrt_s",
-    "state_space_momentum_sigma_cm_sqrt_s",
-    "state_space_momentum_initial_sigma_cm_sqrt_s",
-    "state_space_momentum_velocity_decay",
-    "state_space_momentum_candidate_top_k",
+    *BASE_PARAMETER_COLUMNS,
     "state_space_momentum_predicted_candidate_top_k",
+    "state_space_momentum_candidate_source",
 ]
 
 SESSION_COLUMN_CANDIDATES = ["requested_session", "session"]
@@ -346,12 +353,12 @@ def _load_table(path: str | Path, default_name: str) -> pd.DataFrame:
     if not path.exists():
         raise FileNotFoundError(f"{path} does not exist")
     frame = pd.read_csv(path)
-    for column, default in DEFAULT_PARAMETER_VALUES.items():
+    missing = set(BASE_PARAMETER_COLUMNS) - set(frame.columns)
+    if missing:
+        raise ValueError(f"{path} is missing required parameter columns: {sorted(missing)}")
+    for column, default in OPTIONAL_PARAMETER_DEFAULTS.items():
         if column not in frame.columns:
             frame[column] = default
-    missing = set(PARAMETER_COLUMNS) - set(frame.columns)
-    if missing:
-        raise ValueError(f"{path} is missing parameter columns: {sorted(missing)}")
     return frame
 
 
@@ -407,14 +414,41 @@ def _prepare_recovery(frame: pd.DataFrame) -> pd.DataFrame:
 
 def _normalize_parameter_columns(frame: pd.DataFrame) -> None:
     for col in PARAMETER_COLUMNS:
+        if col not in frame.columns and col in OPTIONAL_PARAMETER_DEFAULTS:
+            frame[col] = OPTIONAL_PARAMETER_DEFAULTS[col]
+        if col in OPTIONAL_PARAMETER_DEFAULTS:
+            frame[col] = frame[col].where(frame[col].notna(), OPTIONAL_PARAMETER_DEFAULTS[col])
         if col in INTEGER_PARAMETER_COLUMNS:
             frame[col] = pd.to_numeric(frame[col], errors="raise").astype("int64")
+        elif col == "state_space_momentum_candidate_source":
+            frame[col] = frame[col].map(_normalize_candidate_source)
         else:
             frame[col] = pd.to_numeric(frame[col], errors="raise").round(8)
 
 
 def _present_session_columns(frame: pd.DataFrame) -> list[str]:
     return [col for col in SESSION_COLUMN_CANDIDATES if col in frame.columns]
+
+
+def _normalize_candidate_source(value: object) -> str:
+    if pd.isna(value):
+        return str(OPTIONAL_PARAMETER_DEFAULTS["state_space_momentum_candidate_source"])
+    text = str(value).strip().lower().replace("_", "-")
+    aliases = {
+        "": "emission",
+        "none": "emission",
+        "null": "emission",
+        "nan": "emission",
+        "likelihood": "emission",
+        "log-likelihood": "emission",
+        "train-posterior": "posterior",
+        "diffusion-posterior": "posterior",
+        "first-order-posterior": "posterior",
+    }
+    normalized = aliases.get(text, text)
+    if normalized not in {"emission", "posterior"}:
+        raise ValueError("state_space_momentum_candidate_source must be 'emission' or 'posterior'")
+    return normalized
 
 
 def _aggregate_evidence(frame: pd.DataFrame) -> pd.DataFrame:

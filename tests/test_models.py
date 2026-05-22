@@ -3,7 +3,6 @@ import itertools
 import numpy as np
 import pandas as pd
 import pytest
-from scipy.spatial import cKDTree
 from scipy.special import logsumexp
 
 from hipporeplayimm.encoding import LogEmissionTensor
@@ -15,8 +14,6 @@ from hipporeplayimm.models import CandidateKinematicModel, DiffusionModel
 from hipporeplayimm.pyrecest_models import (
     PyRecEstGoalParticleIMMModel,
     PyRecEstGoalParticleModel,
-    _grid_proposal_weights,
-    _update_filter_from_grid_likelihood,
 )
 
 
@@ -310,15 +307,24 @@ def test_pyrecest_goal_particle_model_scores_synthetic_event():
 
 
 def test_grid_proposal_weights_normalize_finite_likelihoods():
-    weights = _grid_proposal_weights(np.array([0.0, -np.inf, np.log(3.0)]))
+    filters = pytest.importorskip("pyrecest.filters")
+
+    weights = filters.grid_proposal_weights(np.array([0.0, -np.inf, np.log(3.0)]))
 
     assert np.allclose(weights, np.array([0.25, 0.0, 0.75]))
 
 
 def test_pyrecest_grid_likelihood_callback_uses_requested_positions():
+    filters = pytest.importorskip("pyrecest.filters")
+
     class RecordingProposalFilter:
         def __init__(self) -> None:
             self.position_particles = np.array([[0.0, 0.0]])
+            self.filter_state = type(
+                "_State",
+                (),
+                {"w": np.ones(self.position_particles.shape[0])},
+            )()
             self.queried_likelihoods: np.ndarray | None = None
 
         def update_position_likelihood_with_proposal(
@@ -343,11 +349,10 @@ def test_pyrecest_grid_likelihood_callback_uses_requested_positions():
     log_likelihood = np.array([-10.0, 0.0])
     filter_ = RecordingProposalFilter()
 
-    update_log = _update_filter_from_grid_likelihood(
+    update_log = filters.update_position_grid_likelihood(
         filter_,
         log_likelihood,
         centers,
-        cKDTree(centers),
         position_proposal_probability=1.0,
     )
 

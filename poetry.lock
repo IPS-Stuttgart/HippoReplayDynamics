@@ -1208,7 +1208,7 @@ pytorch-support = ["torch (>=2.4,<3.0)"]
 type = "git"
 url = "https://github.com/FlorianPfaff/PyRecEst.git"
 reference = "main"
-resolved_reference = "a8b59205bfd9830e886ddb0db60c2ab8caa37cb9"
+resolved_reference = "ad7a32a990abd97c468837ae59546a5d23ed5ec1"
 
 [[package]]
 name = "pyshtools"

@@ -23,10 +23,9 @@ from typing import Iterable
 
 import numpy as np
 from scipy.sparse import csr_matrix
-from scipy.special import logsumexp
 
 from .encoding import LogEmissionTensor
-from .state_space_utils import LOG_ZERO, _as_log_probs, _mean_entropy, _scaled_emissions
+from .state_space_utils import _as_log_probs, _mean_entropy, _scaled_emissions
 
 
 def _score_displacement_momentum_exact(

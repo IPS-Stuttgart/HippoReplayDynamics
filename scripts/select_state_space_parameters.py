@@ -40,11 +40,17 @@ RECOVERY_COUNT_COLUMNS = [
     "momentum_recovered_events",
     "overall_recovered_events",
     "overall_simulated_events",
+    "momentum_certified_vs_exact_recovered_events",
+    "overall_certified_vs_exact_recovered_events",
+    "diffusion_certified_vs_exact_recovered_events",
 ]
 RECOVERY_ACCURACY_COLUMNS = [
     "overall_recovery_accuracy",
     "momentum_recovery_accuracy",
     "diffusion_recovery_accuracy",
+    "overall_certified_vs_exact_recovery_accuracy",
+    "momentum_certified_vs_exact_recovery_accuracy",
+    "diffusion_certified_vs_exact_recovery_accuracy",
 ]
 
 
@@ -59,6 +65,7 @@ def select_parameters(
     leave_one_session_out: bool = False,
     session_column: str = "requested_session",
     holdout_sessions: Sequence[str] | None = None,
+    recovery_gate_metric: str = "auto",
 ) -> dict[str, pd.DataFrame]:
     evidence_frame = _load_table(evidence, "state_space_evidence_sweep_config_ranked.csv")
     recovery_frame = _load_table(recovery, "simulation_recovery_sweep_config_ranked.csv")
@@ -69,6 +76,7 @@ def select_parameters(
         min_momentum_recovery_accuracy=min_momentum_recovery_accuracy,
         min_overall_recovery_accuracy=min_overall_recovery_accuracy,
         max_failures=max_failures,
+        recovery_gate_metric=recovery_gate_metric,
     )
     ranked = tables["decision"]
     candidates = tables["candidates"]
@@ -91,6 +99,7 @@ def select_parameters(
             min_momentum_recovery_accuracy=min_momentum_recovery_accuracy,
             min_overall_recovery_accuracy=min_overall_recovery_accuracy,
             max_failures=max_failures,
+            recovery_gate_metric=recovery_gate_metric,
         )
         loso_recommendations.to_csv(out_dir / "state_space_loso_parameter_recommendations.csv", index=False)
         _write_loso_parameter_files(loso_recommendations, out_dir)
@@ -106,6 +115,7 @@ def select_parameters(
         min_overall_recovery_accuracy=min_overall_recovery_accuracy,
         max_failures=max_failures,
         leave_one_session_out=leave_one_session_out,
+        recovery_gate_metric=recovery_gate_metric,
         session_column=session_column,
         holdout_sessions=holdout_sessions,
         loso_recommendations=loso_recommendations,
@@ -127,6 +137,7 @@ def _select_from_frames(
     min_momentum_recovery_accuracy: float,
     min_overall_recovery_accuracy: float,
     max_failures: int,
+    recovery_gate_metric: str,
 ) -> dict[str, pd.DataFrame]:
     evidence_prepared = _aggregate_evidence(_prepare_evidence(evidence_frame))
     recovery_prepared = _aggregate_recovery(_prepare_recovery(recovery_frame))
@@ -136,6 +147,7 @@ def _select_from_frames(
         min_momentum_recovery_accuracy=min_momentum_recovery_accuracy,
         min_overall_recovery_accuracy=min_overall_recovery_accuracy,
         max_failures=max_failures,
+        recovery_gate_metric=recovery_gate_metric,
     )
 
     ranked = _rank_decision_table(decision)
@@ -161,6 +173,7 @@ def _build_decision_table(
     min_momentum_recovery_accuracy: float,
     min_overall_recovery_accuracy: float,
     max_failures: int,
+    recovery_gate_metric: str,
 ) -> pd.DataFrame:
     decision = evidence_frame.merge(
         recovery_frame,
@@ -171,15 +184,29 @@ def _build_decision_table(
     )
     decision["has_evidence"] = decision["source_match"].isin(["both", "left_only"])
     decision["has_recovery"] = decision["source_match"].isin(["both", "right_only"])
+    gate_columns = _recovery_gate_columns(decision, recovery_gate_metric)
+    momentum_gate_col, overall_gate_col, diffusion_gate_col, resolved_gate_metric = gate_columns
+    decision["recovery_gate_metric"] = resolved_gate_metric
+    decision["gate_momentum_recovery_accuracy"] = decision.get(
+        momentum_gate_col, pd.Series(float("nan"), index=decision.index)
+    )
+    decision["gate_overall_recovery_accuracy"] = decision.get(
+        overall_gate_col, pd.Series(float("nan"), index=decision.index)
+    )
+    decision["gate_diffusion_recovery_accuracy"] = decision.get(
+        diffusion_gate_col, pd.Series(float("nan"), index=decision.index)
+    )
+    decision["momentum_recovery_gate_column"] = momentum_gate_col
+    decision["overall_recovery_gate_column"] = overall_gate_col
     decision["passes_recovery_gate"] = (
         decision["has_recovery"]
         & (decision.get("failures", pd.Series(0, index=decision.index)).fillna(0) <= max_failures)
         & (
-            decision.get("momentum_recovery_accuracy", pd.Series(float("nan"), index=decision.index)).fillna(-1.0)
+            decision["gate_momentum_recovery_accuracy"].fillna(-1.0)
             >= min_momentum_recovery_accuracy
         )
         & (
-            decision.get("overall_recovery_accuracy", pd.Series(float("nan"), index=decision.index)).fillna(-1.0)
+            decision["gate_overall_recovery_accuracy"].fillna(-1.0)
             >= min_overall_recovery_accuracy
         )
     )
@@ -188,6 +215,43 @@ def _build_decision_table(
     decision.loc[~decision["has_recovery"], "recovery_gate"] = "missing-recovery"
     decision.loc[~decision["has_evidence"], "recovery_gate"] = "missing-evidence"
     return decision
+
+
+def _recovery_gate_columns(frame: pd.DataFrame, metric: str) -> tuple[str, str, str, str]:
+    """Return momentum/overall/diffusion recovery columns and the resolved metric."""
+
+    normalized = metric.strip().lower().replace("_", "-")
+    aliases = {
+        "certified": "certified-vs-exact",
+        "certified-vs-comparable": "certified-vs-exact",
+        "lower-bound-certified": "certified-vs-exact",
+    }
+    normalized = aliases.get(normalized, normalized)
+    allowed = {"auto", "strict", "certified-vs-exact"}
+    if normalized not in allowed:
+        raise ValueError(f"recovery_gate_metric must be one of {sorted(allowed)}")
+
+    certified = (
+        "momentum_certified_vs_exact_recovery_accuracy",
+        "overall_certified_vs_exact_recovery_accuracy",
+        "diffusion_certified_vs_exact_recovery_accuracy",
+    )
+    strict = (
+        "momentum_recovery_accuracy",
+        "overall_recovery_accuracy",
+        "diffusion_recovery_accuracy",
+    )
+    has_certified = (
+        certified[0] in frame.columns
+        and certified[1] in frame.columns
+        and frame[certified[0]].notna().any()
+        and frame[certified[1]].notna().any()
+    )
+    if normalized == "certified-vs-exact" and not has_certified:
+        raise ValueError("certified-vs-exact recovery columns are absent from the recovery table")
+    if normalized == "certified-vs-exact" or (normalized == "auto" and has_certified):
+        return (*certified, "certified-vs-exact")
+    return (*strict, "strict")
 
 
 def _select_leave_one_session_out(
@@ -199,6 +263,7 @@ def _select_leave_one_session_out(
     min_momentum_recovery_accuracy: float,
     min_overall_recovery_accuracy: float,
     max_failures: int,
+    recovery_gate_metric: str,
 ) -> pd.DataFrame:
     if session_column not in evidence_frame.columns:
         available = [col for col in SESSION_COLUMN_CANDIDATES if col in evidence_frame.columns]
@@ -240,6 +305,7 @@ def _select_leave_one_session_out(
             min_momentum_recovery_accuracy=min_momentum_recovery_accuracy,
             min_overall_recovery_accuracy=min_overall_recovery_accuracy,
             max_failures=max_failures,
+            recovery_gate_metric=recovery_gate_metric,
         )
         recommendation = tables["recommendation"]
         if recommendation.empty:
@@ -314,7 +380,13 @@ def _prepare_recovery(frame: pd.DataFrame) -> pd.DataFrame:
             "momentum_recovered_events",
             "overall_recovered_events",
             "overall_simulated_events",
+            "overall_certified_vs_exact_recovered_events",
+            "momentum_certified_vs_exact_recovered_events",
+            "diffusion_certified_vs_exact_recovered_events",
             "momentum_most_common_best_model",
+            "overall_certified_vs_exact_recovery_accuracy",
+            "momentum_certified_vs_exact_recovery_accuracy",
+            "diffusion_certified_vs_exact_recovery_accuracy",
         ]
         if col in frame.columns
     ]
@@ -433,6 +505,9 @@ def _rank_decision_table(frame: pd.DataFrame) -> pd.DataFrame:
     sortable = frame.copy()
     sort_columns = [
         "is_recommendable",
+        "gate_momentum_recovery_accuracy",
+        "gate_overall_recovery_accuracy",
+        "gate_diffusion_recovery_accuracy",
         "momentum_recovery_accuracy",
         "overall_recovery_accuracy",
         "diffusion_recovery_accuracy",
@@ -443,6 +518,9 @@ def _rank_decision_table(frame: pd.DataFrame) -> pd.DataFrame:
     ]
     ascending_by_column = {
         "is_recommendable": False,
+        "gate_momentum_recovery_accuracy": False,
+        "gate_overall_recovery_accuracy": False,
+        "gate_diffusion_recovery_accuracy": False,
         "momentum_recovery_accuracy": False,
         "overall_recovery_accuracy": False,
         "diffusion_recovery_accuracy": False,
@@ -521,6 +599,7 @@ def _write_selection_manifest(
     min_overall_recovery_accuracy: float,
     max_failures: int,
     leave_one_session_out: bool = False,
+    recovery_gate_metric: str = "auto",
     session_column: str | None = None,
     holdout_sessions: Sequence[str] | None = None,
     loso_recommendations: pd.DataFrame | None = None,
@@ -533,9 +612,15 @@ def _write_selection_manifest(
             "recovery": str(recovery),
         },
         "recovery_gate": {
+            "requested_metric": recovery_gate_metric,
+            "resolved_metric": None
+            if decision.empty or "recovery_gate_metric" not in decision.columns
+            else str(decision["recovery_gate_metric"].dropna().iloc[0]),
             "min_momentum_recovery_accuracy": min_momentum_recovery_accuracy,
             "min_overall_recovery_accuracy": min_overall_recovery_accuracy,
             "max_failures": max_failures,
+            "momentum_column": None if recommendation.empty else selected_row.get("momentum_recovery_gate_column"),
+            "overall_column": None if recommendation.empty else selected_row.get("overall_recovery_gate_column"),
         },
         "parameter_columns": PARAMETER_COLUMNS,
         "row_counts": {
@@ -632,6 +717,12 @@ def main() -> int:
         default="",
         help="Optional comma- or whitespace-separated subset of sessions to hold out.",
     )
+    parser.add_argument(
+        "--recovery-gate-metric",
+        choices=("auto", "strict", "certified-vs-exact"),
+        default="auto",
+        help="Recovery columns used for the gate; auto prefers certified-vs-exact columns when present.",
+    )
     args = parser.parse_args()
 
     tables = select_parameters(
@@ -644,6 +735,7 @@ def main() -> int:
         leave_one_session_out=args.leave_one_session_out,
         session_column=args.session_column,
         holdout_sessions=_parse_holdout_sessions(args.holdout_sessions),
+        recovery_gate_metric=args.recovery_gate_metric,
     )
     print("Top parameter rows:")
     print(tables["decision"].head(10).to_string(index=False))

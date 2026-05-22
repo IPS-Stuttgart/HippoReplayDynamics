@@ -13,12 +13,21 @@ from typing import Sequence
 import pandas as pd
 
 
+DEFAULT_PARAMETER_VALUES = {
+    # Older sweep artifacts predate this column; 8 is StateSpaceDecoderConfig's default.
+    "state_space_momentum_predicted_candidate_top_k": 8,
+}
+INTEGER_PARAMETER_COLUMNS = {
+    "state_space_momentum_candidate_top_k",
+    "state_space_momentum_predicted_candidate_top_k",
+}
 PARAMETER_COLUMNS = [
     "state_space_diffusion_sigma_cm_sqrt_s",
     "state_space_momentum_sigma_cm_sqrt_s",
     "state_space_momentum_initial_sigma_cm_sqrt_s",
     "state_space_momentum_velocity_decay",
     "state_space_momentum_candidate_top_k",
+    "state_space_momentum_predicted_candidate_top_k",
 ]
 
 SESSION_COLUMN_CANDIDATES = ["requested_session", "session"]
@@ -337,6 +346,9 @@ def _load_table(path: str | Path, default_name: str) -> pd.DataFrame:
     if not path.exists():
         raise FileNotFoundError(f"{path} does not exist")
     frame = pd.read_csv(path)
+    for column, default in DEFAULT_PARAMETER_VALUES.items():
+        if column not in frame.columns:
+            frame[column] = default
     missing = set(PARAMETER_COLUMNS) - set(frame.columns)
     if missing:
         raise ValueError(f"{path} is missing parameter columns: {sorted(missing)}")
@@ -395,7 +407,7 @@ def _prepare_recovery(frame: pd.DataFrame) -> pd.DataFrame:
 
 def _normalize_parameter_columns(frame: pd.DataFrame) -> None:
     for col in PARAMETER_COLUMNS:
-        if col == "state_space_momentum_candidate_top_k":
+        if col in INTEGER_PARAMETER_COLUMNS:
             frame[col] = pd.to_numeric(frame[col], errors="raise").astype("int64")
         else:
             frame[col] = pd.to_numeric(frame[col], errors="raise").round(8)

@@ -46,7 +46,7 @@ on:
         required: true
         default: "0.8 0.9 0.95 0.98"
       state_space_momentum_candidate_top_k_values:
-        description: "Whitespace- or comma-separated momentum candidate support sizes"
+        description: "Whitespace- or comma-separated momentum candidate support sizes; 0 means full-grid/exact audit"
         required: true
         default: "128"
       state_space_momentum_predicted_candidate_top_k_values:
@@ -186,7 +186,7 @@ jobs:
               ("DECAY_VALUES", decay_values),
           ):
               validate_float(name, values)
-          validate_int("TOP_K_VALUES", top_k_values)
+          validate_int("TOP_K_VALUES", top_k_values, allow_zero=True)
           validate_int("PREDICTED_TOP_K_VALUES", predicted_top_k_values, allow_zero=True)
 
           rows = []

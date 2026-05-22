@@ -456,10 +456,46 @@ def _candidate_support_config_diagnostics(
     }
 
 
+def _candidate_evidence_support_label(
+    candidates: list[np.ndarray],
+    n_bins: int,
+    valid_bin_mask: np.ndarray | None = None,
+) -> str:
+    """Classify candidate-pruned evidence as exact only for full support.
+
+    The candidate recursions use full-grid transition normalizers.  They are
+    therefore exact full-grid evidences when every time bin's support contains
+    every spatial bin allowed by the occupancy mask, and conservative truncated
+    lower bounds otherwise.  This distinction matters for paper-level model
+    comparison because exact rows can be normalized against diffusion/static
+    baselines, while truncated rows cannot.
+    """
+
+    expected = _full_candidate_index_set(n_bins, valid_bin_mask)
+    for current in candidates:
+        observed = np.sort(np.asarray(current, dtype=int))
+        if observed.shape != expected.shape or not np.array_equal(observed, expected):
+            return "truncated_full_grid"
+    return "exact_full_grid"
+
+
+def _full_candidate_index_set(n_bins: int, valid_bin_mask: np.ndarray | None) -> np.ndarray:
+    if valid_bin_mask is None:
+        return np.arange(n_bins, dtype=int)
+    mask = np.asarray(valid_bin_mask, dtype=bool)
+    if mask.shape != (n_bins,):
+        raise ValueError("valid_bin_mask must contain one boolean value per spatial bin")
+    if not np.any(mask):
+        raise ValueError("valid_bin_mask must contain at least one valid spatial bin")
+    return np.flatnonzero(mask).astype(int)
+
+
 def _candidate_selection_label(config: StateSpaceDecoderConfig) -> str:
     mass_threshold = config.momentum_candidate_mass_threshold
     if mass_threshold is not None and np.isfinite(float(mass_threshold)) and float(mass_threshold) > 0.0:
         return "adaptive_mass"
+    if int(config.momentum_candidate_top_k) <= 0:
+        return "full_grid"
     return "top_k"
 
 

@@ -12,11 +12,7 @@ from hipporeplayimm.pyrecest_models import (
 
 pytest.importorskip("pyrecest")
 
-from pyrecest.filters import (
-    build_replay_grid_likelihood_lookup,
-    replay_grid_log_likelihood_values,
-    update_position_grid_likelihood,
-)
+from pyrecest.filters import build_replay_grid_likelihood_lookup, replay_grid_log_likelihood_values, update_position_grid_likelihood
 
 
 def test_pyrecest_goal_particle_model_passes_transition_durations(monkeypatch):
@@ -242,12 +238,10 @@ def _install_dummy_pyrecest(monkeypatch):
     filters_module = types.ModuleType("pyrecest.filters")
     filters_module.GoalConditionedReplayParticleFilter = DummyGoalFilter
     filters_module.GoalConditionedReplayParticleIMMFilter = DummyIMMFilter
-    filters_module.adaptive_position_proposal_probability = _dummy_adaptive_position_proposal_probability
     filters_module.build_replay_grid_likelihood_lookup = _dummy_build_replay_grid_likelihood_lookup
-    filters_module.grid_proposal_weights = _dummy_grid_proposal_weights
-    filters_module.particle_position_log_posterior = _dummy_particle_position_log_posterior
-    filters_module.replay_grid_log_likelihood_values = _dummy_replay_grid_log_likelihood_values
+    filters_module.adaptive_position_proposal_probability = _dummy_adaptive_position_proposal_probability
     filters_module.update_position_grid_likelihood = _dummy_update_position_grid_likelihood
+    filters_module.particle_position_log_posterior = _dummy_particle_position_log_posterior
     distributions_module = types.ModuleType("pyrecest.distributions")
     distributions_module.GaussianDistribution = DummyGaussianDistribution
     distributions_module.LinearDiracDistribution = DummyLinearDiracDistribution
@@ -261,32 +255,8 @@ def _install_dummy_pyrecest(monkeypatch):
 
 
 def _dummy_build_replay_grid_likelihood_lookup(bin_centers, method="linear"):
-    del bin_centers, method
+    del method
     return types.SimpleNamespace(method="nearest")
-
-
-def _dummy_replay_grid_log_likelihood_values(
-    positions,
-    values,
-    bin_centers,
-    **_kwargs,
-):
-    positions = np.asarray(positions, dtype=float)
-    values = np.asarray(values, dtype=float)
-    bin_centers = np.asarray(bin_centers, dtype=float)
-    distances = np.sum((positions[:, None, :] - bin_centers[None, :, :]) ** 2, axis=2)
-    return values[np.argmin(distances, axis=1)]
-
-
-def _dummy_grid_proposal_weights(log_likelihood):
-    values = np.asarray(log_likelihood, dtype=float)
-    finite = np.isfinite(values)
-    weights = np.zeros_like(values, dtype=float)
-    if not np.any(finite):
-        return weights
-    shifted = np.exp(values[finite] - np.max(values[finite]))
-    weights[finite] = shifted / np.sum(shifted)
-    return weights
 
 
 def _dummy_adaptive_position_proposal_probability(filter_, base_probability, ess_threshold):
@@ -318,13 +288,7 @@ def _dummy_update_position_grid_likelihood(
     return filter_.update_position_likelihood(likelihood, return_log_marginal=True)
 
 
-def _dummy_particle_position_log_posterior(
-    positions,
-    weights,
-    bin_centers,
-    *_args,
-    **_kwargs,
-):
+def _dummy_particle_position_log_posterior(positions, weights, bin_centers, **_kwargs):
     positions = np.asarray(positions, dtype=float)
     weights = np.asarray(weights, dtype=float)
     bin_centers = np.asarray(bin_centers, dtype=float)

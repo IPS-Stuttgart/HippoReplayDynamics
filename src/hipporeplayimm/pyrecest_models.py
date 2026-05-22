@@ -5,7 +5,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 import numpy as np
-from scipy.spatial import cKDTree
 
 from .duration_dynamics import transition_durations_s
 from .encoding import LogEmissionTensor
@@ -28,54 +27,22 @@ def _is_missing_pyrecest_exception(exc: ModuleNotFoundError) -> bool:
     return module_name == "pyrecest" or module_name.startswith("pyrecest.")
 
 
-@dataclass(frozen=True)
-class _PyRecEstReplayGridHelpers:
-    adaptive_position_proposal_probability: object
-    build_replay_grid_likelihood_lookup: object
-    grid_proposal_weights: object
-    particle_position_log_posterior: object
-    replay_grid_log_likelihood_values: object
-    update_position_grid_likelihood: object
-
-
-def _load_pyrecest_replay_grid_helpers() -> _PyRecEstReplayGridHelpers:
-    """Load replay-grid helper functions from PyRecEst on demand.
-
-    HippoReplayIMM keeps PyRecEst optional for non-PyRecEst models.  The
-    PyRecEst-backed particle models nevertheless should not maintain private
-    copies of PyRecEst helper logic; this lazy import preserves the existing
-    optional-extra behavior while delegating reusable grid/proposal utilities to
-    PyRecEst.
-    """
-
+def _import_replay_grid_likelihood():
     try:
         from pyrecest import filters as pyrecest_filters
     except ModuleNotFoundError as exc:
         if _is_missing_pyrecest_exception(exc):
             raise _missing_pyrecest_error() from exc
         raise
-    required = (
-        "adaptive_position_proposal_probability",
-        "build_replay_grid_likelihood_lookup",
-        "grid_proposal_weights",
-        "particle_position_log_posterior",
-        "replay_grid_log_likelihood_values",
-        "update_position_grid_likelihood",
-    )
-    missing = [name for name in required if not hasattr(pyrecest_filters, name)]
-    if missing:
+
+    required = "update_position_grid_likelihood"
+    if not hasattr(pyrecest_filters, required):
         raise RuntimeError(
-            "PyRecEst-backed replay models require a PyRecEst version with "
-            f"replay-grid helpers; missing {', '.join(missing)}."
+            "PyRecEst-backed replay models require a PyRecEst version that provides "
+            "pyrecest.filters.replay_grid_likelihood. Apply the PyRecEst upstream "
+            "grid-likelihood patch or install a newer PyRecEst release."
         )
-    return _PyRecEstReplayGridHelpers(
-        adaptive_position_proposal_probability=pyrecest_filters.adaptive_position_proposal_probability,
-        build_replay_grid_likelihood_lookup=pyrecest_filters.build_replay_grid_likelihood_lookup,
-        grid_proposal_weights=pyrecest_filters.grid_proposal_weights,
-        particle_position_log_posterior=pyrecest_filters.particle_position_log_posterior,
-        replay_grid_log_likelihood_values=pyrecest_filters.replay_grid_log_likelihood_values,
-        update_position_grid_likelihood=pyrecest_filters.update_position_grid_likelihood,
-    )
+    return pyrecest_filters
 
 
 @dataclass
@@ -140,9 +107,8 @@ class PyRecEstGoalParticleModel:
         seed = _event_seed(self.random_seed, emissions)
         np.random.seed(seed)
 
-        grid_helpers = _load_pyrecest_replay_grid_helpers()
-        bin_tree = cKDTree(bin_centers)
-        likelihood_lookup = grid_helpers.build_replay_grid_likelihood_lookup(
+        grid_likelihood = _import_replay_grid_likelihood()
+        likelihood_lookup = grid_likelihood.build_replay_grid_likelihood_lookup(
             bin_centers,
             self.position_likelihood_interpolation,
         )
@@ -161,27 +127,25 @@ class PyRecEstGoalParticleModel:
                     dt=float(transition_durations[time_index - 1]),
                     use_semi_implicit_position_update=True,
                 )
-            proposal_probability, ess_fraction = grid_helpers.adaptive_position_proposal_probability(
+            proposal_probability, ess_fraction = grid_likelihood.adaptive_position_proposal_probability(
                 filter_,
                 self.position_proposal_probability,
                 self.position_proposal_ess_threshold,
             )
             pre_update_ess_fractions.append(ess_fraction)
             proposal_probabilities.append(proposal_probability)
-            logp += _update_filter_from_grid_likelihood(
+            logp += grid_likelihood.update_position_grid_likelihood(
                 filter_,
                 emissions.log_likelihood[time_index],
                 bin_centers,
-                bin_tree,
-                likelihood_lookup,
+                lookup=likelihood_lookup,
                 position_proposal_probability=proposal_probability,
             )
             trajectory_log_posterior.append(
-                grid_helpers.particle_position_log_posterior(
+                grid_likelihood.particle_position_log_posterior(
                     filter_.position_particles,
                     np.asarray(filter_.filter_state.w, dtype=float),
                     bin_centers,
-                    bin_tree,
                 )
             )
 
@@ -392,46 +356,6 @@ def _farthest_point_subset(points: np.ndarray, max_points: int) -> np.ndarray:
         min_dist2 = np.minimum(min_dist2, dist2)
         selected.append(int(np.argmax(min_dist2)))
     return points[np.asarray(selected, dtype=int)]
-
-
-def _update_filter_from_grid_likelihood(
-    filter_,
-    log_likelihood: np.ndarray,
-    bin_centers: np.ndarray,
-    bin_tree: cKDTree,
-    likelihood_lookup: object | None = None,
-    *,
-    position_proposal_probability: float = 0.0,
-) -> float:
-    grid_helpers = _load_pyrecest_replay_grid_helpers()
-    if likelihood_lookup is None:
-        likelihood_lookup = grid_helpers.build_replay_grid_likelihood_lookup(
-            bin_centers,
-            "linear",
-        )
-    return float(
-        grid_helpers.update_position_grid_likelihood(
-            filter_,
-            log_likelihood,
-            bin_centers,
-            lookup=likelihood_lookup,
-            bin_tree=bin_tree,
-            position_proposal_probability=position_proposal_probability,
-        )
-    )
-
-
-def _position_proposal_probability(
-    filter_,
-    base_probability: float,
-    ess_threshold: float | None,
-) -> tuple[float, float]:
-    grid_helpers = _load_pyrecest_replay_grid_helpers()
-    return grid_helpers.adaptive_position_proposal_probability(
-        filter_,
-        base_probability,
-        ess_threshold,
-    )
 
 
 def _goal_diagnostics(filter_, goals: np.ndarray) -> dict[str, float | int]:

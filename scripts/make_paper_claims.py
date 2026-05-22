@@ -183,6 +183,7 @@ def build_paper_claim_tables(
     return PaperClaimTables(
         event_deltas=event_deltas,
         session_summary=session_summary,
+        rat_summary=rat_summary,
         summary=summary,
         manifest=manifest,
     )

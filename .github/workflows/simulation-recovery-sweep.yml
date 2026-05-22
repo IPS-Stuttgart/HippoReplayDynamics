@@ -394,6 +394,9 @@ jobs:
     timeout-minutes: 20
 
     steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
       - name: Set up Python
         uses: actions/setup-python@v6
         with:
@@ -410,6 +413,15 @@ jobs:
           path: artifacts/simulation-recovery-sweep
           pattern: simulation-recovery-sweep-*
 
+      - name: Audit simulation-recovery sweep artifact completeness
+        run: |
+          set -euo pipefail
+          mkdir -p results/simulation-recovery-sweep-summary
+          python scripts/audit_sweep_completeness.py \
+            --mode simulation-recovery \
+            --artifact-root artifacts/simulation-recovery-sweep \
+            --output results/simulation-recovery-sweep-summary/simulation_recovery_sweep_matrix_completeness.csv
+
       - name: Aggregate simulation recovery sweep summaries
         run: |
           set -euo pipefail
@@ -420,6 +432,19 @@ jobs:
           import pandas as pd
 
           root = Path("artifacts/simulation-recovery-sweep")
+          def merge_completeness(comparison: pd.DataFrame, completeness_path: Path) -> pd.DataFrame:
+              if not completeness_path.exists() or "matrix_id" not in comparison.columns:
+                  return comparison
+              completeness = pd.read_csv(completeness_path)
+              if completeness.empty or "matrix_id" not in completeness.columns:
+                  return comparison
+              merged = completeness.merge(comparison, on="matrix_id", how="left", suffixes=("", "_metric"))
+              for column in list(comparison.columns):
+                  metric_column = f"{column}_metric"
+                  if column in merged.columns and metric_column in merged.columns:
+                      merged[column] = merged[metric_column].combine_first(merged[column])
+                      merged = merged.drop(columns=[metric_column])
+              return merged
           score_paths = sorted(root.glob("**/simulation_recovery_event_scores.csv"))
           summary_paths = sorted(root.glob("**/simulation_recovery_summary.csv"))
           confusion_paths = sorted(root.glob("**/simulation_recovery_confusion_matrix.csv"))
@@ -510,6 +535,8 @@ jobs:
                           )
               rows.append(row)
           comparison = pd.DataFrame(rows)
+          completeness_path = out_dir / "simulation_recovery_sweep_matrix_completeness.csv"
+          comparison = merge_completeness(comparison, completeness_path)
           sort_cols = [
               "momentum_certified_vs_exact_recovery_accuracy",
               "momentum_recovery_accuracy",

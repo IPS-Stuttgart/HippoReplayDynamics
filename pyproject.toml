@@ -18,7 +18,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-pyrecest = ["pyrecest==2.2.2"]
+pyrecest = ["pyrecest @ git+https://github.com/FlorianPfaff/PyRecEst.git@main"]
 dev = [
     "pytest>=8",
     "ruff>=0.8",
@@ -26,7 +26,7 @@ dev = [
 dev-pyrecest = [
     "pytest>=8",
     "ruff>=0.8",
-    "pyrecest==2.2.2",
+    "pyrecest @ git+https://github.com/FlorianPfaff/PyRecEst.git@main",
 ]
 
 [project.scripts]

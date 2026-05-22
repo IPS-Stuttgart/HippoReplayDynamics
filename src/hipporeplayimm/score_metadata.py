@@ -150,6 +150,10 @@ def apply_model_hyperparam_patch() -> None:
         state_space_momentum_candidate_max_k: int = 0
         state_space_momentum_predicted_candidate_top_k: int = 8
         state_space_momentum_candidate_source: str = "emission"
+        state_space_displacement_radius_bins: int = 2
+        state_space_displacement_position_sigma_cm: float = 0.0
+        state_space_displacement_transition_sigma_cm_sqrt_s: float = 0.0
+        state_space_displacement_prior_sigma_cm: float = 0.0
         goal_state_space_transition_sigma_cm_sqrt_s: float = 85.0
         goal_state_space_drift_speed_cm_s: float = 400.0
         goal_state_space_max_step_sigma: float = 4.0
@@ -225,6 +229,22 @@ def apply_model_hyperparam_patch() -> None:
                 momentum_predicted_candidate_top_k=cfg(config, "state_space_momentum_predicted_candidate_top_k", 8),
                 momentum_candidate_source=cfg(config, "state_space_momentum_candidate_source", "emission"),
                 valid_occupancy_threshold_s=cfg(config, "state_space_valid_occupancy_threshold_s", 0.0),
+                displacement_radius_bins=cfg(config, "state_space_displacement_radius_bins", 2),
+                displacement_position_sigma_cm=cfg(
+                    config,
+                    "state_space_displacement_position_sigma_cm",
+                    0.0,
+                ),
+                displacement_transition_sigma_cm_sqrt_s=cfg(
+                    config,
+                    "state_space_displacement_transition_sigma_cm_sqrt_s",
+                    0.0,
+                ),
+                displacement_prior_sigma_cm=cfg(
+                    config,
+                    "state_space_displacement_prior_sigma_cm",
+                    0.0,
+                ),
             ),
         )
 
@@ -339,6 +359,22 @@ def apply_model_hyperparam_patch() -> None:
             "state_space_momentum_candidate_source": str(
                 cfg(config, "state_space_momentum_candidate_source", "emission")
             ),
+            "state_space_displacement_radius_bins": int(
+                cfg(config, "state_space_displacement_radius_bins", 2)
+            ),
+            "state_space_displacement_position_sigma_cm": float(
+                cfg(config, "state_space_displacement_position_sigma_cm", 0.0)
+            ),
+            "state_space_displacement_transition_sigma_cm_sqrt_s": float(
+                cfg(
+                    config,
+                    "state_space_displacement_transition_sigma_cm_sqrt_s",
+                    0.0,
+                )
+            ),
+            "state_space_displacement_prior_sigma_cm": float(
+                cfg(config, "state_space_displacement_prior_sigma_cm", 0.0)
+            ),
             "state_space_valid_occupancy_threshold_s": float(cfg(config, "state_space_valid_occupancy_threshold_s", 0.0)),
             "goal_state_space_transition_sigma_cm_sqrt_s": float(cfg(config, "goal_state_space_transition_sigma_cm_sqrt_s", 85.0)),
             "goal_state_space_drift_speed_cm_s": float(cfg(config, "goal_state_space_drift_speed_cm_s", 400.0)),
@@ -403,6 +439,10 @@ def apply_model_hyperparam_patch() -> None:
         state_space_momentum_candidate_max_k: int,
         state_space_momentum_predicted_candidate_top_k: int,
         state_space_momentum_candidate_source: str,
+        state_space_displacement_radius_bins: int,
+        state_space_displacement_position_sigma_cm: float,
+        state_space_displacement_transition_sigma_cm_sqrt_s: float,
+        state_space_displacement_prior_sigma_cm: float,
         state_space_valid_occupancy_threshold_s: float,
         goal_state_space_transition_sigma_cm_sqrt_s: float,
         goal_state_space_drift_speed_cm_s: float,
@@ -480,6 +520,26 @@ def apply_model_hyperparam_patch() -> None:
                 ),
                 state_space_momentum_candidate_source,
             ),
+            state_space_displacement_radius_bins=_unique_int_from_columns(
+                scores_frame,
+                ("state_space_displacement_radius_bins",),
+                state_space_displacement_radius_bins,
+            ),
+            state_space_displacement_position_sigma_cm=_unique_float_from_columns(
+                scores_frame,
+                ("state_space_displacement_position_sigma_cm",),
+                state_space_displacement_position_sigma_cm,
+            ),
+            state_space_displacement_transition_sigma_cm_sqrt_s=_unique_float_from_columns(
+                scores_frame,
+                ("state_space_displacement_transition_sigma_cm_sqrt_s",),
+                state_space_displacement_transition_sigma_cm_sqrt_s,
+            ),
+            state_space_displacement_prior_sigma_cm=_unique_float_from_columns(
+                scores_frame,
+                ("state_space_displacement_prior_sigma_cm",),
+                state_space_displacement_prior_sigma_cm,
+            ),
             state_space_valid_occupancy_threshold_s=_unique_float_from_columns(scores_frame, ("state_space_valid_occupancy_threshold_s", "diagnostic_state_space_valid_occupancy_threshold_s"), state_space_valid_occupancy_threshold_s),
             goal_state_space_transition_sigma_cm_sqrt_s=_unique_float_from_columns(scores_frame, ("goal_state_space_transition_sigma_cm_sqrt_s", "diagnostic_goal_state_space_transition_sigma_cm_sqrt_s"), goal_state_space_transition_sigma_cm_sqrt_s),
             goal_state_space_drift_speed_cm_s=_unique_float_from_columns(scores_frame, ("goal_state_space_drift_speed_cm_s", "diagnostic_goal_state_space_drift_speed_cm_s"), goal_state_space_drift_speed_cm_s),
@@ -533,6 +593,10 @@ def apply_model_hyperparam_patch() -> None:
         state_space_momentum_candidate_max_k: int = 0,
         state_space_momentum_predicted_candidate_top_k: int = 8,
         state_space_momentum_candidate_source: str = "emission",
+        state_space_displacement_radius_bins: int = 2,
+        state_space_displacement_position_sigma_cm: float = 0.0,
+        state_space_displacement_transition_sigma_cm_sqrt_s: float = 0.0,
+        state_space_displacement_prior_sigma_cm: float = 0.0,
         state_space_valid_occupancy_threshold_s: float = 0.0,
         goal_state_space_transition_sigma_cm_sqrt_s: float = 85.0,
         goal_state_space_drift_speed_cm_s: float = 400.0,
@@ -596,6 +660,10 @@ def apply_model_hyperparam_patch() -> None:
             state_space_momentum_candidate_max_k=state_space_momentum_candidate_max_k,
             state_space_momentum_predicted_candidate_top_k=state_space_momentum_predicted_candidate_top_k,
             state_space_momentum_candidate_source=state_space_momentum_candidate_source,
+            state_space_displacement_radius_bins=state_space_displacement_radius_bins,
+            state_space_displacement_position_sigma_cm=state_space_displacement_position_sigma_cm,
+            state_space_displacement_transition_sigma_cm_sqrt_s=state_space_displacement_transition_sigma_cm_sqrt_s,
+            state_space_displacement_prior_sigma_cm=state_space_displacement_prior_sigma_cm,
             state_space_valid_occupancy_threshold_s=state_space_valid_occupancy_threshold_s,
             goal_state_space_transition_sigma_cm_sqrt_s=goal_state_space_transition_sigma_cm_sqrt_s,
             goal_state_space_drift_speed_cm_s=goal_state_space_drift_speed_cm_s,

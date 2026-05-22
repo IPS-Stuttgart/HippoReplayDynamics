@@ -5,6 +5,9 @@ from hipporeplayimm.encoding import EncodingConfig, EncodingModel
 from hipporeplayimm.simulation_recovery import (
     SimulationRecoveryConfig,
     add_evidence_columns,
+    _candidate_indices_with_path,
+    _candidate_path_support_diagnostics,
+    _recovery_state_space_config,
     build_scoring_models,
     confusion_matrix,
     emissions_from_counts,
@@ -126,6 +129,44 @@ def test_build_scoring_models_and_model_parser_accept_space_or_comma_lists():
     )
 
     assert list(models) == ["sorted-spike-state-space-stationary", "sorted-spike-state-space-momentum"]
+
+
+def test_candidate_path_diagnostics_measure_oracle_support_coverage():
+    path = np.asarray([0, 1, 2], dtype=int)
+    candidates = [
+        np.asarray([0], dtype=int),
+        np.asarray([1], dtype=int),
+        np.asarray([3], dtype=int),
+    ]
+
+    diagnostics = _candidate_path_support_diagnostics(candidates, path)
+    augmented = _candidate_indices_with_path(candidates, path)
+    augmented_diagnostics = _candidate_path_support_diagnostics(augmented, path)
+
+    assert diagnostics["candidate_true_bin_coverage"] == 2.0 / 3.0
+    assert diagnostics["candidate_true_pair_coverage"] == 0.5
+    assert diagnostics["candidate_true_triplet_coverage"] == 0.0
+    assert diagnostics["candidate_true_path_fully_supported"] == 0
+    assert augmented_diagnostics["candidate_true_path_fully_supported"] == 1
+    assert augmented_diagnostics["candidate_true_triplet_coverage"] == 1.0
+
+
+def test_recovery_state_space_config_enables_positive_occupancy_mask_by_default():
+    enabled = _recovery_state_space_config(
+        SimulationRecoveryConfig(
+            state_space=StateSpaceDecoderConfig(valid_occupancy_threshold_s=0.0),
+            score_with_occupancy=True,
+        )
+    )
+    disabled = _recovery_state_space_config(
+        SimulationRecoveryConfig(
+            state_space=StateSpaceDecoderConfig(valid_occupancy_threshold_s=0.0),
+            score_with_occupancy=False,
+        )
+    )
+
+    assert enabled.valid_occupancy_threshold_s > 0.0
+    assert disabled.valid_occupancy_threshold_s == 0.0
 
 
 def test_recovery_summary_does_not_mix_truncated_lower_bounds_with_exact_evidence():

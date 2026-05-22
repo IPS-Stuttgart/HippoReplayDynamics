@@ -6,7 +6,6 @@ from dataclasses import dataclass
 
 import numpy as np
 from scipy.spatial import cKDTree
-from scipy.special import logsumexp
 
 from .duration_dynamics import transition_durations_s
 from .encoding import LogEmissionTensor
@@ -27,6 +26,46 @@ def _missing_pyrecest_error() -> RuntimeError:
 def _is_missing_pyrecest_exception(exc: ModuleNotFoundError) -> bool:
     module_name = str(getattr(exc, "name", ""))
     return module_name == "pyrecest" or module_name.startswith("pyrecest.")
+
+
+@dataclass(frozen=True)
+class _PyRecEstReplayGridHelpers:
+    build_grid_likelihood_lookup: object
+    grid_log_likelihood_values: object
+    grid_proposal_weights: object
+    particle_position_log_posterior: object
+    effective_sample_size_fraction: object
+
+
+def _load_pyrecest_replay_grid_helpers() -> _PyRecEstReplayGridHelpers:
+    """Load replay-grid helper functions from PyRecEst on demand.
+
+    HippoReplayIMM keeps PyRecEst optional for non-PyRecEst models.  The
+    PyRecEst-backed particle models nevertheless should not maintain private
+    copies of PyRecEst helper logic; this lazy import preserves the existing
+    optional-extra behavior while delegating reusable grid/proposal utilities to
+    PyRecEst.
+    """
+
+    try:
+        from pyrecest.filters.replay_grid_likelihood import (
+            build_grid_likelihood_lookup,
+            effective_sample_size_fraction,
+            grid_log_likelihood_values,
+            grid_proposal_weights,
+            particle_position_log_posterior,
+        )
+    except ModuleNotFoundError as exc:
+        if _is_missing_pyrecest_exception(exc):
+            raise _missing_pyrecest_error() from exc
+        raise
+    return _PyRecEstReplayGridHelpers(
+        build_grid_likelihood_lookup=build_grid_likelihood_lookup,
+        grid_log_likelihood_values=grid_log_likelihood_values,
+        grid_proposal_weights=grid_proposal_weights,
+        particle_position_log_posterior=particle_position_log_posterior,
+        effective_sample_size_fraction=effective_sample_size_fraction,
+    )
 
 
 @dataclass
@@ -91,8 +130,9 @@ class PyRecEstGoalParticleModel:
         seed = _event_seed(self.random_seed, emissions)
         np.random.seed(seed)
 
+        grid_helpers = _load_pyrecest_replay_grid_helpers()
         bin_tree = cKDTree(bin_centers)
-        likelihood_lookup = _build_grid_likelihood_lookup(
+        likelihood_lookup = grid_helpers.build_grid_likelihood_lookup(
             bin_centers,
             self.position_likelihood_interpolation,
         )
@@ -127,7 +167,7 @@ class PyRecEstGoalParticleModel:
                 position_proposal_probability=proposal_probability,
             )
             trajectory_log_posterior.append(
-                _particle_position_log_posterior(
+                grid_helpers.particle_position_log_posterior(
                     filter_.position_particles,
                     np.asarray(filter_.filter_state.w, dtype=float),
                     bin_centers,
@@ -349,15 +389,16 @@ def _update_filter_from_grid_likelihood(
     log_likelihood: np.ndarray,
     bin_centers: np.ndarray,
     bin_tree: cKDTree,
-    likelihood_lookup: _GridLikelihoodLookup | None = None,
+    likelihood_lookup: object | None = None,
     *,
     position_proposal_probability: float = 0.0,
 ) -> float:
+    grid_helpers = _load_pyrecest_replay_grid_helpers()
     if likelihood_lookup is None:
-        likelihood_lookup = _build_grid_likelihood_lookup(bin_centers, "linear")
+        likelihood_lookup = grid_helpers.build_grid_likelihood_lookup(bin_centers, "linear")
 
     def log_likelihood_at(positions: np.ndarray) -> np.ndarray:
-        return _grid_log_likelihood_values(
+        return grid_helpers.grid_log_likelihood_values(
             positions,
             log_likelihood,
             bin_tree,
@@ -392,7 +433,7 @@ def _update_filter_from_grid_likelihood(
         update_log = filter_.update_position_likelihood_with_proposal(
             scaled_likelihood,
             position_proposal=bin_centers,
-            proposal_weights=_grid_proposal_weights(log_likelihood),
+            proposal_weights=grid_helpers.grid_proposal_weights(log_likelihood),
             proposal_probability=position_proposal_probability,
             return_log_marginal=True,
         )
@@ -404,136 +445,13 @@ def _update_filter_from_grid_likelihood(
     return max_log + float(update_log)
 
 
-@dataclass(frozen=True)
-class _GridLikelihoodLookup:
-    method: str
-    x_values: np.ndarray | None = None
-    y_values: np.ndarray | None = None
-    grid_indices: np.ndarray | None = None
-
-
-def _build_grid_likelihood_lookup(
-    bin_centers: np.ndarray,
-    method: str,
-) -> _GridLikelihoodLookup:
-    method = str(method).lower()
-    if method not in {"nearest", "linear"}:
-        raise ValueError("position_likelihood_interpolation must be 'nearest' or 'linear'")
-    if method == "nearest":
-        return _GridLikelihoodLookup(method="nearest")
-
-    bin_centers = np.asarray(bin_centers, dtype=float)
-    if bin_centers.ndim != 2 or bin_centers.shape[1] != 2:
-        return _GridLikelihoodLookup(method="nearest")
-
-    x_values = np.unique(bin_centers[:, 0])
-    y_values = np.unique(bin_centers[:, 1])
-    if x_values.size < 2 or y_values.size < 2:
-        return _GridLikelihoodLookup(method="nearest")
-    if x_values.size * y_values.size != bin_centers.shape[0]:
-        return _GridLikelihoodLookup(method="nearest")
-
-    x_index = {float(value): index for index, value in enumerate(x_values)}
-    y_index = {float(value): index for index, value in enumerate(y_values)}
-    grid_indices = np.full((x_values.size, y_values.size), -1, dtype=int)
-    for flat_index, center in enumerate(bin_centers):
-        try:
-            grid_indices[x_index[float(center[0])], y_index[float(center[1])]] = flat_index
-        except KeyError:
-            return _GridLikelihoodLookup(method="nearest")
-    if np.any(grid_indices < 0):
-        return _GridLikelihoodLookup(method="nearest")
-    return _GridLikelihoodLookup(
-        method="linear",
-        x_values=x_values,
-        y_values=y_values,
-        grid_indices=grid_indices,
-    )
-
-
-def _grid_log_likelihood_values(
-    positions: np.ndarray,
-    values: np.ndarray,
-    bin_tree: cKDTree,
-    lookup: _GridLikelihoodLookup,
-) -> np.ndarray:
-    if lookup.method != "linear":
-        return _nearest_grid_values(positions, values, bin_tree)
-
-    interpolated = _linear_rectilinear_grid_values(positions, values, lookup)
-    if np.all(np.isfinite(interpolated)):
-        return interpolated
-
-    nearest = _nearest_grid_values(positions, values, bin_tree)
-    return np.where(np.isfinite(interpolated), interpolated, nearest)
-
-
-def _linear_rectilinear_grid_values(
-    positions: np.ndarray,
-    values: np.ndarray,
-    lookup: _GridLikelihoodLookup,
-) -> np.ndarray:
-    positions = np.asarray(positions, dtype=float)
-    values = np.asarray(values, dtype=float)
-    if positions.ndim != 2 or positions.shape[1] != 2:
-        raise ValueError("positions must have shape (n_positions, 2)")
-    if lookup.x_values is None or lookup.y_values is None or lookup.grid_indices is None:
-        return np.full(positions.shape[0], np.nan, dtype=float)
-
-    x_values = lookup.x_values
-    y_values = lookup.y_values
-    grid_values = values[lookup.grid_indices]
-
-    x = positions[:, 0]
-    y = positions[:, 1]
-    inside = (
-        np.isfinite(x)
-        & np.isfinite(y)
-        & (x >= x_values[0])
-        & (x <= x_values[-1])
-        & (y >= y_values[0])
-        & (y <= y_values[-1])
-    )
-    output = np.full(positions.shape[0], np.nan, dtype=float)
-    if not np.any(inside):
-        return output
-
-    x0_index = np.searchsorted(x_values, x[inside], side="right") - 1
-    y0_index = np.searchsorted(y_values, y[inside], side="right") - 1
-    x0_index = np.clip(x0_index, 0, x_values.size - 2)
-    y0_index = np.clip(y0_index, 0, y_values.size - 2)
-    x1_index = x0_index + 1
-    y1_index = y0_index + 1
-
-    x0 = x_values[x0_index]
-    x1 = x_values[x1_index]
-    y0 = y_values[y0_index]
-    y1 = y_values[y1_index]
-    tx = (x[inside] - x0) / (x1 - x0)
-    ty = (y[inside] - y0) / (y1 - y0)
-
-    v00 = grid_values[x0_index, y0_index]
-    v10 = grid_values[x1_index, y0_index]
-    v01 = grid_values[x0_index, y1_index]
-    v11 = grid_values[x1_index, y1_index]
-    valid = np.isfinite(v00) & np.isfinite(v10) & np.isfinite(v01) & np.isfinite(v11)
-    interpolated = (
-        (1.0 - tx) * (1.0 - ty) * v00
-        + tx * (1.0 - ty) * v10
-        + (1.0 - tx) * ty * v01
-        + tx * ty * v11
-    )
-    inside_indices = np.flatnonzero(inside)
-    output[inside_indices[valid]] = interpolated[valid]
-    return output
-
-
 def _position_proposal_probability(
     filter_,
     base_probability: float,
     ess_threshold: float | None,
 ) -> tuple[float, float]:
-    ess_fraction = _effective_sample_size_fraction(
+    grid_helpers = _load_pyrecest_replay_grid_helpers()
+    ess_fraction = grid_helpers.effective_sample_size_fraction(
         np.asarray(filter_.filter_state.w, dtype=float)
     )
     if base_probability <= 0.0:
@@ -545,74 +463,6 @@ def _position_proposal_probability(
     if ess_fraction < float(ess_threshold):
         return float(base_probability), ess_fraction
     return 0.0, ess_fraction
-
-
-def _effective_sample_size_fraction(weights: np.ndarray) -> float:
-    weights = np.asarray(weights, dtype=float)
-    if weights.size == 0:
-        return 0.0
-    total = float(np.sum(weights))
-    if total <= 0.0 or not np.isfinite(total):
-        return 0.0
-    normalized = weights / total
-    ess = 1.0 / float(np.sum(normalized * normalized))
-    return float(ess / weights.size)
-
-
-def _grid_proposal_weights(log_likelihood: np.ndarray) -> np.ndarray:
-    values = np.asarray(log_likelihood, dtype=float)
-    finite = np.isfinite(values)
-    if not np.any(finite):
-        raise ValueError("all grid log-likelihoods are non-finite")
-    weights = np.zeros(values.shape, dtype=float)
-    weights[finite] = np.exp(values[finite] - float(logsumexp(values[finite])))
-    total = float(np.sum(weights))
-    if total <= 0.0:
-        raise ValueError("grid proposal weights have no mass")
-    return weights / total
-
-
-def _nearest_grid_values(
-    positions: np.ndarray,
-    values: np.ndarray,
-    bin_tree: cKDTree,
-) -> np.ndarray:
-    values = np.asarray(values, dtype=float)
-    indices = _nearest_bin_indices(positions, bin_tree)
-    output = values[indices]
-    if not np.all(np.isfinite(output)):
-        finite_values = values[np.isfinite(values)]
-        replacement = float(np.min(finite_values)) if finite_values.size else LOG_ZERO
-        output = np.where(np.isfinite(output), output, replacement)
-    return output
-
-
-def _nearest_bin_indices(positions: np.ndarray, bin_tree: cKDTree) -> np.ndarray:
-    positions = np.asarray(positions, dtype=float)
-    _, indices = bin_tree.query(positions, k=1)
-    return np.asarray(indices, dtype=int)
-
-
-def _particle_position_log_posterior(
-    positions: np.ndarray,
-    weights: np.ndarray,
-    bin_centers: np.ndarray,
-    bin_tree: cKDTree,
-) -> np.ndarray:
-    weights = np.asarray(weights, dtype=float)
-    total = float(np.sum(weights))
-    if total <= 0.0:
-        raise ValueError("particle weights must have positive total mass")
-    weights = weights / total
-    indices = _nearest_bin_indices(positions, bin_tree)
-    masses = np.zeros(bin_centers.shape[0], dtype=float)
-    np.add.at(masses, indices, weights)
-    if not np.any(masses > 0.0):
-        raise ValueError("particle posterior has no mass")
-    log_posterior = np.full(bin_centers.shape[0], LOG_ZERO, dtype=float)
-    positive = masses > 0.0
-    log_posterior[positive] = np.log(masses[positive])
-    return log_posterior - logsumexp(log_posterior)
 
 
 def _goal_diagnostics(filter_, goals: np.ndarray) -> dict[str, float | int]:

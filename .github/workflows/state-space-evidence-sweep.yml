@@ -53,6 +53,10 @@ on:
         description: "Whitespace- or comma-separated predicted momentum support augmentation sizes; 0 disables augmentation"
         required: true
         default: "0 4 8"
+      state_space_momentum_candidate_source_values:
+        description: "Whitespace- or comma-separated momentum/IMM candidate sources: emission or posterior. Use a reduced grid if enabling both."
+        required: true
+        default: "emission"
       state_space_stationary_sigma_cm:
         description: "State-space stationary transition sigma in cm"
         required: true
@@ -136,6 +140,7 @@ jobs:
           DECAY_VALUES: ${{ inputs.state_space_momentum_velocity_decay_values }}
           TOP_K_VALUES: ${{ inputs.state_space_momentum_candidate_top_k_values }}
           PREDICTED_TOP_K_VALUES: ${{ inputs.state_space_momentum_predicted_candidate_top_k_values }}
+          CANDIDATE_SOURCE_VALUES: ${{ inputs.state_space_momentum_candidate_source_values }}
         run: |
           set -euo pipefail
           mkdir -p results/state-space-evidence-sweep-plan
@@ -173,12 +178,19 @@ jobs:
           def slug(value: str) -> str:
               return re.sub(r"[^A-Za-z0-9]+", "-", value).strip("-").lower()
 
+          def validate_candidate_sources(name: str, values: list[str]) -> None:
+              allowed = {"emission", "posterior"}
+              bad = sorted(set(values) - allowed)
+              if bad:
+                  raise SystemExit(f"{name} must contain only {sorted(allowed)}; got {bad}")
+
           diffusion_values = split_values("DIFFUSION_VALUES")
           momentum_values = split_values("MOMENTUM_VALUES")
           momentum_initial_values = split_values("MOMENTUM_INITIAL_VALUES")
           decay_values = split_values("DECAY_VALUES")
           top_k_values = split_values("TOP_K_VALUES")
           predicted_top_k_values = split_values("PREDICTED_TOP_K_VALUES")
+          candidate_source_values = [value.lower().replace("_", "-") for value in split_values("CANDIDATE_SOURCE_VALUES")]
           for name, values in (
               ("DIFFUSION_VALUES", diffusion_values),
               ("MOMENTUM_VALUES", momentum_values),
@@ -188,10 +200,11 @@ jobs:
               validate_float(name, values)
           validate_int("TOP_K_VALUES", top_k_values)
           validate_int("PREDICTED_TOP_K_VALUES", predicted_top_k_values, allow_zero=True)
+          validate_candidate_sources("CANDIDATE_SOURCE_VALUES", candidate_source_values)
 
           rows = []
-          for diffusion, momentum, momentum_initial, decay, top_k, predicted_top_k in itertools.product(
-              diffusion_values, momentum_values, momentum_initial_values, decay_values, top_k_values, predicted_top_k_values
+          for diffusion, momentum, momentum_initial, decay, top_k, predicted_top_k, candidate_source in itertools.product(
+              diffusion_values, momentum_values, momentum_initial_values, decay_values, top_k_values, predicted_top_k_values, candidate_source_values
           ):
               matrix_id = (
                   f"d{slug(diffusion)}-"
@@ -199,7 +212,8 @@ jobs:
                   f"mi{slug(momentum_initial)}-"
                   f"decay{slug(decay)}-"
                   f"k{slug(top_k)}-"
-                  f"pk{slug(predicted_top_k)}"
+                  f"pk{slug(predicted_top_k)}-"
+                  f"src{slug(candidate_source)}"
               )
               rows.append(
                   {
@@ -210,6 +224,7 @@ jobs:
                       "state_space_momentum_velocity_decay": decay,
                       "state_space_momentum_candidate_top_k": top_k,
                       "state_space_momentum_predicted_candidate_top_k": predicted_top_k,
+                      "state_space_momentum_candidate_source": candidate_source,
                   }
               )
           if len(rows) > 256:
@@ -254,6 +269,7 @@ jobs:
       STATE_SPACE_MOMENTUM_VELOCITY_DECAY: ${{ matrix.state_space_momentum_velocity_decay }}
       STATE_SPACE_MOMENTUM_CANDIDATE_TOP_K: ${{ matrix.state_space_momentum_candidate_top_k }}
       STATE_SPACE_MOMENTUM_PREDICTED_CANDIDATE_TOP_K: ${{ matrix.state_space_momentum_predicted_candidate_top_k }}
+      STATE_SPACE_MOMENTUM_CANDIDATE_SOURCE: ${{ matrix.state_space_momentum_candidate_source }}
 
     steps:
       - name: Checkout repository
@@ -305,6 +321,7 @@ jobs:
             --state-space-momentum-velocity-decay "${STATE_SPACE_MOMENTUM_VELOCITY_DECAY}" \
             --state-space-momentum-candidate-top-k "${STATE_SPACE_MOMENTUM_CANDIDATE_TOP_K}" \
             --state-space-momentum-predicted-candidate-top-k "${STATE_SPACE_MOMENTUM_PREDICTED_CANDIDATE_TOP_K}" \
+            --state-space-momentum-candidate-source "${STATE_SPACE_MOMENTUM_CANDIDATE_SOURCE}" \
             --time-bin-s "${TIME_BIN_S}" \
             --spike-rate-scale "${SPIKE_RATE_SCALE}" \
             --bin-size-cm "${BIN_SIZE_CM}" \
@@ -338,6 +355,7 @@ jobs:
               "state_space_momentum_velocity_decay": float(os.environ["STATE_SPACE_MOMENTUM_VELOCITY_DECAY"]),
               "state_space_momentum_candidate_top_k": int(os.environ["STATE_SPACE_MOMENTUM_CANDIDATE_TOP_K"]),
               "state_space_momentum_predicted_candidate_top_k": int(os.environ["STATE_SPACE_MOMENTUM_PREDICTED_CANDIDATE_TOP_K"]),
+              "state_space_momentum_candidate_source": os.environ["STATE_SPACE_MOMENTUM_CANDIDATE_SOURCE"],
               "time_bin_s": float(os.environ["TIME_BIN_S"]),
               "spike_rate_scale": float(os.environ["SPIKE_RATE_SCALE"]),
               "bin_size_cm": float(os.environ["BIN_SIZE_CM"]),
@@ -421,6 +439,7 @@ jobs:
               "state_space_momentum_velocity_decay",
               "state_space_momentum_candidate_top_k",
               "state_space_momentum_predicted_candidate_top_k",
+              "state_space_momentum_candidate_source",
           ]
           pivot = scores.pivot_table(
               index=key_cols + ["session", "event_index"],

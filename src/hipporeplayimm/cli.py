@@ -267,11 +267,29 @@ def main(argv: list[str] | None = None) -> int:
     recovery_parser.add_argument("--state-space-momentum-sigma-cm-sqrt-s", type=float, default=None)
     recovery_parser.add_argument("--state-space-momentum-initial-sigma-cm-sqrt-s", type=float, default=None)
     recovery_parser.add_argument("--state-space-momentum-velocity-decay", type=float, default=0.95)
+    recovery_parser.add_argument(
+        "--state-space-momentum-velocity-decay-tau-s",
+        type=float,
+        default=StateSpaceDecoderConfig().momentum_velocity_decay_tau_s,
+        help="If >0, set per-transition momentum velocity decay to exp(-transition_duration_s/tau).",
+    )
     recovery_parser.add_argument("--state-space-momentum-candidate-top-k", type=int, default=128)
     recovery_parser.add_argument("--state-space-momentum-candidate-mass-threshold", type=float, default=None)
     recovery_parser.add_argument("--state-space-momentum-candidate-min-k", type=int, default=1)
     recovery_parser.add_argument("--state-space-momentum-candidate-max-k", type=int, default=0)
     recovery_parser.add_argument("--state-space-momentum-predicted-candidate-top-k", type=int, default=StateSpaceDecoderConfig().momentum_predicted_candidate_top_k)
+    recovery_parser.add_argument(
+        "--state-space-momentum-candidate-source",
+        choices=("emission", "posterior"),
+        default=StateSpaceDecoderConfig().momentum_candidate_source,
+        help="Candidate support for pruned momentum/IMM: emission top-k/mass, or train-only first-order posterior top-k/mass.",
+    )
+    recovery_parser.add_argument(
+        "--state-space-valid-occupancy-threshold-s",
+        type=float,
+        default=StateSpaceDecoderConfig().valid_occupancy_threshold_s,
+        help="If positive, restrict state-space priors and transition normalizers to occupied spatial bins.",
+    )
     recovery_parser.add_argument("--candidate-top-k", type=int, default=64)
     recovery_parser.add_argument("--stationary-sigma-cm", type=float, default=2.0)
     recovery_parser.add_argument("--diffusion-sigma-cm", type=float, default=12.0)
@@ -460,11 +478,14 @@ def _simulate_recovery(args: argparse.Namespace) -> int:
         momentum_sigma_cm_sqrt_s=args.state_space_momentum_sigma_cm_sqrt_s or shared_sigma,
         momentum_initial_sigma_cm_sqrt_s=args.state_space_momentum_initial_sigma_cm_sqrt_s or shared_sigma,
         momentum_velocity_decay=args.state_space_momentum_velocity_decay,
+        momentum_velocity_decay_tau_s=args.state_space_momentum_velocity_decay_tau_s,
         momentum_candidate_top_k=args.state_space_momentum_candidate_top_k,
         momentum_candidate_mass_threshold=args.state_space_momentum_candidate_mass_threshold,
         momentum_candidate_min_k=args.state_space_momentum_candidate_min_k,
         momentum_candidate_max_k=args.state_space_momentum_candidate_max_k,
         momentum_predicted_candidate_top_k=args.state_space_momentum_predicted_candidate_top_k,
+        momentum_candidate_source=args.state_space_momentum_candidate_source,
+        valid_occupancy_threshold_s=args.state_space_valid_occupancy_threshold_s,
     )
     config = SimulationRecoveryConfig(
         true_models=parse_model_list(args.true_models),

@@ -19,6 +19,8 @@ def _params(
     initial: float,
     decay: float,
     top_k: int,
+    predicted_top_k: int = 8,
+    candidate_source: str = "emission",
 ) -> dict[str, object]:
     return {
         "state_space_diffusion_sigma_cm_sqrt_s": diffusion,
@@ -26,6 +28,8 @@ def _params(
         "state_space_momentum_initial_sigma_cm_sqrt_s": initial,
         "state_space_momentum_velocity_decay": decay,
         "state_space_momentum_candidate_top_k": top_k,
+        "state_space_momentum_predicted_candidate_top_k": predicted_top_k,
+        "state_space_momentum_candidate_source": candidate_source,
     }
 
 
@@ -113,6 +117,84 @@ def test_select_parameters_prefers_recovered_momentum_config(tmp_path):
     assert "--state-space-diffusion-sigma-cm-sqrt-s 60.0" in cli_args
     assert "--state-space-momentum-velocity-decay 0.95" in cli_args
     assert "--state-space-momentum-candidate-top-k 128" in cli_args
+
+
+def test_select_parameters_keeps_candidate_support_dimensions_separate(tmp_path):
+    evidence = tmp_path / "evidence"
+    recovery = tmp_path / "recovery"
+    output = tmp_path / "selection"
+    unsupported_high_evidence = _params(
+        85.0,
+        85.0,
+        85.0,
+        0.95,
+        128,
+        predicted_top_k=0,
+        candidate_source="emission",
+    )
+    recovered_lower_evidence = _params(
+        85.0,
+        85.0,
+        85.0,
+        0.95,
+        128,
+        predicted_top_k=16,
+        candidate_source="posterior",
+    )
+    _write(
+        evidence,
+        "state_space_evidence_sweep_config_ranked.csv",
+        [
+            {
+                **unsupported_high_evidence,
+                "matrix_id": "evidence-pk0-emission",
+                "events": 10,
+                "momentum_beats_diffusion_events": 10,
+                "median_momentum_minus_diffusion_log_evidence": 5.0,
+                "mean_momentum_minus_diffusion_log_evidence": 5.5,
+            },
+            {
+                **recovered_lower_evidence,
+                "matrix_id": "evidence-pk16-posterior",
+                "events": 10,
+                "momentum_beats_diffusion_events": 7,
+                "median_momentum_minus_diffusion_log_evidence": 1.0,
+                "mean_momentum_minus_diffusion_log_evidence": 1.5,
+            },
+        ],
+    )
+    _write(
+        recovery,
+        "simulation_recovery_sweep_config_ranked.csv",
+        [
+            {
+                **recovered_lower_evidence,
+                "matrix_id": "recovery-pk16-posterior",
+                "failures": 0,
+                "overall_certified_vs_exact_recovery_accuracy": 0.8,
+                "momentum_certified_vs_exact_recovery_accuracy": 1.0,
+                "overall_recovery_accuracy": 0.5,
+                "momentum_recovery_accuracy": 0.0,
+            },
+        ],
+    )
+
+    tables = select_parameters(evidence, recovery, output=output, min_momentum_recovery_accuracy=0.5)
+
+    recommendation = tables["recommendation"].iloc[0]
+    assert recommendation["evidence_matrix_id"] == "evidence-pk16-posterior"
+    assert recommendation["recovery_matrix_id"] == "recovery-pk16-posterior"
+    assert recommendation["state_space_momentum_predicted_candidate_top_k"] == 16
+    assert recommendation["state_space_momentum_candidate_source"] == "posterior"
+    assert bool(recommendation["passes_recovery_gate"])
+    decision = tables["decision"].set_index("evidence_matrix_id")
+    assert not bool(decision.loc["evidence-pk0-emission", "has_recovery"])
+    workflow_inputs = (output / "state_space_selected_workflow_inputs.yml").read_text(encoding="utf-8")
+    assert "state_space_momentum_predicted_candidate_top_k: 16" in workflow_inputs
+    assert "state_space_momentum_candidate_source: posterior" in workflow_inputs
+    cli_args = (output / "state_space_selected_cli_args.txt").read_text(encoding="utf-8")
+    assert "--state-space-momentum-predicted-candidate-top-k 16" in cli_args
+    assert "--state-space-momentum-candidate-source posterior" in cli_args
 
 
 def test_select_parameters_falls_back_when_no_config_passes_gate(tmp_path):

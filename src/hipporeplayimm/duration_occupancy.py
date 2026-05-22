@@ -163,7 +163,9 @@ def _score_state_space_duration_with_occupancy(
             "mean_candidate_count": float(np.mean([len(curr) for curr in candidates])),
             "state_space_momentum_candidate_support": "derived" if candidate_indices is None else "provided",
             "state_space_momentum_trajectory_posterior": "smoothed_pair_marginal",
-            "state_space_momentum_evidence_support": "truncated_full_grid",
+            "state_space_momentum_evidence_support": _candidate_evidence_support(
+                candidates, emissions.n_bins, valid_bin_mask
+            ),
             **ss._candidate_support_config_diagnostics("state_space_momentum", self.config),
             "state_space_momentum_candidate_selection": (
                 "provided" if candidate_indices is not None else ss._candidate_selection_label(self.config)
@@ -222,7 +224,9 @@ def _score_state_space_duration_with_occupancy(
                 "state_space_imm_modes": ",".join(names),
                 "state_space_imm_candidate_support": "derived" if candidate_indices is None else "provided",
                 "state_space_imm_trajectory_posterior": "smoothed_pair_marginal",
-                "state_space_imm_evidence_support": "truncated_full_grid",
+                "state_space_imm_evidence_support": _candidate_evidence_support(
+                    candidates, emissions.n_bins, valid_bin_mask
+                ),
                 **ss._candidate_support_config_diagnostics("state_space_imm", self.config),
                 "state_space_imm_candidate_selection": (
                     "provided" if candidate_indices is not None else ss._candidate_selection_label(self.config)
@@ -285,6 +289,35 @@ def _duration_candidates(ss, model, emissions, bin_centers, candidate_indices, v
         valid_bin_mask,
     )
     return ss._validate_candidate_indices(candidates, emissions.n_time, emissions.n_bins)
+
+
+def _candidate_evidence_support(
+    candidates,
+    n_bins: int,
+    valid_bin_mask: np.ndarray | None,
+) -> str:
+    """Classify candidate recursions as exact only when support is the full grid.
+
+    Momentum and four-mode IMM recursions are lower-bound evidences when their
+    second-order path support is pruned.  When every time bin contains every
+    spatial state allowed by the occupancy mask, the same recursions are exact
+    full-grid dynamic programs and should be allowed into comparable-evidence
+    summaries.
+    """
+
+    if valid_bin_mask is None:
+        expected = int(n_bins)
+        for current in candidates:
+            if np.unique(np.asarray(current, dtype=int)).size != expected:
+                return "truncated_full_grid"
+        return "exact_full_grid"
+
+    valid = np.flatnonzero(np.asarray(valid_bin_mask, dtype=bool))
+    for current in candidates:
+        arr = np.unique(np.asarray(current, dtype=int))
+        if arr.size != valid.size or not np.array_equal(np.sort(arr), valid):
+            return "truncated_full_grid"
+    return "exact_full_grid"
 
 
 def _per_bin_sigma(sigma_cm_sqrt_s: float, dt_s: float) -> float:

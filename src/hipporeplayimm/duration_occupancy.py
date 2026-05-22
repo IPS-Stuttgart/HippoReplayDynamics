@@ -157,13 +157,21 @@ def _score_state_space_duration_with_occupancy(
             time_scales=time_scales,
             valid_bin_mask=valid_bin_mask,
         )
+        evidence_support = ss._candidate_evidence_support_label(
+            candidates,
+            emissions.n_bins,
+            valid_bin_mask,
+        )
+        candidate_support_label = "full_grid" if evidence_support == "exact_full_grid" else (
+            "derived" if candidate_indices is None else "provided"
+        )
         extra = {
             "mean_candidate_log_mass": float(np.mean(masses)),
             "min_candidate_log_mass": float(np.min(masses)),
             "mean_candidate_count": float(np.mean([len(curr) for curr in candidates])),
-            "state_space_momentum_candidate_support": "derived" if candidate_indices is None else "provided",
+            "state_space_momentum_candidate_support": candidate_support_label,
             "state_space_momentum_trajectory_posterior": "smoothed_pair_marginal",
-            "state_space_momentum_evidence_support": "truncated_full_grid",
+            "state_space_momentum_evidence_support": evidence_support,
             **ss._candidate_support_config_diagnostics("state_space_momentum", self.config),
             "state_space_momentum_candidate_selection": (
                 "provided" if candidate_indices is not None else ss._candidate_selection_label(self.config)
@@ -209,6 +217,14 @@ def _score_state_space_duration_with_occupancy(
             mode_stickiness=self.config.imm_mode_stickiness,
             valid_bin_mask=valid_bin_mask,
         )
+        evidence_support = ss._candidate_evidence_support_label(
+            candidates,
+            emissions.n_bins,
+            valid_bin_mask,
+        )
+        candidate_support_label = "full_grid" if evidence_support == "exact_full_grid" else (
+            "derived" if candidate_indices is None else "provided"
+        )
         names = ("stationary", "diffusion", "momentum", "jump")
         extra = {
             f"state_space_mode_{name}_terminal_probability": float(mode_post[-1, idx])
@@ -220,9 +236,9 @@ def _score_state_space_duration_with_occupancy(
                 "min_candidate_log_mass": float(np.min(masses)),
                 "mean_candidate_count": float(np.mean([len(curr) for curr in candidates])),
                 "state_space_imm_modes": ",".join(names),
-                "state_space_imm_candidate_support": "derived" if candidate_indices is None else "provided",
+                "state_space_imm_candidate_support": candidate_support_label,
                 "state_space_imm_trajectory_posterior": "smoothed_pair_marginal",
-                "state_space_imm_evidence_support": "truncated_full_grid",
+                "state_space_imm_evidence_support": evidence_support,
                 **ss._candidate_support_config_diagnostics("state_space_imm", self.config),
                 "state_space_imm_candidate_selection": (
                     "provided" if candidate_indices is not None else ss._candidate_selection_label(self.config)

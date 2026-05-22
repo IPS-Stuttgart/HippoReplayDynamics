@@ -8,6 +8,7 @@ from .state_space_model import (
     StateSpaceDecoderConfig,
     StateSpaceReplayModel,
     _augment_candidates_with_momentum_predictions,
+    _candidate_evidence_support_label,
     _candidate_selection_label,
     _candidate_support_config_diagnostics,
 )
@@ -66,6 +67,7 @@ __all__ = [
     "_backward_imm_pair_for_mode",
     "_backward_momentum_pair",
     "_candidate_log_masses",
+    "_candidate_evidence_support_label",
     "_candidate_selection_label",
     "_candidate_support_config_diagnostics",
     "_forward_backward_first_order",

@@ -36,6 +36,10 @@ on:
         description: "Maximum allowed failed synthetic recovery events"
         required: true
         default: "0"
+      recovery_gate_metric:
+        description: "Recovery metric used for the selection gate: auto, strict, or certified-vs-exact"
+        required: true
+        default: "certified-vs-exact"
       output_dir:
         description: "Output directory for parameter-selection CSVs"
         required: true
@@ -58,6 +62,7 @@ env:
   MIN_MOMENTUM_RECOVERY_ACCURACY: ${{ inputs.min_momentum_recovery_accuracy }}
   MIN_OVERALL_RECOVERY_ACCURACY: ${{ inputs.min_overall_recovery_accuracy }}
   MAX_FAILURES: ${{ inputs.max_failures }}
+  RECOVERY_GATE_METRIC: ${{ inputs.recovery_gate_metric }}
   OUTPUT_DIR: ${{ inputs.output_dir }}
 
 jobs:
@@ -71,6 +76,10 @@ jobs:
           test -n "$RECOVERY_RUN_ID"
           test "$EVIDENCE_ARTIFACT_NAME" != "state-space-evidence-sweep-summary-<run_id>"
           test "$RECOVERY_ARTIFACT_NAME" != "simulation-recovery-sweep-summary-<run_id>"
+          case "$RECOVERY_GATE_METRIC" in
+            auto|strict|certified-vs-exact) ;;
+            *) echo "::error ::Invalid recovery_gate_metric: $RECOVERY_GATE_METRIC"; exit 1 ;;
+          esac
 
       - name: Check out repository
         uses: actions/checkout@v6
@@ -111,7 +120,8 @@ jobs:
             --output "$OUTPUT_DIR" \
             --min-momentum-recovery-accuracy "$MIN_MOMENTUM_RECOVERY_ACCURACY" \
             --min-overall-recovery-accuracy "$MIN_OVERALL_RECOVERY_ACCURACY" \
-            --max-failures "$MAX_FAILURES"
+            --max-failures "$MAX_FAILURES" \
+            --recovery-gate-metric "$RECOVERY_GATE_METRIC"
           test -f "$OUTPUT_DIR/state_space_parameter_decision_table.csv"
           test -f "$OUTPUT_DIR/state_space_parameter_candidates.csv"
           test -f "$OUTPUT_DIR/state_space_parameter_recommendation.csv"

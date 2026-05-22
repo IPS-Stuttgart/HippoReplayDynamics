@@ -26,15 +26,24 @@ OPTIONAL_PARAMETER_DEFAULTS = {
     # not accidentally pooled across different candidate-support mechanisms.
     "state_space_momentum_predicted_candidate_top_k": 8,
     "state_space_momentum_candidate_source": "emission",
+    "state_space_displacement_radius_bins": 2,
+    "state_space_displacement_position_sigma_cm": 0.0,
+    "state_space_displacement_transition_sigma_cm_sqrt_s": 0.0,
+    "state_space_displacement_prior_sigma_cm": 0.0,
 }
 INTEGER_PARAMETER_COLUMNS = {
     "state_space_momentum_candidate_top_k",
     "state_space_momentum_predicted_candidate_top_k",
+    "state_space_displacement_radius_bins",
 }
 PARAMETER_COLUMNS = [
     *BASE_PARAMETER_COLUMNS,
     "state_space_momentum_predicted_candidate_top_k",
     "state_space_momentum_candidate_source",
+    "state_space_displacement_radius_bins",
+    "state_space_displacement_position_sigma_cm",
+    "state_space_displacement_transition_sigma_cm_sqrt_s",
+    "state_space_displacement_prior_sigma_cm",
 ]
 
 SESSION_COLUMN_CANDIDATES = ["requested_session", "session"]
@@ -59,6 +68,8 @@ RECOVERY_COUNT_COLUMNS = [
     "momentum_certified_vs_exact_recovered_events",
     "overall_certified_vs_exact_recovered_events",
     "diffusion_certified_vs_exact_recovered_events",
+    "exact_displacement_momentum_scored_events",
+    "exact_displacement_momentum_beats_diffusion_events",
 ]
 RECOVERY_ACCURACY_COLUMNS = [
     "overall_recovery_accuracy",
@@ -73,6 +84,8 @@ RECOVERY_ACCURACY_COLUMNS = [
     "overall_oracle_candidate_certified_vs_exact_recovery_accuracy",
     "momentum_oracle_candidate_certified_vs_exact_recovery_accuracy",
     "diffusion_oracle_candidate_certified_vs_exact_recovery_accuracy",
+    "exact_displacement_momentum_strict_best_fraction",
+    "exact_displacement_momentum_beats_diffusion_fraction",
 ]
 
 
@@ -253,6 +266,14 @@ def _build_decision_table(
     )
     decision["certified_vs_exact_diffusion_recovery_accuracy"] = decision.get(
         "diffusion_certified_vs_exact_recovery_accuracy",
+        pd.Series(float("nan"), index=decision.index),
+    )
+    decision["exact_displacement_momentum_beats_diffusion_fraction"] = decision.get(
+        "exact_displacement_momentum_beats_diffusion_fraction",
+        pd.Series(float("nan"), index=decision.index),
+    )
+    decision["exact_displacement_momentum_strict_best_fraction"] = decision.get(
+        "exact_displacement_momentum_strict_best_fraction",
         pd.Series(float("nan"), index=decision.index),
     )
     candidate_top_k = pd.to_numeric(
@@ -506,6 +527,8 @@ def _prepare_recovery(frame: pd.DataFrame) -> pd.DataFrame:
             "overall_oracle_candidate_certified_vs_exact_recovery_accuracy",
             "momentum_oracle_candidate_certified_vs_exact_recovery_accuracy",
             "diffusion_oracle_candidate_certified_vs_exact_recovery_accuracy",
+            "exact_displacement_momentum_strict_best_fraction",
+            "exact_displacement_momentum_beats_diffusion_fraction",
         ]
         if col in frame.columns
     ]

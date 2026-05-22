@@ -91,6 +91,10 @@ class BenchmarkConfig:
     state_space_momentum_candidate_max_k: int = 0
     state_space_momentum_predicted_candidate_top_k: int = 8
     state_space_momentum_candidate_source: str = "emission"
+    state_space_displacement_radius_bins: int = 2
+    state_space_displacement_position_sigma_cm: float = 0.0
+    state_space_displacement_transition_sigma_cm_sqrt_s: float = 0.0
+    state_space_displacement_prior_sigma_cm: float = 0.0
     goal_state_space_transition_sigma_cm_sqrt_s: float = DEFAULT_GOAL_TRANSITION_SIGMA_CM_SQRT_S
     goal_state_space_drift_speed_cm_s: float = DEFAULT_GOAL_DRIFT_SPEED_CM_S
     goal_state_space_max_step_sigma: float = DEFAULT_GOAL_MAX_STEP_SIGMA
@@ -627,6 +631,18 @@ def _benchmark_config_metadata(config: BenchmarkConfig) -> dict[str, object]:
         "state_space_momentum_predicted_candidate_top_k": int(
             config.state_space_momentum_predicted_candidate_top_k
         ),
+        "state_space_displacement_radius_bins": int(
+            config.state_space_displacement_radius_bins
+        ),
+        "state_space_displacement_position_sigma_cm": float(
+            config.state_space_displacement_position_sigma_cm
+        ),
+        "state_space_displacement_transition_sigma_cm_sqrt_s": float(
+            config.state_space_displacement_transition_sigma_cm_sqrt_s
+        ),
+        "state_space_displacement_prior_sigma_cm": float(
+            config.state_space_displacement_prior_sigma_cm
+        ),
         "goal_state_space_transition_sigma_cm_sqrt_s": float(
             config.goal_state_space_transition_sigma_cm_sqrt_s
         ),
@@ -759,6 +775,10 @@ def _state_space_decoder_config(config: BenchmarkConfig, mode: str) -> StateSpac
         ),
         momentum_candidate_source=str(config.state_space_momentum_candidate_source),
         valid_occupancy_threshold_s=float(config.state_space_valid_occupancy_threshold_s),
+        displacement_radius_bins=int(config.state_space_displacement_radius_bins),
+        displacement_position_sigma_cm=float(config.state_space_displacement_position_sigma_cm),
+        displacement_transition_sigma_cm_sqrt_s=float(config.state_space_displacement_transition_sigma_cm_sqrt_s),
+        displacement_prior_sigma_cm=float(config.state_space_displacement_prior_sigma_cm),
     )
 
 
@@ -791,6 +811,7 @@ def _build_models(
         "sorted-spike-state-space-fragmented": SortedSpikeStateSpaceReplayModel(mode="fragmented"),
         "sorted-spike-state-space-jump": SortedSpikeStateSpaceReplayModel(mode="jump"),
         "sorted-spike-state-space-momentum": SortedSpikeStateSpaceReplayModel(mode="momentum"),
+        "sorted-spike-state-space-displacement-momentum": SortedSpikeStateSpaceReplayModel(mode="displacement-momentum"),
         "sorted-spike-state-space-imm": SortedSpikeStateSpaceReplayModel(mode="imm"),
         "sorted-spike-state-space-first-order-imm": SortedSpikeStateSpaceReplayModel(mode="first-order-imm"),
         "sorted-spike-state-space-goal": goal_state_space_model("sorted-spike-state-space-goal"),
@@ -800,6 +821,7 @@ def _build_models(
         "state-space-fragmented": SortedSpikeStateSpaceReplayModel(mode="fragmented", name="state-space-fragmented"),
         "state-space-jump": SortedSpikeStateSpaceReplayModel(mode="jump", name="state-space-jump"),
         "state-space-momentum": SortedSpikeStateSpaceReplayModel(mode="momentum", name="state-space-momentum"),
+        "state-space-displacement-momentum": SortedSpikeStateSpaceReplayModel(mode="displacement-momentum", name="state-space-displacement-momentum"),
         "state-space-imm": SortedSpikeStateSpaceReplayModel(mode="imm", name="state-space-imm"),
         "state-space-first-order-imm": SortedSpikeStateSpaceReplayModel(mode="first-order-imm", name="state-space-first-order-imm"),
         "clusterless-state-space-stationary": ClusterlessStateSpaceReplayModel(mode="stationary", **clusterless_kwargs),
@@ -807,6 +829,7 @@ def _build_models(
         "clusterless-state-space-fragmented": ClusterlessStateSpaceReplayModel(mode="fragmented", **clusterless_kwargs),
         "clusterless-state-space-jump": ClusterlessStateSpaceReplayModel(mode="jump", **clusterless_kwargs),
         "clusterless-state-space-momentum": ClusterlessStateSpaceReplayModel(mode="momentum", **clusterless_kwargs),
+        "clusterless-state-space-displacement-momentum": ClusterlessStateSpaceReplayModel(mode="displacement-momentum", **clusterless_kwargs),
         "clusterless-state-space-imm": ClusterlessStateSpaceReplayModel(mode="imm", **clusterless_kwargs),
         "clusterless-state-space-first-order-imm": ClusterlessStateSpaceReplayModel(mode="first-order-imm", **clusterless_kwargs),
         "pyrecest-goal-particle": PyRecEstGoalParticleModel(

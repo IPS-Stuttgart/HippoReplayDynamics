@@ -11,6 +11,7 @@ from hipporeplayimm.state_space import (
     StateSpaceReplayModel,
     _augment_candidates_with_momentum_predictions,
     _candidate_evidence_support_label,
+    _displacement_lattice,
     _mass_retaining_candidate_indices,
 )
 
@@ -72,7 +73,7 @@ def test_state_space_modes_return_full_trajectory_posteriors():
     emissions = _synthetic_emissions()
     centers = np.array([[0.0, 0.0], [1.0, 0.0], [2.0, 0.0], [3.0, 0.0]])
 
-    for mode in ("stationary", "fragmented", "jump", "diffusion", "first-order-imm", "imm", "momentum"):
+    for mode in ("stationary", "fragmented", "jump", "diffusion", "first-order-imm", "imm", "momentum", "displacement-momentum"):
         config = StateSpaceDecoderConfig(mode=mode, momentum_candidate_top_k=4)
         score = SortedSpikeStateSpaceReplayModel(mode=mode, config=config).score(emissions, centers)
 
@@ -93,6 +94,12 @@ def test_state_space_modes_return_full_trajectory_posteriors():
             assert score.diagnostics["state_space_momentum_predicted_candidate_top_k"] == 8
             assert score.diagnostics["state_space_momentum_evidence_support"] == "exact_full_grid"
             assert score.diagnostics["mean_candidate_count"] == 4.0
+        if mode == "displacement-momentum":
+            assert score.diagnostics["state_space_displacement_momentum_evidence_support"] == "exact_full_grid"
+            assert score.diagnostics["state_space_displacement_momentum_state_support"] == "finite_displacement_grid"
+            assert score.diagnostics["state_space_displacement_state_count"] == 25
+            assert score.diagnostics["state_space_displacement_joint_state_count"] == 100
+            assert "state_space_displacement_transition_sigma_cm" in score.diagnostics
         if mode == "imm":
             assert score.diagnostics["state_space_imm_modes"] == "stationary,diffusion,momentum,jump"
             assert score.diagnostics["state_space_imm_evidence_support"] == "exact_full_grid"
@@ -337,6 +344,30 @@ def test_state_space_momentum_full_candidate_support_is_marked_exact():
     assert score.diagnostics["state_space_momentum_candidate_selection"] == "full_grid"
     assert score.diagnostics["state_space_momentum_candidate_support"] == "full_grid"
     assert score.diagnostics["state_space_momentum_evidence_support"] == "exact_full_grid"
+
+
+def test_displacement_momentum_uses_declared_finite_lattice():
+    emissions = _synthetic_emissions()
+    centers = np.array([[0.0, 0.0], [1.0, 0.0], [2.0, 0.0], [3.0, 0.0]])
+    config = StateSpaceDecoderConfig(
+        mode="displacement-momentum",
+        displacement_radius_bins=1,
+        displacement_position_sigma_cm=1.0,
+        displacement_transition_sigma_cm_sqrt_s=1.0,
+        displacement_prior_sigma_cm=1.0,
+    )
+
+    score = SortedSpikeStateSpaceReplayModel(mode="displacement-momentum", config=config).score(emissions, centers)
+    lattice = _displacement_lattice(centers, radius_bins=1)
+
+    assert lattice.shape == (9, 2)
+    assert np.isfinite(score.log_likelihood)
+    assert score.trajectory_log_posterior is not None
+    assert score.trajectory_log_posterior.shape == (emissions.n_time, emissions.n_bins)
+    assert np.allclose(logsumexp(score.trajectory_log_posterior, axis=1), 0.0)
+    assert score.diagnostics["state_space_displacement_state_count"] == 9
+    assert score.diagnostics["state_space_displacement_joint_state_count"] == 36
+    assert score.diagnostics["state_space_displacement_momentum_evidence_support"] == "exact_full_grid"
 
 
 def test_state_space_momentum_can_reuse_external_candidate_support():

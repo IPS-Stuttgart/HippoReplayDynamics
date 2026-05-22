@@ -25,6 +25,10 @@ from .state_space_candidates_momentum import (
     _init_pair_log_alpha,
     _score_momentum_candidates,
 )
+from .state_space_displacement_momentum import (
+    _displacement_lattice,
+    _score_displacement_momentum_exact,
+)
 from .state_space_first_order import (
     _apply_transition,
     _apply_transition_backward,
@@ -72,6 +76,7 @@ __all__ = [
     "_candidate_support_config_diagnostics",
     "_forward_backward_first_order",
     "_full_grid_normalized_pairwise_gaussian_log_prob",
+    "_displacement_lattice",
     "_gaussian_transition_matrix",
     "_init_imm_pair_log_alpha",
     "_init_pair_log_alpha",
@@ -86,6 +91,7 @@ __all__ = [
     "_scaled_emissions",
     "_score_first_order_imm",
     "_score_fragmented",
+    "_score_displacement_momentum_exact",
     "_score_imm_candidates",
     "_score_momentum_candidates",
     "_score_stationary",

@@ -50,6 +50,10 @@ class StateSpaceDecoderConfig:
     momentum_velocity_decay_tau_s: float = 0.0
     momentum_candidate_top_k: int = 128
     momentum_candidate_mass_threshold: float | None = None
+    displacement_radius_bins: int = 2
+    displacement_position_sigma_cm: float = 0.0
+    displacement_transition_sigma_cm_sqrt_s: float = 0.0
+    displacement_prior_sigma_cm: float = 0.0
     momentum_candidate_min_k: int = 1
     momentum_candidate_max_k: int = 0
     momentum_predicted_candidate_top_k: int = 8
@@ -72,7 +76,10 @@ class StateSpaceReplayModel:
     Candidate recursions keep full-grid prior and transition normalizers and
     drop off-support paths, so their evidences are conservative truncated
     full-grid evidences. They return candidate-supported per-bin posterior
-    marginals.
+    marginals. ``displacement-momentum`` is an exact finite-state surrogate over
+    ``(position, displacement)`` states. It is not the full pairwise momentum
+    model, but its evidence is exact over the declared finite displacement grid
+    and can be used as a comparable diagnostic row.
     """
 
     mode: str = "diffusion"
@@ -88,6 +95,7 @@ class StateSpaceReplayModel:
             "first-order-imm",
             "imm",
             "momentum",
+            "displacement-momentum",
         }
         if self.mode not in allowed:
             raise ValueError(f"mode must be one of {sorted(allowed)}")

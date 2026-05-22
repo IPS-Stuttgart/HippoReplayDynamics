@@ -43,6 +43,7 @@ _TRAJECTORY_MODELS = {
     "momentum",
     "momentum-reverse",
     "momentum-bidirectional",
+    "displacement-momentum",
     "imm",
     "first-order-imm",
     "goal",
@@ -321,6 +322,8 @@ def canonical_model_name(model: object) -> str:
             break
     if name.endswith("-marginalized"):
         name = name.removesuffix("-marginalized")
+    if name in {"velocity", "finite-displacement-momentum"}:
+        return "displacement-momentum"
     if name == "jump":
         return "fragmented"
     return name
@@ -364,7 +367,8 @@ def claims_markdown(summary: pd.DataFrame, session_effects: pd.DataFrame, *, exa
         "## Interpretation guardrails",
         "",
         "Momentum and IMM candidate-supported rows can be truncated full-grid lower bounds. "
-        "A lower-bound row is counted as a certified win only when it exceeds the exact comparator. "
+        "The finite-displacement momentum row is exact over its declared augmented state space. "
+        "A candidate lower-bound row is counted as a certified win only when it exceeds the exact comparator. "
         "A lower bound below an exact comparator is marked inconclusive rather than as a certified loss.",
         "",
         "## Session heterogeneity",
@@ -495,21 +499,33 @@ def _trajectory_effects(group: pd.DataFrame) -> dict[str, object]:
 
 
 def _momentum_diffusion_effects(group: pd.DataFrame) -> dict[str, object]:
-    momentum = _best_row(group[group["canonical_model"].eq("momentum")])
+    candidate_momentum = _best_row(group[group["canonical_model"].eq("momentum")])
+    exact_displacement_momentum = _best_row(group[group["canonical_model"].eq("displacement-momentum")])
+    momentum = _best_row(group[group["canonical_model"].isin(["momentum", "displacement-momentum"])])
     diffusion = _best_row(group[group["canonical_model"].eq("diffusion")])
     out: dict[str, object] = {
         "momentum_model": _row_value(momentum, "model"),
+        "momentum_family_canonical_model": _row_value(momentum, "canonical_model"),
         "momentum_log_evidence": _row_float(momentum, "log_evidence"),
         "momentum_evidence_support": _row_value(momentum, "evidence_support"),
         "momentum_evidence_comparable": _row_bool(momentum, "evidence_comparable"),
+        "candidate_momentum_model": _row_value(candidate_momentum, "model"),
+        "candidate_momentum_log_evidence": _row_float(candidate_momentum, "log_evidence"),
+        "candidate_momentum_evidence_support": _row_value(candidate_momentum, "evidence_support"),
+        "exact_displacement_momentum_model": _row_value(exact_displacement_momentum, "model"),
+        "exact_displacement_momentum_log_evidence": _row_float(exact_displacement_momentum, "log_evidence"),
+        "exact_displacement_momentum_evidence_support": _row_value(exact_displacement_momentum, "evidence_support"),
+        "exact_displacement_momentum_evidence_comparable": _row_bool(exact_displacement_momentum, "evidence_comparable"),
         "diffusion_model": _row_value(diffusion, "model"),
         "diffusion_log_evidence": _row_float(diffusion, "log_evidence"),
         "diffusion_evidence_support": _row_value(diffusion, "evidence_support"),
         "diffusion_evidence_comparable": _row_bool(diffusion, "evidence_comparable"),
         "momentum_minus_diffusion_log_evidence": np.nan,
+        "exact_displacement_momentum_minus_diffusion_log_evidence": np.nan,
         "momentum_beats_diffusion_reported": np.nan,
         "momentum_beats_diffusion_certified": np.nan,
         "diffusion_beats_momentum_certified": np.nan,
+        "exact_displacement_momentum_beats_diffusion": np.nan,
         "momentum_vs_diffusion_certification": "missing_pair",
     }
     if momentum is None or diffusion is None:
@@ -522,6 +538,11 @@ def _momentum_diffusion_effects(group: pd.DataFrame) -> dict[str, object]:
     momentum_is_lower_bound = momentum_support == TRUNCATED_EVIDENCE_SUPPORT
     out["momentum_minus_diffusion_log_evidence"] = float(delta)
     out["momentum_beats_diffusion_reported"] = bool(delta > 0.0)
+    if exact_displacement_momentum is not None:
+        exact_delta = _row_float(exact_displacement_momentum, "log_evidence") - _row_float(diffusion, "log_evidence")
+        exact_comparable = bool(exact_displacement_momentum.get("evidence_comparable", False)) and diffusion_comparable
+        out["exact_displacement_momentum_minus_diffusion_log_evidence"] = float(exact_delta)
+        out["exact_displacement_momentum_beats_diffusion"] = bool(exact_comparable and exact_delta > 0.0)
 
     if momentum_comparable and diffusion_comparable:
         out["momentum_beats_diffusion_certified"] = bool(delta > 0.0)

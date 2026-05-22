@@ -275,6 +275,10 @@ def main(argv: list[str] | None = None) -> int:
         help="If >0, set per-transition momentum velocity decay to exp(-transition_duration_s/tau).",
     )
     recovery_parser.add_argument("--state-space-momentum-candidate-top-k", type=int, default=128)
+    recovery_parser.add_argument("--state-space-displacement-radius-bins", type=int, default=StateSpaceDecoderConfig().displacement_radius_bins)
+    recovery_parser.add_argument("--state-space-displacement-position-sigma-cm", type=float, default=StateSpaceDecoderConfig().displacement_position_sigma_cm)
+    recovery_parser.add_argument("--state-space-displacement-transition-sigma-cm-sqrt-s", type=float, default=StateSpaceDecoderConfig().displacement_transition_sigma_cm_sqrt_s)
+    recovery_parser.add_argument("--state-space-displacement-prior-sigma-cm", type=float, default=StateSpaceDecoderConfig().displacement_prior_sigma_cm)
     recovery_parser.add_argument("--state-space-momentum-candidate-mass-threshold", type=float, default=None)
     recovery_parser.add_argument("--state-space-momentum-candidate-min-k", type=int, default=1)
     recovery_parser.add_argument("--state-space-momentum-candidate-max-k", type=int, default=0)
@@ -487,6 +491,10 @@ def _simulate_recovery(args: argparse.Namespace) -> int:
         momentum_candidate_max_k=args.state_space_momentum_candidate_max_k,
         momentum_predicted_candidate_top_k=args.state_space_momentum_predicted_candidate_top_k,
         momentum_candidate_source=args.state_space_momentum_candidate_source,
+        displacement_radius_bins=args.state_space_displacement_radius_bins,
+        displacement_position_sigma_cm=args.state_space_displacement_position_sigma_cm,
+        displacement_transition_sigma_cm_sqrt_s=args.state_space_displacement_transition_sigma_cm_sqrt_s,
+        displacement_prior_sigma_cm=args.state_space_displacement_prior_sigma_cm,
         valid_occupancy_threshold_s=args.state_space_valid_occupancy_threshold_s,
     )
     true_state_space = _true_state_space_config_from_args(args, state_space)
@@ -877,6 +885,30 @@ def _add_state_space_arguments(parser: argparse.ArgumentParser) -> None:
         default=defaults.momentum_predicted_candidate_top_k,
     )
     parser.add_argument(
+        "--state-space-displacement-radius-bins",
+        type=int,
+        default=defaults.displacement_radius_bins,
+        help="Exact displacement-momentum decoder lattice radius, in grid bins.",
+    )
+    parser.add_argument(
+        "--state-space-displacement-position-sigma-cm",
+        type=float,
+        default=defaults.displacement_position_sigma_cm,
+        help="Position residual sigma for exact displacement-momentum; <=0 derives it from grid spacing.",
+    )
+    parser.add_argument(
+        "--state-space-displacement-transition-sigma-cm-sqrt-s",
+        type=float,
+        default=defaults.displacement_transition_sigma_cm_sqrt_s,
+        help="Displacement-state transition noise; <=0 inherits the momentum sigma.",
+    )
+    parser.add_argument(
+        "--state-space-displacement-prior-sigma-cm",
+        type=float,
+        default=defaults.displacement_prior_sigma_cm,
+        help="Initial displacement prior sigma; <=0 inherits the initial momentum sigma.",
+    )
+    parser.add_argument(
         "--state-space-momentum-candidate-source",
         choices=("emission", "posterior"),
         default=defaults.momentum_candidate_source,
@@ -1146,6 +1178,10 @@ def _state_space_scalar_kwargs(args: argparse.Namespace) -> dict[str, float | in
         "state_space_momentum_candidate_max_k": args.state_space_momentum_candidate_max_k,
         "state_space_momentum_predicted_candidate_top_k": args.state_space_momentum_predicted_candidate_top_k,
         "state_space_momentum_candidate_source": args.state_space_momentum_candidate_source,
+        "state_space_displacement_radius_bins": args.state_space_displacement_radius_bins,
+        "state_space_displacement_position_sigma_cm": args.state_space_displacement_position_sigma_cm,
+        "state_space_displacement_transition_sigma_cm_sqrt_s": args.state_space_displacement_transition_sigma_cm_sqrt_s,
+        "state_space_displacement_prior_sigma_cm": args.state_space_displacement_prior_sigma_cm,
     }
 
 

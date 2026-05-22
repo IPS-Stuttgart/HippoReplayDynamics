@@ -129,6 +129,18 @@ def _score_state_space_duration_with_occupancy(
                 "state_space_imm_evidence_support": "exact_full_grid",
             }
         )
+    elif self.mode == "displacement-momentum":
+        from .state_space_displacement_momentum import _score_displacement_momentum_exact
+
+        logp, trajectory, displacement_post, displacement_extra = _score_displacement_momentum_exact(
+            emissions,
+            bin_centers,
+            self.config,
+            durations,
+            valid_bin_mask=valid_bin_mask,
+        )
+        transition_sigma_cm = float(displacement_extra["state_space_displacement_transition_sigma_cm"])
+        extra = displacement_extra
     elif self.mode == "momentum":
         candidates = _duration_candidates(ss, self, emissions, bin_centers, candidate_indices, valid_bin_mask)
         momentum_sigmas = _per_transition_sigmas(
@@ -264,6 +276,10 @@ def _score_state_space_duration_with_occupancy(
         "state_space_momentum_sigma_cm_sqrt_s": float(self.config.momentum_sigma_cm_sqrt_s),
         "state_space_momentum_initial_sigma_cm_sqrt_s": float(self.config.momentum_initial_sigma_cm_sqrt_s),
         "state_space_momentum_velocity_decay": float(self.config.momentum_velocity_decay),
+        "state_space_displacement_radius_bins": int(getattr(self.config, "displacement_radius_bins", 0)),
+        "state_space_displacement_position_sigma_cm": float(getattr(self.config, "displacement_position_sigma_cm", 0.0)),
+        "state_space_displacement_transition_sigma_cm_sqrt_s": float(getattr(self.config, "displacement_transition_sigma_cm_sqrt_s", 0.0)),
+        "state_space_displacement_prior_sigma_cm": float(getattr(self.config, "displacement_prior_sigma_cm", 0.0)),
         "state_space_momentum_velocity_decay_tau_s": float(self.config.momentum_velocity_decay_tau_s),
         "state_space_valid_occupancy_threshold_s": float(self.config.valid_occupancy_threshold_s),
         "state_space_transition_sigma_cm": float(transition_sigma_cm),

@@ -80,6 +80,7 @@ _TRAJ = {
     "sorted-spike-state-space-momentum",
     "sorted-spike-state-space-momentum-reverse",
     "sorted-spike-state-space-momentum-bidirectional",
+    "sorted-spike-state-space-displacement-momentum",
     "sorted-spike-state-space-first-order-imm",
     "sorted-spike-state-space-imm",
     "sorted-spike-state-space-goal",
@@ -90,6 +91,7 @@ _TRAJ = {
     "clusterless-state-space-fragmented",
     "clusterless-state-space-jump",
     "clusterless-state-space-momentum",
+    "clusterless-state-space-displacement-momentum",
     "clusterless-state-space-first-order-imm",
     "clusterless-state-space-imm",
 }
@@ -185,6 +187,10 @@ def _models(args, session=None) -> dict[str, object]:
             momentum_predicted_candidate_top_k=getattr(args, "state_space_momentum_predicted_candidate_top_k", 8),
             momentum_candidate_source=getattr(args, "state_space_momentum_candidate_source", "emission"),
             valid_occupancy_threshold_s=getattr(args, "state_space_valid_occupancy_threshold_s", 0.0),
+            displacement_radius_bins=getattr(args, "state_space_displacement_radius_bins", 2),
+            displacement_position_sigma_cm=getattr(args, "state_space_displacement_position_sigma_cm", 0.0),
+            displacement_transition_sigma_cm_sqrt_s=getattr(args, "state_space_displacement_transition_sigma_cm_sqrt_s", 0.0),
+            displacement_prior_sigma_cm=getattr(args, "state_space_displacement_prior_sigma_cm", 0.0),
         )
 
     def state_space_model(mode: str) -> SortedSpikeStateSpaceReplayModel:
@@ -248,6 +254,7 @@ def _models(args, session=None) -> dict[str, object]:
         "sorted-spike-state-space-jump": state_space_model("jump"),
         "sorted-spike-state-space-momentum": forward_momentum_state_space,
         "sorted-spike-state-space-momentum-reverse": reverse_momentum_state_space,
+        "sorted-spike-state-space-displacement-momentum": state_space_model("displacement-momentum"),
         "sorted-spike-state-space-momentum-bidirectional": BidirectionalReplayModel(
             forward_momentum_state_space,
             reverse_momentum_state_space,
@@ -268,6 +275,7 @@ def _models(args, session=None) -> dict[str, object]:
         "clusterless-state-space-fragmented": clusterless_state_space_model("fragmented"),
         "clusterless-state-space-jump": clusterless_state_space_model("jump"),
         "clusterless-state-space-momentum": clusterless_state_space_model("momentum"),
+        "clusterless-state-space-displacement-momentum": clusterless_state_space_model("displacement-momentum"),
         "clusterless-state-space-first-order-imm": clusterless_state_space_model("first-order-imm"),
         "clusterless-state-space-imm": clusterless_state_space_model("imm"),
     }
@@ -416,6 +424,10 @@ def _state_space_metadata(args) -> dict[str, object]:
         "state_space_momentum_candidate_source": str(getattr(args, "state_space_momentum_candidate_source", "emission")),
         "state_space_valid_occupancy_threshold_s": float(getattr(args, "state_space_valid_occupancy_threshold_s", 0.0)),
         "state_space_common_support_top_k": int(getattr(args, "state_space_common_support_top_k", 0)),
+        "state_space_displacement_radius_bins": int(getattr(args, "state_space_displacement_radius_bins", 2)),
+        "state_space_displacement_position_sigma_cm": float(getattr(args, "state_space_displacement_position_sigma_cm", 0.0)),
+        "state_space_displacement_transition_sigma_cm_sqrt_s": float(getattr(args, "state_space_displacement_transition_sigma_cm_sqrt_s", 0.0)),
+        "state_space_displacement_prior_sigma_cm": float(getattr(args, "state_space_displacement_prior_sigma_cm", 0.0)),
         "goal_state_space_transition_sigma_cm_sqrt_s": float(getattr(args, "goal_state_space_transition_sigma_cm_sqrt_s", DEFAULT_GOAL_TRANSITION_SIGMA_CM_SQRT_S)),
         "goal_state_space_drift_speed_cm_s": float(getattr(args, "goal_state_space_drift_speed_cm_s", DEFAULT_GOAL_DRIFT_SPEED_CM_S)),
         "goal_state_space_max_step_sigma": float(getattr(args, "goal_state_space_max_step_sigma", DEFAULT_GOAL_MAX_STEP_SIGMA)),
@@ -796,6 +808,10 @@ def main() -> int:
     )
     p.add_argument("--state-space-momentum-candidate-top-k", type=int, default=256)
     p.add_argument("--state-space-momentum-predicted-candidate-top-k", type=int, default=16)
+    p.add_argument("--state-space-displacement-radius-bins", type=int, default=2)
+    p.add_argument("--state-space-displacement-position-sigma-cm", type=float, default=0.0)
+    p.add_argument("--state-space-displacement-transition-sigma-cm-sqrt-s", type=float, default=0.0)
+    p.add_argument("--state-space-displacement-prior-sigma-cm", type=float, default=0.0)
     p.add_argument(
         "--state-space-momentum-candidate-mass-threshold",
         type=_optional_float_argument,

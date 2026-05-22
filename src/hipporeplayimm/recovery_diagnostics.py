@@ -42,6 +42,9 @@ _CANDIDATE_METRIC_COLUMNS = (
     "candidate_true_path_fully_supported",
     "candidate_true_path_missing_bins",
 )
+_DIFFUSION_SUFFIX = "diffusion"
+_CANDIDATE_MOMENTUM_SUFFIX = "momentum"
+_EXACT_DISPLACEMENT_MOMENTUM_SUFFIX = "displacement-momentum"
 
 
 @dataclass
@@ -230,6 +233,7 @@ def _event_diagnostic_row(
         "expected_minus_best_comparable_log_evidence": expected_minus_best_comparable,
     }
     row.update(_candidate_metric_values(expected))
+    row.update(_exact_displacement_momentum_values(scored, comparable, strict_best_model))
     row["failure_mode"] = _classify_failure_mode(row)
     return row
 
@@ -264,6 +268,23 @@ def _diagnostic_summary_row(label: str, group: pd.DataFrame) -> dict[str, object
         row[f"mean_{diagnostic_column}"] = float(values.mean()) if values.notna().any() else np.nan
         if diagnostic_column == "expected_candidate_true_path_fully_supported":
             row["expected_true_path_fully_supported_events"] = int(values.fillna(0).astype(bool).sum())
+    if "exact_displacement_momentum_scored" in group:
+        scored = group["exact_displacement_momentum_scored"].fillna(False).astype(bool)
+        exact_wins = group.get(
+            "exact_displacement_momentum_is_strict_best",
+            pd.Series(False, index=group.index),
+        ).fillna(False).astype(bool)
+        beats_diffusion = group.get(
+            "exact_displacement_momentum_beats_diffusion_exact",
+            pd.Series(False, index=group.index),
+        ).fillna(False).astype(bool)
+        deltas = pd.to_numeric(group.get("exact_displacement_momentum_minus_diffusion_log_evidence", pd.Series(dtype=float)), errors="coerce")
+        row["exact_displacement_momentum_scored_events"] = int(scored.sum())
+        row["exact_displacement_momentum_strict_best_events"] = int(exact_wins.sum())
+        row["exact_displacement_momentum_strict_best_fraction"] = _safe_fraction(int(exact_wins.sum()), n_events)
+        row["exact_displacement_momentum_beats_diffusion_events"] = int(beats_diffusion.sum())
+        row["exact_displacement_momentum_beats_diffusion_fraction"] = _safe_fraction(int(beats_diffusion.sum()), int(deltas.notna().sum()))
+        row["mean_exact_displacement_momentum_minus_diffusion_log_evidence"] = float(deltas.mean()) if deltas.notna().any() else np.nan
     for mode, count in group["failure_mode"].astype(str).value_counts().items():
         row[f"failure_mode_{_slug(mode)}_events"] = int(count)
     return row
@@ -278,6 +299,11 @@ def _classify_failure_mode(row: dict[str, object]) -> str:
         return "strict_recovered"
     if bool(row.get("certified_vs_exact_recovered_expected_model", False)):
         return "strict_gate_excluded_certified_lower_bound"
+    if (
+        str(row.get("true_model", "")).lower() == "momentum"
+        and bool(row.get("exact_displacement_momentum_beats_diffusion_exact", False))
+    ):
+        return "candidate_momentum_failed_but_exact_displacement_recovers"
     triplet_coverage = _coerce_float(row.get("expected_candidate_true_triplet_coverage"), np.nan)
     full_path_supported = _coerce_float(row.get("expected_candidate_true_path_fully_supported"), np.nan)
     if np.isfinite(full_path_supported) and full_path_supported < 1.0:
@@ -300,6 +326,47 @@ def _candidate_metric_values(expected: pd.Series | None) -> dict[str, object]:
     for column in _CANDIDATE_METRIC_COLUMNS:
         out[f"expected_{column}"] = np.nan if expected is None else _row_float(expected, column, np.nan)
     return out
+
+
+def _exact_displacement_momentum_values(
+    scored: pd.DataFrame,
+    comparable: pd.DataFrame,
+    strict_best_model: str,
+) -> dict[str, object]:
+    exact_momentum = _best_log_evidence_row(_rows_with_model_suffix(scored, _EXACT_DISPLACEMENT_MOMENTUM_SUFFIX))
+    diffusion = _best_log_evidence_row(_rows_with_model_suffix(comparable, _DIFFUSION_SUFFIX))
+    out: dict[str, object] = {
+        "exact_displacement_momentum_scored": exact_momentum is not None,
+        "exact_displacement_momentum_log_evidence": np.nan,
+        "exact_displacement_momentum_evidence_support": "",
+        "exact_displacement_momentum_evidence_comparable": False,
+        "exact_displacement_momentum_is_strict_best": False,
+        "exact_displacement_momentum_minus_diffusion_log_evidence": np.nan,
+        "exact_displacement_momentum_beats_diffusion_exact": False,
+    }
+    if exact_momentum is None:
+        return out
+    out["exact_displacement_momentum_log_evidence"] = float(exact_momentum["log_evidence"])
+    out["exact_displacement_momentum_evidence_support"] = _row_str(exact_momentum, "evidence_support", "")
+    out["exact_displacement_momentum_evidence_comparable"] = _row_bool(
+        exact_momentum,
+        "evidence_comparable",
+        str(out["exact_displacement_momentum_evidence_support"]) == EXACT_SUPPORT,
+    )
+    out["exact_displacement_momentum_is_strict_best"] = bool(strict_best_model and str(exact_momentum["model"]) == strict_best_model)
+    if diffusion is None:
+        return out
+    delta = float(exact_momentum["log_evidence"]) - float(diffusion["log_evidence"])
+    out["exact_displacement_momentum_minus_diffusion_log_evidence"] = delta
+    out["exact_displacement_momentum_beats_diffusion_exact"] = bool(delta > 0.0 and out["exact_displacement_momentum_evidence_comparable"])
+    return out
+
+
+def _rows_with_model_suffix(frame: pd.DataFrame, suffix: str) -> pd.DataFrame:
+    if frame.empty or "model" not in frame:
+        return frame.iloc[0:0]
+    names = frame["model"].astype(str).str.lower().str.replace("_", "-", regex=False)
+    return frame[names.str.endswith(str(suffix).lower())].copy()
 
 
 def _successful_finite_scores(group: pd.DataFrame) -> pd.DataFrame:

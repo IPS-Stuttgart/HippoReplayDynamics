@@ -79,6 +79,7 @@ class SimulationRecoveryConfig:
         )
     )
     state_space: StateSpaceDecoderConfig = field(default_factory=StateSpaceDecoderConfig)
+    true_state_space: StateSpaceDecoderConfig | None = None
     candidate_top_k: int = 64
     stationary_sigma_cm: float = 2.0
     diffusion_sigma_cm: float = 12.0
@@ -143,6 +144,7 @@ def run_session_simulation_recovery(
 
     rng = np.random.default_rng(config.random_seed)
     scoring_models = build_scoring_models(config)
+    true_state_space = _true_state_space_config(config)
     template_lengths = {
         int(event_id): _event_n_time(session, int(event_id), config.time_bin_s)
         for event_id in template_event_ids
@@ -164,7 +166,7 @@ def run_session_simulation_recovery(
                 spike_rate_scale=config.spike_rate_scale,
                 likelihood_temperature=config.likelihood_temperature,
                 negative_binomial_overdispersion=config.negative_binomial_overdispersion,
-                state_space=config.state_space,
+                state_space=true_state_space,
             )
             expected_model = expected_scoring_model(true_model)
             path_unique_bins = int(np.unique(path).size)
@@ -268,7 +270,12 @@ def run_session_simulation_recovery(
                         raise
             simulation_event_index += 1
 
-    event_scores = add_evidence_columns(pd.DataFrame(rows))
+    event_scores = pd.DataFrame(rows)
+    for key, value in _state_space_parameter_row("true", true_state_space).items():
+        event_scores[key] = value
+    for key, value in _state_space_parameter_row("scoring", config.state_space).items():
+        event_scores[key] = value
+    event_scores = add_evidence_columns(event_scores)
     confusion = confusion_matrix(event_scores, config.scoring_models)
     summary = recovery_summary(event_scores)
     certified_vs_exact = certified_vs_exact_recovery_summary(event_scores)
@@ -351,10 +358,11 @@ def simulate_latent_path(
             path[time_index] = _sample_gaussian_step(encoding.bin_centers, valid_bins, path[time_index - 1], diffusion_sigma, rng)
         return path
 
+    momentum_velocity_decay = _momentum_velocity_decay_for_duration(state_space, dt)
     for time_index in range(2, n_time):
         prev = encoding.bin_centers[path[time_index - 1]]
         prev_prev = encoding.bin_centers[path[time_index - 2]]
-        predicted = prev + state_space.momentum_velocity_decay * (prev - prev_prev)
+        predicted = prev + momentum_velocity_decay * (prev - prev_prev)
         path[time_index] = _sample_gaussian_center(encoding.bin_centers, valid_bins, predicted, momentum_sigma, rng)
     return path
 
@@ -1019,6 +1027,27 @@ def _per_bin_sigma(sigma_cm_sqrt_s: float, dt_s: float) -> float:
     return max(float(sigma_cm_sqrt_s) * np.sqrt(max(float(dt_s), np.finfo(float).tiny)), np.finfo(float).eps)
 
 
+def _momentum_velocity_decay_for_duration(
+    state_space: StateSpaceDecoderConfig,
+    duration_s: float,
+) -> float:
+    tau_s = float(getattr(state_space, "momentum_velocity_decay_tau_s", 0.0))
+    if tau_s > 0.0:
+        return float(np.exp(-float(duration_s) / tau_s))
+    return float(state_space.momentum_velocity_decay)
+
+
+def _true_state_space_config(config: SimulationRecoveryConfig) -> StateSpaceDecoderConfig:
+    return config.state_space if config.true_state_space is None else config.true_state_space
+
+
+def _state_space_parameter_row(prefix: str, config: StateSpaceDecoderConfig) -> dict[str, object]:
+    return {
+        f"{prefix}_state_space_{key}": value
+        for key, value in asdict(config).items()
+    }
+
+
 def _ints(spec: str) -> list[int]:
     values: list[int] = []
     for item in spec.split(","):
@@ -1043,6 +1072,7 @@ def _settings(
     template_event_ids: list[int],
     encoding: EncodingModel,
 ) -> dict[str, object]:
+    true_state_space = _true_state_space_config(config)
     return {
         "session": session.session_id,
         "true_models": list(parse_model_list(config.true_models)),
@@ -1058,6 +1088,9 @@ def _settings(
         "time_bin_s": config.time_bin_s,
         "encoding": asdict(config.encoding),
         "state_space": asdict(config.state_space),
+        "scoring_state_space": asdict(config.state_space),
+        "true_state_space": asdict(true_state_space),
+        "true_state_space_differs_from_scoring": asdict(true_state_space) != asdict(config.state_space),
         "candidate_top_k": config.candidate_top_k,
         "stationary_sigma_cm": config.stationary_sigma_cm,
         "diffusion_sigma_cm": config.diffusion_sigma_cm,

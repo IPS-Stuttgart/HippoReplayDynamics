@@ -96,6 +96,10 @@ on:
         description: "Optional self-hosted persistent dataset cache path"
         required: false
         default: ""
+      allow_incomplete_grid:
+        description: "Allow aggregate ranking when planned sweep configurations are missing"
+        required: true
+        default: "false"
 
 permissions:
   contents: read
@@ -122,6 +126,7 @@ env:
   SMOOTHING_SIGMA_BINS: ${{ inputs.smoothing_sigma_bins }}
   MIN_SPEED_CM_S: ${{ inputs.min_speed_cm_s }}
   LOCAL_CACHE_ROOT: ${{ inputs.local_cache_root }}
+  ALLOW_INCOMPLETE_GRID: ${{ inputs.allow_incomplete_grid }}
   OMP_NUM_THREADS: "1"
   OPENBLAS_NUM_THREADS: "1"
   MKL_NUM_THREADS: "1"
@@ -427,6 +432,7 @@ jobs:
           set -euo pipefail
           mkdir -p results/simulation-recovery-sweep-summary
           python - <<'PY'
+          import os
           from pathlib import Path
 
           import pandas as pd
@@ -451,6 +457,7 @@ jobs:
           certified_paths = sorted(root.glob("**/simulation_recovery_certified_vs_exact_summary.csv"))
           diagnostic_event_paths = sorted(root.glob("**/simulation_recovery_diagnostic_event_table.csv"))
           diagnostic_summary_paths = sorted(root.glob("**/simulation_recovery_diagnostic_summary.csv"))
+          plan_paths = sorted(root.glob("**/matrix.csv"))
           if not score_paths:
               raise SystemExit("No simulation_recovery_event_scores.csv files found")
           scores = pd.concat((pd.read_csv(path) for path in score_paths), ignore_index=True)
@@ -482,6 +489,38 @@ jobs:
               diagnostic_events.to_csv(out_dir / "simulation_recovery_sweep_diagnostic_event_table.csv", index=False)
           if not diagnostic_summaries.empty:
               diagnostic_summaries.to_csv(out_dir / "simulation_recovery_sweep_diagnostic_summary.csv", index=False)
+
+          planned = (
+              pd.concat((pd.read_csv(path) for path in plan_paths), ignore_index=True)
+              if plan_paths
+              else pd.DataFrame()
+          )
+          if not planned.empty:
+              completed_ids = set(scores.get("matrix_id", pd.Series(dtype=str)).dropna().astype(str))
+              planned["completion_status"] = planned["id"].astype(str).map(
+                  lambda value: "completed" if value in completed_ids else "missing"
+              )
+              planned.to_csv(out_dir / "simulation_recovery_sweep_planned_configs.csv", index=False)
+              planned[planned["completion_status"].eq("completed")].to_csv(
+                  out_dir / "simulation_recovery_sweep_completed_configs.csv", index=False
+              )
+              missing = planned[planned["completion_status"].eq("missing")].copy()
+              missing.to_csv(out_dir / "simulation_recovery_sweep_missing_configs.csv", index=False)
+              failure_counts = scores.assign(
+                  failed_row=scores["status"].astype(str).ne("success")
+              ).groupby("matrix_id", as_index=False)["failed_row"].sum()
+              failed = planned.merge(
+                  failure_counts[failure_counts["failed_row"] > 0],
+                  left_on="id",
+                  right_on="matrix_id",
+                  how="inner",
+              )
+              failed.to_csv(out_dir / "simulation_recovery_sweep_failed_configs.csv", index=False)
+              if not missing.empty and os.environ.get("ALLOW_INCOMPLETE_GRID", "false").lower() not in {"1", "true", "yes"}:
+                  raise SystemExit(
+                      f"Sweep grid is incomplete: {len(missing)} planned configuration(s) are missing. "
+                      "Set allow_incomplete_grid=true only for exploratory ranking."
+                  )
 
           key_cols = [
               "matrix_id",

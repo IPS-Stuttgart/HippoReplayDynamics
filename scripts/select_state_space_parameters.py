@@ -88,6 +88,7 @@ def select_parameters(
     session_column: str = "requested_session",
     holdout_sessions: Sequence[str] | None = None,
     recovery_gate_metric: str = "auto",
+    force_strict_recovery_gate: bool = False,
 ) -> dict[str, pd.DataFrame]:
     evidence_frame = _load_table(evidence, "state_space_evidence_sweep_config_ranked.csv")
     recovery_frame = _load_table(recovery, "simulation_recovery_sweep_config_ranked.csv")
@@ -99,6 +100,7 @@ def select_parameters(
         min_overall_recovery_accuracy=min_overall_recovery_accuracy,
         max_failures=max_failures,
         recovery_gate_metric=recovery_gate_metric,
+        force_strict_recovery_gate=force_strict_recovery_gate,
     )
     ranked = tables["decision"]
     candidates = tables["candidates"]
@@ -122,6 +124,7 @@ def select_parameters(
             min_overall_recovery_accuracy=min_overall_recovery_accuracy,
             max_failures=max_failures,
             recovery_gate_metric=recovery_gate_metric,
+            force_strict_recovery_gate=force_strict_recovery_gate,
         )
         loso_recommendations.to_csv(out_dir / "state_space_loso_parameter_recommendations.csv", index=False)
         _write_loso_parameter_files(loso_recommendations, out_dir)
@@ -140,6 +143,7 @@ def select_parameters(
         recovery_gate_metric=recovery_gate_metric,
         session_column=session_column,
         holdout_sessions=holdout_sessions,
+        force_strict_recovery_gate=force_strict_recovery_gate,
         loso_recommendations=loso_recommendations,
     )
     result = {
@@ -160,6 +164,7 @@ def _select_from_frames(
     min_overall_recovery_accuracy: float,
     max_failures: int,
     recovery_gate_metric: str,
+    force_strict_recovery_gate: bool,
 ) -> dict[str, pd.DataFrame]:
     evidence_prepared = _aggregate_evidence(_prepare_evidence(evidence_frame))
     recovery_prepared = _aggregate_recovery(_prepare_recovery(recovery_frame))
@@ -170,6 +175,7 @@ def _select_from_frames(
         min_overall_recovery_accuracy=min_overall_recovery_accuracy,
         max_failures=max_failures,
         recovery_gate_metric=recovery_gate_metric,
+        force_strict_recovery_gate=force_strict_recovery_gate,
     )
 
     ranked = _rank_decision_table(decision)
@@ -202,6 +208,7 @@ def _build_decision_table(
     min_overall_recovery_accuracy: float,
     max_failures: int,
     recovery_gate_metric: str,
+    force_strict_recovery_gate: bool,
 ) -> pd.DataFrame:
     decision = evidence_frame.merge(
         recovery_frame,
@@ -259,18 +266,33 @@ def _build_decision_table(
     decision["uses_candidate_pruned_momentum"] = candidate_top_k > 0
     decision["certified_recovery_columns_available"] = bool(certified_columns_available)
     decision["recovery_gate_warning"] = ""
+    strict_candidate_rows = (
+        decision["uses_candidate_pruned_momentum"]
+        & (decision["recovery_gate_metric"] == "strict")
+    )
     decision.loc[
-        decision["uses_candidate_pruned_momentum"] & ~decision["certified_recovery_columns_available"] & (decision["recovery_gate_metric"] == "strict"),
+        strict_candidate_rows & ~decision["certified_recovery_columns_available"],
         "recovery_gate_warning",
     ] = "Candidate-pruned momentum/IMM recovery is being gated with strict exact-comparable recovery because certified-vs-exact columns are missing."
     decision.loc[
-        decision["uses_candidate_pruned_momentum"]
-        & (decision["recovery_gate_metric"] == "strict")
+        strict_candidate_rows
         & decision["certified_recovery_columns_available"],
         "recovery_gate_warning",
     ] = "Strict gate was requested even though certified-vs-exact recovery columns are available for candidate-pruned momentum/IMM."
+    decision["strict_candidate_recovery_gate_blocked"] = (
+        strict_candidate_rows & (not force_strict_recovery_gate)
+    )
+    decision.loc[
+        decision["strict_candidate_recovery_gate_blocked"],
+        "recovery_gate_warning",
+    ] = (
+        "Candidate-pruned momentum/IMM rows are not eligible under a strict recovery gate. "
+        "Use certified-vs-exact recovery columns, run full-grid/oracle-support recovery, "
+        "or pass --force-strict-recovery-gate for exploratory legacy selection."
+    )
     decision["passes_recovery_gate"] = (
         decision["has_recovery"]
+        & ~decision["strict_candidate_recovery_gate_blocked"]
         & (decision.get("failures", pd.Series(0, index=decision.index)).fillna(0) <= max_failures)
         & (
             decision["gate_momentum_recovery_accuracy"].fillna(-1.0)
@@ -285,6 +307,10 @@ def _build_decision_table(
     decision["recovery_gate"] = decision["passes_recovery_gate"].map({True: "pass", False: "fail"})
     decision.loc[~decision["has_recovery"], "recovery_gate"] = "missing-recovery"
     decision.loc[~decision["has_evidence"], "recovery_gate"] = "missing-evidence"
+    decision.loc[
+        decision["strict_candidate_recovery_gate_blocked"] & decision["has_recovery"] & decision["has_evidence"],
+        "recovery_gate",
+    ] = "strict-gate-blocked"
     return decision
 
 
@@ -346,6 +372,7 @@ def _select_leave_one_session_out(
     min_overall_recovery_accuracy: float,
     max_failures: int,
     recovery_gate_metric: str,
+    force_strict_recovery_gate: bool,
 ) -> pd.DataFrame:
     if session_column not in evidence_frame.columns:
         available = [col for col in SESSION_COLUMN_CANDIDATES if col in evidence_frame.columns]
@@ -388,6 +415,7 @@ def _select_leave_one_session_out(
             min_overall_recovery_accuracy=min_overall_recovery_accuracy,
             max_failures=max_failures,
             recovery_gate_metric=recovery_gate_metric,
+            force_strict_recovery_gate=force_strict_recovery_gate,
         )
         recommendation = tables["recommendation"]
         if recommendation.empty:
@@ -720,6 +748,7 @@ def _write_selection_manifest(
     recovery_gate_metric: str = "auto",
     session_column: str | None = None,
     holdout_sessions: Sequence[str] | None = None,
+    force_strict_recovery_gate: bool = False,
     loso_recommendations: pd.DataFrame | None = None,
 ) -> None:
     selected_row = None if recommendation.empty else _json_ready(recommendation.iloc[0].to_dict())
@@ -739,6 +768,13 @@ def _write_selection_manifest(
             "max_failures": max_failures,
             "momentum_column": None if recommendation.empty else selected_row.get("momentum_recovery_gate_column"),
             "overall_column": None if recommendation.empty else selected_row.get("overall_recovery_gate_column"),
+            "force_strict_recovery_gate": bool(force_strict_recovery_gate),
+            "strict_candidate_rows_blocked": int(
+                decision.get(
+                    "strict_candidate_recovery_gate_blocked",
+                    pd.Series(False, index=decision.index),
+                ).fillna(False).astype(bool).sum()
+            ),
         },
         "parameter_columns": PARAMETER_COLUMNS,
         "row_counts": {
@@ -841,6 +877,14 @@ def main() -> int:
         default="auto",
         help="Recovery columns used for the gate; auto prefers certified-vs-exact columns when present.",
     )
+    parser.add_argument(
+        "--force-strict-recovery-gate",
+        action="store_true",
+        help=(
+            "Allow candidate-pruned momentum/IMM configurations to pass a strict exact-comparable recovery gate. "
+            "This is intended for exploratory legacy sweeps; final selections should prefer certified-vs-exact recovery."
+        ),
+    )
     args = parser.parse_args()
 
     tables = select_parameters(
@@ -854,6 +898,7 @@ def main() -> int:
         session_column=args.session_column,
         holdout_sessions=_parse_holdout_sessions(args.holdout_sessions),
         recovery_gate_metric=args.recovery_gate_metric,
+        force_strict_recovery_gate=args.force_strict_recovery_gate,
     )
     print("Top parameter rows:")
     print(tables["decision"].head(10).to_string(index=False))

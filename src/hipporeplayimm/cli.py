@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 import argparse
 from pathlib import Path
 
@@ -290,6 +291,7 @@ def main(argv: list[str] | None = None) -> int:
         default=StateSpaceDecoderConfig().valid_occupancy_threshold_s,
         help="If positive, restrict state-space priors and transition normalizers to occupied spatial bins.",
     )
+    _add_true_state_space_recovery_arguments(recovery_parser)
     recovery_parser.add_argument("--candidate-top-k", type=int, default=64)
     recovery_parser.add_argument("--stationary-sigma-cm", type=float, default=2.0)
     recovery_parser.add_argument("--diffusion-sigma-cm", type=float, default=12.0)
@@ -487,6 +489,7 @@ def _simulate_recovery(args: argparse.Namespace) -> int:
         momentum_candidate_source=args.state_space_momentum_candidate_source,
         valid_occupancy_threshold_s=args.state_space_valid_occupancy_threshold_s,
     )
+    true_state_space = _true_state_space_config_from_args(args, state_space)
     config = SimulationRecoveryConfig(
         true_models=parse_model_list(args.true_models),
         scoring_models=parse_model_list(args.models),
@@ -500,6 +503,7 @@ def _simulate_recovery(args: argparse.Namespace) -> int:
         negative_binomial_overdispersion=args.emission_negative_binomial_overdispersion,
         encoding=_encoding_config_from_args(args),
         state_space=state_space,
+        true_state_space=true_state_space,
         candidate_top_k=args.candidate_top_k,
         stationary_sigma_cm=args.stationary_sigma_cm,
         diffusion_sigma_cm=args.diffusion_sigma_cm,
@@ -518,6 +522,23 @@ def _simulate_recovery(args: argparse.Namespace) -> int:
     print(f"\nRows: {len(result.event_scores)}")
     print(f"Failures: {int((result.event_scores['status'] != 'success').sum())}")
     return 0
+
+
+def _true_state_space_config_from_args(
+    args: argparse.Namespace,
+    scoring_state_space: StateSpaceDecoderConfig,
+) -> StateSpaceDecoderConfig:
+    """Return the synthetic true-dynamics config for simulation recovery."""
+
+    overrides = {
+        "diffusion_sigma_cm_sqrt_s": args.true_state_space_diffusion_sigma_cm_sqrt_s,
+        "momentum_sigma_cm_sqrt_s": args.true_state_space_momentum_sigma_cm_sqrt_s,
+        "momentum_initial_sigma_cm_sqrt_s": args.true_state_space_momentum_initial_sigma_cm_sqrt_s,
+        "momentum_velocity_decay": args.true_state_space_momentum_velocity_decay,
+        "momentum_velocity_decay_tau_s": args.true_state_space_momentum_velocity_decay_tau_s,
+    }
+    clean = {key: value for key, value in overrides.items() if value is not None}
+    return scoring_state_space if not clean else replace(scoring_state_space, **clean)
 
 
 def _benchmark(args: argparse.Namespace) -> int:
@@ -868,6 +889,42 @@ def _add_state_space_arguments(parser: argparse.ArgumentParser) -> None:
         help=(
             "If positive, state-space priors and transition normalizers are restricted "
             "to spatial bins whose training occupancy is at least this many seconds."
+        ),
+    )
+
+
+def _add_true_state_space_recovery_arguments(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--true-state-space-diffusion-sigma-cm-sqrt-s",
+        type=float,
+        default=None,
+        help="Synthetic true diffusion noise for simulation recovery; defaults to the scoring value.",
+    )
+    parser.add_argument(
+        "--true-state-space-momentum-sigma-cm-sqrt-s",
+        type=float,
+        default=None,
+        help="Synthetic true momentum noise for simulation recovery; defaults to the scoring value.",
+    )
+    parser.add_argument(
+        "--true-state-space-momentum-initial-sigma-cm-sqrt-s",
+        type=float,
+        default=None,
+        help="Synthetic true initial momentum-transition noise; defaults to the scoring value.",
+    )
+    parser.add_argument(
+        "--true-state-space-momentum-velocity-decay",
+        type=float,
+        default=None,
+        help="Synthetic true per-bin momentum velocity decay; defaults to the scoring value.",
+    )
+    parser.add_argument(
+        "--true-state-space-momentum-velocity-decay-tau-s",
+        type=float,
+        default=None,
+        help=(
+            "Synthetic true physical-time momentum decay tau in seconds. "
+            "When positive, true path generation uses exp(-dt/tau)."
         ),
     )
 

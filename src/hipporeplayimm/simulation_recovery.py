@@ -85,6 +85,8 @@ class SimulationRecoveryConfig:
     momentum_sigma_cm: float = 12.0
     velocity_decay: float = 0.95
     mode_stickiness: float = 0.94
+    score_with_occupancy: bool = True
+    oracle_candidate_support: bool = False
     continue_on_error: bool = False
 
 
@@ -162,14 +164,20 @@ def run_session_simulation_recovery(
             for requested_model, model in scoring_models.items():
                 start = time.perf_counter()
                 try:
-                    if isinstance(model, CandidateKinematicModel):
+                    candidates = None
+                    candidate_diagnostics: dict[str, float | int] = {}
+                    if _uses_candidate_support(model):
                         candidates = _candidate_indices_for_model(model, emissions, encoding.bin_centers)
-                        score = model.score(emissions, encoding.bin_centers, candidate_indices=candidates)
-                    elif isinstance(model, SortedSpikeStateSpaceReplayModel) and model.mode == "momentum":
-                        candidates = _candidate_indices_for_model(model, emissions, encoding.bin_centers)
-                        score = model.score(emissions, encoding.bin_centers, candidate_indices=candidates)
-                    else:
-                        score = model.score(emissions, encoding.bin_centers)
+                        if config.oracle_candidate_support:
+                            candidates = _candidate_indices_with_path(candidates, path)
+                        candidate_diagnostics = _candidate_path_support_diagnostics(candidates, path)
+                    score = _score_recovery_model(
+                        model,
+                        emissions,
+                        encoding,
+                        candidate_indices=candidates,
+                        score_with_occupancy=config.score_with_occupancy,
+                    )
                     model_name = str(score.model_name)
                     row = {
                         "status": "success",
@@ -204,7 +212,10 @@ def run_session_simulation_recovery(
                         "min_speed_cm_s": float(config.encoding.min_speed_cm_s),
                         "min_occupancy_s": float(config.encoding.min_occupancy_s),
                         "rate_floor_hz": float(config.encoding.rate_floor_hz),
+                        "score_with_occupancy": bool(config.score_with_occupancy),
+                        "oracle_candidate_support": bool(config.oracle_candidate_support),
                     }
+                    row.update(candidate_diagnostics)
                     row.update({f"diagnostic_{key}": value for key, value in score.diagnostics.items()})
                     rows.append(row)
                 except Exception as exc:
@@ -242,6 +253,8 @@ def run_session_simulation_recovery(
                             "min_speed_cm_s": float(config.encoding.min_speed_cm_s),
                             "min_occupancy_s": float(config.encoding.min_occupancy_s),
                             "rate_floor_hz": float(config.encoding.rate_floor_hz),
+                            "score_with_occupancy": bool(config.score_with_occupancy),
+                            "oracle_candidate_support": bool(config.oracle_candidate_support),
                         }
                     )
                     if not config.continue_on_error:
@@ -373,28 +386,107 @@ def add_evidence_columns(df: pd.DataFrame) -> pd.DataFrame:
     groups = []
     for _, group in df.groupby(["session", "event_index"], sort=False):
         group = group.copy()
+        group["relative_log_evidence"] = np.nan
+        group["model_probability"] = np.nan
+        group["is_best_model"] = False
+        group["best_model"] = ""
+        group["recovered_expected_model"] = False
+        group["evidence_support"] = ""
+        group["evidence_comparable"] = False
+        group["best_truncated_lower_bound_model"] = ""
+        group["best_truncated_lower_bound_log_evidence"] = np.nan
+
         ok = group["status"] == "success"
         scored = group[ok]
         if scored.empty:
-            group["relative_log_evidence"] = np.nan
-            group["model_probability"] = np.nan
-            group["is_best_model"] = False
-            group["best_model"] = ""
             groups.append(group)
             continue
-        values = scored["log_evidence"].to_numpy(float)
+
+        support = scored.apply(_row_evidence_support, axis=1)
+        comparable = support.map(_evidence_is_comparable).astype(bool)
+        finite_log_evidence = pd.Series(
+            np.isfinite(scored["log_evidence"].to_numpy(float)),
+            index=scored.index,
+        )
+        group.loc[scored.index, "evidence_support"] = support
+        group.loc[scored.index, "evidence_comparable"] = comparable & finite_log_evidence
+
+        lower_bound_rows = scored[~comparable & finite_log_evidence]
+        if not lower_bound_rows.empty:
+            lower_values = lower_bound_rows["log_evidence"].to_numpy(float)
+            lower_best = lower_bound_rows.iloc[int(np.argmax(lower_values))]
+            group["best_truncated_lower_bound_model"] = str(lower_best["model"])
+            group["best_truncated_lower_bound_log_evidence"] = float(
+                lower_best["log_evidence"]
+            )
+
+        comparable_rows = scored[comparable & finite_log_evidence]
+        if comparable_rows.empty:
+            groups.append(group)
+            continue
+
+        values = comparable_rows["log_evidence"].to_numpy(float)
         max_value = float(np.max(values))
         probabilities = np.exp(values - logsumexp(values))
-        best = str(scored.iloc[int(np.argmax(values))]["model"])
-        group["relative_log_evidence"] = np.nan
-        group["model_probability"] = np.nan
-        group.loc[scored.index, "relative_log_evidence"] = values - max_value
-        group.loc[scored.index, "model_probability"] = probabilities
-        group["is_best_model"] = group["model"] == best
+        best = str(comparable_rows.iloc[int(np.argmax(values))]["model"])
+        group.loc[comparable_rows.index, "relative_log_evidence"] = values - max_value
+        group.loc[comparable_rows.index, "model_probability"] = probabilities
+        group.loc[comparable_rows.index, "is_best_model"] = (
+            comparable_rows["model"] == best
+        )
         group["best_model"] = best
         group["recovered_expected_model"] = group["best_model"] == group["expected_model"]
         groups.append(group)
     return pd.concat(groups, ignore_index=True).sort_values(["event_index", "model"]).reset_index(drop=True)
+
+
+_NONCOMPARABLE_EVIDENCE_SUPPORTS = {
+    "degenerate_single_bin",
+    "truncated_full_grid",
+}
+
+
+def _row_evidence_support(row: pd.Series) -> str:
+    """Return the evidence support label for one event/model row."""
+
+    preferred = (
+        "diagnostic_candidate_evidence_support",
+        "diagnostic_state_space_momentum_evidence_support",
+        "diagnostic_state_space_imm_evidence_support",
+    )
+    support_columns = list(
+        dict.fromkeys(
+            [
+                *preferred,
+                *[
+                    name
+                    for name in row.index
+                    if str(name).startswith("diagnostic_")
+                    and str(name).endswith("_evidence_support")
+                ],
+            ]
+        )
+    )
+    values = []
+    for column in support_columns:
+        if column not in row.index:
+            continue
+        value = row[column]
+        if pd.isna(value):
+            continue
+        label = str(value).strip()
+        if label:
+            values.append(label)
+    if not values:
+        return "exact_full_grid"
+    for value in values:
+        if value in _NONCOMPARABLE_EVIDENCE_SUPPORTS:
+            return value
+    return values[0]
+
+
+def _evidence_is_comparable(support: object) -> bool:
+    return str(support) not in _NONCOMPARABLE_EVIDENCE_SUPPORTS
 
 
 def confusion_matrix(event_scores: pd.DataFrame, scoring_models: Iterable[str]) -> pd.DataFrame:
@@ -447,6 +539,7 @@ def recovery_summary(event_scores: pd.DataFrame) -> pd.DataFrame:
 
 
 def build_scoring_models(config: SimulationRecoveryConfig) -> dict[str, object]:
+    state_space_config = _recovery_state_space_config(config)
     available: dict[str, object] = {
         "random": RandomModel(),
         "stationary": StationaryModel(),
@@ -494,13 +587,36 @@ def build_scoring_models(config: SimulationRecoveryConfig) -> dict[str, object]:
     for mode in ("stationary", "diffusion", "fragmented", "jump", "momentum", "imm"):
         available[f"sorted-spike-state-space-{mode}"] = SortedSpikeStateSpaceReplayModel(
             mode=mode,
-            config=replace(config.state_space, mode=mode),
+            config=replace(state_space_config, mode=mode),
         )
     names = parse_model_list(config.scoring_models)
     missing = sorted(set(names) - set(available))
     if missing:
         raise ValueError(f"unknown scoring models: {missing}; available: {sorted(available)}")
     return {name: available[name] for name in dict.fromkeys(names)}
+
+
+def _recovery_state_space_config(config: SimulationRecoveryConfig) -> StateSpaceDecoderConfig:
+    """Return the state-space config used for synthetic recovery scoring."""
+
+    if (
+        config.score_with_occupancy
+        and float(config.state_space.valid_occupancy_threshold_s) <= 0.0
+    ):
+        return replace(
+            config.state_space,
+            valid_occupancy_threshold_s=float(np.finfo(float).tiny),
+        )
+    return config.state_space
+
+
+def _uses_candidate_support(model: object) -> bool:
+    if isinstance(model, CandidateKinematicModel):
+        return True
+    return isinstance(model, SortedSpikeStateSpaceReplayModel) and model.mode in {
+        "momentum",
+        "imm",
+    }
 
 
 def _candidate_indices_for_model(model: object, emissions: LogEmissionTensor, bin_centers: np.ndarray) -> list[np.ndarray]:
@@ -510,6 +626,96 @@ def _candidate_indices_for_model(model: object, emissions: LogEmissionTensor, bi
         return model.candidate_indices(emissions, bin_centers)  # type: ignore[attr-defined]
     except TypeError:
         return model.candidate_indices(emissions)  # type: ignore[attr-defined]
+
+
+def _score_recovery_model(
+    model: object,
+    emissions: LogEmissionTensor,
+    encoding: EncodingModel,
+    *,
+    candidate_indices: list[np.ndarray] | None = None,
+    score_with_occupancy: bool = True,
+) -> object:
+    """Score one synthetic event with diagnostics-friendly support handling."""
+
+    if isinstance(model, SortedSpikeStateSpaceReplayModel):
+        kwargs: dict[str, object] = {}
+        if candidate_indices is not None:
+            kwargs["candidate_indices"] = candidate_indices
+        if score_with_occupancy:
+            kwargs["occupancy_s"] = encoding.occupancy_s
+        return model.score(emissions, encoding.bin_centers, **kwargs)
+    if candidate_indices is not None:
+        return model.score(  # type: ignore[attr-defined]
+            emissions,
+            encoding.bin_centers,
+            candidate_indices=candidate_indices,
+        )
+    return model.score(emissions, encoding.bin_centers)  # type: ignore[attr-defined]
+
+
+def _candidate_indices_with_path(
+    candidates: list[np.ndarray],
+    path: np.ndarray,
+) -> list[np.ndarray]:
+    """Return candidate support augmented with the known synthetic path."""
+
+    path = np.asarray(path, dtype=int)
+    if len(candidates) != path.shape[0]:
+        raise ValueError("candidate support and synthetic path lengths must match")
+    augmented: list[np.ndarray] = []
+    for time_index, current in enumerate(candidates):
+        current = np.asarray(current, dtype=int)
+        augmented.append(
+            np.unique(np.concatenate([current, np.asarray([path[time_index]], dtype=int)]))
+        )
+    return augmented
+
+
+def _candidate_path_support_diagnostics(
+    candidates: list[np.ndarray],
+    path: np.ndarray,
+) -> dict[str, float | int]:
+    """Summarize whether candidate support contains the synthetic latent path."""
+
+    path = np.asarray(path, dtype=int)
+    if len(candidates) != path.shape[0]:
+        raise ValueError("candidate support and synthetic path lengths must match")
+    if path.size == 0:
+        return {
+            "candidate_true_bin_coverage": float("nan"),
+            "candidate_true_pair_coverage": float("nan"),
+            "candidate_true_triplet_coverage": float("nan"),
+            "candidate_true_path_fully_supported": 0,
+            "candidate_true_path_missing_bins": 0,
+        }
+    supported = np.asarray(
+        [
+            bool(np.any(np.asarray(current, dtype=int) == path[time_index]))
+            for time_index, current in enumerate(candidates)
+        ],
+        dtype=bool,
+    )
+    pair_supported = (
+        supported[:-1] & supported[1:] if supported.size > 1 else np.empty(0, dtype=bool)
+    )
+    triplet_supported = (
+        supported[:-2] & supported[1:-1] & supported[2:]
+        if supported.size > 2
+        else np.empty(0, dtype=bool)
+    )
+    return {
+        "candidate_true_bin_coverage": _boolean_fraction(supported),
+        "candidate_true_pair_coverage": _boolean_fraction(pair_supported),
+        "candidate_true_triplet_coverage": _boolean_fraction(triplet_supported),
+        "candidate_true_path_fully_supported": int(bool(np.all(supported))),
+        "candidate_true_path_missing_bins": int(np.sum(~supported)),
+    }
+
+
+def _boolean_fraction(values: np.ndarray) -> float:
+    values = np.asarray(values, dtype=bool)
+    return float("nan") if values.size == 0 else float(np.mean(values))
 
 
 def select_event_indices(session: ReplaySession, spec: str) -> list[int]:
@@ -551,6 +757,8 @@ def model_family(model: str) -> str:
 
 def _event_best_rows(event_scores: pd.DataFrame) -> pd.DataFrame:
     ok = event_scores[event_scores["status"] == "success"]
+    if "evidence_comparable" in ok.columns:
+        ok = ok[ok["evidence_comparable"].fillna(False).astype(bool)]
     if ok.empty:
         return pd.DataFrame()
     best = ok.sort_values(["session", "event_index", "log_evidence"], ascending=[True, True, False])
@@ -649,6 +857,8 @@ def _settings(
         "momentum_sigma_cm": config.momentum_sigma_cm,
         "velocity_decay": config.velocity_decay,
         "mode_stickiness": config.mode_stickiness,
+        "score_with_occupancy": bool(config.score_with_occupancy),
+        "oracle_candidate_support": bool(config.oracle_candidate_support),
         "n_position_bins": encoding.n_bins,
         "n_cells": encoding.n_cells,
         "observation_model": "sorted-spike-poisson",

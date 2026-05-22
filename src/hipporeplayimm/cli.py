@@ -279,6 +279,18 @@ def main(argv: list[str] | None = None) -> int:
     recovery_parser.add_argument("--velocity-decay", type=float, default=0.95)
     recovery_parser.add_argument("--mode-stickiness", type=float, default=0.94)
     recovery_parser.add_argument("--continue-on-error", action="store_true")
+    recovery_parser.add_argument(
+        "--no-score-with-occupancy",
+        dest="score_with_occupancy",
+        action="store_false",
+        help="Do not pass occupancy support to sorted-spike state-space recovery scoring.",
+    )
+    recovery_parser.add_argument(
+        "--oracle-candidate-support",
+        action="store_true",
+        help="Augment candidate-pruned synthetic recovery models with the true latent path for beam-support diagnostics.",
+    )
+    recovery_parser.set_defaults(score_with_occupancy=True)
     _add_encoding_arguments(recovery_parser)
 
     sweep_parser = subparsers.add_parser("sweep-pyrecest")
@@ -473,6 +485,8 @@ def _simulate_recovery(args: argparse.Namespace) -> int:
         momentum_sigma_cm=args.momentum_sigma_cm,
         velocity_decay=args.velocity_decay,
         mode_stickiness=args.mode_stickiness,
+        score_with_occupancy=args.score_with_occupancy,
+        oracle_candidate_support=args.oracle_candidate_support,
         continue_on_error=args.continue_on_error,
     )
     result = run_session_simulation_recovery(args.root, args.session, config)

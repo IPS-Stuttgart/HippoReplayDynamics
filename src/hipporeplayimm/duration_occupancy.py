@@ -141,6 +141,38 @@ def _score_state_space_duration_with_occupancy(
         )
         transition_sigma_cm = float(displacement_extra["state_space_displacement_transition_sigma_cm"])
         extra = displacement_extra
+    elif self.mode == "displacement-imm":
+        from .state_space_displacement_imm import _DISPLACEMENT_IMM_MODES, _score_displacement_imm_exact
+
+        logp, trajectory, mode_post, displacement_post, displacement_extra = _score_displacement_imm_exact(
+            emissions,
+            bin_centers,
+            self.config,
+            durations,
+            valid_bin_mask=valid_bin_mask,
+        )
+        transition_sigma_cm = float(
+            displacement_extra["state_space_displacement_imm_transition_sigma_cm"]
+        )
+        extra = {
+            f"state_space_mode_{name.replace('-', '_')}_terminal_probability": float(mode_post[-1, idx])
+            for idx, name in enumerate(_DISPLACEMENT_IMM_MODES)
+        }
+        extra.update(displacement_extra)
+    elif self.mode == "momentum-exact-sparse":
+        from .state_space_sparse_momentum import _score_sparse_momentum_exact
+
+        logp, trajectory, sparse_extra = _score_sparse_momentum_exact(
+            emissions,
+            bin_centers,
+            self.config,
+            durations,
+            valid_bin_mask=valid_bin_mask,
+        )
+        transition_sigma_cm = float(
+            sparse_extra["state_space_momentum_transition_sigma_cm"]
+        )
+        extra = sparse_extra
     elif self.mode == "momentum":
         candidates = _duration_candidates(ss, self, emissions, bin_centers, candidate_indices, valid_bin_mask)
         momentum_sigmas = _per_transition_sigmas(

@@ -36,6 +36,7 @@ DEFAULT_SCORING_MODELS = (
     "sorted-spike-state-space-momentum",
     "sorted-spike-state-space-fragmented",
     "sorted-spike-state-space-displacement-momentum",
+    "sorted-spike-state-space-displacement-imm",
     "sorted-spike-state-space-imm",
 )
 _TRAJECTORY = {
@@ -49,6 +50,8 @@ _TRAJECTORY = {
     "sorted-spike-state-space-jump",
     "sorted-spike-state-space-momentum",
     "sorted-spike-state-space-displacement-momentum",
+    "sorted-spike-state-space-displacement-imm",
+    "sorted-spike-state-space-momentum-exact-sparse",
     "sorted-spike-state-space-imm",
 }
 _NONTRAJECTORY = {
@@ -171,6 +174,7 @@ def run_session_simulation_recovery(
                 state_space=true_state_space,
             )
             expected_model = expected_scoring_model(true_model)
+            expected_exact_surrogate = exact_surrogate_scoring_model(true_model)
             path_unique_bins = int(np.unique(path).size)
             for requested_model, model in scoring_models.items():
                 start = time.perf_counter()
@@ -201,6 +205,7 @@ def run_session_simulation_recovery(
                         "true_model": true_model,
                         "true_model_family": model_family(true_model),
                         "expected_model": expected_model,
+                        "expected_exact_surrogate_model": expected_exact_surrogate,
                         "model": model_name,
                         "requested_model": requested_model,
                         "model_family": model_family(model_name),
@@ -242,6 +247,7 @@ def run_session_simulation_recovery(
                             "true_model": true_model,
                             "true_model_family": model_family(true_model),
                             "expected_model": expected_model,
+                            "expected_exact_surrogate_model": expected_exact_surrogate,
                             "model": requested_model,
                             "requested_model": requested_model,
                             "model_family": model_family(requested_model),
@@ -415,6 +421,10 @@ def add_evidence_columns(df: pd.DataFrame) -> pd.DataFrame:
         group["is_best_model"] = False
         group["best_model"] = ""
         group["recovered_expected_model"] = False
+        group["exact_surrogate_best_model"] = ""
+        group["exact_surrogate_recovered_expected_model"] = False
+        group["exact_surrogate_log_evidence"] = np.nan
+        group["exact_surrogate_minus_best_comparable_log_evidence"] = np.nan
         group["evidence_support"] = ""
         group["evidence_comparable"] = False
         group["best_truncated_lower_bound_model"] = ""
@@ -460,6 +470,19 @@ def add_evidence_columns(df: pd.DataFrame) -> pd.DataFrame:
         )
         group["best_model"] = best
         group["recovered_expected_model"] = group["best_model"] == group["expected_model"]
+        surrogate_model = _event_expected_exact_surrogate_model(group)
+        surrogate_rows = comparable_rows[comparable_rows["model"].astype(str).eq(surrogate_model)]
+        if not surrogate_rows.empty:
+            surrogate = _best_log_evidence_row(surrogate_rows)
+            surrogate_log_evidence = float(surrogate["log_evidence"])
+            group["exact_surrogate_best_model"] = best
+            group["exact_surrogate_log_evidence"] = surrogate_log_evidence
+            group["exact_surrogate_minus_best_comparable_log_evidence"] = (
+                surrogate_log_evidence - max_value
+            )
+            group["exact_surrogate_recovered_expected_model"] = bool(
+                str(surrogate["model"]) == best
+            )
         groups.append(group)
     return pd.concat(groups, ignore_index=True).sort_values(["event_index", "model"]).reset_index(drop=True)
 
@@ -533,6 +556,7 @@ def recovery_summary(event_scores: pd.DataFrame) -> pd.DataFrame:
     for true_model, group in best.groupby("true_model", sort=False):
         best_counts = group["best_model"].value_counts()
         expected = expected_scoring_model(str(true_model))
+        surrogate_recovered = _surrogate_recovered_series(group)
         rows.append(
             {
                 "true_model": true_model,
@@ -540,6 +564,8 @@ def recovery_summary(event_scores: pd.DataFrame) -> pd.DataFrame:
                 "simulated_events": int(group["event_index"].nunique()),
                 "recovered_events": int((group["best_model"] == expected).sum()),
                 "recovery_accuracy": float((group["best_model"] == expected).mean()),
+                "exact_surrogate_recovered_events": int(surrogate_recovered.sum()),
+                "exact_surrogate_recovery_accuracy": float(surrogate_recovered.mean()),
                 "most_common_best_model": str(best_counts.index[0]),
                 "most_common_best_model_events": int(best_counts.iloc[0]),
                 "mean_n_time": float(group["n_time"].mean()),
@@ -554,6 +580,8 @@ def recovery_summary(event_scores: pd.DataFrame) -> pd.DataFrame:
             "simulated_events": total_events,
             "recovered_events": int(best["recovered_expected_model"].sum()),
             "recovery_accuracy": float(best["recovered_expected_model"].mean()),
+            "exact_surrogate_recovered_events": int(_surrogate_recovered_series(best).sum()),
+            "exact_surrogate_recovery_accuracy": float(_surrogate_recovered_series(best).mean()),
             "most_common_best_model": str(best["best_model"].value_counts().index[0]),
             "most_common_best_model_events": int(best["best_model"].value_counts().iloc[0]),
             "mean_n_time": float(best["n_time"].mean()),
@@ -802,7 +830,17 @@ def build_scoring_models(config: SimulationRecoveryConfig) -> dict[str, object]:
             name="imm",
         ),
     }
-    for mode in ("stationary", "diffusion", "fragmented", "jump", "momentum", "displacement-momentum", "imm"):
+    for mode in (
+        "stationary",
+        "diffusion",
+        "fragmented",
+        "jump",
+        "momentum",
+        "momentum-exact-sparse",
+        "displacement-momentum",
+        "displacement-imm",
+        "imm",
+    ):
         available[f"sorted-spike-state-space-{mode}"] = SortedSpikeStateSpaceReplayModel(
             mode=mode,
             config=replace(state_space_config, mode=mode),
@@ -962,6 +1000,29 @@ def expected_scoring_model(true_model: str) -> str:
     if name == "jump":
         name = "fragmented"
     return f"sorted-spike-state-space-{name}"
+
+
+def exact_surrogate_scoring_model(true_model: str) -> str:
+    """Return the exact-comparable surrogate expected for a true model."""
+
+    name = true_model.lower()
+    if name == "momentum":
+        return "sorted-spike-state-space-displacement-momentum"
+    return expected_scoring_model(name)
+
+
+def _event_expected_exact_surrogate_model(group: pd.DataFrame) -> str:
+    if "expected_exact_surrogate_model" in group.columns:
+        values = group["expected_exact_surrogate_model"].dropna().astype(str)
+        if not values.empty and values.iloc[0]:
+            return str(values.iloc[0])
+    return str(group["expected_model"].iloc[0])
+
+
+def _surrogate_recovered_series(group: pd.DataFrame) -> pd.Series:
+    if "exact_surrogate_recovered_expected_model" not in group.columns:
+        return pd.Series(False, index=group.index)
+    return group["exact_surrogate_recovered_expected_model"].fillna(False).astype(bool)
 
 
 def model_family(model: str) -> str:

@@ -66,20 +66,26 @@ class StateSpaceReplayModel:
     """Replay decoder baseline returning a posterior for every replay bin.
 
     Supported modes are ``stationary``, ``diffusion``, ``fragmented``/``jump``,
-    ``first-order-imm``, ``momentum``, and ``imm``. The first-order models use
-    exact full-grid forward-backward recursions. ``first-order-imm`` is the
-    legacy exact first-order switcher over stationary, diffusion, and
-    fragmented/jump dynamics. ``momentum`` and ``imm`` use candidate-pruned
-    second-order dynamics for scalability. ``imm`` switches among stationary,
-    diffusion, momentum, and jump modes.
+    ``first-order-imm``, ``momentum``, ``imm``, ``displacement-momentum``, and
+    ``displacement-imm``. The first-order models use exact full-grid
+    forward-backward recursions. ``first-order-imm`` is the legacy exact
+    first-order switcher over stationary, diffusion, and fragmented/jump
+    dynamics. ``momentum`` and ``imm`` use candidate-pruned second-order
+    dynamics for scalability. ``imm`` switches among stationary, diffusion,
+    momentum, and jump modes.
 
     Candidate recursions keep full-grid prior and transition normalizers and
     drop off-support paths, so their evidences are conservative truncated
     full-grid evidences. They return candidate-supported per-bin posterior
-    marginals. ``displacement-momentum`` is an exact finite-state surrogate over
-    ``(position, displacement)`` states. It is not the full pairwise momentum
-    model, but its evidence is exact over the declared finite displacement grid
-    and can be used as a comparable diagnostic row.
+    marginals. ``momentum-exact-sparse`` is an exact pair-grid dynamic program
+    over a finite-radius sparse transition model and is intended as the
+    comparable paper-facing second-order momentum row. ``displacement-momentum``
+    is an exact finite-state surrogate over ``(position, displacement)`` states.
+    ``displacement-imm`` is an exact finite-state IMM surrogate over ``(mode,
+    position, displacement)`` states. These finite-state surrogates are not the
+    full pairwise momentum model, but their evidences are exact over the
+    declared finite displacement grid and can be used as comparable diagnostic
+    rows.
     """
 
     mode: str = "diffusion"
@@ -95,7 +101,9 @@ class StateSpaceReplayModel:
             "first-order-imm",
             "imm",
             "momentum",
+            "momentum-exact-sparse",
             "displacement-momentum",
+            "displacement-imm",
         }
         if self.mode not in allowed:
             raise ValueError(f"mode must be one of {sorted(allowed)}")

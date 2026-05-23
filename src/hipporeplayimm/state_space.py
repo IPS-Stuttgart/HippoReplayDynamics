@@ -29,6 +29,12 @@ from .state_space_displacement_momentum import (
     _displacement_lattice,
     _score_displacement_momentum_exact,
 )
+from .state_space_displacement_imm import (
+    _score_displacement_imm_exact,
+)
+from .state_space_sparse_momentum import (
+    _score_sparse_momentum_exact,
+)
 from .state_space_first_order import (
     _apply_transition,
     _apply_transition_backward,
@@ -92,8 +98,10 @@ __all__ = [
     "_score_first_order_imm",
     "_score_fragmented",
     "_score_displacement_momentum_exact",
+    "_score_displacement_imm_exact",
     "_score_imm_candidates",
     "_score_momentum_candidates",
+    "_score_sparse_momentum_exact",
     "_score_stationary",
     "_top_candidate_indices",
     "_valid_bin_count",

@@ -44,6 +44,7 @@ _TRAJECTORY_MODELS = {
     "momentum-reverse",
     "momentum-bidirectional",
     "displacement-momentum",
+    "displacement-imm",
     "imm",
     "first-order-imm",
     "goal",
@@ -324,6 +325,8 @@ def canonical_model_name(model: object) -> str:
         name = name.removesuffix("-marginalized")
     if name in {"velocity", "finite-displacement-momentum"}:
         return "displacement-momentum"
+    if name in {"finite-displacement-imm", "displacement-imm"}:
+        return "displacement-imm"
     if name == "jump":
         return "fragmented"
     return name

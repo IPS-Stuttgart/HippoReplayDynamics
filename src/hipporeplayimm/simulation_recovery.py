@@ -49,6 +49,7 @@ _TRAJECTORY = {
     "sorted-spike-state-space-jump",
     "sorted-spike-state-space-momentum",
     "sorted-spike-state-space-displacement-momentum",
+    "sorted-spike-state-space-momentum-exact-sparse",
     "sorted-spike-state-space-imm",
 }
 _NONTRAJECTORY = {
@@ -802,7 +803,7 @@ def build_scoring_models(config: SimulationRecoveryConfig) -> dict[str, object]:
             name="imm",
         ),
     }
-    for mode in ("stationary", "diffusion", "fragmented", "jump", "momentum", "displacement-momentum", "imm"):
+    for mode in ("stationary", "diffusion", "fragmented", "jump", "momentum", "momentum-exact-sparse", "displacement-momentum", "imm"):
         available[f"sorted-spike-state-space-{mode}"] = SortedSpikeStateSpaceReplayModel(
             mode=mode,
             config=replace(state_space_config, mode=mode),

@@ -141,6 +141,20 @@ def _score_state_space_duration_with_occupancy(
         )
         transition_sigma_cm = float(displacement_extra["state_space_displacement_transition_sigma_cm"])
         extra = displacement_extra
+    elif self.mode == "momentum-exact-sparse":
+        from .state_space_sparse_momentum import _score_sparse_momentum_exact
+
+        logp, trajectory, sparse_extra = _score_sparse_momentum_exact(
+            emissions,
+            bin_centers,
+            self.config,
+            durations,
+            valid_bin_mask=valid_bin_mask,
+        )
+        transition_sigma_cm = float(
+            sparse_extra["state_space_momentum_transition_sigma_cm"]
+        )
+        extra = sparse_extra
     elif self.mode == "momentum":
         candidates = _duration_candidates(ss, self, emissions, bin_centers, candidate_indices, valid_bin_mask)
         momentum_sigmas = _per_transition_sigmas(

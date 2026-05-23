@@ -405,7 +405,11 @@ def _benchmark_split_metadata(
 
 def _score_train_joint_model(model, train_emissions, joint_emissions, bin_centers, occupancy_s=None):
     if isinstance(model, StateSpaceReplayModel):
-        candidates = _candidate_indices_for_model(model, train_emissions, bin_centers)
+        candidates = (
+            _candidate_indices_for_model(model, train_emissions, bin_centers)
+            if _state_space_uses_candidate_support(model)
+            else None
+        )
         train_score = _score_state_space_model(
             model,
             train_emissions,
@@ -450,6 +454,10 @@ def _candidate_indices_for_model(model, emissions, bin_centers):
         return model.candidate_indices(emissions, bin_centers)
     except TypeError:
         return model.candidate_indices(emissions)
+
+
+def _state_space_uses_candidate_support(model: StateSpaceReplayModel) -> bool:
+    return model.mode in {"momentum", "imm"}
 
 
 def _is_clusterless_model(model: object) -> bool:
@@ -811,6 +819,7 @@ def _build_models(
         "sorted-spike-state-space-fragmented": SortedSpikeStateSpaceReplayModel(mode="fragmented"),
         "sorted-spike-state-space-jump": SortedSpikeStateSpaceReplayModel(mode="jump"),
         "sorted-spike-state-space-momentum": SortedSpikeStateSpaceReplayModel(mode="momentum"),
+        "sorted-spike-state-space-momentum-exact-sparse": SortedSpikeStateSpaceReplayModel(mode="momentum-exact-sparse"),
         "sorted-spike-state-space-displacement-momentum": SortedSpikeStateSpaceReplayModel(mode="displacement-momentum"),
         "sorted-spike-state-space-imm": SortedSpikeStateSpaceReplayModel(mode="imm"),
         "sorted-spike-state-space-first-order-imm": SortedSpikeStateSpaceReplayModel(mode="first-order-imm"),
@@ -821,6 +830,7 @@ def _build_models(
         "state-space-fragmented": SortedSpikeStateSpaceReplayModel(mode="fragmented", name="state-space-fragmented"),
         "state-space-jump": SortedSpikeStateSpaceReplayModel(mode="jump", name="state-space-jump"),
         "state-space-momentum": SortedSpikeStateSpaceReplayModel(mode="momentum", name="state-space-momentum"),
+        "state-space-momentum-exact-sparse": SortedSpikeStateSpaceReplayModel(mode="momentum-exact-sparse", name="state-space-momentum-exact-sparse"),
         "state-space-displacement-momentum": SortedSpikeStateSpaceReplayModel(mode="displacement-momentum", name="state-space-displacement-momentum"),
         "state-space-imm": SortedSpikeStateSpaceReplayModel(mode="imm", name="state-space-imm"),
         "state-space-first-order-imm": SortedSpikeStateSpaceReplayModel(mode="first-order-imm", name="state-space-first-order-imm"),
@@ -829,6 +839,7 @@ def _build_models(
         "clusterless-state-space-fragmented": ClusterlessStateSpaceReplayModel(mode="fragmented", **clusterless_kwargs),
         "clusterless-state-space-jump": ClusterlessStateSpaceReplayModel(mode="jump", **clusterless_kwargs),
         "clusterless-state-space-momentum": ClusterlessStateSpaceReplayModel(mode="momentum", **clusterless_kwargs),
+        "clusterless-state-space-momentum-exact-sparse": ClusterlessStateSpaceReplayModel(mode="momentum-exact-sparse", **clusterless_kwargs),
         "clusterless-state-space-displacement-momentum": ClusterlessStateSpaceReplayModel(mode="displacement-momentum", **clusterless_kwargs),
         "clusterless-state-space-imm": ClusterlessStateSpaceReplayModel(mode="imm", **clusterless_kwargs),
         "clusterless-state-space-first-order-imm": ClusterlessStateSpaceReplayModel(mode="first-order-imm", **clusterless_kwargs),

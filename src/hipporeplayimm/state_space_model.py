@@ -76,10 +76,13 @@ class StateSpaceReplayModel:
     Candidate recursions keep full-grid prior and transition normalizers and
     drop off-support paths, so their evidences are conservative truncated
     full-grid evidences. They return candidate-supported per-bin posterior
-    marginals. ``displacement-momentum`` is an exact finite-state surrogate over
-    ``(position, displacement)`` states. It is not the full pairwise momentum
-    model, but its evidence is exact over the declared finite displacement grid
-    and can be used as a comparable diagnostic row.
+    marginals. ``momentum-exact-sparse`` is an exact pair-grid dynamic program
+    over a finite-radius sparse transition model and is intended as the
+    comparable paper-facing second-order momentum row. ``displacement-momentum``
+    is an exact finite-state surrogate over ``(position, displacement)`` states.
+    It is not the full pairwise momentum model, but its evidence is exact over
+    the declared finite displacement grid and can be used as a comparable
+    diagnostic row.
     """
 
     mode: str = "diffusion"
@@ -95,6 +98,7 @@ class StateSpaceReplayModel:
             "first-order-imm",
             "imm",
             "momentum",
+            "momentum-exact-sparse",
             "displacement-momentum",
         }
         if self.mode not in allowed:

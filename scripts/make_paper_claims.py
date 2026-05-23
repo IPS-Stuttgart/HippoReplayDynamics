@@ -101,6 +101,7 @@ class PaperClaimTables:
     event_deltas: pd.DataFrame
     session_summary: pd.DataFrame
     rat_summary: pd.DataFrame
+    leave_one_rat_out_summary: pd.DataFrame
     summary: pd.DataFrame
     manifest: dict[str, object]
 
@@ -110,6 +111,7 @@ class PaperClaimTables:
         self.event_deltas.to_csv(out_dir / "paper_claim_event_deltas.csv", index=False)
         self.session_summary.to_csv(out_dir / "paper_claim_session_summary.csv", index=False)
         self.rat_summary.to_csv(out_dir / "paper_claim_rat_summary.csv", index=False)
+        self.leave_one_rat_out_summary.to_csv(out_dir / "paper_claim_leave_one_rat_out_summary.csv", index=False)
         self.summary.to_csv(out_dir / "paper_claim_summary.csv", index=False)
         (out_dir / "paper_claims.md").write_text(render_claim_markdown(self), encoding="utf-8")
         (out_dir / "paper_claim_manifest.json").write_text(
@@ -158,6 +160,7 @@ def build_paper_claim_tables(
     )
     session_summary = summarize_sessions(event_deltas)
     rat_summary = summarize_rats(event_deltas)
+    leave_one_rat_out_summary = summarize_leave_one_rat_out(event_deltas)
     summary = summarize_overall(
         event_deltas,
         primary_model=primary_model,
@@ -184,6 +187,7 @@ def build_paper_claim_tables(
         event_deltas=event_deltas,
         session_summary=session_summary,
         rat_summary=rat_summary,
+        leave_one_rat_out_summary=leave_one_rat_out_summary,
         summary=summary,
         manifest=manifest,
     )
@@ -324,6 +328,22 @@ def summarize_rats(event_deltas: pd.DataFrame) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
+def summarize_leave_one_rat_out(event_deltas: pd.DataFrame) -> pd.DataFrame:
+    """Summarize sensitivity to excluding one rat at a time."""
+
+    if event_deltas.empty or "session" not in event_deltas:
+        return pd.DataFrame()
+    frame = event_deltas.copy()
+    frame["rat"] = frame["session"].map(_rat_from_session)
+    rows: list[dict[str, object]] = []
+    for rat in sorted(frame["rat"].dropna().astype(str).unique()):
+        subset = frame[frame["rat"].astype(str) != rat]
+        row = _summary_row(f"leave_out_{rat}", subset)
+        row["left_out_rat"] = rat
+        rows.append(row)
+    return pd.DataFrame(rows)
+
+
 def summarize_overall(
     event_deltas: pd.DataFrame,
     *,
@@ -420,6 +440,13 @@ def render_claim_markdown(tables: PaperClaimTables) -> str:
             "## Rat-level summary",
             "",
             f"Rat-level rows available: {0 if rat_rows.empty else int(len(rat_rows))}. Use `paper_claim_rat_summary.csv` for nested reporting.",
+            "",
+            "## Leave-one-rat-out sensitivity",
+            "",
+            (
+                f"Leave-one-rat-out rows available: {len(tables.leave_one_rat_out_summary)}. "
+                "Use `paper_claim_leave_one_rat_out_summary.csv` for rat-influence reporting."
+            ),
             "",
         ]
     )

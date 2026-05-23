@@ -90,6 +90,7 @@ sorted-spike-state-space-diffusion
 sorted-spike-state-space-fragmented
 sorted-spike-state-space-first-order-imm
 sorted-spike-state-space-momentum
+sorted-spike-state-space-velocity-momentum
 sorted-spike-state-space-momentum-bidirectional
 sorted-spike-state-space-imm
 sorted-spike-state-space-goal
@@ -97,6 +98,7 @@ sorted-spike-state-space-goal-bidirectional
 clusterless-state-space-stationary
 clusterless-state-space-diffusion
 clusterless-state-space-momentum
+clusterless-state-space-velocity-momentum
 clusterless-state-space-fragmented
 clusterless-state-space-imm
 ```
@@ -131,14 +133,36 @@ cell_split_strategy: random, mean-rate, peak-rate
 uncertainty: session/rat hierarchical bootstrap
 ```
 
-## 8. Treat clusterless and PyRecEst results as separate validation tracks
+## 8. Run the momentum-recovery ladder before selecting second-order parameters
+
+Candidate-pruned pairwise momentum/IMM rows are useful lower-bound diagnostics,
+but a failed strict recovery table is not enough to tell whether momentum is
+unidentifiable, unsupported by the candidate beam, or excluded by the exact-
+evidence gate.  Before tuning real replay evidence, run the ladder:
+
+```bash
+python scripts/run_momentum_recovery_ladder.py \
+  --dataset-root data/DataSetFromPfeifferFoster \
+  --session Rat1/Open1 \
+  --events run:0-25 \
+  --events-per-model 25 \
+  --output results/momentum-recovery-ladder
+```
+
+Interpret the four tiers as a diagnostic progression: full-grid pairwise
+momentum, exact finite-velocity/displacement momentum, oracle candidate support,
+and native candidate support.  A paper-level second-order claim should use exact
+finite-velocity/displacement evidence for the headline model comparison and keep
+candidate-pruned pairwise momentum/IMM as lower-bound support diagnostics.
+
+## 9. Treat clusterless and PyRecEst results as separate validation tracks
 
 Clusterless local-KDE models should pass mark-drift and mark-likelihood
 sensitivity checks before being mixed into the sorted-spike narrative.  PyRecEst
 particle results should be reported as seed/particle-count/proposal aggregated
 Pareto summaries rather than single-seed rankings.
 
-## 9. Diagnose synthetic recovery before selecting parameters
+## 10. Diagnose synthetic recovery before selecting parameters
 
 For candidate-pruned momentum/IMM rows, strict recovery is exact-comparable only
 and can exclude the expected model from winning.  Always inspect the diagnostic
@@ -154,7 +178,7 @@ Use `simulation_recovery_diagnostic_summary.csv` to separate strict-gate
 exclusion, certified lower-bound recovery, candidate-support loss, and genuinely
 nondecisive lower bounds.
 
-## 10. Build a single paper-pack artifact
+## 11. Build a single paper-pack artifact
 
 After the final evidence, recovery, null-control, and parameter-selection runs,
 collect them into one auditable directory rather than copying tables by hand:

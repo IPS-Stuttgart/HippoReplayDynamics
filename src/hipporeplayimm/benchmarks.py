@@ -821,6 +821,10 @@ def _build_models(
         "sorted-spike-state-space-momentum": SortedSpikeStateSpaceReplayModel(mode="momentum"),
         "sorted-spike-state-space-momentum-exact-sparse": SortedSpikeStateSpaceReplayModel(mode="momentum-exact-sparse"),
         "sorted-spike-state-space-displacement-momentum": SortedSpikeStateSpaceReplayModel(mode="displacement-momentum"),
+        "sorted-spike-state-space-velocity-momentum": SortedSpikeStateSpaceReplayModel(
+            mode="displacement-momentum",
+            name="sorted-spike-state-space-velocity-momentum",
+        ),
         "sorted-spike-state-space-displacement-imm": SortedSpikeStateSpaceReplayModel(mode="displacement-imm"),
         "sorted-spike-state-space-imm": SortedSpikeStateSpaceReplayModel(mode="imm"),
         "sorted-spike-state-space-first-order-imm": SortedSpikeStateSpaceReplayModel(mode="first-order-imm"),
@@ -833,6 +837,10 @@ def _build_models(
         "state-space-momentum": SortedSpikeStateSpaceReplayModel(mode="momentum", name="state-space-momentum"),
         "state-space-momentum-exact-sparse": SortedSpikeStateSpaceReplayModel(mode="momentum-exact-sparse", name="state-space-momentum-exact-sparse"),
         "state-space-displacement-momentum": SortedSpikeStateSpaceReplayModel(mode="displacement-momentum", name="state-space-displacement-momentum"),
+        "state-space-velocity-momentum": SortedSpikeStateSpaceReplayModel(
+            mode="displacement-momentum",
+            name="state-space-velocity-momentum",
+        ),
         "state-space-displacement-imm": SortedSpikeStateSpaceReplayModel(mode="displacement-imm", name="state-space-displacement-imm"),
         "state-space-imm": SortedSpikeStateSpaceReplayModel(mode="imm", name="state-space-imm"),
         "state-space-first-order-imm": SortedSpikeStateSpaceReplayModel(mode="first-order-imm", name="state-space-first-order-imm"),
@@ -843,6 +851,11 @@ def _build_models(
         "clusterless-state-space-momentum": ClusterlessStateSpaceReplayModel(mode="momentum", **clusterless_kwargs),
         "clusterless-state-space-momentum-exact-sparse": ClusterlessStateSpaceReplayModel(mode="momentum-exact-sparse", **clusterless_kwargs),
         "clusterless-state-space-displacement-momentum": ClusterlessStateSpaceReplayModel(mode="displacement-momentum", **clusterless_kwargs),
+        "clusterless-state-space-velocity-momentum": ClusterlessStateSpaceReplayModel(
+            mode="displacement-momentum",
+            name="clusterless-state-space-velocity-momentum",
+            **clusterless_kwargs,
+        ),
         "clusterless-state-space-displacement-imm": ClusterlessStateSpaceReplayModel(mode="displacement-imm", **clusterless_kwargs),
         "clusterless-state-space-imm": ClusterlessStateSpaceReplayModel(mode="imm", **clusterless_kwargs),
         "clusterless-state-space-first-order-imm": ClusterlessStateSpaceReplayModel(mode="first-order-imm", **clusterless_kwargs),

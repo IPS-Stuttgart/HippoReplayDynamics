@@ -21,7 +21,6 @@ from typing import Iterable
 
 import numpy as np
 from scipy.spatial import cKDTree
-from scipy.special import logsumexp
 
 from .encoding import LogEmissionTensor
 from .state_space_first_order import _score_fragmented

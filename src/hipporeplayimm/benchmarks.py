@@ -821,6 +821,7 @@ def _build_models(
         "sorted-spike-state-space-momentum": SortedSpikeStateSpaceReplayModel(mode="momentum"),
         "sorted-spike-state-space-momentum-exact-sparse": SortedSpikeStateSpaceReplayModel(mode="momentum-exact-sparse"),
         "sorted-spike-state-space-displacement-momentum": SortedSpikeStateSpaceReplayModel(mode="displacement-momentum"),
+        "sorted-spike-state-space-displacement-imm": SortedSpikeStateSpaceReplayModel(mode="displacement-imm"),
         "sorted-spike-state-space-imm": SortedSpikeStateSpaceReplayModel(mode="imm"),
         "sorted-spike-state-space-first-order-imm": SortedSpikeStateSpaceReplayModel(mode="first-order-imm"),
         "sorted-spike-state-space-goal": goal_state_space_model("sorted-spike-state-space-goal"),
@@ -832,6 +833,7 @@ def _build_models(
         "state-space-momentum": SortedSpikeStateSpaceReplayModel(mode="momentum", name="state-space-momentum"),
         "state-space-momentum-exact-sparse": SortedSpikeStateSpaceReplayModel(mode="momentum-exact-sparse", name="state-space-momentum-exact-sparse"),
         "state-space-displacement-momentum": SortedSpikeStateSpaceReplayModel(mode="displacement-momentum", name="state-space-displacement-momentum"),
+        "state-space-displacement-imm": SortedSpikeStateSpaceReplayModel(mode="displacement-imm", name="state-space-displacement-imm"),
         "state-space-imm": SortedSpikeStateSpaceReplayModel(mode="imm", name="state-space-imm"),
         "state-space-first-order-imm": SortedSpikeStateSpaceReplayModel(mode="first-order-imm", name="state-space-first-order-imm"),
         "clusterless-state-space-stationary": ClusterlessStateSpaceReplayModel(mode="stationary", **clusterless_kwargs),
@@ -841,6 +843,7 @@ def _build_models(
         "clusterless-state-space-momentum": ClusterlessStateSpaceReplayModel(mode="momentum", **clusterless_kwargs),
         "clusterless-state-space-momentum-exact-sparse": ClusterlessStateSpaceReplayModel(mode="momentum-exact-sparse", **clusterless_kwargs),
         "clusterless-state-space-displacement-momentum": ClusterlessStateSpaceReplayModel(mode="displacement-momentum", **clusterless_kwargs),
+        "clusterless-state-space-displacement-imm": ClusterlessStateSpaceReplayModel(mode="displacement-imm", **clusterless_kwargs),
         "clusterless-state-space-imm": ClusterlessStateSpaceReplayModel(mode="imm", **clusterless_kwargs),
         "clusterless-state-space-first-order-imm": ClusterlessStateSpaceReplayModel(mode="first-order-imm", **clusterless_kwargs),
         "pyrecest-goal-particle": PyRecEstGoalParticleModel(
@@ -914,6 +917,8 @@ _STATE_SPACE_STATIC_BASELINE_MODES = frozenset(
         "fragmented",
         "jump",
         "momentum",
+        "displacement-momentum",
+        "displacement-imm",
     }
 )
 

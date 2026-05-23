@@ -28,7 +28,6 @@ from .simulation_recovery import (
     SimulationRecoveryConfig,
     SimulationRecoveryResult,
     certified_vs_exact_event_recovery,
-    parse_model_list,
     run_session_simulation_recovery,
 )
 from .state_space import StateSpaceDecoderConfig

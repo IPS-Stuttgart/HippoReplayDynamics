@@ -56,10 +56,14 @@ predictive density as the primary metric.
   candidate-pruned scoring for speed, while `DiffusionModel` remains available
   for exact small-grid checks.
 - `momentum`: candidate-pruned second-order dynamics with velocity persistence.
+  Use `sorted-spike-state-space-momentum-exact-sparse` for paper-facing
+  exact/comparable momentum evidence; the candidate-pruned row is a lower-bound
+  support audit unless it keeps the full grid.
 - `imm`: candidate-pruned switching model over stationary, diffusion, momentum,
   and jump/fragmented modes.
 - `sorted-spike-state-space-stationary`, `sorted-spike-state-space-diffusion`,
   `sorted-spike-state-space-fragmented`, `sorted-spike-state-space-jump`,
+  `sorted-spike-state-space-momentum-exact-sparse`,
   `sorted-spike-state-space-momentum`, and `sorted-spike-state-space-imm`:
   sorted-spike Poisson state-space baselines intended for 1-3 ms replay bins.
   The first-order modes return full forward/backward trajectory posteriors.
@@ -103,7 +107,7 @@ hipporeplayimm benchmark D:\Uni-Data\DataSetFromPfeifferFoster `
   --bin-size-cm 6.0 `
   --smoothing-sigma-bins 2.0 `
   --min-speed-cm-s 5.0 `
-  --models random,stationary,sorted-spike-state-space-diffusion,sorted-spike-state-space-momentum,sorted-spike-state-space-imm `
+  --models random,stationary,sorted-spike-state-space-diffusion,sorted-spike-state-space-momentum-exact-sparse,sorted-spike-state-space-momentum,sorted-spike-state-space-imm `
   --output results\state_space_smoke
 ```
 

@@ -23,7 +23,7 @@ on:
       models:
         description: "Space-separated models"
         required: true
-        default: "sorted-spike-state-space-stationary sorted-spike-state-space-diffusion sorted-spike-state-space-fragmented sorted-spike-state-space-first-order-imm sorted-spike-state-space-momentum sorted-spike-state-space-momentum-bidirectional sorted-spike-state-space-imm sorted-spike-state-space-goal sorted-spike-state-space-goal-bidirectional clusterless-state-space-stationary clusterless-state-space-diffusion clusterless-state-space-momentum clusterless-state-space-fragmented clusterless-state-space-imm"
+        default: "sorted-spike-state-space-stationary sorted-spike-state-space-diffusion sorted-spike-state-space-fragmented sorted-spike-state-space-first-order-imm sorted-spike-state-space-momentum-exact-sparse sorted-spike-state-space-momentum sorted-spike-state-space-momentum-bidirectional sorted-spike-state-space-imm sorted-spike-state-space-goal sorted-spike-state-space-goal-bidirectional clusterless-state-space-stationary clusterless-state-space-diffusion clusterless-state-space-momentum clusterless-state-space-fragmented clusterless-state-space-imm"
       event_shard_count:
         description: "Target number of event shards"
         required: true

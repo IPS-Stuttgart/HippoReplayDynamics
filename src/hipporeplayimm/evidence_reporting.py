@@ -35,6 +35,10 @@ EVIDENCE_COMPARISON_DESCRIPTIONS = {
     EVIDENCE_COMPARISON_NOT_SCORED: "Model was not scored successfully for this event.",
     EVIDENCE_COMPARISON_UNKNOWN: "Evidence support is missing or unknown; treat as non-comparable until classified explicitly.",
 }
+_MOMENTUM_EXACT_SURROGATE_MODELS = (
+    "sorted-spike-state-space-momentum-exact-sparse",
+    "sorted-spike-state-space-displacement-momentum",
+)
 
 
 def evidence_support_from_row(row: pd.Series) -> str:
@@ -118,6 +122,10 @@ def simulation_add_evidence_columns(df: pd.DataFrame) -> pd.DataFrame:
         group["truncated_relative_log_evidence"] = np.nan
         group["is_best_truncated_lower_bound"] = False
         group["best_truncated_lower_bound_model"] = ""
+        group["exact_surrogate_best_model"] = ""
+        group["exact_surrogate_recovered_expected_model"] = False
+        group["exact_surrogate_log_evidence"] = np.nan
+        group["exact_surrogate_minus_best_comparable_log_evidence"] = np.nan
         if scored.empty:
             if "expected_model" in group:
                 group["recovered_expected_model"] = False
@@ -125,6 +133,7 @@ def simulation_add_evidence_columns(df: pd.DataFrame) -> pd.DataFrame:
             groups.append(group)
             continue
 
+        best = ""
         exact = scored[scored["evidence_comparable"].fillna(False).astype(bool)]
         if not exact.empty:
             values = exact["log_evidence"].to_numpy(float)
@@ -136,6 +145,19 @@ def simulation_add_evidence_columns(df: pd.DataFrame) -> pd.DataFrame:
             group.loc[exact.index, "model_probability"] = probabilities
             group.loc[best_index, "is_best_model"] = True
             group["best_model"] = best
+            surrogate_models = _simulation_exact_surrogate_models(group)
+            surrogate_rows = exact[exact["model"].astype(str).isin(surrogate_models)]
+            if not surrogate_rows.empty:
+                surrogate = _best_log_evidence_row(surrogate_rows)
+                surrogate_log_evidence = float(surrogate["log_evidence"])
+                group["exact_surrogate_best_model"] = str(surrogate["model"])
+                group["exact_surrogate_log_evidence"] = surrogate_log_evidence
+                group["exact_surrogate_minus_best_comparable_log_evidence"] = (
+                    surrogate_log_evidence - max_value
+                )
+                group["exact_surrogate_recovered_expected_model"] = bool(
+                    str(surrogate["model"]) == best
+                )
 
         truncated = scored[scored["evidence_support"].eq(TRUNCATED_EVIDENCE_SUPPORT)]
         if not truncated.empty:
@@ -148,12 +170,57 @@ def simulation_add_evidence_columns(df: pd.DataFrame) -> pd.DataFrame:
             group["best_truncated_lower_bound_model"] = best_truncated
 
         if "expected_model" in group:
-            group["recovered_expected_model"] = group["best_model"] == group["expected_model"]
+            group["recovered_expected_model"] = best in _simulation_acceptable_recovery_models(
+                group
+            )
             group["lower_bound_recovered_expected_model"] = (
                 group["best_truncated_lower_bound_model"] == group["expected_model"]
             )
         groups.append(group)
     return pd.concat(groups, ignore_index=True).sort_values(["event_index", "model"]).reset_index(drop=True)
+
+
+def _simulation_acceptable_recovery_models(group: pd.DataFrame) -> tuple[str, ...]:
+    models: list[str] = []
+    expected = _simulation_event_text(group, "expected_model")
+    if expected:
+        models.append(expected)
+    models.extend(_simulation_exact_surrogate_models(group))
+    return tuple(dict.fromkeys(models))
+
+
+def _simulation_exact_surrogate_models(group: pd.DataFrame) -> tuple[str, ...]:
+    models: list[str] = []
+    true_model = _simulation_event_text(group, "true_model").lower()
+    if true_model == "momentum":
+        models.extend(_MOMENTUM_EXACT_SURROGATE_MODELS)
+    models.extend(_simulation_model_values(group, "expected_exact_surrogate_model"))
+    return tuple(dict.fromkeys(models))
+
+
+def _simulation_event_text(group: pd.DataFrame, column: str) -> str:
+    if column not in group.columns:
+        return ""
+    values = group[column].dropna().astype(str)
+    if values.empty:
+        return ""
+    return str(values.iloc[0]).strip()
+
+
+def _simulation_model_values(group: pd.DataFrame, column: str) -> list[str]:
+    values: list[str] = []
+    if column not in group.columns:
+        return values
+    for value in group[column].dropna().astype(str):
+        for model in value.replace(",", " ").split():
+            if model:
+                values.append(model)
+    return list(dict.fromkeys(values))
+
+
+def _best_log_evidence_row(frame: pd.DataFrame) -> pd.Series:
+    values = frame["log_evidence"].to_numpy(float)
+    return frame.iloc[int(np.argmax(values))]
 
 
 def simulation_event_best_rows(event_scores: pd.DataFrame) -> pd.DataFrame:

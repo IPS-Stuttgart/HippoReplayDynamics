@@ -54,7 +54,7 @@ except ModuleNotFoundError:  # pragma: no cover - helpful when run before editab
         return out
 
 
-DEFAULT_PRIMARY_MODEL = "sorted-spike-state-space-momentum"
+DEFAULT_PRIMARY_MODEL = "sorted-spike-state-space-momentum-exact-sparse"
 DEFAULT_BASELINE_MODEL = "sorted-spike-state-space-diffusion"
 DEFAULT_VALUE_COLUMN = "heldout_log_likelihood"
 OPTIONAL_IDENTITY_COLUMNS = (

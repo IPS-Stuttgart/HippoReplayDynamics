@@ -596,3 +596,142 @@ def test_state_space_momentum_exact_sparse_matches_bruteforce_tiny_grid():
     assert score.diagnostics["state_space_momentum_candidate_selection"] == "none_exact_sparse"
     assert score.diagnostics["state_space_sparse_momentum_max_pair_count"] == 4
     assert score.diagnostics["state_space_sparse_momentum_transition_support"] == "finite_radius_gaussian"
+
+
+def test_exact_sparse_momentum_matches_dense_finite_radius_reference_and_heldout_identity():
+    centers = np.array([[0.0, 0.0], [1.0, 0.0], [2.0, 0.0]])
+    train = LogEmissionTensor(
+        log_likelihood=np.log(
+            np.array(
+                [
+                    [0.72, 0.20, 0.08],
+                    [0.12, 0.72, 0.16],
+                    [0.08, 0.18, 0.74],
+                    [0.10, 0.24, 0.66],
+                ]
+            )
+        ),
+        spike_counts=np.zeros((4, 1), dtype=int),
+        times=np.array([0.0, 1.0, 2.0, 3.0]),
+        dt=1.0,
+        cell_ids=np.array([1]),
+        n_spikes=0,
+    )
+    test_log_likelihood = np.log(
+        np.array(
+            [
+                [0.55, 0.35, 0.10],
+                [0.18, 0.64, 0.18],
+                [0.12, 0.32, 0.56],
+                [0.14, 0.30, 0.56],
+            ]
+        )
+    )
+    joint = LogEmissionTensor(
+        log_likelihood=train.log_likelihood + test_log_likelihood,
+        spike_counts=np.zeros((4, 1), dtype=int),
+        times=train.times.copy(),
+        dt=1.0,
+        cell_ids=train.cell_ids.copy(),
+        n_spikes=0,
+    )
+    config = StateSpaceDecoderConfig(
+        mode="momentum-exact-sparse",
+        momentum_sigma_cm_sqrt_s=0.9,
+        momentum_initial_sigma_cm_sqrt_s=0.9,
+        momentum_velocity_decay=0.65,
+        max_step_sigma=1.25,
+    )
+    exact_model = StateSpaceReplayModel(mode="momentum-exact-sparse", config=config)
+
+    train_score = exact_model.score(train, centers)
+    joint_score = exact_model.score(joint, centers)
+    dense_train_logz = _dense_finite_radius_momentum_log_evidence(train, centers, config)
+    dense_joint_logz = _dense_finite_radius_momentum_log_evidence(joint, centers, config)
+
+    assert abs(train_score.log_likelihood - dense_train_logz) < 1e-8
+    assert abs(joint_score.log_likelihood - dense_joint_logz) < 1e-8
+    assert abs(
+        (joint_score.log_likelihood - train_score.log_likelihood)
+        - (dense_joint_logz - dense_train_logz)
+    ) < 1e-8
+    assert train_score.diagnostics["state_space_momentum_candidate_selection"] == "none_exact_sparse"
+    assert joint_score.diagnostics["state_space_momentum_candidate_selection"] == "none_exact_sparse"
+
+    pruned_config = StateSpaceDecoderConfig(
+        mode="momentum",
+        momentum_sigma_cm_sqrt_s=config.momentum_sigma_cm_sqrt_s,
+        momentum_initial_sigma_cm_sqrt_s=config.momentum_initial_sigma_cm_sqrt_s,
+        momentum_velocity_decay=config.momentum_velocity_decay,
+        max_step_sigma=config.max_step_sigma,
+        momentum_candidate_top_k=1,
+        momentum_predicted_candidate_top_k=0,
+    )
+    pruned_score = StateSpaceReplayModel(mode="momentum", config=pruned_config).score(train, centers)
+
+    assert pruned_score.log_likelihood <= train_score.log_likelihood + 1e-8
+    assert pruned_score.diagnostics["state_space_momentum_evidence_support"] == "truncated_full_grid"
+
+
+def _dense_finite_radius_momentum_log_evidence(
+    emissions: LogEmissionTensor,
+    centers: np.ndarray,
+    config: StateSpaceDecoderConfig,
+) -> float:
+    terms = []
+    prior = -np.log(emissions.n_bins)
+    sigma = float(config.momentum_sigma_cm_sqrt_s)
+    initial_sigma = float(config.momentum_initial_sigma_cm_sqrt_s)
+    radius = float(config.max_step_sigma)
+    decay = float(config.momentum_velocity_decay)
+    for path in itertools.product(range(emissions.n_bins), repeat=emissions.n_time):
+        initial = _finite_radius_log_transition(
+            centers,
+            predicted=centers[path[0]],
+            dst=path[1],
+            sigma=initial_sigma,
+            radius=radius,
+        )
+        if not np.isfinite(initial):
+            continue
+        logp = prior + emissions.log_likelihood[0, path[0]]
+        logp += initial + emissions.log_likelihood[1, path[1]]
+        ok = True
+        for time_index in range(2, emissions.n_time):
+            prev_prev = path[time_index - 2]
+            prev = path[time_index - 1]
+            dst = path[time_index]
+            predicted = centers[prev] + decay * (centers[prev] - centers[prev_prev])
+            transition = _finite_radius_log_transition(
+                centers,
+                predicted=predicted,
+                dst=dst,
+                sigma=sigma,
+                radius=radius,
+            )
+            if not np.isfinite(transition):
+                ok = False
+                break
+            logp += transition + emissions.log_likelihood[time_index, dst]
+        if ok:
+            terms.append(logp)
+    return float(logsumexp(terms))
+
+
+def _finite_radius_log_transition(
+    centers: np.ndarray,
+    *,
+    predicted: np.ndarray,
+    dst: int,
+    sigma: float,
+    radius: float,
+) -> float:
+    distances = np.linalg.norm(centers - predicted[None, :], axis=1)
+    support = np.flatnonzero(distances <= radius * sigma)
+    if support.size == 0:
+        support = np.asarray([int(np.argmin(distances))], dtype=int)
+    if dst not in set(int(index) for index in support):
+        return float("-inf")
+    weights = np.exp(-0.5 * np.sum((centers[support] - predicted[None, :]) ** 2, axis=1) / (sigma * sigma))
+    local = int(np.flatnonzero(support == dst)[0])
+    return float(np.log(weights[local] / weights.sum()))

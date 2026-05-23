@@ -89,6 +89,7 @@ sorted-spike-state-space-stationary
 sorted-spike-state-space-diffusion
 sorted-spike-state-space-fragmented
 sorted-spike-state-space-first-order-imm
+sorted-spike-state-space-momentum-exact-sparse
 sorted-spike-state-space-momentum
 sorted-spike-state-space-momentum-bidirectional
 sorted-spike-state-space-imm
@@ -140,9 +141,10 @@ Pareto summaries rather than single-seed rankings.
 
 ## 9. Diagnose synthetic recovery before selecting parameters
 
-For candidate-pruned momentum/IMM rows, strict recovery is exact-comparable only
-and can exclude the expected model from winning.  Always inspect the diagnostic
-view before interpreting a momentum-recovery failure:
+Use exact sparse momentum for the headline exact/comparable momentum row.  For
+candidate-pruned momentum/IMM rows, strict recovery is exact-comparable only and
+can exclude the expected model from winning.  Always inspect the diagnostic view
+before interpreting a candidate-pruned momentum-recovery failure:
 
 ```bash
 python scripts/diagnose_simulation_recovery.py \
@@ -163,7 +165,7 @@ collect them into one auditable directory rather than copying tables by hand:
 python scripts/build_paper_pack.py \
   --scores results/model-evidence-all-sessions/event_scores.csv \
   --simulation-recovery-scores results/simulation-recovery-sweep-summary \
-  --primary-model sorted-spike-state-space-momentum \
+  --primary-model sorted-spike-state-space-momentum-exact-sparse \
   --baseline-model sorted-spike-state-space-diffusion \
   --output results/paper-pack
 ```

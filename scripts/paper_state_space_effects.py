@@ -325,6 +325,8 @@ def canonical_model_name(model: object) -> str:
         name = name.removesuffix("-marginalized")
     if name in {"velocity", "finite-displacement-momentum"}:
         return "displacement-momentum"
+    if name == "momentum-exact-sparse":
+        return "momentum"
     if name in {"finite-displacement-imm", "displacement-imm"}:
         return "displacement-imm"
     if name == "jump":

@@ -24,13 +24,13 @@ def test_paper_claim_tables_report_paired_session_heterogeneity(tmp_path):
     scores = pd.DataFrame(
         [
             _row("Rat1/Open1", 0, "sorted-spike-state-space-diffusion", 0.0),
-            _row("Rat1/Open1", 0, "sorted-spike-state-space-momentum", 2.0),
+            _row("Rat1/Open1", 0, "sorted-spike-state-space-momentum-exact-sparse", 2.0),
             _row("Rat1/Open1", 1, "sorted-spike-state-space-diffusion", 1.0),
-            _row("Rat1/Open1", 1, "sorted-spike-state-space-momentum", 0.0),
+            _row("Rat1/Open1", 1, "sorted-spike-state-space-momentum-exact-sparse", 0.0),
             _row("Rat2/Open1", 0, "sorted-spike-state-space-diffusion", 0.0),
-            _row("Rat2/Open1", 0, "sorted-spike-state-space-momentum", 3.0),
+            _row("Rat2/Open1", 0, "sorted-spike-state-space-momentum-exact-sparse", 3.0),
             _row("Rat2/Open1", 1, "sorted-spike-state-space-diffusion", 0.0),
-            _row("Rat2/Open1", 1, "sorted-spike-state-space-momentum", 4.0),
+            _row("Rat2/Open1", 1, "sorted-spike-state-space-momentum-exact-sparse", 4.0),
         ]
     )
 
@@ -43,7 +43,7 @@ def test_paper_claim_tables_report_paired_session_heterogeneity(tmp_path):
     assert summary["apparent_baseline_wins"] == 1
     assert summary["certified_primary_wins"] == 3
     assert summary["mean_delta_primary_minus_baseline"] == 2.0
-    assert summary["primary_model"] == "sorted-spike-state-space-momentum"
+    assert summary["primary_model"] == "sorted-spike-state-space-momentum-exact-sparse"
     assert summary["baseline_model"] == "sorted-spike-state-space-diffusion"
 
     by_session = tables.session_summary.set_index("group")
@@ -68,7 +68,14 @@ def test_lower_bound_primary_losses_are_nondecisive(tmp_path):
         ]
     )
 
-    tables = build_paper_claim_tables(scores, PaperClaimConfig(n_bootstrap=50, random_seed=4))
+    tables = build_paper_claim_tables(
+        scores,
+        PaperClaimConfig(
+            primary_model="sorted-spike-state-space-momentum",
+            n_bootstrap=50,
+            random_seed=4,
+        ),
+    )
     deltas = tables.event_deltas.sort_values("event_index")
 
     assert bool(deltas.iloc[0]["certified_primary_win"])

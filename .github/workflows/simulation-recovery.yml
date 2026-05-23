@@ -31,7 +31,7 @@ on:
       models:
         description: "Space-separated scoring models"
         required: true
-        default: "sorted-spike-state-space-stationary sorted-spike-state-space-diffusion sorted-spike-state-space-momentum sorted-spike-state-space-fragmented sorted-spike-state-space-imm"
+        default: "sorted-spike-state-space-stationary sorted-spike-state-space-diffusion sorted-spike-state-space-momentum-exact-sparse sorted-spike-state-space-momentum sorted-spike-state-space-fragmented sorted-spike-state-space-first-order-imm sorted-spike-state-space-imm"
       random_seed:
         description: "Simulation random seed"
         required: true

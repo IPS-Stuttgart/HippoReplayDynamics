@@ -23,7 +23,7 @@ on:
       models:
         description: "Space-separated models"
         required: true
-        default: "random stationary sorted-spike-state-space-diffusion sorted-spike-state-space-momentum sorted-spike-state-space-imm sorted-spike-state-space-goal sorted-spike-state-space-goal-bidirectional"
+        default: "random stationary sorted-spike-state-space-diffusion sorted-spike-state-space-momentum-exact-sparse sorted-spike-state-space-momentum sorted-spike-state-space-imm sorted-spike-state-space-goal sorted-spike-state-space-goal-bidirectional"
       time_bin_s:
         description: "Replay decoding time-bin width in seconds"
         required: true

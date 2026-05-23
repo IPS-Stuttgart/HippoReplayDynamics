@@ -4,6 +4,8 @@ from pathlib import Path
 def test_simulation_recovery_workflow_exposes_state_space_parameters():
     workflow = Path(".github/workflows/simulation-recovery.yml").read_text(encoding="utf-8")
 
+    assert "sorted-spike-state-space-momentum-exact-sparse" in workflow
+    assert "sorted-spike-state-space-first-order-imm" in workflow
     assert "state_space_diffusion_sigma_cm_sqrt_s:" in workflow
     assert "state_space_momentum_sigma_cm_sqrt_s:" in workflow
     assert "state_space_momentum_initial_sigma_cm_sqrt_s:" in workflow
@@ -19,6 +21,13 @@ def test_simulation_recovery_sweep_workflow_defines_recovery_rankings():
 
     assert "name: Simulation recovery parameter sweep" in workflow
     assert 'default: "diffusion momentum"' in workflow
+    assert (
+        'default: "sorted-spike-state-space-diffusion '
+        "sorted-spike-state-space-momentum-exact-sparse "
+        "sorted-spike-state-space-momentum "
+        "sorted-spike-state-space-first-order-imm "
+        'sorted-spike-state-space-imm"'
+    ) in workflow
     assert 'default: "6"' in workflow
     assert "state_space_diffusion_sigma_cm_sqrt_s_values:" in workflow
     assert 'default: "60 85 110"' in workflow

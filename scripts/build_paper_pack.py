@@ -149,7 +149,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--output", required=True)
     parser.add_argument("--scores", nargs="+", help="Benchmark score CSVs/directories for paired paper claims.")
     parser.add_argument("--simulation-recovery-scores", nargs="+", help="Simulation recovery score CSVs/directories for recovery diagnostics.")
-    parser.add_argument("--primary-model", default="sorted-spike-state-space-momentum")
+    parser.add_argument("--primary-model", default="sorted-spike-state-space-momentum-exact-sparse")
     parser.add_argument("--baseline-model", default="sorted-spike-state-space-diffusion")
     parser.add_argument("--value-column", default="heldout_log_likelihood")
     parser.add_argument("--n-bootstrap", type=int, default=5000)

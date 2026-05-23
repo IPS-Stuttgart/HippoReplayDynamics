@@ -32,8 +32,9 @@ hipporeplayimm benchmark data/DataSetFromPfeifferFoster \
   --output results/exact_sparse_momentum_smoke
 ```
 
-For synthetic recovery, include the exact sparse row explicitly rather than
-making it the default scoring model:
+For synthetic recovery, the exact sparse row is the default paper-facing
+momentum scorer; keep the candidate-pruned row when you want a lower-bound
+support audit:
 
 ```bash
 hipporeplayimm simulate-recovery data/DataSetFromPfeifferFoster \

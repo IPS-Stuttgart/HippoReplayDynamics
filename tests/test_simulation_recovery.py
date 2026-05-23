@@ -121,16 +121,48 @@ def test_recovery_summary_and_confusion_matrix_use_expected_models():
     assert confusion.loc[confusion["true_model"] == "momentum", "sorted-spike-state-space-momentum"].iloc[0] == 1
 
 
+def test_recovery_summary_counts_exact_sparse_momentum_surrogate():
+    rows = pd.DataFrame(
+        [
+            _row(0, "momentum", "sorted-spike-state-space-diffusion", -2.0),
+            _row(0, "momentum", "sorted-spike-state-space-momentum-exact-sparse", -1.0),
+        ]
+    )
+
+    scored = add_evidence_columns(rows)
+
+    exact_sparse = scored[
+        scored["model"] == "sorted-spike-state-space-momentum-exact-sparse"
+    ].iloc[0]
+    assert bool(exact_sparse["is_best_model"])
+    assert bool(exact_sparse["recovered_expected_model"])
+    assert bool(exact_sparse["exact_surrogate_recovered_expected_model"])
+
+    summary = recovery_summary(scored)
+    momentum = summary[summary["true_model"] == "momentum"].iloc[0]
+    assert momentum["recovered_events"] == 1
+    assert momentum["recovery_accuracy"] == 1.0
+    assert momentum["exact_surrogate_recovered_events"] == 1
+
+
 def test_build_scoring_models_and_model_parser_accept_space_or_comma_lists():
     assert parse_model_list("stationary,diffusion momentum") == ("stationary", "diffusion", "momentum")
     models = build_scoring_models(
         SimulationRecoveryConfig(
-            scoring_models=("sorted-spike-state-space-stationary", "sorted-spike-state-space-momentum"),
+            scoring_models=(
+                "sorted-spike-state-space-stationary",
+                "sorted-spike-state-space-first-order-imm",
+                "sorted-spike-state-space-momentum",
+            ),
             state_space=StateSpaceDecoderConfig(momentum_candidate_top_k=4),
         )
     )
 
-    assert list(models) == ["sorted-spike-state-space-stationary", "sorted-spike-state-space-momentum"]
+    assert list(models) == [
+        "sorted-spike-state-space-stationary",
+        "sorted-spike-state-space-first-order-imm",
+        "sorted-spike-state-space-momentum",
+    ]
 
 
 def test_candidate_path_diagnostics_measure_oracle_support_coverage():

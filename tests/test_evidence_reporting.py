@@ -57,6 +57,43 @@ def test_state_space_imm_support_diagnostic_is_truncated_not_exact():
     assert imm["best_truncated_lower_bound_model"] == "sorted-spike-state-space-imm"
 
 
+def test_simulation_reporting_counts_exact_sparse_momentum_as_recovery():
+    rows = pd.DataFrame(
+        [
+            {
+                "status": "success",
+                "session": "RatX/OpenY",
+                "event_index": 0,
+                "true_model": "momentum",
+                "expected_model": "sorted-spike-state-space-momentum",
+                "model": "sorted-spike-state-space-diffusion",
+                "log_evidence": -2.0,
+                "n_time": 3,
+                "n_spikes": 5,
+            },
+            {
+                "status": "success",
+                "session": "RatX/OpenY",
+                "event_index": 0,
+                "true_model": "momentum",
+                "expected_model": "sorted-spike-state-space-momentum",
+                "model": "sorted-spike-state-space-momentum-exact-sparse",
+                "log_evidence": -1.0,
+                "n_time": 3,
+                "n_spikes": 5,
+            },
+        ]
+    )
+
+    scored = simulation_add_evidence_columns(rows)
+    exact_sparse = scored[
+        scored["model"] == "sorted-spike-state-space-momentum-exact-sparse"
+    ].iloc[0]
+
+    assert bool(exact_sparse["is_best_model"])
+    assert bool(exact_sparse["recovered_expected_model"])
+
+
 def test_state_space_imm_support_column_is_used_by_generic_inference():
     rows = pd.DataFrame(
         [

@@ -141,3 +141,5 @@ jobs:
         with:
           files: |
             test-results/*/junit_test_results.xml
+          comment_mode: off
+          compare_to_earlier_commit: false

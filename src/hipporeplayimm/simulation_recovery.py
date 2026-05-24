@@ -37,6 +37,7 @@ DEFAULT_SCORING_MODELS = (
     "sorted-spike-state-space-fragmented",
     "sorted-spike-state-space-first-order-imm",
     "sorted-spike-state-space-displacement-momentum",
+    "sorted-spike-state-space-velocity-momentum",
     "sorted-spike-state-space-displacement-imm",
     "sorted-spike-state-space-imm",
 )
@@ -56,6 +57,7 @@ _TRAJECTORY = {
     "sorted-spike-state-space-first-order-imm",
     "sorted-spike-state-space-momentum",
     "sorted-spike-state-space-displacement-momentum",
+    "sorted-spike-state-space-velocity-momentum",
     "sorted-spike-state-space-displacement-imm",
     "sorted-spike-state-space-momentum-exact-sparse",
     "sorted-spike-state-space-imm",
@@ -857,6 +859,16 @@ def build_scoring_models(config: SimulationRecoveryConfig) -> dict[str, object]:
             mode=mode,
             config=replace(state_space_config, mode=mode),
         )
+    available["sorted-spike-state-space-velocity-momentum"] = SortedSpikeStateSpaceReplayModel(
+        mode="displacement-momentum",
+        config=replace(state_space_config, mode="displacement-momentum"),
+        name="sorted-spike-state-space-velocity-momentum",
+    )
+    available["state-space-velocity-momentum"] = SortedSpikeStateSpaceReplayModel(
+        mode="displacement-momentum",
+        config=replace(state_space_config, mode="displacement-momentum"),
+        name="state-space-velocity-momentum",
+    )
     names = parse_model_list(config.scoring_models)
     missing = sorted(set(names) - set(available))
     if missing:

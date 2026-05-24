@@ -14,7 +14,7 @@ python scripts/benchmark_model_evidence_improved.py \
   --session Rat1/Open1 \
   --events run:0-25 \
   --time-bin-s 0.003 \
-  --models "random stationary sorted-spike-state-space-diffusion sorted-spike-state-space-momentum sorted-spike-state-space-imm sorted-spike-state-space-goal sorted-spike-state-space-goal-bidirectional" \
+  --models "random stationary sorted-spike-state-space-diffusion sorted-spike-state-space-momentum-exact-sparse sorted-spike-state-space-momentum sorted-spike-state-space-imm sorted-spike-state-space-goal sorted-spike-state-space-goal-bidirectional" \
   --output results/model-evidence-improved
 ```
 

@@ -28,7 +28,7 @@ on:
       models:
         description: "Space-separated state-space models"
         required: true
-        default: "sorted-spike-state-space-diffusion sorted-spike-state-space-momentum sorted-spike-state-space-imm"
+        default: "sorted-spike-state-space-diffusion sorted-spike-state-space-momentum-exact-sparse sorted-spike-state-space-momentum sorted-spike-state-space-first-order-imm sorted-spike-state-space-imm"
       state_space_diffusion_sigma_cm_sqrt_s_values:
         description: "Whitespace- or comma-separated diffusion noise values in cm/sqrt(s)"
         required: true
@@ -469,7 +469,7 @@ jobs:
               values="log_evidence",
               aggfunc="first",
           ).reset_index()
-          momentum_col = "sorted-spike-state-space-momentum"
+          momentum_col = "sorted-spike-state-space-momentum-exact-sparse"
           diffusion_col = "sorted-spike-state-space-diffusion"
           imm_col = "sorted-spike-state-space-imm"
           if momentum_col in pivot and diffusion_col in pivot:

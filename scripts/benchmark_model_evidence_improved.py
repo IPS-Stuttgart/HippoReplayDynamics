@@ -81,6 +81,7 @@ _TRAJECTORY_MODELS = {
     "sorted-spike-state-space-momentum",
     "sorted-spike-state-space-momentum-reverse",
     "sorted-spike-state-space-momentum-bidirectional",
+    "sorted-spike-state-space-momentum-exact-sparse",
     "sorted-spike-state-space-imm",
     "sorted-spike-state-space-goal",
     "sorted-spike-state-space-goal-reverse",
@@ -108,6 +109,7 @@ _ALIASES = {
 }
 DEFAULT_IMPROVED_MODELS = (
     "random stationary sorted-spike-state-space-diffusion "
+    "sorted-spike-state-space-momentum-exact-sparse "
     "sorted-spike-state-space-momentum sorted-spike-state-space-imm "
     "sorted-spike-state-space-goal sorted-spike-state-space-goal-bidirectional"
 )
@@ -191,7 +193,16 @@ def _models(args: argparse.Namespace, session, encoding=None) -> dict[str, objec
     if not names:
         raise ValueError("no models selected")
 
-    goal_candidates = _goal_candidates(session)
+    wants_goal_state_space = any(
+        name in {
+            "sorted-spike-state-space-goal",
+            "sorted-spike-state-space-goal-reverse",
+            "sorted-spike-state-space-goal-bidirectional",
+            "state-space-goal",
+        }
+        for name in names
+    )
+    goal_candidates = _goal_candidates(session) if wants_goal_state_space else None
     valid_mask = None
     valid_grid_shape = (1, 1)
     if encoding is not None:
@@ -288,6 +299,7 @@ def _models(args: argparse.Namespace, session, encoding=None) -> dict[str, objec
         "sorted-spike-state-space-jump": state_space_model("jump"),
         "sorted-spike-state-space-momentum": forward_momentum,
         "sorted-spike-state-space-momentum-reverse": reverse_momentum,
+        "sorted-spike-state-space-momentum-exact-sparse": state_space_model("momentum-exact-sparse"),
         "sorted-spike-state-space-momentum-bidirectional": BidirectionalReplayModel(
             forward_momentum,
             reverse_momentum,

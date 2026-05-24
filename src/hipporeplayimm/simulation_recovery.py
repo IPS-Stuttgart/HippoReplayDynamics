@@ -33,12 +33,17 @@ DEFAULT_TRUE_MODELS = ("stationary", "diffusion", "momentum", "fragmented")
 DEFAULT_SCORING_MODELS = (
     "sorted-spike-state-space-stationary",
     "sorted-spike-state-space-diffusion",
-    "sorted-spike-state-space-momentum",
+    "sorted-spike-state-space-momentum-exact-sparse",
     "sorted-spike-state-space-fragmented",
+    "sorted-spike-state-space-first-order-imm",
     "sorted-spike-state-space-displacement-momentum",
     "sorted-spike-state-space-velocity-momentum",
     "sorted-spike-state-space-displacement-imm",
     "sorted-spike-state-space-imm",
+)
+_MOMENTUM_EXACT_SURROGATE_MODELS = (
+    "sorted-spike-state-space-momentum-exact-sparse",
+    "sorted-spike-state-space-displacement-momentum",
 )
 _TRAJECTORY = {
     "diffusion",
@@ -49,6 +54,7 @@ _TRAJECTORY = {
     "sorted-spike-state-space-diffusion",
     "sorted-spike-state-space-fragmented",
     "sorted-spike-state-space-jump",
+    "sorted-spike-state-space-first-order-imm",
     "sorted-spike-state-space-momentum",
     "sorted-spike-state-space-displacement-momentum",
     "sorted-spike-state-space-velocity-momentum",
@@ -471,13 +477,17 @@ def add_evidence_columns(df: pd.DataFrame) -> pd.DataFrame:
             comparable_rows["model"] == best
         )
         group["best_model"] = best
-        group["recovered_expected_model"] = group["best_model"] == group["expected_model"]
-        surrogate_model = _event_expected_exact_surrogate_model(group)
-        surrogate_rows = comparable_rows[comparable_rows["model"].astype(str).eq(surrogate_model)]
+        group["recovered_expected_model"] = best in _event_acceptable_recovery_models(
+            group
+        )
+        surrogate_models = _event_expected_exact_surrogate_models(group)
+        surrogate_rows = comparable_rows[
+            comparable_rows["model"].astype(str).isin(surrogate_models)
+        ]
         if not surrogate_rows.empty:
             surrogate = _best_log_evidence_row(surrogate_rows)
             surrogate_log_evidence = float(surrogate["log_evidence"])
-            group["exact_surrogate_best_model"] = best
+            group["exact_surrogate_best_model"] = str(surrogate["model"])
             group["exact_surrogate_log_evidence"] = surrogate_log_evidence
             group["exact_surrogate_minus_best_comparable_log_evidence"] = (
                 surrogate_log_evidence - max_value
@@ -558,14 +568,15 @@ def recovery_summary(event_scores: pd.DataFrame) -> pd.DataFrame:
     for true_model, group in best.groupby("true_model", sort=False):
         best_counts = group["best_model"].value_counts()
         expected = expected_scoring_model(str(true_model))
+        recovered = _recovered_expected_series(group, str(true_model))
         surrogate_recovered = _surrogate_recovered_series(group)
         rows.append(
             {
                 "true_model": true_model,
                 "expected_model": expected,
                 "simulated_events": int(group["event_index"].nunique()),
-                "recovered_events": int((group["best_model"] == expected).sum()),
-                "recovery_accuracy": float((group["best_model"] == expected).mean()),
+                "recovered_events": int(recovered.sum()),
+                "recovery_accuracy": float(recovered.mean()),
                 "exact_surrogate_recovered_events": int(surrogate_recovered.sum()),
                 "exact_surrogate_recovery_accuracy": float(surrogate_recovered.mean()),
                 "most_common_best_model": str(best_counts.index[0]),
@@ -837,6 +848,7 @@ def build_scoring_models(config: SimulationRecoveryConfig) -> dict[str, object]:
         "diffusion",
         "fragmented",
         "jump",
+        "first-order-imm",
         "momentum",
         "momentum-exact-sparse",
         "displacement-momentum",
@@ -1017,18 +1029,72 @@ def expected_scoring_model(true_model: str) -> str:
 def exact_surrogate_scoring_model(true_model: str) -> str:
     """Return the exact-comparable surrogate expected for a true model."""
 
+    return exact_surrogate_scoring_models(true_model)[0]
+
+
+def exact_surrogate_scoring_models(true_model: str) -> tuple[str, ...]:
+    """Return exact-comparable model variants that recover a true model."""
+
     name = true_model.lower()
     if name == "momentum":
-        return "sorted-spike-state-space-displacement-momentum"
-    return expected_scoring_model(name)
+        return _MOMENTUM_EXACT_SURROGATE_MODELS
+    return (expected_scoring_model(name),)
 
 
-def _event_expected_exact_surrogate_model(group: pd.DataFrame) -> str:
-    if "expected_exact_surrogate_model" in group.columns:
-        values = group["expected_exact_surrogate_model"].dropna().astype(str)
-        if not values.empty and values.iloc[0]:
-            return str(values.iloc[0])
-    return str(group["expected_model"].iloc[0])
+def _event_expected_exact_surrogate_models(group: pd.DataFrame) -> tuple[str, ...]:
+    models: list[str] = []
+    true_model = _event_text(group, "true_model")
+    if true_model:
+        models.extend(exact_surrogate_scoring_models(true_model))
+    models.extend(_event_model_values(group, "expected_exact_surrogate_model"))
+    if not models:
+        expected = _event_text(group, "expected_model")
+        if expected:
+            models.append(expected)
+    return tuple(dict.fromkeys(models))
+
+
+def _event_acceptable_recovery_models(group: pd.DataFrame) -> tuple[str, ...]:
+    models: list[str] = []
+    expected = _event_text(group, "expected_model")
+    if expected:
+        models.append(expected)
+    models.extend(_event_expected_exact_surrogate_models(group))
+    return tuple(dict.fromkeys(models))
+
+
+def _event_text(group: pd.DataFrame, column: str) -> str:
+    if column not in group.columns:
+        return ""
+    values = group[column].dropna().astype(str)
+    if values.empty:
+        return ""
+    return str(values.iloc[0]).strip()
+
+
+def _event_model_values(group: pd.DataFrame, column: str) -> list[str]:
+    values: list[str] = []
+    if column not in group.columns:
+        return values
+    for value in group[column].dropna().astype(str):
+        for model in value.replace(",", " ").split():
+            if model:
+                values.append(model)
+    return list(dict.fromkeys(values))
+
+
+def _recovered_expected_series(group: pd.DataFrame, true_model: str) -> pd.Series:
+    if "recovered_expected_model" in group.columns:
+        return group["recovered_expected_model"].fillna(False).astype(bool)
+    acceptable = set(acceptable_recovery_models(true_model))
+    return group["best_model"].astype(str).isin(acceptable)
+
+
+def acceptable_recovery_models(true_model: str) -> tuple[str, ...]:
+    """Return model names that should count as recovering a true dynamics class."""
+
+    expected = expected_scoring_model(true_model)
+    return tuple(dict.fromkeys([expected, *exact_surrogate_scoring_models(true_model)]))
 
 
 def _surrogate_recovered_series(group: pd.DataFrame) -> pd.Series:

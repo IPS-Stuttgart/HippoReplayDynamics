@@ -80,6 +80,7 @@ _TRAJ = {
     "sorted-spike-state-space-momentum",
     "sorted-spike-state-space-momentum-reverse",
     "sorted-spike-state-space-momentum-bidirectional",
+    "sorted-spike-state-space-momentum-exact-sparse",
     "sorted-spike-state-space-displacement-momentum",
     "sorted-spike-state-space-first-order-imm",
     "sorted-spike-state-space-imm",
@@ -254,6 +255,7 @@ def _models(args, session=None) -> dict[str, object]:
         "sorted-spike-state-space-jump": state_space_model("jump"),
         "sorted-spike-state-space-momentum": forward_momentum_state_space,
         "sorted-spike-state-space-momentum-reverse": reverse_momentum_state_space,
+        "sorted-spike-state-space-momentum-exact-sparse": state_space_model("momentum-exact-sparse"),
         "sorted-spike-state-space-displacement-momentum": state_space_model("displacement-momentum"),
         "sorted-spike-state-space-momentum-bidirectional": BidirectionalReplayModel(
             forward_momentum_state_space,
@@ -785,7 +787,7 @@ def main() -> int:
     p.add_argument("--session", required=True)
     p.add_argument("--events", default="run:0-25")
     p.add_argument("--max-events", type=int, default=None)
-    p.add_argument("--models", default="random stationary sorted-spike-state-space-diffusion sorted-spike-state-space-momentum sorted-spike-state-space-imm sorted-spike-state-space-goal")
+    p.add_argument("--models", default="random stationary sorted-spike-state-space-diffusion sorted-spike-state-space-momentum-exact-sparse sorted-spike-state-space-momentum sorted-spike-state-space-imm sorted-spike-state-space-goal")
     p.add_argument("--candidate-top-k", type=int, default=64)
     p.add_argument("--stationary-sigma-cm", type=float, default=2.0)
     p.add_argument("--diffusion-sigma-cm", type=float, default=12.0)

@@ -26,6 +26,8 @@ def canonical_model_name(model: str) -> str:
         name = name.removeprefix("state-space-")
     if name == "jump":
         return "fragmented"
+    if name == "momentum-exact-sparse":
+        return "momentum"
     if name in {"random", "stationary", "stationary-gaussian", "diffusion", "momentum", "imm", "fragmented"}:
         return name
     return name

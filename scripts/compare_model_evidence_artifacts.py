@@ -44,6 +44,8 @@ def canonical_model_name(model: object) -> str:
             break
     if name == "jump":
         return "fragmented"
+    if name == "momentum-exact-sparse":
+        return "momentum"
     return name if name in _CANONICAL_MODELS else name
 
 

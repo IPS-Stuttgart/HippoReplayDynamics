@@ -14,6 +14,7 @@ def _write_scores(path: Path, filename: str, rows: list[dict[str, object]]) -> N
 
 def test_canonical_model_name_maps_state_space_aliases():
     assert canonical_model_name("sorted-spike-state-space-momentum") == "momentum"
+    assert canonical_model_name("sorted-spike-state-space-momentum-exact-sparse") == "momentum"
     assert canonical_model_name("clusterless-state-space-momentum") == "momentum"
     assert canonical_model_name("state-space-diffusion") == "diffusion"
     assert canonical_model_name("jump") == "fragmented"

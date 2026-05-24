@@ -29,7 +29,7 @@ class _SessionStub:
 
 def test_model_evidence_accepts_sorted_spike_state_space_models():
     args = argparse.Namespace(
-        models="sorted-spike-state-space-diffusion sorted-spike-state-space-first-order-imm sorted-spike-state-space-momentum sorted-spike-state-space-imm",
+        models="sorted-spike-state-space-diffusion sorted-spike-state-space-first-order-imm sorted-spike-state-space-momentum-exact-sparse sorted-spike-state-space-momentum sorted-spike-state-space-imm",
         candidate_top_k=64,
         stationary_sigma_cm=2.0,
         diffusion_sigma_cm=12.0,
@@ -52,11 +52,13 @@ def test_model_evidence_accepts_sorted_spike_state_space_models():
     assert list(models) == [
         "sorted-spike-state-space-diffusion",
         "sorted-spike-state-space-first-order-imm",
+        "sorted-spike-state-space-momentum-exact-sparse",
         "sorted-spike-state-space-momentum",
         "sorted-spike-state-space-imm",
     ]
     assert models["sorted-spike-state-space-diffusion"].name == "sorted-spike-state-space-diffusion"
     assert models["sorted-spike-state-space-first-order-imm"].name == "sorted-spike-state-space-first-order-imm"
+    assert models["sorted-spike-state-space-momentum-exact-sparse"].name == "sorted-spike-state-space-momentum-exact-sparse"
     assert models["sorted-spike-state-space-momentum"].name == "sorted-spike-state-space-momentum"
     assert models["sorted-spike-state-space-imm"].name == "sorted-spike-state-space-imm"
     assert models["sorted-spike-state-space-diffusion"].config.diffusion_sigma_cm_sqrt_s == 42.0

@@ -47,7 +47,7 @@ scoring parameters:
 hipporeplayimm simulate-recovery data/DataSetFromPfeifferFoster \
   --session Rat1/Open1 \
   --true-models "diffusion momentum" \
-  --models "sorted-spike-state-space-diffusion sorted-spike-state-space-momentum" \
+  --models "sorted-spike-state-space-diffusion sorted-spike-state-space-momentum-exact-sparse sorted-spike-state-space-momentum" \
   --true-state-space-diffusion-sigma-cm-sqrt-s 85 \
   --true-state-space-momentum-sigma-cm-sqrt-s 85 \
   --true-state-space-momentum-initial-sigma-cm-sqrt-s 85 \

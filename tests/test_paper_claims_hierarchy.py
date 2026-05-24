@@ -4,13 +4,14 @@ from scripts.make_paper_claims import PaperClaimConfig, build_paper_claim_tables
 
 
 def test_paper_claim_tables_include_leave_one_rat_out_summary(tmp_path):
+    momentum = "sorted-spike-state-space-momentum-exact-sparse"
     scores = pd.DataFrame(
         [
-            _score("Rat1/Open1", 0, "sorted-spike-state-space-momentum", 4.0),
+            _score("Rat1/Open1", 0, momentum, 4.0),
             _score("Rat1/Open1", 0, "sorted-spike-state-space-diffusion", 1.0),
-            _score("Rat2/Open1", 1, "sorted-spike-state-space-momentum", 1.0),
+            _score("Rat2/Open1", 1, momentum, 1.0),
             _score("Rat2/Open1", 1, "sorted-spike-state-space-diffusion", 2.0),
-            _score("Rat3/Open1", 2, "sorted-spike-state-space-momentum", 5.0),
+            _score("Rat3/Open1", 2, momentum, 5.0),
             _score("Rat3/Open1", 2, "sorted-spike-state-space-diffusion", 3.0),
         ]
     )

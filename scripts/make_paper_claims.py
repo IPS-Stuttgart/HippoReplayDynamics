@@ -474,6 +474,18 @@ def resolve_model_spec(models: Iterable[object], requested: str) -> str:
         return suffix_matches[0]
     if len(suffix_matches) > 1:
         raise ValueError(f"model alias {requested!r} is ambiguous: {suffix_matches}")
+    if requested_norm.endswith("-exact-sparse"):
+        legacy_requested = requested_norm.removesuffix("-exact-sparse")
+        legacy_aliases = [
+            legacy_requested,
+            f"sorted-spike-state-space-{legacy_requested}",
+            f"state-space-{legacy_requested}",
+            f"clusterless-state-space-{legacy_requested}",
+        ]
+        for alias in legacy_aliases:
+            matches = [model for model in available if model.lower() == alias]
+            if len(matches) == 1:
+                return matches[0]
     raise ValueError(f"model {requested!r} not found; available models include: {sorted(available)[:20]}")
 
 

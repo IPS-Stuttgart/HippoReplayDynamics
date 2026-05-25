@@ -35,6 +35,7 @@ def test_simulation_recovery_sweep_workflow_defines_recovery_rankings():
     assert "state_space_momentum_predicted_candidate_top_k_values:" in workflow
     assert 'default: "0 4 8"' in workflow
     assert "state_space_momentum_predicted_candidate_top_k" in workflow
+    assert "timeout-minutes: 360" in workflow
     assert "simulation_recovery_sweep_config_ranked.csv" in workflow
     assert "simulation_recovery_sweep_momentum_ranked.csv" in workflow
     assert "momentum_recovery_accuracy" in workflow

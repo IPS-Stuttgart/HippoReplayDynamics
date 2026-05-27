@@ -1,0 +1,697 @@
+---
+name: Simulation recovery emission calibration sweep
+
+on:
+  workflow_dispatch:
+    inputs:
+      dataset_root:
+        description: "Dataset path after download or cache restore"
+        required: true
+        default: "data/DataSetFromPfeifferFoster"
+      session:
+        description: "Session ID, e.g. Rat1/Open1"
+        required: true
+        default: "Rat1/Open1"
+      events:
+        description: "Template event IDs/ranges, all, run, or run:0-25"
+        required: true
+        default: "run"
+      max_template_events:
+        description: "Maximum selected real ripple templates"
+        required: true
+        default: "25"
+      events_per_model:
+        description: "Synthetic events generated for each true dynamics model"
+        required: true
+        default: "2"
+      max_synthetic_events:
+        description: "Optional cap on total synthetic events across true models; empty disables"
+        required: false
+        default: ""
+      max_runtime_s:
+        description: "Optional graceful runtime limit in seconds; empty disables"
+        required: false
+        default: ""
+      true_models:
+        description: "Space-separated true dynamics to simulate"
+        required: true
+        default: "diffusion momentum"
+      models:
+        description: "Space-separated scoring models"
+        required: true
+        default: "sorted-spike-state-space-diffusion sorted-spike-state-space-momentum-exact-sparse"
+      random_seed:
+        description: "Whitespace- or comma-separated simulation seeds"
+        required: true
+        default: "11 21 31 41"
+      state_space_diffusion_sigma_cm_sqrt_s_values:
+        description: "Whitespace- or comma-separated diffusion noise values in cm/sqrt(s)"
+        required: true
+        default: "60"
+      state_space_momentum_sigma_cm_sqrt_s_values:
+        description: "Whitespace- or comma-separated momentum noise values in cm/sqrt(s)"
+        required: true
+        default: "60"
+      state_space_momentum_initial_sigma_cm_sqrt_s_values:
+        description: "Whitespace- or comma-separated momentum initial transition noise values in cm/sqrt(s)"
+        required: true
+        default: "85"
+      state_space_momentum_velocity_decay_values:
+        description: "Whitespace- or comma-separated momentum velocity decay values"
+        required: true
+        default: "0.95"
+      state_space_max_step_sigma:
+        description: "Whitespace- or comma-separated exact sparse transition truncation radii in sigmas"
+        required: true
+        default: "3.0"
+      spike_rate_scale_values:
+        description: "Whitespace- or comma-separated replay spike-rate multipliers"
+        required: true
+        default: "1.0 2.0"
+      emission_likelihood_temperature_values:
+        description: "Whitespace- or comma-separated emission likelihood temperatures"
+        required: true
+        default: "0.75 1.0 1.5"
+      emission_negative_binomial_overdispersion_values:
+        description: "Whitespace- or comma-separated negative-binomial overdispersion values; 0 keeps Poisson emissions"
+        required: true
+        default: "0.0 0.2"
+      time_bin_ms:
+        description: "Synthetic replay time-bin width in milliseconds"
+        required: true
+        default: "3.0"
+      bin_size_cm:
+        description: "Place-field spatial bin size in centimeters"
+        required: true
+        default: "6.0"
+      smoothing_sigma_bins:
+        description: "Place-field smoothing sigma in spatial bins"
+        required: true
+        default: "2.0"
+      min_speed_cm_s:
+        description: "Minimum speed for place-field training in cm/s"
+        required: true
+        default: "5.0"
+      allow_incomplete_grid:
+        description: "Allow aggregate ranking when planned sweep configurations are missing"
+        required: true
+        default: "false"
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: simulation-recovery-emission-calibration-${{ github.repository }}-${{ inputs.session }}-${{ inputs.events }}-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  DATASET_ROOT: ${{ inputs.dataset_root }}
+  SESSION: ${{ inputs.session }}
+  EVENTS: ${{ inputs.events }}
+  MAX_TEMPLATE_EVENTS: ${{ inputs.max_template_events }}
+  EVENTS_PER_MODEL: ${{ inputs.events_per_model }}
+  TRUE_MODELS: ${{ inputs.true_models }}
+  MAX_SYNTHETIC_EVENTS: ${{ inputs.max_synthetic_events }}
+  MAX_RUNTIME_S: ${{ inputs.max_runtime_s }}
+  MODELS: ${{ inputs.models }}
+  TIME_BIN_MS: ${{ inputs.time_bin_ms }}
+  BIN_SIZE_CM: ${{ inputs.bin_size_cm }}
+  SMOOTHING_SIGMA_BINS: ${{ inputs.smoothing_sigma_bins }}
+  MIN_SPEED_CM_S: ${{ inputs.min_speed_cm_s }}
+  ALLOW_INCOMPLETE_GRID: ${{ inputs.allow_incomplete_grid }}
+  OMP_NUM_THREADS: "1"
+  OPENBLAS_NUM_THREADS: "1"
+  MKL_NUM_THREADS: "1"
+
+jobs:
+  plan-matrix:
+    name: Plan recovery calibration sweep
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      matrix: ${{ steps.plan.outputs.matrix }}
+      count: ${{ steps.plan.outputs.count }}
+
+    steps:
+      - name: Build recovery calibration parameter matrix
+        id: plan
+        env:
+          DIFFUSION_VALUES: ${{ inputs.state_space_diffusion_sigma_cm_sqrt_s_values }}
+          MOMENTUM_VALUES: ${{ inputs.state_space_momentum_sigma_cm_sqrt_s_values }}
+          MOMENTUM_INITIAL_VALUES: ${{ inputs.state_space_momentum_initial_sigma_cm_sqrt_s_values }}
+          DECAY_VALUES: ${{ inputs.state_space_momentum_velocity_decay_values }}
+          MAX_STEP_SIGMA_VALUES: ${{ inputs.state_space_max_step_sigma }}
+          SPIKE_RATE_SCALE_VALUES: ${{ inputs.spike_rate_scale_values }}
+          LIKELIHOOD_TEMPERATURE_VALUES: ${{ inputs.emission_likelihood_temperature_values }}
+          NEGATIVE_BINOMIAL_OVERDISPERSION_VALUES: ${{ inputs.emission_negative_binomial_overdispersion_values }}
+          SEED_VALUES: ${{ inputs.random_seed }}
+        run: |
+          set -euo pipefail
+          mkdir -p results/simulation-recovery-emission-calibration-plan
+          python - <<'PY'
+          import csv
+          import itertools
+          import json
+          import os
+          import re
+          from pathlib import Path
+
+          def split_values(name: str) -> list[str]:
+              values = [item.strip() for item in re.split(r"[\s,]+", os.environ[name]) if item.strip()]
+              if not values:
+                  raise SystemExit(f"{name} must contain at least one value")
+              return values
+
+          def validate_float(name: str, values: list[str]) -> None:
+              for value in values:
+                  try:
+                      float(value)
+                  except ValueError as exc:
+                      raise SystemExit(f"{name} contains non-numeric value {value!r}") from exc
+
+          def validate_int(name: str, values: list[str], *, allow_zero: bool = False) -> None:
+              for value in values:
+                  try:
+                      parsed = int(value)
+                  except ValueError as exc:
+                      raise SystemExit(f"{name} contains non-integer value {value!r}") from exc
+                  if parsed < 0 or (parsed == 0 and not allow_zero):
+                      qualifier = "non-negative" if allow_zero else "positive"
+                      raise SystemExit(f"{name} values must be {qualifier}")
+
+          def slug(value: str) -> str:
+              return re.sub(r"[^A-Za-z0-9]+", "-", value).strip("-").lower()
+
+          diffusion_values = split_values("DIFFUSION_VALUES")
+          momentum_values = split_values("MOMENTUM_VALUES")
+          momentum_initial_values = split_values("MOMENTUM_INITIAL_VALUES")
+          decay_values = split_values("DECAY_VALUES")
+          max_step_sigma_values = split_values("MAX_STEP_SIGMA_VALUES")
+          spike_rate_scale_values = split_values("SPIKE_RATE_SCALE_VALUES")
+          likelihood_temperature_values = split_values("LIKELIHOOD_TEMPERATURE_VALUES")
+          negative_binomial_overdispersion_values = split_values("NEGATIVE_BINOMIAL_OVERDISPERSION_VALUES")
+          seed_values = split_values("SEED_VALUES")
+          for name, values in (
+              ("DIFFUSION_VALUES", diffusion_values),
+              ("MOMENTUM_VALUES", momentum_values),
+              ("MOMENTUM_INITIAL_VALUES", momentum_initial_values),
+              ("DECAY_VALUES", decay_values),
+              ("MAX_STEP_SIGMA_VALUES", max_step_sigma_values),
+              ("SPIKE_RATE_SCALE_VALUES", spike_rate_scale_values),
+              ("LIKELIHOOD_TEMPERATURE_VALUES", likelihood_temperature_values),
+              ("NEGATIVE_BINOMIAL_OVERDISPERSION_VALUES", negative_binomial_overdispersion_values),
+          ):
+              validate_float(name, values)
+          validate_int("SEED_VALUES", seed_values, allow_zero=True)
+
+          rows = []
+          for index, (diffusion, momentum, momentum_initial, decay, max_step_sigma, spike_rate_scale, likelihood_temperature, negative_binomial_overdispersion, seed) in enumerate(
+              itertools.product(
+                  diffusion_values,
+                  momentum_values,
+                  momentum_initial_values,
+                  decay_values,
+                  max_step_sigma_values,
+                  spike_rate_scale_values,
+                  likelihood_temperature_values,
+                  negative_binomial_overdispersion_values,
+                  seed_values,
+              )
+          ):
+              matrix_id = (
+                  f"seed{slug(seed)}-"
+                  f"d{slug(diffusion)}-"
+                  f"m{slug(momentum)}-"
+                  f"mi{slug(momentum_initial)}-"
+                  f"decay{slug(decay)}-"
+                  f"step{slug(max_step_sigma)}-"
+                  f"rate{slug(spike_rate_scale)}-"
+                  f"temp{slug(likelihood_temperature)}-"
+                  f"nb{slug(negative_binomial_overdispersion)}"
+              )
+              rows.append(
+                  {
+                      "matrix_index": index,
+                      "id": matrix_id,
+                      "random_seed": seed,
+                      "state_space_diffusion_sigma_cm_sqrt_s": diffusion,
+                      "state_space_momentum_sigma_cm_sqrt_s": momentum,
+                      "state_space_momentum_initial_sigma_cm_sqrt_s": momentum_initial,
+                      "state_space_momentum_velocity_decay": decay,
+                      "state_space_max_step_sigma": max_step_sigma,
+                      "spike_rate_scale": spike_rate_scale,
+                      "emission_likelihood_temperature": likelihood_temperature,
+                      "emission_negative_binomial_overdispersion": negative_binomial_overdispersion,
+                  }
+              )
+          if len(rows) > 256:
+              raise SystemExit(f"Matrix has {len(rows)} jobs; reduce inputs to 256 or fewer")
+
+          out_dir = Path("results/simulation-recovery-emission-calibration-plan")
+          (out_dir / "matrix.json").write_text(json.dumps(rows, indent=2), encoding="utf-8")
+          with (out_dir / "matrix.csv").open("w", newline="", encoding="utf-8") as handle:
+              writer = csv.DictWriter(handle, fieldnames=list(rows[0]))
+              writer.writeheader()
+              writer.writerows(rows)
+
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+              output.write(f"matrix={json.dumps({'include': rows}, separators=(',', ':'))}\n")
+              output.write(f"count={len(rows)}\n")
+          print(f"Planned {len(rows)} simulation recovery calibration configurations.")
+          PY
+
+      - name: Upload recovery calibration sweep plan
+        uses: actions/upload-artifact@v7
+        with:
+          name: simulation-recovery-sweep-plan-${{ github.run_id }}
+          path: results/simulation-recovery-emission-calibration-plan/
+          if-no-files-found: error
+
+  simulation-recovery-calibration:
+    name: seed=${{ matrix.random_seed }} rate=${{ matrix.spike_rate_scale }} temp=${{ matrix.emission_likelihood_temperature }} nb=${{ matrix.emission_negative_binomial_overdispersion }}
+    needs: plan-matrix
+    if: ${{ needs.plan-matrix.outputs.count != '0' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    strategy:
+      fail-fast: false
+      max-parallel: 4
+      matrix: ${{ fromJSON(needs.plan-matrix.outputs.matrix) }}
+
+    env:
+      MATRIX_INDEX: ${{ matrix.matrix_index }}
+      MATRIX_ID: ${{ matrix.id }}
+      RANDOM_SEED: ${{ matrix.random_seed }}
+      STATE_SPACE_DIFFUSION_SIGMA_CM_SQRT_S: ${{ matrix.state_space_diffusion_sigma_cm_sqrt_s }}
+      STATE_SPACE_MOMENTUM_SIGMA_CM_SQRT_S: ${{ matrix.state_space_momentum_sigma_cm_sqrt_s }}
+      STATE_SPACE_MOMENTUM_INITIAL_SIGMA_CM_SQRT_S: ${{ matrix.state_space_momentum_initial_sigma_cm_sqrt_s }}
+      STATE_SPACE_MOMENTUM_VELOCITY_DECAY: ${{ matrix.state_space_momentum_velocity_decay }}
+      STATE_SPACE_MAX_STEP_SIGMA: ${{ matrix.state_space_max_step_sigma }}
+      SPIKE_RATE_SCALE: ${{ matrix.spike_rate_scale }}
+      EMISSION_LIKELIHOOD_TEMPERATURE: ${{ matrix.emission_likelihood_temperature }}
+      EMISSION_NEGATIVE_BINOMIAL_OVERDISPERSION: ${{ matrix.emission_negative_binomial_overdispersion }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Install package
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e .
+
+      - name: Ensure Pfeiffer-Foster dataset
+        id: dataset
+        uses: ./.github/actions/ensure-pfeiffer-foster-dataset
+        with:
+          dataset-root: ${{ env.DATASET_ROOT }}
+          session: ${{ env.SESSION }}
+          cache-key: hipporeplayimm-dataset-${{ runner.os }}-rclone-v1
+          webdav-url: ${{ secrets.PFEIFFERFOSTER_WEBDAV_URL }}
+          webdav-key: ${{ secrets.PFEIFFERFOSTER_DATA_KEY }}
+          webdav-password: ${{ secrets.PFEIFFERFOSTER_DATA_PASSWORD }}
+
+      - name: Run simulation recovery calibration configuration
+        timeout-minutes: 350
+        run: |
+          set -euo pipefail
+          out_dir="results/simulation-recovery-emission-calibration/${MATRIX_ID}"
+          limit_args=()
+          if [ -n "${MAX_SYNTHETIC_EVENTS}" ]; then
+            limit_args+=(--max-synthetic-events "${MAX_SYNTHETIC_EVENTS}")
+          fi
+          if [ -n "${MAX_RUNTIME_S}" ]; then
+            limit_args+=(--max-runtime-s "${MAX_RUNTIME_S}")
+          fi
+          hipporeplayimm simulate-recovery "${DATASET_ROOT}" \
+            --session "${SESSION}" \
+            --events "${EVENTS}" \
+            --max-template-events "${MAX_TEMPLATE_EVENTS}" \
+            --events-per-model "${EVENTS_PER_MODEL}" \
+            --true-models "${TRUE_MODELS}" \
+            --models "${MODELS}" \
+            --random-seed "${RANDOM_SEED}" \
+            --time-bin-ms "${TIME_BIN_MS}" \
+            --spike-rate-scale "${SPIKE_RATE_SCALE}" \
+            --emission-likelihood-temperature "${EMISSION_LIKELIHOOD_TEMPERATURE}" \
+            --emission-negative-binomial-overdispersion "${EMISSION_NEGATIVE_BINOMIAL_OVERDISPERSION}" \
+            "${limit_args[@]}" \
+            --state-space-diffusion-sigma-cm-sqrt-s "${STATE_SPACE_DIFFUSION_SIGMA_CM_SQRT_S}" \
+            --state-space-max-step-sigma "${STATE_SPACE_MAX_STEP_SIGMA}" \
+            --state-space-momentum-sigma-cm-sqrt-s "${STATE_SPACE_MOMENTUM_SIGMA_CM_SQRT_S}" \
+            --state-space-momentum-initial-sigma-cm-sqrt-s "${STATE_SPACE_MOMENTUM_INITIAL_SIGMA_CM_SQRT_S}" \
+            --state-space-momentum-velocity-decay "${STATE_SPACE_MOMENTUM_VELOCITY_DECAY}" \
+            --bin-size-cm "${BIN_SIZE_CM}" \
+            --smoothing-sigma-bins "${SMOOTHING_SIGMA_BINS}" \
+            --min-speed-cm-s "${MIN_SPEED_CM_S}" \
+            --output "${out_dir}" \
+            --checkpoint-output "${out_dir}" \
+            --progress-log \
+            --continue-on-error
+
+      - name: Annotate recovery calibration outputs
+        if: always()
+        run: |
+          python - <<'PY'
+          import os
+          from pathlib import Path
+
+          import pandas as pd
+
+          out_dir = Path("results/simulation-recovery-emission-calibration") / os.environ["MATRIX_ID"]
+          metadata = {
+              "matrix_id": os.environ["MATRIX_ID"],
+              "matrix_index": int(os.environ["MATRIX_INDEX"]),
+              "random_seed": int(os.environ["RANDOM_SEED"]),
+              "requested_session": os.environ["SESSION"],
+              "events_spec": os.environ["EVENTS"],
+              "max_template_events": int(os.environ["MAX_TEMPLATE_EVENTS"]),
+              "events_per_model": int(os.environ["EVENTS_PER_MODEL"]),
+              "max_synthetic_events": os.environ["MAX_SYNTHETIC_EVENTS"],
+              "max_runtime_s": os.environ["MAX_RUNTIME_S"],
+              "true_models_requested": os.environ["TRUE_MODELS"],
+              "models_requested": os.environ["MODELS"],
+              "state_space_diffusion_sigma_cm_sqrt_s": float(os.environ["STATE_SPACE_DIFFUSION_SIGMA_CM_SQRT_S"]),
+              "state_space_max_step_sigma": float(os.environ["STATE_SPACE_MAX_STEP_SIGMA"]),
+              "state_space_momentum_sigma_cm_sqrt_s": float(os.environ["STATE_SPACE_MOMENTUM_SIGMA_CM_SQRT_S"]),
+              "state_space_momentum_initial_sigma_cm_sqrt_s": float(os.environ["STATE_SPACE_MOMENTUM_INITIAL_SIGMA_CM_SQRT_S"]),
+              "state_space_momentum_velocity_decay": float(os.environ["STATE_SPACE_MOMENTUM_VELOCITY_DECAY"]),
+              "spike_rate_scale": float(os.environ["SPIKE_RATE_SCALE"]),
+              "emission_likelihood_temperature": float(os.environ["EMISSION_LIKELIHOOD_TEMPERATURE"]),
+              "emission_negative_binomial_overdispersion": float(os.environ["EMISSION_NEGATIVE_BINOMIAL_OVERDISPERSION"]),
+              "time_bin_ms": float(os.environ["TIME_BIN_MS"]),
+              "bin_size_cm": float(os.environ["BIN_SIZE_CM"]),
+              "smoothing_sigma_bins": float(os.environ["SMOOTHING_SIGMA_BINS"]),
+              "min_speed_cm_s": float(os.environ["MIN_SPEED_CM_S"]),
+          }
+          for path in out_dir.glob("*.csv"):
+              frame = pd.read_csv(path)
+              for key, value in metadata.items():
+                  frame[key] = value
+              frame.to_csv(path, index=False)
+          PY
+
+      - name: Show partial recovery manifest
+        if: always()
+        run: |
+          manifest="results/simulation-recovery-emission-calibration/${MATRIX_ID}/simulation_recovery_partial_manifest.json"
+          if [[ -f "${manifest}" ]]; then
+            cat "${manifest}"
+          else
+            echo "No simulation_recovery_partial_manifest.json was written."
+          fi
+
+      - name: Upload simulation recovery calibration result
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: simulation-recovery-sweep-${{ matrix.id }}
+          path: results/simulation-recovery-emission-calibration/${{ matrix.id }}/
+          if-no-files-found: warn
+
+  aggregate:
+    name: Aggregate recovery calibration sweep
+    needs:
+      - plan-matrix
+      - simulation-recovery-calibration
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+
+      - name: Install aggregate dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install pandas
+
+      - name: Download simulation recovery calibration artifacts
+        uses: actions/download-artifact@v7
+        with:
+          path: artifacts/simulation-recovery-emission-calibration
+          pattern: simulation-recovery-sweep-*
+
+      - name: Audit recovery calibration artifact completeness
+        run: |
+          set -euo pipefail
+          mkdir -p results/simulation-recovery-emission-calibration-summary
+          python scripts/audit_sweep_completeness.py \
+            --mode simulation-recovery \
+            --artifact-root artifacts/simulation-recovery-emission-calibration \
+            --output results/simulation-recovery-emission-calibration-summary/simulation_recovery_emission_calibration_matrix_completeness.csv
+
+      - name: Aggregate recovery calibration summaries
+        run: |
+          set -euo pipefail
+          mkdir -p results/simulation-recovery-emission-calibration-summary
+          python - <<'PY'
+          import os
+          from pathlib import Path
+
+          import pandas as pd
+
+          root = Path("artifacts/simulation-recovery-emission-calibration")
+          out_dir = Path("results/simulation-recovery-emission-calibration-summary")
+          score_paths = sorted(root.glob("**/simulation_recovery_event_scores.csv"))
+          summary_paths = sorted(root.glob("**/simulation_recovery_summary.csv"))
+          confusion_paths = sorted(root.glob("**/simulation_recovery_confusion_matrix.csv"))
+          certified_paths = sorted(root.glob("**/simulation_recovery_certified_vs_exact_summary.csv"))
+          diagnostic_event_paths = sorted(root.glob("**/simulation_recovery_diagnostic_event_table.csv"))
+          diagnostic_summary_paths = sorted(root.glob("**/simulation_recovery_diagnostic_summary.csv"))
+          plan_paths = sorted(root.glob("**/matrix.csv"))
+          if not score_paths:
+              raise SystemExit("No simulation_recovery_event_scores.csv files found")
+          scores = pd.concat((pd.read_csv(path) for path in score_paths), ignore_index=True)
+          summaries = pd.concat((pd.read_csv(path) for path in summary_paths), ignore_index=True)
+          confusions = pd.concat((pd.read_csv(path) for path in confusion_paths), ignore_index=True)
+          certified_summaries = (
+              pd.concat((pd.read_csv(path) for path in certified_paths), ignore_index=True)
+              if certified_paths
+              else pd.DataFrame()
+          )
+          diagnostic_events = (
+              pd.concat((pd.read_csv(path) for path in diagnostic_event_paths), ignore_index=True)
+              if diagnostic_event_paths
+              else pd.DataFrame()
+          )
+          diagnostic_summaries = (
+              pd.concat((pd.read_csv(path) for path in diagnostic_summary_paths), ignore_index=True)
+              if diagnostic_summary_paths
+              else pd.DataFrame()
+          )
+          planned = (
+              pd.concat((pd.read_csv(path) for path in plan_paths), ignore_index=True)
+              if plan_paths
+              else pd.DataFrame()
+          )
+          scores.to_csv(out_dir / "simulation_recovery_emission_calibration_event_scores.csv", index=False)
+          summaries.to_csv(out_dir / "simulation_recovery_emission_calibration_summary.csv", index=False)
+          confusions.to_csv(out_dir / "simulation_recovery_emission_calibration_confusion_matrix.csv", index=False)
+          if not certified_summaries.empty:
+              certified_summaries.to_csv(
+                  out_dir / "simulation_recovery_emission_calibration_certified_vs_exact_summary.csv",
+                  index=False,
+              )
+          if not diagnostic_events.empty:
+              diagnostic_events.to_csv(
+                  out_dir / "simulation_recovery_emission_calibration_diagnostic_event_table.csv",
+                  index=False,
+              )
+          if not diagnostic_summaries.empty:
+              diagnostic_summaries.to_csv(
+                  out_dir / "simulation_recovery_emission_calibration_diagnostic_summary.csv",
+                  index=False,
+              )
+
+          if not planned.empty:
+              completed_ids = set(scores.get("matrix_id", pd.Series(dtype=str)).dropna().astype(str))
+              planned["completion_status"] = planned["id"].astype(str).map(
+                  lambda value: "completed" if value in completed_ids else "missing"
+              )
+              planned.to_csv(out_dir / "simulation_recovery_emission_calibration_planned_configs.csv", index=False)
+              planned[planned["completion_status"].eq("completed")].to_csv(
+                  out_dir / "simulation_recovery_emission_calibration_completed_configs.csv",
+                  index=False,
+              )
+              missing = planned[planned["completion_status"].eq("missing")].copy()
+              missing.to_csv(out_dir / "simulation_recovery_emission_calibration_missing_configs.csv", index=False)
+              if not missing.empty and os.environ.get("ALLOW_INCOMPLETE_GRID", "false").lower() not in {"1", "true", "yes"}:
+                  raise SystemExit(
+                      f"Sweep grid is incomplete: {len(missing)} planned configuration(s) are missing. "
+                      "Set allow_incomplete_grid=true only for exploratory ranking."
+                  )
+
+          key_cols = [
+              "matrix_id",
+              "random_seed",
+              "requested_session",
+              "events_spec",
+              "max_template_events",
+              "events_per_model",
+              "state_space_diffusion_sigma_cm_sqrt_s",
+              "state_space_max_step_sigma",
+              "state_space_momentum_sigma_cm_sqrt_s",
+              "state_space_momentum_initial_sigma_cm_sqrt_s",
+              "state_space_momentum_velocity_decay",
+              "spike_rate_scale",
+              "emission_likelihood_temperature",
+              "emission_negative_binomial_overdispersion",
+          ]
+          rows = []
+          failures = scores.assign(is_failure=scores["status"] != "success").groupby("matrix_id", as_index=False)["is_failure"].sum()
+          certified_by_matrix = {
+              matrix_id: group.set_index("true_model")
+              for matrix_id, group in certified_summaries.groupby("matrix_id", sort=False)
+          } if not certified_summaries.empty else {}
+          for matrix_id, group in summaries.groupby("matrix_id", sort=False):
+              row = {col: group.iloc[0][col] for col in key_cols}
+              by_true = group.set_index("true_model")
+              certified = certified_by_matrix.get(matrix_id)
+              failure_rows = failures.loc[failures["matrix_id"] == matrix_id, "is_failure"]
+              row["failures"] = int(failure_rows.iloc[0]) if not failure_rows.empty else 0
+              if "overall" in by_true.index:
+                  row["overall_recovery_accuracy"] = float(by_true.loc["overall", "recovery_accuracy"])
+                  row["overall_recovered_events"] = int(by_true.loc["overall", "recovered_events"])
+                  row["overall_simulated_events"] = int(by_true.loc["overall", "simulated_events"])
+              for true_model in ("diffusion", "momentum", "stationary", "fragmented"):
+                  if true_model in by_true.index:
+                      row[f"{true_model}_recovery_accuracy"] = float(by_true.loc[true_model, "recovery_accuracy"])
+                      row[f"{true_model}_recovered_events"] = int(by_true.loc[true_model, "recovered_events"])
+                      row[f"{true_model}_most_common_best_model"] = str(by_true.loc[true_model, "most_common_best_model"])
+              if certified is not None:
+                  if "overall" in certified.index:
+                      row["overall_certified_vs_exact_recovery_accuracy"] = float(
+                          certified.loc["overall", "certified_vs_exact_recovery_accuracy"]
+                      )
+                      row["overall_certified_vs_exact_recovered_events"] = int(
+                          certified.loc["overall", "certified_vs_exact_recovered_events"]
+                      )
+                  for true_model in ("diffusion", "momentum", "stationary", "fragmented"):
+                      if true_model in certified.index:
+                          row[f"{true_model}_certified_vs_exact_recovery_accuracy"] = float(
+                              certified.loc[true_model, "certified_vs_exact_recovery_accuracy"]
+                          )
+                          row[f"{true_model}_certified_vs_exact_recovered_events"] = int(
+                              certified.loc[true_model, "certified_vs_exact_recovered_events"]
+                          )
+              rows.append(row)
+          comparison = pd.DataFrame(rows)
+          sort_cols = [
+              "momentum_certified_vs_exact_recovery_accuracy",
+              "momentum_recovery_accuracy",
+              "overall_certified_vs_exact_recovery_accuracy",
+              "overall_recovery_accuracy",
+              "diffusion_recovery_accuracy",
+              "failures",
+          ]
+          ascending_by_col = {
+              "momentum_certified_vs_exact_recovery_accuracy": False,
+              "momentum_recovery_accuracy": False,
+              "overall_certified_vs_exact_recovery_accuracy": False,
+              "overall_recovery_accuracy": False,
+              "diffusion_recovery_accuracy": False,
+              "failures": True,
+          }
+          present = [col for col in sort_cols if col in comparison.columns]
+          ranked = (
+              comparison.sort_values(
+                  present,
+                  ascending=[ascending_by_col[col] for col in present],
+                  kind="stable",
+              )
+              if present
+              else comparison
+          )
+          comparison.to_csv(out_dir / "simulation_recovery_emission_calibration_config_comparison.csv", index=False)
+          ranked.to_csv(out_dir / "simulation_recovery_emission_calibration_config_ranked.csv", index=False)
+
+          seed_group_cols = [
+              "requested_session",
+              "events_spec",
+              "max_template_events",
+              "events_per_model",
+              "state_space_diffusion_sigma_cm_sqrt_s",
+              "state_space_max_step_sigma",
+              "state_space_momentum_sigma_cm_sqrt_s",
+              "state_space_momentum_initial_sigma_cm_sqrt_s",
+              "state_space_momentum_velocity_decay",
+              "spike_rate_scale",
+              "emission_likelihood_temperature",
+              "emission_negative_binomial_overdispersion",
+          ]
+          seed_rows = []
+          if "random_seed" in comparison.columns:
+              for keys, group in comparison.groupby(seed_group_cols, sort=False, dropna=False):
+                  row = dict(zip(seed_group_cols, keys, strict=True))
+                  seeds = sorted({int(seed) for seed in group["random_seed"].dropna().astype(int)})
+                  row["random_seed_count"] = len(seeds)
+                  row["random_seeds"] = ",".join(str(seed) for seed in seeds)
+                  row["matrix_ids"] = ",".join(str(value) for value in group["matrix_id"].dropna().astype(str))
+                  row["failures"] = int(group.get("failures", pd.Series(dtype=float)).fillna(0).sum())
+                  for prefix in ("overall", "diffusion", "momentum", "stationary", "fragmented"):
+                      recovered_col = f"{prefix}_recovered_events"
+                      simulated_col = f"{prefix}_simulated_events"
+                      accuracy_col = f"{prefix}_recovery_accuracy"
+                      if recovered_col in group.columns and simulated_col in group.columns:
+                          recovered = int(group[recovered_col].fillna(0).sum())
+                          simulated = int(group[simulated_col].fillna(0).sum())
+                          row[recovered_col] = recovered
+                          row[simulated_col] = simulated
+                          row[accuracy_col] = float(recovered / simulated) if simulated else float("nan")
+                      certified_recovered_col = f"{prefix}_certified_vs_exact_recovered_events"
+                      certified_accuracy_col = f"{prefix}_certified_vs_exact_recovery_accuracy"
+                      if certified_recovered_col in group.columns and simulated_col in group.columns:
+                          recovered = int(group[certified_recovered_col].fillna(0).sum())
+                          simulated = int(group[simulated_col].fillna(0).sum())
+                          row[certified_recovered_col] = recovered
+                          row[certified_accuracy_col] = float(recovered / simulated) if simulated else float("nan")
+                      best_col = f"{prefix}_most_common_best_model"
+                      if best_col in group.columns:
+                          row[best_col] = ",".join(sorted(set(group[best_col].dropna().astype(str))))
+                  seed_rows.append(row)
+          seed_comparison = pd.DataFrame(seed_rows)
+          if not seed_comparison.empty:
+              seed_present = [col for col in sort_cols if col in seed_comparison.columns]
+              seed_ranked = (
+                  seed_comparison.sort_values(
+                      seed_present,
+                      ascending=[ascending_by_col[col] for col in seed_present],
+                      kind="stable",
+                  )
+                  if seed_present
+                  else seed_comparison
+              )
+              seed_comparison.to_csv(
+                  out_dir / "simulation_recovery_emission_calibration_seed_replicated_comparison.csv",
+                  index=False,
+              )
+              seed_ranked.to_csv(
+                  out_dir / "simulation_recovery_emission_calibration_seed_replicated_ranked.csv",
+                  index=False,
+              )
+              print("Best seed-replicated recovery calibration configurations:")
+              print(seed_ranked.head(10).to_string(index=False))
+          print("\nBest recovery calibration configurations:")
+          print(ranked.head(10).to_string(index=False))
+          PY
+
+      - name: Upload aggregate recovery calibration summary
+        uses: actions/upload-artifact@v7
+        with:
+          name: simulation-recovery-emission-calibration-summary-${{ github.run_id }}
+          path: results/simulation-recovery-emission-calibration-summary/
+          if-no-files-found: error

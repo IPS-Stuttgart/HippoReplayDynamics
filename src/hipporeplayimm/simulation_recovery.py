@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import time
 from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
@@ -102,6 +103,7 @@ class SimulationRecoveryConfig:
     score_with_occupancy: bool = True
     oracle_candidate_support: bool = False
     continue_on_error: bool = False
+    partial_output: str | Path | None = None
 
 
 @dataclass
@@ -127,6 +129,129 @@ class SimulationRecoveryResult:
         from .recovery_diagnostics import build_recovery_diagnostic_tables
         build_recovery_diagnostic_tables(self.event_scores).write(out_dir)
         _write_yaml(out_dir / "simulation_recovery_settings.yml", self.settings)
+
+
+class _SimulationRecoveryProgress:
+    """Incrementally persist recovery progress for long workflow jobs."""
+
+    def __init__(
+        self,
+        *,
+        output: str | Path | None,
+        total_events: int,
+        scoring_model_count: int,
+        true_state_space: StateSpaceDecoderConfig,
+        scoring_state_space: StateSpaceDecoderConfig,
+    ) -> None:
+        self.output = Path(output) if output is not None else None
+        self.total_events = int(total_events)
+        self.scoring_model_count = int(scoring_model_count)
+        self.true_state_space = true_state_space
+        self.scoring_state_space = scoring_state_space
+        self.started_at = time.perf_counter()
+        self.completed_events = 0
+        self.failed_events = 0
+        self._failed_event_indices: set[int] = set()
+        self.current_true_model = ""
+        self.current_template_event: int | None = None
+        self.current_scoring_model = ""
+        self.current_synthetic_event: int | None = None
+        self.current_synthetic_events_for_model: int | None = None
+        self.current_simulation_event_index: int | None = None
+        if self.output is not None:
+            self.output.mkdir(parents=True, exist_ok=True)
+
+    def update_current(
+        self,
+        *,
+        true_model: str,
+        synthetic_event: int,
+        synthetic_events_for_model: int,
+        simulation_event_index: int,
+        template_event_index: int,
+        scoring_model: str,
+        status: str,
+    ) -> None:
+        self.current_true_model = str(true_model)
+        self.current_synthetic_event = int(synthetic_event)
+        self.current_synthetic_events_for_model = int(synthetic_events_for_model)
+        self.current_simulation_event_index = int(simulation_event_index)
+        self.current_template_event = int(template_event_index)
+        self.current_scoring_model = str(scoring_model)
+        elapsed = self.elapsed_seconds
+        print(
+            "[recovery] "
+            f"true_model={self.current_true_model} "
+            f"synthetic_event={self.current_synthetic_event}/"
+            f"{self.current_synthetic_events_for_model} "
+            f"scoring_model={self.current_scoring_model} "
+            f"elapsed={elapsed:.1f}s",
+            flush=True,
+        )
+        self.write_manifest(status=status)
+
+    def complete_event(self, rows: list[dict[str, object]], *, failed: bool) -> None:
+        self.completed_events += 1
+        if failed:
+            self.mark_current_event_failed()
+        self.current_scoring_model = ""
+        self.write_event_scores(rows)
+        self.write_manifest(status="running")
+
+    def mark_current_event_failed(self) -> None:
+        if self.current_simulation_event_index is None:
+            self.failed_events += 1
+            return
+        self._failed_event_indices.add(int(self.current_simulation_event_index))
+        self.failed_events = len(self._failed_event_indices)
+
+    def write_model_scores(self, rows: list[dict[str, object]]) -> None:
+        self._write_scores(rows, "simulation_recovery_partial_model_scores.csv")
+
+    def write_event_scores(self, rows: list[dict[str, object]]) -> None:
+        self._write_scores(rows, "simulation_recovery_partial_event_scores.csv")
+
+    def write_manifest(self, *, status: str) -> None:
+        if self.output is None:
+            return
+        manifest = {
+            "status": str(status),
+            "completed_events": int(self.completed_events),
+            "failed_events": int(self.failed_events),
+            "total_events": int(self.total_events),
+            "scoring_model_count": int(self.scoring_model_count),
+            "current_true_model": self.current_true_model,
+            "current_template_event": self.current_template_event,
+            "current_simulation_event_index": self.current_simulation_event_index,
+            "current_synthetic_event": self.current_synthetic_event,
+            "current_synthetic_events_for_model": (
+                self.current_synthetic_events_for_model
+            ),
+            "current_scoring_model": self.current_scoring_model,
+            "elapsed_seconds": self.elapsed_seconds,
+        }
+        _write_json_atomic(
+            self.output / "simulation_recovery_partial_manifest.json",
+            manifest,
+        )
+
+    @property
+    def elapsed_seconds(self) -> float:
+        return float(time.perf_counter() - self.started_at)
+
+    def _write_scores(
+        self,
+        rows: list[dict[str, object]],
+        filename: str,
+    ) -> None:
+        if self.output is None or not rows:
+            return
+        scores = _finalize_recovery_event_scores(
+            rows,
+            true_state_space=self.true_state_space,
+            scoring_state_space=self.scoring_state_space,
+        )
+        _write_dataframe_atomic(scores, self.output / filename)
 
 
 def parse_model_list(spec: str | Iterable[str]) -> tuple[str, ...]:
@@ -162,6 +287,14 @@ def run_session_simulation_recovery(
         int(event_id): _event_n_time(session, int(event_id), config.time_bin_s)
         for event_id in template_event_ids
     }
+    progress = _SimulationRecoveryProgress(
+        output=config.partial_output,
+        total_events=len(parse_model_list(config.true_models)) * config.events_per_model,
+        scoring_model_count=len(scoring_models),
+        true_state_space=true_state_space,
+        scoring_state_space=config.state_space,
+    )
+    progress.write_manifest(status="running")
 
     rows: list[dict[str, object]] = []
     simulation_event_index = 0
@@ -170,6 +303,7 @@ def run_session_simulation_recovery(
         for replicate in range(config.events_per_model):
             template_event_id = int(rng.choice(template_event_ids))
             n_time = int(template_lengths[template_event_id])
+            event_start_row = len(rows)
             emissions, path = simulate_replay_event(
                 encoding,
                 true_model=true_model,
@@ -186,6 +320,15 @@ def run_session_simulation_recovery(
             path_unique_bins = int(np.unique(path).size)
             for requested_model, model in scoring_models.items():
                 start = time.perf_counter()
+                progress.update_current(
+                    true_model=true_model,
+                    synthetic_event=replicate + 1,
+                    synthetic_events_for_model=config.events_per_model,
+                    simulation_event_index=simulation_event_index,
+                    template_event_index=template_event_id,
+                    scoring_model=requested_model,
+                    status="running",
+                )
                 try:
                     candidates = None
                     candidate_diagnostics: dict[str, float | int] = {}
@@ -242,6 +385,7 @@ def run_session_simulation_recovery(
                     row.update(candidate_diagnostics)
                     row.update({f"diagnostic_{key}": value for key, value in score.diagnostics.items()})
                     rows.append(row)
+                    progress.write_model_scores(rows)
                 except Exception as exc:
                     rows.append(
                         {
@@ -282,20 +426,27 @@ def run_session_simulation_recovery(
                             "oracle_candidate_support": bool(config.oracle_candidate_support),
                         }
                     )
+                    progress.write_model_scores(rows)
+                    progress.mark_current_event_failed()
+                    progress.write_manifest(status="failed" if not config.continue_on_error else "running")
                     if not config.continue_on_error:
                         raise
+            event_rows = rows[event_start_row:]
+            event_failed = any(str(row.get("status")) != "success" for row in event_rows)
+            progress.complete_event(rows, failed=event_failed)
             simulation_event_index += 1
 
-    event_scores = pd.DataFrame(rows)
-    for key, value in _state_space_parameter_row("true", true_state_space).items():
-        event_scores[key] = value
-    for key, value in _state_space_parameter_row("scoring", config.state_space).items():
-        event_scores[key] = value
-    event_scores = add_evidence_columns(event_scores)
+    progress.write_manifest(status="finalizing")
+    event_scores = _finalize_recovery_event_scores(
+        rows,
+        true_state_space=true_state_space,
+        scoring_state_space=config.state_space,
+    )
     confusion = confusion_matrix(event_scores, config.scoring_models)
     summary = recovery_summary(event_scores)
     certified_vs_exact = certified_vs_exact_recovery_summary(event_scores)
     settings = _settings(session, config, template_event_ids, encoding)
+    progress.write_manifest(status="complete")
     return SimulationRecoveryResult(
         event_scores=event_scores,
         confusion_matrix=confusion,
@@ -1183,6 +1334,22 @@ def _true_state_space_config(config: SimulationRecoveryConfig) -> StateSpaceDeco
     return config.state_space if config.true_state_space is None else config.true_state_space
 
 
+def _finalize_recovery_event_scores(
+    rows: list[dict[str, object]],
+    *,
+    true_state_space: StateSpaceDecoderConfig,
+    scoring_state_space: StateSpaceDecoderConfig,
+) -> pd.DataFrame:
+    event_scores = pd.DataFrame(rows)
+    if event_scores.empty:
+        return event_scores
+    for key, value in _state_space_parameter_row("true", true_state_space).items():
+        event_scores[key] = value
+    for key, value in _state_space_parameter_row("scoring", scoring_state_space).items():
+        event_scores[key] = value
+    return add_evidence_columns(event_scores)
+
+
 def _state_space_parameter_row(prefix: str, config: StateSpaceDecoderConfig) -> dict[str, object]:
     return {
         f"{prefix}_state_space_{key}": value
@@ -1249,6 +1416,20 @@ def _settings(
 
 def _write_yaml(path: Path, value: object) -> None:
     path.write_text(_yaml_lines(value), encoding="utf-8")
+
+
+def _write_json_atomic(path: Path, value: object) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temp = path.with_name(f"{path.name}.tmp")
+    temp.write_text(json.dumps(value, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    temp.replace(path)
+
+
+def _write_dataframe_atomic(frame: pd.DataFrame, path: Path) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temp = path.with_name(f"{path.name}.tmp")
+    frame.to_csv(temp, index=False)
+    temp.replace(path)
 
 
 def _yaml_lines(value: object, indent: int = 0) -> str:

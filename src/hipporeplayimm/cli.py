@@ -521,6 +521,7 @@ def _simulate_recovery(args: argparse.Namespace) -> int:
         score_with_occupancy=args.score_with_occupancy,
         oracle_candidate_support=args.oracle_candidate_support,
         continue_on_error=args.continue_on_error,
+        partial_output=args.output,
     )
     result = run_session_simulation_recovery(args.root, args.session, config)
     result.write(args.output)

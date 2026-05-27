@@ -596,6 +596,7 @@ def test_state_space_momentum_exact_sparse_matches_bruteforce_tiny_grid():
     assert score.diagnostics["state_space_momentum_candidate_selection"] == "none_exact_sparse"
     assert score.diagnostics["state_space_sparse_momentum_max_pair_count"] == 4
     assert score.diagnostics["state_space_sparse_momentum_transition_support"] == "finite_radius_gaussian"
+    assert score.diagnostics["state_space_sparse_momentum_backward_transition_rows"] == "forward_cached"
 
 
 def test_exact_sparse_momentum_matches_dense_finite_radius_reference_and_heldout_identity():

@@ -26,6 +26,8 @@ from .encoding import LogEmissionTensor
 from .state_space_first_order import _score_fragmented
 from .state_space_utils import _as_log_probs, _mean_entropy, _scaled_emissions
 
+TransitionRows = list[tuple[np.ndarray, np.ndarray]]
+
 
 def _score_sparse_momentum_exact(
     emissions: LogEmissionTensor,
@@ -103,11 +105,12 @@ def _score_sparse_momentum_exact(
     filtered: list[np.ndarray] = [alpha]
     scales = [first_scale]
     edge_counts: list[int] = list(initial_edge_counts)
+    transition_rows: list[TransitionRows] = []
     logp = float(np.log(first_scale) + offsets[0] + offsets[1])
 
     for time_index in range(2, emissions.n_time):
         transition_index = time_index - 1
-        prev, curr, alpha, counts = _advance_pair_alpha(
+        prev, curr, alpha, counts, rows_for_transition = _advance_pair_alpha(
             centers,
             valid_indices,
             tree,
@@ -128,6 +131,7 @@ def _score_sparse_momentum_exact(
         filtered.append(alpha)
         scales.append(scale)
         edge_counts.extend(counts)
+        transition_rows.append(rows_for_transition)
         logp += float(np.log(scale) + offsets[time_index])
 
     betas = _backward_sparse_pair_betas(
@@ -139,10 +143,7 @@ def _score_sparse_momentum_exact(
         filtered,
         scaled,
         scales,
-        transition_sigmas,
-        decays,
-        time_scales,
-        max_step_sigma=max_step_sigma,
+        transition_rows,
     )
     trajectory = _pair_position_trajectory(
         pair_prev,
@@ -163,6 +164,7 @@ def _score_sparse_momentum_exact(
         "state_space_sparse_momentum_max_pair_count": int(np.max(pair_counts)),
         "state_space_sparse_momentum_mean_outgoing_count": float(np.mean(edge_counts)) if edge_counts else 0.0,
         "state_space_sparse_momentum_max_outgoing_count": int(np.max(edge_counts)) if edge_counts else 0,
+        "state_space_sparse_momentum_backward_transition_rows": "forward_cached",
         "state_space_momentum_trajectory_posterior": "smoothed_pair_marginal",
         "state_space_momentum_evidence_support": "exact_full_grid",
         "state_space_momentum_candidate_support": "not_used_exact_sparse",
@@ -252,13 +254,15 @@ def _advance_pair_alpha(
     sigma_cm: float,
     velocity_decay: float,
     max_step_sigma: float,
-) -> tuple[np.ndarray, np.ndarray, np.ndarray, list[int]]:
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, list[int], TransitionRows]:
     prev_parts: list[np.ndarray] = []
     curr_parts: list[np.ndarray] = []
     value_parts: list[np.ndarray] = []
     edge_counts: list[int] = []
+    transition_rows: TransitionRows = []
     for src_prev, src_curr, source_mass in zip(prev, curr, alpha, strict=True):
         if source_mass <= 0.0:
+            transition_rows.append((np.empty(0, dtype=int), np.empty(0, dtype=float)))
             continue
         prediction = centers[int(src_curr)] + float(velocity_decay) * (centers[int(src_curr)] - centers[int(src_prev)])
         dst, weights = _finite_gaussian_row(
@@ -269,6 +273,7 @@ def _advance_pair_alpha(
             sigma_cm=sigma_cm,
             max_step_sigma=max_step_sigma,
         )
+        transition_rows.append((dst, weights))
         values = float(source_mass) * weights * curr_emission[dst]
         keep = values > 0.0
         edge_counts.append(int(dst.shape[0]))
@@ -277,7 +282,11 @@ def _advance_pair_alpha(
         prev_parts.append(np.full(int(np.sum(keep)), int(src_curr), dtype=int))
         curr_parts.append(dst[keep])
         value_parts.append(values[keep])
-    return (*_coalesce_pairs(prev_parts, curr_parts, value_parts, centers.shape[0]), edge_counts)
+    return (
+        *_coalesce_pairs(prev_parts, curr_parts, value_parts, centers.shape[0]),
+        edge_counts,
+        transition_rows,
+    )
 
 
 def _backward_sparse_pair_betas(
@@ -289,14 +298,12 @@ def _backward_sparse_pair_betas(
     filtered: list[np.ndarray],
     scaled: np.ndarray,
     scales: list[float],
-    transition_sigmas: np.ndarray,
-    decays: np.ndarray,
-    time_scales: np.ndarray,
-    *,
-    max_step_sigma: float,
+    transition_rows: list[TransitionRows],
 ) -> list[np.ndarray]:
     betas: list[np.ndarray] = [np.empty(0, dtype=float) for _ in filtered]
     betas[-1] = np.ones_like(filtered[-1], dtype=float)
+    if len(transition_rows) != max(len(filtered) - 1, 0):
+        raise ValueError("transition row cache length does not match sparse pair lattice")
     n_bins = centers.shape[0]
     for pair_index in range(len(filtered) - 2, -1, -1):
         next_flat = pair_prev[pair_index + 1].astype(np.int64) * n_bins + pair_curr[pair_index + 1].astype(np.int64)
@@ -304,20 +311,12 @@ def _backward_sparse_pair_betas(
         next_flat = next_flat[order]
         next_beta = betas[pair_index + 1][order]
         beta = np.zeros_like(filtered[pair_index], dtype=float)
-        transition_index = pair_index + 1
         observation_index = pair_index + 2
+        rows_for_transition = transition_rows[pair_index]
+        if len(rows_for_transition) != len(filtered[pair_index]):
+            raise ValueError("transition row cache does not match sparse pair count")
         for row, (src_prev, src_curr) in enumerate(zip(pair_prev[pair_index], pair_curr[pair_index], strict=True)):
-            prediction = centers[int(src_curr)] + float(decays[transition_index]) * float(time_scales[transition_index]) * (
-                centers[int(src_curr)] - centers[int(src_prev)]
-            )
-            dst, weights = _finite_gaussian_row(
-                centers,
-                valid_indices,
-                tree,
-                prediction,
-                sigma_cm=float(transition_sigmas[transition_index]),
-                max_step_sigma=max_step_sigma,
-            )
+            dst, weights = rows_for_transition[row]
             query = int(src_curr) * n_bins + dst.astype(np.int64)
             continuation = _lookup_sorted(next_flat, next_beta, query)
             beta[row] = float(np.sum(weights * scaled[observation_index, dst] * continuation) / scales[pair_index + 1])

@@ -13,7 +13,9 @@ from hipporeplayimm.advanced_result_diagnostics import (
     mark_drift_diagnostics,
     paired_model_margin_decisions,
     paired_model_margin_summary,
+    paired_model_margin_threshold_sweep,
     place_field_quality_from_arrays,
+    select_paired_model_margin_threshold,
     posterior_predictive_count_checks,
     stable_cell_ids,
     wrong_map_delta_summary,
@@ -96,6 +98,58 @@ def test_paired_model_margin_decisions_reject_weak_momentum_claims():
     assert summary.loc[0, "false_positive_claims"] == 0
     assert summary.loc[0, "reference_specificity"] == 1.0
     assert summary.loc[0, "positive_claim_recall"] == 0.5
+
+
+def test_paired_model_margin_threshold_selection_uses_synthetic_specificity():
+    scores = pd.DataFrame(
+        {
+            "matrix_id": ["cell-a"] * 8,
+            "random_seed": [11] * 8,
+            "session": ["Rat1/Open1"] * 8,
+            "simulation_event_index": [0, 0, 1, 1, 2, 2, 3, 3],
+            "true_model": [
+                "diffusion",
+                "diffusion",
+                "diffusion",
+                "diffusion",
+                "momentum",
+                "momentum",
+                "momentum",
+                "momentum",
+            ],
+            "model": [
+                "sorted-spike-state-space-diffusion",
+                "sorted-spike-state-space-momentum-exact-sparse",
+                "sorted-spike-state-space-diffusion",
+                "sorted-spike-state-space-momentum-exact-sparse",
+                "sorted-spike-state-space-diffusion",
+                "sorted-spike-state-space-momentum-exact-sparse",
+                "sorted-spike-state-space-diffusion",
+                "sorted-spike-state-space-momentum-exact-sparse",
+            ],
+            "log_evidence": [0.0, 4.0, 0.0, -6.0, 0.0, 8.0, 0.0, 6.0],
+            "status": ["success"] * 8,
+            "evidence_comparable": [True] * 8,
+        }
+    )
+
+    sweep = paired_model_margin_threshold_sweep(
+        scores,
+        positive_model="sorted-spike-state-space-momentum-exact-sparse",
+        reference_model="sorted-spike-state-space-diffusion",
+        thresholds=(0.0, 3.0, 5.0),
+        true_model_col="true_model",
+        positive_true_label="momentum",
+    )
+    selected = select_paired_model_margin_threshold(sweep, max_false_positive_claims=0)
+
+    assert sweep["group_cols"].unique().tolist() == [
+        "matrix_id,random_seed,session,simulation_event_index"
+    ]
+    assert sweep["false_positive_claims"].tolist() == [1, 1, 0]
+    assert sweep["positive_claim_recall"].tolist() == [1.0, 1.0, 1.0]
+    assert selected.loc[0, "selected_margin_threshold"] == 5.0
+    assert selected.loc[0, "selection_status"] == "passed_specificity_gate"
 
 
 def test_place_field_quality_and_stable_cells():

@@ -176,6 +176,7 @@ class StateSpaceReplayModel:
         candidate_indices: list[np.ndarray] | None = None,
         *,
         occupancy_s: np.ndarray | None = None,
+        return_trajectory: bool = True,
     ) -> EventScore:
         # Native duration-aware implementation. The historical runtime patch
         # modules detect the marker below and skip monkey-patching this method.
@@ -189,6 +190,7 @@ class StateSpaceReplayModel:
             bin_centers,
             candidate_indices=candidate_indices,
             occupancy_s=occupancy_s,
+            return_trajectory=return_trajectory,
         )
         if emissions.n_time == 0:
             raise ValueError("emissions must contain at least one time bin")

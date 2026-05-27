@@ -77,7 +77,7 @@ on:
         required: true
         default: "0.0 0.2"
       time_bin_ms:
-        description: "Synthetic replay time-bin width in milliseconds"
+        description: "Whitespace- or comma-separated synthetic replay time-bin widths in milliseconds"
         required: true
         default: "3.0"
       bin_size_cm:
@@ -142,6 +142,7 @@ jobs:
           MOMENTUM_INITIAL_VALUES: ${{ inputs.state_space_momentum_initial_sigma_cm_sqrt_s_values }}
           DECAY_VALUES: ${{ inputs.state_space_momentum_velocity_decay_values }}
           MAX_STEP_SIGMA_VALUES: ${{ inputs.state_space_max_step_sigma }}
+          TIME_BIN_MS_VALUES: ${{ inputs.time_bin_ms }}
           SPIKE_RATE_SCALE_VALUES: ${{ inputs.spike_rate_scale_values }}
           LIKELIHOOD_TEMPERATURE_VALUES: ${{ inputs.emission_likelihood_temperature_values }}
           NEGATIVE_BINOMIAL_OVERDISPERSION_VALUES: ${{ inputs.emission_negative_binomial_overdispersion_values }}
@@ -188,6 +189,7 @@ jobs:
           momentum_initial_values = split_values("MOMENTUM_INITIAL_VALUES")
           decay_values = split_values("DECAY_VALUES")
           max_step_sigma_values = split_values("MAX_STEP_SIGMA_VALUES")
+          time_bin_ms_values = split_values("TIME_BIN_MS_VALUES")
           spike_rate_scale_values = split_values("SPIKE_RATE_SCALE_VALUES")
           likelihood_temperature_values = split_values("LIKELIHOOD_TEMPERATURE_VALUES")
           negative_binomial_overdispersion_values = split_values("NEGATIVE_BINOMIAL_OVERDISPERSION_VALUES")
@@ -198,6 +200,7 @@ jobs:
               ("MOMENTUM_INITIAL_VALUES", momentum_initial_values),
               ("DECAY_VALUES", decay_values),
               ("MAX_STEP_SIGMA_VALUES", max_step_sigma_values),
+              ("TIME_BIN_MS_VALUES", time_bin_ms_values),
               ("SPIKE_RATE_SCALE_VALUES", spike_rate_scale_values),
               ("LIKELIHOOD_TEMPERATURE_VALUES", likelihood_temperature_values),
               ("NEGATIVE_BINOMIAL_OVERDISPERSION_VALUES", negative_binomial_overdispersion_values),
@@ -206,13 +209,14 @@ jobs:
           validate_int("SEED_VALUES", seed_values, allow_zero=True)
 
           rows = []
-          for index, (diffusion, momentum, momentum_initial, decay, max_step_sigma, spike_rate_scale, likelihood_temperature, negative_binomial_overdispersion, seed) in enumerate(
+          for index, (diffusion, momentum, momentum_initial, decay, max_step_sigma, time_bin_ms, spike_rate_scale, likelihood_temperature, negative_binomial_overdispersion, seed) in enumerate(
               itertools.product(
                   diffusion_values,
                   momentum_values,
                   momentum_initial_values,
                   decay_values,
                   max_step_sigma_values,
+                  time_bin_ms_values,
                   spike_rate_scale_values,
                   likelihood_temperature_values,
                   negative_binomial_overdispersion_values,
@@ -226,6 +230,7 @@ jobs:
                   f"mi{slug(momentum_initial)}-"
                   f"decay{slug(decay)}-"
                   f"step{slug(max_step_sigma)}-"
+                  f"tb{slug(time_bin_ms)}-"
                   f"rate{slug(spike_rate_scale)}-"
                   f"temp{slug(likelihood_temperature)}-"
                   f"nb{slug(negative_binomial_overdispersion)}"
@@ -240,6 +245,7 @@ jobs:
                       "state_space_momentum_initial_sigma_cm_sqrt_s": momentum_initial,
                       "state_space_momentum_velocity_decay": decay,
                       "state_space_max_step_sigma": max_step_sigma,
+                      "time_bin_ms": time_bin_ms,
                       "spike_rate_scale": spike_rate_scale,
                       "emission_likelihood_temperature": likelihood_temperature,
                       "emission_negative_binomial_overdispersion": negative_binomial_overdispersion,
@@ -269,7 +275,7 @@ jobs:
           if-no-files-found: error
 
   simulation-recovery-calibration:
-    name: seed=${{ matrix.random_seed }} rate=${{ matrix.spike_rate_scale }} temp=${{ matrix.emission_likelihood_temperature }} nb=${{ matrix.emission_negative_binomial_overdispersion }}
+    name: seed=${{ matrix.random_seed }} tb=${{ matrix.time_bin_ms }} rate=${{ matrix.spike_rate_scale }} temp=${{ matrix.emission_likelihood_temperature }} nb=${{ matrix.emission_negative_binomial_overdispersion }}
     needs: plan-matrix
     if: ${{ needs.plan-matrix.outputs.count != '0' }}
     runs-on: ubuntu-latest
@@ -288,6 +294,7 @@ jobs:
       STATE_SPACE_MOMENTUM_INITIAL_SIGMA_CM_SQRT_S: ${{ matrix.state_space_momentum_initial_sigma_cm_sqrt_s }}
       STATE_SPACE_MOMENTUM_VELOCITY_DECAY: ${{ matrix.state_space_momentum_velocity_decay }}
       STATE_SPACE_MAX_STEP_SIGMA: ${{ matrix.state_space_max_step_sigma }}
+      TIME_BIN_MS: ${{ matrix.time_bin_ms }}
       SPIKE_RATE_SCALE: ${{ matrix.spike_rate_scale }}
       EMISSION_LIKELIHOOD_TEMPERATURE: ${{ matrix.emission_likelihood_temperature }}
       EMISSION_NEGATIVE_BINOMIAL_OVERDISPERSION: ${{ matrix.emission_negative_binomial_overdispersion }}
@@ -547,6 +554,7 @@ jobs:
               "state_space_momentum_sigma_cm_sqrt_s",
               "state_space_momentum_initial_sigma_cm_sqrt_s",
               "state_space_momentum_velocity_decay",
+              "time_bin_ms",
               "spike_rate_scale",
               "emission_likelihood_temperature",
               "emission_negative_binomial_overdispersion",
@@ -629,6 +637,7 @@ jobs:
               "state_space_momentum_sigma_cm_sqrt_s",
               "state_space_momentum_initial_sigma_cm_sqrt_s",
               "state_space_momentum_velocity_decay",
+              "time_bin_ms",
               "spike_rate_scale",
               "emission_likelihood_temperature",
               "emission_negative_binomial_overdispersion",

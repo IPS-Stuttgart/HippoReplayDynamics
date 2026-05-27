@@ -73,6 +73,10 @@ def test_simulation_recovery_emission_calibration_workflow_defines_rankings():
     assert "spike_rate_scale_values:" in workflow
     assert "emission_likelihood_temperature_values:" in workflow
     assert "emission_negative_binomial_overdispersion_values:" in workflow
+    assert "TIME_BIN_MS_VALUES" in workflow
+    assert 'f"tb{slug(time_bin_ms)}-"' in workflow
+    assert "TIME_BIN_MS: ${{ matrix.time_bin_ms }}" in workflow
+    assert "time_bin_ms" in workflow
     assert "--spike-rate-scale" in workflow
     assert "--emission-likelihood-temperature" in workflow
     assert "--emission-negative-binomial-overdispersion" in workflow

@@ -72,18 +72,6 @@ on:
         description: "Clusterless mark likelihood: local-kde or diagonal-gaussian"
         required: true
         default: "local-kde"
-      clusterless_mark_kde_bandwidth:
-        description: "Optional local-KDE mark bandwidth; empty selects data-driven bandwidth"
-        required: false
-        default: ""
-      clusterless_mark_kde_spatial_sigma_bins:
-        description: "Optional local-KDE spatial support sigma in bins; empty uses mark smoothing sigma"
-        required: false
-        default: ""
-      clusterless_mark_kde_max_neighbors:
-        description: "Maximum local-KDE mark neighbors per spatial bin"
-        required: true
-        default: "256"
       time_bin_s:
         description: "Ripple decoding time-bin width in seconds"
         required: true
@@ -149,9 +137,9 @@ env:
   CLUSTERLESS_MARK_VARIANCE_FLOOR: ${{ inputs.clusterless_mark_variance_floor }}
   CLUSTERLESS_RATE_FLOOR_HZ: ${{ inputs.clusterless_rate_floor_hz }}
   CLUSTERLESS_MARK_LIKELIHOOD: ${{ inputs.clusterless_mark_likelihood }}
-  CLUSTERLESS_MARK_KDE_BANDWIDTH: ${{ inputs.clusterless_mark_kde_bandwidth }}
-  CLUSTERLESS_MARK_KDE_SPATIAL_SIGMA_BINS: ${{ inputs.clusterless_mark_kde_spatial_sigma_bins }}
-  CLUSTERLESS_MARK_KDE_MAX_NEIGHBORS: ${{ inputs.clusterless_mark_kde_max_neighbors }}
+  CLUSTERLESS_MARK_KDE_BANDWIDTH: ""
+  CLUSTERLESS_MARK_KDE_SPATIAL_SIGMA_BINS: ""
+  CLUSTERLESS_MARK_KDE_MAX_NEIGHBORS: "256"
   TIME_BIN_S: ${{ inputs.time_bin_s }}
   SPIKE_RATE_SCALE: ${{ inputs.spike_rate_scale }}
   EMISSION_LIKELIHOOD_TEMPERATURE: ${{ inputs.emission_likelihood_temperature }}

@@ -371,6 +371,72 @@ def test_select_parameters_keeps_observation_calibration_dimensions_separate(tmp
     assert "time_bin_s: 0.004" in workflow_inputs
 
 
+def test_select_parameters_loads_emission_calibration_recovery_artifact(tmp_path):
+    evidence = tmp_path / "evidence"
+    recovery = tmp_path / "recovery"
+    output = tmp_path / "selection"
+    params = _params(60.0, 60.0, 85.0, 0.95, 128, predicted_top_k=0)
+    evidence_common = {
+        **params,
+        "state_space_max_step_sigma": 3.0,
+        "state_space_valid_occupancy_threshold_s": 0.0,
+        "time_bin_s": 0.004,
+        "spike_rate_scale": 2.0,
+        "emission_likelihood_temperature": 0.375,
+        "emission_negative_binomial_overdispersion": 0.0,
+    }
+    recovery_common = {
+        key: value
+        for key, value in evidence_common.items()
+        if key
+        not in {
+            "state_space_momentum_candidate_top_k",
+            "state_space_momentum_predicted_candidate_top_k",
+            "state_space_momentum_candidate_source",
+        }
+    }
+    _write(
+        evidence,
+        "state_space_evidence_sweep_config_ranked.csv",
+        [
+            {
+                **evidence_common,
+                "matrix_id": "evidence-temp0375",
+                "events": 10,
+                "momentum_beats_diffusion_events": 9,
+                "momentum_beats_diffusion_log5_events": 7,
+                "median_momentum_minus_diffusion_log_evidence": 8.0,
+                "mean_momentum_minus_diffusion_log_evidence": 20.0,
+            }
+        ],
+    )
+    _write(
+        recovery,
+        "simulation_recovery_emission_calibration_config_ranked.csv",
+        [
+            {
+                **recovery_common,
+                "matrix_id": "recovery-temp0375",
+                "failures": 0,
+                "overall_recovery_accuracy": 0.875,
+                "momentum_recovery_accuracy": 1.0,
+                "diffusion_recovery_accuracy": 0.75,
+                "momentum_most_common_best_model": "sorted-spike-state-space-momentum-exact-sparse",
+            }
+        ],
+    )
+
+    tables = select_parameters(evidence, recovery, output=output)
+
+    recommendation = tables["recommendation"].iloc[0]
+    assert recommendation["evidence_matrix_id"] == "evidence-temp0375"
+    assert recommendation["recovery_matrix_id"] == "recovery-temp0375"
+    assert recommendation["state_space_momentum_candidate_top_k"] == 128
+    assert recommendation["state_space_momentum_predicted_candidate_top_k"] == 0
+    assert recommendation["state_space_momentum_candidate_source"] == "emission"
+    assert bool(recommendation["passes_recovery_gate"])
+
+
 def test_select_parameters_matches_predicted_candidate_support_dimension(tmp_path):
     evidence = tmp_path / "evidence"
     recovery = tmp_path / "recovery"

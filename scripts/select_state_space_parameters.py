@@ -20,10 +20,16 @@ BASE_PARAMETER_COLUMNS = [
     "state_space_momentum_velocity_decay",
     "state_space_momentum_candidate_top_k",
 ]
+REQUIRED_PARAMETER_COLUMNS = [
+    column
+    for column in BASE_PARAMETER_COLUMNS
+    if column != "state_space_momentum_candidate_top_k"
+]
 OPTIONAL_PARAMETER_DEFAULTS = {
     # Older recovery/evidence artifacts predate these support controls.  Default
     # them explicitly so historical rows remain loadable while new sweeps are
     # not accidentally pooled across different candidate-support mechanisms.
+    "state_space_momentum_candidate_top_k": 128,
     "state_space_max_step_sigma": 4.0,
     "state_space_valid_occupancy_threshold_s": 0.0,
     "state_space_momentum_predicted_candidate_top_k": 8,
@@ -123,6 +129,7 @@ def select_parameters(
 ) -> dict[str, pd.DataFrame]:
     evidence_frame = _load_table(evidence, "state_space_evidence_sweep_config_ranked.csv")
     recovery_frame = _load_table(recovery, "simulation_recovery_sweep_config_ranked.csv")
+    _inherit_single_evidence_parameter_defaults(recovery_frame, evidence_frame)
     if confidence_evidence is not None:
         evidence_frame = _merge_confidence_evidence(
             evidence_frame,
@@ -496,19 +503,54 @@ def _select_leave_one_session_out(
 def _load_table(path: str | Path, default_name: str) -> pd.DataFrame:
     path = Path(path)
     if path.is_dir():
-        path = path / default_name
+        path = _find_ranked_table(path, default_name)
     if not path.exists():
         raise FileNotFoundError(f"{path} does not exist")
     frame = pd.read_csv(path)
     if "time_bin_s" not in frame.columns and "time_bin_ms" in frame.columns:
         frame["time_bin_s"] = pd.to_numeric(frame["time_bin_ms"], errors="raise") / 1000.0
-    missing = set(BASE_PARAMETER_COLUMNS) - set(frame.columns)
+    missing = set(REQUIRED_PARAMETER_COLUMNS) - set(frame.columns)
     if missing:
         raise ValueError(f"{path} is missing required parameter columns: {sorted(missing)}")
+    missing_parameter_columns = sorted(set(PARAMETER_COLUMNS) - set(frame.columns))
     for column, default in OPTIONAL_PARAMETER_DEFAULTS.items():
         if column not in frame.columns:
             frame[column] = default
+    frame.attrs["source_path"] = str(path)
+    frame.attrs["missing_parameter_columns"] = missing_parameter_columns
     return frame
+
+
+def _find_ranked_table(root: Path, default_name: str) -> Path:
+    candidates = [default_name]
+    if default_name == "simulation_recovery_sweep_config_ranked.csv":
+        candidates.extend(
+            [
+                "simulation_recovery_emission_calibration_config_ranked.csv",
+                "simulation_recovery_sweep_seed_replicated_ranked.csv",
+                "simulation_recovery_emission_calibration_seed_replicated_ranked.csv",
+            ]
+        )
+    for candidate in candidates:
+        path = root / candidate
+        if path.exists():
+            return path
+    return root / default_name
+
+
+def _inherit_single_evidence_parameter_defaults(
+    recovery: pd.DataFrame,
+    evidence: pd.DataFrame,
+) -> None:
+    """Fill missing recovery parameter columns from single-valued evidence axes."""
+
+    missing = set(recovery.attrs.get("missing_parameter_columns", []))
+    for column in sorted(missing.intersection(PARAMETER_COLUMNS)):
+        if column not in evidence.columns:
+            continue
+        values = evidence[column].dropna().unique()
+        if len(values) == 1:
+            recovery[column] = values[0]
 
 
 def _load_confidence_evidence(path: str | Path) -> pd.DataFrame:

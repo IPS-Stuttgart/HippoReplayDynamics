@@ -83,6 +83,16 @@ EVIDENCE_MEDIAN_COLUMNS = [
     "median_momentum_minus_diffusion_log_evidence",
     "median_momentum_minus_imm_log_evidence",
 ]
+CONFIDENCE_RECOVERY_COLUMNS = [
+    "momentum_confidence_recovery_thresholded_binary_accuracy",
+    "momentum_confidence_recovery_positive_claim_recall",
+    "momentum_confidence_recovery_reference_specificity",
+    "momentum_confidence_recovery_false_positive_claims",
+    "momentum_confidence_recovery_false_negative_claims",
+    "momentum_confidence_recovery_passes_threshold_gate",
+    "momentum_confidence_recovery_selection_status",
+    "momentum_confidence_recovery_threshold_scope",
+]
 RECOVERY_COUNT_COLUMNS = [
     "failures",
     "momentum_recovered_events",
@@ -556,39 +566,115 @@ def _inherit_single_evidence_parameter_defaults(
 def _load_confidence_evidence(path: str | Path) -> pd.DataFrame:
     path = Path(path)
     if path.is_dir():
-        path = path / "momentum_confidence_threshold_evidence_by_stratum.csv"
+        evidence_path = path / "momentum_confidence_threshold_evidence_by_stratum.csv"
+        selection_path = path / "momentum_confidence_threshold_selection.csv"
+        if not evidence_path.exists():
+            raise FileNotFoundError(f"{evidence_path} does not exist")
+        frame = pd.read_csv(evidence_path)
+        if selection_path.exists():
+            frame = _merge_confidence_recovery_selection(frame, pd.read_csv(selection_path))
+        return frame
     if not path.exists():
         raise FileNotFoundError(f"{path} does not exist")
     frame = pd.read_csv(path)
-    if "matrix_id" not in frame.columns:
-        raise ValueError(f"{path} must include a matrix_id column")
     return frame
 
 
 def _merge_confidence_evidence(evidence: pd.DataFrame, confidence: pd.DataFrame) -> pd.DataFrame:
-    if "matrix_id" not in evidence.columns:
-        raise ValueError("Cannot merge calibrated confidence evidence: evidence table lacks matrix_id")
+    keys = _confidence_merge_keys(evidence, confidence)
     columns = {
-        "matrix_id": "matrix_id",
         "margin_threshold": "momentum_confidence_threshold",
         "positive_model_claims": "momentum_confidence_claim_events",
         "reference_model_claims": "momentum_confidence_reference_events",
         "ambiguous_events": "momentum_confidence_ambiguous_events",
         "positive_claim_fraction": "momentum_confidence_claim_event_fraction",
+        "momentum_confidence_recovery_thresholded_binary_accuracy": (
+            "momentum_confidence_recovery_thresholded_binary_accuracy"
+        ),
+        "momentum_confidence_recovery_positive_claim_recall": (
+            "momentum_confidence_recovery_positive_claim_recall"
+        ),
+        "momentum_confidence_recovery_reference_specificity": (
+            "momentum_confidence_recovery_reference_specificity"
+        ),
+        "momentum_confidence_recovery_false_positive_claims": (
+            "momentum_confidence_recovery_false_positive_claims"
+        ),
+        "momentum_confidence_recovery_false_negative_claims": (
+            "momentum_confidence_recovery_false_negative_claims"
+        ),
+        "momentum_confidence_recovery_passes_threshold_gate": (
+            "momentum_confidence_recovery_passes_threshold_gate"
+        ),
+        "momentum_confidence_recovery_selection_status": (
+            "momentum_confidence_recovery_selection_status"
+        ),
+        "momentum_confidence_recovery_threshold_scope": (
+            "momentum_confidence_recovery_threshold_scope"
+        ),
     }
     available = {source: target for source, target in columns.items() if source in confidence.columns}
     if "positive_model_claims" not in available:
         raise ValueError("confidence evidence must include positive_model_claims")
-    confidence_subset = confidence[list(available)].rename(columns=available)
-    if confidence_subset["matrix_id"].duplicated().any():
-        duplicates = sorted(confidence_subset.loc[confidence_subset["matrix_id"].duplicated(), "matrix_id"].astype(str).unique())
-        raise ValueError(f"confidence evidence has duplicate matrix_id rows: {duplicates}")
-    merged = evidence.merge(confidence_subset, on="matrix_id", how="left", validate="one_to_one")
+    confidence_subset = confidence[list(dict.fromkeys([*keys, *available]))].rename(columns=available)
+    if not keys:
+        merged = evidence.copy()
+        row = confidence_subset.iloc[0]
+        for column in confidence_subset.columns:
+            merged[column] = row[column]
+        return merged
+    if confidence_subset.duplicated(keys).any():
+        duplicates = confidence_subset.loc[confidence_subset.duplicated(keys, keep=False), keys].drop_duplicates()
+        raise ValueError(f"confidence evidence has duplicate merge keys: {duplicates.to_dict(orient='records')}")
+    merged = evidence.merge(confidence_subset, on=keys, how="left", validate="many_to_one")
     missing = merged["momentum_confidence_claim_events"].isna()
     if missing.any():
-        missing_ids = sorted(merged.loc[missing, "matrix_id"].astype(str).unique())
-        raise ValueError(f"confidence evidence is missing matrix_id rows: {missing_ids}")
+        missing_keys = merged.loc[missing, keys].drop_duplicates().to_dict(orient="records")
+        raise ValueError(f"confidence evidence is missing rows for merge keys: {missing_keys}")
     return merged
+
+
+def _merge_confidence_recovery_selection(confidence: pd.DataFrame, selection: pd.DataFrame) -> pd.DataFrame:
+    selection_columns = {
+        "thresholded_binary_accuracy": "momentum_confidence_recovery_thresholded_binary_accuracy",
+        "positive_claim_recall": "momentum_confidence_recovery_positive_claim_recall",
+        "reference_specificity": "momentum_confidence_recovery_reference_specificity",
+        "false_positive_claims": "momentum_confidence_recovery_false_positive_claims",
+        "false_negative_claims": "momentum_confidence_recovery_false_negative_claims",
+        "passes_threshold_gate": "momentum_confidence_recovery_passes_threshold_gate",
+        "selection_status": "momentum_confidence_recovery_selection_status",
+        "threshold_scope": "momentum_confidence_recovery_threshold_scope",
+    }
+    available = {source: target for source, target in selection_columns.items() if source in selection.columns}
+    if not available:
+        return confidence
+    keys = _confidence_merge_keys(confidence, selection)
+    subset = selection[list(dict.fromkeys([*keys, *available]))].rename(columns=available)
+    if not keys:
+        out = confidence.copy()
+        row = subset.iloc[0]
+        for column in subset.columns:
+            out[column] = row[column]
+        return out
+    if subset.duplicated(keys).any():
+        duplicates = subset.loc[subset.duplicated(keys, keep=False), keys].drop_duplicates()
+        raise ValueError(f"confidence threshold selection has duplicate merge keys: {duplicates.to_dict(orient='records')}")
+    return confidence.merge(subset, on=keys, how="left", validate="many_to_one")
+
+
+def _confidence_merge_keys(left: pd.DataFrame, right: pd.DataFrame) -> list[str]:
+    if "matrix_id" in left.columns and "matrix_id" in right.columns:
+        return ["matrix_id"]
+    keys = [column for column in PARAMETER_COLUMNS if column in left.columns and column in right.columns]
+    if keys:
+        left = left.copy()
+        right = right.copy()
+        _normalize_parameter_columns(left)
+        _normalize_parameter_columns(right)
+        return keys
+    if len(right) == 1:
+        return []
+    raise ValueError("calibrated confidence evidence must share matrix_id or parameter columns")
 
 
 def _prepare_evidence(frame: pd.DataFrame) -> pd.DataFrame:
@@ -626,6 +712,7 @@ def _prepare_evidence(frame: pd.DataFrame) -> pd.DataFrame:
             "median_momentum_minus_diffusion_log_evidence",
             "mean_momentum_minus_imm_log_evidence",
             "median_momentum_minus_imm_log_evidence",
+            *CONFIDENCE_RECOVERY_COLUMNS,
         ]
         if col in frame.columns
     ]
@@ -753,6 +840,9 @@ def _aggregate_evidence(frame: pd.DataFrame) -> pd.DataFrame:
         for col in EVIDENCE_MEDIAN_COLUMNS:
             if col in group:
                 row[col] = _median(group[col])
+        for col in CONFIDENCE_RECOVERY_COLUMNS:
+            if col in group:
+                row[col] = _unique_or_first(group[col])
         rows.append(row)
     return pd.DataFrame(rows)
 
@@ -785,6 +875,14 @@ def _aggregate_recovery(frame: pd.DataFrame) -> pd.DataFrame:
 def _join_unique(values: pd.Series) -> str:
     unique = sorted({str(value) for value in values.dropna() if str(value)})
     return ";".join(unique)
+
+
+def _unique_or_first(values: pd.Series) -> object:
+    non_missing = values.dropna()
+    if non_missing.empty:
+        return pd.NA
+    unique = non_missing.unique()
+    return unique[0]
 
 
 def _weighted_average(values: pd.Series, weights: pd.Series | None = None) -> float:
@@ -829,6 +927,12 @@ def _rank_decision_table(frame: pd.DataFrame) -> pd.DataFrame:
         "momentum_recovery_accuracy",
         "overall_recovery_accuracy",
         "diffusion_recovery_accuracy",
+        "momentum_confidence_recovery_passes_threshold_gate",
+        "momentum_confidence_recovery_false_positive_claims",
+        "momentum_confidence_recovery_thresholded_binary_accuracy",
+        "momentum_confidence_recovery_reference_specificity",
+        "momentum_confidence_recovery_positive_claim_recall",
+        "momentum_confidence_recovery_false_negative_claims",
         "momentum_confidence_claim_event_fraction",
         "momentum_beats_diffusion_log5_event_fraction",
         "momentum_beats_diffusion_event_fraction",
@@ -844,6 +948,12 @@ def _rank_decision_table(frame: pd.DataFrame) -> pd.DataFrame:
         "momentum_recovery_accuracy": False,
         "overall_recovery_accuracy": False,
         "diffusion_recovery_accuracy": False,
+        "momentum_confidence_recovery_passes_threshold_gate": False,
+        "momentum_confidence_recovery_false_positive_claims": True,
+        "momentum_confidence_recovery_thresholded_binary_accuracy": False,
+        "momentum_confidence_recovery_reference_specificity": False,
+        "momentum_confidence_recovery_positive_claim_recall": False,
+        "momentum_confidence_recovery_false_negative_claims": True,
         "momentum_confidence_claim_event_fraction": False,
         "momentum_beats_diffusion_log5_event_fraction": False,
         "momentum_beats_diffusion_event_fraction": False,
@@ -852,14 +962,18 @@ def _rank_decision_table(frame: pd.DataFrame) -> pd.DataFrame:
         "failures": True,
     }
     present = [col for col in sort_columns if col in sortable.columns]
+    sort_key_columns: list[str] = []
     for col in present:
+        sort_col = f"__sort_{col}"
+        sort_key_columns.append(sort_col)
         fill_value = float("inf") if ascending_by_column[col] else float("-inf")
-        sortable[col] = sortable[col].fillna(fill_value)
-    return sortable.sort_values(
-        present,
+        sortable[sort_col] = sortable[col].fillna(fill_value)
+    ranked = sortable.sort_values(
+        sort_key_columns,
         ascending=[ascending_by_column[col] for col in present],
         kind="stable",
     )
+    return ranked.drop(columns=sort_key_columns)
 
 
 def _write_selected_parameter_files(recommendation: pd.DataFrame, out_dir: Path) -> None:

@@ -40,6 +40,9 @@ _OBSERVATION_PARAMETER_COLUMNS = (
     "clusterless_mark_variance_floor",
     "clusterless_rate_floor_hz",
 )
+_SUPPORT_PARAMETER_COLUMNS = (
+    "state_space_valid_occupancy_threshold_s",
+)
 _OUTPUT_METADATA_COLUMNS = (
     "n_time",
     "n_spikes",
@@ -51,6 +54,7 @@ _OUTPUT_METADATA_COLUMNS = (
     "spike_rate_scale",
     "emission_likelihood_temperature",
     "emission_negative_binomial_overdispersion",
+    "state_space_valid_occupancy_threshold_s",
     "clusterless_mark_smoothing_sigma_bins",
     "clusterless_mark_prior_count",
     "clusterless_mark_variance_floor",
@@ -230,6 +234,11 @@ def _source_model_from_rows(source: pd.DataFrame, spec: _ModelSpec) -> str:
 
 def _parameter_columns_for_model(source: pd.DataFrame, spec: _ModelSpec, observation_parameters: str) -> tuple[str, ...]:
     cols: list[str] = list(spec.param_cols)
+    for col in _SUPPORT_PARAMETER_COLUMNS:
+        if col not in source.columns:
+            continue
+        if _numeric_values(source[col]).size > 1 and col not in cols:
+            cols.append(col)
     if observation_parameters == "none":
         return tuple(cols)
     for col in _OBSERVATION_PARAMETER_COLUMNS:

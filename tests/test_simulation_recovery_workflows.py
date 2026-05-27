@@ -77,6 +77,11 @@ def test_simulation_recovery_emission_calibration_workflow_defines_rankings():
     assert 'f"tb{slug(time_bin_ms)}-"' in workflow
     assert "TIME_BIN_MS: ${{ matrix.time_bin_ms }}" in workflow
     assert "time_bin_ms" in workflow
+    assert "state_space_valid_occupancy_threshold_s_values:" in workflow
+    assert "VALID_OCCUPANCY_THRESHOLD_VALUES" in workflow
+    assert 'f"occ{slug(valid_occupancy_threshold)}-"' in workflow
+    assert "--state-space-valid-occupancy-threshold-s" in workflow
+    assert "state_space_valid_occupancy_threshold_s" in workflow
     assert "--spike-rate-scale" in workflow
     assert "--emission-likelihood-temperature" in workflow
     assert "--emission-negative-binomial-overdispersion" in workflow

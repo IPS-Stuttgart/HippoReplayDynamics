@@ -254,6 +254,28 @@ def main(argv: list[str] | None = None) -> int:
     recovery_parser.add_argument("--events", default="run")
     recovery_parser.add_argument("--max-template-events", type=int, default=25)
     recovery_parser.add_argument("--events-per-model", type=int, default=25)
+    recovery_parser.add_argument(
+        "--max-synthetic-events",
+        type=int,
+        help="Stop after this many synthetic events across all true models.",
+    )
+    recovery_parser.add_argument(
+        "--max-runtime-s",
+        type=float,
+        help="Stop before starting a new synthetic event after this many elapsed seconds.",
+    )
+    recovery_parser.add_argument(
+        "--checkpoint-output",
+        help=(
+            "Directory for per-event checkpoint outputs. Defaults to --output so "
+            "long recovery jobs leave partial CSVs if cancelled after at least one event."
+        ),
+    )
+    recovery_parser.add_argument(
+        "--progress-log",
+        action="store_true",
+        help="Print one progress line before and after each synthetic event.",
+    )
     recovery_parser.add_argument("--true-models", default=" ".join(DEFAULT_TRUE_MODELS))
     recovery_parser.add_argument("--models", default=" ".join(DEFAULT_SCORING_MODELS))
     recovery_parser.add_argument("--random-seed", type=int, default=1)
@@ -504,6 +526,10 @@ def _simulate_recovery(args: argparse.Namespace) -> int:
         events=args.events,
         max_template_events=args.max_template_events,
         events_per_model=args.events_per_model,
+        max_synthetic_events=args.max_synthetic_events,
+        max_runtime_s=args.max_runtime_s,
+        checkpoint_output=args.checkpoint_output or args.output,
+        progress_log=args.progress_log,
         random_seed=args.random_seed,
         spike_rate_scale=args.spike_rate_scale,
         time_bin_s=args.time_bin_ms / 1000.0,

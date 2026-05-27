@@ -104,6 +104,10 @@ class SimulationRecoveryConfig:
     oracle_candidate_support: bool = False
     continue_on_error: bool = False
     partial_output: str | Path | None = None
+    max_synthetic_events: int | None = None
+    max_runtime_s: float | None = None
+    checkpoint_output: str | Path | None = None
+    progress_log: bool = False
 
 
 @dataclass
@@ -126,8 +130,21 @@ class SimulationRecoveryResult:
             out_dir / "simulation_recovery_certified_vs_exact_summary.csv",
             index=False,
         )
-        from .recovery_diagnostics import build_recovery_diagnostic_tables
-        build_recovery_diagnostic_tables(self.event_scores).write(out_dir)
+        if self.event_scores.empty:
+            pd.DataFrame().to_csv(out_dir / "simulation_recovery_diagnostic_event_table.csv", index=False)
+            pd.DataFrame().to_csv(out_dir / "simulation_recovery_diagnostic_summary.csv", index=False)
+            pd.DataFrame().to_csv(out_dir / "simulation_recovery_certified_vs_exact_events.csv", index=False)
+            (out_dir / "simulation_recovery_diagnostic_report.md").write_text(
+                "# Simulation-recovery diagnostics\n\nNo diagnostic events were available.\n",
+                encoding="utf-8",
+            )
+            (out_dir / "simulation_recovery_diagnostic_manifest.json").write_text(
+                '{"schema_version": 1, "n_input_rows": 0, "n_diagnostic_events": 0}\n',
+                encoding="utf-8",
+            )
+        else:
+            from .recovery_diagnostics import build_recovery_diagnostic_tables
+            build_recovery_diagnostic_tables(self.event_scores).write(out_dir)
         _write_yaml(out_dir / "simulation_recovery_settings.yml", self.settings)
 
 
@@ -287,23 +304,52 @@ def run_session_simulation_recovery(
         int(event_id): _event_n_time(session, int(event_id), config.time_bin_s)
         for event_id in template_event_ids
     }
+
+    _validate_recovery_runtime_limits(config)
+    rows: list[dict[str, object]] = []
+    simulation_event_index = 0
+    true_models = parse_model_list(config.true_models)
+    planned_synthetic_events = len(true_models) * int(config.events_per_model)
+    if config.max_synthetic_events is not None:
+        planned_synthetic_events = min(
+            planned_synthetic_events,
+            int(config.max_synthetic_events),
+        )
+    checkpoint_output = Path(config.checkpoint_output) if config.checkpoint_output is not None else None
     progress = _SimulationRecoveryProgress(
         output=config.partial_output,
-        total_events=len(parse_model_list(config.true_models)) * config.events_per_model,
+        total_events=planned_synthetic_events,
         scoring_model_count=len(scoring_models),
         true_state_space=true_state_space,
         scoring_state_space=config.state_space,
     )
     progress.write_manifest(status="running")
-
-    rows: list[dict[str, object]] = []
-    simulation_event_index = 0
-    true_models = parse_model_list(config.true_models)
+    run_started_at = time.perf_counter()
+    stop_reason = "completed"
+    stop_requested = False
     for true_model in true_models:
         for replicate in range(config.events_per_model):
+            should_stop, reason = _should_stop_recovery_before_event(
+                config,
+                completed_synthetic_events=simulation_event_index,
+                run_started_at=run_started_at,
+            )
+            if should_stop:
+                stop_reason = reason
+                stop_requested = True
+                break
             template_event_id = int(rng.choice(template_event_ids))
             n_time = int(template_lengths[template_event_id])
-            event_start_row = len(rows)
+            rows_before_event = len(rows)
+            event_started_at = time.perf_counter()
+            if config.progress_log:
+                print(
+                    "[simulation-recovery] "
+                    f"event {simulation_event_index + 1}/{planned_synthetic_events} "
+                    f"true_model={true_model} replicate={replicate} "
+                    f"template_event={template_event_id} n_time={n_time}",
+                    flush=True,
+                )
             emissions, path = simulate_replay_event(
                 encoding,
                 true_model=true_model,
@@ -431,22 +477,155 @@ def run_session_simulation_recovery(
                     progress.write_manifest(status="failed" if not config.continue_on_error else "running")
                     if not config.continue_on_error:
                         raise
-            event_rows = rows[event_start_row:]
+            event_rows = rows[rows_before_event:]
             event_failed = any(str(row.get("status")) != "success" for row in event_rows)
             progress.complete_event(rows, failed=event_failed)
             simulation_event_index += 1
+            event_runtime_s = time.perf_counter() - event_started_at
+            if config.progress_log:
+                print(
+                    "[simulation-recovery] "
+                    f"event {simulation_event_index}/{planned_synthetic_events} "
+                    f"done rows={len(rows) - rows_before_event} "
+                    f"event_runtime_s={event_runtime_s:.3f} "
+                    f"elapsed_s={time.perf_counter() - run_started_at:.3f}",
+                    flush=True,
+                )
+            if checkpoint_output is not None:
+                _write_simulation_recovery_checkpoint(
+                    rows,
+                    checkpoint_output,
+                    session,
+                    config,
+                    template_event_ids,
+                    encoding,
+                    true_state_space,
+                    run_started_at=run_started_at,
+                    planned_synthetic_events=planned_synthetic_events,
+                    completed_synthetic_events=simulation_event_index,
+                    stop_reason=stop_reason,
+                    checkpoint_status="running",
+                )
+        if stop_requested:
+            break
 
     progress.write_manifest(status="finalizing")
-    event_scores = _finalize_recovery_event_scores(
+    final_status = "completed" if stop_reason == "completed" else "stopped"
+    result = _build_simulation_recovery_result(
         rows,
-        true_state_space=true_state_space,
-        scoring_state_space=config.state_space,
+        session,
+        config,
+        template_event_ids,
+        encoding,
+        true_state_space,
+        run_started_at=run_started_at,
+        planned_synthetic_events=planned_synthetic_events,
+        completed_synthetic_events=simulation_event_index,
+        stop_reason=stop_reason,
+        checkpoint_status=final_status,
     )
-    confusion = confusion_matrix(event_scores, config.scoring_models)
-    summary = recovery_summary(event_scores)
-    certified_vs_exact = certified_vs_exact_recovery_summary(event_scores)
+    progress.write_manifest(status=final_status)
+    return result
+
+
+def _validate_recovery_runtime_limits(config: SimulationRecoveryConfig) -> None:
+    if config.max_synthetic_events is not None and int(config.max_synthetic_events) <= 0:
+        raise ValueError("max_synthetic_events must be positive when set")
+    if config.max_runtime_s is not None and float(config.max_runtime_s) <= 0.0:
+        raise ValueError("max_runtime_s must be positive when set")
+
+
+def _should_stop_recovery_before_event(
+    config: SimulationRecoveryConfig,
+    *,
+    completed_synthetic_events: int,
+    run_started_at: float,
+) -> tuple[bool, str]:
+    if (
+        config.max_synthetic_events is not None
+        and int(completed_synthetic_events) >= int(config.max_synthetic_events)
+    ):
+        return True, "max_synthetic_events"
+    if (
+        config.max_runtime_s is not None
+        and time.perf_counter() - run_started_at >= float(config.max_runtime_s)
+    ):
+        return True, "max_runtime_s"
+    return False, ""
+
+
+def _write_simulation_recovery_checkpoint(
+    rows: list[dict[str, object]],
+    output: str | Path,
+    session: ReplaySession,
+    config: SimulationRecoveryConfig,
+    template_event_ids: list[int],
+    encoding: EncodingModel,
+    true_state_space: StateSpaceDecoderConfig,
+    *,
+    run_started_at: float,
+    planned_synthetic_events: int,
+    completed_synthetic_events: int,
+    stop_reason: str,
+    checkpoint_status: str,
+) -> None:
+    result = _build_simulation_recovery_result(
+        rows,
+        session,
+        config,
+        template_event_ids,
+        encoding,
+        true_state_space,
+        run_started_at=run_started_at,
+        planned_synthetic_events=planned_synthetic_events,
+        completed_synthetic_events=completed_synthetic_events,
+        stop_reason=stop_reason,
+        checkpoint_status=checkpoint_status,
+    )
+    result.write(output)
+
+
+def _build_simulation_recovery_result(
+    rows: list[dict[str, object]],
+    session: ReplaySession,
+    config: SimulationRecoveryConfig,
+    template_event_ids: list[int],
+    encoding: EncodingModel,
+    true_state_space: StateSpaceDecoderConfig,
+    *,
+    run_started_at: float,
+    planned_synthetic_events: int,
+    completed_synthetic_events: int,
+    stop_reason: str,
+    checkpoint_status: str,
+) -> SimulationRecoveryResult:
+    event_scores = pd.DataFrame(rows)
+    if event_scores.empty:
+        event_scores = pd.DataFrame(columns=["status"])
+    for key, value in _state_space_parameter_row("true", true_state_space).items():
+        event_scores[key] = value
+    for key, value in _state_space_parameter_row("scoring", config.state_space).items():
+        event_scores[key] = value
+    event_scores = add_evidence_columns(event_scores)
+    if event_scores.empty:
+        confusion = pd.DataFrame()
+        summary = pd.DataFrame()
+        certified_vs_exact = pd.DataFrame()
+    else:
+        confusion = confusion_matrix(event_scores, config.scoring_models)
+        summary = recovery_summary(event_scores)
+        certified_vs_exact = certified_vs_exact_recovery_summary(event_scores)
     settings = _settings(session, config, template_event_ids, encoding)
-    progress.write_manifest(status="complete")
+    settings.update(
+        _simulation_recovery_checkpoint_metadata(
+            config,
+            run_started_at=run_started_at,
+            planned_synthetic_events=planned_synthetic_events,
+            completed_synthetic_events=completed_synthetic_events,
+            stop_reason=stop_reason,
+            checkpoint_status=checkpoint_status,
+        )
+    )
     return SimulationRecoveryResult(
         event_scores=event_scores,
         confusion_matrix=confusion,
@@ -454,6 +633,28 @@ def run_session_simulation_recovery(
         settings=settings,
         certified_vs_exact_summary=certified_vs_exact,
     )
+
+
+def _simulation_recovery_checkpoint_metadata(
+    config: SimulationRecoveryConfig,
+    *,
+    run_started_at: float,
+    planned_synthetic_events: int,
+    completed_synthetic_events: int,
+    stop_reason: str,
+    checkpoint_status: str,
+) -> dict[str, object]:
+    return {
+        "checkpoint_status": checkpoint_status,
+        "checkpoint_stop_reason": stop_reason,
+        "checkpoint_completed_synthetic_events": int(completed_synthetic_events),
+        "checkpoint_planned_synthetic_events": int(planned_synthetic_events),
+        "checkpoint_elapsed_s": float(time.perf_counter() - run_started_at),
+        "max_synthetic_events": (
+            None if config.max_synthetic_events is None else int(config.max_synthetic_events)
+        ),
+        "max_runtime_s": None if config.max_runtime_s is None else float(config.max_runtime_s),
+    }
 
 
 def simulate_replay_event(
@@ -1408,6 +1609,10 @@ def _settings(
         "mode_stickiness": config.mode_stickiness,
         "score_with_occupancy": bool(config.score_with_occupancy),
         "oracle_candidate_support": bool(config.oracle_candidate_support),
+        "max_synthetic_events": config.max_synthetic_events,
+        "max_runtime_s": config.max_runtime_s,
+        "checkpoint_output": "" if config.checkpoint_output is None else str(config.checkpoint_output),
+        "progress_log": bool(config.progress_log),
         "n_position_bins": encoding.n_bins,
         "n_cells": encoding.n_cells,
         "observation_model": "sorted-spike-poisson",

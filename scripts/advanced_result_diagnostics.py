@@ -17,6 +17,8 @@ from hipporeplayimm.advanced_result_diagnostics import (
     hierarchical_summary,
     leave_one_group_influence,
     model_disagreement_events,
+    paired_model_margin_decisions,
+    paired_model_margin_summary,
     provenance_audit,
     wrong_map_delta_summary,
     write_dashboard,
@@ -38,6 +40,16 @@ def main() -> int:
     parser.add_argument("--selection-passed-recovery-gate", choices=["true", "false", "unknown"], default="unknown")
     parser.add_argument("--selection-used-real-evidence", choices=["true", "false", "unknown"], default="unknown")
     parser.add_argument("--notes", default="")
+    parser.add_argument("--paired-positive-model", default="", help="Optional model to test as a margin-gated positive claim.")
+    parser.add_argument("--paired-reference-model", default="", help="Optional reference model for paired margin-gated decisions.")
+    parser.add_argument("--paired-margin-threshold", type=float, default=0.0)
+    parser.add_argument(
+        "--paired-group-cols",
+        default="session,event_index",
+        help="Comma-separated columns defining one paired decision row.",
+    )
+    parser.add_argument("--paired-true-model-column", default="")
+    parser.add_argument("--paired-positive-true-label", default="")
     args = parser.parse_args()
 
     scores = pd.read_csv(args.scores)
@@ -63,6 +75,23 @@ def main() -> int:
     hierarchical_summary(scores).to_csv(out / "hierarchical_summary.csv", index=False)
     model_disagreement_events(scores).to_csv(out / "model_disagreement_events.csv", index=False)
     provenance_audit(scores, provenance).to_csv(out / "provenance_audit.csv", index=False)
+
+    if args.paired_positive_model and args.paired_reference_model:
+        paired_group_cols = tuple(col.strip() for col in args.paired_group_cols.split(",") if col.strip())
+        paired_decisions = paired_model_margin_decisions(
+            scores,
+            positive_model=args.paired_positive_model,
+            reference_model=args.paired_reference_model,
+            margin_threshold=args.paired_margin_threshold,
+            group_cols=paired_group_cols,
+            true_model_col=args.paired_true_model_column or None,
+            positive_true_label=args.paired_positive_true_label or None,
+        )
+        paired_decisions.to_csv(out / "paired_model_margin_decisions.csv", index=False)
+        paired_model_margin_summary(
+            paired_decisions,
+            true_model_col=args.paired_true_model_column or None,
+        ).to_csv(out / "paired_model_margin_summary.csv", index=False)
 
     if "session" in scores.columns:
         leave_one_group_influence(scores, group_col="session").to_csv(out / "leave_one_session_influence.csv", index=False)

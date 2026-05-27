@@ -161,6 +161,188 @@ def add_evidence_margin_columns(
     return scores.merge(margins, on=list(group_cols), how="left")
 
 
+def paired_model_margin_decisions(
+    scores: pd.DataFrame,
+    *,
+    positive_model: str,
+    reference_model: str,
+    margin_threshold: float = 0.0,
+    group_cols: Sequence[str] = ("session", "event_index"),
+    evidence_col: str = "log_evidence",
+    model_col: str = "model",
+    true_model_col: str | None = None,
+    positive_true_label: str | None = None,
+) -> pd.DataFrame:
+    """Classify paired model wins using a symmetric log-evidence margin.
+
+    A positive-model claim is emitted only when
+    ``logZ(positive_model) - logZ(reference_model) >= margin_threshold``.
+    Reference claims use the symmetric negative threshold; rows between the
+    two thresholds are intentionally labelled ``ambiguous``.  When a true-model
+    label is present, the table also marks whether the margin-gated binary
+    claim matches the positive-vs-reference synthetic family.
+    """
+
+    threshold = float(margin_threshold)
+    if threshold < 0.0:
+        raise ValueError("margin_threshold must be non-negative")
+    ok = _comparable_rows(scores)
+    columns = [
+        *group_cols,
+        "positive_model",
+        "reference_model",
+        "positive_log_evidence",
+        "reference_log_evidence",
+        "positive_minus_reference_log_evidence",
+        "margin_threshold",
+        "margin_decision",
+        "positive_model_claimed",
+    ]
+    if true_model_col:
+        columns.extend(
+            [
+                true_model_col,
+                "positive_true_label",
+                "true_is_positive",
+                "margin_binary_correct",
+            ]
+        )
+    if ok.empty:
+        return pd.DataFrame(columns=columns)
+    missing = [column for column in (*group_cols, evidence_col, model_col) if column not in ok.columns]
+    if true_model_col and true_model_col not in ok.columns:
+        missing.append(true_model_col)
+    if missing:
+        raise KeyError(f"scores is missing required columns: {missing}")
+
+    positive_label = positive_true_label or _model_family_label(positive_model)
+    rows: list[dict[str, object]] = []
+    for key, group in ok.groupby(list(group_cols), sort=False):
+        key_tuple = key if isinstance(key, tuple) else (key,)
+        paired = group[group[model_col].astype(str).isin([positive_model, reference_model])]
+        pivot = paired.dropna(subset=[evidence_col]).drop_duplicates(model_col, keep="last")
+        by_model = pivot.set_index(model_col)
+        if positive_model not in by_model.index or reference_model not in by_model.index:
+            continue
+        positive_value = float(by_model.loc[positive_model, evidence_col])
+        reference_value = float(by_model.loc[reference_model, evidence_col])
+        delta = positive_value - reference_value
+        if delta >= threshold:
+            decision = positive_model
+            positive_claimed = True
+        elif delta <= -threshold:
+            decision = reference_model
+            positive_claimed = False
+        else:
+            decision = "ambiguous"
+            positive_claimed = False
+        row = {column: value for column, value in zip(group_cols, key_tuple, strict=True)}
+        row.update(
+            {
+                "positive_model": positive_model,
+                "reference_model": reference_model,
+                "positive_log_evidence": positive_value,
+                "reference_log_evidence": reference_value,
+                "positive_minus_reference_log_evidence": float(delta),
+                "margin_threshold": threshold,
+                "margin_decision": decision,
+                "positive_model_claimed": bool(positive_claimed),
+            }
+        )
+        if true_model_col:
+            true_label = _unique_text_value(group[true_model_col])
+            true_is_positive = _model_family_label(true_label) == _model_family_label(positive_label)
+            row.update(
+                {
+                    true_model_col: true_label,
+                    "positive_true_label": positive_label,
+                    "true_is_positive": bool(true_is_positive),
+                    "margin_binary_correct": bool(positive_claimed) == bool(true_is_positive),
+                }
+            )
+        rows.append(row)
+    return pd.DataFrame(rows, columns=columns)
+
+
+def paired_model_margin_summary(
+    decisions: pd.DataFrame,
+    *,
+    true_model_col: str | None = None,
+) -> pd.DataFrame:
+    """Summarize a paired margin-decision table."""
+
+    if decisions.empty:
+        return pd.DataFrame(
+            [
+                {
+                    "events": 0,
+                    "positive_model_claims": 0,
+                    "reference_model_claims": 0,
+                    "ambiguous_events": 0,
+                    "positive_claim_fraction": np.nan,
+                    "mean_positive_minus_reference_log_evidence": np.nan,
+                    "median_positive_minus_reference_log_evidence": np.nan,
+                }
+            ]
+        )
+    out: dict[str, object] = {
+        "events": int(len(decisions)),
+        "positive_model": str(decisions["positive_model"].dropna().iloc[0]),
+        "reference_model": str(decisions["reference_model"].dropna().iloc[0]),
+        "margin_threshold": float(decisions["margin_threshold"].dropna().iloc[0]),
+        "positive_model_claims": int(decisions["positive_model_claimed"].fillna(False).astype(bool).sum()),
+        "reference_model_claims": int((decisions["margin_decision"] == decisions["reference_model"]).sum()),
+        "ambiguous_events": int((decisions["margin_decision"] == "ambiguous").sum()),
+        "positive_claim_fraction": float(decisions["positive_model_claimed"].fillna(False).astype(bool).mean()),
+        "mean_positive_minus_reference_log_evidence": float(
+            decisions["positive_minus_reference_log_evidence"].mean()
+        ),
+        "median_positive_minus_reference_log_evidence": float(
+            decisions["positive_minus_reference_log_evidence"].median()
+        ),
+    }
+    if true_model_col and true_model_col in decisions:
+        correct = decisions["margin_binary_correct"].fillna(False).astype(bool)
+        true_positive = decisions["true_is_positive"].fillna(False).astype(bool)
+        claims = decisions["positive_model_claimed"].fillna(False).astype(bool)
+        out.update(
+            {
+                "thresholded_binary_accuracy": float(correct.mean()),
+                "positive_true_events": int(true_positive.sum()),
+                "reference_true_events": int((~true_positive).sum()),
+                "positive_true_claimed_events": int((claims & true_positive).sum()),
+                "reference_true_rejected_events": int((~claims & ~true_positive).sum()),
+                "positive_claim_recall": _safe_ratio(int((claims & true_positive).sum()), int(true_positive.sum())),
+                "reference_specificity": _safe_ratio(int((~claims & ~true_positive).sum()), int((~true_positive).sum())),
+                "false_positive_claims": int((claims & ~true_positive).sum()),
+                "false_negative_claims": int((~claims & true_positive).sum()),
+            }
+        )
+    return pd.DataFrame([out])
+
+
+def _unique_text_value(values: pd.Series) -> str:
+    unique = [str(value) for value in values.dropna().unique()]
+    if not unique:
+        return ""
+    return unique[0]
+
+
+def _model_family_label(value: str) -> str:
+    text = str(value).lower()
+    if "momentum" in text:
+        return "momentum"
+    if "diffusion" in text:
+        return "diffusion"
+    return text
+
+
+def _safe_ratio(numerator: int, denominator: int) -> float:
+    if denominator <= 0:
+        return float("nan")
+    return float(numerator / denominator)
+
+
 def wrong_map_delta_summary(
     current_map_scores: pd.DataFrame,
     wrong_map_scores: pd.DataFrame,

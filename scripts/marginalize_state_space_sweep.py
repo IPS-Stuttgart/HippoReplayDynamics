@@ -22,7 +22,7 @@ import pandas as pd
 from scipy.special import logsumexp
 
 from benchmark_model_evidence import _add_evidence_columns, _counts, _summary
-from hipporeplayimm.evidence_reporting import TRUNCATED_EVIDENCE_SUPPORT
+from hipporeplayimm.evidence_reporting import EXACT_EVIDENCE_SUPPORT, TRUNCATED_EVIDENCE_SUPPORT
 from hipporeplayimm.kd_reference import empirical_grid_prior
 
 _EVENT_KEY = ["session", "event_index"]
@@ -58,6 +58,7 @@ _OPTIONAL_MOMENTUM_PARAMETER_DEFAULTS = {
     "state_space_momentum_predicted_candidate_top_k": 8,
     "state_space_momentum_candidate_source": "emission",
 }
+_EXACT_SPARSE_MOMENTUM_MODEL = "sorted-spike-state-space-momentum-exact-sparse"
 
 
 @dataclass(frozen=True)
@@ -110,11 +111,12 @@ def marginalize_sweep(
     for model in models:
         spec = _MODEL_SPECS[_canonical_model(model)]
         grid, event_table, param_values, source = _grid_for_model(scores, spec, observation_parameters=observation_parameters)
+        source_model = _source_model_from_rows(source, spec)
         weights, prior_kind = _prior_for_grid(grid, spec, param_values, prior)
         marginalized = logsumexp(grid + np.log(np.maximum(weights, np.finfo(float).tiny))[None, ...], axis=tuple(range(1, grid.ndim)))
-        rows.extend(_marginalized_rows(spec, event_table, source, param_values, marginalized, prior_kind))
-        best_rows.extend(_best_parameter_rows(spec, event_table, grid, param_values))
-        prior_rows.extend(_prior_rows(spec, param_values, weights, prior_kind))
+        rows.extend(_marginalized_rows(spec, event_table, source, param_values, marginalized, prior_kind, source_model))
+        best_rows.extend(_best_parameter_rows(spec, event_table, grid, param_values, source_model))
+        prior_rows.extend(_prior_rows(spec, param_values, weights, prior_kind, source_model))
 
     outdir = Path(output)
     outdir.mkdir(parents=True, exist_ok=True)
@@ -164,11 +166,8 @@ def _grid_for_model(
     missing_base = [col for col in (*_EVENT_KEY, "model", "log_evidence", *spec.param_cols) if col not in scores.columns]
     if missing_base:
         raise ValueError(f"sweep scores are missing columns needed for {spec.short_name}: {missing_base}")
-    source = scores[scores["model"] == spec.source_model].copy()
-    if "status" in source.columns:
-        source = source[source["status"] == "success"].copy()
-    if source.empty:
-        raise ValueError(f"no successful rows for {spec.source_model}")
+    source = _source_rows_for_model(scores, spec)
+    source_model = _source_model_from_rows(source, spec)
 
     param_cols = _parameter_columns_for_model(source, spec, observation_parameters)
     missing = [col for col in param_cols if col not in source.columns]
@@ -198,7 +197,31 @@ def _grid_for_model(
     missing_count = int(np.isnan(grid).sum())
     if missing_count:
         raise ValueError(f"{spec.source_model} grid has {missing_count} missing event/parameter scores")
-    return grid, event_table, param_values, _event_representatives(grouped, event_table)
+    representatives = _event_representatives(grouped, event_table)
+    representatives["model"] = source_model
+    return grid, event_table, param_values, representatives
+
+
+def _source_rows_for_model(scores: pd.DataFrame, spec: _ModelSpec) -> pd.DataFrame:
+    for source_model in _source_model_candidates(spec):
+        source = scores[scores["model"] == source_model].copy()
+        if "status" in source.columns:
+            source = source[source["status"] == "success"].copy()
+        if not source.empty:
+            return source
+    raise ValueError(f"no successful rows for any of: {', '.join(_source_model_candidates(spec))}")
+
+
+def _source_model_candidates(spec: _ModelSpec) -> tuple[str, ...]:
+    if spec.short_name == "momentum":
+        return (_EXACT_SPARSE_MOMENTUM_MODEL, spec.source_model)
+    return (spec.source_model,)
+
+
+def _source_model_from_rows(source: pd.DataFrame, spec: _ModelSpec) -> str:
+    if "model" not in source or source.empty:
+        return spec.source_model
+    return str(source["model"].iloc[0])
 
 
 def _parameter_columns_for_model(source: pd.DataFrame, spec: _ModelSpec, observation_parameters: str) -> tuple[str, ...]:
@@ -383,6 +406,7 @@ def _marginalized_rows(
     param_values: dict[str, np.ndarray],
     marginalized: np.ndarray,
     prior_kind: str,
+    source_model: str,
 ) -> list[dict[str, object]]:
     rows: list[dict[str, object]] = []
     param_cols = tuple(param_values)
@@ -392,7 +416,7 @@ def _marginalized_rows(
     grid_description = ";".join(f"{col}={','.join(_format_parameter_value(value) for value in values)}" for col, values in param_values.items())
     for row_index, event in event_table.iterrows():
         representative = source.iloc[row_index]
-        source_support = TRUNCATED_EVIDENCE_SUPPORT if spec.short_name == "momentum" else "exact_full_grid"
+        source_support = _source_evidence_support(spec, source_model)
         row: dict[str, object] = {
             "status": "success",
             "session": event["session"],
@@ -402,7 +426,7 @@ def _marginalized_rows(
             "model_family": "trajectory",
             "log_evidence": float(marginalized[row_index]),
             "error": "",
-            "diagnostic_state_space_marginalized_source_model": spec.source_model,
+            "diagnostic_state_space_marginalized_source_model": source_model,
             "diagnostic_state_space_marginalization_prior": prior_kind,
             "diagnostic_state_space_marginalization_grid_points": grid_points,
             "diagnostic_state_space_marginalized_dynamics_parameters": " ".join(dynamics_cols),
@@ -411,10 +435,13 @@ def _marginalized_rows(
             "diagnostic_state_space_marginalized_source_evidence_support": source_support,
         }
         if spec.short_name == "momentum":
-            # The source sorted-spike state-space momentum implementation uses
-            # candidate-pruned second-order recursions, so its marginalized row
-            # remains a truncated full-grid lower bound rather than exact evidence.
-            row["diagnostic_state_space_momentum_evidence_support"] = TRUNCATED_EVIDENCE_SUPPORT
+            if source_support == TRUNCATED_EVIDENCE_SUPPORT:
+                # The legacy sorted-spike state-space momentum implementation uses
+                # candidate-pruned second-order recursions, so its marginalized row
+                # remains a truncated full-grid lower bound rather than exact evidence.
+                row["diagnostic_state_space_momentum_evidence_support"] = TRUNCATED_EVIDENCE_SUPPORT
+            else:
+                row["diagnostic_state_space_sparse_momentum_evidence_support"] = EXACT_EVIDENCE_SUPPORT
         for col in _OUTPUT_METADATA_COLUMNS:
             if col not in source.columns:
                 continue
@@ -429,7 +456,19 @@ def _marginalized_rows(
     return rows
 
 
-def _best_parameter_rows(spec: _ModelSpec, event_table: pd.DataFrame, grid: np.ndarray, param_values: dict[str, np.ndarray]) -> list[dict[str, object]]:
+def _source_evidence_support(spec: _ModelSpec, source_model: str) -> str:
+    if spec.short_name == "momentum" and source_model != _EXACT_SPARSE_MOMENTUM_MODEL:
+        return TRUNCATED_EVIDENCE_SUPPORT
+    return EXACT_EVIDENCE_SUPPORT
+
+
+def _best_parameter_rows(
+    spec: _ModelSpec,
+    event_table: pd.DataFrame,
+    grid: np.ndarray,
+    param_values: dict[str, np.ndarray],
+    source_model: str,
+) -> list[dict[str, object]]:
     rows: list[dict[str, object]] = []
     param_cols = list(param_values)
     for event_row, event in event_table.iterrows():
@@ -438,7 +477,7 @@ def _best_parameter_rows(spec: _ModelSpec, event_table: pd.DataFrame, grid: np.n
         row: dict[str, object] = {
             "session": event["session"],
             "event_index": int(event["event_index"]),
-            "source_model": spec.source_model,
+            "source_model": source_model,
             "marginalized_model": spec.output_model,
             "best_log_evidence": float(grid[(event_row, *indices)]),
         }
@@ -448,12 +487,18 @@ def _best_parameter_rows(spec: _ModelSpec, event_table: pd.DataFrame, grid: np.n
     return rows
 
 
-def _prior_rows(spec: _ModelSpec, param_values: dict[str, np.ndarray], prior: np.ndarray, prior_kind: str) -> list[dict[str, object]]:
+def _prior_rows(
+    spec: _ModelSpec,
+    param_values: dict[str, np.ndarray],
+    prior: np.ndarray,
+    prior_kind: str,
+    source_model: str,
+) -> list[dict[str, object]]:
     rows: list[dict[str, object]] = []
     value_lists = [values.tolist() for values in param_values.values()]
     for indices in itertools.product(*(range(len(values)) for values in value_lists)):
         row: dict[str, object] = {
-            "source_model": spec.source_model,
+            "source_model": source_model,
             "marginalized_model": spec.output_model,
             "prior": prior_kind,
             "prior_weight": float(prior[indices]),

@@ -127,6 +127,154 @@ def test_select_parameters_prefers_recovered_momentum_config(tmp_path):
     assert "--state-space-momentum-predicted-candidate-top-k 8" in cli_args
 
 
+def test_select_parameters_prefers_confident_momentum_wins(tmp_path):
+    evidence = tmp_path / "evidence"
+    recovery = tmp_path / "recovery"
+    output = tmp_path / "selection"
+    raw_win_only = _params(85.0, 85.0, 85.0, 0.95, 128)
+    confident_win = _params(60.0, 85.0, 85.0, 0.95, 128)
+    _write(
+        evidence,
+        "state_space_evidence_sweep_config_ranked.csv",
+        [
+            {
+                **raw_win_only,
+                "matrix_id": "evidence-raw",
+                "events": 10,
+                "momentum_beats_diffusion_events": 10,
+                "momentum_beats_diffusion_log5_events": 2,
+                "median_momentum_minus_diffusion_log_evidence": 1.0,
+                "mean_momentum_minus_diffusion_log_evidence": 1.5,
+            },
+            {
+                **confident_win,
+                "matrix_id": "evidence-confident",
+                "events": 10,
+                "momentum_beats_diffusion_events": 7,
+                "momentum_beats_diffusion_log5_events": 6,
+                "median_momentum_minus_diffusion_log_evidence": 5.0,
+                "mean_momentum_minus_diffusion_log_evidence": 6.0,
+            },
+        ],
+    )
+    _write(
+        recovery,
+        "simulation_recovery_sweep_config_ranked.csv",
+        [
+            {
+                **raw_win_only,
+                "matrix_id": "recovery-raw",
+                "failures": 0,
+                "overall_recovery_accuracy": 1.0,
+                "momentum_recovery_accuracy": 1.0,
+                "diffusion_recovery_accuracy": 1.0,
+            },
+            {
+                **confident_win,
+                "matrix_id": "recovery-confident",
+                "failures": 0,
+                "overall_recovery_accuracy": 1.0,
+                "momentum_recovery_accuracy": 1.0,
+                "diffusion_recovery_accuracy": 1.0,
+            },
+        ],
+    )
+
+    tables = select_parameters(
+        evidence,
+        recovery,
+        output=output,
+        force_strict_recovery_gate=True,
+    )
+
+    recommendation = tables["recommendation"].iloc[0]
+    assert recommendation["evidence_matrix_id"] == "evidence-confident"
+    assert recommendation["momentum_beats_diffusion_log5_event_fraction"] == 0.6
+    assert recommendation["momentum_beats_diffusion_event_fraction"] == 0.7
+
+
+def test_select_parameters_keeps_observation_calibration_dimensions_separate(tmp_path):
+    evidence = tmp_path / "evidence"
+    recovery = tmp_path / "recovery"
+    output = tmp_path / "selection"
+    params = _params(60.0, 60.0, 85.0, 0.95, 128, predicted_top_k=0)
+    common = {
+        **params,
+        "state_space_max_step_sigma": 3.0,
+        "state_space_valid_occupancy_threshold_s": 0.0,
+        "spike_rate_scale": 2.0,
+        "emission_negative_binomial_overdispersion": 0.0,
+    }
+    evidence_common = {**common, "time_bin_s": 0.004}
+    recovery_common = {**common, "time_bin_ms": 4.0}
+    _write(
+        evidence,
+        "state_space_evidence_sweep_config_ranked.csv",
+        [
+            {
+                **evidence_common,
+                "matrix_id": "evidence-temp0375",
+                "events": 10,
+                "momentum_beats_diffusion_events": 9,
+                "momentum_beats_diffusion_log5_events": 7,
+                "median_momentum_minus_diffusion_log_evidence": 8.0,
+                "mean_momentum_minus_diffusion_log_evidence": 20.0,
+                "emission_likelihood_temperature": 0.375,
+            },
+            {
+                **evidence_common,
+                "matrix_id": "evidence-temp0425",
+                "events": 10,
+                "momentum_beats_diffusion_events": 8,
+                "momentum_beats_diffusion_log5_events": 5,
+                "median_momentum_minus_diffusion_log_evidence": 7.0,
+                "mean_momentum_minus_diffusion_log_evidence": 18.0,
+                "emission_likelihood_temperature": 0.425,
+            },
+        ],
+    )
+    _write(
+        recovery,
+        "simulation_recovery_sweep_config_ranked.csv",
+        [
+            {
+                **recovery_common,
+                "matrix_id": "recovery-temp0375",
+                "failures": 0,
+                "overall_recovery_accuracy": 0.875,
+                "momentum_recovery_accuracy": 1.0,
+                "diffusion_recovery_accuracy": 0.75,
+                "momentum_most_common_best_model": "sorted-spike-state-space-momentum-exact-sparse",
+                "emission_likelihood_temperature": 0.375,
+            },
+            {
+                **recovery_common,
+                "matrix_id": "recovery-temp0425",
+                "failures": 0,
+                "overall_recovery_accuracy": 0.875,
+                "momentum_recovery_accuracy": 1.0,
+                "diffusion_recovery_accuracy": 0.75,
+                "momentum_most_common_best_model": "sorted-spike-state-space-momentum-exact-sparse",
+                "emission_likelihood_temperature": 0.425,
+            },
+        ],
+    )
+
+    tables = select_parameters(evidence, recovery, output=output)
+
+    assert len(tables["decision"]) == 2
+    recommendation = tables["recommendation"].iloc[0]
+    assert recommendation["evidence_matrix_id"] == "evidence-temp0375"
+    assert recommendation["recovery_matrix_id"] == "recovery-temp0375"
+    assert recommendation["emission_likelihood_temperature"] == 0.375
+    assert recommendation["momentum_beats_diffusion_log5_event_fraction"] == 0.7
+    assert bool(recommendation["passes_recovery_gate"])
+    assert not bool(recommendation["uses_candidate_pruned_momentum"])
+    workflow_inputs = (output / "state_space_selected_workflow_inputs.yml").read_text(encoding="utf-8")
+    assert "emission_likelihood_temperature: 0.375" in workflow_inputs
+    assert "time_bin_s: 0.004" in workflow_inputs
+
+
 def test_select_parameters_matches_predicted_candidate_support_dimension(tmp_path):
     evidence = tmp_path / "evidence"
     recovery = tmp_path / "recovery"

@@ -533,8 +533,17 @@ jobs:
           diffusion_col = "sorted-spike-state-space-diffusion"
           imm_col = "sorted-spike-state-space-imm"
           if momentum_col in pivot and diffusion_col in pivot:
+              MOMENTUM_CONFIDENT_LOG_EVIDENCE_THRESHOLD = 5.0
               pivot["momentum_minus_diffusion_log_evidence"] = pivot[momentum_col] - pivot[diffusion_col]
               pivot["momentum_beats_diffusion"] = pivot["momentum_minus_diffusion_log_evidence"] > 0.0
+              pivot["momentum_beats_diffusion_log5"] = (
+                  pivot["momentum_minus_diffusion_log_evidence"]
+                  >= MOMENTUM_CONFIDENT_LOG_EVIDENCE_THRESHOLD
+              )
+              pivot["momentum_ambiguous_vs_diffusion_log5"] = (
+                  pivot["momentum_minus_diffusion_log_evidence"].abs()
+                  < MOMENTUM_CONFIDENT_LOG_EVIDENCE_THRESHOLD
+              )
           if momentum_col in pivot and imm_col in pivot:
               pivot["momentum_minus_imm_log_evidence"] = pivot[momentum_col] - pivot[imm_col]
               pivot["momentum_beats_imm"] = pivot["momentum_minus_imm_log_evidence"] > 0.0
@@ -547,6 +556,9 @@ jobs:
                   row["mean_momentum_minus_diffusion_log_evidence"] = float(group["momentum_minus_diffusion_log_evidence"].mean())
                   row["median_momentum_minus_diffusion_log_evidence"] = float(group["momentum_minus_diffusion_log_evidence"].median())
                   row["momentum_beats_diffusion_events"] = int(group["momentum_beats_diffusion"].sum())
+                  row["momentum_beats_diffusion_log5_events"] = int(group["momentum_beats_diffusion_log5"].sum())
+                  row["momentum_beats_diffusion_log5_event_fraction"] = float(group["momentum_beats_diffusion_log5"].mean())
+                  row["momentum_ambiguous_vs_diffusion_log5_events"] = int(group["momentum_ambiguous_vs_diffusion_log5"].sum())
               if "momentum_minus_imm_log_evidence" in group:
                   row["mean_momentum_minus_imm_log_evidence"] = float(group["momentum_minus_imm_log_evidence"].mean())
                   row["median_momentum_minus_imm_log_evidence"] = float(group["momentum_minus_imm_log_evidence"].median())
@@ -556,6 +568,7 @@ jobs:
           completeness_path = out_dir / "state_space_evidence_sweep_matrix_completeness.csv"
           comparison = merge_completeness(comparison, completeness_path)
           sort_cols = [
+              "momentum_beats_diffusion_log5_events",
               "momentum_beats_diffusion_events",
               "median_momentum_minus_diffusion_log_evidence",
               "mean_momentum_minus_diffusion_log_evidence",

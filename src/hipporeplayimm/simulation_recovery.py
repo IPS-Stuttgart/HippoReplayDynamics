@@ -1029,7 +1029,6 @@ def certified_vs_exact_event_recovery(event_scores: pd.DataFrame) -> pd.DataFram
             )
             continue
 
-        expected_rows = scored[scored["model"].astype(str) == expected_model]
         comparable_mask = _comparable_mask(scored)
         comparable_rows = scored.loc[comparable_mask].copy()
         best_comparable_model = ""
@@ -1039,12 +1038,18 @@ def certified_vs_exact_event_recovery(event_scores: pd.DataFrame) -> pd.DataFram
             best_comparable_model = str(best_comparable["model"])
             best_comparable_log_evidence = float(best_comparable["log_evidence"])
 
-        if expected_rows.empty:
+        acceptable_models = _event_acceptable_recovery_models(group)
+        acceptable_rows = scored[
+            scored["model"].astype(str).isin(acceptable_models)
+        ].copy()
+        expected_rows = scored[scored["model"].astype(str) == expected_model]
+        if acceptable_rows.empty:
             rows.append(
                 {
                     **base,
                     "certified_vs_exact_recovered_expected_model": False,
                     "certified_vs_exact_reason": "expected_model_not_scored",
+                    "certified_reference_model": "",
                     "expected_model_log_evidence": np.nan,
                     "expected_model_evidence_support": "",
                     "expected_model_evidence_comparable": False,
@@ -1055,7 +1060,14 @@ def certified_vs_exact_event_recovery(event_scores: pd.DataFrame) -> pd.DataFram
             )
             continue
 
-        expected = _best_log_evidence_row(expected_rows)
+        if best_comparable_model in acceptable_models:
+            expected = scored[scored["model"].astype(str) == best_comparable_model].iloc[0]
+        elif not expected_rows.empty:
+            expected = _best_log_evidence_row(expected_rows)
+        else:
+            expected = _best_log_evidence_row(acceptable_rows)
+
+        certified_reference_model = str(expected["model"])
         expected_log_evidence = float(expected["log_evidence"])
         expected_support = str(expected.get("evidence_support", ""))
         raw_expected_comparable = expected.get(
@@ -1069,12 +1081,19 @@ def certified_vs_exact_event_recovery(event_scores: pd.DataFrame) -> pd.DataFram
         )
         margin = expected_log_evidence - best_comparable_log_evidence
 
-        if expected_comparable:
-            recovered = best_comparable_model == expected_model
+        if best_comparable_model in acceptable_models:
+            recovered = True
             reason = (
                 "expected_comparable_best"
-                if recovered
-                else "expected_comparable_not_best"
+                if best_comparable_model == expected_model
+                else "exact_surrogate_comparable_best"
+            )
+        elif expected_comparable:
+            recovered = False
+            reason = (
+                "expected_comparable_not_best"
+                if certified_reference_model == expected_model
+                else "exact_surrogate_comparable_not_best"
             )
         elif not np.isfinite(best_comparable_log_evidence):
             recovered = False
@@ -1092,6 +1111,7 @@ def certified_vs_exact_event_recovery(event_scores: pd.DataFrame) -> pd.DataFram
                 **base,
                 "certified_vs_exact_recovered_expected_model": recovered,
                 "certified_vs_exact_reason": reason,
+                "certified_reference_model": certified_reference_model,
                 "expected_model_log_evidence": expected_log_evidence,
                 "expected_model_evidence_support": expected_support,
                 "expected_model_evidence_comparable": expected_comparable,

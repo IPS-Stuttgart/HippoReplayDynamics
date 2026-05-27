@@ -150,6 +150,29 @@ def test_recovery_summary_counts_exact_sparse_momentum_surrogate():
     assert momentum["exact_surrogate_recovered_events"] == 1
 
 
+def test_certified_vs_exact_summary_counts_exact_sparse_momentum_surrogate():
+    rows = pd.DataFrame(
+        [
+            _row(0, "momentum", "sorted-spike-state-space-diffusion", -2.0),
+            _row(0, "momentum", "sorted-spike-state-space-momentum-exact-sparse", -1.0),
+        ]
+    )
+    scored = add_evidence_columns(rows)
+
+    events = certified_vs_exact_event_recovery(scored)
+    summary = certified_vs_exact_recovery_summary(scored)
+    momentum = summary[summary["true_model"] == "momentum"].iloc[0]
+
+    assert bool(events.iloc[0]["certified_vs_exact_recovered_expected_model"])
+    assert events.iloc[0]["certified_vs_exact_reason"] == "exact_surrogate_comparable_best"
+    assert events.iloc[0]["certified_reference_model"] == (
+        "sorted-spike-state-space-momentum-exact-sparse"
+    )
+    assert events.iloc[0]["expected_model"] == "sorted-spike-state-space-momentum"
+    assert momentum["certified_vs_exact_recovered_events"] == 1
+    assert momentum["certified_vs_exact_recovery_accuracy"] == 1.0
+
+
 def test_build_scoring_models_and_model_parser_accept_space_or_comma_lists():
     assert parse_model_list("stationary,diffusion momentum") == ("stationary", "diffusion", "momentum")
     models = build_scoring_models(

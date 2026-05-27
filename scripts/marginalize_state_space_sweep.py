@@ -30,6 +30,8 @@ _DEFAULT_MODELS = ("diffusion", "momentum")
 _OBSERVATION_PARAMETER_COLUMNS = (
     "time_bin_s",
     "spike_rate_scale",
+    "emission_likelihood_temperature",
+    "emission_negative_binomial_overdispersion",
     "bin_size_cm",
     "smoothing_sigma_bins",
     "min_speed_cm_s",
@@ -47,6 +49,8 @@ _OUTPUT_METADATA_COLUMNS = (
     "min_speed_cm_s",
     "time_bin_s",
     "spike_rate_scale",
+    "emission_likelihood_temperature",
+    "emission_negative_binomial_overdispersion",
     "clusterless_mark_smoothing_sigma_bins",
     "clusterless_mark_prior_count",
     "clusterless_mark_variance_floor",

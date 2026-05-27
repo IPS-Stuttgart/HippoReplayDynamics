@@ -14,6 +14,10 @@ def test_simulation_recovery_workflow_exposes_state_space_parameters():
     assert "--state-space-momentum-initial-sigma-cm-sqrt-s" in workflow
     assert "--state-space-momentum-candidate-top-k" in workflow
     assert "--state-space-momentum-predicted-candidate-top-k" in workflow
+    assert "max_synthetic_events:" in workflow
+    assert "max_runtime_s:" in workflow
+    assert "--checkpoint-output results/simulation-recovery" in workflow
+    assert "--progress-log" in workflow
 
 
 def test_simulation_recovery_sweep_workflow_defines_recovery_rankings():
@@ -45,3 +49,7 @@ def test_simulation_recovery_sweep_workflow_defines_recovery_rankings():
     assert "simulation_recovery_sweep_diagnostic_summary.csv" in workflow
     assert "Matrix has {len(rows)} jobs; reduce inputs to 256 or fewer" in workflow
     assert "pattern: simulation-recovery-sweep-*" in workflow
+    assert "max_synthetic_events:" in workflow
+    assert "max_runtime_s:" in workflow
+    assert "--checkpoint-output \"${out_dir}\"" in workflow
+    assert "--progress-log" in workflow

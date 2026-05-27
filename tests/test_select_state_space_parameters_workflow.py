@@ -16,7 +16,10 @@ def test_select_state_space_parameters_workflow_downloads_summaries_and_uploads_
     assert "calibrate_confidence_threshold:" in workflow
     assert "confidence_threshold_values:" in workflow
     assert "CONFIDENCE_THRESHOLD_VALUES" in workflow
+    assert "CONFIDENCE_STRATIFY_COLUMNS" in workflow
     assert "scripts/select_momentum_confidence_threshold.py" in workflow
+    assert "--threshold-scope stratum" in workflow
+    assert "--stratify-columns \"$CONFIDENCE_STRATIFY_COLUMNS\"" in workflow
     assert "momentum-confidence-threshold" in workflow
     assert "--confidence-evidence" in workflow
     assert "PYTHONPATH: src" in workflow

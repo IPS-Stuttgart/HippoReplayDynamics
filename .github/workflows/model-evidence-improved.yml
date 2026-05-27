@@ -64,18 +64,6 @@ on:
         description: "Clusterless mark likelihood: local-kde or diagonal-gaussian"
         required: true
         default: "local-kde"
-      clusterless_mark_kde_bandwidth:
-        description: "Optional scalar KDE mark bandwidth; empty uses data rule"
-        required: false
-        default: ""
-      clusterless_mark_kde_spatial_sigma_bins:
-        description: "Optional spatial KDE sigma in bins; empty uses mark smoothing"
-        required: false
-        default: ""
-      clusterless_mark_kde_max_neighbors:
-        description: "Maximum local-KDE mark neighbors"
-        required: true
-        default: "256"
       sorted_spike_emission_model:
         description: "Sorted-spike emission model: poisson or negative-binomial"
         required: true
@@ -168,9 +156,9 @@ jobs:
           GOAL_STATE_SPACE_DRIFT_SPEED_CM_S: ${{ inputs.goal_state_space_drift_speed_cm_s }}
           GOAL_STATE_SPACE_MAX_STEP_SIGMA: ${{ inputs.goal_state_space_max_step_sigma }}
           CLUSTERLESS_MARK_LIKELIHOOD: ${{ inputs.clusterless_mark_likelihood }}
-          CLUSTERLESS_MARK_KDE_BANDWIDTH: ${{ inputs.clusterless_mark_kde_bandwidth }}
-          CLUSTERLESS_MARK_KDE_SPATIAL_SIGMA_BINS: ${{ inputs.clusterless_mark_kde_spatial_sigma_bins }}
-          CLUSTERLESS_MARK_KDE_MAX_NEIGHBORS: ${{ inputs.clusterless_mark_kde_max_neighbors }}
+          CLUSTERLESS_MARK_KDE_BANDWIDTH: ""
+          CLUSTERLESS_MARK_KDE_SPATIAL_SIGMA_BINS: ""
+          CLUSTERLESS_MARK_KDE_MAX_NEIGHBORS: "256"
           SORTED_SPIKE_EMISSION_MODEL: ${{ inputs.sorted_spike_emission_model }}
           REPLAY_GAIN_MODE: ${{ inputs.replay_gain_mode }}
           REPLAY_GAIN_PRIOR_COUNT: ${{ inputs.replay_gain_prior_count }}

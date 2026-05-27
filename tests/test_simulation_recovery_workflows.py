@@ -64,6 +64,26 @@ def test_simulation_recovery_sweep_workflow_defines_recovery_rankings():
     assert _workflow_dispatch_input_count(workflow) <= 25
 
 
+def test_simulation_recovery_emission_calibration_workflow_defines_rankings():
+    workflow = Path(
+        ".github/workflows/simulation-recovery-emission-calibration-sweep.yml"
+    ).read_text(encoding="utf-8")
+
+    assert "name: Simulation recovery emission calibration sweep" in workflow
+    assert "spike_rate_scale_values:" in workflow
+    assert "emission_likelihood_temperature_values:" in workflow
+    assert "emission_negative_binomial_overdispersion_values:" in workflow
+    assert "--spike-rate-scale" in workflow
+    assert "--emission-likelihood-temperature" in workflow
+    assert "--emission-negative-binomial-overdispersion" in workflow
+    assert "simulation_recovery_emission_calibration_config_ranked.csv" in workflow
+    assert "simulation_recovery_emission_calibration_seed_replicated_ranked.csv" in workflow
+    assert "simulation-recovery-emission-calibration-summary-${{ github.run_id }}" in workflow
+    assert "timeout-minutes: 360" in workflow
+    assert "timeout-minutes: 350" in workflow
+    assert _workflow_dispatch_input_count(workflow) <= 25
+
+
 def _workflow_dispatch_input_count(workflow: str) -> int:
     in_inputs = False
     count = 0

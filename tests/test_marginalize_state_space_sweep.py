@@ -148,6 +148,52 @@ def test_marginalize_state_space_sweep_keeps_candidate_support_axes(tmp_path: Pa
     assert np.isclose(prior_weights["prior_weight"].sum(), 1.0)
 
 
+def test_marginalize_state_space_sweep_uses_exact_sparse_momentum_when_available(tmp_path: Path):
+    rows = []
+    for event_index, log_evidence in {0: -1.0, 1: -2.0}.items():
+        row = _base_row(
+            event_index,
+            "sorted-spike-state-space-momentum-exact-sparse",
+            log_evidence,
+        )
+        row["state_space_momentum_sigma_cm_sqrt_s"] = 60.0
+        row["state_space_momentum_initial_sigma_cm_sqrt_s"] = 85.0
+        row["state_space_momentum_velocity_decay"] = 0.95
+        row["state_space_momentum_candidate_top_k"] = 128
+        rows.append(row)
+    input_csv = tmp_path / "state_space_evidence_sweep_event_scores.csv"
+    pd.DataFrame(rows).to_csv(input_csv, index=False)
+
+    out_dir = tmp_path / "marginalized"
+    tables = marginalize_state_space_sweep.marginalize_sweep(
+        input_csv,
+        out_dir,
+        models=("momentum",),
+        prior="uniform",
+    )
+
+    event_model_evidence = tables["event_model_evidence"]
+    assert set(event_model_evidence["model"]) == {
+        "sorted-spike-state-space-momentum-marginalized",
+    }
+    assert set(event_model_evidence["evidence_support"]) == {"exact_full_grid"}
+    assert set(event_model_evidence["diagnostic_state_space_marginalized_source_model"]) == {
+        "sorted-spike-state-space-momentum-exact-sparse",
+    }
+    assert set(event_model_evidence["diagnostic_state_space_sparse_momentum_evidence_support"]) == {
+        "exact_full_grid",
+    }
+
+    best_params = tables["gridsearch_best_params"]
+    assert set(best_params["source_model"]) == {
+        "sorted-spike-state-space-momentum-exact-sparse",
+    }
+    prior_weights = tables["prior_weights"]
+    assert set(prior_weights["source_model"]) == {
+        "sorted-spike-state-space-momentum-exact-sparse",
+    }
+
+
 def test_marginalize_state_space_sweep_auto_marginalizes_observation_hyperparameters(tmp_path: Path):
     rows = []
     log_values = {

@@ -141,6 +141,7 @@ jobs:
           TOP_K_VALUES: ${{ inputs.state_space_momentum_candidate_top_k_values }}
           PREDICTED_TOP_K_VALUES: ${{ inputs.state_space_momentum_predicted_candidate_top_k_values }}
           CANDIDATE_SOURCE_VALUES: ${{ inputs.state_space_momentum_candidate_source_values }}
+          MAX_STEP_SIGMA_VALUES: ${{ inputs.state_space_max_step_sigma }}
         run: |
           set -euo pipefail
           mkdir -p results/state-space-evidence-sweep-plan
@@ -191,11 +192,13 @@ jobs:
           top_k_values = split_values("TOP_K_VALUES")
           predicted_top_k_values = split_values("PREDICTED_TOP_K_VALUES")
           candidate_source_values = [value.lower().replace("_", "-") for value in split_values("CANDIDATE_SOURCE_VALUES")]
+          max_step_sigma_values = split_values("MAX_STEP_SIGMA_VALUES")
           for name, values in (
               ("DIFFUSION_VALUES", diffusion_values),
               ("MOMENTUM_VALUES", momentum_values),
               ("MOMENTUM_INITIAL_VALUES", momentum_initial_values),
               ("DECAY_VALUES", decay_values),
+              ("MAX_STEP_SIGMA_VALUES", max_step_sigma_values),
           ):
               validate_float(name, values)
           validate_int("TOP_K_VALUES", top_k_values, allow_zero=True)
@@ -203,14 +206,15 @@ jobs:
           validate_candidate_sources("CANDIDATE_SOURCE_VALUES", candidate_source_values)
 
           rows = []
-          for diffusion, momentum, momentum_initial, decay, top_k, predicted_top_k, candidate_source in itertools.product(
-              diffusion_values, momentum_values, momentum_initial_values, decay_values, top_k_values, predicted_top_k_values, candidate_source_values
+          for diffusion, momentum, momentum_initial, decay, top_k, predicted_top_k, candidate_source, max_step_sigma in itertools.product(
+              diffusion_values, momentum_values, momentum_initial_values, decay_values, top_k_values, predicted_top_k_values, candidate_source_values, max_step_sigma_values
           ):
               matrix_id = (
                   f"d{slug(diffusion)}-"
                   f"m{slug(momentum)}-"
                   f"mi{slug(momentum_initial)}-"
                   f"decay{slug(decay)}-"
+                  f"step{slug(max_step_sigma)}-"
                   f"k{slug(top_k)}-"
                   f"pk{slug(predicted_top_k)}-"
                   f"src{slug(candidate_source)}"
@@ -222,6 +226,7 @@ jobs:
                       "state_space_momentum_sigma_cm_sqrt_s": momentum,
                       "state_space_momentum_initial_sigma_cm_sqrt_s": momentum_initial,
                       "state_space_momentum_velocity_decay": decay,
+                      "state_space_max_step_sigma": max_step_sigma,
                       "state_space_momentum_candidate_top_k": top_k,
                       "state_space_momentum_predicted_candidate_top_k": predicted_top_k,
                       "state_space_momentum_candidate_source": candidate_source,
@@ -251,7 +256,7 @@ jobs:
           if-no-files-found: error
 
   evidence-sweep:
-    name: d=${{ matrix.state_space_diffusion_sigma_cm_sqrt_s }} m=${{ matrix.state_space_momentum_sigma_cm_sqrt_s }} decay=${{ matrix.state_space_momentum_velocity_decay }}
+    name: d=${{ matrix.state_space_diffusion_sigma_cm_sqrt_s }} m=${{ matrix.state_space_momentum_sigma_cm_sqrt_s }} step=${{ matrix.state_space_max_step_sigma }} decay=${{ matrix.state_space_momentum_velocity_decay }}
     needs: plan-matrix
     if: ${{ needs.plan-matrix.outputs.count != '0' }}
     runs-on: ubuntu-latest
@@ -267,6 +272,7 @@ jobs:
       STATE_SPACE_MOMENTUM_SIGMA_CM_SQRT_S: ${{ matrix.state_space_momentum_sigma_cm_sqrt_s }}
       STATE_SPACE_MOMENTUM_INITIAL_SIGMA_CM_SQRT_S: ${{ matrix.state_space_momentum_initial_sigma_cm_sqrt_s }}
       STATE_SPACE_MOMENTUM_VELOCITY_DECAY: ${{ matrix.state_space_momentum_velocity_decay }}
+      STATE_SPACE_MAX_STEP_SIGMA: ${{ matrix.state_space_max_step_sigma }}
       STATE_SPACE_MOMENTUM_CANDIDATE_TOP_K: ${{ matrix.state_space_momentum_candidate_top_k }}
       STATE_SPACE_MOMENTUM_PREDICTED_CANDIDATE_TOP_K: ${{ matrix.state_space_momentum_predicted_candidate_top_k }}
       STATE_SPACE_MOMENTUM_CANDIDATE_SOURCE: ${{ matrix.state_space_momentum_candidate_source }}
@@ -456,6 +462,7 @@ jobs:
               "events_spec",
               "max_events",
               "state_space_diffusion_sigma_cm_sqrt_s",
+              "state_space_max_step_sigma",
               "state_space_momentum_sigma_cm_sqrt_s",
               "state_space_momentum_initial_sigma_cm_sqrt_s",
               "state_space_momentum_velocity_decay",

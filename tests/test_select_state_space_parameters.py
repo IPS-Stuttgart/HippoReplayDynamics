@@ -289,6 +289,127 @@ def test_select_parameters_prefers_calibrated_confidence_threshold(tmp_path):
     assert manifest["input_paths"]["confidence_evidence"] == str(confidence)
 
 
+def test_select_parameters_uses_confidence_recovery_safety_metrics(tmp_path):
+    evidence = tmp_path / "evidence"
+    recovery = tmp_path / "recovery"
+    confidence = tmp_path / "confidence"
+    output = tmp_path / "selection"
+    unsafe = _params(85.0, 85.0, 85.0, 0.95, 128)
+    safe = _params(60.0, 85.0, 85.0, 0.95, 128)
+    _write(
+        evidence,
+        "state_space_evidence_sweep_config_ranked.csv",
+        [
+            {
+                **unsafe,
+                "matrix_id": "evidence-unsafe",
+                "events": 10,
+                "momentum_beats_diffusion_events": 9,
+                "momentum_beats_diffusion_log5_events": 7,
+                "median_momentum_minus_diffusion_log_evidence": 9.0,
+                "mean_momentum_minus_diffusion_log_evidence": 20.0,
+            },
+            {
+                **safe,
+                "matrix_id": "evidence-safe",
+                "events": 10,
+                "momentum_beats_diffusion_events": 8,
+                "momentum_beats_diffusion_log5_events": 6,
+                "median_momentum_minus_diffusion_log_evidence": 7.0,
+                "mean_momentum_minus_diffusion_log_evidence": 10.0,
+            },
+        ],
+    )
+    _write(
+        recovery,
+        "simulation_recovery_sweep_config_ranked.csv",
+        [
+            {
+                **unsafe,
+                "matrix_id": "recovery-unsafe",
+                "failures": 0,
+                "overall_recovery_accuracy": 1.0,
+                "momentum_recovery_accuracy": 1.0,
+                "diffusion_recovery_accuracy": 1.0,
+            },
+            {
+                **safe,
+                "matrix_id": "recovery-safe",
+                "failures": 0,
+                "overall_recovery_accuracy": 1.0,
+                "momentum_recovery_accuracy": 1.0,
+                "diffusion_recovery_accuracy": 1.0,
+            },
+        ],
+    )
+    _write(
+        confidence,
+        "momentum_confidence_threshold_evidence_by_stratum.csv",
+        [
+            {
+                "matrix_id": "evidence-unsafe",
+                "margin_threshold": 5.0,
+                "events": 10,
+                "positive_model_claims": 5,
+                "reference_model_claims": 0,
+                "ambiguous_events": 5,
+                "positive_claim_fraction": 0.5,
+            },
+            {
+                "matrix_id": "evidence-safe",
+                "margin_threshold": 5.0,
+                "events": 10,
+                "positive_model_claims": 5,
+                "reference_model_claims": 0,
+                "ambiguous_events": 5,
+                "positive_claim_fraction": 0.5,
+            },
+        ],
+    )
+    _write(
+        confidence,
+        "momentum_confidence_threshold_selection.csv",
+        [
+            {
+                "matrix_id": "evidence-unsafe",
+                "thresholded_binary_accuracy": 0.875,
+                "positive_claim_recall": 1.0,
+                "reference_specificity": 0.75,
+                "false_positive_claims": 1,
+                "false_negative_claims": 0,
+                "passes_threshold_gate": False,
+                "selection_status": "fallback_no_gate_pass",
+                "threshold_scope": "stratum",
+            },
+            {
+                "matrix_id": "evidence-safe",
+                "thresholded_binary_accuracy": 1.0,
+                "positive_claim_recall": 1.0,
+                "reference_specificity": 1.0,
+                "false_positive_claims": 0,
+                "false_negative_claims": 0,
+                "passes_threshold_gate": True,
+                "selection_status": "passed_specificity_gate",
+                "threshold_scope": "stratum",
+            },
+        ],
+    )
+
+    tables = select_parameters(
+        evidence,
+        recovery,
+        output=output,
+        confidence_evidence=confidence,
+        force_strict_recovery_gate=True,
+    )
+
+    recommendation = tables["recommendation"].iloc[0]
+    assert recommendation["evidence_matrix_id"] == "evidence-safe"
+    assert recommendation["momentum_confidence_recovery_false_positive_claims"] == 0
+    assert recommendation["momentum_confidence_recovery_reference_specificity"] == 1.0
+    assert bool(recommendation["momentum_confidence_recovery_passes_threshold_gate"])
+
+
 def test_select_parameters_keeps_observation_calibration_dimensions_separate(tmp_path):
     evidence = tmp_path / "evidence"
     recovery = tmp_path / "recovery"
@@ -443,6 +564,7 @@ def test_select_parameters_matches_predicted_candidate_support_dimension(tmp_pat
     output = tmp_path / "selection"
     strong_unvalidated_support = _params(85.0, 85.0, 85.0, 0.95, 128, predicted_top_k=0)
     weaker_validated_support = _params(85.0, 85.0, 85.0, 0.95, 128, predicted_top_k=8)
+    recovery_only_support = _params(110.0, 85.0, 85.0, 0.95, 128, predicted_top_k=8)
     _write(
         evidence,
         "state_space_evidence_sweep_config_ranked.csv",
@@ -477,6 +599,14 @@ def test_select_parameters_matches_predicted_candidate_support_dimension(tmp_pat
                 "momentum_recovery_accuracy": 1.0,
                 "diffusion_recovery_accuracy": 0.6,
             },
+            {
+                **recovery_only_support,
+                "matrix_id": "recovery-only",
+                "failures": 0,
+                "overall_recovery_accuracy": 1.0,
+                "momentum_recovery_accuracy": 1.0,
+                "diffusion_recovery_accuracy": 1.0,
+            },
         ],
     )
 
@@ -497,6 +627,12 @@ def test_select_parameters_matches_predicted_candidate_support_dimension(tmp_pat
     ].iloc[0]
     assert not bool(unvalidated["has_recovery"])
     assert unvalidated["recovery_gate"] == "missing-recovery"
+    recovery_only = tables["decision"][
+        tables["decision"]["recovery_matrix_id"].eq("recovery-only")
+    ].iloc[0]
+    assert not bool(recovery_only["has_evidence"])
+    assert recovery_only["recovery_gate"] == "missing-evidence"
+    assert pd.isna(recovery_only["mean_momentum_minus_diffusion_log_evidence"])
 
 
 def test_select_parameters_keeps_candidate_support_dimensions_separate(tmp_path):

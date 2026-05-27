@@ -83,6 +83,7 @@ env:
   CONFIDENCE_THRESHOLD_VALUES: ${{ inputs.confidence_threshold_values }}
   CONFIDENCE_MAX_FALSE_POSITIVE_CLAIMS: ${{ inputs.confidence_max_false_positive_claims }}
   CONFIDENCE_MIN_POSITIVE_CLAIM_RECALL: ${{ inputs.confidence_min_positive_claim_recall }}
+  CONFIDENCE_STRATIFY_COLUMNS: "state_space_diffusion_sigma_cm_sqrt_s,state_space_momentum_sigma_cm_sqrt_s,state_space_momentum_initial_sigma_cm_sqrt_s,state_space_momentum_velocity_decay,state_space_max_step_sigma,state_space_valid_occupancy_threshold_s,time_bin_s,spike_rate_scale,emission_likelihood_temperature,emission_negative_binomial_overdispersion"
   OUTPUT_DIR: ${{ inputs.output_dir }}
   PYTHONPATH: src
 
@@ -146,6 +147,8 @@ jobs:
               --evidence-scores artifacts/evidence \
               --output "$OUTPUT_DIR/momentum-confidence-threshold" \
               --thresholds "$CONFIDENCE_THRESHOLD_VALUES" \
+              --threshold-scope stratum \
+              --stratify-columns "$CONFIDENCE_STRATIFY_COLUMNS" \
               --max-false-positive-claims "$CONFIDENCE_MAX_FALSE_POSITIVE_CLAIMS" \
               --min-positive-claim-recall "$CONFIDENCE_MIN_POSITIVE_CLAIM_RECALL"
             test -f "$OUTPUT_DIR/momentum-confidence-threshold/momentum_confidence_threshold_selection.csv"

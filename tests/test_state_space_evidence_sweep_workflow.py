@@ -31,6 +31,14 @@ def test_state_space_evidence_sweep_workflow_defines_parameter_grid_and_summary_
     assert "SPIKE_RATE_SCALE_VALUES" in workflow
     assert 'f"rate{slug(spike_rate_scale)}-"' in workflow
     assert "--spike-rate-scale" in workflow
+    assert "emission_likelihood_temperature_values:" in workflow
+    assert "emission_negative_binomial_overdispersion_values:" in workflow
+    assert "LIKELIHOOD_TEMPERATURE_VALUES" in workflow
+    assert "NEGATIVE_BINOMIAL_OVERDISPERSION_VALUES" in workflow
+    assert 'f"temp{slug(likelihood_temperature)}-"' in workflow
+    assert 'f"nb{slug(negative_binomial_overdispersion)}-"' in workflow
+    assert "--emission-likelihood-temperature" in workflow
+    assert "--emission-negative-binomial-overdispersion" in workflow
     assert "state_space_evidence_sweep_config_ranked.csv" in workflow
     assert "state_space_evidence_sweep_momentum_ranked.csv" in workflow
     assert "scripts/marginalize_state_space_sweep.py" in workflow
@@ -39,3 +47,18 @@ def test_state_space_evidence_sweep_workflow_defines_parameter_grid_and_summary_
     assert "momentum_minus_diffusion_log_evidence" in workflow
     assert 'momentum_col = "sorted-spike-state-space-momentum-exact-sparse"' in workflow
     assert "pattern: state-space-evidence-sweep-*" in workflow
+    assert _workflow_dispatch_input_count(workflow) <= 25
+
+
+def _workflow_dispatch_input_count(workflow: str) -> int:
+    in_inputs = False
+    count = 0
+    for line in workflow.splitlines():
+        if line.strip() == "inputs:":
+            in_inputs = True
+            continue
+        if in_inputs and line.startswith("permissions:"):
+            break
+        if in_inputs and line.startswith("      ") and not line.startswith("        "):
+            count += 1
+    return count

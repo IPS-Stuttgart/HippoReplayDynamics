@@ -197,15 +197,34 @@ def test_marginalize_state_space_sweep_uses_exact_sparse_momentum_when_available
 def test_marginalize_state_space_sweep_auto_marginalizes_observation_hyperparameters(tmp_path: Path):
     rows = []
     log_values = {
-        (50.0, 0.5): -4.0,
-        (50.0, 1.0): 0.0,
-        (60.0, 0.5): -1.0,
-        (60.0, 1.0): -2.0,
+        (50.0, 0.5, 1.0, 0.0): -4.0,
+        (50.0, 0.5, 1.0, 0.25): -4.5,
+        (50.0, 0.5, 2.0, 0.0): -3.0,
+        (50.0, 0.5, 2.0, 0.25): -3.5,
+        (50.0, 1.0, 1.0, 0.0): 0.0,
+        (50.0, 1.0, 1.0, 0.25): -0.5,
+        (50.0, 1.0, 2.0, 0.0): -1.0,
+        (50.0, 1.0, 2.0, 0.25): -1.5,
+        (60.0, 0.5, 1.0, 0.0): -1.0,
+        (60.0, 0.5, 1.0, 0.25): -1.5,
+        (60.0, 0.5, 2.0, 0.0): -2.0,
+        (60.0, 0.5, 2.0, 0.25): -2.5,
+        (60.0, 1.0, 1.0, 0.0): -2.0,
+        (60.0, 1.0, 1.0, 0.25): -2.5,
+        (60.0, 1.0, 2.0, 0.0): -3.0,
+        (60.0, 1.0, 2.0, 0.25): -3.5,
     }
-    for (diffusion_sigma, spike_rate_scale), log_evidence in log_values.items():
+    for (
+        diffusion_sigma,
+        spike_rate_scale,
+        likelihood_temperature,
+        overdispersion,
+    ), log_evidence in log_values.items():
         row = _base_row(0, "sorted-spike-state-space-diffusion", log_evidence)
         row["state_space_diffusion_sigma_cm_sqrt_s"] = diffusion_sigma
         row["spike_rate_scale"] = spike_rate_scale
+        row["emission_likelihood_temperature"] = likelihood_temperature
+        row["emission_negative_binomial_overdispersion"] = overdispersion
         rows.append(row)
     input_csv = tmp_path / "state_space_evidence_sweep_event_scores.csv"
     pd.DataFrame(rows).to_csv(input_csv, index=False)
@@ -215,15 +234,27 @@ def test_marginalize_state_space_sweep_auto_marginalizes_observation_hyperparame
 
     event_model_evidence = tables["event_model_evidence"]
     event0 = event_model_evidence.iloc[0]
-    assert np.isclose(event0["log_evidence"], logsumexp(list(log_values.values())) - np.log(4.0))
-    assert event0["diagnostic_state_space_marginalized_observation_parameters"] == "spike_rate_scale"
-    assert event0["diagnostic_state_space_marginalization_grid_points"] == 4
+    assert np.isclose(event0["log_evidence"], logsumexp(list(log_values.values())) - np.log(16.0))
+    assert (
+        event0["diagnostic_state_space_marginalized_observation_parameters"]
+        == (
+            "spike_rate_scale emission_likelihood_temperature "
+            "emission_negative_binomial_overdispersion"
+        )
+    )
+    assert event0["diagnostic_state_space_marginalization_grid_points"] == 16
     assert pd.isna(event0["spike_rate_scale"])
+    assert pd.isna(event0["emission_likelihood_temperature"])
+    assert pd.isna(event0["emission_negative_binomial_overdispersion"])
 
     best_params = tables["gridsearch_best_params"].iloc[0]
     assert best_params["best_state_space_diffusion_sigma_cm_sqrt_s"] == 50.0
     assert best_params["best_spike_rate_scale"] == 1.0
+    assert best_params["best_emission_likelihood_temperature"] == 1.0
+    assert best_params["best_emission_negative_binomial_overdispersion"] == 0.0
 
     prior_weights = tables["prior_weights"]
     assert "spike_rate_scale" in prior_weights.columns
+    assert "emission_likelihood_temperature" in prior_weights.columns
+    assert "emission_negative_binomial_overdispersion" in prior_weights.columns
     assert np.isclose(prior_weights["prior_weight"].sum(), 1.0)

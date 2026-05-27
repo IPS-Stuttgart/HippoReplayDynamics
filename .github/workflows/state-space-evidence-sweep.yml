@@ -77,6 +77,14 @@ on:
         description: "Multiplicative scale applied to Poisson place-field rates during ripple scoring"
         required: true
         default: "1.0"
+      emission_likelihood_temperature_values:
+        description: "Whitespace- or comma-separated emission likelihood temperatures"
+        required: true
+        default: "1.0"
+      emission_negative_binomial_overdispersion_values:
+        description: "Whitespace- or comma-separated sorted-spike negative-binomial overdispersion values; 0 keeps Poisson emissions"
+        required: true
+        default: "0.0"
       bin_size_cm:
         description: "Place-field spatial bin size in centimeters"
         required: true
@@ -143,6 +151,8 @@ jobs:
           CANDIDATE_SOURCE_VALUES: ${{ inputs.state_space_momentum_candidate_source_values }}
           MAX_STEP_SIGMA_VALUES: ${{ inputs.state_space_max_step_sigma }}
           SPIKE_RATE_SCALE_VALUES: ${{ inputs.spike_rate_scale }}
+          LIKELIHOOD_TEMPERATURE_VALUES: ${{ inputs.emission_likelihood_temperature_values }}
+          NEGATIVE_BINOMIAL_OVERDISPERSION_VALUES: ${{ inputs.emission_negative_binomial_overdispersion_values }}
         run: |
           set -euo pipefail
           mkdir -p results/state-space-evidence-sweep-plan
@@ -195,6 +205,8 @@ jobs:
           candidate_source_values = [value.lower().replace("_", "-") for value in split_values("CANDIDATE_SOURCE_VALUES")]
           max_step_sigma_values = split_values("MAX_STEP_SIGMA_VALUES")
           spike_rate_scale_values = split_values("SPIKE_RATE_SCALE_VALUES")
+          likelihood_temperature_values = split_values("LIKELIHOOD_TEMPERATURE_VALUES")
+          negative_binomial_overdispersion_values = split_values("NEGATIVE_BINOMIAL_OVERDISPERSION_VALUES")
           for name, values in (
               ("DIFFUSION_VALUES", diffusion_values),
               ("MOMENTUM_VALUES", momentum_values),
@@ -202,6 +214,8 @@ jobs:
               ("DECAY_VALUES", decay_values),
               ("MAX_STEP_SIGMA_VALUES", max_step_sigma_values),
               ("SPIKE_RATE_SCALE_VALUES", spike_rate_scale_values),
+              ("LIKELIHOOD_TEMPERATURE_VALUES", likelihood_temperature_values),
+              ("NEGATIVE_BINOMIAL_OVERDISPERSION_VALUES", negative_binomial_overdispersion_values),
           ):
               validate_float(name, values)
           validate_int("TOP_K_VALUES", top_k_values, allow_zero=True)
@@ -209,8 +223,8 @@ jobs:
           validate_candidate_sources("CANDIDATE_SOURCE_VALUES", candidate_source_values)
 
           rows = []
-          for diffusion, momentum, momentum_initial, decay, top_k, predicted_top_k, candidate_source, max_step_sigma, spike_rate_scale in itertools.product(
-              diffusion_values, momentum_values, momentum_initial_values, decay_values, top_k_values, predicted_top_k_values, candidate_source_values, max_step_sigma_values, spike_rate_scale_values
+          for diffusion, momentum, momentum_initial, decay, top_k, predicted_top_k, candidate_source, max_step_sigma, spike_rate_scale, likelihood_temperature, negative_binomial_overdispersion in itertools.product(
+              diffusion_values, momentum_values, momentum_initial_values, decay_values, top_k_values, predicted_top_k_values, candidate_source_values, max_step_sigma_values, spike_rate_scale_values, likelihood_temperature_values, negative_binomial_overdispersion_values
           ):
               matrix_id = (
                   f"d{slug(diffusion)}-"
@@ -219,6 +233,8 @@ jobs:
                   f"decay{slug(decay)}-"
                   f"step{slug(max_step_sigma)}-"
                   f"rate{slug(spike_rate_scale)}-"
+                  f"temp{slug(likelihood_temperature)}-"
+                  f"nb{slug(negative_binomial_overdispersion)}-"
                   f"k{slug(top_k)}-"
                   f"pk{slug(predicted_top_k)}-"
                   f"src{slug(candidate_source)}"
@@ -232,6 +248,8 @@ jobs:
                       "state_space_momentum_velocity_decay": decay,
                       "state_space_max_step_sigma": max_step_sigma,
                       "spike_rate_scale": spike_rate_scale,
+                      "emission_likelihood_temperature": likelihood_temperature,
+                      "emission_negative_binomial_overdispersion": negative_binomial_overdispersion,
                       "state_space_momentum_candidate_top_k": top_k,
                       "state_space_momentum_predicted_candidate_top_k": predicted_top_k,
                       "state_space_momentum_candidate_source": candidate_source,
@@ -261,7 +279,7 @@ jobs:
           if-no-files-found: error
 
   evidence-sweep:
-    name: d=${{ matrix.state_space_diffusion_sigma_cm_sqrt_s }} m=${{ matrix.state_space_momentum_sigma_cm_sqrt_s }} step=${{ matrix.state_space_max_step_sigma }} rate=${{ matrix.spike_rate_scale }} decay=${{ matrix.state_space_momentum_velocity_decay }}
+    name: d=${{ matrix.state_space_diffusion_sigma_cm_sqrt_s }} m=${{ matrix.state_space_momentum_sigma_cm_sqrt_s }} step=${{ matrix.state_space_max_step_sigma }} rate=${{ matrix.spike_rate_scale }} temp=${{ matrix.emission_likelihood_temperature }} nb=${{ matrix.emission_negative_binomial_overdispersion }} decay=${{ matrix.state_space_momentum_velocity_decay }}
     needs: plan-matrix
     if: ${{ needs.plan-matrix.outputs.count != '0' }}
     runs-on: ubuntu-latest
@@ -279,6 +297,8 @@ jobs:
       STATE_SPACE_MOMENTUM_VELOCITY_DECAY: ${{ matrix.state_space_momentum_velocity_decay }}
       STATE_SPACE_MAX_STEP_SIGMA: ${{ matrix.state_space_max_step_sigma }}
       SPIKE_RATE_SCALE: ${{ matrix.spike_rate_scale }}
+      EMISSION_LIKELIHOOD_TEMPERATURE: ${{ matrix.emission_likelihood_temperature }}
+      EMISSION_NEGATIVE_BINOMIAL_OVERDISPERSION: ${{ matrix.emission_negative_binomial_overdispersion }}
       STATE_SPACE_MOMENTUM_CANDIDATE_TOP_K: ${{ matrix.state_space_momentum_candidate_top_k }}
       STATE_SPACE_MOMENTUM_PREDICTED_CANDIDATE_TOP_K: ${{ matrix.state_space_momentum_predicted_candidate_top_k }}
       STATE_SPACE_MOMENTUM_CANDIDATE_SOURCE: ${{ matrix.state_space_momentum_candidate_source }}
@@ -336,6 +356,8 @@ jobs:
             --state-space-momentum-candidate-source "${STATE_SPACE_MOMENTUM_CANDIDATE_SOURCE}" \
             --time-bin-s "${TIME_BIN_S}" \
             --spike-rate-scale "${SPIKE_RATE_SCALE}" \
+            --emission-likelihood-temperature "${EMISSION_LIKELIHOOD_TEMPERATURE}" \
+            --emission-negative-binomial-overdispersion "${EMISSION_NEGATIVE_BINOMIAL_OVERDISPERSION}" \
             --bin-size-cm "${BIN_SIZE_CM}" \
             --smoothing-sigma-bins "${SMOOTHING_SIGMA_BINS}" \
             --min-speed-cm-s "${MIN_SPEED_CM_S}" \
@@ -370,6 +392,8 @@ jobs:
               "state_space_momentum_candidate_source": os.environ["STATE_SPACE_MOMENTUM_CANDIDATE_SOURCE"],
               "time_bin_s": float(os.environ["TIME_BIN_S"]),
               "spike_rate_scale": float(os.environ["SPIKE_RATE_SCALE"]),
+              "emission_likelihood_temperature": float(os.environ["EMISSION_LIKELIHOOD_TEMPERATURE"]),
+              "emission_negative_binomial_overdispersion": float(os.environ["EMISSION_NEGATIVE_BINOMIAL_OVERDISPERSION"]),
               "bin_size_cm": float(os.environ["BIN_SIZE_CM"]),
               "smoothing_sigma_bins": float(os.environ["SMOOTHING_SIGMA_BINS"]),
               "min_speed_cm_s": float(os.environ["MIN_SPEED_CM_S"]),
@@ -476,6 +500,8 @@ jobs:
               "state_space_momentum_predicted_candidate_top_k",
               "state_space_momentum_candidate_source",
               "spike_rate_scale",
+              "emission_likelihood_temperature",
+              "emission_negative_binomial_overdispersion",
           ]
           pivot = scores.pivot_table(
               index=key_cols + ["session", "event_index"],

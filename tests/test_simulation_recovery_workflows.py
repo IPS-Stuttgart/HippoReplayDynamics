@@ -55,3 +55,18 @@ def test_simulation_recovery_sweep_workflow_defines_recovery_rankings():
     assert "--checkpoint-output \"${out_dir}\"" in workflow
     assert "--progress-log" in workflow
     assert "simulation_recovery_partial_manifest.json" in workflow
+    assert _workflow_dispatch_input_count(workflow) <= 25
+
+
+def _workflow_dispatch_input_count(workflow: str) -> int:
+    in_inputs = False
+    count = 0
+    for line in workflow.splitlines():
+        if line.strip() == "inputs:":
+            in_inputs = True
+            continue
+        if in_inputs and line.startswith("permissions:"):
+            break
+        if in_inputs and line.startswith("      ") and not line.startswith("        "):
+            count += 1
+    return count

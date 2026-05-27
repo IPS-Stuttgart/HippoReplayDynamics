@@ -28,6 +28,8 @@ def test_state_space_evidence_sweep_workflow_defines_parameter_grid_and_summary_
     assert "state_space_max_step_sigma" in workflow
     assert 'f"step{slug(max_step_sigma)}-"' in workflow
     assert "spike_rate_scale:" in workflow
+    assert "SPIKE_RATE_SCALE_VALUES" in workflow
+    assert 'f"rate{slug(spike_rate_scale)}-"' in workflow
     assert "--spike-rate-scale" in workflow
     assert "state_space_evidence_sweep_config_ranked.csv" in workflow
     assert "state_space_evidence_sweep_momentum_ranked.csv" in workflow

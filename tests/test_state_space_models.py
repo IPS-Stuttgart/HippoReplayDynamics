@@ -555,9 +555,18 @@ def test_state_space_four_mode_imm_matches_bruteforce_tiny_grid():
 
 def test_state_space_momentum_exact_sparse_matches_bruteforce_tiny_grid():
     emissions = LogEmissionTensor(
-        log_likelihood=np.log(np.array([[0.7, 0.3], [0.2, 0.8], [0.4, 0.6]])),
-        spike_counts=np.zeros((3, 1), dtype=int),
-        times=np.array([0.0, 1.0, 2.0]),
+        log_likelihood=np.log(
+            np.array(
+                [
+                    [0.7, 0.3],
+                    [0.2, 0.8],
+                    [0.4, 0.6],
+                    [0.45, 0.55],
+                ]
+            )
+        ),
+        spike_counts=np.zeros((4, 1), dtype=int),
+        times=np.array([0.0, 1.0, 2.0, 3.0]),
         dt=1.0,
         cell_ids=np.array([1]),
         n_spikes=0,
@@ -577,8 +586,9 @@ def test_state_space_momentum_exact_sparse_matches_bruteforce_tiny_grid():
         return float(np.log(weights[dst] / weights.sum()))
 
     brute_terms = []
-    for x0, x1, x2 in itertools.product(range(2), repeat=3):
+    for x0, x1, x2, x3 in itertools.product(range(2), repeat=4):
         predicted = centers[x1] + config.momentum_velocity_decay * (centers[x1] - centers[x0])
+        predicted_next = centers[x2] + config.momentum_velocity_decay * (centers[x2] - centers[x1])
         brute_terms.append(
             -np.log(2.0)
             + emissions.log_likelihood[0, x0]
@@ -586,6 +596,8 @@ def test_state_space_momentum_exact_sparse_matches_bruteforce_tiny_grid():
             + emissions.log_likelihood[1, x1]
             + kernel_log(predicted, x2, 1.0)
             + emissions.log_likelihood[2, x2]
+            + kernel_log(predicted_next, x3, 1.0)
+            + emissions.log_likelihood[3, x3]
         )
 
     assert np.allclose(score.log_likelihood, logsumexp(brute_terms))
@@ -597,6 +609,8 @@ def test_state_space_momentum_exact_sparse_matches_bruteforce_tiny_grid():
     assert score.diagnostics["state_space_sparse_momentum_max_pair_count"] == 4
     assert score.diagnostics["state_space_sparse_momentum_transition_support"] == "finite_radius_gaussian"
     assert score.diagnostics["state_space_sparse_momentum_backward_transition_rows"] == "forward_cached"
+    assert score.diagnostics["state_space_sparse_momentum_transition_row_cache_hits"] == 4
+    assert score.diagnostics["state_space_sparse_momentum_transition_row_cache_entries"] == 4
 
 
 def test_exact_sparse_momentum_matches_dense_finite_radius_reference_and_heldout_identity():

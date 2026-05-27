@@ -27,6 +27,7 @@ from .state_space_first_order import _score_fragmented
 from .state_space_utils import _as_log_probs, _mean_entropy, _scaled_emissions
 
 TransitionRows = list[tuple[np.ndarray, np.ndarray]]
+TransitionRowCache = dict[tuple[int, int, float, float], tuple[np.ndarray, np.ndarray]]
 
 
 def _score_sparse_momentum_exact(
@@ -106,11 +107,22 @@ def _score_sparse_momentum_exact(
     scales = [first_scale]
     edge_counts: list[int] = list(initial_edge_counts)
     transition_rows: list[TransitionRows] = []
+    transition_row_cache: TransitionRowCache = {}
+    transition_row_cache_hits = 0
+    transition_row_cache_misses = 0
     logp = float(np.log(first_scale) + offsets[0] + offsets[1])
 
     for time_index in range(2, emissions.n_time):
         transition_index = time_index - 1
-        prev, curr, alpha, counts, rows_for_transition = _advance_pair_alpha(
+        (
+            prev,
+            curr,
+            alpha,
+            counts,
+            rows_for_transition,
+            cache_hits,
+            cache_misses,
+        ) = _advance_pair_alpha(
             centers,
             valid_indices,
             tree,
@@ -121,7 +133,10 @@ def _score_sparse_momentum_exact(
             sigma_cm=float(transition_sigmas[transition_index]),
             velocity_decay=float(decays[transition_index]) * float(time_scales[transition_index]),
             max_step_sigma=max_step_sigma,
+            row_cache=transition_row_cache,
         )
+        transition_row_cache_hits += cache_hits
+        transition_row_cache_misses += cache_misses
         scale = float(alpha.sum())
         if scale <= 0.0 or not np.isfinite(scale):
             raise ValueError(f"emission row {time_index} has no finite sparse-pair predicted mass")
@@ -165,6 +180,9 @@ def _score_sparse_momentum_exact(
         "state_space_sparse_momentum_mean_outgoing_count": float(np.mean(edge_counts)) if edge_counts else 0.0,
         "state_space_sparse_momentum_max_outgoing_count": int(np.max(edge_counts)) if edge_counts else 0,
         "state_space_sparse_momentum_backward_transition_rows": "forward_cached",
+        "state_space_sparse_momentum_transition_row_cache_entries": int(len(transition_row_cache)),
+        "state_space_sparse_momentum_transition_row_cache_hits": int(transition_row_cache_hits),
+        "state_space_sparse_momentum_transition_row_cache_misses": int(transition_row_cache_misses),
         "state_space_momentum_trajectory_posterior": "smoothed_pair_marginal",
         "state_space_momentum_evidence_support": "exact_full_grid",
         "state_space_momentum_candidate_support": "not_used_exact_sparse",
@@ -254,25 +272,37 @@ def _advance_pair_alpha(
     sigma_cm: float,
     velocity_decay: float,
     max_step_sigma: float,
-) -> tuple[np.ndarray, np.ndarray, np.ndarray, list[int], TransitionRows]:
+    row_cache: TransitionRowCache | None = None,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, list[int], TransitionRows, int, int]:
     prev_parts: list[np.ndarray] = []
     curr_parts: list[np.ndarray] = []
     value_parts: list[np.ndarray] = []
     edge_counts: list[int] = []
     transition_rows: TransitionRows = []
+    cache_hits = 0
+    cache_misses = 0
     for src_prev, src_curr, source_mass in zip(prev, curr, alpha, strict=True):
         if source_mass <= 0.0:
             transition_rows.append((np.empty(0, dtype=int), np.empty(0, dtype=float)))
             continue
-        prediction = centers[int(src_curr)] + float(velocity_decay) * (centers[int(src_curr)] - centers[int(src_prev)])
-        dst, weights = _finite_gaussian_row(
-            centers,
-            valid_indices,
-            tree,
-            prediction,
-            sigma_cm=sigma_cm,
-            max_step_sigma=max_step_sigma,
-        )
+        cache_key = (int(src_prev), int(src_curr), float(sigma_cm), float(velocity_decay))
+        cached = None if row_cache is None else row_cache.get(cache_key)
+        if cached is None:
+            prediction = centers[int(src_curr)] + float(velocity_decay) * (centers[int(src_curr)] - centers[int(src_prev)])
+            dst, weights = _finite_gaussian_row(
+                centers,
+                valid_indices,
+                tree,
+                prediction,
+                sigma_cm=sigma_cm,
+                max_step_sigma=max_step_sigma,
+            )
+            if row_cache is not None:
+                row_cache[cache_key] = (dst, weights)
+            cache_misses += 1
+        else:
+            dst, weights = cached
+            cache_hits += 1
         transition_rows.append((dst, weights))
         values = float(source_mass) * weights * curr_emission[dst]
         keep = values > 0.0
@@ -286,6 +316,8 @@ def _advance_pair_alpha(
         *_coalesce_pairs(prev_parts, curr_parts, value_parts, centers.shape[0]),
         edge_counts,
         transition_rows,
+        cache_hits,
+        cache_misses,
     )
 
 

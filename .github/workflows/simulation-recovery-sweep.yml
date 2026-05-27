@@ -321,6 +321,7 @@ jobs:
           webdav-password: ${{ secrets.PFEIFFERFOSTER_DATA_PASSWORD }}
 
       - name: Run simulation recovery configuration
+        timeout-minutes: 350
         run: |
           set -euo pipefail
           out_dir="results/simulation-recovery-sweep/${MATRIX_ID}"
@@ -402,6 +403,16 @@ jobs:
                   frame[key] = value
               frame.to_csv(path, index=False)
           PY
+
+      - name: Show partial recovery manifest
+        if: always()
+        run: |
+          manifest="results/simulation-recovery-sweep/${MATRIX_ID}/simulation_recovery_partial_manifest.json"
+          if [[ -f "${manifest}" ]]; then
+            cat "${manifest}"
+          else
+            echo "No simulation_recovery_partial_manifest.json was written."
+          fi
 
       - name: Upload simulation recovery sweep result
         if: always()

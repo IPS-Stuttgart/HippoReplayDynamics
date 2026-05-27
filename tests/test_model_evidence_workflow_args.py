@@ -21,10 +21,13 @@ _REQUIRED_WORKFLOW_FLAGS = {
     "--clusterless-mark-kde-spatial-sigma-bins",
     "--clusterless-mark-kde-max-neighbors",
     "--spike-rate-scale",
+    "--emission-likelihood-temperature",
+    "--emission-negative-binomial-overdispersion",
     "--time-bin-s",
     "--bin-size-cm",
     "--smoothing-sigma-bins",
     "--min-speed-cm-s",
+    "--state-space-valid-occupancy-threshold-s",
 }
 
 

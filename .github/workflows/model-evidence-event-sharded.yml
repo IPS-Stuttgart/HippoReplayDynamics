@@ -32,30 +32,6 @@ on:
         description: "Candidate spatial bins per time bin for candidate-pruned models"
         required: true
         default: "64"
-      stationary_sigma_cm:
-        description: "Gaussian stationary transition sigma in cm"
-        required: true
-        default: "2.0"
-      diffusion_sigma_cm:
-        description: "Diffusion transition sigma in cm"
-        required: true
-        default: "12.0"
-      momentum_sigma_cm:
-        description: "Momentum transition sigma in cm"
-        required: true
-        default: "12.0"
-      velocity_decay:
-        description: "Momentum velocity decay"
-        required: true
-        default: "0.95"
-      mode_stickiness:
-        description: "IMM mode-transition stickiness"
-        required: true
-        default: "0.94"
-      state_space_stationary_sigma_cm:
-        description: "State-space stationary transition sigma in cm"
-        required: true
-        default: "2.0"
       state_space_diffusion_sigma_cm_sqrt_s:
         description: "State-space diffusion noise in cm/sqrt(s)"
         required: true
@@ -64,14 +40,6 @@ on:
         description: "State-space Gaussian transition truncation radius in sigmas"
         required: true
         default: "4.0"
-      state_space_imm_mode_stickiness:
-        description: "State-space IMM mode-transition stickiness"
-        required: true
-        default: "0.95"
-      state_space_imm_switch_tau_s:
-        description: "Optional state-space IMM mode-switch time constant in seconds; 0 uses state_space_imm_mode_stickiness"
-        required: true
-        default: "0.060"
       state_space_valid_occupancy_threshold_s:
         description: "Minimum run occupancy in seconds for valid state-space bins; 0 keeps the full grid"
         required: true
@@ -96,34 +64,14 @@ on:
         description: "Momentum/IMM candidate source: emission or posterior"
         required: true
         default: "emission"
-      state_space_common_support_top_k:
-        description: "If >0, score state-space candidate models on a common union support seeded by this emission top-k"
-        required: true
-        default: "0"
       state_space_momentum_candidate_top_k:
         description: "Emission top-k support for state-space momentum/IMM lower-bound recursions"
         required: true
         default: "256"
-      state_space_momentum_candidate_mass_threshold:
-        description: "Optional adaptive candidate-support mass threshold; empty keeps fixed top-k"
-        required: false
-        default: ""
-      state_space_momentum_candidate_min_k:
-        description: "Minimum adaptive candidate count per replay bin"
-        required: true
-        default: "1"
-      state_space_momentum_candidate_max_k:
-        description: "Maximum adaptive candidate count per replay bin; 0 means unbounded"
-        required: true
-        default: "0"
       state_space_momentum_predicted_candidate_top_k:
         description: "Top adjacent emission candidates used to augment second-order candidate support with momentum predictions"
         required: true
         default: "16"
-      clusterless_rate_floor_hz:
-        description: "Clusterless spike-intensity rate floor in Hz"
-        required: true
-        default: "0.0001"
       time_bin_s:
         description: "Ripple decoding time-bin width in seconds"
         required: true
@@ -132,6 +80,14 @@ on:
         description: "Multiplicative scale applied to Poisson place-field rates during ripple scoring"
         required: true
         default: "1.0"
+      emission_likelihood_temperature:
+        description: "Sorted-spike emission likelihood temperature"
+        required: true
+        default: "1.0"
+      emission_negative_binomial_overdispersion:
+        description: "Sorted-spike negative-binomial overdispersion; 0 keeps Poisson emissions"
+        required: true
+        default: "0.0"
       bin_size_cm:
         description: "Place-field spatial bin size in centimeters"
         required: true
@@ -153,7 +109,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: model-evidence-event-sharded-${{ github.repository }}-${{ inputs.session }}-${{ inputs.events }}-${{ inputs.max_events }}-${{ inputs.spike_rate_scale }}-${{ github.ref }}
+  group: model-evidence-event-sharded-${{ github.repository }}-${{ inputs.session }}-${{ inputs.events }}-${{ inputs.max_events }}-${{ inputs.spike_rate_scale }}-${{ inputs.emission_likelihood_temperature }}-${{ inputs.emission_negative_binomial_overdispersion }}-${{ inputs.state_space_valid_occupancy_threshold_s }}-${{ github.ref }}
   cancel-in-progress: false
 
 env:
@@ -164,27 +120,27 @@ env:
   MODELS: ${{ inputs.models }}
   EVENT_SHARD_COUNT: ${{ inputs.event_shard_count }}
   CANDIDATE_TOP_K: ${{ inputs.candidate_top_k }}
-  STATIONARY_SIGMA_CM: ${{ inputs.stationary_sigma_cm }}
-  DIFFUSION_SIGMA_CM: ${{ inputs.diffusion_sigma_cm }}
-  MOMENTUM_SIGMA_CM: ${{ inputs.momentum_sigma_cm }}
-  VELOCITY_DECAY: ${{ inputs.velocity_decay }}
-  MODE_STICKINESS: ${{ inputs.mode_stickiness }}
-  STATE_SPACE_STATIONARY_SIGMA_CM: ${{ inputs.state_space_stationary_sigma_cm }}
+  STATIONARY_SIGMA_CM: "2.0"
+  DIFFUSION_SIGMA_CM: "12.0"
+  MOMENTUM_SIGMA_CM: "12.0"
+  VELOCITY_DECAY: "0.95"
+  MODE_STICKINESS: "0.94"
+  STATE_SPACE_STATIONARY_SIGMA_CM: "2.0"
   STATE_SPACE_DIFFUSION_SIGMA_CM_SQRT_S: ${{ inputs.state_space_diffusion_sigma_cm_sqrt_s }}
   STATE_SPACE_MAX_STEP_SIGMA: ${{ inputs.state_space_max_step_sigma }}
-  STATE_SPACE_IMM_MODE_STICKINESS: ${{ inputs.state_space_imm_mode_stickiness }}
-  STATE_SPACE_IMM_SWITCH_TAU_S: ${{ inputs.state_space_imm_switch_tau_s }}
+  STATE_SPACE_IMM_MODE_STICKINESS: "0.95"
+  STATE_SPACE_IMM_SWITCH_TAU_S: "0.060"
   STATE_SPACE_VALID_OCCUPANCY_THRESHOLD_S: ${{ inputs.state_space_valid_occupancy_threshold_s }}
   STATE_SPACE_MOMENTUM_SIGMA_CM_SQRT_S: ${{ inputs.state_space_momentum_sigma_cm_sqrt_s }}
   STATE_SPACE_MOMENTUM_INITIAL_SIGMA_CM_SQRT_S: ${{ inputs.state_space_momentum_initial_sigma_cm_sqrt_s }}
   STATE_SPACE_MOMENTUM_VELOCITY_DECAY: ${{ inputs.state_space_momentum_velocity_decay }}
   STATE_SPACE_MOMENTUM_VELOCITY_DECAY_TAU_S: ${{ inputs.state_space_momentum_velocity_decay_tau_s }}
   STATE_SPACE_MOMENTUM_CANDIDATE_SOURCE: ${{ inputs.state_space_momentum_candidate_source }}
-  STATE_SPACE_COMMON_SUPPORT_TOP_K: ${{ inputs.state_space_common_support_top_k }}
+  STATE_SPACE_COMMON_SUPPORT_TOP_K: "0"
   STATE_SPACE_MOMENTUM_CANDIDATE_TOP_K: ${{ inputs.state_space_momentum_candidate_top_k }}
-  STATE_SPACE_MOMENTUM_CANDIDATE_MASS_THRESHOLD: ${{ inputs.state_space_momentum_candidate_mass_threshold }}
-  STATE_SPACE_MOMENTUM_CANDIDATE_MIN_K: ${{ inputs.state_space_momentum_candidate_min_k }}
-  STATE_SPACE_MOMENTUM_CANDIDATE_MAX_K: ${{ inputs.state_space_momentum_candidate_max_k }}
+  STATE_SPACE_MOMENTUM_CANDIDATE_MASS_THRESHOLD: ""
+  STATE_SPACE_MOMENTUM_CANDIDATE_MIN_K: "1"
+  STATE_SPACE_MOMENTUM_CANDIDATE_MAX_K: "0"
   STATE_SPACE_MOMENTUM_PREDICTED_CANDIDATE_TOP_K: ${{ inputs.state_space_momentum_predicted_candidate_top_k }}
   GOAL_STATE_SPACE_TRANSITION_SIGMA_CM_SQRT_S: "85.0"
   GOAL_STATE_SPACE_DRIFT_SPEED_CM_S: "400.0"
@@ -192,13 +148,15 @@ env:
   CLUSTERLESS_MARK_SMOOTHING_SIGMA_BINS: "1.0"
   CLUSTERLESS_MARK_PRIOR_COUNT: "1.0"
   CLUSTERLESS_MARK_VARIANCE_FLOOR: "1.0"
-  CLUSTERLESS_RATE_FLOOR_HZ: ${{ inputs.clusterless_rate_floor_hz }}
+  CLUSTERLESS_RATE_FLOOR_HZ: "0.0001"
   CLUSTERLESS_MARK_LIKELIHOOD: "local-kde"
   CLUSTERLESS_MARK_KDE_BANDWIDTH: ""
   CLUSTERLESS_MARK_KDE_SPATIAL_SIGMA_BINS: ""
   CLUSTERLESS_MARK_KDE_MAX_NEIGHBORS: "256"
   TIME_BIN_S: ${{ inputs.time_bin_s }}
   SPIKE_RATE_SCALE: ${{ inputs.spike_rate_scale }}
+  EMISSION_LIKELIHOOD_TEMPERATURE: ${{ inputs.emission_likelihood_temperature }}
+  EMISSION_NEGATIVE_BINOMIAL_OVERDISPERSION: ${{ inputs.emission_negative_binomial_overdispersion }}
   BIN_SIZE_CM: ${{ inputs.bin_size_cm }}
   SMOOTHING_SIGMA_BINS: ${{ inputs.smoothing_sigma_bins }}
   MIN_SPEED_CM_S: ${{ inputs.min_speed_cm_s }}
@@ -364,6 +322,8 @@ jobs:
             --clusterless-mark-kde-max-neighbors "${CLUSTERLESS_MARK_KDE_MAX_NEIGHBORS}" \
             --time-bin-s "${TIME_BIN_S}" \
             --spike-rate-scale "${SPIKE_RATE_SCALE}" \
+            --emission-likelihood-temperature "${EMISSION_LIKELIHOOD_TEMPERATURE}" \
+            --emission-negative-binomial-overdispersion "${EMISSION_NEGATIVE_BINOMIAL_OVERDISPERSION}" \
             --bin-size-cm "${BIN_SIZE_CM}" \
             --smoothing-sigma-bins "${SMOOTHING_SIGMA_BINS}" \
             --min-speed-cm-s "${MIN_SPEED_CM_S}" \

@@ -24,6 +24,14 @@ on:
         description: "Synthetic events generated for each true dynamics model"
         required: true
         default: "25"
+      max_synthetic_events:
+        description: "Optional cap on total synthetic events across true models; empty disables"
+        required: false
+        default: ""
+      max_runtime_s:
+        description: "Optional graceful runtime limit in seconds; empty disables"
+        required: false
+        default: ""
       true_models:
         description: "Space-separated true dynamics to simulate"
         required: true
@@ -106,6 +114,8 @@ env:
   EVENTS: ${{ inputs.events }}
   MAX_TEMPLATE_EVENTS: ${{ inputs.max_template_events }}
   EVENTS_PER_MODEL: ${{ inputs.events_per_model }}
+  MAX_SYNTHETIC_EVENTS: ${{ inputs.max_synthetic_events }}
+  MAX_RUNTIME_S: ${{ inputs.max_runtime_s }}
   TRUE_MODELS: ${{ inputs.true_models }}
   MODELS: ${{ inputs.models }}
   RANDOM_SEED: ${{ inputs.random_seed }}
@@ -179,6 +189,13 @@ jobs:
           if [ -n "${STATE_SPACE_MOMENTUM_INITIAL_SIGMA_CM_SQRT_S}" ]; then
             state_space_args+=(--state-space-momentum-initial-sigma-cm-sqrt-s "${STATE_SPACE_MOMENTUM_INITIAL_SIGMA_CM_SQRT_S}")
           fi
+          limit_args=()
+          if [ -n "${MAX_SYNTHETIC_EVENTS}" ]; then
+            limit_args+=(--max-synthetic-events "${MAX_SYNTHETIC_EVENTS}")
+          fi
+          if [ -n "${MAX_RUNTIME_S}" ]; then
+            limit_args+=(--max-runtime-s "${MAX_RUNTIME_S}")
+          fi
           hipporeplayimm simulate-recovery "${DATASET_ROOT}" \
             --session "${SESSION}" \
             --events "${EVENTS}" \
@@ -189,10 +206,13 @@ jobs:
             --random-seed "${RANDOM_SEED}" \
             --time-bin-ms "${TIME_BIN_MS}" \
             "${state_space_args[@]}" \
+            "${limit_args[@]}" \
             --bin-size-cm "${BIN_SIZE_CM}" \
             --smoothing-sigma-bins "${SMOOTHING_SIGMA_BINS}" \
             --min-speed-cm-s "${MIN_SPEED_CM_S}" \
             --output results/simulation-recovery \
+            --checkpoint-output results/simulation-recovery \
+            --progress-log \
             --continue-on-error
 
       - name: Validate simulation recovery outputs
@@ -217,12 +237,24 @@ jobs:
           confusion = pd.read_csv("results/simulation-recovery/simulation_recovery_confusion_matrix.csv")
           true_models = [x for x in os.environ["TRUE_MODELS"].replace(",", " ").split() if x]
           scoring_models = [x for x in os.environ["MODELS"].replace(",", " ").split() if x]
-          expected_rows = len(true_models) * int(os.environ["EVENTS_PER_MODEL"]) * len(scoring_models)
+          planned_events = len(true_models) * int(os.environ["EVENTS_PER_MODEL"])
+          max_synthetic_events = os.environ.get("MAX_SYNTHETIC_EVENTS", "").strip()
+          max_runtime_s = os.environ.get("MAX_RUNTIME_S", "").strip()
+          if max_synthetic_events:
+              planned_events = min(planned_events, int(max_synthetic_events))
+          expected_rows = planned_events * len(scoring_models)
           print(summary.to_string(index=False))
           print("\nConfusion matrix:")
           print(confusion.to_string(index=False))
           print("\nRows:", len(scores))
-          if len(scores) != expected_rows:
+          if max_runtime_s:
+              if len(scores) == 0:
+                  raise SystemExit("Runtime-limited simulation recovery wrote no score rows")
+              if len(scores) > expected_rows:
+                  raise SystemExit(
+                      f"Expected at most {expected_rows} score rows, found {len(scores)}"
+                  )
+          elif len(scores) != expected_rows:
               raise SystemExit(f"Expected {expected_rows} score rows, found {len(scores)}")
           failures = int((scores["status"] != "success").sum())
           print("Failures:", failures)

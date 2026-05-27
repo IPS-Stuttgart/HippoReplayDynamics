@@ -24,6 +24,14 @@ on:
         description: "Synthetic events generated for each true dynamics model"
         required: true
         default: "6"
+      max_synthetic_events:
+        description: "Optional cap on total synthetic events across true models; empty disables"
+        required: false
+        default: ""
+      max_runtime_s:
+        description: "Optional graceful runtime limit in seconds; empty disables"
+        required: false
+        default: ""
       true_models:
         description: "Space-separated true dynamics to simulate"
         required: true
@@ -116,6 +124,8 @@ env:
   MAX_TEMPLATE_EVENTS: ${{ inputs.max_template_events }}
   EVENTS_PER_MODEL: ${{ inputs.events_per_model }}
   TRUE_MODELS: ${{ inputs.true_models }}
+  MAX_SYNTHETIC_EVENTS: ${{ inputs.max_synthetic_events }}
+  MAX_RUNTIME_S: ${{ inputs.max_runtime_s }}
   MODELS: ${{ inputs.models }}
   BASE_RANDOM_SEED: ${{ inputs.random_seed }}
   STATE_SPACE_STATIONARY_SIGMA_CM: ${{ inputs.state_space_stationary_sigma_cm }}
@@ -315,6 +325,13 @@ jobs:
           set -euo pipefail
           out_dir="results/simulation-recovery-sweep/${MATRIX_ID}"
           random_seed=$((BASE_RANDOM_SEED + MATRIX_INDEX))
+          limit_args=()
+          if [ -n "${MAX_SYNTHETIC_EVENTS}" ]; then
+            limit_args+=(--max-synthetic-events "${MAX_SYNTHETIC_EVENTS}")
+          fi
+          if [ -n "${MAX_RUNTIME_S}" ]; then
+            limit_args+=(--max-runtime-s "${MAX_RUNTIME_S}")
+          fi
           hipporeplayimm simulate-recovery "${DATASET_ROOT}" \
             --session "${SESSION}" \
             --events "${EVENTS}" \
@@ -324,6 +341,7 @@ jobs:
             --models "${MODELS}" \
             --random-seed "${random_seed}" \
             --time-bin-ms "${TIME_BIN_MS}" \
+            "${limit_args[@]}" \
             --state-space-stationary-sigma-cm "${STATE_SPACE_STATIONARY_SIGMA_CM}" \
             --state-space-diffusion-sigma-cm-sqrt-s "${STATE_SPACE_DIFFUSION_SIGMA_CM_SQRT_S}" \
             --state-space-max-step-sigma "${STATE_SPACE_MAX_STEP_SIGMA}" \
@@ -338,6 +356,8 @@ jobs:
             --smoothing-sigma-bins "${SMOOTHING_SIGMA_BINS}" \
             --min-speed-cm-s "${MIN_SPEED_CM_S}" \
             --output "${out_dir}" \
+            --checkpoint-output "${out_dir}" \
+            --progress-log \
             --continue-on-error
 
       - name: Annotate recovery outputs
@@ -357,6 +377,8 @@ jobs:
               "events_spec": os.environ["EVENTS"],
               "max_template_events": int(os.environ["MAX_TEMPLATE_EVENTS"]),
               "events_per_model": int(os.environ["EVENTS_PER_MODEL"]),
+              "max_synthetic_events": os.environ["MAX_SYNTHETIC_EVENTS"],
+              "max_runtime_s": os.environ["MAX_RUNTIME_S"],
               "true_models_requested": os.environ["TRUE_MODELS"],
               "models_requested": os.environ["MODELS"],
               "state_space_stationary_sigma_cm": float(os.environ["STATE_SPACE_STATIONARY_SIGMA_CM"]),

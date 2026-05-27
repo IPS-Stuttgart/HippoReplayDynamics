@@ -61,6 +61,9 @@ PARAMETER_COLUMNS = [
 SESSION_COLUMN_CANDIDATES = ["requested_session", "session"]
 
 EVIDENCE_COUNT_COLUMNS = [
+    "momentum_confidence_claim_events",
+    "momentum_confidence_reference_events",
+    "momentum_confidence_ambiguous_events",
     "momentum_beats_diffusion_log5_events",
     "momentum_ambiguous_vs_diffusion_log5_events",
     "momentum_beats_diffusion_events",
@@ -108,6 +111,7 @@ def select_parameters(
     recovery: str | Path,
     *,
     output: str | Path,
+    confidence_evidence: str | Path | None = None,
     min_momentum_recovery_accuracy: float = 0.5,
     min_overall_recovery_accuracy: float = 0.5,
     max_failures: int = 0,
@@ -119,6 +123,11 @@ def select_parameters(
 ) -> dict[str, pd.DataFrame]:
     evidence_frame = _load_table(evidence, "state_space_evidence_sweep_config_ranked.csv")
     recovery_frame = _load_table(recovery, "simulation_recovery_sweep_config_ranked.csv")
+    if confidence_evidence is not None:
+        evidence_frame = _merge_confidence_evidence(
+            evidence_frame,
+            _load_confidence_evidence(confidence_evidence),
+        )
 
     tables = _select_from_frames(
         evidence_frame,
@@ -159,6 +168,7 @@ def select_parameters(
     _write_selection_manifest(
         evidence=evidence,
         recovery=recovery,
+        confidence_evidence=confidence_evidence,
         output_dir=out_dir,
         decision=ranked,
         candidates=candidates,
@@ -501,9 +511,52 @@ def _load_table(path: str | Path, default_name: str) -> pd.DataFrame:
     return frame
 
 
+def _load_confidence_evidence(path: str | Path) -> pd.DataFrame:
+    path = Path(path)
+    if path.is_dir():
+        path = path / "momentum_confidence_threshold_evidence_by_stratum.csv"
+    if not path.exists():
+        raise FileNotFoundError(f"{path} does not exist")
+    frame = pd.read_csv(path)
+    if "matrix_id" not in frame.columns:
+        raise ValueError(f"{path} must include a matrix_id column")
+    return frame
+
+
+def _merge_confidence_evidence(evidence: pd.DataFrame, confidence: pd.DataFrame) -> pd.DataFrame:
+    if "matrix_id" not in evidence.columns:
+        raise ValueError("Cannot merge calibrated confidence evidence: evidence table lacks matrix_id")
+    columns = {
+        "matrix_id": "matrix_id",
+        "margin_threshold": "momentum_confidence_threshold",
+        "positive_model_claims": "momentum_confidence_claim_events",
+        "reference_model_claims": "momentum_confidence_reference_events",
+        "ambiguous_events": "momentum_confidence_ambiguous_events",
+        "positive_claim_fraction": "momentum_confidence_claim_event_fraction",
+    }
+    available = {source: target for source, target in columns.items() if source in confidence.columns}
+    if "positive_model_claims" not in available:
+        raise ValueError("confidence evidence must include positive_model_claims")
+    confidence_subset = confidence[list(available)].rename(columns=available)
+    if confidence_subset["matrix_id"].duplicated().any():
+        duplicates = sorted(confidence_subset.loc[confidence_subset["matrix_id"].duplicated(), "matrix_id"].astype(str).unique())
+        raise ValueError(f"confidence evidence has duplicate matrix_id rows: {duplicates}")
+    merged = evidence.merge(confidence_subset, on="matrix_id", how="left", validate="one_to_one")
+    missing = merged["momentum_confidence_claim_events"].isna()
+    if missing.any():
+        missing_ids = sorted(merged.loc[missing, "matrix_id"].astype(str).unique())
+        raise ValueError(f"confidence evidence is missing matrix_id rows: {missing_ids}")
+    return merged
+
+
 def _prepare_evidence(frame: pd.DataFrame) -> pd.DataFrame:
     frame = frame.copy()
     _normalize_parameter_columns(frame)
+    if "events" in frame and "momentum_confidence_claim_events" in frame:
+        events = frame["events"].replace(0, pd.NA)
+        frame["momentum_confidence_claim_event_fraction"] = (
+            frame["momentum_confidence_claim_events"] / events
+        )
     if "events" in frame and "momentum_beats_diffusion_log5_events" in frame:
         events = frame["events"].replace(0, pd.NA)
         frame["momentum_beats_diffusion_log5_event_fraction"] = (
@@ -517,6 +570,11 @@ def _prepare_evidence(frame: pd.DataFrame) -> pd.DataFrame:
         for col in [
             "matrix_id",
             "events",
+            "momentum_confidence_threshold",
+            "momentum_confidence_claim_events",
+            "momentum_confidence_claim_event_fraction",
+            "momentum_confidence_reference_events",
+            "momentum_confidence_ambiguous_events",
             "momentum_beats_diffusion_log5_events",
             "momentum_beats_diffusion_log5_event_fraction",
             "momentum_ambiguous_vs_diffusion_log5_events",
@@ -623,6 +681,10 @@ def _aggregate_evidence(frame: pd.DataFrame) -> pd.DataFrame:
             if col in group:
                 row[col] = int(pd.to_numeric(group[col], errors="coerce").fillna(0).sum())
         if "events" in row and row["events"]:
+            if "momentum_confidence_claim_events" in row:
+                row["momentum_confidence_claim_event_fraction"] = (
+                    row["momentum_confidence_claim_events"] / row["events"]
+                )
             if "momentum_beats_diffusion_log5_events" in row:
                 row["momentum_beats_diffusion_log5_event_fraction"] = (
                     row["momentum_beats_diffusion_log5_events"] / row["events"]
@@ -630,6 +692,10 @@ def _aggregate_evidence(frame: pd.DataFrame) -> pd.DataFrame:
             if "momentum_beats_diffusion_events" in row:
                 row["momentum_beats_diffusion_event_fraction"] = row["momentum_beats_diffusion_events"] / row["events"]
         else:
+            if "momentum_confidence_claim_event_fraction" in group:
+                row["momentum_confidence_claim_event_fraction"] = _weighted_average(
+                    group["momentum_confidence_claim_event_fraction"]
+                )
             if "momentum_beats_diffusion_log5_event_fraction" in group:
                 row["momentum_beats_diffusion_log5_event_fraction"] = _weighted_average(
                     group["momentum_beats_diffusion_log5_event_fraction"]
@@ -721,6 +787,7 @@ def _rank_decision_table(frame: pd.DataFrame) -> pd.DataFrame:
         "momentum_recovery_accuracy",
         "overall_recovery_accuracy",
         "diffusion_recovery_accuracy",
+        "momentum_confidence_claim_event_fraction",
         "momentum_beats_diffusion_log5_event_fraction",
         "momentum_beats_diffusion_event_fraction",
         "median_momentum_minus_diffusion_log_evidence",
@@ -735,6 +802,7 @@ def _rank_decision_table(frame: pd.DataFrame) -> pd.DataFrame:
         "momentum_recovery_accuracy": False,
         "overall_recovery_accuracy": False,
         "diffusion_recovery_accuracy": False,
+        "momentum_confidence_claim_event_fraction": False,
         "momentum_beats_diffusion_log5_event_fraction": False,
         "momentum_beats_diffusion_event_fraction": False,
         "median_momentum_minus_diffusion_log_evidence": False,
@@ -803,6 +871,7 @@ def _write_selection_manifest(
     *,
     evidence: str | Path,
     recovery: str | Path,
+    confidence_evidence: str | Path | None,
     output_dir: Path,
     decision: pd.DataFrame,
     candidates: pd.DataFrame,
@@ -823,6 +892,7 @@ def _write_selection_manifest(
         "input_paths": {
             "evidence": str(evidence),
             "recovery": str(recovery),
+            "confidence_evidence": None if confidence_evidence is None else str(confidence_evidence),
         },
         "recovery_gate": {
             "requested_metric": recovery_gate_metric,
@@ -918,6 +988,14 @@ def main() -> int:
     )
     parser.add_argument("--evidence", required=True, help="Evidence sweep summary directory or ranked CSV")
     parser.add_argument("--recovery", required=True, help="Simulation-recovery sweep summary directory or ranked CSV")
+    parser.add_argument(
+        "--confidence-evidence",
+        help=(
+            "Optional calibrated confidence-threshold evidence summary from "
+            "select_momentum_confidence_threshold.py. When provided, ranking "
+            "prefers the calibrated confident momentum-claim fraction."
+        ),
+    )
     parser.add_argument("--output", default="results/state-space-parameter-selection")
     parser.add_argument("--min-momentum-recovery-accuracy", type=float, default=0.5)
     parser.add_argument("--min-overall-recovery-accuracy", type=float, default=0.5)
@@ -957,6 +1035,7 @@ def main() -> int:
         args.evidence,
         args.recovery,
         output=args.output,
+        confidence_evidence=args.confidence_evidence,
         min_momentum_recovery_accuracy=args.min_momentum_recovery_accuracy,
         min_overall_recovery_accuracy=args.min_overall_recovery_accuracy,
         max_failures=args.max_failures,

@@ -193,6 +193,102 @@ def test_select_parameters_prefers_confident_momentum_wins(tmp_path):
     assert recommendation["momentum_beats_diffusion_event_fraction"] == 0.7
 
 
+def test_select_parameters_prefers_calibrated_confidence_threshold(tmp_path):
+    evidence = tmp_path / "evidence"
+    recovery = tmp_path / "recovery"
+    confidence = tmp_path / "confidence"
+    output = tmp_path / "selection"
+    stronger_fixed_log5 = _params(85.0, 85.0, 85.0, 0.95, 128)
+    stronger_calibrated_threshold = _params(60.0, 85.0, 85.0, 0.95, 128)
+    _write(
+        evidence,
+        "state_space_evidence_sweep_config_ranked.csv",
+        [
+            {
+                **stronger_fixed_log5,
+                "matrix_id": "evidence-log5",
+                "events": 10,
+                "momentum_beats_diffusion_events": 9,
+                "momentum_beats_diffusion_log5_events": 7,
+                "median_momentum_minus_diffusion_log_evidence": 8.0,
+                "mean_momentum_minus_diffusion_log_evidence": 9.0,
+            },
+            {
+                **stronger_calibrated_threshold,
+                "matrix_id": "evidence-calibrated",
+                "events": 10,
+                "momentum_beats_diffusion_events": 8,
+                "momentum_beats_diffusion_log5_events": 6,
+                "median_momentum_minus_diffusion_log_evidence": 7.0,
+                "mean_momentum_minus_diffusion_log_evidence": 8.0,
+            },
+        ],
+    )
+    _write(
+        recovery,
+        "simulation_recovery_sweep_config_ranked.csv",
+        [
+            {
+                **stronger_fixed_log5,
+                "matrix_id": "recovery-log5",
+                "failures": 0,
+                "overall_recovery_accuracy": 1.0,
+                "momentum_recovery_accuracy": 1.0,
+                "diffusion_recovery_accuracy": 1.0,
+            },
+            {
+                **stronger_calibrated_threshold,
+                "matrix_id": "recovery-calibrated",
+                "failures": 0,
+                "overall_recovery_accuracy": 1.0,
+                "momentum_recovery_accuracy": 1.0,
+                "diffusion_recovery_accuracy": 1.0,
+            },
+        ],
+    )
+    _write(
+        confidence,
+        "momentum_confidence_threshold_evidence_by_stratum.csv",
+        [
+            {
+                "matrix_id": "evidence-log5",
+                "margin_threshold": 6.0,
+                "events": 10,
+                "positive_model_claims": 3,
+                "reference_model_claims": 0,
+                "ambiguous_events": 7,
+                "positive_claim_fraction": 0.3,
+            },
+            {
+                "matrix_id": "evidence-calibrated",
+                "margin_threshold": 6.0,
+                "events": 10,
+                "positive_model_claims": 5,
+                "reference_model_claims": 0,
+                "ambiguous_events": 5,
+                "positive_claim_fraction": 0.5,
+            },
+        ],
+    )
+
+    tables = select_parameters(
+        evidence,
+        recovery,
+        output=output,
+        confidence_evidence=confidence,
+        force_strict_recovery_gate=True,
+    )
+
+    recommendation = tables["recommendation"].iloc[0]
+    assert recommendation["evidence_matrix_id"] == "evidence-calibrated"
+    assert recommendation["momentum_confidence_threshold"] == 6.0
+    assert recommendation["momentum_confidence_claim_events"] == 5
+    assert recommendation["momentum_confidence_claim_event_fraction"] == 0.5
+    assert recommendation["momentum_beats_diffusion_log5_event_fraction"] == 0.6
+    manifest = json.loads((output / "state_space_parameter_selection_manifest.json").read_text(encoding="utf-8"))
+    assert manifest["input_paths"]["confidence_evidence"] == str(confidence)
+
+
 def test_select_parameters_keeps_observation_calibration_dimensions_separate(tmp_path):
     evidence = tmp_path / "evidence"
     recovery = tmp_path / "recovery"

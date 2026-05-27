@@ -13,8 +13,16 @@ def test_select_state_space_parameters_workflow_downloads_summaries_and_uploads_
     assert "recovery_gate_metric:" in workflow
     assert "certified-vs-exact" in workflow
     assert "RECOVERY_GATE_METRIC" in workflow
+    assert "calibrate_confidence_threshold:" in workflow
+    assert "confidence_threshold_values:" in workflow
+    assert "CONFIDENCE_THRESHOLD_VALUES" in workflow
+    assert "scripts/select_momentum_confidence_threshold.py" in workflow
+    assert "momentum-confidence-threshold" in workflow
+    assert "--confidence-evidence" in workflow
+    assert "PYTHONPATH: src" in workflow
     assert "actions/upload-artifact@v7" in workflow
     assert "actions/upload-artifact@v4" not in workflow
+    assert "python -m pip install pandas numpy scipy" in workflow
     assert "scripts/select_state_space_parameters.py" in workflow
     assert "--min-momentum-recovery-accuracy" in workflow
     assert "--min-overall-recovery-accuracy" in workflow

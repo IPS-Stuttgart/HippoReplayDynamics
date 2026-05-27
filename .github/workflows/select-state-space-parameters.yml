@@ -40,6 +40,22 @@ on:
         description: "Recovery metric used for the selection gate: auto, strict, or certified-vs-exact"
         required: true
         default: "certified-vs-exact"
+      calibrate_confidence_threshold:
+        description: "Calibrate a momentum-vs-diffusion confidence threshold from recovery and use it for selection"
+        required: true
+        default: "true"
+      confidence_threshold_values:
+        description: "Whitespace-separated log-evidence thresholds to evaluate when calibration is enabled"
+        required: true
+        default: "0 1 2 3 4 5 6 7 8 9 10"
+      confidence_max_false_positive_claims:
+        description: "Maximum diffusion-generated false momentum claims allowed when selecting the confidence threshold"
+        required: true
+        default: "0"
+      confidence_min_positive_claim_recall:
+        description: "Minimum momentum-generated positive-claim recall required when selecting the confidence threshold"
+        required: true
+        default: "0.0"
       output_dir:
         description: "Output directory for parameter-selection CSVs"
         required: true
@@ -63,7 +79,12 @@ env:
   MIN_OVERALL_RECOVERY_ACCURACY: ${{ inputs.min_overall_recovery_accuracy }}
   MAX_FAILURES: ${{ inputs.max_failures }}
   RECOVERY_GATE_METRIC: ${{ inputs.recovery_gate_metric }}
+  CALIBRATE_CONFIDENCE_THRESHOLD: ${{ inputs.calibrate_confidence_threshold }}
+  CONFIDENCE_THRESHOLD_VALUES: ${{ inputs.confidence_threshold_values }}
+  CONFIDENCE_MAX_FALSE_POSITIVE_CLAIMS: ${{ inputs.confidence_max_false_positive_claims }}
+  CONFIDENCE_MIN_POSITIVE_CLAIM_RECALL: ${{ inputs.confidence_min_positive_claim_recall }}
   OUTPUT_DIR: ${{ inputs.output_dir }}
+  PYTHONPATH: src
 
 jobs:
   select:
@@ -80,6 +101,10 @@ jobs:
             auto|strict|certified-vs-exact) ;;
             *) echo "::error ::Invalid recovery_gate_metric: $RECOVERY_GATE_METRIC"; exit 1 ;;
           esac
+          case "$CALIBRATE_CONFIDENCE_THRESHOLD" in
+            true|false) ;;
+            *) echo "::error ::Invalid calibrate_confidence_threshold: $CALIBRATE_CONFIDENCE_THRESHOLD"; exit 1 ;;
+          esac
 
       - name: Check out repository
         uses: actions/checkout@v6
@@ -92,7 +117,7 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          python -m pip install pandas
+          python -m pip install pandas numpy scipy
 
       - name: Download evidence sweep summary
         uses: actions/download-artifact@v7
@@ -114,9 +139,23 @@ jobs:
 
       - name: Select state-space parameters
         run: |
+          confidence_args=()
+          if [ "$CALIBRATE_CONFIDENCE_THRESHOLD" = "true" ]; then
+            python scripts/select_momentum_confidence_threshold.py \
+              --recovery-scores artifacts/recovery \
+              --evidence-scores artifacts/evidence \
+              --output "$OUTPUT_DIR/momentum-confidence-threshold" \
+              --thresholds "$CONFIDENCE_THRESHOLD_VALUES" \
+              --max-false-positive-claims "$CONFIDENCE_MAX_FALSE_POSITIVE_CLAIMS" \
+              --min-positive-claim-recall "$CONFIDENCE_MIN_POSITIVE_CLAIM_RECALL"
+            test -f "$OUTPUT_DIR/momentum-confidence-threshold/momentum_confidence_threshold_selection.csv"
+            test -f "$OUTPUT_DIR/momentum-confidence-threshold/momentum_confidence_threshold_evidence_by_stratum.csv"
+            confidence_args=(--confidence-evidence "$OUTPUT_DIR/momentum-confidence-threshold")
+          fi
           python scripts/select_state_space_parameters.py \
             --evidence artifacts/evidence \
             --recovery artifacts/recovery \
+            "${confidence_args[@]}" \
             --output "$OUTPUT_DIR" \
             --min-momentum-recovery-accuracy "$MIN_MOMENTUM_RECOVERY_ACCURACY" \
             --min-overall-recovery-accuracy "$MIN_OVERALL_RECOVERY_ACCURACY" \
@@ -133,10 +172,4 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: state-space-parameter-selection-${{ github.run_id }}
-          path: |
-            ${{ env.OUTPUT_DIR }}/state_space_parameter_decision_table.csv
-            ${{ env.OUTPUT_DIR }}/state_space_parameter_candidates.csv
-            ${{ env.OUTPUT_DIR }}/state_space_parameter_recommendation.csv
-            ${{ env.OUTPUT_DIR }}/state_space_parameter_selection_manifest.json
-            ${{ env.OUTPUT_DIR }}/state_space_selected_workflow_inputs.yml
-            ${{ env.OUTPUT_DIR }}/state_space_selected_cli_args.txt
+          path: ${{ env.OUTPUT_DIR }}

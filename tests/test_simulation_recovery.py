@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 import numpy as np
@@ -6,6 +7,7 @@ import pandas as pd
 from hipporeplayimm.encoding import EncodingConfig, EncodingModel
 from hipporeplayimm.simulation_recovery import (
     SimulationRecoveryConfig,
+    _SimulationRecoveryProgress,
     add_evidence_columns,
     certified_vs_exact_event_recovery,
     certified_vs_exact_recovery_summary,
@@ -303,6 +305,74 @@ def test_simulation_recovery_checkpoint_writes_partial_outputs(tmp_path):
     assert summary.loc[summary["true_model"] == "momentum", "recovered_events"].iloc[0] == 1
     assert "checkpoint_status: running" in settings
     assert "checkpoint_completed_synthetic_events: 1" in settings
+
+
+def test_simulation_recovery_progress_writes_partial_artifacts(tmp_path, capsys):
+    progress = _SimulationRecoveryProgress(
+        output=tmp_path,
+        total_events=2,
+        scoring_model_count=2,
+        true_state_space=StateSpaceDecoderConfig(diffusion_sigma_cm_sqrt_s=85.0),
+        scoring_state_space=StateSpaceDecoderConfig(diffusion_sigma_cm_sqrt_s=85.0),
+        progress_log=True,
+    )
+    progress.update_current(
+        true_model="momentum",
+        synthetic_event=1,
+        synthetic_events_for_model=2,
+        simulation_event_index=0,
+        template_event_index=7,
+        scoring_model="sorted-spike-state-space-momentum-exact-sparse",
+        status="running",
+    )
+    rows = [
+        _row(
+            0,
+            "momentum",
+            "sorted-spike-state-space-diffusion",
+            -2.0,
+            simulation_event_index=0,
+        ),
+        _row(
+            0,
+            "momentum",
+            "sorted-spike-state-space-momentum-exact-sparse",
+            -1.0,
+            simulation_event_index=0,
+        ),
+    ]
+
+    progress.write_model_scores(rows)
+    progress.complete_event(rows, failed=False)
+
+    manifest = json.loads(
+        (tmp_path / "simulation_recovery_partial_manifest.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    event_scores = pd.read_csv(
+        tmp_path / "simulation_recovery_partial_event_scores.csv"
+    )
+    model_scores = pd.read_csv(
+        tmp_path / "simulation_recovery_partial_model_scores.csv"
+    )
+    log = capsys.readouterr().out
+
+    assert manifest["completed_events"] == 1
+    assert manifest["failed_events"] == 0
+    assert manifest["current_true_model"] == "momentum"
+    assert manifest["current_template_event"] == 7
+    assert manifest["current_scoring_model"] == ""
+    assert event_scores["simulation_event_index"].tolist() == [0, 0]
+    assert model_scores["simulation_event_index"].tolist() == [0, 0]
+    assert "true_state_space_diffusion_sigma_cm_sqrt_s" in event_scores.columns
+    assert event_scores["best_model"].iloc[0] == (
+        "sorted-spike-state-space-momentum-exact-sparse"
+    )
+    assert (
+        "[recovery] true_model=momentum synthetic_event=1/2 "
+        "scoring_model=sorted-spike-state-space-momentum-exact-sparse"
+    ) in log
 
 
 def _row(event_index: int, true_model: str, model: str, log_evidence: float, **extra: object) -> dict[str, object]:

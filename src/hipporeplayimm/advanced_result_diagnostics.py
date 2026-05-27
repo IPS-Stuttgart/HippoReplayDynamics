@@ -264,6 +264,115 @@ def paired_model_margin_decisions(
     return pd.DataFrame(rows, columns=columns)
 
 
+def infer_paired_model_group_cols(scores: pd.DataFrame) -> tuple[str, ...]:
+    """Infer columns that define one paired model-decision event.
+
+    Summary artifacts often contain multiple matrix cells or synthetic seeds in
+    one table.  Including those identifiers prevents post-hoc paired diagnostics
+    from mixing evidence across calibration settings.
+    """
+
+    columns: list[str] = []
+    for candidate in ("matrix_id", "random_seed", "session"):
+        if candidate in scores.columns:
+            columns.append(candidate)
+    if "simulation_event_index" in scores.columns:
+        columns.append("simulation_event_index")
+    elif "event_index" in scores.columns:
+        columns.append("event_index")
+    if not columns:
+        raise KeyError("could not infer paired event grouping columns")
+    return tuple(columns)
+
+
+def paired_model_margin_threshold_sweep(
+    scores: pd.DataFrame,
+    *,
+    positive_model: str,
+    reference_model: str,
+    thresholds: Sequence[float],
+    group_cols: Sequence[str] | None = None,
+    evidence_col: str = "log_evidence",
+    model_col: str = "model",
+    true_model_col: str | None = None,
+    positive_true_label: str | None = None,
+) -> pd.DataFrame:
+    """Summarize paired margin decisions over candidate thresholds."""
+
+    paired_group_cols = tuple(group_cols) if group_cols is not None else infer_paired_model_group_cols(scores)
+    rows: list[pd.DataFrame] = []
+    for threshold in thresholds:
+        decisions = paired_model_margin_decisions(
+            scores,
+            positive_model=positive_model,
+            reference_model=reference_model,
+            margin_threshold=float(threshold),
+            group_cols=paired_group_cols,
+            evidence_col=evidence_col,
+            model_col=model_col,
+            true_model_col=true_model_col,
+            positive_true_label=positive_true_label,
+        )
+        summary = paired_model_margin_summary(decisions, true_model_col=true_model_col)
+        summary["group_cols"] = ",".join(paired_group_cols)
+        rows.append(summary)
+    if not rows:
+        return pd.DataFrame()
+    out = pd.concat(rows, ignore_index=True)
+    return out.sort_values("margin_threshold", kind="stable").reset_index(drop=True)
+
+
+def select_paired_model_margin_threshold(
+    threshold_sweep: pd.DataFrame,
+    *,
+    max_false_positive_claims: int = 0,
+    min_positive_claim_recall: float = 0.0,
+) -> pd.DataFrame:
+    """Select the smallest threshold satisfying synthetic specificity gates.
+
+    If no threshold satisfies the gates, the best available fallback is returned
+    with ``selection_status='fallback_no_gate_pass'`` so downstream reports can
+    fail visibly instead of silently using an unsafe threshold.
+    """
+
+    if threshold_sweep.empty:
+        return pd.DataFrame(
+            [
+                {
+                    "selection_status": "empty_threshold_sweep",
+                    "selected_margin_threshold": np.nan,
+                }
+            ]
+        )
+    if "false_positive_claims" not in threshold_sweep or "positive_claim_recall" not in threshold_sweep:
+        raise KeyError("threshold_sweep must include true-model false-positive and recall columns")
+
+    sweep = threshold_sweep.copy()
+    sweep["passes_threshold_gate"] = (
+        pd.to_numeric(sweep["false_positive_claims"], errors="coerce").fillna(np.inf) <= max_false_positive_claims
+    ) & (
+        pd.to_numeric(sweep["positive_claim_recall"], errors="coerce").fillna(-np.inf) >= min_positive_claim_recall
+    )
+    if sweep["passes_threshold_gate"].any():
+        selected = sweep[sweep["passes_threshold_gate"]].sort_values("margin_threshold", kind="stable").head(1).copy()
+        selected["selection_status"] = "passed_specificity_gate"
+    else:
+        selected = (
+            sweep.sort_values(
+                ["false_positive_claims", "positive_claim_recall", "margin_threshold"],
+                ascending=[True, False, True],
+                kind="stable",
+            )
+            .head(1)
+            .copy()
+        )
+        selected["selection_status"] = "fallback_no_gate_pass"
+    selected["selected_margin_threshold"] = selected["margin_threshold"].astype(float)
+    selected["max_false_positive_claims"] = int(max_false_positive_claims)
+    selected["min_positive_claim_recall"] = float(min_positive_claim_recall)
+    return selected.reset_index(drop=True)
+
+
 def paired_model_margin_summary(
     decisions: pd.DataFrame,
     *,

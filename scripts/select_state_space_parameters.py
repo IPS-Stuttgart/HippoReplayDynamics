@@ -24,12 +24,18 @@ OPTIONAL_PARAMETER_DEFAULTS = {
     # Older recovery/evidence artifacts predate these support controls.  Default
     # them explicitly so historical rows remain loadable while new sweeps are
     # not accidentally pooled across different candidate-support mechanisms.
+    "state_space_max_step_sigma": 4.0,
+    "state_space_valid_occupancy_threshold_s": 0.0,
     "state_space_momentum_predicted_candidate_top_k": 8,
     "state_space_momentum_candidate_source": "emission",
     "state_space_displacement_radius_bins": 2,
     "state_space_displacement_position_sigma_cm": 0.0,
     "state_space_displacement_transition_sigma_cm_sqrt_s": 0.0,
     "state_space_displacement_prior_sigma_cm": 0.0,
+    "time_bin_s": 0.003,
+    "spike_rate_scale": 1.0,
+    "emission_likelihood_temperature": 1.0,
+    "emission_negative_binomial_overdispersion": 0.0,
 }
 INTEGER_PARAMETER_COLUMNS = {
     "state_space_momentum_candidate_top_k",
@@ -38,17 +44,25 @@ INTEGER_PARAMETER_COLUMNS = {
 }
 PARAMETER_COLUMNS = [
     *BASE_PARAMETER_COLUMNS,
+    "state_space_max_step_sigma",
+    "state_space_valid_occupancy_threshold_s",
     "state_space_momentum_predicted_candidate_top_k",
     "state_space_momentum_candidate_source",
     "state_space_displacement_radius_bins",
     "state_space_displacement_position_sigma_cm",
     "state_space_displacement_transition_sigma_cm_sqrt_s",
     "state_space_displacement_prior_sigma_cm",
+    "time_bin_s",
+    "spike_rate_scale",
+    "emission_likelihood_temperature",
+    "emission_negative_binomial_overdispersion",
 ]
 
 SESSION_COLUMN_CANDIDATES = ["requested_session", "session"]
 
 EVIDENCE_COUNT_COLUMNS = [
+    "momentum_beats_diffusion_log5_events",
+    "momentum_ambiguous_vs_diffusion_log5_events",
     "momentum_beats_diffusion_events",
     "momentum_beats_imm_events",
 ]
@@ -283,8 +297,16 @@ def _build_decision_table(
         ),
         errors="coerce",
     ).fillna(0)
+    momentum_best_model = decision.get(
+        "momentum_most_common_best_model",
+        pd.Series("", index=decision.index),
+    ).fillna("").astype(str)
+    exact_sparse_momentum_best = momentum_best_model.str.contains(
+        "momentum-exact-sparse",
+        regex=False,
+    )
     certified_columns_available = _certified_recovery_columns_available(decision)
-    decision["uses_candidate_pruned_momentum"] = candidate_top_k > 0
+    decision["uses_candidate_pruned_momentum"] = (candidate_top_k > 0) & ~exact_sparse_momentum_best
     decision["certified_recovery_columns_available"] = bool(certified_columns_available)
     decision["recovery_gate_warning"] = ""
     strict_candidate_rows = (
@@ -468,6 +490,8 @@ def _load_table(path: str | Path, default_name: str) -> pd.DataFrame:
     if not path.exists():
         raise FileNotFoundError(f"{path} does not exist")
     frame = pd.read_csv(path)
+    if "time_bin_s" not in frame.columns and "time_bin_ms" in frame.columns:
+        frame["time_bin_s"] = pd.to_numeric(frame["time_bin_ms"], errors="raise") / 1000.0
     missing = set(BASE_PARAMETER_COLUMNS) - set(frame.columns)
     if missing:
         raise ValueError(f"{path} is missing required parameter columns: {sorted(missing)}")
@@ -480,6 +504,11 @@ def _load_table(path: str | Path, default_name: str) -> pd.DataFrame:
 def _prepare_evidence(frame: pd.DataFrame) -> pd.DataFrame:
     frame = frame.copy()
     _normalize_parameter_columns(frame)
+    if "events" in frame and "momentum_beats_diffusion_log5_events" in frame:
+        events = frame["events"].replace(0, pd.NA)
+        frame["momentum_beats_diffusion_log5_event_fraction"] = (
+            frame["momentum_beats_diffusion_log5_events"] / events
+        )
     if "events" in frame and "momentum_beats_diffusion_events" in frame:
         events = frame["events"].replace(0, pd.NA)
         frame["momentum_beats_diffusion_event_fraction"] = frame["momentum_beats_diffusion_events"] / events
@@ -488,6 +517,9 @@ def _prepare_evidence(frame: pd.DataFrame) -> pd.DataFrame:
         for col in [
             "matrix_id",
             "events",
+            "momentum_beats_diffusion_log5_events",
+            "momentum_beats_diffusion_log5_event_fraction",
+            "momentum_ambiguous_vs_diffusion_log5_events",
             "momentum_beats_diffusion_events",
             "momentum_beats_diffusion_event_fraction",
             "mean_momentum_minus_diffusion_log_evidence",
@@ -591,12 +623,21 @@ def _aggregate_evidence(frame: pd.DataFrame) -> pd.DataFrame:
             if col in group:
                 row[col] = int(pd.to_numeric(group[col], errors="coerce").fillna(0).sum())
         if "events" in row and row["events"]:
+            if "momentum_beats_diffusion_log5_events" in row:
+                row["momentum_beats_diffusion_log5_event_fraction"] = (
+                    row["momentum_beats_diffusion_log5_events"] / row["events"]
+                )
             if "momentum_beats_diffusion_events" in row:
                 row["momentum_beats_diffusion_event_fraction"] = row["momentum_beats_diffusion_events"] / row["events"]
-        elif "momentum_beats_diffusion_event_fraction" in group:
-            row["momentum_beats_diffusion_event_fraction"] = _weighted_average(
-                group["momentum_beats_diffusion_event_fraction"]
-            )
+        else:
+            if "momentum_beats_diffusion_log5_event_fraction" in group:
+                row["momentum_beats_diffusion_log5_event_fraction"] = _weighted_average(
+                    group["momentum_beats_diffusion_log5_event_fraction"]
+                )
+            if "momentum_beats_diffusion_event_fraction" in group:
+                row["momentum_beats_diffusion_event_fraction"] = _weighted_average(
+                    group["momentum_beats_diffusion_event_fraction"]
+                )
         weights = group["events"] if "events" in group else None
         for col in EVIDENCE_MEAN_COLUMNS:
             if col in group:
@@ -680,6 +721,7 @@ def _rank_decision_table(frame: pd.DataFrame) -> pd.DataFrame:
         "momentum_recovery_accuracy",
         "overall_recovery_accuracy",
         "diffusion_recovery_accuracy",
+        "momentum_beats_diffusion_log5_event_fraction",
         "momentum_beats_diffusion_event_fraction",
         "median_momentum_minus_diffusion_log_evidence",
         "mean_momentum_minus_diffusion_log_evidence",
@@ -693,6 +735,7 @@ def _rank_decision_table(frame: pd.DataFrame) -> pd.DataFrame:
         "momentum_recovery_accuracy": False,
         "overall_recovery_accuracy": False,
         "diffusion_recovery_accuracy": False,
+        "momentum_beats_diffusion_log5_event_fraction": False,
         "momentum_beats_diffusion_event_fraction": False,
         "median_momentum_minus_diffusion_log_evidence": False,
         "mean_momentum_minus_diffusion_log_evidence": False,

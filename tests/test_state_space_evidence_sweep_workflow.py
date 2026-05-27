@@ -54,6 +54,9 @@ def test_state_space_evidence_sweep_workflow_defines_parameter_grid_and_summary_
     assert "state_space_marginalized_model_evidence_summary.csv" in workflow
     assert "state_space_marginalized_prior_weights.csv" in workflow
     assert "momentum_minus_diffusion_log_evidence" in workflow
+    assert "MOMENTUM_CONFIDENT_LOG_EVIDENCE_THRESHOLD = 5.0" in workflow
+    assert "momentum_beats_diffusion_log5_events" in workflow
+    assert "momentum_ambiguous_vs_diffusion_log5_events" in workflow
     assert 'momentum_col = "sorted-spike-state-space-momentum-exact-sparse"' in workflow
     assert "pattern: state-space-evidence-sweep-*" in workflow
     assert _workflow_dispatch_input_count(workflow) <= 25

@@ -40,6 +40,7 @@ def _score_state_space_duration_with_occupancy(
     candidate_indices=None,
     *,
     occupancy_s=None,
+    return_trajectory: bool = True,
 ):
     import hipporeplayimm.state_space as ss
 
@@ -58,6 +59,7 @@ def _score_state_space_duration_with_occupancy(
     attach_duration_metadata(emissions)
 
     extra: dict[str, float | int | str] = {}
+    terminal = None
     if self.mode == "stationary":
         logp, trajectory = ss._score_stationary(emissions, valid_bin_mask=valid_bin_mask)
         transition_sigma_cm = 0.0
@@ -162,12 +164,13 @@ def _score_state_space_duration_with_occupancy(
     elif self.mode == "momentum-exact-sparse":
         from .state_space_sparse_momentum import _score_sparse_momentum_exact
 
-        logp, trajectory, sparse_extra = _score_sparse_momentum_exact(
+        logp, trajectory, terminal, sparse_extra = _score_sparse_momentum_exact(
             emissions,
             bin_centers,
             self.config,
             durations,
             valid_bin_mask=valid_bin_mask,
+            return_trajectory=return_trajectory,
         )
         transition_sigma_cm = float(
             sparse_extra["state_space_momentum_transition_sigma_cm"]
@@ -294,12 +297,21 @@ def _score_state_space_duration_with_occupancy(
     else:  # pragma: no cover - StateSpaceReplayModel.__post_init__ validates this.
         raise ValueError(f"Unsupported state-space mode: {self.mode}")
 
-    terminal = trajectory[-1]
+    if trajectory is not None:
+        terminal = trajectory[-1]
+        trajectory_available = 1
+        mean_trajectory_entropy = ss._mean_entropy(trajectory)
+    elif terminal is not None:
+        trajectory_available = 0
+        mean_trajectory_entropy = float("nan")
+    else:
+        raise ValueError("state-space scorer did not return a trajectory or terminal posterior")
+
     diagnostics: dict[str, float | int | str] = {
         "state_space_mode": str(self.mode),
         "state_space_time_bin_s": float(emissions.dt),
         "state_space_transition_durations": ",".join(f"{duration:.12g}" for duration in durations),
-        "state_space_trajectory_posterior": 1,
+        "state_space_trajectory_posterior": trajectory_available,
         "state_space_trajectory_time_bins": int(emissions.n_time),
         "state_space_stationary_sigma_cm": float(self.config.stationary_sigma_cm),
         "state_space_diffusion_sigma_cm_sqrt_s": float(self.config.diffusion_sigma_cm_sqrt_s),
@@ -315,7 +327,7 @@ def _score_state_space_duration_with_occupancy(
         "state_space_momentum_velocity_decay_tau_s": float(self.config.momentum_velocity_decay_tau_s),
         "state_space_valid_occupancy_threshold_s": float(self.config.valid_occupancy_threshold_s),
         "state_space_transition_sigma_cm": float(transition_sigma_cm),
-        "mean_trajectory_posterior_entropy": ss._mean_entropy(trajectory),
+        "mean_trajectory_posterior_entropy": mean_trajectory_entropy,
         **extra,
     }
     if valid_bin_mask is not None:

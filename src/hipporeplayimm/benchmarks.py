@@ -434,19 +434,19 @@ def _score_train_joint_model(model, train_emissions, joint_emissions, bin_center
 
 
 def _score_state_space_model(model, emissions, bin_centers, candidates, occupancy_s):
+    kwargs: dict[str, object] = {"candidate_indices": candidates}
+    if isinstance(model, SortedSpikeStateSpaceReplayModel) and model.mode == "momentum-exact-sparse":
+        kwargs["return_trajectory"] = False
     if occupancy_s is None:
-        return model.score(emissions, bin_centers, candidate_indices=candidates)
+        return model.score(emissions, bin_centers, **kwargs)
+    kwargs["occupancy_s"] = occupancy_s
     try:
-        return model.score(
-            emissions,
-            bin_centers,
-            candidate_indices=candidates,
-            occupancy_s=occupancy_s,
-        )
+        return model.score(emissions, bin_centers, **kwargs)
     except TypeError as exc:
         if "occupancy_s" not in str(exc):
             raise
-        return model.score(emissions, bin_centers, candidate_indices=candidates)
+        kwargs.pop("occupancy_s", None)
+        return model.score(emissions, bin_centers, **kwargs)
 
 
 def _candidate_indices_for_model(model, emissions, bin_centers):

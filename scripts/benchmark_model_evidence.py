@@ -309,6 +309,8 @@ def _score_model_with_optional_support(model, emissions, bin_centers, *, occupan
         kwargs["candidate_indices"] = candidates
     if occupancy_s is not None:
         kwargs["occupancy_s"] = occupancy_s
+    if isinstance(model, SortedSpikeStateSpaceReplayModel) and model.mode == "momentum-exact-sparse":
+        kwargs["return_trajectory"] = False
     if not kwargs:
         return model.score(emissions, bin_centers)
     try:

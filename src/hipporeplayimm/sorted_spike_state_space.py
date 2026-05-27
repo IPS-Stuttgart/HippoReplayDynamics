@@ -37,12 +37,14 @@ class SortedSpikeStateSpaceReplayModel(StateSpaceReplayModel):
         candidate_indices: list[np.ndarray] | None = None,
         *,
         occupancy_s: np.ndarray | None = None,
+        return_trajectory: bool = True,
     ) -> EventScore:
         score = super().score(
             emissions,
             bin_centers,
             candidate_indices=candidate_indices,
             occupancy_s=occupancy_s,
+            return_trajectory=return_trajectory,
         )
         score.model_name = str(self.name)
         score.diagnostics["state_space_observation_model"] = "sorted-spike-poisson"

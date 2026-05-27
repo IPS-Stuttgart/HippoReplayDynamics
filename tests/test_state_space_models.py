@@ -613,6 +613,51 @@ def test_state_space_momentum_exact_sparse_matches_bruteforce_tiny_grid():
     assert score.diagnostics["state_space_sparse_momentum_transition_row_cache_entries"] == 4
 
 
+def test_sparse_momentum_evidence_only_skips_smoothed_trajectory():
+    emissions = LogEmissionTensor(
+        log_likelihood=np.log(
+            np.array(
+                [
+                    [0.7, 0.3],
+                    [0.2, 0.8],
+                    [0.4, 0.6],
+                    [0.45, 0.55],
+                ]
+            )
+        ),
+        spike_counts=np.zeros((4, 1), dtype=int),
+        times=np.array([0.0, 1.0, 2.0, 3.0]),
+        dt=1.0,
+        cell_ids=np.array([1]),
+        n_spikes=0,
+    )
+    centers = np.array([[0.0, 0.0], [1.0, 0.0]])
+    config = StateSpaceDecoderConfig(
+        mode="momentum-exact-sparse",
+        momentum_sigma_cm_sqrt_s=1.0,
+        momentum_initial_sigma_cm_sqrt_s=1.0,
+        momentum_velocity_decay=0.9,
+        max_step_sigma=10.0,
+    )
+    model = StateSpaceReplayModel(mode="momentum-exact-sparse", config=config)
+
+    smoothed = model.score(emissions, centers)
+    evidence_only = model.score(emissions, centers, return_trajectory=False)
+
+    assert np.allclose(evidence_only.log_likelihood, smoothed.log_likelihood)
+    assert evidence_only.trajectory_log_posterior is None
+    assert evidence_only.terminal_log_posterior is not None
+    assert smoothed.terminal_log_posterior is not None
+    assert np.allclose(evidence_only.terminal_log_posterior, smoothed.terminal_log_posterior)
+    assert evidence_only.diagnostics["state_space_trajectory_posterior"] == 0
+    assert evidence_only.diagnostics["state_space_momentum_trajectory_posterior"] == "not_returned_evidence_only"
+    assert (
+        evidence_only.diagnostics["state_space_sparse_momentum_backward_transition_rows"]
+        == "skipped_evidence_only"
+    )
+    assert evidence_only.diagnostics["decoded_map_bin"] == smoothed.diagnostics["decoded_map_bin"]
+
+
 def test_exact_sparse_momentum_matches_dense_finite_radius_reference_and_heldout_identity():
     centers = np.array([[0.0, 0.0], [1.0, 0.0], [2.0, 0.0]])
     train = LogEmissionTensor(

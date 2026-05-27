@@ -1274,6 +1274,8 @@ def _score_recovery_model(
 
     if isinstance(model, SortedSpikeStateSpaceReplayModel):
         kwargs: dict[str, object] = {}
+        if model.mode == "momentum-exact-sparse":
+            kwargs["return_trajectory"] = False
         if candidate_indices is not None:
             kwargs["candidate_indices"] = candidate_indices
         if score_with_occupancy:

@@ -65,6 +65,10 @@ on:
         description: "State-space Gaussian transition truncation radius in sigmas"
         required: true
         default: "4.0"
+      state_space_valid_occupancy_threshold_s_values:
+        description: "Whitespace- or comma-separated minimum training occupancy per spatial bin for state-space support; 0 keeps every bin"
+        required: true
+        default: "0.0"
       state_space_imm_mode_stickiness:
         description: "State-space IMM mode-transition stickiness"
         required: true
@@ -150,6 +154,7 @@ jobs:
           PREDICTED_TOP_K_VALUES: ${{ inputs.state_space_momentum_predicted_candidate_top_k_values }}
           CANDIDATE_SOURCE_VALUES: ${{ inputs.state_space_momentum_candidate_source_values }}
           MAX_STEP_SIGMA_VALUES: ${{ inputs.state_space_max_step_sigma }}
+          VALID_OCCUPANCY_THRESHOLD_VALUES: ${{ inputs.state_space_valid_occupancy_threshold_s_values }}
           TIME_BIN_S_VALUES: ${{ inputs.time_bin_s }}
           SPIKE_RATE_SCALE_VALUES: ${{ inputs.spike_rate_scale }}
           LIKELIHOOD_TEMPERATURE_VALUES: ${{ inputs.emission_likelihood_temperature_values }}
@@ -205,6 +210,7 @@ jobs:
           predicted_top_k_values = split_values("PREDICTED_TOP_K_VALUES")
           candidate_source_values = [value.lower().replace("_", "-") for value in split_values("CANDIDATE_SOURCE_VALUES")]
           max_step_sigma_values = split_values("MAX_STEP_SIGMA_VALUES")
+          valid_occupancy_threshold_values = split_values("VALID_OCCUPANCY_THRESHOLD_VALUES")
           time_bin_s_values = split_values("TIME_BIN_S_VALUES")
           spike_rate_scale_values = split_values("SPIKE_RATE_SCALE_VALUES")
           likelihood_temperature_values = split_values("LIKELIHOOD_TEMPERATURE_VALUES")
@@ -215,6 +221,7 @@ jobs:
               ("MOMENTUM_INITIAL_VALUES", momentum_initial_values),
               ("DECAY_VALUES", decay_values),
               ("MAX_STEP_SIGMA_VALUES", max_step_sigma_values),
+              ("VALID_OCCUPANCY_THRESHOLD_VALUES", valid_occupancy_threshold_values),
               ("TIME_BIN_S_VALUES", time_bin_s_values),
               ("SPIKE_RATE_SCALE_VALUES", spike_rate_scale_values),
               ("LIKELIHOOD_TEMPERATURE_VALUES", likelihood_temperature_values),
@@ -226,8 +233,8 @@ jobs:
           validate_candidate_sources("CANDIDATE_SOURCE_VALUES", candidate_source_values)
 
           rows = []
-          for diffusion, momentum, momentum_initial, decay, top_k, predicted_top_k, candidate_source, max_step_sigma, time_bin_s, spike_rate_scale, likelihood_temperature, negative_binomial_overdispersion in itertools.product(
-              diffusion_values, momentum_values, momentum_initial_values, decay_values, top_k_values, predicted_top_k_values, candidate_source_values, max_step_sigma_values, time_bin_s_values, spike_rate_scale_values, likelihood_temperature_values, negative_binomial_overdispersion_values
+          for diffusion, momentum, momentum_initial, decay, top_k, predicted_top_k, candidate_source, max_step_sigma, valid_occupancy_threshold, time_bin_s, spike_rate_scale, likelihood_temperature, negative_binomial_overdispersion in itertools.product(
+              diffusion_values, momentum_values, momentum_initial_values, decay_values, top_k_values, predicted_top_k_values, candidate_source_values, max_step_sigma_values, valid_occupancy_threshold_values, time_bin_s_values, spike_rate_scale_values, likelihood_temperature_values, negative_binomial_overdispersion_values
           ):
               matrix_id = (
                   f"d{slug(diffusion)}-"
@@ -235,6 +242,7 @@ jobs:
                   f"mi{slug(momentum_initial)}-"
                   f"decay{slug(decay)}-"
                   f"step{slug(max_step_sigma)}-"
+                  f"occ{slug(valid_occupancy_threshold)}-"
                   f"tb{slug(time_bin_s)}-"
                   f"rate{slug(spike_rate_scale)}-"
                   f"temp{slug(likelihood_temperature)}-"
@@ -251,6 +259,7 @@ jobs:
                       "state_space_momentum_initial_sigma_cm_sqrt_s": momentum_initial,
                       "state_space_momentum_velocity_decay": decay,
                       "state_space_max_step_sigma": max_step_sigma,
+                      "state_space_valid_occupancy_threshold_s": valid_occupancy_threshold,
                       "time_bin_s": time_bin_s,
                       "spike_rate_scale": spike_rate_scale,
                       "emission_likelihood_temperature": likelihood_temperature,
@@ -284,7 +293,7 @@ jobs:
           if-no-files-found: error
 
   evidence-sweep:
-    name: d=${{ matrix.state_space_diffusion_sigma_cm_sqrt_s }} m=${{ matrix.state_space_momentum_sigma_cm_sqrt_s }} step=${{ matrix.state_space_max_step_sigma }} tb=${{ matrix.time_bin_s }} rate=${{ matrix.spike_rate_scale }} temp=${{ matrix.emission_likelihood_temperature }} nb=${{ matrix.emission_negative_binomial_overdispersion }} decay=${{ matrix.state_space_momentum_velocity_decay }}
+    name: d=${{ matrix.state_space_diffusion_sigma_cm_sqrt_s }} m=${{ matrix.state_space_momentum_sigma_cm_sqrt_s }} step=${{ matrix.state_space_max_step_sigma }} occ=${{ matrix.state_space_valid_occupancy_threshold_s }} tb=${{ matrix.time_bin_s }} rate=${{ matrix.spike_rate_scale }} temp=${{ matrix.emission_likelihood_temperature }} nb=${{ matrix.emission_negative_binomial_overdispersion }} decay=${{ matrix.state_space_momentum_velocity_decay }}
     needs: plan-matrix
     if: ${{ needs.plan-matrix.outputs.count != '0' }}
     runs-on: ubuntu-latest
@@ -301,6 +310,7 @@ jobs:
       STATE_SPACE_MOMENTUM_INITIAL_SIGMA_CM_SQRT_S: ${{ matrix.state_space_momentum_initial_sigma_cm_sqrt_s }}
       STATE_SPACE_MOMENTUM_VELOCITY_DECAY: ${{ matrix.state_space_momentum_velocity_decay }}
       STATE_SPACE_MAX_STEP_SIGMA: ${{ matrix.state_space_max_step_sigma }}
+      STATE_SPACE_VALID_OCCUPANCY_THRESHOLD_S: ${{ matrix.state_space_valid_occupancy_threshold_s }}
       TIME_BIN_S: ${{ matrix.time_bin_s }}
       SPIKE_RATE_SCALE: ${{ matrix.spike_rate_scale }}
       EMISSION_LIKELIHOOD_TEMPERATURE: ${{ matrix.emission_likelihood_temperature }}
@@ -353,6 +363,7 @@ jobs:
             --state-space-stationary-sigma-cm "${STATE_SPACE_STATIONARY_SIGMA_CM}" \
             --state-space-diffusion-sigma-cm-sqrt-s "${STATE_SPACE_DIFFUSION_SIGMA_CM_SQRT_S}" \
             --state-space-max-step-sigma "${STATE_SPACE_MAX_STEP_SIGMA}" \
+            --state-space-valid-occupancy-threshold-s "${STATE_SPACE_VALID_OCCUPANCY_THRESHOLD_S}" \
             --state-space-imm-mode-stickiness "${STATE_SPACE_IMM_MODE_STICKINESS}" \
             --state-space-momentum-sigma-cm-sqrt-s "${STATE_SPACE_MOMENTUM_SIGMA_CM_SQRT_S}" \
             --state-space-momentum-initial-sigma-cm-sqrt-s "${STATE_SPACE_MOMENTUM_INITIAL_SIGMA_CM_SQRT_S}" \
@@ -389,6 +400,7 @@ jobs:
               "state_space_stationary_sigma_cm": float(os.environ["STATE_SPACE_STATIONARY_SIGMA_CM"]),
               "state_space_diffusion_sigma_cm_sqrt_s": float(os.environ["STATE_SPACE_DIFFUSION_SIGMA_CM_SQRT_S"]),
               "state_space_max_step_sigma": float(os.environ["STATE_SPACE_MAX_STEP_SIGMA"]),
+              "state_space_valid_occupancy_threshold_s": float(os.environ["STATE_SPACE_VALID_OCCUPANCY_THRESHOLD_S"]),
               "state_space_imm_mode_stickiness": float(os.environ["STATE_SPACE_IMM_MODE_STICKINESS"]),
               "state_space_momentum_sigma_cm_sqrt_s": float(os.environ["STATE_SPACE_MOMENTUM_SIGMA_CM_SQRT_S"]),
               "state_space_momentum_initial_sigma_cm_sqrt_s": float(os.environ["STATE_SPACE_MOMENTUM_INITIAL_SIGMA_CM_SQRT_S"]),
@@ -499,6 +511,7 @@ jobs:
               "max_events",
               "state_space_diffusion_sigma_cm_sqrt_s",
               "state_space_max_step_sigma",
+              "state_space_valid_occupancy_threshold_s",
               "state_space_momentum_sigma_cm_sqrt_s",
               "state_space_momentum_initial_sigma_cm_sqrt_s",
               "state_space_momentum_velocity_decay",

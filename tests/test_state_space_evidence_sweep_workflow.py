@@ -27,6 +27,11 @@ def test_state_space_evidence_sweep_workflow_defines_parameter_grid_and_summary_
     assert "MAX_STEP_SIGMA_VALUES" in workflow
     assert "state_space_max_step_sigma" in workflow
     assert 'f"step{slug(max_step_sigma)}-"' in workflow
+    assert "state_space_valid_occupancy_threshold_s_values:" in workflow
+    assert "VALID_OCCUPANCY_THRESHOLD_VALUES" in workflow
+    assert 'f"occ{slug(valid_occupancy_threshold)}-"' in workflow
+    assert "--state-space-valid-occupancy-threshold-s" in workflow
+    assert "state_space_valid_occupancy_threshold_s" in workflow
     assert "TIME_BIN_S_VALUES" in workflow
     assert 'f"tb{slug(time_bin_s)}-"' in workflow
     assert "time_bin_s" in workflow

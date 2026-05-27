@@ -258,3 +258,42 @@ def test_marginalize_state_space_sweep_auto_marginalizes_observation_hyperparame
     assert "emission_likelihood_temperature" in prior_weights.columns
     assert "emission_negative_binomial_overdispersion" in prior_weights.columns
     assert np.isclose(prior_weights["prior_weight"].sum(), 1.0)
+
+
+def test_marginalize_state_space_sweep_auto_marginalizes_valid_occupancy_threshold(tmp_path: Path):
+    rows = []
+    log_values = {
+        (50.0, 0.0): -4.0,
+        (50.0, 0.02): -2.0,
+        (60.0, 0.0): -3.0,
+        (60.0, 0.02): -1.0,
+    }
+    for (diffusion_sigma, occupancy_threshold), log_evidence in log_values.items():
+        row = _base_row(0, "sorted-spike-state-space-diffusion", log_evidence)
+        row["state_space_diffusion_sigma_cm_sqrt_s"] = diffusion_sigma
+        row["state_space_valid_occupancy_threshold_s"] = occupancy_threshold
+        rows.append(row)
+    input_csv = tmp_path / "state_space_evidence_sweep_event_scores.csv"
+    pd.DataFrame(rows).to_csv(input_csv, index=False)
+
+    out_dir = tmp_path / "marginalized"
+    tables = marginalize_state_space_sweep.marginalize_sweep(
+        input_csv, out_dir, models=("diffusion",), prior="uniform"
+    )
+
+    event0 = tables["event_model_evidence"].iloc[0]
+    assert np.isclose(event0["log_evidence"], logsumexp(list(log_values.values())) - np.log(4.0))
+    assert "state_space_valid_occupancy_threshold_s" in event0[
+        "diagnostic_state_space_marginalized_dynamics_parameters"
+    ]
+    assert event0["diagnostic_state_space_marginalized_observation_parameters"] == ""
+    assert event0["diagnostic_state_space_marginalization_grid_points"] == 4
+    assert pd.isna(event0["state_space_valid_occupancy_threshold_s"])
+
+    best_params = tables["gridsearch_best_params"].iloc[0]
+    assert best_params["best_state_space_diffusion_sigma_cm_sqrt_s"] == 60.0
+    assert best_params["best_state_space_valid_occupancy_threshold_s"] == 0.02
+
+    prior_weights = tables["prior_weights"]
+    assert "state_space_valid_occupancy_threshold_s" in prior_weights.columns
+    assert np.isclose(prior_weights["prior_weight"].sum(), 1.0)

@@ -41,7 +41,7 @@ on:
         required: true
         default: "sorted-spike-state-space-diffusion sorted-spike-state-space-momentum-exact-sparse sorted-spike-state-space-momentum sorted-spike-state-space-first-order-imm sorted-spike-state-space-imm"
       random_seed:
-        description: "Base simulation random seed; matrix jobs add their index"
+        description: "Whitespace- or comma-separated simulation seeds"
         required: true
         default: "1"
       state_space_diffusion_sigma_cm_sqrt_s_values:
@@ -123,7 +123,6 @@ env:
   MAX_SYNTHETIC_EVENTS: ${{ inputs.max_synthetic_events }}
   MAX_RUNTIME_S: ${{ inputs.max_runtime_s }}
   MODELS: ${{ inputs.models }}
-  BASE_RANDOM_SEED: ${{ inputs.random_seed }}
   STATE_SPACE_STATIONARY_SIGMA_CM: ${{ inputs.state_space_stationary_sigma_cm }}
   STATE_SPACE_MAX_STEP_SIGMA: ${{ inputs.state_space_max_step_sigma }}
   STATE_SPACE_IMM_MODE_STICKINESS: ${{ inputs.state_space_imm_mode_stickiness }}
@@ -157,6 +156,7 @@ jobs:
           TOP_K_VALUES: ${{ inputs.state_space_momentum_candidate_top_k_values }}
           PREDICTED_TOP_K_VALUES: ${{ inputs.state_space_momentum_predicted_candidate_top_k_values }}
           CANDIDATE_SOURCE_VALUES: ${{ inputs.state_space_momentum_candidate_source_values }}
+          SEED_VALUES: ${{ inputs.random_seed }}
         run: |
           set -euo pipefail
           mkdir -p results/simulation-recovery-sweep-plan
@@ -207,6 +207,7 @@ jobs:
           top_k_values = split_values("TOP_K_VALUES")
           predicted_top_k_values = split_values("PREDICTED_TOP_K_VALUES")
           candidate_source_values = [value.lower().replace("_", "-") for value in split_values("CANDIDATE_SOURCE_VALUES")]
+          seed_values = split_values("SEED_VALUES")
           for name, values in (
               ("DIFFUSION_VALUES", diffusion_values),
               ("MOMENTUM_VALUES", momentum_values),
@@ -216,11 +217,12 @@ jobs:
               validate_float(name, values)
           validate_int("TOP_K_VALUES", top_k_values, allow_zero=True)
           validate_int("PREDICTED_TOP_K_VALUES", predicted_top_k_values, allow_zero=True)
+          validate_int("SEED_VALUES", seed_values, allow_zero=True)
           validate_candidate_sources("CANDIDATE_SOURCE_VALUES", candidate_source_values)
 
           rows = []
-          for index, (diffusion, momentum, momentum_initial, decay, top_k, predicted_top_k, candidate_source) in enumerate(
-              itertools.product(diffusion_values, momentum_values, momentum_initial_values, decay_values, top_k_values, predicted_top_k_values, candidate_source_values)
+          for index, (diffusion, momentum, momentum_initial, decay, top_k, predicted_top_k, candidate_source, seed) in enumerate(
+              itertools.product(diffusion_values, momentum_values, momentum_initial_values, decay_values, top_k_values, predicted_top_k_values, candidate_source_values, seed_values)
           ):
               matrix_id = (
                   f"d{slug(diffusion)}-"
@@ -229,12 +231,14 @@ jobs:
                   f"decay{slug(decay)}-"
                   f"k{slug(top_k)}-"
                   f"pk{slug(predicted_top_k)}-"
-                  f"src{slug(candidate_source)}"
+                  f"src{slug(candidate_source)}-"
+                  f"seed{slug(seed)}"
               )
               rows.append(
                   {
                       "matrix_index": index,
                       "id": matrix_id,
+                      "random_seed": seed,
                       "state_space_diffusion_sigma_cm_sqrt_s": diffusion,
                       "state_space_momentum_sigma_cm_sqrt_s": momentum,
                       "state_space_momentum_initial_sigma_cm_sqrt_s": momentum_initial,
@@ -268,7 +272,7 @@ jobs:
           if-no-files-found: error
 
   simulation-recovery-sweep:
-    name: d=${{ matrix.state_space_diffusion_sigma_cm_sqrt_s }} m=${{ matrix.state_space_momentum_sigma_cm_sqrt_s }} decay=${{ matrix.state_space_momentum_velocity_decay }}
+    name: seed=${{ matrix.random_seed }} d=${{ matrix.state_space_diffusion_sigma_cm_sqrt_s }} m=${{ matrix.state_space_momentum_sigma_cm_sqrt_s }} decay=${{ matrix.state_space_momentum_velocity_decay }}
     needs: plan-matrix
     if: ${{ needs.plan-matrix.outputs.count != '0' }}
     runs-on: ubuntu-latest
@@ -281,6 +285,7 @@ jobs:
     env:
       MATRIX_INDEX: ${{ matrix.matrix_index }}
       MATRIX_ID: ${{ matrix.id }}
+      RANDOM_SEED: ${{ matrix.random_seed }}
       STATE_SPACE_DIFFUSION_SIGMA_CM_SQRT_S: ${{ matrix.state_space_diffusion_sigma_cm_sqrt_s }}
       STATE_SPACE_MOMENTUM_SIGMA_CM_SQRT_S: ${{ matrix.state_space_momentum_sigma_cm_sqrt_s }}
       STATE_SPACE_MOMENTUM_INITIAL_SIGMA_CM_SQRT_S: ${{ matrix.state_space_momentum_initial_sigma_cm_sqrt_s }}
@@ -321,7 +326,6 @@ jobs:
         run: |
           set -euo pipefail
           out_dir="results/simulation-recovery-sweep/${MATRIX_ID}"
-          random_seed=$((BASE_RANDOM_SEED + MATRIX_INDEX))
           limit_args=()
           if [ -n "${MAX_SYNTHETIC_EVENTS}" ]; then
             limit_args+=(--max-synthetic-events "${MAX_SYNTHETIC_EVENTS}")
@@ -336,7 +340,7 @@ jobs:
             --events-per-model "${EVENTS_PER_MODEL}" \
             --true-models "${TRUE_MODELS}" \
             --models "${MODELS}" \
-            --random-seed "${random_seed}" \
+            --random-seed "${RANDOM_SEED}" \
             --time-bin-ms "${TIME_BIN_MS}" \
             "${limit_args[@]}" \
             --state-space-stationary-sigma-cm "${STATE_SPACE_STATIONARY_SIGMA_CM}" \
@@ -370,6 +374,7 @@ jobs:
           metadata = {
               "matrix_id": os.environ["MATRIX_ID"],
               "matrix_index": int(os.environ["MATRIX_INDEX"]),
+              "random_seed": int(os.environ["RANDOM_SEED"]),
               "requested_session": os.environ["SESSION"],
               "events_spec": os.environ["EVENTS"],
               "max_template_events": int(os.environ["MAX_TEMPLATE_EVENTS"]),
@@ -553,6 +558,7 @@ jobs:
 
           key_cols = [
               "matrix_id",
+              "random_seed",
               "requested_session",
               "events_spec",
               "max_template_events",
@@ -626,6 +632,71 @@ jobs:
           ranked = comparison.sort_values(present, ascending=ascending, kind="stable") if present else comparison
           comparison.to_csv(out_dir / "simulation_recovery_sweep_config_comparison.csv", index=False)
           ranked.to_csv(out_dir / "simulation_recovery_sweep_config_ranked.csv", index=False)
+          seed_group_cols = [
+              "requested_session",
+              "events_spec",
+              "max_template_events",
+              "events_per_model",
+              "state_space_diffusion_sigma_cm_sqrt_s",
+              "state_space_momentum_sigma_cm_sqrt_s",
+              "state_space_momentum_initial_sigma_cm_sqrt_s",
+              "state_space_momentum_velocity_decay",
+              "state_space_momentum_candidate_top_k",
+              "state_space_momentum_predicted_candidate_top_k",
+              "state_space_momentum_candidate_source",
+          ]
+          seed_metric_prefixes = [
+              "overall",
+              "diffusion",
+              "momentum",
+              "stationary",
+              "fragmented",
+          ]
+          seed_rows = []
+          if "random_seed" in comparison.columns:
+              for keys, group in comparison.groupby(seed_group_cols, sort=False, dropna=False):
+                  row = dict(zip(seed_group_cols, keys, strict=True))
+                  seeds = sorted({int(seed) for seed in group["random_seed"].dropna().astype(int)})
+                  row["random_seed_count"] = len(seeds)
+                  row["random_seeds"] = ",".join(str(seed) for seed in seeds)
+                  row["matrix_ids"] = ",".join(str(value) for value in group["matrix_id"].dropna().astype(str))
+                  row["failures"] = int(group.get("failures", pd.Series(dtype=float)).fillna(0).sum())
+                  for prefix in seed_metric_prefixes:
+                      recovered_col = f"{prefix}_recovered_events"
+                      simulated_col = f"{prefix}_simulated_events"
+                      accuracy_col = f"{prefix}_recovery_accuracy"
+                      if recovered_col in group.columns and simulated_col in group.columns:
+                          recovered = int(group[recovered_col].fillna(0).sum())
+                          simulated = int(group[simulated_col].fillna(0).sum())
+                          row[recovered_col] = recovered
+                          row[simulated_col] = simulated
+                          row[accuracy_col] = float(recovered / simulated) if simulated else float("nan")
+                      elif accuracy_col in group.columns:
+                          row[f"mean_{accuracy_col}"] = float(group[accuracy_col].mean())
+                      certified_recovered_col = f"{prefix}_certified_vs_exact_recovered_events"
+                      certified_accuracy_col = f"{prefix}_certified_vs_exact_recovery_accuracy"
+                      if certified_recovered_col in group.columns and simulated_col in group.columns:
+                          recovered = int(group[certified_recovered_col].fillna(0).sum())
+                          simulated = int(group[simulated_col].fillna(0).sum())
+                          row[certified_recovered_col] = recovered
+                          row[certified_accuracy_col] = float(recovered / simulated) if simulated else float("nan")
+                      best_col = f"{prefix}_most_common_best_model"
+                      if best_col in group.columns:
+                          row[best_col] = ",".join(sorted(set(group[best_col].dropna().astype(str))))
+                  seed_rows.append(row)
+          seed_comparison = pd.DataFrame(seed_rows)
+          if not seed_comparison.empty:
+              seed_present = [col for col in sort_cols if col in seed_comparison.columns]
+              seed_ascending = [ascending_by_col[col] for col in seed_present]
+              seed_ranked = (
+                  seed_comparison.sort_values(seed_present, ascending=seed_ascending, kind="stable")
+                  if seed_present
+                  else seed_comparison
+              )
+              seed_comparison.to_csv(out_dir / "simulation_recovery_sweep_seed_replicated_comparison.csv", index=False)
+              seed_ranked.to_csv(out_dir / "simulation_recovery_sweep_seed_replicated_ranked.csv", index=False)
+              print("Best seed-replicated recovery configurations:")
+              print(seed_ranked.head(10).to_string(index=False))
           if "momentum_recovery_accuracy" in comparison.columns:
               momentum_sort_cols = [
                   col for col in [

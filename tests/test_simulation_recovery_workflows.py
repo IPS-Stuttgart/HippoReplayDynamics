@@ -43,6 +43,9 @@ def test_simulation_recovery_sweep_workflow_defines_recovery_rankings():
     assert "timeout-minutes: 350" in workflow
     assert "simulation_recovery_sweep_config_ranked.csv" in workflow
     assert "simulation_recovery_sweep_momentum_ranked.csv" in workflow
+    assert "simulation_recovery_sweep_seed_replicated_ranked.csv" in workflow
+    assert "random_seed_count" in workflow
+    assert "SEED_VALUES" in workflow
     assert "momentum_recovery_accuracy" in workflow
     assert "simulation_recovery_sweep_certified_vs_exact_summary.csv" in workflow
     assert "momentum_certified_vs_exact_recovery_accuracy" in workflow

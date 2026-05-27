@@ -44,6 +44,10 @@ on:
         description: "State-space Gaussian transition truncation radius in sigmas"
         required: true
         default: "4.0"
+      state_space_valid_occupancy_threshold_s:
+        description: "Minimum run occupancy in seconds for valid state-space bins; 0 keeps the full grid"
+        required: true
+        default: "0.0"
       state_space_imm_mode_stickiness:
         description: "State-space IMM mode-transition stickiness"
         required: true
@@ -88,6 +92,14 @@ on:
         description: "Multiplicative scale applied to Poisson place-field rates during ripple scoring"
         required: true
         default: "1.0"
+      emission_likelihood_temperature:
+        description: "Sorted-spike emission likelihood temperature"
+        required: true
+        default: "1.0"
+      emission_negative_binomial_overdispersion:
+        description: "Sorted-spike negative-binomial overdispersion; 0 keeps Poisson emissions"
+        required: true
+        default: "0.0"
       bin_size_cm:
         description: "Place-field spatial bin size in centimeters"
         required: true
@@ -109,7 +121,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: model-evidence-all-sessions-${{ github.repository }}-${{ inputs.sessions }}-${{ inputs.events }}-${{ inputs.max_events }}-${{ inputs.spike_rate_scale }}-${{ github.ref }}
+  group: model-evidence-all-sessions-${{ github.repository }}-${{ inputs.sessions }}-${{ inputs.events }}-${{ inputs.max_events }}-${{ inputs.spike_rate_scale }}-${{ inputs.emission_likelihood_temperature }}-${{ inputs.emission_negative_binomial_overdispersion }}-${{ inputs.state_space_valid_occupancy_threshold_s }}-${{ github.ref }}
   cancel-in-progress: false
 
 env:
@@ -123,6 +135,7 @@ env:
   STATE_SPACE_STATIONARY_SIGMA_CM: ${{ inputs.state_space_stationary_sigma_cm }}
   STATE_SPACE_DIFFUSION_SIGMA_CM_SQRT_S: ${{ inputs.state_space_diffusion_sigma_cm_sqrt_s }}
   STATE_SPACE_MAX_STEP_SIGMA: ${{ inputs.state_space_max_step_sigma }}
+  STATE_SPACE_VALID_OCCUPANCY_THRESHOLD_S: ${{ inputs.state_space_valid_occupancy_threshold_s }}
   STATE_SPACE_IMM_MODE_STICKINESS: ${{ inputs.state_space_imm_mode_stickiness }}
   STATE_SPACE_MOMENTUM_SIGMA_CM_SQRT_S: ${{ inputs.state_space_momentum_sigma_cm_sqrt_s }}
   STATE_SPACE_MOMENTUM_INITIAL_SIGMA_CM_SQRT_S: "85.0"
@@ -141,6 +154,8 @@ env:
   CLUSTERLESS_MARK_KDE_MAX_NEIGHBORS: ${{ inputs.clusterless_mark_kde_max_neighbors }}
   TIME_BIN_S: ${{ inputs.time_bin_s }}
   SPIKE_RATE_SCALE: ${{ inputs.spike_rate_scale }}
+  EMISSION_LIKELIHOOD_TEMPERATURE: ${{ inputs.emission_likelihood_temperature }}
+  EMISSION_NEGATIVE_BINOMIAL_OVERDISPERSION: ${{ inputs.emission_negative_binomial_overdispersion }}
   BIN_SIZE_CM: ${{ inputs.bin_size_cm }}
   SMOOTHING_SIGMA_BINS: ${{ inputs.smoothing_sigma_bins }}
   MIN_SPEED_CM_S: ${{ inputs.min_speed_cm_s }}
@@ -312,6 +327,7 @@ jobs:
             --state-space-stationary-sigma-cm "${STATE_SPACE_STATIONARY_SIGMA_CM}" \
             --state-space-diffusion-sigma-cm-sqrt-s "${STATE_SPACE_DIFFUSION_SIGMA_CM_SQRT_S}" \
             --state-space-max-step-sigma "${STATE_SPACE_MAX_STEP_SIGMA}" \
+            --state-space-valid-occupancy-threshold-s "${STATE_SPACE_VALID_OCCUPANCY_THRESHOLD_S}" \
             --state-space-imm-mode-stickiness "${STATE_SPACE_IMM_MODE_STICKINESS}" \
             --state-space-momentum-sigma-cm-sqrt-s "${STATE_SPACE_MOMENTUM_SIGMA_CM_SQRT_S}" \
             --state-space-momentum-initial-sigma-cm-sqrt-s "${STATE_SPACE_MOMENTUM_INITIAL_SIGMA_CM_SQRT_S}" \
@@ -330,6 +346,8 @@ jobs:
             --clusterless-mark-kde-max-neighbors "${CLUSTERLESS_MARK_KDE_MAX_NEIGHBORS}" \
             --time-bin-s "${TIME_BIN_S}" \
             --spike-rate-scale "${SPIKE_RATE_SCALE}" \
+            --emission-likelihood-temperature "${EMISSION_LIKELIHOOD_TEMPERATURE}" \
+            --emission-negative-binomial-overdispersion "${EMISSION_NEGATIVE_BINOMIAL_OVERDISPERSION}" \
             --bin-size-cm "${BIN_SIZE_CM}" \
             --smoothing-sigma-bins "${SMOOTHING_SIGMA_BINS}" \
             --min-speed-cm-s "${MIN_SPEED_CM_S}" \

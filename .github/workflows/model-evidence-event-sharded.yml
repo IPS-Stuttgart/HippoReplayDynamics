@@ -132,6 +132,14 @@ on:
         description: "Multiplicative scale applied to Poisson place-field rates during ripple scoring"
         required: true
         default: "1.0"
+      emission_likelihood_temperature:
+        description: "Sorted-spike emission likelihood temperature"
+        required: true
+        default: "1.0"
+      emission_negative_binomial_overdispersion:
+        description: "Sorted-spike negative-binomial overdispersion; 0 keeps Poisson emissions"
+        required: true
+        default: "0.0"
       bin_size_cm:
         description: "Place-field spatial bin size in centimeters"
         required: true
@@ -153,7 +161,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: model-evidence-event-sharded-${{ github.repository }}-${{ inputs.session }}-${{ inputs.events }}-${{ inputs.max_events }}-${{ inputs.spike_rate_scale }}-${{ github.ref }}
+  group: model-evidence-event-sharded-${{ github.repository }}-${{ inputs.session }}-${{ inputs.events }}-${{ inputs.max_events }}-${{ inputs.spike_rate_scale }}-${{ inputs.emission_likelihood_temperature }}-${{ inputs.emission_negative_binomial_overdispersion }}-${{ inputs.state_space_valid_occupancy_threshold_s }}-${{ github.ref }}
   cancel-in-progress: false
 
 env:
@@ -199,6 +207,8 @@ env:
   CLUSTERLESS_MARK_KDE_MAX_NEIGHBORS: "256"
   TIME_BIN_S: ${{ inputs.time_bin_s }}
   SPIKE_RATE_SCALE: ${{ inputs.spike_rate_scale }}
+  EMISSION_LIKELIHOOD_TEMPERATURE: ${{ inputs.emission_likelihood_temperature }}
+  EMISSION_NEGATIVE_BINOMIAL_OVERDISPERSION: ${{ inputs.emission_negative_binomial_overdispersion }}
   BIN_SIZE_CM: ${{ inputs.bin_size_cm }}
   SMOOTHING_SIGMA_BINS: ${{ inputs.smoothing_sigma_bins }}
   MIN_SPEED_CM_S: ${{ inputs.min_speed_cm_s }}
@@ -364,6 +374,8 @@ jobs:
             --clusterless-mark-kde-max-neighbors "${CLUSTERLESS_MARK_KDE_MAX_NEIGHBORS}" \
             --time-bin-s "${TIME_BIN_S}" \
             --spike-rate-scale "${SPIKE_RATE_SCALE}" \
+            --emission-likelihood-temperature "${EMISSION_LIKELIHOOD_TEMPERATURE}" \
+            --emission-negative-binomial-overdispersion "${EMISSION_NEGATIVE_BINOMIAL_OVERDISPERSION}" \
             --bin-size-cm "${BIN_SIZE_CM}" \
             --smoothing-sigma-bins "${SMOOTHING_SIGMA_BINS}" \
             --min-speed-cm-s "${MIN_SPEED_CM_S}" \

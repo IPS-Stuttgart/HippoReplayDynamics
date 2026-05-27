@@ -264,6 +264,49 @@ def test_certified_vs_exact_summary_counts_lower_bound_wins_conservatively():
     assert momentum["certified_vs_exact_recovery_accuracy"] == 1.0
 
 
+def test_simulation_recovery_checkpoint_writes_partial_outputs(tmp_path):
+    class FakeSession:
+        session_id = "RatX/OpenY"
+
+    rows = [
+        _row(0, "momentum", "sorted-spike-state-space-diffusion", -2.0),
+        _row(0, "momentum", "sorted-spike-state-space-momentum-exact-sparse", -1.0),
+    ]
+    config = SimulationRecoveryConfig(
+        true_models=("momentum",),
+        scoring_models=(
+            "sorted-spike-state-space-diffusion",
+            "sorted-spike-state-space-momentum-exact-sparse",
+        ),
+        checkpoint_output=tmp_path,
+        progress_log=True,
+    )
+
+    _write_simulation_recovery_checkpoint(
+        rows,
+        tmp_path,
+        FakeSession(),  # type: ignore[arg-type]
+        config,
+        [7],
+        _encoding(),
+        StateSpaceDecoderConfig(),
+        run_started_at=0.0,
+        planned_synthetic_events=2,
+        completed_synthetic_events=1,
+        stop_reason="completed",
+        checkpoint_status="running",
+    )
+
+    scores = pd.read_csv(tmp_path / "simulation_recovery_event_scores.csv")
+    summary = pd.read_csv(tmp_path / "simulation_recovery_summary.csv")
+    settings = Path(tmp_path / "simulation_recovery_settings.yml").read_text(encoding="utf-8")
+
+    assert len(scores) == 2
+    assert summary.loc[summary["true_model"] == "momentum", "recovered_events"].iloc[0] == 1
+    assert "checkpoint_status: running" in settings
+    assert "checkpoint_completed_synthetic_events: 1" in settings
+
+
 def test_simulation_recovery_progress_writes_partial_artifacts(tmp_path, capsys):
     progress = _SimulationRecoveryProgress(
         output=tmp_path,
@@ -271,6 +314,7 @@ def test_simulation_recovery_progress_writes_partial_artifacts(tmp_path, capsys)
         scoring_model_count=2,
         true_state_space=StateSpaceDecoderConfig(diffusion_sigma_cm_sqrt_s=85.0),
         scoring_state_space=StateSpaceDecoderConfig(diffusion_sigma_cm_sqrt_s=85.0),
+        progress_log=True,
     )
     progress.update_current(
         true_model="momentum",
@@ -329,49 +373,6 @@ def test_simulation_recovery_progress_writes_partial_artifacts(tmp_path, capsys)
         "[recovery] true_model=momentum synthetic_event=1/2 "
         "scoring_model=sorted-spike-state-space-momentum-exact-sparse"
     ) in log
-
-
-def test_simulation_recovery_checkpoint_writes_partial_outputs(tmp_path):
-    class FakeSession:
-        session_id = "RatX/OpenY"
-
-    rows = [
-        _row(0, "momentum", "sorted-spike-state-space-diffusion", -2.0),
-        _row(0, "momentum", "sorted-spike-state-space-momentum-exact-sparse", -1.0),
-    ]
-    config = SimulationRecoveryConfig(
-        true_models=("momentum",),
-        scoring_models=(
-            "sorted-spike-state-space-diffusion",
-            "sorted-spike-state-space-momentum-exact-sparse",
-        ),
-        checkpoint_output=tmp_path,
-        progress_log=True,
-    )
-
-    _write_simulation_recovery_checkpoint(
-        rows,
-        tmp_path,
-        FakeSession(),  # type: ignore[arg-type]
-        config,
-        [7],
-        _encoding(),
-        StateSpaceDecoderConfig(),
-        run_started_at=0.0,
-        planned_synthetic_events=2,
-        completed_synthetic_events=1,
-        stop_reason="completed",
-        checkpoint_status="running",
-    )
-
-    scores = pd.read_csv(tmp_path / "simulation_recovery_event_scores.csv")
-    summary = pd.read_csv(tmp_path / "simulation_recovery_summary.csv")
-    settings = Path(tmp_path / "simulation_recovery_settings.yml").read_text(encoding="utf-8")
-
-    assert len(scores) == 2
-    assert summary.loc[summary["true_model"] == "momentum", "recovered_events"].iloc[0] == 1
-    assert "checkpoint_status: running" in settings
-    assert "checkpoint_completed_synthetic_events: 1" in settings
 
 
 def _row(event_index: int, true_model: str, model: str, log_evidence: float, **extra: object) -> dict[str, object]:

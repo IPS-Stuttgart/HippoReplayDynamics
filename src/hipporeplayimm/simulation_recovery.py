@@ -103,7 +103,6 @@ class SimulationRecoveryConfig:
     score_with_occupancy: bool = True
     oracle_candidate_support: bool = False
     continue_on_error: bool = False
-    partial_output: str | Path | None = None
     max_synthetic_events: int | None = None
     max_runtime_s: float | None = None
     checkpoint_output: str | Path | None = None
@@ -159,12 +158,14 @@ class _SimulationRecoveryProgress:
         scoring_model_count: int,
         true_state_space: StateSpaceDecoderConfig,
         scoring_state_space: StateSpaceDecoderConfig,
+        progress_log: bool,
     ) -> None:
         self.output = Path(output) if output is not None else None
         self.total_events = int(total_events)
         self.scoring_model_count = int(scoring_model_count)
         self.true_state_space = true_state_space
         self.scoring_state_space = scoring_state_space
+        self.progress_log = bool(progress_log)
         self.started_at = time.perf_counter()
         self.completed_events = 0
         self.failed_events = 0
@@ -196,15 +197,16 @@ class _SimulationRecoveryProgress:
         self.current_template_event = int(template_event_index)
         self.current_scoring_model = str(scoring_model)
         elapsed = self.elapsed_seconds
-        print(
-            "[recovery] "
-            f"true_model={self.current_true_model} "
-            f"synthetic_event={self.current_synthetic_event}/"
-            f"{self.current_synthetic_events_for_model} "
-            f"scoring_model={self.current_scoring_model} "
-            f"elapsed={elapsed:.1f}s",
-            flush=True,
-        )
+        if self.progress_log:
+            print(
+                "[recovery] "
+                f"true_model={self.current_true_model} "
+                f"synthetic_event={self.current_synthetic_event}/"
+                f"{self.current_synthetic_events_for_model} "
+                f"scoring_model={self.current_scoring_model} "
+                f"elapsed={elapsed:.1f}s",
+                flush=True,
+            )
         self.write_manifest(status=status)
 
     def complete_event(self, rows: list[dict[str, object]], *, failed: bool) -> None:
@@ -316,15 +318,16 @@ def run_session_simulation_recovery(
             int(config.max_synthetic_events),
         )
     checkpoint_output = Path(config.checkpoint_output) if config.checkpoint_output is not None else None
+    run_started_at = time.perf_counter()
     progress = _SimulationRecoveryProgress(
-        output=config.partial_output,
+        output=checkpoint_output,
         total_events=planned_synthetic_events,
         scoring_model_count=len(scoring_models),
         true_state_space=true_state_space,
         scoring_state_space=config.state_space,
+        progress_log=config.progress_log,
     )
     progress.write_manifest(status="running")
-    run_started_at = time.perf_counter()
     stop_reason = "completed"
     stop_requested = False
     for true_model in true_models:

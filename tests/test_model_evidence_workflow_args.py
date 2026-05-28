@@ -28,6 +28,7 @@ _REQUIRED_WORKFLOW_FLAGS = {
     "--smoothing-sigma-bins",
     "--min-speed-cm-s",
     "--state-space-valid-occupancy-threshold-s",
+    "--state-space-momentum-initial-sigma-cm-sqrt-s",
 }
 
 
@@ -57,6 +58,18 @@ def test_event_sharded_workflow_includes_exact_first_order_imm_default():
         "sorted-spike-state-space-first-order-imm"
         in _workflow_dispatch_default_models(text)
     )
+
+
+def test_all_session_workflow_exposes_momentum_initial_sigma_input():
+    text = (ROOT / ".github" / "workflows" / "model-evidence-all-sessions.yml").read_text(
+        encoding="utf-8"
+    )
+
+    assert "state_space_momentum_initial_sigma_cm_sqrt_s:" in text
+    assert (
+        "STATE_SPACE_MOMENTUM_INITIAL_SIGMA_CM_SQRT_S: "
+        "${{ inputs.state_space_momentum_initial_sigma_cm_sqrt_s }}"
+    ) in text
 
 
 def test_clusterless_first_order_imm_is_not_silently_skipped_by_model_evidence_script():

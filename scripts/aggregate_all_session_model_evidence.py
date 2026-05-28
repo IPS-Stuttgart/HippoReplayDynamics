@@ -12,7 +12,12 @@ import pandas as pd
 from scipy.special import logsumexp
 
 from benchmark_model_evidence import _add_evidence_columns, _counts, _ensure_evidence_support_columns, _summary, _write
+from hipporeplayimm.advanced_result_diagnostics import paired_model_margin_decisions
 from model_evidence_settings import _validate_constant_settings
+
+DEFAULT_MARGIN_POSITIVE_MODEL = "sorted-spike-state-space-momentum-exact-sparse"
+DEFAULT_MARGIN_REFERENCE_MODEL = "sorted-spike-state-space-diffusion"
+DEFAULT_MOMENTUM_CONFIDENCE_THRESHOLD = 5.5
 
 
 def _load_score_files(shard_glob: str) -> list[Path]:
@@ -153,9 +158,95 @@ def random_effects_model_probabilities(df: pd.DataFrame) -> pd.DataFrame:
     )
 
 
+def paired_momentum_diffusion_margin_decisions(
+    df: pd.DataFrame,
+    *,
+    margin_threshold: float = DEFAULT_MOMENTUM_CONFIDENCE_THRESHOLD,
+) -> pd.DataFrame:
+    """Return calibrated exact-sparse momentum-vs-diffusion event decisions."""
+
+    return paired_model_margin_decisions(
+        df,
+        positive_model=DEFAULT_MARGIN_POSITIVE_MODEL,
+        reference_model=DEFAULT_MARGIN_REFERENCE_MODEL,
+        margin_threshold=margin_threshold,
+        group_cols=("session", "event_index"),
+    )
+
+
+def paired_momentum_diffusion_margin_summary(decisions: pd.DataFrame) -> pd.DataFrame:
+    """Summarize calibrated exact-sparse momentum-vs-diffusion decisions."""
+
+    return _paired_margin_summary(decisions, group_cols=())
+
+
+def session_paired_momentum_diffusion_margin_summary(decisions: pd.DataFrame) -> pd.DataFrame:
+    """Summarize calibrated exact-sparse momentum-vs-diffusion decisions by session."""
+
+    return _paired_margin_summary(decisions, group_cols=("session",))
+
+
+def _paired_margin_summary(decisions: pd.DataFrame, *, group_cols: tuple[str, ...]) -> pd.DataFrame:
+    columns = [
+        *group_cols,
+        "events",
+        "positive_model",
+        "reference_model",
+        "margin_threshold",
+        "positive_raw_wins",
+        "reference_raw_wins",
+        "raw_ties",
+        "positive_raw_win_fraction",
+        "positive_model_claims",
+        "reference_model_claims",
+        "ambiguous_events",
+        "positive_claim_fraction",
+        "reference_claim_fraction",
+        "ambiguous_fraction",
+        "mean_positive_minus_reference_log_evidence",
+        "median_positive_minus_reference_log_evidence",
+    ]
+    if decisions.empty:
+        return pd.DataFrame(columns=columns)
+
+    rows: list[dict[str, object]] = []
+    groups = [((), decisions)] if not group_cols else decisions.groupby(list(group_cols), sort=True)
+    for key, group in groups:
+        key_tuple = key if isinstance(key, tuple) else (key,)
+        delta = group["positive_minus_reference_log_evidence"].astype(float)
+        events = int(len(group))
+        positive_claims = int(group["positive_model_claimed"].fillna(False).astype(bool).sum())
+        reference_claims = int((group["margin_decision"] == group["reference_model"]).sum())
+        ambiguous = int((group["margin_decision"] == "ambiguous").sum())
+        row = {column: value for column, value in zip(group_cols, key_tuple, strict=True)}
+        row.update(
+            {
+                "events": events,
+                "positive_model": str(group["positive_model"].dropna().iloc[0]),
+                "reference_model": str(group["reference_model"].dropna().iloc[0]),
+                "margin_threshold": float(group["margin_threshold"].dropna().iloc[0]),
+                "positive_raw_wins": int((delta > 0.0).sum()),
+                "reference_raw_wins": int((delta < 0.0).sum()),
+                "raw_ties": int((delta == 0.0).sum()),
+                "positive_raw_win_fraction": float((delta > 0.0).mean()),
+                "positive_model_claims": positive_claims,
+                "reference_model_claims": reference_claims,
+                "ambiguous_events": ambiguous,
+                "positive_claim_fraction": float(positive_claims / max(events, 1)),
+                "reference_claim_fraction": float(reference_claims / max(events, 1)),
+                "ambiguous_fraction": float(ambiguous / max(events, 1)),
+                "mean_positive_minus_reference_log_evidence": float(delta.mean()),
+                "median_positive_minus_reference_log_evidence": float(delta.median()),
+            }
+        )
+        rows.append(row)
+    return pd.DataFrame(rows, columns=columns)
+
+
 def aggregate_all_sessions(shard_glob: str, outdir: Path) -> pd.DataFrame:
     combined = _load_combined(shard_glob)
     outdir.mkdir(parents=True, exist_ok=True)
+    paired_decisions = paired_momentum_diffusion_margin_decisions(combined)
 
     _write(combined, outdir)
     combined.to_csv(outdir / "all_sessions_event_model_evidence.csv", index=False)
@@ -164,6 +255,15 @@ def aggregate_all_sessions(shard_glob: str, outdir: Path) -> pd.DataFrame:
     session_model_evidence_summary(combined).to_csv(outdir / "session_model_evidence_summary.csv", index=False)
     session_best_model_counts(combined).to_csv(outdir / "session_best_model_counts.csv", index=False)
     random_effects_model_probabilities(combined).to_csv(outdir / "random_effects_model_probabilities.csv", index=False)
+    paired_decisions.to_csv(outdir / "paired_momentum_diffusion_margin_decisions.csv", index=False)
+    paired_momentum_diffusion_margin_summary(paired_decisions).to_csv(
+        outdir / "paired_momentum_diffusion_margin_summary.csv",
+        index=False,
+    )
+    session_paired_momentum_diffusion_margin_summary(paired_decisions).to_csv(
+        outdir / "session_paired_momentum_diffusion_margin_summary.csv",
+        index=False,
+    )
     return combined
 
 
@@ -179,6 +279,9 @@ def main() -> int:
     print(session_model_evidence_summary(combined).to_string(index=False))
     print("\nRandom-effects model probabilities:")
     print(random_effects_model_probabilities(combined).to_string(index=False))
+    decisions = paired_momentum_diffusion_margin_decisions(combined)
+    print("\nPaired exact-sparse momentum-vs-diffusion margin summary:")
+    print(paired_momentum_diffusion_margin_summary(decisions).to_string(index=False))
     print(f"\nRows: {len(combined)}")
     if "status" in combined:
         print(f"Failures: {int((combined['status'] != 'success').sum())}")

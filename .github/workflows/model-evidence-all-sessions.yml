@@ -104,11 +104,6 @@ on:
         description: "Minimum speed for place-field training in cm/s"
         required: true
         default: "5.0"
-      local_cache_root:
-        description: "Optional self-hosted persistent dataset cache path"
-        required: false
-        default: ""
-
 permissions:
   contents: read
 
@@ -151,7 +146,7 @@ env:
   BIN_SIZE_CM: ${{ inputs.bin_size_cm }}
   SMOOTHING_SIGMA_BINS: ${{ inputs.smoothing_sigma_bins }}
   MIN_SPEED_CM_S: ${{ inputs.min_speed_cm_s }}
-  LOCAL_CACHE_ROOT: ${{ inputs.local_cache_root }}
+  LOCAL_CACHE_ROOT: ${{ vars.PFEIFFERFOSTER_LOCAL_CACHE_ROOT }}
   OMP_NUM_THREADS: "1"
   OPENBLAS_NUM_THREADS: "1"
   MKL_NUM_THREADS: "1"

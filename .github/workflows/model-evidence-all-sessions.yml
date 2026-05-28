@@ -397,12 +397,14 @@ jobs:
             random_effects_model_probabilities.csv \
             paired_momentum_diffusion_margin_decisions.csv \
             paired_momentum_diffusion_margin_summary.csv \
+            paired_momentum_diffusion_threshold_sensitivity.csv \
             session_paired_momentum_diffusion_margin_summary.csv \
             rat_paired_momentum_diffusion_margin_summary.csv \
             leave_one_rat_out_paired_momentum_diffusion_margin_summary.csv \
             rat_bootstrap_paired_momentum_diffusion_margin_summary.csv \
             exact_sparse_momentum_core_margins.csv \
             exact_sparse_momentum_core_margin_summary.csv \
+            exact_sparse_momentum_core_threshold_sensitivity.csv \
             session_exact_sparse_momentum_core_margin_summary.csv \
             rat_exact_sparse_momentum_core_margin_summary.csv \
             leave_one_rat_out_exact_sparse_momentum_core_margin_summary.csv \
@@ -450,6 +452,8 @@ jobs:
           print(pd.read_csv(f"{root}/random_effects_model_probabilities.csv").to_string(index=False))
           print("\nPaired exact-sparse momentum-vs-diffusion margin summary:")
           print(pd.read_csv(f"{root}/paired_momentum_diffusion_margin_summary.csv").to_string(index=False))
+          print("\nPaired exact-sparse momentum-vs-diffusion threshold sensitivity:")
+          print(pd.read_csv(f"{root}/paired_momentum_diffusion_threshold_sensitivity.csv").to_string(index=False))
           print("\nSession paired exact-sparse momentum-vs-diffusion margin summary:")
           print(pd.read_csv(f"{root}/session_paired_momentum_diffusion_margin_summary.csv").to_string(index=False))
           print("\nRat paired exact-sparse momentum-vs-diffusion margin summary:")
@@ -460,6 +464,8 @@ jobs:
           print(pd.read_csv(f"{root}/rat_bootstrap_paired_momentum_diffusion_margin_summary.csv").to_string(index=False))
           print("\nExact-sparse momentum full-core margin summary:")
           print(pd.read_csv(f"{root}/exact_sparse_momentum_core_margin_summary.csv").to_string(index=False))
+          print("\nExact-sparse momentum full-core threshold sensitivity:")
+          print(pd.read_csv(f"{root}/exact_sparse_momentum_core_threshold_sensitivity.csv").to_string(index=False))
           print("\nSession exact-sparse momentum full-core margin summary:")
           print(pd.read_csv(f"{root}/session_exact_sparse_momentum_core_margin_summary.csv").to_string(index=False))
           print("\nRat exact-sparse momentum full-core margin summary:")

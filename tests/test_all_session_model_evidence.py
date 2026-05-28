@@ -22,6 +22,12 @@ def test_all_session_model_evidence_workflow_exports_expected_outputs():
     assert "scripts/aggregate_all_session_model_evidence.py" in workflow
     assert "spike_rate_scale:" in workflow
     assert "--spike-rate-scale" in workflow
+    assert "state_space_momentum_initial_sigma_cm_sqrt_s:" in workflow
+    assert (
+        "STATE_SPACE_MOMENTUM_INITIAL_SIGMA_CM_SQRT_S: "
+        "${{ inputs.state_space_momentum_initial_sigma_cm_sqrt_s }}"
+    ) in workflow
+    assert "--state-space-momentum-initial-sigma-cm-sqrt-s" in workflow
     assert 'CLUSTERLESS_MARK_SMOOTHING_SIGMA_BINS: "1.0"' in workflow
     assert "--clusterless-mark-smoothing-sigma-bins" in workflow
     assert "all_sessions_model_evidence_summary.csv" in workflow

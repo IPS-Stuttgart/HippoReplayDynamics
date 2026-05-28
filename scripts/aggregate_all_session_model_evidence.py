@@ -18,6 +18,7 @@ from model_evidence_settings import _validate_constant_settings
 DEFAULT_MARGIN_POSITIVE_MODEL = "sorted-spike-state-space-momentum-exact-sparse"
 DEFAULT_MARGIN_REFERENCE_MODEL = "sorted-spike-state-space-diffusion"
 DEFAULT_MOMENTUM_CONFIDENCE_THRESHOLD = 5.5
+DEFAULT_MARGIN_SENSITIVITY_THRESHOLDS = (0.0, 1.0, 3.0, 5.5, 10.0, 20.0)
 DEFAULT_RAT_BOOTSTRAP_REPLICATES = 2000
 DEFAULT_RAT_BOOTSTRAP_RANDOM_SEED = 1
 
@@ -182,6 +183,22 @@ def paired_momentum_diffusion_margin_summary(decisions: pd.DataFrame) -> pd.Data
     return _paired_margin_summary(decisions, group_cols=())
 
 
+def paired_momentum_diffusion_threshold_sensitivity(
+    df: pd.DataFrame,
+    *,
+    thresholds: tuple[float, ...] = DEFAULT_MARGIN_SENSITIVITY_THRESHOLDS,
+) -> pd.DataFrame:
+    """Summarize paired momentum-vs-diffusion decisions across margin thresholds."""
+
+    rows = []
+    for threshold in thresholds:
+        decisions = paired_momentum_diffusion_margin_decisions(df, margin_threshold=float(threshold))
+        rows.append(paired_momentum_diffusion_margin_summary(decisions))
+    if not rows:
+        return pd.DataFrame()
+    return pd.concat(rows, ignore_index=True).sort_values("margin_threshold").reset_index(drop=True)
+
+
 def session_paired_momentum_diffusion_margin_summary(decisions: pd.DataFrame) -> pd.DataFrame:
     """Summarize calibrated exact-sparse momentum-vs-diffusion decisions by session."""
 
@@ -298,6 +315,22 @@ def exact_sparse_momentum_core_margin_summary(margins: pd.DataFrame) -> pd.DataF
     """Summarize exact-sparse momentum full-core margins across sessions."""
 
     return _core_margin_summary(margins, group_cols=())
+
+
+def exact_sparse_momentum_core_threshold_sensitivity(
+    df: pd.DataFrame,
+    *,
+    thresholds: tuple[float, ...] = DEFAULT_MARGIN_SENSITIVITY_THRESHOLDS,
+) -> pd.DataFrame:
+    """Summarize full-core exact-sparse momentum decisions across thresholds."""
+
+    rows = []
+    for threshold in thresholds:
+        margins = exact_sparse_momentum_core_margins(df, margin_threshold=float(threshold))
+        rows.append(exact_sparse_momentum_core_margin_summary(margins))
+    if not rows:
+        return pd.DataFrame()
+    return pd.concat(rows, ignore_index=True).sort_values("margin_threshold").reset_index(drop=True)
 
 
 def session_exact_sparse_momentum_core_margin_summary(margins: pd.DataFrame) -> pd.DataFrame:
@@ -596,6 +629,10 @@ def aggregate_all_sessions(shard_glob: str, outdir: Path) -> pd.DataFrame:
         outdir / "paired_momentum_diffusion_margin_summary.csv",
         index=False,
     )
+    paired_momentum_diffusion_threshold_sensitivity(combined).to_csv(
+        outdir / "paired_momentum_diffusion_threshold_sensitivity.csv",
+        index=False,
+    )
     session_paired_momentum_diffusion_margin_summary(paired_decisions).to_csv(
         outdir / "session_paired_momentum_diffusion_margin_summary.csv",
         index=False,
@@ -615,6 +652,10 @@ def aggregate_all_sessions(shard_glob: str, outdir: Path) -> pd.DataFrame:
     core_margins.to_csv(outdir / "exact_sparse_momentum_core_margins.csv", index=False)
     exact_sparse_momentum_core_margin_summary(core_margins).to_csv(
         outdir / "exact_sparse_momentum_core_margin_summary.csv",
+        index=False,
+    )
+    exact_sparse_momentum_core_threshold_sensitivity(combined).to_csv(
+        outdir / "exact_sparse_momentum_core_threshold_sensitivity.csv",
         index=False,
     )
     session_exact_sparse_momentum_core_margin_summary(core_margins).to_csv(
@@ -651,9 +692,13 @@ def main() -> int:
     decisions = paired_momentum_diffusion_margin_decisions(combined)
     print("\nPaired exact-sparse momentum-vs-diffusion margin summary:")
     print(paired_momentum_diffusion_margin_summary(decisions).to_string(index=False))
+    print("\nPaired exact-sparse momentum-vs-diffusion threshold sensitivity:")
+    print(paired_momentum_diffusion_threshold_sensitivity(combined).to_string(index=False))
     core_margins = exact_sparse_momentum_core_margins(combined)
     print("\nExact-sparse momentum full-core margin summary:")
     print(exact_sparse_momentum_core_margin_summary(core_margins).to_string(index=False))
+    print("\nExact-sparse momentum full-core threshold sensitivity:")
+    print(exact_sparse_momentum_core_threshold_sensitivity(combined).to_string(index=False))
     print("\nRat paired exact-sparse momentum-vs-diffusion margin summary:")
     print(rat_paired_momentum_diffusion_margin_summary(decisions).to_string(index=False))
     print("\nLeave-one-rat-out paired exact-sparse momentum-vs-diffusion margin summary:")

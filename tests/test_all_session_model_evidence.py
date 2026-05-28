@@ -9,10 +9,12 @@ from aggregate_all_session_model_evidence import (
     _load_combined,
     exact_sparse_momentum_core_margin_summary,
     exact_sparse_momentum_core_margins,
+    exact_sparse_momentum_core_threshold_sensitivity,
     leave_one_rat_out_exact_sparse_momentum_core_margin_summary,
     leave_one_rat_out_paired_momentum_diffusion_margin_summary,
     paired_momentum_diffusion_margin_decisions,
     paired_momentum_diffusion_margin_summary,
+    paired_momentum_diffusion_threshold_sensitivity,
     rat_exact_sparse_momentum_core_margin_summary,
     rat_bootstrap_exact_sparse_momentum_core_margin_summary,
     rat_bootstrap_paired_momentum_diffusion_margin_summary,
@@ -46,11 +48,13 @@ def test_all_session_model_evidence_workflow_exports_expected_outputs():
     assert "session_model_evidence_summary.csv" in workflow
     assert "random_effects_model_probabilities.csv" in workflow
     assert "paired_momentum_diffusion_margin_summary.csv" in workflow
+    assert "paired_momentum_diffusion_threshold_sensitivity.csv" in workflow
     assert "session_paired_momentum_diffusion_margin_summary.csv" in workflow
     assert "rat_paired_momentum_diffusion_margin_summary.csv" in workflow
     assert "leave_one_rat_out_paired_momentum_diffusion_margin_summary.csv" in workflow
     assert "rat_bootstrap_paired_momentum_diffusion_margin_summary.csv" in workflow
     assert "exact_sparse_momentum_core_margin_summary.csv" in workflow
+    assert "exact_sparse_momentum_core_threshold_sensitivity.csv" in workflow
     assert "session_exact_sparse_momentum_core_margin_summary.csv" in workflow
     assert "rat_exact_sparse_momentum_core_margin_summary.csv" in workflow
     assert "leave_one_rat_out_exact_sparse_momentum_core_margin_summary.csv" in workflow
@@ -143,6 +147,50 @@ def test_all_session_paired_momentum_margin_summaries_separate_claim_states():
     rat1 = session_summary[session_summary["session"] == "Rat1/Open1"].iloc[0]
     assert rat1["positive_model_claims"] == 1
     assert rat1["ambiguous_events"] == 1
+
+
+def test_all_session_threshold_sensitivity_sweeps_margin_gate():
+    frame = pd.DataFrame(
+        [
+            _paired_score_row("Rat1/Open1", 0, "sorted-spike-state-space-diffusion", 0.0),
+            _paired_score_row(
+                "Rat1/Open1",
+                0,
+                "sorted-spike-state-space-momentum-exact-sparse",
+                9.0,
+            ),
+            _paired_score_row("Rat1/Open1", 1, "sorted-spike-state-space-diffusion", 0.0),
+            _paired_score_row(
+                "Rat1/Open1",
+                1,
+                "sorted-spike-state-space-momentum-exact-sparse",
+                3.0,
+            ),
+            _paired_score_row("Rat2/Open1", 2, "sorted-spike-state-space-diffusion", 7.0),
+            _paired_score_row(
+                "Rat2/Open1",
+                2,
+                "sorted-spike-state-space-momentum-exact-sparse",
+                0.0,
+            ),
+        ]
+    )
+
+    paired = paired_momentum_diffusion_threshold_sensitivity(
+        frame,
+        thresholds=(0.0, 5.5, 10.0),
+    )
+    core = exact_sparse_momentum_core_threshold_sensitivity(
+        frame,
+        thresholds=(0.0, 5.5, 10.0),
+    )
+
+    assert paired["margin_threshold"].tolist() == [0.0, 5.5, 10.0]
+    assert paired["positive_model_claims"].tolist() == [2, 1, 0]
+    assert paired["reference_model_claims"].tolist() == [1, 1, 0]
+    assert paired["ambiguous_events"].tolist() == [0, 1, 3]
+    assert core["margin_threshold"].tolist() == [0.0, 5.5, 10.0]
+    assert core["positive_confident_core_claims"].tolist() == [2, 1, 0]
 
 
 def test_all_session_exact_sparse_momentum_core_margins_compare_best_other_exact_model():

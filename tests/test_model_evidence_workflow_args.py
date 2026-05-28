@@ -60,16 +60,26 @@ def test_event_sharded_workflow_includes_exact_first_order_imm_default():
     )
 
 
-def test_all_session_workflow_exposes_momentum_initial_sigma_input():
-    text = (ROOT / ".github" / "workflows" / "model-evidence-all-sessions.yml").read_text(
-        encoding="utf-8"
-    )
+@pytest.mark.parametrize(
+    "workflow_name",
+    (
+        "model-evidence-event-sharded.yml",
+        "model-evidence-all-sessions.yml",
+    ),
+)
+def test_reproducible_evidence_workflows_expose_momentum_initial_sigma_input(
+    workflow_name: str,
+):
+    text = (ROOT / ".github" / "workflows" / workflow_name).read_text(encoding="utf-8")
 
     assert "state_space_momentum_initial_sigma_cm_sqrt_s:" in text
     assert (
         "STATE_SPACE_MOMENTUM_INITIAL_SIGMA_CM_SQRT_S: "
         "${{ inputs.state_space_momentum_initial_sigma_cm_sqrt_s }}"
     ) in text
+    assert "inputs.state_space_momentum_initial_sigma_cm_sqrt_s" in _workflow_concurrency_group(
+        text
+    )
 
 
 def test_clusterless_first_order_imm_is_not_silently_skipped_by_model_evidence_script():
@@ -90,6 +100,12 @@ def _workflow_benchmark_flags(workflow: Path) -> set[str]:
 def _benchmark_script_flags() -> set[str]:
     text = SCRIPT.read_text(encoding="utf-8")
     return set(re.findall(r"add_argument\(\s*[\"'](--[a-z0-9-]+)[\"']", text, flags=re.MULTILINE))
+
+
+def _workflow_concurrency_group(text: str) -> str:
+    match = re.search(r"concurrency:\n\s+group:\s+([^\n]+)", text)
+    assert match is not None
+    return match.group(1)
 
 
 def _workflow_dispatch_default_models(text: str) -> str:

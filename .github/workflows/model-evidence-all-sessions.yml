@@ -398,6 +398,9 @@ jobs:
             paired_momentum_diffusion_margin_decisions.csv \
             paired_momentum_diffusion_margin_summary.csv \
             session_paired_momentum_diffusion_margin_summary.csv \
+            exact_sparse_momentum_core_margins.csv \
+            exact_sparse_momentum_core_margin_summary.csv \
+            session_exact_sparse_momentum_core_margin_summary.csv \
             event_model_pivot_log_evidence.csv \
             event_model_pivot_relative_log_evidence.csv \
             event_model_pivot_model_probability.csv; do
@@ -443,6 +446,10 @@ jobs:
           print(pd.read_csv(f"{root}/paired_momentum_diffusion_margin_summary.csv").to_string(index=False))
           print("\nSession paired exact-sparse momentum-vs-diffusion margin summary:")
           print(pd.read_csv(f"{root}/session_paired_momentum_diffusion_margin_summary.csv").to_string(index=False))
+          print("\nExact-sparse momentum full-core margin summary:")
+          print(pd.read_csv(f"{root}/exact_sparse_momentum_core_margin_summary.csv").to_string(index=False))
+          print("\nSession exact-sparse momentum full-core margin summary:")
+          print(pd.read_csv(f"{root}/session_exact_sparse_momentum_core_margin_summary.csv").to_string(index=False))
           PY
 
       - name: Upload all-session model-evidence results

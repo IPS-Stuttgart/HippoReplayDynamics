@@ -7,9 +7,12 @@ import pytest
 sys.path.insert(0, str(Path("scripts").resolve()))
 from aggregate_all_session_model_evidence import (
     _load_combined,
+    exact_sparse_momentum_core_margin_summary,
+    exact_sparse_momentum_core_margins,
     paired_momentum_diffusion_margin_decisions,
     paired_momentum_diffusion_margin_summary,
     random_effects_model_probabilities,
+    session_exact_sparse_momentum_core_margin_summary,
     session_best_model_counts,
     session_model_evidence_summary,
     session_paired_momentum_diffusion_margin_summary,
@@ -38,6 +41,8 @@ def test_all_session_model_evidence_workflow_exports_expected_outputs():
     assert "random_effects_model_probabilities.csv" in workflow
     assert "paired_momentum_diffusion_margin_summary.csv" in workflow
     assert "session_paired_momentum_diffusion_margin_summary.csv" in workflow
+    assert "exact_sparse_momentum_core_margin_summary.csv" in workflow
+    assert "session_exact_sparse_momentum_core_margin_summary.csv" in workflow
 
 
 def test_all_session_summary_helpers_group_by_session():
@@ -126,6 +131,56 @@ def test_all_session_paired_momentum_margin_summaries_separate_claim_states():
     rat1 = session_summary[session_summary["session"] == "Rat1/Open1"].iloc[0]
     assert rat1["positive_model_claims"] == 1
     assert rat1["ambiguous_events"] == 1
+
+
+def test_all_session_exact_sparse_momentum_core_margins_compare_best_other_exact_model():
+    frame = pd.DataFrame(
+        [
+            _paired_score_row("Rat1/Open1", 0, "sorted-spike-state-space-diffusion", 1.0),
+            _paired_score_row("Rat1/Open1", 0, "sorted-spike-state-space-fragmented", 4.0),
+            _paired_score_row(
+                "Rat1/Open1",
+                0,
+                "sorted-spike-state-space-momentum-exact-sparse",
+                10.0,
+            ),
+            _paired_score_row("Rat1/Open1", 1, "sorted-spike-state-space-diffusion", 2.0),
+            _paired_score_row("Rat1/Open1", 1, "sorted-spike-state-space-first-order-imm", 9.0),
+            _paired_score_row(
+                "Rat1/Open1",
+                1,
+                "sorted-spike-state-space-momentum-exact-sparse",
+                8.0,
+            ),
+            _paired_score_row("Rat2/Open1", 2, "sorted-spike-state-space-diffusion", 2.0),
+            _paired_score_row("Rat2/Open1", 2, "sorted-spike-state-space-fragmented", 3.0),
+            _paired_score_row(
+                "Rat2/Open1",
+                2,
+                "sorted-spike-state-space-momentum-exact-sparse",
+                7.0,
+            ),
+        ]
+    )
+
+    margins = exact_sparse_momentum_core_margins(frame)
+    summary = exact_sparse_momentum_core_margin_summary(margins).iloc[0]
+    session_summary = session_exact_sparse_momentum_core_margin_summary(margins)
+
+    assert summary["events"] == 3
+    assert summary["positive_exact_best_events"] == 2
+    assert summary["non_positive_exact_best_events"] == 1
+    assert summary["positive_confident_core_claims"] == 1
+    assert summary["ambiguous_or_other_best_events"] == 2
+    assert summary["mean_positive_minus_best_other_exact_log_evidence"] == pytest.approx(3.0)
+    assert summary["median_positive_minus_best_other_exact_log_evidence"] == pytest.approx(4.0)
+    assert set(margins["best_other_exact_model"]) == {
+        "sorted-spike-state-space-fragmented",
+        "sorted-spike-state-space-first-order-imm",
+    }
+    rat1 = session_summary[session_summary["session"] == "Rat1/Open1"].iloc[0]
+    assert rat1["positive_exact_best_events"] == 1
+    assert rat1["positive_confident_core_claims"] == 1
 
 
 def _score_row(*, event_index: int, spike_rate_scale: float = 1.0) -> dict[str, object]:

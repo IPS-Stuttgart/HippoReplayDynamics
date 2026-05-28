@@ -186,6 +186,149 @@ def session_paired_momentum_diffusion_margin_summary(decisions: pd.DataFrame) ->
     return _paired_margin_summary(decisions, group_cols=("session",))
 
 
+def exact_sparse_momentum_core_margins(
+    df: pd.DataFrame,
+    *,
+    margin_threshold: float = DEFAULT_MOMENTUM_CONFIDENCE_THRESHOLD,
+) -> pd.DataFrame:
+    """Return exact-sparse momentum margins against the best other exact model.
+
+    The paired diffusion table answers the calibrated primary contrast. This
+    table answers the full-core question: whether exact-sparse momentum remains
+    best after adding stationary, fragmented, first-order IMM, and other
+    exact-comparable alternatives.
+    """
+
+    columns = [
+        "session",
+        "event_index",
+        "positive_model",
+        "positive_log_evidence",
+        "positive_exact_rank",
+        "positive_is_exact_best",
+        "positive_confident_core_claim",
+        "best_other_exact_model",
+        "best_other_exact_log_evidence",
+        "positive_minus_best_other_exact_log_evidence",
+        "margin_threshold",
+        "exact_models_compared",
+    ]
+    df = _ensure_evidence_support_columns(df)
+    ok = df[(df["status"] == "success") & df["evidence_comparable"].fillna(False).astype(bool)].copy()
+    if ok.empty:
+        return pd.DataFrame(columns=columns)
+
+    rows: list[dict[str, object]] = []
+    for key, group in ok.groupby(["session", "event_index"], sort=False):
+        session, event_index = key
+        group = group.dropna(subset=["log_evidence"]).copy()
+        if group.empty:
+            continue
+        positive = group[group["model"].astype(str).eq(DEFAULT_MARGIN_POSITIVE_MODEL)]
+        if positive.empty:
+            continue
+        positive_row = positive.iloc[-1]
+        positive_value = float(positive_row["log_evidence"])
+        ranked = group.sort_values("log_evidence", ascending=False).reset_index(drop=True)
+        positive_matches = ranked["model"].astype(str).eq(DEFAULT_MARGIN_POSITIVE_MODEL)
+        if not positive_matches.any():
+            continue
+        positive_rank = int(np.flatnonzero(positive_matches.to_numpy())[0] + 1)
+        others = ranked[~positive_matches]
+        if others.empty:
+            best_other_model = ""
+            best_other_value = np.nan
+            delta = np.inf
+        else:
+            best_other = others.iloc[0]
+            best_other_model = str(best_other["model"])
+            best_other_value = float(best_other["log_evidence"])
+            delta = positive_value - best_other_value
+        rows.append(
+            {
+                "session": str(session),
+                "event_index": int(event_index),
+                "positive_model": DEFAULT_MARGIN_POSITIVE_MODEL,
+                "positive_log_evidence": positive_value,
+                "positive_exact_rank": positive_rank,
+                "positive_is_exact_best": bool(positive_rank == 1),
+                "positive_confident_core_claim": bool(delta >= float(margin_threshold)),
+                "best_other_exact_model": best_other_model,
+                "best_other_exact_log_evidence": float(best_other_value),
+                "positive_minus_best_other_exact_log_evidence": float(delta),
+                "margin_threshold": float(margin_threshold),
+                "exact_models_compared": int(len(ranked)),
+            }
+        )
+    return pd.DataFrame(rows, columns=columns)
+
+
+def exact_sparse_momentum_core_margin_summary(margins: pd.DataFrame) -> pd.DataFrame:
+    """Summarize exact-sparse momentum full-core margins across sessions."""
+
+    return _core_margin_summary(margins, group_cols=())
+
+
+def session_exact_sparse_momentum_core_margin_summary(margins: pd.DataFrame) -> pd.DataFrame:
+    """Summarize exact-sparse momentum full-core margins by session."""
+
+    return _core_margin_summary(margins, group_cols=("session",))
+
+
+def _core_margin_summary(margins: pd.DataFrame, *, group_cols: tuple[str, ...]) -> pd.DataFrame:
+    columns = [
+        *group_cols,
+        "events",
+        "positive_model",
+        "margin_threshold",
+        "positive_exact_best_events",
+        "non_positive_exact_best_events",
+        "positive_exact_best_fraction",
+        "positive_confident_core_claims",
+        "ambiguous_or_other_best_events",
+        "positive_confident_core_claim_fraction",
+        "mean_positive_minus_best_other_exact_log_evidence",
+        "median_positive_minus_best_other_exact_log_evidence",
+        "min_positive_minus_best_other_exact_log_evidence",
+        "max_positive_minus_best_other_exact_log_evidence",
+        "most_common_best_other_exact_model",
+    ]
+    if margins.empty:
+        return pd.DataFrame(columns=columns)
+
+    rows: list[dict[str, object]] = []
+    groups = [((), margins)] if not group_cols else margins.groupby(list(group_cols), sort=True)
+    for key, group in groups:
+        key_tuple = key if isinstance(key, tuple) else (key,)
+        delta = group["positive_minus_best_other_exact_log_evidence"].astype(float)
+        events = int(len(group))
+        exact_best = int(group["positive_is_exact_best"].fillna(False).astype(bool).sum())
+        confident = int(group["positive_confident_core_claim"].fillna(False).astype(bool).sum())
+        best_other = group["best_other_exact_model"].fillna("").astype(str)
+        best_other = best_other[best_other != ""]
+        row = {column: value for column, value in zip(group_cols, key_tuple, strict=True)}
+        row.update(
+            {
+                "events": events,
+                "positive_model": str(group["positive_model"].dropna().iloc[0]),
+                "margin_threshold": float(group["margin_threshold"].dropna().iloc[0]),
+                "positive_exact_best_events": exact_best,
+                "non_positive_exact_best_events": int(events - exact_best),
+                "positive_exact_best_fraction": float(exact_best / max(events, 1)),
+                "positive_confident_core_claims": confident,
+                "ambiguous_or_other_best_events": int(events - confident),
+                "positive_confident_core_claim_fraction": float(confident / max(events, 1)),
+                "mean_positive_minus_best_other_exact_log_evidence": float(delta.mean()),
+                "median_positive_minus_best_other_exact_log_evidence": float(delta.median()),
+                "min_positive_minus_best_other_exact_log_evidence": float(delta.min()),
+                "max_positive_minus_best_other_exact_log_evidence": float(delta.max()),
+                "most_common_best_other_exact_model": "" if best_other.empty else str(best_other.value_counts().index[0]),
+            }
+        )
+        rows.append(row)
+    return pd.DataFrame(rows, columns=columns)
+
+
 def _paired_margin_summary(decisions: pd.DataFrame, *, group_cols: tuple[str, ...]) -> pd.DataFrame:
     columns = [
         *group_cols,
@@ -247,6 +390,7 @@ def aggregate_all_sessions(shard_glob: str, outdir: Path) -> pd.DataFrame:
     combined = _load_combined(shard_glob)
     outdir.mkdir(parents=True, exist_ok=True)
     paired_decisions = paired_momentum_diffusion_margin_decisions(combined)
+    core_margins = exact_sparse_momentum_core_margins(combined)
 
     _write(combined, outdir)
     combined.to_csv(outdir / "all_sessions_event_model_evidence.csv", index=False)
@@ -262,6 +406,15 @@ def aggregate_all_sessions(shard_glob: str, outdir: Path) -> pd.DataFrame:
     )
     session_paired_momentum_diffusion_margin_summary(paired_decisions).to_csv(
         outdir / "session_paired_momentum_diffusion_margin_summary.csv",
+        index=False,
+    )
+    core_margins.to_csv(outdir / "exact_sparse_momentum_core_margins.csv", index=False)
+    exact_sparse_momentum_core_margin_summary(core_margins).to_csv(
+        outdir / "exact_sparse_momentum_core_margin_summary.csv",
+        index=False,
+    )
+    session_exact_sparse_momentum_core_margin_summary(core_margins).to_csv(
+        outdir / "session_exact_sparse_momentum_core_margin_summary.csv",
         index=False,
     )
     return combined
@@ -282,6 +435,9 @@ def main() -> int:
     decisions = paired_momentum_diffusion_margin_decisions(combined)
     print("\nPaired exact-sparse momentum-vs-diffusion margin summary:")
     print(paired_momentum_diffusion_margin_summary(decisions).to_string(index=False))
+    core_margins = exact_sparse_momentum_core_margins(combined)
+    print("\nExact-sparse momentum full-core margin summary:")
+    print(exact_sparse_momentum_core_margin_summary(core_margins).to_string(index=False))
     print(f"\nRows: {len(combined)}")
     if "status" in combined:
         print(f"Failures: {int((combined['status'] != 'success').sum())}")

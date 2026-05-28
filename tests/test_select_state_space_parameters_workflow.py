@@ -15,6 +15,7 @@ def test_select_state_space_parameters_workflow_downloads_summaries_and_uploads_
     assert "RECOVERY_GATE_METRIC" in workflow
     assert "calibrate_confidence_threshold:" in workflow
     assert "confidence_threshold_values:" in workflow
+    assert "0 0.5 1 1.5" in workflow
     assert "CONFIDENCE_THRESHOLD_VALUES" in workflow
     assert "CONFIDENCE_STRATIFY_COLUMNS" in workflow
     assert "scripts/select_momentum_confidence_threshold.py" in workflow

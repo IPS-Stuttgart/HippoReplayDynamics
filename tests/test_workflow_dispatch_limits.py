@@ -2,6 +2,12 @@ import re
 from pathlib import Path
 
 
+SELECTED_ROW_WORKFLOWS = (
+    Path(".github/workflows/model-evidence-event-sharded.yml"),
+    Path(".github/workflows/model-evidence-all-sessions.yml"),
+)
+
+
 def test_workflow_dispatch_inputs_stay_within_github_limit():
     workflow_dir = Path(".github/workflows")
     offenders: dict[str, int] = {}
@@ -14,6 +20,14 @@ def test_workflow_dispatch_inputs_stay_within_github_limit():
             offenders[str(workflow)] = input_count
 
     assert not offenders
+
+
+def test_selected_row_model_evidence_workflows_keep_initial_sigma_dispatchable():
+    for workflow in SELECTED_ROW_WORKFLOWS:
+        text = workflow.read_text(encoding="utf-8")
+
+        assert _workflow_dispatch_input_count(text) <= 25
+        assert "state_space_momentum_initial_sigma_cm_sqrt_s:" in text
 
 
 def _workflow_dispatch_input_count(workflow: str) -> int:

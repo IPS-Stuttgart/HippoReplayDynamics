@@ -17,7 +17,9 @@ from aggregate_all_session_model_evidence import (
     paired_momentum_diffusion_threshold_sensitivity,
     rat_exact_sparse_momentum_core_margin_summary,
     rat_bootstrap_exact_sparse_momentum_core_margin_summary,
+    rat_bootstrap_exact_sparse_momentum_core_threshold_sensitivity,
     rat_bootstrap_paired_momentum_diffusion_margin_summary,
+    rat_bootstrap_paired_momentum_diffusion_threshold_sensitivity,
     rat_paired_momentum_diffusion_margin_summary,
     random_effects_model_probabilities,
     session_exact_sparse_momentum_core_margin_summary,
@@ -53,12 +55,14 @@ def test_all_session_model_evidence_workflow_exports_expected_outputs():
     assert "rat_paired_momentum_diffusion_margin_summary.csv" in workflow
     assert "leave_one_rat_out_paired_momentum_diffusion_margin_summary.csv" in workflow
     assert "rat_bootstrap_paired_momentum_diffusion_margin_summary.csv" in workflow
+    assert "rat_bootstrap_paired_momentum_diffusion_threshold_sensitivity.csv" in workflow
     assert "exact_sparse_momentum_core_margin_summary.csv" in workflow
     assert "exact_sparse_momentum_core_threshold_sensitivity.csv" in workflow
     assert "session_exact_sparse_momentum_core_margin_summary.csv" in workflow
     assert "rat_exact_sparse_momentum_core_margin_summary.csv" in workflow
     assert "leave_one_rat_out_exact_sparse_momentum_core_margin_summary.csv" in workflow
     assert "rat_bootstrap_exact_sparse_momentum_core_margin_summary.csv" in workflow
+    assert "rat_bootstrap_exact_sparse_momentum_core_threshold_sensitivity.csv" in workflow
 
 
 def test_all_session_summary_helpers_group_by_session():
@@ -346,6 +350,56 @@ def test_all_session_rat_bootstrap_summaries_report_uncertainty():
     assert paired["observed_mean_delta"] == pytest.approx(5.0)
     assert 0.0 <= paired["probability_mean_delta_gt_0"] <= 1.0
     assert core["observed_mean_delta"] == pytest.approx(paired["observed_mean_delta"])
+
+
+def test_all_session_rat_bootstrap_threshold_sensitivity_reports_claim_uncertainty():
+    frame = pd.DataFrame(
+        [
+            _paired_score_row("Rat1/Open1", 0, "sorted-spike-state-space-diffusion", 0.0),
+            _paired_score_row(
+                "Rat1/Open1",
+                0,
+                "sorted-spike-state-space-momentum-exact-sparse",
+                9.0,
+            ),
+            _paired_score_row("Rat2/Open1", 1, "sorted-spike-state-space-diffusion", 0.0),
+            _paired_score_row(
+                "Rat2/Open1",
+                1,
+                "sorted-spike-state-space-momentum-exact-sparse",
+                3.0,
+            ),
+            _paired_score_row("Rat3/Open1", 2, "sorted-spike-state-space-diffusion", 7.0),
+            _paired_score_row(
+                "Rat3/Open1",
+                2,
+                "sorted-spike-state-space-momentum-exact-sparse",
+                0.0,
+            ),
+        ]
+    )
+
+    paired = rat_bootstrap_paired_momentum_diffusion_threshold_sensitivity(
+        frame,
+        thresholds=(0.0, 5.5, 10.0),
+        n_bootstrap=50,
+        random_seed=7,
+    )
+    core = rat_bootstrap_exact_sparse_momentum_core_threshold_sensitivity(
+        frame,
+        thresholds=(0.0, 5.5, 10.0),
+        n_bootstrap=50,
+        random_seed=7,
+    )
+
+    assert paired["margin_threshold"].tolist() == [0.0, 5.5, 10.0]
+    assert paired["observed_positive_claim_fraction"].tolist() == pytest.approx([2 / 3, 1 / 3, 0.0])
+    assert paired["observed_positive_raw_win_fraction"].tolist() == pytest.approx([2 / 3, 2 / 3, 2 / 3])
+    assert paired["observed_mean_delta"].tolist() == pytest.approx([5 / 3, 5 / 3, 5 / 3])
+    assert core["margin_threshold"].tolist() == [0.0, 5.5, 10.0]
+    assert core["observed_positive_claim_fraction"].tolist() == pytest.approx(
+        paired["observed_positive_claim_fraction"].tolist()
+    )
 
 
 def _score_row(*, event_index: int, spike_rate_scale: float = 1.0) -> dict[str, object]:

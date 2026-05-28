@@ -234,6 +234,29 @@ def rat_bootstrap_paired_momentum_diffusion_margin_summary(
     )
 
 
+def rat_bootstrap_paired_momentum_diffusion_threshold_sensitivity(
+    df: pd.DataFrame,
+    *,
+    thresholds: tuple[float, ...] = DEFAULT_MARGIN_SENSITIVITY_THRESHOLDS,
+    n_bootstrap: int = DEFAULT_RAT_BOOTSTRAP_REPLICATES,
+    random_seed: int = DEFAULT_RAT_BOOTSTRAP_RANDOM_SEED,
+) -> pd.DataFrame:
+    """Return rat-cluster bootstrap intervals across paired margin thresholds."""
+
+    rows = []
+    for threshold in thresholds:
+        decisions = paired_momentum_diffusion_margin_decisions(df, margin_threshold=float(threshold))
+        summary = rat_bootstrap_paired_momentum_diffusion_margin_summary(
+            decisions,
+            n_bootstrap=n_bootstrap,
+            random_seed=random_seed,
+        )
+        rows.append(_insert_margin_threshold(summary, threshold))
+    if not rows:
+        return pd.DataFrame()
+    return pd.concat(rows, ignore_index=True).sort_values("margin_threshold").reset_index(drop=True)
+
+
 def exact_sparse_momentum_core_margins(
     df: pd.DataFrame,
     *,
@@ -366,6 +389,36 @@ def rat_bootstrap_exact_sparse_momentum_core_margin_summary(
         n_bootstrap=n_bootstrap,
         random_seed=random_seed,
     )
+
+
+def rat_bootstrap_exact_sparse_momentum_core_threshold_sensitivity(
+    df: pd.DataFrame,
+    *,
+    thresholds: tuple[float, ...] = DEFAULT_MARGIN_SENSITIVITY_THRESHOLDS,
+    n_bootstrap: int = DEFAULT_RAT_BOOTSTRAP_REPLICATES,
+    random_seed: int = DEFAULT_RAT_BOOTSTRAP_RANDOM_SEED,
+) -> pd.DataFrame:
+    """Return rat-cluster bootstrap intervals across full-core thresholds."""
+
+    rows = []
+    for threshold in thresholds:
+        margins = exact_sparse_momentum_core_margins(df, margin_threshold=float(threshold))
+        summary = rat_bootstrap_exact_sparse_momentum_core_margin_summary(
+            margins,
+            n_bootstrap=n_bootstrap,
+            random_seed=random_seed,
+        )
+        rows.append(_insert_margin_threshold(summary, threshold))
+    if not rows:
+        return pd.DataFrame()
+    return pd.concat(rows, ignore_index=True).sort_values("margin_threshold").reset_index(drop=True)
+
+
+def _insert_margin_threshold(summary: pd.DataFrame, threshold: float) -> pd.DataFrame:
+    out = summary.copy()
+    insert_at = min(3, len(out.columns))
+    out.insert(insert_at, "margin_threshold", float(threshold))
+    return out
 
 
 def _with_rat(frame: pd.DataFrame) -> pd.DataFrame:
@@ -649,6 +702,10 @@ def aggregate_all_sessions(shard_glob: str, outdir: Path) -> pd.DataFrame:
         outdir / "rat_bootstrap_paired_momentum_diffusion_margin_summary.csv",
         index=False,
     )
+    rat_bootstrap_paired_momentum_diffusion_threshold_sensitivity(combined).to_csv(
+        outdir / "rat_bootstrap_paired_momentum_diffusion_threshold_sensitivity.csv",
+        index=False,
+    )
     core_margins.to_csv(outdir / "exact_sparse_momentum_core_margins.csv", index=False)
     exact_sparse_momentum_core_margin_summary(core_margins).to_csv(
         outdir / "exact_sparse_momentum_core_margin_summary.csv",
@@ -672,6 +729,10 @@ def aggregate_all_sessions(shard_glob: str, outdir: Path) -> pd.DataFrame:
     )
     rat_bootstrap_exact_sparse_momentum_core_margin_summary(core_margins).to_csv(
         outdir / "rat_bootstrap_exact_sparse_momentum_core_margin_summary.csv",
+        index=False,
+    )
+    rat_bootstrap_exact_sparse_momentum_core_threshold_sensitivity(combined).to_csv(
+        outdir / "rat_bootstrap_exact_sparse_momentum_core_threshold_sensitivity.csv",
         index=False,
     )
     return combined
@@ -705,6 +766,10 @@ def main() -> int:
     print(leave_one_rat_out_paired_momentum_diffusion_margin_summary(decisions).to_string(index=False))
     print("\nRat-bootstrap paired exact-sparse momentum-vs-diffusion margin summary:")
     print(rat_bootstrap_paired_momentum_diffusion_margin_summary(decisions).to_string(index=False))
+    print("\nRat-bootstrap paired exact-sparse momentum-vs-diffusion threshold sensitivity:")
+    print(rat_bootstrap_paired_momentum_diffusion_threshold_sensitivity(combined).to_string(index=False))
+    print("\nRat-bootstrap exact-sparse momentum full-core threshold sensitivity:")
+    print(rat_bootstrap_exact_sparse_momentum_core_threshold_sensitivity(combined).to_string(index=False))
     print(f"\nRows: {len(combined)}")
     if "status" in combined:
         print(f"Failures: {int((combined['status'] != 'success').sum())}")

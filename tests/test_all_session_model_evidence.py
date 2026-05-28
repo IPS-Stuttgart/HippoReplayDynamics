@@ -7,9 +7,12 @@ import pytest
 sys.path.insert(0, str(Path("scripts").resolve()))
 from aggregate_all_session_model_evidence import (
     _load_combined,
+    paired_momentum_diffusion_margin_decisions,
+    paired_momentum_diffusion_margin_summary,
     random_effects_model_probabilities,
     session_best_model_counts,
     session_model_evidence_summary,
+    session_paired_momentum_diffusion_margin_summary,
 )
 
 
@@ -33,6 +36,8 @@ def test_all_session_model_evidence_workflow_exports_expected_outputs():
     assert "all_sessions_model_evidence_summary.csv" in workflow
     assert "session_model_evidence_summary.csv" in workflow
     assert "random_effects_model_probabilities.csv" in workflow
+    assert "paired_momentum_diffusion_margin_summary.csv" in workflow
+    assert "session_paired_momentum_diffusion_margin_summary.csv" in workflow
 
 
 def test_all_session_summary_helpers_group_by_session():
@@ -79,6 +84,50 @@ def test_all_session_aggregation_rejects_mixed_run_settings(tmp_path: Path):
         _load_combined(str(tmp_path / "*.csv"))
 
 
+def test_all_session_paired_momentum_margin_summaries_separate_claim_states():
+    frame = pd.DataFrame(
+        [
+            _paired_score_row("Rat1/Open1", 0, "sorted-spike-state-space-diffusion", 0.0),
+            _paired_score_row(
+                "Rat1/Open1",
+                0,
+                "sorted-spike-state-space-momentum-exact-sparse",
+                9.0,
+            ),
+            _paired_score_row("Rat1/Open1", 1, "sorted-spike-state-space-diffusion", 0.0),
+            _paired_score_row(
+                "Rat1/Open1",
+                1,
+                "sorted-spike-state-space-momentum-exact-sparse",
+                3.0,
+            ),
+            _paired_score_row("Rat2/Open1", 2, "sorted-spike-state-space-diffusion", 7.0),
+            _paired_score_row(
+                "Rat2/Open1",
+                2,
+                "sorted-spike-state-space-momentum-exact-sparse",
+                0.0,
+            ),
+        ]
+    )
+
+    decisions = paired_momentum_diffusion_margin_decisions(frame)
+    summary = paired_momentum_diffusion_margin_summary(decisions).iloc[0]
+    session_summary = session_paired_momentum_diffusion_margin_summary(decisions)
+
+    assert summary["events"] == 3
+    assert summary["positive_raw_wins"] == 2
+    assert summary["reference_raw_wins"] == 1
+    assert summary["positive_model_claims"] == 1
+    assert summary["reference_model_claims"] == 1
+    assert summary["ambiguous_events"] == 1
+    assert summary["margin_threshold"] == 5.5
+    assert set(session_summary["session"]) == {"Rat1/Open1", "Rat2/Open1"}
+    rat1 = session_summary[session_summary["session"] == "Rat1/Open1"].iloc[0]
+    assert rat1["positive_model_claims"] == 1
+    assert rat1["ambiguous_events"] == 1
+
+
 def _score_row(*, event_index: int, spike_rate_scale: float = 1.0) -> dict[str, object]:
     return {
         "status": "success",
@@ -97,6 +146,38 @@ def _score_row(*, event_index: int, spike_rate_scale: float = 1.0) -> dict[str, 
         "min_speed_cm_s": 5.0,
         "time_bin_s": 0.003,
         "spike_rate_scale": spike_rate_scale,
+        "clusterless_mark_smoothing_sigma_bins": 1.0,
+        "clusterless_mark_prior_count": 1.0,
+        "clusterless_mark_variance_floor": 1.0,
+        "clusterless_rate_floor_hz": 1e-4,
+    }
+
+
+def _paired_score_row(
+    session: str,
+    event_index: int,
+    model: str,
+    log_evidence: float,
+) -> dict[str, object]:
+    return {
+        "status": "success",
+        "session": session,
+        "event_index": event_index,
+        "model": model,
+        "requested_model": model,
+        "model_family": "trajectory",
+        "evidence_comparable": True,
+        "evidence_support": "exact_full_grid",
+        "log_evidence": log_evidence,
+        "n_time": 3,
+        "n_spikes": 5,
+        "runtime_s": 0.0,
+        "error": "",
+        "bin_size_cm": 6.0,
+        "smoothing_sigma_bins": 2.0,
+        "min_speed_cm_s": 5.0,
+        "time_bin_s": 0.003,
+        "spike_rate_scale": 1.0,
         "clusterless_mark_smoothing_sigma_bins": 1.0,
         "clusterless_mark_prior_count": 1.0,
         "clusterless_mark_variance_floor": 1.0,

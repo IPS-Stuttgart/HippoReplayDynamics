@@ -20,7 +20,7 @@ from hipporeplayimm.advanced_result_diagnostics import (
 
 DEFAULT_POSITIVE_MODEL = "sorted-spike-state-space-momentum-exact-sparse"
 DEFAULT_REFERENCE_MODEL = "sorted-spike-state-space-diffusion"
-DEFAULT_THRESHOLDS = tuple(float(value) for value in range(0, 11))
+DEFAULT_THRESHOLDS = tuple(value / 2.0 for value in range(0, 21))
 SCORE_FILE_CANDIDATES = (
     "simulation_recovery_emission_calibration_event_scores.csv",
     "simulation_recovery_sweep_event_scores.csv",

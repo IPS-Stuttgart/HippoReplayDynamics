@@ -6,11 +6,18 @@ import sys
 import pandas as pd
 
 sys.path.insert(0, str(Path("scripts").resolve()))
-from select_momentum_confidence_threshold import main  # noqa: E402
+from select_momentum_confidence_threshold import DEFAULT_THRESHOLDS, main  # noqa: E402
 
 
 POSITIVE_MODEL = "sorted-spike-state-space-momentum-exact-sparse"
 REFERENCE_MODEL = "sorted-spike-state-space-diffusion"
+
+
+def test_default_threshold_grid_uses_half_log_evidence_steps():
+    assert DEFAULT_THRESHOLDS[0] == 0.0
+    assert DEFAULT_THRESHOLDS[-1] == 10.0
+    assert 4.5 in DEFAULT_THRESHOLDS
+    assert len(DEFAULT_THRESHOLDS) == 21
 
 
 def test_stratum_scoped_thresholds_can_recover_more_confident_claims(tmp_path, monkeypatch):

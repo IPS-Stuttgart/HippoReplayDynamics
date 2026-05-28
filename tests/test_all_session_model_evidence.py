@@ -14,6 +14,7 @@ from aggregate_all_session_model_evidence import (
     leave_one_rat_out_exact_sparse_momentum_core_threshold_sensitivity,
     leave_one_rat_out_paired_momentum_diffusion_margin_summary,
     leave_one_rat_out_paired_momentum_diffusion_threshold_sensitivity,
+    paper_readiness_gate_summary,
     paired_momentum_diffusion_margin_decisions,
     paired_momentum_diffusion_margin_summary,
     paired_momentum_diffusion_threshold_sensitivity,
@@ -53,6 +54,7 @@ def test_all_session_model_evidence_workflow_exports_expected_outputs():
     assert "all_sessions_model_evidence_summary.csv" in workflow
     assert "session_model_evidence_summary.csv" in workflow
     assert "random_effects_model_probabilities.csv" in workflow
+    assert "paper_readiness_gate_summary.csv" in workflow
     assert "paired_momentum_diffusion_margin_summary.csv" in workflow
     assert "paired_momentum_diffusion_threshold_sensitivity.csv" in workflow
     assert "session_paired_momentum_diffusion_margin_summary.csv" in workflow
@@ -507,6 +509,48 @@ def test_all_session_rat_bootstrap_threshold_sensitivity_reports_claim_uncertain
     assert core["observed_positive_claim_fraction"].tolist() == pytest.approx(
         paired["observed_positive_claim_fraction"].tolist()
     )
+
+
+def test_all_session_paper_readiness_gate_summary_reports_pass_fail():
+    frame = pd.DataFrame(
+        [
+            _paired_score_row("Rat1/Open1", 0, "sorted-spike-state-space-diffusion", 0.0),
+            _paired_score_row(
+                "Rat1/Open1",
+                0,
+                "sorted-spike-state-space-momentum-exact-sparse",
+                9.0,
+            ),
+            _paired_score_row("Rat2/Open1", 1, "sorted-spike-state-space-diffusion", 0.0),
+            _paired_score_row(
+                "Rat2/Open1",
+                1,
+                "sorted-spike-state-space-momentum-exact-sparse",
+                8.0,
+            ),
+            _paired_score_row("Rat3/Open1", 2, "sorted-spike-state-space-diffusion", 0.0),
+            _paired_score_row(
+                "Rat3/Open1",
+                2,
+                "sorted-spike-state-space-momentum-exact-sparse",
+                7.0,
+            ),
+        ]
+    )
+
+    summary = paper_readiness_gate_summary(
+        frame,
+        n_bootstrap=50,
+        random_seed=7,
+    ).set_index("gate")
+
+    assert bool(summary.loc["no_scoring_failures", "passed"])
+    assert bool(summary.loc["paired_no_confident_diffusion_claims", "passed"])
+    assert bool(summary.loc["all_sessions_have_confident_momentum_claims", "passed"])
+    assert bool(summary.loc["leave_one_rat_out_median_delta_positive", "passed"])
+    assert bool(summary.loc["rat_bootstrap_median_delta_ci_positive", "passed"])
+    assert bool(summary.loc["full_core_exact_sparse_claims_present", "passed"])
+    assert bool(summary.loc["overall", "passed"])
 
 
 def _score_row(*, event_index: int, spike_rate_scale: float = 1.0) -> dict[str, object]:

@@ -478,6 +478,154 @@ def rat_bootstrap_exact_sparse_momentum_core_threshold_sensitivity(
     return pd.concat(rows, ignore_index=True).sort_values("margin_threshold").reset_index(drop=True)
 
 
+def paper_readiness_gate_summary(
+    df: pd.DataFrame,
+    *,
+    margin_threshold: float = DEFAULT_MOMENTUM_CONFIDENCE_THRESHOLD,
+    n_bootstrap: int = DEFAULT_RAT_BOOTSTRAP_REPLICATES,
+    random_seed: int = DEFAULT_RAT_BOOTSTRAP_RANDOM_SEED,
+) -> pd.DataFrame:
+    """Return explicit pass/fail gates for the calibrated momentum evidence."""
+
+    columns = ["gate", "passed", "observed", "criterion", "details"]
+    rows: list[dict[str, object]] = []
+
+    def add(gate: str, passed: bool, observed: object, criterion: str, details: str = "") -> None:
+        rows.append(
+            {
+                "gate": gate,
+                "passed": bool(passed),
+                "observed": observed,
+                "criterion": criterion,
+                "details": details,
+            }
+        )
+
+    status_failures = int((df["status"] != "success").sum()) if "status" in df else 0
+    add("no_scoring_failures", status_failures == 0, status_failures, "status failures == 0")
+
+    paired_decisions = paired_momentum_diffusion_margin_decisions(df, margin_threshold=margin_threshold)
+    paired_summary = paired_momentum_diffusion_margin_summary(paired_decisions)
+    if paired_summary.empty:
+        add("paired_events_present", False, 0, "paired events > 0")
+        return pd.DataFrame(rows, columns=columns)
+
+    paired = paired_summary.iloc[0]
+    add("paired_events_present", int(paired["events"]) > 0, int(paired["events"]), "paired events > 0")
+    add(
+        "paired_no_confident_diffusion_claims",
+        int(paired["reference_model_claims"]) == 0,
+        int(paired["reference_model_claims"]),
+        "reference_model_claims == 0",
+    )
+    add(
+        "paired_confident_momentum_claims_present",
+        int(paired["positive_model_claims"]) > 0,
+        int(paired["positive_model_claims"]),
+        "positive_model_claims > 0",
+        f"margin_threshold={float(margin_threshold):g}",
+    )
+
+    session = session_paired_momentum_diffusion_margin_summary(paired_decisions)
+    if session.empty:
+        add("all_sessions_have_confident_momentum_claims", False, 0, "min session positive_model_claims > 0")
+        add("all_sessions_have_no_confident_diffusion_claims", False, 0, "max session reference_model_claims == 0")
+    else:
+        min_session_positive = int(session["positive_model_claims"].min())
+        max_session_reference = int(session["reference_model_claims"].max())
+        add(
+            "all_sessions_have_confident_momentum_claims",
+            min_session_positive > 0,
+            min_session_positive,
+            "min session positive_model_claims > 0",
+        )
+        add(
+            "all_sessions_have_no_confident_diffusion_claims",
+            max_session_reference == 0,
+            max_session_reference,
+            "max session reference_model_claims == 0",
+        )
+
+    leave_one = leave_one_rat_out_paired_momentum_diffusion_margin_summary(paired_decisions)
+    if leave_one.empty:
+        add("leave_one_rat_out_mean_delta_positive", False, np.nan, "min leave-one-rat-out mean delta > 0")
+        add("leave_one_rat_out_median_delta_positive", False, np.nan, "min leave-one-rat-out median delta > 0")
+    else:
+        min_leave_one_mean = float(leave_one["mean_positive_minus_reference_log_evidence"].min())
+        min_leave_one_median = float(leave_one["median_positive_minus_reference_log_evidence"].min())
+        add(
+            "leave_one_rat_out_mean_delta_positive",
+            min_leave_one_mean > 0.0,
+            f"{min_leave_one_mean:.6g}",
+            "min leave-one-rat-out mean delta > 0",
+        )
+        add(
+            "leave_one_rat_out_median_delta_positive",
+            min_leave_one_median > 0.0,
+            f"{min_leave_one_median:.6g}",
+            "min leave-one-rat-out median delta > 0",
+        )
+
+    bootstrap = rat_bootstrap_paired_momentum_diffusion_margin_summary(
+        paired_decisions,
+        n_bootstrap=n_bootstrap,
+        random_seed=random_seed,
+    )
+    if bootstrap.empty:
+        add("rat_bootstrap_mean_delta_ci_positive", False, np.nan, "mean_delta_ci95_low > 0")
+        add("rat_bootstrap_median_delta_ci_positive", False, np.nan, "median_delta_ci95_low > 0")
+        add("rat_bootstrap_claim_fraction_ci_nonzero", False, np.nan, "positive_claim_fraction_ci95_low > 0")
+    else:
+        boot = bootstrap.iloc[0]
+        add(
+            "rat_bootstrap_mean_delta_ci_positive",
+            float(boot["mean_delta_ci95_low"]) > 0.0,
+            f"{float(boot['mean_delta_ci95_low']):.6g}",
+            "mean_delta_ci95_low > 0",
+        )
+        add(
+            "rat_bootstrap_median_delta_ci_positive",
+            float(boot["median_delta_ci95_low"]) > 0.0,
+            f"{float(boot['median_delta_ci95_low']):.6g}",
+            "median_delta_ci95_low > 0",
+        )
+        add(
+            "rat_bootstrap_claim_fraction_ci_nonzero",
+            float(boot["positive_claim_fraction_ci95_low"]) > 0.0,
+            f"{float(boot['positive_claim_fraction_ci95_low']):.6g}",
+            "positive_claim_fraction_ci95_low > 0",
+        )
+
+    core_margins = exact_sparse_momentum_core_margins(df, margin_threshold=margin_threshold)
+    core_summary = exact_sparse_momentum_core_margin_summary(core_margins)
+    if core_summary.empty:
+        add("full_core_exact_sparse_claims_present", False, 0, "positive_confident_core_claims > 0")
+    else:
+        core = core_summary.iloc[0]
+        add(
+            "full_core_exact_sparse_claims_present",
+            int(core["positive_confident_core_claims"]) > 0,
+            int(core["positive_confident_core_claims"]),
+            "positive_confident_core_claims > 0",
+        )
+
+    result = pd.DataFrame(rows, columns=columns)
+    overall_pass = bool(result["passed"].all())
+    overall = pd.DataFrame(
+        [
+            {
+                "gate": "overall",
+                "passed": overall_pass,
+                "observed": f"{int(result['passed'].sum())}/{len(result)} gates passed",
+                "criterion": "all gates pass",
+                "details": f"margin_threshold={float(margin_threshold):g}",
+            }
+        ],
+        columns=columns,
+    )
+    return pd.concat([result, overall], ignore_index=True)
+
+
 def _insert_margin_threshold(summary: pd.DataFrame, threshold: float) -> pd.DataFrame:
     out = summary.copy()
     insert_at = min(3, len(out.columns))
@@ -741,6 +889,7 @@ def aggregate_all_sessions(shard_glob: str, outdir: Path) -> pd.DataFrame:
     session_model_evidence_summary(combined).to_csv(outdir / "session_model_evidence_summary.csv", index=False)
     session_best_model_counts(combined).to_csv(outdir / "session_best_model_counts.csv", index=False)
     random_effects_model_probabilities(combined).to_csv(outdir / "random_effects_model_probabilities.csv", index=False)
+    paper_readiness_gate_summary(combined).to_csv(outdir / "paper_readiness_gate_summary.csv", index=False)
     paired_decisions.to_csv(outdir / "paired_momentum_diffusion_margin_decisions.csv", index=False)
     paired_momentum_diffusion_margin_summary(paired_decisions).to_csv(
         outdir / "paired_momentum_diffusion_margin_summary.csv",
@@ -830,6 +979,8 @@ def main() -> int:
     print(session_model_evidence_summary(combined).to_string(index=False))
     print("\nRandom-effects model probabilities:")
     print(random_effects_model_probabilities(combined).to_string(index=False))
+    print("\nPaper readiness gate summary:")
+    print(paper_readiness_gate_summary(combined).to_string(index=False))
     decisions = paired_momentum_diffusion_margin_decisions(combined)
     print("\nPaired exact-sparse momentum-vs-diffusion margin summary:")
     print(paired_momentum_diffusion_margin_summary(decisions).to_string(index=False))

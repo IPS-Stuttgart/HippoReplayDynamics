@@ -395,6 +395,7 @@ jobs:
             session_model_evidence_summary.csv \
             session_best_model_counts.csv \
             random_effects_model_probabilities.csv \
+            paper_readiness_gate_summary.csv \
             paired_momentum_diffusion_margin_decisions.csv \
             paired_momentum_diffusion_margin_summary.csv \
             paired_momentum_diffusion_threshold_sensitivity.csv \
@@ -456,6 +457,8 @@ jobs:
           print(pd.read_csv(f"{root}/session_model_evidence_summary.csv").to_string(index=False))
           print("\nRandom-effects model probabilities:")
           print(pd.read_csv(f"{root}/random_effects_model_probabilities.csv").to_string(index=False))
+          print("\nPaper readiness gate summary:")
+          print(pd.read_csv(f"{root}/paper_readiness_gate_summary.csv").to_string(index=False))
           print("\nPaired exact-sparse momentum-vs-diffusion margin summary:")
           print(pd.read_csv(f"{root}/paired_momentum_diffusion_margin_summary.csv").to_string(index=False))
           print("\nPaired exact-sparse momentum-vs-diffusion threshold sensitivity:")

@@ -205,6 +205,22 @@ def session_paired_momentum_diffusion_margin_summary(decisions: pd.DataFrame) ->
     return _paired_margin_summary(decisions, group_cols=("session",))
 
 
+def session_paired_momentum_diffusion_threshold_sensitivity(
+    df: pd.DataFrame,
+    *,
+    thresholds: tuple[float, ...] = DEFAULT_MARGIN_SENSITIVITY_THRESHOLDS,
+) -> pd.DataFrame:
+    """Summarize paired threshold sensitivity by session."""
+
+    rows = []
+    for threshold in thresholds:
+        decisions = paired_momentum_diffusion_margin_decisions(df, margin_threshold=float(threshold))
+        rows.append(session_paired_momentum_diffusion_margin_summary(decisions))
+    if not rows:
+        return pd.DataFrame()
+    return pd.concat(rows, ignore_index=True).sort_values(["margin_threshold", "session"]).reset_index(drop=True)
+
+
 def rat_paired_momentum_diffusion_margin_summary(decisions: pd.DataFrame) -> pd.DataFrame:
     """Summarize calibrated exact-sparse momentum-vs-diffusion decisions by rat."""
 
@@ -376,6 +392,22 @@ def session_exact_sparse_momentum_core_margin_summary(margins: pd.DataFrame) -> 
     """Summarize exact-sparse momentum full-core margins by session."""
 
     return _core_margin_summary(margins, group_cols=("session",))
+
+
+def session_exact_sparse_momentum_core_threshold_sensitivity(
+    df: pd.DataFrame,
+    *,
+    thresholds: tuple[float, ...] = DEFAULT_MARGIN_SENSITIVITY_THRESHOLDS,
+) -> pd.DataFrame:
+    """Summarize full-core threshold sensitivity by session."""
+
+    rows = []
+    for threshold in thresholds:
+        margins = exact_sparse_momentum_core_margins(df, margin_threshold=float(threshold))
+        rows.append(session_exact_sparse_momentum_core_margin_summary(margins))
+    if not rows:
+        return pd.DataFrame()
+    return pd.concat(rows, ignore_index=True).sort_values(["margin_threshold", "session"]).reset_index(drop=True)
 
 
 def rat_exact_sparse_momentum_core_margin_summary(margins: pd.DataFrame) -> pd.DataFrame:
@@ -722,6 +754,10 @@ def aggregate_all_sessions(shard_glob: str, outdir: Path) -> pd.DataFrame:
         outdir / "session_paired_momentum_diffusion_margin_summary.csv",
         index=False,
     )
+    session_paired_momentum_diffusion_threshold_sensitivity(combined).to_csv(
+        outdir / "session_paired_momentum_diffusion_threshold_sensitivity.csv",
+        index=False,
+    )
     rat_paired_momentum_diffusion_margin_summary(paired_decisions).to_csv(
         outdir / "rat_paired_momentum_diffusion_margin_summary.csv",
         index=False,
@@ -753,6 +789,10 @@ def aggregate_all_sessions(shard_glob: str, outdir: Path) -> pd.DataFrame:
     )
     session_exact_sparse_momentum_core_margin_summary(core_margins).to_csv(
         outdir / "session_exact_sparse_momentum_core_margin_summary.csv",
+        index=False,
+    )
+    session_exact_sparse_momentum_core_threshold_sensitivity(combined).to_csv(
+        outdir / "session_exact_sparse_momentum_core_threshold_sensitivity.csv",
         index=False,
     )
     rat_exact_sparse_momentum_core_margin_summary(core_margins).to_csv(
@@ -795,11 +835,15 @@ def main() -> int:
     print(paired_momentum_diffusion_margin_summary(decisions).to_string(index=False))
     print("\nPaired exact-sparse momentum-vs-diffusion threshold sensitivity:")
     print(paired_momentum_diffusion_threshold_sensitivity(combined).to_string(index=False))
+    print("\nSession paired exact-sparse momentum-vs-diffusion threshold sensitivity:")
+    print(session_paired_momentum_diffusion_threshold_sensitivity(combined).to_string(index=False))
     core_margins = exact_sparse_momentum_core_margins(combined)
     print("\nExact-sparse momentum full-core margin summary:")
     print(exact_sparse_momentum_core_margin_summary(core_margins).to_string(index=False))
     print("\nExact-sparse momentum full-core threshold sensitivity:")
     print(exact_sparse_momentum_core_threshold_sensitivity(combined).to_string(index=False))
+    print("\nSession exact-sparse momentum full-core threshold sensitivity:")
+    print(session_exact_sparse_momentum_core_threshold_sensitivity(combined).to_string(index=False))
     print("\nRat paired exact-sparse momentum-vs-diffusion margin summary:")
     print(rat_paired_momentum_diffusion_margin_summary(decisions).to_string(index=False))
     print("\nLeave-one-rat-out paired exact-sparse momentum-vs-diffusion margin summary:")

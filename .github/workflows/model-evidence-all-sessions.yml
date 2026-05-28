@@ -401,6 +401,7 @@ jobs:
             session_paired_momentum_diffusion_margin_summary.csv \
             rat_paired_momentum_diffusion_margin_summary.csv \
             leave_one_rat_out_paired_momentum_diffusion_margin_summary.csv \
+            leave_one_rat_out_paired_momentum_diffusion_threshold_sensitivity.csv \
             rat_bootstrap_paired_momentum_diffusion_margin_summary.csv \
             rat_bootstrap_paired_momentum_diffusion_threshold_sensitivity.csv \
             exact_sparse_momentum_core_margins.csv \
@@ -409,6 +410,7 @@ jobs:
             session_exact_sparse_momentum_core_margin_summary.csv \
             rat_exact_sparse_momentum_core_margin_summary.csv \
             leave_one_rat_out_exact_sparse_momentum_core_margin_summary.csv \
+            leave_one_rat_out_exact_sparse_momentum_core_threshold_sensitivity.csv \
             rat_bootstrap_exact_sparse_momentum_core_margin_summary.csv \
             rat_bootstrap_exact_sparse_momentum_core_threshold_sensitivity.csv \
             event_model_pivot_log_evidence.csv \
@@ -462,6 +464,8 @@ jobs:
           print(pd.read_csv(f"{root}/rat_paired_momentum_diffusion_margin_summary.csv").to_string(index=False))
           print("\nLeave-one-rat-out paired exact-sparse momentum-vs-diffusion margin summary:")
           print(pd.read_csv(f"{root}/leave_one_rat_out_paired_momentum_diffusion_margin_summary.csv").to_string(index=False))
+          print("\nLeave-one-rat-out paired exact-sparse momentum-vs-diffusion threshold sensitivity:")
+          print(pd.read_csv(f"{root}/leave_one_rat_out_paired_momentum_diffusion_threshold_sensitivity.csv").to_string(index=False))
           print("\nRat-bootstrap paired exact-sparse momentum-vs-diffusion margin summary:")
           print(pd.read_csv(f"{root}/rat_bootstrap_paired_momentum_diffusion_margin_summary.csv").to_string(index=False))
           print("\nRat-bootstrap paired exact-sparse momentum-vs-diffusion threshold sensitivity:")
@@ -476,6 +480,8 @@ jobs:
           print(pd.read_csv(f"{root}/rat_exact_sparse_momentum_core_margin_summary.csv").to_string(index=False))
           print("\nLeave-one-rat-out exact-sparse momentum full-core margin summary:")
           print(pd.read_csv(f"{root}/leave_one_rat_out_exact_sparse_momentum_core_margin_summary.csv").to_string(index=False))
+          print("\nLeave-one-rat-out exact-sparse momentum full-core threshold sensitivity:")
+          print(pd.read_csv(f"{root}/leave_one_rat_out_exact_sparse_momentum_core_threshold_sensitivity.csv").to_string(index=False))
           print("\nRat-bootstrap exact-sparse momentum full-core margin summary:")
           print(pd.read_csv(f"{root}/rat_bootstrap_exact_sparse_momentum_core_margin_summary.csv").to_string(index=False))
           print("\nRat-bootstrap exact-sparse momentum full-core threshold sensitivity:")

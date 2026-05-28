@@ -186,6 +186,18 @@ def session_paired_momentum_diffusion_margin_summary(decisions: pd.DataFrame) ->
     return _paired_margin_summary(decisions, group_cols=("session",))
 
 
+def rat_paired_momentum_diffusion_margin_summary(decisions: pd.DataFrame) -> pd.DataFrame:
+    """Summarize calibrated exact-sparse momentum-vs-diffusion decisions by rat."""
+
+    return _paired_margin_summary(_with_rat(decisions), group_cols=("rat",))
+
+
+def leave_one_rat_out_paired_momentum_diffusion_margin_summary(decisions: pd.DataFrame) -> pd.DataFrame:
+    """Summarize calibrated momentum-vs-diffusion decisions after excluding each rat."""
+
+    return _leave_one_rat_out_summary(decisions, paired_momentum_diffusion_margin_summary)
+
+
 def exact_sparse_momentum_core_margins(
     df: pd.DataFrame,
     *,
@@ -273,6 +285,57 @@ def session_exact_sparse_momentum_core_margin_summary(margins: pd.DataFrame) -> 
     """Summarize exact-sparse momentum full-core margins by session."""
 
     return _core_margin_summary(margins, group_cols=("session",))
+
+
+def rat_exact_sparse_momentum_core_margin_summary(margins: pd.DataFrame) -> pd.DataFrame:
+    """Summarize exact-sparse momentum full-core margins by rat."""
+
+    return _core_margin_summary(_with_rat(margins), group_cols=("rat",))
+
+
+def leave_one_rat_out_exact_sparse_momentum_core_margin_summary(margins: pd.DataFrame) -> pd.DataFrame:
+    """Summarize exact-sparse momentum full-core margins after excluding each rat."""
+
+    return _leave_one_rat_out_summary(margins, exact_sparse_momentum_core_margin_summary)
+
+
+def _with_rat(frame: pd.DataFrame) -> pd.DataFrame:
+    out = frame.copy()
+    if "rat" not in out:
+        if "session" in out:
+            out["rat"] = out["session"].map(_rat_from_session)
+        else:
+            out["rat"] = pd.Series(dtype=str)
+    return out
+
+
+def _rat_from_session(session: object) -> str:
+    return str(session).replace("\\", "/").split("/", 1)[0]
+
+
+def _leave_one_rat_out_summary(frame: pd.DataFrame, summary_func) -> pd.DataFrame:
+    frame = _with_rat(frame)
+    summary_columns = list(summary_func(frame).columns)
+    columns = ["held_out_rat", "included_rats", *summary_columns]
+    if frame.empty:
+        return pd.DataFrame(columns=columns)
+
+    rows: list[dict[str, object]] = []
+    rats = sorted(frame["rat"].dropna().astype(str).unique())
+    for held_out_rat in rats:
+        retained = frame[frame["rat"].astype(str) != held_out_rat].copy()
+        summary = summary_func(retained)
+        if summary.empty:
+            continue
+        row = summary.iloc[0].to_dict()
+        row.update(
+            {
+                "held_out_rat": held_out_rat,
+                "included_rats": " ".join(sorted(retained["rat"].dropna().astype(str).unique())),
+            }
+        )
+        rows.append(row)
+    return pd.DataFrame(rows, columns=columns)
 
 
 def _core_margin_summary(margins: pd.DataFrame, *, group_cols: tuple[str, ...]) -> pd.DataFrame:
@@ -408,6 +471,14 @@ def aggregate_all_sessions(shard_glob: str, outdir: Path) -> pd.DataFrame:
         outdir / "session_paired_momentum_diffusion_margin_summary.csv",
         index=False,
     )
+    rat_paired_momentum_diffusion_margin_summary(paired_decisions).to_csv(
+        outdir / "rat_paired_momentum_diffusion_margin_summary.csv",
+        index=False,
+    )
+    leave_one_rat_out_paired_momentum_diffusion_margin_summary(paired_decisions).to_csv(
+        outdir / "leave_one_rat_out_paired_momentum_diffusion_margin_summary.csv",
+        index=False,
+    )
     core_margins.to_csv(outdir / "exact_sparse_momentum_core_margins.csv", index=False)
     exact_sparse_momentum_core_margin_summary(core_margins).to_csv(
         outdir / "exact_sparse_momentum_core_margin_summary.csv",
@@ -415,6 +486,14 @@ def aggregate_all_sessions(shard_glob: str, outdir: Path) -> pd.DataFrame:
     )
     session_exact_sparse_momentum_core_margin_summary(core_margins).to_csv(
         outdir / "session_exact_sparse_momentum_core_margin_summary.csv",
+        index=False,
+    )
+    rat_exact_sparse_momentum_core_margin_summary(core_margins).to_csv(
+        outdir / "rat_exact_sparse_momentum_core_margin_summary.csv",
+        index=False,
+    )
+    leave_one_rat_out_exact_sparse_momentum_core_margin_summary(core_margins).to_csv(
+        outdir / "leave_one_rat_out_exact_sparse_momentum_core_margin_summary.csv",
         index=False,
     )
     return combined
@@ -438,6 +517,10 @@ def main() -> int:
     core_margins = exact_sparse_momentum_core_margins(combined)
     print("\nExact-sparse momentum full-core margin summary:")
     print(exact_sparse_momentum_core_margin_summary(core_margins).to_string(index=False))
+    print("\nRat paired exact-sparse momentum-vs-diffusion margin summary:")
+    print(rat_paired_momentum_diffusion_margin_summary(decisions).to_string(index=False))
+    print("\nLeave-one-rat-out paired exact-sparse momentum-vs-diffusion margin summary:")
+    print(leave_one_rat_out_paired_momentum_diffusion_margin_summary(decisions).to_string(index=False))
     print(f"\nRows: {len(combined)}")
     if "status" in combined:
         print(f"Failures: {int((combined['status'] != 'success').sum())}")

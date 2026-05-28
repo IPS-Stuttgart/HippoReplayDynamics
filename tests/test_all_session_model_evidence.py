@@ -9,8 +9,12 @@ from aggregate_all_session_model_evidence import (
     _load_combined,
     exact_sparse_momentum_core_margin_summary,
     exact_sparse_momentum_core_margins,
+    leave_one_rat_out_exact_sparse_momentum_core_margin_summary,
+    leave_one_rat_out_paired_momentum_diffusion_margin_summary,
     paired_momentum_diffusion_margin_decisions,
     paired_momentum_diffusion_margin_summary,
+    rat_exact_sparse_momentum_core_margin_summary,
+    rat_paired_momentum_diffusion_margin_summary,
     random_effects_model_probabilities,
     session_exact_sparse_momentum_core_margin_summary,
     session_best_model_counts,
@@ -41,8 +45,12 @@ def test_all_session_model_evidence_workflow_exports_expected_outputs():
     assert "random_effects_model_probabilities.csv" in workflow
     assert "paired_momentum_diffusion_margin_summary.csv" in workflow
     assert "session_paired_momentum_diffusion_margin_summary.csv" in workflow
+    assert "rat_paired_momentum_diffusion_margin_summary.csv" in workflow
+    assert "leave_one_rat_out_paired_momentum_diffusion_margin_summary.csv" in workflow
     assert "exact_sparse_momentum_core_margin_summary.csv" in workflow
     assert "session_exact_sparse_momentum_core_margin_summary.csv" in workflow
+    assert "rat_exact_sparse_momentum_core_margin_summary.csv" in workflow
+    assert "leave_one_rat_out_exact_sparse_momentum_core_margin_summary.csv" in workflow
 
 
 def test_all_session_summary_helpers_group_by_session():
@@ -181,6 +189,60 @@ def test_all_session_exact_sparse_momentum_core_margins_compare_best_other_exact
     rat1 = session_summary[session_summary["session"] == "Rat1/Open1"].iloc[0]
     assert rat1["positive_exact_best_events"] == 1
     assert rat1["positive_confident_core_claims"] == 1
+
+
+def test_all_session_rat_robustness_summaries_group_and_hold_out_rats():
+    frame = pd.DataFrame(
+        [
+            _paired_score_row("Rat1/Open1", 0, "sorted-spike-state-space-diffusion", 0.0),
+            _paired_score_row(
+                "Rat1/Open1",
+                0,
+                "sorted-spike-state-space-momentum-exact-sparse",
+                9.0,
+            ),
+            _paired_score_row("Rat1/Open2", 1, "sorted-spike-state-space-diffusion", 1.0),
+            _paired_score_row(
+                "Rat1/Open2",
+                1,
+                "sorted-spike-state-space-momentum-exact-sparse",
+                0.0,
+            ),
+            _paired_score_row("Rat2/Open1", 2, "sorted-spike-state-space-diffusion", 0.0),
+            _paired_score_row(
+                "Rat2/Open1",
+                2,
+                "sorted-spike-state-space-momentum-exact-sparse",
+                8.0,
+            ),
+            _paired_score_row("Rat3/Open1", 3, "sorted-spike-state-space-diffusion", 6.0),
+            _paired_score_row(
+                "Rat3/Open1",
+                3,
+                "sorted-spike-state-space-momentum-exact-sparse",
+                0.0,
+            ),
+        ]
+    )
+    decisions = paired_momentum_diffusion_margin_decisions(frame)
+    core_margins = exact_sparse_momentum_core_margins(frame)
+
+    rat_paired = rat_paired_momentum_diffusion_margin_summary(decisions)
+    rat_core = rat_exact_sparse_momentum_core_margin_summary(core_margins)
+    paired_leave_one_out = leave_one_rat_out_paired_momentum_diffusion_margin_summary(decisions)
+    core_leave_one_out = leave_one_rat_out_exact_sparse_momentum_core_margin_summary(core_margins)
+
+    assert rat_paired["rat"].tolist() == ["Rat1", "Rat2", "Rat3"]
+    assert rat_core["rat"].tolist() == ["Rat1", "Rat2", "Rat3"]
+    assert paired_leave_one_out["held_out_rat"].tolist() == ["Rat1", "Rat2", "Rat3"]
+    assert core_leave_one_out["held_out_rat"].tolist() == ["Rat1", "Rat2", "Rat3"]
+    rat1 = rat_paired[rat_paired["rat"] == "Rat1"].iloc[0]
+    assert rat1["events"] == 2
+    assert rat1["positive_model_claims"] == 1
+    held_out_rat1 = paired_leave_one_out[paired_leave_one_out["held_out_rat"] == "Rat1"].iloc[0]
+    assert held_out_rat1["included_rats"] == "Rat2 Rat3"
+    assert held_out_rat1["events"] == 2
+    assert held_out_rat1["positive_model_claims"] == 1
 
 
 def _score_row(*, event_index: int, spike_rate_scale: float = 1.0) -> dict[str, object]:

@@ -11,7 +11,9 @@ from aggregate_all_session_model_evidence import (
     exact_sparse_momentum_core_margins,
     exact_sparse_momentum_core_threshold_sensitivity,
     leave_one_rat_out_exact_sparse_momentum_core_margin_summary,
+    leave_one_rat_out_exact_sparse_momentum_core_threshold_sensitivity,
     leave_one_rat_out_paired_momentum_diffusion_margin_summary,
+    leave_one_rat_out_paired_momentum_diffusion_threshold_sensitivity,
     paired_momentum_diffusion_margin_decisions,
     paired_momentum_diffusion_margin_summary,
     paired_momentum_diffusion_threshold_sensitivity,
@@ -54,6 +56,7 @@ def test_all_session_model_evidence_workflow_exports_expected_outputs():
     assert "session_paired_momentum_diffusion_margin_summary.csv" in workflow
     assert "rat_paired_momentum_diffusion_margin_summary.csv" in workflow
     assert "leave_one_rat_out_paired_momentum_diffusion_margin_summary.csv" in workflow
+    assert "leave_one_rat_out_paired_momentum_diffusion_threshold_sensitivity.csv" in workflow
     assert "rat_bootstrap_paired_momentum_diffusion_margin_summary.csv" in workflow
     assert "rat_bootstrap_paired_momentum_diffusion_threshold_sensitivity.csv" in workflow
     assert "exact_sparse_momentum_core_margin_summary.csv" in workflow
@@ -61,6 +64,7 @@ def test_all_session_model_evidence_workflow_exports_expected_outputs():
     assert "session_exact_sparse_momentum_core_margin_summary.csv" in workflow
     assert "rat_exact_sparse_momentum_core_margin_summary.csv" in workflow
     assert "leave_one_rat_out_exact_sparse_momentum_core_margin_summary.csv" in workflow
+    assert "leave_one_rat_out_exact_sparse_momentum_core_threshold_sensitivity.csv" in workflow
     assert "rat_bootstrap_exact_sparse_momentum_core_margin_summary.csv" in workflow
     assert "rat_bootstrap_exact_sparse_momentum_core_threshold_sensitivity.csv" in workflow
 
@@ -299,6 +303,56 @@ def test_all_session_rat_robustness_summaries_group_and_hold_out_rats():
     assert held_out_rat1["included_rats"] == "Rat2 Rat3"
     assert held_out_rat1["events"] == 2
     assert held_out_rat1["positive_model_claims"] == 1
+
+
+def test_all_session_leave_one_rat_out_threshold_sensitivity_sweeps_margin_gate():
+    frame = pd.DataFrame(
+        [
+            _paired_score_row("Rat1/Open1", 0, "sorted-spike-state-space-diffusion", 0.0),
+            _paired_score_row(
+                "Rat1/Open1",
+                0,
+                "sorted-spike-state-space-momentum-exact-sparse",
+                9.0,
+            ),
+            _paired_score_row("Rat2/Open1", 1, "sorted-spike-state-space-diffusion", 0.0),
+            _paired_score_row(
+                "Rat2/Open1",
+                1,
+                "sorted-spike-state-space-momentum-exact-sparse",
+                3.0,
+            ),
+            _paired_score_row("Rat3/Open1", 2, "sorted-spike-state-space-diffusion", 7.0),
+            _paired_score_row(
+                "Rat3/Open1",
+                2,
+                "sorted-spike-state-space-momentum-exact-sparse",
+                0.0,
+            ),
+        ]
+    )
+
+    paired = leave_one_rat_out_paired_momentum_diffusion_threshold_sensitivity(
+        frame,
+        thresholds=(0.0, 5.5),
+    )
+    core = leave_one_rat_out_exact_sparse_momentum_core_threshold_sensitivity(
+        frame,
+        thresholds=(0.0, 5.5),
+    )
+
+    assert paired["margin_threshold"].tolist() == [0.0, 0.0, 0.0, 5.5, 5.5, 5.5]
+    assert paired["held_out_rat"].tolist() == ["Rat1", "Rat2", "Rat3", "Rat1", "Rat2", "Rat3"]
+    t0 = paired[paired["margin_threshold"] == 0.0]
+    assert t0["positive_model_claims"].tolist() == [1, 1, 2]
+    assert t0["reference_model_claims"].tolist() == [1, 1, 0]
+    t55 = paired[paired["margin_threshold"] == 5.5]
+    assert t55["positive_model_claims"].tolist() == [0, 1, 1]
+    assert t55["reference_model_claims"].tolist() == [1, 1, 0]
+    assert t55["ambiguous_events"].tolist() == [1, 0, 1]
+    assert core["margin_threshold"].tolist() == paired["margin_threshold"].tolist()
+    assert core["held_out_rat"].tolist() == paired["held_out_rat"].tolist()
+    assert core["positive_confident_core_claims"].tolist() == paired["positive_model_claims"].tolist()
 
 
 def test_all_session_rat_bootstrap_summaries_report_uncertainty():

@@ -18,6 +18,8 @@ from model_evidence_settings import _validate_constant_settings
 DEFAULT_MARGIN_POSITIVE_MODEL = "sorted-spike-state-space-momentum-exact-sparse"
 DEFAULT_MARGIN_REFERENCE_MODEL = "sorted-spike-state-space-diffusion"
 DEFAULT_MOMENTUM_CONFIDENCE_THRESHOLD = 5.5
+DEFAULT_RAT_BOOTSTRAP_REPLICATES = 2000
+DEFAULT_RAT_BOOTSTRAP_RANDOM_SEED = 1
 
 
 def _load_score_files(shard_glob: str) -> list[Path]:
@@ -198,6 +200,23 @@ def leave_one_rat_out_paired_momentum_diffusion_margin_summary(decisions: pd.Dat
     return _leave_one_rat_out_summary(decisions, paired_momentum_diffusion_margin_summary)
 
 
+def rat_bootstrap_paired_momentum_diffusion_margin_summary(
+    decisions: pd.DataFrame,
+    *,
+    n_bootstrap: int = DEFAULT_RAT_BOOTSTRAP_REPLICATES,
+    random_seed: int = DEFAULT_RAT_BOOTSTRAP_RANDOM_SEED,
+) -> pd.DataFrame:
+    """Return rat-cluster bootstrap intervals for paired momentum decisions."""
+
+    return _rat_bootstrap_margin_summary(
+        decisions,
+        delta_col="positive_minus_reference_log_evidence",
+        positive_claim_col="positive_model_claimed",
+        n_bootstrap=n_bootstrap,
+        random_seed=random_seed,
+    )
+
+
 def exact_sparse_momentum_core_margins(
     df: pd.DataFrame,
     *,
@@ -299,6 +318,23 @@ def leave_one_rat_out_exact_sparse_momentum_core_margin_summary(margins: pd.Data
     return _leave_one_rat_out_summary(margins, exact_sparse_momentum_core_margin_summary)
 
 
+def rat_bootstrap_exact_sparse_momentum_core_margin_summary(
+    margins: pd.DataFrame,
+    *,
+    n_bootstrap: int = DEFAULT_RAT_BOOTSTRAP_REPLICATES,
+    random_seed: int = DEFAULT_RAT_BOOTSTRAP_RANDOM_SEED,
+) -> pd.DataFrame:
+    """Return rat-cluster bootstrap intervals for full-core momentum margins."""
+
+    return _rat_bootstrap_margin_summary(
+        margins,
+        delta_col="positive_minus_best_other_exact_log_evidence",
+        positive_claim_col="positive_confident_core_claim",
+        n_bootstrap=n_bootstrap,
+        random_seed=random_seed,
+    )
+
+
 def _with_rat(frame: pd.DataFrame) -> pd.DataFrame:
     out = frame.copy()
     if "rat" not in out:
@@ -336,6 +372,99 @@ def _leave_one_rat_out_summary(frame: pd.DataFrame, summary_func) -> pd.DataFram
         )
         rows.append(row)
     return pd.DataFrame(rows, columns=columns)
+
+
+def _rat_bootstrap_margin_summary(
+    frame: pd.DataFrame,
+    *,
+    delta_col: str,
+    positive_claim_col: str,
+    n_bootstrap: int,
+    random_seed: int,
+) -> pd.DataFrame:
+    columns = [
+        "bootstrap_unit",
+        "bootstrap_replicates",
+        "random_seed",
+        "observed_events",
+        "observed_rats",
+        "observed_positive_raw_win_fraction",
+        "positive_raw_win_fraction_ci95_low",
+        "positive_raw_win_fraction_ci95_high",
+        "observed_positive_claim_fraction",
+        "positive_claim_fraction_ci95_low",
+        "positive_claim_fraction_ci95_high",
+        "observed_mean_delta",
+        "mean_delta_ci95_low",
+        "mean_delta_ci95_high",
+        "probability_mean_delta_gt_0",
+        "observed_median_delta",
+        "median_delta_ci95_low",
+        "median_delta_ci95_high",
+        "probability_median_delta_gt_0",
+    ]
+    frame = _with_rat(frame)
+    if frame.empty:
+        return pd.DataFrame(columns=columns)
+    missing = [column for column in ("rat", delta_col, positive_claim_col) if column not in frame]
+    if missing:
+        raise KeyError(f"frame is missing required columns: {missing}")
+    if n_bootstrap <= 0:
+        raise ValueError("n_bootstrap must be positive")
+
+    observed = _bootstrap_margin_metrics(frame, delta_col=delta_col, positive_claim_col=positive_claim_col)
+    rats = sorted(frame["rat"].dropna().astype(str).unique())
+    by_rat = {rat: frame[frame["rat"].astype(str).eq(rat)] for rat in rats}
+    rng = np.random.default_rng(int(random_seed))
+    replicate_rows: list[dict[str, float]] = []
+    for _ in range(int(n_bootstrap)):
+        sampled = rng.choice(rats, size=len(rats), replace=True)
+        sample = pd.concat([by_rat[rat] for rat in sampled], ignore_index=True)
+        replicate_rows.append(
+            _bootstrap_margin_metrics(sample, delta_col=delta_col, positive_claim_col=positive_claim_col)
+        )
+    replicates = pd.DataFrame(replicate_rows)
+
+    def ci(metric: str, q: float) -> float:
+        return float(np.nanquantile(replicates[metric].to_numpy(dtype=float), q))
+
+    row = {
+        "bootstrap_unit": "rat",
+        "bootstrap_replicates": int(n_bootstrap),
+        "random_seed": int(random_seed),
+        "observed_events": int(len(frame)),
+        "observed_rats": int(len(rats)),
+        "observed_positive_raw_win_fraction": observed["positive_raw_win_fraction"],
+        "positive_raw_win_fraction_ci95_low": ci("positive_raw_win_fraction", 0.025),
+        "positive_raw_win_fraction_ci95_high": ci("positive_raw_win_fraction", 0.975),
+        "observed_positive_claim_fraction": observed["positive_claim_fraction"],
+        "positive_claim_fraction_ci95_low": ci("positive_claim_fraction", 0.025),
+        "positive_claim_fraction_ci95_high": ci("positive_claim_fraction", 0.975),
+        "observed_mean_delta": observed["mean_delta"],
+        "mean_delta_ci95_low": ci("mean_delta", 0.025),
+        "mean_delta_ci95_high": ci("mean_delta", 0.975),
+        "probability_mean_delta_gt_0": float((replicates["mean_delta"] > 0.0).mean()),
+        "observed_median_delta": observed["median_delta"],
+        "median_delta_ci95_low": ci("median_delta", 0.025),
+        "median_delta_ci95_high": ci("median_delta", 0.975),
+        "probability_median_delta_gt_0": float((replicates["median_delta"] > 0.0).mean()),
+    }
+    return pd.DataFrame([row], columns=columns)
+
+
+def _bootstrap_margin_metrics(
+    frame: pd.DataFrame,
+    *,
+    delta_col: str,
+    positive_claim_col: str,
+) -> dict[str, float]:
+    delta = frame[delta_col].astype(float)
+    return {
+        "positive_raw_win_fraction": float((delta > 0.0).mean()),
+        "positive_claim_fraction": float(frame[positive_claim_col].fillna(False).astype(bool).mean()),
+        "mean_delta": float(delta.mean()),
+        "median_delta": float(delta.median()),
+    }
 
 
 def _core_margin_summary(margins: pd.DataFrame, *, group_cols: tuple[str, ...]) -> pd.DataFrame:
@@ -479,6 +608,10 @@ def aggregate_all_sessions(shard_glob: str, outdir: Path) -> pd.DataFrame:
         outdir / "leave_one_rat_out_paired_momentum_diffusion_margin_summary.csv",
         index=False,
     )
+    rat_bootstrap_paired_momentum_diffusion_margin_summary(paired_decisions).to_csv(
+        outdir / "rat_bootstrap_paired_momentum_diffusion_margin_summary.csv",
+        index=False,
+    )
     core_margins.to_csv(outdir / "exact_sparse_momentum_core_margins.csv", index=False)
     exact_sparse_momentum_core_margin_summary(core_margins).to_csv(
         outdir / "exact_sparse_momentum_core_margin_summary.csv",
@@ -494,6 +627,10 @@ def aggregate_all_sessions(shard_glob: str, outdir: Path) -> pd.DataFrame:
     )
     leave_one_rat_out_exact_sparse_momentum_core_margin_summary(core_margins).to_csv(
         outdir / "leave_one_rat_out_exact_sparse_momentum_core_margin_summary.csv",
+        index=False,
+    )
+    rat_bootstrap_exact_sparse_momentum_core_margin_summary(core_margins).to_csv(
+        outdir / "rat_bootstrap_exact_sparse_momentum_core_margin_summary.csv",
         index=False,
     )
     return combined
@@ -521,6 +658,8 @@ def main() -> int:
     print(rat_paired_momentum_diffusion_margin_summary(decisions).to_string(index=False))
     print("\nLeave-one-rat-out paired exact-sparse momentum-vs-diffusion margin summary:")
     print(leave_one_rat_out_paired_momentum_diffusion_margin_summary(decisions).to_string(index=False))
+    print("\nRat-bootstrap paired exact-sparse momentum-vs-diffusion margin summary:")
+    print(rat_bootstrap_paired_momentum_diffusion_margin_summary(decisions).to_string(index=False))
     print(f"\nRows: {len(combined)}")
     if "status" in combined:
         print(f"Failures: {int((combined['status'] != 'success').sum())}")

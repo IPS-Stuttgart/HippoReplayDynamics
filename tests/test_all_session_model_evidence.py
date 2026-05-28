@@ -14,6 +14,8 @@ from aggregate_all_session_model_evidence import (
     paired_momentum_diffusion_margin_decisions,
     paired_momentum_diffusion_margin_summary,
     rat_exact_sparse_momentum_core_margin_summary,
+    rat_bootstrap_exact_sparse_momentum_core_margin_summary,
+    rat_bootstrap_paired_momentum_diffusion_margin_summary,
     rat_paired_momentum_diffusion_margin_summary,
     random_effects_model_probabilities,
     session_exact_sparse_momentum_core_margin_summary,
@@ -47,10 +49,12 @@ def test_all_session_model_evidence_workflow_exports_expected_outputs():
     assert "session_paired_momentum_diffusion_margin_summary.csv" in workflow
     assert "rat_paired_momentum_diffusion_margin_summary.csv" in workflow
     assert "leave_one_rat_out_paired_momentum_diffusion_margin_summary.csv" in workflow
+    assert "rat_bootstrap_paired_momentum_diffusion_margin_summary.csv" in workflow
     assert "exact_sparse_momentum_core_margin_summary.csv" in workflow
     assert "session_exact_sparse_momentum_core_margin_summary.csv" in workflow
     assert "rat_exact_sparse_momentum_core_margin_summary.csv" in workflow
     assert "leave_one_rat_out_exact_sparse_momentum_core_margin_summary.csv" in workflow
+    assert "rat_bootstrap_exact_sparse_momentum_core_margin_summary.csv" in workflow
 
 
 def test_all_session_summary_helpers_group_by_session():
@@ -243,6 +247,57 @@ def test_all_session_rat_robustness_summaries_group_and_hold_out_rats():
     assert held_out_rat1["included_rats"] == "Rat2 Rat3"
     assert held_out_rat1["events"] == 2
     assert held_out_rat1["positive_model_claims"] == 1
+
+
+def test_all_session_rat_bootstrap_summaries_report_uncertainty():
+    frame = pd.DataFrame(
+        [
+            _paired_score_row("Rat1/Open1", 0, "sorted-spike-state-space-diffusion", 0.0),
+            _paired_score_row(
+                "Rat1/Open1",
+                0,
+                "sorted-spike-state-space-momentum-exact-sparse",
+                9.0,
+            ),
+            _paired_score_row("Rat2/Open1", 1, "sorted-spike-state-space-diffusion", 2.0),
+            _paired_score_row(
+                "Rat2/Open1",
+                1,
+                "sorted-spike-state-space-momentum-exact-sparse",
+                0.0,
+            ),
+            _paired_score_row("Rat3/Open1", 2, "sorted-spike-state-space-diffusion", 0.0),
+            _paired_score_row(
+                "Rat3/Open1",
+                2,
+                "sorted-spike-state-space-momentum-exact-sparse",
+                8.0,
+            ),
+        ]
+    )
+    decisions = paired_momentum_diffusion_margin_decisions(frame)
+    core_margins = exact_sparse_momentum_core_margins(frame)
+
+    paired = rat_bootstrap_paired_momentum_diffusion_margin_summary(
+        decisions,
+        n_bootstrap=50,
+        random_seed=7,
+    ).iloc[0]
+    core = rat_bootstrap_exact_sparse_momentum_core_margin_summary(
+        core_margins,
+        n_bootstrap=50,
+        random_seed=7,
+    ).iloc[0]
+
+    assert paired["bootstrap_unit"] == "rat"
+    assert paired["bootstrap_replicates"] == 50
+    assert paired["observed_events"] == 3
+    assert paired["observed_rats"] == 3
+    assert paired["observed_positive_raw_win_fraction"] == pytest.approx(2 / 3)
+    assert paired["observed_positive_claim_fraction"] == pytest.approx(2 / 3)
+    assert paired["observed_mean_delta"] == pytest.approx(5.0)
+    assert 0.0 <= paired["probability_mean_delta_gt_0"] <= 1.0
+    assert core["observed_mean_delta"] == pytest.approx(paired["observed_mean_delta"])
 
 
 def _score_row(*, event_index: int, spike_rate_scale: float = 1.0) -> dict[str, object]:

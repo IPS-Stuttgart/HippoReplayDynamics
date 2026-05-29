@@ -512,31 +512,7 @@ def test_all_session_rat_bootstrap_threshold_sensitivity_reports_claim_uncertain
 
 
 def test_all_session_paper_readiness_gate_summary_reports_pass_fail():
-    frame = pd.DataFrame(
-        [
-            _paired_score_row("Rat1/Open1", 0, "sorted-spike-state-space-diffusion", 0.0),
-            _paired_score_row(
-                "Rat1/Open1",
-                0,
-                "sorted-spike-state-space-momentum-exact-sparse",
-                9.0,
-            ),
-            _paired_score_row("Rat2/Open1", 1, "sorted-spike-state-space-diffusion", 0.0),
-            _paired_score_row(
-                "Rat2/Open1",
-                1,
-                "sorted-spike-state-space-momentum-exact-sparse",
-                8.0,
-            ),
-            _paired_score_row("Rat3/Open1", 2, "sorted-spike-state-space-diffusion", 0.0),
-            _paired_score_row(
-                "Rat3/Open1",
-                2,
-                "sorted-spike-state-space-momentum-exact-sparse",
-                7.0,
-            ),
-        ]
-    )
+    frame = _paper_readiness_frame()
 
     summary = paper_readiness_gate_summary(
         frame,
@@ -545,12 +521,57 @@ def test_all_session_paper_readiness_gate_summary_reports_pass_fail():
     ).set_index("gate")
 
     assert bool(summary.loc["no_scoring_failures", "passed"])
+    assert bool(summary.loc["minimum_rats_present", "passed"])
+    assert bool(summary.loc["minimum_sessions_present", "passed"])
+    assert bool(summary.loc["minimum_paired_events_per_session", "passed"])
     assert bool(summary.loc["paired_no_confident_diffusion_claims", "passed"])
     assert bool(summary.loc["all_sessions_have_confident_momentum_claims", "passed"])
     assert bool(summary.loc["leave_one_rat_out_median_delta_positive", "passed"])
     assert bool(summary.loc["rat_bootstrap_median_delta_ci_positive", "passed"])
     assert bool(summary.loc["full_core_exact_sparse_claims_present", "passed"])
     assert bool(summary.loc["overall", "passed"])
+
+
+def test_all_session_paper_readiness_gate_summary_rejects_canary_coverage():
+    rows: list[dict[str, object]] = []
+    for event_index in range(5):
+        rows.extend(
+            [
+                _paired_score_row("Rat1/Open1", event_index, "sorted-spike-state-space-diffusion", 0.0),
+                _paired_score_row(
+                    "Rat1/Open1",
+                    event_index,
+                    "sorted-spike-state-space-momentum-exact-sparse",
+                    8.0,
+                ),
+            ]
+        )
+    summary = paper_readiness_gate_summary(pd.DataFrame(rows), n_bootstrap=50, random_seed=7).set_index("gate")
+
+    assert not bool(summary.loc["minimum_rats_present", "passed"])
+    assert not bool(summary.loc["minimum_sessions_present", "passed"])
+    assert bool(summary.loc["minimum_paired_events_per_session", "passed"])
+    assert not bool(summary.loc["overall", "passed"])
+
+
+def _paper_readiness_frame() -> pd.DataFrame:
+    rows: list[dict[str, object]] = []
+    for rat in range(1, 5):
+        for session_idx in range(1, 3):
+            session = f"Rat{rat}/Open{session_idx}"
+            for event_index in range(5):
+                rows.extend(
+                    [
+                        _paired_score_row(session, event_index, "sorted-spike-state-space-diffusion", 0.0),
+                        _paired_score_row(
+                            session,
+                            event_index,
+                            "sorted-spike-state-space-momentum-exact-sparse",
+                            8.0 + float(event_index),
+                        ),
+                    ]
+                )
+    return pd.DataFrame(rows)
 
 
 def _score_row(*, event_index: int, spike_rate_scale: float = 1.0) -> dict[str, object]:

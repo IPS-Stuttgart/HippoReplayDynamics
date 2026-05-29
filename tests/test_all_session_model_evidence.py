@@ -6,6 +6,8 @@ import pytest
 
 sys.path.insert(0, str(Path("scripts").resolve()))
 from aggregate_all_session_model_evidence import (
+    exact_core_model_claim_decisions,
+    exact_core_model_claim_summary,
     _load_combined,
     exact_sparse_momentum_core_margin_summary,
     exact_sparse_momentum_core_margins,
@@ -26,6 +28,7 @@ from aggregate_all_session_model_evidence import (
     rat_paired_momentum_diffusion_margin_summary,
     random_effects_model_probabilities,
     required_full_core_model_coverage_table,
+    session_exact_core_model_claim_summary,
     session_exact_sparse_momentum_core_margin_summary,
     session_exact_sparse_momentum_core_threshold_sensitivity,
     session_best_model_counts,
@@ -57,6 +60,9 @@ def test_all_session_model_evidence_workflow_exports_expected_outputs():
     assert "random_effects_model_probabilities.csv" in workflow
     assert "paper_readiness_gate_summary.csv" in workflow
     assert "required_full_core_model_coverage.csv" in workflow
+    assert "exact_core_model_claim_decisions.csv" in workflow
+    assert "exact_core_model_claim_summary.csv" in workflow
+    assert "session_exact_core_model_claim_summary.csv" in workflow
     assert "paired_momentum_diffusion_margin_summary.csv" in workflow
     assert "paired_momentum_diffusion_threshold_sensitivity.csv" in workflow
     assert "session_paired_momentum_diffusion_margin_summary.csv" in workflow
@@ -306,6 +312,71 @@ def test_all_session_exact_sparse_momentum_core_margins_compare_best_other_exact
     rat1 = session_summary[session_summary["session"] == "Rat1/Open1"].iloc[0]
     assert rat1["positive_exact_best_events"] == 1
     assert rat1["positive_confident_core_claims"] == 1
+
+
+def test_all_session_exact_core_model_claims_track_full_core_winners():
+    frame = pd.DataFrame(
+        [
+            _paired_score_row("Rat1/Open1", 0, "sorted-spike-state-space-stationary", -3.0),
+            _paired_score_row("Rat1/Open1", 0, "sorted-spike-state-space-diffusion", 0.0),
+            _paired_score_row("Rat1/Open1", 0, "sorted-spike-state-space-fragmented", 2.0),
+            _paired_score_row("Rat1/Open1", 0, "sorted-spike-state-space-first-order-imm", 15.0),
+            _paired_score_row(
+                "Rat1/Open1",
+                0,
+                "sorted-spike-state-space-momentum-exact-sparse",
+                8.0,
+            ),
+            _paired_score_row("Rat1/Open1", 1, "sorted-spike-state-space-stationary", -3.0),
+            _paired_score_row("Rat1/Open1", 1, "sorted-spike-state-space-diffusion", 0.0),
+            _paired_score_row("Rat1/Open1", 1, "sorted-spike-state-space-fragmented", -1.0),
+            _paired_score_row("Rat1/Open1", 1, "sorted-spike-state-space-first-order-imm", -2.0),
+            _paired_score_row(
+                "Rat1/Open1",
+                1,
+                "sorted-spike-state-space-momentum-exact-sparse",
+                8.0,
+            ),
+            _paired_score_row("Rat1/Open2", 2, "sorted-spike-state-space-diffusion", 0.0),
+            _paired_score_row(
+                "Rat1/Open2",
+                2,
+                "sorted-spike-state-space-momentum-exact-sparse",
+                20.0,
+            ),
+        ]
+    )
+
+    decisions = exact_core_model_claim_decisions(frame)
+    summary = exact_core_model_claim_summary(decisions)
+    session_summary = session_exact_core_model_claim_summary(decisions)
+
+    assert decisions["claim_model"].tolist() == [
+        "sorted-spike-state-space-first-order-imm",
+        "sorted-spike-state-space-momentum-exact-sparse",
+        "incomplete_core",
+    ]
+    assert decisions["required_models_complete"].tolist() == [True, True, False]
+    assert decisions.loc[2, "missing_required_models"] == (
+        "sorted-spike-state-space-stationary "
+        "sorted-spike-state-space-fragmented "
+        "sorted-spike-state-space-first-order-imm"
+    )
+
+    imm = summary[summary["model"] == "sorted-spike-state-space-first-order-imm"].iloc[0]
+    momentum = summary[summary["model"] == "sorted-spike-state-space-momentum-exact-sparse"].iloc[0]
+    assert imm["raw_best_events"] == 1
+    assert imm["confident_claims"] == 1
+    assert momentum["raw_best_events"] == 2
+    assert momentum["confident_claims"] == 1
+    assert momentum["incomplete_core_events"] == 1
+
+    rat1_open1 = session_summary[
+        (session_summary["session"] == "Rat1/Open1")
+        & (session_summary["model"] == "sorted-spike-state-space-momentum-exact-sparse")
+    ].iloc[0]
+    assert rat1_open1["events"] == 2
+    assert rat1_open1["confident_claims"] == 1
 
 
 def test_all_session_rat_robustness_summaries_group_and_hold_out_rats():

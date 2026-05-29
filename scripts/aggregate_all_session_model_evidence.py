@@ -785,6 +785,169 @@ def required_full_core_model_coverage_table(
     return pd.DataFrame(rows, columns=columns)
 
 
+def exact_core_model_claim_decisions(
+    df: pd.DataFrame,
+    *,
+    required_models: tuple[str, ...] = DEFAULT_PAPER_REQUIRED_FULL_CORE_MODELS,
+    margin_threshold: float = DEFAULT_MOMENTUM_CONFIDENCE_THRESHOLD,
+) -> pd.DataFrame:
+    """Return per-event winner and margin decisions among required exact core models."""
+
+    columns = [
+        "session",
+        "event_index",
+        "required_models_present",
+        "required_models_total",
+        "required_models_complete",
+        "missing_required_models",
+        "present_required_models",
+        "margin_threshold",
+        "best_core_model",
+        "best_core_log_evidence",
+        "runner_up_core_model",
+        "runner_up_core_log_evidence",
+        "best_minus_runner_up_log_evidence",
+        "claim_model",
+    ]
+    required = tuple(str(model) for model in required_models)
+    required_set = set(required)
+    df = _ensure_evidence_support_columns(df)
+    if "model" not in df or "session" not in df or "event_index" not in df:
+        return pd.DataFrame(columns=columns)
+
+    status_ok = df["status"].eq("success") if "status" in df else pd.Series(True, index=df.index)
+    comparable = df["evidence_comparable"].fillna(False).astype(bool)
+    ok = df[status_ok & comparable].copy()
+    if ok.empty:
+        return pd.DataFrame(columns=columns)
+
+    rows: list[dict[str, object]] = []
+    for key, group in ok.groupby(["session", "event_index"], sort=True):
+        session, event_index = key
+        core = group[group["model"].astype(str).isin(required_set)].dropna(subset=["log_evidence"]).copy()
+        present = tuple(model for model in required if model in set(core["model"].astype(str)))
+        missing = tuple(model for model in required if model not in set(present))
+        complete = not missing
+        if core.empty:
+            best_model = ""
+            best_value = np.nan
+            runner_up_model = ""
+            runner_up_value = np.nan
+            margin = np.nan
+            claim_model = "incomplete_core"
+        else:
+            ranked = core.sort_values("log_evidence", ascending=False).reset_index(drop=True)
+            best = ranked.iloc[0]
+            best_model = str(best["model"])
+            best_value = float(best["log_evidence"])
+            if len(ranked) > 1:
+                runner_up = ranked.iloc[1]
+                runner_up_model = str(runner_up["model"])
+                runner_up_value = float(runner_up["log_evidence"])
+                margin = best_value - runner_up_value
+            else:
+                runner_up_model = ""
+                runner_up_value = np.nan
+                margin = np.inf
+            if not complete:
+                claim_model = "incomplete_core"
+            elif margin >= float(margin_threshold):
+                claim_model = best_model
+            else:
+                claim_model = "ambiguous"
+        rows.append(
+            {
+                "session": str(session),
+                "event_index": int(event_index),
+                "required_models_present": int(len(present)),
+                "required_models_total": int(len(required)),
+                "required_models_complete": bool(complete),
+                "missing_required_models": " ".join(missing),
+                "present_required_models": " ".join(present),
+                "margin_threshold": float(margin_threshold),
+                "best_core_model": best_model,
+                "best_core_log_evidence": float(best_value),
+                "runner_up_core_model": runner_up_model,
+                "runner_up_core_log_evidence": float(runner_up_value),
+                "best_minus_runner_up_log_evidence": float(margin),
+                "claim_model": claim_model,
+            }
+        )
+    return pd.DataFrame(rows, columns=columns)
+
+
+def exact_core_model_claim_summary(
+    decisions: pd.DataFrame,
+    *,
+    required_models: tuple[str, ...] = DEFAULT_PAPER_REQUIRED_FULL_CORE_MODELS,
+    group_cols: tuple[str, ...] = (),
+) -> pd.DataFrame:
+    """Summarize raw and calibrated claims for each required exact core model."""
+
+    columns = [
+        *group_cols,
+        "model",
+        "events",
+        "required_complete_events",
+        "incomplete_core_events",
+        "ambiguous_events",
+        "margin_threshold",
+        "raw_best_events",
+        "raw_best_fraction",
+        "confident_claims",
+        "confident_claim_fraction",
+        "mean_winning_margin_when_best",
+        "median_winning_margin_when_best",
+    ]
+    required = tuple(str(model) for model in required_models)
+    if decisions.empty:
+        return pd.DataFrame(columns=columns)
+
+    rows: list[dict[str, object]] = []
+    groups = [((), decisions)] if not group_cols else decisions.groupby(list(group_cols), sort=True)
+    for key, group in groups:
+        key_tuple = key if isinstance(key, tuple) else (key,)
+        events = int(len(group))
+        complete = group["required_models_complete"].fillna(False).astype(bool)
+        required_complete_events = int(complete.sum())
+        incomplete_core_events = int((group["claim_model"].astype(str) == "incomplete_core").sum())
+        ambiguous_events = int((group["claim_model"].astype(str) == "ambiguous").sum())
+        threshold = float(group["margin_threshold"].dropna().iloc[0]) if "margin_threshold" in group else np.nan
+        for model in required:
+            raw_best = group["best_core_model"].astype(str).eq(model)
+            confident = group["claim_model"].astype(str).eq(model)
+            winning_margins = group.loc[raw_best, "best_minus_runner_up_log_evidence"].astype(float)
+            row = {column: value for column, value in zip(group_cols, key_tuple, strict=True)}
+            row.update(
+                {
+                    "model": model,
+                    "events": events,
+                    "required_complete_events": required_complete_events,
+                    "incomplete_core_events": incomplete_core_events,
+                    "ambiguous_events": ambiguous_events,
+                    "margin_threshold": threshold,
+                    "raw_best_events": int(raw_best.sum()),
+                    "raw_best_fraction": float(raw_best.mean()) if events else 0.0,
+                    "confident_claims": int(confident.sum()),
+                    "confident_claim_fraction": float(confident.mean()) if events else 0.0,
+                    "mean_winning_margin_when_best": (
+                        float(winning_margins.mean()) if not winning_margins.empty else np.nan
+                    ),
+                    "median_winning_margin_when_best": (
+                        float(winning_margins.median()) if not winning_margins.empty else np.nan
+                    ),
+                }
+            )
+            rows.append(row)
+    return pd.DataFrame(rows, columns=columns)
+
+
+def session_exact_core_model_claim_summary(decisions: pd.DataFrame) -> pd.DataFrame:
+    """Summarize exact core model claims by session."""
+
+    return exact_core_model_claim_summary(decisions, group_cols=("session",))
+
+
 def _required_full_core_model_coverage(
     df: pd.DataFrame,
     required_models: tuple[str, ...],
@@ -1067,6 +1230,7 @@ def aggregate_all_sessions(shard_glob: str, outdir: Path) -> pd.DataFrame:
     outdir.mkdir(parents=True, exist_ok=True)
     paired_decisions = paired_momentum_diffusion_margin_decisions(combined)
     core_margins = exact_sparse_momentum_core_margins(combined)
+    exact_core_decisions = exact_core_model_claim_decisions(combined)
 
     _write(combined, outdir)
     combined.to_csv(outdir / "all_sessions_event_model_evidence.csv", index=False)
@@ -1078,6 +1242,15 @@ def aggregate_all_sessions(shard_glob: str, outdir: Path) -> pd.DataFrame:
     paper_readiness_gate_summary(combined).to_csv(outdir / "paper_readiness_gate_summary.csv", index=False)
     required_full_core_model_coverage_table(combined).to_csv(
         outdir / "required_full_core_model_coverage.csv",
+        index=False,
+    )
+    exact_core_decisions.to_csv(outdir / "exact_core_model_claim_decisions.csv", index=False)
+    exact_core_model_claim_summary(exact_core_decisions).to_csv(
+        outdir / "exact_core_model_claim_summary.csv",
+        index=False,
+    )
+    session_exact_core_model_claim_summary(exact_core_decisions).to_csv(
+        outdir / "session_exact_core_model_claim_summary.csv",
         index=False,
     )
     paired_decisions.to_csv(outdir / "paired_momentum_diffusion_margin_decisions.csv", index=False)
@@ -1173,6 +1346,11 @@ def main() -> int:
     print(paper_readiness_gate_summary(combined).to_string(index=False))
     print("\nRequired full-core model coverage:")
     print(required_full_core_model_coverage_table(combined).to_string(index=False))
+    exact_core_decisions = exact_core_model_claim_decisions(combined)
+    print("\nExact core model claim summary:")
+    print(exact_core_model_claim_summary(exact_core_decisions).to_string(index=False))
+    print("\nSession exact core model claim summary:")
+    print(session_exact_core_model_claim_summary(exact_core_decisions).to_string(index=False))
     decisions = paired_momentum_diffusion_margin_decisions(combined)
     print("\nPaired exact-sparse momentum-vs-diffusion margin summary:")
     print(paired_momentum_diffusion_margin_summary(decisions).to_string(index=False))

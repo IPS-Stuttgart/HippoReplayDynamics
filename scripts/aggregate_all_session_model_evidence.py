@@ -1408,10 +1408,31 @@ def exact_trajectory_nontrajectory_gate_summary(
         session = exact_trajectory_nontrajectory_margin_summary(decisions, group_cols=("session",))
         if session.empty:
             add("all_sessions_have_trajectory_family_claims", False, 0, "min session trajectory claims > 0")
+            add(
+                "all_sessions_have_trajectory_family_claim_majority",
+                False,
+                np.nan,
+                "min session trajectory claim fraction > 0.5",
+            )
             add("all_sessions_have_no_nontrajectory_claims", False, 0, "max session nontrajectory claims == 0")
+            add(
+                "all_sessions_family_mean_delta_positive",
+                False,
+                np.nan,
+                "min session mean delta > 0",
+            )
+            add(
+                "all_sessions_family_median_delta_positive",
+                False,
+                np.nan,
+                "min session median delta > 0",
+            )
         else:
             min_session_trajectory = int(session["trajectory_confident_claims"].min())
+            min_session_claim_fraction = float(session["trajectory_confident_claim_fraction"].min())
             max_session_nontrajectory = int(session["nontrajectory_confident_claims"].max())
+            min_session_mean = float(session["mean_trajectory_minus_nontrajectory_log_evidence"].min())
+            min_session_median = float(session["median_trajectory_minus_nontrajectory_log_evidence"].min())
             add(
                 "all_sessions_have_trajectory_family_claims",
                 min_session_trajectory > 0,
@@ -1419,10 +1440,28 @@ def exact_trajectory_nontrajectory_gate_summary(
                 "min session trajectory_confident_claims > 0",
             )
             add(
+                "all_sessions_have_trajectory_family_claim_majority",
+                min_session_claim_fraction > float(min_confident_claim_fraction),
+                f"{min_session_claim_fraction:.6g}",
+                f"min session trajectory claim fraction > {float(min_confident_claim_fraction):g}",
+            )
+            add(
                 "all_sessions_have_no_nontrajectory_claims",
                 max_session_nontrajectory == 0,
                 max_session_nontrajectory,
                 "max session nontrajectory_confident_claims == 0",
+            )
+            add(
+                "all_sessions_family_mean_delta_positive",
+                min_session_mean > 0.0,
+                f"{min_session_mean:.6g}",
+                "min session mean delta > 0",
+            )
+            add(
+                "all_sessions_family_median_delta_positive",
+                min_session_median > 0.0,
+                f"{min_session_median:.6g}",
+                "min session median delta > 0",
             )
 
         rat = rat_exact_trajectory_nontrajectory_margin_summary(decisions)

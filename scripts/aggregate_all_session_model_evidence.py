@@ -645,6 +645,18 @@ def paper_readiness_gate_summary(
     core_summary = exact_sparse_momentum_core_margin_summary(core_margins)
     if core_summary.empty:
         add("full_core_exact_sparse_claims_present", False, 0, "positive_confident_core_claims > 0")
+        add(
+            "full_core_exact_sparse_best_majority",
+            False,
+            np.nan,
+            f"positive_exact_best_fraction > {float(min_raw_win_fraction):g}",
+        )
+        add(
+            "full_core_confident_exact_sparse_claim_majority",
+            False,
+            np.nan,
+            f"positive_confident_core_claim_fraction > {float(min_confident_claim_fraction):g}",
+        )
     else:
         core = core_summary.iloc[0]
         add(
@@ -652,6 +664,19 @@ def paper_readiness_gate_summary(
             int(core["positive_confident_core_claims"]) > 0,
             int(core["positive_confident_core_claims"]),
             "positive_confident_core_claims > 0",
+        )
+        add(
+            "full_core_exact_sparse_best_majority",
+            float(core["positive_exact_best_fraction"]) > float(min_raw_win_fraction),
+            f"{float(core['positive_exact_best_fraction']):.6g}",
+            f"positive_exact_best_fraction > {float(min_raw_win_fraction):g}",
+        )
+        add(
+            "full_core_confident_exact_sparse_claim_majority",
+            float(core["positive_confident_core_claim_fraction"]) > float(min_confident_claim_fraction),
+            f"{float(core['positive_confident_core_claim_fraction']):.6g}",
+            f"positive_confident_core_claim_fraction > {float(min_confident_claim_fraction):g}",
+            f"margin_threshold={float(margin_threshold):g}",
         )
 
     result = pd.DataFrame(rows, columns=columns)

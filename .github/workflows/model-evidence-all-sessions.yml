@@ -397,6 +397,9 @@ jobs:
             random_effects_model_probabilities.csv \
             paper_readiness_gate_summary.csv \
             required_full_core_model_coverage.csv \
+            exact_core_model_claim_decisions.csv \
+            exact_core_model_claim_summary.csv \
+            session_exact_core_model_claim_summary.csv \
             paired_momentum_diffusion_margin_decisions.csv \
             paired_momentum_diffusion_margin_summary.csv \
             paired_momentum_diffusion_threshold_sensitivity.csv \
@@ -462,6 +465,10 @@ jobs:
           print(pd.read_csv(f"{root}/paper_readiness_gate_summary.csv").to_string(index=False))
           print("\nRequired full-core model coverage:")
           print(pd.read_csv(f"{root}/required_full_core_model_coverage.csv").to_string(index=False))
+          print("\nExact core model claim summary:")
+          print(pd.read_csv(f"{root}/exact_core_model_claim_summary.csv").to_string(index=False))
+          print("\nSession exact core model claim summary:")
+          print(pd.read_csv(f"{root}/session_exact_core_model_claim_summary.csv").to_string(index=False))
           print("\nPaired exact-sparse momentum-vs-diffusion margin summary:")
           print(pd.read_csv(f"{root}/paired_momentum_diffusion_margin_summary.csv").to_string(index=False))
           print("\nPaired exact-sparse momentum-vs-diffusion threshold sensitivity:")

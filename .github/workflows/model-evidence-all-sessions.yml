@@ -406,6 +406,7 @@ jobs:
             exact_trajectory_nontrajectory_margin_summary.csv \
             exact_trajectory_nontrajectory_threshold_sensitivity.csv \
             session_exact_trajectory_nontrajectory_threshold_sensitivity.csv \
+            rat_exact_trajectory_nontrajectory_threshold_sensitivity.csv \
             leave_one_rat_out_exact_trajectory_nontrajectory_threshold_sensitivity.csv \
             rat_bootstrap_exact_trajectory_nontrajectory_threshold_sensitivity.csv \
             exact_trajectory_nontrajectory_gate_summary.csv \
@@ -494,6 +495,8 @@ jobs:
           print(pd.read_csv(f"{root}/exact_trajectory_nontrajectory_threshold_sensitivity.csv").to_string(index=False))
           print("\nSession exact trajectory-vs-nontrajectory threshold sensitivity:")
           print(pd.read_csv(f"{root}/session_exact_trajectory_nontrajectory_threshold_sensitivity.csv").to_string(index=False))
+          print("\nRat exact trajectory-vs-nontrajectory threshold sensitivity:")
+          print(pd.read_csv(f"{root}/rat_exact_trajectory_nontrajectory_threshold_sensitivity.csv").to_string(index=False))
           print("\nLeave-one-rat-out exact trajectory-vs-nontrajectory threshold sensitivity:")
           print(pd.read_csv(f"{root}/leave_one_rat_out_exact_trajectory_nontrajectory_threshold_sensitivity.csv").to_string(index=False))
           print("\nRat-bootstrap exact trajectory-vs-nontrajectory threshold sensitivity:")

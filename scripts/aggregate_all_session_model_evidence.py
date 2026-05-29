@@ -1258,6 +1258,28 @@ def session_exact_trajectory_nontrajectory_threshold_sensitivity(
     return pd.concat(rows, ignore_index=True).sort_values(["margin_threshold", "session"]).reset_index(drop=True)
 
 
+def rat_exact_trajectory_nontrajectory_margin_summary(decisions: pd.DataFrame) -> pd.DataFrame:
+    """Summarize trajectory-vs-nontrajectory margins by rat."""
+
+    return exact_trajectory_nontrajectory_margin_summary(_with_rat(decisions), group_cols=("rat",))
+
+
+def rat_exact_trajectory_nontrajectory_threshold_sensitivity(
+    df: pd.DataFrame,
+    *,
+    thresholds: tuple[float, ...] = DEFAULT_MARGIN_SENSITIVITY_THRESHOLDS,
+) -> pd.DataFrame:
+    """Summarize trajectory-vs-nontrajectory threshold sensitivity by rat."""
+
+    rows = []
+    for threshold in thresholds:
+        decisions = exact_trajectory_nontrajectory_margin_decisions(df, margin_threshold=float(threshold))
+        rows.append(rat_exact_trajectory_nontrajectory_margin_summary(decisions))
+    if not rows:
+        return pd.DataFrame()
+    return pd.concat(rows, ignore_index=True).sort_values(["margin_threshold", "rat"]).reset_index(drop=True)
+
+
 def leave_one_rat_out_exact_trajectory_nontrajectory_margin_summary(decisions: pd.DataFrame) -> pd.DataFrame:
     """Summarize trajectory-vs-nontrajectory margins after excluding each rat."""
 
@@ -1401,6 +1423,62 @@ def exact_trajectory_nontrajectory_gate_summary(
                 max_session_nontrajectory == 0,
                 max_session_nontrajectory,
                 "max session nontrajectory_confident_claims == 0",
+            )
+
+        rat = rat_exact_trajectory_nontrajectory_margin_summary(decisions)
+        if rat.empty:
+            add(
+                "all_rats_have_trajectory_family_claim_majority",
+                False,
+                np.nan,
+                "min rat trajectory claim fraction > 0.5",
+            )
+            add(
+                "all_rats_have_no_nontrajectory_claims",
+                False,
+                np.nan,
+                "max rat nontrajectory claims == 0",
+            )
+            add(
+                "all_rats_family_mean_delta_positive",
+                False,
+                np.nan,
+                "min rat mean delta > 0",
+            )
+            add(
+                "all_rats_family_median_delta_positive",
+                False,
+                np.nan,
+                "min rat median delta > 0",
+            )
+        else:
+            min_rat_claim_fraction = float(rat["trajectory_confident_claim_fraction"].min())
+            max_rat_nontrajectory_claims = int(rat["nontrajectory_confident_claims"].max())
+            min_rat_mean = float(rat["mean_trajectory_minus_nontrajectory_log_evidence"].min())
+            min_rat_median = float(rat["median_trajectory_minus_nontrajectory_log_evidence"].min())
+            add(
+                "all_rats_have_trajectory_family_claim_majority",
+                min_rat_claim_fraction > float(min_confident_claim_fraction),
+                f"{min_rat_claim_fraction:.6g}",
+                f"min rat trajectory claim fraction > {float(min_confident_claim_fraction):g}",
+            )
+            add(
+                "all_rats_have_no_nontrajectory_claims",
+                max_rat_nontrajectory_claims == 0,
+                max_rat_nontrajectory_claims,
+                "max rat nontrajectory claims == 0",
+            )
+            add(
+                "all_rats_family_mean_delta_positive",
+                min_rat_mean > 0.0,
+                f"{min_rat_mean:.6g}",
+                "min rat mean delta > 0",
+            )
+            add(
+                "all_rats_family_median_delta_positive",
+                min_rat_median > 0.0,
+                f"{min_rat_median:.6g}",
+                "min rat median delta > 0",
             )
 
         leave_one = leave_one_rat_out_exact_trajectory_nontrajectory_margin_summary(decisions)
@@ -2183,6 +2261,10 @@ def aggregate_all_sessions(shard_glob: str, outdir: Path) -> pd.DataFrame:
         outdir / "session_exact_trajectory_nontrajectory_threshold_sensitivity.csv",
         index=False,
     )
+    rat_exact_trajectory_nontrajectory_threshold_sensitivity(combined).to_csv(
+        outdir / "rat_exact_trajectory_nontrajectory_threshold_sensitivity.csv",
+        index=False,
+    )
     leave_one_rat_out_exact_trajectory_nontrajectory_threshold_sensitivity(combined).to_csv(
         outdir / "leave_one_rat_out_exact_trajectory_nontrajectory_threshold_sensitivity.csv",
         index=False,
@@ -2318,6 +2400,8 @@ def main() -> int:
     print(exact_trajectory_nontrajectory_threshold_sensitivity(combined).to_string(index=False))
     print("\nSession exact trajectory-vs-nontrajectory threshold sensitivity:")
     print(session_exact_trajectory_nontrajectory_threshold_sensitivity(combined).to_string(index=False))
+    print("\nRat exact trajectory-vs-nontrajectory threshold sensitivity:")
+    print(rat_exact_trajectory_nontrajectory_threshold_sensitivity(combined).to_string(index=False))
     print("\nLeave-one-rat-out exact trajectory-vs-nontrajectory threshold sensitivity:")
     print(leave_one_rat_out_exact_trajectory_nontrajectory_threshold_sensitivity(combined).to_string(index=False))
     print("\nRat-bootstrap exact trajectory-vs-nontrajectory threshold sensitivity:")

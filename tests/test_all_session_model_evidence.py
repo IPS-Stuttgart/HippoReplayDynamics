@@ -530,6 +530,7 @@ def test_all_session_paper_readiness_gate_summary_reports_pass_fail():
     assert bool(summary.loc["all_sessions_have_confident_momentum_claims", "passed"])
     assert bool(summary.loc["leave_one_rat_out_median_delta_positive", "passed"])
     assert bool(summary.loc["rat_bootstrap_median_delta_ci_positive", "passed"])
+    assert bool(summary.loc["full_core_required_exact_models_present", "passed"])
     assert bool(summary.loc["full_core_min_exact_models_compared", "passed"])
     assert bool(summary.loc["full_core_exact_sparse_claims_present", "passed"])
     assert bool(summary.loc["full_core_exact_sparse_best_majority", "passed"])
@@ -608,8 +609,44 @@ def test_all_session_paper_readiness_gate_summary_rejects_two_model_full_core_co
 
     assert bool(summary.loc["paired_raw_momentum_win_majority", "passed"])
     assert bool(summary.loc["paired_confident_momentum_claim_majority", "passed"])
+    assert not bool(summary.loc["full_core_required_exact_models_present", "passed"])
+    assert summary.loc["full_core_required_exact_models_present", "observed"] == "2/5"
     assert not bool(summary.loc["full_core_min_exact_models_compared", "passed"])
     assert summary.loc["full_core_min_exact_models_compared", "observed"] == 2
+    assert not bool(summary.loc["overall", "passed"])
+
+
+def test_all_session_paper_readiness_gate_summary_rejects_wrong_full_core_models():
+    rows: list[dict[str, object]] = []
+    for rat in range(1, 5):
+        for session_idx in range(1, 3):
+            session = f"Rat{rat}/Open{session_idx}"
+            for event_index in range(5):
+                rows.extend(
+                    [
+                        _paired_score_row(session, event_index, "sorted-spike-state-space-stationary", -3.0),
+                        _paired_score_row(session, event_index, "sorted-spike-state-space-diffusion", 0.0),
+                        _paired_score_row(
+                            session,
+                            event_index,
+                            "sorted-spike-state-space-first-order-imm",
+                            -1.0,
+                        ),
+                        _paired_score_row(session, event_index, "sorted-spike-state-space-goal", -2.0),
+                        _paired_score_row(
+                            session,
+                            event_index,
+                            "sorted-spike-state-space-momentum-exact-sparse",
+                            8.0,
+                        ),
+                    ]
+                )
+
+    summary = paper_readiness_gate_summary(pd.DataFrame(rows), n_bootstrap=50, random_seed=7).set_index("gate")
+
+    assert bool(summary.loc["full_core_min_exact_models_compared", "passed"])
+    assert not bool(summary.loc["full_core_required_exact_models_present", "passed"])
+    assert summary.loc["full_core_required_exact_models_present", "observed"] == "4/5"
     assert not bool(summary.loc["overall", "passed"])
 
 

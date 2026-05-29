@@ -8,6 +8,7 @@ sys.path.insert(0, str(Path("scripts").resolve()))
 from aggregate_all_session_model_evidence import (
     exact_core_model_claim_decisions,
     exact_core_model_claim_summary,
+    exact_trajectory_dynamics_gate_summary,
     _load_combined,
     exact_sparse_momentum_core_margin_summary,
     exact_sparse_momentum_core_margins,
@@ -59,6 +60,7 @@ def test_all_session_model_evidence_workflow_exports_expected_outputs():
     assert "session_model_evidence_summary.csv" in workflow
     assert "random_effects_model_probabilities.csv" in workflow
     assert "paper_readiness_gate_summary.csv" in workflow
+    assert "exact_trajectory_dynamics_gate_summary.csv" in workflow
     assert "required_full_core_model_coverage.csv" in workflow
     assert "exact_core_model_claim_decisions.csv" in workflow
     assert "exact_core_model_claim_summary.csv" in workflow
@@ -377,6 +379,79 @@ def test_all_session_exact_core_model_claims_track_full_core_winners():
     ].iloc[0]
     assert rat1_open1["events"] == 2
     assert rat1_open1["confident_claims"] == 1
+
+
+def test_all_session_exact_trajectory_dynamics_gate_summary_accepts_imm_dominance():
+    frame = pd.DataFrame(
+        [
+            _paired_score_row("Rat1/Open1", 0, "sorted-spike-state-space-stationary", -3.0),
+            _paired_score_row("Rat1/Open1", 0, "sorted-spike-state-space-diffusion", 0.0),
+            _paired_score_row("Rat1/Open1", 0, "sorted-spike-state-space-fragmented", 2.0),
+            _paired_score_row("Rat1/Open1", 0, "sorted-spike-state-space-first-order-imm", 15.0),
+            _paired_score_row(
+                "Rat1/Open1",
+                0,
+                "sorted-spike-state-space-momentum-exact-sparse",
+                8.0,
+            ),
+            _paired_score_row("Rat1/Open1", 1, "sorted-spike-state-space-stationary", -3.0),
+            _paired_score_row("Rat1/Open1", 1, "sorted-spike-state-space-diffusion", 0.0),
+            _paired_score_row("Rat1/Open1", 1, "sorted-spike-state-space-fragmented", -1.0),
+            _paired_score_row("Rat1/Open1", 1, "sorted-spike-state-space-first-order-imm", -2.0),
+            _paired_score_row(
+                "Rat1/Open1",
+                1,
+                "sorted-spike-state-space-momentum-exact-sparse",
+                8.0,
+            ),
+            _paired_score_row("Rat1/Open1", 2, "sorted-spike-state-space-stationary", -3.0),
+            _paired_score_row("Rat1/Open1", 2, "sorted-spike-state-space-diffusion", 0.0),
+            _paired_score_row("Rat1/Open1", 2, "sorted-spike-state-space-fragmented", 4.0),
+            _paired_score_row("Rat1/Open1", 2, "sorted-spike-state-space-first-order-imm", 5.0),
+            _paired_score_row(
+                "Rat1/Open1",
+                2,
+                "sorted-spike-state-space-momentum-exact-sparse",
+                6.0,
+            ),
+        ]
+    )
+
+    summary = exact_trajectory_dynamics_gate_summary(frame).set_index("gate")
+
+    assert bool(summary.loc["required_exact_core_models_present", "passed"])
+    assert bool(summary.loc["exact_trajectory_raw_best_majority", "passed"])
+    assert summary.loc["exact_trajectory_raw_best_majority", "observed"] == 1.0
+    assert bool(summary.loc["exact_trajectory_confident_claim_majority", "passed"])
+    assert summary.loc["exact_trajectory_confident_claim_majority", "observed"] == pytest.approx(2 / 3)
+    assert bool(summary.loc["no_confident_static_or_other_core_claims", "passed"])
+    assert bool(summary.loc["overall", "passed"])
+
+
+def test_all_session_exact_trajectory_dynamics_gate_summary_rejects_stationary_claims():
+    rows: list[dict[str, object]] = []
+    for event_index in range(3):
+        rows.extend(
+            [
+                _paired_score_row("Rat1/Open1", event_index, "sorted-spike-state-space-stationary", 20.0),
+                _paired_score_row("Rat1/Open1", event_index, "sorted-spike-state-space-diffusion", 0.0),
+                _paired_score_row("Rat1/Open1", event_index, "sorted-spike-state-space-fragmented", 2.0),
+                _paired_score_row("Rat1/Open1", event_index, "sorted-spike-state-space-first-order-imm", 3.0),
+                _paired_score_row(
+                    "Rat1/Open1",
+                    event_index,
+                    "sorted-spike-state-space-momentum-exact-sparse",
+                    4.0,
+                ),
+            ]
+        )
+
+    summary = exact_trajectory_dynamics_gate_summary(pd.DataFrame(rows)).set_index("gate")
+
+    assert not bool(summary.loc["exact_trajectory_raw_best_majority", "passed"])
+    assert not bool(summary.loc["exact_trajectory_confident_claim_majority", "passed"])
+    assert not bool(summary.loc["no_confident_static_or_other_core_claims", "passed"])
+    assert not bool(summary.loc["overall", "passed"])
 
 
 def test_all_session_rat_robustness_summaries_group_and_hold_out_rats():

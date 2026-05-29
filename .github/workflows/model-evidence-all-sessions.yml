@@ -396,6 +396,7 @@ jobs:
             session_best_model_counts.csv \
             random_effects_model_probabilities.csv \
             paper_readiness_gate_summary.csv \
+            exact_trajectory_dynamics_gate_summary.csv \
             required_full_core_model_coverage.csv \
             exact_core_model_claim_decisions.csv \
             exact_core_model_claim_summary.csv \
@@ -463,6 +464,8 @@ jobs:
           print(pd.read_csv(f"{root}/random_effects_model_probabilities.csv").to_string(index=False))
           print("\nPaper readiness gate summary:")
           print(pd.read_csv(f"{root}/paper_readiness_gate_summary.csv").to_string(index=False))
+          print("\nExact trajectory dynamics gate summary:")
+          print(pd.read_csv(f"{root}/exact_trajectory_dynamics_gate_summary.csv").to_string(index=False))
           print("\nRequired full-core model coverage:")
           print(pd.read_csv(f"{root}/required_full_core_model_coverage.csv").to_string(index=False))
           print("\nExact core model claim summary:")

@@ -34,6 +34,12 @@ DEFAULT_PAPER_REQUIRED_FULL_CORE_MODELS = (
     "sorted-spike-state-space-first-order-imm",
     DEFAULT_MARGIN_POSITIVE_MODEL,
 )
+DEFAULT_PAPER_EXACT_TRAJECTORY_MODELS = (
+    DEFAULT_MARGIN_REFERENCE_MODEL,
+    "sorted-spike-state-space-fragmented",
+    "sorted-spike-state-space-first-order-imm",
+    DEFAULT_MARGIN_POSITIVE_MODEL,
+)
 
 
 def _load_score_files(shard_glob: str) -> list[Path]:
@@ -948,6 +954,104 @@ def session_exact_core_model_claim_summary(decisions: pd.DataFrame) -> pd.DataFr
     return exact_core_model_claim_summary(decisions, group_cols=("session",))
 
 
+def exact_trajectory_dynamics_gate_summary(
+    df: pd.DataFrame,
+    *,
+    required_models: tuple[str, ...] = DEFAULT_PAPER_REQUIRED_FULL_CORE_MODELS,
+    trajectory_models: tuple[str, ...] = DEFAULT_PAPER_EXACT_TRAJECTORY_MODELS,
+    margin_threshold: float = DEFAULT_MOMENTUM_CONFIDENCE_THRESHOLD,
+    min_raw_win_fraction: float = DEFAULT_PAPER_MIN_RAW_WIN_FRACTION,
+    min_confident_claim_fraction: float = DEFAULT_PAPER_MIN_CONFIDENT_CLAIM_FRACTION,
+) -> pd.DataFrame:
+    """Return pass/fail gates for the broader exact trajectory-dynamics claim."""
+
+    columns = ["gate", "passed", "observed", "criterion", "details"]
+    rows: list[dict[str, object]] = []
+
+    def add(gate: str, passed: bool, observed: object, criterion: str, details: str = "") -> None:
+        rows.append(
+            {
+                "gate": gate,
+                "passed": bool(passed),
+                "observed": observed,
+                "criterion": criterion,
+                "details": details,
+            }
+        )
+
+    trajectory_set = set(str(model) for model in trajectory_models)
+    decisions = exact_core_model_claim_decisions(
+        df,
+        required_models=required_models,
+        margin_threshold=margin_threshold,
+    )
+    coverage = _required_full_core_model_coverage(df, required_models)
+    failures = int((df["status"] != "success").sum()) if "status" in df else 0
+    add("no_scoring_failures", failures == 0, failures, "status failures == 0")
+    add("exact_core_events_present", not decisions.empty, int(len(decisions)), "exact core events > 0")
+    add(
+        "required_exact_core_models_present",
+        bool(coverage["passed"]),
+        coverage["observed"],
+        "all events include required exact core models",
+        str(coverage["details"]),
+    )
+
+    if decisions.empty:
+        add("exact_trajectory_raw_best_majority", False, 0.0, "trajectory raw best fraction > 0.5")
+        add(
+            "exact_trajectory_confident_claim_majority",
+            False,
+            0.0,
+            "trajectory confident claim fraction > 0.5",
+            f"margin_threshold={float(margin_threshold):g}",
+        )
+        add("no_confident_static_or_other_core_claims", False, 0, "nontrajectory confident claims == 0")
+    else:
+        raw_best_trajectory = decisions["best_core_model"].fillna("").astype(str).isin(trajectory_set)
+        confident_trajectory = decisions["claim_model"].fillna("").astype(str).isin(trajectory_set)
+        nontrajectory_claims = decisions[
+            ~decisions["claim_model"].fillna("").astype(str).isin((*trajectory_set, "ambiguous", "incomplete_core"))
+        ]
+        raw_fraction = float(raw_best_trajectory.mean())
+        claim_fraction = float(confident_trajectory.mean())
+        add(
+            "exact_trajectory_raw_best_majority",
+            raw_fraction > float(min_raw_win_fraction),
+            raw_fraction,
+            f"trajectory raw best fraction > {float(min_raw_win_fraction):g}",
+            "trajectory_models=" + " ".join(str(model) for model in trajectory_models),
+        )
+        add(
+            "exact_trajectory_confident_claim_majority",
+            claim_fraction > float(min_confident_claim_fraction),
+            claim_fraction,
+            f"trajectory confident claim fraction > {float(min_confident_claim_fraction):g}",
+            f"margin_threshold={float(margin_threshold):g}",
+        )
+        add(
+            "no_confident_static_or_other_core_claims",
+            int(len(nontrajectory_claims)) == 0,
+            int(len(nontrajectory_claims)),
+            "nontrajectory confident claims == 0",
+        )
+
+    result = pd.DataFrame(rows, columns=columns)
+    overall = pd.DataFrame(
+        [
+            {
+                "gate": "overall",
+                "passed": bool(result["passed"].all()),
+                "observed": f"{int(result['passed'].sum())}/{len(result)} gates passed",
+                "criterion": "all gates pass",
+                "details": f"margin_threshold={float(margin_threshold):g}",
+            }
+        ],
+        columns=columns,
+    )
+    return pd.concat([result, overall], ignore_index=True)
+
+
 def _required_full_core_model_coverage(
     df: pd.DataFrame,
     required_models: tuple[str, ...],
@@ -1240,6 +1344,10 @@ def aggregate_all_sessions(shard_glob: str, outdir: Path) -> pd.DataFrame:
     session_best_model_counts(combined).to_csv(outdir / "session_best_model_counts.csv", index=False)
     random_effects_model_probabilities(combined).to_csv(outdir / "random_effects_model_probabilities.csv", index=False)
     paper_readiness_gate_summary(combined).to_csv(outdir / "paper_readiness_gate_summary.csv", index=False)
+    exact_trajectory_dynamics_gate_summary(combined).to_csv(
+        outdir / "exact_trajectory_dynamics_gate_summary.csv",
+        index=False,
+    )
     required_full_core_model_coverage_table(combined).to_csv(
         outdir / "required_full_core_model_coverage.csv",
         index=False,
@@ -1344,6 +1452,8 @@ def main() -> int:
     print(random_effects_model_probabilities(combined).to_string(index=False))
     print("\nPaper readiness gate summary:")
     print(paper_readiness_gate_summary(combined).to_string(index=False))
+    print("\nExact trajectory dynamics gate summary:")
+    print(exact_trajectory_dynamics_gate_summary(combined).to_string(index=False))
     print("\nRequired full-core model coverage:")
     print(required_full_core_model_coverage_table(combined).to_string(index=False))
     exact_core_decisions = exact_core_model_claim_decisions(combined)

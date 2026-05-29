@@ -26,6 +26,7 @@ from aggregate_all_session_model_evidence import (
     rat_exact_sparse_momentum_core_margin_summary,
     rat_bootstrap_exact_sparse_momentum_core_margin_summary,
     rat_bootstrap_exact_sparse_momentum_core_threshold_sensitivity,
+    rat_bootstrap_exact_trajectory_dynamics_threshold_sensitivity,
     rat_bootstrap_paired_momentum_diffusion_margin_summary,
     rat_bootstrap_paired_momentum_diffusion_threshold_sensitivity,
     rat_exact_trajectory_dynamics_threshold_sensitivity,
@@ -69,6 +70,7 @@ def test_all_session_model_evidence_workflow_exports_expected_outputs():
     assert "session_exact_trajectory_dynamics_threshold_sensitivity.csv" in workflow
     assert "rat_exact_trajectory_dynamics_threshold_sensitivity.csv" in workflow
     assert "leave_one_rat_out_exact_trajectory_dynamics_threshold_sensitivity.csv" in workflow
+    assert "rat_bootstrap_exact_trajectory_dynamics_threshold_sensitivity.csv" in workflow
     assert "required_full_core_model_coverage.csv" in workflow
     assert "exact_core_model_claim_decisions.csv" in workflow
     assert "exact_core_model_claim_summary.csv" in workflow
@@ -561,6 +563,71 @@ def test_all_session_exact_trajectory_dynamics_rat_and_leave_one_out_summaries()
     assert held_out_rat2["included_rats"] == "Rat1"
     assert held_out_rat2["trajectory_confident_claims"] == 2
     assert held_out_rat2["nontrajectory_confident_claims"] == 0
+
+
+def test_all_session_exact_trajectory_dynamics_rat_bootstrap_reports_uncertainty():
+    frame = pd.DataFrame(
+        [
+            _paired_score_row("Rat1/Open1", 0, "sorted-spike-state-space-stationary", -3.0),
+            _paired_score_row("Rat1/Open1", 0, "sorted-spike-state-space-diffusion", 0.0),
+            _paired_score_row("Rat1/Open1", 0, "sorted-spike-state-space-fragmented", 2.0),
+            _paired_score_row("Rat1/Open1", 0, "sorted-spike-state-space-first-order-imm", 10.0),
+            _paired_score_row(
+                "Rat1/Open1",
+                0,
+                "sorted-spike-state-space-momentum-exact-sparse",
+                3.0,
+            ),
+            _paired_score_row("Rat1/Open2", 1, "sorted-spike-state-space-stationary", -3.0),
+            _paired_score_row("Rat1/Open2", 1, "sorted-spike-state-space-diffusion", 0.0),
+            _paired_score_row("Rat1/Open2", 1, "sorted-spike-state-space-fragmented", 1.0),
+            _paired_score_row("Rat1/Open2", 1, "sorted-spike-state-space-first-order-imm", 2.0),
+            _paired_score_row(
+                "Rat1/Open2",
+                1,
+                "sorted-spike-state-space-momentum-exact-sparse",
+                8.0,
+            ),
+            _paired_score_row("Rat2/Open1", 0, "sorted-spike-state-space-stationary", -3.0),
+            _paired_score_row("Rat2/Open1", 0, "sorted-spike-state-space-diffusion", 0.0),
+            _paired_score_row("Rat2/Open1", 0, "sorted-spike-state-space-fragmented", 2.0),
+            _paired_score_row("Rat2/Open1", 0, "sorted-spike-state-space-first-order-imm", 4.0),
+            _paired_score_row(
+                "Rat2/Open1",
+                0,
+                "sorted-spike-state-space-momentum-exact-sparse",
+                5.0,
+            ),
+            _paired_score_row("Rat2/Open2", 1, "sorted-spike-state-space-stationary", 12.0),
+            _paired_score_row("Rat2/Open2", 1, "sorted-spike-state-space-diffusion", 0.0),
+            _paired_score_row("Rat2/Open2", 1, "sorted-spike-state-space-fragmented", 2.0),
+            _paired_score_row("Rat2/Open2", 1, "sorted-spike-state-space-first-order-imm", 3.0),
+            _paired_score_row(
+                "Rat2/Open2",
+                1,
+                "sorted-spike-state-space-momentum-exact-sparse",
+                4.0,
+            ),
+        ]
+    )
+
+    bootstrap = rat_bootstrap_exact_trajectory_dynamics_threshold_sensitivity(
+        frame,
+        thresholds=(5.5,),
+        n_bootstrap=50,
+        random_seed=7,
+    ).iloc[0]
+
+    assert bootstrap["margin_threshold"] == 5.5
+    assert bootstrap["observed_events"] == 4
+    assert bootstrap["observed_rats"] == 2
+    assert bootstrap["observed_required_complete_fraction"] == 1.0
+    assert bootstrap["observed_trajectory_raw_best_fraction"] == pytest.approx(0.75)
+    assert bootstrap["observed_trajectory_confident_claim_fraction"] == pytest.approx(0.5)
+    assert bootstrap["observed_nontrajectory_confident_claim_fraction"] == pytest.approx(0.25)
+    assert bootstrap["observed_ambiguous_fraction"] == pytest.approx(0.25)
+    assert 0.0 <= bootstrap["trajectory_confident_claim_fraction_ci95_low"] <= 1.0
+    assert 0.0 <= bootstrap["trajectory_confident_claim_fraction_ci95_high"] <= 1.0
 
 
 def test_all_session_exact_trajectory_dynamics_gate_summary_rejects_stationary_claims():

@@ -1302,6 +1302,132 @@ def rat_bootstrap_exact_trajectory_nontrajectory_threshold_sensitivity(
     return pd.concat(rows, ignore_index=True).sort_values("margin_threshold").reset_index(drop=True)
 
 
+def exact_trajectory_nontrajectory_gate_summary(
+    df: pd.DataFrame,
+    *,
+    margin_threshold: float = DEFAULT_MOMENTUM_CONFIDENCE_THRESHOLD,
+    n_bootstrap: int = DEFAULT_RAT_BOOTSTRAP_REPLICATES,
+    random_seed: int = DEFAULT_RAT_BOOTSTRAP_RANDOM_SEED,
+    min_raw_win_fraction: float = DEFAULT_PAPER_MIN_RAW_WIN_FRACTION,
+    min_confident_claim_fraction: float = DEFAULT_PAPER_MIN_CONFIDENT_CLAIM_FRACTION,
+) -> pd.DataFrame:
+    """Return pass/fail gates for the exact trajectory-family claim."""
+
+    columns = ["gate", "passed", "observed", "criterion", "details"]
+    rows: list[dict[str, object]] = []
+
+    def add(gate: str, passed: bool, observed: object, criterion: str, details: str = "") -> None:
+        rows.append(
+            {
+                "gate": gate,
+                "passed": bool(passed),
+                "observed": observed,
+                "criterion": criterion,
+                "details": details,
+            }
+        )
+
+    decisions = exact_trajectory_nontrajectory_margin_decisions(df, margin_threshold=margin_threshold)
+    summary = exact_trajectory_nontrajectory_margin_summary(decisions)
+    if summary.empty:
+        add("complete_family_margin_events_present", False, 0, "required_complete_events > 0")
+        result = pd.DataFrame(rows, columns=columns)
+    else:
+        row = summary.iloc[0]
+        complete_events = int(row["required_complete_events"])
+        add(
+            "complete_family_margin_events_present",
+            complete_events > 0,
+            complete_events,
+            "required_complete_events > 0",
+        )
+        add(
+            "trajectory_family_raw_win_majority",
+            float(row["trajectory_raw_win_fraction"]) > float(min_raw_win_fraction),
+            f"{float(row['trajectory_raw_win_fraction']):.6g}",
+            f"trajectory_raw_win_fraction > {float(min_raw_win_fraction):g}",
+        )
+        add(
+            "trajectory_family_confident_claim_majority",
+            float(row["trajectory_confident_claim_fraction"]) > float(min_confident_claim_fraction),
+            f"{float(row['trajectory_confident_claim_fraction']):.6g}",
+            f"trajectory_confident_claim_fraction > {float(min_confident_claim_fraction):g}",
+            f"margin_threshold={float(margin_threshold):g}",
+        )
+        add(
+            "no_confident_nontrajectory_claims",
+            int(row["nontrajectory_confident_claims"]) == 0,
+            int(row["nontrajectory_confident_claims"]),
+            "nontrajectory_confident_claims == 0",
+        )
+
+        session = exact_trajectory_nontrajectory_margin_summary(decisions, group_cols=("session",))
+        if session.empty:
+            add("all_sessions_have_trajectory_family_claims", False, 0, "min session trajectory claims > 0")
+            add("all_sessions_have_no_nontrajectory_claims", False, 0, "max session nontrajectory claims == 0")
+        else:
+            min_session_trajectory = int(session["trajectory_confident_claims"].min())
+            max_session_nontrajectory = int(session["nontrajectory_confident_claims"].max())
+            add(
+                "all_sessions_have_trajectory_family_claims",
+                min_session_trajectory > 0,
+                min_session_trajectory,
+                "min session trajectory_confident_claims > 0",
+            )
+            add(
+                "all_sessions_have_no_nontrajectory_claims",
+                max_session_nontrajectory == 0,
+                max_session_nontrajectory,
+                "max session nontrajectory_confident_claims == 0",
+            )
+
+        bootstrap = rat_bootstrap_exact_trajectory_nontrajectory_margin_summary(
+            decisions,
+            n_bootstrap=n_bootstrap,
+            random_seed=random_seed,
+        )
+        if bootstrap.empty:
+            add("rat_bootstrap_family_claim_fraction_ci_majority", False, np.nan, "positive_claim_fraction_ci95_low > 0.5")
+            add("rat_bootstrap_family_mean_delta_ci_positive", False, np.nan, "mean_delta_ci95_low > 0")
+            add("rat_bootstrap_family_median_delta_ci_positive", False, np.nan, "median_delta_ci95_low > 0")
+        else:
+            boot = bootstrap.iloc[0]
+            add(
+                "rat_bootstrap_family_claim_fraction_ci_majority",
+                float(boot["positive_claim_fraction_ci95_low"]) > float(min_confident_claim_fraction),
+                f"{float(boot['positive_claim_fraction_ci95_low']):.6g}",
+                f"positive_claim_fraction_ci95_low > {float(min_confident_claim_fraction):g}",
+            )
+            add(
+                "rat_bootstrap_family_mean_delta_ci_positive",
+                float(boot["mean_delta_ci95_low"]) > 0.0,
+                f"{float(boot['mean_delta_ci95_low']):.6g}",
+                "mean_delta_ci95_low > 0",
+            )
+            add(
+                "rat_bootstrap_family_median_delta_ci_positive",
+                float(boot["median_delta_ci95_low"]) > 0.0,
+                f"{float(boot['median_delta_ci95_low']):.6g}",
+                "median_delta_ci95_low > 0",
+            )
+        result = pd.DataFrame(rows, columns=columns)
+
+    overall_pass = bool(result["passed"].all()) if not result.empty else False
+    overall = pd.DataFrame(
+        [
+            {
+                "gate": "overall",
+                "passed": overall_pass,
+                "observed": f"{int(result['passed'].sum())}/{len(result)} gates passed",
+                "criterion": "all gates pass",
+                "details": f"margin_threshold={float(margin_threshold):g}",
+            }
+        ],
+        columns=columns,
+    )
+    return pd.concat([result, overall], ignore_index=True)
+
+
 def session_exact_trajectory_dynamics_summary(decisions: pd.DataFrame) -> pd.DataFrame:
     """Summarize exact trajectory-dynamics claims by session."""
 
@@ -1983,6 +2109,10 @@ def aggregate_all_sessions(shard_glob: str, outdir: Path) -> pd.DataFrame:
         outdir / "rat_bootstrap_exact_trajectory_nontrajectory_threshold_sensitivity.csv",
         index=False,
     )
+    exact_trajectory_nontrajectory_gate_summary(combined).to_csv(
+        outdir / "exact_trajectory_nontrajectory_gate_summary.csv",
+        index=False,
+    )
     required_full_core_model_coverage_table(combined).to_csv(
         outdir / "required_full_core_model_coverage.csv",
         index=False,
@@ -2108,6 +2238,8 @@ def main() -> int:
     print(session_exact_trajectory_nontrajectory_threshold_sensitivity(combined).to_string(index=False))
     print("\nRat-bootstrap exact trajectory-vs-nontrajectory threshold sensitivity:")
     print(rat_bootstrap_exact_trajectory_nontrajectory_threshold_sensitivity(combined).to_string(index=False))
+    print("\nExact trajectory-vs-nontrajectory gate summary:")
+    print(exact_trajectory_nontrajectory_gate_summary(combined).to_string(index=False))
     print("\nRequired full-core model coverage:")
     print(required_full_core_model_coverage_table(combined).to_string(index=False))
     exact_core_decisions = exact_core_model_claim_decisions(combined)

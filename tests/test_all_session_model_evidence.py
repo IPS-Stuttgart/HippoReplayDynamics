@@ -10,6 +10,7 @@ from aggregate_all_session_model_evidence import (
     exact_core_model_claim_summary,
     exact_trajectory_dynamics_gate_summary,
     exact_trajectory_dynamics_threshold_sensitivity,
+    exact_trajectory_nontrajectory_gate_summary,
     exact_trajectory_nontrajectory_margin_decisions,
     exact_trajectory_nontrajectory_margin_summary,
     exact_trajectory_nontrajectory_threshold_sensitivity,
@@ -81,6 +82,7 @@ def test_all_session_model_evidence_workflow_exports_expected_outputs():
     assert "exact_trajectory_nontrajectory_threshold_sensitivity.csv" in workflow
     assert "session_exact_trajectory_nontrajectory_threshold_sensitivity.csv" in workflow
     assert "rat_bootstrap_exact_trajectory_nontrajectory_threshold_sensitivity.csv" in workflow
+    assert "exact_trajectory_nontrajectory_gate_summary.csv" in workflow
     assert "required_full_core_model_coverage.csv" in workflow
     assert "exact_core_model_claim_decisions.csv" in workflow
     assert "exact_core_model_claim_summary.csv" in workflow
@@ -718,6 +720,92 @@ def test_all_session_exact_trajectory_nontrajectory_margin_tables():
     assert bootstrap["observed_positive_raw_win_fraction"] == pytest.approx(1 / 3)
     assert bootstrap["observed_positive_claim_fraction"] == pytest.approx(1 / 3)
     assert bootstrap["observed_mean_delta"] == pytest.approx(2 / 3)
+
+
+def test_all_session_exact_trajectory_nontrajectory_gate_summary_reports_family_readiness():
+    frame = _paper_readiness_frame()
+
+    summary = exact_trajectory_nontrajectory_gate_summary(
+        frame,
+        n_bootstrap=50,
+        random_seed=7,
+    ).set_index("gate")
+
+    assert bool(summary.loc["complete_family_margin_events_present", "passed"])
+    assert bool(summary.loc["trajectory_family_raw_win_majority", "passed"])
+    assert bool(summary.loc["trajectory_family_confident_claim_majority", "passed"])
+    assert bool(summary.loc["no_confident_nontrajectory_claims", "passed"])
+    assert bool(summary.loc["all_sessions_have_trajectory_family_claims", "passed"])
+    assert bool(summary.loc["all_sessions_have_no_nontrajectory_claims", "passed"])
+    assert bool(summary.loc["rat_bootstrap_family_claim_fraction_ci_majority", "passed"])
+    assert bool(summary.loc["rat_bootstrap_family_mean_delta_ci_positive", "passed"])
+    assert bool(summary.loc["rat_bootstrap_family_median_delta_ci_positive", "passed"])
+    assert bool(summary.loc["overall", "passed"])
+
+
+def test_all_session_exact_trajectory_nontrajectory_gate_summary_rejects_incomplete_core():
+    rows: list[dict[str, object]] = []
+    for event_index in range(3):
+        rows.extend(
+            [
+                _paired_score_row("Rat1/Open1", event_index, "sorted-spike-state-space-diffusion", 0.0),
+                _paired_score_row(
+                    "Rat1/Open1",
+                    event_index,
+                    "sorted-spike-state-space-momentum-exact-sparse",
+                    8.0,
+                ),
+            ]
+        )
+
+    summary = exact_trajectory_nontrajectory_gate_summary(pd.DataFrame(rows), n_bootstrap=50).set_index("gate")
+
+    assert not bool(summary.loc["complete_family_margin_events_present", "passed"])
+    assert not bool(summary.loc["overall", "passed"])
+
+
+def test_all_session_exact_trajectory_nontrajectory_gate_summary_rejects_static_claims():
+    rows: list[dict[str, object]] = []
+    for rat in range(1, 5):
+        for session_idx in range(1, 3):
+            session = f"Rat{rat}/Open{session_idx}"
+            for event_index in range(5):
+                stationary_log_evidence = 20.0 if event_index < 3 else -3.0
+                rows.extend(
+                    [
+                        _paired_score_row(
+                            session,
+                            event_index,
+                            "sorted-spike-state-space-stationary",
+                            stationary_log_evidence,
+                        ),
+                        _paired_score_row(session, event_index, "sorted-spike-state-space-diffusion", 0.0),
+                        _paired_score_row(session, event_index, "sorted-spike-state-space-fragmented", -2.0),
+                        _paired_score_row(
+                            session,
+                            event_index,
+                            "sorted-spike-state-space-first-order-imm",
+                            -1.0,
+                        ),
+                        _paired_score_row(
+                            session,
+                            event_index,
+                            "sorted-spike-state-space-momentum-exact-sparse",
+                            8.0,
+                        ),
+                    ]
+                )
+
+    summary = exact_trajectory_nontrajectory_gate_summary(
+        pd.DataFrame(rows),
+        n_bootstrap=50,
+        random_seed=7,
+    ).set_index("gate")
+
+    assert not bool(summary.loc["trajectory_family_raw_win_majority", "passed"])
+    assert not bool(summary.loc["trajectory_family_confident_claim_majority", "passed"])
+    assert not bool(summary.loc["no_confident_nontrajectory_claims", "passed"])
+    assert not bool(summary.loc["overall", "passed"])
 
 
 def test_all_session_exact_trajectory_dynamics_gate_summary_rejects_stationary_claims():

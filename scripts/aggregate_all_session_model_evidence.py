@@ -1059,6 +1059,50 @@ def session_exact_trajectory_dynamics_threshold_sensitivity(
     return pd.concat(rows, ignore_index=True).sort_values(["margin_threshold", "session"]).reset_index(drop=True)
 
 
+def rat_exact_trajectory_dynamics_summary(decisions: pd.DataFrame) -> pd.DataFrame:
+    """Summarize exact trajectory-dynamics claims by rat."""
+
+    return exact_trajectory_dynamics_summary(_with_rat(decisions), group_cols=("rat",))
+
+
+def rat_exact_trajectory_dynamics_threshold_sensitivity(
+    df: pd.DataFrame,
+    *,
+    thresholds: tuple[float, ...] = DEFAULT_MARGIN_SENSITIVITY_THRESHOLDS,
+) -> pd.DataFrame:
+    """Summarize exact trajectory-dynamics threshold sensitivity by rat."""
+
+    rows = []
+    for threshold in thresholds:
+        decisions = exact_core_model_claim_decisions(df, margin_threshold=float(threshold))
+        rows.append(rat_exact_trajectory_dynamics_summary(decisions))
+    if not rows:
+        return pd.DataFrame()
+    return pd.concat(rows, ignore_index=True).sort_values(["margin_threshold", "rat"]).reset_index(drop=True)
+
+
+def leave_one_rat_out_exact_trajectory_dynamics_summary(decisions: pd.DataFrame) -> pd.DataFrame:
+    """Summarize exact trajectory-dynamics claims after excluding each rat."""
+
+    return _leave_one_rat_out_summary(decisions, exact_trajectory_dynamics_summary)
+
+
+def leave_one_rat_out_exact_trajectory_dynamics_threshold_sensitivity(
+    df: pd.DataFrame,
+    *,
+    thresholds: tuple[float, ...] = DEFAULT_MARGIN_SENSITIVITY_THRESHOLDS,
+) -> pd.DataFrame:
+    """Summarize exact trajectory-dynamics threshold sensitivity after excluding each rat."""
+
+    rows = []
+    for threshold in thresholds:
+        decisions = exact_core_model_claim_decisions(df, margin_threshold=float(threshold))
+        rows.append(leave_one_rat_out_exact_trajectory_dynamics_summary(decisions))
+    if not rows:
+        return pd.DataFrame()
+    return pd.concat(rows, ignore_index=True).sort_values(["margin_threshold", "held_out_rat"]).reset_index(drop=True)
+
+
 def exact_trajectory_dynamics_gate_summary(
     df: pd.DataFrame,
     *,
@@ -1461,6 +1505,14 @@ def aggregate_all_sessions(shard_glob: str, outdir: Path) -> pd.DataFrame:
         outdir / "session_exact_trajectory_dynamics_threshold_sensitivity.csv",
         index=False,
     )
+    rat_exact_trajectory_dynamics_threshold_sensitivity(combined).to_csv(
+        outdir / "rat_exact_trajectory_dynamics_threshold_sensitivity.csv",
+        index=False,
+    )
+    leave_one_rat_out_exact_trajectory_dynamics_threshold_sensitivity(combined).to_csv(
+        outdir / "leave_one_rat_out_exact_trajectory_dynamics_threshold_sensitivity.csv",
+        index=False,
+    )
     required_full_core_model_coverage_table(combined).to_csv(
         outdir / "required_full_core_model_coverage.csv",
         index=False,
@@ -1571,6 +1623,10 @@ def main() -> int:
     print(exact_trajectory_dynamics_threshold_sensitivity(combined).to_string(index=False))
     print("\nSession exact trajectory dynamics threshold sensitivity:")
     print(session_exact_trajectory_dynamics_threshold_sensitivity(combined).to_string(index=False))
+    print("\nRat exact trajectory dynamics threshold sensitivity:")
+    print(rat_exact_trajectory_dynamics_threshold_sensitivity(combined).to_string(index=False))
+    print("\nLeave-one-rat-out exact trajectory dynamics threshold sensitivity:")
+    print(leave_one_rat_out_exact_trajectory_dynamics_threshold_sensitivity(combined).to_string(index=False))
     print("\nRequired full-core model coverage:")
     print(required_full_core_model_coverage_table(combined).to_string(index=False))
     exact_core_decisions = exact_core_model_claim_decisions(combined)

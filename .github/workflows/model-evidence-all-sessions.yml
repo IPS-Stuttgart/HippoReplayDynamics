@@ -399,6 +399,8 @@ jobs:
             exact_trajectory_dynamics_gate_summary.csv \
             exact_trajectory_dynamics_threshold_sensitivity.csv \
             session_exact_trajectory_dynamics_threshold_sensitivity.csv \
+            rat_exact_trajectory_dynamics_threshold_sensitivity.csv \
+            leave_one_rat_out_exact_trajectory_dynamics_threshold_sensitivity.csv \
             required_full_core_model_coverage.csv \
             exact_core_model_claim_decisions.csv \
             exact_core_model_claim_summary.csv \
@@ -472,6 +474,10 @@ jobs:
           print(pd.read_csv(f"{root}/exact_trajectory_dynamics_threshold_sensitivity.csv").to_string(index=False))
           print("\nSession exact trajectory dynamics threshold sensitivity:")
           print(pd.read_csv(f"{root}/session_exact_trajectory_dynamics_threshold_sensitivity.csv").to_string(index=False))
+          print("\nRat exact trajectory dynamics threshold sensitivity:")
+          print(pd.read_csv(f"{root}/rat_exact_trajectory_dynamics_threshold_sensitivity.csv").to_string(index=False))
+          print("\nLeave-one-rat-out exact trajectory dynamics threshold sensitivity:")
+          print(pd.read_csv(f"{root}/leave_one_rat_out_exact_trajectory_dynamics_threshold_sensitivity.csv").to_string(index=False))
           print("\nRequired full-core model coverage:")
           print(pd.read_csv(f"{root}/required_full_core_model_coverage.csv").to_string(index=False))
           print("\nExact core model claim summary:")

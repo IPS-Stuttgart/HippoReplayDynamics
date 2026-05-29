@@ -734,6 +734,57 @@ def paper_readiness_gate_summary(
     return pd.concat([result, overall], ignore_index=True)
 
 
+def required_full_core_model_coverage_table(
+    df: pd.DataFrame,
+    required_models: tuple[str, ...] = DEFAULT_PAPER_REQUIRED_FULL_CORE_MODELS,
+) -> pd.DataFrame:
+    """Return per-event coverage for the named exact/comparable core models."""
+
+    columns = [
+        "session",
+        "event_index",
+        "required_models_present",
+        "required_models_total",
+        "required_models_complete",
+        "missing_required_models",
+        "present_required_models",
+        "exact_models_compared",
+        "exact_comparable_models",
+    ]
+    required = tuple(str(model) for model in required_models)
+    df = _ensure_evidence_support_columns(df)
+    if "model" not in df or "session" not in df or "event_index" not in df:
+        return pd.DataFrame(columns=columns)
+
+    status_ok = df["status"].eq("success") if "status" in df else pd.Series(True, index=df.index)
+    comparable = df["evidence_comparable"].fillna(False).astype(bool)
+    ok = df[status_ok & comparable].copy()
+    if ok.empty:
+        return pd.DataFrame(columns=columns)
+
+    rows: list[dict[str, object]] = []
+    for key, group in ok.groupby(["session", "event_index"], sort=True):
+        session, event_index = key
+        models = sorted(set(group["model"].dropna().astype(str)))
+        model_set = set(models)
+        present = tuple(model for model in required if model in model_set)
+        missing = tuple(model for model in required if model not in model_set)
+        rows.append(
+            {
+                "session": str(session),
+                "event_index": int(event_index),
+                "required_models_present": int(len(present)),
+                "required_models_total": int(len(required)),
+                "required_models_complete": not missing,
+                "missing_required_models": " ".join(missing),
+                "present_required_models": " ".join(present),
+                "exact_models_compared": int(len(models)),
+                "exact_comparable_models": " ".join(models),
+            }
+        )
+    return pd.DataFrame(rows, columns=columns)
+
+
 def _required_full_core_model_coverage(
     df: pd.DataFrame,
     required_models: tuple[str, ...],
@@ -741,30 +792,21 @@ def _required_full_core_model_coverage(
     required = tuple(str(model) for model in required_models)
     if not required:
         return {"passed": True, "observed": "0/0", "details": "required_models="}
-    df = _ensure_evidence_support_columns(df)
-    if "model" not in df or "session" not in df or "event_index" not in df:
-        return {"passed": False, "observed": f"0/{len(required)}", "details": "missing grouping/model columns"}
-
-    status_ok = df["status"].eq("success") if "status" in df else pd.Series(True, index=df.index)
-    comparable = df["evidence_comparable"].fillna(False).astype(bool)
-    ok = df[status_ok & comparable].copy()
-    if ok.empty:
+    table = required_full_core_model_coverage_table(df, required)
+    if table.empty:
         return {
             "passed": False,
             "observed": f"0/{len(required)}",
             "details": "missing=" + " ".join(required),
         }
 
-    min_present = len(required)
     missing_union: set[str] = set()
-    for _, group in ok.groupby(["session", "event_index"], sort=False):
-        models = set(group["model"].dropna().astype(str))
-        present = sum(model in models for model in required)
-        min_present = min(min_present, present)
-        missing_union.update(model for model in required if model not in models)
+    for missing in table["missing_required_models"].dropna().astype(str):
+        missing_union.update(model for model in missing.split() if model)
+    min_present = int(table["required_models_present"].min())
     missing = " ".join(sorted(missing_union))
     return {
-        "passed": not missing_union and min_present == len(required),
+        "passed": bool(table["required_models_complete"].fillna(False).astype(bool).all()),
         "observed": f"{min_present}/{len(required)}",
         "details": "missing=" + missing if missing else "required_models=" + " ".join(required),
     }
@@ -1034,6 +1076,10 @@ def aggregate_all_sessions(shard_glob: str, outdir: Path) -> pd.DataFrame:
     session_best_model_counts(combined).to_csv(outdir / "session_best_model_counts.csv", index=False)
     random_effects_model_probabilities(combined).to_csv(outdir / "random_effects_model_probabilities.csv", index=False)
     paper_readiness_gate_summary(combined).to_csv(outdir / "paper_readiness_gate_summary.csv", index=False)
+    required_full_core_model_coverage_table(combined).to_csv(
+        outdir / "required_full_core_model_coverage.csv",
+        index=False,
+    )
     paired_decisions.to_csv(outdir / "paired_momentum_diffusion_margin_decisions.csv", index=False)
     paired_momentum_diffusion_margin_summary(paired_decisions).to_csv(
         outdir / "paired_momentum_diffusion_margin_summary.csv",
@@ -1125,6 +1171,8 @@ def main() -> int:
     print(random_effects_model_probabilities(combined).to_string(index=False))
     print("\nPaper readiness gate summary:")
     print(paper_readiness_gate_summary(combined).to_string(index=False))
+    print("\nRequired full-core model coverage:")
+    print(required_full_core_model_coverage_table(combined).to_string(index=False))
     decisions = paired_momentum_diffusion_margin_decisions(combined)
     print("\nPaired exact-sparse momentum-vs-diffusion margin summary:")
     print(paired_momentum_diffusion_margin_summary(decisions).to_string(index=False))

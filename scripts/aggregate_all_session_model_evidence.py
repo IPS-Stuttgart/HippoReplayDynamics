@@ -27,6 +27,13 @@ DEFAULT_PAPER_MIN_PAIRED_EVENTS_PER_SESSION = 5
 DEFAULT_PAPER_MIN_RAW_WIN_FRACTION = 0.5
 DEFAULT_PAPER_MIN_CONFIDENT_CLAIM_FRACTION = 0.5
 DEFAULT_PAPER_MIN_FULL_CORE_EXACT_MODELS = 5
+DEFAULT_PAPER_REQUIRED_FULL_CORE_MODELS = (
+    "sorted-spike-state-space-stationary",
+    DEFAULT_MARGIN_REFERENCE_MODEL,
+    "sorted-spike-state-space-fragmented",
+    "sorted-spike-state-space-first-order-imm",
+    DEFAULT_MARGIN_POSITIVE_MODEL,
+)
 
 
 def _load_score_files(shard_glob: str) -> list[Path]:
@@ -496,6 +503,7 @@ def paper_readiness_gate_summary(
     min_raw_win_fraction: float = DEFAULT_PAPER_MIN_RAW_WIN_FRACTION,
     min_confident_claim_fraction: float = DEFAULT_PAPER_MIN_CONFIDENT_CLAIM_FRACTION,
     min_full_core_exact_models: int = DEFAULT_PAPER_MIN_FULL_CORE_EXACT_MODELS,
+    required_full_core_models: tuple[str, ...] = DEFAULT_PAPER_REQUIRED_FULL_CORE_MODELS,
 ) -> pd.DataFrame:
     """Return explicit pass/fail gates for the calibrated momentum evidence."""
 
@@ -644,8 +652,16 @@ def paper_readiness_gate_summary(
         )
 
     core_margins = exact_sparse_momentum_core_margins(df, margin_threshold=margin_threshold)
+    required_core_coverage = _required_full_core_model_coverage(df, required_full_core_models)
     core_summary = exact_sparse_momentum_core_margin_summary(core_margins)
     if core_summary.empty:
+        add(
+            "full_core_required_exact_models_present",
+            False,
+            required_core_coverage["observed"],
+            "all events include required exact core models",
+            str(required_core_coverage["details"]),
+        )
         add(
             "full_core_min_exact_models_compared",
             False,
@@ -668,6 +684,13 @@ def paper_readiness_gate_summary(
     else:
         core = core_summary.iloc[0]
         min_core_models = int(core_margins["exact_models_compared"].min()) if not core_margins.empty else 0
+        add(
+            "full_core_required_exact_models_present",
+            bool(required_core_coverage["passed"]),
+            required_core_coverage["observed"],
+            "all events include required exact core models",
+            str(required_core_coverage["details"]),
+        )
         add(
             "full_core_min_exact_models_compared",
             min_core_models >= int(min_full_core_exact_models),
@@ -709,6 +732,42 @@ def paper_readiness_gate_summary(
         columns=columns,
     )
     return pd.concat([result, overall], ignore_index=True)
+
+
+def _required_full_core_model_coverage(
+    df: pd.DataFrame,
+    required_models: tuple[str, ...],
+) -> dict[str, object]:
+    required = tuple(str(model) for model in required_models)
+    if not required:
+        return {"passed": True, "observed": "0/0", "details": "required_models="}
+    df = _ensure_evidence_support_columns(df)
+    if "model" not in df or "session" not in df or "event_index" not in df:
+        return {"passed": False, "observed": f"0/{len(required)}", "details": "missing grouping/model columns"}
+
+    status_ok = df["status"].eq("success") if "status" in df else pd.Series(True, index=df.index)
+    comparable = df["evidence_comparable"].fillna(False).astype(bool)
+    ok = df[status_ok & comparable].copy()
+    if ok.empty:
+        return {
+            "passed": False,
+            "observed": f"0/{len(required)}",
+            "details": "missing=" + " ".join(required),
+        }
+
+    min_present = len(required)
+    missing_union: set[str] = set()
+    for _, group in ok.groupby(["session", "event_index"], sort=False):
+        models = set(group["model"].dropna().astype(str))
+        present = sum(model in models for model in required)
+        min_present = min(min_present, present)
+        missing_union.update(model for model in required if model not in models)
+    missing = " ".join(sorted(missing_union))
+    return {
+        "passed": not missing_union and min_present == len(required),
+        "observed": f"{min_present}/{len(required)}",
+        "details": "missing=" + missing if missing else "required_models=" + " ".join(required),
+    }
 
 
 def _insert_margin_threshold(summary: pd.DataFrame, threshold: float) -> pd.DataFrame:

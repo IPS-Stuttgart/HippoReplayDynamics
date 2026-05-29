@@ -21,6 +21,9 @@ DEFAULT_MOMENTUM_CONFIDENCE_THRESHOLD = 5.5
 DEFAULT_MARGIN_SENSITIVITY_THRESHOLDS = (0.0, 1.0, 3.0, 5.5, 10.0, 20.0)
 DEFAULT_RAT_BOOTSTRAP_REPLICATES = 2000
 DEFAULT_RAT_BOOTSTRAP_RANDOM_SEED = 1
+DEFAULT_PAPER_MIN_RATS = 4
+DEFAULT_PAPER_MIN_SESSIONS = 8
+DEFAULT_PAPER_MIN_PAIRED_EVENTS_PER_SESSION = 5
 
 
 def _load_score_files(shard_glob: str) -> list[Path]:
@@ -484,6 +487,9 @@ def paper_readiness_gate_summary(
     margin_threshold: float = DEFAULT_MOMENTUM_CONFIDENCE_THRESHOLD,
     n_bootstrap: int = DEFAULT_RAT_BOOTSTRAP_REPLICATES,
     random_seed: int = DEFAULT_RAT_BOOTSTRAP_RANDOM_SEED,
+    min_rats: int = DEFAULT_PAPER_MIN_RATS,
+    min_sessions: int = DEFAULT_PAPER_MIN_SESSIONS,
+    min_paired_events_per_session: int = DEFAULT_PAPER_MIN_PAIRED_EVENTS_PER_SESSION,
 ) -> pd.DataFrame:
     """Return explicit pass/fail gates for the calibrated momentum evidence."""
 
@@ -512,6 +518,28 @@ def paper_readiness_gate_summary(
 
     paired = paired_summary.iloc[0]
     add("paired_events_present", int(paired["events"]) > 0, int(paired["events"]), "paired events > 0")
+    observed_sessions = int(paired_decisions["session"].dropna().astype(str).nunique())
+    observed_rats = int(paired_decisions["session"].dropna().map(_rat_from_session).nunique())
+    per_session_events = paired_decisions.groupby("session", sort=False).size()
+    min_observed_events_per_session = int(per_session_events.min()) if not per_session_events.empty else 0
+    add(
+        "minimum_rats_present",
+        observed_rats >= int(min_rats),
+        observed_rats,
+        f"observed rats >= {int(min_rats)}",
+    )
+    add(
+        "minimum_sessions_present",
+        observed_sessions >= int(min_sessions),
+        observed_sessions,
+        f"observed sessions >= {int(min_sessions)}",
+    )
+    add(
+        "minimum_paired_events_per_session",
+        min_observed_events_per_session >= int(min_paired_events_per_session),
+        min_observed_events_per_session,
+        f"min paired events/session >= {int(min_paired_events_per_session)}",
+    )
     add(
         "paired_no_confident_diffusion_claims",
         int(paired["reference_model_claims"]) == 0,

@@ -9,6 +9,7 @@ from aggregate_all_session_model_evidence import (
     exact_core_model_claim_decisions,
     exact_core_model_claim_summary,
     exact_trajectory_dynamics_gate_summary,
+    exact_trajectory_dynamics_threshold_sensitivity,
     _load_combined,
     exact_sparse_momentum_core_margin_summary,
     exact_sparse_momentum_core_margins,
@@ -30,6 +31,7 @@ from aggregate_all_session_model_evidence import (
     random_effects_model_probabilities,
     required_full_core_model_coverage_table,
     session_exact_core_model_claim_summary,
+    session_exact_trajectory_dynamics_threshold_sensitivity,
     session_exact_sparse_momentum_core_margin_summary,
     session_exact_sparse_momentum_core_threshold_sensitivity,
     session_best_model_counts,
@@ -61,6 +63,8 @@ def test_all_session_model_evidence_workflow_exports_expected_outputs():
     assert "random_effects_model_probabilities.csv" in workflow
     assert "paper_readiness_gate_summary.csv" in workflow
     assert "exact_trajectory_dynamics_gate_summary.csv" in workflow
+    assert "exact_trajectory_dynamics_threshold_sensitivity.csv" in workflow
+    assert "session_exact_trajectory_dynamics_threshold_sensitivity.csv" in workflow
     assert "required_full_core_model_coverage.csv" in workflow
     assert "exact_core_model_claim_decisions.csv" in workflow
     assert "exact_core_model_claim_summary.csv" in workflow
@@ -426,6 +430,60 @@ def test_all_session_exact_trajectory_dynamics_gate_summary_accepts_imm_dominanc
     assert summary.loc["exact_trajectory_confident_claim_majority", "observed"] == pytest.approx(2 / 3)
     assert bool(summary.loc["no_confident_static_or_other_core_claims", "passed"])
     assert bool(summary.loc["overall", "passed"])
+
+
+def test_all_session_exact_trajectory_dynamics_threshold_sensitivity_sweeps_claims():
+    frame = pd.DataFrame(
+        [
+            _paired_score_row("Rat1/Open1", 0, "sorted-spike-state-space-stationary", -3.0),
+            _paired_score_row("Rat1/Open1", 0, "sorted-spike-state-space-diffusion", 0.0),
+            _paired_score_row("Rat1/Open1", 0, "sorted-spike-state-space-fragmented", 2.0),
+            _paired_score_row("Rat1/Open1", 0, "sorted-spike-state-space-first-order-imm", 15.0),
+            _paired_score_row(
+                "Rat1/Open1",
+                0,
+                "sorted-spike-state-space-momentum-exact-sparse",
+                8.0,
+            ),
+            _paired_score_row("Rat1/Open1", 1, "sorted-spike-state-space-stationary", -3.0),
+            _paired_score_row("Rat1/Open1", 1, "sorted-spike-state-space-diffusion", 0.0),
+            _paired_score_row("Rat1/Open1", 1, "sorted-spike-state-space-fragmented", -1.0),
+            _paired_score_row("Rat1/Open1", 1, "sorted-spike-state-space-first-order-imm", -2.0),
+            _paired_score_row(
+                "Rat1/Open1",
+                1,
+                "sorted-spike-state-space-momentum-exact-sparse",
+                8.0,
+            ),
+            _paired_score_row("Rat1/Open1", 2, "sorted-spike-state-space-stationary", -3.0),
+            _paired_score_row("Rat1/Open1", 2, "sorted-spike-state-space-diffusion", 0.0),
+            _paired_score_row("Rat1/Open1", 2, "sorted-spike-state-space-fragmented", 4.0),
+            _paired_score_row("Rat1/Open1", 2, "sorted-spike-state-space-first-order-imm", 5.0),
+            _paired_score_row(
+                "Rat1/Open1",
+                2,
+                "sorted-spike-state-space-momentum-exact-sparse",
+                6.0,
+            ),
+        ]
+    )
+
+    summary = exact_trajectory_dynamics_threshold_sensitivity(
+        frame,
+        thresholds=(0.0, 5.5, 10.0),
+    )
+    session_summary = session_exact_trajectory_dynamics_threshold_sensitivity(
+        frame,
+        thresholds=(5.5,),
+    )
+
+    assert summary["margin_threshold"].tolist() == [0.0, 5.5, 10.0]
+    assert summary["trajectory_raw_best_events"].tolist() == [3, 3, 3]
+    assert summary["trajectory_confident_claims"].tolist() == [3, 2, 0]
+    assert summary["ambiguous_events"].tolist() == [0, 1, 3]
+    assert summary["nontrajectory_confident_claims"].tolist() == [0, 0, 0]
+    assert session_summary["session"].tolist() == ["Rat1/Open1"]
+    assert session_summary["trajectory_confident_claims"].tolist() == [2]
 
 
 def test_all_session_exact_trajectory_dynamics_gate_summary_rejects_stationary_claims():

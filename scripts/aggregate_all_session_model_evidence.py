@@ -954,6 +954,111 @@ def session_exact_core_model_claim_summary(decisions: pd.DataFrame) -> pd.DataFr
     return exact_core_model_claim_summary(decisions, group_cols=("session",))
 
 
+def exact_trajectory_dynamics_summary(
+    decisions: pd.DataFrame,
+    *,
+    trajectory_models: tuple[str, ...] = DEFAULT_PAPER_EXACT_TRAJECTORY_MODELS,
+    group_cols: tuple[str, ...] = (),
+) -> pd.DataFrame:
+    """Summarize exact trajectory-vs-static decisions from exact core claims."""
+
+    columns = [
+        *group_cols,
+        "events",
+        "required_complete_events",
+        "incomplete_core_events",
+        "ambiguous_events",
+        "margin_threshold",
+        "trajectory_raw_best_events",
+        "nontrajectory_raw_best_events",
+        "trajectory_raw_best_fraction",
+        "trajectory_confident_claims",
+        "nontrajectory_confident_claims",
+        "trajectory_confident_claim_fraction",
+        "most_common_trajectory_claim_model",
+        "most_common_nontrajectory_claim_model",
+    ]
+    if decisions.empty:
+        return pd.DataFrame(columns=columns)
+
+    trajectory_set = set(str(model) for model in trajectory_models)
+    rows: list[dict[str, object]] = []
+    groups = [((), decisions)] if not group_cols else decisions.groupby(list(group_cols), sort=True)
+    for key, group in groups:
+        key_tuple = key if isinstance(key, tuple) else (key,)
+        events = int(len(group))
+        complete = group["required_models_complete"].fillna(False).astype(bool)
+        raw_trajectory = group["best_core_model"].fillna("").astype(str).isin(trajectory_set)
+        claim_model = group["claim_model"].fillna("").astype(str)
+        trajectory_claims = claim_model.isin(trajectory_set)
+        nontrajectory_claims = ~claim_model.isin((*trajectory_set, "ambiguous", "incomplete_core", ""))
+        trajectory_claim_values = claim_model[trajectory_claims]
+        nontrajectory_claim_values = claim_model[nontrajectory_claims]
+        threshold = float(group["margin_threshold"].dropna().iloc[0]) if "margin_threshold" in group else np.nan
+        row = {column: value for column, value in zip(group_cols, key_tuple, strict=True)}
+        row.update(
+            {
+                "events": events,
+                "required_complete_events": int(complete.sum()),
+                "incomplete_core_events": int((claim_model == "incomplete_core").sum()),
+                "ambiguous_events": int((claim_model == "ambiguous").sum()),
+                "margin_threshold": threshold,
+                "trajectory_raw_best_events": int(raw_trajectory.sum()),
+                "nontrajectory_raw_best_events": int((~raw_trajectory).sum()),
+                "trajectory_raw_best_fraction": float(raw_trajectory.mean()) if events else 0.0,
+                "trajectory_confident_claims": int(trajectory_claims.sum()),
+                "nontrajectory_confident_claims": int(nontrajectory_claims.sum()),
+                "trajectory_confident_claim_fraction": float(trajectory_claims.mean()) if events else 0.0,
+                "most_common_trajectory_claim_model": (
+                    "" if trajectory_claim_values.empty else str(trajectory_claim_values.value_counts().index[0])
+                ),
+                "most_common_nontrajectory_claim_model": (
+                    "" if nontrajectory_claim_values.empty else str(nontrajectory_claim_values.value_counts().index[0])
+                ),
+            }
+        )
+        rows.append(row)
+    return pd.DataFrame(rows, columns=columns)
+
+
+def exact_trajectory_dynamics_threshold_sensitivity(
+    df: pd.DataFrame,
+    *,
+    thresholds: tuple[float, ...] = DEFAULT_MARGIN_SENSITIVITY_THRESHOLDS,
+) -> pd.DataFrame:
+    """Summarize exact trajectory-dynamics claims across margin thresholds."""
+
+    rows = []
+    for threshold in thresholds:
+        decisions = exact_core_model_claim_decisions(df, margin_threshold=float(threshold))
+        rows.append(exact_trajectory_dynamics_summary(decisions))
+    if not rows:
+        return pd.DataFrame()
+    return pd.concat(rows, ignore_index=True).sort_values("margin_threshold").reset_index(drop=True)
+
+
+def session_exact_trajectory_dynamics_summary(decisions: pd.DataFrame) -> pd.DataFrame:
+    """Summarize exact trajectory-dynamics claims by session."""
+
+    return exact_trajectory_dynamics_summary(decisions, group_cols=("session",))
+
+
+def session_exact_trajectory_dynamics_threshold_sensitivity(
+    df: pd.DataFrame,
+    *,
+    thresholds: tuple[float, ...] = DEFAULT_MARGIN_SENSITIVITY_THRESHOLDS,
+) -> pd.DataFrame:
+    """Summarize exact trajectory-dynamics threshold sensitivity by session."""
+
+    rows = []
+    for threshold in thresholds:
+        decisions = exact_core_model_claim_decisions(df, margin_threshold=float(threshold))
+        rows.append(session_exact_trajectory_dynamics_summary(decisions))
+    if not rows:
+        return pd.DataFrame()
+    return pd.concat(rows, ignore_index=True).sort_values(["margin_threshold", "session"]).reset_index(drop=True)
+
+
 def exact_trajectory_dynamics_gate_summary(
     df: pd.DataFrame,
     *,
@@ -1348,6 +1453,14 @@ def aggregate_all_sessions(shard_glob: str, outdir: Path) -> pd.DataFrame:
         outdir / "exact_trajectory_dynamics_gate_summary.csv",
         index=False,
     )
+    exact_trajectory_dynamics_threshold_sensitivity(combined).to_csv(
+        outdir / "exact_trajectory_dynamics_threshold_sensitivity.csv",
+        index=False,
+    )
+    session_exact_trajectory_dynamics_threshold_sensitivity(combined).to_csv(
+        outdir / "session_exact_trajectory_dynamics_threshold_sensitivity.csv",
+        index=False,
+    )
     required_full_core_model_coverage_table(combined).to_csv(
         outdir / "required_full_core_model_coverage.csv",
         index=False,
@@ -1454,6 +1567,10 @@ def main() -> int:
     print(paper_readiness_gate_summary(combined).to_string(index=False))
     print("\nExact trajectory dynamics gate summary:")
     print(exact_trajectory_dynamics_gate_summary(combined).to_string(index=False))
+    print("\nExact trajectory dynamics threshold sensitivity:")
+    print(exact_trajectory_dynamics_threshold_sensitivity(combined).to_string(index=False))
+    print("\nSession exact trajectory dynamics threshold sensitivity:")
+    print(session_exact_trajectory_dynamics_threshold_sensitivity(combined).to_string(index=False))
     print("\nRequired full-core model coverage:")
     print(required_full_core_model_coverage_table(combined).to_string(index=False))
     exact_core_decisions = exact_core_model_claim_decisions(combined)

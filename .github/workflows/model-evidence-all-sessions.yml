@@ -407,6 +407,7 @@ jobs:
             exact_trajectory_nontrajectory_threshold_sensitivity.csv \
             session_exact_trajectory_nontrajectory_threshold_sensitivity.csv \
             rat_bootstrap_exact_trajectory_nontrajectory_threshold_sensitivity.csv \
+            exact_trajectory_nontrajectory_gate_summary.csv \
             required_full_core_model_coverage.csv \
             exact_core_model_claim_decisions.csv \
             exact_core_model_claim_summary.csv \
@@ -494,6 +495,8 @@ jobs:
           print(pd.read_csv(f"{root}/session_exact_trajectory_nontrajectory_threshold_sensitivity.csv").to_string(index=False))
           print("\nRat-bootstrap exact trajectory-vs-nontrajectory threshold sensitivity:")
           print(pd.read_csv(f"{root}/rat_bootstrap_exact_trajectory_nontrajectory_threshold_sensitivity.csv").to_string(index=False))
+          print("\nExact trajectory-vs-nontrajectory gate summary:")
+          print(pd.read_csv(f"{root}/exact_trajectory_nontrajectory_gate_summary.csv").to_string(index=False))
           print("\nRequired full-core model coverage:")
           print(pd.read_csv(f"{root}/required_full_core_model_coverage.csv").to_string(index=False))
           print("\nExact core model claim summary:")

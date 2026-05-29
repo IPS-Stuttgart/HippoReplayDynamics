@@ -1037,6 +1037,271 @@ def exact_trajectory_dynamics_threshold_sensitivity(
     return pd.concat(rows, ignore_index=True).sort_values("margin_threshold").reset_index(drop=True)
 
 
+def exact_trajectory_nontrajectory_margin_decisions(
+    df: pd.DataFrame,
+    *,
+    required_models: tuple[str, ...] = DEFAULT_PAPER_REQUIRED_FULL_CORE_MODELS,
+    trajectory_models: tuple[str, ...] = DEFAULT_PAPER_EXACT_TRAJECTORY_MODELS,
+    margin_threshold: float = DEFAULT_MOMENTUM_CONFIDENCE_THRESHOLD,
+) -> pd.DataFrame:
+    """Return per-event best-trajectory-vs-best-nontrajectory margins.
+
+    Exact-core winner tables can understate the broader trajectory-dynamics
+    claim when trajectory models split support among themselves. This table asks
+    the family-level question directly: does the best exact trajectory row beat
+    the best required exact nontrajectory row?
+    """
+
+    columns = [
+        "session",
+        "event_index",
+        "required_models_present",
+        "required_models_total",
+        "required_models_complete",
+        "missing_required_models",
+        "present_required_models",
+        "margin_threshold",
+        "best_trajectory_model",
+        "best_trajectory_log_evidence",
+        "best_nontrajectory_model",
+        "best_nontrajectory_log_evidence",
+        "trajectory_minus_nontrajectory_log_evidence",
+        "trajectory_raw_win",
+        "trajectory_confident_claim",
+        "nontrajectory_confident_claim",
+        "margin_decision",
+    ]
+    required = tuple(str(model) for model in required_models)
+    required_set = set(required)
+    trajectory_set = set(str(model) for model in trajectory_models)
+    df = _ensure_evidence_support_columns(df)
+    if "model" not in df or "session" not in df or "event_index" not in df:
+        return pd.DataFrame(columns=columns)
+
+    status_ok = df["status"].eq("success") if "status" in df else pd.Series(True, index=df.index)
+    comparable = df["evidence_comparable"].fillna(False).astype(bool)
+    ok = df[status_ok & comparable].copy()
+    if ok.empty:
+        return pd.DataFrame(columns=columns)
+
+    rows: list[dict[str, object]] = []
+    for key, group in ok.groupby(["session", "event_index"], sort=True):
+        session, event_index = key
+        core = group[group["model"].astype(str).isin(required_set)].dropna(subset=["log_evidence"]).copy()
+        present = tuple(model for model in required if model in set(core["model"].astype(str)))
+        missing = tuple(model for model in required if model not in set(present))
+        complete = not missing
+        trajectory = core[core["model"].astype(str).isin(trajectory_set)]
+        nontrajectory = core[~core["model"].astype(str).isin(trajectory_set)]
+        if trajectory.empty or nontrajectory.empty:
+            best_trajectory_model = ""
+            best_trajectory_value = np.nan
+            best_nontrajectory_model = ""
+            best_nontrajectory_value = np.nan
+            delta = np.nan
+            raw_win = False
+            trajectory_claim = False
+            nontrajectory_claim = False
+            margin_decision = "incomplete_core"
+        else:
+            best_trajectory = trajectory.sort_values("log_evidence", ascending=False).iloc[0]
+            best_nontrajectory = nontrajectory.sort_values("log_evidence", ascending=False).iloc[0]
+            best_trajectory_model = str(best_trajectory["model"])
+            best_trajectory_value = float(best_trajectory["log_evidence"])
+            best_nontrajectory_model = str(best_nontrajectory["model"])
+            best_nontrajectory_value = float(best_nontrajectory["log_evidence"])
+            delta = best_trajectory_value - best_nontrajectory_value
+            raw_win = bool(delta > 0.0)
+            trajectory_claim = bool(complete and delta >= float(margin_threshold))
+            nontrajectory_claim = bool(complete and delta <= -float(margin_threshold))
+            if not complete:
+                margin_decision = "incomplete_core"
+            elif trajectory_claim:
+                margin_decision = "trajectory"
+            elif nontrajectory_claim:
+                margin_decision = "nontrajectory"
+            else:
+                margin_decision = "ambiguous"
+        rows.append(
+            {
+                "session": str(session),
+                "event_index": int(event_index),
+                "required_models_present": int(len(present)),
+                "required_models_total": int(len(required)),
+                "required_models_complete": bool(complete),
+                "missing_required_models": " ".join(missing),
+                "present_required_models": " ".join(present),
+                "margin_threshold": float(margin_threshold),
+                "best_trajectory_model": best_trajectory_model,
+                "best_trajectory_log_evidence": float(best_trajectory_value),
+                "best_nontrajectory_model": best_nontrajectory_model,
+                "best_nontrajectory_log_evidence": float(best_nontrajectory_value),
+                "trajectory_minus_nontrajectory_log_evidence": float(delta),
+                "trajectory_raw_win": raw_win,
+                "trajectory_confident_claim": trajectory_claim,
+                "nontrajectory_confident_claim": nontrajectory_claim,
+                "margin_decision": margin_decision,
+            }
+        )
+    return pd.DataFrame(rows, columns=columns)
+
+
+def exact_trajectory_nontrajectory_margin_summary(
+    decisions: pd.DataFrame,
+    *,
+    group_cols: tuple[str, ...] = (),
+) -> pd.DataFrame:
+    """Summarize best-trajectory-vs-best-nontrajectory margins."""
+
+    columns = [
+        *group_cols,
+        "events",
+        "required_complete_events",
+        "incomplete_core_events",
+        "margin_threshold",
+        "trajectory_raw_wins",
+        "nontrajectory_raw_wins",
+        "raw_ties",
+        "trajectory_raw_win_fraction",
+        "trajectory_confident_claims",
+        "nontrajectory_confident_claims",
+        "ambiguous_events",
+        "trajectory_confident_claim_fraction",
+        "nontrajectory_confident_claim_fraction",
+        "ambiguous_fraction",
+        "mean_trajectory_minus_nontrajectory_log_evidence",
+        "median_trajectory_minus_nontrajectory_log_evidence",
+        "min_trajectory_minus_nontrajectory_log_evidence",
+        "max_trajectory_minus_nontrajectory_log_evidence",
+        "most_common_best_trajectory_model",
+        "most_common_best_nontrajectory_model",
+    ]
+    if decisions.empty:
+        return pd.DataFrame(columns=columns)
+
+    rows: list[dict[str, object]] = []
+    groups = [((), decisions)] if not group_cols else decisions.groupby(list(group_cols), sort=True)
+    for key, group in groups:
+        key_tuple = key if isinstance(key, tuple) else (key,)
+        delta = group["trajectory_minus_nontrajectory_log_evidence"].astype(float).dropna()
+        events = int(len(group))
+        complete = group["required_models_complete"].fillna(False).astype(bool)
+        trajectory_claims = int(group["trajectory_confident_claim"].fillna(False).astype(bool).sum())
+        nontrajectory_claims = int(group["nontrajectory_confident_claim"].fillna(False).astype(bool).sum())
+        ambiguous = int((group["margin_decision"] == "ambiguous").sum())
+        best_trajectory = group["best_trajectory_model"].replace("", pd.NA).dropna().astype(str)
+        best_nontrajectory = group["best_nontrajectory_model"].replace("", pd.NA).dropna().astype(str)
+        row = {column: value for column, value in zip(group_cols, key_tuple, strict=True)}
+        row.update(
+            {
+                "events": events,
+                "required_complete_events": int(complete.sum()),
+                "incomplete_core_events": int((group["margin_decision"] == "incomplete_core").sum()),
+                "margin_threshold": float(group["margin_threshold"].dropna().iloc[0]),
+                "trajectory_raw_wins": int((delta > 0.0).sum()),
+                "nontrajectory_raw_wins": int((delta < 0.0).sum()),
+                "raw_ties": int((delta == 0.0).sum()),
+                "trajectory_raw_win_fraction": float((delta > 0.0).mean()) if not delta.empty else 0.0,
+                "trajectory_confident_claims": trajectory_claims,
+                "nontrajectory_confident_claims": nontrajectory_claims,
+                "ambiguous_events": ambiguous,
+                "trajectory_confident_claim_fraction": float(trajectory_claims / max(events, 1)),
+                "nontrajectory_confident_claim_fraction": float(nontrajectory_claims / max(events, 1)),
+                "ambiguous_fraction": float(ambiguous / max(events, 1)),
+                "mean_trajectory_minus_nontrajectory_log_evidence": float(delta.mean()) if not delta.empty else np.nan,
+                "median_trajectory_minus_nontrajectory_log_evidence": (
+                    float(delta.median()) if not delta.empty else np.nan
+                ),
+                "min_trajectory_minus_nontrajectory_log_evidence": float(delta.min()) if not delta.empty else np.nan,
+                "max_trajectory_minus_nontrajectory_log_evidence": float(delta.max()) if not delta.empty else np.nan,
+                "most_common_best_trajectory_model": (
+                    "" if best_trajectory.empty else str(best_trajectory.value_counts().index[0])
+                ),
+                "most_common_best_nontrajectory_model": (
+                    "" if best_nontrajectory.empty else str(best_nontrajectory.value_counts().index[0])
+                ),
+            }
+        )
+        rows.append(row)
+    return pd.DataFrame(rows, columns=columns)
+
+
+def exact_trajectory_nontrajectory_threshold_sensitivity(
+    df: pd.DataFrame,
+    *,
+    thresholds: tuple[float, ...] = DEFAULT_MARGIN_SENSITIVITY_THRESHOLDS,
+) -> pd.DataFrame:
+    """Summarize best-trajectory-vs-best-nontrajectory margins across thresholds."""
+
+    rows = []
+    for threshold in thresholds:
+        decisions = exact_trajectory_nontrajectory_margin_decisions(df, margin_threshold=float(threshold))
+        rows.append(exact_trajectory_nontrajectory_margin_summary(decisions))
+    if not rows:
+        return pd.DataFrame()
+    return pd.concat(rows, ignore_index=True).sort_values("margin_threshold").reset_index(drop=True)
+
+
+def session_exact_trajectory_nontrajectory_threshold_sensitivity(
+    df: pd.DataFrame,
+    *,
+    thresholds: tuple[float, ...] = DEFAULT_MARGIN_SENSITIVITY_THRESHOLDS,
+) -> pd.DataFrame:
+    """Summarize best-trajectory-vs-best-nontrajectory threshold sensitivity by session."""
+
+    rows = []
+    for threshold in thresholds:
+        decisions = exact_trajectory_nontrajectory_margin_decisions(df, margin_threshold=float(threshold))
+        rows.append(exact_trajectory_nontrajectory_margin_summary(decisions, group_cols=("session",)))
+    if not rows:
+        return pd.DataFrame()
+    return pd.concat(rows, ignore_index=True).sort_values(["margin_threshold", "session"]).reset_index(drop=True)
+
+
+def rat_bootstrap_exact_trajectory_nontrajectory_margin_summary(
+    decisions: pd.DataFrame,
+    *,
+    n_bootstrap: int = DEFAULT_RAT_BOOTSTRAP_REPLICATES,
+    random_seed: int = DEFAULT_RAT_BOOTSTRAP_RANDOM_SEED,
+) -> pd.DataFrame:
+    """Return rat-cluster bootstrap intervals for trajectory-vs-nontrajectory margins."""
+
+    complete = decisions[
+        decisions["required_models_complete"].fillna(False).astype(bool)
+        & decisions["trajectory_minus_nontrajectory_log_evidence"].notna()
+    ].copy()
+    return _rat_bootstrap_margin_summary(
+        complete,
+        delta_col="trajectory_minus_nontrajectory_log_evidence",
+        positive_claim_col="trajectory_confident_claim",
+        n_bootstrap=n_bootstrap,
+        random_seed=random_seed,
+    )
+
+
+def rat_bootstrap_exact_trajectory_nontrajectory_threshold_sensitivity(
+    df: pd.DataFrame,
+    *,
+    thresholds: tuple[float, ...] = DEFAULT_MARGIN_SENSITIVITY_THRESHOLDS,
+    n_bootstrap: int = DEFAULT_RAT_BOOTSTRAP_REPLICATES,
+    random_seed: int = DEFAULT_RAT_BOOTSTRAP_RANDOM_SEED,
+) -> pd.DataFrame:
+    """Return rat-cluster bootstrap intervals for trajectory-vs-nontrajectory thresholds."""
+
+    rows = []
+    for threshold in thresholds:
+        decisions = exact_trajectory_nontrajectory_margin_decisions(df, margin_threshold=float(threshold))
+        summary = rat_bootstrap_exact_trajectory_nontrajectory_margin_summary(
+            decisions,
+            n_bootstrap=n_bootstrap,
+            random_seed=random_seed,
+        )
+        rows.append(_insert_margin_threshold(summary, threshold))
+    if not rows:
+        return pd.DataFrame()
+    return pd.concat(rows, ignore_index=True).sort_values("margin_threshold").reset_index(drop=True)
+
+
 def session_exact_trajectory_dynamics_summary(decisions: pd.DataFrame) -> pd.DataFrame:
     """Summarize exact trajectory-dynamics claims by session."""
 
@@ -1664,6 +1929,7 @@ def aggregate_all_sessions(shard_glob: str, outdir: Path) -> pd.DataFrame:
     paired_decisions = paired_momentum_diffusion_margin_decisions(combined)
     core_margins = exact_sparse_momentum_core_margins(combined)
     exact_core_decisions = exact_core_model_claim_decisions(combined)
+    trajectory_nontrajectory_decisions = exact_trajectory_nontrajectory_margin_decisions(combined)
 
     _write(combined, outdir)
     combined.to_csv(outdir / "all_sessions_event_model_evidence.csv", index=False)
@@ -1695,6 +1961,26 @@ def aggregate_all_sessions(shard_glob: str, outdir: Path) -> pd.DataFrame:
     )
     rat_bootstrap_exact_trajectory_dynamics_threshold_sensitivity(combined).to_csv(
         outdir / "rat_bootstrap_exact_trajectory_dynamics_threshold_sensitivity.csv",
+        index=False,
+    )
+    trajectory_nontrajectory_decisions.to_csv(
+        outdir / "exact_trajectory_nontrajectory_margin_decisions.csv",
+        index=False,
+    )
+    exact_trajectory_nontrajectory_margin_summary(trajectory_nontrajectory_decisions).to_csv(
+        outdir / "exact_trajectory_nontrajectory_margin_summary.csv",
+        index=False,
+    )
+    exact_trajectory_nontrajectory_threshold_sensitivity(combined).to_csv(
+        outdir / "exact_trajectory_nontrajectory_threshold_sensitivity.csv",
+        index=False,
+    )
+    session_exact_trajectory_nontrajectory_threshold_sensitivity(combined).to_csv(
+        outdir / "session_exact_trajectory_nontrajectory_threshold_sensitivity.csv",
+        index=False,
+    )
+    rat_bootstrap_exact_trajectory_nontrajectory_threshold_sensitivity(combined).to_csv(
+        outdir / "rat_bootstrap_exact_trajectory_nontrajectory_threshold_sensitivity.csv",
         index=False,
     )
     required_full_core_model_coverage_table(combined).to_csv(
@@ -1813,6 +2099,15 @@ def main() -> int:
     print(leave_one_rat_out_exact_trajectory_dynamics_threshold_sensitivity(combined).to_string(index=False))
     print("\nRat-bootstrap exact trajectory dynamics threshold sensitivity:")
     print(rat_bootstrap_exact_trajectory_dynamics_threshold_sensitivity(combined).to_string(index=False))
+    trajectory_nontrajectory_decisions = exact_trajectory_nontrajectory_margin_decisions(combined)
+    print("\nExact trajectory-vs-nontrajectory margin summary:")
+    print(exact_trajectory_nontrajectory_margin_summary(trajectory_nontrajectory_decisions).to_string(index=False))
+    print("\nExact trajectory-vs-nontrajectory threshold sensitivity:")
+    print(exact_trajectory_nontrajectory_threshold_sensitivity(combined).to_string(index=False))
+    print("\nSession exact trajectory-vs-nontrajectory threshold sensitivity:")
+    print(session_exact_trajectory_nontrajectory_threshold_sensitivity(combined).to_string(index=False))
+    print("\nRat-bootstrap exact trajectory-vs-nontrajectory threshold sensitivity:")
+    print(rat_bootstrap_exact_trajectory_nontrajectory_threshold_sensitivity(combined).to_string(index=False))
     print("\nRequired full-core model coverage:")
     print(required_full_core_model_coverage_table(combined).to_string(index=False))
     exact_core_decisions = exact_core_model_claim_decisions(combined)

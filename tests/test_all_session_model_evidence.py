@@ -25,6 +25,7 @@ from aggregate_all_session_model_evidence import (
     rat_bootstrap_paired_momentum_diffusion_threshold_sensitivity,
     rat_paired_momentum_diffusion_margin_summary,
     random_effects_model_probabilities,
+    required_full_core_model_coverage_table,
     session_exact_sparse_momentum_core_margin_summary,
     session_exact_sparse_momentum_core_threshold_sensitivity,
     session_best_model_counts,
@@ -55,6 +56,7 @@ def test_all_session_model_evidence_workflow_exports_expected_outputs():
     assert "session_model_evidence_summary.csv" in workflow
     assert "random_effects_model_probabilities.csv" in workflow
     assert "paper_readiness_gate_summary.csv" in workflow
+    assert "required_full_core_model_coverage.csv" in workflow
     assert "paired_momentum_diffusion_margin_summary.csv" in workflow
     assert "paired_momentum_diffusion_threshold_sensitivity.csv" in workflow
     assert "session_paired_momentum_diffusion_margin_summary.csv" in workflow
@@ -605,7 +607,20 @@ def test_all_session_paper_readiness_gate_summary_rejects_two_model_full_core_co
                     ]
                 )
 
-    summary = paper_readiness_gate_summary(pd.DataFrame(rows), n_bootstrap=50, random_seed=7).set_index("gate")
+    frame = pd.DataFrame(rows)
+    coverage = required_full_core_model_coverage_table(frame)
+    summary = paper_readiness_gate_summary(frame, n_bootstrap=50, random_seed=7).set_index("gate")
+
+    assert len(coverage) == 40
+    assert set(coverage["required_models_present"]) == {2}
+    assert set(coverage["required_models_complete"]) == {False}
+    assert set(coverage["missing_required_models"]) == {
+        (
+            "sorted-spike-state-space-stationary "
+            "sorted-spike-state-space-fragmented "
+            "sorted-spike-state-space-first-order-imm"
+        )
+    }
 
     assert bool(summary.loc["paired_raw_momentum_win_majority", "passed"])
     assert bool(summary.loc["paired_confident_momentum_claim_majority", "passed"])

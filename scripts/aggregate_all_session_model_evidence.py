@@ -1103,6 +1103,139 @@ def leave_one_rat_out_exact_trajectory_dynamics_threshold_sensitivity(
     return pd.concat(rows, ignore_index=True).sort_values(["margin_threshold", "held_out_rat"]).reset_index(drop=True)
 
 
+def rat_bootstrap_exact_trajectory_dynamics_summary(
+    decisions: pd.DataFrame,
+    *,
+    trajectory_models: tuple[str, ...] = DEFAULT_PAPER_EXACT_TRAJECTORY_MODELS,
+    n_bootstrap: int = DEFAULT_RAT_BOOTSTRAP_REPLICATES,
+    random_seed: int = DEFAULT_RAT_BOOTSTRAP_RANDOM_SEED,
+) -> pd.DataFrame:
+    """Return rat-cluster bootstrap intervals for exact trajectory-dynamics claims."""
+
+    columns = [
+        "bootstrap_unit",
+        "bootstrap_replicates",
+        "random_seed",
+        "observed_events",
+        "observed_rats",
+        "observed_required_complete_fraction",
+        "required_complete_fraction_ci95_low",
+        "required_complete_fraction_ci95_high",
+        "observed_trajectory_raw_best_fraction",
+        "trajectory_raw_best_fraction_ci95_low",
+        "trajectory_raw_best_fraction_ci95_high",
+        "observed_trajectory_confident_claim_fraction",
+        "trajectory_confident_claim_fraction_ci95_low",
+        "trajectory_confident_claim_fraction_ci95_high",
+        "probability_trajectory_confident_claim_fraction_gt_half",
+        "observed_nontrajectory_confident_claim_fraction",
+        "nontrajectory_confident_claim_fraction_ci95_low",
+        "nontrajectory_confident_claim_fraction_ci95_high",
+        "probability_nontrajectory_confident_claim_fraction_eq_0",
+        "observed_ambiguous_fraction",
+        "ambiguous_fraction_ci95_low",
+        "ambiguous_fraction_ci95_high",
+        "observed_incomplete_core_fraction",
+        "incomplete_core_fraction_ci95_low",
+        "incomplete_core_fraction_ci95_high",
+    ]
+    decisions = _with_rat(decisions)
+    if decisions.empty:
+        return pd.DataFrame(columns=columns)
+    if n_bootstrap <= 0:
+        raise ValueError("n_bootstrap must be positive")
+    missing = [column for column in ("rat", "best_core_model", "claim_model") if column not in decisions]
+    if missing:
+        raise KeyError(f"decisions is missing required columns: {missing}")
+
+    observed = _trajectory_bootstrap_metrics(decisions, trajectory_models=trajectory_models)
+    rat_counts = _trajectory_bootstrap_count_table(decisions, trajectory_models=trajectory_models)
+    rats = rat_counts["rat"].tolist()
+    rng = np.random.default_rng(int(random_seed))
+    count_columns = [
+        "event_count",
+        "required_complete_count",
+        "trajectory_raw_best_count",
+        "trajectory_confident_claim_count",
+        "nontrajectory_confident_claim_count",
+        "ambiguous_count",
+        "incomplete_core_count",
+    ]
+    count_array = rat_counts[count_columns].to_numpy(dtype=float)
+    sampled = rng.integers(0, len(rats), size=(int(n_bootstrap), len(rats)))
+    replicate_counts = count_array[sampled].sum(axis=1)
+    denominators = replicate_counts[:, 0]
+    replicates = pd.DataFrame(
+        {
+            "required_complete_fraction": replicate_counts[:, 1] / denominators,
+            "trajectory_raw_best_fraction": replicate_counts[:, 2] / denominators,
+            "trajectory_confident_claim_fraction": replicate_counts[:, 3] / denominators,
+            "nontrajectory_confident_claim_fraction": replicate_counts[:, 4] / denominators,
+            "ambiguous_fraction": replicate_counts[:, 5] / denominators,
+            "incomplete_core_fraction": replicate_counts[:, 6] / denominators,
+        }
+    )
+
+    def ci(metric: str, q: float) -> float:
+        return float(np.nanquantile(replicates[metric].to_numpy(dtype=float), q))
+
+    row = {
+        "bootstrap_unit": "rat",
+        "bootstrap_replicates": int(n_bootstrap),
+        "random_seed": int(random_seed),
+        "observed_events": int(len(decisions)),
+        "observed_rats": int(len(rats)),
+        "observed_required_complete_fraction": observed["required_complete_fraction"],
+        "required_complete_fraction_ci95_low": ci("required_complete_fraction", 0.025),
+        "required_complete_fraction_ci95_high": ci("required_complete_fraction", 0.975),
+        "observed_trajectory_raw_best_fraction": observed["trajectory_raw_best_fraction"],
+        "trajectory_raw_best_fraction_ci95_low": ci("trajectory_raw_best_fraction", 0.025),
+        "trajectory_raw_best_fraction_ci95_high": ci("trajectory_raw_best_fraction", 0.975),
+        "observed_trajectory_confident_claim_fraction": observed["trajectory_confident_claim_fraction"],
+        "trajectory_confident_claim_fraction_ci95_low": ci("trajectory_confident_claim_fraction", 0.025),
+        "trajectory_confident_claim_fraction_ci95_high": ci("trajectory_confident_claim_fraction", 0.975),
+        "probability_trajectory_confident_claim_fraction_gt_half": float(
+            (replicates["trajectory_confident_claim_fraction"] > 0.5).mean()
+        ),
+        "observed_nontrajectory_confident_claim_fraction": observed["nontrajectory_confident_claim_fraction"],
+        "nontrajectory_confident_claim_fraction_ci95_low": ci("nontrajectory_confident_claim_fraction", 0.025),
+        "nontrajectory_confident_claim_fraction_ci95_high": ci("nontrajectory_confident_claim_fraction", 0.975),
+        "probability_nontrajectory_confident_claim_fraction_eq_0": float(
+            (replicates["nontrajectory_confident_claim_fraction"] == 0.0).mean()
+        ),
+        "observed_ambiguous_fraction": observed["ambiguous_fraction"],
+        "ambiguous_fraction_ci95_low": ci("ambiguous_fraction", 0.025),
+        "ambiguous_fraction_ci95_high": ci("ambiguous_fraction", 0.975),
+        "observed_incomplete_core_fraction": observed["incomplete_core_fraction"],
+        "incomplete_core_fraction_ci95_low": ci("incomplete_core_fraction", 0.025),
+        "incomplete_core_fraction_ci95_high": ci("incomplete_core_fraction", 0.975),
+    }
+    return pd.DataFrame([row], columns=columns)
+
+
+def rat_bootstrap_exact_trajectory_dynamics_threshold_sensitivity(
+    df: pd.DataFrame,
+    *,
+    thresholds: tuple[float, ...] = DEFAULT_MARGIN_SENSITIVITY_THRESHOLDS,
+    n_bootstrap: int = DEFAULT_RAT_BOOTSTRAP_REPLICATES,
+    random_seed: int = DEFAULT_RAT_BOOTSTRAP_RANDOM_SEED,
+) -> pd.DataFrame:
+    """Return rat-cluster bootstrap intervals across trajectory-dynamics thresholds."""
+
+    rows = []
+    for threshold in thresholds:
+        decisions = exact_core_model_claim_decisions(df, margin_threshold=float(threshold))
+        summary = rat_bootstrap_exact_trajectory_dynamics_summary(
+            decisions,
+            n_bootstrap=n_bootstrap,
+            random_seed=random_seed,
+        )
+        rows.append(_insert_margin_threshold(summary, threshold))
+    if not rows:
+        return pd.DataFrame()
+    return pd.concat(rows, ignore_index=True).sort_values("margin_threshold").reset_index(drop=True)
+
+
 def exact_trajectory_dynamics_gate_summary(
     df: pd.DataFrame,
     *,
@@ -1367,6 +1500,53 @@ def _bootstrap_margin_metrics(
     }
 
 
+def _trajectory_bootstrap_metrics(
+    frame: pd.DataFrame,
+    *,
+    trajectory_models: tuple[str, ...],
+) -> dict[str, float]:
+    trajectory_set = set(str(model) for model in trajectory_models)
+    claim_model = frame["claim_model"].fillna("").astype(str)
+    return {
+        "required_complete_fraction": float(frame["required_models_complete"].fillna(False).astype(bool).mean()),
+        "trajectory_raw_best_fraction": float(frame["best_core_model"].fillna("").astype(str).isin(trajectory_set).mean()),
+        "trajectory_confident_claim_fraction": float(claim_model.isin(trajectory_set).mean()),
+        "nontrajectory_confident_claim_fraction": float(
+            (~claim_model.isin((*trajectory_set, "ambiguous", "incomplete_core", ""))).mean()
+        ),
+        "ambiguous_fraction": float((claim_model == "ambiguous").mean()),
+        "incomplete_core_fraction": float((claim_model == "incomplete_core").mean()),
+    }
+
+
+def _trajectory_bootstrap_count_table(
+    frame: pd.DataFrame,
+    *,
+    trajectory_models: tuple[str, ...],
+) -> pd.DataFrame:
+    trajectory_set = set(str(model) for model in trajectory_models)
+    rows = []
+    for rat, group in frame.groupby("rat", sort=True):
+        claim_model = group["claim_model"].fillna("").astype(str)
+        rows.append(
+            {
+                "rat": str(rat),
+                "event_count": int(len(group)),
+                "required_complete_count": int(group["required_models_complete"].fillna(False).astype(bool).sum()),
+                "trajectory_raw_best_count": int(
+                    group["best_core_model"].fillna("").astype(str).isin(trajectory_set).sum()
+                ),
+                "trajectory_confident_claim_count": int(claim_model.isin(trajectory_set).sum()),
+                "nontrajectory_confident_claim_count": int(
+                    (~claim_model.isin((*trajectory_set, "ambiguous", "incomplete_core", ""))).sum()
+                ),
+                "ambiguous_count": int((claim_model == "ambiguous").sum()),
+                "incomplete_core_count": int((claim_model == "incomplete_core").sum()),
+            }
+        )
+    return pd.DataFrame(rows)
+
+
 def _core_margin_summary(margins: pd.DataFrame, *, group_cols: tuple[str, ...]) -> pd.DataFrame:
     columns = [
         *group_cols,
@@ -1513,6 +1693,10 @@ def aggregate_all_sessions(shard_glob: str, outdir: Path) -> pd.DataFrame:
         outdir / "leave_one_rat_out_exact_trajectory_dynamics_threshold_sensitivity.csv",
         index=False,
     )
+    rat_bootstrap_exact_trajectory_dynamics_threshold_sensitivity(combined).to_csv(
+        outdir / "rat_bootstrap_exact_trajectory_dynamics_threshold_sensitivity.csv",
+        index=False,
+    )
     required_full_core_model_coverage_table(combined).to_csv(
         outdir / "required_full_core_model_coverage.csv",
         index=False,
@@ -1627,6 +1811,8 @@ def main() -> int:
     print(rat_exact_trajectory_dynamics_threshold_sensitivity(combined).to_string(index=False))
     print("\nLeave-one-rat-out exact trajectory dynamics threshold sensitivity:")
     print(leave_one_rat_out_exact_trajectory_dynamics_threshold_sensitivity(combined).to_string(index=False))
+    print("\nRat-bootstrap exact trajectory dynamics threshold sensitivity:")
+    print(rat_bootstrap_exact_trajectory_dynamics_threshold_sensitivity(combined).to_string(index=False))
     print("\nRequired full-core model coverage:")
     print(required_full_core_model_coverage_table(combined).to_string(index=False))
     exact_core_decisions = exact_core_model_claim_decisions(combined)

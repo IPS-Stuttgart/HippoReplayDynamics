@@ -19,6 +19,7 @@ from aggregate_all_session_model_evidence import (
     exact_sparse_momentum_core_margins,
     exact_sparse_momentum_core_threshold_sensitivity,
     leave_one_rat_out_exact_trajectory_dynamics_threshold_sensitivity,
+    leave_one_rat_out_exact_trajectory_nontrajectory_threshold_sensitivity,
     leave_one_rat_out_exact_sparse_momentum_core_margin_summary,
     leave_one_rat_out_exact_sparse_momentum_core_threshold_sensitivity,
     leave_one_rat_out_paired_momentum_diffusion_margin_summary,
@@ -81,6 +82,7 @@ def test_all_session_model_evidence_workflow_exports_expected_outputs():
     assert "exact_trajectory_nontrajectory_margin_summary.csv" in workflow
     assert "exact_trajectory_nontrajectory_threshold_sensitivity.csv" in workflow
     assert "session_exact_trajectory_nontrajectory_threshold_sensitivity.csv" in workflow
+    assert "leave_one_rat_out_exact_trajectory_nontrajectory_threshold_sensitivity.csv" in workflow
     assert "rat_bootstrap_exact_trajectory_nontrajectory_threshold_sensitivity.csv" in workflow
     assert "exact_trajectory_nontrajectory_gate_summary.csv" in workflow
     assert "required_full_core_model_coverage.csv" in workflow
@@ -709,6 +711,14 @@ def test_all_session_exact_trajectory_nontrajectory_margin_tables():
     assert session_summary["session"].tolist() == ["Rat1/Open1", "Rat1/Open2", "Rat2/Open1"]
     assert session_summary["trajectory_confident_claims"].tolist() == [1, 0, 0]
 
+    leave_one = leave_one_rat_out_exact_trajectory_nontrajectory_threshold_sensitivity(
+        frame,
+        thresholds=(2.0,),
+    )
+    assert leave_one["held_out_rat"].tolist() == ["Rat1", "Rat2"]
+    assert leave_one["trajectory_confident_claims"].tolist() == [0, 1]
+    assert leave_one["nontrajectory_confident_claims"].tolist() == [1, 0]
+
     bootstrap = rat_bootstrap_exact_trajectory_nontrajectory_threshold_sensitivity(
         frame,
         thresholds=(2.0,),
@@ -737,6 +747,10 @@ def test_all_session_exact_trajectory_nontrajectory_gate_summary_reports_family_
     assert bool(summary.loc["no_confident_nontrajectory_claims", "passed"])
     assert bool(summary.loc["all_sessions_have_trajectory_family_claims", "passed"])
     assert bool(summary.loc["all_sessions_have_no_nontrajectory_claims", "passed"])
+    assert bool(summary.loc["leave_one_rat_out_family_claim_majority", "passed"])
+    assert bool(summary.loc["leave_one_rat_out_no_nontrajectory_claims", "passed"])
+    assert bool(summary.loc["leave_one_rat_out_family_mean_delta_positive", "passed"])
+    assert bool(summary.loc["leave_one_rat_out_family_median_delta_positive", "passed"])
     assert bool(summary.loc["rat_bootstrap_family_claim_fraction_ci_majority", "passed"])
     assert bool(summary.loc["rat_bootstrap_family_mean_delta_ci_positive", "passed"])
     assert bool(summary.loc["rat_bootstrap_family_median_delta_ci_positive", "passed"])
@@ -761,6 +775,56 @@ def test_all_session_exact_trajectory_nontrajectory_gate_summary_rejects_incompl
     summary = exact_trajectory_nontrajectory_gate_summary(pd.DataFrame(rows), n_bootstrap=50).set_index("gate")
 
     assert not bool(summary.loc["complete_family_margin_events_present", "passed"])
+    assert not bool(summary.loc["overall", "passed"])
+
+
+def test_all_session_exact_trajectory_nontrajectory_gate_summary_rejects_single_rat_dominance():
+    rows: list[dict[str, object]] = []
+    for event_index in range(30):
+        rows.extend(
+            [
+                _paired_score_row("Rat1/Open1", event_index, "sorted-spike-state-space-stationary", -3.0),
+                _paired_score_row("Rat1/Open1", event_index, "sorted-spike-state-space-diffusion", 0.0),
+                _paired_score_row("Rat1/Open1", event_index, "sorted-spike-state-space-fragmented", -2.0),
+                _paired_score_row("Rat1/Open1", event_index, "sorted-spike-state-space-first-order-imm", -1.0),
+                _paired_score_row(
+                    "Rat1/Open1",
+                    event_index,
+                    "sorted-spike-state-space-momentum-exact-sparse",
+                    8.0,
+                ),
+            ]
+        )
+    for rat in range(2, 5):
+        for event_index in range(3):
+            rows.extend(
+                [
+                    _paired_score_row(f"Rat{rat}/Open1", event_index, "sorted-spike-state-space-stationary", 0.0),
+                    _paired_score_row(f"Rat{rat}/Open1", event_index, "sorted-spike-state-space-diffusion", 1.0),
+                    _paired_score_row(f"Rat{rat}/Open1", event_index, "sorted-spike-state-space-fragmented", 2.0),
+                    _paired_score_row(
+                        f"Rat{rat}/Open1",
+                        event_index,
+                        "sorted-spike-state-space-first-order-imm",
+                        3.0,
+                    ),
+                    _paired_score_row(
+                        f"Rat{rat}/Open1",
+                        event_index,
+                        "sorted-spike-state-space-momentum-exact-sparse",
+                        4.0,
+                    ),
+                ]
+            )
+
+    summary = exact_trajectory_nontrajectory_gate_summary(
+        pd.DataFrame(rows),
+        n_bootstrap=50,
+        random_seed=7,
+    ).set_index("gate")
+
+    assert bool(summary.loc["trajectory_family_confident_claim_majority", "passed"])
+    assert not bool(summary.loc["leave_one_rat_out_family_claim_majority", "passed"])
     assert not bool(summary.loc["overall", "passed"])
 
 

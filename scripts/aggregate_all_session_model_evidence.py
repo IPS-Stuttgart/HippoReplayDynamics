@@ -26,6 +26,7 @@ DEFAULT_PAPER_MIN_SESSIONS = 8
 DEFAULT_PAPER_MIN_PAIRED_EVENTS_PER_SESSION = 5
 DEFAULT_PAPER_MIN_RAW_WIN_FRACTION = 0.5
 DEFAULT_PAPER_MIN_CONFIDENT_CLAIM_FRACTION = 0.5
+DEFAULT_PAPER_MIN_FULL_CORE_EXACT_MODELS = 5
 
 
 def _load_score_files(shard_glob: str) -> list[Path]:
@@ -494,6 +495,7 @@ def paper_readiness_gate_summary(
     min_paired_events_per_session: int = DEFAULT_PAPER_MIN_PAIRED_EVENTS_PER_SESSION,
     min_raw_win_fraction: float = DEFAULT_PAPER_MIN_RAW_WIN_FRACTION,
     min_confident_claim_fraction: float = DEFAULT_PAPER_MIN_CONFIDENT_CLAIM_FRACTION,
+    min_full_core_exact_models: int = DEFAULT_PAPER_MIN_FULL_CORE_EXACT_MODELS,
 ) -> pd.DataFrame:
     """Return explicit pass/fail gates for the calibrated momentum evidence."""
 
@@ -644,6 +646,12 @@ def paper_readiness_gate_summary(
     core_margins = exact_sparse_momentum_core_margins(df, margin_threshold=margin_threshold)
     core_summary = exact_sparse_momentum_core_margin_summary(core_margins)
     if core_summary.empty:
+        add(
+            "full_core_min_exact_models_compared",
+            False,
+            0,
+            f"min exact_models_compared >= {int(min_full_core_exact_models)}",
+        )
         add("full_core_exact_sparse_claims_present", False, 0, "positive_confident_core_claims > 0")
         add(
             "full_core_exact_sparse_best_majority",
@@ -659,6 +667,13 @@ def paper_readiness_gate_summary(
         )
     else:
         core = core_summary.iloc[0]
+        min_core_models = int(core_margins["exact_models_compared"].min()) if not core_margins.empty else 0
+        add(
+            "full_core_min_exact_models_compared",
+            min_core_models >= int(min_full_core_exact_models),
+            min_core_models,
+            f"min exact_models_compared >= {int(min_full_core_exact_models)}",
+        )
         add(
             "full_core_exact_sparse_claims_present",
             int(core["positive_confident_core_claims"]) > 0,

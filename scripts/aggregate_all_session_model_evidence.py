@@ -24,6 +24,8 @@ DEFAULT_RAT_BOOTSTRAP_RANDOM_SEED = 1
 DEFAULT_PAPER_MIN_RATS = 4
 DEFAULT_PAPER_MIN_SESSIONS = 8
 DEFAULT_PAPER_MIN_PAIRED_EVENTS_PER_SESSION = 5
+DEFAULT_PAPER_MIN_RAW_WIN_FRACTION = 0.5
+DEFAULT_PAPER_MIN_CONFIDENT_CLAIM_FRACTION = 0.5
 
 
 def _load_score_files(shard_glob: str) -> list[Path]:
@@ -490,6 +492,8 @@ def paper_readiness_gate_summary(
     min_rats: int = DEFAULT_PAPER_MIN_RATS,
     min_sessions: int = DEFAULT_PAPER_MIN_SESSIONS,
     min_paired_events_per_session: int = DEFAULT_PAPER_MIN_PAIRED_EVENTS_PER_SESSION,
+    min_raw_win_fraction: float = DEFAULT_PAPER_MIN_RAW_WIN_FRACTION,
+    min_confident_claim_fraction: float = DEFAULT_PAPER_MIN_CONFIDENT_CLAIM_FRACTION,
 ) -> pd.DataFrame:
     """Return explicit pass/fail gates for the calibrated momentum evidence."""
 
@@ -551,6 +555,19 @@ def paper_readiness_gate_summary(
         int(paired["positive_model_claims"]) > 0,
         int(paired["positive_model_claims"]),
         "positive_model_claims > 0",
+        f"margin_threshold={float(margin_threshold):g}",
+    )
+    add(
+        "paired_raw_momentum_win_majority",
+        float(paired["positive_raw_win_fraction"]) > float(min_raw_win_fraction),
+        f"{float(paired['positive_raw_win_fraction']):.6g}",
+        f"positive_raw_win_fraction > {float(min_raw_win_fraction):g}",
+    )
+    add(
+        "paired_confident_momentum_claim_majority",
+        float(paired["positive_claim_fraction"]) > float(min_confident_claim_fraction),
+        f"{float(paired['positive_claim_fraction']):.6g}",
+        f"positive_claim_fraction > {float(min_confident_claim_fraction):g}",
         f"margin_threshold={float(margin_threshold):g}",
     )
 

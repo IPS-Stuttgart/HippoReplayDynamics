@@ -43,17 +43,23 @@ def main() -> int:
     parser.add_argument("--state-space-stationary-sigma-cm", type=float, default=2.0)
     parser.add_argument("--state-space-diffusion-sigma-cm-sqrt-s", type=float, default=85.0)
     parser.add_argument("--state-space-max-step-sigma", type=float, default=4.0)
+    parser.add_argument("--state-space-valid-occupancy-threshold-s", type=float, default=0.0)
     parser.add_argument("--state-space-imm-mode-stickiness", type=float, default=0.95)
     parser.add_argument("--state-space-momentum-sigma-cm-sqrt-s", type=float, default=85.0)
     parser.add_argument("--state-space-momentum-initial-sigma-cm-sqrt-s", type=float, default=85.0)
     parser.add_argument("--state-space-momentum-velocity-decay", type=float, default=0.95)
     parser.add_argument("--state-space-momentum-candidate-top-k", type=int, default=128)
+    parser.add_argument("--state-space-momentum-predicted-candidate-top-k", type=int, default=8)
+    parser.add_argument("--state-space-momentum-candidate-source", default="emission")
     parser.add_argument("--clusterless-mark-smoothing-sigma-bins", type=float, default=1.0)
     parser.add_argument("--clusterless-mark-prior-count", type=float, default=1.0)
     parser.add_argument("--clusterless-mark-variance-floor", type=float, default=1.0)
     parser.add_argument("--clusterless-rate-floor-hz", type=float, default=1e-4)
+    parser.add_argument("--clusterless-mark-likelihood", default="local-kde")
     parser.add_argument("--time-bin-s", type=float, default=0.003)
     parser.add_argument("--spike-rate-scale", type=float, default=1.0)
+    parser.add_argument("--emission-likelihood-temperature", type=float, default=1.0)
+    parser.add_argument("--emission-negative-binomial-overdispersion", type=float, default=0.0)
     parser.add_argument("--bin-size-cm", type=float, default=6.0)
     parser.add_argument("--smoothing-sigma-bins", type=float, default=2.0)
     parser.add_argument("--min-speed-cm-s", type=float, default=5.0)
@@ -76,7 +82,12 @@ def main() -> int:
         ),
     )
     models = _models(args)
-    emissions_cfg = EmissionConfig(time_bin_s=args.time_bin_s, spike_rate_scale=args.spike_rate_scale)
+    emissions_cfg = EmissionConfig(
+        time_bin_s=args.time_bin_s,
+        spike_rate_scale=args.spike_rate_scale,
+        likelihood_temperature=args.emission_likelihood_temperature,
+        negative_binomial_overdispersion=args.emission_negative_binomial_overdispersion,
+    )
     rows = []
     for event_id in event_ids:
         emissions = build_emissions(event_session, encoding, int(event_id), emissions_cfg)

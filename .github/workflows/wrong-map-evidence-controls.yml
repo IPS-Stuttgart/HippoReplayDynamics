@@ -20,6 +20,14 @@ on:
         description: "Maximum selected events per event session; empty means no cap"
         required: false
         default: ""
+      real_evidence_run_id:
+        description: "Optional real-map model-evidence run ID to compare against wrong-map controls"
+        required: false
+        default: ""
+      real_evidence_artifact_name:
+        description: "Artifact name from the real-map run; required when real_evidence_run_id is set"
+        required: false
+        default: ""
       models:
         description: "Space-separated models"
         required: true
@@ -64,18 +72,6 @@ on:
         description: "State-space momentum velocity decay"
         required: true
         default: "0.93"
-      clusterless_mark_variance_floor:
-        description: "Clusterless Gaussian mark variance floor"
-        required: true
-        default: "1.0"
-      clusterless_rate_floor_hz:
-        description: "Clusterless spike-intensity rate floor in Hz"
-        required: true
-        default: "0.0001"
-      clusterless_mark_likelihood:
-        description: "Clusterless mark likelihood: local-kde or diagonal-gaussian"
-        required: true
-        default: "local-kde"
       time_bin_s:
         description: "Ripple decoding time-bin width in seconds"
         required: true
@@ -117,6 +113,8 @@ env:
   SESSION_MAP_PAIRS: ${{ inputs.session_map_pairs }}
   EVENTS: ${{ inputs.events }}
   MAX_EVENTS: ${{ inputs.max_events }}
+  REAL_EVIDENCE_RUN_ID: ${{ inputs.real_evidence_run_id }}
+  REAL_EVIDENCE_ARTIFACT_NAME: ${{ inputs.real_evidence_artifact_name }}
   MODELS: ${{ inputs.models }}
   EVENT_SHARD_COUNT: ${{ inputs.event_shard_count }}
   CANDIDATE_TOP_K: ${{ inputs.candidate_top_k }}
@@ -133,9 +131,9 @@ env:
   STATE_SPACE_MOMENTUM_CANDIDATE_SOURCE: "emission"
   CLUSTERLESS_MARK_SMOOTHING_SIGMA_BINS: "1.0"
   CLUSTERLESS_MARK_PRIOR_COUNT: "1.0"
-  CLUSTERLESS_MARK_VARIANCE_FLOOR: ${{ inputs.clusterless_mark_variance_floor }}
-  CLUSTERLESS_RATE_FLOOR_HZ: ${{ inputs.clusterless_rate_floor_hz }}
-  CLUSTERLESS_MARK_LIKELIHOOD: ${{ inputs.clusterless_mark_likelihood }}
+  CLUSTERLESS_MARK_VARIANCE_FLOOR: "1.0"
+  CLUSTERLESS_RATE_FLOOR_HZ: "0.0001"
+  CLUSTERLESS_MARK_LIKELIHOOD: "local-kde"
   TIME_BIN_S: ${{ inputs.time_bin_s }}
   SPIKE_RATE_SCALE: ${{ inputs.spike_rate_scale }}
   EMISSION_LIKELIHOOD_TEMPERATURE: ${{ inputs.emission_likelihood_temperature }}
@@ -391,6 +389,16 @@ jobs:
           pattern: wrong-map-evidence-control-shard-${{ github.run_id }}-*
           path: artifacts/wrong-map-evidence-control-shards
 
+      - name: Download real-map reference artifact
+        if: ${{ inputs.real_evidence_run_id != '' }}
+        uses: actions/download-artifact@v7
+        with:
+          run-id: ${{ inputs.real_evidence_run_id }}
+          name: ${{ inputs.real_evidence_artifact_name }}
+          path: artifacts/real-map-evidence
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+
       - name: Aggregate wrong-map evidence controls
         env:
           EXPECTED_EVENTS: ${{ needs.plan-session-event-shards.outputs.event_count }}
@@ -450,6 +458,32 @@ jobs:
           print("Wrong-map best-model counts:")
           print(best.to_string(index=False))
           PY
+
+      - name: Compare wrong-map evidence against real-map reference
+        if: ${{ inputs.real_evidence_run_id != '' }}
+        run: |
+          set -euo pipefail
+          if [ -z "${REAL_EVIDENCE_ARTIFACT_NAME}" ]; then
+            echo "real_evidence_artifact_name is required when real_evidence_run_id is set" >&2
+            exit 1
+          fi
+          real_csv="$(find artifacts/real-map-evidence -name all_sessions_event_model_evidence.csv -print -quit)"
+          if [ -z "${real_csv}" ]; then
+            real_csv="$(find artifacts/real-map-evidence -name event_model_evidence.csv -print -quit)"
+          fi
+          if [ -z "${real_csv}" ]; then
+            echo "Could not find real-map event evidence CSV in downloaded artifact" >&2
+            find artifacts/real-map-evidence -maxdepth 3 -type f | sort >&2 || true
+            exit 1
+          fi
+          python scripts/compare_wrong_map_evidence_controls.py \
+            --real-event-model-evidence "${real_csv}" \
+            --wrong-map-event-model-evidence results/wrong-map-evidence-controls/all_sessions_wrong_map_event_model_evidence.csv \
+            --margin-threshold 5.5 \
+            --output results/wrong-map-evidence-controls
+          test -s results/wrong-map-evidence-controls/wrong_map_model_evidence_attenuation.csv
+          test -s results/wrong-map-evidence-controls/wrong_map_family_evidence_attenuation_summary.csv
+          test -s results/wrong-map-evidence-controls/wrong_map_control_gate_summary.csv
 
       - name: Upload wrong-map evidence control results
         uses: actions/upload-artifact@v7

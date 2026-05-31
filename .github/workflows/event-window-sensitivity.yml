@@ -1,0 +1,354 @@
+---
+name: Event-window sensitivity controls
+
+on:
+  workflow_dispatch:
+    inputs:
+      dataset_root:
+        description: "Dataset path after download or cache restore"
+        required: true
+        default: "data/DataSetFromPfeifferFoster"
+      sessions:
+        description: "Space- or comma-separated sessions"
+        required: true
+        default: "Rat1/Open1 Rat1/Open2 Rat2/Open1 Rat2/Open2 Rat3/Open1 Rat3/Open2 Rat4/Open1 Rat4/Open2"
+      events:
+        description: "Event IDs/ranges, all, run, or run:0-25"
+        required: true
+        default: "run"
+      max_events:
+        description: "Maximum selected events per session; empty means no cap"
+        required: false
+        default: "10"
+      models:
+        description: "Space-separated models"
+        required: true
+        default: "sorted-spike-state-space-stationary sorted-spike-state-space-diffusion sorted-spike-state-space-fragmented sorted-spike-state-space-first-order-imm sorted-spike-state-space-momentum-exact-sparse sorted-spike-state-space-momentum sorted-spike-state-space-imm"
+      event_shard_count:
+        description: "Target event shards per session"
+        required: true
+        default: "16"
+      window_variant_specs:
+        description: "Named replay-window variants as NAME:PRE_PAD_S:POST_PAD_S"
+        required: true
+        default: "core:0.000:0.000 contracted:-0.004:-0.004 expanded:0.008:0.008 shifted_pre:0.050:-0.050 shifted_post:-0.050:0.050"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: event-window-sensitivity-${{ github.repository }}-${{ inputs.sessions }}-${{ inputs.events }}-${{ inputs.max_events }}-${{ inputs.window_variant_specs }}-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  DATASET_ROOT: ${{ inputs.dataset_root }}
+  SESSIONS: ${{ inputs.sessions }}
+  EVENTS: ${{ inputs.events }}
+  MAX_EVENTS: ${{ inputs.max_events }}
+  MODELS: ${{ inputs.models }}
+  EVENT_SHARD_COUNT: ${{ inputs.event_shard_count }}
+  WINDOW_VARIANT_SPECS: ${{ inputs.window_variant_specs }}
+  CANDIDATE_TOP_K: "64"
+  STATE_SPACE_STATIONARY_SIGMA_CM: "2.0"
+  STATE_SPACE_DIFFUSION_SIGMA_CM_SQRT_S: "60.0"
+  STATE_SPACE_MAX_STEP_SIGMA: "3.0"
+  STATE_SPACE_VALID_OCCUPANCY_THRESHOLD_S: "0.0"
+  STATE_SPACE_IMM_MODE_STICKINESS: "0.95"
+  STATE_SPACE_IMM_SWITCH_TAU_S: "0.060"
+  STATE_SPACE_MOMENTUM_SIGMA_CM_SQRT_S: "50.0"
+  STATE_SPACE_MOMENTUM_INITIAL_SIGMA_CM_SQRT_S: "45.0"
+  STATE_SPACE_MOMENTUM_VELOCITY_DECAY: "0.93"
+  STATE_SPACE_MOMENTUM_CANDIDATE_TOP_K: "128"
+  STATE_SPACE_MOMENTUM_PREDICTED_CANDIDATE_TOP_K: "16"
+  STATE_SPACE_MOMENTUM_CANDIDATE_SOURCE: "emission"
+  CLUSTERLESS_MARK_SMOOTHING_SIGMA_BINS: "1.0"
+  CLUSTERLESS_MARK_PRIOR_COUNT: "1.0"
+  CLUSTERLESS_MARK_VARIANCE_FLOOR: "1.0"
+  CLUSTERLESS_RATE_FLOOR_HZ: "0.0001"
+  CLUSTERLESS_MARK_LIKELIHOOD: "local-kde"
+  CLUSTERLESS_MARK_KDE_MAX_NEIGHBORS: "256"
+  TIME_BIN_S: "0.004"
+  SPIKE_RATE_SCALE: "2.0"
+  EMISSION_LIKELIHOOD_TEMPERATURE: "0.300"
+  EMISSION_NEGATIVE_BINOMIAL_OVERDISPERSION: "0.0"
+  BIN_SIZE_CM: "6.0"
+  SMOOTHING_SIGMA_BINS: "2.0"
+  MIN_SPEED_CM_S: "5.0"
+  WINDOW_MIN_DURATION_S: "0.004"
+  LOCAL_CACHE_ROOT: ${{ vars.PFEIFFERFOSTER_LOCAL_CACHE_ROOT }}
+  OMP_NUM_THREADS: "1"
+  OPENBLAS_NUM_THREADS: "1"
+  MKL_NUM_THREADS: "1"
+
+jobs:
+  plan-session-event-shards:
+    name: Plan event-window shards
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    outputs:
+      event_matrix: ${{ steps.plan.outputs.event_matrix }}
+      event_count: ${{ steps.plan.outputs.event_count }}
+      session_count: ${{ steps.plan.outputs.session_count }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Install package
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e .
+
+      - name: Ensure Pfeiffer-Foster dataset
+        uses: ./.github/actions/ensure-pfeiffer-foster-dataset
+        with:
+          dataset-root: ${{ env.DATASET_ROOT }}
+          session: Rat1/Open1
+          cache-key: hipporeplayimm-dataset-${{ runner.os }}-rclone-v1
+          local-cache-root: ${{ env.LOCAL_CACHE_ROOT }}
+          webdav-url: ${{ secrets.PFEIFFERFOSTER_WEBDAV_URL }}
+          webdav-key: ${{ secrets.PFEIFFERFOSTER_DATA_KEY }}
+          webdav-password: ${{ secrets.PFEIFFERFOSTER_DATA_PASSWORD }}
+
+      - name: Plan session/event shards
+        id: plan
+        run: |
+          set -euo pipefail
+          mkdir -p results/event-window-sensitivity-plan
+          python - <<'PY'
+          import json
+          import os
+          import re
+          import subprocess
+          from pathlib import Path
+
+          sessions = [s for s in re.split(r"[\s,]+", os.environ["SESSIONS"].strip()) if s]
+          if not sessions:
+              raise SystemExit("No sessions selected")
+          output_dir = Path("results/event-window-sensitivity-plan")
+          matrix = []
+          total_events = 0
+          for session in sessions:
+              safe_session = session.replace("/", "_").replace("\\", "_")
+              plan_path = output_dir / f"plan_{safe_session}.json"
+              cmd = [
+                  "python", "scripts/plan_model_evidence_event_shards.py",
+                  "--dataset-root", os.environ["DATASET_ROOT"],
+                  "--session", session,
+                  "--events", os.environ["EVENTS"],
+                  "--event-shard-count", os.environ["EVENT_SHARD_COUNT"],
+                  "--output", str(plan_path),
+              ]
+              if os.environ.get("MAX_EVENTS"):
+                  cmd.extend(["--max-events", os.environ["MAX_EVENTS"]])
+              subprocess.run(cmd, check=True)
+              plan = json.loads(plan_path.read_text(encoding="utf-8"))
+              total_events += int(plan["event_count"])
+              for shard in plan["event_matrix"]:
+                  shard = dict(shard)
+                  shard["session"] = session
+                  shard["session_slug"] = safe_session
+                  shard["global_shard_index"] = len(matrix)
+                  matrix.append(shard)
+          if len(matrix) > 256:
+              raise SystemExit(f"Session/event matrix has {len(matrix)} jobs, exceeding GitHub Actions' 256-job matrix limit")
+          all_plan = {
+              "sessions": sessions,
+              "events": os.environ["EVENTS"],
+              "max_events": os.environ.get("MAX_EVENTS") or None,
+              "window_variant_specs": os.environ["WINDOW_VARIANT_SPECS"],
+              "session_count": len(sessions),
+              "event_count": total_events,
+              "event_matrix": matrix,
+          }
+          (output_dir / "event_window_sensitivity_plan.json").write_text(json.dumps(all_plan, indent=2) + "\n", encoding="utf-8")
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+              output.write(f"event_matrix={json.dumps(matrix, separators=(',', ':'))}\n")
+              output.write(f"event_count={total_events}\n")
+              output.write(f"session_count={len(sessions)}\n")
+          print(f"Planned {total_events} events across {len(sessions)} sessions and {len(matrix)} shards.")
+          PY
+
+      - name: Upload event-window plan
+        uses: actions/upload-artifact@v7
+        with:
+          name: event-window-sensitivity-plan-${{ github.run_id }}
+          path: results/event-window-sensitivity-plan/
+          if-no-files-found: error
+
+  event-window-evidence-shard:
+    name: Event-window ${{ matrix.event.session }} shard ${{ matrix.event.event_shard_index }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    needs: plan-session-event-shards
+    strategy:
+      fail-fast: false
+      max-parallel: 8
+      matrix:
+        event: ${{ fromJson(needs.plan-session-event-shards.outputs.event_matrix) }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Install package
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e .
+
+      - name: Ensure Pfeiffer-Foster dataset
+        uses: ./.github/actions/ensure-pfeiffer-foster-dataset
+        with:
+          dataset-root: ${{ env.DATASET_ROOT }}
+          session: ${{ matrix.event.session }}
+          cache-key: hipporeplayimm-dataset-${{ runner.os }}-rclone-v1
+          local-cache-root: ${{ env.LOCAL_CACHE_ROOT }}
+          webdav-url: ${{ secrets.PFEIFFERFOSTER_WEBDAV_URL }}
+          webdav-key: ${{ secrets.PFEIFFERFOSTER_DATA_KEY }}
+          webdav-password: ${{ secrets.PFEIFFERFOSTER_DATA_PASSWORD }}
+
+      - name: Run event-window evidence shard
+        env:
+          SHARD_SESSION: ${{ matrix.event.session }}
+          SHARD_SESSION_SLUG: ${{ matrix.event.session_slug }}
+          EVENT_SHARD_INDEX: ${{ matrix.event.event_shard_index }}
+          GLOBAL_SHARD_INDEX: ${{ matrix.event.global_shard_index }}
+          SHARD_EVENTS: ${{ matrix.event.events_spec }}
+        run: |
+          set -euo pipefail
+          out_dir="results/event-window-${SHARD_SESSION_SLUG}-shard-${EVENT_SHARD_INDEX}"
+          python scripts/benchmark_model_evidence_improved.py \
+            --dataset-root "${DATASET_ROOT}" \
+            --session "${SHARD_SESSION}" \
+            --events "${SHARD_EVENTS}" \
+            --models "${MODELS}" \
+            --candidate-top-k "${CANDIDATE_TOP_K}" \
+            --state-space-stationary-sigma-cm "${STATE_SPACE_STATIONARY_SIGMA_CM}" \
+            --state-space-diffusion-sigma-cm-sqrt-s "${STATE_SPACE_DIFFUSION_SIGMA_CM_SQRT_S}" \
+            --state-space-max-step-sigma "${STATE_SPACE_MAX_STEP_SIGMA}" \
+            --state-space-valid-occupancy-threshold-s "${STATE_SPACE_VALID_OCCUPANCY_THRESHOLD_S}" \
+            --state-space-imm-mode-stickiness "${STATE_SPACE_IMM_MODE_STICKINESS}" \
+            --state-space-imm-switch-tau-s "${STATE_SPACE_IMM_SWITCH_TAU_S}" \
+            --state-space-momentum-sigma-cm-sqrt-s "${STATE_SPACE_MOMENTUM_SIGMA_CM_SQRT_S}" \
+            --state-space-momentum-initial-sigma-cm-sqrt-s "${STATE_SPACE_MOMENTUM_INITIAL_SIGMA_CM_SQRT_S}" \
+            --state-space-momentum-velocity-decay "${STATE_SPACE_MOMENTUM_VELOCITY_DECAY}" \
+            --state-space-momentum-candidate-top-k "${STATE_SPACE_MOMENTUM_CANDIDATE_TOP_K}" \
+            --state-space-momentum-predicted-candidate-top-k "${STATE_SPACE_MOMENTUM_PREDICTED_CANDIDATE_TOP_K}" \
+            --state-space-momentum-candidate-source "${STATE_SPACE_MOMENTUM_CANDIDATE_SOURCE}" \
+            --clusterless-mark-smoothing-sigma-bins "${CLUSTERLESS_MARK_SMOOTHING_SIGMA_BINS}" \
+            --clusterless-mark-prior-count "${CLUSTERLESS_MARK_PRIOR_COUNT}" \
+            --clusterless-mark-variance-floor "${CLUSTERLESS_MARK_VARIANCE_FLOOR}" \
+            --clusterless-rate-floor-hz "${CLUSTERLESS_RATE_FLOOR_HZ}" \
+            --clusterless-mark-likelihood "${CLUSTERLESS_MARK_LIKELIHOOD}" \
+            --clusterless-mark-kde-max-neighbors "${CLUSTERLESS_MARK_KDE_MAX_NEIGHBORS}" \
+            --time-bin-s "${TIME_BIN_S}" \
+            --spike-rate-scale "${SPIKE_RATE_SCALE}" \
+            --emission-likelihood-temperature "${EMISSION_LIKELIHOOD_TEMPERATURE}" \
+            --emission-negative-binomial-overdispersion "${EMISSION_NEGATIVE_BINOMIAL_OVERDISPERSION}" \
+            --bin-size-cm "${BIN_SIZE_CM}" \
+            --smoothing-sigma-bins "${SMOOTHING_SIGMA_BINS}" \
+            --min-speed-cm-s "${MIN_SPEED_CM_S}" \
+            --window-variant-specs "${WINDOW_VARIANT_SPECS}" \
+            --window-min-duration-s "${WINDOW_MIN_DURATION_S}" \
+            --output "${out_dir}" \
+            --continue-on-error
+
+      - name: Upload event-window evidence shard
+        uses: actions/upload-artifact@v7
+        with:
+          name: event-window-sensitivity-shard-${{ github.run_id }}-${{ matrix.event.global_shard_index }}
+          path: results/event-window-${{ matrix.event.session_slug }}-shard-${{ matrix.event.event_shard_index }}/
+          if-no-files-found: error
+
+  aggregate:
+    name: Aggregate event-window sensitivity
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    needs: [plan-session-event-shards, event-window-evidence-shard]
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Install package
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e .
+
+      - name: Download event-window evidence shards
+        uses: actions/download-artifact@v7
+        with:
+          pattern: event-window-sensitivity-shard-${{ github.run_id }}-*
+          path: artifacts/event-window-sensitivity-shards
+
+      - name: Aggregate event-window sensitivity
+        run: |
+          set -euo pipefail
+          python scripts/aggregate_event_window_sensitivity.py \
+            --shard-glob "artifacts/event-window-sensitivity-shards/**/event_model_evidence.csv" \
+            --output results/event-window-sensitivity \
+            --core-variant core \
+            --margin-threshold 5.5
+          for required_file in \
+            all_sessions_event_window_model_evidence.csv \
+            event_window_family_margin_decisions.csv \
+            event_window_family_margin_summary.csv \
+            session_event_window_family_margin_summary.csv \
+            event_window_model_summary.csv \
+            event_window_comparison_to_core.csv \
+            event_window_control_gate_summary.csv; do
+            test -s "results/event-window-sensitivity/${required_file}" || {
+              echo "Missing results/event-window-sensitivity/${required_file}" >&2
+              exit 1
+            }
+          done
+          python - <<'PY'
+          import pandas as pd
+
+          scores = pd.read_csv("results/event-window-sensitivity/all_sessions_event_window_model_evidence.csv")
+          if int((scores["status"] != "success").sum()) != 0:
+              raise SystemExit("Event-window sensitivity contains failed rows")
+          observed_events = int(scores[["session", "event_index"]].drop_duplicates().shape[0])
+          observed_variants = int(scores["event_window_variant"].nunique())
+          observed_models = int(scores["model"].nunique())
+          print(f"Validated {len(scores)} rows across {observed_events} events, {observed_variants} windows, and {observed_models} models.")
+          PY
+
+      - name: Show event-window sensitivity summary
+        run: |
+          python - <<'PY'
+          import pandas as pd
+
+          root = "results/event-window-sensitivity"
+          print("Event-window family-margin summary:")
+          print(pd.read_csv(f"{root}/event_window_family_margin_summary.csv").to_string(index=False))
+          print("\nEvent-window comparison to core:")
+          print(pd.read_csv(f"{root}/event_window_comparison_to_core.csv").to_string(index=False))
+          print("\nEvent-window control gates:")
+          print(pd.read_csv(f"{root}/event_window_control_gate_summary.csv").to_string(index=False))
+          PY
+
+      - name: Upload event-window sensitivity results
+        uses: actions/upload-artifact@v7
+        with:
+          name: event-window-sensitivity-${{ github.run_id }}
+          path: results/event-window-sensitivity/
+          if-no-files-found: error

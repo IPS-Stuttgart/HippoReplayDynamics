@@ -35,6 +35,7 @@ _CONSTANT_SETTING_COLUMNS = (
     "valid_state_max_step_sigma",
     "valid_state_grid_diagonal_neighbors",
     "valid_state_grid_stay_probability",
+    "window_variant_specs",
     "window_pre_pads_s",
     "window_post_pads_s",
     "window_min_duration_s",

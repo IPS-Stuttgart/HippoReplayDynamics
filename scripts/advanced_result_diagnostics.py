@@ -20,7 +20,14 @@ from hipporeplayimm.advanced_result_diagnostics import (
     paired_model_margin_decisions,
     paired_model_margin_summary,
     provenance_audit,
+    leave_one_rat_out_wrong_map_absolute_evidence_summary,
+    rat_bootstrap_wrong_map_absolute_evidence_summary,
+    rat_wrong_map_absolute_evidence_summary,
+    wrong_map_absolute_evidence_deltas,
+    wrong_map_absolute_evidence_summary,
     wrong_map_delta_summary,
+    wrong_map_family_margin_difference_in_differences,
+    wrong_map_family_margin_difference_in_differences_summary,
     write_dashboard,
 )
 
@@ -117,6 +124,39 @@ def main() -> int:
     if args.wrong_map_scores:
         wrong = pd.read_csv(args.wrong_map_scores)
         wrong_map_delta_summary(scores, wrong).to_csv(out / "wrong_map_delta_summary.csv", index=False)
+        wrong_map_deltas = wrong_map_absolute_evidence_deltas(scores, wrong)
+        wrong_map_deltas.to_csv(out / "wrong_map_absolute_evidence_deltas.csv", index=False)
+        wrong_map_absolute_evidence_summary(wrong_map_deltas).to_csv(
+            out / "wrong_map_absolute_evidence_summary.csv",
+            index=False,
+        )
+        wrong_map_absolute_evidence_summary(wrong_map_deltas, group_cols=("session",)).to_csv(
+            out / "session_wrong_map_absolute_evidence_summary.csv",
+            index=False,
+        )
+        rat_wrong_map_absolute_evidence_summary(wrong_map_deltas).to_csv(
+            out / "rat_wrong_map_absolute_evidence_summary.csv",
+            index=False,
+        )
+        leave_one_rat_out_wrong_map_absolute_evidence_summary(wrong_map_deltas).to_csv(
+            out / "leave_one_rat_out_wrong_map_absolute_evidence_summary.csv",
+            index=False,
+        )
+        rat_bootstrap_wrong_map_absolute_evidence_summary(
+            wrong_map_deltas,
+            n_bootstrap=args.bootstrap_samples,
+            random_seed=args.random_seed,
+        ).to_csv(out / "rat_bootstrap_wrong_map_absolute_evidence_summary.csv", index=False)
+        margin_did = wrong_map_family_margin_difference_in_differences(scores, wrong)
+        margin_did.to_csv(out / "wrong_map_family_margin_difference_in_differences.csv", index=False)
+        wrong_map_family_margin_difference_in_differences_summary(margin_did).to_csv(
+            out / "wrong_map_family_margin_difference_in_differences_summary.csv",
+            index=False,
+        )
+        wrong_map_family_margin_difference_in_differences_summary(margin_did, group_cols=("session",)).to_csv(
+            out / "session_wrong_map_family_margin_difference_in_differences_summary.csv",
+            index=False,
+        )
 
     if args.common_support_scores:
         common = pd.read_csv(args.common_support_scores)

@@ -30,6 +30,27 @@ EVIDENCE_MARGIN_CATEGORIES: tuple[tuple[str, float], ...] = (
     ("decisive", np.inf),
 )
 
+DEFAULT_WRONG_MAP_EXACT_CORE_MODELS: tuple[str, ...] = (
+    "sorted-spike-state-space-stationary",
+    "sorted-spike-state-space-diffusion",
+    "sorted-spike-state-space-fragmented",
+    "sorted-spike-state-space-first-order-imm",
+    "sorted-spike-state-space-momentum-exact-sparse",
+)
+DEFAULT_WRONG_MAP_EXACT_TRAJECTORY_MODELS: tuple[str, ...] = (
+    "sorted-spike-state-space-diffusion",
+    "sorted-spike-state-space-fragmented",
+    "sorted-spike-state-space-first-order-imm",
+    "sorted-spike-state-space-momentum-exact-sparse",
+)
+DEFAULT_WRONG_MAP_FIXED_MODELS: tuple[str, ...] = (
+    "sorted-spike-state-space-first-order-imm",
+    "sorted-spike-state-space-momentum-exact-sparse",
+    "sorted-spike-state-space-diffusion",
+    "sorted-spike-state-space-fragmented",
+    "sorted-spike-state-space-stationary",
+)
+
 
 @dataclass(frozen=True)
 class ProvenanceRecord:
@@ -490,6 +511,421 @@ def wrong_map_delta_summary(
         .rename(columns={"model": "wrong_map_best_model"})
     )
     return merged.merge(best_wrong, on=event_keys, how="left")
+
+
+def wrong_map_absolute_evidence_deltas(
+    current_map_scores: pd.DataFrame,
+    wrong_map_scores: pd.DataFrame,
+    *,
+    group_cols: Sequence[str] = ("session", "event_index"),
+    fixed_models: Sequence[str] = DEFAULT_WRONG_MAP_FIXED_MODELS,
+    exact_core_models: Sequence[str] = DEFAULT_WRONG_MAP_EXACT_CORE_MODELS,
+    exact_trajectory_models: Sequence[str] = DEFAULT_WRONG_MAP_EXACT_TRAJECTORY_MODELS,
+    evidence_col: str = "log_evidence",
+    model_col: str = "model",
+) -> pd.DataFrame:
+    """Return map-sensitivity deltas ``logZ(real map) - logZ(wrong map)``.
+
+    The wrong-map control's primary statistic is absolute map sensitivity, not
+    the within-map trajectory-minus-static margin.  This table reports fixed
+    exact model rows plus event-specific rows for the exact-core winner and the
+    exact-trajectory winner under the real map.
+    """
+
+    columns = [
+        *group_cols,
+        "statistic",
+        "statistic_type",
+        "selected_model",
+        "log_evidence_real_map",
+        "log_evidence_wrong_map",
+        "delta_map_log_evidence",
+        "map_session",
+    ]
+    left = _successful_rows(current_map_scores)
+    right = _successful_rows(wrong_map_scores)
+    if left.empty or right.empty:
+        return pd.DataFrame(columns=columns)
+    missing_left = [column for column in (*group_cols, model_col, evidence_col) if column not in left.columns]
+    missing_right = [column for column in (*group_cols, model_col, evidence_col) if column not in right.columns]
+    if missing_left:
+        raise KeyError(f"current_map_scores is missing required columns: {missing_left}")
+    if missing_right:
+        raise KeyError(f"wrong_map_scores is missing required columns: {missing_right}")
+
+    key_cols = [*group_cols, model_col]
+    left = left.dropna(subset=[evidence_col]).drop_duplicates(key_cols, keep="last")
+    right = right.dropna(subset=[evidence_col]).drop_duplicates(key_cols, keep="last")
+    matched = left[key_cols + [evidence_col]].merge(
+        right[key_cols + [evidence_col] + (["map_session"] if "map_session" in right.columns else [])],
+        on=key_cols,
+        how="inner",
+        suffixes=("_real_map", "_wrong_map"),
+    )
+    rows: list[dict[str, object]] = []
+    for _, row in matched[matched[model_col].isin(fixed_models)].iterrows():
+        rows.append(
+            _wrong_map_delta_row(
+                row,
+                group_cols=group_cols,
+                model_col=model_col,
+                evidence_col=evidence_col,
+                statistic=str(row[model_col]),
+                statistic_type="fixed_model",
+                selected_model=str(row[model_col]),
+            )
+        )
+
+    for key, group in matched.groupby(list(group_cols), sort=False):
+        key_tuple = key if isinstance(key, tuple) else (key,)
+        by_model = group.set_index(model_col)
+        for statistic, candidate_models in (
+            ("best_exact_core_model_real_map", exact_core_models),
+            ("best_exact_trajectory_model_real_map", exact_trajectory_models),
+        ):
+            available = [model for model in candidate_models if model in by_model.index]
+            if not available:
+                continue
+            selected = str(by_model.loc[available, f"{evidence_col}_real_map"].astype(float).idxmax())
+            selected_row = by_model.loc[selected].copy()
+            for column, value in zip(group_cols, key_tuple, strict=True):
+                selected_row[column] = value
+            selected_row[model_col] = selected
+            rows.append(
+                _wrong_map_delta_row(
+                    selected_row,
+                    group_cols=group_cols,
+                    model_col=model_col,
+                    evidence_col=evidence_col,
+                    statistic=statistic,
+                    statistic_type="real_map_selected_model",
+                    selected_model=selected,
+                )
+            )
+    return pd.DataFrame(rows, columns=columns)
+
+
+def wrong_map_absolute_evidence_summary(
+    deltas: pd.DataFrame,
+    *,
+    group_cols: Sequence[str] = (),
+) -> pd.DataFrame:
+    """Summarize positive map-sensitivity deltas."""
+
+    return _wrong_map_delta_summary(deltas, group_cols=group_cols)
+
+
+def rat_wrong_map_absolute_evidence_summary(deltas: pd.DataFrame) -> pd.DataFrame:
+    """Summarize map sensitivity by rat."""
+
+    if deltas.empty:
+        return _wrong_map_delta_summary(_with_rat(deltas), group_cols=("rat",))
+    return _wrong_map_delta_summary(_with_rat(deltas), group_cols=("rat",))
+
+
+def leave_one_rat_out_wrong_map_absolute_evidence_summary(deltas: pd.DataFrame) -> pd.DataFrame:
+    """Summarize map sensitivity after dropping each rat."""
+
+    columns = [
+        "held_out_rat",
+        "included_rats",
+        "statistic",
+        "events",
+        "positive_delta_events",
+        "positive_delta_fraction",
+        "mean_delta_map_log_evidence",
+        "median_delta_map_log_evidence",
+        "min_delta_map_log_evidence",
+        "max_delta_map_log_evidence",
+        "most_common_selected_model",
+    ]
+    if deltas.empty or "session" not in deltas.columns:
+        return pd.DataFrame(columns=columns)
+    frame = _with_rat(deltas)
+    rows: list[pd.DataFrame] = []
+    rats = sorted(frame["rat"].dropna().astype(str).unique())
+    for rat in rats:
+        retained = frame[frame["rat"].astype(str) != rat].copy()
+        summary = _wrong_map_delta_summary(retained, group_cols=())
+        if summary.empty:
+            continue
+        summary.insert(0, "included_rats", " ".join(sorted(retained["rat"].dropna().astype(str).unique())))
+        summary.insert(0, "held_out_rat", rat)
+        rows.append(summary)
+    if not rows:
+        return pd.DataFrame(columns=columns)
+    return pd.concat(rows, ignore_index=True)
+
+
+def rat_bootstrap_wrong_map_absolute_evidence_summary(
+    deltas: pd.DataFrame,
+    *,
+    n_bootstrap: int = 2000,
+    random_seed: int = 1,
+) -> pd.DataFrame:
+    """Rat-cluster bootstrap uncertainty for absolute map sensitivity."""
+
+    columns = [
+        "bootstrap_unit",
+        "bootstrap_replicates",
+        "random_seed",
+        "statistic",
+        "observed_events",
+        "observed_rats",
+        "observed_positive_delta_fraction",
+        "positive_delta_fraction_ci95_low",
+        "positive_delta_fraction_ci95_high",
+        "observed_mean_delta_map_log_evidence",
+        "mean_delta_ci95_low",
+        "mean_delta_ci95_high",
+        "probability_mean_delta_gt_0",
+        "observed_median_delta_map_log_evidence",
+        "median_delta_ci95_low",
+        "median_delta_ci95_high",
+        "probability_median_delta_gt_0",
+        "most_common_selected_model",
+    ]
+    if deltas.empty or "session" not in deltas.columns:
+        return pd.DataFrame(columns=columns)
+    frame = _with_rat(deltas)
+    rats = sorted(frame["rat"].dropna().astype(str).unique())
+    if not rats:
+        return pd.DataFrame(columns=columns)
+    rng = np.random.default_rng(int(random_seed))
+    rows: list[dict[str, object]] = []
+    for statistic, group in frame.groupby("statistic", sort=False):
+        observed = _wrong_map_delta_summary(group).iloc[0]
+        positive_fractions: list[float] = []
+        means: list[float] = []
+        medians: list[float] = []
+        by_rat = {rat: group[group["rat"].astype(str) == rat] for rat in rats}
+        for _ in range(int(n_bootstrap)):
+            sampled = rng.choice(rats, size=len(rats), replace=True)
+            sample = pd.concat([by_rat[rat] for rat in sampled], ignore_index=True)
+            values = sample["delta_map_log_evidence"].to_numpy(float)
+            positive_fractions.append(float(np.mean(values > 0.0)))
+            means.append(float(np.mean(values)))
+            medians.append(float(np.median(values)))
+        rows.append(
+            {
+                "bootstrap_unit": "rat",
+                "bootstrap_replicates": int(n_bootstrap),
+                "random_seed": int(random_seed),
+                "statistic": str(statistic),
+                "observed_events": int(observed["events"]),
+                "observed_rats": int(len(rats)),
+                "observed_positive_delta_fraction": float(observed["positive_delta_fraction"]),
+                "positive_delta_fraction_ci95_low": _quantile(positive_fractions, 0.025),
+                "positive_delta_fraction_ci95_high": _quantile(positive_fractions, 0.975),
+                "observed_mean_delta_map_log_evidence": float(observed["mean_delta_map_log_evidence"]),
+                "mean_delta_ci95_low": _quantile(means, 0.025),
+                "mean_delta_ci95_high": _quantile(means, 0.975),
+                "probability_mean_delta_gt_0": float(np.mean(np.asarray(means) > 0.0)),
+                "observed_median_delta_map_log_evidence": float(observed["median_delta_map_log_evidence"]),
+                "median_delta_ci95_low": _quantile(medians, 0.025),
+                "median_delta_ci95_high": _quantile(medians, 0.975),
+                "probability_median_delta_gt_0": float(np.mean(np.asarray(medians) > 0.0)),
+                "most_common_selected_model": str(observed["most_common_selected_model"]),
+            }
+        )
+    return pd.DataFrame(rows, columns=columns)
+
+
+def wrong_map_family_margin_difference_in_differences(
+    current_map_scores: pd.DataFrame,
+    wrong_map_scores: pd.DataFrame,
+    *,
+    group_cols: Sequence[str] = ("session", "event_index"),
+    exact_trajectory_models: Sequence[str] = DEFAULT_WRONG_MAP_EXACT_TRAJECTORY_MODELS,
+    nontrajectory_model: str = "sorted-spike-state-space-stationary",
+    evidence_col: str = "log_evidence",
+    model_col: str = "model",
+) -> pd.DataFrame:
+    """Compute a diagnostic difference-in-differences family margin.
+
+    This is intentionally diagnostic rather than the primary wrong-map gate:
+    a wrong map can penalize the stationary row more than trajectory rows, which
+    makes the within-map trajectory-minus-stationary margin larger under the
+    wrong map even when absolute evidence is lower.
+    """
+
+    left = _successful_rows(current_map_scores)
+    right = _successful_rows(wrong_map_scores)
+    columns = [
+        *group_cols,
+        "real_best_trajectory_model",
+        "wrong_best_trajectory_model",
+        "real_trajectory_minus_nontrajectory_log_evidence",
+        "wrong_trajectory_minus_nontrajectory_log_evidence",
+        "margin_difference_in_differences",
+    ]
+    if left.empty or right.empty:
+        return pd.DataFrame(columns=columns)
+    required = [*group_cols, model_col, evidence_col]
+    missing_left = [column for column in required if column not in left.columns]
+    missing_right = [column for column in required if column not in right.columns]
+    if missing_left:
+        raise KeyError(f"current_map_scores is missing required columns: {missing_left}")
+    if missing_right:
+        raise KeyError(f"wrong_map_scores is missing required columns: {missing_right}")
+
+    def margins(frame: pd.DataFrame, prefix: str) -> pd.DataFrame:
+        rows: list[dict[str, object]] = []
+        for key, group in frame.groupby(list(group_cols), sort=False):
+            key_tuple = key if isinstance(key, tuple) else (key,)
+            by_model = group.dropna(subset=[evidence_col]).drop_duplicates(model_col, keep="last").set_index(model_col)
+            if nontrajectory_model not in by_model.index:
+                continue
+            available = [model for model in exact_trajectory_models if model in by_model.index]
+            if not available:
+                continue
+            best_trajectory_model = str(by_model.loc[available, evidence_col].astype(float).idxmax())
+            margin = float(by_model.loc[best_trajectory_model, evidence_col]) - float(
+                by_model.loc[nontrajectory_model, evidence_col]
+            )
+            row = {column: value for column, value in zip(group_cols, key_tuple, strict=True)}
+            row[f"{prefix}_best_trajectory_model"] = best_trajectory_model
+            row[f"{prefix}_trajectory_minus_nontrajectory_log_evidence"] = margin
+            rows.append(row)
+        return pd.DataFrame(rows)
+
+    real = margins(left, "real")
+    wrong = margins(right, "wrong")
+    if real.empty or wrong.empty:
+        return pd.DataFrame(columns=columns)
+    merged = real.merge(wrong, on=list(group_cols), how="inner")
+    merged["margin_difference_in_differences"] = (
+        merged["real_trajectory_minus_nontrajectory_log_evidence"]
+        - merged["wrong_trajectory_minus_nontrajectory_log_evidence"]
+    )
+    return merged[columns]
+
+
+def wrong_map_family_margin_difference_in_differences_summary(
+    deltas: pd.DataFrame,
+    *,
+    group_cols: Sequence[str] = (),
+) -> pd.DataFrame:
+    """Summarize diagnostic family-margin difference-in-differences rows."""
+
+    if deltas.empty:
+        return pd.DataFrame(
+            columns=[
+                *group_cols,
+                "events",
+                "positive_difference_in_differences_events",
+                "positive_difference_in_differences_fraction",
+                "mean_difference_in_differences",
+                "median_difference_in_differences",
+                "min_difference_in_differences",
+                "max_difference_in_differences",
+            ]
+        )
+    rows: list[dict[str, object]] = []
+    grouped = [((), deltas)] if not group_cols else deltas.groupby(list(group_cols), sort=False)
+    for key, group in grouped:
+        key_tuple = key if isinstance(key, tuple) else (key,)
+        values = group["margin_difference_in_differences"].to_numpy(float)
+        row = {column: value for column, value in zip(group_cols, key_tuple, strict=True)}
+        row.update(
+            {
+                "events": int(values.size),
+                "positive_difference_in_differences_events": int(np.sum(values > 0.0)),
+                "positive_difference_in_differences_fraction": float(np.mean(values > 0.0)),
+                "mean_difference_in_differences": float(np.mean(values)),
+                "median_difference_in_differences": float(np.median(values)),
+                "min_difference_in_differences": float(np.min(values)),
+                "max_difference_in_differences": float(np.max(values)),
+            }
+        )
+        rows.append(row)
+    return pd.DataFrame(rows)
+
+
+def _wrong_map_delta_row(
+    row: pd.Series,
+    *,
+    group_cols: Sequence[str],
+    model_col: str,
+    evidence_col: str,
+    statistic: str,
+    statistic_type: str,
+    selected_model: str,
+) -> dict[str, object]:
+    real_value = float(row[f"{evidence_col}_real_map"])
+    wrong_value = float(row[f"{evidence_col}_wrong_map"])
+    return {
+        **{column: row[column] for column in group_cols},
+        "statistic": statistic,
+        "statistic_type": statistic_type,
+        "selected_model": selected_model or str(row[model_col]),
+        "log_evidence_real_map": real_value,
+        "log_evidence_wrong_map": wrong_value,
+        "delta_map_log_evidence": real_value - wrong_value,
+        "map_session": str(row["map_session"]) if "map_session" in row.index else "",
+    }
+
+
+def _wrong_map_delta_summary(
+    deltas: pd.DataFrame,
+    *,
+    group_cols: Sequence[str] = (),
+) -> pd.DataFrame:
+    columns = [
+        *group_cols,
+        "statistic",
+        "events",
+        "positive_delta_events",
+        "positive_delta_fraction",
+        "mean_delta_map_log_evidence",
+        "median_delta_map_log_evidence",
+        "min_delta_map_log_evidence",
+        "max_delta_map_log_evidence",
+        "most_common_selected_model",
+    ]
+    if deltas.empty:
+        return pd.DataFrame(columns=columns)
+    rows: list[dict[str, object]] = []
+    grouped = deltas.groupby([*group_cols, "statistic"], sort=False) if group_cols else deltas.groupby("statistic", sort=False)
+    for key, group in grouped:
+        key_tuple = key if isinstance(key, tuple) else (key,)
+        if group_cols:
+            *group_values, statistic = key_tuple
+        else:
+            group_values = []
+            statistic = key_tuple[0]
+        values = group["delta_map_log_evidence"].to_numpy(float)
+        selected = group["selected_model"].astype(str)
+        most_common = selected.mode().iloc[0] if not selected.empty else ""
+        row = {column: value for column, value in zip(group_cols, group_values, strict=True)}
+        row.update(
+            {
+                "statistic": str(statistic),
+                "events": int(values.size),
+                "positive_delta_events": int(np.sum(values > 0.0)),
+                "positive_delta_fraction": float(np.mean(values > 0.0)),
+                "mean_delta_map_log_evidence": float(np.mean(values)),
+                "median_delta_map_log_evidence": float(np.median(values)),
+                "min_delta_map_log_evidence": float(np.min(values)),
+                "max_delta_map_log_evidence": float(np.max(values)),
+                "most_common_selected_model": str(most_common),
+            }
+        )
+        rows.append(row)
+    return pd.DataFrame(rows, columns=columns)
+
+
+def _with_rat(frame: pd.DataFrame) -> pd.DataFrame:
+    out = frame.copy()
+    if "rat" not in out.columns:
+        out["rat"] = out["session"].map(rat_from_session) if "session" in out.columns else ""
+    return out
+
+
+def _quantile(values: Sequence[float], q: float) -> float:
+    if not values:
+        return float("nan")
+    return float(np.quantile(np.asarray(values, dtype=float), q))
 
 
 def place_field_quality_from_arrays(

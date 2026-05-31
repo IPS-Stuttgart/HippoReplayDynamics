@@ -17,8 +17,13 @@ from hipporeplayimm.advanced_result_diagnostics import (
     place_field_quality_from_arrays,
     select_paired_model_margin_threshold,
     posterior_predictive_count_checks,
+    rat_bootstrap_wrong_map_absolute_evidence_summary,
     stable_cell_ids,
+    wrong_map_absolute_evidence_deltas,
+    wrong_map_absolute_evidence_summary,
     wrong_map_delta_summary,
+    wrong_map_family_margin_difference_in_differences,
+    wrong_map_family_margin_difference_in_differences_summary,
 )
 
 
@@ -54,6 +59,59 @@ def test_wrong_map_delta_summary():
     wrong["log_evidence"] = 2.0
     out = wrong_map_delta_summary(current, wrong)
     assert float(out["delta_vs_wrong_environment_map"].iloc[0]) == 3.0
+
+
+def test_wrong_map_absolute_evidence_is_primary_map_control():
+    current = pd.DataFrame(
+        {
+            "session": ["Rat1/Open1"] * 4,
+            "event_index": [0, 0, 1, 1],
+            "model": [
+                "sorted-spike-state-space-stationary",
+                "sorted-spike-state-space-first-order-imm",
+                "sorted-spike-state-space-stationary",
+                "sorted-spike-state-space-first-order-imm",
+            ],
+            "log_evidence": [0.0, 10.0, 0.0, 8.0],
+            "status": ["success"] * 4,
+        }
+    )
+    wrong = pd.DataFrame(
+        {
+            "session": ["Rat1/Open1"] * 4,
+            "event_index": [0, 0, 1, 1],
+            "map_session": ["Rat1/Open2"] * 4,
+            "model": [
+                "sorted-spike-state-space-stationary",
+                "sorted-spike-state-space-first-order-imm",
+                "sorted-spike-state-space-stationary",
+                "sorted-spike-state-space-first-order-imm",
+            ],
+            # The wrong map has lower absolute evidence, but a larger
+            # trajectory-minus-stationary margin.
+            "log_evidence": [-100.0, -50.0, -80.0, -40.0],
+            "status": ["success"] * 4,
+        }
+    )
+
+    deltas = wrong_map_absolute_evidence_deltas(current, wrong)
+    summary = wrong_map_absolute_evidence_summary(deltas).set_index("statistic")
+    bootstrap = rat_bootstrap_wrong_map_absolute_evidence_summary(
+        deltas,
+        n_bootstrap=20,
+        random_seed=7,
+    ).set_index("statistic")
+    did = wrong_map_family_margin_difference_in_differences(current, wrong)
+    did_summary = wrong_map_family_margin_difference_in_differences_summary(did).iloc[0]
+
+    best = summary.loc["best_exact_trajectory_model_real_map"]
+    assert int(best["events"]) == 2
+    assert int(best["positive_delta_events"]) == 2
+    assert float(best["mean_delta_map_log_evidence"]) == 54.0
+    assert bootstrap.loc["best_exact_trajectory_model_real_map", "mean_delta_ci95_low"] > 0
+
+    assert did["margin_difference_in_differences"].tolist() == [-40.0, -32.0]
+    assert float(did_summary["mean_difference_in_differences"]) == -36.0
 
 
 def test_paired_model_margin_decisions_reject_weak_momentum_claims():

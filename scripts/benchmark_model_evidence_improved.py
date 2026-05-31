@@ -77,6 +77,7 @@ _TRAJECTORY_MODELS = {
     "imm",
     "sorted-spike-state-space-diffusion",
     "sorted-spike-state-space-fragmented",
+    "sorted-spike-state-space-first-order-imm",
     "sorted-spike-state-space-jump",
     "sorted-spike-state-space-momentum",
     "sorted-spike-state-space-momentum-reverse",
@@ -142,6 +143,65 @@ def _parse_float_sequence(value: str) -> tuple[float, ...]:
     if not items:
         raise ValueError("expected at least one floating-point value")
     return tuple(items)
+
+
+def _parse_window_variant_specs(value: str) -> tuple[tuple[str, float, float], ...]:
+    """Parse NAME:PRE_PAD_S:POST_PAD_S replay-window variants."""
+
+    variants: list[tuple[str, float, float]] = []
+    for raw in str(value).replace(",", " ").split():
+        text = raw.strip()
+        if not text:
+            continue
+        parts = text.split(":")
+        if len(parts) != 3:
+            raise ValueError(
+                "window variant specs must use NAME:PRE_PAD_S:POST_PAD_S entries"
+            )
+        name, pre_pad, post_pad = parts
+        if not name:
+            raise ValueError("window variant names must be non-empty")
+        variants.append((name, float(pre_pad), float(post_pad)))
+    if not variants:
+        raise ValueError("expected at least one window variant spec")
+    return tuple(variants)
+
+
+def _event_windows(args: argparse.Namespace, event) -> pd.DataFrame:
+    if args.window_variant_specs:
+        rows = []
+        for name, pre_pad, post_pad in _parse_window_variant_specs(args.window_variant_specs):
+            start = float(event.start) - float(pre_pad)
+            end = float(event.end) + float(post_pad)
+            duration = end - start
+            if duration >= float(args.window_min_duration_s):
+                rows.append(
+                    {
+                        "event_window_variant": name,
+                        "pre_pad_s": float(pre_pad),
+                        "post_pad_s": float(post_pad),
+                        "window_start_s": start,
+                        "window_end_s": end,
+                        "window_duration_s": duration,
+                    }
+                )
+        return pd.DataFrame(rows)
+
+    windows = candidate_event_windows(
+        event,
+        pre_pads_s=_parse_float_sequence(args.window_pre_pads_s),
+        post_pads_s=_parse_float_sequence(args.window_post_pads_s),
+        min_duration_s=args.window_min_duration_s,
+    )
+    if not windows.empty:
+        windows = windows.copy()
+        windows["event_window_variant"] = [
+            f"pre{pre_pad:+.3f}_post{post_pad:+.3f}"
+            for pre_pad, post_pad in zip(
+                windows["pre_pad_s"], windows["post_pad_s"], strict=True
+            )
+        ]
+    return windows
 
 
 def _optional_threshold(value: float) -> float | None:
@@ -296,6 +356,7 @@ def _models(args: argparse.Namespace, session, encoding=None) -> dict[str, objec
         "sorted-spike-state-space-stationary": state_space_model("stationary"),
         "sorted-spike-state-space-diffusion": state_space_model("diffusion"),
         "sorted-spike-state-space-fragmented": state_space_model("fragmented"),
+        "sorted-spike-state-space-first-order-imm": state_space_model("first-order-imm"),
         "sorted-spike-state-space-jump": state_space_model("jump"),
         "sorted-spike-state-space-momentum": forward_momentum,
         "sorted-spike-state-space-momentum-reverse": reverse_momentum,
@@ -401,12 +462,7 @@ def _score(args: argparse.Namespace) -> pd.DataFrame:
     rows: list[dict[str, object]] = []
 
     for event_id in event_ids:
-        windows = candidate_event_windows(
-            session.ripple(int(event_id)),
-            pre_pads_s=_parse_float_sequence(args.window_pre_pads_s),
-            post_pads_s=_parse_float_sequence(args.window_post_pads_s),
-            min_duration_s=args.window_min_duration_s,
-        )
+        windows = _event_windows(args, session.ripple(int(event_id)))
         for window_index, window in windows.reset_index(drop=True).iterrows():
             event_window = SimpleNamespace(
                 start=float(window["window_start_s"]),
@@ -416,6 +472,7 @@ def _score(args: argparse.Namespace) -> pd.DataFrame:
                 "window_index": int(window_index),
                 "window_pre_pad_s": float(window["pre_pad_s"]),
                 "window_post_pad_s": float(window["post_pad_s"]),
+                "event_window_variant": str(window["event_window_variant"]),
                 "window_start_s": float(window["window_start_s"]),
                 "window_end_s": float(window["window_end_s"]),
                 "window_duration_s": float(window["window_duration_s"]),
@@ -585,6 +642,7 @@ def _run_settings(args: argparse.Namespace) -> dict[str, object]:
         "valid_state_max_step_sigma": float(args.valid_state_max_step_sigma),
         "valid_state_grid_diagonal_neighbors": bool(args.valid_state_grid_diagonal_neighbors),
         "valid_state_grid_stay_probability": float(args.valid_state_grid_stay_probability),
+        "window_variant_specs": str(args.window_variant_specs),
         "window_pre_pads_s": str(args.window_pre_pads_s),
         "window_post_pads_s": str(args.window_post_pads_s),
         "window_min_duration_s": float(args.window_min_duration_s),
@@ -657,6 +715,14 @@ def main() -> int:
     parser.add_argument("--valid-state-max-step-sigma", type=float, default=4.0)
     parser.add_argument("--valid-state-grid-diagonal-neighbors", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--valid-state-grid-stay-probability", type=float, default=0.0)
+    parser.add_argument(
+        "--window-variant-specs",
+        default="",
+        help=(
+            "Optional named replay-window variants as "
+            "NAME:PRE_PAD_S:POST_PAD_S entries separated by spaces or commas."
+        ),
+    )
     parser.add_argument("--window-pre-pads-s", default="0.0")
     parser.add_argument("--window-post-pads-s", default="0.0")
     parser.add_argument("--window-min-duration-s", type=float, default=0.005)

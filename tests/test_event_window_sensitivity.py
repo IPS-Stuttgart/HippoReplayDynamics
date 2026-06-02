@@ -96,6 +96,14 @@ def test_event_window_sensitivity_workflow_runs_named_variants():
     assert "shifted_pre:0.050:-0.050" in workflow
     assert "scripts/benchmark_model_evidence_improved.py" in workflow
     assert "--window-variant-specs" in workflow
+    assert "timeout-minutes: 360" in workflow
+    assert (
+        "timeout 350m python scripts/benchmark_model_evidence_improved.py"
+        in workflow
+    )
+    assert "shard_status.csv" in workflow
+    assert "event_window_shard_status.csv" in workflow
+    assert "needs.plan-session-event-shards.result == 'success'" in workflow
     assert "scripts/aggregate_event_window_sensitivity.py" in workflow
     assert "event-window-sensitivity-${{ github.run_id }}" in workflow
 

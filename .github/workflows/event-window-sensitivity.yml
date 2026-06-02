@@ -185,7 +185,7 @@ jobs:
   event-window-evidence-shard:
     name: Event-window ${{ matrix.event.session }} shard ${{ matrix.event.event_shard_index }}
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    timeout-minutes: 360
     needs: plan-session-event-shards
     strategy:
       fail-fast: false
@@ -227,9 +227,14 @@ jobs:
           GLOBAL_SHARD_INDEX: ${{ matrix.event.global_shard_index }}
           SHARD_EVENTS: ${{ matrix.event.events_spec }}
         run: |
-          set -euo pipefail
+          set -uo pipefail
           out_dir="results/event-window-${SHARD_SESSION_SLUG}-shard-${EVENT_SHARD_INDEX}"
-          python scripts/benchmark_model_evidence_improved.py \
+          mkdir -p "${out_dir}"
+          status="success"
+          message="completed"
+          start_epoch="$(date +%s)"
+          set +e
+          timeout 350m python scripts/benchmark_model_evidence_improved.py \
             --dataset-root "${DATASET_ROOT}" \
             --session "${SHARD_SESSION}" \
             --events "${SHARD_EVENTS}" \
@@ -264,8 +269,48 @@ jobs:
             --window-min-duration-s "${WINDOW_MIN_DURATION_S}" \
             --output "${out_dir}" \
             --continue-on-error
+          exit_code=$?
+          set -e
+          elapsed_seconds="$(( $(date +%s) - start_epoch ))"
+          if [ "${exit_code}" -eq 124 ]; then
+            status="soft_timeout"
+            message="Shard stopped after the 350 minute soft timeout before the GitHub job timeout."
+          elif [ "${exit_code}" -ne 0 ]; then
+            status="failure"
+            message="Shard command exited with code ${exit_code}."
+          fi
+          export out_dir status exit_code elapsed_seconds message
+          python - <<'PY'
+          import csv
+          import json
+          import os
+          from pathlib import Path
+
+          out = Path(os.environ["out_dir"])
+          row = {
+              "global_shard_index": os.environ["GLOBAL_SHARD_INDEX"],
+              "session": os.environ["SHARD_SESSION"],
+              "session_slug": os.environ["SHARD_SESSION_SLUG"],
+              "event_shard_index": os.environ["EVENT_SHARD_INDEX"],
+              "events_spec": os.environ["SHARD_EVENTS"],
+              "status": os.environ["status"],
+              "exit_code": os.environ["exit_code"],
+              "elapsed_seconds": os.environ["elapsed_seconds"],
+              "message": os.environ["message"],
+              "event_model_evidence_present": str((out / "event_model_evidence.csv").exists()).lower(),
+          }
+          with (out / "shard_status.csv").open("w", encoding="utf-8", newline="") as handle:
+              writer = csv.DictWriter(handle, fieldnames=list(row))
+              writer.writeheader()
+              writer.writerow(row)
+          (out / "shard_status.json").write_text(json.dumps(row, indent=2) + "\n", encoding="utf-8")
+          PY
+          if [ "${status}" = "failure" ]; then
+            exit "${exit_code}"
+          fi
 
       - name: Upload event-window evidence shard
+        if: always()
         uses: actions/upload-artifact@v7
         with:
           name: event-window-sensitivity-shard-${{ github.run_id }}-${{ matrix.event.global_shard_index }}
@@ -277,6 +322,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 90
     needs: [plan-session-event-shards, event-window-evidence-shard]
+    if: ${{ always() && needs.plan-session-event-shards.result == 'success' }}
 
     steps:
       - name: Checkout repository
@@ -302,6 +348,36 @@ jobs:
       - name: Aggregate event-window sensitivity
         run: |
           set -euo pipefail
+          mkdir -p results/event-window-sensitivity
+          python - <<'PY'
+          from pathlib import Path
+          import pandas as pd
+
+          paths = sorted(Path("artifacts/event-window-sensitivity-shards").glob("**/shard_status.csv"))
+          frames = [pd.read_csv(path) for path in paths]
+          status = pd.concat(frames, ignore_index=True) if frames else pd.DataFrame(
+              columns=[
+                  "global_shard_index",
+                  "session",
+                  "session_slug",
+                  "event_shard_index",
+                  "events_spec",
+                  "status",
+                  "exit_code",
+                  "elapsed_seconds",
+                  "message",
+                  "event_model_evidence_present",
+              ]
+          )
+          status.to_csv("results/event-window-sensitivity/event_window_shard_status.csv", index=False)
+          if not status.empty:
+              print("Event-window shard status:")
+              print(status.groupby("status", dropna=False).size().reset_index(name="shards").to_string(index=False))
+          PY
+          if ! find artifacts/event-window-sensitivity-shards -name event_model_evidence.csv -print -quit | grep -q .; then
+            echo "No completed event_model_evidence.csv shards were found; uploading shard-status artifact only."
+            exit 0
+          fi
           python scripts/aggregate_event_window_sensitivity.py \
             --shard-glob "artifacts/event-window-sensitivity-shards/**/event_model_evidence.csv" \
             --output results/event-window-sensitivity \
@@ -314,7 +390,8 @@ jobs:
             session_event_window_family_margin_summary.csv \
             event_window_model_summary.csv \
             event_window_comparison_to_core.csv \
-            event_window_control_gate_summary.csv; do
+            event_window_control_gate_summary.csv \
+            event_window_shard_status.csv; do
             test -s "results/event-window-sensitivity/${required_file}" || {
               echo "Missing results/event-window-sensitivity/${required_file}" >&2
               exit 1
@@ -326,24 +403,41 @@ jobs:
           scores = pd.read_csv("results/event-window-sensitivity/all_sessions_event_window_model_evidence.csv")
           if int((scores["status"] != "success").sum()) != 0:
               raise SystemExit("Event-window sensitivity contains failed rows")
+          shard_status = pd.read_csv("results/event-window-sensitivity/event_window_shard_status.csv")
+          soft_timeouts = int(shard_status["status"].astype(str).eq("soft_timeout").sum()) if not shard_status.empty else 0
           observed_events = int(scores[["session", "event_index"]].drop_duplicates().shape[0])
           observed_variants = int(scores["event_window_variant"].nunique())
           observed_models = int(scores["model"].nunique())
           print(f"Validated {len(scores)} rows across {observed_events} events, {observed_variants} windows, and {observed_models} models.")
+          if soft_timeouts:
+              print(f"Soft-timed-out shards recorded: {soft_timeouts}")
           PY
 
       - name: Show event-window sensitivity summary
         run: |
           python - <<'PY'
+          from pathlib import Path
           import pandas as pd
 
           root = "results/event-window-sensitivity"
+          summary_path = Path(f"{root}/event_window_family_margin_summary.csv")
+          if not summary_path.exists():
+              print("No completed event-window evidence shards were available for aggregate summaries.")
+              status_path = Path(f"{root}/event_window_shard_status.csv")
+              if status_path.exists():
+                  print("\nEvent-window shard status:")
+                  print(pd.read_csv(status_path).groupby("status", dropna=False).size().reset_index(name="shards").to_string(index=False))
+              raise SystemExit(0)
           print("Event-window family-margin summary:")
-          print(pd.read_csv(f"{root}/event_window_family_margin_summary.csv").to_string(index=False))
+          print(pd.read_csv(summary_path).to_string(index=False))
           print("\nEvent-window comparison to core:")
           print(pd.read_csv(f"{root}/event_window_comparison_to_core.csv").to_string(index=False))
           print("\nEvent-window control gates:")
           print(pd.read_csv(f"{root}/event_window_control_gate_summary.csv").to_string(index=False))
+          status_path = f"{root}/event_window_shard_status.csv"
+          if Path(status_path).exists():
+              print("\nEvent-window shard status:")
+              print(pd.read_csv(status_path).groupby("status", dropna=False).size().reset_index(name="shards").to_string(index=False))
           PY
 
       - name: Upload event-window sensitivity results

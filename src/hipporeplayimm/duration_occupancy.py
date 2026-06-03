@@ -131,6 +131,26 @@ def _score_state_space_duration_with_occupancy(
                 "state_space_imm_evidence_support": "exact_full_grid",
             }
         )
+    elif self.mode == "trajectory-imm-exact-sparse":
+        from .state_space_trajectory_imm import _score_trajectory_imm_exact_sparse
+
+        logp, trajectory, terminal, mode_post, trajectory_imm_extra = _score_trajectory_imm_exact_sparse(
+            emissions,
+            bin_centers,
+            self.config,
+            durations,
+            valid_bin_mask=valid_bin_mask,
+            return_trajectory=return_trajectory,
+        )
+        transition_sigma_cm = float(
+            trajectory_imm_extra["state_space_trajectory_imm_diffusion_transition_sigma_cm"]
+        )
+        names = ("stationary", "diffusion", "fragmented", "momentum_exact_sparse")
+        extra = {
+            f"state_space_mode_{name}_terminal_probability": float(mode_post[-1, idx])
+            for idx, name in enumerate(names)
+        } if mode_post is not None else {}
+        extra.update(trajectory_imm_extra)
     elif self.mode == "displacement-momentum":
         from .state_space_displacement_momentum import _score_displacement_momentum_exact
 

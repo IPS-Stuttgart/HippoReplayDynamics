@@ -83,6 +83,7 @@ _TRAJECTORY_MODELS = {
     "sorted-spike-state-space-momentum-reverse",
     "sorted-spike-state-space-momentum-bidirectional",
     "sorted-spike-state-space-momentum-exact-sparse",
+    "sorted-spike-state-space-trajectory-imm-exact-sparse",
     "sorted-spike-state-space-imm",
     "sorted-spike-state-space-goal",
     "sorted-spike-state-space-goal-reverse",
@@ -92,6 +93,7 @@ _TRAJECTORY_MODELS = {
     "clusterless-state-space-fragmented",
     "clusterless-state-space-jump",
     "clusterless-state-space-momentum",
+    "clusterless-state-space-trajectory-imm-exact-sparse",
     "clusterless-state-space-imm",
     "valid-state-diffusion",
     "valid-state-grid",
@@ -361,6 +363,7 @@ def _models(args: argparse.Namespace, session, encoding=None) -> dict[str, objec
         "sorted-spike-state-space-momentum": forward_momentum,
         "sorted-spike-state-space-momentum-reverse": reverse_momentum,
         "sorted-spike-state-space-momentum-exact-sparse": state_space_model("momentum-exact-sparse"),
+        "sorted-spike-state-space-trajectory-imm-exact-sparse": state_space_model("trajectory-imm-exact-sparse"),
         "sorted-spike-state-space-momentum-bidirectional": BidirectionalReplayModel(
             forward_momentum,
             reverse_momentum,
@@ -380,6 +383,7 @@ def _models(args: argparse.Namespace, session, encoding=None) -> dict[str, objec
         "clusterless-state-space-fragmented": clusterless_model("fragmented"),
         "clusterless-state-space-jump": clusterless_model("jump"),
         "clusterless-state-space-momentum": clusterless_model("momentum"),
+        "clusterless-state-space-trajectory-imm-exact-sparse": clusterless_model("trajectory-imm-exact-sparse"),
         "clusterless-state-space-imm": clusterless_model("imm"),
         "valid-state-diffusion": ValidStateDiffusionReplayModel(
             valid_mask_safe,

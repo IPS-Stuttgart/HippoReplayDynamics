@@ -39,6 +39,7 @@ DEFAULT_PAPER_EXACT_TRAJECTORY_MODELS = (
     "sorted-spike-state-space-fragmented",
     "sorted-spike-state-space-first-order-imm",
     DEFAULT_MARGIN_POSITIVE_MODEL,
+    "sorted-spike-state-space-trajectory-imm-exact-sparse",
 )
 
 

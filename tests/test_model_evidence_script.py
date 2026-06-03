@@ -29,7 +29,14 @@ class _SessionStub:
 
 def test_model_evidence_accepts_sorted_spike_state_space_models():
     args = argparse.Namespace(
-        models="sorted-spike-state-space-diffusion sorted-spike-state-space-first-order-imm sorted-spike-state-space-momentum-exact-sparse sorted-spike-state-space-momentum sorted-spike-state-space-imm",
+        models=(
+            "sorted-spike-state-space-diffusion "
+            "sorted-spike-state-space-first-order-imm "
+            "sorted-spike-state-space-momentum-exact-sparse "
+            "sorted-spike-state-space-trajectory-imm-exact-sparse "
+            "sorted-spike-state-space-momentum "
+            "sorted-spike-state-space-imm"
+        ),
         candidate_top_k=64,
         stationary_sigma_cm=2.0,
         diffusion_sigma_cm=12.0,
@@ -53,12 +60,16 @@ def test_model_evidence_accepts_sorted_spike_state_space_models():
         "sorted-spike-state-space-diffusion",
         "sorted-spike-state-space-first-order-imm",
         "sorted-spike-state-space-momentum-exact-sparse",
+        "sorted-spike-state-space-trajectory-imm-exact-sparse",
         "sorted-spike-state-space-momentum",
         "sorted-spike-state-space-imm",
     ]
     assert models["sorted-spike-state-space-diffusion"].name == "sorted-spike-state-space-diffusion"
     assert models["sorted-spike-state-space-first-order-imm"].name == "sorted-spike-state-space-first-order-imm"
     assert models["sorted-spike-state-space-momentum-exact-sparse"].name == "sorted-spike-state-space-momentum-exact-sparse"
+    assert models["sorted-spike-state-space-trajectory-imm-exact-sparse"].name == (
+        "sorted-spike-state-space-trajectory-imm-exact-sparse"
+    )
     assert models["sorted-spike-state-space-momentum"].name == "sorted-spike-state-space-momentum"
     assert models["sorted-spike-state-space-imm"].name == "sorted-spike-state-space-imm"
     assert models["sorted-spike-state-space-diffusion"].config.diffusion_sigma_cm_sqrt_s == 42.0
@@ -143,12 +154,14 @@ def test_model_evidence_classifies_state_space_families():
     assert _family("sorted-spike-state-space-diffusion") == "trajectory"
     assert _family("sorted-spike-state-space-fragmented") == "trajectory"
     assert _family("sorted-spike-state-space-momentum") == "trajectory"
+    assert _family("sorted-spike-state-space-trajectory-imm-exact-sparse") == "trajectory"
     assert _family("sorted-spike-state-space-first-order-imm") == "trajectory"
     assert _family("sorted-spike-state-space-imm") == "trajectory"
     assert _family("clusterless-state-space-stationary") == "nontrajectory"
     assert _family("clusterless-state-space-diffusion") == "trajectory"
     assert _family("clusterless-state-space-fragmented") == "trajectory"
     assert _family("clusterless-state-space-momentum") == "trajectory"
+    assert _family("clusterless-state-space-trajectory-imm-exact-sparse") == "trajectory"
     assert _family("clusterless-state-space-first-order-imm") == "trajectory"
     assert _family("clusterless-state-space-imm") == "trajectory"
 

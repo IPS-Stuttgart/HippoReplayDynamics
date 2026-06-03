@@ -79,6 +79,7 @@ def test_state_space_modes_return_full_trajectory_posteriors():
         "jump",
         "diffusion",
         "first-order-imm",
+        "trajectory-imm-exact-sparse",
         "imm",
         "momentum",
         "momentum-exact-sparse",
@@ -110,6 +111,26 @@ def test_state_space_modes_return_full_trajectory_posteriors():
             assert score.diagnostics["state_space_sparse_momentum_state_support"] == "finite_radius_pair_grid"
             assert score.diagnostics["state_space_momentum_candidate_support"] == "not_used_exact_sparse"
             assert score.diagnostics["state_space_sparse_momentum_max_pair_count"] > 0
+        if mode == "trajectory-imm-exact-sparse":
+            assert score.diagnostics["state_space_trajectory_imm_evidence_support"] == "exact_full_grid"
+            assert (
+                score.diagnostics["state_space_trajectory_imm_state_support"]
+                == "exact_first_order_plus_finite_radius_pair_grid"
+            )
+            assert score.diagnostics["state_space_trajectory_imm_modes"] == (
+                "stationary,diffusion,fragmented,momentum-exact-sparse"
+            )
+            terminal_probs = [
+                score.diagnostics[f"state_space_mode_{name}_terminal_probability"]
+                for name in ("stationary", "diffusion", "fragmented", "momentum_exact_sparse")
+            ]
+            event_probs = [
+                score.diagnostics[f"state_space_mode_{name}_event_probability"]
+                for name in ("stationary", "diffusion", "fragmented", "momentum_exact_sparse")
+            ]
+            assert np.allclose(sum(terminal_probs), 1.0)
+            assert np.allclose(sum(event_probs), 1.0)
+            assert 0.0 <= score.diagnostics["state_space_trajectory_family_event_probability"] <= 1.0
         if mode == "displacement-momentum":
             assert score.diagnostics["state_space_displacement_momentum_evidence_support"] == "exact_full_grid"
             assert score.diagnostics["state_space_displacement_momentum_state_support"] == "finite_displacement_grid"
@@ -611,6 +632,102 @@ def test_state_space_momentum_exact_sparse_matches_bruteforce_tiny_grid():
     assert score.diagnostics["state_space_sparse_momentum_backward_transition_rows"] == "forward_cached"
     assert score.diagnostics["state_space_sparse_momentum_transition_row_cache_hits"] == 4
     assert score.diagnostics["state_space_sparse_momentum_transition_row_cache_entries"] == 4
+
+
+def test_state_space_trajectory_imm_exact_sparse_matches_bruteforce_tiny_grid():
+    emissions = LogEmissionTensor(
+        log_likelihood=np.log(
+            np.array(
+                [
+                    [0.7, 0.3],
+                    [0.2, 0.8],
+                    [0.4, 0.6],
+                ]
+            )
+        ),
+        spike_counts=np.zeros((3, 1), dtype=int),
+        times=np.array([0.0, 1.0, 2.0]),
+        dt=1.0,
+        cell_ids=np.array([1]),
+        n_spikes=0,
+    )
+    centers = np.array([[0.0, 0.0], [1.0, 0.0]])
+    config = StateSpaceDecoderConfig(
+        mode="trajectory-imm-exact-sparse",
+        stationary_sigma_cm=1.0,
+        diffusion_sigma_cm_sqrt_s=1.0,
+        imm_mode_stickiness=0.8,
+        momentum_sigma_cm_sqrt_s=1.0,
+        momentum_initial_sigma_cm_sqrt_s=1.0,
+        momentum_velocity_decay=0.9,
+        max_step_sigma=10.0,
+    )
+    score = StateSpaceReplayModel(mode="trajectory-imm-exact-sparse", config=config).score(emissions, centers)
+
+    modes = ("stationary", "diffusion", "fragmented", "momentum-exact-sparse")
+    transition = np.full((4, 4), (1.0 - config.imm_mode_stickiness) / 3.0)
+    np.fill_diagonal(transition, config.imm_mode_stickiness)
+
+    def kernel_log(
+        dst_mode: str,
+        src_mode: str,
+        x_prev_prev: int,
+        x_prev: int,
+        x_dst: int,
+        *,
+        initial: bool = False,
+    ) -> float:
+        if dst_mode == "fragmented":
+            return -np.log(centers.shape[0])
+        if dst_mode == "stationary":
+            sigma = config.stationary_sigma_cm
+            predicted = centers[x_prev]
+        elif dst_mode == "diffusion":
+            sigma = config.diffusion_sigma_cm_sqrt_s
+            predicted = centers[x_prev]
+        elif dst_mode == "momentum-exact-sparse":
+            if initial or src_mode != "momentum-exact-sparse":
+                sigma = config.momentum_initial_sigma_cm_sqrt_s
+                predicted = centers[x_prev]
+            else:
+                sigma = config.momentum_sigma_cm_sqrt_s
+                predicted = centers[x_prev] + config.momentum_velocity_decay * (
+                    centers[x_prev] - centers[x_prev_prev]
+                )
+        else:
+            raise AssertionError(dst_mode)
+        weights = np.exp(-0.5 * np.sum((centers - predicted[None, :]) ** 2, axis=1) / (sigma * sigma))
+        return float(np.log(weights[x_dst] / weights.sum()))
+
+    brute_terms = []
+    for x0, x1, x2 in itertools.product(range(2), repeat=3):
+        for m0_idx, mode0 in enumerate(modes):
+            for m1_idx, mode1 in enumerate(modes):
+                for m2_idx, mode2 in enumerate(modes):
+                    brute_terms.append(
+                        -np.log(2.0)
+                        - np.log(len(modes))
+                        + emissions.log_likelihood[0, x0]
+                        + np.log(transition[m0_idx, m1_idx])
+                        + kernel_log(mode1, mode0, x0, x0, x1, initial=True)
+                        + emissions.log_likelihood[1, x1]
+                        + np.log(transition[m1_idx, m2_idx])
+                        + kernel_log(mode2, mode1, x0, x1, x2)
+                        + emissions.log_likelihood[2, x2]
+                    )
+
+    assert np.allclose(score.log_likelihood, logsumexp(brute_terms))
+    assert score.trajectory_log_posterior is not None
+    assert np.allclose(logsumexp(score.trajectory_log_posterior, axis=1), 0.0)
+    assert score.diagnostics["state_space_trajectory_imm_evidence_support"] == "exact_full_grid"
+    assert score.diagnostics["state_space_trajectory_imm_modes"] == (
+        "stationary,diffusion,fragmented,momentum-exact-sparse"
+    )
+    terminal_probs = [
+        score.diagnostics[f"state_space_mode_{name}_terminal_probability"]
+        for name in ("stationary", "diffusion", "fragmented", "momentum_exact_sparse")
+    ]
+    assert np.allclose(sum(terminal_probs), 1.0)
 
 
 def test_sparse_momentum_evidence_only_skips_smoothed_trajectory():

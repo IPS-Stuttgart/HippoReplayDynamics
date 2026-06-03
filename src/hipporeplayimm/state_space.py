@@ -35,6 +35,9 @@ from .state_space_displacement_imm import (
 from .state_space_sparse_momentum import (
     _score_sparse_momentum_exact,
 )
+from .state_space_trajectory_imm import (
+    _score_trajectory_imm_exact_sparse,
+)
 from .state_space_first_order import (
     _apply_transition,
     _apply_transition_backward,
@@ -102,6 +105,7 @@ __all__ = [
     "_score_imm_candidates",
     "_score_momentum_candidates",
     "_score_sparse_momentum_exact",
+    "_score_trajectory_imm_exact_sparse",
     "_score_stationary",
     "_top_candidate_indices",
     "_valid_bin_count",

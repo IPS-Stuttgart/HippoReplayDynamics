@@ -42,6 +42,7 @@ DEFAULT_EXACT_TRAJECTORY_MODELS = (
     "sorted-spike-state-space-fragmented",
     "sorted-spike-state-space-first-order-imm",
     "sorted-spike-state-space-momentum-exact-sparse",
+    "sorted-spike-state-space-trajectory-imm-exact-sparse",
 )
 
 

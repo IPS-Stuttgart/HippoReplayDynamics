@@ -263,6 +263,8 @@ def apply_model_hyperparam_patch() -> None:
             "sorted-spike-state-space-jump": state_space_model(config, "jump"),
             "sorted-spike-state-space-first-order-imm": state_space_model(config, "first-order-imm"),
             "sorted-spike-state-space-momentum": state_space_model(config, "momentum"),
+            "sorted-spike-state-space-momentum-exact-sparse": state_space_model(config, "momentum-exact-sparse"),
+            "sorted-spike-state-space-trajectory-imm-exact-sparse": state_space_model(config, "trajectory-imm-exact-sparse"),
             "sorted-spike-state-space-imm": state_space_model(config, "imm"),
             "state-space-stationary": state_space_model(config, "stationary", "state-space-stationary"),
             "state-space-diffusion": state_space_model(config, "diffusion", "state-space-diffusion"),
@@ -274,6 +276,16 @@ def apply_model_hyperparam_patch() -> None:
                 "state-space-first-order-imm",
             ),
             "state-space-momentum": state_space_model(config, "momentum", "state-space-momentum"),
+            "state-space-momentum-exact-sparse": state_space_model(
+                config,
+                "momentum-exact-sparse",
+                "state-space-momentum-exact-sparse",
+            ),
+            "state-space-trajectory-imm-exact-sparse": state_space_model(
+                config,
+                "trajectory-imm-exact-sparse",
+                "state-space-trajectory-imm-exact-sparse",
+            ),
             "state-space-imm": state_space_model(config, "imm", "state-space-imm"),
             "pyrecest-goal-particle": PyRecEstGoalParticleModel(
                 candidate_goals=goal_candidates,

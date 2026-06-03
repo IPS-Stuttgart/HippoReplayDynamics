@@ -66,8 +66,8 @@ class StateSpaceReplayModel:
     """Replay decoder baseline returning a posterior for every replay bin.
 
     Supported modes are ``stationary``, ``diffusion``, ``fragmented``/``jump``,
-    ``first-order-imm``, ``momentum``, ``imm``, ``displacement-momentum``, and
-    ``displacement-imm``. The first-order models use exact full-grid
+    ``first-order-imm``, ``trajectory-imm-exact-sparse``, ``momentum``, ``imm``,
+    ``displacement-momentum``, and ``displacement-imm``. The first-order models use exact full-grid
     forward-backward recursions. ``first-order-imm`` is the legacy exact
     first-order switcher over stationary, diffusion, and fragmented/jump
     dynamics. ``momentum`` and ``imm`` use candidate-pruned second-order
@@ -99,6 +99,7 @@ class StateSpaceReplayModel:
             "fragmented",
             "jump",
             "first-order-imm",
+            "trajectory-imm-exact-sparse",
             "imm",
             "momentum",
             "momentum-exact-sparse",

@@ -21,10 +21,11 @@ from typing import Iterable
 
 import numpy as np
 from scipy.spatial import cKDTree
+from pyrecest.filters.sparse_second_order_grid import sparse_second_order_grid_evidence
 
 from .encoding import LogEmissionTensor
 from .state_space_first_order import _score_fragmented
-from .state_space_utils import _as_log_probs, _mean_entropy, _scaled_emissions
+from .state_space_utils import _as_log_probs, _mean_entropy
 
 TransitionRows = list[tuple[np.ndarray, np.ndarray]]
 TransitionRowCache = dict[tuple[int, int, float, float], tuple[np.ndarray, np.ndarray]]
@@ -65,9 +66,9 @@ def _score_sparse_momentum_exact(
 
     valid_mask = _coerce_valid_bin_mask(valid_bin_mask, emissions.n_bins)
     valid_indices = _valid_indices(valid_mask, emissions.n_bins)
-    scaled, offsets = _scaled_emissions(emissions.log_likelihood)
+    log_likelihood = np.asarray(emissions.log_likelihood, dtype=float).copy()
     if valid_mask is not None:
-        scaled[:, ~valid_mask] = 0.0
+        log_likelihood[:, ~valid_mask] = -np.inf
 
     durations = _coerce_transition_durations(
         transition_durations_s,
@@ -92,116 +93,65 @@ def _score_sparse_momentum_exact(
     tree = cKDTree(centers[valid_indices])
     prior = _uniform_position_prior(emissions.n_bins, valid_mask)
 
-    prev, curr, alpha, initial_edge_counts = _initial_pair_alpha(
-        centers,
-        valid_indices,
-        tree,
-        scaled,
-        prior,
-        initial_sigma_cm=initial_sigma,
-        max_step_sigma=max_step_sigma,
-    )
-    first_scale = float(alpha.sum())
-    if first_scale <= 0.0 or not np.isfinite(first_scale):
-        raise ValueError("first two emission rows have no finite sparse-pair mass")
-    alpha = alpha / first_scale
-
-    pair_prev: list[np.ndarray] = [prev]
-    pair_curr: list[np.ndarray] = [curr]
-    filtered: list[np.ndarray] = [alpha]
-    scales = [first_scale]
-    edge_counts: list[int] = list(initial_edge_counts)
-    transition_rows: list[TransitionRows] = []
-    transition_row_cache: TransitionRowCache = {}
-    transition_row_cache_hits = 0
-    transition_row_cache_misses = 0
-    logp = float(np.log(first_scale) + offsets[0] + offsets[1])
-
-    for time_index in range(2, emissions.n_time):
-        transition_index = time_index - 1
-        (
-            prev,
-            curr,
-            alpha,
-            counts,
-            rows_for_transition,
-            cache_hits,
-            cache_misses,
-        ) = _advance_pair_alpha(
+    def initial_pair_initializer(scaled: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray, list[int]]:
+        return _initial_pair_alpha(
             centers,
             valid_indices,
             tree,
-            prev,
-            curr,
-            alpha,
-            scaled[time_index],
-            sigma_cm=float(transition_sigmas[transition_index]),
-            velocity_decay=float(decays[transition_index]) * float(time_scales[transition_index]),
-            max_step_sigma=max_step_sigma,
-            row_cache=transition_row_cache,
-            store_transition_rows=return_trajectory,
-        )
-        transition_row_cache_hits += cache_hits
-        transition_row_cache_misses += cache_misses
-        scale = float(alpha.sum())
-        if scale <= 0.0 or not np.isfinite(scale):
-            raise ValueError(f"emission row {time_index} has no finite sparse-pair predicted mass")
-        alpha = alpha / scale
-        pair_prev.append(prev)
-        pair_curr.append(curr)
-        filtered.append(alpha)
-        scales.append(scale)
-        edge_counts.extend(counts)
-        if return_trajectory:
-            transition_rows.append(rows_for_transition)
-        logp += float(np.log(scale) + offsets[time_index])
-
-    terminal = _terminal_position_log_posterior(pair_curr[-1], filtered[-1], n_bins=emissions.n_bins)
-    trajectory: np.ndarray | None
-    if return_trajectory:
-        betas = _backward_sparse_pair_betas(
-            centers,
-            valid_indices,
-            tree,
-            pair_prev,
-            pair_curr,
-            filtered,
             scaled,
-            scales,
-            transition_rows,
+            prior,
+            initial_sigma_cm=initial_sigma,
+            max_step_sigma=max_step_sigma,
         )
-        trajectory = _pair_position_trajectory(
-            pair_prev,
-            pair_curr,
-            filtered,
-            betas,
-            n_time=emissions.n_time,
-            n_bins=emissions.n_bins,
+
+    def transition_row_builder(src_prev: int, src_curr: int, transition_index: int) -> tuple[np.ndarray, np.ndarray]:
+        prediction = centers[int(src_curr)] + float(decays[transition_index]) * float(time_scales[transition_index]) * (
+            centers[int(src_curr)] - centers[int(src_prev)]
         )
-        terminal = trajectory[-1]
+        return _finite_gaussian_row(
+            centers,
+            valid_indices,
+            tree,
+            prediction,
+            sigma_cm=float(transition_sigmas[transition_index]),
+            max_step_sigma=max_step_sigma,
+        )
+
+    def transition_cache_key_builder(src_prev: int, src_curr: int, transition_index: int) -> tuple[int, int, float, float]:
+        sigma = float(transition_sigmas[transition_index])
+        velocity_decay = float(decays[transition_index]) * float(time_scales[transition_index])
+        return int(src_prev), int(src_curr), sigma, velocity_decay
+
+    result = sparse_second_order_grid_evidence(
+        log_likelihood,
+        initial_pair_initializer,
+        transition_row_builder,
+        transition_cache_key_builder=transition_cache_key_builder,
+        return_smoothed=return_trajectory,
+    )
+    trajectory = result.smoothed_log_probabilities
+    terminal = result.terminal_log_probabilities
+    if trajectory is not None:
         trajectory_label = "smoothed_pair_marginal"
-        backward_label = "forward_cached"
         posterior_entropy = _mean_entropy(trajectory)
     else:
-        trajectory = None
         trajectory_label = "not_returned_evidence_only"
-        backward_label = "skipped_evidence_only"
         posterior_entropy = float("nan")
-    pair_counts = np.asarray([values.shape[0] for values in filtered], dtype=float)
+    backward_label = str(result.diagnostics["backward_transition_rows"])
     diagnostics: dict[str, float | int | str] = {
         "state_space_sparse_momentum_evidence_support": "exact_full_grid",
         "state_space_sparse_momentum_state_support": "finite_radius_pair_grid",
         "state_space_sparse_momentum_transition_support": "finite_radius_gaussian",
-        "state_space_sparse_momentum_initial_pair_count": int(pair_counts[0]),
-        "state_space_sparse_momentum_terminal_pair_count": int(pair_counts[-1]),
-        "state_space_sparse_momentum_mean_pair_count": float(np.mean(pair_counts)),
-        "state_space_sparse_momentum_max_pair_count": int(np.max(pair_counts)),
-        "state_space_sparse_momentum_mean_outgoing_count": float(np.mean(edge_counts)) if edge_counts else 0.0,
-        "state_space_sparse_momentum_max_outgoing_count": int(np.max(edge_counts)) if edge_counts else 0,
+        "state_space_sparse_momentum_initial_pair_count": int(result.diagnostics["initial_pair_count"]),
+        "state_space_sparse_momentum_terminal_pair_count": int(result.diagnostics["terminal_pair_count"]),
+        "state_space_sparse_momentum_mean_pair_count": float(result.diagnostics["mean_pair_count"]),
+        "state_space_sparse_momentum_max_pair_count": int(result.diagnostics["max_pair_count"]),
+        "state_space_sparse_momentum_mean_outgoing_count": float(result.diagnostics["mean_outgoing_count"]),
+        "state_space_sparse_momentum_max_outgoing_count": int(result.diagnostics["max_outgoing_count"]),
         "state_space_sparse_momentum_backward_transition_rows": backward_label,
-        "state_space_sparse_momentum_transition_row_cache_entries": int(len(transition_row_cache)),
-        "state_space_sparse_momentum_transition_row_cache_hits": int(transition_row_cache_hits),
-        "state_space_sparse_momentum_transition_row_cache_misses": int(transition_row_cache_misses),
+        "state_space_sparse_momentum_transition_row_cache_entries": int(result.diagnostics["transition_row_cache_entries"]),
+        "state_space_sparse_momentum_transition_row_cache_hits": int(result.diagnostics["transition_row_cache_hits"]),
+        "state_space_sparse_momentum_transition_row_cache_misses": int(result.diagnostics["transition_row_cache_misses"]),
         "state_space_momentum_trajectory_posterior": trajectory_label,
         "state_space_momentum_evidence_support": "exact_full_grid",
         "state_space_momentum_candidate_support": "not_used_exact_sparse",
@@ -219,7 +169,7 @@ def _score_sparse_momentum_exact(
         "state_space_momentum_velocity_decay_per_step": _format_float_series(decays),
         "state_space_sparse_momentum_mean_posterior_entropy": posterior_entropy,
     }
-    return float(logp), trajectory, terminal, diagnostics
+    return float(result.log_marginal_likelihood), trajectory, terminal, diagnostics
 
 
 def _single_bin_diagnostics(config: object) -> dict[str, float | int | str]:

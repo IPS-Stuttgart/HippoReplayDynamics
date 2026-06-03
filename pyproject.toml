@@ -15,6 +15,7 @@ dependencies = [
     "h5py",
     "pandas",
     "matplotlib",
+    "pyrecest @ git+https://github.com/FlorianPfaff/PyRecEst.git@main",
 ]
 
 [project.optional-dependencies]

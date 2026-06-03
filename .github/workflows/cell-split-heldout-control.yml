@@ -1,0 +1,395 @@
+---
+name: Cell-split held-out replay control
+
+on:
+  workflow_dispatch:
+    inputs:
+      dataset_root:
+        description: "Dataset path after download or cache restore"
+        required: true
+        default: "data/DataSetFromPfeifferFoster"
+      sessions:
+        description: "Space- or comma-separated sessions"
+        required: true
+        default: "Rat1/Open1 Rat1/Open2 Rat2/Open1 Rat2/Open2 Rat3/Open1 Rat3/Open2 Rat4/Open1 Rat4/Open2"
+      events:
+        description: "Event IDs/ranges, all, run, or run:0-25"
+        required: true
+        default: "run"
+      max_events:
+        description: "Maximum selected events per session; empty means no cap"
+        required: false
+        default: "10"
+      event_shard_count:
+        description: "Target event shards per session"
+        required: true
+        default: "16"
+      n_splits:
+        description: "Repeated random cell splits"
+        required: true
+        default: "20"
+      test_cell_fraction:
+        description: "Fraction of cells held out on each split"
+        required: true
+        default: "0.5"
+      random_seed:
+        description: "Base random seed for cell splits"
+        required: true
+        default: "1"
+      margin_threshold:
+        description: "Held-out trajectory-family confidence threshold"
+        required: true
+        default: "5.5"
+      models:
+        description: "Space-separated scoring models"
+        required: true
+        default: "sorted-spike-state-space-stationary sorted-spike-state-space-diffusion sorted-spike-state-space-fragmented sorted-spike-state-space-first-order-imm sorted-spike-state-space-momentum-exact-sparse sorted-spike-state-space-momentum sorted-spike-state-space-imm"
+      state_space_diffusion_sigma_cm_sqrt_s:
+        description: "Diffusion state-space sigma"
+        required: true
+        default: "60.0"
+      state_space_max_step_sigma:
+        description: "State-space sparse transition support radius in sigmas"
+        required: true
+        default: "3.0"
+      state_space_momentum_sigma_cm_sqrt_s:
+        description: "Momentum state-space sigma"
+        required: true
+        default: "50.0"
+      state_space_momentum_initial_sigma_cm_sqrt_s:
+        description: "Initial momentum velocity sigma"
+        required: true
+        default: "45.0"
+      state_space_momentum_velocity_decay:
+        description: "Momentum velocity decay"
+        required: true
+        default: "0.93"
+      state_space_momentum_predicted_candidate_top_k:
+        description: "Candidate-pruned momentum predicted-support top-k"
+        required: true
+        default: "16"
+      state_space_momentum_candidate_source:
+        description: "Candidate-pruned momentum support source"
+        required: true
+        default: "emission"
+      time_bin_s:
+        description: "Replay emission bin width"
+        required: true
+        default: "0.004"
+      spike_rate_scale:
+        description: "Replay spike-rate scale"
+        required: true
+        default: "2.0"
+      emission_likelihood_temperature:
+        description: "Emission likelihood temperature"
+        required: true
+        default: "0.300"
+      bin_size_cm:
+        description: "Place-field bin size"
+        required: true
+        default: "6.0"
+      smoothing_sigma_bins:
+        description: "Place-field smoothing sigma"
+        required: true
+        default: "2.0"
+      min_speed_cm_s:
+        description: "Minimum speed for place-field fitting"
+        required: true
+        default: "5.0"
+      extra_model_args:
+        description: "Optional extra CLI arguments passed to the scorer"
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cell-split-heldout-control-${{ github.repository }}-${{ inputs.sessions }}-${{ inputs.events }}-${{ inputs.max_events }}-${{ inputs.n_splits }}-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  DATASET_ROOT: ${{ inputs.dataset_root }}
+  SESSIONS: ${{ inputs.sessions }}
+  EVENTS: ${{ inputs.events }}
+  MAX_EVENTS: ${{ inputs.max_events }}
+  EVENT_SHARD_COUNT: ${{ inputs.event_shard_count }}
+  N_SPLITS: ${{ inputs.n_splits }}
+  TEST_CELL_FRACTION: ${{ inputs.test_cell_fraction }}
+  RANDOM_SEED: ${{ inputs.random_seed }}
+  MARGIN_THRESHOLD: ${{ inputs.margin_threshold }}
+  MODELS: ${{ inputs.models }}
+  STATE_SPACE_DIFFUSION_SIGMA_CM_SQRT_S: ${{ inputs.state_space_diffusion_sigma_cm_sqrt_s }}
+  STATE_SPACE_MAX_STEP_SIGMA: ${{ inputs.state_space_max_step_sigma }}
+  STATE_SPACE_MOMENTUM_SIGMA_CM_SQRT_S: ${{ inputs.state_space_momentum_sigma_cm_sqrt_s }}
+  STATE_SPACE_MOMENTUM_INITIAL_SIGMA_CM_SQRT_S: ${{ inputs.state_space_momentum_initial_sigma_cm_sqrt_s }}
+  STATE_SPACE_MOMENTUM_VELOCITY_DECAY: ${{ inputs.state_space_momentum_velocity_decay }}
+  STATE_SPACE_MOMENTUM_PREDICTED_CANDIDATE_TOP_K: ${{ inputs.state_space_momentum_predicted_candidate_top_k }}
+  STATE_SPACE_MOMENTUM_CANDIDATE_SOURCE: ${{ inputs.state_space_momentum_candidate_source }}
+  TIME_BIN_S: ${{ inputs.time_bin_s }}
+  SPIKE_RATE_SCALE: ${{ inputs.spike_rate_scale }}
+  EMISSION_LIKELIHOOD_TEMPERATURE: ${{ inputs.emission_likelihood_temperature }}
+  BIN_SIZE_CM: ${{ inputs.bin_size_cm }}
+  SMOOTHING_SIGMA_BINS: ${{ inputs.smoothing_sigma_bins }}
+  MIN_SPEED_CM_S: ${{ inputs.min_speed_cm_s }}
+  EXTRA_MODEL_ARGS: ${{ inputs.extra_model_args }}
+  LOCAL_CACHE_ROOT: ${{ vars.PFEIFFERFOSTER_LOCAL_CACHE_ROOT }}
+  OMP_NUM_THREADS: "1"
+  OPENBLAS_NUM_THREADS: "1"
+  MKL_NUM_THREADS: "1"
+
+jobs:
+  plan-session-event-shards:
+    name: Plan cell-split held-out shards
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    outputs:
+      event_matrix: ${{ steps.plan.outputs.event_matrix }}
+      event_count: ${{ steps.plan.outputs.event_count }}
+      session_count: ${{ steps.plan.outputs.session_count }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Install package
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e .
+
+      - name: Ensure Pfeiffer-Foster dataset
+        uses: ./.github/actions/ensure-pfeiffer-foster-dataset
+        with:
+          dataset-root: ${{ env.DATASET_ROOT }}
+          session: Rat1/Open1
+          cache-key: hipporeplayimm-dataset-${{ runner.os }}-rclone-v1
+          local-cache-root: ${{ env.LOCAL_CACHE_ROOT }}
+          webdav-url: ${{ secrets.PFEIFFERFOSTER_WEBDAV_URL }}
+          webdav-key: ${{ secrets.PFEIFFERFOSTER_DATA_KEY }}
+          webdav-password: ${{ secrets.PFEIFFERFOSTER_DATA_PASSWORD }}
+
+      - name: Plan session/event shards
+        id: plan
+        run: |
+          set -euo pipefail
+          mkdir -p results/cell-split-heldout-control-plan
+          python - <<'PY'
+          import json
+          import os
+          import re
+          import subprocess
+          from pathlib import Path
+
+          sessions = [s for s in re.split(r"[\s,]+", os.environ["SESSIONS"].strip()) if s]
+          if not sessions:
+              raise SystemExit("No sessions selected")
+          output_dir = Path("results/cell-split-heldout-control-plan")
+          matrix = []
+          total_events = 0
+          for session in sessions:
+              safe_session = session.replace("/", "_").replace("\\", "_")
+              plan_path = output_dir / f"plan_{safe_session}.json"
+              cmd = [
+                  "python", "scripts/plan_model_evidence_event_shards.py",
+                  "--dataset-root", os.environ["DATASET_ROOT"],
+                  "--session", session,
+                  "--events", os.environ["EVENTS"],
+                  "--event-shard-count", os.environ["EVENT_SHARD_COUNT"],
+                  "--output", str(plan_path),
+              ]
+              if os.environ.get("MAX_EVENTS"):
+                  cmd.extend(["--max-events", os.environ["MAX_EVENTS"]])
+              subprocess.run(cmd, check=True)
+              plan = json.loads(plan_path.read_text(encoding="utf-8"))
+              total_events += int(plan["event_count"])
+              for shard in plan["event_matrix"]:
+                  shard = dict(shard)
+                  shard["session"] = session
+                  shard["session_slug"] = safe_session
+                  shard["global_shard_index"] = len(matrix)
+                  matrix.append(shard)
+          if len(matrix) > 256:
+              raise SystemExit(f"Session/event matrix has {len(matrix)} jobs, exceeding GitHub Actions' 256-job matrix limit")
+          all_plan = {
+              "sessions": sessions,
+              "events": os.environ["EVENTS"],
+              "max_events": os.environ.get("MAX_EVENTS") or None,
+              "n_splits": int(os.environ["N_SPLITS"]),
+              "test_cell_fraction": float(os.environ["TEST_CELL_FRACTION"]),
+              "session_count": len(sessions),
+              "event_count": total_events,
+              "event_matrix": matrix,
+          }
+          (output_dir / "cell_split_heldout_control_plan.json").write_text(json.dumps(all_plan, indent=2) + "\n", encoding="utf-8")
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+              output.write(f"event_matrix={json.dumps(matrix, separators=(',', ':'))}\n")
+              output.write(f"event_count={total_events}\n")
+              output.write(f"session_count={len(sessions)}\n")
+          print(f"Planned {total_events} events across {len(sessions)} sessions and {len(matrix)} shards.")
+          PY
+
+      - name: Upload cell-split held-out plan
+        uses: actions/upload-artifact@v7
+        with:
+          name: cell-split-heldout-control-plan-${{ github.run_id }}
+          path: results/cell-split-heldout-control-plan/
+          if-no-files-found: error
+
+  cell-split-heldout-shard:
+    name: Cell-split held-out ${{ matrix.event.session }} shard ${{ matrix.event.event_shard_index }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    needs: plan-session-event-shards
+    strategy:
+      fail-fast: false
+      max-parallel: 8
+      matrix:
+        event: ${{ fromJson(needs.plan-session-event-shards.outputs.event_matrix) }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Install package
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e .
+
+      - name: Ensure Pfeiffer-Foster dataset
+        uses: ./.github/actions/ensure-pfeiffer-foster-dataset
+        with:
+          dataset-root: ${{ env.DATASET_ROOT }}
+          session: ${{ matrix.event.session }}
+          cache-key: hipporeplayimm-dataset-${{ runner.os }}-rclone-v1
+          local-cache-root: ${{ env.LOCAL_CACHE_ROOT }}
+          webdav-url: ${{ secrets.PFEIFFERFOSTER_WEBDAV_URL }}
+          webdav-key: ${{ secrets.PFEIFFERFOSTER_DATA_KEY }}
+          webdav-password: ${{ secrets.PFEIFFERFOSTER_DATA_PASSWORD }}
+
+      - name: Run cell-split held-out shard
+        env:
+          SHARD_SESSION: ${{ matrix.event.session }}
+          SHARD_SESSION_SLUG: ${{ matrix.event.session_slug }}
+          EVENT_SHARD_INDEX: ${{ matrix.event.event_shard_index }}
+          SHARD_EVENTS: ${{ matrix.event.events_spec }}
+        run: |
+          set -euo pipefail
+          out_dir="results/cell-split-heldout-${SHARD_SESSION_SLUG}-shard-${EVENT_SHARD_INDEX}"
+          extra_args=()
+          if [[ -n "${EXTRA_MODEL_ARGS}" ]]; then
+            read -r -a extra_args <<< "${EXTRA_MODEL_ARGS}"
+          fi
+          python scripts/cell_split_heldout_control.py score \
+            --dataset-root "${DATASET_ROOT}" \
+            --session "${SHARD_SESSION}" \
+            --events "${SHARD_EVENTS}" \
+            --models "${MODELS}" \
+            --n-splits "${N_SPLITS}" \
+            --test-cell-fraction "${TEST_CELL_FRACTION}" \
+            --random-seed "${RANDOM_SEED}" \
+            --null-random-seed "${RANDOM_SEED}" \
+            --state-space-diffusion-sigma-cm-sqrt-s "${STATE_SPACE_DIFFUSION_SIGMA_CM_SQRT_S}" \
+            --state-space-max-step-sigma "${STATE_SPACE_MAX_STEP_SIGMA}" \
+            --state-space-momentum-sigma-cm-sqrt-s "${STATE_SPACE_MOMENTUM_SIGMA_CM_SQRT_S}" \
+            --state-space-momentum-initial-sigma-cm-sqrt-s "${STATE_SPACE_MOMENTUM_INITIAL_SIGMA_CM_SQRT_S}" \
+            --state-space-momentum-velocity-decay "${STATE_SPACE_MOMENTUM_VELOCITY_DECAY}" \
+            --state-space-momentum-predicted-candidate-top-k "${STATE_SPACE_MOMENTUM_PREDICTED_CANDIDATE_TOP_K}" \
+            --state-space-momentum-candidate-source "${STATE_SPACE_MOMENTUM_CANDIDATE_SOURCE}" \
+            --time-bin-s "${TIME_BIN_S}" \
+            --spike-rate-scale "${SPIKE_RATE_SCALE}" \
+            --emission-likelihood-temperature "${EMISSION_LIKELIHOOD_TEMPERATURE}" \
+            --bin-size-cm "${BIN_SIZE_CM}" \
+            --smoothing-sigma-bins "${SMOOTHING_SIGMA_BINS}" \
+            --min-speed-cm-s "${MIN_SPEED_CM_S}" \
+            --output "${out_dir}" \
+            --continue-on-error \
+            "${extra_args[@]}"
+
+      - name: Upload cell-split held-out shard
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: cell-split-heldout-control-shard-${{ github.run_id }}-${{ matrix.event.global_shard_index }}
+          path: results/cell-split-heldout-${{ matrix.event.session_slug }}-shard-${{ matrix.event.event_shard_index }}/
+          if-no-files-found: error
+
+  aggregate:
+    name: Aggregate cell-split held-out control
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    needs: [plan-session-event-shards, cell-split-heldout-shard]
+    if: ${{ always() && needs.plan-session-event-shards.result == 'success' }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Install package
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e .
+
+      - name: Download cell-split held-out shards
+        uses: actions/download-artifact@v7
+        with:
+          pattern: cell-split-heldout-control-shard-${{ github.run_id }}-*
+          path: artifacts/cell-split-heldout-control-shards
+          merge-multiple: false
+
+      - name: Aggregate cell-split held-out control
+        run: |
+          set -euo pipefail
+          python scripts/cell_split_heldout_control.py aggregate \
+            --score-glob "artifacts/cell-split-heldout-control-shards/**/cell_split_heldout_model_evidence.csv" \
+            --output results/cell-split-heldout-control \
+            --margin-threshold "${MARGIN_THRESHOLD}"
+          for required_file in \
+            cell_split_heldout_model_evidence.csv \
+            cell_split_heldout_family_margin_decisions.csv \
+            cell_split_heldout_family_margin_summary.csv \
+            rat_cell_split_heldout_summary.csv \
+            cell_split_control_gate_summary.csv; do
+            test -s "results/cell-split-heldout-control/${required_file}" || {
+              echo "Missing results/cell-split-heldout-control/${required_file}" >&2
+              exit 1
+            }
+          done
+
+      - name: Show cell-split held-out summary
+        run: |
+          python - <<'PY'
+          import pandas as pd
+
+          root = "results/cell-split-heldout-control"
+          print("Cell-split held-out family-margin summary:")
+          print(pd.read_csv(f"{root}/cell_split_heldout_family_margin_summary.csv").to_string(index=False))
+          print("\nRat cell-split held-out summary:")
+          print(pd.read_csv(f"{root}/rat_cell_split_heldout_summary.csv").to_string(index=False))
+          print("\nCell-split held-out control gates:")
+          print(pd.read_csv(f"{root}/cell_split_control_gate_summary.csv").to_string(index=False))
+          PY
+
+      - name: Upload cell-split held-out control results
+        uses: actions/upload-artifact@v7
+        with:
+          name: cell-split-heldout-control-${{ github.run_id }}
+          path: results/cell-split-heldout-control/
+          if-no-files-found: error

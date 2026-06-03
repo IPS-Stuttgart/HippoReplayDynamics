@@ -391,6 +391,10 @@ jobs:
             event_window_model_summary.csv \
             event_window_comparison_to_core.csv \
             event_window_control_gate_summary.csv \
+            event_window_observation_normalized_summary.csv \
+            event_window_spike_count_summary.csv \
+            event_window_core_matched_attenuation.csv \
+            event_window_control_gate_summary_v2.csv \
             event_window_shard_status.csv; do
             test -s "results/event-window-sensitivity/${required_file}" || {
               echo "Missing results/event-window-sensitivity/${required_file}" >&2
@@ -434,6 +438,14 @@ jobs:
           print(pd.read_csv(f"{root}/event_window_comparison_to_core.csv").to_string(index=False))
           print("\nEvent-window control gates:")
           print(pd.read_csv(f"{root}/event_window_control_gate_summary.csv").to_string(index=False))
+          print("\nEvent-window observation-normalized summary:")
+          print(pd.read_csv(f"{root}/event_window_observation_normalized_summary.csv").to_string(index=False))
+          print("\nEvent-window spike-count summary:")
+          print(pd.read_csv(f"{root}/event_window_spike_count_summary.csv").to_string(index=False))
+          print("\nEvent-window core-matched attenuation:")
+          print(pd.read_csv(f"{root}/event_window_core_matched_attenuation.csv").to_string(index=False))
+          print("\nEvent-window control gates v2:")
+          print(pd.read_csv(f"{root}/event_window_control_gate_summary_v2.csv").to_string(index=False))
           status_path = f"{root}/event_window_shard_status.csv"
           if Path(status_path).exists():
               print("\nEvent-window shard status:")

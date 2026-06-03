@@ -48,23 +48,60 @@ def test_event_window_aggregator_compares_variants_to_core(tmp_path):
     shard_root = tmp_path / "shards" / "shard0"
     shard_root.mkdir(parents=True)
     rows = []
+    observation_counts = {
+        "core": (20, 10),
+        "contracted": (19, 9),
+        "expanded": (22, 11),
+        "shifted_pre": (10, 10),
+    }
     for variant, trajectory_logz, stationary_logz in (
         ("core", 20.0, 0.0),
         ("contracted", 16.0, 0.0),
         ("expanded", 14.0, 0.0),
         ("shifted_pre", 2.0, 0.0),
     ):
+        n_spikes, n_time = observation_counts[variant]
         rows.extend(
             [
-                _row(variant, "sorted-spike-state-space-stationary", "nontrajectory", stationary_logz),
-                _row(variant, "sorted-spike-state-space-diffusion", "trajectory", trajectory_logz - 3.0),
-                _row(variant, "sorted-spike-state-space-fragmented", "trajectory", trajectory_logz - 2.0),
-                _row(variant, "sorted-spike-state-space-first-order-imm", "trajectory", trajectory_logz),
+                _row(
+                    variant,
+                    "sorted-spike-state-space-stationary",
+                    "nontrajectory",
+                    stationary_logz,
+                    n_spikes=n_spikes,
+                    n_time=n_time,
+                ),
+                _row(
+                    variant,
+                    "sorted-spike-state-space-diffusion",
+                    "trajectory",
+                    trajectory_logz - 3.0,
+                    n_spikes=n_spikes,
+                    n_time=n_time,
+                ),
+                _row(
+                    variant,
+                    "sorted-spike-state-space-fragmented",
+                    "trajectory",
+                    trajectory_logz - 2.0,
+                    n_spikes=n_spikes,
+                    n_time=n_time,
+                ),
+                _row(
+                    variant,
+                    "sorted-spike-state-space-first-order-imm",
+                    "trajectory",
+                    trajectory_logz,
+                    n_spikes=n_spikes,
+                    n_time=n_time,
+                ),
                 _row(
                     variant,
                     "sorted-spike-state-space-momentum-exact-sparse",
                     "trajectory",
                     trajectory_logz - 1.0,
+                    n_spikes=n_spikes,
+                    n_time=n_time,
                 ),
             ]
         )
@@ -76,14 +113,29 @@ def test_event_window_aggregator_compares_variants_to_core(tmp_path):
     summary = pd.read_csv(out / "event_window_family_margin_summary.csv")
     comparison = pd.read_csv(out / "event_window_comparison_to_core.csv")
     gates = pd.read_csv(out / "event_window_control_gate_summary.csv")
+    normalized = pd.read_csv(out / "event_window_observation_normalized_summary.csv")
+    spike_counts = pd.read_csv(out / "event_window_spike_count_summary.csv")
+    attenuation = pd.read_csv(out / "event_window_core_matched_attenuation.csv")
+    gates_v2 = pd.read_csv(out / "event_window_control_gate_summary_v2.csv")
 
     core = summary.set_index("event_window_variant").loc["core"]
     shifted = comparison.set_index("event_window_variant").loc["shifted_pre"]
     overall = gates.set_index("gate").loc["overall"]
+    core_normalized = normalized.set_index("event_window_variant").loc["core"]
+    shifted_spikes = spike_counts.set_index("event_window_variant").loc["shifted_pre"]
+    shifted_attenuation = attenuation.set_index("event_window_variant").loc["shifted_pre"]
+    gate_v2 = gates_v2.set_index("gate")
     assert core["trajectory_confident_claims"] == 1
     assert shifted["mean_best_trajectory_log_evidence_minus_core"] < 0.0
     assert shifted["mean_family_margin_minus_core"] < 0.0
     assert bool(overall["passed"])
+    assert core_normalized["mean_best_trajectory_log_evidence_per_time_bin"] == pytest.approx(2.0)
+    assert shifted_spikes["mean_n_spikes"] == pytest.approx(10.0)
+    assert shifted_attenuation["mean_n_spikes_minus_core"] == pytest.approx(-10.0)
+    assert shifted_attenuation["mean_best_trajectory_log_evidence_per_spike_minus_core"] < 0.0
+    assert bool(gate_v2.loc["overall_primary", "passed"])
+    assert gate_v2.loc["shifted_windows_observation_mismatch_diagnostic", "gate_type"] == "diagnostic"
+    assert "event_window_spike_count_summary.csv" in {path.name for path in out.iterdir()}
 
 
 def test_event_window_sensitivity_workflow_runs_named_variants():
@@ -103,6 +155,10 @@ def test_event_window_sensitivity_workflow_runs_named_variants():
     )
     assert "shard_status.csv" in workflow
     assert "event_window_shard_status.csv" in workflow
+    assert "event_window_observation_normalized_summary.csv" in workflow
+    assert "event_window_spike_count_summary.csv" in workflow
+    assert "event_window_core_matched_attenuation.csv" in workflow
+    assert "event_window_control_gate_summary_v2.csv" in workflow
     assert "needs.plan-session-event-shards.result == 'success'" in workflow
     assert "scripts/aggregate_event_window_sensitivity.py" in workflow
     assert "event-window-sensitivity-${{ github.run_id }}" in workflow
@@ -113,6 +169,9 @@ def _row(
     model: str,
     family: str,
     log_evidence: float,
+    *,
+    n_spikes: int = 20,
+    n_time: int = 10,
 ) -> dict[str, object]:
     return {
         "status": "success",
@@ -129,8 +188,8 @@ def _row(
         "requested_model": model,
         "model_family": family,
         "log_evidence": log_evidence,
-        "n_time": 10,
-        "n_spikes": 20,
+        "n_time": n_time,
+        "n_spikes": n_spikes,
         "runtime_s": 0.1,
         "error": "",
         "bin_size_cm": 6.0,

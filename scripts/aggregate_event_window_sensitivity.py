@@ -59,8 +59,24 @@ def aggregate_event_window_sensitivity(
         outdir / "event_window_comparison_to_core.csv",
         index=False,
     )
+    event_window_observation_normalized_summary(decisions).to_csv(
+        outdir / "event_window_observation_normalized_summary.csv",
+        index=False,
+    )
+    event_window_spike_count_summary(decisions).to_csv(
+        outdir / "event_window_spike_count_summary.csv",
+        index=False,
+    )
+    event_window_core_matched_attenuation(decisions, core_variant=core_variant).to_csv(
+        outdir / "event_window_core_matched_attenuation.csv",
+        index=False,
+    )
     event_window_control_gate_summary(decisions, core_variant=core_variant).to_csv(
         outdir / "event_window_control_gate_summary.csv",
+        index=False,
+    )
+    event_window_control_gate_summary_v2(decisions, core_variant=core_variant).to_csv(
+        outdir / "event_window_control_gate_summary_v2.csv",
         index=False,
     )
     return combined
@@ -113,6 +129,18 @@ def _numeric_column(frame: pd.DataFrame, column: str) -> pd.Series:
     return pd.to_numeric(frame[column], errors="coerce")
 
 
+def _first_numeric_value(frame: pd.DataFrame, column: str) -> float:
+    values = _numeric_column(frame, column).dropna()
+    if values.empty:
+        return np.nan
+    return float(values.iloc[0])
+
+
+def _safe_divide(numerator: pd.Series, denominator: pd.Series) -> pd.Series:
+    denom = pd.to_numeric(denominator, errors="coerce").replace(0.0, np.nan)
+    return pd.to_numeric(numerator, errors="coerce") / denom
+
+
 def event_window_family_margin_decisions(
     frame: pd.DataFrame,
     *,
@@ -136,6 +164,8 @@ def event_window_family_margin_decisions(
     rows: list[dict[str, object]] = []
     for key, group in ok.groupby(["session", "event_index", "event_window_variant"], sort=True):
         session, event_index, variant = key
+        n_spikes = _first_numeric_value(group, "n_spikes")
+        n_time = _first_numeric_value(group, "n_time")
         core = group[group["model"].astype(str).isin(required_set)].dropna(subset=["log_evidence"]).copy()
         present = tuple(model for model in required if model in set(core["model"].astype(str)))
         missing = tuple(model for model in required if model not in set(present))
@@ -176,6 +206,8 @@ def event_window_family_margin_decisions(
                 "session": str(session),
                 "event_index": int(event_index),
                 "event_window_variant": str(variant),
+                "n_spikes": n_spikes,
+                "n_time": n_time,
                 "required_models_present": int(len(present)),
                 "required_models_total": int(len(required)),
                 "required_models_complete": bool(complete),
@@ -194,6 +226,246 @@ def event_window_family_margin_decisions(
             }
         )
     return pd.DataFrame(rows)
+
+
+def _with_normalized_decision_metrics(decisions: pd.DataFrame) -> pd.DataFrame:
+    out = decisions.copy()
+    if out.empty:
+        return out
+    out["best_trajectory_log_evidence_per_time_bin"] = _safe_divide(
+        out["best_trajectory_log_evidence"], out["n_time"]
+    )
+    out["best_trajectory_log_evidence_per_spike"] = _safe_divide(
+        out["best_trajectory_log_evidence"], out["n_spikes"]
+    )
+    out["trajectory_minus_nontrajectory_log_evidence_per_time_bin"] = _safe_divide(
+        out["trajectory_minus_nontrajectory_log_evidence"], out["n_time"]
+    )
+    out["trajectory_minus_nontrajectory_log_evidence_per_spike"] = _safe_divide(
+        out["trajectory_minus_nontrajectory_log_evidence"], out["n_spikes"]
+    )
+    return out
+
+
+def event_window_observation_normalized_summary(decisions: pd.DataFrame) -> pd.DataFrame:
+    """Summarize event-window evidence after normalizing by observation size."""
+
+    columns = [
+        "event_window_variant",
+        "events",
+        "mean_n_spikes",
+        "median_n_spikes",
+        "mean_n_time",
+        "median_n_time",
+        "mean_best_trajectory_log_evidence_per_time_bin",
+        "median_best_trajectory_log_evidence_per_time_bin",
+        "mean_best_trajectory_log_evidence_per_spike",
+        "median_best_trajectory_log_evidence_per_spike",
+        "mean_family_margin_per_time_bin",
+        "median_family_margin_per_time_bin",
+        "mean_family_margin_per_spike",
+        "median_family_margin_per_spike",
+    ]
+    if decisions.empty:
+        return pd.DataFrame(columns=columns)
+
+    normalized = _with_normalized_decision_metrics(decisions)
+    rows: list[dict[str, object]] = []
+    for variant, group in normalized.groupby("event_window_variant", sort=True):
+        rows.append(
+            {
+                "event_window_variant": str(variant),
+                "events": int(len(group)),
+                "mean_n_spikes": float(_numeric_column(group, "n_spikes").mean()),
+                "median_n_spikes": float(_numeric_column(group, "n_spikes").median()),
+                "mean_n_time": float(_numeric_column(group, "n_time").mean()),
+                "median_n_time": float(_numeric_column(group, "n_time").median()),
+                "mean_best_trajectory_log_evidence_per_time_bin": float(
+                    _numeric_column(group, "best_trajectory_log_evidence_per_time_bin").mean()
+                ),
+                "median_best_trajectory_log_evidence_per_time_bin": float(
+                    _numeric_column(group, "best_trajectory_log_evidence_per_time_bin").median()
+                ),
+                "mean_best_trajectory_log_evidence_per_spike": float(
+                    _numeric_column(group, "best_trajectory_log_evidence_per_spike").mean()
+                ),
+                "median_best_trajectory_log_evidence_per_spike": float(
+                    _numeric_column(group, "best_trajectory_log_evidence_per_spike").median()
+                ),
+                "mean_family_margin_per_time_bin": float(
+                    _numeric_column(
+                        group,
+                        "trajectory_minus_nontrajectory_log_evidence_per_time_bin",
+                    ).mean()
+                ),
+                "median_family_margin_per_time_bin": float(
+                    _numeric_column(
+                        group,
+                        "trajectory_minus_nontrajectory_log_evidence_per_time_bin",
+                    ).median()
+                ),
+                "mean_family_margin_per_spike": float(
+                    _numeric_column(
+                        group,
+                        "trajectory_minus_nontrajectory_log_evidence_per_spike",
+                    ).mean()
+                ),
+                "median_family_margin_per_spike": float(
+                    _numeric_column(
+                        group,
+                        "trajectory_minus_nontrajectory_log_evidence_per_spike",
+                    ).median()
+                ),
+            }
+        )
+    return pd.DataFrame(rows, columns=columns)
+
+
+def event_window_spike_count_summary(decisions: pd.DataFrame) -> pd.DataFrame:
+    """Summarize observation counts by event-window variant."""
+
+    columns = [
+        "event_window_variant",
+        "events",
+        "mean_n_spikes",
+        "median_n_spikes",
+        "min_n_spikes",
+        "max_n_spikes",
+        "mean_n_time",
+        "median_n_time",
+        "min_n_time",
+        "max_n_time",
+    ]
+    if decisions.empty:
+        return pd.DataFrame(columns=columns)
+    rows: list[dict[str, object]] = []
+    for variant, group in decisions.groupby("event_window_variant", sort=True):
+        n_spikes = _numeric_column(group, "n_spikes")
+        n_time = _numeric_column(group, "n_time")
+        rows.append(
+            {
+                "event_window_variant": str(variant),
+                "events": int(len(group)),
+                "mean_n_spikes": float(n_spikes.mean()),
+                "median_n_spikes": float(n_spikes.median()),
+                "min_n_spikes": float(n_spikes.min()),
+                "max_n_spikes": float(n_spikes.max()),
+                "mean_n_time": float(n_time.mean()),
+                "median_n_time": float(n_time.median()),
+                "min_n_time": float(n_time.min()),
+                "max_n_time": float(n_time.max()),
+            }
+        )
+    return pd.DataFrame(rows, columns=columns)
+
+
+def event_window_core_matched_attenuation(
+    decisions: pd.DataFrame,
+    *,
+    core_variant: str = "core",
+) -> pd.DataFrame:
+    """Compare each window variant with core after matching events."""
+
+    columns = [
+        "event_window_variant",
+        "core_variant",
+        "matched_events",
+        "mean_n_spikes_minus_core",
+        "median_n_spikes_minus_core",
+        "mean_n_time_minus_core",
+        "median_n_time_minus_core",
+        "mean_best_trajectory_log_evidence_minus_core",
+        "median_best_trajectory_log_evidence_minus_core",
+        "fraction_best_trajectory_log_evidence_below_core",
+        "mean_best_trajectory_log_evidence_per_time_bin_minus_core",
+        "median_best_trajectory_log_evidence_per_time_bin_minus_core",
+        "fraction_best_trajectory_log_evidence_per_time_bin_below_core",
+        "mean_best_trajectory_log_evidence_per_spike_minus_core",
+        "median_best_trajectory_log_evidence_per_spike_minus_core",
+        "fraction_best_trajectory_log_evidence_per_spike_below_core",
+        "mean_family_margin_minus_core",
+        "median_family_margin_minus_core",
+        "fraction_family_margin_below_core",
+        "mean_family_margin_per_time_bin_minus_core",
+        "median_family_margin_per_time_bin_minus_core",
+        "fraction_family_margin_per_time_bin_below_core",
+        "mean_family_margin_per_spike_minus_core",
+        "median_family_margin_per_spike_minus_core",
+        "fraction_family_margin_per_spike_below_core",
+    ]
+    if decisions.empty:
+        return pd.DataFrame(columns=columns)
+
+    normalized = _with_normalized_decision_metrics(decisions)
+    index_cols = ["session", "event_index"]
+    core = normalized[normalized["event_window_variant"].astype(str).eq(core_variant)].set_index(index_cols)
+    rows: list[dict[str, object]] = []
+    for variant, group in normalized.groupby("event_window_variant", sort=True):
+        current = group.set_index(index_cols)
+        matched = current.join(core, lsuffix="_variant", rsuffix="_core", how="inner")
+        if matched.empty:
+            continue
+
+        def delta(column: str) -> pd.Series:
+            return (
+                pd.to_numeric(matched[f"{column}_variant"], errors="coerce")
+                - pd.to_numeric(matched[f"{column}_core"], errors="coerce")
+            )
+
+        def below_core(values: pd.Series) -> float:
+            clean = values.dropna()
+            return float((clean < 0.0).mean()) if not clean.empty else np.nan
+
+        best_delta = delta("best_trajectory_log_evidence")
+        best_per_time_delta = delta("best_trajectory_log_evidence_per_time_bin")
+        best_per_spike_delta = delta("best_trajectory_log_evidence_per_spike")
+        margin_delta = delta("trajectory_minus_nontrajectory_log_evidence")
+        margin_per_time_delta = delta("trajectory_minus_nontrajectory_log_evidence_per_time_bin")
+        margin_per_spike_delta = delta("trajectory_minus_nontrajectory_log_evidence_per_spike")
+        n_spikes_delta = delta("n_spikes")
+        n_time_delta = delta("n_time")
+        rows.append(
+            {
+                "event_window_variant": str(variant),
+                "core_variant": core_variant,
+                "matched_events": int(len(matched)),
+                "mean_n_spikes_minus_core": float(n_spikes_delta.mean()),
+                "median_n_spikes_minus_core": float(n_spikes_delta.median()),
+                "mean_n_time_minus_core": float(n_time_delta.mean()),
+                "median_n_time_minus_core": float(n_time_delta.median()),
+                "mean_best_trajectory_log_evidence_minus_core": float(best_delta.mean()),
+                "median_best_trajectory_log_evidence_minus_core": float(best_delta.median()),
+                "fraction_best_trajectory_log_evidence_below_core": below_core(best_delta),
+                "mean_best_trajectory_log_evidence_per_time_bin_minus_core": float(
+                    best_per_time_delta.mean()
+                ),
+                "median_best_trajectory_log_evidence_per_time_bin_minus_core": float(
+                    best_per_time_delta.median()
+                ),
+                "fraction_best_trajectory_log_evidence_per_time_bin_below_core": below_core(
+                    best_per_time_delta
+                ),
+                "mean_best_trajectory_log_evidence_per_spike_minus_core": float(
+                    best_per_spike_delta.mean()
+                ),
+                "median_best_trajectory_log_evidence_per_spike_minus_core": float(
+                    best_per_spike_delta.median()
+                ),
+                "fraction_best_trajectory_log_evidence_per_spike_below_core": below_core(
+                    best_per_spike_delta
+                ),
+                "mean_family_margin_minus_core": float(margin_delta.mean()),
+                "median_family_margin_minus_core": float(margin_delta.median()),
+                "fraction_family_margin_below_core": below_core(margin_delta),
+                "mean_family_margin_per_time_bin_minus_core": float(margin_per_time_delta.mean()),
+                "median_family_margin_per_time_bin_minus_core": float(margin_per_time_delta.median()),
+                "fraction_family_margin_per_time_bin_below_core": below_core(margin_per_time_delta),
+                "mean_family_margin_per_spike_minus_core": float(margin_per_spike_delta.mean()),
+                "median_family_margin_per_spike_minus_core": float(margin_per_spike_delta.median()),
+                "fraction_family_margin_per_spike_below_core": below_core(margin_per_spike_delta),
+            }
+        )
+    return pd.DataFrame(rows, columns=columns).sort_values("event_window_variant")
 
 
 def event_window_family_margin_summary(
@@ -376,6 +648,168 @@ def event_window_control_gate_summary(decisions: pd.DataFrame, *, core_variant: 
     return pd.DataFrame(rows)
 
 
+def event_window_control_gate_summary_v2(
+    decisions: pd.DataFrame,
+    *,
+    core_variant: str = "core",
+) -> pd.DataFrame:
+    """Report observation-aware event-window control checks.
+
+    The v1 gate intentionally remains available for backward compatibility. The
+    v2 table treats shifted windows as diagnostics when their spike/time-bin
+    counts differ from core, because raw log evidence is not directly comparable
+    across different observations.
+    """
+
+    summary = event_window_family_margin_summary(decisions)
+    normalized = event_window_observation_normalized_summary(decisions)
+    matched = event_window_core_matched_attenuation(decisions, core_variant=core_variant)
+    by_variant = summary.set_index("event_window_variant") if not summary.empty else pd.DataFrame()
+    rows: list[dict[str, object]] = []
+
+    core = by_variant.loc[core_variant] if core_variant in by_variant.index else None
+    _append_gate_v2(
+        rows,
+        "core_window_present",
+        "primary",
+        core is not None,
+        "" if core is None else int(core["events"]),
+        "core window has scored events",
+    )
+    if core is not None:
+        _append_gate_v2(
+            rows,
+            "core_window_strong_trajectory_family",
+            "primary",
+            float(core["trajectory_confident_claim_fraction"]) >= 0.5,
+            round(float(core["trajectory_confident_claim_fraction"]), 3),
+            "core trajectory confident-claim fraction >= 0.5",
+        )
+        _append_gate_v2(
+            rows,
+            "core_window_no_nontrajectory_claims",
+            "primary",
+            int(core["nontrajectory_confident_claims"]) == 0,
+            int(core["nontrajectory_confident_claims"]),
+            "core nontrajectory confident claims == 0",
+        )
+
+    boundary = normalized[
+        normalized["event_window_variant"].astype(str).str.contains(
+            "contracted|expanded",
+            case=False,
+            regex=True,
+        )
+    ]
+    boundary_positive = bool(boundary.empty) or bool(
+        (
+            (boundary["mean_family_margin_per_time_bin"].astype(float) > 0.0)
+            & (boundary["mean_family_margin_per_spike"].astype(float) > 0.0)
+        ).all()
+    )
+    boundary_observed = (
+        ""
+        if boundary.empty
+        else (
+            "min mean margin/time="
+            f"{float(boundary['mean_family_margin_per_time_bin'].min()):.3f}; "
+            "min mean margin/spike="
+            f"{float(boundary['mean_family_margin_per_spike'].min()):.3f}"
+        )
+    )
+    _append_gate_v2(
+        rows,
+        "contracted_expanded_observation_normalized_positive",
+        "primary",
+        boundary_positive,
+        boundary_observed,
+        "contracted/expanded mean family margin per time bin and per spike > 0",
+    )
+
+    shifted = matched[
+        matched["event_window_variant"].astype(str).str.contains("shift", case=False, regex=True)
+    ]
+    shifted_has_observation_difference = False
+    shifted_observed = ""
+    if not shifted.empty:
+        max_spike_difference = float(shifted["mean_n_spikes_minus_core"].abs().max())
+        max_time_difference = float(shifted["mean_n_time_minus_core"].abs().max())
+        shifted_has_observation_difference = bool(max_spike_difference > 0.0 or max_time_difference > 0.0)
+        shifted_observed = (
+            f"max |mean spikes-core|={max_spike_difference:.3f}; "
+            f"max |mean time-core|={max_time_difference:.3f}"
+        )
+    _append_gate_v2(
+        rows,
+        "shifted_windows_observation_mismatch_diagnostic",
+        "diagnostic",
+        bool(not shifted.empty),
+        shifted_observed,
+        "shifted windows are diagnostic when spike/time-bin observations differ from core",
+    )
+
+    shifted_norm = normalized[
+        normalized["event_window_variant"].astype(str).str.contains("shift", case=False, regex=True)
+    ]
+    shifted_norm_observed = ""
+    if not shifted_norm.empty:
+        shifted_norm_observed = (
+            "min mean margin/time="
+            f"{float(shifted_norm['mean_family_margin_per_time_bin'].min()):.3f}; "
+            "min mean margin/spike="
+            f"{float(shifted_norm['mean_family_margin_per_spike'].min()):.3f}"
+        )
+    _append_gate_v2(
+        rows,
+        "shifted_windows_normalized_family_margin_diagnostic",
+        "diagnostic",
+        bool(not shifted_norm.empty),
+        shifted_norm_observed,
+        "inspect shifted-window normalized family margins; do not use raw evidence as a pass/fail gate",
+    )
+
+    shifted_core_matched = shifted
+    shifted_core_observed = ""
+    if not shifted_core_matched.empty:
+        shifted_core_observed = (
+            "max mean normalized margin change/time="
+            f"{float(shifted_core_matched['mean_family_margin_per_time_bin_minus_core'].max()):.3f}; "
+            "max mean normalized margin change/spike="
+            f"{float(shifted_core_matched['mean_family_margin_per_spike_minus_core'].max()):.3f}"
+        )
+    _append_gate_v2(
+        rows,
+        "shifted_windows_core_matched_attenuation_diagnostic",
+        "diagnostic",
+        bool(not shifted_core_matched.empty),
+        shifted_core_observed,
+        "inspect core-matched normalized attenuation and observation-count deltas",
+    )
+
+    primary_rows = [row for row in rows if row["gate_type"] == "primary"]
+    primary_passed = all(bool(row["passed"]) for row in primary_rows)
+    rows.append(
+        {
+            "gate": "overall_primary",
+            "gate_type": "primary",
+            "passed": bool(primary_passed),
+            "observed": f"{sum(bool(row['passed']) for row in primary_rows)}/{len(primary_rows)} primary gates passed",
+            "criterion": "all primary event-window sensitivity gates pass; shifted windows are diagnostics",
+        }
+    )
+    if shifted_has_observation_difference:
+        rows.append(
+            {
+                "gate": "shifted_window_raw_evidence_not_standalone",
+                "gate_type": "interpretation",
+                "passed": True,
+                "observed": shifted_observed,
+                "criterion": "raw shifted-window evidence is not a standalone null statistic when observations differ",
+            }
+        )
+    return pd.DataFrame(rows)
+
+
 def _append_gate(
     rows: list[dict[str, object]],
     gate: str,
@@ -386,6 +820,25 @@ def _append_gate(
     rows.append(
         {
             "gate": gate,
+            "passed": bool(passed),
+            "observed": observed,
+            "criterion": criterion,
+        }
+    )
+
+
+def _append_gate_v2(
+    rows: list[dict[str, object]],
+    gate: str,
+    gate_type: str,
+    passed: bool,
+    observed: object,
+    criterion: str,
+) -> None:
+    rows.append(
+        {
+            "gate": gate,
+            "gate_type": gate_type,
             "passed": bool(passed),
             "observed": observed,
             "criterion": criterion,
@@ -414,6 +867,14 @@ def main() -> int:
     print(pd.read_csv(out / "event_window_comparison_to_core.csv").to_string(index=False))
     print("\nEvent-window control gates:")
     print(pd.read_csv(out / "event_window_control_gate_summary.csv").to_string(index=False))
+    print("\nEvent-window observation-normalized summary:")
+    print(pd.read_csv(out / "event_window_observation_normalized_summary.csv").to_string(index=False))
+    print("\nEvent-window spike-count summary:")
+    print(pd.read_csv(out / "event_window_spike_count_summary.csv").to_string(index=False))
+    print("\nEvent-window core-matched attenuation:")
+    print(pd.read_csv(out / "event_window_core_matched_attenuation.csv").to_string(index=False))
+    print("\nEvent-window control gates v2:")
+    print(pd.read_csv(out / "event_window_control_gate_summary_v2.csv").to_string(index=False))
     print(f"\nRows: {len(combined)}")
     if "status" in combined:
         print(f"Failures: {int((combined['status'] != 'success').sum())}")

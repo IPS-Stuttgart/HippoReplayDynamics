@@ -1,0 +1,896 @@
+#!/usr/bin/env python3
+"""Score spike-matched off-SWR null windows for replay evidence controls."""
+
+from __future__ import annotations
+
+import argparse
+import glob
+import math
+import time
+from pathlib import Path
+from types import SimpleNamespace
+
+import numpy as np
+import pandas as pd
+
+from benchmark_model_evidence import _check_session, _events, _postprocess_evidence_scores, _session_path
+from benchmark_model_evidence_improved import (
+    DEFAULT_IMPROVED_STATE_SPACE_IMM_SWITCH_TAU_S,
+    DEFAULT_IMPROVED_STATE_SPACE_MOMENTUM_PREDICTED_CANDIDATE_TOP_K,
+    _family,
+    _models,
+    _run_settings,
+)
+from aggregate_event_window_sensitivity import (
+    DEFAULT_EXACT_TRAJECTORY_MODELS,
+    DEFAULT_MARGIN_THRESHOLD,
+    DEFAULT_REQUIRED_MODELS,
+)
+from hipporeplayimm.clusterless import (
+    ClusterlessStateSpaceReplayModel,
+    build_clusterless_mark_emissions,
+    fit_clusterless_mark_encoding,
+)
+from hipporeplayimm.data import ReplaySession, load_replay_session
+from hipporeplayimm.encoding import EmissionConfig, EncodingConfig, fit_place_field_encoding
+from hipporeplayimm.position_validation import (
+    VALIDATED_POSITION_BIN_SIZE_CM,
+    VALIDATED_POSITION_MIN_SPEED_CM_S,
+    VALIDATED_POSITION_SMOOTHING_SIGMA_BINS,
+)
+from hipporeplayimm.result_improvement_extensions import (
+    ReplayEmissionCalibration,
+    build_sorted_emissions_with_replay_calibration,
+    score_replay_model_compat,
+)
+
+DEFAULT_MATCHED_NULL_MODELS = (
+    "sorted-spike-state-space-stationary "
+    "sorted-spike-state-space-diffusion "
+    "sorted-spike-state-space-fragmented "
+    "sorted-spike-state-space-first-order-imm "
+    "sorted-spike-state-space-momentum-exact-sparse "
+    "sorted-spike-state-space-momentum "
+    "sorted-spike-state-space-imm"
+)
+
+
+def spike_matched_null_windows(
+    session: ReplaySession,
+    event_index: int,
+    *,
+    nulls_per_event: int,
+    random_seed: int,
+    spike_count_tolerance_fraction: float = 0.10,
+    active_cell_tolerance: int | None = None,
+    candidate_step_s: float | None = None,
+    exclusion_padding_s: float = 0.0,
+    restrict_to_run_times: bool = True,
+) -> pd.DataFrame:
+    """Return off-SWR windows matched to one replay event's spike load."""
+
+    event = session.ripple(int(event_index))
+    duration = float(event.end) - float(event.start)
+    if duration <= 0.0:
+        raise ValueError(f"event {event_index} has non-positive duration")
+    spikes = session.excitatory_spikes()
+    real_count, real_active = _spike_count_and_active_cells(spikes, float(event.start), float(event.end))
+    candidates = _candidate_null_windows(
+        session,
+        duration_s=duration,
+        candidate_step_s=candidate_step_s,
+        exclusion_padding_s=exclusion_padding_s,
+        restrict_to_run_times=restrict_to_run_times,
+    )
+    if candidates.empty:
+        return candidates
+    counts: list[int] = []
+    active_counts: list[int] = []
+    for row in candidates.itertuples(index=False):
+        count, active = _spike_count_and_active_cells(spikes, float(row.window_start_s), float(row.window_end_s))
+        counts.append(count)
+        active_counts.append(active)
+    candidates = candidates.copy()
+    candidates["null_n_spikes"] = counts
+    candidates["null_active_cell_count"] = active_counts
+    candidates["real_n_spikes"] = int(real_count)
+    candidates["real_active_cell_count"] = int(real_active)
+    candidates["n_spikes_delta"] = candidates["null_n_spikes"].astype(int) - int(real_count)
+    candidates["active_cell_count_delta"] = candidates["null_active_cell_count"].astype(int) - int(real_active)
+    denominator = max(int(real_count), 1)
+    candidates["n_spikes_relative_delta"] = candidates["n_spikes_delta"].astype(float) / float(denominator)
+    within_spike_tolerance = (
+        candidates["n_spikes_delta"].abs()
+        <= max(1.0, float(spike_count_tolerance_fraction) * float(denominator))
+    )
+    if active_cell_tolerance is not None:
+        within_active_tolerance = candidates["active_cell_count_delta"].abs() <= int(active_cell_tolerance)
+    else:
+        within_active_tolerance = pd.Series(True, index=candidates.index)
+    eligible = candidates[within_spike_tolerance & within_active_tolerance].copy()
+    if len(eligible) < int(nulls_per_event):
+        eligible = candidates.copy()
+    rng = np.random.default_rng(int(random_seed) + 7919 * int(event_index))
+    eligible["random_tiebreaker"] = rng.random(len(eligible))
+    eligible["n_spikes_delta_abs"] = eligible["n_spikes_delta"].abs()
+    eligible["active_cell_count_delta_abs"] = eligible["active_cell_count_delta"].abs()
+    eligible = eligible.sort_values(
+        ["n_spikes_delta_abs", "active_cell_count_delta_abs", "random_tiebreaker", "window_start_s"],
+        kind="mergesort",
+    )
+    selected = eligible.head(int(nulls_per_event)).copy()
+    selected["null_index"] = np.arange(len(selected), dtype=int)
+    selected["matched_null_rank"] = selected["null_index"].astype(int) + 1
+    selected["template_event_index"] = int(event_index)
+    selected["real_event_start_s"] = float(event.start)
+    selected["real_event_end_s"] = float(event.end)
+    selected["real_event_duration_s"] = float(duration)
+    return selected.drop(columns=["random_tiebreaker"], errors="ignore")
+
+
+def _candidate_null_windows(
+    session: ReplaySession,
+    *,
+    duration_s: float,
+    candidate_step_s: float | None,
+    exclusion_padding_s: float,
+    restrict_to_run_times: bool,
+) -> pd.DataFrame:
+    base_intervals = _base_candidate_intervals(session, restrict_to_run_times=restrict_to_run_times)
+    excluded = _padded_intervals(session.ripple_events[:, :2], padding_s=exclusion_padding_s)
+    step = float(candidate_step_s) if candidate_step_s and candidate_step_s > 0.0 else max(duration_s / 2.0, 0.001)
+    rows: list[dict[str, float | int | bool]] = []
+    for interval_start, interval_end in base_intervals:
+        last_start = float(interval_end) - float(duration_s)
+        if last_start < float(interval_start):
+            continue
+        starts = np.arange(float(interval_start), last_start + step * 0.5, step)
+        for start in starts:
+            end = float(start) + float(duration_s)
+            if end > float(interval_end) + 1e-9:
+                continue
+            if _overlaps_any(float(start), float(end), excluded):
+                continue
+            rows.append(
+                {
+                    "window_start_s": float(start),
+                    "window_end_s": float(end),
+                    "window_duration_s": float(duration_s),
+                    "off_swr": True,
+                    "restrict_to_run_times": bool(restrict_to_run_times),
+                }
+            )
+    return pd.DataFrame(rows)
+
+
+def _base_candidate_intervals(session: ReplaySession, *, restrict_to_run_times: bool) -> np.ndarray:
+    if restrict_to_run_times and session.run_times.size:
+        return np.asarray(session.run_times, dtype=float).reshape(-1, 2)
+    starts: list[float] = []
+    ends: list[float] = []
+    if session.position.size:
+        starts.append(float(np.nanmin(session.position[:, 0])))
+        ends.append(float(np.nanmax(session.position[:, 0])))
+    if session.spikes.size:
+        starts.append(float(np.nanmin(session.spikes[:, 0])))
+        ends.append(float(np.nanmax(session.spikes[:, 0])))
+    if session.ripple_events.size:
+        starts.append(float(np.nanmin(session.ripple_events[:, 0])))
+        ends.append(float(np.nanmax(session.ripple_events[:, 1])))
+    if not starts or not ends:
+        return np.empty((0, 2), dtype=float)
+    return np.array([[min(starts), max(ends)]], dtype=float)
+
+
+def _padded_intervals(intervals: np.ndarray, *, padding_s: float) -> np.ndarray:
+    arr = np.asarray(intervals, dtype=float).reshape(-1, 2)
+    if arr.size == 0:
+        return np.empty((0, 2), dtype=float)
+    out = arr.copy()
+    out[:, 0] -= float(padding_s)
+    out[:, 1] += float(padding_s)
+    return out
+
+
+def _overlaps_any(start: float, end: float, intervals: np.ndarray) -> bool:
+    if intervals.size == 0:
+        return False
+    return bool(np.any((start < intervals[:, 1]) & (end > intervals[:, 0])))
+
+
+def _spike_count_and_active_cells(spikes: np.ndarray, start: float, end: float) -> tuple[int, int]:
+    if spikes.size == 0:
+        return 0, 0
+    mask = (spikes[:, 0] >= float(start)) & (spikes[:, 0] < float(end))
+    selected = spikes[mask]
+    if selected.size == 0:
+        return 0, 0
+    return int(selected.shape[0]), int(np.unique(selected[:, 1].astype(int)).size)
+
+
+def score_matched_nulls(args: argparse.Namespace) -> pd.DataFrame:
+    """Score real core windows and spike-matched null windows."""
+
+    session_dir = _session_path(args.dataset_root, args.session)
+    _check_session(session_dir)
+    session = load_replay_session(session_dir)
+    event_ids = _events(args.events, session)
+    if args.max_events is not None:
+        event_ids = event_ids[: args.max_events]
+
+    encoding = fit_place_field_encoding(
+        session,
+        EncodingConfig(
+            bin_size_cm=args.bin_size_cm,
+            smoothing_sigma_bins=args.smoothing_sigma_bins,
+            min_speed_cm_s=args.min_speed_cm_s,
+            min_occupancy_s=args.min_occupancy_s,
+            rate_floor_hz=args.rate_floor_hz,
+        ),
+    )
+    models = _models(args, session, encoding=encoding)
+    has_clusterless = any(isinstance(model, ClusterlessStateSpaceReplayModel) for model in models.values())
+    clusterless_encoding = fit_clusterless_mark_encoding(session, _clusterless_mark_config(args)) if has_clusterless else None
+    emissions_cfg = EmissionConfig(
+        time_bin_s=args.time_bin_s,
+        spike_rate_scale=args.spike_rate_scale,
+        likelihood_temperature=args.emission_likelihood_temperature,
+        negative_binomial_overdispersion=args.emission_negative_binomial_overdispersion,
+    )
+    sorted_calibration = ReplayEmissionCalibration(
+        gain_mode=args.replay_gain_mode,
+        gain_prior_count=args.replay_gain_prior_count,
+        max_gain=args.replay_gain_max_gain,
+        emission_model=args.sorted_spike_emission_model,
+        negative_binomial_dispersion=args.negative_binomial_dispersion,
+    )
+
+    rows: list[dict[str, object]] = []
+    for event_id in event_ids:
+        event = session.ripple(int(event_id))
+        real_count, real_active = _spike_count_and_active_cells(
+            session.excitatory_spikes(),
+            float(event.start),
+            float(event.end),
+        )
+        window_rows = [
+            {
+                "window_role": "real",
+                "event_window_variant": "core",
+                "null_index": -1,
+                "matched_null_rank": 0,
+                "template_event_index": int(event_id),
+                "window_start_s": float(event.start),
+                "window_end_s": float(event.end),
+                "window_duration_s": float(event.end - event.start),
+                "real_event_start_s": float(event.start),
+                "real_event_end_s": float(event.end),
+                "real_event_duration_s": float(event.end - event.start),
+                "real_n_spikes": int(real_count),
+                "real_active_cell_count": int(real_active),
+                "null_n_spikes": int(real_count),
+                "null_active_cell_count": int(real_active),
+                "n_spikes_delta": 0,
+                "active_cell_count_delta": 0,
+                "n_spikes_relative_delta": 0.0,
+                "off_swr": False,
+            }
+        ]
+        nulls = spike_matched_null_windows(
+            session,
+            int(event_id),
+            nulls_per_event=args.nulls_per_event,
+            random_seed=args.null_random_seed,
+            spike_count_tolerance_fraction=args.spike_count_tolerance_fraction,
+            active_cell_tolerance=args.active_cell_tolerance,
+            candidate_step_s=args.null_candidate_step_s,
+            exclusion_padding_s=args.swr_exclusion_padding_s,
+            restrict_to_run_times=not args.allow_non_run_nulls,
+        )
+        for row in nulls.to_dict("records"):
+            item = dict(row)
+            item["window_role"] = "matched_null"
+            item["event_window_variant"] = "matched_null"
+            window_rows.append(item)
+        for window_index, window in enumerate(window_rows):
+            _score_one_window(
+                args,
+                session,
+                encoding,
+                clusterless_encoding,
+                models,
+                emissions_cfg,
+                sorted_calibration,
+                event_id=int(event_id),
+                window_index=int(window_index),
+                window=window,
+                rows=rows,
+            )
+    return _postprocess_evidence_scores(pd.DataFrame(rows))
+
+
+def _score_one_window(
+    args: argparse.Namespace,
+    session: ReplaySession,
+    encoding,
+    clusterless_encoding,
+    models: dict[str, object],
+    emissions_cfg: EmissionConfig,
+    sorted_calibration: ReplayEmissionCalibration,
+    *,
+    event_id: int,
+    window_index: int,
+    window: dict[str, object],
+    rows: list[dict[str, object]],
+) -> None:
+    event_window = SimpleNamespace(
+        start=float(window["window_start_s"]),
+        end=float(window["window_end_s"]),
+    )
+    sorted_emissions = build_sorted_emissions_with_replay_calibration(
+        session,
+        encoding,
+        event_window,
+        emissions_cfg,
+        calibration=sorted_calibration,
+    )
+    if sorted_emissions.n_time == 0:
+        return
+    clusterless_emissions = (
+        build_clusterless_mark_emissions(session, clusterless_encoding, event_window, emissions_cfg)
+        if clusterless_encoding is not None
+        else None
+    )
+    window_settings = _window_settings(window, window_index=window_index)
+    for name, model in models.items():
+        start = time.perf_counter()
+        use_clusterless = isinstance(model, ClusterlessStateSpaceReplayModel)
+        emissions = clusterless_emissions if use_clusterless else sorted_emissions
+        bin_centers = clusterless_encoding.bin_centers if use_clusterless and clusterless_encoding is not None else encoding.bin_centers
+        occupancy_s = clusterless_encoding.occupancy_s if use_clusterless and clusterless_encoding is not None else encoding.occupancy_s
+        assert emissions is not None
+        try:
+            result = score_replay_model_compat(model, emissions, bin_centers, occupancy_s=occupancy_s)
+            model_name = str(result.model_name)
+            row: dict[str, object] = {
+                "status": "success",
+                "session": session.session_id,
+                "event_index": int(event_id),
+                **window_settings,
+                "model": model_name,
+                "requested_model": name,
+                "model_family": _family(model_name),
+                "log_evidence": float(result.log_likelihood),
+                "n_time": int(result.n_time),
+                "n_spikes": int(result.n_spikes),
+                "runtime_s": float(time.perf_counter() - start),
+                "error": "",
+                **_run_settings(args),
+                "matched_nulls_per_event": int(args.nulls_per_event),
+                "spike_count_tolerance_fraction": float(args.spike_count_tolerance_fraction),
+                "active_cell_tolerance": "" if args.active_cell_tolerance is None else int(args.active_cell_tolerance),
+                "null_candidate_step_s": "" if args.null_candidate_step_s is None else float(args.null_candidate_step_s),
+                "swr_exclusion_padding_s": float(args.swr_exclusion_padding_s),
+                "allow_non_run_nulls": bool(args.allow_non_run_nulls),
+            }
+            metadata = getattr(emissions, "metadata", {}) or {}
+            row.update({f"emission_{key}": value for key, value in metadata.items()})
+            row.update({f"diagnostic_{key}": value for key, value in result.diagnostics.items()})
+            rows.append(row)
+            print(
+                f"Scored {session.session_id} event {event_id} {window_settings['window_role']} "
+                f"{window_settings['null_index']} with {name}",
+                flush=True,
+            )
+        except Exception as exc:
+            rows.append(
+                {
+                    "status": "failure",
+                    "session": session.session_id,
+                    "event_index": int(event_id),
+                    **window_settings,
+                    "model": name,
+                    "requested_model": name,
+                    "model_family": _family(name),
+                    "log_evidence": np.nan,
+                    "n_time": int(emissions.n_time),
+                    "n_spikes": int(emissions.n_spikes),
+                    "runtime_s": float(time.perf_counter() - start),
+                    "error": f"{type(exc).__name__}: {exc}",
+                    **_run_settings(args),
+                }
+            )
+            if not args.continue_on_error:
+                raise
+
+
+def _window_settings(window: dict[str, object], *, window_index: int) -> dict[str, object]:
+    keys = [
+        "window_role",
+        "event_window_variant",
+        "null_index",
+        "matched_null_rank",
+        "template_event_index",
+        "window_start_s",
+        "window_end_s",
+        "window_duration_s",
+        "real_event_start_s",
+        "real_event_end_s",
+        "real_event_duration_s",
+        "real_n_spikes",
+        "real_active_cell_count",
+        "null_n_spikes",
+        "null_active_cell_count",
+        "n_spikes_delta",
+        "active_cell_count_delta",
+        "n_spikes_relative_delta",
+        "off_swr",
+        "restrict_to_run_times",
+    ]
+    out = {key: window.get(key, "") for key in keys}
+    out["window_index"] = int(window_index)
+    return out
+
+
+def _clusterless_mark_config(args: argparse.Namespace):
+    from benchmark_model_evidence_improved import _clusterless_mark_config as build_config
+
+    return build_config(args)
+
+
+def matched_null_family_margin_decisions(
+    frame: pd.DataFrame,
+    *,
+    required_models: tuple[str, ...] = DEFAULT_REQUIRED_MODELS,
+    trajectory_models: tuple[str, ...] = DEFAULT_EXACT_TRAJECTORY_MODELS,
+    margin_threshold: float = DEFAULT_MARGIN_THRESHOLD,
+) -> pd.DataFrame:
+    """Return best exact trajectory versus nontrajectory decisions for real/null windows."""
+
+    if frame.empty:
+        return pd.DataFrame()
+    required = tuple(str(model) for model in required_models)
+    required_set = set(required)
+    trajectory_set = set(str(model) for model in trajectory_models)
+    status_ok = frame["status"].eq("success") if "status" in frame else pd.Series(True, index=frame.index)
+    comparable = frame["evidence_comparable"].fillna(False).astype(bool) if "evidence_comparable" in frame else pd.Series(True, index=frame.index)
+    ok = frame[status_ok & comparable].copy()
+    rows: list[dict[str, object]] = []
+    group_cols = ["session", "event_index", "window_role", "null_index"]
+    for key, group in ok.groupby(group_cols, sort=True):
+        session, event_index, window_role, null_index = key
+        core = group[group["model"].astype(str).isin(required_set)].dropna(subset=["log_evidence"]).copy()
+        present = tuple(model for model in required if model in set(core["model"].astype(str)))
+        missing = tuple(model for model in required if model not in set(present))
+        trajectory = core[core["model"].astype(str).isin(trajectory_set)]
+        nontrajectory = core[~core["model"].astype(str).isin(trajectory_set)]
+        if trajectory.empty or nontrajectory.empty:
+            best_trajectory_model = ""
+            best_trajectory_log_evidence = np.nan
+            best_nontrajectory_model = ""
+            best_nontrajectory_log_evidence = np.nan
+            margin = np.nan
+            decision = "incomplete_core"
+        else:
+            best_trajectory = trajectory.sort_values("log_evidence", ascending=False).iloc[0]
+            best_nontrajectory = nontrajectory.sort_values("log_evidence", ascending=False).iloc[0]
+            best_trajectory_model = str(best_trajectory["model"])
+            best_trajectory_log_evidence = float(best_trajectory["log_evidence"])
+            best_nontrajectory_model = str(best_nontrajectory["model"])
+            best_nontrajectory_log_evidence = float(best_nontrajectory["log_evidence"])
+            margin = best_trajectory_log_evidence - best_nontrajectory_log_evidence
+            if missing:
+                decision = "incomplete_core"
+            elif margin >= float(margin_threshold):
+                decision = "trajectory"
+            elif margin <= -float(margin_threshold):
+                decision = "nontrajectory"
+            else:
+                decision = "ambiguous"
+        n_spikes = _first_numeric_value(group, "n_spikes")
+        n_time = _first_numeric_value(group, "n_time")
+        rows.append(
+            {
+                "session": str(session),
+                "rat": str(session).split("/")[0],
+                "event_index": int(event_index),
+                "window_role": str(window_role),
+                "null_index": int(null_index),
+                "window_start_s": _first_numeric_value(group, "window_start_s"),
+                "window_end_s": _first_numeric_value(group, "window_end_s"),
+                "window_duration_s": _first_numeric_value(group, "window_duration_s"),
+                "n_spikes": n_spikes,
+                "n_time": n_time,
+                "active_cell_count": _first_numeric_value(group, "null_active_cell_count"),
+                "real_n_spikes": _first_numeric_value(group, "real_n_spikes"),
+                "n_spikes_delta": _first_numeric_value(group, "n_spikes_delta"),
+                "n_spikes_relative_delta": _first_numeric_value(group, "n_spikes_relative_delta"),
+                "required_models_present": int(len(present)),
+                "required_models_total": int(len(required)),
+                "required_models_complete": bool(not missing),
+                "missing_required_models": " ".join(missing),
+                "margin_threshold": float(margin_threshold),
+                "best_trajectory_model": best_trajectory_model,
+                "best_trajectory_log_evidence": best_trajectory_log_evidence,
+                "best_nontrajectory_model": best_nontrajectory_model,
+                "best_nontrajectory_log_evidence": best_nontrajectory_log_evidence,
+                "trajectory_minus_nontrajectory_log_evidence": margin,
+                "best_trajectory_log_evidence_per_time_bin": _safe_ratio(best_trajectory_log_evidence, n_time),
+                "best_trajectory_log_evidence_per_spike": _safe_ratio(best_trajectory_log_evidence, n_spikes),
+                "trajectory_minus_nontrajectory_log_evidence_per_time_bin": _safe_ratio(margin, n_time),
+                "trajectory_minus_nontrajectory_log_evidence_per_spike": _safe_ratio(margin, n_spikes),
+                "trajectory_confident_claim": bool(decision == "trajectory"),
+                "nontrajectory_confident_claim": bool(decision == "nontrajectory"),
+                "margin_decision": decision,
+            }
+        )
+    return pd.DataFrame(rows)
+
+
+def matched_null_family_margin_summary(decisions: pd.DataFrame, *, group_cols: tuple[str, ...] = ("window_role",)) -> pd.DataFrame:
+    """Summarize real/null family-margin decisions."""
+
+    if decisions.empty:
+        return pd.DataFrame()
+    rows: list[dict[str, object]] = []
+    for key, group in decisions.groupby(list(group_cols), sort=True):
+        key_tuple = key if isinstance(key, tuple) else (key,)
+        margins = pd.to_numeric(group["trajectory_minus_nontrajectory_log_evidence"], errors="coerce")
+        row = {column: value for column, value in zip(group_cols, key_tuple, strict=True)}
+        row.update(
+            {
+                "windows": int(len(group)),
+                "events": int(group[["session", "event_index"]].drop_duplicates().shape[0]),
+                "required_complete_windows": int(group["required_models_complete"].fillna(False).astype(bool).sum()),
+                "trajectory_confident_claims": int(group["trajectory_confident_claim"].fillna(False).astype(bool).sum()),
+                "nontrajectory_confident_claims": int(group["nontrajectory_confident_claim"].fillna(False).astype(bool).sum()),
+                "ambiguous_windows": int((group["margin_decision"] == "ambiguous").sum()),
+                "mean_family_margin": float(margins.mean()),
+                "median_family_margin": float(margins.median()),
+                "mean_best_trajectory_log_evidence_per_spike": float(
+                    pd.to_numeric(group["best_trajectory_log_evidence_per_spike"], errors="coerce").mean()
+                ),
+                "median_best_trajectory_log_evidence_per_spike": float(
+                    pd.to_numeric(group["best_trajectory_log_evidence_per_spike"], errors="coerce").median()
+                ),
+                "mean_best_trajectory_log_evidence_per_time_bin": float(
+                    pd.to_numeric(group["best_trajectory_log_evidence_per_time_bin"], errors="coerce").mean()
+                ),
+                "median_best_trajectory_log_evidence_per_time_bin": float(
+                    pd.to_numeric(group["best_trajectory_log_evidence_per_time_bin"], errors="coerce").median()
+                ),
+            }
+        )
+        rows.append(row)
+    return pd.DataFrame(rows)
+
+
+def matched_null_empirical_p_values(decisions: pd.DataFrame) -> pd.DataFrame:
+    """Compute per-event empirical p-values from matched-null margins."""
+
+    if decisions.empty:
+        return pd.DataFrame()
+    rows: list[dict[str, object]] = []
+    for (session, event_index), group in decisions.groupby(["session", "event_index"], sort=True):
+        real = group[group["window_role"].astype(str).eq("real")]
+        nulls = group[group["window_role"].astype(str).eq("matched_null")]
+        if real.empty:
+            continue
+        real_row = real.sort_values("null_index").iloc[0]
+        null_margin = pd.to_numeric(nulls["trajectory_minus_nontrajectory_log_evidence"], errors="coerce").dropna()
+        real_margin = float(real_row["trajectory_minus_nontrajectory_log_evidence"])
+        null_best_per_spike = pd.to_numeric(nulls["best_trajectory_log_evidence_per_spike"], errors="coerce").dropna()
+        null_best_per_time = pd.to_numeric(nulls["best_trajectory_log_evidence_per_time_bin"], errors="coerce").dropna()
+        k = int(len(null_margin))
+        p_value = float((1 + int((null_margin >= real_margin).sum())) / (1 + k)) if k else np.nan
+        rows.append(
+            {
+                "session": str(session),
+                "rat": str(session).split("/")[0],
+                "event_index": int(event_index),
+                "matched_null_windows": k,
+                "empirical_p_value": p_value,
+                "real_family_margin": real_margin,
+                "median_null_family_margin": float(null_margin.median()) if k else np.nan,
+                "mean_null_family_margin": float(null_margin.mean()) if k else np.nan,
+                "real_minus_median_null_family_margin": real_margin - float(null_margin.median()) if k else np.nan,
+                "real_best_trajectory_log_evidence_per_spike": float(real_row["best_trajectory_log_evidence_per_spike"]),
+                "median_null_best_trajectory_log_evidence_per_spike": float(null_best_per_spike.median()) if not null_best_per_spike.empty else np.nan,
+                "real_minus_median_null_best_trajectory_log_evidence_per_spike": (
+                    float(real_row["best_trajectory_log_evidence_per_spike"]) - float(null_best_per_spike.median())
+                    if not null_best_per_spike.empty
+                    else np.nan
+                ),
+                "real_best_trajectory_log_evidence_per_time_bin": float(real_row["best_trajectory_log_evidence_per_time_bin"]),
+                "median_null_best_trajectory_log_evidence_per_time_bin": float(null_best_per_time.median()) if not null_best_per_time.empty else np.nan,
+                "real_minus_median_null_best_trajectory_log_evidence_per_time_bin": (
+                    float(real_row["best_trajectory_log_evidence_per_time_bin"]) - float(null_best_per_time.median())
+                    if not null_best_per_time.empty
+                    else np.nan
+                ),
+                "real_trajectory_confident_claim": bool(real_row["trajectory_confident_claim"]),
+                "real_nontrajectory_confident_claim": bool(real_row["nontrajectory_confident_claim"]),
+            }
+        )
+    return pd.DataFrame(rows)
+
+
+def matched_null_group_summary(p_values: pd.DataFrame, *, group_cols: tuple[str, ...]) -> pd.DataFrame:
+    if p_values.empty:
+        return pd.DataFrame()
+    rows: list[dict[str, object]] = []
+    for key, group in p_values.groupby(list(group_cols), sort=True):
+        key_tuple = key if isinstance(key, tuple) else (key,)
+        delta = pd.to_numeric(group["real_minus_median_null_family_margin"], errors="coerce")
+        row = {column: value for column, value in zip(group_cols, key_tuple, strict=True)}
+        row.update(_delta_summary(group, delta))
+        rows.append(row)
+    return pd.DataFrame(rows)
+
+
+def leave_one_rat_out_matched_null_summary(p_values: pd.DataFrame) -> pd.DataFrame:
+    if p_values.empty or "rat" not in p_values:
+        return pd.DataFrame()
+    rows: list[dict[str, object]] = []
+    for rat in sorted(p_values["rat"].dropna().astype(str).unique()):
+        group = p_values[p_values["rat"].astype(str) != rat]
+        delta = pd.to_numeric(group["real_minus_median_null_family_margin"], errors="coerce")
+        row = {"held_out_rat": rat}
+        row.update(_delta_summary(group, delta))
+        rows.append(row)
+    return pd.DataFrame(rows)
+
+
+def rat_bootstrap_matched_null_summary(
+    p_values: pd.DataFrame,
+    *,
+    random_seed: int = 1,
+    n_bootstrap: int = 2000,
+) -> pd.DataFrame:
+    if p_values.empty or "rat" not in p_values:
+        return pd.DataFrame()
+    rats = sorted(p_values["rat"].dropna().astype(str).unique())
+    if not rats:
+        return pd.DataFrame()
+    rng = np.random.default_rng(int(random_seed))
+    mean_values: list[float] = []
+    median_values: list[float] = []
+    for _ in range(int(n_bootstrap)):
+        sampled = rng.choice(rats, size=len(rats), replace=True)
+        pieces = [p_values[p_values["rat"].astype(str).eq(rat)] for rat in sampled]
+        sample = pd.concat(pieces, ignore_index=True)
+        delta = pd.to_numeric(sample["real_minus_median_null_family_margin"], errors="coerce").dropna()
+        if delta.empty:
+            continue
+        mean_values.append(float(delta.mean()))
+        median_values.append(float(delta.median()))
+    return pd.DataFrame(
+        [
+            {
+                "bootstrap_unit": "rat",
+                "bootstrap_samples": int(len(mean_values)),
+                "mean_delta_lower_95": float(np.quantile(mean_values, 0.025)) if mean_values else np.nan,
+                "mean_delta_median": float(np.quantile(mean_values, 0.5)) if mean_values else np.nan,
+                "mean_delta_upper_95": float(np.quantile(mean_values, 0.975)) if mean_values else np.nan,
+                "median_delta_lower_95": float(np.quantile(median_values, 0.025)) if median_values else np.nan,
+                "median_delta_median": float(np.quantile(median_values, 0.5)) if median_values else np.nan,
+                "median_delta_upper_95": float(np.quantile(median_values, 0.975)) if median_values else np.nan,
+            }
+        ]
+    )
+
+
+def matched_null_control_gate_summary(p_values: pd.DataFrame, bootstrap: pd.DataFrame) -> pd.DataFrame:
+    rows: list[dict[str, object]] = []
+    if p_values.empty:
+        return pd.DataFrame(
+            [{"gate": "overall", "passed": False, "observed": "no events", "criterion": "matched-null events exist"}]
+        )
+    delta = pd.to_numeric(p_values["real_minus_median_null_family_margin"], errors="coerce")
+    _append_gate(rows, "median_real_minus_null_family_margin_positive", float(delta.median()) > 0.0, float(delta.median()), "median real-minus-null family margin > 0")
+    _append_gate(rows, "majority_events_exceed_null_median", float((delta > 0.0).mean()) > 0.5, float((delta > 0.0).mean()), "majority of events have real margin > matched-null median")
+    rat_summary = matched_null_group_summary(p_values, group_cols=("rat",))
+    rat_medians = pd.to_numeric(rat_summary["median_real_minus_median_null_family_margin"], errors="coerce") if not rat_summary.empty else pd.Series(dtype=float)
+    _append_gate(rows, "per_rat_median_positive", bool(not rat_medians.empty and (rat_medians > 0.0).all()), "" if rat_medians.empty else float(rat_medians.min()), "per-rat median real-minus-null margin > 0")
+    loo = leave_one_rat_out_matched_null_summary(p_values)
+    loo_medians = pd.to_numeric(loo["median_real_minus_median_null_family_margin"], errors="coerce") if not loo.empty else pd.Series(dtype=float)
+    _append_gate(rows, "leave_one_rat_out_median_positive", bool(not loo_medians.empty and (loo_medians > 0.0).all()), "" if loo_medians.empty else float(loo_medians.min()), "leave-one-rat-out median real-minus-null margin > 0")
+    if not bootstrap.empty:
+        mean_lower = float(bootstrap["mean_delta_lower_95"].iloc[0])
+        median_lower = float(bootstrap["median_delta_lower_95"].iloc[0])
+        _append_gate(rows, "rat_bootstrap_lower_bound_positive", bool(mean_lower > 0.0 or median_lower > 0.0), f"mean={mean_lower:.3f}; median={median_lower:.3f}", "rat-bootstrap lower bound for mean or median real-minus-null margin > 0")
+    nontrajectory = int(p_values["real_nontrajectory_confident_claim"].fillna(False).astype(bool).sum())
+    _append_gate(rows, "real_nontrajectory_claims_near_zero", nontrajectory <= max(1, math.ceil(0.05 * len(p_values))), nontrajectory, "false/nontrajectory claims remain near zero")
+    rows.append(
+        {
+            "gate": "overall",
+            "passed": all(bool(row["passed"]) for row in rows),
+            "observed": f"{sum(bool(row['passed']) for row in rows)}/{len(rows)} gates passed",
+            "criterion": "all matched-null control gates pass",
+        }
+    )
+    return pd.DataFrame(rows)
+
+
+def _delta_summary(group: pd.DataFrame, delta: pd.Series) -> dict[str, object]:
+    delta = delta.dropna()
+    return {
+        "events": int(group[["session", "event_index"]].drop_duplicates().shape[0]),
+        "median_real_minus_median_null_family_margin": float(delta.median()) if not delta.empty else np.nan,
+        "mean_real_minus_median_null_family_margin": float(delta.mean()) if not delta.empty else np.nan,
+        "fraction_real_margin_above_null_median": float((delta > 0.0).mean()) if not delta.empty else np.nan,
+        "median_empirical_p_value": float(pd.to_numeric(group["empirical_p_value"], errors="coerce").median()),
+        "events_empirical_p_le_0_05": int((pd.to_numeric(group["empirical_p_value"], errors="coerce") <= 0.05).sum()),
+        "real_trajectory_confident_claims": int(group["real_trajectory_confident_claim"].fillna(False).astype(bool).sum()),
+        "real_nontrajectory_confident_claims": int(group["real_nontrajectory_confident_claim"].fillna(False).astype(bool).sum()),
+    }
+
+
+def _append_gate(rows: list[dict[str, object]], gate: str, passed: bool, observed: object, criterion: str) -> None:
+    rows.append({"gate": gate, "passed": bool(passed), "observed": observed, "criterion": criterion})
+
+
+def _first_numeric_value(frame: pd.DataFrame, column: str) -> float:
+    if column not in frame:
+        return np.nan
+    values = pd.to_numeric(frame[column], errors="coerce").dropna()
+    return float(values.iloc[0]) if not values.empty else np.nan
+
+
+def _safe_ratio(value: float, denominator: float) -> float:
+    if not np.isfinite(value) or not np.isfinite(denominator) or float(denominator) == 0.0:
+        return np.nan
+    return float(value) / float(denominator)
+
+
+def aggregate_matched_null_scores(
+    score_glob: str,
+    outdir: Path,
+    *,
+    margin_threshold: float = DEFAULT_MARGIN_THRESHOLD,
+    bootstrap_seed: int = 1,
+    bootstrap_samples: int = 2000,
+) -> pd.DataFrame:
+    paths = [Path(path) for path in sorted(glob.glob(str(score_glob), recursive=True))]
+    if not paths:
+        raise FileNotFoundError(f"no matched-null score files found for {score_glob!r}")
+    scores = pd.concat([pd.read_csv(path) for path in paths], ignore_index=True)
+    outdir.mkdir(parents=True, exist_ok=True)
+    scores.to_csv(outdir / "matched_null_event_model_evidence.csv", index=False)
+    decisions = matched_null_family_margin_decisions(scores, margin_threshold=margin_threshold)
+    decisions.to_csv(outdir / "matched_null_family_margin_decisions.csv", index=False)
+    matched_null_family_margin_summary(decisions).to_csv(outdir / "matched_null_family_margin_summary.csv", index=False)
+    p_values = matched_null_empirical_p_values(decisions)
+    p_values.to_csv(outdir / "matched_null_empirical_p_values.csv", index=False)
+    matched_null_group_summary(p_values, group_cols=("session",)).to_csv(outdir / "session_matched_null_summary.csv", index=False)
+    matched_null_group_summary(p_values, group_cols=("rat",)).to_csv(outdir / "rat_matched_null_summary.csv", index=False)
+    leave_one_rat_out_matched_null_summary(p_values).to_csv(outdir / "leave_one_rat_out_matched_null_summary.csv", index=False)
+    bootstrap = rat_bootstrap_matched_null_summary(p_values, random_seed=bootstrap_seed, n_bootstrap=bootstrap_samples)
+    bootstrap.to_csv(outdir / "rat_bootstrap_matched_null_summary.csv", index=False)
+    matched_null_control_gate_summary(p_values, bootstrap).to_csv(outdir / "matched_null_control_gate_summary.csv", index=False)
+    return scores
+
+
+def _add_scoring_arguments(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--dataset-root", required=True)
+    parser.add_argument("--session", required=True)
+    parser.add_argument("--events", default="run:0-10")
+    parser.add_argument("--max-events", type=int)
+    parser.add_argument("--models", default=DEFAULT_MATCHED_NULL_MODELS)
+    parser.add_argument("--nulls-per-event", type=int, default=10)
+    parser.add_argument("--null-random-seed", type=int, default=1)
+    parser.add_argument("--spike-count-tolerance-fraction", type=float, default=0.10)
+    parser.add_argument("--active-cell-tolerance", type=int)
+    parser.add_argument("--null-candidate-step-s", type=float)
+    parser.add_argument("--swr-exclusion-padding-s", type=float, default=0.0)
+    parser.add_argument("--allow-non-run-nulls", action="store_true")
+    _add_model_arguments(parser)
+    parser.add_argument("--output", default="results/spike-matched-event-window-null")
+    parser.add_argument("--continue-on-error", action="store_true")
+
+
+def _add_model_arguments(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--candidate-top-k", type=int, default=64)
+    parser.add_argument("--stationary-sigma-cm", type=float, default=2.0)
+    parser.add_argument("--diffusion-sigma-cm", type=float, default=12.0)
+    parser.add_argument("--momentum-sigma-cm", type=float, default=12.0)
+    parser.add_argument("--velocity-decay", type=float, default=0.95)
+    parser.add_argument("--mode-stickiness", type=float, default=0.94)
+    parser.add_argument("--state-space-stationary-sigma-cm", type=float, default=2.0)
+    parser.add_argument("--state-space-diffusion-sigma-cm-sqrt-s", type=float, default=60.0)
+    parser.add_argument("--state-space-max-step-sigma", type=float, default=3.0)
+    parser.add_argument("--state-space-imm-mode-stickiness", type=float, default=0.95)
+    parser.add_argument("--state-space-imm-switch-tau-s", type=float, default=DEFAULT_IMPROVED_STATE_SPACE_IMM_SWITCH_TAU_S)
+    parser.add_argument("--state-space-momentum-sigma-cm-sqrt-s", type=float, default=50.0)
+    parser.add_argument("--state-space-momentum-initial-sigma-cm-sqrt-s", type=float, default=45.0)
+    parser.add_argument("--state-space-momentum-velocity-decay", type=float, default=0.93)
+    parser.add_argument("--state-space-momentum-velocity-decay-tau-s", type=float, default=0.0)
+    parser.add_argument("--state-space-momentum-candidate-top-k", type=int, default=128)
+    parser.add_argument("--state-space-momentum-candidate-mass-threshold", type=float)
+    parser.add_argument("--state-space-momentum-candidate-min-k", type=int, default=1)
+    parser.add_argument("--state-space-momentum-candidate-max-k", type=int, default=0)
+    parser.add_argument("--state-space-momentum-predicted-candidate-top-k", type=int, default=DEFAULT_IMPROVED_STATE_SPACE_MOMENTUM_PREDICTED_CANDIDATE_TOP_K)
+    parser.add_argument("--state-space-momentum-candidate-source", choices=("emission", "posterior"), default="emission")
+    parser.add_argument("--state-space-valid-occupancy-threshold-s", type=float, default=0.0)
+    parser.add_argument("--goal-state-space-transition-sigma-cm-sqrt-s", type=float, default=85.0)
+    parser.add_argument("--goal-state-space-drift-speed-cm-s", type=float, default=400.0)
+    parser.add_argument("--goal-state-space-max-step-sigma", type=float, default=4.0)
+    parser.add_argument("--clusterless-mark-likelihood", default="local-kde")
+    parser.add_argument("--clusterless-mark-group-by", choices=("auto", "none", "tetrode", "cell"), default="auto")
+    parser.add_argument("--clusterless-mark-smoothing-sigma-bins", type=float, default=1.0)
+    parser.add_argument("--clusterless-mark-prior-count", type=float, default=1.0)
+    parser.add_argument("--clusterless-mark-variance-floor", type=float, default=1.0)
+    parser.add_argument("--clusterless-rate-floor-hz", type=float, default=1e-4)
+    parser.add_argument("--clusterless-mark-kde-bandwidth", type=float)
+    parser.add_argument("--clusterless-mark-kde-spatial-sigma-bins", type=float)
+    parser.add_argument("--clusterless-mark-kde-max-neighbors", type=int, default=256)
+    parser.add_argument("--time-bin-s", type=float, default=0.004)
+    parser.add_argument("--spike-rate-scale", type=float, default=2.0)
+    parser.add_argument("--emission-likelihood-temperature", type=float, default=0.300)
+    parser.add_argument("--emission-negative-binomial-overdispersion", type=float, default=0.0)
+    parser.add_argument("--sorted-spike-emission-model", choices=("poisson", "negative-binomial", "gamma-poisson"), default="poisson")
+    parser.add_argument("--replay-gain-mode", choices=("none", "event", "cell", "event-cell"), default="none")
+    parser.add_argument("--replay-gain-prior-count", type=float, default=10.0)
+    parser.add_argument("--replay-gain-max-gain", type=float, default=20.0)
+    parser.add_argument("--negative-binomial-dispersion", type=float, default=50.0)
+    parser.add_argument("--include-clusterless-defaults", action="store_true")
+    parser.add_argument("--valid-state-min-occupancy-s", type=float, default=0.02)
+    parser.add_argument("--valid-state-top-occupancy-fraction", type=float, default=None)
+    parser.add_argument("--valid-state-sigma-cm", type=float, default=5.0)
+    parser.add_argument("--valid-state-max-step-sigma", type=float, default=4.0)
+    parser.add_argument("--valid-state-grid-diagonal-neighbors", action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument("--valid-state-grid-stay-probability", type=float, default=0.0)
+    parser.add_argument("--window-variant-specs", default="")
+    parser.add_argument("--window-pre-pads-s", default="0.0")
+    parser.add_argument("--window-post-pads-s", default="0.0")
+    parser.add_argument("--window-min-duration-s", type=float, default=0.004)
+    parser.add_argument("--reliability-min-spikes", type=int, default=5)
+    parser.add_argument("--reliability-min-time-bins", type=int, default=2)
+    parser.add_argument("--reliability-max-terminal-entropy", type=float, default=float("nan"))
+    parser.add_argument("--reliability-min-candidate-log-mass", type=float, default=-0.01)
+    parser.add_argument("--null-shuffles", type=int, default=0)
+    parser.add_argument("--bin-size-cm", type=float, default=VALIDATED_POSITION_BIN_SIZE_CM)
+    parser.add_argument("--smoothing-sigma-bins", type=float, default=VALIDATED_POSITION_SMOOTHING_SIGMA_BINS)
+    parser.add_argument("--min-speed-cm-s", type=float, default=VALIDATED_POSITION_MIN_SPEED_CM_S)
+    parser.add_argument("--min-occupancy-s", type=float, default=EncodingConfig().min_occupancy_s)
+    parser.add_argument("--rate-floor-hz", type=float, default=EncodingConfig().rate_floor_hz)
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    subparsers = parser.add_subparsers(dest="command", required=True)
+    score_parser = subparsers.add_parser("score")
+    _add_scoring_arguments(score_parser)
+    aggregate_parser = subparsers.add_parser("aggregate")
+    aggregate_parser.add_argument("--score-glob", required=True)
+    aggregate_parser.add_argument("--output", default="results/spike-matched-event-window-null")
+    aggregate_parser.add_argument("--margin-threshold", type=float, default=DEFAULT_MARGIN_THRESHOLD)
+    aggregate_parser.add_argument("--bootstrap-seed", type=int, default=1)
+    aggregate_parser.add_argument("--bootstrap-samples", type=int, default=2000)
+    args = parser.parse_args()
+
+    if args.command == "score":
+        outdir = Path(args.output)
+        outdir.mkdir(parents=True, exist_ok=True)
+        scores = score_matched_nulls(args)
+        if scores.empty:
+            raise RuntimeError("No matched-null scores were generated.")
+        scores.to_csv(outdir / "matched_null_event_model_evidence.csv", index=False)
+        aggregate_matched_null_scores(
+            str(outdir / "matched_null_event_model_evidence.csv"),
+            outdir,
+            bootstrap_seed=args.null_random_seed,
+        )
+        return 0
+    aggregate_matched_null_scores(
+        args.score_glob,
+        Path(args.output),
+        margin_threshold=args.margin_threshold,
+        bootstrap_seed=args.bootstrap_seed,
+        bootstrap_samples=args.bootstrap_samples,
+    )
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

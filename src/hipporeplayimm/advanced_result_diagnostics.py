@@ -22,6 +22,17 @@ import numpy as np
 import pandas as pd
 from scipy.special import gammaln
 
+from pyrecest.evaluation.model_comparison import (
+    add_evidence_margin_columns as _pyrecest_add_evidence_margin_columns,
+    classify_evidence_margin as _pyrecest_classify_evidence_margin,
+    evidence_margin_table as _pyrecest_evidence_margin_table,
+    infer_paired_model_group_cols as _pyrecest_infer_paired_model_group_cols,
+    paired_model_margin_decisions as _pyrecest_paired_model_margin_decisions,
+    paired_model_margin_summary as _pyrecest_paired_model_margin_summary,
+    paired_model_margin_threshold_sweep as _pyrecest_paired_model_margin_threshold_sweep,
+    select_paired_model_margin_threshold as _pyrecest_select_paired_model_margin_threshold,
+)
+
 
 EVIDENCE_MARGIN_CATEGORIES: tuple[tuple[str, float], ...] = (
     ("tie", 1.0),
@@ -471,6 +482,19 @@ def _safe_ratio(numerator: int, denominator: int) -> float:
     if denominator <= 0:
         return float("nan")
     return float(numerator / denominator)
+
+
+# Generic evidence-margin/model-comparison helpers live upstream in PyRecEst.
+# Keep the historical HippoReplayIMM import paths as compatibility aliases for
+# scripts and paper diagnostics that import from this module.
+classify_evidence_margin = _pyrecest_classify_evidence_margin
+evidence_margin_table = _pyrecest_evidence_margin_table
+add_evidence_margin_columns = _pyrecest_add_evidence_margin_columns
+paired_model_margin_decisions = _pyrecest_paired_model_margin_decisions
+infer_paired_model_group_cols = _pyrecest_infer_paired_model_group_cols
+paired_model_margin_threshold_sweep = _pyrecest_paired_model_margin_threshold_sweep
+select_paired_model_margin_threshold = _pyrecest_select_paired_model_margin_threshold
+paired_model_margin_summary = _pyrecest_paired_model_margin_summary
 
 
 def wrong_map_delta_summary(

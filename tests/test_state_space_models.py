@@ -111,6 +111,8 @@ def test_state_space_modes_return_full_trajectory_posteriors():
             assert score.diagnostics["state_space_sparse_momentum_state_support"] == "finite_radius_pair_grid"
             assert score.diagnostics["state_space_momentum_candidate_support"] == "not_used_exact_sparse"
             assert score.diagnostics["state_space_sparse_momentum_max_pair_count"] > 0
+            assert score.diagnostics["state_space_sparse_momentum_evidence_mode"] == "full_smoothing"
+            assert score.diagnostics["state_space_sparse_momentum_evidence_only"] == 0
         if mode == "trajectory-imm-exact-sparse":
             assert score.diagnostics["state_space_trajectory_imm_evidence_support"] == "exact_full_grid"
             assert (
@@ -158,6 +160,26 @@ def test_state_space_modes_return_full_trajectory_posteriors():
         if mode == "first-order-imm":
             assert score.diagnostics["state_space_imm_modes"] == "stationary,diffusion,fragmented"
             assert score.diagnostics["state_space_imm_evidence_support"] == "exact_full_grid"
+
+
+def test_exact_sparse_momentum_evidence_only_delegates_to_pyrecest_mode():
+    emissions = _synthetic_emissions()
+    centers = np.array([[0.0, 0.0], [1.0, 0.0], [2.0, 0.0], [3.0, 0.0]])
+    config = StateSpaceDecoderConfig(mode="momentum-exact-sparse")
+    model = SortedSpikeStateSpaceReplayModel(mode="momentum-exact-sparse", config=config)
+
+    full = model.score(emissions, centers, return_trajectory=True)
+    evidence_only = model.score(emissions, centers, return_trajectory=False)
+
+    assert np.isfinite(evidence_only.log_likelihood)
+    assert evidence_only.log_likelihood == pytest.approx(full.log_likelihood, abs=1e-12)
+    assert full.trajectory_log_posterior is not None
+    assert evidence_only.trajectory_log_posterior is None
+    assert evidence_only.terminal_log_posterior is not None
+    assert evidence_only.diagnostics["state_space_sparse_momentum_evidence_mode"] == "evidence_only"
+    assert evidence_only.diagnostics["state_space_sparse_momentum_evidence_only"] == 1
+    assert evidence_only.diagnostics["state_space_sparse_momentum_backward_transition_rows"] == "skipped_evidence_only"
+    assert evidence_only.diagnostics["state_space_momentum_trajectory_posterior"] == "not_returned_evidence_only"
 
 
 def test_adaptive_candidate_support_adds_forward_and_backward_predictions():

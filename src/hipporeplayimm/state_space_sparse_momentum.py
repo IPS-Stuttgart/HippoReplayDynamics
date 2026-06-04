@@ -21,6 +21,7 @@ from typing import Iterable
 
 import numpy as np
 from scipy.spatial import cKDTree
+from pyrecest.evidence import EvidenceComputationMode
 from pyrecest.filters import SparseTransitionRowCache, sparse_second_order_grid_evidence
 
 from .encoding import LogEmissionTensor
@@ -122,12 +123,14 @@ def _score_sparse_momentum_exact(
         velocity_decay = float(decays[transition_index]) * float(time_scales[transition_index])
         return int(src_prev), int(src_curr), sigma, velocity_decay
 
+    evidence_mode = EvidenceComputationMode.from_return_smoothed(return_trajectory)
     transition_row_cache = SparseTransitionRowCache()
     result = sparse_second_order_grid_evidence(
         log_likelihood,
         initial_pair_initializer,
         transition_row_builder,
         transition_cache_key_builder=transition_cache_key_builder,
+        evidence_mode=evidence_mode,
         transition_row_cache=transition_row_cache,
         return_smoothed=return_trajectory,
     )
@@ -151,6 +154,8 @@ def _score_sparse_momentum_exact(
         "state_space_sparse_momentum_mean_outgoing_count": float(result.diagnostics["mean_outgoing_count"]),
         "state_space_sparse_momentum_max_outgoing_count": int(result.diagnostics["max_outgoing_count"]),
         "state_space_sparse_momentum_backward_transition_rows": backward_label,
+        "state_space_sparse_momentum_evidence_mode": str(result.diagnostics.get("evidence_computation_mode", evidence_mode.mode)),
+        "state_space_sparse_momentum_evidence_only": int(result.diagnostics.get("evidence_only", int(not return_trajectory))),
         "state_space_sparse_momentum_transition_row_cache_entries": int(result.diagnostics["transition_row_cache_entries"]),
         "state_space_sparse_momentum_transition_row_cache_hits": int(result.diagnostics["transition_row_cache_hits"]),
         "state_space_sparse_momentum_transition_row_cache_misses": int(result.diagnostics["transition_row_cache_misses"]),

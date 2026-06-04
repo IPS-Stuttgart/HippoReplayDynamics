@@ -5,8 +5,10 @@ from __future__ import annotations
 
 import argparse
 import glob
+import json
 import math
 import time
+from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -44,11 +46,42 @@ DEFAULT_EXACT_TRAJECTORY_MODELS = (
     "sorted-spike-state-space-momentum-exact-sparse",
     "sorted-spike-state-space-trajectory-imm-exact-sparse",
 )
+PARTIAL_SCORE_COLUMNS = (
+    "status",
+    "session",
+    "rat",
+    "event_index",
+    "event_shard_index",
+    "started_at",
+    "completed_splits",
+    "last_completed_split",
+    "partial_result",
+    "cell_split_index",
+    "cell_split_seed",
+    "split_shard_index",
+    "split_shard_count",
+    "requested_splits",
+    "model",
+    "requested_model",
+    "heldout_log_likelihood",
+    "log_evidence",
+    "runtime_s",
+    "error",
+)
+MANIFEST_NAME = "cell_split_heldout_manifest.json"
+SCORES_NAME = "cell_split_heldout_model_evidence.csv"
 
 
 def score_cell_split_heldout(args: argparse.Namespace) -> pd.DataFrame:
     """Score replay events with train-cell evidence and held-out-cell likelihood."""
 
+    split_indices = _split_indices_for_shard(
+        args.n_splits,
+        split_shard_index=args.split_shard_index,
+        split_shard_count=args.split_shard_count,
+    )
+    outdir = Path(args.output)
+    manifest = _initialize_partial_outputs(args, outdir, split_indices)
     session_dir = _session_path(args.dataset_root, args.session)
     _check_session(session_dir)
     session = load_replay_session(session_dir)
@@ -88,12 +121,8 @@ def score_cell_split_heldout(args: argparse.Namespace) -> pd.DataFrame:
         negative_binomial_dispersion=args.negative_binomial_dispersion,
     )
 
-    split_indices = _split_indices_for_shard(
-        args.n_splits,
-        split_shard_index=args.split_shard_index,
-        split_shard_count=args.split_shard_count,
-    )
     rows: list[dict[str, object]] = []
+    completed_splits: list[int] = []
     for split_index in split_indices:
         split_seed = _cell_split_seed(args.random_seed, split_index)
         train_cells, test_cells = _split_cells(encoding.cell_ids, args.test_cell_fraction, split_seed)
@@ -107,9 +136,13 @@ def score_cell_split_heldout(args: argparse.Namespace) -> pd.DataFrame:
         split_settings = {
             "cell_split_index": int(split_index),
             "cell_split_count": int(args.n_splits),
+            "event_shard_index": int(args.event_shard_index),
             "cell_split_shard_index": int(args.split_shard_index),
             "cell_split_shard_count": int(args.split_shard_count),
             "cell_split_shard_splits": _format_cell_ids(np.asarray(split_indices, dtype=int)),
+            "split_shard_index": int(args.split_shard_index),
+            "split_shard_count": int(args.split_shard_count),
+            "requested_splits": _format_cell_ids(np.asarray(split_indices, dtype=int)),
             "cell_split_seed": int(split_seed),
             "test_cell_fraction": float(args.test_cell_fraction),
             "train_cell_count": int(train_cells.size),
@@ -228,7 +261,32 @@ def score_cell_split_heldout(args: argparse.Namespace) -> pd.DataFrame:
                         flush=True,
                     )
                     if not args.continue_on_error:
+                        _flush_partial_outputs(
+                            outdir,
+                            manifest,
+                            rows,
+                            completed_splits=completed_splits,
+                            last_completed_split=None,
+                            status="failed",
+                        )
                         raise
+        completed_splits.append(int(split_index))
+        _flush_partial_outputs(
+            outdir,
+            manifest,
+            rows,
+            completed_splits=completed_splits,
+            last_completed_split=int(split_index),
+            status="running",
+        )
+    _flush_partial_outputs(
+        outdir,
+        manifest,
+        rows,
+        completed_splits=completed_splits,
+        last_completed_split=completed_splits[-1] if completed_splits else None,
+        status="complete",
+    )
     return ensure_evidence_support_columns(pd.DataFrame(rows))
 
 
@@ -469,6 +527,7 @@ def _add_scoring_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--max-events", type=int)
     parser.add_argument("--models", default=DEFAULT_CELL_SPLIT_HELDOUT_MODELS)
     parser.add_argument("--n-splits", type=int, default=DEFAULT_SPLIT_COUNT)
+    parser.add_argument("--event-shard-index", type=int, default=0)
     parser.add_argument("--split-shard-index", type=int, default=0)
     parser.add_argument("--split-shard-count", type=int, default=1)
     parser.add_argument("--test-cell-fraction", type=float, default=DEFAULT_TEST_CELL_FRACTION)
@@ -509,6 +568,76 @@ def _split_indices_for_shard(
             f"for n_splits={n_splits}"
         )
     return indices
+
+
+def _initialize_partial_outputs(
+    args: argparse.Namespace,
+    outdir: Path,
+    split_indices: tuple[int, ...],
+) -> dict[str, object]:
+    outdir.mkdir(parents=True, exist_ok=True)
+    requested_splits = [int(index) for index in split_indices]
+    manifest: dict[str, object] = {
+        "session": str(args.session),
+        "event_shard_index": int(args.event_shard_index),
+        "split_shard_index": int(args.split_shard_index),
+        "split_shard_count": int(args.split_shard_count),
+        "requested_splits": requested_splits,
+        "completed_splits": [],
+        "started_at": _utc_now_iso(),
+        "updated_at": _utc_now_iso(),
+        "last_completed_split": None,
+        "partial_result": True,
+        "status": "running",
+    }
+    _write_manifest(outdir, manifest)
+    pd.DataFrame(columns=PARTIAL_SCORE_COLUMNS).to_csv(outdir / SCORES_NAME, index=False)
+    return manifest
+
+
+def _flush_partial_outputs(
+    outdir: Path,
+    manifest: dict[str, object],
+    rows: list[dict[str, object]],
+    *,
+    completed_splits: list[int],
+    last_completed_split: int | None,
+    status: str,
+) -> None:
+    if rows:
+        scores = ensure_evidence_support_columns(pd.DataFrame(rows))
+        scores["started_at"] = str(manifest.get("started_at", ""))
+        scores["completed_splits"] = _format_cell_ids(np.asarray(completed_splits, dtype=int))
+        scores["last_completed_split"] = (
+            np.nan if last_completed_split is None else int(last_completed_split)
+        )
+        scores["partial_result"] = True
+        scores.to_csv(outdir / SCORES_NAME, index=False)
+    elif not (outdir / SCORES_NAME).exists():
+        pd.DataFrame(columns=PARTIAL_SCORE_COLUMNS).to_csv(outdir / SCORES_NAME, index=False)
+    manifest.update(
+        {
+            "completed_splits": [int(index) for index in completed_splits],
+            "updated_at": _utc_now_iso(),
+            "last_completed_split": (
+                None if last_completed_split is None else int(last_completed_split)
+            ),
+            "partial_result": True,
+            "status": status,
+        }
+    )
+    _write_manifest(outdir, manifest)
+
+
+def _write_manifest(outdir: Path, manifest: dict[str, object]) -> None:
+    (outdir / MANIFEST_NAME).write_text(
+        json.dumps(manifest, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+
+
+def _utc_now_iso() -> str:
+    return datetime.now(tz=UTC).isoformat().replace("+00:00", "Z")
 
 
 def _first_numeric_value(frame: pd.DataFrame, column: str) -> float:

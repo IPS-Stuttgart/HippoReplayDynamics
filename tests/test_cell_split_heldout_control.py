@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from argparse import Namespace
+import json
 from pathlib import Path
 import sys
 
@@ -12,6 +14,8 @@ from cell_split_heldout_control import (  # noqa: E402
     cell_split_control_gate_summary,
     cell_split_family_margin_decisions,
     cell_split_family_margin_summary,
+    _flush_partial_outputs,
+    _initialize_partial_outputs,
     _split_indices_for_shard,
 )
 
@@ -110,6 +114,65 @@ def test_split_indices_for_shard_uses_modulo_batches():
         17,
     )
     assert _split_indices_for_shard(3, split_shard_index=2, split_shard_count=4) == (2,)
+
+
+def test_partial_outputs_are_initialized_and_flushed_after_split(tmp_path):
+    args = Namespace(
+        session="Rat1/Open1",
+        event_shard_index=3,
+        split_shard_index=1,
+        split_shard_count=4,
+    )
+    out = tmp_path / "partial"
+
+    manifest = _initialize_partial_outputs(args, out, (1, 5, 9))
+
+    manifest_path = out / "cell_split_heldout_manifest.json"
+    scores_path = out / "cell_split_heldout_model_evidence.csv"
+    assert manifest_path.exists()
+    assert scores_path.exists()
+    initial_manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    assert initial_manifest["session"] == "Rat1/Open1"
+    assert initial_manifest["event_shard_index"] == 3
+    assert initial_manifest["requested_splits"] == [1, 5, 9]
+    assert initial_manifest["completed_splits"] == []
+    assert initial_manifest["last_completed_split"] is None
+    assert initial_manifest["partial_result"] is True
+
+    rows = [
+        {
+            "status": "success",
+            "session": "Rat1/Open1",
+            "event_index": 0,
+            "event_shard_index": 3,
+            "cell_split_index": 1,
+            "split_shard_index": 1,
+            "split_shard_count": 4,
+            "requested_splits": "1,5,9",
+            "model": "sorted-spike-state-space-stationary",
+            "heldout_log_likelihood": 0.0,
+            "log_evidence": 0.0,
+        }
+    ]
+
+    _flush_partial_outputs(
+        out,
+        manifest,
+        rows,
+        completed_splits=[1],
+        last_completed_split=1,
+        status="running",
+    )
+
+    flushed_manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    flushed_scores = pd.read_csv(scores_path)
+    assert flushed_manifest["completed_splits"] == [1]
+    assert flushed_manifest["last_completed_split"] == 1
+    assert flushed_manifest["partial_result"] is True
+    assert flushed_scores["cell_split_index"].tolist() == [1]
+    assert flushed_scores["completed_splits"].astype(str).tolist() == ["1"]
+    assert flushed_scores["last_completed_split"].tolist() == [1]
+    assert flushed_scores["partial_result"].tolist() == [True]
 
 
 def _event_split_rows(

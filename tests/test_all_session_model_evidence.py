@@ -6,6 +6,7 @@ import pytest
 
 sys.path.insert(0, str(Path("scripts").resolve()))
 from aggregate_all_session_model_evidence import (
+    augmented_exact_core_model_claim_summary,
     exact_core_model_claim_decisions,
     exact_core_model_claim_summary,
     exact_trajectory_dynamics_gate_summary,
@@ -28,7 +29,10 @@ from aggregate_all_session_model_evidence import (
     paired_momentum_diffusion_margin_decisions,
     paired_momentum_diffusion_margin_summary,
     paired_momentum_diffusion_threshold_sensitivity,
+    paired_trajectory_imm_vs_exact_sparse_momentum_margin_summary,
+    paired_trajectory_imm_vs_first_order_imm_margin_summary,
     rat_exact_trajectory_nontrajectory_threshold_sensitivity,
+    rat_trajectory_imm_mode_mass_summary,
     rat_exact_sparse_momentum_core_margin_summary,
     rat_bootstrap_exact_sparse_momentum_core_margin_summary,
     rat_bootstrap_exact_sparse_momentum_core_threshold_sensitivity,
@@ -45,10 +49,12 @@ from aggregate_all_session_model_evidence import (
     session_exact_trajectory_nontrajectory_threshold_sensitivity,
     session_exact_sparse_momentum_core_margin_summary,
     session_exact_sparse_momentum_core_threshold_sensitivity,
+    session_trajectory_imm_mode_mass_summary,
     session_best_model_counts,
     session_model_evidence_summary,
     session_paired_momentum_diffusion_margin_summary,
     session_paired_momentum_diffusion_threshold_sensitivity,
+    trajectory_imm_mode_mass_summary,
 )
 
 
@@ -91,6 +97,12 @@ def test_all_session_model_evidence_workflow_exports_expected_outputs():
     assert "exact_core_model_claim_decisions.csv" in workflow
     assert "exact_core_model_claim_summary.csv" in workflow
     assert "session_exact_core_model_claim_summary.csv" in workflow
+    assert "trajectory_imm_mode_mass_summary.csv" in workflow
+    assert "session_trajectory_imm_mode_mass_summary.csv" in workflow
+    assert "rat_trajectory_imm_mode_mass_summary.csv" in workflow
+    assert "paired_trajectory_imm_vs_first_order_imm_margin_summary.csv" in workflow
+    assert "paired_trajectory_imm_vs_exact_sparse_momentum_margin_summary.csv" in workflow
+    assert "augmented_exact_core_model_claim_summary.csv" in workflow
     assert "paired_momentum_diffusion_margin_summary.csv" in workflow
     assert "paired_momentum_diffusion_threshold_sensitivity.csv" in workflow
     assert "session_paired_momentum_diffusion_margin_summary.csv" in workflow
@@ -405,6 +417,88 @@ def test_all_session_exact_core_model_claims_track_full_core_winners():
     ].iloc[0]
     assert rat1_open1["events"] == 2
     assert rat1_open1["confident_claims"] == 1
+
+
+def test_all_session_trajectory_imm_mode_mass_tables_track_decomposition():
+    frame = pd.DataFrame(
+        [
+            _paired_score_row("Rat1/Open1", 0, "sorted-spike-state-space-stationary", 0.0),
+            _paired_score_row("Rat1/Open1", 0, "sorted-spike-state-space-diffusion", 2.0),
+            _paired_score_row("Rat1/Open1", 0, "sorted-spike-state-space-fragmented", 3.0),
+            _paired_score_row("Rat1/Open1", 0, "sorted-spike-state-space-first-order-imm", 10.0),
+            _paired_score_row(
+                "Rat1/Open1",
+                0,
+                "sorted-spike-state-space-momentum-exact-sparse",
+                7.0,
+            ),
+            _trajectory_imm_score_row(
+                "Rat1/Open1",
+                0,
+                12.0,
+                stationary=0.1,
+                diffusion=0.2,
+                fragmented=0.3,
+                momentum=0.4,
+                entropy=1.1,
+            ),
+            _paired_score_row("Rat2/Open1", 1, "sorted-spike-state-space-stationary", 0.0),
+            _paired_score_row("Rat2/Open1", 1, "sorted-spike-state-space-diffusion", 1.0),
+            _paired_score_row("Rat2/Open1", 1, "sorted-spike-state-space-fragmented", 2.0),
+            _paired_score_row("Rat2/Open1", 1, "sorted-spike-state-space-first-order-imm", 6.0),
+            _paired_score_row(
+                "Rat2/Open1",
+                1,
+                "sorted-spike-state-space-momentum-exact-sparse",
+                8.0,
+            ),
+            _trajectory_imm_score_row(
+                "Rat2/Open1",
+                1,
+                5.0,
+                stationary=0.6,
+                diffusion=0.2,
+                fragmented=0.1,
+                momentum=0.1,
+                entropy=0.9,
+            ),
+        ]
+    )
+
+    events = trajectory_imm_mode_mass_summary(frame)
+    session_summary = session_trajectory_imm_mode_mass_summary(frame)
+    rat_summary = rat_trajectory_imm_mode_mass_summary(frame)
+    first_order = paired_trajectory_imm_vs_first_order_imm_margin_summary(frame).iloc[0]
+    momentum = paired_trajectory_imm_vs_exact_sparse_momentum_margin_summary(frame).iloc[0]
+    augmented = augmented_exact_core_model_claim_summary(frame, margin_threshold=1.0)
+
+    assert events["event_id"].tolist() == ["Rat1/Open1:0", "Rat2/Open1:1"]
+    assert events["trajectory_imm_minus_first_order_imm"].tolist() == [2.0, -1.0]
+    assert events["trajectory_imm_minus_exact_sparse_momentum"].tolist() == [5.0, -3.0]
+    assert events["trajectory_family_posterior_mass"].tolist() == [0.9, 0.4]
+    assert events["dominant_mode"].tolist() == ["momentum-exact-sparse", "stationary"]
+    assert events["mode_entropy"].tolist() == [1.1, 0.9]
+
+    assert session_summary["session"].tolist() == ["Rat1/Open1", "Rat2/Open1"]
+    assert session_summary["most_common_dominant_mode"].tolist() == [
+        "momentum-exact-sparse",
+        "stationary",
+    ]
+    assert rat_summary["rat"].tolist() == ["Rat1", "Rat2"]
+    assert rat_summary["mean_trajectory_family_posterior_mass"].tolist() == [0.9, 0.4]
+
+    assert first_order["positive_raw_wins"] == 1
+    assert first_order["reference_raw_wins"] == 1
+    assert first_order["mean_positive_minus_reference_log_evidence"] == pytest.approx(0.5)
+    assert momentum["positive_raw_wins"] == 1
+    assert momentum["reference_raw_wins"] == 1
+    assert momentum["mean_positive_minus_reference_log_evidence"] == pytest.approx(1.0)
+
+    augmented_by_model = augmented.set_index("model")
+    assert augmented_by_model.loc["sorted-spike-state-space-trajectory-imm-exact-sparse", "raw_best_events"] == 1
+    assert augmented_by_model.loc["sorted-spike-state-space-trajectory-imm-exact-sparse", "confident_claims"] == 1
+    assert augmented_by_model.loc["sorted-spike-state-space-momentum-exact-sparse", "raw_best_events"] == 1
+    assert augmented_by_model.loc["sorted-spike-state-space-momentum-exact-sparse", "confident_claims"] == 1
 
 
 def test_all_session_exact_trajectory_dynamics_gate_summary_accepts_imm_dominance():
@@ -1504,3 +1598,36 @@ def _paired_score_row(
         "clusterless_mark_variance_floor": 1.0,
         "clusterless_rate_floor_hz": 1e-4,
     }
+
+
+def _trajectory_imm_score_row(
+    session: str,
+    event_index: int,
+    log_evidence: float,
+    *,
+    stationary: float,
+    diffusion: float,
+    fragmented: float,
+    momentum: float,
+    entropy: float,
+) -> dict[str, object]:
+    row = _paired_score_row(
+        session,
+        event_index,
+        "sorted-spike-state-space-trajectory-imm-exact-sparse",
+        log_evidence,
+    )
+    row.update(
+        {
+            "diagnostic_state_space_trajectory_imm_evidence_support": "exact_full_grid",
+            "diagnostic_state_space_trajectory_family_event_probability": (
+                diffusion + fragmented + momentum
+            ),
+            "diagnostic_state_space_mode_stationary_event_probability": stationary,
+            "diagnostic_state_space_mode_diffusion_event_probability": diffusion,
+            "diagnostic_state_space_mode_fragmented_event_probability": fragmented,
+            "diagnostic_state_space_mode_momentum_exact_sparse_event_probability": momentum,
+            "diagnostic_state_space_trajectory_imm_mean_mode_entropy": entropy,
+        }
+    )
+    return row

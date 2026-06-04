@@ -414,6 +414,12 @@ jobs:
             exact_core_model_claim_decisions.csv \
             exact_core_model_claim_summary.csv \
             session_exact_core_model_claim_summary.csv \
+            trajectory_imm_mode_mass_summary.csv \
+            session_trajectory_imm_mode_mass_summary.csv \
+            rat_trajectory_imm_mode_mass_summary.csv \
+            paired_trajectory_imm_vs_first_order_imm_margin_summary.csv \
+            paired_trajectory_imm_vs_exact_sparse_momentum_margin_summary.csv \
+            augmented_exact_core_model_claim_summary.csv \
             paired_momentum_diffusion_margin_decisions.csv \
             paired_momentum_diffusion_margin_summary.csv \
             paired_momentum_diffusion_threshold_sensitivity.csv \
@@ -509,6 +515,18 @@ jobs:
           print(pd.read_csv(f"{root}/exact_core_model_claim_summary.csv").to_string(index=False))
           print("\nSession exact core model claim summary:")
           print(pd.read_csv(f"{root}/session_exact_core_model_claim_summary.csv").to_string(index=False))
+          print("\nTrajectory IMM mode mass summary:")
+          print(pd.read_csv(f"{root}/trajectory_imm_mode_mass_summary.csv").to_string(index=False))
+          print("\nSession trajectory IMM mode mass summary:")
+          print(pd.read_csv(f"{root}/session_trajectory_imm_mode_mass_summary.csv").to_string(index=False))
+          print("\nRat trajectory IMM mode mass summary:")
+          print(pd.read_csv(f"{root}/rat_trajectory_imm_mode_mass_summary.csv").to_string(index=False))
+          print("\nPaired trajectory IMM-vs-first-order IMM margin summary:")
+          print(pd.read_csv(f"{root}/paired_trajectory_imm_vs_first_order_imm_margin_summary.csv").to_string(index=False))
+          print("\nPaired trajectory IMM-vs-exact-sparse momentum margin summary:")
+          print(pd.read_csv(f"{root}/paired_trajectory_imm_vs_exact_sparse_momentum_margin_summary.csv").to_string(index=False))
+          print("\nAugmented exact core model claim summary:")
+          print(pd.read_csv(f"{root}/augmented_exact_core_model_claim_summary.csv").to_string(index=False))
           print("\nPaired exact-sparse momentum-vs-diffusion margin summary:")
           print(pd.read_csv(f"{root}/paired_momentum_diffusion_margin_summary.csv").to_string(index=False))
           print("\nPaired exact-sparse momentum-vs-diffusion threshold sensitivity:")

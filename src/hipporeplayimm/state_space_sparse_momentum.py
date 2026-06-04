@@ -22,7 +22,7 @@ from typing import Iterable
 import numpy as np
 from scipy.spatial import cKDTree
 from pyrecest.evidence import EvidenceComputationMode
-from pyrecest.filters.sparse_second_order_grid import sparse_second_order_grid_evidence
+from pyrecest.filters import SparseTransitionRowCache, sparse_second_order_grid_evidence
 
 from .encoding import LogEmissionTensor
 from .state_space_first_order import _score_fragmented
@@ -124,12 +124,15 @@ def _score_sparse_momentum_exact(
         return int(src_prev), int(src_curr), sigma, velocity_decay
 
     evidence_mode = EvidenceComputationMode.from_return_smoothed(return_trajectory)
+    transition_row_cache = SparseTransitionRowCache()
     result = sparse_second_order_grid_evidence(
         log_likelihood,
         initial_pair_initializer,
         transition_row_builder,
         transition_cache_key_builder=transition_cache_key_builder,
         evidence_mode=evidence_mode,
+        transition_row_cache=transition_row_cache,
+        return_smoothed=return_trajectory,
     )
     trajectory = result.smoothed_log_probabilities
     terminal = result.terminal_log_probabilities

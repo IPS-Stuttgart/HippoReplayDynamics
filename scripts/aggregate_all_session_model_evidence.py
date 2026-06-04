@@ -17,6 +17,8 @@ from model_evidence_settings import _validate_constant_settings
 
 DEFAULT_MARGIN_POSITIVE_MODEL = "sorted-spike-state-space-momentum-exact-sparse"
 DEFAULT_MARGIN_REFERENCE_MODEL = "sorted-spike-state-space-diffusion"
+DEFAULT_FIRST_ORDER_IMM_MODEL = "sorted-spike-state-space-first-order-imm"
+DEFAULT_TRAJECTORY_IMM_MODEL = "sorted-spike-state-space-trajectory-imm-exact-sparse"
 DEFAULT_MOMENTUM_CONFIDENCE_THRESHOLD = 5.5
 DEFAULT_MARGIN_SENSITIVITY_THRESHOLDS = (0.0, 1.0, 3.0, 5.5, 10.0, 20.0)
 DEFAULT_RAT_BOOTSTRAP_REPLICATES = 2000
@@ -39,7 +41,15 @@ DEFAULT_PAPER_EXACT_TRAJECTORY_MODELS = (
     "sorted-spike-state-space-fragmented",
     "sorted-spike-state-space-first-order-imm",
     DEFAULT_MARGIN_POSITIVE_MODEL,
-    "sorted-spike-state-space-trajectory-imm-exact-sparse",
+    DEFAULT_TRAJECTORY_IMM_MODEL,
+)
+DEFAULT_AUGMENTED_EXACT_CORE_MODELS = (
+    "sorted-spike-state-space-stationary",
+    DEFAULT_MARGIN_REFERENCE_MODEL,
+    "sorted-spike-state-space-fragmented",
+    DEFAULT_FIRST_ORDER_IMM_MODEL,
+    DEFAULT_MARGIN_POSITIVE_MODEL,
+    DEFAULT_TRAJECTORY_IMM_MODEL,
 )
 
 
@@ -953,6 +963,160 @@ def session_exact_core_model_claim_summary(decisions: pd.DataFrame) -> pd.DataFr
     """Summarize exact core model claims by session."""
 
     return exact_core_model_claim_summary(decisions, group_cols=("session",))
+
+
+def trajectory_imm_mode_mass_summary(df: pd.DataFrame) -> pd.DataFrame:
+    """Return per-event trajectory-IMM decomposition and paired core margins."""
+
+    columns = [
+        "event_id",
+        "session",
+        "rat",
+        "event_index",
+        "trajectory_imm_logZ",
+        "first_order_imm_logZ",
+        "exact_sparse_momentum_logZ",
+        "trajectory_imm_minus_first_order_imm",
+        "trajectory_imm_minus_exact_sparse_momentum",
+        "trajectory_family_posterior_mass",
+        "stationary_mode_mass",
+        "diffusion_mode_mass",
+        "fragmented_mode_mass",
+        "momentum_mode_mass",
+        "dominant_mode",
+        "mode_entropy",
+        "trajectory_imm_evidence_support",
+        "trajectory_imm_evidence_comparable",
+    ]
+    if df.empty or not {"session", "event_index", "model", "log_evidence"}.issubset(df.columns):
+        return pd.DataFrame(columns=columns)
+
+    df = _ensure_evidence_support_columns(df)
+    status_ok = df["status"].eq("success") if "status" in df else pd.Series(True, index=df.index)
+    ok = df[status_ok].copy()
+    if ok.empty:
+        return pd.DataFrame(columns=columns)
+
+    model_names = {
+        DEFAULT_TRAJECTORY_IMM_MODEL: "trajectory_imm_logZ",
+        DEFAULT_FIRST_ORDER_IMM_MODEL: "first_order_imm_logZ",
+        DEFAULT_MARGIN_POSITIVE_MODEL: "exact_sparse_momentum_logZ",
+    }
+    logz = (
+        ok[ok["model"].astype(str).isin(model_names)]
+        .pivot_table(
+            index=["session", "event_index"],
+            columns="model",
+            values="log_evidence",
+            aggfunc="last",
+        )
+        .reset_index()
+        .rename(columns=model_names)
+    )
+    for column in model_names.values():
+        if column not in logz:
+            logz[column] = np.nan
+
+    trajectory_rows = ok[ok["model"].astype(str).eq(DEFAULT_TRAJECTORY_IMM_MODEL)].copy()
+    if trajectory_rows.empty:
+        return pd.DataFrame(columns=columns)
+    trajectory_rows = trajectory_rows.drop_duplicates(["session", "event_index"], keep="last")
+
+    base = trajectory_rows[["session", "event_index"]].copy()
+    base["event_id"] = base["session"].astype(str) + ":" + base["event_index"].astype(str)
+    base["rat"] = base["session"].map(_rat_from_session)
+    base["trajectory_family_posterior_mass"] = _numeric_or_nan(
+        trajectory_rows,
+        "diagnostic_state_space_trajectory_family_event_probability",
+    )
+    base["stationary_mode_mass"] = _numeric_or_nan(
+        trajectory_rows,
+        "diagnostic_state_space_mode_stationary_event_probability",
+    )
+    base["diffusion_mode_mass"] = _numeric_or_nan(
+        trajectory_rows,
+        "diagnostic_state_space_mode_diffusion_event_probability",
+    )
+    base["fragmented_mode_mass"] = _numeric_or_nan(
+        trajectory_rows,
+        "diagnostic_state_space_mode_fragmented_event_probability",
+    )
+    base["momentum_mode_mass"] = _numeric_or_nan(
+        trajectory_rows,
+        "diagnostic_state_space_mode_momentum_exact_sparse_event_probability",
+    )
+    base["mode_entropy"] = _numeric_or_nan(
+        trajectory_rows,
+        "diagnostic_state_space_trajectory_imm_mean_mode_entropy",
+    )
+    base["trajectory_imm_evidence_support"] = trajectory_rows["evidence_support"].astype(str).to_numpy()
+    base["trajectory_imm_evidence_comparable"] = (
+        trajectory_rows["evidence_comparable"].fillna(False).astype(bool).to_numpy()
+    )
+    base["dominant_mode"] = _dominant_mode_labels(
+        base[["stationary_mode_mass", "diffusion_mode_mass", "fragmented_mode_mass", "momentum_mode_mass"]]
+    )
+
+    out = base.merge(logz, on=["session", "event_index"], how="left")
+    out["trajectory_imm_minus_first_order_imm"] = out["trajectory_imm_logZ"] - out["first_order_imm_logZ"]
+    out["trajectory_imm_minus_exact_sparse_momentum"] = (
+        out["trajectory_imm_logZ"] - out["exact_sparse_momentum_logZ"]
+    )
+    return out[columns].sort_values(["session", "event_index"]).reset_index(drop=True)
+
+
+def session_trajectory_imm_mode_mass_summary(df: pd.DataFrame) -> pd.DataFrame:
+    """Summarize trajectory-IMM decomposition by session."""
+
+    return _trajectory_imm_mode_mass_group_summary(
+        trajectory_imm_mode_mass_summary(df),
+        group_cols=("session",),
+    )
+
+
+def rat_trajectory_imm_mode_mass_summary(df: pd.DataFrame) -> pd.DataFrame:
+    """Summarize trajectory-IMM decomposition by rat."""
+
+    return _trajectory_imm_mode_mass_group_summary(
+        trajectory_imm_mode_mass_summary(df),
+        group_cols=("rat",),
+    )
+
+
+def paired_trajectory_imm_vs_first_order_imm_margin_summary(df: pd.DataFrame) -> pd.DataFrame:
+    """Summarize paired trajectory-IMM margins against first-order IMM."""
+
+    return _trajectory_imm_pair_summary(
+        trajectory_imm_mode_mass_summary(df),
+        margin_col="trajectory_imm_minus_first_order_imm",
+        reference_model=DEFAULT_FIRST_ORDER_IMM_MODEL,
+    )
+
+
+def paired_trajectory_imm_vs_exact_sparse_momentum_margin_summary(df: pd.DataFrame) -> pd.DataFrame:
+    """Summarize paired trajectory-IMM margins against exact-sparse momentum."""
+
+    return _trajectory_imm_pair_summary(
+        trajectory_imm_mode_mass_summary(df),
+        margin_col="trajectory_imm_minus_exact_sparse_momentum",
+        reference_model=DEFAULT_MARGIN_POSITIVE_MODEL,
+    )
+
+
+def augmented_exact_core_model_claim_summary(
+    df: pd.DataFrame,
+    *,
+    required_models: tuple[str, ...] = DEFAULT_AUGMENTED_EXACT_CORE_MODELS,
+    margin_threshold: float = DEFAULT_MOMENTUM_CONFIDENCE_THRESHOLD,
+) -> pd.DataFrame:
+    """Summarize exact-core claims after adding the trajectory-IMM prototype row."""
+
+    decisions = exact_core_model_claim_decisions(
+        df,
+        required_models=required_models,
+        margin_threshold=margin_threshold,
+    )
+    return exact_core_model_claim_summary(decisions, required_models=required_models)
 
 
 def exact_trajectory_dynamics_summary(
@@ -1969,6 +2133,136 @@ def _rat_from_session(session: object) -> str:
     return str(session).replace("\\", "/").split("/", 1)[0]
 
 
+def _numeric_or_nan(frame: pd.DataFrame, column: str) -> np.ndarray:
+    if column not in frame:
+        return np.full(len(frame), np.nan)
+    return pd.to_numeric(frame[column], errors="coerce").to_numpy(dtype=float)
+
+
+def _dominant_mode_labels(mode_masses: pd.DataFrame) -> list[str]:
+    labels = {
+        "stationary_mode_mass": "stationary",
+        "diffusion_mode_mass": "diffusion",
+        "fragmented_mode_mass": "fragmented",
+        "momentum_mode_mass": "momentum-exact-sparse",
+    }
+    dominant: list[str] = []
+    for _, row in mode_masses.iterrows():
+        values = pd.to_numeric(row, errors="coerce").dropna()
+        dominant.append("" if values.empty else labels[str(values.idxmax())])
+    return dominant
+
+
+def _trajectory_imm_mode_mass_group_summary(
+    events: pd.DataFrame,
+    *,
+    group_cols: tuple[str, ...],
+) -> pd.DataFrame:
+    columns = [
+        *group_cols,
+        "events",
+        "mean_trajectory_family_posterior_mass",
+        "median_trajectory_family_posterior_mass",
+        "mean_stationary_mode_mass",
+        "mean_diffusion_mode_mass",
+        "mean_fragmented_mode_mass",
+        "mean_momentum_mode_mass",
+        "most_common_dominant_mode",
+        "mean_mode_entropy",
+        "median_mode_entropy",
+        "mean_trajectory_imm_minus_first_order_imm",
+        "median_trajectory_imm_minus_first_order_imm",
+        "trajectory_imm_wins_vs_first_order_imm",
+        "mean_trajectory_imm_minus_exact_sparse_momentum",
+        "median_trajectory_imm_minus_exact_sparse_momentum",
+        "trajectory_imm_wins_vs_exact_sparse_momentum",
+    ]
+    if events.empty:
+        return pd.DataFrame(columns=columns)
+
+    rows: list[dict[str, object]] = []
+    groups = [((), events)] if not group_cols else events.groupby(list(group_cols), sort=True)
+    for key, group in groups:
+        key_tuple = key if isinstance(key, tuple) else (key,)
+        delta_first = pd.to_numeric(group["trajectory_imm_minus_first_order_imm"], errors="coerce")
+        delta_momentum = pd.to_numeric(group["trajectory_imm_minus_exact_sparse_momentum"], errors="coerce")
+        dominant = group["dominant_mode"].fillna("").astype(str)
+        dominant = dominant[dominant != ""]
+        row = {column: value for column, value in zip(group_cols, key_tuple, strict=True)}
+        row.update(
+            {
+                "events": int(len(group)),
+                "mean_trajectory_family_posterior_mass": _series_mean(group["trajectory_family_posterior_mass"]),
+                "median_trajectory_family_posterior_mass": _series_median(group["trajectory_family_posterior_mass"]),
+                "mean_stationary_mode_mass": _series_mean(group["stationary_mode_mass"]),
+                "mean_diffusion_mode_mass": _series_mean(group["diffusion_mode_mass"]),
+                "mean_fragmented_mode_mass": _series_mean(group["fragmented_mode_mass"]),
+                "mean_momentum_mode_mass": _series_mean(group["momentum_mode_mass"]),
+                "most_common_dominant_mode": "" if dominant.empty else str(dominant.value_counts().index[0]),
+                "mean_mode_entropy": _series_mean(group["mode_entropy"]),
+                "median_mode_entropy": _series_median(group["mode_entropy"]),
+                "mean_trajectory_imm_minus_first_order_imm": _series_mean(delta_first),
+                "median_trajectory_imm_minus_first_order_imm": _series_median(delta_first),
+                "trajectory_imm_wins_vs_first_order_imm": int((delta_first > 0.0).sum()),
+                "mean_trajectory_imm_minus_exact_sparse_momentum": _series_mean(delta_momentum),
+                "median_trajectory_imm_minus_exact_sparse_momentum": _series_median(delta_momentum),
+                "trajectory_imm_wins_vs_exact_sparse_momentum": int((delta_momentum > 0.0).sum()),
+            }
+        )
+        rows.append(row)
+    return pd.DataFrame(rows, columns=columns)
+
+
+def _trajectory_imm_pair_summary(
+    events: pd.DataFrame,
+    *,
+    margin_col: str,
+    reference_model: str,
+) -> pd.DataFrame:
+    columns = [
+        "events",
+        "positive_model",
+        "reference_model",
+        "positive_raw_wins",
+        "reference_raw_wins",
+        "raw_ties",
+        "positive_raw_win_fraction",
+        "mean_positive_minus_reference_log_evidence",
+        "median_positive_minus_reference_log_evidence",
+        "min_positive_minus_reference_log_evidence",
+        "max_positive_minus_reference_log_evidence",
+    ]
+    if events.empty or margin_col not in events:
+        return pd.DataFrame(columns=columns)
+    delta = pd.to_numeric(events[margin_col], errors="coerce").dropna()
+    if delta.empty:
+        return pd.DataFrame(columns=columns)
+    row = {
+        "events": int(len(delta)),
+        "positive_model": DEFAULT_TRAJECTORY_IMM_MODEL,
+        "reference_model": reference_model,
+        "positive_raw_wins": int((delta > 0.0).sum()),
+        "reference_raw_wins": int((delta < 0.0).sum()),
+        "raw_ties": int((delta == 0.0).sum()),
+        "positive_raw_win_fraction": float((delta > 0.0).mean()),
+        "mean_positive_minus_reference_log_evidence": float(delta.mean()),
+        "median_positive_minus_reference_log_evidence": float(delta.median()),
+        "min_positive_minus_reference_log_evidence": float(delta.min()),
+        "max_positive_minus_reference_log_evidence": float(delta.max()),
+    }
+    return pd.DataFrame([row], columns=columns)
+
+
+def _series_mean(series: pd.Series) -> float:
+    values = pd.to_numeric(series, errors="coerce").dropna()
+    return float(values.mean()) if not values.empty else np.nan
+
+
+def _series_median(series: pd.Series) -> float:
+    values = pd.to_numeric(series, errors="coerce").dropna()
+    return float(values.median()) if not values.empty else np.nan
+
+
 def _leave_one_rat_out_summary(frame: pd.DataFrame, summary_func) -> pd.DataFrame:
     frame = _with_rat(frame)
     summary_columns = list(summary_func(frame).columns)
@@ -2252,6 +2546,7 @@ def aggregate_all_sessions(shard_glob: str, outdir: Path) -> pd.DataFrame:
     core_margins = exact_sparse_momentum_core_margins(combined)
     exact_core_decisions = exact_core_model_claim_decisions(combined)
     trajectory_nontrajectory_decisions = exact_trajectory_nontrajectory_margin_decisions(combined)
+    trajectory_imm_modes = trajectory_imm_mode_mass_summary(combined)
 
     _write(combined, outdir)
     combined.to_csv(outdir / "all_sessions_event_model_evidence.csv", index=False)
@@ -2328,6 +2623,27 @@ def aggregate_all_sessions(shard_glob: str, outdir: Path) -> pd.DataFrame:
     )
     session_exact_core_model_claim_summary(exact_core_decisions).to_csv(
         outdir / "session_exact_core_model_claim_summary.csv",
+        index=False,
+    )
+    trajectory_imm_modes.to_csv(outdir / "trajectory_imm_mode_mass_summary.csv", index=False)
+    session_trajectory_imm_mode_mass_summary(combined).to_csv(
+        outdir / "session_trajectory_imm_mode_mass_summary.csv",
+        index=False,
+    )
+    rat_trajectory_imm_mode_mass_summary(combined).to_csv(
+        outdir / "rat_trajectory_imm_mode_mass_summary.csv",
+        index=False,
+    )
+    paired_trajectory_imm_vs_first_order_imm_margin_summary(combined).to_csv(
+        outdir / "paired_trajectory_imm_vs_first_order_imm_margin_summary.csv",
+        index=False,
+    )
+    paired_trajectory_imm_vs_exact_sparse_momentum_margin_summary(combined).to_csv(
+        outdir / "paired_trajectory_imm_vs_exact_sparse_momentum_margin_summary.csv",
+        index=False,
+    )
+    augmented_exact_core_model_claim_summary(combined).to_csv(
+        outdir / "augmented_exact_core_model_claim_summary.csv",
         index=False,
     )
     paired_decisions.to_csv(outdir / "paired_momentum_diffusion_margin_decisions.csv", index=False)
@@ -2455,6 +2771,18 @@ def main() -> int:
     print(exact_core_model_claim_summary(exact_core_decisions).to_string(index=False))
     print("\nSession exact core model claim summary:")
     print(session_exact_core_model_claim_summary(exact_core_decisions).to_string(index=False))
+    print("\nTrajectory IMM mode mass summary:")
+    print(trajectory_imm_mode_mass_summary(combined).to_string(index=False))
+    print("\nSession trajectory IMM mode mass summary:")
+    print(session_trajectory_imm_mode_mass_summary(combined).to_string(index=False))
+    print("\nRat trajectory IMM mode mass summary:")
+    print(rat_trajectory_imm_mode_mass_summary(combined).to_string(index=False))
+    print("\nPaired trajectory IMM-vs-first-order IMM margin summary:")
+    print(paired_trajectory_imm_vs_first_order_imm_margin_summary(combined).to_string(index=False))
+    print("\nPaired trajectory IMM-vs-exact-sparse momentum margin summary:")
+    print(paired_trajectory_imm_vs_exact_sparse_momentum_margin_summary(combined).to_string(index=False))
+    print("\nAugmented exact core model claim summary:")
+    print(augmented_exact_core_model_claim_summary(combined).to_string(index=False))
     decisions = paired_momentum_diffusion_margin_decisions(combined)
     print("\nPaired exact-sparse momentum-vs-diffusion margin summary:")
     print(paired_momentum_diffusion_margin_summary(decisions).to_string(index=False))

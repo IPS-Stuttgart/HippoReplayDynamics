@@ -22,6 +22,11 @@ import numpy as np
 import pandas as pd
 from scipy.special import gammaln
 
+try:  # pragma: no cover - exercised once the upstream PyRecEst helpers are available.
+    from pyrecest.evaluation import model_comparison as _pyrecest_model_comparison
+except (ImportError, ModuleNotFoundError):  # pragma: no cover - keeps local tests usable before the PyRecEst pin advances.
+    _pyrecest_model_comparison = None
+
 
 EVIDENCE_MARGIN_CATEGORIES: tuple[tuple[str, float], ...] = (
     ("tie", 1.0),

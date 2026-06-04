@@ -23,11 +23,15 @@ on:
       event_shard_count:
         description: "Target event shards per session"
         required: true
-        default: "16"
+        default: "8"
       n_splits:
         description: "Repeated random cell splits"
         required: true
         default: "20"
+      split_shard_count:
+        description: "Number of split batches per event shard"
+        required: true
+        default: "4"
       test_cell_fraction:
         description: "Fraction of cells held out on each split"
         required: true
@@ -105,7 +109,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: cell-split-heldout-control-${{ github.repository }}-${{ inputs.sessions }}-${{ inputs.events }}-${{ inputs.max_events }}-${{ inputs.n_splits }}-${{ github.ref }}
+  group: cell-split-heldout-control-${{ github.repository }}-${{ inputs.sessions }}-${{ inputs.events }}-${{ inputs.max_events }}-${{ inputs.n_splits }}-${{ inputs.split_shard_count }}-${{ github.ref }}
   cancel-in-progress: false
 
 env:
@@ -115,6 +119,7 @@ env:
   MAX_EVENTS: ${{ inputs.max_events }}
   EVENT_SHARD_COUNT: ${{ inputs.event_shard_count }}
   N_SPLITS: ${{ inputs.n_splits }}
+  SPLIT_SHARD_COUNT: ${{ inputs.split_shard_count }}
   TEST_CELL_FRACTION: ${{ inputs.test_cell_fraction }}
   RANDOM_SEED: ${{ inputs.random_seed }}
   MARGIN_THRESHOLD: ${{ inputs.margin_threshold }}
@@ -190,6 +195,13 @@ jobs:
           if not sessions:
               raise SystemExit("No sessions selected")
           output_dir = Path("results/cell-split-heldout-control-plan")
+          requested_split_shard_count = int(os.environ["SPLIT_SHARD_COUNT"])
+          n_splits = int(os.environ["N_SPLITS"])
+          if requested_split_shard_count < 1:
+              raise SystemExit("split_shard_count must be at least 1")
+          if n_splits < 1:
+              raise SystemExit("n_splits must be at least 1")
+          split_shard_count = min(requested_split_shard_count, n_splits)
           matrix = []
           total_events = 0
           for session in sessions:
@@ -208,19 +220,29 @@ jobs:
               subprocess.run(cmd, check=True)
               plan = json.loads(plan_path.read_text(encoding="utf-8"))
               total_events += int(plan["event_count"])
-              for shard in plan["event_matrix"]:
-                  shard = dict(shard)
-                  shard["session"] = session
-                  shard["session_slug"] = safe_session
-                  shard["global_shard_index"] = len(matrix)
-                  matrix.append(shard)
+              for event_shard in plan["event_matrix"]:
+                  for split_shard_index in range(split_shard_count):
+                      shard = dict(event_shard)
+                      shard["session"] = session
+                      shard["session_slug"] = safe_session
+                      shard["split_shard_index"] = split_shard_index
+                      shard["split_shard_count"] = split_shard_count
+                      shard["requested_split_shard_count"] = requested_split_shard_count
+                      shard["split_indices"] = list(range(split_shard_index, n_splits, split_shard_count))
+                      shard["global_shard_index"] = len(matrix)
+                      matrix.append(shard)
           if len(matrix) > 256:
-              raise SystemExit(f"Session/event matrix has {len(matrix)} jobs, exceeding GitHub Actions' 256-job matrix limit")
+              raise SystemExit(
+                  f"Session/event x split matrix has {len(matrix)} jobs, exceeding GitHub Actions' 256-job matrix limit. "
+                  "Reduce event_shard_count or split_shard_count."
+              )
           all_plan = {
               "sessions": sessions,
               "events": os.environ["EVENTS"],
               "max_events": os.environ.get("MAX_EVENTS") or None,
-              "n_splits": int(os.environ["N_SPLITS"]),
+              "n_splits": n_splits,
+              "requested_split_shard_count": requested_split_shard_count,
+              "split_shard_count": split_shard_count,
               "test_cell_fraction": float(os.environ["TEST_CELL_FRACTION"]),
               "session_count": len(sessions),
               "event_count": total_events,
@@ -231,7 +253,10 @@ jobs:
               output.write(f"event_matrix={json.dumps(matrix, separators=(',', ':'))}\n")
               output.write(f"event_count={total_events}\n")
               output.write(f"session_count={len(sessions)}\n")
-          print(f"Planned {total_events} events across {len(sessions)} sessions and {len(matrix)} shards.")
+          print(
+              f"Planned {total_events} events across {len(sessions)} sessions, "
+              f"{split_shard_count} split shards, and {len(matrix)} jobs."
+          )
           PY
 
       - name: Upload cell-split held-out plan
@@ -242,7 +267,7 @@ jobs:
           if-no-files-found: error
 
   cell-split-heldout-shard:
-    name: Cell-split held-out ${{ matrix.event.session }} shard ${{ matrix.event.event_shard_index }}
+    name: Cell-split held-out ${{ matrix.event.session }} event shard ${{ matrix.event.event_shard_index }} split shard ${{ matrix.event.split_shard_index }}
     runs-on: ubuntu-latest
     timeout-minutes: 360
     needs: plan-session-event-shards
@@ -283,10 +308,12 @@ jobs:
           SHARD_SESSION: ${{ matrix.event.session }}
           SHARD_SESSION_SLUG: ${{ matrix.event.session_slug }}
           EVENT_SHARD_INDEX: ${{ matrix.event.event_shard_index }}
+          SPLIT_SHARD_INDEX: ${{ matrix.event.split_shard_index }}
+          SPLIT_SHARD_COUNT_ACTUAL: ${{ matrix.event.split_shard_count }}
           SHARD_EVENTS: ${{ matrix.event.events_spec }}
         run: |
           set -euo pipefail
-          out_dir="results/cell-split-heldout-${SHARD_SESSION_SLUG}-shard-${EVENT_SHARD_INDEX}"
+          out_dir="results/cell-split-heldout-${SHARD_SESSION_SLUG}-event-shard-${EVENT_SHARD_INDEX}-split-shard-${SPLIT_SHARD_INDEX}"
           extra_args=()
           if [[ -n "${EXTRA_MODEL_ARGS}" ]]; then
             read -r -a extra_args <<< "${EXTRA_MODEL_ARGS}"
@@ -297,6 +324,8 @@ jobs:
             --events "${SHARD_EVENTS}" \
             --models "${MODELS}" \
             --n-splits "${N_SPLITS}" \
+            --split-shard-index "${SPLIT_SHARD_INDEX}" \
+            --split-shard-count "${SPLIT_SHARD_COUNT_ACTUAL}" \
             --test-cell-fraction "${TEST_CELL_FRACTION}" \
             --random-seed "${RANDOM_SEED}" \
             --null-random-seed "${RANDOM_SEED}" \
@@ -322,7 +351,7 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: cell-split-heldout-control-shard-${{ github.run_id }}-${{ matrix.event.global_shard_index }}
-          path: results/cell-split-heldout-${{ matrix.event.session_slug }}-shard-${{ matrix.event.event_shard_index }}/
+          path: results/cell-split-heldout-${{ matrix.event.session_slug }}-event-shard-${{ matrix.event.event_shard_index }}-split-shard-${{ matrix.event.split_shard_index }}/
           if-no-files-found: error
 
   aggregate:

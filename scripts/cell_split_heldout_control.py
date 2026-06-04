@@ -88,8 +88,13 @@ def score_cell_split_heldout(args: argparse.Namespace) -> pd.DataFrame:
         negative_binomial_dispersion=args.negative_binomial_dispersion,
     )
 
+    split_indices = _split_indices_for_shard(
+        args.n_splits,
+        split_shard_index=args.split_shard_index,
+        split_shard_count=args.split_shard_count,
+    )
     rows: list[dict[str, object]] = []
-    for split_index in range(int(args.n_splits)):
+    for split_index in split_indices:
         split_seed = _cell_split_seed(args.random_seed, split_index)
         train_cells, test_cells = _split_cells(encoding.cell_ids, args.test_cell_fraction, split_seed)
         if train_cells.size == 0 or test_cells.size == 0:
@@ -102,6 +107,9 @@ def score_cell_split_heldout(args: argparse.Namespace) -> pd.DataFrame:
         split_settings = {
             "cell_split_index": int(split_index),
             "cell_split_count": int(args.n_splits),
+            "cell_split_shard_index": int(args.split_shard_index),
+            "cell_split_shard_count": int(args.split_shard_count),
+            "cell_split_shard_splits": _format_cell_ids(np.asarray(split_indices, dtype=int)),
             "cell_split_seed": int(split_seed),
             "test_cell_fraction": float(args.test_cell_fraction),
             "train_cell_count": int(train_cells.size),
@@ -461,6 +469,8 @@ def _add_scoring_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--max-events", type=int)
     parser.add_argument("--models", default=DEFAULT_CELL_SPLIT_HELDOUT_MODELS)
     parser.add_argument("--n-splits", type=int, default=DEFAULT_SPLIT_COUNT)
+    parser.add_argument("--split-shard-index", type=int, default=0)
+    parser.add_argument("--split-shard-count", type=int, default=1)
     parser.add_argument("--test-cell-fraction", type=float, default=DEFAULT_TEST_CELL_FRACTION)
     parser.add_argument("--random-seed", type=int, default=1)
     parser.add_argument("--null-random-seed", type=int, default=1)
@@ -475,6 +485,30 @@ def _format_cell_ids(cell_ids: np.ndarray) -> str:
 
 def _cell_split_seed(base_seed: int, split_index: int) -> int:
     return int(base_seed) + int(split_index)
+
+
+def _split_indices_for_shard(
+    n_splits: int,
+    *,
+    split_shard_index: int,
+    split_shard_count: int,
+) -> tuple[int, ...]:
+    n_splits = int(n_splits)
+    split_shard_index = int(split_shard_index)
+    split_shard_count = int(split_shard_count)
+    if n_splits < 1:
+        raise ValueError("--n-splits must be at least 1")
+    if split_shard_count < 1:
+        raise ValueError("--split-shard-count must be at least 1")
+    if split_shard_index < 0 or split_shard_index >= split_shard_count:
+        raise ValueError("--split-shard-index must be in [0, --split-shard-count)")
+    indices = tuple(range(split_shard_index, n_splits, split_shard_count))
+    if not indices:
+        raise ValueError(
+            f"split shard {split_shard_index}/{split_shard_count} has no split indices "
+            f"for n_splits={n_splits}"
+        )
+    return indices
 
 
 def _first_numeric_value(frame: pd.DataFrame, column: str) -> float:

@@ -12,6 +12,7 @@ from cell_split_heldout_control import (  # noqa: E402
     cell_split_control_gate_summary,
     cell_split_family_margin_decisions,
     cell_split_family_margin_summary,
+    _split_indices_for_shard,
 )
 
 
@@ -75,6 +76,11 @@ def test_cell_split_heldout_workflow_exposes_control_outputs():
     assert "name: Cell-split held-out replay control" in workflow
     assert "n_splits:" in workflow
     assert 'default: "20"' in workflow
+    assert "split_shard_count:" in workflow
+    assert 'default: "4"' in workflow
+    assert "--split-shard-index" in workflow
+    assert "--split-shard-count" in workflow
+    assert "split_shard_index" in workflow
     assert "test_cell_fraction:" in workflow
     assert "scripts/cell_split_heldout_control.py score" in workflow
     assert "scripts/cell_split_heldout_control.py aggregate" in workflow
@@ -86,6 +92,24 @@ def test_cell_split_heldout_workflow_exposes_control_outputs():
         "cell_split_control_gate_summary.csv",
     ):
         assert expected in workflow
+
+
+def test_split_indices_for_shard_uses_modulo_batches():
+    assert _split_indices_for_shard(20, split_shard_index=0, split_shard_count=4) == (
+        0,
+        4,
+        8,
+        12,
+        16,
+    )
+    assert _split_indices_for_shard(20, split_shard_index=1, split_shard_count=4) == (
+        1,
+        5,
+        9,
+        13,
+        17,
+    )
+    assert _split_indices_for_shard(3, split_shard_index=2, split_shard_count=4) == (2,)
 
 
 def _event_split_rows(

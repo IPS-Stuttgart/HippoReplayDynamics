@@ -13,11 +13,6 @@ from scipy.special import logsumexp
 
 from benchmark_model_evidence import _add_evidence_columns, _counts, _ensure_evidence_support_columns, _summary, _write
 from hipporeplayimm.advanced_result_diagnostics import paired_model_margin_decisions
-from pyrecest.evaluation.model_comparison import (
-    cluster_bootstrap_margin_summary as _pyrecest_cluster_bootstrap_margin_summary,
-    leave_one_group_out_summary as _pyrecest_leave_one_group_out_summary,
-    paired_model_margin_summary as _pyrecest_paired_model_margin_summary,
-)
 from model_evidence_settings import _validate_constant_settings
 
 DEFAULT_MARGIN_POSITIVE_MODEL = "sorted-spike-state-space-momentum-exact-sparse"
@@ -2134,17 +2129,6 @@ def _with_rat(frame: pd.DataFrame) -> pd.DataFrame:
     return out
 
 
-def _leave_one_rat_out_summary(decisions: pd.DataFrame, summary_fn) -> pd.DataFrame:
-    """Summarize decisions after excluding each rat via PyRecEst."""
-
-    return _pyrecest_leave_one_group_out_summary(
-        _with_rat(decisions),
-        group_col="rat",
-        held_out_col="held_out_rat",
-        summary_fn=summary_fn,
-    )
-
-
 def _rat_from_session(session: object) -> str:
     return str(session).replace("\\", "/").split("/", 1)[0]
 
@@ -2397,26 +2381,6 @@ def _bootstrap_margin_metrics(
     }
 
 
-def _rat_bootstrap_margin_summary(
-    frame: pd.DataFrame,
-    *,
-    delta_col: str,
-    positive_claim_col: str,
-    n_bootstrap: int = DEFAULT_RAT_BOOTSTRAP_REPLICATES,
-    random_seed: int = DEFAULT_RAT_BOOTSTRAP_RANDOM_SEED,
-) -> pd.DataFrame:
-    """Return rat-cluster bootstrap intervals via PyRecEst."""
-
-    return _pyrecest_cluster_bootstrap_margin_summary(
-        _with_rat(frame),
-        cluster_col="rat",
-        delta_col=delta_col,
-        positive_claim_col=positive_claim_col,
-        n_bootstrap=n_bootstrap,
-        random_seed=random_seed,
-    ).rename(columns={"observed_clusters": "observed_rats"})
-
-
 def _trajectory_bootstrap_metrics(
     frame: pd.DataFrame,
     *,
@@ -2573,12 +2537,6 @@ def _paired_margin_summary(decisions: pd.DataFrame, *, group_cols: tuple[str, ..
         )
         rows.append(row)
     return pd.DataFrame(rows, columns=columns)
-
-
-def _paired_margin_summary(decisions: pd.DataFrame, *, group_cols: tuple[str, ...]) -> pd.DataFrame:
-    """Summarize paired model margins via PyRecEst."""
-
-    return _pyrecest_paired_model_margin_summary(decisions, group_cols=group_cols)
 
 
 def aggregate_all_sessions(shard_glob: str, outdir: Path) -> pd.DataFrame:

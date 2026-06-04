@@ -324,6 +324,7 @@ jobs:
             --events "${SHARD_EVENTS}" \
             --models "${MODELS}" \
             --n-splits "${N_SPLITS}" \
+            --event-shard-index "${EVENT_SHARD_INDEX}" \
             --split-shard-index "${SPLIT_SHARD_INDEX}" \
             --split-shard-count "${SPLIT_SHARD_COUNT_ACTUAL}" \
             --test-cell-fraction "${TEST_CELL_FRACTION}" \

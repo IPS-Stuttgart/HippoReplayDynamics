@@ -921,6 +921,37 @@ def test_all_session_clusterless_consistency_tables():
     assert bool(gate.loc["overall", "passed"])
 
 
+def test_all_session_clusterless_consistency_gate_reports_unsupported_rows():
+    required_clusterless = [
+        "clusterless-state-space-stationary",
+        "clusterless-state-space-diffusion",
+        "clusterless-state-space-first-order-imm",
+        "clusterless-state-space-momentum-exact-sparse",
+        "clusterless-state-space-trajectory-imm-exact-sparse",
+    ]
+    rows = []
+    for model in required_clusterless:
+        row = _paired_score_row("Rat1/Open1", 0, model, float("nan"))
+        row.update(
+            {
+                "status": "unsupported",
+                "evidence_comparable": False,
+                "evidence_support": "not_scored",
+                "error": "ValueError: Session does not contain spike marks for clusterless encoding.",
+            }
+        )
+        rows.append(row)
+    frame = pd.DataFrame(rows)
+
+    gate = clusterless_consistency_gate_summary(frame, margin_threshold=2.0).set_index("gate")
+
+    assert bool(gate.loc["required_clusterless_models_present", "passed"])
+    assert not bool(gate.loc["required_clusterless_models_scored", "passed"])
+    assert gate.loc["required_clusterless_models_scored", "observed"] == 0
+    assert "unsupported_rows=5" in str(gate.loc["required_clusterless_models_scored", "details"])
+    assert not bool(gate.loc["overall", "passed"])
+
+
 def test_all_session_aggregate_writes_clusterless_consistency_outputs(tmp_path):
     frame = pd.DataFrame(
         [

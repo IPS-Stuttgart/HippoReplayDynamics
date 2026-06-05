@@ -1,6 +1,7 @@
 import argparse
 import importlib.util
 from pathlib import Path
+from types import SimpleNamespace
 
 import numpy as np
 import pandas as pd
@@ -17,6 +18,7 @@ _clusterless_mark_config = benchmark_model_evidence._clusterless_mark_config
 _add_evidence_columns = benchmark_model_evidence._add_evidence_columns
 _family = benchmark_model_evidence._family
 _models = benchmark_model_evidence._models
+_score = benchmark_model_evidence._score
 
 
 class _SessionStub:
@@ -163,6 +165,81 @@ def test_model_evidence_clusterless_config_records_rate_floor():
     assert config.mark_kde_bandwidth == 2.5
     assert config.mark_kde_spatial_sigma_bins == 3.5
     assert config.mark_kde_max_neighbors == 17
+
+
+def test_model_evidence_marks_clusterless_rows_unsupported_without_spike_marks(monkeypatch):
+    args = argparse.Namespace(
+        dataset_root="data",
+        session="Rat1/Open1",
+        events="0",
+        max_events=None,
+        models="clusterless-state-space-momentum-exact-sparse",
+        bin_size_cm=6.0,
+        smoothing_sigma_bins=2.0,
+        min_speed_cm_s=5.0,
+        time_bin_s=0.004,
+        spike_rate_scale=2.0,
+        emission_likelihood_temperature=0.3,
+        emission_negative_binomial_overdispersion=0.0,
+        clusterless_mark_smoothing_sigma_bins=1.0,
+        clusterless_mark_prior_count=1.0,
+        clusterless_mark_variance_floor=1.0,
+        clusterless_rate_floor_hz=1e-4,
+        clusterless_mark_likelihood="local-kde",
+        clusterless_mark_kde_bandwidth=None,
+        clusterless_mark_kde_spatial_sigma_bins=None,
+        clusterless_mark_kde_max_neighbors=256,
+        state_space_imm_mode_stickiness=0.95,
+        state_space_common_support_top_k=0,
+    )
+    session = SimpleNamespace(session_id="Rat1/Open1", ripple_count=1)
+    encoding = SimpleNamespace(
+        bin_centers=np.zeros((2, 2), dtype=float),
+        occupancy_s=np.ones(2, dtype=float),
+    )
+    sorted_emissions = SimpleNamespace(
+        n_time=3,
+        n_spikes=5,
+        log_likelihood=np.zeros((3, 2), dtype=float),
+    )
+
+    monkeypatch.setattr(benchmark_model_evidence, "_session_path", lambda root, session: Path("."))
+    monkeypatch.setattr(benchmark_model_evidence, "_check_session", lambda path: None)
+    monkeypatch.setattr(benchmark_model_evidence, "load_replay_session", lambda path: session)
+    monkeypatch.setattr(benchmark_model_evidence, "fit_place_field_encoding", lambda session, config: encoding)
+    monkeypatch.setattr(
+        benchmark_model_evidence,
+        "_models",
+        lambda args, session=None: {
+            "clusterless-state-space-momentum-exact-sparse": (
+                benchmark_model_evidence.ClusterlessStateSpaceReplayModel(
+                    mode="momentum-exact-sparse"
+                )
+            )
+        },
+    )
+    monkeypatch.setattr(
+        benchmark_model_evidence,
+        "fit_clusterless_mark_encoding",
+        lambda session, config: (_ for _ in ()).throw(
+            ValueError("Session does not contain spike marks for clusterless encoding.")
+        ),
+    )
+    monkeypatch.setattr(
+        benchmark_model_evidence,
+        "build_emissions",
+        lambda session, encoding, event_id, config: sorted_emissions,
+    )
+
+    scores = _score(args)
+
+    assert scores["status"].tolist() == ["unsupported"]
+    assert scores["model"].tolist() == ["clusterless-state-space-momentum-exact-sparse"]
+    assert scores["evidence_support"].tolist() == ["not_scored"]
+    assert scores["evidence_comparable"].tolist() == [False]
+    assert "spike marks" in str(scores.loc[0, "error"])
+    assert scores.loc[0, "n_time"] == 3
+    assert scores.loc[0, "n_spikes"] == 5
 
 
 def test_model_evidence_classifies_state_space_families():

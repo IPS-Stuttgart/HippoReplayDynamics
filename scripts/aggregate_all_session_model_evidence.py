@@ -71,6 +71,20 @@ DEFAULT_CLUSTERLESS_TRAJECTORY_MODELS = (
 )
 
 
+def _unexpected_status_failures(df: pd.DataFrame) -> pd.DataFrame:
+    """Return non-success rows that are not explicit unsupported clusterless controls."""
+
+    if "status" not in df:
+        return pd.DataFrame(columns=df.columns)
+    failed = df[~df["status"].eq("success")].copy()
+    if failed.empty:
+        return failed
+    model = failed.get("model", pd.Series("", index=failed.index)).fillna("").astype(str)
+    status = failed["status"].fillna("").astype(str)
+    unsupported_clusterless = status.eq("unsupported") & model.str.startswith("clusterless-state-space-")
+    return failed[~unsupported_clusterless].copy()
+
+
 def _load_score_files(shard_glob: str) -> list[Path]:
     paths = sorted(Path(path) for path in glob.glob(shard_glob, recursive=True))
     if not paths:
@@ -556,8 +570,13 @@ def paper_readiness_gate_summary(
             }
         )
 
-    status_failures = int((df["status"] != "success").sum()) if "status" in df else 0
-    add("no_scoring_failures", status_failures == 0, status_failures, "status failures == 0")
+    status_failures = int(len(_unexpected_status_failures(df)))
+    add(
+        "no_scoring_failures",
+        status_failures == 0,
+        status_failures,
+        "unexpected status failures == 0",
+    )
 
     paired_decisions = paired_momentum_diffusion_margin_decisions(df, margin_threshold=margin_threshold)
     paired_summary = paired_momentum_diffusion_margin_summary(paired_decisions)
@@ -2013,6 +2032,33 @@ def clusterless_consistency_gate_summary(
         f"all {len(DEFAULT_CLUSTERLESS_REQUIRED_CORE_MODELS)} required clusterless models present",
         "missing=" + " ".join(missing_models) if missing_models else "required_models=" + " ".join(DEFAULT_CLUSTERLESS_REQUIRED_CORE_MODELS),
     )
+    successful_clusterless_rows = (
+        clusterless_rows[clusterless_rows["status"].eq("success")]
+        if "status" in clusterless_rows
+        else clusterless_rows
+    )
+    scored_models = set(
+        successful_clusterless_rows.get("model", pd.Series(dtype=str))
+        .dropna()
+        .astype(str)
+    )
+    missing_scored_models = [
+        model for model in DEFAULT_CLUSTERLESS_REQUIRED_CORE_MODELS if model not in scored_models
+    ]
+    unsupported_rows = int(clusterless_rows["status"].eq("unsupported").sum()) if "status" in clusterless_rows else 0
+    add(
+        "required_clusterless_models_scored",
+        not missing_scored_models,
+        len(DEFAULT_CLUSTERLESS_REQUIRED_CORE_MODELS) - len(missing_scored_models),
+        f"all {len(DEFAULT_CLUSTERLESS_REQUIRED_CORE_MODELS)} required clusterless models scored successfully",
+        (
+            "missing_scored="
+            + " ".join(missing_scored_models)
+            + f"; unsupported_rows={unsupported_rows}"
+            if missing_scored_models
+            else "required_models=" + " ".join(DEFAULT_CLUSTERLESS_REQUIRED_CORE_MODELS)
+        ),
+    )
 
     decisions = clusterless_family_margin_decisions(df, margin_threshold=margin_threshold)
     summary = clusterless_family_margin_summary(decisions)
@@ -2349,8 +2395,8 @@ def exact_trajectory_dynamics_gate_summary(
         margin_threshold=margin_threshold,
     )
     coverage = _required_full_core_model_coverage(df, required_models)
-    failures = int((df["status"] != "success").sum()) if "status" in df else 0
-    add("no_scoring_failures", failures == 0, failures, "status failures == 0")
+    failures = int(len(_unexpected_status_failures(df)))
+    add("no_scoring_failures", failures == 0, failures, "unexpected status failures == 0")
     add("exact_core_events_present", not decisions.empty, int(len(decisions)), "exact core events > 0")
     add(
         "required_exact_core_models_present",

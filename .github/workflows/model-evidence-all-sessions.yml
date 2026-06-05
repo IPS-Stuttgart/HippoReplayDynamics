@@ -473,8 +473,17 @@ jobs:
               raise SystemExit(f"Expected {expected_events} session-events, observed {observed_events}")
           if len(scores) != expected_rows:
               raise SystemExit(f"Expected {expected_rows} rows, observed {len(scores)}")
-          if "status" in scores and int((scores["status"] != "success").sum()) != 0:
-              raise SystemExit("All-session model evidence contains failed rows")
+          if "status" in scores:
+              non_success = scores[~scores["status"].eq("success")].copy()
+              if not non_success.empty:
+                  model = non_success["model"].fillna("").astype(str)
+                  allowed = (
+                      non_success["status"].fillna("").astype(str).eq("unsupported")
+                      & model.str.startswith("clusterless-state-space-")
+                  )
+                  if not bool(allowed.all()):
+                      raise SystemExit("All-session model evidence contains unexpected failed rows")
+                  print(f"Validated {int(len(non_success))} unsupported clusterless rows.")
           print(f"Validated {len(scores)} rows across {observed_sessions} sessions, {observed_events} events, and {expected_models} models.")
           PY
 

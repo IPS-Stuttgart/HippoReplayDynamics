@@ -51,6 +51,24 @@ DEFAULT_AUGMENTED_EXACT_CORE_MODELS = (
     DEFAULT_MARGIN_POSITIVE_MODEL,
     DEFAULT_TRAJECTORY_IMM_MODEL,
 )
+DEFAULT_CLUSTERLESS_STATIONARY_MODEL = "clusterless-state-space-stationary"
+DEFAULT_CLUSTERLESS_DIFFUSION_MODEL = "clusterless-state-space-diffusion"
+DEFAULT_CLUSTERLESS_FIRST_ORDER_IMM_MODEL = "clusterless-state-space-first-order-imm"
+DEFAULT_CLUSTERLESS_MOMENTUM_MODEL = "clusterless-state-space-momentum-exact-sparse"
+DEFAULT_CLUSTERLESS_TRAJECTORY_IMM_MODEL = "clusterless-state-space-trajectory-imm-exact-sparse"
+DEFAULT_CLUSTERLESS_REQUIRED_CORE_MODELS = (
+    DEFAULT_CLUSTERLESS_STATIONARY_MODEL,
+    DEFAULT_CLUSTERLESS_DIFFUSION_MODEL,
+    DEFAULT_CLUSTERLESS_FIRST_ORDER_IMM_MODEL,
+    DEFAULT_CLUSTERLESS_MOMENTUM_MODEL,
+    DEFAULT_CLUSTERLESS_TRAJECTORY_IMM_MODEL,
+)
+DEFAULT_CLUSTERLESS_TRAJECTORY_MODELS = (
+    DEFAULT_CLUSTERLESS_DIFFUSION_MODEL,
+    DEFAULT_CLUSTERLESS_FIRST_ORDER_IMM_MODEL,
+    DEFAULT_CLUSTERLESS_MOMENTUM_MODEL,
+    DEFAULT_CLUSTERLESS_TRAJECTORY_IMM_MODEL,
+)
 
 
 def _load_score_files(shard_glob: str) -> list[Path]:
@@ -1788,6 +1806,318 @@ def exact_trajectory_nontrajectory_gate_summary(
     return pd.concat([result, overall], ignore_index=True)
 
 
+def clusterless_event_model_evidence(df: pd.DataFrame) -> pd.DataFrame:
+    """Return clusterless/marked-spike evidence rows from an all-session table."""
+
+    if "model" not in df:
+        return df.head(0).copy()
+    return df[df["model"].astype(str).str.startswith("clusterless-")].copy()
+
+
+def clusterless_family_margin_decisions(
+    df: pd.DataFrame,
+    *,
+    required_models: tuple[str, ...] = DEFAULT_CLUSTERLESS_REQUIRED_CORE_MODELS,
+    trajectory_models: tuple[str, ...] = DEFAULT_CLUSTERLESS_TRAJECTORY_MODELS,
+    margin_threshold: float = DEFAULT_MOMENTUM_CONFIDENCE_THRESHOLD,
+) -> pd.DataFrame:
+    """Return clusterless best-trajectory-vs-stationary family margins."""
+
+    return exact_trajectory_nontrajectory_margin_decisions(
+        clusterless_event_model_evidence(df),
+        required_models=required_models,
+        trajectory_models=trajectory_models,
+        margin_threshold=margin_threshold,
+    )
+
+
+def clusterless_family_margin_summary(
+    decisions: pd.DataFrame,
+    *,
+    group_cols: tuple[str, ...] = (),
+) -> pd.DataFrame:
+    """Summarize clusterless trajectory-family margins."""
+
+    return exact_trajectory_nontrajectory_margin_summary(decisions, group_cols=group_cols)
+
+
+def clusterless_paired_momentum_diffusion_decisions(
+    df: pd.DataFrame,
+    *,
+    margin_threshold: float = DEFAULT_MOMENTUM_CONFIDENCE_THRESHOLD,
+) -> pd.DataFrame:
+    """Return clusterless exact-sparse momentum-vs-diffusion decisions."""
+
+    return paired_model_margin_decisions(
+        clusterless_event_model_evidence(df),
+        positive_model=DEFAULT_CLUSTERLESS_MOMENTUM_MODEL,
+        reference_model=DEFAULT_CLUSTERLESS_DIFFUSION_MODEL,
+        margin_threshold=margin_threshold,
+        group_cols=("session", "event_index"),
+    )
+
+
+def clusterless_paired_momentum_diffusion_summary(decisions: pd.DataFrame) -> pd.DataFrame:
+    """Summarize clusterless momentum-vs-diffusion paired margins."""
+
+    return _paired_margin_summary(decisions, group_cols=())
+
+
+def clusterless_rat_summary(decisions: pd.DataFrame) -> pd.DataFrame:
+    """Summarize clusterless family margins by rat."""
+
+    return clusterless_family_margin_summary(_with_rat(decisions), group_cols=("rat",))
+
+
+def clusterless_leave_one_rat_out_summary(decisions: pd.DataFrame) -> pd.DataFrame:
+    """Summarize clusterless family margins after excluding each rat."""
+
+    return _leave_one_rat_out_summary(decisions, clusterless_family_margin_summary)
+
+
+def clusterless_sorted_spike_event_overlap(
+    df: pd.DataFrame,
+    *,
+    margin_threshold: float = DEFAULT_MOMENTUM_CONFIDENCE_THRESHOLD,
+) -> pd.DataFrame:
+    """Compare clusterless and sorted-spike family decisions on matched events."""
+
+    columns = [
+        "session",
+        "event_index",
+        "sorted_spike_required_models_complete",
+        "clusterless_required_models_complete",
+        "sorted_spike_best_trajectory_model",
+        "clusterless_best_trajectory_model",
+        "sorted_spike_best_nontrajectory_model",
+        "clusterless_best_nontrajectory_model",
+        "sorted_spike_family_margin",
+        "clusterless_family_margin",
+        "clusterless_minus_sorted_spike_family_margin",
+        "sorted_spike_raw_direction",
+        "clusterless_raw_direction",
+        "raw_direction_agrees",
+        "sorted_spike_margin_decision",
+        "clusterless_margin_decision",
+        "margin_decision_agrees",
+        "both_trajectory_raw_win",
+        "both_trajectory_confident_claim",
+        "both_nontrajectory_confident_claim",
+    ]
+    sorted_decisions = exact_trajectory_nontrajectory_margin_decisions(
+        df,
+        margin_threshold=margin_threshold,
+    )
+    clusterless_decisions = clusterless_family_margin_decisions(
+        df,
+        margin_threshold=margin_threshold,
+    )
+    if sorted_decisions.empty or clusterless_decisions.empty:
+        return pd.DataFrame(columns=columns)
+
+    sorted_keep = [
+        "session",
+        "event_index",
+        "required_models_complete",
+        "best_trajectory_model",
+        "best_nontrajectory_model",
+        "trajectory_minus_nontrajectory_log_evidence",
+        "trajectory_raw_win",
+        "trajectory_confident_claim",
+        "nontrajectory_confident_claim",
+        "margin_decision",
+    ]
+    clusterless_keep = sorted_keep.copy()
+    left = sorted_decisions[sorted_keep].rename(
+        columns={
+            "required_models_complete": "sorted_spike_required_models_complete",
+            "best_trajectory_model": "sorted_spike_best_trajectory_model",
+            "best_nontrajectory_model": "sorted_spike_best_nontrajectory_model",
+            "trajectory_minus_nontrajectory_log_evidence": "sorted_spike_family_margin",
+            "trajectory_raw_win": "sorted_spike_trajectory_raw_win",
+            "trajectory_confident_claim": "sorted_spike_trajectory_confident_claim",
+            "nontrajectory_confident_claim": "sorted_spike_nontrajectory_confident_claim",
+            "margin_decision": "sorted_spike_margin_decision",
+        }
+    )
+    right = clusterless_decisions[clusterless_keep].rename(
+        columns={
+            "required_models_complete": "clusterless_required_models_complete",
+            "best_trajectory_model": "clusterless_best_trajectory_model",
+            "best_nontrajectory_model": "clusterless_best_nontrajectory_model",
+            "trajectory_minus_nontrajectory_log_evidence": "clusterless_family_margin",
+            "trajectory_raw_win": "clusterless_trajectory_raw_win",
+            "trajectory_confident_claim": "clusterless_trajectory_confident_claim",
+            "nontrajectory_confident_claim": "clusterless_nontrajectory_confident_claim",
+            "margin_decision": "clusterless_margin_decision",
+        }
+    )
+    overlap = left.merge(right, on=["session", "event_index"], how="inner")
+    if overlap.empty:
+        return pd.DataFrame(columns=columns)
+
+    overlap["clusterless_minus_sorted_spike_family_margin"] = (
+        overlap["clusterless_family_margin"].astype(float)
+        - overlap["sorted_spike_family_margin"].astype(float)
+    )
+    overlap["sorted_spike_raw_direction"] = overlap["sorted_spike_family_margin"].map(_family_margin_direction)
+    overlap["clusterless_raw_direction"] = overlap["clusterless_family_margin"].map(_family_margin_direction)
+    overlap["raw_direction_agrees"] = overlap["sorted_spike_raw_direction"].eq(overlap["clusterless_raw_direction"])
+    overlap["margin_decision_agrees"] = overlap["sorted_spike_margin_decision"].eq(
+        overlap["clusterless_margin_decision"]
+    )
+    overlap["both_trajectory_raw_win"] = overlap["sorted_spike_trajectory_raw_win"].fillna(False).astype(bool) & overlap[
+        "clusterless_trajectory_raw_win"
+    ].fillna(False).astype(bool)
+    overlap["both_trajectory_confident_claim"] = overlap["sorted_spike_trajectory_confident_claim"].fillna(
+        False
+    ).astype(bool) & overlap["clusterless_trajectory_confident_claim"].fillna(False).astype(bool)
+    overlap["both_nontrajectory_confident_claim"] = overlap["sorted_spike_nontrajectory_confident_claim"].fillna(
+        False
+    ).astype(bool) & overlap["clusterless_nontrajectory_confident_claim"].fillna(False).astype(bool)
+    return overlap[columns].sort_values(["session", "event_index"]).reset_index(drop=True)
+
+
+def clusterless_consistency_gate_summary(
+    df: pd.DataFrame,
+    *,
+    margin_threshold: float = DEFAULT_MOMENTUM_CONFIDENCE_THRESHOLD,
+    min_raw_win_fraction: float = DEFAULT_PAPER_MIN_RAW_WIN_FRACTION,
+    min_confident_claim_fraction: float = DEFAULT_PAPER_MIN_CONFIDENT_CLAIM_FRACTION,
+    min_overlap_agreement_fraction: float = DEFAULT_PAPER_MIN_RAW_WIN_FRACTION,
+) -> pd.DataFrame:
+    """Return pass/fail gates for clusterless observation-model consistency."""
+
+    columns = ["gate", "passed", "observed", "criterion", "details"]
+    rows: list[dict[str, object]] = []
+
+    def add(gate: str, passed: bool, observed: object, criterion: str, details: str = "") -> None:
+        rows.append(
+            {
+                "gate": gate,
+                "passed": bool(passed),
+                "observed": observed,
+                "criterion": criterion,
+                "details": details,
+            }
+        )
+
+    clusterless_rows = clusterless_event_model_evidence(df)
+    add("clusterless_rows_present", not clusterless_rows.empty, int(len(clusterless_rows)), "clusterless rows > 0")
+    present_models = set(clusterless_rows.get("model", pd.Series(dtype=str)).dropna().astype(str))
+    missing_models = [model for model in DEFAULT_CLUSTERLESS_REQUIRED_CORE_MODELS if model not in present_models]
+    add(
+        "required_clusterless_models_present",
+        not missing_models,
+        len(DEFAULT_CLUSTERLESS_REQUIRED_CORE_MODELS) - len(missing_models),
+        f"all {len(DEFAULT_CLUSTERLESS_REQUIRED_CORE_MODELS)} required clusterless models present",
+        "missing=" + " ".join(missing_models) if missing_models else "required_models=" + " ".join(DEFAULT_CLUSTERLESS_REQUIRED_CORE_MODELS),
+    )
+
+    decisions = clusterless_family_margin_decisions(df, margin_threshold=margin_threshold)
+    summary = clusterless_family_margin_summary(decisions)
+    if summary.empty:
+        add("clusterless_complete_family_events_present", False, 0, "required_complete_events > 0")
+        add("clusterless_trajectory_raw_win_majority", False, np.nan, f"trajectory_raw_win_fraction > {float(min_raw_win_fraction):g}")
+        add(
+            "clusterless_trajectory_confident_claim_majority",
+            False,
+            np.nan,
+            f"trajectory_confident_claim_fraction > {float(min_confident_claim_fraction):g}",
+        )
+        add("clusterless_no_confident_nontrajectory_claims", False, np.nan, "nontrajectory_confident_claims == 0")
+    else:
+        row = summary.iloc[0]
+        add(
+            "clusterless_complete_family_events_present",
+            int(row["required_complete_events"]) > 0,
+            int(row["required_complete_events"]),
+            "required_complete_events > 0",
+        )
+        add(
+            "clusterless_trajectory_raw_win_majority",
+            float(row["trajectory_raw_win_fraction"]) > float(min_raw_win_fraction),
+            f"{float(row['trajectory_raw_win_fraction']):.6g}",
+            f"trajectory_raw_win_fraction > {float(min_raw_win_fraction):g}",
+        )
+        add(
+            "clusterless_trajectory_confident_claim_majority",
+            float(row["trajectory_confident_claim_fraction"]) > float(min_confident_claim_fraction),
+            f"{float(row['trajectory_confident_claim_fraction']):.6g}",
+            f"trajectory_confident_claim_fraction > {float(min_confident_claim_fraction):g}",
+            f"margin_threshold={float(margin_threshold):g}",
+        )
+        add(
+            "clusterless_no_confident_nontrajectory_claims",
+            int(row["nontrajectory_confident_claims"]) == 0,
+            int(row["nontrajectory_confident_claims"]),
+            "nontrajectory_confident_claims == 0",
+        )
+
+    rat = clusterless_rat_summary(decisions)
+    if rat.empty:
+        add("clusterless_all_rats_median_delta_positive", False, np.nan, "min rat median delta > 0")
+    else:
+        min_rat_median = float(rat["median_trajectory_minus_nontrajectory_log_evidence"].min())
+        add(
+            "clusterless_all_rats_median_delta_positive",
+            min_rat_median > 0.0,
+            f"{min_rat_median:.6g}",
+            "min rat median delta > 0",
+        )
+
+    leave_one = clusterless_leave_one_rat_out_summary(decisions)
+    if leave_one.empty:
+        add("clusterless_leave_one_rat_out_median_delta_positive", False, np.nan, "min leave-one-rat-out median delta > 0")
+    else:
+        min_leave_one_median = float(leave_one["median_trajectory_minus_nontrajectory_log_evidence"].min())
+        add(
+            "clusterless_leave_one_rat_out_median_delta_positive",
+            min_leave_one_median > 0.0,
+            f"{min_leave_one_median:.6g}",
+            "min leave-one-rat-out median delta > 0",
+        )
+
+    overlap = clusterless_sorted_spike_event_overlap(df, margin_threshold=margin_threshold)
+    if overlap.empty:
+        add("clusterless_sorted_spike_overlap_present", False, 0, "matched sorted-spike/clusterless events > 0")
+        add(
+            "clusterless_sorted_spike_raw_direction_consistency",
+            False,
+            np.nan,
+            f"raw direction agreement fraction > {float(min_overlap_agreement_fraction):g}",
+        )
+    else:
+        agreement = float(overlap["raw_direction_agrees"].fillna(False).astype(bool).mean())
+        add(
+            "clusterless_sorted_spike_overlap_present",
+            True,
+            int(len(overlap)),
+            "matched sorted-spike/clusterless events > 0",
+        )
+        add(
+            "clusterless_sorted_spike_raw_direction_consistency",
+            agreement > float(min_overlap_agreement_fraction),
+            f"{agreement:.6g}",
+            f"raw direction agreement fraction > {float(min_overlap_agreement_fraction):g}",
+        )
+
+    result = pd.DataFrame(rows, columns=columns)
+    overall = pd.DataFrame(
+        [
+            {
+                "gate": "overall",
+                "passed": bool(result["passed"].all()) if not result.empty else False,
+                "observed": f"{int(result['passed'].sum())}/{len(result)} gates passed" if not result.empty else "0/0 gates passed",
+                "criterion": "all gates pass",
+                "details": f"margin_threshold={float(margin_threshold):g}",
+            }
+        ],
+        columns=columns,
+    )
+    return pd.concat([result, overall], ignore_index=True)
+
+
 def session_exact_trajectory_dynamics_summary(decisions: pd.DataFrame) -> pd.DataFrame:
     """Summarize exact trajectory-dynamics claims by session."""
 
@@ -2131,6 +2461,17 @@ def _with_rat(frame: pd.DataFrame) -> pd.DataFrame:
 
 def _rat_from_session(session: object) -> str:
     return str(session).replace("\\", "/").split("/", 1)[0]
+
+
+def _family_margin_direction(value: object) -> str:
+    delta = pd.to_numeric(pd.Series([value]), errors="coerce").iloc[0]
+    if pd.isna(delta):
+        return "missing"
+    if float(delta) > 0.0:
+        return "trajectory"
+    if float(delta) < 0.0:
+        return "nontrajectory"
+    return "tie"
 
 
 def _numeric_or_nan(frame: pd.DataFrame, column: str) -> np.ndarray:
@@ -2547,6 +2888,10 @@ def aggregate_all_sessions(shard_glob: str, outdir: Path) -> pd.DataFrame:
     exact_core_decisions = exact_core_model_claim_decisions(combined)
     trajectory_nontrajectory_decisions = exact_trajectory_nontrajectory_margin_decisions(combined)
     trajectory_imm_modes = trajectory_imm_mode_mass_summary(combined)
+    clusterless_rows = clusterless_event_model_evidence(combined)
+    clusterless_decisions = clusterless_family_margin_decisions(combined)
+    clusterless_paired_decisions = clusterless_paired_momentum_diffusion_decisions(combined)
+    clusterless_overlap = clusterless_sorted_spike_event_overlap(combined)
 
     _write(combined, outdir)
     combined.to_csv(outdir / "all_sessions_event_model_evidence.csv", index=False)
@@ -2720,6 +3065,26 @@ def aggregate_all_sessions(shard_glob: str, outdir: Path) -> pd.DataFrame:
         outdir / "rat_bootstrap_exact_sparse_momentum_core_threshold_sensitivity.csv",
         index=False,
     )
+    clusterless_rows.to_csv(outdir / "clusterless_event_model_evidence.csv", index=False)
+    clusterless_decisions.to_csv(outdir / "clusterless_family_margin_decisions.csv", index=False)
+    clusterless_family_margin_summary(clusterless_decisions).to_csv(
+        outdir / "clusterless_family_margin_summary.csv",
+        index=False,
+    )
+    clusterless_paired_momentum_diffusion_summary(clusterless_paired_decisions).to_csv(
+        outdir / "clusterless_paired_momentum_diffusion_summary.csv",
+        index=False,
+    )
+    clusterless_rat_summary(clusterless_decisions).to_csv(outdir / "clusterless_rat_summary.csv", index=False)
+    clusterless_leave_one_rat_out_summary(clusterless_decisions).to_csv(
+        outdir / "clusterless_leave_one_rat_out_summary.csv",
+        index=False,
+    )
+    clusterless_overlap.to_csv(outdir / "clusterless_sorted_spike_event_overlap.csv", index=False)
+    clusterless_consistency_gate_summary(combined).to_csv(
+        outdir / "clusterless_consistency_gate_summary.csv",
+        index=False,
+    )
     return combined
 
 
@@ -2811,6 +3176,19 @@ def main() -> int:
     print(rat_bootstrap_paired_momentum_diffusion_threshold_sensitivity(combined).to_string(index=False))
     print("\nRat-bootstrap exact-sparse momentum full-core threshold sensitivity:")
     print(rat_bootstrap_exact_sparse_momentum_core_threshold_sensitivity(combined).to_string(index=False))
+    clusterless_decisions = clusterless_family_margin_decisions(combined)
+    print("\nClusterless family margin summary:")
+    print(clusterless_family_margin_summary(clusterless_decisions).to_string(index=False))
+    print("\nClusterless paired momentum-vs-diffusion summary:")
+    print(clusterless_paired_momentum_diffusion_summary(clusterless_paired_momentum_diffusion_decisions(combined)).to_string(index=False))
+    print("\nClusterless rat summary:")
+    print(clusterless_rat_summary(clusterless_decisions).to_string(index=False))
+    print("\nClusterless leave-one-rat-out summary:")
+    print(clusterless_leave_one_rat_out_summary(clusterless_decisions).to_string(index=False))
+    print("\nClusterless sorted-spike event overlap:")
+    print(clusterless_sorted_spike_event_overlap(combined).to_string(index=False))
+    print("\nClusterless consistency gate summary:")
+    print(clusterless_consistency_gate_summary(combined).to_string(index=False))
     print(f"\nRows: {len(combined)}")
     if "status" in combined:
         print(f"Failures: {int((combined['status'] != 'success').sum())}")

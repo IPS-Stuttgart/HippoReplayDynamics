@@ -6,7 +6,17 @@ import pytest
 
 sys.path.insert(0, str(Path("scripts").resolve()))
 from aggregate_all_session_model_evidence import (
+    aggregate_all_sessions,
     augmented_exact_core_model_claim_summary,
+    clusterless_consistency_gate_summary,
+    clusterless_event_model_evidence,
+    clusterless_family_margin_decisions,
+    clusterless_family_margin_summary,
+    clusterless_leave_one_rat_out_summary,
+    clusterless_paired_momentum_diffusion_decisions,
+    clusterless_paired_momentum_diffusion_summary,
+    clusterless_rat_summary,
+    clusterless_sorted_spike_event_overlap,
     exact_core_model_claim_decisions,
     exact_core_model_claim_summary,
     exact_trajectory_dynamics_gate_summary,
@@ -121,6 +131,14 @@ def test_all_session_model_evidence_workflow_exports_expected_outputs():
     assert "leave_one_rat_out_exact_sparse_momentum_core_threshold_sensitivity.csv" in workflow
     assert "rat_bootstrap_exact_sparse_momentum_core_margin_summary.csv" in workflow
     assert "rat_bootstrap_exact_sparse_momentum_core_threshold_sensitivity.csv" in workflow
+    assert "clusterless_event_model_evidence.csv" in workflow
+    assert "clusterless_family_margin_decisions.csv" in workflow
+    assert "clusterless_family_margin_summary.csv" in workflow
+    assert "clusterless_paired_momentum_diffusion_summary.csv" in workflow
+    assert "clusterless_rat_summary.csv" in workflow
+    assert "clusterless_leave_one_rat_out_summary.csv" in workflow
+    assert "clusterless_sorted_spike_event_overlap.csv" in workflow
+    assert "clusterless_consistency_gate_summary.csv" in workflow
 
 
 def test_all_session_summary_helpers_group_by_session():
@@ -834,6 +852,107 @@ def test_all_session_exact_trajectory_nontrajectory_margin_tables():
     assert bootstrap["observed_positive_raw_win_fraction"] == pytest.approx(1 / 3)
     assert bootstrap["observed_positive_claim_fraction"] == pytest.approx(1 / 3)
     assert bootstrap["observed_mean_delta"] == pytest.approx(2 / 3)
+
+
+def test_all_session_clusterless_consistency_tables():
+    frame = pd.DataFrame(
+        [
+            _paired_score_row("Rat1/Open1", 0, "sorted-spike-state-space-stationary", 0.0),
+            _paired_score_row("Rat1/Open1", 0, "sorted-spike-state-space-diffusion", 1.0),
+            _paired_score_row("Rat1/Open1", 0, "sorted-spike-state-space-fragmented", 2.0),
+            _paired_score_row("Rat1/Open1", 0, "sorted-spike-state-space-first-order-imm", 8.0),
+            _paired_score_row("Rat1/Open1", 0, "sorted-spike-state-space-momentum-exact-sparse", 4.0),
+            _paired_score_row("Rat1/Open1", 0, "clusterless-state-space-stationary", -1.0),
+            _paired_score_row("Rat1/Open1", 0, "clusterless-state-space-diffusion", 2.0),
+            _paired_score_row("Rat1/Open1", 0, "clusterless-state-space-first-order-imm", 5.0),
+            _paired_score_row("Rat1/Open1", 0, "clusterless-state-space-momentum-exact-sparse", 4.0),
+            _paired_score_row("Rat1/Open1", 0, "clusterless-state-space-trajectory-imm-exact-sparse", 6.0),
+            _paired_score_row("Rat2/Open1", 1, "sorted-spike-state-space-stationary", 3.0),
+            _paired_score_row("Rat2/Open1", 1, "sorted-spike-state-space-diffusion", 4.0),
+            _paired_score_row("Rat2/Open1", 1, "sorted-spike-state-space-fragmented", 5.0),
+            _paired_score_row("Rat2/Open1", 1, "sorted-spike-state-space-first-order-imm", 6.0),
+            _paired_score_row("Rat2/Open1", 1, "sorted-spike-state-space-momentum-exact-sparse", 7.0),
+            _paired_score_row("Rat2/Open1", 1, "clusterless-state-space-stationary", 1.0),
+            _paired_score_row("Rat2/Open1", 1, "clusterless-state-space-diffusion", 0.0),
+            _paired_score_row("Rat2/Open1", 1, "clusterless-state-space-first-order-imm", 3.0),
+            _paired_score_row("Rat2/Open1", 1, "clusterless-state-space-momentum-exact-sparse", 4.0),
+            _paired_score_row("Rat2/Open1", 1, "clusterless-state-space-trajectory-imm-exact-sparse", 2.0),
+        ]
+    )
+
+    clusterless_rows = clusterless_event_model_evidence(frame)
+    assert len(clusterless_rows) == 10
+
+    decisions = clusterless_family_margin_decisions(frame, margin_threshold=2.0)
+    assert decisions["margin_decision"].tolist() == ["trajectory", "trajectory"]
+    assert decisions["best_trajectory_model"].tolist() == [
+        "clusterless-state-space-trajectory-imm-exact-sparse",
+        "clusterless-state-space-momentum-exact-sparse",
+    ]
+    assert decisions["trajectory_minus_nontrajectory_log_evidence"].tolist() == [7.0, 3.0]
+
+    summary = clusterless_family_margin_summary(decisions).iloc[0]
+    assert summary["events"] == 2
+    assert summary["trajectory_raw_wins"] == 2
+    assert summary["trajectory_confident_claims"] == 2
+    assert summary["nontrajectory_confident_claims"] == 0
+
+    paired = clusterless_paired_momentum_diffusion_summary(
+        clusterless_paired_momentum_diffusion_decisions(frame, margin_threshold=2.0)
+    ).iloc[0]
+    assert paired["positive_raw_wins"] == 2
+    assert paired["positive_model_claims"] == 2
+    assert paired["median_positive_minus_reference_log_evidence"] == pytest.approx(3.0)
+
+    rat = clusterless_rat_summary(decisions)
+    assert rat["rat"].tolist() == ["Rat1", "Rat2"]
+    assert rat["median_trajectory_minus_nontrajectory_log_evidence"].tolist() == [7.0, 3.0]
+
+    leave_one = clusterless_leave_one_rat_out_summary(decisions)
+    assert leave_one["held_out_rat"].tolist() == ["Rat1", "Rat2"]
+    assert leave_one["trajectory_confident_claims"].tolist() == [1, 1]
+
+    overlap = clusterless_sorted_spike_event_overlap(frame, margin_threshold=2.0)
+    assert len(overlap) == 2
+    assert overlap["raw_direction_agrees"].tolist() == [True, True]
+    assert overlap["both_trajectory_confident_claim"].tolist() == [True, True]
+
+    gate = clusterless_consistency_gate_summary(frame, margin_threshold=2.0).set_index("gate")
+    assert bool(gate.loc["overall", "passed"])
+
+
+def test_all_session_aggregate_writes_clusterless_consistency_outputs(tmp_path):
+    frame = pd.DataFrame(
+        [
+            _paired_score_row("Rat1/Open1", 0, "sorted-spike-state-space-stationary", 0.0),
+            _paired_score_row("Rat1/Open1", 0, "sorted-spike-state-space-diffusion", 1.0),
+            _paired_score_row("Rat1/Open1", 0, "sorted-spike-state-space-fragmented", 2.0),
+            _paired_score_row("Rat1/Open1", 0, "sorted-spike-state-space-first-order-imm", 8.0),
+            _paired_score_row("Rat1/Open1", 0, "sorted-spike-state-space-momentum-exact-sparse", 4.0),
+            _paired_score_row("Rat1/Open1", 0, "clusterless-state-space-stationary", -1.0),
+            _paired_score_row("Rat1/Open1", 0, "clusterless-state-space-diffusion", 2.0),
+            _paired_score_row("Rat1/Open1", 0, "clusterless-state-space-first-order-imm", 5.0),
+            _paired_score_row("Rat1/Open1", 0, "clusterless-state-space-momentum-exact-sparse", 4.0),
+            _paired_score_row("Rat1/Open1", 0, "clusterless-state-space-trajectory-imm-exact-sparse", 6.0),
+        ]
+    )
+    shard = tmp_path / "event_model_evidence.csv"
+    frame.to_csv(shard, index=False)
+    out = tmp_path / "aggregate"
+
+    aggregate_all_sessions(str(shard), out)
+
+    for name in (
+        "clusterless_event_model_evidence.csv",
+        "clusterless_family_margin_decisions.csv",
+        "clusterless_family_margin_summary.csv",
+        "clusterless_paired_momentum_diffusion_summary.csv",
+        "clusterless_rat_summary.csv",
+        "clusterless_leave_one_rat_out_summary.csv",
+        "clusterless_sorted_spike_event_overlap.csv",
+        "clusterless_consistency_gate_summary.csv",
+    ):
+        assert (out / name).stat().st_size > 0
 
 
 def test_all_session_exact_trajectory_nontrajectory_gate_summary_reports_family_readiness():

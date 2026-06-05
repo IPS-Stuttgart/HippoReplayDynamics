@@ -440,6 +440,14 @@ jobs:
             leave_one_rat_out_exact_sparse_momentum_core_threshold_sensitivity.csv \
             rat_bootstrap_exact_sparse_momentum_core_margin_summary.csv \
             rat_bootstrap_exact_sparse_momentum_core_threshold_sensitivity.csv \
+            clusterless_event_model_evidence.csv \
+            clusterless_family_margin_decisions.csv \
+            clusterless_family_margin_summary.csv \
+            clusterless_paired_momentum_diffusion_summary.csv \
+            clusterless_rat_summary.csv \
+            clusterless_leave_one_rat_out_summary.csv \
+            clusterless_sorted_spike_event_overlap.csv \
+            clusterless_consistency_gate_summary.csv \
             event_model_pivot_log_evidence.csv \
             event_model_pivot_relative_log_evidence.csv \
             event_model_pivot_model_probability.csv; do
@@ -563,6 +571,18 @@ jobs:
           print(pd.read_csv(f"{root}/rat_bootstrap_exact_sparse_momentum_core_margin_summary.csv").to_string(index=False))
           print("\nRat-bootstrap exact-sparse momentum full-core threshold sensitivity:")
           print(pd.read_csv(f"{root}/rat_bootstrap_exact_sparse_momentum_core_threshold_sensitivity.csv").to_string(index=False))
+          print("\nClusterless family margin summary:")
+          print(pd.read_csv(f"{root}/clusterless_family_margin_summary.csv").to_string(index=False))
+          print("\nClusterless paired momentum-vs-diffusion summary:")
+          print(pd.read_csv(f"{root}/clusterless_paired_momentum_diffusion_summary.csv").to_string(index=False))
+          print("\nClusterless rat summary:")
+          print(pd.read_csv(f"{root}/clusterless_rat_summary.csv").to_string(index=False))
+          print("\nClusterless leave-one-rat-out summary:")
+          print(pd.read_csv(f"{root}/clusterless_leave_one_rat_out_summary.csv").to_string(index=False))
+          print("\nClusterless sorted-spike event overlap:")
+          print(pd.read_csv(f"{root}/clusterless_sorted_spike_event_overlap.csv").to_string(index=False))
+          print("\nClusterless consistency gate summary:")
+          print(pd.read_csv(f"{root}/clusterless_consistency_gate_summary.csv").to_string(index=False))
           PY
 
       - name: Upload all-session model-evidence results

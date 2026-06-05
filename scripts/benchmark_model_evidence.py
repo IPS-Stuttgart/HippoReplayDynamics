@@ -93,6 +93,7 @@ _TRAJ = {
     "clusterless-state-space-fragmented",
     "clusterless-state-space-jump",
     "clusterless-state-space-momentum",
+    "clusterless-state-space-momentum-exact-sparse",
     "clusterless-state-space-trajectory-imm-exact-sparse",
     "clusterless-state-space-displacement-momentum",
     "clusterless-state-space-first-order-imm",
@@ -280,6 +281,7 @@ def _models(args, session=None) -> dict[str, object]:
         "clusterless-state-space-fragmented": clusterless_state_space_model("fragmented"),
         "clusterless-state-space-jump": clusterless_state_space_model("jump"),
         "clusterless-state-space-momentum": clusterless_state_space_model("momentum"),
+        "clusterless-state-space-momentum-exact-sparse": clusterless_state_space_model("momentum-exact-sparse"),
         "clusterless-state-space-trajectory-imm-exact-sparse": clusterless_state_space_model("trajectory-imm-exact-sparse"),
         "clusterless-state-space-displacement-momentum": clusterless_state_space_model("displacement-momentum"),
         "clusterless-state-space-first-order-imm": clusterless_state_space_model("first-order-imm"),
@@ -313,7 +315,7 @@ def _score_model_with_optional_support(model, emissions, bin_centers, *, occupan
         kwargs["candidate_indices"] = candidates
     if occupancy_s is not None:
         kwargs["occupancy_s"] = occupancy_s
-    if isinstance(model, SortedSpikeStateSpaceReplayModel) and model.mode == "momentum-exact-sparse":
+    if isinstance(model, (SortedSpikeStateSpaceReplayModel, ClusterlessStateSpaceReplayModel)) and model.mode == "momentum-exact-sparse":
         kwargs["return_trajectory"] = False
     if not kwargs:
         return model.score(emissions, bin_centers)

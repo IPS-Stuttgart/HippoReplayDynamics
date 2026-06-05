@@ -84,7 +84,14 @@ def test_model_evidence_accepts_sorted_spike_state_space_models():
 
 def test_model_evidence_accepts_clusterless_state_space_models():
     args = argparse.Namespace(
-        models="clusterless-state-space-diffusion clusterless-state-space-first-order-imm clusterless-state-space-momentum clusterless-state-space-imm",
+        models=(
+            "clusterless-state-space-diffusion "
+            "clusterless-state-space-first-order-imm "
+            "clusterless-state-space-momentum-exact-sparse "
+            "clusterless-state-space-trajectory-imm-exact-sparse "
+            "clusterless-state-space-momentum "
+            "clusterless-state-space-imm"
+        ),
         candidate_top_k=64,
         stationary_sigma_cm=2.0,
         diffusion_sigma_cm=12.0,
@@ -107,15 +114,24 @@ def test_model_evidence_accepts_clusterless_state_space_models():
     assert list(models) == [
         "clusterless-state-space-diffusion",
         "clusterless-state-space-first-order-imm",
+        "clusterless-state-space-momentum-exact-sparse",
+        "clusterless-state-space-trajectory-imm-exact-sparse",
         "clusterless-state-space-momentum",
         "clusterless-state-space-imm",
     ]
     assert models["clusterless-state-space-diffusion"].name == "clusterless-state-space-diffusion"
     assert models["clusterless-state-space-first-order-imm"].name == "clusterless-state-space-first-order-imm"
+    assert models["clusterless-state-space-momentum-exact-sparse"].name == (
+        "clusterless-state-space-momentum-exact-sparse"
+    )
+    assert models["clusterless-state-space-trajectory-imm-exact-sparse"].name == (
+        "clusterless-state-space-trajectory-imm-exact-sparse"
+    )
     assert models["clusterless-state-space-momentum"].name == "clusterless-state-space-momentum"
     assert models["clusterless-state-space-imm"].name == "clusterless-state-space-imm"
     assert models["clusterless-state-space-diffusion"].config.diffusion_sigma_cm_sqrt_s == 42.0
     assert models["clusterless-state-space-first-order-imm"].config.imm_mode_stickiness == 0.91
+    assert models["clusterless-state-space-momentum-exact-sparse"].config.momentum_sigma_cm_sqrt_s == 43.0
     assert models["clusterless-state-space-momentum"].config.momentum_sigma_cm_sqrt_s == 43.0
     assert models["clusterless-state-space-momentum"].config.momentum_predicted_candidate_top_k == 5
 
@@ -161,6 +177,7 @@ def test_model_evidence_classifies_state_space_families():
     assert _family("clusterless-state-space-diffusion") == "trajectory"
     assert _family("clusterless-state-space-fragmented") == "trajectory"
     assert _family("clusterless-state-space-momentum") == "trajectory"
+    assert _family("clusterless-state-space-momentum-exact-sparse") == "trajectory"
     assert _family("clusterless-state-space-trajectory-imm-exact-sparse") == "trajectory"
     assert _family("clusterless-state-space-first-order-imm") == "trajectory"
     assert _family("clusterless-state-space-imm") == "trajectory"

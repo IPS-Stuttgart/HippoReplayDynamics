@@ -10,6 +10,7 @@ WORKFLOWS = (
     ROOT / ".github" / "workflows" / "model-evidence-all-sessions.yml",
 )
 SCRIPT = ROOT / "scripts" / "benchmark_model_evidence.py"
+IMPROVED_SCRIPT = ROOT / "scripts" / "benchmark_model_evidence_improved.py"
 
 _REQUIRED_WORKFLOW_FLAGS = {
     "--clusterless-mark-smoothing-sigma-bins",
@@ -87,6 +88,13 @@ def test_clusterless_first_order_imm_is_not_silently_skipped_by_model_evidence_s
 
     assert 'if name == "clusterless-state-space-first-order-imm"' not in text
     assert "clusterless-state-space-first-order-imm" in text
+
+
+def test_improved_model_evidence_script_registers_clusterless_first_order_imm():
+    text = IMPROVED_SCRIPT.read_text(encoding="utf-8")
+
+    assert '"clusterless-state-space-first-order-imm": clusterless_model("first-order-imm")' in text
+    assert '"clusterless-state-space-first-order-imm"' in text
 
 
 def _workflow_benchmark_flags(workflow: Path) -> set[str]:

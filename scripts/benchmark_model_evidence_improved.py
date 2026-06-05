@@ -93,6 +93,7 @@ _TRAJECTORY_MODELS = {
     "clusterless-state-space-fragmented",
     "clusterless-state-space-jump",
     "clusterless-state-space-momentum",
+    "clusterless-state-space-momentum-exact-sparse",
     "clusterless-state-space-trajectory-imm-exact-sparse",
     "clusterless-state-space-imm",
     "valid-state-diffusion",
@@ -383,6 +384,7 @@ def _models(args: argparse.Namespace, session, encoding=None) -> dict[str, objec
         "clusterless-state-space-fragmented": clusterless_model("fragmented"),
         "clusterless-state-space-jump": clusterless_model("jump"),
         "clusterless-state-space-momentum": clusterless_model("momentum"),
+        "clusterless-state-space-momentum-exact-sparse": clusterless_model("momentum-exact-sparse"),
         "clusterless-state-space-trajectory-imm-exact-sparse": clusterless_model("trajectory-imm-exact-sparse"),
         "clusterless-state-space-imm": clusterless_model("imm"),
         "valid-state-diffusion": ValidStateDiffusionReplayModel(

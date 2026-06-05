@@ -449,8 +449,16 @@ def _score(args: argparse.Namespace) -> pd.DataFrame:
     models = _models(args, session, encoding=encoding)
     has_clusterless = any(isinstance(model, ClusterlessStateSpaceReplayModel) for model in models.values())
     clusterless_encoding = None
+    clusterless_encoding_error = ""
     if has_clusterless:
-        clusterless_encoding = fit_clusterless_mark_encoding(session, _clusterless_mark_config(args))
+        try:
+            clusterless_encoding = fit_clusterless_mark_encoding(session, _clusterless_mark_config(args))
+        except ValueError as exc:
+            clusterless_encoding_error = f"{type(exc).__name__}: {exc}"
+            print(
+                f"Clusterless scoring unsupported for {session.session_id}: {clusterless_encoding_error}",
+                flush=True,
+            )
 
     emissions_cfg = EmissionConfig(
         time_bin_s=args.time_bin_s,
@@ -506,12 +514,37 @@ def _score(args: argparse.Namespace) -> pd.DataFrame:
                     if use_clusterless and clusterless_encoding is not None
                     else encoding.bin_centers
                 )
-                assert emissions is not None
                 occupancy_s = (
                     clusterless_encoding.occupancy_s
                     if use_clusterless and clusterless_encoding is not None
                     else encoding.occupancy_s
                 )
+                if use_clusterless and clusterless_encoding is None:
+                    rows.append(
+                        {
+                            "status": "unsupported",
+                            "session": session.session_id,
+                            "event_index": int(event_id),
+                            **window_settings,
+                            "model": name,
+                            "requested_model": name,
+                            "model_family": _family(name),
+                            "log_evidence": np.nan,
+                            "n_time": int(sorted_emissions.n_time),
+                            "n_spikes": int(sorted_emissions.n_spikes),
+                            "runtime_s": float(time.perf_counter() - start),
+                            "error": clusterless_encoding_error or "Clusterless encoding unavailable",
+                            "diagnostic_clusterless_observation_model_available": False,
+                            "diagnostic_clusterless_observation_model_error": clusterless_encoding_error,
+                            **_run_settings(args),
+                        }
+                    )
+                    print(
+                        f"Skipped unsupported clusterless model {name} for {session.session_id} event {event_id} window {window_index}",
+                        flush=True,
+                    )
+                    continue
+                assert emissions is not None
                 try:
                     result = score_replay_model_compat(model, emissions, bin_centers, occupancy_s=occupancy_s)
                     model_name = str(result.model_name)

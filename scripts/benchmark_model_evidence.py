@@ -462,10 +462,18 @@ def _score(args) -> pd.DataFrame:
     models = _models(args, session=session)
     has_clusterless = any(isinstance(model, ClusterlessStateSpaceReplayModel) for model in models.values())
     clusterless_encoding = None
+    clusterless_encoding_error = ""
     if has_clusterless:
-        clusterless_encoding = fit_clusterless_mark_encoding(
-            session, _clusterless_mark_config(args),
-        )
+        try:
+            clusterless_encoding = fit_clusterless_mark_encoding(
+                session, _clusterless_mark_config(args),
+            )
+        except ValueError as exc:
+            clusterless_encoding_error = f"{type(exc).__name__}: {exc}"
+            print(
+                f"Clusterless scoring unsupported for {session.session_id}: {clusterless_encoding_error}",
+                flush=True,
+            )
     emissions_cfg = EmissionConfig(
         time_bin_s=args.time_bin_s,
         spike_rate_scale=args.spike_rate_scale,
@@ -498,6 +506,33 @@ def _score(args) -> pd.DataFrame:
             emissions = clusterless_emissions if use_clusterless else sorted_emissions
             bin_centers = clusterless_encoding.bin_centers if use_clusterless and clusterless_encoding is not None else encoding.bin_centers
             occupancy_s = clusterless_encoding.occupancy_s if use_clusterless and clusterless_encoding is not None else encoding.occupancy_s
+            if use_clusterless and clusterless_encoding is None:
+                rows.append({
+                    "status": "unsupported", "session": session.session_id, "event_index": int(event_id),
+                    "model": name, "requested_model": name, "model_family": _family(name), "log_evidence": np.nan,
+                    "n_time": int(sorted_emissions.n_time), "n_spikes": int(sorted_emissions.n_spikes),
+                    "runtime_s": float(time.perf_counter() - start), "error": clusterless_encoding_error or "Clusterless encoding unavailable",
+                    "bin_size_cm": float(args.bin_size_cm),
+                    "smoothing_sigma_bins": float(args.smoothing_sigma_bins),
+                    "min_speed_cm_s": float(args.min_speed_cm_s),
+                    "time_bin_s": float(args.time_bin_s),
+                    "spike_rate_scale": float(args.spike_rate_scale),
+                    "emission_likelihood_temperature": float(args.emission_likelihood_temperature),
+                    "emission_negative_binomial_overdispersion": float(args.emission_negative_binomial_overdispersion),
+                    "clusterless_mark_smoothing_sigma_bins": float(args.clusterless_mark_smoothing_sigma_bins),
+                    "clusterless_mark_prior_count": float(args.clusterless_mark_prior_count),
+                    "clusterless_mark_variance_floor": float(args.clusterless_mark_variance_floor),
+                    "clusterless_rate_floor_hz": float(args.clusterless_rate_floor_hz),
+                    "clusterless_mark_likelihood": str(args.clusterless_mark_likelihood),
+                    "clusterless_mark_kde_bandwidth": _optional_float_setting(args.clusterless_mark_kde_bandwidth),
+                    "clusterless_mark_kde_spatial_sigma_bins": _optional_float_setting(args.clusterless_mark_kde_spatial_sigma_bins),
+                    "clusterless_mark_kde_max_neighbors": int(args.clusterless_mark_kde_max_neighbors),
+                    "diagnostic_clusterless_observation_model_available": False,
+                    "diagnostic_clusterless_observation_model_error": clusterless_encoding_error,
+                    **_state_space_metadata(args),
+                })
+                print(f"Skipped unsupported clusterless model {name} for {session.session_id} event {event_id}", flush=True)
+                continue
             assert emissions is not None
             try:
                 result = score_replay_model_compat(

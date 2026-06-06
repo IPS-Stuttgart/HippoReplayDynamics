@@ -28,6 +28,14 @@ on:
         description: "Spike-matched off-SWR null windows per real event"
         required: true
         default: "10"
+      null_count:
+        description: "Optional override for nulls_per_event, useful for lightweight high-K pilots"
+        required: false
+        default: ""
+      events_per_session_for_k50:
+        description: "Optional event cap per session for lightweight K=50 pilots; overrides max_events when set"
+        required: false
+        default: ""
       spike_count_tolerance_fraction:
         description: "Preferred null spike-count tolerance around the real event"
         required: true
@@ -40,12 +48,16 @@ on:
         description: "Space-separated models"
         required: true
         default: "sorted-spike-state-space-stationary sorted-spike-state-space-diffusion sorted-spike-state-space-fragmented sorted-spike-state-space-first-order-imm sorted-spike-state-space-momentum-exact-sparse sorted-spike-state-space-momentum sorted-spike-state-space-imm"
+      null_models:
+        description: "Optional model-list override for lightweight null pilots"
+        required: false
+        default: ""
 
 permissions:
   contents: read
 
 concurrency:
-  group: spike-matched-event-window-null-${{ github.repository }}-${{ inputs.sessions }}-${{ inputs.events }}-${{ inputs.max_events }}-${{ inputs.nulls_per_event }}-${{ github.ref }}
+  group: spike-matched-event-window-null-${{ github.repository }}-${{ inputs.sessions }}-${{ inputs.events }}-${{ inputs.max_events }}-${{ inputs.events_per_session_for_k50 }}-${{ inputs.nulls_per_event }}-${{ inputs.null_count }}-${{ github.ref }}
   cancel-in-progress: false
 
 env:
@@ -53,11 +65,14 @@ env:
   SESSIONS: ${{ inputs.sessions }}
   EVENTS: ${{ inputs.events }}
   MAX_EVENTS: ${{ inputs.max_events }}
+  EVENTS_PER_SESSION_FOR_K50: ${{ inputs.events_per_session_for_k50 }}
   EVENT_SHARD_COUNT: ${{ inputs.event_shard_count }}
   NULLS_PER_EVENT: ${{ inputs.nulls_per_event }}
+  NULL_COUNT: ${{ inputs.null_count }}
   SPIKE_COUNT_TOLERANCE_FRACTION: ${{ inputs.spike_count_tolerance_fraction }}
   NULL_RANDOM_SEED: ${{ inputs.null_random_seed }}
   MODELS: ${{ inputs.models }}
+  NULL_MODELS: ${{ inputs.null_models }}
   LOCAL_CACHE_ROOT: ${{ vars.PFEIFFERFOSTER_LOCAL_CACHE_ROOT }}
   OMP_NUM_THREADS: "1"
   OPENBLAS_NUM_THREADS: "1"
@@ -114,6 +129,14 @@ jobs:
           sessions = [s for s in re.split(r"[\s,]+", os.environ["SESSIONS"].strip()) if s]
           if not sessions:
               raise SystemExit("No sessions selected")
+          effective_max_events = (
+              os.environ.get("EVENTS_PER_SESSION_FOR_K50", "").strip()
+              or os.environ.get("MAX_EVENTS", "").strip()
+          )
+          effective_nulls_per_event = int(
+              os.environ.get("NULL_COUNT", "").strip()
+              or os.environ["NULLS_PER_EVENT"]
+          )
           output_dir = Path("results/spike-matched-event-window-null-plan")
           matrix = []
           total_events = 0
@@ -128,8 +151,8 @@ jobs:
                   "--event-shard-count", os.environ["EVENT_SHARD_COUNT"],
                   "--output", str(plan_path),
               ]
-              if os.environ.get("MAX_EVENTS"):
-                  cmd.extend(["--max-events", os.environ["MAX_EVENTS"]])
+              if effective_max_events:
+                  cmd.extend(["--max-events", effective_max_events])
               subprocess.run(cmd, check=True)
               plan = json.loads(plan_path.read_text(encoding="utf-8"))
               total_events += int(plan["event_count"])
@@ -144,8 +167,9 @@ jobs:
           all_plan = {
               "sessions": sessions,
               "events": os.environ["EVENTS"],
-              "max_events": os.environ.get("MAX_EVENTS") or None,
-              "nulls_per_event": int(os.environ["NULLS_PER_EVENT"]),
+              "max_events": effective_max_events or None,
+              "nulls_per_event": effective_nulls_per_event,
+              "models": os.environ.get("NULL_MODELS", "").strip() or os.environ["MODELS"],
               "session_count": len(sessions),
               "event_count": total_events,
               "event_matrix": matrix,
@@ -211,12 +235,14 @@ jobs:
         run: |
           set -euo pipefail
           out_dir="results/spike-matched-null-${SHARD_SESSION_SLUG}-shard-${EVENT_SHARD_INDEX}"
+          models="${NULL_MODELS:-${MODELS}}"
+          nulls_per_event="${NULL_COUNT:-${NULLS_PER_EVENT}}"
           python scripts/spike_matched_event_window_null.py score \
             --dataset-root "${DATASET_ROOT}" \
             --session "${SHARD_SESSION}" \
             --events "${SHARD_EVENTS}" \
-            --models "${MODELS}" \
-            --nulls-per-event "${NULLS_PER_EVENT}" \
+            --models "${models}" \
+            --nulls-per-event "${nulls_per_event}" \
             --spike-count-tolerance-fraction "${SPIKE_COUNT_TOLERANCE_FRACTION}" \
             --null-random-seed "${NULL_RANDOM_SEED}" \
             --output "${out_dir}" \

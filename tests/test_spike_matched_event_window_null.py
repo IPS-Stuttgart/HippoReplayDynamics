@@ -73,6 +73,54 @@ def test_spike_matched_null_aggregate_writes_empirical_p_values_and_gates(tmp_pa
         assert (out / expected).exists()
 
 
+def test_spike_matched_null_aggregate_accepts_lightweight_required_models(tmp_path):
+    stationary = "sorted-spike-state-space-stationary"
+    trajectory = "sorted-spike-state-space-first-order-imm"
+    scores = pd.DataFrame(
+        [
+            *_lightweight_event_rows(
+                "Rat1/Open1",
+                0,
+                "real",
+                -1,
+                stationary_model=stationary,
+                trajectory_model=trajectory,
+                stationary_score=0.0,
+                trajectory_score=10.0,
+            ),
+            *_lightweight_event_rows(
+                "Rat1/Open1",
+                0,
+                "matched_null",
+                0,
+                stationary_model=stationary,
+                trajectory_model=trajectory,
+                stationary_score=0.0,
+                trajectory_score=1.0,
+            ),
+        ]
+    )
+    score_path = tmp_path / "scores.csv"
+    scores.to_csv(score_path, index=False)
+    out = tmp_path / "out"
+
+    aggregate_matched_null_scores(
+        str(score_path),
+        out,
+        required_models=(stationary, trajectory),
+        bootstrap_samples=10,
+    )
+
+    decisions = pd.read_csv(out / "matched_null_family_margin_decisions.csv")
+    p_values = pd.read_csv(out / "matched_null_empirical_p_values.csv")
+
+    assert decisions["required_models_total"].tolist() == [2, 2]
+    assert decisions["required_models_complete"].tolist() == [True, True]
+    decisions_by_role = decisions.set_index("window_role")["margin_decision"].to_dict()
+    assert decisions_by_role == {"real": "trajectory", "matched_null": "ambiguous"}
+    assert p_values["real_trajectory_confident_claim"].tolist() == [True]
+
+
 def test_spike_matched_null_workflow_exposes_control_outputs():
     workflow = Path(".github/workflows/spike-matched-event-window-null.yml").read_text(encoding="utf-8")
 
@@ -84,6 +132,7 @@ def test_spike_matched_null_workflow_exposes_control_outputs():
     assert "null_models:" in workflow
     assert 'models="${NULL_MODELS:-${MODELS}}"' in workflow
     assert 'nulls_per_event="${NULL_COUNT:-${NULLS_PER_EVENT}}"' in workflow
+    assert "--required-models" in workflow
     assert "scripts/spike_matched_event_window_null.py score" in workflow
     assert "scripts/spike_matched_event_window_null.py aggregate" in workflow
     for expected in (
@@ -171,4 +220,46 @@ def _event_rows(
             "evidence_comparable": True,
         }
         for model, log_evidence, family in models
+    ]
+
+
+def _lightweight_event_rows(
+    session: str,
+    event_index: int,
+    window_role: str,
+    null_index: int,
+    *,
+    stationary_model: str,
+    trajectory_model: str,
+    stationary_score: float,
+    trajectory_score: float,
+) -> list[dict[str, object]]:
+    rows = [
+        (stationary_model, stationary_score, "nontrajectory"),
+        (trajectory_model, trajectory_score, "trajectory"),
+    ]
+    return [
+        {
+            "status": "success",
+            "session": session,
+            "event_index": event_index,
+            "window_role": window_role,
+            "event_window_variant": "core" if window_role == "real" else "matched_null",
+            "null_index": null_index,
+            "window_start_s": 1.0 + max(null_index, 0),
+            "window_end_s": 1.1 + max(null_index, 0),
+            "window_duration_s": 0.1,
+            "model": model,
+            "requested_model": model,
+            "model_family": family,
+            "log_evidence": log_evidence,
+            "n_time": 25,
+            "n_spikes": 10,
+            "null_active_cell_count": 5,
+            "real_n_spikes": 10,
+            "n_spikes_delta": 0,
+            "n_spikes_relative_delta": 0.0,
+            "evidence_comparable": True,
+        }
+        for model, log_evidence, family in rows
     ]

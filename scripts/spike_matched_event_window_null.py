@@ -747,6 +747,7 @@ def aggregate_matched_null_scores(
     score_glob: str,
     outdir: Path,
     *,
+    required_models: tuple[str, ...] = DEFAULT_REQUIRED_MODELS,
     margin_threshold: float = DEFAULT_MARGIN_THRESHOLD,
     bootstrap_seed: int = 1,
     bootstrap_samples: int = 2000,
@@ -757,7 +758,11 @@ def aggregate_matched_null_scores(
     scores = pd.concat([pd.read_csv(path) for path in paths], ignore_index=True)
     outdir.mkdir(parents=True, exist_ok=True)
     scores.to_csv(outdir / "matched_null_event_model_evidence.csv", index=False)
-    decisions = matched_null_family_margin_decisions(scores, margin_threshold=margin_threshold)
+    decisions = matched_null_family_margin_decisions(
+        scores,
+        required_models=required_models,
+        margin_threshold=margin_threshold,
+    )
     decisions.to_csv(outdir / "matched_null_family_margin_decisions.csv", index=False)
     matched_null_family_margin_summary(decisions).to_csv(outdir / "matched_null_family_margin_summary.csv", index=False)
     p_values = matched_null_empirical_p_values(decisions)
@@ -786,6 +791,14 @@ def _add_scoring_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--allow-non-run-nulls", action="store_true")
     _add_model_arguments(parser)
     parser.add_argument("--output", default="results/spike-matched-event-window-null")
+    parser.add_argument(
+        "--required-models",
+        default="",
+        help=(
+            "Optional whitespace-separated model list required for complete "
+            "family-margin decisions. Defaults to the paper full-core exact set."
+        ),
+    )
     parser.add_argument("--continue-on-error", action="store_true")
 
 
@@ -864,6 +877,14 @@ def main() -> int:
     aggregate_parser = subparsers.add_parser("aggregate")
     aggregate_parser.add_argument("--score-glob", required=True)
     aggregate_parser.add_argument("--output", default="results/spike-matched-event-window-null")
+    aggregate_parser.add_argument(
+        "--required-models",
+        default="",
+        help=(
+            "Optional whitespace-separated model list required for complete "
+            "family-margin decisions. Defaults to the paper full-core exact set."
+        ),
+    )
     aggregate_parser.add_argument("--margin-threshold", type=float, default=DEFAULT_MARGIN_THRESHOLD)
     aggregate_parser.add_argument("--bootstrap-seed", type=int, default=1)
     aggregate_parser.add_argument("--bootstrap-samples", type=int, default=2000)
@@ -879,17 +900,24 @@ def main() -> int:
         aggregate_matched_null_scores(
             str(outdir / "matched_null_event_model_evidence.csv"),
             outdir,
+            required_models=_parse_required_models(args.required_models),
             bootstrap_seed=args.null_random_seed,
         )
         return 0
     aggregate_matched_null_scores(
         args.score_glob,
         Path(args.output),
+        required_models=_parse_required_models(args.required_models),
         margin_threshold=args.margin_threshold,
         bootstrap_seed=args.bootstrap_seed,
         bootstrap_samples=args.bootstrap_samples,
     )
     return 0
+
+
+def _parse_required_models(value: str) -> tuple[str, ...]:
+    models = tuple(item for item in str(value).split() if item)
+    return models or DEFAULT_REQUIRED_MODELS
 
 
 if __name__ == "__main__":

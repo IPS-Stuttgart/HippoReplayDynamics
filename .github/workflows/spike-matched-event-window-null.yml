@@ -237,6 +237,10 @@ jobs:
           out_dir="results/spike-matched-null-${SHARD_SESSION_SLUG}-shard-${EVENT_SHARD_INDEX}"
           models="${NULL_MODELS:-${MODELS}}"
           nulls_per_event="${NULL_COUNT:-${NULLS_PER_EVENT}}"
+          required_models_args=()
+          if [[ -n "${NULL_MODELS}" ]]; then
+            required_models_args=(--required-models "${models}")
+          fi
           python scripts/spike_matched_event_window_null.py score \
             --dataset-root "${DATASET_ROOT}" \
             --session "${SHARD_SESSION}" \
@@ -246,6 +250,7 @@ jobs:
             --spike-count-tolerance-fraction "${SPIKE_COUNT_TOLERANCE_FRACTION}" \
             --null-random-seed "${NULL_RANDOM_SEED}" \
             --output "${out_dir}" \
+            "${required_models_args[@]}" \
             --continue-on-error
 
       - name: Upload matched-null shard
@@ -288,11 +293,16 @@ jobs:
       - name: Aggregate matched-null control
         run: |
           set -euo pipefail
+          required_models_args=()
+          if [[ -n "${NULL_MODELS}" ]]; then
+            required_models_args=(--required-models "${NULL_MODELS}")
+          fi
           python scripts/spike_matched_event_window_null.py aggregate \
             --score-glob "artifacts/spike-matched-event-window-null-shards/**/matched_null_event_model_evidence.csv" \
             --output results/spike-matched-event-window-null \
             --bootstrap-seed "${NULL_RANDOM_SEED}" \
-            --bootstrap-samples 2000
+            --bootstrap-samples 2000 \
+            "${required_models_args[@]}"
           for required_file in \
             matched_null_event_model_evidence.csv \
             matched_null_family_margin_decisions.csv \

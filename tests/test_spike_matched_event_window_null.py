@@ -79,6 +79,11 @@ def test_spike_matched_null_workflow_exposes_control_outputs():
     assert "name: Spike-matched event-window null controls" in workflow
     assert "nulls_per_event:" in workflow
     assert 'default: "10"' in workflow
+    assert "null_count:" in workflow
+    assert "events_per_session_for_k50:" in workflow
+    assert "null_models:" in workflow
+    assert 'models="${NULL_MODELS:-${MODELS}}"' in workflow
+    assert 'nulls_per_event="${NULL_COUNT:-${NULLS_PER_EVENT}}"' in workflow
     assert "scripts/spike_matched_event_window_null.py score" in workflow
     assert "scripts/spike_matched_event_window_null.py aggregate" in workflow
     for expected in (

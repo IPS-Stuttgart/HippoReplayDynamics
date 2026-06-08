@@ -12,10 +12,12 @@ from scripts.build_sota_comparator_pack import (
     STATIONARY,
     build_sota_comparator_event_table,
     build_sota_comparator_family_summary,
+    build_sota_comparator_full_core_winner_summary,
     build_sota_comparator_gate_summary,
     build_sota_comparator_lower_bound_audit,
     build_sota_comparator_claim_delta_summary,
     build_sota_comparator_model_summary,
+    build_sota_comparator_momentum_vs_diffusion_summary,
     write_sota_comparator_pack,
 )
 
@@ -54,6 +56,14 @@ def test_sota_comparator_pack_refines_momentum_story(tmp_path: Path):
     claim = build_sota_comparator_claim_delta_summary(event_table, margin_threshold=5.5)
     model = build_sota_comparator_model_summary(event_table, margin_threshold=5.5)
     family = build_sota_comparator_family_summary(event_table)
+    momentum_axis = build_sota_comparator_momentum_vs_diffusion_summary(
+        event_table,
+        margin_threshold=5.5,
+    )
+    full_core = build_sota_comparator_full_core_winner_summary(
+        event_table,
+        margin_threshold=5.5,
+    )
     audit = build_sota_comparator_lower_bound_audit(event_table)
     gate = build_sota_comparator_gate_summary(event_table, margin_threshold=5.5)
 
@@ -79,6 +89,16 @@ def test_sota_comparator_pack_refines_momentum_story(tmp_path: Path):
     assert first_order_summary["raw_best_events"] == 2
     assert first_order_summary["confident_exact_core_claims"] == 2
 
+    momentum_axis_row = momentum_axis.iloc[0]
+    assert momentum_axis_row["momentum_raw_wins"] == 3
+    assert momentum_axis_row["momentum_confident_claims"] == 3
+    assert momentum_axis_row["paper_interpretation"].endswith("positive but heterogeneous")
+
+    full_core_leader = full_core[full_core["raw_best_rank"].eq(1)].iloc[0]
+    assert full_core_leader["model"] == FIRST_ORDER_IMM
+    assert full_core_leader["raw_best_events"] == 2
+    assert full_core_leader["is_leading_exact_core_row"]
+
     momentum_audit = audit[audit["audit"].eq("candidate_pruned_momentum_lower_bound")].iloc[0]
     assert momentum_audit["matched_events"] == 3
     assert momentum_audit["violations_candidate_above_exact"] == 0
@@ -91,6 +111,8 @@ def test_sota_comparator_pack_refines_momentum_story(tmp_path: Path):
         "sota_comparator_event_table.csv",
         "sota_comparator_model_summary.csv",
         "sota_comparator_family_summary.csv",
+        "sota_comparator_momentum_vs_diffusion_summary.csv",
+        "sota_comparator_full_core_winner_summary.csv",
         "sota_comparator_lower_bound_audit.csv",
         "sota_comparator_claim_delta_summary.csv",
         "sota_comparator_gate_summary.csv",

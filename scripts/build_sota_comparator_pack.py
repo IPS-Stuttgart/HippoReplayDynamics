@@ -364,6 +364,105 @@ def build_sota_comparator_family_summary(event_table: pd.DataFrame) -> pd.DataFr
     )
 
 
+def build_sota_comparator_momentum_vs_diffusion_summary(
+    event_table: pd.DataFrame,
+    *,
+    margin_threshold: float = 5.5,
+) -> pd.DataFrame:
+    """Summarize the prior-style paired momentum-vs-diffusion axis."""
+
+    paired = event_table[
+        pd.to_numeric(
+            event_table["delta_momentum_exact_minus_diffusion"],
+            errors="coerce",
+        ).notna()
+    ].copy()
+    events = int(len(paired))
+    delta = paired["delta_momentum_exact_minus_diffusion"] if events else pd.Series(dtype=float)
+    momentum_confident = (
+        paired["momentum_exact_confident_vs_diffusion"].astype(bool)
+        if events
+        else pd.Series(dtype=bool)
+    )
+    diffusion_confident = (
+        paired["diffusion_confident_vs_momentum_exact"].astype(bool)
+        if events
+        else pd.Series(dtype=bool)
+    )
+    momentum_wins = int((delta > 0).sum()) if events else 0
+    diffusion_wins = int((delta < 0).sum()) if events else 0
+    return pd.DataFrame(
+        [
+            {
+                "comparison": "exact_sparse_momentum_vs_diffusion",
+                "events": events,
+                "momentum_raw_wins": momentum_wins,
+                "diffusion_raw_wins": diffusion_wins,
+                "ties": int((delta == 0).sum()) if events else 0,
+                "momentum_raw_win_fraction": (
+                    float(momentum_wins / events) if events else 0.0
+                ),
+                "momentum_confident_claims": int(momentum_confident.sum()) if events else 0,
+                "diffusion_confident_claims": int(diffusion_confident.sum()) if events else 0,
+                "ambiguous_events": (
+                    int(events - momentum_confident.sum() - diffusion_confident.sum())
+                    if events
+                    else 0
+                ),
+                **_basic_delta_summary(delta),
+                "margin_threshold": margin_threshold,
+                "paper_interpretation": (
+                    "prior-style exact-sparse momentum-vs-diffusion axis is positive "
+                    "but heterogeneous"
+                ),
+            }
+        ]
+    )
+
+
+def build_sota_comparator_full_core_winner_summary(
+    event_table: pd.DataFrame,
+    *,
+    margin_threshold: float = 5.5,
+) -> pd.DataFrame:
+    """Rank exact-core models by raw and confident full-core wins."""
+
+    model_summary = build_sota_comparator_model_summary(
+        event_table,
+        margin_threshold=margin_threshold,
+    ).copy()
+    if model_summary.empty:
+        model_summary["raw_best_rank"] = pd.Series(dtype=int)
+        model_summary["is_leading_exact_core_row"] = pd.Series(dtype=bool)
+        model_summary["paper_interpretation"] = pd.Series(dtype=str)
+        return model_summary
+
+    model_summary = model_summary.sort_values(
+        ["raw_best_events", "confident_exact_core_claims", "model"],
+        ascending=[False, False, True],
+    ).reset_index(drop=True)
+    model_summary["raw_best_rank"] = range(1, len(model_summary) + 1)
+    leading_model = str(model_summary.iloc[0]["model"])
+    model_summary["is_leading_exact_core_row"] = model_summary["model"].eq(leading_model)
+
+    def _interpret(model: object) -> str:
+        model_name = str(model)
+        if model_name == FIRST_ORDER_IMM:
+            return "first-order IMM is the leading exact full-core row"
+        if model_name == MOMENTUM_EXACT:
+            return (
+                "exact-sparse momentum remains a strong paired row but is not "
+                "the full-core winner"
+            )
+        if model_name == STATIONARY:
+            return "static/nontrajectory baseline is included as a controlled comparator"
+        return "trajectory-family exact core comparator"
+
+    model_summary["paper_interpretation"] = model_summary["model"].map(_interpret)
+    model_summary["margin_threshold"] = margin_threshold
+    return model_summary
+
+
 def build_sota_comparator_lower_bound_audit(event_table: pd.DataFrame) -> pd.DataFrame:
     """Summarize lower-bound audit rows without mixing them into exact rankings."""
 
@@ -589,6 +688,18 @@ def write_sota_comparator_pack(
         ),
         "sota_comparator_family_summary.csv": build_sota_comparator_family_summary(
             event_table,
+        ),
+        "sota_comparator_momentum_vs_diffusion_summary.csv": (
+            build_sota_comparator_momentum_vs_diffusion_summary(
+                event_table,
+                margin_threshold=margin_threshold,
+            )
+        ),
+        "sota_comparator_full_core_winner_summary.csv": (
+            build_sota_comparator_full_core_winner_summary(
+                event_table,
+                margin_threshold=margin_threshold,
+            )
         ),
         "sota_comparator_lower_bound_audit.csv": build_sota_comparator_lower_bound_audit(
             event_table,

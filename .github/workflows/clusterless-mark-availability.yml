@@ -1,3 +1,4 @@
+---
 name: Clusterless mark availability
 
 on:
@@ -15,6 +16,9 @@ on:
         description: "Maximum candidate files to inspect per session"
         required: true
         default: "3000"
+
+permissions:
+  contents: read
 
 jobs:
   audit-clusterless-marks:

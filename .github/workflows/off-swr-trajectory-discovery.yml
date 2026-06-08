@@ -1,0 +1,337 @@
+---
+name: Off-SWR trajectory discovery
+
+on:
+  workflow_dispatch:
+    inputs:
+      dataset_root:
+        description: "Dataset path after download or cache restore"
+        required: true
+        default: "data/DataSetFromPfeifferFoster"
+      sessions:
+        description: "Space- or comma-separated sessions"
+        required: true
+        default: "Rat1/Open1 Rat1/Open2 Rat2/Open1 Rat2/Open2 Rat3/Open1 Rat3/Open2 Rat4/Open1 Rat4/Open2"
+      comparison_scope:
+        description: "Family comparison scope: auto or full-core"
+        required: false
+        default: "full-core"
+      session_filter:
+        description: "Optional whitespace-separated sessions to score; empty means all default sessions"
+        required: false
+        default: ""
+      event_index_filter:
+        description: "Optional whitespace/comma-separated event indices to score within each selected session"
+        required: false
+        default: ""
+      events:
+        description: "Event IDs/ranges, all, run, or run:0-25"
+        required: true
+        default: "run"
+      max_events:
+        description: "Maximum selected events per session; empty means no cap"
+        required: false
+        default: "10"
+      event_shard_count:
+        description: "Target event shards per session"
+        required: true
+        default: "16"
+      nulls_per_event:
+        description: "Spike-matched off-SWR windows per template SWR event"
+        required: true
+        default: "25"
+      spike_count_tolerance_fraction:
+        description: "Preferred off-SWR spike-count tolerance around the template event"
+        required: true
+        default: "0.10"
+      null_random_seed:
+        description: "Random seed for off-SWR window tie breaks"
+        required: true
+        default: "1"
+      models:
+        description: "Space-separated exact-core discovery models"
+        required: true
+        default: "sorted-spike-state-space-stationary sorted-spike-state-space-diffusion sorted-spike-state-space-fragmented sorted-spike-state-space-first-order-imm sorted-spike-state-space-momentum-exact-sparse"
+      margin_threshold:
+        description: "Trajectory-family log-evidence margin threshold"
+        required: true
+        default: "5.5"
+      cluster_gap_s:
+        description: "Maximum gap in seconds for merging nearby off-SWR candidates into one cluster"
+        required: true
+        default: "0.5"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: off-swr-trajectory-discovery-${{ github.repository }}-${{ inputs.sessions }}-${{ inputs.session_filter }}-${{ inputs.events }}-${{ inputs.event_index_filter }}-${{ inputs.max_events }}-${{ inputs.nulls_per_event }}-${{ inputs.comparison_scope }}-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  DATASET_ROOT: ${{ inputs.dataset_root }}
+  SESSIONS: ${{ inputs.sessions }}
+  COMPARISON_SCOPE: ${{ inputs.comparison_scope }}
+  SESSION_FILTER: ${{ inputs.session_filter }}
+  EVENT_INDEX_FILTER: ${{ inputs.event_index_filter }}
+  EVENTS: ${{ inputs.events }}
+  MAX_EVENTS: ${{ inputs.max_events }}
+  EVENT_SHARD_COUNT: ${{ inputs.event_shard_count }}
+  NULLS_PER_EVENT: ${{ inputs.nulls_per_event }}
+  SPIKE_COUNT_TOLERANCE_FRACTION: ${{ inputs.spike_count_tolerance_fraction }}
+  NULL_RANDOM_SEED: ${{ inputs.null_random_seed }}
+  MODELS: ${{ inputs.models }}
+  MARGIN_THRESHOLD: ${{ inputs.margin_threshold }}
+  CLUSTER_GAP_S: ${{ inputs.cluster_gap_s }}
+  LOCAL_CACHE_ROOT: ${{ vars.PFEIFFERFOSTER_LOCAL_CACHE_ROOT }}
+  OMP_NUM_THREADS: "1"
+  OPENBLAS_NUM_THREADS: "1"
+  MKL_NUM_THREADS: "1"
+
+jobs:
+  plan-session-event-shards:
+    name: Plan off-SWR discovery shards
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    outputs:
+      event_matrix: ${{ steps.plan.outputs.event_matrix }}
+      event_count: ${{ steps.plan.outputs.event_count }}
+      session_count: ${{ steps.plan.outputs.session_count }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Install package
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e .
+
+      - name: Ensure Pfeiffer-Foster dataset
+        uses: ./.github/actions/ensure-pfeiffer-foster-dataset
+        with:
+          dataset-root: ${{ env.DATASET_ROOT }}
+          session: Rat1/Open1
+          cache-key: hipporeplayimm-dataset-${{ runner.os }}-rclone-v1
+          local-cache-root: ${{ env.LOCAL_CACHE_ROOT }}
+          webdav-url: ${{ secrets.PFEIFFERFOSTER_WEBDAV_URL }}
+          webdav-key: ${{ secrets.PFEIFFERFOSTER_DATA_KEY }}
+          webdav-password: ${{ secrets.PFEIFFERFOSTER_DATA_PASSWORD }}
+
+      - name: Plan session/event shards
+        id: plan
+        run: |
+          set -euo pipefail
+          mkdir -p results/off-swr-trajectory-discovery-plan
+          python - <<'PY'
+          import json
+          import os
+          import re
+          import subprocess
+          from pathlib import Path
+
+          sessions_text = os.environ.get("SESSION_FILTER", "").strip() or os.environ["SESSIONS"].strip()
+          sessions = [session for session in re.split(r"[\s,]+", sessions_text) if session]
+          if not sessions:
+              raise SystemExit("No sessions selected")
+          events_spec = os.environ.get("EVENT_INDEX_FILTER", "").strip() or os.environ["EVENTS"]
+          effective_max_events = os.environ.get("MAX_EVENTS", "").strip()
+          output_dir = Path("results/off-swr-trajectory-discovery-plan")
+          matrix = []
+          total_events = 0
+          for session in sessions:
+              safe_session = session.replace("/", "_").replace("\\", "_")
+              plan_path = output_dir / f"plan_{safe_session}.json"
+              cmd = [
+                  "python", "scripts/plan_model_evidence_event_shards.py",
+                  "--dataset-root", os.environ["DATASET_ROOT"],
+                  "--session", session,
+                  "--events", events_spec,
+                  "--event-shard-count", os.environ["EVENT_SHARD_COUNT"],
+                  "--output", str(plan_path),
+              ]
+              if effective_max_events and not os.environ.get("EVENT_INDEX_FILTER", "").strip():
+                  cmd.extend(["--max-events", effective_max_events])
+              subprocess.run(cmd, check=True)
+              plan = json.loads(plan_path.read_text(encoding="utf-8"))
+              total_events += int(plan["event_count"])
+              for shard in plan["event_matrix"]:
+                  shard = dict(shard)
+                  shard["session"] = session
+                  shard["session_slug"] = safe_session
+                  shard["global_shard_index"] = len(matrix)
+                  matrix.append(shard)
+          if len(matrix) > 256:
+              raise SystemExit(f"Session/event matrix has {len(matrix)} jobs, exceeding GitHub Actions' 256-job matrix limit")
+          all_plan = {
+              "sessions": sessions,
+              "events": events_spec,
+              "max_events": effective_max_events or None,
+              "nulls_per_event": int(os.environ["NULLS_PER_EVENT"]),
+              "comparison_scope": os.environ["COMPARISON_SCOPE"],
+              "models": os.environ["MODELS"],
+              "session_count": len(sessions),
+              "event_count": total_events,
+              "event_matrix": matrix,
+          }
+          (output_dir / "off_swr_trajectory_discovery_plan.json").write_text(json.dumps(all_plan, indent=2) + "\n", encoding="utf-8")
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+              output.write(f"event_matrix={json.dumps(matrix, separators=(',', ':'))}\n")
+              output.write(f"event_count={total_events}\n")
+              output.write(f"session_count={len(sessions)}\n")
+          print(f"Planned {total_events} template SWR events across {len(sessions)} sessions and {len(matrix)} shards.")
+          PY
+
+      - name: Upload off-SWR discovery plan
+        uses: actions/upload-artifact@v7
+        with:
+          name: off-swr-trajectory-discovery-plan-${{ github.run_id }}
+          path: results/off-swr-trajectory-discovery-plan/
+          if-no-files-found: error
+
+  off-swr-discovery-shard:
+    name: Off-SWR discovery ${{ matrix.event.session }} shard ${{ matrix.event.event_shard_index }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    needs: plan-session-event-shards
+    strategy:
+      fail-fast: false
+      max-parallel: 8
+      matrix:
+        event: ${{ fromJson(needs.plan-session-event-shards.outputs.event_matrix) }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Install package
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e .
+
+      - name: Ensure Pfeiffer-Foster dataset
+        uses: ./.github/actions/ensure-pfeiffer-foster-dataset
+        with:
+          dataset-root: ${{ env.DATASET_ROOT }}
+          session: ${{ matrix.event.session }}
+          cache-key: hipporeplayimm-dataset-${{ runner.os }}-rclone-v1
+          local-cache-root: ${{ env.LOCAL_CACHE_ROOT }}
+          webdav-url: ${{ secrets.PFEIFFERFOSTER_WEBDAV_URL }}
+          webdav-key: ${{ secrets.PFEIFFERFOSTER_DATA_KEY }}
+          webdav-password: ${{ secrets.PFEIFFERFOSTER_DATA_PASSWORD }}
+
+      - name: Score spike-matched off-SWR windows
+        env:
+          SHARD_SESSION: ${{ matrix.event.session }}
+          SHARD_SESSION_SLUG: ${{ matrix.event.session_slug }}
+          EVENT_SHARD_INDEX: ${{ matrix.event.event_shard_index }}
+          SHARD_EVENTS: ${{ matrix.event.events_spec }}
+        run: |
+          set -euo pipefail
+          out_dir="results/off-swr-trajectory-discovery-${SHARD_SESSION_SLUG}-shard-${EVENT_SHARD_INDEX}"
+          python scripts/spike_matched_event_window_null.py score \
+            --dataset-root "${DATASET_ROOT}" \
+            --session "${SHARD_SESSION}" \
+            --events "${SHARD_EVENTS}" \
+            --models "${MODELS}" \
+            --comparison-scope "${COMPARISON_SCOPE}" \
+            --nulls-per-event "${NULLS_PER_EVENT}" \
+            --spike-count-tolerance-fraction "${SPIKE_COUNT_TOLERANCE_FRACTION}" \
+            --null-random-seed "${NULL_RANDOM_SEED}" \
+            --output "${out_dir}" \
+            --continue-on-error
+
+      - name: Upload off-SWR discovery shard
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: off-swr-trajectory-discovery-shard-${{ github.run_id }}-${{ matrix.event.global_shard_index }}
+          path: results/off-swr-trajectory-discovery-${{ matrix.event.session_slug }}-shard-${{ matrix.event.event_shard_index }}/
+          if-no-files-found: error
+
+  aggregate:
+    name: Aggregate off-SWR trajectory discovery
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    needs: [plan-session-event-shards, off-swr-discovery-shard]
+    if: ${{ always() && needs.plan-session-event-shards.result == 'success' }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Install package
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e .
+
+      - name: Download off-SWR discovery shards
+        uses: actions/download-artifact@v7
+        with:
+          pattern: off-swr-trajectory-discovery-shard-${{ github.run_id }}-*
+          path: artifacts/off-swr-trajectory-discovery-shards
+          merge-multiple: false
+
+      - name: Aggregate off-SWR discovery candidates
+        run: |
+          set -euo pipefail
+          python scripts/off_swr_trajectory_discovery.py \
+            --score-glob "artifacts/off-swr-trajectory-discovery-shards/**/matched_null_event_model_evidence.csv" \
+            --output results/off-swr-trajectory-discovery \
+            --comparison-scope "${COMPARISON_SCOPE}" \
+            --margin-threshold "${MARGIN_THRESHOLD}" \
+            --cluster-gap-s "${CLUSTER_GAP_S}"
+          for required_file in \
+            off_swr_trajectory_discovery_event_model_evidence.csv \
+            off_swr_trajectory_discovery_decisions.csv \
+            off_swr_trajectory_candidate_events.csv \
+            off_swr_trajectory_candidate_summary.csv \
+            session_off_swr_candidate_summary.csv \
+            rat_off_swr_candidate_summary.csv \
+            off_swr_candidate_clusters.csv \
+            off_swr_candidate_behavior_lfp_summary.csv \
+            off_swr_candidate_gate_summary.csv; do
+            test -s "results/off-swr-trajectory-discovery/${required_file}" || {
+              echo "Missing results/off-swr-trajectory-discovery/${required_file}" >&2
+              exit 1
+            }
+          done
+
+      - name: Show off-SWR discovery summary
+        run: |
+          python - <<'PY'
+          import pandas as pd
+
+          root = "results/off-swr-trajectory-discovery"
+          print("Off-SWR trajectory candidate summary:")
+          print(pd.read_csv(f"{root}/off_swr_trajectory_candidate_summary.csv").to_string(index=False))
+          print("\nOff-SWR trajectory discovery gates:")
+          print(pd.read_csv(f"{root}/off_swr_candidate_gate_summary.csv").to_string(index=False))
+          print("\nOff-SWR candidate clusters:")
+          print(pd.read_csv(f"{root}/off_swr_candidate_clusters.csv").head(25).to_string(index=False))
+          PY
+
+      - name: Upload off-SWR trajectory discovery results
+        uses: actions/upload-artifact@v7
+        with:
+          name: off-swr-trajectory-discovery-${{ github.run_id }}
+          path: results/off-swr-trajectory-discovery/
+          if-no-files-found: error

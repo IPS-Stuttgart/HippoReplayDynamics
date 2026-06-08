@@ -1,0 +1,52 @@
+name: Clusterless mark availability
+
+on:
+  workflow_dispatch:
+    inputs:
+      dataset_root:
+        description: "Path to the Pfeiffer/Foster dataset root on the runner"
+        required: true
+        default: "data/DataSetFromPfeifferFoster"
+      sessions:
+        description: "Space-separated sessions to audit"
+        required: true
+        default: "Rat1/Open1 Rat1/Open2 Rat2/Open1 Rat2/Open2 Rat3/Open1 Rat3/Open2 Rat4/Open1 Rat4/Open2"
+      max_files_per_session:
+        description: "Maximum candidate files to inspect per session"
+        required: true
+        default: "3000"
+
+jobs:
+  audit-clusterless-marks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+
+      - name: Audit clusterless mark availability
+        run: |
+          set -euo pipefail
+          python scripts/clusterless_mark_availability.py \
+            --dataset-root "${{ inputs.dataset_root }}" \
+            --sessions "${{ inputs.sessions }}" \
+            --max-files-per-session "${{ inputs.max_files_per_session }}" \
+            --output results/clusterless-mark-availability
+
+      - name: Print gate summary
+        run: |
+          set -euo pipefail
+          cat results/clusterless-mark-availability/clusterless_mark_gate_summary.csv
+
+      - name: Upload clusterless mark availability artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: clusterless-mark-availability-${{ github.run_id }}
+          path: results/clusterless-mark-availability
+          if-no-files-found: error

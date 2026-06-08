@@ -13,6 +13,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 
 from spike_matched_event_window_null import (  # noqa: E402
     aggregate_matched_null_scores,
+    empirical_p_value,
     spike_matched_null_windows,
 )
 
@@ -107,6 +108,7 @@ def test_spike_matched_null_aggregate_accepts_lightweight_required_models(tmp_pa
     aggregate_matched_null_scores(
         str(score_path),
         out,
+        comparison_scope="lightweight-first-order-imm-vs-stationary",
         required_models=(stationary, trajectory),
         bootstrap_samples=10,
     )
@@ -116,9 +118,134 @@ def test_spike_matched_null_aggregate_accepts_lightweight_required_models(tmp_pa
 
     assert decisions["required_models_total"].tolist() == [2, 2]
     assert decisions["required_models_complete"].tolist() == [True, True]
+    assert decisions["required_models_present"].tolist() == [2, 2]
+    assert decisions["missing_required_models"].fillna("").tolist() == ["", ""]
+    assert decisions["comparison_scope"].tolist() == [
+        "lightweight-first-order-imm-vs-stationary",
+        "lightweight-first-order-imm-vs-stationary",
+    ]
     decisions_by_role = decisions.set_index("window_role")["margin_decision"].to_dict()
     assert decisions_by_role == {"real": "trajectory", "matched_null": "ambiguous"}
     assert p_values["real_trajectory_confident_claim"].tolist() == [True]
+    assert (out / "lightweight_matched_null_control_gate_summary.csv").exists()
+
+
+def test_spike_matched_null_full_core_scope_remains_strict_for_two_model_input(tmp_path):
+    stationary = "sorted-spike-state-space-stationary"
+    trajectory = "sorted-spike-state-space-first-order-imm"
+    scores = pd.DataFrame(
+        [
+            *_lightweight_event_rows(
+                "Rat1/Open1",
+                0,
+                "real",
+                -1,
+                stationary_model=stationary,
+                trajectory_model=trajectory,
+                stationary_score=0.0,
+                trajectory_score=10.0,
+            ),
+            *_lightweight_event_rows(
+                "Rat1/Open1",
+                0,
+                "matched_null",
+                0,
+                stationary_model=stationary,
+                trajectory_model=trajectory,
+                stationary_score=0.0,
+                trajectory_score=1.0,
+            ),
+        ]
+    )
+    score_path = tmp_path / "scores.csv"
+    scores.to_csv(score_path, index=False)
+    out = tmp_path / "out"
+
+    aggregate_matched_null_scores(
+        str(score_path),
+        out,
+        comparison_scope="full-core",
+        bootstrap_samples=10,
+    )
+
+    decisions = pd.read_csv(out / "matched_null_family_margin_decisions.csv")
+
+    assert decisions["required_models_total"].tolist() == [5, 5]
+    assert decisions["required_models_present"].tolist() == [2, 2]
+    assert decisions["required_models_complete"].tolist() == [False, False]
+    assert decisions["margin_decision"].tolist() == ["incomplete_core", "incomplete_core"]
+
+
+def test_empirical_p_value_uses_plus_one_resolution_for_k50():
+    nulls = np.arange(50, dtype=float)
+
+    assert empirical_p_value(100.0, nulls) == pytest.approx(1 / 51)
+    assert empirical_p_value(10.0, np.array([11.0, *np.zeros(49)])) == pytest.approx(2 / 51)
+
+
+def test_targeted_session_diagnostics_identify_rat2_open2_caveat(tmp_path):
+    stationary = "sorted-spike-state-space-stationary"
+    trajectory = "sorted-spike-state-space-first-order-imm"
+    scores = pd.DataFrame(
+        [
+            *_lightweight_event_rows(
+                "Rat2/Open1",
+                0,
+                "real",
+                -1,
+                stationary_model=stationary,
+                trajectory_model=trajectory,
+                stationary_score=0.0,
+                trajectory_score=12.0,
+            ),
+            *_lightweight_event_rows(
+                "Rat2/Open1",
+                0,
+                "matched_null",
+                0,
+                stationary_model=stationary,
+                trajectory_model=trajectory,
+                stationary_score=0.0,
+                trajectory_score=2.0,
+            ),
+            *_lightweight_event_rows(
+                "Rat2/Open2",
+                1,
+                "real",
+                -1,
+                stationary_model=stationary,
+                trajectory_model=trajectory,
+                stationary_score=0.0,
+                trajectory_score=1.0,
+            ),
+            *_lightweight_event_rows(
+                "Rat2/Open2",
+                1,
+                "matched_null",
+                0,
+                stationary_model=stationary,
+                trajectory_model=trajectory,
+                stationary_score=0.0,
+                trajectory_score=8.0,
+            ),
+        ]
+    )
+    score_path = tmp_path / "scores.csv"
+    scores.to_csv(score_path, index=False)
+    out = tmp_path / "out"
+
+    aggregate_matched_null_scores(
+        str(score_path),
+        out,
+        comparison_scope="lightweight-first-order-imm-vs-stationary",
+        bootstrap_samples=10,
+    )
+
+    session_diagnostics = pd.read_csv(out / "targeted_matched_null_session_diagnostics.csv")
+    by_session = session_diagnostics.set_index("session")
+
+    assert by_session.loc["Rat2/Open1", "median_real_minus_median_null_family_margin"] > 0
+    assert by_session.loc["Rat2/Open2", "median_real_minus_median_null_family_margin"] < 0
 
 
 def test_spike_matched_null_workflow_exposes_control_outputs():
@@ -129,10 +256,13 @@ def test_spike_matched_null_workflow_exposes_control_outputs():
     assert 'default: "10"' in workflow
     assert "null_count:" in workflow
     assert "events_per_session_for_k50:" in workflow
+    assert "comparison_scope:" in workflow
+    assert "session_filter:" in workflow
+    assert "event_index_filter:" in workflow
     assert "null_models:" in workflow
     assert 'models="${NULL_MODELS:-${MODELS}}"' in workflow
     assert 'nulls_per_event="${NULL_COUNT:-${NULLS_PER_EVENT}}"' in workflow
-    assert "--required-models" in workflow
+    assert "--comparison-scope" in workflow
     assert "scripts/spike_matched_event_window_null.py score" in workflow
     assert "scripts/spike_matched_event_window_null.py aggregate" in workflow
     for expected in (
@@ -145,6 +275,9 @@ def test_spike_matched_null_workflow_exposes_control_outputs():
         "leave_one_rat_out_matched_null_summary.csv",
         "rat_bootstrap_matched_null_summary.csv",
         "matched_null_control_gate_summary.csv",
+        "targeted_matched_null_session_diagnostics.csv",
+        "targeted_matched_null_event_diagnostics.csv",
+        "lightweight_matched_null_control_gate_summary.csv",
     ):
         assert expected in workflow
 

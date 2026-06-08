@@ -30,6 +30,17 @@ def test_selected_row_model_evidence_workflows_keep_initial_sigma_dispatchable()
         assert "state_space_momentum_initial_sigma_cm_sqrt_s:" in text
 
 
+def test_spike_matched_null_workflow_keeps_lightweight_scope_dispatchable():
+    workflow = Path(".github/workflows/spike-matched-event-window-null.yml")
+    text = workflow.read_text(encoding="utf-8")
+
+    assert _workflow_dispatch_input_count(text) <= 25
+    assert "comparison_scope:" in text
+    assert "session_filter:" in text
+    assert "scripts/spike_matched_event_window_null.py" in text
+    assert "lightweight_matched_null_control_gate_summary.csv" in text
+
+
 def _workflow_dispatch_input_count(workflow: str) -> int:
     """Count first-level workflow_dispatch inputs in a GitHub Actions file."""
 

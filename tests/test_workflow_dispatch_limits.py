@@ -41,6 +41,19 @@ def test_spike_matched_null_workflow_keeps_lightweight_scope_dispatchable():
     assert "lightweight_matched_null_control_gate_summary.csv" in text
 
 
+def test_off_swr_trajectory_discovery_workflow_wires_scorer_and_outputs():
+    workflow = Path(".github/workflows/off-swr-trajectory-discovery.yml")
+    text = workflow.read_text(encoding="utf-8")
+
+    assert _workflow_dispatch_input_count(text) <= 25
+    assert "scripts/spike_matched_event_window_null.py score" in text
+    assert "scripts/off_swr_trajectory_discovery.py" in text
+    assert "off_swr_trajectory_candidate_events.csv" in text
+    assert "off_swr_candidate_clusters.csv" in text
+    assert "off_swr_candidate_behavior_lfp_summary.csv" in text
+    assert "off_swr_candidate_gate_summary.csv" in text
+
+
 def _workflow_dispatch_input_count(workflow: str) -> int:
     """Count first-level workflow_dispatch inputs in a GitHub Actions file."""
 

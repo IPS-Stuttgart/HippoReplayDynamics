@@ -12,6 +12,18 @@ on:
         description: "Space- or comma-separated sessions"
         required: true
         default: "Rat1/Open1 Rat1/Open2 Rat2/Open1 Rat2/Open2 Rat3/Open1 Rat3/Open2 Rat4/Open1 Rat4/Open2"
+      comparison_scope:
+        description: "Family comparison scope: auto, full-core, or lightweight-first-order-imm-vs-stationary"
+        required: false
+        default: "auto"
+      session_filter:
+        description: "Optional whitespace-separated sessions to score; empty means all default sessions"
+        required: false
+        default: ""
+      event_index_filter:
+        description: "Optional whitespace/comma-separated event indices to score within each selected session; empty means use max_events selection"
+        required: false
+        default: ""
       events:
         description: "Event IDs/ranges, all, run, or run:0-25"
         required: true
@@ -57,12 +69,15 @@ permissions:
   contents: read
 
 concurrency:
-  group: spike-matched-event-window-null-${{ github.repository }}-${{ inputs.sessions }}-${{ inputs.events }}-${{ inputs.max_events }}-${{ inputs.events_per_session_for_k50 }}-${{ inputs.nulls_per_event }}-${{ inputs.null_count }}-${{ github.ref }}
+  group: spike-matched-event-window-null-${{ github.repository }}-${{ inputs.sessions }}-${{ inputs.session_filter }}-${{ inputs.events }}-${{ inputs.event_index_filter }}-${{ inputs.max_events }}-${{ inputs.events_per_session_for_k50 }}-${{ inputs.nulls_per_event }}-${{ inputs.null_count }}-${{ inputs.comparison_scope }}-${{ github.ref }}
   cancel-in-progress: false
 
 env:
   DATASET_ROOT: ${{ inputs.dataset_root }}
   SESSIONS: ${{ inputs.sessions }}
+  COMPARISON_SCOPE: ${{ inputs.comparison_scope }}
+  SESSION_FILTER: ${{ inputs.session_filter }}
+  EVENT_INDEX_FILTER: ${{ inputs.event_index_filter }}
   EVENTS: ${{ inputs.events }}
   MAX_EVENTS: ${{ inputs.max_events }}
   EVENTS_PER_SESSION_FOR_K50: ${{ inputs.events_per_session_for_k50 }}
@@ -126,9 +141,11 @@ jobs:
           import subprocess
           from pathlib import Path
 
-          sessions = [s for s in re.split(r"[\s,]+", os.environ["SESSIONS"].strip()) if s]
+          sessions_text = os.environ.get("SESSION_FILTER", "").strip() or os.environ["SESSIONS"].strip()
+          sessions = [s for s in re.split(r"[\s,]+", sessions_text) if s]
           if not sessions:
               raise SystemExit("No sessions selected")
+          events_spec = os.environ.get("EVENT_INDEX_FILTER", "").strip() or os.environ["EVENTS"]
           effective_max_events = (
               os.environ.get("EVENTS_PER_SESSION_FOR_K50", "").strip()
               or os.environ.get("MAX_EVENTS", "").strip()
@@ -147,11 +164,11 @@ jobs:
                   "python", "scripts/plan_model_evidence_event_shards.py",
                   "--dataset-root", os.environ["DATASET_ROOT"],
                   "--session", session,
-                  "--events", os.environ["EVENTS"],
+                  "--events", events_spec,
                   "--event-shard-count", os.environ["EVENT_SHARD_COUNT"],
                   "--output", str(plan_path),
               ]
-              if effective_max_events:
+              if effective_max_events and not os.environ.get("EVENT_INDEX_FILTER", "").strip():
                   cmd.extend(["--max-events", effective_max_events])
               subprocess.run(cmd, check=True)
               plan = json.loads(plan_path.read_text(encoding="utf-8"))
@@ -166,9 +183,10 @@ jobs:
               raise SystemExit(f"Session/event matrix has {len(matrix)} jobs, exceeding GitHub Actions' 256-job matrix limit")
           all_plan = {
               "sessions": sessions,
-              "events": os.environ["EVENTS"],
+              "events": events_spec,
               "max_events": effective_max_events or None,
               "nulls_per_event": effective_nulls_per_event,
+              "comparison_scope": os.environ["COMPARISON_SCOPE"],
               "models": os.environ.get("NULL_MODELS", "").strip() or os.environ["MODELS"],
               "session_count": len(sessions),
               "event_count": total_events,
@@ -237,20 +255,16 @@ jobs:
           out_dir="results/spike-matched-null-${SHARD_SESSION_SLUG}-shard-${EVENT_SHARD_INDEX}"
           models="${NULL_MODELS:-${MODELS}}"
           nulls_per_event="${NULL_COUNT:-${NULLS_PER_EVENT}}"
-          required_models_args=()
-          if [[ -n "${NULL_MODELS}" ]]; then
-            required_models_args=(--required-models "${models}")
-          fi
           python scripts/spike_matched_event_window_null.py score \
             --dataset-root "${DATASET_ROOT}" \
             --session "${SHARD_SESSION}" \
             --events "${SHARD_EVENTS}" \
             --models "${models}" \
+            --comparison-scope "${COMPARISON_SCOPE}" \
             --nulls-per-event "${nulls_per_event}" \
             --spike-count-tolerance-fraction "${SPIKE_COUNT_TOLERANCE_FRACTION}" \
             --null-random-seed "${NULL_RANDOM_SEED}" \
             --output "${out_dir}" \
-            "${required_models_args[@]}" \
             --continue-on-error
 
       - name: Upload matched-null shard
@@ -293,16 +307,12 @@ jobs:
       - name: Aggregate matched-null control
         run: |
           set -euo pipefail
-          required_models_args=()
-          if [[ -n "${NULL_MODELS}" ]]; then
-            required_models_args=(--required-models "${NULL_MODELS}")
-          fi
           python scripts/spike_matched_event_window_null.py aggregate \
             --score-glob "artifacts/spike-matched-event-window-null-shards/**/matched_null_event_model_evidence.csv" \
             --output results/spike-matched-event-window-null \
+            --comparison-scope "${COMPARISON_SCOPE}" \
             --bootstrap-seed "${NULL_RANDOM_SEED}" \
-            --bootstrap-samples 2000 \
-            "${required_models_args[@]}"
+            --bootstrap-samples 2000
           for required_file in \
             matched_null_event_model_evidence.csv \
             matched_null_family_margin_decisions.csv \
@@ -312,7 +322,10 @@ jobs:
             rat_matched_null_summary.csv \
             leave_one_rat_out_matched_null_summary.csv \
             rat_bootstrap_matched_null_summary.csv \
-            matched_null_control_gate_summary.csv; do
+            matched_null_control_gate_summary.csv \
+            targeted_matched_null_session_diagnostics.csv \
+            targeted_matched_null_event_diagnostics.csv \
+            lightweight_matched_null_control_gate_summary.csv; do
             test -s "results/spike-matched-event-window-null/${required_file}" || {
               echo "Missing results/spike-matched-event-window-null/${required_file}" >&2
               exit 1

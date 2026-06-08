@@ -22,9 +22,7 @@ from benchmark_model_evidence_improved import (
     _run_settings,
 )
 from aggregate_event_window_sensitivity import (
-    DEFAULT_EXACT_TRAJECTORY_MODELS,
     DEFAULT_MARGIN_THRESHOLD,
-    DEFAULT_REQUIRED_MODELS,
 )
 from hipporeplayimm.clusterless import (
     ClusterlessStateSpaceReplayModel,
@@ -53,6 +51,70 @@ DEFAULT_MATCHED_NULL_MODELS = (
     "sorted-spike-state-space-momentum "
     "sorted-spike-state-space-imm"
 )
+
+FULL_CORE_REQUIRED_MODELS = (
+    "sorted-spike-state-space-stationary",
+    "sorted-spike-state-space-diffusion",
+    "sorted-spike-state-space-fragmented",
+    "sorted-spike-state-space-first-order-imm",
+    "sorted-spike-state-space-momentum-exact-sparse",
+)
+
+FULL_CORE_TRAJECTORY_MODELS = (
+    "sorted-spike-state-space-diffusion",
+    "sorted-spike-state-space-fragmented",
+    "sorted-spike-state-space-first-order-imm",
+    "sorted-spike-state-space-momentum-exact-sparse",
+)
+
+LIGHTWEIGHT_FO_IMM_STATIONARY_REQUIRED_MODELS = (
+    "sorted-spike-state-space-stationary",
+    "sorted-spike-state-space-first-order-imm",
+)
+
+LIGHTWEIGHT_FO_IMM_STATIONARY_TRAJECTORY_MODELS = (
+    "sorted-spike-state-space-first-order-imm",
+)
+
+LIGHTWEIGHT_FO_IMM_STATIONARY_SCOPE = "lightweight-first-order-imm-vs-stationary"
+
+
+def resolve_family_model_sets(
+    *,
+    comparison_scope: str,
+    scored_models: tuple[str, ...] | list[str] | set[str] | None = None,
+) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    """Return required and trajectory models for matched-null family margins."""
+
+    scope = str(comparison_scope).strip().lower()
+
+    if scope in {"full-core", "full_core"}:
+        return FULL_CORE_REQUIRED_MODELS, FULL_CORE_TRAJECTORY_MODELS
+
+    if scope in {
+        LIGHTWEIGHT_FO_IMM_STATIONARY_SCOPE,
+        "lightweight_fo_imm_stationary",
+        "fo-imm-vs-stationary",
+    }:
+        return (
+            LIGHTWEIGHT_FO_IMM_STATIONARY_REQUIRED_MODELS,
+            LIGHTWEIGHT_FO_IMM_STATIONARY_TRAJECTORY_MODELS,
+        )
+
+    if scope in {"auto", "from-models"}:
+        if scored_models is None:
+            raise ValueError("scored_models is required when comparison_scope='auto'")
+        scored = set(str(model) for model in scored_models)
+        if set(LIGHTWEIGHT_FO_IMM_STATIONARY_REQUIRED_MODELS).issubset(scored) and not set(
+            FULL_CORE_REQUIRED_MODELS
+        ).issubset(scored):
+            return (
+                LIGHTWEIGHT_FO_IMM_STATIONARY_REQUIRED_MODELS,
+                LIGHTWEIGHT_FO_IMM_STATIONARY_TRAJECTORY_MODELS,
+            )
+        return FULL_CORE_REQUIRED_MODELS, FULL_CORE_TRAJECTORY_MODELS
+
+    raise ValueError(f"unknown comparison_scope: {comparison_scope!r}")
 
 
 def spike_matched_null_windows(
@@ -441,17 +503,25 @@ def _clusterless_mark_config(args: argparse.Namespace):
 def matched_null_family_margin_decisions(
     frame: pd.DataFrame,
     *,
-    required_models: tuple[str, ...] = DEFAULT_REQUIRED_MODELS,
-    trajectory_models: tuple[str, ...] = DEFAULT_EXACT_TRAJECTORY_MODELS,
+    comparison_scope: str = "auto",
+    required_models: tuple[str, ...] | None = None,
+    trajectory_models: tuple[str, ...] | None = None,
     margin_threshold: float = DEFAULT_MARGIN_THRESHOLD,
 ) -> pd.DataFrame:
     """Return best exact trajectory versus nontrajectory decisions for real/null windows."""
 
     if frame.empty:
         return pd.DataFrame()
-    required = tuple(str(model) for model in required_models)
+    scored_models = _scored_model_names(frame)
+    resolved_required, resolved_trajectory = resolve_family_model_sets(
+        comparison_scope=comparison_scope,
+        scored_models=scored_models,
+    )
+    required = tuple(str(model) for model in (required_models or resolved_required))
     required_set = set(required)
-    trajectory_set = set(str(model) for model in trajectory_models)
+    trajectory = tuple(str(model) for model in (trajectory_models or resolved_trajectory))
+    trajectory_set = set(trajectory)
+    scope_label = _canonical_comparison_scope(comparison_scope, required)
     status_ok = frame["status"].eq("success") if "status" in frame else pd.Series(True, index=frame.index)
     comparable = frame["evidence_comparable"].fillna(False).astype(bool) if "evidence_comparable" in frame else pd.Series(True, index=frame.index)
     ok = frame[status_ok & comparable].copy()
@@ -505,6 +575,7 @@ def matched_null_family_margin_decisions(
                 "real_n_spikes": _first_numeric_value(group, "real_n_spikes"),
                 "n_spikes_delta": _first_numeric_value(group, "n_spikes_delta"),
                 "n_spikes_relative_delta": _first_numeric_value(group, "n_spikes_relative_delta"),
+                "comparison_scope": scope_label,
                 "required_models_present": int(len(present)),
                 "required_models_total": int(len(required)),
                 "required_models_complete": bool(not missing),
@@ -527,7 +598,11 @@ def matched_null_family_margin_decisions(
     return pd.DataFrame(rows)
 
 
-def matched_null_family_margin_summary(decisions: pd.DataFrame, *, group_cols: tuple[str, ...] = ("window_role",)) -> pd.DataFrame:
+def matched_null_family_margin_summary(
+    decisions: pd.DataFrame,
+    *,
+    group_cols: tuple[str, ...] = ("comparison_scope", "window_role"),
+) -> pd.DataFrame:
     """Summarize real/null family-margin decisions."""
 
     if decisions.empty:
@@ -582,13 +657,15 @@ def matched_null_empirical_p_values(decisions: pd.DataFrame) -> pd.DataFrame:
         null_best_per_spike = pd.to_numeric(nulls["best_trajectory_log_evidence_per_spike"], errors="coerce").dropna()
         null_best_per_time = pd.to_numeric(nulls["best_trajectory_log_evidence_per_time_bin"], errors="coerce").dropna()
         k = int(len(null_margin))
-        p_value = float((1 + int((null_margin >= real_margin).sum())) / (1 + k)) if k else np.nan
+        p_value = empirical_p_value(real_margin, null_margin)
         rows.append(
             {
+                "comparison_scope": str(real_row.get("comparison_scope", "")),
                 "session": str(session),
                 "rat": str(session).split("/")[0],
                 "event_index": int(event_index),
                 "matched_null_windows": k,
+                "minimum_possible_empirical_p_value": float(1.0 / (1.0 + k)) if k else np.nan,
                 "empirical_p_value": p_value,
                 "real_family_margin": real_margin,
                 "median_null_family_margin": float(null_margin.median()) if k else np.nan,
@@ -615,6 +692,28 @@ def matched_null_empirical_p_values(decisions: pd.DataFrame) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
+def empirical_p_value(
+    real_value: float,
+    null_values: tuple[float, ...] | list[float] | np.ndarray | pd.Series,
+    *,
+    greater_equal: bool = True,
+) -> float:
+    """Monte Carlo empirical p-value with +1 correction.
+
+    For K null samples, the minimum possible p-value is 1 / (K + 1).
+    """
+
+    null = np.asarray(null_values, dtype=float)
+    null = null[np.isfinite(null)]
+    if null.size == 0 or not np.isfinite(real_value):
+        return float("nan")
+    if greater_equal:
+        exceed = int(np.sum(null >= float(real_value)))
+    else:
+        exceed = int(np.sum(null <= float(real_value)))
+    return float((1 + exceed) / (1 + null.size))
+
+
 def matched_null_group_summary(p_values: pd.DataFrame, *, group_cols: tuple[str, ...]) -> pd.DataFrame:
     if p_values.empty:
         return pd.DataFrame()
@@ -632,12 +731,15 @@ def leave_one_rat_out_matched_null_summary(p_values: pd.DataFrame) -> pd.DataFra
     if p_values.empty or "rat" not in p_values:
         return pd.DataFrame()
     rows: list[dict[str, object]] = []
-    for rat in sorted(p_values["rat"].dropna().astype(str).unique()):
-        group = p_values[p_values["rat"].astype(str) != rat]
-        delta = pd.to_numeric(group["real_minus_median_null_family_margin"], errors="coerce")
-        row = {"held_out_rat": rat}
-        row.update(_delta_summary(group, delta))
-        rows.append(row)
+    scope_values = sorted(p_values["comparison_scope"].dropna().astype(str).unique()) if "comparison_scope" in p_values else [""]
+    for scope in scope_values:
+        scoped = p_values[p_values["comparison_scope"].astype(str).eq(scope)] if scope else p_values
+        for rat in sorted(scoped["rat"].dropna().astype(str).unique()):
+            group = scoped[scoped["rat"].astype(str) != rat]
+            delta = pd.to_numeric(group["real_minus_median_null_family_margin"], errors="coerce")
+            row = {"comparison_scope": scope, "held_out_rat": rat}
+            row.update(_delta_summary(group, delta))
+            rows.append(row)
     return pd.DataFrame(rows)
 
 
@@ -652,6 +754,8 @@ def rat_bootstrap_matched_null_summary(
     rats = sorted(p_values["rat"].dropna().astype(str).unique())
     if not rats:
         return pd.DataFrame()
+    scope_values = sorted(p_values["comparison_scope"].dropna().astype(str).unique()) if "comparison_scope" in p_values else [""]
+    scope = " ".join(scope_values)
     rng = np.random.default_rng(int(random_seed))
     mean_values: list[float] = []
     median_values: list[float] = []
@@ -667,6 +771,7 @@ def rat_bootstrap_matched_null_summary(
     return pd.DataFrame(
         [
             {
+                "comparison_scope": scope,
                 "bootstrap_unit": "rat",
                 "bootstrap_samples": int(len(mean_values)),
                 "mean_delta_lower_95": float(np.quantile(mean_values, 0.025)) if mean_values else np.nan,
@@ -712,15 +817,131 @@ def matched_null_control_gate_summary(p_values: pd.DataFrame, bootstrap: pd.Data
     return pd.DataFrame(rows)
 
 
+def targeted_matched_null_event_diagnostics(p_values: pd.DataFrame) -> pd.DataFrame:
+    """Return per-event high-K matched-null diagnostics."""
+
+    columns = [
+        "comparison_scope",
+        "session",
+        "rat",
+        "event_index",
+        "real_family_margin",
+        "median_null_family_margin",
+        "mean_null_family_margin",
+        "real_minus_median_null_family_margin",
+        "empirical_p_value",
+        "matched_null_windows",
+        "minimum_possible_empirical_p_value",
+        "real_best_trajectory_log_evidence_per_spike",
+        "median_null_best_trajectory_log_evidence_per_spike",
+        "real_minus_median_null_best_trajectory_log_evidence_per_spike",
+        "real_best_trajectory_log_evidence_per_time_bin",
+        "median_null_best_trajectory_log_evidence_per_time_bin",
+        "real_minus_median_null_best_trajectory_log_evidence_per_time_bin",
+    ]
+    if p_values.empty:
+        return pd.DataFrame(columns=columns)
+    return p_values[[column for column in columns if column in p_values]].copy()
+
+
+def targeted_matched_null_session_diagnostics(p_values: pd.DataFrame) -> pd.DataFrame:
+    """Return session-level high-K matched-null diagnostics."""
+
+    if p_values.empty:
+        return pd.DataFrame()
+    group_cols = tuple(column for column in ("comparison_scope", "session") if column in p_values)
+    return matched_null_group_summary(p_values, group_cols=group_cols)
+
+
+def lightweight_matched_null_control_gate_summary(
+    p_values: pd.DataFrame,
+    decisions: pd.DataFrame,
+    bootstrap: pd.DataFrame,
+) -> pd.DataFrame:
+    """Return gates for lightweight first-order-IMM-vs-stationary diagnostics."""
+
+    rows: list[dict[str, object]] = []
+    if p_values.empty:
+        return pd.DataFrame(
+            [{"gate": "overall", "passed": False, "observed": "no events", "criterion": "matched-null events exist"}]
+        )
+    scope_values = set(p_values.get("comparison_scope", pd.Series(dtype=str)).dropna().astype(str))
+    lightweight = scope_values == {LIGHTWEIGHT_FO_IMM_STATIONARY_SCOPE}
+    _append_gate(
+        rows,
+        "comparison_scope_lightweight",
+        lightweight,
+        " ".join(sorted(scope_values)) if scope_values else "",
+        f"comparison_scope == {LIGHTWEIGHT_FO_IMM_STATIONARY_SCOPE}",
+    )
+    complete = decisions["required_models_complete"].fillna(False).astype(bool) if not decisions.empty else pd.Series(dtype=bool)
+    _append_gate(
+        rows,
+        "complete_lightweight_family_rows",
+        bool(lightweight and not complete.empty and complete.all()),
+        "" if complete.empty else f"{int(complete.sum())}/{len(complete)}",
+        "all lightweight family rows have required two-model evidence",
+    )
+    delta = pd.to_numeric(p_values["real_minus_median_null_family_margin"], errors="coerce")
+    sessions = sorted(p_values["session"].dropna().astype(str).unique())
+    targeted_session = lightweight and len(sessions) == 1
+    if targeted_session:
+        _append_gate(rows, "session_median_positive", float(delta.median()) > 0.0, float(delta.median()), "target session median real-minus-null margin > 0")
+        _append_gate(rows, "session_majority_events_exceed_null_median", float((delta > 0.0).mean()) > 0.5, float((delta > 0.0).mean()), "target session majority events exceed null median")
+        p_values_numeric = pd.to_numeric(p_values["empirical_p_value"], errors="coerce")
+        low_p_events = int((p_values_numeric <= 0.10).sum())
+        _append_gate(rows, "session_has_at_least_one_p_le_0_05_or_p_le_0_10", low_p_events >= 1, low_p_events, "target session has at least one event with empirical p <= 0.10")
+    else:
+        _append_gate(rows, "median_real_minus_null_family_margin_positive", float(delta.median()) > 0.0, float(delta.median()), "median real-minus-null family margin > 0")
+        _append_gate(rows, "majority_events_exceed_null_median", float((delta > 0.0).mean()) > 0.5, float((delta > 0.0).mean()), "majority of events have real margin > matched-null median")
+        session_summary = matched_null_group_summary(p_values, group_cols=("session",))
+        session_medians = pd.to_numeric(session_summary["median_real_minus_median_null_family_margin"], errors="coerce") if not session_summary.empty else pd.Series(dtype=float)
+        _append_gate(rows, "per_session_median_positive", bool(not session_medians.empty and (session_medians > 0.0).all()), "" if session_medians.empty else float(session_medians.min()), "per-session median real-minus-null margin > 0")
+        rat_summary = matched_null_group_summary(p_values, group_cols=("rat",))
+        rat_medians = pd.to_numeric(rat_summary["median_real_minus_median_null_family_margin"], errors="coerce") if not rat_summary.empty else pd.Series(dtype=float)
+        _append_gate(rows, "per_rat_median_positive", bool(not rat_medians.empty and (rat_medians > 0.0).all()), "" if rat_medians.empty else float(rat_medians.min()), "per-rat median real-minus-null margin > 0")
+        loo = leave_one_rat_out_matched_null_summary(p_values)
+        loo_medians = pd.to_numeric(loo["median_real_minus_median_null_family_margin"], errors="coerce") if not loo.empty else pd.Series(dtype=float)
+        _append_gate(rows, "leave_one_rat_out_median_positive", bool(not loo_medians.empty and (loo_medians > 0.0).all()), "" if loo_medians.empty else float(loo_medians.min()), "leave-one-rat-out median real-minus-null margin > 0")
+        if not bootstrap.empty:
+            mean_lower = float(bootstrap["mean_delta_lower_95"].iloc[0])
+            median_lower = float(bootstrap["median_delta_lower_95"].iloc[0])
+            _append_gate(rows, "rat_bootstrap_lower_bound_positive", bool(mean_lower > 0.0 or median_lower > 0.0), f"mean={mean_lower:.3f}; median={median_lower:.3f}", "rat-bootstrap lower bound for mean or median real-minus-null margin > 0")
+    min_possible_p = pd.to_numeric(p_values["minimum_possible_empirical_p_value"], errors="coerce")
+    _append_gate(
+        rows,
+        "conventional_p_value_resolution_available",
+        bool(not min_possible_p.dropna().empty and min_possible_p.min() <= 0.05),
+        "" if min_possible_p.dropna().empty else float(min_possible_p.min()),
+        "minimum possible empirical p-value <= 0.05",
+    )
+    nontrajectory = int(p_values["real_nontrajectory_confident_claim"].fillna(False).astype(bool).sum())
+    _append_gate(rows, "real_nontrajectory_claims_near_zero", nontrajectory <= max(1, math.ceil(0.05 * len(p_values))), nontrajectory, "false/nontrajectory claims remain near zero")
+    rows.append(
+        {
+            "gate": "overall",
+            "passed": all(bool(row["passed"]) for row in rows),
+            "observed": f"{sum(bool(row['passed']) for row in rows)}/{len(rows)} gates passed",
+            "criterion": "all lightweight matched-null gates pass",
+        }
+    )
+    return pd.DataFrame(rows)
+
+
 def _delta_summary(group: pd.DataFrame, delta: pd.Series) -> dict[str, object]:
     delta = delta.dropna()
+    p_values = pd.to_numeric(group["empirical_p_value"], errors="coerce")
+    null_windows = pd.to_numeric(group["matched_null_windows"], errors="coerce")
     return {
         "events": int(group[["session", "event_index"]].drop_duplicates().shape[0]),
+        "matched_null_windows_per_event": float(null_windows.median()) if not null_windows.dropna().empty else np.nan,
         "median_real_minus_median_null_family_margin": float(delta.median()) if not delta.empty else np.nan,
         "mean_real_minus_median_null_family_margin": float(delta.mean()) if not delta.empty else np.nan,
         "fraction_real_margin_above_null_median": float((delta > 0.0).mean()) if not delta.empty else np.nan,
-        "median_empirical_p_value": float(pd.to_numeric(group["empirical_p_value"], errors="coerce").median()),
-        "events_empirical_p_le_0_05": int((pd.to_numeric(group["empirical_p_value"], errors="coerce") <= 0.05).sum()),
+        "median_empirical_p_value": float(p_values.median()),
+        "events_empirical_p_le_0_05": int((p_values <= 0.05).sum()),
+        "events_empirical_p_le_0_10": int((p_values <= 0.10).sum()),
+        "min_empirical_p_value": float(p_values.min()) if not p_values.dropna().empty else np.nan,
         "real_trajectory_confident_claims": int(group["real_trajectory_confident_claim"].fillna(False).astype(bool).sum()),
         "real_nontrajectory_confident_claims": int(group["real_nontrajectory_confident_claim"].fillna(False).astype(bool).sum()),
     }
@@ -728,6 +949,26 @@ def _delta_summary(group: pd.DataFrame, delta: pd.Series) -> dict[str, object]:
 
 def _append_gate(rows: list[dict[str, object]], gate: str, passed: bool, observed: object, criterion: str) -> None:
     rows.append({"gate": gate, "passed": bool(passed), "observed": observed, "criterion": criterion})
+
+
+def _scored_model_names(frame: pd.DataFrame) -> tuple[str, ...]:
+    if "model" not in frame:
+        return ()
+    return tuple(sorted(set(frame["model"].dropna().astype(str))))
+
+
+def _canonical_comparison_scope(comparison_scope: str, required_models: tuple[str, ...]) -> str:
+    scope = str(comparison_scope).strip().lower()
+    if scope in {"auto", "from-models"}:
+        if tuple(required_models) == LIGHTWEIGHT_FO_IMM_STATIONARY_REQUIRED_MODELS:
+            return LIGHTWEIGHT_FO_IMM_STATIONARY_SCOPE
+        if tuple(required_models) == FULL_CORE_REQUIRED_MODELS:
+            return "full-core"
+    if scope == "full_core":
+        return "full-core"
+    if scope in {"lightweight_fo_imm_stationary", "fo-imm-vs-stationary"}:
+        return LIGHTWEIGHT_FO_IMM_STATIONARY_SCOPE
+    return scope
 
 
 def _first_numeric_value(frame: pd.DataFrame, column: str) -> float:
@@ -747,7 +988,8 @@ def aggregate_matched_null_scores(
     score_glob: str,
     outdir: Path,
     *,
-    required_models: tuple[str, ...] = DEFAULT_REQUIRED_MODELS,
+    comparison_scope: str = "auto",
+    required_models: tuple[str, ...] | None = None,
     margin_threshold: float = DEFAULT_MARGIN_THRESHOLD,
     bootstrap_seed: int = 1,
     bootstrap_samples: int = 2000,
@@ -760,6 +1002,7 @@ def aggregate_matched_null_scores(
     scores.to_csv(outdir / "matched_null_event_model_evidence.csv", index=False)
     decisions = matched_null_family_margin_decisions(
         scores,
+        comparison_scope=comparison_scope,
         required_models=required_models,
         margin_threshold=margin_threshold,
     )
@@ -767,12 +1010,18 @@ def aggregate_matched_null_scores(
     matched_null_family_margin_summary(decisions).to_csv(outdir / "matched_null_family_margin_summary.csv", index=False)
     p_values = matched_null_empirical_p_values(decisions)
     p_values.to_csv(outdir / "matched_null_empirical_p_values.csv", index=False)
-    matched_null_group_summary(p_values, group_cols=("session",)).to_csv(outdir / "session_matched_null_summary.csv", index=False)
-    matched_null_group_summary(p_values, group_cols=("rat",)).to_csv(outdir / "rat_matched_null_summary.csv", index=False)
+    matched_null_group_summary(p_values, group_cols=("comparison_scope", "session")).to_csv(outdir / "session_matched_null_summary.csv", index=False)
+    matched_null_group_summary(p_values, group_cols=("comparison_scope", "rat")).to_csv(outdir / "rat_matched_null_summary.csv", index=False)
     leave_one_rat_out_matched_null_summary(p_values).to_csv(outdir / "leave_one_rat_out_matched_null_summary.csv", index=False)
     bootstrap = rat_bootstrap_matched_null_summary(p_values, random_seed=bootstrap_seed, n_bootstrap=bootstrap_samples)
     bootstrap.to_csv(outdir / "rat_bootstrap_matched_null_summary.csv", index=False)
     matched_null_control_gate_summary(p_values, bootstrap).to_csv(outdir / "matched_null_control_gate_summary.csv", index=False)
+    targeted_matched_null_session_diagnostics(p_values).to_csv(outdir / "targeted_matched_null_session_diagnostics.csv", index=False)
+    targeted_matched_null_event_diagnostics(p_values).to_csv(outdir / "targeted_matched_null_event_diagnostics.csv", index=False)
+    lightweight_matched_null_control_gate_summary(p_values, decisions, bootstrap).to_csv(
+        outdir / "lightweight_matched_null_control_gate_summary.csv",
+        index=False,
+    )
     return scores
 
 
@@ -799,6 +1048,7 @@ def _add_scoring_arguments(parser: argparse.ArgumentParser) -> None:
             "family-margin decisions. Defaults to the paper full-core exact set."
         ),
     )
+    _add_comparison_scope_argument(parser)
     parser.add_argument("--continue-on-error", action="store_true")
 
 
@@ -885,6 +1135,7 @@ def main() -> int:
             "family-margin decisions. Defaults to the paper full-core exact set."
         ),
     )
+    _add_comparison_scope_argument(aggregate_parser)
     aggregate_parser.add_argument("--margin-threshold", type=float, default=DEFAULT_MARGIN_THRESHOLD)
     aggregate_parser.add_argument("--bootstrap-seed", type=int, default=1)
     aggregate_parser.add_argument("--bootstrap-samples", type=int, default=2000)
@@ -900,6 +1151,7 @@ def main() -> int:
         aggregate_matched_null_scores(
             str(outdir / "matched_null_event_model_evidence.csv"),
             outdir,
+            comparison_scope=args.comparison_scope,
             required_models=_parse_required_models(args.required_models),
             bootstrap_seed=args.null_random_seed,
         )
@@ -907,6 +1159,7 @@ def main() -> int:
     aggregate_matched_null_scores(
         args.score_glob,
         Path(args.output),
+        comparison_scope=args.comparison_scope,
         required_models=_parse_required_models(args.required_models),
         margin_threshold=args.margin_threshold,
         bootstrap_seed=args.bootstrap_seed,
@@ -915,9 +1168,25 @@ def main() -> int:
     return 0
 
 
-def _parse_required_models(value: str) -> tuple[str, ...]:
+def _add_comparison_scope_argument(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--comparison-scope",
+        default="auto",
+        choices=[
+            "auto",
+            "full-core",
+            LIGHTWEIGHT_FO_IMM_STATIONARY_SCOPE,
+        ],
+        help=(
+            "Which required model set to use for family-margin completeness and gates. "
+            "Use lightweight-first-order-imm-vs-stationary for K=50/K=100 lightweight null diagnostics."
+        ),
+    )
+
+
+def _parse_required_models(value: str) -> tuple[str, ...] | None:
     models = tuple(item for item in str(value).split() if item)
-    return models or DEFAULT_REQUIRED_MODELS
+    return models or None
 
 
 if __name__ == "__main__":

@@ -491,7 +491,23 @@ jobs:
         run: |
           python - <<'PY'
           import pandas as pd
+          from pandas.errors import EmptyDataError
+
           root = "results/all-session-model-evidence"
+          _read_csv = pd.read_csv
+
+          def read_summary_csv(path):
+              try:
+                  frame = _read_csv(path)
+              except EmptyDataError:
+                  return pd.DataFrame({"note": [f"{path} is empty."]})
+              if frame.empty:
+                  columns = " ".join(str(column) for column in frame.columns) or "(none)"
+                  return pd.DataFrame({"note": [f"{path} has no rows."], "columns": [columns]})
+              return frame
+
+          pd.read_csv = read_summary_csv
+
           print("All-session model-evidence summary:")
           print(pd.read_csv(f"{root}/all_sessions_model_evidence_summary.csv").to_string(index=False))
           print("\nSession model-evidence summary:")

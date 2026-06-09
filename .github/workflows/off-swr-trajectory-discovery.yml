@@ -44,6 +44,10 @@ on:
         description: "Preferred off-SWR spike-count tolerance around the template event"
         required: true
         default: "0.10"
+      allow_non_run_nulls:
+        description: "Allow off-SWR candidate windows outside run-time intervals"
+        required: false
+        default: "false"
       null_random_seed:
         description: "Random seed for off-SWR window tie breaks"
         required: true
@@ -69,7 +73,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: off-swr-trajectory-discovery-${{ github.repository }}-${{ inputs.sessions }}-${{ inputs.session_filter }}-${{ inputs.events }}-${{ inputs.event_index_filter }}-${{ inputs.max_events }}-${{ inputs.nulls_per_event }}-${{ inputs.comparison_scope }}-${{ github.ref }}
+  group: off-swr-trajectory-discovery-${{ github.repository }}-${{ inputs.sessions }}-${{ inputs.session_filter }}-${{ inputs.events }}-${{ inputs.event_index_filter }}-${{ inputs.max_events }}-${{ inputs.nulls_per_event }}-${{ inputs.allow_non_run_nulls }}-${{ inputs.comparison_scope }}-${{ github.ref }}
   cancel-in-progress: false
 
 env:
@@ -83,6 +87,7 @@ env:
   EVENT_SHARD_COUNT: ${{ inputs.event_shard_count }}
   NULLS_PER_EVENT: ${{ inputs.nulls_per_event }}
   SPIKE_COUNT_TOLERANCE_FRACTION: ${{ inputs.spike_count_tolerance_fraction }}
+  ALLOW_NON_RUN_NULLS: ${{ inputs.allow_non_run_nulls }}
   NULL_RANDOM_SEED: ${{ inputs.null_random_seed }}
   MODELS: ${{ inputs.models }}
   MARGIN_THRESHOLD: ${{ inputs.margin_threshold }}
@@ -246,6 +251,10 @@ jobs:
         run: |
           set -euo pipefail
           out_dir="results/off-swr-trajectory-discovery-${SHARD_SESSION_SLUG}-shard-${EVENT_SHARD_INDEX}"
+          non_run_args=()
+          if [[ "${ALLOW_NON_RUN_NULLS}" == "true" ]]; then
+            non_run_args+=(--allow-non-run-nulls)
+          fi
           python scripts/spike_matched_event_window_null.py score \
             --dataset-root "${DATASET_ROOT}" \
             --session "${SHARD_SESSION}" \
@@ -256,6 +265,7 @@ jobs:
             --spike-count-tolerance-fraction "${SPIKE_COUNT_TOLERANCE_FRACTION}" \
             --null-random-seed "${NULL_RANDOM_SEED}" \
             --output "${out_dir}" \
+            "${non_run_args[@]}" \
             --continue-on-error
           python - <<'PY'
           import os

@@ -47,6 +47,9 @@ def test_off_swr_trajectory_discovery_workflow_wires_scorer_and_outputs():
 
     assert _workflow_dispatch_input_count(text) <= 25
     assert "scripts/spike_matched_event_window_null.py score" in text
+    assert "allow_non_run_nulls:" in text
+    assert "ALLOW_NON_RUN_NULLS" in text
+    assert "--allow-non-run-nulls" in text
     assert "speed_metadata_coverage.csv" in text
     assert "animal_speed_mean" in text
     assert "scripts/off_swr_trajectory_discovery.py" in text

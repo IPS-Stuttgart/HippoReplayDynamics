@@ -1,0 +1,182 @@
+---
+name: Off-SWR promoted candidate validation
+
+on:
+  workflow_dispatch:
+    inputs:
+      dataset_root:
+        description: "Dataset path after download or cache restore"
+        required: true
+        default: "data/DataSetFromPfeifferFoster"
+      discovery_run_id:
+        description: "Workflow run ID containing the off-SWR discovery artifact"
+        required: true
+        default: "27237703414"
+      discovery_artifact_name:
+        description: "Discovery artifact name; empty uses off-swr-trajectory-discovery-${run_id}"
+        required: false
+        default: ""
+      candidate_table_filename:
+        description: "Candidate table inside the discovery artifact"
+        required: true
+        default: "off_swr_high_specificity_candidate_table.csv"
+      candidate_filter:
+        description: "Candidate subset: promotion-ready, strong-immobile, all-high-specificity, or all"
+        required: true
+        default: "promotion-ready"
+      session_filter:
+        description: "Optional whitespace-separated sessions to validate"
+        required: false
+        default: ""
+      max_candidates:
+        description: "Optional cap on selected candidate rows"
+        required: false
+        default: ""
+      models:
+        description: "Space-separated exact-core validation models"
+        required: true
+        default: "sorted-spike-state-space-stationary sorted-spike-state-space-diffusion sorted-spike-state-space-fragmented sorted-spike-state-space-first-order-imm sorted-spike-state-space-momentum-exact-sparse"
+      comparison_scope:
+        description: "Family comparison scope"
+        required: true
+        default: "full-core"
+      margin_threshold:
+        description: "Trajectory-family log-evidence margin threshold"
+        required: true
+        default: "5.5"
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: off-swr-promoted-candidate-validation-${{ github.repository }}-${{ inputs.discovery_run_id }}-${{ inputs.candidate_filter }}-${{ inputs.session_filter }}-${{ inputs.max_candidates }}-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  DATASET_ROOT: ${{ inputs.dataset_root }}
+  DISCOVERY_RUN_ID: ${{ inputs.discovery_run_id }}
+  DISCOVERY_ARTIFACT_NAME: ${{ inputs.discovery_artifact_name }}
+  CANDIDATE_TABLE_FILENAME: ${{ inputs.candidate_table_filename }}
+  CANDIDATE_FILTER: ${{ inputs.candidate_filter }}
+  SESSION_FILTER: ${{ inputs.session_filter }}
+  MAX_CANDIDATES: ${{ inputs.max_candidates }}
+  MODELS: ${{ inputs.models }}
+  COMPARISON_SCOPE: ${{ inputs.comparison_scope }}
+  MARGIN_THRESHOLD: ${{ inputs.margin_threshold }}
+  LOCAL_CACHE_ROOT: ${{ vars.PFEIFFERFOSTER_LOCAL_CACHE_ROOT }}
+  OMP_NUM_THREADS: "1"
+  OPENBLAS_NUM_THREADS: "1"
+  MKL_NUM_THREADS: "1"
+
+jobs:
+  validate-promoted-candidates:
+    name: Exact-core promoted off-SWR candidate validation
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Install package
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e .
+
+      - name: Ensure Pfeiffer-Foster dataset
+        uses: ./.github/actions/ensure-pfeiffer-foster-dataset
+        with:
+          dataset-root: ${{ env.DATASET_ROOT }}
+          session: Rat1/Open1
+          cache-key: hipporeplayimm-dataset-${{ runner.os }}-rclone-v1
+          local-cache-root: ${{ env.LOCAL_CACHE_ROOT }}
+          webdav-url: ${{ secrets.PFEIFFERFOSTER_WEBDAV_URL }}
+          webdav-key: ${{ secrets.PFEIFFERFOSTER_DATA_KEY }}
+          webdav-password: ${{ secrets.PFEIFFERFOSTER_DATA_PASSWORD }}
+
+      - name: Download off-SWR discovery artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          artifact_name="${DISCOVERY_ARTIFACT_NAME}"
+          if [[ -z "${artifact_name}" ]]; then
+            artifact_name="off-swr-trajectory-discovery-${DISCOVERY_RUN_ID}"
+          fi
+          mkdir -p artifacts/off-swr-discovery
+          gh run download "${DISCOVERY_RUN_ID}" \
+            --name "${artifact_name}" \
+            --dir artifacts/off-swr-discovery
+          echo "Downloaded ${artifact_name} from run ${DISCOVERY_RUN_ID}"
+
+      - name: Score promoted off-SWR candidates
+        run: |
+          set -euo pipefail
+          candidate_table="$(find artifacts/off-swr-discovery -name "${CANDIDATE_TABLE_FILENAME}" -type f -print -quit)"
+          if [[ -z "${candidate_table}" ]]; then
+            echo "Could not find ${CANDIDATE_TABLE_FILENAME} in discovery artifact" >&2
+            find artifacts/off-swr-discovery -maxdepth 3 -type f | sort >&2
+            exit 1
+          fi
+          max_args=()
+          if [[ -n "${MAX_CANDIDATES}" ]]; then
+            max_args+=(--max-candidates "${MAX_CANDIDATES}")
+          fi
+          session_args=()
+          if [[ -n "${SESSION_FILTER}" ]]; then
+            session_args+=(--session-filter "${SESSION_FILTER}")
+          fi
+          python scripts/score_off_swr_promoted_candidates.py \
+            --dataset-root "${DATASET_ROOT}" \
+            --candidate-table "${candidate_table}" \
+            --output results/off-swr-promoted-candidate-validation \
+            --candidate-filter "${CANDIDATE_FILTER}" \
+            --models "${MODELS}" \
+            --comparison-scope "${COMPARISON_SCOPE}" \
+            --margin-threshold "${MARGIN_THRESHOLD}" \
+            "${session_args[@]}" \
+            "${max_args[@]}" \
+            --continue-on-error
+          for required_file in \
+            promoted_off_swr_candidate_exact_core_event_model_evidence.csv \
+            promoted_off_swr_candidate_exact_core_decisions.csv \
+            promoted_off_swr_candidate_exact_core_summary.csv \
+            promoted_off_swr_candidate_exact_core_session_summary.csv \
+            promoted_off_swr_candidate_exact_core_rat_summary.csv \
+            promoted_off_swr_candidate_exact_core_gate_summary.csv \
+            promoted_off_swr_candidate_exact_core_manifest.json; do
+            test -s "results/off-swr-promoted-candidate-validation/${required_file}" || {
+              echo "Missing results/off-swr-promoted-candidate-validation/${required_file}" >&2
+              exit 1
+            }
+          done
+
+      - name: Show promoted-candidate validation summary
+        run: |
+          python - <<'PY'
+          import pandas as pd
+
+          root = "results/off-swr-promoted-candidate-validation"
+          print("Promoted off-SWR exact-core summary:")
+          print(pd.read_csv(f"{root}/promoted_off_swr_candidate_exact_core_summary.csv").to_string(index=False))
+          print("\nPromoted off-SWR exact-core rat summary:")
+          print(pd.read_csv(f"{root}/promoted_off_swr_candidate_exact_core_rat_summary.csv").to_string(index=False))
+          print("\nPromoted off-SWR exact-core gates:")
+          print(pd.read_csv(f"{root}/promoted_off_swr_candidate_exact_core_gate_summary.csv").to_string(index=False))
+          print("\nPromoted off-SWR exact-core decisions:")
+          print(pd.read_csv(f"{root}/promoted_off_swr_candidate_exact_core_decisions.csv").to_string(index=False))
+          PY
+
+      - name: Upload promoted candidate validation
+        uses: actions/upload-artifact@v7
+        with:
+          name: off-swr-promoted-candidate-validation-${{ github.run_id }}
+          path: results/off-swr-promoted-candidate-validation/
+          if-no-files-found: error

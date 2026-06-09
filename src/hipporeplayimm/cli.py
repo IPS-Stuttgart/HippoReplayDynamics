@@ -287,6 +287,24 @@ def main(argv: list[str] | None = None) -> int:
     recovery_parser.add_argument("--state-space-diffusion-sigma-cm-sqrt-s", type=float, default=None)
     recovery_parser.add_argument("--state-space-max-step-sigma", type=float, default=4.0)
     recovery_parser.add_argument("--state-space-imm-mode-stickiness", type=float, default=0.95)
+    recovery_parser.add_argument(
+        "--state-space-trajectory-imm-mode-stickiness",
+        type=float,
+        default=StateSpaceDecoderConfig().trajectory_imm_mode_stickiness,
+        help="Optional trajectory-IMM-specific mode-transition stickiness.",
+    )
+    recovery_parser.add_argument(
+        "--state-space-trajectory-imm-momentum-initial-probability",
+        type=float,
+        default=StateSpaceDecoderConfig().trajectory_imm_momentum_initial_probability,
+        help="Optional trajectory-IMM initial probability assigned to the momentum mode.",
+    )
+    recovery_parser.add_argument(
+        "--state-space-trajectory-imm-momentum-switch-probability",
+        type=float,
+        default=StateSpaceDecoderConfig().trajectory_imm_momentum_switch_probability,
+        help="Optional per-transition probability of switching from first-order modes into momentum.",
+    )
     recovery_parser.add_argument("--state-space-momentum-sigma-cm-sqrt-s", type=float, default=None)
     recovery_parser.add_argument("--state-space-momentum-initial-sigma-cm-sqrt-s", type=float, default=None)
     recovery_parser.add_argument("--state-space-momentum-velocity-decay", type=float, default=0.95)

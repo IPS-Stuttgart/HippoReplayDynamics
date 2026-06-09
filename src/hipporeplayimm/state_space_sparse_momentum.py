@@ -202,7 +202,7 @@ def _score_sparse_momentum_exact(
         posterior_entropy = float("nan")
     pair_counts = np.asarray([values.shape[0] for values in filtered], dtype=float)
     outgoing_counts = np.asarray(edge_counts, dtype=float)
-    backward_label = "computed_full_smoothing" if return_trajectory else "skipped_evidence_only"
+    backward_label = "forward_cached" if return_trajectory else "skipped_evidence_only"
     diagnostics: dict[str, float | int | str] = {
         "state_space_sparse_momentum_evidence_support": "exact_full_grid",
         "state_space_sparse_momentum_state_support": "finite_radius_pair_grid",

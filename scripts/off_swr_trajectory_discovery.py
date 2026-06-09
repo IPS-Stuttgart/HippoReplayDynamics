@@ -485,6 +485,7 @@ HIGH_SPECIFICITY_CANDIDATE_COLUMNS = (
     "passes_1s_swr_exclusion",
     "speed_available",
     "passes_immobility_filter",
+    "passes_specificity_label_filter",
     "passes_high_specificity_promotion_filter",
     "promotion_limitation",
 )
@@ -2169,36 +2170,48 @@ def off_swr_high_specificity_candidate_table(
     distances = _numeric_series(table, "distance_to_nearest_swr_s")
     speed_values = _numeric_series(table, "animal_speed_mean")
     run_state = table["run_or_immobility_state"].astype(str) if "run_or_immobility_state" in table else pd.Series("", index=table.index)
+    specificity_label = (
+        table["candidate_specificity_label"].astype(str)
+        if "candidate_specificity_label" in table
+        else pd.Series("", index=table.index)
+    )
     table["passes_strong_tier"] = margins >= float(strong_threshold)
     table["passes_extreme_tier"] = margins >= float(extreme_threshold)
     table["passes_500ms_swr_exclusion"] = distances.notna() & (distances >= 0.5)
     table["passes_1s_swr_exclusion"] = distances.notna() & (distances >= float(swr_exclusion_radius_s))
     table["speed_available"] = speed_values.notna()
     table["passes_immobility_filter"] = run_state.eq("immobile")
+    table["passes_specificity_label_filter"] = specificity_label.eq(INTERESTING_CANDIDATE_LABEL)
     speed_evaluable = bool(table["speed_available"].any())
     table["passes_high_specificity_promotion_filter"] = (
         table["passes_strong_tier"]
         & table["passes_1s_swr_exclusion"]
+        & table["passes_specificity_label_filter"]
         & (table["passes_immobility_filter"] if speed_evaluable else False)
     )
     if speed_evaluable:
         table["promotion_limitation"] = np.where(
             table["passes_high_specificity_promotion_filter"],
             "",
-            "fails_strong_or_distance_or_immobility_filter",
+            "fails_strong_or_distance_or_immobility_or_specificity_filter",
         )
     else:
         table["promotion_limitation"] = "speed_unavailable_for_immobility_filter"
-    table["high_specificity_label"] = np.where(
-        table["passes_high_specificity_promotion_filter"],
-        "promotion_ready_high_specificity_candidate",
-        np.where(
-            table["passes_strong_tier"] & table["passes_1s_swr_exclusion"],
+    tier_distance = table["passes_strong_tier"] & table["passes_1s_swr_exclusion"]
+    table["high_specificity_label"] = np.select(
+        [
+            table["passes_high_specificity_promotion_filter"],
+            tier_distance & ~table["passes_specificity_label_filter"],
+            tier_distance,
+        ],
+        [
+            "promotion_ready_high_specificity_candidate",
+            "tier_distance_candidate_movement_spiking_or_low_information",
             "tier_distance_candidate_speed_unavailable_or_nonimmobile",
-            "below_high_specificity_filter",
-        ),
+        ],
+        default="below_high_specificity_filter",
     )
-    table = table[table["passes_strong_tier"] & table["passes_1s_swr_exclusion"]].copy()
+    table = table[tier_distance].copy()
     if table.empty:
         return _empty_frame(HIGH_SPECIFICITY_CANDIDATE_COLUMNS)
     return table[[column for column in HIGH_SPECIFICITY_CANDIDATE_COLUMNS if column in table.columns]]

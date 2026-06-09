@@ -288,7 +288,13 @@ def test_off_swr_candidate_tier_summaries_report_selective_thresholds(tmp_path):
             *_event_rows("Rat1/Open1", 1, "matched_null", 0, stationary=0.0, trajectory=25.0, start=10.25, ripple_power=1.2),
             *_event_rows("Rat1/Open1", 2, "matched_null", 0, stationary=0.0, trajectory=60.0, start=10.5, ripple_power=1.2),
             *_event_rows("Rat1/Open1", 3, "matched_null", 0, stationary=0.0, trajectory=120.0, start=10.75, ripple_power=1.2),
-            *_event_rows("Rat1/Open1", 4, "real", -1, stationary=0.0, trajectory=20.0, start=1.0, ripple_power=2.0, off_swr=False),
+            *_event_rows("Rat1/Open1", 4, "matched_null", 0, stationary=80.0, trajectory=0.0, start=11.0, ripple_power=0.2),
+            *_event_rows("Rat1/Open1", 5, "matched_null", 0, stationary=80.0, trajectory=0.0, start=11.25, ripple_power=0.2),
+            *_event_rows("Rat1/Open1", 6, "matched_null", 0, stationary=80.0, trajectory=0.0, start=11.5, ripple_power=0.2),
+            *_event_rows("Rat1/Open1", 7, "matched_null", 0, stationary=80.0, trajectory=0.0, start=11.75, ripple_power=0.2),
+            *_event_rows("Rat1/Open1", 8, "matched_null", 0, stationary=80.0, trajectory=0.0, start=12.0, ripple_power=0.2),
+            *_event_rows("Rat1/Open1", 9, "matched_null", 0, stationary=80.0, trajectory=0.0, start=12.25, ripple_power=0.2),
+            *_event_rows("Rat1/Open1", 10, "real", -1, stationary=0.0, trajectory=20.0, start=1.0, ripple_power=2.0, off_swr=False),
         ]
     )
 
@@ -320,6 +326,8 @@ def test_off_swr_candidate_tier_summaries_report_selective_thresholds(tmp_path):
     high_specificity = outputs["off_swr_high_specificity_candidate_table.csv"]
     assert len(high_specificity) == 2
     assert high_specificity["passes_high_specificity_promotion_filter"].map(bool).all()
+    assert high_specificity["passes_specificity_label_filter"].map(bool).all()
+    assert set(high_specificity["candidate_specificity_label"]) == {INTERESTING_CANDIDATE_LABEL}
 
     promotion = outputs["off_swr_promotion_readiness_summary.csv"].iloc[0]
     assert promotion["promotion_status"] == "ready_for_off_swr_replay_candidate_claim"
@@ -331,6 +339,32 @@ def test_off_swr_candidate_tier_summaries_report_selective_thresholds(tmp_path):
     assert speed_coverage["speed_coverage_status"] == "speed_available_for_promotion_gate"
     assert bool(speed_coverage["speed_coverage_ready"])
     assert int(speed_coverage["strong_candidate_windows_with_speed"]) == 2
+
+
+def test_off_swr_high_specificity_excludes_movement_spiking_like_rows(tmp_path):
+    scores = pd.DataFrame(
+        [
+            *_event_rows("Rat1/Open1", 0, "matched_null", 0, stationary=0.0, trajectory=60.0, start=10.0, ripple_power=1.2),
+            *_event_rows("Rat1/Open1", 1, "matched_null", 0, stationary=0.0, trajectory=120.0, start=10.25, ripple_power=1.2),
+            *_event_rows("Rat1/Open1", 2, "real", -1, stationary=0.0, trajectory=20.0, start=1.0, ripple_power=2.0, off_swr=False),
+        ]
+    )
+
+    outputs = write_off_swr_trajectory_discovery_outputs(scores, tmp_path, cluster_gap_s=0.5)
+
+    high_specificity = outputs["off_swr_high_specificity_candidate_table.csv"]
+    assert len(high_specificity) == 2
+    assert not high_specificity["passes_high_specificity_promotion_filter"].map(bool).any()
+    assert not high_specificity["passes_specificity_label_filter"].map(bool).any()
+    assert set(high_specificity["candidate_specificity_label"]) == {MOVEMENT_SPIKING_LIKE_LABEL}
+    assert set(high_specificity["high_specificity_label"]) == {
+        "tier_distance_candidate_movement_spiking_or_low_information",
+    }
+
+    promotion = outputs["off_swr_promotion_readiness_summary.csv"].iloc[0]
+    assert promotion["promotion_status"] == "exploratory_high_specificity_filter_failed"
+    assert not bool(promotion["promotion_ready"])
+    assert int(promotion["high_specificity_candidate_windows"]) == 0
 
 
 def test_off_swr_vs_swr_contrast_flags_movement_like_candidate_tail(tmp_path):

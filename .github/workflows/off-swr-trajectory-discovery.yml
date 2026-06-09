@@ -60,6 +60,10 @@ on:
         description: "Maximum gap in seconds for merging nearby off-SWR candidates into one cluster"
         required: true
         default: "0.5"
+      run_speed_threshold_cm_s:
+        description: "Speed threshold for run versus immobility/unknown candidate phenotype labels"
+        required: true
+        default: "5.0"
 
 permissions:
   contents: read
@@ -83,6 +87,7 @@ env:
   MODELS: ${{ inputs.models }}
   MARGIN_THRESHOLD: ${{ inputs.margin_threshold }}
   CLUSTER_GAP_S: ${{ inputs.cluster_gap_s }}
+  RUN_SPEED_THRESHOLD_CM_S: ${{ inputs.run_speed_threshold_cm_s }}
   LOCAL_CACHE_ROOT: ${{ vars.PFEIFFERFOSTER_LOCAL_CACHE_ROOT }}
   OMP_NUM_THREADS: "1"
   OPENBLAS_NUM_THREADS: "1"
@@ -252,6 +257,31 @@ jobs:
             --null-random-seed "${NULL_RANDOM_SEED}" \
             --output "${out_dir}" \
             --continue-on-error
+          python - <<'PY'
+          import os
+          import pandas as pd
+          from pathlib import Path
+
+          out_dir = Path(f"results/off-swr-trajectory-discovery-{os.environ['SHARD_SESSION_SLUG']}-shard-{os.environ['EVENT_SHARD_INDEX']}")
+          scores = pd.read_csv(out_dir / "matched_null_event_model_evidence.csv")
+          required = {"animal_speed_mean", "animal_speed_median", "animal_speed_max", "animal_x", "animal_y", "position_sample_count"}
+          missing = sorted(required.difference(scores.columns))
+          if missing:
+              raise SystemExit(f"matched-null score shard is missing speed metadata columns: {missing}")
+          window_cols = ["session", "event_index", "window_role", "null_index"]
+          windows = scores.drop_duplicates(window_cols)
+          coverage = pd.DataFrame(
+              [
+                  {
+                      "windows": len(windows),
+                      "windows_with_position_samples": int((pd.to_numeric(windows["position_sample_count"], errors="coerce") > 0).sum()),
+                      "windows_with_speed": int(pd.to_numeric(windows["animal_speed_mean"], errors="coerce").notna().sum()),
+                  }
+              ]
+          )
+          coverage.to_csv(out_dir / "speed_metadata_coverage.csv", index=False)
+          print(coverage.to_string(index=False))
+          PY
 
       - name: Upload off-SWR discovery shard
         if: always()
@@ -298,7 +328,8 @@ jobs:
             --output results/off-swr-trajectory-discovery \
             --comparison-scope "${COMPARISON_SCOPE}" \
             --margin-threshold "${MARGIN_THRESHOLD}" \
-            --cluster-gap-s "${CLUSTER_GAP_S}"
+            --cluster-gap-s "${CLUSTER_GAP_S}" \
+            --run-speed-threshold-cm-s "${RUN_SPEED_THRESHOLD_CM_S}"
           for required_file in \
             off_swr_trajectory_discovery_event_model_evidence.csv \
             off_swr_trajectory_discovery_decisions.csv \
@@ -308,7 +339,26 @@ jobs:
             rat_off_swr_candidate_summary.csv \
             off_swr_candidate_clusters.csv \
             off_swr_candidate_behavior_lfp_summary.csv \
-            off_swr_candidate_gate_summary.csv; do
+            off_swr_candidate_gate_summary.csv \
+            off_swr_candidate_table.csv \
+            off_swr_candidate_cluster_table.csv \
+            off_swr_candidate_session_summary.csv \
+            off_swr_candidate_rat_summary.csv \
+            off_swr_candidate_vs_swr_summary.csv \
+            off_swr_candidate_vs_swr_window_table.csv \
+            off_swr_candidate_vs_swr_model_distribution.csv \
+            off_swr_run_state_stratified_summary.csv \
+            off_swr_run_state_specificity_summary.csv \
+            off_swr_nearest_swr_exclusion_summary.csv \
+            off_swr_nearest_swr_specificity_summary.csv \
+            off_swr_candidate_tier_threshold_summary.csv \
+            off_swr_candidate_tier_session_summary.csv \
+            off_swr_candidate_tier_rat_summary.csv \
+            off_swr_candidate_tier_nearest_swr_exclusion_summary.csv \
+            off_swr_high_specificity_candidate_table.csv \
+            off_swr_promotion_readiness_summary.csv \
+            off_swr_speed_coverage_summary.csv \
+            off_swr_candidate_specificity_gate_summary.csv; do
             test -s "results/off-swr-trajectory-discovery/${required_file}" || {
               echo "Missing results/off-swr-trajectory-discovery/${required_file}" >&2
               exit 1
@@ -325,8 +375,36 @@ jobs:
           print(pd.read_csv(f"{root}/off_swr_trajectory_candidate_summary.csv").to_string(index=False))
           print("\nOff-SWR trajectory discovery gates:")
           print(pd.read_csv(f"{root}/off_swr_candidate_gate_summary.csv").to_string(index=False))
+          print("\nOff-SWR candidate specificity gates:")
+          print(pd.read_csv(f"{root}/off_swr_candidate_specificity_gate_summary.csv").to_string(index=False))
+          print("\nTop ranked off-SWR candidates:")
+          print(pd.read_csv(f"{root}/off_swr_candidate_table.csv").head(25).to_string(index=False))
           print("\nOff-SWR candidate clusters:")
-          print(pd.read_csv(f"{root}/off_swr_candidate_clusters.csv").head(25).to_string(index=False))
+          print(pd.read_csv(f"{root}/off_swr_candidate_cluster_table.csv").head(25).to_string(index=False))
+          print("\nOff-SWR candidate vs SWR summary:")
+          print(pd.read_csv(f"{root}/off_swr_candidate_vs_swr_summary.csv").to_string(index=False))
+          print("\nOff-SWR candidate vs SWR model distribution:")
+          print(pd.read_csv(f"{root}/off_swr_candidate_vs_swr_model_distribution.csv").to_string(index=False))
+          print("\nOff-SWR candidate vs SWR window contrast:")
+          print(pd.read_csv(f"{root}/off_swr_candidate_vs_swr_window_table.csv").head(25).to_string(index=False))
+          print("\nOff-SWR run-state stratified summary:")
+          print(pd.read_csv(f"{root}/off_swr_run_state_stratified_summary.csv").to_string(index=False))
+          print("\nOff-SWR run-state specificity summary:")
+          print(pd.read_csv(f"{root}/off_swr_run_state_specificity_summary.csv").to_string(index=False))
+          print("\nOff-SWR nearest-SWR exclusion summary:")
+          print(pd.read_csv(f"{root}/off_swr_nearest_swr_exclusion_summary.csv").to_string(index=False))
+          print("\nOff-SWR nearest-SWR specificity summary:")
+          print(pd.read_csv(f"{root}/off_swr_nearest_swr_specificity_summary.csv").to_string(index=False))
+          print("\nOff-SWR candidate tier threshold summary:")
+          print(pd.read_csv(f"{root}/off_swr_candidate_tier_threshold_summary.csv").to_string(index=False))
+          print("\nOff-SWR candidate tier nearest-SWR exclusion summary:")
+          print(pd.read_csv(f"{root}/off_swr_candidate_tier_nearest_swr_exclusion_summary.csv").to_string(index=False))
+          print("\nOff-SWR high-specificity candidates:")
+          print(pd.read_csv(f"{root}/off_swr_high_specificity_candidate_table.csv").head(25).to_string(index=False))
+          print("\nOff-SWR promotion readiness summary:")
+          print(pd.read_csv(f"{root}/off_swr_promotion_readiness_summary.csv").to_string(index=False))
+          print("\nOff-SWR speed coverage summary:")
+          print(pd.read_csv(f"{root}/off_swr_speed_coverage_summary.csv").to_string(index=False))
           PY
 
       - name: Upload off-SWR trajectory discovery results

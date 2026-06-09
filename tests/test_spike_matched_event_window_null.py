@@ -36,6 +36,11 @@ def test_spike_matched_null_windows_select_off_swr_spike_matched_window(tmp_path
     assert not ((nulls["window_start_s"] < 1.1) & (nulls["window_end_s"] > 1.0)).any()
     assert int(nulls.iloc[0]["null_n_spikes"]) == 2
     assert int(nulls.iloc[0]["real_n_spikes"]) == 2
+    assert {"animal_speed_mean", "animal_speed_median", "animal_speed_max", "animal_x", "animal_y", "position_sample_count"}.issubset(
+        nulls.columns
+    )
+    assert nulls["animal_speed_mean"].notna().all()
+    assert (nulls["position_sample_count"] > 0).all()
 
 
 def test_spike_matched_null_aggregate_writes_empirical_p_values_and_gates(tmp_path):
@@ -283,11 +288,12 @@ def test_spike_matched_null_workflow_exposes_control_outputs():
 
 
 def _toy_session(tmp_path: Path) -> ReplaySession:
+    position_times = np.arange(0.0, 6.05, 0.05)
     return ReplaySession(
         rat="Rat1",
         name="Open1",
         path=tmp_path,
-        position=np.array([[0.0, 0.0, 0.0], [10.0, 1.0, 1.0]], dtype=float),
+        position=np.column_stack([position_times, position_times * 10.0, np.zeros_like(position_times)]),
         spikes=np.array(
             [
                 [1.01, 1],

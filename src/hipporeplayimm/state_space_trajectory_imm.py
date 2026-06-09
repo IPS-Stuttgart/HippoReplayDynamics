@@ -113,9 +113,11 @@ def _score_trajectory_imm_exact_sparse(
     time_scales = _time_scales(durations)
     tree = cKDTree(centers[valid])
     position_prior = _uniform_position_prior(emissions.n_bins, valid_mask)
-    mode_transition = _mode_transition_matrix(
-        len(_TRAJECTORY_IMM_MODES),
-        float(getattr(config, "imm_mode_stickiness", 0.95)),
+    trajectory_imm_mode_stickiness = _trajectory_imm_mode_stickiness(config)
+    mode_prior = _trajectory_imm_mode_prior(config)
+    mode_transition = _trajectory_imm_mode_transition_matrix(
+        config,
+        trajectory_imm_mode_stickiness,
     )
     stationary_transition = _gaussian_transition_matrix(
         centers,
@@ -129,9 +131,9 @@ def _score_trajectory_imm_exact_sparse(
         first0[mode_index] = (
             position_prior
             * scaled[0]
-            / float(len(_TRAJECTORY_IMM_MODES))
+            * mode_prior[mode_index]
         )
-    momentum_position0 = position_prior * scaled[0] / float(len(_TRAJECTORY_IMM_MODES))
+    momentum_position0 = position_prior * scaled[0] * mode_prior[_MOMENTUM_MODE_INDEX]
     scale0 = float(first0.sum() + momentum_position0.sum())
     if scale0 <= 0.0 or not np.isfinite(scale0):
         raise ValueError("first emission row has no finite likelihood mass")
@@ -246,6 +248,17 @@ def _score_trajectory_imm_exact_sparse(
         "state_space_trajectory_imm_modes": ",".join(_TRAJECTORY_IMM_MODES),
         "state_space_trajectory_imm_mode_count": int(len(_TRAJECTORY_IMM_MODES)),
         "state_space_trajectory_imm_mode_posterior": mode_posterior_label,
+        "state_space_trajectory_imm_mode_stickiness": float(
+            trajectory_imm_mode_stickiness
+        ),
+        "state_space_trajectory_imm_momentum_initial_probability": float(
+            mode_prior[_MOMENTUM_MODE_INDEX]
+        ),
+        "state_space_trajectory_imm_momentum_switch_probability": (
+            _optional_float_diagnostic(
+                getattr(config, "trajectory_imm_momentum_switch_probability", None)
+            )
+        ),
         "state_space_trajectory_imm_mean_mode_entropy": _mean_entropy(_as_log_probs(mode_posterior)),
         "state_space_trajectory_imm_mean_posterior_entropy": float(posterior_entropy),
         "state_space_trajectory_imm_terminal_pair_count": (
@@ -296,6 +309,60 @@ def _score_trajectory_imm_exact_sparse(
             )
 
     return float(logp), trajectory_log_posterior, terminal, mode_posterior_out, diagnostics
+
+
+def _trajectory_imm_mode_stickiness(config: object) -> float:
+    value = getattr(config, "trajectory_imm_mode_stickiness", None)
+    if value is None:
+        value = getattr(config, "imm_mode_stickiness", 0.95)
+    out = float(value)
+    if not np.isfinite(out) or not 0.0 <= out <= 1.0:
+        raise ValueError("trajectory_imm_mode_stickiness must be in [0, 1]")
+    return out
+
+
+def _trajectory_imm_mode_prior(config: object) -> np.ndarray:
+    value = getattr(config, "trajectory_imm_momentum_initial_probability", None)
+    if value is None:
+        return np.full(len(_TRAJECTORY_IMM_MODES), 1.0 / len(_TRAJECTORY_IMM_MODES), dtype=float)
+    momentum_probability = float(value)
+    if not np.isfinite(momentum_probability) or not 0.0 <= momentum_probability <= 1.0:
+        raise ValueError("trajectory_imm_momentum_initial_probability must be in [0, 1]")
+    prior = np.empty(len(_TRAJECTORY_IMM_MODES), dtype=float)
+    prior[:_FIRST_ORDER_MODE_COUNT] = (1.0 - momentum_probability) / _FIRST_ORDER_MODE_COUNT
+    prior[_MOMENTUM_MODE_INDEX] = momentum_probability
+    return prior
+
+
+def _trajectory_imm_mode_transition_matrix(
+    config: object,
+    stickiness: float,
+) -> np.ndarray:
+    momentum_switch = getattr(config, "trajectory_imm_momentum_switch_probability", None)
+    if momentum_switch is None:
+        return _mode_transition_matrix(len(_TRAJECTORY_IMM_MODES), stickiness)
+    momentum_probability = float(momentum_switch)
+    if not np.isfinite(momentum_probability) or momentum_probability < 0.0:
+        raise ValueError("trajectory_imm_momentum_switch_probability must be finite and nonnegative")
+    remaining = 1.0 - float(stickiness)
+    if momentum_probability > remaining + 1e-12:
+        raise ValueError("trajectory_imm_momentum_switch_probability cannot exceed 1 - stickiness")
+    matrix = np.zeros((len(_TRAJECTORY_IMM_MODES), len(_TRAJECTORY_IMM_MODES)), dtype=float)
+    np.fill_diagonal(matrix, float(stickiness))
+    first_order_other = (remaining - momentum_probability) / (_FIRST_ORDER_MODE_COUNT - 1)
+    for src in range(_FIRST_ORDER_MODE_COUNT):
+        for dst in range(_FIRST_ORDER_MODE_COUNT):
+            if src != dst:
+                matrix[src, dst] = first_order_other
+        matrix[src, _MOMENTUM_MODE_INDEX] = momentum_probability
+    matrix[_MOMENTUM_MODE_INDEX, :_FIRST_ORDER_MODE_COUNT] = remaining / _FIRST_ORDER_MODE_COUNT
+    return matrix
+
+
+def _optional_float_diagnostic(value: object) -> float:
+    if value is None:
+        return float("nan")
+    return float(value)
 
 
 def _advance_state(

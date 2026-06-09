@@ -81,6 +81,9 @@ class BenchmarkConfig:
     state_space_max_step_sigma: float = 4.0
     state_space_imm_mode_stickiness: float = 0.95
     state_space_imm_switch_tau_s: float = 0.0
+    state_space_trajectory_imm_mode_stickiness: float | None = None
+    state_space_trajectory_imm_momentum_initial_probability: float | None = None
+    state_space_trajectory_imm_momentum_switch_probability: float | None = None
     state_space_momentum_sigma_cm_sqrt_s: float = 85.0
     state_space_momentum_initial_sigma_cm_sqrt_s: float = 85.0
     state_space_momentum_velocity_decay: float = 0.95
@@ -607,6 +610,15 @@ def _benchmark_config_metadata(config: BenchmarkConfig) -> dict[str, object]:
         "state_space_imm_mode_stickiness_effective": float(
             _effective_state_space_imm_stickiness(config)
         ),
+        "state_space_trajectory_imm_mode_stickiness": _optional_float(
+            getattr(config, "state_space_trajectory_imm_mode_stickiness", None)
+        ),
+        "state_space_trajectory_imm_momentum_initial_probability": _optional_float(
+            getattr(config, "state_space_trajectory_imm_momentum_initial_probability", None)
+        ),
+        "state_space_trajectory_imm_momentum_switch_probability": _optional_float(
+            getattr(config, "state_space_trajectory_imm_momentum_switch_probability", None)
+        ),
         "state_space_momentum_sigma_cm_sqrt_s": float(
             config.state_space_momentum_sigma_cm_sqrt_s
         ),
@@ -768,6 +780,13 @@ def _state_space_decoder_config(config: BenchmarkConfig, mode: str) -> StateSpac
         diffusion_sigma_cm_sqrt_s=float(config.state_space_diffusion_sigma_cm_sqrt_s),
         max_step_sigma=float(config.state_space_max_step_sigma),
         imm_mode_stickiness=_effective_state_space_imm_stickiness(config),
+        trajectory_imm_mode_stickiness=config.state_space_trajectory_imm_mode_stickiness,
+        trajectory_imm_momentum_initial_probability=(
+            config.state_space_trajectory_imm_momentum_initial_probability
+        ),
+        trajectory_imm_momentum_switch_probability=(
+            config.state_space_trajectory_imm_momentum_switch_probability
+        ),
         momentum_sigma_cm_sqrt_s=float(config.state_space_momentum_sigma_cm_sqrt_s),
         momentum_initial_sigma_cm_sqrt_s=float(
             config.state_space_momentum_initial_sigma_cm_sqrt_s
@@ -799,6 +818,38 @@ def _build_models(
         "mark_likelihood": _clusterless_mark_likelihood(config),
     }
 
+    def persistent_trajectory_imm_model(name: str) -> SortedSpikeStateSpaceReplayModel:
+        return SortedSpikeStateSpaceReplayModel(
+            mode="trajectory-imm-exact-sparse",
+            name=name,
+            config=replace(
+                _state_space_decoder_config(config, "trajectory-imm-exact-sparse"),
+                trajectory_imm_mode_stickiness=0.985,
+            ),
+        )
+
+    def anchored_trajectory_imm_model(name: str) -> SortedSpikeStateSpaceReplayModel:
+        return SortedSpikeStateSpaceReplayModel(
+            mode="trajectory-imm-exact-sparse",
+            name=name,
+            config=replace(
+                _state_space_decoder_config(config, "trajectory-imm-exact-sparse"),
+                trajectory_imm_momentum_initial_probability=0.05,
+                trajectory_imm_momentum_switch_probability=0.005,
+            ),
+        )
+
+    def low_leak_trajectory_imm_model(name: str) -> SortedSpikeStateSpaceReplayModel:
+        return SortedSpikeStateSpaceReplayModel(
+            mode="trajectory-imm-exact-sparse",
+            name=name,
+            config=replace(
+                _state_space_decoder_config(config, "trajectory-imm-exact-sparse"),
+                trajectory_imm_momentum_initial_probability=0.01,
+                trajectory_imm_momentum_switch_probability=0.001,
+            ),
+        )
+
     def goal_state_space_model(name: str) -> GoalStateSpaceReplayModel:
         return GoalStateSpaceReplayModel(
             candidate_goals=goal_candidates,
@@ -821,6 +872,15 @@ def _build_models(
         "sorted-spike-state-space-momentum": SortedSpikeStateSpaceReplayModel(mode="momentum"),
         "sorted-spike-state-space-momentum-exact-sparse": SortedSpikeStateSpaceReplayModel(mode="momentum-exact-sparse"),
         "sorted-spike-state-space-trajectory-imm-exact-sparse": SortedSpikeStateSpaceReplayModel(mode="trajectory-imm-exact-sparse"),
+        "sorted-spike-state-space-trajectory-imm-anchored-exact-sparse": anchored_trajectory_imm_model(
+            "sorted-spike-state-space-trajectory-imm-anchored-exact-sparse"
+        ),
+        "sorted-spike-state-space-trajectory-imm-low-leak-exact-sparse": low_leak_trajectory_imm_model(
+            "sorted-spike-state-space-trajectory-imm-low-leak-exact-sparse"
+        ),
+        "sorted-spike-state-space-trajectory-imm-persistent-exact-sparse": persistent_trajectory_imm_model(
+            "sorted-spike-state-space-trajectory-imm-persistent-exact-sparse"
+        ),
         "sorted-spike-state-space-displacement-momentum": SortedSpikeStateSpaceReplayModel(mode="displacement-momentum"),
         "sorted-spike-state-space-velocity-momentum": SortedSpikeStateSpaceReplayModel(
             mode="displacement-momentum",

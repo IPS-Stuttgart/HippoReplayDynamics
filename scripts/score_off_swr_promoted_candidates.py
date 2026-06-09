@@ -528,6 +528,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--session-filter", default="")
     parser.add_argument("--max-candidates", type=int)
     parser.add_argument("--nulls-per-event", type=int, default=0)
+    parser.add_argument("--null-random-seed", type=int, default=1)
     parser.add_argument("--spike-count-tolerance-fraction", type=float, default=0.10)
     parser.add_argument("--active-cell-tolerance", type=int)
     parser.add_argument("--null-candidate-step-s", type=float)

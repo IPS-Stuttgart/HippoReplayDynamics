@@ -292,6 +292,15 @@ def apply_model_hyperparam_patch() -> None:
                     trajectory_imm_momentum_switch_probability=0.005,
                 ),
             ),
+            "sorted-spike-state-space-trajectory-imm-low-leak-exact-sparse": SortedSpikeStateSpaceReplayModel(
+                mode="trajectory-imm-exact-sparse",
+                name="sorted-spike-state-space-trajectory-imm-low-leak-exact-sparse",
+                config=replace(
+                    state_space_model(config, "trajectory-imm-exact-sparse").config,
+                    trajectory_imm_momentum_initial_probability=0.01,
+                    trajectory_imm_momentum_switch_probability=0.001,
+                ),
+            ),
             "sorted-spike-state-space-trajectory-imm-persistent-exact-sparse": SortedSpikeStateSpaceReplayModel(
                 mode="trajectory-imm-exact-sparse",
                 name="sorted-spike-state-space-trajectory-imm-persistent-exact-sparse",

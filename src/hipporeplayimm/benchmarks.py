@@ -839,6 +839,17 @@ def _build_models(
             ),
         )
 
+    def low_leak_trajectory_imm_model(name: str) -> SortedSpikeStateSpaceReplayModel:
+        return SortedSpikeStateSpaceReplayModel(
+            mode="trajectory-imm-exact-sparse",
+            name=name,
+            config=replace(
+                _state_space_decoder_config(config, "trajectory-imm-exact-sparse"),
+                trajectory_imm_momentum_initial_probability=0.01,
+                trajectory_imm_momentum_switch_probability=0.001,
+            ),
+        )
+
     def goal_state_space_model(name: str) -> GoalStateSpaceReplayModel:
         return GoalStateSpaceReplayModel(
             candidate_goals=goal_candidates,
@@ -863,6 +874,9 @@ def _build_models(
         "sorted-spike-state-space-trajectory-imm-exact-sparse": SortedSpikeStateSpaceReplayModel(mode="trajectory-imm-exact-sparse"),
         "sorted-spike-state-space-trajectory-imm-anchored-exact-sparse": anchored_trajectory_imm_model(
             "sorted-spike-state-space-trajectory-imm-anchored-exact-sparse"
+        ),
+        "sorted-spike-state-space-trajectory-imm-low-leak-exact-sparse": low_leak_trajectory_imm_model(
+            "sorted-spike-state-space-trajectory-imm-low-leak-exact-sparse"
         ),
         "sorted-spike-state-space-trajectory-imm-persistent-exact-sparse": persistent_trajectory_imm_model(
             "sorted-spike-state-space-trajectory-imm-persistent-exact-sparse"

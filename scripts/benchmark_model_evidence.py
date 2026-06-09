@@ -84,6 +84,7 @@ _TRAJ = {
     "sorted-spike-state-space-momentum-exact-sparse",
     "sorted-spike-state-space-trajectory-imm-exact-sparse",
     "sorted-spike-state-space-trajectory-imm-anchored-exact-sparse",
+    "sorted-spike-state-space-trajectory-imm-low-leak-exact-sparse",
     "sorted-spike-state-space-trajectory-imm-persistent-exact-sparse",
     "sorted-spike-state-space-displacement-momentum",
     "sorted-spike-state-space-first-order-imm",
@@ -307,6 +308,12 @@ def _models(args, session=None) -> dict[str, object]:
             name="sorted-spike-state-space-trajectory-imm-anchored-exact-sparse",
             trajectory_imm_momentum_initial_probability=0.05,
             trajectory_imm_momentum_switch_probability=0.005,
+        ),
+        "sorted-spike-state-space-trajectory-imm-low-leak-exact-sparse": state_space_model(
+            "trajectory-imm-exact-sparse",
+            name="sorted-spike-state-space-trajectory-imm-low-leak-exact-sparse",
+            trajectory_imm_momentum_initial_probability=0.01,
+            trajectory_imm_momentum_switch_probability=0.001,
         ),
         "sorted-spike-state-space-trajectory-imm-persistent-exact-sparse": state_space_model(
             "trajectory-imm-exact-sparse",

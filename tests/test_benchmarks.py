@@ -110,6 +110,20 @@ def test_build_models_includes_anchored_trajectory_imm_variant():
     assert model.config.trajectory_imm_momentum_switch_probability == 0.005
 
 
+def test_build_models_includes_low_leak_trajectory_imm_variant():
+    models = _build_models(
+        BenchmarkConfig(
+            models=("sorted-spike-state-space-trajectory-imm-low-leak-exact-sparse",)
+        )
+    )
+
+    model = models["sorted-spike-state-space-trajectory-imm-low-leak-exact-sparse"]
+    assert model.name == "sorted-spike-state-space-trajectory-imm-low-leak-exact-sparse"
+    assert model.mode == "trajectory-imm-exact-sparse"
+    assert model.config.trajectory_imm_momentum_initial_probability == 0.01
+    assert model.config.trajectory_imm_momentum_switch_probability == 0.001
+
+
 def test_build_models_includes_clusterless_state_space_model():
     models = _build_models(BenchmarkConfig(models=("clusterless-state-space-diffusion",)))
 

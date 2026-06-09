@@ -43,6 +43,46 @@ def test_spike_matched_null_windows_select_off_swr_spike_matched_window(tmp_path
     assert (nulls["position_sample_count"] > 0).all()
 
 
+def test_non_run_spike_matched_null_windows_cap_large_candidate_pool(tmp_path):
+    session = _toy_session(tmp_path)
+
+    nulls = spike_matched_null_windows(
+        session,
+        0,
+        nulls_per_event=3,
+        random_seed=1,
+        spike_count_tolerance_fraction=0.1,
+        restrict_to_run_times=False,
+        max_candidate_windows=20,
+    )
+
+    assert len(nulls) == 3
+    assert set(nulls["candidate_sampling_mode"]) == {"sampled"}
+    assert set(nulls["candidate_pool_size"]) == {20}
+    assert nulls["candidate_pool_exhaustive_size"].iloc[0] > 20
+    assert not nulls["restrict_to_run_times"].any()
+    assert not ((nulls["window_start_s"] < 1.1) & (nulls["window_end_s"] > 1.0)).any()
+
+
+def test_explicit_candidate_step_keeps_non_run_null_pool_exhaustive(tmp_path):
+    session = _toy_session(tmp_path)
+
+    nulls = spike_matched_null_windows(
+        session,
+        0,
+        nulls_per_event=2,
+        random_seed=1,
+        candidate_step_s=0.1,
+        spike_count_tolerance_fraction=0.1,
+        restrict_to_run_times=False,
+        max_candidate_windows=5,
+    )
+
+    assert len(nulls) == 2
+    assert set(nulls["candidate_sampling_mode"]) == {"exhaustive"}
+    assert nulls["candidate_pool_size"].iloc[0] > 5
+
+
 def test_spike_matched_null_aggregate_writes_empirical_p_values_and_gates(tmp_path):
     scores = pd.DataFrame(
         [

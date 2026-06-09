@@ -45,6 +45,8 @@ class StateSpaceDecoderConfig:
     max_step_sigma: float = 4.0
     imm_mode_stickiness: float = 0.95
     trajectory_imm_mode_stickiness: float | None = None
+    trajectory_imm_momentum_initial_probability: float | None = None
+    trajectory_imm_momentum_switch_probability: float | None = None
     momentum_sigma_cm_sqrt_s: float = 85.0
     momentum_initial_sigma_cm_sqrt_s: float = 85.0
     momentum_velocity_decay: float = 0.95

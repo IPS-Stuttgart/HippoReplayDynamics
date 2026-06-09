@@ -141,6 +141,8 @@ def apply_model_hyperparam_patch() -> None:
         state_space_imm_mode_stickiness: float = 0.95
         state_space_imm_switch_tau_s: float = 0.0
         state_space_trajectory_imm_mode_stickiness: float | None = None
+        state_space_trajectory_imm_momentum_initial_probability: float | None = None
+        state_space_trajectory_imm_momentum_switch_probability: float | None = None
         state_space_momentum_sigma_cm_sqrt_s: float = 85.0
         state_space_momentum_initial_sigma_cm_sqrt_s: float = 85.0
         state_space_momentum_velocity_decay: float = 0.95
@@ -216,6 +218,16 @@ def apply_model_hyperparam_patch() -> None:
                     "state_space_trajectory_imm_mode_stickiness",
                     None,
                 ),
+                trajectory_imm_momentum_initial_probability=cfg(
+                    config,
+                    "state_space_trajectory_imm_momentum_initial_probability",
+                    None,
+                ),
+                trajectory_imm_momentum_switch_probability=cfg(
+                    config,
+                    "state_space_trajectory_imm_momentum_switch_probability",
+                    None,
+                ),
                 momentum_sigma_cm_sqrt_s=cfg(config, "state_space_momentum_sigma_cm_sqrt_s", 85.0),
                 momentum_initial_sigma_cm_sqrt_s=cfg(
                     config,
@@ -271,6 +283,15 @@ def apply_model_hyperparam_patch() -> None:
             "sorted-spike-state-space-momentum": state_space_model(config, "momentum"),
             "sorted-spike-state-space-momentum-exact-sparse": state_space_model(config, "momentum-exact-sparse"),
             "sorted-spike-state-space-trajectory-imm-exact-sparse": state_space_model(config, "trajectory-imm-exact-sparse"),
+            "sorted-spike-state-space-trajectory-imm-anchored-exact-sparse": SortedSpikeStateSpaceReplayModel(
+                mode="trajectory-imm-exact-sparse",
+                name="sorted-spike-state-space-trajectory-imm-anchored-exact-sparse",
+                config=replace(
+                    state_space_model(config, "trajectory-imm-exact-sparse").config,
+                    trajectory_imm_momentum_initial_probability=0.05,
+                    trajectory_imm_momentum_switch_probability=0.005,
+                ),
+            ),
             "sorted-spike-state-space-trajectory-imm-persistent-exact-sparse": SortedSpikeStateSpaceReplayModel(
                 mode="trajectory-imm-exact-sparse",
                 name="sorted-spike-state-space-trajectory-imm-persistent-exact-sparse",
@@ -370,6 +391,12 @@ def apply_model_hyperparam_patch() -> None:
             "state_space_trajectory_imm_mode_stickiness": _optional_float_metadata(
                 cfg(config, "state_space_trajectory_imm_mode_stickiness", None)
             ),
+            "state_space_trajectory_imm_momentum_initial_probability": _optional_float_metadata(
+                cfg(config, "state_space_trajectory_imm_momentum_initial_probability", None)
+            ),
+            "state_space_trajectory_imm_momentum_switch_probability": _optional_float_metadata(
+                cfg(config, "state_space_trajectory_imm_momentum_switch_probability", None)
+            ),
             "state_space_momentum_sigma_cm_sqrt_s": float(cfg(config, "state_space_momentum_sigma_cm_sqrt_s", 85.0)),
             "state_space_momentum_initial_sigma_cm_sqrt_s": float(cfg(config, "state_space_momentum_initial_sigma_cm_sqrt_s", 85.0)),
             "state_space_momentum_velocity_decay": float(cfg(config, "state_space_momentum_velocity_decay", 0.95)),
@@ -459,6 +486,8 @@ def apply_model_hyperparam_patch() -> None:
         state_space_imm_mode_stickiness: float,
         state_space_imm_switch_tau_s: float,
         state_space_trajectory_imm_mode_stickiness: float | None,
+        state_space_trajectory_imm_momentum_initial_probability: float | None,
+        state_space_trajectory_imm_momentum_switch_probability: float | None,
         state_space_momentum_sigma_cm_sqrt_s: float,
         state_space_momentum_initial_sigma_cm_sqrt_s: float,
         state_space_momentum_velocity_decay: float,
@@ -517,6 +546,22 @@ def apply_model_hyperparam_patch() -> None:
                     "diagnostic_state_space_trajectory_imm_mode_stickiness",
                 ),
                 state_space_trajectory_imm_mode_stickiness,
+            ),
+            state_space_trajectory_imm_momentum_initial_probability=_optional_float_from_columns(
+                scores_frame,
+                (
+                    "state_space_trajectory_imm_momentum_initial_probability",
+                    "diagnostic_state_space_trajectory_imm_momentum_initial_probability",
+                ),
+                state_space_trajectory_imm_momentum_initial_probability,
+            ),
+            state_space_trajectory_imm_momentum_switch_probability=_optional_float_from_columns(
+                scores_frame,
+                (
+                    "state_space_trajectory_imm_momentum_switch_probability",
+                    "diagnostic_state_space_trajectory_imm_momentum_switch_probability",
+                ),
+                state_space_trajectory_imm_momentum_switch_probability,
             ),
             state_space_momentum_sigma_cm_sqrt_s=_unique_float_from_columns(scores_frame, ("state_space_momentum_sigma_cm_sqrt_s", "diagnostic_state_space_momentum_sigma_cm_sqrt_s"), state_space_momentum_sigma_cm_sqrt_s),
             state_space_momentum_initial_sigma_cm_sqrt_s=_unique_float_from_columns(scores_frame, ("state_space_momentum_initial_sigma_cm_sqrt_s", "diagnostic_state_space_momentum_initial_sigma_cm_sqrt_s"), state_space_momentum_initial_sigma_cm_sqrt_s),
@@ -622,6 +667,8 @@ def apply_model_hyperparam_patch() -> None:
         state_space_imm_mode_stickiness: float = 0.95,
         state_space_imm_switch_tau_s: float = 0.0,
         state_space_trajectory_imm_mode_stickiness: float | None = None,
+        state_space_trajectory_imm_momentum_initial_probability: float | None = None,
+        state_space_trajectory_imm_momentum_switch_probability: float | None = None,
         state_space_momentum_sigma_cm_sqrt_s: float = 85.0,
         state_space_momentum_initial_sigma_cm_sqrt_s: float = 85.0,
         state_space_momentum_velocity_decay: float = 0.95,
@@ -690,6 +737,12 @@ def apply_model_hyperparam_patch() -> None:
             state_space_imm_mode_stickiness=state_space_imm_mode_stickiness,
             state_space_imm_switch_tau_s=state_space_imm_switch_tau_s,
             state_space_trajectory_imm_mode_stickiness=state_space_trajectory_imm_mode_stickiness,
+            state_space_trajectory_imm_momentum_initial_probability=(
+                state_space_trajectory_imm_momentum_initial_probability
+            ),
+            state_space_trajectory_imm_momentum_switch_probability=(
+                state_space_trajectory_imm_momentum_switch_probability
+            ),
             state_space_momentum_sigma_cm_sqrt_s=state_space_momentum_sigma_cm_sqrt_s,
             state_space_momentum_initial_sigma_cm_sqrt_s=state_space_momentum_initial_sigma_cm_sqrt_s,
             state_space_momentum_velocity_decay=state_space_momentum_velocity_decay,

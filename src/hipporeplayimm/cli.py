@@ -504,6 +504,12 @@ def _simulate_recovery(args: argparse.Namespace) -> int:
         max_step_sigma=args.state_space_max_step_sigma,
         imm_mode_stickiness=args.state_space_imm_mode_stickiness,
         trajectory_imm_mode_stickiness=args.state_space_trajectory_imm_mode_stickiness,
+        trajectory_imm_momentum_initial_probability=(
+            args.state_space_trajectory_imm_momentum_initial_probability
+        ),
+        trajectory_imm_momentum_switch_probability=(
+            args.state_space_trajectory_imm_momentum_switch_probability
+        ),
         momentum_sigma_cm_sqrt_s=args.state_space_momentum_sigma_cm_sqrt_s or shared_sigma,
         momentum_initial_sigma_cm_sqrt_s=args.state_space_momentum_initial_sigma_cm_sqrt_s or shared_sigma,
         momentum_velocity_decay=args.state_space_momentum_velocity_decay,
@@ -876,6 +882,18 @@ def _add_state_space_arguments(parser: argparse.ArgumentParser) -> None:
         ),
     )
     parser.add_argument(
+        "--state-space-trajectory-imm-momentum-initial-probability",
+        type=float,
+        default=defaults.trajectory_imm_momentum_initial_probability,
+        help="Optional trajectory-IMM initial probability assigned to the momentum mode.",
+    )
+    parser.add_argument(
+        "--state-space-trajectory-imm-momentum-switch-probability",
+        type=float,
+        default=defaults.trajectory_imm_momentum_switch_probability,
+        help="Optional per-transition probability of switching from first-order modes into momentum.",
+    )
+    parser.add_argument(
         "--state-space-momentum-sigma-cm-sqrt-s",
         type=float,
         default=defaults.momentum_sigma_cm_sqrt_s,
@@ -1203,6 +1221,12 @@ def _state_space_scalar_kwargs(args: argparse.Namespace) -> dict[str, float | in
         "state_space_imm_mode_stickiness": args.state_space_imm_mode_stickiness,
         "state_space_imm_switch_tau_s": args.state_space_imm_switch_tau_s,
         "state_space_trajectory_imm_mode_stickiness": args.state_space_trajectory_imm_mode_stickiness,
+        "state_space_trajectory_imm_momentum_initial_probability": (
+            args.state_space_trajectory_imm_momentum_initial_probability
+        ),
+        "state_space_trajectory_imm_momentum_switch_probability": (
+            args.state_space_trajectory_imm_momentum_switch_probability
+        ),
         "state_space_momentum_sigma_cm_sqrt_s": args.state_space_momentum_sigma_cm_sqrt_s,
         "state_space_momentum_initial_sigma_cm_sqrt_s": (
             args.state_space_momentum_initial_sigma_cm_sqrt_s

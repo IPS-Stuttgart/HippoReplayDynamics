@@ -36,6 +36,7 @@ def test_model_evidence_accepts_sorted_spike_state_space_models():
             "sorted-spike-state-space-first-order-imm "
             "sorted-spike-state-space-momentum-exact-sparse "
             "sorted-spike-state-space-trajectory-imm-exact-sparse "
+            "sorted-spike-state-space-trajectory-imm-anchored-exact-sparse "
             "sorted-spike-state-space-trajectory-imm-persistent-exact-sparse "
             "sorted-spike-state-space-momentum "
             "sorted-spike-state-space-imm"
@@ -64,6 +65,7 @@ def test_model_evidence_accepts_sorted_spike_state_space_models():
         "sorted-spike-state-space-first-order-imm",
         "sorted-spike-state-space-momentum-exact-sparse",
         "sorted-spike-state-space-trajectory-imm-exact-sparse",
+        "sorted-spike-state-space-trajectory-imm-anchored-exact-sparse",
         "sorted-spike-state-space-trajectory-imm-persistent-exact-sparse",
         "sorted-spike-state-space-momentum",
         "sorted-spike-state-space-imm",
@@ -73,6 +75,9 @@ def test_model_evidence_accepts_sorted_spike_state_space_models():
     assert models["sorted-spike-state-space-momentum-exact-sparse"].name == "sorted-spike-state-space-momentum-exact-sparse"
     assert models["sorted-spike-state-space-trajectory-imm-exact-sparse"].name == (
         "sorted-spike-state-space-trajectory-imm-exact-sparse"
+    )
+    assert models["sorted-spike-state-space-trajectory-imm-anchored-exact-sparse"].name == (
+        "sorted-spike-state-space-trajectory-imm-anchored-exact-sparse"
     )
     assert models["sorted-spike-state-space-trajectory-imm-persistent-exact-sparse"].name == (
         "sorted-spike-state-space-trajectory-imm-persistent-exact-sparse"
@@ -86,6 +91,18 @@ def test_model_evidence_accepts_sorted_spike_state_space_models():
     assert models["sorted-spike-state-space-momentum"].config.momentum_velocity_decay == 0.8
     assert models["sorted-spike-state-space-momentum"].config.momentum_candidate_top_k == 17
     assert models["sorted-spike-state-space-momentum"].config.momentum_predicted_candidate_top_k == 5
+    assert (
+        models[
+            "sorted-spike-state-space-trajectory-imm-anchored-exact-sparse"
+        ].config.trajectory_imm_momentum_initial_probability
+        == 0.05
+    )
+    assert (
+        models[
+            "sorted-spike-state-space-trajectory-imm-anchored-exact-sparse"
+        ].config.trajectory_imm_momentum_switch_probability
+        == 0.005
+    )
     assert (
         models[
             "sorted-spike-state-space-trajectory-imm-persistent-exact-sparse"
@@ -259,6 +276,7 @@ def test_model_evidence_classifies_state_space_families():
     assert _family("sorted-spike-state-space-fragmented") == "trajectory"
     assert _family("sorted-spike-state-space-momentum") == "trajectory"
     assert _family("sorted-spike-state-space-trajectory-imm-exact-sparse") == "trajectory"
+    assert _family("sorted-spike-state-space-trajectory-imm-anchored-exact-sparse") == "trajectory"
     assert _family("sorted-spike-state-space-trajectory-imm-persistent-exact-sparse") == "trajectory"
     assert _family("sorted-spike-state-space-first-order-imm") == "trajectory"
     assert _family("sorted-spike-state-space-imm") == "trajectory"

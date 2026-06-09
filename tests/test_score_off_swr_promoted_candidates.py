@@ -8,9 +8,28 @@ sys.path.append(str(Path(__file__).resolve().parents[1] / "scripts"))
 from score_off_swr_promoted_candidates import (  # noqa: E402
     FULL_CORE_REQUIRED_MODELS,
     PROMOTED_WINDOW_ROLE,
+    _encoding_config_from_args,
+    build_parser,
     select_candidate_windows,
     write_validation_outputs,
 )
+
+
+def test_parser_defaults_build_current_encoding_config():
+    args = build_parser().parse_args(
+        [
+            "--dataset-root",
+            "data/DataSetFromPfeifferFoster",
+            "--candidate-table",
+            "off_swr_high_specificity_candidate_table.csv",
+        ]
+    )
+
+    config = _encoding_config_from_args(args)
+
+    assert config.bin_size_cm == args.bin_size_cm
+    assert config.smoothing_sigma_bins == args.smoothing_sigma_bins
+    assert config.min_speed_cm_s == args.min_speed_cm_s
 
 
 def test_select_candidate_windows_filters_promotion_ready_and_strong_immobile():

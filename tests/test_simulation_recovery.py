@@ -4,6 +4,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+import hipporeplayimm.cli as cli
 from hipporeplayimm.encoding import EncodingConfig, EncodingModel
 from hipporeplayimm.simulation_recovery import (
     SimulationRecoveryConfig,
@@ -50,6 +51,58 @@ def _encoding() -> EncodingModel:
         cell_ids=np.array([1, 2, 3]),
         config=EncodingConfig(bin_size_cm=1.0),
     )
+
+
+def test_simulate_recovery_cli_wires_trajectory_imm_arguments(monkeypatch, tmp_path):
+    captured: dict[str, object] = {}
+
+    class FakeRecoveryResult:
+        summary = pd.DataFrame([{"true_model": "overall"}])
+        confusion_matrix = pd.DataFrame([{"true_model": "overall"}])
+        event_scores = pd.DataFrame({"status": ["success"]})
+
+        def write(self, output: str) -> None:
+            captured["output"] = Path(output)
+
+    def fake_run_session_simulation_recovery(root, session, config):
+        captured["root"] = root
+        captured["session"] = session
+        captured["config"] = config
+        return FakeRecoveryResult()
+
+    monkeypatch.setattr(
+        cli,
+        "run_session_simulation_recovery",
+        fake_run_session_simulation_recovery,
+    )
+
+    exit_code = cli.main(
+        [
+            "simulate-recovery",
+            "dataset-root",
+            "--session",
+            "Rat1/Open1",
+            "--output",
+            str(tmp_path),
+            "--state-space-trajectory-imm-mode-stickiness",
+            "0.91",
+            "--state-space-trajectory-imm-momentum-initial-probability",
+            "0.25",
+            "--state-space-trajectory-imm-momentum-switch-probability",
+            "0.07",
+        ]
+    )
+
+    assert exit_code == 0
+    assert captured["root"] == "dataset-root"
+    assert captured["session"] == "Rat1/Open1"
+    assert captured["output"] == tmp_path
+
+    config = captured["config"]
+    assert isinstance(config, SimulationRecoveryConfig)
+    assert config.state_space.trajectory_imm_mode_stickiness == 0.91
+    assert config.state_space.trajectory_imm_momentum_initial_probability == 0.25
+    assert config.state_space.trajectory_imm_momentum_switch_probability == 0.07
 
 
 def test_simulated_emissions_have_expected_shape_and_finite_likelihoods():

@@ -809,6 +809,15 @@ def _state_space_decoder_config(config: BenchmarkConfig, mode: str) -> StateSpac
     )
 
 
+_TRAJECTORY_IMM_VARIANT_MODEL_NAMES = frozenset(
+    {
+        "sorted-spike-state-space-trajectory-imm-anchored-exact-sparse",
+        "sorted-spike-state-space-trajectory-imm-low-leak-exact-sparse",
+        "sorted-spike-state-space-trajectory-imm-persistent-exact-sparse",
+    }
+)
+
+
 def _build_models(
     config: BenchmarkConfig,
     session: ReplaySession | None = None,
@@ -960,10 +969,11 @@ def _build_models(
         allowed = ", ".join(sorted(available))
         unknown = ", ".join(unknown_models)
         raise ValueError(f"Unknown model name(s): {unknown}. Allowed models: {allowed}")
-    for model in available.values():
-        if isinstance(model, StateSpaceReplayModel):
+    selected = {name: available[name] for name in config.models}
+    for name, model in selected.items():
+        if isinstance(model, StateSpaceReplayModel) and name not in _TRAJECTORY_IMM_VARIANT_MODEL_NAMES:
             model.config = _state_space_decoder_config(config, model.mode)
-    return {name: available[name] for name in config.models}
+    return selected
 
 
 def _session_goal_candidates(session: ReplaySession | None) -> np.ndarray | None:

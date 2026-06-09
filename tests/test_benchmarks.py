@@ -67,6 +67,20 @@ def test_state_space_aliases_canonicalize_sorted_spike_model_name():
     assert models["state-space-diffusion"].name == "sorted-spike-state-space-diffusion"
 
 
+def test_build_models_applies_benchmark_state_space_config_to_standard_models():
+    models = _build_models(
+        BenchmarkConfig(
+            models=("sorted-spike-state-space-diffusion",),
+            state_space_diffusion_sigma_cm_sqrt_s=123.0,
+            state_space_max_step_sigma=5.0,
+        )
+    )
+
+    model = models["sorted-spike-state-space-diffusion"]
+    assert model.config.diffusion_sigma_cm_sqrt_s == 123.0
+    assert model.config.max_step_sigma == 5.0
+
+
 def test_build_models_includes_exact_first_order_imm_models():
     models = _build_models(
         BenchmarkConfig(

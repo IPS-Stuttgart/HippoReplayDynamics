@@ -51,6 +51,7 @@ DEFAULT_MATCHED_NULL_MODELS = (
     "sorted-spike-state-space-momentum "
     "sorted-spike-state-space-imm"
 )
+DEFAULT_MAX_NON_RUN_CANDIDATE_WINDOWS = 5000
 
 FULL_CORE_REQUIRED_MODELS = (
     "sorted-spike-state-space-stationary",
@@ -128,6 +129,7 @@ def spike_matched_null_windows(
     candidate_step_s: float | None = None,
     exclusion_padding_s: float = 0.0,
     restrict_to_run_times: bool = True,
+    max_candidate_windows: int | None = DEFAULT_MAX_NON_RUN_CANDIDATE_WINDOWS,
 ) -> pd.DataFrame:
     """Return off-SWR windows matched to one replay event's spike load."""
 
@@ -135,21 +137,33 @@ def spike_matched_null_windows(
     duration = float(event.end) - float(event.start)
     if duration <= 0.0:
         raise ValueError(f"event {event_index} has non-positive duration")
-    spikes = session.excitatory_spikes()
-    real_count, real_active = _spike_count_and_active_cells(spikes, float(event.start), float(event.end))
+    spikes = _time_sorted_spikes(session.excitatory_spikes())
+    real_count, real_active = _spike_count_and_active_cells(
+        spikes,
+        float(event.start),
+        float(event.end),
+        assume_sorted=True,
+    )
     candidates = _candidate_null_windows(
         session,
         duration_s=duration,
         candidate_step_s=candidate_step_s,
         exclusion_padding_s=exclusion_padding_s,
         restrict_to_run_times=restrict_to_run_times,
+        max_candidate_windows=max_candidate_windows,
+        random_seed=int(random_seed) + 104729 * int(event_index),
     )
     if candidates.empty:
         return candidates
     counts: list[int] = []
     active_counts: list[int] = []
     for row in candidates.itertuples(index=False):
-        count, active = _spike_count_and_active_cells(spikes, float(row.window_start_s), float(row.window_end_s))
+        count, active = _spike_count_and_active_cells(
+            spikes,
+            float(row.window_start_s),
+            float(row.window_end_s),
+            assume_sorted=True,
+        )
         counts.append(count)
         active_counts.append(active)
     candidates = candidates.copy()
@@ -203,32 +217,112 @@ def _candidate_null_windows(
     candidate_step_s: float | None,
     exclusion_padding_s: float,
     restrict_to_run_times: bool,
+    max_candidate_windows: int | None,
+    random_seed: int,
 ) -> pd.DataFrame:
     base_intervals = _base_candidate_intervals(session, restrict_to_run_times=restrict_to_run_times)
     excluded = _padded_intervals(session.ripple_events[:, :2], padding_s=exclusion_padding_s)
     step = float(candidate_step_s) if candidate_step_s and candidate_step_s > 0.0 else max(duration_s / 2.0, 0.001)
+    start_intervals = _valid_start_intervals(base_intervals, excluded, duration_s=float(duration_s))
+    if start_intervals.size == 0:
+        return pd.DataFrame()
+    exhaustive_size = _exhaustive_start_count(start_intervals, step=step)
+    cap = _candidate_window_cap(
+        max_candidate_windows=max_candidate_windows,
+        candidate_step_s=candidate_step_s,
+        restrict_to_run_times=restrict_to_run_times,
+    )
+    if cap is not None and exhaustive_size > cap:
+        starts = _sample_start_times(start_intervals, n=int(cap), random_seed=int(random_seed))
+        sampling_mode = "sampled"
+    else:
+        starts = _exhaustive_start_times(start_intervals, step=step)
+        sampling_mode = "exhaustive"
     rows: list[dict[str, float | int | bool]] = []
-    for interval_start, interval_end in base_intervals:
-        last_start = float(interval_end) - float(duration_s)
-        if last_start < float(interval_start):
-            continue
-        starts = np.arange(float(interval_start), last_start + step * 0.5, step)
-        for start in starts:
-            end = float(start) + float(duration_s)
-            if end > float(interval_end) + 1e-9:
-                continue
-            if _overlaps_any(float(start), float(end), excluded):
-                continue
-            rows.append(
-                {
-                    "window_start_s": float(start),
-                    "window_end_s": float(end),
-                    "window_duration_s": float(duration_s),
-                    "off_swr": True,
-                    "restrict_to_run_times": bool(restrict_to_run_times),
-                }
-            )
+    for start in starts:
+        end = float(start) + float(duration_s)
+        rows.append(
+            {
+                "window_start_s": float(start),
+                "window_end_s": float(end),
+                "window_duration_s": float(duration_s),
+                "off_swr": True,
+                "restrict_to_run_times": bool(restrict_to_run_times),
+                "candidate_sampling_mode": sampling_mode,
+                "candidate_pool_size": int(len(starts)),
+                "candidate_pool_exhaustive_size": int(exhaustive_size),
+            }
+        )
     return pd.DataFrame(rows)
+
+
+def _candidate_window_cap(
+    *,
+    max_candidate_windows: int | None,
+    candidate_step_s: float | None,
+    restrict_to_run_times: bool,
+) -> int | None:
+    if candidate_step_s is not None:
+        return None
+    if restrict_to_run_times:
+        return None
+    if max_candidate_windows is None or int(max_candidate_windows) <= 0:
+        return None
+    return int(max_candidate_windows)
+
+
+def _valid_start_intervals(base_intervals: np.ndarray, excluded: np.ndarray, *, duration_s: float) -> np.ndarray:
+    intervals: list[tuple[float, float]] = []
+    for interval_start, interval_end in np.asarray(base_intervals, dtype=float).reshape(-1, 2):
+        start_min = float(interval_start)
+        start_max = float(interval_end) - float(duration_s)
+        if start_max < start_min:
+            continue
+        pieces = [(start_min, start_max)]
+        for excluded_start, excluded_end in np.asarray(excluded, dtype=float).reshape(-1, 2):
+            forbidden_start = float(excluded_start) - float(duration_s)
+            forbidden_end = float(excluded_end)
+            next_pieces: list[tuple[float, float]] = []
+            for piece_start, piece_end in pieces:
+                if forbidden_end <= piece_start or forbidden_start >= piece_end:
+                    next_pieces.append((piece_start, piece_end))
+                    continue
+                if forbidden_start > piece_start:
+                    next_pieces.append((piece_start, min(piece_end, forbidden_start)))
+                if forbidden_end < piece_end:
+                    next_pieces.append((max(piece_start, forbidden_end), piece_end))
+            pieces = next_pieces
+            if not pieces:
+                break
+        intervals.extend((start, end) for start, end in pieces if end >= start)
+    return np.asarray(intervals, dtype=float).reshape(-1, 2) if intervals else np.empty((0, 2), dtype=float)
+
+
+def _exhaustive_start_count(start_intervals: np.ndarray, *, step: float) -> int:
+    total = 0
+    for start, end in np.asarray(start_intervals, dtype=float).reshape(-1, 2):
+        total += int(np.floor((float(end) - float(start)) / float(step))) + 1
+    return int(total)
+
+
+def _exhaustive_start_times(start_intervals: np.ndarray, *, step: float) -> np.ndarray:
+    starts: list[np.ndarray] = []
+    for start, end in np.asarray(start_intervals, dtype=float).reshape(-1, 2):
+        starts.append(np.arange(float(start), float(end) + float(step) * 0.5, float(step)))
+    return np.concatenate(starts) if starts else np.array([], dtype=float)
+
+
+def _sample_start_times(start_intervals: np.ndarray, *, n: int, random_seed: int) -> np.ndarray:
+    intervals = np.asarray(start_intervals, dtype=float).reshape(-1, 2)
+    lengths = intervals[:, 1] - intervals[:, 0]
+    total = float(lengths.sum())
+    if total <= 0.0 or not np.isfinite(total):
+        return intervals[:, 0][: int(n)].astype(float)
+    rng = np.random.default_rng(int(random_seed))
+    choices = rng.choice(len(intervals), size=int(n), replace=True, p=lengths / total)
+    offsets = rng.random(int(n)) * lengths[choices]
+    starts = intervals[choices, 0] + offsets
+    return np.sort(starts.astype(float))
 
 
 def _base_candidate_intervals(session: ReplaySession, *, restrict_to_run_times: bool) -> np.ndarray:
@@ -266,11 +360,26 @@ def _overlaps_any(start: float, end: float, intervals: np.ndarray) -> bool:
     return bool(np.any((start < intervals[:, 1]) & (end > intervals[:, 0])))
 
 
-def _spike_count_and_active_cells(spikes: np.ndarray, start: float, end: float) -> tuple[int, int]:
+def _time_sorted_spikes(spikes: np.ndarray) -> np.ndarray:
+    arr = np.asarray(spikes, dtype=float)
+    if arr.size == 0:
+        return arr.reshape(0, 2)
+    arr = arr.reshape(-1, arr.shape[-1])
+    if arr.shape[0] > 1 and np.any(arr[1:, 0] < arr[:-1, 0]):
+        arr = arr[np.argsort(arr[:, 0], kind="mergesort")]
+    return arr
+
+
+def _spike_count_and_active_cells(spikes: np.ndarray, start: float, end: float, *, assume_sorted: bool = False) -> tuple[int, int]:
     if spikes.size == 0:
         return 0, 0
-    mask = (spikes[:, 0] >= float(start)) & (spikes[:, 0] < float(end))
-    selected = spikes[mask]
+    arr = np.asarray(spikes, dtype=float)
+    if not assume_sorted:
+        arr = _time_sorted_spikes(arr)
+    times = arr[:, 0]
+    left = int(np.searchsorted(times, float(start), side="left"))
+    right = int(np.searchsorted(times, float(end), side="left"))
+    selected = arr[left:right]
     if selected.size == 0:
         return 0, 0
     return int(selected.shape[0]), int(np.unique(selected[:, 1].astype(int)).size)
@@ -409,6 +518,7 @@ def score_matched_nulls(args: argparse.Namespace) -> pd.DataFrame:
             candidate_step_s=args.null_candidate_step_s,
             exclusion_padding_s=args.swr_exclusion_padding_s,
             restrict_to_run_times=not args.allow_non_run_nulls,
+            max_candidate_windows=args.max_null_candidate_windows,
         )
         for row in nulls.to_dict("records"):
             item = dict(row)
@@ -500,6 +610,7 @@ def _score_one_window(
                 "spike_count_tolerance_fraction": float(args.spike_count_tolerance_fraction),
                 "active_cell_tolerance": "" if args.active_cell_tolerance is None else int(args.active_cell_tolerance),
                 "null_candidate_step_s": "" if args.null_candidate_step_s is None else float(args.null_candidate_step_s),
+                "max_null_candidate_windows": "" if args.max_null_candidate_windows is None else int(args.max_null_candidate_windows),
                 "swr_exclusion_padding_s": float(args.swr_exclusion_padding_s),
                 "allow_non_run_nulls": bool(args.allow_non_run_nulls),
             }
@@ -556,6 +667,9 @@ def _window_settings(window: dict[str, object], *, window_index: int) -> dict[st
         "n_spikes_relative_delta",
         "off_swr",
         "restrict_to_run_times",
+        "candidate_sampling_mode",
+        "candidate_pool_size",
+        "candidate_pool_exhaustive_size",
         "animal_speed_mean",
         "animal_speed_median",
         "animal_speed_max",
@@ -1110,6 +1224,7 @@ def _add_scoring_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--spike-count-tolerance-fraction", type=float, default=0.10)
     parser.add_argument("--active-cell-tolerance", type=int)
     parser.add_argument("--null-candidate-step-s", type=float)
+    parser.add_argument("--max-null-candidate-windows", type=int, default=DEFAULT_MAX_NON_RUN_CANDIDATE_WINDOWS)
     parser.add_argument("--swr-exclusion-padding-s", type=float, default=0.0)
     parser.add_argument("--allow-non-run-nulls", action="store_true")
     _add_model_arguments(parser)

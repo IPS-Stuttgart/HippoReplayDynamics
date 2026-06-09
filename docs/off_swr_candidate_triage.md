@@ -61,12 +61,13 @@ Primary triage outputs:
 - `off_swr_high_specificity_candidate_table.csv`: strong-tier candidates
   (`margin >= 50`) that survive the 1 s nearest-SWR exclusion, annotated with
   whether they also pass the immobility filter when speed/run-state fields are
-  available.
+  available and the `candidate_specificity_label` filter that excludes
+  low-information or ordinary movement/spiking-like audit rows.
 - `off_swr_promotion_readiness_summary.csv`: one-row promotion decision. It
   remains exploratory when speed is unavailable, candidates vanish near SWRs, or
   strong candidates are not established in immobile non-SWR windows. It reports
   `ready_for_off_swr_replay_candidate_claim` only when the combined tier,
-  nearest-SWR, and immobility filters pass.
+  nearest-SWR, immobility, and specificity-label filters pass.
 - `off_swr_speed_coverage_summary.csv`: one-row metadata coverage audit showing
   whether newly scored off-SWR windows, candidates, and strong candidates have
   position-derived animal-speed fields. Interpret this before promotion status:

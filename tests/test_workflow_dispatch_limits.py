@@ -47,11 +47,32 @@ def test_off_swr_trajectory_discovery_workflow_wires_scorer_and_outputs():
 
     assert _workflow_dispatch_input_count(text) <= 25
     assert "scripts/spike_matched_event_window_null.py score" in text
+    assert "speed_metadata_coverage.csv" in text
+    assert "animal_speed_mean" in text
     assert "scripts/off_swr_trajectory_discovery.py" in text
     assert "off_swr_trajectory_candidate_events.csv" in text
     assert "off_swr_candidate_clusters.csv" in text
     assert "off_swr_candidate_behavior_lfp_summary.csv" in text
     assert "off_swr_candidate_gate_summary.csv" in text
+    assert "off_swr_candidate_table.csv" in text
+    assert "off_swr_candidate_cluster_table.csv" in text
+    assert "off_swr_candidate_session_summary.csv" in text
+    assert "off_swr_candidate_rat_summary.csv" in text
+    assert "off_swr_candidate_vs_swr_summary.csv" in text
+    assert "off_swr_candidate_vs_swr_window_table.csv" in text
+    assert "off_swr_candidate_vs_swr_model_distribution.csv" in text
+    assert "off_swr_run_state_stratified_summary.csv" in text
+    assert "off_swr_run_state_specificity_summary.csv" in text
+    assert "off_swr_nearest_swr_exclusion_summary.csv" in text
+    assert "off_swr_nearest_swr_specificity_summary.csv" in text
+    assert "off_swr_candidate_tier_threshold_summary.csv" in text
+    assert "off_swr_candidate_tier_session_summary.csv" in text
+    assert "off_swr_candidate_tier_rat_summary.csv" in text
+    assert "off_swr_candidate_tier_nearest_swr_exclusion_summary.csv" in text
+    assert "off_swr_high_specificity_candidate_table.csv" in text
+    assert "off_swr_promotion_readiness_summary.csv" in text
+    assert "off_swr_speed_coverage_summary.csv" in text
+    assert "off_swr_candidate_specificity_gate_summary.csv" in text
 
 
 def _workflow_dispatch_input_count(workflow: str) -> int:

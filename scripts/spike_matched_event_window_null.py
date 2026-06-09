@@ -187,6 +187,12 @@ def spike_matched_null_windows(
     selected["real_event_start_s"] = float(event.start)
     selected["real_event_end_s"] = float(event.end)
     selected["real_event_duration_s"] = float(duration)
+    position_summaries = [
+        _window_position_summary(session.position, float(row.window_start_s), float(row.window_end_s))
+        for row in selected.itertuples(index=False)
+    ]
+    if position_summaries:
+        selected = pd.concat([selected.reset_index(drop=True), pd.DataFrame(position_summaries)], axis=1)
     return selected.drop(columns=["random_tiebreaker"], errors="ignore")
 
 
@@ -270,6 +276,60 @@ def _spike_count_and_active_cells(spikes: np.ndarray, start: float, end: float) 
     return int(selected.shape[0]), int(np.unique(selected[:, 1].astype(int)).size)
 
 
+def _position_speed_samples(position: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    arr = np.asarray(position, dtype=float)
+    if arr.ndim != 2 or arr.shape[0] == 0 or arr.shape[1] < 3:
+        return np.array([], dtype=float), np.empty((0, 2), dtype=float), np.array([], dtype=float)
+    finite = np.isfinite(arr[:, 0]) & np.isfinite(arr[:, 1]) & np.isfinite(arr[:, 2])
+    arr = arr[finite]
+    if arr.size == 0:
+        return np.array([], dtype=float), np.empty((0, 2), dtype=float), np.array([], dtype=float)
+    order = np.argsort(arr[:, 0], kind="mergesort")
+    arr = arr[order]
+    times = arr[:, 0].astype(float)
+    xy = arr[:, 1:3].astype(float)
+    speed = np.full(times.shape, np.nan, dtype=float)
+    if len(times) == 1:
+        speed[0] = 0.0
+        return times, xy, speed
+    dt = np.diff(times)
+    displacement = np.linalg.norm(np.diff(xy, axis=0), axis=1)
+    segment_speed = np.divide(displacement, dt, out=np.full_like(displacement, np.nan, dtype=float), where=dt > 0)
+    speed[1:] = segment_speed
+    speed[0] = segment_speed[0] if np.isfinite(segment_speed[0]) else np.nan
+    return times, xy, speed
+
+
+def _window_position_summary(position: np.ndarray, start: float, end: float) -> dict[str, object]:
+    times, xy, speed = _position_speed_samples(position)
+    summary = {
+        "animal_speed_mean": np.nan,
+        "animal_speed_median": np.nan,
+        "animal_speed_max": np.nan,
+        "animal_x": np.nan,
+        "animal_y": np.nan,
+        "position_sample_count": 0,
+    }
+    if times.size == 0 or not np.isfinite(start) or not np.isfinite(end):
+        return summary
+    mask = (times >= float(start)) & (times <= float(end))
+    if not np.any(mask):
+        return summary
+    window_speed = speed[mask]
+    window_xy = xy[mask]
+    finite_speed = window_speed[np.isfinite(window_speed)]
+    finite_xy = window_xy[np.isfinite(window_xy).all(axis=1)]
+    summary["position_sample_count"] = int(mask.sum())
+    if finite_speed.size:
+        summary["animal_speed_mean"] = float(np.mean(finite_speed))
+        summary["animal_speed_median"] = float(np.median(finite_speed))
+        summary["animal_speed_max"] = float(np.max(finite_speed))
+    if finite_xy.size:
+        summary["animal_x"] = float(np.mean(finite_xy[:, 0]))
+        summary["animal_y"] = float(np.mean(finite_xy[:, 1]))
+    return summary
+
+
 def score_matched_nulls(args: argparse.Namespace) -> pd.DataFrame:
     """Score real core windows and spike-matched null windows."""
 
@@ -336,6 +396,7 @@ def score_matched_nulls(args: argparse.Namespace) -> pd.DataFrame:
                 "active_cell_count_delta": 0,
                 "n_spikes_relative_delta": 0.0,
                 "off_swr": False,
+                **_window_position_summary(session.position, float(event.start), float(event.end)),
             }
         ]
         nulls = spike_matched_null_windows(
@@ -353,6 +414,13 @@ def score_matched_nulls(args: argparse.Namespace) -> pd.DataFrame:
             item = dict(row)
             item["window_role"] = "matched_null"
             item["event_window_variant"] = "matched_null"
+            item.update(
+                _window_position_summary(
+                    session.position,
+                    float(item["window_start_s"]),
+                    float(item["window_end_s"]),
+                )
+            )
             window_rows.append(item)
         for window_index, window in enumerate(window_rows):
             _score_one_window(
@@ -488,6 +556,12 @@ def _window_settings(window: dict[str, object], *, window_index: int) -> dict[st
         "n_spikes_relative_delta",
         "off_swr",
         "restrict_to_run_times",
+        "animal_speed_mean",
+        "animal_speed_median",
+        "animal_speed_max",
+        "animal_x",
+        "animal_y",
+        "position_sample_count",
     ]
     out = {key: window.get(key, "") for key in keys}
     out["window_index"] = int(window_index)

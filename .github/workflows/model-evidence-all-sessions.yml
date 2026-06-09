@@ -52,6 +52,18 @@ on:
         description: "State-space IMM mode-transition stickiness"
         required: true
         default: "0.95"
+      state_space_trajectory_imm_mode_stickiness:
+        description: "Optional trajectory-IMM-specific mode-transition stickiness; empty reuses state_space_imm_mode_stickiness"
+        required: false
+        default: ""
+      state_space_trajectory_imm_momentum_initial_probability:
+        description: "Optional trajectory-IMM initial probability assigned to the momentum mode"
+        required: false
+        default: ""
+      state_space_trajectory_imm_momentum_switch_probability:
+        description: "Optional trajectory-IMM per-transition probability for switching from first-order modes into momentum"
+        required: false
+        default: ""
       state_space_momentum_sigma_cm_sqrt_s:
         description: "State-space momentum process noise in cm/sqrt(s)"
         required: true
@@ -108,7 +120,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: model-evidence-all-sessions-${{ github.repository }}-${{ inputs.sessions }}-${{ inputs.events }}-${{ inputs.max_events }}-${{ inputs.spike_rate_scale }}-${{ inputs.emission_likelihood_temperature }}-${{ inputs.emission_negative_binomial_overdispersion }}-${{ inputs.state_space_valid_occupancy_threshold_s }}-${{ inputs.state_space_momentum_initial_sigma_cm_sqrt_s }}-${{ github.ref }}
+  group: model-evidence-all-sessions-${{ github.repository }}-${{ inputs.sessions }}-${{ inputs.events }}-${{ inputs.max_events }}-${{ inputs.spike_rate_scale }}-${{ inputs.emission_likelihood_temperature }}-${{ inputs.emission_negative_binomial_overdispersion }}-${{ inputs.state_space_valid_occupancy_threshold_s }}-${{ inputs.state_space_momentum_initial_sigma_cm_sqrt_s }}-${{ inputs.state_space_trajectory_imm_mode_stickiness }}-${{ inputs.state_space_trajectory_imm_momentum_initial_probability }}-${{ inputs.state_space_trajectory_imm_momentum_switch_probability }}-${{ github.ref }}
   cancel-in-progress: false
 
 env:
@@ -124,6 +136,9 @@ env:
   STATE_SPACE_MAX_STEP_SIGMA: ${{ inputs.state_space_max_step_sigma }}
   STATE_SPACE_VALID_OCCUPANCY_THRESHOLD_S: ${{ inputs.state_space_valid_occupancy_threshold_s }}
   STATE_SPACE_IMM_MODE_STICKINESS: ${{ inputs.state_space_imm_mode_stickiness }}
+  STATE_SPACE_TRAJECTORY_IMM_MODE_STICKINESS: ${{ inputs.state_space_trajectory_imm_mode_stickiness }}
+  STATE_SPACE_TRAJECTORY_IMM_MOMENTUM_INITIAL_PROBABILITY: ${{ inputs.state_space_trajectory_imm_momentum_initial_probability }}
+  STATE_SPACE_TRAJECTORY_IMM_MOMENTUM_SWITCH_PROBABILITY: ${{ inputs.state_space_trajectory_imm_momentum_switch_probability }}
   STATE_SPACE_MOMENTUM_SIGMA_CM_SQRT_S: ${{ inputs.state_space_momentum_sigma_cm_sqrt_s }}
   STATE_SPACE_MOMENTUM_INITIAL_SIGMA_CM_SQRT_S: ${{ inputs.state_space_momentum_initial_sigma_cm_sqrt_s }}
   STATE_SPACE_MOMENTUM_VELOCITY_DECAY: ${{ inputs.state_space_momentum_velocity_decay }}
@@ -316,6 +331,9 @@ jobs:
             --state-space-max-step-sigma "${STATE_SPACE_MAX_STEP_SIGMA}" \
             --state-space-valid-occupancy-threshold-s "${STATE_SPACE_VALID_OCCUPANCY_THRESHOLD_S}" \
             --state-space-imm-mode-stickiness "${STATE_SPACE_IMM_MODE_STICKINESS}" \
+            --state-space-trajectory-imm-mode-stickiness "${STATE_SPACE_TRAJECTORY_IMM_MODE_STICKINESS}" \
+            --state-space-trajectory-imm-momentum-initial-probability "${STATE_SPACE_TRAJECTORY_IMM_MOMENTUM_INITIAL_PROBABILITY}" \
+            --state-space-trajectory-imm-momentum-switch-probability "${STATE_SPACE_TRAJECTORY_IMM_MOMENTUM_SWITCH_PROBABILITY}" \
             --state-space-momentum-sigma-cm-sqrt-s "${STATE_SPACE_MOMENTUM_SIGMA_CM_SQRT_S}" \
             --state-space-momentum-initial-sigma-cm-sqrt-s "${STATE_SPACE_MOMENTUM_INITIAL_SIGMA_CM_SQRT_S}" \
             --state-space-momentum-velocity-decay "${STATE_SPACE_MOMENTUM_VELOCITY_DECAY}" \

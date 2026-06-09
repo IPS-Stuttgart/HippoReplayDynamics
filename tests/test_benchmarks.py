@@ -83,6 +83,19 @@ def test_build_models_includes_exact_first_order_imm_models():
     assert isinstance(models["clusterless-state-space-first-order-imm"], ClusterlessStateSpaceReplayModel)
 
 
+def test_build_models_includes_persistent_trajectory_imm_variant():
+    models = _build_models(
+        BenchmarkConfig(
+            models=("sorted-spike-state-space-trajectory-imm-persistent-exact-sparse",)
+        )
+    )
+
+    model = models["sorted-spike-state-space-trajectory-imm-persistent-exact-sparse"]
+    assert model.name == "sorted-spike-state-space-trajectory-imm-persistent-exact-sparse"
+    assert model.mode == "trajectory-imm-exact-sparse"
+    assert model.config.trajectory_imm_mode_stickiness == 0.985
+
+
 def test_build_models_includes_clusterless_state_space_model():
     models = _build_models(BenchmarkConfig(models=("clusterless-state-space-diffusion",)))
 

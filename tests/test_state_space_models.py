@@ -122,6 +122,7 @@ def test_state_space_modes_return_full_trajectory_posteriors():
             assert score.diagnostics["state_space_trajectory_imm_modes"] == (
                 "stationary,diffusion,fragmented,momentum-exact-sparse"
             )
+            assert score.diagnostics["state_space_trajectory_imm_mode_stickiness"] == 0.95
             terminal_probs = [
                 score.diagnostics[f"state_space_mode_{name}_terminal_probability"]
                 for name in ("stationary", "diffusion", "fragmented", "momentum_exact_sparse")
@@ -745,11 +746,28 @@ def test_state_space_trajectory_imm_exact_sparse_matches_bruteforce_tiny_grid():
     assert score.diagnostics["state_space_trajectory_imm_modes"] == (
         "stationary,diffusion,fragmented,momentum-exact-sparse"
     )
+    assert score.diagnostics["state_space_trajectory_imm_mode_stickiness"] == 0.8
     terminal_probs = [
         score.diagnostics[f"state_space_mode_{name}_terminal_probability"]
         for name in ("stationary", "diffusion", "fragmented", "momentum_exact_sparse")
     ]
     assert np.allclose(sum(terminal_probs), 1.0)
+
+
+def test_state_space_trajectory_imm_can_use_specific_persistence_prior():
+    emissions = _synthetic_emissions()
+    centers = np.array([[0.0, 0.0], [1.0, 0.0], [2.0, 0.0], [3.0, 0.0]])
+    config = StateSpaceDecoderConfig(
+        mode="trajectory-imm-exact-sparse",
+        imm_mode_stickiness=0.8,
+        trajectory_imm_mode_stickiness=0.985,
+    )
+
+    score = StateSpaceReplayModel(mode="trajectory-imm-exact-sparse", config=config).score(emissions, centers)
+
+    assert np.isfinite(score.log_likelihood)
+    assert score.diagnostics["state_space_trajectory_imm_mode_stickiness"] == 0.985
+    assert score.diagnostics["state_space_imm_mode_stickiness"] == 0.8
 
 
 def test_sparse_momentum_evidence_only_skips_smoothed_trajectory():

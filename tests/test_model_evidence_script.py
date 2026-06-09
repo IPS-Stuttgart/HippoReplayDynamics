@@ -36,6 +36,7 @@ def test_model_evidence_accepts_sorted_spike_state_space_models():
             "sorted-spike-state-space-first-order-imm "
             "sorted-spike-state-space-momentum-exact-sparse "
             "sorted-spike-state-space-trajectory-imm-exact-sparse "
+            "sorted-spike-state-space-trajectory-imm-persistent-exact-sparse "
             "sorted-spike-state-space-momentum "
             "sorted-spike-state-space-imm"
         ),
@@ -63,6 +64,7 @@ def test_model_evidence_accepts_sorted_spike_state_space_models():
         "sorted-spike-state-space-first-order-imm",
         "sorted-spike-state-space-momentum-exact-sparse",
         "sorted-spike-state-space-trajectory-imm-exact-sparse",
+        "sorted-spike-state-space-trajectory-imm-persistent-exact-sparse",
         "sorted-spike-state-space-momentum",
         "sorted-spike-state-space-imm",
     ]
@@ -71,6 +73,9 @@ def test_model_evidence_accepts_sorted_spike_state_space_models():
     assert models["sorted-spike-state-space-momentum-exact-sparse"].name == "sorted-spike-state-space-momentum-exact-sparse"
     assert models["sorted-spike-state-space-trajectory-imm-exact-sparse"].name == (
         "sorted-spike-state-space-trajectory-imm-exact-sparse"
+    )
+    assert models["sorted-spike-state-space-trajectory-imm-persistent-exact-sparse"].name == (
+        "sorted-spike-state-space-trajectory-imm-persistent-exact-sparse"
     )
     assert models["sorted-spike-state-space-momentum"].name == "sorted-spike-state-space-momentum"
     assert models["sorted-spike-state-space-imm"].name == "sorted-spike-state-space-imm"
@@ -81,6 +86,12 @@ def test_model_evidence_accepts_sorted_spike_state_space_models():
     assert models["sorted-spike-state-space-momentum"].config.momentum_velocity_decay == 0.8
     assert models["sorted-spike-state-space-momentum"].config.momentum_candidate_top_k == 17
     assert models["sorted-spike-state-space-momentum"].config.momentum_predicted_candidate_top_k == 5
+    assert (
+        models[
+            "sorted-spike-state-space-trajectory-imm-persistent-exact-sparse"
+        ].config.trajectory_imm_mode_stickiness
+        == 0.985
+    )
     assert models["sorted-spike-state-space-imm"].config.imm_mode_stickiness == 0.91
 
 
@@ -248,6 +259,7 @@ def test_model_evidence_classifies_state_space_families():
     assert _family("sorted-spike-state-space-fragmented") == "trajectory"
     assert _family("sorted-spike-state-space-momentum") == "trajectory"
     assert _family("sorted-spike-state-space-trajectory-imm-exact-sparse") == "trajectory"
+    assert _family("sorted-spike-state-space-trajectory-imm-persistent-exact-sparse") == "trajectory"
     assert _family("sorted-spike-state-space-first-order-imm") == "trajectory"
     assert _family("sorted-spike-state-space-imm") == "trajectory"
     assert _family("clusterless-state-space-stationary") == "nontrajectory"

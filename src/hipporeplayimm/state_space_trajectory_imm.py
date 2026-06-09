@@ -113,9 +113,10 @@ def _score_trajectory_imm_exact_sparse(
     time_scales = _time_scales(durations)
     tree = cKDTree(centers[valid])
     position_prior = _uniform_position_prior(emissions.n_bins, valid_mask)
+    trajectory_imm_mode_stickiness = _trajectory_imm_mode_stickiness(config)
     mode_transition = _mode_transition_matrix(
         len(_TRAJECTORY_IMM_MODES),
-        float(getattr(config, "imm_mode_stickiness", 0.95)),
+        trajectory_imm_mode_stickiness,
     )
     stationary_transition = _gaussian_transition_matrix(
         centers,
@@ -246,6 +247,9 @@ def _score_trajectory_imm_exact_sparse(
         "state_space_trajectory_imm_modes": ",".join(_TRAJECTORY_IMM_MODES),
         "state_space_trajectory_imm_mode_count": int(len(_TRAJECTORY_IMM_MODES)),
         "state_space_trajectory_imm_mode_posterior": mode_posterior_label,
+        "state_space_trajectory_imm_mode_stickiness": float(
+            trajectory_imm_mode_stickiness
+        ),
         "state_space_trajectory_imm_mean_mode_entropy": _mean_entropy(_as_log_probs(mode_posterior)),
         "state_space_trajectory_imm_mean_posterior_entropy": float(posterior_entropy),
         "state_space_trajectory_imm_terminal_pair_count": (
@@ -296,6 +300,16 @@ def _score_trajectory_imm_exact_sparse(
             )
 
     return float(logp), trajectory_log_posterior, terminal, mode_posterior_out, diagnostics
+
+
+def _trajectory_imm_mode_stickiness(config: object) -> float:
+    value = getattr(config, "trajectory_imm_mode_stickiness", None)
+    if value is None:
+        value = getattr(config, "imm_mode_stickiness", 0.95)
+    out = float(value)
+    if not np.isfinite(out) or not 0.0 <= out <= 1.0:
+        raise ValueError("trajectory_imm_mode_stickiness must be in [0, 1]")
+    return out
 
 
 def _advance_state(

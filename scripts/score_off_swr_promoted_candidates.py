@@ -102,6 +102,16 @@ def _rat_from_session(session: object) -> str:
     return str(session).split("/", 1)[0]
 
 
+def _encoding_config_from_args(args: argparse.Namespace) -> EncodingConfig:
+    return EncodingConfig(
+        bin_size_cm=args.bin_size_cm,
+        smoothing_sigma_bins=args.smoothing_sigma_bins,
+        min_speed_cm_s=args.min_speed_cm_s,
+        min_occupancy_s=args.min_occupancy_s,
+        rate_floor_hz=args.rate_floor_hz,
+    )
+
+
 def select_candidate_windows(
     candidate_table: pd.DataFrame,
     *,
@@ -158,13 +168,7 @@ def score_promoted_candidates(args: argparse.Namespace, candidates: pd.DataFrame
         session = load_replay_session(session_dir)
         encoding = fit_place_field_encoding(
             session,
-            EncodingConfig(
-                bin_size=args.bin_size_cm,
-                smoothing_sigma_bins=args.smoothing_sigma_bins,
-                min_speed_cm_s=args.min_speed_cm_s,
-                min_occupancy_s=args.min_occupancy_s,
-                rate_floor_hz=args.rate_floor_hz,
-            ),
+            _encoding_config_from_args(args),
         )
         models = _models(args, session, encoding=encoding)
         has_clusterless = any(isinstance(model, ClusterlessStateSpaceReplayModel) for model in models.values())

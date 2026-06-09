@@ -139,6 +139,8 @@ def test_all_session_model_evidence_workflow_exports_expected_outputs():
     assert "clusterless_leave_one_rat_out_summary.csv" in workflow
     assert "clusterless_sorted_spike_event_overlap.csv" in workflow
     assert "clusterless_consistency_gate_summary.csv" in workflow
+    assert "EmptyDataError" in workflow
+    assert "has no rows" in workflow
 
 
 def test_all_session_summary_helpers_group_by_session():

@@ -515,35 +515,7 @@ def _sweep_observation(args: argparse.Namespace) -> int:
 
 
 def _simulate_recovery(args: argparse.Namespace) -> int:
-    shared_sigma = args.state_space_sigma_cm_sqrt_s
-    state_space = StateSpaceDecoderConfig(
-        stationary_sigma_cm=args.state_space_stationary_sigma_cm,
-        diffusion_sigma_cm_sqrt_s=args.state_space_diffusion_sigma_cm_sqrt_s or shared_sigma,
-        max_step_sigma=args.state_space_max_step_sigma,
-        imm_mode_stickiness=args.state_space_imm_mode_stickiness,
-        trajectory_imm_mode_stickiness=args.state_space_trajectory_imm_mode_stickiness,
-        trajectory_imm_momentum_initial_probability=(
-            args.state_space_trajectory_imm_momentum_initial_probability
-        ),
-        trajectory_imm_momentum_switch_probability=(
-            args.state_space_trajectory_imm_momentum_switch_probability
-        ),
-        momentum_sigma_cm_sqrt_s=args.state_space_momentum_sigma_cm_sqrt_s or shared_sigma,
-        momentum_initial_sigma_cm_sqrt_s=args.state_space_momentum_initial_sigma_cm_sqrt_s or shared_sigma,
-        momentum_velocity_decay=args.state_space_momentum_velocity_decay,
-        momentum_velocity_decay_tau_s=args.state_space_momentum_velocity_decay_tau_s,
-        momentum_candidate_top_k=args.state_space_momentum_candidate_top_k,
-        momentum_candidate_mass_threshold=args.state_space_momentum_candidate_mass_threshold,
-        momentum_candidate_min_k=args.state_space_momentum_candidate_min_k,
-        momentum_candidate_max_k=args.state_space_momentum_candidate_max_k,
-        momentum_predicted_candidate_top_k=args.state_space_momentum_predicted_candidate_top_k,
-        momentum_candidate_source=args.state_space_momentum_candidate_source,
-        displacement_radius_bins=args.state_space_displacement_radius_bins,
-        displacement_position_sigma_cm=args.state_space_displacement_position_sigma_cm,
-        displacement_transition_sigma_cm_sqrt_s=args.state_space_displacement_transition_sigma_cm_sqrt_s,
-        displacement_prior_sigma_cm=args.state_space_displacement_prior_sigma_cm,
-        valid_occupancy_threshold_s=args.state_space_valid_occupancy_threshold_s,
-    )
+    state_space = _state_space_config_from_recovery_args(args)
     true_state_space = _true_state_space_config_from_args(args, state_space)
     config = SimulationRecoveryConfig(
         true_models=parse_model_list(args.true_models),
@@ -581,6 +553,53 @@ def _simulate_recovery(args: argparse.Namespace) -> int:
     print(f"\nRows: {len(result.event_scores)}")
     print(f"Failures: {int((result.event_scores['status'] != 'success').sum())}")
     return 0
+
+
+def _state_space_config_from_recovery_args(args: argparse.Namespace) -> StateSpaceDecoderConfig:
+    """Build simulation-recovery state-space config without masking explicit zeros."""
+
+    shared_sigma = args.state_space_sigma_cm_sqrt_s
+    return StateSpaceDecoderConfig(
+        stationary_sigma_cm=args.state_space_stationary_sigma_cm,
+        diffusion_sigma_cm_sqrt_s=_default_if_none(
+            args.state_space_diffusion_sigma_cm_sqrt_s,
+            shared_sigma,
+        ),
+        max_step_sigma=args.state_space_max_step_sigma,
+        imm_mode_stickiness=args.state_space_imm_mode_stickiness,
+        trajectory_imm_mode_stickiness=args.state_space_trajectory_imm_mode_stickiness,
+        trajectory_imm_momentum_initial_probability=(
+            args.state_space_trajectory_imm_momentum_initial_probability
+        ),
+        trajectory_imm_momentum_switch_probability=(
+            args.state_space_trajectory_imm_momentum_switch_probability
+        ),
+        momentum_sigma_cm_sqrt_s=_default_if_none(
+            args.state_space_momentum_sigma_cm_sqrt_s,
+            shared_sigma,
+        ),
+        momentum_initial_sigma_cm_sqrt_s=_default_if_none(
+            args.state_space_momentum_initial_sigma_cm_sqrt_s,
+            shared_sigma,
+        ),
+        momentum_velocity_decay=args.state_space_momentum_velocity_decay,
+        momentum_velocity_decay_tau_s=args.state_space_momentum_velocity_decay_tau_s,
+        momentum_candidate_top_k=args.state_space_momentum_candidate_top_k,
+        momentum_candidate_mass_threshold=args.state_space_momentum_candidate_mass_threshold,
+        momentum_candidate_min_k=args.state_space_momentum_candidate_min_k,
+        momentum_candidate_max_k=args.state_space_momentum_candidate_max_k,
+        momentum_predicted_candidate_top_k=args.state_space_momentum_predicted_candidate_top_k,
+        momentum_candidate_source=args.state_space_momentum_candidate_source,
+        displacement_radius_bins=args.state_space_displacement_radius_bins,
+        displacement_position_sigma_cm=args.state_space_displacement_position_sigma_cm,
+        displacement_transition_sigma_cm_sqrt_s=args.state_space_displacement_transition_sigma_cm_sqrt_s,
+        displacement_prior_sigma_cm=args.state_space_displacement_prior_sigma_cm,
+        valid_occupancy_threshold_s=args.state_space_valid_occupancy_threshold_s,
+    )
+
+
+def _default_if_none(value: float | None, default: float) -> float:
+    return default if value is None else value
 
 
 def _true_state_space_config_from_args(

@@ -78,6 +78,25 @@ def test_off_swr_trajectory_discovery_workflow_wires_scorer_and_outputs():
     assert "off_swr_candidate_specificity_gate_summary.csv" in text
 
 
+def test_off_swr_promoted_candidate_validation_workflow_wires_candidate_only_exact_core_pass():
+    workflow = Path(".github/workflows/off-swr-promoted-candidate-validation.yml")
+    text = workflow.read_text(encoding="utf-8")
+
+    assert _workflow_dispatch_input_count(text) <= 25
+    assert "discovery_run_id:" in text
+    assert "off_swr_high_specificity_candidate_table.csv" in text
+    assert "scripts/score_off_swr_promoted_candidates.py" in text
+    assert "--candidate-filter" in text
+    assert "--session-filter" in text
+    assert "--max-candidates" in text
+    assert "promoted_off_swr_candidate_exact_core_event_model_evidence.csv" in text
+    assert "promoted_off_swr_candidate_exact_core_decisions.csv" in text
+    assert "promoted_off_swr_candidate_exact_core_summary.csv" in text
+    assert "promoted_off_swr_candidate_exact_core_session_summary.csv" in text
+    assert "promoted_off_swr_candidate_exact_core_rat_summary.csv" in text
+    assert "promoted_off_swr_candidate_exact_core_gate_summary.csv" in text
+
+
 def _workflow_dispatch_input_count(workflow: str) -> int:
     """Count first-level workflow_dispatch inputs in a GitHub Actions file."""
 

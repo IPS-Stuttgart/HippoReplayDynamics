@@ -30,6 +30,7 @@ def test_parser_defaults_build_current_encoding_config():
     assert config.bin_size_cm == args.bin_size_cm
     assert config.smoothing_sigma_bins == args.smoothing_sigma_bins
     assert config.min_speed_cm_s == args.min_speed_cm_s
+    assert args.null_random_seed == 1
 
 
 def test_select_candidate_windows_filters_promotion_ready_and_strong_immobile():

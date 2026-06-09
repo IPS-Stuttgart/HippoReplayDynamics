@@ -83,6 +83,40 @@ def test_explicit_candidate_step_keeps_non_run_null_pool_exhaustive(tmp_path):
     assert nulls["candidate_pool_size"].iloc[0] > 5
 
 
+def test_non_run_spike_matched_nulls_prefer_position_covered_support(tmp_path):
+    session = _toy_session(tmp_path)
+    session.position = session.position[session.position[:, 0] <= 2.0]
+    session.spikes = np.vstack(
+        [
+            session.spikes,
+            np.array(
+                [
+                    [50.0, 1],
+                    [50.1, 2],
+                    [80.0, 1],
+                ],
+                dtype=float,
+            ),
+        ]
+    )
+
+    nulls = spike_matched_null_windows(
+        session,
+        0,
+        nulls_per_event=3,
+        random_seed=1,
+        spike_count_tolerance_fraction=0.1,
+        restrict_to_run_times=False,
+        max_candidate_windows=50,
+    )
+
+    assert len(nulls) == 3
+    assert float(nulls["window_start_s"].min()) >= 0.0
+    assert float(nulls["window_end_s"].max()) <= 2.0
+    assert nulls["animal_speed_mean"].notna().all()
+    assert (nulls["position_sample_count"] > 0).all()
+
+
 def test_spike_matched_null_aggregate_writes_empirical_p_values_and_gates(tmp_path):
     scores = pd.DataFrame(
         [

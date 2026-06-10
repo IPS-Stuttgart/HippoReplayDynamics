@@ -573,7 +573,7 @@ def _state_space_config_from_recovery_args(args: argparse.Namespace) -> StateSpa
         ),
         max_step_sigma=args.state_space_max_step_sigma,
         imm_mode_stickiness=args.state_space_imm_mode_stickiness,
-        imm_switch_tau_s=args.state_space_imm_switch_tau_s,
+        imm_switch_tau_s=getattr(args, "state_space_imm_switch_tau_s", 0.0),
         trajectory_imm_mode_stickiness=args.state_space_trajectory_imm_mode_stickiness,
         trajectory_imm_momentum_initial_probability=(
             args.state_space_trajectory_imm_momentum_initial_probability

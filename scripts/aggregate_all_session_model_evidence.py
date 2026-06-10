@@ -183,7 +183,7 @@ def random_effects_model_probabilities(df: pd.DataFrame) -> pd.DataFrame:
     """
 
     df = _ensure_evidence_support_columns(df)
-    ok = df[(df["status"] == "success") & df["evidence_comparable"]].copy()
+    ok = df[(df["status"] == "success") & _bool_column(df, "evidence_comparable")].copy()
     if ok.empty:
         return pd.DataFrame()
     per_session = ok.groupby(["session", "model"], as_index=False).agg(
@@ -379,7 +379,7 @@ def exact_sparse_momentum_core_margins(
         "exact_models_compared",
     ]
     df = _ensure_evidence_support_columns(df)
-    ok = df[(df["status"] == "success") & df["evidence_comparable"].fillna(False).astype(bool)].copy()
+    ok = df[(df["status"] == "success") & _bool_column(df, "evidence_comparable")].copy()
     if ok.empty:
         return pd.DataFrame(columns=columns)
 
@@ -811,7 +811,7 @@ def required_full_core_model_coverage_table(
         return pd.DataFrame(columns=columns)
 
     status_ok = df["status"].eq("success") if "status" in df else pd.Series(True, index=df.index)
-    comparable = df["evidence_comparable"].fillna(False).astype(bool)
+    comparable = _bool_column(df, "evidence_comparable")
     ok = df[status_ok & comparable].copy()
     if ok.empty:
         return pd.DataFrame(columns=columns)
@@ -870,7 +870,7 @@ def exact_core_model_claim_decisions(
         return pd.DataFrame(columns=columns)
 
     status_ok = df["status"].eq("success") if "status" in df else pd.Series(True, index=df.index)
-    comparable = df["evidence_comparable"].fillna(False).astype(bool)
+    comparable = _bool_column(df, "evidence_comparable")
     ok = df[status_ok & comparable].copy()
     if ok.empty:
         return pd.DataFrame(columns=columns)
@@ -962,7 +962,7 @@ def exact_core_model_claim_summary(
     for key, group in groups:
         key_tuple = key if isinstance(key, tuple) else (key,)
         events = int(len(group))
-        complete = group["required_models_complete"].fillna(False).astype(bool)
+        complete = _bool_column(group, "required_models_complete")
         required_complete_events = int(complete.sum())
         incomplete_core_events = int((group["claim_model"].astype(str) == "incomplete_core").sum())
         ambiguous_events = int((group["claim_model"].astype(str) == "ambiguous").sum())
@@ -1088,7 +1088,7 @@ def trajectory_imm_mode_mass_summary(df: pd.DataFrame) -> pd.DataFrame:
     )
     base["trajectory_imm_evidence_support"] = trajectory_rows["evidence_support"].astype(str).to_numpy()
     base["trajectory_imm_evidence_comparable"] = (
-        trajectory_rows["evidence_comparable"].fillna(False).astype(bool).to_numpy()
+        _bool_column(trajectory_rows, "evidence_comparable").to_numpy()
     )
     base["dominant_mode"] = _dominant_mode_labels(
         base[["stationary_mode_mass", "diffusion_mode_mass", "fragmented_mode_mass", "momentum_mode_mass"]]
@@ -1189,7 +1189,7 @@ def exact_trajectory_dynamics_summary(
     for key, group in groups:
         key_tuple = key if isinstance(key, tuple) else (key,)
         events = int(len(group))
-        complete = group["required_models_complete"].fillna(False).astype(bool)
+        complete = _bool_column(group, "required_models_complete")
         raw_trajectory = group["best_core_model"].fillna("").astype(str).isin(trajectory_set)
         claim_model = group["claim_model"].fillna("").astype(str)
         trajectory_claims = claim_model.isin(trajectory_set)
@@ -1281,7 +1281,7 @@ def exact_trajectory_nontrajectory_margin_decisions(
         return pd.DataFrame(columns=columns)
 
     status_ok = df["status"].eq("success") if "status" in df else pd.Series(True, index=df.index)
-    comparable = df["evidence_comparable"].fillna(False).astype(bool)
+    comparable = _bool_column(df, "evidence_comparable")
     ok = df[status_ok & comparable].copy()
     if ok.empty:
         return pd.DataFrame(columns=columns)
@@ -1387,9 +1387,9 @@ def exact_trajectory_nontrajectory_margin_summary(
         key_tuple = key if isinstance(key, tuple) else (key,)
         delta = group["trajectory_minus_nontrajectory_log_evidence"].astype(float).dropna()
         events = int(len(group))
-        complete = group["required_models_complete"].fillna(False).astype(bool)
-        trajectory_claims = int(group["trajectory_confident_claim"].fillna(False).astype(bool).sum())
-        nontrajectory_claims = int(group["nontrajectory_confident_claim"].fillna(False).astype(bool).sum())
+        complete = _bool_column(group, "required_models_complete")
+        trajectory_claims = int(_bool_column(group, "trajectory_confident_claim").sum())
+        nontrajectory_claims = int(_bool_column(group, "nontrajectory_confident_claim").sum())
         ambiguous = int((group["margin_decision"] == "ambiguous").sum())
         best_trajectory = group["best_trajectory_model"].replace("", pd.NA).dropna().astype(str)
         best_nontrajectory = group["best_nontrajectory_model"].replace("", pd.NA).dropna().astype(str)
@@ -1513,7 +1513,7 @@ def rat_bootstrap_exact_trajectory_nontrajectory_margin_summary(
     """Return rat-cluster bootstrap intervals for trajectory-vs-nontrajectory margins."""
 
     complete = decisions[
-        decisions["required_models_complete"].fillna(False).astype(bool)
+        _bool_column(decisions, "required_models_complete")
         & decisions["trajectory_minus_nontrajectory_log_evidence"].notna()
     ].copy()
     return _rat_bootstrap_margin_summary(
@@ -1985,15 +1985,18 @@ def clusterless_sorted_spike_event_overlap(
     overlap["margin_decision_agrees"] = overlap["sorted_spike_margin_decision"].eq(
         overlap["clusterless_margin_decision"]
     )
-    overlap["both_trajectory_raw_win"] = overlap["sorted_spike_trajectory_raw_win"].fillna(False).astype(bool) & overlap[
-        "clusterless_trajectory_raw_win"
-    ].fillna(False).astype(bool)
-    overlap["both_trajectory_confident_claim"] = overlap["sorted_spike_trajectory_confident_claim"].fillna(
-        False
-    ).astype(bool) & overlap["clusterless_trajectory_confident_claim"].fillna(False).astype(bool)
-    overlap["both_nontrajectory_confident_claim"] = overlap["sorted_spike_nontrajectory_confident_claim"].fillna(
-        False
-    ).astype(bool) & overlap["clusterless_nontrajectory_confident_claim"].fillna(False).astype(bool)
+    overlap["both_trajectory_raw_win"] = _bool_column(
+        overlap,
+        "sorted_spike_trajectory_raw_win",
+    ) & _bool_column(overlap, "clusterless_trajectory_raw_win")
+    overlap["both_trajectory_confident_claim"] = _bool_column(
+        overlap,
+        "sorted_spike_trajectory_confident_claim",
+    ) & _bool_column(overlap, "clusterless_trajectory_confident_claim")
+    overlap["both_nontrajectory_confident_claim"] = _bool_column(
+        overlap,
+        "sorted_spike_nontrajectory_confident_claim",
+    ) & _bool_column(overlap, "clusterless_nontrajectory_confident_claim")
     return overlap[columns].sort_values(["session", "event_index"]).reset_index(drop=True)
 
 
@@ -2134,7 +2137,7 @@ def clusterless_consistency_gate_summary(
             f"raw direction agreement fraction > {float(min_overlap_agreement_fraction):g}",
         )
     else:
-        agreement = float(overlap["raw_direction_agrees"].fillna(False).astype(bool).mean())
+        agreement = float(_bool_column(overlap, "raw_direction_agrees").mean())
         add(
             "clusterless_sorted_spike_overlap_present",
             True,
@@ -2482,7 +2485,7 @@ def _required_full_core_model_coverage(
     min_present = int(table["required_models_present"].min())
     missing = " ".join(sorted(missing_union))
     return {
-        "passed": bool(table["required_models_complete"].fillna(False).astype(bool).all()),
+        "passed": bool(_bool_column(table, "required_models_complete").all()),
         "observed": f"{min_present}/{len(required)}",
         "details": "missing=" + missing if missing else "required_models=" + " ".join(required),
     }
@@ -2524,6 +2527,32 @@ def _numeric_or_nan(frame: pd.DataFrame, column: str) -> np.ndarray:
     if column not in frame:
         return np.full(len(frame), np.nan)
     return pd.to_numeric(frame[column], errors="coerce").to_numpy(dtype=float)
+
+
+def _as_bool(value: object, *, default: bool = False) -> bool:
+    if isinstance(value, (bool, np.bool_)):
+        return bool(value)
+    if value is None:
+        return default
+    try:
+        if pd.isna(value):
+            return default
+    except (TypeError, ValueError):
+        pass
+    if isinstance(value, (int, float, np.integer, np.floating)):
+        return bool(value)
+    normalized = str(value).strip().lower()
+    if normalized in {"1", "true", "t", "yes", "y"}:
+        return True
+    if normalized in {"0", "false", "f", "no", "n", "", "nan", "none"}:
+        return False
+    return default
+
+
+def _bool_column(frame: pd.DataFrame, column: str, *, default: bool = False) -> pd.Series:
+    if column not in frame:
+        return pd.Series(default, index=frame.index, dtype=bool)
+    return frame[column].map(lambda value: _as_bool(value, default=default)).astype(bool)
 
 
 def _dominant_mode_labels(mode_masses: pd.DataFrame) -> list[str]:
@@ -2762,7 +2791,7 @@ def _bootstrap_margin_metrics(
     delta = frame[delta_col].astype(float)
     return {
         "positive_raw_win_fraction": float((delta > 0.0).mean()),
-        "positive_claim_fraction": float(frame[positive_claim_col].fillna(False).astype(bool).mean()),
+        "positive_claim_fraction": float(_bool_column(frame, positive_claim_col).mean()),
         "mean_delta": float(delta.mean()),
         "median_delta": float(delta.median()),
     }
@@ -2776,7 +2805,7 @@ def _trajectory_bootstrap_metrics(
     trajectory_set = set(str(model) for model in trajectory_models)
     claim_model = frame["claim_model"].fillna("").astype(str)
     return {
-        "required_complete_fraction": float(frame["required_models_complete"].fillna(False).astype(bool).mean()),
+        "required_complete_fraction": float(_bool_column(frame, "required_models_complete").mean()),
         "trajectory_raw_best_fraction": float(frame["best_core_model"].fillna("").astype(str).isin(trajectory_set).mean()),
         "trajectory_confident_claim_fraction": float(claim_model.isin(trajectory_set).mean()),
         "nontrajectory_confident_claim_fraction": float(
@@ -2800,7 +2829,7 @@ def _trajectory_bootstrap_count_table(
             {
                 "rat": str(rat),
                 "event_count": int(len(group)),
-                "required_complete_count": int(group["required_models_complete"].fillna(False).astype(bool).sum()),
+                "required_complete_count": int(_bool_column(group, "required_models_complete").sum()),
                 "trajectory_raw_best_count": int(
                     group["best_core_model"].fillna("").astype(str).isin(trajectory_set).sum()
                 ),
@@ -2842,8 +2871,8 @@ def _core_margin_summary(margins: pd.DataFrame, *, group_cols: tuple[str, ...]) 
         key_tuple = key if isinstance(key, tuple) else (key,)
         delta = group["positive_minus_best_other_exact_log_evidence"].astype(float)
         events = int(len(group))
-        exact_best = int(group["positive_is_exact_best"].fillna(False).astype(bool).sum())
-        confident = int(group["positive_confident_core_claim"].fillna(False).astype(bool).sum())
+        exact_best = int(_bool_column(group, "positive_is_exact_best").sum())
+        confident = int(_bool_column(group, "positive_confident_core_claim").sum())
         best_other = group["best_other_exact_model"].fillna("").astype(str)
         best_other = best_other[best_other != ""]
         row = {column: value for column, value in zip(group_cols, key_tuple, strict=True)}
@@ -2898,7 +2927,7 @@ def _paired_margin_summary(decisions: pd.DataFrame, *, group_cols: tuple[str, ..
         key_tuple = key if isinstance(key, tuple) else (key,)
         delta = group["positive_minus_reference_log_evidence"].astype(float)
         events = int(len(group))
-        positive_claims = int(group["positive_model_claimed"].fillna(False).astype(bool).sum())
+        positive_claims = int(_bool_column(group, "positive_model_claimed").sum())
         reference_claims = int((group["margin_decision"] == group["reference_model"]).sum())
         ambiguous = int((group["margin_decision"] == "ambiguous").sum())
         row = {column: value for column, value in zip(group_cols, key_tuple, strict=True)}

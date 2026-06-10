@@ -15,6 +15,7 @@ be imported directly by ad-hoc analysis notebooks.
 
 from __future__ import annotations
 
+import inspect
 from dataclasses import dataclass
 from typing import Protocol
 
@@ -365,36 +366,99 @@ def score_replay_model_compat(
 
     candidates = candidate_indices
     if candidates is None and hasattr(model, "candidate_indices"):
-        try:
-            candidates = model.candidate_indices(emissions, bin_centers)  # type: ignore[attr-defined]
-        except TypeError:
-            candidates = model.candidate_indices(emissions)  # type: ignore[attr-defined]
+        candidates = _call_candidate_indices_compat(model.candidate_indices, emissions, bin_centers)  # type: ignore[attr-defined]
 
     kwargs: dict[str, object] = {}
     if candidates is not None:
         kwargs["candidate_indices"] = candidates
     if occupancy_s is not None:
         kwargs["occupancy_s"] = occupancy_s
-    if kwargs:
-        try:
-            return model.score(emissions, bin_centers, **kwargs)  # type: ignore[misc]
-        except TypeError as exc:
-            message = str(exc)
-            if "occupancy_s" in message and "candidate_indices" in kwargs:
-                return model.score(
-                    emissions,
-                    bin_centers,
-                    candidate_indices=kwargs["candidate_indices"],  # type: ignore[misc]
-                )
-            if "candidate_indices" in message and "occupancy_s" in kwargs:
-                return model.score(
-                    emissions,
-                    bin_centers,
-                    occupancy_s=kwargs["occupancy_s"],  # type: ignore[misc]
-                )
-            if "occupancy_s" not in message and "candidate_indices" not in message:
-                raise
-    return model.score(emissions, bin_centers)
+    return _call_score_with_supported_kwargs(model.score, emissions, bin_centers, kwargs)  # type: ignore[misc]
+
+
+def _call_candidate_indices_compat(candidate_indices, emissions: LogEmissionTensor, bin_centers: np.ndarray) -> list[np.ndarray]:
+    """Call candidate support helpers without masking implementation TypeErrors."""
+
+    try:
+        signature = inspect.signature(candidate_indices)
+    except (TypeError, ValueError):
+        return candidate_indices(emissions, bin_centers)
+
+    parameters = tuple(signature.parameters.values())
+    if any(parameter.kind == inspect.Parameter.VAR_POSITIONAL for parameter in parameters):
+        return candidate_indices(emissions, bin_centers)
+
+    positional = tuple(
+        parameter
+        for parameter in parameters
+        if parameter.kind in (inspect.Parameter.POSITIONAL_ONLY, inspect.Parameter.POSITIONAL_OR_KEYWORD)
+    )
+    if len(positional) >= 2:
+        return candidate_indices(emissions, bin_centers)
+    if "bin_centers" in signature.parameters:
+        return candidate_indices(emissions, bin_centers=bin_centers)
+    if "centers" in signature.parameters:
+        return candidate_indices(emissions, centers=bin_centers)
+    return candidate_indices(emissions)
+
+
+def _call_score_with_supported_kwargs(score, emissions: LogEmissionTensor, bin_centers: np.ndarray, optional_kwargs: dict[str, object]) -> EventScore:
+    supported_kwargs = _supported_score_kwargs(score, optional_kwargs)
+    if supported_kwargs is not None:
+        if supported_kwargs:
+            return score(emissions, bin_centers, **supported_kwargs)
+        return score(emissions, bin_centers)
+
+    try:
+        if optional_kwargs:
+            return score(emissions, bin_centers, **optional_kwargs)
+        return score(emissions, bin_centers)
+    except TypeError as exc:
+        unsupported = [
+            keyword
+            for keyword in optional_kwargs
+            if _looks_like_unexpected_keyword_type_error(exc, keyword)
+        ]
+        if not unsupported:
+            raise
+        reduced_kwargs = {key: value for key, value in optional_kwargs.items() if key not in unsupported}
+        if reduced_kwargs:
+            return score(emissions, bin_centers, **reduced_kwargs)
+        return score(emissions, bin_centers)
+
+
+def _supported_score_kwargs(score, optional_kwargs: dict[str, object]) -> dict[str, object] | None:
+    if not optional_kwargs:
+        return {}
+
+    try:
+        signature = inspect.signature(score)
+    except (TypeError, ValueError):
+        return None
+
+    parameters = signature.parameters
+    if any(parameter.kind == inspect.Parameter.VAR_KEYWORD for parameter in parameters.values()):
+        return dict(optional_kwargs)
+
+    supported: dict[str, object] = {}
+    for keyword, value in optional_kwargs.items():
+        parameter = parameters.get(keyword)
+        if parameter is not None and parameter.kind in (
+            inspect.Parameter.KEYWORD_ONLY,
+            inspect.Parameter.POSITIONAL_OR_KEYWORD,
+        ):
+            supported[keyword] = value
+    return supported
+
+
+def _looks_like_unexpected_keyword_type_error(exc: TypeError, keyword: str) -> bool:
+    text = str(exc)
+    return keyword in text and (
+        "unexpected keyword" in text
+        or "got an unexpected" in text
+        or "invalid keyword" in text
+        or "takes no keyword" in text
+    )
 
 
 @dataclass

@@ -177,6 +177,44 @@ def test_all_session_summary_helpers_group_by_session():
     assert random_effects["random_effects_probability"].sum() == 1.0
 
 
+def test_all_session_boolean_string_false_rows_are_not_exact_comparable():
+    frame = pd.DataFrame(
+        [
+            _paired_score_row("Rat1/Open1", 0, "sorted-spike-state-space-stationary", 0.0),
+            _paired_score_row("Rat1/Open1", 0, "sorted-spike-state-space-diffusion", 1.0),
+            _paired_score_row("Rat1/Open1", 0, "sorted-spike-state-space-fragmented", 2.0),
+            _paired_score_row("Rat1/Open1", 0, "sorted-spike-state-space-first-order-imm", 3.0),
+            _paired_score_row(
+                "Rat1/Open1",
+                0,
+                "sorted-spike-state-space-momentum-exact-sparse",
+                10.0,
+            ),
+            {
+                **_paired_score_row(
+                    "Rat1/Open1",
+                    0,
+                    "sorted-spike-state-space-trajectory-imm-exact-sparse",
+                    1000.0,
+                ),
+                "evidence_comparable": "False",
+                "evidence_support": "candidate_pruned_lower_bound",
+            },
+        ]
+    )
+    frame["evidence_comparable"] = frame["evidence_comparable"].map(
+        lambda value: "True" if value is True else value
+    )
+    frame["is_best_model"] = frame["model"].eq("sorted-spike-state-space-trajectory-imm-exact-sparse")
+
+    margins = exact_sparse_momentum_core_margins(frame).iloc[0]
+    assert bool(margins["positive_is_exact_best"])
+    assert margins["best_other_exact_model"] == "sorted-spike-state-space-first-order-imm"
+
+    random_effects = random_effects_model_probabilities(frame)
+    assert "sorted-spike-state-space-trajectory-imm-exact-sparse" not in set(random_effects["model"])
+
+
 def test_all_session_aggregation_rejects_mixed_run_settings(tmp_path: Path):
     first = tmp_path / "first.csv"
     second = tmp_path / "second.csv"

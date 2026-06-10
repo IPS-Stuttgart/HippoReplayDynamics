@@ -441,16 +441,59 @@ def _score_state_space_model(model, emissions, bin_centers, candidates, occupanc
     kwargs: dict[str, object] = {"candidate_indices": candidates}
     if isinstance(model, SortedSpikeStateSpaceReplayModel) and model.mode == "momentum-exact-sparse":
         kwargs["return_trajectory"] = False
+    return _call_score_with_optional_occupancy(
+        model.score,
+        emissions,
+        bin_centers,
+        kwargs,
+        occupancy_s,
+    )
+
+
+def _call_score_with_optional_occupancy(score, emissions, bin_centers, kwargs, occupancy_s):
+    """Call ``score`` with ``occupancy_s`` only when the callable accepts it."""
+
+    call_kwargs = dict(kwargs)
     if occupancy_s is None:
-        return model.score(emissions, bin_centers, **kwargs)
-    kwargs["occupancy_s"] = occupancy_s
+        return score(emissions, bin_centers, **call_kwargs)
+
+    accepts_occupancy = _callable_accepts_keyword(score, "occupancy_s")
+    if accepts_occupancy is False:
+        return score(emissions, bin_centers, **call_kwargs)
+
+    call_kwargs["occupancy_s"] = occupancy_s
     try:
-        return model.score(emissions, bin_centers, **kwargs)
+        return score(emissions, bin_centers, **call_kwargs)
     except TypeError as exc:
-        if "occupancy_s" not in str(exc):
-            raise
-        kwargs.pop("occupancy_s", None)
-        return model.score(emissions, bin_centers, **kwargs)
+        if accepts_occupancy is None and _looks_like_unexpected_keyword_type_error(exc, "occupancy_s"):
+            call_kwargs.pop("occupancy_s", None)
+            return score(emissions, bin_centers, **call_kwargs)
+        raise
+
+
+def _callable_accepts_keyword(callable_, keyword: str) -> bool | None:
+    try:
+        signature = inspect.signature(callable_)
+    except (TypeError, ValueError):
+        return None
+
+    parameter = signature.parameters.get(keyword)
+    if parameter is not None and parameter.kind in (
+        inspect.Parameter.KEYWORD_ONLY,
+        inspect.Parameter.POSITIONAL_OR_KEYWORD,
+    ):
+        return True
+    return any(parameter.kind == inspect.Parameter.VAR_KEYWORD for parameter in signature.parameters.values())
+
+
+def _looks_like_unexpected_keyword_type_error(exc: TypeError, keyword: str) -> bool:
+    text = str(exc)
+    return keyword in text and (
+        "unexpected keyword" in text
+        or "got an unexpected" in text
+        or "invalid keyword" in text
+        or "takes no keyword" in text
+    )
 
 
 def _candidate_indices_for_model(model, emissions, bin_centers):

@@ -294,17 +294,19 @@ def _coerce_mark_matrix(value: Any, *, spike_count: int, spike_times: np.ndarray
     arr = np.asarray(value)
     if arr.size == 0 or arr.dtype.kind not in {"b", "i", "u", "f", "c"}:
         return None
-    arr = np.real(np.squeeze(arr)).astype(float, copy=False)
-    if arr.ndim == 1:
+    arr = np.real(arr).astype(float, copy=False)
+    if arr.ndim == 0:
+        marks = arr.reshape(1, 1) if spike_count == 1 else None
+    elif arr.ndim == 1:
         marks = arr.reshape(spike_count, 1) if arr.shape[0] == spike_count else None
     else:
         axes = [axis for axis, size in enumerate(arr.shape) if size == spike_count]
         if not axes:
             return None
         aligned = np.moveaxis(arr, 0 if 0 in axes else axes[-1], 0)
-        if aligned.ndim == 2 and aligned.shape[1] >= 2 and _looks_like_time_column(aligned[:, 0], spike_times):
-            aligned = aligned[:, 1:]
         marks = aligned.reshape(spike_count, -1)
+        if marks.shape[1] >= 2 and _looks_like_time_column(marks[:, 0], spike_times):
+            marks = marks[:, 1:]
     if marks is None or marks.shape[1] == 0 or not np.any(np.isfinite(marks)):
         return None
     return np.asarray(marks, dtype=float)

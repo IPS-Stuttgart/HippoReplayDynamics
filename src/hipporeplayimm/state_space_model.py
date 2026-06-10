@@ -64,6 +64,7 @@ class StateSpaceDecoderConfig:
     momentum_predicted_candidate_top_k: int = 8
     momentum_candidate_source: str = "emission"
     valid_occupancy_threshold_s: float = 0.0
+    imm_switch_tau_s: float = 0.0
 
 
 @dataclass
@@ -432,6 +433,7 @@ class StateSpaceReplayModel:
             "state_space_diffusion_sigma_cm_sqrt_s": float(self.config.diffusion_sigma_cm_sqrt_s),
             "state_space_max_step_sigma": float(self.config.max_step_sigma),
             "state_space_imm_mode_stickiness": float(self.config.imm_mode_stickiness),
+            "state_space_imm_switch_tau_s": float(self.config.imm_switch_tau_s),
             "state_space_momentum_sigma_cm_sqrt_s": float(self.config.momentum_sigma_cm_sqrt_s),
             "state_space_momentum_initial_sigma_cm_sqrt_s": float(self.config.momentum_initial_sigma_cm_sqrt_s),
             "state_space_momentum_velocity_decay": float(self.config.momentum_velocity_decay),
@@ -621,10 +623,17 @@ def _momentum_velocity_decays(config: StateSpaceDecoderConfig, transition_durati
     durations = np.asarray(transition_durations, dtype=float)
     if durations.size == 0:
         return np.empty(0, dtype=float)
+    if not np.all(np.isfinite(durations)) or np.any(durations <= 0.0):
+        raise ValueError("transition durations must be finite and positive")
     tau_s = float(config.momentum_velocity_decay_tau_s)
+    if not np.isfinite(tau_s) or tau_s < 0.0:
+        raise ValueError("momentum_velocity_decay_tau_s must be finite and nonnegative")
     if tau_s > 0.0:
         return np.exp(-durations / tau_s)
-    return np.full(durations.shape, float(config.momentum_velocity_decay), dtype=float)
+    decay = float(config.momentum_velocity_decay)
+    if not np.isfinite(decay) or decay < 0.0:
+        raise ValueError("momentum_velocity_decay must be finite and nonnegative")
+    return np.full(durations.shape, decay, dtype=float)
 
 
 def _momentum_prediction_multipliers(

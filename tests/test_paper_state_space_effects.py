@@ -205,7 +205,7 @@ def test_event_effect_table_treats_string_false_comparable_as_false():
                 "canonical_model_family": "trajectory",
                 "log_evidence": 100.0,
                 "evidence_support": "exact_full_grid",
-                "evidence_comparable": "False",
+                "evidence_comparable": "0.0",
             },
         ]
     )

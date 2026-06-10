@@ -263,6 +263,11 @@ def rat_replay_grammar_summary(motifs: pd.DataFrame) -> pd.DataFrame:
     for rat, group in frame.groupby("rat", sort=True):
         motif_counts = group["motif"].astype(str).value_counts()
         most_common = str(motif_counts.index[0]) if not motif_counts.empty else ""
+        compositional = _bool_column(group, "compositional_replay")
+        trajectory = _bool_column(group, "has_trajectory_segment")
+        momentum = _bool_column(group, "has_momentum_segment")
+        stationary_prelude = _bool_column(group, "has_stationary_prelude")
+        fragmented_endpoint = _bool_column(group, "has_fragmented_endpoint")
         rows.append(
             {
                 "rat": str(rat),
@@ -270,16 +275,16 @@ def rat_replay_grammar_summary(motifs: pd.DataFrame) -> pd.DataFrame:
                 "unique_motifs": int(group["motif"].nunique()),
                 "most_common_motif": most_common,
                 "most_common_motif_events": int(motif_counts.iloc[0]) if not motif_counts.empty else 0,
-                "compositional_events": int(group["compositional_replay"].fillna(False).sum()),
-                "compositional_fraction": float(group["compositional_replay"].fillna(False).mean()),
-                "events_with_trajectory_segment": int(group["has_trajectory_segment"].fillna(False).sum()),
-                "trajectory_segment_fraction": float(group["has_trajectory_segment"].fillna(False).mean()),
-                "events_with_momentum_segment": int(group["has_momentum_segment"].fillna(False).sum()),
-                "momentum_segment_fraction": float(group["has_momentum_segment"].fillna(False).mean()),
-                "events_with_stationary_prelude": int(group["has_stationary_prelude"].fillna(False).sum()),
-                "stationary_prelude_fraction": float(group["has_stationary_prelude"].fillna(False).mean()),
-                "events_with_fragmented_endpoint": int(group["has_fragmented_endpoint"].fillna(False).sum()),
-                "fragmented_endpoint_fraction": float(group["has_fragmented_endpoint"].fillna(False).mean()),
+                "compositional_events": int(compositional.sum()),
+                "compositional_fraction": float(compositional.mean()),
+                "events_with_trajectory_segment": int(trajectory.sum()),
+                "trajectory_segment_fraction": float(trajectory.mean()),
+                "events_with_momentum_segment": int(momentum.sum()),
+                "momentum_segment_fraction": float(momentum.mean()),
+                "events_with_stationary_prelude": int(stationary_prelude.sum()),
+                "stationary_prelude_fraction": float(stationary_prelude.mean()),
+                "events_with_fragmented_endpoint": int(fragmented_endpoint.sum()),
+                "fragmented_endpoint_fraction": float(fragmented_endpoint.mean()),
                 "mean_trajectory_duration_fraction": float(group["trajectory_duration_fraction"].astype(float).mean()),
             }
         )
@@ -470,6 +475,26 @@ def _key_dict(key_columns: Sequence[str], key: object) -> dict[str, object]:
 
 def _safe_fraction(numerator: float, denominator: float) -> float:
     return float(numerator / denominator) if denominator > 0.0 else 0.0
+
+
+def _as_bool(value: object) -> bool:
+    if isinstance(value, (bool, np.bool_)):
+        return bool(value)
+    try:
+        if pd.isna(value):
+            return False
+    except (TypeError, ValueError):
+        pass
+    if isinstance(value, (int, float, np.integer, np.floating)):
+        numeric = float(value)
+        return bool(np.isfinite(numeric) and numeric != 0.0)
+    return str(value).strip().lower() in {"1", "1.0", "true", "t", "yes", "y", "on"}
+
+
+def _bool_column(frame: pd.DataFrame, column: str) -> pd.Series:
+    if column not in frame:
+        return pd.Series(False, index=frame.index, dtype=bool)
+    return frame[column].map(_as_bool).astype(bool)
 
 
 def _empty_mode_sequence() -> pd.DataFrame:

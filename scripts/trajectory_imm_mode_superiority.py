@@ -69,11 +69,12 @@ def _as_bool(value: object, *, default: bool = False) -> bool:
     except (TypeError, ValueError):
         pass
     if isinstance(value, (int, float, np.integer, np.floating)):
-        return bool(value)
+        numeric = float(value)
+        return bool(np.isfinite(numeric) and numeric != 0.0)
     normalized = str(value).strip().lower()
-    if normalized in {"1", "true", "t", "yes", "y"}:
+    if normalized in {"1", "1.0", "true", "t", "yes", "y", "on"}:
         return True
-    if normalized in {"0", "false", "f", "no", "n", "", "nan", "none"}:
+    if normalized in {"0", "0.0", "false", "f", "no", "n", "", "nan", "none", "null", "off"}:
         return False
     return default
 
@@ -296,6 +297,16 @@ def _summarize_event_pairs(
         complete = group[_bool_column(group, "required_core_complete")].copy()
         d_first = complete["delta_trajectory_imm_minus_first_order_imm"].astype(float).dropna()
         d_momentum = complete["delta_trajectory_imm_minus_momentum"].astype(float).dropna()
+        trajectory_confident_first = _bool_column(complete, "trajectory_imm_confident_vs_first_order_imm")
+        first_order_confident = _bool_column(complete, "first_order_imm_confident_vs_trajectory_imm")
+        ambiguous_first = _bool_column(complete, "trajectory_imm_ambiguous_vs_first_order_imm")
+        trajectory_confident_momentum = _bool_column(complete, "trajectory_imm_confident_vs_momentum")
+        momentum_confident = _bool_column(complete, "momentum_confident_vs_trajectory_imm")
+        ambiguous_momentum = _bool_column(complete, "trajectory_imm_ambiguous_vs_momentum")
+        trajectory_raw_best = _bool_column(complete, "trajectory_imm_raw_best_exact_core")
+        trajectory_confident_exact = _bool_column(complete, "trajectory_imm_confident_exact_core_claim")
+        first_order_raw_best = _bool_column(complete, "first_order_imm_raw_best_exact_core")
+        momentum_raw_best = _bool_column(complete, "momentum_raw_best_exact_core")
         row = {column: value for column, value in zip(group_cols, key_tuple, strict=True)}
         row.update(
             {
@@ -305,15 +316,9 @@ def _summarize_event_pairs(
                 "trajectory_imm_win_fraction_vs_first_order_imm": (
                     float((d_first > 0.0).mean()) if not d_first.empty else 0.0
                 ),
-                "trajectory_imm_confident_vs_first_order_imm": int(
-                    complete["trajectory_imm_confident_vs_first_order_imm"].fillna(False).sum()
-                ),
-                "first_order_imm_confident_vs_trajectory_imm": int(
-                    complete["first_order_imm_confident_vs_trajectory_imm"].fillna(False).sum()
-                ),
-                "ambiguous_vs_first_order_imm": int(
-                    complete["trajectory_imm_ambiguous_vs_first_order_imm"].fillna(False).sum()
-                ),
+                "trajectory_imm_confident_vs_first_order_imm": int(trajectory_confident_first.sum()),
+                "first_order_imm_confident_vs_trajectory_imm": int(first_order_confident.sum()),
+                "ambiguous_vs_first_order_imm": int(ambiguous_first.sum()),
                 "mean_delta_vs_first_order_imm": float(d_first.mean()) if not d_first.empty else np.nan,
                 "median_delta_vs_first_order_imm": float(d_first.median()) if not d_first.empty else np.nan,
                 "min_delta_vs_first_order_imm": float(d_first.min()) if not d_first.empty else np.nan,
@@ -321,24 +326,18 @@ def _summarize_event_pairs(
                 "trajectory_imm_win_fraction_vs_momentum": (
                     float((d_momentum > 0.0).mean()) if not d_momentum.empty else 0.0
                 ),
-                "trajectory_imm_confident_vs_momentum": int(
-                    complete["trajectory_imm_confident_vs_momentum"].fillna(False).sum()
-                ),
-                "momentum_confident_vs_trajectory_imm": int(
-                    complete["momentum_confident_vs_trajectory_imm"].fillna(False).sum()
-                ),
-                "ambiguous_vs_momentum": int(complete["trajectory_imm_ambiguous_vs_momentum"].fillna(False).sum()),
+                "trajectory_imm_confident_vs_momentum": int(trajectory_confident_momentum.sum()),
+                "momentum_confident_vs_trajectory_imm": int(momentum_confident.sum()),
+                "ambiguous_vs_momentum": int(ambiguous_momentum.sum()),
                 "mean_delta_vs_momentum": float(d_momentum.mean()) if not d_momentum.empty else np.nan,
                 "median_delta_vs_momentum": float(d_momentum.median()) if not d_momentum.empty else np.nan,
-                "trajectory_imm_raw_best_exact_core": int(complete["trajectory_imm_raw_best_exact_core"].sum()),
+                "trajectory_imm_raw_best_exact_core": int(trajectory_raw_best.sum()),
                 "trajectory_imm_raw_best_exact_core_fraction": (
-                    float(complete["trajectory_imm_raw_best_exact_core"].mean()) if not complete.empty else 0.0
+                    float(trajectory_raw_best.mean()) if not complete.empty else 0.0
                 ),
-                "trajectory_imm_confident_exact_core_claims": int(
-                    complete["trajectory_imm_confident_exact_core_claim"].fillna(False).sum()
-                ),
-                "first_order_imm_raw_best_exact_core": int(complete["first_order_imm_raw_best_exact_core"].sum()),
-                "momentum_raw_best_exact_core": int(complete["momentum_raw_best_exact_core"].sum()),
+                "trajectory_imm_confident_exact_core_claims": int(trajectory_confident_exact.sum()),
+                "first_order_imm_raw_best_exact_core": int(first_order_raw_best.sum()),
+                "momentum_raw_best_exact_core": int(momentum_raw_best.sum()),
                 "median_trajectory_imm_rank_in_required_core": (
                     float(complete["trajectory_imm_rank_in_required_core"].median()) if not complete.empty else np.nan
                 ),

@@ -603,18 +603,23 @@ def _bool_mask(frame: pd.DataFrame, column: str) -> pd.Series:
 
 
 def _coerce_optional_bool(value: object) -> bool | float:
+    if isinstance(value, (bool, np.bool_)):
+        return bool(value)
     try:
         if pd.isna(value):
             return np.nan
     except (TypeError, ValueError):
         pass
+    if isinstance(value, (int, float, np.integer, np.floating)):
+        numeric = float(value)
+        return bool(np.isfinite(numeric) and numeric != 0.0)
     if isinstance(value, str):
         value = value.strip().lower()
-        if value in {"", "nan", "none"}:
+        if value in {"", "nan", "none", "null"}:
             return np.nan
-        if value in {"true", "1", "yes"}:
+        if value in {"true", "t", "1", "1.0", "yes", "y", "on"}:
             return True
-        if value in {"false", "0", "no"}:
+        if value in {"false", "f", "0", "0.0", "no", "n", "off"}:
             return False
     return bool(value)
 

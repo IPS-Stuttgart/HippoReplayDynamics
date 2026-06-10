@@ -14,6 +14,7 @@ from replay_grammar_analysis import (  # noqa: E402
     RAT_SUMMARY_OUTPUT,
     GrammarInferenceConfig,
     parse_mode_mean_duration_bins,
+    rat_replay_grammar_summary,
     write_replay_grammar_outputs,
 )
 
@@ -102,6 +103,40 @@ def test_parse_mode_duration_overrides():
     assert parsed == {"stationary": 2.0, "diffusion": 5.0, "momentum": 7.0}
     with pytest.raises(ValueError, match="unknown grammar mode"):
         parse_mode_mean_duration_bins("teleport:3")
+
+
+def test_rat_replay_grammar_summary_parses_csv_bool_flags():
+    motifs = pd.DataFrame(
+        [
+            {
+                "session": "Rat1/Open1",
+                "motif": "stationary",
+                "compositional_replay": "False",
+                "has_trajectory_segment": "0.0",
+                "has_momentum_segment": "False",
+                "has_stationary_prelude": "False",
+                "has_fragmented_endpoint": "False",
+                "trajectory_duration_fraction": 0.0,
+            },
+            {
+                "session": "Rat1/Open1",
+                "motif": "diffusion->momentum",
+                "compositional_replay": "True",
+                "has_trajectory_segment": "1.0",
+                "has_momentum_segment": 1.0,
+                "has_stationary_prelude": "False",
+                "has_fragmented_endpoint": "False",
+                "trajectory_duration_fraction": 1.0,
+            },
+        ]
+    )
+
+    summary = rat_replay_grammar_summary(motifs).iloc[0]
+
+    assert summary["compositional_events"] == 1
+    assert summary["compositional_fraction"] == pytest.approx(0.5)
+    assert summary["events_with_trajectory_segment"] == 1
+    assert summary["events_with_momentum_segment"] == 1
 
 
 def _segment_scores(overrides: list[tuple[int, int, str, float]], *, n_time: int) -> pd.DataFrame:

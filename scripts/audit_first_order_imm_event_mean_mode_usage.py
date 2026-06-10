@@ -97,16 +97,17 @@ def _rat_from_session(session: object) -> str:
 
 
 def _as_bool(value: object) -> bool:
-    if isinstance(value, bool):
-        return value
-    if value is None:
-        return False
+    if isinstance(value, (bool, np.bool_)):
+        return bool(value)
     try:
         if pd.isna(value):
             return False
     except (TypeError, ValueError):
-        pass
-    return str(value).strip().lower() in {"1", "true", "t", "yes", "y"}
+        return False
+    if isinstance(value, (int, float, np.integer, np.floating)):
+        numeric = float(value)
+        return bool(np.isfinite(numeric) and numeric != 0.0)
+    return str(value).strip().lower() in {"1", "1.0", "true", "t", "yes", "y", "on"}
 
 
 def _bool_column(frame: pd.DataFrame, column: str) -> pd.Series:

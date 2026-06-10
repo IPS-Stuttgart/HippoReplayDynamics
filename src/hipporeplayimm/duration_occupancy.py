@@ -119,6 +119,13 @@ def _score_state_space_duration_with_occupancy(
             diffusion_transitions=diffusion_transitions,
             max_step_sigma=self.config.max_step_sigma,
             mode_stickiness=self.config.imm_mode_stickiness,
+            mode_transitions=_mode_transition_matrices(
+                ss,
+                3,
+                self.config.imm_mode_stickiness,
+                self.config.imm_switch_tau_s,
+                durations,
+            ),
             valid_bin_mask=valid_bin_mask,
         )
         names = ("stationary", "diffusion", "fragmented")
@@ -303,6 +310,13 @@ def _score_state_space_duration_with_occupancy(
             velocity_decays=decays,
             time_scales=time_scales,
             mode_stickiness=self.config.imm_mode_stickiness,
+            mode_transitions=_mode_transition_matrices(
+                ss,
+                4,
+                self.config.imm_mode_stickiness,
+                self.config.imm_switch_tau_s,
+                durations,
+            ),
             valid_bin_mask=valid_bin_mask,
         )
         evidence_support = ss._candidate_evidence_support_label(
@@ -358,6 +372,7 @@ def _score_state_space_duration_with_occupancy(
         "state_space_diffusion_sigma_cm_sqrt_s": float(self.config.diffusion_sigma_cm_sqrt_s),
         "state_space_max_step_sigma": float(self.config.max_step_sigma),
         "state_space_imm_mode_stickiness": float(self.config.imm_mode_stickiness),
+        "state_space_imm_switch_tau_s": float(self.config.imm_switch_tau_s),
         "state_space_momentum_sigma_cm_sqrt_s": float(self.config.momentum_sigma_cm_sqrt_s),
         "state_space_momentum_initial_sigma_cm_sqrt_s": float(self.config.momentum_initial_sigma_cm_sqrt_s),
         "state_space_momentum_velocity_decay": float(self.config.momentum_velocity_decay),
@@ -482,6 +497,66 @@ def _duration_adjusted_decays(
     return np.asarray([decay ** (float(duration) / reference_dt) for duration in durations], dtype=float)
 
 
+def _mode_transition_matrices(
+    ss,
+    n_modes: int,
+    mode_stickiness: float,
+    imm_switch_tau_s: float,
+    durations: np.ndarray,
+) -> list[np.ndarray]:
+    """Return one IMM mode-transition matrix per adjacent time-bin pair.
+
+    ``mode_stickiness`` remains the legacy per-transition probability.  When
+    ``imm_switch_tau_s`` is positive, the stickiness is derived from each actual
+    transition duration as ``exp(-duration / tau)`` so a final partial replay bin
+    or other variable-duration bin does not use the wrong switching rate.
+    """
+
+    durations = np.asarray(durations, dtype=float)
+    tau_s = float(imm_switch_tau_s)
+    if not np.isfinite(tau_s) or tau_s < 0.0:
+        raise ValueError("imm_switch_tau_s must be finite and nonnegative")
+    if tau_s == 0.0:
+        return _resolve_mode_transitions(
+            ss,
+            int(n_modes),
+            float(mode_stickiness),
+            None,
+            int(durations.size),
+        )
+    if not np.all(np.isfinite(durations)) or np.any(durations <= 0.0):
+        raise ValueError("transition durations must be finite and positive")
+    return [
+        ss._mode_transition_matrix(
+            int(n_modes),
+            float(np.exp(-float(duration) / tau_s)),
+        )
+        for duration in durations
+    ]
+
+
+def _resolve_mode_transitions(
+    ss,
+    n_modes: int,
+    mode_stickiness: float,
+    mode_transitions,
+    n_transitions: int,
+) -> list[np.ndarray]:
+    """Validate provided IMM mode transitions or build a constant sequence."""
+
+    if mode_transitions is None:
+        transition = ss._mode_transition_matrix(int(n_modes), float(mode_stickiness))
+        return [transition for _ in range(int(n_transitions))]
+    if len(mode_transitions) != int(n_transitions):
+        raise ValueError("mode_transitions must contain one matrix per transition")
+    resolved = [np.asarray(matrix, dtype=float) for matrix in mode_transitions]
+    expected_shape = (int(n_modes), int(n_modes))
+    for matrix in resolved:
+        if matrix.shape != expected_shape:
+            raise ValueError("mode transition matrices must be square with one row and column per mode")
+    return resolved
+
+
 def _duration_adjusted_decays_from_config(config, durations: np.ndarray, reference_dt: float) -> np.ndarray:
     """Return transition-specific momentum velocity decays.
 
@@ -569,11 +644,19 @@ def _score_first_order_imm_variable(
     diffusion_transitions,
     max_step_sigma,
     mode_stickiness,
+    mode_transitions=None,
     valid_bin_mask=None,
 ):
     modes = ("stationary", "diffusion", "fragmented")
     n_modes = len(modes)
     n_time, n_bins = log_likelihood.shape
+    mode_transitions = _resolve_mode_transitions(
+        ss,
+        n_modes,
+        mode_stickiness,
+        mode_transitions,
+        max(n_time - 1, 0),
+    )
     transitions = {
         "stationary": ss._gaussian_transition_matrix(
             bin_centers,
@@ -584,7 +667,6 @@ def _score_first_order_imm_variable(
         "diffusion": diffusion_transitions,
         "fragmented": None,
     }
-    mode_transition = ss._mode_transition_matrix(n_modes, mode_stickiness)
     scaled, offsets = ss._scaled_emissions(log_likelihood, valid_bin_mask=valid_bin_mask)
     filtered = np.zeros((n_time, n_modes, n_bins), dtype=float)
     scales = np.zeros(n_time, dtype=float)
@@ -599,6 +681,7 @@ def _score_first_order_imm_variable(
 
     for time_index in range(1, n_time):
         predicted = np.zeros_like(alpha)
+        mode_transition = mode_transitions[time_index - 1]
         for dst_idx, dst_mode in enumerate(modes):
             dst = np.zeros(n_bins, dtype=float)
             for src_idx in range(n_modes):
@@ -622,6 +705,7 @@ def _score_first_order_imm_variable(
     smoothed[-1] = filtered[-1]
     for time_index in range(n_time - 1, 0, -1):
         beta_prev = np.zeros_like(beta)
+        mode_transition = mode_transitions[time_index - 1]
         for src_idx in range(n_modes):
             for dst_idx, dst_mode in enumerate(modes):
                 transition = transitions[dst_mode]
@@ -721,6 +805,7 @@ def _score_imm_duration(
     velocity_decays,
     time_scales,
     mode_stickiness,
+    mode_transitions=None,
     valid_bin_mask=None,
 ):
     modes = ("stationary", "diffusion", "momentum", "jump")
@@ -729,10 +814,14 @@ def _score_imm_duration(
         mode_posterior = np.full((1, len(modes)), 1.0 / len(modes), dtype=float)
         return logp, trajectory, mode_posterior, [0.0]
 
+    mode_transitions = _resolve_mode_transitions(
+        ss,
+        len(modes),
+        mode_stickiness,
+        mode_transitions,
+        max(emissions.n_time - 1, 0),
+    )
     masses = ss._candidate_log_masses(emissions.log_likelihood, candidates)
-    mode_transition = ss._mode_transition_matrix(len(modes), mode_stickiness)
-    with np.errstate(divide="ignore"):
-        log_mode_transition = np.log(mode_transition)
 
     by_mode = [
         ss._init_imm_pair_log_alpha(
@@ -754,6 +843,9 @@ def _score_imm_duration(
     for time_index in range(2, emissions.n_time):
         transition_index = time_index - 1
         next_alpha = []
+        mode_transition = mode_transitions[transition_index]
+        with np.errstate(divide="ignore"):
+            log_mode_transition = np.log(mode_transition)
         for dst_mode_index, dst_mode in enumerate(modes):
             mixed_prev = logsumexp(
                 log_pair + log_mode_transition[:, dst_mode_index][:, None, None],
@@ -783,6 +875,7 @@ def _score_imm_duration(
     for pair_index in range(len(pair_alphas) - 2, -1, -1):
         transition_index = pair_index + 1
         curr_time = pair_index + 2
+        mode_transition = mode_transitions[transition_index]
         pair_betas[pair_index] = ss._backward_imm_pair(
             pair_betas[pair_index + 1],
             candidates[pair_index],

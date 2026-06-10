@@ -841,10 +841,17 @@ def _cell_split_scores_from_encoding(encoding, strategy: str) -> np.ndarray:
 def _effective_state_space_imm_stickiness(config: BenchmarkConfig) -> float:
     """Return per-bin IMM stickiness, optionally from a physical switch time constant."""
 
-    tau_s = float(getattr(config, "state_space_imm_switch_tau_s", 0.0))
+    tau_s = _state_space_imm_switch_tau_s(config)
     if tau_s <= 0.0:
         return float(config.state_space_imm_mode_stickiness)
     return float(np.exp(-float(config.emissions.time_bin_s) / tau_s))
+
+
+def _state_space_imm_switch_tau_s(config: BenchmarkConfig) -> float:
+    tau_s = float(getattr(config, "state_space_imm_switch_tau_s", 0.0))
+    if not np.isfinite(tau_s) or tau_s < 0.0:
+        raise ValueError("state_space_imm_switch_tau_s must be finite and nonnegative")
+    return tau_s
 
 
 def _state_space_decoder_config(config: BenchmarkConfig, mode: str) -> StateSpaceDecoderConfig:
@@ -856,6 +863,7 @@ def _state_space_decoder_config(config: BenchmarkConfig, mode: str) -> StateSpac
         diffusion_sigma_cm_sqrt_s=float(config.state_space_diffusion_sigma_cm_sqrt_s),
         max_step_sigma=float(config.state_space_max_step_sigma),
         imm_mode_stickiness=_effective_state_space_imm_stickiness(config),
+        imm_switch_tau_s=_state_space_imm_switch_tau_s(config),
         trajectory_imm_mode_stickiness=config.state_space_trajectory_imm_mode_stickiness,
         trajectory_imm_momentum_initial_probability=(
             config.state_space_trajectory_imm_momentum_initial_probability

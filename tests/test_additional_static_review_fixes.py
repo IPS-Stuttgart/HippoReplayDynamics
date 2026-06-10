@@ -7,12 +7,23 @@ import numpy as np
 import pytest
 
 from hipporeplayimm.benchmarks import (
+    BenchmarkConfig,
     _candidate_indices_for_model as _benchmark_candidate_indices_for_model,
+    _effective_state_space_imm_stickiness,
     _score_state_space_model as _benchmark_score_state_space_model,
+    _state_space_decoder_config,
 )
-from hipporeplayimm.data import ReplaySession
+from hipporeplayimm.data import ReplaySession, _coerce_mark_matrix
 from hipporeplayimm.duration_dynamics import attach_duration_metadata, transition_durations_s
-from hipporeplayimm.encoding import EncodingConfig, EncodingModel, LogEmissionTensor, fit_place_field_encoding
+from hipporeplayimm.duration_occupancy import _mode_transition_matrices
+from hipporeplayimm.encoding import (
+    EmissionConfig,
+    EncodingConfig,
+    EncodingModel,
+    LogEmissionTensor,
+    _poisson_log_emissions,
+    fit_place_field_encoding,
+)
 from hipporeplayimm.ground_truth import _score_state_space_joint_for_ground_truth
 from hipporeplayimm.kd_reference import KDEncodingConfig, fit_kd_place_field_encoding
 from hipporeplayimm.models import EventScore
@@ -20,6 +31,10 @@ from hipporeplayimm.result_improvement_extensions import score_replay_model_comp
 from hipporeplayimm.simulation_recovery import (
     _candidate_indices_for_model as _simulation_candidate_indices_for_model,
     simulate_replay_event,
+)
+from hipporeplayimm.state_space_model import StateSpaceDecoderConfig, _momentum_velocity_decays
+from hipporeplayimm.state_space_sparse_momentum import (
+    _duration_adjusted_decays as _sparse_momentum_duration_adjusted_decays,
 )
 
 
@@ -103,6 +118,53 @@ def test_kd_place_field_encoding_smoothing_handles_empty_cell_set():
     assert encoding.rates_hz.shape == (0, encoding.n_bins)
 
 
+def test_poisson_emissions_accept_explicit_empty_cell_weights_for_zero_cells():
+    log_likelihood = _poisson_log_emissions(
+        np.zeros((3, 0), dtype=int),
+        np.zeros((0, 2), dtype=float),
+        np.array([0.01, 0.02, 0.03], dtype=float),
+        cell_weights=[],
+    )
+
+    np.testing.assert_allclose(log_likelihood, np.zeros((3, 2), dtype=float))
+
+
+def test_single_spike_mark_matrix_preserves_feature_columns_and_drops_time_column():
+    spike_times = np.array([0.125], dtype=float)
+
+    marks = _coerce_mark_matrix(
+        np.array([[0.125, 10.0, 20.0, 30.0]], dtype=float),
+        spike_count=1,
+        spike_times=spike_times,
+    )
+    assert marks is not None
+    np.testing.assert_allclose(marks, np.array([[10.0, 20.0, 30.0]], dtype=float))
+
+    transposed = _coerce_mark_matrix(
+        np.array([[10.0], [20.0], [30.0]], dtype=float),
+        spike_count=1,
+        spike_times=spike_times,
+    )
+    assert transposed is not None
+    np.testing.assert_allclose(transposed, np.array([[10.0, 20.0, 30.0]], dtype=float))
+
+
+def test_momentum_decay_helpers_reject_nonfinite_tau_and_decay():
+    durations = np.array([0.01, 0.02], dtype=float)
+
+    bad_tau = StateSpaceDecoderConfig(momentum_velocity_decay_tau_s=float("nan"))
+    with pytest.raises(ValueError, match="momentum_velocity_decay_tau_s"):
+        _momentum_velocity_decays(bad_tau, durations)
+    with pytest.raises(ValueError, match="momentum_velocity_decay_tau_s"):
+        _sparse_momentum_duration_adjusted_decays(bad_tau, durations, 0.01)
+
+    bad_decay = StateSpaceDecoderConfig(momentum_velocity_decay=float("nan"))
+    with pytest.raises(ValueError, match="momentum_velocity_decay"):
+        _momentum_velocity_decays(bad_decay, durations)
+    with pytest.raises(ValueError, match="momentum_velocity_decay"):
+        _sparse_momentum_duration_adjusted_decays(bad_decay, durations, 0.01)
+
+
 def test_simulation_recovery_candidate_helper_passes_bin_centers_when_supported():
     emissions = LogEmissionTensor(
         log_likelihood=np.zeros((1, 2), dtype=float),
@@ -171,6 +233,44 @@ def test_candidate_helpers_pass_keyword_only_bin_centers_when_supported():
 
     for helper in (_simulation_candidate_indices_for_model, _benchmark_candidate_indices_for_model):
         assert helper(KeywordOnlyBinCenterModel(), emissions, bin_centers)[0].tolist() == [0]
+
+
+def test_state_space_imm_switch_tau_is_preserved_for_duration_scorer():
+    config = BenchmarkConfig(
+        emissions=EmissionConfig(time_bin_s=0.02),
+        state_space_imm_mode_stickiness=0.91,
+        state_space_imm_switch_tau_s=0.5,
+    )
+
+    decoder_config = _state_space_decoder_config(config, "imm")
+
+    assert decoder_config.imm_mode_stickiness == pytest.approx(np.exp(-0.02 / 0.5))
+    assert decoder_config.imm_switch_tau_s == pytest.approx(0.5)
+    assert _effective_state_space_imm_stickiness(config) == pytest.approx(np.exp(-0.02 / 0.5))
+
+
+def test_imm_switch_tau_builds_duration_specific_transition_matrices():
+    import hipporeplayimm.state_space as ss
+
+    durations = np.array([0.02, 0.04, 0.08], dtype=float)
+
+    matrices = _mode_transition_matrices(
+        ss,
+        n_modes=4,
+        mode_stickiness=0.90,
+        imm_switch_tau_s=0.5,
+        durations=durations,
+    )
+
+    assert len(matrices) == durations.shape[0]
+    for matrix, duration in zip(matrices, durations, strict=True):
+        expected_stickiness = np.exp(-duration / 0.5)
+        np.testing.assert_allclose(np.diag(matrix), expected_stickiness)
+        off_diagonal = matrix[~np.eye(matrix.shape[0], dtype=bool)]
+        np.testing.assert_allclose(off_diagonal, (1.0 - expected_stickiness) / 3.0)
+
+    with pytest.raises(ValueError, match="imm_switch_tau_s"):
+        _mode_transition_matrices(ss, 4, 0.90, float("inf"), durations)
 
 
 def test_state_space_score_helpers_do_not_swallow_occupancy_type_errors():

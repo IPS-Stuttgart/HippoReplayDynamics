@@ -558,9 +558,9 @@ def _duration_adjusted_decays(config: object, durations: np.ndarray, reference_d
     if durations.size == 0:
         return np.empty(0, dtype=float)
     tau_s = float(getattr(config, "momentum_velocity_decay_tau_s", 0.0))
+    if not np.isfinite(tau_s) or tau_s < 0.0:
+        raise ValueError("momentum_velocity_decay_tau_s must be finite and nonnegative")
     if tau_s > 0.0:
-        if not np.isfinite(tau_s):
-            raise ValueError("momentum_velocity_decay_tau_s must be finite when positive")
         return np.exp(durations * (-1.0 / tau_s))
     decay = float(getattr(config, "momentum_velocity_decay", 0.95))
     if not np.isfinite(decay) or decay < 0.0:

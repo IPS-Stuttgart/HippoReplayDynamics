@@ -433,6 +433,8 @@ def _emission_cell_weights(
         raise ValueError("cell_weights must be finite")
     if np.any(weights < 0.0):
         raise ValueError("cell_weights must be nonnegative")
+    if int(n_cells) == 0:
+        return weights
     if not np.any(weights > 0.0):
         raise ValueError("cell_weights must include at least one positive weight")
     return weights

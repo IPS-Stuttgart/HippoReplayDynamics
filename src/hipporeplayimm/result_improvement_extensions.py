@@ -169,10 +169,17 @@ def _sorted_spike_counts_for_edges(
     spike_times = spikes[keep, 0]
     spike_cell_ids = spikes[keep, 1].astype(int)
     time_bins = np.searchsorted(edges, spike_times, side="right") - 1
-    rows = np.searchsorted(encoding.cell_ids, spike_cell_ids)
+    cell_id_to_row = {
+        int(cell_id): row_index
+        for row_index, cell_id in enumerate(np.asarray(encoding.cell_ids, dtype=int))
+    }
+    rows = np.fromiter(
+        (cell_id_to_row.get(int(cell_id), -1) for cell_id in spike_cell_ids),
+        dtype=int,
+        count=spike_cell_ids.shape[0],
+    )
     valid = (time_bins >= 0) & (time_bins < counts.shape[0])
-    valid &= (rows >= 0) & (rows < encoding.cell_ids.shape[0])
-    valid[valid] &= encoding.cell_ids[rows[valid]] == spike_cell_ids[valid]
+    valid &= rows >= 0
     np.add.at(counts, (time_bins[valid].astype(int), rows[valid]), 1)
     return counts
 
@@ -564,6 +571,10 @@ class BidirectionalReplayModel:
                 [forward.trajectory_log_posterior, reverse.trajectory_log_posterior],
                 weights,
             )
+        if terminal is None and trajectory is not None:
+            terminal = trajectory[-1].copy()
+        if terminal is not None:
+            diagnostics.update(_posterior_diagnostics(terminal, bin_centers))
         return EventScore(
             self.name,
             logp,

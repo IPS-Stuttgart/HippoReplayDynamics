@@ -123,7 +123,7 @@ def _score_sparse_momentum_exact(
 
     del transition_row_builder, transition_cache_key_builder
 
-    scaled, offsets = _scaled_emissions(log_likelihood)
+    scaled, offsets = _scaled_emissions(log_likelihood, valid_bin_mask=valid_mask)
     prev, curr, alpha, initial_edge_counts = initial_pair_initializer(scaled)
     scale = float(alpha.sum())
     if scale <= 0.0 or not np.isfinite(scale):

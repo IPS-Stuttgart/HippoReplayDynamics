@@ -494,7 +494,7 @@ def _transition_at(transitions, transition_index: int):
 
 def _forward_backward_variable(ss, log_likelihood, transitions, *, valid_bin_mask=None):
     n_time, n_bins = log_likelihood.shape
-    scaled, offsets = ss._scaled_emissions(log_likelihood)
+    scaled, offsets = ss._scaled_emissions(log_likelihood, valid_bin_mask=valid_bin_mask)
     filtered = np.zeros((n_time, n_bins), dtype=float)
     scales = np.zeros(n_time, dtype=float)
 
@@ -554,7 +554,7 @@ def _score_first_order_imm_variable(
         "fragmented": None,
     }
     mode_transition = ss._mode_transition_matrix(n_modes, mode_stickiness)
-    scaled, offsets = ss._scaled_emissions(log_likelihood)
+    scaled, offsets = ss._scaled_emissions(log_likelihood, valid_bin_mask=valid_bin_mask)
     filtered = np.zeros((n_time, n_modes, n_bins), dtype=float)
     scales = np.zeros(n_time, dtype=float)
 

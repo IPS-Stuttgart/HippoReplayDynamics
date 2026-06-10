@@ -73,6 +73,16 @@ class BidirectionalReplayModel:
 
 
 def reverse_emissions(emissions: LogEmissionTensor) -> LogEmissionTensor:
+    bin_durations = _reversed_optional_duration_vector(
+        getattr(emissions, "bin_durations", None),
+        expected_length=emissions.n_time,
+        name="bin_durations",
+    )
+    transition_durations = _reversed_optional_duration_vector(
+        getattr(emissions, "transition_durations", None),
+        expected_length=max(emissions.n_time - 1, 0),
+        name="transition_durations",
+    )
     reversed_times = np.asarray(emissions.times, dtype=float)[::-1].copy()
     out = LogEmissionTensor(
         log_likelihood=np.asarray(emissions.log_likelihood, dtype=float)[::-1].copy(),
@@ -81,11 +91,29 @@ def reverse_emissions(emissions: LogEmissionTensor) -> LogEmissionTensor:
         dt=emissions.dt,
         cell_ids=np.asarray(emissions.cell_ids).copy(),
         n_spikes=int(emissions.n_spikes),
+        bin_durations=bin_durations,
+        transition_durations=transition_durations,
     )
     metadata = getattr(emissions, "metadata", None)
     if metadata is not None:
         out.metadata = dict(metadata)
     return out
+
+
+def _reversed_optional_duration_vector(
+    values: np.ndarray | None,
+    *,
+    expected_length: int,
+    name: str,
+) -> np.ndarray | None:
+    if values is None:
+        return None
+    array = np.asarray(values, dtype=float)
+    if array.shape != (expected_length,):
+        raise ValueError(
+            f"{name} must contain {expected_length} values; got shape {array.shape}"
+        )
+    return array[::-1].copy()
 
 
 def _mixture_log_posterior(left: np.ndarray | None, right: np.ndarray | None, weights: np.ndarray) -> np.ndarray | None:

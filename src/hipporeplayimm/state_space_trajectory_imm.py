@@ -83,7 +83,7 @@ def _score_trajectory_imm_exact_sparse(
 
     valid_mask = _coerce_valid_bin_mask(valid_bin_mask, emissions.n_bins)
     valid = _valid_indices(valid_mask, emissions.n_bins)
-    scaled, offsets = _scaled_emissions(emissions.log_likelihood)
+    scaled, offsets = _scaled_emissions(emissions.log_likelihood, valid_bin_mask=valid_mask)
     if valid_mask is not None:
         scaled[:, ~valid_mask] = 0.0
 

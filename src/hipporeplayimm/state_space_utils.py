@@ -243,11 +243,24 @@ def _pairwise_gaussian_log_prob(predicted: np.ndarray, observed: np.ndarray, sig
     return -0.5 * dist2 / (sigma_cm * sigma_cm)
 
 
-def _scaled_emissions(log_likelihood: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+def _scaled_emissions(
+    log_likelihood: np.ndarray,
+    valid_bin_mask: np.ndarray | None = None,
+) -> tuple[np.ndarray, np.ndarray]:
     values = np.asarray(log_likelihood, dtype=float)
+    if values.ndim != 2:
+        raise ValueError("log_likelihood must be two-dimensional")
+
     finite = np.isfinite(values)
+    valid_mask = _coerce_valid_bin_mask(valid_bin_mask, values.shape[1])
+    if valid_mask is not None:
+        finite &= valid_mask[None, :]
+
     if not np.all(np.any(finite, axis=1)):
-        raise ValueError("every emission row must contain at least one finite value")
+        raise ValueError(
+            "every emission row must contain at least one finite value on the active support"
+        )
+
     offsets = np.max(np.where(finite, values, -np.inf), axis=1)
     shifted = np.where(finite, values - offsets[:, None], -np.inf)
     scaled = np.exp(np.clip(shifted, -745.0, 0.0))

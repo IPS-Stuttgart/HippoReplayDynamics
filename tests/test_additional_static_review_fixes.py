@@ -40,6 +40,11 @@ from hipporeplayimm.simulation_recovery import (
     _candidate_indices_for_model as _simulation_candidate_indices_for_model,
     simulate_replay_event,
 )
+from hipporeplayimm.state_space_displacement_momentum import (
+    _displacement_transition_matrix,
+    _duration_adjusted_decays as _displacement_duration_adjusted_decays,
+    _shifted_gaussian_transition_matrix,
+)
 from hipporeplayimm.state_space_model import StateSpaceDecoderConfig, _momentum_velocity_decays
 from hipporeplayimm.state_space_sparse_momentum import (
     _duration_adjusted_decays as _sparse_momentum_duration_adjusted_decays,
@@ -242,12 +247,37 @@ def test_momentum_decay_helpers_reject_nonfinite_tau_and_decay():
         _momentum_velocity_decays(bad_tau, durations)
     with pytest.raises(ValueError, match="momentum_velocity_decay_tau_s"):
         _sparse_momentum_duration_adjusted_decays(bad_tau, durations, 0.01)
+    with pytest.raises(ValueError, match="momentum_velocity_decay_tau_s"):
+        _displacement_duration_adjusted_decays(bad_tau, durations, 0.01)
 
     bad_decay = StateSpaceDecoderConfig(momentum_velocity_decay=float("nan"))
     with pytest.raises(ValueError, match="momentum_velocity_decay"):
         _momentum_velocity_decays(bad_decay, durations)
     with pytest.raises(ValueError, match="momentum_velocity_decay"):
         _sparse_momentum_duration_adjusted_decays(bad_decay, durations, 0.01)
+    with pytest.raises(ValueError, match="momentum_velocity_decay"):
+        _displacement_duration_adjusted_decays(bad_decay, durations, 0.01)
+    with pytest.raises(ValueError, match="reference dt"):
+        _displacement_duration_adjusted_decays(StateSpaceDecoderConfig(), durations, float("nan"))
+
+
+def test_displacement_transition_helpers_validate_and_normalize_degenerate_columns():
+    centers = np.array([[0.0, 0.0], [1.0, 0.0]], dtype=float)
+    with pytest.raises(ValueError, match="max_step_sigma"):
+        _shifted_gaussian_transition_matrix(
+            centers,
+            displacement=np.array([0.0, 0.0]),
+            sigma_cm=1.0,
+            max_step_sigma=float("nan"),
+        )
+
+    vectors = np.array([[0.0], [1.0], [2.0]], dtype=float)
+    transition = _displacement_transition_matrix(vectors, sigma_cm=1e-150, decay=0.5)
+
+    np.testing.assert_allclose(transition.sum(axis=0), np.ones(vectors.shape[0]))
+    assert np.all(np.isfinite(transition))
+    assert np.all(transition >= 0.0)
+    assert transition[:, 1].max() == pytest.approx(1.0)
 
 
 def test_simulation_recovery_candidate_helper_passes_bin_centers_when_supported():

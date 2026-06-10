@@ -4,6 +4,7 @@ import numpy as np
 import pytest
 from scipy.special import logsumexp
 
+import hipporeplayimm.state_space_displacement_imm as displacement_imm
 import hipporeplayimm.state_space_trajectory_imm as trajectory_imm
 from hipporeplayimm.encoding import LogEmissionTensor
 from hipporeplayimm.sorted_spike_state_space import SortedSpikeStateSpaceReplayModel
@@ -345,6 +346,64 @@ def test_trajectory_imm_uses_duration_specific_momentum_entry_sigma(monkeypatch)
     assert any(np.isclose(value, 2.0) for value in backward_entry_sigmas)
     assert diagnostics["state_space_momentum_initial_transition_sigma_cm"] == pytest.approx(1.5)
     assert diagnostics["state_space_momentum_initial_transition_sigma_cm_per_step"] == "1,2"
+
+
+def test_displacement_imm_uses_duration_specific_mode_stickiness(monkeypatch):
+    centers = np.array(
+        [
+            [0.0, 0.0],
+            [1.0, 0.0],
+            [2.0, 0.0],
+            [3.0, 0.0],
+        ]
+    )
+    emissions = LogEmissionTensor(
+        log_likelihood=np.zeros((3, centers.shape[0]), dtype=float),
+        spike_counts=np.zeros((3, 1), dtype=int),
+        times=np.array([0.0, 0.01, 0.05]),
+        dt=0.01,
+        cell_ids=np.array([1]),
+        n_spikes=0,
+        transition_durations=np.array([0.01, 0.04]),
+    )
+    config = StateSpaceDecoderConfig(
+        mode="displacement-imm",
+        imm_mode_stickiness=0.5,
+        imm_switch_tau_s=0.02,
+        displacement_radius_bins=0,
+        max_step_sigma=10.0,
+    )
+    recorded_stickiness: list[float] = []
+    original_mode_transition = displacement_imm._mode_transition_matrix
+
+    def record_mode_transition(n_modes, stickiness):
+        recorded_stickiness.append(float(stickiness))
+        return original_mode_transition(n_modes, stickiness)
+
+    monkeypatch.setattr(
+        displacement_imm,
+        "_mode_transition_matrix",
+        record_mode_transition,
+    )
+
+    logp, _, _, _, _, diagnostics = displacement_imm._score_displacement_imm_exact(
+        emissions,
+        centers,
+        config,
+        emissions.transition_durations,
+        return_trajectory=True,
+    )
+
+    expected = np.exp(-emissions.transition_durations / config.imm_switch_tau_s)
+    assert np.isfinite(logp)
+    np.testing.assert_allclose(recorded_stickiness, expected)
+    np.testing.assert_allclose(
+        np.fromstring(
+            diagnostics["state_space_displacement_imm_mode_stickiness_per_step"],
+            sep=",",
+        ),
+        expected,
+    )
 
 
 def test_adaptive_candidate_support_adds_forward_and_backward_predictions():

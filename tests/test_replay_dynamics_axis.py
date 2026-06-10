@@ -6,6 +6,7 @@ import pytest
 
 from scripts.build_replay_dynamics_axis import (
     DIFFUSION,
+    DYNAMICS_INDICES,
     FIRST_ORDER_IMM,
     FRAGMENTED,
     MOMENTUM_EXACT,
@@ -110,6 +111,52 @@ def test_replay_dynamics_axis_computes_indices_and_margins(tmp_path: Path):
     }
     for filename in outputs:
         assert (tmp_path / filename).is_file()
+
+
+def test_dynamics_axis_gate_parses_string_false_exact_core_flags():
+    event_axis = pd.DataFrame(
+        [
+            {
+                "session": "Rat1/Open1",
+                "rat": "Rat1",
+                "event_index": 1,
+                "exact_core_complete": "True",
+                "pre_event_rate": 0.1,
+                **dict.fromkeys(DYNAMICS_INDICES, 0.1),
+            },
+            {
+                "session": "Rat1/Open1",
+                "rat": "Rat1",
+                "event_index": 2,
+                "exact_core_complete": "False",
+                "pre_event_rate": 0.2,
+                **dict.fromkeys(DYNAMICS_INDICES, 0.2),
+            },
+            {
+                "session": "Rat2/Open1",
+                "rat": "Rat2",
+                "event_index": 3,
+                "exact_core_complete": "True",
+                "pre_event_rate": 0.3,
+                **dict.fromkeys(DYNAMICS_INDICES, 0.3),
+            },
+        ]
+    )
+    covariate_model = pd.DataFrame(
+        [{"outcome": outcome, "term": "intercept"} for outcome in DYNAMICS_INDICES]
+    )
+
+    gate = build_dynamics_axis_gate_summary(
+        event_axis,
+        covariate_model,
+        pd.DataFrame([{"held_out_rat": "Rat1"}]),
+        pd.DataFrame([{"outcome": "diffusivity_index"}]),
+        ("pre_event_rate",),
+    ).set_index("gate")
+
+    assert not bool(gate.loc["exact_core_complete", "passed"])
+    assert gate.loc["exact_core_complete", "observed"] == "2/3"
+    assert not bool(gate.loc["overall", "passed"])
 
 
 def _event_scores(

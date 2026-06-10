@@ -539,8 +539,8 @@ def build_gate_summary(
         and not extreme.empty
         and _safe_int(strong.iloc[0]["promotion_ready_windows"]) > 0
         and _safe_int(extreme.iloc[0]["promotion_ready_windows"]) > 0
-        and bool(strong.iloc[0]["observed_exceeds_joint_shuffle_p95"])
-        and bool(extreme.iloc[0]["observed_exceeds_joint_shuffle_p95"])
+        and _as_bool(strong.iloc[0]["observed_exceeds_joint_shuffle_p95"])
+        and _as_bool(extreme.iloc[0]["observed_exceeds_joint_shuffle_p95"])
     )
     add("threshold_curve_stable_high_specificity_region", stable, f"strong={_safe_int(strong.iloc[0]['promotion_ready_windows']) if not strong.empty else 0}; extreme={_safe_int(extreme.iloc[0]['promotion_ready_windows']) if not extreme.empty else 0}", "strong and extreme tiers retain promoted candidates above joint-shuffle p95")
     add("optional_time_shifted_or_wrong_map_controls_missing", True, "not provided", "time-shifted/wrong-map tables are optional external controls in this implementation", required=False)

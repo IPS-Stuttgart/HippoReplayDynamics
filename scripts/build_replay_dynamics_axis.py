@@ -501,6 +501,11 @@ def build_dynamics_axis_gate_summary(
 ) -> pd.DataFrame:
     available = _available_covariates(event_axis, covariates)
     missing = tuple(covariate for covariate in covariates if covariate not in available)
+    exact_core_complete = (
+        event_axis["exact_core_complete"].map(_as_bool)
+        if "exact_core_complete" in event_axis
+        else pd.Series(False, index=event_axis.index, dtype=bool)
+    )
     required_rows = [
         {
             "gate": "event_rows_present",
@@ -511,9 +516,9 @@ def build_dynamics_axis_gate_summary(
         },
         {
             "gate": "exact_core_complete",
-            "passed": bool(event_axis["exact_core_complete"].all()) if len(event_axis) else False,
+            "passed": bool(exact_core_complete.all()) if len(event_axis) else False,
             "observed": (
-                f"{int(event_axis['exact_core_complete'].sum())}/{len(event_axis)}"
+                f"{int(exact_core_complete.sum())}/{len(event_axis)}"
                 if "exact_core_complete" in event_axis
                 else "0/0"
             ),

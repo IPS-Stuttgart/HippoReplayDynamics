@@ -6,6 +6,7 @@ import pandas as pd
 sys.path.append(str(Path(__file__).resolve().parents[1] / "scripts"))
 
 from calibrate_off_swr_promotion_fdr import (  # noqa: E402
+    build_gate_summary,
     build_null_calibration,
     build_threshold_sensitivity,
     write_off_swr_promotion_fdr_outputs,
@@ -115,6 +116,58 @@ def test_off_swr_promotion_fdr_outputs_and_gates_pass(tmp_path):
 
     for filename in outputs:
         assert (output / filename).exists()
+
+
+def test_off_swr_promotion_fdr_gate_parses_string_false_threshold_flags():
+    summary = pd.DataFrame(
+        [
+            {
+                "screened_off_swr_windows": 20,
+                "promotion_ready_windows": 3,
+                "exact_validated_windows": 3,
+                "exact_trajectory_confident_windows": 3,
+                "direct_control_windows": 5,
+                "direct_control_promotion_ready_windows": 0,
+                "p95_permutation_fdr_bound": 0.5,
+                "min_permutation_empirical_p_value": 0.001,
+            }
+        ]
+    )
+    calibration = pd.DataFrame(
+        [
+            {
+                "null_type": "permutation_null",
+                "permutations": 500,
+                "observed_exceeds_null_p95": "True",
+                "observed_exceeds_null_p99": "False",
+            }
+        ]
+    )
+    threshold = pd.DataFrame(
+        [
+            {
+                "candidate_tier": "strong",
+                "promotion_ready_windows": 3,
+                "observed_exceeds_joint_shuffle_p95": "False",
+            },
+            {
+                "candidate_tier": "extreme",
+                "promotion_ready_windows": 1,
+                "observed_exceeds_joint_shuffle_p95": "True",
+            },
+        ]
+    )
+
+    gates = build_gate_summary(
+        summary=summary,
+        calibration=calibration,
+        threshold_sensitivity=threshold,
+        validation_decisions=pd.DataFrame(),
+        high_specificity=pd.DataFrame(),
+        n_permutations=500,
+    ).set_index("gate")
+
+    assert not bool(gates.loc["threshold_curve_stable_high_specificity_region", "passed"])
 
 
 def _candidate(index: int, *, margin: float, state: str, interesting: bool) -> dict[str, object]:

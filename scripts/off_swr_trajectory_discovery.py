@@ -1371,7 +1371,7 @@ def off_swr_candidate_vs_swr_window_table(
                 "position_sample_count": _finite_or_nan(row.get("position_sample_count")),
                 "run_or_immobility_state": str(row.get("run_or_immobility_state", "")),
                 "distance_to_nearest_swr_s": _finite_or_nan(row.get("distance_to_nearest_swr_s")),
-                "overlaps_known_swr": bool(row.get("overlaps_known_swr", False)),
+                "overlaps_known_swr": _as_bool(row.get("overlaps_known_swr", False)),
             }
         )
 
@@ -1637,9 +1637,15 @@ def _off_swr_run_state_window_table(
                 "window_role": window_role,
                 "null_index": null_index,
                 "candidate_class": str(row.get("candidate_class", "")),
-                "is_trajectory_family_candidate": bool(row.get("is_trajectory_family_candidate", False)),
-                "trajectory_confident_claim": bool(row.get("trajectory_confident_claim", False)),
-                "nontrajectory_confident_claim": bool(row.get("nontrajectory_confident_claim", False)),
+                "is_trajectory_family_candidate": _as_bool(
+                    row.get("is_trajectory_family_candidate", False)
+                ),
+                "trajectory_confident_claim": _as_bool(
+                    row.get("trajectory_confident_claim", False)
+                ),
+                "nontrajectory_confident_claim": _as_bool(
+                    row.get("nontrajectory_confident_claim", False)
+                ),
                 "window_start_s": start,
                 "window_end_s": end,
                 "duration_s": duration,

@@ -635,14 +635,14 @@ def trajectory_imm_promotion_gate_summary(
         m = mode_readiness.iloc[0]
         add(
             "trajectory_imm_mode_diagnostics_present",
-            bool(m["mode_diagnostics_present"]),
+            _as_bool(m["mode_diagnostics_present"]),
             int(m["mode_diagnostic_columns"]),
             "trajectory-IMM output exposes numeric mode diagnostics",
             str(m.get("mode_diagnostic_column_names", "")),
         )
         add(
             "trajectory_imm_mode_diagnostics_interpretability_ready",
-            bool(m["interpretability_ready"]),
+            _as_bool(m["interpretability_ready"]),
             f"{float(m['mode_diagnostics_complete_fraction']):.6g}",
             "mode diagnostics complete fraction >= 0.95",
         )

@@ -4,7 +4,7 @@ import pandas as pd
 import pytest
 
 from hipporeplayimm.evidence_reporting import simulation_event_best_rows
-from hipporeplayimm.result_quality_gates import event_quality_summary
+from hipporeplayimm.result_quality_gates import _candidate_good_fraction, event_quality_summary
 
 
 def test_event_quality_summary_treats_string_false_as_false() -> None:
@@ -23,6 +23,16 @@ def test_event_quality_summary_treats_string_false_as_false() -> None:
     summary = event_quality_summary(frame)
 
     assert summary.loc[0, "event_reliable_fraction"] == pytest.approx(0.0)
+
+
+def test_candidate_good_fraction_treats_string_false_as_false() -> None:
+    frame = pd.DataFrame(
+        {
+            "candidate_support_quality_good": ["False", "True"],
+        }
+    )
+
+    assert _candidate_good_fraction(frame) == pytest.approx(0.5)
 
 
 def test_simulation_event_best_rows_ignores_string_false_best_flags() -> None:

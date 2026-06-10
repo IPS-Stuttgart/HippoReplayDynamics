@@ -149,12 +149,19 @@ def _bool_series(frame: pd.DataFrame, column: str) -> pd.Series:
     values = frame[column]
     if values.dtype == bool:
         return values.astype("boolean")
-    normalized = values.astype(str).str.strip().str.lower()
+    normalized = values.astype("string").str.strip().str.lower()
     true_values = {"1", "true", "t", "yes", "y"}
-    false_values = {"0", "false", "f", "no", "n", "", "nan", "none"}
-    return normalized.map(
-        lambda value: True if value in true_values else False if value in false_values else pd.NA,
-    ).astype("boolean")
+    false_values = {"0", "false", "f", "no", "n"}
+    parsed = pd.Series(pd.NA, index=frame.index, dtype="boolean")
+
+    numeric = pd.to_numeric(values, errors="coerce")
+    numeric_mask = numeric.notna()
+    true_mask = normalized.isin(true_values).fillna(False) | (numeric_mask & numeric.eq(1.0))
+    false_mask = normalized.isin(false_values).fillna(False) | (numeric_mask & numeric.eq(0.0))
+
+    parsed.loc[true_mask] = True
+    parsed.loc[false_mask & ~true_mask] = False
+    return parsed
 
 
 def _as_bool(value: object) -> bool:

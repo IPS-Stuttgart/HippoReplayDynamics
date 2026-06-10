@@ -70,11 +70,14 @@ def _score_displacement_imm_exact(
     transition_durations_s: Iterable[float],
     *,
     valid_bin_mask: np.ndarray | None = None,
-) -> tuple[float, np.ndarray, np.ndarray, np.ndarray, dict[str, float | int | str]]:
+    return_trajectory: bool = True,
+) -> tuple[float, np.ndarray | None, np.ndarray, np.ndarray, np.ndarray, dict[str, float | int | str]]:
     """Return exact evidence/posteriors for a finite-displacement IMM.
 
     The returned tuple is ``(log_evidence, position_log_posterior,
-    mode_posterior, displacement_log_posterior, diagnostics)``.
+    terminal_log_posterior, mode_posterior, displacement_log_posterior,
+    diagnostics)``. When ``return_trajectory`` is false, the position posterior
+    is ``None`` and the mode/displacement posteriors contain terminal summaries.
     """
 
     centers = _as_2d_centers(bin_centers)
@@ -215,38 +218,46 @@ def _score_displacement_imm_exact(
         filtered[time_index] = alpha
         logp += float(np.log(scales[time_index]) + offsets[time_index])
 
-    smoothed = np.zeros_like(filtered)
-    beta = np.ones((n_modes, n_bins, n_displacements), dtype=float)
-    smoothed[-1] = filtered[-1]
-    for time_index in range(emissions.n_time - 1, 0, -1):
-        cache = transition_cache[time_index - 1]
-        beta_prev = np.zeros_like(beta)
-        for src_mode_index in range(n_modes):
-            total = np.zeros((n_bins, n_displacements), dtype=float)
-            for dst_mode_index, dst_mode in enumerate(_DISPLACEMENT_IMM_MODES):
-                values = scaled[time_index][:, None] * beta[dst_mode_index]
-                total += mode_transition[src_mode_index, dst_mode_index] * _backward_mode(
-                    values,
-                    mode=dst_mode,
-                    stationary_transition=stationary_transition,
-                    diffusion_transition=cache["diffusion_transition"],
-                    displacement_transition=cache["displacement_transition"],
-                    momentum_spatial_transitions=cache["momentum_spatial_transitions"],
-                    displacement_prior=displacement_prior,
-                    valid_bin_mask=valid_mask,
-                )
-            beta_prev[src_mode_index] = total / scales[time_index]
-        beta = beta_prev
-        gamma = filtered[time_index - 1] * beta
-        total_gamma = float(gamma.sum())
-        smoothed[time_index - 1] = (
-            gamma / total_gamma if total_gamma > 0.0 else filtered[time_index - 1]
-        )
+    if return_trajectory:
+        smoothed = np.zeros_like(filtered)
+        beta = np.ones((n_modes, n_bins, n_displacements), dtype=float)
+        smoothed[-1] = filtered[-1]
+        for time_index in range(emissions.n_time - 1, 0, -1):
+            cache = transition_cache[time_index - 1]
+            beta_prev = np.zeros_like(beta)
+            for src_mode_index in range(n_modes):
+                total = np.zeros((n_bins, n_displacements), dtype=float)
+                for dst_mode_index, dst_mode in enumerate(_DISPLACEMENT_IMM_MODES):
+                    values = scaled[time_index][:, None] * beta[dst_mode_index]
+                    total += mode_transition[src_mode_index, dst_mode_index] * _backward_mode(
+                        values,
+                        mode=dst_mode,
+                        stationary_transition=stationary_transition,
+                        diffusion_transition=cache["diffusion_transition"],
+                        displacement_transition=cache["displacement_transition"],
+                        momentum_spatial_transitions=cache["momentum_spatial_transitions"],
+                        displacement_prior=displacement_prior,
+                        valid_bin_mask=valid_mask,
+                    )
+                beta_prev[src_mode_index] = total / scales[time_index]
+            beta = beta_prev
+            gamma = filtered[time_index - 1] * beta
+            total_gamma = float(gamma.sum())
+            smoothed[time_index - 1] = (
+                gamma / total_gamma if total_gamma > 0.0 else filtered[time_index - 1]
+            )
 
-    position_posterior = smoothed.sum(axis=(1, 3))
-    mode_posterior = smoothed.sum(axis=(2, 3))
-    displacement_posterior = smoothed.sum(axis=(1, 2))
-    trajectory = _as_log_probs(position_posterior)
+        position_posterior = smoothed.sum(axis=(1, 3))
+        mode_posterior = smoothed.sum(axis=(2, 3))
+        displacement_posterior = smoothed.sum(axis=(1, 2))
+        trajectory = _as_log_probs(position_posterior)
+        terminal_log_posterior = trajectory[-1]
+    else:
+        trajectory = None
+        position_posterior = alpha.sum(axis=(0, 2))[None, :]
+        mode_posterior = alpha.sum(axis=(1, 2))[None, :]
+        displacement_posterior = alpha.sum(axis=(0, 1))[None, :]
+        terminal_log_posterior = _as_log_probs(position_posterior)[0]
     mode_log_posterior = _as_log_probs(mode_posterior)
     displacement_log_posterior = _as_log_probs(displacement_posterior)
 
@@ -298,6 +309,7 @@ def _score_displacement_imm_exact(
     return (
         float(logp),
         trajectory,
+        terminal_log_posterior,
         mode_posterior,
         displacement_log_posterior,
         diagnostics,

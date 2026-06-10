@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import inspect
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 
@@ -453,10 +454,41 @@ def _score_state_space_model(model, emissions, bin_centers, candidates, occupanc
 
 
 def _candidate_indices_for_model(model, emissions, bin_centers):
+    return _call_candidate_indices(model.candidate_indices, emissions, bin_centers)
+
+
+def _call_candidate_indices(candidate_indices, emissions, bin_centers):
+    """Call candidate_indices without masking implementation TypeErrors.
+
+    Older candidate-pruned models accept only ``emissions``; newer models can also
+    use spatial bin centers to augment or otherwise condition their support.  The
+    previous optimistic call-and-fallback pattern caught every ``TypeError`` from
+    the two-argument call, including real implementation errors raised inside a
+    bin-center-aware model.  Inspect the callable signature instead, so genuine
+    exceptions propagate and legacy one-argument models still work.
+    """
+
     try:
-        return model.candidate_indices(emissions, bin_centers)
-    except TypeError:
-        return model.candidate_indices(emissions)
+        signature = inspect.signature(candidate_indices)
+    except (TypeError, ValueError):
+        return candidate_indices(emissions, bin_centers)
+
+    parameters = tuple(signature.parameters.values())
+    if any(parameter.kind == inspect.Parameter.VAR_POSITIONAL for parameter in parameters):
+        return candidate_indices(emissions, bin_centers)
+
+    positional = tuple(
+        parameter
+        for parameter in parameters
+        if parameter.kind in (inspect.Parameter.POSITIONAL_ONLY, inspect.Parameter.POSITIONAL_OR_KEYWORD)
+    )
+    if len(positional) >= 2:
+        return candidate_indices(emissions, bin_centers)
+    if "bin_centers" in signature.parameters:
+        return candidate_indices(emissions, bin_centers=bin_centers)
+    if "centers" in signature.parameters:
+        return candidate_indices(emissions, centers=bin_centers)
+    return candidate_indices(emissions)
 
 
 def _state_space_uses_candidate_support(model: StateSpaceReplayModel) -> bool:

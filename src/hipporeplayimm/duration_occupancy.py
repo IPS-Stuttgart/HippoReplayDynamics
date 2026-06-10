@@ -154,24 +154,26 @@ def _score_state_space_duration_with_occupancy(
     elif self.mode == "displacement-momentum":
         from .state_space_displacement_momentum import _score_displacement_momentum_exact
 
-        logp, trajectory, displacement_post, displacement_extra = _score_displacement_momentum_exact(
+        logp, trajectory, terminal, displacement_post, displacement_extra = _score_displacement_momentum_exact(
             emissions,
             bin_centers,
             self.config,
             durations,
             valid_bin_mask=valid_bin_mask,
+            return_trajectory=return_trajectory,
         )
         transition_sigma_cm = float(displacement_extra["state_space_displacement_transition_sigma_cm"])
         extra = displacement_extra
     elif self.mode == "displacement-imm":
         from .state_space_displacement_imm import _DISPLACEMENT_IMM_MODES, _score_displacement_imm_exact
 
-        logp, trajectory, mode_post, displacement_post, displacement_extra = _score_displacement_imm_exact(
+        logp, trajectory, terminal, mode_post, displacement_post, displacement_extra = _score_displacement_imm_exact(
             emissions,
             bin_centers,
             self.config,
             durations,
             valid_bin_mask=valid_bin_mask,
+            return_trajectory=return_trajectory,
         )
         transition_sigma_cm = float(
             displacement_extra["state_space_displacement_imm_transition_sigma_cm"]

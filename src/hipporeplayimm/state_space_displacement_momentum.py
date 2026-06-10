@@ -35,7 +35,8 @@ def _score_displacement_momentum_exact(
     transition_durations_s: Iterable[float],
     *,
     valid_bin_mask: np.ndarray | None = None,
-) -> tuple[float, np.ndarray, np.ndarray, dict[str, float | int | str]]:
+    return_trajectory: bool = True,
+) -> tuple[float, np.ndarray | None, np.ndarray, np.ndarray, dict[str, float | int | str]]:
     """Return exact evidence and posteriors for the finite-displacement model.
 
     Parameters
@@ -53,6 +54,9 @@ def _score_displacement_momentum_exact(
     valid_bin_mask:
         Optional occupancy-derived spatial support.  Evidence is exact over the
         valid spatial bins crossed with the displacement lattice.
+    return_trajectory:
+        When false, skip the backward smoother and return only the terminal
+        position posterior needed by evidence-only callers.
     """
 
     centers = _as_2d_centers(bin_centers)
@@ -149,26 +153,33 @@ def _score_displacement_momentum_exact(
         displacement_transitions.append(displacement_transition)
         spatial_transitions.append(transitions)
 
-    smoothed = np.zeros_like(filtered)
-    beta = np.ones((n_bins, n_displacements), dtype=float)
-    smoothed[-1] = filtered[-1]
-    for time_index in range(emissions.n_time - 1, 0, -1):
-        transition_index = time_index - 1
-        spatial_backward = np.zeros_like(beta)
-        for disp_index, transition in enumerate(spatial_transitions[transition_index]):
-            values = scaled[time_index] * beta[:, disp_index]
-            spatial_backward[:, disp_index] = np.asarray(
-                transition.T @ values,
-                dtype=float,
-            )
-        beta = (spatial_backward @ displacement_transitions[transition_index]) / scales[time_index]
-        gamma = filtered[time_index - 1] * beta
-        total = float(gamma.sum())
-        smoothed[time_index - 1] = gamma / total if total > 0.0 else filtered[time_index - 1]
+    if return_trajectory:
+        smoothed = np.zeros_like(filtered)
+        beta = np.ones((n_bins, n_displacements), dtype=float)
+        smoothed[-1] = filtered[-1]
+        for time_index in range(emissions.n_time - 1, 0, -1):
+            transition_index = time_index - 1
+            spatial_backward = np.zeros_like(beta)
+            for disp_index, transition in enumerate(spatial_transitions[transition_index]):
+                values = scaled[time_index] * beta[:, disp_index]
+                spatial_backward[:, disp_index] = np.asarray(
+                    transition.T @ values,
+                    dtype=float,
+                )
+            beta = (spatial_backward @ displacement_transitions[transition_index]) / scales[time_index]
+            gamma = filtered[time_index - 1] * beta
+            total = float(gamma.sum())
+            smoothed[time_index - 1] = gamma / total if total > 0.0 else filtered[time_index - 1]
 
-    position_posterior = smoothed.sum(axis=2)
-    displacement_posterior = smoothed.sum(axis=1)
-    trajectory = _as_log_probs(position_posterior)
+        position_posterior = smoothed.sum(axis=2)
+        displacement_posterior = smoothed.sum(axis=1)
+        trajectory = _as_log_probs(position_posterior)
+        terminal_log_posterior = trajectory[-1]
+    else:
+        trajectory = None
+        position_posterior = alpha.sum(axis=1)[None, :]
+        displacement_posterior = alpha.sum(axis=0)[None, :]
+        terminal_log_posterior = _as_log_probs(position_posterior)[0]
     displacement_log_posterior = _as_log_probs(displacement_posterior)
     median_transition_sigma = _median_or_fallback(
         transition_sigmas,
@@ -190,7 +201,13 @@ def _score_displacement_momentum_exact(
         "state_space_displacement_mean_posterior_entropy": _mean_entropy(displacement_log_posterior),
         "state_space_displacement_vectors_cm": _format_vector_series(vectors),
     }
-    return float(logp), trajectory, displacement_log_posterior, diagnostics
+    return (
+        float(logp),
+        trajectory,
+        terminal_log_posterior,
+        displacement_log_posterior,
+        diagnostics,
+    )
 
 
 def _displacement_lattice(bin_centers: np.ndarray, *, radius_bins: int) -> np.ndarray:

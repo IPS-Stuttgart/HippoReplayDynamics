@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import inspect
 import json
 import time
 from dataclasses import asdict, dataclass, field, replace
@@ -537,6 +538,13 @@ def _validate_recovery_runtime_limits(config: SimulationRecoveryConfig) -> None:
         raise ValueError("max_runtime_s must be positive when set")
 
 
+def _positive_finite_scalar(name: str, value: float) -> float:
+    value = float(value)
+    if not np.isfinite(value) or value <= 0.0:
+        raise ValueError(f"{name} must be finite and positive")
+    return value
+
+
 def _should_stop_recovery_before_event(
     config: SimulationRecoveryConfig,
     *,
@@ -673,6 +681,8 @@ def simulate_replay_event(
 ) -> tuple[LogEmissionTensor, np.ndarray]:
     if n_time <= 0:
         raise ValueError("n_time must be positive")
+    dt = _positive_finite_scalar("dt", dt)
+    spike_rate_scale = _positive_finite_scalar("spike_rate_scale", spike_rate_scale)
     state_space = StateSpaceDecoderConfig() if state_space is None else state_space
     true_model = true_model.lower()
     path = simulate_latent_path(encoding, true_model=true_model, n_time=n_time, dt=dt, rng=rng, state_space=state_space)
@@ -703,6 +713,7 @@ def simulate_latent_path(
     state_space: StateSpaceDecoderConfig | None = None,
 ) -> np.ndarray:
     state_space = StateSpaceDecoderConfig() if state_space is None else state_space
+    dt = _positive_finite_scalar("dt", dt)
     true_model = true_model.lower()
     allowed = {"stationary", "diffusion", "momentum", "fragmented", "jump"}
     if true_model not in allowed:
@@ -747,8 +758,8 @@ def emissions_from_counts(
     negative_binomial_overdispersion: float = 0.0,
 ) -> LogEmissionTensor:
     spike_counts = np.asarray(counts, dtype=int)
-    if spike_rate_scale <= 0.0:
-        raise ValueError("spike_rate_scale must be positive")
+    dt = _positive_finite_scalar("dt", dt)
+    spike_rate_scale = _positive_finite_scalar("spike_rate_scale", spike_rate_scale)
     if spike_counts.ndim != 2:
         raise ValueError("counts must be a two-dimensional array")
     if spike_counts.shape[1] != encoding.n_cells:
@@ -1276,10 +1287,40 @@ def _uses_candidate_support(model: object) -> bool:
 def _candidate_indices_for_model(model: object, emissions: LogEmissionTensor, bin_centers: np.ndarray) -> list[np.ndarray]:
     """Return candidate support, passing bin centers when a model supports augmentation."""
 
+    return _call_candidate_indices(model.candidate_indices, emissions, bin_centers)  # type: ignore[attr-defined]
+
+
+def _call_candidate_indices(candidate_indices, emissions: LogEmissionTensor, bin_centers: np.ndarray) -> list[np.ndarray]:
+    """Call candidate_indices without swallowing implementation TypeErrors.
+
+    Some scoring models expose a legacy ``candidate_indices(emissions)`` method,
+    while newer models accept spatial bin centers as a second argument.  Decide
+    which form to call from the signature instead of catching ``TypeError`` from
+    the model body; otherwise a genuine bin-center-aware implementation failure
+    can be mistaken for a legacy signature and silently retried without centers.
+    """
+
     try:
-        return model.candidate_indices(emissions, bin_centers)  # type: ignore[attr-defined]
-    except TypeError:
-        return model.candidate_indices(emissions)  # type: ignore[attr-defined]
+        signature = inspect.signature(candidate_indices)
+    except (TypeError, ValueError):
+        return candidate_indices(emissions, bin_centers)
+
+    parameters = tuple(signature.parameters.values())
+    if any(parameter.kind == inspect.Parameter.VAR_POSITIONAL for parameter in parameters):
+        return candidate_indices(emissions, bin_centers)
+
+    positional = tuple(
+        parameter
+        for parameter in parameters
+        if parameter.kind in (inspect.Parameter.POSITIONAL_ONLY, inspect.Parameter.POSITIONAL_OR_KEYWORD)
+    )
+    if len(positional) >= 2:
+        return candidate_indices(emissions, bin_centers)
+    if "bin_centers" in signature.parameters:
+        return candidate_indices(emissions, bin_centers=bin_centers)
+    if "centers" in signature.parameters:
+        return candidate_indices(emissions, centers=bin_centers)
+    return candidate_indices(emissions)
 
 
 def _score_recovery_model(

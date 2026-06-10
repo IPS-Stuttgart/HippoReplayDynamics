@@ -4,12 +4,17 @@ import importlib.util
 from pathlib import Path
 
 import numpy as np
+import pytest
 
+from hipporeplayimm.benchmarks import _candidate_indices_for_model as _benchmark_candidate_indices_for_model
 from hipporeplayimm.data import ReplaySession
 from hipporeplayimm.duration_dynamics import attach_duration_metadata, transition_durations_s
-from hipporeplayimm.encoding import EncodingConfig, LogEmissionTensor, fit_place_field_encoding
+from hipporeplayimm.encoding import EncodingConfig, EncodingModel, LogEmissionTensor, fit_place_field_encoding
 from hipporeplayimm.kd_reference import KDEncodingConfig, fit_kd_place_field_encoding
-from hipporeplayimm.simulation_recovery import _candidate_indices_for_model
+from hipporeplayimm.simulation_recovery import (
+    _candidate_indices_for_model as _simulation_candidate_indices_for_model,
+    simulate_replay_event,
+)
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -104,8 +109,83 @@ def test_simulation_recovery_candidate_helper_passes_bin_centers_when_supported(
             assert observed is emissions
             return [np.array([1], dtype=int)]
 
-    assert _candidate_indices_for_model(BinCenterAwareModel(), emissions, bin_centers)[0].tolist() == [0, 1]
-    assert _candidate_indices_for_model(LegacyModel(), emissions, bin_centers)[0].tolist() == [1]
+    assert _simulation_candidate_indices_for_model(BinCenterAwareModel(), emissions, bin_centers)[0].tolist() == [0, 1]
+    assert _simulation_candidate_indices_for_model(LegacyModel(), emissions, bin_centers)[0].tolist() == [1]
+
+
+def test_candidate_helpers_do_not_swallow_bin_center_aware_type_errors():
+    emissions = LogEmissionTensor(
+        log_likelihood=np.zeros((1, 2), dtype=float),
+        spike_counts=np.zeros((1, 1), dtype=int),
+        times=np.array([0.0], dtype=float),
+        dt=0.1,
+        cell_ids=np.array([1], dtype=int),
+        n_spikes=0,
+    )
+    bin_centers = np.array([[0.0, 0.0], [1.0, 0.0]], dtype=float)
+
+    class BrokenBinCenterAwareModel:
+        def candidate_indices(self, observed, centers=None):
+            assert observed is emissions
+            if centers is not None:
+                raise TypeError("internal candidate support bug")
+            return [np.array([1], dtype=int)]
+
+    for helper in (_simulation_candidate_indices_for_model, _benchmark_candidate_indices_for_model):
+        with pytest.raises(TypeError, match="internal candidate support bug"):
+            helper(BrokenBinCenterAwareModel(), emissions, bin_centers)
+
+
+def test_candidate_helpers_pass_keyword_only_bin_centers_when_supported():
+    emissions = LogEmissionTensor(
+        log_likelihood=np.zeros((1, 2), dtype=float),
+        spike_counts=np.zeros((1, 1), dtype=int),
+        times=np.array([0.0], dtype=float),
+        dt=0.1,
+        cell_ids=np.array([1], dtype=int),
+        n_spikes=0,
+    )
+    bin_centers = np.array([[0.0, 0.0], [1.0, 0.0]], dtype=float)
+
+    class KeywordOnlyBinCenterModel:
+        def candidate_indices(self, observed, *, centers=None):
+            assert observed is emissions
+            assert centers is bin_centers
+            return [np.array([0], dtype=int)]
+
+    for helper in (_simulation_candidate_indices_for_model, _benchmark_candidate_indices_for_model):
+        assert helper(KeywordOnlyBinCenterModel(), emissions, bin_centers)[0].tolist() == [0]
+
+
+def test_simulated_replay_rejects_nonfinite_sampling_scalars_before_poisson():
+    encoding = EncodingModel(
+        x_edges=np.array([0.0, 1.0]),
+        y_edges=np.array([0.0, 1.0]),
+        bin_centers=np.array([[0.5, 0.5]], dtype=float),
+        rates_hz=np.ones((1, 1), dtype=float),
+        occupancy_s=np.array([1.0], dtype=float),
+        cell_ids=np.array([1], dtype=int),
+        config=EncodingConfig(),
+    )
+
+    with pytest.raises(ValueError, match="dt"):
+        simulate_replay_event(
+            encoding,
+            true_model="stationary",
+            n_time=1,
+            dt=float("nan"),
+            rng=np.random.default_rng(1),
+        )
+
+    with pytest.raises(ValueError, match="spike_rate_scale"):
+        simulate_replay_event(
+            encoding,
+            true_model="stationary",
+            n_time=1,
+            dt=0.02,
+            rng=np.random.default_rng(1),
+            spike_rate_scale=float("nan"),
+        )
 
 
 def test_track_event_prefix_emissions_slices_duration_metadata():

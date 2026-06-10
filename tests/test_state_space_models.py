@@ -491,6 +491,39 @@ def test_displacement_momentum_uses_declared_finite_lattice():
     assert score.diagnostics["state_space_displacement_momentum_evidence_support"] == "exact_full_grid"
 
 
+def test_displacement_state_space_evidence_only_returns_terminal_posterior():
+    emissions = _synthetic_emissions()
+    centers = np.array([[0.0, 0.0], [1.0, 0.0], [2.0, 0.0], [3.0, 0.0]])
+
+    for mode in ("displacement-momentum", "displacement-imm"):
+        config = StateSpaceDecoderConfig(
+            mode=mode,
+            displacement_radius_bins=1,
+            displacement_position_sigma_cm=1.0,
+            displacement_transition_sigma_cm_sqrt_s=1.0,
+            displacement_prior_sigma_cm=1.0,
+            imm_mode_stickiness=0.8,
+        )
+        model = SortedSpikeStateSpaceReplayModel(mode=mode, config=config)
+
+        full = model.score(emissions, centers, return_trajectory=True)
+        evidence_only = model.score(emissions, centers, return_trajectory=False)
+
+        assert evidence_only.log_likelihood == pytest.approx(
+            full.log_likelihood,
+            abs=1e-12,
+        )
+        assert full.trajectory_log_posterior is not None
+        assert evidence_only.trajectory_log_posterior is None
+        assert evidence_only.terminal_log_posterior is not None
+        assert np.allclose(
+            evidence_only.terminal_log_posterior,
+            full.trajectory_log_posterior[-1],
+        )
+        assert np.allclose(logsumexp(evidence_only.terminal_log_posterior), 0.0)
+        assert evidence_only.diagnostics["state_space_trajectory_posterior"] == 0
+
+
 def test_state_space_momentum_can_reuse_external_candidate_support():
     train = _synthetic_emissions()
     joint = LogEmissionTensor(

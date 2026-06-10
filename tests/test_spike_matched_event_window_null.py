@@ -274,6 +274,7 @@ def test_matched_null_decisions_do_not_treat_string_false_as_comparable():
             ),
         ]
     )
+    scores["evidence_comparable"] = scores["evidence_comparable"].astype(object)
     scores.loc[scores["model"].eq(trajectory), "evidence_comparable"] = "False"
 
     decisions = matched_null_family_margin_decisions(

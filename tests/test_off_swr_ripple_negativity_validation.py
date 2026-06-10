@@ -94,6 +94,47 @@ def test_ripple_negativity_gate_blocks_when_lfp_columns_are_absent(tmp_path):
     assert not bool(gate.loc["overall", "passed"])
 
 
+def test_ripple_negativity_gate_treats_empty_boolean_lfp_fields_as_missing(tmp_path):
+    promoted = tmp_path / "promoted.csv"
+    windows = tmp_path / "windows.csv"
+    output = tmp_path / "out"
+
+    pd.DataFrame([_promoted("Rat1/Open1", 1, 0, exact_margin=50.0)]).to_csv(promoted, index=False)
+    pd.DataFrame(
+        [
+            {
+                "session": "Rat1/Open1",
+                "event_index": 1,
+                "null_index": 0,
+                "peak_ripple_band_power_z": pd.NA,
+                "mean_ripple_band_power_z": pd.NA,
+                "sharp_wave_power_z": pd.NA,
+                "ripple_threshold_crossing_window": pd.NA,
+                "ripple_threshold_crossing_pm50ms": pd.NA,
+                "ripple_threshold_crossing_pm100ms": pd.NA,
+                "ripple_threshold_crossing_pm250ms": pd.NA,
+                "distance_to_nearest_swr_s": 100.0,
+                "run_or_immobility_state": "immobile",
+            }
+        ]
+    ).to_csv(windows, index=False)
+
+    outputs = write_outputs(
+        promoted_decisions=promoted,
+        off_swr_window_table=windows,
+        output=output,
+    )
+
+    promoted_lfp = outputs["off_swr_candidate_lfp_ripple_power.csv"]
+    assert promoted_lfp.iloc[0]["lfp_validation_status"] == "unsupported_no_lfp_power_columns"
+    assert not bool(promoted_lfp.iloc[0]["lfp_power_available"])
+    assert not bool(promoted_lfp.iloc[0]["ripple_negative_with_buffers"])
+
+    gate = outputs["off_swr_candidate_lfp_gate_summary.csv"].set_index("gate")
+    assert not bool(gate.loc["lfp_power_or_crossing_fields_available", "passed"])
+    assert not bool(gate.loc["overall", "passed"])
+
+
 def _promoted(session: str, event_index: int, null_index: int, *, exact_margin: float) -> dict[str, object]:
     return {
         "session": session,

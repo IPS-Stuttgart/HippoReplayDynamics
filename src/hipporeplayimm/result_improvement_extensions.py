@@ -23,7 +23,7 @@ import numpy as np
 import pandas as pd
 from scipy.special import gammaln, logsumexp
 
-from .data import ReplaySession, RippleEvent
+from .data import ReplaySession, RippleEvent, _coerce_ripple_event
 from .encoding import (
     EmissionConfig,
     EncodingModel,
@@ -87,7 +87,7 @@ def build_sorted_emissions_with_replay_calibration(
     if calibration.negative_binomial_dispersion <= 0.0:
         raise ValueError("negative_binomial_dispersion must be positive")
 
-    ripple_event = session.ripple(ripple) if isinstance(ripple, int) else ripple
+    ripple_event = _coerce_ripple_event(session, ripple)
     edges = _time_bin_edges(ripple_event.start, ripple_event.end, config.time_bin_s)
     bin_durations = np.diff(edges)
     times = edges[:-1] + 0.5 * bin_durations
@@ -137,6 +137,8 @@ def build_sorted_emissions_with_replay_calibration(
         dt=dt,
         cell_ids=encoding.cell_ids,
         n_spikes=int(counts.sum()),
+        bin_durations=bin_durations,
+        transition_durations=np.diff(times) if times.shape[0] > 1 else np.empty(0, dtype=float),
     )
     # Keep these fields explicit so improved evidence runs are auditable after aggregation.
     emissions.metadata = {

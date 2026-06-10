@@ -25,7 +25,7 @@ from scipy.ndimage import median_filter
 from scipy.sparse import csr_matrix
 from scipy.special import gammaln, logsumexp
 
-from .data import ReplaySession, RippleEvent
+from .data import ReplaySession, RippleEvent, _coerce_ripple_event
 from .encoding import (
     EmissionConfig,
     EncodingModel,
@@ -306,11 +306,11 @@ def build_continuous_time_emissions(
     """
 
     config = ContinuousTimeEmissionConfig() if config is None else config
-    if config.spike_rate_scale <= 0.0:
-        raise ValueError("spike_rate_scale must be positive")
-    if config.min_interval_s <= 0.0:
-        raise ValueError("min_interval_s must be positive")
-    ripple_event = session.ripple(ripple) if isinstance(ripple, int) else ripple
+    if not np.isfinite(config.spike_rate_scale) or config.spike_rate_scale <= 0.0:
+        raise ValueError("spike_rate_scale must be finite and positive")
+    if not np.isfinite(config.min_interval_s) or config.min_interval_s <= 0.0:
+        raise ValueError("min_interval_s must be finite and positive")
+    ripple_event = _coerce_ripple_event(session, ripple)
     start = float(ripple_event.start)
     end = float(ripple_event.end)
     if end <= start:
@@ -366,6 +366,11 @@ def build_continuous_time_emissions(
         spike_rate_scale=float(config.spike_rate_scale),
     )
     times_arr = np.asarray(times, dtype=float)
+    transition_durations = (
+        np.maximum(np.diff(times_arr), float(config.min_interval_s))
+        if times_arr.shape[0] > 1
+        else np.empty(0, dtype=float)
+    )
     emissions = LogEmissionTensor(
         log_likelihood=log_likelihood,
         spike_counts=spike_counts,
@@ -373,9 +378,9 @@ def build_continuous_time_emissions(
         dt=float(np.median(durations_arr)) if durations_arr.size else float(config.min_interval_s),
         cell_ids=np.asarray(encoding.cell_ids, dtype=int).copy(),
         n_spikes=int(spike_counts.sum()),
+        bin_durations=durations_arr,
+        transition_durations=transition_durations,
     )
-    if emissions.n_time > 1:
-        emissions.transition_durations = np.maximum(np.diff(times_arr), float(config.min_interval_s))
     emissions.metadata = {
         "emission_model": "continuous-time-binned-at-spikes",
         "continuous_time_intervals": int(emissions.n_time),

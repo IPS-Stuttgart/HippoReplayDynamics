@@ -9,7 +9,7 @@ import numpy as np
 from scipy.ndimage import gaussian_filter
 from scipy.special import gammaln
 
-from .data import ReplaySession, RippleEvent
+from .data import ReplaySession, RippleEvent, _coerce_ripple_event
 
 
 def _as_xy_array(xy: np.ndarray, *, name: str = "xy") -> np.ndarray:
@@ -296,7 +296,7 @@ def build_emissions(
     """Build Poisson log-emission likelihoods for one ripple."""
 
     config = EmissionConfig() if config is None else config
-    ripple_event = session.ripple(ripple) if isinstance(ripple, int) else ripple
+    ripple_event = _coerce_ripple_event(session, ripple)
     edges = _time_bin_edges(ripple_event.start, ripple_event.end, config.time_bin_s)
     bin_durations = np.diff(edges)
     times = edges[:-1] + 0.5 * bin_durations

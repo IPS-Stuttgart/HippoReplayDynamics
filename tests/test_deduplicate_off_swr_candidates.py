@@ -86,6 +86,30 @@ def test_off_swr_candidate_dedup_collapses_duplicate_source_groups(tmp_path):
         assert (tmp_path / filename).exists()
 
 
+def test_off_swr_candidate_dedup_accepts_validation_decisions_only(tmp_path):
+    validation = pd.DataFrame(
+        [
+            _candidate("Rat1/Open1", 10, 0, exact=60.0, discovery=55.0, model=FIRST_ORDER_IMM, start=1.0),
+            _candidate("Rat1/Open1", 10, 1, exact=90.0, discovery=80.0, model=FIRST_ORDER_IMM, start=2.0),
+        ]
+    )
+
+    outputs = write_off_swr_candidate_dedup_outputs(
+        validation_decisions=validation,
+        output=tmp_path,
+    )
+
+    source = outputs["off_swr_candidate_source_event_group_summary.csv"]
+    decisions = outputs["off_swr_candidate_one_per_source_group_decisions.csv"]
+    gates = outputs["off_swr_candidate_cluster_robustness_gate_summary.csv"].set_index("gate")
+
+    assert len(source) == 1
+    assert int(source.iloc[0]["candidate_windows"]) == 0
+    assert int(source.iloc[0]["exact_validated_windows"]) == 2
+    assert int(decisions["source_event_group_id"].nunique()) == 1
+    assert int(gates.loc["deduplicated_source_groups_nontrivial", "observed"]) == 1
+
+
 def _candidate(
     session: str,
     event_index: int,

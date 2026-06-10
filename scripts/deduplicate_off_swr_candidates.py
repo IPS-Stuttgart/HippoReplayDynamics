@@ -257,10 +257,10 @@ def build_source_event_group_summary(
     rows: list[dict[str, object]] = []
     for group_id in group_ids:
         frames = {
-            "candidates": candidates[candidates["source_event_group_id"].astype(str).eq(group_id)].copy(),
-            "high": high[high["source_event_group_id"].astype(str).eq(group_id)].copy(),
-            "ready": ready[ready["source_event_group_id"].astype(str).eq(group_id)].copy(),
-            "validated": validated[validated["source_event_group_id"].astype(str).eq(group_id)].copy(),
+            "candidates": _source_group_rows(candidates, group_id),
+            "high": _source_group_rows(high, group_id),
+            "ready": _source_group_rows(ready, group_id),
+            "validated": _source_group_rows(validated, group_id),
         }
         representative = next((frame for frame in frames.values() if not frame.empty), pd.DataFrame()).iloc[0]
         validated_group = frames["validated"]
@@ -288,6 +288,12 @@ def build_source_event_group_summary(
             }
         )
     return pd.DataFrame(rows, columns=list(SOURCE_GROUP_COLUMNS))
+
+
+def _source_group_rows(frame: pd.DataFrame, group_id: str) -> pd.DataFrame:
+    if frame.empty or "source_event_group_id" not in frame:
+        return pd.DataFrame(columns=frame.columns)
+    return frame[frame["source_event_group_id"].astype(str).eq(group_id)].copy()
 
 
 def _select_one_per_group(validation_decisions: pd.DataFrame, *, rule: str) -> pd.DataFrame:

@@ -20,11 +20,9 @@ def test_attach_duration_metadata_preserves_dt_duration_metadata() -> None:
 
     attach_duration_metadata(emissions)
 
-    assert float(emissions.dt) == 0.1
-    np.testing.assert_allclose(
-        np.asarray(emissions.dt.transition_durations, dtype=float),
-        np.array([0.1, 0.15], dtype=float),
-    )
+    assert type(emissions.dt) is float
+    assert emissions.dt == 0.1
+    np.testing.assert_allclose(emissions.transition_durations, np.array([0.1, 0.15], dtype=float))
 
 
 def test_uniform_backward_zeroes_occupancy_masked_bins() -> None:

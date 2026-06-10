@@ -651,7 +651,7 @@ def add_model_averaged_endpoint_columns(df: pd.DataFrame) -> pd.DataFrame:
     out["model_log_evidence_margin"] = np.nan
     for _, group in out.groupby(["session", "event_index"], sort=False):
         if "evidence_comparable" in group:
-            comparable = group["evidence_comparable"].fillna(False).astype(bool)
+            comparable = _bool_series(group["evidence_comparable"])
         else:
             # Ad-hoc CSVs produced before evidence-support columns existed are
             # still useful for endpoint averaging; renormalize the listed rows.
@@ -677,3 +677,14 @@ def add_model_averaged_endpoint_columns(df: pd.DataFrame) -> pd.DataFrame:
         out.loc[group.index, "model_probability_entropy"] = entropy
         out.loc[group.index, "model_log_evidence_margin"] = margin
     return out
+
+
+def _bool_value(value: object) -> bool:
+    if isinstance(value, bool):
+        return value
+    text = str(value).strip().lower()
+    return text in {"1", "true", "t", "yes", "y"}
+
+
+def _bool_series(values: pd.Series) -> pd.Series:
+    return values.map(_bool_value).astype(bool)

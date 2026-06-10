@@ -143,10 +143,10 @@ def select_observation_calibration(
     if config.forbid_real_evidence_selected:
         for column in ("selection_used_real_evidence", "used_real_evidence", "real_evidence_selected"):
             if column in frame.columns:
-                gate &= ~frame[column].fillna(False).astype(bool)
+                gate &= ~_bool_series(frame[column])
     for column in ("selection_passed_recovery_gate", "passed_recovery_gate"):
         if column in frame.columns:
-            gate &= frame[column].fillna(False).astype(bool)
+            gate &= _bool_series(frame[column])
 
     frame["selection_gate_passed"] = gate
     candidates = frame[gate].copy()
@@ -163,7 +163,9 @@ def select_observation_calibration(
         sort_columns.append(f"_selection_recovery__{recovery_col}")
         ascending.append(False)
     if "candidate_support_quality_good" in candidates.columns:
-        candidates["_selection_candidate_support_good"] = candidates["candidate_support_quality_good"].fillna(False).astype(bool)
+        candidates["_selection_candidate_support_good"] = _bool_series(
+            candidates["candidate_support_quality_good"]
+        )
         sort_columns.append("_selection_candidate_support_good")
         ascending.append(False)
     if sort_columns:
@@ -254,6 +256,17 @@ def _first_existing(frame: pd.DataFrame, names: Sequence[str]) -> str | None:
 
 def _numeric(values: pd.Series) -> pd.Series:
     return pd.to_numeric(values, errors="coerce")
+
+
+def _bool_value(value: object) -> bool:
+    if isinstance(value, bool):
+        return value
+    text = str(value).strip().lower()
+    return text in {"1", "true", "t", "yes", "y"}
+
+
+def _bool_series(values: pd.Series) -> pd.Series:
+    return values.map(_bool_value).astype(bool)
 
 
 def _hierarchical_summary_if_available(scores: pd.DataFrame) -> pd.DataFrame:

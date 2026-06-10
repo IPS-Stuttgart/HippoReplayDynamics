@@ -340,6 +340,56 @@ def test_certified_vs_exact_summary_counts_lower_bound_wins_conservatively():
     assert momentum["certified_vs_exact_recovery_accuracy"] == 1.0
 
 
+def test_certified_vs_exact_respects_string_false_comparable_and_support_scope():
+    rows = pd.DataFrame(
+        [
+            _row(
+                0,
+                "momentum",
+                "sorted-spike-state-space-diffusion",
+                0.0,
+                evidence_support="exact_full_grid",
+                evidence_comparable="True",
+            ),
+            _row(
+                0,
+                "momentum",
+                "sorted-spike-state-space-momentum",
+                100.0,
+                evidence_support="unknown_noncomparable",
+                evidence_comparable="False",
+            ),
+            _row(
+                1,
+                "momentum",
+                "sorted-spike-state-space-diffusion",
+                0.0,
+                evidence_support="exact_full_grid",
+                evidence_comparable="True",
+            ),
+            _row(
+                1,
+                "momentum",
+                "sorted-spike-state-space-momentum",
+                100.0,
+                evidence_support="truncated_full_grid",
+                evidence_comparable="False",
+            ),
+        ]
+    )
+
+    events = certified_vs_exact_event_recovery(rows).sort_values("event_index")
+
+    unknown = events.iloc[0]
+    truncated = events.iloc[1]
+    assert not bool(unknown["expected_model_evidence_comparable"])
+    assert not bool(unknown["certified_vs_exact_recovered_expected_model"])
+    assert unknown["certified_vs_exact_reason"] == "expected_noncomparable_not_certified"
+    assert not bool(truncated["expected_model_evidence_comparable"])
+    assert bool(truncated["certified_vs_exact_recovered_expected_model"])
+    assert truncated["certified_vs_exact_reason"] == "expected_lower_bound_beats_best_comparable"
+
+
 def test_simulation_recovery_checkpoint_writes_partial_outputs(tmp_path):
     class FakeSession:
         session_id = "RatX/OpenY"

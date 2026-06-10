@@ -24,6 +24,7 @@ from typing import Iterable, Sequence
 import numpy as np
 import pandas as pd
 
+from .evidence_reporting import _coerce_bool_series
 from .simulation_recovery import (
     SimulationRecoveryConfig,
     SimulationRecoveryResult,
@@ -299,14 +300,19 @@ def summarize_ladder_tiers(tier_event_recovery: pd.DataFrame) -> pd.DataFrame:
         sort=True,
         dropna=False,
     ):
-        recovered = group["certified_vs_exact_recovered_expected_model"].fillna(False).astype(bool)
+        recovered = _coerce_bool_series(
+            group["certified_vs_exact_recovered_expected_model"]
+        )
         margin = pd.to_numeric(group["expected_minus_best_comparable_log_evidence"], errors="coerce")
+        oracle = _coerce_bool_series(
+            group.get("oracle_candidate_support", pd.Series([False], index=group.index))
+        )
         rows.append(
             {
                 "ladder_tier": str(tier),
                 "ladder_tier_index": int(tier_index),
                 "expected_model": _first_nonempty(group.get("ladder_expected_model", group.get("expected_model"))),
-                "oracle_candidate_support": bool(group.get("oracle_candidate_support", pd.Series([False])).iloc[0]),
+                "oracle_candidate_support": bool(oracle.iloc[0]),
                 "description": _first_nonempty(group.get("ladder_description", pd.Series([""]))),
                 "momentum_events": int(group["event_index"].nunique()),
                 "certified_or_strict_recovered_events": int(recovered.sum()),

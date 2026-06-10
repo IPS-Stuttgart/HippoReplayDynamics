@@ -74,6 +74,31 @@ def test_ladder_summary_identifies_full_grid_failure_first():
     assert interpretation.iloc[0]["diagnosis"] == "full_grid_pairwise_momentum_fails"
 
 
+def test_ladder_summary_parses_string_false_recovery_flags():
+    events = pd.DataFrame(
+        [
+            {
+                "ladder_tier": "native_candidate_pairwise_momentum",
+                "ladder_tier_index": 3,
+                "ladder_expected_model": PAIRWISE_MOMENTUM_MODEL,
+                "oracle_candidate_support": "False",
+                "ladder_description": "",
+                "session": "RatX/OpenY",
+                "event_index": 0,
+                "certified_vs_exact_recovered_expected_model": "False",
+                "expected_minus_best_comparable_log_evidence": -1.0,
+                "certified_vs_exact_reason": "expected_below_best_comparable",
+            }
+        ]
+    )
+
+    summary = summarize_ladder_tiers(events)
+
+    assert summary.loc[0, "certified_or_strict_recovered_events"] == 0
+    assert summary.loc[0, "certified_or_strict_recovery_fraction"] == 0.0
+    assert bool(summary.loc[0, "oracle_candidate_support"]) is False
+
+
 def _tier_rows(
     tier: str,
     tier_index: int,

@@ -346,4 +346,4 @@ def _candidate_good_fraction(frame: pd.DataFrame) -> float:
     if frame.empty or "candidate_support_quality_good" not in frame:
         return float("nan")
     values = frame["candidate_support_quality_good"].dropna()
-    return float("nan") if values.empty else float(values.astype(bool).mean())
+    return float("nan") if values.empty else float(_coerce_bool_series(values).mean())

@@ -2,7 +2,10 @@ from __future__ import annotations
 
 import pandas as pd
 
-from scripts.audit_second_order_lower_bound_gap import build_lower_bound_gap_tables
+from scripts.audit_second_order_lower_bound_gap import (
+    build_lower_bound_gap_tables,
+    summarize_gap_table,
+)
 
 
 def _row(event: int, model: str, value: float, support: str, top_k: int) -> dict[str, object]:
@@ -61,3 +64,32 @@ def test_lower_bound_gap_returns_empty_without_exact_pairs():
 
     assert tables.event_gaps.empty
     assert tables.summary.empty
+
+
+def test_lower_bound_gap_summary_parses_string_bool_flags():
+    event_gaps = pd.DataFrame(
+        [
+            {
+                "model": "sorted-spike-state-space-momentum",
+                "lower_bound_gap_log_evidence": 2.0,
+                "lower_bound_exceeds_exact": "False",
+                "lower_bound_gap_within_1": "0.0",
+                "lower_bound_gap_within_3": "True",
+                "lower_bound_gap_within_10": "True",
+            },
+            {
+                "model": "sorted-spike-state-space-momentum",
+                "lower_bound_gap_log_evidence": -0.5,
+                "lower_bound_exceeds_exact": 1.0,
+                "lower_bound_gap_within_1": "1.0",
+                "lower_bound_gap_within_3": "True",
+                "lower_bound_gap_within_10": "True",
+            },
+        ]
+    )
+
+    summary = summarize_gap_table(event_gaps).iloc[0]
+
+    assert summary["events_with_negative_gap"] == 1
+    assert summary["gap_within_1_fraction"] == 0.5
+    assert summary["gap_within_3_fraction"] == 1.0

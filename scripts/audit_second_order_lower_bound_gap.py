@@ -182,14 +182,14 @@ def summarize_gap_table(event_gaps: pd.DataFrame) -> pd.DataFrame:
         row.update(
             {
                 "paired_event_rows": int(len(group)),
-                "events_with_negative_gap": int(group["lower_bound_exceeds_exact"].sum()),
+                "events_with_negative_gap": int(_bool_series(group, "lower_bound_exceeds_exact").sum()),
                 "mean_lower_bound_gap_log_evidence": _safe_stat(gaps, "mean"),
                 "median_lower_bound_gap_log_evidence": _safe_stat(gaps, "median"),
                 "p95_lower_bound_gap_log_evidence": _safe_quantile(gaps, 0.95),
                 "max_lower_bound_gap_log_evidence": _safe_stat(gaps, "max"),
-                "gap_within_1_fraction": float(group["lower_bound_gap_within_1"].mean()),
-                "gap_within_3_fraction": float(group["lower_bound_gap_within_3"].mean()),
-                "gap_within_10_fraction": float(group["lower_bound_gap_within_10"].mean()),
+                "gap_within_1_fraction": _bool_fraction(group, "lower_bound_gap_within_1"),
+                "gap_within_3_fraction": _bool_fraction(group, "lower_bound_gap_within_3"),
+                "gap_within_10_fraction": _bool_fraction(group, "lower_bound_gap_within_10"),
                 "mean_min_candidate_log_mass": _safe_stat(
                     pd.to_numeric(group.get("min_candidate_log_mass", pd.Series(dtype=float)), errors="coerce").dropna(),
                     "mean",
@@ -218,6 +218,32 @@ def _with_support_columns(scores: pd.DataFrame) -> pd.DataFrame:
             else EXACT_SUPPORT
         )
     return out
+
+
+def _as_bool(value: object) -> bool:
+    if isinstance(value, (bool, np.bool_)):
+        return bool(value)
+    try:
+        if pd.isna(value):
+            return False
+    except (TypeError, ValueError):
+        pass
+    if isinstance(value, (int, float, np.integer, np.floating)):
+        numeric = float(value)
+        return bool(np.isfinite(numeric) and numeric != 0.0)
+    return str(value).strip().lower() in {"1", "1.0", "true", "t", "yes", "y"}
+
+
+def _bool_series(frame: pd.DataFrame, column: str) -> pd.Series:
+    if column not in frame:
+        return pd.Series(False, index=frame.index, dtype=bool)
+    return frame[column].map(_as_bool).astype(bool)
+
+
+def _bool_fraction(frame: pd.DataFrame, column: str) -> float:
+    if frame.empty or column not in frame:
+        return float("nan")
+    return float(_bool_series(frame, column).mean())
 
 
 def _resolve_value_column(frame: pd.DataFrame, requested: str | None) -> str:

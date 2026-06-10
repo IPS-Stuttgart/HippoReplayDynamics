@@ -189,8 +189,12 @@ def _gaussian_transition_matrix(
     max_step_sigma: float,
     valid_bin_mask: np.ndarray | None = None,
 ) -> csr_matrix:
-    if sigma_cm <= 0.0:
-        raise ValueError("sigma_cm must be positive")
+    sigma_cm = float(sigma_cm)
+    max_step_sigma = float(max_step_sigma)
+    if not np.isfinite(sigma_cm) or sigma_cm <= 0.0:
+        raise ValueError("sigma_cm must be finite and positive")
+    if not np.isfinite(max_step_sigma) or max_step_sigma <= 0.0:
+        raise ValueError("max_step_sigma must be finite and positive")
     n_bins = bin_centers.shape[0]
     valid_mask = _coerce_valid_bin_mask(valid_bin_mask, n_bins)
     allowed = np.arange(n_bins, dtype=int) if valid_mask is None else np.flatnonzero(valid_mask)

@@ -158,8 +158,12 @@ class CandidateKinematicModel:
         _validate_positive_parameter("momentum_sigma_cm", self.momentum_sigma_cm)
         _validate_nonnegative_parameter("velocity_decay", self.velocity_decay)
         _validate_probability_parameter("mode_stickiness", self.mode_stickiness)
-        if not np.issubdtype(np.asarray(self.top_k).dtype, np.integer):
+        top_k_value = np.asarray(self.top_k)
+        if top_k_value.ndim != 0 or not np.issubdtype(top_k_value.dtype, np.integer):
             raise TypeError("top_k must be an integer")
+        self.top_k = int(top_k_value)
+        if self.top_k < 0:
+            raise ValueError("top_k must be nonnegative")
         if self.name is None:
             self.name = self.mode
 

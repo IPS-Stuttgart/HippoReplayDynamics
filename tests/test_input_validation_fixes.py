@@ -5,7 +5,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from hipporeplayimm.data import ReplaySession, RippleEvent, _as_two_dimensional
+from hipporeplayimm.data import ReplaySession, RippleEvent, _as_intervals, _as_two_dimensional
 from hipporeplayimm.encoding import (
     EncodingConfig,
     EncodingModel,
@@ -79,6 +79,25 @@ def test_empty_ripple_events_keep_six_column_schema() -> None:
     ripple_events = _as_two_dimensional(np.array([]), "Ripple_Events")
 
     assert ripple_events.shape == (0, 6)
+
+
+def test_ripple_events_column_major_schema_is_transposed() -> None:
+    ripple_events = _as_two_dimensional(np.arange(12.0).reshape(6, 2), "Ripple_Events")
+
+    assert ripple_events.shape == (2, 6)
+    np.testing.assert_allclose(ripple_events[0], np.array([0.0, 2.0, 4.0, 6.0, 8.0, 10.0]))
+
+
+def test_malformed_ripple_events_are_rejected() -> None:
+    with pytest.raises(ValueError, match="Ripple_Events"):
+        _as_two_dimensional(np.zeros((2, 5)), "Ripple_Events")
+    with pytest.raises(ValueError, match="Ripple_Events"):
+        _as_two_dimensional(np.zeros(2), "Ripple_Events")
+
+
+def test_interval_arrays_reject_higher_dimensional_inputs() -> None:
+    with pytest.raises(ValueError, match="Intervals"):
+        _as_intervals(np.zeros((1, 2, 2)))
 
 
 def test_candidate_kinematic_model_rejects_negative_top_k() -> None:

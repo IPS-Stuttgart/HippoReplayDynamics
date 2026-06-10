@@ -334,13 +334,20 @@ def _as_two_dimensional(value: Any, name: str) -> np.ndarray:
         n_columns = 6 if name == "Ripple_Events" else 2
         return np.empty((0, n_columns), dtype=float)
     if arr.ndim == 1:
-        if name == "Ripple_Events" and arr.shape[0] == 6:
-            return arr.reshape(1, 6)
+        if name == "Ripple_Events":
+            if arr.shape[0] == 6:
+                return arr.reshape(1, 6)
+            raise ValueError(f"{name} must have six columns; got shape {arr.shape}")
         if arr.shape[0] == 2:
             return arr.reshape(1, 2)
         return arr.reshape(-1, 1)
     if arr.ndim != 2:
         raise ValueError(f"{name} must be one- or two-dimensional; got shape {arr.shape}")
+    if name == "Ripple_Events":
+        if arr.shape[1] != 6 and arr.shape[0] == 6:
+            arr = arr.T
+        if arr.shape[1] != 6:
+            raise ValueError(f"{name} must have six columns; got shape {arr.shape}")
     return arr
 
 
@@ -352,6 +359,8 @@ def _as_intervals(value: Any) -> np.ndarray:
         if arr.shape[0] == 2:
             return arr.reshape(1, 2).astype(float)
         raise ValueError(f"Intervals must have two columns; got shape {arr.shape}")
+    if arr.ndim != 2:
+        raise ValueError(f"Intervals must be one- or two-dimensional; got shape {arr.shape}")
     if arr.shape[1] != 2 and arr.shape[0] == 2:
         arr = arr.T
     if arr.shape[1] != 2:

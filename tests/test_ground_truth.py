@@ -443,6 +443,153 @@ def test_compare_scores_to_ground_truth_uses_benchmark_split_and_train_candidate
     assert model_config.state_space_displacement_prior_sigma_cm == pytest.approx(3.5)
 
 
+def test_compare_scores_to_ground_truth_fits_clusterless_encoding_on_train_split_even_without_excitatory_filter(
+    monkeypatch,
+    tmp_path: Path,
+):
+    times = np.linspace(0.0, 1.0, 11)
+    position = np.column_stack(
+        [times, np.zeros_like(times), np.zeros_like(times), np.zeros_like(times)]
+    )
+    session = _session(
+        tmp_path,
+        position=position,
+        well_sequence=np.array([[0.0, 1.0], [0.5, 2.0], [1.0, 1.0]]),
+        ripple_events=np.array([[0.2, 0.24, 0.22, 1.0, 1.0, 1.0]]),
+    )
+    bin_centers = np.array([[0.0, 0.0], [10.0, 0.0]])
+    encoding = EncodingModel(
+        x_edges=np.array([-1.0, 5.0, 11.0]),
+        y_edges=np.array([-1.0, 1.0]),
+        bin_centers=bin_centers,
+        rates_hz=np.ones((2, 2)),
+        occupancy_s=np.ones(2),
+        cell_ids=np.array([1, 2]),
+        config=EncodingConfig(use_excitatory=False),
+    )
+    wells = pd.DataFrame(
+        {
+            "well_id": [1, 2],
+            "well_x": [0.0, 10.0],
+            "well_y": [0.0, 0.0],
+            "n_estimates": [1, 1],
+        }
+    )
+    scores = pd.DataFrame(
+        {
+            "session": ["Rat1/Open1"],
+            "event_index": [0],
+            "model": ["clusterless-state-space-diffusion"],
+            "requested_model": ["clusterless-state-space-diffusion"],
+            "heldout_log_likelihood": [0.0],
+            "train_log_likelihood": [0.0],
+            "joint_log_likelihood": [0.0],
+            "train_cell_ids": ["1"],
+            "test_cell_ids": ["2"],
+        }
+    )
+    ground_truth = pd.DataFrame(
+        {
+            "session": ["Rat1/Open1"],
+            "event_index": [0],
+            "ripple_peak": [0.22],
+            "active_goal_id": [np.nan],
+            "true_well_id": [2],
+            "true_well_x": [10.0],
+            "true_well_y": [0.0],
+            "arrival_time": [0.5],
+            "time_to_arrival_s": [0.28],
+            "valid_label": [True],
+            "exclude_reason": [""],
+        }
+    )
+    fit_roles: list[str] = []
+    subset_roles: list[tuple[str, tuple[int, ...]]] = []
+    emission_roles: list[str] = []
+
+    def fake_build_emissions(session_arg, encoding_arg, event_index_arg, emission_config_arg):
+        del session_arg, event_index_arg, emission_config_arg
+        return LogEmissionTensor(
+            log_likelihood=np.zeros((1, 2), dtype=float),
+            spike_counts=np.zeros((1, encoding_arg.n_cells), dtype=int),
+            times=np.array([0.22]),
+            dt=0.02,
+            cell_ids=encoding_arg.cell_ids,
+            n_spikes=0,
+        )
+
+    class FakeClusterlessModel:
+        def score(self, emissions, bin_centers_arg):
+            del bin_centers_arg
+            return EventScore(
+                "clusterless-state-space-diffusion",
+                0.0,
+                emissions.n_time,
+                emissions.n_spikes,
+                terminal_log_posterior=np.log(np.array([0.25, 0.75])),
+                trajectory_log_posterior=np.log(np.array([[0.25, 0.75]])),
+            )
+
+    clusterless_model = FakeClusterlessModel()
+
+    def fake_session_with_mark_cell_subset(session_arg, cell_ids, *, role):
+        selected = tuple(int(cell_id) for cell_id in np.asarray(cell_ids, dtype=int))
+        subset_roles.append((role, selected))
+        return {
+            "role": role,
+            "cell_ids": selected,
+            "session_id": session_arg.session_id,
+        }
+
+    def fake_fit_clusterless_mark_encoding(session_arg, config_arg):
+        del config_arg
+        fit_roles.append(session_arg["role"])
+        return encoding
+
+    def fake_build_clusterless_mark_emissions(session_arg, encoding_arg, event_index_arg, emission_config_arg):
+        del encoding_arg, event_index_arg, emission_config_arg
+        emission_roles.append(session_arg["role"])
+        return LogEmissionTensor(
+            log_likelihood=np.zeros((1, 2), dtype=float),
+            spike_counts=np.zeros((1, 1), dtype=int),
+            times=np.array([0.22]),
+            dt=0.02,
+            cell_ids=np.array([1], dtype=int),
+            n_spikes=0,
+        )
+
+    monkeypatch.setattr("hipporeplayimm.ground_truth.load_open_field_sessions", lambda _root: [session])
+    monkeypatch.setattr("hipporeplayimm.ground_truth.fit_place_field_encoding", lambda _session, _config: encoding)
+    monkeypatch.setattr("hipporeplayimm.ground_truth.build_emissions", fake_build_emissions)
+    monkeypatch.setattr("hipporeplayimm.ground_truth.infer_well_locations", lambda _session, _config=None: wells)
+    monkeypatch.setattr(
+        "hipporeplayimm.ground_truth._build_models",
+        lambda _config, session=None: {"clusterless-state-space-diffusion": clusterless_model},
+    )
+    monkeypatch.setattr(
+        "hipporeplayimm.ground_truth._is_clusterless_model",
+        lambda model: model is clusterless_model,
+    )
+    monkeypatch.setattr("hipporeplayimm.ground_truth._clusterless_mark_config", lambda _config: object())
+    monkeypatch.setattr("hipporeplayimm.ground_truth._session_with_mark_cell_subset", fake_session_with_mark_cell_subset)
+    monkeypatch.setattr("hipporeplayimm.ground_truth.fit_clusterless_mark_encoding", fake_fit_clusterless_mark_encoding)
+    monkeypatch.setattr("hipporeplayimm.ground_truth.build_clusterless_mark_emissions", fake_build_clusterless_mark_emissions)
+
+    comparison = compare_scores_to_ground_truth(
+        tmp_path,
+        scores,
+        ground_truth=ground_truth,
+        encoding_config=EncodingConfig(use_excitatory=False),
+        include_bayesian_model_average=False,
+    )
+
+    assert subset_roles == [("train", (1,)), ("joint", (1, 2))]
+    assert fit_roles == ["train"]
+    assert emission_roles == ["train", "joint"]
+    assert comparison.loc[0, "decoded_well_id"] == 2
+    assert bool(comparison.loc[0, "goal_correct"])
+
+
 def test_compare_scores_to_ground_truth_adds_exact_bayesian_model_average(
     monkeypatch,
     tmp_path: Path,

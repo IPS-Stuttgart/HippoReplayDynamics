@@ -90,6 +90,28 @@ def test_lower_bound_primary_losses_are_nondecisive(tmp_path):
     assert summary["nondecisive_primary_lower_bound_events"] == 1
 
 
+def test_paper_claim_tables_accept_sparse_momentum_support_diagnostic():
+    diagnostic = "diagnostic_state_space_sparse_momentum_evidence_support"
+    scores = pd.DataFrame(
+        [
+            {
+                **_row("Rat1/Open1", 0, "sorted-spike-state-space-diffusion", 0.0),
+                diagnostic: None,
+            },
+            {
+                **_row("Rat1/Open1", 0, "sorted-spike-state-space-momentum-exact-sparse", 2.0),
+                diagnostic: "exact_full_grid",
+            },
+        ]
+    ).drop(columns=["evidence_support"])
+
+    tables = build_paper_claim_tables(scores, PaperClaimConfig(n_bootstrap=20, random_seed=5))
+
+    assert tables.summary.iloc[0]["paired_events"] == 1
+    assert tables.event_deltas.iloc[0]["primary_evidence_support"] == "exact_full_grid"
+    assert bool(tables.event_deltas.iloc[0]["both_evidence_comparable"])
+
+
 def test_load_score_tables_accepts_directory_with_event_scores(tmp_path):
     scores_dir = tmp_path / "run"
     scores_dir.mkdir()

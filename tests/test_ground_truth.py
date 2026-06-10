@@ -1,3 +1,4 @@
+import inspect
 from pathlib import Path
 
 import numpy as np
@@ -12,6 +13,7 @@ from hipporeplayimm.ground_truth import (
     _add_ground_truth_metrics,
     _decoded_row,
     _emission_config_for_scores,
+    _score_joint_for_ground_truth,
     assign_endpoint_to_well,
     compare_scores_to_ground_truth,
     compare_scores_to_ground_truth_sensitivity,
@@ -22,6 +24,7 @@ from hipporeplayimm.ground_truth import (
     well_posterior_masses,
 )
 from hipporeplayimm.models import EventScore
+from hipporeplayimm.state_space import StateSpaceReplayModel
 
 
 def test_shifted_well_coordinate_inference():
@@ -217,6 +220,67 @@ def test_emission_config_for_scores_rejects_conflicting_metadata():
         _emission_config_for_scores(scores, EmissionConfig())
 
 
+def test_ground_truth_compare_accepts_cli_forwarded_state_space_kwargs():
+    required = {
+        "state_space_trajectory_imm_mode_stickiness",
+        "state_space_trajectory_imm_momentum_initial_probability",
+        "state_space_trajectory_imm_momentum_switch_probability",
+        "state_space_displacement_radius_bins",
+        "state_space_displacement_position_sigma_cm",
+        "state_space_displacement_transition_sigma_cm_sqrt_s",
+        "state_space_displacement_prior_sigma_cm",
+    }
+
+    compare_params = inspect.signature(compare_scores_to_ground_truth).parameters
+    sensitivity_params = inspect.signature(compare_scores_to_ground_truth_sensitivity).parameters
+
+    compare_accepts_forwarded_kwargs = any(
+        param.kind is inspect.Parameter.VAR_KEYWORD for param in compare_params.values()
+    )
+    for name in required:
+        if not compare_accepts_forwarded_kwargs:
+            assert name in compare_params
+        assert name in sensitivity_params
+    assert "clusterless_mark_group_by" in sensitivity_params
+
+
+def test_score_joint_for_ground_truth_skips_candidates_for_exact_state_space(monkeypatch):
+    train_emissions = LogEmissionTensor(
+        log_likelihood=np.zeros((2, 2), dtype=float),
+        spike_counts=np.zeros((2, 1), dtype=int),
+        times=np.array([0.00, 0.02], dtype=float),
+        dt=0.02,
+        cell_ids=np.array([1], dtype=int),
+        n_spikes=0,
+    )
+    joint_emissions = LogEmissionTensor(
+        log_likelihood=np.zeros((2, 2), dtype=float),
+        spike_counts=np.zeros((2, 2), dtype=int),
+        times=np.array([0.00, 0.02], dtype=float),
+        dt=0.02,
+        cell_ids=np.array([1, 2], dtype=int),
+        n_spikes=0,
+    )
+    bin_centers = np.array([[0.0, 0.0], [1.0, 0.0]], dtype=float)
+    model = StateSpaceReplayModel(mode="diffusion")
+
+    def fail_candidate_indices(self, emissions, centers=None):
+        del self, emissions, centers
+        raise AssertionError("exact first-order state-space models should not derive train candidates")
+
+    monkeypatch.setattr(StateSpaceReplayModel, "candidate_indices", fail_candidate_indices)
+
+    score = _score_joint_for_ground_truth(
+        model,
+        train_emissions,
+        joint_emissions,
+        bin_centers,
+        occupancy_s=np.ones(2),
+    )
+
+    assert score.model_name == "state-space-diffusion"
+
+
 def test_compare_scores_to_ground_truth_uses_benchmark_split_and_train_candidates(
     monkeypatch, tmp_path: Path
 ):
@@ -259,6 +323,13 @@ def test_compare_scores_to_ground_truth_uses_benchmark_split_and_train_candidate
             "joint_log_likelihood": [0.0],
             "train_cell_ids": ["1,2,3"],
             "test_cell_ids": ["4"],
+            "state_space_trajectory_imm_mode_stickiness": [0.73],
+            "state_space_trajectory_imm_momentum_initial_probability": [0.21],
+            "state_space_trajectory_imm_momentum_switch_probability": [0.34],
+            "state_space_displacement_radius_bins": [5],
+            "state_space_displacement_position_sigma_cm": [1.25],
+            "state_space_displacement_transition_sigma_cm_sqrt_s": [9.5],
+            "state_space_displacement_prior_sigma_cm": [3.5],
         }
     )
     ground_truth = pd.DataFrame(
@@ -332,9 +403,15 @@ def test_compare_scores_to_ground_truth_uses_benchmark_split_and_train_candidate
         "hipporeplayimm.ground_truth.infer_well_locations",
         lambda _session, _config=None: wells,
     )
+
+    def fake_build_models(config, session=None):
+        del session
+        seen["model_config"] = config
+        return {"diffusion": FakeCandidateModel()}
+
     monkeypatch.setattr(
         "hipporeplayimm.ground_truth._build_models",
-        lambda _config, session=None: {"diffusion": FakeCandidateModel()},
+        fake_build_models,
     )
 
     comparison = compare_scores_to_ground_truth(
@@ -356,6 +433,14 @@ def test_compare_scores_to_ground_truth_uses_benchmark_split_and_train_candidate
     assert comparison.loc[0, "true_max_well_rank"] == 1
     assert bool(comparison.loc[0, "max_over_time_goal_correct"])
     assert bool(comparison.loc[0, "trajectory_mean_goal_correct"])
+    model_config = seen["model_config"]
+    assert model_config.state_space_trajectory_imm_mode_stickiness == pytest.approx(0.73)
+    assert model_config.state_space_trajectory_imm_momentum_initial_probability == pytest.approx(0.21)
+    assert model_config.state_space_trajectory_imm_momentum_switch_probability == pytest.approx(0.34)
+    assert model_config.state_space_displacement_radius_bins == 5
+    assert model_config.state_space_displacement_position_sigma_cm == pytest.approx(1.25)
+    assert model_config.state_space_displacement_transition_sigma_cm_sqrt_s == pytest.approx(9.5)
+    assert model_config.state_space_displacement_prior_sigma_cm == pytest.approx(3.5)
 
 
 def test_compare_scores_to_ground_truth_adds_exact_bayesian_model_average(
@@ -521,12 +606,12 @@ def test_ground_truth_sensitivity_relabels_without_redecoding(monkeypatch, tmp_p
             "goal_correct": [False, False],
         }
     )
-    compare_calls: list[GroundTruthConfig] = []
+    compare_calls: list[dict[str, object]] = []
     generated_configs: list[GroundTruthConfig] = []
 
     def fake_compare_scores_to_ground_truth(root, scores, **kwargs):
         del root, scores
-        compare_calls.append(kwargs["ground_truth_config"])
+        compare_calls.append(dict(kwargs))
         return base_comparison.copy()
 
     def fake_generate_behavioral_ground_truth(root, config=None):
@@ -568,9 +653,26 @@ def test_ground_truth_sensitivity_relabels_without_redecoding(monkeypatch, tmp_p
             min_dwells_s=(0.2,),
             future_horizons_s=(10.0, 30.0),
         ),
+        clusterless_mark_group_by="cell",
+        state_space_trajectory_imm_mode_stickiness=0.81,
+        state_space_trajectory_imm_momentum_initial_probability=0.22,
+        state_space_trajectory_imm_momentum_switch_probability=0.11,
+        state_space_displacement_radius_bins=4,
+        state_space_displacement_position_sigma_cm=1.5,
+        state_space_displacement_transition_sigma_cm_sqrt_s=7.5,
+        state_space_displacement_prior_sigma_cm=2.5,
     )
 
     assert len(compare_calls) == 1
+    assert compare_calls[0]["ground_truth_config"].future_horizon_s == pytest.approx(10.0)
+    assert compare_calls[0]["clusterless_mark_group_by"] == "cell"
+    assert compare_calls[0]["state_space_trajectory_imm_mode_stickiness"] == pytest.approx(0.81)
+    assert compare_calls[0]["state_space_trajectory_imm_momentum_initial_probability"] == pytest.approx(0.22)
+    assert compare_calls[0]["state_space_trajectory_imm_momentum_switch_probability"] == pytest.approx(0.11)
+    assert compare_calls[0]["state_space_displacement_radius_bins"] == 4
+    assert compare_calls[0]["state_space_displacement_position_sigma_cm"] == pytest.approx(1.5)
+    assert compare_calls[0]["state_space_displacement_transition_sigma_cm_sqrt_s"] == pytest.approx(7.5)
+    assert compare_calls[0]["state_space_displacement_prior_sigma_cm"] == pytest.approx(2.5)
     assert len(generated_configs) == 2
     assert set(result.rows["true_well_id"]) == {1, 2}
     assert result.rows["goal_correct"].tolist() == [True, False, False, True]

@@ -61,6 +61,26 @@ def _minimal_session_with_marks() -> ReplaySession:
     )
 
 
+def _minimal_clusterless_encoding() -> ClusterlessMarkEncoding:
+    return ClusterlessMarkEncoding(
+        x_edges=np.array([0.0, 1.0]),
+        y_edges=np.array([0.0, 1.0]),
+        bin_centers=np.array([[0.5, 0.5]], dtype=float),
+        rate_hz=np.array([1.0]),
+        occupancy_s=np.array([1.0]),
+        effective_spike_count=np.array([1.0]),
+        mark_mean=np.zeros((1, 2), dtype=float),
+        mark_variance=np.ones((1, 2), dtype=float),
+        mark_feature_names=("m0", "m1"),
+        spike_mark_source="unit-test",
+        config=ClusterlessMarkConfig(mark_likelihood="diagonal-gaussian", mark_group_by="cell"),
+        mark_likelihood="diagonal-gaussian",
+        group_ids=np.array([1], dtype=int),
+        group_mark_mean=np.zeros((1, 1, 2), dtype=float),
+        group_mark_variance=np.ones((1, 1, 2), dtype=float),
+    )
+
+
 def test_shared_encoding_cli_arguments_are_registered() -> None:
     parser = ArgumentParser()
     cli._add_encoding_arguments(parser)
@@ -122,26 +142,18 @@ def test_clusterless_fit_uses_train_marks_even_when_all_cells_are_enabled(monkey
 
 
 def test_clusterless_group_ids_reject_fractional_values() -> None:
-    encoding = ClusterlessMarkEncoding(
-        x_edges=np.array([0.0, 1.0]),
-        y_edges=np.array([0.0, 1.0]),
-        bin_centers=np.array([[0.5, 0.5]], dtype=float),
-        rate_hz=np.array([1.0]),
-        occupancy_s=np.array([1.0]),
-        effective_spike_count=np.array([1.0]),
-        mark_mean=np.zeros((1, 2), dtype=float),
-        mark_variance=np.ones((1, 2), dtype=float),
-        mark_feature_names=("m0", "m1"),
-        spike_mark_source="unit-test",
-        config=ClusterlessMarkConfig(mark_likelihood="diagonal-gaussian", mark_group_by="cell"),
-        mark_likelihood="diagonal-gaussian",
-        group_ids=np.array([1], dtype=int),
-        group_mark_mean=np.zeros((1, 1, 2), dtype=float),
-        group_mark_variance=np.ones((1, 1, 2), dtype=float),
-    )
+    encoding = _minimal_clusterless_encoding()
 
     with pytest.raises(ValueError, match="integer-valued"):
         encoding.log_mark_likelihood(np.array([[0.0, 0.0]]), group_ids=np.array([1.5]))
+
+
+def test_clusterless_group_ids_reject_nonfinite_values() -> None:
+    encoding = _minimal_clusterless_encoding()
+
+    for group_ids in (np.array([np.nan]), np.array([np.inf])):
+        with pytest.raises(ValueError, match="finite"):
+            encoding.log_mark_likelihood(np.array([[0.0, 0.0]]), group_ids=group_ids)
 
 
 def test_log_emission_tensor_metadata_is_declared_field() -> None:

@@ -413,7 +413,9 @@ def _posterior_diagnostics(
     posterior = np.exp(terminal_log_posterior)
     endpoint = posterior @ centers
     map_bin = int(np.argmax(terminal_log_posterior))
-    entropy = float(-np.sum(posterior * terminal_log_posterior))
+    with np.errstate(invalid="ignore"):
+        entropy_terms = np.where(posterior > 0.0, posterior * terminal_log_posterior, 0.0)
+    entropy = float(-np.sum(entropy_terms))
     endpoint_y = float(endpoint[1]) if centers.shape[1] > 1 else 0.0
     map_y = float(centers[map_bin, 1]) if centers.shape[1] > 1 else 0.0
     return {

@@ -275,15 +275,30 @@ def _scaled_emissions(
 
 def _as_log_probs(probabilities: np.ndarray) -> np.ndarray:
     probs = np.asarray(probabilities, dtype=float)
+    if probs.ndim != 2:
+        raise ValueError("probabilities must be two-dimensional")
+    if not np.all(np.isfinite(probs)):
+        raise ValueError("probabilities must be finite")
+    if np.any(probs < 0.0):
+        raise ValueError("probabilities must be nonnegative")
+
+    row_mass = probs.sum(axis=1)
+    if not np.all(np.isfinite(row_mass)) or np.any(row_mass <= 0.0):
+        raise ValueError("every probability row must contain positive finite mass")
+
     out = np.full(probs.shape, LOG_ZERO, dtype=float)
-    positive = probs > 0.0
-    out[positive] = np.log(probs[positive])
-    return out - logsumexp(out, axis=1)[:, None]
+    normalized = probs / row_mass[:, None]
+    positive = normalized > 0.0
+    out[positive] = np.log(normalized[positive])
+    return out
 
 
 def _mean_entropy(trajectory_log_posterior: np.ndarray) -> float:
-    posterior = np.exp(trajectory_log_posterior)
-    return float(np.mean(-np.sum(posterior * trajectory_log_posterior, axis=1)))
+    log_posterior = np.asarray(trajectory_log_posterior, dtype=float)
+    posterior = np.exp(log_posterior)
+    with np.errstate(invalid="ignore"):
+        entropy_terms = np.where(posterior > 0.0, posterior * log_posterior, 0.0)
+    return float(np.mean(-np.sum(entropy_terms, axis=1)))
 
 
 def _mode_transition_matrix(n_modes: int, stickiness: float) -> np.ndarray:

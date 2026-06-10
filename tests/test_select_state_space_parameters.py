@@ -410,6 +410,103 @@ def test_select_parameters_uses_confidence_recovery_safety_metrics(tmp_path):
     assert bool(recommendation["momentum_confidence_recovery_passes_threshold_gate"])
 
 
+def test_select_parameters_normalizes_parameter_keys_for_confidence_merges(tmp_path):
+    evidence = tmp_path / "evidence"
+    recovery = tmp_path / "recovery"
+    confidence = tmp_path / "confidence"
+    output = tmp_path / "selection"
+    params = _params(60.0, 85.0, 85.0, 0.95, 128, candidate_source="posterior")
+    _write(
+        evidence,
+        "state_space_evidence_sweep_config_ranked.csv",
+        [
+            {
+                **params,
+                "matrix_id": "evidence-posterior",
+                "events": 10,
+                "momentum_beats_diffusion_events": 8,
+                "momentum_beats_diffusion_log5_events": 6,
+                "median_momentum_minus_diffusion_log_evidence": 7.0,
+                "mean_momentum_minus_diffusion_log_evidence": 8.0,
+            }
+        ],
+    )
+    _write(
+        recovery,
+        "simulation_recovery_sweep_config_ranked.csv",
+        [
+            {
+                **params,
+                "matrix_id": "recovery-posterior",
+                "failures": 0,
+                "overall_recovery_accuracy": 1.0,
+                "momentum_recovery_accuracy": 1.0,
+                "diffusion_recovery_accuracy": 1.0,
+                "momentum_most_common_best_model": "sorted-spike-state-space-momentum-exact-sparse",
+            }
+        ],
+    )
+    confidence_key_aliases = {
+        "state_space_diffusion_sigma_cm_sqrt_s": "60.0",
+        "state_space_momentum_sigma_cm_sqrt_s": "85.0",
+        "state_space_momentum_initial_sigma_cm_sqrt_s": "85.0",
+        "state_space_momentum_velocity_decay": "0.95",
+        "state_space_momentum_candidate_top_k": "128",
+        "state_space_momentum_predicted_candidate_top_k": "8",
+        "state_space_momentum_candidate_source": "train_posterior",
+    }
+    selection_key_aliases = {
+        **confidence_key_aliases,
+        "state_space_momentum_candidate_source": "first_order_posterior",
+    }
+    _write(
+        confidence,
+        "momentum_confidence_threshold_evidence_by_stratum.csv",
+        [
+            {
+                **confidence_key_aliases,
+                "margin_threshold": 5.0,
+                "events": 10,
+                "positive_model_claims": 6,
+                "reference_model_claims": 1,
+                "ambiguous_events": 3,
+                "positive_claim_fraction": 0.6,
+            }
+        ],
+    )
+    _write(
+        confidence,
+        "momentum_confidence_threshold_selection.csv",
+        [
+            {
+                **selection_key_aliases,
+                "thresholded_binary_accuracy": 0.9,
+                "positive_claim_recall": 1.0,
+                "reference_specificity": 1.0,
+                "false_positive_claims": 0,
+                "false_negative_claims": 0,
+                "passes_threshold_gate": True,
+                "selection_status": "passed_specificity_gate",
+                "threshold_scope": "stratum",
+            }
+        ],
+    )
+
+    tables = select_parameters(
+        evidence,
+        recovery,
+        output=output,
+        confidence_evidence=confidence,
+    )
+
+    recommendation = tables["recommendation"].iloc[0]
+    assert recommendation["evidence_matrix_id"] == "evidence-posterior"
+    assert recommendation["momentum_confidence_claim_events"] == 6
+    assert recommendation["momentum_confidence_recovery_false_positive_claims"] == 0
+    assert recommendation["state_space_momentum_candidate_source"] == "posterior"
+    assert bool(recommendation["momentum_confidence_recovery_passes_threshold_gate"])
+
+
 def test_select_parameters_keeps_observation_calibration_dimensions_separate(tmp_path):
     evidence = tmp_path / "evidence"
     recovery = tmp_path / "recovery"

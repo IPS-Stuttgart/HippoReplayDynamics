@@ -142,18 +142,17 @@ class ClusterlessMarkEncoding:
         if raw_group_ids.shape[0] != n_marks:
             raise ValueError(f"Expected {n_marks} mark group IDs, got {raw_group_ids.shape[0]}")
         numeric_group_ids = raw_group_ids.astype(float, copy=False)
-        finite = np.isfinite(numeric_group_ids)
-        coerced = np.full(n_marks, np.iinfo(np.int64).min, dtype=int)
-        integer_valued = np.zeros(n_marks, dtype=bool)
-        integer_valued[finite] = np.isclose(
-            numeric_group_ids[finite],
-            np.rint(numeric_group_ids[finite]),
+        if not np.all(np.isfinite(numeric_group_ids)):
+            raise ValueError("mark group IDs must be finite")
+        integer_valued = np.isclose(
+            numeric_group_ids,
+            np.rint(numeric_group_ids),
             rtol=0.0,
             atol=0.0,
         )
-        if not np.all(integer_valued[finite]):
+        if not np.all(integer_valued):
             raise ValueError("mark group IDs must be integer-valued")
-        coerced[finite] = numeric_group_ids[finite].astype(int)
+        coerced = numeric_group_ids.astype(int)
         sorted_order = np.argsort(self.group_ids)
         sorted_groups = np.asarray(self.group_ids, dtype=int)[sorted_order]
         positions = np.searchsorted(sorted_groups, coerced)
@@ -584,20 +583,31 @@ def build_clusterless_mark_emissions(
 def _validate_mark_config(config: ClusterlessMarkConfig) -> None:
     _normalize_mark_likelihood(config.mark_likelihood)
     _normalize_mark_group_by(config.mark_group_by)
-    if config.mark_smoothing_sigma_bins < 0.0:
+
+    mark_smoothing_sigma_bins = float(config.mark_smoothing_sigma_bins)
+    if not np.isfinite(mark_smoothing_sigma_bins) or mark_smoothing_sigma_bins < 0.0:
         raise ValueError("mark_smoothing_sigma_bins must be nonnegative")
-    if config.mark_prior_count < 0.0:
+    mark_prior_count = float(config.mark_prior_count)
+    if not np.isfinite(mark_prior_count) or mark_prior_count < 0.0:
         raise ValueError("mark_prior_count must be nonnegative")
-    if config.mark_variance_floor <= 0.0:
+    mark_variance_floor = float(config.mark_variance_floor)
+    if not np.isfinite(mark_variance_floor) or mark_variance_floor <= 0.0:
         raise ValueError("mark_variance_floor must be positive")
-    if config.rate_floor_hz <= 0.0:
+    rate_floor_hz = float(config.rate_floor_hz)
+    if not np.isfinite(rate_floor_hz) or rate_floor_hz <= 0.0:
         raise ValueError("rate_floor_hz must be positive")
-    if config.mark_kde_bandwidth is not None and config.mark_kde_bandwidth <= 0.0:
-        raise ValueError("mark_kde_bandwidth must be positive when provided")
-    if config.mark_kde_spatial_sigma_bins is not None and config.mark_kde_spatial_sigma_bins < 0.0:
-        raise ValueError("mark_kde_spatial_sigma_bins must be nonnegative when provided")
-    if int(config.mark_kde_max_neighbors) < 1:
-        raise ValueError("mark_kde_max_neighbors must be at least one")
+
+    if config.mark_kde_bandwidth is not None:
+        mark_kde_bandwidth = float(config.mark_kde_bandwidth)
+        if not np.isfinite(mark_kde_bandwidth) or mark_kde_bandwidth <= 0.0:
+            raise ValueError("mark_kde_bandwidth must be positive when provided")
+    if config.mark_kde_spatial_sigma_bins is not None:
+        mark_kde_spatial_sigma_bins = float(config.mark_kde_spatial_sigma_bins)
+        if not np.isfinite(mark_kde_spatial_sigma_bins) or mark_kde_spatial_sigma_bins < 0.0:
+            raise ValueError("mark_kde_spatial_sigma_bins must be nonnegative when provided")
+    mark_kde_max_neighbors = float(config.mark_kde_max_neighbors)
+    if not np.isfinite(mark_kde_max_neighbors) or not mark_kde_max_neighbors.is_integer() or mark_kde_max_neighbors < 1.0:
+        raise ValueError("mark_kde_max_neighbors must be a positive integer")
 
 
 def _normalize_mark_likelihood(value: str) -> str:

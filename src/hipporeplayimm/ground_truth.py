@@ -569,7 +569,11 @@ def compare_scores_to_ground_truth(
             if has_clusterless_models:
                 clusterless_train_session = _session_with_mark_cell_subset(session, train_cells, role="train")
                 clusterless_joint_session = _session_with_mark_cell_subset(session, np.concatenate([train_cells, test_cells]), role="joint")
-                clusterless_fit_session = clusterless_train_session if encoding_config.use_excitatory else clusterless_joint_session
+                # Match held-out benchmark scoring: fit clusterless observation
+                # parameters on train-cell marks only. Re-fitting on the joint
+                # train+test marked process changes the posterior and leaks
+                # held-out marks into ground-truth re-decoding.
+                clusterless_fit_session = clusterless_train_session
                 clusterless_encoding = fit_clusterless_mark_encoding(clusterless_fit_session, clusterless_config)
         elif has_clusterless_models:
             clusterless_encoding = fit_clusterless_mark_encoding(session, clusterless_config)

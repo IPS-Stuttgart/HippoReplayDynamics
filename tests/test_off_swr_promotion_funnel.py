@@ -5,7 +5,11 @@ import pandas as pd
 
 sys.path.append(str(Path(__file__).resolve().parents[1] / "scripts"))
 
-from build_off_swr_promotion_funnel import write_off_swr_promotion_funnel_outputs  # noqa: E402
+from build_off_swr_promotion_funnel import (  # noqa: E402
+    build_funnel_summary,
+    build_gate_summary,
+    write_off_swr_promotion_funnel_outputs,
+)
 
 
 def test_off_swr_promotion_funnel_joins_discovery_and_exact_validation(tmp_path):
@@ -37,7 +41,6 @@ def test_off_swr_promotion_funnel_joins_discovery_and_exact_validation(tmp_path)
         [
             {
                 **_key("Rat2/Open1", 4, 0),
-                "rat": "Rat2",
                 "required_models_complete": True,
                 "trajectory_confident_claim": True,
                 "nontrajectory_confident_claim": False,
@@ -85,7 +88,9 @@ def test_off_swr_promotion_funnel_joins_discovery_and_exact_validation(tmp_path)
     assert int(rejection.loc["exact_validated_promotion_ready", "candidate_windows"]) == 1
 
     group = outputs["off_swr_promotion_funnel_group_summary.csv"]
+    rat1 = group[group["group_type"].eq("rat") & group["rat"].eq("Rat1")].iloc[0]
     rat2 = group[group["group_type"].eq("rat") & group["rat"].eq("Rat2")].iloc[0]
+    assert int(rat1["exact_trajectory_confident_candidates"]) == 0
     assert int(rat2["promotion_ready_candidates"]) == 1
     assert int(rat2["exact_trajectory_confident_candidates"]) == 1
 
@@ -94,6 +99,72 @@ def test_off_swr_promotion_funnel_joins_discovery_and_exact_validation(tmp_path)
 
     for filename in outputs:
         assert (output / filename).exists()
+
+
+def test_off_swr_promotion_funnel_gate_checks_validation_keys():
+    candidate_table = pd.DataFrame(
+        [_candidate("Rat2/Open1", 4, 0, margin=120.0, state="immobile", label="interesting_off_swr_trajectory_candidate", tier="extreme")]
+    )
+    high_specificity = candidate_table.copy()
+    high_specificity["passes_high_specificity_promotion_filter"] = True
+    validation_decisions = pd.DataFrame(
+        [
+            {
+                **_key("Rat2/Open1", 999, 0),
+                "required_models_complete": True,
+                "trajectory_confident_claim": True,
+                "nontrajectory_confident_claim": False,
+                "trajectory_minus_nontrajectory_log_evidence": 101.0,
+            }
+        ]
+    )
+    funnel = build_funnel_summary(
+        candidate_table=candidate_table,
+        tier_summary=_tier_summary(),
+        run_state_summary=pd.DataFrame(),
+        high_specificity=high_specificity,
+        validation_decisions=validation_decisions,
+    )
+
+    gates = build_gate_summary(
+        candidate_table=candidate_table,
+        tier_summary=_tier_summary(),
+        high_specificity=high_specificity,
+        validation_decisions=validation_decisions,
+        funnel=funnel,
+    ).set_index("gate")
+
+    assert not bool(gates.loc["exact_validation_matches_promotion_ready", "passed"])
+    assert not bool(gates.loc["overall", "passed"])
+
+
+def test_off_swr_promotion_funnel_counts_only_complete_exact_core_rows():
+    candidate_table = pd.DataFrame(
+        [_candidate("Rat2/Open1", 4, 0, margin=120.0, state="immobile", label="interesting_off_swr_trajectory_candidate", tier="extreme")]
+    )
+    high_specificity = candidate_table.copy()
+    high_specificity["passes_high_specificity_promotion_filter"] = True
+    validation_decisions = pd.DataFrame(
+        [
+            {
+                **_key("Rat2/Open1", 4, 0),
+                "required_models_complete": False,
+                "trajectory_confident_claim": True,
+                "nontrajectory_confident_claim": False,
+                "trajectory_minus_nontrajectory_log_evidence": 101.0,
+            }
+        ]
+    )
+    funnel = build_funnel_summary(
+        candidate_table=candidate_table,
+        tier_summary=_tier_summary(),
+        run_state_summary=pd.DataFrame(),
+        high_specificity=high_specificity,
+        validation_decisions=validation_decisions,
+    ).set_index("stage")
+
+    assert int(funnel.loc["exact_core_validated_candidates", "windows"]) == 0
+    assert int(funnel.loc["exact_core_trajectory_confident_candidates", "windows"]) == 0
 
 
 def _key(session: str, event_index: int, null_index: int) -> dict[str, object]:

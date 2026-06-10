@@ -111,9 +111,12 @@ def _as_bool(value: object) -> bool:
 
 
 def _safe_fraction(value: int | float, denominator: int | float) -> float:
-    if denominator is None or float(denominator) == 0.0:
+    if denominator is None:
         return np.nan
-    return float(value) / float(denominator)
+    denominator_value = float(denominator)
+    if not np.isfinite(denominator_value) or denominator_value == 0.0:
+        return np.nan
+    return float(value) / denominator_value
 
 
 def _safe_median(frame: pd.DataFrame, column: str) -> float:
@@ -156,16 +159,25 @@ def _model_distribution(frame: pd.DataFrame) -> str:
     return "; ".join(f"{model}={count} ({count / total:.3f})" for model, count in counts.items())
 
 
+def _has_key_columns(frame: pd.DataFrame) -> bool:
+    return set(KEY_COLUMNS).issubset(frame.columns)
+
+
+def _key_tuples(frame: pd.DataFrame) -> list[tuple[object, ...]]:
+    if frame.empty or not _has_key_columns(frame):
+        return []
+    key_frame = frame[list(KEY_COLUMNS)].astype(object).where(pd.notna(frame[list(KEY_COLUMNS)]), None)
+    return list(map(tuple, key_frame.to_numpy()))
+
+
 def _key_set(frame: pd.DataFrame) -> set[tuple[object, ...]]:
-    if frame.empty or not set(KEY_COLUMNS).issubset(frame.columns):
-        return set()
-    return set(map(tuple, frame[list(KEY_COLUMNS)].astype(object).to_numpy()))
+    return set(_key_tuples(frame))
 
 
 def _mask_keys(frame: pd.DataFrame, keys: set[tuple[object, ...]]) -> pd.Series:
-    if frame.empty or not keys or not set(KEY_COLUMNS).issubset(frame.columns):
+    if frame.empty or not keys or not _has_key_columns(frame):
         return pd.Series(False, index=frame.index)
-    values = list(map(tuple, frame[list(KEY_COLUMNS)].astype(object).to_numpy()))
+    values = _key_tuples(frame)
     return pd.Series([value in keys for value in values], index=frame.index)
 
 
@@ -176,7 +188,7 @@ def _tier_subset(candidate_table: pd.DataFrame, threshold: float) -> pd.DataFram
 
 
 def _tier_summary_value(tier_summary: pd.DataFrame, tier: str, column: str) -> float:
-    if tier_summary.empty or column not in tier_summary:
+    if tier_summary.empty or "candidate_tier" not in tier_summary or column not in tier_summary:
         return np.nan
     rows = tier_summary[tier_summary["candidate_tier"].astype(str).eq(tier)]
     if rows.empty:
@@ -235,12 +247,51 @@ def _stage_row(
 
 def promotion_ready_mask(high_specificity: pd.DataFrame) -> pd.Series:
     if high_specificity.empty:
-        return pd.Series(dtype=bool)
+        return pd.Series(False, index=high_specificity.index, dtype=bool)
     if "passes_high_specificity_promotion_filter" in high_specificity:
         return high_specificity["passes_high_specificity_promotion_filter"].map(_as_bool)
     if "high_specificity_label" in high_specificity:
         return high_specificity["high_specificity_label"].astype(str).eq(PROMOTION_READY_LABEL)
-    return pd.Series(False, index=high_specificity.index)
+    return pd.Series(False, index=high_specificity.index, dtype=bool)
+
+
+def _complete_validation_rows(validation_decisions: pd.DataFrame) -> pd.DataFrame:
+    if validation_decisions.empty:
+        return validation_decisions.copy()
+    if "required_models_complete" not in validation_decisions:
+        return validation_decisions.copy()
+    return validation_decisions[validation_decisions["required_models_complete"].map(_as_bool)].copy()
+
+
+def _attach_reference_columns(frame: pd.DataFrame, reference: pd.DataFrame, columns: tuple[str, ...]) -> pd.DataFrame:
+    output = frame.copy()
+    if "rat" in columns and "rat" not in output and "session" in output:
+        output["rat"] = output["session"].astype(str).str.split("/", n=1).str[0]
+    missing = [column for column in columns if column not in output.columns and column in reference.columns]
+    if missing and not output.empty and not reference.empty and _has_key_columns(output) and _has_key_columns(reference):
+        metadata = reference[list(KEY_COLUMNS) + missing].drop_duplicates(subset=list(KEY_COLUMNS))
+        output = output.merge(metadata, on=list(KEY_COLUMNS), how="left", validate="many_to_one")
+    return output
+
+
+def _validation_key_match_observation(validation_decisions: pd.DataFrame, ready: pd.DataFrame) -> tuple[bool, str]:
+    if _has_key_columns(validation_decisions) and _has_key_columns(ready):
+        validation_keys = _key_tuples(validation_decisions)
+        ready_keys = _key_tuples(ready)
+        validation_key_set = set(validation_keys)
+        ready_key_set = set(ready_keys)
+        duplicate_keys = (len(validation_keys) - len(validation_key_set)) + (len(ready_keys) - len(ready_key_set))
+        matched_keys = len(validation_key_set & ready_key_set)
+        return (
+            validation_key_set == ready_key_set and duplicate_keys == 0,
+            (
+                f"matched_keys={matched_keys}/{len(ready_key_set)}; "
+                f"validation_rows={len(validation_keys)}; "
+                f"promotion_ready_rows={len(ready_keys)}; "
+                f"duplicate_keys={duplicate_keys}"
+            ),
+        )
+    return len(validation_decisions) == len(ready), f"{len(validation_decisions)}/{len(ready)}"
 
 
 def build_funnel_summary(
@@ -321,7 +372,7 @@ def build_funnel_summary(
         )
     )
 
-    validated = validation_decisions.copy()
+    validated = _complete_validation_rows(validation_decisions)
     rows.append(
         _stage_row(
             order=8,
@@ -329,9 +380,7 @@ def build_funnel_summary(
             label="Promotion-ready candidates with complete exact-core validation",
             source_table="promoted_off_swr_candidate_exact_core_decisions.csv",
             frame=validated,
-            windows=int(validation_decisions["required_models_complete"].map(_as_bool).sum())
-            if "required_models_complete" in validation_decisions
-            else int(len(validated)),
+            windows=int(len(validated)),
             screened=screened,
             previous=int(len(ready)),
             median_margin_column=EXACT_MARGIN_COLUMN,
@@ -339,8 +388,8 @@ def build_funnel_summary(
         )
     )
     trajectory = (
-        validation_decisions[validation_decisions["trajectory_confident_claim"].map(_as_bool)].copy()
-        if not validation_decisions.empty and "trajectory_confident_claim" in validation_decisions
+        validated[validated["trajectory_confident_claim"].map(_as_bool)].copy()
+        if not validated.empty and "trajectory_confident_claim" in validated
         else pd.DataFrame()
     )
     rows.append(
@@ -400,7 +449,12 @@ def _group_rows(
     if tier_frame.empty:
         return []
     rows = []
-    ready = high_specificity[promotion_ready_mask(high_specificity)].copy()
+    ready = _attach_reference_columns(high_specificity[promotion_ready_mask(high_specificity)].copy(), high_specificity, group_cols)
+    validation_decisions = _attach_reference_columns(
+        _complete_validation_rows(validation_decisions),
+        ready if not ready.empty else high_specificity,
+        group_cols,
+    )
     tier_groups = tier_frame.groupby(list(group_cols), sort=True)
     for key, group in tier_groups:
         key_tuple = key if isinstance(key, tuple) else (key,)
@@ -412,7 +466,8 @@ def _group_rows(
             subset = group[group["candidate_tier"].astype(str).eq(tier)]
             if subset.empty or column not in subset:
                 return 0
-            return int(pd.to_numeric(subset.iloc[0][column], errors="coerce"))
+            value = pd.to_numeric(subset.iloc[0][column], errors="coerce")
+            return int(value) if pd.notna(value) else 0
 
         off_swr = tier_count("weak", "off_swr_windows")
         ready_group = _filter_group(ready, key_map)
@@ -449,8 +504,9 @@ def _filter_group(frame: pd.DataFrame, key_map: dict[str, str]) -> pd.DataFrame:
         return frame.copy()
     mask = pd.Series(True, index=frame.index)
     for column, value in key_map.items():
-        if column in frame:
-            mask &= frame[column].astype(str).eq(str(value))
+        if column not in frame:
+            return frame.iloc[0:0].copy()
+        mask &= frame[column].astype(str).eq(str(value))
     return frame[mask].copy()
 
 
@@ -465,7 +521,7 @@ def build_rejection_summary(
     frame = candidate_table.copy()
     high_keys = _key_set(high_specificity)
     ready_keys = _key_set(high_specificity[promotion_ready_mask(high_specificity)].copy())
-    validated_keys = _key_set(validation_decisions)
+    validated_keys = _key_set(_complete_validation_rows(validation_decisions))
     high_mask = _mask_keys(frame, high_keys)
     ready_mask = _mask_keys(frame, ready_keys)
     validated_mask = _mask_keys(frame, validated_keys)
@@ -523,6 +579,7 @@ def build_gate_summary(
 
     screened = int(funnel[funnel["stage"].eq("screened_off_swr_windows")]["windows"].iloc[0]) if not funnel.empty else 0
     ready = high_specificity[promotion_ready_mask(high_specificity)].copy()
+    validation_matches_ready, validation_match_observed = _validation_key_match_observation(validation_decisions, ready)
     complete = validation_decisions["required_models_complete"].map(_as_bool) if "required_models_complete" in validation_decisions else pd.Series(dtype=bool)
     trajectory = validation_decisions["trajectory_confident_claim"].map(_as_bool) if "trajectory_confident_claim" in validation_decisions else pd.Series(dtype=bool)
     nontrajectory = (
@@ -541,8 +598,8 @@ def build_gate_summary(
     add("promotion_ready_candidates_present", not ready.empty, int(len(ready)), "promotion-ready high-specificity candidates are present")
     add(
         "exact_validation_matches_promotion_ready",
-        len(validation_decisions) == len(ready),
-        f"{len(validation_decisions)}/{len(ready)}",
+        validation_matches_ready,
+        validation_match_observed,
         "exact validation decision rows match promotion-ready candidates",
     )
     add(

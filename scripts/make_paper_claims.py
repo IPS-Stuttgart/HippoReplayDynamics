@@ -24,25 +24,30 @@ from scipy.stats import binomtest
 try:
     from hipporeplayimm.evidence_reporting import (
         EXACT_EVIDENCE_SUPPORT,
+        EVIDENCE_SUPPORT_DIAGNOSTIC_COLUMNS,
         TRUNCATED_EVIDENCE_SUPPORT,
         ensure_evidence_support_columns,
     )
 except ModuleNotFoundError:  # pragma: no cover - helpful when run before editable install.
     EXACT_EVIDENCE_SUPPORT = "exact_full_grid"
     TRUNCATED_EVIDENCE_SUPPORT = "truncated_full_grid"
+    EVIDENCE_SUPPORT_DIAGNOSTIC_COLUMNS = (
+        "diagnostic_candidate_evidence_support",
+        "diagnostic_state_space_momentum_evidence_support",
+        "diagnostic_state_space_imm_evidence_support",
+        "diagnostic_state_space_sparse_momentum_evidence_support",
+        "diagnostic_state_space_trajectory_imm_evidence_support",
+        "diagnostic_state_space_displacement_momentum_evidence_support",
+        "diagnostic_goal_state_space_evidence_support",
+        "diagnostic_pyrecest_evidence_support",
+    )
 
     def ensure_evidence_support_columns(df: pd.DataFrame) -> pd.DataFrame:  # type: ignore[no-redef]
         out = df.copy()
         if "evidence_support" not in out:
             support_cols = [
                 col
-                for col in (
-                    "diagnostic_candidate_evidence_support",
-                    "diagnostic_state_space_momentum_evidence_support",
-                    "diagnostic_state_space_imm_evidence_support",
-                    "diagnostic_goal_state_space_evidence_support",
-                    "diagnostic_pyrecest_evidence_support",
-                )
+                for col in EVIDENCE_SUPPORT_DIAGNOSTIC_COLUMNS
                 if col in out.columns
             ]
             if support_cols:
@@ -74,11 +79,7 @@ SCORE_FILENAMES = (
 EVIDENCE_SUPPORT_METADATA_COLUMNS = (
     "evidence_support",
     "evidence_comparable",
-    "diagnostic_candidate_evidence_support",
-    "diagnostic_state_space_momentum_evidence_support",
-    "diagnostic_state_space_imm_evidence_support",
-    "diagnostic_goal_state_space_evidence_support",
-    "diagnostic_pyrecest_evidence_support",
+    *EVIDENCE_SUPPORT_DIAGNOSTIC_COLUMNS,
 )
 
 

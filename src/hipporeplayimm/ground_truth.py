@@ -13,9 +13,11 @@ from scipy.special import logsumexp
 from .benchmarks import (
     BenchmarkConfig,
     _build_models,
+    _candidate_indices_for_model,
     _clusterless_mark_config,
     _is_clusterless_model,
     _session_with_mark_cell_subset,
+    _state_space_uses_candidate_support,
     _split_cells,
 )
 from .clusterless import build_clusterless_mark_emissions, fit_clusterless_mark_encoding
@@ -292,6 +294,9 @@ def compare_scores_to_ground_truth(
     state_space_max_step_sigma: float = 4.0,
     state_space_imm_mode_stickiness: float = 0.95,
     state_space_imm_switch_tau_s: float = 0.0,
+    state_space_trajectory_imm_mode_stickiness: float | None = None,
+    state_space_trajectory_imm_momentum_initial_probability: float | None = None,
+    state_space_trajectory_imm_momentum_switch_probability: float | None = None,
     state_space_momentum_sigma_cm_sqrt_s: float = 85.0,
     state_space_momentum_initial_sigma_cm_sqrt_s: float = 85.0,
     state_space_momentum_velocity_decay: float = 0.95,
@@ -302,6 +307,10 @@ def compare_scores_to_ground_truth(
     state_space_momentum_candidate_max_k: int = 0,
     state_space_momentum_predicted_candidate_top_k: int = 8,
     state_space_momentum_candidate_source: str = "emission",
+    state_space_displacement_radius_bins: int = 2,
+    state_space_displacement_position_sigma_cm: float = 0.0,
+    state_space_displacement_transition_sigma_cm_sqrt_s: float = 0.0,
+    state_space_displacement_prior_sigma_cm: float = 0.0,
     goal_state_space_transition_sigma_cm_sqrt_s: float = DEFAULT_GOAL_TRANSITION_SIGMA_CM_SQRT_S,
     goal_state_space_drift_speed_cm_s: float = DEFAULT_GOAL_DRIFT_SPEED_CM_S,
     goal_state_space_max_step_sigma: float = DEFAULT_GOAL_MAX_STEP_SIGMA,
@@ -366,6 +375,21 @@ def compare_scores_to_ground_truth(
         "state_space_imm_switch_tau_s",
         state_space_imm_switch_tau_s,
     )
+    state_space_trajectory_imm_mode_stickiness = _unique_optional_float_from_column(
+        scores_frame,
+        "state_space_trajectory_imm_mode_stickiness",
+        state_space_trajectory_imm_mode_stickiness,
+    )
+    state_space_trajectory_imm_momentum_initial_probability = _unique_optional_float_from_column(
+        scores_frame,
+        "state_space_trajectory_imm_momentum_initial_probability",
+        state_space_trajectory_imm_momentum_initial_probability,
+    )
+    state_space_trajectory_imm_momentum_switch_probability = _unique_optional_float_from_column(
+        scores_frame,
+        "state_space_trajectory_imm_momentum_switch_probability",
+        state_space_trajectory_imm_momentum_switch_probability,
+    )
     state_space_momentum_sigma_cm_sqrt_s = _unique_float_from_column(
         scores_frame,
         "state_space_momentum_sigma_cm_sqrt_s",
@@ -416,6 +440,26 @@ def compare_scores_to_ground_truth(
         "state_space_momentum_candidate_source",
         state_space_momentum_candidate_source,
     )
+    state_space_displacement_radius_bins = _unique_int_from_column(
+        scores_frame,
+        "state_space_displacement_radius_bins",
+        state_space_displacement_radius_bins,
+    )
+    state_space_displacement_position_sigma_cm = _unique_float_from_column(
+        scores_frame,
+        "state_space_displacement_position_sigma_cm",
+        state_space_displacement_position_sigma_cm,
+    )
+    state_space_displacement_transition_sigma_cm_sqrt_s = _unique_float_from_column(
+        scores_frame,
+        "state_space_displacement_transition_sigma_cm_sqrt_s",
+        state_space_displacement_transition_sigma_cm_sqrt_s,
+    )
+    state_space_displacement_prior_sigma_cm = _unique_float_from_column(
+        scores_frame,
+        "state_space_displacement_prior_sigma_cm",
+        state_space_displacement_prior_sigma_cm,
+    )
     goal_state_space_transition_sigma_cm_sqrt_s = _unique_float_from_column(
         scores_frame,
         "goal_state_space_transition_sigma_cm_sqrt_s",
@@ -462,6 +506,11 @@ def compare_scores_to_ground_truth(
         state_space_max_step_sigma=state_space_max_step_sigma,
         state_space_imm_mode_stickiness=state_space_imm_mode_stickiness,
         state_space_imm_switch_tau_s=state_space_imm_switch_tau_s,
+        state_space_trajectory_imm_mode_stickiness=state_space_trajectory_imm_mode_stickiness,
+        state_space_trajectory_imm_momentum_initial_probability=(
+            state_space_trajectory_imm_momentum_initial_probability
+        ),
+        state_space_trajectory_imm_momentum_switch_probability=state_space_trajectory_imm_momentum_switch_probability,
         state_space_momentum_sigma_cm_sqrt_s=state_space_momentum_sigma_cm_sqrt_s,
         state_space_momentum_initial_sigma_cm_sqrt_s=(
             state_space_momentum_initial_sigma_cm_sqrt_s
@@ -474,6 +523,10 @@ def compare_scores_to_ground_truth(
         state_space_momentum_candidate_max_k=state_space_momentum_candidate_max_k,
         state_space_momentum_predicted_candidate_top_k=state_space_momentum_predicted_candidate_top_k,
         state_space_momentum_candidate_source=state_space_momentum_candidate_source,
+        state_space_displacement_radius_bins=state_space_displacement_radius_bins,
+        state_space_displacement_position_sigma_cm=state_space_displacement_position_sigma_cm,
+        state_space_displacement_transition_sigma_cm_sqrt_s=state_space_displacement_transition_sigma_cm_sqrt_s,
+        state_space_displacement_prior_sigma_cm=state_space_displacement_prior_sigma_cm,
         goal_state_space_transition_sigma_cm_sqrt_s=goal_state_space_transition_sigma_cm_sqrt_s,
         goal_state_space_drift_speed_cm_s=goal_state_space_drift_speed_cm_s,
         goal_state_space_max_step_sigma=goal_state_space_max_step_sigma,
@@ -716,6 +769,9 @@ def compare_scores_to_ground_truth_sensitivity(
     state_space_max_step_sigma: float = 4.0,
     state_space_imm_mode_stickiness: float = 0.95,
     state_space_imm_switch_tau_s: float = 0.0,
+    state_space_trajectory_imm_mode_stickiness: float | None = None,
+    state_space_trajectory_imm_momentum_initial_probability: float | None = None,
+    state_space_trajectory_imm_momentum_switch_probability: float | None = None,
     state_space_momentum_sigma_cm_sqrt_s: float = 85.0,
     state_space_momentum_initial_sigma_cm_sqrt_s: float = 85.0,
     state_space_momentum_velocity_decay: float = 0.95,
@@ -726,6 +782,10 @@ def compare_scores_to_ground_truth_sensitivity(
     state_space_momentum_candidate_max_k: int = 0,
     state_space_momentum_predicted_candidate_top_k: int = 8,
     state_space_momentum_candidate_source: str = "emission",
+    state_space_displacement_radius_bins: int = 2,
+    state_space_displacement_position_sigma_cm: float = 0.0,
+    state_space_displacement_transition_sigma_cm_sqrt_s: float = 0.0,
+    state_space_displacement_prior_sigma_cm: float = 0.0,
     goal_state_space_transition_sigma_cm_sqrt_s: float = DEFAULT_GOAL_TRANSITION_SIGMA_CM_SQRT_S,
     goal_state_space_drift_speed_cm_s: float = DEFAULT_GOAL_DRIFT_SPEED_CM_S,
     goal_state_space_max_step_sigma: float = DEFAULT_GOAL_MAX_STEP_SIGMA,
@@ -784,6 +844,11 @@ def compare_scores_to_ground_truth_sensitivity(
         state_space_max_step_sigma=state_space_max_step_sigma,
         state_space_imm_mode_stickiness=state_space_imm_mode_stickiness,
         state_space_imm_switch_tau_s=state_space_imm_switch_tau_s,
+        state_space_trajectory_imm_mode_stickiness=state_space_trajectory_imm_mode_stickiness,
+        state_space_trajectory_imm_momentum_initial_probability=(
+            state_space_trajectory_imm_momentum_initial_probability
+        ),
+        state_space_trajectory_imm_momentum_switch_probability=state_space_trajectory_imm_momentum_switch_probability,
         state_space_momentum_sigma_cm_sqrt_s=state_space_momentum_sigma_cm_sqrt_s,
         state_space_momentum_initial_sigma_cm_sqrt_s=state_space_momentum_initial_sigma_cm_sqrt_s,
         state_space_momentum_velocity_decay=state_space_momentum_velocity_decay,
@@ -794,6 +859,10 @@ def compare_scores_to_ground_truth_sensitivity(
         state_space_momentum_candidate_max_k=state_space_momentum_candidate_max_k,
         state_space_momentum_predicted_candidate_top_k=state_space_momentum_predicted_candidate_top_k,
         state_space_momentum_candidate_source=state_space_momentum_candidate_source,
+        state_space_displacement_radius_bins=state_space_displacement_radius_bins,
+        state_space_displacement_position_sigma_cm=state_space_displacement_position_sigma_cm,
+        state_space_displacement_transition_sigma_cm_sqrt_s=state_space_displacement_transition_sigma_cm_sqrt_s,
+        state_space_displacement_prior_sigma_cm=state_space_displacement_prior_sigma_cm,
         goal_state_space_transition_sigma_cm_sqrt_s=goal_state_space_transition_sigma_cm_sqrt_s,
         goal_state_space_drift_speed_cm_s=goal_state_space_drift_speed_cm_s,
         goal_state_space_max_step_sigma=goal_state_space_max_step_sigma,
@@ -1132,12 +1201,41 @@ def _score_joint_for_ground_truth(
     occupancy_s=None,
 ):
     if isinstance(model, StateSpaceReplayModel):
-        candidates = model.candidate_indices(train_emissions, bin_centers)
-        return model.score(joint_emissions, bin_centers, candidate_indices=candidates, occupancy_s=occupancy_s)
+        candidates = (
+            _candidate_indices_for_model(model, train_emissions, bin_centers)
+            if _state_space_uses_candidate_support(model)
+            else None
+        )
+        return _score_state_space_joint_for_ground_truth(
+            model,
+            joint_emissions,
+            bin_centers,
+            candidates,
+            occupancy_s,
+        )
     if hasattr(model, "candidate_indices"):
-        candidates = model.candidate_indices(train_emissions)
+        candidates = _candidate_indices_for_model(model, train_emissions, bin_centers)
         return model.score(joint_emissions, bin_centers, candidate_indices=candidates)
     return model.score(joint_emissions, bin_centers)
+
+
+def _score_state_space_joint_for_ground_truth(
+    model: StateSpaceReplayModel,
+    joint_emissions,
+    bin_centers: np.ndarray,
+    candidate_indices,
+    occupancy_s=None,
+):
+    kwargs: dict[str, object] = {"candidate_indices": candidate_indices}
+    if occupancy_s is not None:
+        kwargs["occupancy_s"] = occupancy_s
+    try:
+        return model.score(joint_emissions, bin_centers, **kwargs)
+    except TypeError as exc:
+        if "occupancy_s" not in str(exc):
+            raise
+        kwargs.pop("occupancy_s", None)
+        return model.score(joint_emissions, bin_centers, **kwargs)
 
 
 def _cell_split_for_score_rows(

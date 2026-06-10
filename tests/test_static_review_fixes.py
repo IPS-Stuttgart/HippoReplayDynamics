@@ -5,7 +5,7 @@ import pandas as pd
 import pytest
 
 from hipporeplayimm.benchmarks import BenchmarkConfig
-from hipporeplayimm.clusterless import _sqrt_optional
+from hipporeplayimm.clusterless import ClusterlessMarkConfig, _sqrt_optional, _validate_mark_config
 from hipporeplayimm.clusterless_ground_truth import _clusterless_model_config_for_scores
 from hipporeplayimm.duration_dynamics import DurationFloat
 from hipporeplayimm.goal_state_space import _farthest_point_subset as goal_farthest_point_subset
@@ -71,6 +71,17 @@ def test_patched_benchmark_config_preserves_clusterless_fields() -> None:
     assert config.clusterless_mark_kde_bandwidth is None
     assert config.clusterless_mark_kde_spatial_sigma_bins is None
     assert config.clusterless_mark_kde_max_neighbors == 256
+
+
+def test_clusterless_mark_config_rejects_nonfinite_parameters() -> None:
+    with pytest.raises(ValueError, match="mark_smoothing_sigma_bins"):
+        _validate_mark_config(ClusterlessMarkConfig(mark_smoothing_sigma_bins=float("nan")))
+
+    with pytest.raises(ValueError, match="mark_kde_spatial_sigma_bins"):
+        _validate_mark_config(ClusterlessMarkConfig(mark_kde_spatial_sigma_bins=float("nan")))
+
+    with pytest.raises(ValueError, match="mark_kde_max_neighbors"):
+        _validate_mark_config(ClusterlessMarkConfig(mark_kde_max_neighbors=1.5))
 
 
 def test_clusterless_ground_truth_recovers_mark_likelihood_metadata() -> None:

@@ -581,7 +581,7 @@ def _load_confidence_evidence(path: str | Path) -> pd.DataFrame:
 
 
 def _merge_confidence_evidence(evidence: pd.DataFrame, confidence: pd.DataFrame) -> pd.DataFrame:
-    keys = _confidence_merge_keys(evidence, confidence)
+    evidence, confidence, keys = _confidence_merge_inputs(evidence, confidence)
     columns = {
         "margin_threshold": "momentum_confidence_threshold",
         "positive_model_claims": "momentum_confidence_claim_events",
@@ -648,7 +648,7 @@ def _merge_confidence_recovery_selection(confidence: pd.DataFrame, selection: pd
     available = {source: target for source, target in selection_columns.items() if source in selection.columns}
     if not available:
         return confidence
-    keys = _confidence_merge_keys(confidence, selection)
+    confidence, selection, keys = _confidence_merge_inputs(confidence, selection)
     subset = selection[list(dict.fromkeys([*keys, *available]))].rename(columns=available)
     if not keys:
         out = confidence.copy()
@@ -662,15 +662,24 @@ def _merge_confidence_recovery_selection(confidence: pd.DataFrame, selection: pd
     return confidence.merge(subset, on=keys, how="left", validate="many_to_one")
 
 
+def _confidence_merge_inputs(
+    left: pd.DataFrame,
+    right: pd.DataFrame,
+) -> tuple[pd.DataFrame, pd.DataFrame, list[str]]:
+    keys = _confidence_merge_keys(left, right)
+    left = left.copy()
+    right = right.copy()
+    if keys and keys != ["matrix_id"]:
+        _normalize_parameter_columns(left)
+        _normalize_parameter_columns(right)
+    return left, right, keys
+
+
 def _confidence_merge_keys(left: pd.DataFrame, right: pd.DataFrame) -> list[str]:
     if "matrix_id" in left.columns and "matrix_id" in right.columns:
         return ["matrix_id"]
     keys = [column for column in PARAMETER_COLUMNS if column in left.columns and column in right.columns]
     if keys:
-        left = left.copy()
-        right = right.copy()
-        _normalize_parameter_columns(left)
-        _normalize_parameter_columns(right)
         return keys
     if len(right) == 1:
         return []

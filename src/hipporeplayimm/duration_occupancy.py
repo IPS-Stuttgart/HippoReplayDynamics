@@ -442,6 +442,10 @@ def _duration_adjusted_decays(
         raise ValueError("reference dt must be finite and positive")
 
     durations = np.asarray(durations, dtype=float)
+    if durations.size == 0:
+        return np.empty(0, dtype=float)
+    if not np.all(np.isfinite(durations)) or np.any(durations <= 0.0):
+        raise ValueError("transition durations must be finite and positive")
     if hasattr(config_or_decay, "momentum_velocity_decay"):
         tau_s = float(getattr(config_or_decay, "momentum_velocity_decay_tau_s", 0.0))
         if not np.isfinite(tau_s) or tau_s < 0.0:
@@ -483,6 +487,11 @@ def _duration_adjusted_decays_from_config(config, durations: np.ndarray, referen
 
 
 def _time_scales(durations: np.ndarray) -> np.ndarray:
+    durations = np.asarray(durations, dtype=float)
+    if durations.size == 0:
+        return np.empty(0, dtype=float)
+    if not np.all(np.isfinite(durations)) or np.any(durations <= 0.0):
+        raise ValueError("transition durations must be finite and positive")
     scales = np.ones_like(durations, dtype=float)
     if len(durations) > 1:
         scales[1:] = durations[1:] / durations[:-1]

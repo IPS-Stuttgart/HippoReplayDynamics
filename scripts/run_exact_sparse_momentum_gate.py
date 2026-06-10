@@ -575,8 +575,16 @@ def _event_bool(group: pd.DataFrame, column: str, *, fallback: bool) -> bool:
 def _coerce_bool(value: object) -> bool:
     if isinstance(value, bool):
         return value
+    if value is None:
+        return False
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError):
+        numeric = None
+    if numeric is not None:
+        return bool(pd.notna(numeric) and numeric != 0.0)
     text = str(value).strip().lower()
-    return text in {"1", "true", "t", "yes", "y"}
+    return text in {"1", "1.0", "true", "t", "yes", "y", "on"}
 
 
 def _bool_series(values: pd.Series) -> pd.Series:

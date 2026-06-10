@@ -247,9 +247,12 @@ def _mark_group_ids_from_tetrode_cell_ids(cell_ids: np.ndarray | None, tetrode_c
         return None
     arr = np.squeeze(arr)
     if arr.ndim == 1:
-        if arr.shape[0] == np.asarray(cell_ids).shape[0]:
+        if arr.shape[0] == 2:
+            arr = arr.reshape(1, 2)
+        elif arr.shape[0] == np.asarray(cell_ids).shape[0]:
             return np.asarray(arr, dtype=int)
-        return None
+        else:
+            return None
     if arr.ndim != 2:
         return None
     if arr.shape[0] == 2 and arr.shape[1] != 2:

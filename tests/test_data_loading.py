@@ -4,7 +4,7 @@ import numpy as np
 import pytest
 import scipy.io as sio
 
-from hipporeplayimm.data import load_mat_variable, load_replay_session
+from hipporeplayimm.data import _mark_group_ids_from_tetrode_cell_ids, load_mat_variable, load_replay_session
 
 
 def test_load_mat_v5_variable(tmp_path: Path):
@@ -47,6 +47,16 @@ def test_load_mat_v73_hdf5_variable_after_loadmat_oserror(
     loaded = load_mat_variable(path, "Spike_Data")
 
     assert np.allclose(loaded, expected)
+
+
+def test_single_tetrode_cell_id_row_maps_all_matching_spikes_to_the_tetrode() -> None:
+    group_ids = _mark_group_ids_from_tetrode_cell_ids(
+        np.array([42, 42], dtype=int),
+        np.array([7, 42], dtype=int),
+    )
+
+    assert group_ids is not None
+    np.testing.assert_array_equal(group_ids, np.array([7, 7], dtype=int))
 
 
 def _write_minimal_session(path: Path, *, mark_variable: str | None = None) -> None:

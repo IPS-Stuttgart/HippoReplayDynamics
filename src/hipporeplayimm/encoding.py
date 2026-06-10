@@ -159,12 +159,17 @@ class LogEmissionTensor:
     def __post_init__(self) -> None:
         """Attach explicit bin/transition durations for duration-aware dynamics."""
 
+        dt_value = float(self.dt)
+        if not np.isfinite(dt_value) or dt_value <= 0.0:
+            raise ValueError("dt must be finite and positive")
         if self.bin_durations is None:
-            self.bin_durations = np.full(self.n_time, float(self.dt), dtype=float)
+            self.bin_durations = np.full(self.n_time, dt_value, dtype=float)
         else:
             self.bin_durations = np.asarray(self.bin_durations, dtype=float)
             if self.bin_durations.shape != (self.n_time,):
                 raise ValueError("bin_durations must contain one duration per emission row")
+        if not np.all(np.isfinite(self.bin_durations)) or np.any(self.bin_durations <= 0.0):
+            raise ValueError("bin_durations must contain finite positive durations")
         if self.transition_durations is None:
             if self.n_time <= 1:
                 self.transition_durations = np.empty(0, dtype=float)
@@ -179,6 +184,8 @@ class LogEmissionTensor:
             self.transition_durations = np.asarray(self.transition_durations, dtype=float)
             if self.transition_durations.shape != (max(self.n_time - 1, 0),):
                 raise ValueError("transition_durations must contain one duration per adjacent time-bin pair")
+        if self.transition_durations.size and (not np.all(np.isfinite(self.transition_durations)) or np.any(self.transition_durations <= 0.0)):
+            raise ValueError("transition_durations must contain finite positive durations")
 
 
 def fit_place_field_encoding(session: ReplaySession, config: EncodingConfig | None = None) -> EncodingModel:
@@ -338,8 +345,8 @@ def _poisson_log_emissions(
     weights = _emission_cell_weights(cell_weights, spike_counts.shape[1])
     dt_array = np.asarray(dt, dtype=float)
     if dt_array.ndim == 0:
-        if float(dt_array) <= 0.0:
-            raise ValueError("dt must be positive")
+        if not np.isfinite(float(dt_array)) or float(dt_array) <= 0.0:
+            raise ValueError("dt must be finite and positive")
         expected = np.maximum(rates_hz * float(dt_array) * spike_rate_scale, np.finfo(float).tiny)
         log_likelihood = _count_log_emissions(
             spike_counts,
@@ -351,8 +358,8 @@ def _poisson_log_emissions(
 
     if dt_array.ndim != 1 or dt_array.shape[0] != spike_counts.shape[0]:
         raise ValueError("dt must be a scalar or one duration per time bin")
-    if np.any(dt_array <= 0.0):
-        raise ValueError("all bin durations must be positive")
+    if not np.all(np.isfinite(dt_array)) or np.any(dt_array <= 0.0):
+        raise ValueError("all bin durations must be finite and positive")
 
     expected = np.maximum(
         dt_array[:, None, None] * rates_hz[None, :, :] * spike_rate_scale,

@@ -618,8 +618,10 @@ def compare_scores_to_ground_truth(
                 model = models.get(requested_model) or models.get(model_name)
                 if model is None:
                     continue
+                decode_bin_centers = encoding.bin_centers
                 if _is_clusterless_model(model):
                     assert clusterless_encoding is not None
+                    decode_bin_centers = clusterless_encoding.bin_centers
                     if benchmark_decode:
                         assert clusterless_train_emissions is not None
                         assert clusterless_joint_emissions is not None
@@ -661,7 +663,7 @@ def compare_scores_to_ground_truth(
                         model_name,
                         score.terminal_log_posterior,
                         score.trajectory_log_posterior,
-                        encoding.bin_centers,
+                        decode_bin_centers,
                         wells,
                     )
                 )

@@ -150,13 +150,13 @@ def _bool_series(frame: pd.DataFrame, column: str) -> pd.Series:
     if values.dtype == bool:
         return values.astype("boolean")
     normalized = values.astype("string").str.strip().str.lower()
-    true_values = {"1", "true", "t", "yes", "y"}
-    false_values = {"0", "false", "f", "no", "n"}
+    true_values = {"1", "1.0", "true", "t", "yes", "y", "on"}
+    false_values = {"0", "0.0", "false", "f", "no", "n", "", "nan", "none", "null", "off"}
     parsed = pd.Series(pd.NA, index=frame.index, dtype="boolean")
 
     numeric = pd.to_numeric(values, errors="coerce")
-    numeric_mask = numeric.notna()
-    true_mask = normalized.isin(true_values).fillna(False) | (numeric_mask & numeric.eq(1.0))
+    numeric_mask = numeric.notna() & np.isfinite(numeric.astype(float))
+    true_mask = normalized.isin(true_values).fillna(False) | (numeric_mask & numeric.ne(0.0))
     false_mask = normalized.isin(false_values).fillna(False) | (numeric_mask & numeric.eq(0.0))
 
     parsed.loc[true_mask] = True
@@ -165,8 +165,8 @@ def _bool_series(frame: pd.DataFrame, column: str) -> pd.Series:
 
 
 def _as_bool(value: object) -> bool:
-    if isinstance(value, bool):
-        return value
+    if isinstance(value, (bool, np.bool_)):
+        return bool(value)
     if value is None:
         return False
     try:
@@ -174,7 +174,19 @@ def _as_bool(value: object) -> bool:
             return False
     except (TypeError, ValueError):
         pass
-    return str(value).strip().lower() in {"1", "true", "t", "yes", "y"}
+    if isinstance(value, (int, float, np.integer, np.floating)):
+        numeric = float(value)
+        return bool(np.isfinite(numeric) and numeric != 0.0)
+    text = str(value).strip().lower()
+    if text in {"1", "1.0", "true", "t", "yes", "y", "on"}:
+        return True
+    if text in {"0", "0.0", "false", "f", "no", "n", "", "nan", "none", "null", "off"}:
+        return False
+    try:
+        numeric = float(text)
+    except ValueError:
+        return False
+    return bool(np.isfinite(numeric) and numeric != 0.0)
 
 
 def _first_existing_column(frame: pd.DataFrame, aliases: Iterable[str]) -> str | None:

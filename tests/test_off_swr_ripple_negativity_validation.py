@@ -5,7 +5,11 @@ import pandas as pd
 
 sys.path.append(str(Path(__file__).resolve().parents[1] / "scripts"))
 
-from off_swr_ripple_negativity_validation import write_outputs  # noqa: E402
+from off_swr_ripple_negativity_validation import (  # noqa: E402
+    _as_bool_series,
+    _bool_series,
+    write_outputs,
+)
 
 
 def test_ripple_negativity_gate_passes_with_complete_negative_lfp(tmp_path):
@@ -133,6 +137,16 @@ def test_ripple_negativity_gate_treats_empty_boolean_lfp_fields_as_missing(tmp_p
     gate = outputs["off_swr_candidate_lfp_gate_summary.csv"].set_index("gate")
     assert not bool(gate.loc["lfp_power_or_crossing_fields_available", "passed"])
     assert not bool(gate.loc["overall", "passed"])
+
+
+def test_ripple_negativity_boolean_helpers_parse_numeric_csv_flags():
+    frame = pd.DataFrame(
+        {"flag": [0.0, 1.0, 2.0, "0.0", "1.0", "2.0", "False", "True", pd.NA]}
+    )
+    expected = [False, True, True, False, True, True, False, True, False]
+
+    assert _bool_series(frame, "flag").fillna(False).astype(bool).tolist() == expected
+    assert _as_bool_series(frame["flag"]).tolist() == expected
 
 
 def _promoted(session: str, event_index: int, null_index: int, *, exact_margin: float) -> dict[str, object]:

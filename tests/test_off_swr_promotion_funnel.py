@@ -167,6 +167,47 @@ def test_off_swr_promotion_funnel_counts_only_complete_exact_core_rows():
     assert int(funnel.loc["exact_core_trajectory_confident_candidates", "windows"]) == 0
 
 
+def test_off_swr_promotion_funnel_parses_numeric_boolean_flags():
+    candidate_table = pd.DataFrame(
+        [
+            _candidate(
+                "Rat2/Open1",
+                4,
+                0,
+                margin=120.0,
+                state="immobile",
+                label="interesting_off_swr_trajectory_candidate",
+                tier="extreme",
+            )
+        ]
+    )
+    high_specificity = candidate_table.copy()
+    high_specificity["passes_high_specificity_promotion_filter"] = [1.0]
+    validation_decisions = pd.DataFrame(
+        [
+            {
+                **_key("Rat2/Open1", 4, 0),
+                "required_models_complete": 1.0,
+                "trajectory_confident_claim": 1.0,
+                "nontrajectory_confident_claim": 0.0,
+                "trajectory_minus_nontrajectory_log_evidence": 101.0,
+            }
+        ]
+    )
+
+    funnel = build_funnel_summary(
+        candidate_table=candidate_table,
+        tier_summary=_tier_summary(),
+        run_state_summary=pd.DataFrame(),
+        high_specificity=high_specificity,
+        validation_decisions=validation_decisions,
+    ).set_index("stage")
+
+    assert int(funnel.loc["promotion_ready_candidates", "windows"]) == 1
+    assert int(funnel.loc["exact_core_validated_candidates", "windows"]) == 1
+    assert int(funnel.loc["exact_core_trajectory_confident_candidates", "windows"]) == 1
+
+
 def _key(session: str, event_index: int, null_index: int) -> dict[str, object]:
     return {"session": session, "event_index": event_index, "null_index": null_index}
 

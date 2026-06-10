@@ -15,6 +15,7 @@ import pandas as pd
 
 from .evidence_reporting import (
     TRUNCATED_EVIDENCE_SUPPORT,
+    _coerce_bool_series,
     ensure_evidence_support_columns,
 )
 
@@ -78,7 +79,7 @@ def add_evidence_margin_columns(frame: pd.DataFrame) -> pd.DataFrame:
     group_columns = event_group_columns(out)
     for _, group in out.groupby(group_columns, sort=False):
         successful = _successful_rows(group)
-        exact = successful[successful["evidence_comparable"].fillna(False).astype(bool)]
+        exact = successful[_coerce_bool_series(successful["evidence_comparable"])]
         _annotate_margin_scope(out, group.index, exact, prefix="exact_model")
         truncated = successful[successful["evidence_support"].eq(TRUNCATED_EVIDENCE_SUPPORT)]
         _annotate_margin_scope(
@@ -102,7 +103,7 @@ def event_quality_summary(frame: pd.DataFrame) -> pd.DataFrame:
         values = key if isinstance(key, tuple) else (key,)
         record = dict(zip(group_columns, values, strict=True))
         successful = _successful_rows(group)
-        exact = successful[successful["evidence_comparable"].fillna(False).astype(bool)]
+        exact = successful[_coerce_bool_series(successful["evidence_comparable"])]
         truncated = successful[successful["evidence_support"].eq(TRUNCATED_EVIDENCE_SUPPORT)]
         record.update(
             {
@@ -130,7 +131,7 @@ def event_quality_summary(frame: pd.DataFrame) -> pd.DataFrame:
                 "spatial_shuffle_delta_vs_null_median",
             )
         if "event_reliable" in group:
-            reliable = successful["event_reliable"].fillna(False).astype(bool)
+            reliable = _coerce_bool_series(successful["event_reliable"])
             record["event_reliable_fraction"] = float(reliable.mean()) if reliable.size else np.nan
         records.append(record)
     return pd.DataFrame(records)
@@ -145,7 +146,7 @@ def model_quality_summary(frame: pd.DataFrame) -> pd.DataFrame:
     records: list[dict[str, object]] = []
     for model, group in rows.groupby("model", sort=True):
         successful = _successful_rows(group)
-        exact = successful[successful["evidence_comparable"].fillna(False).astype(bool)]
+        exact = successful[_coerce_bool_series(successful["evidence_comparable"])]
         truncated = successful[successful["evidence_support"].eq(TRUNCATED_EVIDENCE_SUPPORT)]
         record = {
             "model": str(model),
@@ -187,7 +188,7 @@ def quality_gate_summary(
     rows = add_evidence_margin_columns(frame)
     events = event_quality_summary(rows)
     successful = _successful_rows(rows)
-    exact = successful[successful["evidence_comparable"].fillna(False).astype(bool)]
+    exact = successful[_coerce_bool_series(successful["evidence_comparable"])]
     truncated = successful[successful["evidence_support"].eq(TRUNCATED_EVIDENCE_SUPPORT)]
     failed = rows.shape[0] - successful.shape[0]
     candidate_good_fraction = _candidate_good_fraction(truncated if not truncated.empty else successful)

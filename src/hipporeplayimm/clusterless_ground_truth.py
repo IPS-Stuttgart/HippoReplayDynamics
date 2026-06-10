@@ -233,21 +233,25 @@ def _compare_clusterless_scores_to_ground_truth(gt, root, scores_frame: pd.DataF
                         occupancy_s=clusterless_encoding.occupancy_s,
                     )
                 decoded_rows.append(
-                    gt._decoded_row(
-                        str(session_id),
-                        int(event_index),
-                        model_name,
-                        score.terminal_log_posterior,
-                        score.trajectory_log_posterior,
-                        clusterless_encoding.bin_centers,
-                        wells,
+                    gt._attach_decode_group_values(
+                        gt._decoded_row(
+                            str(session_id),
+                            int(event_index),
+                            model_name,
+                            score.terminal_log_posterior,
+                            score.trajectory_log_posterior,
+                            clusterless_encoding.bin_centers,
+                            wells,
+                        ),
+                        group_values,
                     )
                 )
     decoded = pd.DataFrame(decoded_rows)
     if decoded.empty:
         decoded = pd.DataFrame(columns=["session", "event_index", "model"])
+    decoded_merge_columns = gt._decoded_merge_columns(scores_frame, decoded, benchmark_decode)
     comparison = scores_frame.merge(gt_frame, on=["session", "event_index"], how="left")
-    comparison = comparison.merge(decoded, on=["session", "event_index", "model"], how="left")
+    comparison = comparison.merge(decoded, on=decoded_merge_columns, how="left")
     return gt._add_ground_truth_metrics(comparison, decoded, gt_frame)
 
 

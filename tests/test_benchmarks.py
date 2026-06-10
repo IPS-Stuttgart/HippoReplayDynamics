@@ -272,12 +272,45 @@ def test_best_static_baseline_includes_state_space_single_mode_models():
     assert _is_best_static_baseline_model("clusterless-state-space-velocity-momentum")
     assert not _is_best_static_baseline_model("imm")
     assert not _is_best_static_baseline_model("state-space-first-order-imm")
+    assert not _is_best_static_baseline_model("state-space-displacement-imm")
     assert not _is_best_static_baseline_model("sorted-spike-state-space-first-order-imm")
+    assert not _is_best_static_baseline_model("sorted-spike-state-space-displacement-imm")
     assert not _is_best_static_baseline_model("sorted-spike-state-space-imm")
     assert not _is_best_static_baseline_model("clusterless-state-space-first-order-imm")
+    assert not _is_best_static_baseline_model("clusterless-state-space-displacement-imm")
     assert not _is_best_static_baseline_model("clusterless-state-space-imm")
     assert not _is_best_static_baseline_model("pyrecest-goal-particle")
     assert not _is_best_static_baseline_model("pyrecest-goal-particle-imm")
+
+
+def test_add_relative_metrics_excludes_displacement_imm_from_static_baseline():
+    rows = pd.DataFrame(
+        {
+            "session": ["s1", "s1", "s1"],
+            "event_index": [7, 7, 7],
+            "model": [
+                "sorted-spike-state-space-diffusion",
+                "sorted-spike-state-space-displacement-momentum",
+                "sorted-spike-state-space-displacement-imm",
+            ],
+            "heldout_log_likelihood": [-8.0, -7.0, -5.0],
+            "test_spikes": [2, 2, 2],
+        }
+    )
+
+    result = _add_relative_metrics(rows)
+    deltas = dict(zip(result["model"], result["delta_vs_best_static"]))
+    best_static = dict(
+        zip(
+            result["model"],
+            result["best_static_heldout_log_likelihood"],
+        )
+    )
+
+    assert best_static["sorted-spike-state-space-displacement-imm"] == -7.0
+    assert deltas["sorted-spike-state-space-diffusion"] == -1.0
+    assert deltas["sorted-spike-state-space-displacement-momentum"] == 0.0
+    assert deltas["sorted-spike-state-space-displacement-imm"] == 2.0
 
 
 def test_add_relative_metrics_uses_state_space_single_mode_baselines():

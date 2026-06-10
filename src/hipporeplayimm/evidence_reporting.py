@@ -42,6 +42,45 @@ _MOMENTUM_EXACT_SURROGATE_MODELS = (
 )
 
 
+_FALSE_BOOL_STRINGS = {"", "0", "0.0", "false", "f", "no", "n", "off", "nan", "none", "null"}
+_TRUE_BOOL_STRINGS = {"1", "1.0", "true", "t", "yes", "y", "on"}
+
+
+def _coerce_bool_series(values: pd.Series, *, default: bool = False) -> pd.Series:
+    """Coerce bool-like scalars without treating every non-empty string as true.
+
+    Pandas ``Series.astype(bool)`` treats any non-empty object string as
+    ``True``.  Score tables are often read back from CSV, where false flags may
+    appear as strings such as ``"False"`` or ``"0"``.  Keep unrecognised and
+    missing values on the conservative default side so reporting code does not
+    accidentally admit non-comparable rows or stale best-model markers.
+    """
+
+    def coerce(value: object) -> bool:
+        if isinstance(value, (bool, np.bool_)):
+            return bool(value)
+        try:
+            if pd.isna(value):
+                return bool(default)
+        except (TypeError, ValueError):
+            return bool(default)
+        if isinstance(value, (int, float, np.integer, np.floating)):
+            numeric = float(value)
+            return bool(np.isfinite(numeric) and numeric != 0.0)
+        text = str(value).strip().lower()
+        if text in _TRUE_BOOL_STRINGS:
+            return True
+        if text in _FALSE_BOOL_STRINGS:
+            return False
+        try:
+            numeric = float(text)
+        except ValueError:
+            return bool(default)
+        return bool(np.isfinite(numeric) and numeric != 0.0)
+
+    return values.map(coerce).astype(bool)
+
+
 def evidence_support_from_row(row: pd.Series) -> str:
     """Infer whether a score is exact evidence, a lower bound, or non-comparable."""
 
@@ -135,7 +174,7 @@ def simulation_add_evidence_columns(df: pd.DataFrame) -> pd.DataFrame:
             continue
 
         best = ""
-        exact = scored[scored["evidence_comparable"].fillna(False).astype(bool)]
+        exact = scored[_coerce_bool_series(scored["evidence_comparable"])]
         if not exact.empty:
             values = exact["log_evidence"].to_numpy(float)
             max_value = float(np.max(values))
@@ -228,11 +267,12 @@ def simulation_event_best_rows(event_scores: pd.DataFrame) -> pd.DataFrame:
     """Return one exact-comparable best row per simulated event."""
 
     event_scores = ensure_evidence_support_columns(event_scores)
-    ok = event_scores[(event_scores["status"] == "success") & event_scores["evidence_comparable"]]
+    comparable = _coerce_bool_series(event_scores["evidence_comparable"])
+    ok = event_scores[(event_scores["status"] == "success") & comparable]
     if ok.empty:
         return pd.DataFrame()
     if "is_best_model" in ok:
-        best = ok[ok["is_best_model"].fillna(False).astype(bool)]
+        best = ok[_coerce_bool_series(ok["is_best_model"])]
         if not best.empty:
             return best.reset_index(drop=True)
     best = ok.sort_values(["session", "event_index", "log_evidence"], ascending=[True, True, False])

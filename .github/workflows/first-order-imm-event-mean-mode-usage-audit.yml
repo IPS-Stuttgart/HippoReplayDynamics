@@ -1,0 +1,180 @@
+---
+name: First-order IMM event-mean mode-usage audit
+
+on:
+  workflow_dispatch:
+    inputs:
+      detected_run_id:
+        description: "Workflow run ID containing model-evidence-all-sessions"
+        required: true
+        default: "27011374643"
+      detected_artifact_name:
+        description: "Detected replay artifact name; empty uses model-evidence-all-sessions-${run_id}"
+        required: false
+        default: ""
+      promoted_run_id:
+        description: "Workflow run ID containing promoted off-SWR exact-core validation"
+        required: true
+        default: "27242588406"
+      promoted_artifact_name:
+        description: "Promoted off-SWR artifact name; empty uses off-swr-promoted-candidate-validation-${run_id}"
+        required: false
+        default: ""
+      margin_threshold:
+        description: "Trajectory-family log-evidence margin threshold"
+        required: true
+        default: "5.5"
+      path_threshold_cm:
+        description: "Posterior path/displacement threshold for content gates"
+        required: true
+        default: "10.0"
+      one_per_source_selection_rule:
+        description: "One-per-source rule to audit"
+        required: true
+        default: "strongest_exact_margin"
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: first-order-imm-event-mean-mode-usage-audit-${{ github.repository }}-${{ inputs.detected_run_id }}-${{ inputs.promoted_run_id }}-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  DETECTED_RUN_ID: ${{ inputs.detected_run_id }}
+  DETECTED_ARTIFACT_NAME: ${{ inputs.detected_artifact_name }}
+  PROMOTED_RUN_ID: ${{ inputs.promoted_run_id }}
+  PROMOTED_ARTIFACT_NAME: ${{ inputs.promoted_artifact_name }}
+  MARGIN_THRESHOLD: ${{ inputs.margin_threshold }}
+  PATH_THRESHOLD_CM: ${{ inputs.path_threshold_cm }}
+  ONE_PER_SOURCE_SELECTION_RULE: ${{ inputs.one_per_source_selection_rule }}
+
+jobs:
+  audit:
+    name: Audit first-order IMM posterior content
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Install package
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e .
+
+      - name: Download detected replay model-evidence artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          artifact_name="${DETECTED_ARTIFACT_NAME}"
+          if [[ -z "${artifact_name}" ]]; then
+            artifact_name="model-evidence-all-sessions-${DETECTED_RUN_ID}"
+          fi
+          mkdir -p artifacts/detected-replay
+          gh run download "${DETECTED_RUN_ID}" \
+            --name "${artifact_name}" \
+            --dir artifacts/detected-replay
+          echo "Downloaded ${artifact_name} from run ${DETECTED_RUN_ID}"
+
+      - name: Download promoted off-SWR exact-core artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          artifact_name="${PROMOTED_ARTIFACT_NAME}"
+          if [[ -z "${artifact_name}" ]]; then
+            artifact_name="off-swr-promoted-candidate-validation-${PROMOTED_RUN_ID}"
+          fi
+          mkdir -p artifacts/promoted-off-swr
+          gh run download "${PROMOTED_RUN_ID}" \
+            --name "${artifact_name}" \
+            --dir artifacts/promoted-off-swr
+          echo "Downloaded ${artifact_name} from run ${PROMOTED_RUN_ID}"
+
+      - name: Build one-per-source off-SWR decisions
+        run: |
+          set -euo pipefail
+          promoted_decisions="$(find artifacts/promoted-off-swr -name promoted_off_swr_candidate_exact_core_decisions.csv -type f -print -quit)"
+          if [[ -z "${promoted_decisions}" ]]; then
+            echo "Could not find promoted_off_swr_candidate_exact_core_decisions.csv" >&2
+            find artifacts/promoted-off-swr -maxdepth 4 -type f | sort >&2
+            exit 1
+          fi
+          python scripts/deduplicate_off_swr_candidates.py \
+            --validation-decisions "${promoted_decisions}" \
+            --output results/off-swr-candidate-source-dedup \
+            --margin-threshold "${MARGIN_THRESHOLD}"
+
+      - name: Run first-order IMM event-mean posterior-content audit
+        run: |
+          set -euo pipefail
+          detected_scores="$(find artifacts/detected-replay -name all_sessions_event_model_evidence.csv -type f -print -quit)"
+          promoted_scores="$(find artifacts/promoted-off-swr -name promoted_off_swr_candidate_exact_core_event_model_evidence.csv -type f -print -quit)"
+          one_per_source="results/off-swr-candidate-source-dedup/off_swr_candidate_one_per_source_group_decisions.csv"
+          if [[ -z "${detected_scores}" ]]; then
+            echo "Could not find all_sessions_event_model_evidence.csv" >&2
+            find artifacts/detected-replay -maxdepth 4 -type f | sort >&2
+            exit 1
+          fi
+          if [[ -z "${promoted_scores}" ]]; then
+            echo "Could not find promoted_off_swr_candidate_exact_core_event_model_evidence.csv" >&2
+            find artifacts/promoted-off-swr -maxdepth 4 -type f | sort >&2
+            exit 1
+          fi
+          python scripts/audit_first_order_imm_event_mean_mode_usage.py \
+            --event-model-evidence "${detected_scores}" \
+            --promoted-off-swr-event-model-evidence "${promoted_scores}" \
+            --one-per-source-decisions "${one_per_source}" \
+            --one-per-source-selection-rule "${ONE_PER_SOURCE_SELECTION_RULE}" \
+            --output results/first-order-imm-event-mean-mode-usage-audit \
+            --path-threshold-cm "${PATH_THRESHOLD_CM}"
+
+      - name: Validate posterior-content audit outputs
+        run: |
+          set -euo pipefail
+          for required_file in \
+            first_order_imm_mode_usage_event_summary.csv \
+            first_order_imm_mode_usage_gate_summary.csv \
+            rat_first_order_imm_mode_usage_summary.csv \
+            session_first_order_imm_mode_usage_summary.csv \
+            swr_off_swr_first_order_imm_mode_usage_comparison.csv \
+            off_swr_one_per_source_group_mode_usage_summary.csv; do
+            test -s "results/first-order-imm-event-mean-mode-usage-audit/${required_file}" || {
+              echo "Missing results/first-order-imm-event-mean-mode-usage-audit/${required_file}" >&2
+              exit 1
+            }
+          done
+          test -s "results/off-swr-candidate-source-dedup/off_swr_candidate_one_per_source_group_decisions.csv"
+
+      - name: Show posterior-content audit summary
+        run: |
+          python - <<'PY'
+          import pandas as pd
+
+          root = "results/first-order-imm-event-mean-mode-usage-audit"
+          print("First-order IMM event-mean posterior-content comparison:")
+          print(pd.read_csv(f"{root}/swr_off_swr_first_order_imm_mode_usage_comparison.csv").to_string(index=False))
+          print("\nFirst-order IMM event-mean posterior-content gates:")
+          print(pd.read_csv(f"{root}/first_order_imm_mode_usage_gate_summary.csv").to_string(index=False))
+          print("\nOne-per-source off-SWR posterior-content summary:")
+          print(pd.read_csv(f"{root}/off_swr_one_per_source_group_mode_usage_summary.csv").to_string(index=False))
+          PY
+
+      - name: Upload posterior-content audit
+        uses: actions/upload-artifact@v7
+        with:
+          name: first-order-imm-event-mean-mode-usage-audit-${{ github.run_id }}
+          path: |
+            results/first-order-imm-event-mean-mode-usage-audit/
+            results/off-swr-candidate-source-dedup/
+          if-no-files-found: error

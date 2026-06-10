@@ -304,6 +304,61 @@ def _mean_entropy(trajectory_log_posterior: np.ndarray) -> float:
     return float(np.mean(-np.sum(entropy_terms, axis=1)))
 
 
+def _first_order_imm_content_diagnostics(
+    mode_posterior: np.ndarray,
+    trajectory_log_posterior: np.ndarray,
+    bin_centers: np.ndarray,
+    dt_s: float,
+) -> dict[str, float | int]:
+    mode = np.asarray(mode_posterior, dtype=float)
+    trajectory = np.asarray(trajectory_log_posterior, dtype=float)
+    centers = np.asarray(bin_centers, dtype=float)
+    if mode.ndim != 2 or mode.shape[1] != 3:
+        raise ValueError("first-order IMM mode posterior must have shape (time, 3)")
+    if trajectory.ndim != 2 or trajectory.shape[0] != mode.shape[0]:
+        raise ValueError("trajectory posterior must have one row per mode-posterior time bin")
+    if centers.ndim != 2 or centers.shape[0] != trajectory.shape[1] or centers.shape[1] < 2:
+        raise ValueError("bin_centers must contain x/y coordinates for each spatial bin")
+    dt = float(dt_s)
+    if not np.isfinite(dt) or dt <= 0.0:
+        raise ValueError("dt_s must be finite and positive")
+
+    map_mode = np.argmax(mode, axis=1)
+    nonstationary = map_mode != 0
+    starts = nonstationary & np.concatenate(([True], ~nonstationary[:-1]))
+    bout_count = int(starts.sum())
+    longest = 0
+    current = 0
+    for active in nonstationary:
+        current = current + 1 if active else 0
+        longest = max(longest, current)
+
+    posterior = np.exp(trajectory)
+    row_mass = posterior.sum(axis=1)
+    valid = row_mass > 0.0
+    posterior[valid] = posterior[valid] / row_mass[valid, None]
+    expected_xy = posterior @ centers[:, :2]
+    if len(expected_xy) > 1:
+        steps = np.linalg.norm(np.diff(expected_xy, axis=0), axis=1)
+        path_length = float(np.nansum(steps))
+        net = float(np.linalg.norm(expected_xy[-1] - expected_xy[0]))
+        duration = max(float(len(expected_xy) - 1) * dt, dt)
+    else:
+        path_length = 0.0
+        net = 0.0
+        duration = dt
+
+    return {
+        "state_space_imm_fraction_time_map_stationary": float(np.mean(~nonstationary)),
+        "state_space_imm_fraction_time_map_nonstationary": float(np.mean(nonstationary)),
+        "state_space_imm_nonstationary_bout_count": bout_count,
+        "state_space_imm_longest_nonstationary_bout_s": float(longest) * dt,
+        "state_space_imm_posterior_expected_path_length_cm": path_length,
+        "state_space_imm_posterior_net_displacement_cm": net,
+        "state_space_imm_posterior_path_speed_cm_s": path_length / duration,
+    }
+
+
 def _mode_transition_matrix(n_modes: int, stickiness: float) -> np.ndarray:
     if n_modes < 2:
         return np.ones((n_modes, n_modes), dtype=float)

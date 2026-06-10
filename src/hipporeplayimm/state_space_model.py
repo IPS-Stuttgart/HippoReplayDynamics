@@ -20,6 +20,7 @@ from .state_space_first_order import (
 )
 from .state_space_utils import (
     _as_log_probs,
+    _first_order_imm_content_diagnostics,
     _gaussian_transition_matrix,
     _mass_retaining_candidate_indices,
     _mean_entropy,
@@ -283,6 +284,14 @@ class StateSpaceReplayModel:
                     "state_space_imm_nonstationary_event_probability": float(event_mode_mass[1:].sum()),
                     "state_space_imm_mean_mode_entropy": _mean_entropy(_as_log_probs(mode_post)),
                 }
+            )
+            extra.update(
+                _first_order_imm_content_diagnostics(
+                    mode_post,
+                    trajectory,
+                    bin_centers,
+                    emissions.dt,
+                )
             )
         elif self.mode == "imm":
             transition_durations = _emission_transition_durations(emissions)

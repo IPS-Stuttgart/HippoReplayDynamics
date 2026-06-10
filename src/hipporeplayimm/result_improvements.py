@@ -340,7 +340,12 @@ def posterior_calibration_summary(
 
 
 def shuffle_spike_times_session(session, random_seed: int = 1):
-    """Return a session with spike times permuted across spikes."""
+    """Return a session with spike times permuted across spikes.
+
+    Clusterless mark rows are stored in the same row order as ``session.spikes``.
+    Keep mark timestamps in that row order as well; otherwise downstream marked
+    point-process emissions can pair a spike waveform with a different spike time.
+    """
 
     rng = np.random.default_rng(random_seed)
     spikes = np.asarray(session.spikes, dtype=float).copy()
@@ -349,14 +354,21 @@ def shuffle_spike_times_session(session, random_seed: int = 1):
     marks = session.spike_marks
     if marks is not None:
         mark_times = np.asarray(marks.times, dtype=float).copy()
-        if mark_times.size:
+        if spikes.ndim == 2 and mark_times.shape[0] == spikes.shape[0]:
+            mark_times = spikes[:, 0].copy()
+        elif mark_times.size:
             mark_times = rng.permutation(mark_times)
-        marks = replace(marks, times=mark_times)
+        marks = _replace_spike_mark_rows(marks, times=mark_times)
     return replace(session, spikes=spikes, spike_marks=marks)
 
 
 def circular_shift_spikes_session(session, shift_s: float | None = None, random_seed: int = 1):
-    """Return a session with spike times circularly shifted within session bounds."""
+    """Return a session with spike times circularly shifted within session bounds.
+
+    The returned ``spikes`` array is time-sorted.  Reorder clusterless mark rows
+    with the same permutation so mark features, mark cell IDs, and spike rows stay
+    aligned.
+    """
 
     spikes = np.asarray(session.spikes, dtype=float).copy()
     if spikes.size == 0:
@@ -374,8 +386,37 @@ def circular_shift_spikes_session(session, shift_s: float | None = None, random_
     marks = session.spike_marks
     if marks is not None:
         mark_times = ((np.asarray(marks.times, dtype=float) - start + float(shift_s)) % duration) + start
-        marks = replace(marks, times=mark_times[order] if mark_times.shape[0] == order.shape[0] else mark_times)
+        if mark_times.shape[0] == order.shape[0]:
+            marks = _replace_spike_mark_rows(marks, times=mark_times[order], order=order)
+        else:
+            marks = _replace_spike_mark_rows(marks, times=mark_times)
     return replace(session, spikes=spikes, spike_marks=marks)
+
+
+def _replace_spike_mark_rows(
+    marks,
+    *,
+    times: np.ndarray | None = None,
+    order: np.ndarray | None = None,
+):
+    """Return spike marks with row-aligned arrays replaced or reordered."""
+
+    updates: dict[str, np.ndarray] = {}
+    if times is not None:
+        updates["times"] = np.asarray(times, dtype=float).copy()
+    if order is not None:
+        row_order = np.asarray(order, dtype=int)
+        if marks.marks.shape[0] == row_order.shape[0]:
+            updates["marks"] = np.asarray(marks.marks).copy()[row_order]
+        if marks.cell_ids is not None:
+            cell_ids = np.asarray(marks.cell_ids)
+            if cell_ids.shape[0] == row_order.shape[0]:
+                updates["cell_ids"] = cell_ids.copy()[row_order]
+        if marks.group_ids is not None:
+            group_ids = np.asarray(marks.group_ids)
+            if group_ids.shape[0] == row_order.shape[0]:
+                updates["group_ids"] = group_ids.copy()[row_order]
+    return replace(marks, **updates)
 
 
 def shuffle_cell_identities_session(session, random_seed: int = 1):

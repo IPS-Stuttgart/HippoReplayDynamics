@@ -1,13 +1,18 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import numpy as np
 import pandas as pd
 
+from hipporeplayimm.data import ReplaySession, SpikeMarkData
 from hipporeplayimm.result_improvements import (
     add_candidate_support_quality_columns,
+    circular_shift_spikes_session,
     hierarchical_bootstrap_ci,
     paired_sign_flip_p_value,
     posterior_calibration_summary,
+    shuffle_spike_times_session,
     stratified_cell_split,
 )
 
@@ -83,3 +88,70 @@ def test_posterior_calibration_summary() -> None:
     summary = posterior_calibration_summary(samples)
     assert summary.loc[0, "rows"] == 2
     assert summary.loc[0, "mean_true_negative_log_probability"] > 0.0
+
+
+def test_shuffle_spike_times_keeps_clusterless_mark_times_aligned() -> None:
+    session = _marked_session()
+    shuffled = shuffle_spike_times_session(session, random_seed=4)
+
+    assert shuffled.spike_marks is not None
+    np.testing.assert_allclose(shuffled.spike_marks.times, shuffled.spikes[:, 0])
+    np.testing.assert_array_equal(shuffled.spike_marks.cell_ids, shuffled.spikes[:, 1].astype(int))
+    np.testing.assert_allclose(shuffled.spike_marks.marks[:, 0], shuffled.spikes[:, 1])
+
+
+def test_circular_shift_reorders_clusterless_mark_rows_with_spikes() -> None:
+    session = _marked_session()
+    shifted = circular_shift_spikes_session(session, shift_s=1.5)
+
+    assert shifted.spike_marks is not None
+    np.testing.assert_allclose(shifted.spike_marks.times, shifted.spikes[:, 0])
+    np.testing.assert_array_equal(shifted.spike_marks.cell_ids, shifted.spikes[:, 1].astype(int))
+    np.testing.assert_allclose(shifted.spike_marks.marks[:, 0], shifted.spikes[:, 1])
+
+
+def _marked_session() -> ReplaySession:
+    spikes = np.array(
+        [
+            [0.0, 10.0],
+            [1.0, 20.0],
+            [2.0, 30.0],
+            [4.0, 40.0],
+        ],
+        dtype=float,
+    )
+    spike_marks = SpikeMarkData(
+        times=spikes[:, 0].copy(),
+        marks=np.array(
+            [
+                [10.0, 1.0],
+                [20.0, 2.0],
+                [30.0, 3.0],
+                [40.0, 4.0],
+            ],
+            dtype=float,
+        ),
+        source_file="synthetic",
+        source_variable="marks",
+        feature_names=("cell_id_proxy", "feature"),
+        cell_ids=spikes[:, 1].astype(int),
+        group_ids=np.array([1, 2, 3, 4], dtype=int),
+    )
+    return ReplaySession(
+        rat="RatX",
+        name="OpenX",
+        path=Path("."),
+        position=np.empty((0, 3), dtype=float),
+        spikes=spikes,
+        tetrode_cell_ids=np.empty((0, 2), dtype=int),
+        excitatory_neurons=np.array([], dtype=int),
+        inhibitory_neurons=np.array([], dtype=int),
+        ripple_events=np.empty((0, 6), dtype=float),
+        run_times=np.empty((0, 2), dtype=float),
+        sleep_box_immobile_times=np.empty((0, 2), dtype=float),
+        sleep_times=np.empty((0, 2), dtype=float),
+        rem_times=np.empty((0, 2), dtype=float),
+        well_sequence=None,
+        metadata={},
+        spike_marks=spike_marks,
+    )

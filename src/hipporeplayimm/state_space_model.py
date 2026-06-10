@@ -156,21 +156,21 @@ class StateSpaceReplayModel:
         predicted_top_k = int(self.config.momentum_predicted_candidate_top_k)
         if predicted_top_k <= 0 or bin_centers is None or emissions.n_time < 3:
             return base
+        transition_durations = _emission_transition_durations(emissions)
+        prediction_multipliers = _momentum_prediction_multipliers(
+            self.config,
+            transition_durations,
+            fallback_dt=float(emissions.dt),
+        )
         return _augment_candidates_with_momentum_predictions(
             base,
             bin_centers,
             predicted_top_k=predicted_top_k,
             velocity_decay=_representative_transition_value(
-                _momentum_velocity_decays(
-                    self.config,
-                    _emission_transition_durations(emissions),
-                ),
+                prediction_multipliers,
                 fallback=float(self.config.momentum_velocity_decay),
             ),
-            velocity_decays=_momentum_velocity_decays(
-                self.config,
-                _emission_transition_durations(emissions),
-            ),
+            velocity_decays=prediction_multipliers,
         )
 
     def score(
@@ -605,6 +605,50 @@ def _momentum_velocity_decays(config: StateSpaceDecoderConfig, transition_durati
     if tau_s > 0.0:
         return np.exp(-durations / tau_s)
     return np.full(durations.shape, float(config.momentum_velocity_decay), dtype=float)
+
+
+def _momentum_prediction_multipliers(
+    config: StateSpaceDecoderConfig,
+    transition_durations: np.ndarray,
+    *,
+    fallback_dt: float,
+) -> np.ndarray:
+    """Return duration-aware displacement multipliers for candidate prediction.
+
+    The momentum scorer predicts ``x[t]`` from the previous displacement using a
+    transition-specific velocity decay multiplied by the adjacent-bin duration
+    ratio.  Candidate augmentation must use the same multiplier; otherwise a
+    variable-duration final bin can prune dynamically plausible states before the
+    scorer has a chance to evaluate them.
+    """
+
+    durations = np.asarray(transition_durations, dtype=float)
+    if durations.size == 0:
+        return np.empty(0, dtype=float)
+    if not np.all(np.isfinite(durations)) or np.any(durations <= 0.0):
+        raise ValueError("transition durations must be finite and positive")
+
+    tau_s = float(config.momentum_velocity_decay_tau_s)
+    if not np.isfinite(tau_s) or tau_s < 0.0:
+        raise ValueError("momentum_velocity_decay_tau_s must be finite and nonnegative")
+    if tau_s > 0.0:
+        decays = np.exp(-durations / tau_s)
+    else:
+        reference_dt = float(fallback_dt)
+        if not np.isfinite(reference_dt) or reference_dt <= 0.0:
+            reference_dt = float(np.median(durations))
+        decay = float(config.momentum_velocity_decay)
+        if not np.isfinite(decay) or decay < 0.0:
+            raise ValueError("momentum_velocity_decay must be finite and nonnegative")
+        decays = np.asarray(
+            [decay ** (float(duration) / reference_dt) for duration in durations],
+            dtype=float,
+        )
+
+    time_scales = np.ones_like(durations, dtype=float)
+    if durations.size > 1:
+        time_scales[1:] = durations[1:] / durations[:-1]
+    return decays * time_scales
 
 
 def _representative_transition_value(values: np.ndarray, *, fallback: float) -> float:

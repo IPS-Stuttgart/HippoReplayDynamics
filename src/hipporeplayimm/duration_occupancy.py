@@ -806,4 +806,6 @@ def _uniform_backward(values: np.ndarray, valid_bin_mask: np.ndarray | None = No
         raise ValueError("valid_bin_mask must contain one boolean value per spatial bin")
     if not np.any(mask):
         raise ValueError("valid_bin_mask must contain at least one valid spatial bin")
-    return np.full(values.shape, float(values[mask].sum()) / int(np.sum(mask)), dtype=float)
+    out = np.zeros(values.shape, dtype=float)
+    out[mask] = float(values[mask].sum()) / int(np.sum(mask))
+    return out

@@ -12,6 +12,22 @@ from scipy.special import gammaln
 from .data import ReplaySession, RippleEvent
 
 
+def _as_xy_array(xy: np.ndarray, *, name: str = "xy") -> np.ndarray:
+    arr = np.asarray(xy, dtype=float)
+    if arr.ndim != 2 or arr.shape[1] < 2:
+        raise ValueError(f"{name} must be a two-dimensional array with at least two columns")
+    return arr
+
+
+def _as_position_array(position: np.ndarray) -> np.ndarray:
+    arr = np.asarray(position, dtype=float)
+    if arr.ndim != 2 or arr.shape[1] < 3:
+        raise ValueError(
+            "position must be a two-dimensional array with at least three columns: time, x, y"
+        )
+    return arr
+
+
 @dataclass(frozen=True)
 class EncodingConfig:
     bin_size_cm: float = 4.0
@@ -31,6 +47,25 @@ class EmissionConfig:
     likelihood_temperature: float = 1.0
     cell_weights: Iterable[float] | np.ndarray | None = None
     negative_binomial_overdispersion: float = 0.0
+
+
+def _validate_encoding_config(config: EncodingConfig) -> None:
+    for name in ("bin_size_cm", "min_occupancy_s", "rate_floor_hz"):
+        value = float(getattr(config, name))
+        if not np.isfinite(value) or value <= 0.0:
+            raise ValueError(f"{name} must be finite and positive")
+
+    smoothing_sigma_bins = float(config.smoothing_sigma_bins)
+    if not np.isfinite(smoothing_sigma_bins) or smoothing_sigma_bins < 0.0:
+        raise ValueError("smoothing_sigma_bins must be finite and nonnegative")
+
+    min_speed_cm_s = float(config.min_speed_cm_s)
+    if not np.isfinite(min_speed_cm_s):
+        raise ValueError("min_speed_cm_s must be finite")
+
+    arena_padding_cm = float(config.arena_padding_cm)
+    if not np.isfinite(arena_padding_cm) or arena_padding_cm < 0.0:
+        raise ValueError("arena_padding_cm must be finite and nonnegative")
 
 
 @dataclass
@@ -85,6 +120,7 @@ class EncodingModel:
         )
 
     def positions_to_flat_bins(self, xy: np.ndarray) -> np.ndarray:
+        xy = _as_xy_array(xy, name="xy")
         x_idx = np.searchsorted(self.x_edges, xy[:, 0], side="right") - 1
         y_idx = np.searchsorted(self.y_edges, xy[:, 1], side="right") - 1
         valid = (
@@ -149,6 +185,7 @@ def fit_place_field_encoding(session: ReplaySession, config: EncodingConfig | No
     """Fit occupancy-normalized Poisson rates from non-replay movement periods."""
 
     config = EncodingConfig() if config is None else config
+    _validate_encoding_config(config)
     position = _clean_position(session.position)
     selected_spikes = session.excitatory_spikes() if config.use_excitatory else session.spikes
     if not (position.shape[0] == 1 and np.asarray(selected_spikes).size == 0):
@@ -450,7 +487,7 @@ def _time_bin_edges(start: float, end: float, time_bin_s: float) -> np.ndarray:
 
 
 def _clean_position(position: np.ndarray) -> np.ndarray:
-    arr = np.asarray(position, dtype=float)
+    arr = _as_position_array(position)
     keep = np.isfinite(arr[:, 0]) & np.isfinite(arr[:, 1]) & np.isfinite(arr[:, 2])
     return arr[keep]
 
@@ -463,6 +500,7 @@ def _validate_position_samples(position: np.ndarray) -> None:
 
 
 def _make_grid(xy: np.ndarray, config: EncodingConfig) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    xy = _as_xy_array(xy, name="xy")
     x_min, y_min = np.nanmin(xy, axis=0) - config.arena_padding_cm
     x_max, y_max = np.nanmax(xy, axis=0) + config.arena_padding_cm
     x_edges = np.arange(x_min, x_max + config.bin_size_cm, config.bin_size_cm)
@@ -475,6 +513,7 @@ def _make_grid(xy: np.ndarray, config: EncodingConfig) -> tuple[np.ndarray, np.n
 
 
 def _positions_to_flat_bins(xy: np.ndarray, x_edges: np.ndarray, y_edges: np.ndarray) -> np.ndarray:
+    xy = _as_xy_array(xy, name="xy")
     x_idx = np.searchsorted(x_edges, xy[:, 0], side="right") - 1
     y_idx = np.searchsorted(y_edges, xy[:, 1], side="right") - 1
     valid = (x_idx >= 0) & (x_idx < len(x_edges) - 1) & (y_idx >= 0) & (y_idx < len(y_edges) - 1)

@@ -328,7 +328,8 @@ def _as_two_column_array(value: Any, name: str) -> np.ndarray:
 def _as_two_dimensional(value: Any, name: str) -> np.ndarray:
     arr = np.asarray(value)
     if arr.size == 0:
-        return np.empty((0, 2), dtype=float)
+        n_columns = 6 if name == "Ripple_Events" else 2
+        return np.empty((0, n_columns), dtype=float)
     if arr.ndim == 1:
         if name == "Ripple_Events" and arr.shape[0] == 6:
             return arr.reshape(1, 6)

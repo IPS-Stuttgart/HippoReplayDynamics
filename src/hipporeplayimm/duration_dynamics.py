@@ -46,7 +46,7 @@ def _check(v,n,name):
 def attach_duration_metadata(em):
     ds=transition_durations_s(em)
     em.transition_durations=ds
-    em.dt=_scalar_dt(em.dt)
+    em.dt=DurationFloat(_scalar_dt(em.dt),ds)
     return em
 
 def _ps(sig,dt):

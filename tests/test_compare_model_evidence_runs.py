@@ -133,3 +133,43 @@ def test_compare_runs_writes_best_model_and_relative_evidence_tables(tmp_path):
     assert (output / "shared_model_relative_evidence_comparison.csv").exists()
     assert (output / "session_model_evidence_comparison.csv").exists()
     assert (output / "model_evidence_run_comparison_summary.csv").exists()
+
+
+def test_compare_runs_exact_only_filters_string_false_comparable_rows(tmp_path):
+    left = tmp_path / "left"
+    right = tmp_path / "right"
+    output = tmp_path / "comparison"
+    rows = [
+        {
+            "session": "Rat1/Open1",
+            "event_index": 0,
+            "model": "diffusion",
+            "log_evidence": -3.0,
+            "status": "success",
+            "evidence_support": "exact_full_grid",
+            "evidence_comparable": "True",
+        },
+        {
+            "session": "Rat1/Open1",
+            "event_index": 0,
+            "model": "momentum",
+            "log_evidence": -1.0,
+            "status": "success",
+            "evidence_support": "truncated_full_grid",
+            "evidence_comparable": "False",
+        },
+    ]
+    _write_event_scores(left, rows)
+    _write_event_scores(right, rows)
+
+    tables = compare_runs(
+        left,
+        right,
+        left_label="left",
+        right_label="right",
+        output=output,
+        exact_only=True,
+    )
+
+    assert set(tables["event_comparison"]["left_canonical_best_model"]) == {"diffusion"}
+    assert set(tables["support_counts"]["evidence_comparable"]) == {True}

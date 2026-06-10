@@ -451,10 +451,10 @@ def paired_model_margin_summary(
         "positive_model": str(decisions["positive_model"].dropna().iloc[0]),
         "reference_model": str(decisions["reference_model"].dropna().iloc[0]),
         "margin_threshold": float(decisions["margin_threshold"].dropna().iloc[0]),
-        "positive_model_claims": int(decisions["positive_model_claimed"].fillna(False).astype(bool).sum()),
+        "positive_model_claims": int(_bool_column(decisions, "positive_model_claimed").sum()),
         "reference_model_claims": int((decisions["margin_decision"] == decisions["reference_model"]).sum()),
         "ambiguous_events": int((decisions["margin_decision"] == "ambiguous").sum()),
-        "positive_claim_fraction": float(decisions["positive_model_claimed"].fillna(False).astype(bool).mean()),
+        "positive_claim_fraction": float(_bool_column(decisions, "positive_model_claimed").mean()),
         "mean_positive_minus_reference_log_evidence": float(
             decisions["positive_minus_reference_log_evidence"].mean()
         ),
@@ -463,9 +463,9 @@ def paired_model_margin_summary(
         ),
     }
     if true_model_col and true_model_col in decisions:
-        correct = decisions["margin_binary_correct"].fillna(False).astype(bool)
-        true_positive = decisions["true_is_positive"].fillna(False).astype(bool)
-        claims = decisions["positive_model_claimed"].fillna(False).astype(bool)
+        correct = _bool_column(decisions, "margin_binary_correct")
+        true_positive = _bool_column(decisions, "true_is_positive")
+        claims = _bool_column(decisions, "positive_model_claimed")
         out.update(
             {
                 "thresholded_binary_accuracy": float(correct.mean()),
@@ -1430,7 +1430,7 @@ def model_disagreement_events(
         models = set(group["model"].astype(str)) if "model" in group else set()
         best = ""
         if "is_best_model" in group:
-            winners = group[group["is_best_model"].fillna(False).astype(bool)]
+            winners = group[_bool_column(group, "is_best_model")]
             if not winners.empty:
                 best = str(winners.iloc[0].get("model", ""))
         if not best and "log_evidence" in group:

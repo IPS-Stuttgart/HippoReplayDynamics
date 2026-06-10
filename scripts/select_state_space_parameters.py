@@ -1071,10 +1071,12 @@ def _write_selection_manifest(
             "overall_column": None if recommendation.empty else selected_row.get("overall_recovery_gate_column"),
             "force_strict_recovery_gate": bool(force_strict_recovery_gate),
             "strict_candidate_rows_blocked": int(
-                decision.get(
-                    "strict_candidate_recovery_gate_blocked",
-                    pd.Series(False, index=decision.index),
-                ).fillna(False).astype(bool).sum()
+                _bool_series(
+                    decision.get(
+                        "strict_candidate_recovery_gate_blocked",
+                        pd.Series(False, index=decision.index),
+                    )
+                ).sum()
             ),
         },
         "parameter_columns": PARAMETER_COLUMNS,
@@ -1122,6 +1124,19 @@ def _json_ready(value: object) -> object:
     if isinstance(scalar, int):
         return int(scalar)
     return scalar
+
+
+def _bool_value(value: object) -> bool:
+    if isinstance(value, bool):
+        return value
+    if pd.isna(value):
+        return False
+    text = str(value).strip().lower()
+    return text in {"1", "true", "t", "yes", "y"}
+
+
+def _bool_series(values: pd.Series) -> pd.Series:
+    return values.map(_bool_value).astype(bool)
 
 
 def _format_parameter_value(value: object) -> str:

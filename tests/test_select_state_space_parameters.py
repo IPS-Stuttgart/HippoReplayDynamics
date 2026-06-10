@@ -5,7 +5,11 @@ from pathlib import Path
 
 import pandas as pd
 
-from scripts.select_state_space_parameters import select_parameters
+from scripts.select_state_space_parameters import (
+    PARAMETER_COLUMNS,
+    _write_selection_manifest,
+    select_parameters,
+)
 
 
 def _write(path: Path, name: str, rows: list[dict[str, object]]) -> None:
@@ -965,6 +969,46 @@ def test_candidate_pruned_strict_gate_is_blocked_without_override(tmp_path):
         force_strict_recovery_gate=True,
     )
     assert bool(forced["recommendation"].iloc[0]["passes_recovery_gate"])
+
+
+def test_selection_manifest_parses_string_false_strict_blocked_count(tmp_path):
+    output = tmp_path / "manifest"
+    output.mkdir()
+    decision = pd.DataFrame(
+        {
+            "strict_candidate_recovery_gate_blocked": ["False", "True"],
+            "recovery_gate_metric": ["strict", "strict"],
+        }
+    )
+    recommendation = pd.DataFrame(
+        [
+            {
+                **dict.fromkeys(PARAMETER_COLUMNS, 0.0),
+                **_params(60.0, 85.0, 85.0, 0.95, 128),
+            }
+        ]
+    )
+
+    _write_selection_manifest(
+        evidence=tmp_path / "evidence",
+        recovery=tmp_path / "recovery",
+        confidence_evidence=None,
+        output_dir=output,
+        decision=decision,
+        candidates=pd.DataFrame(),
+        recommendation=recommendation,
+        min_momentum_recovery_accuracy=0.5,
+        min_overall_recovery_accuracy=0.5,
+        max_failures=0,
+    )
+
+    manifest = json.loads(
+        (output / "state_space_parameter_selection_manifest.json").read_text(
+            encoding="utf-8"
+        )
+    )
+
+    assert manifest["recovery_gate"]["strict_candidate_rows_blocked"] == 1
 
 
 def test_select_parameters_writes_leave_one_session_out_recommendations(tmp_path):

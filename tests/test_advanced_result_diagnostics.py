@@ -11,6 +11,7 @@ from hipporeplayimm.advanced_result_diagnostics import (
     evidence_margin_table,
     hierarchical_summary,
     mark_drift_diagnostics,
+    model_disagreement_events,
     paired_model_margin_decisions,
     paired_model_margin_summary,
     paired_model_margin_threshold_sweep,
@@ -175,6 +176,46 @@ def test_paired_model_margin_decisions_reject_weak_momentum_claims():
     assert summary.loc[0, "false_positive_claims"] == 0
     assert summary.loc[0, "reference_specificity"] == 1.0
     assert summary.loc[0, "positive_claim_recall"] == 0.5
+
+
+def test_paired_model_margin_summary_parses_string_bool_decisions():
+    decisions = pd.DataFrame(
+        {
+            "positive_model": ["momentum", "momentum"],
+            "reference_model": ["diffusion", "diffusion"],
+            "margin_threshold": [5.0, 5.0],
+            "positive_model_claimed": ["False", "True"],
+            "margin_decision": ["ambiguous", "momentum"],
+            "positive_minus_reference_log_evidence": [1.0, 6.0],
+            "margin_binary_correct": ["True", "False"],
+            "true_is_positive": ["False", "False"],
+            "true_model": ["diffusion", "diffusion"],
+        }
+    )
+
+    summary = paired_model_margin_summary(decisions, true_model_col="true_model")
+
+    assert summary.loc[0, "positive_model_claims"] == 1
+    assert summary.loc[0, "positive_claim_fraction"] == 0.5
+    assert summary.loc[0, "false_positive_claims"] == 1
+    assert summary.loc[0, "reference_specificity"] == 0.5
+
+
+def test_model_disagreement_events_parses_string_false_best_flags():
+    scores = pd.DataFrame(
+        {
+            "session": ["Rat1/Open1", "Rat1/Open1"],
+            "event_index": [0, 0],
+            "model": ["lower-bound", "exact"],
+            "log_evidence": [100.0, 1.0],
+            "status": ["success", "success"],
+            "is_best_model": ["False", "True"],
+        }
+    )
+
+    out = model_disagreement_events(scores)
+
+    assert out.loc[0, "best_model"] == "exact"
 
 
 def test_paired_model_margin_threshold_selection_uses_synthetic_specificity():

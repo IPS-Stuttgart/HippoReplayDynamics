@@ -20,6 +20,7 @@ import pandas as pd
 from hipporeplayimm.evidence_reporting import (
     EXACT_EVIDENCE_SUPPORT,
     TRUNCATED_EVIDENCE_SUPPORT,
+    _coerce_bool_series,
     evidence_support_from_row as _canonical_evidence_support_from_row,
     ensure_evidence_support_columns as _canonical_ensure_evidence_support_columns,
 )
@@ -41,7 +42,14 @@ def infer_evidence_support(row: pd.Series) -> str:
 def ensure_evidence_support_columns(df: pd.DataFrame) -> pd.DataFrame:
     """Add ``evidence_support`` and ``evidence_comparable`` if absent."""
 
-    return _canonical_ensure_evidence_support_columns(df)
+    out = _canonical_ensure_evidence_support_columns(df)
+    if "evidence_comparable" in out:
+        out["evidence_comparable"] = _coerce_bool_series(out["evidence_comparable"])
+    return out
+
+
+def _as_bool(value: object) -> bool:
+    return bool(_coerce_bool_series(pd.Series([value])).iloc[0])
 
 
 def evidence_support_summary(df: pd.DataFrame) -> pd.DataFrame:
@@ -74,6 +82,10 @@ def evidence_support_summary(df: pd.DataFrame) -> pd.DataFrame:
     ):
         if name not in ok:
             ok[name] = default
+    ok["is_best_model"] = _coerce_bool_series(ok["is_best_model"])
+    ok["is_best_truncated_lower_bound"] = _coerce_bool_series(
+        ok["is_best_truncated_lower_bound"]
+    )
     summary = ok.groupby(["model", "model_family", "evidence_support", "evidence_comparable"], as_index=False).agg(
         sessions=("session", "nunique"),
         events=("event_index", "count"),
@@ -120,8 +132,8 @@ def resolve_model(models: list[str], role: str, *, reference_model: str | None =
 def comparison_support(left_support: object, right_support: object, left_comparable: object, right_comparable: object) -> str:
     """Label whether a paired delta compares exact evidence or lower bounds."""
 
-    left_exact = bool(left_comparable) and str(left_support) == EXACT_EVIDENCE_SUPPORT
-    right_exact = bool(right_comparable) and str(right_support) == EXACT_EVIDENCE_SUPPORT
+    left_exact = _as_bool(left_comparable) and str(left_support) == EXACT_EVIDENCE_SUPPORT
+    right_exact = _as_bool(right_comparable) and str(right_support) == EXACT_EVIDENCE_SUPPORT
     left_truncated = str(left_support) == TRUNCATED_EVIDENCE_SUPPORT
     right_truncated = str(right_support) == TRUNCATED_EVIDENCE_SUPPORT
     if left_exact and right_exact:
@@ -143,8 +155,8 @@ def _pair_delta_rows(log_pivot: pd.DataFrame, support_pivot: pd.DataFrame, compa
             "delta": log_pivot[left] - log_pivot[right],
             "left_support": support_pivot[left],
             "right_support": support_pivot[right],
-            "left_comparable": comparable_pivot[left].fillna(False).astype(bool),
-            "right_comparable": comparable_pivot[right].fillna(False).astype(bool),
+            "left_comparable": _coerce_bool_series(comparable_pivot[left]),
+            "right_comparable": _coerce_bool_series(comparable_pivot[right]),
         }
     ).dropna(subset=["delta"])
     if rows.empty:

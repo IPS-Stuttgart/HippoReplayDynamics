@@ -1,6 +1,8 @@
+import json
+
 import pandas as pd
 
-from scripts.audit_sweep_completeness import audit_sweep_completeness
+from scripts.audit_sweep_completeness import audit_sweep_completeness, _write_summary_json
 
 
 def test_state_space_sweep_completeness_flags_missing_cells(tmp_path):
@@ -79,3 +81,36 @@ def test_recovery_sweep_completeness_treats_failures_as_not_final(tmp_path):
     assert bool(row["artifact_complete"])
     assert not bool(row["included_in_final_ranking"])
     assert row["n_failure_rows"] == 1
+
+
+def test_sweep_summary_json_parses_string_false_flags(tmp_path):
+    table = pd.DataFrame(
+        [
+            {
+                "planned": "True",
+                "artifact_complete": "True",
+                "included_in_final_ranking": "True",
+                "missing_matrix_cell": "False",
+            },
+            {
+                "planned": "False",
+                "artifact_complete": "False",
+                "included_in_final_ranking": "False",
+                "missing_matrix_cell": "True",
+            },
+        ]
+    )
+    output = tmp_path / "summary.json"
+
+    _write_summary_json(
+        table,
+        output,
+        mode="state-space-evidence",
+        artifact_root=tmp_path / "artifacts",
+    )
+
+    summary = json.loads(output.read_text(encoding="utf-8"))
+    assert summary["planned_matrix_cells"] == 1
+    assert summary["artifact_complete_cells"] == 1
+    assert summary["included_in_final_ranking_cells"] == 1
+    assert summary["missing_or_incomplete_cells"] == 1

@@ -17,6 +17,7 @@ from audit_model_evidence_support import (  # noqa: E402
     pooled_paired_delta_summary,
     write_audit,
 )
+import model_evidence_support_audit as support_audit_tables  # noqa: E402
 
 
 def _toy_scores() -> pd.DataFrame:
@@ -104,6 +105,45 @@ def test_support_summary_keeps_support_classes_separate():
     assert summary.loc["sorted-spike-state-space-diffusion", "wins"] == 1
 
 
+def test_support_summary_parses_string_bool_win_flags():
+    scores = pd.DataFrame(
+        [
+            {
+                "session": "Rat1/Open1",
+                "event_index": 0,
+                "model": "sorted-spike-state-space-diffusion",
+                "model_family": "trajectory",
+                "status": "success",
+                "log_evidence": -10.0,
+                "evidence_support": EXACT_EVIDENCE_SUPPORT,
+                "evidence_comparable": "True",
+                "is_best_model": "False",
+                "is_best_truncated_lower_bound": "False",
+            },
+            {
+                "session": "Rat1/Open1",
+                "event_index": 1,
+                "model": "sorted-spike-state-space-diffusion",
+                "model_family": "trajectory",
+                "status": "success",
+                "log_evidence": -8.0,
+                "evidence_support": EXACT_EVIDENCE_SUPPORT,
+                "evidence_comparable": "True",
+                "is_best_model": "True",
+                "is_best_truncated_lower_bound": "False",
+            },
+        ]
+    )
+
+    summary = evidence_support_summary(scores).set_index("model")
+
+    assert summary.loc["sorted-spike-state-space-diffusion", "wins"] == 1
+    assert summary.loc[
+        "sorted-spike-state-space-diffusion",
+        "truncated_lower_bound_wins",
+    ] == 0
+
+
 def test_paired_delta_summary_labels_lower_bound_vs_exact():
     deltas = paired_delta_summary(_toy_scores())
     momentum_diffusion = deltas[
@@ -116,6 +156,42 @@ def test_paired_delta_summary_labels_lower_bound_vs_exact():
     assert momentum_diffusion["events"] == 2
     assert momentum_diffusion["positive_events"] == 1
     assert np.isclose(momentum_diffusion["mean_delta"], 0.0)
+
+
+def test_paired_delta_summary_parses_string_false_comparable_flags():
+    scores = pd.DataFrame(
+        [
+            {
+                "session": "Rat1/Open1",
+                "event_index": 0,
+                "model": "sorted-spike-state-space-diffusion",
+                "model_family": "trajectory",
+                "status": "success",
+                "log_evidence": -10.0,
+                "evidence_support": EXACT_EVIDENCE_SUPPORT,
+                "evidence_comparable": "True",
+            },
+            {
+                "session": "Rat1/Open1",
+                "event_index": 0,
+                "model": "sorted-spike-state-space-momentum",
+                "model_family": "trajectory",
+                "status": "success",
+                "log_evidence": -9.0,
+                "evidence_support": TRUNCATED_EVIDENCE_SUPPORT,
+                "evidence_comparable": "False",
+            },
+        ]
+    )
+
+    deltas = paired_delta_summary(scores)
+    momentum_diffusion = deltas[
+        deltas["comparison"].eq(
+            "sorted-spike-state-space-momentum_minus_sorted-spike-state-space-diffusion"
+        )
+    ].iloc[0]
+
+    assert momentum_diffusion["comparison_support"] == "truncated_lower_bound_vs_exact"
 
 
 def test_pooled_paired_delta_summary_aggregates_events():
@@ -177,3 +253,38 @@ def test_write_audit_can_fail_on_mixed_support(tmp_path):
         write_audit(input_csv, output_dir, fail_on_mixed_support=True)
 
     assert (output_dir / "mixed_support_violations.csv").is_file()
+
+
+def test_support_audit_tables_parse_string_false_comparable_flags():
+    scores = pd.DataFrame(
+        [
+            {
+                "session": "Rat1/Open1",
+                "event_index": 0,
+                "model": "diffusion",
+                "model_family": "trajectory",
+                "status": "success",
+                "log_evidence": 1.0,
+                "evidence_support": EXACT_EVIDENCE_SUPPORT,
+                "evidence_comparable": "True",
+            },
+            {
+                "session": "Rat1/Open1",
+                "event_index": 0,
+                "model": "momentum",
+                "model_family": "trajectory",
+                "status": "success",
+                "log_evidence": 2.0,
+                "evidence_support": TRUNCATED_EVIDENCE_SUPPORT,
+                "evidence_comparable": "False",
+            },
+        ]
+    )
+
+    event_audit = support_audit_tables.event_support_audit(scores)
+    pairwise = support_audit_tables.pairwise_support_audit(scores)
+
+    assert event_audit.loc[0, "comparable_rows"] == 1
+    assert bool(event_audit.loc[0, "has_uncomparable_rows"]) is True
+    assert bool(pairwise.loc[0, "model_b_comparable"]) is False
+    assert bool(pairwise.loc[0, "both_exact_comparable"]) is False

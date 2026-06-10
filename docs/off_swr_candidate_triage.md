@@ -94,6 +94,22 @@ with a promoted-candidate exact-core validation artifact. It writes:
 - `off_swr_promotion_funnel_gate_summary.csv`: input and consistency gates,
   including whether exact validation rows match the promotion-ready denominator.
 
+Empirical promotion calibration:
+
+`scripts/calibrate_off_swr_promotion_fdr.py` evaluates the strict promotion rule
+against observed running/ordinary movement-spiking controls and shuffled
+label/immobility nulls. It writes:
+
+- `off_swr_promotion_null_calibration.csv`: observed control counts and
+  permutation-null promotion-count distributions.
+- `off_swr_promotion_empirical_fdr_summary.csv`: one-row calibration summary
+  with observed promotions, exact validation counts, direct-control false
+  promotions, and conservative permutation FDR estimates.
+- `off_swr_promotion_threshold_sensitivity.csv`: weak/moderate/strong/extreme
+  threshold sensitivity, including whether promoted counts exceed joint-shuffle
+  null bounds.
+- `off_swr_promotion_null_gate_summary.csv`: required calibration gates.
+
 The triage layer is intended to separate high-priority off-SWR trajectory
 candidates from ordinary movement/spiking windows that naturally favor
 trajectory models. It does not by itself establish replay-without-ripples

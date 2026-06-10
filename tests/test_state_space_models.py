@@ -163,6 +163,23 @@ def test_state_space_modes_return_full_trajectory_posteriors():
         if mode == "first-order-imm":
             assert score.diagnostics["state_space_imm_modes"] == "stationary,diffusion,fragmented"
             assert score.diagnostics["state_space_imm_evidence_support"] == "exact_full_grid"
+            terminal_probs = [
+                score.diagnostics[f"state_space_mode_{name}_terminal_probability"]
+                for name in ("stationary", "diffusion", "fragmented")
+            ]
+            event_probs = [
+                score.diagnostics[f"state_space_mode_{name}_event_probability"]
+                for name in ("stationary", "diffusion", "fragmented")
+            ]
+            assert np.allclose(sum(terminal_probs), 1.0)
+            assert np.allclose(sum(event_probs), 1.0)
+            assert score.diagnostics["state_space_imm_nonstationary_terminal_probability"] == pytest.approx(
+                terminal_probs[1] + terminal_probs[2]
+            )
+            assert score.diagnostics["state_space_imm_nonstationary_event_probability"] == pytest.approx(
+                event_probs[1] + event_probs[2]
+            )
+            assert score.diagnostics["state_space_imm_mean_mode_entropy"] >= 0.0
 
 
 def test_exact_sparse_momentum_evidence_only_delegates_to_pyrecest_mode():

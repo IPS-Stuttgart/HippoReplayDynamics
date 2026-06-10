@@ -13,7 +13,10 @@ from pathlib import Path
 
 import pandas as pd
 
-from hipporeplayimm.evidence_reporting import ensure_evidence_support_columns
+from hipporeplayimm.evidence_reporting import (
+    _coerce_bool_series,
+    ensure_evidence_support_columns,
+)
 
 
 def canonical_model_name(model: str) -> str:
@@ -128,8 +131,12 @@ def _load_event_scores(root: str | Path, run_label: str, *, exact_only: bool = F
     if "status" in frame.columns:
         frame = frame[frame["status"] == "success"].copy()
     frame = ensure_evidence_support_columns(frame)
+    if "evidence_comparable" in frame:
+        frame["evidence_comparable"] = _coerce_bool_series(frame["evidence_comparable"])
+    else:
+        frame["evidence_comparable"] = pd.Series(True, index=frame.index, dtype=bool)
     if exact_only:
-        frame = frame[frame["evidence_comparable"].fillna(False).astype(bool)].copy()
+        frame = frame[frame["evidence_comparable"]].copy()
     frame["run_label"] = run_label
     frame["canonical_model"] = frame["model"].map(canonical_model_name)
     frame = _add_relative_log_evidence(frame)

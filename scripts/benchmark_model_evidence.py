@@ -42,6 +42,7 @@ from hipporeplayimm.encoding import (
 from hipporeplayimm.evidence_reporting import (
     EXACT_EVIDENCE_SUPPORT,
     TRUNCATED_EVIDENCE_SUPPORT,
+    _coerce_bool_series,
     ensure_evidence_support_columns as _ensure_evidence_support_columns,
 )
 from hipporeplayimm.goal_state_space import GoalStateSpaceReplayModel
@@ -694,7 +695,7 @@ _EVIDENCE_MARGIN_COLUMNS = (
 def _add_evidence_columns(df: pd.DataFrame) -> pd.DataFrame:
     if df.empty:
         return df
-    df = _ensure_evidence_support_columns(df)
+    df = _with_evidence_support_columns(df)
     groups = []
     group_columns = _event_group_columns(df)
     for _, g in df.groupby(group_columns, sort=False):
@@ -715,7 +716,7 @@ def _add_evidence_columns(df: pd.DataFrame) -> pd.DataFrame:
             groups.append(g)
             continue
 
-        exact = s[s["evidence_comparable"].fillna(False).astype(bool)]
+        exact = s[_coerce_bool_series(s["evidence_comparable"])]
         if not exact.empty:
             vals = exact["log_evidence"].to_numpy(float)
             maxv = float(np.max(vals))
@@ -761,14 +762,26 @@ def _postprocess_evidence_scores(df: pd.DataFrame) -> pd.DataFrame:
     return add_advanced_evidence_margin_columns(out, group_cols=_event_group_columns(out))
 
 
+def _with_evidence_support_columns(df: pd.DataFrame) -> pd.DataFrame:
+    out = _ensure_evidence_support_columns(df)
+    if "evidence_comparable" in out:
+        out["evidence_comparable"] = _coerce_bool_series(out["evidence_comparable"])
+    return out
+
+
 def _summary(df: pd.DataFrame) -> pd.DataFrame:
-    df = _ensure_evidence_support_columns(df)
+    df = _with_evidence_support_columns(df)
     ok = df[df["status"] == "success"]
     if ok.empty:
         return pd.DataFrame()
     ok = ok.copy()
+    if "is_best_model" in ok:
+        ok["is_best_model"] = _coerce_bool_series(ok["is_best_model"])
     if "is_best_truncated_lower_bound" not in ok:
         ok["is_best_truncated_lower_bound"] = False
+    ok["is_best_truncated_lower_bound"] = _coerce_bool_series(
+        ok["is_best_truncated_lower_bound"]
+    )
     if "truncated_relative_log_evidence" not in ok:
         ok["truncated_relative_log_evidence"] = np.nan
     out = ok.groupby(["model", "model_family", "evidence_support", "evidence_comparable"], as_index=False).agg(
@@ -798,7 +811,7 @@ def _summary_for_support(summary: pd.DataFrame, support: str) -> pd.DataFrame:
 
 
 def _support_counts(df: pd.DataFrame) -> pd.DataFrame:
-    df = _ensure_evidence_support_columns(df)
+    df = _with_evidence_support_columns(df)
     if df.empty:
         return pd.DataFrame(columns=["evidence_support", "evidence_comparison", "evidence_comparable", "rows", "successful_rows", "events", "models"])
     return (
@@ -815,7 +828,7 @@ def _support_counts(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def _counts(df: pd.DataFrame) -> pd.DataFrame:
-    df = _ensure_evidence_support_columns(df)
+    df = _with_evidence_support_columns(df)
     ok = df[df["status"] == "success"]
     if ok.empty:
         return pd.DataFrame()

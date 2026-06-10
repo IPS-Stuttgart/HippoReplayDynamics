@@ -18,6 +18,7 @@ import pandas as pd
 from hipporeplayimm.evidence_reporting import (
     EXACT_EVIDENCE_SUPPORT,
     TRUNCATED_EVIDENCE_SUPPORT,
+    _coerce_bool_series,
     ensure_evidence_support_columns,
 )
 
@@ -38,6 +39,7 @@ def _successful_rows(scores: pd.DataFrame) -> pd.DataFrame:
         return rows
     if "status" in rows:
         rows = rows[rows["status"].eq("success")].copy()
+    rows["evidence_comparable"] = _coerce_bool_series(rows["evidence_comparable"])
     return rows
 
 
@@ -131,7 +133,7 @@ def event_support_audit(scores: pd.DataFrame) -> pd.DataFrame:
                 [EXACT_EVIDENCE_SUPPORT, TRUNCATED_EVIDENCE_SUPPORT]
             )
         ]
-        comparable = group[group["evidence_comparable"].fillna(False).astype(bool)]
+        comparable = group[_coerce_bool_series(group["evidence_comparable"])]
         records.append(
             {
                 "session": session,
@@ -146,7 +148,7 @@ def event_support_audit(scores: pd.DataFrame) -> pd.DataFrame:
                 "comparable_rows": int(len(comparable)),
                 "has_mixed_exact_truncated": bool(len(exact) and len(truncated)),
                 "has_uncomparable_rows": bool(
-                    (~group["evidence_comparable"].fillna(False).astype(bool)).any()
+                    (~_coerce_bool_series(group["evidence_comparable"])).any()
                 ),
             }
         )

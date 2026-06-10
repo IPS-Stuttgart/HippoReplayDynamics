@@ -19,6 +19,7 @@ _add_evidence_columns = benchmark_model_evidence._add_evidence_columns
 _family = benchmark_model_evidence._family
 _models = benchmark_model_evidence._models
 _score = benchmark_model_evidence._score
+_summary = benchmark_model_evidence._summary
 
 
 class _SessionStub:
@@ -340,6 +341,69 @@ def test_model_evidence_excludes_truncated_lower_bounds_from_exact_probabilities
     assert momentum["best_truncated_lower_bound_model"] == "momentum"
     assert bool(momentum["is_best_truncated_lower_bound"])
     assert momentum["truncated_relative_log_evidence"] == 0.0
+
+
+def test_model_evidence_parses_string_false_comparable_flags():
+    scored = _add_evidence_columns(
+        pd.DataFrame(
+            [
+                _score_row(
+                    "random",
+                    0.0,
+                    evidence_support="exact_full_grid",
+                    evidence_comparable="True",
+                ),
+                _score_row(
+                    "momentum",
+                    100.0,
+                    evidence_support="truncated_full_grid",
+                    evidence_comparable="False",
+                ),
+            ]
+        )
+    )
+
+    random = scored[scored["model"] == "random"].iloc[0]
+    momentum = scored[scored["model"] == "momentum"].iloc[0]
+
+    assert bool(random["is_best_model"])
+    assert not bool(momentum["evidence_comparable"])
+    assert not bool(momentum["is_best_model"])
+    assert pd.isna(momentum["relative_log_evidence"])
+
+
+def test_model_evidence_summary_parses_string_bool_win_flags():
+    summary = _summary(
+        pd.DataFrame(
+            [
+                _score_row(
+                    "random",
+                    0.0,
+                    evidence_support="exact_full_grid",
+                    evidence_comparable="True",
+                    is_best_model="False",
+                    is_best_truncated_lower_bound="False",
+                    relative_log_evidence=0.0,
+                    model_probability=0.5,
+                    truncated_relative_log_evidence=np.nan,
+                ),
+                _score_row(
+                    "random",
+                    1.0,
+                    evidence_support="exact_full_grid",
+                    evidence_comparable="True",
+                    is_best_model="True",
+                    is_best_truncated_lower_bound="False",
+                    relative_log_evidence=0.0,
+                    model_probability=0.5,
+                    truncated_relative_log_evidence=np.nan,
+                ),
+            ]
+        )
+    )
+
+    assert summary.loc[0, "wins"] == 1
+    assert summary.loc[0, "truncated_lower_bound_wins"] == 0
 
 
 def _score_row(model: str, log_evidence: float, **extra: object) -> dict[str, object]:

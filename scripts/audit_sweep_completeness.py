@@ -119,7 +119,7 @@ def audit_sweep_completeness(
     out_path.parent.mkdir(parents=True, exist_ok=True)
     table.to_csv(out_path, index=False)
     _write_summary_json(table, out_path.with_suffix(".summary.json"), mode=mode, artifact_root=root)
-    if fail_on_incomplete and bool(table["missing_matrix_cell"].fillna(False).any()):
+    if fail_on_incomplete and bool(_bool_series(table["missing_matrix_cell"]).any()):
         raise SystemExit(f"Sweep is incomplete; see {out_path}")
     return table
 
@@ -249,18 +249,33 @@ def _completeness_reasons(
 
 
 def _write_summary_json(table: pd.DataFrame, path: Path, *, mode: str, artifact_root: Path) -> None:
-    planned = table[table["planned"].fillna(False).astype(bool)] if "planned" in table else table
+    planned = table[_bool_series(table["planned"])] if "planned" in table else table
     summary = {
         "schema_version": 1,
         "mode": mode,
         "artifact_root": str(artifact_root),
         "matrix_cells": int(len(table)),
         "planned_matrix_cells": int(len(planned)),
-        "artifact_complete_cells": int(table["artifact_complete"].fillna(False).astype(bool).sum()),
-        "included_in_final_ranking_cells": int(table["included_in_final_ranking"].fillna(False).astype(bool).sum()),
-        "missing_or_incomplete_cells": int(table["missing_matrix_cell"].fillna(False).astype(bool).sum()),
+        "artifact_complete_cells": int(_bool_series(table["artifact_complete"]).sum()),
+        "included_in_final_ranking_cells": int(
+            _bool_series(table["included_in_final_ranking"]).sum()
+        ),
+        "missing_or_incomplete_cells": int(_bool_series(table["missing_matrix_cell"]).sum()),
     }
     path.write_text(json.dumps(summary, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+
+def _bool_value(value: object) -> bool:
+    if isinstance(value, bool):
+        return value
+    if pd.isna(value):
+        return False
+    text = str(value).strip().lower()
+    return text in {"1", "true", "t", "yes", "y"}
+
+
+def _bool_series(values: pd.Series) -> pd.Series:
+    return values.map(_bool_value).astype(bool)
 
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:

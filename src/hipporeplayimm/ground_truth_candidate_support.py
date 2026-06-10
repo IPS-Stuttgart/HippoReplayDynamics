@@ -6,9 +6,17 @@ import numpy as np
 
 from . import ground_truth as _ground_truth
 from .benchmarks import _candidate_indices_for_model
+from .state_space import StateSpaceReplayModel
 
 
-def _score_joint_for_ground_truth(model, train_emissions, joint_emissions, bin_centers: np.ndarray):
+def _score_joint_for_ground_truth(
+    model,
+    train_emissions,
+    joint_emissions,
+    bin_centers: np.ndarray,
+    *,
+    occupancy_s: np.ndarray | None = None,
+):
     """Score held-out ground-truth decodes with benchmark-matched candidates.
 
     Held-out benchmark scoring derives pruned candidate supports from the train
@@ -19,6 +27,14 @@ def _score_joint_for_ground_truth(model, train_emissions, joint_emissions, bin_c
     evidence rows.
     """
 
+    if isinstance(model, StateSpaceReplayModel):
+        candidates = _candidate_indices_for_model(model, train_emissions, bin_centers)
+        return model.score(
+            joint_emissions,
+            bin_centers,
+            candidate_indices=candidates,
+            occupancy_s=occupancy_s,
+        )
     if hasattr(model, "candidate_indices"):
         candidates = _candidate_indices_for_model(model, train_emissions, bin_centers)
         return model.score(joint_emissions, bin_centers, candidate_indices=candidates)

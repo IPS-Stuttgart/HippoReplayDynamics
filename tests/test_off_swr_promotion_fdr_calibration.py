@@ -9,6 +9,7 @@ from calibrate_off_swr_promotion_fdr import (  # noqa: E402
     build_gate_summary,
     build_null_calibration,
     build_threshold_sensitivity,
+    promotion_ready_mask,
     write_off_swr_promotion_fdr_outputs,
 )
 
@@ -168,6 +169,20 @@ def test_off_swr_promotion_fdr_gate_parses_string_false_threshold_flags():
     ).set_index("gate")
 
     assert not bool(gates.loc["threshold_curve_stable_high_specificity_region", "passed"])
+
+
+def test_off_swr_promotion_fdr_parses_numeric_boolean_flags():
+    high = pd.DataFrame(
+        [
+            _high_candidate(0, margin=120.0, state="immobile", interesting=True, promoted=True),
+            _high_candidate(1, margin=70.0, state="run", interesting=True, promoted=False),
+        ]
+    )
+    high["passes_high_specificity_promotion_filter"] = [1.0, 0.0]
+
+    ready = promotion_ready_mask(high)
+
+    assert ready.tolist() == [True, False]
 
 
 def _candidate(index: int, *, margin: float, state: str, interesting: bool) -> dict[str, object]:

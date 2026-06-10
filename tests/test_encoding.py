@@ -8,6 +8,7 @@ from hipporeplayimm.encoding import (
     EncodingModel,
     build_emissions,
     fit_place_field_encoding,
+    _positions_to_flat_bins,
 )
 
 
@@ -42,6 +43,42 @@ def test_fit_place_field_encoding_recovers_peak_near_spike_location(tmp_path):
     )
     peak = encoding.bin_centers[int(np.argmax(encoding.rates_hz[0]))]
 
+    assert 40.0 <= peak[0] <= 60.0
+
+
+def test_fit_place_field_encoding_falls_back_to_all_spikes_without_excitatory_labels(tmp_path):
+    times = np.linspace(0.0, 10.0, 301)
+    x = np.linspace(0.0, 100.0, times.size)
+    y = np.zeros_like(x)
+    position = np.column_stack([times, x, y, np.zeros_like(x)])
+    spike_times = times[(x > 45.0) & (x < 55.0)][::2]
+    spikes = np.column_stack([spike_times, np.ones(spike_times.shape)])
+    session = ReplaySession(
+        rat="RatX",
+        name="OpenX",
+        path=tmp_path,
+        position=position,
+        spikes=spikes,
+        tetrode_cell_ids=np.array([[1, 1]]),
+        excitatory_neurons=np.array([], dtype=int),
+        inhibitory_neurons=np.array([]),
+        ripple_events=np.empty((0, 6)),
+        run_times=np.array([[0.0, 10.0]]),
+        sleep_box_immobile_times=np.empty((0, 2)),
+        sleep_times=np.empty((0, 2)),
+        rem_times=np.empty((0, 2)),
+        well_sequence=None,
+        metadata={},
+    )
+
+    encoding = fit_place_field_encoding(
+        session,
+        EncodingConfig(bin_size_cm=5.0, smoothing_sigma_bins=0.0, min_speed_cm_s=1.0),
+    )
+    peak = encoding.bin_centers[int(np.argmax(encoding.rates_hz[0]))]
+
+    assert encoding.cell_ids.tolist() == [1]
+    assert encoding.rates_hz[0].max() > encoding.config.rate_floor_hz
     assert 40.0 <= peak[0] <= 60.0
 
 
@@ -183,6 +220,39 @@ def test_select_cells_rejects_missing_cell_ids_with_clear_error():
         encoding.select_cells([1, 99])
 
 
+def test_positions_to_flat_bins_includes_closed_upper_grid_edge():
+    encoding = EncodingModel(
+        x_edges=np.array([0.0, 1.0, 2.0]),
+        y_edges=np.array([0.0, 1.0, 2.0]),
+        bin_centers=np.array(
+            [
+                [0.5, 0.5],
+                [0.5, 1.5],
+                [1.5, 0.5],
+                [1.5, 1.5],
+            ]
+        ),
+        rates_hz=np.ones((1, 4), dtype=float),
+        occupancy_s=np.ones(4, dtype=float),
+        cell_ids=np.array([1]),
+        config=EncodingConfig(),
+    )
+    xy = np.array(
+        [
+            [0.0, 0.0],
+            [2.0, 2.0],
+            [2.0, 0.5],
+            [0.5, 2.0],
+            [2.0 + 1e-6, 0.5],
+            [0.5, 2.0 + 1e-6],
+        ]
+    )
+    expected = np.array([0, 3, 2, 1, -1, -1])
+
+    np.testing.assert_array_equal(encoding.positions_to_flat_bins(xy), expected)
+    np.testing.assert_array_equal(_positions_to_flat_bins(xy, encoding.x_edges, encoding.y_edges), expected)
+
+
 def test_build_emissions_applies_spike_rate_scale_to_expected_counts():
     session = _single_ripple_session()
     encoding = _two_bin_encoding()
@@ -231,6 +301,26 @@ def test_build_emissions_applies_cell_weights_to_cell_log_terms():
 
     expected = np.log(np.array([2.0, 4.0])) - np.array([2.0, 4.0])
     np.testing.assert_allclose(emissions.log_likelihood[0], expected)
+
+
+def test_build_emissions_accepts_zero_dimensional_numpy_cell_weight():
+    session = _single_ripple_session()
+    encoding = _two_bin_encoding()
+
+    expected = build_emissions(
+        session,
+        encoding,
+        0,
+        EmissionConfig(time_bin_s=1.0, cell_weights=[1.0]),
+    )
+    emissions = build_emissions(
+        session,
+        encoding,
+        0,
+        EmissionConfig(time_bin_s=1.0, cell_weights=np.array(1.0)),
+    )
+
+    np.testing.assert_allclose(emissions.log_likelihood, expected.log_likelihood)
 
 
 @pytest.mark.parametrize("cell_weights", ([1.0, 1.0], [-1.0], [0.0], [np.nan]))

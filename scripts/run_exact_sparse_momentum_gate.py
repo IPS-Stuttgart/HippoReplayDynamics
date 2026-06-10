@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
 from pathlib import Path
 import re
@@ -582,7 +583,7 @@ def _coerce_bool(value: object) -> bool:
     except (TypeError, ValueError):
         numeric = None
     if numeric is not None:
-        return bool(pd.notna(numeric) and numeric != 0.0)
+        return bool(math.isfinite(numeric) and numeric != 0.0)
     text = str(value).strip().lower()
     return text in {"1", "1.0", "true", "t", "yes", "y", "on"}
 

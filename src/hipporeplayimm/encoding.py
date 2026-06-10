@@ -68,6 +68,25 @@ def _validate_encoding_config(config: EncodingConfig) -> None:
         raise ValueError("arena_padding_cm must be finite and nonnegative")
 
 
+def _spikes_and_cell_ids_for_encoding(
+    session: ReplaySession,
+    config: EncodingConfig,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Return the spike table and cell IDs selected for place-field fitting."""
+
+    if config.use_excitatory and session.excitatory_neurons.size:
+        spikes = session.excitatory_spikes()
+        cell_ids = np.asarray(session.excitatory_neurons, dtype=int)
+    else:
+        spikes = session.spikes
+        cell_ids = (
+            np.unique(spikes[:, 1].astype(int))
+            if np.asarray(spikes).size
+            else np.empty(0, dtype=int)
+        )
+    return np.asarray(spikes, dtype=float), np.asarray(sorted(np.unique(cell_ids)), dtype=int)
+
+
 @dataclass
 class EncodingModel:
     """Occupancy-normalized place-field encoding model."""
@@ -121,8 +140,8 @@ class EncodingModel:
 
     def positions_to_flat_bins(self, xy: np.ndarray) -> np.ndarray:
         xy = _as_xy_array(xy, name="xy")
-        x_idx = np.searchsorted(self.x_edges, xy[:, 0], side="right") - 1
-        y_idx = np.searchsorted(self.y_edges, xy[:, 1], side="right") - 1
+        x_idx = _axis_to_bin_indices(xy[:, 0], self.x_edges)
+        y_idx = _axis_to_bin_indices(xy[:, 1], self.y_edges)
         valid = (
             (x_idx >= 0)
             & (x_idx < self.grid_shape[0])
@@ -194,7 +213,7 @@ def fit_place_field_encoding(session: ReplaySession, config: EncodingConfig | No
     config = EncodingConfig() if config is None else config
     _validate_encoding_config(config)
     position = _clean_position(session.position)
-    selected_spikes = session.excitatory_spikes() if config.use_excitatory else session.spikes
+    selected_spikes, cell_ids = _spikes_and_cell_ids_for_encoding(session, config)
     if not (position.shape[0] == 1 and np.asarray(selected_spikes).size == 0):
         _validate_position_samples(position)
     times = position[:, 0]
@@ -214,13 +233,7 @@ def fit_place_field_encoding(session: ReplaySession, config: EncodingConfig | No
     valid_frames = movement & (flat_bins >= 0)
     np.add.at(occupancy, flat_bins[valid_frames], dt[valid_frames])
 
-    spikes = session.excitatory_spikes() if config.use_excitatory else session.spikes
-    cell_ids = (
-        np.asarray(session.excitatory_neurons, dtype=int)
-        if config.use_excitatory and session.excitatory_neurons.size
-        else np.unique(spikes[:, 1].astype(int))
-    )
-    cell_ids = np.asarray(sorted(np.unique(cell_ids)), dtype=int)
+    spikes = selected_spikes
     counts = np.zeros((cell_ids.shape[0], occupancy.shape[0]), dtype=float)
 
     if spikes.size and cell_ids.size:
@@ -422,11 +435,17 @@ def _emission_cell_weights(
 
     if cell_weights is None:
         return np.ones(int(n_cells), dtype=float)
+
     if np.isscalar(cell_weights):
-        values = [cell_weights]
+        weights = np.asarray([cell_weights], dtype=float)
     else:
-        values = list(cell_weights)
-    weights = np.asarray(values, dtype=float)
+        try:
+            weights = np.asarray(cell_weights, dtype=float)
+        except TypeError:
+            weights = np.asarray(list(cell_weights), dtype=float)
+        if weights.ndim == 0:
+            weights = weights.reshape(1)
+
     if weights.ndim != 1 or weights.shape[0] != int(n_cells):
         raise ValueError("cell_weights must contain one weight per encoded cell")
     if not np.all(np.isfinite(weights)):
@@ -521,10 +540,33 @@ def _make_grid(xy: np.ndarray, config: EncodingConfig) -> tuple[np.ndarray, np.n
     return x_edges, y_edges, centers
 
 
+def _axis_to_bin_indices(values: np.ndarray, edges: np.ndarray) -> np.ndarray:
+    """Map coordinates onto half-open bins while closing the final edge."""
+
+    edge_values = np.asarray(edges, dtype=float)
+    if edge_values.ndim != 1 or edge_values.shape[0] < 2:
+        raise ValueError("edges must contain at least two values")
+    if not np.all(np.isfinite(edge_values)) or np.any(np.diff(edge_values) <= 0.0):
+        raise ValueError("edges must be finite and strictly increasing")
+
+    coordinates = np.asarray(values, dtype=float)
+    indices = np.searchsorted(edge_values, coordinates, side="right") - 1
+    upper_edge = float(edge_values[-1])
+    tolerance = 16.0 * np.finfo(float).eps * max(abs(upper_edge), 1.0)
+    on_upper_edge = np.isfinite(coordinates) & np.isclose(
+        coordinates,
+        upper_edge,
+        rtol=0.0,
+        atol=tolerance,
+    )
+    indices[on_upper_edge] = edge_values.shape[0] - 2
+    return indices.astype(int, copy=False)
+
+
 def _positions_to_flat_bins(xy: np.ndarray, x_edges: np.ndarray, y_edges: np.ndarray) -> np.ndarray:
     xy = _as_xy_array(xy, name="xy")
-    x_idx = np.searchsorted(x_edges, xy[:, 0], side="right") - 1
-    y_idx = np.searchsorted(y_edges, xy[:, 1], side="right") - 1
+    x_idx = _axis_to_bin_indices(xy[:, 0], x_edges)
+    y_idx = _axis_to_bin_indices(xy[:, 1], y_edges)
     valid = (x_idx >= 0) & (x_idx < len(x_edges) - 1) & (y_idx >= 0) & (y_idx < len(y_edges) - 1)
     flat = np.full(x_idx.shape, -1, dtype=int)
     flat[valid] = x_idx[valid] * (len(y_edges) - 1) + y_idx[valid]

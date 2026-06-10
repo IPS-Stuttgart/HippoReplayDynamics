@@ -11,6 +11,8 @@ from score_off_swr_promoted_candidates import (  # noqa: E402
     _encoding_config_from_args,
     build_parser,
     select_candidate_windows,
+    validation_group_summary,
+    validation_summary,
     write_validation_outputs,
 )
 
@@ -56,6 +58,54 @@ def test_select_candidate_windows_filters_promotion_ready_and_strong_immobile():
     )
 
     assert rat2_strong["event_index"].tolist() == [1]
+
+
+def test_off_swr_validation_paths_parse_numeric_boolean_flags():
+    table = pd.DataFrame(
+        [
+            _candidate("Rat1/Open1", 0, 0, rank=2, promoted=False, margin=120.0),
+            _candidate("Rat2/Open2", 1, 0, rank=1, promoted=True, margin=60.0),
+        ]
+    )
+    table["passes_high_specificity_promotion_filter"] = [0.0, 1.0]
+
+    selected = select_candidate_windows(table, candidate_filter="promotion-ready")
+
+    assert selected["event_index"].tolist() == [1]
+
+    decisions = pd.DataFrame(
+        [
+            {
+                "session": "Rat2/Open2",
+                "event_index": 1,
+                "window_role": PROMOTED_WINDOW_ROLE,
+                "null_index": 0,
+                "required_models_complete": 1.0,
+                "trajectory_confident_claim": 1.0,
+                "nontrajectory_confident_claim": 0.0,
+                "trajectory_minus_nontrajectory_log_evidence": 60.0,
+                "margin_decision": "trajectory_confident",
+            }
+        ]
+    )
+
+    summary = validation_summary(
+        decisions,
+        candidate_filter="promotion-ready",
+        comparison_scope="full-core",
+    ).iloc[0]
+    assert int(summary["required_complete_candidates"]) == 1
+    assert int(summary["trajectory_confident_claims"]) == 1
+    assert int(summary["nontrajectory_confident_claims"]) == 0
+    assert summary["validation_status"] == "exact_core_supports_promoted_off_swr_candidates"
+
+    rat_summary = validation_group_summary(
+        decisions,
+        candidate_filter="promotion-ready",
+        comparison_scope="full-core",
+        group_cols=("rat",),
+    ).iloc[0]
+    assert int(rat_summary["trajectory_confident_claims"]) == 1
 
 
 def test_write_validation_outputs_reports_exact_core_promoted_candidate_support(tmp_path):

@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Sequence
@@ -268,12 +269,21 @@ def _write_summary_json(table: pd.DataFrame, path: Path, *, mode: str, artifact_
 def _bool_value(value: object) -> bool:
     if isinstance(value, bool):
         return value
-    if pd.isna(value):
-        return False
-    if isinstance(value, (int, float)):
-        return bool(value != 0.0)
+    try:
+        if pd.isna(value):
+            return False
+    except (TypeError, ValueError):
+        pass
     text = str(value).strip().lower()
-    return text in {"1", "1.0", "true", "t", "yes", "y", "on"}
+    if text in {"1", "1.0", "true", "t", "yes", "y", "on"}:
+        return True
+    if text in {"0", "0.0", "false", "f", "no", "n", "", "nan", "none", "null", "off"}:
+        return False
+    try:
+        numeric = float(text)
+    except ValueError:
+        return False
+    return bool(math.isfinite(numeric) and numeric != 0.0)
 
 
 def _bool_series(values: pd.Series) -> pd.Series:

@@ -5,6 +5,7 @@ from scipy.special import logsumexp
 
 from hipporeplayimm.data import ReplaySession
 from hipporeplayimm.encoding import EncodingConfig, EmissionConfig, EncodingModel, LogEmissionTensor
+from hipporeplayimm.evidence_reporting import DEGENERATE_SINGLE_BIN_EVIDENCE_SUPPORT
 from hipporeplayimm.state_space import StateSpaceDecoderConfig, StateSpaceReplayModel
 
 
@@ -93,6 +94,35 @@ def test_state_space_four_mode_imm_uses_transition_durations():
 
     assert np.allclose(score.log_likelihood, logsumexp(brute_terms))
     assert score.diagnostics["state_space_transition_durations"] == "1,4"
+
+
+def test_state_space_pruned_path_models_mark_single_bin_evidence_degenerate():
+    centers = np.array([[0.0, 0.0], [1.0, 0.0], [2.0, 0.0]])
+    log_likelihood = np.log(np.array([[0.2, 0.7, 0.1]]))
+    emissions = LogEmissionTensor(
+        log_likelihood=log_likelihood,
+        spike_counts=np.zeros((1, 1), dtype=int),
+        times=np.array([0.0]),
+        dt=1.0,
+        cell_ids=np.array([1]),
+        n_spikes=0,
+    )
+    expected_random_marginal = float(logsumexp(log_likelihood[0]) - np.log(centers.shape[0]))
+
+    for mode, support_key, prefix in (
+        ("momentum", "state_space_momentum_evidence_support", "state_space_momentum"),
+        ("imm", "state_space_imm_evidence_support", "state_space_imm"),
+    ):
+        config = StateSpaceDecoderConfig(
+            mode=mode,
+            momentum_candidate_top_k=centers.shape[0],
+        )
+        score = StateSpaceReplayModel(mode=mode, config=config).score(emissions, centers)
+
+        assert np.isclose(score.log_likelihood, expected_random_marginal)
+        assert score.diagnostics[support_key] == DEGENERATE_SINGLE_BIN_EVIDENCE_SUPPORT
+        assert score.diagnostics[f"{prefix}_degenerate_reason"] == "single_time_bin_fragmented_marginal"
+        assert score.diagnostics[f"{prefix}_required_min_time_bins"] == 2
 
 
 def test_duration_patch_updates_imported_build_emissions_aliases():

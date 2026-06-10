@@ -14,6 +14,7 @@ import numpy as np
 from scipy.special import logsumexp
 
 from .duration_dynamics import attach_duration_metadata, transition_durations_s
+from .evidence_reporting import DEGENERATE_SINGLE_BIN_EVIDENCE_SUPPORT
 from .state_space_utils import _first_order_imm_content_diagnostics
 
 
@@ -252,10 +253,12 @@ def _score_state_space_duration_with_occupancy(
             time_scales=time_scales,
             valid_bin_mask=valid_bin_mask,
         )
-        evidence_support = ss._candidate_evidence_support_label(
+        evidence_support = _path_model_evidence_support(
+            ss,
             candidates,
             emissions.n_bins,
             valid_bin_mask,
+            emissions.n_time,
         )
         candidate_support_label = "full_grid" if evidence_support == "exact_full_grid" else (
             "derived" if candidate_indices is None else "provided"
@@ -272,6 +275,8 @@ def _score_state_space_duration_with_occupancy(
                 "provided" if candidate_indices is not None else ss._candidate_selection_label(self.config)
             ),
         }
+        if emissions.n_time == 1:
+            extra.update(_single_bin_degenerate_diagnostics("state_space_momentum"))
     elif self.mode == "imm":
         candidates = _duration_candidates(ss, self, emissions, bin_centers, candidate_indices, valid_bin_mask)
         diffusion_sigmas = _per_transition_sigmas(
@@ -319,10 +324,12 @@ def _score_state_space_duration_with_occupancy(
             ),
             valid_bin_mask=valid_bin_mask,
         )
-        evidence_support = ss._candidate_evidence_support_label(
+        evidence_support = _path_model_evidence_support(
+            ss,
             candidates,
             emissions.n_bins,
             valid_bin_mask,
+            emissions.n_time,
         )
         candidate_support_label = "full_grid" if evidence_support == "exact_full_grid" else (
             "derived" if candidate_indices is None else "provided"
@@ -349,6 +356,8 @@ def _score_state_space_duration_with_occupancy(
                 "state_space_momentum_initial_transition_sigma_cm": float(initial_sigma),
             }
         )
+        if emissions.n_time == 1:
+            extra.update(_single_bin_degenerate_diagnostics("state_space_imm"))
     else:  # pragma: no cover - StateSpaceReplayModel.__post_init__ validates this.
         raise ValueError(f"Unsupported state-space mode: {self.mode}")
 
@@ -403,6 +412,27 @@ def _score_state_space_duration_with_occupancy(
         terminal_log_posterior=terminal,
         trajectory_log_posterior=trajectory,
     )
+
+
+def _path_model_evidence_support(
+    ss,
+    candidates,
+    n_bins: int,
+    valid_bin_mask: np.ndarray | None,
+    n_time: int,
+) -> str:
+    """Classify evidence support for candidate path models."""
+
+    if int(n_time) <= 1:
+        return DEGENERATE_SINGLE_BIN_EVIDENCE_SUPPORT
+    return ss._candidate_evidence_support_label(candidates, n_bins, valid_bin_mask)
+
+
+def _single_bin_degenerate_diagnostics(prefix: str) -> dict[str, int | str]:
+    return {
+        f"{prefix}_degenerate_reason": "single_time_bin_fragmented_marginal",
+        f"{prefix}_required_min_time_bins": 2,
+    }
 
 
 def _duration_candidates(ss, model, emissions, bin_centers, candidate_indices, valid_bin_mask):

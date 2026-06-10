@@ -85,11 +85,28 @@ GATE_COLUMNS = ("gate", "passed", "observed", "criterion", "required_for_overall
 
 
 def _as_bool(value: object) -> bool:
-    if isinstance(value, bool):
-        return value
-    if value is None or pd.isna(value):
+    if isinstance(value, (bool, np.bool_)):
+        return bool(value)
+    if value is None:
         return False
-    return str(value).strip().lower() in {"1", "true", "t", "yes", "y"}
+    try:
+        if pd.isna(value):
+            return False
+    except (TypeError, ValueError):
+        pass
+    if isinstance(value, (int, float, np.integer, np.floating)):
+        numeric = float(value)
+        return bool(np.isfinite(numeric) and numeric != 0.0)
+    text = str(value).strip().lower()
+    if text in {"1", "1.0", "true", "t", "yes", "y", "on"}:
+        return True
+    if text in {"0", "0.0", "false", "f", "no", "n", "", "nan", "none", "null", "off"}:
+        return False
+    try:
+        numeric = float(text)
+    except ValueError:
+        return False
+    return bool(np.isfinite(numeric) and numeric != 0.0)
 
 
 def _parse_names(value: str | None) -> tuple[str, ...]:

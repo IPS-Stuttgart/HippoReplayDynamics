@@ -19,6 +19,7 @@ from .state_space_first_order import (
     _score_stationary,
 )
 from .state_space_utils import (
+    _as_log_probs,
     _gaussian_transition_matrix,
     _mass_retaining_candidate_indices,
     _mean_entropy,
@@ -263,14 +264,24 @@ class StateSpaceReplayModel:
                 valid_bin_mask=valid_bin_mask,
             )
             names = ("stationary", "diffusion", "fragmented")
+            event_mode_mass = mode_post.mean(axis=0)
             extra = {
                 f"state_space_mode_{name}_terminal_probability": float(mode_post[-1, idx])
                 for idx, name in enumerate(names)
             }
             extra.update(
                 {
+                    f"state_space_mode_{name}_event_probability": float(event_mode_mass[idx])
+                    for idx, name in enumerate(names)
+                }
+            )
+            extra.update(
+                {
                     "state_space_imm_modes": ",".join(names),
                     "state_space_imm_evidence_support": "exact_full_grid",
+                    "state_space_imm_nonstationary_terminal_probability": float(mode_post[-1, 1:].sum()),
+                    "state_space_imm_nonstationary_event_probability": float(event_mode_mass[1:].sum()),
+                    "state_space_imm_mean_mode_entropy": _mean_entropy(_as_log_probs(mode_post)),
                 }
             )
         elif self.mode == "imm":

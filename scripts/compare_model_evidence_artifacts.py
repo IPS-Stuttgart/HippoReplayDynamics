@@ -20,7 +20,10 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from hipporeplayimm.evidence_reporting import ensure_evidence_support_columns
+from hipporeplayimm.evidence_reporting import (
+    _coerce_bool_series,
+    ensure_evidence_support_columns,
+)
 
 _SCORE_FILENAMES = ("event_model_evidence.csv", "all_sessions_event_model_evidence.csv")
 _CANONICAL_MODELS = {
@@ -146,8 +149,9 @@ def load_scores(root: str | Path, run_label: str, *, exact_only: bool = False) -
     if "status" in frame:
         frame = frame[frame["status"].eq("success")].copy()
     frame = ensure_evidence_support_columns(frame)
+    frame["evidence_comparable"] = _coerce_bool_series(frame["evidence_comparable"])
     if exact_only:
-        frame = frame[frame["evidence_comparable"].fillna(False).astype(bool)].copy()
+        frame = frame[frame["evidence_comparable"]].copy()
     frame["source_score_file"] = str(source)
     frame["run_label"] = run_label
     frame["canonical_model"] = frame["model"].map(canonical_model_name)

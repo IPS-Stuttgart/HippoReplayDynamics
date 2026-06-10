@@ -122,6 +122,46 @@ def test_build_event_summary_reports_exact_sparse_margins():
     assert summary.loc[0, "exact_sparse_minus_diffusion"] > 0.0
 
 
+def test_build_event_summary_excludes_string_false_comparable_rows():
+    frame = pd.DataFrame(
+        [
+            {
+                "status": "success",
+                "session": "Rat1/Open1",
+                "event_index": 0,
+                "true_model": "momentum",
+                "expected_model": "sorted-spike-state-space-momentum",
+                "expected_exact_surrogate_model": EXACT_SPARSE_MOMENTUM_MODEL,
+                "model": DIFFUSION_MODEL,
+                "requested_model": DIFFUSION_MODEL,
+                "log_evidence": 1.0,
+                "evidence_comparable": "True",
+                "n_time": 5,
+                "n_spikes": 3,
+            },
+            {
+                "status": "success",
+                "session": "Rat1/Open1",
+                "event_index": 0,
+                "true_model": "momentum",
+                "expected_model": "sorted-spike-state-space-momentum",
+                "expected_exact_surrogate_model": EXACT_SPARSE_MOMENTUM_MODEL,
+                "model": EXACT_SPARSE_MOMENTUM_MODEL,
+                "requested_model": EXACT_SPARSE_MOMENTUM_MODEL,
+                "log_evidence": 100.0,
+                "evidence_comparable": "False",
+                "n_time": 5,
+                "n_spikes": 3,
+            },
+        ]
+    )
+
+    summary = build_event_summary(frame)
+
+    assert summary.loc[0, "best_model"] == DIFFUSION_MODEL
+    assert bool(summary.loc[0, "exact_surrogate_recovered"]) is False
+
+
 def _write_fake_scores(tmp_path, session_dir: str, events: list[list[dict[str, object]]]) -> None:
     output = tmp_path / session_dir
     output.mkdir(parents=True)

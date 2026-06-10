@@ -400,13 +400,13 @@ def aggregate_gate_results(
             and missing_required == 0
         ),
         "momentum_exact_surrogate_recovered_events": int(
-            momentum["exact_surrogate_recovered"].fillna(False).astype(bool).sum()
+            _bool_series(momentum["exact_surrogate_recovered"]).sum()
         ),
         "momentum_events": int(momentum.shape[0]),
         "momentum_exact_surrogate_recovery_accuracy": momentum_accuracy,
         "momentum_recovery_threshold": float(min_momentum_recovery),
         "diffusion_recovered_events": int(
-            diffusion["recovered_expected_model"].fillna(False).astype(bool).sum()
+            _bool_series(diffusion["recovered_expected_model"]).sum()
         ),
         "diffusion_events": int(diffusion.shape[0]),
         "diffusion_recovery_accuracy": diffusion_accuracy,
@@ -547,7 +547,7 @@ def _event_best_model(group: pd.DataFrame) -> str:
             return str(values.iloc[0])
     scored = _successful_finite_rows(group)
     if "evidence_comparable" in scored:
-        scored = scored[scored["evidence_comparable"].fillna(False).astype(bool)]
+        scored = scored[_bool_series(scored["evidence_comparable"])]
     if scored.empty:
         return ""
     values = pd.to_numeric(scored["log_evidence"], errors="coerce")
@@ -577,6 +577,10 @@ def _coerce_bool(value: object) -> bool:
         return value
     text = str(value).strip().lower()
     return text in {"1", "true", "t", "yes", "y"}
+
+
+def _bool_series(values: pd.Series) -> pd.Series:
+    return values.map(_coerce_bool).astype(bool)
 
 
 def _first_numeric(row: pd.Series, column: str) -> float:
@@ -613,11 +617,11 @@ def build_session_summary(event_summary: pd.DataFrame) -> pd.DataFrame:
                 "true_model": true_model,
                 "events": int(group.shape[0]),
                 "recovered_expected_events": int(
-                    group["recovered_expected_model"].fillna(False).astype(bool).sum()
+                    _bool_series(group["recovered_expected_model"]).sum()
                 ),
                 "recovery_accuracy": _mean_bool(group["recovered_expected_model"]),
                 "exact_surrogate_recovered_events": int(
-                    group["exact_surrogate_recovered"].fillna(False).astype(bool).sum()
+                    _bool_series(group["exact_surrogate_recovered"]).sum()
                 ),
                 "exact_surrogate_recovery_accuracy": _mean_bool(
                     group["exact_surrogate_recovered"]
@@ -659,7 +663,7 @@ def build_runtime_summary(scores: pd.DataFrame) -> pd.DataFrame:
 def _mean_bool(values: pd.Series) -> float:
     if values.empty:
         return 0.0
-    return float(values.fillna(False).astype(bool).mean())
+    return float(_bool_series(values).mean())
 
 
 def _mode_or_empty(values: pd.Series) -> str:

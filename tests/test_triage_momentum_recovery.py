@@ -2,7 +2,10 @@ from __future__ import annotations
 
 import pandas as pd
 
-from scripts.triage_momentum_recovery import build_momentum_recovery_triage
+from scripts.triage_momentum_recovery import (
+    build_momentum_recovery_triage,
+    summarize_triage_events,
+)
 
 
 def _row(
@@ -107,3 +110,42 @@ def test_triage_marks_oracle_support_recovery_separately():
 
     assert events.iloc[0]["triage_category"] == "oracle_support_recovers"
     assert bool(events.iloc[0]["certified_or_strict_recovery"])
+
+
+def test_triage_parses_string_false_comparable_and_recovery_flags():
+    scores = pd.DataFrame(
+        [
+            _row(0, "sorted-spike-state-space-diffusion", 1.0),
+            _row(
+                0,
+                "sorted-spike-state-space-momentum",
+                3.0,
+                support="truncated_full_grid",
+                comparable="False",
+            ),
+        ]
+    )
+
+    tables = build_momentum_recovery_triage(scores)
+    event = tables.event_table.iloc[0]
+
+    assert event["triage_category"] == "lower_bound_certified_recovery"
+    assert bool(event["expected_model_evidence_comparable"]) is False
+
+    synthetic_events = pd.DataFrame(
+        [
+            {
+                "triage_category": "exact_nonrecovery",
+                "event_index": 0,
+                "certified_or_strict_recovery": "False",
+                "strict_exact_recovery": "False",
+                "lower_bound_certified_recovery": "False",
+                "candidate_support_loss": "False",
+                "expected_minus_best_comparable_log_evidence": -1.0,
+            }
+        ]
+    )
+    summary = summarize_triage_events(synthetic_events).iloc[0]
+
+    assert summary["certified_or_strict_recovery_events"] == 0
+    assert summary["strict_exact_recovery_events"] == 0

@@ -444,6 +444,31 @@ def test_add_relative_metrics_does_not_mix_exact_and_truncated_static_baselines(
     assert by_model.loc["imm", "delta_vs_best_static_truncated_lower_bound"] == -6.0
 
 
+def test_add_relative_metrics_parses_string_false_comparability():
+    rows = pd.DataFrame(
+        {
+            "session": ["s1", "s1", "s1"],
+            "event_index": [7, 7, 7],
+            "model": ["random", "diffusion", "imm"],
+            "heldout_log_likelihood": [-9.0, -2.0, -8.0],
+            "test_spikes": [2, 2, 2],
+            "evidence_support": [
+                "exact_full_grid",
+                TRUNCATED_EVIDENCE_SUPPORT,
+                TRUNCATED_EVIDENCE_SUPPORT,
+            ],
+            "evidence_comparable": ["True", "False", "False"],
+        }
+    )
+
+    result = _add_relative_metrics(rows).set_index("model")
+
+    assert result["best_static_heldout_log_likelihood"].eq(-9.0).all()
+    assert np.isnan(result.loc["diffusion", "delta_vs_best_static"])
+    assert np.isnan(result.loc["imm", "delta_vs_best_static"])
+    assert result.loc["diffusion", "lower_bound_delta_vs_best_static"] == 7.0
+
+
 def test_benchmark_summary_separates_exact_and_truncated_support():
     rows = pd.DataFrame(
         {

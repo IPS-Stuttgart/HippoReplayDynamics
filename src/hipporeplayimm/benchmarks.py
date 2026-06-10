@@ -21,6 +21,7 @@ from .data import ReplaySession, SpikeMarkData, load_open_field_sessions
 from .encoding import EmissionConfig, EncodingConfig, build_emissions, fit_place_field_encoding
 from .evidence_reporting import (
     TRUNCATED_EVIDENCE_SUPPORT,
+    _coerce_bool_series,
     ensure_evidence_support_columns,
 )
 from .goal_state_space import GoalStateSpaceReplayModel
@@ -1115,7 +1116,8 @@ def _add_relative_metrics(frame: pd.DataFrame) -> pd.DataFrame:
     frame = ensure_evidence_support_columns(frame)
     group_columns = _benchmark_event_group_columns(frame)
     static_mask = frame["model"].map(_is_best_static_baseline_model)
-    exact_static_mask = static_mask & frame["evidence_comparable"].fillna(False).astype(bool)
+    comparable = _coerce_bool_series(frame["evidence_comparable"])
+    exact_static_mask = static_mask & comparable
     best_static = (
         frame[exact_static_mask]
         .groupby(group_columns)["heldout_log_likelihood"]
@@ -1143,7 +1145,8 @@ def _add_relative_metrics(frame: pd.DataFrame) -> pd.DataFrame:
     )
 
     has_exact_static_baseline = merged["best_static_heldout_log_likelihood"].notna()
-    exact_rows = merged["evidence_comparable"].fillna(False).astype(bool) & has_exact_static_baseline
+    merged_comparable = _coerce_bool_series(merged["evidence_comparable"])
+    exact_rows = merged_comparable & has_exact_static_baseline
     merged["delta_vs_best_static"] = np.nan
     merged.loc[exact_rows, "delta_vs_best_static"] = (
         merged.loc[exact_rows, "heldout_log_likelihood"]

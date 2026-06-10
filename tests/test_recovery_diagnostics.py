@@ -85,6 +85,32 @@ def test_recovery_diagnostics_separates_strict_and_certified_recovery():
     assert overall["failure_mode_candidate_support_misses_true_path_events"] == 1
 
 
+def test_recovery_diagnostics_respects_string_false_comparable_flags():
+    scores = pd.DataFrame(
+        [
+            _row(0, "sorted-spike-state-space-diffusion", 0.0),
+            _row(
+                0,
+                "sorted-spike-state-space-momentum",
+                100.0,
+                support="unknown_noncomparable",
+                comparable="False",
+            ),
+        ]
+    )
+
+    tables = build_recovery_diagnostic_tables(scores)
+    event = tables.event_diagnostics.iloc[0]
+    overall = tables.summary[tables.summary["true_model"].eq("overall")].iloc[0]
+
+    assert event["comparable_scores"] == 1
+    assert not bool(event["strict_recovered_expected_model"])
+    assert not bool(event["certified_vs_exact_recovered_expected_model"])
+    assert event["certified_vs_exact_reason"] == "expected_noncomparable_not_certified"
+    assert overall["strict_recovered_events"] == 0
+    assert overall["certified_vs_exact_recovered_events"] == 0
+
+
 def test_recovery_diagnostics_write_outputs(tmp_path):
     scores = pd.DataFrame(
         [

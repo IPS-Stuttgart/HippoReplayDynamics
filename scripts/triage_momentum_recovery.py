@@ -171,14 +171,18 @@ def summarize_triage_events(event_table: pd.DataFrame) -> pd.DataFrame:
         row.update(
             {
                 "momentum_events": int(len(group)),
-                "strict_exact_recovery_events": int(group["strict_exact_recovery"].sum()),
+                "strict_exact_recovery_events": int(
+                    _bool_series(group["strict_exact_recovery"]).sum()
+                ),
                 "lower_bound_certified_recovery_events": int(
-                    group["lower_bound_certified_recovery"].sum()
+                    _bool_series(group["lower_bound_certified_recovery"]).sum()
                 ),
                 "certified_or_strict_recovery_events": int(
-                    group["certified_or_strict_recovery"].sum()
+                    _bool_series(group["certified_or_strict_recovery"]).sum()
                 ),
-                "candidate_support_loss_events": int(group["candidate_support_loss"].sum()),
+                "candidate_support_loss_events": int(
+                    _bool_series(group["candidate_support_loss"]).sum()
+                ),
                 "nondecisive_lower_bound_events": int(
                     group["triage_category"].eq("nondecisive_lower_bound").sum()
                 ),
@@ -252,7 +256,9 @@ def _triage_event_group(group: pd.DataFrame, *, expected_model: str) -> dict[str
     expected = _best_log_evidence_row(expected_rows)
     expected_log_evidence = float(expected["log_evidence"])
     expected_support = str(expected.get("evidence_support", EXACT_SUPPORT))
-    expected_comparable = bool(expected.get("evidence_comparable", expected_support == EXACT_SUPPORT))
+    expected_comparable = _as_bool(
+        expected.get("evidence_comparable", expected_support == EXACT_SUPPORT)
+    )
     margin = expected_log_evidence - best_comparable_log_evidence
     strict_exact_recovery = bool(expected_comparable and best_comparable_model == expected_model)
     lower_bound_certified_recovery = bool(
@@ -349,7 +355,7 @@ def _success_mask(frame: pd.DataFrame) -> pd.Series:
 
 def _comparable_mask(frame: pd.DataFrame) -> pd.Series:
     if "evidence_comparable" in frame.columns:
-        return frame["evidence_comparable"].fillna(False).astype(bool)
+        return _bool_series(frame["evidence_comparable"])
     return frame["evidence_support"].astype(str).eq(EXACT_SUPPORT)
 
 
@@ -382,7 +388,9 @@ def _candidate_support_loss(values: dict[str, object]) -> bool:
 def _failure_examples(event_table: pd.DataFrame, *, max_examples: int) -> pd.DataFrame:
     if event_table.empty:
         return pd.DataFrame()
-    failures = event_table[~event_table["certified_or_strict_recovery"].fillna(False).astype(bool)].copy()
+    failures = event_table[
+        ~_bool_series(event_table["certified_or_strict_recovery"])
+    ].copy()
     if failures.empty:
         return pd.DataFrame()
     priority = {
@@ -427,6 +435,10 @@ def _as_bool(value: object) -> bool:
     if isinstance(value, (int, float, np.integer, np.floating)):
         return bool(value)
     return str(value).strip().lower() in {"1", "true", "yes", "y"}
+
+
+def _bool_series(values: pd.Series) -> pd.Series:
+    return values.map(_as_bool).astype(bool)
 
 
 def _mean(values: pd.Series) -> float:

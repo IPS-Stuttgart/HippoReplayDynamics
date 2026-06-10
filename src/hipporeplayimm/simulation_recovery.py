@@ -21,6 +21,7 @@ from .encoding import (
     _poisson_log_emissions,
     fit_place_field_encoding,
 )
+from .evidence_reporting import _coerce_bool_series
 from .models import CandidateKinematicModel, RandomModel, StationaryModel
 from .position_validation import (
     VALIDATED_POSITION_BIN_SIZE_CM,
@@ -1088,7 +1089,7 @@ def certified_vs_exact_event_recovery(event_scores: pd.DataFrame) -> pd.DataFram
         expected_comparable = (
             _evidence_is_comparable(expected_support)
             if pd.isna(raw_expected_comparable)
-            else bool(raw_expected_comparable)
+            else bool(_coerce_bool_series(pd.Series([raw_expected_comparable])).iloc[0])
         )
         margin = expected_log_evidence - best_comparable_log_evidence
 
@@ -1106,6 +1107,9 @@ def certified_vs_exact_event_recovery(event_scores: pd.DataFrame) -> pd.DataFram
                 if certified_reference_model == expected_model
                 else "exact_surrogate_comparable_not_best"
             )
+        elif expected_support != "truncated_full_grid":
+            recovered = False
+            reason = "expected_noncomparable_not_certified"
         elif not np.isfinite(best_comparable_log_evidence):
             recovered = False
             reason = "no_comparable_exact_reference"
@@ -1148,7 +1152,7 @@ def certified_vs_exact_recovery_summary(event_scores: pd.DataFrame) -> pd.DataFr
 
 
 def _certified_vs_exact_summary_row(label: str, group: pd.DataFrame) -> dict[str, object]:
-    recovered = group["certified_vs_exact_recovered_expected_model"].fillna(False).astype(bool)
+    recovered = _coerce_bool_series(group["certified_vs_exact_recovered_expected_model"])
     margins = pd.to_numeric(
         group["expected_minus_best_comparable_log_evidence"], errors="coerce"
     )
@@ -1170,7 +1174,7 @@ def _certified_vs_exact_summary_row(label: str, group: pd.DataFrame) -> dict[str
 def _comparable_mask(frame: pd.DataFrame) -> pd.Series:
     if "evidence_comparable" not in frame.columns:
         return pd.Series(True, index=frame.index)
-    return frame["evidence_comparable"].fillna(False).astype(bool)
+    return _coerce_bool_series(frame["evidence_comparable"])
 
 
 def _best_log_evidence_row(frame: pd.DataFrame) -> pd.Series:
@@ -1502,7 +1506,7 @@ def _event_model_values(group: pd.DataFrame, column: str) -> list[str]:
 
 def _recovered_expected_series(group: pd.DataFrame, true_model: str) -> pd.Series:
     if "recovered_expected_model" in group.columns:
-        return group["recovered_expected_model"].fillna(False).astype(bool)
+        return _coerce_bool_series(group["recovered_expected_model"])
     acceptable = set(acceptable_recovery_models(true_model))
     return group["best_model"].astype(str).isin(acceptable)
 
@@ -1517,7 +1521,7 @@ def acceptable_recovery_models(true_model: str) -> tuple[str, ...]:
 def _surrogate_recovered_series(group: pd.DataFrame) -> pd.Series:
     if "exact_surrogate_recovered_expected_model" not in group.columns:
         return pd.Series(False, index=group.index)
-    return group["exact_surrogate_recovered_expected_model"].fillna(False).astype(bool)
+    return _coerce_bool_series(group["exact_surrogate_recovered_expected_model"])
 
 
 def model_family(model: str) -> str:
@@ -1532,7 +1536,7 @@ def model_family(model: str) -> str:
 def _event_best_rows(event_scores: pd.DataFrame) -> pd.DataFrame:
     ok = event_scores[event_scores["status"] == "success"]
     if "evidence_comparable" in ok.columns:
-        ok = ok[ok["evidence_comparable"].fillna(False).astype(bool)]
+        ok = ok[_coerce_bool_series(ok["evidence_comparable"])]
     if ok.empty:
         return pd.DataFrame()
     best = ok.sort_values(["session", "event_index", "log_evidence"], ascending=[True, True, False])

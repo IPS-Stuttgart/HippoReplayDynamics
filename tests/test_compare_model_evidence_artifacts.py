@@ -89,13 +89,21 @@ def test_compare_artifacts_exact_only_filters_truncated_rows(tmp_path):
         left,
         "event_model_evidence.csv",
         [
-            {"session": "Rat1/Open1", "event_index": 0, "model": "diffusion", "log_evidence": -3.0},
+            {
+                "session": "Rat1/Open1",
+                "event_index": 0,
+                "model": "diffusion",
+                "log_evidence": -3.0,
+                "evidence_support": "exact_full_grid",
+                "evidence_comparable": "True",
+            },
             {
                 "session": "Rat1/Open1",
                 "event_index": 0,
                 "model": "momentum",
                 "log_evidence": -1.0,
-                "diagnostic_state_space_momentum_evidence_support": "truncated_full_grid",
+                "evidence_support": "truncated_full_grid",
+                "evidence_comparable": "False",
             },
         ],
     )
@@ -108,13 +116,16 @@ def test_compare_artifacts_exact_only_filters_truncated_rows(tmp_path):
                 "event_index": 0,
                 "model": "sorted-spike-state-space-diffusion",
                 "log_evidence": -2.0,
+                "evidence_support": "exact_full_grid",
+                "evidence_comparable": "True",
             },
             {
                 "session": "Rat1/Open1",
                 "event_index": 0,
                 "model": "sorted-spike-state-space-momentum",
                 "log_evidence": -0.5,
-                "diagnostic_state_space_momentum_evidence_support": "truncated_full_grid",
+                "evidence_support": "truncated_full_grid",
+                "evidence_comparable": "False",
             },
         ],
     )
@@ -125,3 +136,4 @@ def test_compare_artifacts_exact_only_filters_truncated_rows(tmp_path):
     assert set(tables["best_comparison"]["left_canonical_best_model"]) == {"diffusion"}
     assert set(tables["best_comparison"]["right_canonical_best_model"]) == {"diffusion"}
     assert set(tables["support_counts"]["evidence_support"]) == {"exact_full_grid"}
+    assert set(tables["support_counts"]["evidence_comparable"]) == {True}

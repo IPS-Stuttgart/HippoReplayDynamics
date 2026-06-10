@@ -37,6 +37,7 @@ from .encoding import (
     _times_in_intervals,
     build_emissions,
 )
+from .evidence_reporting import _coerce_bool_series
 from .models import EventScore, LOG_ZERO, _normalize_log_weights, _posterior_diagnostics
 from .state_space_first_order import _forward_backward_first_order
 from .state_space_utils import _as_log_probs, _mean_entropy, _pairwise_gaussian_log_prob
@@ -571,7 +572,7 @@ def model_probability_diagnostics(
         if "status" in ok:
             ok = ok[ok["status"].eq("success")]
         if "evidence_comparable" in ok:
-            ok = ok[ok["evidence_comparable"].fillna(False).astype(bool)]
+            ok = ok[_coerce_bool_series(ok["evidence_comparable"])]
         values = ok[evidence_column].dropna().to_numpy(dtype=float)
         if values.size == 0:
             continue

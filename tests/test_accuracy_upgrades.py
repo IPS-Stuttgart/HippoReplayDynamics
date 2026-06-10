@@ -6,6 +6,7 @@ import pandas as pd
 from hipporeplayimm.accuracy_upgrades import (
     ValidStateGridReplayModel,
     bootstrap_model_win_probabilities,
+    model_probability_diagnostics,
 )
 from hipporeplayimm.encoding import LogEmissionTensor
 
@@ -63,3 +64,21 @@ def test_bootstrap_model_win_probabilities_accepts_window_groups() -> None:
 
     assert set(out["model"]) == {"a", "b"}
     assert np.isclose(out["bootstrap_win_probability"].sum(), 1.0)
+
+
+def test_model_probability_diagnostics_excludes_string_false_comparable_rows() -> None:
+    scores = pd.DataFrame(
+        {
+            "session": ["s1", "s1"],
+            "event_index": [0, 0],
+            "model": ["exact", "lower-bound"],
+            "log_evidence": [0.0, 100.0],
+            "status": ["success", "success"],
+            "evidence_comparable": ["True", "False"],
+        }
+    )
+
+    out = model_probability_diagnostics(scores)
+
+    assert out.loc[0, "models"] == 1
+    assert out.loc[0, "best_model"] == "exact"

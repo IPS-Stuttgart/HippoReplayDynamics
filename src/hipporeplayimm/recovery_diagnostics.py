@@ -19,6 +19,7 @@ from typing import Iterable, Sequence
 import numpy as np
 import pandas as pd
 
+from .evidence_reporting import _coerce_bool_series
 from .simulation_recovery import (
     add_evidence_columns,
     certified_vs_exact_event_recovery,
@@ -248,8 +249,8 @@ def _diagnostic_summary(events: pd.DataFrame) -> pd.DataFrame:
 
 def _diagnostic_summary_row(label: str, group: pd.DataFrame) -> dict[str, object]:
     n_events = int(len(group))
-    strict = group["strict_recovered_expected_model"].fillna(False).astype(bool)
-    certified = group["certified_vs_exact_recovered_expected_model"].fillna(False).astype(bool)
+    strict = _coerce_bool_series(group["strict_recovered_expected_model"])
+    certified = _coerce_bool_series(group["certified_vs_exact_recovered_expected_model"])
     row: dict[str, object] = {
         "true_model": label,
         "events": n_events,
@@ -258,7 +259,7 @@ def _diagnostic_summary_row(label: str, group: pd.DataFrame) -> dict[str, object
         "certified_vs_exact_recovered_events": int(certified.sum()),
         "certified_vs_exact_recovery_accuracy": _safe_fraction(int(certified.sum()), n_events),
         "events_with_comparable_scores": int((group["comparable_scores"].fillna(0).astype(int) > 0).sum()),
-        "events_with_expected_model_scored": int(group["expected_model_scored"].fillna(False).astype(bool).sum()),
+        "events_with_expected_model_scored": int(_coerce_bool_series(group["expected_model_scored"]).sum()),
     }
     for column in _CANDIDATE_METRIC_COLUMNS:
         diagnostic_column = f"expected_{column}"
@@ -269,15 +270,17 @@ def _diagnostic_summary_row(label: str, group: pd.DataFrame) -> dict[str, object
         if diagnostic_column == "expected_candidate_true_path_fully_supported":
             row["expected_true_path_fully_supported_events"] = int(values.fillna(0).astype(bool).sum())
     if "exact_displacement_momentum_scored" in group:
-        scored = group["exact_displacement_momentum_scored"].fillna(False).astype(bool)
+        scored = _coerce_bool_series(group["exact_displacement_momentum_scored"])
         exact_wins = group.get(
             "exact_displacement_momentum_is_strict_best",
             pd.Series(False, index=group.index),
-        ).fillna(False).astype(bool)
+        )
+        exact_wins = _coerce_bool_series(exact_wins)
         beats_diffusion = group.get(
             "exact_displacement_momentum_beats_diffusion_exact",
             pd.Series(False, index=group.index),
-        ).fillna(False).astype(bool)
+        )
+        beats_diffusion = _coerce_bool_series(beats_diffusion)
         deltas = pd.to_numeric(group.get("exact_displacement_momentum_minus_diffusion_log_evidence", pd.Series(dtype=float)), errors="coerce")
         row["exact_displacement_momentum_scored_events"] = int(scored.sum())
         row["exact_displacement_momentum_strict_best_events"] = int(exact_wins.sum())
@@ -377,7 +380,7 @@ def _successful_finite_scores(group: pd.DataFrame) -> pd.DataFrame:
 
 def _comparable_mask(frame: pd.DataFrame) -> pd.Series:
     if "evidence_comparable" in frame:
-        return frame["evidence_comparable"].fillna(False).astype(bool)
+        return _coerce_bool_series(frame["evidence_comparable"])
     if "evidence_support" in frame:
         return frame["evidence_support"].fillna("").astype(str).eq(EXACT_SUPPORT)
     return pd.Series(True, index=frame.index)

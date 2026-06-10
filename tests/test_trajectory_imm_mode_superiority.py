@@ -143,6 +143,64 @@ def test_promotion_gate_parses_string_false_mode_readiness_flags():
     )
 
 
+def test_trajectory_imm_summary_parses_csv_bool_flags():
+    pairs = pd.DataFrame(
+        [
+            {
+                "rat": "Rat1",
+                "session": "Rat1/Open1",
+                "event_index": 0,
+                "required_core_complete": "True",
+                "delta_trajectory_imm_minus_first_order_imm": 6.0,
+                "delta_trajectory_imm_minus_momentum": 7.0,
+                "trajectory_imm_confident_vs_first_order_imm": "True",
+                "first_order_imm_confident_vs_trajectory_imm": "False",
+                "trajectory_imm_ambiguous_vs_first_order_imm": "False",
+                "trajectory_imm_confident_vs_momentum": "1.0",
+                "momentum_confident_vs_trajectory_imm": "0.0",
+                "trajectory_imm_ambiguous_vs_momentum": "False",
+                "trajectory_imm_raw_best_exact_core": "True",
+                "trajectory_imm_confident_exact_core_claim": "True",
+                "first_order_imm_raw_best_exact_core": "False",
+                "momentum_raw_best_exact_core": "False",
+                "trajectory_imm_rank_in_required_core": 1,
+            },
+            {
+                "rat": "Rat1",
+                "session": "Rat1/Open1",
+                "event_index": 1,
+                "required_core_complete": "1.0",
+                "delta_trajectory_imm_minus_first_order_imm": -6.0,
+                "delta_trajectory_imm_minus_momentum": 1.0,
+                "trajectory_imm_confident_vs_first_order_imm": "False",
+                "first_order_imm_confident_vs_trajectory_imm": "True",
+                "trajectory_imm_ambiguous_vs_first_order_imm": "False",
+                "trajectory_imm_confident_vs_momentum": "False",
+                "momentum_confident_vs_trajectory_imm": "False",
+                "trajectory_imm_ambiguous_vs_momentum": "True",
+                "trajectory_imm_raw_best_exact_core": "False",
+                "trajectory_imm_confident_exact_core_claim": "False",
+                "first_order_imm_raw_best_exact_core": "True",
+                "momentum_raw_best_exact_core": "False",
+                "trajectory_imm_rank_in_required_core": 2,
+            },
+        ]
+    )
+
+    summary = trajectory_imm_superiority_summary(pairs).iloc[0]
+
+    assert summary["complete_core_events"] == 2
+    assert summary["trajectory_imm_confident_vs_first_order_imm"] == 1
+    assert summary["first_order_imm_confident_vs_trajectory_imm"] == 1
+    assert summary["trajectory_imm_confident_vs_momentum"] == 1
+    assert summary["momentum_confident_vs_trajectory_imm"] == 0
+    assert summary["ambiguous_vs_momentum"] == 1
+    assert summary["trajectory_imm_raw_best_exact_core"] == 1
+    assert summary["trajectory_imm_raw_best_exact_core_fraction"] == 0.5
+    assert summary["trajectory_imm_confident_exact_core_claims"] == 1
+    assert summary["first_order_imm_raw_best_exact_core"] == 1
+
+
 def test_noncomparable_trajectory_imm_rows_cannot_satisfy_promotion_or_readiness():
     scores = pd.DataFrame(
         [

@@ -5,7 +5,11 @@ from __future__ import annotations
 import numpy as np
 
 from . import ground_truth as _ground_truth
-from .benchmarks import _candidate_indices_for_model, _state_space_uses_candidate_support
+from .benchmarks import (
+    _call_score_with_optional_occupancy,
+    _candidate_indices_for_model,
+    _state_space_uses_candidate_support,
+)
 from .state_space import StateSpaceReplayModel
 
 
@@ -54,15 +58,13 @@ def _score_state_space_joint_for_ground_truth(
     occupancy_s: np.ndarray | None = None,
 ):
     kwargs: dict[str, object] = {"candidate_indices": candidate_indices}
-    if occupancy_s is not None:
-        kwargs["occupancy_s"] = occupancy_s
-    try:
-        return model.score(joint_emissions, bin_centers, **kwargs)
-    except TypeError as exc:
-        if "occupancy_s" not in str(exc):
-            raise
-        kwargs.pop("occupancy_s", None)
-        return model.score(joint_emissions, bin_centers, **kwargs)
+    return _call_score_with_optional_occupancy(
+        model.score,
+        joint_emissions,
+        bin_centers,
+        kwargs,
+        occupancy_s,
+    )
 
 
 def apply_ground_truth_candidate_support_patch() -> None:

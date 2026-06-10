@@ -6,11 +6,17 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from hipporeplayimm.benchmarks import _candidate_indices_for_model as _benchmark_candidate_indices_for_model
+from hipporeplayimm.benchmarks import (
+    _candidate_indices_for_model as _benchmark_candidate_indices_for_model,
+    _score_state_space_model as _benchmark_score_state_space_model,
+)
 from hipporeplayimm.data import ReplaySession
 from hipporeplayimm.duration_dynamics import attach_duration_metadata, transition_durations_s
 from hipporeplayimm.encoding import EncodingConfig, EncodingModel, LogEmissionTensor, fit_place_field_encoding
+from hipporeplayimm.ground_truth import _score_state_space_joint_for_ground_truth
 from hipporeplayimm.kd_reference import KDEncodingConfig, fit_kd_place_field_encoding
+from hipporeplayimm.models import EventScore
+from hipporeplayimm.result_improvement_extensions import score_replay_model_compat
 from hipporeplayimm.simulation_recovery import (
     _candidate_indices_for_model as _simulation_candidate_indices_for_model,
     simulate_replay_event,
@@ -27,6 +33,16 @@ def _load_script_module(module_name: str, path: Path):
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
+
+
+def _minimal_event_score(model_name: str = "dummy") -> EventScore:
+    return EventScore(
+        model_name=model_name,
+        log_likelihood=0.0,
+        n_time=1,
+        n_spikes=0,
+        terminal_log_posterior=np.array([0.0], dtype=float),
+    )
 
 
 def _empty_spike_session() -> ReplaySession:
@@ -155,6 +171,132 @@ def test_candidate_helpers_pass_keyword_only_bin_centers_when_supported():
 
     for helper in (_simulation_candidate_indices_for_model, _benchmark_candidate_indices_for_model):
         assert helper(KeywordOnlyBinCenterModel(), emissions, bin_centers)[0].tolist() == [0]
+
+
+def test_state_space_score_helpers_do_not_swallow_occupancy_type_errors():
+    emissions = LogEmissionTensor(
+        log_likelihood=np.zeros((1, 2), dtype=float),
+        spike_counts=np.zeros((1, 1), dtype=int),
+        times=np.array([0.0], dtype=float),
+        dt=0.1,
+        cell_ids=np.array([1], dtype=int),
+        n_spikes=0,
+    )
+    bin_centers = np.array([[0.0, 0.0], [1.0, 0.0]], dtype=float)
+    occupancy_s = np.ones(2, dtype=float)
+
+    class BrokenOccupancyAwareModel:
+        mode = "diffusion"
+
+        def score(self, observed, centers, *, candidate_indices=None, occupancy_s=None, return_trajectory=True):
+            del candidate_indices, return_trajectory
+            assert observed is emissions
+            assert centers is bin_centers
+            if occupancy_s is not None:
+                raise TypeError("internal occupancy_s propagation bug")
+            return _minimal_event_score()
+
+    model = BrokenOccupancyAwareModel()
+    with pytest.raises(TypeError, match="internal occupancy_s propagation bug"):
+        _benchmark_score_state_space_model(model, emissions, bin_centers, None, occupancy_s)
+    with pytest.raises(TypeError, match="internal occupancy_s propagation bug"):
+        _score_state_space_joint_for_ground_truth(model, emissions, bin_centers, None, occupancy_s)
+
+
+def test_state_space_score_helpers_omit_occupancy_for_legacy_scores():
+    emissions = LogEmissionTensor(
+        log_likelihood=np.zeros((1, 2), dtype=float),
+        spike_counts=np.zeros((1, 1), dtype=int),
+        times=np.array([0.0], dtype=float),
+        dt=0.1,
+        cell_ids=np.array([1], dtype=int),
+        n_spikes=0,
+    )
+    bin_centers = np.array([[0.0, 0.0], [1.0, 0.0]], dtype=float)
+    occupancy_s = np.ones(2, dtype=float)
+    candidates = [np.array([0, 1], dtype=int)]
+
+    class LegacyScoreModel:
+        mode = "diffusion"
+
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def score(self, observed, centers, *, candidate_indices=None):
+            assert observed is emissions
+            assert centers is bin_centers
+            assert candidate_indices is candidates
+            self.calls += 1
+            return _minimal_event_score("legacy")
+
+    benchmark_model = LegacyScoreModel()
+    benchmark_score = _benchmark_score_state_space_model(
+        benchmark_model,
+        emissions,
+        bin_centers,
+        candidates,
+        occupancy_s,
+    )
+    assert benchmark_score.model_name == "legacy"
+    assert benchmark_model.calls == 1
+
+    ground_truth_model = LegacyScoreModel()
+    ground_truth_score = _score_state_space_joint_for_ground_truth(
+        ground_truth_model,
+        emissions,
+        bin_centers,
+        candidates,
+        occupancy_s,
+    )
+    assert ground_truth_score.model_name == "legacy"
+    assert ground_truth_model.calls == 1
+
+
+def test_score_replay_model_compat_does_not_swallow_optional_argument_type_errors():
+    emissions = LogEmissionTensor(
+        log_likelihood=np.zeros((1, 2), dtype=float),
+        spike_counts=np.zeros((1, 1), dtype=int),
+        times=np.array([0.0], dtype=float),
+        dt=0.1,
+        cell_ids=np.array([1], dtype=int),
+        n_spikes=0,
+    )
+    bin_centers = np.array([[0.0, 0.0], [1.0, 0.0]], dtype=float)
+
+    class BrokenCandidateModel:
+        name = "broken-candidates"
+
+        def candidate_indices(self, observed, centers=None):
+            assert observed is emissions
+            if centers is not None:
+                raise TypeError("internal candidate support bug")
+            return [np.array([0], dtype=int)]
+
+        def score(self, observed, centers, *, candidate_indices=None):
+            del candidate_indices
+            assert observed is emissions
+            assert centers is bin_centers
+            return _minimal_event_score()
+
+    class BrokenOccupancyModel:
+        name = "broken-occupancy"
+
+        def score(self, observed, centers, *, occupancy_s=None):
+            assert observed is emissions
+            assert centers is bin_centers
+            if occupancy_s is not None:
+                raise TypeError("internal occupancy_s scoring bug")
+            return _minimal_event_score()
+
+    with pytest.raises(TypeError, match="internal candidate support bug"):
+        score_replay_model_compat(BrokenCandidateModel(), emissions, bin_centers)
+    with pytest.raises(TypeError, match="internal occupancy_s scoring bug"):
+        score_replay_model_compat(
+            BrokenOccupancyModel(),
+            emissions,
+            bin_centers,
+            occupancy_s=np.ones(2, dtype=float),
+        )
 
 
 def test_simulated_replay_rejects_nonfinite_sampling_scalars_before_poisson():

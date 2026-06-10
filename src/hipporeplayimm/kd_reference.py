@@ -16,7 +16,7 @@ from scipy.ndimage import gaussian_filter
 from scipy.special import gammaln, logsumexp
 from scipy.stats import invgamma, multivariate_normal
 
-from .data import ReplaySession, RippleEvent
+from .data import ReplaySession, RippleEvent, _coerce_ripple_event
 from .encoding import (
     EncodingModel,
     LogEmissionTensor,
@@ -163,7 +163,7 @@ def build_kd_emissions(
     time_bin_s: float,
     spike_rate_scale: float = 1.0,
 ) -> LogEmissionTensor:
-    ripple_event = session.ripple(ripple) if isinstance(ripple, int) else ripple
+    ripple_event = _coerce_ripple_event(session, ripple)
     edges = _ripple_time_edges(ripple_event.start, ripple_event.end, time_bin_s)
     bin_durations = np.diff(edges)
     times = edges[:-1] + 0.5 * bin_durations

@@ -98,6 +98,14 @@ class ReplaySession:
         return np.flatnonzero(_times_in_intervals(self.ripple_events[:, 2], _as_intervals(self.run_times)))
 
 
+def _coerce_ripple_event(session: ReplaySession, ripple: RippleEvent | int) -> RippleEvent:
+    """Return a ripple event for Python or NumPy integer indices."""
+
+    if isinstance(ripple, (int, np.integer)):
+        return session.ripple(int(ripple))
+    return ripple
+
+
 def load_open_field_sessions(root: str | Path, include_rats: tuple[int, ...] = (1, 2, 3, 4)) -> list[ReplaySession]:
     root_path = Path(root)
     sessions: list[ReplaySession] = []
@@ -298,15 +306,20 @@ def _coerce_mark_matrix(value: Any, *, spike_count: int, spike_times: np.ndarray
     if arr.ndim == 0:
         marks = arr.reshape(1, 1) if spike_count == 1 else None
     elif arr.ndim == 1:
-        marks = arr.reshape(spike_count, 1) if arr.shape[0] == spike_count else None
+        if arr.shape[0] == spike_count:
+            marks = arr.reshape(spike_count, 1)
+        elif spike_count == 1:
+            marks = arr.reshape(1, -1)
+        else:
+            marks = None
     else:
         axes = [axis for axis, size in enumerate(arr.shape) if size == spike_count]
         if not axes:
             return None
         aligned = np.moveaxis(arr, 0 if 0 in axes else axes[-1], 0)
         marks = aligned.reshape(spike_count, -1)
-        if marks.shape[1] >= 2 and _looks_like_time_column(marks[:, 0], spike_times):
-            marks = marks[:, 1:]
+    if marks is not None and marks.shape[1] >= 2 and _looks_like_time_column(marks[:, 0], spike_times):
+        marks = marks[:, 1:]
     if marks is None or marks.shape[1] == 0 or not np.any(np.isfinite(marks)):
         return None
     return np.asarray(marks, dtype=float)

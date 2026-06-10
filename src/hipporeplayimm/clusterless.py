@@ -9,7 +9,7 @@ from scipy.ndimage import gaussian_filter
 from scipy.special import gammaln, logsumexp
 from scipy.spatial import cKDTree
 
-from .data import ReplaySession, RippleEvent
+from .data import ReplaySession, RippleEvent, _coerce_ripple_event
 from .encoding import (
     EmissionConfig,
     EncodingConfig,
@@ -502,7 +502,7 @@ def build_clusterless_mark_emissions(
 
     config = EmissionConfig() if config is None else config
     if not np.isfinite(config.spike_rate_scale) or config.spike_rate_scale <= 0.0:
-        raise ValueError("spike_rate_scale must be positive")
+        raise ValueError("spike_rate_scale must be finite and positive")
     _validate_emission_calibration(
         likelihood_temperature=config.likelihood_temperature,
         negative_binomial_overdispersion=config.negative_binomial_overdispersion,
@@ -517,7 +517,7 @@ def build_clusterless_mark_emissions(
     marks = session.spike_marks
     if marks is None or marks.n_features == 0:
         raise ValueError("Session does not contain spike marks for clusterless emission scoring.")
-    ripple_event = session.ripple(ripple) if isinstance(ripple, int) else ripple
+    ripple_event = _coerce_ripple_event(session, ripple)
     edges = _time_bin_edges(ripple_event.start, ripple_event.end, config.time_bin_s)
     bin_durations = np.diff(edges)
     times = edges[:-1] + 0.5 * bin_durations

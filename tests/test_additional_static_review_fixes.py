@@ -6,6 +6,10 @@ from pathlib import Path
 import numpy as np
 import pytest
 
+from hipporeplayimm.accuracy_upgrades import (
+    ContinuousTimeEmissionConfig,
+    build_continuous_time_emissions,
+)
 from hipporeplayimm.benchmarks import (
     BenchmarkConfig,
     _candidate_indices_for_model as _benchmark_candidate_indices_for_model,
@@ -22,12 +26,16 @@ from hipporeplayimm.encoding import (
     EncodingModel,
     LogEmissionTensor,
     _poisson_log_emissions,
+    build_emissions,
     fit_place_field_encoding,
 )
 from hipporeplayimm.ground_truth import _score_state_space_joint_for_ground_truth
-from hipporeplayimm.kd_reference import KDEncodingConfig, fit_kd_place_field_encoding
+from hipporeplayimm.kd_reference import KDEncodingConfig, build_kd_emissions, fit_kd_place_field_encoding
 from hipporeplayimm.models import EventScore
-from hipporeplayimm.result_improvement_extensions import score_replay_model_compat
+from hipporeplayimm.result_improvement_extensions import (
+    build_sorted_emissions_with_replay_calibration,
+    score_replay_model_compat,
+)
 from hipporeplayimm.simulation_recovery import (
     _candidate_indices_for_model as _simulation_candidate_indices_for_model,
     simulate_replay_event,
@@ -85,6 +93,25 @@ def _empty_spike_session() -> ReplaySession:
         rem_times=np.empty((0, 2), dtype=float),
         well_sequence=None,
         metadata={},
+    )
+
+
+def _single_ripple_session() -> ReplaySession:
+    session = _empty_spike_session()
+    session.ripple_events = np.array([[0.20, 0.30, 0.25, 1.0, 0.0, 0.0]], dtype=float)
+    return session
+
+
+def _single_bin_encoding(cell_ids: tuple[int, ...] = ()) -> EncodingModel:
+    ids = np.asarray(cell_ids, dtype=int)
+    return EncodingModel(
+        x_edges=np.array([0.0, 1.0], dtype=float),
+        y_edges=np.array([0.0, 1.0], dtype=float),
+        bin_centers=np.array([[0.5, 0.5]], dtype=float),
+        rates_hz=np.ones((ids.shape[0], 1), dtype=float),
+        occupancy_s=np.array([1.0], dtype=float),
+        cell_ids=ids,
+        config=EncodingConfig(),
     )
 
 
@@ -147,6 +174,64 @@ def test_single_spike_mark_matrix_preserves_feature_columns_and_drops_time_colum
     )
     assert transposed is not None
     np.testing.assert_allclose(transposed, np.array([[10.0, 20.0, 30.0]], dtype=float))
+
+
+def test_single_spike_one_dimensional_mark_vector_preserves_features_and_drops_time_column():
+    spike_times = np.array([0.125], dtype=float)
+
+    marks = _coerce_mark_matrix(
+        np.array([0.125, 10.0, 20.0, 30.0], dtype=float),
+        spike_count=1,
+        spike_times=spike_times,
+    )
+    assert marks is not None
+    np.testing.assert_allclose(marks, np.array([[10.0, 20.0, 30.0]], dtype=float))
+
+    feature_only = _coerce_mark_matrix(
+        np.array([10.0, 20.0, 30.0], dtype=float),
+        spike_count=1,
+        spike_times=spike_times,
+    )
+    assert feature_only is not None
+    np.testing.assert_allclose(feature_only, np.array([[10.0, 20.0, 30.0]], dtype=float))
+
+
+def test_sorted_emission_builders_accept_numpy_integer_ripple_indices():
+    session = _single_ripple_session()
+    encoding = _single_bin_encoding()
+
+    emissions = [
+        build_emissions(session, encoding, np.int64(0), EmissionConfig(time_bin_s=0.05)),
+        build_kd_emissions(session, encoding, np.int64(0), time_bin_s=0.05),
+        build_sorted_emissions_with_replay_calibration(
+            session,
+            encoding,
+            np.int64(0),
+            EmissionConfig(time_bin_s=0.05),
+        ),
+    ]
+
+    for current in emissions:
+        assert current.n_time == 2
+        assert current.n_spikes == 0
+        assert current.log_likelihood.shape == (2, 1)
+
+
+def test_continuous_time_emissions_accept_numpy_integer_and_preserve_interval_durations():
+    session = _single_ripple_session()
+    session.spikes = np.array([[0.22, 1.0]], dtype=float)
+    encoding = _single_bin_encoding((1,))
+
+    emissions = build_continuous_time_emissions(
+        session,
+        encoding,
+        np.int64(0),
+        ContinuousTimeEmissionConfig(min_interval_s=1e-6),
+    )
+
+    np.testing.assert_allclose(emissions.bin_durations, np.array([0.02, 0.08]), atol=1e-12)
+    np.testing.assert_allclose(emissions.transition_durations, np.array([0.08]), atol=1e-12)
+    assert emissions.n_spikes == 1
 
 
 def test_momentum_decay_helpers_reject_nonfinite_tau_and_decay():

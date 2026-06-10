@@ -375,6 +375,7 @@ def _duration_candidates(ss, model, emissions, bin_centers, candidate_indices, v
         if candidate_indices is None
         else candidate_indices
     )
+    candidates = ss._validate_candidate_indices(candidates, emissions.n_time, emissions.n_bins)
     candidates = ss._restrict_candidates_to_valid_bins(
         candidates,
         emissions.log_likelihood,

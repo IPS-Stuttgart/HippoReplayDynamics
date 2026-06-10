@@ -29,6 +29,26 @@ def test_load_mat_v73_hdf5_variable(tmp_path: Path):
     assert np.allclose(loaded, expected)
 
 
+def test_load_mat_v73_hdf5_variable_after_loadmat_oserror(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    h5py = pytest.importorskip("h5py")
+    path = tmp_path / "Spike_Data.mat"
+    expected = np.array([[1.0, 11.0], [2.0, 12.0], [3.0, 13.0]])
+    with h5py.File(path, "w") as handle:
+        handle.create_dataset("Spike_Data", data=expected.T)
+
+    def raise_hdf5_load_error(*_args, **_kwargs):
+        raise OSError("MATLAB v7.3/HDF5 files require an HDF5 reader")
+
+    monkeypatch.setattr(sio, "loadmat", raise_hdf5_load_error)
+
+    loaded = load_mat_variable(path, "Spike_Data")
+
+    assert np.allclose(loaded, expected)
+
+
 def _write_minimal_session(path: Path, *, mark_variable: str | None = None) -> None:
     path.mkdir(parents=True)
     spikes = np.array([[1.0, 11.0], [2.0, 12.0], [3.0, 11.0]])

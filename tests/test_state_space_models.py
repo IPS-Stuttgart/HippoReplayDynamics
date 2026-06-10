@@ -13,6 +13,7 @@ from hipporeplayimm.state_space import (
     _candidate_evidence_support_label,
     _displacement_lattice,
     _mass_retaining_candidate_indices,
+    _score_trajectory_imm_exact_sparse,
 )
 
 
@@ -182,6 +183,27 @@ def test_exact_sparse_momentum_evidence_only_delegates_to_pyrecest_mode():
     assert evidence_only.diagnostics["state_space_sparse_momentum_evidence_only"] == 1
     assert evidence_only.diagnostics["state_space_sparse_momentum_backward_transition_rows"] == "skipped_evidence_only"
     assert evidence_only.diagnostics["state_space_momentum_trajectory_posterior"] == "not_returned_evidence_only"
+
+
+def test_trajectory_imm_helper_returns_log_terminal_for_full_smoothing():
+    emissions = _synthetic_emissions()
+    centers = np.array([[0.0, 0.0], [1.0, 0.0], [2.0, 0.0], [3.0, 0.0]])
+    config = StateSpaceDecoderConfig(mode="trajectory-imm-exact-sparse")
+
+    logp, trajectory, terminal, mode_post, diagnostics = _score_trajectory_imm_exact_sparse(
+        emissions,
+        centers,
+        config,
+        emissions.transition_durations,
+        return_trajectory=True,
+    )
+
+    assert np.isfinite(logp)
+    assert trajectory is not None
+    assert mode_post is not None
+    assert diagnostics["state_space_trajectory_imm_mode_posterior"] == "smoothed_heterogeneous_state"
+    assert np.allclose(terminal, trajectory[-1])
+    assert np.allclose(logsumexp(terminal), 0.0)
 
 
 def test_adaptive_candidate_support_adds_forward_and_backward_predictions():

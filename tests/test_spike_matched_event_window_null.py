@@ -14,6 +14,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 from spike_matched_event_window_null import (  # noqa: E402
     aggregate_matched_null_scores,
     empirical_p_value,
+    matched_null_family_margin_decisions,
+    rat_bootstrap_matched_null_summary,
     spike_matched_null_windows,
 )
 
@@ -253,6 +255,62 @@ def test_spike_matched_null_full_core_scope_remains_strict_for_two_model_input(t
     assert decisions["required_models_present"].tolist() == [2, 2]
     assert decisions["required_models_complete"].tolist() == [False, False]
     assert decisions["margin_decision"].tolist() == ["incomplete_core", "incomplete_core"]
+
+
+def test_matched_null_decisions_do_not_treat_string_false_as_comparable():
+    stationary = "sorted-spike-state-space-stationary"
+    trajectory = "sorted-spike-state-space-first-order-imm"
+    scores = pd.DataFrame(
+        [
+            *_lightweight_event_rows(
+                "Rat1/Open1",
+                0,
+                "real",
+                -1,
+                stationary_model=stationary,
+                trajectory_model=trajectory,
+                stationary_score=0.0,
+                trajectory_score=10.0,
+            ),
+        ]
+    )
+    scores["evidence_comparable"] = scores["evidence_comparable"].astype(object)
+    scores.loc[scores["model"].eq(trajectory), "evidence_comparable"] = "False"
+
+    decisions = matched_null_family_margin_decisions(
+        scores,
+        comparison_scope="lightweight-first-order-imm-vs-stationary",
+        required_models=(stationary, trajectory),
+        margin_threshold=5.5,
+    )
+
+    assert decisions["required_models_present"].tolist() == [1]
+    assert decisions["required_models_complete"].tolist() == [False]
+    assert decisions["missing_required_models"].tolist() == [trajectory]
+    assert decisions["margin_decision"].tolist() == ["incomplete_core"]
+
+
+def test_rat_bootstrap_matched_null_summary_keeps_comparison_scopes_separate():
+    p_values = pd.DataFrame(
+        {
+            "comparison_scope": ["scope-a", "scope-a", "scope-b", "scope-b"],
+            "rat": ["Rat1", "Rat2", "Rat1", "Rat2"],
+            "session": ["Rat1/Open1", "Rat2/Open1", "Rat1/Open1", "Rat2/Open1"],
+            "event_index": [0, 1, 0, 1],
+            "real_minus_median_null_family_margin": [2.0, 4.0, -10.0, -8.0],
+            "empirical_p_value": [0.1, 0.1, 0.9, 0.9],
+            "matched_null_windows": [10, 10, 10, 10],
+            "real_trajectory_confident_claim": [True, True, False, False],
+            "real_nontrajectory_confident_claim": [False, False, True, True],
+        }
+    )
+
+    summary = rat_bootstrap_matched_null_summary(p_values, random_seed=1, n_bootstrap=50)
+    by_scope = summary.set_index("comparison_scope")
+
+    assert summary["comparison_scope"].tolist() == ["scope-a", "scope-b"]
+    assert float(by_scope.loc["scope-a", "median_delta_median"]) > 0.0
+    assert float(by_scope.loc["scope-b", "median_delta_median"]) < 0.0
 
 
 def test_empirical_p_value_uses_plus_one_resolution_for_k50():

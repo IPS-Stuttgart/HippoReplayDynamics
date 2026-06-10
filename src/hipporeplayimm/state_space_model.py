@@ -493,9 +493,10 @@ def _candidate_evidence_support_label(
     baselines, while truncated rows cannot.
     """
 
+    validated = _validate_candidate_indices(candidates, len(candidates), n_bins)
     expected = _full_candidate_index_set(n_bins, valid_bin_mask)
-    for current in candidates:
-        observed = np.sort(np.asarray(current, dtype=int))
+    for current in validated:
+        observed = np.sort(current)
         if observed.shape != expected.shape or not np.array_equal(observed, expected):
             return "truncated_full_grid"
     return "exact_full_grid"

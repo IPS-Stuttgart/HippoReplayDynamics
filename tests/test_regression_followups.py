@@ -14,7 +14,7 @@ from hipporeplayimm.data import ReplaySession, SpikeMarkData
 from hipporeplayimm.encoding import EncodingConfig, LogEmissionTensor
 from hipporeplayimm.models import CandidateKinematicModel, DiffusionModel
 from hipporeplayimm.pyrecest_models import PyRecEstGoalParticleModel
-from hipporeplayimm.state_space import StateSpaceDecoderConfig, StateSpaceReplayModel
+from hipporeplayimm.state_space import _candidate_evidence_support_label, StateSpaceDecoderConfig, StateSpaceReplayModel
 
 
 class _EncodingStub:
@@ -235,6 +235,46 @@ def test_duration_state_space_momentum_decay_tau_is_used_by_active_scorer(monkey
     )
     np.testing.assert_allclose(decays, expected)
     assert score.diagnostics["state_space_momentum_velocity_decay_tau_s"] == pytest.approx(0.10)
+
+
+def test_state_space_validates_supplied_candidates_before_occupancy_restriction() -> None:
+    emissions = LogEmissionTensor(
+        log_likelihood=np.zeros((3, 2), dtype=float),
+        spike_counts=np.zeros((3, 1), dtype=int),
+        times=np.array([0.0, 0.02, 0.04], dtype=float),
+        dt=0.02,
+        cell_ids=np.array([1], dtype=int),
+        n_spikes=0,
+    )
+    centers = np.array([[0.0, 0.0], [1.0, 0.0]], dtype=float)
+    model = StateSpaceReplayModel(
+        mode="momentum",
+        config=StateSpaceDecoderConfig(
+            mode="momentum",
+            valid_occupancy_threshold_s=0.5,
+        ),
+    )
+    invalid_candidates = [
+        np.array([0, 2], dtype=int),
+        np.array([0], dtype=int),
+        np.array([0], dtype=int),
+    ]
+
+    with pytest.raises(ValueError, match="out-of-range"):
+        model.score(
+            emissions,
+            centers,
+            candidate_indices=invalid_candidates,
+            occupancy_s=np.ones(2, dtype=float),
+        )
+
+
+def test_candidate_evidence_support_rejects_fractional_candidate_indices() -> None:
+    with pytest.raises(TypeError, match="integer"):
+        _candidate_evidence_support_label(
+            [np.array([0.0, 1.5])],
+            n_bins=2,
+        )
 
 
 def test_state_space_rejects_nonpositive_diffusion_sigma() -> None:

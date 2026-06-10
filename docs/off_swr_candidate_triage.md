@@ -77,6 +77,23 @@ Primary triage outputs:
   specificity-readiness gates. Missing behavior/LFP phenotype fields are
   reported explicitly and do not silently block table generation.
 
+Promotion funnel:
+
+`scripts/build_off_swr_promotion_funnel.py` joins an off-SWR discovery artifact
+with a promoted-candidate exact-core validation artifact. It writes:
+
+- `off_swr_promotion_funnel_summary.csv`: denominator-backed funnel from all
+  screened off-SWR windows through weak/moderate/strong/extreme tiers,
+  promotion-ready candidates, exact-core validation, and exact-core
+  trajectory-confident candidates.
+- `off_swr_promotion_funnel_group_summary.csv`: the same funnel counts by rat
+  and session.
+- `off_swr_promotion_funnel_rejection_summary.csv`: phenotype summaries for
+  candidates below the strong tier, high-specificity rows rejected by the
+  specificity/immobility filters, and exact-validated promotion-ready rows.
+- `off_swr_promotion_funnel_gate_summary.csv`: input and consistency gates,
+  including whether exact validation rows match the promotion-ready denominator.
+
 The triage layer is intended to separate high-priority off-SWR trajectory
 candidates from ordinary movement/spiking windows that naturally favor
 trajectory models. It does not by itself establish replay-without-ripples

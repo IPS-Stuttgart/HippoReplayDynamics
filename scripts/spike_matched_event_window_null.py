@@ -157,6 +157,10 @@ def _coerce_bool_series(values: pd.Series, *, default: bool = False) -> pd.Serie
     return values.map(coerce).astype(bool)
 
 
+def _coerce_bool(value: object, *, default: bool = False) -> bool:
+    return bool(_coerce_bool_series(pd.Series([value]), default=default).iloc[0])
+
+
 def spike_matched_null_windows(
     session: ReplaySession,
     event_index: int,
@@ -914,8 +918,12 @@ def matched_null_empirical_p_values(decisions: pd.DataFrame) -> pd.DataFrame:
                     if not null_best_per_time.empty
                     else np.nan
                 ),
-                "real_trajectory_confident_claim": bool(real_row["trajectory_confident_claim"]),
-                "real_nontrajectory_confident_claim": bool(real_row["nontrajectory_confident_claim"]),
+                "real_trajectory_confident_claim": _coerce_bool(
+                    real_row["trajectory_confident_claim"]
+                ),
+                "real_nontrajectory_confident_claim": _coerce_bool(
+                    real_row["nontrajectory_confident_claim"]
+                ),
             }
         )
     return pd.DataFrame(rows)

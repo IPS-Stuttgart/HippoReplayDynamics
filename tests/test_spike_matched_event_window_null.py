@@ -14,6 +14,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 from spike_matched_event_window_null import (  # noqa: E402
     aggregate_matched_null_scores,
     empirical_p_value,
+    matched_null_empirical_p_values,
     matched_null_family_margin_decisions,
     rat_bootstrap_matched_null_summary,
     spike_matched_null_windows,
@@ -288,6 +289,42 @@ def test_matched_null_decisions_do_not_treat_string_false_as_comparable():
     assert decisions["required_models_complete"].tolist() == [False]
     assert decisions["missing_required_models"].tolist() == [trajectory]
     assert decisions["margin_decision"].tolist() == ["incomplete_core"]
+
+
+def test_matched_null_empirical_p_values_parse_string_false_claim_flags():
+    decisions = pd.DataFrame(
+        [
+            {
+                "comparison_scope": "full_core",
+                "session": "Rat1/Open1",
+                "event_index": 0,
+                "window_role": "real",
+                "null_index": -1,
+                "trajectory_minus_nontrajectory_log_evidence": 10.0,
+                "best_trajectory_log_evidence_per_spike": 1.0,
+                "best_trajectory_log_evidence_per_time_bin": 1.0,
+                "trajectory_confident_claim": "True",
+                "nontrajectory_confident_claim": "False",
+            },
+            {
+                "comparison_scope": "full_core",
+                "session": "Rat1/Open1",
+                "event_index": 0,
+                "window_role": "matched_null",
+                "null_index": 0,
+                "trajectory_minus_nontrajectory_log_evidence": 2.0,
+                "best_trajectory_log_evidence_per_spike": 0.5,
+                "best_trajectory_log_evidence_per_time_bin": 0.5,
+                "trajectory_confident_claim": "False",
+                "nontrajectory_confident_claim": "False",
+            },
+        ]
+    )
+
+    p_values = matched_null_empirical_p_values(decisions)
+
+    assert bool(p_values.loc[0, "real_trajectory_confident_claim"]) is True
+    assert bool(p_values.loc[0, "real_nontrajectory_confident_claim"]) is False
 
 
 def test_rat_bootstrap_matched_null_summary_keeps_comparison_scopes_separate():

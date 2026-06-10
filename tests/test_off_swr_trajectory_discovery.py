@@ -8,10 +8,12 @@ sys.path.append(str(Path(__file__).resolve().parents[1] / "scripts"))
 from off_swr_trajectory_discovery import (  # noqa: E402
     AMBIGUOUS_CLASS,
     EXCLUDED_SWR_OVERLAP_CLASS,
+    FULL_CORE_REQUIRED_MODELS,
     INTERESTING_CANDIDATE_LABEL,
     MOVEMENT_SPIKING_LIKE_LABEL,
     STATIC_NONTRAJECTORY_CLASS,
     TRAJECTORY_CANDIDATE_CLASS,
+    _off_swr_run_state_window_table,
     write_off_swr_trajectory_discovery_outputs,
 )
 
@@ -255,6 +257,57 @@ def test_off_swr_discovery_classifies_clusters_and_reports_covariates(tmp_path):
         path = tmp_path / filename
         assert path.exists()
         assert path.stat().st_size > 0
+
+
+def test_off_swr_candidate_table_parses_string_false_claim_flags():
+    scores = pd.DataFrame(
+        _event_rows(
+            "Rat1/Open1",
+            0,
+            "matched_null",
+            0,
+            stationary=0.0,
+            trajectory=8.0,
+            start=10.0,
+            ripple_power=1.2,
+            animal_speed_mean=1.0,
+        )
+    )
+    decisions = pd.DataFrame(
+        [
+            {
+                "session": "Rat1/Open1",
+                "rat": "Rat1",
+                "event_index": 0,
+                "window_role": "matched_null",
+                "null_index": 0,
+                "candidate_class": TRAJECTORY_CANDIDATE_CLASS,
+                "is_trajectory_family_candidate": "True",
+                "trajectory_confident_claim": "True",
+                "nontrajectory_confident_claim": "False",
+                "passes_known_swr_exclusion": "True",
+                "window_start_s": 10.0,
+                "window_end_s": 10.1,
+                "window_duration_s": 0.1,
+                "trajectory_minus_nontrajectory_log_evidence": 8.0,
+                "best_trajectory_model": "sorted-spike-state-space-first-order-imm",
+                "n_spikes": 10,
+                "active_cell_count": 5,
+            }
+        ]
+    )
+
+    table = _off_swr_run_state_window_table(
+        decisions,
+        scores,
+        required_models=FULL_CORE_REQUIRED_MODELS,
+        trajectory_models=FULL_CORE_REQUIRED_MODELS[1:],
+    )
+
+    row = table.iloc[0]
+    assert bool(row["is_trajectory_family_candidate"]) is True
+    assert bool(row["trajectory_confident_claim"]) is True
+    assert bool(row["nontrajectory_confident_claim"]) is False
 
 
 def test_off_swr_triage_preserves_lightweight_comparison_scope(tmp_path):

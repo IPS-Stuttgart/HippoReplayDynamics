@@ -14,6 +14,7 @@ from causal_trajectory_family_detector import (  # noqa: E402
     OFFLINE_AGREEMENT_OUTPUT,
     TIME_BIN_TABLE_OUTPUT,
     TRAJECTORY_LABEL,
+    causal_replay_detection_event_table,
     write_causal_replay_detection_outputs,
 )
 
@@ -77,6 +78,47 @@ def test_causal_detector_reports_latency_agreement_and_false_positives(tmp_path)
         path = tmp_path / filename
         assert path.exists()
         assert path.stat().st_size > 0
+
+
+def test_causal_event_table_parses_string_false_final_flags():
+    time_bins = pd.DataFrame(
+        [
+            {
+                "session": "Rat1/Open1",
+                "event_index": 0,
+                "window_role": "matched_null",
+                "null_index": 0,
+                "rat": "Rat1",
+                "off_swr": "False",
+                "window_start_s": 1.0,
+                "window_end_s": 1.03,
+                "window_duration_s": 0.03,
+                "prefix_time_bin_index": 0,
+                "prefix_end_s": 1.03,
+                "prefix_duration_s": 0.03,
+                "prefix_fraction": 1.0,
+                "required_models_complete": "False",
+                "causal_trajectory_confident_claim": "False",
+                "causal_label": "ambiguous",
+                "best_trajectory_model": "",
+                "best_nontrajectory_model": "stationary",
+                "trajectory_minus_nontrajectory_log_evidence": 0.0,
+                "p_static": 1.0,
+                "p_diffusion": 0.0,
+                "p_fragmented": 0.0,
+                "p_first_order_imm": 0.0,
+                "p_momentum": 0.0,
+                "p_trajectory_family": 0.0,
+                "p_nonlocal_replay": 0.0,
+            }
+        ]
+    )
+
+    out = causal_replay_detection_event_table(time_bins)
+
+    assert bool(out.loc[0, "off_swr"]) is False
+    assert bool(out.loc[0, "final_required_models_complete"]) is False
+    assert bool(out.loc[0, "has_causal_trajectory_claim"]) is False
 
 
 def _prefix_rows(

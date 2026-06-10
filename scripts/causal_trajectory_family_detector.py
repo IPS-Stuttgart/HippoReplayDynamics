@@ -673,7 +673,7 @@ def causal_replay_detection_event_table(time_bin_table: pd.DataFrame) -> pd.Data
             {
                 **key_row,
                 "rat": str(final["rat"]),
-                "off_swr": bool(final["off_swr"]),
+                "off_swr": _as_bool(final["off_swr"]),
                 "window_start_s": float(final["window_start_s"]),
                 "window_end_s": float(final["window_end_s"]),
                 "window_duration_s": float(final["window_duration_s"]),
@@ -681,7 +681,9 @@ def causal_replay_detection_event_table(time_bin_table: pd.DataFrame) -> pd.Data
                 "prefix_rows": int(len(group)),
                 "final_prefix_time_bin_index": int(final["prefix_time_bin_index"]),
                 "final_prefix_end_s": float(final["prefix_end_s"]),
-                "final_required_models_complete": bool(final["required_models_complete"]),
+                "final_required_models_complete": _as_bool(
+                    final["required_models_complete"]
+                ),
                 "final_causal_label": final_label,
                 "final_best_trajectory_model": str(final["best_trajectory_model"]),
                 "final_best_nontrajectory_model": str(final["best_nontrajectory_model"]),

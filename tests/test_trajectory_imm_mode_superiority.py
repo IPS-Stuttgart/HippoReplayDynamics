@@ -118,6 +118,31 @@ def test_mode_readiness_requires_mode_diagnostic_columns():
     assert not bool(readiness.iloc[0]["interpretability_ready"])
 
 
+def test_promotion_gate_parses_string_false_mode_readiness_flags():
+    mode = pd.DataFrame(
+        [
+            {
+                "mode_diagnostics_present": "False",
+                "interpretability_ready": "False",
+                "mode_diagnostic_columns": 0,
+                "mode_diagnostics_complete_fraction": 0.0,
+            }
+        ]
+    )
+
+    gate = trajectory_imm_promotion_gate_summary(
+        pd.DataFrame(),
+        mode,
+        n_bootstrap=10,
+        random_seed=1,
+    ).set_index("gate")
+
+    assert not bool(gate.loc["trajectory_imm_mode_diagnostics_present", "passed"])
+    assert not bool(
+        gate.loc["trajectory_imm_mode_diagnostics_interpretability_ready", "passed"]
+    )
+
+
 def test_noncomparable_trajectory_imm_rows_cannot_satisfy_promotion_or_readiness():
     scores = pd.DataFrame(
         [

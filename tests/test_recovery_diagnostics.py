@@ -2,7 +2,11 @@ from __future__ import annotations
 
 import pandas as pd
 
-from hipporeplayimm.recovery_diagnostics import build_recovery_diagnostic_tables
+from hipporeplayimm.recovery_diagnostics import (
+    _classify_failure_mode,
+    _diagnostic_summary_row,
+    build_recovery_diagnostic_tables,
+)
 
 
 def _row(
@@ -109,6 +113,41 @@ def test_recovery_diagnostics_respects_string_false_comparable_flags():
     assert event["certified_vs_exact_reason"] == "expected_noncomparable_not_certified"
     assert overall["strict_recovered_events"] == 0
     assert overall["certified_vs_exact_recovered_events"] == 0
+
+
+def test_recovery_failure_mode_parses_string_false_flags():
+    row = {
+        "successful_scores": 1,
+        "expected_model_scored": "True",
+        "strict_recovered_expected_model": "False",
+        "certified_vs_exact_recovered_expected_model": "False",
+        "true_model": "momentum",
+        "exact_displacement_momentum_beats_diffusion_exact": "False",
+        "expected_model_evidence_support": "exact_full_grid",
+        "comparable_scores": 1,
+        "expected_model_evidence_comparable": "False",
+    }
+
+    assert _classify_failure_mode(row) == "nondecisive_unknown"
+
+
+def test_recovery_summary_parses_string_true_path_support_flags():
+    group = pd.DataFrame(
+        [
+            {
+                "strict_recovered_expected_model": "False",
+                "certified_vs_exact_recovered_expected_model": "False",
+                "expected_model_scored": "True",
+                "comparable_scores": 1,
+                "expected_candidate_true_path_fully_supported": "True",
+                "failure_mode": "nondecisive_unknown",
+            }
+        ]
+    )
+
+    row = _diagnostic_summary_row("overall", group)
+
+    assert row["expected_true_path_fully_supported_events"] == 1
 
 
 def test_recovery_diagnostics_write_outputs(tmp_path):

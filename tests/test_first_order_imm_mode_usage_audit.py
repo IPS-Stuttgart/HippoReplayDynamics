@@ -85,6 +85,47 @@ def test_first_order_imm_audit_blocks_content_claim_for_terminal_only_artifact()
     assert bool(gates.loc["overall", "passed"])
 
 
+def test_first_order_imm_summary_parses_string_false_event_flags():
+    event_table = pd.DataFrame(
+        [
+            {
+                "session": "Rat1/Open1",
+                "rat": "Rat1",
+                "event_index": 0,
+                "exact_core_complete": "True",
+                "first_order_imm_is_best_exact_core": "False",
+                "first_order_imm_confident_exact_core_best": "False",
+                "trajectory_capable_confident_vs_stationary": "False",
+                "terminal_mode_diagnostics_present": "False",
+                "event_mean_mode_diagnostics_present": "False",
+                "terminal_nonstationary_majority": "False",
+                "event_nonstationary_majority": "False",
+            },
+            {
+                "session": "Rat1/Open1",
+                "rat": "Rat1",
+                "event_index": 1,
+                "exact_core_complete": "False",
+                "first_order_imm_is_best_exact_core": "True",
+                "first_order_imm_confident_exact_core_best": "True",
+                "trajectory_capable_confident_vs_stationary": "True",
+                "terminal_mode_diagnostics_present": "True",
+                "event_mean_mode_diagnostics_present": "True",
+                "terminal_nonstationary_majority": "True",
+                "event_nonstationary_majority": "True",
+            },
+        ]
+    )
+
+    summary = build_first_order_imm_mode_usage_summary(event_table).set_index("scope")
+    gates = build_first_order_imm_mode_usage_gate_summary(event_table).set_index("gate")
+
+    assert int(summary.loc["complete_exact_core_events", "events"]) == 1
+    assert int(summary.loc["first_order_imm_exact_core_best_events", "events"]) == 0
+    assert int(summary.loc["complete_exact_core_events", "first_order_imm_best_events"]) == 0
+    assert not bool(gates.loc["first_order_imm_best_rows_present", "passed"])
+
+
 def test_off_swr_audit_keeps_same_source_event_candidates_separate():
     evidence = pd.DataFrame(
         [

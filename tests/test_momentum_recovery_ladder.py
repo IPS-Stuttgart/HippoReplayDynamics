@@ -99,6 +99,27 @@ def test_ladder_summary_parses_string_false_recovery_flags():
     assert bool(summary.loc[0, "oracle_candidate_support"]) is False
 
 
+def test_ladder_event_recovery_parses_string_false_oracle_support():
+    scores = pd.DataFrame(
+        _tier_rows(
+            "oracle_candidate_pairwise_momentum",
+            2,
+            PAIRWISE_MOMENTUM_MODEL,
+            expected_log_evidence=3.0,
+            diffusion_log_evidence=1.0,
+            expected_support="truncated_full_grid",
+            oracle=True,
+        )
+    )
+    scores["ladder_oracle_candidate_support"] = "False"
+
+    events = ladder_event_recovery(scores)
+    summary = summarize_ladder_tiers(events)
+
+    assert bool(events.loc[0, "oracle_candidate_support"]) is False
+    assert bool(summary.loc[0, "oracle_candidate_support"]) is False
+
+
 def _tier_rows(
     tier: str,
     tier_index: int,

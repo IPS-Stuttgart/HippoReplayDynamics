@@ -330,7 +330,7 @@ def cell_split_family_margin_decisions(
 
     scored = ensure_evidence_support_columns(frame)
     status_ok = scored["status"].eq("success") if "status" in scored else pd.Series(True, index=scored.index)
-    comparable = scored["evidence_comparable"].fillna(False).astype(bool) if "evidence_comparable" in scored else pd.Series(True, index=scored.index)
+    comparable = _bool_column(scored, "evidence_comparable", default=True)
     ok = scored[status_ok & comparable].copy()
     required = tuple(str(model) for model in required_models)
     required_set = set(required)
@@ -446,14 +446,14 @@ def cell_split_family_margin_summary(
                 "split_event_rows": int(len(group)),
                 "events": int(group[["session", "event_index"]].drop_duplicates().shape[0]),
                 "cell_splits": int(group["cell_split_index"].nunique()),
-                "required_complete_rows": int(group["required_models_complete"].fillna(False).astype(bool).sum()),
+                "required_complete_rows": int(_bool_column(group, "required_models_complete").sum()),
                 "incomplete_core_rows": int((group["margin_decision"] == "incomplete_core").sum()),
                 "margin_threshold": float(pd.to_numeric(group["margin_threshold"], errors="coerce").dropna().iloc[0]),
-                "trajectory_raw_wins": int(group["trajectory_raw_win"].fillna(False).astype(bool).sum()),
-                "trajectory_raw_win_fraction": float(group["trajectory_raw_win"].fillna(False).astype(bool).mean()),
-                "trajectory_confident_claims": int(group["trajectory_confident_claim"].fillna(False).astype(bool).sum()),
-                "trajectory_confident_claim_fraction": float(group["trajectory_confident_claim"].fillna(False).astype(bool).mean()),
-                "nontrajectory_confident_claims": int(group["nontrajectory_confident_claim"].fillna(False).astype(bool).sum()),
+                "trajectory_raw_wins": int(_bool_column(group, "trajectory_raw_win").sum()),
+                "trajectory_raw_win_fraction": float(_bool_column(group, "trajectory_raw_win").mean()),
+                "trajectory_confident_claims": int(_bool_column(group, "trajectory_confident_claim").sum()),
+                "trajectory_confident_claim_fraction": float(_bool_column(group, "trajectory_confident_claim").mean()),
+                "nontrajectory_confident_claims": int(_bool_column(group, "nontrajectory_confident_claim").sum()),
                 "ambiguous_rows": int((group["margin_decision"] == "ambiguous").sum()),
                 "mean_family_margin": float(margins.mean()),
                 "median_family_margin": float(margins.median()),
@@ -480,14 +480,15 @@ def cell_split_control_gate_summary(scores: pd.DataFrame, decisions: pd.DataFram
             }
         )
         return pd.DataFrame(rows)
-    _append_gate(rows, "required_models_complete", bool(decisions["required_models_complete"].fillna(False).astype(bool).all()), int(decisions["required_models_complete"].fillna(False).astype(bool).sum()), "all split-event rows include the exact core required models")
+    required_complete = _bool_column(decisions, "required_models_complete")
+    _append_gate(rows, "required_models_complete", bool(required_complete.all()), int(required_complete.sum()), "all split-event rows include the exact core required models")
     margins = pd.to_numeric(decisions["trajectory_minus_nontrajectory_heldout_log_likelihood"], errors="coerce")
     _append_gate(rows, "median_family_margin_positive", float(margins.median()) > 0.0, float(margins.median()), "median held-out trajectory-family margin > 0")
     _append_gate(rows, "majority_split_events_positive", float((margins > 0.0).mean()) > 0.5, float((margins > 0.0).mean()), "majority of split-event held-out margins > 0")
     rat_summary = cell_split_family_margin_summary(decisions, group_cols=("rat",))
     rat_medians = pd.to_numeric(rat_summary["median_family_margin"], errors="coerce") if not rat_summary.empty else pd.Series(dtype=float)
     _append_gate(rows, "per_rat_median_positive", bool(not rat_medians.empty and (rat_medians > 0.0).all()), "" if rat_medians.empty else float(rat_medians.min()), "per-rat median held-out family margin > 0")
-    nontrajectory = int(decisions["nontrajectory_confident_claim"].fillna(False).astype(bool).sum())
+    nontrajectory = int(_bool_column(decisions, "nontrajectory_confident_claim").sum())
     _append_gate(rows, "nontrajectory_claims_near_zero", nontrajectory <= max(1, math.ceil(0.05 * len(decisions))), nontrajectory, "false/nontrajectory confident claims remain near zero")
     rows.append(
         {
@@ -652,6 +653,32 @@ def _first_text_value(frame: pd.DataFrame, column: str) -> str:
         return ""
     values = frame[column].dropna().astype(str)
     return str(values.iloc[0]) if not values.empty else ""
+
+
+def _as_bool(value: object, *, default: bool = False) -> bool:
+    if isinstance(value, (bool, np.bool_)):
+        return bool(value)
+    if value is None:
+        return default
+    try:
+        if pd.isna(value):
+            return default
+    except (TypeError, ValueError):
+        pass
+    if isinstance(value, (int, float, np.integer, np.floating)):
+        return bool(value)
+    normalized = str(value).strip().lower()
+    if normalized in {"1", "true", "t", "yes", "y"}:
+        return True
+    if normalized in {"0", "false", "f", "no", "n", "", "nan", "none"}:
+        return False
+    return default
+
+
+def _bool_column(frame: pd.DataFrame, column: str, *, default: bool = False) -> pd.Series:
+    if column not in frame:
+        return pd.Series(default, index=frame.index, dtype=bool)
+    return frame[column].map(lambda value: _as_bool(value, default=default)).astype(bool)
 
 
 def _safe_ratio(value: float, denominator: float) -> float:

@@ -9,7 +9,11 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 
-from aggregate_event_window_sensitivity import aggregate_event_window_sensitivity  # noqa: E402
+from aggregate_event_window_sensitivity import (  # noqa: E402
+    aggregate_event_window_sensitivity,
+    event_window_family_margin_decisions,
+    event_window_model_summary,
+)
 from benchmark_model_evidence_improved import (  # noqa: E402
     _event_windows,
     _parse_window_variant_specs,
@@ -136,6 +140,35 @@ def test_event_window_aggregator_compares_variants_to_core(tmp_path):
     assert bool(gate_v2.loc["overall_primary", "passed"])
     assert gate_v2.loc["shifted_windows_observation_mismatch_diagnostic", "gate_type"] == "diagnostic"
     assert "event_window_spike_count_summary.csv" in {path.name for path in out.iterdir()}
+
+
+def test_event_window_boolean_string_false_rows_are_not_exact_comparable():
+    rows = [
+        _row("core", "sorted-spike-state-space-stationary", "nontrajectory", 0.0),
+        _row("core", "sorted-spike-state-space-diffusion", "trajectory", 1.0),
+        _row("core", "sorted-spike-state-space-fragmented", "trajectory", 2.0),
+        _row("core", "sorted-spike-state-space-first-order-imm", "trajectory", 3.0),
+        _row("core", "sorted-spike-state-space-momentum-exact-sparse", "trajectory", 10.0),
+        {
+            **_row("core", "sorted-spike-state-space-first-order-imm", "trajectory", 1000.0),
+            "evidence_comparable": "False",
+            "is_best_model": "False",
+        },
+    ]
+    for row in rows[:-1]:
+        row["evidence_comparable"] = "True"
+        row["is_best_model"] = "False"
+    frame = pd.DataFrame(rows)
+
+    decision = event_window_family_margin_decisions(frame).iloc[0]
+    assert decision["best_trajectory_model"] == "sorted-spike-state-space-momentum-exact-sparse"
+    assert decision["trajectory_minus_nontrajectory_log_evidence"] == 10.0
+
+    summary = event_window_model_summary(frame)
+    first_order = summary[
+        summary["model"].eq("sorted-spike-state-space-first-order-imm")
+    ].iloc[0]
+    assert int(first_order["wins"]) == 0
 
 
 def test_event_window_sensitivity_workflow_runs_named_variants():

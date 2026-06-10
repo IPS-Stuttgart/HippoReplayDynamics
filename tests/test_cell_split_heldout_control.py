@@ -45,6 +45,38 @@ def test_cell_split_heldout_family_margin_tables_and_gates(tmp_path):
     assert bool(gates.set_index("gate").loc["overall", "passed"])
 
 
+def test_cell_split_boolean_string_false_rows_are_not_exact_comparable():
+    rows = _event_split_rows("Rat1/Open1", 0, 0, stationary=0.0, trajectory=10.0)
+    rows.append(
+        {
+            **_event_split_rows("Rat1/Open1", 0, 0, stationary=0.0, trajectory=1000.0)[3],
+            "heldout_log_likelihood": 1000.0,
+            "log_evidence": 1000.0,
+            "evidence_support": "candidate_pruned_lower_bound",
+            "evidence_comparable": "False",
+        }
+    )
+    for row in rows[:-1]:
+        row["evidence_support"] = "exact_full_grid"
+        row["evidence_comparable"] = "True"
+    scores = pd.DataFrame(rows)
+
+    decisions = cell_split_family_margin_decisions(scores)
+    decision = decisions.iloc[0]
+    assert decision["best_trajectory_model"] == "sorted-spike-state-space-first-order-imm"
+    assert decision["trajectory_minus_nontrajectory_heldout_log_likelihood"] == 10.0
+
+    round_tripped = decisions.copy()
+    for column in ("required_models_complete", "trajectory_raw_win", "trajectory_confident_claim", "nontrajectory_confident_claim"):
+        round_tripped[column] = round_tripped[column].map(lambda value: "True" if value else "False")
+
+    summary = cell_split_family_margin_summary(round_tripped).iloc[0]
+    gates = cell_split_control_gate_summary(scores, round_tripped).set_index("gate")
+    assert int(summary["nontrajectory_confident_claims"]) == 0
+    assert bool(gates.loc["required_models_complete", "passed"])
+    assert bool(gates.loc["nontrajectory_claims_near_zero", "passed"])
+
+
 def test_cell_split_heldout_aggregate_writes_primary_outputs(tmp_path):
     score_path = tmp_path / "scores.csv"
     pd.DataFrame(

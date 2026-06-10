@@ -109,7 +109,7 @@ def event_window_model_summary(frame: pd.DataFrame) -> pd.DataFrame:
                 "model": str(model),
                 "rows": int(len(group)),
                 "events": int(group[["session", "event_index"]].drop_duplicates().shape[0]),
-                "wins": int(group.get("is_best_model", False).fillna(False).astype(bool).sum()),
+                "wins": int(_bool_column(group, "is_best_model").sum()),
                 "mean_log_evidence": float(group["log_evidence"].astype(float).mean()),
                 "median_log_evidence": float(group["log_evidence"].astype(float).median()),
                 "mean_relative_log_evidence": float(
@@ -128,6 +128,32 @@ def _numeric_column(frame: pd.DataFrame, column: str) -> pd.Series:
     if column not in frame:
         return pd.Series(np.nan, index=frame.index, dtype=float)
     return pd.to_numeric(frame[column], errors="coerce")
+
+
+def _as_bool(value: object, *, default: bool = False) -> bool:
+    if isinstance(value, (bool, np.bool_)):
+        return bool(value)
+    if value is None:
+        return default
+    try:
+        if pd.isna(value):
+            return default
+    except (TypeError, ValueError):
+        pass
+    if isinstance(value, (int, float, np.integer, np.floating)):
+        return bool(value)
+    normalized = str(value).strip().lower()
+    if normalized in {"1", "true", "t", "yes", "y"}:
+        return True
+    if normalized in {"0", "false", "f", "no", "n", "", "nan", "none"}:
+        return False
+    return default
+
+
+def _bool_column(frame: pd.DataFrame, column: str, *, default: bool = False) -> pd.Series:
+    if column not in frame:
+        return pd.Series(default, index=frame.index, dtype=bool)
+    return frame[column].map(lambda value: _as_bool(value, default=default)).astype(bool)
 
 
 def _first_numeric_value(frame: pd.DataFrame, column: str) -> float:
@@ -156,11 +182,7 @@ def event_window_family_margin_decisions(
     required_set = set(required)
     trajectory_set = set(str(model) for model in trajectory_models)
     status_ok = frame["status"].eq("success") if "status" in frame else pd.Series(True, index=frame.index)
-    comparable = (
-        frame["evidence_comparable"].fillna(False).astype(bool)
-        if "evidence_comparable" in frame
-        else pd.Series(True, index=frame.index)
-    )
+    comparable = _bool_column(frame, "evidence_comparable", default=True)
     ok = frame[status_ok & comparable].copy()
     rows: list[dict[str, object]] = []
     for key, group in ok.groupby(["session", "event_index", "event_window_variant"], sort=True):
@@ -503,14 +525,14 @@ def event_window_family_margin_summary(
         key_tuple = key if isinstance(key, tuple) else (key,)
         delta = pd.to_numeric(group["trajectory_minus_nontrajectory_log_evidence"], errors="coerce").dropna()
         events = int(len(group))
-        trajectory_claims = int(group["trajectory_confident_claim"].fillna(False).astype(bool).sum())
-        nontrajectory_claims = int(group["nontrajectory_confident_claim"].fillna(False).astype(bool).sum())
+        trajectory_claims = int(_bool_column(group, "trajectory_confident_claim").sum())
+        nontrajectory_claims = int(_bool_column(group, "nontrajectory_confident_claim").sum())
         best_trajectory = group["best_trajectory_model"].replace("", pd.NA).dropna().astype(str)
         row = {column: value for column, value in zip(group_cols, key_tuple, strict=True)}
         row.update(
             {
                 "events": events,
-                "required_complete_events": int(group["required_models_complete"].fillna(False).astype(bool).sum()),
+                "required_complete_events": int(_bool_column(group, "required_models_complete").sum()),
                 "incomplete_core_events": int((group["margin_decision"] == "incomplete_core").sum()),
                 "margin_threshold": float(group["margin_threshold"].dropna().iloc[0]),
                 "trajectory_raw_wins": int((delta > 0.0).sum()),
@@ -563,10 +585,10 @@ def event_window_comparison_to_core(decisions: pd.DataFrame, *, core_variant: st
                 "mean_family_margin_minus_core": float(margin_delta.mean()),
                 "median_family_margin_minus_core": float(margin_delta.median()),
                 "trajectory_confident_claims": int(
-                    matched["trajectory_confident_claim_variant"].fillna(False).astype(bool).sum()
+                    _bool_column(matched, "trajectory_confident_claim_variant").sum()
                 ),
                 "nontrajectory_confident_claims": int(
-                    matched["nontrajectory_confident_claim_variant"].fillna(False).astype(bool).sum()
+                    _bool_column(matched, "nontrajectory_confident_claim_variant").sum()
                 ),
             }
         )

@@ -208,8 +208,8 @@ def _score_trajectory_imm_exact_sparse(
             valid_bin_mask=valid_mask,
         )
         trajectory, mode_posterior = _smoothed_posteriors(states, betas, emissions.n_bins)
-        terminal = trajectory[-1]
         trajectory_log_posterior = _as_log_probs(trajectory)
+        terminal = trajectory_log_posterior[-1]
         mode_posterior_out: np.ndarray | None = mode_posterior
         mode_posterior_label = "smoothed_heterogeneous_state"
         posterior_entropy = _mean_entropy(trajectory_log_posterior)

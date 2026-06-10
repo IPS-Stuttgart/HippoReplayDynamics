@@ -149,10 +149,10 @@ def _load_mat_file(path: Path) -> dict[str, Any]:
     try:
         loaded = sio.loadmat(path, squeeze_me=True, struct_as_record=False)
         return {key: value for key, value in loaded.items() if not key.startswith("__")}
-    except (NotImplementedError, ValueError) as exc:
+    except (NotImplementedError, OSError, ValueError):
         if _is_hdf5_file(path):
             return _load_hdf5_mat_file(path)
-        raise exc
+        raise
 
 
 def _load_hdf5_mat_file(path: Path) -> dict[str, Any]:

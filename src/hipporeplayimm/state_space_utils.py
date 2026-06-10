@@ -167,13 +167,14 @@ def _restrict_candidates_to_valid_bins(
     log_likelihood: np.ndarray,
     valid_bin_mask: np.ndarray | None,
 ) -> list[np.ndarray]:
-    valid_mask = _coerce_valid_bin_mask(valid_bin_mask, log_likelihood.shape[1])
+    n_time, n_bins = log_likelihood.shape
+    validated = _validate_candidate_indices(candidates, n_time, n_bins)
+    valid_mask = _coerce_valid_bin_mask(valid_bin_mask, n_bins)
     if valid_mask is None:
-        return candidates
+        return validated
     valid_indices = np.flatnonzero(valid_mask)
     restricted: list[np.ndarray] = []
-    for time_index, curr in enumerate(candidates):
-        arr = np.asarray(curr, dtype=int)
+    for time_index, arr in enumerate(validated):
         keep = arr[valid_mask[arr]]
         if keep.size == 0:
             valid_scores = log_likelihood[time_index, valid_indices]

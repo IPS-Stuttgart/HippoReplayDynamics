@@ -118,6 +118,45 @@ def resolve_family_model_sets(
     raise ValueError(f"unknown comparison_scope: {comparison_scope!r}")
 
 
+_FALSE_BOOL_STRINGS = {"", "0", "0.0", "false", "f", "no", "n", "off", "nan", "none", "null"}
+_TRUE_BOOL_STRINGS = {"1", "1.0", "true", "t", "yes", "y", "on"}
+
+
+def _coerce_bool_series(values: pd.Series, *, default: bool = False) -> pd.Series:
+    """Coerce bool-like scalar values without treating all strings as true.
+
+    Pandas ``Series.astype(bool)`` treats every non-empty object string as
+    ``True``.  That is unsafe for score CSVs, where ``False``/``0`` may arrive as
+    strings after concatenating artifacts.  Keep unknown or missing values on the
+    conservative default side so non-comparable evidence rows are not admitted
+    into paper-facing family-margin decisions by accident.
+    """
+
+    def coerce(value: object) -> bool:
+        if isinstance(value, (bool, np.bool_)):
+            return bool(value)
+        try:
+            if pd.isna(value):
+                return bool(default)
+        except (TypeError, ValueError):
+            return bool(default)
+        if isinstance(value, (int, float, np.integer, np.floating)):
+            numeric = float(value)
+            return bool(np.isfinite(numeric) and numeric != 0.0)
+        text = str(value).strip().lower()
+        if text in _TRUE_BOOL_STRINGS:
+            return True
+        if text in _FALSE_BOOL_STRINGS:
+            return False
+        try:
+            numeric = float(text)
+        except ValueError:
+            return bool(default)
+        return bool(np.isfinite(numeric) and numeric != 0.0)
+
+    return values.map(coerce).astype(bool)
+
+
 def spike_matched_null_windows(
     session: ReplaySession,
     event_index: int,
@@ -713,7 +752,7 @@ def matched_null_family_margin_decisions(
     trajectory_set = set(trajectory)
     scope_label = _canonical_comparison_scope(comparison_scope, required)
     status_ok = frame["status"].eq("success") if "status" in frame else pd.Series(True, index=frame.index)
-    comparable = frame["evidence_comparable"].fillna(False).astype(bool) if "evidence_comparable" in frame else pd.Series(True, index=frame.index)
+    comparable = _coerce_bool_series(frame["evidence_comparable"], default=False) if "evidence_comparable" in frame else pd.Series(True, index=frame.index)
     ok = frame[status_ok & comparable].copy()
     rows: list[dict[str, object]] = []
     group_cols = ["session", "event_index", "window_role", "null_index"]
@@ -806,9 +845,9 @@ def matched_null_family_margin_summary(
             {
                 "windows": int(len(group)),
                 "events": int(group[["session", "event_index"]].drop_duplicates().shape[0]),
-                "required_complete_windows": int(group["required_models_complete"].fillna(False).astype(bool).sum()),
-                "trajectory_confident_claims": int(group["trajectory_confident_claim"].fillna(False).astype(bool).sum()),
-                "nontrajectory_confident_claims": int(group["nontrajectory_confident_claim"].fillna(False).astype(bool).sum()),
+                "required_complete_windows": int(_coerce_bool_series(group["required_models_complete"]).sum()),
+                "trajectory_confident_claims": int(_coerce_bool_series(group["trajectory_confident_claim"]).sum()),
+                "nontrajectory_confident_claims": int(_coerce_bool_series(group["nontrajectory_confident_claim"]).sum()),
                 "ambiguous_windows": int((group["margin_decision"] == "ambiguous").sum()),
                 "mean_family_margin": float(margins.mean()),
                 "median_family_margin": float(margins.median()),
@@ -941,25 +980,28 @@ def rat_bootstrap_matched_null_summary(
 ) -> pd.DataFrame:
     if p_values.empty or "rat" not in p_values:
         return pd.DataFrame()
-    rats = sorted(p_values["rat"].dropna().astype(str).unique())
-    if not rats:
-        return pd.DataFrame()
     scope_values = sorted(p_values["comparison_scope"].dropna().astype(str).unique()) if "comparison_scope" in p_values else [""]
-    scope = " ".join(scope_values)
-    rng = np.random.default_rng(int(random_seed))
-    mean_values: list[float] = []
-    median_values: list[float] = []
-    for _ in range(int(n_bootstrap)):
-        sampled = rng.choice(rats, size=len(rats), replace=True)
-        pieces = [p_values[p_values["rat"].astype(str).eq(rat)] for rat in sampled]
-        sample = pd.concat(pieces, ignore_index=True)
-        delta = pd.to_numeric(sample["real_minus_median_null_family_margin"], errors="coerce").dropna()
-        if delta.empty:
+    if not scope_values:
+        scope_values = [""]
+    rows: list[dict[str, object]] = []
+    for scope_index, scope in enumerate(scope_values):
+        scoped = p_values[p_values["comparison_scope"].astype(str).eq(scope)] if scope else p_values
+        rats = sorted(scoped["rat"].dropna().astype(str).unique())
+        if not rats:
             continue
-        mean_values.append(float(delta.mean()))
-        median_values.append(float(delta.median()))
-    return pd.DataFrame(
-        [
+        rng = np.random.default_rng(int(random_seed) + 1009 * int(scope_index))
+        mean_values: list[float] = []
+        median_values: list[float] = []
+        for _ in range(int(n_bootstrap)):
+            sampled = rng.choice(rats, size=len(rats), replace=True)
+            pieces = [scoped[scoped["rat"].astype(str).eq(rat)] for rat in sampled]
+            sample = pd.concat(pieces, ignore_index=True)
+            delta = pd.to_numeric(sample["real_minus_median_null_family_margin"], errors="coerce").dropna()
+            if delta.empty:
+                continue
+            mean_values.append(float(delta.mean()))
+            median_values.append(float(delta.median()))
+        rows.append(
             {
                 "comparison_scope": scope,
                 "bootstrap_unit": "rat",
@@ -971,8 +1013,8 @@ def rat_bootstrap_matched_null_summary(
                 "median_delta_median": float(np.quantile(median_values, 0.5)) if median_values else np.nan,
                 "median_delta_upper_95": float(np.quantile(median_values, 0.975)) if median_values else np.nan,
             }
-        ]
-    )
+        )
+    return pd.DataFrame(rows)
 
 
 def matched_null_control_gate_summary(p_values: pd.DataFrame, bootstrap: pd.DataFrame) -> pd.DataFrame:
@@ -994,7 +1036,7 @@ def matched_null_control_gate_summary(p_values: pd.DataFrame, bootstrap: pd.Data
         mean_lower = float(bootstrap["mean_delta_lower_95"].iloc[0])
         median_lower = float(bootstrap["median_delta_lower_95"].iloc[0])
         _append_gate(rows, "rat_bootstrap_lower_bound_positive", bool(mean_lower > 0.0 or median_lower > 0.0), f"mean={mean_lower:.3f}; median={median_lower:.3f}", "rat-bootstrap lower bound for mean or median real-minus-null margin > 0")
-    nontrajectory = int(p_values["real_nontrajectory_confident_claim"].fillna(False).astype(bool).sum())
+    nontrajectory = int(_coerce_bool_series(p_values["real_nontrajectory_confident_claim"]).sum())
     _append_gate(rows, "real_nontrajectory_claims_near_zero", nontrajectory <= max(1, math.ceil(0.05 * len(p_values))), nontrajectory, "false/nontrajectory claims remain near zero")
     rows.append(
         {
@@ -1064,7 +1106,7 @@ def lightweight_matched_null_control_gate_summary(
         " ".join(sorted(scope_values)) if scope_values else "",
         f"comparison_scope == {LIGHTWEIGHT_FO_IMM_STATIONARY_SCOPE}",
     )
-    complete = decisions["required_models_complete"].fillna(False).astype(bool) if not decisions.empty else pd.Series(dtype=bool)
+    complete = _coerce_bool_series(decisions["required_models_complete"]) if not decisions.empty else pd.Series(dtype=bool)
     _append_gate(
         rows,
         "complete_lightweight_family_rows",
@@ -1105,7 +1147,7 @@ def lightweight_matched_null_control_gate_summary(
         "" if min_possible_p.dropna().empty else float(min_possible_p.min()),
         "minimum possible empirical p-value <= 0.05",
     )
-    nontrajectory = int(p_values["real_nontrajectory_confident_claim"].fillna(False).astype(bool).sum())
+    nontrajectory = int(_coerce_bool_series(p_values["real_nontrajectory_confident_claim"]).sum())
     _append_gate(rows, "real_nontrajectory_claims_near_zero", nontrajectory <= max(1, math.ceil(0.05 * len(p_values))), nontrajectory, "false/nontrajectory claims remain near zero")
     rows.append(
         {
@@ -1132,8 +1174,8 @@ def _delta_summary(group: pd.DataFrame, delta: pd.Series) -> dict[str, object]:
         "events_empirical_p_le_0_05": int((p_values <= 0.05).sum()),
         "events_empirical_p_le_0_10": int((p_values <= 0.10).sum()),
         "min_empirical_p_value": float(p_values.min()) if not p_values.dropna().empty else np.nan,
-        "real_trajectory_confident_claims": int(group["real_trajectory_confident_claim"].fillna(False).astype(bool).sum()),
-        "real_nontrajectory_confident_claims": int(group["real_nontrajectory_confident_claim"].fillna(False).astype(bool).sum()),
+        "real_trajectory_confident_claims": int(_coerce_bool_series(group["real_trajectory_confident_claim"]).sum()),
+        "real_nontrajectory_confident_claims": int(_coerce_bool_series(group["real_nontrajectory_confident_claim"]).sum()),
     }
 
 

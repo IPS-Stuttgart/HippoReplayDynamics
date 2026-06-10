@@ -258,12 +258,18 @@ def test_best_static_baseline_includes_state_space_single_mode_models():
     assert _is_best_static_baseline_model("sorted-spike-state-space-fragmented")
     assert _is_best_static_baseline_model("sorted-spike-state-space-jump")
     assert _is_best_static_baseline_model("sorted-spike-state-space-momentum")
+    assert _is_best_static_baseline_model("sorted-spike-state-space-momentum-exact-sparse")
+    assert _is_best_static_baseline_model("sorted-spike-state-space-velocity-momentum")
     assert _is_best_static_baseline_model("state-space-diffusion")
+    assert _is_best_static_baseline_model("state-space-momentum-exact-sparse")
+    assert _is_best_static_baseline_model("state-space-velocity-momentum")
     assert _is_best_static_baseline_model("clusterless-state-space-stationary")
     assert _is_best_static_baseline_model("clusterless-state-space-diffusion")
     assert _is_best_static_baseline_model("clusterless-state-space-fragmented")
     assert _is_best_static_baseline_model("clusterless-state-space-jump")
     assert _is_best_static_baseline_model("clusterless-state-space-momentum")
+    assert _is_best_static_baseline_model("clusterless-state-space-momentum-exact-sparse")
+    assert _is_best_static_baseline_model("clusterless-state-space-velocity-momentum")
     assert not _is_best_static_baseline_model("imm")
     assert not _is_best_static_baseline_model("state-space-first-order-imm")
     assert not _is_best_static_baseline_model("sorted-spike-state-space-first-order-imm")
@@ -298,6 +304,32 @@ def test_add_relative_metrics_uses_state_space_single_mode_baselines():
     assert deltas["sorted-spike-state-space-jump"] == -2.0
     assert deltas["sorted-spike-state-space-imm"] == 1.0
     assert result["best_static_heldout_log_likelihood"].notna().all()
+
+
+def test_add_relative_metrics_uses_exact_sparse_momentum_static_baseline():
+    rows = pd.DataFrame(
+        {
+            "session": ["s1", "s1", "s1", "s1"],
+            "event_index": [7, 7, 7, 7],
+            "model": [
+                "sorted-spike-state-space-diffusion",
+                "sorted-spike-state-space-momentum",
+                "sorted-spike-state-space-momentum-exact-sparse",
+                "sorted-spike-state-space-imm",
+            ],
+            "heldout_log_likelihood": [-8.0, -7.0, -5.0, -4.0],
+            "test_spikes": [2, 2, 2, 2],
+        }
+    )
+
+    result = _add_relative_metrics(rows)
+    deltas = dict(zip(result["model"], result["delta_vs_best_static"]))
+
+    assert deltas["sorted-spike-state-space-diffusion"] == -3.0
+    assert deltas["sorted-spike-state-space-momentum"] == -2.0
+    assert deltas["sorted-spike-state-space-momentum-exact-sparse"] == 0.0
+    assert deltas["sorted-spike-state-space-imm"] == 1.0
+    assert result["best_static_heldout_log_likelihood"].eq(-5.0).all()
 
 
 def test_add_relative_metrics_uses_clusterless_single_mode_baselines():

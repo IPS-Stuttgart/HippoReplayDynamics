@@ -303,6 +303,18 @@ def copy_emissions_with_log_likelihood(
         log_likelihood = log_likelihood[::-1].copy()
         spike_counts = spike_counts[::-1].copy()
         times = times[::-1].copy()
+    bin_durations = _copy_optional_duration_vector(
+        getattr(emissions, "bin_durations", None),
+        reverse_time=reverse_time,
+        expected_length=emissions.n_time,
+        name="bin_durations",
+    )
+    transition_durations = _copy_optional_duration_vector(
+        getattr(emissions, "transition_durations", None),
+        reverse_time=reverse_time,
+        expected_length=max(emissions.n_time - 1, 0),
+        name="transition_durations",
+    )
     out = LogEmissionTensor(
         log_likelihood=log_likelihood.copy(),
         spike_counts=spike_counts.copy(),
@@ -310,14 +322,28 @@ def copy_emissions_with_log_likelihood(
         dt=emissions.dt,
         cell_ids=np.asarray(emissions.cell_ids).copy(),
         n_spikes=int(emissions.n_spikes),
+        bin_durations=bin_durations,
+        transition_durations=transition_durations,
+        metadata=dict(getattr(emissions, "metadata", {}) or {}),
     )
-    if hasattr(emissions, "metadata"):
-        out.metadata = dict(getattr(emissions, "metadata", {}) or {})
-    durations = getattr(emissions, "transition_durations", None)
-    if durations is not None:
-        durations_arr = np.asarray(durations, dtype=float)
-        out.transition_durations = durations_arr[::-1].copy() if reverse_time else durations_arr.copy()
     return out
+
+
+def _copy_optional_duration_vector(
+    values: np.ndarray | None,
+    *,
+    reverse_time: bool,
+    expected_length: int,
+    name: str,
+) -> np.ndarray | None:
+    if values is None:
+        return None
+    array = np.asarray(values, dtype=float)
+    if array.shape != (expected_length,):
+        raise ValueError(
+            f"{name} must contain {expected_length} values; got shape {array.shape}"
+        )
+    return array[::-1].copy() if reverse_time else array.copy()
 
 
 def score_replay_model_compat(
@@ -443,7 +469,13 @@ class BidirectionalReplayModel:
             occupancy_s=occupancy_s,
             candidate_indices=candidate_indices,
         )
-        reverse = score_replay_model_compat(self.reverse_model, emissions, bin_centers, occupancy_s=occupancy_s)
+        reverse = score_replay_model_compat(
+            self.reverse_model,
+            emissions,
+            bin_centers,
+            occupancy_s=occupancy_s,
+            candidate_indices=candidate_indices,
+        )
         values = np.array([forward.log_likelihood, reverse.log_likelihood], dtype=float)
         logp = float(logsumexp(values) - np.log(2.0))
         weights = np.exp(values - logsumexp(values))

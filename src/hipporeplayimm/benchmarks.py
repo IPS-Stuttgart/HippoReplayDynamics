@@ -1003,7 +1003,9 @@ _STATE_SPACE_STATIC_BASELINE_MODES = frozenset(
         "fragmented",
         "jump",
         "momentum",
+        "momentum-exact-sparse",
         "displacement-momentum",
+        "velocity-momentum",
         "displacement-imm",
     }
 )

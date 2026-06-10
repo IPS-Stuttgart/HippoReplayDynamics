@@ -36,7 +36,10 @@ def _score_fragmented(
     emissions: LogEmissionTensor,
     valid_bin_mask: np.ndarray | None = None,
 ) -> tuple[float, np.ndarray]:
-    scaled, offsets = _scaled_emissions(emissions.log_likelihood)
+    scaled, offsets = _scaled_emissions(
+        emissions.log_likelihood,
+        valid_bin_mask=valid_bin_mask,
+    )
     valid_mask = _coerce_valid_bin_mask(valid_bin_mask, emissions.n_bins)
     if valid_mask is None:
         row_sums = scaled.sum(axis=1)
@@ -60,7 +63,7 @@ def _forward_backward_first_order(
     valid_bin_mask: np.ndarray | None = None,
 ) -> tuple[float, np.ndarray]:
     n_time, n_bins = log_likelihood.shape
-    scaled, offsets = _scaled_emissions(log_likelihood)
+    scaled, offsets = _scaled_emissions(log_likelihood, valid_bin_mask=valid_bin_mask)
     filtered = np.zeros((n_time, n_bins), dtype=float)
     scales = np.zeros(n_time, dtype=float)
 
@@ -102,7 +105,7 @@ def _forward_backward_first_order_time_varying(
     n_time, n_bins = log_likelihood.shape
     if len(transitions) != max(n_time - 1, 0):
         raise ValueError("transitions must contain one matrix per adjacent time-bin pair")
-    scaled, offsets = _scaled_emissions(log_likelihood)
+    scaled, offsets = _scaled_emissions(log_likelihood, valid_bin_mask=valid_bin_mask)
     filtered = np.zeros((n_time, n_bins), dtype=float)
     scales = np.zeros(n_time, dtype=float)
 
@@ -155,7 +158,7 @@ def _score_first_order_imm(
         "fragmented": None,
     }
     mode_transition = _mode_transition_matrix(n_modes, mode_stickiness)
-    scaled, offsets = _scaled_emissions(log_likelihood)
+    scaled, offsets = _scaled_emissions(log_likelihood, valid_bin_mask=valid_bin_mask)
     filtered = np.zeros((n_time, n_modes, n_bins), dtype=float)
     scales = np.zeros(n_time, dtype=float)
 

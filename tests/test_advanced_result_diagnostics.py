@@ -45,6 +45,25 @@ def test_evidence_margin_table_classifies_decisive_and_ties():
     assert "evidence_margin_to_second_best" in merged
 
 
+def test_evidence_margin_table_excludes_string_false_comparable_rows():
+    scores = pd.DataFrame(
+        {
+            "session": ["Rat1/Open1", "Rat1/Open1", "Rat1/Open1"],
+            "event_index": [0, 0, 0],
+            "model": ["stationary", "diffusion", "lower-bound-audit"],
+            "log_evidence": [0.0, 2.0, 100.0],
+            "status": ["success"] * 3,
+            "evidence_comparable": ["True", "True", "False"],
+        }
+    )
+
+    margins = evidence_margin_table(scores)
+
+    assert margins.iloc[0]["best_model_by_evidence"] == "diffusion"
+    assert margins.iloc[0]["second_best_model_by_evidence"] == "stationary"
+    assert margins.iloc[0]["models_compared"] == 2
+
+
 def test_wrong_map_delta_summary():
     current = pd.DataFrame(
         {

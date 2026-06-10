@@ -9,7 +9,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 sys.path.insert(0, str(ROOT / "src"))
 
-from paper_state_space_effects import summarize_paper_effects  # noqa: E402
+from paper_state_space_effects import event_effect_table, summarize_paper_effects  # noqa: E402
 
 
 def _write_scores(path: Path) -> None:
@@ -172,3 +172,48 @@ def test_exact_only_removes_lower_bound_momentum_from_paired_effect(tmp_path):
     assert summary["momentum_diffusion_paired_events"] == 1
     assert summary["momentum_vs_diffusion_reported_wins"] == 0
     assert summary["momentum_vs_diffusion_certified_losses"] == 1
+
+
+def test_event_effect_table_treats_string_false_comparable_as_false():
+    scores = pd.DataFrame(
+        [
+            {
+                "session": "Rat1/Open1",
+                "event_index": 0,
+                "model": "stationary",
+                "canonical_model": "stationary",
+                "canonical_model_family": "nontrajectory",
+                "log_evidence": 50.0,
+                "evidence_support": "exact_full_grid",
+                "evidence_comparable": "True",
+            },
+            {
+                "session": "Rat1/Open1",
+                "event_index": 0,
+                "model": "sorted-spike-state-space-diffusion",
+                "canonical_model": "diffusion",
+                "canonical_model_family": "trajectory",
+                "log_evidence": 10.0,
+                "evidence_support": "exact_full_grid",
+                "evidence_comparable": "True",
+            },
+            {
+                "session": "Rat1/Open1",
+                "event_index": 0,
+                "model": "sorted-spike-state-space-momentum",
+                "canonical_model": "momentum",
+                "canonical_model_family": "trajectory",
+                "log_evidence": 100.0,
+                "evidence_support": "exact_full_grid",
+                "evidence_comparable": "False",
+            },
+        ]
+    )
+
+    event = event_effect_table(scores).iloc[0]
+
+    assert event["exact_model_rows"] == 2
+    assert event["best_exact_trajectory_model"] == "sorted-spike-state-space-diffusion"
+    assert bool(event["trajectory_strict_win"]) is False
+    assert bool(event["momentum_evidence_comparable"]) is False
+    assert event["momentum_vs_diffusion_certification"] == "noncomparable_pair"

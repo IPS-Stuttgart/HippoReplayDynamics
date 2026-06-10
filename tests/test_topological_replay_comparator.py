@@ -62,6 +62,15 @@ def test_topological_outputs_summarize_pairing_and_nonrequired_science_gates(tmp
             _row("Rat2/Open1", 1, TOPO_VALID_DIFFUSION_MODEL, 5.0, valid_fraction=0.6),
             _row("Rat2/Open1", 1, TOPO_GRID_WALK_MODEL, 7.0, valid_fraction=0.6),
             _row("Rat2/Open1", 1, TOPO_GEODESIC_MODEL, 5.5, valid_fraction=0.6),
+            _row("Rat3/Open1", 2, EUCLIDEAN_DIFFUSION_MODEL, 6.0),
+            _row(
+                "Rat3/Open1",
+                2,
+                TOPO_GEODESIC_MODEL,
+                100.0,
+                valid_fraction=0.6,
+                evidence_comparable="False",
+            ),
         ]
     )
 
@@ -99,6 +108,7 @@ def _row(
     log_evidence: float,
     *,
     valid_fraction: float | None = None,
+    evidence_comparable: object = True,
 ) -> dict[str, object]:
     row: dict[str, object] = {
         "status": "success",
@@ -111,7 +121,7 @@ def _row(
         "n_time": 10,
         "n_spikes": 12,
         "runtime_s": 0.01,
-        "evidence_comparable": True,
+        "evidence_comparable": evidence_comparable,
         "evidence_support": "exact_full_grid",
     }
     if valid_fraction is not None:

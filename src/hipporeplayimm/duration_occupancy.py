@@ -14,6 +14,7 @@ import numpy as np
 from scipy.special import logsumexp
 
 from .duration_dynamics import attach_duration_metadata, transition_durations_s
+from .state_space_utils import _first_order_imm_content_diagnostics
 
 
 def apply_duration_occupancy_patch() -> None:
@@ -140,6 +141,14 @@ def _score_state_space_duration_with_occupancy(
                 "state_space_imm_nonstationary_event_probability": float(event_mode_mass[1:].sum()),
                 "state_space_imm_mean_mode_entropy": ss._mean_entropy(ss._as_log_probs(mode_post)),
             }
+        )
+        extra.update(
+            _first_order_imm_content_diagnostics(
+                mode_post,
+                trajectory,
+                bin_centers,
+                float(emissions.dt),
+            )
         )
     elif self.mode == "trajectory-imm-exact-sparse":
         from .state_space_trajectory_imm import _score_trajectory_imm_exact_sparse

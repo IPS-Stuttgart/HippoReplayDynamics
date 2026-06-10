@@ -87,12 +87,38 @@ def _successful_rows(scores: pd.DataFrame) -> pd.DataFrame:
     return scores.copy()
 
 
+def _as_bool(value: object, *, default: bool = False) -> bool:
+    if isinstance(value, (bool, np.bool_)):
+        return bool(value)
+    if value is None:
+        return default
+    try:
+        if pd.isna(value):
+            return default
+    except (TypeError, ValueError):
+        pass
+    if isinstance(value, (int, float, np.integer, np.floating)):
+        return bool(value)
+    normalized = str(value).strip().lower()
+    if normalized in {"1", "true", "t", "yes", "y"}:
+        return True
+    if normalized in {"0", "false", "f", "no", "n", "", "nan", "none"}:
+        return False
+    return default
+
+
+def _bool_column(frame: pd.DataFrame, column: str, *, default: bool = False) -> pd.Series:
+    if column not in frame:
+        return pd.Series(default, index=frame.index, dtype=bool)
+    return frame[column].map(lambda value: _as_bool(value, default=default)).astype(bool)
+
+
 def _comparable_rows(scores: pd.DataFrame) -> pd.DataFrame:
     ok = _successful_rows(scores)
     if ok.empty:
         return ok
     if "evidence_comparable" in ok.columns:
-        mask = ok["evidence_comparable"].fillna(False).astype(bool)
+        mask = _bool_column(ok, "evidence_comparable")
         ok = ok[mask].copy()
     return ok
 

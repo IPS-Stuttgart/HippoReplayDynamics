@@ -40,6 +40,32 @@ def _rat_from_session(session: object) -> str:
     return str(session).split("/", 1)[0]
 
 
+def _as_bool(value: object, *, default: bool = False) -> bool:
+    if isinstance(value, (bool, np.bool_)):
+        return bool(value)
+    if value is None:
+        return default
+    try:
+        if pd.isna(value):
+            return default
+    except (TypeError, ValueError):
+        pass
+    if isinstance(value, (int, float, np.integer, np.floating)):
+        return bool(value)
+    normalized = str(value).strip().lower()
+    if normalized in {"1", "true", "t", "yes", "y"}:
+        return True
+    if normalized in {"0", "false", "f", "no", "n", "", "nan", "none"}:
+        return False
+    return default
+
+
+def _bool_column(frame: pd.DataFrame, column: str, *, default: bool = False) -> pd.Series:
+    if column not in frame:
+        return pd.Series(default, index=frame.index, dtype=bool)
+    return frame[column].map(lambda value: _as_bool(value, default=default)).astype(bool)
+
+
 def _success_rows(frame: pd.DataFrame) -> pd.DataFrame:
     out = frame.copy()
     if "status" in out:
@@ -324,7 +350,7 @@ def wrong_map_family_evidence_attenuation_summary(
     groups = [((), family)] if not group_cols else family.groupby(list(group_cols), sort=True)
     for key, group in groups:
         key_tuple = key if isinstance(key, tuple) else (key,)
-        complete = group["required_models_complete_both_maps"].fillna(False).astype(bool)
+        complete = _bool_column(group, "required_models_complete_both_maps")
         usable = group[complete].copy()
         trajectory_delta = usable["best_trajectory_delta_real_minus_wrong"].astype(float).dropna()
         core_delta = usable["best_core_delta_real_minus_wrong"].astype(float).dropna()
@@ -435,7 +461,7 @@ def rat_bootstrap_wrong_map_family_evidence_attenuation(
     if family.empty or "rat" not in family:
         return pd.DataFrame(columns=columns)
     complete = family[
-        family["required_models_complete_both_maps"].fillna(False).astype(bool)
+        _bool_column(family, "required_models_complete_both_maps")
         & family["best_trajectory_delta_real_minus_wrong"].notna()
     ].copy()
     if complete.empty:

@@ -49,6 +49,7 @@ from .state_space_first_order import (
 from .state_space_utils import (
     _as_log_probs,
     _candidate_log_masses,
+    _first_order_imm_content_diagnostics,
     _full_grid_normalized_pairwise_gaussian_log_prob,
     _gaussian_transition_matrix,
     _mass_retaining_candidate_indices,
@@ -83,6 +84,7 @@ __all__ = [
     "_candidate_evidence_support_label",
     "_candidate_selection_label",
     "_candidate_support_config_diagnostics",
+    "_first_order_imm_content_diagnostics",
     "_forward_backward_first_order",
     "_full_grid_normalized_pairwise_gaussian_log_prob",
     "_displacement_lattice",

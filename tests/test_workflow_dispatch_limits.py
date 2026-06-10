@@ -97,6 +97,25 @@ def test_off_swr_promoted_candidate_validation_workflow_wires_candidate_only_exa
     assert "promoted_off_swr_candidate_exact_core_gate_summary.csv" in text
 
 
+def test_first_order_imm_event_mean_audit_workflow_wires_artifact_audit():
+    workflow = Path(".github/workflows/first-order-imm-event-mean-mode-usage-audit.yml")
+    text = workflow.read_text(encoding="utf-8")
+
+    assert _workflow_dispatch_input_count(text) <= 25
+    assert "detected_run_id:" in text
+    assert "promoted_run_id:" in text
+    assert "model-evidence-all-sessions-${DETECTED_RUN_ID}" in text
+    assert "off-swr-promoted-candidate-validation-${PROMOTED_RUN_ID}" in text
+    assert "scripts/deduplicate_off_swr_candidates.py" in text
+    assert "scripts/audit_first_order_imm_event_mean_mode_usage.py" in text
+    assert "all_sessions_event_model_evidence.csv" in text
+    assert "promoted_off_swr_candidate_exact_core_event_model_evidence.csv" in text
+    assert "promoted_off_swr_candidate_exact_core_decisions.csv" in text
+    assert "first_order_imm_mode_usage_gate_summary.csv" in text
+    assert "swr_off_swr_first_order_imm_mode_usage_comparison.csv" in text
+    assert "first-order-imm-event-mean-mode-usage-audit-${{ github.run_id }}" in text
+
+
 def _workflow_dispatch_input_count(workflow: str) -> int:
     """Count first-level workflow_dispatch inputs in a GitHub Actions file."""
 

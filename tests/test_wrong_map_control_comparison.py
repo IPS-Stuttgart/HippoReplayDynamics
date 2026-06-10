@@ -5,6 +5,7 @@ import pandas as pd
 
 sys.path.insert(0, str(Path("scripts").resolve()))
 from compare_wrong_map_evidence_controls import (
+    rat_bootstrap_wrong_map_family_evidence_attenuation,
     wrong_map_control_gate_summary,
     wrong_map_family_evidence_attenuation,
     wrong_map_family_evidence_attenuation_summary,
@@ -85,6 +86,48 @@ def test_wrong_map_absolute_attenuation_can_pass_when_margin_did_is_negative(tmp
         assert (tmp_path / name).is_file()
 
 
+def test_wrong_map_summary_treats_string_false_complete_flag_as_false():
+    family = pd.DataFrame(
+        [
+            _family_row(
+                rat="Rat1",
+                session="Rat1/Open1",
+                event_index=0,
+                complete=True,
+                best_delta=10.0,
+                core_delta=8.0,
+                stationary_delta=4.0,
+                margin_real=12.0,
+                margin_wrong=7.0,
+            ),
+            _family_row(
+                rat="Rat2",
+                session="Rat2/Open1",
+                event_index=1,
+                complete="False",
+                best_delta=1000.0,
+                core_delta=900.0,
+                stationary_delta=800.0,
+                margin_real=700.0,
+                margin_wrong=-300.0,
+            ),
+        ]
+    )
+
+    summary = wrong_map_family_evidence_attenuation_summary(family).iloc[0]
+    bootstrap = rat_bootstrap_wrong_map_family_evidence_attenuation(
+        family,
+        n_bootstrap=20,
+        random_seed=3,
+    ).iloc[0]
+
+    assert summary["events"] == 2
+    assert summary["complete_family_events"] == 1
+    assert summary["mean_best_trajectory_delta_real_minus_wrong"] == 10.0
+    assert summary["mean_family_margin_difference_in_differences"] == 5.0
+    assert bootstrap["observed_mean_best_trajectory_delta_real_minus_wrong"] == 10.0
+
+
 def _score(session: str, event_index: int, model: str, log_evidence: float) -> dict[str, object]:
     return {
         "status": "success",
@@ -107,3 +150,48 @@ def _wrong_score(
     row["map_session"] = map_session
     row["wrong_map_control"] = True
     return row
+
+
+def _family_row(
+    *,
+    rat: str,
+    session: str,
+    event_index: int,
+    complete: object,
+    best_delta: float,
+    core_delta: float,
+    stationary_delta: float,
+    margin_real: float,
+    margin_wrong: float,
+) -> dict[str, object]:
+    return {
+        "rat": rat,
+        "session": session,
+        "event_index": event_index,
+        "map_session": f"{session}-wrong",
+        "required_models_complete_real_map": complete,
+        "required_models_complete_wrong_map": complete,
+        "required_models_complete_both_maps": complete,
+        "missing_required_models_real_map": "",
+        "missing_required_models_wrong_map": "",
+        "best_trajectory_model_real_map": "sorted-spike-state-space-first-order-imm",
+        "best_trajectory_log_evidence_real_map": 0.0,
+        "same_trajectory_model_log_evidence_wrong_map": -best_delta,
+        "best_trajectory_delta_real_minus_wrong": best_delta,
+        "best_trajectory_model_wrong_map": "sorted-spike-state-space-first-order-imm",
+        "best_trajectory_log_evidence_wrong_map": -best_delta,
+        "best_core_model_real_map": "sorted-spike-state-space-first-order-imm",
+        "best_core_log_evidence_real_map": 0.0,
+        "same_core_model_log_evidence_wrong_map": -core_delta,
+        "best_core_delta_real_minus_wrong": core_delta,
+        "best_nontrajectory_model_real_map": "sorted-spike-state-space-stationary",
+        "best_nontrajectory_log_evidence_real_map": -margin_real,
+        "best_nontrajectory_model_wrong_map": "sorted-spike-state-space-stationary",
+        "best_nontrajectory_log_evidence_wrong_map": -margin_wrong,
+        "stationary_log_evidence_real_map": 0.0,
+        "stationary_log_evidence_wrong_map": -stationary_delta,
+        "stationary_delta_real_minus_wrong": stationary_delta,
+        "family_margin_real_map": margin_real,
+        "family_margin_wrong_map": margin_wrong,
+        "family_margin_difference_in_differences": margin_real - margin_wrong,
+    }

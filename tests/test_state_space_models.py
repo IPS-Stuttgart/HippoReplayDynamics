@@ -181,6 +181,27 @@ def test_state_space_modes_return_full_trajectory_posteriors():
                 event_probs[1] + event_probs[2]
             )
             assert score.diagnostics["state_space_imm_mean_mode_entropy"] >= 0.0
+            assert 0.0 <= score.diagnostics["state_space_imm_fraction_time_map_stationary"] <= 1.0
+            assert 0.0 <= score.diagnostics["state_space_imm_fraction_time_map_nonstationary"] <= 1.0
+            assert score.diagnostics["state_space_imm_nonstationary_bout_count"] >= 0
+            assert score.diagnostics["state_space_imm_longest_nonstationary_bout_s"] >= 0.0
+            assert score.diagnostics["state_space_imm_posterior_expected_path_length_cm"] >= 0.0
+            assert score.diagnostics["state_space_imm_posterior_net_displacement_cm"] >= 0.0
+            assert score.diagnostics["state_space_imm_posterior_path_speed_cm_s"] >= 0.0
+
+
+def test_first_order_imm_content_diagnostics_do_not_depend_on_public_alias(monkeypatch):
+    import hipporeplayimm.state_space as state_space
+
+    monkeypatch.delattr(state_space, "_first_order_imm_content_diagnostics", raising=False)
+    emissions = _synthetic_emissions()
+    centers = np.array([[0.0, 0.0], [1.0, 0.0], [2.0, 0.0], [3.0, 0.0]])
+    config = StateSpaceDecoderConfig(mode="first-order-imm", momentum_candidate_top_k=4)
+
+    score = SortedSpikeStateSpaceReplayModel(mode="first-order-imm", config=config).score(emissions, centers)
+
+    assert "state_space_imm_posterior_expected_path_length_cm" in score.diagnostics
+    assert "state_space_imm_posterior_net_displacement_cm" in score.diagnostics
 
 
 def test_exact_sparse_momentum_evidence_only_delegates_to_pyrecest_mode():

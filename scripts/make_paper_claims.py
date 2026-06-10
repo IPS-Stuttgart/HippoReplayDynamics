@@ -248,8 +248,12 @@ def paired_event_deltas(
     out["delta_primary_minus_baseline"] = out["primary_value"] - out["baseline_value"]
     out["primary_evidence_support"] = _lookup_pivot_column(support, paired.index, primary_model, EXACT_EVIDENCE_SUPPORT)
     out["baseline_evidence_support"] = _lookup_pivot_column(support, paired.index, baseline_model, EXACT_EVIDENCE_SUPPORT)
-    out["primary_evidence_comparable"] = _lookup_pivot_column(comparable, paired.index, primary_model, True).astype(bool)
-    out["baseline_evidence_comparable"] = _lookup_pivot_column(comparable, paired.index, baseline_model, True).astype(bool)
+    out["primary_evidence_comparable"] = _coerce_bool_series(
+        _lookup_pivot_column(comparable, paired.index, primary_model, True),
+    )
+    out["baseline_evidence_comparable"] = _coerce_bool_series(
+        _lookup_pivot_column(comparable, paired.index, baseline_model, True),
+    )
     out["both_evidence_comparable"] = out["primary_evidence_comparable"] & out["baseline_evidence_comparable"]
     out["primary_is_truncated_lower_bound"] = out["primary_evidence_support"].astype(str).eq(TRUNCATED_EVIDENCE_SUPPORT)
     out["baseline_is_exact"] = out["baseline_evidence_support"].astype(str).eq(EXACT_EVIDENCE_SUPPORT)
@@ -579,7 +583,31 @@ def _first_nonempty(values: pd.Series) -> object:
 def _all_bool(values: pd.Series) -> bool:
     if values.empty:
         return False
-    return bool(values.fillna(False).astype(bool).all())
+    return bool(_coerce_bool_series(values).all())
+
+
+def _coerce_bool(value: object, *, default: bool = False) -> bool:
+    if isinstance(value, (bool, np.bool_)):
+        return bool(value)
+    if value is None:
+        return default
+    try:
+        if pd.isna(value):
+            return default
+    except (TypeError, ValueError):
+        pass
+    if isinstance(value, (int, float, np.integer, np.floating)):
+        return bool(value)
+    normalized = str(value).strip().lower()
+    if normalized in {"1", "true", "t", "yes", "y"}:
+        return True
+    if normalized in {"0", "false", "f", "no", "n", "", "nan", "none"}:
+        return False
+    return default
+
+
+def _coerce_bool_series(values: pd.Series, *, default: bool = False) -> pd.Series:
+    return values.map(lambda value: _coerce_bool(value, default=default)).astype(bool)
 
 
 def _safe_fraction(numerator: int, denominator: int) -> float:

@@ -118,6 +118,38 @@ def test_mode_readiness_requires_mode_diagnostic_columns():
     assert not bool(readiness.iloc[0]["interpretability_ready"])
 
 
+def test_noncomparable_trajectory_imm_rows_cannot_satisfy_promotion_or_readiness():
+    scores = pd.DataFrame(
+        [
+            row("Rat1/Open1", 0, DEFAULT_STATIONARY_MODEL, 0.0),
+            row("Rat1/Open1", 0, DEFAULT_DIFFUSION_MODEL, 3.0),
+            row("Rat1/Open1", 0, DEFAULT_FRAGMENTED_MODEL, 4.0),
+            row("Rat1/Open1", 0, DEFAULT_MOMENTUM_MODEL, 5.0),
+            row("Rat1/Open1", 0, DEFAULT_FIRST_ORDER_IMM_MODEL, 10.0),
+            row(
+                "Rat1/Open1",
+                0,
+                DEFAULT_TRAJECTORY_IMM_MODEL,
+                100.0,
+                evidence_comparable="False",
+                evidence_support="truncated_full_grid",
+                mode_mass_momentum=0.7,
+            ),
+        ]
+    )
+
+    pairs = trajectory_imm_event_pairs(scores)
+    summary = trajectory_imm_superiority_summary(pairs).iloc[0]
+    readiness = trajectory_imm_mode_readiness(scores).iloc[0]
+
+    assert not bool(pairs.iloc[0]["required_core_complete"])
+    assert DEFAULT_TRAJECTORY_IMM_MODEL in pairs.iloc[0]["missing_required_core_models"]
+    assert pd.isna(pairs.iloc[0]["trajectory_imm_log_evidence"])
+    assert summary["complete_core_events"] == 0
+    assert readiness["trajectory_imm_rows"] == 0
+    assert not bool(readiness["interpretability_ready"])
+
+
 def test_rat_bootstrap_reports_positive_intervals_for_strong_rows():
     scores = pd.DataFrame(
         [
@@ -147,6 +179,8 @@ def row(
     event_index: int,
     model: str,
     log_evidence: float,
+    evidence_comparable: object = True,
+    evidence_support: str = "exact_full_grid",
     **diagnostics: float,
 ) -> dict[str, object]:
     out: dict[str, object] = {
@@ -157,6 +191,8 @@ def row(
         "requested_model": model,
         "model_family": "trajectory" if model != DEFAULT_STATIONARY_MODEL else "stationary",
         "log_evidence": log_evidence,
+        "evidence_comparable": evidence_comparable,
+        "evidence_support": evidence_support,
     }
     out.update(diagnostics)
     return out

@@ -6,6 +6,7 @@ from scripts.make_paper_claims import (
     PaperClaimConfig,
     build_paper_claim_tables,
     load_score_tables,
+    paired_event_deltas,
 )
 
 
@@ -110,6 +111,35 @@ def test_paper_claim_tables_accept_sparse_momentum_support_diagnostic():
     assert tables.summary.iloc[0]["paired_events"] == 1
     assert tables.event_deltas.iloc[0]["primary_evidence_support"] == "exact_full_grid"
     assert bool(tables.event_deltas.iloc[0]["both_evidence_comparable"])
+
+
+def test_paired_event_deltas_treats_string_false_comparable_as_false():
+    primary = "sorted-spike-state-space-momentum-exact-sparse"
+    baseline = "sorted-spike-state-space-diffusion"
+    frame = pd.DataFrame(
+        [
+            {
+                **_row("Rat1/Open1", 0, baseline, 0.0),
+                "evidence_comparable": "True",
+            },
+            {
+                **_row("Rat1/Open1", 0, primary, 10.0),
+                "evidence_comparable": "False",
+            },
+        ]
+    )
+
+    deltas = paired_event_deltas(
+        frame,
+        primary_model=primary,
+        baseline_model=baseline,
+    )
+
+    row = deltas.iloc[0]
+    assert not bool(row["primary_evidence_comparable"])
+    assert not bool(row["both_evidence_comparable"])
+    assert not bool(row["strict_primary_win"])
+    assert row["claim_category"] == "nondecisive_or_noncomparable"
 
 
 def test_load_score_tables_accepts_directory_with_event_scores(tmp_path):

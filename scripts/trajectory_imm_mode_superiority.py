@@ -35,6 +35,7 @@ DEFAULT_FRAGMENTED_MODEL = "sorted-spike-state-space-fragmented"
 DEFAULT_MARGIN_THRESHOLD = 5.5
 DEFAULT_RAT_BOOTSTRAP_REPLICATES = 2000
 DEFAULT_RAT_BOOTSTRAP_RANDOM_SEED = 1
+EXACT_EVIDENCE_SUPPORT = "exact_full_grid"
 DEFAULT_REQUIRED_AUGMENTED_CORE_MODELS = (
     DEFAULT_STATIONARY_MODEL,
     DEFAULT_DIFFUSION_MODEL,
@@ -57,6 +58,32 @@ def _as_models(value: str | Iterable[str] | None) -> tuple[str, ...]:
     return tuple(str(part) for part in value if str(part))
 
 
+def _as_bool(value: object, *, default: bool = False) -> bool:
+    if isinstance(value, (bool, np.bool_)):
+        return bool(value)
+    if value is None:
+        return default
+    try:
+        if pd.isna(value):
+            return default
+    except (TypeError, ValueError):
+        pass
+    if isinstance(value, (int, float, np.integer, np.floating)):
+        return bool(value)
+    normalized = str(value).strip().lower()
+    if normalized in {"1", "true", "t", "yes", "y"}:
+        return True
+    if normalized in {"0", "false", "f", "no", "n", "", "nan", "none"}:
+        return False
+    return default
+
+
+def _bool_column(frame: pd.DataFrame, column: str, *, default: bool = False) -> pd.Series:
+    if column not in frame:
+        return pd.Series(default, index=frame.index, dtype=bool)
+    return frame[column].map(lambda value: _as_bool(value, default=default)).astype(bool)
+
+
 def _success_rows(frame: pd.DataFrame) -> pd.DataFrame:
     """Return successful model-evidence rows with normalized core columns."""
 
@@ -73,7 +100,14 @@ def _success_rows(frame: pd.DataFrame) -> pd.DataFrame:
     out["event_index"] = out["event_index"].astype(int)
     out["model"] = out["model"].astype(str)
     out["log_evidence"] = pd.to_numeric(out["log_evidence"], errors="coerce")
-    return out.dropna(subset=["log_evidence"])
+    out = out.dropna(subset=["log_evidence"]).copy()
+    if "evidence_comparable" in out.columns:
+        out["evidence_comparable"] = _bool_column(out, "evidence_comparable")
+    elif "evidence_support" in out.columns:
+        out["evidence_comparable"] = out["evidence_support"].astype(str).eq(EXACT_EVIDENCE_SUPPORT)
+    else:
+        out["evidence_comparable"] = True
+    return out
 
 
 def _value_for_model(group: pd.DataFrame, model: str) -> float:
@@ -111,6 +145,7 @@ def trajectory_imm_event_pairs(
     """Return paired event-level evidence comparisons for trajectory-IMM."""
 
     ok = _success_rows(scores)
+    comparable = ok[_bool_column(ok, "evidence_comparable")].copy()
     required_core_models = _as_models(required_core_models)
     core_set = set(required_core_models)
     columns = [
@@ -148,7 +183,14 @@ def trajectory_imm_event_pairs(
         "momentum_raw_best_exact_core",
     ]
     rows: list[dict[str, object]] = []
-    for (session, event_index), group in ok.groupby(["session", "event_index"], sort=True):
+    event_keys = ok[["session", "event_index", "rat"]].drop_duplicates().sort_values(["session", "event_index"])
+    for _, event in event_keys.iterrows():
+        session = str(event["session"])
+        event_index = int(event["event_index"])
+        group = comparable[
+            comparable["session"].eq(session)
+            & comparable["event_index"].eq(event_index)
+        ].copy()
         present = set(group["model"].astype(str))
         missing = tuple(model for model in required_core_models if model not in present)
         trajectory_value = _value_for_model(group, trajectory_imm_model)
@@ -162,9 +204,9 @@ def trajectory_imm_event_pairs(
         delta_stationary = trajectory_value - stationary_value
         rows.append(
             {
-                "rat": _rat_from_session(session),
-                "session": str(session),
-                "event_index": int(event_index),
+                "rat": str(event["rat"]),
+                "session": session,
+                "event_index": event_index,
                 "required_core_models_present": int(len(core_set.intersection(present))),
                 "required_core_models_total": int(len(core_set)),
                 "required_core_complete": not missing,
@@ -251,7 +293,7 @@ def _summarize_event_pairs(
     groups = [((), pairs)] if not group_cols else pairs.groupby(list(group_cols), sort=True)
     for key, group in groups:
         key_tuple = key if isinstance(key, tuple) else (key,)
-        complete = group[group["required_core_complete"].astype(bool)].copy()
+        complete = group[_bool_column(group, "required_core_complete")].copy()
         d_first = complete["delta_trajectory_imm_minus_first_order_imm"].astype(float).dropna()
         d_momentum = complete["delta_trajectory_imm_minus_momentum"].astype(float).dropna()
         row = {column: value for column, value in zip(group_cols, key_tuple, strict=True)}
@@ -355,7 +397,7 @@ def rat_bootstrap_trajectory_imm_superiority(
         "raw_best_exact_core_fraction_ci95_low",
         "raw_best_exact_core_fraction_ci95_high",
     ]
-    complete = pairs[pairs.get("required_core_complete", pd.Series(False, index=pairs.index)).astype(bool)].copy()
+    complete = pairs[_bool_column(pairs, "required_core_complete")].copy()
     if complete.empty:
         return pd.DataFrame(columns=columns)
     rats = sorted(complete["rat"].dropna().astype(str).unique())
@@ -434,7 +476,10 @@ def trajectory_imm_mode_readiness(
     """Summarize whether trajectory-IMM rows expose interpretable mode diagnostics."""
 
     ok = _success_rows(scores)
-    rows = ok[ok["model"].astype(str).eq(str(trajectory_imm_model))].copy()
+    rows = ok[
+        ok["model"].astype(str).eq(str(trajectory_imm_model))
+        & _bool_column(ok, "evidence_comparable")
+    ].copy()
     if rows.empty:
         return pd.DataFrame(
             [

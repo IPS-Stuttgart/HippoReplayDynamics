@@ -240,6 +240,32 @@ def write_topological_replay_outputs(
     }
 
 
+def _as_bool(value: object, *, default: bool = False) -> bool:
+    if isinstance(value, (bool, np.bool_)):
+        return bool(value)
+    if value is None:
+        return default
+    try:
+        if pd.isna(value):
+            return default
+    except (TypeError, ValueError):
+        pass
+    if isinstance(value, (int, float, np.integer, np.floating)):
+        return bool(value)
+    normalized = str(value).strip().lower()
+    if normalized in {"1", "true", "t", "yes", "y"}:
+        return True
+    if normalized in {"0", "false", "f", "no", "n", "", "nan", "none"}:
+        return False
+    return default
+
+
+def _bool_column(frame: pd.DataFrame, column: str, *, default: bool = False) -> pd.Series:
+    if column not in frame:
+        return pd.Series(default, index=frame.index, dtype=bool)
+    return frame[column].map(lambda value: _as_bool(value, default=default)).astype(bool)
+
+
 def euclidean_vs_topological_trajectory_summary(
     evidence: pd.DataFrame,
     *,
@@ -253,7 +279,7 @@ def euclidean_vs_topological_trajectory_summary(
     key_columns = _event_key_columns(evidence)
     ok = evidence[evidence.get("status", "success").eq("success")].copy()
     if "evidence_comparable" in ok:
-        ok = ok[ok["evidence_comparable"].fillna(False).astype(bool)]
+        ok = ok[_bool_column(ok, "evidence_comparable")]
     if ok.empty or not key_columns:
         return _empty_comparison_summary()
 

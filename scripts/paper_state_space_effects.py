@@ -113,7 +113,7 @@ def load_event_scores(input_path: str | Path, *, exact_only: bool = False) -> pd
     frame["log_evidence"] = pd.to_numeric(frame["log_evidence"], errors="coerce")
     frame = frame[np.isfinite(frame["log_evidence"].to_numpy(float))].copy()
     if exact_only:
-        frame = frame[frame["evidence_comparable"].fillna(False).astype(bool)].copy()
+        frame = frame[_bool_mask(frame, "evidence_comparable")].copy()
     frame["canonical_model"] = frame["model"].map(canonical_model_name)
     frame["canonical_model_family"] = frame["canonical_model"].map(model_family)
     return frame.reset_index(drop=True)
@@ -439,14 +439,14 @@ def _event_key_columns(frame: pd.DataFrame) -> list[str]:
 def _event_counts(group: pd.DataFrame) -> dict[str, object]:
     return {
         "successful_model_rows": int(len(group)),
-        "exact_model_rows": int(group["evidence_comparable"].fillna(False).astype(bool).sum()),
+        "exact_model_rows": int(_bool_mask(group, "evidence_comparable").sum()),
         "truncated_lower_bound_rows": int(group["evidence_support"].astype(str).eq(TRUNCATED_EVIDENCE_SUPPORT).sum()),
         "models_scored": int(group["canonical_model"].nunique()),
     }
 
 
 def _trajectory_effects(group: pd.DataFrame) -> dict[str, object]:
-    exact = group[group["evidence_comparable"].fillna(False).astype(bool)].copy()
+    exact = group[_bool_mask(group, "evidence_comparable")].copy()
     exact_trajectory = exact[exact["canonical_model_family"].eq("trajectory")]
     exact_nontrajectory = exact[exact["canonical_model_family"].eq("nontrajectory")]
     any_trajectory = group[group["canonical_model_family"].eq("trajectory")]
@@ -538,14 +538,14 @@ def _momentum_diffusion_effects(group: pd.DataFrame) -> dict[str, object]:
 
     delta = _row_float(momentum, "log_evidence") - _row_float(diffusion, "log_evidence")
     momentum_support = str(momentum.get("evidence_support", ""))
-    diffusion_comparable = bool(diffusion.get("evidence_comparable", False))
-    momentum_comparable = bool(momentum.get("evidence_comparable", False))
+    diffusion_comparable = _row_bool(diffusion, "evidence_comparable")
+    momentum_comparable = _row_bool(momentum, "evidence_comparable")
     momentum_is_lower_bound = momentum_support == TRUNCATED_EVIDENCE_SUPPORT
     out["momentum_minus_diffusion_log_evidence"] = float(delta)
     out["momentum_beats_diffusion_reported"] = bool(delta > 0.0)
     if exact_displacement_momentum is not None:
         exact_delta = _row_float(exact_displacement_momentum, "log_evidence") - _row_float(diffusion, "log_evidence")
-        exact_comparable = bool(exact_displacement_momentum.get("evidence_comparable", False)) and diffusion_comparable
+        exact_comparable = _row_bool(exact_displacement_momentum, "evidence_comparable") and diffusion_comparable
         out["exact_displacement_momentum_minus_diffusion_log_evidence"] = float(exact_delta)
         out["exact_displacement_momentum_beats_diffusion"] = bool(exact_comparable and exact_delta > 0.0)
 
@@ -586,13 +586,20 @@ def _row_float(row: pd.Series | None, column: str) -> float:
 def _row_bool(row: pd.Series | None, column: str) -> bool:
     if row is None or column not in row:
         return False
-    return bool(row[column])
+    value = _coerce_optional_bool(row[column])
+    return False if pd.isna(value) else bool(value)
 
 
 def _bool_series(frame: pd.DataFrame, column: str) -> pd.Series:
     if column not in frame:
         return pd.Series(dtype=object)
     return frame[column].map(_coerce_optional_bool)
+
+
+def _bool_mask(frame: pd.DataFrame, column: str) -> pd.Series:
+    if column not in frame:
+        return pd.Series(False, index=frame.index, dtype=bool)
+    return _bool_series(frame, column).fillna(False).astype(bool)
 
 
 def _coerce_optional_bool(value: object) -> bool | float:

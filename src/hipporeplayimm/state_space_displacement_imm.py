@@ -131,9 +131,11 @@ def _score_displacement_imm_exact(
     )
     decays = _duration_adjusted_decays(config, durations, float(emissions.dt))
     time_scales = _time_scales(durations)
-    mode_transition = _mode_transition_matrix(
+    mode_transitions = _mode_transition_matrices(
         n_modes,
         float(getattr(config, "imm_mode_stickiness", 0.95)),
+        float(getattr(config, "imm_switch_tau_s", 0.0)),
+        durations,
     )
 
     position_prior = _uniform_position_prior(n_bins, valid_mask)
@@ -166,6 +168,7 @@ def _score_displacement_imm_exact(
     transition_cache: list[dict[str, object]] = []
     for time_index in range(1, emissions.n_time):
         transition_index = time_index - 1
+        mode_transition = mode_transitions[transition_index]
         diffusion_transition = _gaussian_transition_matrix(
             centers,
             float(diffusion_sigmas[transition_index]),
@@ -224,6 +227,7 @@ def _score_displacement_imm_exact(
         smoothed[-1] = filtered[-1]
         for time_index in range(emissions.n_time - 1, 0, -1):
             cache = transition_cache[time_index - 1]
+            mode_transition = mode_transitions[time_index - 1]
             beta_prev = np.zeros_like(beta)
             for src_mode_index in range(n_modes):
                 total = np.zeros((n_bins, n_displacements), dtype=float)
@@ -284,6 +288,12 @@ def _score_displacement_imm_exact(
         "state_space_displacement_imm_state_support": "finite_displacement_grid",
         "state_space_displacement_imm_modes": ",".join(_DISPLACEMENT_IMM_MODES),
         "state_space_displacement_imm_mode_count": int(n_modes),
+        "state_space_displacement_imm_switch_tau_s": float(
+            getattr(config, "imm_switch_tau_s", 0.0)
+        ),
+        "state_space_displacement_imm_mode_stickiness_per_step": _format_float_series(
+            np.asarray([matrix[0, 0] for matrix in mode_transitions], dtype=float)
+        ),
         "state_space_displacement_imm_state_count": int(n_modes * valid_count * n_displacements),
         "state_space_displacement_state_count": int(n_displacements),
         "state_space_displacement_joint_state_count": int(valid_count * n_displacements),
@@ -314,6 +324,34 @@ def _score_displacement_imm_exact(
         displacement_log_posterior,
         diagnostics,
     )
+
+
+def _mode_transition_matrices(
+    n_modes: int,
+    mode_stickiness: float,
+    imm_switch_tau_s: float,
+    durations: np.ndarray,
+) -> list[np.ndarray]:
+    """Return one mode-transition matrix for each adjacent replay-bin pair."""
+
+    durations = np.asarray(durations, dtype=float)
+    tau_s = float(imm_switch_tau_s)
+    if not np.isfinite(tau_s) or tau_s < 0.0:
+        raise ValueError("imm_switch_tau_s must be finite and nonnegative")
+
+    if tau_s == 0.0:
+        transition = _mode_transition_matrix(int(n_modes), float(mode_stickiness))
+        return [transition for _ in range(int(durations.size))]
+
+    if not np.all(np.isfinite(durations)) or np.any(durations <= 0.0):
+        raise ValueError("transition durations must be finite and positive")
+    return [
+        _mode_transition_matrix(
+            int(n_modes),
+            float(np.exp(-float(duration) / tau_s)),
+        )
+        for duration in durations
+    ]
 
 
 def _advance_mode(

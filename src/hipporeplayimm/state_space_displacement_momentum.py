@@ -254,13 +254,17 @@ def _shifted_gaussian_transition_matrix(
     max_step_sigma: float,
     valid_bin_mask: np.ndarray | None = None,
 ) -> csr_matrix:
-    if sigma_cm <= 0.0 or not np.isfinite(sigma_cm):
+    sigma_cm = float(sigma_cm)
+    max_step_sigma = float(max_step_sigma)
+    if not np.isfinite(sigma_cm) or sigma_cm <= 0.0:
         raise ValueError("sigma_cm must be finite and positive")
+    if not np.isfinite(max_step_sigma) or max_step_sigma <= 0.0:
+        raise ValueError("max_step_sigma must be finite and positive")
     centers = _as_2d_centers(bin_centers)
     n_bins = centers.shape[0]
     valid_mask = _coerce_valid_bin_mask(valid_bin_mask, n_bins)
     allowed = np.arange(n_bins, dtype=int) if valid_mask is None else np.flatnonzero(valid_mask)
-    radius2 = (float(sigma_cm) * float(max_step_sigma)) ** 2
+    radius2 = (sigma_cm * max_step_sigma) ** 2
     rows: list[int] = []
     cols: list[int] = []
     data: list[float] = []
@@ -274,7 +278,7 @@ def _shifted_gaussian_transition_matrix(
         if not np.any(keep):
             keep[int(allowed[int(np.argmin(dist2[allowed]))])] = True
         dst = np.flatnonzero(keep)
-        weights = np.exp(-0.5 * dist2[dst] / (float(sigma_cm) * float(sigma_cm)))
+        weights = np.exp(-0.5 * dist2[dst] / (sigma_cm * sigma_cm))
         weights_sum = float(weights.sum())
         if weights_sum <= 0.0 or not np.isfinite(weights_sum):
             weights = np.ones(dst.shape[0], dtype=float) / max(int(dst.shape[0]), 1)
@@ -299,9 +303,16 @@ def _displacement_transition_matrix(
     predicted = float(decay) * vectors
     delta = vectors[:, None, :] - predicted[None, :, :]
     dist2 = np.sum(delta * delta, axis=2)
-    weights = np.exp(-0.5 * dist2 / (float(sigma_cm) * float(sigma_cm)))
+    with np.errstate(under="ignore"):
+        weights = np.exp(-0.5 * dist2 / (float(sigma_cm) * float(sigma_cm)))
     weights_sum = weights.sum(axis=0, keepdims=True)
-    weights_sum[weights_sum <= 0.0] = 1.0
+    bad_columns = (~np.isfinite(weights_sum[0])) | (weights_sum[0] <= 0.0)
+    if np.any(bad_columns):
+        weights[:, bad_columns] = 0.0
+        nearest_rows = np.argmin(dist2[:, bad_columns], axis=0)
+        bad_indices = np.flatnonzero(bad_columns)
+        weights[nearest_rows, bad_indices] = 1.0
+        weights_sum = weights.sum(axis=0, keepdims=True)
     return weights / weights_sum
 
 
@@ -404,13 +415,15 @@ def _duration_adjusted_decays(config: object, durations: np.ndarray, reference_d
     if durations.size == 0:
         return np.empty(0, dtype=float)
     tau_s = float(getattr(config, "momentum_velocity_decay_tau_s", 0.0))
+    if not np.isfinite(tau_s) or tau_s < 0.0:
+        raise ValueError("momentum_velocity_decay_tau_s must be finite and nonnegative")
     if tau_s > 0.0:
-        if not np.isfinite(tau_s):
-            raise ValueError("momentum_velocity_decay_tau_s must be finite when positive")
         return np.exp(-durations / tau_s)
     decay = float(getattr(config, "momentum_velocity_decay", 0.95))
     if not np.isfinite(decay) or decay < 0.0:
         raise ValueError("momentum_velocity_decay must be finite and nonnegative")
+    if not np.isfinite(reference_dt) or reference_dt <= 0.0:
+        raise ValueError("reference dt must be finite and positive")
     return np.asarray([decay ** (float(duration) / reference_dt) for duration in durations], dtype=float)
 
 

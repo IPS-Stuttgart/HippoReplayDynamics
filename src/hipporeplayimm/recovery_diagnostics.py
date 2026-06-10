@@ -268,7 +268,9 @@ def _diagnostic_summary_row(label: str, group: pd.DataFrame) -> dict[str, object
         values = pd.to_numeric(group[diagnostic_column], errors="coerce")
         row[f"mean_{diagnostic_column}"] = float(values.mean()) if values.notna().any() else np.nan
         if diagnostic_column == "expected_candidate_true_path_fully_supported":
-            row["expected_true_path_fully_supported_events"] = int(values.fillna(0).astype(bool).sum())
+            row["expected_true_path_fully_supported_events"] = int(
+                _coerce_bool_series(group[diagnostic_column]).sum()
+            )
     if "exact_displacement_momentum_scored" in group:
         scored = _coerce_bool_series(group["exact_displacement_momentum_scored"])
         exact_wins = group.get(
@@ -296,15 +298,15 @@ def _diagnostic_summary_row(label: str, group: pd.DataFrame) -> dict[str, object
 def _classify_failure_mode(row: dict[str, object]) -> str:
     if int(row.get("successful_scores", 0)) <= 0:
         return "no_successful_scores"
-    if not bool(row.get("expected_model_scored", False)):
+    if not _coerce_bool(row.get("expected_model_scored", False)):
         return "expected_model_not_scored"
-    if bool(row.get("strict_recovered_expected_model", False)):
+    if _coerce_bool(row.get("strict_recovered_expected_model", False)):
         return "strict_recovered"
-    if bool(row.get("certified_vs_exact_recovered_expected_model", False)):
+    if _coerce_bool(row.get("certified_vs_exact_recovered_expected_model", False)):
         return "strict_gate_excluded_certified_lower_bound"
     if (
         str(row.get("true_model", "")).lower() == "momentum"
-        and bool(row.get("exact_displacement_momentum_beats_diffusion_exact", False))
+        and _coerce_bool(row.get("exact_displacement_momentum_beats_diffusion_exact", False))
     ):
         return "candidate_momentum_failed_but_exact_displacement_recovers"
     triplet_coverage = _coerce_float(row.get("expected_candidate_true_triplet_coverage"), np.nan)
@@ -319,7 +321,7 @@ def _classify_failure_mode(row: dict[str, object]) -> str:
             return "lower_bound_not_decisive"
     if int(row.get("comparable_scores", 0)) <= 0:
         return "no_comparable_exact_reference"
-    if bool(row.get("expected_model_evidence_comparable", False)):
+    if _coerce_bool(row.get("expected_model_evidence_comparable", False)):
         return "expected_exact_not_best"
     return "nondecisive_unknown"
 
@@ -414,6 +416,14 @@ def _row_bool(row: pd.Series, column: str, default: bool) -> bool:
     if column not in row.index or pd.isna(row[column]):
         return default
     value = row[column]
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "y"}
+    return bool(value)
+
+
+def _coerce_bool(value: object, default: bool = False) -> bool:
+    if pd.isna(value):
+        return default
     if isinstance(value, str):
         return value.strip().lower() in {"1", "true", "yes", "y"}
     return bool(value)

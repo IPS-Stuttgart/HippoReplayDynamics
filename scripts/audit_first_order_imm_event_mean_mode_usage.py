@@ -109,6 +109,12 @@ def _as_bool(value: object) -> bool:
     return str(value).strip().lower() in {"1", "true", "t", "yes", "y"}
 
 
+def _bool_column(frame: pd.DataFrame, column: str) -> pd.Series:
+    if column not in frame:
+        return pd.Series(False, index=frame.index, dtype=bool)
+    return frame[column].map(_as_bool).astype(bool)
+
+
 def _numeric(frame: pd.DataFrame, column: str) -> pd.Series:
     if column not in frame:
         return pd.Series(np.nan, index=frame.index, dtype=float)
@@ -160,7 +166,7 @@ def _diag_value(group: pd.DataFrame, model: str, column: str) -> float:
 
 
 def _best_exact_core(group: pd.DataFrame) -> tuple[str, float]:
-    exact = group[group["model"].isin(REQUIRED_EXACT_CORE_MODELS) & group["evidence_comparable"].astype(bool)].copy()
+    exact = group[group["model"].isin(REQUIRED_EXACT_CORE_MODELS) & _bool_column(group, "evidence_comparable")].copy()
     if exact.empty:
         return "", float("nan")
     exact = exact.sort_values("log_evidence", ascending=False)
@@ -286,10 +292,10 @@ def build_event_mean_mode_usage_event_summary(
 
 
 def _summary_row(scope: str, frame: pd.DataFrame, *, event_class: str = "", rat: str = "", session: str = "") -> dict[str, object]:
-    first_order = frame[frame["first_order_imm_is_best_exact_core"].astype(bool)].copy()
+    first_order = frame[_bool_column(frame, "first_order_imm_is_best_exact_core")].copy()
     denominator = len(first_order)
-    moderate = int(first_order["trajectory_content_gate_passed"].astype(bool).sum()) if not first_order.empty else 0
-    strong = int(first_order["strong_trajectory_content_gate_passed"].astype(bool).sum()) if not first_order.empty else 0
+    moderate = int(_bool_column(first_order, "trajectory_content_gate_passed").sum()) if not first_order.empty else 0
+    strong = int(_bool_column(first_order, "strong_trajectory_content_gate_passed").sum()) if not first_order.empty else 0
     status = (
         "posterior_content_supported"
         if denominator > 0 and moderate > denominator / 2
@@ -304,9 +310,9 @@ def _summary_row(scope: str, frame: pd.DataFrame, *, event_class: str = "", rat:
         "session": session,
         "events": int(len(frame)),
         "first_order_imm_best_events": int(denominator),
-        "event_mean_mode_diagnostic_events": int(first_order["event_mean_mode_diagnostics_present"].astype(bool).sum()) if not first_order.empty else 0,
-        "map_mode_diagnostic_events": int(first_order["map_mode_diagnostics_present"].astype(bool).sum()) if not first_order.empty else 0,
-        "spatial_content_diagnostic_events": int(first_order["spatial_content_diagnostics_present"].astype(bool).sum()) if not first_order.empty else 0,
+        "event_mean_mode_diagnostic_events": int(_bool_column(first_order, "event_mean_mode_diagnostics_present").sum()) if not first_order.empty else 0,
+        "map_mode_diagnostic_events": int(_bool_column(first_order, "map_mode_diagnostics_present").sum()) if not first_order.empty else 0,
+        "spatial_content_diagnostic_events": int(_bool_column(first_order, "spatial_content_diagnostics_present").sum()) if not first_order.empty else 0,
         "moderate_content_gate_events": moderate,
         "moderate_content_gate_fraction_of_first_order_best": moderate / denominator if denominator else np.nan,
         "strong_content_gate_events": strong,
@@ -368,13 +374,13 @@ def build_mode_usage_gate_summary(
         )
 
     for (event_class, selection_rule), group in event_summary.groupby(["event_class", "selection_rule"], sort=True, dropna=False):
-        first_order = group[group["first_order_imm_is_best_exact_core"].astype(bool)].copy()
+        first_order = group[_bool_column(group, "first_order_imm_is_best_exact_core")].copy()
         n_first = len(first_order)
-        event_diag = int(first_order["event_mean_mode_diagnostics_present"].astype(bool).sum()) if n_first else 0
-        map_diag = int(first_order["map_mode_diagnostics_present"].astype(bool).sum()) if n_first else 0
-        spatial_diag = int(first_order["spatial_content_diagnostics_present"].astype(bool).sum()) if n_first else 0
-        moderate = int(first_order["trajectory_content_gate_passed"].astype(bool).sum()) if n_first else 0
-        strong = int(first_order["strong_trajectory_content_gate_passed"].astype(bool).sum()) if n_first else 0
+        event_diag = int(_bool_column(first_order, "event_mean_mode_diagnostics_present").sum()) if n_first else 0
+        map_diag = int(_bool_column(first_order, "map_mode_diagnostics_present").sum()) if n_first else 0
+        spatial_diag = int(_bool_column(first_order, "spatial_content_diagnostics_present").sum()) if n_first else 0
+        moderate = int(_bool_column(first_order, "trajectory_content_gate_passed").sum()) if n_first else 0
+        strong = int(_bool_column(first_order, "strong_trajectory_content_gate_passed").sum()) if n_first else 0
         add(str(event_class), str(selection_rule), "events_present", len(group) > 0, int(len(group)), "event rows are present")
         add(str(event_class), str(selection_rule), "first_order_imm_best_rows_present", n_first > 0, n_first, "first-order IMM is exact-core best on at least one event")
         add(str(event_class), str(selection_rule), "event_mean_mode_diagnostics_complete", n_first > 0 and event_diag == n_first, f"{event_diag}/{n_first}", "event-mean mode probabilities are present for all first-order IMM best rows")

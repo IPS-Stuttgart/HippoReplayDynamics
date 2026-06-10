@@ -158,6 +158,12 @@ def _as_bool(value: object) -> bool:
     return str(value).strip().lower() in {"1", "true", "t", "yes", "y"}
 
 
+def _bool_column(frame: pd.DataFrame, column: str) -> pd.Series:
+    if column not in frame:
+        return pd.Series(False, index=frame.index, dtype=bool)
+    return frame[column].map(_as_bool).astype(bool)
+
+
 def _clean_optional_text(value: object) -> object:
     if pd.isna(value):
         return ""
@@ -275,7 +281,7 @@ def build_first_order_imm_mode_usage_event_table(
         event_index = int(group.iloc[0]["event_index"])
         exact_group = group[
             group["model"].isin(REQUIRED_EXACT_CORE_MODELS)
-            & group["evidence_comparable"].astype(bool)
+            & _bool_column(group, "evidence_comparable")
         ].copy()
         exact_core_complete = not _missing_models(exact_group, REQUIRED_EXACT_CORE_MODELS)
         best_exact_model, _ = _best_in(exact_group, REQUIRED_EXACT_CORE_MODELS)
@@ -397,8 +403,8 @@ def _summary_row(scope: str, frame: pd.DataFrame) -> dict[str, object]:
             "events": 0,
             "posterior_content_status": "empty_scope",
         }
-    terminal_present = frame["terminal_mode_diagnostics_present"].astype(bool)
-    event_present = frame["event_mean_mode_diagnostics_present"].astype(bool)
+    terminal_present = _bool_column(frame, "terminal_mode_diagnostics_present")
+    event_present = _bool_column(frame, "event_mean_mode_diagnostics_present")
     event_status = (
         "event_mean_mode_mass_available"
         if bool(event_present.all())
@@ -411,30 +417,30 @@ def _summary_row(scope: str, frame: pd.DataFrame) -> dict[str, object]:
     return {
         "scope": scope,
         "events": int(len(frame)),
-        "exact_core_complete_events": int(frame["exact_core_complete"].astype(bool).sum()),
-        "first_order_imm_best_events": int(frame["first_order_imm_is_best_exact_core"].astype(bool).sum()),
+        "exact_core_complete_events": int(_bool_column(frame, "exact_core_complete").sum()),
+        "first_order_imm_best_events": int(_bool_column(frame, "first_order_imm_is_best_exact_core").sum()),
         "first_order_imm_confident_exact_core_best_events": int(
-            frame["first_order_imm_confident_exact_core_best"].astype(bool).sum()
+            _bool_column(frame, "first_order_imm_confident_exact_core_best").sum()
         ),
         "trajectory_capable_confident_vs_stationary_events": int(
-            frame["trajectory_capable_confident_vs_stationary"].astype(bool).sum()
+            _bool_column(frame, "trajectory_capable_confident_vs_stationary").sum()
         ),
         "terminal_mode_diagnostic_events": int(terminal_present.sum()),
         "terminal_nonstationary_majority_events": int(
-            terminal_diag["terminal_nonstationary_majority"].astype(bool).sum()
+            _bool_column(terminal_diag, "terminal_nonstationary_majority").sum()
         ),
         "terminal_nonstationary_majority_fraction": _safe_fraction(
-            int(terminal_diag["terminal_nonstationary_majority"].astype(bool).sum()),
+            int(_bool_column(terminal_diag, "terminal_nonstationary_majority").sum()),
             int(terminal_present.sum()),
         ),
         "median_stationary_terminal_probability": _median(terminal_diag, "stationary_terminal_probability"),
         "median_nonstationary_terminal_probability": _median(terminal_diag, "nonstationary_terminal_probability"),
         "event_mean_mode_diagnostic_events": int(event_present.sum()),
         "event_nonstationary_majority_events": int(
-            event_diag["event_nonstationary_majority"].astype(bool).sum()
+            _bool_column(event_diag, "event_nonstationary_majority").sum()
         ),
         "event_nonstationary_majority_fraction": _safe_fraction(
-            int(event_diag["event_nonstationary_majority"].astype(bool).sum()),
+            int(_bool_column(event_diag, "event_nonstationary_majority").sum()),
             int(event_present.sum()),
         ),
         "median_stationary_event_probability": _median(event_diag, "stationary_event_probability"),
@@ -446,13 +452,13 @@ def _summary_row(scope: str, frame: pd.DataFrame) -> dict[str, object]:
 def build_first_order_imm_mode_usage_summary(event_table: pd.DataFrame) -> pd.DataFrame:
     """Summarize first-order IMM mode usage for paper-facing scopes."""
 
-    complete = event_table[event_table["exact_core_complete"].astype(bool)].copy()
-    first_order_best = complete[complete["first_order_imm_is_best_exact_core"].astype(bool)].copy()
+    complete = event_table[_bool_column(event_table, "exact_core_complete")].copy()
+    first_order_best = complete[_bool_column(complete, "first_order_imm_is_best_exact_core")].copy()
     first_order_confident = complete[
-        complete["first_order_imm_confident_exact_core_best"].astype(bool)
+        _bool_column(complete, "first_order_imm_confident_exact_core_best")
     ].copy()
     trajectory_confident = complete[
-        complete["trajectory_capable_confident_vs_stationary"].astype(bool)
+        _bool_column(complete, "trajectory_capable_confident_vs_stationary")
     ].copy()
     rows = [
         _summary_row("complete_exact_core_events", complete),
@@ -487,8 +493,8 @@ def build_first_order_imm_mode_usage_rat_summary(
     """Summarize first-order IMM best rows by rat."""
 
     first_order_best = event_table[
-        event_table["exact_core_complete"].astype(bool)
-        & event_table["first_order_imm_is_best_exact_core"].astype(bool)
+        _bool_column(event_table, "exact_core_complete")
+        & _bool_column(event_table, "first_order_imm_is_best_exact_core")
     ].copy()
     rows = []
     group_columns = ["rat"]
@@ -544,24 +550,24 @@ def build_first_order_imm_mode_usage_gate_summary(
             }
         )
 
-    complete = event_table[event_table["exact_core_complete"].astype(bool)].copy()
-    first_order_best = complete[complete["first_order_imm_is_best_exact_core"].astype(bool)].copy()
+    complete = event_table[_bool_column(event_table, "exact_core_complete")].copy()
+    first_order_best = complete[_bool_column(complete, "first_order_imm_is_best_exact_core")].copy()
     terminal_present = (
-        first_order_best["terminal_mode_diagnostics_present"].astype(bool)
+        _bool_column(first_order_best, "terminal_mode_diagnostics_present")
         if not first_order_best.empty
         else pd.Series(dtype=bool)
     )
     event_present = (
-        first_order_best["event_mean_mode_diagnostics_present"].astype(bool)
+        _bool_column(first_order_best, "event_mean_mode_diagnostics_present")
         if not first_order_best.empty
         else pd.Series(dtype=bool)
     )
-    trajectory_confident_count = int(complete["trajectory_capable_confident_vs_stationary"].astype(bool).sum())
+    trajectory_confident_count = int(_bool_column(complete, "trajectory_capable_confident_vs_stationary").sum())
     nonstationary_terminal = int(
-        first_order_best["terminal_nonstationary_majority"].astype(bool).sum()
+        _bool_column(first_order_best, "terminal_nonstationary_majority").sum()
     ) if not first_order_best.empty else 0
     nonstationary_event = int(
-        first_order_best["event_nonstationary_majority"].astype(bool).sum()
+        _bool_column(first_order_best, "event_nonstationary_majority").sum()
     ) if not first_order_best.empty else 0
 
     add("exact_core_events_present", not complete.empty, int(len(complete)), "complete exact-core events > 0", "audit")

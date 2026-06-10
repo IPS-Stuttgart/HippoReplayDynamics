@@ -278,7 +278,7 @@ def ladder_event_recovery(event_scores: pd.DataFrame) -> pd.DataFrame:
         events.insert(0, "ladder_tier", str(tier))
         events.insert(1, "ladder_tier_index", int(tier_index))
         events["ladder_expected_model"] = str(first.get("ladder_expected_model", first.get("expected_model", "")))
-        events["oracle_candidate_support"] = bool(first.get("ladder_oracle_candidate_support", False))
+        events["oracle_candidate_support"] = _coerce_bool(first.get("ladder_oracle_candidate_support", False))
         events["ladder_description"] = str(first.get("ladder_description", ""))
         rows.append(events)
     if not rows:
@@ -454,6 +454,10 @@ def _first_nonempty(values: pd.Series | None) -> str:
         if text:
             return text
     return ""
+
+
+def _coerce_bool(value: object) -> bool:
+    return bool(_coerce_bool_series(pd.Series([value])).iloc[0])
 
 
 def _fraction(numerator: object, denominator: object) -> float:

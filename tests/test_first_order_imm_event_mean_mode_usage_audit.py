@@ -82,6 +82,29 @@ def test_event_mean_mode_usage_audit_fails_terminal_only_artifact():
     assert not bool(gates.loc["overall", "passed"])
 
 
+def test_event_mean_gate_parses_string_false_first_order_flags():
+    event_summary = pd.DataFrame(
+        [
+            {
+                "event_class": "detected_replay_or_swr",
+                "selection_rule": "",
+                "first_order_imm_is_best_exact_core": "False",
+                "event_mean_mode_diagnostics_present": "True",
+                "map_mode_diagnostics_present": "True",
+                "spatial_content_diagnostics_present": "True",
+                "trajectory_content_gate_passed": "True",
+                "strong_trajectory_content_gate_passed": "True",
+            }
+        ]
+    )
+
+    gates = build_mode_usage_gate_summary(event_summary).set_index("gate")
+
+    assert not bool(gates.loc["first_order_imm_best_rows_present", "passed"])
+    assert not bool(gates.loc["moderate_content_majority", "passed"])
+    assert not bool(gates.loc["overall", "passed"])
+
+
 def test_event_mean_mode_usage_audit_keeps_off_swr_candidates_distinct(tmp_path):
     promoted = pd.DataFrame(
         [

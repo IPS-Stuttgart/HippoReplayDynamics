@@ -51,11 +51,12 @@ def _as_bool(value: object, *, default: bool = False) -> bool:
     except (TypeError, ValueError):
         pass
     if isinstance(value, (int, float, np.integer, np.floating)):
-        return bool(value)
+        numeric = float(value)
+        return bool(np.isfinite(numeric) and numeric != 0.0)
     normalized = str(value).strip().lower()
-    if normalized in {"1", "true", "t", "yes", "y"}:
+    if normalized in {"1", "1.0", "true", "t", "yes", "y", "on"}:
         return True
-    if normalized in {"0", "false", "f", "no", "n", "", "nan", "none"}:
+    if normalized in {"0", "0.0", "false", "f", "no", "n", "", "nan", "none", "null", "off"}:
         return False
     return default
 

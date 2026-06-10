@@ -1131,8 +1131,10 @@ def _bool_value(value: object) -> bool:
         return value
     if pd.isna(value):
         return False
+    if isinstance(value, (int, float)):
+        return bool(math.isfinite(float(value)) and float(value) != 0.0)
     text = str(value).strip().lower()
-    return text in {"1", "true", "t", "yes", "y"}
+    return text in {"1", "1.0", "true", "t", "yes", "y", "on"}
 
 
 def _bool_series(values: pd.Series) -> pd.Series:

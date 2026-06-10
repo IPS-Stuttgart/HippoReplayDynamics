@@ -259,10 +259,18 @@ def _numeric(values: pd.Series) -> pd.Series:
 
 
 def _bool_value(value: object) -> bool:
-    if isinstance(value, bool):
-        return value
+    if isinstance(value, (bool, np.bool_)):
+        return bool(value)
+    try:
+        if pd.isna(value):
+            return False
+    except (TypeError, ValueError):
+        pass
+    if isinstance(value, (int, float, np.integer, np.floating)):
+        numeric = float(value)
+        return bool(np.isfinite(numeric) and numeric != 0.0)
     text = str(value).strip().lower()
-    return text in {"1", "true", "t", "yes", "y"}
+    return text in {"1", "1.0", "true", "t", "yes", "y", "on"}
 
 
 def _bool_series(values: pd.Series) -> pd.Series:

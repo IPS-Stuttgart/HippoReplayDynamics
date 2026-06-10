@@ -428,13 +428,14 @@ def _numeric(value: object) -> float:
 
 
 def _as_bool(value: object) -> bool:
-    if isinstance(value, bool):
-        return value
+    if isinstance(value, (bool, np.bool_)):
+        return bool(value)
     if pd.isna(value):
         return False
     if isinstance(value, (int, float, np.integer, np.floating)):
-        return bool(value)
-    return str(value).strip().lower() in {"1", "true", "yes", "y"}
+        numeric = float(value)
+        return bool(math.isfinite(numeric) and numeric != 0.0)
+    return str(value).strip().lower() in {"1", "1.0", "true", "t", "yes", "y", "on"}
 
 
 def _bool_series(values: pd.Series) -> pd.Series:

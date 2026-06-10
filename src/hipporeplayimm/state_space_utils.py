@@ -243,6 +243,9 @@ def _full_grid_normalized_pairwise_gaussian_log_prob(
 
 
 def _pairwise_gaussian_log_prob(predicted: np.ndarray, observed: np.ndarray, sigma_cm: float) -> np.ndarray:
+    sigma_cm = float(sigma_cm)
+    if not np.isfinite(sigma_cm) or sigma_cm <= 0.0:
+        raise ValueError("sigma_cm must be finite and positive")
     delta = predicted[:, None, :] - observed[None, :, :]
     dist2 = np.sum(delta * delta, axis=2)
     return -0.5 * dist2 / (sigma_cm * sigma_cm)

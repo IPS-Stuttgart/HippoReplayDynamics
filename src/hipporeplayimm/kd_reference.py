@@ -196,20 +196,27 @@ def build_kd_emissions(
         dt=dt,
         cell_ids=encoding.cell_ids,
         n_spikes=int(counts.sum()),
+        bin_durations=bin_durations,
+        transition_durations=np.diff(times) if times.shape[0] > 1 else np.empty(0, dtype=float),
     )
 
 
 def _ripple_time_edges(start: float, end: float, time_bin_s: float) -> np.ndarray:
-    if time_bin_s <= 0.0:
-        raise ValueError("time_bin_s must be positive")
+    start = float(start)
+    end = float(end)
+    time_bin_s = float(time_bin_s)
+    if not np.isfinite(start) or not np.isfinite(end):
+        raise ValueError("ripple start and end must be finite")
+    if not np.isfinite(time_bin_s) or time_bin_s <= 0.0:
+        raise ValueError("time_bin_s must be finite and positive")
     if end <= start:
         raise ValueError("ripple end must be greater than ripple start")
 
-    duration = float(end) - float(start)
+    duration = end - start
     n_full_bins = int(np.floor(duration / time_bin_s))
-    edges = float(start) + np.arange(n_full_bins + 1, dtype=float) * time_bin_s
+    edges = start + np.arange(n_full_bins + 1, dtype=float) * time_bin_s
     tolerance = max(
-        np.finfo(float).eps * max(abs(float(start)), abs(float(end)), 1.0) * 16.0,
+        np.finfo(float).eps * max(abs(start), abs(end), 1.0) * 16.0,
         time_bin_s * 1e-9,
     )
     if edges[-1] > end and not np.isclose(edges[-1], end, rtol=0.0, atol=tolerance):
@@ -229,18 +236,18 @@ def poisson_log_emissions(
     spike_rate_scale: float = 1.0,
 ) -> np.ndarray:
     dt_array = np.asarray(dt, dtype=float)
-    if spike_rate_scale <= 0.0:
-        raise ValueError("spike_rate_scale must be positive")
+    if not np.isfinite(spike_rate_scale) or spike_rate_scale <= 0.0:
+        raise ValueError("spike_rate_scale must be finite and positive")
     if dt_array.ndim == 0:
-        if float(dt_array) <= 0.0:
-            raise ValueError("dt must be positive")
+        if not np.isfinite(float(dt_array)) or float(dt_array) <= 0.0:
+            raise ValueError("dt must be finite and positive")
         expected = np.maximum(rates_hz * float(dt_array) * spike_rate_scale, np.finfo(float).tiny)
         return spike_counts @ np.log(expected) - expected.sum(axis=0)[None, :] - gammaln(spike_counts + 1).sum(axis=1)[:, None]
 
     if dt_array.ndim != 1 or dt_array.shape[0] != spike_counts.shape[0]:
         raise ValueError("dt must be a scalar or one duration per time bin")
-    if np.any(dt_array <= 0.0):
-        raise ValueError("all bin durations must be positive")
+    if not np.all(np.isfinite(dt_array)) or np.any(dt_array <= 0.0):
+        raise ValueError("all bin durations must be finite and positive")
 
     expected = np.maximum(
         dt_array[:, None, None] * rates_hz[None, :, :] * spike_rate_scale,

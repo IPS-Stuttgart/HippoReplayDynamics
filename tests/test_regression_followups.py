@@ -377,3 +377,17 @@ def test_base_compare_ground_truth_accepts_cli_state_space_kwargs() -> None:
     args = parser.parse_args([])
     for name in cli._state_space_scalar_kwargs(args):
         assert name in signature.parameters
+
+
+def test_ground_truth_sensitivity_accepts_cli_state_space_kwargs() -> None:
+    import hipporeplayimm.ground_truth as ground_truth
+
+    signature = inspect.signature(ground_truth.compare_scores_to_ground_truth_sensitivity)
+    if any(param.kind == inspect.Parameter.VAR_KEYWORD for param in signature.parameters.values()):
+        return
+
+    parser = ArgumentParser()
+    cli._add_state_space_arguments(parser)
+    args = parser.parse_args([])
+    for name in cli._state_space_scalar_kwargs(args):
+        assert name in signature.parameters

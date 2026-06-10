@@ -611,7 +611,7 @@ def test_displacement_momentum_uses_declared_finite_lattice():
     assert score.diagnostics["state_space_displacement_momentum_evidence_support"] == "exact_full_grid"
 
 
-def test_displacement_state_space_evidence_only_returns_terminal_posterior():
+def test_finite_displacement_modes_honor_return_trajectory_false():
     emissions = _synthetic_emissions()
     centers = np.array([[0.0, 0.0], [1.0, 0.0], [2.0, 0.0], [3.0, 0.0]])
 
@@ -636,7 +636,7 @@ def test_displacement_state_space_evidence_only_returns_terminal_posterior():
         assert full.trajectory_log_posterior is not None
         assert evidence_only.trajectory_log_posterior is None
         assert evidence_only.terminal_log_posterior is not None
-        assert np.allclose(
+        np.testing.assert_allclose(
             evidence_only.terminal_log_posterior,
             full.trajectory_log_posterior[-1],
         )

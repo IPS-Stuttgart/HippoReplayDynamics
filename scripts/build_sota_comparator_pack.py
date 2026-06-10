@@ -79,6 +79,12 @@ def _as_bool(value: object) -> bool:
     return str(value).strip().lower() in {"1", "true", "t", "yes", "y"}
 
 
+def _bool_column(frame: pd.DataFrame, column: str) -> pd.Series:
+    if column not in frame:
+        return pd.Series(False, index=frame.index, dtype=bool)
+    return frame[column].map(_as_bool).astype(bool)
+
+
 def _success_rows(frame: pd.DataFrame) -> pd.DataFrame:
     required = {"session", "event_index", "model", "log_evidence"}
     missing = sorted(required.difference(frame.columns))
@@ -170,7 +176,7 @@ def build_sota_comparator_event_table(
     for (session, event_index), group in evidence.groupby(["session", "event_index"], sort=True):
         exact_group = group[
             group["model"].isin(REQUIRED_EXACT_CORE_MODELS)
-            & group["evidence_comparable"].astype(bool)
+            & _bool_column(group, "evidence_comparable")
         ].copy()
         required_missing = _missing_models(exact_group, REQUIRED_EXACT_CORE_MODELS)
         exact_core_complete = not required_missing
@@ -304,7 +310,7 @@ def build_sota_comparator_model_summary(
     """Summarize exact-core winners and confident exact-core claims."""
 
     rows: list[dict[str, object]] = []
-    complete = event_table[event_table["exact_core_complete"].astype(bool)].copy()
+    complete = event_table[_bool_column(event_table, "exact_core_complete")].copy()
     events = int(len(complete))
     for model in REQUIRED_EXACT_CORE_MODELS:
         raw_best = complete["best_exact_core_model"].eq(model)
@@ -328,14 +334,14 @@ def build_sota_comparator_model_summary(
 
 
 def build_sota_comparator_family_summary(event_table: pd.DataFrame) -> pd.DataFrame:
-    complete = event_table[event_table["exact_core_complete"].astype(bool)].copy()
+    complete = event_table[_bool_column(event_table, "exact_core_complete")].copy()
     events = int(len(complete))
     delta = complete["delta_trajectory_minus_nontrajectory"] if events else pd.Series(dtype=float)
     trajectory_claims = (
-        complete["trajectory_confident_vs_nontrajectory"].astype(bool) if events else pd.Series(dtype=bool)
+        _bool_column(complete, "trajectory_confident_vs_nontrajectory") if events else pd.Series(dtype=bool)
     )
     nontrajectory_claims = (
-        complete["nontrajectory_confident_vs_trajectory"].astype(bool) if events else pd.Series(dtype=bool)
+        _bool_column(complete, "nontrajectory_confident_vs_trajectory") if events else pd.Series(dtype=bool)
     )
     return pd.DataFrame(
         [
@@ -380,12 +386,12 @@ def build_sota_comparator_momentum_vs_diffusion_summary(
     events = int(len(paired))
     delta = paired["delta_momentum_exact_minus_diffusion"] if events else pd.Series(dtype=float)
     momentum_confident = (
-        paired["momentum_exact_confident_vs_diffusion"].astype(bool)
+        _bool_column(paired, "momentum_exact_confident_vs_diffusion")
         if events
         else pd.Series(dtype=bool)
     )
     diffusion_confident = (
-        paired["diffusion_confident_vs_momentum_exact"].astype(bool)
+        _bool_column(paired, "diffusion_confident_vs_momentum_exact")
         if events
         else pd.Series(dtype=bool)
     )
@@ -508,7 +514,7 @@ def build_sota_comparator_claim_delta_summary(
     """Return the compact claim-level comparison table."""
 
     events = int(len(event_table))
-    complete = event_table[event_table["exact_core_complete"].astype(bool)].copy()
+    complete = event_table[_bool_column(event_table, "exact_core_complete")].copy()
     complete_events = int(len(complete))
     rows: list[dict[str, object]] = []
 
@@ -519,10 +525,10 @@ def build_sota_comparator_claim_delta_summary(
             "events": events,
             "raw_positive_events": int((mom_delta > 0).sum()),
             "confident_positive_events": int(
-                event_table["momentum_exact_confident_vs_diffusion"].sum()
+                _bool_column(event_table, "momentum_exact_confident_vs_diffusion").sum()
             ),
             "confident_reference_events": int(
-                event_table["diffusion_confident_vs_momentum_exact"].sum()
+                _bool_column(event_table, "diffusion_confident_vs_momentum_exact").sum()
             ),
             **_basic_delta_summary(mom_delta),
             "paper_interpretation": "paired exact-sparse momentum-vs-diffusion signal",
@@ -536,10 +542,10 @@ def build_sota_comparator_claim_delta_summary(
             "events": complete_events,
             "raw_positive_events": int((first_order_delta > 0).sum()),
             "confident_positive_events": int(
-                complete["first_order_imm_confident_core_best"].sum()
+                _bool_column(complete, "first_order_imm_confident_core_best").sum()
             ),
             "confident_reference_events": int(
-                complete["momentum_exact_confident_core_best"].sum()
+                _bool_column(complete, "momentum_exact_confident_core_best").sum()
             ),
             **_basic_delta_summary(first_order_delta),
             "paper_interpretation": (
@@ -555,10 +561,10 @@ def build_sota_comparator_claim_delta_summary(
             "events": complete_events,
             "raw_positive_events": int((family_delta > 0).sum()),
             "confident_positive_events": int(
-                complete["trajectory_confident_vs_nontrajectory"].sum()
+                _bool_column(complete, "trajectory_confident_vs_nontrajectory").sum()
             ),
             "confident_reference_events": int(
-                complete["nontrajectory_confident_vs_trajectory"].sum()
+                _bool_column(complete, "nontrajectory_confident_vs_trajectory").sum()
             ),
             **_basic_delta_summary(family_delta),
             "paper_interpretation": (
@@ -567,17 +573,17 @@ def build_sota_comparator_claim_delta_summary(
         }
     )
 
-    momentum_core_best = complete["momentum_exact_is_exact_core_best"]
+    momentum_core_best = _bool_column(complete, "momentum_exact_is_exact_core_best")
     rows.append(
         {
             "claim_axis": "exact_sparse_momentum_full_core_dominance",
             "events": complete_events,
             "raw_positive_events": int(momentum_core_best.sum()),
             "confident_positive_events": int(
-                complete["momentum_exact_confident_core_best"].sum()
+                _bool_column(complete, "momentum_exact_confident_core_best").sum()
             ),
             "confident_reference_events": int(
-                complete["first_order_imm_confident_core_best"].sum()
+                _bool_column(complete, "first_order_imm_confident_core_best").sum()
             ),
             "mean_delta": np.nan,
             "median_delta": np.nan,
@@ -599,7 +605,7 @@ def build_sota_comparator_gate_summary(
     *,
     margin_threshold: float = 5.5,
 ) -> pd.DataFrame:
-    complete = event_table[event_table["exact_core_complete"].astype(bool)]
+    complete = event_table[_bool_column(event_table, "exact_core_complete")]
     family = build_sota_comparator_family_summary(event_table).iloc[0]
     claim = build_sota_comparator_claim_delta_summary(
         event_table,

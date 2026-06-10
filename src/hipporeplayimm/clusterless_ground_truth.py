@@ -28,6 +28,13 @@ _CLUSTERLESS_KWARG_NAMES = frozenset(
         "clusterless_mark_kde_max_neighbors",
     }
 )
+_GROUND_TRUTH_BMA_KWARG_NAMES = frozenset(
+    {
+        "include_bayesian_model_average",
+        "bayesian_model_average_name",
+        "bayesian_model_average_evidence_column",
+    }
+)
 
 
 def apply_clusterless_ground_truth_patch() -> None:
@@ -63,13 +70,16 @@ def apply_clusterless_ground_truth_patch() -> None:
         non_clusterless_kwargs = _drop_clusterless_kwargs(kwargs)
         pieces: list[pd.DataFrame] = []
         if (~clusterless_mask).any():
-            pieces.append(
-                base_compare_scores_to_ground_truth(
-                    root,
-                    scores_frame.loc[~clusterless_mask].copy(),
-                    **non_clusterless_kwargs,
+            for score_group in _non_clusterless_score_groups(
+                scores_frame.loc[~clusterless_mask].copy()
+            ):
+                pieces.append(
+                    base_compare_scores_to_ground_truth(
+                        root,
+                        score_group,
+                        **non_clusterless_kwargs,
+                    )
                 )
-            )
         if clusterless_mask.any():
             pieces.append(
                 _compare_clusterless_scores_to_ground_truth(
@@ -93,7 +103,28 @@ def apply_clusterless_ground_truth_patch() -> None:
 
 
 def _drop_clusterless_kwargs(kwargs: dict[str, object]) -> dict[str, object]:
-    return {key: value for key, value in kwargs.items() if key not in _CLUSTERLESS_KWARG_NAMES}
+    unsupported = _CLUSTERLESS_KWARG_NAMES | _GROUND_TRUTH_BMA_KWARG_NAMES
+    return {key: value for key, value in kwargs.items() if key not in unsupported}
+
+
+def _non_clusterless_score_groups(scores_frame: pd.DataFrame) -> list[pd.DataFrame]:
+    split_columns = [
+        column
+        for column in (
+            "session",
+            "benchmark_cell_split_index",
+            "benchmark_cell_split_seed",
+            "train_cell_ids",
+            "test_cell_ids",
+        )
+        if column in scores_frame.columns
+    ]
+    if not split_columns:
+        return [scores_frame]
+    return [
+        group.copy()
+        for _, group in scores_frame.groupby(split_columns, sort=False, dropna=False)
+    ]
 
 
 def _compare_clusterless_scores_to_ground_truth(gt, root, scores_frame: pd.DataFrame, **kwargs) -> pd.DataFrame:
@@ -233,21 +264,25 @@ def _compare_clusterless_scores_to_ground_truth(gt, root, scores_frame: pd.DataF
                         occupancy_s=clusterless_encoding.occupancy_s,
                     )
                 decoded_rows.append(
-                    gt._decoded_row(
-                        str(session_id),
-                        int(event_index),
-                        model_name,
-                        score.terminal_log_posterior,
-                        score.trajectory_log_posterior,
-                        clusterless_encoding.bin_centers,
-                        wells,
+                    gt._attach_decode_group_values(
+                        gt._decoded_row(
+                            str(session_id),
+                            int(event_index),
+                            model_name,
+                            score.terminal_log_posterior,
+                            score.trajectory_log_posterior,
+                            clusterless_encoding.bin_centers,
+                            wells,
+                        ),
+                        group_values,
                     )
                 )
     decoded = pd.DataFrame(decoded_rows)
     if decoded.empty:
         decoded = pd.DataFrame(columns=["session", "event_index", "model"])
+    decoded_merge_columns = gt._decoded_merge_columns(scores_frame, decoded, benchmark_decode)
     comparison = scores_frame.merge(gt_frame, on=["session", "event_index"], how="left")
-    comparison = comparison.merge(decoded, on=["session", "event_index", "model"], how="left")
+    comparison = comparison.merge(decoded, on=decoded_merge_columns, how="left")
     return gt._add_ground_truth_metrics(comparison, decoded, gt_frame)
 
 

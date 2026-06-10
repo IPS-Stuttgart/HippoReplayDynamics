@@ -4,6 +4,7 @@ import numpy as np
 import pytest
 from scipy.special import logsumexp
 
+import hipporeplayimm.state_space_trajectory_imm as trajectory_imm
 from hipporeplayimm.encoding import LogEmissionTensor
 from hipporeplayimm.sorted_spike_state_space import SortedSpikeStateSpaceReplayModel
 from hipporeplayimm.state_space import (
@@ -221,6 +222,108 @@ def test_trajectory_imm_helper_returns_log_terminal_for_full_smoothing():
     assert diagnostics["state_space_trajectory_imm_mode_posterior"] == "smoothed_heterogeneous_state"
     assert np.allclose(terminal, trajectory[-1])
     assert np.allclose(logsumexp(terminal), 0.0)
+
+
+def test_trajectory_imm_uses_duration_specific_momentum_entry_sigma(monkeypatch):
+    centers = np.array(
+        [
+            [0.0, 0.0],
+            [1.0, 0.0],
+            [2.0, 0.0],
+            [3.0, 0.0],
+        ]
+    )
+    emissions = LogEmissionTensor(
+        log_likelihood=np.zeros((3, centers.shape[0]), dtype=float),
+        spike_counts=np.zeros((3, 1), dtype=int),
+        times=np.array([0.0, 0.01, 0.05]),
+        dt=0.01,
+        cell_ids=np.array([1]),
+        n_spikes=0,
+        transition_durations=np.array([0.01, 0.04]),
+    )
+    config = StateSpaceDecoderConfig(
+        mode="trajectory-imm-exact-sparse",
+        trajectory_imm_mode_stickiness=0.5,
+        trajectory_imm_momentum_initial_probability=0.0,
+        trajectory_imm_momentum_switch_probability=0.2,
+        momentum_initial_sigma_cm_sqrt_s=10.0,
+        max_step_sigma=10.0,
+    )
+    forward_entry_sigmas: list[float] = []
+    backward_entry_sigmas: list[float] = []
+    original_forward = trajectory_imm._advance_position_to_momentum
+    original_backward = trajectory_imm._backward_position_to_momentum
+
+    def record_forward_entry_sigma(
+        source_position,
+        centers_arg,
+        valid_indices,
+        tree,
+        emission,
+        *,
+        sigma_cm,
+        max_step_sigma,
+    ):
+        forward_entry_sigmas.append(float(sigma_cm))
+        return original_forward(
+            source_position,
+            centers_arg,
+            valid_indices,
+            tree,
+            emission,
+            sigma_cm=sigma_cm,
+            max_step_sigma=max_step_sigma,
+        )
+
+    def record_backward_entry_sigma(
+        dest_prev,
+        dest_curr,
+        dest_values,
+        centers_arg,
+        valid_indices,
+        tree,
+        *,
+        sigma_cm,
+        max_step_sigma,
+    ):
+        backward_entry_sigmas.append(float(sigma_cm))
+        return original_backward(
+            dest_prev,
+            dest_curr,
+            dest_values,
+            centers_arg,
+            valid_indices,
+            tree,
+            sigma_cm=sigma_cm,
+            max_step_sigma=max_step_sigma,
+        )
+
+    monkeypatch.setattr(
+        trajectory_imm,
+        "_advance_position_to_momentum",
+        record_forward_entry_sigma,
+    )
+    monkeypatch.setattr(
+        trajectory_imm,
+        "_backward_position_to_momentum",
+        record_backward_entry_sigma,
+    )
+
+    _, _, _, _, diagnostics = trajectory_imm._score_trajectory_imm_exact_sparse(
+        emissions,
+        centers,
+        config,
+        emissions.transition_durations,
+        return_trajectory=True,
+    )
+
+    assert any(np.isclose(value, 1.0) for value in forward_entry_sigmas)
+    assert any(np.isclose(value, 2.0) for value in forward_entry_sigmas)
+    assert any(np.isclose(value, 1.0) for value in backward_entry_sigmas)
+    assert any(np.isclose(value, 2.0) for value in backward_entry_sigmas)
+    assert diagnostics["state_space_momentum_initial_transition_sigma_cm"] == pytest.approx(1.5)
+    assert diagnostics["state_space_momentum_initial_transition_sigma_cm_per_step"] == "1,2"
 
 
 def test_adaptive_candidate_support_adds_forward_and_backward_predictions():

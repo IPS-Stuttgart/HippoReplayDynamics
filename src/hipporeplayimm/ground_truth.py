@@ -661,14 +661,17 @@ def compare_scores_to_ground_truth(
                     else:
                         score = model.score(emissions, encoding.bin_centers)
                 decoded_rows.append(
-                    _decoded_row(
-                        str(session_id),
-                        int(event_index),
-                        model_name,
-                        score.terminal_log_posterior,
-                        score.trajectory_log_posterior,
-                        decode_bin_centers,
-                        wells,
+                    _attach_decode_group_values(
+                        _decoded_row(
+                            str(session_id),
+                            int(event_index),
+                            model_name,
+                            score.terminal_log_posterior,
+                            score.trajectory_log_posterior,
+                            decode_bin_centers,
+                            wells,
+                        ),
+                        group_values,
                     )
                 )
                 log_evidence = _score_row_log_evidence(score_row, bayesian_model_average_evidence_column)
@@ -682,14 +685,17 @@ def compare_scores_to_ground_truth(
             average_log_posterior = _bayesian_model_average_log_posterior(average_components)
             if average_log_posterior is not None:
                 decoded_rows.append(
-                    _decoded_row(
-                        str(session_id),
-                        int(event_index),
-                        bayesian_model_average_name,
-                        average_log_posterior,
-                        None,
-                        encoding.bin_centers,
-                        wells,
+                    _attach_decode_group_values(
+                        _decoded_row(
+                            str(session_id),
+                            int(event_index),
+                            bayesian_model_average_name,
+                            average_log_posterior,
+                            None,
+                            encoding.bin_centers,
+                            wells,
+                        ),
+                        group_values,
                     )
                 )
                 average_score_rows.append(
@@ -706,8 +712,11 @@ def compare_scores_to_ground_truth(
             sort=False,
         )
     decoded = pd.DataFrame(decoded_rows)
+    if decoded.empty:
+        decoded = pd.DataFrame(columns=["session", "event_index", "model"])
+    decoded_merge_columns = _decoded_merge_columns(scores_frame, decoded, benchmark_decode)
     comparison = scores_frame.merge(gt_frame, on=["session", "event_index"], how="left")
-    comparison = comparison.merge(decoded, on=["session", "event_index", "model"], how="left")
+    comparison = comparison.merge(decoded, on=decoded_merge_columns, how="left")
     comparison = _add_ground_truth_metrics(comparison, decoded, gt_frame)
     return comparison
 
@@ -1066,6 +1075,25 @@ def _group_key_values(columns: list[str], group_key: object) -> dict[str, object
     if len(values) != len(columns):
         raise ValueError("group key shape does not match group columns")
     return dict(zip(columns, values))
+
+
+def _attach_decode_group_values(row: dict[str, object], group_values: dict[str, object]) -> dict[str, object]:
+    """Attach non-key decode grouping metadata to a decoded row."""
+
+    for column, value in group_values.items():
+        if column not in {"session", "event_index", "model"}:
+            row[column] = value
+    return row
+
+
+def _decoded_merge_columns(scores_frame: pd.DataFrame, decoded: pd.DataFrame, benchmark_decode: bool) -> list[str]:
+    """Return merge keys that keep split-specific decodes aligned with score rows."""
+
+    columns = ["session", "event_index", "model"]
+    for column in _decode_group_columns(scores_frame, benchmark_decode):
+        if column not in columns and column in scores_frame.columns and column in decoded.columns:
+            columns.append(column)
+    return columns
 
 
 def _model_names_for_scores(scores_frame: pd.DataFrame) -> tuple[str, ...]:

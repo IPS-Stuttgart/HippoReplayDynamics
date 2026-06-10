@@ -105,9 +105,16 @@ def _score_trajectory_imm_exact_sparse(
         float(getattr(config, "momentum_sigma_cm_sqrt_s", 85.0)),
         durations,
     )
-    initial_sigma = _per_bin_sigma(
+    initial_sigmas = _per_transition_sigmas(
         float(getattr(config, "momentum_initial_sigma_cm_sqrt_s", 85.0)),
-        float(durations[0]) if durations.size else float(emissions.dt),
+        durations,
+    )
+    initial_sigma = _median_or_fallback(
+        initial_sigmas,
+        _per_bin_sigma(
+            float(getattr(config, "momentum_initial_sigma_cm_sqrt_s", 85.0)),
+            reference_dt,
+        ),
     )
     decays = _duration_adjusted_decays(config, durations, float(emissions.dt))
     time_scales = _time_scales(durations)
@@ -172,7 +179,7 @@ def _score_trajectory_imm_exact_sparse(
             diffusion_transition=diffusion_transition,
             position_prior=position_prior,
             mode_transition=mode_transition,
-            entry_sigma_cm=initial_sigma,
+            entry_sigma_cm=float(initial_sigmas[transition_index]),
             momentum_sigma_cm=float(momentum_sigmas[transition_index]),
             velocity_decay=float(decays[transition_index]) * float(time_scales[transition_index]),
             max_step_sigma=max_step_sigma,
@@ -200,7 +207,7 @@ def _score_trajectory_imm_exact_sparse(
             diffusion_sigmas=diffusion_sigmas,
             position_prior=position_prior,
             mode_transition=mode_transition,
-            entry_sigma_cm=initial_sigma,
+            entry_sigmas=initial_sigmas,
             momentum_sigmas=momentum_sigmas,
             decays=decays,
             time_scales=time_scales,
@@ -288,6 +295,9 @@ def _score_trajectory_imm_exact_sparse(
         "state_space_momentum_velocity_decay_effective": float(median_decay),
         "state_space_trajectory_imm_diffusion_transition_sigma_cm_per_step": _format_float_series(
             diffusion_sigmas
+        ),
+        "state_space_momentum_initial_transition_sigma_cm_per_step": _format_float_series(
+            initial_sigmas
         ),
         "state_space_momentum_transition_sigma_cm_per_step": _format_float_series(momentum_sigmas),
         "state_space_momentum_velocity_decay_per_step": _format_float_series(decays),
@@ -595,7 +605,7 @@ def _backward_states(
     diffusion_sigmas: np.ndarray,
     position_prior: np.ndarray,
     mode_transition: np.ndarray,
-    entry_sigma_cm: float,
+    entry_sigmas: np.ndarray,
     momentum_sigmas: np.ndarray,
     decays: np.ndarray,
     time_scales: np.ndarray,
@@ -658,7 +668,7 @@ def _backward_states(
                 centers,
                 valid_indices,
                 tree,
-                sigma_cm=entry_sigma_cm,
+                sigma_cm=float(entry_sigmas[transition_index]),
                 max_step_sigma=max_step_sigma,
             )
             source_first[src_index] = total / scales[time_index]
@@ -681,7 +691,7 @@ def _backward_states(
                 centers,
                 valid_indices,
                 tree,
-                sigma_cm=entry_sigma_cm,
+                sigma_cm=float(entry_sigmas[transition_index]),
                 max_step_sigma=max_step_sigma,
             )
             betas[time_index - 1] = _BackwardState(

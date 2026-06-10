@@ -121,6 +121,64 @@ def test_sota_comparator_pack_refines_momentum_story(tmp_path: Path):
         assert (tmp_path / name).is_file()
 
 
+def test_sota_comparator_summaries_parse_string_false_flags():
+    evidence = pd.DataFrame(
+        [
+            _score("Rat1/Open1", 0, STATIONARY, 0.0),
+            _score("Rat1/Open1", 0, DIFFUSION, 10.0),
+            _score("Rat1/Open1", 0, FRAGMENTED, 20.0),
+            _score("Rat1/Open1", 0, FIRST_ORDER_IMM, 80.0),
+            _score("Rat1/Open1", 0, MOMENTUM_EXACT, 40.0),
+            _score("Rat1/Open1", 1, STATIONARY, 0.0),
+            _score("Rat1/Open1", 1, DIFFUSION, 20.0),
+            _score("Rat1/Open1", 1, FRAGMENTED, 5.0),
+            _score("Rat1/Open1", 1, FIRST_ORDER_IMM, 60.0),
+            _score("Rat1/Open1", 1, MOMENTUM_EXACT, 50.0),
+            _score("Rat2/Open1", 2, STATIONARY, 0.0),
+            _score("Rat2/Open1", 2, DIFFUSION, 20.0),
+            _score("Rat2/Open1", 2, FRAGMENTED, 5.0),
+            _score("Rat2/Open1", 2, FIRST_ORDER_IMM, 10.0),
+            _score("Rat2/Open1", 2, MOMENTUM_EXACT, 70.0),
+        ]
+    )
+    event_table = build_sota_comparator_event_table(evidence, margin_threshold=5.5)
+    bool_columns = [
+        "exact_core_complete",
+        "momentum_exact_confident_vs_diffusion",
+        "diffusion_confident_vs_momentum_exact",
+        "trajectory_confident_vs_nontrajectory",
+        "nontrajectory_confident_vs_trajectory",
+        "first_order_imm_confident_core_best",
+        "momentum_exact_confident_core_best",
+        "momentum_exact_is_exact_core_best",
+    ]
+    for column in bool_columns:
+        event_table[column] = event_table[column].map(
+            lambda value: "True" if bool(value) else "False"
+        )
+    event_table.loc[event_table["event_index"].eq(2), "exact_core_complete"] = "False"
+
+    model = build_sota_comparator_model_summary(event_table, margin_threshold=5.5)
+    family = build_sota_comparator_family_summary(event_table)
+    momentum_axis = build_sota_comparator_momentum_vs_diffusion_summary(
+        event_table,
+        margin_threshold=5.5,
+    )
+    claim = build_sota_comparator_claim_delta_summary(event_table, margin_threshold=5.5)
+    gate = build_sota_comparator_gate_summary(event_table, margin_threshold=5.5).set_index("gate")
+
+    first_order_summary = model[model["model"].eq(FIRST_ORDER_IMM)].iloc[0]
+    assert first_order_summary["events"] == 2
+    assert first_order_summary["confident_exact_core_claims"] == 2
+    assert int(family.iloc[0]["events"]) == 2
+    assert int(family.iloc[0]["nontrajectory_confident_claims"]) == 0
+    assert int(momentum_axis.iloc[0]["diffusion_confident_claims"]) == 0
+    assert _claim_row(claim, "exact_sparse_momentum_full_core_dominance")[
+        "raw_positive_events"
+    ] == 0
+    assert not bool(gate.loc["required_exact_core_complete", "passed"])
+
+
 def _score(
     session: str,
     event_index: int,

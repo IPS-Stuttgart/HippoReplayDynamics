@@ -60,12 +60,20 @@ def _validate_score_inputs(emissions: LogEmissionTensor, bin_centers: np.ndarray
         raise ValueError("emissions.log_likelihood must be two-dimensional")
     if log_likelihood.shape[0] == 0:
         raise ValueError("emissions must contain at least one time bin")
+    if log_likelihood.shape[1] == 0:
+        raise ValueError("emissions must contain at least one spatial bin")
+    if np.any(np.isnan(log_likelihood)) or np.any(log_likelihood == np.inf):
+        raise ValueError("emissions.log_likelihood must not contain NaN or +inf")
+    if not np.all(np.any(np.isfinite(log_likelihood), axis=1)):
+        raise ValueError("every emission row must contain at least one finite spatial-bin log likelihood")
 
     centers = np.asarray(bin_centers, dtype=float)
     if centers.ndim != 2 or centers.shape[1] < 1:
         raise ValueError("bin_centers must have shape (n_bins, position_dim)")
     if centers.shape[0] != log_likelihood.shape[1]:
         raise ValueError("bin_centers must contain one row per emission spatial bin")
+    if not np.all(np.isfinite(centers)):
+        raise ValueError("bin_centers must be finite")
     return centers
 
 

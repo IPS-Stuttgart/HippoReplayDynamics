@@ -178,6 +178,19 @@ class LogEmissionTensor:
     def __post_init__(self) -> None:
         """Attach explicit bin/transition durations for duration-aware dynamics."""
 
+        self.log_likelihood = np.asarray(self.log_likelihood, dtype=float)
+        if self.log_likelihood.ndim != 2:
+            raise ValueError("log_likelihood must be two-dimensional")
+        self.spike_counts = np.asarray(self.spike_counts)
+        if self.spike_counts.ndim != 2 or self.spike_counts.shape[0] != self.n_time:
+            raise ValueError("spike_counts must be two-dimensional with one row per emission time bin")
+        self.times = np.asarray(self.times, dtype=float)
+        if self.times.shape != (self.n_time,):
+            raise ValueError("times must contain one value per emission row")
+        if not np.all(np.isfinite(self.times)):
+            raise ValueError("times must be finite")
+        self.cell_ids = np.asarray(self.cell_ids)
+
         dt_value = float(self.dt)
         if not np.isfinite(dt_value) or dt_value <= 0.0:
             raise ValueError("dt must be finite and positive")
@@ -192,13 +205,11 @@ class LogEmissionTensor:
         if self.transition_durations is None:
             if self.n_time <= 1:
                 self.transition_durations = np.empty(0, dtype=float)
-            elif self.times.shape == (self.n_time,):
-                values = np.diff(np.asarray(self.times, dtype=float))
-                self.transition_durations = values if np.all(values > 0.0) else np.full(self.n_time - 1, float(self.dt), dtype=float)
-            elif self.bin_durations is not None:
-                self.transition_durations = 0.5 * (self.bin_durations[:-1] + self.bin_durations[1:])
             else:
-                self.transition_durations = np.full(self.n_time - 1, float(self.dt), dtype=float)
+                values = np.diff(self.times)
+                if not np.all(values > 0.0):
+                    raise ValueError("times must be strictly increasing when transition_durations is not provided")
+                self.transition_durations = values
         else:
             self.transition_durations = np.asarray(self.transition_durations, dtype=float)
             if self.transition_durations.shape != (max(self.n_time - 1, 0),):
@@ -531,13 +542,33 @@ def _make_grid(xy: np.ndarray, config: EncodingConfig) -> tuple[np.ndarray, np.n
     xy = _as_xy_array(xy, name="xy")
     x_min, y_min = np.nanmin(xy, axis=0) - config.arena_padding_cm
     x_max, y_max = np.nanmax(xy, axis=0) + config.arena_padding_cm
-    x_edges = np.arange(x_min, x_max + config.bin_size_cm, config.bin_size_cm)
-    y_edges = np.arange(y_min, y_max + config.bin_size_cm, config.bin_size_cm)
+    x_edges = _axis_edges_for_range(float(x_min), float(x_max), config)
+    y_edges = _axis_edges_for_range(float(y_min), float(y_max), config)
     x_centers = 0.5 * (x_edges[:-1] + x_edges[1:])
     y_centers = 0.5 * (y_edges[:-1] + y_edges[1:])
     mesh_x, mesh_y = np.meshgrid(x_centers, y_centers, indexing="ij")
     centers = np.column_stack([mesh_x.reshape(-1), mesh_y.reshape(-1)])
     return x_edges, y_edges, centers
+
+
+def _axis_edges_for_range(min_value: float, max_value: float, config: EncodingConfig) -> np.ndarray:
+    """Return strictly increasing grid edges, even for a collapsed coordinate range."""
+
+    bin_size = float(config.bin_size_cm)
+    if not np.isfinite(bin_size) or bin_size <= 0.0:
+        raise ValueError("bin_size_cm must be finite and positive")
+    lower = float(min_value)
+    upper = float(max_value)
+    if not np.isfinite(lower) or not np.isfinite(upper):
+        raise ValueError("position coordinates must be finite to construct encoding grid")
+    if upper <= lower:
+        midpoint = 0.5 * (lower + upper)
+        lower = midpoint - 0.5 * bin_size
+        upper = midpoint + 0.5 * bin_size
+    edges = np.arange(lower, upper + bin_size, bin_size, dtype=float)
+    if edges.shape[0] < 2:
+        edges = np.array([lower, lower + bin_size], dtype=float)
+    return edges
 
 
 def _axis_to_bin_indices(values: np.ndarray, edges: np.ndarray) -> np.ndarray:

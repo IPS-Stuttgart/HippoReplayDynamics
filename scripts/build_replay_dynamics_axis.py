@@ -102,9 +102,28 @@ def _success_rows(frame: pd.DataFrame) -> pd.DataFrame:
 
 
 def _as_bool(value: object) -> bool:
-    if isinstance(value, bool):
-        return value
-    return str(value).strip().lower() in {"1", "true", "yes", "y"}
+    if isinstance(value, (bool, np.bool_)):
+        return bool(value)
+    if value is None:
+        return False
+    try:
+        if pd.isna(value):
+            return False
+    except (TypeError, ValueError):
+        pass
+    if isinstance(value, (int, float, np.integer, np.floating)):
+        numeric = float(value)
+        return bool(np.isfinite(numeric) and numeric != 0.0)
+    text = str(value).strip().lower()
+    if text in {"1", "1.0", "true", "t", "yes", "y", "on"}:
+        return True
+    if text in {"0", "0.0", "false", "f", "no", "n", "", "nan", "none", "null", "off"}:
+        return False
+    try:
+        numeric = float(text)
+    except ValueError:
+        return False
+    return bool(np.isfinite(numeric) and numeric != 0.0)
 
 
 def _safe_softmax(values: Sequence[float]) -> np.ndarray:

@@ -9,6 +9,7 @@ import pytest
 from hipporeplayimm.accuracy_upgrades import (
     ContinuousTimeEmissionConfig,
     build_continuous_time_emissions,
+    restrict_emissions_to_mask,
 )
 from hipporeplayimm.benchmarks import (
     BenchmarkConfig,
@@ -237,6 +238,43 @@ def test_continuous_time_emissions_accept_numpy_integer_and_preserve_interval_du
     np.testing.assert_allclose(emissions.bin_durations, np.array([0.02, 0.08]), atol=1e-12)
     np.testing.assert_allclose(emissions.transition_durations, np.array([0.08]), atol=1e-12)
     assert emissions.n_spikes == 1
+
+
+def test_restrict_emissions_to_mask_preserves_duration_metadata():
+    emissions = LogEmissionTensor(
+        log_likelihood=np.array(
+            [[0.0, -1.0, -2.0], [-3.0, -4.0, -5.0]],
+            dtype=float,
+        ),
+        spike_counts=np.zeros((2, 1), dtype=int),
+        times=np.array([0.02, 0.10], dtype=float),
+        dt=0.05,
+        cell_ids=np.array([1], dtype=int),
+        n_spikes=0,
+        bin_durations=np.array([0.02, 0.08], dtype=float),
+        transition_durations=np.array([0.08], dtype=float),
+        metadata={"emission_model": "variable-duration"},
+    )
+
+    restricted = restrict_emissions_to_mask(
+        emissions,
+        np.array([True, False, True], dtype=bool),
+    )
+
+    np.testing.assert_allclose(
+        restricted.log_likelihood,
+        emissions.log_likelihood[:, [0, 2]],
+    )
+    np.testing.assert_allclose(
+        restricted.bin_durations,
+        np.array([0.02, 0.08], dtype=float),
+    )
+    np.testing.assert_allclose(
+        restricted.transition_durations,
+        np.array([0.08], dtype=float),
+    )
+    assert restricted.metadata == {"emission_model": "variable-duration"}
+    assert restricted.metadata is not emissions.metadata
 
 
 def test_momentum_decay_helpers_reject_nonfinite_tau_and_decay():

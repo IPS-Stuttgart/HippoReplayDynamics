@@ -12,9 +12,11 @@ sys.path.insert(0, str(ROOT / "src"))
 from aggregate_event_window_sensitivity import _bool_column as event_window_bool_column  # noqa: E402
 from audit_sweep_completeness import _bool_series as sweep_bool_series  # noqa: E402
 from build_off_swr_promotion_funnel import _as_bool as promotion_funnel_bool_value  # noqa: E402
+from build_replay_dynamics_axis import _as_bool as dynamics_axis_bool_value  # noqa: E402
 from calibrate_off_swr_promotion_fdr import _as_bool as promotion_calibration_bool_value  # noqa: E402
 from cell_split_heldout_control import _bool_column as cell_split_bool_column  # noqa: E402
 from compare_wrong_map_evidence_controls import _bool_column as wrong_map_bool_column  # noqa: E402
+from deduplicate_off_swr_candidates import _as_bool as deduplicate_candidates_bool_value  # noqa: E402
 from hipporeplayimm.advanced_result_diagnostics import _bool_column as advanced_bool_column  # noqa: E402
 from hipporeplayimm.result_improvement_extensions import _bool_series as extension_bool_series  # noqa: E402
 from hipporeplayimm.result_quality_audit import _bool_series as quality_audit_bool_series  # noqa: E402
@@ -81,6 +83,8 @@ def test_bool_helpers_treat_nonfinite_numeric_values_as_false() -> None:
 
 def test_off_swr_bool_helpers_parse_csv_numeric_flags_and_reject_nonfinite() -> None:
     helpers = (
+        deduplicate_candidates_bool_value,
+        dynamics_axis_bool_value,
         off_swr_discovery_bool_value,
         promotion_calibration_bool_value,
         promotion_funnel_bool_value,

@@ -185,6 +185,7 @@ def _models(args, session=None) -> dict[str, object]:
             diffusion_sigma_cm_sqrt_s=args.state_space_diffusion_sigma_cm_sqrt_s,
             max_step_sigma=args.state_space_max_step_sigma,
             imm_mode_stickiness=_state_space_mode_stickiness(args),
+            imm_switch_tau_s=getattr(args, "state_space_imm_switch_tau_s", 0.0),
             trajectory_imm_mode_stickiness=getattr(
                 args,
                 "state_space_trajectory_imm_mode_stickiness",

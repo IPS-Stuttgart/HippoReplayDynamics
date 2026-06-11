@@ -12,8 +12,8 @@ from hipporeplayimm.benchmarks import BenchmarkConfig, _build_models, _cell_spli
 from hipporeplayimm.clusterless import ClusterlessMarkConfig, ClusterlessMarkEncoding
 from hipporeplayimm.data import ReplaySession, SpikeMarkData
 from hipporeplayimm.encoding import EncodingConfig, LogEmissionTensor
-from hipporeplayimm.models import CandidateKinematicModel, DiffusionModel
-from hipporeplayimm.pyrecest_models import PyRecEstGoalParticleModel
+from hipporeplayimm.models import CandidateKinematicModel, DiffusionModel, RandomModel
+from hipporeplayimm.pyrecest_models import PyRecEstGoalParticleModel, _representative_filter_dt
 from hipporeplayimm.state_space import _candidate_evidence_support_label, StateSpaceDecoderConfig, StateSpaceReplayModel
 
 
@@ -168,6 +168,47 @@ def test_log_emission_tensor_metadata_is_declared_field() -> None:
     )
 
     assert emissions.metadata["source"] == "unit-test"
+
+
+def test_pyrecest_filter_dt_accepts_numpy_scalar_array() -> None:
+    emissions = LogEmissionTensor(
+        log_likelihood=np.zeros((1, 1), dtype=float),
+        spike_counts=np.zeros((1, 1), dtype=int),
+        times=np.array([0.0]),
+        dt=np.asarray(0.02),
+        cell_ids=np.array([1], dtype=int),
+        n_spikes=0,
+    )
+
+    assert _representative_filter_dt(emissions, np.empty(0, dtype=float)) == pytest.approx(0.02)
+
+
+def test_replay_models_reject_empty_emissions_clearly() -> None:
+    emissions = LogEmissionTensor(
+        log_likelihood=np.zeros((0, 2), dtype=float),
+        spike_counts=np.zeros((0, 1), dtype=int),
+        times=np.empty(0, dtype=float),
+        dt=0.02,
+        cell_ids=np.array([1], dtype=int),
+        n_spikes=0,
+    )
+
+    with pytest.raises(ValueError, match="at least one time bin"):
+        RandomModel().score(emissions, np.zeros((2, 2), dtype=float))
+
+
+def test_replay_models_reject_bin_center_count_mismatch() -> None:
+    emissions = LogEmissionTensor(
+        log_likelihood=np.zeros((1, 2), dtype=float),
+        spike_counts=np.zeros((1, 1), dtype=int),
+        times=np.array([0.0]),
+        dt=0.02,
+        cell_ids=np.array([1], dtype=int),
+        n_spikes=0,
+    )
+
+    with pytest.raises(ValueError, match="one row per emission spatial bin"):
+        RandomModel().score(emissions, np.zeros((1, 2), dtype=float))
 
 
 def test_duration_state_space_keeps_duration_metadata_with_occupancy_mask() -> None:

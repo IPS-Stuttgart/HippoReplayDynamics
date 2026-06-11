@@ -1004,6 +1004,8 @@ def _unique_bool_from_column(frame: pd.DataFrame, column: str, default: bool) ->
     if column in frame.columns:
         for value in frame[column].dropna():
             text = str(value).strip()
+            if text.lower() in _MISSING_METADATA_STRINGS:
+                continue
             if text:
                 values.append(_parse_bool(value))
     if not values:
@@ -1019,11 +1021,20 @@ def _parse_bool(value: object) -> bool:
         return bool(value)
     if isinstance(value, (int, np.integer)):
         return bool(value)
-    if isinstance(value, (float, np.floating)) and not np.isnan(value):
+    if isinstance(value, (float, np.floating)):
+        if not np.isfinite(value):
+            raise ValueError(f"cannot parse boolean value {value!r}")
         return bool(value)
     text = str(value).strip().lower()
-    if text in {"1", "true", "yes"}:
+    if text in {"true", "yes", "on"}:
         return True
-    if text in {"0", "false", "no"}:
+    if text in {"false", "no", "off"}:
         return False
+    try:
+        numeric = float(text)
+    except ValueError:
+        pass
+    else:
+        if np.isfinite(numeric):
+            return bool(numeric)
     raise ValueError(f"cannot parse boolean value {value!r}")

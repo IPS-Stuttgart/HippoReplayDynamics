@@ -181,14 +181,10 @@ class LogEmissionTensor:
         self.log_likelihood = np.asarray(self.log_likelihood, dtype=float)
         if self.log_likelihood.ndim != 2:
             raise ValueError("log_likelihood must be two-dimensional")
-        if self.n_time == 0:
-            raise ValueError("log_likelihood must contain at least one emission time bin")
         if self.n_bins == 0:
             raise ValueError("log_likelihood must contain at least one spatial bin")
         if np.any(np.isnan(self.log_likelihood)) or np.any(self.log_likelihood == np.inf):
             raise ValueError("log_likelihood must not contain NaN or +inf")
-        if not np.all(np.any(np.isfinite(self.log_likelihood), axis=1)):
-            raise ValueError("every emission row must contain at least one finite spatial-bin log likelihood")
 
         self.spike_counts = np.asarray(self.spike_counts)
         if self.spike_counts.ndim != 2 or self.spike_counts.shape[0] != self.n_time:
@@ -198,7 +194,8 @@ class LogEmissionTensor:
             raise ValueError("spike_counts must contain finite nonnegative values")
 
         self.times = np.asarray(self.times, dtype=float)
-        if self.times.shape != (self.n_time,):
+        times_are_missing = self.times.shape == (0,)
+        if self.times.shape != (self.n_time,) and not times_are_missing:
             raise ValueError("times must contain one value per emission row")
         if not np.all(np.isfinite(self.times)):
             raise ValueError("times must be finite")
@@ -224,11 +221,13 @@ class LogEmissionTensor:
         if self.transition_durations is None:
             if self.n_time <= 1:
                 self.transition_durations = np.empty(0, dtype=float)
-            else:
+            elif self.times.shape == (self.n_time,):
                 values = np.diff(self.times)
                 if not np.all(values > 0.0):
                     raise ValueError("times must be strictly increasing when transition_durations is not provided")
                 self.transition_durations = values
+            else:
+                self.transition_durations = np.full(self.n_time - 1, dt_value, dtype=float)
         else:
             self.transition_durations = np.asarray(self.transition_durations, dtype=float)
             if self.transition_durations.shape != (max(self.n_time - 1, 0),):

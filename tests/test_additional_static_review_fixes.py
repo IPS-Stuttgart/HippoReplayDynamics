@@ -18,9 +18,10 @@ from hipporeplayimm.benchmarks import (
     _score_state_space_model as _benchmark_score_state_space_model,
     _state_space_decoder_config,
 )
+from hipporeplayimm.candidate_pruning_calibration import score_pruning_gaps
 from hipporeplayimm.data import ReplaySession, _coerce_mark_matrix
 from hipporeplayimm.duration_dynamics import attach_duration_metadata, transition_durations_s
-from hipporeplayimm.duration_occupancy import _mode_transition_matrices
+from hipporeplayimm.duration_occupancy import _duration_candidates, _mode_transition_matrices
 from hipporeplayimm.encoding import (
     EmissionConfig,
     EncodingConfig,
@@ -34,6 +35,7 @@ from hipporeplayimm.ground_truth import _score_state_space_joint_for_ground_trut
 from hipporeplayimm.kd_reference import KDEncodingConfig, build_kd_emissions, fit_kd_place_field_encoding
 from hipporeplayimm.models import EventScore
 from hipporeplayimm.result_improvement_extensions import (
+    ReplayEmissionCalibration,
     build_sorted_emissions_with_replay_calibration,
     score_replay_model_compat,
 )
@@ -46,10 +48,15 @@ from hipporeplayimm.state_space_displacement_momentum import (
     _duration_adjusted_decays as _displacement_duration_adjusted_decays,
     _shifted_gaussian_transition_matrix,
 )
-from hipporeplayimm.state_space_model import StateSpaceDecoderConfig, _momentum_velocity_decays
+from hipporeplayimm.state_space_model import (
+    StateSpaceDecoderConfig,
+    StateSpaceReplayModel,
+    _momentum_velocity_decays,
+)
 from hipporeplayimm.state_space_sparse_momentum import (
     _duration_adjusted_decays as _sparse_momentum_duration_adjusted_decays,
 )
+from hipporeplayimm.state_space_utils import _valid_bin_mask_from_occupancy
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -240,6 +247,46 @@ def test_continuous_time_emissions_accept_numpy_integer_and_preserve_interval_du
     assert emissions.n_spikes == 1
 
 
+def test_replay_calibrated_emissions_reject_nonfinite_parameters():
+    session = _single_ripple_session()
+    encoding = _single_bin_encoding()
+
+    bad_calibrations = [
+        (ReplayEmissionCalibration(gain_prior_count=float("nan")), "gain_prior_count"),
+        (ReplayEmissionCalibration(max_gain=float("inf")), "max_gain"),
+        (
+            ReplayEmissionCalibration(negative_binomial_dispersion=float("nan")),
+            "negative_binomial_dispersion",
+        ),
+    ]
+    for calibration, message in bad_calibrations:
+        with pytest.raises(ValueError, match=message):
+            build_sorted_emissions_with_replay_calibration(
+                session,
+                encoding,
+                np.int64(0),
+                EmissionConfig(time_bin_s=0.05),
+                calibration,
+            )
+
+    with pytest.raises(ValueError, match="spike_rate_scale"):
+        build_sorted_emissions_with_replay_calibration(
+            session,
+            encoding,
+            np.int64(0),
+            EmissionConfig(time_bin_s=0.05, spike_rate_scale=float("nan")),
+        )
+
+    with pytest.raises(ValueError, match="likelihood_temperature"):
+        build_sorted_emissions_with_replay_calibration(
+            session,
+            encoding,
+            np.int64(0),
+            EmissionConfig(time_bin_s=0.05, likelihood_temperature=float("nan")),
+            ReplayEmissionCalibration(emission_model="negative-binomial"),
+        )
+
+
 def test_restrict_emissions_to_mask_preserves_duration_metadata():
     emissions = LogEmissionTensor(
         log_likelihood=np.array(
@@ -297,6 +344,16 @@ def test_momentum_decay_helpers_reject_nonfinite_tau_and_decay():
         _displacement_duration_adjusted_decays(bad_decay, durations, 0.01)
     with pytest.raises(ValueError, match="reference dt"):
         _displacement_duration_adjusted_decays(StateSpaceDecoderConfig(), durations, float("nan"))
+
+
+def test_valid_bin_mask_rejects_nonfinite_or_negative_thresholds():
+    occupancy = np.ones(2, dtype=float)
+
+    for threshold in (float("nan"), float("inf"), -1.0):
+        with pytest.raises(ValueError, match="min_occupancy_s"):
+            _valid_bin_mask_from_occupancy(occupancy, threshold, 2)
+    with pytest.raises(ValueError, match="min_occupancy_s"):
+        _valid_bin_mask_from_occupancy(None, float("nan"), 2)
 
 
 def test_displacement_transition_helpers_validate_and_normalize_degenerate_columns():
@@ -388,6 +445,105 @@ def test_candidate_helpers_pass_keyword_only_bin_centers_when_supported():
         assert helper(KeywordOnlyBinCenterModel(), emissions, bin_centers)[0].tolist() == [0]
 
 
+def test_pruning_gap_candidate_helper_does_not_swallow_bin_center_type_errors():
+    emissions = LogEmissionTensor(
+        log_likelihood=np.zeros((1, 2), dtype=float),
+        spike_counts=np.zeros((1, 1), dtype=int),
+        times=np.array([0.0], dtype=float),
+        dt=0.1,
+        cell_ids=np.array([1], dtype=int),
+        n_spikes=0,
+    )
+    bin_centers = np.array([[0.0, 0.0], [1.0, 0.0]], dtype=float)
+
+    class BrokenBinCenterAwareModel:
+        def candidate_indices(self, observed, centers=None):
+            assert observed is emissions
+            if centers is not None:
+                raise TypeError("internal pruning support bug")
+            return [np.array([0], dtype=int)]
+
+        def score(self, observed, centers, *, candidate_indices=None):
+            assert observed is emissions
+            assert centers is bin_centers
+            assert candidate_indices is not None
+            return _minimal_event_score("broken")
+
+    with pytest.raises(TypeError, match="internal pruning support bug"):
+        score_pruning_gaps([BrokenBinCenterAwareModel()], emissions, bin_centers)
+
+
+def test_pruning_gap_candidate_helper_passes_keyword_only_bin_centers_when_supported():
+    emissions = LogEmissionTensor(
+        log_likelihood=np.zeros((1, 2), dtype=float),
+        spike_counts=np.zeros((1, 1), dtype=int),
+        times=np.array([0.0], dtype=float),
+        dt=0.1,
+        cell_ids=np.array([1], dtype=int),
+        n_spikes=0,
+    )
+    bin_centers = np.array([[0.0, 0.0], [1.0, 0.0]], dtype=float)
+
+    class KeywordOnlyBinCenterPruningModel:
+        def __init__(self) -> None:
+            self.saw_bin_centers = False
+
+        def candidate_indices(self, observed, *, centers=None):
+            assert observed is emissions
+            self.saw_bin_centers = centers is bin_centers
+            return [np.array([0, 1], dtype=int)]
+
+        def score(self, observed, centers, *, candidate_indices=None):
+            assert observed is emissions
+            assert centers is bin_centers
+            assert candidate_indices is not None
+            return _minimal_event_score("keyword-only")
+
+    model = KeywordOnlyBinCenterPruningModel()
+    result = score_pruning_gaps([model], emissions, bin_centers)
+
+    assert model.saw_bin_centers
+    assert result.loc[0, "model"] == "keyword-only"
+
+
+def test_pruning_gap_candidate_helper_accepts_legacy_one_argument_candidates():
+    emissions = LogEmissionTensor(
+        log_likelihood=np.zeros((1, 2), dtype=float),
+        spike_counts=np.zeros((1, 1), dtype=int),
+        times=np.array([0.0], dtype=float),
+        dt=0.1,
+        cell_ids=np.array([1], dtype=int),
+        n_spikes=0,
+    )
+    bin_centers = np.array([[0.0, 0.0], [1.0, 0.0]], dtype=float)
+
+    class LegacyCandidateModel:
+        name = "legacy-candidates"
+
+        def __init__(self) -> None:
+            self.candidate_calls = 0
+            self.score_calls = 0
+
+        def candidate_indices(self, observed):
+            assert observed is emissions
+            self.candidate_calls += 1
+            return [np.array([1], dtype=int)]
+
+        def score(self, observed, centers, *, candidate_indices=None):
+            assert observed is emissions
+            assert centers is bin_centers
+            assert candidate_indices is not None
+            self.score_calls += 1
+            return _minimal_event_score("legacy-candidates")
+
+    model = LegacyCandidateModel()
+    gaps = score_pruning_gaps([model], emissions, bin_centers)
+
+    assert gaps.loc[0, "model"] == "legacy-candidates"
+    assert model.candidate_calls == 1
+    assert model.score_calls == 2
+
+
 def test_state_space_imm_switch_tau_is_preserved_for_duration_scorer():
     config = BenchmarkConfig(
         emissions=EmissionConfig(time_bin_s=0.02),
@@ -424,6 +580,68 @@ def test_imm_switch_tau_builds_duration_specific_transition_matrices():
 
     with pytest.raises(ValueError, match="imm_switch_tau_s"):
         _mode_transition_matrices(ss, 4, 0.90, float("inf"), durations)
+
+
+def test_duration_candidates_are_derived_on_valid_occupancy_support():
+    import hipporeplayimm.state_space as ss
+
+    emissions = LogEmissionTensor(
+        log_likelihood=np.array(
+            [
+                [20.0, 19.0, 1.0, 0.0],
+                [20.0, 19.0, 1.0, 0.0],
+            ],
+            dtype=float,
+        ),
+        spike_counts=np.zeros((2, 1), dtype=int),
+        times=np.array([0.0, 0.1], dtype=float),
+        dt=0.1,
+        cell_ids=np.array([1], dtype=int),
+        n_spikes=0,
+    )
+    bin_centers = np.column_stack((np.arange(4.0), np.zeros(4, dtype=float)))
+    model = StateSpaceReplayModel(
+        mode="momentum",
+        config=StateSpaceDecoderConfig(
+            momentum_candidate_top_k=2,
+            momentum_predicted_candidate_top_k=0,
+            valid_occupancy_threshold_s=0.5,
+        ),
+    )
+
+    candidates = _duration_candidates(
+        ss,
+        model,
+        emissions,
+        bin_centers,
+        None,
+        np.array([False, False, True, True], dtype=bool),
+    )
+
+    assert [current.tolist() for current in candidates] == [[2, 3], [2, 3]]
+
+
+def test_state_space_score_respects_return_trajectory_false():
+    emissions = LogEmissionTensor(
+        log_likelihood=np.zeros((3, 2), dtype=float),
+        spike_counts=np.zeros((3, 1), dtype=int),
+        times=np.array([0.0, 0.1, 0.2], dtype=float),
+        dt=0.1,
+        cell_ids=np.array([1], dtype=int),
+        n_spikes=0,
+    )
+    bin_centers = np.array([[0.0, 0.0], [1.0, 0.0]], dtype=float)
+
+    score = StateSpaceReplayModel(mode="diffusion").score(
+        emissions,
+        bin_centers,
+        return_trajectory=False,
+    )
+
+    assert score.trajectory_log_posterior is None
+    assert score.terminal_log_posterior is not None
+    assert score.terminal_log_posterior.shape == (2,)
+    assert score.diagnostics["state_space_trajectory_posterior"] == 0
 
 
 def test_state_space_score_helpers_do_not_swallow_occupancy_type_errors():
@@ -550,6 +768,81 @@ def test_score_replay_model_compat_does_not_swallow_optional_argument_type_error
             bin_centers,
             occupancy_s=np.ones(2, dtype=float),
         )
+
+
+def test_benchmark_model_evidence_score_helper_does_not_swallow_optional_type_errors():
+    benchmark_model_evidence = _load_script_module(
+        "benchmark_model_evidence_under_test_optional_errors",
+        ROOT / "scripts" / "benchmark_model_evidence.py",
+    )
+    emissions = LogEmissionTensor(
+        log_likelihood=np.zeros((1, 2), dtype=float),
+        spike_counts=np.zeros((1, 1), dtype=int),
+        times=np.array([0.0], dtype=float),
+        dt=0.1,
+        cell_ids=np.array([1], dtype=int),
+        n_spikes=0,
+    )
+    bin_centers = np.array([[0.0, 0.0], [1.0, 0.0]], dtype=float)
+
+    class BrokenCandidateModel:
+        def candidate_indices(self, observed, centers=None):
+            assert observed is emissions
+            if centers is not None:
+                raise TypeError("internal benchmark candidate support bug")
+            return [np.array([0], dtype=int)]
+
+        def score(self, observed, centers, *, candidate_indices=None):
+            del candidate_indices
+            assert observed is emissions
+            assert centers is bin_centers
+            return _minimal_event_score()
+
+    class BrokenOccupancyModel:
+        def score(self, observed, centers, *, occupancy_s=None):
+            assert observed is emissions
+            assert centers is bin_centers
+            if occupancy_s is not None:
+                raise TypeError("internal benchmark occupancy scoring bug")
+            return _minimal_event_score()
+
+    with pytest.raises(TypeError, match="internal benchmark candidate support bug"):
+        benchmark_model_evidence._score_model_with_optional_support(BrokenCandidateModel(), emissions, bin_centers)
+    with pytest.raises(TypeError, match="internal benchmark occupancy scoring bug"):
+        benchmark_model_evidence._score_model_with_optional_support(
+            BrokenOccupancyModel(),
+            emissions,
+            bin_centers,
+            occupancy_s=np.ones(2, dtype=float),
+        )
+
+
+def test_benchmark_model_evidence_common_support_does_not_swallow_candidate_type_errors(monkeypatch):
+    benchmark_model_evidence = _load_script_module(
+        "benchmark_model_evidence_under_test_common_support",
+        ROOT / "scripts" / "benchmark_model_evidence.py",
+    )
+    emissions = LogEmissionTensor(
+        log_likelihood=np.zeros((1, 2), dtype=float),
+        spike_counts=np.zeros((1, 1), dtype=int),
+        times=np.array([0.0], dtype=float),
+        dt=0.1,
+        cell_ids=np.array([1], dtype=int),
+        n_spikes=0,
+    )
+    bin_centers = np.array([[0.0, 0.0], [1.0, 0.0]], dtype=float)
+    args = type("_Args", (), {"state_space_common_support_top_k": 2})()
+
+    class BrokenCandidateModel:
+        def candidate_indices(self, observed, centers=None):
+            assert observed is emissions
+            if centers is not None:
+                raise TypeError("internal common support candidate bug")
+            return [np.array([0], dtype=int)]
+
+    monkeypatch.setattr(benchmark_model_evidence, "_is_state_space_candidate_model", lambda model: True)
+    with pytest.raises(TypeError, match="internal common support candidate bug"):
+        benchmark_model_evidence._common_state_space_candidates(args, [BrokenCandidateModel()], emissions, bin_centers)
 
 
 def test_simulated_replay_rejects_nonfinite_sampling_scalars_before_poisson():

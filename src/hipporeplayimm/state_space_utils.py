@@ -58,21 +58,22 @@ def _mass_retaining_candidate_indices(
     finite = np.isfinite(values)
     if not np.any(finite):
         raise ValueError("log_emission must contain at least one finite value")
-    n_bins = values.shape[0]
-    top_k_minimum = 0 if top_k is None or int(top_k) <= 0 else int(top_k)
-    min_count = min(n_bins, max(1, top_k_minimum, int(min_k)))
-    max_count = (
-        n_bins if max_k <= 0 else min(n_bins, max(min_count, int(max_k)))
-    )
     order = np.argsort(np.where(finite, values, -np.inf))[::-1]
-    ordered_values = np.where(finite[order], values[order], -np.inf)
+    finite_order = order[finite[order]]
+    finite_count = int(finite_order.size)
+    top_k_minimum = 0 if top_k is None or int(top_k) <= 0 else int(top_k)
+    min_count = min(finite_count, max(1, top_k_minimum, int(min_k)))
+    max_count = (
+        finite_count if max_k <= 0 else min(finite_count, max(min_count, int(max_k)))
+    )
+    ordered_values = values[finite_order]
     cumulative_mass = np.cumsum(np.exp(ordered_values - logsumexp(ordered_values)))
     tolerance = 16.0 * np.finfo(float).eps
     mass_count = int(
         np.searchsorted(cumulative_mass + tolerance, float(mass_threshold), side="left") + 1
     )
     count = min(max(min_count, mass_count), max_count)
-    return np.asarray(order[:count], dtype=int)
+    return np.asarray(finite_order[:count], dtype=int)
 
 
 def _validate_candidate_indices(
@@ -126,7 +127,9 @@ def _valid_bin_mask_from_occupancy(
     n_bins: int,
 ) -> np.ndarray | None:
     threshold = float(min_occupancy_s)
-    if threshold <= 0.0 or occupancy_s is None:
+    if not np.isfinite(threshold) or threshold < 0.0:
+        raise ValueError("min_occupancy_s must be finite and nonnegative")
+    if threshold == 0.0 or occupancy_s is None:
         return None
     occupancy = np.asarray(occupancy_s, dtype=float)
     if occupancy.shape != (n_bins,):

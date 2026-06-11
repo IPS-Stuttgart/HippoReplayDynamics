@@ -9,6 +9,7 @@ import numpy as np
 import pandas as pd
 
 from .encoding import LogEmissionTensor
+from .result_improvement_extensions import _call_candidate_indices_compat
 
 
 def full_grid_candidate_indices(emissions: LogEmissionTensor) -> list[np.ndarray]:
@@ -46,9 +47,6 @@ def score_pruning_gaps(models: Iterable[object], emissions: LogEmissionTensor, b
     for model in models:
         if not hasattr(model, "candidate_indices"):
             continue
-        try:
-            candidates = model.candidate_indices(emissions, bin_centers)
-        except TypeError:
-            candidates = model.candidate_indices(emissions)
+        candidates = _call_candidate_indices_compat(model.candidate_indices, emissions, bin_centers)
         rows.append(score_pruning_gap(model, emissions, bin_centers, candidates))
     return pd.DataFrame(rows)

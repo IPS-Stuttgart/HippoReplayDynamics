@@ -132,18 +132,56 @@ def _model_diagnostics(model: object) -> dict[str, int | float]:
 
 
 def _unique_int(frame: pd.DataFrame, columns: tuple[str, ...], default: int) -> int:
-    values = [int(float(v)) for column in columns if column in frame for v in frame[column].dropna() if str(v).strip()]
-    if not values:
-        return default
+    numeric_values = _numeric_metadata_values(frame, columns)
+    if not numeric_values:
+        return int(default)
+    values: list[int] = []
+    for value in numeric_values:
+        integer_value = int(round(value))
+        if not np.isclose(value, integer_value, rtol=0.0, atol=1e-9):
+            raise ValueError(f"{' / '.join(columns)} must be an integer")
+        values.append(integer_value)
     if any(value != values[0] for value in values[1:]):
         raise ValueError(f"{' / '.join(columns)} contains multiple values")
     return values[0]
 
 
 def _unique_float(frame: pd.DataFrame, columns: tuple[str, ...], default: float) -> float:
-    values = [float(v) for column in columns if column in frame for v in frame[column].dropna() if str(v).strip()]
+    values = _numeric_metadata_values(frame, columns)
     if not values:
-        return default
+        return float(default)
     if any(not np.isclose(value, values[0]) for value in values[1:]):
         raise ValueError(f"{' / '.join(columns)} contains multiple values")
     return float(values[0])
+
+
+_MISSING_METADATA_STRINGS = {"", "nan", "na", "n/a", "none", "null", "<na>"}
+
+
+def _numeric_metadata_values(frame: pd.DataFrame, columns: tuple[str, ...]) -> list[float]:
+    values: list[float] = []
+    for column in columns:
+        if column not in frame.columns:
+            continue
+        for value in frame[column]:
+            parsed = _metadata_float_from_value(value, column)
+            if parsed is not None:
+                values.append(parsed)
+    return values
+
+
+def _metadata_float_from_value(value: object, column: str) -> float | None:
+    try:
+        if pd.isna(value):
+            return None
+    except (TypeError, ValueError):
+        pass
+
+    text = str(value).strip()
+    if text.lower() in _MISSING_METADATA_STRINGS:
+        return None
+
+    numeric = float(text)
+    if not np.isfinite(numeric):
+        raise ValueError(f"{column} must be finite")
+    return float(numeric)

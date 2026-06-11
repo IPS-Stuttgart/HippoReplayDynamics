@@ -80,12 +80,23 @@ def build_sorted_emissions_with_replay_calibration(
     calibration = ReplayEmissionCalibration() if calibration is None else calibration
     gain_mode = _normalize_gain_mode(calibration.gain_mode)
     emission_model = _normalize_emission_model(calibration.emission_model)
-    if calibration.gain_prior_count < 0.0:
-        raise ValueError("gain_prior_count must be non-negative")
-    if calibration.max_gain <= 0.0:
-        raise ValueError("max_gain must be positive")
-    if calibration.negative_binomial_dispersion <= 0.0:
-        raise ValueError("negative_binomial_dispersion must be positive")
+
+    spike_rate_scale = float(config.spike_rate_scale)
+    likelihood_temperature = float(config.likelihood_temperature)
+    gain_prior_count = float(calibration.gain_prior_count)
+    max_gain = float(calibration.max_gain)
+    negative_binomial_dispersion = float(calibration.negative_binomial_dispersion)
+
+    if not np.isfinite(spike_rate_scale) or spike_rate_scale <= 0.0:
+        raise ValueError("spike_rate_scale must be finite and positive")
+    if not np.isfinite(likelihood_temperature) or likelihood_temperature <= 0.0:
+        raise ValueError("likelihood_temperature must be finite and positive")
+    if not np.isfinite(gain_prior_count) or gain_prior_count < 0.0:
+        raise ValueError("gain_prior_count must be finite and non-negative")
+    if not np.isfinite(max_gain) or max_gain <= 0.0:
+        raise ValueError("max_gain must be finite and positive")
+    if not np.isfinite(negative_binomial_dispersion) or negative_binomial_dispersion <= 0.0:
+        raise ValueError("negative_binomial_dispersion must be finite and positive")
 
     ripple_event = _coerce_ripple_event(session, ripple)
     edges = _time_bin_edges(ripple_event.start, ripple_event.end, config.time_bin_s)
@@ -95,14 +106,14 @@ def build_sorted_emissions_with_replay_calibration(
 
     counts = _sorted_spike_counts_for_edges(session, encoding, edges)
     rates_hz = np.asarray(encoding.rates_hz, dtype=float).copy()
-    rates_hz = np.maximum(rates_hz * float(config.spike_rate_scale), np.finfo(float).tiny)
+    rates_hz = np.maximum(rates_hz * spike_rate_scale, np.finfo(float).tiny)
     rates_hz, gain_metadata = _apply_replay_gains(
         rates_hz,
         counts,
         bin_durations,
         mode=gain_mode,
-        prior_count=float(calibration.gain_prior_count),
-        max_gain=float(calibration.max_gain),
+        prior_count=gain_prior_count,
+        max_gain=max_gain,
     )
 
     if emission_model == "poisson":
@@ -125,10 +136,10 @@ def build_sorted_emissions_with_replay_calibration(
             counts,
             rates_hz,
             bin_durations,
-            dispersion=float(calibration.negative_binomial_dispersion),
+            dispersion=negative_binomial_dispersion,
         )
 
-    log_likelihood = _apply_likelihood_temperature(log_likelihood, config.likelihood_temperature)
+    log_likelihood = _apply_likelihood_temperature(log_likelihood, likelihood_temperature)
 
     emissions = LogEmissionTensor(
         log_likelihood=log_likelihood,
@@ -144,10 +155,10 @@ def build_sorted_emissions_with_replay_calibration(
     emissions.metadata = {
         "sorted_spike_emission_model": emission_model,
         "replay_gain_mode": gain_mode,
-        "replay_gain_prior_count": float(calibration.gain_prior_count),
-        "replay_gain_max_gain": float(calibration.max_gain),
-        "negative_binomial_dispersion": float(calibration.negative_binomial_dispersion),
-        "emission_likelihood_temperature": float(config.likelihood_temperature),
+        "replay_gain_prior_count": gain_prior_count,
+        "replay_gain_max_gain": max_gain,
+        "negative_binomial_dispersion": negative_binomial_dispersion,
+        "emission_likelihood_temperature": likelihood_temperature,
         "emission_negative_binomial_overdispersion": float(config.negative_binomial_overdispersion),
         **gain_metadata,
     }
@@ -250,17 +261,17 @@ def _negative_binomial_log_emissions(
     dispersion ``r``.  As ``r`` grows, the model approaches the Poisson emission.
     """
 
-    if dispersion <= 0.0:
-        raise ValueError("dispersion must be positive")
+    r = float(dispersion)
+    if not np.isfinite(r) or r <= 0.0:
+        raise ValueError("dispersion must be finite and positive")
     dt = np.asarray(bin_durations, dtype=float)
     if dt.ndim != 1 or dt.shape[0] != spike_counts.shape[0]:
         raise ValueError("bin_durations must contain one duration per time bin")
-    if np.any(dt <= 0.0):
-        raise ValueError("all bin durations must be positive")
+    if not np.all(np.isfinite(dt)) or np.any(dt <= 0.0):
+        raise ValueError("all bin durations must be finite and positive")
 
     mean = np.maximum(dt[:, None, None] * rates_hz[None, :, :], np.finfo(float).tiny)
     counts = np.asarray(spike_counts, dtype=float)[:, :, None]
-    r = float(dispersion)
     return np.sum(
         gammaln(counts + r)
         - gammaln(r)

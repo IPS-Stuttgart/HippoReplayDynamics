@@ -64,6 +64,8 @@ from hipporeplayimm.state_space import StateSpaceDecoderConfig
 from hipporeplayimm.result_improvement_extensions import (
     BidirectionalReplayModel,
     ReverseTimeReplayModel,
+    _call_candidate_indices_compat,
+    _call_score_with_supported_kwargs,
     score_replay_model_compat,
 )
 from hipporeplayimm.result_quality_gates import (
@@ -367,10 +369,7 @@ def _score_model_with_optional_support(model, emissions, bin_centers, *, occupan
 
     candidates = candidate_indices
     if candidates is None and hasattr(model, "candidate_indices"):
-        try:
-            candidates = model.candidate_indices(emissions, bin_centers)
-        except TypeError:
-            candidates = model.candidate_indices(emissions)
+        candidates = _call_candidate_indices_compat(model.candidate_indices, emissions, bin_centers)
 
     kwargs: dict[str, object] = {}
     if candidates is not None:
@@ -381,25 +380,7 @@ def _score_model_with_optional_support(model, emissions, bin_centers, *, occupan
         kwargs["return_trajectory"] = False
     if not kwargs:
         return model.score(emissions, bin_centers)
-    try:
-        return model.score(emissions, bin_centers, **kwargs)
-    except TypeError as exc:
-        message = str(exc)
-        if "occupancy_s" in message and "candidate_indices" in kwargs:
-            return model.score(
-                emissions,
-                bin_centers,
-                candidate_indices=kwargs["candidate_indices"],
-            )
-        if "candidate_indices" in message and "occupancy_s" in kwargs:
-            return model.score(
-                emissions,
-                bin_centers,
-                occupancy_s=kwargs["occupancy_s"],
-            )
-        if "occupancy_s" not in message and "candidate_indices" not in message:
-            raise
-    return model.score(emissions, bin_centers)
+    return _call_score_with_supported_kwargs(model.score, emissions, bin_centers, kwargs)
 
 
 def _is_state_space_candidate_model(model: object) -> bool:
@@ -417,9 +398,9 @@ def _common_state_space_candidates(args, models, emissions, bin_centers):
         if not _is_state_space_candidate_model(model):
             continue
         try:
-            candidates = model.candidate_indices(emissions, bin_centers)
+            candidates = _call_candidate_indices_compat(model.candidate_indices, emissions, bin_centers)
         except TypeError:
-            candidates = model.candidate_indices(emissions)
+            raise
         except Exception:
             continue
         if union is None:

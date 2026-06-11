@@ -10,6 +10,8 @@ per-transition durations and valid-occupancy masks active at the same time.
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 import numpy as np
 from scipy.special import logsumexp
 
@@ -361,10 +363,15 @@ def _score_state_space_duration_with_occupancy(
     else:  # pragma: no cover - StateSpaceReplayModel.__post_init__ validates this.
         raise ValueError(f"Unsupported state-space mode: {self.mode}")
 
+    trajectory_to_return = None
     if trajectory is not None:
         terminal = trajectory[-1]
-        trajectory_available = 1
         mean_trajectory_entropy = ss._mean_entropy(trajectory)
+        if return_trajectory:
+            trajectory_to_return = trajectory
+            trajectory_available = 1
+        else:
+            trajectory_available = 0
     elif terminal is not None:
         trajectory_available = 0
         mean_trajectory_entropy = float("nan")
@@ -410,7 +417,7 @@ def _score_state_space_duration_with_occupancy(
         emissions.n_spikes,
         diagnostics=diagnostics,
         terminal_log_posterior=terminal,
-        trajectory_log_posterior=trajectory,
+        trajectory_log_posterior=trajectory_to_return,
     )
 
 
@@ -436,11 +443,11 @@ def _single_bin_degenerate_diagnostics(prefix: str) -> dict[str, int | str]:
 
 
 def _duration_candidates(ss, model, emissions, bin_centers, candidate_indices, valid_bin_mask):
-    candidates = (
-        model.candidate_indices(emissions, bin_centers)
-        if candidate_indices is None
-        else candidate_indices
-    )
+    if candidate_indices is None:
+        candidate_emissions = _candidate_selection_emissions(emissions, valid_bin_mask)
+        candidates = model.candidate_indices(candidate_emissions, bin_centers)
+    else:
+        candidates = candidate_indices
     candidates = ss._validate_candidate_indices(candidates, emissions.n_time, emissions.n_bins)
     candidates = ss._restrict_candidates_to_valid_bins(
         candidates,
@@ -448,6 +455,25 @@ def _duration_candidates(ss, model, emissions, bin_centers, candidate_indices, v
         valid_bin_mask,
     )
     return ss._validate_candidate_indices(candidates, emissions.n_time, emissions.n_bins)
+
+
+def _candidate_selection_emissions(emissions, valid_bin_mask):
+    """Return emissions whose invalid occupancy bins cannot win internal beams."""
+
+    if valid_bin_mask is None:
+        return emissions
+
+    mask = np.asarray(valid_bin_mask, dtype=bool)
+    if mask.shape != (emissions.n_bins,):
+        raise ValueError("valid_bin_mask must contain one boolean value per spatial bin")
+    if not np.any(mask):
+        raise ValueError("valid_bin_mask must contain at least one valid spatial bin")
+    if bool(np.all(mask)):
+        return emissions
+
+    log_likelihood = np.asarray(emissions.log_likelihood, dtype=float).copy()
+    log_likelihood[:, ~mask] = -np.inf
+    return replace(emissions, log_likelihood=log_likelihood)
 
 
 def _candidate_evidence_support(

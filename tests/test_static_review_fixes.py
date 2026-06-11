@@ -12,6 +12,10 @@ from hipporeplayimm.goal_state_space import _farthest_point_subset as goal_farth
 from hipporeplayimm.pyrecest_models import (
     _farthest_point_subset as pyrecest_farthest_point_subset,
 )
+from hipporeplayimm.result_improvements import (
+    posterior_calibration_summary,
+    stratified_cell_split,
+)
 
 
 class _ProposalRecordingFilter:
@@ -124,3 +128,76 @@ def test_clusterless_ground_truth_recovers_mark_likelihood_metadata() -> None:
 def test_clusterless_kde_bandwidth_metadata_reports_bandwidth_not_variance() -> None:
     effective_variance = np.array([6.25, 9.0])
     np.testing.assert_allclose(_sqrt_optional(effective_variance), np.array([2.5, 3.0]))
+
+
+def test_sweep_observation_cli_preserves_continue_on_error_default(monkeypatch, tmp_path) -> None:
+    from hipporeplayimm import cli
+
+    captured: dict[str, object] = {}
+
+    class _Result:
+        summary = pd.DataFrame()
+
+    def fake_run(root, config):
+        captured["root"] = root
+        captured["config"] = config
+        return _Result()
+
+    def fake_write(result, output):
+        captured["result"] = result
+        captured["output"] = output
+
+    monkeypatch.setattr(cli, "run_observation_parameter_sweep", fake_run)
+    monkeypatch.setattr(cli, "write_observation_sweep_outputs", fake_write)
+
+    assert (
+        cli.main(
+            [
+                "sweep-observation",
+                str(tmp_path),
+                "--output",
+                str(tmp_path / "out"),
+                "--skip-simulation-recovery",
+            ]
+        )
+        == 0
+    )
+
+    assert captured["root"] == str(tmp_path)
+    assert captured["output"] == str(tmp_path / "out")
+    assert getattr(captured["config"], "simulation_continue_on_error") is True
+
+
+def test_stratified_cell_split_downsamples_overfull_strata_randomly() -> None:
+    ids = np.arange(4)
+    scores = np.arange(4.0)
+
+    train, test = stratified_cell_split(
+        ids,
+        scores,
+        test_fraction=0.3,
+        random_seed=0,
+        n_strata=2,
+    )
+
+    np.testing.assert_array_equal(test, np.array([2]))
+    np.testing.assert_array_equal(train, np.array([0, 1, 3]))
+
+
+def test_posterior_calibration_summary_coerces_probability_column() -> None:
+    samples = pd.DataFrame(
+        {
+            "session": ["Rat1/Open1", "Rat1/Open1"],
+            "true_bin_probability": ["0.25", "0.75"],
+            "true_bin_rank": [1, 2],
+            "n_position_bins": [4, 4],
+        }
+    )
+
+    summary = posterior_calibration_summary(samples)
+
+    assert summary.loc[0, "mean_true_probability"] == pytest.approx(0.5)
+    assert summary.loc[0, "median_true_probability"] == pytest.approx(0.5)
+    assert summary.loc[0, "mean_true_negative_log_probability"] == pytest.approx(
+        float(np.mean(-np.log([0.25, 0.75])))
+    )

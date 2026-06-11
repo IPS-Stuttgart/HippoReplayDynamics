@@ -403,8 +403,13 @@ def _representative_filter_dt(
     call does not pass an explicit dt.
     """
 
-    base_dt = getattr(emissions.dt, "base", emissions.dt)
-    dt = float(base_dt)
+    dt_array = np.asarray(emissions.dt, dtype=float)
+    if dt_array.shape == ():
+        dt = float(dt_array)
+    elif dt_array.size == 1:
+        dt = float(dt_array.reshape(-1)[0])
+    else:
+        dt = float("nan")
     if not np.isfinite(dt) or dt <= 0.0:
         if transition_durations.size == 0:
             raise ValueError("emissions.dt must be finite and positive")

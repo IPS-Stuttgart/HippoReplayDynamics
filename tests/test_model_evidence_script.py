@@ -130,6 +130,48 @@ def test_model_evidence_accepts_sorted_spike_state_space_models():
     assert models["sorted-spike-state-space-imm"].config.imm_mode_stickiness == 0.91
 
 
+def test_model_evidence_preserves_imm_switch_tau_for_state_space_models():
+    args = argparse.Namespace(
+        models="sorted-spike-state-space-first-order-imm sorted-spike-state-space-imm",
+        candidate_top_k=64,
+        stationary_sigma_cm=2.0,
+        diffusion_sigma_cm=12.0,
+        momentum_sigma_cm=12.0,
+        velocity_decay=0.95,
+        mode_stickiness=0.94,
+        time_bin_s=0.003,
+        state_space_stationary_sigma_cm=1.5,
+        state_space_diffusion_sigma_cm_sqrt_s=42.0,
+        state_space_max_step_sigma=3.0,
+        state_space_imm_mode_stickiness=0.91,
+        state_space_imm_switch_tau_s=0.12,
+        state_space_momentum_sigma_cm_sqrt_s=43.0,
+        state_space_momentum_initial_sigma_cm_sqrt_s=44.0,
+        state_space_momentum_velocity_decay=0.8,
+        state_space_momentum_candidate_top_k=17,
+        state_space_momentum_predicted_candidate_top_k=5,
+    )
+
+    models = _models(args)
+    expected_stickiness = float(np.exp(-0.003 / 0.12))
+
+    for name in (
+        "sorted-spike-state-space-first-order-imm",
+        "sorted-spike-state-space-imm",
+    ):
+        assert models[name].config.imm_switch_tau_s == 0.12
+        assert models[name].config.imm_mode_stickiness == expected_stickiness
+
+
+def test_improved_model_evidence_preserves_imm_switch_tau_in_state_space_config():
+    improved_script = Path(__file__).resolve().parents[1] / "scripts" / "benchmark_model_evidence_improved.py"
+
+    assert (
+        "imm_switch_tau_s=args.state_space_imm_switch_tau_s"
+        in improved_script.read_text(encoding="utf-8")
+    )
+
+
 def test_model_evidence_accepts_clusterless_state_space_models():
     args = argparse.Namespace(
         models=(

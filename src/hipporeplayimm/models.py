@@ -52,11 +52,29 @@ class ReplayModel(Protocol):
         ...
 
 
+def _validate_score_inputs(emissions: LogEmissionTensor, bin_centers: np.ndarray) -> np.ndarray:
+    """Validate shared replay-model score inputs and return numeric bin centers."""
+
+    log_likelihood = np.asarray(emissions.log_likelihood, dtype=float)
+    if log_likelihood.ndim != 2:
+        raise ValueError("emissions.log_likelihood must be two-dimensional")
+    if log_likelihood.shape[0] == 0:
+        raise ValueError("emissions must contain at least one time bin")
+
+    centers = np.asarray(bin_centers, dtype=float)
+    if centers.ndim != 2 or centers.shape[1] < 1:
+        raise ValueError("bin_centers must have shape (n_bins, position_dim)")
+    if centers.shape[0] != log_likelihood.shape[1]:
+        raise ValueError("bin_centers must contain one row per emission spatial bin")
+    return centers
+
+
 @dataclass
 class RandomModel:
     name: str = "random"
 
     def score(self, emissions: LogEmissionTensor, bin_centers: np.ndarray) -> EventScore:
+        bin_centers = _validate_score_inputs(emissions, bin_centers)
         trajectory_log_posterior = _normalize_log_weights_by_row(emissions.log_likelihood)
         terminal_log_posterior = trajectory_log_posterior[-1]
         logp = float(np.sum(logsumexp(emissions.log_likelihood, axis=1) - np.log(emissions.n_bins)))
@@ -76,6 +94,7 @@ class StationaryModel:
     name: str = "stationary"
 
     def score(self, emissions: LogEmissionTensor, bin_centers: np.ndarray) -> EventScore:
+        bin_centers = _validate_score_inputs(emissions, bin_centers)
         cumulative_log_likelihood = np.cumsum(emissions.log_likelihood, axis=0) - np.log(emissions.n_bins)
         trajectory_log_posterior = _normalize_log_weights_by_row(cumulative_log_likelihood)
         terminal_log_posterior = trajectory_log_posterior[-1]
@@ -102,6 +121,7 @@ class DiffusionModel:
         _validate_positive_parameter("max_step_sigma", self.max_step_sigma)
 
     def score(self, emissions: LogEmissionTensor, bin_centers: np.ndarray) -> EventScore:
+        bin_centers = _validate_score_inputs(emissions, bin_centers)
         transition = _log_transition_matrix(
             bin_centers,
             sigma_cm=self.sigma_cm,
@@ -176,6 +196,7 @@ class CandidateKinematicModel:
         bin_centers: np.ndarray,
         candidate_indices: list[np.ndarray] | None = None,
     ) -> EventScore:
+        bin_centers = _validate_score_inputs(emissions, bin_centers)
         if emissions.n_time == 1:
             if candidate_indices is not None:
                 _validate_candidate_support(candidate_indices, emissions.n_time, emissions.n_bins)

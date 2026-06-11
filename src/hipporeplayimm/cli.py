@@ -245,7 +245,15 @@ def main(argv: list[str] | None = None) -> int:
     observation_parser.add_argument("--simulation-events-per-model", type=int, default=10)
     observation_parser.add_argument("--simulation-true-models", default=" ".join(DEFAULT_TRUE_MODELS))
     observation_parser.add_argument("--simulation-models", default=" ".join(DEFAULT_SCORING_MODELS))
-    observation_parser.add_argument("--simulation-continue-on-error", action="store_true")
+    observation_parser.add_argument(
+        "--simulation-continue-on-error",
+        action=argparse.BooleanOptionalAction,
+        default=ObservationSweepConfig.simulation_continue_on_error,
+        help=(
+            "Continue scoring later sweep settings after a synthetic-recovery "
+            "event fails; use --no-simulation-continue-on-error to fail fast."
+        ),
+    )
 
     recovery_parser = subparsers.add_parser("simulate-recovery")
     recovery_parser.add_argument("root")

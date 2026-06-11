@@ -282,12 +282,17 @@ def stratified_cell_split(
         test_indices.extend(int(index) for index in shuffled[:n_test])
     n_test_total = max(1, int(round(ids.size * float(test_fraction))))
     n_test_total = min(n_test_total, ids.size - 1)
-    if len(test_indices) < n_test_total:
-        remaining = np.setdiff1d(np.arange(ids.size), np.asarray(test_indices, dtype=int), assume_unique=False)
+    selected = np.asarray(sorted(set(test_indices)), dtype=int)
+    if selected.size < n_test_total:
+        remaining = np.setdiff1d(np.arange(ids.size), selected, assume_unique=False)
         rng.shuffle(remaining)
-        test_indices.extend(int(index) for index in remaining[: n_test_total - len(test_indices)])
-    test_indices = sorted(set(test_indices))[:n_test_total]
-    test = np.sort(ids[np.asarray(test_indices, dtype=int)])
+        selected = np.concatenate(
+            [selected, remaining[: n_test_total - selected.size]]
+        )
+    elif selected.size > n_test_total:
+        selected = rng.choice(selected, size=n_test_total, replace=False)
+    test_indices = np.sort(selected.astype(int))
+    test = np.sort(ids[test_indices])
     train = np.sort(np.setdiff1d(ids, test, assume_unique=False))
     return train, test
 
@@ -310,6 +315,7 @@ def posterior_calibration_summary(
         samples["_all"] = "all"
     frame = samples.copy()
     probabilities = pd.to_numeric(frame[probability_column], errors="coerce").clip(lower=np.finfo(float).tiny, upper=1.0)
+    frame[probability_column] = probabilities
     frame["true_negative_log_probability"] = -np.log(probabilities)
     if rank_column in frame and n_bins_column in frame:
         rank = pd.to_numeric(frame[rank_column], errors="coerce")

@@ -219,6 +219,7 @@ def _state_space_config(args: argparse.Namespace, mode: str) -> StateSpaceDecode
         diffusion_sigma_cm_sqrt_s=args.state_space_diffusion_sigma_cm_sqrt_s,
         max_step_sigma=args.state_space_max_step_sigma,
         imm_mode_stickiness=_effective_state_space_imm_stickiness(args),
+        imm_switch_tau_s=args.state_space_imm_switch_tau_s,
         momentum_sigma_cm_sqrt_s=args.state_space_momentum_sigma_cm_sqrt_s,
         momentum_initial_sigma_cm_sqrt_s=args.state_space_momentum_initial_sigma_cm_sqrt_s,
         momentum_velocity_decay=args.state_space_momentum_velocity_decay,

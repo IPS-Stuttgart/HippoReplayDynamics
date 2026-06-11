@@ -102,18 +102,25 @@ def restrict_emissions_to_mask(emissions: LogEmissionTensor, valid_mask: np.ndar
     """Return a LogEmissionTensor restricted to valid spatial bins."""
 
     mask = _coerce_mask(valid_mask, emissions.n_bins)
-    out = LogEmissionTensor(
+    bin_durations = getattr(emissions, "bin_durations", None)
+    if bin_durations is not None:
+        bin_durations = np.asarray(bin_durations, dtype=float).copy()
+    transition_durations = getattr(emissions, "transition_durations", None)
+    if transition_durations is not None:
+        transition_durations = np.asarray(transition_durations, dtype=float).copy()
+    metadata = dict(getattr(emissions, "metadata", {}) or {})
+
+    return LogEmissionTensor(
         log_likelihood=np.asarray(emissions.log_likelihood, dtype=float)[:, mask],
         spike_counts=np.asarray(emissions.spike_counts).copy(),
         times=np.asarray(emissions.times, dtype=float).copy(),
         dt=emissions.dt,
         cell_ids=np.asarray(emissions.cell_ids).copy(),
         n_spikes=int(emissions.n_spikes),
+        bin_durations=bin_durations,
+        transition_durations=transition_durations,
+        metadata=metadata,
     )
-    for name in ("metadata", "transition_durations"):
-        if hasattr(emissions, name):
-            setattr(out, name, getattr(emissions, name))
-    return out
 
 
 def masked_gaussian_transition_matrix(

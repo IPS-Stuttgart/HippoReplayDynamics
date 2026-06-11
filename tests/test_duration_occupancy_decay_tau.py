@@ -32,8 +32,12 @@ def test_duration_adjusted_decays_keep_legacy_path_when_tau_disabled() -> None:
     assert np.allclose(decays, np.asarray([0.95, 0.95**2]))
 
 
-def test_duration_adjusted_decays_reject_nonfinite_tau() -> None:
-    config = SimpleNamespace(momentum_velocity_decay=0.95, momentum_velocity_decay_tau_s=float("inf"))
+@pytest.mark.parametrize("bad_tau", [float("nan"), float("inf"), -0.001])
+def test_duration_adjusted_decays_reject_invalid_tau(bad_tau: float) -> None:
+    config = SimpleNamespace(
+        momentum_velocity_decay=0.95,
+        momentum_velocity_decay_tau_s=bad_tau,
+    )
 
     with pytest.raises(ValueError, match="momentum_velocity_decay_tau_s"):
         _duration_adjusted_decays_from_config(config, np.asarray([0.003]), 0.003)

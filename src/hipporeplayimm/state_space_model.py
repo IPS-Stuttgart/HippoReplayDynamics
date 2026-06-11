@@ -20,6 +20,7 @@ from .state_space_first_order import (
 )
 from .state_space_utils import (
     _as_log_probs,
+    _coerce_valid_bin_mask,
     _first_order_imm_content_diagnostics,
     _gaussian_transition_matrix,
     _mass_retaining_candidate_indices,
@@ -121,7 +122,12 @@ class StateSpaceReplayModel:
         elif self.config.mode != self.mode:
             self.config = replace(self.config, mode=self.mode)
 
-    def candidate_indices(self, emissions: LogEmissionTensor, bin_centers: np.ndarray | None = None) -> list[np.ndarray]:
+    def candidate_indices(
+        self,
+        emissions: LogEmissionTensor,
+        bin_centers: np.ndarray | None = None,
+        valid_bin_mask: np.ndarray | None = None,
+    ) -> list[np.ndarray]:
         """Return the candidate support used by pruned momentum/IMM recursions.
 
         The base support is either the per-bin emission top-k set or, when
@@ -135,10 +141,19 @@ class StateSpaceReplayModel:
         emission rank is too low for the fixed top-k beam. The augmentation is
         bounded by the prediction top-k and never changes externally supplied
         candidate supports.
+
+        When ``valid_bin_mask`` is supplied, masked bins are excluded from the
+        candidate-source emissions and posterior-source diffusion pre-pass, then
+        removed again after momentum-prediction augmentation.
         """
 
         assert self.config is not None
-        support_log_values = _candidate_support_log_values(emissions, bin_centers, self.config)
+        support_log_values = _candidate_support_log_values(
+            emissions,
+            bin_centers,
+            self.config,
+            valid_bin_mask=valid_bin_mask,
+        )
         mass_threshold = self.config.momentum_candidate_mass_threshold
         if mass_threshold is None or not np.isfinite(float(mass_threshold)):
             base = [
@@ -158,14 +173,18 @@ class StateSpaceReplayModel:
             ]
         predicted_top_k = int(self.config.momentum_predicted_candidate_top_k)
         if predicted_top_k <= 0 or bin_centers is None or emissions.n_time < 3:
-            return base
+            return _restrict_candidate_indices_when_masked(
+                base,
+                support_log_values,
+                valid_bin_mask,
+            )
         transition_durations = _emission_transition_durations(emissions)
         prediction_multipliers = _momentum_prediction_multipliers(
             self.config,
             transition_durations,
             fallback_dt=float(emissions.dt),
         )
-        return _augment_candidates_with_momentum_predictions(
+        augmented = _augment_candidates_with_momentum_predictions(
             base,
             bin_centers,
             predicted_top_k=predicted_top_k,
@@ -174,6 +193,11 @@ class StateSpaceReplayModel:
                 fallback=float(self.config.momentum_velocity_decay),
             ),
             velocity_decays=prediction_multipliers,
+        )
+        return _restrict_candidate_indices_when_masked(
+            augmented,
+            support_log_values,
+            valid_bin_mask,
         )
 
     def score(
@@ -563,24 +587,65 @@ def _candidate_support_log_values(
     emissions: LogEmissionTensor,
     bin_centers: np.ndarray | None,
     config: StateSpaceDecoderConfig,
+    *,
+    valid_bin_mask: np.ndarray | None = None,
 ) -> np.ndarray:
     """Return train-only log support scores used for candidate selection."""
 
     source = _candidate_source_label(config)
     if source == "emission" or bin_centers is None:
-        return np.asarray(emissions.log_likelihood, dtype=float)
-    return _diffusion_candidate_log_posterior(emissions, bin_centers, config)
+        return _masked_candidate_support_log_values(emissions.log_likelihood, valid_bin_mask)
+    return _diffusion_candidate_log_posterior(
+        emissions,
+        bin_centers,
+        config,
+        valid_bin_mask=valid_bin_mask,
+    )
+
+
+def _restrict_candidate_indices_when_masked(
+    candidates: list[np.ndarray],
+    support_log_values: np.ndarray,
+    valid_bin_mask: np.ndarray | None,
+) -> list[np.ndarray]:
+    if valid_bin_mask is None:
+        return candidates
+    return _restrict_candidates_to_valid_bins(candidates, support_log_values, valid_bin_mask)
+
+
+def _masked_candidate_support_log_values(
+    log_likelihood: np.ndarray,
+    valid_bin_mask: np.ndarray | None,
+) -> np.ndarray:
+    values = np.asarray(log_likelihood, dtype=float)
+    if values.ndim != 2:
+        raise ValueError("log_likelihood must be two-dimensional")
+    if valid_bin_mask is None:
+        return values
+    valid_mask = _coerce_valid_bin_mask(valid_bin_mask, values.shape[1])
+    assert valid_mask is not None
+    if bool(np.all(valid_mask)):
+        return values
+    masked = values.copy()
+    masked[:, ~valid_mask] = -np.inf
+    return masked
 
 
 def _diffusion_candidate_log_posterior(
     emissions: LogEmissionTensor,
     bin_centers: np.ndarray,
     config: StateSpaceDecoderConfig,
+    *,
+    valid_bin_mask: np.ndarray | None = None,
 ) -> np.ndarray:
     """Use the exact first-order diffusion posterior as a leakage-free beam source."""
 
+    log_likelihood = _masked_candidate_support_log_values(
+        emissions.log_likelihood,
+        valid_bin_mask,
+    )
     if emissions.n_time <= 1:
-        return _normalize_log_rows(emissions.log_likelihood)
+        return _normalize_log_rows(log_likelihood)
     transition_durations = _emission_transition_durations(emissions)
     sigmas = _per_transition_sigmas_cm(config.diffusion_sigma_cm_sqrt_s, transition_durations)
     if sigmas.size and not np.allclose(sigmas, _per_bin_sigma(config.diffusion_sigma_cm_sqrt_s, emissions.dt)):
@@ -589,20 +654,23 @@ def _diffusion_candidate_log_posterior(
                 bin_centers,
                 float(sigma_cm),
                 config.max_step_sigma,
+                valid_bin_mask=valid_bin_mask,
             )
             for sigma_cm in sigmas
         ]
         _, trajectory = _forward_backward_first_order_time_varying(
-            emissions.log_likelihood,
+            log_likelihood,
             transitions,
+            valid_bin_mask=valid_bin_mask,
         )
         return trajectory
     transition = _gaussian_transition_matrix(
         bin_centers,
         _per_bin_sigma(config.diffusion_sigma_cm_sqrt_s, emissions.dt),
         config.max_step_sigma,
+        valid_bin_mask=valid_bin_mask,
     )
-    _, trajectory = _forward_backward_first_order(emissions.log_likelihood, transition)
+    _, trajectory = _forward_backward_first_order(log_likelihood, transition, valid_bin_mask=valid_bin_mask)
     return trajectory
 
 

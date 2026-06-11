@@ -184,9 +184,15 @@ def apply_model_hyperparam_patch() -> None:
     def cfg(config, name: str, default):
         return getattr(config, name, default)
 
-    def effective_state_space_imm_stickiness(config) -> float:
+    def state_space_imm_switch_tau_s(config) -> float:
         tau_s = float(cfg(config, "state_space_imm_switch_tau_s", 0.0))
-        if tau_s <= 0.0:
+        if not np.isfinite(tau_s) or tau_s < 0.0:
+            raise ValueError("state_space_imm_switch_tau_s must be finite and nonnegative")
+        return tau_s
+
+    def effective_state_space_imm_stickiness(config) -> float:
+        tau_s = state_space_imm_switch_tau_s(config)
+        if tau_s == 0.0:
             return float(cfg(config, "state_space_imm_mode_stickiness", 0.95))
         emissions = cfg(config, "emissions", EmissionConfig())
         return float(np.exp(-float(emissions.time_bin_s) / tau_s))
@@ -213,6 +219,7 @@ def apply_model_hyperparam_patch() -> None:
                 diffusion_sigma_cm_sqrt_s=cfg(config, "state_space_diffusion_sigma_cm_sqrt_s", 85.0),
                 max_step_sigma=cfg(config, "state_space_max_step_sigma", 4.0),
                 imm_mode_stickiness=effective_state_space_imm_stickiness(config),
+                imm_switch_tau_s=state_space_imm_switch_tau_s(config),
                 trajectory_imm_mode_stickiness=cfg(
                     config,
                     "state_space_trajectory_imm_mode_stickiness",

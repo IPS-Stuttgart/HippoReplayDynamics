@@ -1115,6 +1115,8 @@ def _is_best_static_baseline_model(model_name: object) -> bool:
 
 def _benchmark_event_group_columns(frame: pd.DataFrame) -> list[str]:
     columns = ["session", "event_index"]
+    if "benchmark_random_seed" in frame.columns:
+        columns.append("benchmark_random_seed")
     if "benchmark_cell_split_index" in frame.columns:
         columns.append("benchmark_cell_split_index")
     return columns

@@ -445,7 +445,11 @@ def _single_bin_degenerate_diagnostics(prefix: str) -> dict[str, int | str]:
 def _duration_candidates(ss, model, emissions, bin_centers, candidate_indices, valid_bin_mask):
     if candidate_indices is None:
         candidate_emissions = _candidate_selection_emissions(emissions, valid_bin_mask)
-        candidates = model.candidate_indices(candidate_emissions, bin_centers)
+        candidates = model.candidate_indices(
+            candidate_emissions,
+            bin_centers,
+            valid_bin_mask=valid_bin_mask,
+        )
     else:
         candidates = candidate_indices
     candidates = ss._validate_candidate_indices(candidates, emissions.n_time, emissions.n_bins)
@@ -624,14 +628,14 @@ def _duration_adjusted_decays_from_config(config, durations: np.ndarray, referen
     """
 
     tau_s = float(getattr(config, "momentum_velocity_decay_tau_s", 0.0))
-    if tau_s <= 0.0:
+    if not np.isfinite(tau_s) or tau_s < 0.0:
+        raise ValueError("momentum_velocity_decay_tau_s must be finite and nonnegative")
+    if tau_s == 0.0:
         return _duration_adjusted_decays(
             float(getattr(config, "momentum_velocity_decay", 0.95)),
             durations,
             reference_dt,
         )
-    if not np.isfinite(tau_s):
-        raise ValueError("momentum_velocity_decay_tau_s must be finite when positive")
     durations = np.asarray(durations, dtype=float)
     if np.any(durations <= 0.0) or not np.all(np.isfinite(durations)):
         raise ValueError("transition durations must be finite and positive")

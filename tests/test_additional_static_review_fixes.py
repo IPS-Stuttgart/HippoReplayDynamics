@@ -4,6 +4,7 @@ import importlib.util
 from pathlib import Path
 
 import numpy as np
+import pandas as pd
 import pytest
 
 from hipporeplayimm.accuracy_upgrades import (
@@ -19,7 +20,7 @@ from hipporeplayimm.benchmarks import (
     _state_space_decoder_config,
 )
 from hipporeplayimm.candidate_pruning_calibration import score_pruning_gaps
-from hipporeplayimm.data import ReplaySession, _coerce_mark_matrix
+from hipporeplayimm.data import ReplaySession, _coerce_mark_matrix, _load_mat_file
 from hipporeplayimm.duration_dynamics import attach_duration_metadata, transition_durations_s
 from hipporeplayimm.duration_occupancy import _duration_candidates, _mode_transition_matrices
 from hipporeplayimm.encoding import (
@@ -31,7 +32,12 @@ from hipporeplayimm.encoding import (
     build_emissions,
     fit_place_field_encoding,
 )
-from hipporeplayimm.ground_truth import _score_state_space_joint_for_ground_truth
+from hipporeplayimm.ground_truth import (
+    _emission_config_for_scores,
+    _encoding_config_for_scores,
+    _score_state_space_joint_for_ground_truth,
+    _unique_bool_from_column,
+)
 from hipporeplayimm.kd_reference import KDEncodingConfig, build_kd_emissions, fit_kd_place_field_encoding
 from hipporeplayimm.models import EventScore
 from hipporeplayimm.result_improvement_extensions import (
@@ -126,6 +132,27 @@ def _single_bin_encoding(cell_ids: tuple[int, ...] = ()) -> EncodingModel:
         cell_ids=ids,
         config=EncodingConfig(),
     )
+
+
+def test_hdf5_mat_loader_dereferences_matlab_cell_arrays(tmp_path):
+    h5py = pytest.importorskip("h5py")
+    path = tmp_path / "matlab_v73_cells.mat"
+
+    with h5py.File(path, "w") as handle:
+        refs = handle.create_group("#refs#")
+        left = refs.create_dataset("left", data=np.array([[1.0, 2.0]], dtype=float))
+        right = refs.create_dataset("right", data=np.array([[3.0, 4.0]], dtype=float))
+        cells = handle.create_dataset("Cell_Data", shape=(1, 2), dtype=h5py.ref_dtype)
+        cells[0, 0] = left.ref
+        cells[0, 1] = right.ref
+
+    loaded = _load_mat_file(path)
+    values = loaded["Cell_Data"]
+
+    assert isinstance(values, np.ndarray)
+    assert values.shape == (2,)
+    np.testing.assert_allclose(values[0], np.array([1.0, 2.0], dtype=float))
+    np.testing.assert_allclose(values[1], np.array([3.0, 4.0], dtype=float))
 
 
 def test_place_field_encoding_smoothing_handles_empty_cell_set():
@@ -322,6 +349,51 @@ def test_restrict_emissions_to_mask_preserves_duration_metadata():
     )
     assert restricted.metadata == {"emission_model": "variable-duration"}
     assert restricted.metadata is not emissions.metadata
+
+
+def test_log_emission_tensor_rejects_invalid_core_shapes_and_values():
+    good_kwargs = {
+        "log_likelihood": np.zeros((2, 2), dtype=float),
+        "spike_counts": np.zeros((2, 1), dtype=int),
+        "times": np.array([0.0, 0.1], dtype=float),
+        "dt": 0.1,
+        "cell_ids": np.array([1], dtype=int),
+        "n_spikes": 0,
+    }
+
+    with pytest.raises(ValueError, match="one column per cell ID"):
+        LogEmissionTensor(
+            **{
+                **good_kwargs,
+                "spike_counts": np.zeros((2, 2), dtype=int),
+            }
+        )
+
+    with pytest.raises(ValueError, match="at least one spatial bin"):
+        LogEmissionTensor(
+            **{
+                **good_kwargs,
+                "log_likelihood": np.empty((2, 0), dtype=float),
+                "spike_counts": np.zeros((2, 0), dtype=int),
+                "cell_ids": np.array([], dtype=int),
+            }
+        )
+
+    with pytest.raises(ValueError, match=r"NaN or \+inf"):
+        LogEmissionTensor(
+            **{
+                **good_kwargs,
+                "log_likelihood": np.array([[0.0, np.nan], [0.0, 0.0]], dtype=float),
+            }
+        )
+
+    with pytest.raises(ValueError, match="finite nonnegative"):
+        LogEmissionTensor(
+            **{
+                **good_kwargs,
+                "spike_counts": np.array([[-1], [0]], dtype=int),
+            }
+        )
 
 
 def test_momentum_decay_helpers_reject_nonfinite_tau_and_decay():
@@ -895,3 +967,72 @@ def test_track_event_prefix_emissions_slices_duration_metadata():
     assert tuple(prefix.dt.transition_durations) == (0.1, 0.1)
     assert prefix.n_time == 3
     assert prefix.n_spikes == 0
+
+
+def test_ground_truth_score_metadata_parsers_skip_textual_missing_values():
+    frame = pd.DataFrame(
+        {
+            "encoding_bin_size_cm": ["nan", "", "None", "6.0"],
+            "encoding_smoothing_sigma_bins": ["null", np.nan, "", "2.5"],
+            "encoding_min_speed_cm_s": ["<NA>", "7.5", "", "nan"],
+            "encoding_min_occupancy_s": ["None", "", "0.04", np.nan],
+            "encoding_rate_floor_hz": ["n/a", "0.001", "", "null"],
+            "encoding_arena_padding_cm": ["<NA>", "", "3.5", "nan"],
+            "encoding_use_excitatory": ["nan", "", "None", "on"],
+            "emission_time_bin_s": ["nan", "", "None", "0.005"],
+            "emission_spike_rate_scale": ["None", "1.5", "", np.nan],
+            "emission_likelihood_temperature": ["null", "", "2.0", "nan"],
+            "emission_negative_binomial_overdispersion": ["n/a", "0.03", "", None],
+        }
+    )
+
+    encoding = _encoding_config_for_scores(
+        frame,
+        EncodingConfig(use_excitatory=False),
+    )
+    assert encoding.bin_size_cm == pytest.approx(6.0)
+    assert encoding.smoothing_sigma_bins == pytest.approx(2.5)
+    assert encoding.min_speed_cm_s == pytest.approx(7.5)
+    assert encoding.min_occupancy_s == pytest.approx(0.04)
+    assert encoding.rate_floor_hz == pytest.approx(0.001)
+    assert encoding.arena_padding_cm == pytest.approx(3.5)
+    assert encoding.use_excitatory is True
+
+    emission = _emission_config_for_scores(frame, EmissionConfig())
+    assert emission.time_bin_s == pytest.approx(0.005)
+    assert emission.spike_rate_scale == pytest.approx(1.5)
+    assert emission.likelihood_temperature == pytest.approx(2.0)
+    assert emission.negative_binomial_overdispersion == pytest.approx(0.03)
+
+
+def test_ground_truth_bool_metadata_parser_accepts_aliases_and_rejects_nonfinite():
+    assert _unique_bool_from_column(pd.DataFrame({"flag": ["nan", "yes"]}), "flag", False) is True
+    assert _unique_bool_from_column(pd.DataFrame({"flag": ["0.0"]}), "flag", True) is False
+    assert _unique_bool_from_column(pd.DataFrame({"flag": ["2.0"]}), "flag", False) is True
+    assert _unique_bool_from_column(pd.DataFrame({"flag": ["off"]}), "flag", True) is False
+
+    with pytest.raises(ValueError, match="cannot parse boolean value"):
+        _unique_bool_from_column(pd.DataFrame({"flag": ["inf"]}), "flag", False)
+
+
+def test_duration_dynamics_accepts_size_one_dt_arrays_and_rejects_vector_dt():
+    emissions = LogEmissionTensor(
+        log_likelihood=np.zeros((3, 1), dtype=float),
+        spike_counts=np.zeros((3, 1), dtype=int),
+        times=np.empty(0, dtype=float),
+        dt=0.05,
+        cell_ids=np.array([1], dtype=int),
+        n_spikes=0,
+    )
+
+    emissions.transition_durations = None
+    emissions.dt = np.array([0.05], dtype=float)
+    np.testing.assert_allclose(
+        transition_durations_s(emissions),
+        np.array([0.05, 0.05], dtype=float),
+    )
+
+    emissions.transition_durations = None
+    emissions.dt = np.array([0.05, 0.06], dtype=float)
+    with pytest.raises(ValueError, match="dt must be scalar"):
+        transition_durations_s(emissions)

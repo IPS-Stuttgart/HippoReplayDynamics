@@ -635,8 +635,13 @@ def _pairwise_gaussian_log_prob(predicted: np.ndarray, observed: np.ndarray, sig
 
 
 def _mode_transition_matrix(n_modes: int, stickiness: float) -> np.ndarray:
+    n_modes = int(n_modes)
+    if n_modes < 1:
+        raise ValueError("n_modes must be positive")
     if not 0.0 <= stickiness <= 1.0:
         raise ValueError("mode_stickiness must be in [0, 1]")
+    if n_modes == 1:
+        return np.ones((1, 1), dtype=float)
     off_diag = (1.0 - stickiness) / (n_modes - 1)
     matrix = np.full((n_modes, n_modes), off_diag, dtype=float)
     np.fill_diagonal(matrix, stickiness)

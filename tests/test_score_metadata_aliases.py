@@ -5,7 +5,7 @@ import pandas as pd
 import pytest
 
 import hipporeplayimm.ground_truth as gt
-from hipporeplayimm.benchmarks import BenchmarkConfig, _benchmark_config_metadata
+from hipporeplayimm.benchmarks import BenchmarkConfig, _benchmark_config_metadata, _build_models
 from hipporeplayimm.encoding import EmissionConfig, EncodingConfig
 from hipporeplayimm.ground_truth import _emission_config_for_scores, _encoding_config_for_scores
 from hipporeplayimm.pyrecest_score_metadata import pyrecest_config_kwargs_for_scores
@@ -92,6 +92,33 @@ def test_benchmark_metadata_includes_pyrecest_hyperparameters():
     assert metadata["pyrecest_beta"] == pytest.approx(1.25)
     assert metadata["pyrecest_process_noise_sigma_cm_s"] == pytest.approx(11.0)
     assert metadata["pyrecest_imm_jump_velocity_decay"] == pytest.approx(0.25)
+
+
+def test_patched_build_models_preserves_state_space_imm_switch_tau() -> None:
+    config = BenchmarkConfig(
+        emissions=EmissionConfig(time_bin_s=0.02),
+        state_space_imm_mode_stickiness=0.91,
+        state_space_imm_switch_tau_s=0.5,
+        models=("state-space-imm",),
+    )
+
+    model = _build_models(config)["state-space-imm"]
+
+    assert model.config.imm_mode_stickiness == pytest.approx(np.exp(-0.02 / 0.5))
+    assert model.config.imm_switch_tau_s == pytest.approx(0.5)
+
+
+@pytest.mark.parametrize("bad_tau", [float("nan"), float("inf"), -0.001])
+def test_patched_build_models_rejects_invalid_state_space_imm_switch_tau(
+    bad_tau: float,
+) -> None:
+    config = BenchmarkConfig(
+        state_space_imm_switch_tau_s=bad_tau,
+        models=("state-space-imm",),
+    )
+
+    with pytest.raises(ValueError, match="state_space_imm_switch_tau_s"):
+        _build_models(config)
 
 
 def test_score_metadata_recovers_pyrecest_hyperparameters_from_aliases():

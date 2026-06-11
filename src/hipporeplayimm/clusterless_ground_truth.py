@@ -147,6 +147,18 @@ def _compare_clusterless_scores_to_ground_truth(gt, root, scores_frame: pd.DataF
         state_space_max_step_sigma=kwargs.get("state_space_max_step_sigma", 4.0),
         state_space_imm_mode_stickiness=kwargs.get("state_space_imm_mode_stickiness", 0.95),
         state_space_imm_switch_tau_s=kwargs.get("state_space_imm_switch_tau_s", 0.0),
+        state_space_trajectory_imm_mode_stickiness=kwargs.get(
+            "state_space_trajectory_imm_mode_stickiness",
+            None,
+        ),
+        state_space_trajectory_imm_momentum_initial_probability=kwargs.get(
+            "state_space_trajectory_imm_momentum_initial_probability",
+            None,
+        ),
+        state_space_trajectory_imm_momentum_switch_probability=kwargs.get(
+            "state_space_trajectory_imm_momentum_switch_probability",
+            None,
+        ),
         state_space_momentum_sigma_cm_sqrt_s=kwargs.get("state_space_momentum_sigma_cm_sqrt_s", 85.0),
         state_space_momentum_initial_sigma_cm_sqrt_s=kwargs.get(
             "state_space_momentum_initial_sigma_cm_sqrt_s", 85.0
@@ -159,6 +171,10 @@ def _compare_clusterless_scores_to_ground_truth(gt, root, scores_frame: pd.DataF
         state_space_momentum_candidate_max_k=kwargs.get("state_space_momentum_candidate_max_k", 0),
         state_space_momentum_predicted_candidate_top_k=kwargs.get("state_space_momentum_predicted_candidate_top_k", 8),
         state_space_momentum_candidate_source=kwargs.get("state_space_momentum_candidate_source", "emission"),
+        state_space_displacement_radius_bins=kwargs.get("state_space_displacement_radius_bins", 2),
+        state_space_displacement_position_sigma_cm=kwargs.get("state_space_displacement_position_sigma_cm", 0.0),
+        state_space_displacement_transition_sigma_cm_sqrt_s=kwargs.get("state_space_displacement_transition_sigma_cm_sqrt_s", 0.0),
+        state_space_displacement_prior_sigma_cm=kwargs.get("state_space_displacement_prior_sigma_cm", 0.0),
         state_space_valid_occupancy_threshold_s=kwargs.get("state_space_valid_occupancy_threshold_s", 0.0),
         clusterless_mark_smoothing_sigma_bins=kwargs.get("clusterless_mark_smoothing_sigma_bins", 1.0),
         clusterless_mark_prior_count=kwargs.get("clusterless_mark_prior_count", 1.0),
@@ -295,6 +311,14 @@ def _clusterless_state_space_model(config: object, mode: str) -> ClusterlessStat
             diffusion_sigma_cm_sqrt_s=_cfg(config, "state_space_diffusion_sigma_cm_sqrt_s", 85.0),
             max_step_sigma=_cfg(config, "state_space_max_step_sigma", 4.0),
             imm_mode_stickiness=_cfg(config, "state_space_imm_mode_stickiness", 0.95),
+            imm_switch_tau_s=_cfg(config, "state_space_imm_switch_tau_s", 0.0),
+            trajectory_imm_mode_stickiness=_cfg(config, "state_space_trajectory_imm_mode_stickiness", None),
+            trajectory_imm_momentum_initial_probability=_cfg(
+                config, "state_space_trajectory_imm_momentum_initial_probability", None
+            ),
+            trajectory_imm_momentum_switch_probability=_cfg(
+                config, "state_space_trajectory_imm_momentum_switch_probability", None
+            ),
             momentum_sigma_cm_sqrt_s=_cfg(config, "state_space_momentum_sigma_cm_sqrt_s", 85.0),
             momentum_initial_sigma_cm_sqrt_s=_cfg(
                 config,
@@ -309,6 +333,10 @@ def _clusterless_state_space_model(config: object, mode: str) -> ClusterlessStat
             momentum_candidate_max_k=_cfg(config, "state_space_momentum_candidate_max_k", 0),
             momentum_predicted_candidate_top_k=_cfg(config, "state_space_momentum_predicted_candidate_top_k", 8),
             momentum_candidate_source=_cfg(config, "state_space_momentum_candidate_source", "emission"),
+            displacement_radius_bins=_cfg(config, "state_space_displacement_radius_bins", 2),
+            displacement_position_sigma_cm=_cfg(config, "state_space_displacement_position_sigma_cm", 0.0),
+            displacement_transition_sigma_cm_sqrt_s=_cfg(config, "state_space_displacement_transition_sigma_cm_sqrt_s", 0.0),
+            displacement_prior_sigma_cm=_cfg(config, "state_space_displacement_prior_sigma_cm", 0.0),
             valid_occupancy_threshold_s=_cfg(config, "state_space_valid_occupancy_threshold_s", 0.0),
         ),
         mark_likelihood=_cfg(config, "clusterless_mark_likelihood", "local-kde"),
@@ -342,6 +370,30 @@ def _clusterless_model_config_for_scores(scores_frame: pd.DataFrame, *, model_na
             scores_frame,
             ("state_space_imm_switch_tau_s", "diagnostic_state_space_imm_switch_tau_s"),
             defaults.get("state_space_imm_switch_tau_s", 0.0),
+        ),
+        state_space_trajectory_imm_mode_stickiness=_optional_float_from_columns(
+            scores_frame,
+            (
+                "state_space_trajectory_imm_mode_stickiness",
+                "diagnostic_state_space_trajectory_imm_mode_stickiness",
+            ),
+            defaults.get("state_space_trajectory_imm_mode_stickiness", None),
+        ),
+        state_space_trajectory_imm_momentum_initial_probability=_optional_float_from_columns(
+            scores_frame,
+            (
+                "state_space_trajectory_imm_momentum_initial_probability",
+                "diagnostic_state_space_trajectory_imm_momentum_initial_probability",
+            ),
+            defaults.get("state_space_trajectory_imm_momentum_initial_probability", None),
+        ),
+        state_space_trajectory_imm_momentum_switch_probability=_optional_float_from_columns(
+            scores_frame,
+            (
+                "state_space_trajectory_imm_momentum_switch_probability",
+                "diagnostic_state_space_trajectory_imm_momentum_switch_probability",
+            ),
+            defaults.get("state_space_trajectory_imm_momentum_switch_probability", None),
         ),
         state_space_momentum_sigma_cm_sqrt_s=_score_metadata._unique_float_from_columns(
             scores_frame,
@@ -409,6 +461,38 @@ def _clusterless_model_config_for_scores(scores_frame: pd.DataFrame, *, model_na
                 "diagnostic_state_space_momentum_candidate_source",
             ),
             defaults.get("state_space_momentum_candidate_source", "emission"),
+        ),
+        state_space_displacement_radius_bins=_score_metadata._unique_int_from_columns(
+            scores_frame,
+            (
+                "state_space_displacement_radius_bins",
+                "diagnostic_state_space_displacement_radius_bins",
+            ),
+            defaults.get("state_space_displacement_radius_bins", 2),
+        ),
+        state_space_displacement_position_sigma_cm=_score_metadata._unique_float_from_columns(
+            scores_frame,
+            (
+                "state_space_displacement_position_sigma_cm",
+                "diagnostic_state_space_displacement_position_sigma_cm",
+            ),
+            defaults.get("state_space_displacement_position_sigma_cm", 0.0),
+        ),
+        state_space_displacement_transition_sigma_cm_sqrt_s=_score_metadata._unique_float_from_columns(
+            scores_frame,
+            (
+                "state_space_displacement_transition_sigma_cm_sqrt_s",
+                "diagnostic_state_space_displacement_transition_sigma_cm_sqrt_s",
+            ),
+            defaults.get("state_space_displacement_transition_sigma_cm_sqrt_s", 0.0),
+        ),
+        state_space_displacement_prior_sigma_cm=_score_metadata._unique_float_from_columns(
+            scores_frame,
+            (
+                "state_space_displacement_prior_sigma_cm",
+                "diagnostic_state_space_displacement_prior_sigma_cm",
+            ),
+            defaults.get("state_space_displacement_prior_sigma_cm", 0.0),
         ),
         state_space_valid_occupancy_threshold_s=_score_metadata._unique_float_from_columns(
             scores_frame,

@@ -105,90 +105,94 @@ class PyRecEstGoalParticleModel:
             )
 
         seed = _event_seed(self.random_seed, emissions)
+        rng_state = np.random.get_state()
         np.random.seed(seed)
 
-        grid_likelihood = _import_replay_grid_likelihood()
-        likelihood_lookup = grid_likelihood.build_replay_grid_likelihood_lookup(
-            bin_centers,
-            self.position_likelihood_interpolation,
-        )
-        goals = _coerce_candidate_goals(self.candidate_goals, bin_centers)
-        transition_durations = transition_durations_s(emissions)
-        filter_dt = _representative_filter_dt(emissions, transition_durations)
-        filter_ = self._build_filter(bin_centers, goals, filter_dt)
-
-        logp = 0.0
-        trajectory_log_posterior: list[np.ndarray] = []
-        pre_update_ess_fractions: list[float] = []
-        proposal_probabilities: list[float] = []
-        for time_index in range(emissions.n_time):
-            if time_index > 0:
-                filter_.predict_replay(
-                    dt=float(transition_durations[time_index - 1]),
-                    use_semi_implicit_position_update=True,
-                )
-            proposal_probability, ess_fraction = grid_likelihood.adaptive_position_proposal_probability(
-                filter_,
-                self.position_proposal_probability,
-                self.position_proposal_ess_threshold,
-            )
-            pre_update_ess_fractions.append(ess_fraction)
-            proposal_probabilities.append(proposal_probability)
-            logp += grid_likelihood.update_position_grid_likelihood(
-                filter_,
-                emissions.log_likelihood[time_index],
+        try:
+            grid_likelihood = _import_replay_grid_likelihood()
+            likelihood_lookup = grid_likelihood.build_replay_grid_likelihood_lookup(
                 bin_centers,
-                lookup=likelihood_lookup,
-                position_proposal_probability=proposal_probability,
+                self.position_likelihood_interpolation,
             )
-            trajectory_log_posterior.append(
-                grid_likelihood.particle_position_log_posterior(
-                    filter_.position_particles,
-                    np.asarray(filter_.filter_state.w, dtype=float),
-                    bin_centers,
-                )
-            )
+            goals = _coerce_candidate_goals(self.candidate_goals, bin_centers)
+            transition_durations = transition_durations_s(emissions)
+            filter_dt = _representative_filter_dt(emissions, transition_durations)
+            filter_ = self._build_filter(bin_centers, goals, filter_dt)
 
-        terminal_log_posterior = trajectory_log_posterior[-1]
-        diagnostics = {
-            "pyrecest_evidence_support": PYRECEST_PARTICLE_EVIDENCE_SUPPORT,
-            "pyrecest_particles": int(self.n_particles),
-            "pyrecest_candidate_goals": int(goals.shape[0]),
-            "pyrecest_time_bin_s": float(filter_dt),
-            "pyrecest_transition_durations": _format_transition_durations(transition_durations),
-            "pyrecest_position_likelihood_interpolation": likelihood_lookup.method,
-            "pyrecest_position_proposal_probability": float(
-                self.position_proposal_probability
-            ),
-            "pyrecest_position_proposal_ess_threshold": (
-                "none"
-                if self.position_proposal_ess_threshold is None
-                else float(self.position_proposal_ess_threshold)
-            ),
-            "pyrecest_mean_pre_update_ess_fraction": float(
-                np.mean(pre_update_ess_fractions)
-            ),
-            "pyrecest_mean_position_proposal_probability": float(
-                np.mean(proposal_probabilities)
-            ),
-            "pyrecest_last_jump_fraction": float(filter_.last_jump_fraction),
-            "pyrecest_last_goal_remap_fraction": float(filter_.last_goal_remap_fraction),
-            "pyrecest_last_position_proposal_fraction": float(
-                filter_.last_position_proposal_fraction
-            ),
-        }
-        diagnostics.update(_goal_diagnostics(filter_, goals))
-        diagnostics.update(_mode_diagnostics(filter_))
-        diagnostics.update(_posterior_diagnostics(terminal_log_posterior, bin_centers))
-        return EventScore(
-            self.name,
-            float(logp),
-            emissions.n_time,
-            emissions.n_spikes,
-            diagnostics=diagnostics,
-            terminal_log_posterior=terminal_log_posterior,
-            trajectory_log_posterior=np.stack(trajectory_log_posterior, axis=0),
-        )
+            logp = 0.0
+            trajectory_log_posterior: list[np.ndarray] = []
+            pre_update_ess_fractions: list[float] = []
+            proposal_probabilities: list[float] = []
+            for time_index in range(emissions.n_time):
+                if time_index > 0:
+                    filter_.predict_replay(
+                        dt=float(transition_durations[time_index - 1]),
+                        use_semi_implicit_position_update=True,
+                    )
+                proposal_probability, ess_fraction = grid_likelihood.adaptive_position_proposal_probability(
+                    filter_,
+                    self.position_proposal_probability,
+                    self.position_proposal_ess_threshold,
+                )
+                pre_update_ess_fractions.append(ess_fraction)
+                proposal_probabilities.append(proposal_probability)
+                logp += grid_likelihood.update_position_grid_likelihood(
+                    filter_,
+                    emissions.log_likelihood[time_index],
+                    bin_centers,
+                    lookup=likelihood_lookup,
+                    position_proposal_probability=proposal_probability,
+                )
+                trajectory_log_posterior.append(
+                    grid_likelihood.particle_position_log_posterior(
+                        filter_.position_particles,
+                        np.asarray(filter_.filter_state.w, dtype=float),
+                        bin_centers,
+                    )
+                )
+
+            terminal_log_posterior = trajectory_log_posterior[-1]
+            diagnostics = {
+                "pyrecest_evidence_support": PYRECEST_PARTICLE_EVIDENCE_SUPPORT,
+                "pyrecest_particles": int(self.n_particles),
+                "pyrecest_candidate_goals": int(goals.shape[0]),
+                "pyrecest_time_bin_s": float(filter_dt),
+                "pyrecest_transition_durations": _format_transition_durations(transition_durations),
+                "pyrecest_position_likelihood_interpolation": likelihood_lookup.method,
+                "pyrecest_position_proposal_probability": float(
+                    self.position_proposal_probability
+                ),
+                "pyrecest_position_proposal_ess_threshold": (
+                    "none"
+                    if self.position_proposal_ess_threshold is None
+                    else float(self.position_proposal_ess_threshold)
+                ),
+                "pyrecest_mean_pre_update_ess_fraction": float(
+                    np.mean(pre_update_ess_fractions)
+                ),
+                "pyrecest_mean_position_proposal_probability": float(
+                    np.mean(proposal_probabilities)
+                ),
+                "pyrecest_last_jump_fraction": float(filter_.last_jump_fraction),
+                "pyrecest_last_goal_remap_fraction": float(filter_.last_goal_remap_fraction),
+                "pyrecest_last_position_proposal_fraction": float(
+                    filter_.last_position_proposal_fraction
+                ),
+            }
+            diagnostics.update(_goal_diagnostics(filter_, goals))
+            diagnostics.update(_mode_diagnostics(filter_))
+            diagnostics.update(_posterior_diagnostics(terminal_log_posterior, bin_centers))
+            return EventScore(
+                self.name,
+                float(logp),
+                emissions.n_time,
+                emissions.n_spikes,
+                diagnostics=diagnostics,
+                terminal_log_posterior=terminal_log_posterior,
+                trajectory_log_posterior=np.stack(trajectory_log_posterior, axis=0),
+            )
+        finally:
+            np.random.set_state(rng_state)
 
     def _build_filter(
         self,

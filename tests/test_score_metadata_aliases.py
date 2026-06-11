@@ -66,6 +66,21 @@ def test_score_metadata_rejects_conflicting_canonical_and_legacy_values():
         _emission_config_for_scores(emission_scores, EmissionConfig())
 
 
+def test_score_metadata_build_models_preserves_state_space_switch_tau():
+    models = _build_models(
+        BenchmarkConfig(
+            emissions=EmissionConfig(time_bin_s=0.003),
+            models=("state-space-first-order-imm",),
+            state_space_imm_mode_stickiness=0.50,
+            state_space_imm_switch_tau_s=0.060,
+        )
+    )
+
+    model = models["state-space-first-order-imm"]
+    assert model.config.imm_switch_tau_s == pytest.approx(0.060)
+    assert model.config.imm_mode_stickiness == pytest.approx(np.exp(-0.003 / 0.060))
+
+
 def test_benchmark_metadata_includes_pyrecest_hyperparameters():
     metadata = _benchmark_config_metadata(
         BenchmarkConfig(

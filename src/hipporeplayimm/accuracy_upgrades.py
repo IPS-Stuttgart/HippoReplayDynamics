@@ -131,12 +131,17 @@ def masked_gaussian_transition_matrix(
     """Column-stochastic Gaussian transition over the supplied valid centers."""
 
     centers = np.asarray(bin_centers, dtype=float)
-    if centers.ndim != 2 or centers.shape[0] == 0:
+    if centers.ndim != 2 or centers.shape[0] == 0 or centers.shape[1] == 0:
         raise ValueError("bin_centers must have shape (n_bins, position_dim)")
+    if not np.all(np.isfinite(centers)):
+        raise ValueError("bin_centers must contain only finite values")
     sigma_cm = float(sigma_cm)
-    if sigma_cm <= 0.0:
-        raise ValueError("sigma_cm must be positive")
-    radius2 = (sigma_cm * float(max_step_sigma)) ** 2
+    if not np.isfinite(sigma_cm) or sigma_cm <= 0.0:
+        raise ValueError("sigma_cm must be finite and positive")
+    max_step_sigma = float(max_step_sigma)
+    if not np.isfinite(max_step_sigma) or max_step_sigma <= 0.0:
+        raise ValueError("max_step_sigma must be finite and positive")
+    radius2 = (sigma_cm * max_step_sigma) ** 2
     rows: list[int] = []
     cols: list[int] = []
     data: list[float] = []
@@ -464,18 +469,21 @@ def negative_binomial_log_emissions(
     """
 
     alpha = float(overdispersion)
-    if alpha < 0.0:
-        raise ValueError("overdispersion must be non-negative")
+    if not np.isfinite(alpha) or alpha < 0.0:
+        raise ValueError("overdispersion must be finite and non-negative")
+    spike_rate_scale = float(spike_rate_scale)
+    if not np.isfinite(spike_rate_scale) or spike_rate_scale <= 0.0:
+        raise ValueError("spike_rate_scale must be finite and positive")
     if alpha <= np.finfo(float).eps:
         return _poisson_log_emissions(spike_counts, rates_hz, dt, spike_rate_scale=spike_rate_scale)
     counts = np.asarray(spike_counts, dtype=float)
     dt_array = np.asarray(dt, dtype=float)
     if dt_array.ndim == 0:
-        mu = rates_hz[None, :, :] * float(dt_array) * float(spike_rate_scale)
+        mu = rates_hz[None, :, :] * float(dt_array) * spike_rate_scale
     else:
         if dt_array.shape != (counts.shape[0],):
             raise ValueError("dt must be scalar or one duration per time bin")
-        mu = dt_array[:, None, None] * rates_hz[None, :, :] * float(spike_rate_scale)
+        mu = dt_array[:, None, None] * rates_hz[None, :, :] * spike_rate_scale
     mu = np.maximum(mu, np.finfo(float).tiny)
     size = 1.0 / alpha
     logp_success = np.log(size / (size + mu))

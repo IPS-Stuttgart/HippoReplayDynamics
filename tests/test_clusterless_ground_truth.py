@@ -1,10 +1,67 @@
 from pathlib import Path
+from types import SimpleNamespace
 
 import numpy as np
 import pandas as pd
 
+from hipporeplayimm.clusterless_ground_truth import (
+    _clusterless_model_config_for_scores,
+    _clusterless_state_space_model,
+)
 from hipporeplayimm.data import ReplaySession, SpikeMarkData
 from hipporeplayimm.ground_truth import compare_scores_to_ground_truth
+
+
+def test_clusterless_state_space_model_preserves_duration_and_displacement_config():
+    config = SimpleNamespace(
+        state_space_imm_mode_stickiness=0.77,
+        state_space_imm_switch_tau_s=0.060,
+        state_space_trajectory_imm_mode_stickiness=0.88,
+        state_space_trajectory_imm_momentum_initial_probability=0.12,
+        state_space_trajectory_imm_momentum_switch_probability=0.03,
+        state_space_displacement_radius_bins=4,
+        state_space_displacement_position_sigma_cm=1.25,
+        state_space_displacement_transition_sigma_cm_sqrt_s=55.0,
+        state_space_displacement_prior_sigma_cm=2.5,
+    )
+
+    model = _clusterless_state_space_model(config, "displacement-imm")
+
+    assert model.config.imm_mode_stickiness == 0.77
+    assert model.config.imm_switch_tau_s == 0.060
+    assert model.config.trajectory_imm_mode_stickiness == 0.88
+    assert model.config.trajectory_imm_momentum_initial_probability == 0.12
+    assert model.config.trajectory_imm_momentum_switch_probability == 0.03
+    assert model.config.displacement_radius_bins == 4
+    assert model.config.displacement_position_sigma_cm == 1.25
+    assert model.config.displacement_transition_sigma_cm_sqrt_s == 55.0
+    assert model.config.displacement_prior_sigma_cm == 2.5
+
+
+def test_clusterless_model_config_for_scores_recovers_state_space_metadata():
+    scores = pd.DataFrame(
+        {
+            "state_space_imm_switch_tau_s": [0.060],
+            "state_space_trajectory_imm_mode_stickiness": [0.88],
+            "state_space_displacement_radius_bins": [4],
+            "diagnostic_state_space_displacement_position_sigma_cm": [1.25],
+            "state_space_displacement_transition_sigma_cm_sqrt_s": [55.0],
+            "diagnostic_state_space_displacement_prior_sigma_cm": [2.5],
+        }
+    )
+
+    config = _clusterless_model_config_for_scores(
+        scores,
+        model_names=("clusterless-state-space-displacement-imm",),
+        **_clusterless_config_defaults(),
+    )
+
+    assert config.state_space_imm_switch_tau_s == 0.060
+    assert config.state_space_trajectory_imm_mode_stickiness == 0.88
+    assert config.state_space_displacement_radius_bins == 4
+    assert config.state_space_displacement_position_sigma_cm == 1.25
+    assert config.state_space_displacement_transition_sigma_cm_sqrt_s == 55.0
+    assert config.state_space_displacement_prior_sigma_cm == 2.5
 
 
 def test_compare_scores_to_ground_truth_decodes_clusterless_state_space(
@@ -102,3 +159,39 @@ def test_compare_scores_to_ground_truth_decodes_clusterless_state_space(
     assert np.isfinite(comparison.loc[0, "decoded_endpoint_x"])
     assert comparison.loc[0, "decoded_well_id"] == 2
     assert bool(comparison.loc[0, "goal_correct"])
+
+
+def _clusterless_config_defaults() -> dict[str, object]:
+    return {
+        "state_space_stationary_sigma_cm": 2.0,
+        "state_space_diffusion_sigma_cm_sqrt_s": 85.0,
+        "state_space_max_step_sigma": 4.0,
+        "state_space_imm_mode_stickiness": 0.95,
+        "state_space_imm_switch_tau_s": 0.0,
+        "state_space_trajectory_imm_mode_stickiness": None,
+        "state_space_trajectory_imm_momentum_initial_probability": None,
+        "state_space_trajectory_imm_momentum_switch_probability": None,
+        "state_space_momentum_sigma_cm_sqrt_s": 85.0,
+        "state_space_momentum_initial_sigma_cm_sqrt_s": 85.0,
+        "state_space_momentum_velocity_decay": 0.95,
+        "state_space_momentum_velocity_decay_tau_s": 0.0,
+        "state_space_momentum_candidate_top_k": 128,
+        "state_space_momentum_candidate_mass_threshold": None,
+        "state_space_momentum_candidate_min_k": 1,
+        "state_space_momentum_candidate_max_k": 0,
+        "state_space_momentum_predicted_candidate_top_k": 8,
+        "state_space_momentum_candidate_source": "emission",
+        "state_space_displacement_radius_bins": 2,
+        "state_space_displacement_position_sigma_cm": 0.0,
+        "state_space_displacement_transition_sigma_cm_sqrt_s": 0.0,
+        "state_space_displacement_prior_sigma_cm": 0.0,
+        "state_space_valid_occupancy_threshold_s": 0.0,
+        "clusterless_mark_smoothing_sigma_bins": 1.0,
+        "clusterless_mark_prior_count": 1.0,
+        "clusterless_mark_variance_floor": 1.0,
+        "clusterless_rate_floor_hz": 1e-4,
+        "clusterless_mark_likelihood": "local-kde",
+        "clusterless_mark_kde_bandwidth": None,
+        "clusterless_mark_kde_spatial_sigma_bins": None,
+        "clusterless_mark_kde_max_neighbors": 256,
+    }

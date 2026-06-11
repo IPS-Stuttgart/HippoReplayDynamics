@@ -11,7 +11,7 @@ from hipporeplayimm import cli
 from hipporeplayimm.benchmarks import BenchmarkConfig, _build_models, _cell_split_seed, _score_session_split, _split_cells
 from hipporeplayimm.clusterless import ClusterlessMarkConfig, ClusterlessMarkEncoding
 from hipporeplayimm.data import ReplaySession, SpikeMarkData
-from hipporeplayimm.encoding import EncodingConfig, LogEmissionTensor
+from hipporeplayimm.encoding import EncodingConfig, LogEmissionTensor, fit_place_field_encoding
 from hipporeplayimm.models import CandidateKinematicModel, DiffusionModel, RandomModel
 from hipporeplayimm.pyrecest_models import PyRecEstGoalParticleModel, _representative_filter_dt
 from hipporeplayimm.state_space import _candidate_evidence_support_label, StateSpaceDecoderConfig, StateSpaceReplayModel
@@ -110,6 +110,36 @@ def test_build_models_rejects_unknown_model_with_clear_error() -> None:
         _build_models(BenchmarkConfig(models=("random", "not-a-model")))
 
 
+def test_place_field_encoding_keeps_nonempty_grid_for_constant_position_zero_padding() -> None:
+    times = np.linspace(0.0, 1.0, 5)
+    session = ReplaySession(
+        rat="RatX",
+        name="Open1",
+        path=None,  # type: ignore[arg-type]
+        position=np.column_stack([times, np.zeros_like(times), np.zeros_like(times)]),
+        spikes=np.empty((0, 2), dtype=float),
+        tetrode_cell_ids=np.empty((0, 2), dtype=float),
+        excitatory_neurons=np.array([], dtype=int),
+        inhibitory_neurons=np.array([], dtype=int),
+        ripple_events=np.empty((0, 6), dtype=float),
+        run_times=np.array([[0.0, 1.0]], dtype=float),
+        sleep_box_immobile_times=np.empty((0, 2), dtype=float),
+        sleep_times=np.empty((0, 2), dtype=float),
+        rem_times=np.empty((0, 2), dtype=float),
+        well_sequence=None,
+        metadata={},
+    )
+
+    encoding = fit_place_field_encoding(
+        session,
+        EncodingConfig(bin_size_cm=5.0, arena_padding_cm=0.0, min_speed_cm_s=0.0, smoothing_sigma_bins=0.0),
+    )
+
+    assert encoding.n_bins == 1
+    assert encoding.rates_hz.shape == (0, 1)
+    np.testing.assert_allclose(encoding.bin_centers, np.array([[0.0, 0.0]]))
+
+
 def test_clusterless_fit_uses_train_marks_even_when_all_cells_are_enabled(monkeypatch) -> None:
     import hipporeplayimm.benchmarks as benchmarks
 
@@ -170,6 +200,32 @@ def test_log_emission_tensor_metadata_is_declared_field() -> None:
     assert emissions.metadata["source"] == "unit-test"
 
 
+def test_log_emission_tensor_coerces_arrays_and_rejects_nonmonotone_times() -> None:
+    emissions = LogEmissionTensor(
+        log_likelihood=[[0.0]],
+        spike_counts=[[0]],
+        times=[0.0],
+        dt=0.02,
+        cell_ids=[1],
+        n_spikes=0,
+    )
+
+    assert emissions.log_likelihood.shape == (1, 1)
+    assert emissions.spike_counts.shape == (1, 1)
+    assert emissions.times.shape == (1,)
+    assert emissions.cell_ids.shape == (1,)
+
+    with pytest.raises(ValueError, match="strictly increasing"):
+        LogEmissionTensor(
+            log_likelihood=np.zeros((2, 1), dtype=float),
+            spike_counts=np.zeros((2, 1), dtype=int),
+            times=np.array([0.0, 0.0]),
+            dt=0.02,
+            cell_ids=np.array([1], dtype=int),
+            n_spikes=0,
+        )
+
+
 def test_pyrecest_filter_dt_accepts_numpy_scalar_array() -> None:
     emissions = LogEmissionTensor(
         log_likelihood=np.zeros((1, 1), dtype=float),
@@ -209,6 +265,34 @@ def test_replay_models_reject_bin_center_count_mismatch() -> None:
 
     with pytest.raises(ValueError, match="one row per emission spatial bin"):
         RandomModel().score(emissions, np.zeros((1, 2), dtype=float))
+
+
+def test_replay_models_reject_nonfinite_bin_centers() -> None:
+    emissions = LogEmissionTensor(
+        log_likelihood=np.zeros((1, 2), dtype=float),
+        spike_counts=np.zeros((1, 1), dtype=int),
+        times=np.array([0.0]),
+        dt=0.02,
+        cell_ids=np.array([1], dtype=int),
+        n_spikes=0,
+    )
+
+    with pytest.raises(ValueError, match="bin_centers must be finite"):
+        RandomModel().score(emissions, np.array([[0.0, 0.0], [np.nan, 0.0]], dtype=float))
+
+
+def test_replay_models_reject_emission_rows_without_finite_support() -> None:
+    emissions = LogEmissionTensor(
+        log_likelihood=np.array([[0.0, -1.0], [-np.inf, -np.inf]], dtype=float),
+        spike_counts=np.zeros((2, 1), dtype=int),
+        times=np.array([0.0, 0.02]),
+        dt=0.02,
+        cell_ids=np.array([1], dtype=int),
+        n_spikes=0,
+    )
+
+    with pytest.raises(ValueError, match="at least one finite"):
+        RandomModel().score(emissions, np.zeros((2, 2), dtype=float))
 
 
 def test_duration_state_space_keeps_duration_metadata_with_occupancy_mask() -> None:

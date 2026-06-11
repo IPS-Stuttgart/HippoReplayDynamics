@@ -230,9 +230,13 @@ def paired_event_deltas(
         )
         .reset_index()
     )
-    values = grouped.pivot_table(index=ids, columns="model", values="score", aggfunc="first")
-    support = grouped.pivot_table(index=ids, columns="model", values="evidence_support", aggfunc="first")
-    comparable = grouped.pivot_table(index=ids, columns="model", values="evidence_comparable", aggfunc="first")
+    # The preceding groupby already collapses duplicate model rows, and uses
+    # dropna=False so optional identity fields with missing values still define
+    # valid paired-event keys.  DataFrame.pivot preserves those NaN keys;
+    # pivot_table would drop them before model pairing.
+    values = grouped.pivot(index=ids, columns="model", values="score")
+    support = grouped.pivot(index=ids, columns="model", values="evidence_support")
+    comparable = grouped.pivot(index=ids, columns="model", values="evidence_comparable")
     required = [primary_model, baseline_model]
     missing_models = [name for name in required if name not in values.columns]
     if missing_models:

@@ -20,6 +20,7 @@ from hipporeplayimm.data import ReplaySession, SpikeMarkData
 from hipporeplayimm.encoding import EmissionConfig, EncodingConfig
 from hipporeplayimm.evidence_reporting import TRUNCATED_EVIDENCE_SUPPORT
 from hipporeplayimm.models import EventScore
+from hipporeplayimm.state_space import StateSpaceReplayModel
 
 
 def test_benchmark_summary_and_bootstrap_ci():
@@ -142,6 +143,48 @@ def test_build_models_includes_clusterless_state_space_model():
     models = _build_models(BenchmarkConfig(models=("clusterless-state-space-diffusion",)))
 
     assert isinstance(models["clusterless-state-space-diffusion"], ClusterlessStateSpaceReplayModel)
+
+
+def test_build_models_includes_displacement_state_space_variants():
+    models = _build_models(
+        BenchmarkConfig(
+            models=(
+                "sorted-spike-state-space-displacement-momentum",
+                "sorted-spike-state-space-velocity-momentum",
+                "sorted-spike-state-space-displacement-imm",
+                "state-space-displacement-momentum",
+                "state-space-velocity-momentum",
+                "state-space-displacement-imm",
+            ),
+            state_space_displacement_radius_bins=3,
+            state_space_displacement_position_sigma_cm=1.5,
+            state_space_displacement_transition_sigma_cm_sqrt_s=42.0,
+            state_space_displacement_prior_sigma_cm=2.5,
+        )
+    )
+
+    expected_modes = {
+        "sorted-spike-state-space-displacement-momentum": "displacement-momentum",
+        "sorted-spike-state-space-velocity-momentum": "displacement-momentum",
+        "sorted-spike-state-space-displacement-imm": "displacement-imm",
+        "state-space-displacement-momentum": "displacement-momentum",
+        "state-space-velocity-momentum": "displacement-momentum",
+        "state-space-displacement-imm": "displacement-imm",
+    }
+    assert set(models) == set(expected_modes)
+    for name, mode in expected_modes.items():
+        model = models[name]
+        assert isinstance(model, StateSpaceReplayModel)
+        assert model.mode == mode
+        assert model.config.displacement_radius_bins == 3
+        assert model.config.displacement_position_sigma_cm == 1.5
+        assert model.config.displacement_transition_sigma_cm_sqrt_s == 42.0
+        assert model.config.displacement_prior_sigma_cm == 2.5
+
+    assert (
+        models["sorted-spike-state-space-velocity-momentum"].name
+        == "sorted-spike-state-space-velocity-momentum"
+    )
 
 
 def test_session_mark_diagnostics_reports_available_clusterless_likelihood():

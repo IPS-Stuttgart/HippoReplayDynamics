@@ -660,14 +660,23 @@ def _speed_cm_s(times: np.ndarray, xy: np.ndarray) -> np.ndarray:
 
 
 def _frame_durations(times: np.ndarray) -> np.ndarray:
+    times = np.asarray(times, dtype=float)
     if times.shape[0] == 0:
         return np.empty_like(times, dtype=float)
+    if not np.all(np.isfinite(times)):
+        raise ValueError("position times must be finite")
     durations = np.empty_like(times, dtype=float)
     diffs = np.diff(times)
-    median = float(np.median(diffs)) if diffs.size else 1.0 / 30.0
-    durations[:-1] = diffs if diffs.size else median
+    if diffs.size:
+        if np.any(diffs <= 0.0):
+            raise ValueError("position times must be strictly increasing")
+        median = float(np.median(diffs))
+        durations[:-1] = diffs
+    else:
+        median = 1.0 / 30.0
+        durations[:-1] = median
     durations[-1] = median
-    return np.clip(durations, 0.0, 1.0)
+    return np.minimum(durations, 1.0)
 
 
 def _interp_positions(times: np.ndarray, xy: np.ndarray, query_times: np.ndarray) -> np.ndarray:

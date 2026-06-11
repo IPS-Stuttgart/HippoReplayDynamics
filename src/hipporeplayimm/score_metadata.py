@@ -289,6 +289,19 @@ def apply_model_hyperparam_patch() -> None:
             "sorted-spike-state-space-first-order-imm": state_space_model(config, "first-order-imm"),
             "sorted-spike-state-space-momentum": state_space_model(config, "momentum"),
             "sorted-spike-state-space-momentum-exact-sparse": state_space_model(config, "momentum-exact-sparse"),
+            "sorted-spike-state-space-displacement-momentum": state_space_model(
+                config,
+                "displacement-momentum",
+            ),
+            "sorted-spike-state-space-velocity-momentum": state_space_model(
+                config,
+                "displacement-momentum",
+                "sorted-spike-state-space-velocity-momentum",
+            ),
+            "sorted-spike-state-space-displacement-imm": state_space_model(
+                config,
+                "displacement-imm",
+            ),
             "sorted-spike-state-space-trajectory-imm-exact-sparse": state_space_model(config, "trajectory-imm-exact-sparse"),
             "sorted-spike-state-space-trajectory-imm-anchored-exact-sparse": SortedSpikeStateSpaceReplayModel(
                 mode="trajectory-imm-exact-sparse",
@@ -331,6 +344,21 @@ def apply_model_hyperparam_patch() -> None:
                 config,
                 "momentum-exact-sparse",
                 "state-space-momentum-exact-sparse",
+            ),
+            "state-space-displacement-momentum": state_space_model(
+                config,
+                "displacement-momentum",
+                "state-space-displacement-momentum",
+            ),
+            "state-space-velocity-momentum": state_space_model(
+                config,
+                "displacement-momentum",
+                "state-space-velocity-momentum",
+            ),
+            "state-space-displacement-imm": state_space_model(
+                config,
+                "displacement-imm",
+                "state-space-displacement-imm",
             ),
             "state-space-trajectory-imm-exact-sparse": state_space_model(
                 config,

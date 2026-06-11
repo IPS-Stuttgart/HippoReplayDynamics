@@ -50,6 +50,33 @@ def test_pyrecest_model_reports_install_hint_when_extra_is_missing() -> None:
         model.score(emissions, np.array([[0.0, 0.0], [1.0, 0.0]]))
 
 
+def test_pyrecest_missing_extra_does_not_reset_numpy_rng() -> None:
+    if importlib.util.find_spec("pyrecest") is not None:
+        pytest.skip("PyRecEst is installed in this environment")
+
+    emissions = LogEmissionTensor(
+        log_likelihood=np.log(np.array([[0.6, 0.4], [0.3, 0.7]])),
+        spike_counts=np.zeros((2, 1), dtype=int),
+        times=np.array([0.0, 0.02]),
+        dt=0.02,
+        cell_ids=np.array([1]),
+        n_spikes=0,
+    )
+    model = PyRecEstGoalParticleModel(
+        candidate_goals=np.array([[0.0, 0.0], [1.0, 0.0]]),
+        n_particles=8,
+        random_seed=0,
+    )
+
+    np.random.seed(12345)
+    before = np.random.get_state()
+    with pytest.raises(RuntimeError, match="hipporeplayimm\\[pyrecest\\]"):
+        model.score(emissions, np.array([[0.0, 0.0], [1.0, 0.0]]))
+    after = np.random.get_state()
+
+    _assert_numpy_rng_states_equal(after, before)
+
+
 def test_exact_sparse_momentum_runs_without_pyrecest_extra() -> None:
     if importlib.util.find_spec("pyrecest") is not None:
         pytest.skip("PyRecEst is installed in this environment")
@@ -91,3 +118,11 @@ def test_exact_sparse_momentum_runs_without_pyrecest_extra() -> None:
 
 def _requirement_name(requirement: str) -> str:
     return requirement.split(";", 1)[0].split("@", 1)[0].strip().lower()
+
+
+def _assert_numpy_rng_states_equal(left: tuple[object, ...], right: tuple[object, ...]) -> None:
+    assert left[0] == right[0]
+    np.testing.assert_array_equal(left[1], right[1])
+    assert left[2] == right[2]
+    assert left[3] == right[3]
+    assert left[4] == right[4]

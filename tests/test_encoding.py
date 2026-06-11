@@ -8,6 +8,7 @@ from hipporeplayimm.encoding import (
     EncodingModel,
     build_emissions,
     fit_place_field_encoding,
+    _frame_durations,
     _positions_to_flat_bins,
 )
 
@@ -116,6 +117,11 @@ def test_fit_place_field_encoding_rejects_nonincreasing_position_times(times):
 
     with pytest.raises(ValueError, match="strictly increasing"):
         fit_place_field_encoding(session)
+
+
+def test_frame_durations_rejects_non_increasing_times():
+    with pytest.raises(ValueError, match="strictly increasing"):
+        _frame_durations(np.array([0.0, 0.2, 0.2]))
 
 
 def test_fit_place_field_encoding_handles_empty_cell_set_with_smoothing(tmp_path):

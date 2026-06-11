@@ -142,6 +142,35 @@ def test_paired_event_deltas_treats_string_false_comparable_as_false():
     assert row["claim_category"] == "nondecisive_or_noncomparable"
 
 
+def test_paired_event_deltas_preserves_missing_optional_identity_columns():
+    primary = "sorted-spike-state-space-momentum-exact-sparse"
+    baseline = "sorted-spike-state-space-diffusion"
+    frame = pd.DataFrame(
+        [
+            {
+                **_row("Rat1/Open1", 0, baseline, 0.0),
+                "benchmark_cell_split_index": None,
+                "evidence_comparable": True,
+            },
+            {
+                **_row("Rat1/Open1", 0, primary, 1.5),
+                "benchmark_cell_split_index": None,
+                "evidence_comparable": True,
+            },
+        ]
+    )
+
+    deltas = paired_event_deltas(
+        frame,
+        primary_model=primary,
+        baseline_model=baseline,
+    )
+
+    assert len(deltas) == 1
+    assert pd.isna(deltas.iloc[0]["benchmark_cell_split_index"])
+    assert deltas.iloc[0]["delta_primary_minus_baseline"] == 1.5
+
+
 def test_load_score_tables_accepts_directory_with_event_scores(tmp_path):
     scores_dir = tmp_path / "run"
     scores_dir.mkdir()

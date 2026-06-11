@@ -41,3 +41,10 @@ def test_duration_adjusted_decays_reject_invalid_tau(bad_tau: float) -> None:
 
     with pytest.raises(ValueError, match="momentum_velocity_decay_tau_s"):
         _duration_adjusted_decays_from_config(config, np.asarray([0.003]), 0.003)
+
+
+def test_duration_adjusted_decays_reject_negative_tau() -> None:
+    config = SimpleNamespace(momentum_velocity_decay=0.95, momentum_velocity_decay_tau_s=-1.0)
+
+    with pytest.raises(ValueError, match="momentum_velocity_decay_tau_s"):
+        _duration_adjusted_decays_from_config(config, np.asarray([0.003]), 0.003)

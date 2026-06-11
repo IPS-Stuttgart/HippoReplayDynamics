@@ -1420,19 +1420,44 @@ def _unique_float_from_column(frame: pd.DataFrame, column: str, default: float) 
     return _unique_float_from_columns(frame, (column,), default)
 
 
+_MISSING_TEXT_VALUES = frozenset({"", "na", "n/a", "nan", "none", "null", "<na>"})
+
+
+def _is_missing_scalar(value: object) -> bool:
+    if value is None:
+        return True
+    try:
+        missing = pd.isna(value)
+    except (TypeError, ValueError):
+        return False
+    if isinstance(missing, (bool, np.bool_)):
+        return bool(missing)
+    return False
+
+
+def _iter_present_column_values(
+    frame: pd.DataFrame,
+    columns: tuple[str, ...],
+):
+    for column in columns:
+        if column not in frame.columns:
+            continue
+        for value in frame[column]:
+            if _is_missing_scalar(value):
+                continue
+            text = str(value).strip()
+            if text.lower() in _MISSING_TEXT_VALUES:
+                continue
+            yield value
+
+
 def _unique_float_from_columns(
     frame: pd.DataFrame,
     columns: tuple[str, ...],
     default: float,
 ) -> float:
     values: list[float] = []
-    for column in columns:
-        if column not in frame.columns:
-            continue
-        for value in frame[column].dropna():
-            text = str(value).strip()
-            if text:
-                values.append(float(value))
+    values.extend(float(value) for value in _iter_present_column_values(frame, columns))
     if not values:
         return float(default)
     first = values[0]
@@ -1447,11 +1472,7 @@ def _unique_optional_float_from_column(
     default: float | None,
 ) -> float | None:
     values: list[float] = []
-    if column in frame.columns:
-        for value in frame[column].dropna():
-            text = str(value).strip()
-            if text:
-                values.append(float(value))
+    values.extend(float(value) for value in _iter_present_column_values(frame, (column,)))
     if not values:
         return default
     first = values[0]
@@ -1462,11 +1483,7 @@ def _unique_optional_float_from_column(
 
 def _unique_int_from_column(frame: pd.DataFrame, column: str, default: int) -> int:
     values: list[int] = []
-    if column in frame.columns:
-        for value in frame[column].dropna():
-            text = str(value).strip()
-            if text:
-                values.append(int(float(value)))
+    values.extend(int(float(value)) for value in _iter_present_column_values(frame, (column,)))
     if not values:
         return int(default)
     first = values[0]
@@ -1477,11 +1494,7 @@ def _unique_int_from_column(frame: pd.DataFrame, column: str, default: int) -> i
 
 def _unique_string_from_column(frame: pd.DataFrame, column: str, default: str) -> str:
     values: list[str] = []
-    if column in frame.columns:
-        for value in frame[column].dropna():
-            text = str(value).strip()
-            if text:
-                values.append(text)
+    values.extend(str(value).strip() for value in _iter_present_column_values(frame, (column,)))
     if not values:
         return str(default)
     first = values[0]
@@ -1492,11 +1505,7 @@ def _unique_string_from_column(frame: pd.DataFrame, column: str, default: str) -
 
 def _unique_bool_from_column(frame: pd.DataFrame, column: str, default: bool) -> bool:
     values: list[bool] = []
-    if column in frame.columns:
-        for value in frame[column].dropna():
-            text = str(value).strip()
-            if text:
-                values.append(_parse_bool(value))
+    values.extend(_parse_bool(value) for value in _iter_present_column_values(frame, (column,)))
     if not values:
         return bool(default)
     first = values[0]
@@ -1508,16 +1517,25 @@ def _unique_bool_from_column(frame: pd.DataFrame, column: str, default: bool) ->
 def _parse_bool(value: object) -> bool:
     if isinstance(value, (bool, np.bool_)):
         return bool(value)
-    if isinstance(value, (int, np.integer)):
-        return bool(value)
-    if isinstance(value, (float, np.floating)) and not np.isnan(value):
-        return bool(value)
+    if _is_missing_scalar(value):
+        raise ValueError(f"cannot parse boolean value {value!r}")
+    if isinstance(value, (int, float, np.integer, np.floating)):
+        numeric = float(value)
+        if not np.isfinite(numeric):
+            raise ValueError(f"cannot parse boolean value {value!r}")
+        return numeric != 0.0
     text = str(value).strip().lower()
-    if text in {"1", "true", "yes"}:
+    if text in {"1", "1.0", "true", "t", "yes", "y", "on"}:
         return True
-    if text in {"0", "false", "no"}:
+    if text in {"0", "0.0", "false", "f", "no", "n", "off"}:
         return False
-    raise ValueError(f"cannot parse boolean value {value!r}")
+    try:
+        numeric = float(text)
+    except ValueError:
+        raise ValueError(f"cannot parse boolean value {value!r}") from None
+    if not np.isfinite(numeric):
+        raise ValueError(f"cannot parse boolean value {value!r}")
+    return numeric != 0.0
 
 
 def _decoded_row(

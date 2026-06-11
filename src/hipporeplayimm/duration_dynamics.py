@@ -6,7 +6,18 @@ from scipy.special import logsumexp
 
 def _scalar_dt(dt):
     """Return the representative bin duration as an ordinary float."""
-    return float(getattr(dt,'base',dt))
+    base=getattr(dt,'base',dt)
+    if base is None: base=dt
+    values=np.asarray(base,dtype=float)
+    if values.shape==():
+        out=float(values)
+    elif values.size==1:
+        out=float(values.reshape(-1)[0])
+    else:
+        raise ValueError(f'dt must be scalar or size-one duration, got shape {values.shape}')
+    if not np.isfinite(out) or out<=0.0:
+        raise ValueError('dt must be finite and positive')
+    return out
 
 class DurationFloat(float):
     """Float dt with optional per-transition durations for compatibility."""

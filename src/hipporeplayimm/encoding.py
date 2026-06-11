@@ -181,15 +181,31 @@ class LogEmissionTensor:
         self.log_likelihood = np.asarray(self.log_likelihood, dtype=float)
         if self.log_likelihood.ndim != 2:
             raise ValueError("log_likelihood must be two-dimensional")
+        if self.n_bins == 0:
+            raise ValueError("log_likelihood must contain at least one spatial bin")
+        if np.any(np.isnan(self.log_likelihood)) or np.any(self.log_likelihood == np.inf):
+            raise ValueError("log_likelihood must not contain NaN or +inf")
+
         self.spike_counts = np.asarray(self.spike_counts)
         if self.spike_counts.ndim != 2 or self.spike_counts.shape[0] != self.n_time:
             raise ValueError("spike_counts must be two-dimensional with one row per emission time bin")
+        spike_counts_numeric = np.asarray(self.spike_counts, dtype=float)
+        if not np.all(np.isfinite(spike_counts_numeric)) or np.any(spike_counts_numeric < 0.0):
+            raise ValueError("spike_counts must contain finite nonnegative values")
+
         self.times = np.asarray(self.times, dtype=float)
-        if self.times.shape != (self.n_time,):
+        times_are_missing = self.times.shape == (0,)
+        if self.times.shape != (self.n_time,) and not times_are_missing:
             raise ValueError("times must contain one value per emission row")
         if not np.all(np.isfinite(self.times)):
             raise ValueError("times must be finite")
         self.cell_ids = np.asarray(self.cell_ids)
+        if self.cell_ids.ndim == 0:
+            self.cell_ids = self.cell_ids.reshape(1)
+        elif self.cell_ids.ndim != 1:
+            raise ValueError("cell_ids must be one-dimensional")
+        if self.spike_counts.shape[1] != self.cell_ids.shape[0]:
+            raise ValueError("spike_counts must contain one column per cell ID")
 
         dt_value = float(self.dt)
         if not np.isfinite(dt_value) or dt_value <= 0.0:
@@ -205,11 +221,13 @@ class LogEmissionTensor:
         if self.transition_durations is None:
             if self.n_time <= 1:
                 self.transition_durations = np.empty(0, dtype=float)
-            else:
+            elif self.times.shape == (self.n_time,):
                 values = np.diff(self.times)
                 if not np.all(values > 0.0):
                     raise ValueError("times must be strictly increasing when transition_durations is not provided")
                 self.transition_durations = values
+            else:
+                self.transition_durations = np.full(self.n_time - 1, dt_value, dtype=float)
         else:
             self.transition_durations = np.asarray(self.transition_durations, dtype=float)
             if self.transition_durations.shape != (max(self.n_time - 1, 0),):
@@ -535,6 +553,11 @@ def _validate_position_samples(position: np.ndarray) -> None:
     if position.shape[0] < 2:
         raise ValueError(
             "at least two finite position samples are required to fit place fields"
+        )
+    times = np.asarray(position[:, 0], dtype=float)
+    if not np.all(np.isfinite(times)) or not np.all(np.diff(times) > 0.0):
+        raise ValueError(
+            "position times must be finite and strictly increasing to fit place fields"
         )
 
 

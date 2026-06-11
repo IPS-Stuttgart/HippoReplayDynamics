@@ -10,7 +10,7 @@ from hipporeplayimm.evidence_reporting import (
     DEGENERATE_SINGLE_BIN_EVIDENCE_SUPPORT,
     ensure_evidence_support_columns,
 )
-from hipporeplayimm.models import CandidateKinematicModel, DiffusionModel
+from hipporeplayimm.models import CandidateKinematicModel, DiffusionModel, _mode_transition_matrix
 from hipporeplayimm.pyrecest_models import (
     PyRecEstGoalParticleIMMModel,
     PyRecEstGoalParticleModel,
@@ -70,6 +70,12 @@ def test_imm_scores_stationary_to_momentum_synthetic_event():
 
     assert np.isfinite(score.log_likelihood)
     assert score.diagnostics["mean_candidate_log_mass"] == 0.0
+
+
+def test_mode_transition_matrix_handles_single_mode():
+    transition = _mode_transition_matrix(1, 0.94)
+
+    np.testing.assert_allclose(transition, np.ones((1, 1)))
 
 
 def test_candidate_kinematic_model_validates_external_candidate_support():

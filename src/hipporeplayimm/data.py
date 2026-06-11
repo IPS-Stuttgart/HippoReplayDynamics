@@ -188,6 +188,8 @@ def _read_hdf5_value(obj: Any) -> Any:
     import h5py
     if isinstance(obj, h5py.Dataset):
         arr = np.array(obj)
+        if h5py.check_dtype(ref=arr.dtype) is not None:
+            return _read_hdf5_reference_array(arr, obj.file)
         if arr.dtype.kind in {"S", "U"}:
             return arr.astype(str)
         if arr.dtype == np.uint16 and arr.ndim >= 1 and arr.size > 0:
@@ -199,6 +201,34 @@ def _read_hdf5_value(obj: Any) -> Any:
     if isinstance(obj, h5py.Group):
         return {key: _read_hdf5_value(value) for key, value in obj.items()}
     raise TypeError(f"Unsupported HDF5 MATLAB object: {type(obj)!r}")
+
+
+def _read_hdf5_reference_array(arr: np.ndarray, handle: Any) -> Any:
+    """Dereference MATLAB v7.3 cell/struct references stored in HDF5 datasets."""
+
+    import h5py
+
+    refs = np.asarray(arr)
+
+    def read_reference(ref: Any) -> Any:
+        if not isinstance(ref, h5py.Reference):
+            raise TypeError(f"Expected HDF5 object reference, got {type(ref)!r}")
+        if not ref:
+            return None
+        return _read_hdf5_value(handle[ref])
+
+    if refs.ndim == 0:
+        return read_reference(refs.item())
+
+    values = np.empty(refs.shape, dtype=object)
+    for index in np.ndindex(refs.shape):
+        values[index] = read_reference(refs[index])
+
+    aligned = values.T if values.ndim >= 2 else values
+    squeezed = np.squeeze(aligned)
+    if isinstance(squeezed, np.ndarray) and squeezed.ndim == 0:
+        return squeezed.item()
+    return squeezed
 
 
 def _required_array(path: Path, variable_name: str) -> np.ndarray:

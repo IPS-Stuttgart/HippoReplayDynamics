@@ -339,6 +339,32 @@ def test_add_relative_metrics_uses_state_space_single_mode_baselines():
     assert result["best_static_heldout_log_likelihood"].notna().all()
 
 
+def test_add_relative_metrics_keeps_random_seeds_separate():
+    rows = pd.DataFrame(
+        {
+            "session": ["s1", "s1", "s1", "s1"],
+            "event_index": [7, 7, 7, 7],
+            "benchmark_random_seed": [1, 1, 2, 2],
+            "model": ["random", "imm", "random", "imm"],
+            "heldout_log_likelihood": [-10.0, -8.0, -100.0, -95.0],
+            "test_spikes": [2, 2, 2, 2],
+        }
+    )
+
+    result = _add_relative_metrics(rows).set_index(["benchmark_random_seed", "model"])
+
+    assert result.loc[(1, "random"), "best_static_heldout_log_likelihood"] == -10.0
+    assert result.loc[(1, "imm"), "best_static_heldout_log_likelihood"] == -10.0
+    assert result.loc[(1, "imm"), "delta_vs_best_static"] == 2.0
+    assert np.isclose(
+        result.loc[(1, "imm"), "bits_per_spike_vs_best_static"],
+        2.0 / np.log(2.0) / 2.0,
+    )
+    assert result.loc[(2, "random"), "best_static_heldout_log_likelihood"] == -100.0
+    assert result.loc[(2, "imm"), "best_static_heldout_log_likelihood"] == -100.0
+    assert result.loc[(2, "imm"), "delta_vs_best_static"] == 5.0
+
+
 def test_add_relative_metrics_uses_exact_sparse_momentum_static_baseline():
     rows = pd.DataFrame(
         {

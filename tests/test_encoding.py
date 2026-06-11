@@ -103,6 +103,21 @@ def test_fit_place_field_encoding_rejects_empty_or_too_short_position(position):
         fit_place_field_encoding(session)
 
 
+@pytest.mark.parametrize(
+    "times",
+    [
+        np.array([0.0, 0.0, 0.5]),
+        np.array([0.0, 1.0, 0.5]),
+    ],
+)
+def test_fit_place_field_encoding_rejects_nonincreasing_position_times(times):
+    session = _single_ripple_session()
+    session.position = np.column_stack([times, np.array([0.0, 1.0, 2.0]), np.zeros(3), np.zeros(3)])
+
+    with pytest.raises(ValueError, match="strictly increasing"):
+        fit_place_field_encoding(session)
+
+
 def test_fit_place_field_encoding_handles_empty_cell_set_with_smoothing(tmp_path):
     times = np.linspace(0.0, 10.0, 301)
     x = np.linspace(0.0, 100.0, times.size)

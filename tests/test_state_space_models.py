@@ -529,6 +529,21 @@ def test_mass_retaining_candidate_support_respects_threshold_and_bounds():
     assert list(forced_minimum) == [0, 1, 2, 3]
 
 
+def test_mass_retaining_candidate_support_ignores_nonfinite_bins_for_minimum_bounds():
+    log_emission = np.array([0.0, -np.inf, -2.0, np.nan, -np.inf])
+
+    selected = _mass_retaining_candidate_indices(
+        log_emission,
+        0.50,
+        top_k=4,
+        min_k=4,
+        max_k=0,
+    )
+
+    assert list(selected) == [0, 2]
+    assert np.all(np.isfinite(log_emission[selected]))
+
+
 def test_state_space_model_can_use_mass_retaining_candidate_support():
     centers = np.arange(4.0)[:, None]
     emissions = LogEmissionTensor(

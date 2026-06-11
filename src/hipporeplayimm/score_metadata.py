@@ -896,14 +896,7 @@ def _unique_float_from_columns(
     columns: tuple[str, ...],
     default: float,
 ) -> float:
-    values: list[float] = []
-    for column in columns:
-        if column not in frame.columns:
-            continue
-        for value in frame[column].dropna():
-            text = str(value).strip()
-            if text:
-                values.append(float(value))
+    values = _numeric_metadata_values(frame, columns)
     if not values:
         return float(default)
     first = values[0]
@@ -921,14 +914,7 @@ def _optional_float_from_columns(
     columns: tuple[str, ...],
     default: float | None,
 ) -> float | None:
-    values: list[float] = []
-    for column in columns:
-        if column not in frame.columns:
-            continue
-        for value in frame[column].dropna():
-            text = str(value).strip()
-            if text:
-                values.append(float(value))
+    values = _numeric_metadata_values(frame, columns)
     if not values:
         return default
     first = values[0]
@@ -959,20 +945,51 @@ def _unique_int_from_column(frame: pd.DataFrame, column: str, default: int) -> i
 
 
 def _unique_int_from_columns(frame: pd.DataFrame, columns: tuple[str, ...], default: int) -> int:
-    values: list[int] = []
-    for column in columns:
-        if column not in frame.columns:
-            continue
-        for value in frame[column].dropna():
-            text = str(value).strip()
-            if text:
-                values.append(int(float(value)))
-    if not values:
+    numeric_values = _numeric_metadata_values(frame, columns)
+    if not numeric_values:
         return int(default)
+    values: list[int] = []
+    for value in numeric_values:
+        integer_value = int(round(value))
+        if not np.isclose(value, integer_value, rtol=0.0, atol=1e-9):
+            raise ValueError(f"{' / '.join(columns)} must be an integer")
+        values.append(integer_value)
     first = values[0]
     if any(value != first for value in values[1:]):
         raise ValueError(f"{' / '.join(columns)} contains multiple values")
     return int(first)
+
+
+_MISSING_METADATA_STRINGS = {"", "nan", "na", "n/a", "none", "null", "<na>"}
+
+
+def _numeric_metadata_values(frame: pd.DataFrame, columns: tuple[str, ...]) -> list[float]:
+    values: list[float] = []
+    for column in columns:
+        if column not in frame.columns:
+            continue
+        for value in frame[column]:
+            parsed = _metadata_float_from_value(value, column)
+            if parsed is not None:
+                values.append(parsed)
+    return values
+
+
+def _metadata_float_from_value(value: object, column: str) -> float | None:
+    try:
+        if pd.isna(value):
+            return None
+    except (TypeError, ValueError):
+        pass
+
+    text = str(value).strip()
+    if text.lower() in _MISSING_METADATA_STRINGS:
+        return None
+
+    numeric = float(text)
+    if not np.isfinite(numeric):
+        raise ValueError(f"{column} must be finite")
+    return float(numeric)
 
 
 def _unique_bool_from_column(frame: pd.DataFrame, column: str, default: bool) -> bool:

@@ -13,6 +13,8 @@ import pandas as pd
 
 from .encoding import EmissionConfig
 
+_MISSING_METADATA_STRINGS = {"", "nan", "na", "n/a", "none", "null", "<na>"}
+
 
 def apply_spike_rate_metadata_patch() -> None:
     """Preserve ``spike_rate_scale`` in score-table readers and writers."""
@@ -83,8 +85,13 @@ def _unique_float_from_columns(
             continue
         for value in frame[column].dropna():
             text = str(value).strip()
+            if text.lower() in _MISSING_METADATA_STRINGS:
+                continue
             if text:
-                values.append(float(value))
+                numeric = float(value)
+                if not np.isfinite(numeric):
+                    raise ValueError(f"{column} must be finite")
+                values.append(numeric)
     if not values:
         return float(default)
     first = values[0]

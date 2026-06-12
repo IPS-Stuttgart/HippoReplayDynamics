@@ -225,6 +225,37 @@ def test_exact_sparse_momentum_evidence_only_delegates_to_pyrecest_mode():
     assert evidence_only.diagnostics["state_space_momentum_trajectory_posterior"] == "not_returned_evidence_only"
 
 
+def test_trajectory_imm_evidence_only_handles_zero_momentum_mass():
+    emissions = _synthetic_emissions()
+    centers = np.array([[0.0, 0.0], [1.0, 0.0], [2.0, 0.0], [3.0, 0.0]])
+    config = StateSpaceDecoderConfig(
+        mode="trajectory-imm-exact-sparse",
+        trajectory_imm_momentum_initial_probability=0.0,
+        trajectory_imm_momentum_switch_probability=0.0,
+    )
+    model = StateSpaceReplayModel(
+        mode="trajectory-imm-exact-sparse",
+        config=config,
+    )
+
+    full = model.score(emissions, centers, return_trajectory=True)
+    evidence_only = model.score(emissions, centers, return_trajectory=False)
+
+    assert np.isfinite(evidence_only.log_likelihood)
+    assert evidence_only.log_likelihood == pytest.approx(full.log_likelihood, abs=1e-12)
+    assert full.trajectory_log_posterior is not None
+    assert evidence_only.trajectory_log_posterior is None
+    assert evidence_only.terminal_log_posterior is not None
+    assert np.allclose(logsumexp(evidence_only.terminal_log_posterior), 0.0)
+    assert evidence_only.diagnostics["state_space_trajectory_imm_mode_posterior"] == "not_returned_evidence_only"
+    assert evidence_only.diagnostics[
+        "state_space_mode_momentum_exact_sparse_terminal_probability"
+    ] == pytest.approx(0.0, abs=1e-12)
+    assert evidence_only.diagnostics[
+        "state_space_mode_momentum_exact_sparse_event_probability"
+    ] == pytest.approx(0.0, abs=1e-12)
+
+
 def test_trajectory_imm_helper_returns_log_terminal_for_full_smoothing():
     emissions = _synthetic_emissions()
     centers = np.array([[0.0, 0.0], [1.0, 0.0], [2.0, 0.0], [3.0, 0.0]])
@@ -346,6 +377,64 @@ def test_trajectory_imm_uses_duration_specific_momentum_entry_sigma(monkeypatch)
     assert any(np.isclose(value, 2.0) for value in backward_entry_sigmas)
     assert diagnostics["state_space_momentum_initial_transition_sigma_cm"] == pytest.approx(1.5)
     assert diagnostics["state_space_momentum_initial_transition_sigma_cm_per_step"] == "1,2"
+
+
+def test_trajectory_imm_uses_duration_specific_mode_stickiness(monkeypatch):
+    centers = np.array(
+        [
+            [0.0, 0.0],
+            [1.0, 0.0],
+            [2.0, 0.0],
+            [3.0, 0.0],
+        ]
+    )
+    emissions = LogEmissionTensor(
+        log_likelihood=np.zeros((3, centers.shape[0]), dtype=float),
+        spike_counts=np.zeros((3, 1), dtype=int),
+        times=np.array([0.0, 0.01, 0.05]),
+        dt=0.01,
+        cell_ids=np.array([1]),
+        n_spikes=0,
+        transition_durations=np.array([0.01, 0.04]),
+    )
+    config = StateSpaceDecoderConfig(
+        mode="trajectory-imm-exact-sparse",
+        imm_mode_stickiness=0.5,
+        imm_switch_tau_s=0.02,
+        max_step_sigma=10.0,
+    )
+    recorded_stickiness: list[float] = []
+    original_mode_transition = trajectory_imm._mode_transition_matrix
+
+    def record_mode_transition(n_modes, stickiness):
+        recorded_stickiness.append(float(stickiness))
+        return original_mode_transition(n_modes, stickiness)
+
+    monkeypatch.setattr(
+        trajectory_imm,
+        "_mode_transition_matrix",
+        record_mode_transition,
+    )
+
+    logp, _, _, _, diagnostics = trajectory_imm._score_trajectory_imm_exact_sparse(
+        emissions,
+        centers,
+        config,
+        emissions.transition_durations,
+        return_trajectory=True,
+    )
+
+    expected = np.exp(-emissions.transition_durations / config.imm_switch_tau_s)
+    assert np.isfinite(logp)
+    np.testing.assert_allclose(recorded_stickiness, expected)
+    assert diagnostics["state_space_trajectory_imm_switch_tau_s"] == config.imm_switch_tau_s
+    np.testing.assert_allclose(
+        np.fromstring(
+            diagnostics["state_space_trajectory_imm_mode_stickiness_per_step"],
+            sep=",",
+        ),
+        expected,
+    )
 
 
 def test_displacement_imm_uses_duration_specific_mode_stickiness(monkeypatch):

@@ -122,9 +122,13 @@ def _score_trajectory_imm_exact_sparse(
     position_prior = _uniform_position_prior(emissions.n_bins, valid_mask)
     trajectory_imm_mode_stickiness = _trajectory_imm_mode_stickiness(config)
     mode_prior = _trajectory_imm_mode_prior(config)
-    mode_transition = _trajectory_imm_mode_transition_matrix(
+    mode_transitions = _trajectory_imm_mode_transition_matrices(
         config,
         trajectory_imm_mode_stickiness,
+        durations,
+    )
+    mode_stickiness_per_step = np.asarray(
+        [matrix[0, 0] for matrix in mode_transitions], dtype=float
     )
     stationary_transition = _gaussian_transition_matrix(
         centers,
@@ -178,7 +182,7 @@ def _score_trajectory_imm_exact_sparse(
             stationary_transition=stationary_transition,
             diffusion_transition=diffusion_transition,
             position_prior=position_prior,
-            mode_transition=mode_transition,
+            mode_transition=mode_transitions[transition_index],
             entry_sigma_cm=float(initial_sigmas[transition_index]),
             momentum_sigma_cm=float(momentum_sigmas[transition_index]),
             velocity_decay=float(decays[transition_index]) * float(time_scales[transition_index]),
@@ -206,7 +210,7 @@ def _score_trajectory_imm_exact_sparse(
             stationary_sigma_cm=float(getattr(config, "stationary_sigma_cm", 2.0)),
             diffusion_sigmas=diffusion_sigmas,
             position_prior=position_prior,
-            mode_transition=mode_transition,
+            mode_transitions=mode_transitions,
             entry_sigmas=initial_sigmas,
             momentum_sigmas=momentum_sigmas,
             decays=decays,
@@ -258,6 +262,10 @@ def _score_trajectory_imm_exact_sparse(
         "state_space_trajectory_imm_mode_stickiness": float(
             trajectory_imm_mode_stickiness
         ),
+        "state_space_trajectory_imm_switch_tau_s": float(
+            getattr(config, "imm_switch_tau_s", 0.0)
+        ),
+        "state_space_trajectory_imm_mode_stickiness_per_step": _format_float_series(mode_stickiness_per_step),
         "state_space_trajectory_imm_momentum_initial_probability": float(
             mode_prior[_MOMENTUM_MODE_INDEX]
         ),
@@ -367,6 +375,34 @@ def _trajectory_imm_mode_transition_matrix(
         matrix[src, _MOMENTUM_MODE_INDEX] = momentum_probability
     matrix[_MOMENTUM_MODE_INDEX, :_FIRST_ORDER_MODE_COUNT] = remaining / _FIRST_ORDER_MODE_COUNT
     return matrix
+
+
+def _trajectory_imm_mode_transition_matrices(
+    config: object,
+    stickiness: float,
+    durations: np.ndarray,
+) -> list[np.ndarray]:
+    """Return one trajectory-IMM mode-transition matrix per transition.
+
+    ``stickiness`` is the legacy per-transition probability.  When
+    ``imm_switch_tau_s`` is positive, derive the stickiness for each adjacent
+    replay-bin transition from the actual center-to-center duration, matching
+    the duration-aware behavior of the other IMM state-space decoders.
+    """
+
+    durations = np.asarray(durations, dtype=float)
+    tau_s = float(getattr(config, "imm_switch_tau_s", 0.0))
+    if not np.isfinite(tau_s) or tau_s < 0.0:
+        raise ValueError("imm_switch_tau_s must be finite and nonnegative")
+    if tau_s == 0.0:
+        transition = _trajectory_imm_mode_transition_matrix(config, stickiness)
+        return [transition for _ in range(int(durations.size))]
+    if not np.all(np.isfinite(durations)) or np.any(durations <= 0.0):
+        raise ValueError("transition durations must be finite and positive")
+    return [
+        _trajectory_imm_mode_transition_matrix(config, float(np.exp(-float(duration) / tau_s)))
+        for duration in durations
+    ]
 
 
 def _optional_float_diagnostic(value: object) -> float:
@@ -604,7 +640,7 @@ def _backward_states(
     stationary_sigma_cm: float,
     diffusion_sigmas: np.ndarray,
     position_prior: np.ndarray,
-    mode_transition: np.ndarray,
+    mode_transitions: list[np.ndarray],
     entry_sigmas: np.ndarray,
     momentum_sigmas: np.ndarray,
     decays: np.ndarray,
@@ -635,6 +671,7 @@ def _backward_states(
         destination_beta = betas[time_index]
         source = states[time_index - 1]
         transition_index = time_index - 1
+        mode_transition = mode_transitions[transition_index]
         diffusion_transition = _gaussian_transition_matrix(
             centers,
             float(diffusion_sigmas[transition_index]),
@@ -894,10 +931,17 @@ def _filtered_terminal_posteriors(
     position = state.first_order.sum(axis=0)
     mode = np.zeros(len(_TRAJECTORY_IMM_MODES), dtype=float)
     mode[:_FIRST_ORDER_MODE_COUNT] = state.first_order.sum(axis=1)
-    if state.momentum_prev.size == 0:
-        position += state.momentum_alpha
-    else:
-        np.add.at(position, state.momentum_curr, state.momentum_alpha)
+    # Later states can have no momentum pair rows when momentum prior/switch mass is zero.
+    # Only the initial position-only momentum state stores one dense value per spatial bin.
+    if state.momentum_alpha.size:
+        if state.momentum_prev.size == 0:
+            if state.momentum_alpha.shape != (n_bins,):
+                raise ValueError(
+                    "position-only momentum posterior must contain one value per spatial bin"
+                )
+            position += state.momentum_alpha
+        else:
+            np.add.at(position, state.momentum_curr, state.momentum_alpha)
     mode[_MOMENTUM_MODE_INDEX] = float(state.momentum_alpha.sum())
     position_total = float(position.sum())
     mode_total = float(mode.sum())

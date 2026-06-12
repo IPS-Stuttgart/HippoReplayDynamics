@@ -95,6 +95,27 @@ def test_malformed_ripple_events_are_rejected() -> None:
         _as_two_dimensional(np.zeros(2), "Ripple_Events")
 
 
+def test_well_sequence_column_major_schema_is_transposed() -> None:
+    well_sequence = _as_two_dimensional(
+        np.array(
+            [
+                [10.0, 20.0, 30.0],
+                [1.0, 2.0, 3.0],
+            ],
+            dtype=float,
+        ),
+        "Well_Sequence",
+    )
+
+    assert well_sequence.shape == (3, 2)
+    np.testing.assert_allclose(well_sequence[0], np.array([10.0, 1.0]))
+
+
+def test_malformed_well_sequence_is_rejected() -> None:
+    with pytest.raises(ValueError, match="Well_Sequence"):
+        _as_two_dimensional(np.zeros((3, 3)), "Well_Sequence")
+
+
 def test_interval_arrays_reject_higher_dimensional_inputs() -> None:
     with pytest.raises(ValueError, match="Intervals"):
         _as_intervals(np.zeros((1, 2, 2)))

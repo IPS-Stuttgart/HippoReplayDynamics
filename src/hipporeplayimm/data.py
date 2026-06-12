@@ -383,6 +383,10 @@ def _as_two_dimensional(value: Any, name: str) -> np.ndarray:
             if arr.shape[0] == 6:
                 return arr.reshape(1, 6)
             raise ValueError(f"{name} must have six columns; got shape {arr.shape}")
+        if name == "Well_Sequence":
+            if arr.shape[0] == 2:
+                return arr.reshape(1, 2)
+            raise ValueError(f"{name} must have two columns; got shape {arr.shape}")
         if arr.shape[0] == 2:
             return arr.reshape(1, 2)
         return arr.reshape(-1, 1)
@@ -393,6 +397,11 @@ def _as_two_dimensional(value: Any, name: str) -> np.ndarray:
             arr = arr.T
         if arr.shape[1] != 6:
             raise ValueError(f"{name} must have six columns; got shape {arr.shape}")
+    if name == "Well_Sequence":
+        if arr.shape[1] != 2 and arr.shape[0] == 2:
+            arr = arr.T
+        if arr.shape[1] != 2:
+            raise ValueError(f"{name} must have two columns; got shape {arr.shape}")
     return arr
 
 

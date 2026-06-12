@@ -186,6 +186,17 @@ def _restrict_candidates_to_valid_bins(
     return restricted
 
 
+def _as_finite_2d_points(values: np.ndarray, name: str) -> np.ndarray:
+    points = np.asarray(values, dtype=float)
+    if points.ndim == 1:
+        points = points[:, None]
+    if points.ndim != 2 or points.shape[0] == 0 or points.shape[1] == 0:
+        raise ValueError(f"{name} must have shape (n_points, position_dim)")
+    if not np.all(np.isfinite(points)):
+        raise ValueError(f"{name} must be finite")
+    return points
+
+
 def _gaussian_transition_matrix(
     bin_centers: np.ndarray,
     sigma_cm: float,
@@ -198,6 +209,7 @@ def _gaussian_transition_matrix(
         raise ValueError("sigma_cm must be finite and positive")
     if not np.isfinite(max_step_sigma) or max_step_sigma <= 0.0:
         raise ValueError("max_step_sigma must be finite and positive")
+    bin_centers = _as_finite_2d_points(bin_centers, "bin_centers")
     n_bins = bin_centers.shape[0]
     valid_mask = _coerce_valid_bin_mask(valid_bin_mask, n_bins)
     allowed = np.arange(n_bins, dtype=int) if valid_mask is None else np.flatnonzero(valid_mask)
@@ -235,6 +247,7 @@ def _full_grid_normalized_pairwise_gaussian_log_prob(
 ) -> np.ndarray:
     """Evaluate candidate log transitions with full-grid normalization."""
 
+    all_observed = _as_finite_2d_points(all_observed, "all_observed")
     log_kernel = _pairwise_gaussian_log_prob(predicted, observed, sigma_cm)
     normalizer_support = all_observed
     if valid_bin_mask is not None:
@@ -253,6 +266,10 @@ def _pairwise_gaussian_log_prob(predicted: np.ndarray, observed: np.ndarray, sig
     sigma_cm = float(sigma_cm)
     if not np.isfinite(sigma_cm) or sigma_cm <= 0.0:
         raise ValueError("sigma_cm must be finite and positive")
+    predicted = _as_finite_2d_points(predicted, "predicted")
+    observed = _as_finite_2d_points(observed, "observed")
+    if predicted.shape[1] != observed.shape[1]:
+        raise ValueError("predicted and observed must have matching position dimensions")
     delta = predicted[:, None, :] - observed[None, :, :]
     dist2 = np.sum(delta * delta, axis=2)
     return -0.5 * dist2 / (sigma_cm * sigma_cm)

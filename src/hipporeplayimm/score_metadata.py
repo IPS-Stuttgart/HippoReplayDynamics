@@ -649,22 +649,34 @@ def apply_model_hyperparam_patch() -> None:
             ),
             state_space_displacement_radius_bins=_unique_int_from_columns(
                 scores_frame,
-                ("state_space_displacement_radius_bins",),
+                (
+                    "state_space_displacement_radius_bins",
+                    "diagnostic_state_space_displacement_radius_bins",
+                ),
                 state_space_displacement_radius_bins,
             ),
             state_space_displacement_position_sigma_cm=_unique_float_from_columns(
                 scores_frame,
-                ("state_space_displacement_position_sigma_cm",),
+                (
+                    "state_space_displacement_position_sigma_cm",
+                    "diagnostic_state_space_displacement_position_sigma_cm",
+                ),
                 state_space_displacement_position_sigma_cm,
             ),
             state_space_displacement_transition_sigma_cm_sqrt_s=_unique_float_from_columns(
                 scores_frame,
-                ("state_space_displacement_transition_sigma_cm_sqrt_s",),
+                (
+                    "state_space_displacement_transition_sigma_cm_sqrt_s",
+                    "diagnostic_state_space_displacement_transition_sigma_cm_sqrt_s",
+                ),
                 state_space_displacement_transition_sigma_cm_sqrt_s,
             ),
             state_space_displacement_prior_sigma_cm=_unique_float_from_columns(
                 scores_frame,
-                ("state_space_displacement_prior_sigma_cm",),
+                (
+                    "state_space_displacement_prior_sigma_cm",
+                    "diagnostic_state_space_displacement_prior_sigma_cm",
+                ),
                 state_space_displacement_prior_sigma_cm,
             ),
             state_space_valid_occupancy_threshold_s=_unique_float_from_columns(scores_frame, ("state_space_valid_occupancy_threshold_s", "diagnostic_state_space_valid_occupancy_threshold_s"), state_space_valid_occupancy_threshold_s),

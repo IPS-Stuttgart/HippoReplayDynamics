@@ -111,3 +111,22 @@ def test_state_space_imm_support_column_is_used_by_generic_inference():
     assert scored.loc[0, "evidence_support"] == TRUNCATED_EVIDENCE_SUPPORT
     assert not bool(scored.loc[0, "evidence_comparable"])
     assert scored.loc[0, "evidence_comparison"] == EVIDENCE_COMPARISON_LOWER_BOUND
+
+
+def test_state_space_displacement_imm_support_column_is_used_by_generic_inference():
+    rows = pd.DataFrame(
+        [
+            {
+                "status": "success",
+                "model": "sorted-spike-state-space-displacement-imm",
+                "log_evidence": 10.0,
+                "diagnostic_state_space_displacement_imm_evidence_support": TRUNCATED_EVIDENCE_SUPPORT,
+            }
+        ]
+    )
+
+    scored = ensure_evidence_support_columns(rows)
+
+    assert scored.loc[0, "evidence_support"] == TRUNCATED_EVIDENCE_SUPPORT
+    assert not bool(scored.loc[0, "evidence_comparable"])
+    assert scored.loc[0, "evidence_comparison"] == EVIDENCE_COMPARISON_LOWER_BOUND

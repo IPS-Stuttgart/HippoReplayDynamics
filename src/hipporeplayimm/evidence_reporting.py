@@ -19,6 +19,7 @@ EVIDENCE_SUPPORT_DIAGNOSTIC_COLUMNS = (
     "diagnostic_state_space_sparse_momentum_evidence_support",
     "diagnostic_state_space_trajectory_imm_evidence_support",
     "diagnostic_state_space_displacement_momentum_evidence_support",
+    "diagnostic_state_space_displacement_imm_evidence_support",
     "diagnostic_goal_state_space_evidence_support",
     "diagnostic_pyrecest_evidence_support",
 )

@@ -136,6 +136,74 @@ def test_patched_build_models_rejects_invalid_state_space_imm_switch_tau(
         _build_models(config)
 
 
+def test_compare_ground_truth_restores_displacement_state_space_metadata_from_diagnostics(monkeypatch):
+    scores = pd.DataFrame(
+        {
+            "session": ["s1"],
+            "event_index": [0],
+            "model": ["state-space-displacement-momentum"],
+            "diagnostic_state_space_displacement_radius_bins": [4],
+            "diagnostic_state_space_displacement_position_sigma_cm": [1.25],
+            "diagnostic_state_space_displacement_transition_sigma_cm_sqrt_s": [33.0],
+            "diagnostic_state_space_displacement_prior_sigma_cm": [9.5],
+        }
+    )
+    ground_truth = pd.DataFrame(
+        {
+            "session": ["s1"],
+            "event_index": [0],
+            "true_well_id": [np.nan],
+            "true_well_x": [np.nan],
+            "true_well_y": [np.nan],
+            "valid_label": [False],
+        }
+    )
+    captured_configs = []
+
+    class FakeEncoding:
+        bin_centers = np.asarray([[0.0, 0.0], [1.0, 0.0]])
+        cell_ids = np.asarray([1, 2])
+
+    class FakeModel:
+        def score(self, emissions, bin_centers):
+            del emissions, bin_centers
+            return SimpleNamespace(
+                terminal_log_posterior=np.log(np.asarray([0.5, 0.5]))
+            )
+
+    def fake_build_models(config, session=None):
+        del session
+        captured_configs.append(config)
+        return {"state-space-displacement-momentum": FakeModel()}
+
+    monkeypatch.setattr(gt, "_load_or_generate_ground_truth", lambda *args, **kwargs: ground_truth)
+    monkeypatch.setattr(gt, "load_open_field_sessions", lambda root: [SimpleNamespace(session_id="s1")])
+    monkeypatch.setattr(gt, "fit_place_field_encoding", lambda *args, **kwargs: FakeEncoding())
+    monkeypatch.setattr(gt, "build_emissions", lambda *args, **kwargs: SimpleNamespace(n_time=1))
+    monkeypatch.setattr(
+        gt,
+        "infer_well_locations",
+        lambda *args, **kwargs: pd.DataFrame(columns=["well_id", "well_x", "well_y"]),
+    )
+    monkeypatch.setattr(gt, "_build_models", fake_build_models)
+
+    gt.compare_scores_to_ground_truth(
+        "unused-root",
+        scores,
+        state_space_displacement_radius_bins=99,
+        state_space_displacement_position_sigma_cm=99.0,
+        state_space_displacement_transition_sigma_cm_sqrt_s=99.0,
+        state_space_displacement_prior_sigma_cm=99.0,
+    )
+
+    assert len(captured_configs) == 1
+    config = captured_configs[0]
+    assert config.state_space_displacement_radius_bins == 4
+    assert config.state_space_displacement_position_sigma_cm == pytest.approx(1.25)
+    assert config.state_space_displacement_transition_sigma_cm_sqrt_s == pytest.approx(33.0)
+    assert config.state_space_displacement_prior_sigma_cm == pytest.approx(9.5)
+
+
 def test_score_metadata_recovers_pyrecest_hyperparameters_from_aliases():
     scores = pd.DataFrame(
         {

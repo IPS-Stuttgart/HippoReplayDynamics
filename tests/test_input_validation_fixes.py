@@ -142,6 +142,38 @@ def test_state_space_gaussian_transition_rejects_nonfinite_parameters() -> None:
         _gaussian_transition_matrix(bin_centers, 1.0, float("nan"))
 
 
+def test_state_space_gaussian_helpers_reject_nonfinite_positions() -> None:
+    bin_centers = np.array([[0.0, 0.0], [1.0, 0.0]], dtype=float)
+    bad_centers = np.array([[0.0, 0.0], [float("nan"), 1.0]], dtype=float)
+
+    with pytest.raises(ValueError, match="bin_centers"):
+        _gaussian_transition_matrix(bad_centers, 1.0, 4.0)
+
+    with pytest.raises(ValueError, match="predicted"):
+        _full_grid_normalized_pairwise_gaussian_log_prob(
+            bad_centers[:1],
+            bin_centers,
+            bin_centers,
+            1.0,
+        )
+
+    with pytest.raises(ValueError, match="observed"):
+        _full_grid_normalized_pairwise_gaussian_log_prob(
+            bin_centers[:1],
+            bad_centers,
+            bin_centers,
+            1.0,
+        )
+
+    with pytest.raises(ValueError, match="all_observed"):
+        _full_grid_normalized_pairwise_gaussian_log_prob(
+            bin_centers[:1],
+            bin_centers,
+            bad_centers,
+            1.0,
+        )
+
+
 def test_log_emission_tensor_rejects_nonfinite_duration_metadata() -> None:
     log_likelihood = np.zeros((2, 1), dtype=float)
     spike_counts = np.zeros((2, 1), dtype=int)

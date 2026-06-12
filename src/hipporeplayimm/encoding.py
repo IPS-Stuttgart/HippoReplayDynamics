@@ -60,8 +60,8 @@ def _validate_encoding_config(config: EncodingConfig) -> None:
         raise ValueError("smoothing_sigma_bins must be finite and nonnegative")
 
     min_speed_cm_s = float(config.min_speed_cm_s)
-    if not np.isfinite(min_speed_cm_s):
-        raise ValueError("min_speed_cm_s must be finite")
+    if not np.isfinite(min_speed_cm_s) or min_speed_cm_s < 0.0:
+        raise ValueError("min_speed_cm_s must be finite and nonnegative")
 
     arena_padding_cm = float(config.arena_padding_cm)
     if not np.isfinite(arena_padding_cm) or arena_padding_cm < 0.0:
@@ -333,18 +333,12 @@ def build_emissions(
     spikes = session.spikes
     counts = np.zeros((times.shape[0], encoding.n_cells), dtype=int)
     if spikes.size and encoding.n_cells:
-        keep = (
-            (spikes[:, 0] >= ripple_event.start)
-            & (spikes[:, 0] < ripple_event.end)
-            & np.isin(spikes[:, 1].astype(int), encoding.cell_ids)
-        )
-        spike_times = spikes[keep, 0]
-        spike_cell_ids = spikes[keep, 1].astype(int)
+        in_ripple = (spikes[:, 0] >= ripple_event.start) & (spikes[:, 0] < ripple_event.end)
+        spike_times = spikes[in_ripple, 0]
+        spike_cell_ids = spikes[in_ripple, 1].astype(int)
         time_bins = np.searchsorted(edges, spike_times, side="right") - 1
-        rows = np.searchsorted(encoding.cell_ids, spike_cell_ids)
-        valid = (time_bins >= 0) & (time_bins < counts.shape[0])
-        valid &= (rows >= 0) & (rows < encoding.cell_ids.shape[0])
-        valid[valid] &= encoding.cell_ids[rows[valid]] == spike_cell_ids[valid]
+        rows = _cell_id_row_indices(encoding.cell_ids, spike_cell_ids)
+        valid = (time_bins >= 0) & (time_bins < counts.shape[0]) & (rows >= 0)
         np.add.at(counts, (time_bins[valid].astype(int), rows[valid]), 1)
 
     log_likelihood = _poisson_log_emissions(
@@ -454,6 +448,24 @@ def _count_log_emissions(
         negative_binomial_overdispersion,
     )
     return (log_terms * cell_weights[None, :, None]).sum(axis=1)
+
+
+def _cell_id_row_indices(cell_ids: np.ndarray, spike_cell_ids: np.ndarray) -> np.ndarray:
+    """Map spike cell IDs to encoding rows without requiring sorted cell IDs."""
+
+    available = np.asarray(cell_ids, dtype=int)
+    if available.ndim != 1:
+        raise ValueError("encoding.cell_ids must be one-dimensional")
+    if np.unique(available).shape[0] != available.shape[0]:
+        raise ValueError("encoding.cell_ids must be unique")
+
+    requested = np.asarray(spike_cell_ids, dtype=int)
+    row_by_cell_id = {int(cell_id): index for index, cell_id in enumerate(available)}
+    return np.fromiter(
+        (row_by_cell_id.get(int(cell_id), -1) for cell_id in requested),
+        dtype=int,
+        count=requested.shape[0],
+    )
 
 
 def _emission_cell_weights(

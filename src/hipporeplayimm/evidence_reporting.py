@@ -39,7 +39,11 @@ EVIDENCE_COMPARISON_DESCRIPTIONS = {
 }
 _MOMENTUM_EXACT_SURROGATE_MODELS = (
     "sorted-spike-state-space-momentum-exact-sparse",
+    "state-space-momentum-exact-sparse",
     "sorted-spike-state-space-displacement-momentum",
+    "state-space-displacement-momentum",
+    "sorted-spike-state-space-velocity-momentum",
+    "state-space-velocity-momentum",
 )
 
 
@@ -283,6 +287,7 @@ def simulation_event_best_rows(event_scores: pd.DataFrame) -> pd.DataFrame:
 def patch_simulation_recovery_module(module: object) -> None:
     """Patch simulation recovery reporting to separate exact and truncated evidence."""
 
+    setattr(module, "_MOMENTUM_EXACT_SURROGATE_MODELS", _MOMENTUM_EXACT_SURROGATE_MODELS)
     setattr(module, "_ensure_evidence_support_columns", ensure_evidence_support_columns)
     setattr(module, "add_evidence_columns", simulation_add_evidence_columns)
     setattr(module, "_event_best_rows", simulation_event_best_rows)

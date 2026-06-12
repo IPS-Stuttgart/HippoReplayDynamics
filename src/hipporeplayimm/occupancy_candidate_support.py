@@ -41,7 +41,7 @@ def _candidate_indices_for_model(
     valid_bin_mask = _valid_bin_mask_for_candidate_support(
         model,
         occupancy_s,
-        int(emissions.n_bins),
+        _candidate_support_n_bins(emissions, bin_centers),
     )
     return _call_candidate_indices(
         model.candidate_indices,  # type: ignore[attr-defined]
@@ -49,6 +49,13 @@ def _candidate_indices_for_model(
         bin_centers,
         valid_bin_mask=valid_bin_mask,
     )
+
+
+def _candidate_support_n_bins(emissions, bin_centers: np.ndarray) -> int:
+    n_bins = getattr(emissions, "n_bins", None)
+    if n_bins is not None:
+        return int(n_bins)
+    return int(np.asarray(bin_centers).shape[0])
 
 
 def _is_state_space_model(model: object) -> bool:

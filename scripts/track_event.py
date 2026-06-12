@@ -70,6 +70,7 @@ def _validate_session_files(session_path: Path) -> None:
 
 def _prefix_emissions(emissions: LogEmissionTensor, stop: int) -> LogEmissionTensor:
     """Return emissions restricted to time bins [0, stop)."""
+    bin_durations = getattr(emissions, "bin_durations", None)
     prefix = LogEmissionTensor(
         log_likelihood=emissions.log_likelihood[:stop],
         spike_counts=emissions.spike_counts[:stop],
@@ -77,6 +78,11 @@ def _prefix_emissions(emissions: LogEmissionTensor, stop: int) -> LogEmissionTen
         dt=float(getattr(emissions.dt, "base", emissions.dt)),
         cell_ids=emissions.cell_ids,
         n_spikes=int(emissions.spike_counts[:stop].sum()),
+        bin_durations=(
+            None
+            if bin_durations is None
+            else np.asarray(bin_durations, dtype=float)[:stop]
+        ),
     )
     transition_durations = getattr(emissions, "transition_durations", None)
     if transition_durations is None:

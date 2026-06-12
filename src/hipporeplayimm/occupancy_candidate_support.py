@@ -6,8 +6,6 @@ import inspect
 
 import numpy as np
 
-from .state_space import StateSpaceReplayModel, _valid_bin_mask_from_occupancy
-
 
 def apply_occupancy_candidate_support_patch() -> None:
     """Keep benchmark, recovery, and post-hoc decode beams occupancy-aware."""
@@ -53,16 +51,24 @@ def _candidate_indices_for_model(
     )
 
 
+def _is_state_space_model(model: object) -> bool:
+    from .state_space import StateSpaceReplayModel
+
+    return isinstance(model, StateSpaceReplayModel)
+
+
 def _valid_bin_mask_for_candidate_support(
     model: object,
     occupancy_s: np.ndarray | None,
     n_bins: int,
 ) -> np.ndarray | None:
-    if occupancy_s is None or not isinstance(model, StateSpaceReplayModel):
+    if occupancy_s is None or not _is_state_space_model(model):
         return None
     config = getattr(model, "config", None)
     if config is None:
         return None
+    from .state_space import _valid_bin_mask_from_occupancy
+
     return _valid_bin_mask_from_occupancy(
         occupancy_s,
         float(config.valid_occupancy_threshold_s),
@@ -134,7 +140,7 @@ def _score_train_joint_model(
 ):
     from . import benchmarks as benchmark_module
 
-    if isinstance(model, StateSpaceReplayModel):
+    if _is_state_space_model(model):
         candidates = (
             _candidate_indices_for_model(
                 model,
@@ -179,7 +185,7 @@ def _score_joint_for_ground_truth(
     from . import benchmarks as benchmark_module
     from . import ground_truth_candidate_support as ground_truth_candidate_module
 
-    if isinstance(model, StateSpaceReplayModel):
+    if _is_state_space_model(model):
         candidates = (
             _candidate_indices_for_model(
                 model,

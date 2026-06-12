@@ -92,19 +92,25 @@ def evidence_support_from_row(row: pd.Series) -> str:
     status = row.get("status", "success")
     if pd.notna(status) and str(status) != "success":
         return "not_scored"
+
+    labels: list[str] = []
     for column in EVIDENCE_SUPPORT_DIAGNOSTIC_COLUMNS:
         value = row.get(column)
         if pd.isna(value):
             continue
-        text = str(value)
-        if text == TRUNCATED_EVIDENCE_SUPPORT:
-            return TRUNCATED_EVIDENCE_SUPPORT
-        if text == EXACT_EVIDENCE_SUPPORT:
-            return EXACT_EVIDENCE_SUPPORT
-        if text == DEGENERATE_SINGLE_BIN_EVIDENCE_SUPPORT:
-            return DEGENERATE_SINGLE_BIN_EVIDENCE_SUPPORT
-        if text == PYRECEST_PARTICLE_EVIDENCE_SUPPORT:
-            return PYRECEST_PARTICLE_EVIDENCE_SUPPORT
+        text = str(value).strip()
+        if text:
+            labels.append(text)
+
+    for non_exact_support in (
+        TRUNCATED_EVIDENCE_SUPPORT,
+        DEGENERATE_SINGLE_BIN_EVIDENCE_SUPPORT,
+        PYRECEST_PARTICLE_EVIDENCE_SUPPORT,
+    ):
+        if non_exact_support in labels:
+            return non_exact_support
+    if EXACT_EVIDENCE_SUPPORT in labels:
+        return EXACT_EVIDENCE_SUPPORT
     return EXACT_EVIDENCE_SUPPORT
 
 

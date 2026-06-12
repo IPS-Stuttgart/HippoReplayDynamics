@@ -44,6 +44,25 @@ def test_pyrecest_rows_are_not_marked_exact_comparable() -> None:
     assert not bool(out.loc[0, "evidence_comparable"])
 
 
+def test_noncomparable_support_overrides_earlier_exact_diagnostic() -> None:
+    rows = pd.DataFrame(
+        [
+            {
+                "status": "success",
+                "model": "state-space-momentum",
+                "log_evidence": 1.0,
+                "diagnostic_candidate_evidence_support": EXACT_EVIDENCE_SUPPORT,
+                "diagnostic_state_space_momentum_evidence_support": TRUNCATED_EVIDENCE_SUPPORT,
+            }
+        ]
+    )
+
+    out = ensure_evidence_support_columns(rows)
+
+    assert out.loc[0, "evidence_support"] == TRUNCATED_EVIDENCE_SUPPORT
+    assert not bool(out.loc[0, "evidence_comparable"])
+
+
 def test_legacy_audit_uses_canonical_support_inference_for_degenerate_rows() -> None:
     rows = pd.DataFrame(
         [

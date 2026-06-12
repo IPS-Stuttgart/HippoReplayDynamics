@@ -1,5 +1,6 @@
 import pandas as pd
 
+import hipporeplayimm.simulation_recovery as simulation_recovery
 from hipporeplayimm.evidence_reporting import (
     EVIDENCE_COMPARISON_EXACT,
     EVIDENCE_COMPARISON_LOWER_BOUND,
@@ -92,6 +93,51 @@ def test_simulation_reporting_counts_exact_sparse_momentum_as_recovery():
 
     assert bool(exact_sparse["is_best_model"])
     assert bool(exact_sparse["recovered_expected_model"])
+
+
+def test_simulation_reporting_counts_velocity_momentum_alias_as_recovery():
+    rows = pd.DataFrame(
+        [
+            {
+                "status": "success",
+                "session": "RatX/OpenY",
+                "event_index": 0,
+                "true_model": "momentum",
+                "expected_model": "sorted-spike-state-space-momentum",
+                "model": "sorted-spike-state-space-diffusion",
+                "log_evidence": -2.0,
+                "n_time": 3,
+                "n_spikes": 5,
+            },
+            {
+                "status": "success",
+                "session": "RatX/OpenY",
+                "event_index": 0,
+                "true_model": "momentum",
+                "expected_model": "sorted-spike-state-space-momentum",
+                "model": "sorted-spike-state-space-velocity-momentum",
+                "log_evidence": -1.0,
+                "n_time": 3,
+                "n_spikes": 5,
+            },
+        ]
+    )
+
+    scored = simulation_add_evidence_columns(rows)
+    velocity_momentum = scored[
+        scored["model"] == "sorted-spike-state-space-velocity-momentum"
+    ].iloc[0]
+
+    assert bool(velocity_momentum["is_best_model"])
+    assert bool(velocity_momentum["recovered_expected_model"])
+    assert velocity_momentum["exact_surrogate_best_model"] == "sorted-spike-state-space-velocity-momentum"
+
+
+def test_simulation_recovery_patch_exposes_velocity_momentum_surrogate_aliases():
+    surrogates = simulation_recovery.exact_surrogate_scoring_models("momentum")
+
+    assert "sorted-spike-state-space-velocity-momentum" in surrogates
+    assert "state-space-velocity-momentum" in surrogates
 
 
 def test_state_space_imm_support_column_is_used_by_generic_inference():

@@ -14,12 +14,16 @@ DEGENERATE_SINGLE_BIN_EVIDENCE_SUPPORT = "degenerate_single_bin"
 PYRECEST_PARTICLE_EVIDENCE_SUPPORT = "particle_approximation"
 EVIDENCE_SUPPORT_DIAGNOSTIC_COLUMNS = (
     "diagnostic_candidate_evidence_support",
-    "diagnostic_state_space_momentum_evidence_support",
-    "diagnostic_state_space_imm_evidence_support",
+    # Check specific state-space model labels before generic component labels.
+    # Exact-sparse and trajectory-IMM rows also emit state_space_momentum_*
+    # diagnostics for shared momentum parameters; those component diagnostics
+    # must not override a more specific non-comparable support label.
     "diagnostic_state_space_sparse_momentum_evidence_support",
     "diagnostic_state_space_trajectory_imm_evidence_support",
     "diagnostic_state_space_displacement_momentum_evidence_support",
     "diagnostic_state_space_displacement_imm_evidence_support",
+    "diagnostic_state_space_momentum_evidence_support",
+    "diagnostic_state_space_imm_evidence_support",
     "diagnostic_goal_state_space_evidence_support",
     "diagnostic_pyrecest_evidence_support",
 )

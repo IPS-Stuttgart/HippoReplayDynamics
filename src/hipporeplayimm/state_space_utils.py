@@ -215,7 +215,11 @@ def _gaussian_transition_matrix(
             keep[int(allowed[int(np.argmin(dist2[allowed]))])] = True
         dst = np.flatnonzero(keep)
         weights = np.exp(-0.5 * dist2[dst] / (sigma_cm * sigma_cm))
-        weights /= float(weights.sum())
+        weights_sum = float(weights.sum())
+        if weights_sum <= 0.0 or not np.isfinite(weights_sum):
+            weights = np.ones(dst.shape[0], dtype=float) / max(int(dst.shape[0]), 1)
+        else:
+            weights /= weights_sum
         rows.extend(int(idx) for idx in dst)
         cols.extend([src] * len(dst))
         data.extend(float(value) for value in weights)

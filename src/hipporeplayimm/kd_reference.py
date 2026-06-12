@@ -26,6 +26,7 @@ from .encoding import (
     _positions_to_flat_bins,
     _speed_cm_s,
     _smooth_count_rows,
+    _validate_poisson_inputs,
     _times_in_intervals,
 )
 
@@ -235,6 +236,7 @@ def poisson_log_emissions(
     *,
     spike_rate_scale: float = 1.0,
 ) -> np.ndarray:
+    spike_counts, rates_hz = _validate_poisson_inputs(spike_counts, rates_hz)
     dt_array = np.asarray(dt, dtype=float)
     if not np.isfinite(spike_rate_scale) or spike_rate_scale <= 0.0:
         raise ValueError("spike_rate_scale must be finite and positive")

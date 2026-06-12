@@ -4,6 +4,8 @@ import hipporeplayimm.simulation_recovery as simulation_recovery
 from hipporeplayimm.evidence_reporting import (
     EVIDENCE_COMPARISON_EXACT,
     EVIDENCE_COMPARISON_LOWER_BOUND,
+    EVIDENCE_COMPARISON_DEGENERATE,
+    DEGENERATE_SINGLE_BIN_EVIDENCE_SUPPORT,
     EXACT_EVIDENCE_SUPPORT,
     TRUNCATED_EVIDENCE_SUPPORT,
     ensure_evidence_support_columns,
@@ -176,3 +178,23 @@ def test_state_space_displacement_imm_support_column_is_used_by_generic_inferenc
     assert scored.loc[0, "evidence_support"] == TRUNCATED_EVIDENCE_SUPPORT
     assert not bool(scored.loc[0, "evidence_comparable"])
     assert scored.loc[0, "evidence_comparison"] == EVIDENCE_COMPARISON_LOWER_BOUND
+
+
+def test_specific_state_space_support_overrides_generic_component_support():
+    rows = pd.DataFrame(
+        [
+            {
+                "status": "success",
+                "model": "sorted-spike-state-space-momentum-exact-sparse",
+                "log_evidence": 0.0,
+                "diagnostic_state_space_momentum_evidence_support": EXACT_EVIDENCE_SUPPORT,
+                "diagnostic_state_space_sparse_momentum_evidence_support": DEGENERATE_SINGLE_BIN_EVIDENCE_SUPPORT,
+            }
+        ]
+    )
+
+    scored = ensure_evidence_support_columns(rows)
+
+    assert scored.loc[0, "evidence_support"] == DEGENERATE_SINGLE_BIN_EVIDENCE_SUPPORT
+    assert not bool(scored.loc[0, "evidence_comparable"])
+    assert scored.loc[0, "evidence_comparison"] == EVIDENCE_COMPARISON_DEGENERATE

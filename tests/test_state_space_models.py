@@ -7,6 +7,7 @@ from scipy.special import logsumexp
 import hipporeplayimm.state_space_displacement_imm as displacement_imm
 import hipporeplayimm.state_space_trajectory_imm as trajectory_imm
 from hipporeplayimm.encoding import LogEmissionTensor
+from hipporeplayimm.evidence_reporting import DEGENERATE_SINGLE_BIN_EVIDENCE_SUPPORT
 from hipporeplayimm.sorted_spike_state_space import SortedSpikeStateSpaceReplayModel
 from hipporeplayimm.state_space import (
     StateSpaceDecoderConfig,
@@ -14,6 +15,7 @@ from hipporeplayimm.state_space import (
     _augment_candidates_with_momentum_predictions,
     _candidate_evidence_support_label,
     _displacement_lattice,
+    _gaussian_transition_matrix,
     _mass_retaining_candidate_indices,
     _score_trajectory_imm_exact_sparse,
 )
@@ -70,6 +72,22 @@ def test_state_space_diffusion_matches_bruteforce_tiny_grid():
     assert score.trajectory_log_posterior is not None
     assert score.trajectory_log_posterior.shape == (3, 2)
     assert np.allclose(logsumexp(score.trajectory_log_posterior, axis=1), 0.0)
+
+
+def test_gaussian_transition_matrix_masked_fallback_does_not_underflow_to_nan():
+    centers = np.array([[0.0, 0.0], [1.0e6, 0.0]], dtype=float)
+    valid_bin_mask = np.array([False, True], dtype=bool)
+
+    transition = _gaussian_transition_matrix(
+        centers,
+        sigma_cm=1.0,
+        max_step_sigma=1.0,
+        valid_bin_mask=valid_bin_mask,
+    ).toarray()
+
+    assert np.all(np.isfinite(transition))
+    np.testing.assert_allclose(transition.sum(axis=0), np.ones(2, dtype=float))
+    np.testing.assert_allclose(transition[:, 0], np.array([0.0, 1.0], dtype=float))
 
 
 def test_state_space_modes_return_full_trajectory_posteriors():
@@ -223,6 +241,29 @@ def test_exact_sparse_momentum_evidence_only_delegates_to_pyrecest_mode():
     assert evidence_only.diagnostics["state_space_sparse_momentum_evidence_only"] == 1
     assert evidence_only.diagnostics["state_space_sparse_momentum_backward_transition_rows"] == "skipped_evidence_only"
     assert evidence_only.diagnostics["state_space_momentum_trajectory_posterior"] == "not_returned_evidence_only"
+
+
+def test_exact_sparse_momentum_single_bin_is_reported_degenerate():
+    emissions = LogEmissionTensor(
+        log_likelihood=np.log(np.array([[0.6, 0.4]], dtype=float)),
+        spike_counts=np.zeros((1, 1), dtype=int),
+        times=np.array([0.0]),
+        dt=0.003,
+        cell_ids=np.array([1]),
+        n_spikes=0,
+    )
+    centers = np.array([[0.0, 0.0], [1.0, 0.0]], dtype=float)
+    model = SortedSpikeStateSpaceReplayModel(
+        mode="momentum-exact-sparse",
+        config=StateSpaceDecoderConfig(mode="momentum-exact-sparse"),
+    )
+
+    score = model.score(emissions, centers)
+
+    assert np.isfinite(score.log_likelihood)
+    assert score.diagnostics["state_space_sparse_momentum_state_support"] == "single_bin_fragmented_fallback"
+    assert score.diagnostics["state_space_sparse_momentum_evidence_support"] == DEGENERATE_SINGLE_BIN_EVIDENCE_SUPPORT
+    assert score.diagnostics["state_space_momentum_evidence_support"] == DEGENERATE_SINGLE_BIN_EVIDENCE_SUPPORT
 
 
 def test_trajectory_imm_evidence_only_handles_zero_momentum_mass():

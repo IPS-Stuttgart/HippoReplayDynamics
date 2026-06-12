@@ -372,6 +372,7 @@ def _poisson_log_emissions(
     cell_weights: Iterable[float] | np.ndarray | None = None,
     negative_binomial_overdispersion: float = 0.0,
 ) -> np.ndarray:
+    spike_counts, rates_hz = _validate_poisson_inputs(spike_counts, rates_hz)
     if not np.isfinite(spike_rate_scale) or spike_rate_scale <= 0.0:
         raise ValueError("spike_rate_scale must be finite and positive")
     _validate_emission_calibration(
@@ -408,6 +409,45 @@ def _poisson_log_emissions(
         negative_binomial_overdispersion=negative_binomial_overdispersion,
     )
     return _apply_likelihood_temperature(log_likelihood, likelihood_temperature)
+
+
+def _validate_poisson_inputs(
+    spike_counts: np.ndarray,
+    rates_hz: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Return validated Poisson count/rate arrays.
+
+    Count emissions are only well-defined for finite, nonnegative,
+    integer-valued spike counts and finite, nonnegative rates.  Rejecting invalid
+    inputs here avoids silently converting negative rates into tiny positive
+    rates via the numerical floor applied to expected counts.
+    """
+
+    counts = np.asarray(spike_counts)
+    if counts.ndim != 2:
+        raise ValueError("spike_counts must be two-dimensional")
+    try:
+        counts_numeric = np.asarray(counts, dtype=float)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("spike_counts must contain numeric values") from exc
+    if not np.all(np.isfinite(counts_numeric)) or np.any(counts_numeric < 0.0):
+        raise ValueError("spike_counts must contain finite nonnegative values")
+    if not np.all(
+        np.isclose(counts_numeric, np.rint(counts_numeric), rtol=0.0, atol=0.0)
+    ):
+        raise ValueError("spike_counts must contain integer-valued counts")
+
+    try:
+        rates = np.asarray(rates_hz, dtype=float)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("rates_hz must contain numeric values") from exc
+    if rates.ndim != 2:
+        raise ValueError("rates_hz must be two-dimensional")
+    if rates.shape[0] != counts_numeric.shape[1]:
+        raise ValueError("rates_hz must contain one row per spike-count cell")
+    if not np.all(np.isfinite(rates)) or np.any(rates < 0.0):
+        raise ValueError("rates_hz must contain finite nonnegative values")
+    return counts_numeric, rates
 
 
 def _count_log_emissions(

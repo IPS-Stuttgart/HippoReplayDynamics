@@ -5,6 +5,7 @@ from . import clusterless_config_validation as _clusterless_config_validation
 from . import clusterless_ground_truth as _clusterless_ground_truth
 from . import goal_state_space_integration as _goal_state_space_integration
 from . import ground_truth as _ground_truth
+from . import occupancy_candidate_support as _occupancy_candidate_support
 from . import pyrecest_score_metadata as _pyrecest_score_metadata
 from . import score_metadata as _score_metadata
 from . import simulation_recovery as _simulation_recovery
@@ -107,6 +108,7 @@ def apply_runtime_patches() -> None:
     _ground_truth._encoding_config_for_scores = _score_metadata.encoding_config_for_scores
     _ground_truth._emission_config_for_scores = _score_metadata.emission_config_for_scores
     _apply_ground_truth_candidate_support_patch()
+    _occupancy_candidate_support.apply_occupancy_candidate_support_patch()
     _apply_duration_dynamics_patch()
     _apply_state_space_imm_duration_patch()
     _apply_duration_occupancy_patch()

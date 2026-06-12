@@ -40,20 +40,23 @@ class GoalStateSpaceReplayModel:
             raise ValueError('bin_centers must have shape (n_bins, position_dim)')
         if emissions.n_bins != centers.shape[0]:
             raise ValueError('emissions.n_bins must match bin_centers rows')
-        if float(self.transition_sigma_cm_sqrt_s) <= 0.0:
-            raise ValueError('transition_sigma_cm_sqrt_s must be positive')
-        if float(self.drift_speed_cm_s) < 0.0:
-            raise ValueError('drift_speed_cm_s must be non-negative')
-        if float(self.max_step_sigma) <= 0.0:
-            raise ValueError('max_step_sigma must be positive')
+        transition_sigma_cm_sqrt_s = float(self.transition_sigma_cm_sqrt_s)
+        drift_speed_cm_s = float(self.drift_speed_cm_s)
+        max_step_sigma = float(self.max_step_sigma)
+        if not np.isfinite(transition_sigma_cm_sqrt_s) or transition_sigma_cm_sqrt_s <= 0.0:
+            raise ValueError('transition_sigma_cm_sqrt_s must be finite and positive')
+        if not np.isfinite(drift_speed_cm_s) or drift_speed_cm_s < 0.0:
+            raise ValueError('drift_speed_cm_s must be finite and non-negative')
+        if not np.isfinite(max_step_sigma) or max_step_sigma <= 0.0:
+            raise ValueError('max_step_sigma must be finite and positive')
 
         goals = _coerce_candidate_goals(self.candidate_goals, centers)
         transition_durations = transition_durations_s(emissions)
         transition_sigmas_cm = _goal_transition_sigmas_cm(
-            self.transition_sigma_cm_sqrt_s,
+            transition_sigma_cm_sqrt_s,
             transition_durations,
         )
-        drift_steps_cm = _goal_drift_steps_cm(self.drift_speed_cm_s, transition_durations)
+        drift_steps_cm = _goal_drift_steps_cm(drift_speed_cm_s, transition_durations)
         transitions = tuple(
             tuple(
                 _goal_transition_matrix(
@@ -61,7 +64,7 @@ class GoalStateSpaceReplayModel:
                     goal,
                     drift_step_cm=float(drift_steps_cm[transition_index]),
                     sigma_cm=float(transition_sigmas_cm[transition_index]),
-                    max_step_sigma=self.max_step_sigma,
+                    max_step_sigma=max_step_sigma,
                 )
                 for transition_index in range(len(transition_durations))
             )
@@ -76,11 +79,11 @@ class GoalStateSpaceReplayModel:
         best_goal_index = int(np.argmax(terminal_goal_posterior))
         transition_sigma_cm = _representative_transition_parameter(
             transition_sigmas_cm,
-            fallback=_per_bin_sigma(self.transition_sigma_cm_sqrt_s, float(emissions.dt)),
+            fallback=_per_bin_sigma(transition_sigma_cm_sqrt_s, float(emissions.dt)),
         )
         drift_step_cm = _representative_transition_parameter(
             drift_steps_cm,
-            fallback=float(self.drift_speed_cm_s) * float(emissions.dt),
+            fallback=drift_speed_cm_s * float(emissions.dt),
         )
         diagnostics: dict[str, float | int | str] = {
             'state_space_mode': 'goal',
@@ -90,7 +93,7 @@ class GoalStateSpaceReplayModel:
             'state_space_trajectory_time_bins': int(emissions.n_time),
             'mean_trajectory_posterior_entropy': _mean_entropy(trajectory),
             'goal_state_space_candidate_goals': int(goals.shape[0]),
-            'goal_state_space_transition_sigma_cm_sqrt_s': float(self.transition_sigma_cm_sqrt_s),
+            'goal_state_space_transition_sigma_cm_sqrt_s': transition_sigma_cm_sqrt_s,
             'goal_state_space_transition_sigma_cm': float(transition_sigma_cm),
             'goal_state_space_transition_sigma_cm_per_step': _format_float_series(
                 transition_sigmas_cm
@@ -98,10 +101,10 @@ class GoalStateSpaceReplayModel:
             'goal_state_space_transition_durations': _format_float_series(
                 transition_durations
             ),
-            'goal_state_space_drift_speed_cm_s': float(self.drift_speed_cm_s),
+            'goal_state_space_drift_speed_cm_s': drift_speed_cm_s,
             'goal_state_space_drift_step_cm': float(drift_step_cm),
             'goal_state_space_drift_step_cm_per_step': _format_float_series(drift_steps_cm),
-            'goal_state_space_max_step_sigma': float(self.max_step_sigma),
+            'goal_state_space_max_step_sigma': max_step_sigma,
             'goal_state_space_evidence_support': EXACT_EVIDENCE_SUPPORT,
             'goal_state_space_most_likely_goal_index': best_goal_index,
             'goal_state_space_most_likely_goal_x': float(goals[best_goal_index, 0]),
@@ -208,12 +211,15 @@ def _goal_transition_matrix(
 ) -> csr_matrix:
     '''Build a column-stochastic drift-diffusion transition toward one goal.'''
 
-    if sigma_cm <= 0.0:
-        raise ValueError('sigma_cm must be positive')
-    if drift_step_cm < 0.0:
-        raise ValueError('drift_step_cm must be non-negative')
-    if max_step_sigma <= 0.0:
-        raise ValueError('max_step_sigma must be positive')
+    sigma_cm = float(sigma_cm)
+    drift_step_cm = float(drift_step_cm)
+    max_step_sigma = float(max_step_sigma)
+    if not np.isfinite(sigma_cm) or sigma_cm <= 0.0:
+        raise ValueError('sigma_cm must be finite and positive')
+    if not np.isfinite(drift_step_cm) or drift_step_cm < 0.0:
+        raise ValueError('drift_step_cm must be finite and non-negative')
+    if not np.isfinite(max_step_sigma) or max_step_sigma <= 0.0:
+        raise ValueError('max_step_sigma must be finite and positive')
     centers = np.asarray(bin_centers, dtype=float)
     goal = np.asarray(goal, dtype=float)
     if goal.shape != (centers.shape[1],):

@@ -181,6 +181,17 @@ def simulation_add_evidence_columns(df: pd.DataFrame) -> pd.DataFrame:
         group["exact_surrogate_recovered_expected_model"] = False
         group["exact_surrogate_log_evidence"] = np.nan
         group["exact_surrogate_minus_best_comparable_log_evidence"] = np.nan
+
+        if not scored.empty:
+            finite_log_evidence = pd.Series(
+                np.isfinite(scored["log_evidence"].to_numpy(float)),
+                index=scored.index,
+            )
+            nonfinite_index = finite_log_evidence.index[~finite_log_evidence.to_numpy()]
+            if len(nonfinite_index):
+                group.loc[nonfinite_index, "evidence_comparable"] = False
+            scored = scored.loc[finite_log_evidence]
+
         if scored.empty:
             if "expected_model" in group:
                 group["recovered_expected_model"] = False

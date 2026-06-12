@@ -140,6 +140,19 @@ def evidence_comparison_from_support(support: object) -> str:
     return EVIDENCE_COMPARISON_UNKNOWN
 
 
+def _success_status_mask(frame: pd.DataFrame) -> pd.Series:
+    """Return rows that should be treated as successfully scored.
+
+    Legacy score tables predate the explicit ``status`` column.  Other evidence
+    helpers already treat those rows as successful; simulation reporting should
+    follow the same convention instead of raising a KeyError.
+    """
+
+    if "status" not in frame.columns:
+        return pd.Series(True, index=frame.index)
+    return frame["status"].eq("success")
+
+
 def ensure_evidence_support_columns(df: pd.DataFrame) -> pd.DataFrame:
     """Add comparable-evidence flags used by reporting and aggregation."""
 
@@ -153,7 +166,7 @@ def ensure_evidence_support_columns(df: pd.DataFrame) -> pd.DataFrame:
         out["evidence_support"] = existing.where(~missing, inferred)
     else:
         out["evidence_support"] = inferred
-    status_ok = out["status"].eq("success") if "status" in out else pd.Series(True, index=out.index)
+    status_ok = _success_status_mask(out)
     out["evidence_comparison"] = out["evidence_support"].map(evidence_comparison_from_support)
     out["evidence_comparison_note"] = out["evidence_comparison"].map(EVIDENCE_COMPARISON_DESCRIPTIONS).fillna(EVIDENCE_COMPARISON_DESCRIPTIONS[EVIDENCE_COMPARISON_UNKNOWN])
     out["evidence_comparable"] = status_ok & out["evidence_support"].eq(EXACT_EVIDENCE_SUPPORT)
@@ -169,7 +182,7 @@ def simulation_add_evidence_columns(df: pd.DataFrame) -> pd.DataFrame:
     groups = []
     for _, group in df.groupby(["session", "event_index"], sort=False):
         group = group.copy()
-        scored = group[group["status"] == "success"]
+        scored = group[_success_status_mask(group)]
         group["relative_log_evidence"] = np.nan
         group["model_probability"] = np.nan
         group["is_best_model"] = False
@@ -283,7 +296,7 @@ def simulation_event_best_rows(event_scores: pd.DataFrame) -> pd.DataFrame:
 
     event_scores = ensure_evidence_support_columns(event_scores)
     comparable = _coerce_bool_series(event_scores["evidence_comparable"])
-    ok = event_scores[(event_scores["status"] == "success") & comparable]
+    ok = event_scores[_success_status_mask(event_scores) & comparable]
     if ok.empty:
         return pd.DataFrame()
     if "is_best_model" in ok:

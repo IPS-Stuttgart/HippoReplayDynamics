@@ -1,6 +1,7 @@
 '''State-space and IMM replay benchmarks for hippocampal open-field data.'''
 # ruff: noqa: E402
 
+from . import clusterless_config_validation as _clusterless_config_validation
 from . import clusterless_ground_truth as _clusterless_ground_truth
 from . import goal_state_space_integration as _goal_state_space_integration
 from . import ground_truth as _ground_truth
@@ -16,6 +17,7 @@ _clusterless_ground_truth.apply_clusterless_ground_truth_patch()
 _pyrecest_score_metadata.apply_pyrecest_score_metadata_patch()
 _goal_state_space_integration.apply_goal_state_space_patch()
 _spike_rate_metadata.apply_spike_rate_metadata_patch()
+_clusterless_config_validation.apply_clusterless_encoding_config_validation_patch()
 
 from .benchmarks import BenchmarkConfig, BenchmarkResult, run_open_field_benchmark
 from .clusterless import (
@@ -101,6 +103,7 @@ def apply_runtime_patches() -> None:
 
     _score_metadata.apply_model_hyperparam_patch()
     _clusterless_ground_truth.apply_clusterless_ground_truth_patch()
+    _clusterless_config_validation.apply_clusterless_encoding_config_validation_patch()
     _ground_truth._encoding_config_for_scores = _score_metadata.encoding_config_for_scores
     _ground_truth._emission_config_for_scores = _score_metadata.emission_config_for_scores
     _apply_ground_truth_candidate_support_patch()

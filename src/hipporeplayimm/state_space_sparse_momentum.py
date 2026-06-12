@@ -22,6 +22,7 @@ from typing import Iterable
 import numpy as np
 from scipy.spatial import cKDTree
 
+from .evidence_reporting import DEGENERATE_SINGLE_BIN_EVIDENCE_SUPPORT
 from .encoding import LogEmissionTensor
 from .state_space_first_order import _score_fragmented
 from .state_space_utils import _as_log_probs, _mean_entropy, _scaled_emissions
@@ -241,7 +242,7 @@ def _score_sparse_momentum_exact(
 
 def _single_bin_diagnostics(config: object) -> dict[str, float | int | str]:
     return {
-        "state_space_sparse_momentum_evidence_support": "exact_full_grid",
+        "state_space_sparse_momentum_evidence_support": DEGENERATE_SINGLE_BIN_EVIDENCE_SUPPORT,
         "state_space_sparse_momentum_state_support": "single_bin_fragmented_fallback",
         "state_space_sparse_momentum_transition_support": "none_single_bin",
         "state_space_sparse_momentum_initial_pair_count": 0,
@@ -251,7 +252,7 @@ def _single_bin_diagnostics(config: object) -> dict[str, float | int | str]:
         "state_space_sparse_momentum_mean_outgoing_count": 0.0,
         "state_space_sparse_momentum_max_outgoing_count": 0,
         "state_space_momentum_trajectory_posterior": "single_bin_fragmented_fallback",
-        "state_space_momentum_evidence_support": "exact_full_grid",
+        "state_space_momentum_evidence_support": DEGENERATE_SINGLE_BIN_EVIDENCE_SUPPORT,
         "state_space_momentum_candidate_support": "not_used_exact_sparse",
         "state_space_momentum_candidate_selection": "none_exact_sparse",
         "state_space_momentum_transition_sigma_cm": 0.0,

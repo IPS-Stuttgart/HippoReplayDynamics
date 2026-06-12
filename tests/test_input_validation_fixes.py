@@ -192,6 +192,20 @@ def test_sorted_poisson_log_emissions_reject_nonfinite_durations() -> None:
         _poisson_log_emissions(spike_counts, rates_hz, np.array([0.02, float("inf")], dtype=float))
 
 
+def test_sorted_poisson_log_emissions_reject_invalid_counts_and_rates() -> None:
+    with pytest.raises(ValueError, match="spike_counts"):
+        _poisson_log_emissions(np.array([[0, -1]], dtype=int), np.ones((2, 1), dtype=float), 0.02)
+
+    with pytest.raises(ValueError, match="integer-valued"):
+        _poisson_log_emissions(np.array([[0.5]], dtype=float), np.ones((1, 1), dtype=float), 0.02)
+
+    with pytest.raises(ValueError, match="rates_hz"):
+        _poisson_log_emissions(np.zeros((1, 1), dtype=int), np.array([[-1.0]], dtype=float), 0.02)
+
+    with pytest.raises(ValueError, match="one row per spike-count cell"):
+        _poisson_log_emissions(np.zeros((1, 2), dtype=int), np.ones((1, 1), dtype=float), 0.02)
+
+
 def test_kd_poisson_log_emissions_reject_nonfinite_inputs() -> None:
     spike_counts = np.zeros((2, 1), dtype=int)
     rates_hz = np.ones((1, 2), dtype=float)
@@ -204,6 +218,14 @@ def test_kd_poisson_log_emissions_reject_nonfinite_inputs() -> None:
 
     with pytest.raises(ValueError, match="finite and positive"):
         _kd_poisson_log_emissions(spike_counts, rates_hz, np.array([0.02, float("inf")], dtype=float))
+
+
+def test_kd_poisson_log_emissions_reject_invalid_counts_and_rates() -> None:
+    with pytest.raises(ValueError, match="spike_counts"):
+        _kd_poisson_log_emissions(np.array([[-1]], dtype=int), np.ones((1, 2), dtype=float), 0.02)
+
+    with pytest.raises(ValueError, match="rates_hz"):
+        _kd_poisson_log_emissions(np.zeros((1, 1), dtype=int), np.array([[float("nan")]], dtype=float), 0.02)
 
 
 def test_kd_emissions_preserve_partial_bin_duration_metadata() -> None:

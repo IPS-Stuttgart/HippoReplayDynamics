@@ -109,6 +109,14 @@ def test_benchmark_metadata_includes_pyrecest_hyperparameters():
     assert metadata["pyrecest_imm_jump_velocity_decay"] == pytest.approx(0.25)
 
 
+def test_benchmark_metadata_includes_clusterless_mark_group_by():
+    metadata = _benchmark_config_metadata(
+        BenchmarkConfig(clusterless_mark_group_by="tetrode")
+    )
+
+    assert metadata["clusterless_mark_group_by"] == "tetrode"
+
+
 def test_patched_build_models_preserves_state_space_imm_switch_tau() -> None:
     config = BenchmarkConfig(
         emissions=EmissionConfig(time_bin_s=0.02),

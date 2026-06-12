@@ -5,6 +5,10 @@ import pandas as pd
 
 import hipporeplayimm.ground_truth as gt_module
 from hipporeplayimm.encoding import LogEmissionTensor
+from hipporeplayimm.clusterless_ground_truth import (
+    _clusterless_model_config_for_scores,
+    _drop_clusterless_kwargs,
+)
 from hipporeplayimm.ground_truth_candidate_support import _score_joint_for_ground_truth
 from hipporeplayimm.state_space import StateSpaceDecoderConfig, StateSpaceReplayModel
 
@@ -116,3 +120,43 @@ def test_ground_truth_sensitivity_forwards_clusterless_mark_group_by(monkeypatch
 
     assert captured["clusterless_mark_group_by"] == "tetrode"
     assert not result.rows.empty
+
+
+def test_clusterless_ground_truth_drops_mark_group_by_for_non_clusterless_scores() -> None:
+    filtered = _drop_clusterless_kwargs(
+        {
+            "clusterless_mark_group_by": "tetrode",
+            "clusterless_mark_likelihood": "local-kde",
+            "state_space_diffusion_sigma_cm_sqrt_s": 85.0,
+        }
+    )
+
+    assert "clusterless_mark_group_by" not in filtered
+    assert "clusterless_mark_likelihood" not in filtered
+    assert filtered["state_space_diffusion_sigma_cm_sqrt_s"] == 85.0
+
+
+def test_clusterless_ground_truth_recovers_mark_group_by_from_score_metadata() -> None:
+    config = _clusterless_model_config_for_scores(
+        pd.DataFrame({"clusterless_mark_group_by": ["tetrode"]}),
+        model_names=("clusterless-state-space-diffusion",),
+        state_space_stationary_sigma_cm=2.0,
+        state_space_diffusion_sigma_cm_sqrt_s=85.0,
+        state_space_max_step_sigma=4.0,
+        state_space_imm_mode_stickiness=0.95,
+        state_space_momentum_sigma_cm_sqrt_s=85.0,
+        state_space_momentum_initial_sigma_cm_sqrt_s=85.0,
+        state_space_momentum_velocity_decay=0.95,
+        state_space_momentum_candidate_top_k=128,
+        clusterless_mark_smoothing_sigma_bins=1.0,
+        clusterless_mark_prior_count=1.0,
+        clusterless_mark_variance_floor=1.0,
+        clusterless_rate_floor_hz=1e-4,
+        clusterless_mark_likelihood="local-kde",
+        clusterless_mark_kde_bandwidth=None,
+        clusterless_mark_kde_spatial_sigma_bins=None,
+        clusterless_mark_kde_max_neighbors=256,
+        clusterless_mark_group_by="auto",
+    )
+
+    assert config.clusterless_mark_group_by == "tetrode"

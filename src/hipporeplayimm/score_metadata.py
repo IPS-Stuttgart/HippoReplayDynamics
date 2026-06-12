@@ -489,6 +489,9 @@ def apply_model_hyperparam_patch() -> None:
                 cfg(config, "clusterless_mark_kde_spatial_sigma_bins", None)
             ),
             "clusterless_mark_kde_max_neighbors": int(cfg(config, "clusterless_mark_kde_max_neighbors", 256)),
+            "clusterless_mark_group_by": str(
+                cfg(config, "clusterless_mark_group_by", "auto")
+            ),
         }
         return base
 

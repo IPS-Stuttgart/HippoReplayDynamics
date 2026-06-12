@@ -26,6 +26,7 @@ _CLUSTERLESS_KWARG_NAMES = frozenset(
         "clusterless_mark_kde_bandwidth",
         "clusterless_mark_kde_spatial_sigma_bins",
         "clusterless_mark_kde_max_neighbors",
+        "clusterless_mark_group_by",
     }
 )
 _GROUND_TRUTH_BMA_KWARG_NAMES = frozenset(
@@ -184,6 +185,7 @@ def _compare_clusterless_scores_to_ground_truth(gt, root, scores_frame: pd.DataF
         clusterless_mark_kde_bandwidth=kwargs.get("clusterless_mark_kde_bandwidth", None),
         clusterless_mark_kde_spatial_sigma_bins=kwargs.get("clusterless_mark_kde_spatial_sigma_bins", None),
         clusterless_mark_kde_max_neighbors=kwargs.get("clusterless_mark_kde_max_neighbors", 256),
+        clusterless_mark_group_by=kwargs.get("clusterless_mark_group_by", "auto"),
     )
     gt_frame = gt._load_or_generate_ground_truth(root, ground_truth, ground_truth_config)
     sessions = {session.session_id: session for session in gt.load_open_field_sessions(root)}
@@ -209,6 +211,7 @@ def _compare_clusterless_scores_to_ground_truth(gt, root, scores_frame: pd.DataF
             mark_kde_bandwidth=model_config.clusterless_mark_kde_bandwidth,
             mark_kde_spatial_sigma_bins=model_config.clusterless_mark_kde_spatial_sigma_bins,
             mark_kde_max_neighbors=model_config.clusterless_mark_kde_max_neighbors,
+            mark_group_by=model_config.clusterless_mark_group_by,
             use_excitatory=encoding_config.use_excitatory,
         )
         if benchmark_decode:
@@ -541,6 +544,11 @@ def _clusterless_model_config_for_scores(scores_frame: pd.DataFrame, *, model_na
                 "diagnostic_clusterless_mark_kde_max_neighbors",
             ),
             defaults["clusterless_mark_kde_max_neighbors"],
+        ),
+        clusterless_mark_group_by=_unique_string_from_columns(
+            scores_frame,
+            ("clusterless_mark_group_by", "diagnostic_clusterless_mark_group_by"),
+            defaults.get("clusterless_mark_group_by", "auto"),
         ),
     )
 

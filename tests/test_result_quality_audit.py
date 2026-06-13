@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import pandas as pd
 
+from hipporeplayimm.evidence_reporting import TRUNCATED_EVIDENCE_SUPPORT
 from hipporeplayimm.result_quality_audit import (
     ObservationCalibrationSelectionConfig,
     null_control_catalog,
@@ -147,3 +148,49 @@ def test_write_result_quality_audit_writes_core_outputs(tmp_path) -> None:
     margins = pd.read_csv(tmp_path / "evidence_margins.csv")
     assert margins["best_model_by_evidence"].tolist() == ["random"]
     assert margins["evidence_margin_category"].tolist() == ["weak"]
+
+
+def test_write_result_quality_audit_infers_support_before_evidence_margins(tmp_path) -> None:
+    scores = pd.DataFrame(
+        [
+            {
+                "status": "success",
+                "session": "Rat1/Open1",
+                "event_index": 0,
+                "model": "sorted-spike-state-space-diffusion",
+                "model_family": "trajectory",
+                "log_evidence": -10.0,
+                "n_time": 3,
+                "n_spikes": 5,
+                "runtime_s": 0.01,
+                "error": "",
+            },
+            {
+                "status": "success",
+                "session": "Rat1/Open1",
+                "event_index": 0,
+                "model": "sorted-spike-state-space-imm",
+                "model_family": "trajectory",
+                "log_evidence": 100.0,
+                "n_time": 3,
+                "n_spikes": 5,
+                "runtime_s": 0.01,
+                "error": "",
+                "diagnostic_state_space_imm_evidence_support": TRUNCATED_EVIDENCE_SUPPORT,
+            },
+        ]
+    )
+
+    write_result_quality_audit(scores, tmp_path)
+
+    margins = pd.read_csv(tmp_path / "evidence_margins.csv")
+    assert margins["best_model_by_evidence"].tolist() == [
+        "sorted-spike-state-space-diffusion"
+    ]
+
+    audited_scores = pd.read_csv(tmp_path / "event_model_evidence_with_quality.csv")
+    imm = audited_scores[
+        audited_scores["model"] == "sorted-spike-state-space-imm"
+    ].iloc[0]
+    assert imm["evidence_support"] == TRUNCATED_EVIDENCE_SUPPORT
+    assert not bool(imm["evidence_comparable"])

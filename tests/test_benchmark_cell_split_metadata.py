@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import is_dataclass, replace
 from types import SimpleNamespace
 
 import numpy as np
@@ -70,6 +71,12 @@ def test_compare_ground_truth_recovers_cell_split_metadata_from_scores(monkeypat
 
     def fake_build_models(config, session=None):
         del session
+        if is_dataclass(config):
+            config = replace(config, models=("random",))
+        else:
+            values = dict(vars(config))
+            values["models"] = ("random",)
+            config = SimpleNamespace(**values)
         captured_configs.append(config)
         return {"random": FakeModel()}
 

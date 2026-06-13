@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, fields, is_dataclass
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import numpy as np
@@ -89,8 +90,8 @@ def _wrap_ground_truth_compare_scores(gt: Any) -> None:
         original_build_models = gt._build_models
         original_cell_split_for_score_rows = gt._cell_split_for_score_rows
 
-        def with_cell_split_config(config: Any) -> _CellSplitConfigProxy:
-            return _CellSplitConfigProxy(config, strategy, strata)
+        def with_cell_split_config(config: Any) -> SimpleNamespace:
+            return _config_with_cell_split_metadata(config, strategy, strata)
 
         def build_models_with_cell_split(config: Any, *args: Any, **build_kwargs: Any) -> Any:
             return original_build_models(with_cell_split_config(config), *args, **build_kwargs)
@@ -114,16 +115,20 @@ def _wrap_ground_truth_compare_scores(gt: Any) -> None:
     gt.compare_scores_to_ground_truth = compare_scores_to_ground_truth_with_cell_split
 
 
-@dataclass(frozen=True)
-class _CellSplitConfigProxy:
-    """Delegate config attributes while supplying cell-split metadata fields."""
+def _config_with_cell_split_metadata(
+    config: Any,
+    strategy: str,
+    strata: int,
+) -> SimpleNamespace:
+    """Copy config attributes while overriding cell-split metadata fields."""
 
-    base_config: Any
-    cell_split_strategy: str
-    cell_split_strata: int
-
-    def __getattr__(self, name: str) -> Any:
-        return getattr(self.base_config, name)
+    if is_dataclass(config) and not isinstance(config, type):
+        values = {field.name: getattr(config, field.name) for field in fields(config)}
+    else:
+        values = dict(getattr(config, "__dict__", {}))
+    values["cell_split_strategy"] = strategy
+    values["cell_split_strata"] = int(strata)
+    return SimpleNamespace(**values)
 
 
 def _scores_frame_for_cell_split_metadata(scores: str | Path | pd.DataFrame) -> pd.DataFrame:

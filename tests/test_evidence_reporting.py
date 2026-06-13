@@ -6,8 +6,10 @@ from hipporeplayimm.evidence_reporting import (
     EVIDENCE_COMPARISON_EXACT,
     EVIDENCE_COMPARISON_LOWER_BOUND,
     EVIDENCE_COMPARISON_DEGENERATE,
+    EVIDENCE_COMPARISON_PARTICLE_APPROXIMATION,
     DEGENERATE_SINGLE_BIN_EVIDENCE_SUPPORT,
     EXACT_EVIDENCE_SUPPORT,
+    PYRECEST_PARTICLE_EVIDENCE_SUPPORT,
     TRUNCATED_EVIDENCE_SUPPORT,
     ensure_evidence_support_columns,
     simulation_add_evidence_columns,
@@ -251,6 +253,25 @@ def test_state_space_displacement_imm_support_column_is_used_by_generic_inferenc
     assert scored.loc[0, "evidence_support"] == TRUNCATED_EVIDENCE_SUPPORT
     assert not bool(scored.loc[0, "evidence_comparable"])
     assert scored.loc[0, "evidence_comparison"] == EVIDENCE_COMPARISON_LOWER_BOUND
+
+
+def test_pyrecest_particle_support_is_classified_as_particle_approximation():
+    rows = pd.DataFrame(
+        [
+            {
+                "status": "success",
+                "model": "pyrecest-goal-particle",
+                "log_evidence": 10.0,
+                "diagnostic_pyrecest_evidence_support": PYRECEST_PARTICLE_EVIDENCE_SUPPORT,
+            }
+        ]
+    )
+
+    scored = ensure_evidence_support_columns(rows)
+
+    assert scored.loc[0, "evidence_support"] == PYRECEST_PARTICLE_EVIDENCE_SUPPORT
+    assert not bool(scored.loc[0, "evidence_comparable"])
+    assert scored.loc[0, "evidence_comparison"] == EVIDENCE_COMPARISON_PARTICLE_APPROXIMATION
 
 
 def test_specific_state_space_support_overrides_generic_component_support():

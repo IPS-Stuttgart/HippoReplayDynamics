@@ -31,6 +31,7 @@ EVIDENCE_SUPPORT_DIAGNOSTIC_COLUMNS = (
 EVIDENCE_COMPARISON_EXACT = "exact_model_evidence"
 EVIDENCE_COMPARISON_LOWER_BOUND = "truncated_lower_bound"
 EVIDENCE_COMPARISON_DEGENERATE = "degenerate_single_bin"
+EVIDENCE_COMPARISON_PARTICLE_APPROXIMATION = "particle_approximation"
 EVIDENCE_COMPARISON_NOT_SCORED = "not_scored"
 EVIDENCE_COMPARISON_UNKNOWN = "unknown_noncomparable"
 
@@ -38,6 +39,7 @@ EVIDENCE_COMPARISON_DESCRIPTIONS = {
     EVIDENCE_COMPARISON_EXACT: "Exact full-grid model evidences: safe to normalize into posterior model probabilities within the event.",
     EVIDENCE_COMPARISON_LOWER_BOUND: "Truncated candidate-support evidences: lower-bound diagnostics only; do not rank directly against exact full-grid evidences.",
     EVIDENCE_COMPARISON_DEGENERATE: "Degenerate single-bin evidence: exact for a collapsed state support, but not directly comparable to full-grid state supports.",
+    EVIDENCE_COMPARISON_PARTICLE_APPROXIMATION: "Stochastic particle-approximation evidence: non-exact diagnostic support; do not rank directly against exact full-grid evidences.",
     EVIDENCE_COMPARISON_NOT_SCORED: "Model was not scored successfully for this event.",
     EVIDENCE_COMPARISON_UNKNOWN: "Evidence support is missing or unknown; treat as non-comparable until classified explicitly.",
 }
@@ -135,6 +137,8 @@ def evidence_comparison_from_support(support: object) -> str:
         return EVIDENCE_COMPARISON_LOWER_BOUND
     if text == DEGENERATE_SINGLE_BIN_EVIDENCE_SUPPORT:
         return EVIDENCE_COMPARISON_DEGENERATE
+    if text == PYRECEST_PARTICLE_EVIDENCE_SUPPORT:
+        return EVIDENCE_COMPARISON_PARTICLE_APPROXIMATION
     if text == "not_scored":
         return EVIDENCE_COMPARISON_NOT_SCORED
     return EVIDENCE_COMPARISON_UNKNOWN

@@ -36,6 +36,7 @@ from .advanced_result_diagnostics import (
     rat_from_session,
     summarize_window_sensitivity,
 )
+from .evidence_reporting import ensure_evidence_support_columns
 from .result_improvements import add_candidate_support_quality_columns
 
 
@@ -193,7 +194,8 @@ def write_result_quality_audit(
         raise ValueError("scores must not be empty")
 
     group_cols = event_group_columns(scores)
-    scores_with_quality = add_candidate_support_quality_columns(scores)
+    scores_with_support = ensure_evidence_support_columns(scores)
+    scores_with_quality = add_candidate_support_quality_columns(scores_with_support)
     scores_with_margins = add_evidence_margin_columns(scores_with_quality, group_cols=group_cols or ("model",))
     margins = evidence_margin_table(scores_with_quality, group_cols=group_cols or ("model",))
     disagreements = model_disagreement_events(scores_with_margins, group_cols=group_cols or ("model",))

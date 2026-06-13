@@ -151,7 +151,7 @@ def test_state_space_gaussian_helpers_reject_nonfinite_positions() -> None:
 
     with pytest.raises(ValueError, match="predicted"):
         _full_grid_normalized_pairwise_gaussian_log_prob(
-            bad_centers[:1],
+            bad_centers[1:],
             bin_centers,
             bin_centers,
             1.0,

@@ -41,6 +41,12 @@ def test_compare_ground_truth_recovers_cell_split_metadata_from_scores(monkeypat
             "session": ["s1"],
             "event_index": [0],
             "model": ["random"],
+            "heldout_log_likelihood": [0.0],
+            "train_log_likelihood": [0.0],
+            "joint_log_likelihood": [0.0],
+            "benchmark_test_cell_fraction": [0.5],
+            "benchmark_random_seed": [11],
+            "benchmark_cell_split_seed": [13],
             "benchmark_cell_split_strategy": ["peak-rate"],
             "benchmark_cell_split_strata": [7],
         }
@@ -56,10 +62,14 @@ def test_compare_ground_truth_recovers_cell_split_metadata_from_scores(monkeypat
         }
     )
     captured_configs = []
+    captured_splits = []
 
     class FakeEncoding:
         bin_centers = np.asarray([[0.0, 0.0], [1.0, 0.0]], dtype=float)
         cell_ids = np.asarray([1, 2], dtype=int)
+
+        def select_cells(self, cell_ids):
+            return self
 
     class FakeModel:
         def score(self, emissions, bin_centers):
@@ -80,6 +90,11 @@ def test_compare_ground_truth_recovers_cell_split_metadata_from_scores(monkeypat
         captured_configs.append(config)
         return {"random": FakeModel()}
 
+    def fake_split_cells_from_encoding(encoding, config, random_seed):
+        del encoding
+        captured_splits.append((config, random_seed))
+        return np.asarray([1], dtype=int), np.asarray([2], dtype=int)
+
     monkeypatch.setattr(ground_truth, "_load_or_generate_ground_truth", lambda *args, **kwargs: labels)
     monkeypatch.setattr(ground_truth, "load_open_field_sessions", lambda root: [SimpleNamespace(session_id="s1")])
     monkeypatch.setattr(ground_truth, "fit_place_field_encoding", lambda *args, **kwargs: FakeEncoding())
@@ -90,6 +105,7 @@ def test_compare_ground_truth_recovers_cell_split_metadata_from_scores(monkeypat
         lambda *args, **kwargs: pd.DataFrame(columns=["well_id", "well_x", "well_y"]),
     )
     monkeypatch.setattr(ground_truth, "_build_models", fake_build_models)
+    monkeypatch.setattr(benchmarks, "_split_cells_from_encoding", fake_split_cells_from_encoding)
 
     ground_truth.compare_scores_to_ground_truth(
         "unused-root",
@@ -101,3 +117,9 @@ def test_compare_ground_truth_recovers_cell_split_metadata_from_scores(monkeypat
     assert len(captured_configs) == 1
     assert captured_configs[0].cell_split_strategy == "peak-rate"
     assert captured_configs[0].cell_split_strata == 7
+    assert len(captured_splits) == 1
+    split_config, random_seed = captured_splits[0]
+    assert split_config.cell_split_strategy == "peak-rate"
+    assert split_config.cell_split_strata == 7
+    assert split_config.test_cell_fraction == 0.5
+    assert random_seed == 13

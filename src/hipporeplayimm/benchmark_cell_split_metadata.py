@@ -64,11 +64,11 @@ def apply_benchmark_cell_split_metadata_patch() -> None:
         benchmark_config_metadata_with_cell_split._cell_split_metadata_wrapped = True  # type: ignore[attr-defined]
         bench._benchmark_config_metadata = benchmark_config_metadata_with_cell_split
 
-    _wrap_ground_truth_compare_scores(gt)
+    _wrap_ground_truth_compare_scores(bench, gt)
     bench._benchmark_cell_split_metadata_patch_applied = True
 
 
-def _wrap_ground_truth_compare_scores(gt: Any) -> None:
+def _wrap_ground_truth_compare_scores(bench: Any, gt: Any) -> None:
     """Let patched ground-truth decoding consume saved cell-split metadata."""
 
     compare_scores = gt.compare_scores_to_ground_truth
@@ -97,11 +97,38 @@ def _wrap_ground_truth_compare_scores(gt: Any) -> None:
             return original_build_models(with_cell_split_config(config), *args, **build_kwargs)
 
         def cell_split_for_score_rows_with_metadata(session_scores: Any, encoding: Any, config: Any) -> Any:
-            return original_cell_split_for_score_rows(
+            config_with_metadata = with_cell_split_config(config)
+            if _score_rows_have_explicit_cell_ids(gt, session_scores):
+                return original_cell_split_for_score_rows(
+                    session_scores,
+                    encoding,
+                    config_with_metadata,
+                )
+
+            test_cell_fraction = gt._unique_float_from_column(
                 session_scores,
-                encoding,
-                with_cell_split_config(config),
+                "benchmark_test_cell_fraction",
+                config_with_metadata.test_cell_fraction,
             )
+            benchmark_random_seed = gt._unique_int_from_column(
+                session_scores,
+                "benchmark_random_seed",
+                config_with_metadata.random_seed,
+            )
+            random_seed = gt._unique_int_from_column(
+                session_scores,
+                "benchmark_cell_split_seed",
+                benchmark_random_seed,
+            )
+            split_config = _config_with_cell_split_metadata(
+                _config_with_overrides(
+                    config_with_metadata,
+                    test_cell_fraction=float(test_cell_fraction),
+                ),
+                strategy,
+                strata,
+            )
+            return bench._split_cells_from_encoding(encoding, split_config, int(random_seed))
 
         gt._build_models = build_models_with_cell_split
         gt._cell_split_for_score_rows = cell_split_for_score_rows_with_metadata
@@ -115,6 +142,12 @@ def _wrap_ground_truth_compare_scores(gt: Any) -> None:
     gt.compare_scores_to_ground_truth = compare_scores_to_ground_truth_with_cell_split
 
 
+def _score_rows_have_explicit_cell_ids(gt: Any, session_scores: Any) -> bool:
+    train_cells = gt._cell_ids_from_score_column(session_scores, "train_cell_ids")
+    test_cells = gt._cell_ids_from_score_column(session_scores, "test_cell_ids")
+    return train_cells is not None or test_cells is not None
+
+
 def _config_with_cell_split_metadata(
     config: Any,
     strategy: str,
@@ -122,13 +155,22 @@ def _config_with_cell_split_metadata(
 ) -> SimpleNamespace:
     """Copy config attributes while overriding cell-split metadata fields."""
 
-    if is_dataclass(config) and not isinstance(config, type):
-        values = {field.name: getattr(config, field.name) for field in fields(config)}
-    else:
-        values = dict(getattr(config, "__dict__", {}))
+    values = _config_values(config)
     values["cell_split_strategy"] = strategy
     values["cell_split_strata"] = int(strata)
     return SimpleNamespace(**values)
+
+
+def _config_with_overrides(config: Any, **overrides: Any) -> SimpleNamespace:
+    values = _config_values(config)
+    values.update(overrides)
+    return SimpleNamespace(**values)
+
+
+def _config_values(config: Any) -> dict[str, Any]:
+    if is_dataclass(config) and not isinstance(config, type):
+        return {field.name: getattr(config, field.name) for field in fields(config)}
+    return dict(getattr(config, "__dict__", {}))
 
 
 def _scores_frame_for_cell_split_metadata(scores: str | Path | pd.DataFrame) -> pd.DataFrame:

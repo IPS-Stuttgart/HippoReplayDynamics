@@ -228,9 +228,7 @@ def _apply_transition_backward(
         valid_mask = _coerce_valid_bin_mask(valid_bin_mask, values.shape[0])
         if valid_mask is None:
             return np.full(values.shape, float(values.sum()) / values.shape[0], dtype=float)
-        return np.full(
-            values.shape,
-            float(values[valid_mask].sum()) / int(np.sum(valid_mask)),
-            dtype=float,
-        )
+        out = np.zeros(values.shape, dtype=float)
+        out[valid_mask] = float(values[valid_mask].sum()) / int(np.sum(valid_mask))
+        return out
     return np.asarray(transition.T @ values, dtype=float)

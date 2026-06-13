@@ -53,6 +53,9 @@ from .models import (
     score_model,
 )
 from .pyrecest_models import PyRecEstGoalParticleModel
+from .simulation_recovery_trajectory_imm import (
+    apply_trajectory_imm_recovery_patch as _apply_trajectory_imm_recovery_patch,
+)
 from .state_space_imm_duration import apply_state_space_imm_duration_patch as _apply_state_space_imm_duration_patch
 from .sweeps import (
     PyRecEstSweepConfig,
@@ -114,6 +117,7 @@ def apply_runtime_patches() -> None:
     _apply_duration_occupancy_patch()
     _synchronize_duration_patched_emission_builders()
     _patch_simulation_recovery_module(_simulation_recovery)
+    _apply_trajectory_imm_recovery_patch()
 
 
 # Ensure replay dynamics use center-to-center transition durations when replay

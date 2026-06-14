@@ -31,7 +31,28 @@ class WellRouteStateSpaceReplayModel:
     name: str = "sorted-spike-state-space-route"
 
     def score(self, emissions: LogEmissionTensor, bin_centers: np.ndarray) -> EventScore:
+        if emissions.n_time == 0:
+            raise ValueError("emissions must contain at least one time bin")
         centers = np.asarray(bin_centers, dtype=float)
+        if centers.ndim != 2:
+            raise ValueError("bin_centers must have shape (n_bins, position_dim)")
+        if emissions.n_bins != centers.shape[0]:
+            raise ValueError("emissions.n_bins must match bin_centers rows")
+        if centers.shape[1] == 0:
+            raise ValueError("bin_centers must contain at least one coordinate column")
+        if not np.all(np.isfinite(centers)):
+            raise ValueError("bin_centers must be finite")
+
+        transition_sigma_cm_sqrt_s = float(self.transition_sigma_cm_sqrt_s)
+        drift_speed_cm_s = float(self.drift_speed_cm_s)
+        max_step_sigma = float(self.max_step_sigma)
+        if not np.isfinite(transition_sigma_cm_sqrt_s) or transition_sigma_cm_sqrt_s <= 0.0:
+            raise ValueError("transition_sigma_cm_sqrt_s must be finite and positive")
+        if not np.isfinite(drift_speed_cm_s) or drift_speed_cm_s < 0.0:
+            raise ValueError("drift_speed_cm_s must be finite and non-negative")
+        if not np.isfinite(max_step_sigma) or max_step_sigma <= 0.0:
+            raise ValueError("max_step_sigma must be finite and positive")
+
         routes = _coerce_candidate_routes(self.candidate_routes, centers, self.max_default_points)
         durations = transition_durations_s(emissions)
         transitions = tuple(
@@ -39,9 +60,9 @@ class WellRouteStateSpaceReplayModel:
                 _goal_transition_matrix(
                     centers,
                     _route_target(route, transition_index + 1, max(emissions.n_time - 1, 1)),
-                    drift_step_cm=float(self.drift_speed_cm_s) * float(duration),
-                    sigma_cm=_per_bin_sigma(self.transition_sigma_cm_sqrt_s, float(duration)),
-                    max_step_sigma=self.max_step_sigma,
+                    drift_step_cm=drift_speed_cm_s * float(duration),
+                    sigma_cm=_per_bin_sigma(transition_sigma_cm_sqrt_s, float(duration)),
+                    max_step_sigma=max_step_sigma,
                 )
                 for transition_index, duration in enumerate(durations)
             )
@@ -58,9 +79,9 @@ class WellRouteStateSpaceReplayModel:
             "state_space_trajectory_time_bins": int(emissions.n_time),
             "route_state_space_candidate_routes": int(routes.shape[0]),
             "route_state_space_waypoints_per_route": int(routes.shape[1]),
-            "route_state_space_transition_sigma_cm_sqrt_s": float(self.transition_sigma_cm_sqrt_s),
-            "route_state_space_drift_speed_cm_s": float(self.drift_speed_cm_s),
-            "route_state_space_max_step_sigma": float(self.max_step_sigma),
+            "route_state_space_transition_sigma_cm_sqrt_s": float(transition_sigma_cm_sqrt_s),
+            "route_state_space_drift_speed_cm_s": float(drift_speed_cm_s),
+            "route_state_space_max_step_sigma": float(max_step_sigma),
             "route_state_space_evidence_support": "exact_full_grid",
             "route_state_space_most_likely_route_index": best_route,
             "route_state_space_most_likely_route_probability": float(terminal_route_posterior[best_route]),
@@ -101,7 +122,10 @@ def _coerce_candidate_routes(routes: np.ndarray | None, centers: np.ndarray, max
         if not np.all(np.isfinite(arr)):
             raise ValueError("candidate_routes must be finite")
         return arr
-    points = _farthest_point_subset(centers, max_points=max_default_points)
+    max_points = int(max_default_points)
+    if max_points < 2:
+        raise ValueError("max_default_points must be at least 2 when candidate_routes is not provided")
+    points = _farthest_point_subset(centers, max_points=max_points)
     return routes_from_wells(points)
 
 

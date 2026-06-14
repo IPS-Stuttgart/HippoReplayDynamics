@@ -14,12 +14,15 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
+import importlib
 import numpy as np
 import pandas as pd
 
 
 _DEFAULT_CELL_SPLIT_STRATEGY = "random"
 _DEFAULT_CELL_SPLIT_STRATA = 4
+_DEFAULT_TEST_CELL_FRACTION = 0.25
+_DEFAULT_RANDOM_SEED = 1
 _MISSING_METADATA_STRINGS = {"", "nan", "na", "n/a", "none", "null", "<na>"}
 _HELDOUT_BENCHMARK_COLUMNS = {
     "heldout_log_likelihood",
@@ -70,7 +73,28 @@ def apply_benchmark_cell_split_metadata_patch() -> None:
         bench._benchmark_config_metadata = benchmark_config_metadata_with_cell_split
 
     _wrap_ground_truth_compare_scores(bench, gt)
+    _wrap_late_ground_truth_patches(bench, gt)
     bench._benchmark_cell_split_metadata_patch_applied = True
+
+
+def _wrap_late_ground_truth_patches(bench: Any, gt: Any) -> None:
+    """Re-apply this wrapper after later modules replace ground-truth decoding."""
+
+    try:
+        module = importlib.import_module(f"{__package__}.clusterless_ground_truth")
+    except Exception:
+        return
+    apply_patch = getattr(module, "apply_clusterless_ground_truth_patch", None)
+    if apply_patch is None or getattr(apply_patch, "_cell_split_metadata_rewraps_compare", False):
+        return
+
+    def apply_patch_with_cell_split_metadata() -> Any:
+        result = apply_patch()
+        _wrap_ground_truth_compare_scores(bench, gt)
+        return result
+
+    apply_patch_with_cell_split_metadata._cell_split_metadata_rewraps_compare = True  # type: ignore[attr-defined]
+    module.apply_clusterless_ground_truth_patch = apply_patch_with_cell_split_metadata
 
 
 def _wrap_ground_truth_compare_scores(bench: Any, gt: Any) -> None:
@@ -113,12 +137,16 @@ def _wrap_ground_truth_compare_scores(bench: Any, gt: Any) -> None:
             test_cell_fraction = gt._unique_float_from_column(
                 session_scores,
                 "benchmark_test_cell_fraction",
-                config_with_metadata.test_cell_fraction,
+                getattr(
+                    config_with_metadata,
+                    "test_cell_fraction",
+                    _DEFAULT_TEST_CELL_FRACTION,
+                ),
             )
             benchmark_random_seed = gt._unique_int_from_column(
                 session_scores,
                 "benchmark_random_seed",
-                config_with_metadata.random_seed,
+                getattr(config_with_metadata, "random_seed", _DEFAULT_RANDOM_SEED),
             )
             random_seed = gt._unique_int_from_column(
                 session_scores,

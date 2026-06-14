@@ -21,6 +21,11 @@ import pandas as pd
 _DEFAULT_CELL_SPLIT_STRATEGY = "random"
 _DEFAULT_CELL_SPLIT_STRATA = 4
 _MISSING_METADATA_STRINGS = {"", "nan", "na", "n/a", "none", "null", "<na>"}
+_HELDOUT_BENCHMARK_COLUMNS = {
+    "heldout_log_likelihood",
+    "train_log_likelihood",
+    "joint_log_likelihood",
+}
 
 
 def apply_benchmark_cell_split_metadata_patch() -> None:
@@ -133,6 +138,17 @@ def _wrap_ground_truth_compare_scores(bench: Any, gt: Any) -> None:
         gt._build_models = build_models_with_cell_split
         gt._cell_split_for_score_rows = cell_split_for_score_rows_with_metadata
         try:
+            if _score_table_needs_split_scoped_decode(scores_frame):
+                comparisons = [
+                    compare_scores(root, split_scores.copy(), **kwargs)
+                    for _, split_scores in scores_frame.groupby(
+                        ["session", "benchmark_cell_split_index"],
+                        sort=False,
+                    )
+                ]
+                if comparisons:
+                    return pd.concat(comparisons, ignore_index=True, sort=False)
+                return compare_scores(root, scores_frame, **kwargs)
             return compare_scores(root, scores, **kwargs)
         finally:
             gt._build_models = original_build_models
@@ -140,6 +156,25 @@ def _wrap_ground_truth_compare_scores(bench: Any, gt: Any) -> None:
 
     compare_scores_to_ground_truth_with_cell_split._cell_split_metadata_wrapped = True  # type: ignore[attr-defined]
     gt.compare_scores_to_ground_truth = compare_scores_to_ground_truth_with_cell_split
+
+
+def _score_table_needs_split_scoped_decode(scores_frame: pd.DataFrame) -> bool:
+    """Return true when a benchmark score table contains multiple splits per session.
+
+    The metadata compatibility layer wraps historical ``compare_scores_to_ground_truth``
+    implementations, some of which decode one session at a time rather than one
+    session/split at a time.  Splitting here keeps train/test metadata unique before
+    those implementations ask ``_cell_split_for_score_rows`` to reconstruct held-out
+    emissions.
+    """
+
+    if not _HELDOUT_BENCHMARK_COLUMNS.issubset(scores_frame.columns):
+        return False
+    if "benchmark_cell_split_index" not in scores_frame.columns:
+        return False
+    split_keys = scores_frame[["session", "benchmark_cell_split_index"]].drop_duplicates()
+    session_keys = scores_frame[["session"]].drop_duplicates()
+    return int(split_keys.shape[0]) > int(session_keys.shape[0])
 
 
 def _score_rows_have_explicit_cell_ids(gt: Any, session_scores: Any) -> bool:

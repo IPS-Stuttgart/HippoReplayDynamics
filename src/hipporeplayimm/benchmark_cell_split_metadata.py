@@ -113,96 +113,150 @@ def _wrap_ground_truth_compare_scores(bench: Any, gt: Any) -> None:
         **kwargs: Any,
     ) -> pd.DataFrame:
         scores_frame = _scores_frame_for_cell_split_metadata(scores)
-        strategy = _cell_split_strategy_from_scores(scores_frame, cell_split_strategy)
-        strata = _cell_split_strata_from_scores(scores_frame, cell_split_strata)
-
-        original_build_models = gt._build_models
-        original_cell_split_for_score_rows = gt._cell_split_for_score_rows
-
-        def with_cell_split_config(config: Any) -> SimpleNamespace:
-            return _config_with_cell_split_metadata(config, strategy, strata)
-
-        def build_models_with_cell_split(config: Any, *args: Any, **build_kwargs: Any) -> Any:
-            return original_build_models(with_cell_split_config(config), *args, **build_kwargs)
-
-        def cell_split_for_score_rows_with_metadata(session_scores: Any, encoding: Any, config: Any) -> Any:
-            config_with_metadata = with_cell_split_config(config)
-            if _score_rows_have_explicit_cell_ids(gt, session_scores):
-                return original_cell_split_for_score_rows(
-                    session_scores,
-                    encoding,
-                    config_with_metadata,
+        if _score_table_needs_cell_split_scoped_decode(scores_frame):
+            group_columns = _cell_split_decode_group_columns(scores_frame)
+            comparisons = [
+                _compare_scores_with_cell_split_metadata(
+                    compare_scores,
+                    bench,
+                    gt,
+                    root,
+                    split_scores.copy(),
+                    split_scores.copy(),
+                    cell_split_strategy,
+                    cell_split_strata,
+                    kwargs,
                 )
-
-            test_cell_fraction = gt._unique_float_from_column(
-                session_scores,
-                "benchmark_test_cell_fraction",
-                getattr(
-                    config_with_metadata,
-                    "test_cell_fraction",
-                    _DEFAULT_TEST_CELL_FRACTION,
-                ),
+                for _, split_scores in scores_frame.groupby(group_columns, sort=False)
+            ]
+            if comparisons:
+                return pd.concat(comparisons, ignore_index=True, sort=False)
+            return _compare_scores_with_cell_split_metadata(
+                compare_scores,
+                bench,
+                gt,
+                root,
+                scores_frame,
+                scores_frame,
+                cell_split_strategy,
+                cell_split_strata,
+                kwargs,
             )
-            benchmark_random_seed = gt._unique_int_from_column(
-                session_scores,
-                "benchmark_random_seed",
-                getattr(config_with_metadata, "random_seed", _DEFAULT_RANDOM_SEED),
-            )
-            random_seed = gt._unique_int_from_column(
-                session_scores,
-                "benchmark_cell_split_seed",
-                benchmark_random_seed,
-            )
-            split_config = _config_with_cell_split_metadata(
-                _config_with_overrides(
-                    config_with_metadata,
-                    test_cell_fraction=float(test_cell_fraction),
-                ),
-                strategy,
-                strata,
-            )
-            return bench._split_cells_from_encoding(encoding, split_config, int(random_seed))
-
-        gt._build_models = build_models_with_cell_split
-        gt._cell_split_for_score_rows = cell_split_for_score_rows_with_metadata
-        try:
-            if _score_table_needs_split_scoped_decode(scores_frame):
-                comparisons = [
-                    compare_scores(root, split_scores.copy(), **kwargs)
-                    for _, split_scores in scores_frame.groupby(
-                        ["session", "benchmark_cell_split_index"],
-                        sort=False,
-                    )
-                ]
-                if comparisons:
-                    return pd.concat(comparisons, ignore_index=True, sort=False)
-                return compare_scores(root, scores_frame, **kwargs)
-            return compare_scores(root, scores, **kwargs)
-        finally:
-            gt._build_models = original_build_models
-            gt._cell_split_for_score_rows = original_cell_split_for_score_rows
+        return _compare_scores_with_cell_split_metadata(
+            compare_scores,
+            bench,
+            gt,
+            root,
+            scores,
+            scores_frame,
+            cell_split_strategy,
+            cell_split_strata,
+            kwargs,
+        )
 
     compare_scores_to_ground_truth_with_cell_split._cell_split_metadata_wrapped = True  # type: ignore[attr-defined]
     gt.compare_scores_to_ground_truth = compare_scores_to_ground_truth_with_cell_split
 
 
-def _score_table_needs_split_scoped_decode(scores_frame: pd.DataFrame) -> bool:
-    """Return true when a benchmark score table contains multiple splits per session.
+def _compare_scores_with_cell_split_metadata(
+    compare_scores: Any,
+    bench: Any,
+    gt: Any,
+    root: str | Path,
+    scores: str | Path | pd.DataFrame,
+    scores_frame: pd.DataFrame,
+    default_strategy: str,
+    default_strata: int,
+    kwargs: dict[str, Any],
+) -> pd.DataFrame:
+    strategy = _cell_split_strategy_from_scores(scores_frame, default_strategy)
+    strata = _cell_split_strata_from_scores(scores_frame, default_strata)
+    original_build_models = gt._build_models
+    original_cell_split_for_score_rows = gt._cell_split_for_score_rows
 
-    The metadata compatibility layer wraps historical ``compare_scores_to_ground_truth``
-    implementations, some of which decode one session at a time rather than one
-    session/split at a time.  Splitting here keeps train/test metadata unique before
-    those implementations ask ``_cell_split_for_score_rows`` to reconstruct held-out
-    emissions.
+    def with_cell_split_config(config: Any) -> SimpleNamespace:
+        return _config_with_cell_split_metadata(config, strategy, strata)
+
+    def build_models_with_cell_split(config: Any, *args: Any, **build_kwargs: Any) -> Any:
+        return original_build_models(with_cell_split_config(config), *args, **build_kwargs)
+
+    def cell_split_for_score_rows_with_metadata(session_scores: Any, encoding: Any, config: Any) -> Any:
+        config_with_metadata = with_cell_split_config(config)
+        if _score_rows_have_explicit_cell_ids(gt, session_scores):
+            return original_cell_split_for_score_rows(
+                session_scores,
+                encoding,
+                config_with_metadata,
+            )
+
+        test_cell_fraction = gt._unique_float_from_column(
+            session_scores,
+            "benchmark_test_cell_fraction",
+            getattr(
+                config_with_metadata,
+                "test_cell_fraction",
+                _DEFAULT_TEST_CELL_FRACTION,
+            ),
+        )
+        benchmark_random_seed = gt._unique_int_from_column(
+            session_scores,
+            "benchmark_random_seed",
+            getattr(config_with_metadata, "random_seed", _DEFAULT_RANDOM_SEED),
+        )
+        random_seed = gt._unique_int_from_column(
+            session_scores,
+            "benchmark_cell_split_seed",
+            benchmark_random_seed,
+        )
+        split_config = _config_with_cell_split_metadata(
+            _config_with_overrides(
+                config_with_metadata,
+                test_cell_fraction=float(test_cell_fraction),
+            ),
+            strategy,
+            strata,
+        )
+        return bench._split_cells_from_encoding(encoding, split_config, int(random_seed))
+
+    gt._build_models = build_models_with_cell_split
+    gt._cell_split_for_score_rows = cell_split_for_score_rows_with_metadata
+    try:
+        return compare_scores(root, scores, **kwargs)
+    finally:
+        gt._build_models = original_build_models
+        gt._cell_split_for_score_rows = original_cell_split_for_score_rows
+
+
+def _score_table_needs_cell_split_scoped_decode(scores_frame: pd.DataFrame) -> bool:
+    """Return true when a score table needs per-session/split cell-split metadata.
+
+    The wrapped ground-truth decoders carry one active cell-split strategy/strata
+    pair in their temporary config.  Combined score tables can contain different
+    metadata for different sessions or benchmark splits, so decode those groups
+    separately before each group asks ``_cell_split_for_score_rows`` to rebuild
+    held-out emissions.
     """
 
     if not _HELDOUT_BENCHMARK_COLUMNS.issubset(scores_frame.columns):
         return False
-    if "benchmark_cell_split_index" not in scores_frame.columns:
+    if "session" not in scores_frame.columns:
         return False
-    split_keys = scores_frame[["session", "benchmark_cell_split_index"]].drop_duplicates()
-    session_keys = scores_frame[["session"]].drop_duplicates()
-    return int(split_keys.shape[0]) > int(session_keys.shape[0])
+    group_columns = _cell_split_decode_group_columns(scores_frame)
+    group_count = int(scores_frame[group_columns].drop_duplicates().shape[0])
+    session_count = int(scores_frame[["session"]].drop_duplicates().shape[0])
+    if group_count > session_count:
+        return True
+    return (
+        len(set(_string_metadata_values(scores_frame, "benchmark_cell_split_strategy"))) > 1
+        or len(set(_string_metadata_values(scores_frame, "benchmark_cell_split_strata"))) > 1
+    )
+
+
+def _cell_split_decode_group_columns(scores_frame: pd.DataFrame) -> list[str]:
+    columns = ["session"]
+    if "benchmark_cell_split_index" in scores_frame.columns:
+        columns.append("benchmark_cell_split_index")
+    return columns
 
 
 def _score_rows_have_explicit_cell_ids(gt: Any, session_scores: Any) -> bool:

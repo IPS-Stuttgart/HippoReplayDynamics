@@ -22,6 +22,10 @@ def apply_trajectory_imm_recovery_patch() -> None:
 
     import hipporeplayimm.simulation_recovery as recovery
 
+    from . import ground_truth_cell_split_strategy as gt_split_strategy
+
+    gt_split_strategy.apply_ground_truth_cell_split_strategy_patch()
+
     if getattr(recovery, "_trajectory_imm_recovery_patch_applied", False):
         return
 

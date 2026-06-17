@@ -2,6 +2,7 @@
 # ruff: noqa: E402
 
 from . import benchmark_cell_split_metadata as _benchmark_cell_split_metadata
+from . import candidate_support_quality_patch as _candidate_support_quality_patch
 from . import clusterless_config_validation as _clusterless_config_validation
 from . import clusterless_ground_truth as _clusterless_ground_truth
 from . import goal_state_space_integration as _goal_state_space_integration
@@ -15,6 +16,7 @@ from . import spike_rate_metadata as _spike_rate_metadata
 # Keep score-table metadata and post-hoc decoding consistent before public
 # symbols are imported from the patched modules.
 _score_metadata.apply_model_hyperparam_patch()
+_candidate_support_quality_patch.apply_candidate_support_quality_patch()
 _benchmark_cell_split_metadata.apply_benchmark_cell_split_metadata_patch()
 _clusterless_ground_truth.apply_clusterless_ground_truth_patch()
 _pyrecest_score_metadata.apply_pyrecest_score_metadata_patch()
@@ -108,6 +110,7 @@ def apply_runtime_patches() -> None:
     """
 
     _score_metadata.apply_model_hyperparam_patch()
+    _candidate_support_quality_patch.apply_candidate_support_quality_patch()
     _benchmark_cell_split_metadata.apply_benchmark_cell_split_metadata_patch()
     _clusterless_ground_truth.apply_clusterless_ground_truth_patch()
     _clusterless_config_validation.apply_clusterless_encoding_config_validation_patch()

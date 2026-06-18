@@ -29,6 +29,15 @@ _HELDOUT_BENCHMARK_COLUMNS = {
     "train_log_likelihood",
     "joint_log_likelihood",
 }
+_CELL_SPLIT_SCOPE_COLUMNS = (
+    "benchmark_random_seed",
+    "benchmark_cell_split_index",
+    "benchmark_cell_split_seed",
+    "benchmark_cell_split_strategy",
+    "benchmark_cell_split_strata",
+    "train_cell_ids",
+    "test_cell_ids",
+)
 
 
 def apply_benchmark_cell_split_metadata_patch() -> None:
@@ -127,7 +136,7 @@ def _wrap_ground_truth_compare_scores(bench: Any, gt: Any) -> None:
                     cell_split_strata,
                     kwargs,
                 )
-                for _, split_scores in scores_frame.groupby(group_columns, sort=False)
+                for _, split_scores in scores_frame.groupby(group_columns, sort=False, dropna=False)
             ]
             if comparisons:
                 return pd.concat(comparisons, ignore_index=True, sort=False)
@@ -232,9 +241,9 @@ def _score_table_needs_cell_split_scoped_decode(scores_frame: pd.DataFrame) -> b
 
     The wrapped ground-truth decoders carry one active cell-split strategy/strata
     pair in their temporary config.  Combined score tables can contain different
-    metadata for different sessions or benchmark splits, so decode those groups
-    separately before each group asks ``_cell_split_for_score_rows`` to rebuild
-    held-out emissions.
+    metadata for different sessions, benchmark random seeds, explicit cell IDs,
+    or benchmark splits, so decode those groups separately before each group asks
+    ``_cell_split_for_score_rows`` to rebuild held-out emissions.
     """
 
     if not _HELDOUT_BENCHMARK_COLUMNS.issubset(scores_frame.columns):
@@ -254,8 +263,7 @@ def _score_table_needs_cell_split_scoped_decode(scores_frame: pd.DataFrame) -> b
 
 def _cell_split_decode_group_columns(scores_frame: pd.DataFrame) -> list[str]:
     columns = ["session"]
-    if "benchmark_cell_split_index" in scores_frame.columns:
-        columns.append("benchmark_cell_split_index")
+    columns.extend(column for column in _CELL_SPLIT_SCOPE_COLUMNS if column in scores_frame.columns)
     return columns
 
 

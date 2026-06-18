@@ -109,7 +109,7 @@ def _score_trajectory_imm_exact_sparse(
         float(getattr(config, "momentum_initial_sigma_cm_sqrt_s", 85.0)),
         durations,
     )
-    initial_sigma = _median_or_fallback(
+    initial_sigma = _first_or_fallback(
         initial_sigmas,
         _per_bin_sigma(
             float(getattr(config, "momentum_initial_sigma_cm_sqrt_s", 85.0)),
@@ -953,3 +953,8 @@ def _filtered_terminal_posteriors(
 def _median_or_fallback(values: np.ndarray, fallback: float) -> float:
     arr = np.asarray(values, dtype=float)
     return float(fallback) if arr.size == 0 else float(np.median(arr))
+
+
+def _first_or_fallback(values: np.ndarray, fallback: float) -> float:
+    arr = np.asarray(values, dtype=float)
+    return float(fallback) if arr.size == 0 else float(arr[0])

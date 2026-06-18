@@ -122,6 +122,38 @@ def test_ground_truth_sensitivity_forwards_clusterless_mark_group_by(monkeypatch
     assert not result.rows.empty
 
 
+def test_ground_truth_sensitivity_drops_label_dependent_metric_columns() -> None:
+    reference = pd.DataFrame(
+        {
+            "session": ["Rat1/Open1"],
+            "event_index": [0],
+            "model": ["random"],
+            "decoded_well_id": [1],
+            "active_goal_correct": [True],
+            "initial_goal_correct": [False],
+            "goal_correct_integrated": [True],
+            "true_initial_well_posterior": [0.8],
+            "integrated_endpoint_error_cm": [3.0],
+            "active_trajectory_well_posterior": [0.2],
+            "true_vs_active_trajectory_posterior_margin": [0.6],
+        }
+    )
+
+    base = gt_module._ground_truth_sensitivity_score_decode_base(reference)
+
+    for column in (
+        "active_goal_correct",
+        "initial_goal_correct",
+        "goal_correct_integrated",
+        "true_initial_well_posterior",
+        "integrated_endpoint_error_cm",
+        "active_trajectory_well_posterior",
+        "true_vs_active_trajectory_posterior_margin",
+    ):
+        assert column not in base.columns
+    assert {"session", "event_index", "model", "decoded_well_id"}.issubset(base.columns)
+
+
 def test_clusterless_ground_truth_drops_mark_group_by_for_non_clusterless_scores() -> None:
     filtered = _drop_clusterless_kwargs(
         {

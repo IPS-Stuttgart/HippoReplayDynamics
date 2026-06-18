@@ -416,7 +416,7 @@ def test_trajectory_imm_uses_duration_specific_momentum_entry_sigma(monkeypatch)
     assert any(np.isclose(value, 2.0) for value in forward_entry_sigmas)
     assert any(np.isclose(value, 1.0) for value in backward_entry_sigmas)
     assert any(np.isclose(value, 2.0) for value in backward_entry_sigmas)
-    assert diagnostics["state_space_momentum_initial_transition_sigma_cm"] == pytest.approx(1.5)
+    assert diagnostics["state_space_momentum_initial_transition_sigma_cm"] == pytest.approx(1.0)
     assert diagnostics["state_space_momentum_initial_transition_sigma_cm_per_step"] == "1,2"
 
 

@@ -30,8 +30,9 @@ _HELDOUT_BENCHMARK_COLUMNS = {
     "joint_log_likelihood",
 }
 _CELL_SPLIT_SCOPE_COLUMNS = (
-    "benchmark_random_seed",
     "benchmark_cell_split_index",
+    "benchmark_test_cell_fraction",
+    "benchmark_random_seed",
     "benchmark_cell_split_seed",
     "benchmark_cell_split_strategy",
     "benchmark_cell_split_strata",
@@ -241,9 +242,10 @@ def _score_table_needs_cell_split_scoped_decode(scores_frame: pd.DataFrame) -> b
 
     The wrapped ground-truth decoders carry one active cell-split strategy/strata
     pair in their temporary config.  Combined score tables can contain different
-    metadata for different sessions, benchmark random seeds, explicit cell IDs,
-    or benchmark splits, so decode those groups separately before each group asks
-    ``_cell_split_for_score_rows`` to rebuild held-out emissions.
+    metadata for different sessions, test fractions, benchmark random seeds,
+    explicit cell IDs, or benchmark splits, so decode those groups separately
+    before each group asks ``_cell_split_for_score_rows`` to rebuild held-out
+    emissions.
     """
 
     if not _HELDOUT_BENCHMARK_COLUMNS.issubset(scores_frame.columns):
@@ -255,15 +257,20 @@ def _score_table_needs_cell_split_scoped_decode(scores_frame: pd.DataFrame) -> b
     session_count = int(scores_frame[["session"]].drop_duplicates().shape[0])
     if group_count > session_count:
         return True
-    return (
-        len(set(_string_metadata_values(scores_frame, "benchmark_cell_split_strategy"))) > 1
-        or len(set(_string_metadata_values(scores_frame, "benchmark_cell_split_strata"))) > 1
+    return any(
+        len(_metadata_group_values(scores_frame[column])) > 1
+        for column in _CELL_SPLIT_SCOPE_COLUMNS
+        if column in scores_frame.columns
     )
 
 
 def _cell_split_decode_group_columns(scores_frame: pd.DataFrame) -> list[str]:
     columns = ["session"]
-    columns.extend(column for column in _CELL_SPLIT_SCOPE_COLUMNS if column in scores_frame.columns)
+    for column in _CELL_SPLIT_SCOPE_COLUMNS:
+        if column not in scores_frame.columns:
+            continue
+        if column == "benchmark_cell_split_index" or len(_metadata_group_values(scores_frame[column])) > 1:
+            columns.append(column)
     return columns
 
 
@@ -302,6 +309,22 @@ def _scores_frame_for_cell_split_metadata(scores: str | Path | pd.DataFrame) -> 
     if isinstance(scores, pd.DataFrame):
         return scores.copy()
     return pd.read_csv(scores)
+
+
+def _metadata_group_values(values: pd.Series) -> set[str]:
+    out: set[str] = set()
+    for value in values:
+        try:
+            missing = pd.isna(value)
+        except (TypeError, ValueError):
+            missing = False
+        if isinstance(missing, (bool, np.bool_)) and bool(missing):
+            continue
+        text = str(value).strip()
+        if text.lower() in _MISSING_METADATA_STRINGS:
+            continue
+        out.add(text)
+    return out
 
 
 def _cell_split_strategy_from_scores(scores_frame: pd.DataFrame, default: str) -> str:

@@ -8,6 +8,7 @@ from . import clusterless_ground_truth as _clusterless_ground_truth
 from . import goal_state_space_integration as _goal_state_space_integration
 from . import ground_truth as _ground_truth
 from . import ground_truth_sensitivity_metrics as _ground_truth_sensitivity_metrics
+from . import model_averaged_endpoint_scoping as _model_averaged_endpoint_scoping
 from . import occupancy_candidate_support as _occupancy_candidate_support
 from . import pyrecest_score_metadata as _pyrecest_score_metadata
 from . import score_metadata as _score_metadata
@@ -127,6 +128,7 @@ def apply_runtime_patches() -> None:
     _synchronize_duration_patched_emission_builders()
     _patch_simulation_recovery_module(_simulation_recovery)
     _apply_trajectory_imm_recovery_patch()
+    _model_averaged_endpoint_scoping.apply_model_averaged_endpoint_scoping_patch()
 
 
 # Ensure replay dynamics use center-to-center transition durations when replay

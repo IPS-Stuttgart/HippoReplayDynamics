@@ -8,6 +8,7 @@ from . import clusterless_ground_truth as _clusterless_ground_truth
 from . import goal_state_space_integration as _goal_state_space_integration
 from . import ground_truth as _ground_truth
 from . import ground_truth_sensitivity_metrics as _ground_truth_sensitivity_metrics
+from . import improved_model_evidence_registry_patch as _improved_model_evidence_registry_patch
 from . import model_averaged_endpoint_scoping as _model_averaged_endpoint_scoping
 from . import occupancy_candidate_support as _occupancy_candidate_support
 from . import pyrecest_score_metadata as _pyrecest_score_metadata
@@ -129,6 +130,7 @@ def apply_runtime_patches() -> None:
     _patch_simulation_recovery_module(_simulation_recovery)
     _apply_trajectory_imm_recovery_patch()
     _model_averaged_endpoint_scoping.apply_model_averaged_endpoint_scoping_patch()
+    _improved_model_evidence_registry_patch.apply_improved_model_evidence_registry_patch()
 
 
 # Ensure replay dynamics use center-to-center transition durations when replay
@@ -158,24 +160,4 @@ __all__ = [
     'PyRecEstGoalParticleModel',
     'PyRecEstSweepConfig',
     'PyRecEstSweepResult',
-    'RandomModel',
-    'ReplaySession',
-    'SimulationRecoveryConfig',
-    'SimulationRecoveryResult',
-    'StationaryModel',
-    'apply_runtime_patches',
-    'build_emissions',
-    'build_clusterless_mark_emissions',
-    'compare_scores_to_ground_truth',
-    'fit_place_field_encoding',
-    'fit_clusterless_mark_encoding',
-    'generate_behavioral_ground_truth',
-    'infer_well_locations',
-    'label_session_behavioral_ground_truth',
-    'load_open_field_sessions',
-    'run_open_field_benchmark',
-    'run_pyrecest_parameter_sweep',
-    'run_session_simulation_recovery',
-    'score_model',
-    'write_pyrecest_sweep_outputs',
 ]

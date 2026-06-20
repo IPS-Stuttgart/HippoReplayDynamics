@@ -22,17 +22,18 @@ class EmpiricalTransitionStateSpaceReplayModel:
     name: str = "sorted-spike-state-space-empirical-transition"
 
     def score(self, emissions: LogEmissionTensor, bin_centers: np.ndarray) -> EventScore:
-        if emissions.n_bins != self.transition.shape[0] or self.transition.shape[0] != self.transition.shape[1]:
-            raise ValueError("transition matrix shape must match emissions.n_bins")
-        logp, trajectory = _forward_backward_first_order(emissions.log_likelihood, self.transition)
+        if emissions.n_time == 0:
+            raise ValueError("emissions must contain at least one time bin")
+        transition = _validated_transition_matrix(self.transition, emissions.n_bins)
+        logp, trajectory = _forward_backward_first_order(emissions.log_likelihood, transition)
         terminal = trajectory[-1]
         diagnostics = {
             "state_space_mode": "empirical-transition",
             "state_space_observation_model": "sorted-spike-poisson",
             "state_space_trajectory_posterior": 1,
             "state_space_trajectory_time_bins": int(emissions.n_time),
-            "state_space_empirical_transition_nonzeros": int(self.transition.nnz),
-            "state_space_empirical_transition_density": float(self.transition.nnz / max(1, self.transition.shape[0] ** 2)),
+            "state_space_empirical_transition_nonzeros": int(transition.nnz),
+            "state_space_empirical_transition_density": float(transition.nnz / max(1, transition.shape[0] ** 2)),
             "state_space_empirical_evidence_support": "exact_full_grid",
             "mean_trajectory_posterior_entropy": _mean_entropy(trajectory),
         }
@@ -46,6 +47,27 @@ class EmpiricalTransitionStateSpaceReplayModel:
             terminal_log_posterior=terminal,
             trajectory_log_posterior=trajectory,
         )
+
+
+def _validated_transition_matrix(transition: csr_matrix, n_bins: int) -> csr_matrix:
+    """Return a sparse column-stochastic transition matrix or reject it."""
+
+    matrix = csr_matrix(transition)
+    if matrix.shape != (n_bins, n_bins):
+        raise ValueError("transition matrix shape must match emissions.n_bins")
+
+    data = np.asarray(matrix.data, dtype=float)
+    if not np.all(np.isfinite(data)):
+        raise ValueError("transition matrix entries must be finite")
+    if np.any(data < 0.0):
+        raise ValueError("transition matrix entries must be nonnegative")
+
+    column_sums = np.asarray(matrix.sum(axis=0)).ravel().astype(float)
+    if not np.all(np.isfinite(column_sums)):
+        raise ValueError("transition matrix column sums must be finite")
+    if not np.allclose(column_sums, 1.0, rtol=1e-10, atol=1e-12):
+        raise ValueError("transition matrix columns must sum to 1")
+    return matrix
 
 
 def fit_empirical_transition_matrix(

@@ -2,10 +2,11 @@ from pathlib import Path
 
 import numpy as np
 import pytest
+from scipy.sparse import csr_matrix
 
 from hipporeplayimm.data import ReplaySession
-from hipporeplayimm.empirical_transition import fit_empirical_transition_matrix
-from hipporeplayimm.encoding import EncodingConfig, EncodingModel
+from hipporeplayimm.empirical_transition import EmpiricalTransitionStateSpaceReplayModel, fit_empirical_transition_matrix
+from hipporeplayimm.encoding import EncodingConfig, EncodingModel, LogEmissionTensor
 
 
 def test_fit_empirical_transition_matrix_rejects_invalid_self_loop_count() -> None:
@@ -45,6 +46,32 @@ def test_fit_empirical_transition_matrix_is_column_stochastic_for_valid_inputs()
 
     assert np.all(transition >= 0.0)
     np.testing.assert_allclose(transition.sum(axis=0), np.ones(transition.shape[1]))
+
+
+def test_empirical_transition_model_scores_valid_transition_matrix() -> None:
+    result = EmpiricalTransitionStateSpaceReplayModel(csr_matrix(np.eye(2))).score(
+        _minimal_emissions(),
+        _minimal_bin_centers(),
+    )
+
+    assert np.isfinite(result.log_likelihood)
+
+
+def test_empirical_transition_model_rejects_invalid_transition_matrix() -> None:
+    emissions = _minimal_emissions()
+    bin_centers = _minimal_bin_centers()
+    invalid_cases = (
+        (np.array([[1.0, 0.0], [-0.1, 1.0]], dtype=float), "nonnegative"),
+        (np.array([[np.nan, 0.0], [0.0, 1.0]], dtype=float), "finite"),
+        (np.array([[0.25, 0.25], [0.25, 0.25]], dtype=float), "columns must sum to 1"),
+    )
+
+    for transition, message in invalid_cases:
+        with pytest.raises(ValueError, match=message):
+            EmpiricalTransitionStateSpaceReplayModel(csr_matrix(transition)).score(
+                emissions,
+                bin_centers,
+            )
 
 
 def _minimal_session() -> ReplaySession:
@@ -91,3 +118,18 @@ def _minimal_encoding() -> EncodingModel:
         cell_ids=np.array([], dtype=int),
         config=EncodingConfig(min_speed_cm_s=0.0),
     )
+
+
+def _minimal_emissions() -> LogEmissionTensor:
+    return LogEmissionTensor(
+        log_likelihood=np.zeros((2, 2), dtype=float),
+        spike_counts=np.empty((2, 0), dtype=int),
+        times=np.array([0.0, 0.02], dtype=float),
+        dt=0.02,
+        cell_ids=np.array([], dtype=int),
+        n_spikes=0,
+    )
+
+
+def _minimal_bin_centers() -> np.ndarray:
+    return np.array([[0.0, 0.0], [1.0, 0.0]], dtype=float)

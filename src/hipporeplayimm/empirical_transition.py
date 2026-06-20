@@ -60,7 +60,15 @@ def fit_empirical_transition_matrix(
 
     if not 0.0 <= teleport_probability < 1.0:
         raise ValueError("teleport_probability must lie in [0, 1)")
+    try:
+        self_loop_count = float(add_self_loop_count)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("add_self_loop_count must be finite and nonnegative") from exc
+    if not np.isfinite(self_loop_count) or self_loop_count < 0.0:
+        raise ValueError("add_self_loop_count must be finite and nonnegative")
     min_speed = encoding.config.min_speed_cm_s if min_speed_cm_s is None else float(min_speed_cm_s)
+    if not np.isfinite(min_speed) or min_speed < 0.0:
+        raise ValueError("min_speed_cm_s must be finite and nonnegative")
     position = _clean_position(session.position)
     times = position[:, 0]
     xy = position[:, 1:3]
@@ -70,8 +78,8 @@ def fit_empirical_transition_matrix(
     valid = in_run & (speed >= min_speed) & (bins >= 0)
     n_bins = encoding.n_bins
     counts = np.zeros((n_bins, n_bins), dtype=float)
-    if add_self_loop_count > 0.0:
-        counts += np.eye(n_bins) * float(add_self_loop_count)
+    if self_loop_count > 0.0:
+        counts += np.eye(n_bins) * self_loop_count
     for idx in range(len(bins) - 1):
         if valid[idx] and valid[idx + 1]:
             src = int(bins[idx])

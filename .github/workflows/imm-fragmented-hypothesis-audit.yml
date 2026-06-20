@@ -1,0 +1,150 @@
+---
+name: IMM vs fragmented hypothesis audit
+
+on:
+  workflow_dispatch:
+    inputs:
+      evidence_run_id:
+        description: "Run ID containing an all-session model-evidence artifact"
+        required: true
+        default: "27011374643"
+      evidence_artifact_name:
+        description: "Artifact name containing all_sessions_event_model_evidence.csv"
+        required: true
+        default: "model-evidence-all-sessions-27011374643"
+      original_labels_run_id:
+        description: "Optional run ID containing original algorithm labels"
+        required: false
+        default: ""
+      original_labels_artifact_name:
+        description: "Optional artifact containing original labels CSV"
+        required: false
+        default: ""
+      original_labels_glob:
+        description: "Glob for original label CSV inside optional artifact"
+        required: false
+        default: "**/*original*label*.csv"
+      margin_threshold:
+        description: "Log-evidence margin for confident IMM/fragmented decisions"
+        required: true
+        default: "5.5"
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: imm-fragmented-hypothesis-audit-${{ github.repository }}-${{ inputs.evidence_run_id }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  audit:
+    name: Audit IMM vs fragmented hypothesis
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Install package
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e .
+
+      - name: Download model-evidence artifact
+        uses: actions/download-artifact@v7
+        with:
+          run-id: ${{ inputs.evidence_run_id }}
+          name: ${{ inputs.evidence_artifact_name }}
+          path: artifacts/model-evidence
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+
+      - name: Download original-label artifact
+        if: ${{ inputs.original_labels_run_id != '' && inputs.original_labels_artifact_name != '' }}
+        uses: actions/download-artifact@v7
+        with:
+          run-id: ${{ inputs.original_labels_run_id }}
+          name: ${{ inputs.original_labels_artifact_name }}
+          path: artifacts/original-labels
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+
+      - name: Run IMM/fragmented audit
+        env:
+          ORIGINAL_LABELS_GLOB: ${{ inputs.original_labels_glob }}
+        run: |
+          set -euo pipefail
+          evidence_csv="$(find artifacts/model-evidence -name all_sessions_event_model_evidence.csv -print -quit)"
+          if [ -z "${evidence_csv}" ]; then
+            evidence_csv="$(find artifacts/model-evidence -name event_model_evidence.csv -print -quit)"
+          fi
+          if [ -z "${evidence_csv}" ]; then
+            echo "Could not find event evidence CSV in ${PWD}/artifacts/model-evidence" >&2
+            find artifacts/model-evidence -maxdepth 4 -type f | sort >&2 || true
+            exit 1
+          fi
+
+          label_args=()
+          if [ -d artifacts/original-labels ]; then
+            labels_csv="$(python - <<'PY'
+          import glob
+          import os
+          matches = sorted(glob.glob(os.environ["ORIGINAL_LABELS_GLOB"], root_dir="artifacts/original-labels", recursive=True))
+          print("" if not matches else "artifacts/original-labels/" + matches[0])
+          PY
+          )"
+            if [ -n "${labels_csv}" ]; then
+              label_args+=(--original-labels "${labels_csv}")
+            else
+              echo "No original label CSV matched ${ORIGINAL_LABELS_GLOB}; continuing without original-label reassignment." >&2
+            fi
+          fi
+
+          mkdir -p results/imm-fragmented-hypothesis-audit
+          python scripts/audit_imm_fragmented_hypotheses.py \
+            --event-model-evidence "${evidence_csv}" \
+            --output results/imm-fragmented-hypothesis-audit \
+            --margin-threshold "${{ inputs.margin_threshold }}" \
+            "${label_args[@]}"
+
+      - name: Validate audit outputs
+        run: |
+          set -euo pipefail
+          for required_file in \
+            imm_fragmented_head_to_head_event_table.csv \
+            imm_fragmented_head_to_head_summary.csv \
+            trajectory_taxonomy_event_table.csv \
+            trajectory_taxonomy_summary.csv \
+            original_momentum_reassignment_event_table.csv \
+            original_momentum_reassignment_summary.csv \
+            imm_fragmented_hypothesis_gate_summary.csv; do
+            test -s "results/imm-fragmented-hypothesis-audit/${required_file}" || {
+              echo "Missing results/imm-fragmented-hypothesis-audit/${required_file}" >&2
+              exit 1
+            }
+          done
+          python - <<'PY'
+          import pandas as pd
+          root = "results/imm-fragmented-hypothesis-audit"
+          gates = pd.read_csv(f"{root}/imm_fragmented_hypothesis_gate_summary.csv")
+          print("IMM/fragmented hypothesis gates:")
+          print(gates.to_string(index=False))
+          taxonomy = pd.read_csv(f"{root}/trajectory_taxonomy_summary.csv")
+          print("\nTrajectory taxonomy summary:")
+          print(taxonomy.to_string(index=False))
+          PY
+
+      - name: Upload IMM/fragmented hypothesis audit
+        uses: actions/upload-artifact@v7
+        with:
+          name: imm-fragmented-hypothesis-audit-${{ github.run_id }}
+          path: results/imm-fragmented-hypothesis-audit/
+          if-no-files-found: error

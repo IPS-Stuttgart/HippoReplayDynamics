@@ -1,0 +1,43 @@
+name: Trigger Rat2/Open2 K100 matched-null diagnostic
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - .github/triggers/rat2-open2-k100-matched-null.txt
+      - .github/workflows/trigger-rat2-open2-k100-matched-null.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: write
+
+concurrency:
+  group: rat2-open2-k100-matched-null-trigger-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  dispatch-rat2-open2-k100:
+    name: Dispatch Rat2/Open2 K100 matched-null diagnostic
+    runs-on: ubuntu-latest
+    steps:
+      - name: Dispatch spike-matched null workflow
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh workflow run spike-matched-event-window-null.yml \
+            -R "${{ github.repository }}" \
+            --ref main \
+            -f session_filter="Rat2/Open2" \
+            -f events="run" \
+            -f max_events="10" \
+            -f events_per_session_for_k50="10" \
+            -f comparison_scope="lightweight-first-order-imm-vs-stationary" \
+            -f null_models="sorted-spike-state-space-stationary sorted-spike-state-space-first-order-imm" \
+            -f null_count="100" \
+            -f event_shard_count="16" \
+            -f spike_count_tolerance_fraction="0.10" \
+            -f null_random_seed="1"
+          echo "Dispatched spike-matched-event-window-null.yml for Rat2/Open2 K=100 lightweight diagnostic."

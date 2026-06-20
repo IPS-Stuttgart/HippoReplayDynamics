@@ -28,13 +28,20 @@ on:
         description: "Log-evidence margin for confident IMM/fragmented decisions"
         required: true
         default: "5.5"
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/imm-fragmented-hypothesis-audit-request.json"
+      - ".github/workflows/imm-fragmented-hypothesis-audit.yml"
+      - "scripts/audit_imm_fragmented_hypotheses.py"
 
 permissions:
   contents: read
   actions: read
 
 concurrency:
-  group: imm-fragmented-hypothesis-audit-${{ github.repository }}-${{ inputs.evidence_run_id }}-${{ github.ref }}
+  group: imm-fragmented-hypothesis-audit-${{ github.repository }}-${{ github.ref }}-${{ github.sha }}
   cancel-in-progress: false
 
 jobs:
@@ -58,28 +65,76 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -e .
 
+      - name: Resolve audit request
+        env:
+          DISPATCH_EVIDENCE_RUN_ID: ${{ inputs.evidence_run_id }}
+          DISPATCH_EVIDENCE_ARTIFACT_NAME: ${{ inputs.evidence_artifact_name }}
+          DISPATCH_ORIGINAL_LABELS_RUN_ID: ${{ inputs.original_labels_run_id }}
+          DISPATCH_ORIGINAL_LABELS_ARTIFACT_NAME: ${{ inputs.original_labels_artifact_name }}
+          DISPATCH_ORIGINAL_LABELS_GLOB: ${{ inputs.original_labels_glob }}
+          DISPATCH_MARGIN_THRESHOLD: ${{ inputs.margin_threshold }}
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          defaults = {
+              "evidence_run_id": "27011374643",
+              "evidence_artifact_name": "model-evidence-all-sessions-27011374643",
+              "original_labels_run_id": "",
+              "original_labels_artifact_name": "",
+              "original_labels_glob": "**/*original*label*.csv",
+              "margin_threshold": "5.5",
+          }
+          if os.environ.get("GITHUB_EVENT_NAME") == "workflow_dispatch":
+              values = {
+                  "evidence_run_id": os.environ.get("DISPATCH_EVIDENCE_RUN_ID", ""),
+                  "evidence_artifact_name": os.environ.get("DISPATCH_EVIDENCE_ARTIFACT_NAME", ""),
+                  "original_labels_run_id": os.environ.get("DISPATCH_ORIGINAL_LABELS_RUN_ID", ""),
+                  "original_labels_artifact_name": os.environ.get("DISPATCH_ORIGINAL_LABELS_ARTIFACT_NAME", ""),
+                  "original_labels_glob": os.environ.get("DISPATCH_ORIGINAL_LABELS_GLOB", ""),
+                  "margin_threshold": os.environ.get("DISPATCH_MARGIN_THRESHOLD", ""),
+              }
+          else:
+              config_path = Path(".github/imm-fragmented-hypothesis-audit-request.json")
+              values = json.loads(config_path.read_text(encoding="utf-8"))
+          resolved = {key: str(values.get(key, "") or default) for key, default in defaults.items()}
+          with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as env_file:
+              for key, value in resolved.items():
+                  env_file.write(f"{key.upper()}={value}\n")
+          print("Resolved IMM/fragmented audit request:")
+          for key, value in resolved.items():
+              print(f"  {key}={value}")
+          PY
+
       - name: Download model-evidence artifact
-        uses: actions/download-artifact@v7
-        with:
-          run-id: ${{ inputs.evidence_run_id }}
-          name: ${{ inputs.evidence_artifact_name }}
-          path: artifacts/model-evidence
-          github-token: ${{ github.token }}
-          repository: ${{ github.repository }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts/model-evidence
+          gh run download "${EVIDENCE_RUN_ID}" \
+            -R "${GITHUB_REPOSITORY}" \
+            -n "${EVIDENCE_ARTIFACT_NAME}" \
+            -D artifacts/model-evidence
 
       - name: Download original-label artifact
-        if: ${{ inputs.original_labels_run_id != '' && inputs.original_labels_artifact_name != '' }}
-        uses: actions/download-artifact@v7
-        with:
-          run-id: ${{ inputs.original_labels_run_id }}
-          name: ${{ inputs.original_labels_artifact_name }}
-          path: artifacts/original-labels
-          github-token: ${{ github.token }}
-          repository: ${{ github.repository }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if [ -n "${ORIGINAL_LABELS_RUN_ID}" ] && [ -n "${ORIGINAL_LABELS_ARTIFACT_NAME}" ]; then
+            mkdir -p artifacts/original-labels
+            gh run download "${ORIGINAL_LABELS_RUN_ID}" \
+              -R "${GITHUB_REPOSITORY}" \
+              -n "${ORIGINAL_LABELS_ARTIFACT_NAME}" \
+              -D artifacts/original-labels
+          else
+            echo "No original-label artifact configured; original momentum reassignment will be empty."
+          fi
 
       - name: Run IMM/fragmented audit
-        env:
-          ORIGINAL_LABELS_GLOB: ${{ inputs.original_labels_glob }}
         run: |
           set -euo pipefail
           evidence_csv="$(find artifacts/model-evidence -name all_sessions_event_model_evidence.csv -print -quit)"
@@ -112,7 +167,7 @@ jobs:
           python scripts/audit_imm_fragmented_hypotheses.py \
             --event-model-evidence "${evidence_csv}" \
             --output results/imm-fragmented-hypothesis-audit \
-            --margin-threshold "${{ inputs.margin_threshold }}" \
+            --margin-threshold "${MARGIN_THRESHOLD}" \
             "${label_args[@]}"
 
       - name: Validate audit outputs

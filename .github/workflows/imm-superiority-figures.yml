@@ -1,0 +1,148 @@
+---
+name: IMM superiority figures
+
+on:
+  workflow_dispatch:
+    inputs:
+      audit_run_id:
+        description: "Run ID containing imm-fragmented-hypothesis-audit artifact"
+        required: true
+        default: "27870307437"
+      audit_artifact_name:
+        description: "Artifact name containing IMM/fragmented audit CSVs"
+        required: true
+        default: "imm-fragmented-hypothesis-audit-27870307437"
+      margin_threshold:
+        description: "Log-evidence margin used for figure annotations"
+        required: true
+        default: "5.5"
+      max_examples:
+        description: "Number of top clean IMM examples to show"
+        required: true
+        default: "6"
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/imm-superiority-figures-request.json"
+      - ".github/workflows/imm-superiority-figures.yml"
+      - "scripts/plot_imm_superiority_figures.py"
+  pull_request:
+    paths:
+      - ".github/imm-superiority-figures-request.json"
+      - ".github/workflows/imm-superiority-figures.yml"
+      - "scripts/plot_imm_superiority_figures.py"
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: imm-superiority-figures-${{ github.repository }}-${{ github.ref }}-${{ github.sha }}
+  cancel-in-progress: false
+
+jobs:
+  figures:
+    name: Generate IMM superiority figures
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Install package and plotting dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e . matplotlib
+
+      - name: Resolve figure request
+        env:
+          DISPATCH_AUDIT_RUN_ID: ${{ inputs.audit_run_id }}
+          DISPATCH_AUDIT_ARTIFACT_NAME: ${{ inputs.audit_artifact_name }}
+          DISPATCH_MARGIN_THRESHOLD: ${{ inputs.margin_threshold }}
+          DISPATCH_MAX_EXAMPLES: ${{ inputs.max_examples }}
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          defaults = {
+              "audit_run_id": "27870307437",
+              "audit_artifact_name": "imm-fragmented-hypothesis-audit-27870307437",
+              "margin_threshold": "5.5",
+              "max_examples": "6",
+          }
+          if os.environ.get("GITHUB_EVENT_NAME") == "workflow_dispatch":
+              values = {
+                  "audit_run_id": os.environ.get("DISPATCH_AUDIT_RUN_ID", ""),
+                  "audit_artifact_name": os.environ.get("DISPATCH_AUDIT_ARTIFACT_NAME", ""),
+                  "margin_threshold": os.environ.get("DISPATCH_MARGIN_THRESHOLD", ""),
+                  "max_examples": os.environ.get("DISPATCH_MAX_EXAMPLES", ""),
+              }
+          else:
+              config_path = Path(".github/imm-superiority-figures-request.json")
+              values = json.loads(config_path.read_text(encoding="utf-8"))
+          resolved = {key: str(values.get(key, "") or default) for key, default in defaults.items()}
+          with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as env_file:
+              for key, value in resolved.items():
+                  env_file.write(f"{key.upper()}={value}\n")
+          print("Resolved IMM superiority figure request:")
+          for key, value in resolved.items():
+              print(f"  {key}={value}")
+          PY
+
+      - name: Download IMM/fragmented audit artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts/imm-fragmented-audit
+          gh run download "${AUDIT_RUN_ID}" \
+            -R "${GITHUB_REPOSITORY}" \
+            -n "${AUDIT_ARTIFACT_NAME}" \
+            -D artifacts/imm-fragmented-audit
+
+      - name: Generate figures
+        run: |
+          set -euo pipefail
+          mkdir -p results/imm-superiority-figures
+          python scripts/plot_imm_superiority_figures.py \
+            --audit-dir artifacts/imm-fragmented-audit \
+            --output results/imm-superiority-figures \
+            --margin-threshold "${MARGIN_THRESHOLD}" \
+            --max-examples "${MAX_EXAMPLES}"
+
+      - name: Validate figures
+        run: |
+          set -euo pipefail
+          for required_file in \
+            taxonomy_counts.png \
+            imm_minus_fragmented_histogram.png \
+            imm_superiority_scatter.png \
+            top_clean_imm_evidence_bars.png \
+            taxonomy_example_evidence_bars.png \
+            example_event_manifest.csv \
+            focus_event_manifest.csv \
+            figure_manifest.json; do
+            test -s "results/imm-superiority-figures/${required_file}" || {
+              echo "Missing results/imm-superiority-figures/${required_file}" >&2
+              find results/imm-superiority-figures -maxdepth 2 -type f | sort >&2 || true
+              exit 1
+            }
+          done
+          cat results/imm-superiority-figures/figure_manifest.json
+
+      - name: Upload IMM superiority figures
+        uses: actions/upload-artifact@v7
+        with:
+          name: imm-superiority-figures-${{ github.run_id }}
+          path: results/imm-superiority-figures/
+          if-no-files-found: error

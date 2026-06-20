@@ -1,6 +1,8 @@
 """Duration-aware four-mode state-space IMM patch."""
 from __future__ import annotations
 
+import inspect
+
 import numpy as np
 from scipy.special import logsumexp
 
@@ -14,6 +16,29 @@ from .duration_dynamics import (
     transition_durations_s,
 )
 
+_NATIVE_DURATION_SCORE_IDENTIFIERS = {
+    ("hipporeplayimm.state_space_model", "score"),
+    ("hipporeplayimm.duration_occupancy", "_score_state_space_duration_with_occupancy"),
+}
+
+
+def _has_native_duration_occupancy_score(score: object) -> bool:
+    """Return whether ``score`` already provides the native duration-aware scorer."""
+
+    if getattr(score, "_native_duration_occupancy_aware", False):
+        return True
+    return (
+        getattr(score, "__module__", ""),
+        getattr(score, "__name__", ""),
+    ) in _NATIVE_DURATION_SCORE_IDENTIFIERS
+
+
+def _accepts_return_trajectory(score: object) -> bool:
+    try:
+        return "return_trajectory" in inspect.signature(score).parameters
+    except (TypeError, ValueError):
+        return False
+
 
 def apply_state_space_imm_duration_patch() -> None:
     """Patch four-mode state-space IMM to use per-transition durations."""
@@ -23,20 +48,33 @@ def apply_state_space_imm_duration_patch() -> None:
     if getattr(ss, "_state_space_imm_duration_patch_applied", False):
         return
 
-    if getattr(ss.StateSpaceReplayModel.score, "_native_duration_occupancy_aware", False):
+    if _has_native_duration_occupancy_score(ss.StateSpaceReplayModel.score):
         ss._state_space_imm_duration_patch_applied = True
         return
 
     previous_score = ss.StateSpaceReplayModel.score
 
-    def score(self, emissions, bin_centers, candidate_indices=None, *, occupancy_s=None):
+    def score(
+        self,
+        emissions,
+        bin_centers,
+        candidate_indices=None,
+        *,
+        occupancy_s=None,
+        return_trajectory: bool = True,
+    ):
         if self.mode != "imm" or occupancy_s is not None:
+            kwargs = {
+                "candidate_indices": candidate_indices,
+                "occupancy_s": occupancy_s,
+            }
+            if _accepts_return_trajectory(previous_score):
+                kwargs["return_trajectory"] = return_trajectory
             return previous_score(
                 self,
                 emissions,
                 bin_centers,
-                candidate_indices=candidate_indices,
-                occupancy_s=occupancy_s,
+                **kwargs,
             )
         if emissions.n_time == 0:
             raise ValueError("emissions must contain at least one time bin")
@@ -105,7 +143,7 @@ def apply_state_space_imm_duration_patch() -> None:
             "state_space_mode": str(self.mode),
             "state_space_time_bin_s": float(emissions.dt),
             "state_space_transition_durations": ",".join(f"{duration:.12g}" for duration in durations),
-            "state_space_trajectory_posterior": 1,
+            "state_space_trajectory_posterior": int(bool(return_trajectory)),
             "state_space_trajectory_time_bins": int(emissions.n_time),
             "state_space_stationary_sigma_cm": float(self.config.stationary_sigma_cm),
             "state_space_diffusion_sigma_cm_sqrt_s": float(self.config.diffusion_sigma_cm_sqrt_s),
@@ -126,7 +164,7 @@ def apply_state_space_imm_duration_patch() -> None:
             emissions.n_spikes,
             diagnostics=diagnostics,
             terminal_log_posterior=terminal,
-            trajectory_log_posterior=trajectory,
+            trajectory_log_posterior=trajectory if return_trajectory else None,
         )
 
     ss.StateSpaceReplayModel.__imm_duration_previous_score__ = previous_score

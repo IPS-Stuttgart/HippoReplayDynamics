@@ -50,9 +50,9 @@ def test_imm_fragmented_audit_separates_clean_imm_fragmented_and_momentum(tmp_pa
 
     labels = pd.DataFrame(
         [
-            {"session": "Rat1/Open1", "event_index": 0, "original_label": "momentum"},
-            {"session": "Rat1/Open1", "event_index": 1, "original_label": "momentum"},
-            {"session": "Rat2/Open1", "event_index": 2, "original_label": "momentum"},
+            {"session": "Rat1/Open1", "event_index": 0, "original_algorithm_label": "momentum"},
+            {"session": "Rat1/Open1", "event_index": 1, "original_algorithm_label": "momentum"},
+            {"session": "Rat2/Open1", "event_index": 2, "original_algorithm_label": "momentum"},
         ]
     )
     outputs = write_outputs(evidence, tmp_path, labels=labels, threshold=5.5)

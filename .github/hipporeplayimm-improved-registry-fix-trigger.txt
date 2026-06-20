@@ -1,1 +1,2 @@
 Trigger improved model-evidence registry parity fix on 2026-06-20.
+Second marker: 2026-06-20T16:17Z.

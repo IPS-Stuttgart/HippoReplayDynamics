@@ -1,0 +1,90 @@
+---
+name: Replay behavior alignment self-hosted
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "docs/replay_behavior_alignment_trigger.txt"
+      - ".github/workflows/replay-behavior-alignment-selfhosted.yml"
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  replay-behavior-alignment:
+    runs-on: self-hosted
+    timeout-minutes: 120
+    env:
+      DATASET_ROOT: /home/github-runner/.cache/datasets/hipporeplayimm/pfeiffer-foster
+      EVIDENCE_RUN_ID: "27011374643"
+      EVIDENCE_ARTIFACT_NAME: model-evidence-all-sessions-27011374643
+      FUTURE_HORIZON_S: "2.0"
+      PREVIOUS_HORIZON_S: "2.0"
+      OMP_NUM_THREADS: "1"
+      OPENBLAS_NUM_THREADS: "1"
+      MKL_NUM_THREADS: "1"
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Install package
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e .
+
+      - name: Validate local dataset
+        run: |
+          set -euo pipefail
+          python .github/actions/ensure-pfeiffer-foster-dataset/validate_dataset.py \
+            --dataset-root "${DATASET_ROOT}" \
+            --session Rat1/Open1 \
+            --write-manifest
+
+      - name: Download model-evidence artifact
+        uses: actions/download-artifact@v7
+        with:
+          run-id: 27011374643
+          name: model-evidence-all-sessions-27011374643
+          path: artifacts/model-evidence
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+
+      - name: Run behavior alignment
+        run: |
+          set -euo pipefail
+          event_csv="$(find artifacts/model-evidence -name all_sessions_event_model_evidence.csv -print -quit)"
+          test -n "${event_csv}"
+          mkdir -p results/replay-behavior-alignment
+          python scripts/replay_behavior_alignment.py \
+            --event-model-evidence "${event_csv}" \
+            --dataset-root "${DATASET_ROOT}" \
+            --future-horizon-s "${FUTURE_HORIZON_S}" \
+            --previous-horizon-s "${PREVIOUS_HORIZON_S}" \
+            --output results/replay-behavior-alignment
+          test -s results/replay-behavior-alignment/replay_behavior_alignment.csv
+          test -s results/replay-behavior-alignment/future_path_prediction_summary.csv
+          test -s results/replay-behavior-alignment/rat_behavior_alignment_summary.csv
+          test -s results/replay-behavior-alignment/leave_one_rat_out_behavior_prediction.csv
+
+      - name: Print summaries
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import pandas as pd
+          root = Path('results/replay-behavior-alignment')
+          for name in ['future_path_prediction_summary.csv', 'rat_behavior_alignment_summary.csv', 'leave_one_rat_out_behavior_prediction.csv']:
+              print('\n##', name)
+              print(pd.read_csv(root / name).to_string(index=False))
+          PY
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: replay-behavior-alignment-${{ github.run_id }}
+          path: results/replay-behavior-alignment
+          if-no-files-found: error

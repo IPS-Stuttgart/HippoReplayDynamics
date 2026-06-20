@@ -149,6 +149,21 @@ def _summary_rows(table: pd.DataFrame) -> list[dict[str, object]]:
     return rows
 
 
+def _reassignment_summary(reassignment: pd.DataFrame) -> list[dict[str, object]]:
+    rows: list[dict[str, object]] = [
+        {"metric": "original_momentum_events", "value": len(reassignment)}
+    ]
+    if reassignment.empty:
+        return rows
+    for label, count in reassignment["within_family_classification"].value_counts().items():
+        rows.append({"metric": f"classification_{label}", "value": int(count)})
+    for column in ["delta_imm_minus_fragmented", "delta_imm_minus_momentum", "delta_momentum_minus_diffusion"]:
+        values = pd.to_numeric(reassignment[column], errors="coerce").dropna()
+        rows.append({"metric": f"mean_{column}", "value": float(values.mean()) if not values.empty else np.nan})
+        rows.append({"metric": f"median_{column}", "value": float(values.median()) if not values.empty else np.nan})
+    return rows
+
+
 def _load_labels(path: str | Path | None) -> pd.DataFrame:
     if not path:
         return pd.DataFrame()
@@ -223,7 +238,7 @@ def write_outputs(evidence: pd.DataFrame, output: str | Path, labels: pd.DataFra
         "trajectory_taxonomy_event_table.csv": table,
         "trajectory_taxonomy_summary.csv": taxonomy,
         "original_momentum_reassignment_event_table.csv": reassignment,
-        "original_momentum_reassignment_summary.csv": pd.DataFrame(_summary_rows(reassignment)) if not reassignment.empty else pd.DataFrame([{"metric": "original_momentum_events", "value": 0}]),
+        "original_momentum_reassignment_summary.csv": pd.DataFrame(_reassignment_summary(reassignment)),
         "imm_fragmented_hypothesis_gate_summary.csv": _gates(table, reassignment),
     }
     for filename, frame in outputs.items():

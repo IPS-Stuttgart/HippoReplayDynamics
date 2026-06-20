@@ -6,3 +6,4 @@ alignment workflow against the default model-evidence artifact.
 
 Initial trigger: 2026-06-20
 Main push trigger: 2026-06-20 after PR #286 merge
+Manual retrigger: 2026-06-20 behavior-alignment run request

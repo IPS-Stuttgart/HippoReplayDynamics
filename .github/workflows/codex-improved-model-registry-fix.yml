@@ -1,0 +1,122 @@
+name: Codex improved model registry fix
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - .github/hipporeplayimm-improved-registry-fix-trigger.txt
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+      - name: Apply improved model-evidence registry patch
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path("scripts/benchmark_model_evidence_improved.py")
+          text = path.read_text(encoding="utf-8")
+
+          def replace_once(old: str, new: str) -> None:
+              global text
+              if old not in text:
+                  raise SystemExit(f"Missing patch anchor: {old[:120]!r}")
+              text = text.replace(old, new, 1)
+
+          if "from dataclasses import replace" not in text:
+              replace_once(
+                  "from __future__ import annotations\n\nimport argparse",
+                  "from __future__ import annotations\n\nfrom dataclasses import replace\nimport argparse",
+              )
+
+          if '"sorted-spike-state-space-trajectory-imm-anchored-exact-sparse"' not in text:
+              replace_once(
+                  '    "sorted-spike-state-space-trajectory-imm-exact-sparse",\n    "sorted-spike-state-space-imm",',
+                  '    "sorted-spike-state-space-trajectory-imm-exact-sparse",\n    "sorted-spike-state-space-trajectory-imm-anchored-exact-sparse",\n    "sorted-spike-state-space-trajectory-imm-low-leak-exact-sparse",\n    "sorted-spike-state-space-trajectory-imm-persistent-exact-sparse",\n    "sorted-spike-state-space-displacement-momentum",\n    "sorted-spike-state-space-imm",',
+              )
+              replace_once(
+                  '    "clusterless-state-space-trajectory-imm-exact-sparse",\n    "clusterless-state-space-imm",',
+                  '    "clusterless-state-space-trajectory-imm-exact-sparse",\n    "clusterless-state-space-displacement-momentum",\n    "clusterless-state-space-imm",',
+              )
+
+          if "trajectory_imm_mode_stickiness=getattr(args" not in text:
+              replace_once(
+                  "        imm_switch_tau_s=args.state_space_imm_switch_tau_s,\n        momentum_sigma_cm_sqrt_s=args.state_space_momentum_sigma_cm_sqrt_s,",
+                  "        imm_switch_tau_s=args.state_space_imm_switch_tau_s,\n        trajectory_imm_mode_stickiness=getattr(\n            args, \"state_space_trajectory_imm_mode_stickiness\", None\n        ),\n        trajectory_imm_momentum_initial_probability=getattr(\n            args, \"state_space_trajectory_imm_momentum_initial_probability\", None\n        ),\n        trajectory_imm_momentum_switch_probability=getattr(\n            args, \"state_space_trajectory_imm_momentum_switch_probability\", None\n        ),\n        momentum_sigma_cm_sqrt_s=args.state_space_momentum_sigma_cm_sqrt_s,",
+              )
+              replace_once(
+                  "        momentum_candidate_mass_threshold=args.state_space_momentum_candidate_mass_threshold,\n        momentum_candidate_min_k=args.state_space_momentum_candidate_min_k,",
+                  "        momentum_candidate_mass_threshold=args.state_space_momentum_candidate_mass_threshold,\n        displacement_radius_bins=getattr(args, \"state_space_displacement_radius_bins\", 2),\n        displacement_position_sigma_cm=getattr(\n            args, \"state_space_displacement_position_sigma_cm\", 0.0\n        ),\n        displacement_transition_sigma_cm_sqrt_s=getattr(\n            args, \"state_space_displacement_transition_sigma_cm_sqrt_s\", 0.0\n        ),\n        displacement_prior_sigma_cm=getattr(\n            args, \"state_space_displacement_prior_sigma_cm\", 0.0\n        ),\n        momentum_candidate_min_k=args.state_space_momentum_candidate_min_k,",
+              )
+
+          old_state_space_model = '''    def state_space_model(mode: str, *, name: str | None = None) -> SortedSpikeStateSpaceReplayModel:\n        return SortedSpikeStateSpaceReplayModel(\n            mode=mode,\n            config=_state_space_config(args, mode),\n            name=name,\n        )\n'''
+          new_state_space_model = '''    def state_space_model(\n        mode: str,\n        *,\n        name: str | None = None,\n        trajectory_imm_mode_stickiness: float | None = None,\n        trajectory_imm_momentum_initial_probability: float | None = None,\n        trajectory_imm_momentum_switch_probability: float | None = None,\n    ) -> SortedSpikeStateSpaceReplayModel:\n        config = _state_space_config(args, mode)\n        overrides: dict[str, float] = {}\n        if trajectory_imm_mode_stickiness is not None:\n            overrides[\"trajectory_imm_mode_stickiness\"] = trajectory_imm_mode_stickiness\n        if trajectory_imm_momentum_initial_probability is not None:\n            overrides[\"trajectory_imm_momentum_initial_probability\"] = (\n                trajectory_imm_momentum_initial_probability\n            )\n        if trajectory_imm_momentum_switch_probability is not None:\n            overrides[\"trajectory_imm_momentum_switch_probability\"] = (\n                trajectory_imm_momentum_switch_probability\n            )\n        if overrides:\n            config = replace(config, **overrides)\n        return SortedSpikeStateSpaceReplayModel(\n            mode=mode,\n            config=config,\n            name=name,\n        )\n'''
+          if old_state_space_model in text:
+              replace_once(old_state_space_model, new_state_space_model)
+
+          if '"sorted-spike-state-space-trajectory-imm-anchored-exact-sparse": state_space_model(' not in text:
+              replace_once(
+                  '        "sorted-spike-state-space-trajectory-imm-exact-sparse": state_space_model("trajectory-imm-exact-sparse"),\n        "sorted-spike-state-space-momentum-bidirectional": BidirectionalReplayModel(',
+                  '        "sorted-spike-state-space-trajectory-imm-exact-sparse": state_space_model("trajectory-imm-exact-sparse"),\n        "sorted-spike-state-space-trajectory-imm-anchored-exact-sparse": state_space_model(\n            "trajectory-imm-exact-sparse",\n            name="sorted-spike-state-space-trajectory-imm-anchored-exact-sparse",\n            trajectory_imm_momentum_initial_probability=0.05,\n            trajectory_imm_momentum_switch_probability=0.005,\n        ),\n        "sorted-spike-state-space-trajectory-imm-low-leak-exact-sparse": state_space_model(\n            "trajectory-imm-exact-sparse",\n            name="sorted-spike-state-space-trajectory-imm-low-leak-exact-sparse",\n            trajectory_imm_momentum_initial_probability=0.01,\n            trajectory_imm_momentum_switch_probability=0.001,\n        ),\n        "sorted-spike-state-space-trajectory-imm-persistent-exact-sparse": state_space_model(\n            "trajectory-imm-exact-sparse",\n            name="sorted-spike-state-space-trajectory-imm-persistent-exact-sparse",\n            trajectory_imm_mode_stickiness=0.985,\n        ),\n        "sorted-spike-state-space-displacement-momentum": state_space_model("displacement-momentum"),\n        "sorted-spike-state-space-momentum-bidirectional": BidirectionalReplayModel(',
+              )
+              replace_once(
+                  '        "clusterless-state-space-trajectory-imm-exact-sparse": clusterless_model("trajectory-imm-exact-sparse"),\n        "clusterless-state-space-imm": clusterless_model("imm"),',
+                  '        "clusterless-state-space-trajectory-imm-exact-sparse": clusterless_model("trajectory-imm-exact-sparse"),\n        "clusterless-state-space-displacement-momentum": clusterless_model("displacement-momentum"),\n        "clusterless-state-space-imm": clusterless_model("imm"),',
+              )
+
+          if "state_space_trajectory_imm_mode_stickiness" not in text.split("def main()", 1)[0]:
+              replace_once(
+                  '        "state_space_imm_mode_stickiness_effective": _effective_state_space_imm_stickiness(args),\n        "state_space_momentum_sigma_cm_sqrt_s": float(args.state_space_momentum_sigma_cm_sqrt_s),',
+                  '        "state_space_imm_mode_stickiness_effective": _effective_state_space_imm_stickiness(args),\n        "state_space_trajectory_imm_mode_stickiness": ""\n        if getattr(args, "state_space_trajectory_imm_mode_stickiness", None) is None\n        else float(args.state_space_trajectory_imm_mode_stickiness),\n        "state_space_trajectory_imm_momentum_initial_probability": ""\n        if getattr(args, "state_space_trajectory_imm_momentum_initial_probability", None) is None\n        else float(args.state_space_trajectory_imm_momentum_initial_probability),\n        "state_space_trajectory_imm_momentum_switch_probability": ""\n        if getattr(args, "state_space_trajectory_imm_momentum_switch_probability", None) is None\n        else float(args.state_space_trajectory_imm_momentum_switch_probability),\n        "state_space_momentum_sigma_cm_sqrt_s": float(args.state_space_momentum_sigma_cm_sqrt_s),',
+              )
+              replace_once(
+                  '        "state_space_momentum_candidate_source": str(args.state_space_momentum_candidate_source),\n        "clusterless_mark_likelihood": args.clusterless_mark_likelihood,',
+                  '        "state_space_momentum_candidate_source": str(args.state_space_momentum_candidate_source),\n        "state_space_displacement_radius_bins": int(getattr(args, "state_space_displacement_radius_bins", 2)),\n        "state_space_displacement_position_sigma_cm": float(\n            getattr(args, "state_space_displacement_position_sigma_cm", 0.0)\n        ),\n        "state_space_displacement_transition_sigma_cm_sqrt_s": float(\n            getattr(args, "state_space_displacement_transition_sigma_cm_sqrt_s", 0.0)\n        ),\n        "state_space_displacement_prior_sigma_cm": float(\n            getattr(args, "state_space_displacement_prior_sigma_cm", 0.0)\n        ),\n        "clusterless_mark_likelihood": args.clusterless_mark_likelihood,',
+              )
+
+          if "def _optional_float_argument" not in text:
+              replace_once(
+                  'def _optional_threshold(value: float) -> float | None:\n    return None if not np.isfinite(float(value)) else float(value)\n',
+                  'def _optional_threshold(value: float) -> float | None:\n    return None if not np.isfinite(float(value)) else float(value)\n\n\ndef _optional_float_argument(value: str | None) -> float | None:\n    if value is None:\n        return None\n    text = str(value).strip().lower()\n    if text in {"", "none", "null"}:\n        return None\n    return float(text)\n',
+              )
+
+          if "--state-space-trajectory-imm-mode-stickiness" not in text:
+              replace_once(
+                  '    parser.add_argument("--state-space-imm-switch-tau-s", type=float, default=DEFAULT_IMPROVED_STATE_SPACE_IMM_SWITCH_TAU_S)\n    parser.add_argument("--state-space-momentum-sigma-cm-sqrt-s", type=float, default=85.0)',
+                  '    parser.add_argument("--state-space-imm-switch-tau-s", type=float, default=DEFAULT_IMPROVED_STATE_SPACE_IMM_SWITCH_TAU_S)\n    parser.add_argument(\n        "--state-space-trajectory-imm-mode-stickiness",\n        type=_optional_float_argument,\n        default=None,\n        help=(\n            "Optional trajectory-IMM-specific mode-transition stickiness. "\n            "Empty/default reuses the shared state-space IMM stickiness."\n        ),\n    )\n    parser.add_argument(\n        "--state-space-trajectory-imm-momentum-initial-probability",\n        type=_optional_float_argument,\n        default=None,\n        help="Optional trajectory-IMM initial probability assigned to the momentum mode.",\n    )\n    parser.add_argument(\n        "--state-space-trajectory-imm-momentum-switch-probability",\n        type=_optional_float_argument,\n        default=None,\n        help="Optional per-transition probability of switching from first-order modes into momentum.",\n    )\n    parser.add_argument("--state-space-momentum-sigma-cm-sqrt-s", type=float, default=85.0)',
+              )
+              replace_once(
+                  '    parser.add_argument("--state-space-momentum-candidate-top-k", type=int, default=DEFAULT_IMPROVED_STATE_SPACE_MOMENTUM_CANDIDATE_TOP_K)\n    parser.add_argument("--state-space-momentum-candidate-mass-threshold", type=float)',
+                  '    parser.add_argument("--state-space-momentum-candidate-top-k", type=int, default=DEFAULT_IMPROVED_STATE_SPACE_MOMENTUM_CANDIDATE_TOP_K)\n    parser.add_argument("--state-space-displacement-radius-bins", type=int, default=2)\n    parser.add_argument("--state-space-displacement-position-sigma-cm", type=float, default=0.0)\n    parser.add_argument("--state-space-displacement-transition-sigma-cm-sqrt-s", type=float, default=0.0)\n    parser.add_argument("--state-space-displacement-prior-sigma-cm", type=float, default=0.0)\n    parser.add_argument("--state-space-momentum-candidate-mass-threshold", type=float)',
+              )
+
+          path.write_text(text, encoding="utf-8")
+
+          test_path = Path("tests/test_improved_model_evidence_registry_parity.py")
+          test_path.write_text('''from __future__ import annotations\n\nimport argparse\nimport importlib.util\nimport sys\nfrom pathlib import Path\nfrom types import SimpleNamespace\n\n_SCRIPT = Path(__file__).resolve().parents[1] / "scripts" / "benchmark_model_evidence_improved.py"\nsys.path.insert(0, str(_SCRIPT.parent))\n_SPEC = importlib.util.spec_from_file_location("benchmark_model_evidence_improved_registry", _SCRIPT)\nassert _SPEC is not None\nbenchmark_model_evidence_improved = importlib.util.module_from_spec(_SPEC)\nassert _SPEC.loader is not None\n_SPEC.loader.exec_module(benchmark_model_evidence_improved)\n\n\ndef _args(models: str) -> argparse.Namespace:\n    return argparse.Namespace(\n        models=models,\n        include_clusterless_defaults=False,\n        candidate_top_k=64,\n        stationary_sigma_cm=2.0,\n        diffusion_sigma_cm=12.0,\n        momentum_sigma_cm=12.0,\n        velocity_decay=0.95,\n        mode_stickiness=0.94,\n        state_space_stationary_sigma_cm=1.5,\n        state_space_diffusion_sigma_cm_sqrt_s=42.0,\n        state_space_max_step_sigma=3.0,\n        state_space_imm_mode_stickiness=0.91,\n        state_space_imm_switch_tau_s=0.0,\n        time_bin_s=0.003,\n        state_space_trajectory_imm_mode_stickiness=None,\n        state_space_trajectory_imm_momentum_initial_probability=None,\n        state_space_trajectory_imm_momentum_switch_probability=None,\n        state_space_momentum_sigma_cm_sqrt_s=43.0,\n        state_space_momentum_initial_sigma_cm_sqrt_s=44.0,\n        state_space_momentum_velocity_decay=0.8,\n        state_space_momentum_velocity_decay_tau_s=0.0,\n        state_space_momentum_candidate_top_k=17,\n        state_space_momentum_candidate_mass_threshold=None,\n        state_space_momentum_candidate_min_k=1,\n        state_space_momentum_candidate_max_k=0,\n        state_space_momentum_predicted_candidate_top_k=5,\n        state_space_momentum_candidate_source="emission",\n        state_space_displacement_radius_bins=2,\n        state_space_displacement_position_sigma_cm=0.0,\n        state_space_displacement_transition_sigma_cm_sqrt_s=0.0,\n        state_space_displacement_prior_sigma_cm=0.0,\n        state_space_valid_occupancy_threshold_s=0.0,\n        clusterless_mark_likelihood="local-kde",\n        goal_state_space_transition_sigma_cm_sqrt_s=85.0,\n        goal_state_space_drift_speed_cm_s=400.0,\n        goal_state_space_max_step_sigma=4.0,\n        valid_state_min_occupancy_s=0.02,\n        valid_state_top_occupancy_fraction=None,\n        valid_state_sigma_cm=5.0,\n        valid_state_max_step_sigma=4.0,\n        valid_state_grid_diagonal_neighbors=True,\n        valid_state_grid_stay_probability=0.0,\n    )\n\n\ndef test_improved_model_evidence_accepts_trajectory_imm_and_displacement_variants() -> None:\n    args = _args(\n        "sorted-spike-state-space-trajectory-imm-anchored-exact-sparse "\n        "sorted-spike-state-space-trajectory-imm-low-leak-exact-sparse "\n        "sorted-spike-state-space-trajectory-imm-persistent-exact-sparse "\n        "sorted-spike-state-space-displacement-momentum "\n        "clusterless-state-space-displacement-momentum"\n    )\n\n    models = benchmark_model_evidence_improved._models(\n        args, SimpleNamespace(session_id="Rat1/Open1"), encoding=None\n    )\n\n    assert list(models) == [\n        "sorted-spike-state-space-trajectory-imm-anchored-exact-sparse",\n        "sorted-spike-state-space-trajectory-imm-low-leak-exact-sparse",\n        "sorted-spike-state-space-trajectory-imm-persistent-exact-sparse",\n        "sorted-spike-state-space-displacement-momentum",\n        "clusterless-state-space-displacement-momentum",\n    ]\n    assert (\n        models[\n            "sorted-spike-state-space-trajectory-imm-anchored-exact-sparse"\n        ].config.trajectory_imm_momentum_initial_probability\n        == 0.05\n    )\n    assert (\n        models[\n            "sorted-spike-state-space-trajectory-imm-low-leak-exact-sparse"\n        ].config.trajectory_imm_momentum_switch_probability\n        == 0.001\n    )\n    assert (\n        models[\n            "sorted-spike-state-space-trajectory-imm-persistent-exact-sparse"\n        ].config.trajectory_imm_mode_stickiness\n        == 0.985\n    )\n    assert models["sorted-spike-state-space-displacement-momentum"].mode == "displacement-momentum"\n    assert models["clusterless-state-space-displacement-momentum"].mode == "displacement-momentum"\n''', encoding="utf-8")
+          PY
+      - name: Install package
+        run: python -m pip install -e .[dev]
+      - name: Run targeted tests
+        run: python -m pytest tests/test_improved_model_evidence_registry_parity.py tests/test_model_evidence_workflow_args.py -q
+      - name: Commit source fix
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add scripts/benchmark_model_evidence_improved.py tests/test_improved_model_evidence_registry_parity.py
+          if git diff --cached --quiet; then
+            echo "No source changes to commit."
+            exit 0
+          fi
+          git commit -m "Fix improved model-evidence registry parity"
+          git push

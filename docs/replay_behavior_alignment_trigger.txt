@@ -1,0 +1,7 @@
+Replay behavior alignment workflow trigger
+
+This file intentionally triggers .github/workflows/replay-behavior-alignment.yml
+when changed on a branch push. Touch this file to run the behavior/goal/future-path
+alignment workflow against the default model-evidence artifact.
+
+Initial trigger: 2026-06-20

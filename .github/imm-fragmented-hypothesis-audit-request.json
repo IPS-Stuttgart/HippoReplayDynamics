@@ -1,5 +1,5 @@
 {
-  "request_id": "initial-pr-281-json-trigger",
+  "request_id": "trigger-2026-06-20T08-50Z-pr-281",
   "description": "Default request for the IMM-vs-fragmented hypothesis audit. Bump request_id to trigger a push-based audit run.",
   "evidence_run_id": "27011374643",
   "evidence_artifact_name": "model-evidence-all-sessions-27011374643",

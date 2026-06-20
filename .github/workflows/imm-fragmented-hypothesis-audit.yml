@@ -35,6 +35,11 @@ on:
       - ".github/imm-fragmented-hypothesis-audit-request.json"
       - ".github/workflows/imm-fragmented-hypothesis-audit.yml"
       - "scripts/audit_imm_fragmented_hypotheses.py"
+  pull_request:
+    paths:
+      - ".github/imm-fragmented-hypothesis-audit-request.json"
+      - ".github/workflows/imm-fragmented-hypothesis-audit.yml"
+      - "scripts/audit_imm_fragmented_hypotheses.py"
 
 permissions:
   contents: read

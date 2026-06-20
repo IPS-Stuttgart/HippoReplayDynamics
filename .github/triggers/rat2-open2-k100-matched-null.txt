@@ -1,0 +1,12 @@
+Rat2/Open2 K=100 lightweight matched-null diagnostic trigger.
+
+Changing this file on main triggers .github/workflows/trigger-rat2-open2-k100-matched-null.yml, which dispatches spike-matched-event-window-null.yml with:
+
+session_filter=Rat2/Open2
+comparison_scope=lightweight-first-order-imm-vs-stationary
+null_models=sorted-spike-state-space-stationary sorted-spike-state-space-first-order-imm
+null_count=100
+max_events=10
+events_per_session_for_k50=10
+
+Trigger timestamp: 2026-06-20T00:00:00+02:00

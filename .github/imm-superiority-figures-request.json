@@ -1,5 +1,5 @@
 {
-  "request_id": "initial-main-imm-superiority-figures",
+  "request_id": "trigger-2026-06-20T12-10Z-main",
   "description": "Default request for the IMM superiority figures. Bump request_id to trigger a push- or PR-based figure run.",
   "audit_run_id": "27870307437",
   "audit_artifact_name": "imm-fragmented-hypothesis-audit-27870307437",

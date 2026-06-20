@@ -12,7 +12,6 @@ import copy
 from dataclasses import replace
 from pathlib import Path
 import sys
-import traceback
 from types import FrameType
 from typing import Any
 
@@ -30,11 +29,14 @@ _EXTRA_TRAJECTORY_NAMES = set(_EXTRA_MODEL_NAMES)
 def apply_improved_model_evidence_registry_patch() -> None:
     """Patch ``benchmark_model_evidence_improved.py`` when it is loading.
 
-    The hook is installed only if that script is already on the call stack.  This
-    avoids leaving a global trace active during ordinary package imports.
+    The hook is installed only if that script is already on the call stack.  The
+    already-running script frame also receives ``f_trace`` explicitly; otherwise
+    ``sys.settrace`` would only affect future frames and could miss the remainder
+    of the module body.
     """
 
-    if not _improved_script_on_stack():
+    script_frames = _improved_script_frames_on_stack()
+    if not script_frames:
         return
     previous_trace = sys.gettrace()
 
@@ -46,14 +48,19 @@ def apply_improved_model_evidence_registry_patch() -> None:
             return None
         return trace
 
+    for frame in script_frames:
+        frame.f_trace = trace
     sys.settrace(trace)
 
 
-def _improved_script_on_stack() -> bool:
-    for stack_item in traceback.extract_stack():
-        if Path(stack_item.filename).name == "benchmark_model_evidence_improved.py":
-            return True
-    return False
+def _improved_script_frames_on_stack() -> list[FrameType]:
+    frames: list[FrameType] = []
+    frame = sys._getframe()
+    while frame is not None:
+        if Path(str(frame.f_globals.get("__file__", ""))).name == "benchmark_model_evidence_improved.py":
+            frames.append(frame)
+        frame = frame.f_back
+    return frames
 
 
 def _patch_frame_if_ready(frame: FrameType) -> bool:

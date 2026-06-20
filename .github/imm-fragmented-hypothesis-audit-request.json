@@ -1,0 +1,10 @@
+{
+  "request_id": "initial-main-json-trigger",
+  "description": "Default request for the IMM-vs-fragmented hypothesis audit. Bump request_id to trigger a push-based audit run.",
+  "evidence_run_id": "27011374643",
+  "evidence_artifact_name": "model-evidence-all-sessions-27011374643",
+  "original_labels_run_id": "",
+  "original_labels_artifact_name": "",
+  "original_labels_glob": "**/*original*label*.csv",
+  "margin_threshold": "5.5"
+}

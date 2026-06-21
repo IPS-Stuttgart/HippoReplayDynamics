@@ -7,6 +7,7 @@ from . import clusterless_config_validation as _clusterless_config_validation
 from . import clusterless_ground_truth as _clusterless_ground_truth
 from . import goal_state_space_integration as _goal_state_space_integration
 from . import ground_truth as _ground_truth
+from . import ground_truth_bma_options as _ground_truth_bma_options
 from . import ground_truth_sensitivity_metrics as _ground_truth_sensitivity_metrics
 from . import improved_model_evidence_registry_patch as _improved_model_evidence_registry_patch
 from . import model_averaged_endpoint_scoping as _model_averaged_endpoint_scoping
@@ -23,6 +24,7 @@ _score_metadata.apply_model_hyperparam_patch()
 _candidate_support_quality_patch.apply_candidate_support_quality_patch()
 _benchmark_cell_split_metadata.apply_benchmark_cell_split_metadata_patch()
 _clusterless_ground_truth.apply_clusterless_ground_truth_patch()
+_ground_truth_bma_options.apply_ground_truth_bma_options_patch()
 _pyrecest_score_metadata.apply_pyrecest_score_metadata_patch()
 _goal_state_space_integration.apply_goal_state_space_patch()
 _spike_rate_metadata.apply_spike_rate_metadata_patch()
@@ -119,6 +121,7 @@ def apply_runtime_patches() -> None:
     _candidate_support_quality_patch.apply_candidate_support_quality_patch()
     _benchmark_cell_split_metadata.apply_benchmark_cell_split_metadata_patch()
     _clusterless_ground_truth.apply_clusterless_ground_truth_patch()
+    _ground_truth_bma_options.apply_ground_truth_bma_options_patch()
     _clusterless_config_validation.apply_clusterless_encoding_config_validation_patch()
     _ground_truth._encoding_config_for_scores = _score_metadata.encoding_config_for_scores
     _ground_truth._emission_config_for_scores = _score_metadata.emission_config_for_scores

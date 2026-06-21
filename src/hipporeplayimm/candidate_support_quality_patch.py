@@ -35,10 +35,9 @@ def apply_candidate_support_quality_patch() -> None:
         """Return a conservative quality label for one score row.
 
         Candidate-support quality is meaningful only for successful exact rows or
-        candidate-pruned lower-bound rows.  Failed rows and explicitly
-        non-comparable evidence supports should not be counted as
-        ``exact_or_not_pruned`` merely because they are not truncated lower
-        bounds.
+        candidate-pruned lower-bound rows.  Failed rows and non-comparable
+        evidence supports should not be counted as ``exact_or_not_pruned`` merely
+        because they are not truncated lower bounds.
         """
 
         status = _text(row.get("status", "success")).lower()
@@ -54,15 +53,10 @@ def apply_candidate_support_quality_patch() -> None:
         }:
             return ri.CANDIDATE_SUPPORT_EXACT
 
-        diagnostic_support = " ".join(
-            _text(row.get(column, "")).lower()
-            for column in (
-                "diagnostic_candidate_evidence_support",
-                "diagnostic_state_space_momentum_evidence_support",
-                "diagnostic_state_space_imm_evidence_support",
-            )
-        )
-        if _TRUNCATED_SUPPORT not in diagnostic_support and evidence_support != _TRUNCATED_SUPPORT:
+        diagnostic_supports = _diagnostic_evidence_supports(row)
+        if any(value in _NONCOMPARABLE_SUPPORT_VALUES for value in diagnostic_supports):
+            return ri.CANDIDATE_SUPPORT_UNKNOWN
+        if _TRUNCATED_SUPPORT not in diagnostic_supports and evidence_support != _TRUNCATED_SUPPORT:
             return ri.CANDIDATE_SUPPORT_EXACT
         if min_log_mass is None or not np.isfinite(min_log_mass):
             return ri.CANDIDATE_SUPPORT_UNKNOWN
@@ -74,6 +68,18 @@ def apply_candidate_support_quality_patch() -> None:
 
     ri.candidate_support_quality = candidate_support_quality
     ri._candidate_support_quality_status_patch_applied = True
+
+
+def _diagnostic_evidence_supports(row: pd.Series) -> set[str]:
+    supports: set[str] = set()
+    for column in row.index:
+        name = str(column)
+        if not name.startswith("diagnostic_") or not name.endswith("_evidence_support"):
+            continue
+        value = _text(row.get(column, "")).lower()
+        if value and value not in _MISSING_SUPPORT_VALUES:
+            supports.add(value)
+    return supports
 
 
 def _text(value: Any) -> str:

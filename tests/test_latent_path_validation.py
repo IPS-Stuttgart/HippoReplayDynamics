@@ -2,7 +2,11 @@ import numpy as np
 import pytest
 
 from hipporeplayimm.encoding import EncodingConfig, EncodingModel
-from hipporeplayimm.simulation_recovery import simulate_latent_path
+from hipporeplayimm.simulation_recovery import (
+    SimulationRecoveryConfig,
+    run_session_simulation_recovery,
+    simulate_latent_path,
+)
 
 
 def _small_encoding() -> EncodingModel:
@@ -28,3 +32,20 @@ def test_simulate_latent_path_rejects_invalid_length(bad_length):
             dt=0.02,
             rng=generator,
         )
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("events_per_model", 0),
+        ("events_per_model", 1.5),
+        ("max_template_events", 0),
+        ("max_template_events", 1.5),
+        ("max_synthetic_events", np.nan),
+    ],
+)
+def test_run_session_simulation_recovery_rejects_invalid_count_options(field, value):
+    config = SimulationRecoveryConfig(**{field: value})
+
+    with pytest.raises(ValueError, match=f"{field} must be positive"):
+        run_session_simulation_recovery("unused-root", "unused-session", config)

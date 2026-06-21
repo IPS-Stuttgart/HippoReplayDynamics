@@ -1,0 +1,85 @@
+"""Runtime validation for spike-cell identifier fields loaded from data files.
+
+MATLAB datasets commonly store integer identifiers as floating-point values.  The
+loader should accept integral floats such as ``1.0`` but must not silently truncate
+corrupted fractional identifiers such as ``1.5`` to ``1``.
+"""
+
+from __future__ import annotations
+
+from functools import wraps
+from typing import Any
+
+import numpy as np
+
+
+def apply_data_cell_id_validation_patch() -> None:
+    """Install integral-ID validation on ``hipporeplayimm.data`` helpers."""
+
+    from . import data
+
+    if getattr(data, "_cell_id_validation_patch_applied", False):
+        return
+
+    original_load_spike_marks = data._load_spike_marks
+    original_mark_group_ids = data._mark_group_ids_from_tetrode_cell_ids
+
+    def replay_session_cell_ids(self):
+        if self.spikes.size == 0:
+            return np.array([], dtype=int)
+        spikes = np.asarray(self.spikes)
+        if spikes.ndim != 2 or spikes.shape[1] < 2:
+            raise ValueError("spikes must have at least two columns")
+        return np.unique(_coerce_integral_ids(spikes[:, 1], "spike cell IDs"))
+
+    def replay_session_excitatory_spikes(self):
+        spikes = np.asarray(self.spikes)
+        excitatory = np.asarray(self.excitatory_neurons)
+        if spikes.size == 0 or excitatory.size == 0:
+            return np.empty((0, 2), dtype=float)
+        if spikes.ndim != 2 or spikes.shape[1] < 2:
+            raise ValueError("spikes must have at least two columns")
+        spike_ids = _coerce_integral_ids(spikes[:, 1], "spike cell IDs")
+        excitatory_ids = _coerce_integral_ids(excitatory.reshape(-1), "excitatory neuron IDs")
+        keep = np.isin(spike_ids, excitatory_ids)
+        return spikes[keep]
+
+    @wraps(original_load_spike_marks)
+    def load_spike_marks(session_path, spike_data, spikes):
+        spikes_arr = np.asarray(spikes)
+        if spikes_arr.size and spikes_arr.ndim == 2 and spikes_arr.shape[1] > 1:
+            _coerce_integral_ids(spikes_arr[:, 1], "spike cell IDs")
+        return original_load_spike_marks(session_path, spike_data, spikes)
+
+    @wraps(original_mark_group_ids)
+    def mark_group_ids_from_tetrode_cell_ids(cell_ids, tetrode_cell_ids):
+        if cell_ids is not None:
+            _coerce_integral_ids(cell_ids, "spike cell IDs")
+        arr = np.asarray(tetrode_cell_ids)
+        if arr.size:
+            values = np.asarray(arr, dtype=float)
+            finite_values = values[np.isfinite(values)]
+            if finite_values.size:
+                _coerce_integral_ids(finite_values, "tetrode/cell IDs")
+        out = original_mark_group_ids(cell_ids, tetrode_cell_ids)
+        if out is not None:
+            return _coerce_integral_ids(out, "tetrode group IDs")
+        return out
+
+    data.ReplaySession.cell_ids = property(replay_session_cell_ids)
+    data.ReplaySession.excitatory_spikes = replay_session_excitatory_spikes
+    data._load_spike_marks = load_spike_marks
+    data._mark_group_ids_from_tetrode_cell_ids = mark_group_ids_from_tetrode_cell_ids
+    data._cell_id_validation_patch_applied = True
+
+
+def _coerce_integral_ids(values: Any, name: str) -> np.ndarray:
+    ids = np.asarray(values, dtype=float)
+    if ids.size == 0:
+        return np.asarray(ids, dtype=int)
+    if not np.all(np.isfinite(ids)):
+        raise ValueError(f"{name} must be finite integer identifiers")
+    rounded = np.rint(ids)
+    if not np.all(np.isclose(ids, rounded, rtol=0.0, atol=1e-9)):
+        raise ValueError(f"{name} must be integer-valued")
+    return rounded.astype(int)

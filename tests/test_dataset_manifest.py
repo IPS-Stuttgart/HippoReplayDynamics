@@ -89,3 +89,38 @@ def test_validate_dataset_writes_checksumed_json_manifest(tmp_path, monkeypatch)
     self_hash = manifest.pop("manifest_sha256_without_this_field")
     payload = json.dumps(manifest, indent=2, sort_keys=True) + "\n"
     assert self_hash == _sha256(payload.encode("utf-8"))
+
+
+def test_validate_dataset_writes_manifest_to_explicit_output(tmp_path, monkeypatch) -> None:
+    dataset_root = tmp_path / "readonly-dataset"
+    session = dataset_root / "Rat1" / "Open1"
+    session.mkdir(parents=True)
+    for filename in [
+        "Position_Data.mat",
+        "Ripple_Events.mat",
+        "Spike_Data.mat",
+        "Epochs.mat",
+    ]:
+        (session / filename).write_bytes(filename.encode("utf-8"))
+
+    manifest_output = tmp_path / "results" / "dataset_manifest.json"
+    module = _load_validate_dataset_module()
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "validate_dataset.py",
+            "--dataset-root",
+            str(dataset_root),
+            "--session",
+            "Rat1/Open1",
+            "--write-manifest",
+            "--manifest-output",
+            str(manifest_output),
+        ],
+    )
+
+    module.main()
+
+    assert manifest_output.is_file()
+    assert not (dataset_root / "dataset_manifest.json").exists()

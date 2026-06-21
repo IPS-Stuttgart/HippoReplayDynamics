@@ -5,6 +5,7 @@ from . import benchmark_cell_split_metadata as _benchmark_cell_split_metadata
 from . import candidate_support_quality_patch as _candidate_support_quality_patch
 from . import clusterless_config_validation as _clusterless_config_validation
 from . import clusterless_ground_truth as _clusterless_ground_truth
+from . import duration_occupancy_metadata_guard as _duration_occupancy_metadata_guard
 from . import goal_state_space_integration as _goal_state_space_integration
 from . import ground_truth as _ground_truth
 from . import ground_truth_sensitivity_metrics as _ground_truth_sensitivity_metrics
@@ -15,6 +16,7 @@ from . import pyrecest_score_metadata as _pyrecest_score_metadata
 from . import score_metadata as _score_metadata
 from . import simulation_recovery as _simulation_recovery
 from . import spike_rate_metadata as _spike_rate_metadata
+from . import time_order_patch as _time_order_patch
 
 # Keep score-table metadata and post-hoc decoding consistent before public
 # symbols are imported from the patched modules.
@@ -25,6 +27,7 @@ _clusterless_ground_truth.apply_clusterless_ground_truth_patch()
 _pyrecest_score_metadata.apply_pyrecest_score_metadata_patch()
 _goal_state_space_integration.apply_goal_state_space_patch()
 _spike_rate_metadata.apply_spike_rate_metadata_patch()
+_time_order_patch.apply_reverse_emission_time_patch()
 _clusterless_config_validation.apply_clusterless_encoding_config_validation_patch()
 
 from .benchmarks import BenchmarkConfig, BenchmarkResult, run_open_field_benchmark
@@ -126,6 +129,8 @@ def apply_runtime_patches() -> None:
     _apply_duration_dynamics_patch()
     _apply_state_space_imm_duration_patch()
     _apply_duration_occupancy_patch()
+    _duration_occupancy_metadata_guard.apply_duration_occupancy_metadata_guard_patch()
+    _time_order_patch.apply_reverse_emission_time_patch()
     _synchronize_duration_patched_emission_builders()
     _patch_simulation_recovery_module(_simulation_recovery)
     _apply_trajectory_imm_recovery_patch()

@@ -18,6 +18,9 @@ def apply_duration_occupancy_metadata_guard_patch() -> None:
     """
 
     from . import duration_occupancy as _duration_occupancy
+    from . import transition_duration_validation as _transition_duration_validation
+
+    _transition_duration_validation.apply_transition_duration_validation_patch()
 
     if getattr(_duration_occupancy, "_metadata_guard_patch_applied", False):
         return

@@ -46,7 +46,7 @@ def apply_cell_split_hashable_grouping_patch() -> None:
         if group_count > session_count:
             return True
         return any(
-            len(metadata._metadata_group_values(frame[column])) > 1
+            len(metadata._metadata_group_values(frame[column], include_missing=True)) > 1
             for column in metadata._CELL_SPLIT_SCOPE_COLUMNS
             if column in frame.columns
         )
@@ -57,7 +57,9 @@ def apply_cell_split_hashable_grouping_patch() -> None:
         for column in metadata._CELL_SPLIT_SCOPE_COLUMNS:
             if column not in frame.columns:
                 continue
-            has_multiple_values = len(metadata._metadata_group_values(frame[column])) > 1
+            has_multiple_values = len(
+                metadata._metadata_group_values(frame[column], include_missing=True)
+            ) > 1
             if column == "benchmark_cell_split_index" or has_multiple_values:
                 columns.append(_scope_key_column(column))
         return columns

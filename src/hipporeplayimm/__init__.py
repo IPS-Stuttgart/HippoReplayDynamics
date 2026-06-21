@@ -5,6 +5,7 @@ from . import benchmark_cell_split_metadata as _benchmark_cell_split_metadata
 from . import candidate_support_quality_patch as _candidate_support_quality_patch
 from . import clusterless_config_validation as _clusterless_config_validation
 from . import clusterless_ground_truth as _clusterless_ground_truth
+from . import duration_occupancy_metadata_guard as _duration_occupancy_metadata_guard
 from . import goal_state_space_integration as _goal_state_space_integration
 from . import ground_truth as _ground_truth
 from . import ground_truth_sensitivity_metrics as _ground_truth_sensitivity_metrics
@@ -128,6 +129,7 @@ def apply_runtime_patches() -> None:
     _apply_duration_dynamics_patch()
     _apply_state_space_imm_duration_patch()
     _apply_duration_occupancy_patch()
+    _duration_occupancy_metadata_guard.apply_duration_occupancy_metadata_guard_patch()
     _time_order_patch.apply_reverse_emission_time_patch()
     _synchronize_duration_patched_emission_builders()
     _patch_simulation_recovery_module(_simulation_recovery)

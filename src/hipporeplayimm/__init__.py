@@ -12,6 +12,7 @@ from . import duration_occupancy_metadata_guard as _duration_occupancy_metadata_
 from . import goal_state_space_integration as _goal_state_space_integration
 from . import ground_truth as _ground_truth
 from . import ground_truth_sensitivity_metrics as _ground_truth_sensitivity_metrics
+from . import ground_truth_window_scope as _ground_truth_window_scope
 from . import improved_model_evidence_registry_patch as _improved_model_evidence_registry_patch
 from . import model_averaged_endpoint_scoping as _model_averaged_endpoint_scoping
 from . import occupancy_candidate_support as _occupancy_candidate_support
@@ -35,6 +36,7 @@ _spike_rate_metadata.apply_spike_rate_metadata_patch()
 _time_order_patch.apply_reverse_emission_time_patch()
 _clusterless_config_validation.apply_clusterless_encoding_config_validation_patch()
 _duration_candidate_metadata_patch.apply_duration_candidate_metadata_patch()
+_ground_truth_window_scope.apply_ground_truth_window_scope_patch()
 
 from .benchmarks import BenchmarkConfig, BenchmarkResult, run_open_field_benchmark
 from .clusterless import (
@@ -144,6 +146,7 @@ def apply_runtime_patches() -> None:
     _patch_simulation_recovery_module(_simulation_recovery)
     _apply_trajectory_imm_recovery_patch()
     _model_averaged_endpoint_scoping.apply_model_averaged_endpoint_scoping_patch()
+    _ground_truth_window_scope.apply_ground_truth_window_scope_patch()
     _improved_model_evidence_registry_patch.apply_improved_model_evidence_registry_patch()
 
 
@@ -151,6 +154,7 @@ def apply_runtime_patches() -> None:
 # emissions include a partial final bin.
 apply_runtime_patches()
 from .encoding import build_emissions as build_emissions  # noqa: E402,F401,F811
+from .ground_truth import compare_scores_to_ground_truth as compare_scores_to_ground_truth  # noqa: E402,F401,F811
 
 # Keep synthetic recovery summaries from mixing exact evidences with truncated
 # candidate lower bounds.

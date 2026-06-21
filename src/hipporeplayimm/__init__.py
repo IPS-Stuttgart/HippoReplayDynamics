@@ -19,6 +19,7 @@ from . import occupancy_candidate_support as _occupancy_candidate_support
 from . import pyrecest_score_metadata as _pyrecest_score_metadata
 from . import score_metadata as _score_metadata
 from . import simulation_recovery as _simulation_recovery
+from . import sparse_momentum_duration_validation as _sparse_momentum_duration_validation
 from . import spike_rate_metadata as _spike_rate_metadata
 from . import time_order_patch as _time_order_patch
 
@@ -141,6 +142,7 @@ def apply_runtime_patches() -> None:
     _apply_state_space_imm_duration_patch()
     _apply_duration_occupancy_patch()
     _duration_occupancy_metadata_guard.apply_duration_occupancy_metadata_guard_patch()
+    _sparse_momentum_duration_validation.apply_sparse_momentum_duration_validation_patch()
     _time_order_patch.apply_reverse_emission_time_patch()
     _synchronize_duration_patched_emission_builders()
     _patch_simulation_recovery_module(_simulation_recovery)

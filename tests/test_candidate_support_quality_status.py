@@ -24,6 +24,31 @@ def test_non_success_and_non_comparable_rows_are_unknown_support_quality() -> No
     assert not labelled["candidate_support_quality_good"].any()
 
 
+def test_non_comparable_diagnostic_evidence_support_is_unknown_quality() -> None:
+    rows = pd.DataFrame(
+        [
+            {
+                "model": "pyrecest-goal-particle",
+                "status": "success",
+                "diagnostic_pyrecest_evidence_support": "particle_approximation",
+            },
+            {
+                "model": "state-space-displacement-imm",
+                "status": "success",
+                "diagnostic_state_space_displacement_imm_evidence_support": "truncated_full_grid",
+            },
+        ]
+    )
+
+    labelled = add_candidate_support_quality_columns(rows)
+
+    assert labelled["candidate_support_quality"].tolist() == [
+        "conservative_unknown",
+        "conservative_unknown",
+    ]
+    assert not labelled["candidate_support_quality_good"].any()
+
+
 def test_exact_success_rows_remain_good_support_quality() -> None:
     rows = pd.DataFrame(
         [{"model": "m", "status": "success", "evidence_support": "exact_full_grid"}]

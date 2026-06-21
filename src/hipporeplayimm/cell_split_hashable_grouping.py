@@ -57,7 +57,8 @@ def apply_cell_split_hashable_grouping_patch() -> None:
         for column in metadata._CELL_SPLIT_SCOPE_COLUMNS:
             if column not in frame.columns:
                 continue
-            if column == "benchmark_cell_split_index" or len(metadata._metadata_group_values(frame[column])) > 1:
+            has_multiple_values = len(metadata._metadata_group_values(frame[column])) > 1
+            if column == "benchmark_cell_split_index" or has_multiple_values:
                 columns.append(_scope_key_column(column))
         return columns
 
@@ -95,14 +96,20 @@ def _with_hashable_scope_keys(frame: pd.DataFrame, metadata: Any) -> pd.DataFram
     out = frame.copy()
     for column in metadata._CELL_SPLIT_SCOPE_COLUMNS:
         if column in out.columns:
-            out[_scope_key_column(column)] = [_metadata_group_key(value) for value in out[column]]
+            out[_scope_key_column(column)] = [
+                _metadata_group_key(value) for value in out[column]
+            ]
     return out
 
 
-def _drop_cell_split_scope_key_columns(value: str | Path | pd.DataFrame) -> str | Path | pd.DataFrame:
+def _drop_cell_split_scope_key_columns(
+    value: str | Path | pd.DataFrame,
+) -> str | Path | pd.DataFrame:
     if not isinstance(value, pd.DataFrame):
         return value
-    helper_columns = [column for column in value.columns if column.startswith(_GROUP_COLUMN_PREFIX)]
+    helper_columns = [
+        column for column in value.columns if column.startswith(_GROUP_COLUMN_PREFIX)
+    ]
     if not helper_columns:
         return value.copy()
     return value.drop(columns=helper_columns).copy()

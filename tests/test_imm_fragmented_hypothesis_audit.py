@@ -74,12 +74,32 @@ def test_imm_fragmented_audit_separates_clean_imm_fragmented_and_momentum(tmp_pa
     }
 
 
-def _score(session: str, event_index: int, model: str, log_evidence: float) -> dict[str, object]:
+def test_imm_fragmented_audit_uses_only_comparable_exact_core_rows():
+    evidence = pd.DataFrame(
+        [
+            _score("Rat1/Open1", 0, STATIONARY, 0.0),
+            _score("Rat1/Open1", 0, DIFFUSION, 20.0),
+            _score("Rat1/Open1", 0, FRAGMENTED, 30.0, evidence_comparable=False),
+            _score("Rat1/Open1", 0, FIRST_ORDER_IMM, 80.0),
+            _score("Rat1/Open1", 0, MOMENTUM_EXACT, 40.0),
+        ]
+    )
+
+    event = build_event_table(evidence, threshold=5.5).iloc[0]
+
+    assert not bool(event["exact_core_complete"])
+    assert FRAGMENTED in event["missing_required_exact_core_models"]
+    assert pd.isna(event["logZ_fragmented"])
+    assert pd.isna(event["delta_imm_minus_fragmented"])
+    assert event["within_family_classification"] == "trajectory_family_ambiguous"
+
+
+def _score(session: str, event_index: int, model: str, log_evidence: float, *, evidence_comparable: bool = True) -> dict[str, object]:
     return {
         "status": "success",
         "session": session,
         "event_index": event_index,
         "model": model,
         "log_evidence": log_evidence,
-        "evidence_comparable": True,
+        "evidence_comparable": evidence_comparable,
     }

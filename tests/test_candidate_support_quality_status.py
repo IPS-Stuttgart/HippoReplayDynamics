@@ -24,7 +24,7 @@ def test_non_success_and_non_comparable_rows_are_unknown_support_quality() -> No
     assert not labelled["candidate_support_quality_good"].any()
 
 
-def test_diagnostic_non_comparable_rows_are_unknown_without_materialized_support() -> None:
+def test_non_comparable_diagnostic_evidence_support_is_unknown_quality() -> None:
     rows = pd.DataFrame(
         [
             {
@@ -37,12 +37,18 @@ def test_diagnostic_non_comparable_rows_are_unknown_without_materialized_support
                 "status": "success",
                 "diagnostic_custom_evidence_support": "unknown_noncomparable",
             },
+            {
+                "model": "state-space-displacement-imm",
+                "status": "success",
+                "diagnostic_state_space_displacement_imm_evidence_support": "truncated_full_grid",
+            },
         ]
     )
 
     labelled = add_candidate_support_quality_columns(rows)
 
     assert labelled["candidate_support_quality"].tolist() == [
+        "conservative_unknown",
         "conservative_unknown",
         "conservative_unknown",
     ]

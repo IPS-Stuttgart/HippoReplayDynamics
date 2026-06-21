@@ -53,10 +53,10 @@ def apply_candidate_support_quality_patch() -> None:
         }:
             return ri.CANDIDATE_SUPPORT_EXACT
 
-        diagnostic_supports = _diagnostic_evidence_supports(row)
-        if any(value in _NONCOMPARABLE_SUPPORT_VALUES for value in diagnostic_supports):
+        diagnostic_values = _diagnostic_evidence_support_values(row)
+        if any(value in _NONCOMPARABLE_SUPPORT_VALUES for value in diagnostic_values):
             return ri.CANDIDATE_SUPPORT_UNKNOWN
-        if _TRUNCATED_SUPPORT not in diagnostic_supports and evidence_support != _TRUNCATED_SUPPORT:
+        if _TRUNCATED_SUPPORT not in diagnostic_values and evidence_support != _TRUNCATED_SUPPORT:
             return ri.CANDIDATE_SUPPORT_EXACT
         if min_log_mass is None or not np.isfinite(min_log_mass):
             return ri.CANDIDATE_SUPPORT_UNKNOWN
@@ -70,16 +70,21 @@ def apply_candidate_support_quality_patch() -> None:
     ri._candidate_support_quality_status_patch_applied = True
 
 
-def _diagnostic_evidence_supports(row: pd.Series) -> set[str]:
-    supports: set[str] = set()
+def _diagnostic_evidence_support_values(row: pd.Series) -> list[str]:
+    """Return all non-empty diagnostic evidence-support labels on a score row."""
+
+    values: list[str] = []
     for column in row.index:
-        name = str(column)
-        if not name.startswith("diagnostic_") or not name.endswith("_evidence_support"):
+        column_name = str(column)
+        if not (
+            column_name.startswith("diagnostic_")
+            and column_name.endswith("_evidence_support")
+        ):
             continue
         value = _text(row.get(column, "")).lower()
         if value and value not in _MISSING_SUPPORT_VALUES:
-            supports.add(value)
-    return supports
+            values.append(value)
+    return values
 
 
 def _text(value: Any) -> str:

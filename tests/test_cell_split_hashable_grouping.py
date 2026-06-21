@@ -20,9 +20,15 @@ def test_cell_split_scope_grouping_handles_in_memory_explicit_cell_id_arrays() -
             "benchmark_test_cell_fraction": [0.5, 0.5],
             "benchmark_random_seed": [11, 11],
             "benchmark_cell_split_seed": [11, 12],
-            "benchmark_cell_split_strategy": ["spike_count_stratified", "spike_count_stratified"],
+            "benchmark_cell_split_strategy": [
+                "spike_count_stratified",
+                "spike_count_stratified",
+            ],
             "benchmark_cell_split_strata": [3, 3],
-            "train_cell_ids": [np.array([1, 2], dtype=int), np.array([1, 3], dtype=int)],
+            "train_cell_ids": [
+                np.array([1, 2], dtype=int),
+                np.array([1, 3], dtype=int),
+            ],
             "test_cell_ids": [[3], [2]],
         }
     )

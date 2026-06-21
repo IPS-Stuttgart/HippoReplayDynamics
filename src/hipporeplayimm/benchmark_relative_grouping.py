@@ -9,14 +9,16 @@ a model row from another configuration.
 
 from __future__ import annotations
 
+import numpy as np
 import pandas as pd
 
 
 # Metadata columns emitted by ``benchmarks._benchmark_config_metadata`` and
 # ``benchmarks._benchmark_split_metadata`` that define a compatible held-out
-# scoring condition. Optional columns are used only when every row has a value;
-# this keeps older score tables with missing optional metadata from losing their
-# static-baseline groups under pandas' default ``groupby(dropna=True)`` behavior.
+# scoring condition.  Optional columns are used whenever present.  Missing
+# values are explicitly scoped by the add-relative-metrics wrapper below so
+# legacy rows with absent metadata cannot be mixed with newer sweep rows that
+# carry concrete values for the same column.
 _BENCHMARK_RELATIVE_SCOPE_COLUMNS = (
     "benchmark_test_cell_fraction",
     "benchmark_n_cell_splits",
@@ -82,29 +84,75 @@ def apply_benchmark_relative_grouping_patch() -> None:
     from . import benchmarks as bench
 
     group_columns = bench._benchmark_event_group_columns
-    if getattr(group_columns, "_benchmark_relative_grouping_scoped", False):
+    if not getattr(group_columns, "_benchmark_relative_grouping_scoped", False):
+
+        def benchmark_event_group_columns_with_metadata(frame: pd.DataFrame) -> list[str]:
+            columns = ["session", "event_index"]
+            for column in (
+                "benchmark_random_seed",
+                "benchmark_cell_split_index",
+                *_BENCHMARK_RELATIVE_SCOPE_COLUMNS,
+            ):
+                if column in columns or not _usable_group_column(frame, column):
+                    continue
+                columns.append(column)
+            return columns
+
+        benchmark_event_group_columns_with_metadata._benchmark_relative_grouping_scoped = True  # type: ignore[attr-defined]
+        bench._benchmark_event_group_columns = benchmark_event_group_columns_with_metadata
+
+    add_relative_metrics = bench._add_relative_metrics
+    if getattr(add_relative_metrics, "_benchmark_relative_missing_scope_wrapped", False):
         return
 
-    def benchmark_event_group_columns_with_metadata(frame: pd.DataFrame) -> list[str]:
-        columns = ["session", "event_index"]
-        for column in (
-            "benchmark_random_seed",
-            "benchmark_cell_split_index",
-            *_BENCHMARK_RELATIVE_SCOPE_COLUMNS,
-        ):
-            if column in columns or not _usable_group_column(frame, column):
-                continue
-            columns.append(column)
-        return columns
+    def add_relative_metrics_with_missing_scope(frame: pd.DataFrame) -> pd.DataFrame:
+        """Keep missing optional metadata as its own relative-metric scope.
 
-    benchmark_event_group_columns_with_metadata._benchmark_relative_grouping_scoped = True  # type: ignore[attr-defined]
-    bench._benchmark_event_group_columns = benchmark_event_group_columns_with_metadata
+        ``benchmarks._add_relative_metrics`` uses pandas groupby/merge over the
+        benchmark event scope.  pandas drops NaN group keys by default, so scope
+        columns with mixed missing and concrete values previously had to be
+        disabled completely.  That prevented row loss but allowed legacy rows
+        with missing metadata to supply static baselines for newer rows carrying
+        a concrete value.  Temporarily replacing missing scope values with a
+        column-specific sentinel keeps each missing-value group intact without
+        leaking that sentinel into the returned score table.
+        """
+
+        working = frame.copy()
+        group_columns = bench._benchmark_event_group_columns(working)
+        missing_sentinels: dict[str, str] = {}
+        for column in group_columns:
+            if column not in working.columns:
+                continue
+            missing_mask = working[column].isna()
+            if not bool(missing_mask.any()):
+                continue
+            sentinel = _missing_scope_sentinel(column, working[column])
+            working[column] = working[column].astype(object)
+            working.loc[missing_mask, column] = sentinel
+            missing_sentinels[column] = sentinel
+
+        out = add_relative_metrics(working)
+        for column, sentinel in missing_sentinels.items():
+            if column not in out.columns:
+                continue
+            out.loc[out[column].eq(sentinel), column] = np.nan
+        return out
+
+    add_relative_metrics_with_missing_scope._benchmark_relative_missing_scope_wrapped = True  # type: ignore[attr-defined]
+    bench._add_relative_metrics = add_relative_metrics_with_missing_scope
 
 
 def _usable_group_column(frame: pd.DataFrame, column: str) -> bool:
-    if column not in frame.columns:
-        return False
-    values = frame[column]
-    if values.isna().any():
-        return False
-    return True
+    return column in frame.columns
+
+
+def _missing_scope_sentinel(column: str, values: pd.Series) -> str:
+    base = f"__hipporeplayimm_missing_scope_{column}__"
+    sentinel = base
+    text_values = values.astype(str)
+    suffix = 0
+    while bool(text_values.eq(sentinel).any()):
+        suffix += 1
+        sentinel = f"{base}_{suffix}"
+    return sentinel

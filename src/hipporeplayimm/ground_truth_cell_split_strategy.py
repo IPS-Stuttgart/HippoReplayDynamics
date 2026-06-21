@@ -15,6 +15,10 @@ from typing import Any
 from .benchmarks import _split_cells_from_encoding
 
 
+_DEFAULT_CELL_SPLIT_STRATEGY = "random"
+_DEFAULT_CELL_SPLIT_STRATA = 4
+
+
 def apply_ground_truth_cell_split_strategy_patch() -> None:
     """Make ground-truth split reconstruction honor benchmark split strategy."""
 
@@ -48,11 +52,37 @@ def apply_ground_truth_cell_split_strategy_patch() -> None:
         split_config = _config_with_overrides(
             config,
             test_cell_fraction=float(test_cell_fraction),
+            cell_split_strategy=_cell_split_strategy_from_score_rows(
+                gt,
+                session_scores,
+                config,
+            ),
+            cell_split_strata=_cell_split_strata_from_score_rows(
+                gt,
+                session_scores,
+                config,
+            ),
         )
         return _split_cells_from_encoding(encoding, split_config, int(random_seed))
 
     cell_split_for_score_rows_with_strategy._cell_split_strategy_wrapped = True  # type: ignore[attr-defined]
     gt._cell_split_for_score_rows = cell_split_for_score_rows_with_strategy
+
+
+def _cell_split_strategy_from_score_rows(gt: Any, session_scores: Any, config: Any) -> str:
+    return gt._unique_string_from_column(
+        session_scores,
+        "benchmark_cell_split_strategy",
+        getattr(config, "cell_split_strategy", _DEFAULT_CELL_SPLIT_STRATEGY),
+    )
+
+
+def _cell_split_strata_from_score_rows(gt: Any, session_scores: Any, config: Any) -> int:
+    return gt._unique_int_from_column(
+        session_scores,
+        "benchmark_cell_split_strata",
+        getattr(config, "cell_split_strata", _DEFAULT_CELL_SPLIT_STRATA),
+    )
 
 
 def _config_with_overrides(config: Any, **overrides: Any) -> SimpleNamespace:

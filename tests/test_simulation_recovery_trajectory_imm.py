@@ -1,5 +1,10 @@
 from __future__ import annotations
 
+import numpy as np
+import pandas as pd
+
+import hipporeplayimm.benchmarks as benchmarks
+import hipporeplayimm.ground_truth as ground_truth
 from hipporeplayimm.simulation_recovery import (
     SimulationRecoveryConfig,
     build_scoring_models,
@@ -37,3 +42,37 @@ def test_simulation_recovery_preserves_model_order_with_trajectory_imm() -> None
         TRAJECTORY_IMM_MODEL,
         "sorted-spike-state-space-diffusion",
     ]
+
+
+def test_saved_split_strategy_controls_direct_ground_truth_helper() -> None:
+    class EncodingStub:
+        cell_ids = np.array([1, 2, 3, 4], dtype=int)
+        rates_hz = np.array([[1.0, 1.0], [2.0, 1.0], [3.0, 1.0], [20.0, 1.0]])
+        occupancy_s = np.ones(2, dtype=float)
+
+    encoding = EncodingStub()
+    rows = pd.DataFrame(
+        {
+            "benchmark_test_cell_fraction": [0.5],
+            "benchmark_random_seed": [1],
+            "benchmark_cell_split_seed": [3],
+            "benchmark_cell_split_strategy": ["peak-rate"],
+            "benchmark_cell_split_strata": [2],
+        }
+    )
+
+    train, test = ground_truth._cell_split_for_score_rows(
+        rows,
+        encoding,
+        benchmarks.BenchmarkConfig(cell_split_strategy="random", cell_split_strata=4),
+    )
+    expected_train, expected_test = benchmarks.stratified_cell_split(
+        encoding.cell_ids,
+        benchmarks._cell_split_scores_from_encoding(encoding, "peak-rate"),
+        0.5,
+        3,
+        n_strata=2,
+    )
+
+    np.testing.assert_array_equal(train, expected_train)
+    np.testing.assert_array_equal(test, expected_test)

@@ -17,6 +17,7 @@ useful for full-session evidence runs:
 
 from __future__ import annotations
 
+from dataclasses import replace
 import argparse
 import time
 from types import SimpleNamespace
@@ -84,6 +85,10 @@ _TRAJECTORY_MODELS = {
     "sorted-spike-state-space-momentum-bidirectional",
     "sorted-spike-state-space-momentum-exact-sparse",
     "sorted-spike-state-space-trajectory-imm-exact-sparse",
+    "sorted-spike-state-space-trajectory-imm-anchored-exact-sparse",
+    "sorted-spike-state-space-trajectory-imm-low-leak-exact-sparse",
+    "sorted-spike-state-space-trajectory-imm-persistent-exact-sparse",
+    "sorted-spike-state-space-displacement-momentum",
     "sorted-spike-state-space-imm",
     "sorted-spike-state-space-goal",
     "sorted-spike-state-space-goal-reverse",
@@ -96,6 +101,7 @@ _TRAJECTORY_MODELS = {
     "clusterless-state-space-momentum",
     "clusterless-state-space-momentum-exact-sparse",
     "clusterless-state-space-trajectory-imm-exact-sparse",
+    "clusterless-state-space-displacement-momentum",
     "clusterless-state-space-imm",
     "valid-state-diffusion",
     "valid-state-grid",
@@ -212,6 +218,15 @@ def _optional_threshold(value: float) -> float | None:
     return None if not np.isfinite(float(value)) else float(value)
 
 
+def _optional_float_argument(value: str | None) -> float | None:
+    if value is None:
+        return None
+    text = str(value).strip().lower()
+    if text in {"", "none", "null"}:
+        return None
+    return float(text)
+
+
 def _state_space_config(args: argparse.Namespace, mode: str) -> StateSpaceDecoderConfig:
     return StateSpaceDecoderConfig(
         mode=mode,
@@ -220,12 +235,31 @@ def _state_space_config(args: argparse.Namespace, mode: str) -> StateSpaceDecode
         max_step_sigma=args.state_space_max_step_sigma,
         imm_mode_stickiness=_effective_state_space_imm_stickiness(args),
         imm_switch_tau_s=args.state_space_imm_switch_tau_s,
+        trajectory_imm_mode_stickiness=getattr(
+            args, "state_space_trajectory_imm_mode_stickiness", None
+        ),
+        trajectory_imm_momentum_initial_probability=getattr(
+            args, "state_space_trajectory_imm_momentum_initial_probability", None
+        ),
+        trajectory_imm_momentum_switch_probability=getattr(
+            args, "state_space_trajectory_imm_momentum_switch_probability", None
+        ),
         momentum_sigma_cm_sqrt_s=args.state_space_momentum_sigma_cm_sqrt_s,
         momentum_initial_sigma_cm_sqrt_s=args.state_space_momentum_initial_sigma_cm_sqrt_s,
         momentum_velocity_decay=args.state_space_momentum_velocity_decay,
         momentum_velocity_decay_tau_s=args.state_space_momentum_velocity_decay_tau_s,
         momentum_candidate_top_k=args.state_space_momentum_candidate_top_k,
         momentum_candidate_mass_threshold=args.state_space_momentum_candidate_mass_threshold,
+        displacement_radius_bins=getattr(args, "state_space_displacement_radius_bins", 2),
+        displacement_position_sigma_cm=getattr(
+            args, "state_space_displacement_position_sigma_cm", 0.0
+        ),
+        displacement_transition_sigma_cm_sqrt_s=getattr(
+            args, "state_space_displacement_transition_sigma_cm_sqrt_s", 0.0
+        ),
+        displacement_prior_sigma_cm=getattr(
+            args, "state_space_displacement_prior_sigma_cm", 0.0
+        ),
         momentum_candidate_min_k=args.state_space_momentum_candidate_min_k,
         momentum_candidate_max_k=args.state_space_momentum_candidate_max_k,
         momentum_predicted_candidate_top_k=args.state_space_momentum_predicted_candidate_top_k,
@@ -281,10 +315,31 @@ def _models(args: argparse.Namespace, session, encoding=None) -> dict[str, objec
         valid_grid_shape = encoding.grid_shape
     valid_mask_safe = np.ones(1, dtype=bool) if valid_mask is None else valid_mask
 
-    def state_space_model(mode: str, *, name: str | None = None) -> SortedSpikeStateSpaceReplayModel:
+    def state_space_model(
+        mode: str,
+        *,
+        name: str | None = None,
+        trajectory_imm_mode_stickiness: float | None = None,
+        trajectory_imm_momentum_initial_probability: float | None = None,
+        trajectory_imm_momentum_switch_probability: float | None = None,
+    ) -> SortedSpikeStateSpaceReplayModel:
+        config = _state_space_config(args, mode)
+        overrides: dict[str, float] = {}
+        if trajectory_imm_mode_stickiness is not None:
+            overrides["trajectory_imm_mode_stickiness"] = trajectory_imm_mode_stickiness
+        if trajectory_imm_momentum_initial_probability is not None:
+            overrides["trajectory_imm_momentum_initial_probability"] = (
+                trajectory_imm_momentum_initial_probability
+            )
+        if trajectory_imm_momentum_switch_probability is not None:
+            overrides["trajectory_imm_momentum_switch_probability"] = (
+                trajectory_imm_momentum_switch_probability
+            )
+        if overrides:
+            config = replace(config, **overrides)
         return SortedSpikeStateSpaceReplayModel(
             mode=mode,
-            config=_state_space_config(args, mode),
+            config=config,
             name=name,
         )
 
@@ -367,6 +422,24 @@ def _models(args: argparse.Namespace, session, encoding=None) -> dict[str, objec
         "sorted-spike-state-space-momentum-reverse": reverse_momentum,
         "sorted-spike-state-space-momentum-exact-sparse": state_space_model("momentum-exact-sparse"),
         "sorted-spike-state-space-trajectory-imm-exact-sparse": state_space_model("trajectory-imm-exact-sparse"),
+        "sorted-spike-state-space-trajectory-imm-anchored-exact-sparse": state_space_model(
+            "trajectory-imm-exact-sparse",
+            name="sorted-spike-state-space-trajectory-imm-anchored-exact-sparse",
+            trajectory_imm_momentum_initial_probability=0.05,
+            trajectory_imm_momentum_switch_probability=0.005,
+        ),
+        "sorted-spike-state-space-trajectory-imm-low-leak-exact-sparse": state_space_model(
+            "trajectory-imm-exact-sparse",
+            name="sorted-spike-state-space-trajectory-imm-low-leak-exact-sparse",
+            trajectory_imm_momentum_initial_probability=0.01,
+            trajectory_imm_momentum_switch_probability=0.001,
+        ),
+        "sorted-spike-state-space-trajectory-imm-persistent-exact-sparse": state_space_model(
+            "trajectory-imm-exact-sparse",
+            name="sorted-spike-state-space-trajectory-imm-persistent-exact-sparse",
+            trajectory_imm_mode_stickiness=0.985,
+        ),
+        "sorted-spike-state-space-displacement-momentum": state_space_model("displacement-momentum"),
         "sorted-spike-state-space-momentum-bidirectional": BidirectionalReplayModel(
             forward_momentum,
             reverse_momentum,
@@ -389,6 +462,7 @@ def _models(args: argparse.Namespace, session, encoding=None) -> dict[str, objec
         "clusterless-state-space-momentum": clusterless_model("momentum"),
         "clusterless-state-space-momentum-exact-sparse": clusterless_model("momentum-exact-sparse"),
         "clusterless-state-space-trajectory-imm-exact-sparse": clusterless_model("trajectory-imm-exact-sparse"),
+        "clusterless-state-space-displacement-momentum": clusterless_model("displacement-momentum"),
         "clusterless-state-space-imm": clusterless_model("imm"),
         "valid-state-diffusion": ValidStateDiffusionReplayModel(
             valid_mask_safe,
@@ -718,11 +792,36 @@ def main() -> int:
     parser.add_argument("--state-space-max-step-sigma", type=float, default=4.0)
     parser.add_argument("--state-space-imm-mode-stickiness", type=float, default=0.95)
     parser.add_argument("--state-space-imm-switch-tau-s", type=float, default=DEFAULT_IMPROVED_STATE_SPACE_IMM_SWITCH_TAU_S)
+    parser.add_argument(
+        "--state-space-trajectory-imm-mode-stickiness",
+        type=_optional_float_argument,
+        default=None,
+        help=(
+            "Optional trajectory-IMM-specific mode-transition stickiness. "
+            "Empty/default reuses the shared state-space IMM stickiness."
+        ),
+    )
+    parser.add_argument(
+        "--state-space-trajectory-imm-momentum-initial-probability",
+        type=_optional_float_argument,
+        default=None,
+        help="Optional trajectory-IMM initial probability assigned to the momentum mode.",
+    )
+    parser.add_argument(
+        "--state-space-trajectory-imm-momentum-switch-probability",
+        type=_optional_float_argument,
+        default=None,
+        help="Optional per-transition probability of switching from first-order modes into momentum.",
+    )
     parser.add_argument("--state-space-momentum-sigma-cm-sqrt-s", type=float, default=85.0)
     parser.add_argument("--state-space-momentum-initial-sigma-cm-sqrt-s", type=float, default=85.0)
     parser.add_argument("--state-space-momentum-velocity-decay", type=float, default=0.95)
     parser.add_argument("--state-space-momentum-velocity-decay-tau-s", type=float, default=0.0)
     parser.add_argument("--state-space-momentum-candidate-top-k", type=int, default=DEFAULT_IMPROVED_STATE_SPACE_MOMENTUM_CANDIDATE_TOP_K)
+    parser.add_argument("--state-space-displacement-radius-bins", type=int, default=2)
+    parser.add_argument("--state-space-displacement-position-sigma-cm", type=float, default=0.0)
+    parser.add_argument("--state-space-displacement-transition-sigma-cm-sqrt-s", type=float, default=0.0)
+    parser.add_argument("--state-space-displacement-prior-sigma-cm", type=float, default=0.0)
     parser.add_argument("--state-space-momentum-candidate-mass-threshold", type=float)
     parser.add_argument("--state-space-momentum-candidate-min-k", type=int, default=1)
     parser.add_argument("--state-space-momentum-candidate-max-k", type=int, default=0)

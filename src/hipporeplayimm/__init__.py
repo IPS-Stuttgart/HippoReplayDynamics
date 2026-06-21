@@ -20,6 +20,7 @@ from . import occupancy_candidate_support as _occupancy_candidate_support
 from . import pyrecest_score_metadata as _pyrecest_score_metadata
 from . import score_metadata as _score_metadata
 from . import simulation_recovery as _simulation_recovery
+from . import simulation_recovery_event_count as _simulation_recovery_event_count
 from . import sparse_momentum_duration_validation as _sparse_momentum_duration_validation
 from . import spike_rate_metadata as _spike_rate_metadata
 from . import time_order_patch as _time_order_patch
@@ -152,6 +153,7 @@ def apply_runtime_patches() -> None:
     _patch_simulation_recovery_module(_simulation_recovery)
     _latent_path_validation.apply_latent_path_validation_patch()
     _apply_trajectory_imm_recovery_patch()
+    _simulation_recovery_event_count.apply_simulation_recovery_event_count_patch()
     _model_averaged_endpoint_scoping.apply_model_averaged_endpoint_scoping_patch()
     _ground_truth_window_scope.apply_ground_truth_window_scope_patch()
     _improved_model_evidence_registry_patch.apply_improved_model_evidence_registry_patch()

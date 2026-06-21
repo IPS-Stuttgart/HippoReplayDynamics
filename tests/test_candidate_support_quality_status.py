@@ -24,6 +24,31 @@ def test_non_success_and_non_comparable_rows_are_unknown_support_quality() -> No
     assert not labelled["candidate_support_quality_good"].any()
 
 
+def test_diagnostic_non_comparable_rows_are_unknown_without_materialized_support() -> None:
+    rows = pd.DataFrame(
+        [
+            {
+                "model": "pyrecest-goal-particle",
+                "status": "success",
+                "diagnostic_pyrecest_evidence_support": "particle_approximation",
+            },
+            {
+                "model": "custom-model",
+                "status": "success",
+                "diagnostic_custom_evidence_support": "unknown_noncomparable",
+            },
+        ]
+    )
+
+    labelled = add_candidate_support_quality_columns(rows)
+
+    assert labelled["candidate_support_quality"].tolist() == [
+        "conservative_unknown",
+        "conservative_unknown",
+    ]
+    assert not labelled["candidate_support_quality_good"].any()
+
+
 def test_exact_success_rows_remain_good_support_quality() -> None:
     rows = pd.DataFrame(
         [{"model": "m", "status": "success", "evidence_support": "exact_full_grid"}]

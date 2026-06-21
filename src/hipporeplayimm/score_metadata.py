@@ -762,6 +762,7 @@ def apply_model_hyperparam_patch() -> None:
         pyrecest_imm_jump_fraction: float = 0.9,
         pyrecest_imm_jump_velocity_decay: float = 0.25,
         random_seed: int = 1,
+        include_bayesian_model_average: bool = True,
     ) -> pd.DataFrame:
         scores_frame = pd.read_csv(scores) if not isinstance(scores, pd.DataFrame) else scores.copy()
         gt_frame = gt._load_or_generate_ground_truth(root, ground_truth, ground_truth_config)
@@ -897,26 +898,29 @@ def apply_model_hyperparam_patch() -> None:
                         and score.terminal_log_posterior is not None
                     ):
                         average_components.append((model_name, log_evidence, score.terminal_log_posterior))
-                average_log_posterior = gt._bayesian_model_average_log_posterior(average_components)
+                average_log_posterior = gt._bayesian_model_average_log_posterior(
+                    average_components
+                )
                 if average_log_posterior is not None:
-                    decoded_rows.append(
-                        gt._decoded_row(
-                            str(session_id),
-                            int(event_index),
-                            "bayesian-model-average",
-                            average_log_posterior,
-                            None,
-                            encoding.bin_centers,
-                            wells,
+                    if include_bayesian_model_average:
+                        decoded_rows.append(
+                            gt._decoded_row(
+                                str(session_id),
+                                int(event_index),
+                                "bayesian-model-average",
+                                average_log_posterior,
+                                None,
+                                encoding.bin_centers,
+                                wells,
+                            )
                         )
-                    )
-                    average_score_rows.append(
-                        gt._bayesian_model_average_score_row(
-                            event_scores,
-                            average_components,
-                            "bayesian-model-average",
+                        average_score_rows.append(
+                            gt._bayesian_model_average_score_row(
+                                event_scores,
+                                average_components,
+                                "bayesian-model-average",
+                            )
                         )
-                    )
         if average_score_rows:
             scores_frame = pd.concat(
                 [scores_frame, pd.DataFrame(average_score_rows)],

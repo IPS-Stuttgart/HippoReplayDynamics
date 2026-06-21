@@ -124,7 +124,6 @@ def _wrap_ground_truth_compare_scores(bench: Any, gt: Any) -> None:
     ) -> pd.DataFrame:
         scores_frame = _scores_frame_for_cell_split_metadata(scores)
         if _score_table_needs_cell_split_scoped_decode(scores_frame):
-            group_columns = _cell_split_decode_group_columns(scores_frame)
             comparisons = [
                 _compare_scores_with_cell_split_metadata(
                     compare_scores,
@@ -137,7 +136,7 @@ def _wrap_ground_truth_compare_scores(bench: Any, gt: Any) -> None:
                     cell_split_strata,
                     kwargs,
                 )
-                for _, split_scores in scores_frame.groupby(group_columns, sort=False, dropna=False)
+                for split_scores in _cell_split_decode_groups(scores_frame)
             ]
             if comparisons:
                 return pd.concat(comparisons, ignore_index=True, sort=False)
@@ -253,7 +252,7 @@ def _score_table_needs_cell_split_scoped_decode(scores_frame: pd.DataFrame) -> b
     if "session" not in scores_frame.columns:
         return False
     group_columns = _cell_split_decode_group_columns(scores_frame)
-    group_count = int(scores_frame[group_columns].drop_duplicates().shape[0])
+    group_count = int(_cell_split_group_labels(scores_frame, group_columns).drop_duplicates().shape[0])
     session_count = int(scores_frame[["session"]].drop_duplicates().shape[0])
     if group_count > session_count:
         return True
@@ -261,6 +260,27 @@ def _score_table_needs_cell_split_scoped_decode(scores_frame: pd.DataFrame) -> b
         len(_metadata_group_values(scores_frame[column])) > 1
         for column in _CELL_SPLIT_SCOPE_COLUMNS
         if column in scores_frame.columns
+    )
+
+
+def _cell_split_decode_groups(scores_frame: pd.DataFrame):
+    group_columns = _cell_split_decode_group_columns(scores_frame)
+    group_labels = _cell_split_group_labels(scores_frame, group_columns)
+    for indices in group_labels.groupby(list(group_labels.columns), sort=False, dropna=False).indices.values():
+        yield scores_frame.iloc[np.asarray(indices, dtype=int)]
+
+
+def _cell_split_group_labels(
+    scores_frame: pd.DataFrame,
+    group_columns: list[str],
+) -> pd.DataFrame:
+    return pd.DataFrame(
+        {
+            f"__cell_split_group_{index}": [
+                _metadata_group_label(value) for value in scores_frame[column]
+            ]
+            for index, column in enumerate(group_columns)
+        }
     )
 
 
@@ -314,17 +334,31 @@ def _scores_frame_for_cell_split_metadata(scores: str | Path | pd.DataFrame) -> 
 def _metadata_group_values(values: pd.Series) -> set[str]:
     out: set[str] = set()
     for value in values:
-        try:
-            missing = pd.isna(value)
-        except (TypeError, ValueError):
-            missing = False
-        if isinstance(missing, (bool, np.bool_)) and bool(missing):
-            continue
-        text = str(value).strip()
-        if text.lower() in _MISSING_METADATA_STRINGS:
-            continue
-        out.add(text)
+        label = _metadata_group_label(value)
+        if label:
+            out.add(label)
     return out
+
+
+def _metadata_group_label(value: Any) -> str:
+    if _is_missing_metadata_value(value):
+        return ""
+    if isinstance(value, (list, tuple, set, np.ndarray)):
+        sequence = list(value) if isinstance(value, set) else value
+        array = np.asarray(sequence, dtype=object).reshape(-1)
+        return ",".join(str(item).strip() for item in array)
+    text = str(value).strip()
+    return "" if text.lower() in _MISSING_METADATA_STRINGS else text
+
+
+def _is_missing_metadata_value(value: Any) -> bool:
+    if value is None:
+        return True
+    try:
+        missing = pd.isna(value)
+    except (TypeError, ValueError):
+        return False
+    return isinstance(missing, (bool, np.bool_)) and bool(missing)
 
 
 def _cell_split_strategy_from_scores(scores_frame: pd.DataFrame, default: str) -> str:
@@ -358,13 +392,8 @@ def _string_metadata_values(frame: pd.DataFrame, column: str) -> list[str]:
         return []
     values: list[str] = []
     for value in frame[column]:
-        try:
-            if pd.isna(value):
-                continue
-        except (TypeError, ValueError):
-            continue
-        text = str(value).strip()
-        if text.lower() not in _MISSING_METADATA_STRINGS:
+        text = _metadata_group_label(value)
+        if text:
             values.append(text)
     return values
 

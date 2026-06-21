@@ -2,6 +2,7 @@
 # ruff: noqa: E402
 
 from . import benchmark_cell_split_metadata as _benchmark_cell_split_metadata
+from . import benchmark_relative_grouping as _benchmark_relative_grouping
 from . import bma_options_patch as _bma_options_patch
 from . import candidate_support_quality_patch as _candidate_support_quality_patch
 from . import cell_split_hashable_grouping as _cell_split_hashable_grouping
@@ -31,6 +32,7 @@ _score_metadata.apply_model_hyperparam_patch()
 _candidate_support_quality_patch.apply_candidate_support_quality_patch()
 _benchmark_cell_split_metadata.apply_benchmark_cell_split_metadata_patch()
 _cell_split_hashable_grouping.apply_cell_split_hashable_grouping_patch()
+_benchmark_relative_grouping.apply_benchmark_relative_grouping_patch()
 _clusterless_ground_truth.apply_clusterless_ground_truth_patch()
 _bma_options_patch.apply_bma_options_patch()
 _pyrecest_score_metadata.apply_pyrecest_score_metadata_patch()
@@ -131,6 +133,7 @@ def apply_runtime_patches() -> None:
     _candidate_support_quality_patch.apply_candidate_support_quality_patch()
     _benchmark_cell_split_metadata.apply_benchmark_cell_split_metadata_patch()
     _cell_split_hashable_grouping.apply_cell_split_hashable_grouping_patch()
+    _benchmark_relative_grouping.apply_benchmark_relative_grouping_patch()
     _clusterless_ground_truth.apply_clusterless_ground_truth_patch()
     _bma_options_patch.apply_bma_options_patch()
     _pyrecest_score_metadata.apply_pyrecest_score_metadata_patch()

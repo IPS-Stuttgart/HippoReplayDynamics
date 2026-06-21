@@ -24,12 +24,28 @@ def _patch_simulate_latent_path(recovery: Any) -> None:
 
     @wraps(original)
     def checked_simulate_latent_path(*args: Any, **kwargs: Any) -> Any:
-        if "n_time" in kwargs and int(kwargs["n_time"]) <= 0:
-            raise ValueError("n_time must be positive")
+        if "n_time" in kwargs:
+            kwargs = dict(kwargs)
+            kwargs["n_time"] = _positive_integer_value("n_time", kwargs["n_time"])
         return original(*args, **kwargs)
 
     recovery.simulate_latent_path = checked_simulate_latent_path
     recovery._latent_path_n_time_validation_applied = True
+
+
+def _positive_integer_value(name: str, value: Any) -> int:
+    if isinstance(value, (bool, np.bool_)):
+        raise ValueError(f"{name} must be positive integer-valued")
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must be positive integer-valued") from exc
+    if not np.isfinite(numeric) or numeric <= 0.0:
+        raise ValueError(f"{name} must be positive integer-valued")
+    integer_value = int(round(numeric))
+    if not np.isclose(numeric, integer_value, rtol=0.0, atol=0.0):
+        raise ValueError(f"{name} must be positive integer-valued")
+    return integer_value
 
 
 def _patch_emissions_from_counts(recovery: Any) -> None:

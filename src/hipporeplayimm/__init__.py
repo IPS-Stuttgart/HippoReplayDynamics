@@ -131,6 +131,9 @@ def apply_runtime_patches() -> None:
     _cell_split_hashable_grouping.apply_cell_split_hashable_grouping_patch()
     _clusterless_ground_truth.apply_clusterless_ground_truth_patch()
     _bma_options_patch.apply_bma_options_patch()
+    _pyrecest_score_metadata.apply_pyrecest_score_metadata_patch()
+    _goal_state_space_integration.apply_goal_state_space_patch()
+    _spike_rate_metadata.apply_spike_rate_metadata_patch()
     _clusterless_config_validation.apply_clusterless_encoding_config_validation_patch()
     _duration_candidate_metadata_patch.apply_duration_candidate_metadata_patch()
     _ground_truth._encoding_config_for_scores = _score_metadata.encoding_config_for_scores
@@ -198,6 +201,4 @@ __all__ = [
     'run_open_field_benchmark',
     'run_pyrecest_parameter_sweep',
     'run_session_simulation_recovery',
-    'score_model',
-    'write_pyrecest_sweep_outputs',
 ]

@@ -44,7 +44,8 @@ jobs:
           python .github/actions/ensure-pfeiffer-foster-dataset/validate_dataset.py \
             --dataset-root "${DATASET_ROOT}" \
             --session Rat1/Open1 \
-            --write-manifest
+            --write-manifest \
+            --manifest-output results/replay-behavior-alignment/dataset_manifest.json
 
       - name: Download model-evidence artifact
         uses: actions/download-artifact@v7

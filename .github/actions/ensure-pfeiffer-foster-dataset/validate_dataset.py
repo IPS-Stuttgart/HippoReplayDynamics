@@ -77,7 +77,7 @@ def _session_record(session_dir: Path, dataset_root: Path) -> dict[str, object]:
     }
 
 
-def _write_manifest(dataset_root: Path, files: list[Path]) -> Path:
+def _write_manifest(dataset_root: Path, files: list[Path], target: Path | None = None) -> Path:
     sessions = valid_sessions(dataset_root)
     manifest = {
         "dataset_root_name": dataset_root.name,
@@ -91,7 +91,8 @@ def _write_manifest(dataset_root: Path, files: list[Path]) -> Path:
     manifest["manifest_sha256_without_this_field"] = hashlib.sha256(
         payload.encode("utf-8")
     ).hexdigest()
-    target = dataset_root / "dataset_manifest.json"
+    target = target or dataset_root / "dataset_manifest.json"
+    target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     return target
 
@@ -101,6 +102,11 @@ def main() -> None:
     parser.add_argument("--dataset-root", required=True, type=Path)
     parser.add_argument("--session", default="", help="Optional session such as Rat1/Open1")
     parser.add_argument("--write-manifest", action="store_true")
+    parser.add_argument(
+        "--manifest-output",
+        type=Path,
+        help="Optional manifest path to use instead of writing into the dataset root.",
+    )
     args = parser.parse_args()
 
     dataset_root = args.dataset_root.expanduser()
@@ -126,7 +132,7 @@ def main() -> None:
     files = _tracked_files(dataset_root)
     total_bytes = sum(path.stat().st_size for path in files)
     if args.write_manifest:
-        manifest_path = _write_manifest(dataset_root, files)
+        manifest_path = _write_manifest(dataset_root, files, args.manifest_output)
         print(f"Wrote dataset manifest: {manifest_path}")
 
     print(f"Validated Pfeiffer/Foster dataset at {dataset_root}")

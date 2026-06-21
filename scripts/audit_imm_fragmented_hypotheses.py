@@ -65,6 +65,24 @@ def _value(group: pd.DataFrame, model: str) -> float:
     return float(row.iloc[-1]["log_evidence"])
 
 
+def _finite_difference(left: object, right: object) -> float:
+    try:
+        left_value = float(left)
+        right_value = float(right)
+    except (TypeError, ValueError):
+        return float("nan")
+    if not np.isfinite(left_value) or not np.isfinite(right_value):
+        return float("nan")
+    return left_value - right_value
+
+
+def _finite_max(values: list[object]) -> float:
+    numeric = pd.to_numeric(pd.Series(values), errors="coerce").dropna()
+    if numeric.empty:
+        return float("nan")
+    return float(numeric.max())
+
+
 def _classify(row: pd.Series, threshold: float) -> str:
     best = str(row["best_exact_core_model"])
     imm_frag = float(row["delta_imm_minus_fragmented"])
@@ -105,24 +123,24 @@ def build_event_table(evidence: pd.DataFrame, threshold: float = 5.5) -> pd.Data
             "missing_required_exact_core_models": " ".join(missing),
             "best_exact_core_model": best_model,
             "best_exact_core_log_evidence": best_logz,
-            "logZ_stationary": _value(group, STATIONARY),
-            "logZ_diffusion": _value(group, DIFFUSION),
-            "logZ_fragmented": _value(group, FRAGMENTED),
-            "logZ_first_order_imm": _value(group, FIRST_ORDER_IMM),
-            "logZ_momentum_exact_sparse": _value(group, MOMENTUM_EXACT),
+            "logZ_stationary": _value(core, STATIONARY),
+            "logZ_diffusion": _value(core, DIFFUSION),
+            "logZ_fragmented": _value(core, FRAGMENTED),
+            "logZ_first_order_imm": _value(core, FIRST_ORDER_IMM),
+            "logZ_momentum_exact_sparse": _value(core, MOMENTUM_EXACT),
         }
-        row["delta_imm_minus_fragmented"] = row["logZ_first_order_imm"] - row["logZ_fragmented"]
-        row["delta_imm_minus_momentum"] = row["logZ_first_order_imm"] - row["logZ_momentum_exact_sparse"]
-        row["delta_momentum_minus_diffusion"] = row["logZ_momentum_exact_sparse"] - row["logZ_diffusion"]
-        row["delta_trajectory_minus_stationary"] = (
-            max(
+        row["delta_imm_minus_fragmented"] = _finite_difference(row["logZ_first_order_imm"], row["logZ_fragmented"])
+        row["delta_imm_minus_momentum"] = _finite_difference(row["logZ_first_order_imm"], row["logZ_momentum_exact_sparse"])
+        row["delta_momentum_minus_diffusion"] = _finite_difference(row["logZ_momentum_exact_sparse"], row["logZ_diffusion"])
+        best_trajectory_logz = _finite_max(
+            [
                 row["logZ_diffusion"],
                 row["logZ_fragmented"],
                 row["logZ_first_order_imm"],
                 row["logZ_momentum_exact_sparse"],
-            )
-            - row["logZ_stationary"]
+            ]
         )
+        row["delta_trajectory_minus_stationary"] = _finite_difference(best_trajectory_logz, row["logZ_stationary"])
         row["imm_confident_vs_fragmented"] = row["delta_imm_minus_fragmented"] >= threshold
         row["fragmented_confident_vs_imm"] = row["delta_imm_minus_fragmented"] <= -threshold
         row["momentum_confident_vs_diffusion"] = row["delta_momentum_minus_diffusion"] >= threshold

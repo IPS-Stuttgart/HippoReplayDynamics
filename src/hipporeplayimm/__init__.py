@@ -2,6 +2,7 @@
 # ruff: noqa: E402
 
 from . import benchmark_cell_split_metadata as _benchmark_cell_split_metadata
+from . import benchmark_metadata_scope_patch as _benchmark_metadata_scope_patch
 from . import benchmark_relative_grouping as _benchmark_relative_grouping
 from . import bma_options_patch as _bma_options_patch
 from . import candidate_support_quality_patch as _candidate_support_quality_patch
@@ -34,6 +35,7 @@ from . import time_order_patch as _time_order_patch
 _score_metadata.apply_model_hyperparam_patch()
 _candidate_support_quality_patch.apply_candidate_support_quality_patch()
 _benchmark_cell_split_metadata.apply_benchmark_cell_split_metadata_patch()
+_benchmark_metadata_scope_patch.apply_benchmark_metadata_scope_patch()
 _cell_split_hashable_grouping.apply_cell_split_hashable_grouping_patch()
 _benchmark_relative_grouping.apply_benchmark_relative_grouping_patch()
 _clusterless_ground_truth.apply_clusterless_ground_truth_patch()
@@ -138,6 +140,7 @@ def apply_runtime_patches() -> None:
     _score_metadata.apply_model_hyperparam_patch()
     _candidate_support_quality_patch.apply_candidate_support_quality_patch()
     _benchmark_cell_split_metadata.apply_benchmark_cell_split_metadata_patch()
+    _benchmark_metadata_scope_patch.apply_benchmark_metadata_scope_patch()
     _cell_split_hashable_grouping.apply_cell_split_hashable_grouping_patch()
     _benchmark_relative_grouping.apply_benchmark_relative_grouping_patch()
     _clusterless_ground_truth.apply_clusterless_ground_truth_patch()

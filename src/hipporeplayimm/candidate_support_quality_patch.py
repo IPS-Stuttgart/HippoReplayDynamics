@@ -9,6 +9,7 @@ import pandas as pd
 
 _MISSING_SUPPORT_VALUES = {"", "nan", "none", "null", "<na>"}
 _NONCOMPARABLE_SUPPORT_VALUES = {
+    "degenerate_single_bin",
     "not_scored",
     "unknown_noncomparable",
     "particle_approximation",
@@ -45,19 +46,10 @@ def apply_candidate_support_quality_patch() -> None:
         if status not in _SUCCESS_STATUS_VALUES:
             return ri.CANDIDATE_SUPPORT_UNKNOWN
 
-        evidence_support = _text(row.get("evidence_support", "")).lower()
-        if evidence_support in _NONCOMPARABLE_SUPPORT_VALUES:
+        support_values = _evidence_support_values(row)
+        if any(value in _NONCOMPARABLE_SUPPORT_VALUES for value in support_values):
             return ri.CANDIDATE_SUPPORT_UNKNOWN
-        if evidence_support and evidence_support not in {
-            _TRUNCATED_SUPPORT,
-            *_MISSING_SUPPORT_VALUES,
-        }:
-            return ri.CANDIDATE_SUPPORT_EXACT
-
-        diagnostic_values = _diagnostic_evidence_support_values(row)
-        if any(value in _NONCOMPARABLE_SUPPORT_VALUES for value in diagnostic_values):
-            return ri.CANDIDATE_SUPPORT_UNKNOWN
-        if _TRUNCATED_SUPPORT not in diagnostic_values and evidence_support != _TRUNCATED_SUPPORT:
+        if _TRUNCATED_SUPPORT not in support_values:
             return ri.CANDIDATE_SUPPORT_EXACT
         if min_log_mass is None or not np.isfinite(min_log_mass):
             return ri.CANDIDATE_SUPPORT_UNKNOWN
@@ -71,16 +63,16 @@ def apply_candidate_support_quality_patch() -> None:
     ri._candidate_support_quality_status_patch_applied = True
 
 
-def _diagnostic_evidence_support_values(row: pd.Series) -> list[str]:
-    """Return all non-empty diagnostic evidence-support labels on a score row."""
+def _evidence_support_values(row: pd.Series) -> list[str]:
+    """Return normalized support labels from canonical and diagnostic columns."""
 
     values: list[str] = []
-    for column in row.index:
-        column_name = str(column)
-        if not (
-            column_name.startswith("diagnostic_")
-            and column_name.endswith("_evidence_support")
-        ):
+    canonical = _text(row.get("evidence_support", "")).lower()
+    if canonical and canonical not in _MISSING_SUPPORT_VALUES:
+        values.append(canonical)
+    for column in getattr(row, "index", ()):  # pandas Series in production; duck-typed in tests.
+        name = str(column)
+        if not name.startswith("diagnostic_") or not name.endswith("_evidence_support"):
             continue
         value = _text(row.get(column, "")).lower()
         if value and value not in _MISSING_SUPPORT_VALUES:

@@ -12,6 +12,7 @@ from . import duration_candidate_metadata_patch as _duration_candidate_metadata_
 from . import duration_occupancy_metadata_guard as _duration_occupancy_metadata_guard
 from . import goal_state_space_integration as _goal_state_space_integration
 from . import ground_truth as _ground_truth
+from . import ground_truth_cell_id_metadata as _ground_truth_cell_id_metadata
 from . import ground_truth_integer_metadata as _ground_truth_integer_metadata
 from . import ground_truth_sensitivity_metrics as _ground_truth_sensitivity_metrics
 from . import ground_truth_window_scope as _ground_truth_window_scope
@@ -44,6 +45,7 @@ _clusterless_config_validation.apply_clusterless_encoding_config_validation_patc
 _duration_candidate_metadata_patch.apply_duration_candidate_metadata_patch()
 _ground_truth_window_scope.apply_ground_truth_window_scope_patch()
 _ground_truth_integer_metadata.apply_ground_truth_integer_metadata_patch()
+_ground_truth_cell_id_metadata.apply_ground_truth_cell_id_metadata_patch()
 
 from .benchmarks import BenchmarkConfig, BenchmarkResult, run_open_field_benchmark
 from .clusterless import (
@@ -146,6 +148,7 @@ def apply_runtime_patches() -> None:
     _ground_truth._encoding_config_for_scores = _score_metadata.encoding_config_for_scores
     _ground_truth._emission_config_for_scores = _score_metadata.emission_config_for_scores
     _ground_truth_integer_metadata.apply_ground_truth_integer_metadata_patch()
+    _ground_truth_cell_id_metadata.apply_ground_truth_cell_id_metadata_patch()
     _ground_truth_sensitivity_metrics.apply_ground_truth_sensitivity_metric_patch(_ground_truth)
     _apply_ground_truth_candidate_support_patch()
     _occupancy_candidate_support.apply_occupancy_candidate_support_patch()

@@ -9,6 +9,7 @@ from . import candidate_support_quality_patch as _candidate_support_quality_patc
 from . import cell_split_hashable_grouping as _cell_split_hashable_grouping
 from . import clusterless_config_validation as _clusterless_config_validation
 from . import clusterless_ground_truth as _clusterless_ground_truth
+from . import data_cell_id_validation as _data_cell_id_validation
 from . import duration_candidate_metadata_patch as _duration_candidate_metadata_patch
 from . import duration_occupancy_metadata_guard as _duration_occupancy_metadata_guard
 from . import goal_state_space_integration as _goal_state_space_integration
@@ -45,6 +46,7 @@ _goal_state_space_integration.apply_goal_state_space_patch()
 _spike_rate_metadata.apply_spike_rate_metadata_patch()
 _time_order_patch.apply_reverse_emission_time_patch()
 _clusterless_config_validation.apply_clusterless_encoding_config_validation_patch()
+_data_cell_id_validation.apply_data_cell_id_validation_patch()
 _duration_candidate_metadata_patch.apply_duration_candidate_metadata_patch()
 _ground_truth_window_scope.apply_ground_truth_window_scope_patch()
 _ground_truth_integer_metadata.apply_ground_truth_integer_metadata_patch()
@@ -149,6 +151,7 @@ def apply_runtime_patches() -> None:
     _goal_state_space_integration.apply_goal_state_space_patch()
     _spike_rate_metadata.apply_spike_rate_metadata_patch()
     _clusterless_config_validation.apply_clusterless_encoding_config_validation_patch()
+    _data_cell_id_validation.apply_data_cell_id_validation_patch()
     _duration_candidate_metadata_patch.apply_duration_candidate_metadata_patch()
     _ground_truth._encoding_config_for_scores = _score_metadata.encoding_config_for_scores
     _ground_truth._emission_config_for_scores = _score_metadata.emission_config_for_scores

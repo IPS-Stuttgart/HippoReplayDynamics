@@ -257,7 +257,7 @@ def _score_table_needs_cell_split_scoped_decode(scores_frame: pd.DataFrame) -> b
     if group_count > session_count:
         return True
     return any(
-        len(_metadata_group_values(scores_frame[column])) > 1
+        len(_metadata_group_values(scores_frame[column], include_missing=True)) > 1
         for column in _CELL_SPLIT_SCOPE_COLUMNS
         if column in scores_frame.columns
     )
@@ -289,7 +289,9 @@ def _cell_split_decode_group_columns(scores_frame: pd.DataFrame) -> list[str]:
     for column in _CELL_SPLIT_SCOPE_COLUMNS:
         if column not in scores_frame.columns:
             continue
-        if column == "benchmark_cell_split_index" or len(_metadata_group_values(scores_frame[column])) > 1:
+        if column == "benchmark_cell_split_index" or len(
+            _metadata_group_values(scores_frame[column], include_missing=True)
+        ) > 1:
             columns.append(column)
     return columns
 
@@ -331,11 +333,11 @@ def _scores_frame_for_cell_split_metadata(scores: str | Path | pd.DataFrame) -> 
     return pd.read_csv(scores)
 
 
-def _metadata_group_values(values: pd.Series) -> set[str]:
+def _metadata_group_values(values: pd.Series, *, include_missing: bool = False) -> set[str]:
     out: set[str] = set()
     for value in values:
         label = _metadata_group_label(value)
-        if label:
+        if label or include_missing:
             out.add(label)
     return out
 

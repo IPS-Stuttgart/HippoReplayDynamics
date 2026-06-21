@@ -16,8 +16,7 @@ def test_duration_patched_emission_builders_are_synchronized() -> None:
     assert benchmarks.build_emissions is encoding.build_emissions
     assert ground_truth.build_emissions is encoding.build_emissions
 
-
-def test_apply_runtime_patches_replays_import_time_metadata_hooks(monkeypatch) -> None:
+def test_runtime_patches_replay_import_metadata_hooks(monkeypatch) -> None:
     import hipporeplayimm
 
     calls: list[str] = []

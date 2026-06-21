@@ -2,22 +2,19 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import replace
+from typing import Any, Callable
+
+import numpy as np
 
 
 def apply_duration_occupancy_metadata_guard_patch() -> None:
-    """Ensure occupancy candidate-selection emissions do not share metadata.
-
-    The duration/occupancy scorer derives a temporary emission tensor whose
-    likelihood rows mask invalid occupancy bins before candidate selection.  A
-    bare dataclass ``replace`` keeps the original mutable metadata mapping by
-    reference, so any downstream metadata annotation on the temporary tensor can
-    mutate the caller's emission object.  Keep the original helper's validation
-    and masking semantics, but copy metadata whenever a derived tensor is
-    returned.
-    """
+    """Ensure derived duration/occupancy helper inputs stay isolated and valid."""
 
     from . import duration_occupancy as _duration_occupancy
+
+    _apply_transition_duration_validation()
 
     if getattr(_duration_occupancy, "_metadata_guard_patch_applied", False):
         return
@@ -46,3 +43,71 @@ def apply_duration_occupancy_metadata_guard_patch() -> None:
     _duration_occupancy._candidate_selection_emissions = _candidate_selection_emissions
     _duration_occupancy._uniform_probabilities = _uniform_probabilities
     _duration_occupancy._metadata_guard_patch_applied = True
+
+
+def _apply_transition_duration_validation() -> None:
+    from . import state_space_displacement_imm as displacement_imm
+    from . import state_space_displacement_momentum as displacement_momentum
+    from . import state_space_sparse_momentum as sparse_momentum
+    from . import state_space_trajectory_imm as trajectory_imm
+
+    if getattr(sparse_momentum, "_transition_duration_validation_patch_applied", False):
+        return
+
+    sparse_decay = _validated_decay_helper(sparse_momentum._duration_adjusted_decays)
+    displacement_decay = _validated_decay_helper(displacement_momentum._duration_adjusted_decays)
+
+    sparse_momentum._coerce_transition_durations = _coerce_transition_durations
+    sparse_momentum._duration_adjusted_decays = sparse_decay
+    trajectory_imm._coerce_transition_durations = _coerce_transition_durations
+    trajectory_imm._duration_adjusted_decays = sparse_decay
+
+    displacement_momentum._coerce_transition_durations = _coerce_transition_durations
+    displacement_momentum._duration_adjusted_decays = displacement_decay
+    displacement_imm._coerce_transition_durations = _coerce_transition_durations
+    displacement_imm._duration_adjusted_decays = displacement_decay
+
+    sparse_momentum._transition_duration_validation_patch_applied = True
+    displacement_momentum._transition_duration_validation_patch_applied = True
+    trajectory_imm._transition_duration_validation_patch_applied = True
+    displacement_imm._transition_duration_validation_patch_applied = True
+
+
+def _coerce_transition_durations(
+    values: Iterable[float],
+    *,
+    n_time: int,
+    fallback_dt: float,
+) -> np.ndarray:
+    expected = max(int(n_time) - 1, 0)
+    out = np.asarray(list(values), dtype=float)
+    if out.shape != (expected,):
+        dt = _positive_finite_scalar("fallback dt", fallback_dt)
+        return np.full(expected, dt, dtype=float)
+    _validate_transition_durations(out)
+    return out
+
+
+def _validated_decay_helper(helper: Callable[[Any, np.ndarray, float], np.ndarray]):
+    def duration_adjusted_decays(config: Any, durations: np.ndarray, reference_dt: float) -> np.ndarray:
+        durations = np.asarray(durations, dtype=float)
+        _validate_transition_durations(durations)
+        return helper(config, durations, reference_dt)
+
+    duration_adjusted_decays._transition_duration_validation_wrapped = True  # type: ignore[attr-defined]
+    return duration_adjusted_decays
+
+
+def _validate_transition_durations(durations: np.ndarray) -> None:
+    values = np.asarray(durations, dtype=float)
+    if values.size == 0:
+        return
+    if values.ndim != 1 or not np.all(np.isfinite(values)) or np.any(values <= 0.0):
+        raise ValueError("transition durations must be finite and positive")
+
+
+def _positive_finite_scalar(name: str, value: float) -> float:
+    scalar = float(value)
+    if not np.isfinite(scalar) or scalar <= 0.0:
+        raise ValueError(f"{name} must be finite and positive")
+    return scalar

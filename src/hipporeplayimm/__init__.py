@@ -14,6 +14,7 @@ from . import ground_truth as _ground_truth
 from . import ground_truth_sensitivity_metrics as _ground_truth_sensitivity_metrics
 from . import ground_truth_window_scope as _ground_truth_window_scope
 from . import improved_model_evidence_registry_patch as _improved_model_evidence_registry_patch
+from . import latent_path_validation as _latent_path_validation
 from . import model_averaged_endpoint_scoping as _model_averaged_endpoint_scoping
 from . import occupancy_candidate_support as _occupancy_candidate_support
 from . import pyrecest_score_metadata as _pyrecest_score_metadata
@@ -149,6 +150,7 @@ def apply_runtime_patches() -> None:
     _time_order_patch.apply_reverse_emission_time_patch()
     _synchronize_duration_patched_emission_builders()
     _patch_simulation_recovery_module(_simulation_recovery)
+    _latent_path_validation.apply_latent_path_validation_patch()
     _apply_trajectory_imm_recovery_patch()
     _model_averaged_endpoint_scoping.apply_model_averaged_endpoint_scoping_patch()
     _ground_truth_window_scope.apply_ground_truth_window_scope_patch()
@@ -201,4 +203,6 @@ __all__ = [
     'run_open_field_benchmark',
     'run_pyrecest_parameter_sweep',
     'run_session_simulation_recovery',
+    'score_model',
+    'write_pyrecest_sweep_outputs',
 ]

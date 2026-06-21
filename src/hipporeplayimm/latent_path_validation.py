@@ -96,6 +96,8 @@ def _checked_count_array(counts: Any) -> np.ndarray:
     raw = np.asarray(counts)
     if raw.ndim != 2:
         raise ValueError("counts must be a two-dimensional array")
+    if raw.shape[0] == 0:
+        raise ValueError("counts must contain at least one time bin")
     try:
         numeric = np.asarray(raw, dtype=float)
     except (TypeError, ValueError) as exc:

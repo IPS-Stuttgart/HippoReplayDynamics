@@ -36,10 +36,9 @@ def apply_candidate_support_quality_patch() -> None:
         """Return a conservative quality label for one score row.
 
         Candidate-support quality is meaningful only for successful exact rows or
-        candidate-pruned lower-bound rows.  Failed rows and explicitly
-        non-comparable evidence supports should not be counted as
-        ``exact_or_not_pruned`` merely because they are not truncated lower
-        bounds.
+        candidate-pruned lower-bound rows.  Failed rows and non-comparable
+        evidence supports should not be counted as ``exact_or_not_pruned`` merely
+        because they are not truncated lower bounds.
         """
 
         status = _text(row.get("status", "success")).lower()

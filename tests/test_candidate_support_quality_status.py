@@ -33,6 +33,11 @@ def test_non_comparable_diagnostic_evidence_support_is_unknown_quality() -> None
                 "diagnostic_pyrecest_evidence_support": "particle_approximation",
             },
             {
+                "model": "custom-model",
+                "status": "success",
+                "diagnostic_custom_evidence_support": "unknown_noncomparable",
+            },
+            {
                 "model": "state-space-displacement-imm",
                 "status": "success",
                 "diagnostic_state_space_displacement_imm_evidence_support": "truncated_full_grid",
@@ -43,6 +48,7 @@ def test_non_comparable_diagnostic_evidence_support_is_unknown_quality() -> None
     labelled = add_candidate_support_quality_columns(rows)
 
     assert labelled["candidate_support_quality"].tolist() == [
+        "conservative_unknown",
         "conservative_unknown",
         "conservative_unknown",
     ]

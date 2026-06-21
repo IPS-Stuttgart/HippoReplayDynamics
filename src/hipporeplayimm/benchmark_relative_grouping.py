@@ -1,22 +1,20 @@
 """Scope relative benchmark metrics to matching run metadata.
 
 Held-out benchmark score tables are often concatenated across parameter sweeps,
-cell-split strategies, or held-out fractions.  The relative held-out metrics must
+cell-split strategies, or held-out fractions. The relative held-out metrics must
 compare each model against the static baselines from the same scoring condition;
-otherwise a strong static baseline from one sweep arm can be subtracted from a
-model row from another arm.
+otherwise a strong static baseline from one configuration can be subtracted from
+a model row from another configuration.
 """
 
 from __future__ import annotations
-
-from typing import Any
 
 import pandas as pd
 
 
 # Metadata columns emitted by ``benchmarks._benchmark_config_metadata`` and
 # ``benchmarks._benchmark_split_metadata`` that define a compatible held-out
-# scoring condition.  Optional columns are used only when every row has a value;
+# scoring condition. Optional columns are used only when every row has a value;
 # this keeps older score tables with missing optional metadata from losing their
 # static-baseline groups under pandas' default ``groupby(dropna=True)`` behavior.
 _BENCHMARK_RELATIVE_SCOPE_COLUMNS = (

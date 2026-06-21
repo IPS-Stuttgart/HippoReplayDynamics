@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from functools import wraps
 from typing import Any
 
@@ -17,6 +18,8 @@ def apply_latent_path_validation_patch() -> None:
         _patch_simulate_latent_path(recovery)
     if not getattr(recovery, "_emissions_from_counts_input_validation_applied", False):
         _patch_emissions_from_counts(recovery)
+    if not getattr(recovery, "_recovery_event_count_validation_applied", False):
+        _patch_run_session_simulation_recovery(recovery)
 
 
 def _patch_simulate_latent_path(recovery: Any) -> None:
@@ -31,6 +34,36 @@ def _patch_simulate_latent_path(recovery: Any) -> None:
 
     recovery.simulate_latent_path = checked_simulate_latent_path
     recovery._latent_path_n_time_validation_applied = True
+
+
+def _patch_run_session_simulation_recovery(recovery: Any) -> None:
+    original = recovery.run_session_simulation_recovery
+
+    @wraps(original)
+    def checked_run_session_simulation_recovery(
+        dataset_root: Any,
+        session_id: Any,
+        config: Any,
+    ) -> Any:
+        validated_config = _config_with_validated_event_counts(config)
+        return original(dataset_root, session_id, validated_config)
+
+    recovery.run_session_simulation_recovery = checked_run_session_simulation_recovery
+    recovery._recovery_event_count_validation_applied = True
+
+
+def _config_with_validated_event_counts(config: Any) -> Any:
+    updates = {
+        "events_per_model": _positive_integer_value(
+            "events_per_model",
+            getattr(config, "events_per_model"),
+        )
+    }
+    for name in ("max_template_events", "max_synthetic_events"):
+        value = getattr(config, name, None)
+        if value is not None:
+            updates[name] = _positive_integer_value(name, value)
+    return replace(config, **updates)
 
 
 def _positive_integer_value(name: str, value: Any) -> int:

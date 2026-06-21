@@ -17,13 +17,14 @@ def _small_encoding() -> EncodingModel:
     )
 
 
-def test_simulate_latent_path_rejects_empty_length():
+@pytest.mark.parametrize("bad_length", [0, -1, 1.5, np.nan])
+def test_simulate_latent_path_rejects_invalid_length(bad_length):
     generator = np.random.default_rng(1)
     with pytest.raises(ValueError, match="n_time must be positive"):
         simulate_latent_path(
             _small_encoding(),
             true_model="stationary",
-            n_time=0,
+            n_time=bad_length,
             dt=0.02,
             rng=generator,
         )

@@ -144,7 +144,7 @@ def _window_decode_groups(scores_frame: pd.DataFrame):
         index=scores_frame.index,
     )
     for indices in labels.groupby(list(labels.columns), sort=False, dropna=False).indices.values():
-        yield scores_frame.loc[list(indices)]
+        yield scores_frame.iloc[np.asarray(indices, dtype=int)]
 
 
 def _window_group_columns(scores_frame: pd.DataFrame) -> list[str]:

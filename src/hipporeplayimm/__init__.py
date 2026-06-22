@@ -26,6 +26,7 @@ from . import observation_sweep_config_validation as _observation_sweep_config_v
 from . import occupancy_candidate_support as _occupancy_candidate_support
 from . import position_decoding_config_validation as _position_decoding_config_validation
 from . import pyrecest_score_metadata as _pyrecest_score_metadata
+from . import recovery_diagnostics_bool_patch as _recovery_diagnostics_bool_patch
 from . import reverse_time_terminal_guard as _reverse_time_terminal_guard
 from . import score_metadata as _score_metadata
 from . import simulation_best_row_flags as _simulation_best_row_flags
@@ -192,6 +193,7 @@ def apply_runtime_patches() -> None:
     _simulation_recovery_count_validation.apply_simulation_recovery_count_validation_patch()
     _apply_trajectory_imm_recovery_patch()
     _simulation_recovery_event_count.apply_simulation_recovery_event_count_patch()
+    _recovery_diagnostics_bool_patch.apply_recovery_diagnostics_bool_patch()
     _model_averaged_endpoint_scoping.apply_model_averaged_endpoint_scoping_patch()
     _ground_truth_window_scope.apply_ground_truth_window_scope_patch()
     _improved_model_evidence_registry_patch.apply_improved_model_evidence_registry_patch()

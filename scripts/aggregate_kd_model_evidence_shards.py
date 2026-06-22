@@ -34,8 +34,8 @@ def _load_npz(path: Path) -> dict[str, object]:
             "n_spikes": np.array(shard["n_spikes"], dtype=int, copy=True),
             "sd_meters": np.array(shard["sd_meters"], dtype=float, copy=True),
             "decay": np.array(shard["decay"], dtype=float, copy=True),
-            "sd_indices": np.array(shard["sd_indices"], dtype=int, copy=True),
-            "decay_indices": np.array(shard["decay_indices"], dtype=int, copy=True),
+            "sd_indices": np.array(shard["sd_indices"], copy=True),
+            "decay_indices": np.array(shard["decay_indices"], copy=True),
             "values": np.array(shard["values"], dtype=float, copy=True),
             "runtime_s": float(_np_scalar(shard["runtime_s"])),
             "kd_grid_preset": str(_np_scalar(shard["kd_grid_preset"])),
@@ -56,14 +56,28 @@ def _check_same(reference: dict[str, object], shard: dict[str, object], keys: tu
             raise ValueError(f"Momentum shard metadata differs for {key}: {shard['path']}")
 
 
+def _coerce_grid_index_array(shard: dict[str, object], key: str) -> np.ndarray:
+    raw = np.asarray(shard[key])
+    if np.issubdtype(raw.dtype, np.bool_):
+        raise TypeError(f"Momentum shard {key} must contain integer grid indices, not booleans: {shard['path']}")
+    if np.issubdtype(raw.dtype, np.integer):
+        return raw.astype(np.intp, copy=False)
+    if not np.issubdtype(raw.dtype, np.number):
+        raise TypeError(f"Momentum shard {key} must contain numeric integer grid indices: {shard['path']}")
+    values = np.asarray(raw, dtype=float)
+    if not np.all(np.isfinite(values)) or not np.all(values == np.floor(values)):
+        raise ValueError(f"Momentum shard {key} must contain finite integer grid indices: {shard['path']}")
+    return values.astype(np.intp, copy=False)
+
+
 def _validate_grid_indices(
     shard: dict[str, object],
     *,
     sd_count: int,
     decay_count: int,
 ) -> tuple[np.ndarray, np.ndarray]:
-    sd_indices = np.asarray(shard["sd_indices"], dtype=int)
-    decay_indices = np.asarray(shard["decay_indices"], dtype=int)
+    sd_indices = _coerce_grid_index_array(shard, "sd_indices")
+    decay_indices = _coerce_grid_index_array(shard, "decay_indices")
     if sd_indices.ndim != 1 or decay_indices.ndim != 1:
         raise ValueError(f"Momentum shard grid indices must be one-dimensional: {shard['path']}")
     if sd_indices.shape != decay_indices.shape:

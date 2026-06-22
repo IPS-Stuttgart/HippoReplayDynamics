@@ -22,6 +22,7 @@ from . import ground_truth_window_scope as _ground_truth_window_scope
 from . import improved_model_evidence_registry_patch as _improved_model_evidence_registry_patch
 from . import latent_path_validation as _latent_path_validation
 from . import model_averaged_endpoint_scoping as _model_averaged_endpoint_scoping
+from . import observation_sweep_config_validation as _observation_sweep_config_validation
 from . import occupancy_candidate_support as _occupancy_candidate_support
 from . import position_decoding_config_validation as _position_decoding_config_validation
 from . import pyrecest_score_metadata as _pyrecest_score_metadata
@@ -194,6 +195,7 @@ def apply_runtime_patches() -> None:
     _model_averaged_endpoint_scoping.apply_model_averaged_endpoint_scoping_patch()
     _ground_truth_window_scope.apply_ground_truth_window_scope_patch()
     _improved_model_evidence_registry_patch.apply_improved_model_evidence_registry_patch()
+    _observation_sweep_config_validation.apply_observation_sweep_config_validation_patch()
 
 
 # Ensure replay dynamics use center-to-center transition durations when replay

@@ -8,6 +8,7 @@ window truncation or unrelated NumPy/type errors.
 
 from __future__ import annotations
 
+from dataclasses import replace
 from functools import wraps
 from typing import Any
 
@@ -29,20 +30,30 @@ def apply_position_decoding_config_validation_patch() -> None:
     @wraps(original_validate_session_position_decoding)
     def validate_session_position_decoding_with_config_validation(session: Any, config: Any = None) -> Any:
         config = validation.PositionDecodingConfig() if config is None else config
-        _validate_position_decoding_config(config)
+        config = _validated_position_decoding_config(config)
         return original_validate_session_position_decoding(session, config)
 
     validation.validate_session_position_decoding = validate_session_position_decoding_with_config_validation
     setattr(validation, _PATCHED_FLAG, True)
 
 
-def _validate_position_decoding_config(config: Any) -> None:
-    _positive_finite_scalar("decode_bin_s", getattr(config, "decode_bin_s"))
-    _positive_integer("n_folds", getattr(config, "n_folds"))
-    _nonnegative_integer("min_spikes_per_window", getattr(config, "min_spikes_per_window"))
+def _validated_position_decoding_config(config: Any) -> Any:
+    updates = {
+        "decode_bin_s": _positive_finite_scalar("decode_bin_s", getattr(config, "decode_bin_s")),
+        "n_folds": _positive_integer("n_folds", getattr(config, "n_folds")),
+        "min_spikes_per_window": _nonnegative_integer(
+            "min_spikes_per_window",
+            getattr(config, "min_spikes_per_window"),
+        ),
+    }
     max_windows = getattr(config, "max_windows_per_session", None)
     if max_windows is not None:
-        _positive_integer("max_windows_per_session", max_windows)
+        updates["max_windows_per_session"] = _positive_integer("max_windows_per_session", max_windows)
+    return replace(config, **updates)
+
+
+def _validate_position_decoding_config(config: Any) -> None:
+    _validated_position_decoding_config(config)
 
 
 def _positive_finite_scalar(name: str, value: Any) -> float:

@@ -15,6 +15,7 @@ from .sorted_spike_state_space import SortedSpikeStateSpaceReplayModel
 
 _SORTED_SPIKE_TRAJECTORY_IMM = "sorted-spike-state-space-trajectory-imm-exact-sparse"
 _TRAJECTORY_IMM_MODE = "trajectory-imm-exact-sparse"
+_TRAJECTORY_IMM_ALIASES = frozenset({_SORTED_SPIKE_TRAJECTORY_IMM, _TRAJECTORY_IMM_MODE})
 
 
 def apply_trajectory_imm_recovery_patch() -> None:
@@ -29,20 +30,20 @@ def apply_trajectory_imm_recovery_patch() -> None:
     if getattr(recovery, "_trajectory_imm_recovery_patch_applied", False):
         return
 
-    recovery._TRAJECTORY = set(getattr(recovery, "_TRAJECTORY", set())) | {
-        _TRAJECTORY_IMM_MODE,
-        _SORTED_SPIKE_TRAJECTORY_IMM,
-    }
+    recovery._TRAJECTORY = set(getattr(recovery, "_TRAJECTORY", set())) | set(
+        _TRAJECTORY_IMM_ALIASES
+    )
 
     previous_build_scoring_models = recovery.build_scoring_models
 
     def build_scoring_models_with_trajectory_imm(config: Any) -> dict[str, object]:
         names = recovery.parse_model_list(config.scoring_models)
-        if _SORTED_SPIKE_TRAJECTORY_IMM not in names:
+        requested_trajectory_names = tuple(name for name in names if name in _TRAJECTORY_IMM_ALIASES)
+        if not requested_trajectory_names:
             return previous_build_scoring_models(config)
 
         non_trajectory_names = tuple(
-            name for name in names if name != _SORTED_SPIKE_TRAJECTORY_IMM
+            name for name in names if name not in _TRAJECTORY_IMM_ALIASES
         )
         models: dict[str, object] = {}
         if non_trajectory_names:
@@ -50,11 +51,12 @@ def apply_trajectory_imm_recovery_patch() -> None:
             models.update(previous_build_scoring_models(base_config))
 
         state_space_config = recovery._recovery_state_space_config(config)
-        trajectory_model = SortedSpikeStateSpaceReplayModel(
-            mode=_TRAJECTORY_IMM_MODE,
-            config=replace(state_space_config, mode=_TRAJECTORY_IMM_MODE),
-        )
-        models[_SORTED_SPIKE_TRAJECTORY_IMM] = trajectory_model
+        for requested_name in dict.fromkeys(requested_trajectory_names):
+            models[requested_name] = SortedSpikeStateSpaceReplayModel(
+                mode=_TRAJECTORY_IMM_MODE,
+                config=replace(state_space_config, mode=_TRAJECTORY_IMM_MODE),
+                name=requested_name,
+            )
         return {name: models[name] for name in dict.fromkeys(names)}
 
     recovery.build_scoring_models = build_scoring_models_with_trajectory_imm

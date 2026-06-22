@@ -1,9 +1,9 @@
-"""Runtime guard for sparse momentum duration-dependent helpers.
+"""Runtime guards for duration-dependent momentum helpers.
 
-The exact sparse momentum decoder derives both velocity decay and relative
-velocity scaling from transition durations.  Non-finite or non-positive values
-should fail at the helper boundary instead of producing NaN/inf transition
-parameters that later corrupt the dynamic program.
+The exact sparse and finite-displacement momentum decoders derive both velocity
+shape decay and relative velocity scaling from transition durations.  Non-finite
+or non-positive values should fail at the helper boundary instead of producing
+NaN/inf transition parameters that later corrupt the dynamic program.
 """
 
 from __future__ import annotations
@@ -15,15 +15,21 @@ import numpy as np
 
 
 def apply_sparse_momentum_duration_validation_patch() -> None:
-    """Install duration validation on sparse-momentum helper functions."""
+    """Install duration validation on momentum duration helper functions."""
 
+    import hipporeplayimm.state_space_displacement_momentum as displacement_momentum
     import hipporeplayimm.state_space_sparse_momentum as sparse_momentum
 
-    if getattr(sparse_momentum, "_duration_validation_patch_applied", False):
+    _patch_duration_helpers(sparse_momentum)
+    _patch_duration_helpers(displacement_momentum)
+
+
+def _patch_duration_helpers(module: Any) -> None:
+    if getattr(module, "_duration_validation_patch_applied", False):
         return
 
-    original_duration_adjusted_decays = sparse_momentum._duration_adjusted_decays
-    original_time_scales = sparse_momentum._time_scales
+    original_duration_adjusted_decays = module._duration_adjusted_decays
+    original_time_scales = module._time_scales
 
     @wraps(original_duration_adjusted_decays)
     def duration_adjusted_decays(config: object, durations: Any, reference_dt: float) -> np.ndarray:
@@ -37,9 +43,9 @@ def apply_sparse_momentum_duration_validation_patch() -> None:
     def time_scales(durations: Any) -> np.ndarray:
         return original_time_scales(_valid_transition_durations(durations))
 
-    sparse_momentum._duration_adjusted_decays = duration_adjusted_decays
-    sparse_momentum._time_scales = time_scales
-    sparse_momentum._duration_validation_patch_applied = True
+    module._duration_adjusted_decays = duration_adjusted_decays
+    module._time_scales = time_scales
+    module._duration_validation_patch_applied = True
 
 
 def _valid_transition_durations(durations: Any) -> np.ndarray:

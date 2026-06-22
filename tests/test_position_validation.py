@@ -1,4 +1,5 @@
 import numpy as np
+import pytest
 
 from hipporeplayimm.data import ReplaySession
 from hipporeplayimm.encoding import EncodingConfig
@@ -8,6 +9,27 @@ from hipporeplayimm.position_validation import (
     validated_position_encoding_config,
     validate_session_position_decoding,
 )
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "message"),
+    [
+        ({"decode_bin_s": 0.0}, "decode_bin_s"),
+        ({"decode_bin_s": float("nan")}, "decode_bin_s"),
+        ({"n_folds": 0}, "n_folds"),
+        ({"n_folds": 1.5}, "n_folds"),
+        ({"max_windows_per_session": 0}, "max_windows_per_session"),
+        ({"max_windows_per_session": -1}, "max_windows_per_session"),
+        ({"max_windows_per_session": 1.5}, "max_windows_per_session"),
+        ({"min_spikes_per_window": -1}, "min_spikes_per_window"),
+        ({"min_spikes_per_window": 0.5}, "min_spikes_per_window"),
+    ],
+)
+def test_validate_session_position_decoding_rejects_invalid_config_values(kwargs, message):
+    config = PositionDecodingConfig(**kwargs)
+
+    with pytest.raises(ValueError, match=message):
+        validate_session_position_decoding(object(), config)  # type: ignore[arg-type]
 
 
 def test_validate_session_position_decoding_returns_finite_cv_metrics(tmp_path):

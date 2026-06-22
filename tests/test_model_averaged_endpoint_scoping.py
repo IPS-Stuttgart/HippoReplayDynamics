@@ -51,3 +51,71 @@ def test_model_averaged_endpoint_scopes_replay_window_variants() -> None:
     np.testing.assert_allclose(expanded["model_averaged_endpoint_x"], 150.0)
     assert core["model_averaged_endpoint_models"].tolist() == [2, 2]
     assert expanded["model_averaged_endpoint_models"].tolist() == [2, 2]
+
+
+def _cell_split_row(
+    *,
+    train_cell_ids: object,
+    test_cell_ids: object,
+    model: str,
+    probability: float,
+    endpoint_x: float,
+) -> dict[str, object]:
+    row = _row(
+        variant="core",
+        window_index=0,
+        model=model,
+        probability=probability,
+        endpoint_x=endpoint_x,
+    )
+    row["train_cell_ids"] = train_cell_ids
+    row["test_cell_ids"] = test_cell_ids
+    return row
+
+
+def _cell_tuple(value: object) -> tuple[int, ...]:
+    return tuple(int(cell_id) for cell_id in np.asarray(value, dtype=int).reshape(-1))
+
+
+def test_model_averaged_endpoint_scopes_explicit_cell_split_metadata() -> None:
+    frame = pd.DataFrame(
+        [
+            _cell_split_row(
+                train_cell_ids=np.array([1, 2], dtype=int),
+                test_cell_ids=np.array([3], dtype=int),
+                model="a",
+                probability=0.50,
+                endpoint_x=10.0,
+            ),
+            _cell_split_row(
+                train_cell_ids=np.array([1, 2], dtype=int),
+                test_cell_ids=np.array([3], dtype=int),
+                model="b",
+                probability=0.50,
+                endpoint_x=20.0,
+            ),
+            _cell_split_row(
+                train_cell_ids=[1, 3],
+                test_cell_ids=[2],
+                model="a",
+                probability=0.50,
+                endpoint_x=100.0,
+            ),
+            _cell_split_row(
+                train_cell_ids=[1, 3],
+                test_cell_ids=[2],
+                model="b",
+                probability=0.50,
+                endpoint_x=200.0,
+            ),
+        ]
+    )
+
+    out = add_model_averaged_endpoint_columns(frame)
+
+    split_a = out[out["train_cell_ids"].map(lambda value: _cell_tuple(value) == (1, 2))]
+    split_b = out[out["train_cell_ids"].map(lambda value: _cell_tuple(value) == (1, 3))]
+    np.testing.assert_allclose(split_a["model_averaged_endpoint_x"], 15.0)
+    np.testing.assert_allclose(split_b["model_averaged_endpoint_x"], 150.0)
+    assert split_a["model_averaged_endpoint_models"].tolist() == [2, 2]
+    assert split_b["model_averaged_endpoint_models"].tolist() == [2, 2]

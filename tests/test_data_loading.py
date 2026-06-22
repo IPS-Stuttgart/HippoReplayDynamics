@@ -109,3 +109,20 @@ def test_load_replay_session_reports_missing_spike_marks(tmp_path: Path):
     assert session.spike_marks is None
     assert session.metadata["spike_mark_source"] == ""
     assert session.metadata["spike_mark_features"] == 0
+
+
+def test_load_replay_session_rejects_fractional_excitatory_neuron_ids(tmp_path: Path):
+    session_path = tmp_path / "Rat1" / "Open1"
+    _write_minimal_session(session_path)
+    sio.savemat(
+        session_path / "Spike_Data.mat",
+        {
+            "Spike_Data": np.array([[1.0, 11.0], [2.0, 12.0]]),
+            "Tetrode_Cell_IDs": np.array([[1, 11], [1, 12]]),
+            "Excitatory_Neurons": np.array([11.5]),
+            "Inhibitory_Neurons": np.array([]),
+        },
+    )
+
+    with pytest.raises(ValueError, match="excitatory neuron IDs"):
+        load_replay_session(session_path)

@@ -183,7 +183,8 @@ def simulation_add_evidence_columns(df: pd.DataFrame) -> pd.DataFrame:
     groups = []
     for _, group in df.groupby(["session", "event_index"], sort=False):
         group = group.copy()
-        scored = group[group["status"] == "success"]
+        status_ok = group["status"].eq("success") if "status" in group else pd.Series(True, index=group.index)
+        scored = group[status_ok]
         group["relative_log_evidence"] = np.nan
         group["model_probability"] = np.nan
         group["is_best_model"] = False
@@ -308,7 +309,8 @@ def simulation_event_best_rows(event_scores: pd.DataFrame) -> pd.DataFrame:
 
     event_scores = ensure_evidence_support_columns(event_scores)
     comparable = _coerce_bool_series(event_scores["evidence_comparable"])
-    ok = event_scores[(event_scores["status"] == "success") & comparable]
+    status_ok = event_scores["status"].eq("success") if "status" in event_scores else pd.Series(True, index=event_scores.index)
+    ok = event_scores[status_ok & comparable]
     if ok.empty:
         return pd.DataFrame()
     if "is_best_model" in ok:

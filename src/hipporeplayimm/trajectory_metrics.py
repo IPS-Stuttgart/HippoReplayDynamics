@@ -28,7 +28,12 @@ def trajectory_quality_metrics(
         raise ValueError("trajectory_log_posterior must contain at least one time bin and one position bin")
     if centers.ndim != 2 or centers.shape[0] != logp.shape[1]:
         raise ValueError("bin_centers must have shape (bins, position_dim)")
-    normalized = logp - logsumexp(logp, axis=1)[:, None]
+    if np.any(np.isnan(logp)) or np.any(np.isposinf(logp)):
+        raise ValueError("trajectory_log_posterior cannot contain NaN or +inf")
+    row_log_norm = logsumexp(logp, axis=1)
+    if not np.all(np.isfinite(row_log_norm)):
+        raise ValueError("trajectory_log_posterior rows must contain finite posterior mass")
+    normalized = logp - row_log_norm[:, None]
     posterior = np.exp(normalized)
     mean_path = posterior @ centers
     map_bins = np.argmax(normalized, axis=1)

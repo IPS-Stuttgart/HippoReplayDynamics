@@ -17,6 +17,12 @@ def _row(event_index: int, model: str, log_evidence: float, is_best_model: str) 
     }
 
 
+def test_simulation_event_best_rows_handles_empty_score_frame() -> None:
+    best = simulation_event_best_rows(pd.DataFrame())
+
+    assert best.empty
+
+
 def test_simulation_event_best_rows_recomputes_unflagged_events() -> None:
     rows = pd.DataFrame(
         [

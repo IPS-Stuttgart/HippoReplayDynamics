@@ -51,12 +51,12 @@ def _parse_cell_id_value(value: Any) -> int:
     try:
         numeric = float(value)
     except (TypeError, ValueError) as exc:
-        raise ValueError("cell ID metadata must contain integer values") from exc
+        raise ValueError("score-table cell IDs cell ID metadata must contain integer values") from exc
     if not np.isfinite(numeric):
-        raise ValueError("cell ID metadata must contain finite integer values")
+        raise ValueError("score-table cell IDs cell ID metadata must contain finite integer values")
     integer = int(round(numeric))
     if not np.isclose(numeric, integer, rtol=0.0, atol=1e-9):
-        raise ValueError("cell ID metadata must contain integer values")
+        raise ValueError("score-table cell IDs cell ID metadata must contain integer values")
     return int(integer)
 
 

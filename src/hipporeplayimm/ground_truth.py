@@ -1330,16 +1330,30 @@ def _parse_cell_ids(value: object) -> np.ndarray | None:
     if value is None:
         return None
     if isinstance(value, np.ndarray):
-        return np.asarray(value, dtype=int)
+        return _coerce_cell_id_values(value)
     if isinstance(value, (list, tuple, set)):
-        return np.asarray(list(value), dtype=int)
+        return _coerce_cell_id_values(list(value))
     if pd.isna(value):
         return None
     text = str(value).strip()
     if not text or text.lower() == "nan":
         return None
     text = text.strip("[]()").replace(",", " ")
-    return np.asarray([int(float(piece)) for piece in text.split()], dtype=int)
+    return _coerce_cell_id_values(text.split())
+
+
+def _coerce_cell_id_values(values: object) -> np.ndarray:
+    try:
+        parsed = np.asarray(values, dtype=float)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("score-table cell IDs cell ID metadata must contain integer values") from exc
+    if parsed.ndim == 0:
+        parsed = parsed.reshape(1)
+    if not np.all(np.isfinite(parsed)):
+        raise ValueError("score-table cell IDs cell ID metadata must contain finite integer values")
+    if not np.all(parsed == np.trunc(parsed)):
+        raise ValueError("score-table cell IDs cell ID metadata must contain integer values")
+    return parsed.astype(int)
 
 
 def _validate_cell_ids_in_encoding(cell_ids: np.ndarray, encoding, column: str) -> None:

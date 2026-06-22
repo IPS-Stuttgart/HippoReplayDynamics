@@ -3,8 +3,31 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from hipporeplayimm.state_space_displacement_momentum import _duration_adjusted_decays, _time_scales
+from hipporeplayimm.state_space_displacement_momentum import (
+    _coerce_transition_durations,
+    _duration_adjusted_decays,
+    _time_scales,
+)
 from hipporeplayimm.state_space_model import StateSpaceDecoderConfig
+
+
+def test_displacement_transition_duration_coercion_rejects_invalid_values() -> None:
+    bad_duration_sets = (
+        [0.01, np.nan],
+        [0.01, 0.0],
+        [0.01, -0.02],
+    )
+
+    for durations in bad_duration_sets:
+        with pytest.raises(ValueError, match="transition durations"):
+            _coerce_transition_durations(durations, n_time=3, fallback_dt=0.01)
+
+    np.testing.assert_allclose(
+        _coerce_transition_durations([], n_time=3, fallback_dt=0.02),
+        np.array([0.02, 0.02], dtype=float),
+    )
+    with pytest.raises(ValueError, match="fallback dt"):
+        _coerce_transition_durations([], n_time=3, fallback_dt=np.nan)
 
 
 def test_displacement_duration_helpers_reject_invalid_transition_durations() -> None:

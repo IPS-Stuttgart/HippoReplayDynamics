@@ -79,6 +79,8 @@ def _patch_duration_helpers(module: Any) -> None:
 
 def _valid_transition_durations(durations: Any) -> np.ndarray:
     values = np.asarray(durations, dtype=float)
+    if values.ndim != 1:
+        raise ValueError("transition durations must be one-dimensional")
     if values.size == 0:
         return values
     if not np.all(np.isfinite(values)) or np.any(values <= 0.0):

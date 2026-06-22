@@ -21,7 +21,10 @@ def apply_spike_rate_metadata_patch() -> None:
 
     from . import benchmarks as bench
     from . import ground_truth as gt
+    from . import pyrecest_numeric_metadata_guard as pyrecest_numeric_guard
     from . import score_metadata as score_meta
+
+    pyrecest_numeric_guard.apply_pyrecest_numeric_metadata_guard_patch()
 
     if getattr(score_meta, "_spike_rate_metadata_patch_applied", False):
         return

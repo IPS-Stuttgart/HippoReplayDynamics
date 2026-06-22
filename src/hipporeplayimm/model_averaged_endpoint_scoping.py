@@ -101,7 +101,12 @@ def add_model_averaged_endpoint_columns(df: pd.DataFrame) -> pd.DataFrame:
         if "log_evidence" in exact:
             logs = np.sort(exact["log_evidence"].to_numpy(dtype=float))[::-1]
             logs = logs[np.isfinite(logs)]
-            margin = float(logs[0] - logs[1]) if logs.size > 1 else np.inf
+            if logs.size > 1:
+                margin = float(logs[0] - logs[1])
+            elif logs.size == 1:
+                margin = np.inf
+            else:
+                margin = np.nan
         else:
             margin = np.nan
 

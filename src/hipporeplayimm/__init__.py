@@ -14,6 +14,7 @@ from . import clusterless_ground_truth as _clusterless_ground_truth
 from . import data_cell_id_validation as _data_cell_id_validation
 from . import duration_candidate_metadata_patch as _duration_candidate_metadata_patch
 from . import duration_occupancy_metadata_guard as _duration_occupancy_metadata_guard
+from . import encoding_select_cells_validation as _encoding_select_cells_validation
 from . import evidence_status_coercion as _evidence_status_coercion
 from . import goal_state_space_integration as _goal_state_space_integration
 from . import ground_truth as _ground_truth
@@ -171,6 +172,7 @@ def apply_runtime_patches() -> None:
     _spike_rate_metadata.apply_spike_rate_metadata_patch()
     _clusterless_config_validation.apply_clusterless_encoding_config_validation_patch()
     _data_cell_id_validation.apply_data_cell_id_validation_patch()
+    _encoding_select_cells_validation.apply_encoding_select_cells_validation_patch()
     _position_decoding_config_validation.apply_position_decoding_config_validation_patch()
     _duration_candidate_metadata_patch.apply_duration_candidate_metadata_patch()
     _ground_truth._encoding_config_for_scores = _score_metadata.encoding_config_for_scores

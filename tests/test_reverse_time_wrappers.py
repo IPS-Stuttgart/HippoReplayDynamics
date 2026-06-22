@@ -175,7 +175,6 @@ def test_reverse_time_wrappers_clear_unmappable_evidence_only_terminal() -> None
         assert "decoded_map_bin" not in result.diagnostics
         assert "terminal_posterior_entropy" not in result.diagnostics
 
-
 def test_direct_bidirectional_wrapper_keeps_forward_terminal_when_reverse_unmappable() -> None:
     emissions = _duration_emissions()
     bin_centers = np.array([[0.0, 0.0], [1.0, 0.0]], dtype=float)

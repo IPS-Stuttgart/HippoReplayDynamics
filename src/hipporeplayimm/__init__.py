@@ -206,6 +206,8 @@ __all__ = [
     'GoalStateSpaceReplayModel',
     'GroundTruthConfig',
     'PyRecEstGoalParticleModel',
+    'PyRecEstSweepConfig',
+    'PyRecEstSweepResult',
     'RandomModel',
     'ReplaySession',
     'SimulationRecoveryConfig',

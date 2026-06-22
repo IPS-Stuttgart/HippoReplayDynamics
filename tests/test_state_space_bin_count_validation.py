@@ -10,21 +10,22 @@ from hipporeplayimm.state_space_utils import (
 )
 
 
-def test_state_space_uniform_helpers_reject_empty_support_without_mask():
-    with pytest.raises(ValueError, match="n_bins must be positive"):
-        _uniform_log_prior(0)
-    with pytest.raises(ValueError, match="n_bins must be positive"):
-        _uniform_probabilities(0)
-    with pytest.raises(ValueError, match="n_bins must be positive"):
-        _valid_bin_count(0)
-    with pytest.raises(ValueError, match="n_bins must be positive"):
-        _coerce_valid_bin_mask(None, 0)
+@pytest.mark.parametrize("bad_n_bins", [0, -1, True, np.bool_(True), 1.5, "2.5"])
+def test_state_space_uniform_helpers_reject_invalid_support_size_without_mask(bad_n_bins):
+    with pytest.raises(ValueError, match="n_bins must be a positive integer"):
+        _uniform_log_prior(bad_n_bins)
+    with pytest.raises(ValueError, match="n_bins must be a positive integer"):
+        _uniform_probabilities(bad_n_bins)
+    with pytest.raises(ValueError, match="n_bins must be a positive integer"):
+        _valid_bin_count(bad_n_bins)
+    with pytest.raises(ValueError, match="n_bins must be a positive integer"):
+        _coerce_valid_bin_mask(None, bad_n_bins)
 
 
 def test_state_space_uniform_aliases_reject_empty_support():
-    with pytest.raises(ValueError, match="n_bins must be positive"):
+    with pytest.raises(ValueError, match="n_bins must be a positive integer"):
         state_space_first_order._uniform_log_prior(0)
-    with pytest.raises(ValueError, match="n_bins must be positive"):
+    with pytest.raises(ValueError, match="n_bins must be a positive integer"):
         state_space_first_order._uniform_probabilities(0)
 
 
@@ -37,4 +38,5 @@ def test_state_space_uniform_helpers_preserve_masked_support():
         [-np.log(2.0), -1.0e300, -np.log(2.0)],
     )
     assert _valid_bin_count(3, mask) == 2
+    assert _valid_bin_count("3.0", mask) == 2
     np.testing.assert_array_equal(_coerce_valid_bin_mask(mask, 3), mask)

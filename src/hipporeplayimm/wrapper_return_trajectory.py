@@ -95,8 +95,8 @@ def _patch_result_improvement_wrappers(extensions: Any) -> None:
         )
         if result.trajectory_log_posterior is not None:
             trajectory = np.asarray(result.trajectory_log_posterior, dtype=float)[::-1].copy()
-            result.trajectory_log_posterior = trajectory
             result.terminal_log_posterior = trajectory[-1].copy()
+            result.trajectory_log_posterior = None if return_trajectory is False else trajectory
         result.model_name = str(self.name)
         result.diagnostics = dict(getattr(result, "diagnostics", {}) or {})
         if result.terminal_log_posterior is not None:
@@ -149,7 +149,11 @@ def _patch_result_improvement_wrappers(extensions: Any) -> None:
             weights,
         )
         trajectory = None
-        if forward.trajectory_log_posterior is not None and reverse.trajectory_log_posterior is not None:
+        if (
+            return_trajectory is not False
+            and forward.trajectory_log_posterior is not None
+            and reverse.trajectory_log_posterior is not None
+        ):
             trajectory = extensions._mixture_log_posterior(  # noqa: SLF001
                 [forward.trajectory_log_posterior, reverse.trajectory_log_posterior],
                 weights,
@@ -208,6 +212,8 @@ def _patch_direct_reverse_wrappers(extensions: Any, reverse_models: Any) -> None
         if score.trajectory_log_posterior is not None:
             trajectory = score.trajectory_log_posterior[::-1].copy()
             terminal = trajectory[-1]
+            if return_trajectory is False:
+                trajectory = None
         diagnostics = dict(getattr(score, "diagnostics", {}) or {})
         diagnostics["time_direction"] = "reverse"
         diagnostics["base_model"] = str(score.model_name)
@@ -254,11 +260,13 @@ def _patch_direct_reverse_wrappers(extensions: Any, reverse_models: Any) -> None
             reverse.terminal_log_posterior,
             weights,
         )
-        trajectory = reverse_models._mixture_log_posterior(  # noqa: SLF001
-            forward.trajectory_log_posterior,
-            reverse.trajectory_log_posterior,
-            weights,
-        )
+        trajectory = None
+        if return_trajectory is not False:
+            trajectory = reverse_models._mixture_log_posterior(  # noqa: SLF001
+                forward.trajectory_log_posterior,
+                reverse.trajectory_log_posterior,
+                weights,
+            )
         diagnostics = {
             "time_direction": "bidirectional-mixture",
             "base_model": str(forward.model_name),

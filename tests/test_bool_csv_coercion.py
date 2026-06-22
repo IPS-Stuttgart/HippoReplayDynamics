@@ -25,6 +25,30 @@ def test_event_quality_summary_treats_string_false_as_false() -> None:
     assert summary.loc[0, "event_reliable_fraction"] == pytest.approx(0.0)
 
 
+def test_event_quality_summary_treats_blank_status_as_legacy_success() -> None:
+    frame = pd.DataFrame(
+        {
+            "session": ["session-a", "session-a", "session-a"],
+            "event_index": [0, 0, 0],
+            "model": ["missing-status", "blank-status", "failed-status"],
+            "status": [pd.NA, "", "failed"],
+            "log_evidence": [3.0, 1.0, 100.0],
+            "diagnostic_candidate_evidence_support": [
+                "exact_full_grid",
+                "exact_full_grid",
+                "exact_full_grid",
+            ],
+        }
+    )
+
+    summary = event_quality_summary(frame)
+
+    assert summary.loc[0, "successful_rows"] == 2
+    assert summary.loc[0, "exact_comparable_models"] == 2
+    assert summary.loc[0, "exact_best_model"] == "missing-status"
+    assert summary.loc[0, "exact_log_evidence_margin"] == pytest.approx(2.0)
+
+
 def test_candidate_good_fraction_treats_string_false_as_false() -> None:
     frame = pd.DataFrame(
         {

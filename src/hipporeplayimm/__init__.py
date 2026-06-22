@@ -32,9 +32,10 @@ from . import simulation_recovery as _simulation_recovery
 from . import simulation_recovery_count_validation as _simulation_recovery_count_validation
 from . import simulation_recovery_event_count as _simulation_recovery_event_count
 from . import simulation_recovery_runtime_limits as _simulation_recovery_runtime_limits
-from . import state_space_bin_count_validation as _state_space_bin_count_validation
 from . import sparse_momentum_duration_validation as _sparse_momentum_duration_validation
+from . import sparse_momentum_single_bin_diagnostics as _sparse_momentum_single_bin_diagnostics
 from . import spike_rate_metadata as _spike_rate_metadata
+from . import state_space_bin_count_validation as _state_space_bin_count_validation
 from . import time_order_patch as _time_order_patch
 
 # Keep score-table metadata and post-hoc decoding consistent before public
@@ -78,15 +79,15 @@ from .duration_occupancy import apply_duration_occupancy_patch as _apply_duratio
 from .encoding import EncodingConfig, EncodingModel, build_emissions, fit_place_field_encoding
 from .evidence_reporting import patch_simulation_recovery_module as _patch_simulation_recovery_module
 from .goal_state_space import GoalStateSpaceReplayModel
-from .ground_truth_candidate_support import (
-    apply_ground_truth_candidate_support_patch as _apply_ground_truth_candidate_support_patch,
-)
 from .ground_truth import (
     GroundTruthConfig,
     compare_scores_to_ground_truth,
     generate_behavioral_ground_truth,
     infer_well_locations,
     label_session_behavioral_ground_truth,
+)
+from .ground_truth_candidate_support import (
+    apply_ground_truth_candidate_support_patch as _apply_ground_truth_candidate_support_patch,
 )
 from .models import (
     CandidateKinematicModel,
@@ -179,6 +180,7 @@ def apply_runtime_patches() -> None:
     _apply_duration_occupancy_patch()
     _duration_occupancy_metadata_guard.apply_duration_occupancy_metadata_guard_patch()
     _sparse_momentum_duration_validation.apply_sparse_momentum_duration_validation_patch()
+    _sparse_momentum_single_bin_diagnostics.apply_sparse_momentum_single_bin_diagnostics_patch()
     _time_order_patch.apply_reverse_emission_time_patch()
     _reverse_time_terminal_guard.apply_reverse_time_terminal_guard_patch()
     _synchronize_duration_patched_emission_builders()

@@ -29,12 +29,14 @@ from . import simulation_recovery as _simulation_recovery
 from . import simulation_recovery_count_validation as _simulation_recovery_count_validation
 from . import simulation_recovery_event_count as _simulation_recovery_event_count
 from . import simulation_recovery_runtime_limits as _simulation_recovery_runtime_limits
+from . import state_space_bin_count_validation as _state_space_bin_count_validation
 from . import sparse_momentum_duration_validation as _sparse_momentum_duration_validation
 from . import spike_rate_metadata as _spike_rate_metadata
 from . import time_order_patch as _time_order_patch
 
 # Keep score-table metadata and post-hoc decoding consistent before public
 # symbols are imported from the patched modules.
+_state_space_bin_count_validation.apply_state_space_bin_count_validation_patch()
 _score_metadata.apply_model_hyperparam_patch()
 _candidate_support_quality_patch.apply_candidate_support_quality_patch()
 _benchmark_cell_split_metadata.apply_benchmark_cell_split_metadata_patch()
@@ -143,6 +145,7 @@ def apply_runtime_patches() -> None:
     refresh module-level aliases after direct lower-level imports.
     """
 
+    _state_space_bin_count_validation.apply_state_space_bin_count_validation_patch()
     _score_metadata.apply_model_hyperparam_patch()
     _candidate_support_quality_patch.apply_candidate_support_quality_patch()
     _benchmark_cell_split_metadata.apply_benchmark_cell_split_metadata_patch()

@@ -22,6 +22,7 @@ from . import improved_model_evidence_registry_patch as _improved_model_evidence
 from . import latent_path_validation as _latent_path_validation
 from . import model_averaged_endpoint_scoping as _model_averaged_endpoint_scoping
 from . import occupancy_candidate_support as _occupancy_candidate_support
+from . import position_decoding_config_validation as _position_decoding_config_validation
 from . import pyrecest_score_metadata as _pyrecest_score_metadata
 from . import score_metadata as _score_metadata
 from . import simulation_recovery as _simulation_recovery
@@ -47,6 +48,7 @@ _spike_rate_metadata.apply_spike_rate_metadata_patch()
 _time_order_patch.apply_reverse_emission_time_patch()
 _clusterless_config_validation.apply_clusterless_encoding_config_validation_patch()
 _data_cell_id_validation.apply_data_cell_id_validation_patch()
+_position_decoding_config_validation.apply_position_decoding_config_validation_patch()
 _duration_candidate_metadata_patch.apply_duration_candidate_metadata_patch()
 _ground_truth_window_scope.apply_ground_truth_window_scope_patch()
 _ground_truth_integer_metadata.apply_ground_truth_integer_metadata_patch()
@@ -152,6 +154,7 @@ def apply_runtime_patches() -> None:
     _spike_rate_metadata.apply_spike_rate_metadata_patch()
     _clusterless_config_validation.apply_clusterless_encoding_config_validation_patch()
     _data_cell_id_validation.apply_data_cell_id_validation_patch()
+    _position_decoding_config_validation.apply_position_decoding_config_validation_patch()
     _duration_candidate_metadata_patch.apply_duration_candidate_metadata_patch()
     _ground_truth._encoding_config_for_scores = _score_metadata.encoding_config_for_scores
     _ground_truth._emission_config_for_scores = _score_metadata.emission_config_for_scores
@@ -203,8 +206,6 @@ __all__ = [
     'GoalStateSpaceReplayModel',
     'GroundTruthConfig',
     'PyRecEstGoalParticleModel',
-    'PyRecEstSweepConfig',
-    'PyRecEstSweepResult',
     'RandomModel',
     'ReplaySession',
     'SimulationRecoveryConfig',

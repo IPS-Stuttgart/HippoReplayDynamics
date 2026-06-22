@@ -5,6 +5,7 @@ from . import benchmark_cell_split_metadata as _benchmark_cell_split_metadata
 from . import benchmark_metadata_scope_patch as _benchmark_metadata_scope_patch
 from . import benchmark_relative_grouping as _benchmark_relative_grouping
 from . import bma_options_patch as _bma_options_patch
+from . import candidate_log_mass_validation as _candidate_log_mass_validation
 from . import candidate_support_quality_patch as _candidate_support_quality_patch
 from . import cell_split_hashable_grouping as _cell_split_hashable_grouping
 from . import clusterless_config_validation as _clusterless_config_validation
@@ -180,6 +181,7 @@ def apply_runtime_patches() -> None:
     _apply_duration_dynamics_patch()
     _apply_state_space_imm_duration_patch()
     _apply_duration_occupancy_patch()
+    _candidate_log_mass_validation.apply_candidate_log_mass_validation_patch()
     _duration_occupancy_metadata_guard.apply_duration_occupancy_metadata_guard_patch()
     _sparse_momentum_duration_validation.apply_sparse_momentum_duration_validation_patch()
     _sparse_momentum_single_bin_diagnostics.apply_sparse_momentum_single_bin_diagnostics_patch()

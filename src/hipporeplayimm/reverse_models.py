@@ -9,6 +9,7 @@ from scipy.special import logsumexp
 
 from .encoding import LogEmissionTensor
 from .models import EventScore
+from .reverse_time_terminal_guard import _clear_unmappable_reverse_terminal
 
 
 @dataclass
@@ -30,14 +31,16 @@ class ReverseTimeReplayModel:
         diagnostics = dict(score.diagnostics)
         diagnostics["time_direction"] = "reverse"
         diagnostics["base_model"] = str(score.model_name)
-        return EventScore(
-            model_name,
-            score.log_likelihood,
-            score.n_time,
-            score.n_spikes,
-            diagnostics=diagnostics,
-            terminal_log_posterior=terminal,
-            trajectory_log_posterior=trajectory,
+        return _clear_unmappable_reverse_terminal(
+            EventScore(
+                model_name,
+                score.log_likelihood,
+                score.n_time,
+                score.n_spikes,
+                diagnostics=diagnostics,
+                terminal_log_posterior=terminal,
+                trajectory_log_posterior=trajectory,
+            )
         )
 
 

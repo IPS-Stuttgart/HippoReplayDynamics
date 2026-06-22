@@ -226,7 +226,10 @@ def _with_support_columns(scores: pd.DataFrame) -> pd.DataFrame:
 def _successful_rows(scores: pd.DataFrame) -> pd.DataFrame:
     if "status" not in scores.columns:
         return scores.copy()
-    return scores[scores["status"].astype(str).str.strip().eq("success")].copy()
+    normalized = scores["status"].astype("string").str.strip().str.lower()
+    legacy_missing_status = normalized.isna() | normalized.isin({"", "nan", "none", "null", "<na>"})
+    success = legacy_missing_status | normalized.eq("success")
+    return scores[success].copy()
 
 
 def _as_bool(value: object) -> bool:

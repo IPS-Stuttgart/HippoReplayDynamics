@@ -58,14 +58,15 @@ def _validate_finite_observation_sweep_config(config: Any) -> None:
     if decode_bin_s <= 0.0:
         raise ValueError("decode_bin_s must be positive")
 
-    if int(getattr(config, "n_folds")) <= 0:
-        raise ValueError("n_folds must be positive")
-    if int(getattr(config, "simulation_events_per_model")) <= 0:
-        raise ValueError("simulation_events_per_model must be positive")
+    _positive_integer("n_folds", getattr(config, "n_folds"))
+    _positive_integer("simulation_events_per_model", getattr(config, "simulation_events_per_model"))
 
 
-def _grid_values(config: Any, name: str) -> Any:
-    values = getattr(config, name)
+def _grid_values(config: Any, name: str) -> tuple[Any, ...]:
+    try:
+        values = tuple(getattr(config, name))
+    except TypeError as exc:
+        raise ValueError(f"{name} must contain at least one value") from exc
     if not values:
         raise ValueError(f"{name} must contain at least one value")
     return values
@@ -79,6 +80,16 @@ def _finite_float(name: str, value: Any) -> float:
     if not np.isfinite(numeric):
         raise ValueError(f"{name} values must be finite")
     return float(numeric)
+
+
+def _positive_integer(name: str, value: Any) -> int:
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must be positive") from exc
+    if not np.isfinite(numeric) or numeric <= 0.0 or not numeric.is_integer():
+        raise ValueError(f"{name} must be positive")
+    return int(numeric)
 
 
 __all__ = ["apply_observation_sweep_config_validation_patch"]

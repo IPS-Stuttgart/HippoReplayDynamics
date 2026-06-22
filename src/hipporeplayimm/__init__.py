@@ -22,9 +22,11 @@ from . import improved_model_evidence_registry_patch as _improved_model_evidence
 from . import latent_path_validation as _latent_path_validation
 from . import model_averaged_endpoint_scoping as _model_averaged_endpoint_scoping
 from . import occupancy_candidate_support as _occupancy_candidate_support
+from . import position_decoding_config_validation as _position_decoding_config_validation
 from . import pyrecest_score_metadata as _pyrecest_score_metadata
 from . import score_metadata as _score_metadata
 from . import simulation_recovery as _simulation_recovery
+from . import simulation_recovery_count_validation as _simulation_recovery_count_validation
 from . import simulation_recovery_event_count as _simulation_recovery_event_count
 from . import simulation_recovery_runtime_limits as _simulation_recovery_runtime_limits
 from . import sparse_momentum_duration_validation as _sparse_momentum_duration_validation
@@ -47,11 +49,13 @@ _spike_rate_metadata.apply_spike_rate_metadata_patch()
 _time_order_patch.apply_reverse_emission_time_patch()
 _clusterless_config_validation.apply_clusterless_encoding_config_validation_patch()
 _data_cell_id_validation.apply_data_cell_id_validation_patch()
+_position_decoding_config_validation.apply_position_decoding_config_validation_patch()
 _duration_candidate_metadata_patch.apply_duration_candidate_metadata_patch()
 _ground_truth_window_scope.apply_ground_truth_window_scope_patch()
 _ground_truth_integer_metadata.apply_ground_truth_integer_metadata_patch()
 _ground_truth_cell_id_metadata.apply_ground_truth_cell_id_metadata_patch()
 _simulation_recovery_runtime_limits.apply_simulation_recovery_runtime_limit_validation_patch()
+_simulation_recovery_count_validation.apply_simulation_recovery_count_validation_patch()
 
 from .benchmarks import BenchmarkConfig, BenchmarkResult, run_open_field_benchmark
 from .clusterless import (
@@ -152,6 +156,7 @@ def apply_runtime_patches() -> None:
     _spike_rate_metadata.apply_spike_rate_metadata_patch()
     _clusterless_config_validation.apply_clusterless_encoding_config_validation_patch()
     _data_cell_id_validation.apply_data_cell_id_validation_patch()
+    _position_decoding_config_validation.apply_position_decoding_config_validation_patch()
     _duration_candidate_metadata_patch.apply_duration_candidate_metadata_patch()
     _ground_truth._encoding_config_for_scores = _score_metadata.encoding_config_for_scores
     _ground_truth._emission_config_for_scores = _score_metadata.emission_config_for_scores
@@ -170,6 +175,7 @@ def apply_runtime_patches() -> None:
     _patch_simulation_recovery_module(_simulation_recovery)
     _latent_path_validation.apply_latent_path_validation_patch()
     _simulation_recovery_runtime_limits.apply_simulation_recovery_runtime_limit_validation_patch()
+    _simulation_recovery_count_validation.apply_simulation_recovery_count_validation_patch()
     _apply_trajectory_imm_recovery_patch()
     _simulation_recovery_event_count.apply_simulation_recovery_event_count_patch()
     _model_averaged_endpoint_scoping.apply_model_averaged_endpoint_scoping_patch()

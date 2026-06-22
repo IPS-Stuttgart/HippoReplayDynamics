@@ -27,6 +27,7 @@ def apply_trajectory_imm_recovery_patch() -> None:
     from . import ground_truth_cell_split_strategy as gt_split_strategy
 
     gt_split_strategy.apply_ground_truth_cell_split_strategy_patch()
+    _patch_trajectory_imm_recovery_scoring(recovery)
 
     if getattr(recovery, "_trajectory_imm_recovery_patch_applied", False):
         return
@@ -62,3 +63,42 @@ def apply_trajectory_imm_recovery_patch() -> None:
 
     recovery.build_scoring_models = build_scoring_models_with_trajectory_imm
     recovery._trajectory_imm_recovery_patch_applied = True
+
+
+def _patch_trajectory_imm_recovery_scoring(recovery: Any) -> None:
+    """Avoid trajectory-posterior materialization in evidence-only recovery scoring."""
+
+    if getattr(recovery, "_trajectory_imm_recovery_evidence_only_patch_applied", False):
+        return
+
+    previous_score_recovery_model = recovery._score_recovery_model
+
+    def score_recovery_model_evidence_only_trajectory_imm(
+        model: object,
+        emissions: object,
+        encoding: object,
+        *,
+        candidate_indices: list[object] | None = None,
+        score_with_occupancy: bool = True,
+    ) -> object:
+        if isinstance(model, SortedSpikeStateSpaceReplayModel) and model.mode == _TRAJECTORY_IMM_MODE:
+            kwargs: dict[str, object] = {"return_trajectory": False}
+            if candidate_indices is not None:
+                kwargs["candidate_indices"] = candidate_indices
+            if score_with_occupancy:
+                kwargs["occupancy_s"] = getattr(encoding, "occupancy_s")
+            return model.score(
+                emissions,  # type: ignore[arg-type]
+                getattr(encoding, "bin_centers"),
+                **kwargs,
+            )
+        return previous_score_recovery_model(
+            model,
+            emissions,
+            encoding,
+            candidate_indices=candidate_indices,
+            score_with_occupancy=score_with_occupancy,
+        )
+
+    recovery._score_recovery_model = score_recovery_model_evidence_only_trajectory_imm
+    recovery._trajectory_imm_recovery_evidence_only_patch_applied = True

@@ -8,6 +8,7 @@ corrupted fractional identifiers such as ``1.5`` to ``1``.
 from __future__ import annotations
 
 from functools import wraps
+from pathlib import Path
 from typing import Any
 
 import numpy as np
@@ -21,6 +22,7 @@ def apply_data_cell_id_validation_patch() -> None:
     if getattr(data, "_cell_id_validation_patch_applied", False):
         return
 
+    original_load_replay_session = data.load_replay_session
     original_load_spike_marks = data._load_spike_marks
     original_mark_group_ids = data._mark_group_ids_from_tetrode_cell_ids
 
@@ -43,6 +45,14 @@ def apply_data_cell_id_validation_patch() -> None:
         excitatory_ids = _coerce_integral_ids(excitatory.reshape(-1), "excitatory neuron IDs")
         keep = np.isin(spike_ids, excitatory_ids)
         return spikes[keep]
+
+    @wraps(original_load_replay_session)
+    def load_replay_session(session_path):
+        path = Path(session_path)
+        spike_data = data._load_mat_file(path / "Spike_Data.mat")
+        _validate_optional_neuron_ids(spike_data, "Excitatory_Neurons", "excitatory neuron IDs")
+        _validate_optional_neuron_ids(spike_data, "Inhibitory_Neurons", "inhibitory neuron IDs")
+        return original_load_replay_session(session_path)
 
     @wraps(original_load_spike_marks)
     def load_spike_marks(session_path, spike_data, spikes):
@@ -68,9 +78,19 @@ def apply_data_cell_id_validation_patch() -> None:
 
     data.ReplaySession.cell_ids = property(replay_session_cell_ids)
     data.ReplaySession.excitatory_spikes = replay_session_excitatory_spikes
+    data.load_replay_session = load_replay_session
     data._load_spike_marks = load_spike_marks
     data._mark_group_ids_from_tetrode_cell_ids = mark_group_ids_from_tetrode_cell_ids
     data._cell_id_validation_patch_applied = True
+
+
+def _validate_optional_neuron_ids(spike_data: dict[str, Any], variable_name: str, label: str) -> None:
+    if variable_name not in spike_data:
+        return
+    values = np.asarray(spike_data[variable_name])
+    if values.size == 0:
+        return
+    _coerce_integral_ids(values.reshape(-1), label)
 
 
 def _coerce_integral_ids(values: Any, name: str) -> np.ndarray:

@@ -68,6 +68,10 @@ def audit_sweep_completeness(
         | set(score_paths)
         | set(summary_paths)
     )
+    if not all_matrix_ids:
+        raise FileNotFoundError(
+            f"No planned matrix cells or {mode} artifacts found under: {root}"
+        )
     if planned.empty:
         planned = pd.DataFrame({"matrix_id": all_matrix_ids, "planned": False})
     else:

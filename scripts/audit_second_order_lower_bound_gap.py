@@ -113,6 +113,9 @@ def build_lower_bound_gap_tables(
     if scores.empty:
         return LowerBoundGapTables(pd.DataFrame(), pd.DataFrame())
     frame = _with_support_columns(scores)
+    frame = _successful_rows(frame)
+    if frame.empty:
+        return LowerBoundGapTables(pd.DataFrame(), pd.DataFrame())
     value_column = _resolve_value_column(frame, value_column)
     required = {"model", "evidence_support", value_column}
     missing = sorted(required - set(frame.columns))
@@ -218,6 +221,12 @@ def _with_support_columns(scores: pd.DataFrame) -> pd.DataFrame:
             else EXACT_SUPPORT
         )
     return out
+
+
+def _successful_rows(scores: pd.DataFrame) -> pd.DataFrame:
+    if "status" not in scores.columns:
+        return scores.copy()
+    return scores[scores["status"].astype(str).str.strip().eq("success")].copy()
 
 
 def _as_bool(value: object) -> bool:

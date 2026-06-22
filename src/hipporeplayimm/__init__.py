@@ -15,6 +15,7 @@ from . import duration_occupancy_metadata_guard as _duration_occupancy_metadata_
 from . import goal_state_space_integration as _goal_state_space_integration
 from . import ground_truth as _ground_truth
 from . import ground_truth_cell_id_metadata as _ground_truth_cell_id_metadata
+from . import ground_truth_float_metadata as _ground_truth_float_metadata
 from . import ground_truth_integer_metadata as _ground_truth_integer_metadata
 from . import ground_truth_sensitivity_metrics as _ground_truth_sensitivity_metrics
 from . import ground_truth_window_scope as _ground_truth_window_scope
@@ -53,6 +54,7 @@ _position_decoding_config_validation.apply_position_decoding_config_validation_p
 _duration_candidate_metadata_patch.apply_duration_candidate_metadata_patch()
 _ground_truth_window_scope.apply_ground_truth_window_scope_patch()
 _ground_truth_integer_metadata.apply_ground_truth_integer_metadata_patch()
+_ground_truth_float_metadata.apply_ground_truth_float_metadata_patch()
 _ground_truth_cell_id_metadata.apply_ground_truth_cell_id_metadata_patch()
 _simulation_recovery_runtime_limits.apply_simulation_recovery_runtime_limit_validation_patch()
 _simulation_recovery_count_validation.apply_simulation_recovery_count_validation_patch()
@@ -161,6 +163,7 @@ def apply_runtime_patches() -> None:
     _ground_truth._encoding_config_for_scores = _score_metadata.encoding_config_for_scores
     _ground_truth._emission_config_for_scores = _score_metadata.emission_config_for_scores
     _ground_truth_integer_metadata.apply_ground_truth_integer_metadata_patch()
+    _ground_truth_float_metadata.apply_ground_truth_float_metadata_patch()
     _ground_truth_cell_id_metadata.apply_ground_truth_cell_id_metadata_patch()
     _ground_truth_sensitivity_metrics.apply_ground_truth_sensitivity_metric_patch(_ground_truth)
     _apply_ground_truth_candidate_support_patch()

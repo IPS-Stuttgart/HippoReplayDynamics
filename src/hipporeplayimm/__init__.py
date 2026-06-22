@@ -25,6 +25,7 @@ from . import model_averaged_endpoint_scoping as _model_averaged_endpoint_scopin
 from . import occupancy_candidate_support as _occupancy_candidate_support
 from . import position_decoding_config_validation as _position_decoding_config_validation
 from . import pyrecest_score_metadata as _pyrecest_score_metadata
+from . import reverse_time_terminal_guard as _reverse_time_terminal_guard
 from . import score_metadata as _score_metadata
 from . import simulation_recovery as _simulation_recovery
 from . import simulation_recovery_count_validation as _simulation_recovery_count_validation
@@ -60,6 +61,7 @@ _ground_truth_float_metadata.apply_ground_truth_float_metadata_patch()
 _ground_truth_cell_id_metadata.apply_ground_truth_cell_id_metadata_patch()
 _simulation_recovery_runtime_limits.apply_simulation_recovery_runtime_limit_validation_patch()
 _simulation_recovery_count_validation.apply_simulation_recovery_count_validation_patch()
+_reverse_time_terminal_guard.apply_reverse_time_terminal_guard_patch()
 
 from .benchmarks import BenchmarkConfig, BenchmarkResult, run_open_field_benchmark
 from .clusterless import (
@@ -177,6 +179,7 @@ def apply_runtime_patches() -> None:
     _duration_occupancy_metadata_guard.apply_duration_occupancy_metadata_guard_patch()
     _sparse_momentum_duration_validation.apply_sparse_momentum_duration_validation_patch()
     _time_order_patch.apply_reverse_emission_time_patch()
+    _reverse_time_terminal_guard.apply_reverse_time_terminal_guard_patch()
     _synchronize_duration_patched_emission_builders()
     _patch_simulation_recovery_module(_simulation_recovery)
     _latent_path_validation.apply_latent_path_validation_patch()

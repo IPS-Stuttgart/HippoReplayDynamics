@@ -24,6 +24,8 @@ def trajectory_quality_metrics(
     centers = np.asarray(bin_centers, dtype=float)
     if logp.ndim != 2:
         raise ValueError("trajectory_log_posterior must have shape (time, bins)")
+    if logp.shape[0] == 0 or logp.shape[1] == 0:
+        raise ValueError("trajectory_log_posterior must contain at least one time bin and one position bin")
     if centers.ndim != 2 or centers.shape[0] != logp.shape[1]:
         raise ValueError("bin_centers must have shape (bins, position_dim)")
     normalized = logp - logsumexp(logp, axis=1)[:, None]
@@ -34,7 +36,7 @@ def trajectory_quality_metrics(
     durations = _transition_durations(times, logp.shape[0])
     mean_steps = np.linalg.norm(np.diff(mean_path, axis=0), axis=1) if logp.shape[0] > 1 else np.empty(0)
     map_steps = np.linalg.norm(np.diff(map_path, axis=0), axis=1) if logp.shape[0] > 1 else np.empty(0)
-    displacement = _distance(mean_path[0], mean_path[-1]) if logp.shape[0] else 0.0
+    displacement = _distance(mean_path[0], mean_path[-1])
     path_length = float(np.sum(mean_steps))
     total_time = float(np.sum(durations)) if durations.size else float(max(logp.shape[0] - 1, 1))
     entropy = -np.sum(posterior * normalized, axis=1)

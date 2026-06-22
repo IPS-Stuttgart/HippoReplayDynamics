@@ -55,6 +55,7 @@ _MOMENTUM_EXACT_SURROGATE_MODELS = (
 
 _FALSE_BOOL_STRINGS = {"", "0", "0.0", "false", "f", "no", "n", "off", "nan", "none", "null"}
 _TRUE_BOOL_STRINGS = {"1", "1.0", "true", "t", "yes", "y", "on"}
+_MISSING_EVIDENCE_SUPPORT_STRINGS = {"", "nan", "na", "n/a", "none", "null", "<na>"}
 
 
 def _coerce_bool_series(values: pd.Series, *, default: bool = False) -> pd.Series:
@@ -153,7 +154,7 @@ def ensure_evidence_support_columns(df: pd.DataFrame) -> pd.DataFrame:
     inferred = out.apply(evidence_support_from_row, axis=1)
     if "evidence_support" in out:
         existing = out["evidence_support"].astype(object)
-        missing = existing.isna() | existing.astype(str).str.len().eq(0)
+        missing = existing.map(_is_missing_evidence_support)
         out["evidence_support"] = existing.where(~missing, inferred)
     else:
         out["evidence_support"] = inferred
@@ -162,6 +163,15 @@ def ensure_evidence_support_columns(df: pd.DataFrame) -> pd.DataFrame:
     out["evidence_comparison_note"] = out["evidence_comparison"].map(EVIDENCE_COMPARISON_DESCRIPTIONS).fillna(EVIDENCE_COMPARISON_DESCRIPTIONS[EVIDENCE_COMPARISON_UNKNOWN])
     out["evidence_comparable"] = status_ok & out["evidence_support"].eq(EXACT_EVIDENCE_SUPPORT)
     return add_candidate_support_quality_columns(out)
+
+
+def _is_missing_evidence_support(value: object) -> bool:
+    try:
+        if pd.isna(value):
+            return True
+    except (TypeError, ValueError):
+        return False
+    return str(value).strip().lower() in _MISSING_EVIDENCE_SUPPORT_STRINGS
 
 
 def simulation_add_evidence_columns(df: pd.DataFrame) -> pd.DataFrame:

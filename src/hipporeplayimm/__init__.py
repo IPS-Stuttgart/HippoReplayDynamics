@@ -27,6 +27,7 @@ from . import position_decoding_config_validation as _position_decoding_config_v
 from . import pyrecest_score_metadata as _pyrecest_score_metadata
 from . import reverse_time_terminal_guard as _reverse_time_terminal_guard
 from . import score_metadata as _score_metadata
+from . import simulation_best_row_flags as _simulation_best_row_flags
 from . import simulation_recovery as _simulation_recovery
 from . import simulation_recovery_count_validation as _simulation_recovery_count_validation
 from . import simulation_recovery_event_count as _simulation_recovery_event_count
@@ -182,6 +183,7 @@ def apply_runtime_patches() -> None:
     _reverse_time_terminal_guard.apply_reverse_time_terminal_guard_patch()
     _synchronize_duration_patched_emission_builders()
     _patch_simulation_recovery_module(_simulation_recovery)
+    _simulation_best_row_flags.apply_simulation_best_row_flags_patch()
     _latent_path_validation.apply_latent_path_validation_patch()
     _simulation_recovery_runtime_limits.apply_simulation_recovery_runtime_limit_validation_patch()
     _simulation_recovery_count_validation.apply_simulation_recovery_count_validation_patch()

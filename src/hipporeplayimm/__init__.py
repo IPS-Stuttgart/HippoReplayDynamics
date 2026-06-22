@@ -13,6 +13,7 @@ from . import clusterless_ground_truth as _clusterless_ground_truth
 from . import data_cell_id_validation as _data_cell_id_validation
 from . import duration_candidate_metadata_patch as _duration_candidate_metadata_patch
 from . import duration_occupancy_metadata_guard as _duration_occupancy_metadata_guard
+from . import evidence_status_coercion as _evidence_status_coercion
 from . import goal_state_space_integration as _goal_state_space_integration
 from . import ground_truth as _ground_truth
 from . import ground_truth_cell_id_metadata as _ground_truth_cell_id_metadata
@@ -192,6 +193,7 @@ def apply_runtime_patches() -> None:
     _synchronize_duration_patched_emission_builders()
     _patch_simulation_recovery_module(_simulation_recovery)
     _simulation_best_row_flags.apply_simulation_best_row_flags_patch()
+    _evidence_status_coercion.apply_evidence_status_coercion_patch()
     _latent_path_validation.apply_latent_path_validation_patch()
     _simulation_recovery_runtime_limits.apply_simulation_recovery_runtime_limit_validation_patch()
     _simulation_recovery_count_validation.apply_simulation_recovery_count_validation_patch()

@@ -26,6 +26,7 @@ from . import position_decoding_config_validation as _position_decoding_config_v
 from . import pyrecest_score_metadata as _pyrecest_score_metadata
 from . import score_metadata as _score_metadata
 from . import simulation_recovery as _simulation_recovery
+from . import simulation_recovery_count_validation as _simulation_recovery_count_validation
 from . import simulation_recovery_event_count as _simulation_recovery_event_count
 from . import simulation_recovery_runtime_limits as _simulation_recovery_runtime_limits
 from . import sparse_momentum_duration_validation as _sparse_momentum_duration_validation
@@ -54,6 +55,7 @@ _ground_truth_window_scope.apply_ground_truth_window_scope_patch()
 _ground_truth_integer_metadata.apply_ground_truth_integer_metadata_patch()
 _ground_truth_cell_id_metadata.apply_ground_truth_cell_id_metadata_patch()
 _simulation_recovery_runtime_limits.apply_simulation_recovery_runtime_limit_validation_patch()
+_simulation_recovery_count_validation.apply_simulation_recovery_count_validation_patch()
 
 from .benchmarks import BenchmarkConfig, BenchmarkResult, run_open_field_benchmark
 from .clusterless import (
@@ -173,6 +175,7 @@ def apply_runtime_patches() -> None:
     _patch_simulation_recovery_module(_simulation_recovery)
     _latent_path_validation.apply_latent_path_validation_patch()
     _simulation_recovery_runtime_limits.apply_simulation_recovery_runtime_limit_validation_patch()
+    _simulation_recovery_count_validation.apply_simulation_recovery_count_validation_patch()
     _apply_trajectory_imm_recovery_patch()
     _simulation_recovery_event_count.apply_simulation_recovery_event_count_patch()
     _model_averaged_endpoint_scoping.apply_model_averaged_endpoint_scoping_patch()

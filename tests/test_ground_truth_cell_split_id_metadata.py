@@ -13,6 +13,11 @@ def test_score_table_cell_ids_accept_integral_float_text() -> None:
     )
 
 
+def test_score_table_cell_ids_treat_missing_text_as_absent() -> None:
+    for value in ("", "nan", "NaN", "None", "null", "<NA>", "[]"):
+        assert gt._parse_cell_ids(value) is None
+
+
 def test_score_table_cell_ids_reject_fractional_text() -> None:
     with pytest.raises(ValueError, match="score-table cell IDs"):
         gt._parse_cell_ids("1 2.5 3")

@@ -56,6 +56,38 @@ def _check_same(reference: dict[str, object], shard: dict[str, object], keys: tu
             raise ValueError(f"Momentum shard metadata differs for {key}: {shard['path']}")
 
 
+def _validate_grid_indices(
+    shard: dict[str, object],
+    *,
+    sd_count: int,
+    decay_count: int,
+) -> tuple[np.ndarray, np.ndarray]:
+    sd_indices = np.asarray(shard["sd_indices"], dtype=int)
+    decay_indices = np.asarray(shard["decay_indices"], dtype=int)
+    if sd_indices.ndim != 1 or decay_indices.ndim != 1:
+        raise ValueError(f"Momentum shard grid indices must be one-dimensional: {shard['path']}")
+    if sd_indices.shape != decay_indices.shape:
+        raise ValueError(
+            f"Momentum shard sd_indices and decay_indices length mismatch in {shard['path']}: "
+            f"{sd_indices.shape} vs {decay_indices.shape}"
+        )
+    bad_sd = (sd_indices < 0) | (sd_indices >= int(sd_count))
+    if np.any(bad_sd):
+        bad_values = sd_indices[bad_sd]
+        raise ValueError(
+            f"Momentum shard sd_indices out of range [0, {int(sd_count)}) in {shard['path']}: "
+            f"{bad_values[:10].tolist()}"
+        )
+    bad_decay = (decay_indices < 0) | (decay_indices >= int(decay_count))
+    if np.any(bad_decay):
+        bad_values = decay_indices[bad_decay]
+        raise ValueError(
+            f"Momentum shard decay_indices out of range [0, {int(decay_count)}) in {shard['path']}: "
+            f"{bad_values[:10].tolist()}"
+        )
+    return sd_indices, decay_indices
+
+
 def _load_momentum_grid(shard_paths: list[Path]) -> tuple[np.ndarray, dict[str, np.ndarray], dict[str, object]]:
     if not shard_paths:
         raise FileNotFoundError("No momentum shard files matched.")
@@ -100,8 +132,13 @@ def _load_momentum_grid(shard_paths: list[Path]) -> tuple[np.ndarray, dict[str, 
         )
         if not np.array_equal(shard["sd_meters"], sd_meters) or not np.array_equal(shard["decay"], decay):
             raise ValueError(f"Momentum grid differs in {shard['path']}")
+        sd_indices, decay_indices = _validate_grid_indices(
+            shard,
+            sd_count=sd_meters.shape[0],
+            decay_count=decay.shape[0],
+        )
         values = shard["values"]
-        if values.shape != (shard["event_ids"].shape[0], shard["sd_indices"].shape[0]):
+        if values.shape != (shard["event_ids"].shape[0], sd_indices.shape[0]):
             raise ValueError(f"Unexpected momentum values shape in {shard['path']}: {values.shape}")
         per_event_runtime = float(shard["runtime_s"]) / max(shard["event_ids"].shape[0], 1)
         for local_row, event_id in enumerate(shard["event_ids"]):
@@ -112,7 +149,7 @@ def _load_momentum_grid(shard_paths: list[Path]) -> tuple[np.ndarray, dict[str, 
             elif n_time[row] != int(shard["n_time"][local_row]) or n_spikes[row] != int(shard["n_spikes"][local_row]):
                 raise ValueError(f"Event metadata differs for event {int(event_id)} in {shard['path']}")
             runtime_s_by_event[row] = max(runtime_s_by_event[row], per_event_runtime)
-            for column, (sd_index, decay_index) in enumerate(zip(shard["sd_indices"], shard["decay_indices"], strict=True)):
+            for column, (sd_index, decay_index) in enumerate(zip(sd_indices, decay_indices, strict=True)):
                 target = grid[row, int(sd_index), int(decay_index)]
                 value = float(values[local_row, column])
                 if np.isfinite(target) and not np.isclose(target, value):

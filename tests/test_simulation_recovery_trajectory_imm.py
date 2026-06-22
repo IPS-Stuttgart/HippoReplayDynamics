@@ -13,6 +13,7 @@ from hipporeplayimm.simulation_recovery import (
 
 
 TRAJECTORY_IMM_MODEL = "sorted-spike-state-space-trajectory-imm-exact-sparse"
+TRAJECTORY_IMM_SHORT_MODEL = "trajectory-imm-exact-sparse"
 
 
 def test_simulation_recovery_registers_trajectory_imm_exact_sparse() -> None:
@@ -26,11 +27,23 @@ def test_simulation_recovery_registers_trajectory_imm_exact_sparse() -> None:
     assert model_family(TRAJECTORY_IMM_MODEL) == "trajectory"
 
 
+def test_simulation_recovery_accepts_short_trajectory_imm_exact_sparse_alias() -> None:
+    config = SimulationRecoveryConfig(scoring_models=(TRAJECTORY_IMM_SHORT_MODEL,))
+
+    models = build_scoring_models(config)
+
+    assert list(models) == [TRAJECTORY_IMM_SHORT_MODEL]
+    assert models[TRAJECTORY_IMM_SHORT_MODEL].mode == "trajectory-imm-exact-sparse"
+    assert models[TRAJECTORY_IMM_SHORT_MODEL].name == TRAJECTORY_IMM_SHORT_MODEL
+    assert model_family(TRAJECTORY_IMM_SHORT_MODEL) == "trajectory"
+
+
 def test_simulation_recovery_preserves_model_order_with_trajectory_imm() -> None:
     config = SimulationRecoveryConfig(
         scoring_models=(
             "random",
             TRAJECTORY_IMM_MODEL,
+            TRAJECTORY_IMM_SHORT_MODEL,
             "sorted-spike-state-space-diffusion",
         )
     )
@@ -40,6 +53,7 @@ def test_simulation_recovery_preserves_model_order_with_trajectory_imm() -> None
     assert list(models) == [
         "random",
         TRAJECTORY_IMM_MODEL,
+        TRAJECTORY_IMM_SHORT_MODEL,
         "sorted-spike-state-space-diffusion",
     ]
 

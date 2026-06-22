@@ -196,7 +196,7 @@ def apply_runtime_patches() -> None:
 # emissions include a partial final bin.
 apply_runtime_patches()
 from .encoding import build_emissions as build_emissions  # noqa: E402,F401,F811
-from .ground_truth import compare_scores_to_ground_truth as compare_scores_to_ground_truth  # noqa: E402,F401
+from .ground_truth import compare_scores_to_ground_truth as compare_scores_to_ground_truth  # noqa: E402,F401,F811
 
 # Keep synthetic recovery summaries from mixing exact evidences with truncated
 # candidate lower bounds.

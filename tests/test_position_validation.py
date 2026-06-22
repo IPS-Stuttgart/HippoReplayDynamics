@@ -3,6 +3,7 @@ import pytest
 
 from hipporeplayimm.data import ReplaySession
 from hipporeplayimm.encoding import EncodingConfig
+from hipporeplayimm.position_decoding_config_validation import _validated_position_decoding_config
 from hipporeplayimm.position_validation import (
     PositionDecodingConfig,
     summarize_position_decoding,
@@ -30,6 +31,22 @@ def test_validate_session_position_decoding_rejects_invalid_config_values(kwargs
 
     with pytest.raises(ValueError, match=message):
         validate_session_position_decoding(object(), config)  # type: ignore[arg-type]
+
+
+def test_position_decoding_config_validation_normalizes_accepted_values():
+    config = PositionDecodingConfig(
+        decode_bin_s="1.0",  # type: ignore[arg-type]
+        n_folds="3",  # type: ignore[arg-type]
+        max_windows_per_session="9",  # type: ignore[arg-type]
+        min_spikes_per_window="0",  # type: ignore[arg-type]
+    )
+
+    normalized = _validated_position_decoding_config(config)
+
+    assert normalized.decode_bin_s == 1.0
+    assert normalized.n_folds == 3
+    assert normalized.max_windows_per_session == 9
+    assert normalized.min_spikes_per_window == 0
 
 
 def test_validate_session_position_decoding_returns_finite_cv_metrics(tmp_path):

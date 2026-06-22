@@ -41,6 +41,15 @@ def test_exact_model_transition_duration_helpers_reject_invalid_values(coerce_du
         with pytest.raises(ValueError, match="transition durations"):
             coerce_durations(values, n_time=3, fallback_dt=0.01)
 
+    malformed_rows = (
+        np.array([[0.01, 0.02]], dtype=float),
+        [0.01, 0.02, 0.03],
+        [0.01, np.nan, 0.03],
+    )
+    for values in malformed_rows:
+        with pytest.raises(ValueError, match="transition durations"):
+            coerce_durations(values, n_time=3, fallback_dt=0.01)
+
     np.testing.assert_allclose(
         coerce_durations([], n_time=3, fallback_dt=0.02),
         np.array([0.02, 0.02], dtype=float),

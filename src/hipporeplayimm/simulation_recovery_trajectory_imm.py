@@ -16,6 +16,7 @@ from .sorted_spike_state_space import SortedSpikeStateSpaceReplayModel
 _SORTED_SPIKE_TRAJECTORY_IMM = "sorted-spike-state-space-trajectory-imm-exact-sparse"
 _TRAJECTORY_IMM_MODE = "trajectory-imm-exact-sparse"
 _TRAJECTORY_IMM_ALIASES = frozenset({_SORTED_SPIKE_TRAJECTORY_IMM, _TRAJECTORY_IMM_MODE})
+_TRAJECTORY_MODEL_ALIASES = frozenset({"state-space-velocity-momentum"})
 
 
 def apply_trajectory_imm_recovery_patch() -> None:
@@ -31,7 +32,7 @@ def apply_trajectory_imm_recovery_patch() -> None:
         return
 
     recovery._TRAJECTORY = set(getattr(recovery, "_TRAJECTORY", set())) | set(
-        _TRAJECTORY_IMM_ALIASES
+        _TRAJECTORY_IMM_ALIASES | _TRAJECTORY_MODEL_ALIASES
     )
 
     previous_build_scoring_models = recovery.build_scoring_models

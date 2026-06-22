@@ -10,6 +10,7 @@ from hipporeplayimm.result_improvement_extensions import (
     copy_emissions_with_log_likelihood,
 )
 from hipporeplayimm.reverse_models import (
+    BidirectionalReplayModel as DirectBidirectionalReplayModel,
     ReverseTimeReplayModel as DirectReverseTimeReplayModel,
     reverse_emissions,
 )
@@ -173,6 +174,17 @@ def test_reverse_time_wrappers_clear_unmappable_evidence_only_terminal() -> None
         assert "decoded_endpoint_x" not in result.diagnostics
         assert "decoded_map_bin" not in result.diagnostics
         assert "terminal_posterior_entropy" not in result.diagnostics
+
+def test_direct_bidirectional_wrapper_keeps_forward_terminal_when_reverse_unmappable() -> None:
+    emissions = _duration_emissions()
+    bin_centers = np.array([[0.0, 0.0], [1.0, 0.0]], dtype=float)
+    base = _EvidenceOnlyPosteriorModel("base", 0.0, np.array([0.8, 0.2]))
+    bidirectional = DirectBidirectionalReplayModel(base, name="direct-bidirectional")
+
+    result = bidirectional.score(emissions, bin_centers)
+
+    np.testing.assert_allclose(result.terminal_log_posterior, np.log(np.array([0.8, 0.2])))
+    assert result.trajectory_log_posterior is None
 
 
 def test_bidirectional_wrapper_does_not_mix_unmappable_reverse_terminal() -> None:

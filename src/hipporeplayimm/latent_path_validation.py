@@ -30,6 +30,11 @@ def _patch_simulate_latent_path(recovery: Any) -> None:
         if "n_time" in kwargs:
             kwargs = dict(kwargs)
             kwargs["n_time"] = _positive_integer_value("n_time", kwargs["n_time"])
+        if "state_space" in kwargs and kwargs["state_space"] is not None:
+            _validate_latent_path_motion_sigmas(
+                kwargs.get("true_model", ""),
+                kwargs["state_space"],
+            )
         return original(*args, **kwargs)
 
     recovery.simulate_latent_path = checked_simulate_latent_path
@@ -79,6 +84,34 @@ def _positive_integer_value(name: str, value: Any) -> int:
     if not np.isclose(numeric, integer_value, rtol=0.0, atol=0.0):
         raise ValueError(f"{name} must be positive integer-valued")
     return integer_value
+
+
+def _validate_latent_path_motion_sigmas(true_model: Any, state_space: Any) -> None:
+    model = str(true_model).strip().lower()
+    if model == "diffusion":
+        _finite_nonnegative_value(
+            "state_space.diffusion_sigma_cm_sqrt_s",
+            getattr(state_space, "diffusion_sigma_cm_sqrt_s"),
+        )
+    elif model == "momentum":
+        _finite_nonnegative_value(
+            "state_space.momentum_initial_sigma_cm_sqrt_s",
+            getattr(state_space, "momentum_initial_sigma_cm_sqrt_s"),
+        )
+        _finite_nonnegative_value(
+            "state_space.momentum_sigma_cm_sqrt_s",
+            getattr(state_space, "momentum_sigma_cm_sqrt_s"),
+        )
+
+
+def _finite_nonnegative_value(name: str, value: Any) -> float:
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must be finite and nonnegative") from exc
+    if not np.isfinite(numeric) or numeric < 0.0:
+        raise ValueError(f"{name} must be finite and nonnegative")
+    return numeric
 
 
 def _patch_emissions_from_counts(recovery: Any) -> None:

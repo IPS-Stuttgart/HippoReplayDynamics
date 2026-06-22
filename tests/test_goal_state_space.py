@@ -1,6 +1,7 @@
 import itertools
 
 import numpy as np
+import pytest
 from scipy.special import logsumexp
 
 from hipporeplayimm.benchmarks import BenchmarkConfig, _build_models
@@ -163,6 +164,35 @@ def test_goal_state_space_zero_drift_matches_diffusion_bruteforce():
         brute_terms.append(logp)
 
     assert np.allclose(score.log_likelihood, logsumexp(brute_terms))
+
+
+def test_goal_transition_matrix_normalizes_when_nearest_weight_underflows():
+    centers = np.array([[0.0, 0.0], [1_000_000.0, 0.0]])
+
+    transition = _goal_transition_matrix(
+        centers,
+        np.array([1_000_000.0, 0.0]),
+        drift_step_cm=500_000.0,
+        sigma_cm=1e-6,
+        max_step_sigma=1.0,
+    ).toarray()
+
+    assert np.all(np.isfinite(transition))
+    assert np.all(transition >= 0.0)
+    assert np.allclose(transition.sum(axis=0), 1.0)
+
+
+def test_goal_transition_matrix_rejects_nonfinite_bin_centers():
+    centers = np.array([[0.0, 0.0], [np.nan, 0.0]])
+
+    with pytest.raises(ValueError, match='bin_centers must be finite'):
+        _goal_transition_matrix(
+            centers,
+            np.array([0.0, 0.0]),
+            drift_step_cm=0.0,
+            sigma_cm=1.0,
+            max_step_sigma=4.0,
+        )
 
 
 def test_benchmark_registry_includes_goal_state_space_models():

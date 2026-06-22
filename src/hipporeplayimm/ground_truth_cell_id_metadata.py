@@ -9,6 +9,7 @@ import pandas as pd
 
 
 _PATCHED_FLAG = "_ground_truth_strict_cell_id_metadata_patch_applied"
+_MISSING_TEXT_VALUES = frozenset({"", "nan", "na", "n/a", "none", "null", "<na>"})
 
 
 def apply_ground_truth_cell_id_metadata_patch() -> None:
@@ -29,10 +30,10 @@ def apply_ground_truth_cell_id_metadata_patch() -> None:
         if pd.isna(value):
             return None
         text = str(value).strip()
-        if not text:
+        if text.lower() in _MISSING_TEXT_VALUES:
             return None
         text = text.strip("[]()").replace(",", " ")
-        if not text.strip():
+        if text.strip().lower() in _MISSING_TEXT_VALUES:
             return None
         return _integer_array_from_values(text.split())
 

@@ -37,6 +37,8 @@ def apply_ground_truth_integer_metadata_patch() -> None:
 
 
 def _parse_integer_metadata_value(column: str, value: Any) -> int:
+    if isinstance(value, (bool, np.bool_)):
+        raise ValueError(f"{column} must contain integer values")
     try:
         numeric = float(value)
     except (TypeError, ValueError) as exc:

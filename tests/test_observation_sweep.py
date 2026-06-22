@@ -43,6 +43,30 @@ def test_observation_parameter_grid_rejects_nonpositive_values():
         raise AssertionError("expected ValueError")
 
 
+def test_observation_parameter_grid_rejects_nonfinite_values():
+    cases = [
+        (ObservationSweepConfig(bin_sizes_cm=(float("nan"),)), "bin_sizes_cm"),
+        (ObservationSweepConfig(time_bin_ms=(float("inf"),)), "time_bin_ms"),
+        (
+            ObservationSweepConfig(
+                negative_binomial_overdispersions=(float("nan"),)
+            ),
+            "negative_binomial_overdispersions",
+        ),
+        (ObservationSweepConfig(decode_bin_s=float("nan")), "decode_bin_s"),
+    ]
+
+    for config, field_name in cases:
+        try:
+            observation_parameter_grid(config)
+        except ValueError as exc:
+            message = str(exc)
+            assert field_name in message
+            assert "finite" in message
+        else:
+            raise AssertionError(f"expected ValueError for {field_name}")
+
+
 def test_summarize_observation_sweep_merges_overall_recovery():
     position_summary = pd.DataFrame(
         {

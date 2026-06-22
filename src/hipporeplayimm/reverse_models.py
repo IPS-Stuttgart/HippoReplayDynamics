@@ -120,9 +120,16 @@ def _reversed_optional_duration_vector(
 
 
 def _mixture_log_posterior(left: np.ndarray | None, right: np.ndarray | None, weights: np.ndarray) -> np.ndarray | None:
-    if left is None or right is None:
+    valid = [
+        (np.asarray(post, dtype=float), float(weight))
+        for post, weight in ((left, weights[0]), (right, weights[1]))
+        if post is not None
+    ]
+    if not valid:
         return None
-    left = np.asarray(left, dtype=float)
-    right = np.asarray(right, dtype=float)
-    stacked = np.stack([left + np.log(weights[0]), right + np.log(weights[1])], axis=0)
-    return logsumexp(stacked, axis=0)
+    stacked = np.stack(
+        [post + np.log(max(weight, np.finfo(float).tiny)) for post, weight in valid],
+        axis=0,
+    )
+    out = logsumexp(stacked, axis=0)
+    return out - logsumexp(out, axis=-1, keepdims=True)

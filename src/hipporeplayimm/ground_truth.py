@@ -1317,7 +1317,7 @@ def _cell_ids_from_score_column(
     for value in session_scores[column]:
         ids = _parse_cell_ids(value)
         if ids is not None:
-            parsed.append(tuple(int(cell_id) for cell_id in ids))
+            parsed.append(tuple(sorted(int(cell_id) for cell_id in ids)))
     if not parsed:
         return None
     unique = set(parsed)

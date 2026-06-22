@@ -73,13 +73,14 @@ def _parse_integer_metadata_value(column: str, value: Any) -> int:
 
 
 def _parse_cell_id_values(values: Any) -> np.ndarray:
-    return np.asarray(
+    parsed = np.asarray(
         [
             _parse_integer_metadata_value("score-table cell IDs", value)
             for value in np.asarray(values, dtype=object).reshape(-1)
         ],
         dtype=int,
     )
+    return np.sort(parsed)
 
 
 __all__ = ["apply_ground_truth_integer_metadata_patch"]

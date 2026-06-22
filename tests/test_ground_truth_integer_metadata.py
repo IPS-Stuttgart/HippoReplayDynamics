@@ -15,3 +15,10 @@ def test_unique_int_from_column_rejects_fractional_metadata():
 
     with pytest.raises(ValueError, match="benchmark_random_seed"):
         _unique_int_from_column(frame, "benchmark_random_seed", 1)
+
+
+def test_unique_int_from_column_rejects_boolean_metadata():
+    frame = pd.DataFrame({"benchmark_random_seed": [True]})
+
+    with pytest.raises(ValueError, match="benchmark_random_seed"):
+        _unique_int_from_column(frame, "benchmark_random_seed", 1)

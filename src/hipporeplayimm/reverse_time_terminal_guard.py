@@ -2,10 +2,10 @@
 
 A reverse-time score can only be mapped back to the original event endpoint when
 the base model returns the full trajectory posterior.  If the base model returns
-only a terminal posterior for the reversed event, that posterior belongs to the
-original start time rather than the original endpoint.  In that evidence-only
-case, drop the terminal posterior and endpoint diagnostics instead of exposing a
-misaligned endpoint.
+only a terminal posterior for the reversed multi-bin event, that posterior
+belongs to the original start time rather than the original endpoint.  In that
+evidence-only case, drop the terminal posterior and endpoint diagnostics instead
+of exposing a misaligned endpoint.
 """
 
 from __future__ import annotations
@@ -59,7 +59,11 @@ def apply_reverse_time_terminal_guard_patch() -> None:
 def _clear_unmappable_reverse_terminal(result: Any) -> Any:
     """Clear reverse-time terminal posterior when no trajectory can remap it."""
 
-    if result.trajectory_log_posterior is not None or result.terminal_log_posterior is None:
+    if (
+        result.trajectory_log_posterior is not None
+        or result.terminal_log_posterior is None
+        or int(getattr(result, "n_time", 0)) <= 1
+    ):
         return result
     result.terminal_log_posterior = None
     result.diagnostics = dict(getattr(result, "diagnostics", {}) or {})

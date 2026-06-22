@@ -38,6 +38,7 @@ from . import simulation_recovery_runtime_limits as _simulation_recovery_runtime
 from . import sparse_momentum_duration_validation as _sparse_momentum_duration_validation
 from . import sparse_momentum_single_bin_diagnostics as _sparse_momentum_single_bin_diagnostics
 from . import spike_rate_metadata as _spike_rate_metadata
+from . import state_space_bin_center_validation as _state_space_bin_center_validation
 from . import state_space_bin_count_validation as _state_space_bin_count_validation
 from . import time_order_patch as _time_order_patch
 
@@ -182,6 +183,7 @@ def apply_runtime_patches() -> None:
     _apply_state_space_imm_duration_patch()
     _apply_duration_occupancy_patch()
     _candidate_log_mass_validation.apply_candidate_log_mass_validation_patch()
+    _state_space_bin_center_validation.apply_state_space_bin_center_validation_patch()
     _duration_occupancy_metadata_guard.apply_duration_occupancy_metadata_guard_patch()
     _sparse_momentum_duration_validation.apply_sparse_momentum_duration_validation_patch()
     _sparse_momentum_single_bin_diagnostics.apply_sparse_momentum_single_bin_diagnostics_patch()

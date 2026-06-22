@@ -20,6 +20,10 @@ _MODEL_AVERAGE_SCOPE_COLUMNS = (
     "benchmark_cell_split_seed",
     "benchmark_event_subset_seed",
     "benchmark_test_cell_fraction",
+    "benchmark_cell_split_strategy",
+    "benchmark_cell_split_strata",
+    "train_cell_ids",
+    "test_cell_ids",
     "window_role",
     "window_index",
     "null_index",
@@ -60,9 +64,7 @@ def add_model_averaged_endpoint_columns(df: pd.DataFrame) -> pd.DataFrame:
     out["model_probability_entropy"] = np.nan
     out["model_log_evidence_margin"] = np.nan
 
-    group_columns = _model_average_group_columns(out)
-    groups = [((), out)] if not group_columns else out.groupby(group_columns, sort=False, dropna=False)
-    for _, group in groups:
+    for group in _model_average_groups(out):
         if "evidence_comparable" in group:
             comparable = _bool_series(group["evidence_comparable"])
         else:
@@ -111,6 +113,25 @@ def add_model_averaged_endpoint_columns(df: pd.DataFrame) -> pd.DataFrame:
     return out
 
 
+def _model_average_groups(frame: pd.DataFrame):
+    group_columns = _model_average_group_columns(frame)
+    if not group_columns:
+        yield frame
+        return
+
+    labels = pd.DataFrame(
+        {
+            f"__model_average_scope_{index}": [
+                _scope_label(value) for value in frame[column]
+            ]
+            for index, column in enumerate(group_columns)
+        },
+        index=frame.index,
+    )
+    for indices in labels.groupby(list(labels.columns), sort=False, dropna=False).indices.values():
+        yield frame.iloc[np.asarray(indices, dtype=int)]
+
+
 def _model_average_group_columns(frame: pd.DataFrame) -> list[str]:
     """Return columns identifying one independent model-choice scope."""
 
@@ -119,6 +140,28 @@ def _model_average_group_columns(frame: pd.DataFrame) -> list[str]:
         if column in frame.columns and column not in columns:
             columns.append(column)
     return columns
+
+
+def _scope_label(value: object) -> str:
+    if _is_missing_scalar(value):
+        return "<missing>"
+    if isinstance(value, np.ndarray):
+        return repr(("array", np.asarray(value, dtype=object).reshape(-1).tolist()))
+    if isinstance(value, (list, tuple)):
+        return repr(("sequence", list(value)))
+    if isinstance(value, set):
+        return repr(("set", sorted(value, key=repr)))
+    return repr(("scalar", str(value).strip()))
+
+
+def _is_missing_scalar(value: object) -> bool:
+    if value is None:
+        return True
+    try:
+        missing = pd.isna(value)
+    except (TypeError, ValueError):
+        return False
+    return isinstance(missing, (bool, np.bool_)) and bool(missing)
 
 
 def _bool_value(value: object) -> bool:

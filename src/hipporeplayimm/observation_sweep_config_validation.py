@@ -10,18 +10,21 @@ import numpy as np
 _PATCHED_FLAG = "_observation_sweep_finite_config_validation_patch_applied"
 _POSITIVE_GRID_FIELDS = (
     "bin_sizes_cm",
-    "smoothing_sigmas_bins",
-    "min_speed_cm_s",
     "min_occupancy_s",
     "rate_floor_hz",
     "time_bin_ms",
     "spike_rate_scales",
     "likelihood_temperatures",
 )
+_NONNEGATIVE_GRID_FIELDS = (
+    "smoothing_sigmas_bins",
+    "min_speed_cm_s",
+    "negative_binomial_overdispersions",
+)
 
 
 def apply_observation_sweep_config_validation_patch() -> None:
-    """Reject non-finite observation-sweep parameters before grid expansion."""
+    """Reject invalid observation-sweep parameters before grid expansion."""
 
     from . import observation_sweep as sweep
 
@@ -32,7 +35,6 @@ def apply_observation_sweep_config_validation_patch() -> None:
 
     @wraps(original_validate_config)
     def validate_config_with_finite_grid_values(config: Any) -> None:
-        original_validate_config(config)
         _validate_finite_observation_sweep_config(config)
 
     sweep._validate_config = validate_config_with_finite_grid_values
@@ -41,19 +43,32 @@ def apply_observation_sweep_config_validation_patch() -> None:
 
 def _validate_finite_observation_sweep_config(config: Any) -> None:
     for name in _POSITIVE_GRID_FIELDS:
-        for value in getattr(config, name):
+        for value in _grid_values(config, name):
             numeric = _finite_float(name, value)
             if numeric <= 0.0:
                 raise ValueError(f"{name} values must be positive")
 
-    for value in getattr(config, "negative_binomial_overdispersions"):
-        numeric = _finite_float("negative_binomial_overdispersions", value)
-        if numeric < 0.0:
-            raise ValueError("negative_binomial_overdispersions values must be nonnegative")
+    for name in _NONNEGATIVE_GRID_FIELDS:
+        for value in _grid_values(config, name):
+            numeric = _finite_float(name, value)
+            if numeric < 0.0:
+                raise ValueError(f"{name} values must be nonnegative")
 
     decode_bin_s = _finite_float("decode_bin_s", getattr(config, "decode_bin_s"))
     if decode_bin_s <= 0.0:
         raise ValueError("decode_bin_s must be positive")
+
+    if int(getattr(config, "n_folds")) <= 0:
+        raise ValueError("n_folds must be positive")
+    if int(getattr(config, "simulation_events_per_model")) <= 0:
+        raise ValueError("simulation_events_per_model must be positive")
+
+
+def _grid_values(config: Any, name: str) -> Any:
+    values = getattr(config, name)
+    if not values:
+        raise ValueError(f"{name} must contain at least one value")
+    return values
 
 
 def _finite_float(name: str, value: Any) -> float:

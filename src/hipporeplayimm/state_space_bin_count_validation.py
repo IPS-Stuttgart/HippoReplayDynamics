@@ -6,14 +6,21 @@ import sys
 from collections.abc import Callable
 from typing import Any
 
+import numpy as np
+
 
 def _positive_bin_count(n_bins: int) -> int:
+    if isinstance(n_bins, (bool, np.bool_)):
+        raise ValueError("n_bins must be a positive integer")
     try:
-        count = int(n_bins)
+        numeric = float(n_bins)
     except (TypeError, ValueError, OverflowError) as exc:
-        raise ValueError("n_bins must be positive") from exc
-    if count <= 0:
-        raise ValueError("n_bins must be positive")
+        raise ValueError("n_bins must be a positive integer") from exc
+    if not np.isfinite(numeric) or numeric <= 0.0:
+        raise ValueError("n_bins must be a positive integer")
+    count = int(round(numeric))
+    if not np.isclose(numeric, count, rtol=0.0, atol=0.0):
+        raise ValueError("n_bins must be a positive integer")
     return count
 
 

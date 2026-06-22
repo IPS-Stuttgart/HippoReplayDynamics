@@ -7,6 +7,7 @@ from hipporeplayimm.simulation_recovery import (
     run_session_simulation_recovery,
     simulate_latent_path,
 )
+from hipporeplayimm.state_space import StateSpaceDecoderConfig
 
 
 def _small_encoding() -> EncodingModel:
@@ -31,6 +32,39 @@ def test_simulate_latent_path_rejects_invalid_length(bad_length):
             n_time=bad_length,
             dt=0.02,
             rng=generator,
+        )
+
+
+@pytest.mark.parametrize(
+    ("true_model", "state_space"),
+    [
+        (
+            "diffusion",
+            StateSpaceDecoderConfig(diffusion_sigma_cm_sqrt_s=-1.0),
+        ),
+        (
+            "diffusion",
+            StateSpaceDecoderConfig(diffusion_sigma_cm_sqrt_s=np.nan),
+        ),
+        (
+            "momentum",
+            StateSpaceDecoderConfig(momentum_initial_sigma_cm_sqrt_s=-1.0),
+        ),
+        (
+            "momentum",
+            StateSpaceDecoderConfig(momentum_sigma_cm_sqrt_s=np.inf),
+        ),
+    ],
+)
+def test_simulate_latent_path_rejects_invalid_motion_sigmas(true_model, state_space):
+    with pytest.raises(ValueError, match="finite and nonnegative"):
+        simulate_latent_path(
+            _small_encoding(),
+            true_model=true_model,
+            n_time=3,
+            dt=0.02,
+            rng=np.random.default_rng(1),
+            state_space=state_space,
         )
 
 

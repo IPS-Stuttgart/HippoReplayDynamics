@@ -44,6 +44,7 @@ from . import spike_rate_metadata as _spike_rate_metadata
 from . import state_space_bin_center_validation as _state_space_bin_center_validation
 from . import state_space_bin_count_validation as _state_space_bin_count_validation
 from . import time_order_patch as _time_order_patch
+from . import wrapper_return_trajectory as _wrapper_return_trajectory
 
 # Keep score-table metadata and post-hoc decoding consistent before public
 # symbols are imported from the patched modules.
@@ -71,6 +72,7 @@ _ground_truth_cell_id_metadata.apply_ground_truth_cell_id_metadata_patch()
 _simulation_recovery_runtime_limits.apply_simulation_recovery_runtime_limit_validation_patch()
 _simulation_recovery_count_validation.apply_simulation_recovery_count_validation_patch()
 _reverse_time_terminal_guard.apply_reverse_time_terminal_guard_patch()
+_wrapper_return_trajectory.apply_wrapper_return_trajectory_patch()
 
 from .benchmarks import BenchmarkConfig, BenchmarkResult, run_open_field_benchmark
 from .clusterless import (
@@ -194,6 +196,7 @@ def apply_runtime_patches() -> None:
     _sparse_momentum_single_bin_diagnostics.apply_sparse_momentum_single_bin_diagnostics_patch()
     _time_order_patch.apply_reverse_emission_time_patch()
     _reverse_time_terminal_guard.apply_reverse_time_terminal_guard_patch()
+    _wrapper_return_trajectory.apply_wrapper_return_trajectory_patch()
     _synchronize_duration_patched_emission_builders()
     _patch_simulation_recovery_module(_simulation_recovery)
     _simulation_best_row_flags.apply_simulation_best_row_flags_patch()

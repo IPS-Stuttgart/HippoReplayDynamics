@@ -5,10 +5,11 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 
-from aggregate_kd_model_evidence_shards import aggregate  # noqa: E402
+from aggregate_kd_model_evidence_shards import aggregate, _load_momentum_grid  # noqa: E402
 from plan_kd_event_shards import _event_chunks, _event_spec  # noqa: E402
 
 
@@ -48,6 +49,34 @@ def test_event_shard_planner_builds_balanced_nonempty_specs():
 
     assert chunks == [[10], [11, 12], [20, 21]]
     assert [_event_spec(chunk) for chunk in chunks] == ["10", "11-12", "20-21"]
+
+
+def test_momentum_grid_loader_rejects_negative_sd_indices(tmp_path):
+    shard = tmp_path / "negative_sd_index.npz"
+    _write_momentum_shard(
+        shard,
+        event_ids=[10],
+        sd_indices=[-1, 0, 0, 1],
+        decay_indices=[0, 0, 1, 1],
+        values=np.array([[-7.0, -8.0, -9.0, -10.0]]),
+    )
+
+    with pytest.raises(ValueError, match="sd_indices out of range"):
+        _load_momentum_grid([shard])
+
+
+def test_momentum_grid_loader_rejects_out_of_range_decay_indices(tmp_path):
+    shard = tmp_path / "bad_decay_index.npz"
+    _write_momentum_shard(
+        shard,
+        event_ids=[10],
+        sd_indices=[0, 1, 0, 1],
+        decay_indices=[0, 0, 1, 2],
+        values=np.array([[-7.0, -8.0, -9.0, -10.0]]),
+    )
+
+    with pytest.raises(ValueError, match="decay_indices out of range"):
+        _load_momentum_grid([shard])
 
 
 def test_aggregate_accepts_distinct_event_and_grid_shards(tmp_path):

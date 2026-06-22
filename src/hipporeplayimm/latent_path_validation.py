@@ -16,6 +16,8 @@ def apply_latent_path_validation_patch() -> None:
 
     if not getattr(recovery, "_latent_path_n_time_validation_applied", False):
         _patch_simulate_latent_path(recovery)
+    if not getattr(recovery, "_replay_event_n_time_validation_applied", False):
+        _patch_simulate_replay_event(recovery)
     if not getattr(recovery, "_emissions_from_counts_input_validation_applied", False):
         _patch_emissions_from_counts(recovery)
     if not getattr(recovery, "_recovery_event_count_validation_applied", False):
@@ -39,6 +41,20 @@ def _patch_simulate_latent_path(recovery: Any) -> None:
 
     recovery.simulate_latent_path = checked_simulate_latent_path
     recovery._latent_path_n_time_validation_applied = True
+
+
+def _patch_simulate_replay_event(recovery: Any) -> None:
+    original = recovery.simulate_replay_event
+
+    @wraps(original)
+    def checked_simulate_replay_event(*args: Any, **kwargs: Any) -> Any:
+        if "n_time" in kwargs:
+            kwargs = dict(kwargs)
+            kwargs["n_time"] = _positive_integer_value("n_time", kwargs["n_time"])
+        return original(*args, **kwargs)
+
+    recovery.simulate_replay_event = checked_simulate_replay_event
+    recovery._replay_event_n_time_validation_applied = True
 
 
 def _patch_run_session_simulation_recovery(recovery: Any) -> None:

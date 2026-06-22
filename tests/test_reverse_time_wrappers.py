@@ -9,7 +9,10 @@ from hipporeplayimm.result_improvement_extensions import (
     ReverseTimeReplayModel as CompatReverseTimeReplayModel,
     copy_emissions_with_log_likelihood,
 )
-from hipporeplayimm.reverse_models import reverse_emissions
+from hipporeplayimm.reverse_models import (
+    ReverseTimeReplayModel as DirectReverseTimeReplayModel,
+    reverse_emissions,
+)
 
 
 def _duration_emissions() -> LogEmissionTensor:
@@ -110,6 +113,30 @@ class _CandidateRecordingModel:
         )
 
 
+class _EvidenceOnlyPosteriorModel:
+    def __init__(self, name: str, log_likelihood: float, posterior: np.ndarray) -> None:
+        self.name = name
+        self.log_likelihood = float(log_likelihood)
+        self.posterior = np.asarray(posterior, dtype=float)
+
+    def score(self, emissions: LogEmissionTensor, bin_centers: np.ndarray) -> EventScore:
+        del bin_centers
+        terminal = np.log(self.posterior / np.sum(self.posterior))
+        return EventScore(
+            self.name,
+            self.log_likelihood,
+            emissions.n_time,
+            emissions.n_spikes,
+            diagnostics={
+                "decoded_endpoint_x": 123.0,
+                "decoded_map_bin": 1,
+                "terminal_posterior_entropy": 0.5,
+            },
+            terminal_log_posterior=terminal,
+            trajectory_log_posterior=None,
+        )
+
+
 def test_bidirectional_wrapper_passes_candidate_indices_to_reverse_model() -> None:
     emissions = _duration_emissions()
     bin_centers = np.array([[0.0, 0.0], [1.0, 0.0]], dtype=float)
@@ -130,3 +157,35 @@ def test_bidirectional_wrapper_passes_candidate_indices_to_reverse_model() -> No
         np.testing.assert_array_equal(seen, expected)
     for seen, expected in zip(reverse_base.seen_candidate_indices, candidates[::-1], strict=True):
         np.testing.assert_array_equal(seen, expected)
+
+
+def test_reverse_time_wrappers_clear_unmappable_evidence_only_terminal() -> None:
+    emissions = _duration_emissions()
+    bin_centers = np.array([[0.0, 0.0], [1.0, 0.0]], dtype=float)
+
+    for wrapper_type in (DirectReverseTimeReplayModel, CompatReverseTimeReplayModel):
+        wrapped = wrapper_type(_EvidenceOnlyPosteriorModel("evidence-only", 1.0, np.array([0.9, 0.1])))
+        result = wrapped.score(emissions, bin_centers)
+
+        assert result.trajectory_log_posterior is None
+        assert result.terminal_log_posterior is None
+        assert result.diagnostics["reverse_time_terminal_posterior"] == "unavailable_without_trajectory"
+        assert "decoded_endpoint_x" not in result.diagnostics
+        assert "decoded_map_bin" not in result.diagnostics
+        assert "terminal_posterior_entropy" not in result.diagnostics
+
+
+def test_bidirectional_wrapper_does_not_mix_unmappable_reverse_terminal() -> None:
+    emissions = _duration_emissions()
+    bin_centers = np.array([[0.0, 0.0], [1.0, 0.0]], dtype=float)
+    forward = _EvidenceOnlyPosteriorModel("forward", 0.0, np.array([0.8, 0.2]))
+    reverse_base = _EvidenceOnlyPosteriorModel("reverse-base", 5.0, np.array([0.1, 0.9]))
+    bidirectional = BidirectionalReplayModel(
+        forward_model=forward,
+        reverse_model=CompatReverseTimeReplayModel(reverse_base),
+        name="bidirectional",
+    )
+
+    result = bidirectional.score(emissions, bin_centers)
+
+    np.testing.assert_allclose(result.terminal_log_posterior, np.log(np.array([0.8, 0.2])))

@@ -10,6 +10,14 @@ DEFAULT_MIN_SPIKES = 3
 DEFAULT_MIN_TIME_BINS = 2
 DEFAULT_MIN_CANDIDATE_LOG_MASS = np.log(0.95)
 DEFAULT_MAX_TERMINAL_ENTROPY = np.inf
+RELIABILITY_FLAG_COLUMNS = (
+    "event_reliable",
+    "event_reliability_reasons",
+    "event_low_spike_count",
+    "event_too_few_time_bins",
+    "event_low_candidate_mass",
+    "event_high_terminal_entropy",
+)
 
 
 def event_reliability_flags(
@@ -64,10 +72,14 @@ def event_reliability_flags(
 
 
 def add_event_reliability_flags(df: pd.DataFrame, **kwargs) -> pd.DataFrame:
-    if df.empty:
-        return df.copy()
-    flags = pd.DataFrame([event_reliability_flags(row, **kwargs) for _, row in df.iterrows()], index=df.index)
-    return pd.concat([df.copy(), flags], axis=1)
+    base = df.copy()
+    existing_flag_columns = [column for column in RELIABILITY_FLAG_COLUMNS if column in base.columns]
+    if existing_flag_columns:
+        base = base.drop(columns=existing_flag_columns)
+    if base.empty:
+        return base
+    flags = pd.DataFrame([event_reliability_flags(row, **kwargs) for _, row in base.iterrows()], index=base.index)
+    return pd.concat([base, flags], axis=1)
 
 
 def _as_float(value) -> float:

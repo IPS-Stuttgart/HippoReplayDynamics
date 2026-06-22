@@ -20,6 +20,30 @@ def test_trajectory_quality_metrics_rejects_empty_time_axis():
         )
 
 
+def test_trajectory_quality_metrics_rejects_nan_or_positive_inf():
+    centers = np.array([[0.0, 0.0], [1.0, 0.0]])
+
+    with pytest.raises(ValueError, match="cannot contain NaN or \+inf"):
+        trajectory_quality_metrics(
+            np.array([[0.0, np.nan]]),
+            centers,
+        )
+
+    with pytest.raises(ValueError, match="cannot contain NaN or \+inf"):
+        trajectory_quality_metrics(
+            np.array([[0.0, np.inf]]),
+            centers,
+        )
+
+
+def test_trajectory_quality_metrics_rejects_rows_without_finite_mass():
+    with pytest.raises(ValueError, match="finite posterior mass"):
+        trajectory_quality_metrics(
+            np.array([[0.0, -np.inf], [-np.inf, -np.inf]]),
+            np.array([[0.0, 0.0], [1.0, 0.0]]),
+        )
+
+
 def test_trajectory_quality_metrics_accepts_single_time_bin():
     metrics = trajectory_quality_metrics(
         np.log(np.array([[0.2, 0.8]])),

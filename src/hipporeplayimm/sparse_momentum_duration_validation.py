@@ -1,8 +1,8 @@
 """Runtime guards for duration-dependent momentum helpers.
 
 The exact sparse and finite-displacement momentum decoders derive both velocity
-shape decay and relative velocity scaling from transition durations.  Non-finite
-or non-positive values should fail at the helper boundary instead of producing
+decay and relative velocity scaling from transition durations.  Non-finite or
+non-positive values should fail at the helper boundary instead of producing
 NaN/inf transition parameters that later corrupt the dynamic program.
 """
 

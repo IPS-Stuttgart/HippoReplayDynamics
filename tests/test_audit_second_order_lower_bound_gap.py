@@ -8,7 +8,7 @@ from scripts.audit_second_order_lower_bound_gap import (
 )
 
 
-def _row(event: int, model: str, value: float, support: str, top_k: int, *, status: str = "success") -> dict[str, object]:
+def _row(event: int, model: str, value: float, support: str, top_k: int, *, status: object = "success") -> dict[str, object]:
     return {
         "session": "Rat1/Open1",
         "event_index": event,
@@ -67,6 +67,22 @@ def test_lower_bound_gap_ignores_non_success_score_rows():
 
     assert list(tables.event_gaps["event_index"]) == [1]
     assert tables.event_gaps.iloc[0]["lower_bound_gap_log_evidence"] == 1.0
+
+
+def test_lower_bound_gap_treats_blank_status_as_legacy_success():
+    scores = pd.DataFrame(
+        [
+            _row(0, "sorted-spike-state-space-momentum", 10.0, "exact_full_grid", 0, status=""),
+            _row(0, "sorted-spike-state-space-momentum", 8.0, "truncated_full_grid", 128, status=pd.NA),
+            _row(1, "sorted-spike-state-space-momentum", 100.0, "exact_full_grid", 0, status="failed"),
+            _row(1, "sorted-spike-state-space-momentum", 9.0, "truncated_full_grid", 128, status="nan"),
+        ]
+    )
+
+    tables = build_lower_bound_gap_tables(scores)
+
+    assert list(tables.event_gaps["event_index"]) == [0]
+    assert tables.event_gaps.iloc[0]["lower_bound_gap_log_evidence"] == 2.0
 
 
 def test_lower_bound_gap_returns_empty_without_exact_pairs():

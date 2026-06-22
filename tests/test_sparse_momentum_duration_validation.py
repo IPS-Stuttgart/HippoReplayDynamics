@@ -3,6 +3,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
+from hipporeplayimm.sparse_momentum_duration_validation import _valid_transition_durations
 from hipporeplayimm.state_space_model import StateSpaceDecoderConfig
 from hipporeplayimm.state_space_sparse_momentum import _duration_adjusted_decays, _time_scales
 
@@ -20,6 +21,14 @@ def test_sparse_momentum_duration_helpers_reject_invalid_transition_durations() 
             _duration_adjusted_decays(config, durations, 0.01)
         with pytest.raises(ValueError, match="transition durations"):
             _time_scales(durations)
+
+
+def test_sparse_momentum_duration_validator_rejects_non_1d_arrays() -> None:
+    with pytest.raises(ValueError, match="one-dimensional"):
+        _valid_transition_durations(np.array([[0.01, 0.02]], dtype=float))
+
+    with pytest.raises(ValueError, match="one-dimensional"):
+        _valid_transition_durations(np.empty((0, 1), dtype=float))
 
 
 def test_sparse_momentum_duration_helpers_preserve_valid_outputs() -> None:

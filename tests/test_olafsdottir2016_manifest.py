@@ -2,10 +2,13 @@ from __future__ import annotations
 
 import csv
 from pathlib import Path
+import zipfile
 
+import pytest
 
 from hipporeplayimm.olafsdottir2016 import (
     build_manifest,
+    extract_archive,
     infer_session_type,
     prepare_dataset,
     tetrode_arrangement_for_animal,
@@ -104,6 +107,30 @@ def test_prepare_dataset_manifest_only_does_not_download(tmp_path: Path) -> None
     assert manifest_path.exists()
     assert len(records) == 1
     assert not (tmp_path / "Olafsdottir2016.zip").exists()
+
+
+def test_extract_archive_allows_nested_dataset_members(tmp_path: Path) -> None:
+    archive_path = tmp_path / "safe.zip"
+    with zipfile.ZipFile(archive_path, "w") as archive:
+        archive.writestr("Olafsdottir2016/R2142/2014-08-06/20140806_R2142_track1.set", "header")
+
+    extract_archive(archive_path, tmp_path / "dataset")
+
+    assert (tmp_path / "dataset" / "Olafsdottir2016" / "R2142" / "2014-08-06" / "20140806_R2142_track1.set").read_text() == "header"
+
+
+@pytest.mark.parametrize("member_name", ["../escape.txt", r"..\escape.txt", "/tmp/escape.txt", "C:/escape.txt"])
+def test_extract_archive_rejects_unsafe_member_paths(tmp_path: Path, member_name: str) -> None:
+    archive_path = tmp_path / "unsafe.zip"
+    with zipfile.ZipFile(archive_path, "w") as archive:
+        archive.writestr("safe/member.txt", "safe")
+        archive.writestr(member_name, "bad")
+
+    with pytest.raises(ValueError, match="Unsafe zip member path"):
+        extract_archive(archive_path, tmp_path / "dataset")
+
+    assert not (tmp_path / "escape.txt").exists()
+    assert not (tmp_path / "dataset" / "safe" / "member.txt").exists()
 
 
 def test_verify_md5_rejects_mismatch(tmp_path: Path) -> None:

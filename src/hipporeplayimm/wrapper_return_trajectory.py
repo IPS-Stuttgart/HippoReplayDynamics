@@ -126,13 +126,14 @@ def _patch_result_improvement_wrappers(extensions: Any) -> None:
             candidate_indices=candidate_indices,
             return_trajectory=return_trajectory,
         )
+        reverse_return_trajectory = True if return_trajectory is False else return_trajectory
         reverse = score_replay_model_compat(
             self.reverse_model,
             emissions,
             bin_centers,
             occupancy_s=occupancy_s,
             candidate_indices=candidate_indices,
-            return_trajectory=return_trajectory,
+            return_trajectory=reverse_return_trajectory,
         )
         values = np.array([forward.log_likelihood, reverse.log_likelihood], dtype=float)
         logp = float(logsumexp(values) - np.log(2.0))
@@ -252,10 +253,11 @@ def _patch_direct_reverse_wrappers(extensions: Any, reverse_models: Any) -> None
             bin_centers,
             kwargs,
         )
+        reverse_return_trajectory = True if return_trajectory is False else return_trajectory
         reverse = reverse_models.ReverseTimeReplayModel(self.base_model).score(
             emissions,
             bin_centers,
-            return_trajectory=return_trajectory,
+            return_trajectory=reverse_return_trajectory,
         )
         weights = np.exp(
             np.array([forward.log_likelihood, reverse.log_likelihood])

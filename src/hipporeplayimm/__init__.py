@@ -26,6 +26,7 @@ from . import ground_truth_sensitivity_metrics as _ground_truth_sensitivity_metr
 from . import ground_truth_window_scope as _ground_truth_window_scope
 from . import improved_model_evidence_registry_patch as _improved_model_evidence_registry_patch
 from . import latent_path_validation as _latent_path_validation
+from . import mark_complex_validation as _mark_complex_validation
 from . import model_averaged_endpoint_scoping as _model_averaged_endpoint_scoping
 from . import observation_sweep_config_validation as _observation_sweep_config_validation
 from . import occupancy_candidate_support as _occupancy_candidate_support
@@ -64,6 +65,7 @@ _spike_rate_metadata.apply_spike_rate_metadata_patch()
 _time_order_patch.apply_reverse_emission_time_patch()
 _clusterless_config_validation.apply_clusterless_encoding_config_validation_patch()
 _data_cell_id_validation.apply_data_cell_id_validation_patch()
+_mark_complex_validation.apply_mark_complex_validation_patch()
 _position_decoding_config_validation.apply_position_decoding_config_validation_patch()
 _duration_candidate_metadata_patch.apply_duration_candidate_metadata_patch()
 _ground_truth_window_scope.apply_ground_truth_window_scope_patch()
@@ -175,6 +177,7 @@ def apply_runtime_patches() -> None:
     _spike_rate_metadata.apply_spike_rate_metadata_patch()
     _clusterless_config_validation.apply_clusterless_encoding_config_validation_patch()
     _data_cell_id_validation.apply_data_cell_id_validation_patch()
+    _mark_complex_validation.apply_mark_complex_validation_patch()
     _encoding_select_cells_validation.apply_encoding_select_cells_validation_patch()
     _position_decoding_config_validation.apply_position_decoding_config_validation_patch()
     _duration_candidate_metadata_patch.apply_duration_candidate_metadata_patch()

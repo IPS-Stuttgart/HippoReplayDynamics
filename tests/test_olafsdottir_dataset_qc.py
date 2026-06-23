@@ -56,6 +56,20 @@ def test_track_sleep_pair_qc_accepts_csv_float_boolean_values() -> None:
     assert "track_missing_pos" not in str(usable["exclusion_reason"])
 
 
+def test_qc_summary_parses_string_boolean_flags() -> None:
+    module = _load_module()
+    manifest = _synthetic_manifest()
+    pairs = module.build_track_sleep_pairs(manifest)
+    for column in ("usable_pair", "track_has_pos", "sleep_has_egf", "r2142_reversal_applied"):
+        pairs[column] = pairs[column].map(lambda value: "True" if bool(value) else "False")
+
+    summary = module.build_markdown_summary(manifest, pairs)
+
+    assert "Usable pairs | 1" in summary
+    assert "Pairs with Track1 position | 2" in summary
+    assert "R2142 reversal check | pass" in summary
+
+
 def test_qc_summary_reports_counts_and_recommendation(tmp_path: Path) -> None:
     module = _load_module()
     manifest = _synthetic_manifest()

@@ -40,6 +40,8 @@ PAIR_COLUMNS = [
     "usable_pair",
     "exclusion_reason",
 ]
+_TRUE_BOOL_STRINGS = {"true", "t", "1", "1.0", "yes", "y", "on"}
+_FALSE_BOOL_STRINGS = {"", "false", "f", "0", "0.0", "no", "n", "off", "nan", "none", "null", "<na>"}
 
 
 def load_manifest(path: str | Path) -> pd.DataFrame:
@@ -113,7 +115,7 @@ def write_qc_outputs(manifest_path: str | Path, output_dir: str | Path) -> dict[
 
 def build_markdown_summary(manifest: pd.DataFrame, pairs: pd.DataFrame, *, manifest_path: Path | None = None) -> str:
     animals = sorted(manifest["animal"].dropna().astype(str).str.upper().unique()) if "animal" in manifest else []
-    usable = pairs[pairs["usable_pair"].map(bool)] if "usable_pair" in pairs else pd.DataFrame(columns=pairs.columns)
+    usable = pairs[pairs["usable_pair"].map(_as_bool)] if "usable_pair" in pairs else pd.DataFrame(columns=pairs.columns)
     usable_animals = sorted(usable["animal"].dropna().astype(str).str.upper().unique()) if not usable.empty else []
     r2142_rows = manifest[manifest["animal"].astype(str).str.upper().eq("R2142")] if "animal" in manifest else pd.DataFrame()
     r2142_status = _r2142_status(r2142_rows, pairs)
@@ -125,7 +127,7 @@ def build_markdown_summary(manifest: pd.DataFrame, pairs: pd.DataFrame, *, manif
         ("Track1 sessions", int(manifest["session_type"].astype(str).eq("track1").sum())),
         ("SleepPOST sessions", int(manifest["session_type"].astype(str).eq("sleepPOST").sum())),
         ("Track1/SleepPOST date groups", len(pairs)),
-        ("Usable pairs", int(pairs["usable_pair"].map(bool).sum()) if not pairs.empty else 0),
+        ("Usable pairs", int(pairs["usable_pair"].map(_as_bool).sum()) if not pairs.empty else 0),
         ("Usable-pair animals", len(usable_animals)),
         ("Pairs with Track1 position", _count_true(pairs, "track_has_pos")),
         ("Pairs with Track1 cut files", _count_positive(pairs, "track_n_cut_files")),
@@ -238,13 +240,24 @@ def _row_str(row: pd.Series, column: str) -> str:
 
 
 def _row_bool(row: pd.Series, column: str) -> bool:
-    raw = _row_str(row, column).lower()
-    if raw in {"true", "1", "1.0", "yes", "y"}:
-        return True
-    if raw in {"false", "0", "0.0", "no", "n", ""}:
+    return _as_bool(_row_str(row, column))
+
+
+def _as_bool(value: object) -> bool:
+    if isinstance(value, bool):
+        return value
+    try:
+        if pd.isna(value):
+            return False
+    except (TypeError, ValueError):
         return False
-    value = pd.to_numeric(pd.Series([raw]), errors="coerce").iloc[0]
-    return bool(pd.notna(value) and float(value) == 1.0)
+    text = str(value).strip().lower()
+    if text in _TRUE_BOOL_STRINGS:
+        return True
+    if text in _FALSE_BOOL_STRINGS:
+        return False
+    numeric = pd.to_numeric(pd.Series([text]), errors="coerce").iloc[0]
+    return bool(pd.notna(numeric) and float(numeric) == 1.0)
 
 
 def _row_int(row: pd.Series, column: str) -> int:
@@ -255,7 +268,7 @@ def _row_int(row: pd.Series, column: str) -> int:
 
 
 def _count_true(frame: pd.DataFrame, column: str) -> int:
-    return int(frame[column].map(bool).sum()) if column in frame else 0
+    return int(frame[column].map(_as_bool).sum()) if column in frame else 0
 
 
 def _count_positive(frame: pd.DataFrame, column: str) -> int:
@@ -279,7 +292,7 @@ def _r2142_status(r2142_rows: pd.DataFrame, pairs: pd.DataFrame) -> str:
     pair_ok = True
     if not pairs.empty and "animal" in pairs:
         r2142_pairs = pairs[pairs["animal"].astype(str).str.upper().eq("R2142")]
-        pair_ok = bool(r2142_pairs["r2142_reversal_applied"].map(bool).all()) if not r2142_pairs.empty else True
+        pair_ok = bool(r2142_pairs["r2142_reversal_applied"].map(_as_bool).all()) if not r2142_pairs.empty else True
     return "pass" if hpc_ok and mec_ok and pair_ok else "fail"
 
 

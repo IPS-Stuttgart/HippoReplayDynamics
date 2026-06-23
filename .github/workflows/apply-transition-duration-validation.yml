@@ -1,0 +1,141 @@
+name: Apply transition-duration validation patch
+
+on:
+  push:
+    branches:
+      - codex/fix-transition-duration-validation
+    paths:
+      - .github/workflows/apply-transition-duration-validation.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply-patch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref_name }}
+
+      - name: Apply validation patch and remove bootstrap workflow
+        run: |
+          cat > /tmp/transition-duration-validation.patch <<'PATCH'
+          diff --git a/src/hipporeplayimm/state_space_sparse_momentum.py b/src/hipporeplayimm/state_space_sparse_momentum.py
+          index 8391617..f4d2c1a 100644
+          --- a/src/hipporeplayimm/state_space_sparse_momentum.py
+          +++ b/src/hipporeplayimm/state_space_sparse_momentum.py
+          @@ -536,10 +536,31 @@ def _valid_indices(mask: np.ndarray | None, n_bins: int) -> np.ndarray:
+           
+           def _coerce_transition_durations(values: Iterable[float], *, n_time: int, fallback_dt: float) -> np.ndarray:
+               expected = max(int(n_time) - 1, 0)
+          -    out = np.asarray(list(values), dtype=float)
+          -    if out.shape != (expected,) or not np.all(np.isfinite(out)) or np.any(out <= 0.0):
+          -        return np.full(expected, float(fallback_dt), dtype=float)
+          +    fallback = float(fallback_dt)
+          +    if not np.isfinite(fallback) or fallback <= 0.0:
+          +        raise ValueError("fallback dt must be finite and positive")
+          +    raw_values = list(values)
+          +    if len(raw_values) == 0:
+          +        return np.full(expected, fallback, dtype=float)
+          +    out = np.asarray(raw_values, dtype=float)
+          +    if out.shape != (expected,):
+          +        raise ValueError("transition durations must contain one finite positive value per transition")
+          +    if not np.all(np.isfinite(out)) or np.any(out <= 0.0):
+          +        raise ValueError("transition durations must be finite and positive")
+               return out
+           
+          +
+          +def _validate_transition_duration_array(durations: np.ndarray) -> np.ndarray:
+          +    out = np.asarray(durations, dtype=float)
+          +    if out.ndim != 1:
+          +        raise ValueError("transition durations must be a one-dimensional array")
+          +    if not np.all(np.isfinite(out)) or np.any(out <= 0.0):
+          +        raise ValueError("transition durations must be finite and positive")
+          +    return out
+          +
+           
+           def _per_transition_sigmas(sigma_cm_sqrt_s: float, durations: np.ndarray) -> np.ndarray:
+               return np.asarray([_per_bin_sigma(sigma_cm_sqrt_s, duration) for duration in durations], dtype=float)
+          @@ -558,6 +579,7 @@ def _per_bin_sigma(sigma_cm_sqrt_s: float, dt_s: float) -> float:
+           
+           
+           def _duration_adjusted_decays(config: object, durations: np.ndarray, reference_dt: float) -> np.ndarray:
+          +    durations = _validate_transition_duration_array(durations)
+               if durations.size == 0:
+                   return np.empty(0, dtype=float)
+               tau_s = float(getattr(config, "momentum_velocity_decay_tau_s", 0.0))
+          @@ -574,6 +596,7 @@ def _duration_adjusted_decays(config: object, durations: np.ndarray, reference_d
+           
+           
+           def _time_scales(durations: np.ndarray) -> np.ndarray:
+          +    durations = _validate_transition_duration_array(durations)
+               scales = np.ones_like(durations, dtype=float)
+               if durations.size > 1:
+                   scales[1:] = durations[1:] / durations[:-1]
+          diff --git a/src/hipporeplayimm/state_space_displacement_momentum.py b/src/hipporeplayimm/state_space_displacement_momentum.py
+          index 7e1fa71..6a2c4fb 100644
+          --- a/src/hipporeplayimm/state_space_displacement_momentum.py
+          +++ b/src/hipporeplayimm/state_space_displacement_momentum.py
+          @@ -407,10 +407,31 @@ def _per_bin_sigma(sigma_cm_sqrt_s: float, dt_s: float) -> float:
+           
+           def _coerce_transition_durations(values: Iterable[float], *, n_time: int, fallback_dt: float) -> np.ndarray:
+               expected = max(int(n_time) - 1, 0)
+          -    out = np.asarray(list(values), dtype=float)
+          -    if out.shape != (expected,) or not np.all(np.isfinite(out)) or np.any(out <= 0.0):
+          -        return np.full(expected, float(fallback_dt), dtype=float)
+          +    fallback = float(fallback_dt)
+          +    if not np.isfinite(fallback) or fallback <= 0.0:
+          +        raise ValueError("fallback dt must be finite and positive")
+          +    raw_values = list(values)
+          +    if len(raw_values) == 0:
+          +        return np.full(expected, fallback, dtype=float)
+          +    out = np.asarray(raw_values, dtype=float)
+          +    if out.shape != (expected,):
+          +        raise ValueError("transition durations must contain one finite positive value per transition")
+          +    if not np.all(np.isfinite(out)) or np.any(out <= 0.0):
+          +        raise ValueError("transition durations must be finite and positive")
+               return out
+           
+          +
+          +def _validate_transition_duration_array(durations: np.ndarray) -> np.ndarray:
+          +    out = np.asarray(durations, dtype=float)
+          +    if out.ndim != 1:
+          +        raise ValueError("transition durations must be a one-dimensional array")
+          +    if not np.all(np.isfinite(out)) or np.any(out <= 0.0):
+          +        raise ValueError("transition durations must be finite and positive")
+          +    return out
+          +
+           
+           def _duration_adjusted_decays(config: object, durations: np.ndarray, reference_dt: float) -> np.ndarray:
+          +    durations = _validate_transition_duration_array(durations)
+               if durations.size == 0:
+                   return np.empty(0, dtype=float)
+               tau_s = float(getattr(config, "momentum_velocity_decay_tau_s", 0.0))
+          @@ -428,6 +449,7 @@ def _duration_adjusted_decays(config: object, durations: np.ndarray, reference_d
+           
+           
+           def _time_scales(durations: np.ndarray) -> np.ndarray:
+          +    durations = _validate_transition_duration_array(durations)
+               scales = np.ones_like(durations, dtype=float)
+               if durations.size > 1:
+                   scales[1:] = durations[1:] / durations[:-1]
+          PATCH
+          sed -i 's/^          //' /tmp/transition-duration-validation.patch
+          git apply /tmp/transition-duration-validation.patch
+          rm .github/workflows/apply-transition-duration-validation.yml
+
+      - name: Run targeted tests
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+          pytest tests/test_transition_duration_validation.py tests/test_displacement_duration_validation.py
+
+      - name: Commit patched files
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/hipporeplayimm/state_space_sparse_momentum.py src/hipporeplayimm/state_space_displacement_momentum.py .github/workflows/apply-transition-duration-validation.yml
+          git commit -m "Validate exact-model transition durations"
+          git push

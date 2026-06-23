@@ -36,6 +36,7 @@ CANDIDATE_PREDICTED_TOP_K_COLUMNS = (
     "diagnostic_predicted_candidate_top_k",
     "predicted_candidate_top_k",
 )
+_MISSING_STATUS_VALUES = {"", "nan", "na", "n/a", "none", "null", "<na>"}
 
 
 def _score_file(path: str | Path) -> Path:
@@ -79,6 +80,28 @@ def _format_values(values: list[int]) -> str:
     return "+".join(str(value) for value in values)
 
 
+def _status_success_mask(frame: pd.DataFrame) -> pd.Series:
+    if "status" not in frame:
+        return pd.Series(True, index=frame.index, dtype=bool)
+    return frame["status"].map(_status_is_success_or_missing).astype(bool)
+
+
+def _status_is_success_or_missing(value: object) -> bool:
+    if _is_missing_scalar(value):
+        return True
+    return str(value).strip().lower() == "success"
+
+
+def _is_missing_scalar(value: object) -> bool:
+    try:
+        missing = pd.isna(value)
+    except (TypeError, ValueError):
+        missing = False
+    if isinstance(missing, (bool, np.bool_)) and bool(missing):
+        return True
+    return str(value).strip().lower() in _MISSING_STATUS_VALUES
+
+
 def infer_run_label(frame: pd.DataFrame, fallback: str) -> str:
     parts: list[str] = []
     top_k_values = _candidate_values(frame)
@@ -104,8 +127,7 @@ def parse_labels(spec: str | None, n_expected: int) -> list[str] | None:
 def load_candidate_support_run(path: str | Path, label: str | None = None) -> pd.DataFrame:
     score_file = _score_file(path)
     frame = ensure_evidence_support_columns(pd.read_csv(score_file))
-    if "status" in frame:
-        frame = frame[frame["status"].eq("success")].copy()
+    frame = frame[_status_success_mask(frame)].copy()
     required = {"session", "event_index", "model", "log_evidence"}
     missing = sorted(required - set(frame.columns))
     if missing:

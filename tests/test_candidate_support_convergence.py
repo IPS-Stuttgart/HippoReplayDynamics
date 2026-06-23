@@ -22,9 +22,11 @@ def _row(
     log_evidence: float,
     top_k: int | None = None,
     predicted_top_k: int | None = None,
+    *,
+    status: object = "success",
 ) -> dict[str, object]:
     row = {
-        "status": "success",
+        "status": status,
         "session": "RatX/OpenY",
         "event_index": event_index,
         "model": model,
@@ -67,6 +69,33 @@ def test_candidate_support_convergence_reports_stable_runs(tmp_path):
     assert float(agreement.loc[0, "best_model_agreement_fraction"]) == pytest.approx(1.0)
     assert "passed" in text
     assert result["warnings"] == text
+
+
+def test_candidate_support_convergence_keeps_blank_legacy_status_rows(tmp_path):
+    run64 = tmp_path / "run64"
+    run128 = tmp_path / "run128"
+    model = "sorted-spike-state-space-momentum"
+    _write_scores(
+        run64,
+        [
+            _row(1, model, -8.0, 64, status=""),
+            _row(2, model, -100.0, 64, status="failed"),
+        ],
+    )
+    _write_scores(
+        run128,
+        [
+            _row(1, model, -7.5, 128, status=pd.NA),
+            _row(2, model, -50.0, 128, status="failed"),
+        ],
+    )
+
+    out = tmp_path / "out"
+    write_candidate_support_convergence([run64, run128], out, labels=["k64", "k128"])
+
+    delta = pd.read_csv(out / "candidate_support_delta_summary.csv")
+    assert delta.loc[0, "events"] == 1
+    assert float(delta.loc[0, "mean_delta_b_minus_a"]) == pytest.approx(0.5)
 
 
 def test_candidate_support_convergence_warns_when_best_model_changes(tmp_path):

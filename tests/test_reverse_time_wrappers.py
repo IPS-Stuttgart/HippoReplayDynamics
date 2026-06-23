@@ -219,7 +219,7 @@ def test_direct_reverse_wrapper_recomputes_mapped_terminal_diagnostics() -> None
     np.testing.assert_allclose(result.terminal_log_posterior, np.log(posterior))
     assert result.trajectory_log_posterior is not None
     assert result.diagnostics["decoded_map_bin"] == 0
-    assert result.diagnostics["decoded_endpoint_x"] == 0.1
+    np.testing.assert_allclose(result.diagnostics["decoded_endpoint_x"], 0.1)
     expected_entropy = -float(np.sum(posterior * np.log(posterior)))
     np.testing.assert_allclose(result.diagnostics["terminal_posterior_entropy"], expected_entropy)
 

@@ -304,9 +304,10 @@ def summarize_ladder_tiers(tier_event_recovery: pd.DataFrame) -> pd.DataFrame:
             group["certified_vs_exact_recovered_expected_model"]
         )
         margin = pd.to_numeric(group["expected_minus_best_comparable_log_evidence"], errors="coerce")
-        oracle = _coerce_bool_series(
-            group.get("oracle_candidate_support", pd.Series([False], index=group.index))
-        )
+        if "oracle_candidate_support" in group:
+            oracle = _coerce_bool_series(group["oracle_candidate_support"])
+        else:
+            oracle = pd.Series([False] * len(group), index=group.index)
         momentum_events = _event_count(group)
         rows.append(
             {

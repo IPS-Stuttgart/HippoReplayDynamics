@@ -154,7 +154,7 @@ PYTHONPATH=. python scripts/compare_olafsdottir_1d_2d_trajectory_family.py \
 
 Primary output:
 
-`	ext
+` ext
 compare_1d_2d_trajectory_family_summary.csv
 `
 
@@ -176,7 +176,7 @@ would support a more general replay-dynamics account.
 Use the comparison output as a guarded interpretation table, not as an automatic
 claim generator. The script writes:
 
-`	ext
+` ext
 compare_1d_2d_interpretation_summary.csv
 `
 

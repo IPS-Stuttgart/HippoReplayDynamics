@@ -113,6 +113,33 @@ def test_replay_dynamics_axis_computes_indices_and_margins(tmp_path: Path):
         assert (tmp_path / filename).is_file()
 
 
+def test_replay_dynamics_axis_pack_handles_no_successful_rows(tmp_path: Path):
+    evidence = pd.DataFrame(
+        _event_scores("Rat1/Open1", 1, [0.0, 1.0, 2.0, 4.0, 3.0], 0.10, 30)
+    )
+    evidence["status"] = "failed"
+
+    outputs = write_dynamics_axis_pack(
+        evidence,
+        tmp_path,
+        covariates=("pre_event_rate",),
+        bootstrap_replicates=0,
+    )
+
+    event_axis = outputs["event_dynamics_axis.csv"]
+    assert event_axis.empty
+    assert set(DYNAMICS_INDICES).issubset(event_axis.columns)
+    assert "rat" in event_axis.columns
+    assert "pre_event_rate" in event_axis.columns
+
+    gate = outputs["dynamics_axis_gate_summary.csv"].set_index("gate")
+    assert not bool(gate.loc["event_rows_present", "passed"])
+    assert gate.loc["event_rows_present", "observed"] == "0"
+    assert not bool(gate.loc["overall", "passed"])
+    for filename in outputs:
+        assert (tmp_path / filename).is_file()
+
+
 def test_dynamics_axis_gate_parses_string_false_exact_core_flags():
     event_axis = pd.DataFrame(
         [

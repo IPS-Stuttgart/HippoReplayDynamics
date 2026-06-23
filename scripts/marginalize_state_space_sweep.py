@@ -67,6 +67,7 @@ _OPTIONAL_MOMENTUM_PARAMETER_DEFAULTS = {
     "state_space_momentum_candidate_source": "emission",
 }
 _EXACT_SPARSE_MOMENTUM_MODEL = "sorted-spike-state-space-momentum-exact-sparse"
+_MISSING_STATUS_VALUES = {"", "nan", "na", "n/a", "none", "null", "<na>"}
 
 
 @dataclass(frozen=True)
@@ -210,11 +211,17 @@ def _grid_for_model(
     return grid, event_table, param_values, representatives
 
 
+def _status_success_mask(status: pd.Series) -> pd.Series:
+    normalized = status.astype("string").str.strip().str.lower()
+    missing_or_legacy = normalized.isna() | normalized.isin(_MISSING_STATUS_VALUES)
+    return (missing_or_legacy | normalized.eq("success")).astype(bool)
+
+
 def _source_rows_for_model(scores: pd.DataFrame, spec: _ModelSpec) -> pd.DataFrame:
     for source_model in _source_model_candidates(spec):
         source = scores[scores["model"] == source_model].copy()
         if "status" in source.columns:
-            source = source[source["status"] == "success"].copy()
+            source = source[_status_success_mask(source["status"])].copy()
         if not source.empty:
             return source
     raise ValueError(f"no successful rows for any of: {', '.join(_source_model_candidates(spec))}")

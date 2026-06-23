@@ -50,3 +50,17 @@ def test_simulation_event_best_rows_recomputes_duplicate_flags() -> None:
     best = simulation_event_best_rows(rows)
 
     assert best["model"].tolist() == ["true-highest"]
+
+
+def test_simulation_event_best_rows_treats_missing_status_as_success() -> None:
+    rows = pd.DataFrame(
+        [
+            _row(0, "legacy-low", 0.0, "False"),
+            _row(0, "legacy-high", 5.0, "False"),
+        ]
+    )
+    rows["status"] = [pd.NA, float("nan")]
+
+    best = simulation_event_best_rows(rows)
+
+    assert best["model"].tolist() == ["legacy-high"]

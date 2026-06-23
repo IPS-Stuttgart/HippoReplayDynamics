@@ -11,6 +11,7 @@ import pandas as pd
 
 _GROUP_COLUMNS = ("session", "event_index")
 _PATCHED_FLAG = "_simulation_best_row_flag_scope_patch_applied"
+_MISSING_STATUS_VALUES = {"", "nan", "none", "null", "<na>"}
 
 
 def apply_simulation_best_row_flags_patch() -> None:
@@ -45,7 +46,17 @@ def apply_simulation_best_row_flags_patch() -> None:
 def _status_success_mask(frame: pd.DataFrame) -> pd.Series:
     if "status" not in frame.columns:
         return pd.Series(True, index=frame.index)
-    return frame["status"].astype(str).eq("success")
+    return frame["status"].map(_status_is_success).astype(bool)
+
+
+def _status_is_success(value: object) -> bool:
+    try:
+        if pd.isna(value):
+            return True
+    except (TypeError, ValueError):
+        pass
+    text = str(value).strip().lower()
+    return text == "success" or text in _MISSING_STATUS_VALUES
 
 
 def _best_rows_with_guarded_flags(frame: pd.DataFrame, reporting: Any) -> pd.DataFrame:

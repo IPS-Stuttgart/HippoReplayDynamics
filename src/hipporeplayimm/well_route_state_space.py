@@ -142,7 +142,7 @@ def _route_target(route: np.ndarray, transition_number: int, n_transitions: int)
 def _farthest_point_subset(points: np.ndarray, max_points: int) -> np.ndarray:
     if points.shape[0] <= max_points:
         return points.copy()
-    selected = [int(np.argmin(points[:, 0] + points[:, 1]))]
+    selected = [int(np.argmin(np.sum(points, axis=1)))]
     min_dist2 = np.full(points.shape[0], np.inf, dtype=float)
     for _ in range(1, max_points):
         last = points[selected[-1]]

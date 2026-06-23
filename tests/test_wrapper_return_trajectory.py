@@ -103,9 +103,12 @@ def test_bidirectional_wrappers_forward_evidence_only_return_trajectory() -> Non
     ]
 
     for wrapped in wrappers:
+        full = wrapped.score(emissions, bin_centers, return_trajectory=True)
         result = wrapped.score(emissions, bin_centers, return_trajectory=False)
 
         assert np.isfinite(result.log_likelihood)
         assert result.trajectory_log_posterior is None
         assert result.terminal_log_posterior is not None
+        assert full.terminal_log_posterior is not None
         assert np.isclose(np.exp(result.terminal_log_posterior).sum(), 1.0)
+        np.testing.assert_allclose(result.terminal_log_posterior, full.terminal_log_posterior)

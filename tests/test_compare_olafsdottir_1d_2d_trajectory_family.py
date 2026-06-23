@@ -45,6 +45,7 @@ def test_compare_1d_2d_writes_primary_and_normalized_columns(tmp_path: Path) -> 
     assert interpretation_path.is_file()
     summary = pd.read_csv(summary_path)
     interpretation = pd.read_csv(interpretation_path)
+    readiness = pd.read_csv(tmp_path / module.READINESS_OUTPUT)
     assert list(summary.columns[: len(module.PRIMARY_COLUMNS)]) == list(module.PRIMARY_COLUMNS)
     assert set(summary["environment_type"]) == {"1D_Z_track", "2D_open_field"}
     for column in (
@@ -66,12 +67,70 @@ def test_compare_1d_2d_writes_primary_and_normalized_columns(tmp_path: Path) -> 
     assert two_row["first_order_imm_raw_best_fraction"] > one_row["first_order_imm_raw_best_fraction"]
 
     result = interpretation.iloc[0]
-    assert result["interpretation_class"] == "sparse_or_data_limited_feasibility_result"
+    assert result["interpretation_class"] == "biological_comparison_not_ready"
     assert result["directional_pattern"] == "weaker_1d_signal"
-    assert result["claim_strength"] == "hypothesis_generating_smoke"
+    assert result["claim_strength"] == "pre_biological_comparison_not_ready"
+    assert result["biological_readiness_status"] == "not_ready"
+    assert "multiple_animals_sessions" in result["failed_readiness_gates"]
     assert "Do not claim IMM is only apparent in 2D" in result["hard_caveat"]
+    readiness_by_gate = readiness.set_index("gate")
+    assert not bool(readiness_by_gate.loc["multiple_animals_sessions", "passed"])
+    assert not bool(readiness_by_gate.loc["track_sleep_cell_identity_verified", "passed"])
+    assert not bool(readiness_by_gate.loc["linearization_diagnostics_acceptable", "passed"])
+    assert not bool(readiness_by_gate.loc["synthetic_1d_state_space_tests_passed", "passed"])
+    assert bool(readiness_by_gate.loc["exact_core_coverage_complete", "passed"])
+    assert bool(readiness_by_gate.loc["normalized_margin_columns_present", "passed"])
+    assert bool(readiness_by_gate.loc["within_dataset_decisions_only", "passed"])
     assert tables["one_d_event_metrics"].shape[0] == 4
     assert tables["two_d_event_metrics"].shape[0] == 6
+
+
+def test_comparison_can_be_marked_biologically_ready_when_all_gates_pass(tmp_path: Path) -> None:
+    module = _load_compare_module()
+    one_d = pd.concat(
+        [
+            _scores(module, "R2142/ZTrack20140806", [7.0, 8.0], [module.FIRST_ORDER_IMM_MODEL, module.MOMENTUM_MODEL]),
+            _scores(module, "R2192/ZTrack20140918", [9.0, 10.0], [module.FIRST_ORDER_IMM_MODEL, module.MOMENTUM_MODEL]),
+        ],
+        ignore_index=True,
+    )
+    two_d = _scores(
+        module,
+        "Rat1/Open1",
+        [12.0, 20.0, 18.0, 15.0],
+        [module.FIRST_ORDER_IMM_MODEL] * 4,
+    )
+    linearization = pd.DataFrame(
+        [
+            {"metric": "fraction_valid_position", "value": 0.96},
+            {"metric": "median_projection_error_cm", "value": 2.0},
+            {"metric": "track_length_cm", "value": 310.0},
+            {"metric": "occupancy_by_linear_bin", "value": 5.0},
+            {"metric": "occupancy_by_linear_bin", "value": 4.0},
+        ]
+    )
+    event_detection = pd.DataFrame([{"ripple_events": 4, "median_event_spikes": 9.0}])
+
+    tables = module.build_comparison(
+        one_d_scores=one_d,
+        two_d_scores=two_d,
+        output=tmp_path,
+        min_robust_1d_events=4,
+        min_1d_animals=2,
+        min_1d_sessions=2,
+        cell_identity_verified=True,
+        synthetic_1d_tests_passed=True,
+        linearization_diagnostics=linearization,
+        event_detection_summary=event_detection,
+        min_event_candidates=4,
+    )
+
+    readiness = tables["readiness_gates"]
+    assert readiness["passed"].map(bool).all()
+    interpretation = tables["interpretation_summary"].iloc[0]
+    assert interpretation["biological_readiness_status"] == "ready"
+    assert interpretation["claim_strength"] == "robust_comparison_candidate"
+    assert interpretation["interpretation_class"] != "biological_comparison_not_ready"
 
 
 def test_interpretation_supports_strong_trajectory_but_weaker_imm_dominance() -> None:

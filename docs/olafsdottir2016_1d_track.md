@@ -313,6 +313,7 @@ Required outputs:
 ```text
 compare_1d_2d_trajectory_family_summary.csv
 compare_1d_2d_interpretation_summary.csv
+compare_1d_2d_biological_readiness_gates.csv
 ```
 
 The primary comparison columns are:
@@ -354,6 +355,39 @@ sparse_or_data_limited_feasibility_result
 
 The hard caveat is part of the output: do not claim IMM is only apparent in 2D
 without a robust weak or negative 1D result.
+
+Before using the comparison biologically, the readiness gate table must pass all
+of these checks:
+
+```text
+multiple_animals_sessions
+track_sleep_cell_identity_verified
+linearization_diagnostics_acceptable
+event_detection_plausible
+synthetic_1d_state_space_tests_passed
+exact_core_coverage_complete
+normalized_margin_columns_present
+within_dataset_decisions_only
+```
+
+Some gates are inferred from the evidence tables. Others require explicit
+provenance inputs because they cannot be proven from model evidence alone:
+
+```bash
+PYTHONPATH=src python scripts/compare_olafsdottir_1d_2d_trajectory_family.py \
+  --olafsdottir-1d-evidence results/olafsdottir-1d-evidence \
+  --pfeiffer-foster-2d-evidence path/to/all_sessions_event_model_evidence.csv \
+  --linearization-diagnostics path/to/linearization_diagnostics.csv \
+  --event-detection-summary path/to/olafsdottir_ztrack_conversion_summary.csv \
+  --cell-identity-verified \
+  --synthetic-1d-tests-passed \
+  --output results/olafsdottir-1d-2d-comparison
+```
+
+If any readiness gate fails, the interpretation table is downgraded to
+`biological_comparison_not_ready`. Directional patterns can still guide
+engineering and scaling, but they should not be described as biological
+1D-vs-2D evidence.
 
 The current R2142 pilot suggests that 1D Z-track replay, under the provisional
 adapter and detector, does not show the strong trajectory-family/IMM signature

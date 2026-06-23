@@ -118,6 +118,28 @@ def test_imm_fragmented_audit_parses_numeric_comparable_flags_from_csv(tmp_path:
     assert event["within_family_classification"] == "clean_imm_switching_candidate"
 
 
+def test_imm_fragmented_audit_preserves_schema_for_empty_evidence_with_labels(tmp_path: Path):
+    evidence = pd.DataFrame(
+        columns=["status", "session", "event_index", "model", "log_evidence", "evidence_comparable"]
+    )
+    labels = pd.DataFrame(
+        [
+            {"session": "Rat1/Open1", "event_index": 0, "original_algorithm_label": "momentum"},
+        ]
+    )
+
+    event_table = build_event_table(evidence, threshold=5.5)
+    outputs = write_outputs(evidence, tmp_path, labels=labels, threshold=5.5)
+    gates = outputs["imm_fragmented_hypothesis_gate_summary.csv"].set_index("gate")
+
+    assert event_table.empty
+    assert "within_family_classification" in event_table.columns
+    assert outputs["original_momentum_reassignment_event_table.csv"].empty
+    assert not bool(gates.loc["event_rows_present", "passed"])
+    assert not bool(gates.loc["overall", "passed"])
+    assert (tmp_path / "imm_fragmented_head_to_head_event_table.csv").is_file()
+
+
 def _score(session: str, event_index: int, model: str, log_evidence: float, *, evidence_comparable: object = True) -> dict[str, object]:
     return {
         "status": "success",

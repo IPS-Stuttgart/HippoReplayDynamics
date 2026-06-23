@@ -51,7 +51,11 @@ def _patch_duration_helpers(module: Any) -> None:
             raise ValueError("fallback dt must be finite and positive")
         durations = np.asarray(list(values), dtype=float)
         expected = max(int(n_time) - 1, 0)
-        if durations.shape == (expected,) and durations.size:
+        if durations.ndim != 1:
+            raise ValueError("transition durations must be one-dimensional")
+        if durations.size:
+            if durations.shape != (expected,):
+                raise ValueError(f"transition durations must have shape {(expected,)}, got {durations.shape}")
             _valid_transition_durations(durations)
         return original_coerce_transition_durations(
             durations,

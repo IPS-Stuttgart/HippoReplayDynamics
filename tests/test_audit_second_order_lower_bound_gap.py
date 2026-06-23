@@ -8,13 +8,14 @@ from scripts.audit_second_order_lower_bound_gap import (
 )
 
 
-def _row(event: int, model: str, value: float, support: str, top_k: int) -> dict[str, object]:
+def _row(event: int, model: str, value: float, support: str, top_k: int, *, status: object = "success") -> dict[str, object]:
     return {
         "session": "Rat1/Open1",
         "event_index": event,
         "model": model,
         "log_evidence": value,
         "evidence_support": support,
+        "status": status,
         "state_space_diffusion_sigma_cm_sqrt_s": 85.0,
         "state_space_momentum_sigma_cm_sqrt_s": 85.0,
         "state_space_momentum_initial_sigma_cm_sqrt_s": 85.0,
@@ -50,6 +51,38 @@ def test_lower_bound_gap_pairs_truncated_rows_to_exact_rows():
     assert summary["paired_event_rows"] == 2
     assert summary["events_with_negative_gap"] == 1
     assert summary["mean_lower_bound_gap_log_evidence"] == 0.75
+
+
+def test_lower_bound_gap_ignores_non_success_score_rows():
+    scores = pd.DataFrame(
+        [
+            _row(0, "sorted-spike-state-space-momentum", 100.0, "exact_full_grid", 0, status="failed"),
+            _row(0, "sorted-spike-state-space-momentum", 8.0, "truncated_full_grid", 128),
+            _row(1, "sorted-spike-state-space-momentum", 10.0, "exact_full_grid", 0),
+            _row(1, "sorted-spike-state-space-momentum", 9.0, "truncated_full_grid", 128),
+        ]
+    )
+
+    tables = build_lower_bound_gap_tables(scores)
+
+    assert list(tables.event_gaps["event_index"]) == [1]
+    assert tables.event_gaps.iloc[0]["lower_bound_gap_log_evidence"] == 1.0
+
+
+def test_lower_bound_gap_treats_blank_status_as_legacy_success():
+    scores = pd.DataFrame(
+        [
+            _row(0, "sorted-spike-state-space-momentum", 10.0, "exact_full_grid", 0, status=""),
+            _row(0, "sorted-spike-state-space-momentum", 8.0, "truncated_full_grid", 128, status=pd.NA),
+            _row(1, "sorted-spike-state-space-momentum", 100.0, "exact_full_grid", 0, status="failed"),
+            _row(1, "sorted-spike-state-space-momentum", 9.0, "truncated_full_grid", 128, status="nan"),
+        ]
+    )
+
+    tables = build_lower_bound_gap_tables(scores)
+
+    assert list(tables.event_gaps["event_index"]) == [0]
+    assert tables.event_gaps.iloc[0]["lower_bound_gap_log_evidence"] == 2.0
 
 
 def test_lower_bound_gap_returns_empty_without_exact_pairs():

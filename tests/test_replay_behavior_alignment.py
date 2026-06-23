@@ -11,6 +11,7 @@ from replay_behavior_alignment import (  # noqa: E402
     LOO_OUTPUT,
     PREDICTION_SUMMARY_OUTPUT,
     RAT_SUMMARY_OUTPUT,
+    build_event_evidence_features,
     write_replay_behavior_alignment_outputs,
 )
 
@@ -59,6 +60,32 @@ def test_replay_behavior_alignment_outputs_prediction_summaries(tmp_path):
         path = tmp_path / filename
         assert path.exists()
         assert path.stat().st_size > 0
+
+
+def test_behavior_alignment_keeps_legacy_real_event_rows():
+    legacy = pd.DataFrame(
+        _event_rows("Rat1/Open1", 0, trajectory=8.0, stationary=0.0, endpoint=(10.0, 0.0), momentum_bonus=0.0)
+    )
+    legacy["status"] = ""
+    legacy["window_role"] = pd.NA
+    failed = pd.DataFrame(
+        _event_rows("Rat1/Open1", 1, trajectory=100.0, stationary=0.0, endpoint=(20.0, 0.0), momentum_bonus=0.0)
+    )
+    failed["status"] = "failed"
+    failed["window_role"] = "real"
+    off_swr = pd.DataFrame(
+        _event_rows("Rat1/Open1", 2, trajectory=100.0, stationary=0.0, endpoint=(30.0, 0.0), momentum_bonus=0.0)
+    )
+    off_swr["status"] = "success"
+    off_swr["window_role"] = "promoted_off_swr_candidate"
+    evidence = pd.concat([legacy, failed, off_swr], ignore_index=True)
+
+    features = build_event_evidence_features(evidence)
+
+    assert len(features) == 1
+    assert features.iloc[0]["session"] == "Rat1/Open1"
+    assert int(features.iloc[0]["event_index"]) == 0
+    assert bool(features.iloc[0]["exact_core_complete"])
 
 
 def _event_rows(

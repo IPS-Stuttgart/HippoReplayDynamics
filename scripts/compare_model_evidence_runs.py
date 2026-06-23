@@ -18,6 +18,8 @@ from hipporeplayimm.evidence_reporting import (
     ensure_evidence_support_columns,
 )
 
+_MISSING_STATUS_VALUES = {"", "nan", "na", "n/a", "none", "null", "<na>"}
+
 
 def canonical_model_name(model: str) -> str:
     name = str(model).strip().lower()
@@ -155,12 +157,11 @@ def _load_event_scores(root: str | Path, run_label: str, *, exact_only: bool = F
 def _successful_score_rows(frame: pd.DataFrame) -> pd.DataFrame:
     if "status" not in frame.columns:
         return frame.copy()
-    status = frame["status"].astype("string").str.strip()
-    missing = status.isna() | status.fillna("").eq("")
-    success = status.fillna("").eq("success")
+    normalized = frame["status"].astype("string").str.strip().str.lower()
+    missing = normalized.isna() | normalized.fillna("").isin(_MISSING_STATUS_VALUES)
+    success = normalized.fillna("").eq("success")
     out = frame[missing | success].copy()
-    out["status"] = out["status"].astype("string")
-    out.loc[missing.loc[out.index], "status"] = "success"
+    out["status"] = "success"
     return out
 
 

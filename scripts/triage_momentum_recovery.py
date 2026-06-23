@@ -30,6 +30,7 @@ import pandas as pd
 DEFAULT_EXPECTED_MOMENTUM_MODEL = "sorted-spike-state-space-momentum"
 EXACT_SUPPORT = "exact_full_grid"
 TRUNCATED_SUPPORT = "truncated_full_grid"
+_MISSING_STATUS_VALUES = {"", "nan", "na", "n/a", "none", "null", "<na>"}
 
 SCORE_FILENAMES = (
     "simulation_recovery_sweep_event_scores.csv",
@@ -344,15 +345,37 @@ def _with_support_columns(scores: pd.DataFrame) -> pd.DataFrame:
         else:
             out["evidence_support"] = EXACT_SUPPORT
     if "evidence_comparable" not in out.columns:
-        status_ok = out["status"].astype(str).eq("success") if "status" in out.columns else True
+        status_ok = _status_success_mask(out)
         out["evidence_comparable"] = status_ok & out["evidence_support"].astype(str).eq(EXACT_SUPPORT)
     return out
 
 
 def _success_mask(frame: pd.DataFrame) -> pd.Series:
-    status_ok = frame["status"].astype(str).eq("success") if "status" in frame.columns else pd.Series(True, index=frame.index)
+    status_ok = _status_success_mask(frame)
     values = pd.to_numeric(frame["log_evidence"], errors="coerce")
     return status_ok & np.isfinite(values)
+
+
+def _status_success_mask(frame: pd.DataFrame) -> pd.Series:
+    if "status" not in frame.columns:
+        return pd.Series(True, index=frame.index)
+    return frame["status"].map(_status_is_success_or_missing).astype(bool)
+
+
+def _status_is_success_or_missing(value: object) -> bool:
+    if _is_missing_status_value(value):
+        return True
+    return str(value).strip().lower() == "success"
+
+
+def _is_missing_status_value(value: object) -> bool:
+    try:
+        missing = pd.isna(value)
+    except (TypeError, ValueError):
+        missing = False
+    if isinstance(missing, (bool, np.bool_)) and bool(missing):
+        return True
+    return str(value).strip().lower() in _MISSING_STATUS_VALUES
 
 
 def _comparable_mask(frame: pd.DataFrame) -> pd.Series:

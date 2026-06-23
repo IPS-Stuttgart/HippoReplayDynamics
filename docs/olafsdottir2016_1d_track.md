@@ -124,3 +124,73 @@ paper-facing pass: Track1 position, sorted spike labels/times, SleepPOST LFP,
 and Axona header metadata. Tests use tiny synthetic files under
 `tests/fixtures/axona_minimal/` and do not require downloading the full Zenodo
 archive.
+
+## Z-Track Linearization
+
+PR 2 adds a conservative Track1 position linearization helper:
+
+```bash
+PYTHONPATH=src python scripts/linearize_olafsdottir_ztrack.py \
+  --pos path/to/track1.pos \
+  --output results/olafsdottir-linearized-track1
+```
+
+The script can infer a simple occupied-bin diameter centerline, or consume a
+hand-specified centerline:
+
+```bash
+PYTHONPATH=src python scripts/linearize_olafsdottir_ztrack.py \
+  --pos path/to/track1.pos \
+  --centerline-json path/to/track_geometry_seed.json \
+  --output results/olafsdottir-linearized-track1
+```
+
+Required outputs:
+
+```text
+linearized_position.csv
+track_geometry.json
+linearization_diagnostics.csv
+```
+
+`linearized_position.csv` columns:
+
+```text
+time_s
+x_cm
+y_cm
+linear_position_cm
+speed_cm_s
+valid_position
+```
+
+`linearization_diagnostics.csv` reports scalar diagnostics and occupancy rows:
+
+```text
+fraction_valid_position
+median_projection_error_cm
+max_projection_error_cm
+track_length_cm
+occupancy_by_linear_bin
+position_start_time_s
+position_end_time_s
+session_duration_s
+```
+
+Acceptance criteria should remain diagnostic rather than absolute. For a
+realistic track-running session, expect more than 90% valid position samples,
+linear position that covers the expected Z-track extent, non-collapsed occupancy
+across the track, and projection/geodesic diagnostics that are visible for
+inspection. If a session falls below 90% valid position, document it as a
+session/data-quality limitation rather than silently excluding it.
+
+The R2142 Track1 smoke check preserves the Axona binary parser fix where
+`data_start` can be followed immediately by binary data rather than a newline.
+With the current cached R2142 Track1 copy, position time spans 0.0 to 2275.72 s.
+The same smoke check produced a valid-position fraction of about 0.71, an
+inferred track length of about 396 cm, valid linearized positions spanning the
+full inferred track, and nonzero occupancy across all 80 diagnostic bins. This
+is useful as an end-to-end file-format and diagnostic-output check, but it is
+not by itself a paper-quality linearization claim. Do not overclaim
+linearization quality from this single-animal smoke check; use the diagnostics
+to decide whether a session is ready for scoring.

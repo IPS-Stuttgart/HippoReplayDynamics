@@ -11,7 +11,7 @@ import pandas as pd
 
 _GROUP_COLUMNS = ("session", "event_index")
 _PATCHED_FLAG = "_simulation_best_row_flag_scope_patch_applied"
-_MISSING_STATUS_VALUES = {"", "nan", "none", "null", "<na>"}
+_MISSING_STATUS_VALUES = {"", "nan", "na", "n/a", "none", "null", "<na>"}
 
 
 def apply_simulation_best_row_flags_patch() -> None:

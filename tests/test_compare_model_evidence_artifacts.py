@@ -4,7 +4,7 @@ import sys
 import pandas as pd
 
 sys.path.insert(0, str(Path("scripts").resolve()))
-from compare_model_evidence_artifacts import canonical_model_name, compare_artifacts  # noqa: E402
+from compare_model_evidence_artifacts import canonical_model_name, compare_artifacts, load_scores  # noqa: E402
 
 
 def _write_scores(path: Path, filename: str, rows: list[dict[str, object]]) -> None:
@@ -137,3 +137,39 @@ def test_compare_artifacts_exact_only_filters_truncated_rows(tmp_path):
     assert set(tables["best_comparison"]["right_canonical_best_model"]) == {"diffusion"}
     assert set(tables["support_counts"]["evidence_support"]) == {"exact_full_grid"}
     assert set(tables["support_counts"]["evidence_comparable"]) == {True}
+
+
+def test_load_scores_keeps_missing_and_padded_success_statuses(tmp_path):
+    run = tmp_path / "run"
+    _write_scores(
+        run,
+        "event_model_evidence.csv",
+        [
+            {
+                "session": "Rat1/Open1",
+                "event_index": 0,
+                "model": "momentum",
+                "log_evidence": -1.0,
+                "status": " success ",
+            },
+            {
+                "session": "Rat1/Open1",
+                "event_index": 1,
+                "model": "diffusion",
+                "log_evidence": -2.0,
+                "status": None,
+            },
+            {
+                "session": "Rat1/Open1",
+                "event_index": 2,
+                "model": "stationary",
+                "log_evidence": 100.0,
+                "status": "failed",
+            },
+        ],
+    )
+
+    scores = load_scores(run, "run")
+
+    assert set(scores["event_index"]) == {0, 1}
+    assert set(scores["canonical_model"]) == {"momentum", "diffusion"}

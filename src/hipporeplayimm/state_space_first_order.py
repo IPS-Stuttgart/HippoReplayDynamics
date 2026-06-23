@@ -23,11 +23,21 @@ def _score_stationary(
     emissions: LogEmissionTensor,
     valid_bin_mask: np.ndarray | None = None,
 ) -> tuple[float, np.ndarray]:
-    log_weights = np.sum(emissions.log_likelihood, axis=0) + _uniform_log_prior(
+    log_likelihood = np.asarray(emissions.log_likelihood, dtype=float)
+    valid_mask = _coerce_valid_bin_mask(valid_bin_mask, emissions.n_bins)
+    active = np.ones(emissions.n_bins, dtype=bool) if valid_mask is None else valid_mask
+    finite_on_active_support = np.isfinite(log_likelihood[:, active])
+    if not np.all(np.any(finite_on_active_support, axis=1)):
+        raise ValueError("at least one emission row has no finite likelihood mass")
+
+    masked_log_likelihood = np.where(active[None, :], log_likelihood, -np.inf)
+    log_weights = np.sum(masked_log_likelihood, axis=0) + _uniform_log_prior(
         emissions.n_bins,
         valid_bin_mask,
     )
     logp = float(logsumexp(log_weights))
+    if not np.isfinite(logp):
+        raise ValueError("stationary model has no finite path mass")
     posterior = _normalize_log_weights(log_weights)
     return logp, np.repeat(posterior[None, :], emissions.n_time, axis=0)
 

@@ -66,6 +66,44 @@ _MODEL_SHORT_NAMES = {
     IMM_CANDIDATE: "candidate_pruned_imm",
 }
 
+SOTA_COMPARATOR_EVENT_COLUMNS: tuple[str, ...] = (
+    "session",
+    "rat",
+    "event_index",
+    "margin_threshold",
+    "exact_core_complete",
+    "missing_required_exact_core_models",
+    "best_exact_core_model",
+    "best_exact_core_log_evidence",
+    "best_exact_core_margin_to_runner_up",
+    "best_trajectory_model",
+    "best_trajectory_log_evidence",
+    "best_nontrajectory_model",
+    "best_nontrajectory_log_evidence",
+    "logZ_stationary",
+    "logZ_diffusion",
+    "logZ_fragmented",
+    "logZ_first_order_imm",
+    "logZ_momentum_exact_sparse",
+    "logZ_candidate_pruned_momentum",
+    "logZ_candidate_pruned_imm",
+    "delta_momentum_exact_minus_diffusion",
+    "delta_first_order_imm_minus_momentum_exact",
+    "delta_trajectory_minus_nontrajectory",
+    "delta_momentum_exact_minus_candidate_pruned_momentum",
+    "momentum_exact_beats_diffusion",
+    "momentum_exact_confident_vs_diffusion",
+    "diffusion_confident_vs_momentum_exact",
+    "trajectory_confident_vs_nontrajectory",
+    "nontrajectory_confident_vs_trajectory",
+    "first_order_imm_is_exact_core_best",
+    "first_order_imm_core_margin_to_runner_up",
+    "first_order_imm_confident_core_best",
+    "momentum_exact_is_exact_core_best",
+    "momentum_exact_core_margin_to_runner_up",
+    "momentum_exact_confident_core_best",
+)
+
 
 def _rat_from_session(session: object) -> str:
     return str(session).split("/", 1)[0]
@@ -288,7 +326,7 @@ def build_sota_comparator_event_table(
                 ),
             }
         )
-    return pd.DataFrame(rows).sort_values(["session", "event_index"]).reset_index(drop=True)
+    return pd.DataFrame(rows, columns=list(SOTA_COMPARATOR_EVENT_COLUMNS)).sort_values(["session", "event_index"]).reset_index(drop=True)
 
 
 def _basic_delta_summary(delta: pd.Series) -> dict[str, float]:

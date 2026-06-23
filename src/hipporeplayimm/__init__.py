@@ -12,6 +12,7 @@ from . import candidate_support_quality_patch as _candidate_support_quality_patc
 from . import cell_split_hashable_grouping as _cell_split_hashable_grouping
 from . import clusterless_config_validation as _clusterless_config_validation
 from . import clusterless_ground_truth as _clusterless_ground_truth
+from . import clusterless_mark_group_validation as _clusterless_mark_group_validation
 from . import data_cell_id_validation as _data_cell_id_validation
 from . import duration_candidate_metadata_patch as _duration_candidate_metadata_patch
 from . import duration_occupancy_metadata_guard as _duration_occupancy_metadata_guard
@@ -179,6 +180,7 @@ def apply_runtime_patches() -> None:
     _clusterless_config_validation.apply_clusterless_encoding_config_validation_patch()
     _data_cell_id_validation.apply_data_cell_id_validation_patch()
     _mark_complex_validation.apply_mark_complex_validation_patch()
+    _clusterless_mark_group_validation.apply_clusterless_mark_group_validation_patch()
     _encoding_select_cells_validation.apply_encoding_select_cells_validation_patch()
     _position_decoding_config_validation.apply_position_decoding_config_validation_patch()
     _duration_candidate_metadata_patch.apply_duration_candidate_metadata_patch()

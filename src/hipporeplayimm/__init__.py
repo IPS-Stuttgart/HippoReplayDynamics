@@ -34,6 +34,7 @@ from . import mark_complex_validation as _mark_complex_validation
 from . import model_averaged_endpoint_scoping as _model_averaged_endpoint_scoping
 from . import observation_sweep_config_validation as _observation_sweep_config_validation
 from . import occupancy_candidate_support as _occupancy_candidate_support
+from . import olafsdottir_zip_safety as _olafsdottir_zip_safety
 from . import position_decoding_config_validation as _position_decoding_config_validation
 from . import pyrecest_bin_center_validation as _pyrecest_bin_center_validation
 from . import pyrecest_score_metadata as _pyrecest_score_metadata
@@ -212,6 +213,7 @@ def apply_runtime_patches() -> None:
     _reverse_time_terminal_guard.apply_reverse_time_terminal_guard_patch()
     _wrapper_return_trajectory.apply_wrapper_return_trajectory_patch()
     _axona_data_end_footer.apply_axona_data_end_footer_patch()
+    _olafsdottir_zip_safety.apply_olafsdottir_zip_safety_patch()
     _synchronize_duration_patched_emission_builders()
     _patch_simulation_recovery_module(_simulation_recovery)
     _simulation_best_row_flags.apply_simulation_best_row_flags_patch()

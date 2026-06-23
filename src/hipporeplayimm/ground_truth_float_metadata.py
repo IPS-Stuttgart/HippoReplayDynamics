@@ -102,11 +102,13 @@ def _parse_bool_metadata_value(column: str, value: Any) -> bool:
     except (TypeError, ValueError) as exc:
         raise ValueError(f"{column} must contain boolean values") from exc
     if not np.isfinite(numeric):
-        raise ValueError(f"{column} must contain finite boolean values")
+        raise ValueError(f"cannot parse boolean value for {column}")
     if np.isclose(numeric, 0.0, rtol=0.0, atol=0.0):
         return False
     if np.isclose(numeric, 1.0, rtol=0.0, atol=0.0):
         return True
+    if isinstance(value, str):
+        return bool(numeric)
     raise ValueError(f"{column} must contain boolean values")
 
 

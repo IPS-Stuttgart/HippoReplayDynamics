@@ -11,6 +11,7 @@ from audit_first_order_imm_event_mean_mode_usage import (  # noqa: E402
     FRAGMENTED,
     MOMENTUM_EXACT,
     STATIONARY,
+    _read_event_model_evidence,
     build_event_mean_mode_usage_event_summary,
     build_mode_usage_gate_summary,
     write_event_mean_mode_usage_audit,
@@ -103,6 +104,22 @@ def test_event_mean_gate_parses_string_false_first_order_flags():
     assert not bool(gates.loc["first_order_imm_best_rows_present", "passed"])
     assert not bool(gates.loc["moderate_content_majority", "passed"])
     assert not bool(gates.loc["overall", "passed"])
+
+
+def test_event_mean_evidence_reader_keeps_blank_status_rows(tmp_path):
+    legacy_rows = pd.DataFrame(_event("Rat1/Open1", 0, first_order=80.0, mean_nonstationary=0.8, map_nonstationary=0.7, path=25.0))
+    legacy_rows["status"] = ""
+    failed_row = _score("Rat1/Open1", 1, FIRST_ORDER_IMM, 999.0)
+    failed_row["status"] = "failed"
+    evidence = pd.concat([legacy_rows, pd.DataFrame([failed_row])], ignore_index=True)
+    path = tmp_path / "event_model_evidence.csv"
+    evidence.to_csv(path, index=False)
+
+    loaded = _read_event_model_evidence(path)
+
+    assert len(loaded) == len(legacy_rows)
+    assert set(loaded["event_index"].astype(int)) == {0}
+    assert set(loaded["model"]) == set(legacy_rows["model"])
 
 
 def test_event_mean_mode_usage_audit_keeps_off_swr_candidates_distinct(tmp_path):

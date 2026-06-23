@@ -535,9 +535,26 @@ def _valid_indices(mask: np.ndarray | None, n_bins: int) -> np.ndarray:
 
 def _coerce_transition_durations(values: Iterable[float], *, n_time: int, fallback_dt: float) -> np.ndarray:
     expected = max(int(n_time) - 1, 0)
-    out = np.asarray(list(values), dtype=float)
-    if out.shape != (expected,) or not np.all(np.isfinite(out)) or np.any(out <= 0.0):
-        return np.full(expected, float(fallback_dt), dtype=float)
+    fallback = float(fallback_dt)
+    if not np.isfinite(fallback) or fallback <= 0.0:
+        raise ValueError("fallback dt must be finite and positive")
+    raw_values = list(values)
+    if len(raw_values) == 0:
+        return np.full(expected, fallback, dtype=float)
+    out = np.asarray(raw_values, dtype=float)
+    if out.shape != (expected,):
+        raise ValueError("transition durations must contain one finite positive value per transition")
+    if not np.all(np.isfinite(out)) or np.any(out <= 0.0):
+        raise ValueError("transition durations must be finite and positive")
+    return out
+
+
+def _validate_transition_duration_array(durations: np.ndarray) -> np.ndarray:
+    out = np.asarray(durations, dtype=float)
+    if out.ndim != 1:
+        raise ValueError("transition durations must be a one-dimensional array")
+    if not np.all(np.isfinite(out)) or np.any(out <= 0.0):
+        raise ValueError("transition durations must be finite and positive")
     return out
 
 
@@ -556,6 +573,7 @@ def _per_bin_sigma(sigma_cm_sqrt_s: float, dt_s: float) -> float:
 
 
 def _duration_adjusted_decays(config: object, durations: np.ndarray, reference_dt: float) -> np.ndarray:
+    durations = _validate_transition_duration_array(durations)
     if durations.size == 0:
         return np.empty(0, dtype=float)
     tau_s = float(getattr(config, "momentum_velocity_decay_tau_s", 0.0))
@@ -572,6 +590,7 @@ def _duration_adjusted_decays(config: object, durations: np.ndarray, reference_d
 
 
 def _time_scales(durations: np.ndarray) -> np.ndarray:
+    durations = _validate_transition_duration_array(durations)
     scales = np.ones_like(durations, dtype=float)
     if durations.size > 1:
         scales[1:] = durations[1:] / durations[:-1]

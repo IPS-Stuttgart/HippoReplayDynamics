@@ -1,0 +1,75 @@
+"""Validate KD reference encoding configuration before fitting.
+
+The KD reference encoder uses fixed grid dimensions and occupancy floors directly
+inside NumPy shape, edge, smoothing, and rate calculations. Invalid parameters
+can otherwise reach divide-by-zero, empty-grid, or Gaussian-filter failures that
+are harder to diagnose than a configuration error.
+"""
+
+from __future__ import annotations
+
+from functools import wraps
+from typing import Any
+
+import numpy as np
+
+_PATCHED_FLAG = "_kd_encoding_config_validation_patch_applied"
+
+
+def _validate_positive_float(config: Any, name: str) -> None:
+    value = float(getattr(config, name))
+    if not np.isfinite(value) or value <= 0.0:
+        raise ValueError(f"{name} must be finite and positive")
+
+
+def _validate_nonnegative_float(config: Any, name: str) -> None:
+    value = float(getattr(config, name))
+    if not np.isfinite(value) or value < 0.0:
+        raise ValueError(f"{name} must be finite and nonnegative")
+
+
+def _validate_positive_integer(config: Any, name: str) -> None:
+    value = getattr(config, name)
+    if isinstance(value, (bool, np.bool_)):
+        raise TypeError(f"{name} must be a positive integer")
+    arr = np.asarray(value)
+    if arr.ndim != 0 or not np.issubdtype(arr.dtype, np.integer):
+        raise TypeError(f"{name} must be a positive integer")
+    if int(arr) <= 0:
+        raise ValueError(f"{name} must be positive")
+
+
+def validate_kd_encoding_config(config: Any) -> None:
+    """Reject KD encoder parameters that cannot produce a valid fixed grid."""
+
+    _validate_positive_float(config, "bin_size_cm")
+    _validate_positive_integer(config, "n_bins_x")
+    _validate_positive_integer(config, "n_bins_y")
+    _validate_nonnegative_float(config, "smoothing_sigma_cm")
+    _validate_nonnegative_float(config, "min_speed_cm_s")
+    _validate_positive_float(config, "min_occupancy_s")
+    _validate_positive_float(config, "rate_floor_hz")
+    _validate_nonnegative_float(config, "min_peak_rate_hz")
+
+
+def apply_kd_encoding_config_validation_patch() -> None:
+    """Install KD encoding-config validation on the reference encoder."""
+
+    from . import kd_reference
+
+    if getattr(kd_reference, _PATCHED_FLAG, False):
+        return
+
+    original_fit = kd_reference.fit_kd_place_field_encoding
+
+    @wraps(original_fit)
+    def fit_kd_place_field_encoding(session, config=None):
+        config = kd_reference.KDEncodingConfig() if config is None else config
+        validate_kd_encoding_config(config)
+        return original_fit(session, config)
+
+    kd_reference.fit_kd_place_field_encoding = fit_kd_place_field_encoding
+    setattr(kd_reference, _PATCHED_FLAG, True)
+
+
+__all__ = ["apply_kd_encoding_config_validation_patch", "validate_kd_encoding_config"]

@@ -99,6 +99,33 @@ def test_load_replay_session_detects_row_aligned_spike_marks(tmp_path: Path):
     assert session.metadata["spike_mark_features"] == 4
 
 
+def test_load_replay_session_ignores_nonreal_complex_spike_marks(tmp_path: Path):
+    session_path = tmp_path / "Rat1" / "Open1"
+    _write_minimal_session(session_path)
+    sio.savemat(
+        session_path / "Spike_Data.mat",
+        {
+            "Spike_Data": np.array([[1.0, 11.0], [2.0, 12.0], [3.0, 11.0]]),
+            "Tetrode_Cell_IDs": np.array([[1, 11], [1, 12]]),
+            "Excitatory_Neurons": np.array([11, 12]),
+            "Inhibitory_Neurons": np.array([]),
+            "Spike_Amplitude_Marks": np.array(
+                [
+                    [1.0 + 1.0j, 40.0 + 0.0j],
+                    [2.0 + 0.0j, 50.0 + 0.0j],
+                    [3.0 + 0.0j, 60.0 + 0.0j],
+                ]
+            ),
+        },
+    )
+
+    session = load_replay_session(session_path)
+
+    assert not session.has_spike_marks
+    assert session.spike_marks is None
+    assert session.metadata["spike_mark_features"] == 0
+
+
 def test_load_replay_session_reports_missing_spike_marks(tmp_path: Path):
     session_path = tmp_path / "Rat1" / "Open1"
     _write_minimal_session(session_path)

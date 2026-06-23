@@ -20,6 +20,7 @@ from .encoding import (
     _make_grid,
     _positions_to_flat_bins,
     _speed_cm_s,
+    _spikes_and_cell_ids_for_encoding,
     _times_in_intervals,
 )
 
@@ -162,12 +163,7 @@ def fit_place_field_encoding_for_position_mask(
     occupancy = np.zeros(grid_shape[0] * grid_shape[1], dtype=float)
     np.add.at(occupancy, flat_bins[train_frames], dt[train_frames])
 
-    spikes = session.excitatory_spikes() if config.use_excitatory else session.spikes
-    cell_ids = (
-        np.asarray(session.excitatory_neurons, dtype=int)
-        if config.use_excitatory and session.excitatory_neurons.size
-        else np.unique(spikes[:, 1].astype(int))
-    )
+    spikes, cell_ids = _spikes_and_cell_ids_for_encoding(session, config)
     cell_ids = np.asarray(sorted(np.unique(cell_ids)), dtype=int)
     counts = np.zeros((cell_ids.shape[0], occupancy.shape[0]), dtype=float)
 
@@ -341,7 +337,7 @@ def _spike_counts_for_window(
     end: float,
 ) -> np.ndarray:
     counts = np.zeros(encoding.n_cells, dtype=int)
-    spikes = session.excitatory_spikes() if encoding.config.use_excitatory else session.spikes
+    spikes, _ = _spikes_and_cell_ids_for_encoding(session, encoding.config)
     if not spikes.size or not encoding.n_cells:
         return counts
     keep = (spikes[:, 0] >= start) & (spikes[:, 0] < end) & np.isin(spikes[:, 1].astype(int), encoding.cell_ids)

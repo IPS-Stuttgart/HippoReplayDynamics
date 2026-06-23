@@ -43,6 +43,8 @@ SESSION_COLUMNS = [
     "n_units_sleep",
     "n_spikes_sleep",
     "mean_mua_rate_hz",
+    "raw_candidate_event_count",
+    "artifact_flagged_event_count",
     "candidate_event_count",
     "candidate_event_rate_per_min",
     "median_event_duration_ms",
@@ -69,6 +71,8 @@ EVENT_COLUMNS = [
     "mean_speed_cm_s",
     "event_detection_score",
     "candidate_tier",
+    "event_qc_status",
+    "event_qc_reason",
 ]
 
 
@@ -99,6 +103,8 @@ def run_event_detection_qc(
     max_duration_ms: float = 500.0,
     min_event_spikes: int = 5,
     min_event_active_units: int = 3,
+    start_artifact_exclusion_s: float = 0.100,
+    max_event_spikes_per_active_unit: float = 10.0,
     immobility_speed_threshold_cm_s: float = 5.0,
     moderate_event_spikes: int = 10,
     strong_event_spikes: int = 25,
@@ -131,6 +137,8 @@ def run_event_detection_qc(
             max_duration_ms=max_duration_ms,
             min_event_spikes=min_event_spikes,
             min_event_active_units=min_event_active_units,
+            start_artifact_exclusion_s=start_artifact_exclusion_s,
+            max_event_spikes_per_active_unit=max_event_spikes_per_active_unit,
             immobility_speed_threshold_cm_s=immobility_speed_threshold_cm_s,
             moderate_event_spikes=moderate_event_spikes,
             strong_event_spikes=strong_event_spikes,
@@ -196,6 +204,8 @@ def summarize_pair(
     max_duration_ms: float,
     min_event_spikes: int,
     min_event_active_units: int,
+    start_artifact_exclusion_s: float,
+    max_event_spikes_per_active_unit: float,
     immobility_speed_threshold_cm_s: float,
     moderate_event_spikes: int,
     strong_event_spikes: int,
@@ -245,12 +255,14 @@ def summarize_pair(
             max_duration_ms=max_duration_ms,
             min_event_spikes=min_event_spikes,
             min_event_active_units=min_event_active_units,
+            start_artifact_exclusion_s=start_artifact_exclusion_s,
+            max_event_spikes_per_active_unit=max_event_spikes_per_active_unit,
             immobility_speed_threshold_cm_s=immobility_speed_threshold_cm_s,
             moderate_event_spikes=moderate_event_spikes,
             strong_event_spikes=strong_event_spikes,
             extreme_event_spikes=extreme_event_spikes,
         )
-        status = "pass" if not events.empty else "no_candidate_events"
+        status = "pass" if len(qc_pass_events(events)) else "no_candidate_events"
         row = session_row(
             animal=animal,
             date=date,
@@ -286,6 +298,8 @@ def detect_mua_candidate_events(
     max_duration_ms: float,
     min_event_spikes: int,
     min_event_active_units: int,
+    start_artifact_exclusion_s: float,
+    max_event_spikes_per_active_unit: float,
     immobility_speed_threshold_cm_s: float,
     moderate_event_spikes: int,
     strong_event_spikes: int,
@@ -319,6 +333,13 @@ def detect_mua_candidate_events(
         n_active = int(np.unique(spikes.unit_ids[in_event]).shape[0]) if n_spikes else 0
         if n_spikes < int(min_event_spikes) or n_active < int(min_event_active_units):
             continue
+        qc_status, qc_reason = event_qc_status(
+            start_time_s=start,
+            n_spikes=n_spikes,
+            n_active_units=n_active,
+            start_artifact_exclusion_s=start_artifact_exclusion_s,
+            max_event_spikes_per_active_unit=max_event_spikes_per_active_unit,
+        )
         bin_start = max(0, int(np.searchsorted(edges, start, side="right") - 1))
         bin_end = min(mua_rate.shape[0], int(np.searchsorted(edges, end, side="left") + 1))
         event_rates = mua_rate[bin_start:bin_end]
@@ -347,6 +368,8 @@ def detect_mua_candidate_events(
                     strong_event_spikes=strong_event_spikes,
                     extreme_event_spikes=extreme_event_spikes,
                 ),
+                "event_qc_status": qc_status,
+                "event_qc_reason": qc_reason,
             }
         )
     return pd.DataFrame(rows, columns=EVENT_COLUMNS)
@@ -366,7 +389,8 @@ def session_row(
     immobility_speed_threshold_cm_s: float,
 ) -> dict[str, object]:
     duration_min = float(sleep_duration) / 60.0 if np.isfinite(sleep_duration) and sleep_duration > 0.0 else np.nan
-    speed = pd.to_numeric(events["mean_speed_cm_s"], errors="coerce") if not events.empty else pd.Series(dtype=float)
+    valid_events = qc_pass_events(events)
+    speed = pd.to_numeric(valid_events["mean_speed_cm_s"], errors="coerce") if not valid_events.empty else pd.Series(dtype=float)
     return {
         "animal": animal,
         "date": date,
@@ -376,14 +400,16 @@ def session_row(
         "n_units_sleep": int(spikes.unit_count),
         "n_spikes_sleep": int(spikes.spike_times_s.shape[0]),
         "mean_mua_rate_hz": float(spikes.spike_times_s.shape[0] / sleep_duration) if np.isfinite(sleep_duration) and sleep_duration > 0 else np.nan,
-        "candidate_event_count": int(len(events)),
-        "candidate_event_rate_per_min": float(len(events) / duration_min) if np.isfinite(duration_min) and duration_min > 0 else np.nan,
-        "median_event_duration_ms": _median(events, "duration_ms"),
-        "median_event_spikes": _median(events, "n_spikes"),
-        "median_event_active_units": _median(events, "n_active_units"),
-        "p95_event_spikes": _percentile(events, "n_spikes", 95.0),
-        "immobile_event_count": int((speed <= float(immobility_speed_threshold_cm_s)).sum()) if not events.empty else 0,
-        "running_or_movement_flagged_event_count": int((speed > float(immobility_speed_threshold_cm_s)).sum()) if not events.empty else 0,
+        "raw_candidate_event_count": int(len(events)),
+        "artifact_flagged_event_count": int((events["event_qc_status"].astype(str) != "pass").sum()) if not events.empty else 0,
+        "candidate_event_count": int(len(valid_events)),
+        "candidate_event_rate_per_min": float(len(valid_events) / duration_min) if np.isfinite(duration_min) and duration_min > 0 else np.nan,
+        "median_event_duration_ms": _median(valid_events, "duration_ms"),
+        "median_event_spikes": _median(valid_events, "n_spikes"),
+        "median_event_active_units": _median(valid_events, "n_active_units"),
+        "p95_event_spikes": _percentile(valid_events, "n_spikes", 95.0),
+        "immobile_event_count": int((speed <= float(immobility_speed_threshold_cm_s)).sum()) if not valid_events.empty else 0,
+        "running_or_movement_flagged_event_count": int((speed > float(immobility_speed_threshold_cm_s)).sum()) if not valid_events.empty else 0,
         "event_detection_status": status,
         "exclusion_reason": ";".join(reasons),
     }
@@ -401,6 +427,8 @@ def failed_session_row(*, animal: str, date: str, sleep_session: str, track_sess
             "n_units_sleep": 0,
             "n_spikes_sleep": 0,
             "mean_mua_rate_hz": np.nan,
+            "raw_candidate_event_count": 0,
+            "artifact_flagged_event_count": 0,
             "candidate_event_count": 0,
             "candidate_event_rate_per_min": np.nan,
             "immobile_event_count": 0,
@@ -491,7 +519,8 @@ def summarize_by_animal(sessions: pd.DataFrame, events: pd.DataFrame) -> pd.Data
         return pd.DataFrame(columns=columns)
     rows: list[dict[str, object]] = []
     for animal, group in sessions.groupby("animal", sort=True):
-        animal_events = events[events["animal"].astype(str).eq(str(animal))] if not events.empty else pd.DataFrame(columns=EVENT_COLUMNS)
+        passed_events = qc_pass_events(events)
+        animal_events = passed_events[passed_events["animal"].astype(str).eq(str(animal))] if not passed_events.empty else pd.DataFrame(columns=EVENT_COLUMNS)
         statuses = set(group["event_detection_status"].astype(str))
         status = "fail" if "fail" in statuses else ("pass" if len(animal_events) else "no_candidate_events")
         rows.append(
@@ -523,14 +552,17 @@ def gate_summary(
     max_paper_candidate_session_fraction: float,
 ) -> pd.DataFrame:
     expected_sessions = int(len(pairs))
-    total_events = int(len(events))
+    passed_events = qc_pass_events(events)
+    total_events = int(len(passed_events))
+    raw_events = int(len(events))
+    artifact_events = raw_events - total_events
     sessions_with_events = int((pd.to_numeric(sessions["candidate_event_count"], errors="coerce").fillna(0) > 0).sum()) if not sessions.empty else 0
-    animals_with_events = int(events["animal"].nunique()) if not events.empty else 0
-    immobile_events = int((pd.to_numeric(events["mean_speed_cm_s"], errors="coerce") <= float(immobility_speed_threshold_cm_s)).sum()) if not events.empty else 0
-    max_animal_fraction = _max_group_fraction(events, "animal")
-    max_session_fraction = _max_group_fraction(events, "session")
+    animals_with_events = int(passed_events["animal"].nunique()) if not passed_events.empty else 0
+    immobile_events = int((pd.to_numeric(passed_events["mean_speed_cm_s"], errors="coerce") <= float(immobility_speed_threshold_cm_s)).sum()) if not passed_events.empty else 0
+    max_animal_fraction = _max_group_fraction(passed_events, "animal")
+    max_session_fraction = _max_group_fraction(passed_events, "session")
     status_values = set(sessions["event_detection_status"].astype(str)) if not sessions.empty else set()
-    finite_events = _events_finite_and_plausible(events)
+    finite_events = _events_finite_and_plausible(passed_events)
     gates = [
         _gate(
             "sleeppost_spike_data_present",
@@ -543,10 +575,10 @@ def gate_summary(
         _gate(
             "event_metrics_finite_and_plausible",
             total_events > 0 and finite_events,
-            f"candidate_events={total_events}",
+            f"qc_candidate_events={total_events}; raw_windows={raw_events}; artifact_flagged={artifact_events}",
             "data_integrity",
-            "candidate events have finite durations, spike counts, active-unit counts, and MUA rates",
-            "Rejects malformed event rows before model evidence.",
+            "QC-valid candidate events have finite durations, spike counts, active-unit counts, and MUA rates",
+            "Rejects malformed or timestamp-artifact event rows before model evidence.",
         ),
         _gate(
             "no_event_detection_failures",
@@ -559,9 +591,9 @@ def gate_summary(
         _gate(
             "dataset_usable_candidate_count",
             total_events >= int(min_dataset_candidate_events),
-            f"candidate_events={total_events}",
+            f"qc_candidate_events={total_events}",
             "dataset_usable",
-            f"candidate_events >= {int(min_dataset_candidate_events)}",
+            f"qc_candidate_events >= {int(min_dataset_candidate_events)}",
             "Enough events exist for a pilot model-evidence run.",
         ),
         _gate(
@@ -622,9 +654,11 @@ def build_markdown_summary(sessions: pd.DataFrame, events: pd.DataFrame, animals
             ["Metric", "Value"],
             [
                 ("SleepPOST sessions processed", len(sessions)),
-                ("Candidate events", len(events)),
+                ("Raw high-MUA windows", len(events)),
+                ("Artifact-flagged windows", int((events["event_qc_status"].astype(str) != "pass").sum()) if not events.empty else 0),
+                ("QC-valid candidate events", len(qc_pass_events(events))),
                 ("Sessions with candidates", int((pd.to_numeric(sessions["candidate_event_count"], errors="coerce").fillna(0) > 0).sum()) if not sessions.empty else 0),
-                ("Animals with candidates", events["animal"].nunique() if not events.empty else 0),
+                ("Animals with candidates", qc_pass_events(events)["animal"].nunique() if not qc_pass_events(events).empty else 0),
                 ("Immobile candidate events", int(pd.to_numeric(sessions["immobile_event_count"], errors="coerce").fillna(0).sum()) if not sessions.empty else 0),
                 ("Dataset-usable gates passed", f"{int(dataset_gates['passed'].map(_as_bool).sum())}/{len(dataset_gates)}"),
                 ("Paper-ready gates passed", f"{int(paper_gates['passed'].map(_as_bool).sum())}/{len(paper_gates)}"),
@@ -667,6 +701,31 @@ def candidate_tier(
     if int(n_spikes) >= int(moderate_event_spikes) or (np.isfinite(score) and score >= threshold + 1.0):
         return "moderate"
     return "weak"
+
+
+def event_qc_status(
+    *,
+    start_time_s: float,
+    n_spikes: int,
+    n_active_units: int,
+    start_artifact_exclusion_s: float,
+    max_event_spikes_per_active_unit: float,
+) -> tuple[str, str]:
+    reasons: list[str] = []
+    if np.isfinite(start_time_s) and float(start_time_s) < float(start_artifact_exclusion_s):
+        reasons.append("recording_start_artifact")
+    spikes_per_active = float(n_spikes) / max(float(n_active_units), 1.0)
+    if np.isfinite(max_event_spikes_per_active_unit) and spikes_per_active > float(max_event_spikes_per_active_unit):
+        reasons.append("implausible_spikes_per_active_unit")
+    if reasons:
+        return "artifact", ";".join(reasons)
+    return "pass", ""
+
+
+def qc_pass_events(events: pd.DataFrame) -> pd.DataFrame:
+    if events.empty or "event_qc_status" not in events:
+        return pd.DataFrame(columns=EVENT_COLUMNS)
+    return events[events["event_qc_status"].astype(str).eq("pass")].copy()
 
 
 def _threshold_windows(score: np.ndarray, edges: np.ndarray, *, threshold: float, merge_gap_s: float) -> list[dict[str, float]]:
@@ -832,6 +891,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--max-duration-ms", type=float, default=500.0)
     parser.add_argument("--min-event-spikes", type=int, default=5)
     parser.add_argument("--min-event-active-units", type=int, default=3)
+    parser.add_argument("--start-artifact-exclusion-s", type=float, default=0.100)
+    parser.add_argument("--max-event-spikes-per-active-unit", type=float, default=10.0)
     parser.add_argument("--immobility-speed-threshold-cm-s", type=float, default=5.0)
     parser.add_argument("--moderate-event-spikes", type=int, default=10)
     parser.add_argument("--strong-event-spikes", type=int, default=25)
@@ -859,6 +920,8 @@ def main(argv: list[str] | None = None) -> int:
         max_duration_ms=args.max_duration_ms,
         min_event_spikes=args.min_event_spikes,
         min_event_active_units=args.min_event_active_units,
+        start_artifact_exclusion_s=args.start_artifact_exclusion_s,
+        max_event_spikes_per_active_unit=args.max_event_spikes_per_active_unit,
         immobility_speed_threshold_cm_s=args.immobility_speed_threshold_cm_s,
         moderate_event_spikes=args.moderate_event_spikes,
         strong_event_spikes=args.strong_event_spikes,

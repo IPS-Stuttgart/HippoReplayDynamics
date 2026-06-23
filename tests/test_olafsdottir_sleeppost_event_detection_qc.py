@@ -5,6 +5,7 @@ from pathlib import Path
 import struct
 import sys
 
+import numpy as np
 import pandas as pd
 
 
@@ -86,10 +87,77 @@ def test_sleeppost_event_detection_qc_writes_outputs_and_gates(tmp_path: Path) -
     assert sessions["immobile_event_count"].min() >= 1
     assert events["n_active_units"].min() >= 3
     assert events["candidate_tier"].isin({"weak", "moderate", "strong", "extreme"}).all()
+    assert events["event_qc_status"].eq("pass").all()
     assert gates["passed"].map(bool).all()
     summary = (tmp_path / "qc" / module.SUMMARY_OUTPUT).read_text(encoding="utf-8")
     assert "Dataset-usable gates passed | 2/2" in summary
     assert "Paper-ready gates passed | 4/4" in summary
+
+
+def test_sleeppost_event_detection_qc_excludes_artifact_rows_from_counts() -> None:
+    module = _load_module()
+    events = pd.DataFrame(
+        [
+            {
+                "animal": "R2335",
+                "date": "2015-10-26",
+                "session": "20151026_R2335_sleepPOST",
+                "event_id": 0,
+                "start_time_s": 0.0,
+                "end_time_s": 0.02,
+                "duration_ms": 20.0,
+                "n_spikes": 120,
+                "n_active_units": 3,
+                "mean_mua_rate_hz": 6000.0,
+                "peak_mua_rate_hz": 6000.0,
+                "mean_speed_cm_s": 0.0,
+                "event_detection_score": 20.0,
+                "candidate_tier": "extreme",
+                "event_qc_status": "artifact",
+                "event_qc_reason": "recording_start_artifact;implausible_spikes_per_active_unit",
+            },
+            {
+                "animal": "R2335",
+                "date": "2015-10-26",
+                "session": "20151026_R2335_sleepPOST",
+                "event_id": 1,
+                "start_time_s": 1.0,
+                "end_time_s": 1.04,
+                "duration_ms": 40.0,
+                "n_spikes": 12,
+                "n_active_units": 4,
+                "mean_mua_rate_hz": 300.0,
+                "peak_mua_rate_hz": 400.0,
+                "mean_speed_cm_s": 0.0,
+                "event_detection_score": 4.0,
+                "candidate_tier": "moderate",
+                "event_qc_status": "pass",
+                "event_qc_reason": "",
+            },
+        ],
+        columns=module.EVENT_COLUMNS,
+    )
+    row = module.session_row(
+        animal="R2335",
+        date="2015-10-26",
+        sleep_session="20151026_R2335_sleepPOST",
+        track_session="20151026_R2335_track1",
+        sleep_duration=2.0,
+        spikes=module.SleepSpikes(
+            spike_times_s=np.asarray([1.0, 1.01, 1.02, 1.03], dtype=float),
+            unit_ids=np.asarray([1, 2, 3, 4], dtype=int),
+            unit_count=4,
+        ),
+        events=events,
+        status="pass",
+        reasons=[],
+        immobility_speed_threshold_cm_s=5.0,
+    )
+    assert row["raw_candidate_event_count"] == 2
+    assert row["artifact_flagged_event_count"] == 1
+    assert row["candidate_event_count"] == 1
+    assert row["median_event_spikes"] == 12.0
+    assert row["immobile_event_count"] == 1
 
 
 def test_sleeppost_event_detection_qc_marks_missing_spikes_failure(tmp_path: Path) -> None:

@@ -146,6 +146,23 @@ def test_triage_treats_blank_status_as_legacy_success():
     assert bool(event["expected_model_evidence_comparable"])
 
 
+def test_triage_fills_blank_support_from_diagnostic_columns():
+    rows = [
+        _row(0, "sorted-spike-state-space-diffusion", 0.0, support=""),
+        _row(0, DEFAULT_EXPECTED_MOMENTUM_MODEL, 2.0, support=pd.NA),
+    ]
+    for row in rows:
+        row.pop("evidence_comparable")
+        row["diagnostic_candidate_evidence_support"] = "exact_full_grid"
+    scores = pd.DataFrame(rows)
+
+    event = build_momentum_recovery_triage(scores).event_table.iloc[0]
+
+    assert event["triage_category"] == "strict_exact_recovery"
+    assert event["expected_model_evidence_support"] == "exact_full_grid"
+    assert bool(event["expected_model_evidence_comparable"])
+
+
 def test_triage_parses_string_false_comparable_and_recovery_flags():
     scores = pd.DataFrame(
         [

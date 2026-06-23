@@ -30,6 +30,28 @@ class _LegacyTrajectoryOnlyModel:
         )
 
 
+class _TrajectoryWithoutTerminalModel:
+    name = "trajectory-without-terminal"
+
+    def score(
+        self,
+        emissions: LogEmissionTensor,
+        bin_centers: np.ndarray,
+        *,
+        return_trajectory: bool | None = None,
+    ) -> EventScore:
+        del bin_centers
+        trajectory = np.asarray(emissions.log_likelihood, dtype=float).copy()
+        return EventScore(
+            self.name,
+            0.0,
+            emissions.n_time,
+            emissions.n_spikes,
+            terminal_log_posterior=None,
+            trajectory_log_posterior=None if return_trajectory is False else trajectory,
+        )
+
+
 def _synthetic_emissions() -> LogEmissionTensor:
     return LogEmissionTensor(
         log_likelihood=np.log(
@@ -112,3 +134,26 @@ def test_bidirectional_wrappers_forward_evidence_only_return_trajectory() -> Non
         assert full.terminal_log_posterior is not None
         assert np.isclose(np.exp(result.terminal_log_posterior).sum(), 1.0)
         np.testing.assert_allclose(result.terminal_log_posterior, full.terminal_log_posterior)
+
+
+def test_bidirectional_wrappers_use_mixed_trajectory_terminal_when_base_terminal_missing() -> None:
+    emissions = _synthetic_emissions()
+    bin_centers = _bin_centers()
+    wrappers = [
+        DirectBidirectionalReplayModel(_TrajectoryWithoutTerminalModel()),
+        CompatBidirectionalReplayModel(
+            forward_model=_TrajectoryWithoutTerminalModel(),
+            reverse_model=CompatReverseTimeReplayModel(_TrajectoryWithoutTerminalModel()),
+            name="compat-trajectory-without-terminal-bidirectional",
+        ),
+    ]
+
+    for wrapped in wrappers:
+        result = wrapped.score(emissions, bin_centers, return_trajectory=True)
+
+        assert result.trajectory_log_posterior is not None
+        assert result.terminal_log_posterior is not None
+        np.testing.assert_allclose(
+            result.terminal_log_posterior,
+            result.trajectory_log_posterior[-1],
+        )

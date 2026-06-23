@@ -32,6 +32,8 @@ EXACT_SUPPORT = "exact_full_grid"
 TRUNCATED_SUPPORT = "truncated_full_grid"
 _MISSING_STATUS_VALUES = {"", "nan", "na", "n/a", "none", "null", "<na>"}
 _MISSING_SUPPORT_VALUES = {"", "nan", "na", "n/a", "none", "null", "<na>"}
+_TRUE_BOOL_VALUES = {"1", "1.0", "true", "t", "yes", "y", "on"}
+_FALSE_BOOL_VALUES = {"0", "0.0", "false", "f", "no", "n", "off"}
 
 SCORE_FILENAMES = (
     "simulation_recovery_sweep_event_scores.csv",
@@ -421,6 +423,9 @@ def _candidate_support_loss(values: dict[str, object]) -> bool:
     missing = _numeric(values.get("candidate_true_path_missing_bins"))
     if math.isfinite(missing) and missing > 0:
         return True
+    fully_supported_bool = _optional_bool(values.get("candidate_true_path_fully_supported"))
+    if fully_supported_bool is False:
+        return True
     fully_supported = _numeric(values.get("candidate_true_path_fully_supported"))
     if math.isfinite(fully_supported) and fully_supported < 1:
         return True
@@ -473,15 +478,28 @@ def _numeric(value: object) -> float:
     return out if math.isfinite(out) else float("nan")
 
 
-def _as_bool(value: object) -> bool:
+def _optional_bool(value: object) -> bool | None:
     if isinstance(value, (bool, np.bool_)):
         return bool(value)
-    if pd.isna(value):
-        return False
+    try:
+        if pd.isna(value):
+            return None
+    except (TypeError, ValueError):
+        return None
     if isinstance(value, (int, float, np.integer, np.floating)):
         numeric = float(value)
-        return bool(math.isfinite(numeric) and numeric != 0.0)
-    return str(value).strip().lower() in {"1", "1.0", "true", "t", "yes", "y", "on"}
+        return bool(numeric) if math.isfinite(numeric) else None
+    text = str(value).strip().lower()
+    if text in _TRUE_BOOL_VALUES:
+        return True
+    if text in _FALSE_BOOL_VALUES:
+        return False
+    return None
+
+
+def _as_bool(value: object) -> bool:
+    parsed = _optional_bool(value)
+    return False if parsed is None else bool(parsed)
 
 
 def _bool_series(values: pd.Series) -> pd.Series:

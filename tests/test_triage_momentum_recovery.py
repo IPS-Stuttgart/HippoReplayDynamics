@@ -163,6 +163,31 @@ def test_triage_fills_blank_support_from_diagnostic_columns():
     assert bool(event["expected_model_evidence_comparable"])
 
 
+def test_triage_treats_string_false_path_support_as_support_loss():
+    scores = pd.DataFrame(
+        [
+            _row(0, "sorted-spike-state-space-diffusion", 4.0),
+            {
+                **_row(
+                    0,
+                    "sorted-spike-state-space-momentum",
+                    2.0,
+                    support="truncated_full_grid",
+                    comparable=False,
+                    missing_bins=0,
+                    coverage=1.0,
+                ),
+                "candidate_true_path_fully_supported": "False",
+            },
+        ]
+    )
+
+    event = build_momentum_recovery_triage(scores).event_table.iloc[0]
+
+    assert event["triage_category"] == "candidate_support_loss"
+    assert bool(event["candidate_support_loss"])
+
+
 def test_triage_parses_string_false_comparable_and_recovery_flags():
     scores = pd.DataFrame(
         [

@@ -26,6 +26,8 @@ def apply_simulation_best_row_flags_patch() -> None:
     @wraps(current)
     def simulation_event_best_rows_with_scoped_flags(event_scores: pd.DataFrame) -> pd.DataFrame:
         scored = reporting.ensure_evidence_support_columns(event_scores)
+        if scored.empty:
+            return pd.DataFrame()
         comparable = reporting._coerce_bool_series(scored["evidence_comparable"])
         status_ok = _status_success_mask(scored)
         ok = scored[status_ok & comparable]

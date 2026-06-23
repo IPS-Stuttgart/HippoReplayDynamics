@@ -41,29 +41,27 @@ def _patch_duration_helpers(module: Any) -> None:
     if getattr(module, "_duration_validation_patch_applied", False):
         return
 
-    original_coerce_transition_durations = module._coerce_transition_durations
     original_duration_adjusted_decays = module._duration_adjusted_decays
     original_time_scales = module._time_scales
     original_duration_scale_at = getattr(module, "_duration_scale_at", None)
 
-    @wraps(original_coerce_transition_durations)
+    @wraps(module._coerce_transition_durations)
     def coerce_transition_durations(values: Any, *, n_time: int, fallback_dt: float) -> np.ndarray:
+        expected = max(int(n_time) - 1, 0)
         fallback = float(fallback_dt)
         if not np.isfinite(fallback) or fallback <= 0.0:
             raise ValueError("fallback dt must be finite and positive")
-        durations = np.asarray(list(values), dtype=float)
-        expected = max(int(n_time) - 1, 0)
+
+        raw_values = list(values)
+        if len(raw_values) == 0:
+            return np.full(expected, fallback, dtype=float)
+
+        durations = np.asarray(raw_values, dtype=float)
         if durations.ndim != 1:
             raise ValueError("transition durations must be one-dimensional")
-        if durations.size:
-            if durations.shape != (expected,):
-                raise ValueError(f"transition durations must have shape {(expected,)}, got {durations.shape}")
-            _valid_transition_durations(durations)
-        return original_coerce_transition_durations(
-            durations,
-            n_time=n_time,
-            fallback_dt=fallback,
-        )
+        if durations.shape != (expected,):
+            raise ValueError(f"transition durations must have shape {(expected,)}, got {durations.shape}")
+        return _valid_transition_durations(durations)
 
     @wraps(original_duration_adjusted_decays)
     def duration_adjusted_decays(config: object, durations: Any, reference_dt: float) -> np.ndarray:

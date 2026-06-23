@@ -163,8 +163,8 @@ def _patch_result_improvement_wrappers(extensions: Any) -> None:
                 [forward.trajectory_log_posterior, reverse.trajectory_log_posterior],
                 weights,
             )
-        if terminal is None and trajectory is not None:
-            terminal = trajectory[-1].copy()
+        if trajectory is not None:
+            terminal = np.asarray(trajectory[-1], dtype=float).copy()
         if terminal is not None:
             diagnostics.update(_posterior_diagnostics(terminal, bin_centers))
         return EventScore(
@@ -272,12 +272,18 @@ def _patch_direct_reverse_wrappers(extensions: Any, reverse_models: Any) -> None
             weights,
         )
         trajectory = None
-        if return_trajectory is not False:
+        if (
+            return_trajectory is not False
+            and forward.trajectory_log_posterior is not None
+            and reverse.trajectory_log_posterior is not None
+        ):
             trajectory = reverse_models._mixture_log_posterior(  # noqa: SLF001
                 forward.trajectory_log_posterior,
                 reverse.trajectory_log_posterior,
                 weights,
             )
+        if trajectory is not None:
+            terminal = np.asarray(trajectory[-1], dtype=float).copy()
         diagnostics = {
             "time_direction": "bidirectional-mixture",
             "base_model": str(forward.model_name),

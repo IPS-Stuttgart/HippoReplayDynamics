@@ -127,8 +127,10 @@ def build_momentum_recovery_triage(
     frame = _with_support_columns(scores)
     if "true_model" in frame.columns:
         frame = frame[frame["true_model"].astype(str).str.lower().eq("momentum")].copy()
+    elif "expected_model" in frame.columns:
+        frame = frame[frame["expected_model"].astype(str).eq(expected_model)].copy()
     else:
-        frame = frame[frame.get("expected_model", "").astype(str).eq(expected_model)].copy()
+        frame = frame.copy()
     if frame.empty:
         empty = pd.DataFrame()
         return MomentumRecoveryTriageTables(empty, empty, empty)

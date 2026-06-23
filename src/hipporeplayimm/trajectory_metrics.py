@@ -26,8 +26,12 @@ def trajectory_quality_metrics(
         raise ValueError("trajectory_log_posterior must have shape (time, bins)")
     if logp.shape[0] == 0 or logp.shape[1] == 0:
         raise ValueError("trajectory_log_posterior must contain at least one time bin and one position bin")
+    if centers.ndim == 1:
+        centers = centers[:, None]
     if centers.ndim != 2 or centers.shape[0] != logp.shape[1]:
-        raise ValueError("bin_centers must have shape (bins, position_dim)")
+        raise ValueError("bin_centers must have shape (bins,) or (bins, position_dim)")
+    if not np.all(np.isfinite(centers)):
+        raise ValueError("bin_centers must contain finite values")
     if np.any(np.isnan(logp)) or np.any(np.isposinf(logp)):
         raise ValueError("trajectory_log_posterior cannot contain NaN or +inf")
     row_log_norm = logsumexp(logp, axis=1)

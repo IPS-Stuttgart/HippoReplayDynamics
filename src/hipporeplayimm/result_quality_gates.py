@@ -24,6 +24,7 @@ MARGIN_WEAK = "weak"
 MARGIN_STRONG = "strong"
 MARGIN_DECISIVE = "decisive"
 MARGIN_UNKNOWN = "unknown"
+_MISSING_STATUS_VALUES = {"", "nan", "na", "n/a", "none", "null", "<na>"}
 
 
 def evidence_margin_label(margin: object) -> str:
@@ -283,7 +284,27 @@ def write_result_quality_tables(frame: pd.DataFrame, outdir: str | Path) -> None
 def _successful_rows(frame: pd.DataFrame) -> pd.DataFrame:
     if "status" not in frame:
         return frame.copy()
-    return frame[frame["status"].astype(str).eq("success")].copy()
+    return frame[_status_success_mask(frame["status"])].copy()
+
+
+def _status_success_mask(status: pd.Series) -> pd.Series:
+    return status.map(_status_is_success_or_missing).astype(bool)
+
+
+def _status_is_success_or_missing(value: object) -> bool:
+    if _is_missing_status(value):
+        return True
+    return str(value).strip().lower() == "success"
+
+
+def _is_missing_status(value: object) -> bool:
+    try:
+        missing = pd.isna(value)
+    except (TypeError, ValueError):
+        missing = False
+    if isinstance(missing, (bool, np.bool_)) and bool(missing):
+        return True
+    return str(value).strip().lower() in _MISSING_STATUS_VALUES
 
 
 def _annotate_margin_scope(

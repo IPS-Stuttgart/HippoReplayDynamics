@@ -38,6 +38,10 @@ class GoalStateSpaceReplayModel:
         centers = np.asarray(bin_centers, dtype=float)
         if centers.ndim != 2:
             raise ValueError('bin_centers must have shape (n_bins, position_dim)')
+        if centers.shape[0] == 0:
+            raise ValueError('bin_centers must contain at least one position')
+        if not np.all(np.isfinite(centers)):
+            raise ValueError('bin_centers must be finite')
         if emissions.n_bins != centers.shape[0]:
             raise ValueError('emissions.n_bins must match bin_centers rows')
         transition_sigma_cm_sqrt_s = float(self.transition_sigma_cm_sqrt_s)
@@ -222,6 +226,10 @@ def _goal_transition_matrix(
         raise ValueError('max_step_sigma must be finite and positive')
     centers = np.asarray(bin_centers, dtype=float)
     goal = np.asarray(goal, dtype=float)
+    if centers.ndim != 2 or centers.shape[0] == 0:
+        raise ValueError('bin_centers must have shape (n_bins, position_dim) and contain at least one row')
+    if not np.all(np.isfinite(centers)):
+        raise ValueError('bin_centers must be finite')
     if goal.shape != (centers.shape[1],):
         raise ValueError('goal must have one coordinate per position dimension')
 
@@ -238,8 +246,13 @@ def _goal_transition_matrix(
         if not np.any(keep):
             keep[int(np.argmin(dist2))] = True
         dst = np.flatnonzero(keep)
-        weights = np.exp(-0.5 * dist2[dst] / (sigma_cm * sigma_cm))
-        weights /= float(weights.sum())
+        log_weights = -0.5 * dist2[dst] / (sigma_cm * sigma_cm)
+        max_log_weight = float(np.max(log_weights))
+        weights = np.exp(log_weights - max_log_weight)
+        total_weight = float(weights.sum())
+        if not np.isfinite(total_weight) or total_weight <= 0.0:
+            raise ValueError('goal transition weights have no finite mass')
+        weights /= total_weight
         rows.extend(int(idx) for idx in dst)
         cols.extend([src] * len(dst))
         data.extend(float(value) for value in weights)

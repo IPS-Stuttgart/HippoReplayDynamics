@@ -5,6 +5,8 @@ from . import benchmark_cell_split_metadata as _benchmark_cell_split_metadata
 from . import benchmark_metadata_scope_patch as _benchmark_metadata_scope_patch
 from . import benchmark_relative_grouping as _benchmark_relative_grouping
 from . import bma_options_patch as _bma_options_patch
+from . import candidate_log_mass_validation as _candidate_log_mass_validation
+from . import candidate_support_normalization_validation as _candidate_support_normalization_validation
 from . import candidate_support_quality_patch as _candidate_support_quality_patch
 from . import cell_split_hashable_grouping as _cell_split_hashable_grouping
 from . import clusterless_config_validation as _clusterless_config_validation
@@ -12,6 +14,9 @@ from . import clusterless_ground_truth as _clusterless_ground_truth
 from . import data_cell_id_validation as _data_cell_id_validation
 from . import duration_candidate_metadata_patch as _duration_candidate_metadata_patch
 from . import duration_occupancy_metadata_guard as _duration_occupancy_metadata_guard
+from . import emission_cell_id_validation as _emission_cell_id_validation
+from . import encoding_select_cells_validation as _encoding_select_cells_validation
+from . import evidence_status_coercion as _evidence_status_coercion
 from . import goal_state_space_integration as _goal_state_space_integration
 from . import ground_truth as _ground_truth
 from . import ground_truth_cell_id_metadata as _ground_truth_cell_id_metadata
@@ -26,6 +31,7 @@ from . import observation_sweep_config_validation as _observation_sweep_config_v
 from . import occupancy_candidate_support as _occupancy_candidate_support
 from . import position_decoding_config_validation as _position_decoding_config_validation
 from . import pyrecest_score_metadata as _pyrecest_score_metadata
+from . import recovery_diagnostics_bool_patch as _recovery_diagnostics_bool_patch
 from . import reverse_time_terminal_guard as _reverse_time_terminal_guard
 from . import score_metadata as _score_metadata
 from . import simulation_best_row_flags as _simulation_best_row_flags
@@ -36,8 +42,10 @@ from . import simulation_recovery_runtime_limits as _simulation_recovery_runtime
 from . import sparse_momentum_duration_validation as _sparse_momentum_duration_validation
 from . import sparse_momentum_single_bin_diagnostics as _sparse_momentum_single_bin_diagnostics
 from . import spike_rate_metadata as _spike_rate_metadata
+from . import state_space_bin_center_validation as _state_space_bin_center_validation
 from . import state_space_bin_count_validation as _state_space_bin_count_validation
 from . import time_order_patch as _time_order_patch
+from . import wrapper_return_trajectory as _wrapper_return_trajectory
 
 # Keep score-table metadata and post-hoc decoding consistent before public
 # symbols are imported from the patched modules.
@@ -65,6 +73,7 @@ _ground_truth_cell_id_metadata.apply_ground_truth_cell_id_metadata_patch()
 _simulation_recovery_runtime_limits.apply_simulation_recovery_runtime_limit_validation_patch()
 _simulation_recovery_count_validation.apply_simulation_recovery_count_validation_patch()
 _reverse_time_terminal_guard.apply_reverse_time_terminal_guard_patch()
+_wrapper_return_trajectory.apply_wrapper_return_trajectory_patch()
 
 from .benchmarks import BenchmarkConfig, BenchmarkResult, run_open_field_benchmark
 from .clusterless import (
@@ -166,6 +175,7 @@ def apply_runtime_patches() -> None:
     _spike_rate_metadata.apply_spike_rate_metadata_patch()
     _clusterless_config_validation.apply_clusterless_encoding_config_validation_patch()
     _data_cell_id_validation.apply_data_cell_id_validation_patch()
+    _encoding_select_cells_validation.apply_encoding_select_cells_validation_patch()
     _position_decoding_config_validation.apply_position_decoding_config_validation_patch()
     _duration_candidate_metadata_patch.apply_duration_candidate_metadata_patch()
     _ground_truth._encoding_config_for_scores = _score_metadata.encoding_config_for_scores
@@ -177,21 +187,28 @@ def apply_runtime_patches() -> None:
     _apply_ground_truth_candidate_support_patch()
     _occupancy_candidate_support.apply_occupancy_candidate_support_patch()
     _apply_duration_dynamics_patch()
+    _emission_cell_id_validation.apply_emission_cell_id_validation_patch()
     _apply_state_space_imm_duration_patch()
     _apply_duration_occupancy_patch()
+    _candidate_log_mass_validation.apply_candidate_log_mass_validation_patch()
+    _candidate_support_normalization_validation.apply_candidate_support_normalization_validation_patch()
+    _state_space_bin_center_validation.apply_state_space_bin_center_validation_patch()
     _duration_occupancy_metadata_guard.apply_duration_occupancy_metadata_guard_patch()
     _sparse_momentum_duration_validation.apply_sparse_momentum_duration_validation_patch()
     _sparse_momentum_single_bin_diagnostics.apply_sparse_momentum_single_bin_diagnostics_patch()
     _time_order_patch.apply_reverse_emission_time_patch()
     _reverse_time_terminal_guard.apply_reverse_time_terminal_guard_patch()
+    _wrapper_return_trajectory.apply_wrapper_return_trajectory_patch()
     _synchronize_duration_patched_emission_builders()
     _patch_simulation_recovery_module(_simulation_recovery)
     _simulation_best_row_flags.apply_simulation_best_row_flags_patch()
+    _evidence_status_coercion.apply_evidence_status_coercion_patch()
     _latent_path_validation.apply_latent_path_validation_patch()
     _simulation_recovery_runtime_limits.apply_simulation_recovery_runtime_limit_validation_patch()
     _simulation_recovery_count_validation.apply_simulation_recovery_count_validation_patch()
     _apply_trajectory_imm_recovery_patch()
     _simulation_recovery_event_count.apply_simulation_recovery_event_count_patch()
+    _recovery_diagnostics_bool_patch.apply_recovery_diagnostics_bool_patch()
     _model_averaged_endpoint_scoping.apply_model_averaged_endpoint_scoping_patch()
     _ground_truth_window_scope.apply_ground_truth_window_scope_patch()
     _improved_model_evidence_registry_patch.apply_improved_model_evidence_registry_patch()

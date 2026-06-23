@@ -32,6 +32,19 @@ def test_observation_parameter_grid_cartesian_product():
     assert rows[-1]["spike_rate_scale"] == 1.0
 
 
+def test_observation_parameter_grid_allows_zero_smoothing_and_speed_threshold():
+    config = ObservationSweepConfig(
+        smoothing_sigmas_bins=(0.0,),
+        min_speed_cm_s=(0.0,),
+    )
+
+    rows = observation_parameter_grid(config)
+
+    assert len(rows) == 1
+    assert rows[0]["smoothing_sigma_bins"] == 0.0
+    assert rows[0]["min_speed_cm_s"] == 0.0
+
+
 def test_observation_parameter_grid_rejects_nonpositive_values():
     config = ObservationSweepConfig(rate_floor_hz=(0.0,))
 
@@ -41,6 +54,27 @@ def test_observation_parameter_grid_rejects_nonpositive_values():
         assert "rate_floor_hz" in str(exc)
     else:
         raise AssertionError("expected ValueError")
+
+
+def test_observation_parameter_grid_rejects_negative_nonnegative_values():
+    cases = [
+        (ObservationSweepConfig(smoothing_sigmas_bins=(-1.0,)), "smoothing_sigmas_bins"),
+        (ObservationSweepConfig(min_speed_cm_s=(-1.0,)), "min_speed_cm_s"),
+        (
+            ObservationSweepConfig(negative_binomial_overdispersions=(-1.0,)),
+            "negative_binomial_overdispersions",
+        ),
+    ]
+
+    for config, field_name in cases:
+        try:
+            observation_parameter_grid(config)
+        except ValueError as exc:
+            message = str(exc)
+            assert field_name in message
+            assert "nonnegative" in message
+        else:
+            raise AssertionError(f"expected ValueError for {field_name}")
 
 
 def test_observation_parameter_grid_rejects_nonfinite_values():

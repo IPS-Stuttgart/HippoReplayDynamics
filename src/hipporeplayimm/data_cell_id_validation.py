@@ -102,4 +102,8 @@ def _coerce_integral_ids(values: Any, name: str) -> np.ndarray:
     rounded = np.rint(ids)
     if not np.all(np.isclose(ids, rounded, rtol=0.0, atol=1e-9)):
         raise ValueError(f"{name} must be integer-valued")
-    return rounded.astype(int)
+    integer_dtype = np.dtype(int)
+    integer_info = np.iinfo(integer_dtype)
+    if not np.all((rounded >= integer_info.min) & (rounded <= integer_info.max)):
+        raise ValueError(f"{name} must fit into integer identifier range")
+    return rounded.astype(integer_dtype)

@@ -1,0 +1,125 @@
+---
+name: Olafsdottir 1D Z-track evidence smoke
+
+on:
+  workflow_dispatch:
+    inputs:
+      extracted_root:
+        description: "Extracted Olafsdottir2016 dataset root on the runner"
+        required: true
+        default: "/home/github-runner/.cache/datasets/olafsdottir2016/extracted"
+      session:
+        description: "Derived session ID, e.g. R2142/ZTrack20140806"
+        required: true
+        default: "R2142/ZTrack20140806"
+      max_events:
+        description: "Maximum SleepPOST candidate events to score"
+        required: true
+        default: "5"
+      models:
+        description: "Space-separated exact-core 1D models"
+        required: true
+        default: "sorted-spike-state-space-stationary sorted-spike-state-space-diffusion sorted-spike-state-space-fragmented sorted-spike-state-space-first-order-imm sorted-spike-state-space-momentum-exact-sparse"
+      min_event_spikes:
+        description: "Minimum spikes per detected SleepPOST event"
+        required: true
+        default: "5"
+      min_event_active_cells:
+        description: "Minimum active cells per detected SleepPOST event"
+        required: true
+        default: "3"
+      lfp_detector_mode:
+        description: "LFP detector mode used by the bridge adapter"
+        required: true
+        default: "mean-envelope"
+      output:
+        description: "Output directory"
+        required: true
+        default: "results/olafsdottir-1d-evidence"
+
+permissions:
+  contents: read
+
+jobs:
+  olafsdottir-1d-evidence:
+    name: Olafsdottir 1D evidence workflow smoke
+    runs-on: self-hosted
+    timeout-minutes: 180
+    env:
+      EXTRACTED_ROOT: ${{ inputs.extracted_root }}
+      SESSION: ${{ inputs.session }}
+      MAX_EVENTS: ${{ inputs.max_events }}
+      MODELS: ${{ inputs.models }}
+      MIN_EVENT_SPIKES: ${{ inputs.min_event_spikes }}
+      MIN_EVENT_ACTIVE_CELLS: ${{ inputs.min_event_active_cells }}
+      LFP_DETECTOR_MODE: ${{ inputs.lfp_detector_mode }}
+      OUTPUT: ${{ inputs.output }}
+      OMP_NUM_THREADS: "1"
+      OPENBLAS_NUM_THREADS: "1"
+      MKL_NUM_THREADS: "1"
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Install package
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e .
+
+      - name: Run 1D evidence smoke
+        run: |
+          set -euo pipefail
+          python scripts/benchmark_olafsdottir_1d_replay_evidence.py \
+            --extracted-root "${EXTRACTED_ROOT}" \
+            --derived-root "results/olafsdottir-1d-derived" \
+            --output "${OUTPUT}" \
+            --session "${SESSION}" \
+            --max-events "${MAX_EVENTS}" \
+            --models "${MODELS}" \
+            --lfp-detector-mode "${LFP_DETECTOR_MODE}" \
+            --min-event-spikes "${MIN_EVENT_SPIKES}" \
+            --min-event-active-cells "${MIN_EVENT_ACTIVE_CELLS}"
+          test -s "${OUTPUT}/olafsdottir_1d_event_model_evidence.csv"
+          test -s "${OUTPUT}/olafsdottir_1d_family_margin_decisions.csv"
+          test -s "${OUTPUT}/olafsdottir_1d_family_margin_summary.csv"
+          test -s "${OUTPUT}/olafsdottir_1d_exact_core_model_claim_summary.csv"
+          test -s "${OUTPUT}/olafsdottir_1d_paired_momentum_diffusion_summary.csv"
+          test -s "${OUTPUT}/olafsdottir_1d_session_summary.csv"
+          test -s "${OUTPUT}/olafsdottir_1d_control_gate_summary.csv"
+
+      - name: Print smoke summaries
+        if: always()
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import pandas as pd
+          root = Path("${{ inputs.output }}")
+          for name in [
+              "olafsdottir_1d_family_margin_summary.csv",
+              "olafsdottir_1d_exact_core_model_claim_summary.csv",
+              "olafsdottir_1d_paired_momentum_diffusion_summary.csv",
+              "olafsdottir_1d_session_summary.csv",
+              "olafsdottir_1d_control_gate_summary.csv",
+          ]:
+              path = root / name
+              print(f"\n## {name}")
+              if path.is_file():
+                  print(pd.read_csv(path).to_string(index=False))
+              else:
+                  print("missing")
+          PY
+
+      - name: Upload Olafsdottir 1D evidence results
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: olafsdottir-1d-evidence-${{ github.run_id }}
+          path: ${{ inputs.output }}
+          if-no-files-found: error

@@ -21,6 +21,7 @@ from hipporeplayimm.evidence_reporting import (
     _coerce_bool_series,
     ensure_evidence_support_columns,
 )
+from hipporeplayimm.evidence_status_coercion import _status_success_mask
 
 _EVENT_COLUMNS = ("session", "event_index")
 _AUDIT_FILENAMES = {
@@ -37,8 +38,7 @@ def _successful_rows(scores: pd.DataFrame) -> pd.DataFrame:
     rows = ensure_evidence_support_columns(scores)
     if rows.empty:
         return rows
-    if "status" in rows:
-        rows = rows[rows["status"].eq("success")].copy()
+    rows = rows[_status_success_mask(rows)].copy()
     rows["evidence_comparable"] = _coerce_bool_series(rows["evidence_comparable"])
     return rows
 

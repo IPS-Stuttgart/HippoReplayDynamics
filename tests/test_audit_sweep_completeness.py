@@ -83,6 +83,53 @@ def test_recovery_sweep_completeness_treats_failures_as_not_final(tmp_path):
     assert row["n_failure_rows"] == 1
 
 
+def test_sweep_completeness_treats_blank_status_as_legacy_success(tmp_path):
+    root = tmp_path / "artifacts"
+    plan = root / "state-space-evidence-sweep-plan-1"
+    plan.mkdir(parents=True)
+    pd.DataFrame([{"id": "a"}]).to_csv(plan / "matrix.csv", index=False)
+
+    run = root / "state-space-evidence-sweep-a"
+    run.mkdir()
+    pd.DataFrame(
+        [
+            {
+                "status": "",
+                "matrix_id": "a",
+                "session": "Rat1/Open1",
+                "event_index": 0,
+                "model": "sorted-spike-state-space-diffusion",
+                "log_evidence": -1.0,
+            },
+            {
+                "status": None,
+                "matrix_id": "a",
+                "session": "Rat1/Open1",
+                "event_index": 1,
+                "model": "sorted-spike-state-space-momentum-exact-sparse",
+                "log_evidence": -2.0,
+            },
+        ]
+    ).to_csv(run / "event_model_evidence.csv", index=False)
+    pd.DataFrame([{"matrix_id": "a", "model": "overall"}]).to_csv(
+        run / "model_evidence_summary.csv",
+        index=False,
+    )
+
+    table = audit_sweep_completeness(
+        artifact_root=root,
+        output=tmp_path / "completeness.csv",
+        mode="state-space-evidence",
+    )
+
+    row = table.iloc[0]
+    assert bool(row["artifact_complete"])
+    assert bool(row["included_in_final_ranking"])
+    assert row["n_success_rows"] == 2
+    assert row["n_failure_rows"] == 0
+    assert row["completeness_reason"] == "complete"
+
+
 def test_sweep_summary_json_parses_string_false_flags(tmp_path):
     table = pd.DataFrame(
         [

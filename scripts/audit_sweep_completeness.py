@@ -45,6 +45,8 @@ PRESETS: dict[str, SweepPreset] = {
     ),
 }
 
+_SUCCESS_STATUS_STRINGS = {"", "success", "nan", "na", "n/a", "none", "null", "<na>"}
+
 
 def audit_sweep_completeness(
     *,
@@ -222,7 +224,7 @@ def _score_counts(paths: Sequence[Path]) -> dict[str, int]:
             continue
         n_event_rows += int(len(frame))
         if "status" in frame.columns:
-            ok = frame["status"].astype(str).eq("success")
+            ok = _success_status_series(frame["status"])
             n_success_rows += int(ok.sum())
             n_failure_rows += int((~ok).sum())
         else:
@@ -292,6 +294,11 @@ def _bool_value(value: object) -> bool:
 
 def _bool_series(values: pd.Series) -> pd.Series:
     return values.map(_bool_value).astype(bool)
+
+
+def _success_status_series(values: pd.Series) -> pd.Series:
+    normalized = values.astype("string").str.strip().str.lower()
+    return normalized.isna() | normalized.isin(_SUCCESS_STATUS_STRINGS)
 
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:

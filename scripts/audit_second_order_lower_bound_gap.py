@@ -75,6 +75,7 @@ TRUNCATED_DIAGNOSTIC_COLUMNS = (
     "candidate_true_triplet_coverage",
     "candidate_true_path_missing_bins",
 )
+_MISSING_SUPPORT_STRINGS = {"", "nan", "na", "n/a", "none", "null", "<na>"}
 
 
 @dataclass
@@ -205,22 +206,40 @@ def summarize_gap_table(event_gaps: pd.DataFrame) -> pd.DataFrame:
 
 def _with_support_columns(scores: pd.DataFrame) -> pd.DataFrame:
     out = scores.copy()
-    if "evidence_support" not in out.columns:
-        support_columns = [
-            column
-            for column in (
-                "diagnostic_candidate_evidence_support",
-                "diagnostic_state_space_momentum_evidence_support",
-                "diagnostic_state_space_imm_evidence_support",
-            )
-            if column in out.columns
-        ]
-        out["evidence_support"] = (
-            out[support_columns].bfill(axis=1).iloc[:, 0].fillna(EXACT_SUPPORT)
-            if support_columns
-            else EXACT_SUPPORT
-        )
+    inferred = _support_from_diagnostic_columns(out)
+    if "evidence_support" in out.columns:
+        missing = out["evidence_support"].map(_is_missing_support)
+        out["evidence_support"] = out["evidence_support"].where(~missing, inferred)
+    else:
+        out["evidence_support"] = inferred
     return out
+
+
+def _support_from_diagnostic_columns(scores: pd.DataFrame) -> pd.Series:
+    support_columns = [
+        column
+        for column in (
+            "diagnostic_candidate_evidence_support",
+            "diagnostic_state_space_momentum_evidence_support",
+            "diagnostic_state_space_imm_evidence_support",
+        )
+        if column in scores.columns
+    ]
+    if not support_columns:
+        return pd.Series(EXACT_SUPPORT, index=scores.index)
+    diagnostics = scores[support_columns].copy()
+    for column in support_columns:
+        diagnostics[column] = diagnostics[column].where(~diagnostics[column].map(_is_missing_support), pd.NA)
+    return diagnostics.bfill(axis=1).iloc[:, 0].fillna(EXACT_SUPPORT)
+
+
+def _is_missing_support(value: object) -> bool:
+    try:
+        if pd.isna(value):
+            return True
+    except (TypeError, ValueError):
+        return False
+    return str(value).strip().lower() in _MISSING_SUPPORT_STRINGS
 
 
 def _successful_rows(scores: pd.DataFrame) -> pd.DataFrame:

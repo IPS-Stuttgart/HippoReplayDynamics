@@ -35,6 +35,7 @@ _CANONICAL_MODELS = {
     "imm",
     "fragmented",
 }
+_MISSING_STATUS_VALUES = {"", "nan", "none", "null", "<na>"}
 
 
 def canonical_model_name(model: object) -> str:
@@ -147,7 +148,7 @@ def load_scores(root: str | Path, run_label: str, *, exact_only: bool = False) -
     if missing:
         raise ValueError(f"{source} is missing required columns: {sorted(missing)}")
     if "status" in frame:
-        frame = frame[frame["status"].eq("success")].copy()
+        frame = frame[_status_success_mask(frame)].copy()
     frame = ensure_evidence_support_columns(frame)
     frame["evidence_comparable"] = _coerce_bool_series(frame["evidence_comparable"])
     if exact_only:
@@ -157,6 +158,22 @@ def load_scores(root: str | Path, run_label: str, *, exact_only: bool = False) -
     frame["canonical_model"] = frame["model"].map(canonical_model_name)
     frame = add_relative_log_evidence(frame, force=exact_only)
     return frame
+
+
+def _status_success_mask(frame: pd.DataFrame) -> pd.Series:
+    if "status" not in frame:
+        return pd.Series(True, index=frame.index, dtype=bool)
+    return frame["status"].map(_status_is_success).astype(bool)
+
+
+def _status_is_success(value: object) -> bool:
+    try:
+        if pd.isna(value):
+            return True
+    except (TypeError, ValueError):
+        pass
+    text = str(value).strip().lower()
+    return text == "success" or text in _MISSING_STATUS_VALUES
 
 
 def add_relative_log_evidence(frame: pd.DataFrame, *, force: bool = False) -> pd.DataFrame:

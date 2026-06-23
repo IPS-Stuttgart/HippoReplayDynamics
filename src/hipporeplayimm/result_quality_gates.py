@@ -329,7 +329,8 @@ def _annotate_margin_scope(
     if rows.empty or "log_evidence" not in rows:
         return
     values = pd.to_numeric(rows["log_evidence"], errors="coerce")
-    rows = rows.loc[values.notna()].copy()
+    finite = pd.Series(np.isfinite(values.to_numpy(dtype=float)), index=values.index)
+    rows = rows.loc[finite].copy()
     values = values.loc[rows.index].to_numpy(dtype=float)
     if rows.empty:
         return

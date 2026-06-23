@@ -82,8 +82,9 @@ def apply_clusterless_mark_group_validation_patch() -> None:
         if raw_group_ids.shape[0] != int(n_marks):
             raise ValueError(f"Expected {n_marks} mark group IDs, got {raw_group_ids.shape[0]}")
         coerced = _coerce_integral_group_ids(raw_group_ids, "mark group IDs")
-        sorted_order = np.argsort(self.group_ids)
-        sorted_groups = _coerce_integral_group_ids(self.group_ids, "encoding mark group IDs")[sorted_order]
+        encoding_group_ids = _coerce_integral_group_ids(self.group_ids, "encoding mark group IDs")
+        sorted_order = np.argsort(encoding_group_ids)
+        sorted_groups = encoding_group_ids[sorted_order]
         positions = np.searchsorted(sorted_groups, coerced)
         in_bounds = positions < sorted_groups.shape[0]
         matches = np.zeros(int(n_marks), dtype=bool)

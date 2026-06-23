@@ -72,6 +72,14 @@ def test_clusterless_mark_likelihood_rejects_out_of_range_group_ids():
         encoding.log_mark_likelihood(np.array([[0.0]]), group_ids=np.array([1e100]))
 
 
+def test_clusterless_mark_likelihood_maps_object_string_group_ids_numerically():
+    encoding = _encoding_with_group_ids(np.array(["1", "10", "2"], dtype=object))
+
+    group_indices = encoding._coerce_group_indices(np.array(["2", "10", "1"], dtype=object), n_marks=3)
+
+    assert group_indices.tolist() == [2, 1, 0]
+
+
 def test_clusterless_tetrode_group_extraction_rejects_boolean_group_ids():
     session = _session_with_mark_groups(np.array([True, False]))
 

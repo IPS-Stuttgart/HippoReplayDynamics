@@ -6,6 +6,7 @@ import pytest
 from hipporeplayimm.state_space_displacement_momentum import (
     _coerce_transition_durations,
     _duration_adjusted_decays,
+    _duration_scale_at,
     _time_scales,
 )
 from hipporeplayimm.state_space_model import StateSpaceDecoderConfig
@@ -43,6 +44,11 @@ def test_displacement_duration_helpers_reject_invalid_transition_durations() -> 
             _duration_adjusted_decays(config, durations, 0.01)
         with pytest.raises(ValueError, match="transition durations"):
             _time_scales(durations)
+        with pytest.raises(ValueError, match="transition durations"):
+            _duration_scale_at(durations, 0, 0.01)
+
+    with pytest.raises(ValueError, match="reference dt"):
+        _duration_scale_at(np.array([0.01], dtype=float), 0, 0.0)
 
 
 def test_displacement_duration_helpers_preserve_valid_outputs() -> None:
@@ -53,3 +59,4 @@ def test_displacement_duration_helpers_preserve_valid_outputs() -> None:
 
     np.testing.assert_allclose(decays, np.array([0.9, 0.81, 0.9], dtype=float))
     np.testing.assert_allclose(scales, np.array([1.0, 2.0, 0.5], dtype=float))
+    assert _duration_scale_at(durations, 1, 0.01) == pytest.approx(2.0)

@@ -24,6 +24,7 @@ from hipporeplayimm.evidence_reporting import (
     evidence_support_from_row as _canonical_evidence_support_from_row,
     ensure_evidence_support_columns as _canonical_ensure_evidence_support_columns,
 )
+from hipporeplayimm.evidence_status_coercion import _status_success_mask
 
 SAFE_COMPARISON_SUPPORTS = frozenset({EXACT_EVIDENCE_SUPPORT, TRUNCATED_EVIDENCE_SUPPORT})
 _STATE_SPACE_PREFIXES = (
@@ -56,7 +57,7 @@ def evidence_support_summary(df: pd.DataFrame) -> pd.DataFrame:
     """Summarize exact and truncated evidence rows by model."""
 
     df = ensure_evidence_support_columns(df)
-    ok = df[df.get("status", "success") == "success"].copy()
+    ok = df[_status_success_mask(df)].copy()
     columns = [
         "model",
         "model_family",
@@ -200,7 +201,7 @@ def paired_delta_summary(df: pd.DataFrame) -> pd.DataFrame:
     """Create support-labelled session-level paired-delta summaries."""
 
     df = ensure_evidence_support_columns(df)
-    ok = df[df.get("status", "success") == "success"].copy()
+    ok = df[_status_success_mask(df)].copy()
     columns = [
         "session",
         "comparison",

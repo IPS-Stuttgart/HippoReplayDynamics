@@ -38,9 +38,9 @@ def test_validate_session_position_decoding_rejects_invalid_config_values(kwargs
 def test_position_decoding_config_validation_normalizes_accepted_values():
     config = PositionDecodingConfig(
         decode_bin_s="1.0",  # type: ignore[arg-type]
-        n_folds="3",  # type: ignore[arg-type]
-        max_windows_per_session="9",  # type: ignore[arg-type]
-        min_spikes_per_window="0",  # type: ignore[arg-type]
+        n_folds="3.0",  # type: ignore[arg-type]
+        max_windows_per_session="9.0",  # type: ignore[arg-type]
+        min_spikes_per_window="0.0",  # type: ignore[arg-type]
     )
 
     normalized = _validated_position_decoding_config(config)

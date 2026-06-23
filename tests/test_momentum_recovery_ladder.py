@@ -99,6 +99,43 @@ def test_ladder_summary_parses_string_false_recovery_flags():
     assert bool(summary.loc[0, "oracle_candidate_support"]) is False
 
 
+def test_ladder_summary_counts_repeated_event_indices_across_sessions():
+    events = pd.DataFrame(
+        [
+            {
+                "ladder_tier": "native_candidate_pairwise_momentum",
+                "ladder_tier_index": 3,
+                "ladder_expected_model": PAIRWISE_MOMENTUM_MODEL,
+                "oracle_candidate_support": False,
+                "ladder_description": "",
+                "session": "Rat1/Open1",
+                "event_index": 0,
+                "certified_vs_exact_recovered_expected_model": True,
+                "expected_minus_best_comparable_log_evidence": 2.0,
+                "certified_vs_exact_reason": "expected_exact_best",
+            },
+            {
+                "ladder_tier": "native_candidate_pairwise_momentum",
+                "ladder_tier_index": 3,
+                "ladder_expected_model": PAIRWISE_MOMENTUM_MODEL,
+                "oracle_candidate_support": False,
+                "ladder_description": "",
+                "session": "Rat2/Open1",
+                "event_index": 0,
+                "certified_vs_exact_recovered_expected_model": False,
+                "expected_minus_best_comparable_log_evidence": -1.0,
+                "certified_vs_exact_reason": "expected_below_best_comparable",
+            },
+        ]
+    )
+
+    summary = summarize_ladder_tiers(events)
+
+    assert summary.loc[0, "momentum_events"] == 2
+    assert summary.loc[0, "certified_or_strict_recovered_events"] == 1
+    assert summary.loc[0, "certified_or_strict_recovery_fraction"] == 0.5
+
+
 def test_ladder_event_recovery_parses_string_false_oracle_support():
     scores = pd.DataFrame(
         _tier_rows(

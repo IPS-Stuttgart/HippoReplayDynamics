@@ -85,6 +85,19 @@ def test_lower_bound_gap_treats_blank_status_as_legacy_success():
     assert tables.event_gaps.iloc[0]["lower_bound_gap_log_evidence"] == 2.0
 
 
+def test_lower_bound_gap_fills_blank_support_from_diagnostics():
+    exact = _row(0, "sorted-spike-state-space-momentum", 10.0, "", 0)
+    exact["diagnostic_state_space_momentum_evidence_support"] = "exact_full_grid"
+    truncated = _row(0, "sorted-spike-state-space-momentum", 8.0, "", 128)
+    truncated["diagnostic_candidate_evidence_support"] = "truncated_full_grid"
+    scores = pd.DataFrame([exact, truncated])
+
+    tables = build_lower_bound_gap_tables(scores)
+
+    assert len(tables.event_gaps) == 1
+    assert tables.event_gaps.iloc[0]["lower_bound_gap_log_evidence"] == 2.0
+
+
 def test_lower_bound_gap_returns_empty_without_exact_pairs():
     scores = pd.DataFrame(
         [

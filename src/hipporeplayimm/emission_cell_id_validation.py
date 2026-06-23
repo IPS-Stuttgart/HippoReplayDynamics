@@ -56,32 +56,32 @@ def _cell_id_row_indices(cell_ids: np.ndarray, spike_cell_ids: np.ndarray) -> np
 def apply_emission_cell_id_validation_patch() -> None:
     """Install integral-ID validation for emission row lookups."""
 
-    from . import encoding
+    from . import encoding as encoding_module
 
-    if getattr(encoding, _PATCHED_FLAG, False):
+    if getattr(encoding_module, _PATCHED_FLAG, False):
         return
 
-    original_build_emissions = encoding.build_emissions
+    original_build_emissions = encoding_module.build_emissions
 
     @wraps(original_build_emissions)
-    def build_emissions(session, encoding_model, ripple, config=None):
-        if int(encoding_model.n_cells) > 0:
-            _coerce_integral_ids(encoding_model.cell_ids, "encoding.cell_ids")
+    def build_emissions(session, encoding, ripple, config=None):
+        if int(encoding.n_cells) > 0:
+            _coerce_integral_ids(encoding.cell_ids, "encoding.cell_ids")
 
         spikes = np.asarray(session.spikes)
-        if spikes.size and int(encoding_model.n_cells) > 0:
+        if spikes.size and int(encoding.n_cells) > 0:
             if spikes.ndim != 2 or spikes.shape[1] < 2:
                 raise ValueError("spikes must be two-dimensional with at least time and cell-id columns")
-            ripple_event = encoding._coerce_ripple_event(session, ripple)
+            ripple_event = encoding_module._coerce_ripple_event(session, ripple)
             in_ripple = (spikes[:, 0] >= ripple_event.start) & (spikes[:, 0] < ripple_event.end)
             if np.any(in_ripple):
                 _coerce_integral_ids(spikes[in_ripple, 1], "spike cell IDs")
 
-        return original_build_emissions(session, encoding_model, ripple, config)
+        return original_build_emissions(session, encoding, ripple, config)
 
-    encoding._cell_id_row_indices = _cell_id_row_indices
-    encoding.build_emissions = build_emissions
-    setattr(encoding, _PATCHED_FLAG, True)
+    encoding_module._cell_id_row_indices = _cell_id_row_indices
+    encoding_module.build_emissions = build_emissions
+    setattr(encoding_module, _PATCHED_FLAG, True)
 
 
 __all__ = ["apply_emission_cell_id_validation_patch"]

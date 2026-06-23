@@ -3,6 +3,7 @@ from __future__ import annotations
 import pandas as pd
 
 from scripts.triage_momentum_recovery import (
+    DEFAULT_EXPECTED_MOMENTUM_MODEL,
     build_momentum_recovery_triage,
     summarize_triage_events,
 )
@@ -110,6 +111,23 @@ def test_triage_marks_oracle_support_recovery_separately():
 
     assert events.iloc[0]["triage_category"] == "oracle_support_recovers"
     assert bool(events.iloc[0]["certified_or_strict_recovery"])
+
+
+def test_triage_defaults_to_requested_model_without_model_metadata_columns():
+    rows = [
+        _row(0, "sorted-spike-state-space-diffusion", 0.0),
+        _row(0, DEFAULT_EXPECTED_MOMENTUM_MODEL, 2.0),
+    ]
+    for row in rows:
+        row.pop("true_model")
+        row.pop("expected_model")
+    scores = pd.DataFrame(rows)
+
+    events = build_momentum_recovery_triage(scores).event_table
+
+    assert len(events) == 1
+    assert events.iloc[0]["expected_model"] == DEFAULT_EXPECTED_MOMENTUM_MODEL
+    assert events.iloc[0]["triage_category"] == "strict_exact_recovery"
 
 
 def test_triage_parses_string_false_comparable_and_recovery_flags():

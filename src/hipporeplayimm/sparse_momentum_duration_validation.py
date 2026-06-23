@@ -34,6 +34,7 @@ def apply_sparse_momentum_duration_validation_patch() -> None:
     displacement_imm._coerce_transition_durations = displacement_momentum._coerce_transition_durations
     displacement_imm._duration_adjusted_decays = displacement_momentum._duration_adjusted_decays
     displacement_imm._time_scales = displacement_momentum._time_scales
+    displacement_imm._duration_scale_at = displacement_momentum._duration_scale_at
 
 
 def _patch_duration_helpers(module: Any) -> None:
@@ -43,6 +44,7 @@ def _patch_duration_helpers(module: Any) -> None:
     original_coerce_transition_durations = module._coerce_transition_durations
     original_duration_adjusted_decays = module._duration_adjusted_decays
     original_time_scales = module._time_scales
+    original_duration_scale_at = getattr(module, "_duration_scale_at", None)
 
     @wraps(original_coerce_transition_durations)
     def coerce_transition_durations(values: Any, *, n_time: int, fallback_dt: float) -> np.ndarray:
@@ -78,6 +80,20 @@ def _patch_duration_helpers(module: Any) -> None:
     module._coerce_transition_durations = coerce_transition_durations
     module._duration_adjusted_decays = duration_adjusted_decays
     module._time_scales = time_scales
+    if original_duration_scale_at is not None:
+
+        @wraps(original_duration_scale_at)
+        def duration_scale_at(durations: Any, transition_index: int, reference_dt: float) -> float:
+            reference = float(reference_dt)
+            if not np.isfinite(reference) or reference <= 0.0:
+                raise ValueError("reference dt must be finite and positive")
+            return original_duration_scale_at(
+                _valid_transition_durations(durations),
+                transition_index,
+                reference,
+            )
+
+        module._duration_scale_at = duration_scale_at
     module._duration_validation_patch_applied = True
 
 

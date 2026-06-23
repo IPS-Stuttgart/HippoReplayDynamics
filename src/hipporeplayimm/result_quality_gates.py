@@ -25,6 +25,18 @@ MARGIN_STRONG = "strong"
 MARGIN_DECISIVE = "decisive"
 MARGIN_UNKNOWN = "unknown"
 _MISSING_STATUS_VALUES = {"", "nan", "na", "n/a", "none", "null", "<na>"}
+_EVENT_GROUP_BASE_COLUMNS = ("session", "event_index")
+_EVENT_GROUP_SCOPE_COLUMNS = (
+    "window_role",
+    "window_index",
+    "null_index",
+    "matched_null_rank",
+    "benchmark_random_seed",
+    "benchmark_cell_split_index",
+    "benchmark_cell_split_seed",
+    "benchmark_event_subset_seed",
+    "event_window_variant",
+)
 
 
 def evidence_margin_label(margin: object) -> str:
@@ -48,9 +60,9 @@ def evidence_margin_label(margin: object) -> str:
 def event_group_columns(frame: pd.DataFrame) -> list[str]:
     """Return columns identifying one model-comparison unit."""
 
-    columns = ["session", "event_index"]
-    for optional in ("window_index", "benchmark_cell_split_index"):
-        if optional in frame.columns:
+    columns = [column for column in _EVENT_GROUP_BASE_COLUMNS if column in frame.columns]
+    for optional in _EVENT_GROUP_SCOPE_COLUMNS:
+        if optional in frame.columns and optional not in columns:
             columns.append(optional)
     return columns
 
@@ -326,7 +338,7 @@ def _annotate_margin_scope(
     ordered_values = values[order]
     best_index = ordered_index[0]
     best_model = str(out.loc[best_index, "model"]) if "model" in out else ""
-    margin = float(ordered_values[0] - ordered_values[1]) if ordered_values.size > 1 else float("inf")
+    margin = float(ordered_values[0] - ordered_values[1]) if ordered_values.shape[0] > 1 else np.inf
     out.loc[group_index, f"{prefix}_best_model"] = best_model
     out.loc[group_index, f"{prefix}_log_evidence_margin"] = margin
     out.loc[group_index, f"{prefix}_margin_category"] = evidence_margin_label(margin)

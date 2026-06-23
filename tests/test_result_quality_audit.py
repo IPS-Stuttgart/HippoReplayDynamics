@@ -9,6 +9,60 @@ from hipporeplayimm.result_quality_audit import (
     select_observation_calibration,
     write_result_quality_audit,
 )
+from hipporeplayimm.result_quality_gates import event_quality_summary
+
+
+def test_result_quality_event_summary_scopes_matched_null_windows() -> None:
+    scores = pd.DataFrame(
+        [
+            {
+                "status": "success",
+                "session": "Rat1/Open1",
+                "event_index": 10,
+                "null_index": 0,
+                "model": "stationary",
+                "log_evidence": 0.0,
+                "evidence_comparable": True,
+                "evidence_support": "exact_full_grid",
+            },
+            {
+                "status": "success",
+                "session": "Rat1/Open1",
+                "event_index": 10,
+                "null_index": 0,
+                "model": "diffusion",
+                "log_evidence": 5.0,
+                "evidence_comparable": True,
+                "evidence_support": "exact_full_grid",
+            },
+            {
+                "status": "success",
+                "session": "Rat1/Open1",
+                "event_index": 10,
+                "null_index": 1,
+                "model": "stationary",
+                "log_evidence": 10.0,
+                "evidence_comparable": True,
+                "evidence_support": "exact_full_grid",
+            },
+            {
+                "status": "success",
+                "session": "Rat1/Open1",
+                "event_index": 10,
+                "null_index": 1,
+                "model": "diffusion",
+                "log_evidence": 6.0,
+                "evidence_comparable": True,
+                "evidence_support": "exact_full_grid",
+            },
+        ]
+    )
+
+    summary = event_quality_summary(scores).sort_values("null_index").reset_index(drop=True)
+
+    assert summary["null_index"].astype(int).tolist() == [0, 1]
+    assert summary["exact_best_model"].tolist() == ["diffusion", "stationary"]
+    assert summary["exact_log_evidence_margin"].tolist() == [5.0, 4.0]
 
 
 def test_select_observation_calibration_applies_behavior_and_recovery_gates() -> None:

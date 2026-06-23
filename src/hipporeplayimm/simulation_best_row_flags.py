@@ -34,6 +34,9 @@ def apply_simulation_best_row_flags_patch() -> None:
         ok = scored[status_ok & comparable]
         if ok.empty:
             return pd.DataFrame()
+        ok = _finite_log_evidence_rows(ok)
+        if ok.empty:
+            return pd.DataFrame()
         if "is_best_model" not in ok.columns:
             return _best_by_log_evidence(ok)
         return _best_rows_with_guarded_flags(ok, reporting)
@@ -79,12 +82,18 @@ def _best_rows_with_guarded_flags(frame: pd.DataFrame, reporting: Any) -> pd.Dat
     return pd.concat(pieces, ignore_index=True, sort=False)
 
 
-def _best_by_log_evidence(frame: pd.DataFrame) -> pd.DataFrame:
+def _finite_log_evidence_rows(frame: pd.DataFrame) -> pd.DataFrame:
     if frame.empty:
         return pd.DataFrame()
     working = frame.copy()
     working["log_evidence"] = pd.to_numeric(working["log_evidence"], errors="coerce")
-    working = working[np.isfinite(working["log_evidence"].to_numpy(dtype=float))]
+    return working[np.isfinite(working["log_evidence"].to_numpy(dtype=float))]
+
+
+def _best_by_log_evidence(frame: pd.DataFrame) -> pd.DataFrame:
+    if frame.empty:
+        return pd.DataFrame()
+    working = _finite_log_evidence_rows(frame)
     if working.empty:
         return pd.DataFrame()
     group_columns = _event_group_columns(working)

@@ -31,6 +31,7 @@ DEFAULT_EXPECTED_MOMENTUM_MODEL = "sorted-spike-state-space-momentum"
 EXACT_SUPPORT = "exact_full_grid"
 TRUNCATED_SUPPORT = "truncated_full_grid"
 _MISSING_STATUS_VALUES = {"", "nan", "na", "n/a", "none", "null", "<na>"}
+_MISSING_SUPPORT_VALUES = {"", "nan", "na", "n/a", "none", "null", "<na>"}
 
 SCORE_FILENAMES = (
     "simulation_recovery_sweep_event_scores.csv",
@@ -330,24 +331,44 @@ def _empty_decision(category: str) -> dict[str, object]:
 
 def _with_support_columns(scores: pd.DataFrame) -> pd.DataFrame:
     out = scores.copy()
-    if "evidence_support" not in out.columns:
-        support_columns = [
-            col
-            for col in (
-                "diagnostic_candidate_evidence_support",
-                "diagnostic_state_space_momentum_evidence_support",
-                "diagnostic_state_space_imm_evidence_support",
-            )
-            if col in out.columns
-        ]
-        if support_columns:
-            out["evidence_support"] = out[support_columns].bfill(axis=1).iloc[:, 0].fillna(EXACT_SUPPORT)
-        else:
-            out["evidence_support"] = EXACT_SUPPORT
+    inferred = _support_from_diagnostic_columns(out)
+    if "evidence_support" in out.columns:
+        missing = out["evidence_support"].map(_is_missing_support_value)
+        out["evidence_support"] = out["evidence_support"].where(~missing, inferred)
+    else:
+        out["evidence_support"] = inferred
     if "evidence_comparable" not in out.columns:
         status_ok = _status_success_mask(out)
         out["evidence_comparable"] = status_ok & out["evidence_support"].astype(str).eq(EXACT_SUPPORT)
     return out
+
+
+def _support_from_diagnostic_columns(scores: pd.DataFrame) -> pd.Series:
+    support_columns = [
+        col
+        for col in (
+            "diagnostic_candidate_evidence_support",
+            "diagnostic_state_space_momentum_evidence_support",
+            "diagnostic_state_space_imm_evidence_support",
+        )
+        if col in scores.columns
+    ]
+    if not support_columns:
+        return pd.Series(EXACT_SUPPORT, index=scores.index)
+    diagnostics = scores[support_columns].copy()
+    for column in support_columns:
+        diagnostics[column] = diagnostics[column].where(~diagnostics[column].map(_is_missing_support_value), pd.NA)
+    return diagnostics.bfill(axis=1).iloc[:, 0].fillna(EXACT_SUPPORT)
+
+
+def _is_missing_support_value(value: object) -> bool:
+    try:
+        missing = pd.isna(value)
+    except (TypeError, ValueError):
+        missing = False
+    if isinstance(missing, (bool, np.bool_)) and bool(missing):
+        return True
+    return str(value).strip().lower() in _MISSING_SUPPORT_VALUES
 
 
 def _success_mask(frame: pd.DataFrame) -> pd.Series:

@@ -52,6 +52,20 @@ def test_simulation_event_best_rows_recomputes_duplicate_flags() -> None:
     assert best["model"].tolist() == ["true-highest"]
 
 
+def test_simulation_event_best_rows_ignores_nonfinite_flagged_rows() -> None:
+    rows = pd.DataFrame(
+        [
+            _row(0, "stale-nan-flag", float("nan"), "True"),
+            _row(0, "finite-highest", 4.0, "False"),
+        ]
+    )
+
+    best = simulation_event_best_rows(rows)
+
+    assert best["model"].tolist() == ["finite-highest"]
+    assert best["log_evidence"].tolist() == [4.0]
+
+
 def test_simulation_event_best_rows_treats_missing_status_as_success() -> None:
     rows = pd.DataFrame(
         [

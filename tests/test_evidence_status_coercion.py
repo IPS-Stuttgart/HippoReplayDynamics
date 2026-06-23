@@ -8,10 +8,10 @@ from hipporeplayimm.evidence_reporting import (
 )
 
 
-def _row(model: str, log_evidence: float, status: object) -> dict[str, object]:
+def _row(model: str, log_evidence: float, status: object, *, event_index: int = 0) -> dict[str, object]:
     return {
         "session": "RatX/Open1",
-        "event_index": 0,
+        "event_index": event_index,
         "model": model,
         "status": status,
         "log_evidence": log_evidence,
@@ -55,3 +55,22 @@ def test_non_success_status_remains_excluded_after_status_normalization() -> Non
 
     best = simulation_event_best_rows(rows)
     assert best["model"].tolist() == ["success-low"]
+
+
+def test_nonfinite_log_evidence_is_not_exact_comparable_or_event_best() -> None:
+    rows = pd.DataFrame(
+        [
+            _row("nan-exact", np.nan, "success"),
+            _row("finite-exact", -2.0, "success"),
+            _row("only-nan-exact", np.nan, "success", event_index=1),
+        ]
+    )
+
+    supported = ensure_evidence_support_columns(rows)
+
+    nan_rows = supported[supported["model"].str.contains("nan")]
+    assert not nan_rows["evidence_comparable"].any()
+    assert supported.loc[supported["model"] == "finite-exact", "evidence_comparable"].item() is True
+
+    best = simulation_event_best_rows(supported)
+    assert best[["event_index", "model"]].values.tolist() == [[0, "finite-exact"]]

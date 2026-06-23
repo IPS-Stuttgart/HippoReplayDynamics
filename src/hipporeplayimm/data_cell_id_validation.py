@@ -67,8 +67,9 @@ def apply_data_cell_id_validation_patch() -> None:
             _coerce_integral_ids(cell_ids, "spike cell IDs")
         arr = np.asarray(tetrode_cell_ids)
         if arr.size:
-            values = np.asarray(arr, dtype=float)
-            finite_values = values[np.isfinite(values)]
+            values = np.asarray(arr)
+            finite_mask = np.isfinite(np.asarray(values, dtype=float))
+            finite_values = values[finite_mask]
             if finite_values.size:
                 _coerce_integral_ids(finite_values, "tetrode/cell IDs")
         out = original_mark_group_ids(cell_ids, tetrode_cell_ids)
@@ -93,8 +94,22 @@ def _validate_optional_neuron_ids(spike_data: dict[str, Any], variable_name: str
     _coerce_integral_ids(values.reshape(-1), label)
 
 
+def _contains_boolean_ids(values: np.ndarray) -> bool:
+    raw = np.asarray(values)
+    if raw.size == 0:
+        return False
+    if np.issubdtype(raw.dtype, np.bool_):
+        return True
+    if raw.dtype == object:
+        return any(isinstance(value, (bool, np.bool_)) for value in raw.reshape(-1))
+    return False
+
+
 def _coerce_integral_ids(values: Any, name: str) -> np.ndarray:
-    ids = np.asarray(values, dtype=float)
+    raw = np.asarray(values)
+    if _contains_boolean_ids(raw):
+        raise ValueError(f"{name} must not contain boolean identifiers")
+    ids = np.asarray(raw, dtype=float)
     if ids.size == 0:
         return np.asarray(ids, dtype=int)
     if not np.all(np.isfinite(ids)):

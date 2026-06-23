@@ -21,6 +21,21 @@ def test_cell_id_row_indices_rejects_fractional_spike_ids():
         _cell_id_row_indices(np.array([1.0]), np.array([1.5]))
 
 
+def test_cell_id_row_indices_rejects_boolean_encoding_ids():
+    with pytest.raises(ValueError, match="encoding.cell_ids.*boolean"):
+        _cell_id_row_indices(np.array([True]), np.array([1.0]))
+
+
+def test_cell_id_row_indices_rejects_boolean_spike_ids():
+    with pytest.raises(ValueError, match="spike cell IDs.*boolean"):
+        _cell_id_row_indices(np.array([1.0]), np.array([False]))
+
+
+def test_cell_id_row_indices_rejects_out_of_range_encoding_ids():
+    with pytest.raises(ValueError, match="encoding.cell_ids.*range"):
+        _cell_id_row_indices(np.array([1e20]), np.array([1.0]))
+
+
 def test_build_emissions_rejects_fractional_ripple_spike_cell_ids():
     session = _single_ripple_session(spike_cell_id=1.5)
 
@@ -38,6 +53,16 @@ def test_build_emissions_rejects_fractional_encoding_cell_ids():
         build_emissions(
             _single_ripple_session(spike_cell_id=1.0),
             _single_cell_encoding(cell_ids=np.array([1.5])),
+            0,
+            EmissionConfig(time_bin_s=1.0),
+        )
+
+
+def test_build_emissions_rejects_boolean_encoding_cell_ids():
+    with pytest.raises(ValueError, match="encoding.cell_ids.*boolean"):
+        build_emissions(
+            _single_ripple_session(spike_cell_id=1.0),
+            _single_cell_encoding(cell_ids=np.array([True])),
             0,
             EmissionConfig(time_bin_s=1.0),
         )

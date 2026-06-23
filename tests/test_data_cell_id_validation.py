@@ -30,6 +30,26 @@ def _session_with_ids(spike_ids, excitatory_ids=()):
     )
 
 
+def _session_with_raw_spikes(spikes) -> ReplaySession:
+    return ReplaySession(
+        rat="RatX",
+        name="Open1",
+        path=Path("RatX/Open1"),
+        position=np.empty((0, 3), dtype=float),
+        spikes=np.asarray(spikes, dtype=object),
+        tetrode_cell_ids=np.empty((0, 2), dtype=float),
+        excitatory_neurons=np.empty(0, dtype=int),
+        inhibitory_neurons=np.empty(0, dtype=int),
+        ripple_events=np.empty((0, 6), dtype=float),
+        run_times=np.empty((0, 2), dtype=float),
+        sleep_box_immobile_times=np.empty((0, 2), dtype=float),
+        sleep_times=np.empty((0, 2), dtype=float),
+        rem_times=np.empty((0, 2), dtype=float),
+        well_sequence=None,
+        metadata={},
+    )
+
+
 def test_replay_session_cell_ids_accept_integral_float_ids():
     session = _session_with_ids([2.0, 1.0, 2.0])
 
@@ -40,6 +60,13 @@ def test_replay_session_cell_ids_reject_fractional_spike_ids():
     session = _session_with_ids([1.0, 2.5])
 
     with pytest.raises(ValueError, match="spike cell IDs"):
+        _ = session.cell_ids
+
+
+def test_replay_session_cell_ids_reject_boolean_spike_ids():
+    session = _session_with_raw_spikes([[0.0, True]])
+
+    with pytest.raises(ValueError, match="boolean"):
         _ = session.cell_ids
 
 

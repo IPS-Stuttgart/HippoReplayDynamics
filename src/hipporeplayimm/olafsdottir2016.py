@@ -371,7 +371,24 @@ def _read_axona_header_and_payload(path: str | Path) -> tuple[dict[str, str], by
     elif payload[data_offset : data_offset + 1] in {b"\r", b"\n"}:
         data_offset += 1
     header = _parse_axona_header(payload[:data_offset].decode("latin-1", errors="ignore"))
-    return header, payload[data_offset:]
+    return header, _strip_axona_data_end(payload[data_offset:])
+
+
+def _strip_axona_data_end(payload: bytes) -> bytes:
+    """Strip an optional Axona ``data_end`` footer without touching binary samples."""
+
+    marker = b"data_end"
+    end = len(payload)
+    while end > 0 and payload[end - 1 : end] in {b"\r", b"\n", b"\t", b" "}:
+        end -= 1
+    if not payload[:end].endswith(marker):
+        return payload
+    footer_start = end - len(marker)
+    if payload[max(0, footer_start - 2) : footer_start] == b"\r\n":
+        footer_start -= 2
+    elif payload[max(0, footer_start - 1) : footer_start] in {b"\r", b"\n"}:
+        footer_start -= 1
+    return payload[:footer_start]
 
 
 def _parse_axona_header(text: str) -> dict[str, str]:

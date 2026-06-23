@@ -22,6 +22,28 @@ FIRST_ORDER_IMM = "sorted-spike-state-space-first-order-imm"
 MOMENTUM_EXACT = "sorted-spike-state-space-momentum-exact-sparse"
 REQUIRED = [STATIONARY, DIFFUSION, FRAGMENTED, FIRST_ORDER_IMM, MOMENTUM_EXACT]
 LABEL_COLUMNS = ["original_algorithm_label", "original_label", "model_label", "label", "best_model"]
+EVENT_TABLE_COLUMNS = [
+    "session",
+    "rat",
+    "event_index",
+    "exact_core_complete",
+    "missing_required_exact_core_models",
+    "best_exact_core_model",
+    "best_exact_core_log_evidence",
+    "logZ_stationary",
+    "logZ_diffusion",
+    "logZ_fragmented",
+    "logZ_first_order_imm",
+    "logZ_momentum_exact_sparse",
+    "delta_imm_minus_fragmented",
+    "delta_imm_minus_momentum",
+    "delta_momentum_minus_diffusion",
+    "delta_trajectory_minus_stationary",
+    "imm_confident_vs_fragmented",
+    "fragmented_confident_vs_imm",
+    "momentum_confident_vs_diffusion",
+    "within_family_classification",
+]
 
 
 def _rat(session: object) -> str:
@@ -49,6 +71,10 @@ def _as_bool(value: object) -> bool:
     except ValueError:
         return False
     return bool(np.isfinite(numeric) and numeric != 0.0)
+
+
+def _empty_event_table() -> pd.DataFrame:
+    return pd.DataFrame(columns=EVENT_TABLE_COLUMNS)
 
 
 def _read_evidence(path: str | Path) -> pd.DataFrame:
@@ -115,6 +141,9 @@ def _classify(row: pd.Series, threshold: float) -> str:
 
 
 def build_event_table(evidence: pd.DataFrame, threshold: float = 5.5) -> pd.DataFrame:
+    if evidence.empty:
+        return _empty_event_table()
+
     rows = []
     for (session, event_index), group in evidence.groupby(["session", "event_index"], sort=True):
         comparable = group[group["evidence_comparable"]]
@@ -157,10 +186,11 @@ def build_event_table(evidence: pd.DataFrame, threshold: float = 5.5) -> pd.Data
         row["fragmented_confident_vs_imm"] = row["delta_imm_minus_fragmented"] <= -threshold
         row["momentum_confident_vs_diffusion"] = row["delta_momentum_minus_diffusion"] >= threshold
         rows.append(row)
+    if not rows:
+        return _empty_event_table()
     out = pd.DataFrame(rows).sort_values(["session", "event_index"]).reset_index(drop=True)
-    if not out.empty:
-        out["within_family_classification"] = out.apply(lambda row: _classify(row, threshold), axis=1)
-    return out
+    out["within_family_classification"] = out.apply(lambda row: _classify(row, threshold), axis=1)
+    return out[EVENT_TABLE_COLUMNS]
 
 
 def _summary_rows(table: pd.DataFrame) -> list[dict[str, object]]:

@@ -17,6 +17,17 @@ import numpy as np
 _PATCHED_FLAG = "_emission_cell_id_validation_patch_applied"
 
 
+def _contains_boolean_ids(values: np.ndarray) -> bool:
+    raw = np.asarray(values)
+    if raw.size == 0:
+        return False
+    if np.issubdtype(raw.dtype, np.bool_):
+        return True
+    if raw.dtype == object:
+        return any(isinstance(value, (bool, np.bool_)) for value in raw.reshape(-1))
+    return False
+
+
 def _coerce_integral_ids(values: Any, name: str) -> np.ndarray:
     ids = np.asarray(values)
     if ids.ndim == 0:
@@ -25,6 +36,8 @@ def _coerce_integral_ids(values: Any, name: str) -> np.ndarray:
         raise ValueError(f"{name} must be one-dimensional")
     if ids.size == 0:
         return np.empty(0, dtype=int)
+    if _contains_boolean_ids(ids):
+        raise ValueError(f"{name} must not contain boolean identifiers")
     try:
         numeric = np.asarray(ids, dtype=float)
     except (TypeError, ValueError) as exc:
@@ -34,6 +47,9 @@ def _coerce_integral_ids(values: Any, name: str) -> np.ndarray:
     rounded = np.rint(numeric)
     if not np.all(np.isclose(numeric, rounded, rtol=0.0, atol=1e-9)):
         raise ValueError(f"{name} must be integer-valued")
+    integer_info = np.iinfo(np.dtype(int))
+    if not np.all((rounded >= integer_info.min) & (rounded <= integer_info.max)):
+        raise ValueError(f"{name} must fit into integer identifier range")
     return rounded.astype(int)
 
 

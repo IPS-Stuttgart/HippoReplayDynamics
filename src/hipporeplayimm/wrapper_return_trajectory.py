@@ -93,16 +93,20 @@ def _patch_result_improvement_wrappers(extensions: Any) -> None:
             candidate_indices=reversed_candidates,
             return_trajectory=return_trajectory,
         )
+        mapped_terminal_from_trajectory = False
         if result.trajectory_log_posterior is not None:
             trajectory = np.asarray(result.trajectory_log_posterior, dtype=float)[::-1].copy()
             result.terminal_log_posterior = trajectory[-1].copy()
             result.trajectory_log_posterior = None if return_trajectory is False else trajectory
+            mapped_terminal_from_trajectory = True
         result.model_name = str(self.name)
         result.diagnostics = dict(getattr(result, "diagnostics", {}) or {})
         if result.terminal_log_posterior is not None:
             result.diagnostics.update(_posterior_diagnostics(result.terminal_log_posterior, bin_centers))
         result.diagnostics["direction_model"] = "reverse"
         result.diagnostics["reverse_time_base_model"] = str(getattr(self.base_model, "name", "model"))
+        if mapped_terminal_from_trajectory:
+            return result
         return _clear_unmappable_reverse_terminal(result)
 
     def bidirectional_score(
@@ -209,25 +213,28 @@ def _patch_direct_reverse_wrappers(extensions: Any, reverse_models: Any) -> None
         model_name = self.name or f"{score.model_name}-reverse"
         trajectory = None
         terminal = score.terminal_log_posterior
+        mapped_terminal_from_trajectory = False
         if score.trajectory_log_posterior is not None:
             trajectory = score.trajectory_log_posterior[::-1].copy()
             terminal = trajectory[-1]
+            mapped_terminal_from_trajectory = True
             if return_trajectory is False:
                 trajectory = None
         diagnostics = dict(getattr(score, "diagnostics", {}) or {})
         diagnostics["time_direction"] = "reverse"
         diagnostics["base_model"] = str(score.model_name)
-        return _clear_unmappable_reverse_terminal(
-            EventScore(
-                model_name,
-                score.log_likelihood,
-                score.n_time,
-                score.n_spikes,
-                diagnostics=diagnostics,
-                terminal_log_posterior=terminal,
-                trajectory_log_posterior=trajectory,
-            )
+        result = EventScore(
+            model_name,
+            score.log_likelihood,
+            score.n_time,
+            score.n_spikes,
+            diagnostics=diagnostics,
+            terminal_log_posterior=terminal,
+            trajectory_log_posterior=trajectory,
         )
+        if mapped_terminal_from_trajectory:
+            return result
+        return _clear_unmappable_reverse_terminal(result)
 
     def bidirectional_score(
         self,

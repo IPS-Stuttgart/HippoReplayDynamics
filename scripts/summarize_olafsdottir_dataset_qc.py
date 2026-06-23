@@ -239,7 +239,12 @@ def _row_str(row: pd.Series, column: str) -> str:
 
 def _row_bool(row: pd.Series, column: str) -> bool:
     raw = _row_str(row, column).lower()
-    return raw in {"true", "1", "yes", "y"}
+    if raw in {"true", "1", "1.0", "yes", "y"}:
+        return True
+    if raw in {"false", "0", "0.0", "no", "n", ""}:
+        return False
+    value = pd.to_numeric(pd.Series([raw]), errors="coerce").iloc[0]
+    return bool(pd.notna(value) and float(value) == 1.0)
 
 
 def _row_int(row: pd.Series, column: str) -> int:

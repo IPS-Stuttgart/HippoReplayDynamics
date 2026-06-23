@@ -49,6 +49,8 @@ def _integer_array_from_values(values: Any) -> np.ndarray:
 
 
 def _parse_cell_id_value(value: Any) -> int:
+    if isinstance(value, (bool, np.bool_)):
+        raise ValueError("score-table cell IDs cell ID metadata must not contain boolean identifiers")
     try:
         numeric = float(value)
     except (TypeError, ValueError) as exc:

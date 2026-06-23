@@ -13,3 +13,10 @@ def test_parse_cell_ids_rejects_fractional_metadata():
     fractional_cell = 2 + 0.5
     with pytest.raises(ValueError, match="cell ID metadata"):
         _parse_cell_ids([1, fractional_cell])
+
+
+def test_parse_cell_ids_rejects_boolean_metadata():
+    with pytest.raises(ValueError, match="boolean identifiers"):
+        _parse_cell_ids([1, True])
+    with pytest.raises(ValueError, match="boolean identifiers"):
+        _parse_cell_ids(np.array([False], dtype=bool))

@@ -18,6 +18,7 @@ def _row(
     comparable: bool = True,
     missing_bins: int = 0,
     coverage: float = 1.0,
+    status: object = "success",
 ) -> dict[str, object]:
     return {
         "matrix_id": "cfg-a",
@@ -28,7 +29,7 @@ def _row(
         "true_model": "momentum",
         "expected_model": "sorted-spike-state-space-momentum",
         "model": model,
-        "status": "success",
+        "status": status,
         "log_evidence": value,
         "evidence_support": support,
         "evidence_comparable": comparable,
@@ -128,6 +129,21 @@ def test_triage_defaults_to_requested_model_without_model_metadata_columns():
     assert len(events) == 1
     assert events.iloc[0]["expected_model"] == DEFAULT_EXPECTED_MOMENTUM_MODEL
     assert events.iloc[0]["triage_category"] == "strict_exact_recovery"
+
+
+def test_triage_treats_blank_status_as_legacy_success():
+    rows = [
+        _row(0, "sorted-spike-state-space-diffusion", 0.0, status=""),
+        _row(0, DEFAULT_EXPECTED_MOMENTUM_MODEL, 2.0, status=pd.NA),
+    ]
+    for row in rows:
+        row.pop("evidence_comparable")
+    scores = pd.DataFrame(rows)
+
+    event = build_momentum_recovery_triage(scores).event_table.iloc[0]
+
+    assert event["triage_category"] == "strict_exact_recovery"
+    assert bool(event["expected_model_evidence_comparable"])
 
 
 def test_triage_parses_string_false_comparable_and_recovery_flags():

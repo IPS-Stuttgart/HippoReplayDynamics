@@ -159,6 +159,7 @@ def _successful_score_rows(frame: pd.DataFrame) -> pd.DataFrame:
     missing = status.isna() | status.fillna("").eq("")
     success = status.fillna("").eq("success")
     out = frame[missing | success].copy()
+    out["status"] = out["status"].astype("string")
     out.loc[missing.loc[out.index], "status"] = "success"
     return out
 

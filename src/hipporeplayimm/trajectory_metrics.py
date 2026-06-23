@@ -48,7 +48,7 @@ def trajectory_quality_metrics(
     displacement = _distance(mean_path[0], mean_path[-1])
     path_length = float(np.sum(mean_steps))
     total_time = float(np.sum(durations)) if durations.size else float(max(logp.shape[0] - 1, 1))
-    entropy = -np.sum(posterior * normalized, axis=1)
+    entropy = _posterior_entropy(posterior, normalized)
     spread = _posterior_spread(posterior, centers, mean_path)
     return {
         f"{prefix}_time_bins": int(logp.shape[0]),
@@ -79,6 +79,19 @@ def _transition_durations(times: np.ndarray | None, n_time: int) -> np.ndarray:
     if not np.all(np.isfinite(diffs)) or np.any(diffs <= 0.0):
         return np.ones(n_time - 1, dtype=float)
     return diffs
+
+
+def _posterior_entropy(posterior: np.ndarray, log_posterior: np.ndarray) -> np.ndarray:
+    """Return entropy while treating impossible bins as zero-contribution mass."""
+
+    terms = np.zeros_like(posterior, dtype=float)
+    np.multiply(
+        posterior,
+        log_posterior,
+        out=terms,
+        where=np.isfinite(log_posterior),
+    )
+    return -np.sum(terms, axis=1)
 
 
 def _posterior_spread(posterior: np.ndarray, centers: np.ndarray, mean_path: np.ndarray) -> np.ndarray:

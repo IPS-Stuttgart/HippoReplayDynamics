@@ -34,6 +34,29 @@ def test_trajectory_quality_metrics_accepts_one_dimensional_bin_centers():
     assert metrics["trajectory_map_path_length_cm"] == pytest.approx(10.0)
 
 
+def test_trajectory_quality_metrics_entropy_ignores_impossible_bins():
+    metrics = trajectory_quality_metrics(
+        np.array(
+            [
+                [0.0, -np.inf, -np.inf],
+                [-np.inf, 0.0, -np.inf],
+            ],
+            dtype=float,
+        ),
+        np.array(
+            [
+                [0.0, 0.0],
+                [1.0, 0.0],
+                [2.0, 0.0],
+            ],
+            dtype=float,
+        ),
+    )
+
+    assert metrics["trajectory_mean_entropy"] == pytest.approx(0.0)
+    assert metrics["trajectory_terminal_entropy"] == pytest.approx(0.0)
+
+
 def test_trajectory_quality_metrics_rejects_nonfinite_bin_centers():
     with pytest.raises(ValueError, match="bin_centers must contain finite values"):
         trajectory_quality_metrics(

@@ -67,6 +67,32 @@ _MODEL_SHORT_NAMES = {
     MOMENTUM_EXACT: "momentum_exact_sparse",
 }
 
+_EVENT_AXIS_BASE_COLUMNS = (
+    "session",
+    "rat",
+    "event_index",
+    "exact_core_complete",
+    "missing_exact_core_models",
+    "logZ_stationary",
+    "logZ_diffusion",
+    "logZ_fragmented",
+    "logZ_first_order_imm",
+    "logZ_momentum_exact_sparse",
+    "P_stationary",
+    "P_diffusion",
+    "P_fragmented",
+    "P_first_order_imm",
+    "P_momentum_exact_sparse",
+    "P_trajectory_family",
+    "trajectory_family_margin",
+    "momentum_minus_diffusion_margin",
+    "first_order_imm_minus_momentum_margin",
+    *DYNAMICS_INDICES,
+    "event_duration",
+    "spike_count",
+    "event_spike_rate_hz",
+)
+
 
 def _rat_from_session(session: object) -> str:
     return str(session).split("/", 1)[0]
@@ -157,6 +183,14 @@ def _available_covariates(frame: pd.DataFrame, covariates: Sequence[str]) -> tup
     return tuple(available)
 
 
+def _event_axis_columns(covariates: Sequence[str]) -> list[str]:
+    columns = list(_EVENT_AXIS_BASE_COLUMNS)
+    for covariate in covariates:
+        if covariate not in columns:
+            columns.append(covariate)
+    return columns
+
+
 def build_event_dynamics_axis(
     event_model_evidence: pd.DataFrame,
     *,
@@ -165,6 +199,7 @@ def build_event_dynamics_axis(
     """Return one replay-dynamics-axis row per complete event."""
 
     evidence = _success_rows(event_model_evidence)
+    columns = _event_axis_columns(covariates)
     rows: list[dict[str, object]] = []
     for (session, event_index), group in evidence.groupby(["session", "event_index"], sort=True):
         by_model = group.drop_duplicates("model", keep="last").set_index("model")
@@ -245,8 +280,8 @@ def build_event_dynamics_axis(
         rows.append(row)
 
     if not rows:
-        return pd.DataFrame()
-    return pd.DataFrame(rows).sort_values(["session", "event_index"]).reset_index(drop=True)
+        return pd.DataFrame(columns=columns)
+    return pd.DataFrame(rows, columns=columns).sort_values(["session", "event_index"]).reset_index(drop=True)
 
 
 def build_rat_dynamics_axis_summary(event_axis: pd.DataFrame) -> pd.DataFrame:

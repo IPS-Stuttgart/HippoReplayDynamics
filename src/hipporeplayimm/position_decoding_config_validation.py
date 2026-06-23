@@ -85,12 +85,6 @@ def _nonnegative_integer(name: str, value: Any) -> int:
 def _integer_value(name: str, value: Any) -> int:
     if isinstance(value, (bool, np.bool_)):
         raise ValueError(f"{name} must be an integer")
-    if isinstance(value, str):
-        try:
-            integer = int(value)
-        except (TypeError, ValueError) as exc:
-            raise ValueError(f"{name} must be an integer") from exc
-        return integer
     try:
         numeric = float(value)
     except (TypeError, ValueError) as exc:

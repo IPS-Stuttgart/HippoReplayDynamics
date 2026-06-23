@@ -64,6 +64,7 @@ def apply_evidence_status_coercion_patch() -> None:
         else:
             out["evidence_support"] = inferred
         status_ok = _status_success_mask(out)
+        finite_log_evidence = _finite_log_evidence_mask(out)
         out["evidence_comparison"] = out["evidence_support"].map(
             reporting.evidence_comparison_from_support
         )
@@ -72,8 +73,10 @@ def apply_evidence_status_coercion_patch() -> None:
         ).fillna(
             reporting.EVIDENCE_COMPARISON_DESCRIPTIONS[reporting.EVIDENCE_COMPARISON_UNKNOWN]
         )
-        out["evidence_comparable"] = status_ok & out["evidence_support"].eq(
-            reporting.EXACT_EVIDENCE_SUPPORT
+        out["evidence_comparable"] = (
+            status_ok
+            & finite_log_evidence
+            & out["evidence_support"].eq(reporting.EXACT_EVIDENCE_SUPPORT)
         )
         return reporting.add_candidate_support_quality_columns(out)
 
@@ -114,6 +117,13 @@ def _status_success_mask(frame: pd.DataFrame) -> pd.Series:
     if "status" not in frame.columns:
         return pd.Series(True, index=frame.index)
     return frame["status"].map(_status_is_success_or_missing).astype(bool)
+
+
+def _finite_log_evidence_mask(frame: pd.DataFrame) -> pd.Series:
+    if "log_evidence" not in frame.columns:
+        return pd.Series(True, index=frame.index)
+    values = pd.to_numeric(frame["log_evidence"], errors="coerce")
+    return pd.Series(np.isfinite(values.to_numpy(dtype=float)), index=frame.index)
 
 
 def _status_is_success_or_missing(value: object) -> bool:

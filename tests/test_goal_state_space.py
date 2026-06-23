@@ -7,6 +7,7 @@ from scipy.special import logsumexp
 from hipporeplayimm.benchmarks import BenchmarkConfig, _build_models
 from hipporeplayimm.encoding import LogEmissionTensor
 from hipporeplayimm.goal_state_space import GoalStateSpaceReplayModel, _goal_transition_matrix
+from hipporeplayimm.well_route_state_space import WellRouteStateSpaceReplayModel
 
 
 def test_goal_state_space_model_scores_synthetic_event():
@@ -193,6 +194,40 @@ def test_goal_transition_matrix_rejects_nonfinite_bin_centers():
             sigma_cm=1.0,
             max_step_sigma=4.0,
         )
+
+
+def test_well_route_default_routes_support_one_dimensional_bin_centers():
+    centers = np.array([[0.0], [1.0], [2.0], [3.0]])
+    log_likelihood = np.log(
+        np.array(
+            [
+                [0.70, 0.20, 0.08, 0.02],
+                [0.10, 0.20, 0.60, 0.10],
+                [0.02, 0.08, 0.20, 0.70],
+            ]
+        )
+    )
+    emissions = LogEmissionTensor(
+        log_likelihood=log_likelihood,
+        spike_counts=np.zeros((3, 1), dtype=int),
+        times=np.array([0.0, 1.0, 2.0]),
+        dt=1.0,
+        cell_ids=np.array([1]),
+        n_spikes=0,
+    )
+
+    score = WellRouteStateSpaceReplayModel(
+        transition_sigma_cm_sqrt_s=1.0,
+        drift_speed_cm_s=1.0,
+        max_step_sigma=10.0,
+        max_default_points=3,
+    ).score(emissions, centers)
+
+    assert np.isfinite(score.log_likelihood)
+    assert score.trajectory_log_posterior.shape == emissions.log_likelihood.shape
+    assert np.allclose(logsumexp(score.terminal_log_posterior), 0.0)
+    assert score.diagnostics['route_state_space_candidate_routes'] == 6
+    assert score.diagnostics['decoded_endpoint_y'] == 0.0
 
 
 def test_benchmark_registry_includes_goal_state_space_models():

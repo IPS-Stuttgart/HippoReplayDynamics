@@ -83,3 +83,11 @@ def test_pyrecest_metadata_rejects_nonfinite_numeric_metadata() -> None:
 
     with pytest.raises(ValueError, match="must be finite"):
         pyrecest_config_kwargs_for_scores(scores)
+
+
+def test_pyrecest_metadata_rejects_boolean_numeric_metadata() -> None:
+    for column, value in (("pyrecest_alpha", True), ("pyrecest_particles", np.bool_(False))):
+        scores = pd.DataFrame({column: [value]})
+
+        with pytest.raises(ValueError, match=f"{column}.*finite numeric"):
+            pyrecest_config_kwargs_for_scores(scores)

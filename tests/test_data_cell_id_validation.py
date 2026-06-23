@@ -43,6 +43,13 @@ def test_replay_session_cell_ids_reject_fractional_spike_ids():
         _ = session.cell_ids
 
 
+def test_replay_session_cell_ids_reject_out_of_range_spike_ids():
+    session = _session_with_ids([1.0, 1e20])
+
+    with pytest.raises(ValueError, match="integer identifier range"):
+        _ = session.cell_ids
+
+
 def test_replay_session_excitatory_spikes_reject_fractional_excitatory_ids():
     session = _session_with_ids([1.0, 2.0], excitatory_ids=[1.5])
 

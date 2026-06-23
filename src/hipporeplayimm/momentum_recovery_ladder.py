@@ -304,9 +304,11 @@ def summarize_ladder_tiers(tier_event_recovery: pd.DataFrame) -> pd.DataFrame:
             group["certified_vs_exact_recovered_expected_model"]
         )
         margin = pd.to_numeric(group["expected_minus_best_comparable_log_evidence"], errors="coerce")
-        oracle = _coerce_bool_series(
-            group.get("oracle_candidate_support", pd.Series([False], index=group.index))
-        )
+        if "oracle_candidate_support" in group:
+            oracle = _coerce_bool_series(group["oracle_candidate_support"])
+        else:
+            oracle = pd.Series([False] * len(group), index=group.index)
+        momentum_events = _event_count(group)
         rows.append(
             {
                 "ladder_tier": str(tier),
@@ -314,9 +316,9 @@ def summarize_ladder_tiers(tier_event_recovery: pd.DataFrame) -> pd.DataFrame:
                 "expected_model": _first_nonempty(group.get("ladder_expected_model", group.get("expected_model"))),
                 "oracle_candidate_support": bool(oracle.iloc[0]),
                 "description": _first_nonempty(group.get("ladder_description", pd.Series([""]))),
-                "momentum_events": int(group["event_index"].nunique()),
+                "momentum_events": momentum_events,
                 "certified_or_strict_recovered_events": int(recovered.sum()),
-                "certified_or_strict_recovery_fraction": _fraction(recovered.sum(), group["event_index"].nunique()),
+                "certified_or_strict_recovery_fraction": _fraction(recovered.sum(), momentum_events),
                 "mean_expected_minus_best_comparable_log_evidence": _mean(margin),
                 "median_expected_minus_best_comparable_log_evidence": _median(margin),
                 "events_without_comparable_exact_reference": int(
@@ -437,6 +439,14 @@ def _recovered(value: object, *, threshold: float = 0.50) -> bool:
     except (TypeError, ValueError):
         return False
     return bool(np.isfinite(numeric) and numeric > threshold)
+
+
+def _event_count(group: pd.DataFrame) -> int:
+    if {"session", "event_index"}.issubset(group.columns):
+        return int(group[["session", "event_index"]].drop_duplicates().shape[0])
+    if "event_index" in group.columns:
+        return int(group["event_index"].nunique(dropna=False))
+    return int(len(group))
 
 
 def _reason_counts(values: Iterable[object]) -> dict[str, int]:

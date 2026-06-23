@@ -81,9 +81,46 @@ def test_canonical_model_name_maps_state_space_aliases():
     assert canonical_model_name("sorted-spike-state-space-displacement-momentum") == "momentum"
     assert canonical_model_name("state-space-velocity-momentum") == "momentum"
     assert canonical_model_name("clusterless-state-space-momentum") == "momentum"
+    assert canonical_model_name("state-space-first-order-imm") == "imm"
+    assert canonical_model_name("sorted-spike-state-space-trajectory-imm-exact-sparse") == "imm"
+    assert canonical_model_name("clusterless-state-space-displacement-imm") == "imm"
     assert canonical_model_name("state-space-diffusion") == "diffusion"
     assert canonical_model_name("jump") == "fragmented"
     assert canonical_model_name("stationary-gaussian") == "stationary-gaussian"
+
+
+def test_compare_runs_matches_exact_imm_variants_by_canonical_label(tmp_path):
+    left = tmp_path / "legacy"
+    right = tmp_path / "exact"
+    output = tmp_path / "comparison"
+    _write_event_scores(
+        left,
+        [
+            {"session": "Rat1/Open1", "event_index": 0, "model": "state-space-imm", "log_evidence": 5.0},
+            {"session": "Rat1/Open1", "event_index": 0, "model": "state-space-diffusion", "log_evidence": 0.0},
+        ],
+    )
+    _write_event_scores(
+        right,
+        [
+            {
+                "session": "Rat1/Open1",
+                "event_index": 0,
+                "model": "state-space-trajectory-imm-exact-sparse",
+                "log_evidence": 6.0,
+            },
+            {"session": "Rat1/Open1", "event_index": 0, "model": "state-space-diffusion", "log_evidence": 0.0},
+        ],
+    )
+
+    tables = compare_runs(left, right, left_label="legacy", right_label="exact", output=output)
+
+    summary = tables["summary"].iloc[0]
+    assert summary["matched_events"] == 1
+    assert summary["canonical_best_agreements"] == 1
+    assert tables["event_comparison"].iloc[0]["legacy_canonical_best_model"] == "imm"
+    assert tables["event_comparison"].iloc[0]["exact_canonical_best_model"] == "imm"
+    assert tables["relative"].loc[tables["relative"]["canonical_model"] == "imm"].shape[0] == 1
 
 
 def test_compare_runs_writes_best_model_and_relative_evidence_tables(tmp_path):

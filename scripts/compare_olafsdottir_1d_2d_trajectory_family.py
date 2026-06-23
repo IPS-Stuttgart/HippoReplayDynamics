@@ -48,6 +48,7 @@ EVENT_TABLE_CANDIDATES = (
 )
 SUMMARY_OUTPUT = "compare_1d_2d_trajectory_family_summary.csv"
 INTERPRETATION_OUTPUT = "compare_1d_2d_interpretation_summary.csv"
+READINESS_OUTPUT = "compare_1d_2d_biological_readiness_gates.csv"
 PRIMARY_COLUMNS = (
     "dataset",
     "environment_type",
@@ -108,8 +109,18 @@ def build_comparison(
     one_d_environment: str = "1D_Z_track",
     two_d_environment: str = "2D_open_field",
     min_robust_1d_events: int = 50,
+    min_1d_animals: int = 2,
+    min_1d_sessions: int = 2,
     weaker_fraction_delta: float = 0.20,
     similar_fraction_delta: float = 0.10,
+    cell_identity_verified: bool = False,
+    synthetic_1d_tests_passed: bool = False,
+    linearization_diagnostics: str | Path | pd.DataFrame | None = None,
+    event_detection_summary: str | Path | pd.DataFrame | None = None,
+    min_linearization_valid_fraction: float = 0.90,
+    max_linearization_median_projection_error_cm: float = 15.0,
+    min_event_candidates: int = 10,
+    min_event_median_spikes: float = 5.0,
 ) -> dict[str, pd.DataFrame]:
     """Write comparison and interpretation CSVs."""
 
@@ -134,18 +145,39 @@ def build_comparison(
         ]
     )
     summary = summary[[*PRIMARY_COLUMNS, *[column for column in summary.columns if column not in PRIMARY_COLUMNS]]]
+    readiness = biological_readiness_gates(
+        one_d_scores=one_d_scores,
+        one_d_event_metrics=one_d_event_metrics,
+        comparison_summary=summary,
+        min_1d_animals=min_1d_animals,
+        min_1d_sessions=min_1d_sessions,
+        min_robust_1d_events=min_robust_1d_events,
+        cell_identity_verified=cell_identity_verified,
+        synthetic_1d_tests_passed=synthetic_1d_tests_passed,
+        linearization_diagnostics=linearization_diagnostics,
+        event_detection_summary=event_detection_summary,
+        min_linearization_valid_fraction=min_linearization_valid_fraction,
+        max_linearization_median_projection_error_cm=max_linearization_median_projection_error_cm,
+        min_event_candidates=min_event_candidates,
+        min_event_median_spikes=min_event_median_spikes,
+    )
+    failed_readiness_gates = tuple(readiness.loc[~readiness["passed"].map(bool), "gate"].astype(str))
     interpretation = interpretation_summary(
         summary,
         margin_threshold=margin_threshold,
         min_robust_1d_events=min_robust_1d_events,
         weaker_fraction_delta=weaker_fraction_delta,
         similar_fraction_delta=similar_fraction_delta,
+        biological_ready=not failed_readiness_gates,
+        failed_readiness_gates=failed_readiness_gates,
     )
     summary.to_csv(output_dir / SUMMARY_OUTPUT, index=False)
     interpretation.to_csv(output_dir / INTERPRETATION_OUTPUT, index=False)
+    readiness.to_csv(output_dir / READINESS_OUTPUT, index=False)
     return {
         "comparison_summary": summary,
         "interpretation_summary": interpretation,
+        "readiness_gates": readiness,
         "one_d_event_metrics": one_d_event_metrics,
         "two_d_event_metrics": two_d_event_metrics,
     }
@@ -258,6 +290,8 @@ def interpretation_summary(
     min_robust_1d_events: int,
     weaker_fraction_delta: float,
     similar_fraction_delta: float,
+    biological_ready: bool = True,
+    failed_readiness_gates: Sequence[str] = (),
 ) -> pd.DataFrame:
     columns = [
         "comparison",
@@ -274,6 +308,8 @@ def interpretation_summary(
         "momentum_raw_best_fraction_delta_1d_minus_2d",
         "paper_safe_statement",
         "hard_caveat",
+        "biological_readiness_status",
+        "failed_readiness_gates",
         "margin_threshold",
         "min_robust_1d_events",
     ]
@@ -295,6 +331,8 @@ def interpretation_summary(
                     "momentum_raw_best_fraction_delta_1d_minus_2d": np.nan,
                     "paper_safe_statement": "The 1D-vs-2D comparison inputs are incomplete.",
                     "hard_caveat": _hard_caveat(),
+                    "biological_readiness_status": "not_ready",
+                    "failed_readiness_gates": "missing_inputs",
                     "margin_threshold": float(margin_threshold),
                     "min_robust_1d_events": int(min_robust_1d_events),
                 }
@@ -329,7 +367,14 @@ def interpretation_summary(
         weaker_fraction_delta=weaker_fraction_delta,
         similar_fraction_delta=similar_fraction_delta,
     )
-    if data_limited:
+    if not biological_ready:
+        interpretation_class = "biological_comparison_not_ready"
+        claim_strength = "pre_biological_comparison_not_ready"
+        statement = (
+            "Do not use the directional 1D-vs-2D pattern as a biological comparison "
+            "until all readiness gates pass."
+        )
+    elif data_limited:
         interpretation_class = "sparse_or_data_limited_feasibility_result"
         claim_strength = "hypothesis_generating_smoke"
         statement = (
@@ -350,10 +395,119 @@ def interpretation_summary(
         **deltas,
         "paper_safe_statement": statement,
         "hard_caveat": _hard_caveat(),
+        "biological_readiness_status": "ready" if biological_ready else "not_ready",
+        "failed_readiness_gates": " ".join(failed_readiness_gates),
         "margin_threshold": float(margin_threshold),
         "min_robust_1d_events": int(min_robust_1d_events),
     }
     return pd.DataFrame([row], columns=columns)
+
+
+def biological_readiness_gates(
+    *,
+    one_d_scores: pd.DataFrame,
+    one_d_event_metrics: pd.DataFrame,
+    comparison_summary: pd.DataFrame,
+    min_1d_animals: int,
+    min_1d_sessions: int,
+    min_robust_1d_events: int,
+    cell_identity_verified: bool,
+    synthetic_1d_tests_passed: bool,
+    linearization_diagnostics: str | Path | pd.DataFrame | None,
+    event_detection_summary: str | Path | pd.DataFrame | None,
+    min_linearization_valid_fraction: float,
+    max_linearization_median_projection_error_cm: float,
+    min_event_candidates: int,
+    min_event_median_spikes: float,
+) -> pd.DataFrame:
+    """Return gates that must pass before making a biological 1D-vs-2D claim."""
+
+    one_d_summary = _one_d_summary_row(comparison_summary)
+    animals = _animal_count(one_d_scores)
+    sessions = int(one_d_scores["session"].nunique()) if "session" in one_d_scores else 0
+    events = int(one_d_summary.get("events", len(one_d_event_metrics))) if not one_d_summary.empty else int(len(one_d_event_metrics))
+    exact_complete = int(one_d_summary.get("complete_exact_core_events", len(one_d_event_metrics))) if not one_d_summary.empty else int(len(one_d_event_metrics))
+    linearization = _linearization_diagnostic_values(linearization_diagnostics)
+    event_detection = _event_detection_values(event_detection_summary, one_d_event_metrics)
+    normalized = _normalized_columns_present(one_d_summary)
+
+    gates = [
+        _gate(
+            "multiple_animals_sessions",
+            animals >= min_1d_animals and sessions >= min_1d_sessions and events >= min_robust_1d_events,
+            f"animals={animals}; sessions={sessions}; events={events}",
+            f"animals>={min_1d_animals}, sessions>={min_1d_sessions}, events>={min_robust_1d_events}",
+            "Biological comparison needs scaled 1D evidence, not a single-animal/day pilot.",
+        ),
+        _gate(
+            "track_sleep_cell_identity_verified",
+            bool(cell_identity_verified),
+            str(bool(cell_identity_verified)).lower(),
+            "explicit verification flag is true",
+            "Stable Track1/SleepPOST cell identity cannot be inferred from model-evidence rows alone.",
+        ),
+        _gate(
+            "linearization_diagnostics_acceptable",
+            bool(linearization["available"])
+            and linearization["fraction_valid_position"] >= min_linearization_valid_fraction
+            and linearization["median_projection_error_cm"] <= max_linearization_median_projection_error_cm
+            and linearization["track_length_cm"] > 0
+            and linearization["occupied_linear_bins"] > 1,
+            (
+                f"available={linearization['available']}; "
+                f"fraction_valid_position={linearization['fraction_valid_position']:.6g}; "
+                f"median_projection_error_cm={linearization['median_projection_error_cm']:.6g}; "
+                f"track_length_cm={linearization['track_length_cm']:.6g}; "
+                f"occupied_linear_bins={linearization['occupied_linear_bins']}"
+            ),
+            (
+                f"available and fraction_valid_position>={min_linearization_valid_fraction:g}, "
+                f"median_projection_error_cm<={max_linearization_median_projection_error_cm:g}, "
+                "track_length_cm>0, occupied_linear_bins>1"
+            ),
+            "Use visible linearization diagnostics before interpreting 1D replay geometry.",
+        ),
+        _gate(
+            "event_detection_plausible",
+            event_detection["event_candidates"] >= min_event_candidates
+            and event_detection["median_event_spikes"] >= min_event_median_spikes,
+            (
+                f"event_candidates={event_detection['event_candidates']}; "
+                f"median_event_spikes={event_detection['median_event_spikes']:.6g}"
+            ),
+            f"event_candidates>={min_event_candidates}, median_event_spikes>={min_event_median_spikes:g}",
+            "Ripple/burst events should be plausible before comparing model hierarchies.",
+        ),
+        _gate(
+            "synthetic_1d_state_space_tests_passed",
+            bool(synthetic_1d_tests_passed),
+            str(bool(synthetic_1d_tests_passed)).lower(),
+            "explicit synthetic-test flag is true",
+            "The tiny-grid 1D state-space correctness tests must be run in the validation context.",
+        ),
+        _gate(
+            "exact_core_coverage_complete",
+            events > 0 and exact_complete == events,
+            f"complete_exact_core_events={exact_complete}; events={events}",
+            "complete_exact_core_events == events",
+            "Every 1D event needs stationary, diffusion, fragmented, first-order IMM, and exact-sparse momentum rows.",
+        ),
+        _gate(
+            "normalized_margin_columns_present",
+            bool(normalized["passed"]),
+            normalized["value"],
+            "finite per-spike and per-time-bin normalized margin summaries",
+            "Raw 1D and 2D log-evidence margins are not directly comparable.",
+        ),
+        _gate(
+            "within_dataset_decisions_only",
+            True,
+            "implemented_by_construction",
+            "model decisions are computed within each dataset before cross-dataset summary comparison",
+            "The script compares within-dataset family/model decisions and normalized summaries, not raw cross-dataset logZ.",
+        ),
+    ]
+    return pd.DataFrame(gates)
 
 
 def _directional_pattern(
@@ -403,6 +557,162 @@ def _hard_caveat() -> str:
         "Do not claim IMM is only apparent in 2D without a robust weak or negative 1D result; "
         "single-animal/day smoke results remain hypothesis-generating."
     )
+
+
+def _gate(gate: str, passed: bool, value: str, requirement: str, note: str) -> dict[str, object]:
+    return {
+        "gate": gate,
+        "passed": bool(passed),
+        "status": "pass" if passed else "fail",
+        "value": value,
+        "requirement": requirement,
+        "note": note,
+    }
+
+
+def _one_d_summary_row(summary: pd.DataFrame) -> pd.Series:
+    if summary.empty:
+        return pd.Series(dtype=object)
+    one_d = summary[summary["environment_type"].astype(str).str.startswith("1D")]
+    if one_d.empty:
+        return summary.iloc[0]
+    return one_d.iloc[0]
+
+
+def _animal_count(scores: pd.DataFrame) -> int:
+    for column in ("animal", "rat", "source_animal"):
+        if column in scores:
+            values = scores[column].dropna().astype(str)
+            values = values[values != ""]
+            if not values.empty:
+                return int(values.nunique())
+    if "session" not in scores:
+        return 0
+    animals = scores["session"].dropna().astype(str).str.replace("\\", "/", regex=False).str.split("/").str[0]
+    animals = animals[animals != ""]
+    return int(animals.nunique())
+
+
+def _linearization_diagnostic_values(diagnostics: str | Path | pd.DataFrame | None) -> dict[str, object]:
+    if diagnostics is None:
+        return _empty_linearization_values(False)
+    frame = _load_optional_table(diagnostics)
+    if frame is None or frame.empty:
+        return _empty_linearization_values(False)
+    metrics = _metric_value_map(frame)
+    fraction = _metric_float(metrics, "fraction_valid_position", default=np.nan)
+    median_projection = _metric_float(metrics, "median_projection_error_cm", default=0.0)
+    track_length = _metric_float(metrics, "track_length_cm", default=np.nan)
+    occupied = _occupied_linear_bins(frame, metrics)
+    return {
+        "available": True,
+        "fraction_valid_position": fraction,
+        "median_projection_error_cm": median_projection,
+        "track_length_cm": track_length,
+        "occupied_linear_bins": occupied,
+    }
+
+
+def _empty_linearization_values(available: bool) -> dict[str, object]:
+    return {
+        "available": bool(available),
+        "fraction_valid_position": np.nan,
+        "median_projection_error_cm": np.inf,
+        "track_length_cm": np.nan,
+        "occupied_linear_bins": 0,
+    }
+
+
+def _event_detection_values(summary: str | Path | pd.DataFrame | None, events: pd.DataFrame) -> dict[str, float]:
+    frame = _load_optional_table(summary)
+    if frame is not None and not frame.empty:
+        event_candidates = _first_available_numeric(
+            frame,
+            ("ripple_events", "event_candidates", "candidate_events", "events", "event_count", "n_events"),
+        )
+        median_spikes = _first_available_numeric(
+            frame,
+            ("median_event_spikes", "median_spikes_per_event", "event_spikes_median", "median_n_spikes"),
+        )
+    else:
+        event_candidates = np.nan
+        median_spikes = np.nan
+    if not np.isfinite(event_candidates):
+        event_candidates = float(len(events))
+    if not np.isfinite(median_spikes) and "n_spikes" in events:
+        median_spikes = _numeric_median(events, "n_spikes")
+    return {
+        "event_candidates": float(event_candidates) if np.isfinite(event_candidates) else 0.0,
+        "median_event_spikes": float(median_spikes) if np.isfinite(median_spikes) else 0.0,
+    }
+
+
+def _normalized_columns_present(one_d_summary: pd.Series) -> dict[str, object]:
+    required = (
+        "mean_family_margin_per_spike",
+        "median_family_margin_per_spike",
+        "mean_family_margin_per_time_bin",
+        "median_family_margin_per_time_bin",
+    )
+    missing = [column for column in required if column not in one_d_summary.index]
+    finite = []
+    for column in required:
+        value = _series_float(one_d_summary, column)
+        finite.append(bool(np.isfinite(value)))
+    passed = not missing and all(finite)
+    return {
+        "passed": passed,
+        "value": "missing=" + ",".join(missing) + f"; finite={sum(finite)}/{len(required)}",
+    }
+
+
+def _load_optional_table(table: str | Path | pd.DataFrame | None) -> pd.DataFrame | None:
+    if table is None:
+        return None
+    if isinstance(table, pd.DataFrame):
+        return table.copy()
+    path = Path(table)
+    if not path.is_file():
+        return None
+    return pd.read_csv(path)
+
+
+def _metric_value_map(frame: pd.DataFrame) -> dict[str, object]:
+    if "metric" in frame and "value" in frame:
+        return dict(zip(frame["metric"].astype(str), frame["value"], strict=False))
+    if len(frame) == 1:
+        return frame.iloc[0].to_dict()
+    return {}
+
+
+def _metric_float(metrics: dict[str, object], key: str, *, default: float) -> float:
+    if key not in metrics:
+        return float(default)
+    value = pd.to_numeric(pd.Series([metrics[key]]), errors="coerce").iloc[0]
+    return float(value) if pd.notna(value) else float(default)
+
+
+def _occupied_linear_bins(frame: pd.DataFrame, metrics: dict[str, object]) -> int:
+    for key in ("occupied_linear_bins", "nonzero_occupancy_bins"):
+        if key in metrics:
+            value = _metric_float(metrics, key, default=0.0)
+            return int(value) if np.isfinite(value) else 0
+    if {"metric", "value"}.issubset(frame.columns):
+        occupancy = frame[frame["metric"].astype(str).eq("occupancy_by_linear_bin")]
+        values = pd.to_numeric(occupancy["value"], errors="coerce").fillna(0.0)
+        return int((values > 0).sum())
+    return 0
+
+
+def _first_available_numeric(frame: pd.DataFrame, columns: Sequence[str]) -> float:
+    if len(frame) == 0:
+        return np.nan
+    for column in columns:
+        if column in frame:
+            values = pd.to_numeric(frame[column], errors="coerce").dropna()
+            if not values.empty:
+                return float(values.iloc[0])
+    return np.nan
 
 
 def _exact_core_rows(scores: pd.DataFrame) -> pd.DataFrame:
@@ -486,10 +796,20 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--output", default=Path("results/olafsdottir-1d-2d-comparison"), type=Path)
     parser.add_argument("--margin-threshold", default=5.5, type=float)
     parser.add_argument("--min-robust-1d-events", default=50, type=int)
+    parser.add_argument("--min-1d-animals", default=2, type=int)
+    parser.add_argument("--min-1d-sessions", default=2, type=int)
     parser.add_argument("--weaker-fraction-delta", default=0.20, type=float)
     parser.add_argument("--similar-fraction-delta", default=0.10, type=float)
     parser.add_argument("--one-d-dataset", default="Olafsdottir2016")
     parser.add_argument("--two-d-dataset", default="PfeifferFoster")
+    parser.add_argument("--cell-identity-verified", action="store_true")
+    parser.add_argument("--synthetic-1d-tests-passed", action="store_true")
+    parser.add_argument("--linearization-diagnostics", type=Path, default=None)
+    parser.add_argument("--event-detection-summary", type=Path, default=None)
+    parser.add_argument("--min-linearization-valid-fraction", default=0.90, type=float)
+    parser.add_argument("--max-linearization-median-projection-error-cm", default=15.0, type=float)
+    parser.add_argument("--min-event-candidates", default=10, type=int)
+    parser.add_argument("--min-event-median-spikes", default=5.0, type=float)
     return parser
 
 
@@ -505,12 +825,24 @@ def main(argv: Sequence[str] | None = None) -> int:
         one_d_dataset=args.one_d_dataset,
         two_d_dataset=args.two_d_dataset,
         min_robust_1d_events=args.min_robust_1d_events,
+        min_1d_animals=args.min_1d_animals,
+        min_1d_sessions=args.min_1d_sessions,
         weaker_fraction_delta=args.weaker_fraction_delta,
         similar_fraction_delta=args.similar_fraction_delta,
+        cell_identity_verified=args.cell_identity_verified,
+        synthetic_1d_tests_passed=args.synthetic_1d_tests_passed,
+        linearization_diagnostics=args.linearization_diagnostics,
+        event_detection_summary=args.event_detection_summary,
+        min_linearization_valid_fraction=args.min_linearization_valid_fraction,
+        max_linearization_median_projection_error_cm=args.max_linearization_median_projection_error_cm,
+        min_event_candidates=args.min_event_candidates,
+        min_event_median_spikes=args.min_event_median_spikes,
     )
     print(tables["comparison_summary"].to_string(index=False))
     print()
     print(tables["interpretation_summary"].to_string(index=False))
+    print()
+    print(tables["readiness_gates"].to_string(index=False))
     return 0
 
 

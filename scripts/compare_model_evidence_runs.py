@@ -138,8 +138,7 @@ def _load_event_scores(root: str | Path, run_label: str, *, exact_only: bool = F
     missing = required - set(frame.columns)
     if missing:
         raise ValueError(f"{path} is missing columns: {sorted(missing)}")
-    if "status" in frame.columns:
-        frame = frame[frame["status"] == "success"].copy()
+    frame = _successful_score_rows(frame)
     frame = ensure_evidence_support_columns(frame)
     if "evidence_comparable" in frame:
         frame["evidence_comparable"] = _coerce_bool_series(frame["evidence_comparable"])
@@ -151,6 +150,18 @@ def _load_event_scores(root: str | Path, run_label: str, *, exact_only: bool = F
     frame["canonical_model"] = frame["model"].map(canonical_model_name)
     frame = _add_relative_log_evidence(frame)
     return frame
+
+
+def _successful_score_rows(frame: pd.DataFrame) -> pd.DataFrame:
+    if "status" not in frame.columns:
+        return frame.copy()
+    status = frame["status"].astype("string").str.strip()
+    missing = status.isna() | status.fillna("").eq("")
+    success = status.fillna("").eq("success")
+    out = frame[missing | success].copy()
+    out["status"] = out["status"].astype("string")
+    out.loc[missing.loc[out.index], "status"] = "success"
+    return out
 
 
 def _evidence_support_counts(frame: pd.DataFrame, label: str) -> pd.DataFrame:

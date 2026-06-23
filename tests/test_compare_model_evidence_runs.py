@@ -42,6 +42,39 @@ def test_compare_runs_handles_empty_successful_score_tables(tmp_path):
     assert (output / "model_evidence_run_comparison_summary.csv").exists()
 
 
+def test_compare_runs_treats_blank_status_as_legacy_success(tmp_path):
+    left = tmp_path / "left"
+    right = tmp_path / "right"
+    output = tmp_path / "comparison"
+    rows = [
+        {
+            "session": "Rat1/Open1",
+            "event_index": 0,
+            "model": "momentum",
+            "log_evidence": 2.0,
+            "status": "",
+        },
+        {
+            "session": "Rat1/Open1",
+            "event_index": 0,
+            "model": "diffusion",
+            "log_evidence": 1.0,
+            "status": None,
+        },
+    ]
+    _write_event_scores(left, rows)
+    _write_event_scores(right, rows)
+
+    tables = compare_runs(left, right, left_label="left", right_label="right", output=output, exact_only=True)
+
+    summary = tables["summary"].iloc[0]
+    assert summary["left_events"] == 1
+    assert summary["right_events"] == 1
+    assert summary["matched_events"] == 1
+    assert set(tables["event_comparison"]["left_canonical_best_model"]) == {"momentum"}
+    assert set(tables["support_counts"]["evidence_comparable"]) == {True}
+
+
 def test_canonical_model_name_maps_state_space_aliases():
     assert canonical_model_name("sorted-spike-state-space-momentum") == "momentum"
     assert canonical_model_name("sorted-spike-state-space-momentum-exact-sparse") == "momentum"

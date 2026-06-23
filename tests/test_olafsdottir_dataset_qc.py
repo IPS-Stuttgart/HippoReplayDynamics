@@ -40,6 +40,22 @@ def test_track_sleep_pair_qc_marks_usable_and_excluded_pairs() -> None:
     assert ";" in ambiguous["track_session"]
 
 
+def test_track_sleep_pair_qc_accepts_csv_float_boolean_values() -> None:
+    module = _load_module()
+    manifest = _synthetic_manifest()
+    track_mask = manifest["animal"].eq("R2142") & manifest["session_type"].eq("track1")
+    sleep_mask = manifest["animal"].eq("R2142") & manifest["session_type"].eq("sleepPOST")
+    manifest.loc[track_mask, "has_pos"] = "1.0"
+    manifest.loc[sleep_mask, "has_pos"] = "0.0"
+
+    pairs = module.build_track_sleep_pairs(manifest)
+
+    usable = pairs[pairs["animal"].eq("R2142")].iloc[0]
+    assert bool(usable["track_has_pos"])
+    assert bool(usable["usable_pair"])
+    assert "track_missing_pos" not in str(usable["exclusion_reason"])
+
+
 def test_qc_summary_reports_counts_and_recommendation(tmp_path: Path) -> None:
     module = _load_module()
     manifest = _synthetic_manifest()

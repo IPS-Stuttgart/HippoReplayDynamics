@@ -56,6 +56,8 @@ def apply_evidence_status_coercion_patch() -> None:
         out = df.copy()
         if out.empty:
             return out
+        if "status" in out.columns:
+            out["status"] = out["status"].map(_normalize_status_value)
         inferred = out.apply(evidence_support_from_row, axis=1)
         if "evidence_support" in out:
             existing = out["evidence_support"].astype(object)

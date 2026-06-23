@@ -265,3 +265,109 @@ sensitivity notes until LFP/ripple diagnostics are reviewed.
 
 Important caveat: this is an initial candidate detector. Do not treat these
 events as final SWR detections until LFP/ripple diagnostics are reviewed.
+
+## 1D Evidence Workflow
+
+PR 6 adds a workflow smoke that chains the bridge adapter into exact-core 1D
+model-evidence scoring:
+
+```bash
+PYTHONPATH=src python scripts/benchmark_olafsdottir_1d_replay_evidence.py \
+  --extracted-root /home/github-runner/.cache/datasets/olafsdottir2016/extracted \
+  --derived-root results/olafsdottir-1d-derived \
+  --output results/olafsdottir-1d-evidence \
+  --session R2142/ZTrack20140806 \
+  --max-events 5
+```
+
+The script writes:
+
+```text
+olafsdottir_1d_event_model_evidence.csv
+olafsdottir_1d_family_margin_decisions.csv
+olafsdottir_1d_family_margin_summary.csv
+olafsdottir_1d_exact_core_model_claim_summary.csv
+olafsdottir_1d_paired_momentum_diffusion_summary.csv
+olafsdottir_1d_session_summary.csv
+olafsdottir_1d_control_gate_summary.csv
+```
+
+The first milestone is end-to-end ingestion, linearization, candidate-event
+detection, exact-core evidence scoring, and summary-table generation. It is not
+a positive biological result.
+
+## 1D-vs-2D Comparison Layer
+
+PR 7 adds a comparison script for completed event-level evidence artifacts:
+
+```bash
+PYTHONPATH=src python scripts/compare_olafsdottir_1d_2d_trajectory_family.py \
+  --olafsdottir-1d-evidence results/olafsdottir-1d-evidence \
+  --pfeiffer-foster-2d-evidence path/to/all_sessions_event_model_evidence.csv \
+  --output results/olafsdottir-1d-2d-comparison \
+  --margin-threshold 5.5
+```
+
+Required outputs:
+
+```text
+compare_1d_2d_trajectory_family_summary.csv
+compare_1d_2d_interpretation_summary.csv
+```
+
+The primary comparison columns are:
+
+```text
+dataset
+environment_type
+events
+trajectory_confident_claim_fraction
+nontrajectory_confident_claim_fraction
+mean_family_margin
+median_family_margin
+first_order_imm_raw_best_fraction
+momentum_raw_best_fraction
+momentum_vs_diffusion_median
+mean_family_margin_per_spike
+median_family_margin_per_spike
+mean_family_margin_per_time_bin
+median_family_margin_per_time_bin
+mean_spikes_per_event
+median_spikes_per_event
+mean_time_bins_per_event
+median_time_bins_per_event
+```
+
+The normalized margin columns are mandatory because raw 1D and 2D log-evidence
+margins are not directly comparable across different spike counts and event
+lengths.
+
+The interpretation table can label the comparison as:
+
+```text
+weaker_1d_signal
+similarly_strong_1d_signal
+strong_trajectory_family_but_weaker_imm_dominance
+mixed_1d_result
+sparse_or_data_limited_feasibility_result
+```
+
+The hard caveat is part of the output: do not claim IMM is only apparent in 2D
+without a robust weak or negative 1D result.
+
+The current R2142 pilot suggests that 1D Z-track replay, under the provisional
+adapter and detector, does not show the strong trajectory-family/IMM signature
+seen in the 2D Pfeiffer/Foster open-field result. Keep this as
+hypothesis-generating smoke, not a biological conclusion, because it uses one
+animal/day, a small candidate-event set, preliminary event detection,
+diagnostic-only linearization, and an adapter whose Track1/SleepPOST cell
+identity alignment still needs scaled verification. The strong exact-margin
+fraction in the pilot is 0.0, so model separation is low-confidence.
+
+Using the 21-event R2142 pilot table against the 160-event Pfeiffer/Foster
+full-core artifact, the comparison layer reports 0/21 1D trajectory-confident
+claims, 0/21 nontrajectory-confident claims, median 1D family margin about
++0.011, 0/21 first-order IMM raw best, and 3/21 exact-sparse momentum raw best.
+The same comparison labels the result
+`sparse_or_data_limited_feasibility_result` with directional pattern
+`weaker_1d_signal`. Treat that as a scaling target, not a paper claim.

@@ -10,6 +10,7 @@ from scripts.build_sota_comparator_pack import (
     MOMENTUM_CANDIDATE,
     MOMENTUM_EXACT,
     STATIONARY,
+    SOTA_COMPARATOR_EVENT_COLUMNS,
     build_sota_comparator_event_table,
     build_sota_comparator_family_summary,
     build_sota_comparator_full_core_winner_summary,
@@ -119,6 +120,34 @@ def test_sota_comparator_pack_refines_momentum_story(tmp_path: Path):
     }
     for name in outputs:
         assert (tmp_path / name).is_file()
+
+
+def test_sota_comparator_pack_preserves_schema_for_empty_inputs(tmp_path: Path):
+    evidence = pd.DataFrame(
+        columns=[
+            "status",
+            "session",
+            "event_index",
+            "model",
+            "log_evidence",
+            "evidence_comparable",
+            "evidence_support",
+        ]
+    )
+
+    event_table = build_sota_comparator_event_table(evidence, margin_threshold=5.5)
+    assert event_table.empty
+    assert tuple(event_table.columns) == SOTA_COMPARATOR_EVENT_COLUMNS
+
+    outputs = write_sota_comparator_pack(evidence, tmp_path, margin_threshold=5.5)
+    gate = outputs["sota_comparator_gate_summary.csv"].set_index("gate")
+
+    assert outputs["sota_comparator_event_table.csv"].empty
+    assert not bool(gate.loc["event_rows_present", "passed"])
+    assert not bool(gate.loc["overall", "passed"])
+    for name, frame in outputs.items():
+        assert (tmp_path / name).is_file()
+        assert len(frame.columns) > 0
 
 
 def test_sota_comparator_summaries_parse_string_false_flags():

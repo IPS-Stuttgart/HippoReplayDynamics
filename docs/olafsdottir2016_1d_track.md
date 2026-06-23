@@ -194,3 +194,74 @@ is useful as an end-to-end file-format and diagnostic-output check, but it is
 not by itself a paper-quality linearization claim. Do not overclaim
 linearization quality from this single-animal smoke check; use the diagnostics
 to decide whether a session is ready for scoring.
+
+## SleepPOST Candidate Event Detection
+
+PR 3 adds an initial conservative SleepPOST replay/SWR candidate detector:
+
+```bash
+PYTHONPATH=src python scripts/detect_olafsdottir_sleep_replay_events.py \
+  --dataset-root data/Olafsdottir2016 \
+  --output results/olafsdottir-sleeppost-events \
+  --min-event-spikes 5 \
+  --min-event-active-cells 3
+```
+
+The detector pairs `track1` and `sleepPOST` rows from
+`olafsdottir2016_manifest.csv`, reads hippocampal `.egf` channels, computes a
+ripple-band envelope, combines channels, detects threshold crossings, and then
+applies duration, spike-count, and active-cell gates.
+
+The default channel combination is `--combine-method max`, which computes the
+envelope/z-score separately per available hippocampal EGF channel and then uses
+the channel-wise maximum. Use `--combine-method mean` for a stricter
+across-channel average.
+
+Supported gate controls:
+
+```text
+--min-event-spikes
+--min-event-active-cells
+--min-duration-s
+--max-duration-s
+```
+
+Required outputs:
+
+```text
+sleep_replay_events.csv
+ripple_detection_summary.csv
+```
+
+`sleep_replay_events.csv` columns:
+
+```text
+event_index
+start_time_s
+end_time_s
+duration_s
+peak_time_s
+peak_ripple_z
+n_spikes
+n_active_cells
+animal
+date
+track_session
+sleep_session
+event_detector
+detector_parameters
+```
+
+The R2142 pilot run with `--min-event-spikes 5` and
+`--min-event-active-cells 3` produced 21 SleepPOST candidate events, with median
+event spikes 8 and maximum event spikes 55. Keep this as a pilot value for
+pipeline orientation, not as final SWR/replay prevalence.
+
+With this PR's default detector settings on the cached R2142 copy
+(`--combine-method max`, `--ripple-z-threshold 3.2`, `--min-duration-s 0.005`),
+the same spike-support gates produced 20 candidate events, with median event
+spikes 8 and maximum event spikes 34. Treat both values as detector-parameter
+sensitivity notes until LFP/ripple diagnostics are reviewed.
+
+Important caveat: this is an initial candidate detector. Do not treat these
+events as final SWR detections until LFP/ripple diagnostics are reviewed.

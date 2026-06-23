@@ -73,30 +73,56 @@ def apply_emission_cell_id_validation_patch() -> None:
     """Install integral-ID validation for emission row lookups."""
 
     from . import encoding as encoding_module
+    from . import kd_reference as kd_module
 
-    if getattr(encoding_module, _PATCHED_FLAG, False):
-        return
+    if not getattr(encoding_module, _PATCHED_FLAG, False):
+        original_build_emissions = encoding_module.build_emissions
 
-    original_build_emissions = encoding_module.build_emissions
+        @wraps(original_build_emissions)
+        def build_emissions(session, encoding, ripple, config=None):
+            encoding_cell_ids = _coerce_integral_ids(encoding.cell_ids, "encoding.cell_ids")
 
-    @wraps(original_build_emissions)
-    def build_emissions(session, encoding, ripple, config=None):
-        encoding_cell_ids = _coerce_integral_ids(encoding.cell_ids, "encoding.cell_ids")
+            spikes = np.asarray(session.spikes)
+            if spikes.size and encoding_cell_ids.size > 0:
+                if spikes.ndim != 2 or spikes.shape[1] < 2:
+                    raise ValueError("spikes must be two-dimensional with at least time and cell-id columns")
+                ripple_event = encoding_module._coerce_ripple_event(session, ripple)
+                in_ripple = (spikes[:, 0] >= ripple_event.start) & (spikes[:, 0] < ripple_event.end)
+                if np.any(in_ripple):
+                    _coerce_integral_ids(spikes[in_ripple, 1], "spike cell IDs")
 
-        spikes = np.asarray(session.spikes)
-        if spikes.size and encoding_cell_ids.size > 0:
-            if spikes.ndim != 2 or spikes.shape[1] < 2:
-                raise ValueError("spikes must be two-dimensional with at least time and cell-id columns")
-            ripple_event = encoding_module._coerce_ripple_event(session, ripple)
-            in_ripple = (spikes[:, 0] >= ripple_event.start) & (spikes[:, 0] < ripple_event.end)
-            if np.any(in_ripple):
-                _coerce_integral_ids(spikes[in_ripple, 1], "spike cell IDs")
+            return original_build_emissions(session, encoding, ripple, config)
 
-        return original_build_emissions(session, encoding, ripple, config)
+        encoding_module._cell_id_row_indices = _cell_id_row_indices
+        encoding_module.build_emissions = build_emissions
+        setattr(encoding_module, _PATCHED_FLAG, True)
 
-    encoding_module._cell_id_row_indices = _cell_id_row_indices
-    encoding_module.build_emissions = build_emissions
-    setattr(encoding_module, _PATCHED_FLAG, True)
+    if not getattr(kd_module, _PATCHED_FLAG, False):
+        original_build_kd_emissions = kd_module.build_kd_emissions
+
+        @wraps(original_build_kd_emissions)
+        def build_kd_emissions(session, encoding, ripple, time_bin_s, spike_rate_scale=1.0):
+            encoding_cell_ids = _coerce_integral_ids(encoding.cell_ids, "encoding.cell_ids")
+
+            spikes = np.asarray(session.spikes)
+            if spikes.size and encoding_cell_ids.size > 0:
+                if spikes.ndim != 2 or spikes.shape[1] < 2:
+                    raise ValueError("spikes must be two-dimensional with at least time and cell-id columns")
+                ripple_event = kd_module._coerce_ripple_event(session, ripple)
+                in_ripple = (spikes[:, 0] >= ripple_event.start) & (spikes[:, 0] < ripple_event.end)
+                if np.any(in_ripple):
+                    _coerce_integral_ids(spikes[in_ripple, 1], "spike cell IDs")
+
+            return original_build_kd_emissions(
+                session,
+                encoding,
+                ripple,
+                time_bin_s,
+                spike_rate_scale=spike_rate_scale,
+            )
+
+        kd_module.build_kd_emissions = build_kd_emissions
+        setattr(kd_module, _PATCHED_FLAG, True)
 
 
 __all__ = ["apply_emission_cell_id_validation_patch"]

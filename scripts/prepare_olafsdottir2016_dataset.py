@@ -28,7 +28,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--force-download",
         action="store_true",
-        help="Redownload the archive even if --archive-path already exists.",
+        help="Redownload the archive even if --archive-path already exists. Implies --download.",
     )
     parser.add_argument(
         "--extract",
@@ -46,7 +46,7 @@ def main(argv: list[str] | None = None) -> int:
         expected_md5=args.expected_md5,
         archive_path=args.archive_path,
         manifest_output=args.manifest_output,
-        download=args.download,
+        download=args.download or args.force_download,
         extract=args.extract,
         force_download=args.force_download,
     )

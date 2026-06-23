@@ -53,6 +53,8 @@ ALIGNMENT_OUTPUT = "replay_behavior_alignment.csv"
 PREDICTION_SUMMARY_OUTPUT = "future_path_prediction_summary.csv"
 RAT_SUMMARY_OUTPUT = "rat_behavior_alignment_summary.csv"
 LOO_OUTPUT = "leave_one_rat_out_behavior_prediction.csv"
+_LEGACY_MISSING_TEXT = {"", "nan", "none", "null", "na", "n/a", "<na>"}
+_REAL_WINDOW_ROLES = {"real", *_LEGACY_MISSING_TEXT}
 
 
 def _as_bool(value: object) -> bool:
@@ -146,6 +148,20 @@ def _diagnostic_numeric(row: pd.Series, name: str) -> float:
     return np.nan
 
 
+def _normalized_text(values: pd.Series) -> pd.Series:
+    return values.astype("string").str.strip().str.lower()
+
+
+def _status_success_mask(status: pd.Series) -> pd.Series:
+    normalized = _normalized_text(status)
+    return normalized.isna() | normalized.eq("success") | normalized.isin(_LEGACY_MISSING_TEXT)
+
+
+def _real_window_role_mask(window_role: pd.Series) -> pd.Series:
+    normalized = _normalized_text(window_role)
+    return normalized.isna() | normalized.isin(_REAL_WINDOW_ROLES)
+
+
 def _success_rows(frame: pd.DataFrame) -> pd.DataFrame:
     required = {"session", "event_index", "model", "log_evidence"}
     missing = sorted(required.difference(frame.columns))
@@ -154,11 +170,11 @@ def _success_rows(frame: pd.DataFrame) -> pd.DataFrame:
 
     out = frame.copy()
     if "status" in out.columns:
-        out = out[out["status"].astype(str).eq("success")].copy()
+        out = out[_status_success_mask(out["status"])].copy()
     if "evidence_comparable" in out.columns:
         out = out[out["evidence_comparable"].map(_as_bool)].copy()
     if "window_role" in out.columns:
-        out = out[out["window_role"].astype(str).isin(["", "real"])].copy()
+        out = out[_real_window_role_mask(out["window_role"])].copy()
     out["session"] = out["session"].astype(str)
     out["rat"] = out["session"].map(_rat_from_session)
     out["event_index"] = pd.to_numeric(out["event_index"], errors="raise").astype(int)

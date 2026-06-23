@@ -33,6 +33,7 @@ REQUIRED_EXACT_CORE_MODELS = (
 
 DEFAULT_GROUP_COLUMNS = ("session", "event_index")
 OFF_SWR_GROUP_COLUMNS = ("session", "event_index", "null_index")
+LEGACY_SUCCESS_STATUS_VALUES = {"", "nan", "none", "null", "na", "n/a", "<na>"}
 
 EVENT_COLUMNS = (
     "event_class",
@@ -110,6 +111,20 @@ def _as_bool(value: object) -> bool:
     return str(value).strip().lower() in {"1", "1.0", "true", "t", "yes", "y", "on"}
 
 
+def _status_is_success(value: object) -> bool:
+    try:
+        if pd.isna(value):
+            return True
+    except (TypeError, ValueError):
+        return False
+    status = str(value).strip().lower()
+    return status == "success" or status in LEGACY_SUCCESS_STATUS_VALUES
+
+
+def _successful_status_mask(status: pd.Series) -> pd.Series:
+    return status.map(_status_is_success).astype(bool)
+
+
 def _bool_column(frame: pd.DataFrame, column: str) -> pd.Series:
     if column not in frame:
         return pd.Series(False, index=frame.index, dtype=bool)
@@ -136,7 +151,7 @@ def _read_event_model_evidence(path: Path) -> pd.DataFrame:
     if missing:
         raise ValueError(f"event evidence is missing required columns: {missing}")
     if "status" in frame:
-        frame = frame[frame["status"].astype(str).eq("success")].copy()
+        frame = frame[_successful_status_mask(frame["status"])].copy()
     frame["session"] = frame["session"].astype(str)
     frame["rat"] = frame["session"].map(_rat_from_session)
     frame["event_index"] = pd.to_numeric(frame["event_index"], errors="raise").astype(int)

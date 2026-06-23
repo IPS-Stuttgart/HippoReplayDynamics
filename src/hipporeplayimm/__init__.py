@@ -2,6 +2,7 @@
 # ruff: noqa: E402
 
 from . import advanced_result_status_patch as _advanced_result_status_patch
+from . import axona_data_end_footer as _axona_data_end_footer
 from . import benchmark_cell_split_metadata as _benchmark_cell_split_metadata
 from . import benchmark_metadata_scope_patch as _benchmark_metadata_scope_patch
 from . import benchmark_relative_grouping as _benchmark_relative_grouping
@@ -210,6 +211,7 @@ def apply_runtime_patches() -> None:
     _time_order_patch.apply_reverse_emission_time_patch()
     _reverse_time_terminal_guard.apply_reverse_time_terminal_guard_patch()
     _wrapper_return_trajectory.apply_wrapper_return_trajectory_patch()
+    _axona_data_end_footer.apply_axona_data_end_footer_patch()
     _synchronize_duration_patched_emission_builders()
     _patch_simulation_recovery_module(_simulation_recovery)
     _simulation_best_row_flags.apply_simulation_best_row_flags_patch()

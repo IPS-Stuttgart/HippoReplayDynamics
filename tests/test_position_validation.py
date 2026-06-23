@@ -6,6 +6,8 @@ from hipporeplayimm.encoding import EncodingConfig
 from hipporeplayimm.position_decoding_config_validation import _validated_position_decoding_config
 from hipporeplayimm.position_validation import (
     PositionDecodingConfig,
+    _spike_counts_for_window,
+    fit_place_field_encoding_for_position_mask,
     summarize_position_decoding,
     validated_position_encoding_config,
     validate_session_position_decoding,
@@ -47,6 +49,58 @@ def test_position_decoding_config_validation_normalizes_accepted_values():
     assert normalized.n_folds == 3
     assert normalized.max_windows_per_session == 9
     assert normalized.min_spikes_per_window == 0
+
+
+def test_position_mask_encoding_falls_back_to_all_spikes_without_excitatory_labels(tmp_path):
+    times = np.array([0.0, 1.0, 2.0, 3.0], dtype=float)
+    position = np.column_stack(
+        [
+            times,
+            times,
+            np.zeros_like(times),
+            np.zeros_like(times),
+        ]
+    )
+    session = ReplaySession(
+        rat="RatX",
+        name="OpenX",
+        path=tmp_path,
+        position=position,
+        spikes=np.array([[1.5, 7.0]], dtype=float),
+        tetrode_cell_ids=np.array([[1, 7]], dtype=float),
+        excitatory_neurons=np.array([], dtype=int),
+        inhibitory_neurons=np.array([], dtype=int),
+        ripple_events=np.empty((0, 6), dtype=float),
+        run_times=np.array([[0.0, 3.0]], dtype=float),
+        sleep_box_immobile_times=np.empty((0, 2), dtype=float),
+        sleep_times=np.empty((0, 2), dtype=float),
+        rem_times=np.empty((0, 2), dtype=float),
+        well_sequence=None,
+        metadata={},
+    )
+    config = EncodingConfig(
+        bin_size_cm=1.0,
+        smoothing_sigma_bins=0.0,
+        min_speed_cm_s=0.0,
+        min_occupancy_s=1e-6,
+        rate_floor_hz=1e-4,
+        arena_padding_cm=0.0,
+        use_excitatory=True,
+    )
+
+    encoding = fit_place_field_encoding_for_position_mask(
+        session,
+        np.ones(times.shape, dtype=bool),
+        config,
+    )
+
+    assert encoding.cell_ids.tolist() == [7]
+    assert encoding.n_cells == 1
+    assert float(np.max(encoding.rates_hz[0])) > config.rate_floor_hz
+    np.testing.assert_array_equal(
+        _spike_counts_for_window(session, encoding, 1.0, 2.0),
+        np.array([1], dtype=int),
+    )
 
 
 def test_validate_session_position_decoding_returns_finite_cv_metrics(tmp_path):

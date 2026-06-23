@@ -233,6 +233,8 @@ def _patch_direct_reverse_wrappers(extensions: Any, reverse_models: Any) -> None
             terminal_log_posterior=terminal,
             trajectory_log_posterior=trajectory,
         )
+        if terminal is not None:
+            result.diagnostics.update(_posterior_diagnostics(terminal, bin_centers))
         if mapped_terminal_from_trajectory:
             return result
         return _clear_unmappable_reverse_terminal(result)
@@ -282,6 +284,8 @@ def _patch_direct_reverse_wrappers(extensions: Any, reverse_models: Any) -> None
             "forward_model_posterior_probability": float(weights[0]),
             "reverse_model_posterior_probability": float(weights[1]),
         }
+        if terminal is not None:
+            diagnostics.update(_posterior_diagnostics(terminal, bin_centers))
         return EventScore(
             self.name or f"{forward.model_name}-bidirectional",
             logp,

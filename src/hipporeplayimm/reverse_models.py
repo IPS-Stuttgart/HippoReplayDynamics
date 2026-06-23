@@ -8,7 +8,7 @@ import numpy as np
 from scipy.special import logsumexp
 
 from .encoding import LogEmissionTensor
-from .models import EventScore
+from .models import EventScore, _posterior_diagnostics
 from .reverse_time_terminal_guard import _clear_unmappable_reverse_terminal
 
 
@@ -31,6 +31,8 @@ class ReverseTimeReplayModel:
         diagnostics = dict(score.diagnostics)
         diagnostics["time_direction"] = "reverse"
         diagnostics["base_model"] = str(score.model_name)
+        if terminal is not None:
+            diagnostics.update(_posterior_diagnostics(terminal, bin_centers))
         return _clear_unmappable_reverse_terminal(
             EventScore(
                 model_name,
@@ -64,6 +66,8 @@ class BidirectionalReplayModel:
             "forward_model_posterior_probability": float(weights[0]),
             "reverse_model_posterior_probability": float(weights[1]),
         }
+        if terminal is not None:
+            diagnostics.update(_posterior_diagnostics(terminal, bin_centers))
         return EventScore(
             self.name or f"{forward.model_name}-bidirectional",
             logp,

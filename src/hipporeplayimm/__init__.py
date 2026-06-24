@@ -234,7 +234,7 @@ def apply_runtime_patches() -> None:
     _simulation_best_row_flags.apply_simulation_best_row_flags_patch()
     _evidence_status_coercion.apply_evidence_status_coercion_patch()
     _advanced_result_status_patch.apply_advanced_result_status_patch()
-    _advanced_result_empty_threshold_patch.apply_advanced_result_threshold_patch()
+    _advanced_result_empty_threshold_patch.apply_advanced_result_empty_threshold_patch()
     _advanced_result_threshold_validation.apply_advanced_result_threshold_validation_patch()
     _advanced_result_wrong_map_bootstrap_patch.apply_wrong_map_rat_bootstrap_patch()
     _latent_path_validation.apply_latent_path_validation_patch()

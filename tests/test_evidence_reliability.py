@@ -5,6 +5,21 @@ import pandas as pd
 from hipporeplayimm.evidence_reliability import add_event_reliability_flags
 
 
+def _valid_score_rows(status_values: list[object]) -> pd.DataFrame:
+    return pd.DataFrame(
+        [
+            {
+                "model": f"model-{index}",
+                "status": status,
+                "n_spikes": 4,
+                "n_time": 3,
+                "mean_candidate_log_mass": 0.0,
+            }
+            for index, status in enumerate(status_values)
+        ]
+    )
+
+
 def test_add_event_reliability_flags_replaces_existing_columns_on_rerun():
     scores = pd.DataFrame(
         [
@@ -35,3 +50,21 @@ def test_add_event_reliability_flags_replaces_existing_columns_on_rerun():
         reliable_rows=("event_reliable", "sum"),
     )
     assert int(reliability.loc[0, "reliable_rows"]) == 1
+
+
+def test_add_event_reliability_flags_treats_legacy_missing_status_as_success():
+    scores = _valid_score_rows(["", " ", None, pd.NA, float("nan")])
+
+    flagged = add_event_reliability_flags(scores)
+
+    assert flagged["event_reliable"].tolist() == [True] * len(scores)
+    assert flagged["event_reliability_reasons"].tolist() == [""] * len(scores)
+
+
+def test_add_event_reliability_flags_keeps_explicit_failed_status_unreliable():
+    scores = _valid_score_rows(["failure", "unsupported"])
+
+    flagged = add_event_reliability_flags(scores)
+
+    assert flagged["event_reliable"].tolist() == [False, False]
+    assert flagged["event_reliability_reasons"].tolist() == ["score_failure", "score_failure"]

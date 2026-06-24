@@ -85,6 +85,23 @@ def test_qc_summary_uses_parsed_r2142_tetrodes() -> None:
     assert "R2142 reversal check | pass" in summary
 
 
+def test_qc_summary_treats_tetrode_lists_as_order_insensitive() -> None:
+    module = _load_module()
+    manifest = _synthetic_manifest()
+    r2142_mask = manifest["animal"].eq("R2142")
+    manifest.loc[r2142_mask, "hippocampal_tetrodes"] = "8,7,6,5,4,3,2,1"
+    manifest.loc[r2142_mask, "mec_tetrodes"] = "16,15,14,13,12,11,10,9"
+
+    pairs = module.build_track_sleep_pairs(manifest)
+    summary = module.build_markdown_summary(manifest, pairs)
+
+    usable = pairs[pairs["animal"].eq("R2142")].iloc[0]
+    assert bool(usable["usable_pair"])
+    assert bool(usable["r2142_reversal_applied"])
+    assert "r2142_reversal_not_applied" not in str(usable["exclusion_reason"])
+    assert "R2142 reversal check | pass" in summary
+
+
 def test_qc_summary_reports_counts_and_recommendation(tmp_path: Path) -> None:
     module = _load_module()
     manifest = _synthetic_manifest()

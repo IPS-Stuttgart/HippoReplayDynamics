@@ -15,7 +15,9 @@ def _safe_zip_member_path(root: Path, member_name: str) -> Path:
     if not normalized:
         raise ValueError("Unsafe zip member path: empty filename")
     member_path = PurePosixPath(normalized)
-    if member_path.is_absolute() or any(part == ".." for part in member_path.parts) or (member_path.parts and member_path.parts[0].endswith(":")):
+    first_part = member_path.parts[0] if member_path.parts else ""
+    has_windows_drive = len(first_part) >= 2 and first_part[1] == ":" and first_part[0].isalpha()
+    if member_path.is_absolute() or any(part == ".." for part in member_path.parts) or has_windows_drive:
         raise ValueError(f"Unsafe zip member path: {member_name!r}")
     destination = (root / Path(*member_path.parts)).resolve()
     try:

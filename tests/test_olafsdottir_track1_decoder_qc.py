@@ -97,6 +97,9 @@ def test_track1_decoder_qc_writes_outputs_and_passes_gates(tmp_path: Path) -> No
     assert list(decoder.columns) == module.DECODER_COLUMNS
     assert len(decoder) == 2
     assert decoder["decoder_status"].eq("pass").all()
+    assert decoder["decoder_qc_paper_ready"].map(bool).all()
+    assert decoder["decoder_qc_scoring_available"].map(bool).all()
+    assert decoder["decoder_scoring_available_reason"].fillna("").eq("").all()
     assert decoder["encoding_units_passing_qc"].min() >= 5
     assert decoder["posterior_coverage_fraction"].min() >= 0.80
     assert np.isfinite(decoder["posterior_mean_error_cm_median"]).all()
@@ -161,11 +164,34 @@ def test_track1_decoder_qc_marks_missing_linearization_failure(tmp_path: Path) -
 
     row = tables["decoder"].iloc[0]
     assert row["decoder_status"] == "fail"
+    assert not bool(row["decoder_qc_paper_ready"])
+    assert not bool(row["decoder_qc_scoring_available"])
     assert "linearization_qc_not_passed" in row["exclusion_reason"]
     gates = tables["gates"].set_index("gate")
     assert bool(gates.loc["track1_decoder_outputs_present", "passed"])
     assert not bool(gates.loc["animals_retained_after_decoder_qc", "passed"])
     assert not bool(gates.loc["finite_crossval_errors", "passed"])
+
+
+def test_track1_decoder_qc_separates_scoring_available_from_paper_ready() -> None:
+    module = _load_module()
+    row = {
+        "animal": "R2335",
+        "n_position_samples": 1000,
+        "valid_position_fraction": 0.95,
+        "linearized_track_span_cm": 180.0,
+        "occupancy_nonzero_bins": 30,
+        "encoding_units_passing_qc": 8,
+        "posterior_mean_error_cm_median": 75.0,
+        "map_error_cm_median": 100.0,
+        "posterior_coverage_fraction": 0.55,
+        "reversal_applied": False,
+    }
+
+    assert module.decoder_scoring_available_reasons(row, min_encoding_units=5) == []
+
+    row["posterior_mean_error_cm_median"] = 250.0
+    assert "posterior_mean_error_exceeds_track_span" in module.decoder_scoring_available_reasons(row, min_encoding_units=5)
 
 
 def test_track1_decoder_qc_rejects_missing_inputs(tmp_path: Path) -> None:

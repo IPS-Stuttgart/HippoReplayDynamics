@@ -37,6 +37,7 @@ from . import kd_impossible_emission_patch as _kd_impossible_emission_patch
 from . import latent_path_validation as _latent_path_validation
 from . import mark_complex_validation as _mark_complex_validation
 from . import model_averaged_endpoint_scoping as _model_averaged_endpoint_scoping
+from . import model_parameter_validation as _model_parameter_validation
 from . import observation_sweep_config_validation as _observation_sweep_config_validation
 from . import occupancy_candidate_support as _occupancy_candidate_support
 from . import olafsdottir_zip_safety as _olafsdottir_zip_safety
@@ -65,6 +66,7 @@ from . import wrapper_return_trajectory as _wrapper_return_trajectory
 # symbols are imported from the patched modules.
 _state_space_bin_count_validation.apply_state_space_bin_count_validation_patch()
 _score_metadata.apply_model_hyperparam_patch()
+_model_parameter_validation.apply_model_parameter_validation_patch()
 _candidate_support_quality_patch.apply_candidate_support_quality_patch()
 _benchmark_cell_split_metadata.apply_benchmark_cell_split_metadata_patch()
 _benchmark_metadata_scope_patch.apply_benchmark_metadata_scope_patch()
@@ -181,6 +183,7 @@ def apply_runtime_patches() -> None:
 
     _state_space_bin_count_validation.apply_state_space_bin_count_validation_patch()
     _score_metadata.apply_model_hyperparam_patch()
+    _model_parameter_validation.apply_model_parameter_validation_patch()
     _candidate_support_quality_patch.apply_candidate_support_quality_patch()
     _benchmark_cell_split_metadata.apply_benchmark_cell_split_metadata_patch()
     _benchmark_metadata_scope_patch.apply_benchmark_metadata_scope_patch()
@@ -231,7 +234,7 @@ def apply_runtime_patches() -> None:
     _simulation_best_row_flags.apply_simulation_best_row_flags_patch()
     _evidence_status_coercion.apply_evidence_status_coercion_patch()
     _advanced_result_status_patch.apply_advanced_result_status_patch()
-    _advanced_result_empty_threshold_patch.apply_advanced_result_empty_threshold_patch()
+    _advanced_result_empty_threshold_patch.apply_advanced_result_threshold_patch()
     _advanced_result_threshold_validation.apply_advanced_result_threshold_validation_patch()
     _advanced_result_wrong_map_bootstrap_patch.apply_wrong_map_rat_bootstrap_patch()
     _latent_path_validation.apply_latent_path_validation_patch()

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import numpy as np
 import pandas as pd
+import pytest
 
 from hipporeplayimm.advanced_result_diagnostics import (
     paired_model_margin_threshold_sweep,
@@ -44,3 +45,26 @@ def test_paired_threshold_sweep_preserves_schema_without_complete_pairs():
 
     assert selected.loc[0, "selection_status"] == "fallback_no_gate_pass"
     assert selected.loc[0, "selected_margin_threshold"] == 0.0
+
+
+def test_paired_threshold_sweep_rejects_nonfinite_or_negative_thresholds():
+    scores = pd.DataFrame(
+        {
+            "session": ["Rat1/Open1", "Rat1/Open1"],
+            "event_index": [0, 0],
+            "model": ["momentum", "diffusion"],
+            "log_evidence": [10.0, 8.0],
+            "status": ["success", "success"],
+            "evidence_comparable": [True, True],
+        }
+    )
+
+    for thresholds in ((np.nan,), (np.inf,), (-1.0,)):
+        with pytest.raises(ValueError, match="finite nonnegative"):
+            paired_model_margin_threshold_sweep(
+                scores,
+                positive_model="momentum",
+                reference_model="diffusion",
+                thresholds=thresholds,
+                group_cols=("session", "event_index"),
+            )

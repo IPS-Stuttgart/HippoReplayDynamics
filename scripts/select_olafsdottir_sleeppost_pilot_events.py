@@ -85,6 +85,12 @@ SELECTION_COLUMNS = [
 ]
 
 
+def _pass_status_mask(values: pd.Series) -> pd.Series:
+    """Return a boolean mask for normalized pass-status cells."""
+
+    return values.astype("string").str.strip().str.lower().eq("pass").fillna(False)
+
+
 def run_pilot_event_selection(
     *,
     candidate_events_csv: str | Path,
@@ -111,7 +117,7 @@ def run_pilot_event_selection(
         "pilot_50_balanced": int(pilot50_events_per_pair),
         "pilot_100_balanced": int(pilot100_events_per_pair),
     }
-    decoder_pass = decoder[decoder["decoder_status"].astype(str).eq("pass")].copy()
+    decoder_pass = decoder[_pass_status_mask(decoder["decoder_status"])].copy()
     eligible = eligible_events(
         events,
         decoder_pass,
@@ -214,7 +220,7 @@ def eligible_events(
         how="inner",
     )
     keep = (
-        joined["event_qc_status"].astype(str).eq("pass")
+        _pass_status_mask(joined["event_qc_status"])
         & (pd.to_numeric(joined["mean_speed_cm_s"], errors="coerce") <= float(immobility_speed_threshold_cm_s))
         & (pd.to_numeric(joined["duration_ms"], errors="coerce") >= float(min_duration_ms))
         & (pd.to_numeric(joined["duration_ms"], errors="coerce") <= float(max_duration_ms))

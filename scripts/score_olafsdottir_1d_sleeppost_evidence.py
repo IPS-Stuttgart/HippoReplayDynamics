@@ -16,7 +16,6 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 import json
 import math
-import os
 from pathlib import Path
 import time
 from typing import Sequence
@@ -24,6 +23,7 @@ from typing import Sequence
 import numpy as np
 import pandas as pd
 
+from _provenance import build_script_provenance
 from hipporeplayimm.olafsdottir2016 import read_axona_cut
 
 
@@ -862,11 +862,17 @@ def gate_summary(*, selected: pd.DataFrame, decoder: pd.DataFrame, evidence: pd.
 
 
 def build_manifest(**kwargs: object) -> dict[str, object]:
+    input_paths = {
+        "pairs_csv": kwargs.get("pairs_csv"),
+        "linearization_qc": kwargs.get("linearization_qc"),
+        "decoder_qc": kwargs.get("decoder_qc"),
+        "pilot_selection": kwargs.get("pilot_selection"),
+    }
     return {
         "analysis": "olafsdottir_1d_sleeppost_evidence_smoke",
         "biological_claim_assessed": False,
         "created_at_utc": datetime.now(timezone.utc).isoformat(),
-        "code_commit": os.environ.get("GITHUB_SHA") or os.environ.get("CI_COMMIT_SHA") or "unknown_without_git",
+        **build_script_provenance(input_paths=input_paths),
         **{key: serialisable(value) for key, value in kwargs.items()},
     }
 

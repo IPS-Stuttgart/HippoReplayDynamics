@@ -261,3 +261,47 @@ def apply_runtime_patches() -> None:
 apply_runtime_patches()
 from .encoding import build_emissions as build_emissions  # noqa: E402,F401,F811
 from .ground_truth import compare_scores_to_ground_truth as compare_scores_to_ground_truth  # noqa: E402,F401,F811
+
+# Keep synthetic recovery summaries from mixing exact evidences with truncated
+# candidate lower bounds.
+SimulationRecoveryConfig = _simulation_recovery.SimulationRecoveryConfig
+SimulationRecoveryResult = _simulation_recovery.SimulationRecoveryResult
+run_session_simulation_recovery = _simulation_recovery.run_session_simulation_recovery
+
+__all__ = [
+    'BenchmarkConfig',
+    'BenchmarkResult',
+    'CandidateKinematicModel',
+    'ClusterlessMarkConfig',
+    'ClusterlessMarkEncoding',
+    'ClusterlessStateSpaceReplayModel',
+    'DiffusionModel',
+    'EncodingConfig',
+    'EncodingModel',
+    'EventScore',
+    'GoalStateSpaceReplayModel',
+    'GroundTruthConfig',
+    'PyRecEstGoalParticleModel',
+    'PyRecEstSweepConfig',
+    'PyRecEstSweepResult',
+    'RandomModel',
+    'ReplaySession',
+    'SimulationRecoveryConfig',
+    'SimulationRecoveryResult',
+    'StationaryModel',
+    'apply_runtime_patches',
+    'build_clusterless_mark_emissions',
+    'build_emissions',
+    'compare_scores_to_ground_truth',
+    'fit_clusterless_mark_encoding',
+    'fit_place_field_encoding',
+    'generate_behavioral_ground_truth',
+    'infer_well_locations',
+    'label_session_behavioral_ground_truth',
+    'load_open_field_sessions',
+    'run_open_field_benchmark',
+    'run_pyrecest_parameter_sweep',
+    'run_session_simulation_recovery',
+    'score_model',
+    'write_pyrecest_sweep_outputs',
+]

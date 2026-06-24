@@ -287,13 +287,19 @@ def _count_nonempty(frame: pd.DataFrame, column: str) -> int:
 def _r2142_status(r2142_rows: pd.DataFrame, pairs: pd.DataFrame) -> str:
     if r2142_rows.empty:
         return "not_present"
-    hpc_ok = r2142_rows["hippocampal_tetrodes"].astype(str).eq("1,2,3,4,5,6,7,8").all()
-    mec_ok = r2142_rows["mec_tetrodes"].astype(str).eq("9,10,11,12,13,14,15,16").all()
+    hpc_ok = _tetrode_column_matches(r2142_rows, "hippocampal_tetrodes", tuple(range(1, 9)))
+    mec_ok = _tetrode_column_matches(r2142_rows, "mec_tetrodes", tuple(range(9, 17)))
     pair_ok = True
     if not pairs.empty and "animal" in pairs:
         r2142_pairs = pairs[pairs["animal"].astype(str).str.upper().eq("R2142")]
         pair_ok = bool(r2142_pairs["r2142_reversal_applied"].map(_as_bool).all()) if not r2142_pairs.empty else True
     return "pass" if hpc_ok and mec_ok and pair_ok else "fail"
+
+
+def _tetrode_column_matches(rows: pd.DataFrame, column: str, expected: tuple[int, ...]) -> bool:
+    if column not in rows:
+        return False
+    return bool(rows[column].map(_parse_tetrodes).eq(expected).all())
 
 
 def _recommendation(*, usable_pairs: int, usable_animals: int) -> str:

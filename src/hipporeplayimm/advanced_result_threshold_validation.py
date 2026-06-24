@@ -1,4 +1,4 @@
-"""Reject non-finite paired model margin thresholds."""
+"""Validate paired model margin thresholds and neutral zero-margin ties."""
 
 from __future__ import annotations
 
@@ -21,14 +21,57 @@ def _validated_thresholds(thresholds: Sequence[float]) -> tuple[float, ...]:
 
 
 def apply_advanced_result_threshold_validation_patch() -> None:
-    """Install finite nonnegative validation for paired threshold sweeps."""
+    """Install paired-threshold validation and neutral zero-margin tie handling."""
 
     from . import advanced_result_diagnostics as diagnostics
 
     if getattr(diagnostics, _PATCHED_FLAG, False):
         return
 
-    previous = diagnostics.paired_model_margin_threshold_sweep
+    previous_decisions = diagnostics.paired_model_margin_decisions
+    previous_sweep = diagnostics.paired_model_margin_threshold_sweep
+
+    def paired_model_margin_decisions(
+        scores: pd.DataFrame,
+        *,
+        positive_model: str,
+        reference_model: str,
+        margin_threshold: float = 0.0,
+        group_cols: Sequence[str] = ("session", "event_index"),
+        evidence_col: str = "log_evidence",
+        model_col: str = "model",
+        true_model_col: str | None = None,
+        positive_true_label: str | None = None,
+    ) -> pd.DataFrame:
+        out = previous_decisions(
+            scores,
+            positive_model=positive_model,
+            reference_model=reference_model,
+            margin_threshold=margin_threshold,
+            group_cols=group_cols,
+            evidence_col=evidence_col,
+            model_col=model_col,
+            true_model_col=true_model_col,
+            positive_true_label=positive_true_label,
+        )
+        if out.empty:
+            return out
+        zero_tie = np.isclose(
+            pd.to_numeric(out["margin_threshold"], errors="coerce"),
+            0.0,
+        ) & np.isclose(
+            pd.to_numeric(out["positive_minus_reference_log_evidence"], errors="coerce"),
+            0.0,
+        )
+        if not bool(zero_tie.any()):
+            return out
+        out = out.copy()
+        out.loc[zero_tie, "margin_decision"] = "ambiguous"
+        out.loc[zero_tie, "positive_model_claimed"] = False
+        if "margin_binary_correct" in out and "true_is_positive" in out:
+            true_is_positive = diagnostics._bool_column(out, "true_is_positive")
+            out.loc[zero_tie, "margin_binary_correct"] = (~true_is_positive.loc[zero_tie]).astype(bool)
+        return out
 
     def paired_model_margin_threshold_sweep(
         scores: pd.DataFrame,
@@ -42,7 +85,7 @@ def apply_advanced_result_threshold_validation_patch() -> None:
         true_model_col: str | None = None,
         positive_true_label: str | None = None,
     ) -> pd.DataFrame:
-        return previous(
+        return previous_sweep(
             scores,
             positive_model=positive_model,
             reference_model=reference_model,
@@ -54,6 +97,7 @@ def apply_advanced_result_threshold_validation_patch() -> None:
             positive_true_label=positive_true_label,
         )
 
+    diagnostics.paired_model_margin_decisions = paired_model_margin_decisions
     diagnostics.paired_model_margin_threshold_sweep = paired_model_margin_threshold_sweep
     setattr(diagnostics, _PATCHED_FLAG, True)
 

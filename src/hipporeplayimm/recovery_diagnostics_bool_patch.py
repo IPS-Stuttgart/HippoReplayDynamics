@@ -15,6 +15,8 @@ import pandas as pd
 from .evidence_reporting import _coerce_bool_series
 
 _PATCHED_FLAG = "_recovery_diagnostics_bool_scalar_patch_applied"
+_TRUE_FLOAT_STRINGS = {"true", "yes", "y"}
+_FALSE_FLOAT_STRINGS = {"false", "no", "n"}
 
 
 def apply_recovery_diagnostics_bool_patch() -> None:
@@ -38,8 +40,31 @@ def apply_recovery_diagnostics_bool_patch() -> None:
             return bool(default)
         return coerce_bool(row[column], default)
 
+    def coerce_float(value: object, default: float) -> float:
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            text = str(value).strip().lower()
+            if text in _TRUE_FLOAT_STRINGS:
+                return 1.0
+            if text in _FALSE_FLOAT_STRINGS:
+                return 0.0
+            return float(default)
+
+    def row_float(row: Any, column: str, default: float) -> float:
+        if column not in row.index:
+            return float(default)
+        try:
+            if pd.isna(row[column]):
+                return float(default)
+        except (TypeError, ValueError):
+            return float(default)
+        return coerce_float(row[column], default)
+
     diagnostics._coerce_bool = coerce_bool
     diagnostics._row_bool = row_bool
+    diagnostics._coerce_float = coerce_float
+    diagnostics._row_float = row_float
     setattr(diagnostics, _PATCHED_FLAG, True)
 
 

@@ -240,17 +240,14 @@ def test_pyrecest_filter_dt_accepts_numpy_scalar_array() -> None:
 
 
 def test_replay_models_reject_empty_emissions_clearly() -> None:
-    emissions = LogEmissionTensor(
-        log_likelihood=np.zeros((0, 2), dtype=float),
-        spike_counts=np.zeros((0, 1), dtype=int),
-        times=np.empty(0, dtype=float),
-        dt=0.02,
-        cell_ids=np.array([1], dtype=int),
-        n_spikes=0,
-    )
+    class EmptyEmissions:
+        log_likelihood = np.zeros((0, 2), dtype=float)
+        n_bins = 2
+        n_time = 0
+        n_spikes = 0
 
     with pytest.raises(ValueError, match="at least one time bin"):
-        RandomModel().score(emissions, np.zeros((2, 2), dtype=float))
+        RandomModel().score(EmptyEmissions(), np.zeros((2, 2), dtype=float))
 
 
 def test_replay_models_reject_bin_center_count_mismatch() -> None:

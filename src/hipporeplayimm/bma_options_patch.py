@@ -55,7 +55,6 @@ def _wrap_late_compare_patch(module_name: str, function_name: str) -> None:
 
 
 def _wrap_ground_truth_compare_for_bma_options() -> None:
-    import pandas as pd
 
     import hipporeplayimm.ground_truth as gt
 

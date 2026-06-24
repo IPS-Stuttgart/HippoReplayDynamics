@@ -111,7 +111,7 @@ def _parse_float_metadata_value(column: str, value: Any) -> float:
         raise ValueError(f"{column} must contain finite numeric values")
     try:
         numeric = float(value)
-    except (TypeError, ValueError) as exc:
+    except (TypeError, ValueError, OverflowError) as exc:
         raise ValueError(f"{column} must contain finite numeric values") from exc
     if not np.isfinite(numeric):
         raise ValueError(f"{column} must contain finite numeric values")
@@ -130,7 +130,7 @@ def _parse_bool_metadata_value(column: str, value: Any) -> bool:
         return False
     try:
         numeric = float(value)
-    except (TypeError, ValueError) as exc:
+    except (TypeError, ValueError, OverflowError) as exc:
         raise ValueError(f"{column} must contain boolean values") from exc
     if not np.isfinite(numeric):
         raise ValueError(f"cannot parse boolean value for {column}")

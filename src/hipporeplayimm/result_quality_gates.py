@@ -67,6 +67,15 @@ def event_group_columns(frame: pd.DataFrame) -> list[str]:
     return columns
 
 
+def _iter_event_groups(frame: pd.DataFrame, group_columns: list[str]):
+    """Yield event-comparison groups, treating group-less tables as one unit."""
+
+    if group_columns:
+        yield from frame.groupby(group_columns, sort=False, dropna=False)
+    else:
+        yield (), frame
+
+
 def add_evidence_margin_columns(frame: pd.DataFrame) -> pd.DataFrame:
     """Annotate event/model rows with exact and lower-bound evidence margins.
 
@@ -90,7 +99,7 @@ def add_evidence_margin_columns(frame: pd.DataFrame) -> pd.DataFrame:
         out[f"{prefix}_relative_log_evidence"] = np.nan
 
     group_columns = event_group_columns(out)
-    for _, group in out.groupby(group_columns, sort=False):
+    for _, group in _iter_event_groups(out, group_columns):
         successful = _successful_rows(group)
         exact = successful[_coerce_bool_series(successful["evidence_comparable"])]
         _annotate_margin_scope(out, group.index, exact, prefix="exact_model")
@@ -112,7 +121,7 @@ def event_quality_summary(frame: pd.DataFrame) -> pd.DataFrame:
     rows = add_evidence_margin_columns(frame)
     group_columns = event_group_columns(rows)
     records: list[dict[str, object]] = []
-    for key, group in rows.groupby(group_columns, sort=False):
+    for key, group in _iter_event_groups(rows, group_columns):
         values = key if isinstance(key, tuple) else (key,)
         record = dict(zip(group_columns, values, strict=True))
         successful = _successful_rows(group)

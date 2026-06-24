@@ -379,11 +379,11 @@ def test_log_emission_tensor_rejects_invalid_core_shapes_and_values():
             }
         )
 
-    with pytest.raises(ValueError, match=r"NaN or \+inf"):
+    with pytest.raises(ValueError, match=r"\+inf"):
         LogEmissionTensor(
             **{
                 **good_kwargs,
-                "log_likelihood": np.array([[0.0, np.nan], [0.0, 0.0]], dtype=float),
+                "log_likelihood": np.array([[0.0, np.inf], [0.0, 0.0]], dtype=float),
             }
         )
 

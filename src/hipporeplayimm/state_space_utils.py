@@ -282,6 +282,8 @@ def _scaled_emissions(
     values = np.asarray(log_likelihood, dtype=float)
     if values.ndim != 2:
         raise ValueError("log_likelihood must be two-dimensional")
+    if np.any(np.isnan(values)) or np.any(values == np.inf):
+        raise ValueError("log_likelihood must not contain NaN or +inf")
 
     finite = np.isfinite(values)
     valid_mask = _coerce_valid_bin_mask(valid_bin_mask, values.shape[1])

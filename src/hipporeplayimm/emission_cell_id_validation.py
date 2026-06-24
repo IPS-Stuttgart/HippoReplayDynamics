@@ -4,9 +4,9 @@
 matching them against encoding rows.  That silently mapped corrupted fractional
 IDs such as ``1.5`` onto a real cell ``1`` and counted the spike for the wrong
 unit.  This patch validates both encoding and spike cell IDs as finite
-integer-valued identifiers before any row lookup can truncate them.
-It also installs a count-summary guard so ``LogEmissionTensor.n_spikes`` cannot
-silently disagree with the validated ``spike_counts`` tensor.
+integer-valued identifiers before any row lookup can truncate them.  It also
+installs a count-summary guard so ``LogEmissionTensor.n_spikes`` cannot silently
+disagree with the validated ``spike_counts`` tensor.
 """
 
 from __future__ import annotations

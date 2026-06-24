@@ -30,7 +30,11 @@ def _score_stationary(
     if not np.all(np.any(finite_on_active_support, axis=1)):
         raise ValueError("at least one emission row has no finite likelihood mass")
 
-    masked_log_likelihood = np.where(active[None, :], log_likelihood, -np.inf)
+    masked_log_likelihood = np.where(
+        active[None, :] & np.isfinite(log_likelihood),
+        log_likelihood,
+        -np.inf,
+    )
     log_weights = np.sum(masked_log_likelihood, axis=0) + _uniform_log_prior(
         emissions.n_bins,
         valid_bin_mask,

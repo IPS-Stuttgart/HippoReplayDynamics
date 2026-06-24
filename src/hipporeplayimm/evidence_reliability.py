@@ -5,6 +5,8 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
+from .evidence_status_coercion import _status_is_success_or_missing
+
 
 DEFAULT_MIN_SPIKES = 3
 DEFAULT_MIN_TIME_BINS = 2
@@ -31,8 +33,8 @@ def event_reliability_flags(
     """Return interpretable reliability flags for one score row."""
 
     reasons: list[str] = []
-    status = str(row.get("status", "success"))
-    if status != "success":
+    status = row.get("status", "success")
+    if not _status_is_success_or_missing(status):
         reasons.append("score_failure")
     n_spikes = _as_float(row.get("n_spikes", row.get("test_spikes", np.nan)))
     if np.isfinite(n_spikes) and n_spikes < min_spikes:

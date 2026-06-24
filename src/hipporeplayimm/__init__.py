@@ -13,6 +13,7 @@ from . import candidate_log_mass_validation as _candidate_log_mass_validation
 from . import candidate_support_normalization_validation as _candidate_support_normalization_validation
 from . import candidate_support_quality_patch as _candidate_support_quality_patch
 from . import cell_split_hashable_grouping as _cell_split_hashable_grouping
+from . import cli_float_values_validation as _cli_float_values_validation
 from . import clusterless_config_validation as _clusterless_config_validation
 from . import clusterless_ground_truth as _clusterless_ground_truth
 from . import clusterless_mark_group_validation as _clusterless_mark_group_validation
@@ -236,6 +237,7 @@ def apply_runtime_patches() -> None:
     _ground_truth_window_scope.apply_ground_truth_window_scope_patch()
     _improved_model_evidence_registry_patch.apply_improved_model_evidence_registry_patch()
     _observation_sweep_config_validation.apply_observation_sweep_config_validation_patch()
+    _cli_float_values_validation.apply_cli_float_values_validation_patch()
 
 
 # Ensure replay dynamics use center-to-center transition durations when replay

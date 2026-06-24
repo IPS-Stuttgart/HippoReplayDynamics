@@ -64,7 +64,7 @@ def add_model_averaged_endpoint_columns(df: pd.DataFrame) -> pd.DataFrame:
     out["model_probability_entropy"] = np.nan
     out["model_log_evidence_margin"] = np.nan
 
-    for group in _model_average_groups(out):
+    for row_positions, group in _model_average_groups(out):
         if "evidence_comparable" in group:
             comparable = _bool_series(group["evidence_comparable"])
         else:
@@ -110,18 +110,20 @@ def add_model_averaged_endpoint_columns(df: pd.DataFrame) -> pd.DataFrame:
         else:
             margin = np.nan
 
-        out.loc[group.index, "model_averaged_endpoint_x"] = x
-        out.loc[group.index, "model_averaged_endpoint_y"] = y
-        out.loc[group.index, "model_averaged_endpoint_models"] = int(exact.shape[0])
-        out.loc[group.index, "model_probability_entropy"] = entropy
-        out.loc[group.index, "model_log_evidence_margin"] = margin
+        positions = np.asarray(row_positions, dtype=int)
+        out.iloc[positions, out.columns.get_loc("model_averaged_endpoint_x")] = x
+        out.iloc[positions, out.columns.get_loc("model_averaged_endpoint_y")] = y
+        out.iloc[positions, out.columns.get_loc("model_averaged_endpoint_models")] = int(exact.shape[0])
+        out.iloc[positions, out.columns.get_loc("model_probability_entropy")] = entropy
+        out.iloc[positions, out.columns.get_loc("model_log_evidence_margin")] = margin
     return out
 
 
 def _model_average_groups(frame: pd.DataFrame):
     group_columns = _model_average_group_columns(frame)
     if not group_columns:
-        yield frame
+        row_positions = np.arange(len(frame), dtype=int)
+        yield row_positions, frame.iloc[row_positions]
         return
 
     labels = pd.DataFrame(
@@ -134,7 +136,8 @@ def _model_average_groups(frame: pd.DataFrame):
         index=frame.index,
     )
     for indices in labels.groupby(list(labels.columns), sort=False, dropna=False).indices.values():
-        yield frame.iloc[np.asarray(indices, dtype=int)]
+        row_positions = np.asarray(indices, dtype=int)
+        yield row_positions, frame.iloc[row_positions]
 
 
 def _model_average_group_columns(frame: pd.DataFrame) -> list[str]:

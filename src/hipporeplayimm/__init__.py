@@ -22,6 +22,7 @@ from . import data_cell_id_validation as _data_cell_id_validation
 from . import duration_candidate_metadata_patch as _duration_candidate_metadata_patch
 from . import duration_occupancy_metadata_guard as _duration_occupancy_metadata_guard
 from . import emission_cell_id_validation as _emission_cell_id_validation
+from . import encoding_grid_extra_columns as _encoding_grid_extra_columns
 from . import encoding_select_cells_validation as _encoding_select_cells_validation
 from . import evidence_status_coercion as _evidence_status_coercion
 from . import goal_state_space_integration as _goal_state_space_integration
@@ -85,6 +86,7 @@ _time_order_patch.apply_reverse_emission_time_patch()
 _clusterless_config_validation.apply_clusterless_encoding_config_validation_patch()
 _data_cell_id_validation.apply_data_cell_id_validation_patch()
 _mark_complex_validation.apply_mark_complex_validation_patch()
+_encoding_grid_extra_columns.apply_encoding_grid_extra_columns_patch()
 _position_decoding_config_validation.apply_position_decoding_config_validation_patch()
 _duration_candidate_metadata_patch.apply_duration_candidate_metadata_patch()
 _ground_truth_window_scope.apply_ground_truth_window_scope_patch()
@@ -204,6 +206,7 @@ def apply_runtime_patches() -> None:
     _mark_complex_validation.apply_mark_complex_validation_patch()
     _clusterless_mark_group_validation.apply_clusterless_mark_group_validation_patch()
     _encoding_select_cells_validation.apply_encoding_select_cells_validation_patch()
+    _encoding_grid_extra_columns.apply_encoding_grid_extra_columns_patch()
     _position_decoding_config_validation.apply_position_decoding_config_validation_patch()
     _duration_candidate_metadata_patch.apply_duration_candidate_metadata_patch()
     _ground_truth._encoding_config_for_scores = _score_metadata.encoding_config_for_scores

@@ -28,15 +28,15 @@ def apply_simulation_best_row_flags_patch() -> None:
     def simulation_event_best_rows_with_scoped_flags(event_scores: pd.DataFrame) -> pd.DataFrame:
         scored = reporting.ensure_evidence_support_columns(event_scores)
         if scored.empty:
-            return pd.DataFrame()
+            return _empty_like(scored)
         comparable = reporting._coerce_bool_series(scored["evidence_comparable"])
         status_ok = _status_success_mask(scored)
         ok = scored[status_ok & comparable]
         if ok.empty:
-            return pd.DataFrame()
+            return _empty_like(ok)
         ok = _finite_log_evidence_rows(ok)
         if ok.empty:
-            return pd.DataFrame()
+            return _empty_like(ok)
         if "is_best_model" not in ok.columns:
             return _best_by_log_evidence(ok)
         return _best_rows_with_guarded_flags(ok, reporting)
@@ -78,24 +78,24 @@ def _best_rows_with_guarded_flags(frame: pd.DataFrame, reporting: Any) -> pd.Dat
         else:
             pieces.append(_best_by_log_evidence(group))
     if not pieces:
-        return pd.DataFrame()
+        return _empty_like(frame)
     return pd.concat(pieces, ignore_index=True, sort=False)
 
 
 def _finite_log_evidence_rows(frame: pd.DataFrame) -> pd.DataFrame:
     if frame.empty:
-        return pd.DataFrame()
+        return _empty_like(frame)
     working = frame.copy()
     working["log_evidence"] = pd.to_numeric(working["log_evidence"], errors="coerce")
-    return working[np.isfinite(working["log_evidence"].to_numpy(dtype=float))]
+    return working[np.isfinite(working["log_evidence"].to_numpy(dtype=float))].copy()
 
 
 def _best_by_log_evidence(frame: pd.DataFrame) -> pd.DataFrame:
     if frame.empty:
-        return pd.DataFrame()
+        return _empty_like(frame)
     working = _finite_log_evidence_rows(frame)
     if working.empty:
-        return pd.DataFrame()
+        return _empty_like(working)
     group_columns = _event_group_columns(working)
     sort_columns = [*group_columns, "log_evidence"]
     ascending = [True] * len(group_columns) + [False]
@@ -105,6 +105,10 @@ def _best_by_log_evidence(frame: pd.DataFrame) -> pd.DataFrame:
     else:
         best = best.head(1)
     return best.reset_index(drop=True)
+
+
+def _empty_like(frame: pd.DataFrame) -> pd.DataFrame:
+    return frame.iloc[0:0].copy()
 
 
 def _event_group_columns(frame: pd.DataFrame) -> list[str]:

@@ -23,6 +23,18 @@ def test_simulation_event_best_rows_handles_empty_score_frame() -> None:
     assert best.empty
 
 
+def test_simulation_event_best_rows_preserves_schema_when_all_rows_filtered() -> None:
+    rows = pd.DataFrame([_row(0, "failed-row", 1.0, "True")])
+    rows["status"] = "failed"
+
+    best = simulation_event_best_rows(rows)
+
+    assert best.empty
+    assert "model" in best.columns
+    assert "log_evidence" in best.columns
+    assert "evidence_comparable" in best.columns
+
+
 def test_simulation_event_best_rows_recomputes_unflagged_events() -> None:
     rows = pd.DataFrame(
         [

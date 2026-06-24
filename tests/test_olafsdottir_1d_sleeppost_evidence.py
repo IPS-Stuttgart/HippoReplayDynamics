@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 from pathlib import Path
 import struct
 import sys
@@ -178,6 +179,14 @@ def test_sleeppost_evidence_smoke_writes_required_outputs_and_gates(tmp_path: Pa
     summary = (out / module.SUMMARY_OUTPUT).read_text(encoding="utf-8")
     assert "scoring/readiness smoke only" in summary
     assert "pilot_20_balanced" in summary
+    manifest = json.loads((out / module.MANIFEST_OUTPUT).read_text(encoding="utf-8"))
+    assert manifest["code_commit"] not in {"", "unknown_without_git"}
+    assert "git_branch" in manifest
+    assert "git_dirty" in manifest
+    assert manifest["command_line"]
+    assert manifest["working_directory"]
+    assert "pairs_csv" in manifest["input_file_paths"]
+    assert manifest["input_file_sha256"]["pairs_csv"]
 
 
 def test_sleeppost_evidence_smoke_scores_scoring_available_debug_tier(tmp_path: Path) -> None:

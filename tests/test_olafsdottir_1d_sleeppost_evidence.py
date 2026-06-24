@@ -26,6 +26,38 @@ def _load_module():
     return module
 
 
+def test_sleeppost_evidence_zero_selected_events_fails_completeness_gates(tmp_path: Path) -> None:
+    module = _load_module()
+    output_dir = tmp_path / "evidence"
+    output_dir.mkdir()
+    (output_dir / module.MANIFEST_OUTPUT).write_text("{}", encoding="utf-8")
+    decoder = pd.DataFrame(
+        [
+            {
+                "animal": "R2142",
+                "date": "2014-08-06",
+                "track1_session": "20140806_R2142_track1",
+                "sleeppost_session": "20140806_R2142_sleepPOST",
+                "decoder_status": "pass",
+            }
+        ]
+    )
+
+    gates = module.gate_summary(
+        selected=pd.DataFrame(),
+        decoder=decoder,
+        evidence=pd.DataFrame(),
+        decisions=pd.DataFrame(),
+        output_dir=output_dir,
+    ).set_index("gate")
+
+    assert not bool(gates.loc["selected_events_present", "passed"])
+    assert not bool(gates.loc["required_models_complete", "passed"])
+    assert not bool(gates.loc["stationary_comparator_present", "passed"])
+    assert not bool(gates.loc["fragmented_comparator_present", "passed"])
+    assert not bool(gates.loc["overall", "passed"])
+
+
 def test_sleeppost_evidence_smoke_writes_required_outputs_and_gates(tmp_path: Path) -> None:
     module = _load_module()
     dataset_root = tmp_path / "data"

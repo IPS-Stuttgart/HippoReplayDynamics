@@ -775,6 +775,8 @@ def gate_summary(*, selected: pd.DataFrame, decoder: pd.DataFrame, evidence: pd.
     selected_keys = event_key_set(selected)
     evidence_keys = event_key_set(evidence)
     required_rows_per_event = evidence.groupby(["animal", "date", "track1_session", "sleeppost_session", "event_index"], dropna=False)["model"].apply(lambda models: set(models.astype(str))) if not evidence.empty else pd.Series(dtype=object)
+    selected_events_nonempty = bool(selected_keys)
+    complete_required_model_events = sum(set(REQUIRED_MODELS).issubset(models) for models in required_rows_per_event)
     decoder_pass = decoder[decoder["decoder_status"].astype(str).eq("pass")].copy() if not decoder.empty else decoder
     selected_pairs = pair_key_set(selected)
     decoder_pass_pairs = pair_key_set_from_decoder(decoder_pass)
@@ -789,8 +791,10 @@ def gate_summary(*, selected: pd.DataFrame, decoder: pd.DataFrame, evidence: pd.
         ),
         gate_row(
             "required_models_complete",
-            len(required_rows_per_event) == len(selected_keys) and all(set(REQUIRED_MODELS).issubset(models) for models in required_rows_per_event),
-            f"complete_events={sum(set(REQUIRED_MODELS).issubset(models) for models in required_rows_per_event)}/{len(selected_keys)}",
+            selected_events_nonempty
+            and len(required_rows_per_event) == len(selected_keys)
+            and all(set(REQUIRED_MODELS).issubset(models) for models in required_rows_per_event),
+            f"complete_events={complete_required_model_events}/{len(selected_keys)}",
             "every selected event has stationary, diffusion, fragmented, and first_order_imm rows",
         ),
         gate_row(
@@ -813,13 +817,13 @@ def gate_summary(*, selected: pd.DataFrame, decoder: pd.DataFrame, evidence: pd.
         ),
         gate_row(
             "stationary_comparator_present",
-            STATIONARY_MODEL in models_present,
+            selected_events_nonempty and STATIONARY_MODEL in models_present,
             f"models={','.join(sorted(models_present))}",
             "stationary comparator rows are present",
         ),
         gate_row(
             "fragmented_comparator_present",
-            FRAGMENTED_MODEL in models_present,
+            selected_events_nonempty and FRAGMENTED_MODEL in models_present,
             f"models={','.join(sorted(models_present))}",
             "fragmented comparator rows are present",
         ),

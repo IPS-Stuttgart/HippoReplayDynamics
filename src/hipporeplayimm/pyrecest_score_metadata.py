@@ -59,7 +59,7 @@ def pyrecest_config_kwargs_for_scores(scores: pd.DataFrame, defaults: dict[str, 
         base.update(defaults)
     out: dict[str, int | float] = {}
     for name, columns in PYRECEST_INT_COLUMNS.items():
-        out[name] = _unique_int(scores, columns, int(base[name]))
+        out[name] = _unique_positive_int(scores, columns, int(base[name]))
     for name, columns in PYRECEST_FLOAT_COLUMNS.items():
         out[name] = _unique_float(scores, columns, float(base[name]))
     return out
@@ -144,6 +144,13 @@ def _unique_int(frame: pd.DataFrame, columns: tuple[str, ...], default: int) -> 
     if any(value != values[0] for value in values[1:]):
         raise ValueError(f"{' / '.join(columns)} contains multiple values")
     return values[0]
+
+
+def _unique_positive_int(frame: pd.DataFrame, columns: tuple[str, ...], default: int) -> int:
+    value = _unique_int(frame, columns, default)
+    if value <= 0:
+        raise ValueError(f"{' / '.join(columns)} must be positive")
+    return value
 
 
 def _unique_float(frame: pd.DataFrame, columns: tuple[str, ...], default: float) -> float:

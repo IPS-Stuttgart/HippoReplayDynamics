@@ -4,13 +4,9 @@
 matching them against encoding rows.  That silently mapped corrupted fractional
 IDs such as ``1.5`` onto a real cell ``1`` and counted the spike for the wrong
 unit.  This patch validates both encoding and spike cell IDs as finite
-integer-valued identifiers before any row lookup can truncate them.
-
-The same runtime patch also rejects empty ``LogEmissionTensor`` time axes at
-construction time.  Downstream scorers index the first emission row, so accepting
-zero-row tensors creates opaque later failures instead of a clear input error.
-It also installs a count-summary guard so ``LogEmissionTensor.n_spikes`` cannot
-silently disagree with the validated ``spike_counts`` tensor.
+integer-valued identifiers before any row lookup can truncate them.  It also
+installs a count-summary guard so ``LogEmissionTensor.n_spikes`` cannot silently
+disagree with the validated ``spike_counts`` tensor.
 """
 
 from __future__ import annotations
@@ -21,7 +17,6 @@ from typing import Any
 import numpy as np
 
 _PATCHED_FLAG = "_emission_cell_id_validation_patch_applied"
-_TIME_AXIS_PATCHED_FLAG = "_log_emission_time_axis_validation_patch_applied"
 
 
 def _contains_boolean_ids(values: np.ndarray) -> bool:
@@ -76,25 +71,6 @@ def _cell_id_row_indices(cell_ids: np.ndarray, spike_cell_ids: np.ndarray) -> np
     )
 
 
-def _install_log_emission_time_axis_guard(encoding_module) -> None:
-    """Reject zero-row emission tensors before later decoders index row zero."""
-
-    if getattr(encoding_module, _TIME_AXIS_PATCHED_FLAG, False):
-        return
-
-    original_post_init = encoding_module.LogEmissionTensor.__post_init__
-
-    @wraps(original_post_init)
-    def __post_init__(self) -> None:
-        log_likelihood = np.asarray(self.log_likelihood)
-        if log_likelihood.ndim == 2 and log_likelihood.shape[0] == 0:
-            raise ValueError("log_likelihood must contain at least one time bin")
-        original_post_init(self)
-
-    encoding_module.LogEmissionTensor.__post_init__ = __post_init__
-    setattr(encoding_module, _TIME_AXIS_PATCHED_FLAG, True)
-
-
 def apply_emission_cell_id_validation_patch() -> None:
     """Install integral-ID validation for emission row lookups."""
 
@@ -102,7 +78,6 @@ def apply_emission_cell_id_validation_patch() -> None:
     from . import kd_reference as kd_module
     from . import log_emission_n_spikes_validation as n_spikes_validation
 
-    _install_log_emission_time_axis_guard(encoding_module)
     n_spikes_validation.apply_log_emission_n_spikes_validation_patch()
 
     if not getattr(encoding_module, _PATCHED_FLAG, False):

@@ -91,6 +91,12 @@ def add_evidence_margin_columns(frame: pd.DataFrame) -> pd.DataFrame:
         return ensure_evidence_support_columns(frame)
 
     out = ensure_evidence_support_columns(frame)
+    original_index = out.index
+    # Margin annotation writes through ``.loc``.  Normalize to a unique internal
+    # index so concatenated score tables with duplicate labels cannot annotate
+    # another event's rows by accident.  Restore the caller's index before
+    # returning so downstream joins remain backward-compatible.
+    out = out.reset_index(drop=True)
     for prefix in ("exact_model", "truncated_lower_bound"):
         out[f"{prefix}_best_model"] = ""
         out[f"{prefix}_log_evidence_margin"] = np.nan
@@ -110,6 +116,7 @@ def add_evidence_margin_columns(frame: pd.DataFrame) -> pd.DataFrame:
             truncated,
             prefix="truncated_lower_bound",
         )
+    out.index = original_index
     return out
 
 

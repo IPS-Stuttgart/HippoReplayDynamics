@@ -1008,8 +1008,10 @@ def test_ground_truth_score_metadata_parsers_skip_textual_missing_values():
 def test_ground_truth_bool_metadata_parser_accepts_aliases_and_rejects_nonfinite():
     assert _unique_bool_from_column(pd.DataFrame({"flag": ["nan", "yes"]}), "flag", False) is True
     assert _unique_bool_from_column(pd.DataFrame({"flag": ["0.0"]}), "flag", True) is False
-    assert _unique_bool_from_column(pd.DataFrame({"flag": ["2.0"]}), "flag", False) is True
     assert _unique_bool_from_column(pd.DataFrame({"flag": ["off"]}), "flag", True) is False
+
+    with pytest.raises(ValueError, match="boolean values"):
+        _unique_bool_from_column(pd.DataFrame({"flag": ["2.0"]}), "flag", False)
 
     with pytest.raises(ValueError, match="cannot parse boolean value"):
         _unique_bool_from_column(pd.DataFrame({"flag": ["inf"]}), "flag", False)

@@ -80,11 +80,20 @@ def _coerce_transition_durations(
     fallback_dt: float,
 ) -> np.ndarray:
     expected = max(int(n_time) - 1, 0)
-    out = np.asarray(list(values), dtype=float)
-    if out.shape != (expected,):
+    raw_values = list(values)
+    if len(raw_values) == 0:
         dt = _positive_finite_scalar("fallback dt", fallback_dt)
         return np.full(expected, dt, dtype=float)
+
+    out = np.asarray(raw_values, dtype=float)
+    if out.ndim != 1:
+        raise ValueError("transition durations must be one-dimensional")
     _validate_transition_durations(out)
+    if out.shape != (expected,):
+        raise ValueError(
+            "transition durations must contain one finite positive value per transition; "
+            f"expected shape {(expected,)}, got {out.shape}"
+        )
     return out
 
 

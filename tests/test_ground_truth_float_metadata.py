@@ -11,8 +11,24 @@ from hipporeplayimm.ground_truth import (
 )
 
 
+class _OverflowingNumeric:
+    def __float__(self) -> float:
+        raise OverflowError("too large to convert to float")
+
+
 def test_ground_truth_float_metadata_rejects_nonfinite_values() -> None:
     scores = pd.DataFrame({"state_space_diffusion_sigma_cm_sqrt_s": ["inf"]})
+
+    with pytest.raises(ValueError, match="finite numeric"):
+        _unique_float_from_columns(
+            scores,
+            ("state_space_diffusion_sigma_cm_sqrt_s",),
+            85.0,
+        )
+
+
+def test_ground_truth_float_metadata_overflow_is_value_error() -> None:
+    scores = pd.DataFrame({"state_space_diffusion_sigma_cm_sqrt_s": [_OverflowingNumeric()]})
 
     with pytest.raises(ValueError, match="finite numeric"):
         _unique_float_from_columns(
@@ -55,6 +71,16 @@ def test_ground_truth_bool_metadata_rejects_invalid_numeric_values() -> None:
 
     with pytest.raises(ValueError, match="boolean values"):
         _parse_bool(2)
+
+
+def test_ground_truth_bool_metadata_overflow_is_value_error() -> None:
+    scores = pd.DataFrame({"encoding_use_excitatory": [_OverflowingNumeric()]})
+
+    with pytest.raises(ValueError, match="boolean values"):
+        _unique_bool_from_column(scores, "encoding_use_excitatory", True)
+
+    with pytest.raises(ValueError, match="boolean values"):
+        _parse_bool(_OverflowingNumeric())
 
 
 def test_ground_truth_bool_metadata_accepts_boolean_like_values() -> None:

@@ -3,9 +3,14 @@ from __future__ import annotations
 from functools import wraps
 from typing import Any
 
+import numpy as np
+import pandas as pd
+
 
 _DEFAULT_BMA_NAME = "bayesian-model-average"
 _DEFAULT_BMA_EVIDENCE_COLUMN = "auto"
+_TRUE_BOOL_STRINGS = {"1", "1.0", "true", "t", "yes", "y", "on"}
+_FALSE_BOOL_STRINGS = {"", "0", "0.0", "false", "f", "no", "n", "off", "nan", "none", "null", "<na>"}
 
 
 def apply_bma_options_patch() -> None:
@@ -50,7 +55,6 @@ def _wrap_late_compare_patch(module_name: str, function_name: str) -> None:
 
 
 def _wrap_ground_truth_compare_for_bma_options() -> None:
-    import pandas as pd
 
     import hipporeplayimm.ground_truth as gt
 
@@ -88,12 +92,31 @@ def _wrap_ground_truth_compare_for_bma_options() -> None:
                 gt._score_row_log_evidence = original_score_row_log_evidence
         return _apply_bma_output_options(
             comparison,
-            include_bma=bool(include_bayesian_model_average),
+            include_bma=_coerce_bool_option(include_bayesian_model_average),
             model_name=str(bayesian_model_average_name),
         )
 
     compare_scores_to_ground_truth_with_bma_options._bma_options_wrapped = True  # type: ignore[attr-defined]
     gt.compare_scores_to_ground_truth = compare_scores_to_ground_truth_with_bma_options
+
+
+def _coerce_bool_option(value: object) -> bool:
+    if isinstance(value, (bool, np.bool_)):
+        return bool(value)
+    try:
+        if pd.isna(value):
+            return False
+    except (TypeError, ValueError):
+        pass
+    if isinstance(value, (int, float, np.integer, np.floating)):
+        numeric = float(value)
+        return bool(np.isfinite(numeric) and numeric != 0.0)
+    text = str(value).strip().lower()
+    if text in _TRUE_BOOL_STRINGS:
+        return True
+    if text in _FALSE_BOOL_STRINGS:
+        return False
+    return bool(value)
 
 
 def _apply_bma_output_options(comparison, *, include_bma: bool, model_name: str):

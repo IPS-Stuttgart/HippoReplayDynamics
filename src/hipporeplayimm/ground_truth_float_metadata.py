@@ -102,12 +102,7 @@ def apply_ground_truth_float_metadata_patch() -> None:
         coerce_bool_series.__name__ = evidence._coerce_bool_series.__name__
         coerce_bool_series.__doc__ = evidence._coerce_bool_series.__doc__
         evidence._coerce_bool_series = coerce_bool_series
-
-        # recovery_diagnostics_bool_patch imports the helper by value during package
-        # initialisation; keep that alias synchronized before the patch is applied.
-        from . import recovery_diagnostics_bool_patch
-
-        recovery_diagnostics_bool_patch._coerce_bool_series = coerce_bool_series
+        _synchronize_coerce_bool_series_aliases(coerce_bool_series)
         setattr(evidence, _EVIDENCE_BOOL_PATCHED_FLAG, True)
 
 
@@ -151,6 +146,19 @@ def _parse_bool_metadata_value_or_default(value: Any, *, default: bool) -> bool:
         return _parse_bool_metadata_value("boolean metadata", value)
     except ValueError:
         return bool(default)
+
+
+def _synchronize_coerce_bool_series_aliases(coerce_bool_series: Any) -> None:
+    """Update package modules that imported the evidence bool helper by value."""
+
+    import sys
+
+    for module in list(sys.modules.values()):
+        module_name = getattr(module, "__name__", "")
+        if not module_name.startswith("hipporeplayimm"):
+            continue
+        if hasattr(module, "_coerce_bool_series"):
+            module._coerce_bool_series = coerce_bool_series
 
 
 __all__ = ["apply_ground_truth_float_metadata_patch"]

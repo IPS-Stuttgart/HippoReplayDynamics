@@ -1,0 +1,67 @@
+from __future__ import annotations
+
+from pathlib import Path
+
+import numpy as np
+
+from hipporeplayimm.data import ReplaySession, SpikeMarkData
+from hipporeplayimm.result_improvements import shuffle_spike_times_session
+
+
+def test_shuffle_spike_times_returns_time_sorted_mark_aligned_session() -> None:
+    session = _marked_session()
+
+    shuffled = shuffle_spike_times_session(session, random_seed=4)
+
+    assert shuffled.spike_marks is not None
+    assert np.all(np.diff(shuffled.spikes[:, 0]) >= 0.0)
+    np.testing.assert_allclose(shuffled.spike_marks.times, shuffled.spikes[:, 0])
+    np.testing.assert_array_equal(shuffled.spike_marks.cell_ids, shuffled.spikes[:, 1].astype(int))
+    np.testing.assert_allclose(shuffled.spike_marks.marks[:, 0], shuffled.spikes[:, 1])
+
+
+def _marked_session() -> ReplaySession:
+    spikes = np.array(
+        [
+            [0.0, 10.0],
+            [1.0, 20.0],
+            [2.0, 30.0],
+            [4.0, 40.0],
+        ],
+        dtype=float,
+    )
+    spike_marks = SpikeMarkData(
+        times=spikes[:, 0].copy(),
+        marks=np.array(
+            [
+                [10.0, 1.0],
+                [20.0, 2.0],
+                [30.0, 3.0],
+                [40.0, 4.0],
+            ],
+            dtype=float,
+        ),
+        source_file="synthetic",
+        source_variable="marks",
+        feature_names=("cell_id_proxy", "feature"),
+        cell_ids=spikes[:, 1].astype(int),
+        group_ids=np.array([1, 2, 3, 4], dtype=int),
+    )
+    return ReplaySession(
+        rat="RatX",
+        name="OpenX",
+        path=Path("."),
+        position=np.empty((0, 3), dtype=float),
+        spikes=spikes,
+        tetrode_cell_ids=np.empty((0, 2), dtype=int),
+        excitatory_neurons=np.array([], dtype=int),
+        inhibitory_neurons=np.array([], dtype=int),
+        ripple_events=np.empty((0, 6), dtype=float),
+        run_times=np.empty((0, 2), dtype=float),
+        sleep_box_immobile_times=np.empty((0, 2), dtype=float),
+        sleep_times=np.empty((0, 2), dtype=float),
+        rem_times=np.empty((0, 2), dtype=float),
+        well_sequence=None,
+        metadata={},
+        spike_marks=spike_marks,
+    )

@@ -159,10 +159,18 @@ def ensure_evidence_support_columns(df: pd.DataFrame) -> pd.DataFrame:
     else:
         out["evidence_support"] = inferred
     status_ok = out["status"].eq("success") if "status" in out else pd.Series(True, index=out.index)
+    finite_log_evidence = _finite_log_evidence_series(out)
     out["evidence_comparison"] = out["evidence_support"].map(evidence_comparison_from_support)
     out["evidence_comparison_note"] = out["evidence_comparison"].map(EVIDENCE_COMPARISON_DESCRIPTIONS).fillna(EVIDENCE_COMPARISON_DESCRIPTIONS[EVIDENCE_COMPARISON_UNKNOWN])
-    out["evidence_comparable"] = status_ok & out["evidence_support"].eq(EXACT_EVIDENCE_SUPPORT)
+    out["evidence_comparable"] = status_ok & finite_log_evidence & out["evidence_support"].eq(EXACT_EVIDENCE_SUPPORT)
     return add_candidate_support_quality_columns(out)
+
+
+def _finite_log_evidence_series(frame: pd.DataFrame) -> pd.Series:
+    if "log_evidence" not in frame:
+        return pd.Series(True, index=frame.index)
+    values = pd.to_numeric(frame["log_evidence"], errors="coerce")
+    return pd.Series(np.isfinite(values.to_numpy(dtype=float)), index=frame.index)
 
 
 def _is_missing_evidence_support(value: object) -> bool:

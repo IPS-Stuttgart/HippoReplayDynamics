@@ -354,8 +354,10 @@ def _as_2d_centers(bin_centers: np.ndarray) -> np.ndarray:
     centers = np.asarray(bin_centers, dtype=float)
     if centers.ndim == 1:
         centers = centers[:, None]
-    if centers.ndim != 2:
-        raise ValueError("bin_centers must be a one- or two-dimensional array")
+    if centers.ndim != 2 or centers.shape[0] == 0 or centers.shape[1] == 0:
+        raise ValueError("bin_centers must have shape (n_bins, position_dim)")
+    if not np.all(np.isfinite(centers)):
+        raise ValueError("bin_centers must be finite")
     return centers
 
 
@@ -376,9 +378,11 @@ def _default_position_sigma_cm(centers: np.ndarray) -> float:
 
 def _positive_config_value(config: object, name: str, *, default: float) -> float:
     value = float(getattr(config, name, 0.0))
-    if np.isfinite(value) and value > 0.0:
-        return value
-    return float(default)
+    if value == 0.0:
+        return float(default)
+    if not np.isfinite(value) or value < 0.0:
+        raise ValueError(f"{name} must be zero for the default or finite and positive")
+    return value
 
 
 def _transition_sigmas_cm(config: object, durations: np.ndarray) -> np.ndarray:
@@ -388,9 +392,16 @@ def _transition_sigmas_cm(config: object, durations: np.ndarray) -> np.ndarray:
 
 def _displacement_transition_sigma_cm_sqrt_s(config: object) -> float:
     value = float(getattr(config, "displacement_transition_sigma_cm_sqrt_s", 0.0))
-    if np.isfinite(value) and value > 0.0:
-        return value
-    return float(getattr(config, "momentum_sigma_cm_sqrt_s", 85.0))
+    if value == 0.0:
+        fallback = float(getattr(config, "momentum_sigma_cm_sqrt_s", 85.0))
+        if not np.isfinite(fallback) or fallback <= 0.0:
+            raise ValueError("momentum_sigma_cm_sqrt_s must be finite and positive")
+        return fallback
+    if not np.isfinite(value) or value < 0.0:
+        raise ValueError(
+            "displacement_transition_sigma_cm_sqrt_s must be zero for the default or finite and positive"
+        )
+    return value
 
 
 def _per_bin_sigma(sigma_cm_sqrt_s: float, dt_s: float) -> float:

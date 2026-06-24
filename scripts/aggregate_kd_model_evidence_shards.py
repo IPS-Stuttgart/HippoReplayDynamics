@@ -60,13 +60,22 @@ def _coerce_grid_index_array(shard: dict[str, object], key: str) -> np.ndarray:
     raw = np.asarray(shard[key])
     if np.issubdtype(raw.dtype, np.bool_):
         raise TypeError(f"Momentum shard {key} must contain integer grid indices, not booleans: {shard['path']}")
-    if np.issubdtype(raw.dtype, np.integer):
-        return raw.astype(np.intp, copy=False)
     if not np.issubdtype(raw.dtype, np.number):
         raise TypeError(f"Momentum shard {key} must contain numeric integer grid indices: {shard['path']}")
+    intp_info = np.iinfo(np.dtype(np.intp))
+    if np.issubdtype(raw.dtype, np.integer):
+        out_of_intp_range = any(
+            int(value) < intp_info.min or int(value) > intp_info.max
+            for value in raw.ravel()
+        )
+        if out_of_intp_range:
+            raise ValueError(f"Momentum shard {key} must fit into NumPy integer index range: {shard['path']}")
+        return raw.astype(np.intp, copy=False)
     values = np.asarray(raw, dtype=float)
     if not np.all(np.isfinite(values)) or not np.all(values == np.floor(values)):
         raise ValueError(f"Momentum shard {key} must contain finite integer grid indices: {shard['path']}")
+    if not np.all((values >= intp_info.min) & (values <= intp_info.max)):
+        raise ValueError(f"Momentum shard {key} must fit into NumPy integer index range: {shard['path']}")
     return values.astype(np.intp, copy=False)
 
 

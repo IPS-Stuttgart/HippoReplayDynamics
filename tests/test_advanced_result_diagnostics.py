@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import numpy as np
 import pandas as pd
+import pytest
 
 from hipporeplayimm.advanced_result_diagnostics import (
     add_evidence_margin_columns,
@@ -176,6 +177,28 @@ def test_paired_model_margin_decisions_reject_weak_momentum_claims():
     assert summary.loc[0, "false_positive_claims"] == 0
     assert summary.loc[0, "reference_specificity"] == 1.0
     assert summary.loc[0, "positive_claim_recall"] == 0.5
+
+
+def test_paired_model_margin_decisions_reject_invalid_scalar_thresholds():
+    scores = pd.DataFrame(
+        {
+            "session": ["Rat1/Open1", "Rat1/Open1"],
+            "event_index": [0, 0],
+            "model": ["momentum", "diffusion"],
+            "log_evidence": [1.0, 0.0],
+            "status": ["success", "success"],
+            "evidence_comparable": [True, True],
+        }
+    )
+
+    for threshold in (True, np.bool_(False), np.nan, np.inf, -1.0):
+        with pytest.raises(ValueError, match="finite nonnegative"):
+            paired_model_margin_decisions(
+                scores,
+                positive_model="momentum",
+                reference_model="diffusion",
+                margin_threshold=threshold,
+            )
 
 
 def test_paired_model_margin_summary_parses_string_bool_decisions():

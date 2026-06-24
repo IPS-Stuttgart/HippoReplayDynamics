@@ -135,6 +135,88 @@ def test_pilot_event_selection_normalizes_pass_status_tokens(tmp_path: Path) -> 
     assert bool(gates.loc["decoder_pass_pairs_present", "passed"])
     assert bool(gates.loc["eligible_events_for_decoder_pairs", "passed"])
     assert bool(gates.loc["pilot_20_balanced_complete", "passed"])
+    assert gates["decoder_pass_pairs"].eq(2).all()
+    assert gates["eligible_pairs"].eq(2).all()
+    assert gates["primary_tier"].eq("pilot_20_balanced").all()
+    assert gates["primary_selected_events"].eq(4).all()
+    assert gates["primary_expected_events"].eq(4).all()
+
+
+def test_pilot_event_selection_uses_explicit_scoring_available_debug_tiers(tmp_path: Path) -> None:
+    module = _load_module()
+    events = _candidate_events()
+    decoder = _decoder_qc()
+    decoder["decoder_status"] = "fail"
+    decoder["decoder_qc_paper_ready"] = False
+    decoder["decoder_qc_scoring_available"] = True
+    events_csv = tmp_path / "events.csv"
+    decoder_csv = tmp_path / "decoder.csv"
+    events.to_csv(events_csv, index=False)
+    decoder.to_csv(decoder_csv, index=False)
+
+    strict = module.run_pilot_event_selection(
+        candidate_events_csv=events_csv,
+        decoder_qc_csv=decoder_csv,
+        output_dir=tmp_path / "strict-selection",
+        seed=123,
+        pilot20_events_per_pair=2,
+        pilot50_events_per_pair=3,
+        pilot100_events_per_pair=4,
+        min_pilot20_animals_fraction=1.0,
+    )
+    debug = module.run_pilot_event_selection(
+        candidate_events_csv=events_csv,
+        decoder_qc_csv=decoder_csv,
+        output_dir=tmp_path / "debug-selection",
+        seed=123,
+        pilot20_events_per_pair=2,
+        pilot50_events_per_pair=3,
+        pilot100_events_per_pair=4,
+        decoder_filter="scoring_available",
+        min_pilot20_animals_fraction=1.0,
+    )
+
+    assert strict["selection"].empty
+    debug_selection = debug["selection"]
+    assert module.tier_count(debug_selection, "pilot_20_decoder_available_debug") == 4
+    assert module.tier_count(debug_selection, "pilot_50_decoder_available_debug") == 6
+    assert module.tier_count(debug_selection, "pilot_100_decoder_available_debug") == 8
+    assert module.tier_count(debug_selection, "pilot_20_balanced") == 0
+    assert debug_selection["decoder_filter"].dropna().eq("scoring_available").all()
+    assert debug_selection["decoder_qc_paper_ready"].map(bool).eq(False).all()
+    assert debug_selection["decoder_qc_scoring_available"].map(bool).all()
+    gates = debug["gates"].set_index("gate")
+    assert bool(gates.loc["pilot_20_decoder_available_debug_complete", "passed"])
+    assert bool(gates.loc["pilot_20_decoder_available_debug_spans_decoder_animals", "passed"])
+    assert bool(gates.loc["pilot_20_decoder_available_debug_spans_decoder_pairs", "passed"])
+    summary = (tmp_path / "debug-selection" / module.SUMMARY_OUTPUT).read_text(encoding="utf-8")
+    assert "decoder_filter | scoring_available" in summary
+    assert "decoder_pass_pairs | 2" in summary
+    assert "primary_expected_events | 4" in summary
+    assert "pilot_20_decoder_available_debug events | 4" in summary
+
+
+def test_scoring_available_filter_requires_explicit_decoder_qc_column(tmp_path: Path) -> None:
+    module = _load_module()
+    events = _candidate_events()
+    decoder = _decoder_qc()
+    decoder["decoder_status"] = "fail"
+    events_csv = tmp_path / "events.csv"
+    decoder_csv = tmp_path / "decoder.csv"
+    events.to_csv(events_csv, index=False)
+    decoder.to_csv(decoder_csv, index=False)
+
+    try:
+        module.run_pilot_event_selection(
+            candidate_events_csv=events_csv,
+            decoder_qc_csv=decoder_csv,
+            output_dir=tmp_path / "selection",
+            decoder_filter="scoring_available",
+        )
+    except ValueError as exc:
+        assert "decoder_qc_scoring_available" in str(exc)
+    else:
+        raise AssertionError("scoring_available should require explicit decoder QC support")
 
 
 def test_pilot_event_selection_rejects_missing_inputs(tmp_path: Path) -> None:

@@ -53,7 +53,7 @@ def _parse_cell_id_value(value: Any) -> int:
         raise ValueError("score-table cell IDs cell ID metadata must not contain boolean identifiers")
     try:
         numeric = float(value)
-    except (TypeError, ValueError) as exc:
+    except (TypeError, ValueError, OverflowError) as exc:
         raise ValueError("score-table cell IDs cell ID metadata must contain integer values") from exc
     if not np.isfinite(numeric):
         raise ValueError("score-table cell IDs cell ID metadata must contain finite integer values")

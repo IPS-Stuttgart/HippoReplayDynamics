@@ -6,6 +6,7 @@ from hipporeplayimm.duration_occupancy import (
     _candidate_selection_emissions,
     _uniform_probabilities,
 )
+from hipporeplayimm.duration_occupancy_metadata_guard import _coerce_transition_durations
 from hipporeplayimm.encoding import LogEmissionTensor
 
 
@@ -57,3 +58,20 @@ def test_candidate_selection_emissions_reuses_input_when_no_masking_needed():
 def test_uniform_probabilities_rejects_nonpositive_bin_count():
     with pytest.raises(ValueError, match="n_bins must be positive"):
         _uniform_probabilities(0)
+
+
+def test_transition_duration_guard_fills_only_missing_metadata() -> None:
+    durations = _coerce_transition_durations([], n_time=3, fallback_dt=0.02)
+
+    np.testing.assert_allclose(durations, np.array([0.02, 0.02], dtype=float))
+
+
+def test_transition_duration_guard_rejects_malformed_nonempty_metadata() -> None:
+    with pytest.raises(ValueError, match="one finite positive value per transition"):
+        _coerce_transition_durations([0.02], n_time=3, fallback_dt=0.02)
+
+    with pytest.raises(ValueError, match="one-dimensional"):
+        _coerce_transition_durations(np.ones((2, 1)), n_time=3, fallback_dt=0.02)
+
+    with pytest.raises(ValueError, match="finite and positive"):
+        _coerce_transition_durations([0.02, float("nan")], n_time=3, fallback_dt=0.02)

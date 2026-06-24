@@ -35,14 +35,6 @@ def apply_simulation_recovery_runtime_limit_validation_patch() -> None:
 def _positive_integer_value(name: str, value: Any) -> int:
     if isinstance(value, (bool, np.bool_)):
         raise ValueError(f"{name} must be a finite positive integer")
-    if isinstance(value, str):
-        try:
-            integer = int(value)
-        except (TypeError, ValueError) as exc:
-            raise ValueError(f"{name} must be a finite positive integer") from exc
-        if integer <= 0:
-            raise ValueError(f"{name} must be a finite positive integer")
-        return integer
     try:
         numeric = float(value)
     except (TypeError, ValueError) as exc:

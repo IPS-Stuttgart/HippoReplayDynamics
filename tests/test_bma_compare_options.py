@@ -4,13 +4,15 @@ from types import SimpleNamespace
 
 import numpy as np
 import pandas as pd
+import pytest
 
 import hipporeplayimm.ground_truth as ground_truth
 from hipporeplayimm.encoding import EncodingConfig, EncodingModel, LogEmissionTensor
 from hipporeplayimm.models import EventScore
 
 
-def test_compare_scores_to_ground_truth_respects_disabled_bma(monkeypatch) -> None:
+@pytest.mark.parametrize("include_bma", [False, "False", "0", 0])
+def test_compare_scores_to_ground_truth_respects_disabled_bma(monkeypatch, include_bma) -> None:
     scores = pd.DataFrame(
         {
             "session": ["s1", "s1"],
@@ -85,7 +87,7 @@ def test_compare_scores_to_ground_truth_respects_disabled_bma(monkeypatch) -> No
         "unused-root",
         scores,
         ground_truth=labels,
-        include_bayesian_model_average=False,
+        include_bayesian_model_average=include_bma,
     )
 
     assert set(comparison["model"]) == {"left", "right"}

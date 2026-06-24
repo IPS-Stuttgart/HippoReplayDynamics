@@ -105,9 +105,7 @@ def _parse_bool_metadata_value(column: str, value: Any) -> bool:
         raise ValueError(f"cannot parse boolean value for {column}")
     if np.isclose(numeric, 0.0, rtol=0.0, atol=0.0):
         return False
-    if np.isclose(numeric, 1.0, rtol=0.0, atol=0.0):
-        return True
-    raise ValueError(f"{column} must contain boolean values")
+    return True
 
 
 __all__ = ["apply_ground_truth_float_metadata_patch"]

@@ -137,6 +137,58 @@ def test_pilot_event_selection_normalizes_pass_status_tokens(tmp_path: Path) -> 
     assert bool(gates.loc["pilot_20_balanced_complete", "passed"])
 
 
+def test_pilot_event_selection_uses_explicit_scoring_available_debug_tiers(tmp_path: Path) -> None:
+    module = _load_module()
+    events = _candidate_events()
+    decoder = _decoder_qc()
+    decoder["decoder_status"] = "fail"
+    decoder["decoder_qc_paper_ready"] = False
+    decoder["decoder_qc_scoring_available"] = True
+    events_csv = tmp_path / "events.csv"
+    decoder_csv = tmp_path / "decoder.csv"
+    events.to_csv(events_csv, index=False)
+    decoder.to_csv(decoder_csv, index=False)
+
+    strict = module.run_pilot_event_selection(
+        candidate_events_csv=events_csv,
+        decoder_qc_csv=decoder_csv,
+        output_dir=tmp_path / "strict-selection",
+        seed=123,
+        pilot20_events_per_pair=2,
+        pilot50_events_per_pair=3,
+        pilot100_events_per_pair=4,
+        min_pilot20_animals_fraction=1.0,
+    )
+    debug = module.run_pilot_event_selection(
+        candidate_events_csv=events_csv,
+        decoder_qc_csv=decoder_csv,
+        output_dir=tmp_path / "debug-selection",
+        seed=123,
+        pilot20_events_per_pair=2,
+        pilot50_events_per_pair=3,
+        pilot100_events_per_pair=4,
+        decoder_filter="scoring_available",
+        min_pilot20_animals_fraction=1.0,
+    )
+
+    assert strict["selection"].empty
+    debug_selection = debug["selection"]
+    assert module.tier_count(debug_selection, "pilot_20_decoder_available_debug") == 4
+    assert module.tier_count(debug_selection, "pilot_50_decoder_available_debug") == 6
+    assert module.tier_count(debug_selection, "pilot_100_decoder_available_debug") == 8
+    assert module.tier_count(debug_selection, "pilot_20_balanced") == 0
+    assert debug_selection["decoder_filter"].dropna().eq("scoring_available").all()
+    assert debug_selection["decoder_qc_paper_ready"].map(bool).eq(False).all()
+    assert debug_selection["decoder_qc_scoring_available"].map(bool).all()
+    gates = debug["gates"].set_index("gate")
+    assert bool(gates.loc["pilot_20_decoder_available_debug_complete", "passed"])
+    assert bool(gates.loc["pilot_20_decoder_available_debug_spans_decoder_animals", "passed"])
+    assert bool(gates.loc["pilot_20_decoder_available_debug_spans_decoder_pairs", "passed"])
+    summary = (tmp_path / "debug-selection" / module.SUMMARY_OUTPUT).read_text(encoding="utf-8")
+    assert "decoder_filter | scoring_available" in summary
+    assert "pilot_20_decoder_available_debug events | 4" in summary
+
+
 def test_pilot_event_selection_rejects_missing_inputs(tmp_path: Path) -> None:
     module = _load_module()
     events_csv = tmp_path / "events.csv"

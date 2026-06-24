@@ -85,6 +85,9 @@ DECODER_COLUMNS = [
     "map_error_cm_p90",
     "posterior_coverage_fraction",
     "decoder_status",
+    "decoder_qc_paper_ready",
+    "decoder_qc_scoring_available",
+    "decoder_scoring_available_reason",
     "orientation_rule",
     "reversal_applied",
     "exclusion_reason",
@@ -324,6 +327,7 @@ def summarize_pair(
             orientation_rule=orientation_rule,
             reversal_applied=reversal_applied,
             reasons=reasons,
+            min_encoding_units=min_encoding_units,
         )
         figures = write_figures(
             animal=animal,
@@ -347,6 +351,7 @@ def summarize_pair(
             orientation_rule=orientation_rule,
             reversal_applied=reversal_applied,
             reasons=reasons,
+            min_encoding_units=min_encoding_units,
         )
         return row, pd.DataFrame(columns=UNIT_COLUMNS), figures
 
@@ -575,10 +580,11 @@ def decoder_row(
     orientation_rule: str,
     reversal_applied: bool,
     reasons: list[str],
+    min_encoding_units: int,
 ) -> dict[str, object]:
     unit_rates = pd.to_numeric(unit_table["mean_rate_hz"], errors="coerce") if not unit_table.empty else pd.Series(dtype=float)
     status = "pass" if not reasons else "fail"
-    return {
+    row = {
         "animal": animal,
         "date": date,
         "track1_session": track_session,
@@ -605,6 +611,11 @@ def decoder_row(
         "reversal_applied": bool(reversal_applied),
         "exclusion_reason": ";".join(reasons),
     }
+    scoring_reasons = decoder_scoring_available_reasons(row, min_encoding_units=min_encoding_units)
+    row["decoder_qc_paper_ready"] = bool(status == "pass")
+    row["decoder_qc_scoring_available"] = bool(not scoring_reasons)
+    row["decoder_scoring_available_reason"] = ";".join(scoring_reasons)
+    return row
 
 
 def failed_decoder_row(
@@ -617,6 +628,7 @@ def failed_decoder_row(
     orientation_rule: str,
     reversal_applied: bool,
     reasons: list[str],
+    min_encoding_units: int,
 ) -> dict[str, object]:
     row = {column: np.nan for column in DECODER_COLUMNS}
     row.update(
@@ -636,12 +648,66 @@ def failed_decoder_row(
             "crossval_n_folds": 0,
             "posterior_coverage_fraction": 0.0,
             "decoder_status": "fail",
+            "decoder_qc_paper_ready": False,
             "orientation_rule": orientation_rule,
             "reversal_applied": bool(reversal_applied),
             "exclusion_reason": ";".join(reasons),
         }
     )
+    scoring_reasons = decoder_scoring_available_reasons(row, min_encoding_units=min_encoding_units)
+    row["decoder_qc_scoring_available"] = bool(not scoring_reasons)
+    row["decoder_scoring_available_reason"] = ";".join(scoring_reasons)
     return row
+
+
+def decoder_scoring_available_reasons(row: dict[str, object], *, min_encoding_units: int) -> list[str]:
+    """Return non-paper reasons that still block a technical scoring smoke."""
+
+    reasons: list[str] = []
+    n_position = _numeric_value(row.get("n_position_samples"))
+    valid_fraction = _numeric_value(row.get("valid_position_fraction"))
+    track_span = _numeric_value(row.get("linearized_track_span_cm"))
+    occupancy_bins = _numeric_value(row.get("occupancy_nonzero_bins"))
+    units = _numeric_value(row.get("encoding_units_passing_qc"))
+    posterior_error = _numeric_value(row.get("posterior_mean_error_cm_median"))
+    map_error = _numeric_value(row.get("map_error_cm_median"))
+    coverage = _numeric_value(row.get("posterior_coverage_fraction"))
+
+    if not np.isfinite(n_position) or n_position <= 0:
+        reasons.append("missing_track1_position_samples")
+    if not np.isfinite(valid_fraction) or valid_fraction <= 0.0:
+        reasons.append("invalid_track1_position_fraction")
+    if not np.isfinite(track_span) or track_span <= 0.0:
+        reasons.append("invalid_linearized_track_span")
+    if not np.isfinite(occupancy_bins) or occupancy_bins <= 0:
+        reasons.append("missing_linearized_occupancy")
+    if not np.isfinite(units) or units < int(min_encoding_units):
+        reasons.append("too_few_encoding_units")
+    if not np.isfinite(posterior_error):
+        reasons.append("missing_posterior_mean_error")
+    if not np.isfinite(map_error):
+        reasons.append("missing_map_error")
+    if not np.isfinite(coverage) or coverage <= 0.0:
+        reasons.append("missing_posterior_coverage")
+    if np.isfinite(posterior_error) and posterior_error < 0.0:
+        reasons.append("invalid_posterior_mean_error")
+    if np.isfinite(map_error) and map_error < 0.0:
+        reasons.append("invalid_map_error")
+    if np.isfinite(track_span) and track_span > 0.0:
+        if np.isfinite(posterior_error) and posterior_error > track_span:
+            reasons.append("posterior_mean_error_exceeds_track_span")
+        if np.isfinite(map_error) and map_error > track_span:
+            reasons.append("map_error_exceeds_track_span")
+    if str(row.get("animal", "")).upper() == "R2142" and not _as_bool(row.get("reversal_applied", False)):
+        reasons.append("r2142_reversal_not_applied")
+    return reasons
+
+
+def _numeric_value(value: object) -> float:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return float("nan")
 
 
 def summarize_by_animal(decoder: pd.DataFrame, units: pd.DataFrame) -> pd.DataFrame:
@@ -649,26 +715,31 @@ def summarize_by_animal(decoder: pd.DataFrame, units: pd.DataFrame) -> pd.DataFr
         "animal",
         "track1_sessions",
         "decoder_pass_sessions",
+        "decoder_scoring_available_sessions",
         "total_encoding_units_passing_qc",
         "median_posterior_mean_error_cm",
         "median_map_error_cm",
         "animal_retained_after_decoder_qc",
+        "animal_retained_for_decoder_scoring",
     ]
     if decoder.empty:
         return pd.DataFrame(columns=columns)
     rows: list[dict[str, object]] = []
     for animal, group in decoder.groupby("animal", sort=True):
         passed = group[group["decoder_status"].astype(str).eq("pass")]
+        scoring_available = group[group["decoder_qc_scoring_available"].map(_as_bool)]
         animal_units = units[units["animal"].astype(str).eq(str(animal))] if not units.empty else pd.DataFrame(columns=UNIT_COLUMNS)
         rows.append(
             {
                 "animal": animal,
                 "track1_sessions": int(len(group)),
                 "decoder_pass_sessions": int(len(passed)),
+                "decoder_scoring_available_sessions": int(len(scoring_available)),
                 "total_encoding_units_passing_qc": int(animal_units["unit_qc_passed"].map(_as_bool).sum()) if not animal_units.empty else 0,
                 "median_posterior_mean_error_cm": _median(group, "posterior_mean_error_cm_median"),
                 "median_map_error_cm": _median(group, "map_error_cm_median"),
                 "animal_retained_after_decoder_qc": bool(len(passed) > 0),
+                "animal_retained_for_decoder_scoring": bool(len(scoring_available) > 0),
             }
         )
     return pd.DataFrame(rows, columns=columns)
@@ -687,8 +758,10 @@ def gate_summary(
 ) -> pd.DataFrame:
     expected_sessions = int(len(pairs))
     passed = decoder[decoder["decoder_status"].astype(str).eq("pass")] if not decoder.empty else decoder
+    scoring_available = decoder[decoder["decoder_qc_scoring_available"].map(_as_bool)] if not decoder.empty else decoder
     input_animals = set(pairs["animal"].astype(str).str.upper()) if not pairs.empty else set()
     retained_animals = set(passed["animal"].astype(str).str.upper()) if not passed.empty else set()
+    scoring_animals = set(scoring_available["animal"].astype(str).str.upper()) if not scoring_available.empty else set()
     r2142_rows = decoder[decoder["animal"].astype(str).str.upper().eq("R2142")] if not decoder.empty else decoder
     gates = [
         _gate(
@@ -704,6 +777,13 @@ def gate_summary(
             f"input_animals={len(input_animals)}; retained_animals={len(retained_animals)}",
             "all animals have at least one passing decoder QC row",
             "Avoids carrying a decoder into replay evidence for only one animal.",
+        ),
+        _gate(
+            "animals_retained_for_decoder_scoring",
+            bool(input_animals) and input_animals == scoring_animals,
+            f"input_animals={len(input_animals)}; scoring_animals={len(scoring_animals)}",
+            "all animals have at least one scoring-available decoder row",
+            "This debug tier is for technical scoring smoke only, not paper-ready decoder claims.",
         ),
         _gate(
             "encoding_units_per_session",
@@ -869,8 +949,10 @@ def build_markdown_summary(
     decode_window_s: float,
 ) -> str:
     pass_sessions = int(decoder["decoder_status"].astype(str).eq("pass").sum()) if not decoder.empty else 0
+    scoring_sessions = int(decoder["decoder_qc_scoring_available"].map(_as_bool).sum()) if not decoder.empty else 0
     total_sessions = int(len(decoder))
     pass_animals = int(animals["animal_retained_after_decoder_qc"].map(_as_bool).sum()) if not animals.empty else 0
+    scoring_animals = int(animals["animal_retained_for_decoder_scoring"].map(_as_bool).sum()) if not animals.empty else 0
     gate_passes = int(gates["passed"].map(_as_bool).sum()) if not gates.empty else 0
     lines = [
         "# Olafsdottir Track1 Decoder QC Summary",
@@ -899,8 +981,10 @@ def build_markdown_summary(
             [
                 ("Track1 sessions processed", total_sessions),
                 ("Track1 sessions passing decoder QC", pass_sessions),
+                ("Track1 sessions scoring-available", scoring_sessions),
                 ("Animals processed", len(animals)),
                 ("Animals retained after decoder QC", pass_animals),
+                ("Animals retained for decoder scoring", scoring_animals),
                 ("Readiness gates passed", f"{gate_passes}/{len(gates)}"),
             ],
         ),
@@ -911,7 +995,7 @@ def build_markdown_summary(
         "",
         "## Animal Summary",
         "",
-        _markdown_table(["Animal", "Sessions", "Passing", "Median posterior error", "Median MAP error"], animal_summary_rows(animals)),
+        _markdown_table(["Animal", "Sessions", "Paper-ready", "Scoring-available", "Median posterior error", "Median MAP error"], animal_summary_rows(animals)),
         "",
     ]
     return "\n".join(lines)
@@ -1228,6 +1312,7 @@ def animal_summary_rows(animals: pd.DataFrame) -> list[tuple[object, ...]]:
                 row.animal,
                 int(row.track1_sessions),
                 int(row.decoder_pass_sessions),
+                int(row.decoder_scoring_available_sessions),
                 f"{float(row.median_posterior_mean_error_cm):.3g}" if np.isfinite(float(row.median_posterior_mean_error_cm)) else "nan",
                 f"{float(row.median_map_error_cm):.3g}" if np.isfinite(float(row.median_map_error_cm)) else "nan",
             )

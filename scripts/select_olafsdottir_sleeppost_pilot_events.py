@@ -51,6 +51,7 @@ TIER_TARGETS = {
     "pilot_50_balanced": 5,
     "pilot_100_balanced": 10,
 }
+DECODER_FILTERS = {"paper_ready", "scoring_available"}
 
 SELECTION_COLUMNS = [
     "selection_tier",
@@ -75,7 +76,10 @@ SELECTION_COLUMNS = [
     "candidate_tier",
     "event_qc_status",
     "event_qc_reason",
+    "decoder_filter",
     "decoder_status",
+    "decoder_qc_paper_ready",
+    "decoder_qc_scoring_available",
     "posterior_mean_error_cm_median",
     "map_error_cm_median",
     "posterior_coverage_fraction",
@@ -105,6 +109,7 @@ def run_pilot_event_selection(
     pilot20_events_per_pair: int = 2,
     pilot50_events_per_pair: int = 5,
     pilot100_events_per_pair: int = 10,
+    decoder_filter: str = "paper_ready",
     min_pilot20_animals_fraction: float = 0.80,
 ) -> dict[str, pd.DataFrame]:
     events = load_candidate_events(candidate_events_csv)
@@ -112,16 +117,18 @@ def run_pilot_event_selection(
     out = Path(output_dir)
     out.mkdir(parents=True, exist_ok=True)
 
-    tier_targets = {
-        "pilot_20_balanced": int(pilot20_events_per_pair),
-        "pilot_50_balanced": int(pilot50_events_per_pair),
-        "pilot_100_balanced": int(pilot100_events_per_pair),
-    }
-    decoder_pass = decoder[_pass_status_mask(decoder["decoder_status"])].copy()
+    tier_targets = tier_targets_for_decoder_filter(
+        decoder_filter,
+        pilot20_events_per_pair=pilot20_events_per_pair,
+        pilot50_events_per_pair=pilot50_events_per_pair,
+        pilot100_events_per_pair=pilot100_events_per_pair,
+    )
+    decoder_pass = select_decoder_rows(decoder, decoder_filter=decoder_filter)
     eligible = eligible_events(
         events,
         decoder_pass,
         seed=seed,
+        decoder_filter=decoder_filter,
         immobility_speed_threshold_cm_s=immobility_speed_threshold_cm_s,
         min_duration_ms=min_duration_ms,
         max_duration_ms=max_duration_ms,
@@ -154,6 +161,7 @@ def run_pilot_event_selection(
             min_event_spikes=min_event_spikes,
             min_event_active_units=min_event_active_units,
             tier_targets=tier_targets,
+            decoder_filter=decoder_filter,
         ),
         encoding="utf-8",
     )
@@ -178,7 +186,77 @@ def load_decoder_qc(path: str | Path) -> pd.DataFrame:
     missing = sorted(REQUIRED_DECODER_COLUMNS.difference(decoder.columns))
     if missing:
         raise ValueError(f"decoder QC CSV is missing required columns: {missing}")
+    decoder = decoder.copy()
+    decoder["decoder_qc_paper_ready"] = decoder_paper_ready_mask(decoder)
+    decoder["decoder_qc_scoring_available"] = decoder_scoring_available_mask(decoder)
     return decoder
+
+
+def tier_targets_for_decoder_filter(
+    decoder_filter: str,
+    *,
+    pilot20_events_per_pair: int,
+    pilot50_events_per_pair: int,
+    pilot100_events_per_pair: int,
+) -> dict[str, int]:
+    if decoder_filter not in DECODER_FILTERS:
+        raise ValueError(f"decoder_filter must be one of {sorted(DECODER_FILTERS)}")
+    if decoder_filter == "paper_ready":
+        return {
+            "pilot_20_balanced": int(pilot20_events_per_pair),
+            "pilot_50_balanced": int(pilot50_events_per_pair),
+            "pilot_100_balanced": int(pilot100_events_per_pair),
+        }
+    return {
+        "pilot_20_decoder_available_debug": int(pilot20_events_per_pair),
+        "pilot_50_decoder_available_debug": int(pilot50_events_per_pair),
+        "pilot_100_decoder_available_debug": int(pilot100_events_per_pair),
+    }
+
+
+def select_decoder_rows(decoder: pd.DataFrame, *, decoder_filter: str) -> pd.DataFrame:
+    if decoder_filter not in DECODER_FILTERS:
+        raise ValueError(f"decoder_filter must be one of {sorted(DECODER_FILTERS)}")
+    if decoder_filter == "paper_ready":
+        return decoder[decoder["decoder_qc_paper_ready"].map(_as_bool)].copy()
+    return decoder[decoder["decoder_qc_scoring_available"].map(_as_bool)].copy()
+
+
+def decoder_paper_ready_mask(decoder: pd.DataFrame) -> pd.Series:
+    if "decoder_qc_paper_ready" in decoder.columns:
+        return decoder["decoder_qc_paper_ready"].map(_as_bool)
+    return _pass_status_mask(decoder["decoder_status"])
+
+
+def decoder_scoring_available_mask(decoder: pd.DataFrame) -> pd.Series:
+    if "decoder_qc_scoring_available" in decoder.columns:
+        return decoder["decoder_qc_scoring_available"].map(_as_bool)
+    required = {
+        "encoding_units_passing_qc",
+        "posterior_mean_error_cm_median",
+        "map_error_cm_median",
+        "posterior_coverage_fraction",
+    }
+    if not required.issubset(decoder.columns):
+        return decoder_paper_ready_mask(decoder)
+    units = pd.to_numeric(decoder["encoding_units_passing_qc"], errors="coerce")
+    posterior = pd.to_numeric(decoder["posterior_mean_error_cm_median"], errors="coerce")
+    map_error = pd.to_numeric(decoder["map_error_cm_median"], errors="coerce")
+    coverage = pd.to_numeric(decoder["posterior_coverage_fraction"], errors="coerce")
+    available = units.ge(5) & posterior.ge(0.0) & map_error.ge(0.0) & coverage.gt(0.0)
+    if "linearized_track_span_cm" in decoder.columns:
+        span = pd.to_numeric(decoder["linearized_track_span_cm"], errors="coerce")
+        available &= span.gt(0.0) & posterior.le(span) & map_error.le(span)
+    if "valid_position_fraction" in decoder.columns:
+        valid_fraction = pd.to_numeric(decoder["valid_position_fraction"], errors="coerce")
+        available &= valid_fraction.gt(0.0)
+    if "occupancy_nonzero_bins" in decoder.columns:
+        occupancy_bins = pd.to_numeric(decoder["occupancy_nonzero_bins"], errors="coerce")
+        available &= occupancy_bins.gt(0)
+    if "reversal_applied" in decoder.columns:
+        r2142 = decoder["animal"].astype(str).str.upper().eq("R2142")
+        available &= ~r2142 | decoder["reversal_applied"].map(_as_bool)
+    return available.fillna(False)
 
 
 def eligible_events(
@@ -186,6 +264,7 @@ def eligible_events(
     decoder_pass: pd.DataFrame,
     *,
     seed: int,
+    decoder_filter: str,
     immobility_speed_threshold_cm_s: float,
     min_duration_ms: float,
     max_duration_ms: float,
@@ -209,6 +288,8 @@ def eligible_events(
                 "date",
                 "track1_session",
                 "sleeppost_session",
+                "decoder_qc_paper_ready",
+                "decoder_qc_scoring_available",
                 "decoder_status",
                 "posterior_mean_error_cm_median",
                 "map_error_cm_median",
@@ -230,6 +311,7 @@ def eligible_events(
     eligible = joined[keep].copy()
     if eligible.empty:
         return pd.DataFrame(columns=eligible_columns())
+    eligible["decoder_filter"] = str(decoder_filter)
     eligible["pre_evidence_random_score"] = [
         stable_random_score(seed, row.animal, row.date, row.session, row.event_id)
         for row in eligible.itertuples(index=False)
@@ -290,9 +372,13 @@ def summarize_by_animal(
         "eligible_events",
         "eligible_pairs",
         "min_eligible_events_per_pair",
+        "decoder_filter",
         "pilot_20_balanced_events",
         "pilot_50_balanced_events",
         "pilot_100_balanced_events",
+        "pilot_20_decoder_available_debug_events",
+        "pilot_50_decoder_available_debug_events",
+        "pilot_100_decoder_available_debug_events",
         "all_immobile_qc_valid_events",
     ]
     animals = sorted(set(decoder_pass["animal"].astype(str).str.upper()) | set(eligible["animal"].astype(str).str.upper()))
@@ -309,9 +395,13 @@ def summarize_by_animal(
                 "eligible_events": int(len(animal_eligible)),
                 "eligible_pairs": int(pair_counts.shape[0]),
                 "min_eligible_events_per_pair": int(pair_counts.min()) if not pair_counts.empty else 0,
+                "decoder_filter": str(animal_selection["decoder_filter"].dropna().iloc[0]) if not animal_selection.empty else "",
                 "pilot_20_balanced_events": int(tier_count(animal_selection, "pilot_20_balanced")),
                 "pilot_50_balanced_events": int(tier_count(animal_selection, "pilot_50_balanced")),
                 "pilot_100_balanced_events": int(tier_count(animal_selection, "pilot_100_balanced")),
+                "pilot_20_decoder_available_debug_events": int(tier_count(animal_selection, "pilot_20_decoder_available_debug")),
+                "pilot_50_decoder_available_debug_events": int(tier_count(animal_selection, "pilot_50_decoder_available_debug")),
+                "pilot_100_decoder_available_debug_events": int(tier_count(animal_selection, "pilot_100_decoder_available_debug")),
                 "all_immobile_qc_valid_events": int(tier_count(animal_selection, "all_immobile_qc_valid")),
             }
         )
@@ -329,13 +419,12 @@ def gate_summary(
 ) -> pd.DataFrame:
     pass_pairs = decoder_pass_pairs(decoder_pass)
     eligible_pairs = event_pairs(eligible)
-    selected_20 = selection[selection["selection_tier"].astype(str).eq("pilot_20_balanced")] if not selection.empty else pd.DataFrame(columns=SELECTION_COLUMNS)
-    pilot20_pairs = event_pairs(selected_20)
+    primary_tier = next(iter(tier_targets))
+    selected_primary = selection[selection["selection_tier"].astype(str).eq(primary_tier)] if not selection.empty else pd.DataFrame(columns=SELECTION_COLUMNS)
+    primary_pairs = event_pairs(selected_primary)
     input_animals = set(decoder_pass["animal"].astype(str).str.upper()) if not decoder_pass.empty else set()
-    pilot20_animals = set(selected_20["animal"].astype(str).str.upper()) if not selected_20.empty else set()
-    expected_20 = int(tier_targets["pilot_20_balanced"]) * len(pass_pairs)
-    expected_50 = int(tier_targets["pilot_50_balanced"]) * len(pass_pairs)
-    expected_100 = int(tier_targets["pilot_100_balanced"]) * len(pass_pairs)
+    primary_animals = set(selected_primary["animal"].astype(str).str.upper()) if not selected_primary.empty else set()
+    tier_items = list(tier_targets.items())
     gates = [
         _gate(
             "candidate_events_loaded",
@@ -348,8 +437,8 @@ def gate_summary(
             "decoder_pass_pairs_present",
             len(pass_pairs) > 0,
             f"decoder_pass_pairs={len(pass_pairs)}",
-            "at least one Track1/SleepPOST pair passed decoder QC",
-            "The selector only freezes events for decoder-ready pairs.",
+            "at least one Track1/SleepPOST pair passed the selected decoder filter",
+            "The selector only freezes events for decoder-ready pairs. The scoring_available filter is debug-only.",
         ),
         _gate(
             "eligible_events_for_decoder_pairs",
@@ -358,39 +447,19 @@ def gate_summary(
             "every decoder-pass pair has at least one immobile QC-valid event",
             "Pre-evidence filters should not silently drop complete sessions.",
         ),
+        *tier_completion_gates(selection, tier_items, pass_pairs_count=len(pass_pairs)),
         _gate(
-            "pilot_20_balanced_complete",
-            expected_20 > 0 and tier_count(selection, "pilot_20_balanced") == expected_20,
-            f"selected={tier_count(selection, 'pilot_20_balanced')}; expected={expected_20}",
-            f"{tier_targets['pilot_20_balanced']} events per decoder-pass pair",
-            "The first evidence smoke should use the frozen 20-event balanced pilot when 10 pairs are present.",
-        ),
-        _gate(
-            "pilot_50_balanced_available",
-            expected_50 > 0 and tier_count(selection, "pilot_50_balanced") == expected_50,
-            f"selected={tier_count(selection, 'pilot_50_balanced')}; expected={expected_50}",
-            f"{tier_targets['pilot_50_balanced']} events per decoder-pass pair",
-            "The next scale-up tier should already be frozen if enough pre-evidence candidates exist.",
-        ),
-        _gate(
-            "pilot_100_balanced_available",
-            expected_100 > 0 and tier_count(selection, "pilot_100_balanced") == expected_100,
-            f"selected={tier_count(selection, 'pilot_100_balanced')}; expected={expected_100}",
-            f"{tier_targets['pilot_100_balanced']} events per decoder-pass pair",
-            "The 100-event scale-up tier should already be frozen if enough pre-evidence candidates exist.",
-        ),
-        _gate(
-            "pilot_20_spans_decoder_animals",
-            bool(input_animals) and len(pilot20_animals) / len(input_animals) >= float(min_pilot20_animals_fraction),
-            f"pilot20_animals={len(pilot20_animals)}; decoder_animals={len(input_animals)}",
-            f"pilot_20 covers at least {float(min_pilot20_animals_fraction):g} of decoder-pass animals",
+            primary_span_gate_name(primary_tier, "animals"),
+            bool(input_animals) and len(primary_animals) / len(input_animals) >= float(min_pilot20_animals_fraction),
+            f"primary_animals={len(primary_animals)}; decoder_animals={len(input_animals)}",
+            f"{primary_tier} covers at least {float(min_pilot20_animals_fraction):g} of decoder-pass animals",
             "The first pilot should not collapse to one animal if decoder-ready candidates are broader.",
         ),
         _gate(
-            "pilot_20_spans_decoder_pairs",
-            bool(pass_pairs) and pass_pairs == pilot20_pairs,
-            f"pilot20_pairs={len(pilot20_pairs)}; decoder_pass_pairs={len(pass_pairs)}",
-            "pilot_20 has selected events for every decoder-pass pair",
+            primary_span_gate_name(primary_tier, "pairs"),
+            bool(pass_pairs) and pass_pairs == primary_pairs,
+            f"primary_pairs={len(primary_pairs)}; decoder_pass_pairs={len(pass_pairs)}",
+            f"{primary_tier} has selected events for every decoder-pass pair",
             "The first pilot should be session-balanced.",
         ),
         _gate(
@@ -402,6 +471,34 @@ def gate_summary(
         ),
     ]
     return pd.DataFrame(gates)
+
+
+def tier_completion_gates(
+    selection: pd.DataFrame,
+    tier_items: list[tuple[str, int]],
+    *,
+    pass_pairs_count: int,
+) -> list[dict[str, object]]:
+    gates: list[dict[str, object]] = []
+    for index, (tier, target) in enumerate(tier_items):
+        expected = int(target) * int(pass_pairs_count)
+        suffix = "complete" if index == 0 else "available"
+        gates.append(
+            _gate(
+                f"{tier}_{suffix}",
+                expected > 0 and tier_count(selection, tier) == expected,
+                f"selected={tier_count(selection, tier)}; expected={expected}",
+                f"{int(target)} events per decoder-pass pair",
+                "The debug decoder-available tiers are for technical scoring smoke only." if "debug" in tier else "The tier should be frozen if enough pre-evidence candidates exist.",
+            )
+        )
+    return gates
+
+
+def primary_span_gate_name(primary_tier: str, axis: str) -> str:
+    if primary_tier == "pilot_20_balanced":
+        return f"pilot_20_spans_decoder_{axis}"
+    return f"{primary_tier}_spans_decoder_{axis}"
 
 
 def build_markdown_summary(
@@ -416,6 +513,7 @@ def build_markdown_summary(
     min_event_spikes: int,
     min_event_active_units: int,
     tier_targets: dict[str, int],
+    decoder_filter: str,
 ) -> str:
     gate_passes = int(gates["passed"].map(_as_bool).sum()) if not gates.empty else 0
     lines = [
@@ -429,15 +527,14 @@ def build_markdown_summary(
             ["Parameter", "Value"],
             [
                 ("selection_rule_version", "pre_evidence_v1"),
+                ("decoder_filter", decoder_filter),
                 ("seed", seed),
                 ("immobility_speed_threshold_cm_s", immobility_speed_threshold_cm_s),
                 ("min_duration_ms", min_duration_ms),
                 ("max_duration_ms", max_duration_ms),
                 ("min_event_spikes", min_event_spikes),
                 ("min_event_active_units", min_event_active_units),
-                ("pilot_20_balanced events per pair", tier_targets["pilot_20_balanced"]),
-                ("pilot_50_balanced events per pair", tier_targets["pilot_50_balanced"]),
-                ("pilot_100_balanced events per pair", tier_targets["pilot_100_balanced"]),
+                *[(f"{tier} events per pair", target) for tier, target in tier_targets.items()],
             ],
         ),
         "",
@@ -446,9 +543,7 @@ def build_markdown_summary(
         _markdown_table(
             ["Metric", "Value"],
             [
-                ("pilot_20_balanced events", tier_count(selection, "pilot_20_balanced")),
-                ("pilot_50_balanced events", tier_count(selection, "pilot_50_balanced")),
-                ("pilot_100_balanced events", tier_count(selection, "pilot_100_balanced")),
+                *[(f"{tier} events", tier_count(selection, tier)) for tier in tier_targets],
                 ("all_immobile_qc_valid events", tier_count(selection, "all_immobile_qc_valid")),
                 ("Selection gates passed", f"{gate_passes}/{len(gates)}"),
             ],
@@ -461,8 +556,8 @@ def build_markdown_summary(
         "## Animal Summary",
         "",
         _markdown_table(
-            ["Animal", "Decoder pairs", "Eligible events", "Pilot 20", "Pilot 50", "Pilot 100"],
-            animal_summary_rows(animals),
+            ["Animal", "Decoder pairs", "Eligible events", *list(tier_targets.keys())],
+            animal_summary_rows(animals, tier_targets=tier_targets),
         ),
         "",
     ]
@@ -489,7 +584,10 @@ def eligible_columns() -> list[str]:
         "candidate_tier",
         "event_qc_status",
         "event_qc_reason",
+        "decoder_filter",
         "decoder_status",
+        "decoder_qc_paper_ready",
+        "decoder_qc_scoring_available",
         "posterior_mean_error_cm_median",
         "map_error_cm_median",
         "posterior_coverage_fraction",
@@ -560,20 +658,16 @@ def _markdown_table(headers: Sequence[str], rows: Sequence[Sequence[object]]) ->
     return "\n".join(lines)
 
 
-def animal_summary_rows(animals: pd.DataFrame) -> list[tuple[object, ...]]:
+def animal_summary_rows(animals: pd.DataFrame, *, tier_targets: dict[str, int]) -> list[tuple[object, ...]]:
     if animals.empty:
         return []
-    return [
-        (
-            row.animal,
-            int(row.decoder_pass_pairs),
-            int(row.eligible_events),
-            int(row.pilot_20_balanced_events),
-            int(row.pilot_50_balanced_events),
-            int(row.pilot_100_balanced_events),
-        )
-        for row in animals.itertuples(index=False)
-    ]
+    rows: list[tuple[object, ...]] = []
+    for row in animals.itertuples(index=False):
+        values: list[object] = [row.animal, int(row.decoder_pass_pairs), int(row.eligible_events)]
+        for tier in tier_targets:
+            values.append(int(getattr(row, f"{tier}_events", 0)))
+        rows.append(tuple(values))
+    return rows
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -590,6 +684,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--pilot20-events-per-pair", type=int, default=2)
     parser.add_argument("--pilot50-events-per-pair", type=int, default=5)
     parser.add_argument("--pilot100-events-per-pair", type=int, default=10)
+    parser.add_argument("--decoder-filter", choices=sorted(DECODER_FILTERS), default="paper_ready")
     parser.add_argument("--min-pilot20-animals-fraction", type=float, default=0.80)
     return parser
 
@@ -609,6 +704,7 @@ def main(argv: list[str] | None = None) -> int:
         pilot20_events_per_pair=args.pilot20_events_per_pair,
         pilot50_events_per_pair=args.pilot50_events_per_pair,
         pilot100_events_per_pair=args.pilot100_events_per_pair,
+        decoder_filter=args.decoder_filter,
         min_pilot20_animals_fraction=args.min_pilot20_animals_fraction,
     )
     print(tables["animals"].to_string(index=False))

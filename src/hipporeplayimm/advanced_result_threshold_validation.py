@@ -13,7 +13,12 @@ _PATCHED_FLAG = "_advanced_result_threshold_validation_patch_applied"
 def _validated_thresholds(thresholds: Sequence[float]) -> tuple[float, ...]:
     values: list[float] = []
     for threshold in thresholds:
-        value = float(threshold)
+        if isinstance(threshold, (bool, np.bool_)):
+            raise ValueError("thresholds must contain finite nonnegative values")
+        try:
+            value = float(threshold)
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise ValueError("thresholds must contain finite nonnegative values") from exc
         if not np.isfinite(value) or value < 0.0:
             raise ValueError("thresholds must contain finite nonnegative values")
         values.append(value)

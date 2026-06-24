@@ -101,6 +101,24 @@ def test_observation_parameter_grid_rejects_nonfinite_values():
             raise AssertionError(f"expected ValueError for {field_name}")
 
 
+def test_observation_parameter_grid_rejects_boolean_numeric_values():
+    cases = [
+        (ObservationSweepConfig(bin_sizes_cm=(True,)), "bin_sizes_cm"),
+        (ObservationSweepConfig(smoothing_sigmas_bins=(False,)), "smoothing_sigmas_bins"),
+        (ObservationSweepConfig(decode_bin_s=True), "decode_bin_s"),
+        (ObservationSweepConfig(n_folds=True), "n_folds"),
+        (ObservationSweepConfig(simulation_events_per_model=True), "simulation_events_per_model"),
+    ]
+
+    for config, field_name in cases:
+        try:
+            observation_parameter_grid(config)
+        except ValueError as exc:
+            assert field_name in str(exc)
+        else:
+            raise AssertionError(f"expected ValueError for {field_name}")
+
+
 def test_summarize_observation_sweep_merges_overall_recovery():
     position_summary = pd.DataFrame(
         {

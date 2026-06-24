@@ -8,11 +8,11 @@ from hipporeplayimm.encoding import LogEmissionTensor
 from hipporeplayimm.state_space_first_order import _score_stationary
 
 
-def test_stationary_ignores_nonfinite_bins_without_poisoning_evidence() -> None:
+def test_stationary_ignores_impossible_bins_without_poisoning_evidence() -> None:
     emissions = LogEmissionTensor(
         log_likelihood=np.array(
             [
-                [np.log(0.6), np.nan],
+                [np.log(0.6), -np.inf],
                 [np.log(0.7), np.log(0.3)],
             ],
             dtype=float,

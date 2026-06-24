@@ -230,7 +230,7 @@ def _parse_tetrodes(raw: str) -> tuple[int, ...]:
             values.append(int(item))
         except ValueError:
             return ()
-    return tuple(values)
+    return tuple(sorted(dict.fromkeys(values)))
 
 
 def _row_str(row: pd.Series, column: str) -> str:

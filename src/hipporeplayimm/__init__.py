@@ -25,6 +25,7 @@ from . import emission_cell_id_validation as _emission_cell_id_validation
 from . import encoding_grid_extra_columns as _encoding_grid_extra_columns
 from . import encoding_select_cells_validation as _encoding_select_cells_validation
 from . import evidence_status_coercion as _evidence_status_coercion
+from . import first_order_imm_diagnostics_validation as _first_order_imm_diagnostics_validation
 from . import goal_state_space_integration as _goal_state_space_integration
 from . import ground_truth as _ground_truth
 from . import ground_truth_cell_id_metadata as _ground_truth_cell_id_metadata
@@ -223,6 +224,7 @@ def apply_runtime_patches() -> None:
     _kd_impossible_emission_patch.apply_kd_impossible_emission_patch()
     _apply_state_space_imm_duration_patch()
     _apply_duration_occupancy_patch()
+    _first_order_imm_diagnostics_validation.apply_first_order_imm_diagnostics_validation_patch()
     _candidate_log_mass_validation.apply_candidate_log_mass_validation_patch()
     _candidate_support_normalization_validation.apply_candidate_support_normalization_validation_patch()
     _state_space_bin_center_validation.apply_state_space_bin_center_validation_patch()

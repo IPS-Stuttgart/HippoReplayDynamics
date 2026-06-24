@@ -47,7 +47,7 @@ def test_paired_threshold_sweep_preserves_schema_without_complete_pairs():
     assert selected.loc[0, "selected_margin_threshold"] == 0.0
 
 
-def test_paired_threshold_sweep_rejects_nonfinite_or_negative_thresholds():
+def test_paired_threshold_sweep_rejects_malformed_thresholds():
     scores = pd.DataFrame(
         {
             "session": ["Rat1/Open1", "Rat1/Open1"],
@@ -59,7 +59,7 @@ def test_paired_threshold_sweep_rejects_nonfinite_or_negative_thresholds():
         }
     )
 
-    for thresholds in ((np.nan,), (np.inf,), (-1.0,)):
+    for thresholds in ((np.nan,), (np.inf,), (-1.0,), (True,), (False,), (np.bool_(True),)):
         with pytest.raises(ValueError, match="finite nonnegative"):
             paired_model_margin_threshold_sweep(
                 scores,

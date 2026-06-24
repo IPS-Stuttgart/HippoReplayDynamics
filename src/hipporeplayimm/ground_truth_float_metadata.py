@@ -1,17 +1,20 @@
-"""Strict numeric parsing for post-hoc ground-truth score metadata."""
+"""Strict numeric and boolean parsing for score-table metadata."""
 
 from __future__ import annotations
 
 from typing import Any
 
 import numpy as np
+import pandas as pd
 
 _FLOAT_PATCHED_FLAG = "_ground_truth_strict_float_metadata_patch_applied"
 _BOOL_PATCHED_FLAG = "_ground_truth_strict_bool_metadata_patch_applied"
+_SCORE_BOOL_PATCHED_FLAG = "_score_metadata_strict_bool_metadata_patch_applied"
+_EVIDENCE_BOOL_PATCHED_FLAG = "_evidence_reporting_strict_bool_metadata_patch_applied"
 
 
 def apply_ground_truth_float_metadata_patch() -> None:
-    """Reject malformed numeric metadata instead of propagating invalid configs."""
+    """Reject malformed numeric/boolean metadata instead of propagating invalid configs."""
 
     from . import ground_truth as gt
 
@@ -74,6 +77,39 @@ def apply_ground_truth_float_metadata_patch() -> None:
         gt._parse_bool = parse_bool
         setattr(gt, _BOOL_PATCHED_FLAG, True)
 
+    from . import score_metadata as score_meta
+
+    if not getattr(score_meta, _SCORE_BOOL_PATCHED_FLAG, False):
+
+        def parse_score_bool(value: Any) -> bool:
+            return _parse_bool_metadata_value("boolean metadata", value)
+
+        parse_score_bool.__name__ = score_meta._parse_bool.__name__
+        parse_score_bool.__doc__ = score_meta._parse_bool.__doc__
+        score_meta._parse_bool = parse_score_bool
+        setattr(score_meta, _SCORE_BOOL_PATCHED_FLAG, True)
+
+    from . import evidence_reporting as evidence
+
+    if not getattr(evidence, _EVIDENCE_BOOL_PATCHED_FLAG, False):
+
+        def coerce_bool_series(values: pd.Series, *, default: bool = False) -> pd.Series:
+            def coerce(value: object) -> bool:
+                return _parse_bool_metadata_value_or_default(value, default=default)
+
+            return values.map(coerce).astype(bool)
+
+        coerce_bool_series.__name__ = evidence._coerce_bool_series.__name__
+        coerce_bool_series.__doc__ = evidence._coerce_bool_series.__doc__
+        evidence._coerce_bool_series = coerce_bool_series
+
+        # recovery_diagnostics_bool_patch imports the helper by value during package
+        # initialisation; keep that alias synchronized before the patch is applied.
+        from . import recovery_diagnostics_bool_patch
+
+        recovery_diagnostics_bool_patch._coerce_bool_series = coerce_bool_series
+        setattr(evidence, _EVIDENCE_BOOL_PATCHED_FLAG, True)
+
 
 def _parse_float_metadata_value(column: str, value: Any) -> float:
     if isinstance(value, (bool, np.bool_)):
@@ -108,6 +144,13 @@ def _parse_bool_metadata_value(column: str, value: Any) -> bool:
     if np.isclose(numeric, 1.0, rtol=0.0, atol=0.0):
         return True
     raise ValueError(f"{column} must contain boolean values")
+
+
+def _parse_bool_metadata_value_or_default(value: Any, *, default: bool) -> bool:
+    try:
+        return _parse_bool_metadata_value("boolean metadata", value)
+    except ValueError:
+        return bool(default)
 
 
 __all__ = ["apply_ground_truth_float_metadata_patch"]

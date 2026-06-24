@@ -53,3 +53,26 @@ def test_clusterless_mark_encoding_validates_nested_encoding_config() -> None:
 
     with pytest.raises(ValueError, match="min_occupancy_s"):
         fit_clusterless_mark_encoding(session, config)
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "message"),
+    [
+        ("mark_smoothing_sigma_bins", True, "mark_smoothing_sigma_bins"),
+        ("mark_prior_count", True, "mark_prior_count"),
+        ("mark_variance_floor", True, "mark_variance_floor"),
+        ("rate_floor_hz", True, "rate_floor_hz"),
+        ("mark_kde_bandwidth", True, "mark_kde_bandwidth"),
+        ("mark_kde_spatial_sigma_bins", False, "mark_kde_spatial_sigma_bins"),
+        ("mark_kde_max_neighbors", np.bool_(True), "mark_kde_max_neighbors"),
+    ],
+)
+def test_clusterless_mark_config_rejects_boolean_numeric_parameters(
+    field: str,
+    value: object,
+    message: str,
+) -> None:
+    config = ClusterlessMarkConfig(**{field: value})
+
+    with pytest.raises(ValueError, match=message):
+        fit_clusterless_mark_encoding(object(), config)

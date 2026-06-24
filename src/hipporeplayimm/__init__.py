@@ -4,6 +4,7 @@
 from . import advanced_result_empty_threshold_patch as _advanced_result_empty_threshold_patch
 from . import advanced_result_status_patch as _advanced_result_status_patch
 from . import advanced_result_threshold_validation as _advanced_result_threshold_validation
+from . import advanced_result_wrong_map_bootstrap_patch as _advanced_result_wrong_map_bootstrap_patch
 from . import axona_data_end_footer as _axona_data_end_footer
 from . import benchmark_cell_split_metadata as _benchmark_cell_split_metadata
 from . import benchmark_metadata_scope_patch as _benchmark_metadata_scope_patch
@@ -13,6 +14,7 @@ from . import candidate_log_mass_validation as _candidate_log_mass_validation
 from . import candidate_support_normalization_validation as _candidate_support_normalization_validation
 from . import candidate_support_quality_patch as _candidate_support_quality_patch
 from . import cell_split_hashable_grouping as _cell_split_hashable_grouping
+from . import cli_float_values_validation as _cli_float_values_validation
 from . import clusterless_config_validation as _clusterless_config_validation
 from . import clusterless_ground_truth as _clusterless_ground_truth
 from . import clusterless_mark_group_validation as _clusterless_mark_group_validation
@@ -226,6 +228,7 @@ def apply_runtime_patches() -> None:
     _advanced_result_status_patch.apply_advanced_result_status_patch()
     _advanced_result_empty_threshold_patch.apply_advanced_result_empty_threshold_patch()
     _advanced_result_threshold_validation.apply_advanced_result_threshold_validation_patch()
+    _advanced_result_wrong_map_bootstrap_patch.apply_wrong_map_rat_bootstrap_patch()
     _latent_path_validation.apply_latent_path_validation_patch()
     _simulation_recovery_runtime_limits.apply_simulation_recovery_runtime_limit_validation_patch()
     _simulation_recovery_count_validation.apply_simulation_recovery_count_validation_patch()
@@ -236,6 +239,7 @@ def apply_runtime_patches() -> None:
     _ground_truth_window_scope.apply_ground_truth_window_scope_patch()
     _improved_model_evidence_registry_patch.apply_improved_model_evidence_registry_patch()
     _observation_sweep_config_validation.apply_observation_sweep_config_validation_patch()
+    _cli_float_values_validation.apply_cli_float_values_validation_patch()
 
 
 # Ensure replay dynamics use center-to-center transition durations when replay

@@ -1,0 +1,38 @@
+from __future__ import annotations
+
+import numpy as np
+import pytest
+
+from hipporeplayimm.encoding import LogEmissionTensor
+
+
+def _tensor_with_counts(counts: np.ndarray, n_spikes: object) -> LogEmissionTensor:
+    counts = np.asarray(counts, dtype=int)
+    return LogEmissionTensor(
+        log_likelihood=np.zeros((counts.shape[0], 2), dtype=float),
+        spike_counts=counts,
+        times=np.arange(counts.shape[0], dtype=float),
+        dt=1.0,
+        cell_ids=np.arange(counts.shape[1], dtype=int),
+        n_spikes=n_spikes,
+    )
+
+
+def test_log_emission_tensor_rejects_mismatched_n_spikes() -> None:
+    with pytest.raises(ValueError, match="total spike_counts sum"):
+        _tensor_with_counts(np.array([[1, 0], [0, 2]], dtype=int), 2)
+
+
+def test_log_emission_tensor_rejects_invalid_n_spikes_summary_values() -> None:
+    with pytest.raises(ValueError, match="finite and nonnegative"):
+        _tensor_with_counts(np.array([[1, 0]], dtype=int), float("nan"))
+
+    with pytest.raises(ValueError, match="integer-valued"):
+        _tensor_with_counts(np.array([[1, 0]], dtype=int), 1.5)
+
+
+def test_log_emission_tensor_canonicalizes_integral_n_spikes() -> None:
+    emissions = _tensor_with_counts(np.array([[1, 0], [0, 2]], dtype=int), 3.0)
+
+    assert emissions.n_spikes == 3
+    assert isinstance(emissions.n_spikes, int)

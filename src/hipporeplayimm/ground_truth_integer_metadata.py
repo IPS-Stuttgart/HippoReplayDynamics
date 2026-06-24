@@ -62,7 +62,7 @@ def _parse_integer_metadata_value(column: str, value: Any) -> int:
         raise ValueError(f"{column} must contain integer values")
     try:
         numeric = float(value)
-    except (TypeError, ValueError) as exc:
+    except (TypeError, ValueError, OverflowError) as exc:
         raise ValueError(f"{column} must contain integer values") from exc
     if not np.isfinite(numeric):
         raise ValueError(f"{column} must contain finite integer values")

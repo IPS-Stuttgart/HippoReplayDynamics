@@ -67,6 +67,9 @@ def _coerce_grid_index_array(shard: dict[str, object], key: str) -> np.ndarray:
     values = np.asarray(raw, dtype=float)
     if not np.all(np.isfinite(values)) or not np.all(values == np.floor(values)):
         raise ValueError(f"Momentum shard {key} must contain finite integer grid indices: {shard['path']}")
+    intp_info = np.iinfo(np.dtype(np.intp))
+    if not np.all((values >= intp_info.min) & (values <= intp_info.max)):
+        raise ValueError(f"Momentum shard {key} must fit into NumPy integer index range: {shard['path']}")
     return values.astype(np.intp, copy=False)
 
 

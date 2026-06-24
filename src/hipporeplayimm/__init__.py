@@ -48,6 +48,7 @@ from . import pyrecest_score_metadata as _pyrecest_score_metadata
 from . import recovery_diagnostics_bool_patch as _recovery_diagnostics_bool_patch
 from . import reverse_time_terminal_guard as _reverse_time_terminal_guard
 from . import score_metadata as _score_metadata
+from . import score_metadata_bool_validation as _score_metadata_bool_validation
 from . import shuffle_spike_time_order as _shuffle_spike_time_order
 from . import simulation_best_row_flags as _simulation_best_row_flags
 from . import simulation_recovery as _simulation_recovery
@@ -66,6 +67,7 @@ from . import wrapper_return_trajectory as _wrapper_return_trajectory
 # symbols are imported from the patched modules.
 _state_space_bin_count_validation.apply_state_space_bin_count_validation_patch()
 _score_metadata.apply_model_hyperparam_patch()
+_score_metadata_bool_validation.apply_score_metadata_bool_validation_patch()
 _model_parameter_validation.apply_model_parameter_validation_patch()
 _candidate_support_quality_patch.apply_candidate_support_quality_patch()
 _benchmark_cell_split_metadata.apply_benchmark_cell_split_metadata_patch()
@@ -183,6 +185,7 @@ def apply_runtime_patches() -> None:
 
     _state_space_bin_count_validation.apply_state_space_bin_count_validation_patch()
     _score_metadata.apply_model_hyperparam_patch()
+    _score_metadata_bool_validation.apply_score_metadata_bool_validation_patch()
     _model_parameter_validation.apply_model_parameter_validation_patch()
     _candidate_support_quality_patch.apply_candidate_support_quality_patch()
     _benchmark_cell_split_metadata.apply_benchmark_cell_split_metadata_patch()

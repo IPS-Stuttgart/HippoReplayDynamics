@@ -299,7 +299,8 @@ def _r2142_status(r2142_rows: pd.DataFrame, pairs: pd.DataFrame) -> str:
 def _tetrode_column_matches(rows: pd.DataFrame, column: str, expected: tuple[int, ...]) -> bool:
     if column not in rows:
         return False
-    return bool(rows[column].map(_parse_tetrodes).eq(expected).all())
+    parsed = rows[column].map(_parse_tetrodes)
+    return bool(parsed.map(lambda value: value == expected).all())
 
 
 def _recommendation(*, usable_pairs: int, usable_animals: int) -> str:

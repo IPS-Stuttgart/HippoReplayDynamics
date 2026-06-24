@@ -3,6 +3,7 @@ from __future__ import annotations
 import pandas as pd
 import pytest
 
+from hipporeplayimm.benchmarks import _coerce_bool_series as _benchmark_coerce_bool_series
 from hipporeplayimm.evidence_reporting import _coerce_bool_series
 from hipporeplayimm.ground_truth_float_metadata import _parse_bool_metadata_value
 from hipporeplayimm.score_metadata import _parse_bool as _parse_score_bool
@@ -44,3 +45,9 @@ def test_evidence_bool_series_keeps_binary_numeric_values() -> None:
     parsed = _coerce_bool_series(pd.Series(["1", "1.0", 1, "0", "0.0", 0]), default=False)
 
     assert parsed.tolist() == [True, True, True, False, False, False]
+
+
+def test_preimported_benchmark_bool_series_alias_is_synchronized() -> None:
+    parsed = _benchmark_coerce_bool_series(pd.Series(["2", "1"]), default=False)
+
+    assert parsed.tolist() == [False, True]

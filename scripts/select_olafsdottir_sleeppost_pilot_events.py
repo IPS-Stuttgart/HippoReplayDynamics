@@ -114,6 +114,7 @@ def run_pilot_event_selection(
 ) -> dict[str, pd.DataFrame]:
     events = load_candidate_events(candidate_events_csv)
     decoder = load_decoder_qc(decoder_qc_csv)
+    validate_decoder_filter_support(decoder, decoder_filter=decoder_filter)
     out = Path(output_dir)
     out.mkdir(parents=True, exist_ok=True)
 
@@ -143,6 +144,7 @@ def run_pilot_event_selection(
         eligible=eligible,
         selection=selection,
         tier_targets=tier_targets,
+        decoder_filter=decoder_filter,
         min_pilot20_animals_fraction=min_pilot20_animals_fraction,
     )
 
@@ -186,10 +188,25 @@ def load_decoder_qc(path: str | Path) -> pd.DataFrame:
     missing = sorted(REQUIRED_DECODER_COLUMNS.difference(decoder.columns))
     if missing:
         raise ValueError(f"decoder QC CSV is missing required columns: {missing}")
+    explicit_paper_ready = "decoder_qc_paper_ready" in decoder.columns
+    explicit_scoring_available = "decoder_qc_scoring_available" in decoder.columns
     decoder = decoder.copy()
     decoder["decoder_qc_paper_ready"] = decoder_paper_ready_mask(decoder)
     decoder["decoder_qc_scoring_available"] = decoder_scoring_available_mask(decoder)
+    decoder.attrs["explicit_decoder_qc_paper_ready"] = explicit_paper_ready
+    decoder.attrs["explicit_decoder_qc_scoring_available"] = explicit_scoring_available
     return decoder
+
+
+def validate_decoder_filter_support(decoder: pd.DataFrame, *, decoder_filter: str) -> None:
+    if decoder_filter not in DECODER_FILTERS:
+        raise ValueError(f"decoder_filter must be one of {sorted(DECODER_FILTERS)}")
+    if decoder_filter == "scoring_available" and not bool(decoder.attrs.get("explicit_decoder_qc_scoring_available", False)):
+        raise ValueError(
+            "--decoder-filter scoring_available requires a decoder QC table with an explicit "
+            "decoder_qc_scoring_available column. Re-run decoder QC/triage first; do not infer "
+            "debug scoring availability from older paper-ready-only outputs."
+        )
 
 
 def tier_targets_for_decoder_filter(
@@ -415,6 +432,7 @@ def gate_summary(
     eligible: pd.DataFrame,
     selection: pd.DataFrame,
     tier_targets: dict[str, int],
+    decoder_filter: str,
     min_pilot20_animals_fraction: float,
 ) -> pd.DataFrame:
     pass_pairs = decoder_pass_pairs(decoder_pass)
@@ -425,6 +443,14 @@ def gate_summary(
     input_animals = set(decoder_pass["animal"].astype(str).str.upper()) if not decoder_pass.empty else set()
     primary_animals = set(selected_primary["animal"].astype(str).str.upper()) if not selected_primary.empty else set()
     tier_items = list(tier_targets.items())
+    denominators = selection_denominator_summary(
+        decoder_filter=decoder_filter,
+        pass_pairs_count=len(pass_pairs),
+        eligible_pairs_count=len(eligible_pairs),
+        selection=selection,
+        primary_tier=primary_tier,
+        primary_target=tier_targets[primary_tier],
+    )
     gates = [
         _gate(
             "candidate_events_loaded",
@@ -470,7 +496,35 @@ def gate_summary(
             "This freezes events before any 1D model-evidence scoring.",
         ),
     ]
-    return pd.DataFrame(gates)
+    return gate_dataframe_with_denominators(gates, denominators)
+
+
+def selection_denominator_summary(
+    *,
+    decoder_filter: str,
+    pass_pairs_count: int,
+    eligible_pairs_count: int,
+    selection: pd.DataFrame,
+    primary_tier: str,
+    primary_target: int,
+) -> dict[str, object]:
+    return {
+        "decoder_filter": decoder_filter,
+        "decoder_pass_pairs": int(pass_pairs_count),
+        "eligible_pairs": int(eligible_pairs_count),
+        "primary_tier": primary_tier,
+        "primary_target_events_per_pair": int(primary_target),
+        "primary_expected_events": int(primary_target) * int(pass_pairs_count),
+        "primary_selected_events": int(tier_count(selection, primary_tier)),
+        "all_immobile_qc_valid_events": int(tier_count(selection, "all_immobile_qc_valid")),
+    }
+
+
+def gate_dataframe_with_denominators(gates: list[dict[str, object]], denominators: dict[str, object]) -> pd.DataFrame:
+    frame = pd.DataFrame(gates)
+    for key, value in denominators.items():
+        frame[key] = value
+    return frame
 
 
 def tier_completion_gates(
@@ -516,6 +570,7 @@ def build_markdown_summary(
     decoder_filter: str,
 ) -> str:
     gate_passes = int(gates["passed"].map(_as_bool).sum()) if not gates.empty else 0
+    denominators = markdown_denominator_rows(gates)
     lines = [
         "# Olafsdottir SleepPOST Pilot Event Selection Summary",
         "",
@@ -543,6 +598,7 @@ def build_markdown_summary(
         _markdown_table(
             ["Metric", "Value"],
             [
+                *denominators,
                 *[(f"{tier} events", tier_count(selection, tier)) for tier in tier_targets],
                 ("all_immobile_qc_valid events", tier_count(selection, "all_immobile_qc_valid")),
                 ("Selection gates passed", f"{gate_passes}/{len(gates)}"),
@@ -562,6 +618,20 @@ def build_markdown_summary(
         "",
     ]
     return "\n".join(lines)
+
+
+def markdown_denominator_rows(gates: pd.DataFrame) -> list[tuple[object, object]]:
+    if gates.empty or "decoder_pass_pairs" not in gates.columns:
+        return []
+    row = gates.iloc[0]
+    return [
+        ("decoder_filter", row.get("decoder_filter", "")),
+        ("decoder_pass_pairs", int(row.get("decoder_pass_pairs", 0))),
+        ("eligible_pairs", int(row.get("eligible_pairs", 0))),
+        ("primary_tier", row.get("primary_tier", "")),
+        ("primary_selected_events", int(row.get("primary_selected_events", 0))),
+        ("primary_expected_events", int(row.get("primary_expected_events", 0))),
+    ]
 
 
 def eligible_columns() -> list[str]:

@@ -36,3 +36,37 @@ def test_reverse_emission_helpers_keep_time_coordinates_increasing() -> None:
         np.testing.assert_allclose(output.transition_durations, emissions.transition_durations[::-1])
         np.testing.assert_allclose(output.times, emissions.times)
         assert np.all(np.diff(output.times) > 0.0)
+
+
+def test_reverse_emission_time_patch_repairs_partial_reverse_model_state(monkeypatch) -> None:
+    import hipporeplayimm.result_improvement_extensions as improved
+    import hipporeplayimm.reverse_models as reverse_models
+    from hipporeplayimm.time_order_patch import apply_reverse_emission_time_patch
+
+    def stale_reverse_emissions(emissions: LogEmissionTensor) -> LogEmissionTensor:
+        return LogEmissionTensor(
+            log_likelihood=np.asarray(emissions.log_likelihood, dtype=float)[::-1].copy(),
+            spike_counts=np.asarray(emissions.spike_counts)[::-1].copy(),
+            times=np.asarray(emissions.times, dtype=float)[::-1].copy(),
+            dt=emissions.dt,
+            cell_ids=np.asarray(emissions.cell_ids).copy(),
+            n_spikes=int(emissions.n_spikes),
+            bin_durations=np.asarray(emissions.bin_durations, dtype=float)[::-1].copy(),
+            transition_durations=np.asarray(emissions.transition_durations, dtype=float)[::-1].copy(),
+            metadata=dict(getattr(emissions, "metadata", {}) or {}),
+        )
+
+    emissions = _emissions()
+    monkeypatch.setattr(improved, "_time_order_patch_applied", True, raising=False)
+    monkeypatch.setattr(reverse_models, "_time_order_patch_applied", False, raising=False)
+    monkeypatch.setattr(reverse_models, "reverse_emissions", stale_reverse_emissions)
+
+    apply_reverse_emission_time_patch()
+
+    output = reverse_models.reverse_emissions(emissions)
+    np.testing.assert_allclose(output.log_likelihood, emissions.log_likelihood[::-1])
+    np.testing.assert_allclose(output.times, emissions.times)
+    np.testing.assert_allclose(output.transition_durations, emissions.transition_durations[::-1])
+    assert np.all(np.diff(output.times) > 0.0)
+    assert getattr(improved, "_time_order_patch_applied") is True
+    assert getattr(reverse_models, "_time_order_patch_applied") is True

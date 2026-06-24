@@ -107,8 +107,6 @@ def _parse_bool_metadata_value(column: str, value: Any) -> bool:
         return False
     if np.isclose(numeric, 1.0, rtol=0.0, atol=0.0):
         return True
-    if isinstance(value, str):
-        return bool(numeric)
     raise ValueError(f"{column} must contain boolean values")
 
 

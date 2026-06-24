@@ -127,9 +127,13 @@ def _metadata_group_key(value: object) -> str:
     except (TypeError, ValueError):
         missing = False
     if isinstance(missing, (bool, np.bool_)) and bool(missing):
-        return "<missing>"
+        return repr(("missing", None))
     if isinstance(value, np.ndarray):
-        return repr(np.asarray(value).tolist())
+        return repr(("array", np.asarray(value, dtype=object).reshape(-1).tolist()))
     if isinstance(value, (list, tuple)):
-        return repr(list(value))
-    return str(value).strip()
+        return repr(("sequence", list(value)))
+    if isinstance(value, set):
+        return repr(("set", sorted(value, key=repr)))
+    if isinstance(value, dict):
+        return repr(("mapping", sorted(value.items(), key=lambda item: repr(item[0]))))
+    return repr(("scalar", str(value).strip()))

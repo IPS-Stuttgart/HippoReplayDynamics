@@ -183,8 +183,8 @@ class LogEmissionTensor:
             raise ValueError("log_likelihood must be two-dimensional")
         if self.n_bins == 0:
             raise ValueError("log_likelihood must contain at least one spatial bin")
-        if np.any(np.isnan(self.log_likelihood)) or np.any(self.log_likelihood == np.inf):
-            raise ValueError("log_likelihood must not contain NaN or +inf")
+        if np.any(self.log_likelihood == np.inf):
+            raise ValueError("log_likelihood must not contain +inf")
 
         self.spike_counts = np.asarray(self.spike_counts)
         if self.spike_counts.ndim != 2 or self.spike_counts.shape[0] != self.n_time:

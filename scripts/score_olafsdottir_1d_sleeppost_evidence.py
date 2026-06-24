@@ -87,6 +87,7 @@ EVENT_MODEL_COLUMNS = [
     "track1_session",
     "sleeppost_session",
     "pilot_tier",
+    "decoder_filter",
     "event_index",
     "event_id",
     "start_time_s",
@@ -111,6 +112,7 @@ DECISION_COLUMNS = [
     "track1_session",
     "sleeppost_session",
     "pilot_tier",
+    "decoder_filter",
     "event_index",
     "event_id",
     "start_time_s",
@@ -289,7 +291,14 @@ def score_selected_event(
     meta = event_metadata(event)
     pair = matching_pair(pairs, meta["animal"], meta["date"], meta["track1_session"], meta["sleeppost_session"])
     lin_pass = linearization_passed(linearization, meta["animal"], meta["date"], meta["track1_session"], meta["sleeppost_session"])
-    dec_pass = decoder_passed(decoder, meta["animal"], meta["date"], meta["track1_session"], meta["sleeppost_session"])
+    dec_pass = decoder_ready_for_filter(
+        decoder,
+        meta["animal"],
+        meta["date"],
+        meta["track1_session"],
+        meta["sleeppost_session"],
+        decoder_filter=str(meta["decoder_filter"]),
+    )
     meta["decoder_qc_passed"] = bool(dec_pass)
     meta["linearization_qc_passed"] = bool(lin_pass)
     if pair is None:
@@ -777,7 +786,8 @@ def gate_summary(*, selected: pd.DataFrame, decoder: pd.DataFrame, evidence: pd.
     required_rows_per_event = evidence.groupby(["animal", "date", "track1_session", "sleeppost_session", "event_index"], dropna=False)["model"].apply(lambda models: set(models.astype(str))) if not evidence.empty else pd.Series(dtype=object)
     selected_events_nonempty = bool(selected_keys)
     complete_required_model_events = sum(set(REQUIRED_MODELS).issubset(models) for models in required_rows_per_event)
-    decoder_pass = decoder[decoder["decoder_status"].astype(str).eq("pass")].copy() if not decoder.empty else decoder
+    decoder_filter = selected_decoder_filter(selected)
+    decoder_pass = decoder_ready_rows(decoder, decoder_filter=decoder_filter)
     selected_pairs = pair_key_set(selected)
     decoder_pass_pairs = pair_key_set_from_decoder(decoder_pass)
     models_present = set(evidence["model"].astype(str)) if not evidence.empty else set()
@@ -807,7 +817,7 @@ def gate_summary(*, selected: pd.DataFrame, decoder: pd.DataFrame, evidence: pd.
             "pairs_represented",
             bool(selected_pairs) and selected_pairs == decoder_pass_pairs,
             f"selected_pairs={len(selected_pairs)}; decoder_pass_pairs={len(decoder_pass_pairs)}",
-            "all decoder-pass pairs are represented by the selected pilot tier",
+            f"all {decoder_filter} decoder-ready pairs are represented by the selected pilot tier",
         ),
         gate_row(
             "animals_represented",
@@ -937,6 +947,8 @@ def load_decoder_qc(path: str | Path) -> pd.DataFrame:
     frame = frame.copy()
     frame["animal"] = frame["animal"].astype(str).str.upper()
     frame["date"] = frame["date"].astype(str)
+    if "decoder_qc_paper_ready" not in frame.columns:
+        frame["decoder_qc_paper_ready"] = frame["decoder_status"].map(as_bool)
     return frame
 
 
@@ -948,6 +960,10 @@ def load_pilot_selection(path: str | Path) -> pd.DataFrame:
     frame = frame.copy()
     frame["animal"] = frame["animal"].astype(str).str.upper()
     frame["date"] = frame["date"].astype(str)
+    if "decoder_filter" not in frame.columns:
+        frame["decoder_filter"] = [decoder_filter_from_tier(tier) for tier in frame["selection_tier"]]
+    else:
+        frame["decoder_filter"] = [normalize_decoder_filter(value, fallback_tier=tier) for value, tier in zip(frame["decoder_filter"], frame["selection_tier"])]
     return frame
 
 
@@ -958,6 +974,7 @@ def event_metadata(event: pd.Series) -> dict[str, object]:
         "track1_session": str(event["track1_session"]),
         "sleeppost_session": str(event["sleeppost_session"]),
         "pilot_tier": str(event["selection_tier"]),
+        "decoder_filter": normalize_decoder_filter(event.get("decoder_filter", ""), fallback_tier=event["selection_tier"]),
         "event_index": int(event["event_index"]),
         "event_id": int(event["event_id"]),
         "start_time_s": float(event["start_time_s"]),
@@ -1008,13 +1025,61 @@ def linearization_passed(linearization: pd.DataFrame, animal: str, date: str, tr
 
 
 def decoder_passed(decoder: pd.DataFrame, animal: str, date: str, track: str, sleep: str) -> bool:
+    return decoder_ready_for_filter(decoder, animal, date, track, sleep, decoder_filter="paper_ready")
+
+
+def decoder_ready_for_filter(decoder: pd.DataFrame, animal: str, date: str, track: str, sleep: str, *, decoder_filter: str) -> bool:
     rows = decoder[
         decoder["animal"].astype(str).str.upper().eq(str(animal).upper())
         & decoder["date"].astype(str).eq(str(date))
         & decoder["track1_session"].astype(str).eq(str(track))
         & decoder["sleeppost_session"].astype(str).eq(str(sleep))
     ]
-    return bool(not rows.empty and rows.iloc[0]["decoder_status"] == "pass")
+    if rows.empty:
+        return False
+    row = rows.iloc[0]
+    if decoder_filter == "scoring_available":
+        return bool("decoder_qc_scoring_available" in rows.columns and as_bool(row["decoder_qc_scoring_available"]))
+    return bool(as_bool(row["decoder_qc_paper_ready"]) if "decoder_qc_paper_ready" in rows.columns else as_bool(row["decoder_status"]))
+
+
+def decoder_ready_rows(decoder: pd.DataFrame, *, decoder_filter: str) -> pd.DataFrame:
+    if decoder.empty:
+        return decoder
+    if decoder_filter == "scoring_available":
+        if "decoder_qc_scoring_available" not in decoder.columns:
+            return decoder.iloc[0:0].copy()
+        return decoder[decoder["decoder_qc_scoring_available"].map(as_bool)].copy()
+    if "decoder_qc_paper_ready" in decoder.columns:
+        return decoder[decoder["decoder_qc_paper_ready"].map(as_bool)].copy()
+    return decoder[decoder["decoder_status"].map(as_bool)].copy()
+
+
+def selected_decoder_filter(selected: pd.DataFrame) -> str:
+    if selected.empty:
+        return "paper_ready"
+    if "decoder_filter" in selected.columns:
+        values = {normalize_decoder_filter(value, fallback_tier="") for value in selected["decoder_filter"]}
+        values.discard("")
+        if len(values) == 1:
+            return values.pop()
+    tiers = {decoder_filter_from_tier(tier) for tier in selected["selection_tier"]} if "selection_tier" in selected.columns else {"paper_ready"}
+    tiers.discard("")
+    return tiers.pop() if len(tiers) == 1 else "paper_ready"
+
+
+def normalize_decoder_filter(value: object, *, fallback_tier: object) -> str:
+    text = str(value).strip().lower()
+    if text in {"paper_ready", "scoring_available"}:
+        return text
+    return decoder_filter_from_tier(fallback_tier)
+
+
+def decoder_filter_from_tier(tier: object) -> str:
+    text = str(tier).strip().lower()
+    if "decoder_available_debug" in text:
+        return "scoring_available"
+    return "paper_ready"
 
 
 def load_linearized_position(*, linearization_root: Path, animal: str, date: str) -> pd.DataFrame:
@@ -1122,7 +1187,7 @@ def model_family(model: str) -> str:
 
 def event_base_from_group(group: pd.DataFrame) -> dict[str, object]:
     first = group.iloc[0]
-    return {column: first[column] for column in DECISION_COLUMNS[:15]}
+    return {column: first[column] for column in DECISION_COLUMNS[: DECISION_COLUMNS.index("best_model")]}
 
 
 def matching_evidence_group(evidence: pd.DataFrame, animal: object, date: object, track: object, sleep: object) -> pd.DataFrame:

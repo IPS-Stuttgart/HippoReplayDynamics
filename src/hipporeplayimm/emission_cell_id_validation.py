@@ -9,6 +9,8 @@ integer-valued identifiers before any row lookup can truncate them.
 The same runtime patch also rejects empty ``LogEmissionTensor`` time axes at
 construction time.  Downstream scorers index the first emission row, so accepting
 zero-row tensors creates opaque later failures instead of a clear input error.
+It also installs a count-summary guard so ``LogEmissionTensor.n_spikes`` cannot
+silently disagree with the validated ``spike_counts`` tensor.
 """
 
 from __future__ import annotations
@@ -98,8 +100,10 @@ def apply_emission_cell_id_validation_patch() -> None:
 
     from . import encoding as encoding_module
     from . import kd_reference as kd_module
+    from . import log_emission_n_spikes_validation as n_spikes_validation
 
     _install_log_emission_time_axis_guard(encoding_module)
+    n_spikes_validation.apply_log_emission_n_spikes_validation_patch()
 
     if not getattr(encoding_module, _PATCHED_FLAG, False):
         original_build_emissions = encoding_module.build_emissions

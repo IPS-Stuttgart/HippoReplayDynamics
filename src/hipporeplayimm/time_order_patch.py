@@ -13,7 +13,9 @@ def apply_reverse_emission_time_patch() -> None:
     from . import result_improvement_extensions as improved
     from . import reverse_models
 
-    if getattr(improved, "_time_order_patch_applied", False):
+    improved_patched = getattr(improved, "_time_order_patch_applied", False)
+    reverse_models_patched = getattr(reverse_models, "_time_order_patch_applied", False)
+    if improved_patched and reverse_models_patched:
         return
 
     def copy_emissions_with_log_likelihood(

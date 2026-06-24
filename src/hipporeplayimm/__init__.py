@@ -37,11 +37,13 @@ from . import kd_impossible_emission_patch as _kd_impossible_emission_patch
 from . import latent_path_validation as _latent_path_validation
 from . import mark_complex_validation as _mark_complex_validation
 from . import model_averaged_endpoint_scoping as _model_averaged_endpoint_scoping
+from . import model_parameter_validation as _model_parameter_validation
 from . import observation_sweep_config_validation as _observation_sweep_config_validation
 from . import occupancy_candidate_support as _occupancy_candidate_support
 from . import olafsdottir_zip_safety as _olafsdottir_zip_safety
 from . import position_decoding_config_validation as _position_decoding_config_validation
 from . import pyrecest_bin_center_validation as _pyrecest_bin_center_validation
+from . import pyrecest_numeric_metadata_guard as _pyrecest_numeric_metadata_guard
 from . import pyrecest_score_metadata as _pyrecest_score_metadata
 from . import recovery_diagnostics_bool_patch as _recovery_diagnostics_bool_patch
 from . import reverse_time_terminal_guard as _reverse_time_terminal_guard
@@ -64,6 +66,7 @@ from . import wrapper_return_trajectory as _wrapper_return_trajectory
 # symbols are imported from the patched modules.
 _state_space_bin_count_validation.apply_state_space_bin_count_validation_patch()
 _score_metadata.apply_model_hyperparam_patch()
+_model_parameter_validation.apply_model_parameter_validation_patch()
 _candidate_support_quality_patch.apply_candidate_support_quality_patch()
 _benchmark_cell_split_metadata.apply_benchmark_cell_split_metadata_patch()
 _benchmark_metadata_scope_patch.apply_benchmark_metadata_scope_patch()
@@ -71,6 +74,7 @@ _cell_split_hashable_grouping.apply_cell_split_hashable_grouping_patch()
 _benchmark_relative_grouping.apply_benchmark_relative_grouping_patch()
 _clusterless_ground_truth.apply_clusterless_ground_truth_patch()
 _bma_options_patch.apply_bma_options_patch()
+_pyrecest_numeric_metadata_guard.apply_pyrecest_numeric_metadata_guard_patch()
 _pyrecest_score_metadata.apply_pyrecest_score_metadata_patch()
 _pyrecest_bin_center_validation.apply_pyrecest_bin_center_validation_patch()
 _goal_state_space_integration.apply_goal_state_space_patch()
@@ -179,6 +183,7 @@ def apply_runtime_patches() -> None:
 
     _state_space_bin_count_validation.apply_state_space_bin_count_validation_patch()
     _score_metadata.apply_model_hyperparam_patch()
+    _model_parameter_validation.apply_model_parameter_validation_patch()
     _candidate_support_quality_patch.apply_candidate_support_quality_patch()
     _benchmark_cell_split_metadata.apply_benchmark_cell_split_metadata_patch()
     _benchmark_metadata_scope_patch.apply_benchmark_metadata_scope_patch()
@@ -186,6 +191,7 @@ def apply_runtime_patches() -> None:
     _benchmark_relative_grouping.apply_benchmark_relative_grouping_patch()
     _clusterless_ground_truth.apply_clusterless_ground_truth_patch()
     _bma_options_patch.apply_bma_options_patch()
+    _pyrecest_numeric_metadata_guard.apply_pyrecest_numeric_metadata_guard_patch()
     _pyrecest_score_metadata.apply_pyrecest_score_metadata_patch()
     _pyrecest_bin_center_validation.apply_pyrecest_bin_center_validation_patch()
     _goal_state_space_integration.apply_goal_state_space_patch()

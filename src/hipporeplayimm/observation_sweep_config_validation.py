@@ -73,6 +73,8 @@ def _grid_values(config: Any, name: str) -> tuple[Any, ...]:
 
 
 def _finite_float(name: str, value: Any) -> float:
+    if isinstance(value, (bool, np.bool_)):
+        raise ValueError(f"{name} values must be finite")
     try:
         numeric = float(value)
     except (TypeError, ValueError) as exc:
@@ -83,6 +85,8 @@ def _finite_float(name: str, value: Any) -> float:
 
 
 def _positive_integer(name: str, value: Any) -> int:
+    if isinstance(value, (bool, np.bool_)):
+        raise ValueError(f"{name} must be positive")
     try:
         numeric = float(value)
     except (TypeError, ValueError) as exc:

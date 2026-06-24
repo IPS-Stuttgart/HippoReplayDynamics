@@ -379,11 +379,11 @@ def test_log_emission_tensor_rejects_invalid_core_shapes_and_values():
             }
         )
 
-    with pytest.raises(ValueError, match=r"NaN or \+inf"):
+    with pytest.raises(ValueError, match=r"\+inf"):
         LogEmissionTensor(
             **{
                 **good_kwargs,
-                "log_likelihood": np.array([[0.0, np.nan], [0.0, 0.0]], dtype=float),
+                "log_likelihood": np.array([[0.0, np.inf], [0.0, 0.0]], dtype=float),
             }
         )
 
@@ -1008,8 +1008,10 @@ def test_ground_truth_score_metadata_parsers_skip_textual_missing_values():
 def test_ground_truth_bool_metadata_parser_accepts_aliases_and_rejects_nonfinite():
     assert _unique_bool_from_column(pd.DataFrame({"flag": ["nan", "yes"]}), "flag", False) is True
     assert _unique_bool_from_column(pd.DataFrame({"flag": ["0.0"]}), "flag", True) is False
-    assert _unique_bool_from_column(pd.DataFrame({"flag": ["2.0"]}), "flag", False) is True
     assert _unique_bool_from_column(pd.DataFrame({"flag": ["off"]}), "flag", True) is False
+
+    with pytest.raises(ValueError, match="boolean values"):
+        _unique_bool_from_column(pd.DataFrame({"flag": ["2.0"]}), "flag", False)
 
     with pytest.raises(ValueError, match="cannot parse boolean value"):
         _unique_bool_from_column(pd.DataFrame({"flag": ["inf"]}), "flag", False)

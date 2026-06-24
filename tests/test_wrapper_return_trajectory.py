@@ -52,6 +52,43 @@ class _TrajectoryWithoutTerminalModel:
         )
 
 
+class _KwargRecordingModel:
+    name = "kwarg-recorder"
+
+    def __init__(self) -> None:
+        self.calls: list[dict[str, object]] = []
+
+    def score(
+        self,
+        emissions: LogEmissionTensor,
+        bin_centers: np.ndarray,
+        *,
+        occupancy_s: np.ndarray | None = None,
+        candidate_indices: list[np.ndarray] | None = None,
+        return_trajectory: bool | None = None,
+    ) -> EventScore:
+        del bin_centers
+        self.calls.append(
+            {
+                "log_likelihood": np.asarray(emissions.log_likelihood, dtype=float).copy(),
+                "occupancy_s": None if occupancy_s is None else np.asarray(occupancy_s, dtype=float).copy(),
+                "candidate_indices": None
+                if candidate_indices is None
+                else [np.asarray(curr, dtype=int).copy() for curr in candidate_indices],
+                "return_trajectory": return_trajectory,
+            }
+        )
+        trajectory = np.asarray(emissions.log_likelihood, dtype=float).copy()
+        return EventScore(
+            self.name,
+            float(len(self.calls)),
+            emissions.n_time,
+            emissions.n_spikes,
+            terminal_log_posterior=trajectory[-1].copy(),
+            trajectory_log_posterior=None if return_trajectory is False else trajectory,
+        )
+
+
 def _synthetic_emissions() -> LogEmissionTensor:
     return LogEmissionTensor(
         log_likelihood=np.log(
@@ -83,6 +120,19 @@ def _state_space_model() -> StateSpaceReplayModel:
     )
 
 
+def _candidate_indices() -> list[np.ndarray]:
+    return [
+        np.array([0], dtype=int),
+        np.array([1], dtype=int),
+        np.array([0, 1], dtype=int),
+    ]
+
+
+def _candidate_lists(candidates: object) -> list[list[int]]:
+    assert candidates is not None
+    return [np.asarray(curr, dtype=int).tolist() for curr in candidates]  # type: ignore[union-attr]
+
+
 def test_reverse_wrappers_accept_evidence_only_return_trajectory() -> None:
     emissions = _synthetic_emissions()
     bin_centers = _bin_centers()
@@ -110,6 +160,58 @@ def test_reverse_wrappers_keep_remapped_terminal_when_only_return_suppresses_tra
         assert result.terminal_log_posterior is not None
         np.testing.assert_allclose(result.terminal_log_posterior, expected_terminal)
         assert "reverse_time_terminal_posterior" not in result.diagnostics
+
+
+def test_direct_reverse_wrapper_forwards_occupancy_and_reverses_candidates() -> None:
+    emissions = _synthetic_emissions()
+    bin_centers = _bin_centers()
+    occupancy_s = np.array([0.25, 1.00], dtype=float)
+    candidates = _candidate_indices()
+    base_model = _KwargRecordingModel()
+    wrapped = DirectReverseTimeReplayModel(base_model)
+
+    wrapped.score(
+        emissions,
+        bin_centers,
+        occupancy_s=occupancy_s,
+        candidate_indices=candidates,
+        return_trajectory=False,
+    )
+
+    assert len(base_model.calls) == 1
+    call = base_model.calls[0]
+    np.testing.assert_allclose(call["log_likelihood"], emissions.log_likelihood[::-1])
+    np.testing.assert_allclose(call["occupancy_s"], occupancy_s)
+    assert _candidate_lists(call["candidate_indices"]) == [[0, 1], [1], [0]]
+    assert call["return_trajectory"] is False
+
+
+def test_direct_bidirectional_wrapper_forwards_occupancy_and_candidates_to_both_directions() -> None:
+    emissions = _synthetic_emissions()
+    bin_centers = _bin_centers()
+    occupancy_s = np.array([0.25, 1.00], dtype=float)
+    candidates = _candidate_indices()
+    base_model = _KwargRecordingModel()
+    wrapped = DirectBidirectionalReplayModel(base_model)
+
+    wrapped.score(
+        emissions,
+        bin_centers,
+        occupancy_s=occupancy_s,
+        candidate_indices=candidates,
+        return_trajectory=False,
+    )
+
+    assert len(base_model.calls) == 2
+    forward_call, reverse_call = base_model.calls
+    np.testing.assert_allclose(forward_call["log_likelihood"], emissions.log_likelihood)
+    np.testing.assert_allclose(reverse_call["log_likelihood"], emissions.log_likelihood[::-1])
+    np.testing.assert_allclose(forward_call["occupancy_s"], occupancy_s)
+    np.testing.assert_allclose(reverse_call["occupancy_s"], occupancy_s)
+    assert _candidate_lists(forward_call["candidate_indices"]) == [[0], [1], [0, 1]]
+    assert _candidate_lists(reverse_call["candidate_indices"]) == [[0, 1], [1], [0]]
+    assert forward_call["return_trajectory"] is False
+    assert reverse_call["return_trajectory"] is True
 
 
 def test_bidirectional_wrappers_forward_evidence_only_return_trajectory() -> None:

@@ -1,6 +1,7 @@
 '''State-space and IMM replay benchmarks for hippocampal open-field data.'''
 # ruff: noqa: E402
 
+from . import advanced_result_empty_threshold_patch as _advanced_result_empty_threshold_patch
 from . import advanced_result_status_patch as _advanced_result_status_patch
 from . import axona_data_end_footer as _axona_data_end_footer
 from . import benchmark_cell_split_metadata as _benchmark_cell_split_metadata
@@ -222,6 +223,7 @@ def apply_runtime_patches() -> None:
     _simulation_best_row_flags.apply_simulation_best_row_flags_patch()
     _evidence_status_coercion.apply_evidence_status_coercion_patch()
     _advanced_result_status_patch.apply_advanced_result_status_patch()
+    _advanced_result_empty_threshold_patch.apply_advanced_result_empty_threshold_patch()
     _latent_path_validation.apply_latent_path_validation_patch()
     _simulation_recovery_runtime_limits.apply_simulation_recovery_runtime_limit_validation_patch()
     _simulation_recovery_count_validation.apply_simulation_recovery_count_validation_patch()

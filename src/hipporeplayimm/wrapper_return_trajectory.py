@@ -1,8 +1,9 @@
 """Propagate evidence-only scoring through replay wrapper models.
 
-State-space models accept ``return_trajectory=False`` for evidence-only runs, but
-lightweight reverse-time and bidirectional wrappers historically did not expose
-that keyword.  This runtime patch keeps wrapper calls compatible with the base
+State-space models accept optional scoring controls such as
+``return_trajectory=False``, ``occupancy_s``, and ``candidate_indices``. Lightweight
+reverse-time and bidirectional wrappers historically did not expose all of those
+keywords. This runtime patch keeps wrapper calls compatible with the base
 state-space interface and continues to guard reverse-time terminals that cannot be
 mapped back without a full trajectory posterior.
 """
@@ -21,7 +22,7 @@ _PATCHED_FLAG = "_wrapper_return_trajectory_patch_applied"
 
 
 def apply_wrapper_return_trajectory_patch() -> None:
-    """Install ``return_trajectory`` support for replay wrapper score methods."""
+    """Install wrapper score compatibility patches."""
 
     from . import result_improvement_extensions as extensions
     from . import reverse_models
@@ -199,10 +200,19 @@ def _patch_direct_reverse_wrappers(extensions: Any, reverse_models: Any) -> None
         emissions,
         bin_centers,
         *,
+        occupancy_s=None,
+        candidate_indices=None,
         return_trajectory: bool | None = None,
     ) -> EventScore:
         reversed_emissions = reverse_models.reverse_emissions(emissions)
-        kwargs = {}
+        kwargs: dict[str, object] = {}
+        if occupancy_s is not None:
+            kwargs["occupancy_s"] = occupancy_s
+        if candidate_indices is not None:
+            kwargs["candidate_indices"] = [
+                np.asarray(curr, dtype=int).copy()
+                for curr in candidate_indices[::-1]
+            ]
         if return_trajectory is not None:
             kwargs["return_trajectory"] = bool(return_trajectory)
         score = extensions._call_score_with_supported_kwargs(  # noqa: SLF001
@@ -244,9 +254,15 @@ def _patch_direct_reverse_wrappers(extensions: Any, reverse_models: Any) -> None
         emissions,
         bin_centers,
         *,
+        occupancy_s=None,
+        candidate_indices=None,
         return_trajectory: bool | None = None,
     ) -> EventScore:
-        kwargs = {}
+        kwargs: dict[str, object] = {}
+        if occupancy_s is not None:
+            kwargs["occupancy_s"] = occupancy_s
+        if candidate_indices is not None:
+            kwargs["candidate_indices"] = candidate_indices
         if return_trajectory is not None:
             kwargs["return_trajectory"] = bool(return_trajectory)
         forward = extensions._call_score_with_supported_kwargs(  # noqa: SLF001
@@ -259,6 +275,8 @@ def _patch_direct_reverse_wrappers(extensions: Any, reverse_models: Any) -> None
         reverse = reverse_models.ReverseTimeReplayModel(self.base_model).score(
             emissions,
             bin_centers,
+            occupancy_s=occupancy_s,
+            candidate_indices=candidate_indices,
             return_trajectory=reverse_return_trajectory,
         )
         weights = np.exp(

@@ -10,19 +10,30 @@ import pandas as pd
 _PATCHED_FLAG = "_advanced_result_threshold_validation_patch_applied"
 
 
+def _validated_threshold(
+    threshold: float,
+    *,
+    message: str = "margin_threshold must be a finite nonnegative value",
+) -> float:
+    if isinstance(threshold, (bool, np.bool_)):
+        raise ValueError(message)
+    try:
+        value = float(threshold)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ValueError(message) from exc
+    if not np.isfinite(value) or value < 0.0:
+        raise ValueError(message)
+    return value
+
+
 def _validated_thresholds(thresholds: Sequence[float]) -> tuple[float, ...]:
-    values: list[float] = []
-    for threshold in thresholds:
-        if isinstance(threshold, (bool, np.bool_)):
-            raise ValueError("thresholds must contain finite nonnegative values")
-        try:
-            value = float(threshold)
-        except (TypeError, ValueError, OverflowError) as exc:
-            raise ValueError("thresholds must contain finite nonnegative values") from exc
-        if not np.isfinite(value) or value < 0.0:
-            raise ValueError("thresholds must contain finite nonnegative values")
-        values.append(value)
-    return tuple(values)
+    return tuple(
+        _validated_threshold(
+            threshold,
+            message="thresholds must contain finite nonnegative values",
+        )
+        for threshold in thresholds
+    )
 
 
 def apply_advanced_result_threshold_validation_patch() -> None:
@@ -48,11 +59,12 @@ def apply_advanced_result_threshold_validation_patch() -> None:
         true_model_col: str | None = None,
         positive_true_label: str | None = None,
     ) -> pd.DataFrame:
+        threshold = _validated_threshold(margin_threshold)
         out = previous_decisions(
             scores,
             positive_model=positive_model,
             reference_model=reference_model,
-            margin_threshold=margin_threshold,
+            margin_threshold=threshold,
             group_cols=group_cols,
             evidence_col=evidence_col,
             model_col=model_col,

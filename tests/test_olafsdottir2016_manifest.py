@@ -119,7 +119,17 @@ def test_extract_archive_allows_nested_dataset_members(tmp_path: Path) -> None:
     assert (tmp_path / "dataset" / "Olafsdottir2016" / "R2142" / "2014-08-06" / "20140806_R2142_track1.set").read_text() == "header"
 
 
-@pytest.mark.parametrize("member_name", ["../escape.txt", r"..\escape.txt", "/tmp/escape.txt", "C:/escape.txt"])
+@pytest.mark.parametrize(
+    "member_name",
+    [
+        "../escape.txt",
+        r"..\escape.txt",
+        "/tmp/escape.txt",
+        "C:/escape.txt",
+        "C:escape.txt",
+        "D:folder/escape.txt",
+    ],
+)
 def test_extract_archive_rejects_unsafe_member_paths(tmp_path: Path, member_name: str) -> None:
     archive_path = tmp_path / "unsafe.zip"
     with zipfile.ZipFile(archive_path, "w") as archive:

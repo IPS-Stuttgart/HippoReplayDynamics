@@ -106,6 +106,37 @@ def test_pilot_event_selection_ignores_decoder_failed_pairs(tmp_path: Path) -> N
     assert bool(gates.loc["selection_is_pre_evidence_only", "passed"])
 
 
+def test_pilot_event_selection_normalizes_pass_status_tokens(tmp_path: Path) -> None:
+    module = _load_module()
+    events = _candidate_events()
+    decoder = _decoder_qc()
+    events.loc[events["event_qc_status"].eq("pass"), "event_qc_status"] = " PASS "
+    decoder.loc[decoder["decoder_status"].eq("pass"), "decoder_status"] = " Pass "
+    events_csv = tmp_path / "events.csv"
+    decoder_csv = tmp_path / "decoder.csv"
+    events.to_csv(events_csv, index=False)
+    decoder.to_csv(decoder_csv, index=False)
+
+    tables = module.run_pilot_event_selection(
+        candidate_events_csv=events_csv,
+        decoder_qc_csv=decoder_csv,
+        output_dir=tmp_path / "selection",
+        seed=789,
+        pilot20_events_per_pair=2,
+        pilot50_events_per_pair=3,
+        pilot100_events_per_pair=4,
+        min_pilot20_animals_fraction=1.0,
+    )
+
+    selection = tables["selection"]
+    assert module.tier_count(selection, "pilot_20_balanced") == 4
+    assert selection["event_qc_status"].astype(str).str.strip().str.lower().eq("pass").all()
+    gates = tables["gates"].set_index("gate")
+    assert bool(gates.loc["decoder_pass_pairs_present", "passed"])
+    assert bool(gates.loc["eligible_events_for_decoder_pairs", "passed"])
+    assert bool(gates.loc["pilot_20_balanced_complete", "passed"])
+
+
 def test_pilot_event_selection_rejects_missing_inputs(tmp_path: Path) -> None:
     module = _load_module()
     events_csv = tmp_path / "events.csv"

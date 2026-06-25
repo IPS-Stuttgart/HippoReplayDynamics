@@ -17,7 +17,10 @@ _PATCHED_FLAG = "_clusterless_mark_group_validation_patch_applied"
 
 
 def _contains_boolean_ids(values: Any) -> bool:
-    raw = np.asarray(values)
+    try:
+        raw = np.asarray(values, dtype=object)
+    except (TypeError, ValueError):
+        raw = np.asarray(values)
     if raw.size == 0:
         return False
     if np.issubdtype(raw.dtype, np.bool_):
@@ -30,7 +33,7 @@ def _contains_boolean_ids(values: Any) -> bool:
 def _coerce_integral_group_ids(values: Any, name: str) -> np.ndarray:
     """Return integer group IDs without lossy bool/fraction/range coercion."""
 
-    raw = np.asarray(values)
+    raw = np.asarray(values, dtype=object)
     if _contains_boolean_ids(raw):
         raise ValueError(f"{name} must not contain boolean identifiers")
     numeric = np.asarray(raw, dtype=float)
@@ -75,7 +78,7 @@ def apply_clusterless_mark_group_validation_patch() -> None:
     def coerce_group_indices(self, group_ids, n_marks: int):
         if group_ids is None or self.group_ids is None:
             return None
-        raw_group_ids = np.asarray(group_ids)
+        raw_group_ids = np.asarray(group_ids, dtype=object)
         if raw_group_ids.ndim == 0:
             raw_group_ids = np.full(int(n_marks), raw_group_ids.item(), dtype=object if raw_group_ids.dtype == object else raw_group_ids.dtype)
         raw_group_ids = raw_group_ids.reshape(-1)

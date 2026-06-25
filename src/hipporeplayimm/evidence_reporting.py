@@ -56,6 +56,7 @@ _MOMENTUM_EXACT_SURROGATE_MODELS = (
 _FALSE_BOOL_STRINGS = {"", "0", "0.0", "false", "f", "no", "n", "off", "nan", "none", "null"}
 _TRUE_BOOL_STRINGS = {"1", "1.0", "true", "t", "yes", "y", "on"}
 _MISSING_EVIDENCE_SUPPORT_STRINGS = {"", "nan", "na", "n/a", "none", "null", "<na>"}
+_MISSING_STATUS_VALUES = {"", "nan", "na", "n/a", "none", "null", "<na>"}
 
 
 def _coerce_bool_series(values: pd.Series, *, default: bool = False) -> pd.Series:
@@ -93,11 +94,33 @@ def _coerce_bool_series(values: pd.Series, *, default: bool = False) -> pd.Serie
     return values.map(coerce).astype(bool)
 
 
+def _is_missing_status(value: object) -> bool:
+    try:
+        missing = pd.isna(value)
+    except (TypeError, ValueError):
+        missing = False
+    if isinstance(missing, (bool, np.bool_)) and bool(missing):
+        return True
+    return str(value).strip().lower() in _MISSING_STATUS_VALUES
+
+
+def _status_is_success_or_missing(value: object) -> bool:
+    if _is_missing_status(value):
+        return True
+    return str(value).strip().lower() == "success"
+
+
+def _status_success_series(frame: pd.DataFrame) -> pd.Series:
+    if "status" not in frame.columns:
+        return pd.Series(True, index=frame.index)
+    return frame["status"].map(_status_is_success_or_missing).astype(bool)
+
+
 def evidence_support_from_row(row: pd.Series) -> str:
     """Infer whether a score is exact evidence, a lower bound, or non-comparable."""
 
     status = row.get("status", "success")
-    if pd.notna(status) and str(status) != "success":
+    if not _status_is_success_or_missing(status):
         return "not_scored"
 
     labels: list[str] = []
@@ -158,7 +181,7 @@ def ensure_evidence_support_columns(df: pd.DataFrame) -> pd.DataFrame:
         out["evidence_support"] = existing.where(~missing, inferred)
     else:
         out["evidence_support"] = inferred
-    status_ok = out["status"].eq("success") if "status" in out else pd.Series(True, index=out.index)
+    status_ok = _status_success_series(out)
     finite_log_evidence = _finite_log_evidence_series(out)
     out["evidence_comparison"] = out["evidence_support"].map(evidence_comparison_from_support)
     out["evidence_comparison_note"] = out["evidence_comparison"].map(EVIDENCE_COMPARISON_DESCRIPTIONS).fillna(EVIDENCE_COMPARISON_DESCRIPTIONS[EVIDENCE_COMPARISON_UNKNOWN])
@@ -191,7 +214,7 @@ def simulation_add_evidence_columns(df: pd.DataFrame) -> pd.DataFrame:
     groups = []
     for _, group in df.groupby(["session", "event_index"], sort=False):
         group = group.copy()
-        status_ok = group["status"].eq("success") if "status" in group else pd.Series(True, index=group.index)
+        status_ok = _status_success_series(group)
         scored = group[status_ok]
         group["relative_log_evidence"] = np.nan
         group["model_probability"] = np.nan
@@ -317,7 +340,7 @@ def simulation_event_best_rows(event_scores: pd.DataFrame) -> pd.DataFrame:
 
     event_scores = ensure_evidence_support_columns(event_scores)
     comparable = _coerce_bool_series(event_scores["evidence_comparable"])
-    status_ok = event_scores["status"].eq("success") if "status" in event_scores else pd.Series(True, index=event_scores.index)
+    status_ok = _status_success_series(event_scores)
     ok = event_scores[status_ok & comparable]
     if ok.empty:
         return pd.DataFrame()

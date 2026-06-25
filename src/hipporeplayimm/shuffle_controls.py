@@ -119,9 +119,20 @@ def score_shuffle_controls(
     return pd.DataFrame(rows)
 
 
+def _with_finite_log_evidence(scores: pd.DataFrame) -> pd.DataFrame:
+    out = scores.copy()
+    if "log_evidence" not in out.columns:
+        return out
+    values = pd.to_numeric(out["log_evidence"], errors="coerce")
+    out["log_evidence"] = values.where(np.isfinite(values), np.nan)
+    return out
+
+
 def add_shuffle_p_values(real_scores: pd.DataFrame, control_scores: pd.DataFrame) -> pd.DataFrame:
     """Add empirical upper-tail p-values against shuffled control evidence."""
 
+    real_scores = _with_finite_log_evidence(real_scores)
+    control_scores = _with_finite_log_evidence(control_scores)
     if real_scores.empty or control_scores.empty:
         out = real_scores.copy()
         out["shuffle_p_value"] = np.nan
@@ -141,9 +152,11 @@ def add_shuffle_p_values(real_scores: pd.DataFrame, control_scores: pd.DataFrame
     for _, row in real_scores.iterrows():
         key = (row.get("session"), row.get("event_index"), row.get("model"))
         control = grouped.get_group(key)["log_evidence"].to_numpy(float) if key in grouped.groups else np.array([])
+        control = control[np.isfinite(control)]
+        real_log_evidence = row.get("log_evidence")
         p_value = np.nan
-        if control.size:
-            p_value = float((1.0 + np.sum(control >= float(row["log_evidence"]))) / (control.size + 1.0))
+        if control.size and np.isfinite(real_log_evidence):
+            p_value = float((1.0 + np.sum(control >= float(real_log_evidence))) / (control.size + 1.0))
         rows.append(p_value)
     out = real_scores.copy()
     out["shuffle_p_value"] = rows

@@ -100,6 +100,7 @@ jobs:
       DATASET_ROOT: ${{ inputs.dataset_root }}
       EVIDENCE_RUN_ID: ${{ inputs.evidence_run_id }}
       EVIDENCE_ARTIFACT_NAME: ${{ inputs.evidence_artifact_name }}
+      LOCAL_CACHE_ROOT: ${{ vars.PFEIFFERFOSTER_LOCAL_CACHE_ROOT }}
       OUTPUT: ${{ inputs.output }}
       N_SHUFFLES: ${{ inputs.n_shuffles }}
       MAX_CLEAN_IMM: ${{ inputs.max_clean_imm }}
@@ -115,6 +116,17 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v6
+
+      - name: Ensure Pfeiffer-Foster dataset
+        uses: ./.github/actions/ensure-pfeiffer-foster-dataset
+        with:
+          dataset-root: ${{ env.DATASET_ROOT }}
+          session: Rat1/Open1
+          cache-key: hipporeplayimm-dataset-${{ runner.os }}-rclone-v1
+          local-cache-root: ${{ env.LOCAL_CACHE_ROOT }}
+          webdav-url: ${{ secrets.PFEIFFERFOSTER_WEBDAV_URL }}
+          webdav-key: ${{ secrets.PFEIFFERFOSTER_DATA_KEY }}
+          webdav-password: ${{ secrets.PFEIFFERFOSTER_DATA_PASSWORD }}
 
       - name: Install package
         run: |

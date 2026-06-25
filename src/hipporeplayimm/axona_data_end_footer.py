@@ -57,7 +57,12 @@ def apply_axona_data_end_footer_patch() -> None:
 
     from . import olafsdottir2016
 
-    if getattr(olafsdottir2016, _PATCHED_FLAG, False):
+    if (
+        getattr(olafsdottir2016, _PATCHED_FLAG, False)
+        and getattr(olafsdottir2016, "_strip_axona_data_end", None) is _strip_axona_data_end
+        and getattr(olafsdottir2016, "_header_float", None) is _header_float
+        and getattr(olafsdottir2016, "_header_int", None) is _header_int
+    ):
         return
     olafsdottir2016._strip_axona_data_end = _strip_axona_data_end
     olafsdottir2016._header_float = _header_float

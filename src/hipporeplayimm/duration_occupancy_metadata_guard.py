@@ -55,26 +55,28 @@ def _apply_transition_duration_validation() -> None:
     from . import state_space_sparse_momentum as sparse_momentum
     from . import state_space_trajectory_imm as trajectory_imm
 
-    if getattr(sparse_momentum, "_transition_duration_validation_patch_applied", False):
-        return
-
     sparse_decay = _validated_decay_helper(sparse_momentum._duration_adjusted_decays)
     displacement_decay = _validated_decay_helper(displacement_momentum._duration_adjusted_decays)
 
-    sparse_momentum._coerce_transition_durations = _coerce_transition_durations
-    sparse_momentum._duration_adjusted_decays = sparse_decay
-    trajectory_imm._coerce_transition_durations = _coerce_transition_durations
-    trajectory_imm._duration_adjusted_decays = sparse_decay
+    if not getattr(sparse_momentum, "_transition_duration_validation_patch_applied", False):
+        sparse_momentum._coerce_transition_durations = _coerce_transition_durations
+        sparse_momentum._duration_adjusted_decays = sparse_decay
+        sparse_momentum._transition_duration_validation_patch_applied = True
 
-    displacement_momentum._coerce_transition_durations = _coerce_transition_durations
-    displacement_momentum._duration_adjusted_decays = displacement_decay
-    displacement_imm._coerce_transition_durations = _coerce_transition_durations
-    displacement_imm._duration_adjusted_decays = displacement_decay
+    if not getattr(trajectory_imm, "_transition_duration_validation_patch_applied", False):
+        trajectory_imm._coerce_transition_durations = _coerce_transition_durations
+        trajectory_imm._duration_adjusted_decays = sparse_decay
+        trajectory_imm._transition_duration_validation_patch_applied = True
 
-    sparse_momentum._transition_duration_validation_patch_applied = True
-    displacement_momentum._transition_duration_validation_patch_applied = True
-    trajectory_imm._transition_duration_validation_patch_applied = True
-    displacement_imm._transition_duration_validation_patch_applied = True
+    if not getattr(displacement_momentum, "_transition_duration_validation_patch_applied", False):
+        displacement_momentum._coerce_transition_durations = _coerce_transition_durations
+        displacement_momentum._duration_adjusted_decays = displacement_decay
+        displacement_momentum._transition_duration_validation_patch_applied = True
+
+    if not getattr(displacement_imm, "_transition_duration_validation_patch_applied", False):
+        displacement_imm._coerce_transition_durations = _coerce_transition_durations
+        displacement_imm._duration_adjusted_decays = displacement_decay
+        displacement_imm._transition_duration_validation_patch_applied = True
 
 
 def _coerce_transition_durations(
@@ -102,6 +104,9 @@ def _coerce_transition_durations(
 
 
 def _validated_decay_helper(helper: Callable[[Any, np.ndarray, float], np.ndarray]):
+    if getattr(helper, "_transition_duration_validation_wrapped", False):
+        return helper
+
     def duration_adjusted_decays(config: Any, durations: np.ndarray, reference_dt: float) -> np.ndarray:
         durations = np.asarray(durations, dtype=float)
         _validate_transition_durations(durations)

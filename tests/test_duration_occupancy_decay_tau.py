@@ -111,6 +111,37 @@ def test_duration_momentum_diagnostics_report_per_transition_values(mode: str) -
     assert np.isclose(float(diagnostics["state_space_momentum_velocity_decay_effective"]), np.median([0.9, 0.9**2]))
 
 
+def test_duration_momentum_diagnostics_patch_updates_existing_state_space_score_alias(monkeypatch) -> None:
+    import hipporeplayimm.duration_candidate_metadata_patch as duration_candidate_metadata_patch
+    import hipporeplayimm.duration_occupancy as duration_occupancy
+    import hipporeplayimm.state_space as state_space
+
+    def sentinel_score(self, emissions, bin_centers, candidate_indices=None, *, occupancy_s=None, return_trajectory=True):
+        raise AssertionError("sentinel score should not be called")
+
+    monkeypatch.setattr(
+        duration_occupancy,
+        "_score_state_space_duration_with_occupancy",
+        sentinel_score,
+    )
+    monkeypatch.setattr(
+        duration_occupancy,
+        "_duration_momentum_diagnostics_patch_applied",
+        False,
+        raising=False,
+    )
+    monkeypatch.setattr(state_space.StateSpaceReplayModel, "score", sentinel_score)
+
+    duration_candidate_metadata_patch._patch_duration_momentum_diagnostics(duration_occupancy)
+
+    patched_score = duration_occupancy._score_state_space_duration_with_occupancy
+    assert patched_score is not sentinel_score
+    assert state_space.StateSpaceReplayModel.score is patched_score
+
+    duration_candidate_metadata_patch._patch_duration_momentum_diagnostics(duration_occupancy)
+    assert duration_occupancy._score_state_space_duration_with_occupancy is patched_score
+
+
 def _float_series(value: object) -> np.ndarray:
     parts = [part for part in str(value).split(",") if part]
     return np.asarray([float(part) for part in parts], dtype=float)

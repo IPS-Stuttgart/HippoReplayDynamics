@@ -110,6 +110,7 @@ jobs:
       OMP_NUM_THREADS: "1"
       OPENBLAS_NUM_THREADS: "1"
       MKL_NUM_THREADS: "1"
+      PYTHON: "python3"
 
     steps:
       - name: Checkout repository
@@ -118,11 +119,7 @@ jobs:
       - name: Install package
         run: |
           python3 --version
-          python3 -m venv .venv-clean-imm-shuffle
-          . .venv-clean-imm-shuffle/bin/activate
-          python -m pip install --upgrade pip
-          python -m pip install -e .
-          echo "PYTHON=${PWD}/.venv-clean-imm-shuffle/bin/python" >> "${GITHUB_ENV}"
+          python3 -m pip install --user --break-system-packages -e .
 
       - name: Download full-core model-evidence artifact
         env:

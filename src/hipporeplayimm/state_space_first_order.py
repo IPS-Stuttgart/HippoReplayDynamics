@@ -24,6 +24,8 @@ def _score_stationary(
     valid_bin_mask: np.ndarray | None = None,
 ) -> tuple[float, np.ndarray]:
     log_likelihood = np.asarray(emissions.log_likelihood, dtype=float)
+    if np.any(np.isnan(log_likelihood)) or np.any(log_likelihood == np.inf):
+        raise ValueError("log_likelihood must not contain NaN or +inf")
     valid_mask = _coerce_valid_bin_mask(valid_bin_mask, emissions.n_bins)
     active = np.ones(emissions.n_bins, dtype=bool) if valid_mask is None else valid_mask
     finite_on_active_support = np.isfinite(log_likelihood[:, active])

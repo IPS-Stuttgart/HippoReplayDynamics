@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import numpy as np
 import pandas as pd
 
 from hipporeplayimm.encoding import EncodingConfig, EncodingModel
-from hipporeplayimm.shuffle_controls import add_shuffle_p_values, shuffled_encoding
+from hipporeplayimm.shuffle_controls import ShuffleControlConfig, add_shuffle_p_values, score_shuffle_controls, shuffled_encoding
 
 
 SHUFFLE_SUMMARY_COLUMNS = {
@@ -37,6 +39,49 @@ def test_independent_spatial_permutation_handles_empty_cell_set():
     assert control.rates_hz.dtype == float
     np.testing.assert_array_equal(control.cell_ids, np.array([], dtype=int))
     np.testing.assert_allclose(control.occupancy_s, np.ones(2, dtype=float))
+
+
+def test_score_shuffle_controls_materializes_generator_event_indices(monkeypatch) -> None:
+    encoding = EncodingModel(
+        x_edges=np.array([0.0, 1.0, 2.0], dtype=float),
+        y_edges=np.array([0.0, 1.0], dtype=float),
+        bin_centers=np.array([[0.5, 0.5], [1.5, 0.5]], dtype=float),
+        rates_hz=np.ones((1, 2), dtype=float),
+        occupancy_s=np.ones(2, dtype=float),
+        cell_ids=np.array([10], dtype=int),
+        config=EncodingConfig(),
+    )
+    call_events: list[int] = []
+
+    def fake_build_emissions(session, control_encoding, event_index, emission_config):
+        del session, control_encoding, emission_config
+        call_events.append(int(event_index))
+        return SimpleNamespace()
+
+    class DummyModel:
+        def score(self, emissions, bin_centers):
+            del emissions, bin_centers
+            return SimpleNamespace(
+                model_name="dummy",
+                log_likelihood=1.0,
+                n_time=1,
+                n_spikes=0,
+            )
+
+    monkeypatch.setattr("hipporeplayimm.shuffle_controls.build_emissions", fake_build_emissions)
+
+    out = score_shuffle_controls(
+        SimpleNamespace(session_id="Rat1/Open1"),
+        encoding,
+        (event_index for event_index in [2, 4]),
+        {"dummy": DummyModel()},
+        control_config=ShuffleControlConfig(n_shuffles=3, random_seed=11),
+    )
+
+    assert len(out) == 6
+    assert call_events == [2, 4, 2, 4, 2, 4]
+    assert out["event_index"].tolist() == [2, 4, 2, 4, 2, 4]
+    assert out["control_index"].tolist() == [0, 0, 1, 1, 2, 2]
 
 
 def test_add_shuffle_p_values_preserves_schema_when_control_scores_empty() -> None:

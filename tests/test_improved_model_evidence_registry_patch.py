@@ -33,7 +33,11 @@ args = argparse.Namespace(
         "sorted-spike-state-space-trajectory-imm-low-leak-exact-sparse "
         "sorted-spike-state-space-trajectory-imm-persistent-exact-sparse "
         "sorted-spike-state-space-displacement-momentum "
-        "clusterless-state-space-displacement-momentum"
+        "sorted-spike-state-space-velocity-momentum "
+        "sorted-spike-state-space-displacement-imm "
+        "clusterless-state-space-displacement-momentum "
+        "clusterless-state-space-velocity-momentum "
+        "clusterless-state-space-displacement-imm"
     ),
     include_clusterless_defaults=False,
     candidate_top_k=64,
@@ -76,13 +80,23 @@ assert list(models) == [
     "sorted-spike-state-space-trajectory-imm-low-leak-exact-sparse",
     "sorted-spike-state-space-trajectory-imm-persistent-exact-sparse",
     "sorted-spike-state-space-displacement-momentum",
+    "sorted-spike-state-space-velocity-momentum",
+    "sorted-spike-state-space-displacement-imm",
     "clusterless-state-space-displacement-momentum",
+    "clusterless-state-space-velocity-momentum",
+    "clusterless-state-space-displacement-imm",
 ]
 assert models["sorted-spike-state-space-trajectory-imm-anchored-exact-sparse"].config.trajectory_imm_momentum_initial_probability == 0.05
 assert models["sorted-spike-state-space-trajectory-imm-low-leak-exact-sparse"].config.trajectory_imm_momentum_switch_probability == 0.001
 assert models["sorted-spike-state-space-trajectory-imm-persistent-exact-sparse"].config.trajectory_imm_mode_stickiness == 0.985
 assert models["sorted-spike-state-space-displacement-momentum"].mode == "displacement-momentum"
+assert models["sorted-spike-state-space-velocity-momentum"].mode == "displacement-momentum"
+assert models["sorted-spike-state-space-velocity-momentum"].name == "sorted-spike-state-space-velocity-momentum"
+assert models["sorted-spike-state-space-displacement-imm"].mode == "displacement-imm"
 assert models["clusterless-state-space-displacement-momentum"].mode == "displacement-momentum"
+assert models["clusterless-state-space-velocity-momentum"].mode == "displacement-momentum"
+assert models["clusterless-state-space-velocity-momentum"].name == "clusterless-state-space-velocity-momentum"
+assert models["clusterless-state-space-displacement-imm"].mode == "displacement-imm"
 '''
     env = os.environ.copy()
     env["PYTHONPATH"] = os.pathsep.join(

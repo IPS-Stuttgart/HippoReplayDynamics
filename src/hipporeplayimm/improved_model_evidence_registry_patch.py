@@ -9,6 +9,7 @@ but before ``main()`` is called.
 from __future__ import annotations
 
 import copy
+import importlib.machinery
 from dataclasses import replace
 from pathlib import Path
 import sys
@@ -16,12 +17,17 @@ from types import FrameType
 from typing import Any
 
 _PATCHED_FLAG = "_hipporeplayimm_improved_registry_patched"
+_IMPORT_HOOK_FLAG = "_hipporeplayimm_improved_registry_import_hook"
 _EXTRA_MODEL_NAMES = {
     "sorted-spike-state-space-trajectory-imm-anchored-exact-sparse",
     "sorted-spike-state-space-trajectory-imm-low-leak-exact-sparse",
     "sorted-spike-state-space-trajectory-imm-persistent-exact-sparse",
     "sorted-spike-state-space-displacement-momentum",
+    "sorted-spike-state-space-displacement-imm",
+    "sorted-spike-state-space-velocity-momentum",
     "clusterless-state-space-displacement-momentum",
+    "clusterless-state-space-displacement-imm",
+    "clusterless-state-space-velocity-momentum",
 }
 _EXTRA_TRAJECTORY_NAMES = set(_EXTRA_MODEL_NAMES)
 
@@ -29,12 +35,13 @@ _EXTRA_TRAJECTORY_NAMES = set(_EXTRA_MODEL_NAMES)
 def apply_improved_model_evidence_registry_patch() -> None:
     """Patch ``benchmark_model_evidence_improved.py`` when it is loading.
 
-    The hook is installed only if that script is already on the call stack.  The
-    already-running script frame also receives ``f_trace`` explicitly; otherwise
-    ``sys.settrace`` would only affect future frames and could miss the remainder
-    of the module body.
+    The hook is installed both for an already-running standalone script frame and
+    for later importlib-based loads.  The latter matters when the package was
+    imported before a test or notebook loads the improved benchmark script from
+    its file path.
     """
 
+    _install_importlib_exec_hook()
     script_frames = _improved_script_frames_on_stack()
     if not script_frames:
         return
@@ -51,6 +58,27 @@ def apply_improved_model_evidence_registry_patch() -> None:
     for frame in script_frames:
         frame.f_trace = trace
     sys.settrace(trace)
+
+
+def _install_importlib_exec_hook() -> None:
+    original_exec_module = importlib.machinery.SourceFileLoader.exec_module
+    if getattr(original_exec_module, _IMPORT_HOOK_FLAG, False):
+        return
+
+    def exec_module(self, module):  # noqa: ANN001
+        original_exec_module(self, module)
+        if Path(str(getattr(module, "__file__", ""))).name != "benchmark_model_evidence_improved.py":
+            return
+        globals_dict = vars(module)
+        if globals_dict.get(_PATCHED_FLAG):
+            return
+        if "_models" not in globals_dict or "_state_space_config" not in globals_dict:
+            return
+        _install_patch(globals_dict)
+
+    setattr(exec_module, _IMPORT_HOOK_FLAG, True)
+    setattr(exec_module, "__wrapped__", original_exec_module)
+    importlib.machinery.SourceFileLoader.exec_module = exec_module
 
 
 def _improved_script_frames_on_stack() -> list[FrameType]:
@@ -163,10 +191,39 @@ def _build_extra_model(name: str, args, globals_dict: dict[str, Any]) -> object:
             name=name,
         )
 
+    if name == "sorted-spike-state-space-velocity-momentum":
+        return sorted_model_cls(
+            "displacement-momentum",
+            config=state_config(args, "displacement-momentum"),
+            name=name,
+        )
+
+    if name == "sorted-spike-state-space-displacement-imm":
+        return sorted_model_cls(
+            "displacement-imm",
+            config=state_config(args, "displacement-imm"),
+            name=name,
+        )
+
     if name == "clusterless-state-space-displacement-momentum":
         return clusterless_model_cls(
             mode="displacement-momentum",
             config=state_config(args, "displacement-momentum"),
+            mark_likelihood=args.clusterless_mark_likelihood,
+        )
+
+    if name == "clusterless-state-space-velocity-momentum":
+        return clusterless_model_cls(
+            mode="displacement-momentum",
+            config=state_config(args, "displacement-momentum"),
+            name=name,
+            mark_likelihood=args.clusterless_mark_likelihood,
+        )
+
+    if name == "clusterless-state-space-displacement-imm":
+        return clusterless_model_cls(
+            mode="displacement-imm",
+            config=state_config(args, "displacement-imm"),
             mark_likelihood=args.clusterless_mark_likelihood,
         )
 

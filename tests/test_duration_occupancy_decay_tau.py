@@ -184,6 +184,23 @@ def test_duration_momentum_diagnostics_patch_updates_existing_state_space_score_
     assert duration_occupancy._score_state_space_duration_with_occupancy is patched_score
 
 
+def test_duration_momentum_diagnostics_repatch_synchronizes_stale_state_space_alias(monkeypatch) -> None:
+    import hipporeplayimm.duration_candidate_metadata_patch as duration_candidate_metadata_patch
+    import hipporeplayimm.duration_occupancy as duration_occupancy
+    import hipporeplayimm.state_space as state_space
+
+    duration_candidate_metadata_patch._patch_duration_momentum_diagnostics(duration_occupancy)
+    patched_score = duration_occupancy._score_state_space_duration_with_occupancy
+    original_score = duration_candidate_metadata_patch._duration_momentum_diagnostics_original_score(patched_score)
+    assert original_score is not None
+
+    monkeypatch.setattr(state_space.StateSpaceReplayModel, "score", original_score)
+
+    duration_candidate_metadata_patch._patch_duration_momentum_diagnostics(duration_occupancy)
+
+    assert state_space.StateSpaceReplayModel.score is patched_score
+
+
 def _float_series(value: object) -> np.ndarray:
     parts = [part for part in str(value).split(",") if part]
     return np.asarray([float(part) for part in parts], dtype=float)

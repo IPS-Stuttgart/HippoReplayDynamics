@@ -85,6 +85,7 @@ def score_shuffle_controls(
 
     emission_config = EmissionConfig() if emission_config is None else emission_config
     control_config = ShuffleControlConfig() if control_config is None else control_config
+    event_indices = tuple(int(event_index) for event_index in event_indices)
     rows: list[dict[str, object]] = []
     for shuffle_index in range(int(control_config.n_shuffles)):
         control_encoding = shuffled_encoding(
@@ -93,7 +94,7 @@ def score_shuffle_controls(
             random_seed=int(control_config.random_seed) + shuffle_index,
         )
         for event_index in event_indices:
-            emissions = build_emissions(session, control_encoding, int(event_index), emission_config)
+            emissions = build_emissions(session, control_encoding, event_index, emission_config)
             for requested_model, model in models.items():
                 if isinstance(model, StateSpaceReplayModel):
                     score = model.score(
@@ -106,7 +107,7 @@ def score_shuffle_controls(
                 rows.append(
                     {
                         "session": session.session_id,
-                        "event_index": int(event_index),
+                        "event_index": event_index,
                         "requested_model": requested_model,
                         "model": score.model_name,
                         "control_type": control_config.mode,

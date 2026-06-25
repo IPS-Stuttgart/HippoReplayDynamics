@@ -1,0 +1,212 @@
+---
+name: Clean IMM time-order shuffle control
+
+on:
+  workflow_dispatch:
+    inputs:
+      dataset_root:
+        description: "Pfeiffer/Foster dataset root on the self-hosted runner"
+        required: true
+        default: "/home/github-runner/.cache/datasets/DataSetFromPfeifferFoster"
+      evidence_run_id:
+        description: "Run ID containing model-evidence-all-sessions"
+        required: true
+        default: "27011374643"
+      evidence_artifact_name:
+        description: "Artifact name containing all_sessions_event_model_evidence.csv"
+        required: false
+        default: ""
+      output:
+        description: "Output directory"
+        required: true
+        default: "results/clean-imm-time-order-shuffle-control"
+      n_shuffles:
+        description: "Whole-bin shuffles per selected event"
+        required: true
+        default: "20"
+      max_clean_imm:
+        description: "Maximum clean IMM events"
+        required: true
+        default: "20"
+      max_ambiguous:
+        description: "Maximum IMM/fragmented ambiguous controls"
+        required: true
+        default: "10"
+      max_momentum_like:
+        description: "Maximum momentum-like controls"
+        required: true
+        default: "10"
+      margin_threshold:
+        description: "Log-evidence threshold for clean IMM selection"
+        required: true
+        default: "5.5"
+      seed:
+        description: "Deterministic event-selection and shuffle seed"
+        required: true
+        default: "1"
+  pull_request:
+    paths:
+      - ".github/workflows/clean-imm-time-order-shuffle-control.yml"
+      - "scripts/clean_imm_time_order_shuffle_control.py"
+      - "tests/test_clean_imm_time_order_shuffle_control.py"
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/clean-imm-time-order-shuffle-control.yml"
+      - "scripts/clean_imm_time_order_shuffle_control.py"
+      - "tests/test_clean_imm_time_order_shuffle_control.py"
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: clean-imm-time-order-shuffle-control-${{ github.repository }}-${{ github.ref }}-${{ github.sha }}
+  cancel-in-progress: false
+
+jobs:
+  tests:
+    name: Unit tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Install package
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e .[dev]
+
+      - name: Run clean IMM time-order shuffle tests
+        run: |
+          python -m pytest tests/test_clean_imm_time_order_shuffle_control.py -q
+
+  clean-imm-time-order-shuffle-control:
+    name: Run clean IMM time-order shuffle control
+    if: github.event_name == 'workflow_dispatch'
+    needs: tests
+    runs-on: self-hosted
+    timeout-minutes: 360
+    env:
+      DATASET_ROOT: ${{ inputs.dataset_root }}
+      EVIDENCE_RUN_ID: ${{ inputs.evidence_run_id }}
+      EVIDENCE_ARTIFACT_NAME: ${{ inputs.evidence_artifact_name }}
+      OUTPUT: ${{ inputs.output }}
+      N_SHUFFLES: ${{ inputs.n_shuffles }}
+      MAX_CLEAN_IMM: ${{ inputs.max_clean_imm }}
+      MAX_AMBIGUOUS: ${{ inputs.max_ambiguous }}
+      MAX_MOMENTUM_LIKE: ${{ inputs.max_momentum_like }}
+      MARGIN_THRESHOLD: ${{ inputs.margin_threshold }}
+      SEED: ${{ inputs.seed }}
+      OMP_NUM_THREADS: "1"
+      OPENBLAS_NUM_THREADS: "1"
+      MKL_NUM_THREADS: "1"
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Install package
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e .
+
+      - name: Download full-core model-evidence artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          artifact_name="${EVIDENCE_ARTIFACT_NAME}"
+          if [[ -z "${artifact_name}" ]]; then
+            artifact_name="model-evidence-all-sessions-${EVIDENCE_RUN_ID}"
+          fi
+          mkdir -p artifacts/model-evidence
+          gh run download "${EVIDENCE_RUN_ID}" \
+            --name "${artifact_name}" \
+            --dir artifacts/model-evidence
+          echo "Downloaded ${artifact_name} from run ${EVIDENCE_RUN_ID}"
+
+      - name: Run clean IMM time-order shuffle control
+        run: |
+          set -euo pipefail
+          evidence_csv="$(find artifacts/model-evidence -name all_sessions_event_model_evidence.csv -type f -print -quit)"
+          if [[ -z "${evidence_csv}" ]]; then
+            evidence_csv="$(find artifacts/model-evidence -name event_model_evidence.csv -type f -print -quit)"
+          fi
+          if [[ -z "${evidence_csv}" ]]; then
+            echo "Could not find event evidence CSV" >&2
+            find artifacts/model-evidence -maxdepth 4 -type f | sort >&2
+            exit 1
+          fi
+          python scripts/clean_imm_time_order_shuffle_control.py \
+            --event-model-evidence "${evidence_csv}" \
+            --dataset-root "${DATASET_ROOT}" \
+            --output "${OUTPUT}" \
+            --n-shuffles "${N_SHUFFLES}" \
+            --max-clean-imm "${MAX_CLEAN_IMM}" \
+            --max-ambiguous "${MAX_AMBIGUOUS}" \
+            --max-momentum-like "${MAX_MOMENTUM_LIKE}" \
+            --margin-threshold "${MARGIN_THRESHOLD}" \
+            --seed "${SEED}"
+
+      - name: Validate control outputs
+        run: |
+          set -euo pipefail
+          for required_file in \
+            clean_imm_time_order_shuffle_event_scores.csv \
+            clean_imm_time_order_shuffle_decisions.csv \
+            clean_imm_time_order_shuffle_summary.csv \
+            clean_imm_time_order_shuffle_by_group.csv \
+            clean_imm_time_order_shuffle_by_rat.csv \
+            clean_imm_time_order_shuffle_by_session.csv \
+            clean_imm_time_order_shuffle_gate_summary.csv \
+            clean_imm_time_order_shuffle_manifest.json; do
+            test -s "${OUTPUT}/${required_file}" || {
+              echo "Missing ${OUTPUT}/${required_file}" >&2
+              exit 1
+            }
+          done
+
+      - name: Show gate summary
+        if: always()
+        run: |
+          python - <<'PY'
+          import os
+          from pathlib import Path
+          import pandas as pd
+          root = Path(os.environ["OUTPUT"])
+          for name in [
+              "clean_imm_time_order_shuffle_gate_summary.csv",
+              "clean_imm_time_order_shuffle_by_group.csv",
+              "clean_imm_time_order_shuffle_summary.csv",
+          ]:
+              path = root / name
+              print(f"\n## {name}")
+              if path.is_file():
+                  print(pd.read_csv(path).to_string(index=False))
+              else:
+                  print("missing")
+          PY
+
+      - name: Upload clean IMM time-order shuffle artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: clean-imm-time-order-shuffle-control-${{ github.run_id }}
+          path: ${{ inputs.output }}
+          if-no-files-found: warn

@@ -77,6 +77,7 @@ def apply_emission_cell_id_validation_patch() -> None:
     from . import encoding as encoding_module
     from . import kd_reference as kd_module
     from . import log_emission_n_spikes_validation as n_spikes_validation
+    from . import result_improvement_extensions as extensions_module
 
     n_spikes_validation.apply_log_emission_n_spikes_validation_patch()
 
@@ -128,6 +129,28 @@ def apply_emission_cell_id_validation_patch() -> None:
 
         kd_module.build_kd_emissions = build_kd_emissions
         setattr(kd_module, _PATCHED_FLAG, True)
+
+    if not getattr(extensions_module, _PATCHED_FLAG, False):
+        original_sorted_spike_counts_for_edges = extensions_module._sorted_spike_counts_for_edges
+
+        @wraps(original_sorted_spike_counts_for_edges)
+        def _sorted_spike_counts_for_edges(session, encoding, edges):
+            encoding_cell_ids = _coerce_integral_ids(encoding.cell_ids, "encoding.cell_ids")
+
+            spikes = np.asarray(session.spikes)
+            if spikes.size and encoding_cell_ids.size > 0:
+                if spikes.ndim != 2 or spikes.shape[1] < 2:
+                    raise ValueError("spikes must be two-dimensional with at least time and cell-id columns")
+                edge_values = np.asarray(edges, dtype=float)
+                if edge_values.ndim == 1 and edge_values.shape[0] >= 2:
+                    in_window = (spikes[:, 0] >= edge_values[0]) & (spikes[:, 0] < edge_values[-1])
+                    if np.any(in_window):
+                        _coerce_integral_ids(spikes[in_window, 1], "spike cell IDs")
+
+            return original_sorted_spike_counts_for_edges(session, encoding, edges)
+
+        extensions_module._sorted_spike_counts_for_edges = _sorted_spike_counts_for_edges
+        setattr(extensions_module, _PATCHED_FLAG, True)
 
 
 __all__ = ["apply_emission_cell_id_validation_patch"]

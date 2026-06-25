@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import numpy as np
 import pandas as pd
+import pytest
 
 from hipporeplayimm.encoding import LogEmissionTensor
 from hipporeplayimm.models import EventScore
@@ -163,6 +164,28 @@ def test_sorted_spike_count_edges_respect_encoding_cell_order() -> None:
             dtype=int,
         ),
     )
+
+
+def test_sorted_spike_count_edges_reject_fractional_spike_cell_ids() -> None:
+    class Session:
+        spikes = np.array(
+            [
+                [0.05, 1.5],
+                [0.25, 2.0],
+            ],
+            dtype=float,
+        )
+
+    class Encoding:
+        cell_ids = np.array([1, 2], dtype=int)
+        n_cells = 2
+
+    with pytest.raises(ValueError, match="spike cell IDs"):
+        _sorted_spike_counts_for_edges(
+            Session(),
+            Encoding(),
+            np.array([0.0, 0.1], dtype=float),
+        )
 
 
 def test_bidirectional_replay_model_diagnostics_match_mixture_posterior() -> None:

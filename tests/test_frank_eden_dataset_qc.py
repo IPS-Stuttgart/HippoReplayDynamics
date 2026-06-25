@@ -42,6 +42,8 @@ def test_frank_eden_qc_detects_sorted_and_clusterless_candidate_days(tmp_path: P
     assert row["candidate_clusterless_day"]
     assert row["has_linearized_position"]
     assert row["has_ripples"]
+    assert row["has_tetrode_metadata"]
+    assert row["has_cell_metadata"]
     assert gates[gates["gate"].eq("overall")]["passed"].iloc[0]
 
 

@@ -45,7 +45,6 @@ def apply_advanced_result_threshold_validation_patch() -> None:
         return
 
     previous_decisions = diagnostics.paired_model_margin_decisions
-    previous_sweep = diagnostics.paired_model_margin_threshold_sweep
 
     def paired_model_margin_decisions(
         scores: pd.DataFrame,
@@ -102,17 +101,30 @@ def apply_advanced_result_threshold_validation_patch() -> None:
         true_model_col: str | None = None,
         positive_true_label: str | None = None,
     ) -> pd.DataFrame:
-        return previous_sweep(
-            scores,
-            positive_model=positive_model,
-            reference_model=reference_model,
-            thresholds=_validated_thresholds(thresholds),
-            group_cols=group_cols,
-            evidence_col=evidence_col,
-            model_col=model_col,
-            true_model_col=true_model_col,
-            positive_true_label=positive_true_label,
-        )
+        paired_group_cols = tuple(group_cols) if group_cols is not None else diagnostics.infer_paired_model_group_cols(scores)
+        rows: list[pd.DataFrame] = []
+        for threshold in _validated_thresholds(thresholds):
+            decisions = paired_model_margin_decisions(
+                scores,
+                positive_model=positive_model,
+                reference_model=reference_model,
+                margin_threshold=threshold,
+                group_cols=paired_group_cols,
+                evidence_col=evidence_col,
+                model_col=model_col,
+                true_model_col=true_model_col,
+                positive_true_label=positive_true_label,
+            )
+            summary = diagnostics.paired_model_margin_summary(decisions, true_model_col=true_model_col).copy()
+            summary["positive_model"] = str(positive_model)
+            summary["reference_model"] = str(reference_model)
+            summary["margin_threshold"] = float(threshold)
+            summary["group_cols"] = ",".join(paired_group_cols)
+            rows.append(summary)
+        if not rows:
+            return pd.DataFrame()
+        out = pd.concat(rows, ignore_index=True)
+        return out.sort_values("margin_threshold", kind="stable").reset_index(drop=True)
 
     diagnostics.paired_model_margin_decisions = paired_model_margin_decisions
     diagnostics.paired_model_margin_threshold_sweep = paired_model_margin_threshold_sweep

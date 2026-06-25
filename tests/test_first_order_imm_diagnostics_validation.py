@@ -99,6 +99,7 @@ def test_duration_occupancy_alias_uses_caller_transition_durations() -> None:
 
     def call_like_duration_occupancy_scorer() -> dict[str, float | int]:
         durations = np.array([0.5], dtype=float)
+        assert durations.shape == (1,)
         return helper(
             _mode_posterior(),
             _deterministic_step_log_posterior(),

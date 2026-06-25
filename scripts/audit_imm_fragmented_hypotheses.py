@@ -22,6 +22,7 @@ FIRST_ORDER_IMM = "sorted-spike-state-space-first-order-imm"
 MOMENTUM_EXACT = "sorted-spike-state-space-momentum-exact-sparse"
 REQUIRED = [STATIONARY, DIFFUSION, FRAGMENTED, FIRST_ORDER_IMM, MOMENTUM_EXACT]
 LABEL_COLUMNS = ["original_algorithm_label", "original_label", "model_label", "label", "best_model"]
+LEGACY_SUCCESS_STATUS_VALUES = {"", "nan", "none", "null", "na", "n/a", "<na>"}
 EVENT_TABLE_COLUMNS = [
     "session",
     "rat",
@@ -73,6 +74,20 @@ def _as_bool(value: object) -> bool:
     return bool(np.isfinite(numeric) and numeric != 0.0)
 
 
+def _status_is_success(value: object) -> bool:
+    try:
+        if pd.isna(value):
+            return True
+    except (TypeError, ValueError):
+        return False
+    status = str(value).strip().lower()
+    return status == "success" or status in LEGACY_SUCCESS_STATUS_VALUES
+
+
+def _successful_status_mask(status: pd.Series) -> pd.Series:
+    return status.map(_status_is_success).astype(bool)
+
+
 def _empty_event_table() -> pd.DataFrame:
     return pd.DataFrame(columns=EVENT_TABLE_COLUMNS)
 
@@ -84,7 +99,7 @@ def _read_evidence(path: str | Path) -> pd.DataFrame:
     if missing:
         raise ValueError(f"event evidence is missing required columns: {missing}")
     if "status" in frame:
-        frame = frame[frame["status"].astype(str).eq("success")].copy()
+        frame = frame[_successful_status_mask(frame["status"])].copy()
     if "evidence_comparable" not in frame:
         frame["evidence_comparable"] = True
     frame["evidence_comparable"] = frame["evidence_comparable"].map(_as_bool)

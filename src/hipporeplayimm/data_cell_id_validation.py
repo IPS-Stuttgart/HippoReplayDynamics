@@ -2,7 +2,9 @@
 
 MATLAB datasets commonly store integer identifiers as floating-point values.  The
 loader should accept integral floats such as ``1.0`` but must not silently truncate
-corrupted fractional identifiers such as ``1.5`` to ``1``.
+corrupted fractional identifiers such as ``1.5`` to ``1``.  The same guard is
+installed for manually constructed sessions before place-field encoding selects
+spikes and cell IDs.
 """
 
 from __future__ import annotations
@@ -17,7 +19,7 @@ import numpy as np
 def apply_data_cell_id_validation_patch() -> None:
     """Install integral-ID validation on ``hipporeplayimm.data`` helpers."""
 
-    from . import data
+    from . import data, encoding
 
     if getattr(data, "_cell_id_validation_patch_applied", False):
         return
@@ -25,6 +27,7 @@ def apply_data_cell_id_validation_patch() -> None:
     original_load_replay_session = data.load_replay_session
     original_load_spike_marks = data._load_spike_marks
     original_mark_group_ids = data._mark_group_ids_from_tetrode_cell_ids
+    original_spikes_and_cell_ids_for_encoding = encoding._spikes_and_cell_ids_for_encoding
 
     def replay_session_cell_ids(self):
         if self.spikes.size == 0:
@@ -77,11 +80,24 @@ def apply_data_cell_id_validation_patch() -> None:
             return _coerce_integral_ids(out, "tetrode group IDs")
         return out
 
+    @wraps(original_spikes_and_cell_ids_for_encoding)
+    def spikes_and_cell_ids_for_encoding(session, config):
+        spikes = np.asarray(session.spikes)
+        if spikes.size:
+            if spikes.ndim != 2 or spikes.shape[1] < 2:
+                raise ValueError("spikes must have at least two columns")
+            _coerce_integral_ids(spikes[:, 1], "spike cell IDs")
+        excitatory = np.asarray(session.excitatory_neurons)
+        if excitatory.size:
+            _coerce_integral_ids(excitatory.reshape(-1), "excitatory neuron IDs")
+        return original_spikes_and_cell_ids_for_encoding(session, config)
+
     data.ReplaySession.cell_ids = property(replay_session_cell_ids)
     data.ReplaySession.excitatory_spikes = replay_session_excitatory_spikes
     data.load_replay_session = load_replay_session
     data._load_spike_marks = load_spike_marks
     data._mark_group_ids_from_tetrode_cell_ids = mark_group_ids_from_tetrode_cell_ids
+    encoding._spikes_and_cell_ids_for_encoding = spikes_and_cell_ids_for_encoding
     data._cell_id_validation_patch_applied = True
 
 

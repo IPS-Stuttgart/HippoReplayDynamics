@@ -21,6 +21,7 @@ from . import clusterless_mark_group_validation as _clusterless_mark_group_valid
 from . import data_cell_id_validation as _data_cell_id_validation
 from . import duration_candidate_metadata_patch as _duration_candidate_metadata_patch
 from . import duration_occupancy_metadata_guard as _duration_occupancy_metadata_guard
+from . import duration_occupancy_mode_transition_validation as _duration_occupancy_mode_transition_validation
 from . import emission_cell_id_validation as _emission_cell_id_validation
 from . import encoding_grid_extra_columns as _encoding_grid_extra_columns
 from . import encoding_select_cells_validation as _encoding_select_cells_validation
@@ -224,6 +225,7 @@ def apply_runtime_patches() -> None:
     _kd_impossible_emission_patch.apply_kd_impossible_emission_patch()
     _apply_state_space_imm_duration_patch()
     _apply_duration_occupancy_patch()
+    _duration_occupancy_mode_transition_validation.apply_duration_occupancy_mode_transition_validation_patch()
     _first_order_imm_diagnostics_validation.apply_first_order_imm_diagnostics_validation_patch()
     _candidate_log_mass_validation.apply_candidate_log_mass_validation_patch()
     _candidate_support_normalization_validation.apply_candidate_support_normalization_validation_patch()

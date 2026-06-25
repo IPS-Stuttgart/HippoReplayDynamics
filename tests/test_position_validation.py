@@ -3,7 +3,7 @@ import pytest
 
 from hipporeplayimm.data import ReplaySession
 from hipporeplayimm.encoding import EncodingConfig
-from hipporeplayimm.position_decoding_config_validation import _validated_position_decoding_config
+from hipporeplayimm.position_decoding_config_validation import _validated_position_decoding_config, _validated_train_frame_mask
 from hipporeplayimm.position_validation import (
     PositionDecodingConfig,
     _spike_counts_for_window,
@@ -49,6 +49,29 @@ def test_position_decoding_config_validation_normalizes_accepted_values():
     assert normalized.n_folds == 3
     assert normalized.max_windows_per_session == 9
     assert normalized.min_spikes_per_window == 0
+
+
+def test_position_train_frame_mask_validation_accepts_bool_and_binary_numeric_values():
+    expected = np.array([True, False, True], dtype=bool)
+
+    np.testing.assert_array_equal(_validated_train_frame_mask([True, False, True], 3), expected)
+    np.testing.assert_array_equal(_validated_train_frame_mask(np.array([1.0, 0.0, 1.0]), 3), expected)
+
+
+@pytest.mark.parametrize(
+    "bad_mask",
+    [
+        np.array([1.0, np.nan, 0.0]),
+        np.array([1.0, np.inf, 0.0]),
+        np.array([1.0, 0.5, 0.0]),
+        np.array(["yes", "no", "yes"], dtype=object),
+        np.array([[1.0], [0.0], [1.0]]),
+        np.array([1.0, 0.0]),
+    ],
+)
+def test_position_train_frame_mask_validation_rejects_non_boolean_values(bad_mask):
+    with pytest.raises(ValueError, match="train_frame_mask"):
+        _validated_train_frame_mask(bad_mask, 3)
 
 
 def test_position_mask_encoding_falls_back_to_all_spikes_without_excitatory_labels(tmp_path):
@@ -101,6 +124,39 @@ def test_position_mask_encoding_falls_back_to_all_spikes_without_excitatory_labe
         _spike_counts_for_window(session, encoding, 1.0, 2.0),
         np.array([1], dtype=int),
     )
+
+
+def test_position_mask_encoding_rejects_fractional_train_mask(tmp_path):
+    times = np.array([0.0, 1.0, 2.0], dtype=float)
+    position = np.column_stack([times, times, np.zeros_like(times), np.zeros_like(times)])
+    session = ReplaySession(
+        rat="RatX",
+        name="OpenX",
+        path=tmp_path,
+        position=position,
+        spikes=np.empty((0, 2), dtype=float),
+        tetrode_cell_ids=np.empty((0, 2), dtype=float),
+        excitatory_neurons=np.array([], dtype=int),
+        inhibitory_neurons=np.array([], dtype=int),
+        ripple_events=np.empty((0, 6), dtype=float),
+        run_times=np.array([[0.0, 2.0]], dtype=float),
+        sleep_box_immobile_times=np.empty((0, 2), dtype=float),
+        sleep_times=np.empty((0, 2), dtype=float),
+        rem_times=np.empty((0, 2), dtype=float),
+        well_sequence=None,
+        metadata={},
+    )
+    config = EncodingConfig(
+        bin_size_cm=1.0,
+        smoothing_sigma_bins=0.0,
+        min_speed_cm_s=0.0,
+        min_occupancy_s=1e-6,
+        rate_floor_hz=1e-4,
+        arena_padding_cm=0.0,
+    )
+
+    with pytest.raises(ValueError, match="train_frame_mask"):
+        fit_place_field_encoding_for_position_mask(session, np.array([1.0, 0.5, 0.0]), config)
 
 
 @pytest.mark.parametrize(

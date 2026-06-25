@@ -84,7 +84,7 @@ def _patch_result_improvement_wrappers(extensions: Any) -> None:
         reversed_candidates = (
             None
             if candidate_indices is None
-            else [np.asarray(curr, dtype=int).copy() for curr in candidate_indices[::-1]]
+            else [np.asarray(curr).copy() for curr in candidate_indices[::-1]]
         )
         result = score_replay_model_compat(
             self.base_model,
@@ -210,7 +210,7 @@ def _patch_direct_reverse_wrappers(extensions: Any, reverse_models: Any) -> None
             kwargs["occupancy_s"] = occupancy_s
         if candidate_indices is not None:
             kwargs["candidate_indices"] = [
-                np.asarray(curr, dtype=int).copy()
+                np.asarray(curr).copy()
                 for curr in candidate_indices[::-1]
             ]
         if return_trajectory is not None:

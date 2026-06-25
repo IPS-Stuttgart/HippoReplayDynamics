@@ -22,7 +22,7 @@ def _small_encoding() -> EncodingModel:
     )
 
 
-@pytest.mark.parametrize("bad_length", [0, -1, 1.5, np.nan])
+@pytest.mark.parametrize("bad_length", [0, -1, 1.5, np.nan, np.array([2])])
 def test_simulate_latent_path_rejects_invalid_length(bad_length):
     generator = np.random.default_rng(1)
     with pytest.raises(ValueError, match="n_time must be positive"):
@@ -47,12 +47,20 @@ def test_simulate_latent_path_rejects_invalid_length(bad_length):
             StateSpaceDecoderConfig(diffusion_sigma_cm_sqrt_s=np.nan),
         ),
         (
+            "diffusion",
+            StateSpaceDecoderConfig(diffusion_sigma_cm_sqrt_s=np.array([1.0])),
+        ),
+        (
             "momentum",
             StateSpaceDecoderConfig(momentum_initial_sigma_cm_sqrt_s=-1.0),
         ),
         (
             "momentum",
             StateSpaceDecoderConfig(momentum_sigma_cm_sqrt_s=np.inf),
+        ),
+        (
+            "momentum",
+            StateSpaceDecoderConfig(momentum_sigma_cm_sqrt_s=np.array([1.0])),
         ),
     ],
 )
@@ -73,9 +81,12 @@ def test_simulate_latent_path_rejects_invalid_motion_sigmas(true_model, state_sp
     [
         ("events_per_model", 0),
         ("events_per_model", 1.5),
+        ("events_per_model", np.array([2])),
         ("max_template_events", 0),
         ("max_template_events", 1.5),
+        ("max_template_events", np.array([2])),
         ("max_synthetic_events", np.nan),
+        ("max_synthetic_events", np.array([2])),
     ],
 )
 def test_run_session_simulation_recovery_rejects_invalid_count_options(field, value):

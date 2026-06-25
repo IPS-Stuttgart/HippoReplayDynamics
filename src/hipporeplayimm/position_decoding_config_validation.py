@@ -50,6 +50,7 @@ def _validated_position_decoding_config(config: Any) -> Any:
     updates = {
         "decode_bin_s": _positive_finite_scalar("decode_bin_s", getattr(config, "decode_bin_s")),
         "n_folds": _positive_integer("n_folds", getattr(config, "n_folds")),
+        "random_seed": _nonnegative_integer("random_seed", getattr(config, "random_seed")),
         "min_spikes_per_window": _nonnegative_integer(
             "min_spikes_per_window",
             getattr(config, "min_spikes_per_window"),

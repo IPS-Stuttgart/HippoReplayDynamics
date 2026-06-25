@@ -31,6 +31,7 @@ from . import first_order_imm_diagnostics_validation as _first_order_imm_diagnos
 from . import goal_state_space_integration as _goal_state_space_integration
 from . import ground_truth as _ground_truth
 from . import ground_truth_cell_id_metadata as _ground_truth_cell_id_metadata
+from . import ground_truth_cell_split_strategy as _ground_truth_cell_split_strategy
 from . import ground_truth_float_metadata as _ground_truth_float_metadata
 from . import ground_truth_integer_metadata as _ground_truth_integer_metadata
 from . import ground_truth_sensitivity_metrics as _ground_truth_sensitivity_metrics
@@ -97,6 +98,7 @@ _ground_truth_window_scope.apply_ground_truth_window_scope_patch()
 _ground_truth_integer_metadata.apply_ground_truth_integer_metadata_patch()
 _ground_truth_float_metadata.apply_ground_truth_float_metadata_patch()
 _ground_truth_cell_id_metadata.apply_ground_truth_cell_id_metadata_patch()
+_ground_truth_cell_split_strategy.apply_ground_truth_cell_split_strategy_patch()
 _simulation_recovery_runtime_limits.apply_simulation_recovery_runtime_limit_validation_patch()
 _simulation_recovery_count_validation.apply_simulation_recovery_count_validation_patch()
 _reverse_time_terminal_guard.apply_reverse_time_terminal_guard_patch()
@@ -219,6 +221,7 @@ def apply_runtime_patches() -> None:
     _ground_truth_integer_metadata.apply_ground_truth_integer_metadata_patch()
     _ground_truth_float_metadata.apply_ground_truth_float_metadata_patch()
     _ground_truth_cell_id_metadata.apply_ground_truth_cell_id_metadata_patch()
+    _ground_truth_cell_split_strategy.apply_ground_truth_cell_split_strategy_patch()
     _ground_truth_sensitivity_metrics.apply_ground_truth_sensitivity_metric_patch(_ground_truth)
     _apply_ground_truth_candidate_support_patch()
     _occupancy_candidate_support.apply_occupancy_candidate_support_patch()

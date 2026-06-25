@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 from functools import wraps
+from typing import Any
 
 import numpy as np
 import pandas as pd
 
 
 _PATCHED_FLAG = "_evidence_status_coercion_patch_applied"
+_RECOVERY_DIAGNOSTICS_PATCHED_FLAG = "_recovery_diagnostics_status_coercion_patch_applied"
 _MISSING_STATUS_VALUES = {"", "nan", "na", "n/a", "none", "null", "<na>"}
 
 
@@ -104,6 +106,12 @@ def apply_evidence_status_coercion_patch() -> None:
         return
     reporting.patch_simulation_recovery_module(recovery)
 
+    try:
+        from . import recovery_diagnostics as diagnostics
+    except ImportError:
+        return
+    _patch_recovery_diagnostics(diagnostics)
+
 
 def _normalize_status_frame(frame: pd.DataFrame) -> pd.DataFrame:
     if "status" not in frame.columns:
@@ -111,6 +119,24 @@ def _normalize_status_frame(frame: pd.DataFrame) -> pd.DataFrame:
     out = frame.copy()
     out["status"] = out["status"].map(_normalize_status_value)
     return out
+
+
+def _patch_recovery_diagnostics(diagnostics: Any) -> None:
+    """Keep recovery-diagnostic score filtering aligned with evidence reporting."""
+
+    if getattr(diagnostics, _RECOVERY_DIAGNOSTICS_PATCHED_FLAG, False):
+        return
+
+    original_successful_finite_scores = diagnostics._successful_finite_scores
+
+    @wraps(original_successful_finite_scores)
+    def successful_finite_scores(group: pd.DataFrame) -> pd.DataFrame:
+        status_ok = _status_success_mask(group)
+        finite = _finite_log_evidence_mask(group)
+        return group[status_ok & finite].copy()
+
+    diagnostics._successful_finite_scores = successful_finite_scores
+    setattr(diagnostics, _RECOVERY_DIAGNOSTICS_PATCHED_FLAG, True)
 
 
 def _normalize_status_value(value: object) -> object:

@@ -85,6 +85,7 @@ def add_model_averaged_endpoint_columns(df: pd.DataFrame) -> pd.DataFrame:
                 "diagnostic_decoded_endpoint_y",
             ]
         )
+        exact = _finite_endpoint_average_rows(exact)
         if exact.empty:
             continue
 
@@ -117,6 +118,25 @@ def add_model_averaged_endpoint_columns(df: pd.DataFrame) -> pd.DataFrame:
         out.iloc[positions, out.columns.get_loc("model_probability_entropy")] = entropy
         out.iloc[positions, out.columns.get_loc("model_log_evidence_margin")] = margin
     return out
+
+
+def _finite_endpoint_average_rows(frame: pd.DataFrame) -> pd.DataFrame:
+    """Keep only rows with finite endpoint coordinates and valid model weights."""
+
+    if frame.empty:
+        return frame
+    required = (
+        "model_probability",
+        "diagnostic_decoded_endpoint_x",
+        "diagnostic_decoded_endpoint_y",
+    )
+    finite = pd.Series(True, index=frame.index)
+    for column in required:
+        values = pd.to_numeric(frame[column], errors="coerce")
+        finite &= np.isfinite(values.to_numpy(dtype=float))
+    probabilities = pd.to_numeric(frame["model_probability"], errors="coerce")
+    finite &= probabilities >= 0.0
+    return frame.loc[finite].copy()
 
 
 def _model_average_groups(frame: pd.DataFrame):

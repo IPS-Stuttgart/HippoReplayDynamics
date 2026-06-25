@@ -43,7 +43,12 @@ def _validate_log_likelihood(emissions: LogEmissionTensor) -> None:
 def _validate_n_spikes(emissions: LogEmissionTensor) -> None:
     """Reject summary spike counts that disagree with ``spike_counts``."""
 
-    total_spikes = float(np.asarray(emissions.spike_counts, dtype=float).sum())
+    spike_counts = np.asarray(emissions.spike_counts, dtype=float)
+    rounded_counts = np.rint(spike_counts)
+    if not np.all(np.isclose(spike_counts, rounded_counts, rtol=0.0, atol=0.0)):
+        raise ValueError("spike_counts must be integer-valued")
+
+    total_spikes = float(rounded_counts.sum())
     try:
         n_spikes = float(emissions.n_spikes)
     except (TypeError, ValueError) as exc:

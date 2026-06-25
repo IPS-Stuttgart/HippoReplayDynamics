@@ -109,13 +109,25 @@ def _patch_state_space_evidence_only_diagnostics() -> None:
 def _mark_pruned_path_evidence_only(model: Any, result: EventScore) -> None:
     diagnostics = dict(getattr(result, "diagnostics", {}) or {})
     mode = str(getattr(model, "mode", diagnostics.get("state_space_mode", "")))
-    if mode == "momentum":
+    if mode in {"momentum", "momentum-exact-sparse"}:
         diagnostics["state_space_momentum_trajectory_posterior"] = "not_returned_evidence_only"
     elif mode == "imm":
         diagnostics["state_space_imm_trajectory_posterior"] = "not_returned_evidence_only"
     else:
         return
     result.diagnostics = diagnostics
+
+
+def _is_exact_sparse_momentum_model(model: Any) -> bool:
+    return str(getattr(model, "mode", "")) == "momentum-exact-sparse"
+
+
+def _default_return_trajectory(model: Any, requested: bool | None) -> bool | None:
+    if requested is not None:
+        return bool(requested)
+    if _is_exact_sparse_momentum_model(model):
+        return False
+    return None
 
 
 def _patch_result_improvement_wrappers(extensions: Any) -> None:
@@ -141,8 +153,9 @@ def _patch_result_improvement_wrappers(extensions: Any) -> None:
             kwargs["candidate_indices"] = candidates
         if occupancy_s is not None:
             kwargs["occupancy_s"] = occupancy_s
-        if return_trajectory is not None:
-            kwargs["return_trajectory"] = bool(return_trajectory)
+        resolved_return_trajectory = _default_return_trajectory(model, return_trajectory)
+        if resolved_return_trajectory is not None:
+            kwargs["return_trajectory"] = resolved_return_trajectory
         return extensions._call_score_with_supported_kwargs(  # noqa: SLF001
             model.score,
             emissions,
@@ -169,13 +182,14 @@ def _patch_result_improvement_wrappers(extensions: Any) -> None:
             if candidate_indices is None
             else [np.asarray(curr).copy() for curr in candidate_indices[::-1]]
         )
+        base_return_trajectory = True if return_trajectory is None else bool(return_trajectory)
         result = score_replay_model_compat(
             self.base_model,
             reversed_emissions,
             bin_centers,
             occupancy_s=occupancy_s,
             candidate_indices=reversed_candidates,
-            return_trajectory=return_trajectory,
+            return_trajectory=base_return_trajectory,
         )
         mapped_terminal_from_trajectory = False
         if result.trajectory_log_posterior is not None:
@@ -208,9 +222,9 @@ def _patch_result_improvement_wrappers(extensions: Any) -> None:
             bin_centers,
             occupancy_s=occupancy_s,
             candidate_indices=candidate_indices,
-            return_trajectory=return_trajectory,
+            return_trajectory=_default_return_trajectory(self.forward_model, return_trajectory),
         )
-        reverse_return_trajectory = True if return_trajectory is False else return_trajectory
+        reverse_return_trajectory = True if return_trajectory is None or return_trajectory is False else return_trajectory
         reverse = score_replay_model_compat(
             self.reverse_model,
             emissions,
@@ -296,8 +310,7 @@ def _patch_direct_reverse_wrappers(extensions: Any, reverse_models: Any) -> None
                 np.asarray(curr).copy()
                 for curr in candidate_indices[::-1]
             ]
-        if return_trajectory is not None:
-            kwargs["return_trajectory"] = bool(return_trajectory)
+        kwargs["return_trajectory"] = True if return_trajectory is None else bool(return_trajectory)
         score = extensions._call_score_with_supported_kwargs(  # noqa: SLF001
             self.base_model.score,
             reversed_emissions,
@@ -346,15 +359,16 @@ def _patch_direct_reverse_wrappers(extensions: Any, reverse_models: Any) -> None
             kwargs["occupancy_s"] = occupancy_s
         if candidate_indices is not None:
             kwargs["candidate_indices"] = candidate_indices
-        if return_trajectory is not None:
-            kwargs["return_trajectory"] = bool(return_trajectory)
+        resolved_return_trajectory = _default_return_trajectory(self.base_model, return_trajectory)
+        if resolved_return_trajectory is not None:
+            kwargs["return_trajectory"] = resolved_return_trajectory
         forward = extensions._call_score_with_supported_kwargs(  # noqa: SLF001
             self.base_model.score,
             emissions,
             bin_centers,
             kwargs,
         )
-        reverse_return_trajectory = True if return_trajectory is False else return_trajectory
+        reverse_return_trajectory = True if return_trajectory is None or return_trajectory is False else return_trajectory
         reverse = reverse_models.ReverseTimeReplayModel(self.base_model).score(
             emissions,
             bin_centers,

@@ -10,6 +10,7 @@ import pandas as pd
 
 
 _PATCHED_FLAG = "_evidence_status_coercion_patch_applied"
+_CERTIFIED_RECOVERY_PATCHED_FLAG = "_certified_recovery_status_coercion_patch_applied"
 _RECOVERY_DIAGNOSTICS_PATCHED_FLAG = "_recovery_diagnostics_status_coercion_patch_applied"
 _MISSING_STATUS_VALUES = {"", "nan", "na", "n/a", "none", "null", "<na>"}
 
@@ -105,12 +106,35 @@ def apply_evidence_status_coercion_patch() -> None:
     except ImportError:
         return
     reporting.patch_simulation_recovery_module(recovery)
+    _patch_certified_recovery(recovery)
 
     try:
         from . import recovery_diagnostics as diagnostics
     except ImportError:
         return
-    _patch_recovery_diagnostics(diagnostics)
+    _patch_recovery_diagnostics(diagnostics, recovery)
+
+
+def _patch_certified_recovery(recovery: Any) -> None:
+    """Normalize legacy status values before certified-vs-exact recovery views."""
+
+    if getattr(recovery, _CERTIFIED_RECOVERY_PATCHED_FLAG, False):
+        return
+
+    original_certified_events = recovery.certified_vs_exact_event_recovery
+    original_certified_summary = recovery.certified_vs_exact_recovery_summary
+
+    @wraps(original_certified_events)
+    def certified_vs_exact_event_recovery(event_scores: pd.DataFrame) -> pd.DataFrame:
+        return original_certified_events(_normalize_status_frame(event_scores))
+
+    @wraps(original_certified_summary)
+    def certified_vs_exact_recovery_summary(event_scores: pd.DataFrame) -> pd.DataFrame:
+        return original_certified_summary(_normalize_status_frame(event_scores))
+
+    recovery.certified_vs_exact_event_recovery = certified_vs_exact_event_recovery
+    recovery.certified_vs_exact_recovery_summary = certified_vs_exact_recovery_summary
+    setattr(recovery, _CERTIFIED_RECOVERY_PATCHED_FLAG, True)
 
 
 def _normalize_status_frame(frame: pd.DataFrame) -> pd.DataFrame:
@@ -121,8 +145,12 @@ def _normalize_status_frame(frame: pd.DataFrame) -> pd.DataFrame:
     return out
 
 
-def _patch_recovery_diagnostics(diagnostics: Any) -> None:
+def _patch_recovery_diagnostics(diagnostics: Any, recovery: Any | None = None) -> None:
     """Keep recovery-diagnostic score filtering aligned with evidence reporting."""
+
+    if recovery is not None:
+        diagnostics.certified_vs_exact_event_recovery = recovery.certified_vs_exact_event_recovery
+        diagnostics.certified_vs_exact_recovery_summary = recovery.certified_vs_exact_recovery_summary
 
     if getattr(diagnostics, _RECOVERY_DIAGNOSTICS_PATCHED_FLAG, False):
         return

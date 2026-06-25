@@ -12,6 +12,8 @@ def _safe_zip_member_path(root: Path, member_name: str) -> Path:
     """Return the resolved output path for a safe zip member name."""
 
     normalized = str(member_name).replace("\\", "/")
+    if "\x00" in normalized:
+        raise ValueError(f"Unsafe zip member path: {member_name!r}")
     if not normalized:
         raise ValueError("Unsafe zip member path: empty filename")
     member_path = PurePosixPath(normalized)

@@ -119,14 +119,19 @@ def _add_duration_momentum_diagnostics(duration_occupancy, score, model, emissio
     """Fill duration-aware momentum diagnostics that the native scorer uses internally."""
 
     mode = str(getattr(model, "mode", ""))
-    if mode not in {"momentum", "imm"}:
-        return
     config = getattr(model, "config", None)
     diagnostics = getattr(score, "diagnostics", None)
-    if config is None or not isinstance(diagnostics, dict):
+    if not isinstance(diagnostics, dict):
         return
 
     durations = np.asarray(duration_occupancy.transition_durations_s(emissions), dtype=float)
+    diagnostics.setdefault("state_space_transition_durations_s", _format_float_series(durations))
+
+    if mode not in {"momentum", "imm"}:
+        return
+    if config is None:
+        return
+
     fallback_dt = float(getattr(emissions, "dt", np.nan))
     momentum_sigmas = duration_occupancy._per_transition_sigmas(
         config.momentum_sigma_cm_sqrt_s,
@@ -154,7 +159,6 @@ def _add_duration_momentum_diagnostics(duration_occupancy, score, model, emissio
             fallback_dt,
         )
 
-    diagnostics.setdefault("state_space_transition_durations_s", _format_float_series(durations))
     diagnostics.setdefault("state_space_momentum_transition_sigma_cm", float(transition_sigma))
     diagnostics.setdefault("state_space_momentum_initial_transition_sigma_cm", float(initial_sigma))
     diagnostics.setdefault("state_space_momentum_transition_sigma_cm_per_step", _format_float_series(momentum_sigmas))

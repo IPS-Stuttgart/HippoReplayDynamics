@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import numpy as np
+import pytest
 
 from hipporeplayimm import apply_runtime_patches
 from hipporeplayimm import kd_reference
@@ -17,6 +18,19 @@ def test_scaled_emission_all_negative_infinity_row_becomes_zero_mass():
 
     assert np.isneginf(offset)
     assert np.array_equal(scaled, np.zeros(2))
+
+
+def test_scaled_emission_rejects_nan_or_positive_infinity_rows():
+    apply_runtime_patches()
+
+    invalid_log_emissions = (
+        np.array([[0.0, np.nan]], dtype=float),
+        np.array([[0.0, np.inf]], dtype=float),
+    )
+
+    for log_emissions in invalid_log_emissions:
+        with pytest.raises(ValueError, match=r"NaN or \+inf"):
+            kd_reference._scaled_emission(log_emissions, 0)
 
 
 def test_first_order_kd_returns_negative_infinity_for_impossible_emission_rows():

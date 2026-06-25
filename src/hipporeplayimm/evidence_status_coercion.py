@@ -20,6 +20,7 @@ def apply_evidence_status_coercion_patch() -> None:
     from . import evidence_reporting as reporting
 
     if getattr(reporting, _PATCHED_FLAG, False):
+        _patch_optional_recovery_modules(reporting)
         return
 
     original_simulation_add_evidence_columns = reporting.simulation_add_evidence_columns
@@ -100,11 +101,23 @@ def apply_evidence_status_coercion_patch() -> None:
     reporting.simulation_event_best_rows = simulation_event_best_rows
     setattr(reporting, _PATCHED_FLAG, True)
 
+    _patch_optional_recovery_modules(reporting)
+
+
+def _patch_optional_recovery_modules(reporting: Any) -> None:
+    """Patch recovery modules whenever they are importable.
+
+    ``apply_evidence_status_coercion_patch`` can be called after the core reporting
+    patch is already installed.  In that case, optional modules that failed to
+    import earlier or were reloaded still need their aliases refreshed.
+    """
+
     try:
         from . import simulation_recovery as recovery
     except ImportError:
-        return
-    reporting.patch_simulation_recovery_module(recovery)
+        pass
+    else:
+        reporting.patch_simulation_recovery_module(recovery)
 
     try:
         from . import recovery_diagnostics as diagnostics

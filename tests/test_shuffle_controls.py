@@ -7,7 +7,14 @@ import pandas as pd
 import pytest
 
 from hipporeplayimm.encoding import EncodingConfig, EncodingModel
-from hipporeplayimm.shuffle_controls import ShuffleControlConfig, _spatial_roll_rates, add_shuffle_p_values, score_shuffle_controls, shuffled_encoding
+from hipporeplayimm.shuffle_controls import (
+    SHUFFLE_CONTROL_SCORE_COLUMNS,
+    ShuffleControlConfig,
+    _spatial_roll_rates,
+    add_shuffle_p_values,
+    score_shuffle_controls,
+    shuffled_encoding,
+)
 
 
 SHUFFLE_SUMMARY_COLUMNS = {
@@ -17,6 +24,18 @@ SHUFFLE_SUMMARY_COLUMNS = {
     "shuffle_log_evidence_std",
     "shuffle_count",
 }
+
+
+def _two_bin_encoding() -> EncodingModel:
+    return EncodingModel(
+        x_edges=np.array([0.0, 1.0, 2.0], dtype=float),
+        y_edges=np.array([0.0, 1.0], dtype=float),
+        bin_centers=np.array([[0.5, 0.5], [1.5, 0.5]], dtype=float),
+        rates_hz=np.ones((1, 2), dtype=float),
+        occupancy_s=np.ones(2, dtype=float),
+        cell_ids=np.array([10], dtype=int),
+        config=EncodingConfig(),
+    )
 
 
 def test_independent_spatial_permutation_handles_empty_cell_set():
@@ -42,6 +61,12 @@ def test_independent_spatial_permutation_handles_empty_cell_set():
     np.testing.assert_allclose(control.occupancy_s, np.ones(2, dtype=float))
 
 
+@pytest.mark.parametrize("random_seed", [-1, 1.5, True, float("nan")])
+def test_shuffled_encoding_rejects_invalid_random_seed(random_seed) -> None:
+    with pytest.raises(ValueError, match="random_seed"):
+        shuffled_encoding(_two_bin_encoding(), random_seed=random_seed)  # type: ignore[arg-type]
+
+
 def test_spatial_roll_avoids_identity_shift_on_multibin_grid() -> None:
     rates = np.arange(4.0, dtype=float).reshape(1, 4)
 
@@ -64,6 +89,44 @@ def test_spatial_roll_validates_rate_grid_shape_consistency() -> None:
 
     with pytest.raises(ValueError, match="one column per spatial grid bin"):
         _spatial_roll_rates(rates, (2, 2), np.random.default_rng(1))
+
+
+def test_score_shuffle_controls_preserves_schema_for_zero_shuffles() -> None:
+    out = score_shuffle_controls(
+        SimpleNamespace(session_id="Rat1/Open1"),
+        _two_bin_encoding(),
+        [2],
+        {},
+        control_config=ShuffleControlConfig(n_shuffles=0),
+    )
+
+    assert out.empty
+    assert out.columns.tolist() == list(SHUFFLE_CONTROL_SCORE_COLUMNS)
+
+
+@pytest.mark.parametrize(
+    ("config_kwargs", "message"),
+    [
+        ({"mode": "not-a-control"}, "mode"),
+        ({"n_shuffles": -1}, "n_shuffles"),
+        ({"n_shuffles": 1.5}, "n_shuffles"),
+        ({"n_shuffles": True}, "n_shuffles"),
+        ({"n_shuffles": float("nan")}, "n_shuffles"),
+        ({"random_seed": -1}, "random_seed"),
+        ({"random_seed": 1.5}, "random_seed"),
+        ({"random_seed": True}, "random_seed"),
+        ({"random_seed": float("nan")}, "random_seed"),
+    ],
+)
+def test_score_shuffle_controls_rejects_invalid_control_config(config_kwargs, message) -> None:
+    with pytest.raises(ValueError, match=message):
+        score_shuffle_controls(
+            SimpleNamespace(session_id="Rat1/Open1"),
+            _two_bin_encoding(),
+            [],
+            {},
+            control_config=ShuffleControlConfig(**config_kwargs),
+        )
 
 
 def test_score_shuffle_controls_materializes_generator_event_indices(monkeypatch) -> None:

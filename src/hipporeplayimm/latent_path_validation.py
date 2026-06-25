@@ -90,9 +90,12 @@ def _config_with_validated_event_counts(config: Any) -> Any:
 def _positive_integer_value(name: str, value: Any) -> int:
     if isinstance(value, (bool, np.bool_)):
         raise ValueError(f"{name} must be positive integer-valued")
+    raw = np.asarray(value)
+    if raw.ndim != 0 or np.issubdtype(raw.dtype, np.bool_):
+        raise ValueError(f"{name} must be positive integer-valued")
     try:
-        numeric = float(value)
-    except (TypeError, ValueError) as exc:
+        numeric = float(raw)
+    except (TypeError, ValueError, OverflowError) as exc:
         raise ValueError(f"{name} must be positive integer-valued") from exc
     if not np.isfinite(numeric) or numeric <= 0.0:
         raise ValueError(f"{name} must be positive integer-valued")
@@ -121,9 +124,14 @@ def _validate_latent_path_motion_sigmas(true_model: Any, state_space: Any) -> No
 
 
 def _finite_nonnegative_value(name: str, value: Any) -> float:
+    if isinstance(value, (bool, np.bool_)):
+        raise ValueError(f"{name} must be finite and nonnegative")
+    raw = np.asarray(value)
+    if raw.ndim != 0 or np.issubdtype(raw.dtype, np.bool_):
+        raise ValueError(f"{name} must be finite and nonnegative")
     try:
-        numeric = float(value)
-    except (TypeError, ValueError) as exc:
+        numeric = float(raw)
+    except (TypeError, ValueError, OverflowError) as exc:
         raise ValueError(f"{name} must be finite and nonnegative") from exc
     if not np.isfinite(numeric) or numeric < 0.0:
         raise ValueError(f"{name} must be finite and nonnegative")

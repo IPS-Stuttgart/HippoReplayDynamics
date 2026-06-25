@@ -159,6 +159,13 @@ def _add_duration_momentum_diagnostics(duration_occupancy, score, model, emissio
             fallback_dt,
         )
 
+    if mode == "imm":
+        diffusion_sigmas = duration_occupancy._per_transition_sigmas(
+            config.diffusion_sigma_cm_sqrt_s,
+            durations,
+        )
+        diagnostics.setdefault("state_space_diffusion_transition_sigma_cm_per_step", _format_float_series(diffusion_sigmas))
+
     diagnostics.setdefault("state_space_momentum_transition_sigma_cm", float(transition_sigma))
     diagnostics.setdefault("state_space_momentum_initial_transition_sigma_cm", float(initial_sigma))
     diagnostics.setdefault("state_space_momentum_transition_sigma_cm_per_step", _format_float_series(momentum_sigmas))

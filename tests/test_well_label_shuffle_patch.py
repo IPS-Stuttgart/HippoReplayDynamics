@@ -22,3 +22,22 @@ def test_shuffle_well_labels_shuffles_ids_when_coordinates_are_missing() -> None
     assert shuffled.loc[:1, ["true_well_x", "true_well_y"]].isna().all().all()
     assert shuffled.loc[2, ["true_well_id", "true_well_x", "true_well_y"]].isna().all()
     assert shuffled["event"].tolist() == frame["event"].tolist()
+
+
+def test_shuffle_well_labels_leaves_textual_missing_well_ids_unlabelled() -> None:
+    frame = pd.DataFrame(
+        {
+            "event": [0, 1, 2, 3],
+            "true_well_id": ["A", "", "nan", "B"],
+            "true_well_x": [1.0, np.nan, np.nan, 2.0],
+            "true_well_y": [3.0, np.nan, np.nan, 4.0],
+        }
+    )
+
+    shuffled = shuffle_well_labels(frame, random_seed=3)
+
+    assert shuffled.loc[[0, 3], "true_well_id"].tolist() == ["B", "A"]
+    assert shuffled.loc[1, "true_well_id"] == ""
+    assert shuffled.loc[2, "true_well_id"] == "nan"
+    assert shuffled.loc[[1, 2], ["true_well_x", "true_well_y"]].isna().all().all()
+    assert shuffled["event"].tolist() == frame["event"].tolist()

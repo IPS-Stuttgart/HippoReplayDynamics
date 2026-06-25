@@ -1,6 +1,10 @@
+import importlib
+
 import numpy as np
 import pandas as pd
 
+import hipporeplayimm
+import hipporeplayimm.evidence_reporting as reporting
 from hipporeplayimm.evidence_reporting import (
     ensure_evidence_support_columns,
     simulation_add_evidence_columns,
@@ -17,6 +21,31 @@ def _row(model: str, log_evidence: float, status: object, *, event_index: int = 
         "log_evidence": log_evidence,
         "diagnostic_candidate_evidence_support": "exact_full_grid",
     }
+
+
+def test_reloaded_core_evidence_reporting_keeps_legacy_status_semantics() -> None:
+    reloaded = importlib.reload(reporting)
+    try:
+        rows = pd.DataFrame(
+            [
+                _row("status-success", 0.0, " Success "),
+                _row("status-missing", 5.0, np.nan),
+                _row("status-failed", 10.0, "failure"),
+            ]
+        )
+
+        supported = reloaded.ensure_evidence_support_columns(rows)
+        assert supported.loc[supported["model"].eq("status-success"), "evidence_comparable"].item() is True
+        assert supported.loc[supported["model"].eq("status-missing"), "evidence_comparable"].item() is True
+        assert supported.loc[supported["model"].eq("status-failed"), "evidence_comparable"].item() is False
+
+        scored = reloaded.simulation_add_evidence_columns(rows)
+        assert scored["best_model"].unique().tolist() == ["status-missing"]
+
+        best = reloaded.simulation_event_best_rows(rows)
+        assert best["model"].tolist() == ["status-missing"]
+    finally:
+        hipporeplayimm.apply_runtime_patches()
 
 
 def test_missing_status_remains_exact_comparable_for_legacy_scores() -> None:

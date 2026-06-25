@@ -64,6 +64,7 @@ from . import spike_rate_metadata as _spike_rate_metadata
 from . import state_space_bin_center_validation as _state_space_bin_center_validation
 from . import state_space_bin_count_validation as _state_space_bin_count_validation
 from . import time_order_patch as _time_order_patch
+from . import well_label_shuffle_patch as _well_label_shuffle_patch
 from . import wrapper_return_trajectory as _wrapper_return_trajectory
 
 # Keep score-table metadata and post-hoc decoding consistent before public
@@ -100,6 +101,7 @@ _simulation_recovery_count_validation.apply_simulation_recovery_count_validation
 _reverse_time_terminal_guard.apply_reverse_time_terminal_guard_patch()
 _wrapper_return_trajectory.apply_wrapper_return_trajectory_patch()
 _shuffle_spike_time_order.apply_shuffle_spike_time_order_patch()
+_well_label_shuffle_patch.apply_well_label_shuffle_patch()
 
 from .benchmarks import BenchmarkConfig, BenchmarkResult, run_open_field_benchmark
 from .clusterless import (
@@ -237,6 +239,7 @@ def apply_runtime_patches() -> None:
     _reverse_time_terminal_guard.apply_reverse_time_terminal_guard_patch()
     _wrapper_return_trajectory.apply_wrapper_return_trajectory_patch()
     _shuffle_spike_time_order.apply_shuffle_spike_time_order_patch()
+    _well_label_shuffle_patch.apply_well_label_shuffle_patch()
     _axona_data_end_footer.apply_axona_data_end_footer_patch()
     _olafsdottir_zip_safety.apply_olafsdottir_zip_safety_patch()
     _synchronize_duration_patched_emission_builders()

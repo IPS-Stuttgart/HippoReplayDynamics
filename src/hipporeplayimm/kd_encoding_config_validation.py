@@ -8,6 +8,7 @@ are harder to diagnose than a configuration error.
 
 from __future__ import annotations
 
+from dataclasses import replace
 from functools import wraps
 from typing import Any
 
@@ -52,6 +53,31 @@ def validate_kd_encoding_config(config: Any) -> None:
     _validate_nonnegative_float(config, "min_peak_rate_hz")
 
 
+def _session_with_excitatory_fallback(session: Any, config: Any) -> Any:
+    """Let the KD encoder match the standard encoder's no-label fallback.
+
+    The reference encoder requests ``session.excitatory_spikes()`` whenever
+    ``use_excitatory`` is true.  For datasets without excitatory labels that
+    method returns no spikes, so the KD encoder silently fits an empty cell set
+    even when spikes are available.  The main encoder falls back to all spikes in
+    this case; mirror that behavior by treating all observed cells as excitatory
+    only when the label list is absent.
+    """
+
+    if not bool(getattr(config, "use_excitatory", True)):
+        return session
+    excitatory_neurons = np.asarray(getattr(session, "excitatory_neurons", np.array([])))
+    if excitatory_neurons.size:
+        return session
+    spikes = np.asarray(getattr(session, "spikes", np.empty((0, 2))))
+    if spikes.size == 0:
+        return session
+    cell_ids = np.asarray(getattr(session, "cell_ids"), dtype=int)
+    if cell_ids.size == 0:
+        return session
+    return replace(session, excitatory_neurons=cell_ids)
+
+
 def apply_kd_encoding_config_validation_patch() -> None:
     """Install KD encoding-config validation on the reference encoder."""
 
@@ -66,7 +92,7 @@ def apply_kd_encoding_config_validation_patch() -> None:
     def fit_kd_place_field_encoding(session, config=None):
         config = kd_reference.KDEncodingConfig() if config is None else config
         validate_kd_encoding_config(config)
-        return original_fit(session, config)
+        return original_fit(_session_with_excitatory_fallback(session, config), config)
 
     kd_reference.fit_kd_place_field_encoding = fit_kd_place_field_encoding
     setattr(kd_reference, _PATCHED_FLAG, True)

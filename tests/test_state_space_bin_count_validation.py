@@ -40,3 +40,35 @@ def test_state_space_uniform_helpers_preserve_masked_support():
     assert _valid_bin_count(3, mask) == 2
     assert _valid_bin_count("3.0", mask) == 2
     np.testing.assert_array_equal(_coerce_valid_bin_mask(mask, 3), mask)
+
+
+def test_state_space_uniform_helpers_accept_binary_numeric_masks():
+    mask = np.array([1.0, 0.0, 1.0], dtype=float)
+    expected = np.array([True, False, True], dtype=bool)
+
+    np.testing.assert_array_equal(_coerce_valid_bin_mask(mask, 3), expected)
+    np.testing.assert_allclose(_uniform_probabilities(3, mask), [0.5, 0.0, 0.5])
+    assert _valid_bin_count(3, mask) == 2
+
+
+@pytest.mark.parametrize(
+    "bad_mask",
+    [
+        np.array([1.0, np.nan, 0.0]),
+        np.array([1.0, np.inf, 0.0]),
+        np.array([1.0, 0.5, 0.0]),
+        np.array(["yes", "no", "yes"], dtype=object),
+    ],
+)
+def test_state_space_uniform_helpers_reject_non_boolean_mask_values(bad_mask):
+    with pytest.raises(ValueError, match="valid_bin_mask must contain"):
+        _coerce_valid_bin_mask(bad_mask, 3)
+    with pytest.raises(ValueError, match="valid_bin_mask must contain"):
+        _uniform_probabilities(3, bad_mask)
+
+
+def test_state_space_uniform_aliases_reject_nan_mask_values():
+    bad_mask = np.array([1.0, np.nan, 0.0])
+
+    with pytest.raises(ValueError, match="valid_bin_mask must contain"):
+        state_space_first_order._uniform_probabilities(3, bad_mask)

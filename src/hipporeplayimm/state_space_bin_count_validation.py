@@ -24,6 +24,27 @@ def _positive_bin_count(n_bins: int) -> int:
     return count
 
 
+def _coerce_bool_mask(valid_bin_mask: Any, n_bins: int) -> np.ndarray | None:
+    """Return a boolean mask without treating arbitrary numeric values as truthy."""
+
+    if valid_bin_mask is None:
+        return None
+    raw = np.asarray(valid_bin_mask)
+    if raw.shape != (n_bins,):
+        raise ValueError("valid_bin_mask must contain one boolean value per spatial bin")
+    if np.issubdtype(raw.dtype, np.bool_):
+        return raw.astype(bool, copy=False)
+    try:
+        numeric = np.asarray(raw, dtype=float)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ValueError("valid_bin_mask must contain boolean or 0/1 values") from exc
+    if not np.all(np.isfinite(numeric)):
+        raise ValueError("valid_bin_mask must contain finite boolean or 0/1 values")
+    if not np.all((numeric == 0.0) | (numeric == 1.0)):
+        raise ValueError("valid_bin_mask must contain boolean or 0/1 values")
+    return numeric.astype(bool)
+
+
 def _mark_patched(wrapper: Callable[..., Any], original: Callable[..., Any]) -> Callable[..., Any]:
     setattr(wrapper, "__hipporeplayimm_original__", original)
     setattr(wrapper, "__hipporeplayimm_bin_count_validation_patch__", True)
@@ -44,16 +65,20 @@ def apply_state_space_bin_count_validation_patch() -> None:
     original_valid_bin_count = utils._valid_bin_count
 
     def _coerce_valid_bin_mask(valid_bin_mask: Any, n_bins: int):
-        return original_coerce_valid_bin_mask(valid_bin_mask, _positive_bin_count(n_bins))
+        count = _positive_bin_count(n_bins)
+        return original_coerce_valid_bin_mask(_coerce_bool_mask(valid_bin_mask, count), count)
 
     def _uniform_log_prior(n_bins: int, valid_bin_mask: Any = None):
-        return original_uniform_log_prior(_positive_bin_count(n_bins), valid_bin_mask)
+        count = _positive_bin_count(n_bins)
+        return original_uniform_log_prior(count, _coerce_bool_mask(valid_bin_mask, count))
 
     def _uniform_probabilities(n_bins: int, valid_bin_mask: Any = None):
-        return original_uniform_probabilities(_positive_bin_count(n_bins), valid_bin_mask)
+        count = _positive_bin_count(n_bins)
+        return original_uniform_probabilities(count, _coerce_bool_mask(valid_bin_mask, count))
 
     def _valid_bin_count(n_bins: int, valid_bin_mask: Any = None) -> int:
-        return original_valid_bin_count(_positive_bin_count(n_bins), valid_bin_mask)
+        count = _positive_bin_count(n_bins)
+        return original_valid_bin_count(count, _coerce_bool_mask(valid_bin_mask, count))
 
     patched = {
         "_coerce_valid_bin_mask": _mark_patched(

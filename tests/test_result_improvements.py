@@ -13,6 +13,7 @@ from hipporeplayimm.result_improvements import (
     paired_sign_flip_p_value,
     posterior_calibration_summary,
     shuffle_spike_times_session,
+    shuffle_well_labels,
     stratified_cell_split,
 )
 
@@ -108,6 +109,35 @@ def test_circular_shift_reorders_clusterless_mark_rows_with_spikes() -> None:
     np.testing.assert_allclose(shifted.spike_marks.times, shifted.spikes[:, 0])
     np.testing.assert_array_equal(shifted.spike_marks.cell_ids, shifted.spikes[:, 1].astype(int))
     np.testing.assert_allclose(shifted.spike_marks.marks[:, 0], shifted.spikes[:, 1])
+
+
+def test_shuffle_well_labels_preserves_id_coordinate_tuples() -> None:
+    frame = pd.DataFrame(
+        {
+            "event": [0, 1, 2, 3],
+            "true_well_id": ["A", "B", "C", None],
+            "true_well_x": [1.0, 2.0, 3.0, np.nan],
+            "true_well_y": [10.0, 20.0, 30.0, np.nan],
+        }
+    )
+    allowed_tuples = {
+        ("A", 1.0, 10.0),
+        ("B", 2.0, 20.0),
+        ("C", 3.0, 30.0),
+    }
+
+    shuffled = shuffle_well_labels(frame, random_seed=0)
+
+    observed_tuples = {
+        tuple(row)
+        for row in shuffled.loc[
+            shuffled["true_well_id"].notna(),
+            ["true_well_id", "true_well_x", "true_well_y"],
+        ].itertuples(index=False, name=None)
+    }
+    assert observed_tuples == allowed_tuples
+    assert shuffled.loc[3, ["true_well_id", "true_well_x", "true_well_y"]].isna().all()
+    assert shuffled["event"].tolist() == frame["event"].tolist()
 
 
 def _marked_session() -> ReplaySession:

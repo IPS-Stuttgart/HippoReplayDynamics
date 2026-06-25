@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import inspect
 from dataclasses import dataclass
 
 import numpy as np
@@ -19,31 +20,52 @@ class ReverseTimeReplayModel:
     base_model: object
     name: str | None = None
 
-    def score(self, emissions: LogEmissionTensor, bin_centers: np.ndarray) -> EventScore:
+    def score(
+        self,
+        emissions: LogEmissionTensor,
+        bin_centers: np.ndarray,
+        *,
+        occupancy_s: np.ndarray | None = None,
+        candidate_indices: list[np.ndarray] | None = None,
+        return_trajectory: bool | None = None,
+    ) -> EventScore:
         reversed_emissions = reverse_emissions(emissions)
-        score = self.base_model.score(reversed_emissions, bin_centers)
+        reversed_candidates = _reverse_candidate_indices(candidate_indices)
+        score = _score_model_with_optional_kwargs(
+            self.base_model,
+            reversed_emissions,
+            bin_centers,
+            occupancy_s=occupancy_s,
+            candidate_indices=reversed_candidates,
+            return_trajectory=return_trajectory,
+        )
         model_name = self.name or f"{score.model_name}-reverse"
         trajectory = None
         terminal = score.terminal_log_posterior
+        mapped_terminal_from_trajectory = False
         if score.trajectory_log_posterior is not None:
             trajectory = score.trajectory_log_posterior[::-1].copy()
             terminal = trajectory[-1]
+            mapped_terminal_from_trajectory = True
+            if return_trajectory is False:
+                trajectory = None
         diagnostics = dict(score.diagnostics)
         diagnostics["time_direction"] = "reverse"
         diagnostics["base_model"] = str(score.model_name)
-        if terminal is not None:
-            diagnostics.update(_posterior_diagnostics(terminal, bin_centers))
-        return _clear_unmappable_reverse_terminal(
-            EventScore(
-                model_name,
-                score.log_likelihood,
-                score.n_time,
-                score.n_spikes,
-                diagnostics=diagnostics,
-                terminal_log_posterior=terminal,
-                trajectory_log_posterior=trajectory,
-            )
+        result = EventScore(
+            model_name,
+            score.log_likelihood,
+            score.n_time,
+            score.n_spikes,
+            diagnostics=diagnostics,
+            terminal_log_posterior=terminal,
+            trajectory_log_posterior=trajectory,
         )
+        if result.terminal_log_posterior is not None:
+            result.diagnostics.update(_posterior_diagnostics(result.terminal_log_posterior, bin_centers))
+        if mapped_terminal_from_trajectory:
+            return result
+        return _clear_unmappable_reverse_terminal(result)
 
 
 @dataclass
@@ -53,13 +75,39 @@ class BidirectionalReplayModel:
     base_model: object
     name: str | None = None
 
-    def score(self, emissions: LogEmissionTensor, bin_centers: np.ndarray) -> EventScore:
-        forward = self.base_model.score(emissions, bin_centers)
-        reverse = ReverseTimeReplayModel(self.base_model).score(emissions, bin_centers)
+    def score(
+        self,
+        emissions: LogEmissionTensor,
+        bin_centers: np.ndarray,
+        *,
+        occupancy_s: np.ndarray | None = None,
+        candidate_indices: list[np.ndarray] | None = None,
+        return_trajectory: bool | None = None,
+    ) -> EventScore:
+        forward = _score_model_with_optional_kwargs(
+            self.base_model,
+            emissions,
+            bin_centers,
+            occupancy_s=occupancy_s,
+            candidate_indices=candidate_indices,
+            return_trajectory=return_trajectory,
+        )
+        reverse_return_trajectory = True if return_trajectory is False else return_trajectory
+        reverse = ReverseTimeReplayModel(self.base_model).score(
+            emissions,
+            bin_centers,
+            occupancy_s=occupancy_s,
+            candidate_indices=candidate_indices,
+            return_trajectory=reverse_return_trajectory,
+        )
         weights = np.exp(np.array([forward.log_likelihood, reverse.log_likelihood]) - logsumexp([forward.log_likelihood, reverse.log_likelihood]))
         logp = float(logsumexp([forward.log_likelihood, reverse.log_likelihood]) - np.log(2.0))
         terminal = _mixture_log_posterior(forward.terminal_log_posterior, reverse.terminal_log_posterior, weights)
-        trajectory = _mixture_log_posterior(forward.trajectory_log_posterior, reverse.trajectory_log_posterior, weights)
+        trajectory = None
+        if return_trajectory is not False:
+            trajectory = _mixture_log_posterior(forward.trajectory_log_posterior, reverse.trajectory_log_posterior, weights)
+        if trajectory is not None:
+            terminal = trajectory[-1].copy()
         diagnostics = {
             "time_direction": "bidirectional-mixture",
             "base_model": str(forward.model_name),
@@ -121,6 +169,92 @@ def _reversed_optional_duration_vector(
             f"{name} must contain {expected_length} values; got shape {array.shape}"
         )
     return array[::-1].copy()
+
+
+def _reverse_candidate_indices(candidate_indices: list[np.ndarray] | None) -> list[np.ndarray] | None:
+    if candidate_indices is None:
+        return None
+    return [np.asarray(curr).copy() for curr in candidate_indices[::-1]]
+
+
+def _score_model_with_optional_kwargs(
+    model: object,
+    emissions: LogEmissionTensor,
+    bin_centers: np.ndarray,
+    *,
+    occupancy_s: np.ndarray | None = None,
+    candidate_indices: list[np.ndarray] | None = None,
+    return_trajectory: bool | None = None,
+) -> EventScore:
+    kwargs: dict[str, object] = {}
+    if occupancy_s is not None:
+        kwargs["occupancy_s"] = occupancy_s
+    if candidate_indices is not None:
+        kwargs["candidate_indices"] = candidate_indices
+    if return_trajectory is not None:
+        kwargs["return_trajectory"] = bool(return_trajectory)
+    return _call_score_with_supported_kwargs(model.score, emissions, bin_centers, kwargs)  # type: ignore[attr-defined]
+
+
+def _call_score_with_supported_kwargs(
+    score: object,
+    emissions: LogEmissionTensor,
+    bin_centers: np.ndarray,
+    optional_kwargs: dict[str, object],
+) -> EventScore:
+    supported_kwargs = _supported_score_kwargs(score, optional_kwargs)
+    if supported_kwargs is not None:
+        if supported_kwargs:
+            return score(emissions, bin_centers, **supported_kwargs)  # type: ignore[operator]
+        return score(emissions, bin_centers)  # type: ignore[operator]
+
+    try:
+        if optional_kwargs:
+            return score(emissions, bin_centers, **optional_kwargs)  # type: ignore[operator]
+        return score(emissions, bin_centers)  # type: ignore[operator]
+    except TypeError as exc:
+        unsupported = [
+            keyword
+            for keyword in optional_kwargs
+            if _looks_like_unexpected_keyword_type_error(exc, keyword)
+        ]
+        if not unsupported:
+            raise
+        reduced_kwargs = {key: value for key, value in optional_kwargs.items() if key not in unsupported}
+        if reduced_kwargs:
+            return score(emissions, bin_centers, **reduced_kwargs)  # type: ignore[operator]
+        return score(emissions, bin_centers)  # type: ignore[operator]
+
+
+def _supported_score_kwargs(score: object, optional_kwargs: dict[str, object]) -> dict[str, object] | None:
+    if not optional_kwargs:
+        return {}
+    try:
+        signature = inspect.signature(score)
+    except (TypeError, ValueError):
+        return None
+    parameters = signature.parameters
+    if any(parameter.kind == inspect.Parameter.VAR_KEYWORD for parameter in parameters.values()):
+        return dict(optional_kwargs)
+    supported: dict[str, object] = {}
+    for keyword, value in optional_kwargs.items():
+        parameter = parameters.get(keyword)
+        if parameter is not None and parameter.kind in (
+            inspect.Parameter.KEYWORD_ONLY,
+            inspect.Parameter.POSITIONAL_OR_KEYWORD,
+        ):
+            supported[keyword] = value
+    return supported
+
+
+def _looks_like_unexpected_keyword_type_error(exc: TypeError, keyword: str) -> bool:
+    text = str(exc)
+    return keyword in text and (
+        "unexpected keyword" in text
+        or "got an unexpected" in text
+        or "invalid keyword" in text
+        or "takes no keyword" in text
+    )
 
 
 def _mixture_log_posterior(left: np.ndarray | None, right: np.ndarray | None, weights: np.ndarray) -> np.ndarray | None:

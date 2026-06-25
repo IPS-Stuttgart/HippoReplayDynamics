@@ -55,9 +55,13 @@ def test_candidate_selection_emissions_reuses_input_when_no_masking_needed():
     ) is emissions
 
 
-def test_uniform_probabilities_rejects_nonpositive_bin_count():
-    with pytest.raises(ValueError, match="n_bins must be positive"):
-        _uniform_probabilities(0)
+@pytest.mark.parametrize(
+    "bad_n_bins",
+    [0, -1, True, np.bool_(True), 1.5, "2.5", np.array([2])],
+)
+def test_uniform_probabilities_rejects_invalid_bin_count(bad_n_bins):
+    with pytest.raises(ValueError, match="n_bins must be a positive integer"):
+        _uniform_probabilities(bad_n_bins)
 
 
 def test_uniform_probabilities_are_bootstrapped_into_duration_occupancy_module():

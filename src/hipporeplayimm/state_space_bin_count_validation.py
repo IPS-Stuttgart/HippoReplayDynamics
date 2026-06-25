@@ -37,8 +37,13 @@ def _integer_count(name: str, value: Any) -> int:
 def _positive_bin_count(n_bins: int) -> int:
     if isinstance(n_bins, (bool, np.bool_)):
         raise ValueError("n_bins must be a positive integer")
+    raw = np.asarray(n_bins)
+    if raw.ndim != 0:
+        raise ValueError("n_bins must be a positive integer")
+    if np.issubdtype(raw.dtype, np.bool_):
+        raise ValueError("n_bins must be a positive integer")
     try:
-        numeric = float(n_bins)
+        numeric = float(raw)
     except (TypeError, ValueError, OverflowError) as exc:
         raise ValueError("n_bins must be a positive integer") from exc
     if not np.isfinite(numeric) or numeric <= 0.0:

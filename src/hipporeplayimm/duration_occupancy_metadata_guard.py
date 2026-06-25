@@ -8,13 +8,12 @@ from typing import Any, Callable
 
 import numpy as np
 
-from .state_space_utils import _uniform_probabilities as _base_uniform_probabilities
-
 
 def apply_duration_occupancy_metadata_guard_patch() -> None:
     """Ensure derived duration/occupancy helper inputs stay isolated and valid."""
 
     from . import duration_occupancy as _duration_occupancy
+    from . import state_space_utils as _state_space_utils
 
     _apply_transition_duration_validation()
 
@@ -23,7 +22,7 @@ def apply_duration_occupancy_metadata_guard_patch() -> None:
 
     previous_candidate_selection = _duration_occupancy._candidate_selection_emissions
     if not hasattr(_duration_occupancy, "_uniform_probabilities"):
-        _duration_occupancy._uniform_probabilities = _base_uniform_probabilities
+        _duration_occupancy._uniform_probabilities = _state_space_utils._uniform_probabilities
     previous_uniform_probabilities = _duration_occupancy._uniform_probabilities
 
     def _candidate_selection_emissions(emissions, valid_bin_mask):
@@ -34,9 +33,6 @@ def apply_duration_occupancy_metadata_guard_patch() -> None:
         return replace(restricted, metadata=metadata)
 
     def _uniform_probabilities(n_bins: int, valid_bin_mask=None):
-        n_bins = int(n_bins)
-        if n_bins <= 0:
-            raise ValueError("n_bins must be positive")
         return previous_uniform_probabilities(n_bins, valid_bin_mask)
 
     _candidate_selection_emissions.__name__ = previous_candidate_selection.__name__

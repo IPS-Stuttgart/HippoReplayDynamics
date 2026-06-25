@@ -10,7 +10,7 @@ from hipporeplayimm.state_space_utils import (
 )
 
 
-@pytest.mark.parametrize("bad_n_bins", [0, -1, True, np.bool_(True), 1.5, "2.5"])
+@pytest.mark.parametrize("bad_n_bins", [0, -1, True, np.bool_(True), 1.5, "2.5", np.array([2])])
 def test_state_space_uniform_helpers_reject_invalid_support_size_without_mask(bad_n_bins):
     with pytest.raises(ValueError, match="n_bins must be a positive integer"):
         _uniform_log_prior(bad_n_bins)

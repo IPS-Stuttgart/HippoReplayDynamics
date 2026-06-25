@@ -1,9 +1,10 @@
 """Strict runtime validation for position-decoding configuration values.
 
-The position-decoding validation helper uses several public config fields in
-array slicing, fold construction, and spike-count filtering.  Invalid integer
-knobs should be rejected before those operations so callers do not get silent
-window truncation or unrelated NumPy/type errors.
+The position-decoding validation helpers use public configuration fields in
+array slicing, fold construction, spike-count filtering, and explicit training
+frame masks.  Invalid integer knobs or non-boolean masks should be rejected
+before those operations so callers do not get silent window truncation,
+accidental truthiness, or unrelated NumPy/type errors.
 """
 
 from __future__ import annotations
@@ -18,7 +19,7 @@ _PATCHED_FLAG = "_position_decoding_config_validation_patch_applied"
 
 
 def apply_position_decoding_config_validation_patch() -> None:
-    """Install strict validation on ``validate_session_position_decoding``."""
+    """Install strict validation on position-decoding runtime entry points."""
 
     from . import position_validation as validation
 
@@ -26,6 +27,7 @@ def apply_position_decoding_config_validation_patch() -> None:
         return
 
     original_validate_session_position_decoding = validation.validate_session_position_decoding
+    original_fit_place_field_encoding_for_position_mask = validation.fit_place_field_encoding_for_position_mask
 
     @wraps(original_validate_session_position_decoding)
     def validate_session_position_decoding_with_config_validation(session: Any, config: Any = None) -> Any:
@@ -33,7 +35,14 @@ def apply_position_decoding_config_validation_patch() -> None:
         config = _validated_position_decoding_config(config)
         return original_validate_session_position_decoding(session, config)
 
+    @wraps(original_fit_place_field_encoding_for_position_mask)
+    def fit_place_field_encoding_for_position_mask_with_mask_validation(session: Any, train_frame_mask: Any, config: Any = None) -> Any:
+        position = validation._clean_position(session.position)
+        mask = _validated_train_frame_mask(train_frame_mask, position.shape[0])
+        return original_fit_place_field_encoding_for_position_mask(session, mask, config)
+
     validation.validate_session_position_decoding = validate_session_position_decoding_with_config_validation
+    validation.fit_place_field_encoding_for_position_mask = fit_place_field_encoding_for_position_mask_with_mask_validation
     setattr(validation, _PATCHED_FLAG, True)
 
 
@@ -54,6 +63,23 @@ def _validated_position_decoding_config(config: Any) -> Any:
 
 def _validate_position_decoding_config(config: Any) -> None:
     _validated_position_decoding_config(config)
+
+
+def _validated_train_frame_mask(train_frame_mask: Any, expected_length: int) -> np.ndarray:
+    raw = np.asarray(train_frame_mask)
+    if raw.shape != (int(expected_length),):
+        raise ValueError("train_frame_mask must have one value per cleaned position frame")
+    if np.issubdtype(raw.dtype, np.bool_):
+        return raw.astype(bool, copy=False)
+    try:
+        numeric = np.asarray(raw, dtype=float)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ValueError("train_frame_mask must contain boolean or 0/1 values") from exc
+    if not np.all(np.isfinite(numeric)):
+        raise ValueError("train_frame_mask must contain finite boolean or 0/1 values")
+    if not np.all((numeric == 0.0) | (numeric == 1.0)):
+        raise ValueError("train_frame_mask must contain boolean or 0/1 values")
+    return numeric.astype(bool)
 
 
 def _positive_finite_scalar(name: str, value: Any) -> float:

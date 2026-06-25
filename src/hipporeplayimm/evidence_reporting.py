@@ -196,6 +196,21 @@ def _finite_log_evidence_series(frame: pd.DataFrame) -> pd.Series:
     return pd.Series(np.isfinite(values.to_numpy(dtype=float)), index=frame.index)
 
 
+def _coerce_log_evidence_column(frame: pd.DataFrame) -> pd.DataFrame:
+    """Return a copy whose log-evidence column is numeric when present.
+
+    CSV round-trips can leave ``log_evidence`` as an object column.  Coerce once
+    before ranking or normalising model evidence so numeric-looking strings are
+    compared numerically and malformed values are treated as nonfinite rows.
+    """
+
+    if "log_evidence" not in frame.columns:
+        return frame.copy()
+    out = frame.copy()
+    out["log_evidence"] = pd.to_numeric(out["log_evidence"], errors="coerce")
+    return out
+
+
 def _is_missing_evidence_support(value: object) -> bool:
     try:
         if pd.isna(value):
@@ -210,7 +225,7 @@ def simulation_add_evidence_columns(df: pd.DataFrame) -> pd.DataFrame:
 
     if df.empty:
         return df
-    df = ensure_evidence_support_columns(df)
+    df = _coerce_log_evidence_column(ensure_evidence_support_columns(df))
     groups = []
     for _, group in df.groupby(["session", "event_index"], sort=False):
         group = group.copy()
@@ -331,14 +346,14 @@ def _simulation_model_values(group: pd.DataFrame, column: str) -> list[str]:
 
 
 def _best_log_evidence_row(frame: pd.DataFrame) -> pd.Series:
-    values = frame["log_evidence"].to_numpy(float)
-    return frame.iloc[int(np.argmax(values))]
+    values = pd.to_numeric(frame["log_evidence"], errors="coerce").to_numpy(float)
+    return frame.iloc[int(np.nanargmax(values))]
 
 
 def simulation_event_best_rows(event_scores: pd.DataFrame) -> pd.DataFrame:
     """Return one exact-comparable best row per simulated event."""
 
-    event_scores = ensure_evidence_support_columns(event_scores)
+    event_scores = _coerce_log_evidence_column(ensure_evidence_support_columns(event_scores))
     comparable = _coerce_bool_series(event_scores["evidence_comparable"])
     status_ok = _status_success_series(event_scores)
     ok = event_scores[status_ok & comparable]

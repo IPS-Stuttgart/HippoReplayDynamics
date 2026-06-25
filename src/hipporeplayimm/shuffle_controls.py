@@ -10,6 +10,7 @@ import pandas as pd
 
 from .data import ReplaySession
 from .encoding import EmissionConfig, EncodingModel, build_emissions
+from .state_space_model import StateSpaceReplayModel
 
 
 @dataclass(frozen=True)
@@ -94,7 +95,14 @@ def score_shuffle_controls(
         for event_index in event_indices:
             emissions = build_emissions(session, control_encoding, int(event_index), emission_config)
             for requested_model, model in models.items():
-                score = model.score(emissions, control_encoding.bin_centers)
+                if isinstance(model, StateSpaceReplayModel):
+                    score = model.score(
+                        emissions,
+                        control_encoding.bin_centers,
+                        occupancy_s=control_encoding.occupancy_s,
+                    )
+                else:
+                    score = model.score(emissions, control_encoding.bin_centers)
                 rows.append(
                     {
                         "session": session.session_id,

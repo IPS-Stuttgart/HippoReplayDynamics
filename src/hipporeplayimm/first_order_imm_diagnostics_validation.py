@@ -9,6 +9,7 @@ import numpy as np
 
 _PATCH_ATTR = "_first_order_imm_diagnostics_validation_patch"
 _ORIGINAL_ATTR = "_first_order_imm_diagnostics_validation_original"
+_DURATION_ALIAS_ATTR = "_first_order_imm_duration_diagnostics_alias_patch"
 
 
 def _validate_first_order_imm_content_inputs(
@@ -81,10 +82,51 @@ def _wrap_helper(
     return validated_first_order_imm_content_diagnostics
 
 
+def _wrap_duration_occupancy_alias(
+    helper: Callable[..., dict[str, float | int]],
+) -> Callable[..., dict[str, float | int]]:
+    """Preserve transition durations for the duration-aware scorer's helper alias."""
+
+    if getattr(helper, _DURATION_ALIAS_ATTR, False):
+        return helper
+
+    def duration_aware_first_order_imm_content_diagnostics(
+        mode_posterior: np.ndarray,
+        trajectory_log_posterior: np.ndarray,
+        bin_centers: np.ndarray,
+        dt_s: float,
+    ) -> dict[str, float | int]:
+        durations = getattr(dt_s, "transition_durations", None)
+        if durations is None:
+            try:
+                durations = sys._getframe(1).f_locals.get("durations")
+            except ValueError:
+                durations = None
+        if durations is not None:
+            from .duration_dynamics import DurationFloat
+
+            dt_s = DurationFloat(float(dt_s), durations)
+        return helper(
+            mode_posterior,
+            trajectory_log_posterior,
+            bin_centers,
+            dt_s,
+        )
+
+    setattr(duration_aware_first_order_imm_content_diagnostics, _DURATION_ALIAS_ATTR, True)
+    setattr(duration_aware_first_order_imm_content_diagnostics, _ORIGINAL_ATTR, helper)
+    return duration_aware_first_order_imm_content_diagnostics
+
+
 def _patch_loaded_alias(module_name: str, helper: Callable[..., dict[str, float | int]]) -> None:
     module = sys.modules.get(module_name)
     if module is not None and hasattr(module, "_first_order_imm_content_diagnostics"):
-        setattr(module, "_first_order_imm_content_diagnostics", helper)
+        alias = (
+            _wrap_duration_occupancy_alias(helper)
+            if module_name == "hipporeplayimm.duration_occupancy"
+            else helper
+        )
+        setattr(module, "_first_order_imm_content_diagnostics", alias)
 
 
 def apply_first_order_imm_diagnostics_validation_patch() -> None:

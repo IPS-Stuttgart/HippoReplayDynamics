@@ -48,6 +48,8 @@ def apply_evidence_status_coercion_patch() -> None:
                 return non_exact_support
         if reporting.EXACT_EVIDENCE_SUPPORT in labels:
             return reporting.EXACT_EVIDENCE_SUPPORT
+        if labels:
+            return reporting.EVIDENCE_COMPARISON_UNKNOWN
         return reporting.EXACT_EVIDENCE_SUPPORT
 
     def ensure_evidence_support_columns(df: pd.DataFrame) -> pd.DataFrame:

@@ -79,6 +79,8 @@ Directory artifact digests are SHA-256 hashes over sorted file names and file ha
 
 ## Interpretation
 
-Use `main_trajectory_family_summary.csv` for the headline exact trajectory-family-vs-nontrajectory result. Use the rat, leave-one-rat-out, and bootstrap tables to verify cross-rat robustness. Use `exact_core_model_winner_summary.csv` to keep the first-order IMM full-core winner statement separate from the family-level claim, and `paired_momentum_diffusion_summary.csv` to report the recovered exact-sparse momentum-vs-diffusion axis.
+Use `main_trajectory_family_summary.csv` for the headline exact trajectory-family-vs-nontrajectory result. Use the rat, leave-one-rat-out, and bootstrap tables to verify cross-rat robustness.
+
+Use `exact_core_model_winner_summary.csv` to keep the first-order IMM full-core winner statement separate from the family-level claim. Use `paired_momentum_diffusion_summary.csv` to report the recovered exact-sparse momentum-vs-diffusion axis.
 
 `control_stack_summary.csv` is the first audit table to inspect. A paper-ready pack should have all supplied control artifacts marked `ok`; any omitted artifact is explicitly marked as missing. The per-control summary files keep source-table provenance through `artifact_label`, `artifact_run_id`, `artifact_path`, and `source_table` columns.

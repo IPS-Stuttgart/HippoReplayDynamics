@@ -108,6 +108,43 @@ def test_stopgate_allows_positive_holdout_case(tmp_path: Path) -> None:
     assert not bool(summary["forbid_pilot50_biology"])
 
 
+def test_stopgate_requires_explicit_technical_pass_manifests(tmp_path: Path) -> None:
+    module = _load_module()
+    reports = _write_empty_report_dirs(tmp_path)
+    comparison_dir = _write_comparison_pack(
+        tmp_path / "comparison",
+        rows=[
+            _tier_row("balanced_debug", events=20, trajectory_confident=2, trajectory_median=-0.5, imm_confident=2, imm_median=2.0),
+            _tier_row("high_information_debug", events=20, trajectory_confident=12, trajectory_median=4.0, imm_confident=10, imm_median=6.0),
+            _tier_row("high_information_holdout19_debug", events=20, trajectory_confident=12, trajectory_median=4.0, imm_confident=10, imm_median=6.0),
+        ],
+        normalized=[
+            _normalized_row("balanced_debug", "trajectory_minus_stationary_per_second", -10.0),
+            _normalized_row("balanced_debug", "trajectory_minus_stationary_per_spike", -0.01),
+            _normalized_row("high_information_debug", "trajectory_minus_stationary_per_second", 80.0),
+            _normalized_row("high_information_debug", "trajectory_minus_stationary_per_spike", 0.05),
+            _normalized_row("high_information_holdout19_debug", "trajectory_minus_stationary_per_second", 80.0),
+            _normalized_row("high_information_holdout19_debug", "trajectory_minus_stationary_per_spike", 0.05),
+        ],
+        recommendation="define_frozen_high_information_confirmation_tier",
+    )
+
+    tables = module.run_stopgate_summary(
+        balanced_report_dir=reports["balanced_debug"],
+        high_information_report_dir=reports["high_information_debug"],
+        holdout_report_dir=reports["high_information_holdout19_debug"],
+        comparison_dir=comparison_dir,
+        output_dir=tmp_path / "stopgate",
+    )
+
+    summary = tables["summary"].iloc[0]
+    assert not bool(summary["technical_scoreable"])
+    assert bool(summary["trajectory_family_over_static_supported"])
+    assert summary["recommended_next_action"] == "continue_imm_fragmented_taxonomy_audit_only"
+    gates = tables["gates"].set_index("gate")
+    assert not bool(gates.loc["technical_scoreable", "passed"])
+
+
 def _write_report_manifests(root: Path) -> dict[str, Path]:
     paths = {}
     for label in ["balanced_debug", "high_information_debug", "high_information_holdout19_debug"]:
@@ -117,6 +154,15 @@ def _write_report_manifests(root: Path) -> dict[str, Path]:
             '{"technical_classification": "technical-pass", "biological_classification": "biological-ambiguous"}\n',
             encoding="utf-8",
         )
+        paths[label] = path
+    return paths
+
+
+def _write_empty_report_dirs(root: Path) -> dict[str, Path]:
+    paths = {}
+    for label in ["balanced_debug", "high_information_debug", "high_information_holdout19_debug"]:
+        path = root / label
+        path.mkdir()
         paths[label] = path
     return paths
 

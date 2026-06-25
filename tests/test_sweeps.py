@@ -128,6 +128,32 @@ def test_ground_truth_summary_metrics_uses_valid_rows():
     assert metrics["mean_true_well_posterior"] == 0.5
 
 
+def test_ground_truth_summary_metrics_coerces_valid_label_strings():
+    comparison = pd.DataFrame(
+        {
+            "model": [
+                "pyrecest-goal-particle",
+                "pyrecest-goal-particle",
+                "pyrecest-goal-particle",
+                "pyrecest-goal-particle",
+            ],
+            "valid_label": ["True", "False", "0", "1"],
+            "goal_correct": [True, True, True, False],
+            "endpoint_error_cm": [10.0, 20.0, 30.0, 30.0],
+            "true_well_posterior": [0.2, 0.4, 0.6, 0.8],
+            "true_well_rank": [1.0, 2.0, 3.0, 4.0],
+        }
+    )
+
+    metrics = _ground_truth_summary_metrics(comparison)
+
+    assert metrics["valid_goal_rows"] == 2
+    assert metrics["goal_accuracy"] == 0.5
+    assert metrics["median_endpoint_error_cm"] == 20.0
+    assert metrics["mean_true_well_posterior"] == 0.5
+    assert metrics["median_true_well_rank"] == 2.5
+
+
 def test_ground_truth_summary_metrics_can_select_particle_imm_model():
     comparison = pd.DataFrame(
         {

@@ -10,6 +10,7 @@ import numpy as np
 import pandas as pd
 
 from .benchmarks import BenchmarkConfig, BenchmarkResult, run_open_field_benchmark
+from .evidence_reporting import _coerce_bool_series
 from .ground_truth import (
     GroundTruthConfig,
     compare_scores_to_ground_truth,
@@ -501,7 +502,7 @@ def _ground_truth_summary_metrics(
         }
     if "model" in comparison.columns:
         comparison = comparison[comparison["model"] == model]
-    valid = comparison[comparison["valid_label"].fillna(False)]
+    valid = comparison[_coerce_bool_series(comparison["valid_label"])]
     if valid.empty:
         return {
             "valid_goal_rows": 0,

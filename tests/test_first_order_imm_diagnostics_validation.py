@@ -100,7 +100,6 @@ def test_duration_occupancy_alias_uses_caller_transition_durations() -> None:
     helper = duration_occupancy._first_order_imm_content_diagnostics
 
     def call_like_duration_occupancy_scorer() -> dict[str, float | int]:
-        durations = np.array([0.5], dtype=float)
         return helper(
             _mode_posterior(),
             _deterministic_step_log_posterior(),

@@ -36,6 +36,27 @@ def _validated_thresholds(thresholds: Sequence[float]) -> tuple[float, ...]:
     )
 
 
+def _ensure_true_model_summary_columns(summary: pd.DataFrame) -> pd.DataFrame:
+    """Keep threshold-selection columns present even when no paired events exist."""
+
+    defaults: dict[str, object] = {
+        "thresholded_binary_accuracy": np.nan,
+        "positive_true_events": 0,
+        "reference_true_events": 0,
+        "positive_true_claimed_events": 0,
+        "reference_true_rejected_events": 0,
+        "positive_claim_recall": np.nan,
+        "reference_specificity": np.nan,
+        "false_positive_claims": 0,
+        "false_negative_claims": 0,
+    }
+    out = summary.copy()
+    for column, value in defaults.items():
+        if column not in out.columns:
+            out[column] = value
+    return out
+
+
 def apply_advanced_result_threshold_validation_patch() -> None:
     """Install paired-threshold validation and neutral zero-margin tie handling."""
 
@@ -116,6 +137,8 @@ def apply_advanced_result_threshold_validation_patch() -> None:
                 positive_true_label=positive_true_label,
             )
             summary = diagnostics.paired_model_margin_summary(decisions, true_model_col=true_model_col).copy()
+            if true_model_col:
+                summary = _ensure_true_model_summary_columns(summary)
             summary["positive_model"] = str(positive_model)
             summary["reference_model"] = str(reference_model)
             summary["margin_threshold"] = float(threshold)

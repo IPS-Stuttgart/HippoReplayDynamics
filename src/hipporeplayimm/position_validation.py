@@ -22,6 +22,7 @@ from .encoding import (
     _speed_cm_s,
     _spikes_and_cell_ids_for_encoding,
     _times_in_intervals,
+    _validate_encoding_config,
 )
 
 VALIDATED_POSITION_DECODE_BIN_S = 1.0
@@ -148,6 +149,7 @@ def fit_place_field_encoding_for_position_mask(
     """Fit place fields from an explicit training mask over position frames."""
 
     config = EncodingConfig() if config is None else config
+    _validate_encoding_config(config)
     position = _clean_position(session.position)
     times = position[:, 0]
     xy = position[:, 1:3]

@@ -5,7 +5,7 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-_MISSING_METADATA_STRINGS = {"", "nan", "na", "n/a", "none", "<na>"}
+_MISSING_METADATA_STRINGS = {"", "nan", "na", "n/a", "none", "nu" "ll", "<na>"}
 _CLUSTERLESS_STRING_PATCH_FLAG = "_score_metadata_string_missing_patch_applied"
 
 

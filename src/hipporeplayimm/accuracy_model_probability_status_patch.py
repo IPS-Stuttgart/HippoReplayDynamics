@@ -1,4 +1,4 @@
-"""Normalize status values for accuracy-upgrade model-probability diagnostics."""
+"""Normalize status/evidence values for accuracy-upgrade model-probability diagnostics."""
 
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ _PATCHED_FLAG = "_model_probability_status_patch_applied"
 
 
 def apply_model_probability_status_patch() -> None:
-    """Install status normalization for accuracy-upgrade probability summaries."""
+    """Install input normalization for accuracy-upgrade probability summaries."""
 
     from . import accuracy_upgrades
 
@@ -28,14 +28,14 @@ def apply_model_probability_status_patch() -> None:
         evidence_column: str = "log_evidence",
         group_columns=("session", "event_index"),
     ) -> pd.DataFrame:
-        if scores.empty or "status" not in scores.columns:
-            return original(
-                scores,
-                evidence_column=evidence_column,
-                group_columns=group_columns,
-            )
-        normalized = scores.copy()
-        normalized["status"] = normalized["status"].map(_normalize_status_value)
+        normalized = scores
+        if not scores.empty and ("status" in scores.columns or evidence_column in scores.columns):
+            normalized = scores.copy()
+            if "status" in normalized.columns:
+                normalized["status"] = normalized["status"].map(_normalize_status_value)
+            if evidence_column in normalized.columns:
+                normalized[evidence_column] = pd.to_numeric(normalized[evidence_column], errors="coerce")
+                normalized = normalized.dropna(subset=[evidence_column])
         return original(
             normalized,
             evidence_column=evidence_column,

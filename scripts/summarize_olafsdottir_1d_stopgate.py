@@ -114,8 +114,7 @@ def build_stopgate_summary(
     holdout = tier_rows["high_information_holdout19_debug"]
 
     technical_scoreable = not missing_tiers and all(
-        str(manifests.get(tier, {}).get("technical_classification", "technical-pass")) == "technical-pass"
-        for tier in REQUIRED_TIERS
+        manifest_has_technical_pass(manifests, tier) for tier in REQUIRED_TIERS
     )
     trajectory_family_supported = trajectory_supported(holdout, normalized, margin_threshold=margin_threshold)
     raw_trajectory_medians_negative = all(
@@ -172,6 +171,13 @@ def build_stopgate_summary(
         "claim_boundary": "technical portability and specificity result; no 1D trajectory-family biological scaling",
     }
     return pd.DataFrame([row])
+
+
+def manifest_has_technical_pass(manifests: dict[str, dict[str, object]], tier: str) -> bool:
+    """Return true only when a required tier has an explicit technical-pass manifest."""
+
+    manifest = manifests.get(tier)
+    return isinstance(manifest, dict) and str(manifest.get("technical_classification", "")) == "technical-pass"
 
 
 def row_for_tier(comparison: pd.DataFrame, tier: str) -> pd.Series | None:

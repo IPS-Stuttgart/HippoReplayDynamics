@@ -34,6 +34,15 @@ def _integer_count(name: str, value: Any) -> int:
     return count
 
 
+def _nonnegative_integer_count(name: str, value: Any) -> int:
+    """Return an integer-valued scalar count that is not negative."""
+
+    count = _integer_count(name, value)
+    if count < 0:
+        raise ValueError(f"{name} must be nonnegative")
+    return count
+
+
 def _positive_bin_count(n_bins: int) -> int:
     if isinstance(n_bins, (bool, np.bool_)):
         raise ValueError("n_bins must be a positive integer")
@@ -133,7 +142,7 @@ def apply_state_space_bin_count_validation_patch() -> None:
         min_k: int = 1,
         max_k: int = 0,
     ) -> np.ndarray:
-        top_k_count = None if top_k is None else _integer_count("top_k", top_k)
+        top_k_count = None if top_k is None else _nonnegative_integer_count("top_k", top_k)
         if mass_threshold is None or float(mass_threshold) <= 0.0:
             return original_mass_retaining_candidate_indices(
                 log_emission,

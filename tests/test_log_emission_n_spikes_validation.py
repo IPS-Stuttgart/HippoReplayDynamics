@@ -18,6 +18,20 @@ def _tensor_with_counts(counts: np.ndarray, n_spikes: object) -> LogEmissionTens
     )
 
 
+def test_log_emission_tensor_rejects_nan_log_likelihood() -> None:
+    counts = np.zeros((2, 1), dtype=int)
+
+    with pytest.raises(ValueError, match="NaN"):
+        LogEmissionTensor(
+            log_likelihood=np.array([[0.0, np.nan], [0.0, 0.0]], dtype=float),
+            spike_counts=counts,
+            times=np.arange(counts.shape[0], dtype=float),
+            dt=1.0,
+            cell_ids=np.array([1], dtype=int),
+            n_spikes=0,
+        )
+
+
 def test_log_emission_tensor_rejects_mismatched_n_spikes() -> None:
     with pytest.raises(ValueError, match="total spike_counts sum"):
         _tensor_with_counts(np.array([[1, 0], [0, 2]], dtype=int), 2)

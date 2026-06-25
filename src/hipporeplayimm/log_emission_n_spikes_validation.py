@@ -1,4 +1,10 @@
-"""Validate ``LogEmissionTensor.n_spikes`` against its count matrix."""
+"""Validate ``LogEmissionTensor`` summary fields after base construction.
+
+The base tensor permits ``-inf`` log-likelihood entries to mark impossible states,
+but ``NaN`` entries poison posterior normalization and evidence calculations.  This
+patch also keeps the stored ``n_spikes`` summary consistent with the validated
+``spike_counts`` tensor.
+"""
 
 from __future__ import annotations
 
@@ -10,7 +16,7 @@ _PATCH_FLAG = "_n_spikes_validation_applied"
 
 
 def apply_log_emission_n_spikes_validation_patch() -> None:
-    """Install an idempotent ``n_spikes`` consistency guard."""
+    """Install idempotent ``LogEmissionTensor`` post-construction guards."""
 
     if getattr(LogEmissionTensor, _PATCH_FLAG, False):
         return
@@ -19,10 +25,19 @@ def apply_log_emission_n_spikes_validation_patch() -> None:
 
     def _validated_post_init(self: LogEmissionTensor) -> None:
         original_post_init(self)
+        _validate_log_likelihood(self)
         _validate_n_spikes(self)
 
     LogEmissionTensor.__post_init__ = _validated_post_init  # type: ignore[method-assign]
     setattr(LogEmissionTensor, _PATCH_FLAG, True)
+
+
+def _validate_log_likelihood(emissions: LogEmissionTensor) -> None:
+    """Reject NaN likelihood entries while preserving ``-inf`` impossible states."""
+
+    values = np.asarray(emissions.log_likelihood, dtype=float)
+    if np.any(np.isnan(values)):
+        raise ValueError("log_likelihood must not contain NaN values")
 
 
 def _validate_n_spikes(emissions: LogEmissionTensor) -> None:

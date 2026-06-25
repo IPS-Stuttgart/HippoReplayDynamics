@@ -192,6 +192,20 @@ def _copy_score_diagnostics(
             row[f"diagnostic_{key}"] = value
 
 
+def _posterior_entropy(log_weights: np.ndarray) -> float:
+    """Return entropy without NaNs for zero-probability posterior bins."""
+
+    values = np.asarray(log_weights, dtype=float)
+    normalizer = logsumexp(values)
+    if not np.isfinite(normalizer):
+        raise ValueError("posterior log weights must contain finite probability mass")
+    normalized = values - normalizer
+    posterior = np.exp(normalized)
+    with np.errstate(invalid="ignore"):
+        entropy_terms = np.where(posterior > 0.0, posterior * normalized, 0.0)
+    return float(-np.sum(entropy_terms))
+
+
 def _trajectory_rows_from_log_posteriors(
     *,
     log_posteriors: np.ndarray,
@@ -215,7 +229,7 @@ def _trajectory_rows_from_log_posteriors(
             "map_y": float(bin_centers[map_bin, 1]),
             "map_bin": map_bin,
             "map_probability": float(posterior[map_bin]),
-            "posterior_entropy": float(-np.sum(posterior * normalized)),
+            "posterior_entropy": _posterior_entropy(normalized),
             "spikes_in_bin": int(emissions.spike_counts[time_index].sum()),
             likelihood_column: float(score.log_likelihood),
         }
@@ -263,7 +277,7 @@ def _trajectory_from_prefix_scores(model: object, emissions: LogEmissionTensor, 
             "map_y": float(bin_centers[map_bin, 1]),
             "map_bin": map_bin,
             "map_probability": float(posterior[map_bin]),
-            "posterior_entropy": float(-np.sum(posterior * log_posterior)),
+            "posterior_entropy": _posterior_entropy(log_posterior),
             "spikes_in_bin": int(emissions.spike_counts[time_index].sum()),
             "prefix_log_likelihood": float(score.log_likelihood),
         }

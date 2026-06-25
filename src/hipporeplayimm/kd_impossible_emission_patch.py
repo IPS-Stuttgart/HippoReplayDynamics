@@ -26,7 +26,9 @@ def apply_kd_impossible_emission_patch() -> None:
 
 
 def _scaled_emission(log_emissions: np.ndarray, time_index: int) -> tuple[np.ndarray, float]:
-    row = log_emissions[time_index]
+    row = np.asarray(log_emissions[time_index], dtype=float)
+    if np.any(np.isnan(row)) or np.any(np.isposinf(row)):
+        raise ValueError("log_emissions cannot contain NaN or +inf")
     offset = float(np.max(row))
     if np.isneginf(offset):
         return np.zeros_like(row, dtype=float), offset

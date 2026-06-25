@@ -10,6 +10,7 @@ mapped back without a full trajectory posterior.
 
 from __future__ import annotations
 
+from functools import wraps
 from typing import Any
 
 import numpy as np
@@ -19,6 +20,8 @@ from .models import EventScore, _posterior_diagnostics
 from .reverse_time_terminal_guard import _clear_unmappable_reverse_terminal
 
 _PATCHED_FLAG = "_wrapper_return_trajectory_patch_applied"
+_STATE_SPACE_DIAGNOSTIC_PATCH_ATTR = "_state_space_evidence_only_diagnostics_patch_applied"
+_STATE_SPACE_DIAGNOSTIC_ORIGINAL_ATTR = "_state_space_evidence_only_diagnostics_original"
 
 
 def apply_wrapper_return_trajectory_patch() -> None:
@@ -33,6 +36,86 @@ def apply_wrapper_return_trajectory_patch() -> None:
     if not getattr(reverse_models, _PATCHED_FLAG, False):
         _patch_direct_reverse_wrappers(extensions, reverse_models)
         setattr(reverse_models, _PATCHED_FLAG, True)
+    _patch_state_space_evidence_only_diagnostics()
+
+
+def _patch_state_space_evidence_only_diagnostics() -> None:
+    """Keep path-model trajectory diagnostics aligned with evidence-only scoring."""
+
+    import sys
+
+    duration_occupancy = sys.modules.get("hipporeplayimm.duration_occupancy")
+    state_space = sys.modules.get("hipporeplayimm.state_space")
+    if duration_occupancy is None or state_space is None:
+        return
+
+    original = getattr(duration_occupancy, "_score_state_space_duration_with_occupancy", None)
+    if original is None:
+        return
+
+    if getattr(original, _STATE_SPACE_DIAGNOSTIC_PATCH_ATTR, False):
+        patched = original
+    else:
+
+        @wraps(original)
+        def score_state_space_duration_with_occupancy(
+            self,
+            emissions,
+            bin_centers,
+            candidate_indices=None,
+            *,
+            occupancy_s=None,
+            return_trajectory: bool = True,
+        ):
+            result = original(
+                self,
+                emissions,
+                bin_centers,
+                candidate_indices=candidate_indices,
+                occupancy_s=occupancy_s,
+                return_trajectory=return_trajectory,
+            )
+            if return_trajectory is False:
+                _mark_pruned_path_evidence_only(self, result)
+            return result
+
+        setattr(
+            score_state_space_duration_with_occupancy,
+            _STATE_SPACE_DIAGNOSTIC_PATCH_ATTR,
+            True,
+        )
+        setattr(
+            score_state_space_duration_with_occupancy,
+            _STATE_SPACE_DIAGNOSTIC_ORIGINAL_ATTR,
+            original,
+        )
+        patched = score_state_space_duration_with_occupancy
+        duration_occupancy._score_state_space_duration_with_occupancy = patched
+
+    state_space_model = getattr(state_space, "StateSpaceReplayModel", None)
+    if state_space_model is None:
+        return
+
+    current_score = getattr(state_space_model, "score", None)
+    original_score = getattr(patched, _STATE_SPACE_DIAGNOSTIC_ORIGINAL_ATTR, None)
+    if (
+        current_score is patched
+        or current_score is original
+        or (original_score is not None and current_score is original_score)
+    ):
+        state_space_model.score = patched
+
+
+def _mark_pruned_path_evidence_only(model: Any, result: EventScore) -> None:
+    diagnostics = dict(getattr(result, "diagnostics", {}) or {})
+    mode = str(getattr(model, "mode", diagnostics.get("state_space_mode", "")))
+    if mode == "momentum":
+        diagnostics["state_space_momentum_trajectory_posterior"] = "not_returned_evidence_only"
+    elif mode == "imm":
+        diagnostics["state_space_imm_trajectory_posterior"] = "not_returned_evidence_only"
+    else:
+        return
+    result.diagnostics = diagnostics
 
 
 def _patch_result_improvement_wrappers(extensions: Any) -> None:
@@ -243,92 +326,14 @@ def _patch_direct_reverse_wrappers(extensions: Any, reverse_models: Any) -> None
             terminal_log_posterior=terminal,
             trajectory_log_posterior=trajectory,
         )
-        if terminal is not None:
-            result.diagnostics.update(_posterior_diagnostics(terminal, bin_centers))
+        if result.terminal_log_posterior is not None:
+            result.diagnostics.update(_posterior_diagnostics(result.terminal_log_posterior, bin_centers))
         if mapped_terminal_from_trajectory:
             return result
         return _clear_unmappable_reverse_terminal(result)
 
-    def bidirectional_score(
-        self,
-        emissions,
-        bin_centers,
-        *,
-        occupancy_s=None,
-        candidate_indices=None,
-        return_trajectory: bool | None = None,
-    ) -> EventScore:
-        kwargs: dict[str, object] = {}
-        if occupancy_s is not None:
-            kwargs["occupancy_s"] = occupancy_s
-        if candidate_indices is not None:
-            kwargs["candidate_indices"] = candidate_indices
-        if return_trajectory is not None:
-            kwargs["return_trajectory"] = bool(return_trajectory)
-        forward = extensions._call_score_with_supported_kwargs(  # noqa: SLF001
-            self.base_model.score,
-            emissions,
-            bin_centers,
-            kwargs,
-        )
-        reverse_return_trajectory = True if return_trajectory is False else return_trajectory
-        reverse = reverse_models.ReverseTimeReplayModel(self.base_model).score(
-            emissions,
-            bin_centers,
-            occupancy_s=occupancy_s,
-            candidate_indices=candidate_indices,
-            return_trajectory=reverse_return_trajectory,
-        )
-        weights = np.exp(
-            np.array([forward.log_likelihood, reverse.log_likelihood])
-            - logsumexp([forward.log_likelihood, reverse.log_likelihood])
-        )
-        logp = float(logsumexp([forward.log_likelihood, reverse.log_likelihood]) - np.log(2.0))
-        terminal = reverse_models._mixture_log_posterior(  # noqa: SLF001
-            forward.terminal_log_posterior,
-            reverse.terminal_log_posterior,
-            weights,
-        )
-        trajectory = None
-        if (
-            return_trajectory is not False
-            and forward.trajectory_log_posterior is not None
-            and reverse.trajectory_log_posterior is not None
-        ):
-            trajectory = reverse_models._mixture_log_posterior(  # noqa: SLF001
-                forward.trajectory_log_posterior,
-                reverse.trajectory_log_posterior,
-                weights,
-            )
-        if trajectory is not None:
-            terminal = np.asarray(trajectory[-1], dtype=float).copy()
-        diagnostics = {
-            "time_direction": "bidirectional-mixture",
-            "base_model": str(forward.model_name),
-            "forward_model_posterior_probability": float(weights[0]),
-            "reverse_model_posterior_probability": float(weights[1]),
-        }
-        if terminal is not None:
-            diagnostics.update(_posterior_diagnostics(terminal, bin_centers))
-        return EventScore(
-            self.name or f"{forward.model_name}-bidirectional",
-            logp,
-            forward.n_time,
-            forward.n_spikes,
-            diagnostics=diagnostics,
-            terminal_log_posterior=terminal,
-            trajectory_log_posterior=trajectory,
-        )
-
     reverse_score.__name__ = "score"
     reverse_score.__doc__ = reverse_models.ReverseTimeReplayModel.score.__doc__
     reverse_score.__module__ = reverse_models.__name__
-    bidirectional_score.__name__ = "score"
-    bidirectional_score.__doc__ = reverse_models.BidirectionalReplayModel.score.__doc__
-    bidirectional_score.__module__ = reverse_models.__name__
-
+    reverse_score._reverse_time_terminal_guard_applied = True  # type: ignore[attr-defined]
     reverse_models.ReverseTimeReplayModel.score = reverse_score
-    reverse_models.BidirectionalReplayModel.score = bidirectional_score
-
-
-__all__ = ["apply_wrapper_return_trajectory_patch"]

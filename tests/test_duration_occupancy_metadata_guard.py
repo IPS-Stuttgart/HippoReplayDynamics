@@ -70,6 +70,28 @@ def test_uniform_probabilities_are_bootstrapped_into_duration_occupancy_module()
     )
 
 
+def test_transition_duration_validation_patch_recovers_from_partial_module_flags(monkeypatch) -> None:
+    import hipporeplayimm.state_space_displacement_imm as displacement_imm
+    import hipporeplayimm.state_space_displacement_momentum as displacement_momentum
+    import hipporeplayimm.state_space_sparse_momentum as sparse_momentum
+    import hipporeplayimm.state_space_trajectory_imm as trajectory_imm
+    from hipporeplayimm.duration_occupancy_metadata_guard import (
+        apply_duration_occupancy_metadata_guard_patch,
+        _coerce_transition_durations,
+    )
+
+    monkeypatch.setattr(sparse_momentum, "_transition_duration_validation_patch_applied", True, raising=False)
+    for module in (trajectory_imm, displacement_momentum, displacement_imm):
+        monkeypatch.setattr(module, "_transition_duration_validation_patch_applied", False, raising=False)
+
+    apply_duration_occupancy_metadata_guard_patch()
+
+    for module in (trajectory_imm, displacement_momentum, displacement_imm):
+        assert getattr(module, "_transition_duration_validation_patch_applied", False)
+        assert module._coerce_transition_durations is _coerce_transition_durations
+        assert getattr(module._duration_adjusted_decays, "_transition_duration_validation_wrapped", False)
+
+
 def test_transition_duration_guard_fills_only_missing_metadata() -> None:
     durations = _coerce_transition_durations([], n_time=3, fallback_dt=0.02)
 

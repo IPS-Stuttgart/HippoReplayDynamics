@@ -80,6 +80,7 @@ SOURCE_DATA_COLUMNS = [
 ]
 
 GATE_COLUMNS = ["gate", "passed", "observed", "criterion"]
+DAYLESS_METADATA_FILE_TYPES = {"cellinfo", "tetinfo"}
 
 
 def build_file_inventory(dataset_root: str | Path) -> pd.DataFrame:
@@ -130,19 +131,24 @@ def build_source_data_inventory(inventory: pd.DataFrame) -> pd.DataFrame:
 
 
 def build_session_day_qc(inventory: pd.DataFrame) -> pd.DataFrame:
-    if inventory.empty or "animal" not in inventory:
+    if inventory.empty or not {"animal", "day", "frank_file_type"}.issubset(inventory.columns):
         return pd.DataFrame(columns=DAY_QC_COLUMNS)
-    parsed = inventory[
+    typed = inventory[
         inventory["animal"].astype(str).ne("")
-        & inventory["day"].astype(str).ne("")
         & inventory["frank_file_type"].astype(str).ne("")
     ].copy()
+    if typed.empty:
+        return pd.DataFrame(columns=DAY_QC_COLUMNS)
+    dayless_metadata_by_animal = _dayless_metadata_types_by_animal(typed)
+    parsed = typed[typed["day"].astype(str).ne("")].copy()
     if parsed.empty:
         return pd.DataFrame(columns=DAY_QC_COLUMNS)
 
     rows: list[dict[str, object]] = []
     for (animal, day), group in parsed.groupby(["animal", "day"], sort=True):
+        animal_key = str(animal).lower()
         types = {str(value).lower() for value in group["frank_file_type"].dropna() if str(value)}
+        types |= dayless_metadata_by_animal.get(animal_key, set())
         has_task = "task" in types
         has_position = bool(types.intersection({"pos", "rawpos", "linpos"}))
         has_linearized_position = "linpos" in types
@@ -319,6 +325,23 @@ def write_qc_outputs(dataset_root: str | Path, output_dir: str | Path) -> dict[s
         encoding="utf-8",
     )
     return paths
+
+
+def _dayless_metadata_types_by_animal(inventory: pd.DataFrame) -> dict[str, set[str]]:
+    if inventory.empty or not {"animal", "day", "frank_file_type"}.issubset(inventory.columns):
+        return {}
+    file_types = inventory["frank_file_type"].astype(str).str.lower()
+    metadata = inventory[
+        inventory["animal"].astype(str).ne("")
+        & inventory["day"].astype(str).eq("")
+        & file_types.isin(DAYLESS_METADATA_FILE_TYPES)
+    ].copy()
+    by_animal: dict[str, set[str]] = {}
+    for animal, group in metadata.groupby("animal", sort=True):
+        metadata_types = {str(value).lower() for value in group["frank_file_type"].dropna() if str(value)}
+        if metadata_types:
+            by_animal[str(animal).lower()] = metadata_types
+    return by_animal
 
 
 def _parse_frank_file_name(file_name: str) -> dict[str, str]:

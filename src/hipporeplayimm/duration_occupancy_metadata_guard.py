@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 from dataclasses import replace
+import operator
 from typing import Any, Callable
 
 import numpy as np
@@ -33,7 +34,7 @@ def apply_duration_occupancy_metadata_guard_patch() -> None:
         return replace(restricted, metadata=metadata)
 
     def _uniform_probabilities(n_bins: int, valid_bin_mask=None):
-        return previous_uniform_probabilities(n_bins, valid_bin_mask)
+        return previous_uniform_probabilities(_positive_integer_bin_count(n_bins), valid_bin_mask)
 
     _candidate_selection_emissions.__name__ = previous_candidate_selection.__name__
     _candidate_selection_emissions.__doc__ = previous_candidate_selection.__doc__
@@ -43,6 +44,18 @@ def apply_duration_occupancy_metadata_guard_patch() -> None:
     _duration_occupancy._candidate_selection_emissions = _candidate_selection_emissions
     _duration_occupancy._uniform_probabilities = _uniform_probabilities
     _duration_occupancy._metadata_guard_patch_applied = True
+
+
+def _positive_integer_bin_count(value: object) -> int:
+    if isinstance(value, (bool, np.bool_)):
+        raise ValueError("n_bins must be a positive integer")
+    try:
+        count = operator.index(value)
+    except TypeError as exc:
+        raise ValueError("n_bins must be a positive integer") from exc
+    if count <= 0:
+        raise ValueError("n_bins must be a positive integer")
+    return int(count)
 
 
 def _apply_transition_duration_validation() -> None:

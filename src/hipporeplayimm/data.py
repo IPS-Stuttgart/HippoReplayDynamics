@@ -411,7 +411,7 @@ def _as_intervals(value: Any) -> np.ndarray:
         return np.empty((0, 2), dtype=float)
     if arr.ndim == 1:
         if arr.shape[0] == 2:
-            return arr.reshape(1, 2).astype(float)
+            return _validate_intervals(arr.reshape(1, 2).astype(float))
         raise ValueError(f"Intervals must have two columns; got shape {arr.shape}")
     if arr.ndim != 2:
         raise ValueError(f"Intervals must be one- or two-dimensional; got shape {arr.shape}")
@@ -419,7 +419,15 @@ def _as_intervals(value: Any) -> np.ndarray:
         arr = arr.T
     if arr.shape[1] != 2:
         raise ValueError(f"Intervals must have two columns; got shape {arr.shape}")
-    return arr.astype(float)
+    return _validate_intervals(arr.astype(float))
+
+
+def _validate_intervals(intervals: np.ndarray) -> np.ndarray:
+    if not np.all(np.isfinite(intervals)):
+        raise ValueError("Intervals must contain finite start and end times")
+    if np.any(intervals[:, 1] < intervals[:, 0]):
+        raise ValueError("Intervals must have end times greater than or equal to start times")
+    return intervals
 
 
 def _times_in_intervals(times: np.ndarray, intervals: np.ndarray) -> np.ndarray:

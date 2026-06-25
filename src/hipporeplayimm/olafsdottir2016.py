@@ -6,7 +6,7 @@ from dataclasses import dataclass
 import csv
 import math
 import hashlib
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 import re
 import shutil
 from urllib.request import urlopen
@@ -355,8 +355,26 @@ def verify_md5(path: str | Path, expected_md5: str) -> None:
 
 def extract_archive(archive_path: str | Path, dataset_root: str | Path) -> None:
     root = Path(dataset_root)
+    root.mkdir(parents=True, exist_ok=True)
+    root_resolved = root.resolve()
     with zipfile.ZipFile(archive_path) as archive:
+        for member in archive.infolist():
+            _validate_safe_zip_member_path(member.filename, root_resolved)
         archive.extractall(root)
+
+
+def _validate_safe_zip_member_path(member_name: str, root_resolved: Path) -> None:
+    """Reject zip members that would escape ``root_resolved`` when extracted."""
+
+    normalized = member_name.replace("\\", "/")
+    if "\x00" in member_name or not normalized or re.match(r"^[A-Za-z]:", normalized):
+        raise ValueError(f"Unsafe zip member path: {member_name!r}")
+    member_path = PurePosixPath(normalized)
+    if member_path.is_absolute() or any(part in {"", ".", ".."} for part in member_path.parts):
+        raise ValueError(f"Unsafe zip member path: {member_name!r}")
+    target = root_resolved.joinpath(*member_path.parts).resolve()
+    if not target.is_relative_to(root_resolved):
+        raise ValueError(f"Unsafe zip member path: {member_name!r}")
 
 
 def _read_axona_header_and_payload(path: str | Path) -> tuple[dict[str, str], bytes]:

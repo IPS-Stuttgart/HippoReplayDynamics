@@ -21,7 +21,11 @@ _EXTRA_MODEL_NAMES = {
     "sorted-spike-state-space-trajectory-imm-low-leak-exact-sparse",
     "sorted-spike-state-space-trajectory-imm-persistent-exact-sparse",
     "sorted-spike-state-space-displacement-momentum",
+    "sorted-spike-state-space-displacement-imm",
+    "sorted-spike-state-space-velocity-momentum",
     "clusterless-state-space-displacement-momentum",
+    "clusterless-state-space-displacement-imm",
+    "clusterless-state-space-velocity-momentum",
 }
 _EXTRA_TRAJECTORY_NAMES = set(_EXTRA_MODEL_NAMES)
 
@@ -163,10 +167,39 @@ def _build_extra_model(name: str, args, globals_dict: dict[str, Any]) -> object:
             name=name,
         )
 
+    if name == "sorted-spike-state-space-velocity-momentum":
+        return sorted_model_cls(
+            "displacement-momentum",
+            config=state_config(args, "displacement-momentum"),
+            name=name,
+        )
+
+    if name == "sorted-spike-state-space-displacement-imm":
+        return sorted_model_cls(
+            "displacement-imm",
+            config=state_config(args, "displacement-imm"),
+            name=name,
+        )
+
     if name == "clusterless-state-space-displacement-momentum":
         return clusterless_model_cls(
             mode="displacement-momentum",
             config=state_config(args, "displacement-momentum"),
+            mark_likelihood=args.clusterless_mark_likelihood,
+        )
+
+    if name == "clusterless-state-space-velocity-momentum":
+        return clusterless_model_cls(
+            mode="displacement-momentum",
+            config=state_config(args, "displacement-momentum"),
+            name=name,
+            mark_likelihood=args.clusterless_mark_likelihood,
+        )
+
+    if name == "clusterless-state-space-displacement-imm":
+        return clusterless_model_cls(
+            mode="displacement-imm",
+            config=state_config(args, "displacement-imm"),
             mark_likelihood=args.clusterless_mark_likelihood,
         )
 

@@ -103,6 +103,45 @@ def test_position_mask_encoding_falls_back_to_all_spikes_without_excitatory_labe
     )
 
 
+@pytest.mark.parametrize(
+    ("config_kwargs", "message"),
+    [
+        ({"smoothing_sigma_bins": -1.0}, "smoothing_sigma_bins"),
+        ({"min_occupancy_s": 0.0}, "min_occupancy_s"),
+        ({"rate_floor_hz": float("nan")}, "rate_floor_hz"),
+        ({"arena_padding_cm": -0.1}, "arena_padding_cm"),
+    ],
+)
+def test_position_mask_encoding_rejects_invalid_encoding_config(tmp_path, config_kwargs, message):
+    times = np.array([0.0, 1.0, 2.0], dtype=float)
+    position = np.column_stack([times, times, np.zeros_like(times), np.zeros_like(times)])
+    session = ReplaySession(
+        rat="RatX",
+        name="OpenX",
+        path=tmp_path,
+        position=position,
+        spikes=np.empty((0, 2), dtype=float),
+        tetrode_cell_ids=np.empty((0, 2), dtype=float),
+        excitatory_neurons=np.array([], dtype=int),
+        inhibitory_neurons=np.array([], dtype=int),
+        ripple_events=np.empty((0, 6), dtype=float),
+        run_times=np.array([[0.0, 2.0]], dtype=float),
+        sleep_box_immobile_times=np.empty((0, 2), dtype=float),
+        sleep_times=np.empty((0, 2), dtype=float),
+        rem_times=np.empty((0, 2), dtype=float),
+        well_sequence=None,
+        metadata={},
+    )
+    config = EncodingConfig(
+        bin_size_cm=1.0,
+        min_speed_cm_s=0.0,
+        **config_kwargs,
+    )
+
+    with pytest.raises(ValueError, match=message):
+        fit_place_field_encoding_for_position_mask(session, np.ones(times.shape, dtype=bool), config)
+
+
 def test_validate_session_position_decoding_returns_finite_cv_metrics(tmp_path):
     times = np.linspace(0.0, 20.0, 1001)
     x = np.linspace(0.0, 100.0, times.size)

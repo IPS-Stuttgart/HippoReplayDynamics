@@ -8,20 +8,6 @@ from hipporeplayimm.state_space import StateSpaceDecoderConfig, StateSpaceReplay
 
 
 def test_state_space_momentum_rejects_nan_emissions_before_candidate_scoring() -> None:
-    emissions = LogEmissionTensor(
-        log_likelihood=np.array(
-            [
-                [0.0, np.nan],
-                [0.0, 0.0],
-            ],
-            dtype=float,
-        ),
-        spike_counts=np.empty((2, 0), dtype=int),
-        times=np.array([0.0, 0.02], dtype=float),
-        dt=0.02,
-        cell_ids=np.empty(0, dtype=int),
-        n_spikes=0,
-    )
     model = StateSpaceReplayModel(
         mode="momentum",
         config=StateSpaceDecoderConfig(
@@ -32,4 +18,18 @@ def test_state_space_momentum_rejects_nan_emissions_before_candidate_scoring() -
     )
 
     with pytest.raises(ValueError, match="NaN"):
+        emissions = LogEmissionTensor(
+            log_likelihood=np.array(
+                [
+                    [0.0, np.nan],
+                    [0.0, 0.0],
+                ],
+                dtype=float,
+            ),
+            spike_counts=np.empty((2, 0), dtype=int),
+            times=np.array([0.0, 0.02], dtype=float),
+            dt=0.02,
+            cell_ids=np.empty(0, dtype=int),
+            n_spikes=0,
+        )
         model.score(emissions, np.array([[0.0, 0.0], [1.0, 0.0]], dtype=float))

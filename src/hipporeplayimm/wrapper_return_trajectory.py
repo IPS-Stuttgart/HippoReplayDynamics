@@ -326,14 +326,92 @@ def _patch_direct_reverse_wrappers(extensions: Any, reverse_models: Any) -> None
             terminal_log_posterior=terminal,
             trajectory_log_posterior=trajectory,
         )
-        if result.terminal_log_posterior is not None:
-            result.diagnostics.update(_posterior_diagnostics(result.terminal_log_posterior, bin_centers))
+        if terminal is not None:
+            result.diagnostics.update(_posterior_diagnostics(terminal, bin_centers))
         if mapped_terminal_from_trajectory:
             return result
         return _clear_unmappable_reverse_terminal(result)
 
+    def bidirectional_score(
+        self,
+        emissions,
+        bin_centers,
+        *,
+        occupancy_s=None,
+        candidate_indices=None,
+        return_trajectory: bool | None = None,
+    ) -> EventScore:
+        kwargs: dict[str, object] = {}
+        if occupancy_s is not None:
+            kwargs["occupancy_s"] = occupancy_s
+        if candidate_indices is not None:
+            kwargs["candidate_indices"] = candidate_indices
+        if return_trajectory is not None:
+            kwargs["return_trajectory"] = bool(return_trajectory)
+        forward = extensions._call_score_with_supported_kwargs(  # noqa: SLF001
+            self.base_model.score,
+            emissions,
+            bin_centers,
+            kwargs,
+        )
+        reverse_return_trajectory = True if return_trajectory is False else return_trajectory
+        reverse = reverse_models.ReverseTimeReplayModel(self.base_model).score(
+            emissions,
+            bin_centers,
+            occupancy_s=occupancy_s,
+            candidate_indices=candidate_indices,
+            return_trajectory=reverse_return_trajectory,
+        )
+        weights = np.exp(
+            np.array([forward.log_likelihood, reverse.log_likelihood])
+            - logsumexp([forward.log_likelihood, reverse.log_likelihood])
+        )
+        logp = float(logsumexp([forward.log_likelihood, reverse.log_likelihood]) - np.log(2.0))
+        terminal = reverse_models._mixture_log_posterior(  # noqa: SLF001
+            forward.terminal_log_posterior,
+            reverse.terminal_log_posterior,
+            weights,
+        )
+        trajectory = None
+        if (
+            return_trajectory is not False
+            and forward.trajectory_log_posterior is not None
+            and reverse.trajectory_log_posterior is not None
+        ):
+            trajectory = reverse_models._mixture_log_posterior(  # noqa: SLF001
+                forward.trajectory_log_posterior,
+                reverse.trajectory_log_posterior,
+                weights,
+            )
+        if trajectory is not None:
+            terminal = np.asarray(trajectory[-1], dtype=float).copy()
+        diagnostics = {
+            "time_direction": "bidirectional-mixture",
+            "base_model": str(forward.model_name),
+            "forward_model_posterior_probability": float(weights[0]),
+            "reverse_model_posterior_probability": float(weights[1]),
+        }
+        if terminal is not None:
+            diagnostics.update(_posterior_diagnostics(terminal, bin_centers))
+        return EventScore(
+            self.name or f"{forward.model_name}-bidirectional",
+            logp,
+            forward.n_time,
+            forward.n_spikes,
+            diagnostics=diagnostics,
+            terminal_log_posterior=terminal,
+            trajectory_log_posterior=trajectory,
+        )
+
     reverse_score.__name__ = "score"
     reverse_score.__doc__ = reverse_models.ReverseTimeReplayModel.score.__doc__
     reverse_score.__module__ = reverse_models.__name__
-    reverse_score._reverse_time_terminal_guard_applied = True  # type: ignore[attr-defined]
+    bidirectional_score.__name__ = "score"
+    bidirectional_score.__doc__ = reverse_models.BidirectionalReplayModel.score.__doc__
+    bidirectional_score.__module__ = reverse_models.__name__
+
     reverse_models.ReverseTimeReplayModel.score = reverse_score
+    reverse_models.BidirectionalReplayModel.score = bidirectional_score
+
+
+__all__ = ["apply_wrapper_return_trajectory_patch"]

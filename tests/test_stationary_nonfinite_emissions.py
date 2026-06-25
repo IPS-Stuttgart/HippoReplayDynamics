@@ -30,3 +30,23 @@ def test_stationary_ignores_impossible_bins_without_poisoning_evidence() -> None
     assert np.allclose(logsumexp(trajectory, axis=1), 0.0)
     assert np.allclose(np.exp(trajectory[:, 0]), 1.0)
     assert np.all(np.isneginf(trajectory[:, 1]))
+
+
+def test_stationary_rejects_nan_emissions() -> None:
+    emissions = LogEmissionTensor(
+        log_likelihood=np.array(
+            [
+                [0.0, np.nan],
+                [0.0, 0.0],
+            ],
+            dtype=float,
+        ),
+        spike_counts=np.zeros((2, 1), dtype=int),
+        times=np.array([0.0, 1.0]),
+        dt=1.0,
+        cell_ids=np.array([1]),
+        n_spikes=0,
+    )
+
+    with pytest.raises(ValueError, match="NaN"):
+        _score_stationary(emissions)

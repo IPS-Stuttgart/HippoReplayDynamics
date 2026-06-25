@@ -42,7 +42,8 @@ def shuffled_encoding(
         permutation = rng.permutation(encoding.n_bins)
         rates = rates[:, permutation]
     elif mode == "independent-spatial-permutation":
-        rates = np.vstack([row[rng.permutation(encoding.n_bins)] for row in rates])
+        if rates.shape[0] > 0:
+            rates = np.vstack([row[rng.permutation(encoding.n_bins)] for row in rates])
     else:
         raise ValueError(
             "mode must be one of: cell-permutation, spatial-roll, "

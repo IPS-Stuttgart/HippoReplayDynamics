@@ -8,6 +8,9 @@ from typing import Any
 
 import numpy as np
 
+_PATCH_ATTR = "__hipporeplayimm_bin_count_validation_patch__"
+_ORIGINAL_ATTR = "__hipporeplayimm_original__"
+
 
 def _integer_count(name: str, value: Any) -> int:
     """Return an integer-valued scalar count without silent truncation."""
@@ -68,9 +71,17 @@ def _coerce_bool_mask(valid_bin_mask: Any, n_bins: int) -> np.ndarray | None:
 
 
 def _mark_patched(wrapper: Callable[..., Any], original: Callable[..., Any]) -> Callable[..., Any]:
-    setattr(wrapper, "__hipporeplayimm_original__", original)
-    setattr(wrapper, "__hipporeplayimm_bin_count_validation_patch__", True)
+    setattr(wrapper, _ORIGINAL_ATTR, original)
+    setattr(wrapper, _PATCH_ATTR, True)
     return wrapper
+
+
+def _original_callable(function: Callable[..., Any]) -> Callable[..., Any]:
+    return getattr(function, _ORIGINAL_ATTR, function)
+
+
+def _is_patched(function: Callable[..., Any]) -> bool:
+    return bool(getattr(function, _PATCH_ATTR, False))
 
 
 def apply_state_space_bin_count_validation_patch() -> None:
@@ -78,14 +89,20 @@ def apply_state_space_bin_count_validation_patch() -> None:
 
     from . import state_space_utils as utils
 
-    if getattr(utils._coerce_valid_bin_mask, "__hipporeplayimm_bin_count_validation_patch__", False):
-        return
+    current_helpers = {
+        "_coerce_valid_bin_mask": utils._coerce_valid_bin_mask,
+        "_uniform_log_prior": utils._uniform_log_prior,
+        "_uniform_probabilities": utils._uniform_probabilities,
+        "_valid_bin_count": utils._valid_bin_count,
+        "_mass_retaining_candidate_indices": utils._mass_retaining_candidate_indices,
+    }
+    originals = {name: _original_callable(function) for name, function in current_helpers.items()}
 
-    original_coerce_valid_bin_mask = utils._coerce_valid_bin_mask
-    original_uniform_log_prior = utils._uniform_log_prior
-    original_uniform_probabilities = utils._uniform_probabilities
-    original_valid_bin_count = utils._valid_bin_count
-    original_mass_retaining_candidate_indices = utils._mass_retaining_candidate_indices
+    original_coerce_valid_bin_mask = originals["_coerce_valid_bin_mask"]
+    original_uniform_log_prior = originals["_uniform_log_prior"]
+    original_uniform_probabilities = originals["_uniform_probabilities"]
+    original_valid_bin_count = originals["_valid_bin_count"]
+    original_mass_retaining_candidate_indices = originals["_mass_retaining_candidate_indices"]
 
     def _coerce_valid_bin_mask(valid_bin_mask: Any, n_bins: int):
         count = _positive_bin_count(n_bins)
@@ -144,20 +161,19 @@ def apply_state_space_bin_count_validation_patch() -> None:
             original_mass_retaining_candidate_indices,
         ),
     }
-    originals = {
-        "_coerce_valid_bin_mask": original_coerce_valid_bin_mask,
-        "_uniform_log_prior": original_uniform_log_prior,
-        "_uniform_probabilities": original_uniform_probabilities,
-        "_valid_bin_count": original_valid_bin_count,
-        "_mass_retaining_candidate_indices": original_mass_retaining_candidate_indices,
-    }
 
+    active_helpers: dict[str, Callable[..., Any]] = {}
     for name, func in patched.items():
+        current = getattr(utils, name)
+        if _is_patched(current):
+            active_helpers[name] = current
+            continue
         setattr(utils, name, func)
+        active_helpers[name] = func
 
     for module in list(sys.modules.values()):
         if not getattr(module, "__name__", "").startswith("hipporeplayimm"):
             continue
         for name, original in originals.items():
             if getattr(module, name, None) is original:
-                setattr(module, name, patched[name])
+                setattr(module, name, active_helpers[name])

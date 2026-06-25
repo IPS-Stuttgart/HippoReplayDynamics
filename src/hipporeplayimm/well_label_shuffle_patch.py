@@ -20,7 +20,14 @@ def apply_well_label_shuffle_patch() -> None:
 
 
 def shuffle_well_labels(frame: pd.DataFrame, random_seed: int = 1) -> pd.DataFrame:
-    """Shuffle complete well-label tuples without breaking ID/coordinate links."""
+    """Shuffle complete label rows without breaking ID/coordinate links.
+
+    Some score tables contain ``true_well_x``/``true_well_y`` columns but leave
+    them missing when only the well identity is available.  The null control
+    should still shuffle the available well identities in that case.  Rows
+    without ``true_well_id`` remain untouched so padding/unlabelled events stay
+    unlabelled.
+    """
 
     if frame.empty or "true_well_id" not in frame:
         return frame.copy()
@@ -29,13 +36,13 @@ def shuffle_well_labels(frame: pd.DataFrame, random_seed: int = 1) -> pd.DataFra
     if not label_columns:
         return out
 
-    complete_labels = out[label_columns].notna().all(axis=1)
-    if not bool(complete_labels.any()):
+    labelled_rows = out["true_well_id"].notna()
+    if not bool(labelled_rows.any()):
         return out
 
-    label_values = out.loc[complete_labels, label_columns].to_numpy(copy=True)
+    label_values = out.loc[labelled_rows, label_columns].to_numpy(copy=True)
     rng = np.random.default_rng(random_seed)
-    out.loc[complete_labels, label_columns] = label_values[
+    out.loc[labelled_rows, label_columns] = label_values[
         rng.permutation(label_values.shape[0])
     ]
     return out

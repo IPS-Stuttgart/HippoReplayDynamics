@@ -3,6 +3,11 @@
 Synthetic recovery event indices restart for each session. Summary helpers that are
 applied to concatenated multi-session score tables must therefore count distinct
 ``(session, event_index)`` pairs instead of only unique integer event indices.
+
+The same summaries may be rebuilt from CSV artifacts. Pandas can then expose
+boolean flags as strings such as ``"True"``/``"False"``; normalize those columns
+before delegating to the original summary helpers so string false values are not
+treated as truthy or rejected by reductions.
 """
 
 from __future__ import annotations
@@ -11,11 +16,18 @@ from functools import wraps
 
 import pandas as pd
 
+from .evidence_reporting import _coerce_bool_series
+
 _PATCHED_FLAG = "_simulation_recovery_session_event_count_patch_applied"
+_SUMMARY_BOOL_COLUMNS = (
+    "recovered_expected_model",
+    "exact_surrogate_recovered_expected_model",
+    "evidence_comparable",
+)
 
 
 def apply_simulation_recovery_event_count_patch() -> None:
-    """Install session-aware event counting for simulation-recovery summaries."""
+    """Install session-aware, CSV-tolerant event counting for recovery summaries."""
 
     import hipporeplayimm.simulation_recovery as recovery
 
@@ -27,20 +39,22 @@ def apply_simulation_recovery_event_count_patch() -> None:
 
     @wraps(original_recovery_summary)
     def recovery_summary_with_session_event_counts(event_scores: pd.DataFrame) -> pd.DataFrame:
-        summary = original_recovery_summary(event_scores)
+        normalized_scores = _normalize_summary_bool_columns(event_scores)
+        summary = original_recovery_summary(normalized_scores)
         if summary.empty or "simulated_events" not in summary.columns:
             return summary
-        best = recovery._event_best_rows(event_scores)
+        best = recovery._event_best_rows(normalized_scores)
         return _replace_simulated_event_counts(summary, best)
 
     @wraps(original_certified_summary)
     def certified_vs_exact_recovery_summary_with_session_event_counts(
         event_scores: pd.DataFrame,
     ) -> pd.DataFrame:
-        summary = original_certified_summary(event_scores)
+        normalized_scores = _normalize_summary_bool_columns(event_scores)
+        summary = original_certified_summary(normalized_scores)
         if summary.empty or "simulated_events" not in summary.columns:
             return summary
-        events = recovery.certified_vs_exact_event_recovery(event_scores)
+        events = recovery.certified_vs_exact_event_recovery(normalized_scores)
         return _replace_simulated_event_counts(summary, events)
 
     recovery.recovery_summary = recovery_summary_with_session_event_counts
@@ -48,6 +62,18 @@ def apply_simulation_recovery_event_count_patch() -> None:
         certified_vs_exact_recovery_summary_with_session_event_counts
     )
     setattr(recovery, _PATCHED_FLAG, True)
+
+
+def _normalize_summary_bool_columns(event_scores: pd.DataFrame) -> pd.DataFrame:
+    """Return score rows with CSV-round-tripped boolean columns restored."""
+
+    if event_scores.empty:
+        return event_scores
+    out = event_scores.copy()
+    for column in _SUMMARY_BOOL_COLUMNS:
+        if column in out.columns:
+            out[column] = _coerce_bool_series(out[column])
+    return out
 
 
 def _replace_simulated_event_counts(

@@ -52,6 +52,43 @@ def test_duration_adjusted_decays_reject_negative_tau() -> None:
         _duration_adjusted_decays_from_config(config, np.asarray([0.003]), 0.003)
 
 
+@pytest.mark.parametrize("mode", ["stationary", "diffusion", "first-order-imm"])
+def test_duration_diagnostics_report_transition_seconds_for_non_candidate_modes(mode: str) -> None:
+    durations = np.asarray([0.003, 0.006], dtype=float)
+    emissions = LogEmissionTensor(
+        log_likelihood=np.log(
+            np.asarray(
+                [
+                    [0.70, 0.20, 0.10],
+                    [0.10, 0.70, 0.20],
+                    [0.10, 0.20, 0.70],
+                ],
+                dtype=float,
+            )
+        ),
+        spike_counts=np.zeros((3, 1), dtype=int),
+        times=np.asarray([0.0, 0.003, 0.009], dtype=float),
+        dt=0.003,
+        cell_ids=np.asarray([1], dtype=int),
+        n_spikes=0,
+        bin_durations=np.asarray([0.003, 0.003, 0.006], dtype=float),
+        transition_durations=durations,
+    )
+    bin_centers = np.asarray(
+        [
+            [0.0, 0.0],
+            [1.0, 0.0],
+            [2.0, 0.0],
+        ],
+        dtype=float,
+    )
+    config = StateSpaceDecoderConfig(mode=mode)
+
+    score = StateSpaceReplayModel(mode=mode, config=config).score(emissions, bin_centers)
+
+    assert np.allclose(_float_series(score.diagnostics["state_space_transition_durations_s"]), durations)
+
+
 @pytest.mark.parametrize("mode", ["momentum", "imm"])
 def test_duration_momentum_diagnostics_report_per_transition_values(mode: str) -> None:
     durations = np.asarray([0.003, 0.006], dtype=float)

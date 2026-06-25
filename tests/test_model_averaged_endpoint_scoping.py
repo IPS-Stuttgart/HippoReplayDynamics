@@ -53,6 +53,22 @@ def test_model_averaged_endpoint_scopes_replay_window_variants() -> None:
     assert expanded["model_averaged_endpoint_models"].tolist() == [2, 2]
 
 
+def test_model_averaged_endpoint_ignores_nonfinite_endpoint_rows() -> None:
+    frame = pd.DataFrame(
+        [
+            _row(variant="core", window_index=0, model="finite", probability=0.50, endpoint_x=10.0, endpoint_y=5.0),
+            _row(variant="core", window_index=0, model="bad-x", probability=0.25, endpoint_x=np.inf, endpoint_y=100.0),
+            _row(variant="core", window_index=0, model="bad-y", probability=0.25, endpoint_x=100.0, endpoint_y=-np.inf),
+        ]
+    )
+
+    out = add_model_averaged_endpoint_columns(frame)
+
+    np.testing.assert_allclose(out["model_averaged_endpoint_x"], 10.0)
+    np.testing.assert_allclose(out["model_averaged_endpoint_y"], 5.0)
+    assert out["model_averaged_endpoint_models"].tolist() == [1, 1, 1]
+
+
 def _cell_split_row(
     *,
     train_cell_ids: object,

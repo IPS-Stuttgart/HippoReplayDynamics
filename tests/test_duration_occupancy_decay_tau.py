@@ -143,6 +143,11 @@ def test_duration_momentum_diagnostics_report_per_transition_values(mode: str) -
         _float_series(diagnostics["state_space_momentum_velocity_decay_per_step"]),
         np.asarray([0.9, 0.9**2], dtype=float),
     )
+    if mode == "imm":
+        assert np.allclose(
+            _float_series(diagnostics["state_space_diffusion_transition_sigma_cm_per_step"]),
+            config.diffusion_sigma_cm_sqrt_s * np.sqrt(durations),
+        )
     assert np.isclose(float(diagnostics["state_space_momentum_transition_sigma_cm"]), 10.0 * np.sqrt(np.median(durations)))
     assert np.isclose(float(diagnostics["state_space_momentum_initial_transition_sigma_cm"]), 20.0 * np.sqrt(durations[0]))
     assert np.isclose(float(diagnostics["state_space_momentum_velocity_decay_effective"]), np.median([0.9, 0.9**2]))

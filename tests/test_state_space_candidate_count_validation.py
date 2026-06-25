@@ -24,6 +24,18 @@ def test_mass_retaining_candidate_support_rejects_noninteger_count_bounds():
             _mass_retaining_candidate_indices(log_emission, 0.95, **kwargs)
 
 
+def test_mass_retaining_candidate_support_rejects_negative_top_k():
+    log_emission = np.log(np.array([0.50, 0.30, 0.15, 0.05], dtype=float))
+
+    for mass_threshold in (None, 0.0, 0.95):
+        with pytest.raises(ValueError, match="top_k"):
+            _mass_retaining_candidate_indices(
+                log_emission,
+                mass_threshold,
+                top_k=-1,
+            )
+
+
 def test_mass_retaining_candidate_support_accepts_integer_valued_count_bounds():
     log_emission = np.log(np.array([0.50, 0.30, 0.15, 0.05], dtype=float))
 

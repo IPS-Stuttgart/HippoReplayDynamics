@@ -8,6 +8,8 @@ import numpy as np
 
 _CANDIDATE_METADATA_PATCHED_FLAG = "_candidate_emission_metadata_patch_applied"
 _MOMENTUM_DIAGNOSTICS_PATCHED_FLAG = "_duration_momentum_diagnostics_patch_applied"
+_MOMENTUM_DIAGNOSTICS_SCORE_WRAPPED_FLAG = "_duration_momentum_diagnostics_score_wrapped"
+_MOMENTUM_DIAGNOSTICS_ORIGINAL_SCORE_ATTR = "_duration_momentum_diagnostics_original_score"
 
 
 def apply_duration_candidate_metadata_patch() -> None:
@@ -43,10 +45,12 @@ def apply_duration_candidate_metadata_patch() -> None:
 def _patch_duration_momentum_diagnostics(duration_occupancy) -> None:
     """Expose the per-transition momentum parameters used by duration scoring."""
 
-    if getattr(duration_occupancy, _MOMENTUM_DIAGNOSTICS_PATCHED_FLAG, False):
+    current_score = duration_occupancy._score_state_space_duration_with_occupancy
+    if _contains_duration_momentum_diagnostics(current_score):
+        setattr(duration_occupancy, _MOMENTUM_DIAGNOSTICS_PATCHED_FLAG, True)
         return
 
-    original_score = duration_occupancy._score_state_space_duration_with_occupancy
+    original_score = current_score
 
     @wraps(original_score)
     def _score_state_space_duration_with_momentum_diagnostics(
@@ -69,8 +73,46 @@ def _patch_duration_momentum_diagnostics(duration_occupancy) -> None:
         _add_duration_momentum_diagnostics(duration_occupancy, score, self, emissions)
         return score
 
+    setattr(
+        _score_state_space_duration_with_momentum_diagnostics,
+        _MOMENTUM_DIAGNOSTICS_SCORE_WRAPPED_FLAG,
+        True,
+    )
+    setattr(
+        _score_state_space_duration_with_momentum_diagnostics,
+        _MOMENTUM_DIAGNOSTICS_ORIGINAL_SCORE_ATTR,
+        original_score,
+    )
     duration_occupancy._score_state_space_duration_with_occupancy = _score_state_space_duration_with_momentum_diagnostics
+    _synchronize_loaded_state_space_score(original_score, _score_state_space_duration_with_momentum_diagnostics)
     setattr(duration_occupancy, _MOMENTUM_DIAGNOSTICS_PATCHED_FLAG, True)
+
+
+def _contains_duration_momentum_diagnostics(score) -> bool:
+    seen: set[int] = set()
+    current = score
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        if getattr(current, _MOMENTUM_DIAGNOSTICS_SCORE_WRAPPED_FLAG, False):
+            return True
+        current = getattr(current, "__wrapped__", None)
+    return False
+
+
+def _synchronize_loaded_state_space_score(previous_score, patched_score) -> None:
+    """Update already-patched StateSpaceReplayModel aliases to the wrapped scorer."""
+
+    import sys
+
+    for module_name in ("hipporeplayimm.state_space", "hipporeplayimm.state_space_model"):
+        module = sys.modules.get(module_name)
+        if module is None:
+            continue
+        model_type = getattr(module, "StateSpaceReplayModel", None)
+        if model_type is None:
+            continue
+        if getattr(model_type, "score", None) is previous_score:
+            setattr(model_type, "score", patched_score)
 
 
 def _add_duration_momentum_diagnostics(duration_occupancy, score, model, emissions) -> None:

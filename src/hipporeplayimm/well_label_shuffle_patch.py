@@ -6,6 +6,7 @@ import numpy as np
 import pandas as pd
 
 _PATCHED_FLAG = "_well_label_shuffle_patch_applied"
+_MISSING_WELL_LABELS = {"", "<na>", "na", "n/a", "nan", "none", "null", "missing"}
 
 
 def apply_well_label_shuffle_patch() -> None:
@@ -36,7 +37,7 @@ def shuffle_well_labels(frame: pd.DataFrame, random_seed: int = 1) -> pd.DataFra
     if not label_columns:
         return out
 
-    labelled_rows = out["true_well_id"].notna()
+    labelled_rows = _labelled_well_rows(out["true_well_id"])
     if not bool(labelled_rows.any()):
         return out
 
@@ -46,6 +47,14 @@ def shuffle_well_labels(frame: pd.DataFrame, random_seed: int = 1) -> pd.DataFra
         rng.permutation(label_values.shape[0])
     ]
     return out
+
+
+def _labelled_well_rows(values: pd.Series) -> pd.Series:
+    """Return rows whose well-ID field is an actual label, not a text sentinel."""
+
+    present = values.notna()
+    normalized = values.astype("string").str.strip().str.lower()
+    return present & ~normalized.isin(_MISSING_WELL_LABELS)
 
 
 __all__ = ["apply_well_label_shuffle_patch", "shuffle_well_labels"]

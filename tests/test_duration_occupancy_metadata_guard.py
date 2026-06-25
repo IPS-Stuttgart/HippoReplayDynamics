@@ -60,6 +60,16 @@ def test_uniform_probabilities_rejects_nonpositive_bin_count():
         _uniform_probabilities(0)
 
 
+def test_uniform_probabilities_are_bootstrapped_into_duration_occupancy_module():
+    import hipporeplayimm.duration_occupancy as duration_occupancy
+
+    assert callable(duration_occupancy._uniform_probabilities)
+    np.testing.assert_allclose(
+        duration_occupancy._uniform_probabilities(2),
+        np.array([0.5, 0.5], dtype=float),
+    )
+
+
 def test_transition_duration_guard_fills_only_missing_metadata() -> None:
     durations = _coerce_transition_durations([], n_time=3, fallback_dt=0.02)
 

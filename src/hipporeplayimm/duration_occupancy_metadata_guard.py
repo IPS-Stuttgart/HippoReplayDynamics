@@ -8,6 +8,8 @@ from typing import Any, Callable
 
 import numpy as np
 
+from .state_space_utils import _uniform_probabilities as _base_uniform_probabilities
+
 
 def apply_duration_occupancy_metadata_guard_patch() -> None:
     """Ensure derived duration/occupancy helper inputs stay isolated and valid."""
@@ -20,6 +22,8 @@ def apply_duration_occupancy_metadata_guard_patch() -> None:
         return
 
     previous_candidate_selection = _duration_occupancy._candidate_selection_emissions
+    if not hasattr(_duration_occupancy, "_uniform_probabilities"):
+        _duration_occupancy._uniform_probabilities = _base_uniform_probabilities
     previous_uniform_probabilities = _duration_occupancy._uniform_probabilities
 
     def _candidate_selection_emissions(emissions, valid_bin_mask):

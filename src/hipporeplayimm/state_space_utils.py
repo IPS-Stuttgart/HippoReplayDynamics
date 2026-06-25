@@ -330,6 +330,53 @@ def _mean_entropy(trajectory_log_posterior: np.ndarray) -> float:
     return float(np.mean(-np.sum(entropy_terms, axis=1)))
 
 
+def _diagnostic_transition_durations(
+    dt_s: float,
+    n_time: int,
+    fallback_dt_s: float,
+) -> np.ndarray:
+    n_transitions = max(int(n_time) - 1, 0)
+    transition_durations = getattr(dt_s, "transition_durations", None)
+    if transition_durations is None:
+        return np.full(n_transitions, float(fallback_dt_s), dtype=float)
+
+    durations = np.asarray(transition_durations, dtype=float)
+    if durations.shape != (n_transitions,):
+        raise ValueError("transition_durations must contain one value per adjacent time-bin pair")
+    if not np.all(np.isfinite(durations)) or np.any(durations <= 0.0):
+        raise ValueError("transition_durations must contain finite positive durations")
+    return durations
+
+
+def _longest_active_run_duration(
+    active: np.ndarray,
+    transition_durations: np.ndarray,
+    fallback_dt_s: float,
+) -> float:
+    active = np.asarray(active, dtype=bool)
+    if active.size == 0:
+        return 0.0
+    bin_duration = (
+        float(np.median(transition_durations)) if transition_durations.size else float(fallback_dt_s)
+    )
+    best = 0.0
+    start: int | None = None
+    for index, value in enumerate(active):
+        if value and start is None:
+            start = index
+        if start is None:
+            continue
+        if value and index != active.size - 1:
+            continue
+        stop = index if value else index - 1
+        duration = bin_duration
+        if stop > start:
+            duration += float(np.sum(transition_durations[start:stop]))
+        best = max(best, duration)
+        start = None
+    return best
+
+
 def _first_order_imm_content_diagnostics(
     mode_posterior: np.ndarray,
     trajectory_log_posterior: np.ndarray,
@@ -348,16 +395,13 @@ def _first_order_imm_content_diagnostics(
     dt = float(dt_s)
     if not np.isfinite(dt) or dt <= 0.0:
         raise ValueError("dt_s must be finite and positive")
+    transition_durations = _diagnostic_transition_durations(dt_s, mode.shape[0], dt)
 
     map_mode = np.argmax(mode, axis=1)
     nonstationary = map_mode != 0
     starts = nonstationary & np.concatenate(([True], ~nonstationary[:-1]))
     bout_count = int(starts.sum())
-    longest = 0
-    current = 0
-    for active in nonstationary:
-        current = current + 1 if active else 0
-        longest = max(longest, current)
+    longest_duration = _longest_active_run_duration(nonstationary, transition_durations, dt)
 
     posterior = np.exp(trajectory)
     row_mass = posterior.sum(axis=1)
@@ -368,7 +412,7 @@ def _first_order_imm_content_diagnostics(
         steps = np.linalg.norm(np.diff(expected_position, axis=0), axis=1)
         path_length = float(np.nansum(steps))
         net = float(np.linalg.norm(expected_position[-1] - expected_position[0]))
-        duration = max(float(len(expected_position) - 1) * dt, dt)
+        duration = max(float(np.sum(transition_durations)), np.finfo(float).tiny)
     else:
         path_length = 0.0
         net = 0.0
@@ -378,7 +422,7 @@ def _first_order_imm_content_diagnostics(
         "state_space_imm_fraction_time_map_stationary": float(np.mean(~nonstationary)),
         "state_space_imm_fraction_time_map_nonstationary": float(np.mean(nonstationary)),
         "state_space_imm_nonstationary_bout_count": bout_count,
-        "state_space_imm_longest_nonstationary_bout_s": float(longest) * dt,
+        "state_space_imm_longest_nonstationary_bout_s": longest_duration,
         "state_space_imm_posterior_expected_path_length_cm": path_length,
         "state_space_imm_posterior_net_displacement_cm": net,
         "state_space_imm_posterior_path_speed_cm_s": path_length / duration,

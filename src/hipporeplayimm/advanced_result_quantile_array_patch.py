@@ -18,7 +18,8 @@ def apply_advanced_result_quantile_array_patch() -> None:
         return
 
     def _quantile(values: Sequence[float], q: float) -> float:
-        arr = np.asarray(values, dtype=float)
+        arr = np.asarray(values, dtype=float).reshape(-1)
+        arr = arr[np.isfinite(arr)]
         if arr.size == 0:
             return float("nan")
         return float(np.quantile(arr, q))

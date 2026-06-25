@@ -47,6 +47,9 @@ def _patch_duration_momentum_diagnostics(duration_occupancy) -> None:
 
     current_score = duration_occupancy._score_state_space_duration_with_occupancy
     if _contains_duration_momentum_diagnostics(current_score):
+        original_score = _duration_momentum_diagnostics_original_score(current_score)
+        if original_score is not None:
+            _synchronize_loaded_state_space_score(original_score, current_score)
         setattr(duration_occupancy, _MOMENTUM_DIAGNOSTICS_PATCHED_FLAG, True)
         return
 
@@ -97,6 +100,18 @@ def _contains_duration_momentum_diagnostics(score) -> bool:
             return True
         current = getattr(current, "__wrapped__", None)
     return False
+
+
+def _duration_momentum_diagnostics_original_score(score):
+    seen: set[int] = set()
+    current = score
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        original_score = getattr(current, _MOMENTUM_DIAGNOSTICS_ORIGINAL_SCORE_ATTR, None)
+        if original_score is not None:
+            return original_score
+        current = getattr(current, "__wrapped__", None)
+    return None
 
 
 def _synchronize_loaded_state_space_score(previous_score, patched_score) -> None:

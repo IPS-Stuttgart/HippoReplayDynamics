@@ -4,9 +4,10 @@ from types import SimpleNamespace
 
 import numpy as np
 import pandas as pd
+import pytest
 
 from hipporeplayimm.encoding import EncodingConfig, EncodingModel
-from hipporeplayimm.shuffle_controls import ShuffleControlConfig, add_shuffle_p_values, score_shuffle_controls, shuffled_encoding
+from hipporeplayimm.shuffle_controls import ShuffleControlConfig, _spatial_roll_rates, add_shuffle_p_values, score_shuffle_controls, shuffled_encoding
 
 
 SHUFFLE_SUMMARY_COLUMNS = {
@@ -39,6 +40,30 @@ def test_independent_spatial_permutation_handles_empty_cell_set():
     assert control.rates_hz.dtype == float
     np.testing.assert_array_equal(control.cell_ids, np.array([], dtype=int))
     np.testing.assert_allclose(control.occupancy_s, np.ones(2, dtype=float))
+
+
+def test_spatial_roll_avoids_identity_shift_on_multibin_grid() -> None:
+    rates = np.arange(4.0, dtype=float).reshape(1, 4)
+
+    rolled = _spatial_roll_rates(rates, (2, 2), np.random.default_rng(11))
+
+    assert rolled.shape == rates.shape
+    assert not np.array_equal(rolled, rates)
+
+
+def test_spatial_roll_keeps_single_bin_grid_unchanged() -> None:
+    rates = np.array([[3.5]], dtype=float)
+
+    rolled = _spatial_roll_rates(rates, (1, 1), np.random.default_rng(11))
+
+    np.testing.assert_array_equal(rolled, rates)
+
+
+def test_spatial_roll_validates_rate_grid_shape_consistency() -> None:
+    rates = np.arange(6.0, dtype=float).reshape(1, 6)
+
+    with pytest.raises(ValueError, match="one column per spatial grid bin"):
+        _spatial_roll_rates(rates, (2, 2), np.random.default_rng(1))
 
 
 def test_score_shuffle_controls_materializes_generator_event_indices(monkeypatch) -> None:

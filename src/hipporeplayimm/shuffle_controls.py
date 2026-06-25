@@ -64,13 +64,35 @@ def shuffled_encoding(
 def _spatial_roll_rates(rates: np.ndarray, grid_shape: tuple[int, int], rng: np.random.Generator) -> np.ndarray:
     if rates.size == 0:
         return rates.copy()
+    n_x, n_y = _validate_grid_shape(grid_shape)
+    if rates.shape[1] != n_x * n_y:
+        raise ValueError("rates must contain one column per spatial grid bin")
     out = np.empty_like(rates)
     for cell_index, row in enumerate(rates):
-        grid = row.reshape(grid_shape)
-        dx = int(rng.integers(0, max(grid_shape[0], 1)))
-        dy = int(rng.integers(0, max(grid_shape[1], 1)))
+        grid = row.reshape((n_x, n_y))
+        dx, dy = _nonidentity_roll_shift((n_x, n_y), rng)
         out[cell_index] = np.roll(np.roll(grid, dx, axis=0), dy, axis=1).reshape(-1)
     return out
+
+
+def _validate_grid_shape(grid_shape: tuple[int, int]) -> tuple[int, int]:
+    if len(grid_shape) != 2:
+        raise ValueError("grid_shape must contain exactly two dimensions")
+    n_x, n_y = (int(grid_shape[0]), int(grid_shape[1]))
+    if n_x <= 0 or n_y <= 0:
+        raise ValueError("grid_shape dimensions must be positive")
+    return n_x, n_y
+
+
+def _nonidentity_roll_shift(grid_shape: tuple[int, int], rng: np.random.Generator) -> tuple[int, int]:
+    """Draw a spatial-roll shift that is not the identity when possible."""
+
+    n_x, n_y = grid_shape
+    n_bins = n_x * n_y
+    if n_bins <= 1:
+        return 0, 0
+    flat_shift = int(rng.integers(1, n_bins))
+    return divmod(flat_shift, n_y)
 
 
 def score_shuffle_controls(

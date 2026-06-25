@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import numpy as np
+import pytest
 
 from hipporeplayimm.encoding import LogEmissionTensor
 from hipporeplayimm.models import EventScore
@@ -120,11 +121,30 @@ def _state_space_model() -> StateSpaceReplayModel:
     )
 
 
+def _momentum_state_space_model() -> StateSpaceReplayModel:
+    return StateSpaceReplayModel(
+        mode="momentum",
+        config=StateSpaceDecoderConfig(
+            mode="momentum",
+            momentum_candidate_top_k=2,
+            momentum_predicted_candidate_top_k=0,
+        ),
+    )
+
+
 def _candidate_indices() -> list[np.ndarray]:
     return [
         np.array([0], dtype=int),
         np.array([1], dtype=int),
         np.array([0, 1], dtype=int),
+    ]
+
+
+def _float_candidate_indices() -> list[np.ndarray]:
+    return [
+        np.array([0.0], dtype=float),
+        np.array([1.0], dtype=float),
+        np.array([0.0, 1.0], dtype=float),
     ]
 
 
@@ -160,6 +180,23 @@ def test_reverse_wrappers_keep_remapped_terminal_when_only_return_suppresses_tra
         assert result.terminal_log_posterior is not None
         np.testing.assert_allclose(result.terminal_log_posterior, expected_terminal)
         assert "reverse_time_terminal_posterior" not in result.diagnostics
+
+
+def test_reverse_wrappers_preserve_candidate_index_dtype_for_base_validation() -> None:
+    emissions = _synthetic_emissions()
+    bin_centers = _bin_centers()
+    candidates = _float_candidate_indices()
+
+    for wrapper_type in (DirectReverseTimeReplayModel, CompatReverseTimeReplayModel):
+        wrapped = wrapper_type(_momentum_state_space_model())
+
+        with pytest.raises((TypeError, ValueError), match="integer"):
+            wrapped.score(
+                emissions,
+                bin_centers,
+                candidate_indices=candidates,
+                return_trajectory=False,
+            )
 
 
 def test_direct_reverse_wrapper_forwards_occupancy_and_reverses_candidates() -> None:

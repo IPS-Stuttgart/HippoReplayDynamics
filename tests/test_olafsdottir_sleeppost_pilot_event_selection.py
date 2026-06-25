@@ -181,19 +181,126 @@ def test_pilot_event_selection_uses_explicit_scoring_available_debug_tiers(tmp_p
     assert module.tier_count(debug_selection, "pilot_20_decoder_available_debug") == 4
     assert module.tier_count(debug_selection, "pilot_50_decoder_available_debug") == 6
     assert module.tier_count(debug_selection, "pilot_100_decoder_available_debug") == 8
+    assert module.tier_count(debug_selection, "pilot_20_high_information_debug") == 4
+    assert module.tier_count(debug_selection, "pilot_20_high_information_holdout_debug") == 4
     assert module.tier_count(debug_selection, "pilot_20_balanced") == 0
     assert debug_selection["decoder_filter"].dropna().eq("scoring_available").all()
     assert debug_selection["decoder_qc_paper_ready"].map(bool).eq(False).all()
     assert debug_selection["decoder_qc_scoring_available"].map(bool).all()
+    high_info = debug_selection[debug_selection["selection_tier"].eq("pilot_20_high_information_debug")]
+    assert high_info["selection_score_name"].eq("event_detection_score").all()
+    assert high_info["selection_score_value"].tolist() == [9.0, 8.0, 9.0, 8.0]
+    assert high_info["event_id"].tolist() == [4, 3, 4, 3]
+    holdout = debug_selection[debug_selection["selection_tier"].eq("pilot_20_high_information_holdout_debug")]
+    prior_debug = debug_selection[debug_selection["selection_tier"].eq("pilot_20_decoder_available_debug")]
+    assert _event_keys(module, holdout).isdisjoint(_event_keys(module, prior_debug))
     gates = debug["gates"].set_index("gate")
     assert bool(gates.loc["pilot_20_decoder_available_debug_complete", "passed"])
     assert bool(gates.loc["pilot_20_decoder_available_debug_spans_decoder_animals", "passed"])
     assert bool(gates.loc["pilot_20_decoder_available_debug_spans_decoder_pairs", "passed"])
+    assert bool(gates.loc["pilot_20_high_information_debug_has_20_events", "passed"])
+    assert bool(gates.loc["pilot_20_high_information_debug_has_all_10_pairs", "passed"])
+    assert bool(gates.loc["pilot_20_high_information_debug_has_6_animals", "passed"])
+    assert bool(gates.loc["pilot_20_high_information_debug_all_immobile", "passed"])
+    assert bool(gates.loc["pilot_20_high_information_debug_all_qc_valid", "passed"])
+    assert bool(gates.loc["pilot_20_high_information_debug_all_artifact_free", "passed"])
+    assert bool(gates.loc["pilot_20_high_information_debug_uses_pre_evidence_fields_only", "passed"])
+    assert bool(gates.loc["pilot_20_high_information_holdout_debug_excludes_prior_debug_events", "passed"])
     summary = (tmp_path / "debug-selection" / module.SUMMARY_OUTPUT).read_text(encoding="utf-8")
     assert "decoder_filter | scoring_available" in summary
     assert "decoder_pass_pairs | 2" in summary
     assert "primary_expected_events | 4" in summary
     assert "pilot_20_decoder_available_debug events | 4" in summary
+    assert "pilot_20_high_information_debug events | 4" in summary
+    assert "pilot_20_high_information_holdout_debug events | 4" in summary
+
+
+def test_high_information_holdout_reports_incomplete_tiers(tmp_path: Path) -> None:
+    module = _load_module()
+    events = _candidate_events()
+    decoder = _decoder_qc()
+    decoder["decoder_status"] = "fail"
+    decoder["decoder_qc_paper_ready"] = False
+    decoder["decoder_qc_scoring_available"] = True
+    exhausted_pair = events["animal"].eq("R2142") & events["event_id"].ge(2)
+    events.loc[exhausted_pair, "event_qc_status"] = "artifact"
+    events.loc[exhausted_pair, "event_qc_reason"] = "holdout_fixture_exhaustion"
+    events_csv = tmp_path / "events.csv"
+    decoder_csv = tmp_path / "decoder.csv"
+    events.to_csv(events_csv, index=False)
+    decoder.to_csv(decoder_csv, index=False)
+
+    tables = module.run_pilot_event_selection(
+        candidate_events_csv=events_csv,
+        decoder_qc_csv=decoder_csv,
+        output_dir=tmp_path / "debug-selection",
+        seed=321,
+        pilot20_events_per_pair=2,
+        pilot50_events_per_pair=3,
+        pilot100_events_per_pair=4,
+        decoder_filter="scoring_available",
+    )
+
+    selection = tables["selection"]
+    assert module.tier_count(selection, "pilot_20_high_information_debug") == 4
+    assert module.tier_count(selection, "pilot_20_high_information_holdout_debug") == 2
+    gates = tables["gates"].set_index("gate")
+    event_gate = gates.loc["pilot_20_high_information_holdout_debug_has_20_events"]
+    pair_gate = gates.loc["pilot_20_high_information_holdout_debug_has_all_10_pairs"]
+    assert not bool(event_gate["passed"])
+    assert not bool(pair_gate["passed"])
+    assert "holdout_tier_complete=false" in str(event_gate["value"])
+    assert "R2142/2014-08-06/20140806_R2142_sleepPOST" in str(event_gate["value"])
+
+
+def test_high_information_tie_breaking_is_seed_deterministic(tmp_path: Path) -> None:
+    module = _load_module()
+    events = _candidate_events()
+    decoder = _decoder_qc()
+    decoder["decoder_status"] = "fail"
+    decoder["decoder_qc_paper_ready"] = False
+    decoder["decoder_qc_scoring_available"] = True
+    events.loc[events["event_id"].lt(5), "event_detection_score"] = 10.0
+    events_csv = tmp_path / "events.csv"
+    decoder_csv = tmp_path / "decoder.csv"
+    events.to_csv(events_csv, index=False)
+    decoder.to_csv(decoder_csv, index=False)
+
+    first = module.run_pilot_event_selection(
+        candidate_events_csv=events_csv,
+        decoder_qc_csv=decoder_csv,
+        output_dir=tmp_path / "debug-selection-a",
+        seed=999,
+        pilot20_events_per_pair=2,
+        decoder_filter="scoring_available",
+    )
+    second = module.run_pilot_event_selection(
+        candidate_events_csv=events_csv,
+        decoder_qc_csv=decoder_csv,
+        output_dir=tmp_path / "debug-selection-b",
+        seed=999,
+        pilot20_events_per_pair=2,
+        decoder_filter="scoring_available",
+    )
+
+    cols = ["animal", "session", "event_id", "selection_score_value"]
+    first_high_info = first["selection"][first["selection"]["selection_tier"].eq("pilot_20_high_information_debug")]
+    second_high_info = second["selection"][second["selection"]["selection_tier"].eq("pilot_20_high_information_debug")]
+    pd.testing.assert_frame_equal(first_high_info[cols].reset_index(drop=True), second_high_info[cols].reset_index(drop=True))
+    assert first_high_info["selection_score_value"].eq(10.0).all()
+
+
+def test_event_qc_cli_alias_maps_to_candidate_events() -> None:
+    module = _load_module()
+    args = module.build_parser().parse_args(
+        [
+            "--event-qc",
+            "events.csv",
+            "--decoder-qc",
+            "decoder.csv",
+        ]
+    )
+    assert args.candidate_events == Path("events.csv")
 
 
 def test_scoring_available_filter_requires_explicit_decoder_qc_column(tmp_path: Path) -> None:
@@ -296,3 +403,7 @@ def _decoder_qc() -> pd.DataFrame:
             },
         ]
     )
+
+
+def _event_keys(module, selection: pd.DataFrame) -> set[tuple[str, str, str, object]]:
+    return module.selection_event_keys(selection)

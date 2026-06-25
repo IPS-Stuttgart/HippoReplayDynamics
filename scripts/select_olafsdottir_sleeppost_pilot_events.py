@@ -6,7 +6,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 from pathlib import Path
-from typing import Sequence
+from typing import Iterable, Sequence
 
 import numpy as np
 import pandas as pd
@@ -52,12 +52,23 @@ TIER_TARGETS = {
     "pilot_100_balanced": 10,
 }
 DECODER_FILTERS = {"paper_ready", "scoring_available"}
+HIGH_INFORMATION_TIERS = (
+    "pilot_20_high_information_debug",
+    "pilot_20_high_information_holdout_debug",
+)
+PRIOR_DEBUG_TIERS_FOR_HOLDOUT = ("pilot_20_decoder_available_debug", "pilot_20_balanced")
 
 SELECTION_COLUMNS = [
     "selection_tier",
+    "pilot_tier",
     "selection_seed",
     "tier_target_events_per_pair",
     "selection_rule_version",
+    "selection_rank_within_pair",
+    "selection_score_name",
+    "selection_score_value",
+    "excluded_previous_debug_event",
+    "source_debug_tier_excluded",
     "animal",
     "date",
     "track1_session",
@@ -76,6 +87,8 @@ SELECTION_COLUMNS = [
     "candidate_tier",
     "event_qc_status",
     "event_qc_reason",
+    "immobile",
+    "artifact_flag",
     "decoder_filter",
     "decoder_status",
     "decoder_qc_paper_ready",
@@ -124,6 +137,11 @@ def run_pilot_event_selection(
         pilot50_events_per_pair=pilot50_events_per_pair,
         pilot100_events_per_pair=pilot100_events_per_pair,
     )
+    high_information_targets = high_information_tier_targets_for_decoder_filter(
+        decoder_filter,
+        pilot20_events_per_pair=pilot20_events_per_pair,
+    )
+    all_tier_targets = {**tier_targets, **high_information_targets}
     decoder_pass = select_decoder_rows(decoder, decoder_filter=decoder_filter)
     eligible = eligible_events(
         events,
@@ -136,14 +154,20 @@ def run_pilot_event_selection(
         min_event_spikes=min_event_spikes,
         min_event_active_units=min_event_active_units,
     )
-    selection = build_selection(eligible, tier_targets=tier_targets, seed=seed)
-    animals = summarize_by_animal(selection, eligible, decoder_pass, tier_targets=tier_targets)
+    selection = build_selection(
+        eligible,
+        tier_targets=tier_targets,
+        high_information_targets=high_information_targets,
+        seed=seed,
+    )
+    animals = summarize_by_animal(selection, eligible, decoder_pass, tier_targets=all_tier_targets)
     gates = gate_summary(
         events=events,
         decoder_pass=decoder_pass,
         eligible=eligible,
         selection=selection,
         tier_targets=tier_targets,
+        high_information_targets=high_information_targets,
         decoder_filter=decoder_filter,
         min_pilot20_animals_fraction=min_pilot20_animals_fraction,
     )
@@ -162,7 +186,7 @@ def run_pilot_event_selection(
             max_duration_ms=max_duration_ms,
             min_event_spikes=min_event_spikes,
             min_event_active_units=min_event_active_units,
-            tier_targets=tier_targets,
+            tier_targets=all_tier_targets,
             decoder_filter=decoder_filter,
         ),
         encoding="utf-8",
@@ -229,6 +253,16 @@ def tier_targets_for_decoder_filter(
         "pilot_50_decoder_available_debug": int(pilot50_events_per_pair),
         "pilot_100_decoder_available_debug": int(pilot100_events_per_pair),
     }
+
+
+def high_information_tier_targets_for_decoder_filter(
+    decoder_filter: str,
+    *,
+    pilot20_events_per_pair: int,
+) -> dict[str, int]:
+    if decoder_filter != "scoring_available":
+        return {}
+    return {tier: int(pilot20_events_per_pair) for tier in HIGH_INFORMATION_TIERS}
 
 
 def select_decoder_rows(decoder: pd.DataFrame, *, decoder_filter: str) -> pd.DataFrame:
@@ -329,6 +363,8 @@ def eligible_events(
     if eligible.empty:
         return pd.DataFrame(columns=eligible_columns())
     eligible["decoder_filter"] = str(decoder_filter)
+    eligible["immobile"] = pd.to_numeric(eligible["mean_speed_cm_s"], errors="coerce") <= float(immobility_speed_threshold_cm_s)
+    eligible["artifact_flag"] = ~_pass_status_mask(eligible["event_qc_status"])
     eligible["pre_evidence_random_score"] = [
         stable_random_score(seed, row.animal, row.date, row.session, row.event_id)
         for row in eligible.itertuples(index=False)
@@ -343,26 +379,89 @@ def eligible_events(
     return eligible[eligible_columns()]
 
 
-def build_selection(eligible: pd.DataFrame, *, tier_targets: dict[str, int], seed: int) -> pd.DataFrame:
+def build_selection(
+    eligible: pd.DataFrame,
+    *,
+    tier_targets: dict[str, int],
+    high_information_targets: dict[str, int] | None = None,
+    seed: int,
+) -> pd.DataFrame:
     if eligible.empty:
         return pd.DataFrame(columns=SELECTION_COLUMNS)
+    high_information_targets = high_information_targets or {}
     rows: list[pd.DataFrame] = []
+    prior_debug_event_tiers: dict[tuple[str, str, str, object], str] = {}
     for tier, target in tier_targets.items():
         selected = select_n_per_pair(eligible, target)
-        selected = selected.copy()
-        selected.insert(0, "selection_tier", tier)
-        selected.insert(1, "selection_seed", int(seed))
-        selected.insert(2, "tier_target_events_per_pair", int(target))
-        selected.insert(3, "selection_rule_version", "pre_evidence_v1")
+        selected = add_selection_metadata(
+            selected,
+            tier=tier,
+            seed=seed,
+            target=target,
+            rule_version="pre_evidence_v1",
+            score_name="pre_evidence_random_score",
+            prior_debug_event_tiers=prior_debug_event_tiers,
+        )
+        rows.append(selected)
+        if tier in PRIOR_DEBUG_TIERS_FOR_HOLDOUT:
+            for row in selected.itertuples(index=False):
+                prior_debug_event_tiers.setdefault(event_key(row), tier)
+
+    for tier, target in high_information_targets.items():
+        excluded = set(prior_debug_event_tiers) if tier.endswith("_holdout_debug") else set()
+        selected = select_high_information_per_pair(eligible, target, excluded_event_keys=excluded)
+        selected = add_selection_metadata(
+            selected,
+            tier=tier,
+            seed=seed,
+            target=target,
+            rule_version="pre_evidence_high_information_v1",
+            score_name="event_detection_score",
+            prior_debug_event_tiers=prior_debug_event_tiers,
+            source_debug_tier_excluded=";".join(PRIOR_DEBUG_TIERS_FOR_HOLDOUT) if excluded else "",
+        )
         rows.append(selected)
     all_events = eligible.copy()
     all_events["tier_rank_within_pair"] = all_events.groupby(["animal", "date", "sleeppost_session"]).cumcount() + 1
-    all_events.insert(0, "selection_tier", "all_immobile_qc_valid")
-    all_events.insert(1, "selection_seed", int(seed))
-    all_events.insert(2, "tier_target_events_per_pair", np.nan)
-    all_events.insert(3, "selection_rule_version", "pre_evidence_v1")
+    all_events = add_selection_metadata(
+        all_events,
+        tier="all_immobile_qc_valid",
+        seed=seed,
+        target=np.nan,
+        rule_version="pre_evidence_v1",
+        score_name="pre_evidence_random_score",
+        prior_debug_event_tiers=prior_debug_event_tiers,
+    )
     rows.append(all_events)
     return pd.concat(rows, ignore_index=True)[SELECTION_COLUMNS]
+
+
+def add_selection_metadata(
+    selected: pd.DataFrame,
+    *,
+    tier: str,
+    seed: int,
+    target: int | float,
+    rule_version: str,
+    score_name: str,
+    prior_debug_event_tiers: dict[tuple[str, str, str, object], str],
+    source_debug_tier_excluded: str = "",
+) -> pd.DataFrame:
+    selected = selected.copy()
+    if selected.empty:
+        return pd.DataFrame(columns=SELECTION_COLUMNS)
+    selected["selection_rank_within_pair"] = selected["tier_rank_within_pair"]
+    selected["selection_score_name"] = score_name
+    selected["selection_score_value"] = pd.to_numeric(selected[score_name], errors="coerce") if score_name in selected.columns else np.nan
+    prior_tiers = [prior_debug_event_tiers.get(event_key(row), "") for row in selected.itertuples(index=False)]
+    selected["excluded_previous_debug_event"] = [bool(value) for value in prior_tiers]
+    selected["source_debug_tier_excluded"] = [source_debug_tier_excluded or value for value in prior_tiers]
+    selected.insert(0, "selection_tier", tier)
+    selected.insert(1, "pilot_tier", tier)
+    selected.insert(2, "selection_seed", int(seed))
+    selected.insert(3, "tier_target_events_per_pair", target)
+    selected.insert(4, "selection_rule_version", rule_version)
+    return selected
 
 
 def select_n_per_pair(eligible: pd.DataFrame, target: int) -> pd.DataFrame:
@@ -374,6 +473,35 @@ def select_n_per_pair(eligible: pd.DataFrame, target: int) -> pd.DataFrame:
     if not selected_parts:
         return pd.DataFrame(columns=eligible_columns())
     return pd.concat(selected_parts, ignore_index=True)
+
+
+def select_high_information_per_pair(
+    eligible: pd.DataFrame,
+    target: int,
+    *,
+    excluded_event_keys: set[tuple[str, str, str, object]],
+) -> pd.DataFrame:
+    selected_parts: list[pd.DataFrame] = []
+    for _pair, group in eligible.groupby(["animal", "date", "sleeppost_session"], sort=True):
+        group = group.copy()
+        if excluded_event_keys:
+            keep = [event_key(row) not in excluded_event_keys for row in group.itertuples(index=False)]
+            group = group.loc[keep].copy()
+        ranked = group.sort_values(
+            ["event_detection_score", "pre_evidence_random_score", "event_id"],
+            ascending=[False, True, True],
+            kind="mergesort",
+        )
+        take = ranked.head(int(target)).copy()
+        take["tier_rank_within_pair"] = np.arange(1, len(take) + 1, dtype=int)
+        selected_parts.append(take)
+    if not selected_parts:
+        return pd.DataFrame(columns=eligible_columns())
+    return pd.concat(selected_parts, ignore_index=True)
+
+
+def event_key(row: object) -> tuple[str, str, str, object]:
+    return (str(getattr(row, "animal")).upper(), str(getattr(row, "date")), str(getattr(row, "sleeppost_session")), getattr(row, "event_id"))
 
 
 def summarize_by_animal(
@@ -396,6 +524,8 @@ def summarize_by_animal(
         "pilot_20_decoder_available_debug_events",
         "pilot_50_decoder_available_debug_events",
         "pilot_100_decoder_available_debug_events",
+        "pilot_20_high_information_debug_events",
+        "pilot_20_high_information_holdout_debug_events",
         "all_immobile_qc_valid_events",
     ]
     animals = sorted(set(decoder_pass["animal"].astype(str).str.upper()) | set(eligible["animal"].astype(str).str.upper()))
@@ -419,6 +549,8 @@ def summarize_by_animal(
                 "pilot_20_decoder_available_debug_events": int(tier_count(animal_selection, "pilot_20_decoder_available_debug")),
                 "pilot_50_decoder_available_debug_events": int(tier_count(animal_selection, "pilot_50_decoder_available_debug")),
                 "pilot_100_decoder_available_debug_events": int(tier_count(animal_selection, "pilot_100_decoder_available_debug")),
+                "pilot_20_high_information_debug_events": int(tier_count(animal_selection, "pilot_20_high_information_debug")),
+                "pilot_20_high_information_holdout_debug_events": int(tier_count(animal_selection, "pilot_20_high_information_holdout_debug")),
                 "all_immobile_qc_valid_events": int(tier_count(animal_selection, "all_immobile_qc_valid")),
             }
         )
@@ -432,6 +564,7 @@ def gate_summary(
     eligible: pd.DataFrame,
     selection: pd.DataFrame,
     tier_targets: dict[str, int],
+    high_information_targets: dict[str, int],
     decoder_filter: str,
     min_pilot20_animals_fraction: float,
 ) -> pd.DataFrame:
@@ -474,6 +607,13 @@ def gate_summary(
             "Pre-evidence filters should not silently drop complete sessions.",
         ),
         *tier_completion_gates(selection, tier_items, pass_pairs_count=len(pass_pairs)),
+        *high_information_tier_gates(
+            selection,
+            decoder_pass=decoder_pass,
+            high_information_targets=high_information_targets,
+            pass_pairs=pass_pairs,
+            input_animals=input_animals,
+        ),
         _gate(
             primary_span_gate_name(primary_tier, "animals"),
             bool(input_animals) and len(primary_animals) / len(input_animals) >= float(min_pilot20_animals_fraction),
@@ -497,6 +637,124 @@ def gate_summary(
         ),
     ]
     return gate_dataframe_with_denominators(gates, denominators)
+
+
+def high_information_tier_gates(
+    selection: pd.DataFrame,
+    *,
+    decoder_pass: pd.DataFrame,
+    high_information_targets: dict[str, int],
+    pass_pairs: set[tuple[str, str, str]],
+    input_animals: set[str],
+) -> list[dict[str, object]]:
+    if not high_information_targets:
+        return []
+    gates: list[dict[str, object]] = []
+    for tier, target in high_information_targets.items():
+        tier_rows = selection[selection["selection_tier"].astype(str).eq(tier)] if not selection.empty else pd.DataFrame(columns=SELECTION_COLUMNS)
+        selected_pairs = event_pairs(tier_rows)
+        selected_animals = set(tier_rows["animal"].astype(str).str.upper()) if not tier_rows.empty else set()
+        expected = int(target) * int(len(pass_pairs))
+        missing_pairs = sorted(pass_pairs.difference(selected_pairs))
+        gates.extend(
+            [
+                _gate(
+                    f"{tier}_has_20_events",
+                    expected > 0 and len(tier_rows) == expected,
+                    f"selected={len(tier_rows)}; expected={expected}; holdout_tier_complete={str(len(tier_rows) == expected).lower()}; missing_pairs={format_pairs(missing_pairs)}",
+                    "select two high-information events for every decoder-available pair",
+                    "The gate name reflects the real-data target of 10 pairs x 2 events; tests may use smaller fixtures.",
+                ),
+                _gate(
+                    f"{tier}_has_all_10_pairs",
+                    bool(pass_pairs) and selected_pairs == pass_pairs,
+                    f"selected_pairs={len(selected_pairs)}; decoder_pass_pairs={len(pass_pairs)}; missing_pairs={format_pairs(missing_pairs)}",
+                    "represent every decoder-available Track1/SleepPOST pair",
+                    "A partial holdout tier is diagnostic only and must be labeled explicitly.",
+                ),
+                _gate(
+                    f"{tier}_has_6_animals",
+                    bool(input_animals) and selected_animals == input_animals,
+                    f"selected_animals={len(selected_animals)}; decoder_animals={len(input_animals)}; missing_animals={','.join(sorted(input_animals.difference(selected_animals)))}",
+                    "represent every decoder-available animal",
+                    "The gate name reflects the real-data target of six animals.",
+                ),
+                _gate(
+                    f"{tier}_all_immobile",
+                    not tier_rows.empty and tier_rows["immobile"].map(_as_bool).all(),
+                    f"immobile_events={int(tier_rows['immobile'].map(_as_bool).sum()) if 'immobile' in tier_rows else 0}/{len(tier_rows)}",
+                    "all selected events satisfy the pre-evidence immobility filter",
+                    "Movement-heavy events should be kept out of replay-evidence debug tiers.",
+                ),
+                _gate(
+                    f"{tier}_all_qc_valid",
+                    not tier_rows.empty and _pass_status_mask(tier_rows["event_qc_status"]).all(),
+                    f"qc_valid_events={int(_pass_status_mask(tier_rows['event_qc_status']).sum()) if 'event_qc_status' in tier_rows else 0}/{len(tier_rows)}",
+                    "all selected events pass candidate-event QC",
+                    "The selection rule must remain pre-evidence and artifact-safe.",
+                ),
+                _gate(
+                    f"{tier}_all_artifact_free",
+                    not tier_rows.empty and (~tier_rows["artifact_flag"].map(_as_bool)).all(),
+                    f"artifact_flagged_events={int(tier_rows['artifact_flag'].map(_as_bool).sum()) if 'artifact_flag' in tier_rows else 0}/{len(tier_rows)}",
+                    "all selected events are artifact-free",
+                    "Artifact labels must be visible even when they are all false.",
+                ),
+                _gate(
+                    f"{tier}_uses_pre_evidence_fields_only",
+                    selection_uses_pre_evidence_fields_only(tier_rows),
+                    "score_name=event_detection_score; forbidden_logz_columns_absent=true",
+                    "rank only by event_detection_score and pre-evidence tie-breakers",
+                    "This tier is diagnostic confirmation, not post-hoc biological selection.",
+                ),
+            ]
+        )
+        if tier.endswith("_holdout_debug"):
+            overlap = holdout_overlap_with_prior_debug(selection, tier)
+            gates.append(
+                _gate(
+                    f"{tier}_excludes_prior_debug_events",
+                    not overlap,
+                    f"overlap_events={len(overlap)}; selected_events={len(tier_rows)}; holdout_tier_complete={str(len(tier_rows) == expected).lower()}; missing_pairs={format_pairs(missing_pairs)}",
+                    "exclude events selected in the prior pilot_20 debug tier",
+                    "This reduces circularity because the high-information rule was motivated by the first debug pilot.",
+                )
+            )
+    return gates
+
+
+def selection_uses_pre_evidence_fields_only(selection: pd.DataFrame) -> bool:
+    forbidden = [
+        column
+        for column in selection.columns
+        if column.lower().startswith("logz")
+        or column.lower() in {"log_evidence", "model_log_evidence"}
+        or column.lower().startswith("delta_")
+        or column.lower() in {"best_model", "runner_up_model", "trajectory_family_claim"}
+    ]
+    if forbidden:
+        return False
+    if selection.empty:
+        return False
+    return selection["selection_score_name"].astype(str).eq("event_detection_score").all()
+
+
+def holdout_overlap_with_prior_debug(selection: pd.DataFrame, holdout_tier: str) -> set[tuple[str, str, str, object]]:
+    if selection.empty:
+        return set()
+    holdout = selection[selection["selection_tier"].astype(str).eq(holdout_tier)]
+    prior = selection[selection["selection_tier"].astype(str).isin(PRIOR_DEBUG_TIERS_FOR_HOLDOUT)]
+    return selection_event_keys(holdout).intersection(selection_event_keys(prior))
+
+
+def selection_event_keys(selection: pd.DataFrame) -> set[tuple[str, str, str, object]]:
+    if selection.empty:
+        return set()
+    return {event_key(row) for row in selection.itertuples(index=False)}
+
+
+def format_pairs(pairs: Iterable[tuple[str, str, str]]) -> str:
+    return ";".join(f"{animal}/{date}/{session}" for animal, date, session in pairs)
 
 
 def selection_denominator_summary(
@@ -654,6 +912,8 @@ def eligible_columns() -> list[str]:
         "candidate_tier",
         "event_qc_status",
         "event_qc_reason",
+        "immobile",
+        "artifact_flag",
         "decoder_filter",
         "decoder_status",
         "decoder_qc_paper_ready",
@@ -742,7 +1002,7 @@ def animal_summary_rows(animals: pd.DataFrame, *, tier_targets: dict[str, int]) 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--candidate-events", type=Path, required=True)
+    parser.add_argument("--candidate-events", "--event-qc", dest="candidate_events", type=Path, required=True)
     parser.add_argument("--decoder-qc", type=Path, required=True)
     parser.add_argument("--output-dir", type=Path, default=Path("results/olafsdottir-sleeppost-pilot-events"))
     parser.add_argument("--seed", type=int, default=27011374643)

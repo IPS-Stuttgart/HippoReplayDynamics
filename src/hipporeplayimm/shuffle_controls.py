@@ -118,6 +118,9 @@ def add_shuffle_p_values(real_scores: pd.DataFrame, control_scores: pd.DataFrame
         out = real_scores.copy()
         out["shuffle_p_value"] = np.nan
         out["shuffle_log_evidence_median"] = np.nan
+        out["shuffle_log_evidence_mean"] = np.nan
+        out["shuffle_log_evidence_std"] = np.nan
+        out["shuffle_count"] = np.nan
         return out
     grouped = control_scores.groupby(["session", "event_index", "model"])
     summaries = grouped["log_evidence"].agg(

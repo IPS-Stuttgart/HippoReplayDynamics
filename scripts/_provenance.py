@@ -26,12 +26,13 @@ def build_script_provenance(
 
     working_directory = Path(cwd or os.getcwd()).resolve()
     path_map = {key: str(value) for key, value in (input_paths or {}).items() if value not in (None, "")}
+    hash_paths = {key: _resolve_input_path(value, working_directory) for key, value in path_map.items()}
     provenance = {
         **git_metadata(working_directory),
         "command_line": command_line(argv or sys.argv),
         "working_directory": str(working_directory),
         "input_file_paths": path_map,
-        "input_file_sha256": {key: file_sha256(Path(value)) for key, value in path_map.items()},
+        "input_file_sha256": {key: file_sha256(path) for key, path in hash_paths.items()},
     }
     return provenance
 
@@ -63,6 +64,11 @@ def git_metadata(cwd: str | Path | None = None) -> dict[str, object]:
 
 def command_line(argv: Sequence[str]) -> str:
     return " ".join(shlex.quote(str(part)) for part in argv)
+
+
+def _resolve_input_path(path: str | Path, working_directory: Path) -> Path:
+    file_path = Path(path)
+    return file_path if file_path.is_absolute() else working_directory / file_path
 
 
 def file_sha256(path: str | Path) -> str | None:

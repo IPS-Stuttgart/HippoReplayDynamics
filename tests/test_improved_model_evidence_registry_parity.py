@@ -68,7 +68,11 @@ def test_improved_model_evidence_accepts_trajectory_imm_and_displacement_variant
         "sorted-spike-state-space-trajectory-imm-low-leak-exact-sparse "
         "sorted-spike-state-space-trajectory-imm-persistent-exact-sparse "
         "sorted-spike-state-space-displacement-momentum "
-        "clusterless-state-space-displacement-momentum"
+        "sorted-spike-state-space-velocity-momentum "
+        "sorted-spike-state-space-displacement-imm "
+        "clusterless-state-space-displacement-momentum "
+        "clusterless-state-space-velocity-momentum "
+        "clusterless-state-space-displacement-imm"
     )
 
     models = benchmark_model_evidence_improved._models(
@@ -80,7 +84,11 @@ def test_improved_model_evidence_accepts_trajectory_imm_and_displacement_variant
         "sorted-spike-state-space-trajectory-imm-low-leak-exact-sparse",
         "sorted-spike-state-space-trajectory-imm-persistent-exact-sparse",
         "sorted-spike-state-space-displacement-momentum",
+        "sorted-spike-state-space-velocity-momentum",
+        "sorted-spike-state-space-displacement-imm",
         "clusterless-state-space-displacement-momentum",
+        "clusterless-state-space-velocity-momentum",
+        "clusterless-state-space-displacement-imm",
     ]
     assert (
         models[
@@ -101,4 +109,10 @@ def test_improved_model_evidence_accepts_trajectory_imm_and_displacement_variant
         == 0.985
     )
     assert models["sorted-spike-state-space-displacement-momentum"].mode == "displacement-momentum"
+    assert models["sorted-spike-state-space-velocity-momentum"].mode == "displacement-momentum"
+    assert models["sorted-spike-state-space-velocity-momentum"].name == "sorted-spike-state-space-velocity-momentum"
+    assert models["sorted-spike-state-space-displacement-imm"].mode == "displacement-imm"
     assert models["clusterless-state-space-displacement-momentum"].mode == "displacement-momentum"
+    assert models["clusterless-state-space-velocity-momentum"].mode == "displacement-momentum"
+    assert models["clusterless-state-space-velocity-momentum"].name == "clusterless-state-space-velocity-momentum"
+    assert models["clusterless-state-space-displacement-imm"].mode == "displacement-imm"

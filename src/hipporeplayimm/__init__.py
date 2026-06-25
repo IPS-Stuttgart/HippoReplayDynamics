@@ -3,6 +3,7 @@
 
 from . import accuracy_model_probability_status_patch as _accuracy_model_probability_status_patch
 from . import advanced_result_empty_threshold_patch as _advanced_result_empty_threshold_patch
+from . import advanced_result_quantile_array_patch as _advanced_result_quantile_array_patch
 from . import advanced_result_status_patch as _advanced_result_status_patch
 from . import advanced_result_threshold_validation as _advanced_result_threshold_validation
 from . import advanced_result_wrong_map_bootstrap_patch as _advanced_result_wrong_map_bootstrap_patch
@@ -255,6 +256,7 @@ def apply_runtime_patches() -> None:
     _advanced_result_empty_threshold_patch.apply_advanced_result_empty_threshold_patch()
     _advanced_result_threshold_validation.apply_advanced_result_threshold_validation_patch()
     _advanced_result_wrong_map_bootstrap_patch.apply_wrong_map_rat_bootstrap_patch()
+    _advanced_result_quantile_array_patch.apply_advanced_result_quantile_array_patch()
     _latent_path_validation.apply_latent_path_validation_patch()
     _simulation_recovery_runtime_limits.apply_simulation_recovery_runtime_limit_validation_patch()
     _simulation_recovery_count_validation.apply_simulation_recovery_count_validation_patch()

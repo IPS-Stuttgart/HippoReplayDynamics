@@ -75,3 +75,52 @@ def test_add_shuffle_p_values_preserves_schema_when_real_scores_empty() -> None:
 
     assert out.empty
     assert SHUFFLE_SUMMARY_COLUMNS.issubset(out.columns)
+
+
+def test_add_shuffle_p_values_returns_nan_for_nonfinite_real_log_evidence() -> None:
+    real_scores = pd.DataFrame(
+        {
+            "session": ["Rat1/Open1"],
+            "event_index": [3],
+            "model": ["sorted-spike-state-space-first-order-imm"],
+            "log_evidence": [np.nan],
+        }
+    )
+    control_scores = pd.DataFrame(
+        {
+            "session": ["Rat1/Open1", "Rat1/Open1"],
+            "event_index": [3, 3],
+            "model": ["sorted-spike-state-space-first-order-imm", "sorted-spike-state-space-first-order-imm"],
+            "log_evidence": [11.0, 12.0],
+        }
+    )
+
+    out = add_shuffle_p_values(real_scores, control_scores)
+
+    assert np.isnan(out.loc[0, "shuffle_p_value"])
+    assert out.loc[0, "shuffle_count"] == 2
+
+
+def test_add_shuffle_p_values_ignores_nonfinite_control_log_evidence() -> None:
+    real_scores = pd.DataFrame(
+        {
+            "session": ["Rat1/Open1"],
+            "event_index": [3],
+            "model": ["sorted-spike-state-space-first-order-imm"],
+            "log_evidence": [10.0],
+        }
+    )
+    control_scores = pd.DataFrame(
+        {
+            "session": ["Rat1/Open1"] * 5,
+            "event_index": [3] * 5,
+            "model": ["sorted-spike-state-space-first-order-imm"] * 5,
+            "log_evidence": [12.0, 8.0, np.nan, np.inf, -np.inf],
+        }
+    )
+
+    out = add_shuffle_p_values(real_scores, control_scores)
+
+    assert np.isclose(out.loc[0, "shuffle_p_value"], 2.0 / 3.0)
+    assert out.loc[0, "shuffle_count"] == 2
+    assert out.loc[0, "shuffle_log_evidence_median"] == 10.0

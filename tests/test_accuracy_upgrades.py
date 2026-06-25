@@ -82,3 +82,23 @@ def test_model_probability_diagnostics_excludes_string_false_comparable_rows() -
 
     assert out.loc[0, "models"] == 1
     assert out.loc[0, "best_model"] == "exact"
+
+
+def test_model_probability_diagnostics_accepts_legacy_success_status_values() -> None:
+    scores = pd.DataFrame(
+        {
+            "session": ["s1", "s1", "s2", "s2"],
+            "event_index": [0, 0, 0, 0],
+            "model": ["legacy-success", "missing-empty", "missing-nan", "failed"],
+            "log_evidence": [2.0, 1.0, 3.0, 100.0],
+            "status": ["Success", "", np.nan, "failed"],
+            "evidence_comparable": [True, True, True, True],
+        }
+    )
+
+    out = model_probability_diagnostics(scores).set_index("session")
+
+    assert out.loc["s1", "models"] == 2
+    assert out.loc["s1", "best_model"] == "legacy-success"
+    assert out.loc["s2", "models"] == 1
+    assert out.loc["s2", "best_model"] == "missing-nan"

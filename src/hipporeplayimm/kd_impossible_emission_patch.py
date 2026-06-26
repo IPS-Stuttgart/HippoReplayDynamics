@@ -63,6 +63,8 @@ def _second_order_separable_log_evidence(log_emissions: np.ndarray, n_bins: int,
         return float("-inf")
     logp = np.log(conditional0) + offset0
     alpha0 /= conditional0
+    if log_emissions.shape[0] == 1:
+        return float(logp)
 
     emission1, offset1 = _scaled_emission(log_emissions, 1)
     emission1_grid = emission1.reshape(n_bins, n_bins)

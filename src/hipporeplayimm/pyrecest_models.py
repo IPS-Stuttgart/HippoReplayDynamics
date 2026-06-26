@@ -9,7 +9,7 @@ import numpy as np
 from .duration_dynamics import transition_durations_s
 from .encoding import LogEmissionTensor
 from .evidence_reporting import PYRECEST_PARTICLE_EVIDENCE_SUPPORT
-from .models import EventScore, _posterior_diagnostics
+from .models import EventScore, _posterior_diagnostics, _validate_score_inputs
 
 PYRECEST_INSTALL_HINT = (
     "PyRecEst-backed replay models require the optional 'pyrecest' dependency. "
@@ -90,8 +90,7 @@ class PyRecEstGoalParticleModel:
                 _validate_nonnegative_float(getattr(self, name), name)
 
     def score(self, emissions: LogEmissionTensor, bin_centers: np.ndarray) -> EventScore:
-        if emissions.n_time == 0:
-            raise ValueError("emissions must contain at least one time bin")
+        bin_centers = _validate_score_inputs(emissions, bin_centers)
         if self.n_particles <= 0:
             raise ValueError("n_particles must be positive")
         _validate_probability(
@@ -343,6 +342,8 @@ def _coerce_candidate_goals(
                 "candidate_goals must have shape (n_goals, position_dim) "
                 "and contain at least one row"
             )
+        if not np.all(np.isfinite(goals)):
+            raise ValueError("candidate_goals must be finite")
         return goals
     return _farthest_point_subset(np.asarray(bin_centers, dtype=float), max_points=32)
 

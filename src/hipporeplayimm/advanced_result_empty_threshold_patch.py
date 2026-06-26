@@ -18,6 +18,16 @@ import pandas as pd
 _PATCHED_FLAG = "_advanced_result_empty_threshold_patch_applied"
 
 
+def _normalize_group_cols(group_cols: Sequence[str] | str | None, scores: pd.DataFrame) -> tuple[str, ...]:
+    if group_cols is None:
+        from . import advanced_result_diagnostics as diagnostics
+
+        return tuple(diagnostics.infer_paired_model_group_cols(scores))
+    if isinstance(group_cols, str):
+        return (group_cols,)
+    return tuple(group_cols)
+
+
 def _with_threshold_context(
     summary: pd.DataFrame,
     *,
@@ -65,7 +75,7 @@ def apply_advanced_result_empty_threshold_patch() -> None:
         positive_model: str,
         reference_model: str,
         thresholds: Sequence[float],
-        group_cols: Sequence[str] | None = None,
+        group_cols: Sequence[str] | str | None = None,
         evidence_col: str = "log_evidence",
         model_col: str = "model",
         true_model_col: str | None = None,
@@ -73,7 +83,7 @@ def apply_advanced_result_empty_threshold_patch() -> None:
     ) -> pd.DataFrame:
         """Summarize paired margin decisions over candidate thresholds."""
 
-        paired_group_cols = tuple(group_cols) if group_cols is not None else diagnostics.infer_paired_model_group_cols(scores)
+        paired_group_cols = _normalize_group_cols(group_cols, scores)
         rows: list[pd.DataFrame] = []
         for threshold in thresholds:
             threshold_value = float(threshold)

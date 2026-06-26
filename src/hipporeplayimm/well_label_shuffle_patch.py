@@ -14,7 +14,10 @@ def apply_well_label_shuffle_patch() -> None:
 
     from . import result_improvements
 
-    if getattr(result_improvements, _PATCHED_FLAG, False):
+    if (
+        getattr(result_improvements, _PATCHED_FLAG, False)
+        and getattr(result_improvements, "shuffle_well_labels", None) is shuffle_well_labels
+    ):
         return
     result_improvements.shuffle_well_labels = shuffle_well_labels
     setattr(result_improvements, _PATCHED_FLAG, True)

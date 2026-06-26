@@ -6,6 +6,54 @@ import pandas as pd
 from hipporeplayimm.result_improvements import shuffle_well_labels
 
 
+def test_well_label_shuffle_patch_reinstalls_after_stale_flag(monkeypatch) -> None:
+    import hipporeplayimm.result_improvements as result_improvements
+    from hipporeplayimm.well_label_shuffle_patch import (
+        apply_well_label_shuffle_patch,
+        shuffle_well_labels as patched_shuffle_well_labels,
+    )
+
+    def stale_shuffle(frame: pd.DataFrame, random_seed: int = 1) -> pd.DataFrame:
+        del random_seed
+        return frame.copy()
+
+    monkeypatch.setattr(
+        result_improvements,
+        "_well_label_shuffle_patch_applied",
+        True,
+        raising=False,
+    )
+    monkeypatch.setattr(result_improvements, "shuffle_well_labels", stale_shuffle)
+
+    apply_well_label_shuffle_patch()
+
+    assert result_improvements.shuffle_well_labels is patched_shuffle_well_labels
+    frame = pd.DataFrame(
+        {
+            "event": [0, 1, 2],
+            "true_well_id": ["A", "B", None],
+            "true_well_x": [1.0, 2.0, np.nan],
+            "true_well_y": [10.0, 20.0, np.nan],
+        }
+    )
+    shuffled = result_improvements.shuffle_well_labels(frame, random_seed=3)
+
+    shuffled_labels = shuffled.loc[
+        :1,
+        ["true_well_id", "true_well_x", "true_well_y"],
+    ].to_numpy()
+    assert shuffled_labels.tolist() == [
+        ["B", 2.0, 20.0],
+        ["A", 1.0, 10.0],
+    ]
+    assert (
+        shuffled.loc[2, ["true_well_id", "true_well_x", "true_well_y"]]
+        .isna()
+        .all()
+    )
+    assert shuffled["event"].tolist() == frame["event"].tolist()
+
+
 def test_shuffle_well_labels_shuffles_ids_when_coordinates_are_missing() -> None:
     frame = pd.DataFrame(
         {

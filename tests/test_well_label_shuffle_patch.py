@@ -103,3 +103,21 @@ def test_shuffle_well_labels_does_not_treat_partial_coordinates_as_labels() -> N
     ]
     assert shuffled.loc[3, ["true_well_x", "true_well_y"]].isna().all()
     assert shuffled["event"].tolist() == frame["event"].tolist()
+
+
+def test_shuffle_well_labels_requires_complete_coordinate_pair_for_coordinate_only_rows() -> None:
+    x_only = pd.DataFrame(
+        {
+            "event": [0, 1, 2],
+            "true_well_x": [1.0, 2.0, np.nan],
+        }
+    )
+    y_only = pd.DataFrame(
+        {
+            "event": [0, 1, 2],
+            "true_well_y": [10.0, 20.0, np.nan],
+        }
+    )
+
+    pd.testing.assert_frame_equal(shuffle_well_labels(x_only, random_seed=3), x_only)
+    pd.testing.assert_frame_equal(shuffle_well_labels(y_only, random_seed=3), y_only)

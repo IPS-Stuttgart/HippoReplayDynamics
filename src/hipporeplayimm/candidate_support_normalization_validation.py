@@ -40,8 +40,9 @@ def _candidate_support_scores(log_emission: np.ndarray) -> np.ndarray:
         raise ValueError("log_emission must be one-dimensional")
     if scores.size == 0:
         raise ValueError("log_emission must contain at least one spatial bin")
-    if np.any(np.isnan(scores)) or np.any(scores == np.inf):
-        raise ValueError("log_emission must not contain NaN or +inf")
+    if np.any(scores == np.inf):
+        raise ValueError("log_emission must not contain +inf")
+    scores = np.where(np.isnan(scores), -np.inf, scores)
     if not np.any(np.isfinite(scores)):
         raise ValueError("log_emission must contain at least one finite value")
     return scores

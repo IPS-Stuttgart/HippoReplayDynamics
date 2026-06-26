@@ -93,12 +93,18 @@ def test_runtime_patch_repairs_duration_occupancy_diagnostics_alias(monkeypatch)
     assert getattr(helper, "_first_order_imm_duration_diagnostics_alias_patch", False)
 
 
-def test_duration_occupancy_alias_uses_caller_transition_durations() -> None:
+def test_duration_occupancy_alias_uses_recorded_transition_durations(monkeypatch) -> None:
     apply_runtime_patches()
     helper = duration_occupancy._first_order_imm_content_diagnostics
+    monkeypatch.setattr(
+        duration_occupancy,
+        "_first_order_imm_diagnostic_transition_durations",
+        np.array([0.5], dtype=float),
+        raising=False,
+    )
 
-    def call_like_duration_occupancy_scorer() -> dict[str, float | int]:
-        durations = np.array([0.5], dtype=float)
+    def call_with_unrelated_caller_durations() -> dict[str, float | int]:
+        durations = np.array([10.0], dtype=float)
         assert durations.shape == (1,)
         return helper(
             _mode_posterior(),
@@ -107,19 +113,24 @@ def test_duration_occupancy_alias_uses_caller_transition_durations() -> None:
             0.02,
         )
 
-    diagnostics = call_like_duration_occupancy_scorer()
+    diagnostics = call_with_unrelated_caller_durations()
 
     assert diagnostics["state_space_imm_posterior_expected_path_length_cm"] == pytest.approx(1.0)
     assert diagnostics["state_space_imm_posterior_path_speed_cm_s"] == pytest.approx(2.0)
 
 
-def test_duration_occupancy_alias_ignores_unrelated_caller_durations() -> None:
+def test_duration_occupancy_alias_ignores_unrecorded_caller_durations(monkeypatch) -> None:
     apply_runtime_patches()
+    monkeypatch.delattr(
+        duration_occupancy,
+        "_first_order_imm_diagnostic_transition_durations",
+        raising=False,
+    )
     helper = duration_occupancy._first_order_imm_content_diagnostics
 
     def call_from_unrelated_context() -> dict[str, float | int]:
-        durations = np.array([10.0, 20.0], dtype=float)
-        assert durations.shape == (2,)
+        durations = np.array([10.0], dtype=float)
+        assert durations.shape == (1,)
         return helper(
             _mode_posterior(),
             _deterministic_step_log_posterior(),

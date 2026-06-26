@@ -136,9 +136,10 @@ def apply_advanced_result_threshold_validation_patch() -> None:
         true_model_col: str | None = None,
         positive_true_label: str | None = None,
     ) -> pd.DataFrame:
+        validated_thresholds = _validated_thresholds(thresholds)
         paired_group_cols = tuple(group_cols) if group_cols is not None else diagnostics.infer_paired_model_group_cols(scores)
         rows: list[pd.DataFrame] = []
-        for threshold in _validated_thresholds(thresholds):
+        for threshold in validated_thresholds:
             decisions = paired_model_margin_decisions(
                 scores,
                 positive_model=positive_model,

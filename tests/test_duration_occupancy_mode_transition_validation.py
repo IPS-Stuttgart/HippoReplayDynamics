@@ -54,6 +54,13 @@ def test_custom_duration_imm_mode_transition_rejects_invalid_probabilities(bad_v
         _resolve([bad_transition])
 
 
+def test_custom_duration_imm_mode_transition_rejects_boolean_masks() -> None:
+    boolean_transition = np.eye(3, dtype=bool)
+
+    with pytest.raises(ValueError, match="not booleans"):
+        _resolve([boolean_transition])
+
+
 def test_custom_duration_imm_mode_transition_accepts_valid_probability_matrix() -> None:
     transition = np.array(
         [

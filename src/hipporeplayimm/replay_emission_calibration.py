@@ -42,6 +42,16 @@ class ReplayEmissionCalibration:
         }
 
 
+def _finite_float(name: str, value: float) -> float:
+    try:
+        out = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must be finite") from exc
+    if not np.isfinite(out):
+        raise ValueError(f"{name} must be finite")
+    return out
+
+
 def fit_replay_cell_gains(
     session: ReplaySession,
     encoding: EncodingModel,
@@ -62,6 +72,10 @@ def fit_replay_cell_gains(
     """
 
     config = EmissionConfig() if config is None else config
+    prior_count = _finite_float("prior_count", prior_count)
+    prior_gain = _finite_float("prior_gain", prior_gain)
+    min_gain = _finite_float("min_gain", min_gain)
+    max_gain = _finite_float("max_gain", max_gain)
     if prior_count < 0.0:
         raise ValueError("prior_count must be non-negative")
     if prior_gain <= 0.0:
@@ -83,9 +97,12 @@ def fit_replay_cell_gains(
         expected += mean_rates * duration * float(config.spike_rate_scale)
         event_count += 1
 
-    numerator = observed + prior_count * prior_gain
-    denominator = np.maximum(expected + prior_count, np.finfo(float).tiny)
-    gains = np.clip(numerator / denominator, min_gain, max_gain)
+    if event_count == 0:
+        gains = np.full(encoding.n_cells, np.clip(prior_gain, min_gain, max_gain), dtype=float)
+    else:
+        numerator = observed + prior_count * prior_gain
+        denominator = np.maximum(expected + prior_count, np.finfo(float).tiny)
+        gains = np.clip(numerator / denominator, min_gain, max_gain)
     return ReplayEmissionCalibration(
         cell_ids=np.asarray(encoding.cell_ids, dtype=int).copy(),
         gains=np.asarray(gains, dtype=float),

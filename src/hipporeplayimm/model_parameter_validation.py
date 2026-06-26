@@ -12,6 +12,7 @@ _STATE_SPACE_DECAY_HELPERS_PATCHED_FLAG = "_state_space_velocity_decay_validatio
 _DURATION_OCCUPANCY_DECAY_PATCHED_FLAG = "_duration_occupancy_velocity_decay_validation_patch_applied"
 _SPARSE_MOMENTUM_DECAY_PATCHED_FLAG = "_sparse_momentum_velocity_decay_validation_patch_applied"
 _DISPLACEMENT_MOMENTUM_DECAY_PATCHED_FLAG = "_displacement_momentum_velocity_decay_validation_patch_applied"
+_TRAJECTORY_IMM_PARAMETERS_PATCHED_FLAG = "_trajectory_imm_parameter_validation_patch_applied"
 _PYRECEST_IMM_DECAY_PATCHED_FLAG = "_pyrecest_imm_velocity_decay_validation_patch_applied"
 
 
@@ -191,6 +192,54 @@ def _apply_displacement_momentum_velocity_decay_validation_patch() -> None:
     setattr(state_space_displacement_momentum, _DISPLACEMENT_MOMENTUM_DECAY_PATCHED_FLAG, True)
 
 
+def _apply_trajectory_imm_parameter_validation_patch() -> None:
+    from . import state_space_trajectory_imm
+
+    if getattr(state_space_trajectory_imm, _TRAJECTORY_IMM_PARAMETERS_PATCHED_FLAG, False):
+        return
+
+    original_mode_stickiness = state_space_trajectory_imm._trajectory_imm_mode_stickiness
+    original_mode_prior = state_space_trajectory_imm._trajectory_imm_mode_prior
+    original_mode_transition_matrix = state_space_trajectory_imm._trajectory_imm_mode_transition_matrix
+    original_mode_transition_matrices = state_space_trajectory_imm._trajectory_imm_mode_transition_matrices
+
+    @wraps(original_mode_stickiness)
+    def trajectory_imm_mode_stickiness(config):
+        explicit_value = getattr(config, "trajectory_imm_mode_stickiness", None)
+        if explicit_value is None:
+            _validate_unit_interval_parameter("imm_mode_stickiness", getattr(config, "imm_mode_stickiness", 0.95))
+        else:
+            _validate_unit_interval_parameter("trajectory_imm_mode_stickiness", explicit_value)
+        return original_mode_stickiness(config)
+
+    @wraps(original_mode_prior)
+    def trajectory_imm_mode_prior(config):
+        value = getattr(config, "trajectory_imm_momentum_initial_probability", None)
+        if value is not None:
+            _validate_unit_interval_parameter("trajectory_imm_momentum_initial_probability", value)
+        return original_mode_prior(config)
+
+    @wraps(original_mode_transition_matrix)
+    def trajectory_imm_mode_transition_matrix(config, stickiness):
+        _validate_unit_interval_parameter("trajectory_imm_mode_stickiness", stickiness)
+        momentum_switch = getattr(config, "trajectory_imm_momentum_switch_probability", None)
+        if momentum_switch is not None:
+            _validate_finite_nonnegative_parameter("trajectory_imm_momentum_switch_probability", momentum_switch)
+        return original_mode_transition_matrix(config, stickiness)
+
+    @wraps(original_mode_transition_matrices)
+    def trajectory_imm_mode_transition_matrices(config, stickiness, durations):
+        _validate_unit_interval_parameter("trajectory_imm_mode_stickiness", stickiness)
+        _validate_finite_nonnegative_parameter("imm_switch_tau_s", getattr(config, "imm_switch_tau_s", 0.0))
+        return original_mode_transition_matrices(config, stickiness, durations)
+
+    state_space_trajectory_imm._trajectory_imm_mode_stickiness = trajectory_imm_mode_stickiness
+    state_space_trajectory_imm._trajectory_imm_mode_prior = trajectory_imm_mode_prior
+    state_space_trajectory_imm._trajectory_imm_mode_transition_matrix = trajectory_imm_mode_transition_matrix
+    state_space_trajectory_imm._trajectory_imm_mode_transition_matrices = trajectory_imm_mode_transition_matrices
+    setattr(state_space_trajectory_imm, _TRAJECTORY_IMM_PARAMETERS_PATCHED_FLAG, True)
+
+
 def _apply_pyrecest_imm_velocity_decay_validation_patch() -> None:
     from . import pyrecest_models
 
@@ -252,6 +301,7 @@ def apply_model_parameter_validation_patch() -> None:
     _apply_duration_occupancy_velocity_decay_validation_patch()
     _apply_sparse_momentum_velocity_decay_validation_patch()
     _apply_displacement_momentum_velocity_decay_validation_patch()
+    _apply_trajectory_imm_parameter_validation_patch()
     _apply_pyrecest_imm_velocity_decay_validation_patch()
     _apply_replay_calibration_max_gain_validation_patch()
 

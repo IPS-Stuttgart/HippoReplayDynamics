@@ -10,6 +10,8 @@ import numpy as np
 _PATCH_ATTR = "_first_order_imm_diagnostics_validation_patch"
 _ORIGINAL_ATTR = "_first_order_imm_diagnostics_validation_original"
 _DURATION_ALIAS_ATTR = "_first_order_imm_duration_diagnostics_alias_patch"
+_DURATION_SOURCE_ATTR = "_first_order_imm_duration_diagnostics_source_patch"
+_LAST_DURATIONS_ATTR = "_first_order_imm_diagnostic_transition_durations"
 
 
 def _validate_first_order_imm_content_inputs(
@@ -148,7 +150,7 @@ def _compute_first_order_imm_content_diagnostics(
 
 
 def _matching_transition_durations(values: object, n_time: int) -> np.ndarray | None:
-    """Return caller-local durations only when they match this diagnostic call."""
+    """Return stored durations only when they match this diagnostic call."""
 
     if values is None:
         return None
@@ -195,17 +197,35 @@ def _wrap_helper(
     return validated_first_order_imm_content_diagnostics
 
 
+def _stored_duration_occupancy_durations(n_time: int) -> np.ndarray | None:
+    module = sys.modules.get("hipporeplayimm.duration_occupancy")
+    if module is None:
+        return None
+    return _matching_transition_durations(getattr(module, _LAST_DURATIONS_ATTR, None), n_time)
+
+
+def _record_duration_occupancy_transition_durations() -> None:
+    module = sys.modules.get("hipporeplayimm.duration_occupancy")
+    if module is None or not hasattr(module, "transition_durations_s"):
+        return
+    current = module.transition_durations_s
+    if getattr(current, _DURATION_SOURCE_ATTR, False):
+        return
+
+    def recording_transition_durations(emissions):
+        durations = current(emissions)
+        setattr(module, _LAST_DURATIONS_ATTR, np.asarray(durations, dtype=float).copy())
+        return durations
+
+    setattr(recording_transition_durations, _DURATION_SOURCE_ATTR, True)
+    setattr(recording_transition_durations, _ORIGINAL_ATTR, current)
+    module.transition_durations_s = recording_transition_durations
+
+
 def _wrap_duration_occupancy_alias(
     helper: Callable[..., dict[str, float | int]],
 ) -> Callable[..., dict[str, float | int]]:
-    """Preserve transition durations for the duration-aware scorer's helper alias.
-
-    Older duration-aware scorer code passes scalar ``dt`` while keeping the
-    validated transition-duration vector in a caller-local variable named
-    ``durations``.  Only consume that local when it has the exact shape expected
-    for the current posterior, otherwise unrelated caller locals can corrupt the
-    diagnostic duration or trigger spurious shape errors.
-    """
+    """Preserve transition durations for the duration-aware scorer's helper alias."""
 
     if getattr(helper, _DURATION_ALIAS_ATTR, False):
         return helper
@@ -220,11 +240,7 @@ def _wrap_duration_occupancy_alias(
         if durations is None:
             mode = np.asarray(mode_posterior)
             n_time = int(mode.shape[0]) if mode.ndim else 0
-            try:
-                caller_durations = sys._getframe(1).f_locals.get("durations")
-            except ValueError:
-                caller_durations = None
-            durations = _matching_transition_durations(caller_durations, n_time)
+            durations = _stored_duration_occupancy_durations(n_time)
         if durations is not None:
             from .duration_dynamics import DurationFloat
 
@@ -259,5 +275,6 @@ def apply_first_order_imm_diagnostics_validation_patch() -> None:
 
     helper = _wrap_helper(state_space_utils._first_order_imm_content_diagnostics)
     state_space_utils._first_order_imm_content_diagnostics = helper
+    _record_duration_occupancy_transition_durations()
     _patch_loaded_alias("hipporeplayimm.state_space", helper)
     _patch_loaded_alias("hipporeplayimm.duration_occupancy", helper)

@@ -17,7 +17,12 @@ def test_well_label_shuffle_patch_reinstalls_after_stale_flag(monkeypatch) -> No
         del random_seed
         return frame.copy()
 
-    monkeypatch.setattr(result_improvements, "_well_label_shuffle_patch_applied", True, raising=False)
+    monkeypatch.setattr(
+        result_improvements,
+        "_well_label_shuffle_patch_applied",
+        True,
+        raising=False,
+    )
     monkeypatch.setattr(result_improvements, "shuffle_well_labels", stale_shuffle)
 
     apply_well_label_shuffle_patch()
@@ -41,7 +46,11 @@ def test_well_label_shuffle_patch_reinstalls_after_stale_flag(monkeypatch) -> No
         ["B", 2.0, 20.0],
         ["A", 1.0, 10.0],
     ]
-    assert shuffled.loc[2, ["true_well_id", "true_well_x", "true_well_y"]].isna().all()
+    assert (
+        shuffled.loc[2, ["true_well_id", "true_well_x", "true_well_y"]]
+        .isna()
+        .all()
+    )
     assert shuffled["event"].tolist() == frame["event"].tolist()
 
 

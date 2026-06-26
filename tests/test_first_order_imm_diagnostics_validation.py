@@ -119,11 +119,41 @@ def test_duration_occupancy_alias_uses_recorded_transition_durations(monkeypatch
     assert diagnostics["state_space_imm_posterior_path_speed_cm_s"] == pytest.approx(2.0)
 
 
-def test_duration_occupancy_alias_ignores_unrecorded_caller_durations(monkeypatch) -> None:
+def test_duration_occupancy_alias_consumes_recorded_transition_durations_once(monkeypatch) -> None:
     apply_runtime_patches()
-    monkeypatch.delattr(
+    helper = duration_occupancy._first_order_imm_content_diagnostics
+    monkeypatch.setattr(
         duration_occupancy,
         "_first_order_imm_diagnostic_transition_durations",
+        np.array([0.5], dtype=float),
+        raising=False,
+    )
+
+    first = helper(
+        _mode_posterior(),
+        _deterministic_step_log_posterior(),
+        _bin_centers(),
+        0.02,
+    )
+    second = helper(
+        _mode_posterior(),
+        _deterministic_step_log_posterior(),
+        _bin_centers(),
+        0.02,
+    )
+
+    assert first["state_space_imm_posterior_expected_path_length_cm"] == pytest.approx(1.0)
+    assert first["state_space_imm_posterior_path_speed_cm_s"] == pytest.approx(2.0)
+    assert second["state_space_imm_posterior_expected_path_length_cm"] == pytest.approx(1.0)
+    assert second["state_space_imm_posterior_path_speed_cm_s"] == pytest.approx(50.0)
+
+
+def test_duration_occupancy_alias_ignores_unrecorded_caller_durations(monkeypatch) -> None:
+    apply_runtime_patches()
+    monkeypatch.setattr(
+        duration_occupancy,
+        "_first_order_imm_diagnostic_transition_durations",
+        None,
         raising=False,
     )
     helper = duration_occupancy._first_order_imm_content_diagnostics

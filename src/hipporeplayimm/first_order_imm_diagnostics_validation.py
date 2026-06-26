@@ -147,6 +147,24 @@ def _compute_first_order_imm_content_diagnostics(
     }
 
 
+def _matching_transition_durations(values: object, n_time: int) -> np.ndarray | None:
+    """Return caller-local durations only when they match this diagnostic call."""
+
+    if values is None:
+        return None
+    try:
+        durations = np.asarray(values, dtype=float)
+    except (TypeError, ValueError):
+        return None
+
+    expected_shape = (max(int(n_time) - 1, 0),)
+    if durations.shape != expected_shape:
+        return None
+    if not np.all(np.isfinite(durations)) or np.any(durations <= 0.0):
+        return None
+    return durations
+
+
 def _wrap_helper(
     helper: Callable[..., dict[str, float | int]],
 ) -> Callable[..., dict[str, float | int]]:
@@ -180,7 +198,14 @@ def _wrap_helper(
 def _wrap_duration_occupancy_alias(
     helper: Callable[..., dict[str, float | int]],
 ) -> Callable[..., dict[str, float | int]]:
-    """Preserve transition durations for the duration-aware scorer's helper alias."""
+    """Preserve transition durations for the duration-aware scorer's helper alias.
+
+    Older duration-aware scorer code passes scalar ``dt`` while keeping the
+    validated transition-duration vector in a caller-local variable named
+    ``durations``.  Only consume that local when it has the exact shape expected
+    for the current posterior, otherwise unrelated caller locals can corrupt the
+    diagnostic duration or trigger spurious shape errors.
+    """
 
     if getattr(helper, _DURATION_ALIAS_ATTR, False):
         return helper
@@ -193,10 +218,13 @@ def _wrap_duration_occupancy_alias(
     ) -> dict[str, float | int]:
         durations = getattr(dt_s, "transition_durations", None)
         if durations is None:
+            mode = np.asarray(mode_posterior)
+            n_time = int(mode.shape[0]) if mode.ndim else 0
             try:
-                durations = sys._getframe(1).f_locals.get("durations")
+                caller_durations = sys._getframe(1).f_locals.get("durations")
             except ValueError:
-                durations = None
+                caller_durations = None
+            durations = _matching_transition_durations(caller_durations, n_time)
         if durations is not None:
             from .duration_dynamics import DurationFloat
 

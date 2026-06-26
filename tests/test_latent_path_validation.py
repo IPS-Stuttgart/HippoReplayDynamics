@@ -2,6 +2,7 @@ import numpy as np
 import pytest
 
 from hipporeplayimm.encoding import EncodingConfig, EncodingModel
+from hipporeplayimm.latent_path_validation import _config_with_validated_event_counts
 from hipporeplayimm.simulation_recovery import (
     SimulationRecoveryConfig,
     run_session_simulation_recovery,
@@ -77,14 +78,32 @@ def test_simulate_latent_path_rejects_invalid_motion_sigmas(true_model, state_sp
 
 
 @pytest.mark.parametrize(
+    ("raw_limit", "expected_limit"),
+    [
+        (None, None),
+        (0, None),
+        (-1, None),
+        (3, 3),
+    ],
+)
+def test_max_template_events_nonpositive_is_uncapped(raw_limit, expected_limit):
+    config = SimulationRecoveryConfig(max_template_events=raw_limit)
+
+    normalized = _config_with_validated_event_counts(config)
+
+    assert normalized.max_template_events == expected_limit
+
+
+@pytest.mark.parametrize(
     ("field", "value"),
     [
         ("events_per_model", 0),
         ("events_per_model", 1.5),
         ("events_per_model", np.array([2])),
-        ("max_template_events", 0),
         ("max_template_events", 1.5),
+        ("max_template_events", np.nan),
         ("max_template_events", np.array([2])),
+        ("max_synthetic_events", 0),
         ("max_synthetic_events", np.nan),
         ("max_synthetic_events", np.array([2])),
     ],

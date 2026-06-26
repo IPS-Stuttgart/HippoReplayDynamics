@@ -95,10 +95,8 @@ def test_shuffle_well_labels_does_not_treat_partial_coordinates_as_labels() -> N
 
     shuffled = shuffle_well_labels(frame, random_seed=3)
 
-    assert shuffled.loc[0, ["true_well_x", "true_well_y"]].to_numpy().tolist() == [
-        1.0,
-        np.nan,
-    ]
+    assert shuffled.loc[0, "true_well_x"] == 1.0
+    assert pd.isna(shuffled.loc[0, "true_well_y"])
     assert shuffled.loc[[1, 2], ["true_well_x", "true_well_y"]].to_numpy().tolist() == [
         [3.0, 30.0],
         [2.0, 20.0],

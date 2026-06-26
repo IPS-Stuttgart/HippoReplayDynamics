@@ -108,6 +108,7 @@ def apply_state_space_bin_count_validation_patch() -> None:
         "_uniform_log_prior": utils._uniform_log_prior,
         "_uniform_probabilities": utils._uniform_probabilities,
         "_valid_bin_count": utils._valid_bin_count,
+        "_top_candidate_indices": utils._top_candidate_indices,
         "_mass_retaining_candidate_indices": utils._mass_retaining_candidate_indices,
     }
     originals = {name: _original_callable(function) for name, function in current_helpers.items()}
@@ -116,6 +117,7 @@ def apply_state_space_bin_count_validation_patch() -> None:
     original_uniform_log_prior = originals["_uniform_log_prior"]
     original_uniform_probabilities = originals["_uniform_probabilities"]
     original_valid_bin_count = originals["_valid_bin_count"]
+    original_top_candidate_indices = originals["_top_candidate_indices"]
     original_mass_retaining_candidate_indices = originals["_mass_retaining_candidate_indices"]
 
     def _coerce_valid_bin_mask(valid_bin_mask: Any, n_bins: int):
@@ -133,6 +135,12 @@ def apply_state_space_bin_count_validation_patch() -> None:
     def _valid_bin_count(n_bins: int, valid_bin_mask: Any = None) -> int:
         count = _positive_bin_count(n_bins)
         return original_valid_bin_count(count, _coerce_bool_mask(valid_bin_mask, count))
+
+    def _top_candidate_indices(log_emission: np.ndarray, top_k: int) -> np.ndarray:
+        return original_top_candidate_indices(
+            log_emission,
+            _nonnegative_integer_count("top_k", top_k),
+        )
 
     def _mass_retaining_candidate_indices(
         log_emission: np.ndarray,
@@ -170,6 +178,10 @@ def apply_state_space_bin_count_validation_patch() -> None:
             original_uniform_probabilities,
         ),
         "_valid_bin_count": _mark_patched(_valid_bin_count, original_valid_bin_count),
+        "_top_candidate_indices": _mark_patched(
+            _top_candidate_indices,
+            original_top_candidate_indices,
+        ),
         "_mass_retaining_candidate_indices": _mark_patched(
             _mass_retaining_candidate_indices,
             original_mass_retaining_candidate_indices,

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 
 import numpy as np
 import pandas as pd
@@ -33,7 +33,10 @@ def apply_advanced_result_quantile_array_patch() -> None:
 def _flatten_quantile_values(values: Sequence[float]) -> np.ndarray:
     """Return scalar values from possibly nested array-valued quantile input."""
 
-    raw = np.asarray(values, dtype=object)
+    if isinstance(values, Iterable) and not isinstance(values, (str, bytes)):
+        raw = np.asarray(list(values), dtype=object)
+    else:
+        raw = np.asarray(values, dtype=object)
     if raw.ndim == 0:
         raw = raw.reshape(1)
     flattened: list[object] = []

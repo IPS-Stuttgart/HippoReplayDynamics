@@ -34,6 +34,7 @@ DEFAULT_TRAJECTORY_MODELS = (
     "sorted-spike-state-space-first-order-imm",
     "sorted-spike-state-space-momentum-exact-sparse",
 )
+_MISSING_STATUS_VALUES = {"", "nan", "na", "n/a", "none", "null", "<na>"}
 
 
 def _rat_from_session(session: object) -> str:
@@ -67,10 +68,26 @@ def _bool_column(frame: pd.DataFrame, column: str, *, default: bool = False) -> 
     return frame[column].map(lambda value: _as_bool(value, default=default)).astype(bool)
 
 
+def _status_is_success_or_missing(value: object) -> bool:
+    if _is_missing_status(value):
+        return True
+    return str(value).strip().lower() == "success"
+
+
+def _is_missing_status(value: object) -> bool:
+    try:
+        missing = pd.isna(value)
+    except (TypeError, ValueError):
+        missing = False
+    if isinstance(missing, (bool, np.bool_)) and bool(missing):
+        return True
+    return str(value).strip().lower() in _MISSING_STATUS_VALUES
+
+
 def _success_rows(frame: pd.DataFrame) -> pd.DataFrame:
     out = frame.copy()
     if "status" in out:
-        out = out[out["status"].astype(str).eq("success")].copy()
+        out = out[out["status"].map(_status_is_success_or_missing).astype(bool)].copy()
     out["model"] = out["model"].astype(str)
     out["session"] = out["session"].astype(str)
     out["event_index"] = out["event_index"].astype(int)
@@ -236,6 +253,9 @@ def wrong_map_family_evidence_attenuation(
     ]
     real_ok = _success_rows(real)
     wrong_ok = _success_rows(wrong)
+    if "map_session" not in wrong_ok.columns:
+        wrong_ok = wrong_ok.copy()
+        wrong_ok["map_session"] = ""
     required = tuple(str(model) for model in required_models)
     required_set = set(required)
     trajectory_set = set(str(model) for model in trajectory_models)
@@ -686,13 +706,9 @@ def write_wrong_map_comparison_outputs(
 
     outputs = {
         "wrong_map_model_evidence_attenuation.csv": attenuation,
-        "wrong_map_model_evidence_attenuation_summary.csv": wrong_map_model_evidence_attenuation_summary(
-            attenuation
-        ),
+        "wrong_map_model_evidence_attenuation_summary.csv": wrong_map_model_evidence_attenuation_summary(attenuation),
         "wrong_map_family_evidence_attenuation.csv": family,
-        "wrong_map_family_evidence_attenuation_summary.csv": wrong_map_family_evidence_attenuation_summary(
-            family
-        ),
+        "wrong_map_family_evidence_attenuation_summary.csv": wrong_map_family_evidence_attenuation_summary(family),
         "rat_wrong_map_family_evidence_attenuation.csv": wrong_map_family_evidence_attenuation_summary(
             family,
             group_cols=("rat",),

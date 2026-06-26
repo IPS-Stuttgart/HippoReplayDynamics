@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import numpy as np
+import pandas as pd
 
 from hipporeplayimm.advanced_result_diagnostics import _quantile
 
@@ -20,3 +21,7 @@ def test_advanced_diagnostics_quantile_ignores_nonfinite_values():
 
 def test_advanced_diagnostics_quantile_all_nonfinite_values_return_nan():
     assert np.isnan(_quantile(np.array([np.nan, np.inf, -np.inf]), 0.5))
+
+
+def test_advanced_diagnostics_quantile_ignores_pandas_missing_values():
+    assert _quantile(pd.array([pd.NA, 1.0, 3.0], dtype="Float64"), 0.5) == 2.0

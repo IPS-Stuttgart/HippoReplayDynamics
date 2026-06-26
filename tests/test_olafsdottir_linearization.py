@@ -54,6 +54,16 @@ def test_project_points_to_centerline_returns_linear_coordinate() -> None:
     assert np.nanmax(error) <= 2.0
 
 
+def test_smooth_positions_preserves_length_when_window_exceeds_samples() -> None:
+    module = _load_linearizer_module()
+    xy = np.array([[0.0, 0.0], [10.0, 10.0]])
+    valid = np.ones(2, dtype=bool)
+
+    smoothed = module.smooth_positions(xy, valid, window_samples=5)
+
+    assert smoothed.shape == xy.shape
+
+
 def test_linearize_pos_file_writes_required_outputs_with_configured_centerline(tmp_path: Path) -> None:
     module = _load_linearizer_module()
     pos_path = tmp_path / "track.pos"

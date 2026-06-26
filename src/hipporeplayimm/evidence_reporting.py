@@ -182,18 +182,28 @@ def ensure_evidence_support_columns(df: pd.DataFrame) -> pd.DataFrame:
     else:
         out["evidence_support"] = inferred
     status_ok = _status_success_series(out)
-    finite_log_evidence = _finite_log_evidence_series(out)
+    finite_evidence = _finite_evidence_series(out)
     out["evidence_comparison"] = out["evidence_support"].map(evidence_comparison_from_support)
     out["evidence_comparison_note"] = out["evidence_comparison"].map(EVIDENCE_COMPARISON_DESCRIPTIONS).fillna(EVIDENCE_COMPARISON_DESCRIPTIONS[EVIDENCE_COMPARISON_UNKNOWN])
-    out["evidence_comparable"] = status_ok & finite_log_evidence & out["evidence_support"].eq(EXACT_EVIDENCE_SUPPORT)
+    out["evidence_comparable"] = status_ok & finite_evidence & out["evidence_support"].eq(EXACT_EVIDENCE_SUPPORT)
     return add_candidate_support_quality_columns(out)
 
 
+def _finite_evidence_series(frame: pd.DataFrame) -> pd.Series:
+    finite = pd.Series(True, index=frame.index)
+    found = False
+    for column in ("log_evidence", "heldout_log_likelihood"):
+        if column in frame:
+            found = True
+            values = pd.to_numeric(frame[column], errors="coerce")
+            finite &= pd.Series(np.isfinite(values.to_numpy(dtype=float)), index=frame.index)
+    if found:
+        return finite
+    return pd.Series(True, index=frame.index)
+
+
 def _finite_log_evidence_series(frame: pd.DataFrame) -> pd.Series:
-    if "log_evidence" not in frame:
-        return pd.Series(True, index=frame.index)
-    values = pd.to_numeric(frame["log_evidence"], errors="coerce")
-    return pd.Series(np.isfinite(values.to_numpy(dtype=float)), index=frame.index)
+    return _finite_evidence_series(frame)
 
 
 def _coerce_log_evidence_column(frame: pd.DataFrame) -> pd.DataFrame:

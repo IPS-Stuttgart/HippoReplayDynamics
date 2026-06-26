@@ -72,7 +72,7 @@ def apply_evidence_status_coercion_patch() -> None:
         else:
             out["evidence_support"] = inferred
         status_ok = _status_success_mask(out)
-        finite_log_evidence = _finite_log_evidence_mask(out)
+        finite_evidence = reporting._finite_evidence_series(out)
         out["evidence_comparison"] = out["evidence_support"].map(
             reporting.evidence_comparison_from_support
         )
@@ -83,7 +83,7 @@ def apply_evidence_status_coercion_patch() -> None:
         )
         out["evidence_comparable"] = (
             status_ok
-            & finite_log_evidence
+            & finite_evidence
             & out["evidence_support"].eq(reporting.EXACT_EVIDENCE_SUPPORT)
         )
         return reporting.add_candidate_support_quality_columns(out)

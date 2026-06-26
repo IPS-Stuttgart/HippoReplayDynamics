@@ -246,11 +246,7 @@ def write_pyrecest_sweep_outputs(result: PyRecEstSweepResult, output: str | Path
 def pyrecest_parameter_grid(config: PyRecEstSweepConfig) -> list[dict[str, object]]:
     """Return the cartesian product of PyRecEst sweep parameters."""
 
-    random_seeds = (
-        (config.random_seed,)
-        if config.random_seeds is None
-        else config.random_seeds
-    )
+    random_seeds = config.random_seeds or (config.random_seed,)
     _validate_nonempty(random_seeds, "random_seeds")
     _validate_nonempty(config.pyrecest_models, "pyrecest_models")
     _validate_nonempty(config.particles, "particles")

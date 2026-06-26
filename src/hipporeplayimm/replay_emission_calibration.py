@@ -42,16 +42,6 @@ class ReplayEmissionCalibration:
         }
 
 
-def _finite_float(name: str, value: float) -> float:
-    try:
-        out = float(value)
-    except (TypeError, ValueError) as exc:
-        raise ValueError(f"{name} must be finite") from exc
-    if not np.isfinite(out):
-        raise ValueError(f"{name} must be finite")
-    return out
-
-
 def fit_replay_cell_gains(
     session: ReplaySession,
     encoding: EncodingModel,
@@ -72,10 +62,6 @@ def fit_replay_cell_gains(
     """
 
     config = EmissionConfig() if config is None else config
-    prior_count = _finite_float("prior_count", prior_count)
-    prior_gain = _finite_float("prior_gain", prior_gain)
-    min_gain = _finite_float("min_gain", min_gain)
-    max_gain = _finite_float("max_gain", max_gain)
     if prior_count < 0.0:
         raise ValueError("prior_count must be non-negative")
     if prior_gain <= 0.0:
@@ -97,12 +83,9 @@ def fit_replay_cell_gains(
         expected += mean_rates * duration * float(config.spike_rate_scale)
         event_count += 1
 
-    if event_count == 0:
-        gains = np.full(encoding.n_cells, np.clip(prior_gain, min_gain, max_gain), dtype=float)
-    else:
-        numerator = observed + prior_count * prior_gain
-        denominator = np.maximum(expected + prior_count, np.finfo(float).tiny)
-        gains = np.clip(numerator / denominator, min_gain, max_gain)
+    numerator = observed + prior_count * prior_gain
+    denominator = np.maximum(expected + prior_count, np.finfo(float).tiny)
+    gains = np.clip(numerator / denominator, min_gain, max_gain)
     return ReplayEmissionCalibration(
         cell_ids=np.asarray(encoding.cell_ids, dtype=int).copy(),
         gains=np.asarray(gains, dtype=float),
@@ -138,20 +121,10 @@ def _gain_vector_for_encoding(
 ) -> np.ndarray:
     if isinstance(gains, ReplayEmissionCalibration):
         mapping = {int(cell): float(gain) for cell, gain in zip(gains.cell_ids, gains.gains, strict=True)}
-        gain_vector = np.asarray([mapping.get(int(cell), 1.0) for cell in encoding.cell_ids], dtype=float)
-    elif isinstance(gains, Mapping):
-        gain_vector = np.asarray([float(gains.get(int(cell), 1.0)) for cell in encoding.cell_ids], dtype=float)
-    else:
-        gain_vector = np.asarray(gains, dtype=float)
-    return _validated_gain_vector(encoding, gain_vector)
-
-
-def _validated_gain_vector(encoding: EncodingModel, gain_vector: np.ndarray) -> np.ndarray:
-    arr = np.asarray(gain_vector, dtype=float)
+        return np.asarray([mapping.get(int(cell), 1.0) for cell in encoding.cell_ids], dtype=float)
+    if isinstance(gains, Mapping):
+        return np.asarray([float(gains.get(int(cell), 1.0)) for cell in encoding.cell_ids], dtype=float)
+    arr = np.asarray(gains, dtype=float)
     if arr.shape != (encoding.n_cells,):
         raise ValueError(f"gain array must have shape {(encoding.n_cells,)}, got {arr.shape}")
-    if not np.all(np.isfinite(arr)):
-        raise ValueError("replay gains must be finite")
-    if np.any(arr <= 0.0):
-        raise ValueError("replay gains must be positive")
     return arr

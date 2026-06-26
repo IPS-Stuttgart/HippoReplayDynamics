@@ -374,7 +374,6 @@ def score_replay_model_compat(
     *,
     occupancy_s: np.ndarray | None = None,
     candidate_indices: list[np.ndarray] | None = None,
-    return_trajectory: bool | None = None,
 ) -> EventScore:
     """Score a replay model while preserving optional state-space controls.
 
@@ -394,8 +393,6 @@ def score_replay_model_compat(
         kwargs["candidate_indices"] = candidates
     if occupancy_s is not None:
         kwargs["occupancy_s"] = occupancy_s
-    if return_trajectory is not None:
-        kwargs["return_trajectory"] = bool(return_trajectory)
     return _call_score_with_supported_kwargs(model.score, emissions, bin_centers, kwargs)  # type: ignore[misc]
 
 

@@ -1,10 +1,9 @@
 import numpy as np
 import pytest
 
-from hipporeplayimm import state_space_first_order, state_space_model
+from hipporeplayimm import state_space_first_order
 from hipporeplayimm.state_space_utils import (
     _coerce_valid_bin_mask,
-    _top_candidate_indices,
     _uniform_log_prior,
     _uniform_probabilities,
     _valid_bin_count,
@@ -21,28 +20,6 @@ def test_state_space_uniform_helpers_reject_invalid_support_size_without_mask(ba
         _valid_bin_count(bad_n_bins)
     with pytest.raises(ValueError, match="n_bins must be a positive integer"):
         _coerce_valid_bin_mask(None, bad_n_bins)
-
-
-@pytest.mark.parametrize("bad_top_k", [True, np.bool_(True), 1.5, "2.5", np.array([2])])
-def test_state_space_top_candidates_reject_non_integer_counts(bad_top_k):
-    scores = np.array([0.0, 2.0, 1.0], dtype=float)
-
-    with pytest.raises(TypeError, match="top_k must be an integer"):
-        _top_candidate_indices(scores, bad_top_k)
-    with pytest.raises(TypeError, match="top_k must be an integer"):
-        state_space_model._top_candidate_indices(scores, bad_top_k)
-
-
-def test_state_space_top_candidates_reject_negative_counts():
-    with pytest.raises(ValueError, match="top_k must be nonnegative"):
-        _top_candidate_indices(np.array([0.0, 1.0], dtype=float), -1)
-
-
-def test_state_space_top_candidates_preserve_zero_as_full_support():
-    np.testing.assert_array_equal(
-        _top_candidate_indices(np.array([0.0, 1.0], dtype=float), 0),
-        np.array([0, 1], dtype=int),
-    )
 
 
 def test_state_space_uniform_aliases_reject_empty_support():

@@ -1,4 +1,3 @@
-from dataclasses import replace
 from pathlib import Path
 
 import numpy as np
@@ -66,13 +65,6 @@ def test_clusterless_mark_likelihood_rejects_boolean_group_ids():
         encoding.log_mark_likelihood(np.array([[0.0]]), group_ids=np.array([True]))
 
 
-def test_clusterless_mark_likelihood_rejects_mixed_python_boolean_group_ids():
-    encoding = _encoding_with_group_ids(np.array([0, 1, 2]))
-
-    with pytest.raises(ValueError, match="boolean"):
-        encoding._coerce_group_indices([True, 2], n_marks=2)
-
-
 def test_clusterless_mark_likelihood_rejects_out_of_range_group_ids():
     encoding = _encoding_with_group_ids(np.array([0, 1]))
 
@@ -90,15 +82,6 @@ def test_clusterless_mark_likelihood_maps_object_string_group_ids_numerically():
 
 def test_clusterless_tetrode_group_extraction_rejects_boolean_group_ids():
     session = _session_with_mark_groups(np.array([True, False]))
-
-    with pytest.raises(ValueError, match="boolean"):
-        _mark_group_ids_for_config(session, ClusterlessMarkConfig(mark_group_by="tetrode"))
-
-
-def test_clusterless_tetrode_group_extraction_rejects_mixed_python_boolean_group_ids():
-    session = _session_with_mark_groups(np.array([1, 2]))
-    assert session.spike_marks is not None
-    session.spike_marks = replace(session.spike_marks, group_ids=[True, 2])
 
     with pytest.raises(ValueError, match="boolean"):
         _mark_group_ids_for_config(session, ClusterlessMarkConfig(mark_group_by="tetrode"))

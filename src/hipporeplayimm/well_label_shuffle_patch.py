@@ -14,10 +14,7 @@ def apply_well_label_shuffle_patch() -> None:
 
     from . import result_improvements
 
-    if (
-        getattr(result_improvements, _PATCHED_FLAG, False)
-        and getattr(result_improvements, "shuffle_well_labels", None) is shuffle_well_labels
-    ):
+    if getattr(result_improvements, _PATCHED_FLAG, False):
         return
     result_improvements.shuffle_well_labels = shuffle_well_labels
     setattr(result_improvements, _PATCHED_FLAG, True)
@@ -28,9 +25,9 @@ def shuffle_well_labels(frame: pd.DataFrame, random_seed: int = 1) -> pd.DataFra
 
     Some score tables contain ``true_well_x``/``true_well_y`` columns but leave
     them missing when only the well identity is available.  Conversely, some
-    coordinate-only rows may keep a missing or sentinel ``true_well_id`` column.
-    Shuffle whichever label columns are present as row tuples so the null
-    control is not a silent no-op for coordinate-backed labels.
+    coordinate-only tables omit ``true_well_id`` entirely.  Shuffle whichever
+    label columns are present as row tuples so the null control is not a silent
+    no-op for coordinate-only labels.
     """
 
     if frame.empty:
@@ -40,10 +37,10 @@ def shuffle_well_labels(frame: pd.DataFrame, random_seed: int = 1) -> pd.DataFra
     if not label_columns:
         return out
 
-    labelled_rows = pd.Series(False, index=out.index)
     if "true_well_id" in out:
-        labelled_rows |= _labelled_well_rows(out["true_well_id"])
-    labelled_rows |= _coordinate_well_rows(out)
+        labelled_rows = _labelled_well_rows(out["true_well_id"])
+    else:
+        labelled_rows = _coordinate_well_rows(out)
     if not bool(labelled_rows.any()):
         return out
 
@@ -64,18 +61,13 @@ def _labelled_well_rows(values: pd.Series) -> pd.Series:
 
 
 def _coordinate_well_rows(frame: pd.DataFrame) -> pd.Series:
-    """Return rows with a complete finite coordinate label."""
+    """Return coordinate-labelled rows when no explicit well-ID column exists."""
 
-    coordinate_columns = ["true_well_x", "true_well_y"]
-    if not all(column in frame for column in coordinate_columns):
+    coordinate_columns = [column for column in ("true_well_x", "true_well_y") if column in frame]
+    if not coordinate_columns:
         return pd.Series(False, index=frame.index)
     numeric = frame[coordinate_columns].apply(pd.to_numeric, errors="coerce")
-    finite = pd.DataFrame(
-        np.isfinite(numeric.to_numpy(dtype=float)),
-        index=frame.index,
-        columns=coordinate_columns,
-    )
-    return finite.all(axis=1)
+    return numeric.notna().any(axis=1)
 
 
 __all__ = ["apply_well_label_shuffle_patch", "shuffle_well_labels"]

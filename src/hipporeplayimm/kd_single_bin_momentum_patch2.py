@@ -5,13 +5,22 @@ from __future__ import annotations
 import numpy as np
 
 _PATCHED_FLAG = "_kd_single_bin_momentum_patch2_applied"
+_WRAPPER_ATTR = "_kd_single_bin_momentum_wrapper"
+
+
+def _current_patch_installed(kd: object) -> bool:
+    current = getattr(kd, "_second_order_separable_log_evidence", None)
+    return bool(getattr(current, _WRAPPER_ATTR, False))
 
 
 def apply_kd_single_bin_momentum_patch2() -> None:
+    from . import kd_impossible_emission_patch as impossible_patch
     from . import kd_reference as kd
 
-    if getattr(kd, _PATCHED_FLAG, False):
+    if _current_patch_installed(kd):
         return
+
+    impossible_patch.apply_kd_impossible_emission_patch()
     original = kd._second_order_separable_log_evidence
 
     def second_order(log_emissions, n_bins, initial, transition):
@@ -23,5 +32,6 @@ def apply_kd_single_bin_momentum_patch2() -> None:
             return -np.inf if mass <= 0.0 else float(np.log(mass) + offset)
         return original(log_emissions, n_bins, initial, transition)
 
+    setattr(second_order, _WRAPPER_ATTR, True)
     kd._second_order_separable_log_evidence = second_order
     setattr(kd, _PATCHED_FLAG, True)

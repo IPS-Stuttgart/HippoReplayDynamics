@@ -50,18 +50,23 @@ def _score_imm_candidates(
         n_transitions,
         diffusion_sigma_cm,
         name="diffusion_sigmas_cm",
+        minimum=0.0,
+        include_minimum=False,
     )
     momentum_sigmas = _transition_parameter_series(
         momentum_sigmas_cm,
         n_transitions,
         momentum_sigma_cm,
         name="momentum_sigmas_cm",
+        minimum=0.0,
+        include_minimum=False,
     )
     transition_velocity_decays = _transition_parameter_series(
         velocity_decays,
         n_transitions,
         velocity_decay,
         name="velocity_decays",
+        minimum=0.0,
     )
 
     mode_transition = _mode_transition_matrix(len(modes), mode_stickiness)

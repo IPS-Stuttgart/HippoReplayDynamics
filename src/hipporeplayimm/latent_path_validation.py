@@ -80,14 +80,34 @@ def _config_with_validated_event_counts(config: Any) -> Any:
             getattr(config, "events_per_model"),
         )
     }
-    for name in ("max_template_events", "max_synthetic_events"):
-        value = getattr(config, name, None)
-        if value is not None:
-            updates[name] = _positive_integer_value(name, value)
+    max_template_events = getattr(config, "max_template_events", None)
+    if max_template_events is not None:
+        updates["max_template_events"] = _positive_integer_or_uncapped_value(
+            "max_template_events",
+            max_template_events,
+        )
+    max_synthetic_events = getattr(config, "max_synthetic_events", None)
+    if max_synthetic_events is not None:
+        updates["max_synthetic_events"] = _positive_integer_value(
+            "max_synthetic_events",
+            max_synthetic_events,
+        )
     return replace(config, **updates)
 
 
 def _positive_integer_value(name: str, value: Any) -> int:
+    integer_value = _integer_valued_scalar(name, value)
+    if integer_value <= 0:
+        raise ValueError(f"{name} must be positive integer-valued")
+    return integer_value
+
+
+def _positive_integer_or_uncapped_value(name: str, value: Any) -> int | None:
+    integer_value = _integer_valued_scalar(name, value)
+    return None if integer_value <= 0 else integer_value
+
+
+def _integer_valued_scalar(name: str, value: Any) -> int:
     if isinstance(value, (bool, np.bool_)):
         raise ValueError(f"{name} must be positive integer-valued")
     raw = np.asarray(value)
@@ -97,7 +117,7 @@ def _positive_integer_value(name: str, value: Any) -> int:
         numeric = float(raw)
     except (TypeError, ValueError, OverflowError) as exc:
         raise ValueError(f"{name} must be positive integer-valued") from exc
-    if not np.isfinite(numeric) or numeric <= 0.0:
+    if not np.isfinite(numeric):
         raise ValueError(f"{name} must be positive integer-valued")
     integer_value = int(round(numeric))
     if not np.isclose(numeric, integer_value, rtol=0.0, atol=0.0):

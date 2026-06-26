@@ -57,7 +57,7 @@ def test_clusterless_mark_subset_rejects_fractional_mark_cell_ids() -> None:
 
 
 def test_clusterless_mark_subset_rejects_boolean_mark_group_ids() -> None:
-    session = _marked_session([1, 2], [True, 20])
+    session = _marked_session([1, 2], np.array([True, 20], dtype=object))
 
     with pytest.raises(ValueError, match="spike-mark group IDs.*boolean"):
         _session_with_mark_cell_subset(session, np.array([1], dtype=int), role="train")

@@ -29,7 +29,7 @@ def build_script_provenance(
     hash_paths = {key: _resolve_input_path(value, working_directory) for key, value in path_map.items()}
     provenance = {
         **git_metadata(working_directory),
-        "command_line": command_line(argv or sys.argv),
+        "command_line": command_line(sys.argv if argv is None else argv),
         "working_directory": str(working_directory),
         "input_file_paths": path_map,
         "input_file_sha256": {key: file_sha256(path) for key, path in hash_paths.items()},

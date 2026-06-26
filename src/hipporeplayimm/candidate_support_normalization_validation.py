@@ -51,43 +51,50 @@ def _candidate_support_scores(log_emission: np.ndarray) -> np.ndarray:
 def apply_candidate_support_normalization_validation_patch() -> None:
     """Install finite-mass validation for posterior and emission candidate supports."""
 
-    from . import state_space, state_space_model, state_space_utils
+    from . import models, state_space, state_space_model, state_space_utils
 
     if not getattr(state_space_model, _PATCHED_FLAG, False):
         state_space_model._normalize_log_rows = _normalize_log_rows
         setattr(state_space_model, _PATCHED_FLAG, True)
 
-    if getattr(state_space_utils, _SCORE_PATCHED_FLAG, False):
-        return
+    if not getattr(state_space_utils, _SCORE_PATCHED_FLAG, False):
+        original_top_candidate_indices = state_space_utils._top_candidate_indices
+        original_mass_retaining_candidate_indices = state_space_utils._mass_retaining_candidate_indices
 
-    original_top_candidate_indices = state_space_utils._top_candidate_indices
-    original_mass_retaining_candidate_indices = state_space_utils._mass_retaining_candidate_indices
+        def _top_candidate_indices(log_emission: np.ndarray, top_k: int) -> np.ndarray:
+            return original_top_candidate_indices(_candidate_support_scores(log_emission), top_k)
 
-    def _top_candidate_indices(log_emission: np.ndarray, top_k: int) -> np.ndarray:
-        return original_top_candidate_indices(_candidate_support_scores(log_emission), top_k)
+        def _mass_retaining_candidate_indices(
+            log_emission: np.ndarray,
+            mass_threshold: float | None = None,
+            *,
+            top_k: int | None = None,
+            min_k: int = 1,
+            max_k: int = 0,
+        ) -> np.ndarray:
+            return original_mass_retaining_candidate_indices(
+                _candidate_support_scores(log_emission),
+                mass_threshold,
+                top_k=top_k,
+                min_k=min_k,
+                max_k=max_k,
+            )
 
-    def _mass_retaining_candidate_indices(
-        log_emission: np.ndarray,
-        mass_threshold: float | None = None,
-        *,
-        top_k: int | None = None,
-        min_k: int = 1,
-        max_k: int = 0,
-    ) -> np.ndarray:
-        return original_mass_retaining_candidate_indices(
-            _candidate_support_scores(log_emission),
-            mass_threshold,
-            top_k=top_k,
-            min_k=min_k,
-            max_k=max_k,
-        )
+        for module in (state_space_utils, state_space, state_space_model):
+            if getattr(module, "_top_candidate_indices", None) is original_top_candidate_indices:
+                module._top_candidate_indices = _top_candidate_indices
+            if getattr(module, "_mass_retaining_candidate_indices", None) is original_mass_retaining_candidate_indices:
+                module._mass_retaining_candidate_indices = _mass_retaining_candidate_indices
+        setattr(state_space_utils, _SCORE_PATCHED_FLAG, True)
 
-    for module in (state_space_utils, state_space, state_space_model):
-        if getattr(module, "_top_candidate_indices", None) is original_top_candidate_indices:
-            module._top_candidate_indices = _top_candidate_indices
-        if getattr(module, "_mass_retaining_candidate_indices", None) is original_mass_retaining_candidate_indices:
-            module._mass_retaining_candidate_indices = _mass_retaining_candidate_indices
-    setattr(state_space_utils, _SCORE_PATCHED_FLAG, True)
+    if not getattr(models, _SCORE_PATCHED_FLAG, False):
+        original_model_top_candidate_indices = models._top_candidate_indices
+
+        def _model_top_candidate_indices(log_emission: np.ndarray, top_k: int) -> np.ndarray:
+            return original_model_top_candidate_indices(_candidate_support_scores(log_emission), top_k)
+
+        models._top_candidate_indices = _model_top_candidate_indices
+        setattr(models, _SCORE_PATCHED_FLAG, True)
 
 
 __all__ = ["apply_candidate_support_normalization_validation_patch"]

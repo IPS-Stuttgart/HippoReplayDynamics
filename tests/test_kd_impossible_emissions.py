@@ -48,6 +48,18 @@ def test_first_order_kd_returns_negative_infinity_for_impossible_emission_rows()
         assert not np.isnan(score)
 
 
+def test_second_order_kd_scores_single_bin_emissions():
+    apply_runtime_patches()
+
+    initial = np.eye(2)
+    transition = np.zeros((2, 2, 2), dtype=float)
+    log_emissions = np.array([[0.0, -np.inf, -np.inf, -np.inf]], dtype=float)
+
+    score = kd_momentum_log_evidence_from_transitions(log_emissions, 2, initial, transition)
+
+    assert score == pytest.approx(-np.log(4.0))
+
+
 def test_second_order_kd_returns_negative_infinity_for_impossible_emission_rows():
     initial = np.eye(2)
     transition = np.zeros((2, 2, 2), dtype=float)

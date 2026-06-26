@@ -19,7 +19,7 @@ def apply_advanced_result_quantile_array_patch() -> None:
         return
 
     def _quantile(values: Sequence[float], q: float) -> float:
-        raw = np.asarray(values, dtype=object).reshape(-1)
+        raw = _flatten_quantile_values(values)
         arr = pd.to_numeric(pd.Series(raw), errors="coerce").to_numpy(dtype=float)
         arr = arr[np.isfinite(arr)]
         if arr.size == 0:
@@ -28,6 +28,25 @@ def apply_advanced_result_quantile_array_patch() -> None:
 
     diagnostics._quantile = _quantile
     setattr(diagnostics, _PATCHED_FLAG, True)
+
+
+def _flatten_quantile_values(values: Sequence[float]) -> np.ndarray:
+    """Return scalar values from possibly nested array-valued quantile input."""
+
+    raw = np.asarray(values, dtype=object)
+    if raw.ndim == 0:
+        raw = raw.reshape(1)
+    flattened: list[object] = []
+    for value in raw.reshape(-1):
+        if isinstance(value, (str, bytes)):
+            flattened.append(value)
+            continue
+        current = np.asarray(value, dtype=object)
+        if current.ndim == 0:
+            flattened.append(value)
+        else:
+            flattened.extend(current.reshape(-1).tolist())
+    return np.asarray(flattened, dtype=object)
 
 
 __all__ = ["apply_advanced_result_quantile_array_patch"]

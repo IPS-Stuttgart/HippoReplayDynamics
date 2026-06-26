@@ -21,7 +21,7 @@ def _single_bin_emissions(n_bins: int = 2) -> LogEmissionTensor:
 def test_pyrecest_score_rejects_bin_center_count_mismatch_before_optional_import() -> None:
     emissions = _single_bin_emissions(n_bins=2)
 
-    with pytest.raises(ValueError, match="one row per emission spatial bin"):
+    with pytest.raises(ValueError, match="emissions.n_bins must match bin_centers rows"):
         PyRecEstGoalParticleModel().score(
             emissions,
             np.zeros((1, 2), dtype=float),
@@ -39,7 +39,7 @@ def test_pyrecest_score_rejects_nonfinite_bin_centers_before_optional_import() -
 def test_pyrecest_candidate_goals_reject_nonfinite_values() -> None:
     bin_centers = np.array([[0.0, 0.0], [1.0, 0.0]], dtype=float)
 
-    with pytest.raises(ValueError, match="candidate_goals must be finite"):
+    with pytest.raises(ValueError, match=r"candidate_goals must .* finite"):
         _coerce_candidate_goals(
             np.array([[0.0, np.nan]], dtype=float),
             bin_centers,

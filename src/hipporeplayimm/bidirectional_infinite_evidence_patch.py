@@ -58,6 +58,7 @@ def apply_bidirectional_infinite_evidence_patch() -> None:
         *,
         occupancy_s=None,
         candidate_indices=None,
+        return_trajectory: bool | None = None,
     ):
         forward = compat.score_replay_model_compat(
             self.forward_model,
@@ -65,13 +66,16 @@ def apply_bidirectional_infinite_evidence_patch() -> None:
             bin_centers,
             occupancy_s=occupancy_s,
             candidate_indices=candidate_indices,
+            return_trajectory=return_trajectory,
         )
+        reverse_return_trajectory = True if return_trajectory is None or return_trajectory is False else return_trajectory
         reverse = compat.score_replay_model_compat(
             self.reverse_model,
             emissions,
             bin_centers,
             occupancy_s=occupancy_s,
             candidate_indices=candidate_indices,
+            return_trajectory=reverse_return_trajectory,
         )
         logp, weights = _equal_prior_logp_and_weights(
             [forward.log_likelihood, reverse.log_likelihood]
@@ -93,15 +97,16 @@ def apply_bidirectional_infinite_evidence_patch() -> None:
         )
         trajectory = None
         if (
-            forward.trajectory_log_posterior is not None
+            return_trajectory is not False
+            and forward.trajectory_log_posterior is not None
             and reverse.trajectory_log_posterior is not None
         ):
             trajectory = compat._mixture_log_posterior(
                 [forward.trajectory_log_posterior, reverse.trajectory_log_posterior],
                 weights,
             )
-        if terminal is None and trajectory is not None:
-            terminal = trajectory[-1].copy()
+        if trajectory is not None:
+            terminal = np.asarray(trajectory[-1], dtype=float).copy()
         if terminal is not None:
             diagnostics.update(compat._posterior_diagnostics(terminal, bin_centers))
         return compat.EventScore(

@@ -10,6 +10,12 @@ def test_advanced_diagnostics_quantile_accepts_numpy_arrays():
     assert _quantile(np.array([1.0, 3.0, 5.0]), 0.5) == 3.0
 
 
+def test_advanced_diagnostics_quantile_flattens_nested_numpy_arrays():
+    values = [np.array([1.0, 3.0]), np.array([5.0])]
+
+    assert _quantile(values, 0.5) == 3.0
+
+
 def test_advanced_diagnostics_quantile_empty_inputs_return_nan():
     assert np.isnan(_quantile([], 0.5))
     assert np.isnan(_quantile(np.array([], dtype=float), 0.5))

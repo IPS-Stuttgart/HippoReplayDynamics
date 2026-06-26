@@ -184,11 +184,21 @@ def _metadata_float_from_value(value: object, column: str) -> float | None:
     except (TypeError, ValueError):
         pass
 
+    if isinstance(value, (bool, np.bool_)):
+        raise _invalid_numeric_metadata(column, value)
+
     text = str(value).strip()
     if text.lower() in _MISSING_METADATA_STRINGS:
         return None
 
-    numeric = float(text)
+    try:
+        numeric = float(text)
+    except (TypeError, ValueError) as exc:
+        raise _invalid_numeric_metadata(column, value) from exc
     if not np.isfinite(numeric):
         raise ValueError(f"{column} must be finite")
     return float(numeric)
+
+
+def _invalid_numeric_metadata(column: str, value: object) -> ValueError:
+    return ValueError(f"{column} must contain finite numeric metadata, got {value!r}")

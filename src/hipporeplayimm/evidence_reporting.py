@@ -190,10 +190,15 @@ def ensure_evidence_support_columns(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def _finite_evidence_series(frame: pd.DataFrame) -> pd.Series:
+    finite = pd.Series(True, index=frame.index)
+    found = False
     for column in ("log_evidence", "heldout_log_likelihood"):
         if column in frame:
+            found = True
             values = pd.to_numeric(frame[column], errors="coerce")
-            return pd.Series(np.isfinite(values.to_numpy(dtype=float)), index=frame.index)
+            finite &= pd.Series(np.isfinite(values.to_numpy(dtype=float)), index=frame.index)
+    if found:
+        return finite
     return pd.Series(True, index=frame.index)
 
 

@@ -138,10 +138,20 @@ def _gain_vector_for_encoding(
 ) -> np.ndarray:
     if isinstance(gains, ReplayEmissionCalibration):
         mapping = {int(cell): float(gain) for cell, gain in zip(gains.cell_ids, gains.gains, strict=True)}
-        return np.asarray([mapping.get(int(cell), 1.0) for cell in encoding.cell_ids], dtype=float)
-    if isinstance(gains, Mapping):
-        return np.asarray([float(gains.get(int(cell), 1.0)) for cell in encoding.cell_ids], dtype=float)
-    arr = np.asarray(gains, dtype=float)
+        gain_vector = np.asarray([mapping.get(int(cell), 1.0) for cell in encoding.cell_ids], dtype=float)
+    elif isinstance(gains, Mapping):
+        gain_vector = np.asarray([float(gains.get(int(cell), 1.0)) for cell in encoding.cell_ids], dtype=float)
+    else:
+        gain_vector = np.asarray(gains, dtype=float)
+    return _validated_gain_vector(encoding, gain_vector)
+
+
+def _validated_gain_vector(encoding: EncodingModel, gain_vector: np.ndarray) -> np.ndarray:
+    arr = np.asarray(gain_vector, dtype=float)
     if arr.shape != (encoding.n_cells,):
         raise ValueError(f"gain array must have shape {(encoding.n_cells,)}, got {arr.shape}")
+    if not np.all(np.isfinite(arr)):
+        raise ValueError("replay gains must be finite")
+    if np.any(arr <= 0.0):
+        raise ValueError("replay gains must be positive")
     return arr

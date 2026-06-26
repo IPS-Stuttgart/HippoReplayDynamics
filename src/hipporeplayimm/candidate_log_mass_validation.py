@@ -63,6 +63,23 @@ def _candidate_log_masses_for_model(emissions, candidates: list[np.ndarray]) -> 
     return _candidate_log_masses(emissions.log_likelihood, candidates)
 
 
+def _current_patch_installed(
+    models,
+    state_space,
+    state_space_candidates,
+    state_space_candidates_momentum,
+    state_space_utils,
+) -> bool:
+    return (
+        getattr(state_space, _PATCHED_FLAG, False)
+        and getattr(state_space_utils, "_candidate_log_masses", None) is _candidate_log_masses
+        and getattr(state_space, "_candidate_log_masses", None) is _candidate_log_masses
+        and getattr(state_space_candidates, "_candidate_log_masses", None) is _candidate_log_masses
+        and getattr(state_space_candidates_momentum, "_candidate_log_masses", None) is _candidate_log_masses
+        and getattr(models, "_candidate_log_masses", None) is _candidate_log_masses_for_model
+    )
+
+
 def apply_candidate_log_mass_validation_patch() -> None:
     """Install finite retained-mass validation on candidate-pruned scorers."""
 
@@ -72,7 +89,13 @@ def apply_candidate_log_mass_validation_patch() -> None:
     from . import state_space_candidates_momentum
     from . import state_space_utils
 
-    if getattr(state_space, _PATCHED_FLAG, False):
+    if _current_patch_installed(
+        models,
+        state_space,
+        state_space_candidates,
+        state_space_candidates_momentum,
+        state_space_utils,
+    ):
         return
 
     state_space_utils._candidate_log_masses = _candidate_log_masses

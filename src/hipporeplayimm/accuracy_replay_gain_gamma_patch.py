@@ -1,0 +1,205 @@
+"""Patch replay-gain cell mapping and Gamma-Poisson emission validation."""
+
+from __future__ import annotations
+
+from functools import wraps
+from typing import Any
+
+import numpy as np
+from scipy.special import gammaln
+
+_PATCHED_FLAG = "_accuracy_replay_gain_gamma_patch_applied"
+
+
+def _contains_boolean_ids(values: np.ndarray) -> bool:
+    raw = np.asarray(values)
+    if raw.size == 0:
+        return False
+    if np.issubdtype(raw.dtype, np.bool_):
+        return True
+    if raw.dtype == object:
+        return any(isinstance(value, (bool, np.bool_)) for value in raw.reshape(-1))
+    return False
+
+
+def _coerce_integral_ids(values: Any, name: str) -> np.ndarray:
+    ids = np.asarray(values)
+    if ids.ndim == 0:
+        ids = ids.reshape(1)
+    if ids.ndim != 1:
+        raise ValueError(f"{name} must be one-dimensional")
+    if ids.size == 0:
+        return np.empty(0, dtype=int)
+    if _contains_boolean_ids(ids):
+        raise ValueError(f"{name} must not contain boolean identifiers")
+    try:
+        numeric = np.asarray(ids, dtype=float)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must contain finite integer identifiers") from exc
+    if not np.all(np.isfinite(numeric)):
+        raise ValueError(f"{name} must contain finite integer identifiers")
+    rounded = np.rint(numeric)
+    if not np.all(np.isclose(numeric, rounded, rtol=0.0, atol=1e-9)):
+        raise ValueError(f"{name} must be integer-valued")
+    integer_info = np.iinfo(np.dtype(int))
+    if not np.all((rounded >= integer_info.min) & (rounded <= integer_info.max)):
+        raise ValueError(f"{name} must fit into integer identifier range")
+    return rounded.astype(int)
+
+
+def _coerce_spike_counts(spike_counts: Any) -> np.ndarray:
+    counts = np.asarray(spike_counts, dtype=float)
+    if counts.ndim != 2:
+        raise ValueError("spike_counts must have shape (n_time, n_cells)")
+    if not np.all(np.isfinite(counts)) or np.any(counts < 0.0):
+        raise ValueError("spike_counts must be finite and nonnegative")
+    rounded = np.rint(counts)
+    if not np.all(np.isclose(counts, rounded, rtol=0.0, atol=1e-9)):
+        raise ValueError("spike_counts must contain integer counts")
+    return rounded
+
+
+def _coerce_positive_matrix(values: Any, name: str) -> np.ndarray:
+    matrix = np.asarray(values, dtype=float)
+    if not np.all(np.isfinite(matrix)) or np.any(matrix <= 0.0):
+        raise ValueError(f"{name} must be finite and positive")
+    return matrix
+
+
+def _coerce_trial_exposure(dt: Any, n_time: int, spike_rate_scale: float) -> np.ndarray:
+    dt_array = np.asarray(dt, dtype=float)
+    if dt_array.ndim == 0:
+        duration = float(dt_array)
+        if not np.isfinite(duration) or duration <= 0.0:
+            raise ValueError("dt must contain finite positive durations")
+        return np.full(n_time, duration * spike_rate_scale, dtype=float)
+
+    if dt_array.shape != (n_time,):
+        raise ValueError("dt must be scalar or one duration per time bin")
+    if not np.all(np.isfinite(dt_array)) or np.any(dt_array <= 0.0):
+        raise ValueError("dt must contain finite positive durations")
+    return dt_array * spike_rate_scale
+
+
+def _estimate_replay_cell_gains_impl(session, encoding, ripple_indices, config):
+    from .accuracy_upgrades import ReplayGainConfig
+
+    config = ReplayGainConfig() if config is None else config
+    cell_ids = _coerce_integral_ids(encoding.cell_ids, "encoding.cell_ids")
+    if cell_ids.shape != (encoding.n_cells,):
+        raise ValueError("encoding.cell_ids must contain one ID per encoding row")
+    if np.unique(cell_ids).shape[0] != cell_ids.shape[0]:
+        raise ValueError("encoding.cell_ids must be unique")
+
+    cell_to_row = {int(cell_id): row for row, cell_id in enumerate(cell_ids)}
+    observed = np.zeros(encoding.n_cells, dtype=float)
+    total_duration = 0.0
+    spikes = np.asarray(session.spikes)
+
+    if spikes.size and (spikes.ndim != 2 or spikes.shape[1] < 2):
+        raise ValueError("spikes must be two-dimensional with at least time and cell-id columns")
+
+    for event_index in ripple_indices:
+        event = session.ripple(int(event_index))
+        total_duration += max(float(event.end) - float(event.start), 0.0)
+        if spikes.size == 0:
+            continue
+
+        spike_times = np.asarray(spikes[:, 0], dtype=float)
+        spike_cell_ids_raw = np.asarray(spikes[:, 1])
+        keep = (
+            (spike_times >= float(event.start))
+            & (spike_times < float(event.end))
+            & np.isin(spike_cell_ids_raw, cell_ids)
+        )
+        if not np.any(keep):
+            continue
+
+        event_cell_ids = _coerce_integral_ids(spike_cell_ids_raw[keep], "spike cell IDs")
+        rows = np.fromiter(
+            (cell_to_row[int(cell_id)] for cell_id in event_cell_ids),
+            dtype=int,
+            count=event_cell_ids.shape[0],
+        )
+        np.add.at(observed, rows, 1.0)
+
+    spatial_mean_rate = np.mean(np.asarray(encoding.rates_hz, dtype=float), axis=1)
+    expected = spatial_mean_rate * max(total_duration, np.finfo(float).tiny)
+    gains = (observed + config.prior_observed_spikes) / (expected + config.prior_expected_spikes)
+    return np.clip(gains, float(config.min_gain), float(config.max_gain))
+
+
+def _gamma_poisson_predictive_log_emissions_impl(
+    spike_counts,
+    rate_shape,
+    rate_exposure_s,
+    dt,
+    *,
+    spike_rate_scale: float = 1.0,
+) -> np.ndarray:
+    counts = _coerce_spike_counts(spike_counts)
+    shape = _coerce_positive_matrix(rate_shape, "rate_shape")
+    exposure = _coerce_positive_matrix(rate_exposure_s, "rate_exposure_s")
+    if shape.shape != exposure.shape:
+        raise ValueError("rate_shape and rate_exposure_s must have matching shapes")
+    if shape.ndim != 2 or shape.shape[0] != counts.shape[1]:
+        raise ValueError("rate prior arrays must have shape (n_cells, n_bins)")
+
+    spike_rate_scale = float(spike_rate_scale)
+    if not np.isfinite(spike_rate_scale) or spike_rate_scale <= 0.0:
+        raise ValueError("spike_rate_scale must be finite and positive")
+
+    trial_exposure = _coerce_trial_exposure(dt, counts.shape[0], spike_rate_scale)
+    out = np.zeros((counts.shape[0], shape.shape[1]), dtype=float)
+    beta = np.maximum(exposure, np.finfo(float).tiny)
+    for time_index, trial_dt in enumerate(trial_exposure):
+        k = counts[time_index][:, None]
+        out[time_index] = np.sum(
+            gammaln(shape + k)
+            - gammaln(shape)
+            - gammaln(k + 1.0)
+            + shape * np.log(beta / (beta + trial_dt))
+            + k * np.log(trial_dt / (beta + trial_dt)),
+            axis=0,
+        )
+    return out
+
+
+def apply_accuracy_replay_gain_gamma_patch() -> None:
+    """Install robust replay-gain row mapping and Gamma-Poisson input guards."""
+
+    from . import accuracy_upgrades as accuracy_module
+
+    if getattr(accuracy_module, _PATCHED_FLAG, False):
+        return
+
+    original_estimate_replay_cell_gains = accuracy_module.estimate_replay_cell_gains
+    original_gamma_poisson_predictive_log_emissions = accuracy_module.gamma_poisson_predictive_log_emissions
+
+    @wraps(original_estimate_replay_cell_gains)
+    def estimate_replay_cell_gains(session, encoding, ripple_indices, config=None):
+        return _estimate_replay_cell_gains_impl(session, encoding, ripple_indices, config)
+
+    @wraps(original_gamma_poisson_predictive_log_emissions)
+    def gamma_poisson_predictive_log_emissions(
+        spike_counts,
+        rate_shape,
+        rate_exposure_s,
+        dt,
+        *,
+        spike_rate_scale: float = 1.0,
+    ):
+        return _gamma_poisson_predictive_log_emissions_impl(
+            spike_counts,
+            rate_shape,
+            rate_exposure_s,
+            dt,
+            spike_rate_scale=spike_rate_scale,
+        )
+
+    accuracy_module.estimate_replay_cell_gains = estimate_replay_cell_gains
+    accuracy_module.gamma_poisson_predictive_log_emissions = gamma_poisson_predictive_log_emissions
+    setattr(accuracy_module, _PATCHED_FLAG, True)
+
+
+__all__ = ["apply_accuracy_replay_gain_gamma_patch"]

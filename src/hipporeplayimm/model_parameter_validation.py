@@ -9,6 +9,7 @@ import numpy as np
 _PATCHED_FLAG = "_model_parameter_validation_patch_applied"
 _REPLAY_CALIBRATION_PATCHED_FLAG = "_replay_calibration_max_gain_validation_patch_applied"
 _STATE_SPACE_DECAY_HELPERS_PATCHED_FLAG = "_state_space_velocity_decay_validation_patch_applied"
+_DURATION_OCCUPANCY_DECAY_PATCHED_FLAG = "_duration_occupancy_velocity_decay_validation_patch_applied"
 _SPARSE_MOMENTUM_DECAY_PATCHED_FLAG = "_sparse_momentum_velocity_decay_validation_patch_applied"
 _DISPLACEMENT_MOMENTUM_DECAY_PATCHED_FLAG = "_displacement_momentum_velocity_decay_validation_patch_applied"
 _PYRECEST_IMM_DECAY_PATCHED_FLAG = "_pyrecest_imm_velocity_decay_validation_patch_applied"
@@ -48,21 +49,43 @@ def _validate_unit_interval_parameter(name: str, value: object) -> float:
     return numeric
 
 
+def _validate_finite_nonnegative_parameter(name: str, value: object) -> float:
+    _reject_boolean_scalar(name, value)
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must be finite and nonnegative") from exc
+    if not np.isfinite(numeric) or numeric < 0.0:
+        raise ValueError(f"{name} must be finite and nonnegative")
+    return numeric
+
+
 def _validate_momentum_velocity_decay(value: object) -> float:
     return _validate_unit_interval_parameter("momentum_velocity_decay", value)
 
 
+def _validate_momentum_velocity_decay_tau(value: object) -> float:
+    return _validate_finite_nonnegative_parameter("momentum_velocity_decay_tau_s", value)
+
+
+def _config_momentum_velocity_decay_tau(config: object) -> float:
+    return _validate_momentum_velocity_decay_tau(getattr(config, "momentum_velocity_decay_tau_s", 0.0))
+
+
 def _should_validate_config_momentum_velocity_decay(config: object) -> bool:
-    try:
-        tau_s = float(getattr(config, "momentum_velocity_decay_tau_s", 0.0))
-    except (TypeError, ValueError):
-        return False
-    return np.isfinite(tau_s) and tau_s == 0.0
+    return _config_momentum_velocity_decay_tau(config) == 0.0
 
 
 def _validate_config_momentum_velocity_decay(config: object) -> None:
     if _should_validate_config_momentum_velocity_decay(config):
         _validate_momentum_velocity_decay(getattr(config, "momentum_velocity_decay", 0.95))
+
+
+def _validate_config_or_scalar_momentum_velocity_decay(config_or_decay: object) -> None:
+    if hasattr(config_or_decay, "momentum_velocity_decay"):
+        _validate_config_momentum_velocity_decay(config_or_decay)
+        return
+    _validate_momentum_velocity_decay(config_or_decay)
 
 
 def _validate_replay_calibration_max_gain(calibration: object | None) -> None:
@@ -115,6 +138,23 @@ def _apply_state_space_velocity_decay_validation_patch() -> None:
     state_space_model._momentum_velocity_decays = momentum_velocity_decays
     state_space_model._momentum_prediction_multipliers = momentum_prediction_multipliers
     setattr(state_space_model, _STATE_SPACE_DECAY_HELPERS_PATCHED_FLAG, True)
+
+
+def _apply_duration_occupancy_velocity_decay_validation_patch() -> None:
+    from . import duration_occupancy
+
+    if getattr(duration_occupancy, _DURATION_OCCUPANCY_DECAY_PATCHED_FLAG, False):
+        return
+
+    original = duration_occupancy._duration_adjusted_decays
+
+    @wraps(original)
+    def duration_adjusted_decays(config_or_decay, durations, reference_dt):
+        _validate_config_or_scalar_momentum_velocity_decay(config_or_decay)
+        return original(config_or_decay, durations, reference_dt)
+
+    duration_occupancy._duration_adjusted_decays = duration_adjusted_decays
+    setattr(duration_occupancy, _DURATION_OCCUPANCY_DECAY_PATCHED_FLAG, True)
 
 
 def _apply_sparse_momentum_velocity_decay_validation_patch() -> None:
@@ -209,6 +249,7 @@ def apply_model_parameter_validation_patch() -> None:
         setattr(models, _PATCHED_FLAG, True)
 
     _apply_state_space_velocity_decay_validation_patch()
+    _apply_duration_occupancy_velocity_decay_validation_patch()
     _apply_sparse_momentum_velocity_decay_validation_patch()
     _apply_displacement_momentum_velocity_decay_validation_patch()
     _apply_pyrecest_imm_velocity_decay_validation_patch()

@@ -8,7 +8,10 @@ from hipporeplayimm.result_improvements import shuffle_well_labels
 
 def test_well_label_shuffle_patch_reinstalls_after_stale_flag(monkeypatch) -> None:
     import hipporeplayimm.result_improvements as result_improvements
-    from hipporeplayimm.well_label_shuffle_patch import apply_well_label_shuffle_patch, shuffle_well_labels as patched_shuffle_well_labels
+    from hipporeplayimm.well_label_shuffle_patch import (
+        apply_well_label_shuffle_patch,
+        shuffle_well_labels as patched_shuffle_well_labels,
+    )
 
     def stale_shuffle(frame: pd.DataFrame, random_seed: int = 1) -> pd.DataFrame:
         del random_seed
@@ -30,7 +33,11 @@ def test_well_label_shuffle_patch_reinstalls_after_stale_flag(monkeypatch) -> No
     )
     shuffled = result_improvements.shuffle_well_labels(frame, random_seed=3)
 
-    assert shuffled.loc[:1, ["true_well_id", "true_well_x", "true_well_y"]].to_numpy().tolist() == [
+    shuffled_labels = shuffled.loc[
+        :1,
+        ["true_well_id", "true_well_x", "true_well_y"],
+    ].to_numpy()
+    assert shuffled_labels.tolist() == [
         ["B", 2.0, 20.0],
         ["A", 1.0, 10.0],
     ]

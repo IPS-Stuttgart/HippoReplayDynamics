@@ -12,24 +12,6 @@ from .data import ReplaySession
 from .encoding import EmissionConfig, EncodingModel, build_emissions
 from .state_space_model import StateSpaceReplayModel
 
-SUPPORTED_SHUFFLE_MODES = (
-    "cell-permutation",
-    "spatial-roll",
-    "spatial-permutation",
-    "independent-spatial-permutation",
-)
-SHUFFLE_CONTROL_SCORE_COLUMNS = (
-    "session",
-    "event_index",
-    "requested_model",
-    "model",
-    "control_type",
-    "control_index",
-    "log_evidence",
-    "n_time",
-    "n_spikes",
-)
-
 
 @dataclass(frozen=True)
 class ShuffleControlConfig:
@@ -50,8 +32,6 @@ def shuffled_encoding(
     ``spatial-permutation``, and ``independent-spatial-permutation``.
     """
 
-    mode = _validated_shuffle_mode(mode)
-    random_seed = _nonnegative_integer_value("random_seed", random_seed)
     rng = np.random.default_rng(random_seed)
     rates = np.asarray(encoding.rates_hz, dtype=float).copy()
     if mode == "cell-permutation":
@@ -65,8 +45,11 @@ def shuffled_encoding(
     elif mode == "independent-spatial-permutation":
         if rates.shape[0] > 0:
             rates = np.vstack([row[rng.permutation(encoding.n_bins)] for row in rates])
-    else:  # pragma: no cover - guarded by _validated_shuffle_mode.
-        raise AssertionError(f"Unhandled shuffle mode: {mode!r}")
+    else:
+        raise ValueError(
+            "mode must be one of: cell-permutation, spatial-roll, "
+            "spatial-permutation, independent-spatial-permutation"
+        )
     return EncodingModel(
         x_edges=encoding.x_edges.copy(),
         y_edges=encoding.y_edges.copy(),
@@ -76,30 +59,6 @@ def shuffled_encoding(
         cell_ids=encoding.cell_ids.copy(),
         config=encoding.config,
     )
-
-
-def _validated_shuffle_mode(mode: object) -> str:
-    if isinstance(mode, str) and mode in SUPPORTED_SHUFFLE_MODES:
-        return mode
-    supported = ", ".join(SUPPORTED_SHUFFLE_MODES)
-    raise ValueError(f"mode must be one of: {supported}")
-
-
-def _nonnegative_integer_value(name: str, value: object) -> int:
-    if isinstance(value, (bool, np.bool_)):
-        raise ValueError(f"{name} must be an integer")
-    try:
-        numeric = float(value)  # type: ignore[arg-type]
-    except (TypeError, ValueError, OverflowError) as exc:
-        raise ValueError(f"{name} must be an integer") from exc
-    if not np.isfinite(numeric):
-        raise ValueError(f"{name} must be a finite integer")
-    integer = int(round(numeric))
-    if not np.isclose(numeric, integer, rtol=0.0, atol=0.0):
-        raise ValueError(f"{name} must be an integer")
-    if integer < 0:
-        raise ValueError(f"{name} must be a nonnegative integer")
-    return integer
 
 
 def _spatial_roll_rates(rates: np.ndarray, grid_shape: tuple[int, int], rng: np.random.Generator) -> np.ndarray:
@@ -148,16 +107,13 @@ def score_shuffle_controls(
 
     emission_config = EmissionConfig() if emission_config is None else emission_config
     control_config = ShuffleControlConfig() if control_config is None else control_config
-    mode = _validated_shuffle_mode(control_config.mode)
-    n_shuffles = _nonnegative_integer_value("n_shuffles", control_config.n_shuffles)
-    random_seed = _nonnegative_integer_value("random_seed", control_config.random_seed)
     event_indices = tuple(int(event_index) for event_index in event_indices)
     rows: list[dict[str, object]] = []
-    for shuffle_index in range(n_shuffles):
+    for shuffle_index in range(int(control_config.n_shuffles)):
         control_encoding = shuffled_encoding(
             encoding,
-            mode=mode,
-            random_seed=random_seed + shuffle_index,
+            mode=control_config.mode,
+            random_seed=int(control_config.random_seed) + shuffle_index,
         )
         for event_index in event_indices:
             emissions = build_emissions(session, control_encoding, event_index, emission_config)
@@ -176,14 +132,14 @@ def score_shuffle_controls(
                         "event_index": event_index,
                         "requested_model": requested_model,
                         "model": score.model_name,
-                        "control_type": mode,
+                        "control_type": control_config.mode,
                         "control_index": int(shuffle_index),
                         "log_evidence": float(score.log_likelihood),
                         "n_time": int(score.n_time),
                         "n_spikes": int(score.n_spikes),
                     }
                 )
-    return pd.DataFrame(rows, columns=SHUFFLE_CONTROL_SCORE_COLUMNS)
+    return pd.DataFrame(rows)
 
 
 def _with_finite_log_evidence(scores: pd.DataFrame) -> pd.DataFrame:

@@ -5,13 +5,12 @@ from __future__ import annotations
 from collections.abc import Sequence
 
 import numpy as np
-import pandas as pd
 
 _PATCHED_FLAG = "_advanced_result_quantile_array_patch_applied"
 
 
 def apply_advanced_result_quantile_array_patch() -> None:
-    """Patch ``_quantile`` so array and nullable inputs are handled uniformly."""
+    """Patch ``_quantile`` so array inputs do not hit ambiguous truth-value checks."""
 
     from . import advanced_result_diagnostics as diagnostics
 
@@ -19,9 +18,7 @@ def apply_advanced_result_quantile_array_patch() -> None:
         return
 
     def _quantile(values: Sequence[float], q: float) -> float:
-        raw = np.asarray(values, dtype=object).reshape(-1)
-        arr = pd.to_numeric(pd.Series(raw), errors="coerce").to_numpy(dtype=float)
-        arr = arr[np.isfinite(arr)]
+        arr = np.asarray(values, dtype=float)
         if arr.size == 0:
             return float("nan")
         return float(np.quantile(arr, q))

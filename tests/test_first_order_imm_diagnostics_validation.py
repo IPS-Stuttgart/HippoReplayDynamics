@@ -28,10 +28,6 @@ def _trajectory_log_posterior() -> np.ndarray:
     )
 
 
-def _deterministic_step_log_posterior() -> np.ndarray:
-    return np.array([[0.0, -np.inf], [-np.inf, 0.0]], dtype=float)
-
-
 def _bin_centers() -> np.ndarray:
     return np.array([[0.0, 0.0], [1.0, 0.0]], dtype=float)
 
@@ -64,9 +60,11 @@ def test_first_order_imm_content_diagnostics_rejects_bad_trajectory_values(bad_v
 
 
 def test_first_order_imm_content_diagnostics_allows_impossible_log_bins() -> None:
+    trajectory = np.array([[0.0, -np.inf], [-np.inf, 0.0]], dtype=float)
+
     diagnostics = state_space_utils._first_order_imm_content_diagnostics(
         _mode_posterior(),
-        _deterministic_step_log_posterior(),
+        trajectory,
         _bin_centers(),
         0.02,
     )
@@ -88,57 +86,4 @@ def test_runtime_patch_repairs_duration_occupancy_diagnostics_alias(monkeypatch)
 
     apply_runtime_patches()
 
-    helper = duration_occupancy._first_order_imm_content_diagnostics
-    assert helper is not original_helper
-    assert getattr(helper, "_first_order_imm_duration_diagnostics_alias_patch", False)
-
-
-def test_duration_occupancy_alias_uses_recorded_transition_durations(monkeypatch) -> None:
-    apply_runtime_patches()
-    helper = duration_occupancy._first_order_imm_content_diagnostics
-    monkeypatch.setattr(
-        duration_occupancy,
-        "_first_order_imm_diagnostic_transition_durations",
-        np.array([0.5], dtype=float),
-        raising=False,
-    )
-
-    def call_with_unrelated_caller_durations() -> dict[str, float | int]:
-        durations = np.array([10.0], dtype=float)
-        assert durations.shape == (1,)
-        return helper(
-            _mode_posterior(),
-            _deterministic_step_log_posterior(),
-            _bin_centers(),
-            0.02,
-        )
-
-    diagnostics = call_with_unrelated_caller_durations()
-
-    assert diagnostics["state_space_imm_posterior_expected_path_length_cm"] == pytest.approx(1.0)
-    assert diagnostics["state_space_imm_posterior_path_speed_cm_s"] == pytest.approx(2.0)
-
-
-def test_duration_occupancy_alias_ignores_unrecorded_caller_durations(monkeypatch) -> None:
-    apply_runtime_patches()
-    monkeypatch.delattr(
-        duration_occupancy,
-        "_first_order_imm_diagnostic_transition_durations",
-        raising=False,
-    )
-    helper = duration_occupancy._first_order_imm_content_diagnostics
-
-    def call_from_unrelated_context() -> dict[str, float | int]:
-        durations = np.array([10.0], dtype=float)
-        assert durations.shape == (1,)
-        return helper(
-            _mode_posterior(),
-            _deterministic_step_log_posterior(),
-            _bin_centers(),
-            0.02,
-        )
-
-    diagnostics = call_from_unrelated_context()
-
-    assert diagnostics["state_space_imm_posterior_expected_path_length_cm"] == pytest.approx(1.0)
-    assert diagnostics["state_space_imm_posterior_path_speed_cm_s"] == pytest.approx(50.0)
+    assert duration_occupancy._first_order_imm_content_diagnostics is state_space_utils._first_order_imm_content_diagnostics

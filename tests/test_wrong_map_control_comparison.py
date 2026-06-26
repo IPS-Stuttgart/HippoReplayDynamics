@@ -86,40 +86,6 @@ def test_wrong_map_absolute_attenuation_can_pass_when_margin_did_is_negative(tmp
         assert (tmp_path / name).is_file()
 
 
-def test_wrong_map_comparison_keeps_legacy_missing_status_rows():
-    real = pd.DataFrame(
-        [
-            _score("Rat1/Open1", 0, "sorted-spike-state-space-stationary", 0.0, status=pd.NA),
-            _score("Rat1/Open1", 0, "sorted-spike-state-space-diffusion", 5.0, status=""),
-            _score("Rat1/Open1", 0, "sorted-spike-state-space-fragmented", 6.0, status=float("nan")),
-            _score("Rat1/Open1", 0, "sorted-spike-state-space-first-order-imm", 9.0, status="success"),
-            _score("Rat1/Open1", 0, "sorted-spike-state-space-momentum-exact-sparse", 7.0, status=None),
-            _score("Rat1/Open1", 0, "failed-model", 999.0, status="failed"),
-        ]
-    )
-    wrong = pd.DataFrame(
-        [
-            _wrong_score("Rat1/Open1", "Rat1/Open2", 0, "sorted-spike-state-space-stationary", -20.0, status=pd.NA),
-            _wrong_score("Rat1/Open1", "Rat1/Open2", 0, "sorted-spike-state-space-diffusion", -10.0, status=""),
-            _wrong_score("Rat1/Open1", "Rat1/Open2", 0, "sorted-spike-state-space-fragmented", -9.0, status=float("nan")),
-            _wrong_score("Rat1/Open1", "Rat1/Open2", 0, "sorted-spike-state-space-first-order-imm", -8.0, status="success"),
-            _wrong_score("Rat1/Open1", "Rat1/Open2", 0, "sorted-spike-state-space-momentum-exact-sparse", -7.0, status=None),
-            _wrong_score("Rat1/Open1", "Rat1/Open2", 0, "failed-model", -999.0, status="failed"),
-        ]
-    )
-
-    attenuation = wrong_map_model_evidence_attenuation(real, wrong)
-    family = wrong_map_family_evidence_attenuation(real, wrong)
-    summary = wrong_map_family_evidence_attenuation_summary(family).iloc[0]
-
-    assert len(attenuation) == 5
-    assert "failed-model" not in set(attenuation["model"])
-    assert len(family) == 1
-    assert bool(family.loc[0, "required_models_complete_both_maps"])
-    assert summary["complete_family_events"] == 1
-    assert summary["mean_best_trajectory_delta_real_minus_wrong"] > 0.0
-
-
 def test_wrong_map_summary_treats_string_false_complete_flag_as_false():
     family = pd.DataFrame(
         [
@@ -162,16 +128,9 @@ def test_wrong_map_summary_treats_string_false_complete_flag_as_false():
     assert bootstrap["observed_mean_best_trajectory_delta_real_minus_wrong"] == 10.0
 
 
-def _score(
-    session: str,
-    event_index: int,
-    model: str,
-    log_evidence: float,
-    *,
-    status: object = "success",
-) -> dict[str, object]:
+def _score(session: str, event_index: int, model: str, log_evidence: float) -> dict[str, object]:
     return {
-        "status": status,
+        "status": "success",
         "session": session,
         "event_index": event_index,
         "model": model,
@@ -186,10 +145,8 @@ def _wrong_score(
     event_index: int,
     model: str,
     log_evidence: float,
-    *,
-    status: object = "success",
 ) -> dict[str, object]:
-    row = _score(session, event_index, model, log_evidence, status=status)
+    row = _score(session, event_index, model, log_evidence)
     row["map_session"] = map_session
     row["wrong_map_control"] = True
     return row

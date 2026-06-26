@@ -9,7 +9,6 @@ from . import advanced_result_threshold_validation as _advanced_result_threshold
 from . import advanced_result_wrong_map_bootstrap_patch as _advanced_result_wrong_map_bootstrap_patch
 from . import axona_data_end_footer as _axona_data_end_footer
 from . import benchmark_cell_split_metadata as _benchmark_cell_split_metadata
-from . import benchmark_mark_cell_id_validation as _benchmark_mark_cell_id_validation
 from . import benchmark_metadata_scope_patch as _benchmark_metadata_scope_patch
 from . import benchmark_relative_grouping as _benchmark_relative_grouping
 from . import bma_options_patch as _bma_options_patch
@@ -82,7 +81,6 @@ _benchmark_cell_split_metadata.apply_benchmark_cell_split_metadata_patch()
 _benchmark_metadata_scope_patch.apply_benchmark_metadata_scope_patch()
 _cell_split_hashable_grouping.apply_cell_split_hashable_grouping_patch()
 _benchmark_relative_grouping.apply_benchmark_relative_grouping_patch()
-_benchmark_mark_cell_id_validation.apply_benchmark_mark_cell_id_validation_patch()
 _clusterless_ground_truth.apply_clusterless_ground_truth_patch()
 _bma_options_patch.apply_bma_options_patch()
 _pyrecest_numeric_metadata_guard.apply_pyrecest_numeric_metadata_guard_patch()
@@ -204,7 +202,6 @@ def apply_runtime_patches() -> None:
     _benchmark_metadata_scope_patch.apply_benchmark_metadata_scope_patch()
     _cell_split_hashable_grouping.apply_cell_split_hashable_grouping_patch()
     _benchmark_relative_grouping.apply_benchmark_relative_grouping_patch()
-    _benchmark_mark_cell_id_validation.apply_benchmark_mark_cell_id_validation_patch()
     _clusterless_ground_truth.apply_clusterless_ground_truth_patch()
     _bma_options_patch.apply_bma_options_patch()
     _pyrecest_numeric_metadata_guard.apply_pyrecest_numeric_metadata_guard_patch()

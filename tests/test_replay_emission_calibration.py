@@ -7,7 +7,7 @@ import pytest
 
 from hipporeplayimm.data import ReplaySession
 from hipporeplayimm.encoding import EncodingConfig, EncodingModel
-from hipporeplayimm.replay_emission_calibration import fit_replay_cell_gains
+from hipporeplayimm.replay_emission_calibration import apply_replay_cell_gains, fit_replay_cell_gains
 
 
 def _empty_spike_session() -> ReplaySession:
@@ -82,3 +82,27 @@ def test_replay_cell_gain_calibration_uses_prior_gain_without_valid_events() -> 
     np.testing.assert_allclose(calibration.gains, np.ones(encoding.n_cells))
     np.testing.assert_allclose(calibration.observed_spikes, np.zeros(encoding.n_cells))
     np.testing.assert_allclose(calibration.expected_spikes, np.zeros(encoding.n_cells))
+
+
+def test_apply_replay_cell_gains_aligns_manual_mapping_by_cell_id() -> None:
+    encoding = _two_cell_encoding()
+    calibrated = apply_replay_cell_gains(encoding, {2: 3.0})
+
+    np.testing.assert_allclose(calibrated.rates_hz, np.array([[1.0], [3.0]]))
+    np.testing.assert_allclose(encoding.rates_hz, np.ones((2, 1)))
+
+
+@pytest.mark.parametrize(
+    ("gains", "message"),
+    [
+        (np.array([1.0, np.nan]), "finite"),
+        (np.array([1.0, np.inf]), "finite"),
+        (np.array([1.0, 0.0]), "positive"),
+        (np.array([1.0, -0.5]), "positive"),
+        ({1: np.nan}, "finite"),
+        ({2: 0.0}, "positive"),
+    ],
+)
+def test_apply_replay_cell_gains_rejects_invalid_manual_gains(gains, message) -> None:
+    with pytest.raises(ValueError, match=message):
+        apply_replay_cell_gains(_two_cell_encoding(), gains)

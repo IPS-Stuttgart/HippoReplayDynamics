@@ -52,7 +52,7 @@ def smooth_positions(xy: np.ndarray, valid: np.ndarray, *, window_samples: int) 
     for dim in range(2):
         values = xy[:, dim]
         filled[:, dim] = np.interp(sample_index, sample_index[valid], values[valid])
-    window = max(int(window_samples), 1)
+    window = min(max(int(window_samples), 1), xy.shape[0])
     if window <= 1:
         return filled
     kernel = np.ones(window, dtype=float) / float(window)

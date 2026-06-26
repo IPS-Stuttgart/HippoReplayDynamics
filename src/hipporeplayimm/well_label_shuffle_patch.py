@@ -63,8 +63,8 @@ def _labelled_well_rows(values: pd.Series) -> pd.Series:
 def _coordinate_well_rows(frame: pd.DataFrame) -> pd.Series:
     """Return rows with a complete finite coordinate label."""
 
-    coordinate_columns = [column for column in ("true_well_x", "true_well_y") if column in frame]
-    if not coordinate_columns:
+    coordinate_columns = ["true_well_x", "true_well_y"]
+    if not all(column in frame for column in coordinate_columns):
         return pd.Series(False, index=frame.index)
     numeric = frame[coordinate_columns].apply(pd.to_numeric, errors="coerce")
     finite = pd.DataFrame(

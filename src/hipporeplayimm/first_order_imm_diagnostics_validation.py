@@ -201,7 +201,9 @@ def _stored_duration_occupancy_durations(n_time: int) -> np.ndarray | None:
     module = sys.modules.get("hipporeplayimm.duration_occupancy")
     if module is None:
         return None
-    return _matching_transition_durations(getattr(module, _LAST_DURATIONS_ATTR, None), n_time)
+    values = getattr(module, _LAST_DURATIONS_ATTR, None)
+    setattr(module, _LAST_DURATIONS_ATTR, None)
+    return _matching_transition_durations(values, n_time)
 
 
 def _record_duration_occupancy_transition_durations() -> None:

@@ -111,3 +111,23 @@ def test_duration_occupancy_alias_uses_caller_transition_durations() -> None:
 
     assert diagnostics["state_space_imm_posterior_expected_path_length_cm"] == pytest.approx(1.0)
     assert diagnostics["state_space_imm_posterior_path_speed_cm_s"] == pytest.approx(2.0)
+
+
+def test_duration_occupancy_alias_ignores_unrelated_caller_durations() -> None:
+    apply_runtime_patches()
+    helper = duration_occupancy._first_order_imm_content_diagnostics
+
+    def call_from_unrelated_context() -> dict[str, float | int]:
+        durations = np.array([10.0, 20.0], dtype=float)
+        assert durations.shape == (2,)
+        return helper(
+            _mode_posterior(),
+            _deterministic_step_log_posterior(),
+            _bin_centers(),
+            0.02,
+        )
+
+    diagnostics = call_from_unrelated_context()
+
+    assert diagnostics["state_space_imm_posterior_expected_path_length_cm"] == pytest.approx(1.0)
+    assert diagnostics["state_space_imm_posterior_path_speed_cm_s"] == pytest.approx(50.0)

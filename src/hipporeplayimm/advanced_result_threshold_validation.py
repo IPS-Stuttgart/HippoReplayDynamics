@@ -8,6 +8,9 @@ import numpy as np
 import pandas as pd
 
 _PATCHED_FLAG = "_advanced_result_threshold_validation_patch_applied"
+_BASE_DECISIONS_ATTR = "_advanced_result_threshold_validation_base_decisions"
+_PATCHED_DECISIONS_ATTR = "_advanced_result_threshold_validation_patched_decisions"
+_PATCHED_SWEEP_ATTR = "_advanced_result_threshold_validation_patched_sweep"
 
 
 def _validated_threshold(
@@ -57,15 +60,26 @@ def _ensure_true_model_summary_columns(summary: pd.DataFrame) -> pd.DataFrame:
     return out
 
 
+def _current_patch_installed(diagnostics) -> bool:
+    return (
+        getattr(diagnostics, _PATCHED_FLAG, False)
+        and getattr(diagnostics, "paired_model_margin_decisions", None) is getattr(diagnostics, _PATCHED_DECISIONS_ATTR, None)
+        and getattr(diagnostics, "paired_model_margin_threshold_sweep", None) is getattr(diagnostics, _PATCHED_SWEEP_ATTR, None)
+    )
+
+
 def apply_advanced_result_threshold_validation_patch() -> None:
     """Install paired-threshold validation and neutral zero-margin tie handling."""
 
     from . import advanced_result_diagnostics as diagnostics
 
-    if getattr(diagnostics, _PATCHED_FLAG, False):
+    if _current_patch_installed(diagnostics):
         return
 
-    previous_decisions = diagnostics.paired_model_margin_decisions
+    base_decisions = getattr(diagnostics, _BASE_DECISIONS_ATTR, None)
+    if base_decisions is None:
+        base_decisions = diagnostics.paired_model_margin_decisions
+        setattr(diagnostics, _BASE_DECISIONS_ATTR, base_decisions)
 
     def paired_model_margin_decisions(
         scores: pd.DataFrame,
@@ -80,7 +94,7 @@ def apply_advanced_result_threshold_validation_patch() -> None:
         positive_true_label: str | None = None,
     ) -> pd.DataFrame:
         threshold = _validated_threshold(margin_threshold)
-        out = previous_decisions(
+        out = base_decisions(
             scores,
             positive_model=positive_model,
             reference_model=reference_model,
@@ -122,9 +136,10 @@ def apply_advanced_result_threshold_validation_patch() -> None:
         true_model_col: str | None = None,
         positive_true_label: str | None = None,
     ) -> pd.DataFrame:
+        validated_thresholds = _validated_thresholds(thresholds)
         paired_group_cols = tuple(group_cols) if group_cols is not None else diagnostics.infer_paired_model_group_cols(scores)
         rows: list[pd.DataFrame] = []
-        for threshold in _validated_thresholds(thresholds):
+        for threshold in validated_thresholds:
             decisions = paired_model_margin_decisions(
                 scores,
                 positive_model=positive_model,
@@ -151,6 +166,8 @@ def apply_advanced_result_threshold_validation_patch() -> None:
 
     diagnostics.paired_model_margin_decisions = paired_model_margin_decisions
     diagnostics.paired_model_margin_threshold_sweep = paired_model_margin_threshold_sweep
+    setattr(diagnostics, _PATCHED_DECISIONS_ATTR, paired_model_margin_decisions)
+    setattr(diagnostics, _PATCHED_SWEEP_ATTR, paired_model_margin_threshold_sweep)
     setattr(diagnostics, _PATCHED_FLAG, True)
 
 

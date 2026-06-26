@@ -38,6 +38,7 @@ def _reject_boolean_scalar(name: str, value: object) -> None:
 
 
 def _validate_unit_interval_parameter(name: str, value: object) -> float:
+    _reject_boolean_scalar(name, value)
     try:
         numeric = float(value)
     except (TypeError, ValueError) as exc:

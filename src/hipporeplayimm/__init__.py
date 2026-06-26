@@ -1,4 +1,4 @@
-'''State-space and IMM replay benchmarks for hippocampal open-field data.'''
+"""State-space and IMM replay benchmarks for hippocampal open-field data."""
 # ruff: noqa: E402
 
 from . import accuracy_model_probability_status_patch as _accuracy_model_probability_status_patch
@@ -12,6 +12,7 @@ from . import benchmark_cell_split_metadata as _benchmark_cell_split_metadata
 from . import benchmark_mark_cell_id_validation as _benchmark_mark_cell_id_validation
 from . import benchmark_metadata_scope_patch as _benchmark_metadata_scope_patch
 from . import benchmark_relative_grouping as _benchmark_relative_grouping
+from . import bidirectional_infinite_evidence_patch as _bidirectional_infinite_evidence_patch
 from . import bma_options_patch as _bma_options_patch
 from . import candidate_log_mass_validation as _candidate_log_mass_validation
 from . import candidate_support_normalization_validation as _candidate_support_normalization_validation
@@ -271,6 +272,7 @@ def apply_runtime_patches() -> None:
     _improved_model_evidence_registry_patch.apply_improved_model_evidence_registry_patch()
     _observation_sweep_config_validation.apply_observation_sweep_config_validation_patch()
     _cli_float_values_validation.apply_cli_float_values_validation_patch()
+    _bidirectional_infinite_evidence_patch.apply_bidirectional_infinite_evidence_patch()
 
 
 # Ensure replay dynamics use center-to-center transition durations when replay

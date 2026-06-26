@@ -33,6 +33,20 @@ def _bootstrap_summary_columns() -> list[str]:
     ]
 
 
+def _positive_integer(value: object, name: str) -> int:
+    """Return a positive integer argument or raise a clear validation error."""
+
+    if isinstance(value, (bool, np.bool_)):
+        raise ValueError(f"{name} must be a positive integer")
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must be a positive integer") from exc
+    if not np.isfinite(numeric) or numeric <= 0.0 or not numeric.is_integer():
+        raise ValueError(f"{name} must be a positive integer")
+    return int(numeric)
+
+
 def apply_wrong_map_rat_bootstrap_patch() -> None:
     """Patch rat-cluster bootstrap to sample only rats present for each statistic."""
 
@@ -52,6 +66,7 @@ def apply_wrong_map_rat_bootstrap_patch() -> None:
     ) -> pd.DataFrame:
         """Rat-cluster bootstrap uncertainty for absolute map sensitivity."""
 
+        replicates = _positive_integer(n_bootstrap, "n_bootstrap")
         columns = _bootstrap_summary_columns()
         if deltas.empty or "session" not in deltas.columns:
             return pd.DataFrame(columns=columns)
@@ -70,7 +85,7 @@ def apply_wrong_map_rat_bootstrap_patch() -> None:
                 rat: group[group["rat"].astype(str) == rat]
                 for rat in statistic_rats
             }
-            for _ in range(int(n_bootstrap)):
+            for _ in range(replicates):
                 sampled = rng.choice(statistic_rats, size=len(statistic_rats), replace=True)
                 sample = pd.concat([by_rat[rat] for rat in sampled], ignore_index=True)
                 values = sample["delta_map_log_evidence"].to_numpy(float)
@@ -80,7 +95,7 @@ def apply_wrong_map_rat_bootstrap_patch() -> None:
             rows.append(
                 {
                     "bootstrap_unit": "rat",
-                    "bootstrap_replicates": int(n_bootstrap),
+                    "bootstrap_replicates": replicates,
                     "random_seed": int(random_seed),
                     "statistic": str(statistic),
                     "observed_events": int(observed["events"]),

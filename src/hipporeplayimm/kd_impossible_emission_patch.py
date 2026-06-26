@@ -9,12 +9,24 @@ import numpy as np
 _PATCHED_FLAG = "_kd_impossible_emission_patch_applied"
 
 
+def _current_patch_installed(kd: object) -> bool:
+    """Return whether the KD impossible-emission aliases currently point here."""
+
+    return (
+        getattr(kd, "_scaled_emission", None) is _scaled_emission
+        and getattr(kd, "_first_order_separable_log_evidence", None) is _first_order_separable_log_evidence
+        and getattr(kd, "_second_order_separable_log_evidence", None) is _second_order_separable_log_evidence
+        and getattr(kd, "empirical_grid_prior", None) is _empirical_grid_prior
+        and getattr(kd, "best_grid_params", None) is _best_grid_params
+    )
+
+
 def apply_kd_impossible_emission_patch() -> None:
     """Install guards for all-impossible KD emission rows and grid summaries."""
 
     from . import kd_reference as kd
 
-    if getattr(kd, _PATCHED_FLAG, False):
+    if _current_patch_installed(kd):
         return
 
     kd._scaled_emission = _scaled_emission

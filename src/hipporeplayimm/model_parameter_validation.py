@@ -10,6 +10,7 @@ _PATCHED_FLAG = "_model_parameter_validation_patch_applied"
 _REPLAY_CALIBRATION_PATCHED_FLAG = "_replay_calibration_max_gain_validation_patch_applied"
 _STATE_SPACE_DECAY_HELPERS_PATCHED_FLAG = "_state_space_velocity_decay_validation_patch_applied"
 _DURATION_OCCUPANCY_DECAY_PATCHED_FLAG = "_duration_occupancy_velocity_decay_validation_patch_applied"
+_DURATION_OCCUPANCY_MODE_PATCHED_FLAG = "_duration_occupancy_mode_parameter_validation_patch_applied"
 _SPARSE_MOMENTUM_DECAY_PATCHED_FLAG = "_sparse_momentum_velocity_decay_validation_patch_applied"
 _DISPLACEMENT_MOMENTUM_DECAY_PATCHED_FLAG = "_displacement_momentum_velocity_decay_validation_patch_applied"
 _TRAJECTORY_IMM_PARAMETERS_PATCHED_FLAG = "_trajectory_imm_parameter_validation_patch_applied"
@@ -158,6 +159,32 @@ def _apply_duration_occupancy_velocity_decay_validation_patch() -> None:
     setattr(duration_occupancy, _DURATION_OCCUPANCY_DECAY_PATCHED_FLAG, True)
 
 
+def _apply_duration_occupancy_mode_parameter_validation_patch() -> None:
+    from . import duration_occupancy
+
+    if getattr(duration_occupancy, _DURATION_OCCUPANCY_MODE_PATCHED_FLAG, False):
+        return
+
+    original_mode_matrices = duration_occupancy._mode_transition_matrices
+    original_resolver = duration_occupancy._resolve_mode_transitions
+
+    @wraps(original_mode_matrices)
+    def mode_transition_matrices(ss, n_modes, mode_stickiness, imm_switch_tau_s, durations):
+        _validate_unit_interval_parameter("imm_mode_stickiness", mode_stickiness)
+        _validate_finite_nonnegative_parameter("imm_switch_tau_s", imm_switch_tau_s)
+        return original_mode_matrices(ss, n_modes, mode_stickiness, imm_switch_tau_s, durations)
+
+    @wraps(original_resolver)
+    def resolve_mode_transitions(ss, n_modes, mode_stickiness, mode_transitions, n_transitions):
+        if mode_transitions is None:
+            _validate_unit_interval_parameter("imm_mode_stickiness", mode_stickiness)
+        return original_resolver(ss, n_modes, mode_stickiness, mode_transitions, n_transitions)
+
+    duration_occupancy._mode_transition_matrices = mode_transition_matrices
+    duration_occupancy._resolve_mode_transitions = resolve_mode_transitions
+    setattr(duration_occupancy, _DURATION_OCCUPANCY_MODE_PATCHED_FLAG, True)
+
+
 def _apply_sparse_momentum_velocity_decay_validation_patch() -> None:
     from . import state_space_sparse_momentum
 
@@ -299,6 +326,7 @@ def apply_model_parameter_validation_patch() -> None:
 
     _apply_state_space_velocity_decay_validation_patch()
     _apply_duration_occupancy_velocity_decay_validation_patch()
+    _apply_duration_occupancy_mode_parameter_validation_patch()
     _apply_sparse_momentum_velocity_decay_validation_patch()
     _apply_displacement_momentum_velocity_decay_validation_patch()
     _apply_trajectory_imm_parameter_validation_patch()

@@ -24,6 +24,7 @@ from . import clusterless_config_validation as _clusterless_config_validation
 from . import clusterless_ground_truth as _clusterless_ground_truth
 from . import clusterless_mark_group_validation as _clusterless_mark_group_validation
 from . import data_cell_id_validation as _data_cell_id_validation
+from . import displacement_imm_decay_validation as _displacement_imm_decay_validation
 from . import duration_candidate_metadata_patch as _duration_candidate_metadata_patch
 from . import duration_occupancy_metadata_guard as _duration_occupancy_metadata_guard
 from . import duration_occupancy_mode_transition_validation as _duration_occupancy_mode_transition_validation
@@ -81,6 +82,7 @@ _state_space_bin_count_validation.apply_state_space_bin_count_validation_patch()
 _score_metadata.apply_model_hyperparam_patch()
 _score_metadata_bool_validation.apply_score_metadata_bool_validation_patch()
 _model_parameter_validation.apply_model_parameter_validation_patch()
+_displacement_imm_decay_validation.apply_displacement_imm_decay_validation_patch()
 _candidate_support_quality_patch.apply_candidate_support_quality_patch()
 _benchmark_cell_split_metadata.apply_benchmark_cell_split_metadata_patch()
 _benchmark_metadata_scope_patch.apply_benchmark_metadata_scope_patch()
@@ -203,6 +205,7 @@ def apply_runtime_patches() -> None:
     _score_metadata.apply_model_hyperparam_patch()
     _score_metadata_bool_validation.apply_score_metadata_bool_validation_patch()
     _model_parameter_validation.apply_model_parameter_validation_patch()
+    _displacement_imm_decay_validation.apply_displacement_imm_decay_validation_patch()
     _candidate_support_quality_patch.apply_candidate_support_quality_patch()
     _benchmark_cell_split_metadata.apply_benchmark_cell_split_metadata_patch()
     _benchmark_metadata_scope_patch.apply_benchmark_metadata_scope_patch()
@@ -249,7 +252,7 @@ def apply_runtime_patches() -> None:
     _sparse_momentum_duration_validation.apply_sparse_momentum_duration_validation_patch()
     _sparse_momentum_single_bin_diagnostics.apply_sparse_momentum_single_bin_diagnostics_patch()
     _time_order_patch.apply_reverse_emission_time_patch()
-    _reverse_time_terminal_guard.apply_reverse_time_terminal_guard_patch()
+    _reverse_time_terminal_guard.apply_reverse_emission_time_patch()
     _wrapper_return_trajectory.apply_wrapper_return_trajectory_patch()
     _shuffle_spike_time_order.apply_shuffle_spike_time_order_patch()
     _well_label_shuffle_patch.apply_well_label_shuffle_patch()

@@ -16,8 +16,8 @@ def trajectory_quality_metrics(
     """Summarize posterior trajectory geometry and certainty.
 
     Metrics are based on both posterior-mean and MAP paths.  They are not a
-    substitute for evidence; they flag whether a high-evidence event corresponds
-    to an interpretable path.
+    substitute for evidence; they flag whether a scored event has an interpretable
+    path.
     """
 
     logp = np.asarray(trajectory_log_posterior, dtype=float)
@@ -28,8 +28,8 @@ def trajectory_quality_metrics(
         raise ValueError("trajectory_log_posterior must contain at least one time bin and one position bin")
     if centers.ndim == 1:
         centers = centers[:, None]
-    if centers.ndim != 2 or centers.shape[0] != logp.shape[1]:
-        raise ValueError("bin_centers must have shape (bins,) or (bins, position_dim)")
+    if centers.ndim != 2 or centers.shape[0] != logp.shape[1] or centers.shape[1] == 0:
+        raise ValueError("bin_centers must have shape (bins,) or (bins, position_dim) with position_dim >= 1")
     if not np.all(np.isfinite(centers)):
         raise ValueError("bin_centers must contain finite values")
     if np.any(np.isnan(logp)) or np.any(np.isposinf(logp)):

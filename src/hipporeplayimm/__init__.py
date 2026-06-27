@@ -261,3 +261,75 @@ def apply_runtime_patches() -> None:
     _synchronize_duration_patched_emission_builders()
     _patch_simulation_recovery_module(_simulation_recovery)
     _simulation_best_row_flags.apply_simulation_best_row_flags_patch()
+    _evidence_status_coercion.apply_evidence_status_coercion_patch()
+    _accuracy_model_probability_status_patch.apply_model_probability_status_patch()
+    _accuracy_replay_gain_gamma_patch.apply_accuracy_replay_gain_gamma_patch()
+    _advanced_result_status_patch.apply_advanced_result_status_patch()
+    _advanced_result_empty_threshold_patch.apply_advanced_result_empty_threshold_patch()
+    _advanced_result_threshold_validation.apply_advanced_result_threshold_validation_patch()
+    _advanced_result_wrong_map_bootstrap_patch.apply_wrong_map_rat_bootstrap_patch()
+    _advanced_result_quantile_array_patch.apply_advanced_result_quantile_array_patch()
+    _posterior_calibration_summary_patch.apply_posterior_calibration_summary_patch()
+    _latent_path_validation.apply_latent_path_validation_patch()
+    _simulation_recovery_runtime_limits.apply_simulation_recovery_runtime_limit_validation_patch()
+    _simulation_recovery_count_validation.apply_simulation_recovery_count_validation_patch()
+    _apply_trajectory_imm_recovery_patch()
+    _simulation_recovery_event_count.apply_simulation_recovery_event_count_patch()
+    _recovery_diagnostics_bool_patch.apply_recovery_diagnostics_bool_patch()
+    _model_averaged_endpoint_scoping.apply_model_averaged_endpoint_scoping_patch()
+    _ground_truth_window_scope.apply_ground_truth_window_scope_patch()
+    _improved_model_evidence_registry_patch.apply_improved_model_evidence_registry_patch()
+    _observation_sweep_config_validation.apply_observation_sweep_config_validation_patch()
+    _cli_float_values_validation.apply_cli_float_values_validation_patch()
+    _bidirectional_infinite_evidence_patch.apply_bidirectional_infinite_evidence_patch()
+
+
+# Ensure replay dynamics use center-to-center transition durations when replay
+# emissions include a partial final bin.
+apply_runtime_patches()
+from .encoding import build_emissions as build_emissions  # noqa: E402,F401,F811
+from .ground_truth import compare_scores_to_ground_truth as compare_scores_to_ground_truth  # noqa: E402,F401,F811
+
+# Keep synthetic recovery summaries from mixing exact evidences with truncated
+# candidate lower bounds.
+SimulationRecoveryConfig = _simulation_recovery.SimulationRecoveryConfig
+SimulationRecoveryResult = _simulation_recovery.SimulationRecoveryResult
+run_session_simulation_recovery = _simulation_recovery.run_session_simulation_recovery
+
+__all__ = [
+    'BenchmarkConfig',
+    'BenchmarkResult',
+    'CandidateKinematicModel',
+    'ClusterlessMarkConfig',
+    'ClusterlessMarkEncoding',
+    'ClusterlessStateSpaceReplayModel',
+    'DiffusionModel',
+    'EncodingConfig',
+    'EncodingModel',
+    'EventScore',
+    'GoalStateSpaceReplayModel',
+    'GroundTruthConfig',
+    'PyRecEstGoalParticleModel',
+    'PyRecEstSweepConfig',
+    'PyRecEstSweepResult',
+    'RandomModel',
+    'ReplaySession',
+    'SimulationRecoveryConfig',
+    'SimulationRecoveryResult',
+    'StationaryModel',
+    'apply_runtime_patches',
+    'build_clusterless_mark_emissions',
+    'build_emissions',
+    'compare_scores_to_ground_truth',
+    'fit_clusterless_mark_encoding',
+    'fit_place_field_encoding',
+    'generate_behavioral_ground_truth',
+    'infer_well_locations',
+    'label_session_behavioral_ground_truth',
+    'load_open_field_sessions',
+    'run_open_field_benchmark',
+    'run_pyrecest_parameter_sweep',
+    'run_session_simulation_recovery',
+    'score_model',
+    'write_pyrecest_sweep_outputs',
+]

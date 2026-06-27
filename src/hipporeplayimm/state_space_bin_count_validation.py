@@ -16,12 +16,18 @@ def _integer_count(name: str, value: Any) -> int:
     """Return an integer-valued scalar count without silent truncation."""
 
     if isinstance(value, (bool, np.bool_)):
-        raise TypeError(f"{name} must be an integer")
+        raise TypeError(f"{name} must be an integer count, not boolean")
     raw = np.asarray(value)
     if raw.ndim != 0:
         raise TypeError(f"{name} must be an integer")
     if np.issubdtype(raw.dtype, np.bool_):
-        raise TypeError(f"{name} must be an integer")
+        raise TypeError(f"{name} must be an integer count, not boolean")
+    if raw.dtype == object:
+        try:
+            if isinstance(raw.item(), (bool, np.bool_)):
+                raise TypeError(f"{name} must be an integer count, not boolean")
+        except ValueError:
+            pass
     try:
         numeric = float(raw)
     except (TypeError, ValueError, OverflowError) as exc:

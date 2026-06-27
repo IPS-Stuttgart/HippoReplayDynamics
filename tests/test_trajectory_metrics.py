@@ -34,6 +34,32 @@ def test_trajectory_quality_metrics_accepts_one_dimensional_bin_centers():
     assert metrics["trajectory_map_path_length_cm"] == pytest.approx(10.0)
 
 
+def test_trajectory_quality_metrics_rejects_time_length_mismatch():
+    with pytest.raises(ValueError, match="one timestamp"):
+        trajectory_quality_metrics(
+            np.log(np.array([[0.75, 0.25], [0.25, 0.75]])),
+            np.array([0.0, 10.0]),
+            times=np.array([0.0]),
+        )
+
+
+@pytest.mark.parametrize(
+    ("times", "message"),
+    [
+        (np.array([0.0, np.nan]), "finite"),
+        (np.array([0.5, 0.5]), "strictly increasing"),
+        (np.array([1.0, 0.5]), "strictly increasing"),
+    ],
+)
+def test_trajectory_quality_metrics_rejects_nonfinite_or_nonmonotone_times(times, message):
+    with pytest.raises(ValueError, match=message):
+        trajectory_quality_metrics(
+            np.log(np.array([[0.75, 0.25], [0.25, 0.75]])),
+            np.array([0.0, 10.0]),
+            times=times,
+        )
+
+
 def test_trajectory_quality_metrics_entropy_ignores_impossible_bins():
     metrics = trajectory_quality_metrics(
         np.array(

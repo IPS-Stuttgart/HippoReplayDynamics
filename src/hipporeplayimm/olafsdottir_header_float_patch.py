@@ -22,7 +22,10 @@ def apply_olafsdottir_header_float_patch() -> None:
 
     from . import olafsdottir2016
 
-    if getattr(olafsdottir2016, _PATCH_FLAG, False):
+    if (
+        getattr(olafsdottir2016, _PATCH_FLAG, False)
+        and getattr(olafsdottir2016, "_header_float", None) is _header_float
+    ):
         return
     _header_float.__name__ = olafsdottir2016._header_float.__name__
     _header_float.__doc__ = olafsdottir2016._header_float.__doc__

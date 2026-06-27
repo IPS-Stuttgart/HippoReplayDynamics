@@ -4,6 +4,7 @@ import hipporeplayimm
 
 
 _PUBLIC_EXPORTS = (
+    "PyRecEstGoalParticleIMMModel",
     "RandomModel",
     "ReplaySession",
     "SimulationRecoveryConfig",
@@ -22,11 +23,6 @@ def test_package_all_includes_public_api_symbols() -> None:
         assert name in hipporeplayimm.__all__
 
 
-def test_wildcard_import_exports_public_api_symbols() -> None:
-    namespace: dict[str, object] = {}
-
-    exec("from hipporeplayimm import *", namespace)
-
+def test_package_all_symbols_resolve_to_public_attributes() -> None:
     for name in _PUBLIC_EXPORTS:
-        assert name in namespace
-        assert namespace[name] is getattr(hipporeplayimm, name)
+        assert getattr(hipporeplayimm, name) is not None

@@ -74,10 +74,12 @@ def _transition_durations(times: np.ndarray | None, n_time: int) -> np.ndarray:
         return np.ones(n_time - 1, dtype=float)
     arr = np.asarray(times, dtype=float)
     if arr.shape != (n_time,):
-        return np.ones(n_time - 1, dtype=float)
+        raise ValueError("times must contain one timestamp per trajectory row")
+    if not np.all(np.isfinite(arr)):
+        raise ValueError("times must contain finite values")
     diffs = np.diff(arr)
-    if not np.all(np.isfinite(diffs)) or np.any(diffs <= 0.0):
-        return np.ones(n_time - 1, dtype=float)
+    if np.any(diffs <= 0.0):
+        raise ValueError("times must be strictly increasing")
     return diffs
 
 

@@ -540,7 +540,17 @@ def _validate_recovery_runtime_limits(config: SimulationRecoveryConfig) -> None:
 
 
 def _positive_finite_scalar(name: str, value: float) -> float:
-    value = float(value)
+    raw = np.asarray(value)
+    if np.issubdtype(raw.dtype, np.bool_) or (
+        raw.dtype == object and any(isinstance(item, (bool, np.bool_)) for item in raw.flat)
+    ):
+        raise TypeError(f"{name} must be finite and positive, not boolean")
+    if raw.ndim != 0:
+        raise ValueError(f"{name} must be finite and positive")
+    try:
+        value = float(raw)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ValueError(f"{name} must be finite and positive") from exc
     if not np.isfinite(value) or value <= 0.0:
         raise ValueError(f"{name} must be finite and positive")
     return value

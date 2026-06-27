@@ -10,10 +10,12 @@ _PATCHED_FLAG = "_model_parameter_validation_patch_applied"
 _REPLAY_CALIBRATION_PATCHED_FLAG = "_replay_calibration_max_gain_validation_patch_applied"
 _STATE_SPACE_DECAY_HELPERS_PATCHED_FLAG = "_state_space_velocity_decay_validation_patch_applied"
 _DURATION_OCCUPANCY_DECAY_PATCHED_FLAG = "_duration_occupancy_velocity_decay_validation_patch_applied"
+_DURATION_OCCUPANCY_MODE_PATCHED_FLAG = "_duration_occupancy_mode_parameter_validation_patch_applied"
 _SPARSE_MOMENTUM_DECAY_PATCHED_FLAG = "_sparse_momentum_velocity_decay_validation_patch_applied"
 _DISPLACEMENT_MOMENTUM_DECAY_PATCHED_FLAG = "_displacement_momentum_velocity_decay_validation_patch_applied"
 _TRAJECTORY_IMM_PARAMETERS_PATCHED_FLAG = "_trajectory_imm_parameter_validation_patch_applied"
 _PYRECEST_IMM_DECAY_PATCHED_FLAG = "_pyrecest_imm_velocity_decay_validation_patch_applied"
+_ENCODING_PARAMETER_PATCHED_FLAG = "_encoding_parameter_validation_patch_applied"
 
 
 def _is_boolean_scalar(value: object) -> bool:
@@ -34,9 +36,27 @@ def _is_boolean_scalar(value: object) -> bool:
     return False
 
 
+def _is_boolean_array(value: object) -> bool:
+    """Return True when an array-valued numeric input is backed by booleans."""
+
+    arr = np.asarray(value)
+    if arr.ndim == 0:
+        return False
+    if np.issubdtype(arr.dtype, np.bool_):
+        return True
+    if arr.dtype == object:
+        return any(isinstance(item, (bool, np.bool_)) for item in arr.flat)
+    return False
+
+
 def _reject_boolean_scalar(name: str, value: object) -> None:
     if _is_boolean_scalar(value):
         raise TypeError(f"{name} must be a numeric scalar, not boolean")
+
+
+def _reject_boolean_numeric(name: str, value: object) -> None:
+    if _is_boolean_scalar(value) or _is_boolean_array(value):
+        raise TypeError(f"{name} must be numeric, not boolean")
 
 
 def _validate_unit_interval_parameter(name: str, value: object) -> float:
@@ -158,6 +178,32 @@ def _apply_duration_occupancy_velocity_decay_validation_patch() -> None:
     setattr(duration_occupancy, _DURATION_OCCUPANCY_DECAY_PATCHED_FLAG, True)
 
 
+def _apply_duration_occupancy_mode_parameter_validation_patch() -> None:
+    from . import duration_occupancy
+
+    if getattr(duration_occupancy, _DURATION_OCCUPANCY_MODE_PATCHED_FLAG, False):
+        return
+
+    original_mode_matrices = duration_occupancy._mode_transition_matrices
+    original_resolver = duration_occupancy._resolve_mode_transitions
+
+    @wraps(original_mode_matrices)
+    def mode_transition_matrices(ss, n_modes, mode_stickiness, imm_switch_tau_s, durations):
+        _validate_unit_interval_parameter("imm_mode_stickiness", mode_stickiness)
+        _validate_finite_nonnegative_parameter("imm_switch_tau_s", imm_switch_tau_s)
+        return original_mode_matrices(ss, n_modes, mode_stickiness, imm_switch_tau_s, durations)
+
+    @wraps(original_resolver)
+    def resolve_mode_transitions(ss, n_modes, mode_stickiness, mode_transitions, n_transitions):
+        if mode_transitions is None:
+            _validate_unit_interval_parameter("imm_mode_stickiness", mode_stickiness)
+        return original_resolver(ss, n_modes, mode_stickiness, mode_transitions, n_transitions)
+
+    duration_occupancy._mode_transition_matrices = mode_transition_matrices
+    duration_occupancy._resolve_mode_transitions = resolve_mode_transitions
+    setattr(duration_occupancy, _DURATION_OCCUPANCY_MODE_PATCHED_FLAG, True)
+
+
 def _apply_sparse_momentum_velocity_decay_validation_patch() -> None:
     from . import state_space_sparse_momentum
 
@@ -264,6 +310,62 @@ def _apply_pyrecest_imm_velocity_decay_validation_patch() -> None:
     cls.__post_init__ = post_init
 
 
+def _apply_encoding_parameter_validation_patch() -> None:
+    from . import encoding
+
+    if getattr(encoding, _ENCODING_PARAMETER_PATCHED_FLAG, False):
+        return
+
+    original_validate_encoding_config = encoding._validate_encoding_config
+    original_time_bin_edges = encoding._time_bin_edges
+    original_poisson_log_emissions = encoding._poisson_log_emissions
+
+    @wraps(original_validate_encoding_config)
+    def validate_encoding_config(config) -> None:
+        for name in ("bin_size_cm", "min_occupancy_s", "rate_floor_hz"):
+            _reject_boolean_scalar(name, getattr(config, name))
+        for name in ("smoothing_sigma_bins", "min_speed_cm_s", "arena_padding_cm"):
+            _reject_boolean_scalar(name, getattr(config, name))
+        return original_validate_encoding_config(config)
+
+    @wraps(original_time_bin_edges)
+    def time_bin_edges(start: float, end: float, time_bin_s: float):
+        _reject_boolean_scalar("time_bin_s", time_bin_s)
+        return original_time_bin_edges(start, end, time_bin_s)
+
+    @wraps(original_poisson_log_emissions)
+    def poisson_log_emissions(
+        spike_counts,
+        rates_hz,
+        dt,
+        *,
+        spike_rate_scale=1.0,
+        likelihood_temperature=1.0,
+        cell_weights=None,
+        negative_binomial_overdispersion=0.0,
+    ):
+        _reject_boolean_numeric("dt", dt)
+        _reject_boolean_scalar("spike_rate_scale", spike_rate_scale)
+        _reject_boolean_scalar("likelihood_temperature", likelihood_temperature)
+        _reject_boolean_scalar("negative_binomial_overdispersion", negative_binomial_overdispersion)
+        if cell_weights is not None:
+            _reject_boolean_numeric("cell_weights", cell_weights)
+        return original_poisson_log_emissions(
+            spike_counts,
+            rates_hz,
+            dt,
+            spike_rate_scale=spike_rate_scale,
+            likelihood_temperature=likelihood_temperature,
+            cell_weights=cell_weights,
+            negative_binomial_overdispersion=negative_binomial_overdispersion,
+        )
+
+    encoding._validate_encoding_config = validate_encoding_config
+    encoding._time_bin_edges = time_bin_edges
+    encoding._poisson_log_emissions = poisson_log_emissions
+    setattr(encoding, _ENCODING_PARAMETER_PATCHED_FLAG, True)
+
+
 def apply_model_parameter_validation_patch() -> None:
     """Install strict numeric validation patches for replay-model parameters."""
 
@@ -299,11 +401,13 @@ def apply_model_parameter_validation_patch() -> None:
 
     _apply_state_space_velocity_decay_validation_patch()
     _apply_duration_occupancy_velocity_decay_validation_patch()
+    _apply_duration_occupancy_mode_parameter_validation_patch()
     _apply_sparse_momentum_velocity_decay_validation_patch()
     _apply_displacement_momentum_velocity_decay_validation_patch()
     _apply_trajectory_imm_parameter_validation_patch()
     _apply_pyrecest_imm_velocity_decay_validation_patch()
     _apply_replay_calibration_max_gain_validation_patch()
+    _apply_encoding_parameter_validation_patch()
 
 
 __all__ = ["apply_model_parameter_validation_patch"]

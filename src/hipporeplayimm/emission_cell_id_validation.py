@@ -17,10 +17,14 @@ from typing import Any
 import numpy as np
 
 _PATCHED_FLAG = "_emission_cell_id_validation_patch_applied"
+_POISSON_INPUT_PATCHED_FLAG = "_poisson_boolean_input_validation_patch_applied"
 
 
-def _contains_boolean_ids(values: np.ndarray) -> bool:
-    raw = np.asarray(values)
+def _contains_boolean_values(values: Any) -> bool:
+    try:
+        raw = np.asarray(values)
+    except (TypeError, ValueError):
+        raw = np.asarray(values, dtype=object)
     if raw.size == 0:
         return False
     if np.issubdtype(raw.dtype, np.bool_):
@@ -28,6 +32,17 @@ def _contains_boolean_ids(values: np.ndarray) -> bool:
     if raw.dtype == object:
         return any(isinstance(value, (bool, np.bool_)) for value in raw.reshape(-1))
     return False
+
+
+def _contains_boolean_ids(values: np.ndarray) -> bool:
+    return _contains_boolean_values(values)
+
+
+def _reject_boolean_poisson_inputs(spike_counts: Any, rates_hz: Any) -> None:
+    if _contains_boolean_values(spike_counts):
+        raise ValueError("spike_counts must contain numeric integer counts, not boolean values")
+    if _contains_boolean_values(rates_hz):
+        raise ValueError("rates_hz must contain numeric rates, not boolean values")
 
 
 def _coerce_integral_ids(values: Any, name: str) -> np.ndarray:
@@ -71,6 +86,25 @@ def _cell_id_row_indices(cell_ids: np.ndarray, spike_cell_ids: np.ndarray) -> np
     )
 
 
+def _apply_poisson_input_validation_patch(encoding_module: Any, kd_module: Any) -> None:
+    if not getattr(encoding_module, _POISSON_INPUT_PATCHED_FLAG, False):
+        original_validate_poisson_inputs = encoding_module._validate_poisson_inputs
+
+        @wraps(original_validate_poisson_inputs)
+        def validate_poisson_inputs(spike_counts, rates_hz):
+            _reject_boolean_poisson_inputs(spike_counts, rates_hz)
+            return original_validate_poisson_inputs(spike_counts, rates_hz)
+
+        setattr(validate_poisson_inputs, _POISSON_INPUT_PATCHED_FLAG, True)
+        encoding_module._validate_poisson_inputs = validate_poisson_inputs
+        setattr(encoding_module, _POISSON_INPUT_PATCHED_FLAG, True)
+
+    # kd_reference imports the validator by value, so keep its alias in sync with
+    # the patched encoding validator.
+    kd_module._validate_poisson_inputs = encoding_module._validate_poisson_inputs
+    setattr(kd_module, _POISSON_INPUT_PATCHED_FLAG, True)
+
+
 def apply_emission_cell_id_validation_patch() -> None:
     """Install integral-ID validation for emission row lookups."""
 
@@ -79,6 +113,7 @@ def apply_emission_cell_id_validation_patch() -> None:
     from . import log_emission_n_spikes_validation as n_spikes_validation
     from . import result_improvement_extensions as extensions_module
 
+    _apply_poisson_input_validation_patch(encoding_module, kd_module)
     n_spikes_validation.apply_log_emission_n_spikes_validation_patch()
 
     if not getattr(encoding_module, _PATCHED_FLAG, False):

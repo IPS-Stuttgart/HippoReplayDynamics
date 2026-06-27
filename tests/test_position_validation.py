@@ -3,7 +3,11 @@ import pytest
 
 from hipporeplayimm.data import ReplaySession
 from hipporeplayimm.encoding import EncodingConfig
-from hipporeplayimm.position_decoding_config_validation import _validated_position_decoding_config, _validated_train_frame_mask
+from hipporeplayimm.position_decoding_config_validation import (
+    _validated_position_decoding_config,
+    _validated_train_frame_mask,
+    apply_position_decoding_config_validation_patch,
+)
 from hipporeplayimm.position_validation import (
     PositionDecodingConfig,
     _spike_counts_for_window,
@@ -56,6 +60,33 @@ def test_position_decoding_config_validation_normalizes_accepted_values():
     assert normalized.min_spikes_per_window == 0
 
 
+def test_position_decoding_config_patch_refreshes_stale_flag(monkeypatch):
+    import hipporeplayimm.position_validation as validation
+
+    def unvalidated_position_decoder(session, config=None):
+        return "unvalidated"
+
+    def unvalidated_mask_encoder(session, train_frame_mask, config=None):
+        return "unvalidated"
+
+    monkeypatch.setattr(validation, "_position_decoding_config_validation_patch_applied", True, raising=False)
+    monkeypatch.setattr(validation, "validate_session_position_decoding", unvalidated_position_decoder)
+    monkeypatch.setattr(validation, "fit_place_field_encoding_for_position_mask", unvalidated_mask_encoder)
+
+    apply_position_decoding_config_validation_patch()
+
+    with pytest.raises(ValueError, match="n_folds"):
+        validation.validate_session_position_decoding(object(), PositionDecodingConfig(n_folds=0))
+    session = type(
+        "DummySession",
+        (),
+        {"position": np.column_stack([np.arange(3.0), np.arange(3.0), np.zeros(3), np.zeros(3)])},
+    )()
+    with pytest.raises(ValueError, match="train_frame_mask"):
+        validation.fit_place_field_encoding_for_position_mask(session, np.array([1.0, 0.5, 0.0]))
+
+
+
 def test_position_train_frame_mask_validation_accepts_bool_and_binary_numeric_values():
     expected = np.array([True, False, True], dtype=bool)
 
@@ -77,6 +108,7 @@ def test_position_train_frame_mask_validation_accepts_bool_and_binary_numeric_va
 def test_position_train_frame_mask_validation_rejects_non_boolean_values(bad_mask):
     with pytest.raises(ValueError, match="train_frame_mask"):
         _validated_train_frame_mask(bad_mask, 3)
+
 
 
 def test_position_mask_encoding_falls_back_to_all_spikes_without_excitatory_labels(tmp_path):
@@ -129,6 +161,7 @@ def test_position_mask_encoding_falls_back_to_all_spikes_without_excitatory_labe
         _spike_counts_for_window(session, encoding, 1.0, 2.0),
         np.array([1], dtype=int),
     )
+
 
 
 def test_position_mask_encoding_rejects_fractional_train_mask(tmp_path):
@@ -203,6 +236,7 @@ def test_position_mask_encoding_rejects_invalid_encoding_config(tmp_path, config
         fit_place_field_encoding_for_position_mask(session, np.ones(times.shape, dtype=bool), config)
 
 
+
 def test_validate_session_position_decoding_returns_finite_cv_metrics(tmp_path):
     times = np.linspace(0.0, 20.0, 1001)
     x = np.linspace(0.0, 100.0, times.size)
@@ -250,6 +284,7 @@ def test_validate_session_position_decoding_returns_finite_cv_metrics(tmp_path):
     assert set(samples["observation_model"]) == {"sorted-spike-poisson"}
     assert set(samples["clusterless_mark_likelihood"]) == {"not_implemented"}
     assert summary.loc[0, "decode_windows"] == 9
+
 
 
 def test_position_decoding_config_defaults_use_validated_settings():

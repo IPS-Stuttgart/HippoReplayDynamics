@@ -26,6 +26,8 @@ def _candidate_log_masses(log_likelihood: np.ndarray, candidates: list[np.ndarra
     values = np.asarray(log_likelihood, dtype=float)
     if values.ndim != 2:
         raise ValueError("log_likelihood must be two-dimensional")
+    if np.any(np.isnan(values)) or np.any(values == np.inf):
+        raise ValueError("log_likelihood must not contain NaN or +inf")
     if len(candidates) != values.shape[0]:
         raise ValueError("candidate_indices must contain one array per emission time bin")
 

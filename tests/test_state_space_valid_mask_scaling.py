@@ -4,6 +4,7 @@ import pytest
 from hipporeplayimm.encoding import LogEmissionTensor
 from hipporeplayimm.models import _posterior_diagnostics
 from hipporeplayimm.state_space import StateSpaceDecoderConfig, StateSpaceReplayModel
+from hipporeplayimm.state_space_displacement_momentum import _shifted_gaussian_transition_matrix
 from hipporeplayimm.state_space_utils import _as_log_probs, _mean_entropy, _scaled_emissions
 
 
@@ -22,6 +23,19 @@ def test_scaled_emissions_uses_valid_mask_before_row_offset():
     np.testing.assert_allclose(scaled[:, 0], 0.0)
     np.testing.assert_allclose(scaled[0, 1:], [1.0, np.exp(-1.0)])
     np.testing.assert_allclose(scaled[1, 1:], [1.0, np.exp(-0.5)])
+
+
+def test_displacement_transition_rejects_nonbinary_valid_masks():
+    centers = np.array([[0.0, 0.0], [1.0, 0.0]], dtype=float)
+
+    with pytest.raises(ValueError, match="boolean or 0/1"):
+        _shifted_gaussian_transition_matrix(
+            centers,
+            displacement=np.zeros(2, dtype=float),
+            sigma_cm=1.0,
+            max_step_sigma=2.0,
+            valid_bin_mask=np.array([2, 0], dtype=int),
+        )
 
 
 def test_as_log_probs_rejects_zero_mass_rows():

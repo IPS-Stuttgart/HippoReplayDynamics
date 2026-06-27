@@ -2,6 +2,7 @@
 # ruff: noqa: E402
 
 from . import accuracy_model_probability_status_patch as _accuracy_model_probability_status_patch
+from . import accuracy_replay_gain_gamma_patch as _accuracy_replay_gain_gamma_patch
 from . import advanced_result_empty_threshold_patch as _advanced_result_empty_threshold_patch
 from . import advanced_result_quantile_array_patch as _advanced_result_quantile_array_patch
 from . import advanced_result_status_patch as _advanced_result_status_patch
@@ -258,6 +259,7 @@ def apply_runtime_patches() -> None:
     _simulation_best_row_flags.apply_simulation_best_row_flags_patch()
     _evidence_status_coercion.apply_evidence_status_coercion_patch()
     _accuracy_model_probability_status_patch.apply_model_probability_status_patch()
+    _accuracy_replay_gain_gamma_patch.apply_accuracy_replay_gain_gamma_patch()
     _advanced_result_status_patch.apply_advanced_result_status_patch()
     _advanced_result_empty_threshold_patch.apply_advanced_result_empty_threshold_patch()
     _advanced_result_threshold_validation.apply_advanced_result_threshold_validation_patch()

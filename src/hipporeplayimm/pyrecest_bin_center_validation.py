@@ -9,7 +9,7 @@ import numpy as np
 
 
 def apply_pyrecest_bin_center_validation_patch() -> None:
-    """Normalize PyRecEst grid inputs to ``(n_bins, position_dim)`` arrays."""
+    """Normalize PyRecEst grid inputs and reject bool-valued numeric parameters."""
 
     from . import pyrecest_models
 
@@ -18,12 +18,17 @@ def apply_pyrecest_bin_center_validation_patch() -> None:
 
     original_score = pyrecest_models.PyRecEstGoalParticleModel.score
     original_initial_replay_priors = pyrecest_models._initial_replay_priors
+    original_validate_probability = pyrecest_models._validate_probability
+    original_validate_positive_int = pyrecest_models._validate_positive_int
+    original_validate_positive_float = pyrecest_models._validate_positive_float
+    original_validate_nonnegative_float = pyrecest_models._validate_nonnegative_float
 
     @wraps(original_score)
     def score(self, emissions, bin_centers):
         centers = _as_2d_points(bin_centers, "bin_centers")
         if emissions.n_bins != centers.shape[0]:
             raise ValueError("emissions.n_bins must match bin_centers rows")
+        _validate_positive_int(self.n_particles, "n_particles", original_validate_positive_int)
         return original_score(self, emissions, centers)
 
     @wraps(original_initial_replay_priors)
@@ -69,11 +74,71 @@ def apply_pyrecest_bin_center_validation_patch() -> None:
             selected.append(int(np.argmax(min_dist2)))
         return points[np.asarray(selected, dtype=int)]
 
+    def _patched_validate_probability(probability, name):
+        _validate_probability(probability, name, original_validate_probability)
+
+    def _patched_validate_positive_int(value, name):
+        _validate_positive_int(value, name, original_validate_positive_int)
+
+    def _patched_validate_positive_float(value, name):
+        _validate_positive_float(value, name, original_validate_positive_float)
+
+    def _patched_validate_nonnegative_float(value, name):
+        _validate_nonnegative_float(value, name, original_validate_nonnegative_float)
+
     pyrecest_models.PyRecEstGoalParticleModel.score = score
     pyrecest_models._initial_replay_priors = _initial_replay_priors
     pyrecest_models._coerce_candidate_goals = _coerce_candidate_goals
     pyrecest_models._farthest_point_subset = _farthest_point_subset
+    pyrecest_models._validate_probability = _patched_validate_probability
+    pyrecest_models._validate_positive_int = _patched_validate_positive_int
+    pyrecest_models._validate_positive_float = _patched_validate_positive_float
+    pyrecest_models._validate_nonnegative_float = _patched_validate_nonnegative_float
     pyrecest_models._pyrecest_bin_center_validation_patch_applied = True
+
+
+def _is_bool_scalar(value: object) -> bool:
+    array = np.asarray(value)
+    return array.shape == () and np.issubdtype(array.dtype, np.bool_)
+
+
+def _validate_probability(value: object, name: str, original_validate) -> None:
+    if _is_bool_scalar(value):
+        raise ValueError(f"{name} must lie in [0, 1]")
+    try:
+        original_validate(value, name)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must lie in [0, 1]") from exc
+
+
+def _validate_positive_int(value: object, name: str, original_validate) -> None:
+    if _is_bool_scalar(value):
+        raise ValueError(f"{name} must be a positive integer")
+    value_array = np.asarray(value)
+    if value_array.shape != ():
+        raise ValueError(f"{name} must be a positive integer")
+    try:
+        original_validate(value, name)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must be a positive integer") from exc
+
+
+def _validate_positive_float(value: object, name: str, original_validate) -> None:
+    if _is_bool_scalar(value):
+        raise ValueError(f"{name} must be finite and positive")
+    try:
+        original_validate(value, name)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must be finite and positive") from exc
+
+
+def _validate_nonnegative_float(value: object, name: str, original_validate) -> None:
+    if _is_bool_scalar(value):
+        raise ValueError(f"{name} must be finite and nonnegative")
+    try:
+        original_validate(value, name)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must be finite and nonnegative") from exc
 
 
 def _as_2d_points(values: Any, name: str) -> np.ndarray:

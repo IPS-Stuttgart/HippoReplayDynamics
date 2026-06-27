@@ -5,7 +5,8 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-_MISSING_METADATA_STRINGS = {"", "nan", "na", "n/a", "none", "nu" "ll", "<na>"}
+_MISSING_METADATA_STRINGS = {"", "nan", "na", "n/a", "none", "null", "<na>"}
+_SCORE_METADATA_BOOL_PATCH_FLAG = "_score_metadata_bool_validation_patch_applied"
 _CLUSTERLESS_STRING_PATCH_FLAG = "_score_metadata_string_missing_patch_applied"
 
 
@@ -86,21 +87,37 @@ def _optional_float_from_columns(frame: pd.DataFrame, columns: tuple[str, ...], 
     return float(first)
 
 
+def _score_metadata_patch_current(score_metadata_module: object) -> bool:
+    return bool(
+        getattr(score_metadata_module, _SCORE_METADATA_BOOL_PATCH_FLAG, False)
+        and getattr(score_metadata_module, "_parse_bool", None) is _parse_strict_bool
+        and getattr(score_metadata_module, "_unique_string_from_columns", None) is _unique_string_from_columns
+    )
+
+
+def _clusterless_string_patch_current(clusterless_ground_truth_module: object) -> bool:
+    return bool(
+        getattr(clusterless_ground_truth_module, _CLUSTERLESS_STRING_PATCH_FLAG, False)
+        and getattr(clusterless_ground_truth_module, "_unique_string_from_columns", None) is _unique_string_from_columns
+        and getattr(clusterless_ground_truth_module, "_optional_float_from_columns", None) is _optional_float_from_columns
+    )
+
+
 def apply_score_metadata_bool_validation_patch() -> None:
     """Install strict parsing and string metadata handling."""
 
     from . import score_metadata as score_metadata_module
 
-    if not getattr(score_metadata_module, "_score_metadata_bool_validation_patch_applied", False):
+    if not _score_metadata_patch_current(score_metadata_module):
         score_metadata_module._parse_bool = _parse_strict_bool
         score_metadata_module._unique_string_from_columns = _unique_string_from_columns
-        score_metadata_module._score_metadata_bool_validation_patch_applied = True
+        setattr(score_metadata_module, _SCORE_METADATA_BOOL_PATCH_FLAG, True)
 
     try:
         from . import clusterless_ground_truth as clusterless_ground_truth_module
     except ImportError:
         return
-    if getattr(clusterless_ground_truth_module, _CLUSTERLESS_STRING_PATCH_FLAG, False):
+    if _clusterless_string_patch_current(clusterless_ground_truth_module):
         return
     clusterless_ground_truth_module._unique_string_from_columns = _unique_string_from_columns
     clusterless_ground_truth_module._optional_float_from_columns = _optional_float_from_columns

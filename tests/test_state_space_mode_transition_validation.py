@@ -16,3 +16,17 @@ def test_mode_transition_matrix_single_mode_validates_stickiness() -> None:
         _mode_transition_matrix(1, 1.2)
 
     np.testing.assert_allclose(_mode_transition_matrix(1, 0.25), np.ones((1, 1)))
+
+
+@pytest.mark.parametrize(
+    "stickiness",
+    [
+        True,
+        False,
+        np.bool_(True),
+        np.array(False, dtype=object),
+    ],
+)
+def test_mode_transition_matrix_rejects_boolean_stickiness(stickiness: object) -> None:
+    with pytest.raises(TypeError, match="not boolean"):
+        _mode_transition_matrix(3, stickiness)

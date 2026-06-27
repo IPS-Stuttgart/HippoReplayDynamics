@@ -9,6 +9,7 @@ import numpy as np
 _PATCHED_FLAG = "_model_parameter_validation_patch_applied"
 _REPLAY_CALIBRATION_PATCHED_FLAG = "_replay_calibration_max_gain_validation_patch_applied"
 _STATE_SPACE_DECAY_HELPERS_PATCHED_FLAG = "_state_space_velocity_decay_validation_patch_applied"
+_STATE_SPACE_MODE_TRANSITION_PATCHED_FLAG = "_state_space_mode_transition_validation_patch_applied"
 _DURATION_OCCUPANCY_DECAY_PATCHED_FLAG = "_duration_occupancy_velocity_decay_validation_patch_applied"
 _DURATION_OCCUPANCY_MODE_PATCHED_FLAG = "_duration_occupancy_mode_parameter_validation_patch_applied"
 _SPARSE_MOMENTUM_DECAY_PATCHED_FLAG = "_sparse_momentum_velocity_decay_validation_patch_applied"
@@ -135,6 +136,30 @@ def _apply_replay_calibration_max_gain_validation_patch() -> None:
     setattr(build_sorted_emissions_with_replay_calibration, _REPLAY_CALIBRATION_PATCHED_FLAG, True)
     setattr(build_sorted_emissions_with_replay_calibration, "__hipporeplayimm_original__", current)
     extensions.build_sorted_emissions_with_replay_calibration = build_sorted_emissions_with_replay_calibration
+
+
+def _apply_state_space_mode_transition_validation_patch() -> None:
+    import sys
+
+    from . import state_space_utils
+
+    current = state_space_utils._mode_transition_matrix
+    if getattr(current, _STATE_SPACE_MODE_TRANSITION_PATCHED_FLAG, False):
+        return
+
+    @wraps(current)
+    def mode_transition_matrix(n_modes, stickiness):
+        _validate_unit_interval_parameter("mode_stickiness", stickiness)
+        return current(n_modes, stickiness)
+
+    setattr(mode_transition_matrix, _STATE_SPACE_MODE_TRANSITION_PATCHED_FLAG, True)
+    setattr(mode_transition_matrix, "__hipporeplayimm_original__", current)
+    state_space_utils._mode_transition_matrix = mode_transition_matrix
+    for module in list(sys.modules.values()):
+        module_name = getattr(module, "__name__", "")
+        if module_name.startswith("hipporeplayimm") and getattr(module, "_mode_transition_matrix", None) is current:
+            module._mode_transition_matrix = mode_transition_matrix
+    setattr(state_space_utils, _STATE_SPACE_MODE_TRANSITION_PATCHED_FLAG, True)
 
 
 def _apply_state_space_velocity_decay_validation_patch() -> None:
@@ -399,6 +424,7 @@ def apply_model_parameter_validation_patch() -> None:
         models._validate_probability_parameter = validate_probability_parameter
         setattr(models, _PATCHED_FLAG, True)
 
+    _apply_state_space_mode_transition_validation_patch()
     _apply_state_space_velocity_decay_validation_patch()
     _apply_duration_occupancy_velocity_decay_validation_patch()
     _apply_duration_occupancy_mode_parameter_validation_patch()

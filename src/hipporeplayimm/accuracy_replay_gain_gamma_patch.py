@@ -1,4 +1,4 @@
-"""Patch replay-gain cell mapping and Gamma-Poisson emission validation."""
+"""Patch replay-gain cell mapping, Gamma-Poisson validation, and continuous-time cell IDs."""
 
 from __future__ import annotations
 
@@ -165,8 +165,28 @@ def _gamma_poisson_predictive_log_emissions_impl(
     return out
 
 
+def _validate_continuous_time_spike_cell_ids(accuracy_module, session, encoding, ripple) -> None:
+    cell_ids = _coerce_integral_ids(encoding.cell_ids, "encoding.cell_ids")
+    if cell_ids.shape != (encoding.n_cells,):
+        raise ValueError("encoding.cell_ids must contain one ID per encoding row")
+    if np.unique(cell_ids).shape[0] != cell_ids.shape[0]:
+        raise ValueError("encoding.cell_ids must be unique")
+
+    spikes = np.asarray(session.spikes)
+    if spikes.size == 0:
+        return
+    if spikes.ndim != 2 or spikes.shape[1] < 2:
+        raise ValueError("spikes must be two-dimensional with at least time and cell-id columns")
+
+    ripple_event = accuracy_module._coerce_ripple_event(session, ripple)
+    spike_times = np.asarray(spikes[:, 0], dtype=float)
+    in_window = (spike_times >= float(ripple_event.start)) & (spike_times < float(ripple_event.end))
+    if np.any(in_window):
+        _coerce_integral_ids(spikes[in_window, 1], "spike cell IDs")
+
+
 def apply_accuracy_replay_gain_gamma_patch() -> None:
-    """Install robust replay-gain row mapping and Gamma-Poisson input guards."""
+    """Install robust replay-gain row mapping, Gamma-Poisson guards, and continuous-time ID validation."""
 
     from . import accuracy_upgrades as accuracy_module
 
@@ -175,6 +195,7 @@ def apply_accuracy_replay_gain_gamma_patch() -> None:
 
     original_estimate_replay_cell_gains = accuracy_module.estimate_replay_cell_gains
     original_gamma_poisson_predictive_log_emissions = accuracy_module.gamma_poisson_predictive_log_emissions
+    original_build_continuous_time_emissions = accuracy_module.build_continuous_time_emissions
 
     @wraps(original_estimate_replay_cell_gains)
     def estimate_replay_cell_gains(session, encoding, ripple_indices, config=None):
@@ -197,8 +218,19 @@ def apply_accuracy_replay_gain_gamma_patch() -> None:
             spike_rate_scale=spike_rate_scale,
         )
 
+    @wraps(original_build_continuous_time_emissions)
+    def build_continuous_time_emissions(session, encoding, ripple, config=None):
+        _validate_continuous_time_spike_cell_ids(
+            accuracy_module,
+            session,
+            encoding,
+            ripple,
+        )
+        return original_build_continuous_time_emissions(session, encoding, ripple, config)
+
     accuracy_module.estimate_replay_cell_gains = estimate_replay_cell_gains
     accuracy_module.gamma_poisson_predictive_log_emissions = gamma_poisson_predictive_log_emissions
+    accuracy_module.build_continuous_time_emissions = build_continuous_time_emissions
     setattr(accuracy_module, _PATCHED_FLAG, True)
 
 

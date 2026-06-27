@@ -153,14 +153,18 @@ def apply_bidirectional_infinite_evidence_patch() -> None:
             weights,
         )
         trajectory = None
-        if return_trajectory is not False:
+        if (
+            return_trajectory is not False
+            and forward.trajectory_log_posterior is not None
+            and reverse.trajectory_log_posterior is not None
+        ):
             trajectory = direct._mixture_log_posterior(
                 forward.trajectory_log_posterior,
                 reverse.trajectory_log_posterior,
                 weights,
             )
         if trajectory is not None:
-            terminal = trajectory[-1].copy()
+            terminal = np.asarray(trajectory[-1], dtype=float).copy()
         diagnostics = {
             "time_direction": "bidirectional-mixture",
             "base_model": str(forward.model_name),

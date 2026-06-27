@@ -16,6 +16,8 @@ from typing import Any
 import numpy as np
 
 _PATCHED_FLAG = "_position_decoding_config_validation_patch_applied"
+_VALIDATE_WRAPPER_FLAG = "_position_decoding_config_validation_validate_wrapper"
+_MASK_WRAPPER_FLAG = "_position_decoding_config_validation_mask_wrapper"
 
 
 def apply_position_decoding_config_validation_patch() -> None:
@@ -23,26 +25,37 @@ def apply_position_decoding_config_validation_patch() -> None:
 
     from . import position_validation as validation
 
-    if getattr(validation, _PATCHED_FLAG, False):
+    current_validate = validation.validate_session_position_decoding
+    current_mask_encoder = validation.fit_place_field_encoding_for_position_mask
+    validate_is_current = bool(getattr(current_validate, _VALIDATE_WRAPPER_FLAG, False))
+    mask_is_current = bool(getattr(current_mask_encoder, _MASK_WRAPPER_FLAG, False))
+    if getattr(validation, _PATCHED_FLAG, False) and validate_is_current and mask_is_current:
         return
 
-    original_validate_session_position_decoding = validation.validate_session_position_decoding
-    original_fit_place_field_encoding_for_position_mask = validation.fit_place_field_encoding_for_position_mask
+    if not validate_is_current:
+        original_validate_session_position_decoding = current_validate
 
-    @wraps(original_validate_session_position_decoding)
-    def validate_session_position_decoding_with_config_validation(session: Any, config: Any = None) -> Any:
-        config = validation.PositionDecodingConfig() if config is None else config
-        config = _validated_position_decoding_config(config)
-        return original_validate_session_position_decoding(session, config)
+        @wraps(original_validate_session_position_decoding)
+        def validate_session_position_decoding_with_config_validation(session: Any, config: Any = None) -> Any:
+            config = validation.PositionDecodingConfig() if config is None else config
+            config = _validated_position_decoding_config(config)
+            return original_validate_session_position_decoding(session, config)
 
-    @wraps(original_fit_place_field_encoding_for_position_mask)
-    def fit_place_field_encoding_for_position_mask_with_mask_validation(session: Any, train_frame_mask: Any, config: Any = None) -> Any:
-        position = validation._clean_position(session.position)
-        mask = _validated_train_frame_mask(train_frame_mask, position.shape[0])
-        return original_fit_place_field_encoding_for_position_mask(session, mask, config)
+        setattr(validate_session_position_decoding_with_config_validation, _VALIDATE_WRAPPER_FLAG, True)
+        validation.validate_session_position_decoding = validate_session_position_decoding_with_config_validation
 
-    validation.validate_session_position_decoding = validate_session_position_decoding_with_config_validation
-    validation.fit_place_field_encoding_for_position_mask = fit_place_field_encoding_for_position_mask_with_mask_validation
+    if not mask_is_current:
+        original_fit_place_field_encoding_for_position_mask = current_mask_encoder
+
+        @wraps(original_fit_place_field_encoding_for_position_mask)
+        def fit_place_field_encoding_for_position_mask_with_mask_validation(session: Any, train_frame_mask: Any, config: Any = None) -> Any:
+            position = validation._clean_position(session.position)
+            mask = _validated_train_frame_mask(train_frame_mask, position.shape[0])
+            return original_fit_place_field_encoding_for_position_mask(session, mask, config)
+
+        setattr(fit_place_field_encoding_for_position_mask_with_mask_validation, _MASK_WRAPPER_FLAG, True)
+        validation.fit_place_field_encoding_for_position_mask = fit_place_field_encoding_for_position_mask_with_mask_validation
+
     setattr(validation, _PATCHED_FLAG, True)
 
 

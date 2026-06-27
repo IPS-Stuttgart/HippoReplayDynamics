@@ -17,30 +17,38 @@ def apply_ground_truth_cell_id_metadata_patch() -> None:
 
     from . import ground_truth as gt
 
-    if getattr(gt, _PATCHED_FLAG, False):
+    if _ground_truth_cell_id_metadata_patch_current(gt):
         return
-
-    def parse_cell_ids(value: object) -> np.ndarray | None:
-        if value is None:
-            return None
-        if isinstance(value, np.ndarray):
-            return _integer_array_from_values(value)
-        if isinstance(value, (list, tuple, set)):
-            return _integer_array_from_values(list(value))
-        if pd.isna(value):
-            return None
-        text = str(value).strip()
-        if text.lower() in _MISSING_TEXT_VALUES:
-            return None
-        text = text.strip("[]()").replace(",", " ")
-        if text.strip().lower() in _MISSING_TEXT_VALUES:
-            return None
-        return _integer_array_from_values(text.split())
-
-    parse_cell_ids.__name__ = gt._parse_cell_ids.__name__
-    parse_cell_ids.__doc__ = gt._parse_cell_ids.__doc__
-    gt._parse_cell_ids = parse_cell_ids
+    gt._parse_cell_ids = _parse_cell_ids_strict
     setattr(gt, _PATCHED_FLAG, True)
+
+
+def _ground_truth_cell_id_metadata_patch_current(gt: object) -> bool:
+    return bool(
+        getattr(gt, _PATCHED_FLAG, False)
+        and getattr(gt, "_parse_cell_ids", None) is _parse_cell_ids_strict
+    )
+
+
+def _parse_cell_ids_strict(value: object) -> np.ndarray | None:
+    if value is None:
+        return None
+    if isinstance(value, np.ndarray):
+        return _integer_array_from_values(value)
+    if isinstance(value, (list, tuple, set)):
+        return _integer_array_from_values(list(value))
+    if pd.isna(value):
+        return None
+    text = str(value).strip()
+    if text.lower() in _MISSING_TEXT_VALUES:
+        return None
+    text = text.strip("[]()").replace(",", " ")
+    if text.strip().lower() in _MISSING_TEXT_VALUES:
+        return None
+    return _integer_array_from_values(text.split())
+
+
+_parse_cell_ids_strict.__name__ = "_parse_cell_ids"
 
 
 def _integer_array_from_values(values: Any) -> np.ndarray:

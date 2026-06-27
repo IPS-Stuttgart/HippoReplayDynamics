@@ -116,6 +116,36 @@ def _status_success_series(frame: pd.DataFrame) -> pd.Series:
     return frame["status"].map(_status_is_success_or_missing).astype(bool)
 
 
+def _evidence_support_labels_from_value(value: object) -> list[str]:
+    """Return scalar support labels from a diagnostic cell without array truth tests."""
+
+    if _is_missing_evidence_support(value):
+        return []
+    if isinstance(value, (str, bytes)):
+        text = str(value).strip()
+        return [text] if text else []
+    try:
+        values = np.asarray(value, dtype=object)
+    except (TypeError, ValueError):
+        text = str(value).strip()
+        return [text] if text else []
+    if values.ndim == 0:
+        scalar = values.item()
+        if _is_missing_evidence_support(scalar):
+            return []
+        text = str(scalar).strip()
+        return [text] if text else []
+
+    labels: list[str] = []
+    for item in values.reshape(-1):
+        if _is_missing_evidence_support(item):
+            continue
+        text = str(item).strip()
+        if text:
+            labels.append(text)
+    return list(dict.fromkeys(labels))
+
+
 def evidence_support_from_row(row: pd.Series) -> str:
     """Infer whether a score is exact evidence, a lower bound, or non-comparable."""
 
@@ -125,12 +155,7 @@ def evidence_support_from_row(row: pd.Series) -> str:
 
     labels: list[str] = []
     for column in EVIDENCE_SUPPORT_DIAGNOSTIC_COLUMNS:
-        value = row.get(column)
-        if pd.isna(value):
-            continue
-        text = str(value).strip()
-        if text:
-            labels.append(text)
+        labels.extend(_evidence_support_labels_from_value(row.get(column)))
 
     for non_exact_support in (
         TRUNCATED_EVIDENCE_SUPPORT,

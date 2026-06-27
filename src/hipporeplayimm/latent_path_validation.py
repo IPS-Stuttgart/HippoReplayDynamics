@@ -109,10 +109,14 @@ def _positive_integer_or_uncapped_value(name: str, value: Any) -> int | None:
 
 def _integer_valued_scalar(name: str, value: Any) -> int:
     if isinstance(value, (bool, np.bool_)):
-        raise ValueError(f"{name} must be positive integer-valued")
+        raise TypeError(f"{name} must be positive integer-valued")
     raw = np.asarray(value)
-    if raw.ndim != 0 or np.issubdtype(raw.dtype, np.bool_):
+    if raw.ndim != 0:
         raise ValueError(f"{name} must be positive integer-valued")
+    if np.issubdtype(raw.dtype, np.bool_) or (
+        raw.dtype == object and isinstance(raw.item(), (bool, np.bool_))
+    ):
+        raise TypeError(f"{name} must be positive integer-valued")
     try:
         numeric = float(raw)
     except (TypeError, ValueError, OverflowError) as exc:

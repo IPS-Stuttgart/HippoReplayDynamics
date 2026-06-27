@@ -150,6 +150,26 @@ def test_recovery_summary_parses_string_true_path_support_flags():
     assert row["expected_true_path_fully_supported_events"] == 1
 
 
+def test_runtime_patches_refresh_stale_recovery_diagnostic_bool_helpers(monkeypatch):
+    import hipporeplayimm
+    import hipporeplayimm.recovery_diagnostics as diagnostics
+    import hipporeplayimm.recovery_diagnostics_bool_patch as bool_patch
+
+    def stale_row_bool(row: pd.Series, column: str, default: bool) -> bool:
+        if column not in row.index or pd.isna(row[column]):
+            return default
+        return bool(row[column])
+
+    monkeypatch.setattr(diagnostics, "_row_bool", stale_row_bool)
+    setattr(diagnostics, bool_patch._PATCHED_FLAG, True)
+
+    assert diagnostics._row_bool(pd.Series({"flag": "False"}), "flag", False)
+
+    hipporeplayimm.apply_runtime_patches()
+
+    assert not diagnostics._row_bool(pd.Series({"flag": "False"}), "flag", False)
+
+
 def test_recovery_diagnostics_write_outputs(tmp_path):
     scores = pd.DataFrame(
         [

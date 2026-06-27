@@ -39,6 +39,18 @@ def _validated_thresholds(thresholds: Sequence[float]) -> tuple[float, ...]:
     )
 
 
+def _normalize_group_cols(group_cols: Sequence[str] | str | None, scores: pd.DataFrame) -> tuple[str, ...]:
+    """Return grouping columns without expanding a single column name into characters."""
+
+    if group_cols is None:
+        from . import advanced_result_diagnostics as diagnostics
+
+        return tuple(diagnostics.infer_paired_model_group_cols(scores))
+    if isinstance(group_cols, str):
+        return (group_cols,)
+    return tuple(group_cols)
+
+
 def _ensure_true_model_summary_columns(summary: pd.DataFrame) -> pd.DataFrame:
     """Keep threshold-selection columns present even when no paired events exist."""
 
@@ -87,19 +99,20 @@ def apply_advanced_result_threshold_validation_patch() -> None:
         positive_model: str,
         reference_model: str,
         margin_threshold: float = 0.0,
-        group_cols: Sequence[str] = ("session", "event_index"),
+        group_cols: Sequence[str] | str = ("session", "event_index"),
         evidence_col: str = "log_evidence",
         model_col: str = "model",
         true_model_col: str | None = None,
         positive_true_label: str | None = None,
     ) -> pd.DataFrame:
         threshold = _validated_threshold(margin_threshold)
+        paired_group_cols = _normalize_group_cols(group_cols, scores)
         out = base_decisions(
             scores,
             positive_model=positive_model,
             reference_model=reference_model,
             margin_threshold=threshold,
-            group_cols=group_cols,
+            group_cols=paired_group_cols,
             evidence_col=evidence_col,
             model_col=model_col,
             true_model_col=true_model_col,
@@ -130,14 +143,14 @@ def apply_advanced_result_threshold_validation_patch() -> None:
         positive_model: str,
         reference_model: str,
         thresholds: Sequence[float],
-        group_cols: Sequence[str] | None = None,
+        group_cols: Sequence[str] | str | None = None,
         evidence_col: str = "log_evidence",
         model_col: str = "model",
         true_model_col: str | None = None,
         positive_true_label: str | None = None,
     ) -> pd.DataFrame:
         validated_thresholds = _validated_thresholds(thresholds)
-        paired_group_cols = tuple(group_cols) if group_cols is not None else diagnostics.infer_paired_model_group_cols(scores)
+        paired_group_cols = _normalize_group_cols(group_cols, scores)
         rows: list[pd.DataFrame] = []
         for threshold in validated_thresholds:
             decisions = paired_model_margin_decisions(

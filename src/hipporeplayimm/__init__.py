@@ -151,7 +151,10 @@ from .models import (
     StationaryModel,
     score_model,
 )
-from .pyrecest_models import PyRecEstGoalParticleModel
+from .pyrecest_models import (
+    PyRecEstGoalParticleIMMModel,
+    PyRecEstGoalParticleModel,
+)
 from .simulation_recovery_trajectory_imm import (
     apply_trajectory_imm_recovery_patch as _apply_trajectory_imm_recovery_patch,
 )
@@ -315,6 +318,7 @@ __all__ = [
     'EventScore',
     'GoalStateSpaceReplayModel',
     'GroundTruthConfig',
+    'PyRecEstGoalParticleIMMModel',
     'PyRecEstGoalParticleModel',
     'PyRecEstSweepConfig',
     'PyRecEstSweepResult',

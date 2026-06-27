@@ -12,6 +12,14 @@ def test_trajectory_quality_metrics_rejects_empty_position_axis():
         )
 
 
+def test_trajectory_quality_metrics_rejects_empty_coordinate_axis():
+    with pytest.raises(ValueError, match="position_dim"):
+        trajectory_quality_metrics(
+            np.log(np.array([[1.0], [1.0]])),
+            np.empty((1, 0)),
+        )
+
+
 def test_trajectory_quality_metrics_rejects_empty_time_axis():
     with pytest.raises(ValueError, match="at least one time bin and one position bin"):
         trajectory_quality_metrics(

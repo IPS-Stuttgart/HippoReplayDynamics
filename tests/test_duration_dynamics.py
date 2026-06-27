@@ -1,6 +1,9 @@
+from types import SimpleNamespace
+
 import numpy as np
 
 from hipporeplayimm.duration_dynamics import (
+    DurationFloat,
     attach_duration_metadata,
     transition_durations_s,
 )
@@ -30,6 +33,12 @@ def test_transition_durations_s_prefers_explicit_metadata():
 
     assert type(emissions.dt) is float
     np.testing.assert_allclose(emissions.transition_durations, np.array([0.01, 0.04]))
+
+
+def test_duration_float_without_transition_metadata_uses_scalar_dt():
+    emissions = SimpleNamespace(n_time=3, dt=DurationFloat(0.02), times=np.array([]))
+
+    np.testing.assert_allclose(transition_durations_s(emissions), np.array([0.02, 0.02]))
 
 
 def _duration_test_emissions() -> LogEmissionTensor:

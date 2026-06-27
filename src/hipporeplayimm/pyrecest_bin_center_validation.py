@@ -7,18 +7,65 @@ from typing import Any
 
 import numpy as np
 
+_PATCHED_FLAG = "_pyrecest_bin_center_validation_patch_applied"
+_ORIGINALS_ATTR = "_pyrecest_bin_center_validation_originals"
+_WRAPPER_MARKER = "_pyrecest_bin_center_validation_wrapper"
+
+
+def _mark_bin_center_guard(wrapper):
+    setattr(wrapper, _WRAPPER_MARKER, True)
+    return wrapper
+
+
+def _is_current_bin_center_guard(value: object) -> bool:
+    return bool(getattr(value, _WRAPPER_MARKER, False))
+
+
+def _wrappers_are_current(pyrecest_models) -> bool:
+    try:
+        return (
+            _is_current_bin_center_guard(pyrecest_models.PyRecEstGoalParticleModel.score)
+            and _is_current_bin_center_guard(pyrecest_models._initial_replay_priors)
+            and _is_current_bin_center_guard(pyrecest_models._coerce_candidate_goals)
+            and _is_current_bin_center_guard(pyrecest_models._farthest_point_subset)
+        )
+    except AttributeError:
+        return False
+
+
+def _originals(pyrecest_models) -> dict[str, object]:
+    originals = getattr(pyrecest_models, _ORIGINALS_ATTR, None)
+    if originals is None:
+        originals = {
+            "score": pyrecest_models.PyRecEstGoalParticleModel.score,
+            "initial_replay_priors": pyrecest_models._initial_replay_priors,
+            "coerce_candidate_goals": pyrecest_models._coerce_candidate_goals,
+            "farthest_point_subset": pyrecest_models._farthest_point_subset,
+        }
+        setattr(pyrecest_models, _ORIGINALS_ATTR, originals)
+    return originals
+
 
 def apply_pyrecest_bin_center_validation_patch() -> None:
-    """Normalize PyRecEst grid inputs to ``(n_bins, position_dim)`` arrays."""
+    """Normalize PyRecEst grid inputs to ``(n_bins, position_dim)`` arrays.
+
+    The module-level applied flag is not enough by itself: tests or downstream
+    code can replace a guarded helper while leaving the flag set. Re-checking
+    wrapper markers lets ``apply_runtime_patches()`` refresh stale helpers.
+    """
 
     from . import pyrecest_models
 
-    if getattr(pyrecest_models, "_pyrecest_bin_center_validation_patch_applied", False):
+    originals = _originals(pyrecest_models)
+    if getattr(pyrecest_models, _PATCHED_FLAG, False) and _wrappers_are_current(pyrecest_models):
         return
 
-    original_score = pyrecest_models.PyRecEstGoalParticleModel.score
-    original_initial_replay_priors = pyrecest_models._initial_replay_priors
+    original_score = originals["score"]
+    original_initial_replay_priors = originals["initial_replay_priors"]
+    original_coerce_candidate_goals = originals["coerce_candidate_goals"]
+    original_farthest_point_subset = originals["farthest_point_subset"]
 
+    @_mark_bin_center_guard
     @wraps(original_score)
     def score(self, emissions, bin_centers):
         centers = _as_2d_points(bin_centers, "bin_centers")
@@ -26,6 +73,7 @@ def apply_pyrecest_bin_center_validation_patch() -> None:
             raise ValueError("emissions.n_bins must match bin_centers rows")
         return original_score(self, emissions, centers)
 
+    @_mark_bin_center_guard
     @wraps(original_initial_replay_priors)
     def _initial_replay_priors(bin_centers, initial_velocity_sigma_cm_s):
         return original_initial_replay_priors(
@@ -33,6 +81,8 @@ def apply_pyrecest_bin_center_validation_patch() -> None:
             initial_velocity_sigma_cm_s,
         )
 
+    @_mark_bin_center_guard
+    @wraps(original_coerce_candidate_goals)
     def _coerce_candidate_goals(candidate_goals, bin_centers):
         centers = _as_2d_points(bin_centers, "bin_centers")
         if candidate_goals is not None:
@@ -53,6 +103,8 @@ def apply_pyrecest_bin_center_validation_patch() -> None:
             return goals
         return pyrecest_models._farthest_point_subset(centers, max_points=32)
 
+    @_mark_bin_center_guard
+    @wraps(original_farthest_point_subset)
     def _farthest_point_subset(points: np.ndarray, max_points: int) -> np.ndarray:
         points = _as_2d_points(points, "bin_centers")
         max_points = int(max_points)
@@ -73,7 +125,7 @@ def apply_pyrecest_bin_center_validation_patch() -> None:
     pyrecest_models._initial_replay_priors = _initial_replay_priors
     pyrecest_models._coerce_candidate_goals = _coerce_candidate_goals
     pyrecest_models._farthest_point_subset = _farthest_point_subset
-    pyrecest_models._pyrecest_bin_center_validation_patch_applied = True
+    setattr(pyrecest_models, _PATCHED_FLAG, True)
 
 
 def _as_2d_points(values: Any, name: str) -> np.ndarray:

@@ -37,12 +37,15 @@ def _score_momentum_candidates(
         emissions.n_time - 1,
         sigma_cm,
         name="transition_sigmas_cm",
+        minimum=0.0,
+        include_minimum=False,
     )
     transition_velocity_decays = _transition_parameter_series(
         velocity_decays,
         emissions.n_time - 1,
         velocity_decay,
         name="velocity_decays",
+        minimum=0.0,
     )
     log_pair = _init_pair_log_alpha(
         emissions.log_likelihood,
@@ -100,18 +103,30 @@ def _transition_parameter_series(
     fallback: float,
     *,
     name: str,
+    minimum: float | None = None,
+    include_minimum: bool = True,
 ) -> np.ndarray:
     """Return one scalar transition parameter per adjacent time-bin pair."""
 
     if n_transitions <= 0:
         return np.empty(0, dtype=float)
     if values is None:
-        return np.full(n_transitions, float(fallback), dtype=float)
-    out = np.asarray(values, dtype=float)
-    if out.shape != (n_transitions,):
-        raise ValueError(f"{name} must contain one value per transition")
+        out = np.full(n_transitions, float(fallback), dtype=float)
+    else:
+        out = np.asarray(values, dtype=float)
+        if out.shape != (n_transitions,):
+            raise ValueError(f"{name} must contain one value per transition")
     if not np.all(np.isfinite(out)):
         raise ValueError(f"{name} must be finite")
+    if minimum is not None:
+        minimum_value = float(minimum)
+        if not np.isfinite(minimum_value):
+            raise ValueError("minimum must be finite")
+        if include_minimum:
+            if np.any(out < minimum_value):
+                raise ValueError(f"{name} values must be >= {minimum_value:g}")
+        elif np.any(out <= minimum_value):
+            raise ValueError(f"{name} values must be > {minimum_value:g}")
     return out
 
 

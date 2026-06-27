@@ -51,6 +51,7 @@ from . import model_averaged_endpoint_scoping as _model_averaged_endpoint_scopin
 from . import model_parameter_validation as _model_parameter_validation
 from . import observation_sweep_config_validation as _observation_sweep_config_validation
 from . import occupancy_candidate_support as _occupancy_candidate_support
+from . import olafsdottir_header_float_patch as _olafsdottir_header_float_patch
 from . import olafsdottir_zip_safety as _olafsdottir_zip_safety
 from . import position_decoding_config_validation as _position_decoding_config_validation
 from . import posterior_calibration_summary_patch as _posterior_calibration_summary_patch
@@ -114,6 +115,7 @@ _reverse_time_terminal_guard.apply_reverse_time_terminal_guard_patch()
 _wrapper_return_trajectory.apply_wrapper_return_trajectory_patch()
 _shuffle_spike_time_order.apply_shuffle_spike_time_order_patch()
 _well_label_shuffle_patch.apply_well_label_shuffle_patch()
+_olafsdottir_header_float_patch.apply_olafsdottir_header_float_patch()
 
 from .benchmarks import BenchmarkConfig, BenchmarkResult, run_open_field_benchmark
 from .clusterless import (
@@ -257,6 +259,7 @@ def apply_runtime_patches() -> None:
     _shuffle_spike_time_order.apply_shuffle_spike_time_order_patch()
     _well_label_shuffle_patch.apply_well_label_shuffle_patch()
     _axona_data_end_footer.apply_axona_data_end_footer_patch()
+    _olafsdottir_header_float_patch.apply_olafsdottir_header_float_patch()
     _olafsdottir_zip_safety.apply_olafsdottir_zip_safety_patch()
     _synchronize_duration_patched_emission_builders()
     _patch_simulation_recovery_module(_simulation_recovery)

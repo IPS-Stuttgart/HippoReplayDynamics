@@ -4,7 +4,7 @@ import numpy as np
 import pytest
 
 from hipporeplayimm.encoding import LogEmissionTensor
-from hipporeplayimm.pyrecest_models import PyRecEstGoalParticleModel, _coerce_candidate_goals
+from hipporeplayimm.pyrecest_models import PyRecEstGoalParticleIMMModel, PyRecEstGoalParticleModel, _coerce_candidate_goals
 
 
 def _single_bin_emissions(n_bins: int = 2) -> LogEmissionTensor:
@@ -44,3 +44,39 @@ def test_pyrecest_candidate_goals_reject_nonfinite_values() -> None:
             np.array([[0.0, np.nan]], dtype=float),
             bin_centers,
         )
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "match"),
+    [
+        ({"n_particles": True}, "n_particles must be a positive integer"),
+        ({"initial_velocity_sigma_cm_s": True}, "initial_velocity_sigma_cm_s must be finite and positive"),
+        ({"jump_probability": False}, r"jump_probability must lie in \[0, 1\]"),
+        ({"position_proposal_ess_threshold": np.bool_(True)}, r"position_proposal_ess_threshold must lie in \[0, 1\]"),
+    ],
+)
+def test_pyrecest_particle_model_rejects_boolean_numeric_parameters(kwargs: dict[str, object], match: str) -> None:
+    with pytest.raises(ValueError, match=match):
+        PyRecEstGoalParticleModel(**kwargs)
+
+
+def test_pyrecest_score_rejects_mutated_boolean_particle_count_before_optional_import() -> None:
+    emissions = _single_bin_emissions(n_bins=2)
+    model = PyRecEstGoalParticleModel()
+    model.n_particles = True  # type: ignore[assignment]
+
+    with pytest.raises(ValueError, match="n_particles must be a positive integer"):
+        model.score(emissions, np.zeros((2, 2), dtype=float))
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "match"),
+    [
+        ({"mode_stickiness": True}, r"mode_stickiness must lie in \[0, 1\]"),
+        ({"jump_fraction": False}, r"jump_fraction must lie in \[0, 1\]"),
+        ({"momentum_velocity_decay": True}, "momentum_velocity_decay must be finite and nonnegative"),
+    ],
+)
+def test_pyrecest_imm_model_rejects_boolean_numeric_parameters(kwargs: dict[str, object], match: str) -> None:
+    with pytest.raises(ValueError, match=match):
+        PyRecEstGoalParticleIMMModel(**kwargs)

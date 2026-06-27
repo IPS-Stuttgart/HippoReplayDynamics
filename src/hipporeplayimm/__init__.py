@@ -252,7 +252,7 @@ def apply_runtime_patches() -> None:
     _sparse_momentum_duration_validation.apply_sparse_momentum_duration_validation_patch()
     _sparse_momentum_single_bin_diagnostics.apply_sparse_momentum_single_bin_diagnostics_patch()
     _time_order_patch.apply_reverse_emission_time_patch()
-    _reverse_time_terminal_guard.apply_reverse_emission_time_patch()
+    _reverse_time_terminal_guard.apply_reverse_time_terminal_guard_patch()
     _wrapper_return_trajectory.apply_wrapper_return_trajectory_patch()
     _shuffle_spike_time_order.apply_shuffle_spike_time_order_patch()
     _well_label_shuffle_patch.apply_well_label_shuffle_patch()

@@ -52,6 +52,7 @@ from . import observation_sweep_config_validation as _observation_sweep_config_v
 from . import occupancy_candidate_support as _occupancy_candidate_support
 from . import olafsdottir_zip_safety as _olafsdottir_zip_safety
 from . import position_decoding_config_validation as _position_decoding_config_validation
+from . import posterior_calibration_summary_patch as _posterior_calibration_summary_patch
 from . import pyrecest_bin_center_validation as _pyrecest_bin_center_validation
 from . import pyrecest_numeric_metadata_guard as _pyrecest_numeric_metadata_guard
 from . import pyrecest_score_metadata as _pyrecest_score_metadata
@@ -265,6 +266,7 @@ def apply_runtime_patches() -> None:
     _advanced_result_threshold_validation.apply_advanced_result_threshold_validation_patch()
     _advanced_result_wrong_map_bootstrap_patch.apply_wrong_map_rat_bootstrap_patch()
     _advanced_result_quantile_array_patch.apply_advanced_result_quantile_array_patch()
+    _posterior_calibration_summary_patch.apply_posterior_calibration_summary_patch()
     _latent_path_validation.apply_latent_path_validation_patch()
     _simulation_recovery_runtime_limits.apply_simulation_recovery_runtime_limit_validation_patch()
     _simulation_recovery_count_validation.apply_simulation_recovery_count_validation_patch()

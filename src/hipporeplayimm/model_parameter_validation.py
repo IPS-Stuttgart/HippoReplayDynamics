@@ -14,6 +14,7 @@ _DURATION_OCCUPANCY_DECAY_PATCHED_FLAG = "_duration_occupancy_velocity_decay_val
 _DURATION_OCCUPANCY_MODE_PATCHED_FLAG = "_duration_occupancy_mode_parameter_validation_patch_applied"
 _SPARSE_MOMENTUM_DECAY_PATCHED_FLAG = "_sparse_momentum_velocity_decay_validation_patch_applied"
 _DISPLACEMENT_MOMENTUM_DECAY_PATCHED_FLAG = "_displacement_momentum_velocity_decay_validation_patch_applied"
+_DISPLACEMENT_IMM_MODE_PATCHED_FLAG = "_displacement_imm_mode_parameter_validation_patch_applied"
 _TRAJECTORY_IMM_PARAMETERS_PATCHED_FLAG = "_trajectory_imm_parameter_validation_patch_applied"
 _PYRECEST_IMM_DECAY_PATCHED_FLAG = "_pyrecest_imm_velocity_decay_validation_patch_applied"
 _ENCODING_PARAMETER_PATCHED_FLAG = "_encoding_parameter_validation_patch_applied"
@@ -268,6 +269,51 @@ def _apply_displacement_momentum_velocity_decay_validation_patch() -> None:
     setattr(state_space_displacement_momentum, _DISPLACEMENT_MOMENTUM_DECAY_PATCHED_FLAG, True)
 
 
+def _apply_displacement_imm_mode_parameter_validation_patch() -> None:
+    from . import state_space_displacement_imm
+
+    if getattr(state_space_displacement_imm, _DISPLACEMENT_IMM_MODE_PATCHED_FLAG, False):
+        return
+
+    original_score = state_space_displacement_imm._score_displacement_imm_exact
+    original_mode_matrices = state_space_displacement_imm._mode_transition_matrices
+
+    @wraps(original_score)
+    def score_displacement_imm_exact(
+        emissions,
+        bin_centers,
+        config,
+        transition_durations_s,
+        *,
+        valid_bin_mask=None,
+        return_trajectory: bool = True,
+    ):
+        _validate_unit_interval_parameter("imm_mode_stickiness", getattr(config, "imm_mode_stickiness", 0.95))
+        _validate_finite_nonnegative_parameter("imm_switch_tau_s", getattr(config, "imm_switch_tau_s", 0.0))
+        return original_score(
+            emissions,
+            bin_centers,
+            config,
+            transition_durations_s,
+            valid_bin_mask=valid_bin_mask,
+            return_trajectory=return_trajectory,
+        )
+
+    @wraps(original_mode_matrices)
+    def mode_transition_matrices(n_modes, mode_stickiness, imm_switch_tau_s, durations):
+        _validate_unit_interval_parameter("imm_mode_stickiness", mode_stickiness)
+        _validate_finite_nonnegative_parameter("imm_switch_tau_s", imm_switch_tau_s)
+        return original_mode_matrices(n_modes, mode_stickiness, imm_switch_tau_s, durations)
+
+    setattr(score_displacement_imm_exact, _DISPLACEMENT_IMM_MODE_PATCHED_FLAG, True)
+    setattr(score_displacement_imm_exact, "__hipporeplayimm_original__", original_score)
+    setattr(mode_transition_matrices, _DISPLACEMENT_IMM_MODE_PATCHED_FLAG, True)
+    setattr(mode_transition_matrices, "__hipporeplayimm_original__", original_mode_matrices)
+    state_space_displacement_imm._score_displacement_imm_exact = score_displacement_imm_exact
+    state_space_displacement_imm._mode_transition_matrices = mode_transition_matrices
+    setattr(state_space_displacement_imm, _DISPLACEMENT_IMM_MODE_PATCHED_FLAG, True)
+
+
 def _apply_trajectory_imm_parameter_validation_patch() -> None:
     from . import state_space_trajectory_imm
 
@@ -435,6 +481,7 @@ def apply_model_parameter_validation_patch() -> None:
     _apply_duration_occupancy_mode_parameter_validation_patch()
     _apply_sparse_momentum_velocity_decay_validation_patch()
     _apply_displacement_momentum_velocity_decay_validation_patch()
+    _apply_displacement_imm_mode_parameter_validation_patch()
     _apply_trajectory_imm_parameter_validation_patch()
     _apply_pyrecest_imm_velocity_decay_validation_patch()
     _apply_replay_calibration_max_gain_validation_patch()

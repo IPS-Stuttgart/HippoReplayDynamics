@@ -16,12 +16,18 @@ def _integer_count(name: str, value: Any) -> int:
     """Return an integer-valued scalar count without silent truncation."""
 
     if isinstance(value, (bool, np.bool_)):
-        raise TypeError(f"{name} must be an integer")
+        raise TypeError(f"{name} must be an integer count, not boolean")
     raw = np.asarray(value)
     if raw.ndim != 0:
         raise TypeError(f"{name} must be an integer")
     if np.issubdtype(raw.dtype, np.bool_):
-        raise TypeError(f"{name} must be an integer")
+        raise TypeError(f"{name} must be an integer count, not boolean")
+    if raw.dtype == object:
+        try:
+            if isinstance(raw.item(), (bool, np.bool_)):
+                raise TypeError(f"{name} must be an integer count, not boolean")
+        except ValueError:
+            pass
     try:
         numeric = float(raw)
     except (TypeError, ValueError, OverflowError) as exc:
@@ -201,5 +207,9 @@ def apply_state_space_bin_count_validation_patch() -> None:
         if not getattr(module, "__name__", "").startswith("hipporeplayimm"):
             continue
         for name, original in originals.items():
-            if getattr(module, name, None) is original:
+            current = getattr(module, name, None)
+            if current is original:
+                setattr(module, name, active_helpers[name])
+                continue
+            if name == "_coerce_valid_bin_mask" and current is not None and not _is_patched(current):
                 setattr(module, name, active_helpers[name])

@@ -9,6 +9,29 @@ from scipy.special import logsumexp
 LOG_ZERO = -1.0e300
 
 
+def _is_boolean_scalar(value: object) -> bool:
+    """Return True for Python, NumPy, and object-wrapped boolean scalars."""
+
+    if isinstance(value, (bool, np.bool_)):
+        return True
+    arr = np.asarray(value)
+    if arr.ndim != 0:
+        return False
+    if np.issubdtype(arr.dtype, np.bool_):
+        return True
+    if arr.dtype == object:
+        try:
+            return isinstance(arr.item(), (bool, np.bool_))
+        except ValueError:
+            return False
+    return False
+
+
+def _reject_boolean_count(name: str, value: object) -> None:
+    if _is_boolean_scalar(value):
+        raise TypeError(f"{name} must be an integer count, not boolean")
+
+
 def _per_bin_sigma(sigma_cm_sqrt_s: float, dt_s: float) -> float:
     sigma = float(sigma_cm_sqrt_s)
     dt = float(dt_s)
@@ -20,6 +43,7 @@ def _per_bin_sigma(sigma_cm_sqrt_s: float, dt_s: float) -> float:
 
 
 def _top_candidate_indices(log_emission: np.ndarray, top_k: int) -> np.ndarray:
+    _reject_boolean_count("top_k", top_k)
     if top_k <= 0 or top_k >= log_emission.shape[0]:
         return np.arange(log_emission.shape[0], dtype=int)
     selected = np.argpartition(log_emission, -top_k)[-top_k:]
@@ -41,6 +65,11 @@ def _mass_retaining_candidate_indices(
     The returned indices are sorted by decreasing emission log-likelihood,
     matching ``_top_candidate_indices``.
     """
+
+    if top_k is not None:
+        _reject_boolean_count("top_k", top_k)
+    _reject_boolean_count("min_k", min_k)
+    _reject_boolean_count("max_k", max_k)
 
     values = np.asarray(log_emission, dtype=float)
     if values.ndim != 1:

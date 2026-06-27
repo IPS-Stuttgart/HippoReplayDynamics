@@ -14,9 +14,6 @@ def apply_kd_impossible_emission_patch() -> None:
 
     from . import kd_reference as kd
 
-    if getattr(kd, _PATCHED_FLAG, False):
-        return
-
     kd._scaled_emission = _scaled_emission
     kd._first_order_separable_log_evidence = _first_order_separable_log_evidence
     kd._second_order_separable_log_evidence = _second_order_separable_log_evidence

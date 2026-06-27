@@ -10,6 +10,10 @@ _SCORE_METADATA_BOOL_PATCH_FLAG = "_score_metadata_bool_validation_patch_applied
 _CLUSTERLESS_STRING_PATCH_FLAG = "_score_metadata_string_missing_patch_applied"
 
 
+def _bool_parse_error(value: object) -> ValueError:
+    return ValueError(f"cannot parse boolean value {value!r}; boolean values must be true/false or binary 0/1")
+
+
 def _parse_strict_bool(value: object) -> bool:
     """Parse boolean-like metadata without accepting arbitrary numerics."""
 
@@ -25,21 +29,19 @@ def _parse_strict_bool(value: object) -> bool:
         return False
     try:
         numeric = float(text)
-    except ValueError:
-        pass
-    else:
-        return _parse_numeric_bool(numeric, value)
-    raise ValueError(f"cannot parse boolean value {value!r}")
+    except ValueError as exc:
+        raise _bool_parse_error(value) from exc
+    return _parse_numeric_bool(numeric, value)
 
 
 def _parse_numeric_bool(numeric: float, original: object) -> bool:
     if not np.isfinite(numeric):
-        raise ValueError(f"cannot parse boolean value {original!r}")
+        raise _bool_parse_error(original)
     if np.isclose(numeric, 0.0, rtol=0.0, atol=0.0):
         return False
     if np.isclose(numeric, 1.0, rtol=0.0, atol=0.0):
         return True
-    raise ValueError(f"cannot parse boolean value {original!r}")
+    raise _bool_parse_error(original)
 
 
 def _metadata_text_or_none(value: object) -> str | None:

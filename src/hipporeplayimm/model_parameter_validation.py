@@ -114,8 +114,13 @@ def _validate_replay_calibration_max_gain(calibration: object | None) -> None:
     if calibration is None:
         return
     try:
-        max_gain = float(getattr(calibration, "max_gain"))
-    except (AttributeError, TypeError, ValueError) as exc:
+        raw_max_gain = getattr(calibration, "max_gain")
+    except AttributeError as exc:
+        raise ValueError("max_gain must be finite and at least 1.0") from exc
+    _reject_boolean_scalar("max_gain", raw_max_gain)
+    try:
+        max_gain = float(raw_max_gain)
+    except (TypeError, ValueError) as exc:
         raise ValueError("max_gain must be finite and at least 1.0") from exc
     if not np.isfinite(max_gain) or max_gain < 1.0:
         raise ValueError("max_gain must be finite and at least 1.0")

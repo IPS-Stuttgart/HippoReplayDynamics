@@ -25,7 +25,12 @@ def _validate_mode_transition_sequence(
     expected_shape = (int(n_modes), int(n_modes))
     resolved: list[np.ndarray] = []
     for transition_index, matrix in enumerate(mode_transitions):
-        values = np.asarray(matrix, dtype=float)
+        raw_values = np.asarray(matrix)
+        if raw_values.dtype == np.bool_:
+            raise ValueError(
+                f"mode transition matrix {transition_index} must contain numeric probabilities, not booleans"
+            )
+        values = raw_values.astype(float, copy=False)
         if values.shape != expected_shape:
             raise ValueError("mode transition matrices must be square with one row and column per mode")
         if not np.all(np.isfinite(values)):

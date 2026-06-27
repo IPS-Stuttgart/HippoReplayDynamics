@@ -34,7 +34,9 @@ class DurationFloat(float):
 def _dur_from_dt(dt):
     # Backward compatibility for emissions created by older in-process patches.
     ds=getattr(dt,'transition_durations',None)
-    return None if ds is None else np.asarray(ds,dtype=float)
+    if ds is None: return None
+    arr=np.asarray(ds,dtype=float)
+    return None if arr.size==0 else arr
 
 def transition_durations_s(em):
     ds=getattr(em,'transition_durations',None)

@@ -50,3 +50,21 @@ def test_log_emission_tensor_canonicalizes_integral_n_spikes() -> None:
 
     assert emissions.n_spikes == 3
     assert isinstance(emissions.n_spikes, int)
+
+
+def test_log_emission_tensor_canonicalizes_integral_spike_counts() -> None:
+    emissions = LogEmissionTensor(
+        log_likelihood=np.zeros((2, 2), dtype=float),
+        spike_counts=np.array([["1", "0"], ["0", "2"]], dtype=object),
+        times=np.arange(2, dtype=float),
+        dt=1.0,
+        cell_ids=np.array([1, 2], dtype=int),
+        n_spikes=3.0,
+    )
+
+    assert np.issubdtype(emissions.spike_counts.dtype, np.integer)
+    np.testing.assert_array_equal(
+        emissions.spike_counts,
+        np.array([[1, 0], [0, 2]], dtype=int),
+    )
+    assert emissions.n_spikes == 3

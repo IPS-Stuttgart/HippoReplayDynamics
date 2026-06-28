@@ -362,29 +362,61 @@ def _selected_sessions(root: str | Path, config: ObservationSweepConfig) -> tupl
 def _validate_config(config: ObservationSweepConfig) -> None:
     for name in (
         "bin_sizes_cm",
-        "smoothing_sigmas_bins",
-        "min_speed_cm_s",
         "min_occupancy_s",
         "rate_floor_hz",
         "time_bin_ms",
         "spike_rate_scales",
         "likelihood_temperatures",
     ):
-        values = getattr(config, name)
-        if not values:
-            raise ValueError(f"{name} must contain at least one value")
-        if any(float(value) <= 0.0 for value in values):
+        _validate_numeric_sequence(config, name, positive=True)
+    for name in (
+        "smoothing_sigmas_bins",
+        "min_speed_cm_s",
+        "negative_binomial_overdispersions",
+    ):
+        _validate_numeric_sequence(config, name, nonnegative=True)
+    _validate_positive_scalar(config.n_folds, "n_folds")
+    _validate_positive_scalar(config.decode_bin_s, "decode_bin_s")
+    _validate_positive_scalar(config.simulation_events_per_model, "simulation_events_per_model")
+
+
+def _validate_numeric_sequence(
+    config: ObservationSweepConfig,
+    name: str,
+    *,
+    positive: bool = False,
+    nonnegative: bool = False,
+) -> None:
+    try:
+        values = tuple(getattr(config, name))
+    except TypeError as exc:
+        raise ValueError(f"{name} must contain at least one value") from exc
+    if not values:
+        raise ValueError(f"{name} must contain at least one value")
+    for value in values:
+        number = _finite_numeric_value(value, f"{name} values")
+        if positive and number <= 0.0:
             raise ValueError(f"{name} values must be positive")
-    if not config.negative_binomial_overdispersions:
-        raise ValueError("negative_binomial_overdispersions must contain at least one value")
-    if any(float(value) < 0.0 for value in config.negative_binomial_overdispersions):
-        raise ValueError("negative_binomial_overdispersions values must be nonnegative")
-    if config.n_folds <= 0:
-        raise ValueError("n_folds must be positive")
-    if config.decode_bin_s <= 0.0:
-        raise ValueError("decode_bin_s must be positive")
-    if config.simulation_events_per_model <= 0:
-        raise ValueError("simulation_events_per_model must be positive")
+        if nonnegative and number < 0.0:
+            raise ValueError(f"{name} values must be nonnegative")
+
+
+def _validate_positive_scalar(value: object, name: str) -> None:
+    number = _finite_numeric_value(value, name)
+    if number <= 0.0:
+        raise ValueError(f"{name} must be positive")
+
+
+def _finite_numeric_value(value: object, name: str) -> float:
+    if isinstance(value, (bool, np.bool_)):
+        raise ValueError(f"{name} must be numeric, not boolean")
+    try:
+        number = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must be numeric") from exc
+    if not np.isfinite(number):
+        raise ValueError(f"{name} must be finite")
+    return number
 
 
 def _concat(frames: list[pd.DataFrame]) -> pd.DataFrame:

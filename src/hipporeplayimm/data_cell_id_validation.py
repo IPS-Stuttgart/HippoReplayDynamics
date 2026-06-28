@@ -15,19 +15,34 @@ from typing import Any
 
 import numpy as np
 
+_PATCHED_FLAG = "_cell_id_validation_patch_applied"
+_PATCH_MARK = "__hipporeplayimm_data_cell_id_validation_patch__"
+_ORIGINAL_ATTR = "__hipporeplayimm_original__"
+
 
 def apply_data_cell_id_validation_patch() -> None:
     """Install integral-ID validation on ``hipporeplayimm.data`` helpers."""
 
     from . import data, encoding
 
-    if getattr(data, "_cell_id_validation_patch_applied", False):
-        return
-
+    current_cell_ids = getattr(getattr(data.ReplaySession, "cell_ids", None), "fget", None)
+    current_excitatory_spikes = getattr(data.ReplaySession, "excitatory_spikes", None)
     original_load_replay_session = data.load_replay_session
     original_load_spike_marks = data._load_spike_marks
     original_mark_group_ids = data._mark_group_ids_from_tetrode_cell_ids
     original_spikes_and_cell_ids_for_encoding = encoding._spikes_and_cell_ids_for_encoding
+
+    patch_targets = (
+        current_cell_ids,
+        current_excitatory_spikes,
+        original_load_replay_session,
+        original_load_spike_marks,
+        original_mark_group_ids,
+        original_spikes_and_cell_ids_for_encoding,
+    )
+    if all(_is_patched(target) for target in patch_targets):
+        setattr(data, _PATCHED_FLAG, True)
+        return
 
     def replay_session_cell_ids(self):
         if self.spikes.size == 0:
@@ -49,7 +64,6 @@ def apply_data_cell_id_validation_patch() -> None:
         keep = np.isin(spike_ids, excitatory_ids)
         return spikes[keep]
 
-    @wraps(original_load_replay_session)
     def load_replay_session(session_path):
         path = Path(session_path)
         spike_data = data._load_mat_file(path / "Spike_Data.mat")
@@ -57,14 +71,12 @@ def apply_data_cell_id_validation_patch() -> None:
         _validate_optional_neuron_ids(spike_data, "Inhibitory_Neurons", "inhibitory neuron IDs")
         return original_load_replay_session(session_path)
 
-    @wraps(original_load_spike_marks)
     def load_spike_marks(session_path, spike_data, spikes):
         spikes_arr = np.asarray(spikes)
         if spikes_arr.size and spikes_arr.ndim == 2 and spikes_arr.shape[1] > 1:
             _coerce_integral_ids(spikes_arr[:, 1], "spike cell IDs")
         return original_load_spike_marks(session_path, spike_data, spikes)
 
-    @wraps(original_mark_group_ids)
     def mark_group_ids_from_tetrode_cell_ids(cell_ids, tetrode_cell_ids):
         if cell_ids is not None:
             _coerce_integral_ids(cell_ids, "spike cell IDs")
@@ -80,7 +92,6 @@ def apply_data_cell_id_validation_patch() -> None:
             return _coerce_integral_ids(out, "tetrode group IDs")
         return out
 
-    @wraps(original_spikes_and_cell_ids_for_encoding)
     def spikes_and_cell_ids_for_encoding(session, config):
         spikes = np.asarray(session.spikes)
         if spikes.size:
@@ -92,13 +103,32 @@ def apply_data_cell_id_validation_patch() -> None:
             _coerce_integral_ids(excitatory.reshape(-1), "excitatory neuron IDs")
         return original_spikes_and_cell_ids_for_encoding(session, config)
 
-    data.ReplaySession.cell_ids = property(replay_session_cell_ids)
-    data.ReplaySession.excitatory_spikes = replay_session_excitatory_spikes
-    data.load_replay_session = load_replay_session
-    data._load_spike_marks = load_spike_marks
-    data._mark_group_ids_from_tetrode_cell_ids = mark_group_ids_from_tetrode_cell_ids
-    encoding._spikes_and_cell_ids_for_encoding = spikes_and_cell_ids_for_encoding
-    data._cell_id_validation_patch_applied = True
+    if not _is_patched(current_cell_ids):
+        data.ReplaySession.cell_ids = property(_mark_patched(replay_session_cell_ids, current_cell_ids))
+    if not _is_patched(current_excitatory_spikes):
+        data.ReplaySession.excitatory_spikes = _mark_patched(replay_session_excitatory_spikes, current_excitatory_spikes)
+    if not _is_patched(original_load_replay_session):
+        data.load_replay_session = _mark_patched(load_replay_session, original_load_replay_session)
+    if not _is_patched(original_load_spike_marks):
+        data._load_spike_marks = _mark_patched(load_spike_marks, original_load_spike_marks)
+    if not _is_patched(original_mark_group_ids):
+        data._mark_group_ids_from_tetrode_cell_ids = _mark_patched(mark_group_ids_from_tetrode_cell_ids, original_mark_group_ids)
+    if not _is_patched(original_spikes_and_cell_ids_for_encoding):
+        encoding._spikes_and_cell_ids_for_encoding = _mark_patched(spikes_and_cell_ids_for_encoding, original_spikes_and_cell_ids_for_encoding)
+
+    setattr(data, _PATCHED_FLAG, True)
+
+
+def _is_patched(target: Any) -> bool:
+    return bool(getattr(target, _PATCH_MARK, False))
+
+
+def _mark_patched(wrapper: Any, original: Any) -> Any:
+    if callable(original):
+        wrapper = wraps(original)(wrapper)
+    setattr(wrapper, _PATCH_MARK, True)
+    setattr(wrapper, _ORIGINAL_ATTR, original)
+    return wrapper
 
 
 def _validate_optional_neuron_ids(spike_data: dict[str, Any], variable_name: str, label: str) -> None:

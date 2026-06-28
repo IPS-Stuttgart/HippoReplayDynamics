@@ -6,6 +6,7 @@ import numpy as np
 import pytest
 
 from hipporeplayimm.data import ReplaySession, _mark_group_ids_from_tetrode_cell_ids
+from hipporeplayimm.data_cell_id_validation import _PATCHED_FLAG, apply_data_cell_id_validation_patch
 
 
 def _session_with_ids(spike_ids, excitatory_ids=()):
@@ -90,3 +91,27 @@ def test_mark_group_ids_reject_fractional_tetrode_mapping_ids():
             np.array([1, 2], dtype=int),
             np.array([[7.0, 1.0], [8.5, 2.0]], dtype=float),
         )
+
+
+def test_data_cell_id_validation_patch_refreshes_replaced_session_helpers(monkeypatch):
+    import hipporeplayimm.data as data
+
+    def lossy_cell_ids(self):
+        return np.unique(np.asarray(self.spikes)[:, 1].astype(int))
+
+    def lossy_excitatory_spikes(self):
+        spikes = np.asarray(self.spikes)
+        excitatory = np.asarray(self.excitatory_neurons)
+        keep = np.isin(spikes[:, 1].astype(int), excitatory.astype(int))
+        return spikes[keep]
+
+    monkeypatch.setattr(ReplaySession, "cell_ids", property(lossy_cell_ids))
+    monkeypatch.setattr(ReplaySession, "excitatory_spikes", lossy_excitatory_spikes)
+    monkeypatch.setattr(data, _PATCHED_FLAG, True, raising=False)
+
+    apply_data_cell_id_validation_patch()
+
+    with pytest.raises(ValueError, match="spike cell IDs"):
+        _ = _session_with_ids([1.0, 2.5]).cell_ids
+    with pytest.raises(ValueError, match="excitatory neuron IDs"):
+        _session_with_ids([1.0, 2.0], excitatory_ids=[1.5]).excitatory_spikes()

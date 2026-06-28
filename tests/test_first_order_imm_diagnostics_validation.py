@@ -93,6 +93,15 @@ def test_runtime_patch_repairs_duration_occupancy_diagnostics_alias(monkeypatch)
     assert getattr(helper, "_first_order_imm_duration_diagnostics_alias_patch", False)
 
 
+def test_runtime_patch_keeps_duration_occupancy_alias_stable() -> None:
+    apply_runtime_patches()
+    helper = duration_occupancy._first_order_imm_content_diagnostics
+
+    apply_runtime_patches()
+
+    assert duration_occupancy._first_order_imm_content_diagnostics is helper
+
+
 def test_duration_occupancy_alias_uses_recorded_transition_durations(monkeypatch) -> None:
     apply_runtime_patches()
     helper = duration_occupancy._first_order_imm_content_diagnostics

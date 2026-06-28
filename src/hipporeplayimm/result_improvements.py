@@ -113,13 +113,35 @@ def _candidate_min_log_mass(row: pd.Series) -> float:
         "diagnostic_state_space_imm_min_candidate_log_mass",
     ):
         value = row.get(column)
-        if value is None or pd.isna(value):
-            continue
-        try:
-            return float(value)
-        except (TypeError, ValueError):
-            continue
+        scalar = _first_finite_numeric_value(value)
+        if scalar is not None:
+            return scalar
     return float("nan")
+
+
+def _first_finite_numeric_value(value: object) -> float | None:
+    if value is None:
+        return None
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return None
+        try:
+            number = float(text)
+        except ValueError:
+            return None
+        return number if np.isfinite(number) else None
+    try:
+        array = np.asarray(value, dtype=float)
+    except (TypeError, ValueError):
+        return None
+    if array.ndim == 0:
+        number = float(array)
+        return number if np.isfinite(number) else None
+    finite = array[np.isfinite(array)]
+    if finite.size == 0:
+        return None
+    return float(finite.reshape(-1)[0])
 
 
 def hierarchical_bootstrap_ci(
@@ -559,5 +581,3 @@ def _yaml_scalar(value: object) -> str:
     if not text or any(ch in text for ch in ":#[]{}&*!|>'\"%@`"):
         return repr(text)
     return text
-
-

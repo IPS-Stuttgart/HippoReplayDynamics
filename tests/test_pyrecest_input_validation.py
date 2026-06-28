@@ -71,15 +71,19 @@ def test_pyrecest_score_rejects_mutated_boolean_particle_count_before_optional_i
 
 
 @pytest.mark.parametrize(
-    ("kwargs", "match"),
+    ("kwargs", "error_type", "match"),
     [
-        ({"mode_stickiness": True}, r"mode_stickiness must lie in \[0, 1\]"),
-        ({"jump_fraction": False}, r"jump_fraction must lie in \[0, 1\]"),
-        ({"momentum_velocity_decay": True}, "momentum_velocity_decay must be finite and nonnegative"),
+        ({"mode_stickiness": True}, ValueError, r"mode_stickiness must lie in \[0, 1\]"),
+        ({"jump_fraction": False}, ValueError, r"jump_fraction must lie in \[0, 1\]"),
+        ({"momentum_velocity_decay": True}, TypeError, "not boolean"),
     ],
 )
-def test_pyrecest_imm_model_rejects_boolean_numeric_parameters(kwargs: dict[str, object], match: str) -> None:
-    with pytest.raises(ValueError, match=match):
+def test_pyrecest_imm_model_rejects_boolean_numeric_parameters(
+    kwargs: dict[str, object],
+    error_type: type[Exception],
+    match: str,
+) -> None:
+    with pytest.raises(error_type, match=match):
         PyRecEstGoalParticleIMMModel(**kwargs)
 
 

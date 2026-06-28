@@ -202,7 +202,7 @@ def _validate_positive_float(value: object, name: str, original_validate) -> Non
 
 def _validate_nonnegative_float(value: object, name: str, original_validate) -> None:
     if _is_bool_scalar(value):
-        raise ValueError(f"{name} must be finite and nonnegative")
+        raise TypeError(f"{name} must be numeric, not boolean")
     try:
         original_validate(value, name)
     except (TypeError, ValueError) as exc:

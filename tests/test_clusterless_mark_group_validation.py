@@ -78,6 +78,14 @@ def test_clusterless_mark_likelihood_rejects_mixed_python_boolean_group_ids():
 
 
 
+def test_clusterless_mark_likelihood_rejects_near_integral_group_ids():
+    encoding = _encoding_with_group_ids(np.array([0, 1]))
+
+    with pytest.raises(ValueError, match="integer-valued"):
+        encoding.log_mark_likelihood(np.array([[0.0]]), group_ids=np.array([1.0000000005]))
+
+
+
 def test_clusterless_mark_likelihood_rejects_out_of_range_group_ids():
     encoding = _encoding_with_group_ids(np.array([0, 1]))
 
@@ -109,6 +117,14 @@ def test_clusterless_tetrode_group_extraction_rejects_mixed_python_boolean_group
     session.spike_marks = replace(session.spike_marks, group_ids=[True, 2])
 
     with pytest.raises(ValueError, match="boolean"):
+        _mark_group_ids_for_config(session, ClusterlessMarkConfig(mark_group_by="tetrode"))
+
+
+
+def test_clusterless_tetrode_group_extraction_rejects_near_integral_group_ids():
+    session = _session_with_mark_groups(np.array([1.0, 2.0000000005]))
+
+    with pytest.raises(ValueError, match="integer-valued"):
         _mark_group_ids_for_config(session, ClusterlessMarkConfig(mark_group_by="tetrode"))
 
 

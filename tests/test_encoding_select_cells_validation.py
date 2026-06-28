@@ -25,7 +25,7 @@ def test_select_cells_accepts_integer_valued_float_ids() -> None:
     np.testing.assert_allclose(selected.rates_hz, np.array([[2.0], [4.0]], dtype=float))
 
 
-@pytest.mark.parametrize("requested", [[1.9], [np.nan]])
+@pytest.mark.parametrize("requested", [[1.9], [1.0000000005], [np.nan]])
 def test_select_cells_rejects_invalid_float_ids_without_truncation(requested) -> None:
     with pytest.raises(ValueError, match="integer-valued|finite"):
         _encoding_model().select_cells(requested)

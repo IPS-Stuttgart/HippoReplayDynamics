@@ -42,7 +42,7 @@ def _canonical_requested_cell_ids(cell_ids: Iterable[int | float]) -> np.ndarray
         raise ValueError("cell_ids must be finite")
 
     rounded = np.rint(numeric)
-    if not np.all(np.isclose(numeric, rounded, rtol=0.0, atol=1e-9)):
+    if not np.all(numeric == rounded):
         raise ValueError("cell_ids must contain integer-valued cell IDs")
 
     integer_info = np.iinfo(np.dtype(int))

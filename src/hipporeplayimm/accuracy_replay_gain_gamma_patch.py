@@ -39,7 +39,7 @@ def _coerce_integral_ids(values: Any, name: str) -> np.ndarray:
     if not np.all(np.isfinite(numeric)):
         raise ValueError(f"{name} must contain finite integer identifiers")
     rounded = np.rint(numeric)
-    if not np.all(np.isclose(numeric, rounded, rtol=0.0, atol=1e-9)):
+    if not np.all(numeric == rounded):
         raise ValueError(f"{name} must be integer-valued")
     integer_info = np.iinfo(np.dtype(int))
     if not np.all((rounded >= integer_info.min) & (rounded <= integer_info.max)):

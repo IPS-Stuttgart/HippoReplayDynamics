@@ -64,6 +64,13 @@ def test_replay_session_cell_ids_reject_fractional_spike_ids():
         _ = session.cell_ids
 
 
+def test_replay_session_cell_ids_reject_near_integral_spike_ids():
+    session = _session_with_ids([1.0, 1.0000000005])
+
+    with pytest.raises(ValueError, match="integer-valued"):
+        _ = session.cell_ids
+
+
 def test_replay_session_cell_ids_reject_boolean_spike_ids():
     session = _session_with_raw_spikes([[0.0, True]])
 
@@ -90,6 +97,14 @@ def test_mark_group_ids_reject_fractional_tetrode_mapping_ids():
         _mark_group_ids_from_tetrode_cell_ids(
             np.array([1, 2], dtype=int),
             np.array([[7.0, 1.0], [8.5, 2.0]], dtype=float),
+        )
+
+
+def test_mark_group_ids_reject_near_integral_tetrode_mapping_ids():
+    with pytest.raises(ValueError, match="integer-valued"):
+        _mark_group_ids_from_tetrode_cell_ids(
+            np.array([1, 2], dtype=int),
+            np.array([[7.0, 1.0], [8.0000000005, 2.0]], dtype=float),
         )
 
 

@@ -2,9 +2,10 @@
 """Build hc-11 robustness tables from an existing model-evidence smoke.
 
 This script is intentionally non-rescoring. It consumes an hc-11 event-model
-evidence CSV plus an optional clean-IMM time-order shuffle artifact and writes
-the animal/session, leave-one-animal-out, bootstrap, IMM-vs-fragmented, and gate
-tables needed to decide whether hc-11 can move beyond external smoke status.
+evidence CSV plus optional clean-IMM time-order shuffle and posterior-content
+artifacts, then writes the animal/session, leave-one-animal-out, bootstrap,
+IMM-vs-fragmented, posterior-content, and gate tables needed to decide whether
+hc-11 can move beyond external smoke status.
 """
 
 from __future__ import annotations
@@ -513,6 +514,223 @@ def build_time_order_summary(path: str | Path | None) -> pd.DataFrame:
     )
 
 
+POSTERIOR_CONTENT_COLUMNS = [
+    "status",
+    "animal",
+    "session",
+    "event_index",
+    "first_order_imm_is_best_exact_core",
+    "mean_nonstationary_mode_probability",
+    "fraction_time_map_nonstationary",
+    "nonstationary_bout_count",
+    "longest_nonstationary_bout_s",
+    "posterior_expected_path_length_cm",
+    "posterior_net_displacement_cm",
+    "posterior_path_speed_cm_s",
+    "trajectory_content_gate_passed",
+    "strong_trajectory_content_gate_passed",
+    "content_diagnostic_status",
+    "source",
+]
+
+
+def build_posterior_content_audit(
+    path: str | Path | None,
+    *,
+    path_threshold_cm: float = 10.0,
+) -> pd.DataFrame:
+    if not path:
+        return pd.DataFrame(
+            [
+                {
+                    "status": "not_run",
+                    "animal": "",
+                    "session": "",
+                    "event_index": np.nan,
+                    "first_order_imm_is_best_exact_core": False,
+                    "mean_nonstationary_mode_probability": np.nan,
+                    "fraction_time_map_nonstationary": np.nan,
+                    "nonstationary_bout_count": np.nan,
+                    "longest_nonstationary_bout_s": np.nan,
+                    "posterior_expected_path_length_cm": np.nan,
+                    "posterior_net_displacement_cm": np.nan,
+                    "posterior_path_speed_cm_s": np.nan,
+                    "trajectory_content_gate_passed": False,
+                    "strong_trajectory_content_gate_passed": False,
+                    "content_diagnostic_status": "No --posterior-content-summary artifact was provided.",
+                    "source": "",
+                }
+            ],
+            columns=POSTERIOR_CONTENT_COLUMNS,
+        )
+    frame = pd.read_csv(path)
+    required = {"session", "event_index"}
+    missing = sorted(required.difference(frame.columns))
+    if missing:
+        raise ValueError(f"posterior-content summary is missing required columns: {missing}")
+    rows: list[dict[str, object]] = []
+    for _, row in frame.iterrows():
+        session = str(row["session"])
+        first_order_best = _first_order_best_from_row(row)
+        mean_nonstationary = _row_numeric(
+            row,
+            "mean_nonstationary_mode_probability",
+            fallback_sum=(
+                "diagnostic_state_space_mode_diffusion_event_probability",
+                "diagnostic_state_space_mode_fragmented_event_probability",
+            ),
+        )
+        fraction_nonstationary = _row_numeric(row, "fraction_time_map_nonstationary", "diagnostic_state_space_imm_fraction_time_map_nonstationary")
+        path_length = _row_numeric(row, "posterior_expected_path_length_cm", "diagnostic_state_space_imm_posterior_expected_path_length_cm")
+        net_displacement = _row_numeric(row, "posterior_net_displacement_cm", "diagnostic_state_space_imm_posterior_net_displacement_cm")
+        moderate_mode = bool(
+            (np.isfinite(mean_nonstationary) and mean_nonstationary >= 0.5)
+            or (np.isfinite(fraction_nonstationary) and fraction_nonstationary >= 0.5)
+        )
+        moderate_spatial = bool(
+            (np.isfinite(path_length) and path_length >= path_threshold_cm)
+            or (np.isfinite(net_displacement) and net_displacement >= path_threshold_cm)
+        )
+        strong_mode = bool(
+            np.isfinite(mean_nonstationary)
+            and mean_nonstationary >= 0.5
+            and np.isfinite(fraction_nonstationary)
+            and fraction_nonstationary >= 0.5
+        )
+        trajectory_gate = _row_bool(row, "trajectory_content_gate_passed", default=bool(first_order_best and moderate_mode and moderate_spatial))
+        strong_gate = _row_bool(
+            row,
+            "strong_trajectory_content_gate_passed",
+            default=bool(first_order_best and strong_mode and np.isfinite(path_length) and path_length >= path_threshold_cm),
+        )
+        rows.append(
+            {
+                "status": "provided",
+                "animal": _animal_from_row(row),
+                "session": session,
+                "event_index": int(row["event_index"]),
+                "first_order_imm_is_best_exact_core": bool(first_order_best),
+                "mean_nonstationary_mode_probability": mean_nonstationary,
+                "fraction_time_map_nonstationary": fraction_nonstationary,
+                "nonstationary_bout_count": _row_numeric(row, "nonstationary_bout_count", "diagnostic_state_space_imm_nonstationary_bout_count"),
+                "longest_nonstationary_bout_s": _row_numeric(row, "longest_nonstationary_bout_s", "diagnostic_state_space_imm_longest_nonstationary_bout_s"),
+                "posterior_expected_path_length_cm": path_length,
+                "posterior_net_displacement_cm": net_displacement,
+                "posterior_path_speed_cm_s": _row_numeric(row, "posterior_path_speed_cm_s", "diagnostic_state_space_imm_posterior_path_speed_cm_s"),
+                "trajectory_content_gate_passed": bool(trajectory_gate),
+                "strong_trajectory_content_gate_passed": bool(strong_gate),
+                "content_diagnostic_status": str(row.get("content_diagnostic_status", "")),
+                "source": str(path),
+            }
+        )
+    return pd.DataFrame(rows, columns=POSTERIOR_CONTENT_COLUMNS)
+
+
+def build_posterior_content_summary(audit: pd.DataFrame) -> pd.DataFrame:
+    columns = [
+        "status",
+        "events",
+        "first_order_imm_best_events",
+        "moderate_content_gate_events",
+        "moderate_content_gate_fraction_of_first_order_best",
+        "strong_content_gate_events",
+        "strong_content_gate_fraction_of_first_order_best",
+        "median_mean_nonstationary_mode_probability",
+        "median_fraction_time_map_nonstationary",
+        "median_posterior_expected_path_length_cm",
+        "median_posterior_net_displacement_cm",
+        "posterior_content_gate_passed",
+        "source",
+        "note",
+    ]
+    if audit.empty or not audit["status"].astype(str).eq("provided").any():
+        return pd.DataFrame(
+            [
+                {
+                    "status": "not_run",
+                    "events": 0,
+                    "first_order_imm_best_events": 0,
+                    "moderate_content_gate_events": 0,
+                    "moderate_content_gate_fraction_of_first_order_best": np.nan,
+                    "strong_content_gate_events": 0,
+                    "strong_content_gate_fraction_of_first_order_best": np.nan,
+                    "median_mean_nonstationary_mode_probability": np.nan,
+                    "median_fraction_time_map_nonstationary": np.nan,
+                    "median_posterior_expected_path_length_cm": np.nan,
+                    "median_posterior_net_displacement_cm": np.nan,
+                    "posterior_content_gate_passed": False,
+                    "source": "",
+                    "note": "No posterior-content artifact was provided.",
+                }
+            ],
+            columns=columns,
+        )
+    provided = audit[audit["status"].astype(str).eq("provided")].copy()
+    first_order = provided[provided["first_order_imm_is_best_exact_core"].map(_as_bool)].copy()
+    denominator = len(first_order)
+    moderate = int(first_order["trajectory_content_gate_passed"].map(_as_bool).sum()) if denominator else 0
+    strong = int(first_order["strong_trajectory_content_gate_passed"].map(_as_bool).sum()) if denominator else 0
+    moderate_fraction = moderate / denominator if denominator else np.nan
+    strong_fraction = strong / denominator if denominator else np.nan
+    gate_passed = bool(denominator > 0 and moderate > denominator / 2)
+    return pd.DataFrame(
+        [
+            {
+                "status": "provided",
+                "events": int(len(provided)),
+                "first_order_imm_best_events": int(denominator),
+                "moderate_content_gate_events": moderate,
+                "moderate_content_gate_fraction_of_first_order_best": moderate_fraction,
+                "strong_content_gate_events": strong,
+                "strong_content_gate_fraction_of_first_order_best": strong_fraction,
+                "median_mean_nonstationary_mode_probability": _median_value(first_order, "mean_nonstationary_mode_probability"),
+                "median_fraction_time_map_nonstationary": _median_value(first_order, "fraction_time_map_nonstationary"),
+                "median_posterior_expected_path_length_cm": _median_value(first_order, "posterior_expected_path_length_cm"),
+                "median_posterior_net_displacement_cm": _median_value(first_order, "posterior_net_displacement_cm"),
+                "posterior_content_gate_passed": gate_passed,
+                "source": str(provided["source"].iloc[0]) if "source" in provided and len(provided) else "",
+                "note": "Summarized from provided first-order IMM posterior-content artifact.",
+            }
+        ],
+        columns=columns,
+    )
+
+
+def _first_order_best_from_row(row: pd.Series) -> bool:
+    if "first_order_imm_is_best_exact_core" in row:
+        return _as_bool(row["first_order_imm_is_best_exact_core"])
+    for column in ("best_exact_core_model", "best_model", "best_trajectory_model"):
+        if column in row and _canonical_model(row[column]) == "first_order_imm":
+            return True
+    return False
+
+
+def _row_bool(row: pd.Series, column: str, *, default: bool = False) -> bool:
+    if column not in row or pd.isna(row[column]):
+        return default
+    return _as_bool(row[column])
+
+
+def _row_numeric(row: pd.Series, *columns: str, fallback_sum: tuple[str, str] | None = None) -> float:
+    for column in columns:
+        if column in row:
+            value = _safe_float(row[column])
+            if np.isfinite(value):
+                return value
+    if fallback_sum and all(column in row for column in fallback_sum):
+        values = [_safe_float(row[column]) for column in fallback_sum]
+        if all(np.isfinite(value) for value in values):
+            return float(sum(values))
+    return float("nan")
+
+
+def _median_value(frame: pd.DataFrame, column: str) -> float:
+    if frame.empty or column not in frame:
+        return float("nan")
+    values = pd.to_numeric(frame[column], errors="coerce").dropna()
+    return float(values.median()) if not values.empty else float("nan")
+
+
 def build_gate_summary(
     events: pd.DataFrame,
     by_animal: pd.DataFrame,
@@ -521,6 +739,7 @@ def build_gate_summary(
     bootstrap: pd.DataFrame,
     imm_audit: pd.DataFrame,
     time_order: pd.DataFrame,
+    posterior_content: pd.DataFrame,
 ) -> pd.DataFrame:
     rows: list[dict[str, object]] = []
 
@@ -569,14 +788,19 @@ def build_gate_summary(
     add("time_order_shuffle_artifact_present", str(time_order_row.get("status", "")) == "provided", time_order_row.get("status", ""), "hc-11 clean-IMM time-order shuffle decisions provided", gate_type="time_order")
     add("time_order_shuffle_clean_imm_gate_passed", _as_bool(time_order_row.get("time_order_gate_passed", False)), time_order_row.get("time_order_gate_passed", False), "clean IMM time-order gate passes", gate_type="time_order")
 
+    posterior_row = posterior_content.iloc[0] if len(posterior_content) else pd.Series(dtype=object)
+    add("posterior_content_artifact_present", str(posterior_row.get("status", "")) == "provided", posterior_row.get("status", ""), "hc-11 first-order IMM posterior-content artifact provided", gate_type="posterior_content")
+    add("posterior_content_gate_passed", _as_bool(posterior_row.get("posterior_content_gate_passed", False)), posterior_row.get("posterior_content_gate_passed", False), "majority of first-order IMM best events pass posterior-content gate", gate_type="posterior_content")
+
     technical_pass = all(row["passed"] for row in rows if row["gate_type"] == "technical")
     robustness_pass = all(row["passed"] for row in rows if row["gate_type"] == "robustness")
     imm_pass = all(row["passed"] for row in rows if row["gate_type"] == "imm_audit")
     time_order_pass = all(row["passed"] for row in rows if row["gate_type"] == "time_order")
-    paper_grade = technical_pass and robustness_pass and imm_pass and time_order_pass
+    posterior_pass = all(row["passed"] for row in rows if row["gate_type"] == "posterior_content")
+    paper_grade = technical_pass and robustness_pass and imm_pass and time_order_pass and posterior_pass
     rows.append({"gate": "technical_overall", "gate_type": "overall", "passed": technical_pass, "status": "pass" if technical_pass else "fail", "observed": technical_pass, "criterion": "all technical gates pass"})
     rows.append({"gate": "robustness_overall", "gate_type": "overall", "passed": robustness_pass, "status": "pass" if robustness_pass else "fail", "observed": robustness_pass, "criterion": "all spread/bootstrap robustness gates pass"})
-    rows.append({"gate": "paper_grade_overall", "gate_type": "overall", "passed": paper_grade, "status": "pass" if paper_grade else "fail", "observed": f"technical={technical_pass}; robustness={robustness_pass}; imm={imm_pass}; time_order={time_order_pass}", "criterion": "technical, robustness, IMM, and time-order gates all pass"})
+    rows.append({"gate": "paper_grade_overall", "gate_type": "overall", "passed": paper_grade, "status": "pass" if paper_grade else "fail", "observed": f"technical={technical_pass}; robustness={robustness_pass}; imm={imm_pass}; time_order={time_order_pass}; posterior_content={posterior_pass}", "criterion": "technical, robustness, IMM, time-order, and posterior-content gates all pass"})
     return pd.DataFrame(rows)
 
 
@@ -598,6 +822,8 @@ def write_outputs(
     n_bootstrap: int,
     seed: int,
     time_order_shuffle_decisions: str | Path | None = None,
+    posterior_content_summary: str | Path | None = None,
+    posterior_content_path_threshold_cm: float = 10.0,
 ) -> dict[str, pd.DataFrame]:
     out = Path(output)
     out.mkdir(parents=True, exist_ok=True)
@@ -608,7 +834,9 @@ def write_outputs(
     bootstrap = build_animal_cluster_bootstrap(events, n_bootstrap=n_bootstrap, seed=seed)
     imm_audit = build_imm_vs_fragmented_audit(events, margin_threshold=margin_threshold)
     time_order = build_time_order_summary(time_order_shuffle_decisions)
-    gates = build_gate_summary(events, by_animal, by_session, leave_one, bootstrap, imm_audit, time_order)
+    posterior_audit = build_posterior_content_audit(posterior_content_summary, path_threshold_cm=posterior_content_path_threshold_cm)
+    posterior_summary = build_posterior_content_summary(posterior_audit)
+    gates = build_gate_summary(events, by_animal, by_session, leave_one, bootstrap, imm_audit, time_order, posterior_summary)
 
     outputs = {
         "hc11_event_claim_table.csv": events,
@@ -618,6 +846,8 @@ def write_outputs(
         "hc11_animal_cluster_bootstrap.csv": bootstrap,
         "hc11_imm_vs_fragmented_audit.csv": imm_audit,
         "hc11_time_order_shuffle_clean_imm.csv": time_order,
+        "hc11_posterior_content_audit.csv": posterior_audit,
+        "hc11_posterior_content_summary.csv": posterior_summary,
         "hc11_gate_summary.csv": gates,
     }
     for name, frame in outputs.items():
@@ -640,6 +870,12 @@ def parse_args() -> argparse.Namespace:
         default="",
         help="Optional clean_imm_time_order_shuffle_decisions.csv for hc-11 clean IMM events",
     )
+    parser.add_argument(
+        "--posterior-content-summary",
+        default="",
+        help="Optional first_order_imm_mode_usage_event_summary.csv for hc-11 clean IMM events",
+    )
+    parser.add_argument("--posterior-content-path-threshold-cm", type=float, default=10.0)
     return parser.parse_args()
 
 
@@ -653,6 +889,8 @@ def main() -> int:
         n_bootstrap=args.n_bootstrap,
         seed=args.seed,
         time_order_shuffle_decisions=args.time_order_shuffle_decisions or None,
+        posterior_content_summary=args.posterior_content_summary or None,
+        posterior_content_path_threshold_cm=args.posterior_content_path_threshold_cm,
     )
     print(f"Wrote hc-11 robustness report to {args.output_dir}")
     return 0

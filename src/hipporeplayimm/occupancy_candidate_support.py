@@ -66,6 +66,11 @@ def _apply_boolean_occupancy_guard() -> None:
 
         @wraps(previous)
         def _valid_bin_mask_from_occupancy(occupancy_s, min_occupancy_s: float, n_bins: int):
+            if _contains_boolean_values(min_occupancy_s):
+                raise TypeError(
+                    "min_occupancy_s must be a numeric occupancy duration threshold in seconds, "
+                    "not boolean mask values"
+                )
             if occupancy_s is not None and _contains_boolean_values(occupancy_s):
                 raise TypeError(
                     "occupancy_s must contain numeric occupancy durations in seconds, "
@@ -130,7 +135,7 @@ def _valid_bin_mask_for_candidate_support(
 
     return _valid_bin_mask_from_occupancy(
         occupancy_s,
-        float(config.valid_occupancy_threshold_s),
+        config.valid_occupancy_threshold_s,
         int(n_bins),
     )
 

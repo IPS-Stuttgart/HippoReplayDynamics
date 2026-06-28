@@ -47,6 +47,20 @@ def _positive_integer(value: object, name: str) -> int:
     return int(numeric)
 
 
+def _nonnegative_integer(value: object, name: str) -> int:
+    """Return a nonnegative integer argument without boolean or float truncation."""
+
+    if isinstance(value, (bool, np.bool_)):
+        raise ValueError(f"{name} must be a finite nonnegative integer")
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must be a finite nonnegative integer") from exc
+    if not np.isfinite(numeric) or numeric < 0.0 or not numeric.is_integer():
+        raise ValueError(f"{name} must be a finite nonnegative integer")
+    return int(numeric)
+
+
 def apply_wrong_map_rat_bootstrap_patch() -> None:
     """Patch rat-cluster bootstrap to sample only rats present for each statistic."""
 
@@ -67,11 +81,12 @@ def apply_wrong_map_rat_bootstrap_patch() -> None:
         """Rat-cluster bootstrap uncertainty for absolute map sensitivity."""
 
         replicates = _positive_integer(n_bootstrap, "n_bootstrap")
+        seed = _nonnegative_integer(random_seed, "random_seed")
         columns = _bootstrap_summary_columns()
         if deltas.empty or "session" not in deltas.columns:
             return pd.DataFrame(columns=columns)
         frame = diagnostics._with_rat(deltas)
-        rng = np.random.default_rng(int(random_seed))
+        rng = np.random.default_rng(seed)
         rows: list[dict[str, object]] = []
         for statistic, group in frame.groupby("statistic", sort=False):
             statistic_rats = sorted(group["rat"].dropna().astype(str).unique())
@@ -96,7 +111,7 @@ def apply_wrong_map_rat_bootstrap_patch() -> None:
                 {
                     "bootstrap_unit": "rat",
                     "bootstrap_replicates": replicates,
-                    "random_seed": int(random_seed),
+                    "random_seed": seed,
                     "statistic": str(statistic),
                     "observed_events": int(observed["events"]),
                     "observed_rats": int(len(statistic_rats)),

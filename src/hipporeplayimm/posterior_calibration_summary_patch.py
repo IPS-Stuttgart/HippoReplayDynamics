@@ -33,8 +33,11 @@ def apply_posterior_calibration_summary_patch() -> None:
 
         frame = samples.copy()
         raw_probabilities = pd.to_numeric(frame[probability_column], errors="coerce")
+        raw_probability_values = raw_probabilities.to_numpy(dtype=float)
         valid_probability = pd.Series(
-            np.isfinite(raw_probabilities.to_numpy(dtype=float)),
+            np.isfinite(raw_probability_values)
+            & (raw_probability_values >= 0.0)
+            & (raw_probability_values <= 1.0),
             index=frame.index,
         )
         frame = frame.loc[valid_probability].copy()

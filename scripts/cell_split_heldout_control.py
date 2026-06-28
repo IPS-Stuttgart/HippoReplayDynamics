@@ -46,6 +46,8 @@ DEFAULT_EXACT_TRAJECTORY_MODELS = (
     "sorted-spike-state-space-momentum-exact-sparse",
     "sorted-spike-state-space-trajectory-imm-exact-sparse",
 )
+FIRST_ORDER_IMM_MODEL = "sorted-spike-state-space-first-order-imm"
+FRAGMENTED_MODEL = "sorted-spike-state-space-fragmented"
 PARTIAL_SCORE_COLUMNS = (
     "status",
     "session",
@@ -501,6 +503,221 @@ def cell_split_control_gate_summary(scores: pd.DataFrame, decisions: pd.DataFram
     return pd.DataFrame(rows)
 
 
+def cell_split_heldout_imm_vs_fragmented_decisions(
+    frame: pd.DataFrame,
+    *,
+    margin_threshold: float = DEFAULT_MARGIN_THRESHOLD,
+) -> pd.DataFrame:
+    """Return held-out first-order IMM versus fragmented paired decisions."""
+
+    columns = [
+        "session",
+        "rat",
+        "event_index",
+        "cell_split_index",
+        "cell_split_seed",
+        "test_cell_count",
+        "test_spikes",
+        "n_time",
+        "imm_model",
+        "fragmented_model",
+        "heldout_logZ_first_order_imm",
+        "heldout_logZ_fragmented",
+        "delta_imm_minus_fragmented_heldout",
+        "delta_imm_minus_fragmented_heldout_bits_per_spike",
+        "imm_raw_win",
+        "imm_confident_win",
+        "fragmented_confident_win",
+        "margin_decision",
+        "required_models_complete",
+        "missing_required_models",
+    ]
+    if frame.empty:
+        return pd.DataFrame(columns=columns)
+
+    scored = ensure_evidence_support_columns(frame)
+    status_ok = scored["status"].eq("success") if "status" in scored else pd.Series(True, index=scored.index)
+    comparable = _bool_column(scored, "evidence_comparable", default=True)
+    ok = scored[status_ok & comparable].copy()
+    rows: list[dict[str, object]] = []
+    for (session, event_index, split_index), group in ok.groupby(["session", "event_index", "cell_split_index"], sort=True):
+        models = set(group["model"].astype(str))
+        missing = tuple(model for model in (FIRST_ORDER_IMM_MODEL, FRAGMENTED_MODEL) if model not in models)
+        complete = not missing
+        imm_rows = group[group["model"].astype(str).eq(FIRST_ORDER_IMM_MODEL)]
+        fragmented_rows = group[group["model"].astype(str).eq(FRAGMENTED_MODEL)]
+        imm = _last_heldout_value(imm_rows)
+        fragmented = _last_heldout_value(fragmented_rows)
+        delta = imm - fragmented if np.isfinite(imm) and np.isfinite(fragmented) else np.nan
+        test_spikes = _first_numeric_value(group, "test_spikes")
+        imm_claim = bool(complete and np.isfinite(delta) and delta >= float(margin_threshold))
+        fragmented_claim = bool(complete and np.isfinite(delta) and delta <= -float(margin_threshold))
+        if not complete:
+            decision = "incomplete_core"
+        elif imm_claim:
+            decision = "imm"
+        elif fragmented_claim:
+            decision = "fragmented"
+        else:
+            decision = "ambiguous"
+        rows.append(
+            {
+                "session": str(session),
+                "rat": _first_text_value(group, "rat") or str(session).split("/")[0],
+                "event_index": int(event_index),
+                "cell_split_index": int(split_index),
+                "cell_split_seed": _first_numeric_value(group, "cell_split_seed"),
+                "test_cell_count": _first_numeric_value(group, "test_cell_count"),
+                "test_spikes": test_spikes,
+                "n_time": _first_numeric_value(group, "n_time"),
+                "imm_model": FIRST_ORDER_IMM_MODEL,
+                "fragmented_model": FRAGMENTED_MODEL,
+                "heldout_logZ_first_order_imm": imm,
+                "heldout_logZ_fragmented": fragmented,
+                "delta_imm_minus_fragmented_heldout": delta,
+                "delta_imm_minus_fragmented_heldout_bits_per_spike": _safe_ratio(delta, test_spikes * np.log(2.0)),
+                "imm_raw_win": bool(np.isfinite(delta) and delta > 0.0),
+                "imm_confident_win": imm_claim,
+                "fragmented_confident_win": fragmented_claim,
+                "margin_decision": decision,
+                "required_models_complete": bool(complete),
+                "missing_required_models": " ".join(missing),
+            }
+        )
+    return pd.DataFrame(rows, columns=columns)
+
+
+def cell_split_heldout_imm_vs_fragmented_summary(
+    decisions: pd.DataFrame,
+    *,
+    group_cols: tuple[str, ...] = (),
+) -> pd.DataFrame:
+    """Summarize held-out first-order IMM versus fragmented decisions."""
+
+    columns = [
+        *group_cols,
+        "split_event_rows",
+        "events",
+        "cell_splits",
+        "required_complete_rows",
+        "incomplete_core_rows",
+        "imm_raw_wins",
+        "imm_raw_win_fraction",
+        "imm_confident_wins",
+        "imm_confident_win_fraction",
+        "fragmented_confident_wins",
+        "ambiguous_rows",
+        "mean_delta_imm_minus_fragmented_heldout",
+        "median_delta_imm_minus_fragmented_heldout",
+        "mean_delta_imm_minus_fragmented_heldout_bits_per_spike",
+        "median_delta_imm_minus_fragmented_heldout_bits_per_spike",
+    ]
+    if decisions.empty:
+        return pd.DataFrame(columns=columns)
+    grouped = decisions.groupby(list(group_cols), sort=True) if group_cols else (((), decisions),)
+    rows: list[dict[str, object]] = []
+    for key, group in grouped:
+        key_tuple = key if isinstance(key, tuple) else (key,)
+        row = {column: value for column, value in zip(group_cols, key_tuple, strict=True)}
+        deltas = pd.to_numeric(group["delta_imm_minus_fragmented_heldout"], errors="coerce")
+        bits = pd.to_numeric(group["delta_imm_minus_fragmented_heldout_bits_per_spike"], errors="coerce")
+        row.update(
+            {
+                "split_event_rows": int(len(group)),
+                "events": int(group[["session", "event_index"]].drop_duplicates().shape[0]),
+                "cell_splits": int(group["cell_split_index"].nunique()),
+                "required_complete_rows": int(_bool_column(group, "required_models_complete").sum()),
+                "incomplete_core_rows": int((group["margin_decision"] == "incomplete_core").sum()),
+                "imm_raw_wins": int(_bool_column(group, "imm_raw_win").sum()),
+                "imm_raw_win_fraction": float(_bool_column(group, "imm_raw_win").mean()),
+                "imm_confident_wins": int(_bool_column(group, "imm_confident_win").sum()),
+                "imm_confident_win_fraction": float(_bool_column(group, "imm_confident_win").mean()),
+                "fragmented_confident_wins": int(_bool_column(group, "fragmented_confident_win").sum()),
+                "ambiguous_rows": int((group["margin_decision"] == "ambiguous").sum()),
+                "mean_delta_imm_minus_fragmented_heldout": float(deltas.mean()),
+                "median_delta_imm_minus_fragmented_heldout": float(deltas.median()),
+                "mean_delta_imm_minus_fragmented_heldout_bits_per_spike": float(bits.mean()),
+                "median_delta_imm_minus_fragmented_heldout_bits_per_spike": float(bits.median()),
+            }
+        )
+        rows.append(row)
+    return pd.DataFrame(rows, columns=columns)
+
+
+def cell_split_heldout_imm_vs_fragmented_gate_summary(decisions: pd.DataFrame) -> pd.DataFrame:
+    """Return pass/fail gates for held-out first-order IMM versus fragmented."""
+
+    rows: list[dict[str, object]] = []
+    if decisions.empty:
+        _append_gate(rows, "decisions_exist", False, 0, "held-out IMM-vs-fragmented decisions exist")
+        rows.append(
+            {
+                "gate": "overall",
+                "passed": False,
+                "observed": "0 gates passed",
+                "criterion": "all held-out IMM-vs-fragmented gates pass",
+            }
+        )
+        return pd.DataFrame(rows)
+
+    required_complete = _bool_column(decisions, "required_models_complete")
+    _append_gate(
+        rows,
+        "required_models_complete",
+        bool(required_complete.all()),
+        int(required_complete.sum()),
+        "every split-event row has first-order IMM and fragmented",
+    )
+    deltas = pd.to_numeric(decisions["delta_imm_minus_fragmented_heldout"], errors="coerce")
+    _append_gate(
+        rows,
+        "median_heldout_delta_positive",
+        float(deltas.median()) > 0.0,
+        float(deltas.median()),
+        "median held-out IMM-fragmented delta > 0",
+    )
+    _append_gate(
+        rows,
+        "majority_split_events_imm_positive",
+        float((deltas > 0.0).mean()) > 0.5,
+        float((deltas > 0.0).mean()),
+        "majority of split-event held-out deltas > 0",
+    )
+    rat_summary = cell_split_heldout_imm_vs_fragmented_summary(decisions, group_cols=("rat",))
+    rat_medians = pd.to_numeric(rat_summary["median_delta_imm_minus_fragmented_heldout"], errors="coerce") if not rat_summary.empty else pd.Series(dtype=float)
+    _append_gate(
+        rows,
+        "per_rat_median_heldout_delta_positive",
+        bool(not rat_medians.empty and (rat_medians > 0.0).all()),
+        "" if rat_medians.empty else float(rat_medians.min()),
+        "per-rat median held-out IMM-fragmented delta > 0",
+    )
+    fragmented_claims = int(_bool_column(decisions, "fragmented_confident_win").sum())
+    _append_gate(
+        rows,
+        "fragmented_confident_claims_near_zero",
+        fragmented_claims <= max(1, math.ceil(0.05 * len(decisions))),
+        fragmented_claims,
+        "fragmented confident held-out wins remain near zero",
+    )
+    rows.append(
+        {
+            "gate": "overall",
+            "passed": all(bool(row["passed"]) for row in rows),
+            "observed": f"{sum(bool(row['passed']) for row in rows)}/{len(rows)} gates passed",
+            "criterion": "all held-out IMM-vs-fragmented gates pass",
+        }
+    )
+    return pd.DataFrame(rows)
+
+
+def _last_heldout_value(rows: pd.DataFrame) -> float:
+    if rows.empty or "heldout_log_likelihood" not in rows:
+        return np.nan
+    values = pd.to_numeric(rows["heldout_log_likelihood"], errors="coerce").dropna()
+    return float(values.iloc[-1]) if not values.empty else np.nan
+
+
 def aggregate_cell_split_heldout_scores(
     score_glob: str,
     outdir: Path,
@@ -518,6 +735,11 @@ def aggregate_cell_split_heldout_scores(
     cell_split_family_margin_summary(decisions).to_csv(outdir / "cell_split_heldout_family_margin_summary.csv", index=False)
     cell_split_family_margin_summary(decisions, group_cols=("rat",)).to_csv(outdir / "rat_cell_split_heldout_summary.csv", index=False)
     cell_split_control_gate_summary(scores, decisions).to_csv(outdir / "cell_split_control_gate_summary.csv", index=False)
+    imm_decisions = cell_split_heldout_imm_vs_fragmented_decisions(scores, margin_threshold=margin_threshold)
+    imm_decisions.to_csv(outdir / "cell_split_heldout_imm_vs_fragmented.csv", index=False)
+    cell_split_heldout_imm_vs_fragmented_summary(imm_decisions).to_csv(outdir / "cell_split_heldout_imm_vs_fragmented_summary.csv", index=False)
+    cell_split_heldout_imm_vs_fragmented_summary(imm_decisions, group_cols=("rat",)).to_csv(outdir / "rat_cell_split_heldout_imm_vs_fragmented_summary.csv", index=False)
+    cell_split_heldout_imm_vs_fragmented_gate_summary(imm_decisions).to_csv(outdir / "cell_split_heldout_imm_vs_fragmented_gate_summary.csv", index=False)
     return scores
 
 

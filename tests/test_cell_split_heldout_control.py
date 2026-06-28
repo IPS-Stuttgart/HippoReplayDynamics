@@ -14,6 +14,9 @@ from cell_split_heldout_control import (  # noqa: E402
     cell_split_control_gate_summary,
     cell_split_family_margin_decisions,
     cell_split_family_margin_summary,
+    cell_split_heldout_imm_vs_fragmented_decisions,
+    cell_split_heldout_imm_vs_fragmented_gate_summary,
+    cell_split_heldout_imm_vs_fragmented_summary,
     _flush_partial_outputs,
     _initialize_partial_outputs,
     _split_indices_for_shard,
@@ -77,6 +80,55 @@ def test_cell_split_boolean_string_false_rows_are_not_exact_comparable():
     assert bool(gates.loc["nontrajectory_claims_near_zero", "passed"])
 
 
+def test_cell_split_heldout_imm_vs_fragmented_tables_and_gates():
+    scores = pd.DataFrame(
+        [
+            *_event_split_rows("Rat1/Open1", 0, 0, stationary=0.0, trajectory=10.0),
+            *_event_split_rows("Rat1/Open1", 0, 1, stationary=0.0, trajectory=12.0),
+            *_event_split_rows("Rat2/Open1", 1, 0, stationary=1.0, trajectory=11.0),
+            *_event_split_rows("Rat2/Open1", 1, 1, stationary=1.0, trajectory=13.0),
+        ]
+    )
+
+    decisions = cell_split_heldout_imm_vs_fragmented_decisions(scores, margin_threshold=1.5)
+    summary = cell_split_heldout_imm_vs_fragmented_summary(decisions)
+    rat_summary = cell_split_heldout_imm_vs_fragmented_summary(decisions, group_cols=("rat",))
+    gates = cell_split_heldout_imm_vs_fragmented_gate_summary(decisions)
+
+    assert decisions["delta_imm_minus_fragmented_heldout"].tolist() == [2.0, 2.0, 2.0, 2.0]
+    assert decisions["imm_raw_win"].tolist() == [True, True, True, True]
+    assert decisions["imm_confident_win"].tolist() == [True, True, True, True]
+    assert decisions["fragmented_confident_win"].tolist() == [False, False, False, False]
+    assert summary.iloc[0]["split_event_rows"] == 4
+    assert summary.iloc[0]["events"] == 2
+    assert summary.iloc[0]["median_delta_imm_minus_fragmented_heldout"] == 2.0
+    assert rat_summary["median_delta_imm_minus_fragmented_heldout"].tolist() == [2.0, 2.0]
+    assert bool(gates.set_index("gate").loc["overall", "passed"])
+
+
+def test_cell_split_heldout_imm_vs_fragmented_ignores_noncomparable_rows():
+    rows = _event_split_rows("Rat1/Open1", 0, 0, stationary=0.0, trajectory=10.0)
+    rows.append(
+        {
+            **_event_split_rows("Rat1/Open1", 0, 0, stationary=0.0, trajectory=1000.0)[3],
+            "heldout_log_likelihood": 1000.0,
+            "log_evidence": 1000.0,
+            "evidence_support": "candidate_pruned_lower_bound",
+            "evidence_comparable": "False",
+        }
+    )
+    for row in rows[:-1]:
+        row["evidence_support"] = "exact_full_grid"
+        row["evidence_comparable"] = "True"
+    scores = pd.DataFrame(rows)
+
+    decisions = cell_split_heldout_imm_vs_fragmented_decisions(scores)
+
+    assert decisions.iloc[0]["heldout_logZ_first_order_imm"] == 10.0
+    assert decisions.iloc[0]["heldout_logZ_fragmented"] == 8.0
+    assert decisions.iloc[0]["delta_imm_minus_fragmented_heldout"] == 2.0
+
+
 def test_cell_split_heldout_aggregate_writes_primary_outputs(tmp_path):
     score_path = tmp_path / "scores.csv"
     pd.DataFrame(
@@ -102,6 +154,10 @@ def test_cell_split_heldout_aggregate_writes_primary_outputs(tmp_path):
         "cell_split_heldout_family_margin_summary.csv",
         "rat_cell_split_heldout_summary.csv",
         "cell_split_control_gate_summary.csv",
+        "cell_split_heldout_imm_vs_fragmented.csv",
+        "cell_split_heldout_imm_vs_fragmented_summary.csv",
+        "rat_cell_split_heldout_imm_vs_fragmented_summary.csv",
+        "cell_split_heldout_imm_vs_fragmented_gate_summary.csv",
     ):
         assert (out / expected).exists()
 
@@ -126,6 +182,10 @@ def test_cell_split_heldout_workflow_exposes_control_outputs():
         "cell_split_heldout_family_margin_summary.csv",
         "rat_cell_split_heldout_summary.csv",
         "cell_split_control_gate_summary.csv",
+        "cell_split_heldout_imm_vs_fragmented.csv",
+        "cell_split_heldout_imm_vs_fragmented_summary.csv",
+        "rat_cell_split_heldout_imm_vs_fragmented_summary.csv",
+        "cell_split_heldout_imm_vs_fragmented_gate_summary.csv",
     ):
         assert expected in workflow
 

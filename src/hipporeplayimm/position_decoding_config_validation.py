@@ -18,6 +18,7 @@ import numpy as np
 _PATCHED_FLAG = "_position_decoding_config_validation_patch_applied"
 _VALIDATE_WRAPPER_FLAG = "_position_decoding_config_validation_validate_wrapper"
 _MASK_WRAPPER_FLAG = "_position_decoding_config_validation_mask_wrapper"
+_COUNTS_WRAPPER_FLAG = "_position_decoding_config_validation_counts_wrapper"
 
 
 def apply_position_decoding_config_validation_patch() -> None:
@@ -27,9 +28,11 @@ def apply_position_decoding_config_validation_patch() -> None:
 
     current_validate = validation.validate_session_position_decoding
     current_mask_encoder = validation.fit_place_field_encoding_for_position_mask
+    current_spike_counts_for_window = validation._spike_counts_for_window
     validate_is_current = bool(getattr(current_validate, _VALIDATE_WRAPPER_FLAG, False))
     mask_is_current = bool(getattr(current_mask_encoder, _MASK_WRAPPER_FLAG, False))
-    if getattr(validation, _PATCHED_FLAG, False) and validate_is_current and mask_is_current:
+    counts_is_current = bool(getattr(current_spike_counts_for_window, _COUNTS_WRAPPER_FLAG, False))
+    if getattr(validation, _PATCHED_FLAG, False) and validate_is_current and mask_is_current and counts_is_current:
         return
 
     if not validate_is_current:
@@ -39,6 +42,7 @@ def apply_position_decoding_config_validation_patch() -> None:
         def validate_session_position_decoding_with_config_validation(session: Any, config: Any = None) -> Any:
             config = validation.PositionDecodingConfig() if config is None else config
             config = _validated_position_decoding_config(config)
+            _validate_position_decoding_cell_ids(session, config.encoding)
             return original_validate_session_position_decoding(session, config)
 
         setattr(validate_session_position_decoding_with_config_validation, _VALIDATE_WRAPPER_FLAG, True)
@@ -51,10 +55,24 @@ def apply_position_decoding_config_validation_patch() -> None:
         def fit_place_field_encoding_for_position_mask_with_mask_validation(session: Any, train_frame_mask: Any, config: Any = None) -> Any:
             position = validation._clean_position(session.position)
             mask = _validated_train_frame_mask(train_frame_mask, position.shape[0])
-            return original_fit_place_field_encoding_for_position_mask(session, mask, config)
+            encoding_config = validation.EncodingConfig() if config is None else config
+            _validate_position_decoding_cell_ids(session, encoding_config)
+            return original_fit_place_field_encoding_for_position_mask(session, mask, encoding_config)
 
         setattr(fit_place_field_encoding_for_position_mask_with_mask_validation, _MASK_WRAPPER_FLAG, True)
         validation.fit_place_field_encoding_for_position_mask = fit_place_field_encoding_for_position_mask_with_mask_validation
+
+    if not counts_is_current:
+        original_spike_counts_for_window = current_spike_counts_for_window
+
+        @wraps(original_spike_counts_for_window)
+        def spike_counts_for_window_with_cell_id_validation(session: Any, encoding: Any, start: float, end: float) -> Any:
+            _validate_position_decoding_cell_ids(session, encoding.config)
+            _coerce_integral_ids(getattr(encoding, "cell_ids"), "encoding.cell_ids")
+            return original_spike_counts_for_window(session, encoding, start, end)
+
+        setattr(spike_counts_for_window_with_cell_id_validation, _COUNTS_WRAPPER_FLAG, True)
+        validation._spike_counts_for_window = spike_counts_for_window_with_cell_id_validation
 
     setattr(validation, _PATCHED_FLAG, True)
 
@@ -94,6 +112,36 @@ def _validated_train_frame_mask(train_frame_mask: Any, expected_length: int) -> 
     if not np.all((numeric == 0.0) | (numeric == 1.0)):
         raise ValueError("train_frame_mask must contain boolean or 0/1 values")
     return numeric.astype(bool)
+
+
+def _validate_position_decoding_cell_ids(session: Any, encoding_config: Any) -> None:
+    """Reject lossy cell IDs before position-decoding helpers cast to integers."""
+
+    _validate_session_spike_cell_ids(session)
+    if bool(getattr(encoding_config, "use_excitatory", True)):
+        _validate_optional_integral_ids(getattr(session, "excitatory_neurons", np.empty(0)), "excitatory_neurons")
+    _validate_optional_integral_ids(getattr(session, "inhibitory_neurons", np.empty(0)), "inhibitory_neurons")
+
+
+def _validate_session_spike_cell_ids(session: Any) -> None:
+    spikes = np.asarray(getattr(session, "spikes", np.empty((0, 2))))
+    if spikes.size == 0:
+        return
+    if spikes.ndim != 2 or spikes.shape[1] < 2:
+        raise ValueError("spikes must be two-dimensional with at least time and cell-id columns")
+    _coerce_integral_ids(spikes[:, 1], "spike cell IDs")
+
+
+def _validate_optional_integral_ids(values: Any, name: str) -> None:
+    arr = np.asarray(values)
+    if arr.size:
+        _coerce_integral_ids(arr.reshape(-1), name)
+
+
+def _coerce_integral_ids(values: Any, name: str) -> np.ndarray:
+    from .emission_cell_id_validation import _coerce_integral_ids as coerce
+
+    return coerce(values, name)
 
 
 def _positive_finite_scalar(name: str, value: Any) -> float:

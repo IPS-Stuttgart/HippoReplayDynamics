@@ -9,6 +9,7 @@ _COUNT_WRAPPER_ATTR = "_simulation_recovery_count_validation_wrapper"
 _FINITE_SCALAR_WRAPPER_ATTR = "_simulation_recovery_positive_finite_scalar_validation_wrapper"
 _LATENT_PATH_WRAPPER_ATTR = "_simulation_recovery_latent_path_n_time_validation_wrapper"
 _REPLAY_EVENT_WRAPPER_ATTR = "_simulation_recovery_replay_event_n_time_validation_wrapper"
+_PRIOR_WRAPPER_ATTR = "_simulation_recovery_valid_bins_prior_validation_wrapper"
 _ORIGINAL_ATTR = "__hipporeplayimm_original__"
 
 
@@ -19,6 +20,7 @@ def apply_simulation_recovery_count_validation_patch() -> None:
     _patch_simulate_latent_path(simulation_recovery)
     _patch_simulate_replay_event(simulation_recovery)
     _patch_emissions_from_counts(simulation_recovery)
+    _patch_valid_bins_and_prior(simulation_recovery)
     simulation_recovery._count_validation_patch_applied = True
 
 
@@ -143,6 +145,23 @@ def _patch_emissions_from_counts(simulation_recovery: Any) -> None:
     simulation_recovery.emissions_from_counts = emissions_from_counts_with_validated_counts
 
 
+def _patch_valid_bins_and_prior(simulation_recovery: Any) -> None:
+    current = simulation_recovery._valid_bins_and_prior
+    if getattr(current, _PRIOR_WRAPPER_ATTR, False):
+        return
+
+    original = getattr(current, _ORIGINAL_ATTR, current)
+
+    @wraps(original)
+    def valid_bins_and_prior_with_validated_occupancy(encoding: Any):
+        _validated_occupancy_vector(encoding)
+        return original(encoding)
+
+    setattr(valid_bins_and_prior_with_validated_occupancy, _PRIOR_WRAPPER_ATTR, True)
+    setattr(valid_bins_and_prior_with_validated_occupancy, _ORIGINAL_ATTR, original)
+    simulation_recovery._valid_bins_and_prior = valid_bins_and_prior_with_validated_occupancy
+
+
 def _validated_count_matrix(counts: Any, *, n_cells: int) -> np.ndarray:
     if _contains_boolean_values(counts):
         raise ValueError("counts must contain numeric integer counts, not boolean values")
@@ -161,6 +180,33 @@ def _validated_count_matrix(counts: Any, *, n_cells: int) -> np.ndarray:
     if not np.all(np.isclose(values, rounded, rtol=0.0, atol=0.0)):
         raise ValueError("counts must contain integer-valued counts")
     return np.asarray(rounded, dtype=int)
+
+
+def _validated_occupancy_vector(encoding: Any) -> np.ndarray:
+    try:
+        n_bins_raw = getattr(encoding, "n_bins")
+    except AttributeError as exc:
+        raise ValueError("encoding.n_bins is required") from exc
+    n_bins = _positive_integer_scalar("encoding.n_bins", n_bins_raw)
+
+    try:
+        occupancy_raw = getattr(encoding, "occupancy_s")
+    except AttributeError as exc:
+        raise ValueError("encoding.occupancy_s is required") from exc
+    if _contains_boolean_values(occupancy_raw):
+        raise ValueError("occupancy_s must contain finite nonnegative values")
+    try:
+        occupancy = np.asarray(occupancy_raw, dtype=float)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("occupancy_s must contain finite nonnegative values") from exc
+
+    if occupancy.ndim != 1:
+        raise ValueError("occupancy_s must be a one-dimensional vector")
+    if occupancy.shape[0] != n_bins:
+        raise ValueError("occupancy_s length must match encoding.n_bins")
+    if not np.all(np.isfinite(occupancy)) or np.any(occupancy < 0.0):
+        raise ValueError("occupancy_s must contain finite nonnegative values")
+    return occupancy
 
 
 def _contains_boolean_values(values: Any) -> bool:

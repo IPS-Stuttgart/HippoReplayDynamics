@@ -44,12 +44,15 @@ def _header_float(header: dict[str, str], key: str, default: float) -> float:
 
 
 def _header_int(header: dict[str, str], key: str, default: int) -> int:
-    """Parse Axona integer header values via the exponent-aware float parser."""
+    """Parse Axona integer-valued header fields without rounding fractions."""
 
     value = _header_float(header, key, float(default))
     if not math.isfinite(value):
         return int(default)
-    return int(round(value))
+    rounded = round(value)
+    if not math.isclose(value, rounded, rel_tol=0.0, abs_tol=0.0):
+        return int(default)
+    return int(rounded)
 
 
 def apply_axona_data_end_footer_patch() -> None:

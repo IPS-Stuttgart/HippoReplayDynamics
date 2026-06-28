@@ -11,6 +11,7 @@ or tabular configuration files.
 from __future__ import annotations
 
 from dataclasses import replace
+from decimal import Decimal, InvalidOperation
 from functools import wraps
 
 import numpy as np
@@ -68,27 +69,63 @@ def _coerce_optional_nonnegative_integer(value: object, name: str) -> int | None
     if value is None:
         return None
     if isinstance(value, (bool, np.bool_)):
-        raise ValueError(f"{name} must be a non-negative integer")
+        _raise_invalid_nonnegative_integer(name)
 
     try:
         scalar = np.asarray(value)
     except (TypeError, ValueError) as exc:
-        raise ValueError(f"{name} must be a non-negative integer") from exc
+        _raise_invalid_nonnegative_integer(name, exc)
     if scalar.ndim != 0:
-        raise ValueError(f"{name} must be a non-negative integer")
+        _raise_invalid_nonnegative_integer(name)
     if np.issubdtype(scalar.dtype, np.bool_):
-        raise ValueError(f"{name} must be a non-negative integer")
+        _raise_invalid_nonnegative_integer(name)
 
-    item = scalar.item()
+    return _coerce_scalar_nonnegative_integer(scalar.item(), name)
+
+
+def _coerce_scalar_nonnegative_integer(item: object, name: str) -> int:
     if isinstance(item, (bool, np.bool_)):
-        raise ValueError(f"{name} must be a non-negative integer")
+        _raise_invalid_nonnegative_integer(name)
+    if isinstance(item, (int, np.integer)):
+        candidate = int(item)
+        if candidate < 0:
+            _raise_invalid_nonnegative_integer(name)
+        return candidate
+    if isinstance(item, Decimal):
+        return _coerce_decimal_nonnegative_integer(item, name)
+    if isinstance(item, (str, bytes)):
+        text = item.decode().strip() if isinstance(item, bytes) else item.strip()
+        return _coerce_text_nonnegative_integer(text, name)
+
     try:
         numeric = float(item)
     except (TypeError, ValueError, OverflowError) as exc:
-        raise ValueError(f"{name} must be a non-negative integer") from exc
+        _raise_invalid_nonnegative_integer(name, exc)
     if not np.isfinite(numeric) or not numeric.is_integer() or numeric < 0.0:
-        raise ValueError(f"{name} must be a non-negative integer")
+        _raise_invalid_nonnegative_integer(name)
     return int(numeric)
+
+
+def _coerce_text_nonnegative_integer(text: str, name: str) -> int:
+    if not text:
+        _raise_invalid_nonnegative_integer(name)
+    try:
+        decimal = Decimal(text)
+    except (InvalidOperation, ValueError) as exc:
+        _raise_invalid_nonnegative_integer(name, exc)
+    return _coerce_decimal_nonnegative_integer(decimal, name)
+
+
+def _coerce_decimal_nonnegative_integer(decimal: Decimal, name: str) -> int:
+    if not decimal.is_finite() or decimal < 0 or decimal != decimal.to_integral_value():
+        _raise_invalid_nonnegative_integer(name)
+    return int(decimal)
+
+
+def _raise_invalid_nonnegative_integer(name: str, exc: Exception | None = None) -> None:
+    if exc is None:
+        raise ValueError(f"{name} must be a non-negative integer")
+    raise ValueError(f"{name} must be a non-negative integer") from exc
 
 
 __all__ = [

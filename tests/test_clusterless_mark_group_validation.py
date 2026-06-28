@@ -8,6 +8,7 @@ from hipporeplayimm.clusterless import ClusterlessMarkConfig, ClusterlessMarkEnc
 from hipporeplayimm.data import ReplaySession, SpikeMarkData
 
 
+
 def _encoding_with_group_ids(group_ids: np.ndarray) -> ClusterlessMarkEncoding:
     return ClusterlessMarkEncoding(
         x_edges=np.array([0.0, 1.0]),
@@ -28,6 +29,7 @@ def _encoding_with_group_ids(group_ids: np.ndarray) -> ClusterlessMarkEncoding:
         group_mark_mean=np.zeros((len(group_ids), 1, 1)),
         group_mark_variance=np.ones((len(group_ids), 1, 1)),
     )
+
 
 
 def _session_with_mark_groups(group_ids: np.ndarray) -> ReplaySession:
@@ -59,11 +61,13 @@ def _session_with_mark_groups(group_ids: np.ndarray) -> ReplaySession:
     )
 
 
+
 def test_clusterless_mark_likelihood_rejects_boolean_group_ids():
     encoding = _encoding_with_group_ids(np.array([0, 1]))
 
     with pytest.raises(ValueError, match="boolean"):
         encoding.log_mark_likelihood(np.array([[0.0]]), group_ids=np.array([True]))
+
 
 
 def test_clusterless_mark_likelihood_rejects_mixed_python_boolean_group_ids():
@@ -73,11 +77,13 @@ def test_clusterless_mark_likelihood_rejects_mixed_python_boolean_group_ids():
         encoding._coerce_group_indices([True, 2], n_marks=2)
 
 
+
 def test_clusterless_mark_likelihood_rejects_out_of_range_group_ids():
     encoding = _encoding_with_group_ids(np.array([0, 1]))
 
     with pytest.raises(ValueError, match="integer identifier range"):
         encoding.log_mark_likelihood(np.array([[0.0]]), group_ids=np.array([1e100]))
+
 
 
 def test_clusterless_mark_likelihood_maps_object_string_group_ids_numerically():
@@ -88,11 +94,13 @@ def test_clusterless_mark_likelihood_maps_object_string_group_ids_numerically():
     assert group_indices.tolist() == [2, 1, 0]
 
 
+
 def test_clusterless_tetrode_group_extraction_rejects_boolean_group_ids():
     session = _session_with_mark_groups(np.array([True, False]))
 
     with pytest.raises(ValueError, match="boolean"):
         _mark_group_ids_for_config(session, ClusterlessMarkConfig(mark_group_by="tetrode"))
+
 
 
 def test_clusterless_tetrode_group_extraction_rejects_mixed_python_boolean_group_ids():
@@ -102,3 +110,28 @@ def test_clusterless_tetrode_group_extraction_rejects_mixed_python_boolean_group
 
     with pytest.raises(ValueError, match="boolean"):
         _mark_group_ids_for_config(session, ClusterlessMarkConfig(mark_group_by="tetrode"))
+
+
+
+def test_clusterless_mark_group_validation_patch_refreshes_stale_helpers(monkeypatch):
+    import hipporeplayimm
+    import hipporeplayimm.clusterless as clusterless
+
+    def stale_mark_group_ids_for_config(session, config):
+        return np.asarray([True, False])
+
+    def stale_coerce_group_indices(self, group_ids, n_marks: int):
+        return np.full(int(n_marks), -1, dtype=int)
+
+    monkeypatch.setattr(clusterless, "_mark_group_ids_for_config", stale_mark_group_ids_for_config)
+    monkeypatch.setattr(clusterless.ClusterlessMarkEncoding, "_coerce_group_indices", stale_coerce_group_indices)
+
+    hipporeplayimm.apply_runtime_patches()
+
+    session = _session_with_mark_groups(np.array([True, False]))
+    with pytest.raises(ValueError, match="boolean"):
+        clusterless._mark_group_ids_for_config(session, ClusterlessMarkConfig(mark_group_by="tetrode"))
+
+    encoding = _encoding_with_group_ids(np.array([0, 1]))
+    with pytest.raises(ValueError, match="boolean"):
+        encoding._coerce_group_indices([True], n_marks=1)

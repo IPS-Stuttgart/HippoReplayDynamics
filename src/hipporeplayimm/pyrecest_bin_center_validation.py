@@ -165,8 +165,15 @@ def apply_pyrecest_bin_center_validation_patch() -> None:
     setattr(pyrecest_models, _PATCHED_FLAG, True)
 
 
+def _as_array(value: object) -> np.ndarray:
+    try:
+        return np.asarray(value)
+    except ValueError:
+        return np.asarray(value, dtype=object)
+
+
 def _is_bool_scalar(value: object) -> bool:
-    array = np.asarray(value)
+    array = _as_array(value)
     if array.shape != ():
         return False
     if np.issubdtype(array.dtype, np.bool_):
@@ -179,8 +186,23 @@ def _is_bool_scalar(value: object) -> bool:
     return False
 
 
+def _is_bool_array(value: object) -> bool:
+    array = _as_array(value)
+    if array.shape == ():
+        return False
+    if np.issubdtype(array.dtype, np.bool_):
+        return True
+    if array.dtype == object:
+        return any(isinstance(item, (bool, np.bool_)) for item in array.flat)
+    return False
+
+
+def _is_scalar_value(value: object) -> bool:
+    return _as_array(value).shape == ()
+
+
 def _validate_probability(value: object, name: str, original_validate) -> None:
-    if _is_bool_scalar(value):
+    if _is_bool_scalar(value) or _is_bool_array(value) or not _is_scalar_value(value):
         raise ValueError(f"{name} must lie in [0, 1]")
     try:
         original_validate(value, name)
@@ -189,9 +211,9 @@ def _validate_probability(value: object, name: str, original_validate) -> None:
 
 
 def _validate_positive_int(value: object, name: str, original_validate) -> None:
-    if _is_bool_scalar(value):
+    if _is_bool_scalar(value) or _is_bool_array(value):
         raise ValueError(f"{name} must be a positive integer")
-    value_array = np.asarray(value)
+    value_array = _as_array(value)
     if value_array.shape != ():
         raise ValueError(f"{name} must be a positive integer")
     try:
@@ -201,7 +223,7 @@ def _validate_positive_int(value: object, name: str, original_validate) -> None:
 
 
 def _validate_positive_float(value: object, name: str, original_validate) -> None:
-    if _is_bool_scalar(value):
+    if _is_bool_scalar(value) or _is_bool_array(value) or not _is_scalar_value(value):
         raise ValueError(f"{name} must be finite and positive")
     try:
         original_validate(value, name)
@@ -210,8 +232,10 @@ def _validate_positive_float(value: object, name: str, original_validate) -> Non
 
 
 def _validate_nonnegative_float(value: object, name: str, original_validate) -> None:
-    if _is_bool_scalar(value):
+    if _is_bool_scalar(value) or _is_bool_array(value):
         raise TypeError(f"{name} must be numeric, not boolean")
+    if not _is_scalar_value(value):
+        raise ValueError(f"{name} must be finite and nonnegative")
     try:
         original_validate(value, name)
     except (TypeError, ValueError) as exc:

@@ -1,4 +1,4 @@
-"""Normalize legacy simulation-recovery status values in evidence reporting."""
+"""Normalize legacy simulation-recovery status and evidence-comparison values."""
 
 from __future__ import annotations
 
@@ -14,6 +14,7 @@ _CORE_WRAPPER_FLAG = "_evidence_status_coercion_core_wrapper"
 _CERTIFIED_RECOVERY_PATCHED_FLAG = "_certified_recovery_status_coercion_patch_applied"
 _RECOVERY_DIAGNOSTICS_PATCHED_FLAG = "_recovery_diagnostics_status_coercion_patch_applied"
 _MISSING_STATUS_VALUES = {"", "nan", "na", "n/a", "none", "null", "<na>"}
+_EXPLICIT_FALSE_BOOL_VALUES = {"0", "0.0", "false", "f", "no", "n", "off"}
 
 
 def apply_evidence_status_coercion_patch() -> None:
@@ -56,7 +57,14 @@ def apply_evidence_status_coercion_patch() -> None:
         return reporting.EXACT_EVIDENCE_SUPPORT
 
     def ensure_evidence_support_columns(df: pd.DataFrame) -> pd.DataFrame:
-        """Add comparable-evidence flags with consistent legacy-status handling."""
+        """Add comparable-evidence flags with consistent legacy-status handling.
+
+        Older score tables can contain an explicit ``evidence_comparable=False``
+        flag without the newer ``evidence_support`` label.  Do not infer exact
+        full-grid support for those rows: the explicit non-comparable flag is the
+        only trustworthy provenance, so keep the row out of exact-evidence model
+        normalization until a support label is supplied.
+        """
 
         out = df.copy()
         if out.empty:
@@ -66,10 +74,22 @@ def apply_evidence_status_coercion_patch() -> None:
         inferred = out.apply(evidence_support_from_row, axis=1)
         if "evidence_support" in out:
             existing = out["evidence_support"].astype(object)
-            missing = existing.map(reporting._is_missing_evidence_support)
-            out["evidence_support"] = existing.where(~missing, inferred)
+            missing_support = existing.map(reporting._is_missing_evidence_support)
+            out["evidence_support"] = existing.where(~missing_support, inferred)
         else:
+            missing_support = pd.Series(True, index=out.index)
             out["evidence_support"] = inferred
+
+        explicit_noncomparable_without_support = _explicit_noncomparable_without_support_mask(
+            out,
+            missing_support=missing_support,
+        )
+        if explicit_noncomparable_without_support.any():
+            out.loc[
+                explicit_noncomparable_without_support,
+                "evidence_support",
+            ] = reporting.EVIDENCE_COMPARISON_UNKNOWN
+
         status_ok = _status_success_mask(out)
         finite_evidence = reporting._finite_evidence_series(out)
         out["evidence_comparison"] = out["evidence_support"].map(
@@ -217,6 +237,31 @@ def _finite_log_evidence_mask(frame: pd.DataFrame) -> pd.Series:
         return pd.Series(True, index=frame.index)
     values = pd.to_numeric(frame["log_evidence"], errors="coerce")
     return pd.Series(np.isfinite(values.to_numpy(dtype=float)), index=frame.index)
+
+
+def _explicit_noncomparable_without_support_mask(
+    frame: pd.DataFrame,
+    *,
+    missing_support: pd.Series,
+) -> pd.Series:
+    """Return rows with explicit non-comparable flags but no support label."""
+
+    if "evidence_comparable" not in frame.columns:
+        return pd.Series(False, index=frame.index)
+    missing = pd.Series(missing_support, index=frame.index).astype(bool)
+    explicit_false = frame["evidence_comparable"].map(_is_explicit_false_value).astype(bool)
+    return missing & explicit_false
+
+
+def _is_explicit_false_value(value: object) -> bool:
+    if isinstance(value, (bool, np.bool_)):
+        return not bool(value)
+    if _is_missing_scalar(value):
+        return False
+    if isinstance(value, (int, float, np.integer, np.floating)):
+        numeric = float(value)
+        return bool(np.isfinite(numeric) and numeric == 0.0)
+    return str(value).strip().lower() in _EXPLICIT_FALSE_BOOL_VALUES
 
 
 def _status_is_success_or_missing(value: object) -> bool:

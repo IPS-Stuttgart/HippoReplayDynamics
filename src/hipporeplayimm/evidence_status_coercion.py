@@ -39,9 +39,7 @@ def apply_evidence_status_coercion_patch() -> None:
             value = row.get(column)
             if _is_missing_scalar(value):
                 continue
-            text = str(value).strip()
-            if text:
-                labels.append(text)
+            labels.extend(reporting._evidence_support_labels(value))
 
         for non_exact_support in (
             reporting.TRUNCATED_EVIDENCE_SUPPORT,

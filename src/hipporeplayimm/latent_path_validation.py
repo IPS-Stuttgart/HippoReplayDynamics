@@ -179,6 +179,8 @@ def _checked_count_array(counts: Any) -> np.ndarray:
         raise ValueError("counts must be a two-dimensional array")
     if raw.shape[0] == 0:
         raise ValueError("counts must contain at least one time bin")
+    if _contains_boolean_values(raw):
+        raise ValueError("counts must contain numeric integer counts, not boolean values")
     try:
         numeric = np.asarray(raw, dtype=float)
     except (TypeError, ValueError) as exc:
@@ -188,3 +190,13 @@ def _checked_count_array(counts: Any) -> np.ndarray:
     if not np.all(np.isclose(numeric, np.rint(numeric), rtol=0.0, atol=0.0)):
         raise ValueError("counts must contain integer-valued counts")
     return numeric.astype(int)
+
+
+def _contains_boolean_values(values: Any) -> bool:
+    try:
+        raw = np.asarray(values, dtype=object)
+    except (TypeError, ValueError):
+        raw = np.asarray(values, dtype=object)
+    if raw.size == 0:
+        return False
+    return any(isinstance(value, (bool, np.bool_)) for value in raw.reshape(-1))

@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import numpy as np
 import pytest
 
@@ -20,3 +22,15 @@ def _encoding() -> EncodingModel:
 def test_emissions_from_counts_rejects_empty_time_axis() -> None:
     with pytest.raises(ValueError, match="at least one time bin"):
         emissions_from_counts(_encoding(), np.zeros((0, 1), dtype=int), dt=0.02)
+
+
+@pytest.mark.parametrize(
+    "counts",
+    [
+        np.array([[True]], dtype=bool),
+        np.array([[False]], dtype=object),
+    ],
+)
+def test_emissions_from_counts_rejects_boolean_count_values(counts: np.ndarray) -> None:
+    with pytest.raises(ValueError, match="boolean"):
+        emissions_from_counts(_encoding(), counts, dt=0.02)

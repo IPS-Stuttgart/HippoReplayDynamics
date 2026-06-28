@@ -14,6 +14,8 @@ import pandas as pd
 from .encoding import EmissionConfig
 
 _MISSING_METADATA_STRINGS = {"", "nan", "na", "n/a", "none", "null", "<na>"}
+_EMISSION_CONFIG_MARKER = "_spike_rate_metadata_emission_config_wrapper"
+_BENCHMARK_METADATA_MARKER = "_spike_rate_metadata_wrapped"
 
 
 def apply_spike_rate_metadata_patch() -> None:
@@ -26,43 +28,47 @@ def apply_spike_rate_metadata_patch() -> None:
 
     pyrecest_numeric_guard.apply_pyrecest_numeric_metadata_guard_patch()
 
-    if getattr(score_meta, "_spike_rate_metadata_patch_applied", False):
-        return
+    current_reader = getattr(score_meta, "emission_config_for_scores", None)
+    if getattr(current_reader, _EMISSION_CONFIG_MARKER, False):
+        emission_config_for_scores = current_reader
+    else:
 
-    def emission_config_for_scores(
-        scores_frame: pd.DataFrame,
-        fallback: EmissionConfig,
-    ) -> EmissionConfig:
-        """Build an emission config from canonical or legacy score metadata."""
+        def emission_config_for_scores(
+            scores_frame: pd.DataFrame,
+            fallback: EmissionConfig,
+        ) -> EmissionConfig:
+            """Build an emission config from canonical or legacy score metadata."""
 
-        return EmissionConfig(
-            time_bin_s=_unique_float_from_columns(
-                scores_frame,
-                ("emission_time_bin_s", "time_bin_s"),
-                fallback.time_bin_s,
-            ),
-            spike_rate_scale=_unique_float_from_columns(
-                scores_frame,
-                ("emission_spike_rate_scale", "spike_rate_scale"),
-                fallback.spike_rate_scale,
-            ),
-            likelihood_temperature=_unique_float_from_columns(
-                scores_frame,
-                ("emission_likelihood_temperature", "likelihood_temperature"),
-                fallback.likelihood_temperature,
-            ),
-            negative_binomial_overdispersion=_unique_float_from_columns(
-                scores_frame,
-                ("emission_negative_binomial_overdispersion", "negative_binomial_overdispersion"),
-                fallback.negative_binomial_overdispersion,
-            ),
-        )
+            return EmissionConfig(
+                time_bin_s=_unique_float_from_columns(
+                    scores_frame,
+                    ("emission_time_bin_s", "time_bin_s"),
+                    fallback.time_bin_s,
+                ),
+                spike_rate_scale=_unique_float_from_columns(
+                    scores_frame,
+                    ("emission_spike_rate_scale", "spike_rate_scale"),
+                    fallback.spike_rate_scale,
+                ),
+                likelihood_temperature=_unique_float_from_columns(
+                    scores_frame,
+                    ("emission_likelihood_temperature", "likelihood_temperature"),
+                    fallback.likelihood_temperature,
+                ),
+                negative_binomial_overdispersion=_unique_float_from_columns(
+                    scores_frame,
+                    ("emission_negative_binomial_overdispersion", "negative_binomial_overdispersion"),
+                    fallback.negative_binomial_overdispersion,
+                ),
+            )
 
-    score_meta.emission_config_for_scores = emission_config_for_scores
+        setattr(emission_config_for_scores, _EMISSION_CONFIG_MARKER, True)
+        score_meta.emission_config_for_scores = emission_config_for_scores
+
     gt._emission_config_for_scores = emission_config_for_scores
 
     base_metadata = bench._benchmark_config_metadata
-    if not getattr(base_metadata, "_spike_rate_metadata_wrapped", False):
+    if not getattr(base_metadata, _BENCHMARK_METADATA_MARKER, False):
 
         def benchmark_config_metadata(config) -> dict[str, object]:
             metadata = dict(base_metadata(config))
@@ -71,7 +77,7 @@ def apply_spike_rate_metadata_patch() -> None:
             metadata["emission_negative_binomial_overdispersion"] = float(config.emissions.negative_binomial_overdispersion)
             return metadata
 
-        benchmark_config_metadata._spike_rate_metadata_wrapped = True
+        setattr(benchmark_config_metadata, _BENCHMARK_METADATA_MARKER, True)
         bench._benchmark_config_metadata = benchmark_config_metadata
 
     score_meta._spike_rate_metadata_patch_applied = True

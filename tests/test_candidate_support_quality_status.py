@@ -55,6 +55,25 @@ def test_non_comparable_diagnostic_evidence_support_is_unknown_quality() -> None
     assert not labelled["candidate_support_quality_good"].any()
 
 
+def test_boolean_candidate_mass_diagnostic_is_unknown_quality() -> None:
+    rows = pd.DataFrame(
+        [
+            {
+                "model": "state-space-imm",
+                "status": "success",
+                "diagnostic_state_space_imm_evidence_support": "truncated_full_grid",
+                "diagnostic_state_space_imm_min_candidate_log_mass": True,
+            }
+        ]
+    )
+
+    labelled = add_candidate_support_quality_columns(rows)
+
+    assert pd.isna(labelled.loc[0, "candidate_min_log_mass"])
+    assert labelled.loc[0, "candidate_support_quality"] == "conservative_unknown"
+    assert not bool(labelled.loc[0, "candidate_support_quality_good"])
+
+
 def test_exact_success_rows_remain_good_support_quality() -> None:
     rows = pd.DataFrame(
         [{"model": "m", "status": "success", "evidence_support": "exact_full_grid"}]

@@ -67,3 +67,31 @@ def test_position_window_counts_reject_fractional_spike_cell_ids() -> None:
 
     with pytest.raises(ValueError, match="spike cell IDs.*integer-valued"):
         _spike_counts_for_window(session, _encoding(), 0.0, 1.0)
+
+
+def test_position_window_counts_preserve_unsorted_encoding_cell_id_rows() -> None:
+    session = _minimal_session(
+        np.array(
+            [
+                [0.10, 20],
+                [0.20, 10],
+                [0.30, 20],
+                [0.40, 99],
+            ],
+            dtype=float,
+        )
+    )
+    config = EncodingConfig(min_speed_cm_s=0.0, smoothing_sigma_bins=0.0, use_excitatory=False)
+    encoding = EncodingModel(
+        x_edges=np.array([0.0, 1.0], dtype=float),
+        y_edges=np.array([0.0, 1.0], dtype=float),
+        bin_centers=np.array([[0.5, 0.5]], dtype=float),
+        rates_hz=np.ones((2, 1), dtype=float),
+        occupancy_s=np.ones(1, dtype=float),
+        cell_ids=np.array([20, 10], dtype=int),
+        config=config,
+    )
+
+    counts = _spike_counts_for_window(session, encoding, 0.0, 0.35)
+
+    np.testing.assert_array_equal(counts, np.array([2, 1]))

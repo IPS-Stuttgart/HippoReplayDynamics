@@ -16,6 +16,10 @@ _NUMERIC_ENCODING_CONFIG_FIELDS = (
     "rate_floor_hz",
     "arena_padding_cm",
 )
+_BOOLEAN_ENCODING_CONFIG_FIELDS = (
+    "use_excitatory",
+    "exclude_ripple_intervals",
+)
 
 
 def apply_encoding_grid_extra_columns_patch() -> None:
@@ -54,6 +58,8 @@ def _apply_encoding_bool_validation_patch(encoding) -> None:
     def validate_encoding_config(config):
         for name in _NUMERIC_ENCODING_CONFIG_FIELDS:
             _reject_boolean_numeric(getattr(config, name), name)
+        for name in _BOOLEAN_ENCODING_CONFIG_FIELDS:
+            _require_boolean_scalar(getattr(config, name), name)
         return original_validate_encoding_config(config)
 
     def time_bin_edges(start, end, time_bin_s):
@@ -99,6 +105,28 @@ def _apply_encoding_bool_validation_patch(encoding) -> None:
 def _reject_boolean_numeric(value: Any, name: str) -> None:
     if _contains_boolean(value):
         raise TypeError(f"{name} must be numeric, not boolean")
+
+
+def _require_boolean_scalar(value: Any, name: str) -> None:
+    if not _is_boolean_scalar(value):
+        raise TypeError(f"{name} must be boolean")
+
+
+def _is_boolean_scalar(value: Any) -> bool:
+    if isinstance(value, (bool, np.bool_)):
+        return True
+    if not isinstance(value, np.ndarray):
+        return False
+    if value.ndim != 0:
+        return False
+    if np.issubdtype(value.dtype, np.bool_):
+        return True
+    if value.dtype == object:
+        try:
+            return isinstance(value.item(), (bool, np.bool_))
+        except ValueError:
+            return False
+    return False
 
 
 def _contains_boolean(value: Any) -> bool:

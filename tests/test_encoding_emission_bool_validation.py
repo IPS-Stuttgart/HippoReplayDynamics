@@ -60,6 +60,22 @@ def test_encoding_config_rejects_boolean_numeric_fields(tmp_path, field_name):
         fit_place_field_encoding(_minimal_session(tmp_path), config)
 
 
+@pytest.mark.parametrize("field_name", ["use_excitatory", "exclude_ripple_intervals"])
+@pytest.mark.parametrize("value", ["False", 1, np.asarray([True])])
+def test_encoding_config_rejects_non_boolean_flag_fields(tmp_path, field_name, value):
+    config = EncodingConfig(min_speed_cm_s=0.0, **{field_name: value})
+
+    with pytest.raises(TypeError, match=field_name):
+        fit_place_field_encoding(_minimal_session(tmp_path), config)
+
+
+@pytest.mark.parametrize("field_name", ["use_excitatory", "exclude_ripple_intervals"])
+def test_encoding_config_accepts_numpy_boolean_flags(tmp_path, field_name):
+    config = EncodingConfig(min_speed_cm_s=0.0, **{field_name: np.bool_(False)})
+
+    fit_place_field_encoding(_minimal_session(tmp_path), config)
+
+
 def test_emission_time_bin_width_rejects_boolean_scalar():
     with pytest.raises(TypeError, match="time_bin_s"):
         _time_bin_edges(0.0, 1.0, True)

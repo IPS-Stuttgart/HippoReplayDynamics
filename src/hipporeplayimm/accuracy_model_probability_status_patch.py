@@ -14,6 +14,8 @@ from .evidence_status_coercion import _normalize_status_value
 _STATUS_PATCHED_FLAG = "_model_probability_status_patch_applied"
 _REVERSE_PATCHED_FLAG = "_accuracy_reverse_duration_patch_applied"
 _REVERSE_ORIGINAL_ATTR = "_accuracy_reverse_duration_original"
+_VALID_STATE_MASK_PATCHED_FLAG = "_accuracy_valid_state_mask_config_patch_applied"
+_VALID_STATE_MASK_ORIGINAL_ATTR = "_accuracy_valid_state_mask_config_original"
 
 
 def apply_model_probability_status_patch() -> None:
@@ -22,6 +24,7 @@ def apply_model_probability_status_patch() -> None:
     from . import accuracy_upgrades
 
     _patch_model_probability_diagnostics(accuracy_upgrades)
+    _patch_valid_state_mask_from_encoding(accuracy_upgrades)
     _patch_reverse_emissions(accuracy_upgrades)
 
 
@@ -157,6 +160,78 @@ def _probability_entropy(probabilities: np.ndarray) -> float:
     if not np.any(positive):
         return float("nan")
     return float(-np.sum(probs[positive] * np.log(probs[positive])))
+
+
+def _is_boolean_scalar(value: object) -> bool:
+    if isinstance(value, (bool, np.bool_)):
+        return True
+    try:
+        array = np.asarray(value)
+    except (TypeError, ValueError):
+        return False
+    if array.ndim != 0:
+        return False
+    if np.issubdtype(array.dtype, np.bool_):
+        return True
+    if array.dtype == object:
+        try:
+            return isinstance(array.item(), (bool, np.bool_))
+        except ValueError:
+            return False
+    return False
+
+
+def _validate_finite_nonnegative_numeric_parameter(name: str, value: object) -> float:
+    if _is_boolean_scalar(value):
+        raise TypeError(f"{name} must be numeric, not boolean")
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must be finite and nonnegative") from exc
+    if not np.isfinite(numeric) or numeric < 0.0:
+        raise ValueError(f"{name} must be finite and nonnegative")
+    return numeric
+
+
+def _validate_optional_fraction_parameter(name: str, value: object | None) -> None:
+    if value is None:
+        return
+    if _is_boolean_scalar(value):
+        raise TypeError(f"{name} must be numeric, not boolean")
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must lie in (0, 1]") from exc
+    if not np.isfinite(numeric) or not 0.0 < numeric <= 1.0:
+        raise ValueError(f"{name} must lie in (0, 1]")
+
+
+def _validate_boolean_parameter(name: str, value: object) -> None:
+    if not _is_boolean_scalar(value):
+        raise TypeError(f"{name} must be boolean")
+
+
+def _patch_valid_state_mask_from_encoding(accuracy_upgrades) -> None:
+    """Reject ambiguous valid-state mask parameters before support construction."""
+
+    current = accuracy_upgrades.valid_state_mask_from_encoding
+    if getattr(current, _VALID_STATE_MASK_PATCHED_FLAG, False):
+        return
+
+    @wraps(current)
+    def valid_state_mask_from_encoding(encoding, config=None):
+        if config is not None:
+            _validate_finite_nonnegative_numeric_parameter("min_occupancy_s", getattr(config, "min_occupancy_s"))
+            _validate_optional_fraction_parameter(
+                "keep_top_occupancy_fraction",
+                getattr(config, "keep_top_occupancy_fraction", None),
+            )
+            _validate_boolean_parameter("require_finite_rates", getattr(config, "require_finite_rates"))
+        return current(encoding, config)
+
+    setattr(valid_state_mask_from_encoding, _VALID_STATE_MASK_PATCHED_FLAG, True)
+    setattr(valid_state_mask_from_encoding, _VALID_STATE_MASK_ORIGINAL_ATTR, current)
+    accuracy_upgrades.valid_state_mask_from_encoding = valid_state_mask_from_encoding
 
 
 def _patch_reverse_emissions(accuracy_upgrades) -> None:

@@ -1,13 +1,4 @@
-"""Validate spike-cell IDs during emission construction.
-
-`build_emissions()` historically cast ripple spike cell IDs to ``int`` before
-matching them against encoding rows.  That silently mapped corrupted fractional
-IDs such as ``1.5`` onto a real cell ``1`` and counted the spike for the wrong
-unit.  This patch validates both encoding and spike cell IDs as finite
-integer-valued identifiers before any row lookup can truncate them.  It also
-installs a count-summary guard so ``LogEmissionTensor.n_spikes`` cannot silently
-disagree with the validated ``spike_counts`` tensor.
-"""
+"""Validate cell identifiers used while constructing emissions."""
 
 from __future__ import annotations
 
@@ -34,10 +25,6 @@ def _contains_boolean_values(values: Any) -> bool:
     return False
 
 
-def _contains_boolean_ids(values: np.ndarray) -> bool:
-    return _contains_boolean_values(values)
-
-
 def _reject_boolean_poisson_inputs(spike_counts: Any, rates_hz: Any) -> None:
     if _contains_boolean_values(spike_counts):
         raise ValueError("spike_counts must contain numeric integer counts, not boolean values")
@@ -53,7 +40,7 @@ def _coerce_integral_ids(values: Any, name: str) -> np.ndarray:
         raise ValueError(f"{name} must be one-dimensional")
     if ids.size == 0:
         return np.empty(0, dtype=int)
-    if _contains_boolean_ids(ids):
+    if _contains_boolean_values(ids):
         raise ValueError(f"{name} must not contain boolean identifiers")
     try:
         numeric = np.asarray(ids, dtype=float)
@@ -62,7 +49,7 @@ def _coerce_integral_ids(values: Any, name: str) -> np.ndarray:
     if not np.all(np.isfinite(numeric)):
         raise ValueError(f"{name} must contain finite integer identifiers")
     rounded = np.rint(numeric)
-    if not np.all(np.isclose(numeric, rounded, rtol=0.0, atol=1e-9)):
+    if not np.all(numeric == rounded):
         raise ValueError(f"{name} must be integer-valued")
     integer_info = np.iinfo(np.dtype(int))
     if not np.all((rounded >= integer_info.min) & (rounded <= integer_info.max)):
@@ -71,12 +58,11 @@ def _coerce_integral_ids(values: Any, name: str) -> np.ndarray:
 
 
 def _cell_id_row_indices(cell_ids: np.ndarray, spike_cell_ids: np.ndarray) -> np.ndarray:
-    """Map spike cell IDs to encoding rows without lossy integer casts."""
+    """Map cell IDs to encoding rows without lossy integer casts."""
 
     available = _coerce_integral_ids(cell_ids, "encoding.cell_ids")
     if np.unique(available).shape[0] != available.shape[0]:
         raise ValueError("encoding.cell_ids must be unique")
-
     requested = _coerce_integral_ids(spike_cell_ids, "spike cell IDs")
     row_by_cell_id = {int(cell_id): index for index, cell_id in enumerate(available)}
     return np.fromiter(
@@ -84,6 +70,32 @@ def _cell_id_row_indices(cell_ids: np.ndarray, spike_cell_ids: np.ndarray) -> np
         dtype=int,
         count=requested.shape[0],
     )
+
+
+def _validate_session_cell_ids(session: Any, encoding: Any, ripple_event: Any, *, source: str) -> None:
+    encoding_cell_ids = _coerce_integral_ids(encoding.cell_ids, "encoding.cell_ids")
+    spikes = np.asarray(session.spikes)
+    if spikes.size == 0 or encoding_cell_ids.size == 0:
+        return
+    if spikes.ndim != 2 or spikes.shape[1] < 2:
+        raise ValueError("spikes must be two-dimensional with at least time and cell-id columns")
+    in_window = (spikes[:, 0] >= ripple_event.start) & (spikes[:, 0] < ripple_event.end)
+    if np.any(in_window):
+        _coerce_integral_ids(spikes[in_window, 1], source)
+
+
+def _validate_edge_window_cell_ids(session: Any, encoding: Any, edges: Any) -> None:
+    encoding_cell_ids = _coerce_integral_ids(encoding.cell_ids, "encoding.cell_ids")
+    spikes = np.asarray(session.spikes)
+    if spikes.size == 0 or encoding_cell_ids.size == 0:
+        return
+    if spikes.ndim != 2 or spikes.shape[1] < 2:
+        raise ValueError("spikes must be two-dimensional with at least time and cell-id columns")
+    edge_values = np.asarray(edges, dtype=float)
+    if edge_values.ndim == 1 and edge_values.shape[0] >= 2:
+        in_window = (spikes[:, 0] >= edge_values[0]) & (spikes[:, 0] < edge_values[-1])
+        if np.any(in_window):
+            _coerce_integral_ids(spikes[in_window, 1], "spike cell IDs")
 
 
 def _apply_poisson_input_validation_patch(encoding_module: Any, kd_module: Any) -> None:
@@ -98,9 +110,6 @@ def _apply_poisson_input_validation_patch(encoding_module: Any, kd_module: Any) 
         setattr(validate_poisson_inputs, _POISSON_INPUT_PATCHED_FLAG, True)
         encoding_module._validate_poisson_inputs = validate_poisson_inputs
         setattr(encoding_module, _POISSON_INPUT_PATCHED_FLAG, True)
-
-    # kd_reference imports the validator by value, so keep its alias in sync with
-    # the patched encoding validator.
     kd_module._validate_poisson_inputs = encoding_module._validate_poisson_inputs
     setattr(kd_module, _POISSON_INPUT_PATCHED_FLAG, True)
 
@@ -121,17 +130,8 @@ def apply_emission_cell_id_validation_patch() -> None:
 
         @wraps(original_build_emissions)
         def build_emissions(session, encoding, ripple, config=None):
-            encoding_cell_ids = _coerce_integral_ids(encoding.cell_ids, "encoding.cell_ids")
-
-            spikes = np.asarray(session.spikes)
-            if spikes.size and encoding_cell_ids.size > 0:
-                if spikes.ndim != 2 or spikes.shape[1] < 2:
-                    raise ValueError("spikes must be two-dimensional with at least time and cell-id columns")
-                ripple_event = encoding_module._coerce_ripple_event(session, ripple)
-                in_ripple = (spikes[:, 0] >= ripple_event.start) & (spikes[:, 0] < ripple_event.end)
-                if np.any(in_ripple):
-                    _coerce_integral_ids(spikes[in_ripple, 1], "spike cell IDs")
-
+            ripple_event = encoding_module._coerce_ripple_event(session, ripple)
+            _validate_session_cell_ids(session, encoding, ripple_event, source="spike cell IDs")
             return original_build_emissions(session, encoding, ripple, config)
 
         encoding_module._cell_id_row_indices = _cell_id_row_indices
@@ -143,17 +143,8 @@ def apply_emission_cell_id_validation_patch() -> None:
 
         @wraps(original_build_kd_emissions)
         def build_kd_emissions(session, encoding, ripple, time_bin_s, spike_rate_scale=1.0):
-            encoding_cell_ids = _coerce_integral_ids(encoding.cell_ids, "encoding.cell_ids")
-
-            spikes = np.asarray(session.spikes)
-            if spikes.size and encoding_cell_ids.size > 0:
-                if spikes.ndim != 2 or spikes.shape[1] < 2:
-                    raise ValueError("spikes must be two-dimensional with at least time and cell-id columns")
-                ripple_event = kd_module._coerce_ripple_event(session, ripple)
-                in_ripple = (spikes[:, 0] >= ripple_event.start) & (spikes[:, 0] < ripple_event.end)
-                if np.any(in_ripple):
-                    _coerce_integral_ids(spikes[in_ripple, 1], "spike cell IDs")
-
+            ripple_event = kd_module._coerce_ripple_event(session, ripple)
+            _validate_session_cell_ids(session, encoding, ripple_event, source="spike cell IDs")
             return original_build_kd_emissions(
                 session,
                 encoding,
@@ -170,18 +161,7 @@ def apply_emission_cell_id_validation_patch() -> None:
 
         @wraps(original_sorted_spike_counts_for_edges)
         def _sorted_spike_counts_for_edges(session, encoding, edges):
-            encoding_cell_ids = _coerce_integral_ids(encoding.cell_ids, "encoding.cell_ids")
-
-            spikes = np.asarray(session.spikes)
-            if spikes.size and encoding_cell_ids.size > 0:
-                if spikes.ndim != 2 or spikes.shape[1] < 2:
-                    raise ValueError("spikes must be two-dimensional with at least time and cell-id columns")
-                edge_values = np.asarray(edges, dtype=float)
-                if edge_values.ndim == 1 and edge_values.shape[0] >= 2:
-                    in_window = (spikes[:, 0] >= edge_values[0]) & (spikes[:, 0] < edge_values[-1])
-                    if np.any(in_window):
-                        _coerce_integral_ids(spikes[in_window, 1], "spike cell IDs")
-
+            _validate_edge_window_cell_ids(session, encoding, edges)
             return original_sorted_spike_counts_for_edges(session, encoding, edges)
 
         extensions_module._sorted_spike_counts_for_edges = _sorted_spike_counts_for_edges

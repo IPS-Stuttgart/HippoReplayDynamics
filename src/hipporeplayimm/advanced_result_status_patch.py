@@ -103,9 +103,25 @@ def apply_advanced_result_status_patch() -> None:
     setattr(diagnostics, _PATCHED_FLAG, True)
 
 
+def _contains_boolean_values(values: np.ndarray) -> bool:
+    """Return True when a count-like matrix contains actual boolean values."""
+
+    if np.issubdtype(values.dtype, np.bool_):
+        return True
+    if values.dtype == object:
+        return any(isinstance(item, (bool, np.bool_)) for item in values.flat)
+    return False
+
+
 def _validated_nonnegative_matrix(values: np.ndarray, name: str) -> np.ndarray:
     try:
-        array = np.asarray(values, dtype=float)
+        raw_values = np.asarray(values)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must contain numeric values") from exc
+    if _contains_boolean_values(raw_values):
+        raise ValueError(f"{name} must contain numeric count values, not booleans")
+    try:
+        array = raw_values.astype(float, copy=False)
     except (TypeError, ValueError) as exc:
         raise ValueError(f"{name} must contain numeric values") from exc
     if array.ndim != 2:

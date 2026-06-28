@@ -12,6 +12,9 @@ _PATCH_ATTR = "_first_order_imm_diagnostics_validation_patch"
 _ORIGINAL_ATTR = "_first_order_imm_diagnostics_validation_original"
 _DURATION_ALIAS_ATTR = "_first_order_imm_duration_diagnostics_alias_patch"
 _DURATION_SOURCE_ATTR = "_first_order_imm_duration_diagnostics_source_patch"
+_DURATION_SCORE_ATTR = "_first_order_imm_duration_diagnostics_score_patch"
+_RECORDING_ENABLED_ATTR = "_first_order_imm_duration_diagnostics_recording_enabled"
+_LAST_DURATIONS_ATTR = "_first_order_imm_diagnostic_transition_durations"
 _DIAGNOSTIC_TRANSITION_DURATIONS: ContextVar[np.ndarray | None] = ContextVar(
     "first_order_imm_diagnostic_transition_durations",
     default=None,
@@ -201,14 +204,31 @@ def _wrap_helper(
     return validated_first_order_imm_content_diagnostics
 
 
+def _duration_occupancy_module():
+    return sys.modules.get("hipporeplayimm.duration_occupancy")
+
+
+def _clear_duration_occupancy_transition_durations() -> None:
+    _DIAGNOSTIC_TRANSITION_DURATIONS.set(None)
+    module = _duration_occupancy_module()
+    if module is not None:
+        setattr(module, _LAST_DURATIONS_ATTR, None)
+
+
 def _stored_duration_occupancy_durations(n_time: int) -> np.ndarray | None:
     values = _DIAGNOSTIC_TRANSITION_DURATIONS.get()
     _DIAGNOSTIC_TRANSITION_DURATIONS.set(None)
+    if values is None:
+        module = _duration_occupancy_module()
+        if module is None:
+            return None
+        values = getattr(module, _LAST_DURATIONS_ATTR, None)
+        _clear_duration_occupancy_transition_durations()
     return _matching_transition_durations(values, n_time)
 
 
 def _record_duration_occupancy_transition_durations() -> None:
-    module = sys.modules.get("hipporeplayimm.duration_occupancy")
+    module = _duration_occupancy_module()
     if module is None or not hasattr(module, "transition_durations_s"):
         return
     current = module.transition_durations_s
@@ -217,12 +237,42 @@ def _record_duration_occupancy_transition_durations() -> None:
 
     def recording_transition_durations(emissions):
         durations = current(emissions)
-        _DIAGNOSTIC_TRANSITION_DURATIONS.set(np.asarray(durations, dtype=float).copy())
+        if getattr(module, _RECORDING_ENABLED_ATTR, False):
+            recorded = np.asarray(durations, dtype=float).copy()
+            _DIAGNOSTIC_TRANSITION_DURATIONS.set(recorded)
+            setattr(module, _LAST_DURATIONS_ATTR, recorded)
+        else:
+            _DIAGNOSTIC_TRANSITION_DURATIONS.set(None)
+            setattr(module, _LAST_DURATIONS_ATTR, None)
         return durations
 
     setattr(recording_transition_durations, _DURATION_SOURCE_ATTR, True)
     setattr(recording_transition_durations, _ORIGINAL_ATTR, current)
     module.transition_durations_s = recording_transition_durations
+
+
+def _record_duration_occupancy_score_context() -> None:
+    module = _duration_occupancy_module()
+    if module is None or not hasattr(module, "_score_state_space_duration_with_occupancy"):
+        return
+    current = module._score_state_space_duration_with_occupancy
+    if getattr(current, _DURATION_SCORE_ATTR, False):
+        return
+
+    def score_with_first_order_duration_recording(*args, **kwargs):
+        model = args[0] if args else kwargs.get("self")
+        previous = bool(getattr(module, _RECORDING_ENABLED_ATTR, False))
+        setattr(module, _RECORDING_ENABLED_ATTR, getattr(model, "mode", None) == "first-order-imm")
+        try:
+            return current(*args, **kwargs)
+        finally:
+            setattr(module, _RECORDING_ENABLED_ATTR, previous)
+            if not previous:
+                _clear_duration_occupancy_transition_durations()
+
+    setattr(score_with_first_order_duration_recording, _DURATION_SCORE_ATTR, True)
+    setattr(score_with_first_order_duration_recording, _ORIGINAL_ATTR, current)
+    module._score_state_space_duration_with_occupancy = score_with_first_order_duration_recording
 
 
 def _wrap_duration_occupancy_alias(
@@ -239,21 +289,24 @@ def _wrap_duration_occupancy_alias(
         bin_centers: np.ndarray,
         dt_s: float,
     ) -> dict[str, float | int]:
-        durations = getattr(dt_s, "transition_durations", None)
-        if durations is None:
-            mode = np.asarray(mode_posterior)
-            n_time = int(mode.shape[0]) if mode.ndim else 0
-            durations = _stored_duration_occupancy_durations(n_time)
-        if durations is not None:
-            from .duration_dynamics import DurationFloat
+        try:
+            durations = getattr(dt_s, "transition_durations", None)
+            if durations is None:
+                mode = np.asarray(mode_posterior)
+                n_time = int(mode.shape[0]) if mode.ndim else 0
+                durations = _stored_duration_occupancy_durations(n_time)
+            if durations is not None:
+                from .duration_dynamics import DurationFloat
 
-            dt_s = DurationFloat(float(dt_s), durations)
-        return helper(
-            mode_posterior,
-            trajectory_log_posterior,
-            bin_centers,
-            dt_s,
-        )
+                dt_s = DurationFloat(float(dt_s), durations)
+            return helper(
+                mode_posterior,
+                trajectory_log_posterior,
+                bin_centers,
+                dt_s,
+            )
+        finally:
+            _clear_duration_occupancy_transition_durations()
 
     setattr(duration_aware_first_order_imm_content_diagnostics, _DURATION_ALIAS_ATTR, True)
     setattr(duration_aware_first_order_imm_content_diagnostics, _ORIGINAL_ATTR, helper)
@@ -282,5 +335,6 @@ def apply_first_order_imm_diagnostics_validation_patch() -> None:
     helper = _wrap_helper(state_space_utils._first_order_imm_content_diagnostics)
     state_space_utils._first_order_imm_content_diagnostics = helper
     _record_duration_occupancy_transition_durations()
+    _record_duration_occupancy_score_context()
     _patch_loaded_alias("hipporeplayimm.state_space", helper)
     _patch_loaded_alias("hipporeplayimm.duration_occupancy", helper)

@@ -102,6 +102,25 @@ def test_transition_duration_guard_fills_only_missing_metadata() -> None:
     np.testing.assert_allclose(durations, np.array([0.02, 0.02], dtype=float))
 
 
+@pytest.mark.parametrize(
+    "bad_durations",
+    [
+        [True, True],
+        np.array([True, True], dtype=bool),
+        np.array([True, 0.02], dtype=object),
+    ],
+)
+def test_transition_duration_guard_rejects_boolean_metadata(bad_durations) -> None:
+    with pytest.raises(ValueError, match="not boolean"):
+        _coerce_transition_durations(bad_durations, n_time=3, fallback_dt=0.02)
+
+
+@pytest.mark.parametrize("bad_fallback_dt", [True, np.bool_(True), np.array(True)])
+def test_transition_duration_guard_rejects_boolean_fallback_dt(bad_fallback_dt) -> None:
+    with pytest.raises(ValueError, match="not boolean"):
+        _coerce_transition_durations([], n_time=3, fallback_dt=bad_fallback_dt)
+
+
 def test_transition_duration_guard_rejects_malformed_nonempty_metadata() -> None:
     with pytest.raises(ValueError, match="one finite positive value per transition"):
         _coerce_transition_durations([0.02], n_time=3, fallback_dt=0.02)

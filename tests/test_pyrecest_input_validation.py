@@ -64,6 +64,20 @@ def test_pyrecest_particle_model_rejects_boolean_numeric_parameters(kwargs: dict
         PyRecEstGoalParticleModel(**kwargs)
 
 
+@pytest.mark.parametrize(
+    ("kwargs", "match"),
+    [
+        ({"initial_velocity_sigma_cm_s": np.array([120.0])}, "initial_velocity_sigma_cm_s must be finite and positive"),
+        ({"process_noise_sigma_cm_s": np.array([True])}, "process_noise_sigma_cm_s must be finite and positive"),
+        ({"jump_probability": np.array([True])}, r"jump_probability must lie in \[0, 1\]"),
+        ({"position_proposal_probability": np.array([0.25])}, r"position_proposal_probability must lie in \[0, 1\]"),
+    ],
+)
+def test_pyrecest_particle_model_rejects_array_numeric_parameters(kwargs: dict[str, object], match: str) -> None:
+    with pytest.raises(ValueError, match=match):
+        PyRecEstGoalParticleModel(**kwargs)
+
+
 def test_pyrecest_score_rejects_mutated_boolean_particle_count_before_optional_import() -> None:
     emissions = _single_bin_emissions(n_bins=2)
     model = PyRecEstGoalParticleModel()
@@ -80,6 +94,7 @@ def test_pyrecest_score_rejects_mutated_boolean_particle_count_before_optional_i
         ({"jump_fraction": False}, ValueError, r"jump_fraction must lie in \[0, 1\]"),
         ({"momentum_velocity_decay": True}, TypeError, "not boolean"),
         ({"momentum_velocity_decay": np.array(True, dtype=object)}, TypeError, "not boolean"),
+        ({"momentum_velocity_decay": np.array([True])}, TypeError, "not boolean"),
     ],
 )
 def test_pyrecest_imm_model_rejects_boolean_numeric_parameters(

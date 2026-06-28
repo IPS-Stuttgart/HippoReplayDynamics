@@ -4,10 +4,15 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 from dataclasses import replace
+from functools import wraps
 import operator
 from typing import Any, Callable
 
 import numpy as np
+
+_EVIDENCE_ONLY_DIAGNOSTIC_PATCH_ATTR = "_duration_occupancy_evidence_only_diagnostics_patch_applied"
+_EVIDENCE_ONLY_DIAGNOSTIC_ORIGINAL_ATTR = "_duration_occupancy_evidence_only_diagnostics_original"
+_WRAPPER_DIAGNOSTIC_PATCH_ATTR = "_state_space_evidence_only_diagnostics_patch_applied"
 
 
 def apply_duration_occupancy_metadata_guard_patch() -> None:
@@ -17,6 +22,7 @@ def apply_duration_occupancy_metadata_guard_patch() -> None:
     from . import state_space_utils as _state_space_utils
 
     _apply_transition_duration_validation()
+    _patch_evidence_only_path_diagnostics(_duration_occupancy)
 
     if getattr(_duration_occupancy, "_metadata_guard_patch_applied", False):
         return
@@ -44,6 +50,84 @@ def apply_duration_occupancy_metadata_guard_patch() -> None:
     _duration_occupancy._candidate_selection_emissions = _candidate_selection_emissions
     _duration_occupancy._uniform_probabilities = _uniform_probabilities
     _duration_occupancy._metadata_guard_patch_applied = True
+
+
+def _patch_evidence_only_path_diagnostics(duration_occupancy: Any) -> None:
+    """Patch evidence-only path-model diagnostics without requiring state_space to be imported."""
+
+    scorer = getattr(duration_occupancy, "_score_state_space_duration_with_occupancy", None)
+    if scorer is None:
+        return
+    if getattr(scorer, _EVIDENCE_ONLY_DIAGNOSTIC_PATCH_ATTR, False) or getattr(scorer, _WRAPPER_DIAGNOSTIC_PATCH_ATTR, False):
+        return
+
+    @wraps(scorer)
+    def _score_state_space_duration_with_occupancy(
+        self,
+        emissions,
+        bin_centers,
+        candidate_indices=None,
+        *,
+        occupancy_s=None,
+        return_trajectory: bool = True,
+    ):
+        result = scorer(
+            self,
+            emissions,
+            bin_centers,
+            candidate_indices=candidate_indices,
+            occupancy_s=occupancy_s,
+            return_trajectory=return_trajectory,
+        )
+        if return_trajectory is False:
+            _mark_path_model_evidence_only(self, result)
+        return result
+
+    setattr(
+        _score_state_space_duration_with_occupancy,
+        _EVIDENCE_ONLY_DIAGNOSTIC_PATCH_ATTR,
+        True,
+    )
+    setattr(
+        _score_state_space_duration_with_occupancy,
+        _EVIDENCE_ONLY_DIAGNOSTIC_ORIGINAL_ATTR,
+        scorer,
+    )
+    duration_occupancy._score_state_space_duration_with_occupancy = _score_state_space_duration_with_occupancy
+
+
+def _mark_path_model_evidence_only(model: Any, result: Any) -> None:
+    diagnostics = dict(getattr(result, "diagnostics", {}) or {})
+    mode = str(getattr(model, "mode", diagnostics.get("state_space_mode", "")))
+    if mode in {"momentum", "momentum-exact-sparse"}:
+        diagnostics["state_space_momentum_trajectory_posterior"] = "not_returned_evidence_only"
+    elif mode == "imm":
+        diagnostics["state_space_imm_trajectory_posterior"] = "not_returned_evidence_only"
+    else:
+        return
+    result.diagnostics = diagnostics
+
+
+def _contains_boolean_values(values: object) -> bool:
+    if isinstance(values, (bool, np.bool_)):
+        return True
+    if isinstance(values, Iterable) and not isinstance(values, (str, bytes, bytearray)):
+        try:
+            if any(isinstance(value, (bool, np.bool_)) for value in values):
+                return True
+        except TypeError:
+            pass
+    try:
+        raw = np.asarray(values)
+    except (TypeError, ValueError):
+        raw = np.asarray(values, dtype=object)
+    if raw.size == 0:
+        return False
+    if np.issubdtype(raw.dtype, np.bool_):
+        return True
+    if raw.dtype == object:
+        return any(isinstance(value, (bool, np.bool_)) for value in raw.reshape(-1))
+    return False
 
 
 def _positive_integer_bin_count(value: object) -> int:
@@ -103,7 +187,7 @@ def _coerce_transition_durations(
     out = np.asarray(raw_values, dtype=float)
     if out.ndim != 1:
         raise ValueError("transition durations must be one-dimensional")
-    _validate_transition_durations(out)
+    _validate_transition_durations(raw_values)
     if out.shape != (expected,):
         raise ValueError(
             "transition durations must contain one finite positive value per transition; "
@@ -117,8 +201,8 @@ def _validated_decay_helper(helper: Callable[[Any, np.ndarray, float], np.ndarra
         return helper
 
     def duration_adjusted_decays(config: Any, durations: np.ndarray, reference_dt: float) -> np.ndarray:
-        durations = np.asarray(durations, dtype=float)
         _validate_transition_durations(durations)
+        durations = np.asarray(durations, dtype=float)
         return helper(config, durations, reference_dt)
 
     duration_adjusted_decays._transition_duration_validation_wrapped = True  # type: ignore[attr-defined]
@@ -126,6 +210,8 @@ def _validated_decay_helper(helper: Callable[[Any, np.ndarray, float], np.ndarra
 
 
 def _validate_transition_durations(durations: np.ndarray) -> None:
+    if _contains_boolean_values(durations):
+        raise ValueError("transition durations must be numeric durations, not boolean values")
     values = np.asarray(durations, dtype=float)
     if values.size == 0:
         return
@@ -134,6 +220,8 @@ def _validate_transition_durations(durations: np.ndarray) -> None:
 
 
 def _positive_finite_scalar(name: str, value: float) -> float:
+    if _contains_boolean_values(value):
+        raise ValueError(f"{name} must be a numeric duration, not boolean")
     scalar = float(value)
     if not np.isfinite(scalar) or scalar <= 0.0:
         raise ValueError(f"{name} must be finite and positive")

@@ -15,7 +15,7 @@ def _bool_parse_error(value: object) -> ValueError:
 
 
 def _numeric_parse_error(column: str) -> ValueError:
-    return ValueError(f"{column} must contain finite numeric values")
+    return ValueError(f"{column} must contain finite numeric metadata")
 
 
 def _parse_strict_bool(value: object) -> bool:

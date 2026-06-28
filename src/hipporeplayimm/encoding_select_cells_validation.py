@@ -11,6 +11,7 @@ files as floats.
 from __future__ import annotations
 
 from collections.abc import Iterable
+from functools import wraps
 
 import numpy as np
 
@@ -55,7 +56,9 @@ def apply_encoding_select_cells_validation_patch() -> None:
 
     from . import encoding
 
-    if getattr(encoding, _PATCHED_FLAG, False):
+    current = getattr(encoding.EncodingModel, "select_cells", None)
+    if getattr(current, _PATCHED_FLAG, False):
+        setattr(encoding, _PATCHED_FLAG, True)
         return
 
     def select_cells(self, cell_ids: Iterable[int | float]) -> "encoding.EncodingModel":
@@ -85,7 +88,10 @@ def apply_encoding_select_cells_validation_patch() -> None:
             config=self.config,
         )
 
-    encoding.EncodingModel.select_cells = select_cells
+    patched_select_cells = wraps(current)(select_cells) if callable(current) else select_cells
+    setattr(patched_select_cells, _PATCHED_FLAG, True)
+    setattr(patched_select_cells, "__hipporeplayimm_original__", current)
+    encoding.EncodingModel.select_cells = patched_select_cells
     setattr(encoding, _PATCHED_FLAG, True)
 
 

@@ -768,6 +768,8 @@ def emissions_from_counts(
     likelihood_temperature: float = 1.0,
     negative_binomial_overdispersion: float = 0.0,
 ) -> LogEmissionTensor:
+    if _contains_boolean_values(counts):
+        raise ValueError("counts must contain numeric integer counts, not boolean values")
     spike_counts = np.asarray(counts, dtype=int)
     dt = _positive_finite_scalar("dt", dt)
     spike_rate_scale = _positive_finite_scalar("spike_rate_scale", spike_rate_scale)
@@ -792,6 +794,20 @@ def emissions_from_counts(
         cell_ids=encoding.cell_ids,
         n_spikes=int(spike_counts.sum()),
     )
+
+
+def _contains_boolean_values(values: object) -> bool:
+    try:
+        raw = np.asarray(values)
+    except (TypeError, ValueError):
+        raw = np.asarray(values, dtype=object)
+    if raw.size == 0:
+        return False
+    if np.issubdtype(raw.dtype, np.bool_):
+        return True
+    if raw.dtype == object:
+        return any(isinstance(value, (bool, np.bool_)) for value in raw.reshape(-1))
+    return False
 
 
 def add_evidence_columns(df: pd.DataFrame) -> pd.DataFrame:

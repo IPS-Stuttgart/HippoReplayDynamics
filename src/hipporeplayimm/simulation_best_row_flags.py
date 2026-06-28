@@ -9,7 +9,13 @@ import numpy as np
 import pandas as pd
 
 
-_GROUP_COLUMNS = ("session", "event_index")
+_GROUP_COLUMNS = (
+    "session",
+    "event_index",
+    "window_index",
+    "benchmark_cell_split_index",
+    "event_window_variant",
+)
 _PATCHED_FLAG = "_simulation_best_row_flag_scope_patch_applied"
 _MISSING_STATUS_VALUES = {"", "nan", "na", "n/a", "none", "null", "<na>"}
 

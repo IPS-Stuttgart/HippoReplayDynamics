@@ -99,11 +99,8 @@ def _cell_id_row_indices(cell_ids: np.ndarray, spike_cell_ids: np.ndarray) -> np
     )
 
 
-def _encoding_cell_id_patch_current(encoding_module: Any) -> bool:
-    return (
-        getattr(encoding_module, "_cell_id_row_indices", None) is _cell_id_row_indices
-        and _is_marked_wrapper(getattr(encoding_module, "build_emissions", None), _BUILD_EMISSIONS_WRAPPER_MARKER)
-    )
+def _encoding_build_emissions_patch_current(encoding_module: Any) -> bool:
+    return _is_marked_wrapper(getattr(encoding_module, "build_emissions", None), _BUILD_EMISSIONS_WRAPPER_MARKER)
 
 
 def _kd_cell_id_patch_current(kd_module: Any) -> bool:
@@ -149,7 +146,7 @@ def apply_emission_cell_id_validation_patch() -> None:
     _apply_poisson_input_validation_patch(encoding_module, kd_module)
     n_spikes_validation.apply_log_emission_n_spikes_validation_patch()
 
-    if not _encoding_cell_id_patch_current(encoding_module):
+    if not _encoding_build_emissions_patch_current(encoding_module):
         original_build_emissions = encoding_module.build_emissions
 
         @wraps(original_build_emissions)

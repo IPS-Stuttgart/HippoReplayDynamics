@@ -1,9 +1,10 @@
 """Validate ``LogEmissionTensor`` summary fields after base construction.
 
-The base tensor permits ``-inf`` log-likelihood entries to mark impossible states,
-but ``NaN`` entries invalidate posterior normalization and evidence calculations.
-This patch also keeps the stored ``n_spikes`` summary consistent with the
-validated ``spike_counts`` tensor.
+The base tensor permits ``-inf`` log-likelihood entries to mark impossible
+spatial states, but ``NaN`` entries and rows with no finite spatial-bin
+likelihood invalidate posterior normalization and evidence calculations.  This
+patch also keeps the stored ``n_spikes`` summary consistent with the validated
+``spike_counts`` tensor.
 """
 
 from __future__ import annotations
@@ -35,11 +36,13 @@ def apply_log_emission_n_spikes_validation_patch() -> None:
 
 
 def _validate_log_likelihood(emissions: LogEmissionTensor) -> None:
-    """Reject NaN likelihood entries while preserving ``-inf`` impossible states."""
+    """Reject invalid likelihood rows while preserving ``-inf`` impossible states."""
 
     values = np.asarray(emissions.log_likelihood, dtype=float)
     if np.any(np.isnan(values)):
         raise ValueError("log_likelihood must not contain NaN values")
+    if not np.all(np.any(np.isfinite(values), axis=1)):
+        raise ValueError("every log_likelihood row must contain at least one finite spatial-bin value")
 
 
 def _contains_boolean_values(values: Any) -> bool:

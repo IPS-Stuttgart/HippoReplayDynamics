@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import sys
 from collections.abc import Callable
+from contextvars import ContextVar
 
 import numpy as np
 
@@ -14,6 +15,10 @@ _DURATION_SOURCE_ATTR = "_first_order_imm_duration_diagnostics_source_patch"
 _DURATION_SCORE_ATTR = "_first_order_imm_duration_diagnostics_score_patch"
 _RECORDING_ENABLED_ATTR = "_first_order_imm_duration_diagnostics_recording_enabled"
 _LAST_DURATIONS_ATTR = "_first_order_imm_diagnostic_transition_durations"
+_DIAGNOSTIC_TRANSITION_DURATIONS: ContextVar[np.ndarray | None] = ContextVar(
+    "first_order_imm_diagnostic_transition_durations",
+    default=None,
+)
 
 
 def _validate_first_order_imm_content_inputs(
@@ -204,17 +209,21 @@ def _duration_occupancy_module():
 
 
 def _clear_duration_occupancy_transition_durations() -> None:
+    _DIAGNOSTIC_TRANSITION_DURATIONS.set(None)
     module = _duration_occupancy_module()
     if module is not None:
         setattr(module, _LAST_DURATIONS_ATTR, None)
 
 
 def _stored_duration_occupancy_durations(n_time: int) -> np.ndarray | None:
-    module = _duration_occupancy_module()
-    if module is None:
-        return None
-    values = getattr(module, _LAST_DURATIONS_ATTR, None)
-    _clear_duration_occupancy_transition_durations()
+    values = _DIAGNOSTIC_TRANSITION_DURATIONS.get()
+    _DIAGNOSTIC_TRANSITION_DURATIONS.set(None)
+    if values is None:
+        module = _duration_occupancy_module()
+        if module is None:
+            return None
+        values = getattr(module, _LAST_DURATIONS_ATTR, None)
+        _clear_duration_occupancy_transition_durations()
     return _matching_transition_durations(values, n_time)
 
 
@@ -229,8 +238,11 @@ def _record_duration_occupancy_transition_durations() -> None:
     def recording_transition_durations(emissions):
         durations = current(emissions)
         if getattr(module, _RECORDING_ENABLED_ATTR, False):
-            setattr(module, _LAST_DURATIONS_ATTR, np.asarray(durations, dtype=float).copy())
+            recorded = np.asarray(durations, dtype=float).copy()
+            _DIAGNOSTIC_TRANSITION_DURATIONS.set(recorded)
+            setattr(module, _LAST_DURATIONS_ATTR, recorded)
         else:
+            _DIAGNOSTIC_TRANSITION_DURATIONS.set(None)
             setattr(module, _LAST_DURATIONS_ATTR, None)
         return durations
 

@@ -62,6 +62,8 @@ def apply_state_space_bin_center_validation_patch() -> None:
     score.__doc__ = getattr(previous_score, "__doc__", None)
     score.__module__ = getattr(previous_score, "__module__", __name__)
     setattr(score, _PATCHED_FLAG, True)
+    if getattr(previous_score, "_native_duration_occupancy_aware", False):
+        setattr(score, "_native_duration_occupancy_aware", True)
     setattr(score, "__hipporeplayimm_original__", previous_score)
     ss.StateSpaceReplayModel.score = score
 

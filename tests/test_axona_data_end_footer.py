@@ -23,8 +23,12 @@ def test_axona_header_float_parses_scientific_notation() -> None:
     assert _header_float({"pixels_per_metre": ".5e2"}, "pixels_per_metre", 0.0) == 50.0
 
 
-def test_axona_header_int_rounds_scientific_notation() -> None:
+def test_axona_header_int_accepts_integer_scientific_notation() -> None:
     assert _header_int({"num_pos_samples": "3e0"}, "num_pos_samples", 0) == 3
+
+
+def test_axona_header_int_does_not_round_fractional_metadata() -> None:
+    assert _header_int({"num_pos_samples": "3.5"}, "num_pos_samples", 0) == 0
 
 
 def test_axona_patch_refreshes_stale_flagged_functions(monkeypatch) -> None:

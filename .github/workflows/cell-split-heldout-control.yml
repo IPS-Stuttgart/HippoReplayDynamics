@@ -396,7 +396,11 @@ jobs:
             cell_split_heldout_family_margin_decisions.csv \
             cell_split_heldout_family_margin_summary.csv \
             rat_cell_split_heldout_summary.csv \
-            cell_split_control_gate_summary.csv; do
+            cell_split_control_gate_summary.csv \
+            cell_split_heldout_imm_vs_fragmented.csv \
+            cell_split_heldout_imm_vs_fragmented_summary.csv \
+            rat_cell_split_heldout_imm_vs_fragmented_summary.csv \
+            cell_split_heldout_imm_vs_fragmented_gate_summary.csv; do
             test -s "results/cell-split-heldout-control/${required_file}" || {
               echo "Missing results/cell-split-heldout-control/${required_file}" >&2
               exit 1
@@ -415,6 +419,12 @@ jobs:
           print(pd.read_csv(f"{root}/rat_cell_split_heldout_summary.csv").to_string(index=False))
           print("\nCell-split held-out control gates:")
           print(pd.read_csv(f"{root}/cell_split_control_gate_summary.csv").to_string(index=False))
+          print("\nHeld-out IMM-vs-fragmented summary:")
+          print(pd.read_csv(f"{root}/cell_split_heldout_imm_vs_fragmented_summary.csv").to_string(index=False))
+          print("\nRat held-out IMM-vs-fragmented summary:")
+          print(pd.read_csv(f"{root}/rat_cell_split_heldout_imm_vs_fragmented_summary.csv").to_string(index=False))
+          print("\nHeld-out IMM-vs-fragmented gates:")
+          print(pd.read_csv(f"{root}/cell_split_heldout_imm_vs_fragmented_gate_summary.csv").to_string(index=False))
           PY
 
       - name: Upload cell-split held-out control results

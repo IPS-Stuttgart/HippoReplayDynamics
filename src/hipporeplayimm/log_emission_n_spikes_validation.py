@@ -1,12 +1,14 @@
 """Validate ``LogEmissionTensor`` summary fields after base construction.
 
 The base tensor permits ``-inf`` log-likelihood entries to mark impossible states,
-but ``NaN`` entries poison posterior normalization and evidence calculations.  This
-patch also keeps the stored ``n_spikes`` summary consistent with the validated
-``spike_counts`` tensor.
+but ``NaN`` entries invalidate posterior normalization and evidence calculations.
+This patch also keeps the stored ``n_spikes`` summary consistent with the
+validated ``spike_counts`` tensor.
 """
 
 from __future__ import annotations
+
+from typing import Any
 
 import numpy as np
 
@@ -40,8 +42,25 @@ def _validate_log_likelihood(emissions: LogEmissionTensor) -> None:
         raise ValueError("log_likelihood must not contain NaN values")
 
 
+def _contains_boolean_values(values: Any) -> bool:
+    try:
+        raw = np.asarray(values)
+    except (TypeError, ValueError):
+        raw = np.asarray(values, dtype=object)
+    if raw.size == 0:
+        return False
+    if np.issubdtype(raw.dtype, np.bool_):
+        return True
+    if raw.dtype == object:
+        return any(isinstance(value, (bool, np.bool_)) for value in raw.reshape(-1))
+    return False
+
+
 def _validate_n_spikes(emissions: LogEmissionTensor) -> None:
     """Reject summary spike counts that disagree with ``spike_counts``."""
+
+    if _contains_boolean_values(emissions.spike_counts):
+        raise ValueError("spike_counts must be numeric counts, not boolean values")
 
     spike_counts = np.asarray(emissions.spike_counts, dtype=float)
     rounded_counts = np.rint(spike_counts)
@@ -49,6 +68,8 @@ def _validate_n_spikes(emissions: LogEmissionTensor) -> None:
         raise ValueError("spike_counts must be integer-valued")
 
     total_spikes = float(rounded_counts.sum())
+    if _contains_boolean_values(emissions.n_spikes):
+        raise ValueError("n_spikes must be a numeric count, not boolean")
     try:
         n_spikes = float(emissions.n_spikes)
     except (TypeError, ValueError) as exc:

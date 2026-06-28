@@ -11,6 +11,16 @@ _PATCH_ATTR = "_duration_occupancy_mode_transition_validation_patch"
 _ORIGINAL_ATTR = "_duration_occupancy_mode_transition_validation_original"
 
 
+def _contains_boolean_values(values: np.ndarray) -> bool:
+    """Return True for native or object-wrapped boolean matrix entries."""
+
+    if np.issubdtype(values.dtype, np.bool_):
+        return True
+    if values.dtype == object:
+        return any(isinstance(item, (bool, np.bool_)) for item in values.flat)
+    return False
+
+
 def _validate_mode_transition_sequence(
     mode_transitions: Sequence[Any],
     *,
@@ -26,7 +36,7 @@ def _validate_mode_transition_sequence(
     resolved: list[np.ndarray] = []
     for transition_index, matrix in enumerate(mode_transitions):
         raw_values = np.asarray(matrix)
-        if raw_values.dtype == np.bool_:
+        if _contains_boolean_values(raw_values):
             raise ValueError(
                 f"mode transition matrix {transition_index} must contain numeric probabilities, not booleans"
             )

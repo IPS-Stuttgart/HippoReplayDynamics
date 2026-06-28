@@ -49,6 +49,34 @@ def _nonnegative_integer_count(name: str, value: Any) -> int:
     return count
 
 
+def _optional_mass_threshold(name: str, value: Any) -> float | None:
+    """Return a numeric mass threshold without treating booleans as numbers."""
+
+    if value is None:
+        return None
+    if isinstance(value, (bool, np.bool_)):
+        raise TypeError(f"{name} must be a numeric probability, not boolean")
+    raw = np.asarray(value)
+    if raw.ndim != 0:
+        raise TypeError(f"{name} must be a numeric probability")
+    if np.issubdtype(raw.dtype, np.bool_):
+        raise TypeError(f"{name} must be a numeric probability, not boolean")
+    if raw.dtype == object:
+        try:
+            item = raw.item()
+        except ValueError:
+            item = None
+        if isinstance(item, (bool, np.bool_)):
+            raise TypeError(f"{name} must be a numeric probability, not boolean")
+    try:
+        numeric = float(raw)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise TypeError(f"{name} must be a numeric probability") from exc
+    if not np.isfinite(numeric):
+        raise ValueError(f"{name} must be finite")
+    return numeric
+
+
 def _positive_bin_count(n_bins: int) -> int:
     if isinstance(n_bins, (bool, np.bool_)):
         raise ValueError("n_bins must be a positive integer")
@@ -157,17 +185,18 @@ def apply_state_space_bin_count_validation_patch() -> None:
         max_k: int = 0,
     ) -> np.ndarray:
         top_k_count = None if top_k is None else _nonnegative_integer_count("top_k", top_k)
-        if mass_threshold is None or float(mass_threshold) <= 0.0:
+        threshold = _optional_mass_threshold("mass_threshold", mass_threshold)
+        if threshold is None or threshold <= 0.0:
             return original_mass_retaining_candidate_indices(
                 log_emission,
-                mass_threshold,
+                threshold,
                 top_k=top_k_count,
                 min_k=min_k,
                 max_k=max_k,
             )
         return original_mass_retaining_candidate_indices(
             log_emission,
-            mass_threshold,
+            threshold,
             top_k=top_k_count,
             min_k=_integer_count("min_k", min_k),
             max_k=_integer_count("max_k", max_k),

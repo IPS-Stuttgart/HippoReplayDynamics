@@ -20,6 +20,17 @@ _PYRECEST_IMM_DECAY_PATCHED_FLAG = "_pyrecest_imm_velocity_decay_validation_patc
 _ENCODING_PARAMETER_PATCHED_FLAG = "_encoding_parameter_validation_patch_applied"
 
 
+class _TrajectoryImmSwitchProbabilityOverride:
+    """Delegate a config object while overriding its momentum switch probability."""
+
+    def __init__(self, config: object, momentum_switch_probability: float) -> None:
+        self._config = config
+        self.trajectory_imm_momentum_switch_probability = float(momentum_switch_probability)
+
+    def __getattr__(self, name: str) -> object:
+        return getattr(self._config, name)
+
+
 def _is_boolean_scalar(value: object) -> bool:
     """Return True for Python, NumPy, and object-wrapped boolean scalars."""
 
@@ -109,6 +120,31 @@ def _validate_config_or_scalar_momentum_velocity_decay(config_or_decay: object) 
         _validate_config_momentum_velocity_decay(config_or_decay)
         return
     _validate_momentum_velocity_decay(config_or_decay)
+
+
+def _scaled_trajectory_imm_momentum_switch_probability(
+    config: object,
+    *,
+    base_stickiness: float,
+    step_stickiness: float,
+) -> float | None:
+    """Scale an explicit trajectory-IMM momentum switch by duration-aware switch mass."""
+
+    momentum_switch = getattr(config, "trajectory_imm_momentum_switch_probability", None)
+    if momentum_switch is None:
+        return None
+    momentum_probability = _validate_finite_nonnegative_parameter(
+        "trajectory_imm_momentum_switch_probability",
+        momentum_switch,
+    )
+    base_remaining = 1.0 - float(base_stickiness)
+    if momentum_probability > base_remaining + 1.0e-12:
+        raise ValueError("trajectory_imm_momentum_switch_probability cannot exceed 1 - stickiness")
+    if base_remaining <= 0.0:
+        return 0.0
+    step_remaining = max(0.0, 1.0 - float(step_stickiness))
+    momentum_fraction = momentum_probability / base_remaining
+    return min(step_remaining, momentum_fraction * step_remaining)
 
 
 def _validate_replay_calibration_max_gain(calibration: object | None) -> None:
@@ -351,9 +387,27 @@ def _apply_trajectory_imm_parameter_validation_patch() -> None:
 
     @wraps(original_mode_transition_matrices)
     def trajectory_imm_mode_transition_matrices(config, stickiness, durations):
-        _validate_unit_interval_parameter("trajectory_imm_mode_stickiness", stickiness)
-        _validate_finite_nonnegative_parameter("imm_switch_tau_s", getattr(config, "imm_switch_tau_s", 0.0))
-        return original_mode_transition_matrices(config, stickiness, durations)
+        stickiness_value = _validate_unit_interval_parameter("trajectory_imm_mode_stickiness", stickiness)
+        switch_tau_s = _validate_finite_nonnegative_parameter("imm_switch_tau_s", getattr(config, "imm_switch_tau_s", 0.0))
+        momentum_switch = getattr(config, "trajectory_imm_momentum_switch_probability", None)
+        if switch_tau_s == 0.0 or momentum_switch is None:
+            return original_mode_transition_matrices(config, stickiness, durations)
+
+        duration_values = np.asarray(durations, dtype=float)
+        if not np.all(np.isfinite(duration_values)) or np.any(duration_values <= 0.0):
+            raise ValueError("transition durations must be finite and positive")
+        matrices = []
+        for duration in duration_values:
+            step_stickiness = float(np.exp(-float(duration) / switch_tau_s))
+            step_momentum_switch = _scaled_trajectory_imm_momentum_switch_probability(
+                config,
+                base_stickiness=stickiness_value,
+                step_stickiness=step_stickiness,
+            )
+            assert step_momentum_switch is not None
+            matrix_config = _TrajectoryImmSwitchProbabilityOverride(config, step_momentum_switch)
+            matrices.append(original_mode_transition_matrix(matrix_config, step_stickiness))
+        return matrices
 
     state_space_trajectory_imm._trajectory_imm_mode_stickiness = trajectory_imm_mode_stickiness
     state_space_trajectory_imm._trajectory_imm_mode_prior = trajectory_imm_mode_prior

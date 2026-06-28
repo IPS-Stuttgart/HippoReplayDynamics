@@ -59,6 +59,66 @@ _MISSING_EVIDENCE_SUPPORT_STRINGS = {"", "nan", "na", "n/a", "none", "null", "<n
 _MISSING_STATUS_VALUES = {"", "nan", "na", "n/a", "none", "null", "<na>"}
 
 
+def _is_missing_scalar(value: object) -> bool:
+    """Return True only when pandas reports a scalar missing value."""
+
+    try:
+        missing = pd.isna(value)
+    except (TypeError, ValueError):
+        return False
+    return isinstance(missing, (bool, np.bool_)) and bool(missing)
+
+
+def _flatten_support_value(value: object) -> list[object]:
+    """Return scalar-like support labels from scalar or array-like cells."""
+
+    if _is_missing_scalar(value):
+        return []
+    if isinstance(value, (str, bytes)):
+        return [value]
+    try:
+        array = np.asarray(value, dtype=object)
+    except (TypeError, ValueError):
+        return [value]
+    if array.ndim == 0:
+        try:
+            return [array.item()]
+        except ValueError:
+            return []
+    if array.size == 0:
+        return []
+    return list(array.ravel())
+
+
+def _evidence_support_labels(value: object) -> list[str]:
+    """Extract non-missing support labels from scalar or array-like cells."""
+
+    labels: list[str] = []
+    for item in _flatten_support_value(value):
+        if _is_missing_scalar(item):
+            continue
+        text = str(item).strip()
+        if not text or text.lower() in _MISSING_EVIDENCE_SUPPORT_STRINGS:
+            continue
+        labels.append(text)
+    return labels
+
+
+def _prioritized_known_evidence_support(labels: list[str]) -> str:
+    """Return the strongest known non-comparable label before exact support."""
+
+    for non_exact_support in (
+        TRUNCATED_EVIDENCE_SUPPORT,
+        DEGENERATE_SINGLE_BIN_EVIDENCE_SUPPORT,
+        PYRECEST_PARTICLE_EVIDENCE_SUPPORT,
+    ):
+        if non_exact_support in labels:
+            return non_exact_support
+    if EXACT_EVIDENCE_SUPPORT in labels:
+        return EXACT_EVIDENCE_SUPPORT
+    return ""
+
+
 def _coerce_bool_series(values: pd.Series, *, default: bool = False) -> pd.Series:
     """Coerce bool-like scalars without treating every non-empty string as true.
 
@@ -125,45 +185,29 @@ def evidence_support_from_row(row: pd.Series) -> str:
 
     labels: list[str] = []
     for column in EVIDENCE_SUPPORT_DIAGNOSTIC_COLUMNS:
-        value = row.get(column)
-        if pd.isna(value):
-            continue
-        text = str(value).strip()
-        if text:
-            labels.append(text)
+        labels.extend(_evidence_support_labels(row.get(column)))
 
-    for non_exact_support in (
-        TRUNCATED_EVIDENCE_SUPPORT,
-        DEGENERATE_SINGLE_BIN_EVIDENCE_SUPPORT,
-        PYRECEST_PARTICLE_EVIDENCE_SUPPORT,
-    ):
-        if non_exact_support in labels:
-            return non_exact_support
-    if EXACT_EVIDENCE_SUPPORT in labels:
-        return EXACT_EVIDENCE_SUPPORT
+    support = _prioritized_known_evidence_support(labels)
+    if support:
+        return support
     return EXACT_EVIDENCE_SUPPORT
 
 
 def evidence_comparison_from_support(support: object) -> str:
     """Return the comparison scope implied by an evidence-support label."""
 
-    if support is None:
+    if support is None or _is_missing_evidence_support(support):
         return EVIDENCE_COMPARISON_UNKNOWN
-    try:
-        if pd.isna(support):
-            return EVIDENCE_COMPARISON_UNKNOWN
-    except (TypeError, ValueError):
-        pass
-    text = str(support)
-    if text == EXACT_EVIDENCE_SUPPORT:
+    label = _prioritized_known_evidence_support(_evidence_support_labels(support))
+    if label == EXACT_EVIDENCE_SUPPORT:
         return EVIDENCE_COMPARISON_EXACT
-    if text == TRUNCATED_EVIDENCE_SUPPORT:
+    if label == TRUNCATED_EVIDENCE_SUPPORT:
         return EVIDENCE_COMPARISON_LOWER_BOUND
-    if text == DEGENERATE_SINGLE_BIN_EVIDENCE_SUPPORT:
+    if label == DEGENERATE_SINGLE_BIN_EVIDENCE_SUPPORT:
         return EVIDENCE_COMPARISON_DEGENERATE
-    if text == PYRECEST_PARTICLE_EVIDENCE_SUPPORT:
+    if label == PYRECEST_PARTICLE_EVIDENCE_SUPPORT:
         return EVIDENCE_COMPARISON_PARTICLE_APPROXIMATION
-    if text == "not_scored":
+    if str(support) == "not_scored":
         return EVIDENCE_COMPARISON_NOT_SCORED
     return EVIDENCE_COMPARISON_UNKNOWN
 
@@ -222,12 +266,7 @@ def _coerce_log_evidence_column(frame: pd.DataFrame) -> pd.DataFrame:
 
 
 def _is_missing_evidence_support(value: object) -> bool:
-    try:
-        if pd.isna(value):
-            return True
-    except (TypeError, ValueError):
-        return False
-    return str(value).strip().lower() in _MISSING_EVIDENCE_SUPPORT_STRINGS
+    return len(_evidence_support_labels(value)) == 0
 
 
 def simulation_add_evidence_columns(df: pd.DataFrame) -> pd.DataFrame:

@@ -65,6 +65,11 @@ from .state_space_utils import (
     _validate_candidate_indices,
 )
 
+# The StateSpaceReplayModel.score implementation in state_space_model is already
+# duration- and occupancy-aware. Mark it before legacy runtime patch modules
+# inspect the public import surface so they do not replace it with older scorers.
+StateSpaceReplayModel.score._native_duration_occupancy_aware = True
+
 __all__ = [
     "EventScore",
     "GoalStateSpaceReplayModel",

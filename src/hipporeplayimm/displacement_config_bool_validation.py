@@ -7,11 +7,46 @@ from functools import wraps
 from .state_space_utils import _is_boolean_scalar
 
 _PATCHED_FLAG = "_displacement_config_bool_validation_patch_applied"
+_ORIGINALS_ATTR = "_displacement_config_bool_validation_originals"
+_WRAPPER_MARKER = "_displacement_config_bool_validation_wrapper"
 
 
 def _reject_boolean_scalar(name: str, value: object) -> None:
     if _is_boolean_scalar(value):
         raise TypeError(f"{name} must be numeric, not boolean")
+
+
+def _mark_bool_guard(wrapper):
+    setattr(wrapper, _WRAPPER_MARKER, True)
+    return wrapper
+
+
+def _is_current_bool_guard(value: object) -> bool:
+    return bool(getattr(value, _WRAPPER_MARKER, False))
+
+
+def _wrappers_are_current(displacement_imm, displacement_momentum) -> bool:
+    return (
+        _is_current_bool_guard(displacement_momentum._displacement_lattice)
+        and _is_current_bool_guard(displacement_momentum._positive_config_value)
+        and _is_current_bool_guard(displacement_momentum._displacement_transition_sigma_cm_sqrt_s)
+        and _is_current_bool_guard(displacement_momentum._score_displacement_momentum_exact)
+        and _is_current_bool_guard(displacement_imm._score_displacement_imm_exact)
+    )
+
+
+def _originals(displacement_imm, displacement_momentum) -> dict[str, object]:
+    originals = getattr(displacement_momentum, _ORIGINALS_ATTR, None)
+    if originals is None:
+        originals = {
+            "lattice": displacement_momentum._displacement_lattice,
+            "positive_config_value": displacement_momentum._positive_config_value,
+            "transition_sigma": displacement_momentum._displacement_transition_sigma_cm_sqrt_s,
+            "momentum_score": displacement_momentum._score_displacement_momentum_exact,
+            "imm_score": displacement_imm._score_displacement_imm_exact,
+        }
+        setattr(displacement_momentum, _ORIGINALS_ATTR, originals)
+    return originals
 
 
 def apply_displacement_config_bool_validation_patch() -> None:
@@ -22,32 +57,43 @@ def apply_displacement_config_bool_validation_patch() -> None:
     numeric casts for lattice radii and scale parameters, so a misspecified
     boolean can otherwise silently change the displacement lattice or transition
     scale instead of failing fast.
+
+    The module-level flag is not sufficient by itself: tests or downstream code
+    can replace the guarded helpers while leaving the flag set.  Re-checking the
+    wrapper marker lets the public runtime patch hook refresh stale helpers.
     """
 
     from . import state_space
     from . import state_space_displacement_imm as displacement_imm
     from . import state_space_displacement_momentum as displacement_momentum
 
-    if getattr(displacement_momentum, _PATCHED_FLAG, False):
+    originals = _originals(displacement_imm, displacement_momentum)
+    if getattr(displacement_momentum, _PATCHED_FLAG, False) and _wrappers_are_current(
+        displacement_imm,
+        displacement_momentum,
+    ):
         _synchronize_aliases(state_space, displacement_imm, displacement_momentum)
         return
 
-    original_lattice = displacement_momentum._displacement_lattice
-    original_positive_config_value = displacement_momentum._positive_config_value
-    original_transition_sigma = displacement_momentum._displacement_transition_sigma_cm_sqrt_s
-    original_momentum_score = displacement_momentum._score_displacement_momentum_exact
-    original_imm_score = displacement_imm._score_displacement_imm_exact
+    original_lattice = originals["lattice"]
+    original_positive_config_value = originals["positive_config_value"]
+    original_transition_sigma = originals["transition_sigma"]
+    original_momentum_score = originals["momentum_score"]
+    original_imm_score = originals["imm_score"]
 
+    @_mark_bool_guard
     @wraps(original_lattice)
     def displacement_lattice(bin_centers, *, radius_bins):
         _reject_boolean_scalar("displacement_radius_bins", radius_bins)
         return original_lattice(bin_centers, radius_bins=radius_bins)
 
+    @_mark_bool_guard
     @wraps(original_positive_config_value)
     def positive_config_value(config, name: str, *, default: float):
         _reject_boolean_scalar(str(name), getattr(config, name, 0.0))
         return original_positive_config_value(config, name, default=default)
 
+    @_mark_bool_guard
     @wraps(original_transition_sigma)
     def displacement_transition_sigma_cm_sqrt_s(config):
         raw_value = getattr(config, "displacement_transition_sigma_cm_sqrt_s", 0.0)
@@ -60,11 +106,13 @@ def apply_displacement_config_bool_validation_patch() -> None:
             _reject_boolean_scalar("momentum_sigma_cm_sqrt_s", getattr(config, "momentum_sigma_cm_sqrt_s", 85.0))
         return original_transition_sigma(config)
 
+    @_mark_bool_guard
     @wraps(original_momentum_score)
     def score_displacement_momentum_exact(emissions, bin_centers, config, transition_durations_s, *args, **kwargs):
         _reject_boolean_scalar("displacement_radius_bins", getattr(config, "displacement_radius_bins", 2))
         return original_momentum_score(emissions, bin_centers, config, transition_durations_s, *args, **kwargs)
 
+    @_mark_bool_guard
     @wraps(original_imm_score)
     def score_displacement_imm_exact(emissions, bin_centers, config, transition_durations_s, *args, **kwargs):
         _reject_boolean_scalar("displacement_radius_bins", getattr(config, "displacement_radius_bins", 2))

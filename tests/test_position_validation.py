@@ -3,7 +3,11 @@ import pytest
 
 from hipporeplayimm.data import ReplaySession
 from hipporeplayimm.encoding import EncodingConfig
-from hipporeplayimm.position_decoding_config_validation import _validated_position_decoding_config, _validated_train_frame_mask
+from hipporeplayimm.position_decoding_config_validation import (
+    _validated_position_decoding_config,
+    _validated_train_frame_mask,
+    apply_position_decoding_config_validation_patch,
+)
 from hipporeplayimm.position_validation import (
     PositionDecodingConfig,
     _spike_counts_for_window,
@@ -54,6 +58,34 @@ def test_position_decoding_config_validation_normalizes_accepted_values():
     assert normalized.random_seed == 7
     assert normalized.max_windows_per_session == 9
     assert normalized.min_spikes_per_window == 0
+
+
+def test_position_decoding_config_patch_refreshes_stale_flag(monkeypatch):
+    import hipporeplayimm.position_validation as validation
+
+    def unvalidated_position_decoder(session, config=None):
+        return "unvalidated"
+
+    def unvalidated_mask_encoder(session, train_frame_mask, config=None):
+        return "unvalidated"
+
+    monkeypatch.setattr(validation, "_position_decoding_config_validation_patch_applied", True, raising=False)
+    monkeypatch.setattr(validation, "validate_session_position_decoding", unvalidated_position_decoder)
+    monkeypatch.setattr(validation, "fit_place_field_encoding_for_position_mask", unvalidated_mask_encoder)
+
+    apply_position_decoding_config_validation_patch()
+
+    assert getattr(validation.validate_session_position_decoding, "_position_decoding_config_validation_validate_wrapper")
+    assert getattr(validation.fit_place_field_encoding_for_position_mask, "_position_decoding_config_validation_mask_wrapper")
+    with pytest.raises(ValueError, match="n_folds"):
+        validation.validate_session_position_decoding(object(), PositionDecodingConfig(n_folds=0))
+    session = type(
+        "DummySession",
+        (),
+        {"position": np.column_stack([np.arange(3.0), np.arange(3.0), np.zeros(3), np.zeros(3)])},
+    )()
+    with pytest.raises(ValueError, match="train_frame_mask"):
+        validation.fit_place_field_encoding_for_position_mask(session, np.array([1.0, 0.5, 0.0]))
 
 
 def test_position_train_frame_mask_validation_accepts_bool_and_binary_numeric_values():

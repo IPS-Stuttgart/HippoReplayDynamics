@@ -78,3 +78,20 @@ def test_displacement_default_transition_sigma_rejects_boolean_fallback() -> Non
 
     with pytest.raises(TypeError, match="momentum_sigma_cm_sqrt_s"):
         model.score(_tiny_emissions(), _centers(), return_trajectory=False)
+
+
+def test_displacement_bool_patch_refreshes_stale_true_flag(monkeypatch) -> None:
+    import hipporeplayimm.state_space as state_space
+    import hipporeplayimm.state_space_displacement_momentum as displacement_momentum
+
+    hipporeplayimm.apply_runtime_patches()
+    stale_lattice = displacement_momentum._displacement_lattice.__wrapped__
+    monkeypatch.setattr(displacement_momentum, "_displacement_lattice", stale_lattice)
+    monkeypatch.setattr(state_space, "_displacement_lattice", stale_lattice)
+
+    hipporeplayimm.apply_runtime_patches()
+
+    with pytest.raises(TypeError, match="displacement_radius_bins"):
+        displacement_momentum._displacement_lattice(_centers(), radius_bins=True)
+    with pytest.raises(TypeError, match="displacement_radius_bins"):
+        state_space._displacement_lattice(_centers(), radius_bins=True)

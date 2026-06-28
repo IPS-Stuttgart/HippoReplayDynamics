@@ -1,8 +1,15 @@
-"""Validate mark-matrix candidates with complex dtype."""
+"""Validate mark-matrix candidates before numeric coercion.
+
+Spike marks are analog waveform or amplitude features.  Complex values with a
+nonzero imaginary component, and boolean values that are likely logical metadata
+rather than marks, must be rejected before the legacy coercion path can silently
+convert them to real-valued features.
+"""
 
 from __future__ import annotations
 
 from functools import wraps
+from typing import Any
 
 import numpy as np
 
@@ -15,12 +22,23 @@ def _complex_has_zero_imaginary(values: np.ndarray) -> bool:
     return bool(np.all(np.isfinite(imaginary)) and np.allclose(imaginary, 0.0, rtol=0.0, atol=0.0))
 
 
+def _contains_boolean_values(values: Any) -> bool:
+    raw = np.asarray(values)
+    if raw.size == 0:
+        return False
+    if np.issubdtype(raw.dtype, np.bool_):
+        return True
+    if raw.dtype == object:
+        return any(isinstance(value, (bool, np.bool_)) for value in raw.reshape(-1))
+    return False
+
+
 def _is_mark_complex_validation_wrapper(func: object) -> bool:
     return bool(getattr(func, _PATCH_WRAPPER_ATTR, False))
 
 
 def apply_mark_complex_validation_patch() -> None:
-    """Install complex-value validation for mark-matrix candidates."""
+    """Install value-type validation for mark-matrix candidates."""
 
     from . import data
 
@@ -34,6 +52,8 @@ def apply_mark_complex_validation_patch() -> None:
     @wraps(original_coerce_mark_matrix)
     def coerce_mark_matrix(value, *, spike_count: int, spike_times: np.ndarray):
         arr = np.asarray(value)
+        if _contains_boolean_values(arr):
+            return None
         if arr.dtype.kind == "c":
             if not _complex_has_zero_imaginary(arr):
                 return None

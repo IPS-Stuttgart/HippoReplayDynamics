@@ -4,9 +4,8 @@ The base tensor permits ``-inf`` log-likelihood entries to mark impossible
 spatial states, but ``NaN`` entries and rows with no finite spatial-bin
 likelihood invalidate posterior normalization and evidence calculations.  This
 patch also keeps the stored ``n_spikes`` summary consistent with the validated
-``spike_counts`` tensor and canonicalizes the count tensor to an integer dtype.
-Rows containing only ``-inf`` remain constructible so model-specific scorers can
-report support-loss errors at the scoring boundary.
+``spike_counts`` tensor, canonicalizes the count tensor to an integer dtype, and
+keeps emission cell identifiers unambiguous.
 """
 
 from __future__ import annotations
@@ -40,6 +39,7 @@ def apply_log_emission_n_spikes_validation_patch() -> None:
         original_post_init(self)
         _validate_log_likelihood(self)
         _validate_n_spikes(self)
+        _validate_cell_ids(self)
 
     setattr(_validated_post_init, _POST_INIT_WRAPPER_MARKER, True)
     LogEmissionTensor.__post_init__ = _validated_post_init  # type: ignore[method-assign]
@@ -99,6 +99,34 @@ def _validate_n_spikes(emissions: LogEmissionTensor) -> None:
 
     emissions.spike_counts = rounded_counts.astype(int, copy=False)
     emissions.n_spikes = int(rounded)
+
+
+def _validate_cell_ids(emissions: LogEmissionTensor) -> None:
+    """Reject ambiguous or lossy emission cell identifiers."""
+
+    if _contains_boolean_values(emissions.cell_ids):
+        raise ValueError("cell_ids must be numeric integer identifiers, not boolean values")
+    try:
+        cell_ids = np.asarray(emissions.cell_ids, dtype=float)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("cell_ids must contain finite integer identifiers") from exc
+    if cell_ids.ndim != 1:
+        raise ValueError("cell_ids must be one-dimensional")
+    if cell_ids.size == 0:
+        emissions.cell_ids = np.empty(0, dtype=int)
+        return
+    if not np.all(np.isfinite(cell_ids)):
+        raise ValueError("cell_ids must contain finite integer identifiers")
+    rounded = np.rint(cell_ids)
+    if not np.all(np.isclose(cell_ids, rounded, rtol=0.0, atol=0.0)):
+        raise ValueError("cell_ids must be integer-valued")
+    integer_info = np.iinfo(np.dtype(int))
+    if not np.all((rounded >= integer_info.min) & (rounded <= integer_info.max)):
+        raise ValueError("cell_ids must fit into integer identifier range")
+    canonical = rounded.astype(int)
+    if np.unique(canonical).shape[0] != canonical.shape[0]:
+        raise ValueError("cell_ids must be unique")
+    emissions.cell_ids = canonical
 
 
 __all__ = ["apply_log_emission_n_spikes_validation_patch"]

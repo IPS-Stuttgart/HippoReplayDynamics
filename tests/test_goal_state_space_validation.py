@@ -1,6 +1,7 @@
 import numpy as np
 import pytest
 
+from hipporeplayimm.benchmarks import BenchmarkConfig, _build_models
 from hipporeplayimm.encoding import LogEmissionTensor
 from hipporeplayimm.goal_state_space import GoalStateSpaceReplayModel, _goal_transition_matrix
 
@@ -34,6 +35,21 @@ def test_goal_state_space_model_rejects_nonfinite_parameters(kwargs, message):
 @pytest.mark.parametrize(
     ("kwargs", "message"),
     [
+        ({"transition_sigma_cm_sqrt_s": True}, "transition_sigma_cm_sqrt_s"),
+        ({"drift_speed_cm_s": np.array(False, dtype=object)}, "drift_speed_cm_s"),
+        ({"max_step_sigma": np.array([4.0])}, "max_step_sigma"),
+    ],
+)
+def test_goal_state_space_model_rejects_bool_and_array_parameters(kwargs, message):
+    model = GoalStateSpaceReplayModel(candidate_goals=np.array([[1.0, 0.0]], dtype=float), **kwargs)
+
+    with pytest.raises(ValueError, match=message):
+        model.score(_minimal_emissions(), np.array([[0.0, 0.0], [1.0, 0.0]], dtype=float))
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "message"),
+    [
         ({"sigma_cm": float("nan")}, "sigma_cm"),
         ({"drift_step_cm": float("nan")}, "drift_step_cm"),
         ({"max_step_sigma": float("inf")}, "max_step_sigma"),
@@ -49,3 +65,38 @@ def test_goal_transition_matrix_rejects_nonfinite_parameters(kwargs, message):
             np.array([1.0, 0.0], dtype=float),
             **params,
         )
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "message"),
+    [
+        ({"sigma_cm": True}, "sigma_cm"),
+        ({"drift_step_cm": np.array(False, dtype=object)}, "drift_step_cm"),
+        ({"max_step_sigma": np.array([10.0])}, "max_step_sigma"),
+    ],
+)
+def test_goal_transition_matrix_rejects_bool_and_array_parameters(kwargs, message):
+    params = {"sigma_cm": 1.0, "drift_step_cm": 0.5, "max_step_sigma": 10.0}
+    params.update(kwargs)
+
+    with pytest.raises(ValueError, match=message):
+        _goal_transition_matrix(
+            np.array([[0.0, 0.0], [1.0, 0.0]], dtype=float),
+            np.array([1.0, 0.0], dtype=float),
+            **params,
+        )
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "message"),
+    [
+        ({"goal_state_space_transition_sigma_cm_sqrt_s": True}, "goal_state_space_transition_sigma_cm_sqrt_s"),
+        ({"goal_state_space_drift_speed_cm_s": np.array(False, dtype=object)}, "goal_state_space_drift_speed_cm_s"),
+        ({"goal_state_space_max_step_sigma": np.array([4.0])}, "goal_state_space_max_step_sigma"),
+    ],
+)
+def test_benchmark_goal_state_space_rejects_bool_and_array_config(kwargs, message):
+    config = BenchmarkConfig(models=("state-space-goal",), **kwargs)
+
+    with pytest.raises(ValueError, match=message):
+        _build_models(config, session=None)

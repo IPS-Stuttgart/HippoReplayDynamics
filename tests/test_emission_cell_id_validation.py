@@ -21,6 +21,11 @@ def test_cell_id_row_indices_rejects_fractional_spike_ids():
         _cell_id_row_indices(np.array([1.0]), np.array([1.5]))
 
 
+def test_cell_id_row_indices_rejects_nearly_integral_spike_ids():
+    with pytest.raises(ValueError, match="spike cell IDs.*integer"):
+        _cell_id_row_indices(np.array([1.0]), np.array([1.0 + 5e-10]))
+
+
 def test_cell_id_row_indices_rejects_boolean_encoding_ids():
     with pytest.raises(ValueError, match="encoding.cell_ids.*boolean"):
         _cell_id_row_indices(np.array([True]), np.array([1.0]))
@@ -38,6 +43,18 @@ def test_cell_id_row_indices_rejects_out_of_range_encoding_ids():
 
 def test_build_emissions_rejects_fractional_ripple_spike_cell_ids():
     session = _single_ripple_session(spike_cell_id=1.5)
+
+    with pytest.raises(ValueError, match="spike cell IDs.*integer"):
+        build_emissions(
+            session,
+            _single_cell_encoding(),
+            0,
+            EmissionConfig(time_bin_s=1.0),
+        )
+
+
+def test_build_emissions_rejects_nearly_integral_ripple_spike_cell_ids():
+    session = _single_ripple_session(spike_cell_id=1.0 + 5e-10)
 
     with pytest.raises(ValueError, match="spike cell IDs.*integer"):
         build_emissions(

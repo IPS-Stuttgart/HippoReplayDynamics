@@ -48,6 +48,8 @@ def _coerce_integral_ids(values: Any, name: str) -> np.ndarray:
 
 
 def _coerce_spike_counts(spike_counts: Any) -> np.ndarray:
+    if _contains_boolean_ids(spike_counts):
+        raise ValueError("spike_counts must be numeric counts, not boolean values")
     counts = np.asarray(spike_counts, dtype=float)
     if counts.ndim != 2:
         raise ValueError("spike_counts must have shape (n_time, n_cells)")
@@ -60,6 +62,8 @@ def _coerce_spike_counts(spike_counts: Any) -> np.ndarray:
 
 
 def _coerce_positive_matrix(values: Any, name: str) -> np.ndarray:
+    if _contains_boolean_ids(values):
+        raise ValueError(f"{name} must be numeric, not boolean values")
     matrix = np.asarray(values, dtype=float)
     if not np.all(np.isfinite(matrix)) or np.any(matrix <= 0.0):
         raise ValueError(f"{name} must be finite and positive")
@@ -67,6 +71,8 @@ def _coerce_positive_matrix(values: Any, name: str) -> np.ndarray:
 
 
 def _coerce_trial_exposure(dt: Any, n_time: int, spike_rate_scale: float) -> np.ndarray:
+    if _contains_boolean_ids(dt):
+        raise ValueError("dt must contain finite positive durations, not boolean values")
     dt_array = np.asarray(dt, dtype=float)
     if dt_array.ndim == 0:
         duration = float(dt_array)
@@ -145,6 +151,8 @@ def _gamma_poisson_predictive_log_emissions_impl(
     if shape.ndim != 2 or shape.shape[0] != counts.shape[1]:
         raise ValueError("rate prior arrays must have shape (n_cells, n_bins)")
 
+    if isinstance(spike_rate_scale, (bool, np.bool_)):
+        raise ValueError("spike_rate_scale must be finite and positive")
     spike_rate_scale = float(spike_rate_scale)
     if not np.isfinite(spike_rate_scale) or spike_rate_scale <= 0.0:
         raise ValueError("spike_rate_scale must be finite and positive")

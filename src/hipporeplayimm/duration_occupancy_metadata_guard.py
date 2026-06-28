@@ -4,10 +4,15 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 from dataclasses import replace
+from functools import wraps
 import operator
 from typing import Any, Callable
 
 import numpy as np
+
+_EVIDENCE_ONLY_DIAGNOSTIC_PATCH_ATTR = "_duration_occupancy_evidence_only_diagnostics_patch_applied"
+_EVIDENCE_ONLY_DIAGNOSTIC_ORIGINAL_ATTR = "_duration_occupancy_evidence_only_diagnostics_original"
+_WRAPPER_DIAGNOSTIC_PATCH_ATTR = "_state_space_evidence_only_diagnostics_patch_applied"
 
 
 def apply_duration_occupancy_metadata_guard_patch() -> None:
@@ -17,6 +22,7 @@ def apply_duration_occupancy_metadata_guard_patch() -> None:
     from . import state_space_utils as _state_space_utils
 
     _apply_transition_duration_validation()
+    _patch_evidence_only_path_diagnostics(_duration_occupancy)
 
     if getattr(_duration_occupancy, "_metadata_guard_patch_applied", False):
         return
@@ -44,6 +50,62 @@ def apply_duration_occupancy_metadata_guard_patch() -> None:
     _duration_occupancy._candidate_selection_emissions = _candidate_selection_emissions
     _duration_occupancy._uniform_probabilities = _uniform_probabilities
     _duration_occupancy._metadata_guard_patch_applied = True
+
+
+def _patch_evidence_only_path_diagnostics(duration_occupancy: Any) -> None:
+    """Patch evidence-only path-model diagnostics without requiring state_space to be imported."""
+
+    scorer = getattr(duration_occupancy, "_score_state_space_duration_with_occupancy", None)
+    if scorer is None:
+        return
+    if getattr(scorer, _EVIDENCE_ONLY_DIAGNOSTIC_PATCH_ATTR, False) or getattr(scorer, _WRAPPER_DIAGNOSTIC_PATCH_ATTR, False):
+        return
+
+    @wraps(scorer)
+    def _score_state_space_duration_with_occupancy(
+        self,
+        emissions,
+        bin_centers,
+        candidate_indices=None,
+        *,
+        occupancy_s=None,
+        return_trajectory: bool = True,
+    ):
+        result = scorer(
+            self,
+            emissions,
+            bin_centers,
+            candidate_indices=candidate_indices,
+            occupancy_s=occupancy_s,
+            return_trajectory=return_trajectory,
+        )
+        if return_trajectory is False:
+            _mark_path_model_evidence_only(self, result)
+        return result
+
+    setattr(
+        _score_state_space_duration_with_occupancy,
+        _EVIDENCE_ONLY_DIAGNOSTIC_PATCH_ATTR,
+        True,
+    )
+    setattr(
+        _score_state_space_duration_with_occupancy,
+        _EVIDENCE_ONLY_DIAGNOSTIC_ORIGINAL_ATTR,
+        scorer,
+    )
+    duration_occupancy._score_state_space_duration_with_occupancy = _score_state_space_duration_with_occupancy
+
+
+def _mark_path_model_evidence_only(model: Any, result: Any) -> None:
+    diagnostics = dict(getattr(result, "diagnostics", {}) or {})
+    mode = str(getattr(model, "mode", diagnostics.get("state_space_mode", "")))
+    if mode in {"momentum", "momentum-exact-sparse"}:
+        diagnostics["state_space_momentum_trajectory_posterior"] = "not_returned_evidence_only"
+    elif mode == "imm":
+        diagnostics["state_space_imm_trajectory_posterior"] = "not_returned_evidence_only"
+    else:
+        return
+    result.diagnostics = diagnostics
 
 
 def _positive_integer_bin_count(value: object) -> int:

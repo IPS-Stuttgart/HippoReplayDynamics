@@ -109,6 +109,14 @@ def _mark_path_model_evidence_only(model: Any, result: Any) -> None:
 
 
 def _contains_boolean_values(values: object) -> bool:
+    if isinstance(values, (bool, np.bool_)):
+        return True
+    if isinstance(values, Iterable) and not isinstance(values, (str, bytes, bytearray)):
+        try:
+            if any(isinstance(value, (bool, np.bool_)) for value in values):
+                return True
+        except TypeError:
+            pass
     try:
         raw = np.asarray(values)
     except (TypeError, ValueError):

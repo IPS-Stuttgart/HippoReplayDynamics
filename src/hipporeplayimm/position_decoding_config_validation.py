@@ -68,8 +68,8 @@ def apply_position_decoding_config_validation_patch() -> None:
         @wraps(original_spike_counts_for_window)
         def spike_counts_for_window_with_cell_id_validation(session: Any, encoding: Any, start: float, end: float) -> Any:
             _validate_position_decoding_cell_ids(session, encoding.config)
-            _coerce_integral_ids(getattr(encoding, "cell_ids"), "encoding.cell_ids")
-            return original_spike_counts_for_window(session, encoding, start, end)
+            cell_ids = _validated_encoding_cell_ids(encoding)
+            return _spike_counts_for_window_by_cell_id(validation, session, encoding, start, end, cell_ids)
 
         setattr(spike_counts_for_window_with_cell_id_validation, _COUNTS_WRAPPER_FLAG, True)
         validation._spike_counts_for_window = spike_counts_for_window_with_cell_id_validation
@@ -121,6 +121,40 @@ def _validate_position_decoding_cell_ids(session: Any, encoding_config: Any) -> 
     if bool(getattr(encoding_config, "use_excitatory", True)):
         _validate_optional_integral_ids(getattr(session, "excitatory_neurons", np.empty(0)), "excitatory_neurons")
     _validate_optional_integral_ids(getattr(session, "inhibitory_neurons", np.empty(0)), "inhibitory_neurons")
+
+
+def _validated_encoding_cell_ids(encoding: Any) -> np.ndarray:
+    cell_ids = _coerce_integral_ids(getattr(encoding, "cell_ids"), "encoding.cell_ids")
+    n_cells = int(getattr(encoding, "n_cells"))
+    if cell_ids.shape != (n_cells,):
+        raise ValueError("encoding.cell_ids must contain one ID per encoding row")
+    if np.unique(cell_ids).shape[0] != cell_ids.shape[0]:
+        raise ValueError("encoding.cell_ids must be unique")
+    return cell_ids
+
+
+def _spike_counts_for_window_by_cell_id(validation: Any, session: Any, encoding: Any, start: float, end: float, cell_ids: np.ndarray) -> np.ndarray:
+    counts = np.zeros(int(getattr(encoding, "n_cells")), dtype=int)
+    spikes, _ = validation._spikes_and_cell_ids_for_encoding(session, encoding.config)
+    if not spikes.size or not counts.size:
+        return counts
+    if spikes.ndim != 2 or spikes.shape[1] < 2:
+        raise ValueError("spikes must be two-dimensional with at least time and cell-id columns")
+
+    spike_times = np.asarray(spikes[:, 0], dtype=float)
+    spike_cell_ids = _coerce_integral_ids(spikes[:, 1], "spike cell IDs")
+    keep = (spike_times >= float(start)) & (spike_times < float(end)) & np.isin(spike_cell_ids, cell_ids)
+    if not np.any(keep):
+        return counts
+
+    row_by_cell_id = {int(cell_id): row for row, cell_id in enumerate(cell_ids)}
+    rows = np.fromiter(
+        (row_by_cell_id[int(cell_id)] for cell_id in spike_cell_ids[keep]),
+        dtype=int,
+        count=int(np.sum(keep)),
+    )
+    np.add.at(counts, rows, 1)
+    return counts
 
 
 def _validate_session_spike_cell_ids(session: Any) -> None:

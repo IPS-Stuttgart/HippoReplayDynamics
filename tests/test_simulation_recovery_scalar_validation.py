@@ -92,3 +92,44 @@ def test_simulation_recovery_rejects_invalid_n_time(function, n_time: object) ->
             dt=0.02,
             rng=np.random.default_rng(0),
         )
+
+
+@pytest.mark.parametrize(
+    ("occupancy_s", "message"),
+    [
+        (np.asarray([1.0, np.inf], dtype=float), "finite nonnegative"),
+        (np.asarray([1.0, np.nan], dtype=float), "finite nonnegative"),
+        (np.asarray([1.0, -0.01], dtype=float), "finite nonnegative"),
+        (np.asarray([True, False], dtype=bool), "finite nonnegative"),
+        (np.ones((1, 2), dtype=float), "one-dimensional"),
+        (np.ones(1, dtype=float), "length"),
+    ],
+)
+def test_simulation_recovery_rejects_invalid_occupancy_prior(occupancy_s: np.ndarray, message: str) -> None:
+    encoding = _minimal_encoding()
+    encoding.occupancy_s = occupancy_s
+
+    with pytest.raises(ValueError, match=message):
+        simulate_latent_path(
+            encoding,
+            true_model="stationary",
+            n_time=2,
+            dt=0.02,
+            rng=np.random.default_rng(0),
+        )
+
+
+def test_simulation_recovery_allows_zero_occupancy_uniform_fallback() -> None:
+    encoding = _minimal_encoding()
+    encoding.occupancy_s = np.zeros(encoding.n_bins, dtype=float)
+
+    path = simulate_latent_path(
+        encoding,
+        true_model="stationary",
+        n_time=3,
+        dt=0.02,
+        rng=np.random.default_rng(0),
+    )
+
+    assert path.shape == (3,)
+    assert np.all((path >= 0) & (path < encoding.n_bins))

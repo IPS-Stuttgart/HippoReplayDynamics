@@ -14,6 +14,26 @@ from typing import Any
 import numpy as np
 
 _PATCHED_FLAG = "_clusterless_mark_group_validation_patch_applied"
+_WRAPPER_MARKER = "_clusterless_mark_group_validation_wrapper"
+
+
+def _mark_group_guard(wrapper):
+    setattr(wrapper, _WRAPPER_MARKER, True)
+    return wrapper
+
+
+def _is_current_group_guard(value: object) -> bool:
+    return bool(getattr(value, _WRAPPER_MARKER, False))
+
+
+def _wrappers_are_current(clusterless) -> bool:
+    try:
+        return (
+            _is_current_group_guard(clusterless._mark_group_ids_for_config)
+            and _is_current_group_guard(clusterless.ClusterlessMarkEncoding._coerce_group_indices)
+        )
+    except AttributeError:
+        return False
 
 
 def _contains_boolean_ids(values: Any) -> bool:
@@ -55,9 +75,10 @@ def apply_clusterless_mark_group_validation_patch() -> None:
 
     from . import clusterless
 
-    if getattr(clusterless, _PATCHED_FLAG, False):
+    if getattr(clusterless, _PATCHED_FLAG, False) and _wrappers_are_current(clusterless):
         return
 
+    @_mark_group_guard
     def mark_group_ids_for_config(session, config):
         marks = session.spike_marks
         if marks is None:
@@ -75,6 +96,7 @@ def apply_clusterless_mark_group_validation_patch() -> None:
             return _coerce_integral_group_ids(marks.group_ids, "clusterless mark group IDs")
         return None
 
+    @_mark_group_guard
     def coerce_group_indices(self, group_ids, n_marks: int):
         if group_ids is None or self.group_ids is None:
             return None

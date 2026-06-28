@@ -38,6 +38,23 @@ def test_candidate_support_quality_labels_truncated_rows() -> None:
     assert labelled.loc[1, "candidate_support_quality"] == "conservative_poor"
 
 
+def test_candidate_support_quality_accepts_array_like_min_log_mass() -> None:
+    rows = pd.DataFrame(
+        [
+            {
+                "model": "state-space-imm",
+                "evidence_support": "truncated_full_grid",
+                "diagnostic_state_space_imm_min_candidate_log_mass": np.asarray([np.nan, -0.02]),
+            }
+        ]
+    )
+
+    labelled = add_candidate_support_quality_columns(rows)
+
+    assert labelled.loc[0, "candidate_min_log_mass"] == -0.02
+    assert labelled.loc[0, "candidate_support_quality"] == "conservative_warning"
+
+
 def test_hierarchical_bootstrap_ci_returns_interval() -> None:
     rows = pd.DataFrame(
         {

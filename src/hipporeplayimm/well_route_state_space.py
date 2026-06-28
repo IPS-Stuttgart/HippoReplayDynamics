@@ -103,6 +103,10 @@ def routes_from_wells(well_locations: np.ndarray, *, include_reverse: bool = Tru
     wells = np.asarray(well_locations, dtype=float)
     if wells.ndim != 2 or wells.shape[0] < 2:
         raise ValueError("well_locations must have shape (n_wells, position_dim) with at least two wells")
+    if wells.shape[1] == 0:
+        raise ValueError("well_locations must contain at least one coordinate column")
+    if not np.all(np.isfinite(wells)):
+        raise ValueError("well_locations must be finite")
     routes = []
     for start in range(wells.shape[0]):
         for end in range(wells.shape[0]):

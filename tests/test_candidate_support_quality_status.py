@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import numpy as np
 import pandas as pd
 
 from hipporeplayimm.result_improvements import add_candidate_support_quality_columns
@@ -49,6 +50,31 @@ def test_non_comparable_diagnostic_evidence_support_is_unknown_quality() -> None
 
     assert labelled["candidate_support_quality"].tolist() == [
         "conservative_unknown",
+        "conservative_unknown",
+        "conservative_unknown",
+    ]
+    assert not labelled["candidate_support_quality_good"].any()
+
+
+def test_array_like_diagnostic_evidence_support_is_not_mislabelled_exact() -> None:
+    rows = pd.DataFrame(
+        [
+            {
+                "model": "state-space-imm",
+                "status": "success",
+                "diagnostic_state_space_imm_evidence_support": np.array(["exact_full_grid", "truncated_full_grid"], dtype=object),
+            },
+            {
+                "model": "pyrecest-goal-particle",
+                "status": "success",
+                "diagnostic_pyrecest_evidence_support": ["particle_approximation"],
+            },
+        ]
+    )
+
+    labelled = add_candidate_support_quality_columns(rows)
+
+    assert labelled["candidate_support_quality"].tolist() == [
         "conservative_unknown",
         "conservative_unknown",
     ]

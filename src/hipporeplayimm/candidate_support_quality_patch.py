@@ -85,17 +85,46 @@ def _evidence_support_values(row: pd.Series) -> list[str]:
     """Return normalized support labels from canonical and diagnostic columns."""
 
     values: list[str] = []
-    canonical = _text(row.get("evidence_support", "")).lower()
-    if canonical and canonical not in _MISSING_SUPPORT_VALUES:
-        values.append(canonical)
+    values.extend(_support_value_labels(row.get("evidence_support", "")))
     for column in getattr(row, "index", ()):  # pandas Series in production; duck-typed in tests.
         name = str(column)
         if not name.startswith("diagnostic_") or not name.endswith("_evidence_support"):
             continue
-        value = _text(row.get(column, "")).lower()
-        if value and value not in _MISSING_SUPPORT_VALUES:
-            values.append(value)
-    return values
+        values.extend(_support_value_labels(row.get(column, "")))
+    return list(dict.fromkeys(values))
+
+
+def _support_value_labels(value: object) -> list[str]:
+    """Return normalized non-missing support labels from scalar or array-like cells."""
+
+    labels: list[str] = []
+    for item in _flatten_support_value(value):
+        text = _text(item).lower()
+        if text and text not in _MISSING_SUPPORT_VALUES:
+            labels.append(text)
+    return labels
+
+
+def _flatten_support_value(value: object) -> list[object]:
+    if isinstance(value, (str, bytes)):
+        return [value]
+    try:
+        if pd.isna(value):
+            return []
+    except (TypeError, ValueError):
+        pass
+    try:
+        array = np.asarray(value, dtype=object)
+    except (TypeError, ValueError):
+        return [value]
+    if array.ndim == 0:
+        try:
+            return [array.item()]
+        except ValueError:
+            return []
+    if array.size == 0:
+        return []
+    return list(array.reshape(-1))
 
 
 def _finite_candidate_log_mass(value: object) -> float | None:

@@ -20,6 +20,9 @@ from scipy.special import gammaln
 from .evidence_status_coercion import _status_is_success_or_missing
 
 _PATCHED_FLAG = "_advanced_result_status_patch_applied"
+_SUCCESSFUL_ROWS_WRAPPER_FLAG = "_advanced_result_successful_rows_wrapper"
+_COUNT_CHECKS_WRAPPER_FLAG = "_advanced_result_count_checks_wrapper"
+_POISSON_SCORE_WRAPPER_FLAG = "_advanced_result_poisson_score_wrapper"
 
 
 def apply_advanced_result_status_patch() -> None:
@@ -27,7 +30,7 @@ def apply_advanced_result_status_patch() -> None:
 
     from . import advanced_result_diagnostics as diagnostics
 
-    if getattr(diagnostics, _PATCHED_FLAG, False):
+    if getattr(diagnostics, _PATCHED_FLAG, False) and _advanced_result_patch_current(diagnostics):
         return
 
     def successful_rows(scores: pd.DataFrame) -> pd.DataFrame:
@@ -97,10 +100,27 @@ def apply_advanced_result_status_patch() -> None:
         expected = np.maximum(expected, np.finfo(float).tiny)
         return float(np.sum(observed * np.log(expected) - expected - gammaln(observed + 1.0)))
 
+    setattr(successful_rows, _SUCCESSFUL_ROWS_WRAPPER_FLAG, True)
+    setattr(posterior_predictive_count_checks, _COUNT_CHECKS_WRAPPER_FLAG, True)
+    setattr(posterior_predictive_poisson_log_score, _POISSON_SCORE_WRAPPER_FLAG, True)
+
     diagnostics._successful_rows = successful_rows
     diagnostics.posterior_predictive_count_checks = posterior_predictive_count_checks
     diagnostics.posterior_predictive_poisson_log_score = posterior_predictive_poisson_log_score
     setattr(diagnostics, _PATCHED_FLAG, True)
+
+
+def _advanced_result_patch_current(diagnostics) -> bool:
+    """Return whether advanced-diagnostic aliases still point to this patch."""
+
+    return all(
+        getattr(getattr(diagnostics, name, None), flag, False)
+        for name, flag in (
+            ("_successful_rows", _SUCCESSFUL_ROWS_WRAPPER_FLAG),
+            ("posterior_predictive_count_checks", _COUNT_CHECKS_WRAPPER_FLAG),
+            ("posterior_predictive_poisson_log_score", _POISSON_SCORE_WRAPPER_FLAG),
+        )
+    )
 
 
 def _contains_boolean_values(values: np.ndarray) -> bool:

@@ -1,6 +1,9 @@
 import numpy as np
 import pytest
 
+import hipporeplayimm.emission_cell_id_validation as emission_cell_id_validation
+import hipporeplayimm.encoding as encoding_module
+import hipporeplayimm.kd_reference as kd_module
 from hipporeplayimm.data import ReplaySession
 from hipporeplayimm.encoding import (
     EncodingConfig,
@@ -66,6 +69,51 @@ def test_build_emissions_rejects_boolean_encoding_cell_ids():
             0,
             EmissionConfig(time_bin_s=1.0),
         )
+
+
+def test_reapply_refreshes_stale_cell_id_row_lookup(monkeypatch):
+    def lossy_cell_id_row_indices(cell_ids, spike_cell_ids):
+        return np.zeros(np.asarray(spike_cell_ids).shape, dtype=int)
+
+    monkeypatch.setattr(encoding_module, "_cell_id_row_indices", lossy_cell_id_row_indices)
+    monkeypatch.setattr(encoding_module, "_emission_cell_id_validation_patch_applied", True)
+
+    emission_cell_id_validation.apply_emission_cell_id_validation_patch()
+
+    with pytest.raises(ValueError, match="spike cell IDs.*integer"):
+        encoding_module._cell_id_row_indices(np.array([1.0]), np.array([1.5]))
+
+
+def test_reapply_refreshes_stale_build_emissions_wrapper(monkeypatch):
+    def lossy_build_emissions(session, encoding, ripple, config=None):
+        return "unvalidated"
+
+    monkeypatch.setattr(encoding_module, "build_emissions", lossy_build_emissions)
+    monkeypatch.setattr(encoding_module, "_emission_cell_id_validation_patch_applied", True)
+
+    emission_cell_id_validation.apply_emission_cell_id_validation_patch()
+
+    with pytest.raises(ValueError, match="spike cell IDs.*integer"):
+        encoding_module.build_emissions(
+            _single_ripple_session(spike_cell_id=1.5),
+            _single_cell_encoding(),
+            0,
+            EmissionConfig(time_bin_s=1.0),
+        )
+
+
+def test_reapply_refreshes_stale_poisson_boolean_guard(monkeypatch):
+    def lossy_validate_poisson_inputs(spike_counts, rates_hz):
+        return np.asarray(spike_counts, dtype=float), np.asarray(rates_hz, dtype=float)
+
+    monkeypatch.setattr(encoding_module, "_validate_poisson_inputs", lossy_validate_poisson_inputs)
+    monkeypatch.setattr(kd_module, "_validate_poisson_inputs", lossy_validate_poisson_inputs)
+    monkeypatch.setattr(encoding_module, "_poisson_boolean_input_validation_patch_applied", True)
+
+    emission_cell_id_validation.apply_emission_cell_id_validation_patch()
+
+    with pytest.raises(ValueError, match="spike_counts.*boolean"):
+        encoding_module._validate_poisson_inputs(np.array([[True]]), np.array([[1.0]]))
 
 
 def _single_ripple_session(*, spike_cell_id: float) -> ReplaySession:

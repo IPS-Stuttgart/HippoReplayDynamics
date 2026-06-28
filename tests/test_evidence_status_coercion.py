@@ -103,3 +103,39 @@ def test_nonfinite_log_evidence_is_not_exact_comparable_or_event_best() -> None:
 
     best = simulation_event_best_rows(supported)
     assert best[["event_index", "model"]].values.tolist() == [[0, "finite-exact"]]
+
+
+def test_missing_support_with_explicit_false_comparable_stays_noncomparable() -> None:
+    rows = pd.DataFrame(
+        [
+            {
+                "session": "RatX/Open1",
+                "event_index": 0,
+                "model": "exact-low",
+                "status": "success",
+                "log_evidence": 0.0,
+                "evidence_support": "exact_full_grid",
+                "evidence_comparable": True,
+            },
+            {
+                "session": "RatX/Open1",
+                "event_index": 0,
+                "model": "legacy-noncomparable-high",
+                "status": "success",
+                "log_evidence": 100.0,
+                "evidence_support": "",
+                "evidence_comparable": "False",
+            },
+        ]
+    )
+
+    supported = ensure_evidence_support_columns(rows)
+    legacy = supported[supported["model"] == "legacy-noncomparable-high"].iloc[0]
+    assert not bool(legacy["evidence_comparable"])
+    assert legacy["evidence_support"] == "unknown_noncomparable"
+    assert legacy["evidence_comparison"] == "unknown_noncomparable"
+
+    scored = simulation_add_evidence_columns(rows)
+    assert scored["best_model"].unique().tolist() == ["exact-low"]
+    assert scored.loc[scored["model"] == "exact-low", "is_best_model"].item() is True
+    assert pd.isna(scored.loc[scored["model"] == "legacy-noncomparable-high", "model_probability"].item())

@@ -17,7 +17,13 @@ def _contains_boolean_values(values: np.ndarray) -> bool:
     if np.issubdtype(values.dtype, np.bool_):
         return True
     if values.dtype == object:
-        return any(isinstance(item, (bool, np.bool_)) for item in values.flat)
+        if any(isinstance(item, (bool, np.bool_)) for item in values.flat):
+            return True
+        try:
+            numeric = values.astype(float, copy=False)
+        except (TypeError, ValueError):
+            return False
+        return bool(numeric.size and np.all(np.isin(numeric, (0.0, 1.0))))
     return False
 
 

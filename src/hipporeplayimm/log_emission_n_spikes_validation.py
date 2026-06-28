@@ -8,6 +8,8 @@ patch also keeps the stored ``n_spikes`` summary consistent with the validated
 
 from __future__ import annotations
 
+from typing import Any
+
 import numpy as np
 
 from .encoding import LogEmissionTensor
@@ -40,8 +42,25 @@ def _validate_log_likelihood(emissions: LogEmissionTensor) -> None:
         raise ValueError("log_likelihood must not contain NaN values")
 
 
+def _contains_boolean_values(values: Any) -> bool:
+    try:
+        raw = np.asarray(values)
+    except (TypeError, ValueError):
+        raw = np.asarray(values, dtype=object)
+    if raw.size == 0:
+        return False
+    if np.issubdtype(raw.dtype, np.bool_):
+        return True
+    if raw.dtype == object:
+        return any(isinstance(value, (bool, np.bool_)) for value in raw.reshape(-1))
+    return False
+
+
 def _validate_n_spikes(emissions: LogEmissionTensor) -> None:
     """Reject summary spike counts that disagree with ``spike_counts``."""
+
+    if _contains_boolean_values(emissions.spike_counts):
+        raise ValueError("spike_counts must be numeric counts, not boolean values")
 
     spike_counts = np.asarray(emissions.spike_counts, dtype=float)
     rounded_counts = np.rint(spike_counts)

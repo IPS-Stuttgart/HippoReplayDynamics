@@ -196,6 +196,34 @@ def test_goal_transition_matrix_rejects_nonfinite_bin_centers():
         )
 
 
+def test_goal_transition_matrix_rejects_zero_coordinate_bin_centers():
+    with pytest.raises(ValueError, match='at least one coordinate column'):
+        _goal_transition_matrix(
+            np.empty((2, 0)),
+            np.empty((0,)),
+            drift_step_cm=0.0,
+            sigma_cm=1.0,
+            max_step_sigma=4.0,
+        )
+
+
+def test_goal_state_space_rejects_zero_coordinate_bin_centers():
+    emissions = LogEmissionTensor(
+        log_likelihood=np.log(np.array([[0.5, 0.5]])),
+        spike_counts=np.zeros((1, 1), dtype=int),
+        times=np.array([0.0]),
+        dt=1.0,
+        cell_ids=np.array([1]),
+        n_spikes=0,
+    )
+
+    with pytest.raises(ValueError, match='at least one coordinate column'):
+        GoalStateSpaceReplayModel(candidate_goals=np.empty((1, 0))).score(
+            emissions,
+            np.empty((2, 0)),
+        )
+
+
 def test_well_route_default_routes_support_one_dimensional_bin_centers():
     centers = np.array([[0.0], [1.0], [2.0], [3.0]])
     log_likelihood = np.log(

@@ -40,6 +40,8 @@ class GoalStateSpaceReplayModel:
             raise ValueError('bin_centers must have shape (n_bins, position_dim)')
         if centers.shape[0] == 0:
             raise ValueError('bin_centers must contain at least one position')
+        if centers.shape[1] == 0:
+            raise ValueError('bin_centers must contain at least one coordinate column')
         if not np.all(np.isfinite(centers)):
             raise ValueError('bin_centers must be finite')
         if emissions.n_bins != centers.shape[0]:
@@ -228,6 +230,8 @@ def _goal_transition_matrix(
     goal = np.asarray(goal, dtype=float)
     if centers.ndim != 2 or centers.shape[0] == 0:
         raise ValueError('bin_centers must have shape (n_bins, position_dim) and contain at least one row')
+    if centers.shape[1] == 0:
+        raise ValueError('bin_centers must contain at least one coordinate column')
     if not np.all(np.isfinite(centers)):
         raise ValueError('bin_centers must be finite')
     if goal.shape != (centers.shape[1],):

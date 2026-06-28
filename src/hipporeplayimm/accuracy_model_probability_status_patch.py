@@ -1,4 +1,4 @@
-"""Runtime fixes for accuracy-upgrade diagnostics and reverse-time emissions."""
+"Runtime fixes for accuracy-upgrade diagnostics, emissions, and metadata."
 
 from __future__ import annotations
 
@@ -16,6 +16,8 @@ _REVERSE_PATCHED_FLAG = "_accuracy_reverse_duration_patch_applied"
 _REVERSE_ORIGINAL_ATTR = "_accuracy_reverse_duration_original"
 _VALID_STATE_MASK_PATCHED_FLAG = "_accuracy_valid_state_mask_config_patch_applied"
 _VALID_STATE_MASK_ORIGINAL_ATTR = "_accuracy_valid_state_mask_config_original"
+_ENSEMBLE_PATCHED_FLAG = "_weighted_ensemble_observation_metadata_patch_applied"
+_ENSEMBLE_ORIGINAL_ATTR = "_weighted_ensemble_observation_metadata_original"
 
 
 def apply_model_probability_status_patch() -> None:
@@ -26,6 +28,7 @@ def apply_model_probability_status_patch() -> None:
     _patch_model_probability_diagnostics(accuracy_upgrades)
     _patch_valid_state_mask_from_encoding(accuracy_upgrades)
     _patch_reverse_emissions(accuracy_upgrades)
+    _patch_weighted_ensemble_emissions(accuracy_upgrades)
 
 
 def _patch_model_probability_diagnostics(accuracy_upgrades) -> None:
@@ -267,6 +270,43 @@ def _patch_reverse_emissions(accuracy_upgrades) -> None:
     accuracy_upgrades.reverse_emissions = reverse_emissions
 
 
+def _patch_weighted_ensemble_emissions(accuracy_upgrades) -> None:
+    """Keep observation metadata consistent for weighted ensemble emissions."""
+
+    current = accuracy_upgrades.weighted_ensemble_emissions
+    if getattr(current, _ENSEMBLE_PATCHED_FLAG, False):
+        return
+
+    @wraps(current)
+    def weighted_ensemble_emissions(
+        left: LogEmissionTensor,
+        right: LogEmissionTensor,
+        *,
+        alpha: float = 0.5,
+    ) -> LogEmissionTensor:
+        out = current(left, right, alpha=alpha)
+        out.n_spikes = int(getattr(left, "n_spikes", out.n_spikes))
+        bin_durations = _copied_duration_vector(
+            getattr(left, "bin_durations", None),
+            expected_length=out.n_time,
+            name="bin_durations",
+        )
+        if bin_durations is not None:
+            out.bin_durations = bin_durations
+        transition_durations = _copied_duration_vector(
+            getattr(left, "transition_durations", None),
+            expected_length=max(out.n_time - 1, 0),
+            name="transition_durations",
+        )
+        if transition_durations is not None:
+            out.transition_durations = transition_durations
+        return out
+
+    setattr(weighted_ensemble_emissions, _ENSEMBLE_PATCHED_FLAG, True)
+    setattr(weighted_ensemble_emissions, _ENSEMBLE_ORIGINAL_ATTR, current)
+    accuracy_upgrades.weighted_ensemble_emissions = weighted_ensemble_emissions
+
+
 def _reversed_transition_durations(emissions: LogEmissionTensor) -> np.ndarray:
     expected_length = max(emissions.n_time - 1, 0)
     values = getattr(emissions, "transition_durations", None)
@@ -311,6 +351,24 @@ def _reversed_duration_vector(
     if not np.all(np.isfinite(array)) or np.any(array <= 0.0):
         raise ValueError(f"{name} must contain finite positive durations")
     return array[::-1].copy()
+
+
+def _copied_duration_vector(
+    values: object,
+    *,
+    expected_length: int,
+    name: str,
+) -> np.ndarray | None:
+    if values is None:
+        return None
+    array = np.asarray(values, dtype=float)
+    if array.shape != (int(expected_length),):
+        raise ValueError(
+            f"{name} must contain {int(expected_length)} values; got shape {array.shape}"
+        )
+    if not np.all(np.isfinite(array)) or np.any(array <= 0.0):
+        raise ValueError(f"{name} must contain finite positive durations")
+    return array.copy()
 
 
 __all__ = ["apply_model_probability_status_patch"]

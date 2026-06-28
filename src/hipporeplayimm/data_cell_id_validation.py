@@ -4,13 +4,15 @@ MATLAB datasets commonly store integer identifiers as floating-point values.  Th
 loader should accept integral floats such as ``1.0`` but must not silently truncate
 corrupted fractional identifiers such as ``1.5`` to ``1``.  The same guard is
 installed for manually constructed sessions before place-field encoding selects
-spikes and cell IDs.
+spikes and cell IDs.  Replay-event selectors use the same integer-like MATLAB
+values, but boolean flags must not alias to event indices 0 or 1.
 """
 
 from __future__ import annotations
 
 from functools import wraps
 from pathlib import Path
+import sys
 from typing import Any
 
 import numpy as np
@@ -30,6 +32,7 @@ def apply_data_cell_id_validation_patch() -> None:
     original_load_replay_session = data.load_replay_session
     original_load_spike_marks = data._load_spike_marks
     original_mark_group_ids = data._mark_group_ids_from_tetrode_cell_ids
+    original_coerce_ripple_event = data._coerce_ripple_event
     original_spikes_and_cell_ids_for_encoding = encoding._spikes_and_cell_ids_for_encoding
 
     patch_targets = (
@@ -38,9 +41,14 @@ def apply_data_cell_id_validation_patch() -> None:
         original_load_replay_session,
         original_load_spike_marks,
         original_mark_group_ids,
+        original_coerce_ripple_event,
         original_spikes_and_cell_ids_for_encoding,
     )
     if all(_is_patched(target) for target in patch_targets):
+        _synchronize_coerce_ripple_event_aliases(
+            getattr(original_coerce_ripple_event, _ORIGINAL_ATTR, original_coerce_ripple_event),
+            original_coerce_ripple_event,
+        )
         setattr(data, _PATCHED_FLAG, True)
         return
 
@@ -92,6 +100,11 @@ def apply_data_cell_id_validation_patch() -> None:
             return _coerce_integral_ids(out, "tetrode group IDs")
         return out
 
+    def coerce_ripple_event(session, ripple):
+        if isinstance(ripple, (bool, np.bool_)):
+            raise TypeError("ripple index must be an integer, not boolean")
+        return original_coerce_ripple_event(session, ripple)
+
     def spikes_and_cell_ids_for_encoding(session, config):
         spikes = np.asarray(session.spikes)
         if spikes.size:
@@ -113,6 +126,14 @@ def apply_data_cell_id_validation_patch() -> None:
         data._load_spike_marks = _mark_patched(load_spike_marks, original_load_spike_marks)
     if not _is_patched(original_mark_group_ids):
         data._mark_group_ids_from_tetrode_cell_ids = _mark_patched(mark_group_ids_from_tetrode_cell_ids, original_mark_group_ids)
+    active_coerce_ripple_event = original_coerce_ripple_event
+    if not _is_patched(original_coerce_ripple_event):
+        active_coerce_ripple_event = _mark_patched(coerce_ripple_event, original_coerce_ripple_event)
+        data._coerce_ripple_event = active_coerce_ripple_event
+    _synchronize_coerce_ripple_event_aliases(
+        original_coerce_ripple_event,
+        active_coerce_ripple_event,
+    )
     if not _is_patched(original_spikes_and_cell_ids_for_encoding):
         encoding._spikes_and_cell_ids_for_encoding = _mark_patched(spikes_and_cell_ids_for_encoding, original_spikes_and_cell_ids_for_encoding)
 
@@ -129,6 +150,17 @@ def _mark_patched(wrapper: Any, original: Any) -> Any:
     setattr(wrapper, _PATCH_MARK, True)
     setattr(wrapper, _ORIGINAL_ATTR, original)
     return wrapper
+
+
+def _synchronize_coerce_ripple_event_aliases(original: Any, active: Any) -> None:
+    """Refresh modules that imported the ripple-event coercer by value."""
+
+    for module in list(sys.modules.values()):
+        if not getattr(module, "__name__", "").startswith("hipporeplayimm"):
+            continue
+        current = getattr(module, "_coerce_ripple_event", None)
+        if current is original:
+            setattr(module, "_coerce_ripple_event", active)
 
 
 def _validate_optional_neuron_ids(spike_data: dict[str, Any], variable_name: str, label: str) -> None:

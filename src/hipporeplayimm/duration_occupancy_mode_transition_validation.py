@@ -12,18 +12,12 @@ _ORIGINAL_ATTR = "_duration_occupancy_mode_transition_validation_original"
 
 
 def _contains_boolean_values(values: np.ndarray) -> bool:
-    """Return True for native or object-wrapped boolean matrix entries."""
+    """Return True only when matrix entries are actual boolean scalars."""
 
     if np.issubdtype(values.dtype, np.bool_):
         return True
     if values.dtype == object:
-        if any(isinstance(item, (bool, np.bool_)) for item in values.flat):
-            return True
-        try:
-            numeric = values.astype(float, copy=False)
-        except (TypeError, ValueError):
-            return False
-        return bool(numeric.size and np.all(np.isin(numeric, (0.0, 1.0))))
+        return any(isinstance(item, (bool, np.bool_)) for item in values.flat)
     return False
 
 

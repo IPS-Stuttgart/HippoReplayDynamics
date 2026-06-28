@@ -33,10 +33,9 @@ def apply_simulation_recovery_runtime_limit_validation_patch() -> None:
 
 
 def _positive_integer_value(name: str, value: Any) -> int:
-    if isinstance(value, (bool, np.bool_)):
-        raise ValueError(f"{name} must be a finite positive integer")
+    scalar = _scalar_non_boolean_value(name, value, message="must be a finite positive integer")
     try:
-        numeric = float(value)
+        numeric = float(scalar)
     except (TypeError, ValueError) as exc:
         raise ValueError(f"{name} must be a finite positive integer") from exc
     if not np.isfinite(numeric) or numeric <= 0.0:
@@ -48,15 +47,26 @@ def _positive_integer_value(name: str, value: Any) -> int:
 
 
 def _positive_finite_scalar(name: str, value: Any) -> float:
-    if isinstance(value, (bool, np.bool_)):
-        raise ValueError(f"{name} must be finite and positive")
+    scalar = _scalar_non_boolean_value(name, value, message="must be finite and positive")
     try:
-        numeric = float(value)
+        numeric = float(scalar)
     except (TypeError, ValueError) as exc:
         raise ValueError(f"{name} must be finite and positive") from exc
     if not np.isfinite(numeric) or numeric <= 0.0:
         raise ValueError(f"{name} must be finite and positive")
     return numeric
+
+
+def _scalar_non_boolean_value(name: str, value: Any, *, message: str) -> Any:
+    raw = np.asarray(value)
+    if raw.ndim != 0:
+        raise ValueError(f"{name} {message}")
+    if np.issubdtype(raw.dtype, np.bool_):
+        raise ValueError(f"{name} {message}")
+    scalar = raw.item()
+    if isinstance(scalar, (bool, np.bool_)):
+        raise ValueError(f"{name} {message}")
+    return scalar
 
 
 __all__ = ["apply_simulation_recovery_runtime_limit_validation_patch"]

@@ -11,6 +11,7 @@ _MISSING_SUPPORT_VALUES = {"", "nan", "none", "null", "<na>"}
 _NONCOMPARABLE_SUPPORT_VALUES = {
     "degenerate_single_bin",
     "not_scored",
+    "unknown",
     "unknown_noncomparable",
     "particle_approximation",
 }

@@ -167,7 +167,16 @@ def apply_pyrecest_bin_center_validation_patch() -> None:
 
 def _is_bool_scalar(value: object) -> bool:
     array = np.asarray(value)
-    return array.shape == () and np.issubdtype(array.dtype, np.bool_)
+    if array.shape != ():
+        return False
+    if np.issubdtype(array.dtype, np.bool_):
+        return True
+    if array.dtype == object:
+        try:
+            return isinstance(array.item(), (bool, np.bool_))
+        except ValueError:
+            return False
+    return False
 
 
 def _validate_probability(value: object, name: str, original_validate) -> None:

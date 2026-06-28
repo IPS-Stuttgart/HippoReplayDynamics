@@ -9,15 +9,13 @@ _PATCHED_FLAG = "_bidirectional_infinite_evidence_patch_applied"
 
 
 def _equal_prior_logp_and_weights(log_likelihoods: object) -> tuple[float, np.ndarray]:
-    """Return equal-prior mixture log evidence and finite component weights."""
-
     values = np.asarray(log_likelihoods, dtype=float).reshape(-1)
     if values.size == 0:
         return float("nan"), np.empty(0, dtype=float)
-    positive_infinite = np.isposinf(values)
-    if np.any(positive_infinite):
+    positive_inf = np.isposinf(values)
+    if np.any(positive_inf):
         weights = np.zeros(values.shape, dtype=float)
-        weights[positive_infinite] = 1.0 / float(np.sum(positive_infinite))
+        weights[positive_inf] = 1.0 / float(np.sum(positive_inf))
         return float("inf"), weights
     finite = np.isfinite(values)
     if np.any(finite):
@@ -25,20 +23,17 @@ def _equal_prior_logp_and_weights(log_likelihoods: object) -> tuple[float, np.nd
         weights = np.zeros(values.shape, dtype=float)
         weights[finite] = np.exp(values[finite] - normalizer)
         return float(normalizer - np.log(float(values.size))), weights
-    negative_infinite = np.isneginf(values)
-    if np.any(negative_infinite):
+    negative_inf = np.isneginf(values)
+    if np.any(negative_inf):
         weights = np.zeros(values.shape, dtype=float)
-        weights[negative_infinite] = 1.0 / float(np.sum(negative_infinite))
+        weights[negative_inf] = 1.0 / float(np.sum(negative_inf))
         return float("-inf"), weights
     return float("nan"), np.full(values.shape, 1.0 / float(values.size), dtype=float)
 
 
 def _safe_mixture_log_posterior(log_posteriors: object, weights: np.ndarray) -> np.ndarray | None:
-    """Return a posterior mixture without NaNs for impossible posterior slices."""
-
-    weight_values = np.asarray(weights, dtype=float).reshape(-1)
-    valid: list[tuple[np.ndarray, float]] = []
-    for posterior, weight in zip(log_posteriors, weight_values, strict=False):
+    valid = []
+    for posterior, weight in zip(log_posteriors, np.asarray(weights, dtype=float).reshape(-1), strict=False):
         if posterior is None:
             continue
         current = np.asarray(posterior, dtype=float)
@@ -68,21 +63,21 @@ def _terminal_log_posterior_from_score(score: object) -> np.ndarray | None:
     if trajectory is None:
         return None
     values = np.asarray(trajectory, dtype=float)
-    if values.ndim == 0 or values.shape[0] == 0:
-        return None
-    return values[-1].copy()
+    return None if values.ndim == 0 or values.shape[0] == 0 else values[-1].copy()
+
+
+def _needs_evidence_only_terminal_retry(score: object, return_trajectory: object) -> bool:
+    return return_trajectory is False and _terminal_log_posterior_from_score(score) is None
 
 
 def apply_bidirectional_infinite_evidence_patch() -> None:
-    """Patch bidirectional wrappers to avoid NaN weights for all-``-inf`` evidence."""
-
     from . import result_improvement_extensions as compat
     from . import reverse_models as direct
 
     if getattr(compat, _PATCHED_FLAG, False) and getattr(direct, _PATCHED_FLAG, False):
         return
 
-    def compat_score(self, emissions, bin_centers, *, occupancy_s=None, candidate_indices=None, return_trajectory: bool | None = None):
+    def compat_score(self, emissions, bin_centers, *, occupancy_s=None, candidate_indices=None, return_trajectory=None):
         forward = compat.score_replay_model_compat(
             self.forward_model,
             emissions,
@@ -91,7 +86,7 @@ def apply_bidirectional_infinite_evidence_patch() -> None:
             candidate_indices=candidate_indices,
             return_trajectory=return_trajectory,
         )
-        if return_trajectory is False and _terminal_log_posterior_from_score(forward) is None:
+        if _needs_evidence_only_terminal_retry(forward, return_trajectory):
             forward = compat.score_replay_model_compat(
                 self.forward_model,
                 emissions,
@@ -132,7 +127,15 @@ def apply_bidirectional_infinite_evidence_patch() -> None:
             terminal = np.asarray(trajectory[-1], dtype=float).copy()
         if terminal is not None:
             diagnostics.update(compat._posterior_diagnostics(terminal, bin_centers))
-        return compat.EventScore(self.name, logp, emissions.n_time, emissions.n_spikes, diagnostics=diagnostics, terminal_log_posterior=terminal, trajectory_log_posterior=trajectory)
+        return compat.EventScore(
+            self.name,
+            logp,
+            emissions.n_time,
+            emissions.n_spikes,
+            diagnostics=diagnostics,
+            terminal_log_posterior=terminal,
+            trajectory_log_posterior=trajectory,
+        )
 
     def direct_score(self, emissions, bin_centers, *, occupancy_s=None, candidate_indices=None, return_trajectory=None):
         forward = direct._score_model_with_optional_kwargs(
@@ -143,7 +146,7 @@ def apply_bidirectional_infinite_evidence_patch() -> None:
             candidate_indices=candidate_indices,
             return_trajectory=return_trajectory,
         )
-        if return_trajectory is False and _terminal_log_posterior_from_score(forward) is None:
+        if _needs_evidence_only_terminal_retry(forward, return_trajectory):
             forward = direct._score_model_with_optional_kwargs(
                 self.base_model,
                 emissions,
@@ -178,7 +181,15 @@ def apply_bidirectional_infinite_evidence_patch() -> None:
         }
         if terminal is not None:
             diagnostics.update(direct._posterior_diagnostics(terminal, bin_centers))
-        return direct.EventScore(self.name or f"{forward.model_name}-bidirectional", logp, forward.n_time, forward.n_spikes, diagnostics=diagnostics, terminal_log_posterior=terminal, trajectory_log_posterior=trajectory)
+        return direct.EventScore(
+            self.name or f"{forward.model_name}-bidirectional",
+            logp,
+            forward.n_time,
+            forward.n_spikes,
+            diagnostics=diagnostics,
+            terminal_log_posterior=terminal,
+            trajectory_log_posterior=trajectory,
+        )
 
     compat.BidirectionalReplayModel.score = compat_score
     direct.BidirectionalReplayModel.score = direct_score

@@ -4,8 +4,9 @@ The base tensor permits ``-inf`` log-likelihood entries to mark impossible
 spatial states, but ``NaN`` entries and rows with no finite spatial-bin
 likelihood invalidate posterior normalization and evidence calculations.  This
 patch also keeps the stored ``n_spikes`` summary consistent with the validated
-``spike_counts`` tensor.  Rows containing only ``-inf`` remain constructible so
-model-specific scorers can report support-loss errors at the scoring boundary.
+``spike_counts`` tensor and canonicalizes the count tensor to an integer dtype.
+Rows containing only ``-inf`` remain constructible so model-specific scorers can
+report support-loss errors at the scoring boundary.
 """
 
 from __future__ import annotations
@@ -87,4 +88,8 @@ def _validate_n_spikes(emissions: LogEmissionTensor) -> None:
     if not np.isclose(rounded, total_spikes, rtol=0.0, atol=0.0):
         raise ValueError("n_spikes must equal the total spike_counts sum")
 
+    emissions.spike_counts = rounded_counts.astype(int, copy=False)
     emissions.n_spikes = int(rounded)
+
+
+__all__ = ["apply_log_emission_n_spikes_validation_patch"]

@@ -6,6 +6,7 @@ from pathlib import Path, PurePosixPath
 import zipfile
 
 _PATCHED_FLAG = "_olafsdottir_zip_safety_patch_applied"
+_PATCHED_EXTRACT_ATTR = "_olafsdottir_zip_safety_extract_archive"
 
 
 def _safe_zip_member_path(root: Path, member_name: str) -> Path:
@@ -40,12 +41,20 @@ def extract_archive(archive_path: str | Path, dataset_root: str | Path) -> None:
         archive.extractall(root)
 
 
+setattr(extract_archive, _PATCHED_EXTRACT_ATTR, True)
+
+
+def _is_safe_extract_archive(candidate: object) -> bool:
+    return bool(getattr(candidate, _PATCHED_EXTRACT_ATTR, False))
+
+
 def apply_olafsdottir_zip_safety_patch() -> None:
     """Install the safe archive extractor for Olafsdottir dataset preparation."""
 
     from . import olafsdottir2016
 
-    if getattr(olafsdottir2016, _PATCHED_FLAG, False):
+    current = getattr(olafsdottir2016, "extract_archive", None)
+    if getattr(olafsdottir2016, _PATCHED_FLAG, False) and _is_safe_extract_archive(current):
         return
     olafsdottir2016.extract_archive = extract_archive
     setattr(olafsdottir2016, _PATCHED_FLAG, True)

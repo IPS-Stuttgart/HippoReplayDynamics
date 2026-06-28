@@ -16,6 +16,7 @@ _NONCOMPARABLE_SUPPORT_VALUES = {
 }
 _TRUNCATED_SUPPORT = "truncated_full_grid"
 _SUCCESS_STATUS_VALUES = {"", "success", "nan", "none", "null", "<na>"}
+_MIN_LOG_MASS_BOOL_PATCHED_FLAG = "_candidate_min_log_mass_bool_patch_applied"
 
 
 def apply_candidate_support_quality_patch() -> None:
@@ -23,43 +24,61 @@ def apply_candidate_support_quality_patch() -> None:
 
     from . import result_improvements as ri
 
-    if getattr(ri, "_candidate_support_quality_status_patch_applied", False):
+    if not getattr(ri, "_candidate_support_quality_status_patch_applied", False):
+
+        def candidate_support_quality(
+            row: pd.Series,
+            *,
+            min_log_mass: float | None = None,
+            good_threshold: float = ri.DEFAULT_GOOD_LOG_MASS_THRESHOLD,
+            warning_threshold: float = ri.DEFAULT_WARNING_LOG_MASS_THRESHOLD,
+        ) -> str:
+            """Return a conservative quality label for one score row.
+
+            Candidate-support quality is meaningful only for successful exact rows or
+            candidate-pruned lower-bound rows.  Failed rows and non-comparable
+            evidence supports should not be counted as ``exact_or_not_pruned`` merely
+            because they are not truncated lower bounds.
+            """
+
+            status = _text(row.get("status", "success")).lower()
+            if status not in _SUCCESS_STATUS_VALUES:
+                return ri.CANDIDATE_SUPPORT_UNKNOWN
+
+            support_values = _evidence_support_values(row)
+            if any(value in _NONCOMPARABLE_SUPPORT_VALUES for value in support_values):
+                return ri.CANDIDATE_SUPPORT_UNKNOWN
+            if _TRUNCATED_SUPPORT not in support_values:
+                return ri.CANDIDATE_SUPPORT_EXACT
+            mass = _finite_candidate_log_mass(min_log_mass)
+            if mass is None:
+                return ri.CANDIDATE_SUPPORT_UNKNOWN
+            if mass >= good_threshold:
+                return ri.CANDIDATE_SUPPORT_GOOD
+            if mass >= warning_threshold:
+                return ri.CANDIDATE_SUPPORT_WARNING
+            return ri.CANDIDATE_SUPPORT_POOR
+
+        ri.candidate_support_quality = candidate_support_quality
+        ri._candidate_support_quality_status_patch_applied = True
+
+    _patch_boolean_candidate_log_mass(ri)
+
+
+def _patch_boolean_candidate_log_mass(ri: Any) -> None:
+    """Avoid interpreting boolean diagnostics as finite retained log mass."""
+
+    if getattr(ri, _MIN_LOG_MASS_BOOL_PATCHED_FLAG, False):
         return
+    original_first_finite_numeric_value = ri._first_finite_numeric_value
 
-    def candidate_support_quality(
-        row: pd.Series,
-        *,
-        min_log_mass: float | None = None,
-        good_threshold: float = ri.DEFAULT_GOOD_LOG_MASS_THRESHOLD,
-        warning_threshold: float = ri.DEFAULT_WARNING_LOG_MASS_THRESHOLD,
-    ) -> str:
-        """Return a conservative quality label for one score row.
+    def _first_finite_numeric_value(value: object) -> float | None:
+        if _contains_boolean(value):
+            return None
+        return original_first_finite_numeric_value(value)
 
-        Candidate-support quality is meaningful only for successful exact rows or
-        candidate-pruned lower-bound rows.  Failed rows and non-comparable
-        evidence supports should not be counted as ``exact_or_not_pruned`` merely
-        because they are not truncated lower bounds.
-        """
-
-        status = _text(row.get("status", "success")).lower()
-        if status not in _SUCCESS_STATUS_VALUES:
-            return ri.CANDIDATE_SUPPORT_UNKNOWN
-
-        support_values = _evidence_support_values(row)
-        if any(value in _NONCOMPARABLE_SUPPORT_VALUES for value in support_values):
-            return ri.CANDIDATE_SUPPORT_UNKNOWN
-        if _TRUNCATED_SUPPORT not in support_values:
-            return ri.CANDIDATE_SUPPORT_EXACT
-        if min_log_mass is None or not np.isfinite(min_log_mass):
-            return ri.CANDIDATE_SUPPORT_UNKNOWN
-        if min_log_mass >= good_threshold:
-            return ri.CANDIDATE_SUPPORT_GOOD
-        if min_log_mass >= warning_threshold:
-            return ri.CANDIDATE_SUPPORT_WARNING
-        return ri.CANDIDATE_SUPPORT_POOR
-
-    ri.candidate_support_quality = candidate_support_quality
-    ri._candidate_support_quality_status_patch_applied = True
+    ri._first_finite_numeric_value = _first_finite_numeric_value
+    setattr(ri, _MIN_LOG_MASS_BOOL_PATCHED_FLAG, True)
 
 
 def _evidence_support_values(row: pd.Series) -> list[str]:
@@ -79,6 +98,31 @@ def _evidence_support_values(row: pd.Series) -> list[str]:
     return values
 
 
+def _finite_candidate_log_mass(value: object) -> float | None:
+    if value is None or _contains_boolean(value):
+        return None
+    try:
+        number = float(value)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    return number if np.isfinite(number) else None
+
+
+def _contains_boolean(value: object) -> bool:
+    if isinstance(value, (bool, np.bool_)):
+        return True
+    try:
+        array = np.asarray(value, dtype=object)
+    except (TypeError, ValueError):
+        return False
+    if array.ndim == 0:
+        try:
+            return isinstance(array.item(), (bool, np.bool_))
+        except ValueError:
+            return False
+    return any(isinstance(item, (bool, np.bool_)) for item in array.reshape(-1))
+
+
 def _text(value: Any) -> str:
     try:
         if pd.isna(value):
@@ -86,3 +130,6 @@ def _text(value: Any) -> str:
     except (TypeError, ValueError):
         pass
     return str(value).strip()
+
+
+__all__ = ["apply_candidate_support_quality_patch"]

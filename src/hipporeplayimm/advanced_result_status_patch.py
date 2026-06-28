@@ -49,7 +49,7 @@ def apply_advanced_result_status_patch() -> None:
     ) -> pd.DataFrame:
         """Compare observed counts with posterior-predictive expected counts."""
 
-        observed = _validated_nonnegative_matrix(observed_counts, "observed_counts")
+        observed = _validated_nonnegative_matrix(observed_counts, "observed_counts", integral=True)
         expected = _validated_nonnegative_matrix(expected_counts, "expected_counts")
         if observed.shape != expected.shape:
             raise ValueError("observed_counts and expected_counts must have matching shapes")
@@ -93,7 +93,7 @@ def apply_advanced_result_status_patch() -> None:
     def posterior_predictive_poisson_log_score(observed_counts: np.ndarray, expected_counts: np.ndarray) -> float:
         """Return a Poisson posterior-predictive log score for observed counts."""
 
-        observed = _validated_nonnegative_matrix(observed_counts, "observed_counts")
+        observed = _validated_nonnegative_matrix(observed_counts, "observed_counts", integral=True)
         expected = _validated_nonnegative_matrix(expected_counts, "expected_counts")
         if observed.shape != expected.shape:
             raise ValueError("observed_counts and expected_counts must have matching shapes")
@@ -133,7 +133,7 @@ def _contains_boolean_values(values: np.ndarray) -> bool:
     return False
 
 
-def _validated_nonnegative_matrix(values: np.ndarray, name: str) -> np.ndarray:
+def _validated_nonnegative_matrix(values: np.ndarray, name: str, *, integral: bool = False) -> np.ndarray:
     try:
         raw_values = np.asarray(values)
     except (TypeError, ValueError) as exc:
@@ -148,6 +148,8 @@ def _validated_nonnegative_matrix(values: np.ndarray, name: str) -> np.ndarray:
         raise ValueError(f"{name} must have shape (n_time, n_cells)")
     if not np.all(np.isfinite(array)) or np.any(array < 0.0):
         raise ValueError(f"{name} must contain finite nonnegative values")
+    if integral and not np.all(np.isclose(array, np.rint(array), rtol=0.0, atol=1.0e-12)):
+        raise ValueError(f"{name} must contain integer count values")
     return array
 
 

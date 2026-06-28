@@ -42,6 +42,41 @@ def _equal_prior_logp_and_weights(log_likelihoods: object) -> tuple[float, np.nd
     return float("nan"), np.full(values.shape, 1.0 / float(values.size), dtype=float)
 
 
+def _safe_mixture_log_posterior(log_posteriors: object, weights: np.ndarray) -> np.ndarray | None:
+    """Return a posterior mixture without NaNs for impossible posterior slices."""
+
+    weight_values = np.asarray(weights, dtype=float).reshape(-1)
+    valid: list[tuple[np.ndarray, float]] = []
+    for posterior, weight in zip(log_posteriors, weight_values, strict=False):
+        if posterior is None:
+            continue
+        current = np.asarray(posterior, dtype=float)
+        if current.size == 0:
+            continue
+        valid.append((current, float(weight)))
+    if not valid:
+        return None
+
+    shape = valid[0][0].shape
+    if any(current.shape != shape for current, _ in valid):
+        raise ValueError("posterior arrays must have matching shapes")
+
+    stacked = np.stack(
+        [current + np.log(max(weight, np.finfo(float).tiny)) for current, weight in valid],
+        axis=0,
+    )
+    mixed = logsumexp(stacked, axis=0)
+    normalizer = logsumexp(mixed, axis=-1, keepdims=True)
+    normalized = np.full(mixed.shape, -np.inf, dtype=float)
+    np.subtract(
+        mixed,
+        normalizer,
+        out=normalized,
+        where=np.isfinite(normalizer),
+    )
+    return normalized
+
+
 def apply_bidirectional_infinite_evidence_patch() -> None:
     """Patch bidirectional wrappers to avoid NaN weights for all-``-inf`` evidence."""
 
@@ -91,7 +126,7 @@ def apply_bidirectional_infinite_evidence_patch() -> None:
                 "direction_reverse_log_evidence": float(reverse.log_likelihood),
             }
         )
-        terminal = compat._mixture_log_posterior(
+        terminal = _safe_mixture_log_posterior(
             [forward.terminal_log_posterior, reverse.terminal_log_posterior],
             weights,
         )
@@ -101,7 +136,7 @@ def apply_bidirectional_infinite_evidence_patch() -> None:
             and forward.trajectory_log_posterior is not None
             and reverse.trajectory_log_posterior is not None
         ):
-            trajectory = compat._mixture_log_posterior(
+            trajectory = _safe_mixture_log_posterior(
                 [forward.trajectory_log_posterior, reverse.trajectory_log_posterior],
                 weights,
             )
@@ -147,9 +182,8 @@ def apply_bidirectional_infinite_evidence_patch() -> None:
         logp, weights = _equal_prior_logp_and_weights(
             [forward.log_likelihood, reverse.log_likelihood]
         )
-        terminal = direct._mixture_log_posterior(
-            forward.terminal_log_posterior,
-            reverse.terminal_log_posterior,
+        terminal = _safe_mixture_log_posterior(
+            [forward.terminal_log_posterior, reverse.terminal_log_posterior],
             weights,
         )
         trajectory = None
@@ -158,9 +192,8 @@ def apply_bidirectional_infinite_evidence_patch() -> None:
             and forward.trajectory_log_posterior is not None
             and reverse.trajectory_log_posterior is not None
         ):
-            trajectory = direct._mixture_log_posterior(
-                forward.trajectory_log_posterior,
-                reverse.trajectory_log_posterior,
+            trajectory = _safe_mixture_log_posterior(
+                [forward.trajectory_log_posterior, reverse.trajectory_log_posterior],
                 weights,
             )
         if trajectory is not None:

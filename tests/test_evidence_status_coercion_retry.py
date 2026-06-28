@@ -48,3 +48,31 @@ def test_status_coercion_retries_recovery_diagnostics_after_reporting_patch(monk
     filtered = diagnostics._successful_finite_scores(scores)
     assert len(filtered) == 1
     assert pd.isna(filtered["status"].iloc[0])
+
+
+def test_status_coercion_reinstalls_unmarked_reporting_helpers(monkeypatch) -> None:
+    """Idempotent calls must refresh reporting helpers that no longer carry the patch marker."""
+
+    def legacy_ensure_evidence_support_columns(frame: pd.DataFrame) -> pd.DataFrame:
+        out = frame.copy()
+        status_ok = out["status"].astype(str).eq("success")
+        out["evidence_support"] = reporting.EXACT_EVIDENCE_SUPPORT
+        out["evidence_comparable"] = status_ok
+        return out
+
+    monkeypatch.setattr(
+        reporting,
+        "ensure_evidence_support_columns",
+        legacy_ensure_evidence_support_columns,
+    )
+
+    scores = pd.DataFrame({"status": [np.nan, "failure"], "log_evidence": [1.0, 2.0]})
+    assert not bool(reporting.ensure_evidence_support_columns(scores)["evidence_comparable"].iloc[0])
+
+    status_coercion.apply_evidence_status_coercion_patch()
+
+    assert getattr(reporting.ensure_evidence_support_columns, status_coercion._CORE_WRAPPER_FLAG, False)
+    refreshed = reporting.ensure_evidence_support_columns(scores)
+    assert refreshed["status"].tolist()[0] == "success"
+    assert bool(refreshed["evidence_comparable"].iloc[0])
+    assert not bool(refreshed["evidence_comparable"].iloc[1])

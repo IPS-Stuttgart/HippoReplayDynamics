@@ -15,6 +15,16 @@ import pandas as pd
 from .evidence_reporting import _coerce_bool_series
 
 _PATCHED_FLAG = "_recovery_diagnostics_bool_scalar_patch_applied"
+_COERCE_BOOL_WRAPPER_FLAG = "_recovery_diagnostics_bool_coerce_bool_wrapper"
+_ROW_BOOL_WRAPPER_FLAG = "_recovery_diagnostics_bool_row_bool_wrapper"
+_COERCE_FLOAT_WRAPPER_FLAG = "_recovery_diagnostics_bool_coerce_float_wrapper"
+_ROW_FLOAT_WRAPPER_FLAG = "_recovery_diagnostics_bool_row_float_wrapper"
+_HELPER_FLAGS = {
+    "_coerce_bool": _COERCE_BOOL_WRAPPER_FLAG,
+    "_row_bool": _ROW_BOOL_WRAPPER_FLAG,
+    "_coerce_float": _COERCE_FLOAT_WRAPPER_FLAG,
+    "_row_float": _ROW_FLOAT_WRAPPER_FLAG,
+}
 _TRUE_FLOAT_STRINGS = {"true", "yes", "y"}
 _FALSE_FLOAT_STRINGS = {"false", "no", "n"}
 
@@ -24,7 +34,7 @@ def apply_recovery_diagnostics_bool_patch() -> None:
 
     from . import recovery_diagnostics as diagnostics
 
-    if getattr(diagnostics, _PATCHED_FLAG, False):
+    if getattr(diagnostics, _PATCHED_FLAG, False) and _helpers_are_patched(diagnostics):
         return
 
     def coerce_bool(value: object, default: bool = False) -> bool:
@@ -61,11 +71,25 @@ def apply_recovery_diagnostics_bool_patch() -> None:
             return float(default)
         return coerce_float(row[column], default)
 
-    diagnostics._coerce_bool = coerce_bool
-    diagnostics._row_bool = row_bool
-    diagnostics._coerce_float = coerce_float
-    diagnostics._row_float = row_float
+    _install_helper(diagnostics, "_coerce_bool", coerce_bool)
+    _install_helper(diagnostics, "_row_bool", row_bool)
+    _install_helper(diagnostics, "_coerce_float", coerce_float)
+    _install_helper(diagnostics, "_row_float", row_float)
     setattr(diagnostics, _PATCHED_FLAG, True)
+
+
+def _helpers_are_patched(diagnostics: Any) -> bool:
+    """Return whether all recovery-diagnostic scalar helpers are active wrappers."""
+
+    return all(
+        getattr(getattr(diagnostics, helper_name, None), wrapper_flag, False)
+        for helper_name, wrapper_flag in _HELPER_FLAGS.items()
+    )
+
+
+def _install_helper(diagnostics: Any, helper_name: str, helper: Any) -> None:
+    setattr(helper, _HELPER_FLAGS[helper_name], True)
+    setattr(diagnostics, helper_name, helper)
 
 
 __all__ = ["apply_recovery_diagnostics_bool_patch"]

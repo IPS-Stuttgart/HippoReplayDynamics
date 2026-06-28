@@ -8,6 +8,12 @@ import numpy as np
 import pandas as pd
 
 _PATCHED_FLAG = "_advanced_result_quantile_array_patch_applied"
+_WRAPPER_ATTR = "_advanced_result_quantile_array_wrapper"
+
+
+def _current_patch_installed(diagnostics: object) -> bool:
+    current = getattr(diagnostics, "_quantile", None)
+    return bool(getattr(current, _WRAPPER_ATTR, False))
 
 
 def apply_advanced_result_quantile_array_patch() -> None:
@@ -15,7 +21,8 @@ def apply_advanced_result_quantile_array_patch() -> None:
 
     from . import advanced_result_diagnostics as diagnostics
 
-    if getattr(diagnostics, _PATCHED_FLAG, False):
+    if _current_patch_installed(diagnostics):
+        setattr(diagnostics, _PATCHED_FLAG, True)
         return
 
     def _quantile(values: Sequence[float], q: float) -> float:
@@ -26,6 +33,7 @@ def apply_advanced_result_quantile_array_patch() -> None:
             return float("nan")
         return float(np.quantile(arr, q))
 
+    setattr(_quantile, _WRAPPER_ATTR, True)
     diagnostics._quantile = _quantile
     setattr(diagnostics, _PATCHED_FLAG, True)
 

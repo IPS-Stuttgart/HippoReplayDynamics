@@ -50,6 +50,22 @@ def test_simulation_event_best_rows_recomputes_unflagged_events() -> None:
     assert best["model"].tolist() == ["explicit-best", "event-one-high"]
 
 
+def test_simulation_event_best_rows_scopes_flags_to_optional_event_windows() -> None:
+    rows = pd.DataFrame(
+        [
+            {**_row(0, "window-zero-flagged", 0.0, "True"), "window_index": 0},
+            {**_row(0, "window-zero-higher", 3.0, "False"), "window_index": 0},
+            {**_row(0, "window-one-low", 1.0, "False"), "window_index": 1},
+            {**_row(0, "window-one-high", 4.0, "False"), "window_index": 1},
+        ]
+    )
+
+    best = simulation_event_best_rows(rows).sort_values("window_index").reset_index(drop=True)
+
+    assert best["window_index"].tolist() == [0, 1]
+    assert best["model"].tolist() == ["window-zero-flagged", "window-one-high"]
+
+
 def test_simulation_event_best_rows_recomputes_duplicate_flags() -> None:
     rows = pd.DataFrame(
         [

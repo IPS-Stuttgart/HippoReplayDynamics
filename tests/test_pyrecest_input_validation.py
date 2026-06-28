@@ -3,6 +3,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
+import hipporeplayimm
 from hipporeplayimm.encoding import LogEmissionTensor
 from hipporeplayimm.pyrecest_models import PyRecEstGoalParticleIMMModel, PyRecEstGoalParticleModel, _coerce_candidate_goals
 
@@ -80,3 +81,20 @@ def test_pyrecest_score_rejects_mutated_boolean_particle_count_before_optional_i
 def test_pyrecest_imm_model_rejects_boolean_numeric_parameters(kwargs: dict[str, object], match: str) -> None:
     with pytest.raises(ValueError, match=match):
         PyRecEstGoalParticleIMMModel(**kwargs)
+
+
+def test_pyrecest_bin_center_patch_refreshes_stale_candidate_goal_helper(monkeypatch) -> None:
+    import hipporeplayimm.pyrecest_models as pyrecest_models
+
+    hipporeplayimm.apply_runtime_patches()
+
+    def stale_coerce_candidate_goals(candidate_goals, bin_centers):
+        return np.asarray(bin_centers, dtype=float)
+
+    monkeypatch.setattr(pyrecest_models, "_coerce_candidate_goals", stale_coerce_candidate_goals)
+
+    hipporeplayimm.apply_runtime_patches()
+
+    goals = pyrecest_models._coerce_candidate_goals(None, np.array([0.0, 1.0], dtype=float))
+    assert pyrecest_models._coerce_candidate_goals is not stale_coerce_candidate_goals
+    assert goals.shape == (2, 1)

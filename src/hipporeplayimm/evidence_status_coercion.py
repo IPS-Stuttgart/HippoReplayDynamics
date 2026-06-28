@@ -10,6 +10,7 @@ import pandas as pd
 
 
 _PATCHED_FLAG = "_evidence_status_coercion_patch_applied"
+_CORE_WRAPPER_FLAG = "_evidence_status_coercion_core_wrapper"
 _CERTIFIED_RECOVERY_PATCHED_FLAG = "_certified_recovery_status_coercion_patch_applied"
 _RECOVERY_DIAGNOSTICS_PATCHED_FLAG = "_recovery_diagnostics_status_coercion_patch_applied"
 _MISSING_STATUS_VALUES = {"", "nan", "na", "n/a", "none", "null", "<na>"}
@@ -20,7 +21,7 @@ def apply_evidence_status_coercion_patch() -> None:
 
     from . import evidence_reporting as reporting
 
-    if getattr(reporting, _PATCHED_FLAG, False):
+    if getattr(reporting, _PATCHED_FLAG, False) and _core_reporting_patch_current(reporting):
         _patch_optional_recovery_modules(reporting)
         return
 
@@ -94,6 +95,14 @@ def apply_evidence_status_coercion_patch() -> None:
     def simulation_event_best_rows(event_scores: pd.DataFrame) -> pd.DataFrame:
         return original_simulation_event_best_rows(_normalize_status_frame(event_scores))
 
+    for function in (
+        evidence_support_from_row,
+        ensure_evidence_support_columns,
+        simulation_add_evidence_columns,
+        simulation_event_best_rows,
+    ):
+        setattr(function, _CORE_WRAPPER_FLAG, True)
+
     reporting.evidence_support_from_row = evidence_support_from_row
     reporting.ensure_evidence_support_columns = ensure_evidence_support_columns
     reporting.simulation_add_evidence_columns = simulation_add_evidence_columns
@@ -101,6 +110,20 @@ def apply_evidence_status_coercion_patch() -> None:
     setattr(reporting, _PATCHED_FLAG, True)
 
     _patch_optional_recovery_modules(reporting)
+
+
+def _core_reporting_patch_current(reporting: Any) -> bool:
+    """Return whether the core reporting aliases still point to this patch."""
+
+    return all(
+        getattr(getattr(reporting, name, None), _CORE_WRAPPER_FLAG, False)
+        for name in (
+            "evidence_support_from_row",
+            "ensure_evidence_support_columns",
+            "simulation_add_evidence_columns",
+            "simulation_event_best_rows",
+        )
+    )
 
 
 def _patch_optional_recovery_modules(reporting: Any) -> None:

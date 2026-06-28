@@ -6,6 +6,8 @@ import numpy as np
 
 from .encoding import LogEmissionTensor
 
+_PATCH_MARKER = "_time_order_patch_wrapped"
+
 
 def apply_reverse_emission_time_patch() -> None:
     """Keep copied time coordinates increasing while reversing observation rows."""
@@ -13,8 +15,10 @@ def apply_reverse_emission_time_patch() -> None:
     from . import result_improvement_extensions as improved
     from . import reverse_models
 
-    improved_patched = getattr(improved, "_time_order_patch_applied", False)
-    reverse_models_patched = getattr(reverse_models, "_time_order_patch_applied", False)
+    improved_copy = getattr(improved, "copy_emissions_with_log_likelihood", None)
+    reverse_copy = getattr(reverse_models, "reverse_emissions", None)
+    improved_patched = getattr(improved, "_time_order_patch_applied", False) and getattr(improved_copy, _PATCH_MARKER, False)
+    reverse_models_patched = getattr(reverse_models, "_time_order_patch_applied", False) and getattr(reverse_copy, _PATCH_MARKER, False)
     if improved_patched and reverse_models_patched:
         return
 
@@ -56,6 +60,8 @@ def apply_reverse_emission_time_patch() -> None:
             reverse_time=True,
         )
 
+    setattr(copy_emissions_with_log_likelihood, _PATCH_MARKER, True)
+    setattr(reverse_emissions, _PATCH_MARKER, True)
     improved.copy_emissions_with_log_likelihood = copy_emissions_with_log_likelihood
     reverse_models.reverse_emissions = reverse_emissions
     improved._time_order_patch_applied = True

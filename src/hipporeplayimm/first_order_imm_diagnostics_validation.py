@@ -261,13 +261,16 @@ def _wrap_duration_occupancy_alias(
 
 def _patch_loaded_alias(module_name: str, helper: Callable[..., dict[str, float | int]]) -> None:
     module = sys.modules.get(module_name)
-    if module is not None and hasattr(module, "_first_order_imm_content_diagnostics"):
-        alias = (
-            _wrap_duration_occupancy_alias(helper)
-            if module_name == "hipporeplayimm.duration_occupancy"
-            else helper
-        )
-        setattr(module, "_first_order_imm_content_diagnostics", alias)
+    if module is None or not hasattr(module, "_first_order_imm_content_diagnostics"):
+        return
+    if module_name == "hipporeplayimm.duration_occupancy":
+        current = getattr(module, "_first_order_imm_content_diagnostics")
+        if getattr(current, _DURATION_ALIAS_ATTR, False):
+            return
+        alias = _wrap_duration_occupancy_alias(helper)
+    else:
+        alias = helper
+    setattr(module, "_first_order_imm_content_diagnostics", alias)
 
 
 def apply_first_order_imm_diagnostics_validation_patch() -> None:

@@ -67,7 +67,7 @@ def _parse_integer_metadata_value(column: str, value: Any) -> int:
     if not np.isfinite(numeric):
         raise ValueError(f"{column} must contain finite integer values")
     integer = int(round(numeric))
-    if not np.isclose(numeric, integer, rtol=0.0, atol=1e-9):
+    if numeric != float(integer):
         raise ValueError(f"{column} must contain integer values")
     return int(integer)
 

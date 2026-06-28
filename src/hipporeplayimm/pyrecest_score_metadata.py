@@ -47,10 +47,28 @@ PYRECEST_DEFAULTS = {
 def pyrecest_metadata_for_config(config: object) -> dict[str, int | float]:
     out: dict[str, int | float] = {}
     for name in PYRECEST_INT_COLUMNS:
-        out[name] = int(getattr(config, name, PYRECEST_DEFAULTS[name]))
+        out[name] = _metadata_int_for_config(config, name)
     for name in PYRECEST_FLOAT_COLUMNS:
-        out[name] = float(getattr(config, name, PYRECEST_DEFAULTS[name]))
+        out[name] = _metadata_float_for_config(config, name)
     return out
+
+
+def _metadata_float_for_config(config: object, name: str) -> float:
+    raw = getattr(config, name, PYRECEST_DEFAULTS[name])
+    value = _metadata_float_from_value(raw, name)
+    if value is None:
+        raise ValueError(f"{name} must contain finite numeric metadata, got {raw!r}")
+    return float(value)
+
+
+def _metadata_int_for_config(config: object, name: str) -> int:
+    value = _metadata_float_for_config(config, name)
+    integer = int(round(value))
+    if not np.isclose(value, integer, rtol=0.0, atol=1e-9):
+        raise ValueError(f"{name} must be an integer")
+    if integer <= 0:
+        raise ValueError(f"{name} must be positive")
+    return integer
 
 
 def pyrecest_config_kwargs_for_scores(scores: pd.DataFrame, defaults: dict[str, int | float] | None = None) -> dict[str, int | float]:

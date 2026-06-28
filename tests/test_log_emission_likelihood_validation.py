@@ -4,6 +4,7 @@ import numpy as np
 import pytest
 
 from hipporeplayimm.encoding import LogEmissionTensor
+from hipporeplayimm.models import RandomModel
 
 
 def _tensor_with_log_likelihood(log_likelihood: np.ndarray) -> LogEmissionTensor:
@@ -23,9 +24,13 @@ def test_log_emission_tensor_rejects_nan_likelihood_entries_at_construction():
         _tensor_with_log_likelihood(np.array([[0.0, np.nan], [0.0, 0.0]], dtype=float))
 
 
-def test_log_emission_tensor_rejects_rows_without_finite_likelihood_mass():
+def test_replay_model_rejects_rows_without_finite_likelihood_mass():
+    tensor = _tensor_with_log_likelihood(
+        np.array([[0.0, -1.0], [-np.inf, -np.inf]], dtype=float)
+    )
+
     with pytest.raises(ValueError, match="at least one finite spatial-bin"):
-        _tensor_with_log_likelihood(np.array([[0.0, -1.0], [-np.inf, -np.inf]], dtype=float))
+        RandomModel().score(tensor, np.zeros((2, 2), dtype=float))
 
 
 def test_log_emission_tensor_allows_individual_impossible_bins():

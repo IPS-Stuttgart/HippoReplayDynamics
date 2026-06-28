@@ -144,6 +144,8 @@ def _patch_emissions_from_counts(simulation_recovery: Any) -> None:
 
 
 def _validated_count_matrix(counts: Any, *, n_cells: int) -> np.ndarray:
+    if _contains_boolean_values(counts):
+        raise ValueError("counts must contain numeric integer counts, not boolean values")
     try:
         values = np.asarray(counts, dtype=float)
     except (TypeError, ValueError) as exc:
@@ -159,6 +161,20 @@ def _validated_count_matrix(counts: Any, *, n_cells: int) -> np.ndarray:
     if not np.all(np.isclose(values, rounded, rtol=0.0, atol=0.0)):
         raise ValueError("counts must contain integer-valued counts")
     return np.asarray(rounded, dtype=int)
+
+
+def _contains_boolean_values(values: Any) -> bool:
+    try:
+        raw = np.asarray(values)
+    except (TypeError, ValueError):
+        raw = np.asarray(values, dtype=object)
+    if raw.size == 0:
+        return False
+    if np.issubdtype(raw.dtype, np.bool_):
+        return True
+    if raw.dtype == object:
+        return any(isinstance(value, (bool, np.bool_)) for value in raw.reshape(-1))
+    return False
 
 
 def _positive_integer_scalar(name: str, value: Any) -> int:

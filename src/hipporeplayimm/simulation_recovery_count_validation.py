@@ -165,16 +165,12 @@ def _validated_count_matrix(counts: Any, *, n_cells: int) -> np.ndarray:
 
 def _contains_boolean_values(values: Any) -> bool:
     try:
-        raw = np.asarray(values)
+        raw = np.asarray(values, dtype=object)
     except (TypeError, ValueError):
         raw = np.asarray(values, dtype=object)
     if raw.size == 0:
         return False
-    if np.issubdtype(raw.dtype, np.bool_):
-        return True
-    if raw.dtype == object:
-        return any(isinstance(value, (bool, np.bool_)) for value in raw.reshape(-1))
-    return False
+    return any(isinstance(value, (bool, np.bool_)) for value in raw.reshape(-1))
 
 
 def _positive_integer_scalar(name: str, value: Any) -> int:

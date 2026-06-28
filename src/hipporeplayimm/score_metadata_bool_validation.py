@@ -14,6 +14,10 @@ def _bool_parse_error(value: object) -> ValueError:
     return ValueError(f"cannot parse boolean value {value!r}; boolean values must be true/false or binary 0/1")
 
 
+def _numeric_parse_error(column: str) -> ValueError:
+    return ValueError(f"{column} must contain finite numeric values")
+
+
 def _parse_strict_bool(value: object) -> bool:
     """Parse boolean-like metadata without accepting arbitrary numerics."""
 
@@ -51,6 +55,28 @@ def _metadata_text_or_none(value: object) -> str | None:
     return text or None
 
 
+def _metadata_float_from_value(value: object, column: str) -> float | None:
+    try:
+        if pd.isna(value):
+            return None
+    except (TypeError, ValueError):
+        pass
+
+    if isinstance(value, (bool, np.bool_)):
+        raise _numeric_parse_error(column)
+
+    text = _metadata_text_or_none(value)
+    if text is None:
+        return None
+    try:
+        numeric = float(text)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise _numeric_parse_error(column) from exc
+    if not np.isfinite(numeric):
+        raise ValueError(f"{column} must be finite")
+    return float(numeric)
+
+
 def _unique_string_from_columns(frame: pd.DataFrame, columns: tuple[str, ...], default: str) -> str:
     values: list[str] = []
     for column in columns:
@@ -70,16 +96,22 @@ def _unique_string_from_columns(frame: pd.DataFrame, columns: tuple[str, ...], d
 
 def _optional_float_from_columns(frame: pd.DataFrame, columns: tuple[str, ...], default: float | None) -> float | None:
     values: list[float] = []
+    joined_columns = " / ".join(columns)
     for column in columns:
         if column not in frame.columns:
             continue
         for value in frame[column].dropna():
+            if isinstance(value, (bool, np.bool_)):
+                raise _numeric_parse_error(joined_columns)
             text = _metadata_text_or_none(value)
             if text is None:
                 continue
-            numeric = float(text)
+            try:
+                numeric = float(text)
+            except (TypeError, ValueError, OverflowError) as exc:
+                raise _numeric_parse_error(joined_columns) from exc
             if not np.isfinite(numeric):
-                raise ValueError(f"{' / '.join(columns)} must be finite")
+                raise ValueError(f"{joined_columns} must be finite")
             values.append(float(numeric))
     if not values:
         return default
@@ -94,6 +126,7 @@ def _score_metadata_patch_current(score_metadata_module: object) -> bool:
         getattr(score_metadata_module, _SCORE_METADATA_BOOL_PATCH_FLAG, False)
         and getattr(score_metadata_module, "_parse_bool", None) is _parse_strict_bool
         and getattr(score_metadata_module, "_unique_string_from_columns", None) is _unique_string_from_columns
+        and getattr(score_metadata_module, "_metadata_float_from_value", None) is _metadata_float_from_value
     )
 
 
@@ -113,6 +146,7 @@ def apply_score_metadata_bool_validation_patch() -> None:
     if not _score_metadata_patch_current(score_metadata_module):
         score_metadata_module._parse_bool = _parse_strict_bool
         score_metadata_module._unique_string_from_columns = _unique_string_from_columns
+        score_metadata_module._metadata_float_from_value = _metadata_float_from_value
         setattr(score_metadata_module, _SCORE_METADATA_BOOL_PATCH_FLAG, True)
 
     try:

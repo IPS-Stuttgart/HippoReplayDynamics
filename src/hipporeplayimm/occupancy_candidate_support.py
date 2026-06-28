@@ -2,13 +2,19 @@
 
 from __future__ import annotations
 
+from functools import wraps
 import inspect
+from typing import Any
 
 import numpy as np
+
+_OCCUPANCY_BOOL_GUARD_MARKER = "_occupancy_seconds_bool_guard"
 
 
 def apply_occupancy_candidate_support_patch() -> None:
     """Keep benchmark, recovery, and post-hoc decode beams occupancy-aware."""
+
+    _apply_boolean_occupancy_guard()
 
     from . import benchmarks as benchmark_module
     from . import ground_truth as ground_truth_module
@@ -27,6 +33,52 @@ def apply_occupancy_candidate_support_patch() -> None:
     recovery_module._call_candidate_indices = _call_candidate_indices
     recovery_module._candidate_indices_for_model = _candidate_indices_for_model
     recovery_module._score_recovery_model = _score_recovery_model
+
+
+def _contains_boolean_values(values: Any) -> bool:
+    """Return True for bool arrays and object arrays containing bool scalars."""
+
+    try:
+        raw = np.asarray(values, dtype=object)
+    except (TypeError, ValueError):
+        raw = np.asarray(values)
+    if raw.size == 0:
+        return False
+    if np.issubdtype(raw.dtype, np.bool_):
+        return True
+    if raw.dtype == object:
+        return any(isinstance(value, (bool, np.bool_)) for value in raw.reshape(-1))
+    return False
+
+
+def _apply_boolean_occupancy_guard() -> None:
+    """Reject boolean masks passed as numeric occupancy durations."""
+
+    from . import state_space as state_space_module
+    from . import state_space_model
+    from . import state_space_utils
+
+    current = state_space_utils._valid_bin_mask_from_occupancy
+    if getattr(current, _OCCUPANCY_BOOL_GUARD_MARKER, False):
+        patched = current
+    else:
+        previous = current
+
+        @wraps(previous)
+        def _valid_bin_mask_from_occupancy(occupancy_s, min_occupancy_s: float, n_bins: int):
+            if occupancy_s is not None and _contains_boolean_values(occupancy_s):
+                raise TypeError(
+                    "occupancy_s must contain numeric occupancy durations in seconds, "
+                    "not boolean mask values"
+                )
+            return previous(occupancy_s, min_occupancy_s, n_bins)
+
+        setattr(_valid_bin_mask_from_occupancy, _OCCUPANCY_BOOL_GUARD_MARKER, True)
+        patched = _valid_bin_mask_from_occupancy
+        state_space_utils._valid_bin_mask_from_occupancy = patched
+
+    state_space_module._valid_bin_mask_from_occupancy = patched
+    state_space_model._valid_bin_mask_from_occupancy = patched
 
 
 def _candidate_indices_for_model(

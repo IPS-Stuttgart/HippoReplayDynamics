@@ -63,6 +63,34 @@ def test_state_space_occupancy_mask_excludes_invalid_terminal_bins():
     assert np.isclose(posterior[[0, 2]].sum(), 1.0)
 
 
+def test_state_space_occupancy_rejects_boolean_mask_values():
+    emissions = LogEmissionTensor(
+        log_likelihood=np.log(
+            np.array(
+                [
+                    [0.2, 0.6, 0.2],
+                    [0.2, 0.6, 0.2],
+                ]
+            )
+        ),
+        spike_counts=np.zeros((2, 1), dtype=int),
+        times=np.array([0.01, 0.03]),
+        dt=0.02,
+        cell_ids=np.array([1]),
+        n_spikes=0,
+    )
+    centers = np.array([[0.0, 0.0], [4.0, 0.0], [8.0, 0.0]])
+    occupancy = np.array([True, False, True])
+    config = StateSpaceDecoderConfig(mode="fragmented", valid_occupancy_threshold_s=0.5)
+
+    with pytest.raises(TypeError, match="occupancy_s.*not boolean"):
+        StateSpaceReplayModel(mode="fragmented", config=config).score(
+            emissions,
+            centers,
+            occupancy_s=occupancy,
+        )
+
+
 def test_state_space_model_scores_after_split():
     emissions = LogEmissionTensor(
         log_likelihood=np.log(

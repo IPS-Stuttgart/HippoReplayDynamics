@@ -7,6 +7,9 @@ from dataclasses import replace
 import numpy as np
 
 
+_PATCHED_FLAG = "_shuffle_spike_time_order_patch_applied"
+
+
 def apply_shuffle_spike_time_order_patch() -> None:
     """Install a sorted spike-time shuffling helper.
 
@@ -17,10 +20,13 @@ def apply_shuffle_spike_time_order_patch() -> None:
 
     from . import result_improvements as ri
 
-    if getattr(ri, "_shuffle_spike_time_order_patch_applied", False):
+    if (
+        getattr(ri, _PATCHED_FLAG, False)
+        and getattr(ri, "shuffle_spike_times_session", None) is _shuffle_spike_times_session_sorted
+    ):
         return
     ri.shuffle_spike_times_session = _shuffle_spike_times_session_sorted
-    ri._shuffle_spike_time_order_patch_applied = True
+    setattr(ri, _PATCHED_FLAG, True)
 
 
 def _shuffle_spike_times_session_sorted(session, random_seed: int = 1):

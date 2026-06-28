@@ -10,7 +10,6 @@ from hipporeplayimm.duration_occupancy_metadata_guard import _coerce_transition_
 from hipporeplayimm.encoding import LogEmissionTensor
 
 
-
 def _emissions_with_metadata() -> LogEmissionTensor:
     return LogEmissionTensor(
         log_likelihood=np.array(
@@ -24,7 +23,6 @@ def _emissions_with_metadata() -> LogEmissionTensor:
         n_spikes=0,
         metadata={"source": "original"},
     )
-
 
 
 def test_candidate_selection_emissions_copies_metadata_for_masked_support():
@@ -47,7 +45,6 @@ def test_candidate_selection_emissions_copies_metadata_for_masked_support():
     assert np.all(np.isneginf(restricted.log_likelihood[:, 1]))
 
 
-
 def test_candidate_selection_emissions_reuses_input_when_no_masking_needed():
     emissions = _emissions_with_metadata()
 
@@ -56,7 +53,6 @@ def test_candidate_selection_emissions_reuses_input_when_no_masking_needed():
         emissions,
         np.array([True, True, True], dtype=bool),
     ) is emissions
-
 
 
 @pytest.mark.parametrize(
@@ -68,7 +64,6 @@ def test_uniform_probabilities_rejects_invalid_bin_count(bad_n_bins):
         _uniform_probabilities(bad_n_bins)
 
 
-
 def test_uniform_probabilities_are_bootstrapped_into_duration_occupancy_module():
     import hipporeplayimm.duration_occupancy as duration_occupancy
 
@@ -77,7 +72,6 @@ def test_uniform_probabilities_are_bootstrapped_into_duration_occupancy_module()
         duration_occupancy._uniform_probabilities(2),
         np.array([0.5, 0.5], dtype=float),
     )
-
 
 
 def test_transition_duration_validation_patch_recovers_from_partial_module_flags(monkeypatch) -> None:
@@ -102,12 +96,10 @@ def test_transition_duration_validation_patch_recovers_from_partial_module_flags
         assert getattr(module._duration_adjusted_decays, "_transition_duration_validation_wrapped", False)
 
 
-
 def test_transition_duration_guard_fills_only_missing_metadata() -> None:
     durations = _coerce_transition_durations([], n_time=3, fallback_dt=0.02)
 
     np.testing.assert_allclose(durations, np.array([0.02, 0.02], dtype=float))
-
 
 
 @pytest.mark.parametrize(
@@ -123,12 +115,10 @@ def test_transition_duration_guard_rejects_boolean_metadata(bad_durations) -> No
         _coerce_transition_durations(bad_durations, n_time=3, fallback_dt=0.02)
 
 
-
 @pytest.mark.parametrize("bad_fallback_dt", [True, np.bool_(True), np.array(True)])
 def test_transition_duration_guard_rejects_boolean_fallback_dt(bad_fallback_dt) -> None:
     with pytest.raises(ValueError, match="not boolean"):
         _coerce_transition_durations([], n_time=3, fallback_dt=bad_fallback_dt)
-
 
 
 def test_transition_duration_guard_rejects_malformed_nonempty_metadata() -> None:

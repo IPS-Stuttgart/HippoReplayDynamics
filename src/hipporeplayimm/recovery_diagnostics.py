@@ -483,14 +483,19 @@ def _json_ready(value: object) -> object:
         return [_json_ready(item) for item in value]
     if isinstance(value, tuple):
         return [_json_ready(item) for item in value]
+    if isinstance(value, np.ndarray):
+        if value.ndim == 0:
+            return _json_ready(value.item())
+        return [_json_ready(item) for item in value.reshape(-1).tolist()]
     try:
-        if pd.isna(value):
-            return None
+        missing = pd.isna(value)
     except (TypeError, ValueError):
-        pass
+        missing = False
+    if isinstance(missing, (bool, np.bool_)) and bool(missing):
+        return None
     try:
         scalar = value.item()
-    except AttributeError:
+    except (AttributeError, ValueError):
         scalar = value
     if isinstance(scalar, float):
         return None if not math.isfinite(scalar) else float(scalar)

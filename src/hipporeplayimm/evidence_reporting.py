@@ -198,7 +198,10 @@ def evidence_comparison_from_support(support: object) -> str:
 
     if support is None or _is_missing_evidence_support(support):
         return EVIDENCE_COMPARISON_UNKNOWN
-    label = _prioritized_known_evidence_support(_evidence_support_labels(support))
+    labels = _evidence_support_labels(support)
+    if "not_scored" in labels:
+        return EVIDENCE_COMPARISON_NOT_SCORED
+    label = _prioritized_known_evidence_support(labels)
     if label == EXACT_EVIDENCE_SUPPORT:
         return EVIDENCE_COMPARISON_EXACT
     if label == TRUNCATED_EVIDENCE_SUPPORT:
@@ -207,8 +210,6 @@ def evidence_comparison_from_support(support: object) -> str:
         return EVIDENCE_COMPARISON_DEGENERATE
     if label == PYRECEST_PARTICLE_EVIDENCE_SUPPORT:
         return EVIDENCE_COMPARISON_PARTICLE_APPROXIMATION
-    if str(support) == "not_scored":
-        return EVIDENCE_COMPARISON_NOT_SCORED
     return EVIDENCE_COMPARISON_UNKNOWN
 
 

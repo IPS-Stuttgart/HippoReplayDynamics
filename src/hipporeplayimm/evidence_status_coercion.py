@@ -36,22 +36,11 @@ def apply_evidence_status_coercion_patch() -> None:
 
         labels: list[str] = []
         for column in reporting.EVIDENCE_SUPPORT_DIAGNOSTIC_COLUMNS:
-            value = row.get(column)
-            if _is_missing_scalar(value):
-                continue
-            text = str(value).strip()
-            if text:
-                labels.append(text)
+            labels.extend(reporting._evidence_support_labels(row.get(column)))
 
-        for non_exact_support in (
-            reporting.TRUNCATED_EVIDENCE_SUPPORT,
-            reporting.DEGENERATE_SINGLE_BIN_EVIDENCE_SUPPORT,
-            reporting.PYRECEST_PARTICLE_EVIDENCE_SUPPORT,
-        ):
-            if non_exact_support in labels:
-                return non_exact_support
-        if reporting.EXACT_EVIDENCE_SUPPORT in labels:
-            return reporting.EXACT_EVIDENCE_SUPPORT
+        support = reporting._prioritized_known_evidence_support(labels)
+        if support:
+            return support
         if labels:
             return reporting.EVIDENCE_COMPARISON_UNKNOWN
         return reporting.EXACT_EVIDENCE_SUPPORT

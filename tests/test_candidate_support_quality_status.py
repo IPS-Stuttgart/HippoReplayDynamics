@@ -12,12 +12,14 @@ def test_non_success_and_non_comparable_rows_are_unknown_support_quality() -> No
             {"model": "m1", "status": "error", "evidence_support": "not_scored"},
             {"model": "m2", "status": "success", "evidence_support": "particle_approximation"},
             {"model": "m3", "status": "success", "evidence_support": "unknown_noncomparable"},
+            {"model": "m4", "status": "success", "evidence_support": "unknown"},
         ]
     )
 
     labelled = add_candidate_support_quality_columns(rows)
 
     assert labelled["candidate_support_quality"].tolist() == [
+        "conservative_unknown",
         "conservative_unknown",
         "conservative_unknown",
         "conservative_unknown",

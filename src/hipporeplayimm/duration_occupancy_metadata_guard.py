@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
+from contextvars import ContextVar
 from dataclasses import replace
 from functools import wraps
 import operator
@@ -13,6 +14,12 @@ import numpy as np
 _EVIDENCE_ONLY_DIAGNOSTIC_PATCH_ATTR = "_duration_occupancy_evidence_only_diagnostics_patch_applied"
 _EVIDENCE_ONLY_DIAGNOSTIC_ORIGINAL_ATTR = "_duration_occupancy_evidence_only_diagnostics_original"
 _WRAPPER_DIAGNOSTIC_PATCH_ATTR = "_state_space_evidence_only_diagnostics_patch_applied"
+_FIRST_ORDER_IMM_DIAGNOSTIC_CONTEXT_PATCH_ATTR = "_first_order_imm_duration_diagnostic_context_patch_applied"
+_FIRST_ORDER_IMM_DIAGNOSTIC_HELPER_PATCH_ATTR = "_first_order_imm_duration_diagnostic_helper_patch_applied"
+_CURRENT_FIRST_ORDER_IMM_TRANSITION_DURATIONS: ContextVar[tuple[float, ...] | None] = ContextVar(
+    "_current_first_order_imm_transition_durations",
+    default=None,
+)
 
 
 def apply_duration_occupancy_metadata_guard_patch() -> None:
@@ -23,6 +30,7 @@ def apply_duration_occupancy_metadata_guard_patch() -> None:
 
     _apply_transition_duration_validation()
     _patch_evidence_only_path_diagnostics(_duration_occupancy)
+    _patch_first_order_imm_duration_diagnostics(_duration_occupancy)
 
     if getattr(_duration_occupancy, "_metadata_guard_patch_applied", False):
         return
@@ -93,6 +101,87 @@ def _patch_evidence_only_path_diagnostics(duration_occupancy: Any) -> None:
         _EVIDENCE_ONLY_DIAGNOSTIC_ORIGINAL_ATTR,
         scorer,
     )
+    duration_occupancy._score_state_space_duration_with_occupancy = _score_state_space_duration_with_occupancy
+
+
+def _patch_first_order_imm_duration_diagnostics(duration_occupancy: Any) -> None:
+    """Keep first-order IMM content diagnostics on the scorer's duration axis."""
+
+    helper = getattr(duration_occupancy, "_first_order_imm_content_diagnostics", None)
+    if helper is not None and not getattr(helper, _FIRST_ORDER_IMM_DIAGNOSTIC_HELPER_PATCH_ATTR, False):
+
+        @wraps(helper)
+        def _first_order_imm_content_diagnostics(mode_posterior, trajectory_log_posterior, bin_centers, dt_s):
+            durations = _CURRENT_FIRST_ORDER_IMM_TRANSITION_DURATIONS.get()
+            has_duration_metadata = getattr(dt_s, "transition_durations", None) is not None
+            if durations is not None and not has_duration_metadata:
+                n_time = int(np.asarray(mode_posterior).shape[0])
+                if len(durations) == max(n_time - 1, 0):
+                    from .duration_dynamics import DurationFloat
+
+                    dt_s = DurationFloat(float(dt_s), durations)
+            return helper(mode_posterior, trajectory_log_posterior, bin_centers, dt_s)
+
+        setattr(
+            _first_order_imm_content_diagnostics,
+            _FIRST_ORDER_IMM_DIAGNOSTIC_HELPER_PATCH_ATTR,
+            True,
+        )
+        setattr(_first_order_imm_content_diagnostics, "__hipporeplayimm_original__", helper)
+        duration_occupancy._first_order_imm_content_diagnostics = _first_order_imm_content_diagnostics
+
+    scorer = getattr(duration_occupancy, "_score_state_space_duration_with_occupancy", None)
+    if scorer is None or getattr(scorer, _FIRST_ORDER_IMM_DIAGNOSTIC_CONTEXT_PATCH_ATTR, False):
+        return
+
+    @wraps(scorer)
+    def _score_state_space_duration_with_occupancy(
+        self,
+        emissions,
+        bin_centers,
+        candidate_indices=None,
+        *,
+        occupancy_s=None,
+        return_trajectory: bool = True,
+    ):
+        if str(getattr(self, "mode", "")) != "first-order-imm":
+            return scorer(
+                self,
+                emissions,
+                bin_centers,
+                candidate_indices=candidate_indices,
+                occupancy_s=occupancy_s,
+                return_trajectory=return_trajectory,
+            )
+
+        durations = duration_occupancy.transition_durations_s(emissions)
+        token = _CURRENT_FIRST_ORDER_IMM_TRANSITION_DURATIONS.set(tuple(float(value) for value in durations))
+        try:
+            return scorer(
+                self,
+                emissions,
+                bin_centers,
+                candidate_indices=candidate_indices,
+                occupancy_s=occupancy_s,
+                return_trajectory=return_trajectory,
+            )
+        finally:
+            _CURRENT_FIRST_ORDER_IMM_TRANSITION_DURATIONS.reset(token)
+
+    setattr(
+        _score_state_space_duration_with_occupancy,
+        _FIRST_ORDER_IMM_DIAGNOSTIC_CONTEXT_PATCH_ATTR,
+        True,
+    )
+    if getattr(scorer, _EVIDENCE_ONLY_DIAGNOSTIC_PATCH_ATTR, False):
+        setattr(_score_state_space_duration_with_occupancy, _EVIDENCE_ONLY_DIAGNOSTIC_PATCH_ATTR, True)
+        setattr(
+            _score_state_space_duration_with_occupancy,
+            _EVIDENCE_ONLY_DIAGNOSTIC_ORIGINAL_ATTR,
+            getattr(scorer, _EVIDENCE_ONLY_DIAGNOSTIC_ORIGINAL_ATTR, scorer),
+        )
+    if getattr(scorer, _WRAPPER_DIAGNOSTIC_PATCH_ATTR, False):
+        setattr(_score_state_space_duration_with_occupancy, _WRAPPER_DIAGNOSTIC_PATCH_ATTR, True)
     duration_occupancy._score_state_space_duration_with_occupancy = _score_state_space_duration_with_occupancy
 
 

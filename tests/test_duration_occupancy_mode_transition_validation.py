@@ -61,6 +61,29 @@ def test_custom_duration_imm_mode_transition_rejects_boolean_masks() -> None:
         _resolve([boolean_transition])
 
 
+def test_custom_duration_imm_mode_transition_rejects_object_boolean_masks() -> None:
+    boolean_transition = np.eye(3, dtype=object)
+
+    with pytest.raises(ValueError, match="not booleans"):
+        _resolve([boolean_transition])
+
+
+def test_custom_duration_imm_mode_transition_accepts_valid_object_probability_matrix() -> None:
+    transition = np.array(
+        [
+            [0.8, 0.1, 0.1],
+            [0.2, 0.7, 0.1],
+            [0.25, 0.25, 0.5],
+        ],
+        dtype=object,
+    )
+
+    resolved = _resolve([transition])
+
+    assert len(resolved) == 1
+    np.testing.assert_allclose(resolved[0], np.asarray(transition, dtype=float))
+
+
 def test_custom_duration_imm_mode_transition_accepts_valid_probability_matrix() -> None:
     transition = np.array(
         [

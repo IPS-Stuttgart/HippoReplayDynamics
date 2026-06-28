@@ -6,6 +6,7 @@ from functools import wraps
 
 import numpy as np
 import pandas as pd
+from scipy.special import logsumexp
 
 from .encoding import LogEmissionTensor
 from .evidence_status_coercion import _normalize_status_value
@@ -47,7 +48,8 @@ def _patch_model_probability_diagnostics(accuracy_upgrades) -> None:
             if evidence_column in normalized.columns:
                 normalized[evidence_column] = pd.to_numeric(normalized[evidence_column], errors="coerce")
                 normalized = normalized.dropna(subset=[evidence_column])
-        return original(
+        return _model_probability_diagnostics_with_nonfinite_evidence(
+            accuracy_upgrades,
             normalized,
             evidence_column=evidence_column,
             group_columns=group_columns,
@@ -55,6 +57,106 @@ def _patch_model_probability_diagnostics(accuracy_upgrades) -> None:
 
     accuracy_upgrades.model_probability_diagnostics = model_probability_diagnostics
     setattr(accuracy_upgrades, _STATUS_PATCHED_FLAG, True)
+
+
+def _model_probability_diagnostics_with_nonfinite_evidence(
+    accuracy_upgrades,
+    scores: pd.DataFrame,
+    *,
+    evidence_column: str,
+    group_columns,
+) -> pd.DataFrame:
+    if scores.empty:
+        return pd.DataFrame()
+
+    rows: list[dict[str, object]] = []
+    for key, group in scores.groupby(list(group_columns), sort=False):
+        ok = group.copy()
+        if "status" in ok:
+            ok = ok[ok["status"].eq("success")]
+        if "evidence_comparable" in ok:
+            ok = ok[accuracy_upgrades._coerce_bool_series(ok["evidence_comparable"])]
+        if ok.empty:
+            continue
+
+        ok = ok.dropna(subset=[evidence_column])
+        values = ok[evidence_column].to_numpy(dtype=float)
+        if values.size == 0:
+            continue
+
+        ordered = np.sort(values)[::-1]
+        probs = _stable_log_evidence_probabilities(values)
+        best_idx = _best_evidence_index(values)
+        row = accuracy_upgrades._group_key_dict(group_columns, key)
+        row.update(
+            {
+                "models": int(values.size),
+                "best_model": str(ok.iloc[best_idx]["model"]),
+                "best_log_evidence": float(ordered[0]),
+                "evidence_margin_to_second_best": _evidence_margin_to_second_best(ordered),
+                "model_probability_entropy": _probability_entropy(probs),
+                "best_model_probability": float(np.max(probs)),
+            }
+        )
+        rows.append(row)
+    return pd.DataFrame(rows)
+
+
+def _stable_log_evidence_probabilities(values: np.ndarray) -> np.ndarray:
+    evidence = np.asarray(values, dtype=float)
+    probabilities = np.zeros(evidence.shape, dtype=float)
+
+    positive_infinite = np.isposinf(evidence)
+    if np.any(positive_infinite):
+        probabilities[positive_infinite] = 1.0 / float(np.sum(positive_infinite))
+        return probabilities
+
+    finite = np.isfinite(evidence)
+    if np.any(finite):
+        normalizer = float(logsumexp(evidence[finite]))
+        probabilities[finite] = np.exp(evidence[finite] - normalizer)
+        return probabilities
+
+    negative_infinite = np.isneginf(evidence)
+    if np.any(negative_infinite):
+        probabilities[negative_infinite] = 1.0 / float(np.sum(negative_infinite))
+        return probabilities
+
+    return np.full(evidence.shape, np.nan, dtype=float)
+
+
+def _best_evidence_index(values: np.ndarray) -> int:
+    evidence = np.asarray(values, dtype=float)
+    positive_infinite = np.flatnonzero(np.isposinf(evidence))
+    if positive_infinite.size:
+        return int(positive_infinite[0])
+    finite = np.flatnonzero(np.isfinite(evidence))
+    if finite.size:
+        return int(finite[int(np.argmax(evidence[finite]))])
+    negative_infinite = np.flatnonzero(np.isneginf(evidence))
+    if negative_infinite.size:
+        return int(negative_infinite[0])
+    return int(np.nanargmax(evidence))
+
+
+def _evidence_margin_to_second_best(ordered: np.ndarray) -> float:
+    if ordered.size <= 1:
+        return float("nan")
+    best = float(ordered[0])
+    second = float(ordered[1])
+    if np.isposinf(best) and np.isposinf(second):
+        return 0.0
+    if np.isneginf(best) and np.isneginf(second):
+        return 0.0
+    return float(best - second)
+
+
+def _probability_entropy(probabilities: np.ndarray) -> float:
+    probs = np.asarray(probabilities, dtype=float)
+    positive = probs > 0.0
+    if not np.any(positive):
+        return float("nan")
+    return float(-np.sum(probs[positive] * np.log(probs[positive])))
 
 
 def _patch_reverse_emissions(accuracy_upgrades) -> None:

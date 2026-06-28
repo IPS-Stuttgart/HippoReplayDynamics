@@ -7,7 +7,22 @@ from hipporeplayimm.simulation_recovery import (
 )
 
 
-@pytest.mark.parametrize("limit_value", [0, -1, 1.5, "1.5", np.nan, np.inf, True])
+@pytest.mark.parametrize(
+    "limit_value",
+    [
+        0,
+        -1,
+        1.5,
+        "1.5",
+        np.nan,
+        np.inf,
+        True,
+        np.array(True),
+        np.array(False),
+        np.array([3]),
+        np.array([True]),
+    ],
+)
 def test_simulation_recovery_rejects_invalid_max_synthetic_events(limit_value):
     with pytest.raises(ValueError, match="max_synthetic_events"):
         _validate_recovery_runtime_limits(
@@ -15,14 +30,27 @@ def test_simulation_recovery_rejects_invalid_max_synthetic_events(limit_value):
         )
 
 
-@pytest.mark.parametrize("limit_value", [3, 3.0, "3", "3.0"])
+@pytest.mark.parametrize("limit_value", [3, 3.0, "3", "3.0", np.array(3)])
 def test_simulation_recovery_accepts_integer_valued_max_synthetic_events(limit_value):
     _validate_recovery_runtime_limits(
         SimulationRecoveryConfig(max_synthetic_events=limit_value)
     )
 
 
-@pytest.mark.parametrize("limit_value", [0.0, -0.1, np.nan, np.inf, True])
+@pytest.mark.parametrize(
+    "limit_value",
+    [
+        0.0,
+        -0.1,
+        np.nan,
+        np.inf,
+        True,
+        np.array(True),
+        np.array(False),
+        np.array([1.0]),
+        np.array([True]),
+    ],
+)
 def test_simulation_recovery_rejects_invalid_max_runtime_s(limit_value):
     with pytest.raises(ValueError, match="max_runtime_s"):
         _validate_recovery_runtime_limits(SimulationRecoveryConfig(max_runtime_s=limit_value))

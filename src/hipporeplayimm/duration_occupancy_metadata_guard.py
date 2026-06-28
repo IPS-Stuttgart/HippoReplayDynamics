@@ -108,6 +108,28 @@ def _mark_path_model_evidence_only(model: Any, result: Any) -> None:
     result.diagnostics = diagnostics
 
 
+def _contains_boolean_values(values: object) -> bool:
+    if isinstance(values, (bool, np.bool_)):
+        return True
+    if isinstance(values, Iterable) and not isinstance(values, (str, bytes, bytearray)):
+        try:
+            if any(isinstance(value, (bool, np.bool_)) for value in values):
+                return True
+        except TypeError:
+            pass
+    try:
+        raw = np.asarray(values)
+    except (TypeError, ValueError):
+        raw = np.asarray(values, dtype=object)
+    if raw.size == 0:
+        return False
+    if np.issubdtype(raw.dtype, np.bool_):
+        return True
+    if raw.dtype == object:
+        return any(isinstance(value, (bool, np.bool_)) for value in raw.reshape(-1))
+    return False
+
+
 def _positive_integer_bin_count(value: object) -> int:
     if isinstance(value, (bool, np.bool_)):
         raise ValueError("n_bins must be a positive integer")
@@ -165,7 +187,7 @@ def _coerce_transition_durations(
     out = np.asarray(raw_values, dtype=float)
     if out.ndim != 1:
         raise ValueError("transition durations must be one-dimensional")
-    _validate_transition_durations(out)
+    _validate_transition_durations(raw_values)
     if out.shape != (expected,):
         raise ValueError(
             "transition durations must contain one finite positive value per transition; "
@@ -179,8 +201,8 @@ def _validated_decay_helper(helper: Callable[[Any, np.ndarray, float], np.ndarra
         return helper
 
     def duration_adjusted_decays(config: Any, durations: np.ndarray, reference_dt: float) -> np.ndarray:
-        durations = np.asarray(durations, dtype=float)
         _validate_transition_durations(durations)
+        durations = np.asarray(durations, dtype=float)
         return helper(config, durations, reference_dt)
 
     duration_adjusted_decays._transition_duration_validation_wrapped = True  # type: ignore[attr-defined]
@@ -188,6 +210,8 @@ def _validated_decay_helper(helper: Callable[[Any, np.ndarray, float], np.ndarra
 
 
 def _validate_transition_durations(durations: np.ndarray) -> None:
+    if _contains_boolean_values(durations):
+        raise ValueError("transition durations must be numeric durations, not boolean values")
     values = np.asarray(durations, dtype=float)
     if values.size == 0:
         return
@@ -196,6 +220,8 @@ def _validate_transition_durations(durations: np.ndarray) -> None:
 
 
 def _positive_finite_scalar(name: str, value: float) -> float:
+    if _contains_boolean_values(value):
+        raise ValueError(f"{name} must be a numeric duration, not boolean")
     scalar = float(value)
     if not np.isfinite(scalar) or scalar <= 0.0:
         raise ValueError(f"{name} must be finite and positive")

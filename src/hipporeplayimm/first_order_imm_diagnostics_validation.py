@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import sys
 from collections.abc import Callable
+from contextvars import ContextVar
 
 import numpy as np
 
@@ -11,7 +12,10 @@ _PATCH_ATTR = "_first_order_imm_diagnostics_validation_patch"
 _ORIGINAL_ATTR = "_first_order_imm_diagnostics_validation_original"
 _DURATION_ALIAS_ATTR = "_first_order_imm_duration_diagnostics_alias_patch"
 _DURATION_SOURCE_ATTR = "_first_order_imm_duration_diagnostics_source_patch"
-_LAST_DURATIONS_ATTR = "_first_order_imm_diagnostic_transition_durations"
+_DIAGNOSTIC_TRANSITION_DURATIONS: ContextVar[np.ndarray | None] = ContextVar(
+    "first_order_imm_diagnostic_transition_durations",
+    default=None,
+)
 
 
 def _validate_first_order_imm_content_inputs(
@@ -198,11 +202,8 @@ def _wrap_helper(
 
 
 def _stored_duration_occupancy_durations(n_time: int) -> np.ndarray | None:
-    module = sys.modules.get("hipporeplayimm.duration_occupancy")
-    if module is None:
-        return None
-    values = getattr(module, _LAST_DURATIONS_ATTR, None)
-    setattr(module, _LAST_DURATIONS_ATTR, None)
+    values = _DIAGNOSTIC_TRANSITION_DURATIONS.get()
+    _DIAGNOSTIC_TRANSITION_DURATIONS.set(None)
     return _matching_transition_durations(values, n_time)
 
 
@@ -216,7 +217,7 @@ def _record_duration_occupancy_transition_durations() -> None:
 
     def recording_transition_durations(emissions):
         durations = current(emissions)
-        setattr(module, _LAST_DURATIONS_ATTR, np.asarray(durations, dtype=float).copy())
+        _DIAGNOSTIC_TRANSITION_DURATIONS.set(np.asarray(durations, dtype=float).copy())
         return durations
 
     setattr(recording_transition_durations, _DURATION_SOURCE_ATTR, True)

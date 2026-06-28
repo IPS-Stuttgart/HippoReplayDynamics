@@ -6,6 +6,8 @@ import zipfile
 
 import pytest
 
+import hipporeplayimm
+import hipporeplayimm.olafsdottir2016 as olafsdottir2016
 from hipporeplayimm.olafsdottir2016 import (
     build_manifest,
     extract_archive,
@@ -141,6 +143,32 @@ def test_extract_archive_rejects_unsafe_member_paths(tmp_path: Path, member_name
 
     assert not (tmp_path / "escape.txt").exists()
     assert not (tmp_path / "dataset" / "safe" / "member.txt").exists()
+
+
+def test_runtime_patches_restore_olafsdottir_zip_safety_after_replacement(tmp_path: Path) -> None:
+    hipporeplayimm.apply_runtime_patches()
+    safe_extract_archive = olafsdottir2016.extract_archive
+
+    def unsafe_extract_archive(archive_path: str | Path, dataset_root: str | Path) -> None:
+        root = Path(dataset_root)
+        root.mkdir(parents=True, exist_ok=True)
+        with zipfile.ZipFile(archive_path) as archive:
+            archive.extractall(root)
+
+    olafsdottir2016.extract_archive = unsafe_extract_archive
+    setattr(olafsdottir2016, "_olafsdottir_zip_safety_patch_applied", True)
+
+    hipporeplayimm.apply_runtime_patches()
+
+    assert olafsdottir2016.extract_archive is safe_extract_archive
+    archive_path = tmp_path / "unsafe.zip"
+    with zipfile.ZipFile(archive_path, "w") as archive:
+        archive.writestr("../escape.txt", "bad")
+
+    with pytest.raises(ValueError, match="Unsafe zip member path"):
+        olafsdottir2016.extract_archive(archive_path, tmp_path / "dataset")
+
+    assert not (tmp_path / "escape.txt").exists()
 
 
 def test_verify_md5_rejects_mismatch(tmp_path: Path) -> None:

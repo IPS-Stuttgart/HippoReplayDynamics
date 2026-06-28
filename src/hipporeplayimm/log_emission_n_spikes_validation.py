@@ -11,6 +11,7 @@ report support-loss errors at the scoring boundary.
 
 from __future__ import annotations
 
+from functools import wraps
 from typing import Any
 
 import numpy as np
@@ -18,21 +19,29 @@ import numpy as np
 from .encoding import LogEmissionTensor
 
 _PATCH_FLAG = "_n_spikes_validation_applied"
+_POST_INIT_WRAPPER_MARKER = "_n_spikes_validation_post_init_wrapper"
+
+
+def _log_emission_n_spikes_patch_current() -> bool:
+    return bool(getattr(LogEmissionTensor.__post_init__, _POST_INIT_WRAPPER_MARKER, False))
 
 
 def apply_log_emission_n_spikes_validation_patch() -> None:
     """Install idempotent ``LogEmissionTensor`` post-construction guards."""
 
-    if getattr(LogEmissionTensor, _PATCH_FLAG, False):
+    if _log_emission_n_spikes_patch_current():
+        setattr(LogEmissionTensor, _PATCH_FLAG, True)
         return
 
     original_post_init = LogEmissionTensor.__post_init__
 
+    @wraps(original_post_init)
     def _validated_post_init(self: LogEmissionTensor) -> None:
         original_post_init(self)
         _validate_log_likelihood(self)
         _validate_n_spikes(self)
 
+    setattr(_validated_post_init, _POST_INIT_WRAPPER_MARKER, True)
     LogEmissionTensor.__post_init__ = _validated_post_init  # type: ignore[method-assign]
     setattr(LogEmissionTensor, _PATCH_FLAG, True)
 

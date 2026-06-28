@@ -4,6 +4,7 @@ import numpy as np
 import pytest
 
 from hipporeplayimm.encoding import LogEmissionTensor
+from hipporeplayimm.log_emission_n_spikes_validation import apply_log_emission_n_spikes_validation_patch
 
 
 def _tensor_with_counts(counts: np.ndarray, n_spikes: object) -> LogEmissionTensor:
@@ -16,6 +17,19 @@ def _tensor_with_counts(counts: np.ndarray, n_spikes: object) -> LogEmissionTens
         cell_ids=np.arange(counts.shape[1], dtype=int),
         n_spikes=n_spikes,
     )
+
+
+def test_log_emission_n_spikes_patch_refreshes_stale_post_init_flag(monkeypatch: pytest.MonkeyPatch) -> None:
+    def stale_post_init(self: LogEmissionTensor) -> None:
+        self.log_likelihood = np.asarray(self.log_likelihood, dtype=float)
+
+    monkeypatch.setattr(LogEmissionTensor, "__post_init__", stale_post_init)
+    monkeypatch.setattr(LogEmissionTensor, "_n_spikes_validation_applied", True, raising=False)
+
+    apply_log_emission_n_spikes_validation_patch()
+
+    with pytest.raises(ValueError, match="total spike_counts sum"):
+        _tensor_with_counts(np.array([[1, 0], [0, 2]], dtype=int), 2)
 
 
 def test_log_emission_tensor_rejects_nan_log_likelihood() -> None:

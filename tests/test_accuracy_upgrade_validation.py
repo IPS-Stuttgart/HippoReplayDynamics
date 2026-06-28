@@ -147,6 +147,48 @@ def test_estimate_replay_cell_gains_counts_unsorted_encoding_cell_ids() -> None:
     np.testing.assert_allclose(gains, [2.0, 1.0])
 
 
+def test_gamma_poisson_predictive_log_emissions_rejects_boolean_inputs() -> None:
+    spike_counts = np.zeros((2, 1), dtype=float)
+    shape = np.ones((1, 3), dtype=float)
+    exposure = np.ones((1, 3), dtype=float)
+
+    with pytest.raises(ValueError, match="spike_counts"):
+        gamma_poisson_predictive_log_emissions(
+            np.array([[True], [False]], dtype=bool),
+            shape,
+            exposure,
+            0.02,
+        )
+
+    with pytest.raises(ValueError, match="rate_shape"):
+        gamma_poisson_predictive_log_emissions(
+            spike_counts,
+            np.array([[True, True, True]], dtype=bool),
+            exposure,
+            0.02,
+        )
+
+    with pytest.raises(ValueError, match="rate_exposure_s"):
+        gamma_poisson_predictive_log_emissions(
+            spike_counts,
+            shape,
+            np.array([[True, True, True]], dtype=bool),
+            0.02,
+        )
+
+    with pytest.raises(ValueError, match="dt"):
+        gamma_poisson_predictive_log_emissions(spike_counts, shape, exposure, True)
+
+    with pytest.raises(ValueError, match="spike_rate_scale"):
+        gamma_poisson_predictive_log_emissions(
+            spike_counts,
+            shape,
+            exposure,
+            0.02,
+            spike_rate_scale=True,
+        )
+
+
 def test_gamma_poisson_predictive_log_emissions_rejects_invalid_inputs() -> None:
     spike_counts = np.zeros((2, 1), dtype=float)
     shape = np.ones((1, 3), dtype=float)

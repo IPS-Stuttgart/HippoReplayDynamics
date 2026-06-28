@@ -193,8 +193,8 @@ def _validated_decay_helper(helper: Callable[[Any, np.ndarray, float], np.ndarra
         return helper
 
     def duration_adjusted_decays(config: Any, durations: np.ndarray, reference_dt: float) -> np.ndarray:
-        durations = np.asarray(durations, dtype=float)
         _validate_transition_durations(durations)
+        durations = np.asarray(durations, dtype=float)
         return helper(config, durations, reference_dt)
 
     duration_adjusted_decays._transition_duration_validation_wrapped = True  # type: ignore[attr-defined]

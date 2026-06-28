@@ -135,7 +135,7 @@ def _valid_bin_mask_for_candidate_support(
 
     return _valid_bin_mask_from_occupancy(
         occupancy_s,
-        float(config.valid_occupancy_threshold_s),
+        config.valid_occupancy_threshold_s,
         int(n_bins),
     )
 

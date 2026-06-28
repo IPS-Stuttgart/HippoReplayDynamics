@@ -1,9 +1,9 @@
 """Validate ``LogEmissionTensor`` summary fields after base construction.
 
 The base tensor permits ``-inf`` log-likelihood entries to mark impossible states,
-but ``NaN`` entries poison posterior normalization and evidence calculations.  This
-patch also keeps the stored ``n_spikes`` summary consistent with the validated
-``spike_counts`` tensor.
+but ``NaN`` entries invalidate posterior normalization and evidence calculations.
+This patch also keeps the stored ``n_spikes`` summary consistent with the
+validated ``spike_counts`` tensor.
 """
 
 from __future__ import annotations
@@ -68,6 +68,8 @@ def _validate_n_spikes(emissions: LogEmissionTensor) -> None:
         raise ValueError("spike_counts must be integer-valued")
 
     total_spikes = float(rounded_counts.sum())
+    if _contains_boolean_values(emissions.n_spikes):
+        raise ValueError("n_spikes must be a numeric count, not boolean")
     try:
         n_spikes = float(emissions.n_spikes)
     except (TypeError, ValueError) as exc:

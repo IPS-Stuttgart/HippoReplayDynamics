@@ -37,7 +37,7 @@ def event_reliability_flags(
     status = row.get("status", "success")
     if not _status_is_success_or_missing(status):
         reasons.append("score_failure")
-    n_spikes = _as_float(row.get("n_spikes", row.get("test_spikes", np.nan)))
+    n_spikes = _first_finite(row, ("n_spikes", "test_spikes"))
     if np.isfinite(n_spikes) and n_spikes < min_spikes:
         reasons.append("low_spike_count")
     n_time = _as_float(row.get("n_time", np.nan))

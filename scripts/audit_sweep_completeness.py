@@ -65,11 +65,10 @@ def audit_sweep_completeness(
     planned = _load_plan_rows(root)
     score_paths = _paths_by_matrix_id(root, preset.score_filenames, preset.artifact_prefix)
     summary_paths = _paths_by_matrix_id(root, preset.required_summary_filenames, preset.artifact_prefix)
-    all_matrix_ids = sorted(
-        set(planned.get("matrix_id", pd.Series(dtype=str)).astype(str))
-        | set(score_paths)
-        | set(summary_paths)
+    planned_ids = set(
+        _matrix_id_series(planned.get("matrix_id", pd.Series(dtype="string"))).astype(str)
     )
+    all_matrix_ids = sorted(planned_ids | set(score_paths) | set(summary_paths))
     if not all_matrix_ids:
         raise FileNotFoundError(
             f"No planned matrix cells or {mode} artifacts found under: {root}"
@@ -145,6 +144,13 @@ def _preset(mode: str) -> SweepPreset:
     return PRESETS[normalized]
 
 
+def _matrix_id_series(values: pd.Series) -> pd.Series:
+    """Return non-null, non-blank matrix identifiers as stripped strings."""
+
+    ids = values.astype("string").str.strip()
+    return ids[ids.notna() & ids.ne("")]
+
+
 def _load_plan_rows(root: Path) -> pd.DataFrame:
     frames: list[pd.DataFrame] = []
     for path in sorted(root.rglob("matrix.csv")):
@@ -159,6 +165,11 @@ def _load_plan_rows(root: Path) -> pd.DataFrame:
             frame = frame.rename(columns={"id": "matrix_id"})
         if "matrix_id" not in frame:
             continue
+        matrix_ids = _matrix_id_series(frame["matrix_id"])
+        if matrix_ids.empty:
+            continue
+        frame = frame.loc[matrix_ids.index].copy()
+        frame["matrix_id"] = matrix_ids.astype(str)
         frame["source_matrix_plan_file"] = str(path)
         frames.append(frame)
     if not frames:
@@ -187,8 +198,10 @@ def _matrix_id_from_csv(path: Path) -> str | None:
     for column in ("matrix_id", "id"):
         if column in frame.columns and not frame.empty:
             value = frame[column].iloc[0]
-            if pd.notna(value) and str(value):
-                return str(value)
+            if pd.notna(value):
+                text = str(value).strip()
+                if text:
+                    return text
     return None
 
 

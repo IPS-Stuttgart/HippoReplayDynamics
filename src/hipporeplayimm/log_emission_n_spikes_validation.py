@@ -65,16 +65,12 @@ def _contains_boolean_values(values: Any) -> bool:
 
 
 def _validate_n_spikes(emissions: LogEmissionTensor) -> None:
-    """Reject summary spike counts that disagree with ``spike_counts``."""
-
     if _contains_boolean_values(emissions.spike_counts):
         raise ValueError("spike_counts must be numeric counts, not boolean values")
-
     spike_counts = np.asarray(emissions.spike_counts, dtype=float)
     rounded_counts = np.rint(spike_counts)
     if not np.all(np.isclose(spike_counts, rounded_counts, rtol=0.0, atol=0.0)):
         raise ValueError("spike_counts must be integer-valued")
-
     total_spikes = float(rounded_counts.sum())
     if _contains_boolean_values(emissions.n_spikes):
         raise ValueError("n_spikes must be a numeric count, not boolean")
@@ -82,24 +78,18 @@ def _validate_n_spikes(emissions: LogEmissionTensor) -> None:
         n_spikes = float(emissions.n_spikes)
     except (TypeError, ValueError) as exc:
         raise ValueError("n_spikes must be numeric") from exc
-
     if not np.isfinite(n_spikes) or n_spikes < 0.0:
         raise ValueError("n_spikes must be finite and nonnegative")
-
     rounded = float(np.rint(n_spikes))
     if not np.isclose(n_spikes, rounded, rtol=0.0, atol=0.0):
         raise ValueError("n_spikes must be integer-valued")
-
     if not np.isclose(rounded, total_spikes, rtol=0.0, atol=0.0):
         raise ValueError("n_spikes must equal the total spike_counts sum")
-
     emissions.spike_counts = rounded_counts.astype(int, copy=False)
     emissions.n_spikes = int(rounded)
 
 
 def _validate_cell_ids(emissions: LogEmissionTensor) -> None:
-    """Reject ambiguous or lossy emission cell identifiers."""
-
     if _contains_boolean_values(emissions.cell_ids):
         raise ValueError("cell_ids must be numeric integer identifiers, not boolean values")
     try:

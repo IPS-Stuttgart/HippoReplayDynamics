@@ -10,6 +10,7 @@ misaligned endpoint.
 
 from __future__ import annotations
 
+import inspect
 from functools import wraps
 from typing import Any
 
@@ -42,18 +43,56 @@ def apply_reverse_time_terminal_guard_patch() -> None:
         *,
         occupancy_s: Any = None,
         candidate_indices: Any = None,
+        return_trajectory: bool | None = None,
     ):
-        result = score(
-            self,
-            emissions,
-            bin_centers,
-            occupancy_s=occupancy_s,
-            candidate_indices=candidate_indices,
-        )
+        kwargs: dict[str, Any] = {
+            "occupancy_s": occupancy_s,
+            "candidate_indices": candidate_indices,
+        }
+        if return_trajectory is not None:
+            kwargs["return_trajectory"] = bool(return_trajectory)
+        result = _call_score_with_supported_kwargs(score, self, emissions, bin_centers, kwargs)
         return _clear_unmappable_reverse_terminal(result)
 
     score_with_terminal_guard._reverse_time_terminal_guard_applied = True  # type: ignore[attr-defined]
+    score_with_terminal_guard.__hipporeplayimm_original__ = score  # type: ignore[attr-defined]
     extensions.ReverseTimeReplayModel.score = score_with_terminal_guard
+
+
+def _call_score_with_supported_kwargs(
+    score: Any,
+    self: Any,
+    emissions: Any,
+    bin_centers: Any,
+    optional_kwargs: dict[str, Any],
+) -> Any:
+    """Call a score function without dropping newly supported wrapper kwargs."""
+
+    supported_kwargs = _supported_score_kwargs(score, optional_kwargs)
+    if supported_kwargs:
+        return score(self, emissions, bin_centers, **supported_kwargs)
+    return score(self, emissions, bin_centers)
+
+
+def _supported_score_kwargs(score: Any, optional_kwargs: dict[str, Any]) -> dict[str, Any]:
+    if not optional_kwargs:
+        return {}
+    try:
+        signature = inspect.signature(score)
+    except (TypeError, ValueError):
+        return dict(optional_kwargs)
+    parameters = signature.parameters
+    if any(parameter.kind == inspect.Parameter.VAR_KEYWORD for parameter in parameters.values()):
+        return dict(optional_kwargs)
+    supported: dict[str, Any] = {}
+    for keyword, value in optional_kwargs.items():
+        parameter = parameters.get(keyword)
+        if parameter is not None and parameter.kind in (
+            inspect.Parameter.KEYWORD_ONLY,
+            inspect.Parameter.POSITIONAL_OR_KEYWORD,
+        ):
+            supported[keyword] = value
+    return supported
 
 
 def _clear_unmappable_reverse_terminal(result: Any) -> Any:

@@ -32,8 +32,15 @@ def apply_benchmark_metadata_scope_patch() -> None:
         out["benchmark_event_subset_base_seed"] = (
             np.nan if event_subset_seed is None else int(event_subset_seed)
         )
-        out["benchmark_event_epoch"] = str(getattr(config, "event_epoch", "run"))
+        out["benchmark_event_epoch"] = _event_epoch_scope(getattr(config, "event_epoch", "run"))
         return out
 
     benchmark_config_metadata_with_scope_fields._benchmark_scope_metadata_wrapped = True  # type: ignore[attr-defined]
     bench._benchmark_config_metadata = benchmark_config_metadata_with_scope_fields
+
+
+def _event_epoch_scope(value: object) -> str:
+    if value is None:
+        return "run"
+    label = str(value).strip()
+    return label or "run"

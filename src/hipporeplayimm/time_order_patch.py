@@ -81,7 +81,30 @@ def _time_vector(
         return times.copy()
     if times.shape != (emissions.n_time,):
         return times.copy()
-    return (float(times[-1]) - times[::-1] + float(times[0])).copy()
+
+    transition_durations = _transition_durations_for_time_vector(emissions)
+    if transition_durations is None:
+        return (float(times[-1]) - times[::-1] + float(times[0])).copy()
+
+    reversed_durations = transition_durations[::-1]
+    output = np.empty_like(times, dtype=float)
+    output[0] = float(times[0])
+    if reversed_durations.size:
+        output[1:] = output[0] + np.cumsum(reversed_durations)
+    return output
+
+
+def _transition_durations_for_time_vector(emissions: LogEmissionTensor) -> np.ndarray | None:
+    values = getattr(emissions, "transition_durations", None)
+    if values is None:
+        return _transition_durations_from_times(emissions)
+    expected_length = max(emissions.n_time - 1, 0)
+    array = np.asarray(values, dtype=float)
+    if array.shape != (expected_length,):
+        raise ValueError(f"transition_durations must contain {expected_length} values; got shape {array.shape}")
+    if array.size and (not np.all(np.isfinite(array)) or np.any(array <= 0.0)):
+        raise ValueError("transition_durations must contain finite positive values")
+    return array
 
 
 def _duration_vector(

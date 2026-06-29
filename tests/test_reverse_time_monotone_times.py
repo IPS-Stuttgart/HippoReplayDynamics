@@ -21,7 +21,12 @@ def _emissions() -> LogEmissionTensor:
     )
 
 
-def test_reverse_emission_helpers_keep_time_coordinates_increasing() -> None:
+def _expected_reverse_times(emissions: LogEmissionTensor) -> np.ndarray:
+    times = np.asarray(emissions.times, dtype=float)
+    return float(times[-1]) - times[::-1] + float(times[0])
+
+
+def test_reverse_emission_helpers_keep_time_coordinates_increasing_and_duration_aligned() -> None:
     emissions = _emissions()
     copied = copy_emissions_with_log_likelihood(
         emissions,
@@ -29,13 +34,15 @@ def test_reverse_emission_helpers_keep_time_coordinates_increasing() -> None:
         reverse_time=True,
     )
     reversed_emissions = reverse_emissions(emissions)
+    expected_times = _expected_reverse_times(emissions)
 
     for output in (copied, reversed_emissions):
         np.testing.assert_allclose(output.log_likelihood, emissions.log_likelihood[::-1])
         np.testing.assert_allclose(output.bin_durations, emissions.bin_durations[::-1])
         np.testing.assert_allclose(output.transition_durations, emissions.transition_durations[::-1])
-        np.testing.assert_allclose(output.times, emissions.times)
+        np.testing.assert_allclose(output.times, expected_times)
         assert np.all(np.diff(output.times) > 0.0)
+        np.testing.assert_allclose(np.diff(output.times), output.transition_durations)
 
 
 def test_reverse_emission_time_patch_repairs_partial_reverse_model_state(monkeypatch) -> None:
@@ -57,6 +64,7 @@ def test_reverse_emission_time_patch_repairs_partial_reverse_model_state(monkeyp
         )
 
     emissions = _emissions()
+    expected_times = _expected_reverse_times(emissions)
     monkeypatch.setattr(improved, "_time_order_patch_applied", True, raising=False)
     monkeypatch.setattr(reverse_models, "_time_order_patch_applied", False, raising=False)
     monkeypatch.setattr(reverse_models, "reverse_emissions", stale_reverse_emissions)
@@ -65,9 +73,10 @@ def test_reverse_emission_time_patch_repairs_partial_reverse_model_state(monkeyp
 
     output = reverse_models.reverse_emissions(emissions)
     np.testing.assert_allclose(output.log_likelihood, emissions.log_likelihood[::-1])
-    np.testing.assert_allclose(output.times, emissions.times)
+    np.testing.assert_allclose(output.times, expected_times)
     np.testing.assert_allclose(output.transition_durations, emissions.transition_durations[::-1])
     assert np.all(np.diff(output.times) > 0.0)
+    np.testing.assert_allclose(np.diff(output.times), output.transition_durations)
     assert getattr(improved, "_time_order_patch_applied") is True
     assert getattr(reverse_models, "_time_order_patch_applied") is True
 
@@ -114,6 +123,7 @@ def test_reverse_emission_time_patch_refreshes_stale_true_flags(monkeypatch) -> 
         )
 
     emissions = _emissions()
+    expected_times = _expected_reverse_times(emissions)
     monkeypatch.setattr(improved, "_time_order_patch_applied", True, raising=False)
     monkeypatch.setattr(reverse_models, "_time_order_patch_applied", True, raising=False)
     monkeypatch.setattr(improved, "copy_emissions_with_log_likelihood", stale_copy_emissions_with_log_likelihood)
@@ -129,8 +139,9 @@ def test_reverse_emission_time_patch_refreshes_stale_true_flags(monkeypatch) -> 
     reversed_emissions = reverse_models.reverse_emissions(emissions)
     for output in (copied, reversed_emissions):
         np.testing.assert_allclose(output.log_likelihood, emissions.log_likelihood[::-1])
-        np.testing.assert_allclose(output.times, emissions.times)
+        np.testing.assert_allclose(output.times, expected_times)
         np.testing.assert_allclose(output.transition_durations, emissions.transition_durations[::-1])
         assert np.all(np.diff(output.times) > 0.0)
+        np.testing.assert_allclose(np.diff(output.times), output.transition_durations)
     assert getattr(improved.copy_emissions_with_log_likelihood, "_time_order_patch_wrapped", False) is True
     assert getattr(reverse_models.reverse_emissions, "_time_order_patch_wrapped", False) is True

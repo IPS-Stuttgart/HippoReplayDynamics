@@ -5,6 +5,10 @@ from __future__ import annotations
 import numpy as np
 from scipy.special import logsumexp
 
+from .models import LOG_ZERO
+
+_LOG_ZERO_ROW_THRESHOLD = LOG_ZERO / 2.0
+
 
 def trajectory_quality_metrics(
     trajectory_log_posterior: np.ndarray,
@@ -35,8 +39,8 @@ def trajectory_quality_metrics(
     if np.any(np.isnan(logp)) or np.any(np.isposinf(logp)):
         raise ValueError("trajectory_log_posterior cannot contain NaN or +inf")
     row_log_norm = logsumexp(logp, axis=1)
-    if not np.all(np.isfinite(row_log_norm)):
-        raise ValueError("trajectory_log_posterior rows must contain finite posterior mass")
+    if not np.all(np.isfinite(row_log_norm)) or np.any(row_log_norm <= _LOG_ZERO_ROW_THRESHOLD):
+        raise ValueError("trajectory_log_posterior rows must contain positive finite posterior mass")
     normalized = logp - row_log_norm[:, None]
     posterior = np.exp(normalized)
     mean_path = posterior @ centers

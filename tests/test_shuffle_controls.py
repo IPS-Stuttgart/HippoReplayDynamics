@@ -129,6 +129,18 @@ def test_score_shuffle_controls_rejects_invalid_control_config(config_kwargs, me
         )
 
 
+@pytest.mark.parametrize("event_indices", [[True], [np.bool_(False)], [1.5], [-1], [float("nan")]])
+def test_score_shuffle_controls_rejects_invalid_event_indices(event_indices) -> None:
+    with pytest.raises(ValueError, match="event_indices"):
+        score_shuffle_controls(
+            SimpleNamespace(session_id="Rat1/Open1"),
+            _two_bin_encoding(),
+            event_indices,
+            {},
+            control_config=ShuffleControlConfig(n_shuffles=0),
+        )
+
+
 def test_score_shuffle_controls_materializes_generator_event_indices(monkeypatch) -> None:
     encoding = EncodingModel(
         x_edges=np.array([0.0, 1.0, 2.0], dtype=float),

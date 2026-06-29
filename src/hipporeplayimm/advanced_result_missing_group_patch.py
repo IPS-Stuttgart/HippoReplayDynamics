@@ -25,6 +25,14 @@ _MARGIN_COLUMNS = [
 ]
 
 
+def _numeric_evidence_rows(group: pd.DataFrame, evidence_col: str) -> pd.DataFrame:
+    """Return rows with finite numeric evidence, sorted by descending evidence."""
+
+    out = group.copy()
+    out[evidence_col] = pd.to_numeric(out[evidence_col], errors="coerce")
+    return out.dropna(subset=[evidence_col]).sort_values(evidence_col, ascending=False, kind="stable")
+
+
 def apply_advanced_result_missing_group_patch() -> None:
     """Keep diagnostics for rows whose optional grouping metadata is missing."""
 
@@ -52,7 +60,7 @@ def apply_advanced_result_missing_group_patch() -> None:
         rows: list[dict[str, object]] = []
         for key, group in ok.groupby(list(group_cols), sort=False, dropna=False):
             key_tuple = key if isinstance(key, tuple) else (key,)
-            group = group.dropna(subset=[evidence_col]).sort_values(evidence_col, ascending=False)
+            group = _numeric_evidence_rows(group, evidence_col)
             if group.empty:
                 continue
             best = group.iloc[0]

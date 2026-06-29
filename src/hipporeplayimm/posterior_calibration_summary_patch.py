@@ -69,8 +69,9 @@ def _apply_paired_model_missing_group_patch() -> None:
         positive_true_label: str | None = None,
     ) -> pd.DataFrame:
         groups = tuple(group_cols)
+        sentinel = _missing_group_sentinel(scores, groups)
         result = original(
-            _fill_missing_group_metadata(scores, groups),
+            _fill_missing_group_metadata(scores, groups, sentinel),
             positive_model=positive_model,
             reference_model=reference_model,
             margin_threshold=margin_threshold,
@@ -80,14 +81,36 @@ def _apply_paired_model_missing_group_patch() -> None:
             true_model_col=true_model_col,
             positive_true_label=positive_true_label,
         )
-        return _restore_missing_group_metadata(result, groups)
+        return _restore_missing_group_metadata(result, groups, sentinel)
 
     setattr(paired_model_margin_decisions, _PAIRED_GROUP_PATCHED_FLAG, True)
     setattr(paired_model_margin_decisions, _ORIGINAL_PAIRED_ATTR, original)
     diagnostics.paired_model_margin_decisions = paired_model_margin_decisions
 
 
-def _fill_missing_group_metadata(frame: pd.DataFrame, group_cols: Sequence[str]) -> pd.DataFrame:
+def _missing_group_sentinel(frame: pd.DataFrame, group_cols: Sequence[str]) -> str:
+    """Return a temporary missing-group label absent from existing group values."""
+
+    sentinel = _MISSING_GROUP_SENTINEL
+    suffix = 0
+    while _group_value_present(frame, group_cols, sentinel):
+        suffix += 1
+        sentinel = f"{_MISSING_GROUP_SENTINEL}_{suffix}"
+    return sentinel
+
+
+def _group_value_present(frame: pd.DataFrame, group_cols: Sequence[str], value: str) -> bool:
+    if frame.empty or not group_cols:
+        return False
+    for column in group_cols:
+        if column not in frame.columns:
+            continue
+        if bool(frame[column].astype(object).eq(value).any()):
+            return True
+    return False
+
+
+def _fill_missing_group_metadata(frame: pd.DataFrame, group_cols: Sequence[str], sentinel: str) -> pd.DataFrame:
     if frame.empty or not group_cols:
         return frame.copy()
     out = frame.copy()
@@ -97,18 +120,18 @@ def _fill_missing_group_metadata(frame: pd.DataFrame, group_cols: Sequence[str])
         missing = out[column].isna()
         if missing.any():
             out[column] = out[column].astype(object)
-            out.loc[missing, column] = _MISSING_GROUP_SENTINEL
+            out.loc[missing, column] = sentinel
     return out
 
 
-def _restore_missing_group_metadata(frame: pd.DataFrame, group_cols: Sequence[str]) -> pd.DataFrame:
+def _restore_missing_group_metadata(frame: pd.DataFrame, group_cols: Sequence[str], sentinel: str) -> pd.DataFrame:
     if frame.empty or not group_cols:
         return frame
     out = frame.copy()
     for column in group_cols:
         if column not in out.columns:
             continue
-        missing = out[column].astype(object).eq(_MISSING_GROUP_SENTINEL)
+        missing = out[column].astype(object).eq(sentinel)
         if missing.any():
             out.loc[missing, column] = pd.NA
     return out

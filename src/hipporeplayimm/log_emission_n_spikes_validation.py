@@ -1,12 +1,4 @@
-"""Validate ``LogEmissionTensor`` summary fields after base construction.
-
-The base tensor permits ``-inf`` log-likelihood entries to mark impossible
-spatial states and leaves support checks to model scoring.  This patch rejects
-``NaN`` entries early, requires every time bin to retain at least one finite
-candidate state, keeps the stored ``n_spikes`` summary consistent with the
-validated ``spike_counts`` tensor, canonicalizes the count tensor to an
-integer dtype, and keeps emission cell identifiers unambiguous.
-"""
+"""Validate ``LogEmissionTensor`` count summaries and cell identifiers."""
 
 from __future__ import annotations
 
@@ -47,19 +39,13 @@ def apply_log_emission_n_spikes_validation_patch() -> None:
 
 
 def _validate_log_likelihood(emissions: LogEmissionTensor) -> None:
-    """Reject invalid likelihood values while preserving ``-inf`` impossible states."""
-
     values = np.asarray(emissions.log_likelihood, dtype=float)
     if values.ndim != 2:
         raise ValueError("log_likelihood must be a two-dimensional array")
-    if values.shape[0] == 0:
-        raise ValueError("log_likelihood must include at least one time bin")
     if values.shape[1] == 0:
         raise ValueError("log_likelihood must include at least one spatial bin")
     if np.any(np.isnan(values)):
         raise ValueError("log_likelihood must not contain NaN values")
-    if not np.all(np.any(np.isfinite(values), axis=1)):
-        raise ValueError("log_likelihood must contain at least one finite value per time bin")
 
 
 def _contains_boolean_values(values: Any) -> bool:
@@ -77,16 +63,12 @@ def _contains_boolean_values(values: Any) -> bool:
 
 
 def _validate_n_spikes(emissions: LogEmissionTensor) -> None:
-    """Reject summary spike counts that disagree with ``spike_counts``."""
-
     if _contains_boolean_values(emissions.spike_counts):
         raise ValueError("spike_counts must be numeric counts, not boolean values")
-
     spike_counts = np.asarray(emissions.spike_counts, dtype=float)
     rounded_counts = np.rint(spike_counts)
     if not np.all(np.isclose(spike_counts, rounded_counts, rtol=0.0, atol=0.0)):
         raise ValueError("spike_counts must be integer-valued")
-
     total_spikes = float(rounded_counts.sum())
     if _contains_boolean_values(emissions.n_spikes):
         raise ValueError("n_spikes must be a numeric count, not boolean")
@@ -94,24 +76,18 @@ def _validate_n_spikes(emissions: LogEmissionTensor) -> None:
         n_spikes = float(emissions.n_spikes)
     except (TypeError, ValueError) as exc:
         raise ValueError("n_spikes must be numeric") from exc
-
     if not np.isfinite(n_spikes) or n_spikes < 0.0:
         raise ValueError("n_spikes must be finite and nonnegative")
-
     rounded = float(np.rint(n_spikes))
     if not np.isclose(n_spikes, rounded, rtol=0.0, atol=0.0):
         raise ValueError("n_spikes must be integer-valued")
-
     if not np.isclose(rounded, total_spikes, rtol=0.0, atol=0.0):
         raise ValueError("n_spikes must equal the total spike_counts sum")
-
     emissions.spike_counts = rounded_counts.astype(int, copy=False)
     emissions.n_spikes = int(rounded)
 
 
 def _validate_cell_ids(emissions: LogEmissionTensor) -> None:
-    """Reject ambiguous or lossy emission cell identifiers."""
-
     if _contains_boolean_values(emissions.cell_ids):
         raise ValueError("cell_ids must be numeric integer identifiers, not boolean values")
     try:

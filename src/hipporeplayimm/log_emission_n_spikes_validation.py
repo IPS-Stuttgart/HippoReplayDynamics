@@ -52,6 +52,8 @@ def _validate_log_likelihood(emissions: LogEmissionTensor) -> None:
     values = np.asarray(emissions.log_likelihood, dtype=float)
     if np.any(np.isnan(values)):
         raise ValueError("log_likelihood must not contain NaN values")
+    if not np.all(np.any(np.isfinite(values), axis=1)):
+        raise ValueError("log_likelihood must contain at least one finite value per time bin")
 
 
 def _contains_boolean_values(values: Any) -> bool:

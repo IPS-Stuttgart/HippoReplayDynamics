@@ -31,10 +31,8 @@ def _apply_result_quality_gates_scope_patch() -> None:
 
     from . import result_quality_gates
 
-    if getattr(result_quality_gates, _GATES_SCOPE_PATCHED_FLAG, False):
-        return
     existing = tuple(getattr(result_quality_gates, "_EVENT_GROUP_SCOPE_COLUMNS", ()))
-    result_quality_gates._EVENT_GROUP_SCOPE_COLUMNS = tuple(
+    updated = tuple(
         dict.fromkeys(
             (
                 *existing,
@@ -42,6 +40,9 @@ def _apply_result_quality_gates_scope_patch() -> None:
             )
         )
     )
+    if getattr(result_quality_gates, _GATES_SCOPE_PATCHED_FLAG, False) and existing == updated:
+        return
+    result_quality_gates._EVENT_GROUP_SCOPE_COLUMNS = updated
     setattr(result_quality_gates, _GATES_SCOPE_PATCHED_FLAG, True)
 
 

@@ -2,11 +2,16 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
+
 import numpy as np
 import pandas as pd
 
 _PATCHED_FLAG = "_posterior_calibration_summary_patch_applied"
 _GATES_SCOPE_PATCHED_FLAG = "_result_quality_gates_scope_patch_applied"
+_PAIRED_GROUP_PATCHED_FLAG = "_paired_model_missing_group_patch_applied"
+_ORIGINAL_PAIRED_ATTR = "_paired_model_missing_group_original"
+_MISSING_GROUP_SENTINEL = "__hipporeplayimm_missing_group__"
 _ADDITIONAL_RESULT_QUALITY_GATE_SCOPE_COLUMNS = (
     "event_window_variant",
     "window_variant",
@@ -38,6 +43,74 @@ def _apply_result_quality_gates_scope_patch() -> None:
         )
     )
     setattr(result_quality_gates, _GATES_SCOPE_PATCHED_FLAG, True)
+
+
+def _apply_paired_model_missing_group_patch() -> None:
+    """Keep paired model-margin decisions for rows with missing optional group keys."""
+
+    from . import advanced_result_diagnostics as diagnostics
+
+    current = diagnostics.paired_model_margin_decisions
+    if getattr(current, _PAIRED_GROUP_PATCHED_FLAG, False):
+        return
+    original = getattr(current, _ORIGINAL_PAIRED_ATTR, current)
+
+    def paired_model_margin_decisions(
+        scores: pd.DataFrame,
+        *,
+        positive_model: str,
+        reference_model: str,
+        margin_threshold: float = 0.0,
+        group_cols: Sequence[str] = ("session", "event_index"),
+        evidence_col: str = "log_evidence",
+        model_col: str = "model",
+        true_model_col: str | None = None,
+        positive_true_label: str | None = None,
+    ) -> pd.DataFrame:
+        groups = tuple(group_cols)
+        result = original(
+            _fill_missing_group_metadata(scores, groups),
+            positive_model=positive_model,
+            reference_model=reference_model,
+            margin_threshold=margin_threshold,
+            group_cols=groups,
+            evidence_col=evidence_col,
+            model_col=model_col,
+            true_model_col=true_model_col,
+            positive_true_label=positive_true_label,
+        )
+        return _restore_missing_group_metadata(result, groups)
+
+    setattr(paired_model_margin_decisions, _PAIRED_GROUP_PATCHED_FLAG, True)
+    setattr(paired_model_margin_decisions, _ORIGINAL_PAIRED_ATTR, original)
+    diagnostics.paired_model_margin_decisions = paired_model_margin_decisions
+
+
+def _fill_missing_group_metadata(frame: pd.DataFrame, group_cols: Sequence[str]) -> pd.DataFrame:
+    if frame.empty or not group_cols:
+        return frame.copy()
+    out = frame.copy()
+    for column in group_cols:
+        if column not in out.columns:
+            continue
+        missing = out[column].isna()
+        if missing.any():
+            out[column] = out[column].astype(object)
+            out.loc[missing, column] = _MISSING_GROUP_SENTINEL
+    return out
+
+
+def _restore_missing_group_metadata(frame: pd.DataFrame, group_cols: Sequence[str]) -> pd.DataFrame:
+    if frame.empty or not group_cols:
+        return frame
+    out = frame.copy()
+    for column in group_cols:
+        if column not in out.columns:
+            continue
+        missing = out[column].astype(object).eq(_MISSING_GROUP_SENTINEL)
+        if missing.any():
+            out.loc[missing, column] = pd.NA
+    return out
 
 
 def _rank_fraction(rank: pd.Series, n_bins: pd.Series) -> pd.Series:
@@ -84,6 +157,7 @@ def apply_posterior_calibration_summary_patch() -> None:
 
     result_quality_audit_scope_patch.apply_result_quality_audit_scope_patch()
     _apply_result_quality_gates_scope_patch()
+    _apply_paired_model_missing_group_patch()
 
     if getattr(result_improvements, _PATCHED_FLAG, False):
         return

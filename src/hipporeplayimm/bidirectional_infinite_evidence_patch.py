@@ -36,16 +36,19 @@ def _safe_mixture_log_posterior(log_posteriors: object, weights: np.ndarray) -> 
     for posterior, weight in zip(log_posteriors, np.asarray(weights, dtype=float).reshape(-1), strict=False):
         if posterior is None:
             continue
+        weight_value = float(weight)
+        if not np.isfinite(weight_value) or weight_value <= 0.0:
+            continue
         current = np.asarray(posterior, dtype=float)
         if current.size:
-            valid.append((current, float(weight)))
+            valid.append((current, weight_value))
     if not valid:
         return None
     shape = valid[0][0].shape
     if any(current.shape != shape for current, _ in valid):
         raise ValueError("posterior arrays must have matching shapes")
     stacked = np.stack(
-        [current + np.log(max(weight, np.finfo(float).tiny)) for current, weight in valid],
+        [current + np.log(weight) for current, weight in valid],
         axis=0,
     )
     mixed = logsumexp(stacked, axis=0)

@@ -111,3 +111,20 @@ def test_exact_success_rows_remain_good_support_quality() -> None:
 
     assert labelled.loc[0, "candidate_support_quality"] == "exact_or_not_pruned"
     assert bool(labelled.loc[0, "candidate_support_quality_good"])
+
+
+def test_legacy_na_status_spellings_remain_good_support_quality() -> None:
+    rows = pd.DataFrame(
+        [
+            {"model": "m1", "status": "NA", "evidence_support": "exact_full_grid"},
+            {"model": "m2", "status": "n/a", "evidence_support": "exact_full_grid"},
+        ]
+    )
+
+    labelled = add_candidate_support_quality_columns(rows)
+
+    assert labelled["candidate_support_quality"].tolist() == [
+        "exact_or_not_pruned",
+        "exact_or_not_pruned",
+    ]
+    assert labelled["candidate_support_quality_good"].tolist() == [True, True]

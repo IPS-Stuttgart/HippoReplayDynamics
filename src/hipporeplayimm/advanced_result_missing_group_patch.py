@@ -13,6 +13,7 @@ _PATCH_FLAG = "_missing_group_metadata_patch_applied"
 _EVIDENCE_MARGIN_TABLE_WRAPPER_FLAG = "_missing_group_metadata_evidence_margin_table_wrapper"
 _ADD_COLUMNS_WRAPPER_FLAG = "_missing_group_metadata_add_margin_columns_wrapper"
 _WINDOW_SENSITIVITY_WRAPPER_FLAG = "_missing_group_metadata_window_sensitivity_wrapper"
+_PAIRED_MARGIN_WRAPPER_FLAG = "_missing_group_metadata_paired_margin_wrapper"
 _MARGIN_COLUMNS = [
     "best_model_by_evidence",
     "second_best_model_by_evidence",
@@ -117,12 +118,109 @@ def apply_advanced_result_missing_group_patch() -> None:
         summary["evidence_window_range"] = summary["evidence_window_max"] - summary["evidence_window_min"]
         return summary
 
+    def paired_model_margin_decisions(
+        scores: pd.DataFrame,
+        *,
+        positive_model: str,
+        reference_model: str,
+        margin_threshold: float = 0.0,
+        group_cols: Sequence[str] = ("session", "event_index"),
+        evidence_col: str = "log_evidence",
+        model_col: str = "model",
+        true_model_col: str | None = None,
+        positive_true_label: str | None = None,
+    ) -> pd.DataFrame:
+        """Classify paired model wins, retaining NA values in optional group keys."""
+
+        threshold = float(margin_threshold)
+        if threshold < 0.0:
+            raise ValueError("margin_threshold must be non-negative")
+        ok = diagnostics._comparable_rows(scores)
+        columns = [
+            *group_cols,
+            "positive_model",
+            "reference_model",
+            "positive_log_evidence",
+            "reference_log_evidence",
+            "positive_minus_reference_log_evidence",
+            "margin_threshold",
+            "margin_decision",
+            "positive_model_claimed",
+        ]
+        if true_model_col:
+            columns.extend(
+                [
+                    true_model_col,
+                    "positive_true_label",
+                    "true_is_positive",
+                    "margin_binary_correct",
+                ]
+            )
+        if ok.empty:
+            return pd.DataFrame(columns=columns)
+        missing = [column for column in (*group_cols, evidence_col, model_col) if column not in ok.columns]
+        if true_model_col and true_model_col not in ok.columns:
+            missing.append(true_model_col)
+        if missing:
+            raise KeyError(f"scores is missing required columns: {missing}")
+
+        positive_label = positive_true_label or diagnostics._model_family_label(positive_model)
+        rows: list[dict[str, object]] = []
+        grouped = ok.groupby(list(group_cols), sort=False, dropna=False) if group_cols else (((), ok),)
+        for key, group in grouped:
+            key_tuple = key if isinstance(key, tuple) else (key,)
+            paired = group[group[model_col].astype(str).isin([positive_model, reference_model])]
+            pivot = paired.dropna(subset=[evidence_col]).drop_duplicates(model_col, keep="last")
+            by_model = pivot.set_index(model_col)
+            if positive_model not in by_model.index or reference_model not in by_model.index:
+                continue
+            positive_value = float(by_model.loc[positive_model, evidence_col])
+            reference_value = float(by_model.loc[reference_model, evidence_col])
+            delta = positive_value - reference_value
+            if delta >= threshold:
+                decision = positive_model
+                positive_claimed = True
+            elif delta <= -threshold:
+                decision = reference_model
+                positive_claimed = False
+            else:
+                decision = "ambiguous"
+                positive_claimed = False
+            row = {column: value for column, value in zip(group_cols, key_tuple, strict=True)}
+            row.update(
+                {
+                    "positive_model": positive_model,
+                    "reference_model": reference_model,
+                    "positive_log_evidence": positive_value,
+                    "reference_log_evidence": reference_value,
+                    "positive_minus_reference_log_evidence": float(delta),
+                    "margin_threshold": threshold,
+                    "margin_decision": decision,
+                    "positive_model_claimed": bool(positive_claimed),
+                }
+            )
+            if true_model_col:
+                true_label = diagnostics._unique_text_value(group[true_model_col])
+                true_is_positive = diagnostics._model_family_label(true_label) == diagnostics._model_family_label(positive_label)
+                row.update(
+                    {
+                        true_model_col: true_label,
+                        "positive_true_label": positive_label,
+                        "true_is_positive": bool(true_is_positive),
+                        "margin_binary_correct": bool(positive_claimed) == bool(true_is_positive),
+                    }
+                )
+            rows.append(row)
+        return pd.DataFrame(rows, columns=columns)
+
     setattr(evidence_margin_table, _EVIDENCE_MARGIN_TABLE_WRAPPER_FLAG, True)
     setattr(add_evidence_margin_columns, _ADD_COLUMNS_WRAPPER_FLAG, True)
     setattr(summarize_window_sensitivity, _WINDOW_SENSITIVITY_WRAPPER_FLAG, True)
+    setattr(paired_model_margin_decisions, _PAIRED_MARGIN_WRAPPER_FLAG, True)
     diagnostics.evidence_margin_table = evidence_margin_table
     diagnostics.add_evidence_margin_columns = add_evidence_margin_columns
     diagnostics.summarize_window_sensitivity = summarize_window_sensitivity
+    diagnostics.paired_model_margin_decisions = paired_model_margin_decisions
     apply_wrong_map_missing_group_patch(diagnostics)
     setattr(diagnostics, _PATCH_FLAG, True)
 
@@ -136,5 +234,6 @@ def _missing_group_patch_current(diagnostics) -> bool:
             ("evidence_margin_table", _EVIDENCE_MARGIN_TABLE_WRAPPER_FLAG),
             ("add_evidence_margin_columns", _ADD_COLUMNS_WRAPPER_FLAG),
             ("summarize_window_sensitivity", _WINDOW_SENSITIVITY_WRAPPER_FLAG),
+            ("paired_model_margin_decisions", _PAIRED_MARGIN_WRAPPER_FLAG),
         )
     )

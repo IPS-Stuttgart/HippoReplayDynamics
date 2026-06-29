@@ -29,6 +29,29 @@ SHUFFLE_CONTROL_SCORE_COLUMNS = (
     "n_time",
     "n_spikes",
 )
+_SHUFFLE_P_VALUE_BASE_COLUMNS = ("session", "event_index", "model")
+_SHUFFLE_P_VALUE_SCOPE_COLUMNS = (
+    "requested_model",
+    "benchmark_random_seed",
+    "benchmark_cell_split_index",
+    "benchmark_cell_split_seed",
+    "benchmark_event_subset_seed",
+    "benchmark_test_cell_fraction",
+    "benchmark_cell_split_strategy",
+    "benchmark_cell_split_strata",
+    "window_role",
+    "window_index",
+    "null_index",
+    "matched_null_rank",
+    "template_event_index",
+    "event_window_variant",
+    "window_variant",
+    "window_start_s",
+    "window_end_s",
+    "window_duration_s",
+    "simulation_random_seed",
+)
+_SHUFFLE_SCOPE_KEY_COLUMN = "__shuffle_scope_key"
 
 
 @dataclass(frozen=True)
@@ -196,7 +219,12 @@ def _with_finite_log_evidence(scores: pd.DataFrame) -> pd.DataFrame:
 
 
 def add_shuffle_p_values(real_scores: pd.DataFrame, control_scores: pd.DataFrame) -> pd.DataFrame:
-    """Add empirical upper-tail p-values against shuffled control evidence."""
+    """Add empirical upper-tail p-values against shuffled control evidence.
+
+    Independent decode scopes that reuse the same ``session``/``event_index`` and
+    ``model`` keys, such as window variants or cell-split repeats, keep separate
+    control distributions when matching scope columns are present in both tables.
+    """
 
     real_scores = _with_finite_log_evidence(real_scores)
     control_scores = _with_finite_log_evidence(control_scores)
@@ -208,23 +236,83 @@ def add_shuffle_p_values(real_scores: pd.DataFrame, control_scores: pd.DataFrame
         out["shuffle_log_evidence_std"] = np.nan
         out["shuffle_count"] = np.nan
         return out
-    grouped = control_scores.groupby(["session", "event_index", "model"])
+
+    group_columns = _shuffle_p_value_group_columns(real_scores, control_scores)
+    control_scores = control_scores.copy()
+    control_scores[_SHUFFLE_SCOPE_KEY_COLUMN] = _scope_keys(control_scores, group_columns)
+    grouped = control_scores.groupby(_SHUFFLE_SCOPE_KEY_COLUMN, sort=False, dropna=False)
+    control_by_key = {
+        key: group["log_evidence"].to_numpy(dtype=float)
+        for key, group in grouped
+    }
     summaries = grouped["log_evidence"].agg(
         shuffle_log_evidence_median="median",
         shuffle_log_evidence_mean="mean",
         shuffle_log_evidence_std="std",
         shuffle_count="count",
     )
-    rows = []
-    for _, row in real_scores.iterrows():
-        key = (row.get("session"), row.get("event_index"), row.get("model"))
-        control = grouped.get_group(key)["log_evidence"].to_numpy(float) if key in grouped.groups else np.array([])
+
+    p_values = []
+    real_keys = _scope_keys(real_scores, group_columns)
+    for key, (_, row) in zip(real_keys.to_numpy(dtype=object), real_scores.iterrows()):
+        control = control_by_key.get(key, np.array([], dtype=float))
         control = control[np.isfinite(control)]
         real_log_evidence = row.get("log_evidence")
         p_value = np.nan
         if control.size and np.isfinite(real_log_evidence):
             p_value = float((1.0 + np.sum(control >= float(real_log_evidence))) / (control.size + 1.0))
-        rows.append(p_value)
+        p_values.append(p_value)
+
     out = real_scores.copy()
-    out["shuffle_p_value"] = rows
-    return out.merge(summaries.reset_index(), on=["session", "event_index", "model"], how="left")
+    out[_SHUFFLE_SCOPE_KEY_COLUMN] = real_keys
+    out["shuffle_p_value"] = p_values
+    out = out.merge(summaries.reset_index(), on=_SHUFFLE_SCOPE_KEY_COLUMN, how="left")
+    return out.drop(columns=[_SHUFFLE_SCOPE_KEY_COLUMN])
+
+
+def _shuffle_p_value_group_columns(real_scores: pd.DataFrame, control_scores: pd.DataFrame) -> list[str]:
+    missing = [
+        column
+        for column in _SHUFFLE_P_VALUE_BASE_COLUMNS
+        if column not in real_scores.columns or column not in control_scores.columns
+    ]
+    if missing:
+        raise KeyError(f"shuffle score tables missing required columns: {missing}")
+    columns = list(_SHUFFLE_P_VALUE_BASE_COLUMNS)
+    for column in _SHUFFLE_P_VALUE_SCOPE_COLUMNS:
+        if column in real_scores.columns and column in control_scores.columns:
+            columns.append(column)
+    return columns
+
+
+def _scope_keys(frame: pd.DataFrame, columns: list[str]) -> pd.Series:
+    return pd.Series(
+        [
+            tuple(_scope_label(row[column]) for column in columns)
+            for _, row in frame.loc[:, columns].iterrows()
+        ],
+        index=frame.index,
+        dtype=object,
+    )
+
+
+def _scope_label(value: object) -> str:
+    if _is_missing_scalar(value):
+        return "<missing>"
+    if isinstance(value, np.ndarray):
+        return repr(("array", np.asarray(value, dtype=object).reshape(-1).tolist()))
+    if isinstance(value, (list, tuple)):
+        return repr(("sequence", list(value)))
+    if isinstance(value, set):
+        return repr(("set", sorted(value, key=repr)))
+    return repr(("scalar", str(value).strip()))
+
+
+def _is_missing_scalar(value: object) -> bool:
+    if value is None:
+        return True
+    try:
+        missing = pd.isna(value)
+    except (TypeError, ValueError):
+        return False
+    return isinstance(missing, (bool, np.bool_)) and bool(missing)

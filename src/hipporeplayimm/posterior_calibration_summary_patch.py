@@ -13,12 +13,20 @@ _PAIRED_GROUP_PATCHED_FLAG = "_paired_model_missing_group_patch_applied"
 _ORIGINAL_PAIRED_ATTR = "_paired_model_missing_group_original"
 _MISSING_GROUP_SENTINEL = "__hipporeplayimm_missing_group__"
 _ADDITIONAL_RESULT_QUALITY_GATE_SCOPE_COLUMNS = (
+    "window_role",
+    "window_index",
     "event_window_variant",
     "window_variant",
     "window_start_s",
     "window_end_s",
     "window_duration_s",
+    "null_index",
+    "matched_null_rank",
     "template_event_index",
+    "benchmark_random_seed",
+    "benchmark_cell_split_index",
+    "benchmark_cell_split_seed",
+    "benchmark_event_subset_seed",
     "benchmark_event_subset_base_seed",
     "benchmark_test_cell_fraction",
     "benchmark_cell_split_strategy",

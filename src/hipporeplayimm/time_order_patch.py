@@ -36,7 +36,10 @@ def apply_reverse_emission_time_patch() -> None:
         return LogEmissionTensor(
             log_likelihood=likelihood.copy(),
             spike_counts=counts.copy(),
-            times=np.asarray(emissions.times, dtype=float).copy(),
+            times=_time_vector(
+                emissions,
+                reverse_time=reverse_time,
+            ),
             dt=emissions.dt,
             cell_ids=np.asarray(emissions.cell_ids).copy(),
             n_spikes=int(emissions.n_spikes),
@@ -66,6 +69,19 @@ def apply_reverse_emission_time_patch() -> None:
     reverse_models.reverse_emissions = reverse_emissions
     improved._time_order_patch_applied = True
     reverse_models._time_order_patch_applied = True
+
+
+def _time_vector(
+    emissions: LogEmissionTensor,
+    *,
+    reverse_time: bool,
+) -> np.ndarray:
+    times = np.asarray(emissions.times, dtype=float)
+    if not reverse_time or times.shape == (0,):
+        return times.copy()
+    if times.shape != (emissions.n_time,):
+        return times.copy()
+    return (float(times[-1]) - times[::-1] + float(times[0])).copy()
 
 
 def _duration_vector(

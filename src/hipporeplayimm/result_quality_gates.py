@@ -30,6 +30,10 @@ _EVENT_GROUP_EVENT_COLUMNS = ("event_index", "event_id")
 _EVENT_GROUP_SCOPE_COLUMNS = (
     "window_role",
     "window_index",
+    "window_variant",
+    "window_start_s",
+    "window_end_s",
+    "window_duration_s",
     "null_index",
     "matched_null_rank",
     "random_seed",

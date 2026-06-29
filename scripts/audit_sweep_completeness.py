@@ -44,6 +44,12 @@ PRESETS: dict[str, SweepPreset] = {
         ),
     ),
 }
+MODE_ALIASES = {
+    "evidence": "state-space-evidence",
+    "state-space": "state-space-evidence",
+    "recovery": "simulation-recovery",
+    "simulation": "simulation-recovery",
+}
 
 _SUCCESS_STATUS_STRINGS = {"", "success", "nan", "na", "n/a", "none", "null", "<na>"}
 
@@ -132,15 +138,10 @@ def audit_sweep_completeness(
 
 def _preset(mode: str) -> SweepPreset:
     normalized = str(mode).strip().lower().replace("_", "-")
-    aliases = {
-        "evidence": "state-space-evidence",
-        "state-space": "state-space-evidence",
-        "recovery": "simulation-recovery",
-        "simulation": "simulation-recovery",
-    }
-    normalized = aliases.get(normalized, normalized)
+    normalized = MODE_ALIASES.get(normalized, normalized)
     if normalized not in PRESETS:
-        raise ValueError(f"mode must be one of {sorted(PRESETS)}")
+        choices = sorted(set(PRESETS) | set(MODE_ALIASES))
+        raise ValueError(f"mode must be one of {choices}")
     return PRESETS[normalized]
 
 
@@ -316,7 +317,7 @@ def _success_status_series(values: pd.Series) -> pd.Series:
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Audit parameter-sweep artifact completeness against the planned matrix.")
-    parser.add_argument("--mode", choices=sorted(PRESETS), required=True)
+    parser.add_argument("--mode", choices=sorted(set(PRESETS) | set(MODE_ALIASES)), required=True)
     parser.add_argument("--artifact-root", required=True)
     parser.add_argument("--output", required=True)
     parser.add_argument("--fail-on-incomplete", action="store_true")

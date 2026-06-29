@@ -51,6 +51,43 @@ def test_state_space_candidate_paths_reject_support_without_finite_mass():
         model.score(emissions, centers, candidate_indices=candidates)
 
 
+@pytest.mark.parametrize("mode", ["momentum", "imm"])
+def test_occupancy_candidate_log_mass_diagnostics_use_active_support(mode: str):
+    emissions = _emissions(
+        np.log(
+            np.array(
+                [
+                    [1.0e-6, 1.0],
+                    [1.0e-6, 1.0],
+                    [1.0e-6, 1.0],
+                ],
+                dtype=float,
+            )
+        )
+    )
+    centers = np.array([[0.0, 0.0], [1.0, 0.0]])
+    candidates = [np.array([0]), np.array([0]), np.array([0])]
+    model = StateSpaceReplayModel(
+        mode=mode,
+        config=StateSpaceDecoderConfig(
+            mode=mode,
+            momentum_candidate_top_k=2,
+            momentum_predicted_candidate_top_k=0,
+            valid_occupancy_threshold_s=0.5,
+        ),
+    )
+
+    score = model.score(
+        emissions,
+        centers,
+        candidate_indices=candidates,
+        occupancy_s=np.array([1.0, 0.0]),
+    )
+
+    assert np.isclose(score.diagnostics["mean_candidate_log_mass"], 0.0)
+    assert np.isclose(score.diagnostics["min_candidate_log_mass"], 0.0)
+
+
 def test_legacy_candidate_model_rejects_support_without_finite_mass():
     emissions = _emissions(
         np.array(

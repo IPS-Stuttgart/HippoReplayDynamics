@@ -70,8 +70,14 @@ def _ps(sig,dt):
 def _pss(sig,ds,dt): return np.asarray([_ps(sig,d) for d in ds],float) if len(ds) else np.empty(0)
 def _rep(sig,ds,dt): return _ps(sig,float(np.median(ds)) if len(ds) else dt)
 def _decays(v,ds,ref):
-    if not len(ds): return np.empty(0)
-    r=max(float(ref),np.finfo(float).tiny); b=max(float(v),np.finfo(float).tiny)
+    ds=np.asarray(ds,dtype=float)
+    if ds.ndim!=1: raise ValueError('transition durations must be one-dimensional')
+    if ds.size==0: return np.empty(0)
+    if not np.all(np.isfinite(ds)) or np.any(ds<=0.0): raise ValueError('transition durations must contain finite positive durations')
+    r=float(ref)
+    if not np.isfinite(r) or r<=0.0: raise ValueError('reference dt must be finite and positive')
+    b=float(v)
+    if not np.isfinite(b) or b<0.0: raise ValueError('momentum_velocity_decay must be finite and nonnegative')
     return np.asarray([b**(float(d)/r) for d in ds],float)
 def _scales(ds):
     s=np.ones_like(ds,dtype=float)

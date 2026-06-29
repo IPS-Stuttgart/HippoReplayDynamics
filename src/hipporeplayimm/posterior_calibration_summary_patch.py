@@ -56,6 +56,18 @@ def _rank_fraction(rank: pd.Series, n_bins: pd.Series) -> pd.Series:
     return pd.Series(fractions, index=rank.index)
 
 
+def _rank_coverage(rank_fraction: pd.Series, threshold: float) -> pd.Series:
+    """Return nullable rank-coverage indicators for finite rank fractions only."""
+
+    values = pd.to_numeric(rank_fraction, errors="coerce")
+    numeric = values.to_numpy(dtype=float)
+    valid = np.isfinite(numeric)
+    coverage = pd.Series(pd.NA, index=values.index, dtype="boolean")
+    if np.any(valid):
+        coverage.loc[valid] = numeric[valid] <= float(threshold)
+    return coverage
+
+
 def apply_posterior_calibration_summary_patch() -> None:
     """Patch calibration summaries to drop invalid probability rows consistently."""
 
@@ -104,9 +116,9 @@ def apply_posterior_calibration_summary_patch() -> None:
         frame["true_negative_log_probability"] = -np.log(probabilities)
         if rank_column in frame and n_bins_column in frame:
             frame["rank_fraction"] = _rank_fraction(frame[rank_column], frame[n_bins_column])
-            frame["coverage_50_rank"] = frame["rank_fraction"] <= 0.50
-            frame["coverage_80_rank"] = frame["rank_fraction"] <= 0.80
-            frame["coverage_95_rank"] = frame["rank_fraction"] <= 0.95
+            frame["coverage_50_rank"] = _rank_coverage(frame["rank_fraction"], 0.50)
+            frame["coverage_80_rank"] = _rank_coverage(frame["rank_fraction"], 0.80)
+            frame["coverage_95_rank"] = _rank_coverage(frame["rank_fraction"], 0.95)
         else:
             frame["rank_fraction"] = np.nan
             frame["coverage_50_rank"] = np.nan

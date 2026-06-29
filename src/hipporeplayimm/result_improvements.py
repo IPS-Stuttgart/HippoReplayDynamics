@@ -470,3 +470,219 @@ def posterior_calibration_summary(
         )
         .reset_index(drop=True)
     )
+
+
+def shuffle_spike_times_session(session, random_seed: int = 1):
+    """Return a session with spike times permuted across spikes.
+
+    Clusterless mark rows are stored in the same row order as ``session.spikes``.
+    Keep mark timestamps in that row order as well; otherwise downstream marked
+    point-process emissions can pair a spike waveform with a different spike time.
+    """
+
+    rng = np.random.default_rng(random_seed)
+    spikes = np.asarray(session.spikes, dtype=float).copy()
+    if spikes.size:
+        spikes[:, 0] = rng.permutation(spikes[:, 0])
+    marks = session.spike_marks
+    if marks is not None:
+        mark_times = np.asarray(marks.times, dtype=float).copy()
+        if spikes.ndim == 2 and mark_times.shape[0] == spikes.shape[0]:
+            mark_times = spikes[:, 0].copy()
+        elif mark_times.size:
+            mark_times = rng.permutation(mark_times)
+        marks = _replace_spike_mark_rows(marks, times=mark_times)
+    return replace(session, spikes=spikes, spike_marks=marks)
+
+
+def circular_shift_spikes_session(session, shift_s: float | None = None, random_seed: int = 1):
+    """Return a session with spike times circularly shifted within session bounds.
+
+    The returned ``spikes`` array is time-sorted.  Reorder clusterless mark rows
+    with the same permutation so mark features, mark cell IDs, and spike rows stay
+    aligned.
+    """
+
+    spikes = np.asarray(session.spikes, dtype=float).copy()
+    if spikes.size == 0:
+        return session
+    start = float(np.nanmin(spikes[:, 0]))
+    end = float(np.nanmax(spikes[:, 0]))
+    duration = max(end - start, np.finfo(float).eps)
+    if shift_s is None:
+        rng = np.random.default_rng(random_seed)
+        shift_s = float(rng.uniform(0.1 * duration, 0.9 * duration))
+    shifted_times = ((spikes[:, 0] - start + float(shift_s)) % duration) + start
+    order = np.argsort(shifted_times, kind="mergesort")
+    spikes[:, 0] = shifted_times
+    spikes = spikes[order]
+    marks = session.spike_marks
+    if marks is not None:
+        mark_times = ((np.asarray(marks.times, dtype=float) - start + float(shift_s)) % duration) + start
+        if mark_times.shape[0] == order.shape[0]:
+            marks = _replace_spike_mark_rows(marks, times=mark_times[order], order=order)
+        else:
+            marks = _replace_spike_mark_rows(marks, times=mark_times)
+    return replace(session, spikes=spikes, spike_marks=marks)
+
+
+def _replace_spike_mark_rows(
+    marks,
+    *,
+    times: np.ndarray | None = None,
+    order: np.ndarray | None = None,
+):
+    """Return spike marks with row-aligned arrays replaced or reordered."""
+
+    updates: dict[str, np.ndarray] = {}
+    if times is not None:
+        updates["times"] = np.asarray(times, dtype=float).copy()
+    if order is not None:
+        row_order = np.asarray(order, dtype=int)
+        if marks.marks.shape[0] == row_order.shape[0]:
+            updates["marks"] = np.asarray(marks.marks).copy()[row_order]
+        if marks.cell_ids is not None:
+            cell_ids = np.asarray(marks.cell_ids)
+            if cell_ids.shape[0] == row_order.shape[0]:
+                updates["cell_ids"] = cell_ids.copy()[row_order]
+        if marks.group_ids is not None:
+            group_ids = np.asarray(marks.group_ids)
+            if group_ids.shape[0] == row_order.shape[0]:
+                updates["group_ids"] = group_ids.copy()[row_order]
+    return replace(marks, **updates)
+
+
+def shuffle_cell_identities_session(session, random_seed: int = 1):
+    """Return a session with cell IDs randomly remapped."""
+
+    rng = np.random.default_rng(random_seed)
+    spikes = np.asarray(session.spikes, dtype=float).copy()
+    if spikes.size == 0:
+        return session
+    cells = np.unique(spikes[:, 1].astype(int))
+    shuffled = rng.permutation(cells)
+    mapping = {int(src): int(dst) for src, dst in zip(cells, shuffled, strict=True)}
+    spikes[:, 1] = [mapping[int(cell)] for cell in spikes[:, 1].astype(int)]
+    marks = session.spike_marks
+    if marks is not None and marks.cell_ids is not None:
+        mark_cell_ids = np.asarray([mapping.get(int(cell), int(cell)) for cell in marks.cell_ids], dtype=int)
+        marks = replace(marks, cell_ids=mark_cell_ids)
+    return replace(session, spikes=spikes, spike_marks=marks)
+
+
+def shuffle_mark_features_session(session, random_seed: int = 1):
+    """Return a session with mark-feature rows independently permuted."""
+
+    marks = session.spike_marks
+    if marks is None or marks.n_features == 0:
+        return session
+    rng = np.random.default_rng(random_seed)
+    values = np.asarray(marks.marks, dtype=float).copy()
+    for column in range(values.shape[1]):
+        values[:, column] = rng.permutation(values[:, column])
+    return replace(session, spike_marks=replace(marks, marks=values))
+
+
+def shuffle_well_labels(frame: pd.DataFrame, random_seed: int = 1) -> pd.DataFrame:
+    """Shuffle behavioral well labels in a ground-truth/score comparison table."""
+
+    if frame.empty or "true_well_id" not in frame:
+        return frame.copy()
+    rng = np.random.default_rng(random_seed)
+    out = frame.copy()
+    label_columns = [column for column in ("true_well_id", "true_well_x", "true_well_y") if column in out]
+    for column in label_columns:
+        values = out[column].to_numpy(copy=True)
+        finite = pd.notna(values)
+        values[finite] = rng.permutation(values[finite])
+        out[column] = values
+    return out
+
+
+def benchmark_settings_dict(config, args: dict[str, object] | None = None, rows: pd.DataFrame | None = None) -> dict[str, object]:
+    """Build reproducibility metadata for a benchmark run."""
+
+    payload = {
+        "created_utc": datetime.now(timezone.utc).isoformat(),
+        "python": sys.version.replace("\n", " "),
+        "platform": platform.platform(),
+        "packages": _package_versions(("numpy", "pandas", "scipy", "hipporeplayimm")),
+        "config": _as_serializable(config),
+    }
+    if args is not None:
+        payload["cli_args"] = _as_serializable(args)
+    if rows is not None and not rows.empty:
+        payload["rows"] = {
+            "count": int(rows.shape[0]),
+            "sessions": sorted(str(value) for value in rows.get("session", pd.Series(dtype=object)).dropna().unique()),
+            "models": sorted(str(value) for value in rows.get("model", pd.Series(dtype=object)).dropna().unique()),
+        }
+    return payload
+
+
+def write_benchmark_settings(path: str | Path, config, args: dict[str, object] | None = None, rows: pd.DataFrame | None = None) -> None:
+    """Write benchmark settings metadata as a small YAML file."""
+
+    Path(path).write_text(_yaml_lines(benchmark_settings_dict(config, args, rows)), encoding="utf-8")
+
+
+def _package_versions(names: Iterable[str]) -> dict[str, str]:
+    versions: dict[str, str] = {}
+    for name in names:
+        try:
+            versions[name] = importlib_metadata.version(name)
+        except importlib_metadata.PackageNotFoundError:
+            versions[name] = "not-installed"
+    return versions
+
+
+def _as_serializable(value):
+    if is_dataclass(value):
+        return _as_serializable(asdict(value))
+    if isinstance(value, dict):
+        return {str(key): _as_serializable(item) for key, item in value.items()}
+    if isinstance(value, (tuple, list)):
+        return [_as_serializable(item) for item in value]
+    if isinstance(value, np.ndarray):
+        return value.tolist()
+    if isinstance(value, (np.integer, np.floating)):
+        return value.item()
+    if isinstance(value, Path):
+        return str(value)
+    return value
+
+
+def _yaml_lines(value: object, indent: int = 0) -> str:
+    prefix = " " * indent
+    if isinstance(value, dict):
+        lines = []
+        for key, item in value.items():
+            if isinstance(item, (dict, list)):
+                lines.append(f"{prefix}{key}:")
+                lines.append(_yaml_lines(item, indent + 2).rstrip())
+            else:
+                lines.append(f"{prefix}{key}: {_yaml_scalar(item)}")
+        return "\n".join(lines) + "\n"
+    if isinstance(value, list):
+        lines = []
+        for item in value:
+            if isinstance(item, (dict, list)):
+                lines.append(f"{prefix}-")
+                lines.append(_yaml_lines(item, indent + 2).rstrip())
+            else:
+                lines.append(f"{prefix}- {_yaml_scalar(item)}")
+        return "\n".join(lines) + "\n"
+    return f"{prefix}{_yaml_scalar(value)}\n"
+
+
+def _yaml_scalar(value: object) -> str:
+    if value is None:
+        return "null"
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, (int, float, np.integer, np.floating)):
+        return str(value)
+    text = str(value)
+    if not text or any(ch in text for ch in ":#[]{}&*!|>'\"%@`"):
+        return repr(text)
+    return text

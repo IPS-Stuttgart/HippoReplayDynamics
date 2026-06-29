@@ -60,6 +60,15 @@ _EVENT_GROUP_SCOPE_COLUMNS = (
     "benchmark_cell_split_strategy",
     "benchmark_cell_split_strata",
 )
+_WINDOW_VARIANT_SCOPE_COLUMNS = (
+    "window_role",
+    "window_index",
+    "event_window_variant",
+    "window_variant",
+    "window_start_s",
+    "window_end_s",
+    "window_duration_s",
+)
 
 
 @dataclass(frozen=True)
@@ -310,14 +319,34 @@ def _hierarchical_summary_if_available(scores: pd.DataFrame) -> pd.DataFrame:
 
 def _window_summary_if_available(scores: pd.DataFrame, *, group_cols: Sequence[str]) -> pd.DataFrame:
     if "event_window_variant" in scores.columns:
-        return summarize_window_sensitivity(scores, group_cols=[column for column in group_cols if column != "event_window_variant"], variant_col="event_window_variant")
+        return summarize_window_sensitivity(
+            scores,
+            group_cols=_window_sensitivity_group_cols(group_cols, "event_window_variant"),
+            variant_col="event_window_variant",
+        )
     if "window_variant" in scores.columns:
-        return summarize_window_sensitivity(scores, group_cols=[column for column in group_cols if column != "window_variant"], variant_col="window_variant")
+        return summarize_window_sensitivity(
+            scores,
+            group_cols=_window_sensitivity_group_cols(group_cols, "window_variant"),
+            variant_col="window_variant",
+        )
     if "window_index" not in scores.columns:
         return pd.DataFrame()
     tmp = scores.copy()
     tmp["event_window_variant"] = "window_" + tmp["window_index"].astype(str)
-    return summarize_window_sensitivity(tmp, group_cols=[column for column in group_cols if column != "window_index"], variant_col="event_window_variant")
+    return summarize_window_sensitivity(
+        tmp,
+        group_cols=_window_sensitivity_group_cols(group_cols, "event_window_variant"),
+        variant_col="event_window_variant",
+    )
+
+
+def _window_sensitivity_group_cols(group_cols: Sequence[str], variant_col: str) -> list[str]:
+    """Drop window-variant identifiers before comparing variants of one event."""
+
+    window_scope = set(_WINDOW_VARIANT_SCOPE_COLUMNS)
+    window_scope.add(str(variant_col))
+    return [column for column in group_cols if column not in window_scope]
 
 
 def _influence_summary(scores: pd.DataFrame) -> pd.DataFrame:

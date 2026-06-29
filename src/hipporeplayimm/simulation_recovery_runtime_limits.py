@@ -19,6 +19,13 @@ def apply_simulation_recovery_runtime_limit_validation_patch() -> None:
         return
 
     def validate_recovery_runtime_limits(config: Any) -> None:
+        events_per_model = getattr(config, "events_per_model", None)
+        _positive_integer_value("events_per_model", events_per_model)
+
+        max_template_events = getattr(config, "max_template_events", None)
+        if max_template_events is not None:
+            _positive_integer_value("max_template_events", max_template_events)
+
         max_synthetic_events = getattr(config, "max_synthetic_events", None)
         if max_synthetic_events is not None:
             _positive_integer_value("max_synthetic_events", max_synthetic_events)

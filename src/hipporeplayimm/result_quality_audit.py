@@ -39,6 +39,28 @@ from .advanced_result_diagnostics import (
 from .evidence_reporting import ensure_evidence_support_columns
 from .result_improvements import add_candidate_support_quality_columns
 
+_EVENT_GROUP_BASE_COLUMNS = ("session", "event_index")
+_EVENT_GROUP_SCOPE_COLUMNS = (
+    "window_role",
+    "window_index",
+    "event_window_variant",
+    "window_variant",
+    "window_start_s",
+    "window_end_s",
+    "window_duration_s",
+    "null_index",
+    "matched_null_rank",
+    "template_event_index",
+    "benchmark_random_seed",
+    "benchmark_cell_split_index",
+    "benchmark_cell_split_seed",
+    "benchmark_event_subset_seed",
+    "benchmark_event_subset_base_seed",
+    "benchmark_test_cell_fraction",
+    "benchmark_cell_split_strategy",
+    "benchmark_cell_split_strata",
+)
+
 
 @dataclass(frozen=True)
 class ObservationCalibrationSelectionConfig:
@@ -51,10 +73,10 @@ class ObservationCalibrationSelectionConfig:
 
 
 def event_group_columns(scores: pd.DataFrame) -> list[str]:
-    """Return columns identifying one model-comparison unit."""
+    """Return columns identifying one independent model-comparison unit."""
 
-    columns = [column for column in ("session", "event_index") if column in scores.columns]
-    for optional in ("window_index", "event_window_variant", "window_variant", "benchmark_cell_split_index"):
+    columns = [column for column in _EVENT_GROUP_BASE_COLUMNS if column in scores.columns]
+    for optional in _EVENT_GROUP_SCOPE_COLUMNS:
         if optional in scores.columns and optional not in columns:
             columns.append(optional)
     return columns
@@ -374,8 +396,9 @@ def _dashboard_markdown(
 
 
 def _event_count(scores: pd.DataFrame) -> int | str:
-    if {"session", "event_index"}.issubset(scores.columns):
-        return int(scores[["session", "event_index"]].drop_duplicates().shape[0])
+    group_columns = event_group_columns(scores)
+    if group_columns:
+        return int(scores[group_columns].drop_duplicates().shape[0])
     return "unknown"
 
 

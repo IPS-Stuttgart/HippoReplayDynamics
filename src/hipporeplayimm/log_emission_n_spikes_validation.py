@@ -50,6 +50,8 @@ def _validate_log_likelihood(emissions: LogEmissionTensor) -> None:
     """Reject invalid likelihood rows while preserving ``-inf`` impossible states."""
 
     values = np.asarray(emissions.log_likelihood, dtype=float)
+    if values.shape[0] == 0:
+        raise ValueError("log_likelihood must contain at least one time bin")
     if np.any(np.isnan(values)):
         raise ValueError("log_likelihood must not contain NaN values")
     if not np.all(np.any(np.isfinite(values), axis=1)):

@@ -61,6 +61,30 @@ def test_simulation_recovery_keeps_same_event_index_separate_by_random_seed() ->
     assert overall["recovered_events"] == 1
 
 
+def test_simulation_recovery_keeps_same_event_index_separate_by_source_file() -> None:
+    rows = pd.DataFrame(
+        [
+            _row(1, 0, "stationary", "sorted-spike-state-space-stationary", 0.0, source_recovery_score_file="run_a.csv"),
+            _row(1, 0, "stationary", "sorted-spike-state-space-diffusion", -4.0, source_recovery_score_file="run_a.csv"),
+            _row(1, 0, "stationary", "sorted-spike-state-space-stationary", -4.0, source_recovery_score_file="run_b.csv"),
+            _row(1, 0, "stationary", "sorted-spike-state-space-diffusion", 0.0, source_recovery_score_file="run_b.csv"),
+        ]
+    )
+
+    scored = add_evidence_columns(rows)
+    best = simulation_event_best_rows(scored).sort_values("source_recovery_score_file").reset_index(drop=True)
+    summary = recovery_summary(scored)
+    overall = summary[summary["true_model"] == "overall"].iloc[0]
+
+    assert best["source_recovery_score_file"].tolist() == ["run_a.csv", "run_b.csv"]
+    assert best["model"].tolist() == [
+        "sorted-spike-state-space-stationary",
+        "sorted-spike-state-space-diffusion",
+    ]
+    assert overall["simulated_events"] == 2
+    assert overall["recovered_events"] == 1
+
+
 def test_certified_recovery_keeps_same_event_index_separate_by_random_seed() -> None:
     rows = pd.DataFrame(
         [
@@ -91,6 +115,47 @@ def test_certified_recovery_keeps_same_event_index_separate_by_random_seed() -> 
     overall = summary[summary["true_model"] == "overall"].iloc[0]
 
     assert events["simulation_random_seed"].tolist() == [1, 2]
+    assert [bool(value) for value in events["certified_vs_exact_recovered_expected_model"]] == [True, False]
+    assert events["certified_vs_exact_reason"].tolist() == [
+        "expected_lower_bound_beats_best_comparable",
+        "expected_lower_bound_not_above_best_comparable",
+    ]
+    assert overall["simulated_events"] == 2
+    assert overall["certified_vs_exact_recovered_events"] == 1
+
+
+def test_certified_recovery_keeps_same_event_index_separate_by_source_file() -> None:
+    rows = pd.DataFrame(
+        [
+            _row(1, 0, "momentum", "sorted-spike-state-space-diffusion", -1.0, source_recovery_score_file="run_a.csv"),
+            _row(
+                1,
+                0,
+                "momentum",
+                "sorted-spike-state-space-momentum",
+                2.0,
+                source_recovery_score_file="run_a.csv",
+                diagnostic_state_space_momentum_evidence_support="truncated_full_grid",
+            ),
+            _row(1, 0, "momentum", "sorted-spike-state-space-diffusion", 5.0, source_recovery_score_file="run_b.csv"),
+            _row(
+                1,
+                0,
+                "momentum",
+                "sorted-spike-state-space-momentum",
+                1.0,
+                source_recovery_score_file="run_b.csv",
+                diagnostic_state_space_momentum_evidence_support="truncated_full_grid",
+            ),
+        ]
+    )
+
+    scored = add_evidence_columns(rows)
+    events = certified_vs_exact_event_recovery(scored).sort_values("source_recovery_score_file").reset_index(drop=True)
+    summary = certified_vs_exact_recovery_summary(scored)
+    overall = summary[summary["true_model"] == "overall"].iloc[0]
+
+    assert events["source_recovery_score_file"].tolist() == ["run_a.csv", "run_b.csv"]
     assert [bool(value) for value in events["certified_vs_exact_recovered_expected_model"]] == [True, False]
     assert events["certified_vs_exact_reason"].tolist() == [
         "expected_lower_bound_beats_best_comparable",

@@ -65,8 +65,15 @@ def _numeric_unique_values(frame: pd.DataFrame, columns: tuple[str, ...]) -> lis
     for column in columns:
         if column not in frame:
             continue
-        numeric = pd.to_numeric(frame[column], errors="coerce").dropna().astype(int)
-        values.extend(int(value) for value in numeric.unique())
+        numeric = pd.to_numeric(frame[column], errors="coerce").dropna().to_numpy(dtype=float)
+        if numeric.size == 0:
+            continue
+        rounded = np.rint(numeric)
+        if not np.all(np.isclose(numeric, rounded, rtol=0.0, atol=0.0)):
+            raise ValueError(f"{column} must contain integer-valued candidate counts")
+        if np.any(rounded < 0.0):
+            raise ValueError(f"{column} must contain nonnegative candidate counts")
+        values.extend(int(value) for value in rounded.astype(int))
     return sorted(set(values))
 
 

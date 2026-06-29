@@ -284,23 +284,42 @@ def _patch_weighted_ensemble_emissions(accuracy_upgrades) -> None:
         *,
         alpha: float = 0.5,
     ) -> LogEmissionTensor:
-        out = current(left, right, alpha=alpha)
-        out.n_spikes = int(getattr(left, "n_spikes", out.n_spikes))
+        alpha = float(alpha)
+        if not 0.0 <= alpha <= 1.0:
+            raise ValueError("alpha must lie in [0, 1]")
+
+        left_likelihood = np.asarray(left.log_likelihood, dtype=float)
+        right_likelihood = np.asarray(right.log_likelihood, dtype=float)
+        if left_likelihood.shape != right_likelihood.shape:
+            raise ValueError("emission tensors must have matching log_likelihood shapes")
+
+        spike_counts = np.asarray(left.spike_counts).copy()
+        n_spikes = int(getattr(left, "n_spikes", np.asarray(spike_counts, dtype=float).sum()))
+        n_time = left_likelihood.shape[0]
         bin_durations = _copied_duration_vector(
             getattr(left, "bin_durations", None),
-            expected_length=out.n_time,
+            expected_length=n_time,
             name="bin_durations",
         )
-        if bin_durations is not None:
-            out.bin_durations = bin_durations
         transition_durations = _copied_duration_vector(
             getattr(left, "transition_durations", None),
-            expected_length=max(out.n_time - 1, 0),
+            expected_length=max(n_time - 1, 0),
             name="transition_durations",
         )
-        if transition_durations is not None:
-            out.transition_durations = transition_durations
-        return out
+        return LogEmissionTensor(
+            log_likelihood=alpha * left_likelihood + (1.0 - alpha) * right_likelihood,
+            spike_counts=spike_counts,
+            times=np.asarray(left.times, dtype=float).copy(),
+            dt=left.dt,
+            cell_ids=np.asarray(left.cell_ids).copy(),
+            n_spikes=n_spikes,
+            bin_durations=bin_durations,
+            transition_durations=transition_durations,
+            metadata={
+                "emission_model": "weighted-product-ensemble",
+                "ensemble_alpha_left": alpha,
+            },
+        )
 
     setattr(weighted_ensemble_emissions, _ENSEMBLE_PATCHED_FLAG, True)
     setattr(weighted_ensemble_emissions, _ENSEMBLE_ORIGINAL_ATTR, current)

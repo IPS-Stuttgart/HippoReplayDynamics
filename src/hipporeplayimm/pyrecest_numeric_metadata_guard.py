@@ -23,12 +23,12 @@ def apply_pyrecest_numeric_metadata_guard_patch() -> None:
     @wraps(current)
     def metadata_float_from_value(value: Any, column: str) -> float | None:
         if isinstance(value, (bool, np.bool_)):
-            raise ValueError(f"{column} must contain finite numeric values")
+            raise ValueError(f"{column} must contain finite numeric metadata values")
         try:
             return current(value, column)
         except ValueError as exc:
             if _RAW_FLOAT_ERROR in str(exc):
-                raise ValueError(f"{column} must contain finite numeric values") from exc
+                raise ValueError(f"{column} must contain finite numeric metadata values") from exc
             raise
 
     setattr(metadata_float_from_value, _PATCHED_FLAG, True)

@@ -8,6 +8,8 @@ import numpy as np
 import pandas as pd
 
 _PATCH_FLAG = "_missing_group_metadata_patch_applied"
+_EVIDENCE_MARGIN_TABLE_WRAPPER_FLAG = "_missing_group_metadata_evidence_margin_table_wrapper"
+_ADD_COLUMNS_WRAPPER_FLAG = "_missing_group_metadata_add_margin_columns_wrapper"
 _MARGIN_COLUMNS = [
     "best_model_by_evidence",
     "second_best_model_by_evidence",
@@ -24,7 +26,7 @@ def apply_advanced_result_missing_group_patch() -> None:
 
     from . import advanced_result_diagnostics as diagnostics
 
-    if getattr(diagnostics, _PATCH_FLAG, False):
+    if getattr(diagnostics, _PATCH_FLAG, False) and _missing_group_patch_current(diagnostics):
         return
 
     def evidence_margin_table(
@@ -86,6 +88,20 @@ def apply_advanced_result_missing_group_patch() -> None:
             return out
         return scores.merge(margins, on=list(group_cols), how="left")
 
+    setattr(evidence_margin_table, _EVIDENCE_MARGIN_TABLE_WRAPPER_FLAG, True)
+    setattr(add_evidence_margin_columns, _ADD_COLUMNS_WRAPPER_FLAG, True)
     diagnostics.evidence_margin_table = evidence_margin_table
     diagnostics.add_evidence_margin_columns = add_evidence_margin_columns
     setattr(diagnostics, _PATCH_FLAG, True)
+
+
+def _missing_group_patch_current(diagnostics) -> bool:
+    """Return whether advanced diagnostics still point to the missing-group wrappers."""
+
+    return all(
+        getattr(getattr(diagnostics, name, None), flag, False)
+        for name, flag in (
+            ("evidence_margin_table", _EVIDENCE_MARGIN_TABLE_WRAPPER_FLAG),
+            ("add_evidence_margin_columns", _ADD_COLUMNS_WRAPPER_FLAG),
+        )
+    )

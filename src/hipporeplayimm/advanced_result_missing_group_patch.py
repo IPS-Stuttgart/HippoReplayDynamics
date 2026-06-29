@@ -178,7 +178,9 @@ def apply_advanced_result_missing_group_patch() -> None:
         for key, group in grouped:
             key_tuple = key if isinstance(key, tuple) else (key,)
             paired = group[group[model_col].astype(str).isin([positive_model, reference_model])]
-            pivot = paired.dropna(subset=[evidence_col]).drop_duplicates(model_col, keep="last")
+            pivot = paired.copy()
+            pivot[evidence_col] = pd.to_numeric(pivot[evidence_col], errors="coerce")
+            pivot = pivot.dropna(subset=[evidence_col]).drop_duplicates(model_col, keep="last")
             by_model = pivot.set_index(model_col)
             if positive_model not in by_model.index or reference_model not in by_model.index:
                 continue

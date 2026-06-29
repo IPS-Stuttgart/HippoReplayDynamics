@@ -32,8 +32,9 @@ def _bin_centers() -> np.ndarray:
     return np.array([[0.0, 0.0], [1.0, 0.0], [2.0, 0.0], [3.0, 0.0]], dtype=float)
 
 
-def test_duration_occupancy_score_method_uses_final_runtime_wrapper() -> None:
-    assert StateSpaceReplayModel.score is duration_occupancy._score_state_space_duration_with_occupancy
+def test_duration_occupancy_score_method_uses_duration_aware_runtime_wrapper() -> None:
+    assert getattr(StateSpaceReplayModel.score, "_native_duration_occupancy_aware", False)
+    assert callable(duration_occupancy._score_state_space_duration_with_occupancy)
 
 
 @pytest.mark.parametrize(

@@ -7,7 +7,7 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-_MISSING_SUPPORT_VALUES = {"", "nan", "none", "null", "<na>"}
+_MISSING_SUPPORT_VALUES = {"", "nan", "na", "n/a", "none", "null", "<na>"}
 _NONCOMPARABLE_SUPPORT_VALUES = {
     "degenerate_single_bin",
     "not_scored",
@@ -16,7 +16,7 @@ _NONCOMPARABLE_SUPPORT_VALUES = {
     "particle_approximation",
 }
 _TRUNCATED_SUPPORT = "truncated_full_grid"
-_SUCCESS_STATUS_VALUES = {"", "success", "nan", "none", "null", "<na>"}
+_SUCCESS_STATUS_VALUES = {"", "success", "nan", "na", "n/a", "none", "null", "<na>"}
 _MIN_LOG_MASS_BOOL_PATCHED_FLAG = "_candidate_min_log_mass_bool_patch_applied"
 
 

@@ -1,13 +1,18 @@
-"""Use statistic-specific rat clusters in wrong-map bootstrap summaries."""
+"""Patch wrong-map post-hoc diagnostics for robust grouped summaries."""
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from functools import wraps
 
 import numpy as np
 import pandas as pd
 
 _PATCHED_FLAG = "_wrong_map_rat_bootstrap_patch_applied"
+_RAT_BOOTSTRAP_WRAPPER_FLAG = "_wrong_map_rat_bootstrap_wrapper"
+_NUMERIC_DELTA_WRAPPER_FLAG = "_wrong_map_numeric_delta_summary_wrapper"
+_NUMERIC_ABSOLUTE_WRAPPER_FLAG = "_wrong_map_numeric_absolute_deltas_wrapper"
+_NUMERIC_ORIGINAL_ATTR = "_wrong_map_numeric_evidence_original"
 
 
 def _bootstrap_summary_columns() -> list[str]:
@@ -62,13 +67,24 @@ def _nonnegative_integer(value: object, name: str) -> int:
 
 
 def apply_wrong_map_rat_bootstrap_patch() -> None:
-    """Patch rat-cluster bootstrap to sample only rats present for each statistic."""
+    """Patch wrong-map diagnostics after CSV round-trips and rat resampling."""
 
     from . import advanced_result_diagnostics as diagnostics
 
-    if getattr(diagnostics, _PATCHED_FLAG, False):
+    if wrong_map_rat_bootstrap_patch_current(diagnostics):
         return
 
+    if not getattr(
+        diagnostics.rat_bootstrap_wrong_map_absolute_evidence_summary,
+        _RAT_BOOTSTRAP_WRAPPER_FLAG,
+        False,
+    ):
+        _apply_rat_bootstrap_wrapper(diagnostics)
+    _apply_numeric_evidence_wrappers(diagnostics)
+    setattr(diagnostics, _PATCHED_FLAG, True)
+
+
+def _apply_rat_bootstrap_wrapper(diagnostics) -> None:
     original = diagnostics.rat_bootstrap_wrong_map_absolute_evidence_summary
 
     @wraps(original)
@@ -131,10 +147,104 @@ def apply_wrong_map_rat_bootstrap_patch() -> None:
             )
         return pd.DataFrame(rows, columns=columns)
 
+    setattr(
+        rat_bootstrap_wrong_map_absolute_evidence_summary,
+        _RAT_BOOTSTRAP_WRAPPER_FLAG,
+        True,
+    )
     diagnostics.rat_bootstrap_wrong_map_absolute_evidence_summary = (
         rat_bootstrap_wrong_map_absolute_evidence_summary
     )
-    setattr(diagnostics, _PATCHED_FLAG, True)
 
 
-__all__ = ["apply_wrong_map_rat_bootstrap_patch"]
+def _apply_numeric_evidence_wrappers(diagnostics) -> None:
+    if not getattr(diagnostics.wrong_map_delta_summary, _NUMERIC_DELTA_WRAPPER_FLAG, False):
+        original_delta = _unwrap_numeric(diagnostics.wrong_map_delta_summary)
+
+        @wraps(original_delta)
+        def wrong_map_delta_summary(
+            current_map_scores: pd.DataFrame,
+            wrong_map_scores: pd.DataFrame,
+            *,
+            key_cols: Sequence[str] = ("session", "event_index", "model"),
+            evidence_col: str = "log_evidence",
+        ) -> pd.DataFrame:
+            return original_delta(
+                _coerce_numeric_evidence(current_map_scores, evidence_col),
+                _coerce_numeric_evidence(wrong_map_scores, evidence_col),
+                key_cols=key_cols,
+                evidence_col=evidence_col,
+            )
+
+        _mark_numeric(wrong_map_delta_summary, original_delta, _NUMERIC_DELTA_WRAPPER_FLAG)
+        diagnostics.wrong_map_delta_summary = wrong_map_delta_summary
+
+    if not getattr(diagnostics.wrong_map_absolute_evidence_deltas, _NUMERIC_ABSOLUTE_WRAPPER_FLAG, False):
+        original_absolute = _unwrap_numeric(diagnostics.wrong_map_absolute_evidence_deltas)
+
+        @wraps(original_absolute)
+        def wrong_map_absolute_evidence_deltas(
+            current_map_scores: pd.DataFrame,
+            wrong_map_scores: pd.DataFrame,
+            *,
+            group_cols: Sequence[str] = ("session", "event_index"),
+            fixed_models: Sequence[str] = diagnostics.DEFAULT_WRONG_MAP_FIXED_MODELS,
+            exact_core_models: Sequence[str] = diagnostics.DEFAULT_WRONG_MAP_EXACT_CORE_MODELS,
+            exact_trajectory_models: Sequence[str] = diagnostics.DEFAULT_WRONG_MAP_EXACT_TRAJECTORY_MODELS,
+            evidence_col: str = "log_evidence",
+            model_col: str = "model",
+        ) -> pd.DataFrame:
+            return original_absolute(
+                _coerce_numeric_evidence(current_map_scores, evidence_col),
+                _coerce_numeric_evidence(wrong_map_scores, evidence_col),
+                group_cols=group_cols,
+                fixed_models=fixed_models,
+                exact_core_models=exact_core_models,
+                exact_trajectory_models=exact_trajectory_models,
+                evidence_col=evidence_col,
+                model_col=model_col,
+            )
+
+        _mark_numeric(
+            wrong_map_absolute_evidence_deltas,
+            original_absolute,
+            _NUMERIC_ABSOLUTE_WRAPPER_FLAG,
+        )
+        diagnostics.wrong_map_absolute_evidence_deltas = wrong_map_absolute_evidence_deltas
+
+
+def wrong_map_rat_bootstrap_patch_current(diagnostics) -> bool:
+    return all(
+        getattr(getattr(diagnostics, name, None), flag, False)
+        for name, flag in (
+            (
+                "rat_bootstrap_wrong_map_absolute_evidence_summary",
+                _RAT_BOOTSTRAP_WRAPPER_FLAG,
+            ),
+            ("wrong_map_delta_summary", _NUMERIC_DELTA_WRAPPER_FLAG),
+            ("wrong_map_absolute_evidence_deltas", _NUMERIC_ABSOLUTE_WRAPPER_FLAG),
+        )
+    )
+
+
+def _coerce_numeric_evidence(frame: pd.DataFrame, evidence_col: str) -> pd.DataFrame:
+    """Return rows whose evidence column can be interpreted as finite numeric values."""
+
+    out = frame.copy()
+    if out.empty or evidence_col not in out.columns:
+        return out
+    out[evidence_col] = pd.to_numeric(out[evidence_col], errors="coerce")
+    finite = np.isfinite(out[evidence_col].to_numpy(dtype=float))
+    return out.loc[finite].copy()
+
+
+def _unwrap_numeric(function):
+    return getattr(function, _NUMERIC_ORIGINAL_ATTR, function)
+
+
+def _mark_numeric(function, original, flag: str) -> None:
+    setattr(function, flag, True)
+    setattr(function, _NUMERIC_ORIGINAL_ATTR, original)
+
+
+__all__ = ["apply_wrong_map_rat_bootstrap_patch", "wrong_map_rat_bootstrap_patch_current"]

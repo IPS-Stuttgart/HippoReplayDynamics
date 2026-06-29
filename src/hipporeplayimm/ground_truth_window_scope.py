@@ -93,21 +93,35 @@ def _compare_scores_for_replay_window(
     original_build_clusterless_mark_emissions = gt.build_clusterless_mark_emissions
 
     @wraps(original_build_emissions)
-    def build_emissions_in_saved_window(session: Any, encoding: Any, ripple: Any, config: Any = None):
+    def build_emissions_in_saved_window(
+        session: Any,
+        encoding: Any,
+        ripple: Any,
+        *emission_args: Any,
+        **emission_kwargs: Any,
+    ):
         return original_build_emissions(
             session,
             encoding,
             _saved_window_for_ripple(session, ripple, replay_window),
-            config,
+            *emission_args,
+            **emission_kwargs,
         )
 
     @wraps(original_build_clusterless_mark_emissions)
-    def build_clusterless_mark_emissions_in_saved_window(session: Any, encoding: Any, ripple: Any, config: Any = None):
+    def build_clusterless_mark_emissions_in_saved_window(
+        session: Any,
+        encoding: Any,
+        ripple: Any,
+        *emission_args: Any,
+        **emission_kwargs: Any,
+    ):
         return original_build_clusterless_mark_emissions(
             session,
             encoding,
             _saved_window_for_ripple(session, ripple, replay_window),
-            config,
+            *emission_args,
+            **emission_kwargs,
         )
 
     gt.build_emissions = build_emissions_in_saved_window

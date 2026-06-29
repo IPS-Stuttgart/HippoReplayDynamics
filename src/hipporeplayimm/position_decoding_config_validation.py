@@ -181,6 +181,7 @@ def _coerce_integral_ids(values: Any, name: str) -> np.ndarray:
 def _positive_finite_scalar(name: str, value: Any) -> float:
     if isinstance(value, (bool, np.bool_)):
         raise ValueError(f"{name} must be finite and positive")
+    value = _reject_array_shaped_scalar(name, value, f"{name} must be finite and positive")
     try:
         numeric = float(value)
     except (TypeError, ValueError) as exc:
@@ -207,6 +208,7 @@ def _nonnegative_integer(name: str, value: Any) -> int:
 def _integer_value(name: str, value: Any) -> int:
     if isinstance(value, (bool, np.bool_)):
         raise ValueError(f"{name} must be an integer")
+    value = _reject_array_shaped_scalar(name, value, f"{name} must be an integer")
     try:
         numeric = float(value)
     except (TypeError, ValueError) as exc:
@@ -217,6 +219,16 @@ def _integer_value(name: str, value: Any) -> int:
     if not np.isclose(numeric, integer, rtol=0.0, atol=0.0):
         raise ValueError(f"{name} must be an integer")
     return integer
+
+
+def _reject_array_shaped_scalar(name: str, value: Any, message: str) -> Any:
+    try:
+        array = np.asarray(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(message) from exc
+    if array.shape != ():
+        raise ValueError(message)
+    return value
 
 
 __all__ = ["apply_position_decoding_config_validation_patch"]

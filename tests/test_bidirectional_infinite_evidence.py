@@ -2,6 +2,10 @@ from __future__ import annotations
 
 import numpy as np
 
+from hipporeplayimm.bidirectional_infinite_evidence_patch import (
+    _equal_prior_logp_and_weights,
+    _safe_mixture_log_posterior,
+)
 from hipporeplayimm.encoding import LogEmissionTensor
 from hipporeplayimm.models import EventScore
 from hipporeplayimm.result_improvement_extensions import BidirectionalReplayModel
@@ -88,3 +92,17 @@ def test_direct_bidirectional_wrapper_keeps_finite_weights_when_both_directions_
     assert result.terminal_log_posterior is not None
     assert np.all(np.isfinite(result.terminal_log_posterior))
     np.testing.assert_allclose(np.exp(result.terminal_log_posterior).sum(), 1.0)
+
+
+def test_zero_weight_direction_does_not_leak_terminal_support() -> None:
+    logp, weights = _equal_prior_logp_and_weights([float("inf"), 0.0])
+    forward = np.array([0.0, -np.inf], dtype=float)
+    reverse = np.array([-np.inf, 0.0], dtype=float)
+
+    mixed = _safe_mixture_log_posterior([forward, reverse], weights)
+
+    assert np.isposinf(logp)
+    np.testing.assert_allclose(weights, np.array([1.0, 0.0]))
+    assert mixed is not None
+    np.testing.assert_allclose(mixed[0], 0.0)
+    assert np.isneginf(mixed[1])

@@ -71,6 +71,27 @@ def test_add_event_reliability_flags_keeps_explicit_failed_status_unreliable():
     assert flagged["event_reliability_reasons"].tolist() == ["score_failure", "score_failure"]
 
 
+def test_add_event_reliability_flags_falls_back_to_test_spikes_when_n_spikes_missing():
+    scores = pd.DataFrame(
+        [
+            {
+                "model": "heldout",
+                "status": "success",
+                "n_spikes": float("nan"),
+                "test_spikes": 1,
+                "n_time": 3,
+                "mean_candidate_log_mass": 0.0,
+            }
+        ]
+    )
+
+    flagged = add_event_reliability_flags(scores)
+
+    assert not bool(flagged.loc[0, "event_reliable"])
+    assert bool(flagged.loc[0, "event_low_spike_count"])
+    assert flagged.loc[0, "event_reliability_reasons"] == "low_spike_count"
+
+
 def test_add_event_reliability_flags_infers_degenerate_support_from_diagnostics():
     scores = pd.DataFrame(
         [

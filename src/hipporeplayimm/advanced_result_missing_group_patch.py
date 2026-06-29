@@ -160,9 +160,11 @@ def apply_advanced_result_missing_group_patch() -> None:
         """Classify paired model wins, retaining NA values in optional group keys."""
 
         group_cols = _paired_margin_group_cols(scores, group_cols)
+        if isinstance(margin_threshold, (bool, np.bool_)):
+            raise ValueError("margin_threshold must be a finite nonnegative value")
         threshold = float(margin_threshold)
-        if threshold < 0.0:
-            raise ValueError("margin_threshold must be non-negative")
+        if not np.isfinite(threshold) or threshold < 0.0:
+            raise ValueError("margin_threshold must be a finite nonnegative value")
         ok = diagnostics._comparable_rows(scores)
         columns = [
             *group_cols,
@@ -205,7 +207,10 @@ def apply_advanced_result_missing_group_patch() -> None:
             positive_value = float(by_model.loc[positive_model, evidence_col])
             reference_value = float(by_model.loc[reference_model, evidence_col])
             delta = positive_value - reference_value
-            if delta >= threshold:
+            if np.isclose(threshold, 0.0) and np.isclose(delta, 0.0):
+                decision = "ambiguous"
+                positive_claimed = False
+            elif delta >= threshold:
                 decision = positive_model
                 positive_claimed = True
             elif delta <= -threshold:

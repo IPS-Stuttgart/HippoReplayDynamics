@@ -47,6 +47,16 @@ def apply_reverse_time_terminal_guard_patch() -> None:
         candidate_indices: Any = None,
         return_trajectory: bool | None = None,
     ):
+        if not hasattr(getattr(self, "base_model", None), "score"):
+            result = score(
+                self,
+                emissions,
+                bin_centers,
+                occupancy_s=occupancy_s,
+                candidate_indices=candidate_indices,
+                return_trajectory=return_trajectory,
+            )
+            return _clear_unmappable_reverse_terminal(result)
         result = _score_reverse_with_supported_return_trajectory(
             extensions,
             self,

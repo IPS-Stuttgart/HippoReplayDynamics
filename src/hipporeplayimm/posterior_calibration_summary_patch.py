@@ -41,15 +41,23 @@ def _apply_result_quality_gates_scope_patch() -> None:
 
 
 def _rank_fraction(rank: pd.Series, n_bins: pd.Series) -> pd.Series:
-    """Return finite rank fractions only for valid positive bin counts."""
+    """Return finite rank fractions only for possible rank/bin pairs."""
 
     rank_values = pd.to_numeric(rank, errors="coerce").to_numpy(dtype=float)
     n_bin_values = pd.to_numeric(n_bins, errors="coerce").to_numpy(dtype=float)
+    integer_like = np.isclose(rank_values, np.rint(rank_values), rtol=0.0, atol=0.0) & np.isclose(
+        n_bin_values,
+        np.rint(n_bin_values),
+        rtol=0.0,
+        atol=0.0,
+    )
     valid = (
         np.isfinite(rank_values)
         & np.isfinite(n_bin_values)
+        & integer_like
         & (rank_values >= 0.0)
         & (n_bin_values > 0.0)
+        & (rank_values <= n_bin_values)
     )
     fractions = np.full(rank_values.shape, np.nan, dtype=float)
     fractions[valid] = rank_values[valid] / n_bin_values[valid]

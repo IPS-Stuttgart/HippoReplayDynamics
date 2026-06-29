@@ -8,6 +8,8 @@ from hipporeplayimm import advanced_result_diagnostics as diagnostics
 from hipporeplayimm.advanced_result_diagnostics import (
     add_evidence_margin_columns,
     evidence_margin_table,
+    paired_model_margin_decisions,
+    paired_model_margin_threshold_sweep,
 )
 
 
@@ -99,6 +101,49 @@ def test_evidence_margin_columns_merge_back_missing_optional_group_metadata() ->
     assert len(merged) == len(scores)
     assert merged["best_model_by_evidence"].tolist() == ["diffusion", "diffusion"]
     assert np.allclose(merged["evidence_margin_to_second_best"].to_numpy(dtype=float), [2.0, 2.0])
+
+
+def test_paired_model_margin_decisions_keep_missing_optional_group_metadata() -> None:
+    scores = pd.DataFrame(
+        {
+            "session": ["Rat1/Open1", "Rat1/Open1"],
+            "event_index": [4, 4],
+            "event_window_variant": [pd.NA, pd.NA],
+            "true_model": ["momentum", "momentum"],
+            "model": ["momentum", "diffusion"],
+            "log_evidence": [5.0, 1.0],
+            "status": ["success", "success"],
+            "evidence_comparable": [True, True],
+        }
+    )
+    group_cols = ("session", "event_index", "event_window_variant")
+
+    decisions = paired_model_margin_decisions(
+        scores,
+        positive_model="momentum",
+        reference_model="diffusion",
+        margin_threshold=2.0,
+        group_cols=group_cols,
+        true_model_col="true_model",
+        positive_true_label="momentum",
+    )
+    sweep = paired_model_margin_threshold_sweep(
+        scores,
+        positive_model="momentum",
+        reference_model="diffusion",
+        thresholds=(2.0,),
+        group_cols=group_cols,
+        true_model_col="true_model",
+        positive_true_label="momentum",
+    )
+
+    assert len(decisions) == 1
+    assert decisions["event_window_variant"].isna().all()
+    assert decisions.loc[0, "margin_decision"] == "momentum"
+    assert decisions.loc[0, "positive_model_claimed"] is True
+    assert decisions.loc[0, "margin_binary_correct"] is True
+    assert int(sweep.loc[0, "events"]) == 1
+    assert float(sweep.loc[0, "positive_claim_recall"]) == 1.0
 
 
 def test_runtime_patches_restore_stale_missing_group_evidence_margin_aliases() -> None:

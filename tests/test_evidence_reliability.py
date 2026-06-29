@@ -3,6 +3,7 @@ from __future__ import annotations
 import pandas as pd
 
 from hipporeplayimm.evidence_reliability import add_event_reliability_flags
+from hipporeplayimm.evidence_reporting import DEGENERATE_SINGLE_BIN_EVIDENCE_SUPPORT
 
 
 def _valid_score_rows(status_values: list[object]) -> pd.DataFrame:
@@ -68,3 +69,23 @@ def test_add_event_reliability_flags_keeps_explicit_failed_status_unreliable():
 
     assert flagged["event_reliable"].tolist() == [False, False]
     assert flagged["event_reliability_reasons"].tolist() == ["score_failure", "score_failure"]
+
+
+def test_add_event_reliability_flags_infers_degenerate_support_from_diagnostics():
+    scores = pd.DataFrame(
+        [
+            {
+                "model": "diffusion",
+                "status": "success",
+                "n_spikes": 4,
+                "n_time": 3,
+                "mean_candidate_log_mass": 0.0,
+                "diagnostic_candidate_evidence_support": DEGENERATE_SINGLE_BIN_EVIDENCE_SUPPORT,
+            }
+        ]
+    )
+
+    flagged = add_event_reliability_flags(scores)
+
+    assert not bool(flagged.loc[0, "event_reliable"])
+    assert flagged.loc[0, "event_reliability_reasons"] == "degenerate_single_bin"

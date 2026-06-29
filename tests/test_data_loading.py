@@ -59,6 +59,36 @@ def test_single_tetrode_cell_id_row_maps_all_matching_spikes_to_the_tetrode() ->
     np.testing.assert_array_equal(group_ids, np.array([7, 7], dtype=int))
 
 
+def test_tetrode_cell_id_mapping_ignores_unused_extra_columns() -> None:
+    group_ids = _mark_group_ids_from_tetrode_cell_ids(
+        np.array([11, 12, 13], dtype=int),
+        np.array(
+            [
+                [7.0, 11.0, 0.25],
+                [8.0, 12.0, 0.50],
+                [9.0, 13.0, 0.75],
+            ]
+        ),
+    )
+
+    assert group_ids is not None
+    np.testing.assert_array_equal(group_ids, np.array([7, 8, 9], dtype=int))
+
+
+def test_tetrode_cell_id_mapping_rejects_fractional_used_columns() -> None:
+    with pytest.raises(ValueError, match="tetrode/cell IDs"):
+        _mark_group_ids_from_tetrode_cell_ids(
+            np.array([11, 12, 13], dtype=int),
+            np.array(
+                [
+                    [7.0, 11.0, 0.0],
+                    [8.5, 12.0, 1.0],
+                    [9.0, 13.0, 2.0],
+                ]
+            ),
+        )
+
+
 def _write_minimal_session(path: Path, *, mark_variable: str | None = None) -> None:
     path.mkdir(parents=True)
     spikes = np.array([[1.0, 11.0], [2.0, 12.0], [3.0, 11.0]])

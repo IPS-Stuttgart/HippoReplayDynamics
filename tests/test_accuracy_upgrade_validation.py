@@ -104,6 +104,12 @@ def test_continuous_time_emissions_reject_nonintegral_spike_cell_ids(bad_cell_id
         build_continuous_time_emissions(_continuous_time_session(bad_cell_id), _two_cell_encoding(), 0)
 
 
+@pytest.mark.parametrize("bad_cell_id", [1.5, 1.0000000005])
+def test_estimate_replay_cell_gains_reject_nonintegral_spike_cell_ids(bad_cell_id: float) -> None:
+    with pytest.raises(ValueError, match="spike cell IDs"):
+        estimate_replay_cell_gains(_continuous_time_session(bad_cell_id), _two_cell_encoding(), [0])
+
+
 def test_estimate_replay_cell_gains_counts_unsorted_encoding_cell_ids() -> None:
     session = ReplaySession(
         rat="RatX",

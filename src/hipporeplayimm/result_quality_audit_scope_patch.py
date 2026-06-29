@@ -5,8 +5,11 @@ from __future__ import annotations
 from functools import wraps
 from typing import Any
 
+import pandas as pd
+
 _PATCHED_FLAG = "_result_quality_audit_scope_patch_applied"
 _EVENT_COUNT_PATCHED_FLAG = "_result_quality_audit_event_count_scope_patch_applied"
+_HELDOUT_INFLUENCE_PATCHED_FLAG = "_result_quality_audit_heldout_influence_patch_applied"
 _EVENT_GROUP_BASE_COLUMNS = ("session", "event_index")
 _EVENT_GROUP_SCOPE_COLUMNS = (
     "window_role",
@@ -42,6 +45,19 @@ _EVENT_GROUP_SCOPE_COLUMNS = (
     "benchmark_cell_split_strategy",
     "benchmark_cell_split_strata",
 )
+_INFLUENCE_COLUMNS = (
+    "model",
+    "full_mean",
+    "leave_one_mean",
+    "left_out_group_col",
+    "left_out_group",
+    "influence_delta",
+)
+_INFLUENCE_VALUE_COLUMNS = (
+    "relative_log_evidence",
+    "log_evidence",
+    "heldout_log_likelihood",
+)
 
 
 def _column_has_complete_metadata(scores: Any, column: str) -> bool:
@@ -65,6 +81,33 @@ def _scoped_event_group_columns(scores: Any) -> list[str]:
         if optional in frame_columns and optional not in columns and _column_has_complete_metadata(scores, optional):
             columns.append(optional)
     return columns
+
+
+def _first_influence_value_column(scores: Any) -> str | None:
+    frame_columns = getattr(scores, "columns", ())
+    for column in _INFLUENCE_VALUE_COLUMNS:
+        if column in frame_columns:
+            return column
+    return None
+
+
+def _heldout_aware_influence_summary(audit_module: Any, scores: pd.DataFrame) -> pd.DataFrame:
+    """Return influence rows for regular and held-out evidence schemas."""
+
+    value_col = _first_influence_value_column(scores)
+    if value_col is None or "session" not in scores.columns:
+        return pd.DataFrame(columns=list(_INFLUENCE_COLUMNS))
+
+    frames = [audit_module.leave_one_group_influence(scores, group_col="session", value_col=value_col)]
+    rat_scores = scores.copy()
+    rat_scores["rat"] = rat_scores["session"].map(audit_module.rat_from_session)
+    frames.append(audit_module.leave_one_group_influence(rat_scores, group_col="rat", value_col=value_col))
+
+    nonempty = [frame for frame in frames if not frame.empty]
+    if not nonempty:
+        return pd.DataFrame(columns=list(_INFLUENCE_COLUMNS))
+    out = pd.concat(nonempty, ignore_index=True)
+    return out if not out.empty else pd.DataFrame(columns=list(_INFLUENCE_COLUMNS))
 
 
 def apply_result_quality_audit_scope_patch() -> None:
@@ -94,6 +137,16 @@ def apply_result_quality_audit_scope_patch() -> None:
 
         setattr(_event_count, _EVENT_COUNT_PATCHED_FLAG, True)
         audit_module._event_count = _event_count
+
+    current_influence_summary = audit_module._influence_summary
+    if not getattr(current_influence_summary, _HELDOUT_INFLUENCE_PATCHED_FLAG, False):
+
+        @wraps(current_influence_summary)
+        def _influence_summary(scores):
+            return _heldout_aware_influence_summary(audit_module, scores)
+
+        setattr(_influence_summary, _HELDOUT_INFLUENCE_PATCHED_FLAG, True)
+        audit_module._influence_summary = _influence_summary
 
 
 __all__ = ["apply_result_quality_audit_scope_patch"]

@@ -39,6 +39,8 @@ def apply_log_emission_n_spikes_validation_patch() -> None:
 
 
 def _validate_log_likelihood(emissions: LogEmissionTensor) -> None:
+    """Reject invalid numeric likelihood entries without checking model support."""
+
     values = np.asarray(emissions.log_likelihood, dtype=float)
     if values.ndim != 2:
         raise ValueError("log_likelihood must be a two-dimensional array")

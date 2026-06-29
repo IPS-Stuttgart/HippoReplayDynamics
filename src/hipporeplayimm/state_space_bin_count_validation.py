@@ -232,6 +232,18 @@ def apply_state_space_bin_count_validation_patch() -> None:
         setattr(utils, name, func)
         active_helpers[name] = func
 
+    # Exact decoder modules keep local valid-mask helpers. Import them before the
+    # sys.modules rewrite so the first package import cannot leave those helpers
+    # on the permissive NumPy truth-casting path.
+    for module_name in (
+        "hipporeplayimm.state_space_displacement_momentum",
+        "hipporeplayimm.state_space_sparse_momentum",
+    ):
+        try:
+            __import__(module_name)
+        except ImportError:
+            continue
+
     for module in list(sys.modules.values()):
         if not getattr(module, "__name__", "").startswith("hipporeplayimm"):
             continue

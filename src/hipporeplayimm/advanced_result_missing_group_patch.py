@@ -86,6 +86,9 @@ def apply_advanced_result_missing_group_patch() -> None:
             out["evidence_margin_to_second_best"] = np.nan
             out["evidence_margin_category"] = "missing"
             return out
+        for column in group_cols:
+            if column in scores.columns and column in margins.columns:
+                margins[column] = margins[column].astype(scores[column].dtype)
         return scores.merge(margins, on=list(group_cols), how="left")
 
     setattr(evidence_margin_table, _EVIDENCE_MARGIN_TABLE_WRAPPER_FLAG, True)

@@ -24,7 +24,7 @@ def test_relative_input_hashes_are_resolved_against_declared_cwd(tmp_path: Path,
     outside_dir = tmp_path / "outside"
     work_dir.mkdir()
     outside_dir.mkdir()
-    (work_dir / "input.csv").write_text("event_id,score\n1,2\n", encoding="utf-8")
+    (work_dir / "input.csv").write_bytes(b"event_id,score\n1,2\n")
     monkeypatch.chdir(outside_dir)
 
     provenance = module.build_script_provenance(

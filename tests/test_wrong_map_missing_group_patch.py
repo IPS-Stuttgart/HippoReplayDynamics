@@ -92,3 +92,22 @@ def test_wrong_map_difference_in_differences_keeps_missing_optional_group_metada
     assert did["event_window_variant"].isna().all()
     assert did.loc[0, "real_best_trajectory_model"] == FIRST_ORDER_IMM
     assert did.loc[0, "wrong_best_trajectory_model"] == MOMENTUM
+
+
+def test_wrong_map_difference_in_differences_summary_keeps_missing_optional_group_metadata() -> None:
+    current, wrong = _wrong_map_scores()
+    did = diagnostics.wrong_map_family_margin_difference_in_differences(
+        current,
+        wrong,
+        group_cols=GROUP_COLS,
+    )
+
+    summary = diagnostics.wrong_map_family_margin_difference_in_differences_summary(
+        did,
+        group_cols=("event_window_variant",),
+    )
+
+    assert not summary.empty
+    assert summary["event_window_variant"].isna().all()
+    assert summary.loc[0, "events"] == 1
+    assert summary.loc[0, "positive_difference_in_differences_events"] == 1

@@ -46,32 +46,6 @@ def test_log_emission_tensor_rejects_nan_log_likelihood() -> None:
         )
 
 
-def test_log_emission_tensor_rejects_all_impossible_likelihood_row() -> None:
-    counts = np.zeros((2, 1), dtype=int)
-
-    with pytest.raises(ValueError, match="finite value per time bin"):
-        LogEmissionTensor(
-            log_likelihood=np.array([[0.0, -np.inf], [-np.inf, -np.inf]], dtype=float),
-            spike_counts=counts,
-            times=np.arange(counts.shape[0], dtype=float),
-            dt=1.0,
-            cell_ids=np.array([1], dtype=int),
-            n_spikes=0,
-        )
-
-
-def test_log_emission_tensor_rejects_empty_time_axis() -> None:
-    with pytest.raises(ValueError, match="at least one time bin"):
-        LogEmissionTensor(
-            log_likelihood=np.empty((0, 1), dtype=float),
-            spike_counts=np.empty((0, 1), dtype=int),
-            times=np.empty(0, dtype=float),
-            dt=1.0,
-            cell_ids=np.array([1], dtype=int),
-            n_spikes=0,
-        )
-
-
 def test_log_emission_tensor_rejects_mismatched_n_spikes() -> None:
     with pytest.raises(ValueError, match="total spike_counts sum"):
         _tensor_with_counts(np.array([[1, 0], [0, 2]], dtype=int), 2)

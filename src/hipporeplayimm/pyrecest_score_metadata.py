@@ -62,19 +62,12 @@ def _metadata_float_for_config(config: object, name: str) -> float:
 
 
 def _metadata_int_for_config(config: object, name: str) -> int:
-    value = _metadata_float_for_config(config, name)
-    integer = int(round(value))
-    if not np.isclose(value, integer, rtol=0.0, atol=1e-9):
-        raise ValueError(f"{name} must be an integer")
-    if integer <= 0:
-        raise ValueError(f"{name} must be positive")
-    return integer
+    raw = getattr(config, name, PYRECEST_DEFAULTS[name])
+    return _metadata_positive_int_from_value(raw, name)
 
 
 def pyrecest_config_kwargs_for_scores(scores: pd.DataFrame, defaults: dict[str, int | float] | None = None) -> dict[str, int | float]:
-    base = dict(PYRECEST_DEFAULTS)
-    if defaults:
-        base.update(defaults)
+    base = _validated_pyrecest_defaults(defaults)
     out: dict[str, int | float] = {}
     for name, columns in PYRECEST_INT_COLUMNS.items():
         out[name] = _unique_positive_int(scores, columns, int(base[name]))
@@ -147,6 +140,35 @@ def _model_diagnostics(model: object) -> dict[str, int | float]:
             }
         )
     return out
+
+
+def _validated_pyrecest_defaults(defaults: dict[str, int | float] | None) -> dict[str, int | float]:
+    base: dict[str, int | float] = dict(PYRECEST_DEFAULTS)
+    if not defaults:
+        return base
+    for name, value in defaults.items():
+        if name not in PYRECEST_DEFAULTS:
+            continue
+        if name in PYRECEST_INT_COLUMNS:
+            base[name] = _metadata_positive_int_from_value(value, name)
+        else:
+            parsed = _metadata_float_from_value(value, name)
+            if parsed is None:
+                raise ValueError(f"{name} must contain finite numeric metadata, got {value!r}")
+            base[name] = float(parsed)
+    return base
+
+
+def _metadata_positive_int_from_value(value: object, column: str) -> int:
+    parsed = _metadata_float_from_value(value, column)
+    if parsed is None:
+        raise ValueError(f"{column} must contain finite numeric metadata, got {value!r}")
+    integer = int(round(parsed))
+    if not np.isclose(parsed, integer, rtol=0.0, atol=1e-9):
+        raise ValueError(f"{column} must be an integer")
+    if integer <= 0:
+        raise ValueError(f"{column} must be positive")
+    return integer
 
 
 def _unique_int(frame: pd.DataFrame, columns: tuple[str, ...], default: int) -> int:

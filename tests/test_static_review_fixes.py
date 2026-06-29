@@ -201,3 +201,35 @@ def test_posterior_calibration_summary_coerces_probability_column() -> None:
     assert summary.loc[0, "mean_true_negative_log_probability"] == pytest.approx(
         float(np.mean(-np.log([0.25, 0.75])))
     )
+
+
+def test_shuffle_p_values_keep_window_scopes_separate() -> None:
+    from hipporeplayimm.shuffle_controls import add_shuffle_p_values
+
+    real_scores = pd.DataFrame(
+        {
+            "session": ["Rat1/Open1", "Rat1/Open1"],
+            "event_index": [7, 7],
+            "model": ["sorted-spike-state-space-imm", "sorted-spike-state-space-imm"],
+            "event_window_variant": ["core", "expanded"],
+            "log_evidence": [5.0, 5.0],
+        }
+    )
+    control_scores = pd.DataFrame(
+        {
+            "session": ["Rat1/Open1"] * 4,
+            "event_index": [7] * 4,
+            "model": ["sorted-spike-state-space-imm"] * 4,
+            "event_window_variant": ["core", "core", "expanded", "expanded"],
+            "log_evidence": [0.0, 1.0, 10.0, 11.0],
+        }
+    )
+
+    scored = add_shuffle_p_values(real_scores, control_scores).set_index(
+        "event_window_variant"
+    )
+
+    assert scored.loc["core", "shuffle_p_value"] == pytest.approx(1.0 / 3.0)
+    assert scored.loc["expanded", "shuffle_p_value"] == pytest.approx(1.0)
+    assert scored.loc["core", "shuffle_log_evidence_median"] == pytest.approx(0.5)
+    assert scored.loc["expanded", "shuffle_log_evidence_median"] == pytest.approx(10.5)

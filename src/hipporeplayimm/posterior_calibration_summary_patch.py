@@ -12,6 +12,9 @@ def apply_posterior_calibration_summary_patch() -> None:
     """Patch calibration summaries to drop invalid probability rows consistently."""
 
     from . import result_improvements
+    from . import result_quality_audit_scope_patch
+
+    result_quality_audit_scope_patch.apply_result_quality_audit_scope_patch()
 
     if getattr(result_improvements, _PATCHED_FLAG, False):
         return

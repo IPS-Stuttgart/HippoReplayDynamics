@@ -14,6 +14,7 @@ from .data import ReplaySession, load_open_field_sessions
 from .encoding import (
     EncodingConfig,
     EncodingModel,
+    _cell_id_row_indices,
     _clean_position,
     _frame_durations,
     _interp_positions,
@@ -342,11 +343,10 @@ def _spike_counts_for_window(
     spikes, _ = _spikes_and_cell_ids_for_encoding(session, encoding.config)
     if not spikes.size or not encoding.n_cells:
         return counts
-    keep = (spikes[:, 0] >= start) & (spikes[:, 0] < end) & np.isin(spikes[:, 1].astype(int), encoding.cell_ids)
-    cell_ids = spikes[keep, 1].astype(int)
-    rows = np.searchsorted(encoding.cell_ids, cell_ids)
-    valid = (rows >= 0) & (rows < encoding.cell_ids.shape[0])
-    valid[valid] &= encoding.cell_ids[rows[valid]] == cell_ids[valid]
+    spike_cell_ids = spikes[:, 1].astype(int)
+    keep = (spikes[:, 0] >= start) & (spikes[:, 0] < end) & np.isin(spike_cell_ids, encoding.cell_ids)
+    rows = _cell_id_row_indices(encoding.cell_ids, spike_cell_ids[keep])
+    valid = rows >= 0
     np.add.at(counts, rows[valid], 1)
     return counts
 

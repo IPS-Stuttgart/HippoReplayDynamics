@@ -192,7 +192,8 @@ def _read_hdf5_value(obj: Any) -> Any:
             return _read_hdf5_reference_array(arr, obj.file)
         if arr.dtype.kind in {"S", "U"}:
             return arr.astype(str)
-        if arr.dtype == np.uint16 and arr.ndim >= 1 and arr.size > 0:
+        matlab_class = _hdf5_matlab_class(obj)
+        if arr.dtype == np.uint16 and arr.ndim >= 1 and arr.size > 0 and matlab_class == "char":
             try:
                 return "".join(chr(int(x)) for x in arr.reshape(-1) if int(x) != 0)
             except (TypeError, ValueError):
@@ -201,6 +202,31 @@ def _read_hdf5_value(obj: Any) -> Any:
     if isinstance(obj, h5py.Group):
         return {key: _read_hdf5_value(value) for key, value in obj.items()}
     raise TypeError(f"Unsupported HDF5 MATLAB object: {type(obj)!r}")
+
+
+def _hdf5_matlab_class(obj: Any) -> str | None:
+    """Return a normalized MATLAB_class attribute for an HDF5 MATLAB object."""
+
+    raw = obj.attrs.get("MATLAB_class")
+    if raw is None:
+        return None
+    if isinstance(raw, bytes):
+        return raw.decode("utf-8", errors="ignore").strip().lower()
+    if isinstance(raw, str):
+        return raw.strip().lower()
+    arr = np.asarray(raw)
+    if arr.shape == ():
+        value = arr.item()
+        if isinstance(value, bytes):
+            return value.decode("utf-8", errors="ignore").strip().lower()
+        return str(value).strip().lower()
+    if arr.dtype.kind == "S":
+        try:
+            joined = b"".join(bytes(value) for value in arr.reshape(-1))
+        except (TypeError, ValueError):
+            return None
+        return joined.decode("utf-8", errors="ignore").strip().lower()
+    return str(raw).strip().lower()
 
 
 def _read_hdf5_reference_array(arr: np.ndarray, handle: Any) -> Any:

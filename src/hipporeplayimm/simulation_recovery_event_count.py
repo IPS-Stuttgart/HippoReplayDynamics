@@ -20,6 +20,7 @@ import pandas as pd
 from .evidence_reporting import _coerce_bool_series
 
 _PATCHED_FLAG = "_simulation_recovery_session_event_count_patch_applied"
+_SOURCE_SCORE_FILE_COLUMN = "source_recovery_score_file"
 _SUMMARY_BOOL_COLUMNS = (
     "recovered_expected_model",
     "exact_surrogate_recovered_expected_model",
@@ -27,6 +28,7 @@ _SUMMARY_BOOL_COLUMNS = (
 )
 _EVENT_SCOPE_COLUMNS = (
     "session",
+    _SOURCE_SCORE_FILE_COLUMN,
     "simulation_random_seed",
     "random_seed",
     "benchmark_random_seed",
@@ -41,7 +43,10 @@ _EVENT_SCOPE_COLUMNS = (
 def apply_simulation_recovery_event_count_patch() -> None:
     """Install full-scope, CSV-tolerant event counting for recovery summaries."""
 
+    import hipporeplayimm.simulation_best_row_flags as best_row_flags
     import hipporeplayimm.simulation_recovery as recovery
+
+    _extend_best_row_event_scope(best_row_flags)
 
     if getattr(recovery, _PATCHED_FLAG, False):
         return
@@ -74,6 +79,23 @@ def apply_simulation_recovery_event_count_patch() -> None:
         certified_vs_exact_recovery_summary_with_session_event_counts
     )
     setattr(recovery, _PATCHED_FLAG, True)
+
+
+def _extend_best_row_event_scope(best_row_flags) -> None:
+    """Keep score-file provenance in the primary event grouping helpers."""
+
+    columns = tuple(getattr(best_row_flags, "_GROUP_COLUMNS", ()))
+    if _SOURCE_SCORE_FILE_COLUMN in columns:
+        return
+    if "session" in columns:
+        index = columns.index("session") + 1
+    else:
+        index = 0
+    best_row_flags._GROUP_COLUMNS = (
+        *columns[:index],
+        _SOURCE_SCORE_FILE_COLUMN,
+        *columns[index:],
+    )
 
 
 def _normalize_summary_bool_columns(event_scores: pd.DataFrame) -> pd.DataFrame:

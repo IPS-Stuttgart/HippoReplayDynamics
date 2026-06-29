@@ -136,8 +136,8 @@ def load_replay_session(session_path: str | Path) -> ReplaySession:
         position=np.asarray(_required_array(path / "Position_Data.mat", "Position_Data"), dtype=float),
         spikes=spikes,
         tetrode_cell_ids=np.asarray(spike_data.get("Tetrode_Cell_IDs", np.empty((0, 2)))),
-        excitatory_neurons=np.asarray(spike_data.get("Excitatory_Neurons", np.array([])), dtype=int).reshape(-1),
-        inhibitory_neurons=np.asarray(spike_data.get("Inhibitory_Neurons", np.array([])), dtype=int).reshape(-1),
+        excitatory_neurons=_as_integer_vector(spike_data.get("Excitatory_Neurons", np.array([])), "excitatory neuron IDs"),
+        inhibitory_neurons=_as_integer_vector(spike_data.get("Inhibitory_Neurons", np.array([])), "inhibitory neuron IDs"),
         ripple_events=_as_two_dimensional(_required_array(path / "Ripple_Events.mat", "Ripple_Events"), "Ripple_Events"),
         run_times=_as_intervals(epochs.get("Run_Times", np.empty((0, 2)))),
         sleep_box_immobile_times=_as_intervals(epochs.get("Sleep_Box_Immobile_Times", np.empty((0, 2)))),
@@ -268,6 +268,24 @@ def _load_optional_metadata(path: Path) -> dict[str, Any]:
     return {} if not path.exists() else _load_mat_file(path)
 
 
+def _as_integer_vector(value: Any, name: str) -> np.ndarray:
+    """Return a flat integer ID vector without silently truncating bad values."""
+
+    arr = np.asarray(value)
+    if arr.size == 0:
+        return np.array([], dtype=int)
+    try:
+        numeric = np.asarray(arr, dtype=float)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must contain numeric integer IDs") from exc
+    flat = numeric.reshape(-1)
+    if not np.all(np.isfinite(flat)):
+        raise ValueError(f"{name} must contain finite integer IDs")
+    if not np.all(np.equal(flat, np.round(flat))):
+        raise ValueError(f"{name} must contain integer-valued IDs")
+    return flat.astype(int)
+
+
 def _load_spike_marks(session_path: Path, spike_data: dict[str, Any], spikes: np.ndarray) -> SpikeMarkData | None:
     if spikes.size == 0:
         return None
@@ -357,6 +375,8 @@ def _candidate_mark_variables(data: dict[str, Any]) -> list[tuple[str, Any]]:
 def _coerce_mark_matrix(value: Any, *, spike_count: int, spike_times: np.ndarray) -> np.ndarray | None:
     arr = np.asarray(value)
     if arr.size == 0 or arr.dtype.kind not in {"b", "i", "u", "f", "c"}:
+        return None
+    if arr.dtype.kind == "c" and not np.all(np.isfinite(np.imag(arr)) & np.isclose(np.imag(arr), 0.0)):
         return None
     arr = np.real(arr).astype(float, copy=False)
     if arr.ndim == 0:

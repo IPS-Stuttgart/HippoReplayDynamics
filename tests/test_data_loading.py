@@ -153,3 +153,20 @@ def test_load_replay_session_rejects_fractional_excitatory_neuron_ids(tmp_path: 
 
     with pytest.raises(ValueError, match="excitatory neuron IDs"):
         load_replay_session(session_path)
+
+
+def test_load_replay_session_rejects_fractional_inhibitory_neuron_ids(tmp_path: Path):
+    session_path = tmp_path / "Rat1" / "Open1"
+    _write_minimal_session(session_path)
+    sio.savemat(
+        session_path / "Spike_Data.mat",
+        {
+            "Spike_Data": np.array([[1.0, 11.0], [2.0, 12.0]]),
+            "Tetrode_Cell_IDs": np.array([[1, 11], [1, 12]]),
+            "Excitatory_Neurons": np.array([11]),
+            "Inhibitory_Neurons": np.array([12.25]),
+        },
+    )
+
+    with pytest.raises(ValueError, match="inhibitory neuron IDs"):
+        load_replay_session(session_path)

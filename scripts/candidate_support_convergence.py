@@ -20,6 +20,14 @@ import pandas as pd
 from hipporeplayimm.evidence_reporting import ensure_evidence_support_columns
 
 EVENT_COLUMNS = ("session", "event_index")
+OPTIONAL_ALIGNMENT_COLUMNS = (
+    "benchmark_random_seed",
+    "random_seed",
+    "benchmark_cell_split_index",
+    "cell_split_index",
+    "benchmark_cell_split_seed",
+    "benchmark_event_subset_seed",
+)
 CANDIDATE_TOP_K_COLUMNS = (
     "diagnostic_state_space_momentum_candidate_top_k",
     "diagnostic_state_space_imm_candidate_top_k",
@@ -50,12 +58,6 @@ def _score_file(path: str | Path) -> Path:
     if not matches:
         raise FileNotFoundError(f"No event_model_evidence.csv found under {candidate}")
     return matches[0]
-
-
-def _event_count(frame: pd.DataFrame) -> int:
-    if frame.empty:
-        return 0
-    return int(frame.loc[:, EVENT_COLUMNS].drop_duplicates().shape[0])
 
 
 def _numeric_unique_values(frame: pd.DataFrame, columns: tuple[str, ...]) -> list[int]:
@@ -100,6 +102,57 @@ def _is_missing_scalar(value: object) -> bool:
     if isinstance(missing, (bool, np.bool_)) and bool(missing):
         return True
     return str(value).strip().lower() in _MISSING_STATUS_VALUES
+
+
+def _column_has_nonmissing_values(frame: pd.DataFrame, column: str) -> bool:
+    return bool(frame[column].map(lambda value: not _is_missing_scalar(value)).any())
+
+
+def _alignment_columns(frames: pd.DataFrame | list[pd.DataFrame] | tuple[pd.DataFrame, ...]) -> tuple[str, ...]:
+    """Return columns that uniquely identify comparable event rows.
+
+    Candidate-support runs can contain repeated ``session/event_index`` pairs when
+    they aggregate multiple random seeds, cell splits, or randomized event subsets.
+    Align on those metadata columns whenever all compared frames provide real
+    values for them; otherwise fall back to the legacy event key for old tables.
+    """
+
+    if isinstance(frames, pd.DataFrame):
+        frame_list = (frames,)
+    else:
+        frame_list = tuple(frames)
+    columns = list(EVENT_COLUMNS)
+    if not frame_list:
+        return tuple(columns)
+    for column in OPTIONAL_ALIGNMENT_COLUMNS:
+        if all(column in frame.columns for frame in frame_list) and any(_column_has_nonmissing_values(frame, column) for frame in frame_list):
+            columns.append(column)
+    return tuple(columns)
+
+
+def _event_count(frame: pd.DataFrame, alignment_columns: tuple[str, ...] | None = None) -> int:
+    if frame.empty:
+        return 0
+    columns = tuple(alignment_columns or _alignment_columns(frame))
+    return int(frame.loc[:, columns].drop_duplicates().shape[0])
+
+
+def _format_alignment_value(value: object) -> str:
+    if isinstance(value, (float, np.floating)) and np.isfinite(float(value)) and float(value).is_integer():
+        return str(int(value))
+    return str(value)
+
+
+def _format_event_key(row: pd.Series, alignment_columns: tuple[str, ...]) -> str:
+    parts = [f"{row['session']}:{int(row['event_index'])}"]
+    for column in alignment_columns:
+        if column in EVENT_COLUMNS or column not in row.index:
+            continue
+        value = row[column]
+        if _is_missing_scalar(value):
+            continue
+        parts.append(f"{column}={_format_alignment_value(value)}")
+    return ":".join(parts)
 
 
 def infer_run_label(frame: pd.DataFrame, fallback: str) -> str:
@@ -171,9 +224,10 @@ def evidence_delta_summary(runs: list[pd.DataFrame]) -> pd.DataFrame:
     for left, right in combinations(runs, 2):
         run_a = str(left["run_label"].iloc[0])
         run_b = str(right["run_label"].iloc[0])
+        alignment_columns = _alignment_columns((left, right))
         merged = left.merge(
             right,
-            on=["session", "event_index", "model"],
+            on=[*alignment_columns, "model"],
             suffixes=("_a", "_b"),
         )
         if merged.empty:
@@ -192,7 +246,7 @@ def evidence_delta_summary(runs: list[pd.DataFrame]) -> pd.DataFrame:
                     "model": model,
                     "support_a": support_a,
                     "support_b": support_b,
-                    "events": _event_count(group),
+                    "events": _event_count(group, alignment_columns),
                     "sessions": int(group["session"].nunique()),
                     "mean_delta_b_minus_a": float(group["delta_b_minus_a"].mean()),
                     "median_delta_b_minus_a": float(group["delta_b_minus_a"].median()),
@@ -207,12 +261,17 @@ def evidence_delta_summary(runs: list[pd.DataFrame]) -> pd.DataFrame:
     return pd.DataFrame.from_records(records, columns=columns)
 
 
-def _best_model_by_event(frame: pd.DataFrame, allowed_models: set[str]) -> pd.DataFrame:
+def _best_model_by_event(
+    frame: pd.DataFrame,
+    allowed_models: set[str],
+    alignment_columns: tuple[str, ...] | None = None,
+) -> pd.DataFrame:
+    columns = tuple(alignment_columns or _alignment_columns(frame))
     subset = frame[frame["model"].astype(str).isin(allowed_models)].dropna(subset=["log_evidence"])
     if subset.empty:
-        return pd.DataFrame(columns=["session", "event_index", "best_model"])
-    best_indices = subset.groupby(list(EVENT_COLUMNS), sort=False)["log_evidence"].idxmax()
-    return subset.loc[best_indices, ["session", "event_index", "model"]].rename(
+        return pd.DataFrame(columns=[*columns, "best_model"])
+    best_indices = subset.groupby(list(columns), sort=False)["log_evidence"].idxmax()
+    return subset.loc[best_indices, [*columns, "model"]].rename(
         columns={"model": "best_model"}
     )
 
@@ -236,22 +295,23 @@ def best_model_agreement(runs: list[pd.DataFrame]) -> pd.DataFrame:
         common_models = set(left["model"].astype(str)) & set(right["model"].astype(str))
         if not common_models:
             continue
-        best_a = _best_model_by_event(left, common_models)
-        best_b = _best_model_by_event(right, common_models)
-        merged = best_a.merge(best_b, on=list(EVENT_COLUMNS), suffixes=("_a", "_b"))
+        alignment_columns = _alignment_columns((left, right))
+        best_a = _best_model_by_event(left, common_models, alignment_columns)
+        best_b = _best_model_by_event(right, common_models, alignment_columns)
+        merged = best_a.merge(best_b, on=list(alignment_columns), suffixes=("_a", "_b"))
         if merged.empty:
             continue
         agree = merged["best_model_a"].eq(merged["best_model_b"])
-        changed = merged.loc[~agree, list(EVENT_COLUMNS) + ["best_model_a", "best_model_b"]]
+        changed = merged.loc[~agree, [*alignment_columns, "best_model_a", "best_model_b"]]
         changed_events = ";".join(
-            f"{row.session}:{int(row.event_index)}:{row.best_model_a}->{row.best_model_b}"
-            for row in changed.head(25).itertuples(index=False)
+            f"{_format_event_key(row, alignment_columns)}:{row['best_model_a']}->{row['best_model_b']}"
+            for _, row in changed.head(25).iterrows()
         )
         records.append(
             {
                 "run_a": run_a,
                 "run_b": run_b,
-                "events": int(len(merged)),
+                "events": _event_count(merged, alignment_columns),
                 "sessions": int(merged["session"].nunique()),
                 "common_models": ",".join(sorted(common_models)),
                 "best_model_agreements": int(agree.sum()),

@@ -225,7 +225,19 @@ def ensure_evidence_support_columns(df: pd.DataFrame) -> pd.DataFrame:
         missing = existing.map(_is_missing_evidence_support)
         out["evidence_support"] = existing.where(~missing, inferred)
     else:
+        missing = pd.Series(True, index=out.index)
         out["evidence_support"] = inferred
+
+    explicit_noncomparable_without_support = _explicit_noncomparable_without_support_mask(
+        out,
+        missing_support=missing,
+    )
+    if explicit_noncomparable_without_support.any():
+        out.loc[
+            explicit_noncomparable_without_support,
+            "evidence_support",
+        ] = EVIDENCE_COMPARISON_UNKNOWN
+
     status_ok = _status_success_series(out)
     finite_evidence = _finite_evidence_series(out)
     out["evidence_comparison"] = out["evidence_support"].map(evidence_comparison_from_support)
@@ -268,6 +280,31 @@ def _coerce_log_evidence_column(frame: pd.DataFrame) -> pd.DataFrame:
 
 def _is_missing_evidence_support(value: object) -> bool:
     return len(_evidence_support_labels(value)) == 0
+
+
+def _explicit_noncomparable_without_support_mask(
+    frame: pd.DataFrame,
+    *,
+    missing_support: pd.Series,
+) -> pd.Series:
+    """Return rows with explicit non-comparable flags but no support label."""
+
+    if "evidence_comparable" not in frame.columns:
+        return pd.Series(False, index=frame.index)
+    missing = pd.Series(missing_support, index=frame.index).astype(bool)
+    explicit_false = frame["evidence_comparable"].map(_is_explicit_false_value).astype(bool)
+    return missing & explicit_false
+
+
+def _is_explicit_false_value(value: object) -> bool:
+    if isinstance(value, (bool, np.bool_)):
+        return not bool(value)
+    if _is_missing_scalar(value):
+        return False
+    if isinstance(value, (int, float, np.integer, np.floating)):
+        numeric = float(value)
+        return bool(np.isfinite(numeric) and numeric == 0.0)
+    return str(value).strip().lower() in _FALSE_BOOL_STRINGS
 
 
 def simulation_add_evidence_columns(df: pd.DataFrame) -> pd.DataFrame:

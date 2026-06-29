@@ -1,19 +1,23 @@
-"""Runtime validation and compatibility patches for CLI argument helpers."""
+"""Runtime validation and compatibility patches for CLI/reporting helpers."""
 
 from __future__ import annotations
 
+from functools import wraps
 import math
+
+import numpy as np
 
 _MISSING_PREDICTED_CANDIDATE_OPTION = "--state-space-momentum-predicted-candidate-top-k"
 
 
 def apply_cli_float_values_validation_patch() -> None:
-    """Reject invalid float grids and keep shared state-space CLI options complete."""
+    """Reject invalid float grids and keep shared helper arguments complete."""
 
     from . import cli as _cli
 
     _patch_parse_float_values(_cli)
     _patch_state_space_predicted_candidate_argument(_cli)
+    _patch_statistical_resampling_counts()
 
 
 def _patch_parse_float_values(_cli) -> None:
@@ -55,6 +59,55 @@ def _patch_state_space_predicted_candidate_argument(_cli) -> None:
     _add_state_space_arguments._hipporeplayimm_adds_predicted_candidate_top_k = True  # type: ignore[attr-defined]
     _add_state_space_arguments._hipporeplayimm_original = current  # type: ignore[attr-defined]
     _cli._add_state_space_arguments = _add_state_space_arguments
+
+
+def _patch_statistical_resampling_counts() -> None:
+    from . import result_improvements
+
+    _patch_positive_integer_kwarg(
+        result_improvements,
+        "hierarchical_bootstrap_ci",
+        "n_bootstrap",
+    )
+    _patch_positive_integer_kwarg(
+        result_improvements,
+        "paired_sign_flip_p_value",
+        "n_permutations",
+    )
+
+
+def _patch_positive_integer_kwarg(module, function_name: str, kwarg_name: str) -> None:
+    current = getattr(module, function_name)
+    patch_attr = f"_hipporeplayimm_validates_{kwarg_name}"
+    if getattr(current, patch_attr, False):
+        return
+
+    @wraps(current)
+    def wrapper(*args, **kwargs):
+        if kwarg_name in kwargs:
+            kwargs = dict(kwargs)
+            kwargs[kwarg_name] = _positive_integer_count(kwarg_name, kwargs[kwarg_name])
+        return current(*args, **kwargs)
+
+    setattr(wrapper, patch_attr, True)
+    wrapper._hipporeplayimm_original = current  # type: ignore[attr-defined]
+    setattr(module, function_name, wrapper)
+
+
+def _positive_integer_count(name: str, value: object) -> int:
+    raw = np.asarray(value)
+    if raw.ndim != 0:
+        raise TypeError(f"{name} must be a scalar positive integer")
+    item = raw.item()
+    if isinstance(item, (bool, np.bool_)):
+        raise TypeError(f"{name} must be a positive integer, not boolean")
+    try:
+        numeric = float(item)
+    except (TypeError, ValueError) as exc:
+        raise TypeError(f"{name} must be a positive integer") from exc
+    if not math.isfinite(numeric) or numeric <= 0.0 or not np.isclose(numeric, np.rint(numeric), rtol=0.0, atol=0.0):
+        raise ValueError(f"{name} must be a positive integer")
+    return int(np.rint(numeric))
 
 
 def _parser_has_option(parser, option: str) -> bool:

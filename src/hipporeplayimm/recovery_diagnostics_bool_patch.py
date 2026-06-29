@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from typing import Any
 
+import numpy as np
 import pandas as pd
 
 from .evidence_reporting import _coerce_bool_series
@@ -19,14 +20,17 @@ _COERCE_BOOL_WRAPPER_FLAG = "_recovery_diagnostics_bool_coerce_bool_wrapper"
 _ROW_BOOL_WRAPPER_FLAG = "_recovery_diagnostics_bool_row_bool_wrapper"
 _COERCE_FLOAT_WRAPPER_FLAG = "_recovery_diagnostics_bool_coerce_float_wrapper"
 _ROW_FLOAT_WRAPPER_FLAG = "_recovery_diagnostics_bool_row_float_wrapper"
+_SUCCESSFUL_FINITE_SCORES_WRAPPER_FLAG = "_recovery_diagnostics_bool_successful_finite_scores_wrapper"
 _HELPER_FLAGS = {
     "_coerce_bool": _COERCE_BOOL_WRAPPER_FLAG,
     "_row_bool": _ROW_BOOL_WRAPPER_FLAG,
     "_coerce_float": _COERCE_FLOAT_WRAPPER_FLAG,
     "_row_float": _ROW_FLOAT_WRAPPER_FLAG,
+    "_successful_finite_scores": _SUCCESSFUL_FINITE_SCORES_WRAPPER_FLAG,
 }
 _TRUE_FLOAT_STRINGS = {"true", "yes", "y"}
 _FALSE_FLOAT_STRINGS = {"false", "no", "n"}
+_MISSING_STATUS_VALUES = {"", "nan", "na", "n/a", "none", "null", "<na>"}
 
 
 def apply_recovery_diagnostics_bool_patch() -> None:
@@ -71,10 +75,20 @@ def apply_recovery_diagnostics_bool_patch() -> None:
             return float(default)
         return coerce_float(row[column], default)
 
+    def successful_finite_scores(group: pd.DataFrame) -> pd.DataFrame:
+        if "status" in group:
+            status_ok = group["status"].map(_status_is_success_or_missing).astype(bool)
+        else:
+            status_ok = pd.Series(True, index=group.index)
+        values = pd.to_numeric(group["log_evidence"], errors="coerce") if "log_evidence" in group else pd.Series(0.0, index=group.index)
+        finite = pd.Series(np.isfinite(values.to_numpy(dtype=float)), index=group.index)
+        return group[status_ok & finite].copy()
+
     _install_helper(diagnostics, "_coerce_bool", coerce_bool)
     _install_helper(diagnostics, "_row_bool", row_bool)
     _install_helper(diagnostics, "_coerce_float", coerce_float)
     _install_helper(diagnostics, "_row_float", row_float)
+    _install_helper(diagnostics, "_successful_finite_scores", successful_finite_scores)
     setattr(diagnostics, _PATCHED_FLAG, True)
 
 
@@ -90,6 +104,17 @@ def _helpers_are_patched(diagnostics: Any) -> bool:
 def _install_helper(diagnostics: Any, helper_name: str, helper: Any) -> None:
     setattr(helper, _HELPER_FLAGS[helper_name], True)
     setattr(diagnostics, helper_name, helper)
+
+
+def _status_is_success_or_missing(value: object) -> bool:
+    try:
+        missing = pd.isna(value)
+    except (TypeError, ValueError):
+        missing = False
+    if isinstance(missing, (bool, np.bool_)) and bool(missing):
+        return True
+    text = str(value).strip().lower()
+    return text == "success" or text in _MISSING_STATUS_VALUES
 
 
 __all__ = ["apply_recovery_diagnostics_bool_patch"]

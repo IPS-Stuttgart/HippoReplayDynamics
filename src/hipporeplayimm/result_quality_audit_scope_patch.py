@@ -30,13 +30,25 @@ _EVENT_GROUP_SCOPE_COLUMNS = (
 )
 
 
+def _column_has_complete_metadata(scores: Any, column: str) -> bool:
+    """Return True only when an optional grouping key is populated for every row."""
+
+    try:
+        values = scores[column]
+    except (KeyError, TypeError):
+        return False
+    if bool(getattr(values, "empty", False)):
+        return False
+    return bool(values.notna().all())
+
+
 def _scoped_event_group_columns(scores: Any) -> list[str]:
     """Return columns identifying one independent model-comparison unit."""
 
     frame_columns = getattr(scores, "columns", ())
     columns = [column for column in _EVENT_GROUP_BASE_COLUMNS if column in frame_columns]
     for optional in _EVENT_GROUP_SCOPE_COLUMNS:
-        if optional in frame_columns and optional not in columns:
+        if optional in frame_columns and optional not in columns and _column_has_complete_metadata(scores, optional):
             columns.append(optional)
     return columns
 

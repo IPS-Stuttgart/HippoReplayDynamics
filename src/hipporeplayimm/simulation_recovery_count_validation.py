@@ -222,7 +222,7 @@ def _contains_boolean_values(values: Any) -> bool:
 def _positive_integer_scalar(name: str, value: Any) -> int:
     if _is_boolean_scalar(value):
         raise TypeError(f"{name} must be an integer, not boolean")
-    item = _scalar_item(value)
+    item = _strict_scalar_item(name, value)
     try:
         numeric = float(item)
     except (TypeError, ValueError) as exc:
@@ -230,6 +230,19 @@ def _positive_integer_scalar(name: str, value: Any) -> int:
     if not np.isfinite(numeric) or numeric <= 0.0 or not numeric.is_integer():
         raise ValueError(f"{name} must be a positive integer")
     return int(numeric)
+
+
+def _strict_scalar_item(name: str, value: Any) -> Any:
+    try:
+        array = np.asarray(value)
+    except (TypeError, ValueError):
+        return value
+    if array.shape != ():
+        raise ValueError(f"{name} must be a positive integer")
+    try:
+        return array.item()
+    except (AttributeError, IndexError, ValueError):
+        return value
 
 
 def _is_boolean_scalar(value: Any) -> bool:

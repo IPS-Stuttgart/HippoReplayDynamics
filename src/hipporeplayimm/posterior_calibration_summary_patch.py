@@ -40,6 +40,22 @@ def _apply_result_quality_gates_scope_patch() -> None:
     setattr(result_quality_gates, _GATES_SCOPE_PATCHED_FLAG, True)
 
 
+def _rank_fraction(rank: pd.Series, n_bins: pd.Series) -> pd.Series:
+    """Return finite rank fractions only for valid positive bin counts."""
+
+    rank_values = pd.to_numeric(rank, errors="coerce").to_numpy(dtype=float)
+    n_bin_values = pd.to_numeric(n_bins, errors="coerce").to_numpy(dtype=float)
+    valid = (
+        np.isfinite(rank_values)
+        & np.isfinite(n_bin_values)
+        & (rank_values >= 0.0)
+        & (n_bin_values > 0.0)
+    )
+    fractions = np.full(rank_values.shape, np.nan, dtype=float)
+    fractions[valid] = rank_values[valid] / n_bin_values[valid]
+    return pd.Series(fractions, index=rank.index)
+
+
 def apply_posterior_calibration_summary_patch() -> None:
     """Patch calibration summaries to drop invalid probability rows consistently."""
 
@@ -87,9 +103,7 @@ def apply_posterior_calibration_summary_patch() -> None:
         frame[probability_column] = probabilities
         frame["true_negative_log_probability"] = -np.log(probabilities)
         if rank_column in frame and n_bins_column in frame:
-            rank = pd.to_numeric(frame[rank_column], errors="coerce")
-            n_bins = pd.to_numeric(frame[n_bins_column], errors="coerce")
-            frame["rank_fraction"] = rank / n_bins
+            frame["rank_fraction"] = _rank_fraction(frame[rank_column], frame[n_bins_column])
             frame["coverage_50_rank"] = frame["rank_fraction"] <= 0.50
             frame["coverage_80_rank"] = frame["rank_fraction"] <= 0.80
             frame["coverage_95_rank"] = frame["rank_fraction"] <= 0.95

@@ -88,6 +88,27 @@ def test_evidence_margin_table_keeps_missing_optional_group_metadata() -> None:
     assert np.isclose(margins.loc[0, "evidence_margin_to_second_best"], 2.0)
 
 
+def test_evidence_margin_table_sorts_string_log_evidence_numerically() -> None:
+    scores = pd.DataFrame(
+        {
+            "session": ["Rat1/Open1", "Rat1/Open1"],
+            "event_index": [0, 0],
+            "model": ["stationary", "diffusion"],
+            "log_evidence": ["9.0", "10.0"],
+            "status": ["success", "success"],
+            "evidence_comparable": [True, True],
+        }
+    )
+
+    margins = evidence_margin_table(scores)
+
+    assert margins.loc[0, "best_model_by_evidence"] == "diffusion"
+    assert margins.loc[0, "second_best_model_by_evidence"] == "stationary"
+    assert np.isclose(margins.loc[0, "best_log_evidence"], 10.0)
+    assert np.isclose(margins.loc[0, "second_best_log_evidence"], 9.0)
+    assert margins.loc[0, "models_compared"] == 2
+
+
 def test_evidence_margin_columns_merge_back_missing_optional_group_metadata() -> None:
     scores = _scores_with_missing_window_metadata()
 

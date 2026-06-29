@@ -151,7 +151,7 @@ def score_shuffle_controls(
     mode = _validated_shuffle_mode(control_config.mode)
     n_shuffles = _nonnegative_integer_value("n_shuffles", control_config.n_shuffles)
     random_seed = _nonnegative_integer_value("random_seed", control_config.random_seed)
-    event_indices = tuple(int(event_index) for event_index in event_indices)
+    event_indices = tuple(_nonnegative_integer_value("event_indices", event_index) for event_index in event_indices)
     rows: list[dict[str, object]] = []
     for shuffle_index in range(n_shuffles):
         control_encoding = shuffled_encoding(

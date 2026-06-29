@@ -125,7 +125,9 @@ def _alignment_columns(frames: pd.DataFrame | list[pd.DataFrame] | tuple[pd.Data
     if not frame_list:
         return tuple(columns)
     for column in OPTIONAL_ALIGNMENT_COLUMNS:
-        if all(column in frame.columns for frame in frame_list) and any(_column_has_nonmissing_values(frame, column) for frame in frame_list):
+        if not all(column in frame.columns for frame in frame_list):
+            continue
+        if all(_column_has_nonmissing_values(frame, column) for frame in frame_list):
             columns.append(column)
     return tuple(columns)
 

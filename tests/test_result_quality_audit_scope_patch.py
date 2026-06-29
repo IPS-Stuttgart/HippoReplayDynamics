@@ -56,3 +56,18 @@ def test_result_quality_audit_margins_do_not_mix_matched_null_windows(tmp_path) 
     assert margins["null_index"].astype(int).tolist() == [0, 1]
     assert margins["best_model_by_evidence"].tolist() == ["diffusion", "stationary"]
     assert margins["evidence_margin_to_second_best"].tolist() == [5.0, 4.0]
+
+
+def test_result_quality_audit_dashboard_counts_scoped_matched_null_windows(tmp_path) -> None:
+    scores = pd.DataFrame(
+        [
+            _score_row(null_index=0, model="stationary", log_evidence=0.0),
+            _score_row(null_index=0, model="diffusion", log_evidence=5.0),
+            _score_row(null_index=1, model="stationary", log_evidence=10.0),
+            _score_row(null_index=1, model="diffusion", log_evidence=6.0),
+        ]
+    )
+
+    dashboard = write_result_quality_audit(scores, tmp_path)
+
+    assert "Events: 2\n" in dashboard.read_text(encoding="utf-8")

@@ -1,8 +1,9 @@
-"""Count simulation-recovery events by their full session/event identity.
+"""Count simulation-recovery events by their full available event identity.
 
-Synthetic recovery event indices restart for each session. Summary helpers that are
-applied to concatenated multi-session score tables must therefore count distinct
-``(session, event_index)`` pairs instead of only unique integer event indices.
+Synthetic recovery event indices restart for each session and for independent
+random-seed/run sweeps. Summary helpers that are applied to concatenated score
+tables must therefore count distinct full event keys rather than only unique
+integer event indices.
 
 The same summaries may be rebuilt from CSV artifacts. Pandas can then expose
 boolean flags as strings such as ``"True"``/``"False"``; normalize those columns
@@ -24,10 +25,21 @@ _SUMMARY_BOOL_COLUMNS = (
     "exact_surrogate_recovered_expected_model",
     "evidence_comparable",
 )
+_EVENT_SCOPE_COLUMNS = (
+    "session",
+    "simulation_random_seed",
+    "random_seed",
+    "benchmark_random_seed",
+    "simulation_event_index",
+    "event_index",
+    "window_index",
+    "benchmark_cell_split_index",
+    "event_window_variant",
+)
 
 
 def apply_simulation_recovery_event_count_patch() -> None:
-    """Install session-aware, CSV-tolerant event counting for recovery summaries."""
+    """Install full-scope, CSV-tolerant event counting for recovery summaries."""
 
     import hipporeplayimm.simulation_recovery as recovery
 
@@ -95,10 +107,9 @@ def _distinct_event_count(events: pd.DataFrame) -> int:
 
     if events.empty:
         return 0
-    if {"session", "event_index"}.issubset(events.columns):
-        return int(events[["session", "event_index"]].drop_duplicates().shape[0])
-    if "event_index" in events.columns:
-        return int(events["event_index"].nunique())
+    event_columns = [column for column in _EVENT_SCOPE_COLUMNS if column in events.columns]
+    if event_columns:
+        return int(events[event_columns].drop_duplicates().shape[0])
     return int(len(events))
 
 

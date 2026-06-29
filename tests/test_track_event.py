@@ -3,7 +3,7 @@ import pytest
 
 from hipporeplayimm.encoding import LogEmissionTensor
 from hipporeplayimm.models import EventScore
-from scripts.track_event import _trajectory_rows_from_log_posteriors
+from scripts.track_event import _TRACK_MODEL_CHOICES, _trajectory_rows_from_log_posteriors
 
 
 def test_trajectory_rows_entropy_handles_zero_probability_bins():
@@ -35,3 +35,27 @@ def test_trajectory_rows_entropy_handles_zero_probability_bins():
     assert rows.loc[0, "posterior_entropy"] == pytest.approx(0.0)
     expected_entropy = -(0.25 * np.log(0.25) + 0.75 * np.log(0.75))
     assert rows.loc[1, "posterior_entropy"] == pytest.approx(expected_entropy)
+
+
+def test_track_model_choices_include_benchmark_state_space_variants():
+    required = {
+        "sorted-spike-state-space-momentum-exact-sparse",
+        "sorted-spike-state-space-trajectory-imm-exact-sparse",
+        "sorted-spike-state-space-trajectory-imm-anchored-exact-sparse",
+        "sorted-spike-state-space-trajectory-imm-low-leak-exact-sparse",
+        "sorted-spike-state-space-trajectory-imm-persistent-exact-sparse",
+        "sorted-spike-state-space-displacement-momentum",
+        "sorted-spike-state-space-velocity-momentum",
+        "sorted-spike-state-space-displacement-imm",
+        "sorted-spike-state-space-first-order-imm",
+        "sorted-spike-state-space-goal",
+        "state-space-momentum-exact-sparse",
+        "state-space-trajectory-imm-exact-sparse",
+        "state-space-displacement-momentum",
+        "state-space-velocity-momentum",
+        "state-space-displacement-imm",
+        "state-space-first-order-imm",
+        "state-space-goal",
+    }
+
+    assert required.issubset(set(_TRACK_MODEL_CHOICES))

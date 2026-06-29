@@ -5,6 +5,7 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
+from . import evidence_reporting
 from .evidence_status_coercion import _status_is_success_or_missing
 
 
@@ -42,8 +43,8 @@ def event_reliability_flags(
     n_time = _as_float(row.get("n_time", np.nan))
     if np.isfinite(n_time) and n_time < min_time_bins:
         reasons.append("too_few_time_bins")
-    support = str(row.get("evidence_support", ""))
-    if support == "degenerate_single_bin":
+    support_labels = _evidence_support_labels_for_reliability(row)
+    if evidence_reporting.DEGENERATE_SINGLE_BIN_EVIDENCE_SUPPORT in support_labels:
         reasons.append("degenerate_single_bin")
     candidate_mass = _first_finite(
         row,
@@ -82,6 +83,15 @@ def add_event_reliability_flags(df: pd.DataFrame, **kwargs) -> pd.DataFrame:
         return base
     flags = pd.DataFrame([event_reliability_flags(row, **kwargs) for _, row in base.iterrows()], index=base.index)
     return pd.concat([base, flags], axis=1)
+
+
+def _evidence_support_labels_for_reliability(row: pd.Series) -> list[str]:
+    """Return explicit or diagnostic-derived support labels for reliability checks."""
+
+    explicit_labels = evidence_reporting._evidence_support_labels(row.get("evidence_support", ""))
+    if explicit_labels:
+        return explicit_labels
+    return evidence_reporting._evidence_support_labels(evidence_reporting.evidence_support_from_row(row))
 
 
 def _as_float(value) -> float:

@@ -17,9 +17,6 @@ def apply_benchmark_metadata_scope_patch() -> None:
     """Ensure benchmark-level split/event-subset metadata is emitted."""
 
     from . import benchmarks as bench
-    from . import result_quality_audit_scope_patch
-
-    result_quality_audit_scope_patch.apply_result_quality_audit_scope_patch()
 
     metadata = bench._benchmark_config_metadata
     if getattr(metadata, "_benchmark_scope_metadata_wrapped", False):

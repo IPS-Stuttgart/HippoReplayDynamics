@@ -144,13 +144,22 @@ def _route_target(route: np.ndarray, transition_number: int, n_transitions: int)
 
 
 def _farthest_point_subset(points: np.ndarray, max_points: int) -> np.ndarray:
-    if points.shape[0] <= max_points:
-        return points.copy()
-    selected = [int(np.argmin(np.sum(points, axis=1)))]
-    min_dist2 = np.full(points.shape[0], np.inf, dtype=float)
-    for _ in range(1, max_points):
-        last = points[selected[-1]]
-        dist2 = np.sum((points - last[None, :]) ** 2, axis=1)
+    unique_points = _unique_points(np.asarray(points, dtype=float))
+    if unique_points.shape[0] <= int(max_points):
+        return unique_points.copy()
+    selected = [int(np.argmin(np.sum(unique_points, axis=1)))]
+    min_dist2 = np.full(unique_points.shape[0], np.inf, dtype=float)
+    for _ in range(1, int(max_points)):
+        last = unique_points[selected[-1]]
+        dist2 = np.sum((unique_points - last[None, :]) ** 2, axis=1)
         min_dist2 = np.minimum(min_dist2, dist2)
+        min_dist2[np.asarray(selected, dtype=int)] = -np.inf
         selected.append(int(np.argmax(min_dist2)))
-    return points[np.asarray(selected, dtype=int)]
+    return unique_points[np.asarray(selected, dtype=int)]
+
+
+def _unique_points(points: np.ndarray) -> np.ndarray:
+    if points.shape[0] == 0:
+        return points.copy()
+    _, first_indices = np.unique(points, axis=0, return_index=True)
+    return points[np.sort(first_indices)].copy()

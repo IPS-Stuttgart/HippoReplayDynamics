@@ -34,6 +34,29 @@ CANDIDATE_SUPPORT_UNKNOWN = "conservative_unknown"
 DEFAULT_GOOD_LOG_MASS_THRESHOLD = -0.01
 DEFAULT_WARNING_LOG_MASS_THRESHOLD = -0.10
 
+_EXACT_EVIDENCE_SUPPORT = "exact_full_grid"
+_TRUNCATED_EVIDENCE_SUPPORT = "truncated_full_grid"
+_NONCOMPARABLE_EVIDENCE_SUPPORTS = {
+    "degenerate_single_bin",
+    "not_scored",
+    "particle_approximation",
+    "unknown",
+    "unknown_noncomparable",
+}
+_MISSING_SUPPORT_STRINGS = {"", "nan", "na", "n/a", "none", "null", "<na>"}
+_MISSING_STATUS_VALUES = {"", "nan", "na", "n/a", "none", "null", "<na>"}
+_CANDIDATE_MIN_LOG_MASS_COLUMNS = (
+    "min_candidate_log_mass",
+    "diagnostic_min_candidate_log_mass",
+    "diagnostic_state_space_sparse_momentum_min_candidate_log_mass",
+    "diagnostic_state_space_trajectory_imm_min_candidate_log_mass",
+    "diagnostic_state_space_displacement_momentum_min_candidate_log_mass",
+    "diagnostic_state_space_displacement_imm_min_candidate_log_mass",
+    "diagnostic_state_space_momentum_min_candidate_log_mass",
+    "diagnostic_state_space_imm_min_candidate_log_mass",
+    "diagnostic_goal_state_space_min_candidate_log_mass",
+)
+
 
 def add_candidate_support_quality_columns(
     frame: pd.DataFrame,
@@ -83,18 +106,13 @@ def candidate_support_quality(
 ) -> str:
     """Return a conservative quality label for one score row."""
 
-    evidence_support = str(row.get("evidence_support", ""))
-    if evidence_support and evidence_support not in {"truncated_full_grid", "nan"}:
-        return CANDIDATE_SUPPORT_EXACT
-    diagnostic_support = " ".join(
-        str(row.get(column, ""))
-        for column in (
-            "diagnostic_candidate_evidence_support",
-            "diagnostic_state_space_momentum_evidence_support",
-            "diagnostic_state_space_imm_evidence_support",
-        )
-    )
-    if "truncated_full_grid" not in diagnostic_support and evidence_support != "truncated_full_grid":
+    if not _status_is_success_or_missing(row.get("status", "success")):
+        return CANDIDATE_SUPPORT_UNKNOWN
+
+    evidence_supports = _row_evidence_support_labels(row)
+    if _has_any_support(evidence_supports, _NONCOMPARABLE_EVIDENCE_SUPPORTS):
+        return CANDIDATE_SUPPORT_UNKNOWN
+    if not _has_support(evidence_supports, _TRUNCATED_EVIDENCE_SUPPORT):
         return CANDIDATE_SUPPORT_EXACT
     if min_log_mass is None or not np.isfinite(min_log_mass):
         return CANDIDATE_SUPPORT_UNKNOWN
@@ -105,13 +123,80 @@ def candidate_support_quality(
     return CANDIDATE_SUPPORT_POOR
 
 
+def _row_evidence_support_labels(row: pd.Series) -> list[str]:
+    labels: list[str] = []
+    for column in row.index:
+        name = str(column)
+        if name == "evidence_support" or (name.startswith("diagnostic_") and name.endswith("_evidence_support")):
+            labels.extend(_evidence_support_labels(row.get(column)))
+    return labels
+
+
+def _evidence_support_labels(value: object) -> list[str]:
+    labels: list[str] = []
+    for item in _flatten_value(value):
+        if _is_missing_scalar(item):
+            continue
+        text = str(item).strip().lower()
+        if text in _MISSING_SUPPORT_STRINGS:
+            continue
+        labels.append(text)
+    return labels
+
+
+def _flatten_value(value: object) -> list[object]:
+    if _is_missing_scalar(value):
+        return []
+    if isinstance(value, (str, bytes)):
+        return [value]
+    try:
+        array = np.asarray(value, dtype=object)
+    except (TypeError, ValueError):
+        return [value]
+    if array.ndim == 0:
+        try:
+            return [array.item()]
+        except ValueError:
+            return []
+    if array.size == 0:
+        return []
+    return list(array.ravel())
+
+
+def _has_support(labels: list[str], support: str) -> bool:
+    return any(label == support or support in label for label in labels)
+
+
+def _has_any_support(labels: list[str], supports: set[str]) -> bool:
+    return any(_has_support(labels, support) for support in supports)
+
+
+def _status_is_success_or_missing(value: object) -> bool:
+    if _is_missing_scalar(value):
+        return True
+    text = str(value).strip().lower()
+    if text in _MISSING_STATUS_VALUES:
+        return True
+    return text == "success"
+
+
+def _is_missing_scalar(value: object) -> bool:
+    try:
+        missing = pd.isna(value)
+    except (TypeError, ValueError):
+        return False
+    return isinstance(missing, (bool, np.bool_)) and bool(missing)
+
+
 def _candidate_min_log_mass(row: pd.Series) -> float:
-    for column in (
-        "min_candidate_log_mass",
-        "diagnostic_min_candidate_log_mass",
-        "diagnostic_state_space_momentum_min_candidate_log_mass",
-        "diagnostic_state_space_imm_min_candidate_log_mass",
-    ):
+    columns: list[object] = list(_CANDIDATE_MIN_LOG_MASS_COLUMNS)
+    seen = {str(column) for column in columns}
+    for column in row.index:
+        name = str(column)
+        if name.endswith("_min_candidate_log_mass") and name not in seen:
+            columns.append(column)
+            seen.add(name)
+    for column in columns:
         value = row.get(column)
         scalar = _first_finite_numeric_value(value)
         if scalar is not None:
@@ -126,22 +211,28 @@ def _first_finite_numeric_value(value: object) -> float | None:
         text = value.strip()
         if not text:
             return None
-        try:
-            number = float(text)
-        except ValueError:
-            return None
-        return number if np.isfinite(number) else None
+        return _finite_numeric_scalar(text)
     try:
-        array = np.asarray(value, dtype=float)
+        array = np.asarray(value, dtype=object)
+    except (TypeError, ValueError):
+        return _finite_numeric_scalar(value)
+    if array.ndim == 0:
+        return _finite_numeric_scalar(array.item())
+    for item in array.ravel():
+        number = _finite_numeric_scalar(item)
+        if number is not None:
+            return number
+    return None
+
+
+def _finite_numeric_scalar(value: object) -> float | None:
+    if isinstance(value, (bool, np.bool_)) or _is_missing_scalar(value):
+        return None
+    try:
+        number = float(value)
     except (TypeError, ValueError):
         return None
-    if array.ndim == 0:
-        number = float(array)
-        return number if np.isfinite(number) else None
-    finite = array[np.isfinite(array)]
-    if finite.size == 0:
-        return None
-    return float(finite.reshape(-1)[0])
+    return number if np.isfinite(number) else None
 
 
 def hierarchical_bootstrap_ci(

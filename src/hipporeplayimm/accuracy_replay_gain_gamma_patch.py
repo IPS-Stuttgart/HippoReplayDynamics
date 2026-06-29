@@ -113,19 +113,20 @@ def _estimate_replay_cell_gains_impl(session, encoding, ripple_indices, config):
 
         spike_times = np.asarray(spikes[:, 0], dtype=float)
         spike_cell_ids_raw = np.asarray(spikes[:, 1])
-        keep = (
-            (spike_times >= float(event.start))
-            & (spike_times < float(event.end))
-            & np.isin(spike_cell_ids_raw, cell_ids)
-        )
+        in_window = (spike_times >= float(event.start)) & (spike_times < float(event.end))
+        if not np.any(in_window):
+            continue
+
+        event_cell_ids = _coerce_integral_ids(spike_cell_ids_raw[in_window], "spike cell IDs")
+        keep = np.isin(event_cell_ids, cell_ids)
         if not np.any(keep):
             continue
 
-        event_cell_ids = _coerce_integral_ids(spike_cell_ids_raw[keep], "spike cell IDs")
+        matched_cell_ids = event_cell_ids[keep]
         rows = np.fromiter(
-            (cell_to_row[int(cell_id)] for cell_id in event_cell_ids),
+            (cell_to_row[int(cell_id)] for cell_id in matched_cell_ids),
             dtype=int,
-            count=event_cell_ids.shape[0],
+            count=matched_cell_ids.shape[0],
         )
         np.add.at(observed, rows, 1.0)
 

@@ -3,6 +3,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
+import hipporeplayimm.duration_occupancy as duration_occupancy
 from hipporeplayimm.encoding import LogEmissionTensor
 from hipporeplayimm.state_space_model import StateSpaceDecoderConfig, StateSpaceReplayModel
 
@@ -29,6 +30,10 @@ def _synthetic_emissions() -> LogEmissionTensor:
 
 def _bin_centers() -> np.ndarray:
     return np.array([[0.0, 0.0], [1.0, 0.0], [2.0, 0.0], [3.0, 0.0]], dtype=float)
+
+
+def test_duration_occupancy_score_method_uses_final_runtime_wrapper() -> None:
+    assert StateSpaceReplayModel.score is duration_occupancy._score_state_space_duration_with_occupancy
 
 
 @pytest.mark.parametrize(

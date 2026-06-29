@@ -7,6 +7,7 @@ from contextvars import ContextVar
 from dataclasses import replace
 from functools import wraps
 import operator
+import sys
 from typing import Any, Callable
 
 import numpy as np
@@ -14,12 +15,52 @@ import numpy as np
 _EVIDENCE_ONLY_DIAGNOSTIC_PATCH_ATTR = "_duration_occupancy_evidence_only_diagnostics_patch_applied"
 _EVIDENCE_ONLY_DIAGNOSTIC_ORIGINAL_ATTR = "_duration_occupancy_evidence_only_diagnostics_original"
 _WRAPPER_DIAGNOSTIC_PATCH_ATTR = "_state_space_evidence_only_diagnostics_patch_applied"
+_WRAPPER_DIAGNOSTIC_ORIGINAL_ATTR = "_state_space_evidence_only_diagnostics_original"
 _FIRST_ORDER_IMM_DIAGNOSTIC_CONTEXT_PATCH_ATTR = "_first_order_imm_duration_diagnostic_context_patch_applied"
 _FIRST_ORDER_IMM_DIAGNOSTIC_HELPER_PATCH_ATTR = "_first_order_imm_duration_diagnostic_helper_patch_applied"
+_SCORE_ORIGINAL_ATTRS = (
+    "__wrapped__",
+    _EVIDENCE_ONLY_DIAGNOSTIC_ORIGINAL_ATTR,
+    _WRAPPER_DIAGNOSTIC_ORIGINAL_ATTR,
+    "_first_order_imm_diagnostics_validation_original",
+    "__hipporeplayimm_original__",
+)
 _CURRENT_FIRST_ORDER_IMM_TRANSITION_DURATIONS: ContextVar[tuple[float, ...] | None] = ContextVar(
     "_current_first_order_imm_transition_durations",
     default=None,
 )
+
+
+def _score_aliases(scorer: Any) -> tuple[Any, ...]:
+    """Return scorer plus known wrapped/original aliases."""
+
+    aliases: list[Any] = []
+    stack = [scorer]
+    seen: set[int] = set()
+    while stack:
+        current = stack.pop()
+        marker = id(current)
+        if marker in seen:
+            continue
+        seen.add(marker)
+        aliases.append(current)
+        for attr in _SCORE_ORIGINAL_ATTRS:
+            original = getattr(current, attr, None)
+            if original is not None:
+                stack.append(original)
+    return tuple(aliases)
+
+
+def _sync_state_space_score(duration_occupancy: Any, scorer: Any) -> None:
+    """Keep StateSpaceReplayModel.score bound to the active duration scorer."""
+
+    state_space = sys.modules.get("hipporeplayimm.state_space") or sys.modules.get("hipporeplayimm.state_space_model")
+    model = getattr(state_space, "StateSpaceReplayModel", None) if state_space is not None else None
+    if model is None:
+        return
+    current = getattr(model, "score", None)
+    if any(current is candidate for candidate in _score_aliases(scorer)):
+        model.score = scorer
 
 
 def apply_duration_occupancy_metadata_guard_patch() -> None:
@@ -67,6 +108,7 @@ def _patch_evidence_only_path_diagnostics(duration_occupancy: Any) -> None:
     if scorer is None:
         return
     if getattr(scorer, _EVIDENCE_ONLY_DIAGNOSTIC_PATCH_ATTR, False) or getattr(scorer, _WRAPPER_DIAGNOSTIC_PATCH_ATTR, False):
+        _sync_state_space_score(duration_occupancy, scorer)
         return
 
     @wraps(scorer)
@@ -102,6 +144,7 @@ def _patch_evidence_only_path_diagnostics(duration_occupancy: Any) -> None:
         scorer,
     )
     duration_occupancy._score_state_space_duration_with_occupancy = _score_state_space_duration_with_occupancy
+    _sync_state_space_score(duration_occupancy, _score_state_space_duration_with_occupancy)
 
 
 def _patch_first_order_imm_duration_diagnostics(duration_occupancy: Any) -> None:
@@ -131,7 +174,10 @@ def _patch_first_order_imm_duration_diagnostics(duration_occupancy: Any) -> None
         duration_occupancy._first_order_imm_content_diagnostics = _first_order_imm_content_diagnostics
 
     scorer = getattr(duration_occupancy, "_score_state_space_duration_with_occupancy", None)
-    if scorer is None or getattr(scorer, _FIRST_ORDER_IMM_DIAGNOSTIC_CONTEXT_PATCH_ATTR, False):
+    if scorer is None:
+        return
+    if getattr(scorer, _FIRST_ORDER_IMM_DIAGNOSTIC_CONTEXT_PATCH_ATTR, False):
+        _sync_state_space_score(duration_occupancy, scorer)
         return
 
     @wraps(scorer)
@@ -183,6 +229,7 @@ def _patch_first_order_imm_duration_diagnostics(duration_occupancy: Any) -> None
     if getattr(scorer, _WRAPPER_DIAGNOSTIC_PATCH_ATTR, False):
         setattr(_score_state_space_duration_with_occupancy, _WRAPPER_DIAGNOSTIC_PATCH_ATTR, True)
     duration_occupancy._score_state_space_duration_with_occupancy = _score_state_space_duration_with_occupancy
+    _sync_state_space_score(duration_occupancy, _score_state_space_duration_with_occupancy)
 
 
 def _mark_path_model_evidence_only(model: Any, result: Any) -> None:

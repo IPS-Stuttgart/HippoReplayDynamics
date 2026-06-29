@@ -11,6 +11,8 @@ _PATCHED_FLAG = "_posterior_calibration_summary_patch_applied"
 _GATES_SCOPE_PATCHED_FLAG = "_result_quality_gates_scope_patch_applied"
 _PAIRED_GROUP_PATCHED_FLAG = "_paired_model_missing_group_patch_applied"
 _ORIGINAL_PAIRED_ATTR = "_paired_model_missing_group_original"
+_GROUPED_METRICS_PATCHED_FLAG = "_grouped_model_metrics_missing_group_patch_applied"
+_ORIGINAL_GROUPED_METRICS_ATTR = "_grouped_model_metrics_missing_group_original"
 _MISSING_GROUP_SENTINEL = "__hipporeplayimm_missing_group__"
 _ADDITIONAL_RESULT_QUALITY_GATE_SCOPE_COLUMNS = (
     "event_window_variant",
@@ -87,6 +89,36 @@ def _apply_paired_model_missing_group_patch() -> None:
     diagnostics.paired_model_margin_decisions = paired_model_margin_decisions
 
 
+def _apply_grouped_model_metrics_missing_group_patch() -> None:
+    """Keep grouped model summaries for rows with missing optional group keys."""
+
+    from . import result_improvements
+
+    current = result_improvements.summarize_grouped_model_metrics
+    if getattr(current, _GROUPED_METRICS_PATCHED_FLAG, False):
+        return
+    original = getattr(current, _ORIGINAL_GROUPED_METRICS_ATTR, current)
+
+    def summarize_grouped_model_metrics(
+        rows: pd.DataFrame,
+        group_columns: Sequence[str],
+        *args: object,
+        **kwargs: object,
+    ) -> pd.DataFrame:
+        groups = tuple(group_columns)
+        result = original(
+            _fill_missing_group_metadata(rows, groups),
+            groups,
+            *args,
+            **kwargs,
+        )
+        return _restore_missing_group_metadata(result, groups)
+
+    setattr(summarize_grouped_model_metrics, _GROUPED_METRICS_PATCHED_FLAG, True)
+    setattr(summarize_grouped_model_metrics, _ORIGINAL_GROUPED_METRICS_ATTR, original)
+    result_improvements.summarize_grouped_model_metrics = summarize_grouped_model_metrics
+
+
 def _fill_missing_group_metadata(frame: pd.DataFrame, group_cols: Sequence[str]) -> pd.DataFrame:
     if frame.empty or not group_cols:
         return frame.copy()
@@ -159,6 +191,7 @@ def apply_posterior_calibration_summary_patch() -> None:
     result_quality_audit_scope_patch.apply_result_quality_audit_scope_patch()
     _apply_result_quality_gates_scope_patch()
     _apply_paired_model_missing_group_patch()
+    _apply_grouped_model_metrics_missing_group_patch()
 
     if getattr(result_improvements, _PATCHED_FLAG, False):
         return

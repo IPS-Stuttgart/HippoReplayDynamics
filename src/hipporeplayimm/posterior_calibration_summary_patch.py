@@ -6,6 +6,38 @@ import numpy as np
 import pandas as pd
 
 _PATCHED_FLAG = "_posterior_calibration_summary_patch_applied"
+_GATES_SCOPE_PATCHED_FLAG = "_result_quality_gates_scope_patch_applied"
+_ADDITIONAL_RESULT_QUALITY_GATE_SCOPE_COLUMNS = (
+    "event_window_variant",
+    "window_variant",
+    "window_start_s",
+    "window_end_s",
+    "window_duration_s",
+    "template_event_index",
+    "benchmark_event_subset_base_seed",
+    "benchmark_test_cell_fraction",
+    "benchmark_cell_split_strategy",
+    "benchmark_cell_split_strata",
+)
+
+
+def _apply_result_quality_gates_scope_patch() -> None:
+    """Keep result-quality gate event grouping aligned with audit window scope."""
+
+    from . import result_quality_gates
+
+    if getattr(result_quality_gates, _GATES_SCOPE_PATCHED_FLAG, False):
+        return
+    existing = tuple(getattr(result_quality_gates, "_EVENT_GROUP_SCOPE_COLUMNS", ()))
+    result_quality_gates._EVENT_GROUP_SCOPE_COLUMNS = tuple(
+        dict.fromkeys(
+            (
+                *existing,
+                *_ADDITIONAL_RESULT_QUALITY_GATE_SCOPE_COLUMNS,
+            )
+        )
+    )
+    setattr(result_quality_gates, _GATES_SCOPE_PATCHED_FLAG, True)
 
 
 def apply_posterior_calibration_summary_patch() -> None:
@@ -15,6 +47,7 @@ def apply_posterior_calibration_summary_patch() -> None:
     from . import result_quality_audit_scope_patch
 
     result_quality_audit_scope_patch.apply_result_quality_audit_scope_patch()
+    _apply_result_quality_gates_scope_patch()
 
     if getattr(result_improvements, _PATCHED_FLAG, False):
         return

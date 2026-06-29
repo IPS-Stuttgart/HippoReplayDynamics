@@ -7,6 +7,7 @@ from hipporeplayimm.evidence_reporting import (
     EVIDENCE_COMPARISON_LOWER_BOUND,
     EVIDENCE_COMPARISON_DEGENERATE,
     EVIDENCE_COMPARISON_PARTICLE_APPROXIMATION,
+    EVIDENCE_COMPARISON_UNKNOWN,
     DEGENERATE_SINGLE_BIN_EVIDENCE_SUPPORT,
     EXACT_EVIDENCE_SUPPORT,
     PYRECEST_PARTICLE_EVIDENCE_SUPPORT,
@@ -234,6 +235,34 @@ def test_state_space_imm_support_column_is_used_by_generic_inference():
     assert scored.loc[0, "evidence_support"] == TRUNCATED_EVIDENCE_SUPPORT
     assert not bool(scored.loc[0, "evidence_comparable"])
     assert scored.loc[0, "evidence_comparison"] == EVIDENCE_COMPARISON_LOWER_BOUND
+
+
+def test_explicit_noncomparable_without_support_stays_unknown():
+    rows = pd.DataFrame(
+        [
+            {
+                "status": "success",
+                "model": "legacy-candidate-pruned-row",
+                "log_evidence": 100.0,
+                "evidence_comparable": "False",
+            },
+            {
+                "status": "success",
+                "model": "exact-row",
+                "log_evidence": 1.0,
+            },
+        ]
+    )
+
+    scored = ensure_evidence_support_columns(rows)
+
+    legacy = scored[scored["model"] == "legacy-candidate-pruned-row"].iloc[0]
+    exact = scored[scored["model"] == "exact-row"].iloc[0]
+    assert legacy["evidence_support"] == EVIDENCE_COMPARISON_UNKNOWN
+    assert not bool(legacy["evidence_comparable"])
+    assert legacy["evidence_comparison"] == EVIDENCE_COMPARISON_UNKNOWN
+    assert exact["evidence_support"] == EXACT_EVIDENCE_SUPPORT
+    assert bool(exact["evidence_comparable"])
 
 
 def test_state_space_displacement_imm_support_column_is_used_by_generic_inference():

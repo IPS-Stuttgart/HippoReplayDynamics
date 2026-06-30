@@ -224,8 +224,9 @@ def write_result_quality_audit(
     if scores.empty:
         raise ValueError("scores must not be empty")
 
-    group_cols = event_group_columns(scores)
-    scores_with_support = ensure_evidence_support_columns(scores)
+    score_table = _score_table_with_log_evidence_alias(scores)
+    group_cols = event_group_columns(score_table)
+    scores_with_support = ensure_evidence_support_columns(score_table)
     scores_with_quality = add_candidate_support_quality_columns(scores_with_support)
     scores_with_margins = add_evidence_margin_columns(scores_with_quality, group_cols=group_cols or ("model",))
     margins = evidence_margin_table(scores_with_quality, group_cols=group_cols or ("model",))
@@ -250,7 +251,7 @@ def write_result_quality_audit(
     provenance_frame.to_csv(out / "provenance_audit.csv", index=False)
 
     if common_support_scores is not None and not common_support_scores.empty:
-        common = common_support_audit(scores_with_margins, common_support_scores)
+        common = common_support_audit(scores_with_margins, _score_table_with_log_evidence_alias(common_support_scores))
         common.to_csv(out / "common_support_audit.csv", index=False)
     else:
         common = pd.DataFrame()
@@ -278,6 +279,22 @@ def write_result_quality_audit(
         encoding="utf-8",
     )
     return dashboard
+
+
+def _score_table_with_log_evidence_alias(scores: pd.DataFrame) -> pd.DataFrame:
+    """Return a score table with the canonical evidence column present.
+
+    Some held-out predictive-control outputs store the model score only as
+    ``heldout_log_likelihood``.  The audit helpers downstream of this function
+    compare rows through the canonical ``log_evidence`` column, so copy the
+    held-out score into that canonical column when it is otherwise absent.
+    """
+
+    if "log_evidence" in scores.columns or "heldout_log_likelihood" not in scores.columns:
+        return scores.copy()
+    out = scores.copy()
+    out["log_evidence"] = out["heldout_log_likelihood"]
+    return out
 
 
 def _first_existing(frame: pd.DataFrame, names: Sequence[str]) -> str | None:
@@ -358,9 +375,9 @@ def _influence_summary(scores: pd.DataFrame) -> pd.DataFrame:
         "left_out_group",
         "influence_delta",
     ]
-    value_col = "relative_log_evidence" if "relative_log_evidence" in scores.columns else "log_evidence"
+    value_col = _first_existing(scores, ("relative_log_evidence", "log_evidence", "heldout_log_likelihood"))
     frames: list[pd.DataFrame] = []
-    if "session" in scores.columns and value_col in scores.columns:
+    if value_col is not None and "session" in scores.columns:
         frames.append(leave_one_group_influence(scores, group_col="session", value_col=value_col))
         rat_scores = scores.copy()
         rat_scores["rat"] = rat_scores["session"].map(rat_from_session)

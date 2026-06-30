@@ -71,3 +71,14 @@ def test_route_state_space_rejects_invalid_dynamic_parameters() -> None:
             _route_emissions(),
             np.array([[0.0, 0.0], [1.0, 0.0]], dtype=float),
         )
+
+
+@pytest.mark.parametrize("bad_max_points", [2.5, float("nan"), np.array([2])])
+def test_route_state_space_rejects_invalid_default_route_point_counts(bad_max_points) -> None:
+    model = WellRouteStateSpaceReplayModel(max_default_points=bad_max_points)
+
+    with pytest.raises(ValueError, match="max_default_points"):
+        model.score(
+            _route_emissions(),
+            np.array([[0.0, 0.0], [1.0, 0.0]], dtype=float),
+        )

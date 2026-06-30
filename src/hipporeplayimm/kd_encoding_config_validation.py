@@ -17,14 +17,36 @@ import numpy as np
 _PATCHED_FLAG = "_kd_encoding_config_validation_patch_applied"
 
 
+def _coerce_float_scalar(config: Any, name: str) -> float:
+    value = getattr(config, name)
+    if isinstance(value, (bool, np.bool_)):
+        raise TypeError(f"{name} must be a scalar float")
+    try:
+        array = np.asarray(value)
+    except (TypeError, ValueError) as exc:
+        raise TypeError(f"{name} must be a scalar float") from exc
+    if array.shape != ():
+        raise TypeError(f"{name} must be a scalar float")
+    try:
+        value = array.item()
+    except (AttributeError, IndexError, ValueError):
+        pass
+    if isinstance(value, (bool, np.bool_)):
+        raise TypeError(f"{name} must be a scalar float")
+    try:
+        return float(value)
+    except (TypeError, ValueError) as exc:
+        raise TypeError(f"{name} must be a scalar float") from exc
+
+
 def _validate_positive_float(config: Any, name: str) -> None:
-    value = float(getattr(config, name))
+    value = _coerce_float_scalar(config, name)
     if not np.isfinite(value) or value <= 0.0:
         raise ValueError(f"{name} must be finite and positive")
 
 
 def _validate_nonnegative_float(config: Any, name: str) -> None:
-    value = float(getattr(config, name))
+    value = _coerce_float_scalar(config, name)
     if not np.isfinite(value) or value < 0.0:
         raise ValueError(f"{name} must be finite and nonnegative")
 

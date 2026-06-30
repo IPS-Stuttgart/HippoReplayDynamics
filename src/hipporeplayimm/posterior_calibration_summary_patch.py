@@ -10,15 +10,25 @@ import pandas as pd
 _PATCHED_FLAG = "_posterior_calibration_summary_patch_applied"
 _GATES_SCOPE_PATCHED_FLAG = "_result_quality_gates_scope_patch_applied"
 _PAIRED_GROUP_PATCHED_FLAG = "_paired_model_missing_group_patch_applied"
+_PAIRED_SWEEP_GROUP_PATCHED_FLAG = "_paired_model_sweep_missing_group_patch_applied"
 _ORIGINAL_PAIRED_ATTR = "_paired_model_missing_group_original"
+_ORIGINAL_SWEEP_ATTR = "_paired_model_sweep_missing_group_original"
 _MISSING_GROUP_SENTINEL = "__hipporeplayimm_missing_group__"
 _ADDITIONAL_RESULT_QUALITY_GATE_SCOPE_COLUMNS = (
+    "window_role",
+    "window_index",
     "event_window_variant",
     "window_variant",
     "window_start_s",
     "window_end_s",
     "window_duration_s",
+    "null_index",
+    "matched_null_rank",
     "template_event_index",
+    "benchmark_random_seed",
+    "benchmark_cell_split_index",
+    "benchmark_cell_split_seed",
+    "benchmark_event_subset_seed",
     "benchmark_event_subset_base_seed",
     "benchmark_test_cell_fraction",
     "benchmark_cell_split_strategy",
@@ -47,45 +57,93 @@ def _apply_result_quality_gates_scope_patch() -> None:
 
 
 def _apply_paired_model_missing_group_patch() -> None:
-    """Keep paired model-margin decisions for rows with missing optional group keys."""
+    """Keep paired model-margin diagnostics for rows with missing optional group keys."""
 
     from . import advanced_result_diagnostics as diagnostics
 
     current = diagnostics.paired_model_margin_decisions
-    if getattr(current, _PAIRED_GROUP_PATCHED_FLAG, False):
-        return
-    original = getattr(current, _ORIGINAL_PAIRED_ATTR, current)
+    if not getattr(current, _PAIRED_GROUP_PATCHED_FLAG, False):
+        original = getattr(current, _ORIGINAL_PAIRED_ATTR, current)
 
-    def paired_model_margin_decisions(
+        def paired_model_margin_decisions(
+            scores: pd.DataFrame,
+            *,
+            positive_model: str,
+            reference_model: str,
+            margin_threshold: float = 0.0,
+            group_cols: Sequence[str] | str = ("session", "event_index"),
+            evidence_col: str = "log_evidence",
+            model_col: str = "model",
+            true_model_col: str | None = None,
+            positive_true_label: str | None = None,
+        ) -> pd.DataFrame:
+            groups = _normalize_group_cols(group_cols)
+            sentinel = _missing_group_sentinel(scores, groups)
+            result = original(
+                _fill_missing_group_metadata(scores, groups, sentinel),
+                positive_model=positive_model,
+                reference_model=reference_model,
+                margin_threshold=margin_threshold,
+                group_cols=groups,
+                evidence_col=evidence_col,
+                model_col=model_col,
+                true_model_col=true_model_col,
+                positive_true_label=positive_true_label,
+            )
+            return _restore_missing_group_metadata(result, groups, sentinel)
+
+        setattr(paired_model_margin_decisions, _PAIRED_GROUP_PATCHED_FLAG, True)
+        setattr(paired_model_margin_decisions, _ORIGINAL_PAIRED_ATTR, original)
+        diagnostics.paired_model_margin_decisions = paired_model_margin_decisions
+
+    current_sweep = diagnostics.paired_model_margin_threshold_sweep
+    if getattr(current_sweep, _PAIRED_SWEEP_GROUP_PATCHED_FLAG, False):
+        return
+    original_sweep = getattr(current_sweep, _ORIGINAL_SWEEP_ATTR, current_sweep)
+
+    def paired_model_margin_threshold_sweep(
         scores: pd.DataFrame,
         *,
         positive_model: str,
         reference_model: str,
-        margin_threshold: float = 0.0,
-        group_cols: Sequence[str] = ("session", "event_index"),
+        thresholds: Sequence[float],
+        group_cols: Sequence[str] | str | None = None,
         evidence_col: str = "log_evidence",
         model_col: str = "model",
         true_model_col: str | None = None,
         positive_true_label: str | None = None,
     ) -> pd.DataFrame:
-        groups = tuple(group_cols)
-        sentinel = _missing_group_sentinel(scores, groups)
-        result = original(
-            _fill_missing_group_metadata(scores, groups, sentinel),
+        groups = _normalize_optional_group_cols(group_cols)
+        sentinel = None if groups is None else _missing_group_sentinel(scores, groups)
+        sweep_scores = scores if groups is None else _fill_missing_group_metadata(scores, groups, sentinel)
+        result = original_sweep(
+            sweep_scores,
             positive_model=positive_model,
             reference_model=reference_model,
-            margin_threshold=margin_threshold,
+            thresholds=thresholds,
             group_cols=groups,
             evidence_col=evidence_col,
             model_col=model_col,
             true_model_col=true_model_col,
             positive_true_label=positive_true_label,
         )
-        return _restore_missing_group_metadata(result, groups, sentinel)
+        return _restore_missing_group_metadata(result, groups or (), sentinel)
 
-    setattr(paired_model_margin_decisions, _PAIRED_GROUP_PATCHED_FLAG, True)
-    setattr(paired_model_margin_decisions, _ORIGINAL_PAIRED_ATTR, original)
-    diagnostics.paired_model_margin_decisions = paired_model_margin_decisions
+    setattr(paired_model_margin_threshold_sweep, _PAIRED_SWEEP_GROUP_PATCHED_FLAG, True)
+    setattr(paired_model_margin_threshold_sweep, _ORIGINAL_SWEEP_ATTR, original_sweep)
+    diagnostics.paired_model_margin_threshold_sweep = paired_model_margin_threshold_sweep
+
+
+def _normalize_group_cols(group_cols: Sequence[str] | str) -> tuple[str, ...]:
+    if isinstance(group_cols, str):
+        return (group_cols,)
+    return tuple(group_cols)
+
+
+def _normalize_optional_group_cols(group_cols: Sequence[str] | str | None) -> tuple[str, ...] | None:
+    if group_cols is None:
+        return None
+    return _normalize_group_cols(group_cols)
 
 
 def _missing_group_sentinel(frame: pd.DataFrame, group_cols: Sequence[str]) -> str:
@@ -110,9 +168,15 @@ def _group_value_present(frame: pd.DataFrame, group_cols: Sequence[str], value: 
     return False
 
 
-def _fill_missing_group_metadata(frame: pd.DataFrame, group_cols: Sequence[str], sentinel: str) -> pd.DataFrame:
+def _fill_missing_group_metadata(
+    frame: pd.DataFrame,
+    group_cols: Sequence[str],
+    sentinel: str | None = None,
+) -> pd.DataFrame:
     if frame.empty or not group_cols:
         return frame.copy()
+    if sentinel is None:
+        sentinel = _missing_group_sentinel(frame, group_cols)
     out = frame.copy()
     for column in group_cols:
         if column not in out.columns:
@@ -124,9 +188,15 @@ def _fill_missing_group_metadata(frame: pd.DataFrame, group_cols: Sequence[str],
     return out
 
 
-def _restore_missing_group_metadata(frame: pd.DataFrame, group_cols: Sequence[str], sentinel: str) -> pd.DataFrame:
+def _restore_missing_group_metadata(
+    frame: pd.DataFrame,
+    group_cols: Sequence[str],
+    sentinel: str | None = None,
+) -> pd.DataFrame:
     if frame.empty or not group_cols:
         return frame
+    if sentinel is None:
+        sentinel = _MISSING_GROUP_SENTINEL
     out = frame.copy()
     for column in group_cols:
         if column not in out.columns:
@@ -137,11 +207,17 @@ def _restore_missing_group_metadata(frame: pd.DataFrame, group_cols: Sequence[st
     return out
 
 
+def _to_float_numpy(values: pd.Series) -> np.ndarray:
+    """Convert pandas numeric data to float, preserving nullable missing values."""
+
+    return values.to_numpy(dtype=float, na_value=np.nan)
+
+
 def _rank_fraction(rank: pd.Series, n_bins: pd.Series) -> pd.Series:
     """Return finite rank fractions only for possible 1-based rank/bin pairs."""
 
-    rank_values = pd.to_numeric(rank, errors="coerce").to_numpy(dtype=float)
-    n_bin_values = pd.to_numeric(n_bins, errors="coerce").to_numpy(dtype=float)
+    rank_values = _to_float_numpy(pd.to_numeric(rank, errors="coerce"))
+    n_bin_values = _to_float_numpy(pd.to_numeric(n_bins, errors="coerce"))
     integer_like = np.isclose(rank_values, np.rint(rank_values), rtol=0.0, atol=0.0) & np.isclose(
         n_bin_values,
         np.rint(n_bin_values),
@@ -165,7 +241,7 @@ def _rank_coverage(rank_fraction: pd.Series, threshold: float) -> pd.Series:
     """Return nullable rank-coverage indicators for finite rank fractions only."""
 
     values = pd.to_numeric(rank_fraction, errors="coerce")
-    numeric = values.to_numpy(dtype=float)
+    numeric = _to_float_numpy(values)
     valid = np.isfinite(numeric)
     coverage = pd.Series(pd.NA, index=values.index, dtype="boolean")
     if np.any(valid):
@@ -203,7 +279,7 @@ def apply_posterior_calibration_summary_patch() -> None:
 
         frame = samples.copy()
         raw_probabilities = pd.to_numeric(frame[probability_column], errors="coerce")
-        raw_probability_values = raw_probabilities.to_numpy(dtype=float)
+        raw_probability_values = _to_float_numpy(raw_probabilities)
         valid_probability = pd.Series(
             np.isfinite(raw_probability_values)
             & (raw_probability_values >= 0.0)

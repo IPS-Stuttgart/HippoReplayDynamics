@@ -17,6 +17,7 @@ from . import benchmark_metadata_scope_patch as _benchmark_metadata_scope_patch
 from . import benchmark_relative_grouping as _benchmark_relative_grouping
 from . import bidirectional_infinite_evidence_patch as _bidirectional_infinite_evidence_patch
 from . import bma_options_patch as _bma_options_patch
+from . import candidate_active_support_validation as _candidate_active_support_validation
 from . import candidate_log_mass_validation as _candidate_log_mass_validation
 from . import candidate_support_normalization_validation as _candidate_support_normalization_validation
 from . import candidate_support_quality_patch as _candidate_support_quality_patch
@@ -90,6 +91,7 @@ _score_metadata_bool_validation.apply_score_metadata_bool_validation_patch()
 _model_parameter_validation.apply_model_parameter_validation_patch()
 _displacement_config_bool_validation.apply_displacement_config_bool_validation_patch()
 _displacement_imm_decay_validation.apply_displacement_imm_decay_validation_patch()
+_candidate_active_support_validation.apply_candidate_active_support_validation_patch()
 _candidate_support_quality_patch.apply_candidate_support_quality_patch()
 _benchmark_cell_split_metadata.apply_benchmark_cell_split_metadata_patch()
 _benchmark_event_limit_validation.apply_benchmark_event_limit_validation_patch()
@@ -220,6 +222,7 @@ def apply_runtime_patches() -> None:
     _model_parameter_validation.apply_model_parameter_validation_patch()
     _displacement_config_bool_validation.apply_displacement_config_bool_validation_patch()
     _displacement_imm_decay_validation.apply_displacement_imm_decay_validation_patch()
+    _candidate_active_support_validation.apply_candidate_active_support_validation_patch()
     _candidate_support_quality_patch.apply_candidate_support_quality_patch()
     _benchmark_cell_split_metadata.apply_benchmark_cell_split_metadata_patch()
     _benchmark_event_limit_validation.apply_benchmark_event_limit_validation_patch()

@@ -10,6 +10,7 @@ import numpy as np
 from .encoding import EncodingConfig, _validate_encoding_config
 
 _PATCH_MARKER = "_clusterless_encoding_config_validation_patch"
+_BENCHMARK_MARK_CONFIG_PATCH_MARKER = "_benchmark_clusterless_mark_config_validation_patch"
 
 
 _NUMERIC_MESSAGES = {
@@ -33,19 +34,43 @@ def apply_clusterless_encoding_config_validation_patch() -> None:
         previous = getattr(current, "__wrapped__", None)
         if previous is not None:
             _synchronize_aliases(previous, current)
+    else:
+        previous = current
+
+        @wraps(previous)
+        def fit_clusterless_mark_encoding(session, config=None):
+            _validate_nested_encoding_config(config)
+            _validate_clusterless_mark_config(config)
+            return previous(session, config)
+
+        setattr(fit_clusterless_mark_encoding, _PATCH_MARKER, True)
+        clusterless.fit_clusterless_mark_encoding = fit_clusterless_mark_encoding
+        _synchronize_aliases(previous, fit_clusterless_mark_encoding)
+
+    _patch_benchmark_clusterless_mark_config()
+
+
+def _patch_benchmark_clusterless_mark_config() -> None:
+    """Validate raw BenchmarkConfig clusterless fields before scalar coercion."""
+
+    benchmarks = sys.modules.get("hipporeplayimm.benchmarks")
+    if benchmarks is None:
+        return
+
+    current = benchmarks._clusterless_mark_config
+    if getattr(current, _BENCHMARK_MARK_CONFIG_PATCH_MARKER, False):
         return
 
     previous = current
 
     @wraps(previous)
-    def fit_clusterless_mark_encoding(session, config=None):
-        _validate_nested_encoding_config(config)
-        _validate_clusterless_mark_config(config)
-        return previous(session, config)
+    def _clusterless_mark_config(config):
+        _validate_benchmark_clusterless_mark_config(config)
+        return previous(config)
 
-    setattr(fit_clusterless_mark_encoding, _PATCH_MARKER, True)
-    clusterless.fit_clusterless_mark_encoding = fit_clusterless_mark_encoding
-    _synchronize_aliases(previous, fit_clusterless_mark_encoding)
+    setattr(_clusterless_mark_config, _BENCHMARK_MARK_CONFIG_PATCH_MARKER, True)
+    setattr(_clusterless_mark_config, "__hipporeplayimm_original__", previous)
+    benchmarks._clusterless_mark_config = _clusterless_mark_config
 
 
 def _validate_nested_encoding_config(config: object | None) -> None:
@@ -67,40 +92,107 @@ def _validate_clusterless_mark_config(config: object | None) -> None:
     _positive_integer_config_value(config, "mark_kde_max_neighbors")
 
 
+def _validate_benchmark_clusterless_mark_config(config: object | None) -> None:
+    if config is None:
+        return
+    _finite_config_value(
+        config,
+        "clusterless_mark_smoothing_sigma_bins",
+        positive=False,
+        message_name="mark_smoothing_sigma_bins",
+    )
+    _finite_config_value(
+        config,
+        "clusterless_mark_prior_count",
+        positive=False,
+        message_name="mark_prior_count",
+    )
+    _finite_config_value(
+        config,
+        "clusterless_mark_variance_floor",
+        positive=True,
+        message_name="mark_variance_floor",
+    )
+    _finite_config_value(
+        config,
+        "clusterless_rate_floor_hz",
+        positive=True,
+        message_name="rate_floor_hz",
+    )
+    _finite_config_value(
+        config,
+        "clusterless_mark_kde_bandwidth",
+        positive=True,
+        optional=True,
+        message_name="mark_kde_bandwidth",
+    )
+    _finite_config_value(
+        config,
+        "clusterless_mark_kde_spatial_sigma_bins",
+        positive=False,
+        optional=True,
+        message_name="mark_kde_spatial_sigma_bins",
+    )
+    _positive_integer_config_value(
+        config,
+        "clusterless_mark_kde_max_neighbors",
+        message_name="mark_kde_max_neighbors",
+    )
+
+
 def _finite_config_value(
     config: object,
     name: str,
     *,
     positive: bool,
     optional: bool = False,
+    message_name: str | None = None,
 ) -> float | None:
+    message = _NUMERIC_MESSAGES[message_name or name]
     value = getattr(config, name, None)
     if value is None:
         if optional:
             return None
-        raise ValueError(_NUMERIC_MESSAGES[name])
-    if isinstance(value, (bool, np.bool_)):
-        raise ValueError(_NUMERIC_MESSAGES[name])
+        raise ValueError(message)
+    item = _scalar_config_item(value, message)
     try:
-        numeric = float(value)
+        numeric = float(item)
     except (TypeError, ValueError, OverflowError) as exc:
-        raise ValueError(_NUMERIC_MESSAGES[name]) from exc
+        raise ValueError(message) from exc
     if not np.isfinite(numeric) or numeric < 0.0 or (positive and numeric <= 0.0):
-        raise ValueError(_NUMERIC_MESSAGES[name])
+        raise ValueError(message)
     return numeric
 
 
-def _positive_integer_config_value(config: object, name: str) -> int:
+def _positive_integer_config_value(config: object, name: str, message_name: str | None = None) -> int:
+    message = _NUMERIC_MESSAGES[message_name or name]
     value = getattr(config, name, None)
-    if isinstance(value, (bool, np.bool_)):
-        raise ValueError(_NUMERIC_MESSAGES[name])
+    item = _scalar_config_item(value, message)
     try:
-        numeric = float(value)
+        numeric = float(item)
     except (TypeError, ValueError, OverflowError) as exc:
-        raise ValueError(_NUMERIC_MESSAGES[name]) from exc
+        raise ValueError(message) from exc
     if not np.isfinite(numeric) or not numeric.is_integer() or numeric < 1.0:
-        raise ValueError(_NUMERIC_MESSAGES[name])
+        raise ValueError(message)
     return int(numeric)
+
+
+def _scalar_config_item(value: object, message: str) -> object:
+    try:
+        array = np.asarray(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(message) from exc
+    if array.ndim != 0:
+        raise ValueError(message)
+    if np.issubdtype(array.dtype, np.bool_):
+        raise ValueError(message)
+    try:
+        item = array.item()
+    except ValueError as exc:
+        raise ValueError(message) from exc
+    if isinstance(item, (bool, np.bool_)):
+        raise ValueError(message)
+    return item
 
 
 def _synchronize_aliases(previous: object, patched: object) -> None:
@@ -110,3 +202,6 @@ def _synchronize_aliases(previous: object, patched: object) -> None:
             continue
         if getattr(module, "fit_clusterless_mark_encoding", None) is previous:
             module.fit_clusterless_mark_encoding = patched
+
+
+__all__ = ["apply_clusterless_encoding_config_validation_patch"]

@@ -1,8 +1,10 @@
-"""Reject boolean finite-displacement decoder configuration values."""
+"""Reject invalid finite-displacement decoder configuration values."""
 
 from __future__ import annotations
 
 from functools import wraps
+
+import numpy as np
 
 from .state_space_utils import _is_boolean_scalar
 
@@ -14,6 +16,26 @@ _WRAPPER_MARKER = "_displacement_config_bool_validation_wrapper"
 def _reject_boolean_scalar(name: str, value: object) -> None:
     if _is_boolean_scalar(value):
         raise TypeError(f"{name} must be numeric, not boolean")
+
+
+def _coerce_nonnegative_integer_scalar(name: str, value: object) -> int:
+    _reject_boolean_scalar(name, value)
+    try:
+        array = np.asarray(value)
+    except (TypeError, ValueError) as exc:
+        raise TypeError(f"{name} must be a nonnegative integer scalar") from exc
+    if array.ndim != 0:
+        raise TypeError(f"{name} must be a nonnegative integer scalar")
+    try:
+        numeric = float(array)
+    except (TypeError, ValueError) as exc:
+        raise TypeError(f"{name} must be a nonnegative integer scalar") from exc
+    if not np.isfinite(numeric) or numeric < 0.0 or not numeric.is_integer():
+        raise ValueError(f"{name} must be a nonnegative integer")
+    integer_info = np.iinfo(np.dtype(int))
+    if numeric < integer_info.min or numeric > integer_info.max:
+        raise ValueError(f"{name} must fit into integer range")
+    return int(numeric)
 
 
 def _mark_bool_guard(wrapper):
@@ -50,13 +72,13 @@ def _originals(displacement_imm, displacement_momentum) -> dict[str, object]:
 
 
 def apply_displacement_config_bool_validation_patch() -> None:
-    """Install bool guards for finite-displacement decoder configuration.
+    """Install value guards for finite-displacement decoder configuration.
 
     Python booleans are subclasses of ``int`` and NumPy booleans cast cleanly to
-    ``int``/``float``.  The finite-displacement state-space models use explicit
-    numeric casts for lattice radii and scale parameters, so a misspecified
-    boolean can otherwise silently change the displacement lattice or transition
-    scale instead of failing fast.
+    ``int``/``float``.  Fractional numeric values also cast through ``int(...)``.
+    The finite-displacement state-space models use explicit numeric casts for
+    lattice radii and scale parameters, so malformed values can otherwise silently
+    change the displacement lattice or transition scale instead of failing fast.
 
     The module-level flag is not sufficient by itself: tests or downstream code
     can replace the guarded helpers while leaving the flag set.  Re-checking the
@@ -84,8 +106,8 @@ def apply_displacement_config_bool_validation_patch() -> None:
     @_mark_bool_guard
     @wraps(original_lattice)
     def displacement_lattice(bin_centers, *, radius_bins):
-        _reject_boolean_scalar("displacement_radius_bins", radius_bins)
-        return original_lattice(bin_centers, radius_bins=radius_bins)
+        radius = _coerce_nonnegative_integer_scalar("displacement_radius_bins", radius_bins)
+        return original_lattice(bin_centers, radius_bins=radius)
 
     @_mark_bool_guard
     @wraps(original_positive_config_value)
@@ -109,13 +131,13 @@ def apply_displacement_config_bool_validation_patch() -> None:
     @_mark_bool_guard
     @wraps(original_momentum_score)
     def score_displacement_momentum_exact(emissions, bin_centers, config, transition_durations_s, *args, **kwargs):
-        _reject_boolean_scalar("displacement_radius_bins", getattr(config, "displacement_radius_bins", 2))
+        _coerce_nonnegative_integer_scalar("displacement_radius_bins", getattr(config, "displacement_radius_bins", 2))
         return original_momentum_score(emissions, bin_centers, config, transition_durations_s, *args, **kwargs)
 
     @_mark_bool_guard
     @wraps(original_imm_score)
     def score_displacement_imm_exact(emissions, bin_centers, config, transition_durations_s, *args, **kwargs):
-        _reject_boolean_scalar("displacement_radius_bins", getattr(config, "displacement_radius_bins", 2))
+        _coerce_nonnegative_integer_scalar("displacement_radius_bins", getattr(config, "displacement_radius_bins", 2))
         return original_imm_score(emissions, bin_centers, config, transition_durations_s, *args, **kwargs)
 
     displacement_momentum._displacement_lattice = displacement_lattice

@@ -61,8 +61,8 @@ _INFLUENCE_VALUE_COLUMNS = (
 )
 
 
-def _column_has_complete_metadata(scores: Any, column: str) -> bool:
-    """Return True only when an optional grouping key is populated for every row."""
+def _column_has_observed_metadata(scores: Any, column: str) -> bool:
+    """Return True when an optional grouping key is populated for at least one row."""
 
     try:
         values = scores[column]
@@ -70,7 +70,7 @@ def _column_has_complete_metadata(scores: Any, column: str) -> bool:
         return False
     if bool(getattr(values, "empty", False)):
         return False
-    return bool(values.notna().all())
+    return bool(values.notna().any())
 
 
 def _scoped_event_group_columns(scores: Any) -> list[str]:
@@ -83,7 +83,7 @@ def _scoped_event_group_columns(scores: Any) -> list[str]:
             columns.append(event_column)
             break
     for optional in _EVENT_GROUP_SCOPE_COLUMNS:
-        if optional in frame_columns and optional not in columns and _column_has_complete_metadata(scores, optional):
+        if optional in frame_columns and optional not in columns and _column_has_observed_metadata(scores, optional):
             columns.append(optional)
     return columns
 

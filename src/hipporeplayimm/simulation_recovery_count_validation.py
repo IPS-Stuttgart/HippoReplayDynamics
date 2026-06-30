@@ -179,6 +179,10 @@ def _validated_count_matrix(counts: Any, *, n_cells: int) -> np.ndarray:
     rounded = np.rint(values)
     if not np.all(np.isclose(values, rounded, rtol=0.0, atol=0.0)):
         raise ValueError("counts must contain integer-valued counts")
+    integer_info = np.iinfo(np.dtype(int))
+    max_safe_float = np.nextafter(float(integer_info.max), 0.0)
+    if np.any(rounded > max_safe_float):
+        raise ValueError("counts must fit into integer count range")
     return np.asarray(rounded, dtype=int)
 
 

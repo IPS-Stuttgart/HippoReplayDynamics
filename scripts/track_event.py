@@ -260,16 +260,23 @@ def _trajectory_from_prefix_scores(model: object, emissions: LogEmissionTensor, 
     full_score = model.score(emissions, bin_centers)
     if full_score.trajectory_log_posterior is not None:
         log_posteriors = np.asarray(full_score.trajectory_log_posterior, dtype=float)
-        return (
-            _trajectory_rows_from_log_posteriors(
-                log_posteriors=log_posteriors,
-                emissions=emissions,
-                bin_centers=bin_centers,
-                score=full_score,
-                likelihood_column="event_log_likelihood",
-            ),
-            log_posteriors,
+        trajectory = _trajectory_rows_from_log_posteriors(
+            log_posteriors=log_posteriors,
+            emissions=emissions,
+            bin_centers=bin_centers,
+            score=full_score,
+            likelihood_column="event_log_likelihood",
         )
+        if isinstance(model, CandidateKinematicModel) and model.mode == "imm":
+            for time_index in range(emissions.n_time):
+                mode_row = _imm_mode_probabilities_for_prefix(
+                    model,
+                    _prefix_emissions(emissions, time_index + 1),
+                    bin_centers,
+                )
+                for key, value in mode_row.items():
+                    trajectory.loc[time_index, key] = value
+        return trajectory, log_posteriors
 
     rows: list[dict[str, float | int | str]] = []
     log_posteriors = np.empty((emissions.n_time, bin_centers.shape[0]), dtype=float)

@@ -24,6 +24,7 @@ from .evidence_reporting import _coerce_bool_series
 _PATCHED_FLAG = "_simulation_recovery_session_event_count_patch_applied"
 _CERTIFIED_EVENT_PATCHED_FLAG = "_simulation_recovery_certified_event_duplicate_model_patch_applied"
 _SOURCE_SCORE_FILE_COLUMN = "source_recovery_score_file"
+_EVENT_ID_COLUMN = "event_id"
 _SUMMARY_BOOL_COLUMNS = (
     "recovered_expected_model",
     "exact_surrogate_recovered_expected_model",
@@ -37,7 +38,7 @@ _EVENT_SCOPE_COLUMNS = (
     "benchmark_random_seed",
     "simulation_event_index",
     "event_index",
-    "event_id",
+    _EVENT_ID_COLUMN,
     "window_index",
     "benchmark_cell_split_index",
     "event_window_variant",
@@ -276,20 +277,23 @@ def _certified_vs_exact_event_recovery(
 
 
 def _extend_best_row_event_scope(best_row_flags: Any) -> None:
-    """Keep score-file provenance in the primary event grouping helpers."""
+    """Keep score-file provenance and explicit event IDs in event grouping helpers."""
 
-    columns = tuple(getattr(best_row_flags, "_GROUP_COLUMNS", ()))
-    if _SOURCE_SCORE_FILE_COLUMN in columns:
-        return
-    if "session" in columns:
-        index = columns.index("session") + 1
-    else:
-        index = 0
-    best_row_flags._GROUP_COLUMNS = (
-        *columns[:index],
-        _SOURCE_SCORE_FILE_COLUMN,
-        *columns[index:],
-    )
+    columns = list(getattr(best_row_flags, "_GROUP_COLUMNS", ()))
+    insert_after = "session"
+    for column in (_SOURCE_SCORE_FILE_COLUMN, _EVENT_ID_COLUMN):
+        if column in columns:
+            insert_after = column
+            continue
+        if insert_after in columns:
+            index = columns.index(insert_after) + 1
+        elif "session" in columns:
+            index = columns.index("session") + 1
+        else:
+            index = 0
+        columns.insert(index, column)
+        insert_after = column
+    best_row_flags._GROUP_COLUMNS = tuple(columns)
 
 
 def _sync_recovery_diagnostics(recovery: Any) -> None:

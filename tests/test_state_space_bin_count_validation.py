@@ -4,6 +4,7 @@ import pytest
 from hipporeplayimm import state_space_first_order, state_space_model
 from hipporeplayimm.state_space_utils import (
     _coerce_valid_bin_mask,
+    _mass_retaining_candidate_indices,
     _top_candidate_indices,
     _uniform_log_prior,
     _uniform_probabilities,
@@ -36,6 +37,38 @@ def test_state_space_top_candidates_reject_non_integer_counts(bad_top_k):
 def test_state_space_top_candidates_reject_negative_counts():
     with pytest.raises(ValueError, match="top_k must be nonnegative"):
         _top_candidate_indices(np.array([0.0, 1.0], dtype=float), -1)
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "error_type", "message"),
+    [
+        ({"mass_threshold": None, "min_k": np.array([1])}, TypeError, "min_k must be an integer"),
+        ({"mass_threshold": None, "max_k": np.array([2])}, TypeError, "max_k must be an integer"),
+        ({"mass_threshold": 0.0, "min_k": -1}, ValueError, "min_k must be nonnegative"),
+        ({"mass_threshold": 0.0, "max_k": -1}, ValueError, "max_k must be nonnegative"),
+    ],
+)
+def test_mass_retaining_candidates_reject_bad_counts_when_threshold_is_disabled(kwargs, error_type, message):
+    scores = np.array([0.0, -1.0, -2.0], dtype=float)
+
+    with pytest.raises(error_type, match=message):
+        _mass_retaining_candidate_indices(scores, **kwargs)
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "error_type", "message"),
+    [
+        ({"mass_threshold": None, "min_k": np.array([1])}, TypeError, "min_k must be an integer"),
+        ({"mass_threshold": None, "max_k": np.array([2])}, TypeError, "max_k must be an integer"),
+        ({"mass_threshold": 0.0, "min_k": -1}, ValueError, "min_k must be nonnegative"),
+        ({"mass_threshold": 0.0, "max_k": -1}, ValueError, "max_k must be nonnegative"),
+    ],
+)
+def test_mass_retaining_candidate_aliases_reject_bad_counts_when_threshold_is_disabled(kwargs, error_type, message):
+    scores = np.array([0.0, -1.0, -2.0], dtype=float)
+
+    with pytest.raises(error_type, match=message):
+        state_space_model._mass_retaining_candidate_indices(scores, **kwargs)
 
 
 def test_state_space_top_candidates_preserve_zero_as_full_support():

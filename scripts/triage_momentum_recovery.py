@@ -30,10 +30,24 @@ import pandas as pd
 DEFAULT_EXPECTED_MOMENTUM_MODEL = "sorted-spike-state-space-momentum"
 EXACT_SUPPORT = "exact_full_grid"
 TRUNCATED_SUPPORT = "truncated_full_grid"
+DEGENERATE_SUPPORT = "degenerate_single_bin"
+PYRECEST_PARTICLE_SUPPORT = "particle_approximation"
 _MISSING_STATUS_VALUES = {"", "nan", "na", "n/a", "none", "null", "<na>"}
 _MISSING_SUPPORT_VALUES = {"", "nan", "na", "n/a", "none", "null", "<na>"}
 _TRUE_BOOL_VALUES = {"1", "1.0", "true", "t", "yes", "y", "on"}
 _FALSE_BOOL_VALUES = {"0", "0.0", "false", "f", "no", "n", "off"}
+
+EVIDENCE_SUPPORT_DIAGNOSTIC_COLUMNS = (
+    "diagnostic_candidate_evidence_support",
+    "diagnostic_state_space_sparse_momentum_evidence_support",
+    "diagnostic_state_space_trajectory_imm_evidence_support",
+    "diagnostic_state_space_displacement_momentum_evidence_support",
+    "diagnostic_state_space_displacement_imm_evidence_support",
+    "diagnostic_state_space_momentum_evidence_support",
+    "diagnostic_state_space_imm_evidence_support",
+    "diagnostic_goal_state_space_evidence_support",
+    "diagnostic_pyrecest_evidence_support",
+)
 
 SCORE_FILENAMES = (
     "simulation_recovery_sweep_event_scores.csv",
@@ -347,20 +361,31 @@ def _with_support_columns(scores: pd.DataFrame) -> pd.DataFrame:
 
 def _support_from_diagnostic_columns(scores: pd.DataFrame) -> pd.Series:
     support_columns = [
-        col
-        for col in (
-            "diagnostic_candidate_evidence_support",
-            "diagnostic_state_space_momentum_evidence_support",
-            "diagnostic_state_space_imm_evidence_support",
-        )
-        if col in scores.columns
+        column for column in EVIDENCE_SUPPORT_DIAGNOSTIC_COLUMNS if column in scores.columns
     ]
     if not support_columns:
         return pd.Series(EXACT_SUPPORT, index=scores.index)
-    diagnostics = scores[support_columns].copy()
-    for column in support_columns:
-        diagnostics[column] = diagnostics[column].where(~diagnostics[column].map(_is_missing_support_value), pd.NA)
-    return diagnostics.bfill(axis=1).iloc[:, 0].fillna(EXACT_SUPPORT)
+    return scores[support_columns].apply(_prioritized_evidence_support, axis=1)
+
+
+def _prioritized_evidence_support(row: pd.Series) -> str:
+    labels: list[str] = []
+    for value in row:
+        if _is_missing_support_value(value):
+            continue
+        text = str(value).strip()
+        if text:
+            labels.append(text)
+    for non_exact_support in (
+        TRUNCATED_SUPPORT,
+        DEGENERATE_SUPPORT,
+        PYRECEST_PARTICLE_SUPPORT,
+    ):
+        if non_exact_support in labels:
+            return non_exact_support
+    if EXACT_SUPPORT in labels:
+        return EXACT_SUPPORT
+    return labels[0] if labels else EXACT_SUPPORT
 
 
 def _is_missing_support_value(value: object) -> bool:

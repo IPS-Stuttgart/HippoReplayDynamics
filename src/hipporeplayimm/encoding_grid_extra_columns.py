@@ -73,6 +73,8 @@ def _apply_encoding_bool_validation_patch(encoding) -> None:
         return original_validate_encoding_config(config)
 
     def time_bin_edges(start, end, time_bin_s):
+        _reject_boolean_numeric(start, "ripple start")
+        _reject_boolean_numeric(end, "ripple end")
         _reject_boolean_numeric(time_bin_s, "time_bin_s")
         return original_time_bin_edges(start, end, time_bin_s)
 

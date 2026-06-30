@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from functools import wraps
+from itertools import product
 from typing import Any
 
 import numpy as np
@@ -9,6 +11,7 @@ import pandas as pd
 
 _FLOAT_PATCHED_FLAG = "_ground_truth_strict_float_metadata_patch_applied"
 _BOOL_PATCHED_FLAG = "_ground_truth_strict_bool_metadata_patch_applied"
+_CONFIG_PATCHED_FLAG = "_ground_truth_config_numeric_validation_patch_applied"
 _SCORE_BOOL_PATCHED_FLAG = "_score_metadata_strict_bool_metadata_patch_applied"
 _EVIDENCE_BOOL_PATCHED_FLAG = "_evidence_reporting_strict_bool_metadata_patch_applied"
 
@@ -77,6 +80,59 @@ def apply_ground_truth_float_metadata_patch() -> None:
         gt._parse_bool = parse_bool
         setattr(gt, _BOOL_PATCHED_FLAG, True)
 
+    if not getattr(gt, _CONFIG_PATCHED_FLAG, False):
+        original_ground_truth_config_init = gt.GroundTruthConfig.__init__
+        original_sensitivity_config_init = gt.GroundTruthSensitivityConfig.__init__
+        original_ground_truth_configs = gt.GroundTruthSensitivityConfig.ground_truth_configs
+
+        @wraps(original_ground_truth_config_init)
+        def ground_truth_config_init(self: Any, *args: Any, **kwargs: Any) -> None:
+            original_ground_truth_config_init(self, *args, **kwargs)
+            _validate_ground_truth_config(self)
+
+        @wraps(original_sensitivity_config_init)
+        def sensitivity_config_init(self: Any, *args: Any, **kwargs: Any) -> None:
+            original_sensitivity_config_init(self, *args, **kwargs)
+            _validate_ground_truth_sensitivity_config(self)
+
+        @wraps(original_ground_truth_configs)
+        def ground_truth_configs(self: Any):
+            visit_radii_cm = _parse_positive_config_sequence(
+                "visit_radii_cm",
+                self.visit_radii_cm,
+            )
+            min_dwells_s = _parse_nonnegative_config_sequence(
+                "min_dwells_s",
+                self.min_dwells_s,
+            )
+            future_horizons_s = _parse_positive_config_sequence(
+                "future_horizons_s",
+                self.future_horizons_s,
+            )
+            well_arrival_window_s = _parse_positive_config_value(
+                "well_arrival_window_s",
+                self.well_arrival_window_s,
+            )
+            return tuple(
+                gt.GroundTruthConfig(
+                    well_arrival_window_s=well_arrival_window_s,
+                    visit_radius_cm=float(visit_radius_cm),
+                    min_dwell_s=float(min_dwell_s),
+                    future_horizon_s=float(future_horizon_s),
+                    event_epoch=self.event_epoch,
+                )
+                for visit_radius_cm, min_dwell_s, future_horizon_s in product(
+                    visit_radii_cm,
+                    min_dwells_s,
+                    future_horizons_s,
+                )
+            )
+
+        gt.GroundTruthConfig.__init__ = ground_truth_config_init
+        gt.GroundTruthSensitivityConfig.__init__ = sensitivity_config_init
+        gt.GroundTruthSensitivityConfig.ground_truth_configs = ground_truth_configs
+        setattr(gt, _CONFIG_PATCHED_FLAG, True)
+
     from . import score_metadata as score_meta
 
     if not getattr(score_meta, _SCORE_BOOL_PATCHED_FLAG, False):
@@ -104,6 +160,79 @@ def apply_ground_truth_float_metadata_patch() -> None:
         evidence._coerce_bool_series = coerce_bool_series
         _synchronize_coerce_bool_series_aliases(coerce_bool_series)
         setattr(evidence, _EVIDENCE_BOOL_PATCHED_FLAG, True)
+
+
+def _validate_ground_truth_config(config: Any) -> None:
+    _parse_positive_config_value("well_arrival_window_s", config.well_arrival_window_s)
+    _parse_positive_config_value("visit_radius_cm", config.visit_radius_cm)
+    _parse_nonnegative_config_value("min_dwell_s", config.min_dwell_s)
+    _parse_positive_config_value("future_horizon_s", config.future_horizon_s)
+
+
+def _validate_ground_truth_sensitivity_config(config: Any) -> None:
+    _parse_positive_config_sequence("visit_radii_cm", config.visit_radii_cm)
+    _parse_nonnegative_config_sequence("min_dwells_s", config.min_dwells_s)
+    _parse_positive_config_sequence("future_horizons_s", config.future_horizons_s)
+    _parse_positive_config_value("well_arrival_window_s", config.well_arrival_window_s)
+
+
+def _parse_positive_config_value(name: str, value: Any) -> float:
+    numeric = _parse_config_scalar(name, value)
+    if numeric <= 0.0:
+        raise ValueError(f"{name} must be finite and positive")
+    return numeric
+
+
+def _parse_nonnegative_config_value(name: str, value: Any) -> float:
+    numeric = _parse_config_scalar(name, value)
+    if numeric < 0.0:
+        raise ValueError(f"{name} must be finite and nonnegative")
+    return numeric
+
+
+def _parse_config_scalar(name: str, value: Any) -> float:
+    if isinstance(value, (bool, np.bool_)):
+        raise TypeError(f"{name} must be numeric, not boolean")
+    raw = np.asarray(value)
+    if raw.ndim != 0:
+        raise TypeError(f"{name} must be a scalar")
+    try:
+        numeric = float(raw)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise TypeError(f"{name} must be numeric") from exc
+    if not np.isfinite(numeric):
+        raise ValueError(f"{name} must be finite")
+    return float(numeric)
+
+
+def _parse_positive_config_sequence(name: str, values: Any) -> tuple[float, ...]:
+    parsed = _parse_config_sequence(name, values)
+    if not parsed:
+        raise ValueError(f"{name} must contain at least one value")
+    if any(value <= 0.0 for value in parsed):
+        raise ValueError(f"{name} must contain finite positive values")
+    return parsed
+
+
+def _parse_nonnegative_config_sequence(name: str, values: Any) -> tuple[float, ...]:
+    parsed = _parse_config_sequence(name, values)
+    if not parsed:
+        raise ValueError(f"{name} must contain at least one value")
+    if any(value < 0.0 for value in parsed):
+        raise ValueError(f"{name} must contain finite nonnegative values")
+    return parsed
+
+
+def _parse_config_sequence(name: str, values: Any) -> tuple[float, ...]:
+    try:
+        raw = np.asarray(values)
+    except (TypeError, ValueError) as exc:
+        raise TypeError(f"{name} must be a sequence of numeric values") from exc
+    if raw.ndim == 0:
+        raise TypeError(f"{name} must be a sequence")
+    if raw.size == 0:
+        return ()
+    return tuple(_parse_config_scalar(name, value) for value in raw.reshape(-1))
 
 
 def _parse_float_metadata_value(column: str, value: Any) -> float:

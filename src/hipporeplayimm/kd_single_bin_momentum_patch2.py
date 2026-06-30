@@ -15,7 +15,10 @@ def _current_patch_installed(kd: object) -> bool:
 
 def apply_kd_single_bin_momentum_patch2() -> None:
     from . import kd_impossible_emission_patch as impossible_patch
+    from . import kd_random_effects_validation as random_effects_validation
     from . import kd_reference as kd
+
+    random_effects_validation.apply_kd_random_effects_validation_patch()
 
     if _current_patch_installed(kd):
         return

@@ -59,6 +59,25 @@ def test_exact_model_transition_duration_helpers_reject_invalid_values(coerce_du
 
 
 @pytest.mark.parametrize(
+    "coerce_durations",
+    [
+        sparse_transition_durations,
+        trajectory_imm_transition_durations,
+        displacement_transition_durations,
+        displacement_imm_transition_durations,
+    ],
+)
+def test_exact_model_transition_duration_helpers_reject_array_shaped_scalars(coerce_durations) -> None:
+    for bad_n_time in (np.array([3]), np.array([[3]]), [3]):
+        with pytest.raises(TypeError, match="n_time"):
+            coerce_durations([], n_time=bad_n_time, fallback_dt=0.01)
+
+    for bad_fallback_dt in (np.array([0.01]), np.array([[0.01]]), [0.01]):
+        with pytest.raises(TypeError, match="fallback dt"):
+            coerce_durations([], n_time=3, fallback_dt=bad_fallback_dt)
+
+
+@pytest.mark.parametrize(
     "duration_decays",
     [
         sparse_duration_decays,
@@ -79,3 +98,19 @@ def test_exact_model_duration_decay_helpers_reject_invalid_durations(duration_de
             duration_decays(config, durations, 0.01)
 
     assert duration_decays(config, np.empty(0, dtype=float), 0.01).size == 0
+
+
+@pytest.mark.parametrize(
+    "duration_decays",
+    [
+        sparse_duration_decays,
+        trajectory_imm_duration_decays,
+        displacement_duration_decays,
+        displacement_imm_duration_decays,
+    ],
+)
+def test_exact_model_duration_decay_helpers_reject_array_shaped_reference_dt(duration_decays) -> None:
+    config = StateSpaceDecoderConfig()
+    for reference_dt in (np.array([0.01]), np.array([[0.01]]), [0.01]):
+        with pytest.raises(TypeError, match="reference dt"):
+            duration_decays(config, np.array([0.01], dtype=float), reference_dt)

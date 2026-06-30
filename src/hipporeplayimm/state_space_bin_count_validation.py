@@ -186,20 +186,14 @@ def apply_state_space_bin_count_validation_patch() -> None:
     ) -> np.ndarray:
         top_k_count = None if top_k is None else _nonnegative_integer_count("top_k", top_k)
         threshold = _optional_mass_threshold("mass_threshold", mass_threshold)
-        if threshold is None or threshold <= 0.0:
-            return original_mass_retaining_candidate_indices(
-                log_emission,
-                threshold,
-                top_k=top_k_count,
-                min_k=min_k,
-                max_k=max_k,
-            )
+        min_count = _nonnegative_integer_count("min_k", min_k)
+        max_count = _nonnegative_integer_count("max_k", max_k)
         return original_mass_retaining_candidate_indices(
             log_emission,
             threshold,
             top_k=top_k_count,
-            min_k=_integer_count("min_k", min_k),
-            max_k=_integer_count("max_k", max_k),
+            min_k=min_count,
+            max_k=max_count,
         )
 
     patched = {

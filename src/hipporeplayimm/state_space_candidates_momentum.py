@@ -46,6 +46,7 @@ def _score_momentum_candidates(
         velocity_decay,
         name="velocity_decays",
         minimum=0.0,
+        maximum=1.0,
     )
     log_pair = _init_pair_log_alpha(
         emissions.log_likelihood,
@@ -105,6 +106,8 @@ def _transition_parameter_series(
     name: str,
     minimum: float | None = None,
     include_minimum: bool = True,
+    maximum: float | None = None,
+    include_maximum: bool = True,
 ) -> np.ndarray:
     """Return one scalar transition parameter per adjacent time-bin pair."""
 
@@ -127,6 +130,17 @@ def _transition_parameter_series(
                 raise ValueError(f"{name} values must be >= {minimum_value:g}")
         elif np.any(out <= minimum_value):
             raise ValueError(f"{name} values must be > {minimum_value:g}")
+    if maximum is None and name == "velocity_decays":
+        maximum = 1.0
+    if maximum is not None:
+        maximum_value = float(maximum)
+        if not np.isfinite(maximum_value):
+            raise ValueError("maximum must be finite")
+        if include_maximum:
+            if np.any(out > maximum_value):
+                raise ValueError(f"{name} values must be <= {maximum_value:g}")
+        elif np.any(out >= maximum_value):
+            raise ValueError(f"{name} values must be < {maximum_value:g}")
     return out
 
 

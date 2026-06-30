@@ -82,6 +82,18 @@ def test_emission_time_bin_width_rejects_boolean_scalar():
 
 
 @pytest.mark.parametrize(
+    ("start", "end", "message"),
+    [
+        (True, 1.0, "ripple start"),
+        (0.0, False, "ripple end"),
+    ],
+)
+def test_emission_time_bin_edges_reject_boolean_bounds(start, end, message):
+    with pytest.raises(TypeError, match=message):
+        _time_bin_edges(start, end, 0.02)
+
+
+@pytest.mark.parametrize(
     ("kwargs", "message"),
     [
         ({"dt": True}, "dt"),

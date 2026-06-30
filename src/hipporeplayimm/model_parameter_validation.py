@@ -62,7 +62,19 @@ def _is_boolean_array(value: object) -> bool:
     return False
 
 
+def _reject_array_shaped_scalar(name: str, value: object) -> None:
+    """Reject values that NumPy/Python might coerce from an array to a scalar."""
+
+    try:
+        arr = np.asarray(value)
+    except ValueError as exc:
+        raise TypeError(f"{name} must be a numeric scalar") from exc
+    if arr.ndim != 0:
+        raise TypeError(f"{name} must be a numeric scalar")
+
+
 def _reject_boolean_scalar(name: str, value: object) -> None:
+    _reject_array_shaped_scalar(name, value)
     if _is_boolean_scalar(value):
         raise TypeError(f"{name} must be a numeric scalar, not boolean")
 

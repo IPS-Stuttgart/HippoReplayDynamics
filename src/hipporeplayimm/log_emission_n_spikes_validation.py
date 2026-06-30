@@ -64,6 +64,15 @@ def _contains_boolean_values(values: Any) -> bool:
     return False
 
 
+def _require_scalar_count(value: Any, name: str) -> None:
+    try:
+        raw = np.asarray(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must be a scalar count") from exc
+    if raw.ndim != 0:
+        raise ValueError(f"{name} must be a scalar count")
+
+
 def _validate_n_spikes(emissions: LogEmissionTensor) -> None:
     if _contains_boolean_values(emissions.spike_counts):
         raise ValueError("spike_counts must be numeric counts, not boolean values")
@@ -72,6 +81,7 @@ def _validate_n_spikes(emissions: LogEmissionTensor) -> None:
     if not np.all(np.isclose(spike_counts, rounded_counts, rtol=0.0, atol=0.0)):
         raise ValueError("spike_counts must be integer-valued")
     total_spikes = float(rounded_counts.sum())
+    _require_scalar_count(emissions.n_spikes, "n_spikes")
     if _contains_boolean_values(emissions.n_spikes):
         raise ValueError("n_spikes must be a numeric count, not boolean")
     try:

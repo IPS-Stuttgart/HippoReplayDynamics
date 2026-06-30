@@ -4,6 +4,9 @@ from __future__ import annotations
 
 from .goal_state_space import GoalStateSpaceReplayModel
 from .models import EventScore, LOG_ZERO, _normalize_log_weights, _posterior_diagnostics
+from .candidate_active_support_validation import (
+    apply_candidate_active_support_validation_patch as _apply_candidate_active_support_validation_patch,
+)
 from .momentum_prediction_decay_validation import (
     apply_momentum_prediction_decay_validation_patch as _apply_momentum_prediction_decay_validation_patch,
 )
@@ -79,6 +82,7 @@ from .state_space_utils import (
 # duration- and occupancy-aware. Mark it before legacy runtime patch modules
 # inspect the public import surface so they do not replace it with older scorers.
 StateSpaceReplayModel.score._native_duration_occupancy_aware = True
+_apply_candidate_active_support_validation_patch()
 _apply_sparse_momentum_bin_center_validation_patch()
 _apply_trajectory_imm_single_bin_diagnostics_patch()
 _apply_momentum_prediction_decay_validation_patch()

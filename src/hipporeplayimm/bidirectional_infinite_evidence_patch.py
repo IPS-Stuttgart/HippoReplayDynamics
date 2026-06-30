@@ -170,7 +170,7 @@ def apply_bidirectional_infinite_evidence_patch() -> None:
                 candidate_indices=candidate_indices,
                 return_trajectory=True,
             )
-        reverse_return_trajectory = True if return_trajectory is False else return_trajectory
+        reverse_return_trajectory = True if return_trajectory is None or return_trajectory is False else return_trajectory
         reverse = direct.ReverseTimeReplayModel(self.base_model).score(
             emissions,
             bin_centers,

@@ -300,7 +300,11 @@ def _patch_weighted_ensemble_emissions(accuracy_upgrades) -> None:
         *,
         alpha: float = 0.5,
     ) -> LogEmissionTensor:
-        alpha = float(alpha)
+        alpha = _finite_float_scalar(
+            "alpha",
+            alpha,
+            "alpha must be finite and lie in [0, 1]",
+        )
         if not 0.0 <= alpha <= 1.0:
             raise ValueError("alpha must lie in [0, 1]")
 

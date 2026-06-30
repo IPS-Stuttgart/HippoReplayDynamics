@@ -211,8 +211,10 @@ def _load_momentum_grid(shard_paths: list[Path]) -> tuple[np.ndarray, dict[str, 
             for column, (sd_index, decay_index) in enumerate(zip(sd_indices, decay_indices, strict=True)):
                 target = grid[row, int(sd_index), int(decay_index)]
                 value = float(values[local_row, column])
-                if np.isfinite(target) and not np.isclose(target, value):
-                    raise ValueError(f"Conflicting momentum score for event {int(event_id)}, grid ({sd_index}, {decay_index})")
+                if np.isfinite(target):
+                    raise ValueError(
+                        f"Duplicate momentum score for event {int(event_id)}, grid ({sd_index}, {decay_index}) in {shard['path']}"
+                    )
                 grid[row, int(sd_index), int(decay_index)] = value
     missing = np.argwhere(~np.isfinite(grid))
     if missing.size:

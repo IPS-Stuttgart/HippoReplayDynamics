@@ -189,3 +189,16 @@ def test_momentum_grid_loader_rejects_event_metadata_shape_mismatch(tmp_path):
 
     with pytest.raises(ValueError, match="n_time.*event_ids shape"):
         _load_momentum_grid([shard])
+
+
+def test_momentum_grid_loader_rejects_duplicate_event_grid_scores(tmp_path):
+    shard = tmp_path / "duplicate_event_grid.npz"
+    _write_event_metadata_shard(
+        shard,
+        event_ids=np.asarray([10, 10], dtype=int),
+        n_time=np.asarray([3, 3], dtype=int),
+        n_spikes=np.asarray([7, 7], dtype=int),
+    )
+
+    with pytest.raises(ValueError, match="Duplicate momentum score.*event 10"):
+        _load_momentum_grid([shard])

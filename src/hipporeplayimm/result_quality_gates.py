@@ -25,12 +25,31 @@ MARGIN_STRONG = "strong"
 MARGIN_DECISIVE = "decisive"
 MARGIN_UNKNOWN = "unknown"
 _MISSING_STATUS_VALUES = {"", "nan", "na", "n/a", "none", "null", "<na>"}
-_EVENT_GROUP_BASE_COLUMNS = ("session", "event_index")
+_EVENT_GROUP_SESSION_COLUMNS = ("session",)
+_EVENT_GROUP_EVENT_COLUMNS = ("event_index", "event_id")
 _EVENT_GROUP_SCOPE_COLUMNS = (
     "window_role",
     "window_index",
+    "window_variant",
+    "window_start_s",
+    "window_end_s",
+    "window_duration_s",
     "null_index",
     "matched_null_rank",
+    "random_seed",
+    "null_random_seed",
+    "cell_split_index",
+    "cell_split_seed",
+    "cell_split_count",
+    "cell_split_shard_index",
+    "cell_split_shard_count",
+    "split_shard_index",
+    "split_shard_count",
+    "test_cell_fraction",
+    "train_cell_count",
+    "test_cell_count",
+    "train_cell_ids",
+    "test_cell_ids",
     "benchmark_random_seed",
     "benchmark_cell_split_index",
     "benchmark_cell_split_seed",
@@ -60,7 +79,11 @@ def evidence_margin_label(margin: object) -> str:
 def event_group_columns(frame: pd.DataFrame) -> list[str]:
     """Return columns identifying one model-comparison unit."""
 
-    columns = [column for column in _EVENT_GROUP_BASE_COLUMNS if column in frame.columns]
+    columns = [column for column in _EVENT_GROUP_SESSION_COLUMNS if column in frame.columns]
+    for event_column in _EVENT_GROUP_EVENT_COLUMNS:
+        if event_column in frame.columns:
+            columns.append(event_column)
+            break
     for optional in _EVENT_GROUP_SCOPE_COLUMNS:
         if optional in frame.columns and optional not in columns:
             columns.append(optional)

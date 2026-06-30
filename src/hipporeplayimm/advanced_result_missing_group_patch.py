@@ -7,11 +7,14 @@ from collections.abc import Sequence
 import numpy as np
 import pandas as pd
 
+from .advanced_result_threshold_validation import _validated_threshold
 from .wrong_map_missing_group_patch import apply_wrong_map_missing_group_patch, wrong_map_missing_group_patch_current
 
 _PATCH_FLAG = "_missing_group_metadata_patch_applied"
 _EVIDENCE_MARGIN_TABLE_WRAPPER_FLAG = "_missing_group_metadata_evidence_margin_table_wrapper"
 _ADD_COLUMNS_WRAPPER_FLAG = "_missing_group_metadata_add_margin_columns_wrapper"
+_WINDOW_SENSITIVITY_WRAPPER_FLAG = "_missing_group_metadata_window_sensitivity_wrapper"
+_PAIRED_MARGIN_WRAPPER_FLAG = "_missing_group_metadata_paired_margin_wrapper"
 _MARGIN_COLUMNS = [
     "best_model_by_evidence",
     "second_best_model_by_evidence",
@@ -21,10 +24,37 @@ _MARGIN_COLUMNS = [
     "evidence_margin_category",
     "models_compared",
 ]
+_DEFAULT_EVENT_GROUP_COLUMNS = ("session", "event_index")
+_PAIRED_MARGIN_SCOPE_COLUMNS = (
+    "window_role",
+    "window_index",
+    "event_window_variant",
+    "window_variant",
+    "window_start_s",
+    "window_end_s",
+    "window_duration_s",
+    "null_index",
+    "matched_null_rank",
+    "template_event_index",
+    "benchmark_random_seed",
+    "benchmark_cell_split_index",
+    "benchmark_cell_split_seed",
+    "benchmark_event_subset_seed",
+    "benchmark_event_subset_base_seed",
+    "benchmark_test_cell_fraction",
+    "benchmark_cell_split_strategy",
+    "benchmark_cell_split_strata",
+    "cell_split_index",
+    "cell_split_seed",
+    "split_shard_index",
+    "event_shard_index",
+    "train_cell_ids",
+    "test_cell_ids",
+)
 
 
 def apply_advanced_result_missing_group_patch() -> None:
-    """Keep margin diagnostics for rows whose optional grouping metadata is missing."""
+    """Keep diagnostics for rows whose optional grouping metadata is missing."""
 
     from . import advanced_result_diagnostics as diagnostics
 
@@ -34,7 +64,7 @@ def apply_advanced_result_missing_group_patch() -> None:
     def evidence_margin_table(
         scores: pd.DataFrame,
         *,
-        group_cols: Sequence[str] = ("session", "event_index"),
+        group_cols: Sequence[str] = _DEFAULT_EVENT_GROUP_COLUMNS,
         evidence_col: str = "log_evidence",
         model_col: str = "model",
     ) -> pd.DataFrame:
@@ -76,7 +106,7 @@ def apply_advanced_result_missing_group_patch() -> None:
     def add_evidence_margin_columns(
         scores: pd.DataFrame,
         *,
-        group_cols: Sequence[str] = ("session", "event_index"),
+        group_cols: Sequence[str] = _DEFAULT_EVENT_GROUP_COLUMNS,
     ) -> pd.DataFrame:
         """Merge event-level evidence-margin diagnostics back into score rows."""
 
@@ -93,12 +123,149 @@ def apply_advanced_result_missing_group_patch() -> None:
                 margins[column] = margins[column].astype(scores[column].dtype)
         return scores.merge(margins, on=list(group_cols), how="left")
 
+    def summarize_window_sensitivity(
+        scores: pd.DataFrame,
+        *,
+        group_cols: Sequence[str] = _DEFAULT_EVENT_GROUP_COLUMNS,
+        variant_col: str = "window_variant",
+        evidence_col: str = "log_evidence",
+    ) -> pd.DataFrame:
+        """Summarize replay-window sensitivity, retaining NA group keys."""
+
+        if scores.empty or variant_col not in scores.columns:
+            return pd.DataFrame()
+        ok = diagnostics._successful_rows(scores)
+        keys = list(group_cols) + ["model"]
+        summary = ok.groupby(keys, as_index=False, dropna=False).agg(
+            window_variants=(variant_col, "nunique"),
+            evidence_window_mean=(evidence_col, "mean"),
+            evidence_window_sd=(evidence_col, "std"),
+            evidence_window_min=(evidence_col, "min"),
+            evidence_window_max=(evidence_col, "max"),
+        )
+        summary["evidence_window_range"] = summary["evidence_window_max"] - summary["evidence_window_min"]
+        return summary
+
+    def paired_model_margin_decisions(
+        scores: pd.DataFrame,
+        *,
+        positive_model: str,
+        reference_model: str,
+        margin_threshold: float = 0.0,
+        group_cols: Sequence[str] = _DEFAULT_EVENT_GROUP_COLUMNS,
+        evidence_col: str = "log_evidence",
+        model_col: str = "model",
+        true_model_col: str | None = None,
+        positive_true_label: str | None = None,
+    ) -> pd.DataFrame:
+        """Classify paired model wins, retaining NA values in optional group keys."""
+
+        group_cols = _paired_margin_group_cols(scores, group_cols)
+        threshold = _validated_threshold(margin_threshold)
+        ok = diagnostics._comparable_rows(scores)
+        columns = [
+            *group_cols,
+            "positive_model",
+            "reference_model",
+            "positive_log_evidence",
+            "reference_log_evidence",
+            "positive_minus_reference_log_evidence",
+            "margin_threshold",
+            "margin_decision",
+            "positive_model_claimed",
+        ]
+        if true_model_col:
+            columns.extend(
+                [
+                    true_model_col,
+                    "positive_true_label",
+                    "true_is_positive",
+                    "margin_binary_correct",
+                ]
+            )
+        if ok.empty:
+            return pd.DataFrame(columns=columns)
+        missing = [column for column in (*group_cols, evidence_col, model_col) if column not in ok.columns]
+        if true_model_col and true_model_col not in ok.columns:
+            missing.append(true_model_col)
+        if missing:
+            raise KeyError(f"scores is missing required columns: {missing}")
+
+        positive_label = positive_true_label or diagnostics._model_family_label(positive_model)
+        rows: list[dict[str, object]] = []
+        grouped = ok.groupby(list(group_cols), sort=False, dropna=False) if group_cols else (((), ok),)
+        for key, group in grouped:
+            key_tuple = key if isinstance(key, tuple) else (key,)
+            paired = group[group[model_col].astype(str).isin([positive_model, reference_model])]
+            pivot = paired.dropna(subset=[evidence_col]).drop_duplicates(model_col, keep="last")
+            by_model = pivot.set_index(model_col)
+            if positive_model not in by_model.index or reference_model not in by_model.index:
+                continue
+            positive_value = float(by_model.loc[positive_model, evidence_col])
+            reference_value = float(by_model.loc[reference_model, evidence_col])
+            delta = positive_value - reference_value
+            if np.isclose(threshold, 0.0) and np.isclose(delta, 0.0):
+                decision = "ambiguous"
+                positive_claimed = False
+            elif delta >= threshold:
+                decision = positive_model
+                positive_claimed = True
+            elif delta <= -threshold:
+                decision = reference_model
+                positive_claimed = False
+            else:
+                decision = "ambiguous"
+                positive_claimed = False
+            row = {column: value for column, value in zip(group_cols, key_tuple, strict=True)}
+            row.update(
+                {
+                    "positive_model": positive_model,
+                    "reference_model": reference_model,
+                    "positive_log_evidence": positive_value,
+                    "reference_log_evidence": reference_value,
+                    "positive_minus_reference_log_evidence": float(delta),
+                    "margin_threshold": threshold,
+                    "margin_decision": decision,
+                    "positive_model_claimed": bool(positive_claimed),
+                }
+            )
+            if true_model_col:
+                true_label = diagnostics._unique_text_value(group[true_model_col])
+                true_is_positive = diagnostics._model_family_label(true_label) == diagnostics._model_family_label(positive_label)
+                row.update(
+                    {
+                        true_model_col: true_label,
+                        "positive_true_label": positive_label,
+                        "true_is_positive": bool(true_is_positive),
+                        "margin_binary_correct": bool(positive_claimed) == bool(true_is_positive),
+                    }
+                )
+            rows.append(row)
+        return pd.DataFrame(rows, columns=columns)
+
     setattr(evidence_margin_table, _EVIDENCE_MARGIN_TABLE_WRAPPER_FLAG, True)
     setattr(add_evidence_margin_columns, _ADD_COLUMNS_WRAPPER_FLAG, True)
+    setattr(summarize_window_sensitivity, _WINDOW_SENSITIVITY_WRAPPER_FLAG, True)
+    setattr(paired_model_margin_decisions, _PAIRED_MARGIN_WRAPPER_FLAG, True)
     diagnostics.evidence_margin_table = evidence_margin_table
     diagnostics.add_evidence_margin_columns = add_evidence_margin_columns
+    diagnostics.summarize_window_sensitivity = summarize_window_sensitivity
+    diagnostics.paired_model_margin_decisions = paired_model_margin_decisions
     apply_wrong_map_missing_group_patch(diagnostics)
     setattr(diagnostics, _PATCH_FLAG, True)
+
+
+def _paired_margin_group_cols(scores: pd.DataFrame, group_cols: Sequence[str]) -> tuple[str, ...]:
+    """Expand default paired-event grouping to independent score scopes."""
+
+    columns = tuple(str(column) for column in group_cols)
+    if columns != _DEFAULT_EVENT_GROUP_COLUMNS:
+        return columns
+    resolved = list(columns)
+    for column in _PAIRED_MARGIN_SCOPE_COLUMNS:
+        if column in scores.columns and column not in resolved:
+            resolved.append(column)
+    return tuple(resolved)
 
 
 def _missing_group_patch_current(diagnostics) -> bool:
@@ -109,5 +276,7 @@ def _missing_group_patch_current(diagnostics) -> bool:
         for name, flag in (
             ("evidence_margin_table", _EVIDENCE_MARGIN_TABLE_WRAPPER_FLAG),
             ("add_evidence_margin_columns", _ADD_COLUMNS_WRAPPER_FLAG),
+            ("summarize_window_sensitivity", _WINDOW_SENSITIVITY_WRAPPER_FLAG),
+            ("paired_model_margin_decisions", _PAIRED_MARGIN_WRAPPER_FLAG),
         )
     )

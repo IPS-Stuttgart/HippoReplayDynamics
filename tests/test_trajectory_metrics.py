@@ -1,6 +1,7 @@
 import numpy as np
 import pytest
 
+from hipporeplayimm.models import LOG_ZERO
 from hipporeplayimm.trajectory_metrics import trajectory_quality_metrics
 
 
@@ -119,6 +120,14 @@ def test_trajectory_quality_metrics_rejects_rows_without_finite_mass():
     with pytest.raises(ValueError, match="finite posterior mass"):
         trajectory_quality_metrics(
             np.array([[0.0, -np.inf], [-np.inf, -np.inf]]),
+            np.array([[0.0, 0.0], [1.0, 0.0]]),
+        )
+
+
+def test_trajectory_quality_metrics_rejects_log_zero_sentinel_rows():
+    with pytest.raises(ValueError, match="positive finite posterior mass"):
+        trajectory_quality_metrics(
+            np.full((2, 2), LOG_ZERO, dtype=float),
             np.array([[0.0, 0.0], [1.0, 0.0]]),
         )
 

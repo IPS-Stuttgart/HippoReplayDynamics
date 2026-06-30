@@ -87,12 +87,11 @@ class PyRecEstGoalParticleModel:
             "jump_velocity_decay",
         ):
             if hasattr(self, name):
-                _validate_nonnegative_float(getattr(self, name), name)
+                _validate_velocity_decay(getattr(self, name), name)
 
     def score(self, emissions: LogEmissionTensor, bin_centers: np.ndarray) -> EventScore:
         bin_centers = _validate_score_inputs(emissions, bin_centers)
-        if self.n_particles <= 0:
-            raise ValueError("n_particles must be positive")
+        _validate_positive_int(self.n_particles, "n_particles")
         _validate_probability(
             self.position_proposal_probability,
             "position_proposal_probability",
@@ -428,24 +427,86 @@ def _format_transition_durations(transition_durations: np.ndarray) -> str:
     return ",".join(f"{float(duration):.12g}" for duration in transition_durations)
 
 
+def _validation_array(value: object) -> np.ndarray:
+    try:
+        return np.asarray(value)
+    except ValueError:
+        return np.asarray(value, dtype=object)
+
+
+def _is_boolean_scalar(value: object) -> bool:
+    array = _validation_array(value)
+    if array.shape != ():
+        return False
+    if np.issubdtype(array.dtype, np.bool_):
+        return True
+    if array.dtype == object:
+        try:
+            return isinstance(array.item(), (bool, np.bool_))
+        except ValueError:
+            return False
+    return False
+
+
+def _is_boolean_array(value: object) -> bool:
+    array = _validation_array(value)
+    if array.shape == ():
+        return False
+    if np.issubdtype(array.dtype, np.bool_):
+        return True
+    if array.dtype == object:
+        return any(isinstance(item, (bool, np.bool_)) for item in array.flat)
+    return False
+
+
+def _is_scalar_value(value: object) -> bool:
+    return _validation_array(value).shape == ()
+
+
+def _coerce_scalar_float(value: object, name: str, message: str) -> float:
+    if _is_boolean_scalar(value) or _is_boolean_array(value) or not _is_scalar_value(value):
+        raise ValueError(message)
+    try:
+        return float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(message) from exc
+
+
 def _validate_probability(probability: float, name: str) -> None:
-    value = float(probability)
+    value = _coerce_scalar_float(probability, name, f"{name} must lie in [0, 1]")
     if not np.isfinite(value) or not 0.0 <= value <= 1.0:
         raise ValueError(f"{name} must lie in [0, 1]")
 
 
 def _validate_positive_int(value: int, name: str) -> None:
-    if int(value) != value or int(value) <= 0:
+    if _is_boolean_scalar(value) or _is_boolean_array(value) or not _is_scalar_value(value):
+        raise ValueError(f"{name} must be a positive integer")
+    scalar = _validation_array(value).item()
+    try:
+        int_value = int(scalar)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ValueError(f"{name} must be a positive integer") from exc
+    if int_value != scalar or int_value <= 0:
         raise ValueError(f"{name} must be a positive integer")
 
 
 def _validate_positive_float(value: float, name: str) -> None:
-    value = float(value)
+    value = _coerce_scalar_float(value, name, f"{name} must be finite and positive")
     if not np.isfinite(value) or value <= 0.0:
         raise ValueError(f"{name} must be finite and positive")
 
 
 def _validate_nonnegative_float(value: float, name: str) -> None:
-    value = float(value)
+    if _is_boolean_scalar(value) or _is_boolean_array(value):
+        raise TypeError(f"{name} must be numeric, not boolean")
+    value = _coerce_scalar_float(value, name, f"{name} must be finite and nonnegative")
     if not np.isfinite(value) or value < 0.0:
         raise ValueError(f"{name} must be finite and nonnegative")
+
+
+def _validate_velocity_decay(value: float, name: str) -> None:
+    if _is_boolean_scalar(value) or _is_boolean_array(value):
+        raise TypeError(f"{name} must be numeric, not boolean")
+    value = _coerce_scalar_float(value, name, f"{name} must lie in [0, 1]")
+    if not np.isfinite(value) or not 0.0 <= value <= 1.0:
+        raise ValueError(f"{name} must lie in [0, 1]")

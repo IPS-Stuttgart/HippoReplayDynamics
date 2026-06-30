@@ -15,6 +15,8 @@ _BOOTSTRAP_GROUP_PATCHED_FLAG = "_hierarchical_bootstrap_missing_group_patch_app
 _PAIRED_SWEEP_GROUP_PATCHED_FLAG = "_paired_model_sweep_missing_group_patch_applied"
 _ORIGINAL_PAIRED_ATTR = "_paired_model_missing_group_original"
 _ORIGINAL_BOOTSTRAP_ATTR = "_hierarchical_bootstrap_missing_group_original"
+_GROUPED_METRICS_PATCHED_FLAG = "_grouped_model_metrics_missing_group_patch_applied"
+_ORIGINAL_GROUPED_METRICS_ATTR = "_grouped_model_metrics_missing_group_original"
 _ORIGINAL_SWEEP_ATTR = "_paired_model_sweep_missing_group_original"
 _MISSING_GROUP_SENTINEL = "__hipporeplayimm_missing_group__"
 _ADDITIONAL_RESULT_QUALITY_GATE_SCOPE_COLUMNS = (
@@ -135,6 +137,37 @@ def _apply_paired_model_missing_group_patch() -> None:
     setattr(paired_model_margin_threshold_sweep, _PAIRED_SWEEP_GROUP_PATCHED_FLAG, True)
     setattr(paired_model_margin_threshold_sweep, _ORIGINAL_SWEEP_ATTR, original_sweep)
     diagnostics.paired_model_margin_threshold_sweep = paired_model_margin_threshold_sweep
+
+
+def _apply_grouped_model_metrics_missing_group_patch() -> None:
+    """Keep grouped model summaries for rows with missing optional group keys."""
+
+    from . import result_improvements
+
+    current = result_improvements.summarize_grouped_model_metrics
+    if getattr(current, _GROUPED_METRICS_PATCHED_FLAG, False):
+        return
+    original = getattr(current, _ORIGINAL_GROUPED_METRICS_ATTR, current)
+
+    def summarize_grouped_model_metrics(
+        rows: pd.DataFrame,
+        group_columns: Sequence[str],
+        *args: object,
+        **kwargs: object,
+    ) -> pd.DataFrame:
+        groups = tuple(group_columns)
+        sentinel = _missing_group_sentinel(rows, groups)
+        result = original(
+            _fill_missing_group_metadata(rows, groups, sentinel),
+            groups,
+            *args,
+            **kwargs,
+        )
+        return _restore_missing_group_metadata(result, groups, sentinel)
+
+    setattr(summarize_grouped_model_metrics, _GROUPED_METRICS_PATCHED_FLAG, True)
+    setattr(summarize_grouped_model_metrics, _ORIGINAL_GROUPED_METRICS_ATTR, original)
+    result_improvements.summarize_grouped_model_metrics = summarize_grouped_model_metrics
 
 
 def _normalize_group_cols(group_cols: Sequence[str] | str) -> tuple[str, ...]:
@@ -317,6 +350,7 @@ def apply_posterior_calibration_summary_patch() -> None:
     _apply_result_quality_gates_scope_patch()
     _apply_paired_model_missing_group_patch()
     _apply_hierarchical_bootstrap_missing_group_patch(result_improvements)
+    _apply_grouped_model_metrics_missing_group_patch()
 
     if getattr(result_improvements, _PATCHED_FLAG, False):
         return

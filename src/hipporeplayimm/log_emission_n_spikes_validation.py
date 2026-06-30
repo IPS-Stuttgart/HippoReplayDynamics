@@ -115,4 +115,6 @@ def _validate_cell_ids(emissions: LogEmissionTensor) -> None:
     emissions.cell_ids = canonical
 
 
+apply_log_emission_n_spikes_validation_patch()
+
 __all__ = ["apply_log_emission_n_spikes_validation_patch"]

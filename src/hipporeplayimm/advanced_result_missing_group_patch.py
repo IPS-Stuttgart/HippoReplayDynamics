@@ -7,6 +7,7 @@ from collections.abc import Sequence
 import numpy as np
 import pandas as pd
 
+from .advanced_result_threshold_validation import _validated_threshold
 from .wrong_map_missing_group_patch import apply_wrong_map_missing_group_patch, wrong_map_missing_group_patch_current
 
 _PATCH_FLAG = "_missing_group_metadata_patch_applied"
@@ -186,9 +187,7 @@ def apply_advanced_result_missing_group_patch() -> None:
         """Classify paired model wins, retaining NA values in optional group keys."""
 
         group_cols = _paired_margin_group_cols(scores, group_cols)
-        threshold = float(margin_threshold)
-        if threshold < 0.0:
-            raise ValueError("margin_threshold must be non-negative")
+        threshold = _validated_threshold(margin_threshold)
         ok = diagnostics._comparable_rows(scores)
         columns = [
             *group_cols,
@@ -231,7 +230,10 @@ def apply_advanced_result_missing_group_patch() -> None:
             positive_value = float(by_model.loc[positive_model, evidence_col])
             reference_value = float(by_model.loc[reference_model, evidence_col])
             delta = positive_value - reference_value
-            if delta >= threshold:
+            if np.isclose(threshold, 0.0) and np.isclose(delta, 0.0):
+                decision = "ambiguous"
+                positive_claimed = False
+            elif delta >= threshold:
                 decision = positive_model
                 positive_claimed = True
             elif delta <= -threshold:

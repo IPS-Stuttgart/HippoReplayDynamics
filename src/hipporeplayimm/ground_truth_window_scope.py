@@ -245,7 +245,7 @@ def _metadata_label(value: Any) -> str:
     if isinstance(value, (list, tuple)):
         return repr(list(value))
     if isinstance(value, set):
-        return repr(sorted(value))
+        return repr(sorted(value, key=repr))
     text = str(value).strip()
     return "" if text.lower() in _MISSING_TEXT_VALUES else text
 

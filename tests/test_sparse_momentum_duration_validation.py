@@ -3,9 +3,14 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
+from hipporeplayimm.encoding import LogEmissionTensor
 from hipporeplayimm.sparse_momentum_duration_validation import _valid_transition_durations
 from hipporeplayimm.state_space_model import StateSpaceDecoderConfig
-from hipporeplayimm.state_space_sparse_momentum import _duration_adjusted_decays, _time_scales
+from hipporeplayimm.state_space_sparse_momentum import (
+    _duration_adjusted_decays,
+    _score_sparse_momentum_exact,
+    _time_scales,
+)
 
 
 def test_sparse_momentum_duration_helpers_reject_invalid_transition_durations() -> None:
@@ -39,3 +44,23 @@ def test_sparse_momentum_duration_helpers_preserve_valid_outputs() -> None:
 
     np.testing.assert_allclose(decays, np.array([0.9, 0.81, 0.9], dtype=float))
     np.testing.assert_allclose(scales, np.array([1.0, 2.0, 0.5], dtype=float))
+
+
+def test_sparse_momentum_exact_rejects_nonfinite_bin_centers() -> None:
+    emissions = LogEmissionTensor(
+        log_likelihood=np.log(np.array([[0.6, 0.4], [0.3, 0.7]], dtype=float)),
+        spike_counts=np.zeros((2, 1), dtype=int),
+        times=np.array([0.0, 0.01]),
+        dt=0.01,
+        cell_ids=np.array([1]),
+        n_spikes=0,
+    )
+    centers = np.array([[0.0, 0.0], [np.nan, 1.0]], dtype=float)
+
+    with pytest.raises(ValueError, match="bin_centers must be finite"):
+        _score_sparse_momentum_exact(
+            emissions,
+            centers,
+            StateSpaceDecoderConfig(),
+            emissions.transition_durations,
+        )

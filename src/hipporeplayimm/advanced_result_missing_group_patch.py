@@ -14,6 +14,7 @@ _PATCH_FLAG = "_missing_group_metadata_patch_applied"
 _EVIDENCE_MARGIN_TABLE_WRAPPER_FLAG = "_missing_group_metadata_evidence_margin_table_wrapper"
 _ADD_COLUMNS_WRAPPER_FLAG = "_missing_group_metadata_add_margin_columns_wrapper"
 _WINDOW_SENSITIVITY_WRAPPER_FLAG = "_missing_group_metadata_window_sensitivity_wrapper"
+_EVENT_WINDOW_VARIANTS_WRAPPER_FLAG = "_missing_group_metadata_event_window_variants_wrapper"
 _PAIRED_MARGIN_WRAPPER_FLAG = "_missing_group_metadata_paired_margin_wrapper"
 _MARGIN_COLUMNS = [
     "best_model_by_evidence",
@@ -146,6 +147,31 @@ def apply_advanced_result_missing_group_patch() -> None:
         summary["evidence_window_range"] = summary["evidence_window_max"] - summary["evidence_window_min"]
         return summary
 
+    base_event_window_variants = _base_event_window_variants(diagnostics)
+
+    def event_window_variants(
+        events: pd.DataFrame,
+        *,
+        start_col: str = "start",
+        end_col: str = "end",
+        event_id_col: str = "event_index",
+        paddings_s: Sequence[float] = (0.0, 0.01, 0.02),
+        min_duration_s: float = 0.003,
+    ) -> pd.DataFrame:
+        """Create replay-window variants after validating event identifiers."""
+
+        if event_id_col in events.columns:
+            for value in events[event_id_col]:
+                _coerce_event_window_id(value, column=event_id_col)
+        return base_event_window_variants(
+            events,
+            start_col=start_col,
+            end_col=end_col,
+            event_id_col=event_id_col,
+            paddings_s=paddings_s,
+            min_duration_s=min_duration_s,
+        )
+
     def paired_model_margin_decisions(
         scores: pd.DataFrame,
         *,
@@ -246,10 +272,12 @@ def apply_advanced_result_missing_group_patch() -> None:
     setattr(evidence_margin_table, _EVIDENCE_MARGIN_TABLE_WRAPPER_FLAG, True)
     setattr(add_evidence_margin_columns, _ADD_COLUMNS_WRAPPER_FLAG, True)
     setattr(summarize_window_sensitivity, _WINDOW_SENSITIVITY_WRAPPER_FLAG, True)
+    setattr(event_window_variants, _EVENT_WINDOW_VARIANTS_WRAPPER_FLAG, True)
     setattr(paired_model_margin_decisions, _PAIRED_MARGIN_WRAPPER_FLAG, True)
     diagnostics.evidence_margin_table = evidence_margin_table
     diagnostics.add_evidence_margin_columns = add_evidence_margin_columns
     diagnostics.summarize_window_sensitivity = summarize_window_sensitivity
+    diagnostics.event_window_variants = event_window_variants
     diagnostics.paired_model_margin_decisions = paired_model_margin_decisions
     apply_wrong_map_missing_group_patch(diagnostics)
     setattr(diagnostics, _PATCH_FLAG, True)
@@ -268,6 +296,38 @@ def _paired_margin_group_cols(scores: pd.DataFrame, group_cols: Sequence[str]) -
     return tuple(resolved)
 
 
+def _base_event_window_variants(diagnostics):
+    current = getattr(diagnostics, "event_window_variants", None)
+    if getattr(current, _EVENT_WINDOW_VARIANTS_WRAPPER_FLAG, False):
+        return getattr(diagnostics, "_missing_group_metadata_base_event_window_variants")
+    base = getattr(diagnostics, "_missing_group_metadata_base_event_window_variants", None)
+    if base is None:
+        base = current
+        setattr(diagnostics, "_missing_group_metadata_base_event_window_variants", base)
+    return base
+
+
+def _coerce_event_window_id(value: object, *, column: str) -> int:
+    message = f"{column} must contain integer event identifiers"
+    if isinstance(value, (bool, np.bool_)):
+        raise ValueError(message)
+    if isinstance(value, (int, np.integer)):
+        return int(value)
+    if isinstance(value, (float, np.floating)):
+        numeric = float(value)
+        if np.isfinite(numeric) and numeric.is_integer():
+            return int(numeric)
+        raise ValueError(message)
+    try:
+        if pd.isna(value):
+            raise ValueError(message)
+    except TypeError:
+        pass
+    except ValueError as exc:
+        raise ValueError(message) from exc
+    raise ValueError(message)
+
+
 def _missing_group_patch_current(diagnostics) -> bool:
     """Return whether advanced diagnostics still point to the missing-group wrappers."""
 
@@ -277,6 +337,7 @@ def _missing_group_patch_current(diagnostics) -> bool:
             ("evidence_margin_table", _EVIDENCE_MARGIN_TABLE_WRAPPER_FLAG),
             ("add_evidence_margin_columns", _ADD_COLUMNS_WRAPPER_FLAG),
             ("summarize_window_sensitivity", _WINDOW_SENSITIVITY_WRAPPER_FLAG),
+            ("event_window_variants", _EVENT_WINDOW_VARIANTS_WRAPPER_FLAG),
             ("paired_model_margin_decisions", _PAIRED_MARGIN_WRAPPER_FLAG),
         )
     )

@@ -35,7 +35,19 @@ def _is_boolean_scalar(value: object) -> bool:
     return False
 
 
+def _reject_array_shaped_mass_threshold(mass_threshold: object) -> None:
+    """Reject values that NumPy/Python might coerce from an array to a scalar."""
+
+    try:
+        arr = np.asarray(mass_threshold)
+    except ValueError as exc:
+        raise TypeError("mass_threshold must be a numeric scalar") from exc
+    if arr.ndim != 0:
+        raise TypeError("mass_threshold must be a numeric scalar")
+
+
 def _reject_boolean_mass_threshold(mass_threshold: object) -> None:
+    _reject_array_shaped_mass_threshold(mass_threshold)
     if _is_boolean_scalar(mass_threshold):
         raise TypeError("mass_threshold must be numeric, not boolean")
 

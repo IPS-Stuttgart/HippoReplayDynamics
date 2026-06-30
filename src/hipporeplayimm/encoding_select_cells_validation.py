@@ -95,4 +95,10 @@ def apply_encoding_select_cells_validation_patch() -> None:
     setattr(encoding, _PATCHED_FLAG, True)
 
 
+# ``hipporeplayimm.__init__`` imports this module before re-exporting
+# ``EncodingModel``.  Apply the patch on import so top-level package imports get
+# the same strict validation that ``apply_runtime_patches()`` installs later.
+apply_encoding_select_cells_validation_patch()
+
+
 __all__ = ["apply_encoding_select_cells_validation_patch"]

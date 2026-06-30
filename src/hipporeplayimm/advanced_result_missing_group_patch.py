@@ -54,6 +54,14 @@ _PAIRED_MARGIN_SCOPE_COLUMNS = (
 )
 
 
+def _numeric_evidence_rows(group: pd.DataFrame, evidence_col: str) -> pd.DataFrame:
+    """Return rows with finite numeric evidence, sorted by descending evidence."""
+
+    out = group.copy()
+    out[evidence_col] = pd.to_numeric(out[evidence_col], errors="coerce")
+    return out.dropna(subset=[evidence_col]).sort_values(evidence_col, ascending=False, kind="stable")
+
+
 def apply_advanced_result_missing_group_patch() -> None:
     """Keep diagnostics for rows whose optional grouping metadata is missing."""
 
@@ -81,7 +89,7 @@ def apply_advanced_result_missing_group_patch() -> None:
         rows: list[dict[str, object]] = []
         for key, group in ok.groupby(list(group_cols), sort=False, dropna=False):
             key_tuple = key if isinstance(key, tuple) else (key,)
-            group = group.dropna(subset=[evidence_col]).sort_values(evidence_col, ascending=False)
+            group = _numeric_evidence_rows(group, evidence_col)
             if group.empty:
                 continue
             best = group.iloc[0]
@@ -223,7 +231,9 @@ def apply_advanced_result_missing_group_patch() -> None:
         for key, group in grouped:
             key_tuple = key if isinstance(key, tuple) else (key,)
             paired = group[group[model_col].astype(str).isin([positive_model, reference_model])]
-            pivot = paired.dropna(subset=[evidence_col]).drop_duplicates(model_col, keep="last")
+            pivot = paired.copy()
+            pivot[evidence_col] = pd.to_numeric(pivot[evidence_col], errors="coerce")
+            pivot = pivot.dropna(subset=[evidence_col]).drop_duplicates(model_col, keep="last")
             by_model = pivot.set_index(model_col)
             if positive_model not in by_model.index or reference_model not in by_model.index:
                 continue

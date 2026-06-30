@@ -7,6 +7,7 @@ from typing import Any
 import numpy as np
 
 _PATCHED_FLAG = "_state_space_bin_center_validation_patch_applied"
+_SPARSE_MOMENTUM_PATCHED_FLAG = "_sparse_momentum_bin_center_validation_patch_applied"
 
 
 def _validate_state_space_log_likelihood(emissions: Any) -> None:
@@ -43,29 +44,73 @@ def _coerce_state_space_bin_centers(bin_centers: Any, n_bins: int) -> np.ndarray
     return centers
 
 
+def _patch_sparse_momentum_bin_center_validation() -> None:
+    """Install the same validation on the direct exact-sparse momentum helper."""
+
+    from . import state_space as ss
+    from . import state_space_sparse_momentum as sparse_momentum
+
+    previous_score = sparse_momentum._score_sparse_momentum_exact
+    if getattr(previous_score, _SPARSE_MOMENTUM_PATCHED_FLAG, False):
+        return
+
+    def score_sparse_momentum_exact(
+        emissions,
+        bin_centers,
+        config,
+        transition_durations_s,
+        *,
+        valid_bin_mask=None,
+        return_trajectory: bool = True,
+    ):
+        _validate_state_space_log_likelihood(emissions)
+        centers = _coerce_state_space_bin_centers(bin_centers, emissions.n_bins)
+        return previous_score(
+            emissions,
+            centers,
+            config,
+            transition_durations_s,
+            valid_bin_mask=valid_bin_mask,
+            return_trajectory=return_trajectory,
+        )
+
+    score_sparse_momentum_exact.__name__ = getattr(
+        previous_score,
+        "__name__",
+        "_score_sparse_momentum_exact",
+    )
+    score_sparse_momentum_exact.__doc__ = getattr(previous_score, "__doc__", None)
+    score_sparse_momentum_exact.__module__ = getattr(previous_score, "__module__", __name__)
+    setattr(score_sparse_momentum_exact, _SPARSE_MOMENTUM_PATCHED_FLAG, True)
+    setattr(score_sparse_momentum_exact, "__hipporeplayimm_original__", previous_score)
+    sparse_momentum._score_sparse_momentum_exact = score_sparse_momentum_exact
+    if getattr(ss, "_score_sparse_momentum_exact", None) is previous_score:
+        ss._score_sparse_momentum_exact = score_sparse_momentum_exact
+
+
 def apply_state_space_bin_center_validation_patch() -> None:
     """Install state-space score input validation for ``StateSpaceReplayModel.score``."""
 
     from . import state_space as ss
 
-    if getattr(ss.StateSpaceReplayModel.score, _PATCHED_FLAG, False):
-        return
+    if not getattr(ss.StateSpaceReplayModel.score, _PATCHED_FLAG, False):
+        previous_score = ss.StateSpaceReplayModel.score
 
-    previous_score = ss.StateSpaceReplayModel.score
+        def score(self, emissions, bin_centers, *args, **kwargs):
+            _validate_state_space_log_likelihood(emissions)
+            centers = _coerce_state_space_bin_centers(bin_centers, emissions.n_bins)
+            return previous_score(self, emissions, centers, *args, **kwargs)
 
-    def score(self, emissions, bin_centers, *args, **kwargs):
-        _validate_state_space_log_likelihood(emissions)
-        centers = _coerce_state_space_bin_centers(bin_centers, emissions.n_bins)
-        return previous_score(self, emissions, centers, *args, **kwargs)
+        score.__name__ = getattr(previous_score, "__name__", "score")
+        score.__doc__ = getattr(previous_score, "__doc__", None)
+        score.__module__ = getattr(previous_score, "__module__", __name__)
+        setattr(score, _PATCHED_FLAG, True)
+        if getattr(previous_score, "_native_duration_occupancy_aware", False):
+            setattr(score, "_native_duration_occupancy_aware", True)
+        setattr(score, "__hipporeplayimm_original__", previous_score)
+        ss.StateSpaceReplayModel.score = score
 
-    score.__name__ = getattr(previous_score, "__name__", "score")
-    score.__doc__ = getattr(previous_score, "__doc__", None)
-    score.__module__ = getattr(previous_score, "__module__", __name__)
-    setattr(score, _PATCHED_FLAG, True)
-    if getattr(previous_score, "_native_duration_occupancy_aware", False):
-        setattr(score, "_native_duration_occupancy_aware", True)
-    setattr(score, "__hipporeplayimm_original__", previous_score)
-    ss.StateSpaceReplayModel.score = score
+    _patch_sparse_momentum_bin_center_validation()
 
 
 __all__ = ["apply_state_space_bin_center_validation_patch"]

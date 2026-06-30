@@ -101,6 +101,44 @@ def test_simulation_reporting_counts_exact_sparse_momentum_as_recovery():
     assert bool(exact_sparse["recovered_expected_model"])
 
 
+def test_simulation_reporting_counts_clusterless_exact_momentum_surrogate_as_recovery():
+    rows = pd.DataFrame(
+        [
+            {
+                "status": "success",
+                "session": "RatX/OpenY",
+                "event_index": 0,
+                "true_model": "momentum",
+                "expected_model": "sorted-spike-state-space-momentum",
+                "model": "sorted-spike-state-space-diffusion",
+                "log_evidence": -2.0,
+                "n_time": 3,
+                "n_spikes": 5,
+            },
+            {
+                "status": "success",
+                "session": "RatX/OpenY",
+                "event_index": 0,
+                "true_model": "momentum",
+                "expected_model": "sorted-spike-state-space-momentum",
+                "model": "clusterless-state-space-momentum-exact-sparse",
+                "log_evidence": -1.0,
+                "n_time": 3,
+                "n_spikes": 5,
+            },
+        ]
+    )
+
+    scored = simulation_add_evidence_columns(rows)
+    clusterless = scored[
+        scored["model"] == "clusterless-state-space-momentum-exact-sparse"
+    ].iloc[0]
+
+    assert bool(clusterless["is_best_model"])
+    assert bool(clusterless["recovered_expected_model"])
+    assert clusterless["exact_surrogate_best_model"] == "clusterless-state-space-momentum-exact-sparse"
+
+
 def test_simulation_reporting_counts_velocity_momentum_alias_as_recovery():
     rows = pd.DataFrame(
         [
@@ -216,6 +254,9 @@ def test_simulation_recovery_patch_exposes_velocity_momentum_surrogate_aliases()
 
     assert "sorted-spike-state-space-velocity-momentum" in surrogates
     assert "state-space-velocity-momentum" in surrogates
+    assert "clusterless-state-space-momentum-exact-sparse" in surrogates
+    assert "clusterless-state-space-displacement-momentum" in surrogates
+    assert "clusterless-state-space-velocity-momentum" in surrogates
 
 
 def test_state_space_imm_support_column_is_used_by_generic_inference():

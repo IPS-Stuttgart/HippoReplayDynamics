@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from functools import wraps
+import operator
 from typing import Any
 
 import numpy as np
@@ -87,6 +88,15 @@ def _coerce_trial_exposure(dt: Any, n_time: int, spike_rate_scale: float) -> np.
     return dt_array * spike_rate_scale
 
 
+def _coerce_event_index(event_index: Any) -> int:
+    if isinstance(event_index, (bool, np.bool_)):
+        raise TypeError("event index must be an integer, not boolean")
+    try:
+        return int(operator.index(event_index))
+    except TypeError as exc:
+        raise TypeError("event index must be an integer") from exc
+
+
 def _estimate_replay_cell_gains_impl(session, encoding, ripple_indices, config):
     from .accuracy_upgrades import ReplayGainConfig
 
@@ -106,7 +116,7 @@ def _estimate_replay_cell_gains_impl(session, encoding, ripple_indices, config):
         raise ValueError("spikes must be two-dimensional with at least time and cell-id columns")
 
     for event_index in ripple_indices:
-        event = session.ripple(int(event_index))
+        event = session.ripple(_coerce_event_index(event_index))
         total_duration += max(float(event.end) - float(event.start), 0.0)
         if spikes.size == 0:
             continue

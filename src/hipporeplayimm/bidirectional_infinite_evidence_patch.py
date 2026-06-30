@@ -6,6 +6,7 @@ import numpy as np
 from scipy.special import logsumexp
 
 _PATCHED_FLAG = "_bidirectional_infinite_evidence_patch_applied"
+_PATCHED_SCORE_FLAG = "_bidirectional_infinite_evidence_score_patch_applied"
 
 
 def _equal_prior_logp_and_weights(log_likelihoods: object) -> tuple[float, np.ndarray]:
@@ -73,11 +74,22 @@ def _needs_evidence_only_terminal_retry(score: object, return_trajectory: object
     return return_trajectory is False and _terminal_log_posterior_from_score(score) is None
 
 
+def _score_patch_is_current(compat: object, direct: object) -> bool:
+    """Return whether both bidirectional score methods still carry this patch."""
+
+    return bool(
+        getattr(compat.BidirectionalReplayModel.score, _PATCHED_SCORE_FLAG, False)
+        and getattr(direct.BidirectionalReplayModel.score, _PATCHED_SCORE_FLAG, False)
+    )
+
+
 def apply_bidirectional_infinite_evidence_patch() -> None:
     from . import result_improvement_extensions as compat
     from . import reverse_models as direct
 
-    if getattr(compat, _PATCHED_FLAG, False) and getattr(direct, _PATCHED_FLAG, False):
+    if _score_patch_is_current(compat, direct):
+        setattr(compat, _PATCHED_FLAG, True)
+        setattr(direct, _PATCHED_FLAG, True)
         return
 
     def compat_score(self, emissions, bin_centers, *, occupancy_s=None, candidate_indices=None, return_trajectory=None):
@@ -194,6 +206,8 @@ def apply_bidirectional_infinite_evidence_patch() -> None:
             trajectory_log_posterior=trajectory,
         )
 
+    setattr(compat_score, _PATCHED_SCORE_FLAG, True)
+    setattr(direct_score, _PATCHED_SCORE_FLAG, True)
     compat.BidirectionalReplayModel.score = compat_score
     direct.BidirectionalReplayModel.score = direct_score
     setattr(compat, _PATCHED_FLAG, True)

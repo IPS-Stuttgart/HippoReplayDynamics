@@ -37,6 +37,7 @@ _EVENT_SCOPE_COLUMNS = (
     "benchmark_random_seed",
     "simulation_event_index",
     "event_index",
+    "event_id",
     "window_index",
     "benchmark_cell_split_index",
     "event_window_variant",

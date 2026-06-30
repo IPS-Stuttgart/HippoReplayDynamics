@@ -46,10 +46,13 @@ EVIDENCE_COMPARISON_DESCRIPTIONS = {
 _MOMENTUM_EXACT_SURROGATE_MODELS = (
     "sorted-spike-state-space-momentum-exact-sparse",
     "state-space-momentum-exact-sparse",
+    "clusterless-state-space-momentum-exact-sparse",
     "sorted-spike-state-space-displacement-momentum",
     "state-space-displacement-momentum",
+    "clusterless-state-space-displacement-momentum",
     "sorted-spike-state-space-velocity-momentum",
     "state-space-velocity-momentum",
+    "clusterless-state-space-velocity-momentum",
 )
 
 

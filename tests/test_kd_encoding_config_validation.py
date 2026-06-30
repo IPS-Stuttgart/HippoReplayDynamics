@@ -47,6 +47,38 @@ def test_fit_kd_place_field_encoding_rejects_invalid_config(kwargs, match):
         fit_kd_place_field_encoding(_minimal_session(), KDEncodingConfig(**kwargs))
 
 
+@pytest.mark.parametrize(
+    ("kwargs", "match"),
+    [
+        ({"bin_size_cm": np.asarray([5.0])}, "bin_size_cm"),
+        ({"smoothing_sigma_cm": np.asarray([0.0])}, "smoothing_sigma_cm"),
+        ({"min_speed_cm_s": np.asarray([0.0])}, "min_speed_cm_s"),
+        ({"min_occupancy_s": np.asarray([0.01])}, "min_occupancy_s"),
+        ({"rate_floor_hz": np.asarray([1e-4])}, "rate_floor_hz"),
+        ({"min_peak_rate_hz": np.asarray([0.0])}, "min_peak_rate_hz"),
+    ],
+)
+def test_fit_kd_place_field_encoding_rejects_array_shaped_float_config(kwargs, match):
+    with pytest.raises(TypeError, match=match):
+        fit_kd_place_field_encoding(_minimal_session(), KDEncodingConfig(**kwargs))
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "match"),
+    [
+        ({"bin_size_cm": True}, "bin_size_cm"),
+        ({"smoothing_sigma_cm": False}, "smoothing_sigma_cm"),
+        ({"min_speed_cm_s": False}, "min_speed_cm_s"),
+        ({"min_occupancy_s": True}, "min_occupancy_s"),
+        ({"rate_floor_hz": True}, "rate_floor_hz"),
+        ({"min_peak_rate_hz": False}, "min_peak_rate_hz"),
+    ],
+)
+def test_fit_kd_place_field_encoding_rejects_boolean_float_config(kwargs, match):
+    with pytest.raises(TypeError, match=match):
+        fit_kd_place_field_encoding(_minimal_session(), KDEncodingConfig(**kwargs))
+
+
 def test_fit_kd_place_field_encoding_rejects_non_integer_grid_size():
     with pytest.raises(TypeError, match="n_bins_x"):
         fit_kd_place_field_encoding(_minimal_session(), KDEncodingConfig(n_bins_x=10.0))  # type: ignore[arg-type]

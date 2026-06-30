@@ -47,10 +47,8 @@ def _patch_duration_helpers(module: Any) -> None:
 
     @wraps(module._coerce_transition_durations)
     def coerce_transition_durations(values: Any, *, n_time: int, fallback_dt: float) -> np.ndarray:
-        expected = max(int(n_time) - 1, 0)
-        fallback = float(fallback_dt)
-        if not np.isfinite(fallback) or fallback <= 0.0:
-            raise ValueError("fallback dt must be finite and positive")
+        expected = max(_coerce_count_scalar("n_time", n_time) - 1, 0)
+        fallback = _coerce_positive_float_scalar("fallback dt", fallback_dt, "fallback dt must be finite and positive")
 
         raw_values = list(values)
         if len(raw_values) == 0:
@@ -65,10 +63,11 @@ def _patch_duration_helpers(module: Any) -> None:
 
     @wraps(original_duration_adjusted_decays)
     def duration_adjusted_decays(config: object, durations: Any, reference_dt: float) -> np.ndarray:
+        reference = _coerce_positive_float_scalar("reference dt", reference_dt, "reference dt must be finite and positive")
         return original_duration_adjusted_decays(
             config,
             _valid_transition_durations(durations),
-            reference_dt,
+            reference,
         )
 
     @wraps(original_time_scales)
@@ -82,9 +81,7 @@ def _patch_duration_helpers(module: Any) -> None:
 
         @wraps(original_duration_scale_at)
         def duration_scale_at(durations: Any, transition_index: int, reference_dt: float) -> float:
-            reference = float(reference_dt)
-            if not np.isfinite(reference) or reference <= 0.0:
-                raise ValueError("reference dt must be finite and positive")
+            reference = _coerce_positive_float_scalar("reference dt", reference_dt, "reference dt must be finite and positive")
             return original_duration_scale_at(
                 _valid_transition_durations(durations),
                 transition_index,
@@ -93,6 +90,58 @@ def _patch_duration_helpers(module: Any) -> None:
 
         module._duration_scale_at = duration_scale_at
     module._duration_validation_patch_applied = True
+
+
+def _is_boolean_scalar(value: object) -> bool:
+    """Return True for Python, NumPy, and object-wrapped boolean scalars."""
+
+    if isinstance(value, (bool, np.bool_)):
+        return True
+    arr = np.asarray(value)
+    if arr.ndim != 0:
+        return False
+    if np.issubdtype(arr.dtype, np.bool_):
+        return True
+    if arr.dtype == object:
+        try:
+            return isinstance(arr.item(), (bool, np.bool_))
+        except ValueError:
+            return False
+    return False
+
+
+def _reject_array_shaped_scalar(name: str, value: object) -> None:
+    """Reject values that NumPy/Python might coerce from an array to a scalar."""
+
+    try:
+        arr = np.asarray(value)
+    except ValueError as exc:
+        raise TypeError(f"{name} must be a numeric scalar") from exc
+    if arr.ndim != 0:
+        raise TypeError(f"{name} must be a numeric scalar")
+
+
+def _coerce_count_scalar(name: str, value: object) -> int:
+    _reject_array_shaped_scalar(name, value)
+    if _is_boolean_scalar(value):
+        raise TypeError(f"{name} must be an integer count, not boolean")
+    try:
+        return int(value)
+    except (TypeError, ValueError) as exc:
+        raise TypeError(f"{name} must be an integer count") from exc
+
+
+def _coerce_positive_float_scalar(name: str, value: object, message: str) -> float:
+    _reject_array_shaped_scalar(name, value)
+    if _is_boolean_scalar(value):
+        raise TypeError(f"{name} must be numeric, not boolean")
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(message) from exc
+    if not np.isfinite(numeric) or numeric <= 0.0:
+        raise ValueError(message)
+    return numeric
 
 
 def _valid_transition_durations(durations: Any) -> np.ndarray:

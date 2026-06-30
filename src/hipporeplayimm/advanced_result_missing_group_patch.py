@@ -1,4 +1,4 @@
-"""Preserve advanced evidence-margin groups with missing scope metadata."""
+"""Preserve advanced diagnostics groups with missing scope metadata."""
 
 from __future__ import annotations
 
@@ -14,6 +14,8 @@ _PATCH_FLAG = "_missing_group_metadata_patch_applied"
 _EVIDENCE_MARGIN_TABLE_WRAPPER_FLAG = "_missing_group_metadata_evidence_margin_table_wrapper"
 _ADD_COLUMNS_WRAPPER_FLAG = "_missing_group_metadata_add_margin_columns_wrapper"
 _WINDOW_SENSITIVITY_WRAPPER_FLAG = "_missing_group_metadata_window_sensitivity_wrapper"
+_PAIRED_DECISIONS_WRAPPER_FLAG = "_missing_group_metadata_paired_margin_decisions_wrapper"
+_THRESHOLD_BASE_DECISIONS_ATTR = "_advanced_result_threshold_validation_base_decisions"
 _EVENT_WINDOW_VARIANTS_WRAPPER_FLAG = "_missing_group_metadata_event_window_variants_wrapper"
 _PAIRED_MARGIN_WRAPPER_FLAG = "_missing_group_metadata_paired_margin_wrapper"
 _MARGIN_COLUMNS = [
@@ -66,8 +68,14 @@ def apply_advanced_result_missing_group_patch() -> None:
     """Keep diagnostics for rows whose optional grouping metadata is missing."""
 
     from . import advanced_result_diagnostics as diagnostics
+    from . import advanced_result_threshold_validation as threshold_validation
 
-    if getattr(diagnostics, _PATCH_FLAG, False) and _missing_group_patch_current(diagnostics) and wrong_map_missing_group_patch_current(diagnostics):
+    if (
+        getattr(diagnostics, _PATCH_FLAG, False)
+        and _missing_group_patch_current(diagnostics)
+        and _paired_missing_group_patch_current(diagnostics)
+        and wrong_map_missing_group_patch_current(diagnostics)
+    ):
         return
 
     def evidence_margin_table(
@@ -282,6 +290,7 @@ def apply_advanced_result_missing_group_patch() -> None:
     setattr(evidence_margin_table, _EVIDENCE_MARGIN_TABLE_WRAPPER_FLAG, True)
     setattr(add_evidence_margin_columns, _ADD_COLUMNS_WRAPPER_FLAG, True)
     setattr(summarize_window_sensitivity, _WINDOW_SENSITIVITY_WRAPPER_FLAG, True)
+    setattr(paired_model_margin_decisions, _PAIRED_DECISIONS_WRAPPER_FLAG, True)
     setattr(event_window_variants, _EVENT_WINDOW_VARIANTS_WRAPPER_FLAG, True)
     setattr(paired_model_margin_decisions, _PAIRED_MARGIN_WRAPPER_FLAG, True)
     diagnostics.evidence_margin_table = evidence_margin_table
@@ -289,6 +298,13 @@ def apply_advanced_result_missing_group_patch() -> None:
     diagnostics.summarize_window_sensitivity = summarize_window_sensitivity
     diagnostics.event_window_variants = event_window_variants
     diagnostics.paired_model_margin_decisions = paired_model_margin_decisions
+    setattr(diagnostics, _THRESHOLD_BASE_DECISIONS_ATTR, paired_model_margin_decisions)
+    threshold_validation.apply_advanced_result_threshold_validation_patch()
+    setattr(
+        diagnostics.event_window_variants,
+        _EVENT_WINDOW_VARIANTS_WRAPPER_FLAG,
+        True,
+    )
     apply_wrong_map_missing_group_patch(diagnostics)
     setattr(diagnostics, _PATCH_FLAG, True)
 
@@ -351,3 +367,10 @@ def _missing_group_patch_current(diagnostics) -> bool:
             ("paired_model_margin_decisions", _PAIRED_MARGIN_WRAPPER_FLAG),
         )
     )
+
+
+def _paired_missing_group_patch_current(diagnostics) -> bool:
+    """Return whether paired decisions still use the NA-preserving base wrapper."""
+
+    base_decisions = getattr(diagnostics, _THRESHOLD_BASE_DECISIONS_ATTR, None)
+    return bool(getattr(base_decisions, _PAIRED_DECISIONS_WRAPPER_FLAG, False))

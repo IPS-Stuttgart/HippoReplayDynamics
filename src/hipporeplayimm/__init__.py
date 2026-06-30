@@ -63,6 +63,7 @@ from . import pyrecest_bin_center_validation as _pyrecest_bin_center_validation
 from . import pyrecest_numeric_metadata_guard as _pyrecest_numeric_metadata_guard
 from . import pyrecest_score_metadata as _pyrecest_score_metadata
 from . import recovery_diagnostics_bool_patch as _recovery_diagnostics_bool_patch
+from . import result_quality_audit_scope_patch as _result_quality_audit_scope_patch
 from . import reverse_time_terminal_guard as _reverse_time_terminal_guard
 from . import score_metadata as _score_metadata
 from . import score_metadata_bool_validation as _score_metadata_bool_validation
@@ -287,6 +288,7 @@ def apply_runtime_patches() -> None:
     _advanced_result_quantile_array_patch.apply_advanced_result_quantile_array_patch()
     _advanced_result_missing_group_patch.apply_advanced_result_missing_group_patch()
     _posterior_calibration_summary_patch.apply_posterior_calibration_summary_patch()
+    _result_quality_audit_scope_patch.apply_result_quality_audit_scope_patch()
     _latent_path_validation.apply_latent_path_validation_patch()
     _simulation_recovery_runtime_limits.apply_simulation_recovery_runtime_limit_validation_patch()
     _simulation_recovery_count_validation.apply_simulation_recovery_count_validation_patch()

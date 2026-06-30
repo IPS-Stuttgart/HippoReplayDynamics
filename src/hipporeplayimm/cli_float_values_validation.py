@@ -97,14 +97,14 @@ def _patch_positive_integer_kwarg(module, function_name: str, kwarg_name: str) -
 def _positive_integer_count(name: str, value: object) -> int:
     raw = np.asarray(value)
     if raw.ndim != 0:
-        raise TypeError(f"{name} must be a scalar positive integer")
+        raise ValueError(f"{name} must be a scalar positive integer")
     item = raw.item()
     if isinstance(item, (bool, np.bool_)):
-        raise TypeError(f"{name} must be a positive integer, not boolean")
+        raise ValueError(f"{name} must be a positive integer, not boolean")
     try:
         numeric = float(item)
     except (TypeError, ValueError) as exc:
-        raise TypeError(f"{name} must be a positive integer") from exc
+        raise ValueError(f"{name} must be a positive integer") from exc
     if not math.isfinite(numeric) or numeric <= 0.0 or not np.isclose(numeric, np.rint(numeric), rtol=0.0, atol=0.0):
         raise ValueError(f"{name} must be a positive integer")
     return int(np.rint(numeric))

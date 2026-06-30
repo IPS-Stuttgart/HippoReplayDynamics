@@ -126,11 +126,22 @@ def _coerce_candidate_routes(routes: np.ndarray | None, centers: np.ndarray, max
         if not np.all(np.isfinite(arr)):
             raise ValueError("candidate_routes must be finite")
         return arr
-    max_points = int(max_default_points)
-    if max_points < 2:
-        raise ValueError("max_default_points must be at least 2 when candidate_routes is not provided")
+    max_points = _coerce_max_default_points(max_default_points)
     points = _farthest_point_subset(centers, max_points=max_points)
     return routes_from_wells(points)
+
+
+def _coerce_max_default_points(value: int) -> int:
+    arr = np.asarray(value)
+    if arr.shape != () or arr.dtype.kind == "b" or arr.dtype.kind not in {"i", "u", "f"}:
+        raise ValueError("max_default_points must be an integer >= 2 when candidate_routes is not provided")
+    numeric = float(arr)
+    if not np.isfinite(numeric) or not numeric.is_integer():
+        raise ValueError("max_default_points must be an integer >= 2 when candidate_routes is not provided")
+    max_points = int(numeric)
+    if max_points < 2:
+        raise ValueError("max_default_points must be at least 2 when candidate_routes is not provided")
+    return max_points
 
 
 def _route_target(route: np.ndarray, transition_number: int, n_transitions: int) -> np.ndarray:

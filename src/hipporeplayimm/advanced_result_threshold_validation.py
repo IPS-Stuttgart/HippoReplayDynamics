@@ -21,7 +21,15 @@ def _validated_threshold(
     if isinstance(threshold, (bool, np.bool_)):
         raise ValueError(message)
     try:
-        value = float(threshold)
+        scalar = np.asarray(threshold)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(message) from exc
+    if scalar.ndim != 0:
+        raise ValueError(message)
+    if np.issubdtype(scalar.dtype, np.bool_):
+        raise ValueError(message)
+    try:
+        value = float(scalar.item())
     except (TypeError, ValueError, OverflowError) as exc:
         raise ValueError(message) from exc
     if not np.isfinite(value) or value < 0.0:

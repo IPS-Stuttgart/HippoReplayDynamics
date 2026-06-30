@@ -72,15 +72,15 @@ def trajectory_quality_metrics(
 
 
 def _transition_durations(times: np.ndarray | None, n_time: int) -> np.ndarray:
-    if n_time <= 1:
-        return np.empty(0, dtype=float)
     if times is None:
-        return np.ones(n_time - 1, dtype=float)
+        return np.ones(n_time - 1, dtype=float) if n_time > 1 else np.empty(0, dtype=float)
     arr = np.asarray(times, dtype=float)
     if arr.shape != (n_time,):
         raise ValueError("times must contain one timestamp per trajectory row")
     if not np.all(np.isfinite(arr)):
         raise ValueError("times must contain finite values")
+    if n_time <= 1:
+        return np.empty(0, dtype=float)
     diffs = np.diff(arr)
     if np.any(diffs <= 0.0):
         raise ValueError("times must be strictly increasing")

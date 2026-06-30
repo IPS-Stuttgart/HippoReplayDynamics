@@ -13,7 +13,19 @@ _ORIGINALS_ATTR = "_displacement_config_bool_validation_originals"
 _WRAPPER_MARKER = "_displacement_config_bool_validation_wrapper"
 
 
+def _reject_array_shaped_scalar(name: str, value: object) -> None:
+    """Reject values that NumPy/Python might coerce from an array to a scalar."""
+
+    try:
+        array = np.asarray(value)
+    except (TypeError, ValueError) as exc:
+        raise TypeError(f"{name} must be a numeric scalar") from exc
+    if array.ndim != 0:
+        raise TypeError(f"{name} must be a numeric scalar")
+
+
 def _reject_boolean_scalar(name: str, value: object) -> None:
+    _reject_array_shaped_scalar(name, value)
     if _is_boolean_scalar(value):
         raise TypeError(f"{name} must be numeric, not boolean")
 
@@ -76,9 +88,11 @@ def apply_displacement_config_bool_validation_patch() -> None:
 
     Python booleans are subclasses of ``int`` and NumPy booleans cast cleanly to
     ``int``/``float``.  Fractional numeric values also cast through ``int(...)``.
-    The finite-displacement state-space models use explicit numeric casts for
-    lattice radii and scale parameters, so malformed values can otherwise silently
-    change the displacement lattice or transition scale instead of failing fast.
+    Single-element NumPy arrays can likewise cast through ``float(...)`` for scale
+    parameters.  The finite-displacement state-space models use explicit numeric
+    casts for lattice radii and scale parameters, so malformed values can
+    otherwise silently change the displacement lattice or transition scale instead
+    of failing fast.
 
     The module-level flag is not sufficient by itself: tests or downstream code
     can replace the guarded helpers while leaving the flag set.  Re-checking the

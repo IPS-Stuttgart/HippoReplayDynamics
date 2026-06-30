@@ -27,6 +27,23 @@ def test_window_decode_groups_handles_non_default_index():
     assert [float(group["window_start_s"].iloc[0]) for group in groups] == [1.0, 1.1]
 
 
+def test_window_decode_groups_handles_mixed_type_set_metadata():
+    scores = pd.DataFrame(
+        {
+            "session": ["rat1", "rat1"],
+            "event_index": [0, 0],
+            "event_window_variant": [{1, "contracted"}, {"contracted", 1}],
+            "window_start_s": [1.0, 1.0],
+            "window_end_s": [1.2, 1.2],
+        }
+    )
+
+    groups = list(_window_decode_groups(scores))
+
+    assert len(groups) == 1
+    assert groups[0]["window_start_s"].tolist() == [1.0, 1.0]
+
+
 def test_compare_scores_for_replay_window_preserves_emission_call_extras():
     calls = []
 

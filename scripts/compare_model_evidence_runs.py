@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 
 from hipporeplayimm.evidence_reporting import (
@@ -141,6 +142,7 @@ def _load_event_scores(root: str | Path, run_label: str, *, exact_only: bool = F
     if missing:
         raise ValueError(f"{path} is missing columns: {sorted(missing)}")
     frame = _successful_score_rows(frame)
+    frame = _finite_log_evidence_rows(frame)
     frame = ensure_evidence_support_columns(frame)
     if "evidence_comparable" in frame:
         frame["evidence_comparable"] = _coerce_bool_series(frame["evidence_comparable"])
@@ -163,6 +165,15 @@ def _successful_score_rows(frame: pd.DataFrame) -> pd.DataFrame:
     out = frame[missing | success].copy()
     out["status"] = "success"
     return out
+
+
+def _finite_log_evidence_rows(frame: pd.DataFrame) -> pd.DataFrame:
+    out = frame.copy()
+    out["log_evidence"] = pd.to_numeric(out["log_evidence"], errors="coerce")
+    if out.empty:
+        return out
+    finite = np.isfinite(out["log_evidence"].to_numpy(dtype=float))
+    return out.loc[finite].copy()
 
 
 def _evidence_support_counts(frame: pd.DataFrame, label: str) -> pd.DataFrame:

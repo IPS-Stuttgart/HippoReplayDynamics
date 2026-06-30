@@ -76,10 +76,9 @@ def test_encoding_config_rejects_array_shaped_numeric_fields(
     field_name,
     valid_value,
 ):
-    config = EncodingConfig(
-        min_speed_cm_s=0.0,
-        **{field_name: np.asarray([valid_value])},
-    )
+    kwargs = {"min_speed_cm_s": 0.0}
+    kwargs[field_name] = np.asarray([valid_value])
+    config = EncodingConfig(**kwargs)
 
     with pytest.raises(TypeError, match=field_name):
         fit_place_field_encoding(_minimal_session(tmp_path), config)

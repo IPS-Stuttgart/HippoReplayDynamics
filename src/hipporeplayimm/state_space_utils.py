@@ -319,10 +319,10 @@ def _scaled_emissions(
     if valid_mask is not None:
         finite &= valid_mask[None, :]
 
-    if not np.all(np.any(finite, axis=1)):
-        raise ValueError(
-            "every emission row must contain at least one finite value on the active support"
-        )
+    finite_rows = np.any(finite, axis=1)
+    if not np.all(finite_rows):
+        row = int(np.flatnonzero(~finite_rows)[0])
+        raise ValueError(f"row {row} must contain at least one finite value on the active support")
 
     offsets = np.max(np.where(finite, values, -np.inf), axis=1)
     shifted = np.where(finite, values - offsets[:, None], -np.inf)

@@ -5,7 +5,9 @@ from pathlib import Path
 import numpy as np
 import pytest
 
+from hipporeplayimm.benchmarks import BenchmarkConfig, _clusterless_mark_config
 from hipporeplayimm.clusterless import ClusterlessMarkConfig, fit_clusterless_mark_encoding
+from hipporeplayimm.clusterless_config_validation import _validate_clusterless_mark_config
 from hipporeplayimm.data import ReplaySession, SpikeMarkData
 from hipporeplayimm.encoding import EncodingConfig
 
@@ -76,3 +78,63 @@ def test_clusterless_mark_config_rejects_boolean_numeric_parameters(
 
     with pytest.raises(ValueError, match=message):
         fit_clusterless_mark_encoding(object(), config)
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("mark_smoothing_sigma_bins", np.array([1.0])),
+        ("mark_prior_count", np.array([1.0])),
+        ("mark_variance_floor", np.array([1.0])),
+        ("rate_floor_hz", np.array([1.0])),
+        ("mark_kde_bandwidth", np.array([1.0])),
+        ("mark_kde_spatial_sigma_bins", np.array([1.0])),
+        ("mark_kde_max_neighbors", np.array([16])),
+        ("mark_smoothing_sigma_bins", np.array(True)),
+        ("mark_kde_max_neighbors", np.array(True, dtype=object)),
+    ],
+)
+def test_clusterless_mark_config_rejects_array_or_bool_scalars(field: str, value: object) -> None:
+    config = ClusterlessMarkConfig(**{field: value})
+
+    with pytest.raises(ValueError, match=field):
+        _validate_clusterless_mark_config(config)
+
+
+def test_clusterless_mark_config_accepts_zero_dimensional_numeric_arrays() -> None:
+    config = ClusterlessMarkConfig(
+        mark_smoothing_sigma_bins=np.array(1.0),
+        mark_prior_count=np.array(1.0),
+        mark_variance_floor=np.array(1.0),
+        rate_floor_hz=np.array(1.0),
+        mark_kde_bandwidth=np.array(1.0),
+        mark_kde_spatial_sigma_bins=np.array(0.0),
+        mark_kde_max_neighbors=np.array(16),
+    )
+
+    _validate_clusterless_mark_config(config)
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "message"),
+    [
+        ("clusterless_mark_smoothing_sigma_bins", np.array([1.0]), "mark_smoothing_sigma_bins"),
+        ("clusterless_mark_prior_count", np.array([1.0]), "mark_prior_count"),
+        ("clusterless_mark_variance_floor", np.array([1.0]), "mark_variance_floor"),
+        ("clusterless_rate_floor_hz", np.array([1.0]), "rate_floor_hz"),
+        ("clusterless_mark_kde_bandwidth", np.array([1.0]), "mark_kde_bandwidth"),
+        ("clusterless_mark_kde_spatial_sigma_bins", np.array([1.0]), "mark_kde_spatial_sigma_bins"),
+        ("clusterless_mark_kde_max_neighbors", np.array([16]), "mark_kde_max_neighbors"),
+        ("clusterless_mark_smoothing_sigma_bins", np.array(True), "mark_smoothing_sigma_bins"),
+        ("clusterless_mark_kde_max_neighbors", np.array(True, dtype=object), "mark_kde_max_neighbors"),
+    ],
+)
+def test_benchmark_clusterless_adapter_rejects_array_or_bool_scalars(
+    field: str,
+    value: object,
+    message: str,
+) -> None:
+    config = BenchmarkConfig(**{field: value})
+
+    with pytest.raises(ValueError, match=message):
+        _clusterless_mark_config(config)

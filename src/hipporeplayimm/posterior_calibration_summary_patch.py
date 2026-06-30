@@ -171,11 +171,17 @@ def _restore_missing_group_metadata(frame: pd.DataFrame, group_cols: Sequence[st
     return out
 
 
+def _to_float_numpy(values: pd.Series) -> np.ndarray:
+    """Convert pandas numeric data to float, preserving nullable missing values."""
+
+    return values.to_numpy(dtype=float, na_value=np.nan)
+
+
 def _rank_fraction(rank: pd.Series, n_bins: pd.Series) -> pd.Series:
     """Return finite rank fractions only for possible 1-based rank/bin pairs."""
 
-    rank_values = pd.to_numeric(rank, errors="coerce").to_numpy(dtype=float)
-    n_bin_values = pd.to_numeric(n_bins, errors="coerce").to_numpy(dtype=float)
+    rank_values = _to_float_numpy(pd.to_numeric(rank, errors="coerce"))
+    n_bin_values = _to_float_numpy(pd.to_numeric(n_bins, errors="coerce"))
     integer_like = np.isclose(rank_values, np.rint(rank_values), rtol=0.0, atol=0.0) & np.isclose(
         n_bin_values,
         np.rint(n_bin_values),
@@ -199,7 +205,7 @@ def _rank_coverage(rank_fraction: pd.Series, threshold: float) -> pd.Series:
     """Return nullable rank-coverage indicators for finite rank fractions only."""
 
     values = pd.to_numeric(rank_fraction, errors="coerce")
-    numeric = values.to_numpy(dtype=float)
+    numeric = _to_float_numpy(values)
     valid = np.isfinite(numeric)
     coverage = pd.Series(pd.NA, index=values.index, dtype="boolean")
     if np.any(valid):
@@ -237,7 +243,7 @@ def apply_posterior_calibration_summary_patch() -> None:
 
         frame = samples.copy()
         raw_probabilities = pd.to_numeric(frame[probability_column], errors="coerce")
-        raw_probability_values = raw_probabilities.to_numpy(dtype=float)
+        raw_probability_values = _to_float_numpy(raw_probabilities)
         valid_probability = pd.Series(
             np.isfinite(raw_probability_values)
             & (raw_probability_values >= 0.0)

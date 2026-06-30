@@ -2,8 +2,8 @@ import numpy as np
 import pytest
 
 from hipporeplayimm.encoding import LogEmissionTensor
-from hipporeplayimm.models import EventScore
-from scripts.track_event import _TRACK_MODEL_CHOICES, _trajectory_rows_from_log_posteriors
+from hipporeplayimm.models import CandidateKinematicModel, EventScore
+from scripts.track_event import _TRACK_MODEL_CHOICES, _trajectory_from_prefix_scores, _trajectory_rows_from_log_posteriors
 
 
 def test_trajectory_rows_entropy_handles_zero_probability_bins():
@@ -35,6 +35,28 @@ def test_trajectory_rows_entropy_handles_zero_probability_bins():
     assert rows.loc[0, "posterior_entropy"] == pytest.approx(0.0)
     expected_entropy = -(0.25 * np.log(0.25) + 0.75 * np.log(0.75))
     assert rows.loc[1, "posterior_entropy"] == pytest.approx(expected_entropy)
+
+
+def test_full_trajectory_imm_export_preserves_mode_probability_columns():
+    emissions = LogEmissionTensor(
+        log_likelihood=np.zeros((2, 2), dtype=float),
+        spike_counts=np.zeros((2, 1), dtype=int),
+        times=np.array([0.0, 0.02]),
+        dt=0.02,
+        cell_ids=np.array([1]),
+        n_spikes=0,
+    )
+    bin_centers = np.array([[0.0, 0.0], [1.0, 0.0]], dtype=float)
+    model = CandidateKinematicModel(mode="imm", top_k=0)
+
+    rows, log_posteriors = _trajectory_from_prefix_scores(model, emissions, bin_centers)
+
+    assert log_posteriors.shape == (emissions.n_time, emissions.n_bins)
+    probability_columns = [f"mode_{mode}_probability" for mode in ("stationary", "diffusion", "momentum", "jump")]
+    assert set(probability_columns).issubset(rows.columns)
+    assert "most_likely_mode" in rows.columns
+    np.testing.assert_allclose(rows[probability_columns].sum(axis=1), np.ones(emissions.n_time))
+    assert rows["most_likely_mode"].notna().all()
 
 
 def test_track_model_choices_include_benchmark_state_space_variants():

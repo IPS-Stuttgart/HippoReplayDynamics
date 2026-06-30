@@ -14,6 +14,8 @@ import inspect
 from functools import wraps
 from typing import Any
 
+import numpy as np
+
 
 _REVERSE_TIME_TERMINAL_UNAVAILABLE = "unavailable_without_trajectory"
 _POSTERIOR_DIAGNOSTIC_KEYS = (
@@ -45,18 +47,73 @@ def apply_reverse_time_terminal_guard_patch() -> None:
         candidate_indices: Any = None,
         return_trajectory: bool | None = None,
     ):
-        kwargs: dict[str, Any] = {
-            "occupancy_s": occupancy_s,
-            "candidate_indices": candidate_indices,
-        }
-        if return_trajectory is not None:
-            kwargs["return_trajectory"] = bool(return_trajectory)
-        result = _call_score_with_supported_kwargs(score, self, emissions, bin_centers, kwargs)
+        if not hasattr(getattr(self, "base_model", None), "score"):
+            result = score(
+                self,
+                emissions,
+                bin_centers,
+                occupancy_s=occupancy_s,
+                candidate_indices=candidate_indices,
+                return_trajectory=return_trajectory,
+            )
+            return _clear_unmappable_reverse_terminal(result)
+        result = _score_reverse_with_supported_return_trajectory(
+            extensions,
+            self,
+            emissions,
+            bin_centers,
+            occupancy_s=occupancy_s,
+            candidate_indices=candidate_indices,
+            return_trajectory=return_trajectory,
+        )
         return _clear_unmappable_reverse_terminal(result)
 
     score_with_terminal_guard._reverse_time_terminal_guard_applied = True  # type: ignore[attr-defined]
     score_with_terminal_guard.__hipporeplayimm_original__ = score  # type: ignore[attr-defined]
     extensions.ReverseTimeReplayModel.score = score_with_terminal_guard
+
+
+def _score_reverse_with_supported_return_trajectory(
+    extensions: Any,
+    self: Any,
+    emissions: Any,
+    bin_centers: Any,
+    *,
+    occupancy_s: Any = None,
+    candidate_indices: Any = None,
+    return_trajectory: bool | None = None,
+) -> Any:
+    """Score a reverse-time model while preserving the trajectory-return flag."""
+
+    reversed_emissions = extensions.copy_emissions_with_log_likelihood(
+        emissions,
+        emissions.log_likelihood,
+        reverse_time=True,
+    )
+    reversed_candidates = (
+        None
+        if candidate_indices is None
+        else [np.asarray(curr, dtype=int).copy() for curr in candidate_indices[::-1]]
+    )
+    result = extensions.score_replay_model_compat(
+        self.base_model,
+        reversed_emissions,
+        bin_centers,
+        occupancy_s=occupancy_s,
+        candidate_indices=reversed_candidates,
+        return_trajectory=return_trajectory,
+    )
+    if result.trajectory_log_posterior is not None:
+        trajectory = np.asarray(result.trajectory_log_posterior, dtype=float)[::-1].copy()
+        result.trajectory_log_posterior = trajectory
+        result.terminal_log_posterior = trajectory[-1].copy()
+    result.model_name = str(self.name)
+    result.diagnostics = dict(result.diagnostics)
+    if result.terminal_log_posterior is not None:
+        result.diagnostics.update(extensions._posterior_diagnostics(result.terminal_log_posterior, bin_centers))
+    result.diagnostics["direction_model"] = "reverse"
+    result.diagnostics["reverse_time_base_model"] = str(getattr(self.base_model, "name", "model"))
+    return result
 
 
 def _call_score_with_supported_kwargs(

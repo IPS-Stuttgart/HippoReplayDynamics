@@ -26,6 +26,25 @@ def test_posterior_predictive_count_checks_reject_impossible_count_inputs():
         posterior_predictive_count_checks(observed, expected, variance_counts=np.array([[0.2, np.nan]]))
 
 
+def test_posterior_predictive_checks_reject_empty_count_tables():
+    message = "must contain at least one time bin and one cell"
+
+    with pytest.raises(ValueError, match=f"observed_counts {message}"):
+        posterior_predictive_count_checks(np.empty((0, 2)), np.empty((0, 2)))
+
+    with pytest.raises(ValueError, match=f"observed_counts {message}"):
+        posterior_predictive_count_checks(np.empty((1, 0)), np.empty((1, 0)))
+
+    with pytest.raises(ValueError, match=f"expected_counts {message}"):
+        posterior_predictive_count_checks(np.array([[0.0]]), np.empty((0, 1)))
+
+    with pytest.raises(ValueError, match=f"variance_counts {message}"):
+        posterior_predictive_count_checks(np.array([[0.0]]), np.array([[0.1]]), variance_counts=np.empty((0, 1)))
+
+    with pytest.raises(ValueError, match=f"observed_counts {message}"):
+        posterior_predictive_poisson_log_score(np.empty((0, 2)), np.empty((0, 2)))
+
+
 def test_posterior_predictive_checks_allow_fractional_expectations_and_variances():
     observed = np.array([[0.0, 1.0]])
     expected = np.array([[0.2, 0.8]])

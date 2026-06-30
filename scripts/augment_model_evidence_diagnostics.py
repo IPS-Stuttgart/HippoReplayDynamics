@@ -12,9 +12,20 @@ import pandas as pd
 from hipporeplayimm.evidence_reliability import add_event_reliability_flags
 
 
+def _numeric_series(values: pd.Series) -> pd.Series:
+    return pd.to_numeric(values, errors="coerce").astype(float)
+
+
 def _safe_divide(num: pd.Series, denom: pd.Series) -> pd.Series:
-    d = denom.astype(float).replace(0.0, np.nan)
-    return num.astype(float) / d
+    d = _numeric_series(denom).replace(0.0, np.nan)
+    return _numeric_series(num) / d
+
+
+def _finite_quantile(values: pd.Series, q: float) -> float:
+    numeric = _numeric_series(values).dropna()
+    if numeric.empty:
+        return float("nan")
+    return float(np.quantile(numeric.to_numpy(dtype=float), q))
 
 
 def augment(args: argparse.Namespace) -> pd.DataFrame:
@@ -30,6 +41,7 @@ def augment(args: argparse.Namespace) -> pd.DataFrame:
     scores["selection_dataset"] = args.selection_dataset
     scores["selection_metric"] = args.selection_metric
     if "runtime_s" in scores:
+        scores["runtime_s"] = _numeric_series(scores["runtime_s"])
         if "relative_log_evidence" in scores:
             scores["relative_log_evidence_per_runtime_s"] = _safe_divide(scores["relative_log_evidence"], scores["runtime_s"])
         if "truncated_relative_log_evidence" in scores:
@@ -51,15 +63,18 @@ def write_outputs(scores: pd.DataFrame, output: Path) -> None:
         reliability["reliable_fraction"] = reliability["reliable_rows"] / reliability["rows"].clip(lower=1)
         reliability.to_csv(output / "model_reliability_summary.csv", index=False)
     if "runtime_s" in scores:
-        runtime = scores.groupby("model", as_index=False).agg(
+        runtime_scores = scores.copy()
+        runtime_scores["runtime_s"] = _numeric_series(runtime_scores["runtime_s"])
+        runtime = runtime_scores.groupby("model", as_index=False).agg(
             rows=("model", "count"),
             mean_runtime_s=("runtime_s", "mean"),
             median_runtime_s=("runtime_s", "median"),
-            p95_runtime_s=("runtime_s", lambda x: float(np.quantile(x, 0.95))),
+            p95_runtime_s=("runtime_s", lambda x: _finite_quantile(x, 0.95)),
         )
-        if "relative_log_evidence_per_runtime_s" in scores:
+        if "relative_log_evidence_per_runtime_s" in runtime_scores:
+            runtime_scores["relative_log_evidence_per_runtime_s"] = _numeric_series(runtime_scores["relative_log_evidence_per_runtime_s"])
             runtime = runtime.merge(
-                scores.groupby("model", as_index=False)["relative_log_evidence_per_runtime_s"].mean(),
+                runtime_scores.groupby("model", as_index=False)["relative_log_evidence_per_runtime_s"].mean(),
                 on="model",
                 how="left",
             )

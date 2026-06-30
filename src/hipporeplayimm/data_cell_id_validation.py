@@ -29,6 +29,7 @@ def apply_data_cell_id_validation_patch() -> None:
 
     current_cell_ids = getattr(getattr(data.ReplaySession, "cell_ids", None), "fget", None)
     current_excitatory_spikes = getattr(data.ReplaySession, "excitatory_spikes", None)
+    current_ripple = getattr(data.ReplaySession, "ripple", None)
     original_load_replay_session = data.load_replay_session
     original_load_spike_marks = data._load_spike_marks
     original_mark_group_ids = data._mark_group_ids_from_tetrode_cell_ids
@@ -38,6 +39,7 @@ def apply_data_cell_id_validation_patch() -> None:
     patch_targets = (
         current_cell_ids,
         current_excitatory_spikes,
+        current_ripple,
         original_load_replay_session,
         original_load_spike_marks,
         original_mark_group_ids,
@@ -72,6 +74,10 @@ def apply_data_cell_id_validation_patch() -> None:
         keep = np.isin(spike_ids, excitatory_ids)
         return spikes[keep]
 
+    def replay_session_ripple(self, index):
+        index_value = _coerce_ripple_index(index, self.ripple_count)
+        return current_ripple(self, index_value)
+
     def load_replay_session(session_path):
         path = Path(session_path)
         spike_data = data._load_mat_file(path / "Spike_Data.mat")
@@ -103,6 +109,8 @@ def apply_data_cell_id_validation_patch() -> None:
     def coerce_ripple_event(session, ripple):
         if isinstance(ripple, (bool, np.bool_)):
             raise TypeError("ripple index must be an integer, not boolean")
+        if isinstance(ripple, (int, np.integer)):
+            return session.ripple(ripple)
         return original_coerce_ripple_event(session, ripple)
 
     def spikes_and_cell_ids_for_encoding(session, config):
@@ -120,6 +128,8 @@ def apply_data_cell_id_validation_patch() -> None:
         data.ReplaySession.cell_ids = property(_mark_patched(replay_session_cell_ids, current_cell_ids))
     if not _is_patched(current_excitatory_spikes):
         data.ReplaySession.excitatory_spikes = _mark_patched(replay_session_excitatory_spikes, current_excitatory_spikes)
+    if not _is_patched(current_ripple):
+        data.ReplaySession.ripple = _mark_patched(replay_session_ripple, current_ripple)
     if not _is_patched(original_load_replay_session):
         data.load_replay_session = _mark_patched(load_replay_session, original_load_replay_session)
     if not _is_patched(original_load_spike_marks):
@@ -170,6 +180,18 @@ def _validate_optional_neuron_ids(spike_data: dict[str, Any], variable_name: str
     if values.size == 0:
         return
     _coerce_integral_ids(values.reshape(-1), label)
+
+
+def _coerce_ripple_index(index: Any, ripple_count: int) -> int:
+    if isinstance(index, (bool, np.bool_)):
+        raise TypeError("ripple index must be an integer, not boolean")
+    if not isinstance(index, (int, np.integer)):
+        raise TypeError("ripple index must be an integer")
+    resolved = int(index)
+    count = int(ripple_count)
+    if resolved < 0 or resolved >= count:
+        raise IndexError(f"ripple index {resolved} out of range for {count} ripple events")
+    return resolved
 
 
 def _contains_boolean_ids(values: np.ndarray) -> bool:

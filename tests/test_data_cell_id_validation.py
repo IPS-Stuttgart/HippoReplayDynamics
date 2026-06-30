@@ -5,7 +5,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from hipporeplayimm.data import ReplaySession, _mark_group_ids_from_tetrode_cell_ids
+from hipporeplayimm.data import ReplaySession, RippleEvent, _coerce_ripple_event, _mark_group_ids_from_tetrode_cell_ids
 from hipporeplayimm.data_cell_id_validation import _PATCHED_FLAG, apply_data_cell_id_validation_patch
 
 
@@ -51,6 +51,18 @@ def _session_with_raw_spikes(spikes) -> ReplaySession:
     )
 
 
+def _session_with_ripples() -> ReplaySession:
+    session = _session_with_ids([])
+    session.ripple_events = np.array(
+        [
+            [0.0, 0.1, 0.05, 1.0, 2.0, 3.0],
+            [0.2, 0.3, 0.25, 4.0, 5.0, 6.0],
+        ],
+        dtype=float,
+    )
+    return session
+
+
 def test_replay_session_cell_ids_accept_integral_float_ids():
     session = _session_with_ids([2.0, 1.0, 2.0])
 
@@ -92,6 +104,36 @@ def test_replay_session_excitatory_spikes_reject_fractional_excitatory_ids():
         session.excitatory_spikes()
 
 
+def test_replay_session_ripple_accepts_numpy_integer_indices():
+    session = _session_with_ripples()
+
+    ripple = session.ripple(np.int64(1))
+
+    assert ripple.start == 0.2
+    assert ripple.peak == 0.25
+
+
+def test_replay_session_ripple_rejects_negative_indices():
+    session = _session_with_ripples()
+
+    with pytest.raises(IndexError, match="ripple index -1 out of range"):
+        session.ripple(-1)
+
+
+def test_replay_session_ripple_rejects_out_of_range_indices():
+    session = _session_with_ripples()
+
+    with pytest.raises(IndexError, match="ripple index 2 out of range"):
+        session.ripple(np.int64(2))
+
+
+def test_coerce_ripple_event_rejects_boolean_indices():
+    session = _session_with_ripples()
+
+    with pytest.raises(TypeError, match="not boolean"):
+        _coerce_ripple_event(session, np.bool_(True))
+
+
 def test_mark_group_ids_reject_fractional_tetrode_mapping_ids():
     with pytest.raises(ValueError, match="tetrode/cell IDs"):
         _mark_group_ids_from_tetrode_cell_ids(
@@ -120,8 +162,12 @@ def test_data_cell_id_validation_patch_refreshes_replaced_session_helpers(monkey
         keep = np.isin(spikes[:, 1].astype(int), excitatory.astype(int))
         return spikes[keep]
 
+    def lossy_ripple(self, index):
+        return RippleEvent.from_row(self.ripple_events[index])
+
     monkeypatch.setattr(ReplaySession, "cell_ids", property(lossy_cell_ids))
     monkeypatch.setattr(ReplaySession, "excitatory_spikes", lossy_excitatory_spikes)
+    monkeypatch.setattr(ReplaySession, "ripple", lossy_ripple)
     monkeypatch.setattr(data, _PATCHED_FLAG, True, raising=False)
 
     apply_data_cell_id_validation_patch()
@@ -130,3 +176,5 @@ def test_data_cell_id_validation_patch_refreshes_replaced_session_helpers(monkey
         _ = _session_with_ids([1.0, 2.5]).cell_ids
     with pytest.raises(ValueError, match="excitatory neuron IDs"):
         _session_with_ids([1.0, 2.0], excitatory_ids=[1.5]).excitatory_spikes()
+    with pytest.raises(IndexError, match="ripple index -1 out of range"):
+        _session_with_ripples().ripple(-1)

@@ -358,8 +358,8 @@ def _unique_log_evidence(values: pd.Series) -> float:
     finite = values.dropna().to_numpy(float)
     if finite.size == 0:
         return float("nan")
-    if float(np.max(finite) - np.min(finite)) > 1e-7:
-        raise ValueError("duplicate grid rows have conflicting log evidence")
+    if finite.size > 1:
+        raise ValueError("duplicate grid rows for the same event/parameter combination")
     return float(finite[0])
 
 

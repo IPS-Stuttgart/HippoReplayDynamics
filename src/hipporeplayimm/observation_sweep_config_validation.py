@@ -36,6 +36,7 @@ def apply_observation_sweep_config_validation_patch() -> None:
     @wraps(original_validate_config)
     def validate_config_with_finite_grid_values(config: Any) -> None:
         _validate_finite_observation_sweep_config(config)
+        original_validate_config(config)
 
     sweep._validate_config = validate_config_with_finite_grid_values
     setattr(sweep, _PATCHED_FLAG, True)

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+from functools import wraps
 
 import numpy as np
 import pandas as pd
@@ -10,8 +11,10 @@ import pandas as pd
 _PATCHED_FLAG = "_posterior_calibration_summary_patch_applied"
 _GATES_SCOPE_PATCHED_FLAG = "_result_quality_gates_scope_patch_applied"
 _PAIRED_GROUP_PATCHED_FLAG = "_paired_model_missing_group_patch_applied"
+_BOOTSTRAP_GROUP_PATCHED_FLAG = "_hierarchical_bootstrap_missing_group_patch_applied"
 _PAIRED_SWEEP_GROUP_PATCHED_FLAG = "_paired_model_sweep_missing_group_patch_applied"
 _ORIGINAL_PAIRED_ATTR = "_paired_model_missing_group_original"
+_ORIGINAL_BOOTSTRAP_ATTR = "_hierarchical_bootstrap_missing_group_original"
 _GROUPED_METRICS_PATCHED_FLAG = "_grouped_model_metrics_missing_group_patch_applied"
 _ORIGINAL_GROUPED_METRICS_ATTR = "_grouped_model_metrics_missing_group_original"
 _ORIGINAL_SWEEP_ATTR = "_paired_model_sweep_missing_group_original"
@@ -179,6 +182,61 @@ def _normalize_optional_group_cols(group_cols: Sequence[str] | str | None) -> tu
     return _normalize_group_cols(group_cols)
 
 
+def _apply_hierarchical_bootstrap_missing_group_patch(result_improvements) -> None:
+    """Keep nested bootstrap groups whose optional scope metadata is missing."""
+
+    current = result_improvements.hierarchical_bootstrap_ci
+    if getattr(current, _BOOTSTRAP_GROUP_PATCHED_FLAG, False):
+        return
+    original = getattr(current, _ORIGINAL_BOOTSTRAP_ATTR, current)
+
+    @wraps(original)
+    def hierarchical_bootstrap_ci(
+        rows: pd.DataFrame,
+        *,
+        model: str,
+        value_column: str = "delta_vs_best_static",
+        group_columns: tuple[str, ...] = ("session",),
+        n_bootstrap: int = 5000,
+        random_seed: int = 1,
+    ) -> tuple[float, float]:
+        values = result_improvements._model_metric_rows(rows, model, value_column, group_columns)
+        if values.empty:
+            return (float("nan"), float("nan"))
+        rng = np.random.default_rng(random_seed)
+        if group_columns:
+            groupby_keys = group_columns[0] if len(group_columns) == 1 else list(group_columns)
+            grouped_values = [
+                group[value_column].to_numpy(dtype=float)
+                for _, group in values.groupby(groupby_keys, sort=False, dropna=False)
+            ]
+        else:
+            grouped_values = [values[value_column].to_numpy(dtype=float)]
+        if not grouped_values:
+            return (float("nan"), float("nan"))
+        bootstrap_means = np.empty(int(n_bootstrap), dtype=float)
+        for index in range(int(n_bootstrap)):
+            sampled_groups = rng.choice(
+                np.arange(len(grouped_values)),
+                size=len(grouped_values),
+                replace=True,
+            )
+            sampled_values: list[np.ndarray] = []
+            for group_index in sampled_groups:
+                curr = grouped_values[int(group_index)]
+                sampled_values.append(rng.choice(curr, size=curr.size, replace=True))
+            merged = np.concatenate(sampled_values) if sampled_values else np.array([], dtype=float)
+            bootstrap_means[index] = float(np.mean(merged)) if merged.size else np.nan
+        finite = bootstrap_means[np.isfinite(bootstrap_means)]
+        if finite.size == 0:
+            return (float("nan"), float("nan"))
+        return (float(np.quantile(finite, 0.025)), float(np.quantile(finite, 0.975)))
+
+    setattr(hierarchical_bootstrap_ci, _BOOTSTRAP_GROUP_PATCHED_FLAG, True)
+    setattr(hierarchical_bootstrap_ci, _ORIGINAL_BOOTSTRAP_ATTR, original)
+    result_improvements.hierarchical_bootstrap_ci = hierarchical_bootstrap_ci
+
+
 def _missing_group_sentinel(frame: pd.DataFrame, group_cols: Sequence[str]) -> str:
     """Return a temporary missing-group label absent from existing group values."""
 
@@ -291,6 +349,7 @@ def apply_posterior_calibration_summary_patch() -> None:
     result_quality_audit_scope_patch.apply_result_quality_audit_scope_patch()
     _apply_result_quality_gates_scope_patch()
     _apply_paired_model_missing_group_patch()
+    _apply_hierarchical_bootstrap_missing_group_patch(result_improvements)
     _apply_grouped_model_metrics_missing_group_patch()
 
     if getattr(result_improvements, _PATCHED_FLAG, False):

@@ -40,3 +40,16 @@ def test_log_emission_tensor_rejects_boolean_n_spikes() -> None:
             cell_ids=np.array([1], dtype=int),
             n_spikes=True,
         )
+
+
+@pytest.mark.parametrize("n_spikes", [np.array([1]), np.array([[1]])])
+def test_log_emission_tensor_rejects_array_shaped_n_spikes(n_spikes: object) -> None:
+    with pytest.raises(ValueError, match="n_spikes.*scalar"):
+        LogEmissionTensor(
+            log_likelihood=np.zeros((1, 1), dtype=float),
+            spike_counts=np.array([[1]], dtype=int),
+            times=np.array([0.0], dtype=float),
+            dt=0.02,
+            cell_ids=np.array([1], dtype=int),
+            n_spikes=n_spikes,
+        )

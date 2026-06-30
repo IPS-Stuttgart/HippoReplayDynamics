@@ -41,6 +41,18 @@ def test_duration_float_without_transition_metadata_uses_scalar_dt():
     np.testing.assert_allclose(transition_durations_s(emissions), np.array([0.02, 0.02]))
 
 
+def test_numpy_size_one_dt_view_uses_view_value_not_backing_array():
+    raw_durations = np.array([0.005, 0.02, 0.04])
+    emissions = SimpleNamespace(n_time=3, dt=raw_durations[1:2], times=np.array([]))
+
+    np.testing.assert_allclose(transition_durations_s(emissions), np.array([0.02, 0.02]))
+
+    attach_duration_metadata(emissions)
+
+    assert type(emissions.dt) is float
+    assert np.isclose(emissions.dt, 0.02)
+
+
 def _duration_test_emissions() -> LogEmissionTensor:
     return LogEmissionTensor(
         log_likelihood=np.log(

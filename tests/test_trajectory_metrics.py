@@ -69,6 +69,15 @@ def test_trajectory_quality_metrics_rejects_nonfinite_or_nonmonotone_times(times
         )
 
 
+def test_trajectory_quality_metrics_validates_single_time_bin_timestamp():
+    with pytest.raises(ValueError, match="finite"):
+        trajectory_quality_metrics(
+            np.log(np.array([[1.0]])),
+            np.array([0.0]),
+            times=np.array([np.nan]),
+        )
+
+
 def test_trajectory_quality_metrics_entropy_ignores_impossible_bins():
     metrics = trajectory_quality_metrics(
         np.array(

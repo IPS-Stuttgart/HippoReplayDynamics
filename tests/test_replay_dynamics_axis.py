@@ -113,6 +113,27 @@ def test_replay_dynamics_axis_computes_indices_and_margins(tmp_path: Path):
         assert (tmp_path / filename).is_file()
 
 
+def test_replay_dynamics_axis_keeps_window_variants_separate():
+    contracted = _event_scores("Rat1/Open1", 1, [0.0, 1.0, 2.0, 4.0, 3.0], 0.10, 30)
+    expanded = _event_scores("Rat1/Open1", 1, [0.0, 3.0, 1.0, 2.0, 4.0], 0.20, 40)
+    for row in contracted:
+        row["event_window_variant"] = "contracted"
+    for row in expanded:
+        row["event_window_variant"] = "expanded"
+
+    event_axis = build_event_dynamics_axis(
+        pd.DataFrame([*contracted, *expanded]),
+        covariates=("pre_event_rate",),
+    )
+
+    assert len(event_axis) == 2
+    assert event_axis["event_window_variant"].tolist() == ["contracted", "expanded"]
+    contracted_row = event_axis[event_axis["event_window_variant"].eq("contracted")].iloc[0]
+    expanded_row = event_axis[event_axis["event_window_variant"].eq("expanded")].iloc[0]
+    assert contracted_row["logZ_first_order_imm"] == pytest.approx(4.0)
+    assert expanded_row["logZ_first_order_imm"] == pytest.approx(2.0)
+
+
 def test_replay_dynamics_axis_pack_handles_no_successful_rows(tmp_path: Path):
     evidence = pd.DataFrame(
         _event_scores("Rat1/Open1", 1, [0.0, 1.0, 2.0, 4.0, 3.0], 0.10, 30)

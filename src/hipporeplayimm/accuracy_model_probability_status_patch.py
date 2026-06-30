@@ -184,14 +184,31 @@ def _is_boolean_scalar(value: object) -> bool:
     return False
 
 
-def _validate_finite_nonnegative_numeric_parameter(name: str, value: object) -> float:
+def _finite_float_scalar(name: str, value: object, invalid_message: str) -> float:
     if _is_boolean_scalar(value):
         raise TypeError(f"{name} must be numeric, not boolean")
     try:
-        numeric = float(value)
+        array = np.asarray(value)
     except (TypeError, ValueError) as exc:
-        raise ValueError(f"{name} must be finite and nonnegative") from exc
-    if not np.isfinite(numeric) or numeric < 0.0:
+        raise ValueError(invalid_message) from exc
+    if array.ndim != 0:
+        raise ValueError(invalid_message)
+    try:
+        numeric = float(array)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(invalid_message) from exc
+    if not np.isfinite(numeric):
+        raise ValueError(invalid_message)
+    return numeric
+
+
+def _validate_finite_nonnegative_numeric_parameter(name: str, value: object) -> float:
+    numeric = _finite_float_scalar(
+        name,
+        value,
+        f"{name} must be finite and nonnegative",
+    )
+    if numeric < 0.0:
         raise ValueError(f"{name} must be finite and nonnegative")
     return numeric
 
@@ -199,13 +216,12 @@ def _validate_finite_nonnegative_numeric_parameter(name: str, value: object) -> 
 def _validate_optional_fraction_parameter(name: str, value: object | None) -> None:
     if value is None:
         return
-    if _is_boolean_scalar(value):
-        raise TypeError(f"{name} must be numeric, not boolean")
-    try:
-        numeric = float(value)
-    except (TypeError, ValueError) as exc:
-        raise ValueError(f"{name} must lie in (0, 1]") from exc
-    if not np.isfinite(numeric) or not 0.0 < numeric <= 1.0:
+    numeric = _finite_float_scalar(
+        name,
+        value,
+        f"{name} must lie in (0, 1]",
+    )
+    if not 0.0 < numeric <= 1.0:
         raise ValueError(f"{name} must lie in (0, 1]")
 
 

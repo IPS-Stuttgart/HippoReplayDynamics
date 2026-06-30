@@ -3,6 +3,8 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
+import hipporeplayimm
+import hipporeplayimm.simulation_recovery as simulation_recovery
 from hipporeplayimm.encoding import EncodingConfig, EncodingModel
 from hipporeplayimm.simulation_recovery import (
     emissions_from_counts,
@@ -89,6 +91,21 @@ def test_simulation_recovery_rejects_invalid_n_time(function, n_time: object) ->
             _minimal_encoding(),
             true_model="stationary",
             n_time=n_time,
+            dt=0.02,
+            rng=np.random.default_rng(0),
+        )
+
+
+@pytest.mark.parametrize("function_name", ["simulate_latent_path", "simulate_replay_event"])
+def test_runtime_patch_reapplication_rejects_array_shaped_n_time(function_name: str) -> None:
+    hipporeplayimm.apply_runtime_patches()
+    function = getattr(simulation_recovery, function_name)
+
+    with pytest.raises(ValueError, match="n_time"):
+        function(
+            _minimal_encoding(),
+            true_model="stationary",
+            n_time=np.asarray([2]),
             dt=0.02,
             rng=np.random.default_rng(0),
         )

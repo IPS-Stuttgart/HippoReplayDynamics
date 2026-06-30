@@ -9,6 +9,7 @@ from contextvars import ContextVar
 import numpy as np
 
 _PATCH_ATTR = "_first_order_imm_diagnostics_validation_patch"
+_MODE_COUNT_PATCH_ATTR = "_state_space_mode_count_validation_patch"
 _ORIGINAL_ATTR = "_first_order_imm_diagnostics_validation_original"
 _DURATION_ALIAS_ATTR = "_first_order_imm_duration_diagnostics_alias_patch"
 _DURATION_SOURCE_ATTR = "_first_order_imm_duration_diagnostics_source_patch"
@@ -174,6 +175,60 @@ def _matching_transition_durations(values: object, n_time: int) -> np.ndarray | 
     return durations
 
 
+def _is_boolean_scalar(value: object) -> bool:
+    """Return True for Python, NumPy, and object-wrapped boolean scalars."""
+
+    if isinstance(value, (bool, np.bool_)):
+        return True
+    arr = np.asarray(value)
+    if arr.ndim != 0:
+        return False
+    if np.issubdtype(arr.dtype, np.bool_):
+        return True
+    if arr.dtype == object:
+        try:
+            return isinstance(arr.item(), (bool, np.bool_))
+        except ValueError:
+            return False
+    return False
+
+
+def _coerce_mode_count(value: object) -> int:
+    """Return an integer mode count without bool, float, or array coercion."""
+
+    if _is_boolean_scalar(value):
+        raise TypeError("n_modes must be an integer count, not boolean")
+    try:
+        arr = np.asarray(value)
+    except ValueError as exc:
+        raise TypeError("n_modes must be an integer scalar") from exc
+    if arr.ndim != 0 or not np.issubdtype(arr.dtype, np.integer):
+        raise TypeError("n_modes must be an integer scalar")
+    return int(arr)
+
+
+def _patch_mode_transition_count_validation() -> None:
+    """Reject malformed IMM mode counts before NumPy/Python integer coercion."""
+
+    import hipporeplayimm.state_space_utils as state_space_utils
+
+    current = state_space_utils._mode_transition_matrix
+    if getattr(current, _MODE_COUNT_PATCH_ATTR, False):
+        return
+
+    def mode_transition_matrix(n_modes: int, stickiness: float) -> np.ndarray:
+        return current(_coerce_mode_count(n_modes), stickiness)
+
+    setattr(mode_transition_matrix, _MODE_COUNT_PATCH_ATTR, True)
+    setattr(mode_transition_matrix, _ORIGINAL_ATTR, current)
+    state_space_utils._mode_transition_matrix = mode_transition_matrix
+
+    for module in list(sys.modules.values()):
+        module_name = getattr(module, "__name__", "")
+        if module_name.startswith("hipporeplayimm") and getattr(module, "_mode_transition_matrix", None) is current:
+            module._mode_transition_matrix = mode_transition_matrix
+
+
 def _wrap_helper(
     helper: Callable[..., dict[str, float | int]],
 ) -> Callable[..., dict[str, float | int]]:
@@ -332,6 +387,7 @@ def apply_first_order_imm_diagnostics_validation_patch() -> None:
 
     import hipporeplayimm.state_space_utils as state_space_utils
 
+    _patch_mode_transition_count_validation()
     helper = _wrap_helper(state_space_utils._first_order_imm_content_diagnostics)
     state_space_utils._first_order_imm_content_diagnostics = helper
     _record_duration_occupancy_transition_durations()

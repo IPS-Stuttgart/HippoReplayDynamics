@@ -235,6 +235,18 @@ def _finite_numeric_scalar(value: object) -> float | None:
     return number if np.isfinite(number) else None
 
 
+def _positive_integer_count(value: object, name: str) -> int:
+    if isinstance(value, (bool, np.bool_)):
+        raise ValueError(f"{name} must be a positive integer")
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must be a positive integer") from exc
+    if not np.isfinite(numeric) or numeric < 1.0 or numeric != np.floor(numeric):
+        raise ValueError(f"{name} must be a positive integer")
+    return int(numeric)
+
+
 def hierarchical_bootstrap_ci(
     rows: pd.DataFrame,
     *,
@@ -251,6 +263,7 @@ def hierarchical_bootstrap_ci(
     event bootstrap for session-nested replay events.
     """
 
+    n_bootstrap = _positive_integer_count(n_bootstrap, "n_bootstrap")
     values = _model_metric_rows(rows, model, value_column, group_columns)
     if values.empty:
         return (float("nan"), float("nan"))
@@ -265,8 +278,8 @@ def hierarchical_bootstrap_ci(
         grouped_values = [values[value_column].to_numpy(dtype=float)]
     if not grouped_values:
         return (float("nan"), float("nan"))
-    bootstrap_means = np.empty(int(n_bootstrap), dtype=float)
-    for index in range(int(n_bootstrap)):
+    bootstrap_means = np.empty(n_bootstrap, dtype=float)
+    for index in range(n_bootstrap):
         sampled_groups = rng.choice(
             np.arange(len(grouped_values)),
             size=len(grouped_values),
@@ -294,6 +307,7 @@ def paired_sign_flip_p_value(
 ) -> float:
     """Two-sided paired sign-flip p-value for event-level deltas."""
 
+    n_permutations = _positive_integer_count(n_permutations, "n_permutations")
     values = rows.loc[rows["model"].astype(str).eq(str(model)), value_column]
     values = values.dropna().to_numpy(dtype=float)
     if values.size == 0:
@@ -301,11 +315,11 @@ def paired_sign_flip_p_value(
     observed = abs(float(np.mean(values)))
     rng = np.random.default_rng(random_seed)
     count = 1
-    for _ in range(int(n_permutations)):
+    for _ in range(n_permutations):
         signs = rng.choice(np.array([-1.0, 1.0]), size=values.size, replace=True)
         if abs(float(np.mean(values * signs))) >= observed:
             count += 1
-    return float(count / (int(n_permutations) + 1))
+    return float(count / (n_permutations + 1))
 
 
 def _model_metric_rows(

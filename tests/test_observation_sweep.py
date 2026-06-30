@@ -119,6 +119,43 @@ def test_observation_parameter_grid_rejects_boolean_numeric_values():
             raise AssertionError(f"expected ValueError for {field_name}")
 
 
+def test_observation_parameter_grid_rejects_bare_string_sessions():
+    config = ObservationSweepConfig(sessions="Rat1/Open1")
+
+    try:
+        observation_parameter_grid(config)
+    except ValueError as exc:
+        message = str(exc)
+        assert "sessions" in message
+        assert "sequence" in message
+    else:
+        raise AssertionError("expected ValueError for bare string sessions")
+
+
+def test_observation_parameter_grid_rejects_invalid_session_sequences():
+    cases = [
+        ObservationSweepConfig(sessions=()),
+        ObservationSweepConfig(sessions=("Rat1/Open1", " ")),
+        ObservationSweepConfig(sessions=("Rat1/Open1", 1)),
+    ]
+
+    for config in cases:
+        try:
+            observation_parameter_grid(config)
+        except ValueError as exc:
+            assert "sessions" in str(exc)
+        else:
+            raise AssertionError("expected ValueError for invalid sessions")
+
+
+def test_observation_parameter_grid_accepts_all_sessions_sentinel():
+    config = ObservationSweepConfig(sessions=None)
+
+    rows = observation_parameter_grid(config)
+
+    assert len(rows) == 1
+
+
 def test_summarize_observation_sweep_merges_overall_recovery():
     position_summary = pd.DataFrame(
         {

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+from functools import wraps
 
 import numpy as np
 import pandas as pd
@@ -10,8 +11,12 @@ import pandas as pd
 _PATCHED_FLAG = "_posterior_calibration_summary_patch_applied"
 _GATES_SCOPE_PATCHED_FLAG = "_result_quality_gates_scope_patch_applied"
 _PAIRED_GROUP_PATCHED_FLAG = "_paired_model_missing_group_patch_applied"
+_BOOTSTRAP_GROUP_PATCHED_FLAG = "_hierarchical_bootstrap_missing_group_patch_applied"
 _PAIRED_SWEEP_GROUP_PATCHED_FLAG = "_paired_model_sweep_missing_group_patch_applied"
 _ORIGINAL_PAIRED_ATTR = "_paired_model_missing_group_original"
+_ORIGINAL_BOOTSTRAP_ATTR = "_hierarchical_bootstrap_missing_group_original"
+_GROUPED_METRICS_PATCHED_FLAG = "_grouped_model_metrics_missing_group_patch_applied"
+_ORIGINAL_GROUPED_METRICS_ATTR = "_grouped_model_metrics_missing_group_original"
 _ORIGINAL_SWEEP_ATTR = "_paired_model_sweep_missing_group_original"
 _MISSING_GROUP_SENTINEL = "__hipporeplayimm_missing_group__"
 _ADDITIONAL_RESULT_QUALITY_GATE_SCOPE_COLUMNS = (
@@ -78,8 +83,9 @@ def _apply_paired_model_missing_group_patch() -> None:
             positive_true_label: str | None = None,
         ) -> pd.DataFrame:
             groups = _normalize_group_cols(group_cols)
+            sentinel = _missing_group_sentinel(scores, groups)
             result = original(
-                _fill_missing_group_metadata(scores, groups),
+                _fill_missing_group_metadata(scores, groups, sentinel),
                 positive_model=positive_model,
                 reference_model=reference_model,
                 margin_threshold=margin_threshold,
@@ -89,7 +95,7 @@ def _apply_paired_model_missing_group_patch() -> None:
                 true_model_col=true_model_col,
                 positive_true_label=positive_true_label,
             )
-            return _restore_missing_group_metadata(result, groups)
+            return _restore_missing_group_metadata(result, groups, sentinel)
 
         setattr(paired_model_margin_decisions, _PAIRED_GROUP_PATCHED_FLAG, True)
         setattr(paired_model_margin_decisions, _ORIGINAL_PAIRED_ATTR, original)
@@ -113,7 +119,8 @@ def _apply_paired_model_missing_group_patch() -> None:
         positive_true_label: str | None = None,
     ) -> pd.DataFrame:
         groups = _normalize_optional_group_cols(group_cols)
-        sweep_scores = scores if groups is None else _fill_missing_group_metadata(scores, groups)
+        sentinel = None if groups is None else _missing_group_sentinel(scores, groups)
+        sweep_scores = scores if groups is None else _fill_missing_group_metadata(scores, groups, sentinel)
         result = original_sweep(
             sweep_scores,
             positive_model=positive_model,
@@ -125,11 +132,42 @@ def _apply_paired_model_missing_group_patch() -> None:
             true_model_col=true_model_col,
             positive_true_label=positive_true_label,
         )
-        return _restore_missing_group_metadata(result, groups or ())
+        return _restore_missing_group_metadata(result, groups or (), sentinel)
 
     setattr(paired_model_margin_threshold_sweep, _PAIRED_SWEEP_GROUP_PATCHED_FLAG, True)
     setattr(paired_model_margin_threshold_sweep, _ORIGINAL_SWEEP_ATTR, original_sweep)
     diagnostics.paired_model_margin_threshold_sweep = paired_model_margin_threshold_sweep
+
+
+def _apply_grouped_model_metrics_missing_group_patch() -> None:
+    """Keep grouped model summaries for rows with missing optional group keys."""
+
+    from . import result_improvements
+
+    current = result_improvements.summarize_grouped_model_metrics
+    if getattr(current, _GROUPED_METRICS_PATCHED_FLAG, False):
+        return
+    original = getattr(current, _ORIGINAL_GROUPED_METRICS_ATTR, current)
+
+    def summarize_grouped_model_metrics(
+        rows: pd.DataFrame,
+        group_columns: Sequence[str],
+        *args: object,
+        **kwargs: object,
+    ) -> pd.DataFrame:
+        groups = tuple(group_columns)
+        sentinel = _missing_group_sentinel(rows, groups)
+        result = original(
+            _fill_missing_group_metadata(rows, groups, sentinel),
+            groups,
+            *args,
+            **kwargs,
+        )
+        return _restore_missing_group_metadata(result, groups, sentinel)
+
+    setattr(summarize_grouped_model_metrics, _GROUPED_METRICS_PATCHED_FLAG, True)
+    setattr(summarize_grouped_model_metrics, _ORIGINAL_GROUPED_METRICS_ATTR, original)
+    result_improvements.summarize_grouped_model_metrics = summarize_grouped_model_metrics
 
 
 def _normalize_group_cols(group_cols: Sequence[str] | str) -> tuple[str, ...]:
@@ -144,9 +182,92 @@ def _normalize_optional_group_cols(group_cols: Sequence[str] | str | None) -> tu
     return _normalize_group_cols(group_cols)
 
 
-def _fill_missing_group_metadata(frame: pd.DataFrame, group_cols: Sequence[str]) -> pd.DataFrame:
+def _apply_hierarchical_bootstrap_missing_group_patch(result_improvements) -> None:
+    """Keep nested bootstrap groups whose optional scope metadata is missing."""
+
+    current = result_improvements.hierarchical_bootstrap_ci
+    if getattr(current, _BOOTSTRAP_GROUP_PATCHED_FLAG, False):
+        return
+    original = getattr(current, _ORIGINAL_BOOTSTRAP_ATTR, current)
+
+    @wraps(original)
+    def hierarchical_bootstrap_ci(
+        rows: pd.DataFrame,
+        *,
+        model: str,
+        value_column: str = "delta_vs_best_static",
+        group_columns: tuple[str, ...] = ("session",),
+        n_bootstrap: int = 5000,
+        random_seed: int = 1,
+    ) -> tuple[float, float]:
+        values = result_improvements._model_metric_rows(rows, model, value_column, group_columns)
+        if values.empty:
+            return (float("nan"), float("nan"))
+        rng = np.random.default_rng(random_seed)
+        if group_columns:
+            groupby_keys = group_columns[0] if len(group_columns) == 1 else list(group_columns)
+            grouped_values = [
+                group[value_column].to_numpy(dtype=float)
+                for _, group in values.groupby(groupby_keys, sort=False, dropna=False)
+            ]
+        else:
+            grouped_values = [values[value_column].to_numpy(dtype=float)]
+        if not grouped_values:
+            return (float("nan"), float("nan"))
+        bootstrap_means = np.empty(int(n_bootstrap), dtype=float)
+        for index in range(int(n_bootstrap)):
+            sampled_groups = rng.choice(
+                np.arange(len(grouped_values)),
+                size=len(grouped_values),
+                replace=True,
+            )
+            sampled_values: list[np.ndarray] = []
+            for group_index in sampled_groups:
+                curr = grouped_values[int(group_index)]
+                sampled_values.append(rng.choice(curr, size=curr.size, replace=True))
+            merged = np.concatenate(sampled_values) if sampled_values else np.array([], dtype=float)
+            bootstrap_means[index] = float(np.mean(merged)) if merged.size else np.nan
+        finite = bootstrap_means[np.isfinite(bootstrap_means)]
+        if finite.size == 0:
+            return (float("nan"), float("nan"))
+        return (float(np.quantile(finite, 0.025)), float(np.quantile(finite, 0.975)))
+
+    setattr(hierarchical_bootstrap_ci, _BOOTSTRAP_GROUP_PATCHED_FLAG, True)
+    setattr(hierarchical_bootstrap_ci, _ORIGINAL_BOOTSTRAP_ATTR, original)
+    result_improvements.hierarchical_bootstrap_ci = hierarchical_bootstrap_ci
+
+
+def _missing_group_sentinel(frame: pd.DataFrame, group_cols: Sequence[str]) -> str:
+    """Return a temporary missing-group label absent from existing group values."""
+
+    sentinel = _MISSING_GROUP_SENTINEL
+    suffix = 0
+    while _group_value_present(frame, group_cols, sentinel):
+        suffix += 1
+        sentinel = f"{_MISSING_GROUP_SENTINEL}_{suffix}"
+    return sentinel
+
+
+def _group_value_present(frame: pd.DataFrame, group_cols: Sequence[str], value: str) -> bool:
+    if frame.empty or not group_cols:
+        return False
+    for column in group_cols:
+        if column not in frame.columns:
+            continue
+        if bool(frame[column].astype(object).eq(value).any()):
+            return True
+    return False
+
+
+def _fill_missing_group_metadata(
+    frame: pd.DataFrame,
+    group_cols: Sequence[str],
+    sentinel: str | None = None,
+) -> pd.DataFrame:
     if frame.empty or not group_cols:
         return frame.copy()
+    if sentinel is None:
+        sentinel = _missing_group_sentinel(frame, group_cols)
     out = frame.copy()
     for column in group_cols:
         if column not in out.columns:
@@ -154,18 +275,24 @@ def _fill_missing_group_metadata(frame: pd.DataFrame, group_cols: Sequence[str])
         missing = out[column].isna()
         if missing.any():
             out[column] = out[column].astype(object)
-            out.loc[missing, column] = _MISSING_GROUP_SENTINEL
+            out.loc[missing, column] = sentinel
     return out
 
 
-def _restore_missing_group_metadata(frame: pd.DataFrame, group_cols: Sequence[str]) -> pd.DataFrame:
+def _restore_missing_group_metadata(
+    frame: pd.DataFrame,
+    group_cols: Sequence[str],
+    sentinel: str | None = None,
+) -> pd.DataFrame:
     if frame.empty or not group_cols:
         return frame
+    if sentinel is None:
+        sentinel = _MISSING_GROUP_SENTINEL
     out = frame.copy()
     for column in group_cols:
         if column not in out.columns:
             continue
-        missing = out[column].astype(object).eq(_MISSING_GROUP_SENTINEL)
+        missing = out[column].astype(object).eq(sentinel)
         if missing.any():
             out.loc[missing, column] = pd.NA
     return out
@@ -222,6 +349,8 @@ def apply_posterior_calibration_summary_patch() -> None:
     result_quality_audit_scope_patch.apply_result_quality_audit_scope_patch()
     _apply_result_quality_gates_scope_patch()
     _apply_paired_model_missing_group_patch()
+    _apply_hierarchical_bootstrap_missing_group_patch(result_improvements)
+    _apply_grouped_model_metrics_missing_group_patch()
 
     if getattr(result_improvements, _PATCHED_FLAG, False):
         return

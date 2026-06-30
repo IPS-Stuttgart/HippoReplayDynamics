@@ -74,6 +74,28 @@ def test_hierarchical_bootstrap_ci_returns_interval() -> None:
     assert lo <= hi
 
 
+def test_hierarchical_bootstrap_ci_keeps_missing_optional_group_rows() -> None:
+    rows = pd.DataFrame(
+        {
+            "session": ["s1", "s1"],
+            "window_variant": [pd.NA, "expanded"],
+            "model": ["imm", "imm"],
+            "delta_vs_best_static": [1.0, 2.0],
+        }
+    )
+
+    lo, hi = hierarchical_bootstrap_ci(
+        rows,
+        model="imm",
+        group_columns=("session", "window_variant"),
+        n_bootstrap=200,
+        random_seed=0,
+    )
+
+    assert lo < 2.0
+    assert hi <= 2.0
+
+
 def test_paired_sign_flip_p_value_is_probability() -> None:
     rows = pd.DataFrame(
         {

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import operator
 from collections.abc import Callable, Sequence
 from typing import Any
 
@@ -21,6 +22,27 @@ def _contains_boolean_values(values: np.ndarray) -> bool:
     return False
 
 
+def _coerce_integer_count(value: Any, name: str, *, minimum: int) -> int:
+    """Return an integer count without bool or array-scalar coercion."""
+
+    try:
+        arr = np.asarray(value)
+    except (TypeError, ValueError) as exc:
+        raise TypeError(f"{name} must be an integer scalar") from exc
+    if arr.ndim != 0:
+        raise TypeError(f"{name} must be an integer scalar")
+    item = arr.item()
+    if isinstance(item, (bool, np.bool_)):
+        raise TypeError(f"{name} must be an integer scalar")
+    try:
+        count = operator.index(item)
+    except TypeError as exc:
+        raise TypeError(f"{name} must be an integer scalar") from exc
+    if count < int(minimum):
+        raise ValueError(f"{name} must be at least {int(minimum)}")
+    return int(count)
+
+
 def _validate_mode_transition_sequence(
     mode_transitions: Sequence[Any],
     *,
@@ -29,10 +51,12 @@ def _validate_mode_transition_sequence(
 ) -> list[np.ndarray]:
     """Validate custom source-row-stochastic mode-transition matrices."""
 
-    if len(mode_transitions) != int(n_transitions):
+    mode_count = _coerce_integer_count(n_modes, "n_modes", minimum=1)
+    transition_count = _coerce_integer_count(n_transitions, "n_transitions", minimum=0)
+    if len(mode_transitions) != transition_count:
         raise ValueError("mode_transitions must contain one matrix per transition")
 
-    expected_shape = (int(n_modes), int(n_modes))
+    expected_shape = (mode_count, mode_count)
     resolved: list[np.ndarray] = []
     for transition_index, matrix in enumerate(mode_transitions):
         raw_values = np.asarray(matrix)
@@ -40,7 +64,12 @@ def _validate_mode_transition_sequence(
             raise ValueError(
                 f"mode transition matrix {transition_index} must contain numeric probabilities, not booleans"
             )
-        values = raw_values.astype(float, copy=False)
+        try:
+            values = raw_values.astype(float, copy=False)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(
+                f"mode transition matrix {transition_index} must contain numeric probabilities"
+            ) from exc
         if values.shape != expected_shape:
             raise ValueError("mode transition matrices must be square with one row and column per mode")
         if not np.all(np.isfinite(values)):
@@ -71,8 +100,8 @@ def _wrap_resolver(resolver: Callable[..., list[np.ndarray]]) -> Callable[..., l
             return resolver(ss, n_modes, mode_stickiness, mode_transitions, n_transitions)
         return _validate_mode_transition_sequence(
             mode_transitions,
-            n_modes=int(n_modes),
-            n_transitions=int(n_transitions),
+            n_modes=n_modes,
+            n_transitions=n_transitions,
         )
 
     _resolve_mode_transitions.__name__ = getattr(resolver, "__name__", "_resolve_mode_transitions")

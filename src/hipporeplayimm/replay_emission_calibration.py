@@ -10,6 +10,7 @@ building replay emissions.
 from __future__ import annotations
 
 from dataclasses import dataclass
+import operator
 from typing import Mapping, Sequence
 
 import numpy as np
@@ -42,14 +43,50 @@ class ReplayEmissionCalibration:
         }
 
 
-def _finite_float(name: str, value: float) -> float:
+def _is_boolean_scalar(value: object) -> bool:
+    if isinstance(value, (bool, np.bool_)):
+        return True
     try:
-        out = float(value)
+        arr = np.asarray(value)
+    except (TypeError, ValueError):
+        return False
+    if arr.ndim != 0:
+        return False
+    if np.issubdtype(arr.dtype, np.bool_):
+        return True
+    if arr.dtype == object:
+        try:
+            return isinstance(arr.item(), (bool, np.bool_))
+        except ValueError:
+            return False
+    return False
+
+
+def _finite_float(name: str, value: object) -> float:
+    try:
+        arr = np.asarray(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must be finite") from exc
+    if arr.ndim != 0:
+        raise TypeError(f"{name} must be a finite numeric scalar")
+    if _is_boolean_scalar(value):
+        raise TypeError(f"{name} must be a numeric scalar, not boolean")
+    try:
+        out = float(arr)
     except (TypeError, ValueError) as exc:
         raise ValueError(f"{name} must be finite") from exc
     if not np.isfinite(out):
         raise ValueError(f"{name} must be finite")
     return out
+
+
+def _event_index_int(event_index: object) -> int:
+    if isinstance(event_index, (bool, np.bool_)):
+        raise TypeError("event index must be an integer, not boolean")
+    try:
+        return int(operator.index(event_index))
+    except TypeError as exc:
+        raise TypeError("event index must be an integer") from exc
 
 
 def fit_replay_cell_gains(
@@ -88,9 +125,10 @@ def fit_replay_cell_gains(
     event_count = 0
     mean_rates = np.mean(encoding.rates_hz, axis=1) if encoding.n_cells else np.empty(0)
     for event_index in event_indices:
-        event = session.ripple(int(event_index))
+        event_index_int = _event_index_int(event_index)
+        event = session.ripple(event_index_int)
         duration = max(float(event.end - event.start), np.finfo(float).eps)
-        emissions = build_emissions(session, encoding, int(event_index), config)
+        emissions = build_emissions(session, encoding, event_index_int, config)
         if emissions.n_time == 0:
             continue
         observed += emissions.spike_counts.sum(axis=0).astype(float)

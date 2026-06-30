@@ -36,12 +36,15 @@ def apply_observation_sweep_config_validation_patch() -> None:
     @wraps(original_validate_config)
     def validate_config_with_finite_grid_values(config: Any) -> None:
         _validate_finite_observation_sweep_config(config)
+        original_validate_config(config)
 
     sweep._validate_config = validate_config_with_finite_grid_values
     setattr(sweep, _PATCHED_FLAG, True)
 
 
 def _validate_finite_observation_sweep_config(config: Any) -> None:
+    _validate_sessions(getattr(config, "sessions", None))
+
     for name in _POSITIVE_GRID_FIELDS:
         for value in _grid_values(config, name):
             numeric = _finite_float(name, value)
@@ -62,6 +65,22 @@ def _validate_finite_observation_sweep_config(config: Any) -> None:
     _positive_integer("simulation_events_per_model", getattr(config, "simulation_events_per_model"))
 
 
+def _validate_sessions(sessions: Any) -> None:
+    if sessions is None:
+        return
+    if isinstance(sessions, (str, bytes)):
+        raise ValueError("sessions must be None or a non-empty sequence of session IDs")
+    try:
+        values = tuple(sessions)
+    except TypeError as exc:
+        raise ValueError("sessions must be None or a non-empty sequence of session IDs") from exc
+    if not values:
+        raise ValueError("sessions must be None or a non-empty sequence of session IDs")
+    for session in values:
+        if not isinstance(session, str) or not session.strip():
+            raise ValueError("sessions must contain non-empty string session IDs")
+
+
 def _grid_values(config: Any, name: str) -> tuple[Any, ...]:
     try:
         values = tuple(getattr(config, name))
@@ -74,25 +93,37 @@ def _grid_values(config: Any, name: str) -> tuple[Any, ...]:
 
 def _finite_float(name: str, value: Any) -> float:
     if isinstance(value, (bool, np.bool_)):
-        raise ValueError(f"{name} values must be finite")
+        raise ValueError(f"{name} values must be finite scalars")
     try:
-        numeric = float(value)
+        array = np.asarray(value)
     except (TypeError, ValueError) as exc:
-        raise ValueError(f"{name} values must be finite") from exc
+        raise ValueError(f"{name} values must be finite scalars") from exc
+    if array.ndim != 0:
+        raise ValueError(f"{name} values must be finite scalars")
+    try:
+        numeric = float(array)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} values must be finite scalars") from exc
     if not np.isfinite(numeric):
-        raise ValueError(f"{name} values must be finite")
+        raise ValueError(f"{name} values must be finite scalars")
     return float(numeric)
 
 
 def _positive_integer(name: str, value: Any) -> int:
     if isinstance(value, (bool, np.bool_)):
-        raise ValueError(f"{name} must be positive")
+        raise ValueError(f"{name} must be a positive integer")
     try:
-        numeric = float(value)
+        array = np.asarray(value)
     except (TypeError, ValueError) as exc:
-        raise ValueError(f"{name} must be positive") from exc
+        raise ValueError(f"{name} must be a positive integer") from exc
+    if array.ndim != 0:
+        raise ValueError(f"{name} must be a positive integer")
+    try:
+        numeric = float(array)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must be a positive integer") from exc
     if not np.isfinite(numeric) or numeric <= 0.0 or not numeric.is_integer():
-        raise ValueError(f"{name} must be positive")
+        raise ValueError(f"{name} must be a positive integer")
     return int(numeric)
 
 

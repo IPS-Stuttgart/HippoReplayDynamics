@@ -49,3 +49,12 @@ def test_transition_decay_guard_preserves_valid_values_and_fallback() -> None:
     assert _transition_decay_at(np.array([0.25], dtype=float), 1, 0.9) == pytest.approx(0.9)
     with pytest.raises(ValueError, match=r"velocity_decays.*finite nonnegative"):
         _transition_decay_at(np.array([-0.1], dtype=float), 0, 0.9)
+
+
+def test_transition_decay_guard_rejects_noninteger_indices() -> None:
+    hipporeplayimm.apply_runtime_patches()
+
+    bad_indices = (0.5, np.nan, np.array([0], dtype=int), True)
+    for transition_index in bad_indices:
+        with pytest.raises(ValueError, match="transition_index"):
+            _transition_decay_at(np.array([0.25], dtype=float), transition_index, 0.9)

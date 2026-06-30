@@ -67,6 +67,27 @@ _MODEL_SHORT_NAMES = {
     MOMENTUM_EXACT: "momentum_exact_sparse",
 }
 
+_EVENT_GROUP_BASE_COLUMNS = ("session", "event_index")
+_EVENT_GROUP_SCOPE_COLUMNS = (
+    "window_role",
+    "window_index",
+    "event_window_variant",
+    "window_variant",
+    "window_start_s",
+    "window_end_s",
+    "window_duration_s",
+    "null_index",
+    "matched_null_rank",
+    "template_event_index",
+    "benchmark_random_seed",
+    "benchmark_cell_split_index",
+    "benchmark_cell_split_seed",
+    "benchmark_event_subset_seed",
+    "benchmark_event_subset_base_seed",
+    "benchmark_test_cell_fraction",
+    "benchmark_cell_split_strategy",
+    "benchmark_cell_split_strata",
+)
 _EVENT_AXIS_BASE_COLUMNS = (
     "session",
     "rat",
@@ -183,8 +204,24 @@ def _available_covariates(frame: pd.DataFrame, covariates: Sequence[str]) -> tup
     return tuple(available)
 
 
-def _event_axis_columns(covariates: Sequence[str]) -> list[str]:
-    columns = list(_EVENT_AXIS_BASE_COLUMNS)
+def _event_group_columns(scores: pd.DataFrame) -> list[str]:
+    """Return columns identifying one independent model-comparison unit."""
+
+    columns = [column for column in _EVENT_GROUP_BASE_COLUMNS if column in scores.columns]
+    for optional in _EVENT_GROUP_SCOPE_COLUMNS:
+        if optional in scores.columns and optional not in columns:
+            columns.append(optional)
+    return columns
+
+
+def _event_axis_columns(covariates: Sequence[str], group_cols: Sequence[str] = _EVENT_GROUP_BASE_COLUMNS) -> list[str]:
+    prefix = ["session", "rat", "event_index"]
+    scope_columns = [column for column in group_cols if column not in {"session", "event_index"}]
+    columns = prefix + scope_columns + [
+        column
+        for column in _EVENT_AXIS_BASE_COLUMNS
+        if column not in set(prefix) and column not in set(scope_columns)
+    ]
     for covariate in covariates:
         if covariate not in columns:
             columns.append(covariate)
@@ -196,12 +233,17 @@ def build_event_dynamics_axis(
     *,
     covariates: Sequence[str] = DEFAULT_COVARIATES,
 ) -> pd.DataFrame:
-    """Return one replay-dynamics-axis row per complete event."""
+    """Return one replay-dynamics-axis row per independent score unit."""
 
     evidence = _success_rows(event_model_evidence)
-    columns = _event_axis_columns(covariates)
+    group_cols = _event_group_columns(evidence)
+    columns = _event_axis_columns(covariates, group_cols)
     rows: list[dict[str, object]] = []
-    for (session, event_index), group in evidence.groupby(["session", "event_index"], sort=True):
+    for key, group in evidence.groupby(group_cols, sort=True, dropna=False):
+        key_tuple = key if isinstance(key, tuple) else (key,)
+        group_values = dict(zip(group_cols, key_tuple, strict=True))
+        session = str(group_values["session"])
+        event_index = int(group_values["event_index"])
         by_model = group.drop_duplicates("model", keep="last").set_index("model")
         missing = [model for model in REQUIRED_EXACT_CORE_MODELS if model not in by_model.index]
         logz_by_model = {
@@ -245,7 +287,8 @@ def build_event_dynamics_axis(
         row: dict[str, object] = {
             "session": session,
             "rat": _rat_from_session(session),
-            "event_index": int(event_index),
+            "event_index": event_index,
+            **{column: value for column, value in group_values.items() if column not in {"session", "event_index"}},
             "exact_core_complete": not missing,
             "missing_exact_core_models": " ".join(missing),
             "logZ_stationary": logz_by_model[STATIONARY],
@@ -281,7 +324,8 @@ def build_event_dynamics_axis(
 
     if not rows:
         return pd.DataFrame(columns=columns)
-    return pd.DataFrame(rows, columns=columns).sort_values(["session", "event_index"]).reset_index(drop=True)
+    sort_cols = [column for column in group_cols if column in columns]
+    return pd.DataFrame(rows, columns=columns).sort_values(sort_cols).reset_index(drop=True)
 
 
 def build_rat_dynamics_axis_summary(event_axis: pd.DataFrame) -> pd.DataFrame:

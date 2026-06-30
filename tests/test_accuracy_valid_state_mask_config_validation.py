@@ -43,11 +43,30 @@ def test_valid_state_mask_rejects_invalid_min_occupancy(value: float) -> None:
         valid_state_mask_from_encoding(_encoding(), ValidStateConfig(min_occupancy_s=value))
 
 
+@pytest.mark.parametrize("value", [np.array([0.02]), np.array([[0.02]])])
+def test_valid_state_mask_rejects_array_min_occupancy(value: object) -> None:
+    hipporeplayimm.apply_runtime_patches()
+
+    with pytest.raises(ValueError, match="min_occupancy_s"):
+        valid_state_mask_from_encoding(_encoding(), ValidStateConfig(min_occupancy_s=value))
+
+
 @pytest.mark.parametrize("value", [True, np.bool_(False), np.asarray(True, dtype=object)])
 def test_valid_state_mask_rejects_boolean_top_occupancy_fraction(value: object) -> None:
     hipporeplayimm.apply_runtime_patches()
 
     with pytest.raises(TypeError, match="keep_top_occupancy_fraction"):
+        valid_state_mask_from_encoding(
+            _encoding(),
+            ValidStateConfig(keep_top_occupancy_fraction=value),
+        )
+
+
+@pytest.mark.parametrize("value", [np.array([0.5]), np.array([[0.5]])])
+def test_valid_state_mask_rejects_array_top_occupancy_fraction(value: object) -> None:
+    hipporeplayimm.apply_runtime_patches()
+
+    with pytest.raises(ValueError, match="keep_top_occupancy_fraction"):
         valid_state_mask_from_encoding(
             _encoding(),
             ValidStateConfig(keep_top_occupancy_fraction=value),

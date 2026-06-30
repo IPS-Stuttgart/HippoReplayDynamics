@@ -5,6 +5,9 @@ import pytest
 
 import hipporeplayimm.duration_occupancy as duration_occupancy
 from hipporeplayimm import apply_runtime_patches
+from hipporeplayimm.duration_occupancy_mode_transition_validation import (
+    _validate_mode_transition_sequence,
+)
 
 
 class _DummyStateSpace:
@@ -111,6 +114,55 @@ def test_custom_duration_imm_mode_transition_accepts_valid_probability_matrix() 
     )
 
     resolved = _resolve([transition])
+
+    assert len(resolved) == 1
+    np.testing.assert_allclose(resolved[0], transition)
+
+
+def test_custom_duration_imm_mode_transition_rejects_array_and_bool_counts() -> None:
+    transition = np.eye(3, dtype=float)
+
+    with pytest.raises(TypeError, match="n_modes"):
+        _validate_mode_transition_sequence(
+            [transition],
+            n_modes=np.array([3]),
+            n_transitions=1,
+        )
+
+    with pytest.raises(TypeError, match="n_transitions"):
+        _validate_mode_transition_sequence(
+            [transition],
+            n_modes=3,
+            n_transitions=True,
+        )
+
+
+def test_custom_duration_imm_mode_transition_rejects_non_numeric_object_values() -> None:
+    transition = np.array(
+        [
+            ["stay", "switch", "switch"],
+            ["switch", "stay", "switch"],
+            ["switch", "switch", "stay"],
+        ],
+        dtype=object,
+    )
+
+    with pytest.raises(ValueError, match="numeric probabilities"):
+        _validate_mode_transition_sequence(
+            [transition],
+            n_modes=3,
+            n_transitions=1,
+        )
+
+
+def test_custom_duration_imm_mode_transition_accepts_numpy_integer_counts() -> None:
+    transition = np.eye(3, dtype=float)
+
+    resolved = _validate_mode_transition_sequence(
+        [transition],
+        n_modes=np.int64(3),
+        n_transitions=np.int64(1),
+    )
 
     assert len(resolved) == 1
     np.testing.assert_allclose(resolved[0], transition)

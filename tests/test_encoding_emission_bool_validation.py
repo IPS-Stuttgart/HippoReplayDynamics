@@ -60,6 +60,30 @@ def test_encoding_config_rejects_boolean_numeric_fields(tmp_path, field_name):
         fit_place_field_encoding(_minimal_session(tmp_path), config)
 
 
+@pytest.mark.parametrize(
+    ("field_name", "valid_value"),
+    [
+        ("bin_size_cm", 4.0),
+        ("smoothing_sigma_bins", 1.5),
+        ("min_speed_cm_s", 0.0),
+        ("min_occupancy_s", 0.02),
+        ("rate_floor_hz", 1e-4),
+        ("arena_padding_cm", 2.0),
+    ],
+)
+def test_encoding_config_rejects_array_shaped_numeric_fields(
+    tmp_path,
+    field_name,
+    valid_value,
+):
+    kwargs = {"min_speed_cm_s": 0.0}
+    kwargs[field_name] = np.asarray([valid_value])
+    config = EncodingConfig(**kwargs)
+
+    with pytest.raises(TypeError, match=field_name):
+        fit_place_field_encoding(_minimal_session(tmp_path), config)
+
+
 @pytest.mark.parametrize("field_name", ["use_excitatory", "exclude_ripple_intervals"])
 @pytest.mark.parametrize("value", ["False", 1, np.asarray([True])])
 def test_encoding_config_rejects_non_boolean_flag_fields(tmp_path, field_name, value):
@@ -79,6 +103,24 @@ def test_encoding_config_accepts_numpy_boolean_flags(tmp_path, field_name):
 def test_emission_time_bin_width_rejects_boolean_scalar():
     with pytest.raises(TypeError, match="time_bin_s"):
         _time_bin_edges(0.0, 1.0, True)
+
+
+@pytest.mark.parametrize(
+    ("start", "end", "time_bin_s", "message"),
+    [
+        (np.asarray([0.0]), 1.0, 0.02, "ripple start"),
+        (0.0, np.asarray([1.0]), 0.02, "ripple end"),
+        (0.0, 1.0, np.asarray([0.02]), "time_bin_s"),
+    ],
+)
+def test_emission_time_bin_edges_reject_array_shaped_scalars(
+    start,
+    end,
+    time_bin_s,
+    message,
+):
+    with pytest.raises(TypeError, match=message):
+        _time_bin_edges(start, end, time_bin_s)
 
 
 @pytest.mark.parametrize(
@@ -111,6 +153,25 @@ def test_emission_numeric_parameters_reject_booleans(kwargs, message):
 
     with pytest.raises(TypeError, match=message):
         _poisson_log_emissions(counts, rates, dt, **call_kwargs)
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "message"),
+    [
+        ({"spike_rate_scale": np.asarray([1.0])}, "spike_rate_scale"),
+        ({"likelihood_temperature": np.asarray([1.0])}, "likelihood_temperature"),
+        (
+            {"negative_binomial_overdispersion": np.asarray([0.0])},
+            "negative_binomial_overdispersion",
+        ),
+    ],
+)
+def test_emission_scalar_parameters_reject_array_shapes(kwargs, message):
+    counts = np.zeros((1, 1), dtype=int)
+    rates = np.ones((1, 2), dtype=float)
+
+    with pytest.raises(TypeError, match=message):
+        _poisson_log_emissions(counts, rates, 0.02, **kwargs)
 
 
 def test_encoding_grid_patch_refreshes_stale_true_flag(monkeypatch):

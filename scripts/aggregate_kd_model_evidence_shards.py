@@ -19,32 +19,68 @@ from hipporeplayimm.kd_reference import (
 )
 
 
-def _np_scalar(value) -> object:
+def _np_scalar(value, *, key: str, path: Path) -> object:
     array = np.asarray(value)
-    return array.item() if array.shape == () else value
+    if array.shape != ():
+        raise ValueError(f"Momentum shard {key} must be scalar metadata in {path}: got shape {array.shape}")
+    return array.item()
+
+
+def _integer_metadata(value, *, key: str, path: Path, min_value: int) -> np.ndarray:
+    raw = np.asarray(value)
+    if raw.ndim != 1:
+        raise ValueError(f"Momentum shard {key} must be one-dimensional: {path}")
+    if np.issubdtype(raw.dtype, np.bool_):
+        raise TypeError(f"Momentum shard {key} must contain integer values, not booleans: {path}")
+    if not np.issubdtype(raw.dtype, np.number):
+        raise TypeError(f"Momentum shard {key} must contain numeric integer values: {path}")
+    intp_info = np.iinfo(np.dtype(np.intp))
+    if np.issubdtype(raw.dtype, np.integer):
+        out_of_range = any(int(item) < intp_info.min or int(item) > intp_info.max for item in raw.ravel())
+        if out_of_range:
+            raise ValueError(f"Momentum shard {key} must fit into NumPy integer range: {path}")
+        values = raw.astype(np.intp, copy=True)
+    else:
+        numeric = np.asarray(raw, dtype=float)
+        if not np.all(np.isfinite(numeric)) or not np.all(numeric == np.floor(numeric)):
+            raise ValueError(f"Momentum shard {key} must contain finite integer values: {path}")
+        if not np.all((numeric >= intp_info.min) & (numeric <= intp_info.max)):
+            raise ValueError(f"Momentum shard {key} must fit into NumPy integer range: {path}")
+        values = numeric.astype(np.intp, copy=True)
+    if np.any(values < int(min_value)):
+        qualifier = "nonnegative" if int(min_value) == 0 else "positive"
+        raise ValueError(f"Momentum shard {key} must contain {qualifier} integer values: {path}")
+    return values
 
 
 def _load_npz(path: Path) -> dict[str, object]:
     with np.load(path, allow_pickle=False) as shard:
+        event_ids = _integer_metadata(shard["event_ids"], key="event_ids", path=path, min_value=0)
+        n_time = _integer_metadata(shard["n_time"], key="n_time", path=path, min_value=1)
+        n_spikes = _integer_metadata(shard["n_spikes"], key="n_spikes", path=path, min_value=0)
+        if n_time.shape != event_ids.shape:
+            raise ValueError(f"Momentum shard n_time must match event_ids shape in {path}: {n_time.shape} vs {event_ids.shape}")
+        if n_spikes.shape != event_ids.shape:
+            raise ValueError(f"Momentum shard n_spikes must match event_ids shape in {path}: {n_spikes.shape} vs {event_ids.shape}")
         return {
             "path": path,
-            "session": str(_np_scalar(shard["session"])),
-            "event_ids": np.array(shard["event_ids"], dtype=int, copy=True),
-            "n_time": np.array(shard["n_time"], dtype=int, copy=True),
-            "n_spikes": np.array(shard["n_spikes"], dtype=int, copy=True),
+            "session": str(_np_scalar(shard["session"], key="session", path=path)),
+            "event_ids": event_ids,
+            "n_time": n_time,
+            "n_spikes": n_spikes,
             "sd_meters": np.array(shard["sd_meters"], dtype=float, copy=True),
             "decay": np.array(shard["decay"], dtype=float, copy=True),
             "sd_indices": np.array(shard["sd_indices"], copy=True),
             "decay_indices": np.array(shard["decay_indices"], copy=True),
             "values": np.array(shard["values"], dtype=float, copy=True),
-            "runtime_s": float(_np_scalar(shard["runtime_s"])),
-            "kd_grid_preset": str(_np_scalar(shard["kd_grid_preset"])),
-            "kd_time_bin_ms": float(_np_scalar(shard["kd_time_bin_ms"])),
-            "kd_bin_size_cm": float(_np_scalar(shard["kd_bin_size_cm"])),
-            "kd_n_bins": int(_np_scalar(shard["kd_n_bins"])),
-            "kd_n_jobs": int(_np_scalar(shard["kd_n_jobs"])),
-            "kd_event_chunk_size": int(_np_scalar(shard["kd_event_chunk_size"])),
-            "kd_spike_rate_scale": float(_np_scalar(shard["kd_spike_rate_scale"]))
+            "runtime_s": float(_np_scalar(shard["runtime_s"], key="runtime_s", path=path)),
+            "kd_grid_preset": str(_np_scalar(shard["kd_grid_preset"], key="kd_grid_preset", path=path)),
+            "kd_time_bin_ms": float(_np_scalar(shard["kd_time_bin_ms"], key="kd_time_bin_ms", path=path)),
+            "kd_bin_size_cm": float(_np_scalar(shard["kd_bin_size_cm"], key="kd_bin_size_cm", path=path)),
+            "kd_n_bins": int(_np_scalar(shard["kd_n_bins"], key="kd_n_bins", path=path)),
+            "kd_n_jobs": int(_np_scalar(shard["kd_n_jobs"], key="kd_n_jobs", path=path)),
+            "kd_event_chunk_size": int(_np_scalar(shard["kd_event_chunk_size"], key="kd_event_chunk_size", path=path)),
+            "kd_spike_rate_scale": float(_np_scalar(shard["kd_spike_rate_scale"], key="kd_spike_rate_scale", path=path))
             if "kd_spike_rate_scale" in shard.files
             else 1.0,
         }

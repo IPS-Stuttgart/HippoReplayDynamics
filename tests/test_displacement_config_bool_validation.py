@@ -31,6 +31,22 @@ def test_displacement_lattice_rejects_boolean_radius(radius: object) -> None:
         _displacement_lattice(_centers(), radius_bins=radius)
 
 
+@pytest.mark.parametrize("radius", [1.25, np.float64(2.5), np.array(1.5)])
+def test_displacement_lattice_rejects_fractional_radius(radius: object) -> None:
+    hipporeplayimm.apply_runtime_patches()
+
+    with pytest.raises(ValueError, match="displacement_radius_bins.*nonnegative integer"):
+        _displacement_lattice(_centers(), radius_bins=radius)
+
+
+def test_displacement_lattice_accepts_integer_valued_float_radius() -> None:
+    hipporeplayimm.apply_runtime_patches()
+
+    vectors = _displacement_lattice(_centers(), radius_bins=np.float64(1.0))
+
+    assert vectors.shape == (3, 1)
+
+
 @pytest.mark.parametrize("mode", ["displacement-momentum", "displacement-imm"])
 def test_displacement_models_reject_boolean_radius(mode: str) -> None:
     hipporeplayimm.apply_runtime_patches()
@@ -41,6 +57,19 @@ def test_displacement_models_reject_boolean_radius(mode: str) -> None:
     model = StateSpaceReplayModel(mode=mode, config=config)
 
     with pytest.raises(TypeError, match="displacement_radius_bins"):
+        model.score(_tiny_emissions(), _centers(), return_trajectory=False)
+
+
+@pytest.mark.parametrize("mode", ["displacement-momentum", "displacement-imm"])
+def test_displacement_models_reject_fractional_radius(mode: str) -> None:
+    hipporeplayimm.apply_runtime_patches()
+    config = StateSpaceDecoderConfig(
+        mode=mode,
+        displacement_radius_bins=1.5,  # type: ignore[arg-type]
+    )
+    model = StateSpaceReplayModel(mode=mode, config=config)
+
+    with pytest.raises(ValueError, match="displacement_radius_bins.*nonnegative integer"):
         model.score(_tiny_emissions(), _centers(), return_trajectory=False)
 
 
@@ -66,6 +95,28 @@ def test_displacement_models_reject_boolean_explicit_scales(mode: str, field: st
         model.score(_tiny_emissions(), _centers(), return_trajectory=False)
 
 
+@pytest.mark.parametrize("mode", ["displacement-momentum", "displacement-imm"])
+@pytest.mark.parametrize(
+    "field",
+    [
+        "displacement_position_sigma_cm",
+        "displacement_prior_sigma_cm",
+        "displacement_transition_sigma_cm_sqrt_s",
+    ],
+)
+def test_displacement_models_reject_array_shaped_explicit_scales(mode: str, field: str) -> None:
+    hipporeplayimm.apply_runtime_patches()
+    config = StateSpaceDecoderConfig(
+        mode=mode,
+        displacement_radius_bins=0,
+        **{field: np.array([1.0])},  # type: ignore[arg-type]
+    )
+    model = StateSpaceReplayModel(mode=mode, config=config)
+
+    with pytest.raises(TypeError, match=rf"{field}.*numeric scalar"):
+        model.score(_tiny_emissions(), _centers(), return_trajectory=False)
+
+
 def test_displacement_default_transition_sigma_rejects_boolean_fallback() -> None:
     hipporeplayimm.apply_runtime_patches()
     config = StateSpaceDecoderConfig(
@@ -77,6 +128,20 @@ def test_displacement_default_transition_sigma_rejects_boolean_fallback() -> Non
     model = StateSpaceReplayModel(mode="displacement-momentum", config=config)
 
     with pytest.raises(TypeError, match="momentum_sigma_cm_sqrt_s"):
+        model.score(_tiny_emissions(), _centers(), return_trajectory=False)
+
+
+def test_displacement_default_transition_sigma_rejects_array_shaped_fallback() -> None:
+    hipporeplayimm.apply_runtime_patches()
+    config = StateSpaceDecoderConfig(
+        mode="displacement-momentum",
+        displacement_radius_bins=0,
+        displacement_transition_sigma_cm_sqrt_s=0.0,
+        momentum_sigma_cm_sqrt_s=np.array([85.0]),  # type: ignore[arg-type]
+    )
+    model = StateSpaceReplayModel(mode="displacement-momentum", config=config)
+
+    with pytest.raises(TypeError, match=r"momentum_sigma_cm_sqrt_s.*numeric scalar"):
         model.score(_tiny_emissions(), _centers(), return_trajectory=False)
 
 
@@ -95,3 +160,20 @@ def test_displacement_bool_patch_refreshes_stale_true_flag(monkeypatch) -> None:
         displacement_momentum._displacement_lattice(_centers(), radius_bins=True)
     with pytest.raises(TypeError, match="displacement_radius_bins"):
         state_space._displacement_lattice(_centers(), radius_bins=True)
+
+
+def test_displacement_patch_refreshes_stale_fractional_radius_guard(monkeypatch) -> None:
+    import hipporeplayimm.state_space as state_space
+    import hipporeplayimm.state_space_displacement_momentum as displacement_momentum
+
+    hipporeplayimm.apply_runtime_patches()
+    stale_lattice = displacement_momentum._displacement_lattice.__wrapped__
+    monkeypatch.setattr(displacement_momentum, "_displacement_lattice", stale_lattice)
+    monkeypatch.setattr(state_space, "_displacement_lattice", stale_lattice)
+
+    hipporeplayimm.apply_runtime_patches()
+
+    with pytest.raises(ValueError, match="displacement_radius_bins.*nonnegative integer"):
+        displacement_momentum._displacement_lattice(_centers(), radius_bins=1.5)
+    with pytest.raises(ValueError, match="displacement_radius_bins.*nonnegative integer"):
+        state_space._displacement_lattice(_centers(), radius_bins=1.5)

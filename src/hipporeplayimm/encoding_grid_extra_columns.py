@@ -67,15 +67,15 @@ def _apply_encoding_bool_validation_patch(encoding) -> None:
 
     def validate_encoding_config(config):
         for name in _NUMERIC_ENCODING_CONFIG_FIELDS:
-            _reject_boolean_numeric(getattr(config, name), name)
+            _require_numeric_scalar(getattr(config, name), name)
         for name in _BOOLEAN_ENCODING_CONFIG_FIELDS:
             _require_boolean_scalar(getattr(config, name), name)
         return original_validate_encoding_config(config)
 
     def time_bin_edges(start, end, time_bin_s):
-        _reject_boolean_numeric(start, "ripple start")
-        _reject_boolean_numeric(end, "ripple end")
-        _reject_boolean_numeric(time_bin_s, "time_bin_s")
+        _require_numeric_scalar(start, "ripple start")
+        _require_numeric_scalar(end, "ripple end")
+        _require_numeric_scalar(time_bin_s, "time_bin_s")
         return original_time_bin_edges(start, end, time_bin_s)
 
     def poisson_log_emissions(
@@ -90,9 +90,9 @@ def _apply_encoding_bool_validation_patch(encoding) -> None:
     ):
         checked_cell_weights = _materialize_iterable_for_validation(cell_weights)
         _reject_boolean_numeric(dt, "dt")
-        _reject_boolean_numeric(spike_rate_scale, "spike_rate_scale")
-        _reject_boolean_numeric(likelihood_temperature, "likelihood_temperature")
-        _reject_boolean_numeric(negative_binomial_overdispersion, "negative_binomial_overdispersion")
+        _require_numeric_scalar(spike_rate_scale, "spike_rate_scale")
+        _require_numeric_scalar(likelihood_temperature, "likelihood_temperature")
+        _require_numeric_scalar(negative_binomial_overdispersion, "negative_binomial_overdispersion")
         if checked_cell_weights is not None:
             _reject_boolean_numeric(checked_cell_weights, "cell_weights")
         return original_poisson_log_emissions(
@@ -166,6 +166,16 @@ def _is_marked_wrapper(value: Any, marker: str) -> bool:
 def _reject_boolean_numeric(value: Any, name: str) -> None:
     if _contains_boolean(value):
         raise TypeError(f"{name} must be numeric, not boolean")
+
+
+def _require_numeric_scalar(value: Any, name: str) -> None:
+    _reject_boolean_numeric(value, name)
+    try:
+        array = np.asarray(value)
+    except (TypeError, ValueError) as exc:
+        raise TypeError(f"{name} must be a numeric scalar") from exc
+    if array.ndim != 0:
+        raise TypeError(f"{name} must be a numeric scalar")
 
 
 def _require_boolean_scalar(value: Any, name: str) -> None:

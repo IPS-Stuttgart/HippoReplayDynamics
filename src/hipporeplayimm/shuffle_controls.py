@@ -109,10 +109,17 @@ def _validated_shuffle_mode(mode: object) -> str:
 
 
 def _nonnegative_integer_value(name: str, value: object) -> int:
-    if isinstance(value, (bool, np.bool_)):
-        raise ValueError(f"{name} must be an integer")
     try:
-        numeric = float(value)  # type: ignore[arg-type]
+        array = np.asarray(value)
+    except ValueError as exc:
+        raise ValueError(f"{name} must be an integer scalar") from exc
+    if array.ndim != 0:
+        raise ValueError(f"{name} must be an integer scalar")
+    scalar = array.item()
+    if isinstance(scalar, (bool, np.bool_)):
+        raise ValueError(f"{name} must be an integer, not boolean")
+    try:
+        numeric = float(scalar)
     except (TypeError, ValueError, OverflowError) as exc:
         raise ValueError(f"{name} must be an integer") from exc
     if not np.isfinite(numeric):

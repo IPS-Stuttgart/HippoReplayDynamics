@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import numpy as np
 import pytest
 
@@ -35,3 +37,25 @@ def test_duration_decays_preserve_zero_decay_without_flooring() -> None:
     durations = np.array([0.02, 0.04], dtype=float)
 
     np.testing.assert_allclose(_decays(0.0, durations, 0.02), np.zeros(2, dtype=float))
+
+
+def test_duration_decays_honor_physical_time_tau_config() -> None:
+    durations = np.array([0.02, 0.04], dtype=float)
+    config = SimpleNamespace(
+        momentum_velocity_decay=0.25,
+        momentum_velocity_decay_tau_s=0.04,
+    )
+
+    np.testing.assert_allclose(_decays(config, durations, 0.02), np.exp(-durations / 0.04))
+
+
+def test_duration_decays_reject_invalid_physical_time_tau_config() -> None:
+    durations = np.array([0.02, 0.04], dtype=float)
+
+    for tau_s in (float("nan"), float("inf"), -0.1):
+        config = SimpleNamespace(
+            momentum_velocity_decay=0.25,
+            momentum_velocity_decay_tau_s=tau_s,
+        )
+        with pytest.raises(ValueError, match="momentum_velocity_decay_tau_s"):
+            _decays(config, durations, 0.02)

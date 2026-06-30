@@ -25,6 +25,7 @@ from . import cli_float_values_validation as _cli_float_values_validation
 from . import clusterless_config_validation as _clusterless_config_validation
 from . import clusterless_ground_truth as _clusterless_ground_truth
 from . import clusterless_mark_group_validation as _clusterless_mark_group_validation
+from . import clusterless_missing_decode_group as _clusterless_missing_decode_group
 from . import data_cell_id_validation as _data_cell_id_validation
 from . import displacement_config_bool_validation as _displacement_config_bool_validation
 from . import displacement_imm_decay_validation as _displacement_imm_decay_validation
@@ -96,6 +97,7 @@ _cell_split_hashable_grouping.apply_cell_split_hashable_grouping_patch()
 _benchmark_relative_grouping.apply_benchmark_relative_grouping_patch()
 _benchmark_mark_cell_id_validation.apply_benchmark_mark_cell_id_validation_patch()
 _clusterless_ground_truth.apply_clusterless_ground_truth_patch()
+_clusterless_missing_decode_group.apply_clusterless_missing_decode_group_patch()
 _bma_options_patch.apply_bma_options_patch()
 _pyrecest_numeric_metadata_guard.apply_pyrecest_numeric_metadata_guard_patch()
 _pyrecest_score_metadata.apply_pyrecest_score_metadata_patch()
@@ -225,6 +227,7 @@ def apply_runtime_patches() -> None:
     _benchmark_relative_grouping.apply_benchmark_relative_grouping_patch()
     _benchmark_mark_cell_id_validation.apply_benchmark_mark_cell_id_validation_patch()
     _clusterless_ground_truth.apply_clusterless_ground_truth_patch()
+    _clusterless_missing_decode_group.apply_clusterless_missing_decode_group_patch()
     _bma_options_patch.apply_bma_options_patch()
     _pyrecest_numeric_metadata_guard.apply_pyrecest_numeric_metadata_guard_patch()
     _pyrecest_score_metadata.apply_pyrecest_score_metadata_patch()

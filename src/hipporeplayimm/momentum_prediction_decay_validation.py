@@ -9,6 +9,7 @@ validation contract as package-level model scoring.
 
 from __future__ import annotations
 
+import operator
 from functools import wraps
 
 import numpy as np
@@ -29,6 +30,19 @@ def _coerce_prediction_multiplier(name: str, value: object) -> float:
     return multiplier
 
 
+def _coerce_transition_index(value: object) -> int:
+    arr = np.asarray(value)
+    if arr.ndim != 0:
+        raise ValueError("transition_index must be an integer scalar")
+    item = arr.item()
+    if isinstance(item, (bool, np.bool_)):
+        raise ValueError("transition_index must be an integer scalar")
+    try:
+        return int(operator.index(item))
+    except (TypeError, ValueError) as exc:
+        raise ValueError("transition_index must be an integer scalar") from exc
+
+
 def apply_momentum_prediction_decay_validation_patch() -> None:
     """Install validation for state-space momentum candidate predictors."""
 
@@ -40,19 +54,20 @@ def apply_momentum_prediction_decay_validation_patch() -> None:
 
     @wraps(current)
     def transition_decay_at(values, transition_index: int, fallback):
+        index = _coerce_transition_index(transition_index)
         if values is None:
             return _coerce_prediction_multiplier("velocity_decay", fallback)
 
         arr = np.asarray(values)
         if arr.ndim == 0:
-            if int(transition_index) == 0:
+            if index == 0:
                 return _coerce_prediction_multiplier("velocity_decays", arr)
             return _coerce_prediction_multiplier("velocity_decay", fallback)
         if arr.ndim != 1:
             raise ValueError("velocity_decays must be a finite nonnegative scalar or one-dimensional sequence")
-        if int(transition_index) < 0 or int(transition_index) >= arr.size:
+        if index < 0 or index >= arr.size:
             return _coerce_prediction_multiplier("velocity_decay", fallback)
-        return _coerce_prediction_multiplier("velocity_decays", arr[int(transition_index)])
+        return _coerce_prediction_multiplier("velocity_decays", arr[index])
 
     setattr(transition_decay_at, _PATCHED_FLAG, True)
     setattr(transition_decay_at, "__hipporeplayimm_original__", current)

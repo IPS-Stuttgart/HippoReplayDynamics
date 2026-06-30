@@ -7,6 +7,7 @@ from collections.abc import Sequence
 import numpy as np
 import pandas as pd
 
+from .advanced_result_threshold_validation import _validated_threshold
 from .wrong_map_missing_group_patch import apply_wrong_map_missing_group_patch, wrong_map_missing_group_patch_current
 
 _PATCH_FLAG = "_missing_group_metadata_patch_applied"
@@ -23,6 +24,33 @@ _MARGIN_COLUMNS = [
     "evidence_margin_category",
     "models_compared",
 ]
+_DEFAULT_EVENT_GROUP_COLUMNS = ("session", "event_index")
+_PAIRED_MARGIN_SCOPE_COLUMNS = (
+    "window_role",
+    "window_index",
+    "event_window_variant",
+    "window_variant",
+    "window_start_s",
+    "window_end_s",
+    "window_duration_s",
+    "null_index",
+    "matched_null_rank",
+    "template_event_index",
+    "benchmark_random_seed",
+    "benchmark_cell_split_index",
+    "benchmark_cell_split_seed",
+    "benchmark_event_subset_seed",
+    "benchmark_event_subset_base_seed",
+    "benchmark_test_cell_fraction",
+    "benchmark_cell_split_strategy",
+    "benchmark_cell_split_strata",
+    "cell_split_index",
+    "cell_split_seed",
+    "split_shard_index",
+    "event_shard_index",
+    "train_cell_ids",
+    "test_cell_ids",
+)
 
 
 def apply_advanced_result_missing_group_patch() -> None:
@@ -36,7 +64,7 @@ def apply_advanced_result_missing_group_patch() -> None:
     def evidence_margin_table(
         scores: pd.DataFrame,
         *,
-        group_cols: Sequence[str] = ("session", "event_index"),
+        group_cols: Sequence[str] = _DEFAULT_EVENT_GROUP_COLUMNS,
         evidence_col: str = "log_evidence",
         model_col: str = "model",
     ) -> pd.DataFrame:
@@ -78,7 +106,7 @@ def apply_advanced_result_missing_group_patch() -> None:
     def add_evidence_margin_columns(
         scores: pd.DataFrame,
         *,
-        group_cols: Sequence[str] = ("session", "event_index"),
+        group_cols: Sequence[str] = _DEFAULT_EVENT_GROUP_COLUMNS,
     ) -> pd.DataFrame:
         """Merge event-level evidence-margin diagnostics back into score rows."""
 
@@ -98,7 +126,7 @@ def apply_advanced_result_missing_group_patch() -> None:
     def summarize_window_sensitivity(
         scores: pd.DataFrame,
         *,
-        group_cols: Sequence[str] = ("session", "event_index"),
+        group_cols: Sequence[str] = _DEFAULT_EVENT_GROUP_COLUMNS,
         variant_col: str = "window_variant",
         evidence_col: str = "log_evidence",
     ) -> pd.DataFrame:
@@ -124,7 +152,7 @@ def apply_advanced_result_missing_group_patch() -> None:
         positive_model: str,
         reference_model: str,
         margin_threshold: float = 0.0,
-        group_cols: Sequence[str] = ("session", "event_index"),
+        group_cols: Sequence[str] = _DEFAULT_EVENT_GROUP_COLUMNS,
         evidence_col: str = "log_evidence",
         model_col: str = "model",
         true_model_col: str | None = None,
@@ -132,9 +160,8 @@ def apply_advanced_result_missing_group_patch() -> None:
     ) -> pd.DataFrame:
         """Classify paired model wins, retaining NA values in optional group keys."""
 
-        threshold = float(margin_threshold)
-        if threshold < 0.0:
-            raise ValueError("margin_threshold must be non-negative")
+        group_cols = _paired_margin_group_cols(scores, group_cols)
+        threshold = _validated_threshold(margin_threshold)
         ok = diagnostics._comparable_rows(scores)
         columns = [
             *group_cols,
@@ -177,7 +204,10 @@ def apply_advanced_result_missing_group_patch() -> None:
             positive_value = float(by_model.loc[positive_model, evidence_col])
             reference_value = float(by_model.loc[reference_model, evidence_col])
             delta = positive_value - reference_value
-            if delta >= threshold:
+            if np.isclose(threshold, 0.0) and np.isclose(delta, 0.0):
+                decision = "ambiguous"
+                positive_claimed = False
+            elif delta >= threshold:
                 decision = positive_model
                 positive_claimed = True
             elif delta <= -threshold:
@@ -223,6 +253,19 @@ def apply_advanced_result_missing_group_patch() -> None:
     diagnostics.paired_model_margin_decisions = paired_model_margin_decisions
     apply_wrong_map_missing_group_patch(diagnostics)
     setattr(diagnostics, _PATCH_FLAG, True)
+
+
+def _paired_margin_group_cols(scores: pd.DataFrame, group_cols: Sequence[str]) -> tuple[str, ...]:
+    """Expand default paired-event grouping to independent score scopes."""
+
+    columns = tuple(str(column) for column in group_cols)
+    if columns != _DEFAULT_EVENT_GROUP_COLUMNS:
+        return columns
+    resolved = list(columns)
+    for column in _PAIRED_MARGIN_SCOPE_COLUMNS:
+        if column in scores.columns and column not in resolved:
+            resolved.append(column)
+    return tuple(resolved)
 
 
 def _missing_group_patch_current(diagnostics) -> bool:

@@ -10,7 +10,8 @@ import pandas as pd
 _PATCHED_FLAG = "_result_quality_audit_scope_patch_applied"
 _EVENT_COUNT_PATCHED_FLAG = "_result_quality_audit_event_count_scope_patch_applied"
 _HELDOUT_INFLUENCE_PATCHED_FLAG = "_result_quality_audit_heldout_influence_patch_applied"
-_EVENT_GROUP_BASE_COLUMNS = ("session", "event_index")
+_EVENT_GROUP_SESSION_COLUMNS = ("session",)
+_EVENT_GROUP_EVENT_COLUMNS = ("event_index", "event_id")
 _EVENT_GROUP_SCOPE_COLUMNS = (
     "window_role",
     "window_index",
@@ -60,8 +61,8 @@ _INFLUENCE_VALUE_COLUMNS = (
 )
 
 
-def _column_has_complete_metadata(scores: Any, column: str) -> bool:
-    """Return True only when an optional grouping key is populated for every row."""
+def _column_has_observed_metadata(scores: Any, column: str) -> bool:
+    """Return True when an optional grouping key is populated for at least one row."""
 
     try:
         values = scores[column]
@@ -69,16 +70,20 @@ def _column_has_complete_metadata(scores: Any, column: str) -> bool:
         return False
     if bool(getattr(values, "empty", False)):
         return False
-    return bool(values.notna().all())
+    return bool(values.notna().any())
 
 
 def _scoped_event_group_columns(scores: Any) -> list[str]:
     """Return columns identifying one independent model-comparison unit."""
 
     frame_columns = getattr(scores, "columns", ())
-    columns = [column for column in _EVENT_GROUP_BASE_COLUMNS if column in frame_columns]
+    columns = [column for column in _EVENT_GROUP_SESSION_COLUMNS if column in frame_columns]
+    for event_column in _EVENT_GROUP_EVENT_COLUMNS:
+        if event_column in frame_columns:
+            columns.append(event_column)
+            break
     for optional in _EVENT_GROUP_SCOPE_COLUMNS:
-        if optional in frame_columns and optional not in columns and _column_has_complete_metadata(scores, optional):
+        if optional in frame_columns and optional not in columns and _column_has_observed_metadata(scores, optional):
             columns.append(optional)
     return columns
 

@@ -22,6 +22,14 @@ def _encoding_model() -> EncodingModel:
     )
 
 
+def test_package_import_applies_select_cells_validation() -> None:
+    assert getattr(EncodingModel.select_cells, _PATCHED_FLAG, False)
+    with pytest.raises(ValueError, match="integer-valued"):
+        _encoding_model().select_cells([1.5])
+    with pytest.raises(TypeError, match="boolean"):
+        _encoding_model().select_cells([True])
+
+
 def test_encoding_select_cells_validation_patch_refreshes_replaced_method(monkeypatch) -> None:
     import hipporeplayimm.encoding as encoding
 

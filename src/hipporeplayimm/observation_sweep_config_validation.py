@@ -43,6 +43,8 @@ def apply_observation_sweep_config_validation_patch() -> None:
 
 
 def _validate_finite_observation_sweep_config(config: Any) -> None:
+    _validate_sessions(getattr(config, "sessions", None))
+
     for name in _POSITIVE_GRID_FIELDS:
         for value in _grid_values(config, name):
             numeric = _finite_float(name, value)
@@ -61,6 +63,22 @@ def _validate_finite_observation_sweep_config(config: Any) -> None:
 
     _positive_integer("n_folds", getattr(config, "n_folds"))
     _positive_integer("simulation_events_per_model", getattr(config, "simulation_events_per_model"))
+
+
+def _validate_sessions(sessions: Any) -> None:
+    if sessions is None:
+        return
+    if isinstance(sessions, (str, bytes)):
+        raise ValueError("sessions must be None or a non-empty sequence of session IDs")
+    try:
+        values = tuple(sessions)
+    except TypeError as exc:
+        raise ValueError("sessions must be None or a non-empty sequence of session IDs") from exc
+    if not values:
+        raise ValueError("sessions must be None or a non-empty sequence of session IDs")
+    for session in values:
+        if not isinstance(session, str) or not session.strip():
+            raise ValueError("sessions must contain non-empty string session IDs")
 
 
 def _grid_values(config: Any, name: str) -> tuple[Any, ...]:

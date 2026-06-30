@@ -42,6 +42,14 @@ def _event_chunks(event_ids: list[int], requested_shards: int) -> list[list[int]
     return chunks
 
 
+def _validate_max_events(max_events: int | None) -> int | None:
+    if max_events is None:
+        return None
+    if isinstance(max_events, bool) or max_events < 0:
+        raise ValueError("--max-events must be non-negative")
+    return int(max_events)
+
+
 def plan_event_shards(
     dataset_root: Path,
     session_id: str,
@@ -53,10 +61,11 @@ def plan_event_shards(
 ) -> dict[str, object]:
     if momentum_shard_count < 1:
         raise ValueError("--momentum-shard-count must be positive")
+    validated_max_events = _validate_max_events(max_events)
     session_dir = _session_path(dataset_root, session_id)
     _check_session(session_dir)
     session = load_replay_session(session_dir)
-    event_ids = _events(events, session, max_events)
+    event_ids = _events(events, session, validated_max_events)
     chunks = _event_chunks(event_ids, event_shard_count)
     matrix_size = len(chunks) * momentum_shard_count
     if matrix_size > 256:

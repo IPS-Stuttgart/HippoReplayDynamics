@@ -76,7 +76,13 @@ def _decays(v,ds,ref):
     if not np.all(np.isfinite(ds)) or np.any(ds<=0.0): raise ValueError('transition durations must contain finite positive durations')
     r=float(ref)
     if not np.isfinite(r) or r<=0.0: raise ValueError('reference dt must be finite and positive')
-    b=float(v)
+    if hasattr(v,'momentum_velocity_decay'):
+        tau=float(getattr(v,'momentum_velocity_decay_tau_s',0.0))
+        if not np.isfinite(tau) or tau<0.0: raise ValueError('momentum_velocity_decay_tau_s must be finite and nonnegative')
+        if tau>0.0: return np.asarray(np.exp(-ds/tau),float)
+        b=float(getattr(v,'momentum_velocity_decay'))
+    else:
+        b=float(v)
     if not np.isfinite(b) or b<0.0: raise ValueError('momentum_velocity_decay must be finite and nonnegative')
     return np.asarray([b**(float(d)/r) for d in ds],float)
 def _scales(ds):
@@ -205,13 +211,13 @@ def _patch_state_space(ss):
                 from hipporeplayimm.state_space_imm_duration import _score_imm_duration
                 dsig=_pss(self.config.diffusion_sigma_cm_sqrt_s,ds,float(em.dt)); ts=_rep(self.config.diffusion_sigma_cm_sqrt_s,ds,float(em.dt))
                 msig=_pss(self.config.momentum_sigma_cm_sqrt_s,ds,float(em.dt)); mts=_rep(self.config.momentum_sigma_cm_sqrt_s,ds,float(em.dt))
-                ini=_ps(self.config.momentum_initial_sigma_cm_sqrt_s,ds[0] if len(ds) else float(em.dt)); dec=_decays(self.config.momentum_velocity_decay,ds,float(em.dt)); sc=_scales(ds)
+                ini=_ps(self.config.momentum_initial_sigma_cm_sqrt_s,ds[0] if len(ds) else float(em.dt)); dec=_decays(self.config,ds,float(em.dt)); sc=_scales(ds)
                 lp,tr,mp,masses=_score_imm_duration(ss,em,centers,c,stationary_sigma_cm=self.config.stationary_sigma_cm,diffusion_sigmas_cm=dsig,momentum_sigmas_cm=msig,initial_momentum_sigma_cm=ini,velocity_decays=dec,time_scales=sc,mode_stickiness=self.config.imm_mode_stickiness)
                 names=('stationary','diffusion','momentum','jump'); extra={f'state_space_mode_{n}_terminal_probability':float(mp[-1,i]) for i,n in enumerate(names)}
                 extra.update({'mean_candidate_log_mass':float(np.mean(masses)),'min_candidate_log_mass':float(np.min(masses)),'mean_candidate_count':float(np.mean([len(curr) for curr in c])),'state_space_imm_modes':','.join(names),'state_space_imm_candidate_top_k':int(self.config.momentum_candidate_top_k),'state_space_imm_predicted_candidate_top_k':int(self.config.momentum_predicted_candidate_top_k),'state_space_imm_candidate_support':'derived' if candidate_indices is None else 'provided','state_space_imm_trajectory_posterior':'smoothed_pair_marginal','state_space_imm_evidence_support':'truncated_full_grid',**ss._candidate_support_config_diagnostics('state_space_imm',self.config),'state_space_imm_candidate_selection':'provided' if candidate_indices is not None else ss._candidate_selection_label(self.config),'state_space_momentum_transition_sigma_cm':float(mts),'state_space_momentum_initial_transition_sigma_cm':float(ini)})
             else:
                 sig=_pss(self.config.momentum_sigma_cm_sqrt_s,ds,float(em.dt)); ts=_rep(self.config.momentum_sigma_cm_sqrt_s,ds,float(em.dt))
-                ini=_ps(self.config.momentum_initial_sigma_cm_sqrt_s,ds[0] if len(ds) else float(em.dt)); dec=_decays(self.config.momentum_velocity_decay,ds,float(em.dt)); sc=_scales(ds)
+                ini=_ps(self.config.momentum_initial_sigma_cm_sqrt_s,ds[0] if len(ds) else float(em.dt)); dec=_decays(self.config,ds,float(em.dt)); sc=_scales(ds)
                 lp,tr,masses=score_mom(em,centers,c,sigmas_cm=sig,initial_sigma_cm=ini,velocity_decays=dec,time_scales=sc)
                 extra={'mean_candidate_log_mass':float(np.mean(masses)),'min_candidate_log_mass':float(np.min(masses)),'mean_candidate_count':float(np.mean([len(curr) for curr in c])),'state_space_momentum_candidate_top_k':int(self.config.momentum_candidate_top_k),'state_space_momentum_predicted_candidate_top_k':int(self.config.momentum_predicted_candidate_top_k),'state_space_momentum_candidate_support':'derived' if candidate_indices is None else 'provided','state_space_momentum_trajectory_posterior':'smoothed_pair_marginal','state_space_momentum_evidence_support':'truncated_full_grid',**ss._candidate_support_config_diagnostics('state_space_momentum',self.config),'state_space_momentum_candidate_selection':'provided' if candidate_indices is not None else ss._candidate_selection_label(self.config)}
         else: raise ValueError(f'Unsupported state-space mode: {self.mode}')

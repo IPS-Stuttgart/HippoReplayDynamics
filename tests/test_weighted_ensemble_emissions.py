@@ -63,3 +63,23 @@ def test_weighted_ensemble_rejects_boolean_alpha(alpha: object) -> None:
 
     with pytest.raises(TypeError, match="alpha must be numeric, not boolean"):
         weighted_ensemble_emissions(left, right, alpha=alpha)
+
+
+def test_weighted_ensemble_rejects_misaligned_times() -> None:
+    hipporeplayimm.apply_runtime_patches()
+    left = _emissions(0.0)
+    right = _emissions(1.0)
+    right.times = right.times + 0.001
+
+    with pytest.raises(ValueError, match="matching times"):
+        weighted_ensemble_emissions(left, right)
+
+
+def test_weighted_ensemble_rejects_misaligned_bin_durations() -> None:
+    hipporeplayimm.apply_runtime_patches()
+    left = _emissions(0.0)
+    right = _emissions(1.0)
+    right.bin_durations = np.array([0.01, 0.02, 0.05], dtype=float)
+
+    with pytest.raises(ValueError, match="matching bin_durations"):
+        weighted_ensemble_emissions(left, right)

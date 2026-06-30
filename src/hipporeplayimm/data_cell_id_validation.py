@@ -94,13 +94,9 @@ def apply_data_cell_id_validation_patch() -> None:
     def mark_group_ids_from_tetrode_cell_ids(cell_ids, tetrode_cell_ids):
         if cell_ids is not None:
             _coerce_integral_ids(cell_ids, "spike cell IDs")
-        arr = np.asarray(tetrode_cell_ids)
-        if arr.size:
-            values = np.asarray(arr)
-            finite_mask = np.isfinite(np.asarray(values, dtype=float))
-            finite_values = values[finite_mask]
-            if finite_values.size:
-                _coerce_integral_ids(finite_values, "tetrode/cell IDs")
+        values = _tetrode_cell_id_values_for_validation(tetrode_cell_ids, cell_ids)
+        if values.size:
+            _coerce_integral_ids(values, "tetrode/cell IDs")
         out = original_mark_group_ids(cell_ids, tetrode_cell_ids)
         if out is not None:
             return _coerce_integral_ids(out, "tetrode group IDs")
@@ -180,6 +176,54 @@ def _validate_optional_neuron_ids(spike_data: dict[str, Any], variable_name: str
     if values.size == 0:
         return
     _coerce_integral_ids(values.reshape(-1), label)
+
+
+def _tetrode_cell_id_values_for_validation(tetrode_cell_ids: Any, cell_ids: Any) -> np.ndarray:
+    """Return only mapping ID fields that the loader will actually consume."""
+
+    arr = np.asarray(tetrode_cell_ids)
+    if arr.size == 0:
+        return np.asarray([], dtype=object)
+    arr = np.squeeze(arr)
+    if arr.ndim == 1:
+        if arr.shape[0] == 2:
+            return _finite_complete_rows(arr.reshape(1, 2)).reshape(-1)
+        if arr.shape[0] == np.asarray(cell_ids).shape[0]:
+            return _finite_values(arr)
+        return np.asarray([], dtype=object)
+    if arr.ndim != 2:
+        return np.asarray([], dtype=object)
+    if arr.shape[0] == 2 and arr.shape[1] != 2:
+        arr = arr.T
+    if arr.shape[1] < 2:
+        return np.asarray([], dtype=object)
+    return _finite_complete_rows(arr[:, :2]).reshape(-1)
+
+
+def _finite_values(values: Any) -> np.ndarray:
+    raw = np.asarray(values)
+    numeric = _as_numeric_ids(raw)
+    if numeric.size == 0:
+        return np.asarray([], dtype=object)
+    return raw[np.isfinite(numeric)]
+
+
+def _finite_complete_rows(values: Any) -> np.ndarray:
+    raw = np.asarray(values)
+    numeric = _as_numeric_ids(raw)
+    if numeric.size == 0:
+        return np.asarray([], dtype=object)
+    finite_rows = np.isfinite(numeric).all(axis=1)
+    if not np.any(finite_rows):
+        return np.asarray([], dtype=object)
+    return raw[finite_rows]
+
+
+def _as_numeric_ids(values: Any) -> np.ndarray:
+    try:
+        return np.asarray(values, dtype=float)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("tetrode/cell IDs must contain numeric integer identifiers") from exc
 
 
 def _coerce_ripple_index(index: Any, ripple_count: int) -> int:

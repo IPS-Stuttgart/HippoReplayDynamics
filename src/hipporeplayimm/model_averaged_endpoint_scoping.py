@@ -1,17 +1,9 @@
-"""Patch model-averaged endpoint summaries to respect decode scope.
-
-Improved evidence tables can contain several independent model-choice units for
-the same ``(session, event_index)`` pair: replay-window variants, matched-null
-windows, or cell-split benchmark repeats.  Endpoint averaging has to use the
-same scope as evidence normalization; otherwise endpoint columns can mix distinct
-windows even though their model probabilities were normalized separately.
-"""
+"""Patch model-averaged endpoint summaries to respect decode scope."""
 
 from __future__ import annotations
 
 import numpy as np
 import pandas as pd
-
 
 _MODEL_AVERAGE_BASE_COLUMNS = ("session", "event_index")
 _MODEL_AVERAGE_SCOPE_COLUMNS = (
@@ -37,8 +29,6 @@ _MODEL_AVERAGE_SCOPE_COLUMNS = (
 
 
 def apply_model_averaged_endpoint_scoping_patch() -> None:
-    """Install the scoped endpoint-averaging implementation."""
-
     from . import result_improvement_extensions as extensions
 
     current = extensions.add_model_averaged_endpoint_columns
@@ -49,8 +39,6 @@ def apply_model_averaged_endpoint_scoping_patch() -> None:
 
 
 def add_model_averaged_endpoint_columns(df: pd.DataFrame) -> pd.DataFrame:
-    """Add scoped model-averaged endpoint estimates to an evidence table."""
-
     if df.empty or "model_probability" not in df:
         return df
     required = {"diagnostic_decoded_endpoint_x", "diagnostic_decoded_endpoint_y"}
@@ -65,10 +53,7 @@ def add_model_averaged_endpoint_columns(df: pd.DataFrame) -> pd.DataFrame:
     out["model_log_evidence_margin"] = np.nan
 
     for row_positions, group in _model_average_groups(out):
-        if "evidence_comparable" in group:
-            comparable = _bool_series(group["evidence_comparable"])
-        else:
-            comparable = pd.Series(True, index=group.index)
+        comparable = _bool_series(group["evidence_comparable"]) if "evidence_comparable" in group else pd.Series(True, index=group.index)
         exact = group[comparable].copy()
         for column in (
             "model_probability",
@@ -78,13 +63,7 @@ def add_model_averaged_endpoint_columns(df: pd.DataFrame) -> pd.DataFrame:
         ):
             if column in exact.columns:
                 exact[column] = pd.to_numeric(exact[column], errors="coerce")
-        exact = exact.dropna(
-            subset=[
-                "model_probability",
-                "diagnostic_decoded_endpoint_x",
-                "diagnostic_decoded_endpoint_y",
-            ]
-        )
+        exact = exact.dropna(subset=["model_probability", "diagnostic_decoded_endpoint_x", "diagnostic_decoded_endpoint_y"])
         exact = _finite_endpoint_average_rows(exact)
         if exact.empty:
             continue
@@ -94,22 +73,11 @@ def add_model_averaged_endpoint_columns(df: pd.DataFrame) -> pd.DataFrame:
         if total <= 0.0 or not np.isfinite(total):
             continue
         weights /= total
-
         x = float(np.sum(weights * exact["diagnostic_decoded_endpoint_x"].to_numpy(dtype=float)))
         y = float(np.sum(weights * exact["diagnostic_decoded_endpoint_y"].to_numpy(dtype=float)))
         positive = weights > 0.0
         entropy = float(-np.sum(weights[positive] * np.log(weights[positive])))
-        if "log_evidence" in exact:
-            logs = np.sort(exact["log_evidence"].to_numpy(dtype=float))[::-1]
-            logs = logs[np.isfinite(logs)]
-            if logs.size > 1:
-                margin = float(logs[0] - logs[1])
-            elif logs.size == 1:
-                margin = np.inf
-            else:
-                margin = np.nan
-        else:
-            margin = np.nan
+        margin = _log_evidence_margin(exact)
 
         positions = np.asarray(row_positions, dtype=int)
         out.iloc[positions, out.columns.get_loc("model_averaged_endpoint_x")] = x
@@ -120,18 +88,23 @@ def add_model_averaged_endpoint_columns(df: pd.DataFrame) -> pd.DataFrame:
     return out
 
 
-def _finite_endpoint_average_rows(frame: pd.DataFrame) -> pd.DataFrame:
-    """Keep only rows with finite endpoint coordinates and valid model weights."""
+def _log_evidence_margin(exact: pd.DataFrame) -> float:
+    if "log_evidence" not in exact:
+        return np.nan
+    logs = np.sort(exact["log_evidence"].to_numpy(dtype=float))[::-1]
+    logs = logs[np.isfinite(logs)]
+    if logs.size > 1:
+        return float(logs[0] - logs[1])
+    if logs.size == 1:
+        return np.inf
+    return np.nan
 
+
+def _finite_endpoint_average_rows(frame: pd.DataFrame) -> pd.DataFrame:
     if frame.empty:
         return frame
-    required = (
-        "model_probability",
-        "diagnostic_decoded_endpoint_x",
-        "diagnostic_decoded_endpoint_y",
-    )
     finite = pd.Series(True, index=frame.index)
-    for column in required:
+    for column in ("model_probability", "diagnostic_decoded_endpoint_x", "diagnostic_decoded_endpoint_y"):
         values = pd.to_numeric(frame[column], errors="coerce")
         finite &= np.isfinite(values.to_numpy(dtype=float))
     probabilities = pd.to_numeric(frame["model_probability"], errors="coerce")
@@ -145,12 +118,9 @@ def _model_average_groups(frame: pd.DataFrame):
         row_positions = np.arange(len(frame), dtype=int)
         yield row_positions, frame.iloc[row_positions]
         return
-
     labels = pd.DataFrame(
         {
-            f"__model_average_scope_{index}": [
-                _scope_label(value) for value in frame[column]
-            ]
+            f"__model_average_scope_{index}": [_scope_label(value) for value in frame[column]]
             for index, column in enumerate(group_columns)
         },
         index=frame.index,
@@ -161,8 +131,6 @@ def _model_average_groups(frame: pd.DataFrame):
 
 
 def _model_average_group_columns(frame: pd.DataFrame) -> list[str]:
-    """Return columns identifying one independent model-choice scope."""
-
     columns = [column for column in _MODEL_AVERAGE_BASE_COLUMNS if column in frame.columns]
     for column in _MODEL_AVERAGE_SCOPE_COLUMNS:
         if column in frame.columns and column not in columns:
@@ -173,6 +141,12 @@ def _model_average_group_columns(frame: pd.DataFrame) -> list[str]:
 def _scope_label(value: object) -> str:
     if _is_missing_scalar(value):
         return "<missing>"
+    if isinstance(value, (bool, np.bool_)):
+        return repr(("scalar", str(bool(value))))
+    if isinstance(value, (int, float, np.integer, np.floating)):
+        numeric = float(value)
+        if np.isfinite(numeric):
+            return repr(("numeric", int(numeric) if numeric.is_integer() else numeric))
     if isinstance(value, np.ndarray):
         return repr(("array", np.asarray(value, dtype=object).reshape(-1).tolist()))
     if isinstance(value, (list, tuple)):
@@ -203,8 +177,7 @@ def _bool_value(value: object) -> bool:
     if isinstance(value, (int, float, np.integer, np.floating)):
         numeric = float(value)
         return bool(np.isfinite(numeric) and numeric != 0.0)
-    text = str(value).strip().lower()
-    return text in {"1", "1.0", "true", "t", "yes", "y", "on"}
+    return str(value).strip().lower() in {"1", "1.0", "true", "t", "yes", "y", "on"}
 
 
 def _bool_series(values: pd.Series) -> pd.Series:

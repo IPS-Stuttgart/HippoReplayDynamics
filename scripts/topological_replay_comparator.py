@@ -267,6 +267,12 @@ def _bool_column(frame: pd.DataFrame, column: str, *, default: bool = False) -> 
     return frame[column].map(lambda value: _as_bool(value, default=default)).astype(bool)
 
 
+def _success_mask(frame: pd.DataFrame) -> pd.Series:
+    if "status" not in frame:
+        return pd.Series(True, index=frame.index, dtype=bool)
+    return frame["status"].eq("success")
+
+
 def euclidean_vs_topological_trajectory_summary(
     evidence: pd.DataFrame,
     *,
@@ -278,7 +284,7 @@ def euclidean_vs_topological_trajectory_summary(
     if evidence.empty:
         return _empty_comparison_summary()
     key_columns = _event_key_columns(evidence)
-    ok = evidence[evidence.get("status", "success").eq("success")].copy()
+    ok = evidence[_success_mask(evidence)].copy()
     if "evidence_comparable" in ok:
         ok = ok[_bool_column(ok, "evidence_comparable")]
     if ok.empty or not key_columns:
@@ -320,7 +326,7 @@ def topological_replay_gate_summary(
 ) -> pd.DataFrame:
     """Return infrastructure gates plus non-required scientific diagnostics."""
 
-    scored = evidence[evidence.get("status", "success").eq("success")] if not evidence.empty else pd.DataFrame()
+    scored = evidence[_success_mask(evidence)] if not evidence.empty else pd.DataFrame()
     models = set(scored["model"].astype(str)) if "model" in scored else set()
     required: list[dict[str, object]] = []
     diagnostics: list[dict[str, object]] = []

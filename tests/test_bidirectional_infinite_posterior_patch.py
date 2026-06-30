@@ -5,6 +5,7 @@ import numpy as np
 from hipporeplayimm.bidirectional_infinite_evidence_patch import (
     _equal_prior_logp_and_weights,
     _safe_mixture_log_posterior,
+    apply_bidirectional_infinite_evidence_patch,
 )
 
 
@@ -41,3 +42,20 @@ def test_safe_bidirectional_posterior_mixture_preserves_impossible_trajectory_ro
     assert not np.isnan(mixed).any()
     np.testing.assert_allclose(np.exp(mixed[0]).sum(), 1.0)
     assert np.isneginf(mixed[1]).all()
+
+
+def test_bidirectional_patch_refreshes_overwritten_score_methods(monkeypatch) -> None:
+    from hipporeplayimm import result_improvement_extensions as compat
+    from hipporeplayimm import reverse_models as direct
+
+    def stale_score(self, emissions, bin_centers, **kwargs):  # pragma: no cover
+        del self, emissions, bin_centers, kwargs
+        raise AssertionError("stale bidirectional score method was not refreshed")
+
+    monkeypatch.setattr(compat.BidirectionalReplayModel, "score", stale_score)
+    monkeypatch.setattr(direct.BidirectionalReplayModel, "score", stale_score)
+
+    apply_bidirectional_infinite_evidence_patch()
+
+    assert compat.BidirectionalReplayModel.score is not stale_score
+    assert direct.BidirectionalReplayModel.score is not stale_score

@@ -7,6 +7,9 @@ from .models import EventScore, LOG_ZERO, _normalize_log_weights, _posterior_dia
 from .momentum_prediction_decay_validation import (
     apply_momentum_prediction_decay_validation_patch as _apply_momentum_prediction_decay_validation_patch,
 )
+from .sparse_momentum_bin_center_validation import (
+    apply_sparse_momentum_bin_center_validation_patch as _apply_sparse_momentum_bin_center_validation_patch,
+)
 from .trajectory_imm_single_bin_diagnostics import (
     apply_trajectory_imm_single_bin_diagnostics_patch as _apply_trajectory_imm_single_bin_diagnostics_patch,
 )
@@ -76,6 +79,7 @@ from .state_space_utils import (
 # duration- and occupancy-aware. Mark it before legacy runtime patch modules
 # inspect the public import surface so they do not replace it with older scorers.
 StateSpaceReplayModel.score._native_duration_occupancy_aware = True
+_apply_sparse_momentum_bin_center_validation_patch()
 _apply_trajectory_imm_single_bin_diagnostics_patch()
 _apply_momentum_prediction_decay_validation_patch()
 

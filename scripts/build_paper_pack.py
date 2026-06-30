@@ -15,6 +15,7 @@ import math
 from pathlib import Path
 from typing import Sequence
 
+import numpy as np
 import pandas as pd
 
 from hipporeplayimm.recovery_diagnostics import (
@@ -126,8 +127,12 @@ def _render_readme(manifest: dict[str, object]) -> str:
 def _json_ready(value: object) -> object:
     if isinstance(value, dict):
         return {str(key): _json_ready(item) for key, item in value.items()}
-    if isinstance(value, list):
+    if isinstance(value, (list, tuple)):
         return [_json_ready(item) for item in value]
+    if isinstance(value, pd.DataFrame):
+        return _json_ready(value.to_dict(orient="records"))
+    if isinstance(value, np.ndarray):
+        return _json_ready(value.tolist())
     try:
         if pd.isna(value):
             return None

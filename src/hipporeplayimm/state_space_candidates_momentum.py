@@ -130,6 +130,8 @@ def _transition_parameter_series(
                 raise ValueError(f"{name} values must be >= {minimum_value:g}")
         elif np.any(out <= minimum_value):
             raise ValueError(f"{name} values must be > {minimum_value:g}")
+    if maximum is None and name == "velocity_decays":
+        maximum = 1.0
     if maximum is not None:
         maximum_value = float(maximum)
         if not np.isfinite(maximum_value):

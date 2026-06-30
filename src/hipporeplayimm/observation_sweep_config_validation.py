@@ -75,25 +75,37 @@ def _grid_values(config: Any, name: str) -> tuple[Any, ...]:
 
 def _finite_float(name: str, value: Any) -> float:
     if isinstance(value, (bool, np.bool_)):
-        raise ValueError(f"{name} values must be finite")
+        raise ValueError(f"{name} values must be finite scalars")
     try:
-        numeric = float(value)
+        array = np.asarray(value)
     except (TypeError, ValueError) as exc:
-        raise ValueError(f"{name} values must be finite") from exc
+        raise ValueError(f"{name} values must be finite scalars") from exc
+    if array.ndim != 0:
+        raise ValueError(f"{name} values must be finite scalars")
+    try:
+        numeric = float(array)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} values must be finite scalars") from exc
     if not np.isfinite(numeric):
-        raise ValueError(f"{name} values must be finite")
+        raise ValueError(f"{name} values must be finite scalars")
     return float(numeric)
 
 
 def _positive_integer(name: str, value: Any) -> int:
     if isinstance(value, (bool, np.bool_)):
-        raise ValueError(f"{name} must be positive")
+        raise ValueError(f"{name} must be a positive integer")
     try:
-        numeric = float(value)
+        array = np.asarray(value)
     except (TypeError, ValueError) as exc:
-        raise ValueError(f"{name} must be positive") from exc
+        raise ValueError(f"{name} must be a positive integer") from exc
+    if array.ndim != 0:
+        raise ValueError(f"{name} must be a positive integer")
+    try:
+        numeric = float(array)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must be a positive integer") from exc
     if not np.isfinite(numeric) or numeric <= 0.0 or not numeric.is_integer():
-        raise ValueError(f"{name} must be positive")
+        raise ValueError(f"{name} must be a positive integer")
     return int(numeric)
 
 

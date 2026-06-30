@@ -31,6 +31,7 @@ def _score_momentum_candidates(
         logp, trajectory = _score_fragmented(emissions, valid_bin_mask=valid_bin_mask)
         return logp, trajectory, [0.0]
 
+    initial_sigma_cm = _positive_finite_scalar("initial_sigma_cm", initial_sigma_cm)
     masses = _candidate_log_masses(emissions.log_likelihood, candidates)
     transition_sigmas = _transition_parameter_series(
         transition_sigmas_cm,
@@ -96,6 +97,13 @@ def _score_momentum_candidates(
     for time_index in range(emissions.n_time):
         trajectory[time_index] -= logsumexp(trajectory[time_index])
     return logp, trajectory, masses
+
+
+def _positive_finite_scalar(name: str, value: float) -> float:
+    numeric = float(value)
+    if not np.isfinite(numeric) or numeric <= 0.0:
+        raise ValueError(f"{name} must be finite and positive")
+    return numeric
 
 
 def _transition_parameter_series(

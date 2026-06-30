@@ -38,6 +38,18 @@ def _empty_spike_session() -> ReplaySession:
     )
 
 
+def _ripple_session() -> ReplaySession:
+    session = _empty_spike_session()
+    session.ripple_events = np.array(
+        [
+            [0.20, 0.30, 0.25, 0.0, 0.0, 0.0],
+            [0.50, 0.62, 0.56, 0.0, 0.0, 0.0],
+        ],
+        dtype=float,
+    )
+    return session
+
+
 def _two_cell_encoding() -> EncodingModel:
     cell_ids = np.array([1, 2], dtype=int)
     return EncodingModel(
@@ -64,6 +76,12 @@ def _two_cell_encoding() -> EncodingModel:
 def test_replay_cell_gain_calibration_rejects_nonfinite_scalars(kwargs, message) -> None:
     with pytest.raises(ValueError, match=message):
         fit_replay_cell_gains(_empty_spike_session(), _two_cell_encoding(), [], **kwargs)
+
+
+@pytest.mark.parametrize("event_index", [True, False, np.bool_(True), np.bool_(False)])
+def test_replay_cell_gain_calibration_rejects_boolean_event_indices(event_index) -> None:
+    with pytest.raises(TypeError, match="event index must be an integer, not boolean"):
+        fit_replay_cell_gains(_ripple_session(), _two_cell_encoding(), [event_index])
 
 
 def test_replay_cell_gain_calibration_uses_prior_gain_without_valid_events() -> None:

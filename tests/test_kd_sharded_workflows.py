@@ -20,28 +20,31 @@ def _write_momentum_shard(
     sd_indices: list[int],
     decay_indices: list[int],
     values: np.ndarray,
+    metadata_overrides: dict[str, object] | None = None,
 ) -> None:
-    np.savez_compressed(
-        path,
-        session="RatX/OpenY",
-        event_ids=np.asarray(event_ids, dtype=int),
-        n_time=np.full(len(event_ids), 3, dtype=int),
-        n_spikes=np.full(len(event_ids), 7, dtype=int),
-        sd_meters=np.asarray([0.1, 0.2], dtype=float),
-        decay=np.asarray([1.0, 2.0], dtype=float),
-        sd_indices=np.asarray(sd_indices, dtype=int),
-        decay_indices=np.asarray(decay_indices, dtype=int),
-        values=np.asarray(values, dtype=float),
-        runtime_s=np.asarray(10.0, dtype=float),
-        shard_index=np.asarray(0, dtype=int),
-        shard_count=np.asarray(2, dtype=int),
-        kd_grid_preset="smoke",
-        kd_time_bin_ms=np.asarray(3.0, dtype=float),
-        kd_bin_size_cm=np.asarray(4.0, dtype=float),
-        kd_n_bins=np.asarray(2, dtype=int),
-        kd_n_jobs=np.asarray(1, dtype=int),
-        kd_event_chunk_size=np.asarray(1, dtype=int),
-    )
+    payload: dict[str, object] = {
+        "session": "RatX/OpenY",
+        "event_ids": np.asarray(event_ids, dtype=int),
+        "n_time": np.full(len(event_ids), 3, dtype=int),
+        "n_spikes": np.full(len(event_ids), 7, dtype=int),
+        "sd_meters": np.asarray([0.1, 0.2], dtype=float),
+        "decay": np.asarray([1.0, 2.0], dtype=float),
+        "sd_indices": np.asarray(sd_indices, dtype=int),
+        "decay_indices": np.asarray(decay_indices, dtype=int),
+        "values": np.asarray(values, dtype=float),
+        "runtime_s": np.asarray(10.0, dtype=float),
+        "shard_index": np.asarray(0, dtype=int),
+        "shard_count": np.asarray(2, dtype=int),
+        "kd_grid_preset": "smoke",
+        "kd_time_bin_ms": np.asarray(3.0, dtype=float),
+        "kd_bin_size_cm": np.asarray(4.0, dtype=float),
+        "kd_n_bins": np.asarray(2, dtype=int),
+        "kd_n_jobs": np.asarray(1, dtype=int),
+        "kd_event_chunk_size": np.asarray(1, dtype=int),
+    }
+    if metadata_overrides is not None:
+        payload.update(metadata_overrides)
+    np.savez_compressed(path, **payload)
 
 
 def test_event_shard_planner_builds_balanced_nonempty_specs():
@@ -76,6 +79,21 @@ def test_momentum_grid_loader_rejects_out_of_range_decay_indices(tmp_path):
     )
 
     with pytest.raises(ValueError, match="decay_indices out of range"):
+        _load_momentum_grid([shard])
+
+
+def test_momentum_grid_loader_rejects_array_shaped_scalar_metadata(tmp_path):
+    shard = tmp_path / "bad_scalar_metadata.npz"
+    _write_momentum_shard(
+        shard,
+        event_ids=[10],
+        sd_indices=[0, 1, 0, 1],
+        decay_indices=[0, 0, 1, 1],
+        values=np.array([[-7.0, -8.0, -9.0, -10.0]]),
+        metadata_overrides={"kd_n_bins": np.asarray([2], dtype=int)},
+    )
+
+    with pytest.raises(ValueError, match="kd_n_bins.*scalar"):
         _load_momentum_grid([shard])
 
 

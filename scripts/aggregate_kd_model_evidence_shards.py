@@ -19,9 +19,11 @@ from hipporeplayimm.kd_reference import (
 )
 
 
-def _np_scalar(value) -> object:
+def _np_scalar(value, *, key: str, path: Path) -> object:
     array = np.asarray(value)
-    return array.item() if array.shape == () else value
+    if array.shape != ():
+        raise ValueError(f"Momentum shard {key} must be scalar metadata in {path}: got shape {array.shape}")
+    return array.item()
 
 
 def _integer_metadata(value, *, key: str, path: Path, min_value: int) -> np.ndarray:
@@ -62,7 +64,7 @@ def _load_npz(path: Path) -> dict[str, object]:
             raise ValueError(f"Momentum shard n_spikes must match event_ids shape in {path}: {n_spikes.shape} vs {event_ids.shape}")
         return {
             "path": path,
-            "session": str(_np_scalar(shard["session"])),
+            "session": str(_np_scalar(shard["session"], key="session", path=path)),
             "event_ids": event_ids,
             "n_time": n_time,
             "n_spikes": n_spikes,
@@ -71,14 +73,14 @@ def _load_npz(path: Path) -> dict[str, object]:
             "sd_indices": np.array(shard["sd_indices"], copy=True),
             "decay_indices": np.array(shard["decay_indices"], copy=True),
             "values": np.array(shard["values"], dtype=float, copy=True),
-            "runtime_s": float(_np_scalar(shard["runtime_s"])),
-            "kd_grid_preset": str(_np_scalar(shard["kd_grid_preset"])),
-            "kd_time_bin_ms": float(_np_scalar(shard["kd_time_bin_ms"])),
-            "kd_bin_size_cm": float(_np_scalar(shard["kd_bin_size_cm"])),
-            "kd_n_bins": int(_np_scalar(shard["kd_n_bins"])),
-            "kd_n_jobs": int(_np_scalar(shard["kd_n_jobs"])),
-            "kd_event_chunk_size": int(_np_scalar(shard["kd_event_chunk_size"])),
-            "kd_spike_rate_scale": float(_np_scalar(shard["kd_spike_rate_scale"]))
+            "runtime_s": float(_np_scalar(shard["runtime_s"], key="runtime_s", path=path)),
+            "kd_grid_preset": str(_np_scalar(shard["kd_grid_preset"], key="kd_grid_preset", path=path)),
+            "kd_time_bin_ms": float(_np_scalar(shard["kd_time_bin_ms"], key="kd_time_bin_ms", path=path)),
+            "kd_bin_size_cm": float(_np_scalar(shard["kd_bin_size_cm"], key="kd_bin_size_cm", path=path)),
+            "kd_n_bins": int(_np_scalar(shard["kd_n_bins"], key="kd_n_bins", path=path)),
+            "kd_n_jobs": int(_np_scalar(shard["kd_n_jobs"], key="kd_n_jobs", path=path)),
+            "kd_event_chunk_size": int(_np_scalar(shard["kd_event_chunk_size"], key="kd_event_chunk_size", path=path)),
+            "kd_spike_rate_scale": float(_np_scalar(shard["kd_spike_rate_scale"], key="kd_spike_rate_scale", path=path))
             if "kd_spike_rate_scale" in shard.files
             else 1.0,
         }

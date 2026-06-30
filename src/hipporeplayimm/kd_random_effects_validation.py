@@ -28,14 +28,15 @@ def apply_kd_random_effects_validation_patch() -> None:
         n_iterations: int = 500,
         burnin: int = 50,
     ):
+        evidence_values, model_values = _validate_model_evidence_inputs(log_evidence, models)
         prior_value, n_iterations_value, burnin_value = _validate_sampler_options(
             prior=prior,
             n_iterations=n_iterations,
             burnin=burnin,
         )
         return current(
-            log_evidence,
-            models,
+            evidence_values,
+            model_values,
             prior=prior_value,
             n_iterations=n_iterations_value,
             burnin=burnin_value,
@@ -45,6 +46,30 @@ def apply_kd_random_effects_validation_patch() -> None:
     setattr(random_effects_model_probabilities, "__hipporeplayimm_original__", current)
     kd_reference.random_effects_model_probabilities = random_effects_model_probabilities
     setattr(kd_reference, _PATCHED_FLAG, True)
+
+
+def _validate_model_evidence_inputs(log_evidence: Any, models: Any) -> tuple[np.ndarray, list[Any]]:
+    """Return evidence/model inputs with dimensions that can be indexed safely."""
+
+    try:
+        evidence_values = np.asarray(log_evidence, dtype=float)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("log_evidence must be a numeric two-dimensional array") from exc
+    if evidence_values.ndim != 2:
+        raise ValueError("log_evidence must be a two-dimensional array")
+
+    if isinstance(models, (str, bytes)):
+        raise TypeError("models must be a sequence of model names")
+    try:
+        model_values = list(models)
+    except TypeError as exc:
+        raise TypeError("models must be a sequence of model names") from exc
+
+    if evidence_values.shape[1] == 0:
+        raise ValueError("models must contain at least one model")
+    if len(model_values) != evidence_values.shape[1]:
+        raise ValueError("models length must match log_evidence columns")
+    return evidence_values, model_values
 
 
 def _validate_sampler_options(*, prior: Any, n_iterations: Any, burnin: Any) -> tuple[float, int, int]:

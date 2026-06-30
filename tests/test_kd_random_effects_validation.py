@@ -37,6 +37,25 @@ def test_random_effects_rejects_invalid_sampler_options() -> None:
         random_effects_model_probabilities(_log_evidence(), ["a", "b"], n_iterations=0)
 
 
+def test_random_effects_rejects_model_count_mismatches() -> None:
+    with pytest.raises(ValueError, match="models length"):
+        random_effects_model_probabilities(_log_evidence(), ["a"])
+
+    with pytest.raises(ValueError, match="models length"):
+        random_effects_model_probabilities(_log_evidence()[:, :1], ["a", "b"])
+
+
+def test_random_effects_rejects_invalid_evidence_shape() -> None:
+    with pytest.raises(ValueError, match="two-dimensional"):
+        random_effects_model_probabilities(np.array([0.0, -1.0], dtype=float), ["a", "b"])
+
+    with pytest.raises(ValueError, match="at least one model"):
+        random_effects_model_probabilities(np.empty((2, 0), dtype=float), [])
+
+    with pytest.raises(TypeError, match="sequence"):
+        random_effects_model_probabilities(_log_evidence(), "ab")
+
+
 def test_random_effects_accepts_valid_sampler_options() -> None:
     rows = random_effects_model_probabilities(
         _log_evidence(),

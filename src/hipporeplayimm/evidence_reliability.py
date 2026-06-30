@@ -109,10 +109,7 @@ def _as_float(value) -> tuple[float, bool]:
     try:
         array = np.asarray(value)
     except (TypeError, ValueError):
-        try:
-            return float(value), False
-        except (TypeError, ValueError):
-            return float("nan"), False
+        return _coerced_metric_float(value)
     if array.shape != ():
         return float("nan"), True
     if np.issubdtype(array.dtype, np.bool_):
@@ -126,14 +123,20 @@ def _as_float(value) -> tuple[float, bool]:
             return float("nan"), False
         if isinstance(item, (bool, np.bool_)):
             return float("nan"), True
-        try:
-            return float(item), False
-        except (TypeError, ValueError):
-            return float("nan"), False
+        return _coerced_metric_float(item)
+    return _coerced_metric_float(array)
+
+
+def _coerced_metric_float(value) -> tuple[float, bool]:
     try:
-        return float(array), False
-    except (TypeError, ValueError):
+        numeric = float(value)
+    except (TypeError, ValueError, OverflowError):
         return float("nan"), False
+    if np.isnan(numeric):
+        return float("nan"), False
+    if not np.isfinite(numeric):
+        return numeric, True
+    return numeric, False
 
 
 def _is_missing_scalar(value) -> bool:

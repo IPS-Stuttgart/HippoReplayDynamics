@@ -18,3 +18,20 @@ def test_mass_retaining_candidate_support_rejects_boolean_threshold() -> None:
                 min_k=0,
                 max_k=0,
             )
+
+
+@pytest.mark.parametrize(
+    "threshold",
+    [np.array([0.90]), np.array([[0.90]]), [0.90]],
+)
+def test_mass_retaining_candidate_support_rejects_array_shaped_threshold(threshold: object) -> None:
+    log_emission = np.log(np.array([0.60, 0.25, 0.10, 0.05]))
+
+    with pytest.raises(TypeError, match="mass_threshold.*numeric scalar"):
+        _mass_retaining_candidate_indices(
+            log_emission,
+            mass_threshold=threshold,
+            top_k=1,
+            min_k=0,
+            max_k=0,
+        )

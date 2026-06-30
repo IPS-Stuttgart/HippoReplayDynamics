@@ -101,6 +101,26 @@ def test_topological_outputs_summarize_pairing_and_nonrequired_science_gates(tmp
         assert path.stat().st_size > 0
 
 
+def test_topological_outputs_treat_missing_status_as_success(tmp_path):
+    evidence = pd.DataFrame(
+        [
+            _row("Rat1/Open1", 0, EUCLIDEAN_DIFFUSION_MODEL, 10.0),
+            _row("Rat1/Open1", 0, TOPO_GEODESIC_MODEL, 12.0, valid_fraction=0.5),
+        ]
+    ).drop(columns=["status"])
+
+    outputs = write_topological_replay_outputs(evidence, tmp_path)
+
+    summary = outputs[COMPARISON_OUTPUT]
+    geodesic = summary[summary["topological_model"].eq(TOPO_GEODESIC_MODEL)].iloc[0]
+    assert int(geodesic["paired_events"]) == 1
+    assert int(geodesic["topological_wins"]) == 1
+
+    gates = outputs[GATE_OUTPUT]
+    overall = gates[gates["gate"].eq("overall")].iloc[0]
+    assert bool(overall["passed"])
+
+
 def _row(
     session: str,
     event_index: int,

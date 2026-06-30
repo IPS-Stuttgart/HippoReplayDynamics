@@ -146,6 +146,8 @@ def _validated_nonnegative_matrix(values: np.ndarray, name: str, *, integral: bo
         raise ValueError(f"{name} must contain numeric values") from exc
     if array.ndim != 2:
         raise ValueError(f"{name} must have shape (n_time, n_cells)")
+    if 0 in array.shape:
+        raise ValueError(f"{name} must contain at least one time bin and one cell")
     if not np.all(np.isfinite(array)) or np.any(array < 0.0):
         raise ValueError(f"{name} must contain finite nonnegative values")
     if integral and not np.all(np.isclose(array, np.rint(array), rtol=0.0, atol=1.0e-12)):

@@ -163,6 +163,35 @@ def test_triage_fills_blank_support_from_diagnostic_columns():
     assert bool(event["expected_model_evidence_comparable"])
 
 
+def test_triage_prioritizes_specific_nonexact_support_diagnostics():
+    expected_model = "sorted-spike-state-space-displacement-momentum"
+    rows = [
+        _row(0, "sorted-spike-state-space-diffusion", 0.0, support=""),
+        _row(
+            0,
+            expected_model,
+            2.0,
+            support="",
+            comparable=False,
+        ),
+    ]
+    for row in rows:
+        row["expected_model"] = expected_model
+        row.pop("evidence_comparable")
+        row["diagnostic_candidate_evidence_support"] = "exact_full_grid"
+    rows[1]["diagnostic_state_space_displacement_momentum_evidence_support"] = "truncated_full_grid"
+
+    event = build_momentum_recovery_triage(
+        pd.DataFrame(rows),
+        expected_model=expected_model,
+    ).event_table.iloc[0]
+
+    assert event["triage_category"] == "lower_bound_certified_recovery"
+    assert event["expected_model_evidence_support"] == "truncated_full_grid"
+    assert bool(event["expected_model_evidence_comparable"]) is False
+    assert bool(event["lower_bound_certified_recovery"])
+
+
 def test_triage_treats_string_false_path_support_as_support_loss():
     scores = pd.DataFrame(
         [

@@ -42,6 +42,37 @@ def test_compare_runs_handles_empty_successful_score_tables(tmp_path):
     assert (output / "model_evidence_run_comparison_summary.csv").exists()
 
 
+def test_compare_runs_ignores_nonfinite_successful_log_evidence(tmp_path):
+    left = tmp_path / "left"
+    right = tmp_path / "right"
+    output = tmp_path / "comparison"
+    left_rows = [
+        {"session": "Rat1/Open1", "event_index": 0, "model": "momentum", "log_evidence": float("nan"), "status": "success"},
+        {"session": "Rat1/Open1", "event_index": 0, "model": "diffusion", "log_evidence": float("-inf"), "status": "success"},
+        {"session": "Rat1/Open1", "event_index": 1, "model": "momentum", "log_evidence": 2.0, "status": "success"},
+        {"session": "Rat1/Open1", "event_index": 1, "model": "diffusion", "log_evidence": 1.0, "status": "success"},
+    ]
+    right_rows = [
+        {"session": "Rat1/Open1", "event_index": 0, "model": "momentum", "log_evidence": float("nan"), "status": "success"},
+        {"session": "Rat1/Open1", "event_index": 0, "model": "diffusion", "log_evidence": float("inf"), "status": "success"},
+        {"session": "Rat1/Open1", "event_index": 1, "model": "momentum", "log_evidence": 3.0, "status": "success"},
+        {"session": "Rat1/Open1", "event_index": 1, "model": "diffusion", "log_evidence": 0.0, "status": "success"},
+    ]
+    _write_event_scores(left, left_rows)
+    _write_event_scores(right, right_rows)
+
+    tables = compare_runs(left, right, left_label="left", right_label="right", output=output)
+
+    summary = tables["summary"].iloc[0]
+    assert summary["left_events"] == 1
+    assert summary["right_events"] == 1
+    assert summary["matched_events"] == 1
+    assert tables["event_comparison"]["event_index"].tolist() == [1]
+    assert set(tables["relative"]["event_index"]) == {1}
+    assert not tables["relative"]["left_relative_log_evidence"].isna().any()
+    assert not tables["relative"]["right_relative_log_evidence"].isna().any()
+
+
 def test_compare_runs_treats_blank_status_as_legacy_success(tmp_path):
     left = tmp_path / "left"
     right = tmp_path / "right"

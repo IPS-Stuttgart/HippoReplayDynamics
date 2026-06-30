@@ -13,8 +13,10 @@ def _validate_active_support_rows(values: np.ndarray) -> None:
     rows = np.asarray(values, dtype=float)
     if rows.ndim != 2:
         raise ValueError("log_likelihood must be two-dimensional")
-    if not np.all(np.any(np.isfinite(rows), axis=1)):
-        raise ValueError("every emission row must contain at least one finite value on the active support")
+    finite_rows = np.any(np.isfinite(rows), axis=1)
+    if not np.all(finite_rows):
+        row = int(np.flatnonzero(~finite_rows)[0])
+        raise ValueError(f"row {row} must contain at least one finite value on the active support")
 
 
 def apply_candidate_active_support_validation_patch() -> None:

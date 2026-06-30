@@ -6,7 +6,7 @@ from scipy.special import logsumexp
 
 def _scalar_dt(dt):
     """Return the representative bin duration as an ordinary float."""
-    base=getattr(dt,'base',dt)
+    base=getattr(dt,'base',dt) if hasattr(dt,'transition_durations') else dt
     if base is None: base=dt
     values=np.asarray(base,dtype=float)
     if values.shape==():

@@ -15,6 +15,17 @@ _CERTIFIED_RECOVERY_PATCHED_FLAG = "_certified_recovery_status_coercion_patch_ap
 _RECOVERY_DIAGNOSTICS_PATCHED_FLAG = "_recovery_diagnostics_status_coercion_patch_applied"
 _MISSING_STATUS_VALUES = {"", "nan", "na", "n/a", "none", "null", "<na>"}
 _EXPLICIT_FALSE_BOOL_VALUES = {"0", "0.0", "false", "f", "no", "n", "off"}
+_SIMULATION_EVENT_GROUP_COLUMNS = (
+    "session",
+    "simulation_random_seed",
+    "random_seed",
+    "benchmark_random_seed",
+    "simulation_event_index",
+    "event_index",
+    "window_index",
+    "benchmark_cell_split_index",
+    "event_window_variant",
+)
 
 
 def apply_evidence_status_coercion_patch() -> None:
@@ -109,7 +120,8 @@ def apply_evidence_status_coercion_patch() -> None:
 
     @wraps(original_simulation_add_evidence_columns)
     def simulation_add_evidence_columns(df: pd.DataFrame) -> pd.DataFrame:
-        return original_simulation_add_evidence_columns(_normalize_status_frame(df))
+        scored = original_simulation_add_evidence_columns(_normalize_status_frame(df))
+        return _normalize_lower_bound_recovery_flags(scored, reporting)
 
     @wraps(original_simulation_event_best_rows)
     def simulation_event_best_rows(event_scores: pd.DataFrame) -> pd.DataFrame:
@@ -190,6 +202,54 @@ def _patch_certified_recovery(recovery: Any) -> None:
     recovery.certified_vs_exact_event_recovery = certified_vs_exact_event_recovery
     recovery.certified_vs_exact_recovery_summary = certified_vs_exact_recovery_summary
     setattr(recovery, _CERTIFIED_RECOVERY_PATCHED_FLAG, True)
+
+
+def _normalize_lower_bound_recovery_flags(frame: pd.DataFrame, reporting: Any) -> pd.DataFrame:
+    """Make lower-bound recovery flags event-scoped and surrogate-aware."""
+
+    required_columns = {
+        "best_truncated_lower_bound_model",
+        "expected_model",
+        "lower_bound_recovered_expected_model",
+    }
+    if frame.empty or not required_columns.issubset(frame.columns):
+        return frame
+
+    out = frame.copy()
+    group_columns = _simulation_event_group_columns(out)
+    if not group_columns:
+        _set_lower_bound_recovery_flag(out, out, reporting)
+        return out
+
+    for _, group in out.groupby(group_columns, sort=False, dropna=False):
+        _set_lower_bound_recovery_flag(out, group, reporting)
+    return out
+
+
+def _simulation_event_group_columns(frame: pd.DataFrame) -> list[str]:
+    return [column for column in _SIMULATION_EVENT_GROUP_COLUMNS if column in frame.columns]
+
+
+def _set_lower_bound_recovery_flag(out: pd.DataFrame, group: pd.DataFrame, reporting: Any) -> None:
+    acceptable_models = {
+        str(model).strip()
+        for model in reporting._simulation_acceptable_recovery_models(group)
+        if str(model).strip()
+    }
+    best_model = _first_nonmissing_text(group["best_truncated_lower_bound_model"])
+    out.loc[group.index, "lower_bound_recovered_expected_model"] = bool(
+        best_model and best_model in acceptable_models
+    )
+
+
+def _first_nonmissing_text(values: pd.Series) -> str:
+    for value in values:
+        if _is_missing_scalar(value):
+            continue
+        text = str(value).strip()
+        if text and text.lower() not in _MISSING_STATUS_VALUES:
+            return text
+    return ""
 
 
 def _normalize_status_frame(frame: pd.DataFrame) -> pd.DataFrame:

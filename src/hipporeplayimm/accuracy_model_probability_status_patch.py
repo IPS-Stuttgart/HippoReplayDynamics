@@ -313,9 +313,28 @@ def _patch_weighted_ensemble_emissions(accuracy_upgrades) -> None:
         if left_likelihood.shape != right_likelihood.shape:
             raise ValueError("emission tensors must have matching log_likelihood shapes")
 
+        n_time = left_likelihood.shape[0]
+        _validate_aligned_vector(
+            "times",
+            getattr(left, "times", None),
+            getattr(right, "times", None),
+            expected_length=n_time,
+        )
+        _validate_optional_aligned_duration_vector(
+            "bin_durations",
+            getattr(left, "bin_durations", None),
+            getattr(right, "bin_durations", None),
+            expected_length=n_time,
+        )
+        _validate_optional_aligned_duration_vector(
+            "transition_durations",
+            getattr(left, "transition_durations", None),
+            getattr(right, "transition_durations", None),
+            expected_length=max(n_time - 1, 0),
+        )
+
         spike_counts = np.asarray(left.spike_counts).copy()
         n_spikes = int(getattr(left, "n_spikes", np.asarray(spike_counts, dtype=float).sum()))
-        n_time = left_likelihood.shape[0]
         bin_durations = _copied_duration_vector(
             getattr(left, "bin_durations", None),
             expected_length=n_time,
@@ -344,6 +363,45 @@ def _patch_weighted_ensemble_emissions(accuracy_upgrades) -> None:
     setattr(weighted_ensemble_emissions, _ENSEMBLE_PATCHED_FLAG, True)
     setattr(weighted_ensemble_emissions, _ENSEMBLE_ORIGINAL_ATTR, current)
     accuracy_upgrades.weighted_ensemble_emissions = weighted_ensemble_emissions
+
+
+def _validate_aligned_vector(
+    name: str,
+    left_values: object,
+    right_values: object,
+    *,
+    expected_length: int,
+) -> None:
+    expected_shape = (int(expected_length),)
+    try:
+        left_array = np.asarray(left_values, dtype=float)
+        right_array = np.asarray(right_values, dtype=float)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"emission tensors must have matching {name} shapes") from exc
+
+    if left_array.shape != expected_shape or right_array.shape != expected_shape:
+        raise ValueError(f"emission tensors must have matching {name} shapes")
+    if not np.all(np.isfinite(left_array)) or not np.all(np.isfinite(right_array)):
+        raise ValueError(f"emission tensors must have finite {name}")
+    if not np.allclose(left_array, right_array, rtol=0.0, atol=1e-12):
+        raise ValueError(f"emission tensors must have matching {name}")
+
+
+def _validate_optional_aligned_duration_vector(
+    name: str,
+    left_values: object,
+    right_values: object,
+    *,
+    expected_length: int,
+) -> None:
+    if left_values is None or right_values is None:
+        return
+    _validate_aligned_vector(
+        name,
+        left_values,
+        right_values,
+        expected_length=expected_length,
+    )
 
 
 def _reversed_transition_durations(emissions: LogEmissionTensor) -> np.ndarray:

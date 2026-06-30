@@ -300,6 +300,11 @@ def apply_advanced_result_missing_group_patch() -> None:
     diagnostics.paired_model_margin_decisions = paired_model_margin_decisions
     setattr(diagnostics, _THRESHOLD_BASE_DECISIONS_ATTR, paired_model_margin_decisions)
     threshold_validation.apply_advanced_result_threshold_validation_patch()
+    setattr(
+        diagnostics.event_window_variants,
+        _EVENT_WINDOW_VARIANTS_WRAPPER_FLAG,
+        True,
+    )
     apply_wrong_map_missing_group_patch(diagnostics)
     setattr(diagnostics, _PATCH_FLAG, True)
 

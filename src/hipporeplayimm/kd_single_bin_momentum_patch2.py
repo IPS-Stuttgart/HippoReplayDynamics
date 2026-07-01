@@ -19,11 +19,11 @@ def apply_kd_single_bin_momentum_patch2() -> None:
     from . import kd_reference as kd
 
     random_effects_validation.apply_kd_random_effects_validation_patch()
+    impossible_patch.apply_kd_impossible_emission_patch()
 
     if _current_patch_installed(kd):
         return
 
-    impossible_patch.apply_kd_impossible_emission_patch()
     original = kd._second_order_separable_log_evidence
 
     def second_order(log_emissions, n_bins, initial, transition):

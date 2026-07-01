@@ -103,7 +103,9 @@ def _session_with_excitatory_fallback(session: Any, config: Any) -> Any:
 def apply_kd_encoding_config_validation_patch() -> None:
     """Install KD encoding-config validation on the reference encoder."""
 
-    from . import kd_reference
+    from . import kd_random_effects_validation, kd_reference
+
+    kd_random_effects_validation.apply_kd_random_effects_validation_patch()
 
     if getattr(kd_reference, _PATCHED_FLAG, False):
         return

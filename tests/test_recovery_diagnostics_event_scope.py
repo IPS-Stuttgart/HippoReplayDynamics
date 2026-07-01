@@ -45,3 +45,27 @@ def test_recovery_diagnostics_keep_independent_run_event_scope():
         tables.certified_vs_exact_summary["true_model"] == "overall"
     ].iloc[0]
     assert overall["simulated_events"] == 2
+
+
+def test_recovery_diagnostics_keep_source_scope_without_seed_disambiguation():
+    scores = pd.DataFrame(
+        [
+            _row("run-a/simulation_recovery_event_scores.csv", 11, -1.0),
+            _row("run-b/simulation_recovery_event_scores.csv", 11, -2.0),
+        ]
+    )
+
+    tables = build_recovery_diagnostic_tables(scores)
+
+    assert tables.event_diagnostics["source_recovery_score_file"].tolist() == [
+        "run-a/simulation_recovery_event_scores.csv",
+        "run-b/simulation_recovery_event_scores.csv",
+    ]
+    assert tables.certified_vs_exact_events["source_recovery_score_file"].tolist() == [
+        "run-a/simulation_recovery_event_scores.csv",
+        "run-b/simulation_recovery_event_scores.csv",
+    ]
+    overall = tables.certified_vs_exact_summary[
+        tables.certified_vs_exact_summary["true_model"] == "overall"
+    ].iloc[0]
+    assert overall["simulated_events"] == 2

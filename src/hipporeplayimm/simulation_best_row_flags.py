@@ -298,12 +298,13 @@ def _certified_vs_exact_event_recovery(event_scores: pd.DataFrame, reporting: An
 
         comparable_mask = recovery._comparable_mask(scored)
         comparable_rows = scored.loc[comparable_mask].copy()
+        best_comparable_row: pd.Series | None = None
         best_comparable_model = ""
         best_comparable_log_evidence = np.nan
         if not comparable_rows.empty:
-            best_comparable = _best_log_evidence_row(comparable_rows)
-            best_comparable_model = str(best_comparable["model"])
-            best_comparable_log_evidence = float(best_comparable["log_evidence"])
+            best_comparable_row = _best_log_evidence_row(comparable_rows)
+            best_comparable_model = str(best_comparable_row["model"])
+            best_comparable_log_evidence = float(best_comparable_row["log_evidence"])
 
         acceptable_models = recovery._event_acceptable_recovery_models(group)
         acceptable_rows = scored[scored["model"].astype(str).isin(acceptable_models)].copy()
@@ -325,8 +326,8 @@ def _certified_vs_exact_event_recovery(event_scores: pd.DataFrame, reporting: An
             )
             continue
 
-        if best_comparable_model in acceptable_models:
-            expected = scored[scored["model"].astype(str) == best_comparable_model].iloc[0]
+        if best_comparable_row is not None and best_comparable_model in acceptable_models:
+            expected = best_comparable_row
         elif not expected_rows.empty:
             expected = _best_log_evidence_row(expected_rows)
         else:
@@ -343,7 +344,7 @@ def _certified_vs_exact_event_recovery(event_scores: pd.DataFrame, reporting: An
         )
         margin = expected_log_evidence - best_comparable_log_evidence
 
-        if best_comparable_model in acceptable_models:
+        if best_comparable_row is not None and best_comparable_model in acceptable_models:
             recovered = True
             reason = "expected_comparable_best" if best_comparable_model == expected_model else "exact_surrogate_comparable_best"
         elif expected_comparable:

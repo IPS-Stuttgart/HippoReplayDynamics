@@ -45,6 +45,27 @@ def test_reverse_emission_helpers_keep_time_coordinates_increasing_and_duration_
         np.testing.assert_allclose(np.diff(output.times), output.transition_durations)
 
 
+def test_source_reverse_emissions_after_module_reload_keeps_times_increasing() -> None:
+    import importlib
+
+    import hipporeplayimm.reverse_models as reverse_models
+    from hipporeplayimm.time_order_patch import apply_reverse_emission_time_patch
+
+    emissions = _emissions()
+    reloaded_reverse_models = importlib.reload(reverse_models)
+    try:
+        output = reloaded_reverse_models.reverse_emissions(emissions)
+        expected_times = _expected_reverse_times(emissions)
+        np.testing.assert_allclose(output.log_likelihood, emissions.log_likelihood[::-1])
+        np.testing.assert_allclose(output.bin_durations, emissions.bin_durations[::-1])
+        np.testing.assert_allclose(output.transition_durations, emissions.transition_durations[::-1])
+        np.testing.assert_allclose(output.times, expected_times)
+        assert np.all(np.diff(output.times) > 0.0)
+        np.testing.assert_allclose(np.diff(output.times), output.transition_durations)
+    finally:
+        apply_reverse_emission_time_patch()
+
+
 def test_reverse_emission_time_patch_repairs_partial_reverse_model_state(monkeypatch) -> None:
     import hipporeplayimm.result_improvement_extensions as improved
     import hipporeplayimm.reverse_models as reverse_models

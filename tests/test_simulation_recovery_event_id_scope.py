@@ -96,3 +96,27 @@ def test_certified_recovery_keeps_same_event_index_separate_by_event_id() -> Non
     ]
     assert overall["simulated_events"] == 2
     assert overall["certified_vs_exact_recovered_events"] == 1
+
+
+def test_best_row_flags_certified_recovery_uses_winning_duplicate_model_row() -> None:
+    from hipporeplayimm import evidence_reporting, simulation_best_row_flags, simulation_recovery
+
+    rows = pd.DataFrame(
+        [
+            _row("evt-a", "stationary", "sorted-spike-state-space-stationary", -4.0),
+            _row("evt-a", "stationary", "sorted-spike-state-space-stationary", 2.0),
+            _row("evt-a", "stationary", "sorted-spike-state-space-diffusion", 0.0),
+        ]
+    )
+
+    events = simulation_best_row_flags._certified_vs_exact_event_recovery(
+        rows,
+        evidence_reporting,
+        simulation_recovery,
+    )
+    event = events.iloc[0]
+
+    assert event["certified_reference_model"] == "sorted-spike-state-space-stationary"
+    assert event["expected_model_log_evidence"] == 2.0
+    assert event["best_comparable_log_evidence"] == 2.0
+    assert event["expected_minus_best_comparable_log_evidence"] == 0.0

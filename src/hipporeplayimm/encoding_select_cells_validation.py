@@ -5,7 +5,8 @@
 such as ``1.9`` to ``1`` and select the wrong cell.  This patch validates the
 requested identifiers before casting them to the integer dtype used internally,
 while still accepting integer-valued numeric IDs commonly loaded from MATLAB
-files as floats.
+files as floats.  Integer identifiers are validated in their integer domain so
+large cell IDs are not rounded through floating-point conversion.
 """
 
 from __future__ import annotations
@@ -16,6 +17,37 @@ from functools import wraps
 import numpy as np
 
 _PATCHED_FLAG = "_encoding_select_cells_validation_patch_applied"
+
+
+def _coerce_requested_cell_id(value: object, integer_info: np.iinfo) -> int:
+    """Coerce one requested cell ID without passing integer inputs through float."""
+
+    try:
+        scalar = np.asarray(value)
+    except (TypeError, ValueError) as exc:
+        raise TypeError("cell_ids must contain integer-valued cell IDs") from exc
+    if scalar.ndim != 0:
+        raise ValueError("cell_ids must be one-dimensional")
+
+    item = scalar.item()
+    if isinstance(item, (bool, np.bool_)):
+        raise TypeError("cell_ids must not contain boolean identifiers")
+
+    if isinstance(item, (int, np.integer)):
+        cell_id = int(item)
+    elif isinstance(item, (float, np.floating)):
+        numeric = float(item)
+        if not np.isfinite(numeric):
+            raise ValueError("cell_ids must be finite")
+        if not numeric.is_integer():
+            raise ValueError("cell_ids must contain integer-valued cell IDs")
+        cell_id = int(numeric)
+    else:
+        raise TypeError("cell_ids must contain integer-valued cell IDs")
+
+    if cell_id < int(integer_info.min) or cell_id > int(integer_info.max):
+        raise ValueError("cell_ids must fit into integer identifier range")
+    return cell_id
 
 
 def _canonical_requested_cell_ids(cell_ids: Iterable[int | float]) -> np.ndarray:
@@ -29,26 +61,9 @@ def _canonical_requested_cell_ids(cell_ids: Iterable[int | float]) -> np.ndarray
     if not values:
         return np.empty(0, dtype=int)
 
-    for value in values:
-        if isinstance(value, (bool, np.bool_)):
-            raise TypeError("cell_ids must not contain boolean identifiers")
-        if not isinstance(value, (int, np.integer, float, np.floating)):
-            raise TypeError("cell_ids must contain integer-valued cell IDs")
-
-    numeric = np.asarray(values, dtype=float)
-    if numeric.ndim != 1:
-        raise ValueError("cell_ids must be one-dimensional")
-    if not np.all(np.isfinite(numeric)):
-        raise ValueError("cell_ids must be finite")
-
-    rounded = np.rint(numeric)
-    if not np.all(numeric == rounded):
-        raise ValueError("cell_ids must contain integer-valued cell IDs")
-
     integer_info = np.iinfo(np.dtype(int))
-    if not np.all((rounded >= integer_info.min) & (rounded <= integer_info.max)):
-        raise ValueError("cell_ids must fit into integer identifier range")
-    return np.asarray(sorted(set(rounded.astype(int).tolist())), dtype=int)
+    requested = [_coerce_requested_cell_id(value, integer_info) for value in values]
+    return np.asarray(sorted(set(requested)), dtype=int)
 
 
 def apply_encoding_select_cells_validation_patch() -> None:

@@ -17,3 +17,18 @@ def test_shared_valid_bin_mask_rejects_nonbinary_numeric_values() -> None:
         _coerce_valid_bin_mask(np.array([1, 0], dtype=int), 2),
         np.array([True, False]),
     )
+
+
+def test_shared_valid_bin_mask_rejects_textual_values() -> None:
+    for mask in (
+        np.array(["1", "0"], dtype=str),
+        np.array([b"1", b"0"], dtype="S1"),
+        np.array(["1", "0"], dtype=object),
+    ):
+        with pytest.raises(ValueError, match="boolean or 0/1"):
+            _coerce_valid_bin_mask(mask, 2)
+
+
+def test_shared_valid_bin_mask_rejects_complex_values() -> None:
+    with pytest.raises(ValueError, match="boolean or 0/1"):
+        _coerce_valid_bin_mask(np.array([1 + 1j, 0 + 0j]), 2)

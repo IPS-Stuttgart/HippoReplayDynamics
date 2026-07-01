@@ -184,9 +184,12 @@ def _coerce_count_scalar(name: str, value: object) -> int:
     if _is_boolean_scalar(value):
         raise TypeError(f"{name} must be an integer count, not boolean")
     try:
-        return int(value)
+        numeric = float(value)
     except (TypeError, ValueError) as exc:
         raise TypeError(f"{name} must be an integer count") from exc
+    if not np.isfinite(numeric) or numeric < 0.0 or numeric != np.floor(numeric):
+        raise TypeError(f"{name} must be a non-negative integer count")
+    return int(numeric)
 
 
 def _coerce_positive_float_scalar(name: str, value: object, message: str) -> float:

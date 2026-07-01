@@ -32,7 +32,7 @@ def apply_shuffle_spike_time_order_patch() -> None:
 def _shuffle_spike_times_session_sorted(session, random_seed: int = 1):
     from . import result_improvements as ri
 
-    rng = np.random.default_rng(random_seed)
+    rng = np.random.default_rng(_nonnegative_integer_seed(random_seed))
     spikes = np.asarray(session.spikes, dtype=float).copy()
     if spikes.size == 0:
         return session
@@ -53,3 +53,27 @@ def _shuffle_spike_times_session_sorted(session, random_seed: int = 1):
         marks = ri._replace_spike_mark_rows(marks, times=mark_times, order=order)
 
     return replace(session, spikes=spikes, spike_marks=marks)
+
+
+def _nonnegative_integer_seed(value: object) -> int:
+    try:
+        array = np.asarray(value)
+    except ValueError as exc:
+        raise ValueError("random_seed must be an integer scalar") from exc
+    if array.ndim != 0:
+        raise ValueError("random_seed must be an integer scalar")
+    scalar = array.item()
+    if isinstance(scalar, (bool, np.bool_)):
+        raise ValueError("random_seed must be an integer, not boolean")
+    try:
+        numeric = float(scalar)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ValueError("random_seed must be an integer") from exc
+    if not np.isfinite(numeric):
+        raise ValueError("random_seed must be a finite integer")
+    integer = int(round(numeric))
+    if not np.isclose(numeric, integer, rtol=0.0, atol=0.0):
+        raise ValueError("random_seed must be an integer")
+    if integer < 0:
+        raise ValueError("random_seed must be a nonnegative integer")
+    return integer

@@ -102,11 +102,18 @@ def _coerce_bool_mask(valid_bin_mask: Any, n_bins: int) -> np.ndarray | None:
 
     if valid_bin_mask is None:
         return None
-    raw = np.asarray(valid_bin_mask)
+    try:
+        raw = np.asarray(valid_bin_mask)
+    except ValueError as exc:
+        raise ValueError("valid_bin_mask must contain one boolean value per spatial bin") from exc
     if raw.shape != (n_bins,):
         raise ValueError("valid_bin_mask must contain one boolean value per spatial bin")
     if np.issubdtype(raw.dtype, np.bool_):
         return raw.astype(bool, copy=False)
+    if np.issubdtype(raw.dtype, np.complexfloating) or raw.dtype.kind in {"S", "U"}:
+        raise ValueError("valid_bin_mask must contain boolean or 0/1 values")
+    if raw.dtype == object and any(isinstance(value, (bytes, str)) for value in raw.flat):
+        raise ValueError("valid_bin_mask must contain boolean or 0/1 values")
     try:
         numeric = np.asarray(raw, dtype=float)
     except (TypeError, ValueError, OverflowError) as exc:
@@ -248,3 +255,6 @@ def apply_state_space_bin_count_validation_patch() -> None:
                 continue
             if name == "_coerce_valid_bin_mask" and current is not None and not _is_patched(current):
                 setattr(module, name, active_helpers[name])
+
+
+__all__ = ["apply_state_space_bin_count_validation_patch"]

@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import numpy as np
+import pytest
 
 from hipporeplayimm.data import ReplaySession, SpikeMarkData
 from hipporeplayimm.result_improvements import shuffle_spike_times_session
@@ -18,6 +19,12 @@ def test_shuffle_spike_times_returns_time_sorted_mark_aligned_session() -> None:
     np.testing.assert_allclose(shuffled.spike_marks.times, shuffled.spikes[:, 0])
     np.testing.assert_array_equal(shuffled.spike_marks.cell_ids, shuffled.spikes[:, 1].astype(int))
     np.testing.assert_allclose(shuffled.spike_marks.marks[:, 0], shuffled.spikes[:, 1])
+
+
+@pytest.mark.parametrize("random_seed", [-1, 1.5, True, float("nan")])
+def test_shuffle_spike_times_rejects_invalid_random_seed(random_seed) -> None:
+    with pytest.raises(ValueError, match="random_seed"):
+        shuffle_spike_times_session(_marked_session(), random_seed=random_seed)
 
 
 def _marked_session() -> ReplaySession:

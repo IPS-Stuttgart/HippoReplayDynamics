@@ -38,31 +38,41 @@ def _bootstrap_summary_columns() -> list[str]:
     ]
 
 
+def _scalar_numeric_value(value: object, name: str, message: str) -> float:
+    """Return a numeric scalar value without accepting array-shaped containers."""
+
+    try:
+        array = np.asarray(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(message) from exc
+    if array.ndim != 0:
+        raise ValueError(message)
+    scalar = array.item()
+    if isinstance(scalar, (bool, np.bool_)):
+        raise ValueError(message)
+    try:
+        return float(scalar)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(message) from exc
+
+
 def _positive_integer(value: object, name: str) -> int:
     """Return a positive integer argument or raise a clear validation error."""
 
-    if isinstance(value, (bool, np.bool_)):
-        raise ValueError(f"{name} must be a positive integer")
-    try:
-        numeric = float(value)
-    except (TypeError, ValueError) as exc:
-        raise ValueError(f"{name} must be a positive integer") from exc
+    message = f"{name} must be a positive integer"
+    numeric = _scalar_numeric_value(value, name, message)
     if not np.isfinite(numeric) or numeric <= 0.0 or not numeric.is_integer():
-        raise ValueError(f"{name} must be a positive integer")
+        raise ValueError(message)
     return int(numeric)
 
 
 def _nonnegative_integer(value: object, name: str) -> int:
     """Return a nonnegative integer argument without boolean or float truncation."""
 
-    if isinstance(value, (bool, np.bool_)):
-        raise ValueError(f"{name} must be a finite nonnegative integer")
-    try:
-        numeric = float(value)
-    except (TypeError, ValueError) as exc:
-        raise ValueError(f"{name} must be a finite nonnegative integer") from exc
+    message = f"{name} must be a finite nonnegative integer"
+    numeric = _scalar_numeric_value(value, name, message)
     if not np.isfinite(numeric) or numeric < 0.0 or not numeric.is_integer():
-        raise ValueError(f"{name} must be a finite nonnegative integer")
+        raise ValueError(message)
     return int(numeric)
 
 

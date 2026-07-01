@@ -138,6 +138,40 @@ def _normalize_group_cols(group_cols: Sequence[str] | str | None, scores: pd.Dat
     return tuple(group_cols)
 
 
+def _sort_scores_for_duplicate_model_evidence(
+    scores: pd.DataFrame,
+    group_cols: Sequence[str],
+    evidence_col: str,
+    model_col: str,
+) -> pd.DataFrame:
+    """Order duplicate model rows so keep-last reducers use the best finite evidence."""
+
+    if scores.empty or evidence_col not in scores.columns or model_col not in scores.columns:
+        return scores
+
+    out = scores.copy()
+    evidence_key = "__paired_model_numeric_evidence"
+    while evidence_key in out.columns:
+        evidence_key = f"_{evidence_key}"
+    out[evidence_key] = pd.to_numeric(out[evidence_col], errors="coerce")
+
+    sort_columns = [model_col, evidence_key]
+    if group_cols:
+        try:
+            grouped = out.groupby(list(group_cols), sort=False, dropna=False)
+        except (TypeError, ValueError):
+            out = out.sort_values(sort_columns, ascending=[True, True], kind="stable", na_position="first")
+        else:
+            pieces = [
+                group.sort_values(sort_columns, ascending=[True, True], kind="stable", na_position="first")
+                for _, group in grouped
+            ]
+            out = pd.concat(pieces, axis=0) if pieces else out
+    else:
+        out = out.sort_values(sort_columns, ascending=[True, True], kind="stable", na_position="first")
+    return out.drop(columns=[evidence_key])
+
+
 def _ensure_true_model_summary_columns(summary: pd.DataFrame) -> pd.DataFrame:
     """Keep threshold-selection columns present even when no paired events exist."""
 
@@ -196,8 +230,14 @@ def apply_advanced_result_threshold_validation_patch() -> None:
         ) -> pd.DataFrame:
             threshold = _validated_threshold(margin_threshold)
             paired_group_cols = _normalize_group_cols(group_cols, scores)
-            out = base_decisions(
+            prepared_scores = _sort_scores_for_duplicate_model_evidence(
                 scores,
+                paired_group_cols,
+                evidence_col,
+                model_col,
+            )
+            out = base_decisions(
+                prepared_scores,
                 positive_model=positive_model,
                 reference_model=reference_model,
                 margin_threshold=threshold,

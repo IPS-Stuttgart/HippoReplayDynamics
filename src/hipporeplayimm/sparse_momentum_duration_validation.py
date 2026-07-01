@@ -13,9 +13,12 @@ from typing import Any
 
 import numpy as np
 
+_SPARSE_SCORE_CONFIG_PATCHED_FLAG = "_sparse_momentum_config_validation_patch_applied"
+_TRAJECTORY_IMM_CONFIG_PATCHED_FLAG = "_trajectory_imm_sparse_config_validation_patch_applied"
+
 
 def apply_sparse_momentum_duration_validation_patch() -> None:
-    """Install duration validation on momentum duration helper functions."""
+    """Install duration and exact-sparse momentum config validation patches."""
 
     import hipporeplayimm.state_space_displacement_momentum as displacement_momentum
     import hipporeplayimm.state_space_sparse_momentum as sparse_momentum
@@ -35,6 +38,19 @@ def apply_sparse_momentum_duration_validation_patch() -> None:
     displacement_imm._duration_adjusted_decays = displacement_momentum._duration_adjusted_decays
     displacement_imm._time_scales = displacement_momentum._time_scales
     displacement_imm._duration_scale_at = displacement_momentum._duration_scale_at
+
+    _patch_exact_sparse_momentum_config(
+        sparse_momentum,
+        "_score_sparse_momentum_exact",
+        _SPARSE_SCORE_CONFIG_PATCHED_FLAG,
+        include_diffusion=False,
+    )
+    _patch_exact_sparse_momentum_config(
+        trajectory_imm,
+        "_score_trajectory_imm_exact_sparse",
+        _TRAJECTORY_IMM_CONFIG_PATCHED_FLAG,
+        include_diffusion=True,
+    )
 
 
 def _patch_duration_helpers(module: Any) -> None:
@@ -90,6 +106,48 @@ def _patch_duration_helpers(module: Any) -> None:
 
         module._duration_scale_at = duration_scale_at
     module._duration_validation_patch_applied = True
+
+
+def _patch_exact_sparse_momentum_config(module: Any, score_name: str, patched_flag: str, *, include_diffusion: bool) -> None:
+    original_score = getattr(module, score_name)
+    if getattr(original_score, patched_flag, False):
+        return
+
+    @wraps(original_score)
+    def score(
+        emissions: Any,
+        bin_centers: Any,
+        config: object,
+        transition_durations_s: Any,
+        *,
+        valid_bin_mask: Any = None,
+        return_trajectory: bool = True,
+    ):
+        _validate_exact_sparse_momentum_config(config, include_diffusion=include_diffusion)
+        return original_score(
+            emissions,
+            bin_centers,
+            config,
+            transition_durations_s,
+            valid_bin_mask=valid_bin_mask,
+            return_trajectory=return_trajectory,
+        )
+
+    setattr(score, patched_flag, True)
+    setattr(score, "__hipporeplayimm_original__", original_score)
+    setattr(module, score_name, score)
+
+
+def _validate_exact_sparse_momentum_config(config: object, *, include_diffusion: bool) -> None:
+    _validate_config_positive_scalar(config, "max_step_sigma", 4.0)
+    if include_diffusion:
+        _validate_config_positive_scalar(config, "diffusion_sigma_cm_sqrt_s", 85.0)
+    _validate_config_positive_scalar(config, "momentum_sigma_cm_sqrt_s", 85.0)
+    _validate_config_positive_scalar(config, "momentum_initial_sigma_cm_sqrt_s", 85.0)
+
+
+def _validate_config_positive_scalar(config: object, name: str, default: float) -> None:
+    _coerce_positive_float_scalar(name, getattr(config, name, default), f"{name} must be finite and positive")
 
 
 def _is_boolean_scalar(value: object) -> bool:

@@ -27,6 +27,8 @@ _COERCE_FLOAT_WRAPPER_FLAG = "_recovery_diagnostics_bool_coerce_float_wrapper"
 _ROW_FLOAT_WRAPPER_FLAG = "_recovery_diagnostics_bool_row_float_wrapper"
 _SUCCESSFUL_FINITE_SCORES_WRAPPER_FLAG = "_recovery_diagnostics_bool_successful_finite_scores_wrapper"
 _EVENT_DIAGNOSTICS_WRAPPER_FLAG = "_recovery_diagnostics_scoped_event_diagnostics_wrapper"
+_CERTIFIED_EVENT_WRAPPER_FLAG = "_recovery_diagnostics_scoped_certified_event_wrapper"
+_CERTIFIED_SUMMARY_WRAPPER_FLAG = "_recovery_diagnostics_scoped_certified_summary_wrapper"
 _HELPER_FLAGS = {
     "_coerce_bool": _COERCE_BOOL_WRAPPER_FLAG,
     "_row_bool": _ROW_BOOL_WRAPPER_FLAG,
@@ -38,6 +40,7 @@ _TRUE_FLOAT_STRINGS = {"true", "yes", "y"}
 _FALSE_FLOAT_STRINGS = {"false", "no", "n"}
 _MISSING_STATUS_VALUES = {"", "nan", "na", "n/a", "none", "null", "<na>"}
 _MISSING_KEY_VALUE = object()
+_SOURCE_GROUP_COLUMNS = ("source_recovery_score_file",)
 
 
 def apply_recovery_diagnostics_bool_patch() -> None:
@@ -50,6 +53,7 @@ def apply_recovery_diagnostics_bool_patch() -> None:
         getattr(diagnostics, _PATCHED_FLAG, False)
         and _helpers_are_patched(diagnostics)
         and _event_diagnostics_is_patched(diagnostics)
+        and _certified_wrappers_are_patched(diagnostics)
     ):
         return
 
@@ -101,9 +105,8 @@ def apply_recovery_diagnostics_bool_patch() -> None:
     _install_helper(diagnostics, "_coerce_float", coerce_float)
     _install_helper(diagnostics, "_row_float", row_float)
     _install_helper(diagnostics, "_successful_finite_scores", successful_finite_scores)
+    _install_scoped_certified_recovery(diagnostics, recovery)
     _install_scoped_event_diagnostics(diagnostics)
-    diagnostics.certified_vs_exact_event_recovery = recovery.certified_vs_exact_event_recovery
-    diagnostics.certified_vs_exact_recovery_summary = recovery.certified_vs_exact_recovery_summary
     setattr(diagnostics, _PATCHED_FLAG, True)
 
 
@@ -120,9 +123,33 @@ def _event_diagnostics_is_patched(diagnostics: Any) -> bool:
     return bool(getattr(getattr(diagnostics, "_event_diagnostics", None), _EVENT_DIAGNOSTICS_WRAPPER_FLAG, False))
 
 
+def _certified_wrappers_are_patched(diagnostics: Any) -> bool:
+    return bool(
+        getattr(getattr(diagnostics, "certified_vs_exact_event_recovery", None), _CERTIFIED_EVENT_WRAPPER_FLAG, False)
+        and getattr(getattr(diagnostics, "certified_vs_exact_recovery_summary", None), _CERTIFIED_SUMMARY_WRAPPER_FLAG, False)
+    )
+
+
 def _install_helper(diagnostics: Any, helper_name: str, helper: Any) -> None:
     setattr(helper, _HELPER_FLAGS[helper_name], True)
     setattr(diagnostics, helper_name, helper)
+
+
+def _install_scoped_certified_recovery(diagnostics: Any, recovery: Any) -> None:
+    if _certified_wrappers_are_patched(diagnostics):
+        return
+
+    def certified_vs_exact_event_recovery(event_scores: pd.DataFrame) -> pd.DataFrame:
+        return _certified_vs_exact_event_recovery_with_scoped_keys(event_scores, recovery)
+
+    def certified_vs_exact_recovery_summary(event_scores: pd.DataFrame) -> pd.DataFrame:
+        events = certified_vs_exact_event_recovery(event_scores)
+        return _certified_vs_exact_summary_from_events(events)
+
+    setattr(certified_vs_exact_event_recovery, _CERTIFIED_EVENT_WRAPPER_FLAG, True)
+    setattr(certified_vs_exact_recovery_summary, _CERTIFIED_SUMMARY_WRAPPER_FLAG, True)
+    diagnostics.certified_vs_exact_event_recovery = certified_vs_exact_event_recovery
+    diagnostics.certified_vs_exact_recovery_summary = certified_vs_exact_recovery_summary
 
 
 def _install_scoped_event_diagnostics(diagnostics: Any) -> None:
@@ -134,6 +161,57 @@ def _install_scoped_event_diagnostics(diagnostics: Any) -> None:
 
     setattr(event_diagnostics, _EVENT_DIAGNOSTICS_WRAPPER_FLAG, True)
     diagnostics._event_diagnostics = event_diagnostics
+
+
+def _certified_vs_exact_event_recovery_with_scoped_keys(
+    event_scores: pd.DataFrame,
+    recovery: Any,
+) -> pd.DataFrame:
+    if event_scores.empty:
+        return recovery.certified_vs_exact_event_recovery(event_scores)
+
+    pieces: list[pd.DataFrame] = []
+    for _, group in _iter_event_groups(event_scores):
+        if group.empty:
+            continue
+        piece = recovery.certified_vs_exact_event_recovery(group)
+        if piece.empty:
+            continue
+        group_columns = _event_group_columns(group)
+        piece = piece.copy()
+        for column in group_columns:
+            if column not in piece.columns:
+                piece[column] = _event_scalar(group, column)
+        pieces.append(piece)
+
+    if not pieces:
+        return pd.DataFrame()
+    return _sort_by_event_group_columns(pd.concat(pieces, ignore_index=True, sort=False))
+
+
+def _certified_vs_exact_summary_from_events(events: pd.DataFrame) -> pd.DataFrame:
+    if events.empty:
+        return pd.DataFrame()
+    rows = [_certified_vs_exact_summary_row(str(true_model), group) for true_model, group in events.groupby("true_model", sort=False)]
+    rows.append(_certified_vs_exact_summary_row("overall", events))
+    return pd.DataFrame(rows)
+
+
+def _certified_vs_exact_summary_row(label: str, group: pd.DataFrame) -> dict[str, object]:
+    recovered = _coerce_bool_series(group["certified_vs_exact_recovered_expected_model"])
+    margins = pd.to_numeric(group["expected_minus_best_comparable_log_evidence"], errors="coerce")
+    expected_model = "" if label == "overall" else str(group["expected_model"].iloc[0])
+    n_events = int(len(group))
+    return {
+        "true_model": label,
+        "expected_model": expected_model,
+        "simulated_events": n_events,
+        "certified_vs_exact_recovered_events": int(recovered.sum()),
+        "certified_vs_exact_recovery_accuracy": _safe_fraction(int(recovered.sum()), n_events),
+        "mean_expected_minus_best_comparable_log_evidence": float(margins.mean()),
+        "median_expected_minus_best_comparable_log_evidence": float(margins.median()),
+        "events_without_comparable_exact_reference": int((group["certified_vs_exact_reason"] == "no_comparable_exact_reference").sum()),
+    }
 
 
 def _event_diagnostics_with_scoped_keys(
@@ -149,12 +227,7 @@ def _event_diagnostics_with_scoped_keys(
     }
 
     rows: list[dict[str, object]] = []
-    if group_columns:
-        groups = scores.groupby(group_columns, sort=False, dropna=False)
-    else:
-        groups = [((), scores)]
-
-    for _, group in groups:
+    for _, group in _iter_event_groups(scores):
         if group.empty:
             continue
         first = group.iloc[0]
@@ -174,19 +247,44 @@ def _event_diagnostics_with_scoped_keys(
     result = pd.DataFrame(rows)
     if result.empty:
         return result
-    sort_columns = [column for column in group_columns if column in result.columns]
-    if sort_columns:
-        return result.sort_values(sort_columns).reset_index(drop=True)
-    return result.reset_index(drop=True)
+    return _sort_by_event_group_columns(result)
+
+
+def _iter_event_groups(frame: pd.DataFrame) -> Any:
+    group_columns = _event_group_columns(frame)
+    if group_columns:
+        return frame.groupby(group_columns, sort=False, dropna=False)
+    return [((), frame)]
 
 
 def _event_group_columns(frame: pd.DataFrame) -> list[str]:
     from . import simulation_best_row_flags as best_row_flags
 
-    group_columns = best_row_flags._event_group_columns(frame)
+    group_columns = list(best_row_flags._event_group_columns(frame))
+    for column in reversed(_SOURCE_GROUP_COLUMNS):
+        if column in frame.columns and column not in group_columns:
+            group_columns.insert(0, column)
     if group_columns:
         return group_columns
     return [column for column in ("session", "event_index") if column in frame.columns]
+
+
+def _sort_by_event_group_columns(frame: pd.DataFrame) -> pd.DataFrame:
+    if frame.empty:
+        return frame.reset_index(drop=True)
+    sort_columns = [column for column in _event_group_columns(frame) if column in frame.columns]
+    if not sort_columns:
+        return frame.reset_index(drop=True)
+    sort_keys = pd.DataFrame({column: frame[column].map(_sort_key_value) for column in sort_columns}, index=frame.index)
+    order = sort_keys.sort_values(sort_columns, kind="mergesort").index
+    return frame.loc[order].reset_index(drop=True)
+
+
+def _sort_key_value(value: object) -> str:
+    normalized = _normalize_key_value(value)
+    if normalized is _MISSING_KEY_VALUE:
+        return ""
+    return str(normalized)
 
 
 def _row_key(row: pd.Series, columns: list[str]) -> tuple[object, ...]:
@@ -206,6 +304,10 @@ def _normalize_key_value(value: object) -> object:
 
 def _event_scalar(group: pd.DataFrame, column: str) -> object:
     return group[column].iloc[0] if column in group.columns and not group.empty else np.nan
+
+
+def _safe_fraction(numerator: int, denominator: int) -> float:
+    return float("nan") if denominator <= 0 else float(numerator) / float(denominator)
 
 
 def _status_is_success_or_missing(value: object) -> bool:

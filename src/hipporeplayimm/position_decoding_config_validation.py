@@ -103,15 +103,28 @@ def _validated_train_frame_mask(train_frame_mask: Any, expected_length: int) -> 
         raise ValueError("train_frame_mask must have one value per cleaned position frame")
     if np.issubdtype(raw.dtype, np.bool_):
         return raw.astype(bool, copy=False)
+    if _contains_textual_or_complex_mask_values(raw):
+        raise ValueError("train_frame_mask must contain boolean or numeric 0/1 values")
     try:
         numeric = np.asarray(raw, dtype=float)
     except (TypeError, ValueError, OverflowError) as exc:
-        raise ValueError("train_frame_mask must contain boolean or 0/1 values") from exc
+        raise ValueError("train_frame_mask must contain boolean or numeric 0/1 values") from exc
     if not np.all(np.isfinite(numeric)):
-        raise ValueError("train_frame_mask must contain finite boolean or 0/1 values")
+        raise ValueError("train_frame_mask must contain finite boolean or numeric 0/1 values")
     if not np.all((numeric == 0.0) | (numeric == 1.0)):
-        raise ValueError("train_frame_mask must contain boolean or 0/1 values")
+        raise ValueError("train_frame_mask must contain boolean or numeric 0/1 values")
     return numeric.astype(bool)
+
+
+def _contains_textual_or_complex_mask_values(values: Any) -> bool:
+    raw = np.asarray(values)
+    if raw.size == 0:
+        return False
+    if raw.dtype.kind in {"U", "S", "c"}:
+        return True
+    if raw.dtype == object:
+        return any(isinstance(value, (str, bytes, complex, np.complexfloating)) for value in raw.reshape(-1))
+    return False
 
 
 def _validate_position_decoding_cell_ids(session: Any, encoding_config: Any) -> None:

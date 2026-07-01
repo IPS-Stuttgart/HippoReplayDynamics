@@ -307,12 +307,40 @@ def _scope_label(value: object) -> str:
     if _is_missing_scalar(value):
         return "<missing>"
     if isinstance(value, np.ndarray):
-        return repr(("array", np.asarray(value, dtype=object).reshape(-1).tolist()))
+        if value.ndim == 0:
+            value = value.item()
+        else:
+            return repr(("array", np.asarray(value, dtype=object).reshape(-1).tolist()))
     if isinstance(value, (list, tuple)):
         return repr(("sequence", list(value)))
     if isinstance(value, set):
         return repr(("set", sorted(value, key=repr)))
+    numeric = _numeric_scope_label(value)
+    if numeric is not None:
+        return repr(("numeric", numeric))
     return repr(("scalar", str(value).strip()))
+
+
+def _numeric_scope_label(value: object) -> str | None:
+    """Return a canonical label for numeric scalar scope keys.
+
+    CSV round-trips can turn integer identifiers such as ``event_index`` or
+    ``window_index`` into floats in one table but not the other.  Treat numeric
+    scalars with the same exact value as the same shuffle-control scope, while
+    keeping booleans and textual labels on the normal string path.
+    """
+
+    if isinstance(value, (bool, np.bool_)):
+        return None
+    if not isinstance(value, (int, float, np.integer, np.floating)):
+        return None
+    numeric = float(value)
+    if not np.isfinite(numeric):
+        return None
+    rounded = int(round(numeric))
+    if np.isclose(numeric, rounded, rtol=0.0, atol=0.0):
+        return str(rounded)
+    return repr(numeric)
 
 
 def _is_missing_scalar(value: object) -> bool:

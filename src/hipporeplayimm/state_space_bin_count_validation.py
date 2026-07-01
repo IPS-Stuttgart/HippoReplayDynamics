@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import sys
 from collections.abc import Callable
+from functools import wraps
 from typing import Any
 
 import numpy as np
 
 _PATCH_ATTR = "__hipporeplayimm_bin_count_validation_patch__"
 _ORIGINAL_ATTR = "__hipporeplayimm_original__"
+_STATE_SPACE_CANDIDATE_COUNT_PATCH_ATTR = "__hipporeplayimm_state_space_candidate_count_validation_patch__"
 
 
 def _integer_count(name: str, value: Any) -> int:
@@ -139,6 +141,35 @@ def _is_patched(function: Callable[..., Any]) -> bool:
     return bool(getattr(function, _PATCH_ATTR, False))
 
 
+def _patch_state_space_candidate_count_validation() -> None:
+    """Validate state-space candidate-count config values not routed through helpers."""
+
+    from . import state_space_model
+
+    current = state_space_model.StateSpaceReplayModel.candidate_indices
+    if getattr(current, _STATE_SPACE_CANDIDATE_COUNT_PATCH_ATTR, False):
+        return
+
+    @wraps(current)
+    def candidate_indices(self, emissions, bin_centers=None, valid_bin_mask=None):
+        config = getattr(self, "config", None)
+        if config is not None:
+            _nonnegative_integer_count(
+                "momentum_predicted_candidate_top_k",
+                getattr(config, "momentum_predicted_candidate_top_k", 0),
+            )
+        return current(
+            self,
+            emissions,
+            bin_centers=bin_centers,
+            valid_bin_mask=valid_bin_mask,
+        )
+
+    setattr(candidate_indices, _ORIGINAL_ATTR, current)
+    setattr(candidate_indices, _STATE_SPACE_CANDIDATE_COUNT_PATCH_ATTR, True)
+    state_space_model.StateSpaceReplayModel.candidate_indices = candidate_indices
+
+
 def apply_state_space_bin_count_validation_patch() -> None:
     """Reject invalid state-space counts before support construction."""
 
@@ -255,6 +286,8 @@ def apply_state_space_bin_count_validation_patch() -> None:
                 continue
             if name == "_coerce_valid_bin_mask" and current is not None and not _is_patched(current):
                 setattr(module, name, active_helpers[name])
+
+    _patch_state_space_candidate_count_validation()
 
 
 __all__ = ["apply_state_space_bin_count_validation_patch"]

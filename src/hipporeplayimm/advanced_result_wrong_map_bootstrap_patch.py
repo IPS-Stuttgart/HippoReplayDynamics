@@ -111,7 +111,9 @@ def _apply_rat_bootstrap_wrapper(diagnostics) -> None:
         columns = _bootstrap_summary_columns()
         if deltas.empty or "session" not in deltas.columns:
             return pd.DataFrame(columns=columns)
-        frame = diagnostics._with_rat(deltas)
+        frame = diagnostics._with_rat(_coerce_numeric_delta_evidence(deltas))
+        if frame.empty:
+            return pd.DataFrame(columns=columns)
         rng = np.random.default_rng(seed)
         rows: list[dict[str, object]] = []
         for statistic, group in frame.groupby("statistic", sort=False):
@@ -165,6 +167,17 @@ def _apply_rat_bootstrap_wrapper(diagnostics) -> None:
     diagnostics.rat_bootstrap_wrong_map_absolute_evidence_summary = (
         rat_bootstrap_wrong_map_absolute_evidence_summary
     )
+
+
+def _coerce_numeric_delta_evidence(frame: pd.DataFrame) -> pd.DataFrame:
+    """Return rows with finite numeric wrong-map evidence deltas."""
+
+    out = frame.copy()
+    if out.empty or "delta_map_log_evidence" not in out.columns:
+        return out
+    out["delta_map_log_evidence"] = pd.to_numeric(out["delta_map_log_evidence"], errors="coerce")
+    finite = np.isfinite(out["delta_map_log_evidence"].to_numpy(dtype=float))
+    return out.loc[finite].copy()
 
 
 def _apply_numeric_evidence_wrappers(diagnostics) -> None:

@@ -18,12 +18,17 @@ def apply_kd_single_bin_momentum_patch2() -> None:
     from . import kd_random_effects_validation as random_effects_validation
     from . import kd_reference as kd
 
-    random_effects_validation.apply_kd_random_effects_validation_patch()
+    current = getattr(kd, "_second_order_separable_log_evidence", None)
+    active_wrapper = current if getattr(current, _WRAPPER_ATTR, False) else None
 
-    if _current_patch_installed(kd):
+    random_effects_validation.apply_kd_random_effects_validation_patch()
+    impossible_patch.apply_kd_impossible_emission_patch()
+
+    if active_wrapper is not None:
+        kd._second_order_separable_log_evidence = active_wrapper
+        setattr(kd, _PATCHED_FLAG, True)
         return
 
-    impossible_patch.apply_kd_impossible_emission_patch()
     original = kd._second_order_separable_log_evidence
 
     def second_order(log_emissions, n_bins, initial, transition):

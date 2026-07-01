@@ -92,15 +92,11 @@ def _mass_retaining_candidate_indices(
     finite_count = int(finite_order.size)
     top_k_minimum = 0 if top_k is None or int(top_k) <= 0 else int(top_k)
     min_count = min(finite_count, max(1, top_k_minimum, int(min_k)))
-    max_count = (
-        finite_count if max_k <= 0 else min(finite_count, max(min_count, int(max_k)))
-    )
+    max_count = finite_count if max_k <= 0 else min(finite_count, max(min_count, int(max_k)))
     ordered_values = values[finite_order]
     cumulative_mass = np.cumsum(np.exp(ordered_values - logsumexp(ordered_values)))
     tolerance = 16.0 * np.finfo(float).eps
-    mass_count = int(
-        np.searchsorted(cumulative_mass + tolerance, float(mass_threshold), side="left") + 1
-    )
+    mass_count = int(np.searchsorted(cumulative_mass + tolerance, float(mass_threshold), side="left") + 1)
     count = min(max(min_count, mass_count), max_count)
     return np.asarray(finite_order[:count], dtype=int)
 
@@ -142,9 +138,28 @@ def _candidate_log_masses(log_likelihood: np.ndarray, candidates: list[np.ndarra
 def _coerce_valid_bin_mask(valid_bin_mask: np.ndarray | None, n_bins: int) -> np.ndarray | None:
     if valid_bin_mask is None:
         return None
-    mask = np.asarray(valid_bin_mask, dtype=bool)
-    if mask.shape != (n_bins,):
+    try:
+        raw_mask = np.asarray(valid_bin_mask)
+    except ValueError as exc:
+        raise ValueError("valid_bin_mask must contain one boolean value per spatial bin") from exc
+    if raw_mask.shape != (n_bins,):
         raise ValueError("valid_bin_mask must contain one boolean value per spatial bin")
+    if np.issubdtype(raw_mask.dtype, np.bool_):
+        mask = raw_mask.astype(bool, copy=False)
+    else:
+        if np.issubdtype(raw_mask.dtype, np.complexfloating) or raw_mask.dtype.kind in {"S", "U"}:
+            raise ValueError("valid_bin_mask entries must be boolean or 0/1")
+        if raw_mask.dtype == object and any(isinstance(value, (bytes, str)) for value in raw_mask.flat):
+            raise ValueError("valid_bin_mask entries must be boolean or 0/1")
+        try:
+            numeric_mask = raw_mask.astype(float, copy=False)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("valid_bin_mask entries must be boolean or 0/1") from exc
+        if not np.all(np.isfinite(numeric_mask)):
+            raise ValueError("valid_bin_mask entries must be finite")
+        if not np.all((numeric_mask == 0.0) | (numeric_mask == 1.0)):
+            raise ValueError("valid_bin_mask entries must be boolean or 0/1")
+        mask = numeric_mask.astype(bool)
     if not np.any(mask):
         raise ValueError("valid_bin_mask must contain at least one valid spatial bin")
     return mask
@@ -385,9 +400,7 @@ def _longest_active_run_duration(
     active = np.asarray(active, dtype=bool)
     if active.size == 0:
         return 0.0
-    bin_duration = (
-        float(np.median(transition_durations)) if transition_durations.size else float(fallback_dt_s)
-    )
+    bin_duration = float(np.median(transition_durations)) if transition_durations.size else float(fallback_dt_s)
     best = 0.0
     start: int | None = None
     for index, value in enumerate(active):

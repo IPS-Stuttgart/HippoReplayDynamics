@@ -138,7 +138,7 @@ def reverse_emissions(emissions: LogEmissionTensor) -> LogEmissionTensor:
         expected_length=max(emissions.n_time - 1, 0),
         name="transition_durations",
     )
-    reversed_times = np.asarray(emissions.times, dtype=float)[::-1].copy()
+    reversed_times = _reversed_time_vector(emissions, transition_durations)
     out = LogEmissionTensor(
         log_likelihood=np.asarray(emissions.log_likelihood, dtype=float)[::-1].copy(),
         spike_counts=np.asarray(emissions.spike_counts)[::-1].copy(),
@@ -169,6 +169,31 @@ def _reversed_optional_duration_vector(
             f"{name} must contain {expected_length} values; got shape {array.shape}"
         )
     return array[::-1].copy()
+
+
+def _reversed_time_vector(
+    emissions: LogEmissionTensor,
+    reversed_transition_durations: np.ndarray | None,
+) -> np.ndarray:
+    """Return increasing timestamps for the reversed emission rows."""
+
+    times = np.asarray(emissions.times, dtype=float)
+    if times.shape == (0,):
+        return times.copy()
+    if times.shape != (emissions.n_time,):
+        return times.copy()
+    if reversed_transition_durations is None:
+        return (float(times[-1]) - times[::-1] + float(times[0])).copy()
+
+    durations = np.asarray(reversed_transition_durations, dtype=float)
+    expected_length = max(emissions.n_time - 1, 0)
+    if durations.shape != (expected_length,):
+        raise ValueError(f"transition_durations must contain {expected_length} values; got shape {durations.shape}")
+    output = np.empty_like(times, dtype=float)
+    output[0] = float(times[0])
+    if durations.size:
+        output[1:] = output[0] + np.cumsum(durations)
+    return output
 
 
 def _reverse_candidate_indices(candidate_indices: list[np.ndarray] | None) -> list[np.ndarray] | None:

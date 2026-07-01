@@ -10,6 +10,9 @@ import numpy as np
 from scipy.special import gammaln
 
 _PATCHED_FLAG = "_accuracy_replay_gain_gamma_patch_applied"
+_ESTIMATE_WRAPPER_FLAG = "_accuracy_replay_gain_gamma_estimate_wrapper"
+_GAMMA_WRAPPER_FLAG = "_accuracy_replay_gain_gamma_gamma_wrapper"
+_CONTINUOUS_WRAPPER_FLAG = "_accuracy_replay_gain_gamma_continuous_wrapper"
 
 
 def _contains_boolean_ids(values: np.ndarray) -> bool:
@@ -209,47 +212,61 @@ def apply_accuracy_replay_gain_gamma_patch() -> None:
 
     from . import accuracy_upgrades as accuracy_module
 
-    if getattr(accuracy_module, _PATCHED_FLAG, False):
+    current_estimate_replay_cell_gains = accuracy_module.estimate_replay_cell_gains
+    current_gamma_poisson_predictive_log_emissions = accuracy_module.gamma_poisson_predictive_log_emissions
+    current_build_continuous_time_emissions = accuracy_module.build_continuous_time_emissions
+    estimate_is_current = bool(getattr(current_estimate_replay_cell_gains, _ESTIMATE_WRAPPER_FLAG, False))
+    gamma_is_current = bool(getattr(current_gamma_poisson_predictive_log_emissions, _GAMMA_WRAPPER_FLAG, False))
+    continuous_is_current = bool(getattr(current_build_continuous_time_emissions, _CONTINUOUS_WRAPPER_FLAG, False))
+    if getattr(accuracy_module, _PATCHED_FLAG, False) and estimate_is_current and gamma_is_current and continuous_is_current:
         return
 
-    original_estimate_replay_cell_gains = accuracy_module.estimate_replay_cell_gains
-    original_gamma_poisson_predictive_log_emissions = accuracy_module.gamma_poisson_predictive_log_emissions
-    original_build_continuous_time_emissions = accuracy_module.build_continuous_time_emissions
+    if not estimate_is_current:
 
-    @wraps(original_estimate_replay_cell_gains)
-    def estimate_replay_cell_gains(session, encoding, ripple_indices, config=None):
-        return _estimate_replay_cell_gains_impl(session, encoding, ripple_indices, config)
+        @wraps(current_estimate_replay_cell_gains)
+        def estimate_replay_cell_gains(session, encoding, ripple_indices, config=None):
+            return _estimate_replay_cell_gains_impl(session, encoding, ripple_indices, config)
 
-    @wraps(original_gamma_poisson_predictive_log_emissions)
-    def gamma_poisson_predictive_log_emissions(
-        spike_counts,
-        rate_shape,
-        rate_exposure_s,
-        dt,
-        *,
-        spike_rate_scale: float = 1.0,
-    ):
-        return _gamma_poisson_predictive_log_emissions_impl(
+        setattr(estimate_replay_cell_gains, _ESTIMATE_WRAPPER_FLAG, True)
+        accuracy_module.estimate_replay_cell_gains = estimate_replay_cell_gains
+
+    if not gamma_is_current:
+
+        @wraps(current_gamma_poisson_predictive_log_emissions)
+        def gamma_poisson_predictive_log_emissions(
             spike_counts,
             rate_shape,
             rate_exposure_s,
             dt,
-            spike_rate_scale=spike_rate_scale,
-        )
+            *,
+            spike_rate_scale: float = 1.0,
+        ):
+            return _gamma_poisson_predictive_log_emissions_impl(
+                spike_counts,
+                rate_shape,
+                rate_exposure_s,
+                dt,
+                spike_rate_scale=spike_rate_scale,
+            )
 
-    @wraps(original_build_continuous_time_emissions)
-    def build_continuous_time_emissions(session, encoding, ripple, config=None):
-        _validate_continuous_time_spike_cell_ids(
-            accuracy_module,
-            session,
-            encoding,
-            ripple,
-        )
-        return original_build_continuous_time_emissions(session, encoding, ripple, config)
+        setattr(gamma_poisson_predictive_log_emissions, _GAMMA_WRAPPER_FLAG, True)
+        accuracy_module.gamma_poisson_predictive_log_emissions = gamma_poisson_predictive_log_emissions
 
-    accuracy_module.estimate_replay_cell_gains = estimate_replay_cell_gains
-    accuracy_module.gamma_poisson_predictive_log_emissions = gamma_poisson_predictive_log_emissions
-    accuracy_module.build_continuous_time_emissions = build_continuous_time_emissions
+    if not continuous_is_current:
+
+        @wraps(current_build_continuous_time_emissions)
+        def build_continuous_time_emissions(session, encoding, ripple, config=None):
+            _validate_continuous_time_spike_cell_ids(
+                accuracy_module,
+                session,
+                encoding,
+                ripple,
+            )
+            return current_build_continuous_time_emissions(session, encoding, ripple, config)
+
+        setattr(build_continuous_time_emissions, _CONTINUOUS_WRAPPER_FLAG, True)
+        accuracy_module.build_continuous_time_emissions = build_continuous_time_emissions
+
     setattr(accuracy_module, _PATCHED_FLAG, True)
 
 

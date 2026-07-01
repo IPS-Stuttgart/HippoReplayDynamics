@@ -409,7 +409,9 @@ def _event_group_columns(frame: pd.DataFrame) -> list[str]:
 
 
 def _comparison_event_key_columns(left: pd.DataFrame, right: pd.DataFrame) -> list[str]:
-    return [column for column in _EVENT_KEY_COLUMNS if column in left.columns or column in right.columns]
+    """Return event-key columns that can be compared on both score tables."""
+
+    return [column for column in _EVENT_KEY_COLUMNS if column in left.columns and column in right.columns]
 
 
 def _align_event_key_columns(

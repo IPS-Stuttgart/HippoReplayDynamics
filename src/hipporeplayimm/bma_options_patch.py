@@ -11,6 +11,7 @@ _DEFAULT_BMA_NAME = "bayesian-model-average"
 _DEFAULT_BMA_EVIDENCE_COLUMN = "auto"
 _TRUE_BOOL_STRINGS = {"1", "1.0", "true", "t", "yes", "y", "on"}
 _FALSE_BOOL_STRINGS = {"", "0", "0.0", "false", "f", "no", "n", "off", "nan", "none", "null", "<na>"}
+_BOOL_OPTION_ERROR = "boolean option must be a scalar true/false value"
 
 
 def apply_bma_options_patch() -> None:
@@ -103,20 +104,26 @@ def _wrap_ground_truth_compare_for_bma_options() -> None:
 def _coerce_bool_option(value: object) -> bool:
     if isinstance(value, (bool, np.bool_)):
         return bool(value)
+    array = np.asarray(value)
+    if array.ndim != 0:
+        raise ValueError(_BOOL_OPTION_ERROR)
+    scalar = array.item()
+    if isinstance(scalar, (bool, np.bool_)):
+        return bool(scalar)
     try:
-        if pd.isna(value):
+        if pd.isna(scalar):
             return False
     except (TypeError, ValueError):
         pass
-    if isinstance(value, (int, float, np.integer, np.floating)):
-        numeric = float(value)
+    if isinstance(scalar, (int, float, np.integer, np.floating)):
+        numeric = float(scalar)
         return bool(np.isfinite(numeric) and numeric != 0.0)
-    text = str(value).strip().lower()
+    text = str(scalar).strip().lower()
     if text in _TRUE_BOOL_STRINGS:
         return True
     if text in _FALSE_BOOL_STRINGS:
         return False
-    return bool(value)
+    raise ValueError(_BOOL_OPTION_ERROR)
 
 
 def _apply_bma_output_options(comparison, *, include_bma: bool, model_name: str):

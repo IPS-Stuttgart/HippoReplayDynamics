@@ -18,6 +18,12 @@ from .benchmarks import _split_cells_from_encoding
 _DEFAULT_CELL_SPLIT_STRATEGY = "random"
 _DEFAULT_CELL_SPLIT_STRATA = 4
 _DECODE_GROUP_COLUMNS_PATCH_ATTR = "_random_seed_decode_grouping_wrapped"
+_DECODE_GROUP_METADATA_COLUMNS = (
+    "cell_split_index",
+    "benchmark_random_seed",
+    "benchmark_cell_split_seed",
+    "cell_split_seed",
+)
 
 
 def apply_ground_truth_cell_split_strategy_patch() -> None:
@@ -81,7 +87,7 @@ def _patch_benchmark_decode_group_columns(gt: Any) -> None:
         if not benchmark_decode:
             return columns
         insert_at = 1 if columns and columns[0] == "session" else len(columns)
-        for column in ("benchmark_random_seed", "benchmark_cell_split_seed"):
+        for column in _DECODE_GROUP_METADATA_COLUMNS:
             if _score_column_has_values(scores_frame, column) and column not in columns:
                 columns.insert(insert_at, column)
                 insert_at += 1

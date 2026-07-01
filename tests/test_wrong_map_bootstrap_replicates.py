@@ -23,12 +23,22 @@ def _wrong_map_deltas() -> pd.DataFrame:
     )
 
 
-@pytest.mark.parametrize("invalid", [0, -1, 1.5, np.nan, True])
+@pytest.mark.parametrize("invalid", [0, -1, 1.5, np.nan, True, np.array([3])])
 def test_wrong_map_bootstrap_rejects_invalid_replicate_counts(invalid: object) -> None:
     with pytest.raises(ValueError, match="n_bootstrap must be a positive integer"):
         rat_bootstrap_wrong_map_absolute_evidence_summary(
             _wrong_map_deltas(),
             n_bootstrap=invalid,
+        )
+
+
+@pytest.mark.parametrize("invalid", [-1, 1.5, np.nan, True, np.array([7])])
+def test_wrong_map_bootstrap_rejects_invalid_random_seed(invalid: object) -> None:
+    with pytest.raises(ValueError, match="random_seed must be a finite nonnegative integer"):
+        rat_bootstrap_wrong_map_absolute_evidence_summary(
+            _wrong_map_deltas(),
+            n_bootstrap=3,
+            random_seed=invalid,
         )
 
 

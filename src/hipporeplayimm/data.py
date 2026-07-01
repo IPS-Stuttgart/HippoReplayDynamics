@@ -274,6 +274,8 @@ def _as_integer_vector(value: Any, name: str) -> np.ndarray:
     arr = np.asarray(value)
     if arr.size == 0:
         return np.array([], dtype=int)
+    if np.issubdtype(arr.dtype, np.bool_) or (arr.dtype == object and any(isinstance(item, (bool, np.bool_)) for item in arr.reshape(-1))):
+        raise ValueError(f"{name} must not contain boolean identifiers")
     try:
         numeric = np.asarray(arr, dtype=float)
     except (TypeError, ValueError) as exc:

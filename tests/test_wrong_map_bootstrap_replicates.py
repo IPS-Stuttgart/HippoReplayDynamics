@@ -52,3 +52,30 @@ def test_wrong_map_bootstrap_accepts_numeric_string_replicate_count() -> None:
     assert summary.loc[0, "bootstrap_replicates"] == 3
     assert summary.loc[0, "observed_events"] == 2
     assert summary.loc[0, "observed_rats"] == 2
+
+
+def test_wrong_map_bootstrap_filters_nonfinite_delta_rows() -> None:
+    deltas = pd.DataFrame(
+        {
+            "session": ["Rat1/Open1", "Rat1/Open2", "Rat2/Open1", "Rat3/Open1"],
+            "event_index": [0, 1, 2, 3],
+            "statistic": ["fixed_model"] * 4,
+            "statistic_type": ["fixed_model"] * 4,
+            "selected_model": ["m", "m", "m", "m"],
+            "delta_map_log_evidence": [1.0, np.nan, "not-a-number", 3.0],
+            "map_session": ["Rat1/Open2", "Rat1/Open1", "Rat2/Open2", "Rat3/Open2"],
+        }
+    )
+
+    summary = rat_bootstrap_wrong_map_absolute_evidence_summary(
+        deltas,
+        n_bootstrap=4,
+        random_seed=3,
+    )
+
+    assert summary.loc[0, "observed_events"] == 2
+    assert summary.loc[0, "observed_rats"] == 2
+    assert summary.loc[0, "observed_positive_delta_fraction"] == 1.0
+    assert summary.loc[0, "observed_mean_delta_map_log_evidence"] == 2.0
+    assert np.isfinite(summary.loc[0, "mean_delta_ci95_low"])
+    assert np.isfinite(summary.loc[0, "median_delta_ci95_high"])

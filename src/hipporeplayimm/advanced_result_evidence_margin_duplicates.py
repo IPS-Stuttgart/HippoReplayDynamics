@@ -16,9 +16,11 @@ def apply_evidence_margin_distinct_model_patch() -> None:
 
     from . import advanced_result_diagnostics as diagnostics
 
-    if getattr(diagnostics, _PATCHED_FLAG, False):
+    current_margin = diagnostics.evidence_margin_table
+    current_add = diagnostics.add_evidence_margin_columns
+    if getattr(diagnostics, _PATCHED_FLAG, False) and getattr(current_margin, _MARGIN_FLAG, False) and getattr(current_add, _ADD_FLAG, False):
         return
-    original_margin = diagnostics.evidence_margin_table
+    original_margin = current_margin
 
     def evidence_margin_table(scores, *, group_cols=_DEFAULT_GROUP_COLUMNS, evidence_col="log_evidence", model_col="model"):
         groups = _normalize_group_cols(group_cols)

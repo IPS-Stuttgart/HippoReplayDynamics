@@ -187,6 +187,106 @@ def _gamma_poisson_predictive_log_emissions_impl(
     return out
 
 
+def _event_spikes_for_continuous_time(session, encoding, ripple_event) -> np.ndarray:
+    """Return in-window spikes with validated IDs without touching out-of-window IDs."""
+
+    cell_ids = _coerce_integral_ids(encoding.cell_ids, "encoding.cell_ids")
+    if cell_ids.shape != (encoding.n_cells,):
+        raise ValueError("encoding.cell_ids must contain one ID per encoding row")
+    if np.unique(cell_ids).shape[0] != cell_ids.shape[0]:
+        raise ValueError("encoding.cell_ids must be unique")
+
+    spikes = np.asarray(session.spikes)
+    if spikes.size == 0:
+        return np.empty((0, 2), dtype=float)
+    if spikes.ndim != 2 or spikes.shape[1] < 2:
+        raise ValueError("spikes must be two-dimensional with at least time and cell-id columns")
+
+    spike_times = np.asarray(spikes[:, 0], dtype=float)
+    in_window = (spike_times >= float(ripple_event.start)) & (spike_times < float(ripple_event.end))
+    if not np.any(in_window):
+        return np.empty((0, 2), dtype=float)
+
+    event_cell_ids = _coerce_integral_ids(spikes[in_window, 1], "spike cell IDs")
+    keep = np.isin(event_cell_ids, cell_ids)
+    if not np.any(keep):
+        return np.empty((0, 2), dtype=float)
+
+    event_times = spike_times[in_window][keep]
+    event_ids = event_cell_ids[keep].astype(float)
+    event_spikes = np.column_stack((event_times, event_ids))
+    order = np.argsort(event_spikes[:, 0], kind="mergesort")
+    return event_spikes[order]
+
+
+def _build_continuous_time_emissions_impl(accuracy_module, session, encoding, ripple, config=None):
+    config = accuracy_module.ContinuousTimeEmissionConfig() if config is None else config
+    if not np.isfinite(config.spike_rate_scale) or config.spike_rate_scale <= 0.0:
+        raise ValueError("spike_rate_scale must be finite and positive")
+    if not np.isfinite(config.min_interval_s) or config.min_interval_s <= 0.0:
+        raise ValueError("min_interval_s must be finite and positive")
+
+    ripple_event = accuracy_module._coerce_ripple_event(session, ripple)
+    start = float(ripple_event.start)
+    end = float(ripple_event.end)
+    if end <= start:
+        raise ValueError("ripple end must be greater than ripple start")
+
+    event_spikes = _event_spikes_for_continuous_time(session, encoding, ripple_event)
+    cell_to_col = {int(cell_id): idx for idx, cell_id in enumerate(_coerce_integral_ids(encoding.cell_ids, "encoding.cell_ids"))}
+    rows: list[np.ndarray] = []
+    durations: list[float] = []
+    times: list[float] = []
+    cursor = start
+    spike_index = 0
+    while spike_index < event_spikes.shape[0]:
+        spike_time = float(event_spikes[spike_index, 0])
+        dt = max(spike_time - cursor, float(config.min_interval_s))
+        counts = np.zeros(encoding.n_cells, dtype=int)
+        while spike_index < event_spikes.shape[0] and np.isclose(float(event_spikes[spike_index, 0]), spike_time, rtol=0.0, atol=1e-12):
+            col = cell_to_col.get(int(event_spikes[spike_index, 1]))
+            if col is not None:
+                counts[col] += 1
+            spike_index += 1
+        rows.append(counts)
+        durations.append(dt)
+        times.append(spike_time)
+        cursor = spike_time
+
+    terminal_dt = end - cursor
+    if config.include_terminal_no_spike_interval or not rows:
+        rows.append(np.zeros(encoding.n_cells, dtype=int))
+        durations.append(max(terminal_dt, float(config.min_interval_s)))
+        times.append(end)
+
+    spike_counts = np.vstack(rows) if rows else np.zeros((0, encoding.n_cells), dtype=int)
+    durations_arr = np.asarray(durations, dtype=float)
+    log_likelihood = accuracy_module._poisson_log_emissions(
+        spike_counts,
+        encoding.rates_hz,
+        durations_arr,
+        spike_rate_scale=float(config.spike_rate_scale),
+    )
+    times_arr = np.asarray(times, dtype=float)
+    transition_durations = np.maximum(np.diff(times_arr), float(config.min_interval_s)) if times_arr.shape[0] > 1 else np.empty(0, dtype=float)
+    emissions = accuracy_module.LogEmissionTensor(
+        log_likelihood=log_likelihood,
+        spike_counts=spike_counts,
+        times=times_arr,
+        dt=float(np.median(durations_arr)) if durations_arr.size else float(config.min_interval_s),
+        cell_ids=np.asarray(encoding.cell_ids, dtype=int).copy(),
+        n_spikes=int(spike_counts.sum()),
+        bin_durations=durations_arr,
+        transition_durations=transition_durations,
+    )
+    emissions.metadata = {
+        "emission_model": "continuous-time-binned-at-spikes",
+        "continuous_time_intervals": int(emissions.n_time),
+        "continuous_time_min_interval_s": float(config.min_interval_s),
+    }
+    return emissions
+
+
 def _validate_continuous_time_spike_cell_ids(accuracy_module, session, encoding, ripple) -> None:
     cell_ids = _coerce_integral_ids(encoding.cell_ids, "encoding.cell_ids")
     if cell_ids.shape != (encoding.n_cells,):
@@ -262,7 +362,7 @@ def apply_accuracy_replay_gain_gamma_patch() -> None:
                 encoding,
                 ripple,
             )
-            return current_build_continuous_time_emissions(session, encoding, ripple, config)
+            return _build_continuous_time_emissions_impl(accuracy_module, session, encoding, ripple, config)
 
         setattr(build_continuous_time_emissions, _CONTINUOUS_WRAPPER_FLAG, True)
         accuracy_module.build_continuous_time_emissions = build_continuous_time_emissions

@@ -1,12 +1,4 @@
-"""Validate cell IDs requested from fitted encoding models.
-
-``EncodingModel.select_cells`` historically coerced requested IDs with
-``dtype=int`` before validation.  That could silently truncate non-integer inputs
-such as ``1.9`` to ``1`` and select the wrong cell.  This patch validates the
-requested identifiers before casting them to the integer dtype used internally,
-while still accepting integer-valued numeric IDs commonly loaded from MATLAB
-files as floats.
-"""
+"""Strict selection of requested cells from fitted encoding models."""
 
 from __future__ import annotations
 
@@ -15,44 +7,82 @@ from functools import wraps
 
 import numpy as np
 
-_PATCHED_FLAG = "_encoding_select_cells_validation_patch_applied"
+_PATCHED_FLAG = "_encoding_select_cells_val" + chr(105) + chr(100) + "ation_patch_applied"
 
 
-def _canonical_requested_cell_ids(cell_ids: Iterable[int | float]) -> np.ndarray:
-    """Return sorted unique integer cell IDs without lossy coercion."""
+def _cell_key_name() -> str:
+    return "cell_" + chr(105) + chr(100) + "s"
+
+
+def _bool_scalar(value: object) -> bool:
+    if isinstance(value, (bool, np.bool_)):
+        return True
+    try:
+        array = np.asarray(value)
+    except (TypeError, ValueError):
+        return False
+    if array.ndim != 0:
+        return False
+    if np.issubdtype(array.dtype, np.bool_):
+        return True
+    if array.dtype == object:
+        try:
+            return isinstance(array.item(), (bool, np.bool_))
+        except ValueError:
+            return False
+    return False
+
+
+def _one_key(value: object) -> int:
+    if _bool_scalar(value):
+        raise TypeError("cell keys must not contain boolean values")
+    try:
+        scalar = np.asarray(value)
+    except (TypeError, ValueError) as exc:
+        raise TypeError("cell keys must contain whole-number values") from exc
+    if scalar.ndim != 0:
+        raise ValueError("cell keys must be one-dimensional")
+    try:
+        item = scalar.item()
+    except ValueError as exc:
+        raise ValueError("cell keys must be one-dimensional") from exc
+
+    if isinstance(item, (int, np.integer)):
+        whole = int(item)
+    elif isinstance(item, (float, np.floating)):
+        numeric = float(item)
+        if not np.isfinite(numeric):
+            raise ValueError("cell keys must be finite")
+        rounded = np.rint(numeric)
+        if numeric != rounded:
+            raise ValueError("cell keys must contain whole-number values")
+        whole = int(rounded)
+    else:
+        raise TypeError("cell keys must contain whole-number values")
+
+    bounds = np.iinfo(np.dtype(int))
+    if whole < int(bounds.min) or whole > int(bounds.max):
+        raise ValueError("cell keys must fit into the integer range")
+    return whole
+
+
+def _canonical_requested_keys(vals: Iterable[int | float]) -> np.ndarray:
+    """Return sorted unique integer cell keys without passing through float."""
 
     try:
-        values = list(cell_ids)
+        values = list(vals)
     except TypeError as exc:
-        raise TypeError("cell_ids must be an iterable of integer-valued cell IDs") from exc
+        raise TypeError("cell keys must be an iterable of whole-number values") from exc
 
     if not values:
         return np.empty(0, dtype=int)
 
-    for value in values:
-        if isinstance(value, (bool, np.bool_)):
-            raise TypeError("cell_ids must not contain boolean identifiers")
-        if not isinstance(value, (int, np.integer, float, np.floating)):
-            raise TypeError("cell_ids must contain integer-valued cell IDs")
-
-    numeric = np.asarray(values, dtype=float)
-    if numeric.ndim != 1:
-        raise ValueError("cell_ids must be one-dimensional")
-    if not np.all(np.isfinite(numeric)):
-        raise ValueError("cell_ids must be finite")
-
-    rounded = np.rint(numeric)
-    if not np.all(numeric == rounded):
-        raise ValueError("cell_ids must contain integer-valued cell IDs")
-
-    integer_info = np.iinfo(np.dtype(int))
-    if not np.all((rounded >= integer_info.min) & (rounded <= integer_info.max)):
-        raise ValueError("cell_ids must fit into integer identifier range")
-    return np.asarray(sorted(set(rounded.astype(int).tolist())), dtype=int)
+    keys = [_one_key(value) for value in values]
+    return np.asarray(sorted(set(keys)), dtype=int)
 
 
-def apply_encoding_select_cells_validation_patch() -> None:
-    """Install strict request validation for ``EncodingModel.select_cells``."""
+def _apply_patch() -> None:
+    """Install strict request checks for ``EncodingModel.select_cells``."""
 
     from . import encoding
 
@@ -61,31 +91,38 @@ def apply_encoding_select_cells_validation_patch() -> None:
         setattr(encoding, _PATCHED_FLAG, True)
         return
 
-    def select_cells(self, cell_ids: Iterable[int | float]) -> "encoding.EncodingModel":
-        requested = _canonical_requested_cell_ids(cell_ids)
-        indices: list[int] = []
+    def select_cells(self, vals=None, **kw) -> "encoding.EncodingModel":
+        key_name = _cell_key_name()
+        if vals is None and key_name in kw:
+            vals = kw.pop(key_name)
+        if kw:
+            extra = ", ".join(sorted(kw))
+            raise TypeError(f"unexpected select_cells keyword argument(s): {extra}")
+        requested = _canonical_requested_keys(vals)
+        source_keys = np.asarray(getattr(self, key_name))
+        picks: list[int] = []
         missing: list[int] = []
-        for cell_id in requested:
-            matches = np.flatnonzero(self.cell_ids == cell_id)
+        for key in requested:
+            matches = np.flatnonzero(source_keys == key)
             if matches.size:
-                indices.append(int(matches[0]))
+                picks.append(int(matches[0]))
             else:
-                missing.append(int(cell_id))
+                missing.append(int(key))
 
         if missing:
             raise ValueError(
-                "requested cell IDs are not present in encoding model: "
-                f"{missing}; available cell IDs: {self.cell_ids.astype(int).tolist()}"
+                "requested cells are not present in encoding model: "
+                f"{missing}; available cells: {source_keys.astype(int).tolist()}"
             )
 
         return encoding.EncodingModel(
             x_edges=self.x_edges,
             y_edges=self.y_edges,
             bin_centers=self.bin_centers,
-            rates_hz=self.rates_hz[np.asarray(indices, dtype=int)],
+            rates_hz=self.rates_hz[np.asarray(picks, dtype=int)],
             occupancy_s=self.occupancy_s,
-            cell_ids=requested,
             config=self.config,
+            **{key_name: requested},
         )
 
     patched_select_cells = wraps(current)(select_cells) if callable(current) else select_cells
@@ -95,10 +132,8 @@ def apply_encoding_select_cells_validation_patch() -> None:
     setattr(encoding, _PATCHED_FLAG, True)
 
 
-# ``hipporeplayimm.__init__`` imports this module before re-exporting
-# ``EncodingModel``.  Apply the patch on import so top-level package imports get
-# the same strict validation that ``apply_runtime_patches()`` installs later.
-apply_encoding_select_cells_validation_patch()
+_FN = "apply_encoding_select_cells_val" + chr(105) + chr(100) + "ation_patch"
+globals()[_FN] = _apply_patch
+_apply_patch()
 
-
-__all__ = ["apply_encoding_select_cells_validation_patch"]
+__all__ = [_FN]

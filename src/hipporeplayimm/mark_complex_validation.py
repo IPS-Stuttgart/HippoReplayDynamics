@@ -8,6 +8,7 @@ convert them to real-valued features.
 
 from __future__ import annotations
 
+from collections.abc import Iterable, Mapping
 from functools import wraps
 from typing import Any
 
@@ -23,13 +24,23 @@ def _complex_has_zero_imaginary(values: np.ndarray) -> bool:
 
 
 def _contains_boolean_values(values: Any) -> bool:
-    raw = np.asarray(values)
-    if raw.size == 0:
-        return False
-    if np.issubdtype(raw.dtype, np.bool_):
+    if isinstance(values, (bool, np.bool_)):
         return True
-    if raw.dtype == object:
-        return any(isinstance(value, (bool, np.bool_)) for value in raw.reshape(-1))
+    if isinstance(values, np.ndarray):
+        raw = values
+        if raw.size == 0:
+            return False
+        if np.issubdtype(raw.dtype, np.bool_):
+            return True
+        if raw.dtype == object:
+            return any(_contains_boolean_values(value) for value in raw.reshape(-1))
+        return False
+    if isinstance(values, Mapping):
+        return any(_contains_boolean_values(value) for value in values.values())
+    if isinstance(values, (str, bytes, bytearray)):
+        return False
+    if isinstance(values, Iterable):
+        return any(_contains_boolean_values(value) for value in values)
     return False
 
 
@@ -51,9 +62,9 @@ def apply_mark_complex_validation_patch() -> None:
 
     @wraps(original_coerce_mark_matrix)
     def coerce_mark_matrix(value, *, spike_count: int, spike_times: np.ndarray):
-        arr = np.asarray(value)
-        if _contains_boolean_values(arr):
+        if _contains_boolean_values(value):
             return None
+        arr = np.asarray(value)
         if arr.dtype.kind == "c":
             if not _complex_has_zero_imaginary(arr):
                 return None

@@ -11,7 +11,12 @@ import numpy as np
 
 _PATCH_ATTR = "_duration_occupancy_mode_transition_validation_patch"
 _DECAY_PATCH_ATTR = "_duration_occupancy_decay_output_validation_patch"
+_DISPLACEMENT_MOMENTUM_SINGLE_BIN_PATCH_ATTR = (
+    "_displacement_momentum_single_bin_evidence_support_patch"
+)
+_DISPLACEMENT_IMM_SINGLE_BIN_PATCH_ATTR = "_displacement_imm_single_bin_evidence_support_patch"
 _ORIGINAL_ATTR = "_duration_occupancy_mode_transition_validation_original"
+_DEGENERATE_SINGLE_BIN_EVIDENCE_SUPPORT = "degenerate_single_bin"
 
 
 def _contains_boolean_values(values: np.ndarray) -> bool:
@@ -113,6 +118,96 @@ def _wrap_duration_adjusted_decays(helper: Callable[..., np.ndarray]) -> Callabl
     return duration_adjusted_decays
 
 
+def _is_single_bin_event(emissions: Any) -> bool:
+    try:
+        return int(getattr(emissions, "n_time")) <= 1
+    except (AttributeError, TypeError, ValueError):
+        return False
+
+
+def _mark_single_bin_displacement_support(
+    diagnostics: dict[str, Any],
+    prefix: str,
+) -> dict[str, Any]:
+    updated = dict(diagnostics)
+    updated[f"{prefix}_evidence_support"] = _DEGENERATE_SINGLE_BIN_EVIDENCE_SUPPORT
+    updated[f"{prefix}_degenerate_reason"] = "single_time_bin_random_marginal"
+    updated[f"{prefix}_required_min_time_bins"] = 2
+    return updated
+
+
+def _wrap_displacement_momentum_single_bin_support(helper: Callable[..., Any]) -> Callable[..., Any]:
+    if getattr(helper, _DISPLACEMENT_MOMENTUM_SINGLE_BIN_PATCH_ATTR, False):
+        return helper
+
+    @wraps(helper)
+    def score_displacement_momentum_exact(
+        emissions,
+        bin_centers,
+        config,
+        transition_durations_s,
+        *,
+        valid_bin_mask=None,
+        return_trajectory: bool = True,
+    ):
+        logp, trajectory, terminal, displacement_post, diagnostics = helper(
+            emissions,
+            bin_centers,
+            config,
+            transition_durations_s,
+            valid_bin_mask=valid_bin_mask,
+            return_trajectory=return_trajectory,
+        )
+        if _is_single_bin_event(emissions):
+            diagnostics = _mark_single_bin_displacement_support(
+                diagnostics,
+                "state_space_displacement_momentum",
+            )
+        return logp, trajectory, terminal, displacement_post, diagnostics
+
+    setattr(
+        score_displacement_momentum_exact,
+        _DISPLACEMENT_MOMENTUM_SINGLE_BIN_PATCH_ATTR,
+        True,
+    )
+    setattr(score_displacement_momentum_exact, _ORIGINAL_ATTR, helper)
+    return score_displacement_momentum_exact
+
+
+def _wrap_displacement_imm_single_bin_support(helper: Callable[..., Any]) -> Callable[..., Any]:
+    if getattr(helper, _DISPLACEMENT_IMM_SINGLE_BIN_PATCH_ATTR, False):
+        return helper
+
+    @wraps(helper)
+    def score_displacement_imm_exact(
+        emissions,
+        bin_centers,
+        config,
+        transition_durations_s,
+        *,
+        valid_bin_mask=None,
+        return_trajectory: bool = True,
+    ):
+        logp, trajectory, terminal, mode_post, displacement_post, diagnostics = helper(
+            emissions,
+            bin_centers,
+            config,
+            transition_durations_s,
+            valid_bin_mask=valid_bin_mask,
+            return_trajectory=return_trajectory,
+        )
+        if _is_single_bin_event(emissions):
+            diagnostics = _mark_single_bin_displacement_support(
+                diagnostics,
+                "state_space_displacement_imm",
+            )
+        return logp, trajectory, terminal, mode_post, displacement_post, diagnostics
+
+    setattr(score_displacement_imm_exact, _DISPLACEMENT_IMM_SINGLE_BIN_PATCH_ATTR, True)
+    setattr(score_displacement_imm_exact, _ORIGINAL_ATTR, helper)
+    return score_displacement_imm_exact
+
+
 def _wrap_resolver(resolver: Callable[..., list[np.ndarray]]) -> Callable[..., list[np.ndarray]]:
     if getattr(resolver, _PATCH_ATTR, False):
         return resolver
@@ -139,6 +234,21 @@ def _wrap_resolver(resolver: Callable[..., list[np.ndarray]]) -> Callable[..., l
     return _resolve_mode_transitions
 
 
+def _patch_displacement_single_bin_evidence_support() -> None:
+    from . import state_space_displacement_imm, state_space_displacement_momentum
+
+    state_space_displacement_momentum._score_displacement_momentum_exact = (
+        _wrap_displacement_momentum_single_bin_support(
+            state_space_displacement_momentum._score_displacement_momentum_exact
+        )
+    )
+    state_space_displacement_imm._score_displacement_imm_exact = (
+        _wrap_displacement_imm_single_bin_support(
+            state_space_displacement_imm._score_displacement_imm_exact
+        )
+    )
+
+
 def apply_duration_occupancy_mode_transition_validation_patch() -> None:
     """Install validation for duration-aware IMM transition helpers."""
 
@@ -146,6 +256,7 @@ def apply_duration_occupancy_mode_transition_validation_patch() -> None:
 
     duration_occupancy._resolve_mode_transitions = _wrap_resolver(duration_occupancy._resolve_mode_transitions)
     duration_occupancy._duration_adjusted_decays = _wrap_duration_adjusted_decays(duration_occupancy._duration_adjusted_decays)
+    _patch_displacement_single_bin_evidence_support()
 
 
 __all__ = [

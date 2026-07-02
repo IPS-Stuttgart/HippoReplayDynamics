@@ -253,16 +253,36 @@ def _coerce_integral_ids(values: Any, name: str) -> np.ndarray:
     raw = np.asarray(values)
     if _contains_boolean_ids(raw):
         raise ValueError(f"{name} must not contain boolean identifiers")
-    ids = np.asarray(raw, dtype=float)
-    if ids.size == 0:
-        return np.asarray(ids, dtype=int)
-    if not np.all(np.isfinite(ids)):
-        raise ValueError(f"{name} must be finite integer identifiers")
-    rounded = np.rint(ids)
-    if not np.all(ids == rounded):
-        raise ValueError(f"{name} must be integer-valued")
+    if raw.size == 0:
+        return np.asarray(raw, dtype=int)
     integer_dtype = np.dtype(int)
     integer_info = np.iinfo(integer_dtype)
-    if not np.all((rounded >= integer_info.min) & (rounded <= integer_info.max)):
+    coerced = np.asarray(
+        [_coerce_integral_id(value, name, integer_info) for value in raw.reshape(-1)],
+        dtype=integer_dtype,
+    )
+    return coerced.reshape(raw.shape)
+
+
+def _coerce_integral_id(value: Any, name: str, integer_info: np.iinfo) -> int:
+    try:
+        item = np.asarray(value).item()
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must contain finite integer identifiers") from exc
+    if isinstance(item, (bool, np.bool_)):
+        raise ValueError(f"{name} must not contain boolean identifiers")
+    if isinstance(item, (int, np.integer)):
+        identifier = int(item)
+    else:
+        try:
+            numeric = float(item)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"{name} must contain numeric integer identifiers") from exc
+        if not np.isfinite(numeric):
+            raise ValueError(f"{name} must be finite integer identifiers")
+        if not numeric.is_integer():
+            raise ValueError(f"{name} must be integer-valued")
+        identifier = int(numeric)
+    if identifier < int(integer_info.min) or identifier > int(integer_info.max):
         raise ValueError(f"{name} must fit into integer identifier range")
-    return rounded.astype(integer_dtype)
+    return identifier

@@ -20,6 +20,11 @@ from .models import EventScore, _posterior_diagnostics
 from .reverse_time_terminal_guard import _clear_unmappable_reverse_terminal
 
 _PATCHED_FLAG = "_wrapper_return_trajectory_patch_applied"
+_RESULT_COMPAT_WRAPPER_ATTR = "_wrapper_return_trajectory_score_compat_wrapper"
+_EXTENSION_REVERSE_WRAPPER_ATTR = "_wrapper_return_trajectory_extension_reverse_score_wrapper"
+_EXTENSION_BIDIRECTIONAL_WRAPPER_ATTR = "_wrapper_return_trajectory_extension_bidirectional_score_wrapper"
+_DIRECT_REVERSE_WRAPPER_ATTR = "_wrapper_return_trajectory_direct_reverse_score_wrapper"
+_DIRECT_BIDIRECTIONAL_WRAPPER_ATTR = "_wrapper_return_trajectory_direct_bidirectional_score_wrapper"
 _STATE_SPACE_DIAGNOSTIC_PATCH_ATTR = "_state_space_evidence_only_diagnostics_patch_applied"
 _STATE_SPACE_DIAGNOSTIC_ORIGINAL_ATTR = "_state_space_evidence_only_diagnostics_original"
 
@@ -30,13 +35,32 @@ def apply_wrapper_return_trajectory_patch() -> None:
     from . import result_improvement_extensions as extensions
     from . import reverse_models
 
-    if not getattr(extensions, _PATCHED_FLAG, False):
+    if not _result_improvement_wrappers_current(extensions):
         _patch_result_improvement_wrappers(extensions)
-        setattr(extensions, _PATCHED_FLAG, True)
-    if not getattr(reverse_models, _PATCHED_FLAG, False):
+    setattr(extensions, _PATCHED_FLAG, True)
+
+    if not _direct_reverse_wrappers_current(reverse_models):
         _patch_direct_reverse_wrappers(extensions, reverse_models)
-        setattr(reverse_models, _PATCHED_FLAG, True)
+    setattr(reverse_models, _PATCHED_FLAG, True)
+
     _patch_state_space_evidence_only_diagnostics()
+
+
+def _result_improvement_wrappers_current(extensions: Any) -> bool:
+    return (
+        getattr(extensions, _PATCHED_FLAG, False)
+        and getattr(getattr(extensions, "score_replay_model_compat", None), _RESULT_COMPAT_WRAPPER_ATTR, False)
+        and getattr(getattr(extensions.ReverseTimeReplayModel, "score", None), _EXTENSION_REVERSE_WRAPPER_ATTR, False)
+        and getattr(getattr(extensions.BidirectionalReplayModel, "score", None), _EXTENSION_BIDIRECTIONAL_WRAPPER_ATTR, False)
+    )
+
+
+def _direct_reverse_wrappers_current(reverse_models: Any) -> bool:
+    return (
+        getattr(reverse_models, _PATCHED_FLAG, False)
+        and getattr(getattr(reverse_models.ReverseTimeReplayModel, "score", None), _DIRECT_REVERSE_WRAPPER_ATTR, False)
+        and getattr(getattr(reverse_models.BidirectionalReplayModel, "score", None), _DIRECT_BIDIRECTIONAL_WRAPPER_ATTR, False)
+    )
 
 
 def _patch_state_space_evidence_only_diagnostics() -> None:
@@ -285,6 +309,9 @@ def _patch_result_improvement_wrappers(extensions: Any) -> None:
     bidirectional_score.__name__ = "score"
     bidirectional_score.__doc__ = extensions.BidirectionalReplayModel.score.__doc__
     bidirectional_score.__module__ = extensions.__name__
+    setattr(score_replay_model_compat, _RESULT_COMPAT_WRAPPER_ATTR, True)
+    setattr(reverse_score, _EXTENSION_REVERSE_WRAPPER_ATTR, True)
+    setattr(bidirectional_score, _EXTENSION_BIDIRECTIONAL_WRAPPER_ATTR, True)
 
     extensions.score_replay_model_compat = score_replay_model_compat
     extensions.ReverseTimeReplayModel.score = reverse_score
@@ -423,6 +450,8 @@ def _patch_direct_reverse_wrappers(extensions: Any, reverse_models: Any) -> None
     bidirectional_score.__name__ = "score"
     bidirectional_score.__doc__ = reverse_models.BidirectionalReplayModel.score.__doc__
     bidirectional_score.__module__ = reverse_models.__name__
+    setattr(reverse_score, _DIRECT_REVERSE_WRAPPER_ATTR, True)
+    setattr(bidirectional_score, _DIRECT_BIDIRECTIONAL_WRAPPER_ATTR, True)
 
     reverse_models.ReverseTimeReplayModel.score = reverse_score
     reverse_models.BidirectionalReplayModel.score = bidirectional_score

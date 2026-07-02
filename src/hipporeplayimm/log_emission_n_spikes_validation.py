@@ -62,7 +62,7 @@ def _require_scalar_duration(value: Any, name: str) -> None:
 
 
 def _validate_log_likelihood(emissions: LogEmissionTensor) -> None:
-    """Reject invalid numeric likelihood entries without checking model support."""
+    """Reject invalid numeric likelihood entries before scorers normalize rows."""
 
     values = np.asarray(emissions.log_likelihood, dtype=float)
     if values.ndim != 2:
@@ -71,6 +71,8 @@ def _validate_log_likelihood(emissions: LogEmissionTensor) -> None:
         raise ValueError("log_likelihood must include at least one spatial bin")
     if np.any(np.isnan(values)):
         raise ValueError("log_likelihood must not contain NaN values")
+    if not np.all(np.any(np.isfinite(values), axis=1)):
+        raise ValueError("each log_likelihood row must include at least one finite spatial-bin likelihood")
 
 
 def _contains_boolean_values(values: Any) -> bool:

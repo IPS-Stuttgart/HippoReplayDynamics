@@ -5,6 +5,9 @@ import pytest
 
 import hipporeplayimm
 from hipporeplayimm.duration_occupancy import _duration_adjusted_decays as _duration_occupancy_decays
+from hipporeplayimm.duration_occupancy_mode_transition_validation import (
+    _wrap_duration_adjusted_decays,
+)
 from hipporeplayimm.state_space_displacement_momentum import (
     _duration_adjusted_decays as _displacement_decays,
 )
@@ -53,3 +56,15 @@ def test_duration_occupancy_rejects_boolean_scalar_decay() -> None:
 
     with pytest.raises(TypeError, match="momentum_velocity_decay"):
         _duration_occupancy_decays(True, np.array([0.01], dtype=float), 0.01)
+
+
+def test_duration_decay_wrapper_rejects_invalid_decay_outputs() -> None:
+    durations = np.array([0.01, 0.02], dtype=float)
+
+    def bad_decay_helper(config_or_decay, transition_durations, reference_dt):
+        return np.array([0.5, 1.01], dtype=float)
+
+    wrapped = _wrap_duration_adjusted_decays(bad_decay_helper)
+
+    with pytest.raises(ValueError, match=r"\[0, 1\]"):
+        wrapped(object(), durations, 0.01)

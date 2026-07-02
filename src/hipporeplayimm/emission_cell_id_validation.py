@@ -55,19 +55,35 @@ def _coerce_integral_ids(values: Any, name: str) -> np.ndarray:
         return np.empty(0, dtype=int)
     if _contains_boolean_values(ids):
         raise ValueError(f"{name} must not contain boolean identifiers")
+    integer_info = np.iinfo(np.dtype(int))
+    return np.asarray(
+        [_coerce_integral_id(value, name, integer_info) for value in ids.reshape(-1)],
+        dtype=int,
+    )
+
+
+def _coerce_integral_id(value: Any, name: str, integer_info: np.iinfo) -> int:
     try:
-        numeric = np.asarray(ids, dtype=float)
+        item = np.asarray(value).item()
     except (TypeError, ValueError) as exc:
         raise ValueError(f"{name} must contain finite integer identifiers") from exc
-    if not np.all(np.isfinite(numeric)):
-        raise ValueError(f"{name} must contain finite integer identifiers")
-    rounded = np.rint(numeric)
-    if not np.all(numeric == rounded):
-        raise ValueError(f"{name} must be integer-valued")
-    integer_info = np.iinfo(np.dtype(int))
-    if not np.all((rounded >= integer_info.min) & (rounded <= integer_info.max)):
+    if isinstance(item, (bool, np.bool_)):
+        raise ValueError(f"{name} must not contain boolean identifiers")
+    if isinstance(item, (int, np.integer)):
+        identifier = int(item)
+    else:
+        try:
+            numeric = float(item)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"{name} must contain finite integer identifiers") from exc
+        if not np.isfinite(numeric):
+            raise ValueError(f"{name} must contain finite integer identifiers")
+        if not numeric.is_integer():
+            raise ValueError(f"{name} must be integer-valued")
+        identifier = int(numeric)
+    if identifier < int(integer_info.min) or identifier > int(integer_info.max):
         raise ValueError(f"{name} must fit into integer identifier range")
-    return rounded.astype(int)
+    return identifier
 
 
 def _cell_id_row_indices(cell_ids: np.ndarray, spike_cell_ids: np.ndarray) -> np.ndarray:

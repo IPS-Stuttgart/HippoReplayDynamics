@@ -123,29 +123,53 @@ def _validate_n_spikes(emissions: LogEmissionTensor) -> None:
 
 
 def _validate_cell_ids(emissions: LogEmissionTensor) -> None:
-    if _contains_boolean_values(emissions.cell_ids):
-        raise ValueError("cell_ids must be numeric integer identifiers, not boolean values")
+    emissions.cell_ids = _coerce_cell_ids(emissions.cell_ids)
+
+
+def _coerce_cell_ids(values: Any) -> np.ndarray:
     try:
-        cell_ids = np.asarray(emissions.cell_ids, dtype=float)
+        cell_ids = np.asarray(values)
     except (TypeError, ValueError) as exc:
         raise ValueError("cell_ids must contain finite integer identifiers") from exc
     if cell_ids.ndim != 1:
         raise ValueError("cell_ids must be one-dimensional")
     if cell_ids.size == 0:
-        emissions.cell_ids = np.empty(0, dtype=int)
-        return
-    if not np.all(np.isfinite(cell_ids)):
-        raise ValueError("cell_ids must contain finite integer identifiers")
-    rounded = np.rint(cell_ids)
-    if not np.all(np.isclose(cell_ids, rounded, rtol=0.0, atol=0.0)):
-        raise ValueError("cell_ids must be integer-valued")
+        return np.empty(0, dtype=int)
+    if _contains_boolean_values(cell_ids):
+        raise ValueError("cell_ids must be numeric integer identifiers, not boolean values")
+
     integer_info = np.iinfo(np.dtype(int))
-    if not np.all((rounded >= integer_info.min) & (rounded <= integer_info.max)):
-        raise ValueError("cell_ids must fit into integer identifier range")
-    canonical = rounded.astype(int)
+    canonical = np.asarray(
+        [_coerce_integer_identifier(value, "cell_ids", integer_info) for value in cell_ids.reshape(-1)],
+        dtype=int,
+    )
     if np.unique(canonical).shape[0] != canonical.shape[0]:
         raise ValueError("cell_ids must be unique")
-    emissions.cell_ids = canonical
+    return canonical
+
+
+def _coerce_integer_identifier(value: Any, name: str, integer_info: np.iinfo) -> int:
+    try:
+        item = np.asarray(value).item()
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must contain finite integer identifiers") from exc
+    if isinstance(item, (bool, np.bool_)):
+        raise ValueError(f"{name} must not contain boolean identifiers")
+    if isinstance(item, (int, np.integer)):
+        identifier = int(item)
+    else:
+        try:
+            numeric = float(item)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"{name} must contain finite integer identifiers") from exc
+        if not np.isfinite(numeric):
+            raise ValueError(f"{name} must contain finite integer identifiers")
+        if not numeric.is_integer():
+            raise ValueError(f"{name} must be integer-valued")
+        identifier = int(numeric)
+    if identifier < int(integer_info.min) or identifier > int(integer_info.max):
+        raise ValueError(f"{name} must fit into integer identifier range")
+    return identifier
 
 
 apply_log_emission_n_spikes_validation_patch()

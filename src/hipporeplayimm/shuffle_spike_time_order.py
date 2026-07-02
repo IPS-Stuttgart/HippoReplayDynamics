@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import replace
 
 import numpy as np
@@ -24,6 +25,8 @@ def apply_shuffle_spike_time_order_patch() -> None:
         original_scope_label = shuffle_controls._scope_label
 
         def scope_label(value: object) -> str:
+            if isinstance(value, Mapping):
+                return _mapping_scope_label(value, scope_label)
             numeric = _numeric_scope_label(value)
             if numeric is not None:
                 return repr(("numeric", numeric))
@@ -31,6 +34,14 @@ def apply_shuffle_spike_time_order_patch() -> None:
 
         shuffle_controls._scope_label = scope_label
         setattr(shuffle_controls, _SCOPE_KEY_PATCHED_FLAG, True)
+
+
+def _mapping_scope_label(value: Mapping[object, object], scope_label) -> str:
+    items = sorted(
+        ((scope_label(key), scope_label(item)) for key, item in value.items()),
+        key=repr,
+    )
+    return repr(("mapping", items))
 
 
 def _shuffle_spike_times_session_sorted(session, random_seed: int = 1):

@@ -6,6 +6,10 @@ zero probability mass and must fail fast instead of becoming NaN after
 ``-inf - -inf`` normalization.  Emission-derived candidate beams need the same
 finite-score validation before top-k support selection, because NumPy otherwise
 orders NaN/+inf values as if they were valid high-likelihood spatial bins.
+
+Candidate evidence-support diagnostics also share the same valid-bin mask
+contract.  They must reject malformed textual, complex, or non-binary numeric
+masks instead of treating arbitrary truthy values as valid spatial bins.
 """
 
 from __future__ import annotations
@@ -15,6 +19,9 @@ from scipy.special import logsumexp
 
 _PATCHED_FLAG = "_candidate_support_normalization_validation_patch_applied"
 _SCORE_PATCHED_FLAG = "_candidate_support_score_validation_patch_applied"
+_EVIDENCE_MASK_PATCHED_FLAG = "_candidate_evidence_mask_validation_patch_applied"
+_EVIDENCE_MASK_WRAPPER_MARKER = "_candidate_evidence_mask_validation_wrapper"
+_ORIGINAL_ATTR = "__hipporeplayimm_original__"
 
 
 def _is_boolean_scalar(value: object) -> bool:
@@ -83,6 +90,16 @@ def _candidate_support_scores(log_emission: np.ndarray) -> np.ndarray:
     return scores
 
 
+def _candidate_evidence_mask_patch_current(state_space_model: object) -> bool:
+    return bool(
+        getattr(
+            getattr(state_space_model, "_full_candidate_index_set", None),
+            _EVIDENCE_MASK_WRAPPER_MARKER,
+            False,
+        )
+    )
+
+
 def apply_candidate_support_normalization_validation_patch() -> None:
     """Install finite-mass validation for posterior and emission candidate supports."""
 
@@ -91,6 +108,21 @@ def apply_candidate_support_normalization_validation_patch() -> None:
     if not getattr(state_space_model, _PATCHED_FLAG, False):
         state_space_model._normalize_log_rows = _normalize_log_rows
         setattr(state_space_model, _PATCHED_FLAG, True)
+
+    if not _candidate_evidence_mask_patch_current(state_space_model):
+        original_full_candidate_index_set = state_space_model._full_candidate_index_set
+
+        def _full_candidate_index_set(n_bins: int, valid_bin_mask: np.ndarray | None) -> np.ndarray:
+            if valid_bin_mask is None:
+                return original_full_candidate_index_set(n_bins, None)
+            valid_mask = state_space_utils._coerce_valid_bin_mask(valid_bin_mask, n_bins)
+            assert valid_mask is not None
+            return original_full_candidate_index_set(n_bins, valid_mask)
+
+        setattr(_full_candidate_index_set, _EVIDENCE_MASK_WRAPPER_MARKER, True)
+        setattr(_full_candidate_index_set, _ORIGINAL_ATTR, original_full_candidate_index_set)
+        state_space_model._full_candidate_index_set = _full_candidate_index_set
+    setattr(state_space_model, _EVIDENCE_MASK_PATCHED_FLAG, True)
 
     if not getattr(state_space_utils, _SCORE_PATCHED_FLAG, False):
         original_top_candidate_indices = state_space_utils._top_candidate_indices

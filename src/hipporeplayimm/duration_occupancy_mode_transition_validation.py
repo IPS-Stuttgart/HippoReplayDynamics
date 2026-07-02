@@ -66,7 +66,12 @@ def _validate_mode_transition_sequence(
     expected_shape = (mode_count, mode_count)
     resolved: list[np.ndarray] = []
     for transition_index, matrix in enumerate(mode_transitions):
-        raw_values = np.asarray(matrix)
+        try:
+            raw_values = np.asarray(matrix)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(
+                f"mode transition matrix {transition_index} must be a rectangular numeric probability matrix"
+            ) from exc
         if _contains_boolean_values(raw_values):
             raise ValueError(
                 f"mode transition matrix {transition_index} must contain numeric probabilities, not booleans"

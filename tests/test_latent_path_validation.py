@@ -78,6 +78,30 @@ def test_simulate_latent_path_rejects_invalid_motion_sigmas(true_model, state_sp
 
 
 @pytest.mark.parametrize(
+    ("bad_occupancy", "match"),
+    [
+        (np.array([np.nan]), "finite nonnegative"),
+        (np.array([np.inf]), "finite nonnegative"),
+        (np.array([-0.1]), "finite nonnegative"),
+        (np.array([1.0, 2.0]), "one finite nonnegative value per spatial bin"),
+        (np.empty(0), "one finite nonnegative value per spatial bin"),
+    ],
+)
+def test_simulate_latent_path_rejects_invalid_occupancy_prior(bad_occupancy, match):
+    encoding = _small_encoding()
+    encoding.occupancy_s = bad_occupancy
+
+    with pytest.raises(ValueError, match=match):
+        simulate_latent_path(
+            encoding,
+            true_model="stationary",
+            n_time=2,
+            dt=0.02,
+            rng=np.random.default_rng(1),
+        )
+
+
+@pytest.mark.parametrize(
     ("raw_limit", "expected_limit"),
     [
         (None, None),

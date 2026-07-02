@@ -51,6 +51,7 @@ from . import kd_encoding_config_validation as _kd_encoding_config_validation
 from . import kd_impossible_emission_patch as _kd_impossible_emission_patch
 from . import kd_single_bin_momentum_patch2 as _kd_single_bin_momentum_patch2
 from . import latent_path_validation as _latent_path_validation
+from . import log_emission_tensor_validation as _log_emission_tensor_validation
 from . import mark_complex_validation as _mark_complex_validation
 from . import model_averaged_endpoint_scoping as _model_averaged_endpoint_scoping
 from . import model_parameter_validation as _model_parameter_validation
@@ -112,6 +113,7 @@ _clusterless_config_validation.apply_clusterless_encoding_config_validation_patc
 _data_cell_id_validation.apply_data_cell_id_validation_patch()
 _mark_complex_validation.apply_mark_complex_validation_patch()
 _encoding_grid_extra_columns.apply_encoding_grid_extra_columns_patch()
+_log_emission_tensor_validation.apply_log_emission_tensor_validation_patch()
 _position_decoding_config_validation.apply_position_decoding_config_validation_patch()
 _duration_candidate_metadata_patch.apply_duration_candidate_metadata_patch()
 _ground_truth_window_scope.apply_ground_truth_window_scope_patch()
@@ -244,6 +246,7 @@ def apply_runtime_patches() -> None:
     _clusterless_mark_group_validation.apply_clusterless_mark_group_validation_patch()
     _encoding_select_cells_validation.apply_encoding_select_cells_validation_patch()
     _encoding_grid_extra_columns.apply_encoding_grid_extra_columns_patch()
+    _log_emission_tensor_validation.apply_log_emission_tensor_validation_patch()
     _position_decoding_config_validation.apply_position_decoding_config_validation_patch()
     _duration_candidate_metadata_patch.apply_duration_candidate_metadata_patch()
     _ground_truth._encoding_config_for_scores = _score_metadata.encoding_config_for_scores

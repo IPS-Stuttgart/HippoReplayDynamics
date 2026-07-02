@@ -13,12 +13,16 @@ from typing import Any
 
 import numpy as np
 
+from .sparse_momentum_bin_center_validation import apply_sparse_momentum_bin_center_validation_patch
+
 _SPARSE_SCORE_CONFIG_PATCHED_FLAG = "_sparse_momentum_config_validation_patch_applied"
 _TRAJECTORY_IMM_CONFIG_PATCHED_FLAG = "_trajectory_imm_sparse_config_validation_patch_applied"
 
 
 def apply_sparse_momentum_duration_validation_patch() -> None:
     """Install duration and exact-sparse momentum config validation patches."""
+
+    apply_sparse_momentum_bin_center_validation_patch()
 
     import hipporeplayimm.state_space_displacement_momentum as displacement_momentum
     import hipporeplayimm.state_space_sparse_momentum as sparse_momentum

@@ -1,4 +1,4 @@
-"""Keep displacement-IMM velocity-decay validation synchronized."""
+"""Keep displacement/trajectory IMM velocity-decay validation synchronized."""
 
 from __future__ import annotations
 
@@ -8,20 +8,27 @@ import numpy as np
 
 _PATCHED_FLAG = "_displacement_imm_velocity_decay_validation_patch_applied"
 _DURATION_SCALE_PATCHED_FLAG = "_displacement_duration_scale_validation_patch_applied"
+_TRAJECTORY_IMM_DECAY_PATCHED_FLAG = "_trajectory_imm_velocity_decay_validation_patch_applied"
 
 
 def apply_displacement_imm_decay_validation_patch() -> None:
-    """Validate displacement-momentum helpers after direct submodule imports.
+    """Validate imported duration helpers after direct submodule imports.
 
-    ``state_space_displacement_imm`` imports duration helpers by value from
-    ``state_space_displacement_momentum``. Runtime validation therefore has to
-    rebind both the source helper and the displacement-IMM alias; otherwise stale
+    ``state_space_displacement_imm`` and ``state_space_trajectory_imm`` import
+    duration helpers by value from the displacement/sparse momentum modules.
+    Runtime validation therefore has to rebind those aliases; otherwise stale
     aliases can bypass the package-level validation path.
     """
 
-    from . import state_space_displacement_imm, state_space_displacement_momentum
+    from . import (
+        state_space_displacement_imm,
+        state_space_displacement_momentum,
+        state_space_sparse_momentum,
+        state_space_trajectory_imm,
+    )
     from .model_parameter_validation import (
         _DISPLACEMENT_MOMENTUM_DECAY_PATCHED_FLAG,
+        _SPARSE_MOMENTUM_DECAY_PATCHED_FLAG,
         _validate_config_momentum_velocity_decay,
     )
 
@@ -45,6 +52,27 @@ def apply_displacement_imm_decay_validation_patch() -> None:
 
     state_space_displacement_imm._duration_adjusted_decays = patched
     setattr(state_space_displacement_imm, _PATCHED_FLAG, True)
+
+    sparse_patched = state_space_sparse_momentum._duration_adjusted_decays
+    if not getattr(state_space_sparse_momentum, _SPARSE_MOMENTUM_DECAY_PATCHED_FLAG, False):
+        original_sparse = sparse_patched
+
+        @wraps(original_sparse)
+        def sparse_duration_adjusted_decays(config, durations, reference_dt):
+            _validate_config_momentum_velocity_decay(config)
+            return original_sparse(config, durations, reference_dt)
+
+        setattr(sparse_duration_adjusted_decays, _SPARSE_MOMENTUM_DECAY_PATCHED_FLAG, True)
+        setattr(sparse_duration_adjusted_decays, _TRAJECTORY_IMM_DECAY_PATCHED_FLAG, True)
+        setattr(sparse_duration_adjusted_decays, "__hipporeplayimm_original__", original_sparse)
+        state_space_sparse_momentum._duration_adjusted_decays = sparse_duration_adjusted_decays
+        setattr(state_space_sparse_momentum, _SPARSE_MOMENTUM_DECAY_PATCHED_FLAG, True)
+        sparse_patched = sparse_duration_adjusted_decays
+    else:
+        setattr(sparse_patched, _TRAJECTORY_IMM_DECAY_PATCHED_FLAG, True)
+
+    state_space_trajectory_imm._duration_adjusted_decays = sparse_patched
+    setattr(state_space_trajectory_imm, _TRAJECTORY_IMM_DECAY_PATCHED_FLAG, True)
 
     scale_at = state_space_displacement_momentum._duration_scale_at
     if not getattr(scale_at, _DURATION_SCALE_PATCHED_FLAG, False):

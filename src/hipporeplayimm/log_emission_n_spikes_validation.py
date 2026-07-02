@@ -1,4 +1,4 @@
-"""Validate ``LogEmissionTensor`` count summaries and cell identifiers."""
+"""Validate ``LogEmissionTensor`` count summaries, durations, and cell identifiers."""
 
 from __future__ import annotations
 
@@ -28,6 +28,7 @@ def apply_log_emission_n_spikes_validation_patch() -> None:
 
     @wraps(original_post_init)
     def _validated_post_init(self: LogEmissionTensor) -> None:
+        _validate_duration_inputs(self)
         original_post_init(self)
         _validate_log_likelihood(self)
         _validate_n_spikes(self)
@@ -36,6 +37,28 @@ def apply_log_emission_n_spikes_validation_patch() -> None:
     setattr(_validated_post_init, _POST_INIT_WRAPPER_MARKER, True)
     LogEmissionTensor.__post_init__ = _validated_post_init  # type: ignore[method-assign]
     setattr(LogEmissionTensor, _PATCH_FLAG, True)
+
+
+def _validate_duration_inputs(emissions: LogEmissionTensor) -> None:
+    """Reject boolean or array-shaped duration inputs before dataclass coercion."""
+
+    if _contains_boolean_values(emissions.dt):
+        raise ValueError("dt must be a numeric duration, not boolean")
+    _require_scalar_duration(emissions.dt, "dt")
+
+    if emissions.bin_durations is not None and _contains_boolean_values(emissions.bin_durations):
+        raise ValueError("bin_durations must contain numeric durations, not boolean values")
+    if emissions.transition_durations is not None and _contains_boolean_values(emissions.transition_durations):
+        raise ValueError("transition_durations must contain numeric durations, not boolean values")
+
+
+def _require_scalar_duration(value: Any, name: str) -> None:
+    try:
+        raw = np.asarray(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must be a scalar duration") from exc
+    if raw.ndim != 0:
+        raise ValueError(f"{name} must be a scalar duration")
 
 
 def _validate_log_likelihood(emissions: LogEmissionTensor) -> None:

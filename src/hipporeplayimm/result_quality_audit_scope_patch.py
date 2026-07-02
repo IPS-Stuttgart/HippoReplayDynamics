@@ -5,11 +5,13 @@ from __future__ import annotations
 from functools import wraps
 from typing import Any
 
+import numpy as np
 import pandas as pd
 
 _PATCHED_FLAG = "_result_quality_audit_scope_patch_applied"
 _EVENT_COUNT_PATCHED_FLAG = "_result_quality_audit_event_count_scope_patch_applied"
 _HELDOUT_INFLUENCE_PATCHED_FLAG = "_result_quality_audit_heldout_influence_patch_applied"
+_MISSING_TEXT_VALUES = {"", "nan", "na", "n/a", "none", "null", "<na>"}
 _EVENT_GROUP_SESSION_COLUMNS = ("session",)
 _EVENT_GROUP_EVENT_COLUMNS = ("event_index", "event_id")
 _EVENT_GROUP_SCOPE_COLUMNS = (
@@ -61,6 +63,20 @@ _INFLUENCE_VALUE_COLUMNS = (
 )
 
 
+def _is_observed_metadata_value(value: object) -> bool:
+    """Return whether a metadata cell carries a real grouping value."""
+
+    try:
+        missing = pd.isna(value)
+    except (TypeError, ValueError):
+        missing = False
+    if isinstance(missing, (bool, np.bool_)) and bool(missing):
+        return False
+    if isinstance(value, str):
+        return value.strip().lower() not in _MISSING_TEXT_VALUES
+    return True
+
+
 def _column_has_observed_metadata(scores: Any, column: str) -> bool:
     """Return True when an optional grouping key is populated for at least one row."""
 
@@ -70,7 +86,7 @@ def _column_has_observed_metadata(scores: Any, column: str) -> bool:
         return False
     if bool(getattr(values, "empty", False)):
         return False
-    return bool(values.notna().any())
+    return bool(values.map(_is_observed_metadata_value).any())
 
 
 def _scoped_event_group_columns(scores: Any) -> list[str]:

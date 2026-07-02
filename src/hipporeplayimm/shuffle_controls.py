@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import operator
 from typing import Iterable, Mapping
 
 import numpy as np
@@ -118,18 +119,23 @@ def _nonnegative_integer_value(name: str, value: object) -> int:
     scalar = array.item()
     if isinstance(scalar, (bool, np.bool_)):
         raise ValueError(f"{name} must be an integer, not boolean")
+
     try:
-        numeric = float(scalar)
-    except (TypeError, ValueError, OverflowError) as exc:
-        raise ValueError(f"{name} must be an integer") from exc
-    if not np.isfinite(numeric):
-        raise ValueError(f"{name} must be a finite integer")
-    integer = int(round(numeric))
-    if not np.isclose(numeric, integer, rtol=0.0, atol=0.0):
-        raise ValueError(f"{name} must be an integer")
+        integer = operator.index(scalar)
+    except TypeError:
+        try:
+            numeric = float(scalar)
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise ValueError(f"{name} must be an integer") from exc
+        if not np.isfinite(numeric):
+            raise ValueError(f"{name} must be a finite integer")
+        integer = int(round(numeric))
+        if not np.isclose(numeric, integer, rtol=0.0, atol=0.0):
+            raise ValueError(f"{name} must be an integer")
+
     if integer < 0:
         raise ValueError(f"{name} must be a nonnegative integer")
-    return integer
+    return int(integer)
 
 
 def _spatial_roll_rates(rates: np.ndarray, grid_shape: tuple[int, int], rng: np.random.Generator) -> np.ndarray:

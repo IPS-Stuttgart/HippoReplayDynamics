@@ -102,6 +102,9 @@ def apply_evidence_status_coercion_patch() -> None:
             ] = reporting.EVIDENCE_COMPARISON_UNKNOWN
 
         status_ok = _status_success_mask(out)
+        failed_status = ~status_ok
+        if failed_status.any():
+            out.loc[failed_status, "evidence_support"] = reporting.EVIDENCE_COMPARISON_NOT_SCORED
         finite_evidence = reporting._finite_evidence_series(out)
         out["evidence_comparison"] = out["evidence_support"].map(
             reporting.evidence_comparison_from_support

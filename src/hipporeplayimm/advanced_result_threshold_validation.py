@@ -11,6 +11,8 @@ _PATCHED_FLAG = "_advanced_result_threshold_validation_patch_applied"
 _BASE_DECISIONS_ATTR = "_advanced_result_threshold_validation_base_decisions"
 _PATCHED_DECISIONS_ATTR = "_advanced_result_threshold_validation_patched_decisions"
 _PATCHED_SWEEP_ATTR = "_advanced_result_threshold_validation_patched_sweep"
+_BASE_EVIDENCE_MARGIN_TABLE_ATTR = "_advanced_result_threshold_validation_base_evidence_margin_table"
+_PATCHED_EVIDENCE_MARGIN_TABLE_ATTR = "_advanced_result_threshold_validation_patched_evidence_margin_table"
 _EVENT_WINDOW_WRAPPER_FLAG = "_advanced_result_event_window_validation_wrapper"
 _PATCHED_EVENT_WINDOW_ATTR = "_advanced_result_event_window_validation_patched_event_window_variants"
 
@@ -138,6 +140,13 @@ def _normalize_group_cols(group_cols: Sequence[str] | str | None, scores: pd.Dat
     return tuple(group_cols)
 
 
+def _unique_helper_column(frame: pd.DataFrame, preferred: str) -> str:
+    column = preferred
+    while column in frame.columns:
+        column = f"_{column}"
+    return column
+
+
 def _sort_scores_for_duplicate_model_evidence(
     scores: pd.DataFrame,
     group_cols: Sequence[str],
@@ -150,9 +159,7 @@ def _sort_scores_for_duplicate_model_evidence(
         return scores
 
     out = scores.copy()
-    evidence_key = "__paired_model_numeric_evidence"
-    while evidence_key in out.columns:
-        evidence_key = f"_{evidence_key}"
+    evidence_key = _unique_helper_column(out, "__paired_model_numeric_evidence")
     out[evidence_key] = pd.to_numeric(out[evidence_col], errors="coerce")
 
     sort_columns = [model_col, evidence_key]
@@ -170,6 +177,21 @@ def _sort_scores_for_duplicate_model_evidence(
     else:
         out = out.sort_values(sort_columns, ascending=[True, True], kind="stable", na_position="first")
     return out.drop(columns=[evidence_key])
+
+
+def _scores_with_numeric_evidence(
+    scores: pd.DataFrame,
+    evidence_col: str,
+) -> tuple[pd.DataFrame, str]:
+    """Return a copy whose evidence column is numeric, preserving the source table."""
+
+    if scores.empty or evidence_col not in scores.columns:
+        return scores, evidence_col
+
+    out = scores.copy()
+    evidence_key = _unique_helper_column(out, "__advanced_result_numeric_evidence")
+    out[evidence_key] = pd.to_numeric(out[evidence_col], errors="coerce")
+    return out, evidence_key
 
 
 def _ensure_true_model_summary_columns(summary: pd.DataFrame) -> pd.DataFrame:
@@ -198,6 +220,14 @@ def _threshold_patch_current(diagnostics) -> bool:
         getattr(diagnostics, _PATCHED_FLAG, False)
         and getattr(diagnostics, "paired_model_margin_decisions", None) is getattr(diagnostics, _PATCHED_DECISIONS_ATTR, None)
         and getattr(diagnostics, "paired_model_margin_threshold_sweep", None) is getattr(diagnostics, _PATCHED_SWEEP_ATTR, None)
+    )
+
+
+def _evidence_margin_table_patch_current(diagnostics) -> bool:
+    return getattr(diagnostics, "evidence_margin_table", None) is getattr(
+        diagnostics,
+        _PATCHED_EVIDENCE_MARGIN_TABLE_ATTR,
+        None,
     )
 
 
@@ -311,6 +341,31 @@ def apply_advanced_result_threshold_validation_patch() -> None:
         setattr(diagnostics, _PATCHED_DECISIONS_ATTR, paired_model_margin_decisions)
         setattr(diagnostics, _PATCHED_SWEEP_ATTR, paired_model_margin_threshold_sweep)
         setattr(diagnostics, _PATCHED_FLAG, True)
+
+    if not _evidence_margin_table_patch_current(diagnostics):
+        base_evidence_margin_table = getattr(diagnostics, _BASE_EVIDENCE_MARGIN_TABLE_ATTR, None)
+        if base_evidence_margin_table is None:
+            base_evidence_margin_table = diagnostics.evidence_margin_table
+            setattr(diagnostics, _BASE_EVIDENCE_MARGIN_TABLE_ATTR, base_evidence_margin_table)
+
+        def evidence_margin_table(
+            scores: pd.DataFrame,
+            *,
+            group_cols: Sequence[str] | str = ("session", "event_index"),
+            evidence_col: str = "log_evidence",
+            model_col: str = "model",
+        ) -> pd.DataFrame:
+            margin_group_cols = _normalize_group_cols(group_cols, scores)
+            prepared_scores, numeric_evidence_col = _scores_with_numeric_evidence(scores, evidence_col)
+            return base_evidence_margin_table(
+                prepared_scores,
+                group_cols=margin_group_cols,
+                evidence_col=numeric_evidence_col,
+                model_col=model_col,
+            )
+
+        diagnostics.evidence_margin_table = evidence_margin_table
+        setattr(diagnostics, _PATCHED_EVIDENCE_MARGIN_TABLE_ATTR, evidence_margin_table)
 
     if not _event_window_patch_current(diagnostics):
         base_event_window_variants = diagnostics.event_window_variants

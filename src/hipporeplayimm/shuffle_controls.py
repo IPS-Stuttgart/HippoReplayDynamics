@@ -153,33 +153,45 @@ def _spatial_roll_rates(rates: np.ndarray, grid_shape: tuple[int, int], rng: np.
 
 
 def _validate_grid_shape(grid_shape: tuple[int, int]) -> tuple[int, int]:
+    if isinstance(grid_shape, (str, bytes)):
+        raise ValueError("grid_shape must contain exactly two dimensions")
     try:
-        values = tuple(grid_shape)
+        dimensions = tuple(grid_shape)
     except TypeError as exc:
         raise ValueError("grid_shape must contain exactly two dimensions") from exc
-    if len(values) != 2:
+    if len(dimensions) != 2:
         raise ValueError("grid_shape must contain exactly two dimensions")
-    n_x, n_y = (_positive_grid_dimension(value) for value in values)
+    n_x = _positive_grid_dimension(dimensions[0])
+    n_y = _positive_grid_dimension(dimensions[1])
     return n_x, n_y
 
 
 def _positive_grid_dimension(value: object) -> int:
-    if isinstance(value, (bool, np.bool_)):
-        raise ValueError("grid_shape dimensions must be positive integers")
     try:
-        integer = operator.index(value)
+        array = np.asarray(value)
+    except ValueError as exc:
+        raise ValueError("grid_shape dimensions must be positive integers") from exc
+    if array.ndim != 0:
+        raise ValueError("grid_shape dimensions must be positive integers")
+    scalar = array.item()
+    if isinstance(scalar, (bool, np.bool_)):
+        raise ValueError("grid_shape dimensions must be positive integers")
+
+    try:
+        integer = operator.index(scalar)
     except TypeError:
         try:
-            numeric = float(value)
+            numeric = float(scalar)
         except (TypeError, ValueError, OverflowError) as exc:
             raise ValueError("grid_shape dimensions must be positive integers") from exc
         if not np.isfinite(numeric):
-            raise ValueError("grid_shape dimensions must be finite positive integers")
+            raise ValueError("grid_shape dimensions must be positive integers")
         integer = int(round(numeric))
         if not np.isclose(numeric, integer, rtol=0.0, atol=0.0):
-            raise ValueError("grid_shape dimensions must be integer-valued")
+            raise ValueError("grid_shape dimensions must be positive integers")
+
     if integer <= 0:
-        raise ValueError("grid_shape dimensions must be positive")
+        raise ValueError("grid_shape dimensions must be positive integers")
     return int(integer)
 
 
@@ -335,40 +347,12 @@ def _scope_label(value: object) -> str:
     if _is_missing_scalar(value):
         return "<missing>"
     if isinstance(value, np.ndarray):
-        if value.ndim == 0:
-            value = value.item()
-        else:
-            return repr(("array", np.asarray(value, dtype=object).reshape(-1).tolist()))
+        return repr(("array", np.asarray(value, dtype=object).reshape(-1).tolist()))
     if isinstance(value, (list, tuple)):
         return repr(("sequence", list(value)))
     if isinstance(value, set):
         return repr(("set", sorted(value, key=repr)))
-    numeric = _numeric_scope_label(value)
-    if numeric is not None:
-        return repr(("numeric", numeric))
     return repr(("scalar", str(value).strip()))
-
-
-def _numeric_scope_label(value: object) -> str | None:
-    """Return a canonical label for numeric scalar scope keys.
-
-    CSV round-trips can turn integer identifiers such as ``event_index`` or
-    ``window_index`` into floats in one table but not the other.  Treat numeric
-    scalars with the same exact value as the same shuffle-control scope, while
-    keeping booleans and textual labels on the normal string path.
-    """
-
-    if isinstance(value, (bool, np.bool_)):
-        return None
-    if not isinstance(value, (int, float, np.integer, np.floating)):
-        return None
-    numeric = float(value)
-    if not np.isfinite(numeric):
-        return None
-    rounded = int(round(numeric))
-    if np.isclose(numeric, rounded, rtol=0.0, atol=0.0):
-        return str(rounded)
-    return repr(numeric)
 
 
 def _is_missing_scalar(value: object) -> bool:

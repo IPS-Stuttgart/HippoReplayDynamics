@@ -103,7 +103,7 @@ def _positive_integer_count(name: str, value: object) -> int:
         raise ValueError(f"{name} must be a positive integer, not boolean")
     try:
         numeric = float(item)
-    except (TypeError, ValueError) as exc:
+    except (TypeError, ValueError, OverflowError) as exc:
         raise ValueError(f"{name} must be a positive integer") from exc
     if not math.isfinite(numeric) or numeric <= 0.0 or not np.isclose(numeric, np.rint(numeric), rtol=0.0, atol=0.0):
         raise ValueError(f"{name} must be a positive integer")

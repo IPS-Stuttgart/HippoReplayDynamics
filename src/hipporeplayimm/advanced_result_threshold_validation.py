@@ -193,6 +193,39 @@ def _ensure_true_model_summary_columns(summary: pd.DataFrame) -> pd.DataFrame:
     return out
 
 
+def _is_missing_true_model_label(value: object) -> bool:
+    if value is None:
+        return True
+    try:
+        missing = pd.isna(value)
+    except (TypeError, ValueError):
+        return False
+    return isinstance(missing, (bool, np.bool_)) and bool(missing)
+
+
+def _validate_unique_true_model_labels(
+    scores: pd.DataFrame,
+    group_cols: Sequence[str],
+    true_model_col: str,
+) -> None:
+    """Reject paired-margin scopes that mix multiple synthetic truth labels."""
+
+    if scores.empty or true_model_col not in scores.columns:
+        return
+    grouped = [((), scores)] if not group_cols else scores.groupby(list(group_cols), sort=False, dropna=False)
+    for key, group in grouped:
+        labels = {
+            str(value)
+            for value in group[true_model_col]
+            if not _is_missing_true_model_label(value)
+        }
+        if len(labels) > 1:
+            raise ValueError(
+                f"{true_model_col} must be constant within each paired model-margin group; "
+                f"group {key!r} has labels {sorted(labels)!r}"
+            )
+
+
 def _threshold_patch_current(diagnostics) -> bool:
     return (
         getattr(diagnostics, _PATCHED_FLAG, False)
@@ -236,6 +269,8 @@ def apply_advanced_result_threshold_validation_patch() -> None:
                 evidence_col,
                 model_col,
             )
+            if true_model_col is not None:
+                _validate_unique_true_model_labels(prepared_scores, paired_group_cols, true_model_col)
             out = base_decisions(
                 prepared_scores,
                 positive_model=positive_model,

@@ -22,6 +22,8 @@ def apply_latent_path_validation_patch() -> None:
         _patch_emissions_from_counts(recovery)
     if not getattr(recovery, "_recovery_event_count_validation_applied", False):
         _patch_run_session_simulation_recovery(recovery)
+    if not getattr(recovery, "_valid_bins_prior_validation_applied", False):
+        _patch_valid_bins_and_prior(recovery)
 
 
 def _patch_simulate_latent_path(recovery: Any) -> None:
@@ -71,6 +73,18 @@ def _patch_run_session_simulation_recovery(recovery: Any) -> None:
 
     recovery.run_session_simulation_recovery = checked_run_session_simulation_recovery
     recovery._recovery_event_count_validation_applied = True
+
+
+def _patch_valid_bins_and_prior(recovery: Any) -> None:
+    original = recovery._valid_bins_and_prior
+
+    @wraps(original)
+    def checked_valid_bins_and_prior(encoding: Any) -> Any:
+        _validate_encoding_occupancy_prior(encoding)
+        return original(encoding)
+
+    recovery._valid_bins_and_prior = checked_valid_bins_and_prior
+    recovery._valid_bins_prior_validation_applied = True
 
 
 def _config_with_validated_event_counts(config: Any) -> Any:
@@ -145,6 +159,18 @@ def _validate_latent_path_motion_sigmas(true_model: Any, state_space: Any) -> No
             "state_space.momentum_sigma_cm_sqrt_s",
             getattr(state_space, "momentum_sigma_cm_sqrt_s"),
         )
+
+
+def _validate_encoding_occupancy_prior(encoding: Any) -> None:
+    try:
+        occupancy = np.asarray(getattr(encoding, "occupancy_s"), dtype=float)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("occupancy_s must contain finite nonnegative values") from exc
+    n_bins = int(getattr(encoding, "n_bins"))
+    if occupancy.ndim != 1 or occupancy.shape[0] != n_bins:
+        raise ValueError("occupancy_s must contain one finite nonnegative value per spatial bin")
+    if not np.all(np.isfinite(occupancy)) or np.any(occupancy < 0.0):
+        raise ValueError("occupancy_s must contain finite nonnegative values")
 
 
 def _finite_nonnegative_value(name: str, value: Any) -> float:

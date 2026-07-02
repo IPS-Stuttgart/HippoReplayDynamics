@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import operator
 from collections.abc import Callable, Sequence
+from functools import wraps
 from typing import Any
 
 import numpy as np
 
 _PATCH_ATTR = "_duration_occupancy_mode_transition_validation_patch"
+_DECAY_PATCH_ATTR = "_duration_occupancy_decay_output_validation_patch"
 _ORIGINAL_ATTR = "_duration_occupancy_mode_transition_validation_original"
 
 
@@ -85,6 +87,32 @@ def _validate_mode_transition_sequence(
     return resolved
 
 
+def _validate_decay_probabilities(decays: np.ndarray, durations: np.ndarray) -> np.ndarray:
+    """Return validated per-transition velocity-decay probabilities."""
+
+    values = np.asarray(decays, dtype=float)
+    expected_shape = np.asarray(durations, dtype=float).shape
+    if values.shape != expected_shape:
+        raise ValueError("momentum velocity decays must contain one value per transition duration")
+    if not np.all(np.isfinite(values)) or np.any((values < 0.0) | (values > 1.0)):
+        raise ValueError("momentum velocity decays must be finite probabilities in [0, 1]")
+    return values
+
+
+def _wrap_duration_adjusted_decays(helper: Callable[..., np.ndarray]) -> Callable[..., np.ndarray]:
+    if getattr(helper, _DECAY_PATCH_ATTR, False):
+        return helper
+
+    @wraps(helper)
+    def duration_adjusted_decays(config_or_decay, durations, reference_dt):
+        out = helper(config_or_decay, durations, reference_dt)
+        return _validate_decay_probabilities(out, np.asarray(durations, dtype=float))
+
+    setattr(duration_adjusted_decays, _DECAY_PATCH_ATTR, True)
+    setattr(duration_adjusted_decays, _ORIGINAL_ATTR, helper)
+    return duration_adjusted_decays
+
+
 def _wrap_resolver(resolver: Callable[..., list[np.ndarray]]) -> Callable[..., list[np.ndarray]]:
     if getattr(resolver, _PATCH_ATTR, False):
         return resolver
@@ -112,11 +140,14 @@ def _wrap_resolver(resolver: Callable[..., list[np.ndarray]]) -> Callable[..., l
 
 
 def apply_duration_occupancy_mode_transition_validation_patch() -> None:
-    """Install validation for externally supplied duration-aware IMM transitions."""
+    """Install validation for duration-aware IMM transition helpers."""
 
     from . import duration_occupancy
 
     duration_occupancy._resolve_mode_transitions = _wrap_resolver(duration_occupancy._resolve_mode_transitions)
+    duration_occupancy._duration_adjusted_decays = _wrap_duration_adjusted_decays(duration_occupancy._duration_adjusted_decays)
 
 
-__all__ = ["apply_duration_occupancy_mode_transition_validation_patch"]
+__all__ = [
+    "apply_duration_occupancy_mode_transition_validation_patch",
+]

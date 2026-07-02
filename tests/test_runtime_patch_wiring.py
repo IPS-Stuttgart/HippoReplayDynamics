@@ -109,3 +109,29 @@ def test_spike_rate_metadata_patch_refreshes_stale_true_flag(monkeypatch) -> Non
     assert metadata["emission_spike_rate_scale"] == 3.0
     assert metadata["emission_likelihood_temperature"] == 0.5
     assert metadata["emission_negative_binomial_overdispersion"] == 0.1
+
+
+def test_wrapper_return_trajectory_patch_refreshes_stale_true_flags(monkeypatch) -> None:
+    import hipporeplayimm
+    import hipporeplayimm.result_improvement_extensions as extensions
+    import hipporeplayimm.reverse_models as reverse_models
+    import hipporeplayimm.wrapper_return_trajectory as wrapper_patch
+
+    def stale_score(*args, **kwargs):  # pragma: no cover - must be replaced before use.
+        raise AssertionError("stale wrapper was not refreshed")
+
+    monkeypatch.setattr(extensions, "score_replay_model_compat", stale_score)
+    monkeypatch.setattr(extensions.ReverseTimeReplayModel, "score", stale_score)
+    monkeypatch.setattr(extensions.BidirectionalReplayModel, "score", stale_score)
+    monkeypatch.setattr(extensions, wrapper_patch._PATCHED_FLAG, True, raising=False)
+    monkeypatch.setattr(reverse_models.ReverseTimeReplayModel, "score", stale_score)
+    monkeypatch.setattr(reverse_models.BidirectionalReplayModel, "score", stale_score)
+    monkeypatch.setattr(reverse_models, wrapper_patch._PATCHED_FLAG, True, raising=False)
+
+    hipporeplayimm.apply_runtime_patches()
+
+    assert getattr(extensions.score_replay_model_compat, wrapper_patch._RESULT_COMPAT_WRAPPER_ATTR, False)
+    assert getattr(extensions.ReverseTimeReplayModel.score, wrapper_patch._EXTENSION_REVERSE_WRAPPER_ATTR, False)
+    assert getattr(extensions.BidirectionalReplayModel.score, wrapper_patch._EXTENSION_BIDIRECTIONAL_WRAPPER_ATTR, False)
+    assert getattr(reverse_models.ReverseTimeReplayModel.score, wrapper_patch._DIRECT_REVERSE_WRAPPER_ATTR, False)
+    assert getattr(reverse_models.BidirectionalReplayModel.score, wrapper_patch._DIRECT_BIDIRECTIONAL_WRAPPER_ATTR, False)

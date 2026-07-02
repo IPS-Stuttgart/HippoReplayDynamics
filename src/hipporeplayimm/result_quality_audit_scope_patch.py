@@ -134,7 +134,10 @@ def _heldout_aware_influence_summary(audit_module: Any, scores: pd.DataFrame) ->
 def apply_result_quality_audit_scope_patch() -> None:
     """Install scoped grouping for result-quality audit summaries."""
 
+    from . import advanced_result_evidence_margin_duplicates
     from . import result_quality_audit as audit_module
+
+    advanced_result_evidence_margin_duplicates.apply_evidence_margin_distinct_model_patch()
 
     current_group_columns = audit_module.event_group_columns
     if not getattr(current_group_columns, _PATCHED_FLAG, False):

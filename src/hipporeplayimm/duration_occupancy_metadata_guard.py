@@ -287,25 +287,36 @@ def _apply_transition_duration_validation() -> None:
     sparse_decay = _validated_decay_helper(sparse_momentum._duration_adjusted_decays)
     displacement_decay = _validated_decay_helper(displacement_momentum._duration_adjusted_decays)
 
-    if not getattr(sparse_momentum, "_transition_duration_validation_patch_applied", False):
+    if _needs_transition_duration_validation_patch(sparse_momentum, sparse_decay):
         sparse_momentum._coerce_transition_durations = _coerce_transition_durations
         sparse_momentum._duration_adjusted_decays = sparse_decay
         sparse_momentum._transition_duration_validation_patch_applied = True
 
-    if not getattr(trajectory_imm, "_transition_duration_validation_patch_applied", False):
+    if _needs_transition_duration_validation_patch(trajectory_imm, sparse_decay):
         trajectory_imm._coerce_transition_durations = _coerce_transition_durations
         trajectory_imm._duration_adjusted_decays = sparse_decay
         trajectory_imm._transition_duration_validation_patch_applied = True
 
-    if not getattr(displacement_momentum, "_transition_duration_validation_patch_applied", False):
+    if _needs_transition_duration_validation_patch(displacement_momentum, displacement_decay):
         displacement_momentum._coerce_transition_durations = _coerce_transition_durations
         displacement_momentum._duration_adjusted_decays = displacement_decay
         displacement_momentum._transition_duration_validation_patch_applied = True
 
-    if not getattr(displacement_imm, "_transition_duration_validation_patch_applied", False):
+    if _needs_transition_duration_validation_patch(displacement_imm, displacement_decay):
         displacement_imm._coerce_transition_durations = _coerce_transition_durations
         displacement_imm._duration_adjusted_decays = displacement_decay
         displacement_imm._transition_duration_validation_patch_applied = True
+
+
+def _needs_transition_duration_validation_patch(
+    module: Any,
+    decay_helper: Callable[[Any, np.ndarray, float], np.ndarray],
+) -> bool:
+    return (
+        not getattr(module, "_transition_duration_validation_patch_applied", False)
+        or getattr(module, "_coerce_transition_durations", None) is not _coerce_transition_durations
+        or getattr(module, "_duration_adjusted_decays", None) is not decay_helper
+    )
 
 
 def _coerce_transition_durations(

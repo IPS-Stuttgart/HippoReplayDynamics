@@ -19,6 +19,11 @@ def _tensor_with_log_likelihood(log_likelihood: np.ndarray) -> LogEmissionTensor
     )
 
 
+def test_log_emission_tensor_rejects_empty_time_axes_at_construction():
+    with pytest.raises(ValueError, match="at least one time bin"):
+        _tensor_with_log_likelihood(np.empty((0, 2), dtype=float))
+
+
 def test_log_emission_tensor_rejects_nan_likelihood_entries_at_construction():
     with pytest.raises(ValueError, match="NaN"):
         _tensor_with_log_likelihood(np.array([[0.0, np.nan], [0.0, 0.0]], dtype=float))

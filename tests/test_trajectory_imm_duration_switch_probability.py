@@ -2,13 +2,9 @@ from __future__ import annotations
 
 import numpy as np
 
+from hipporeplayimm import state_space_trajectory_imm as trajectory_imm
 from hipporeplayimm.model_parameter_validation import apply_model_parameter_validation_patch
 from hipporeplayimm.state_space_model import StateSpaceDecoderConfig
-from hipporeplayimm.state_space_trajectory_imm import (
-    _FIRST_ORDER_MODE_COUNT,
-    _MOMENTUM_MODE_INDEX,
-    _trajectory_imm_mode_transition_matrices,
-)
 
 
 def test_trajectory_imm_tau_scales_explicit_momentum_switch_probability() -> None:
@@ -25,7 +21,7 @@ def test_trajectory_imm_tau_scales_explicit_momentum_switch_probability() -> Non
     )
     durations = np.asarray([0.01, 0.10, 0.50], dtype=float)
 
-    matrices = _trajectory_imm_mode_transition_matrices(config, base_stickiness, durations)
+    matrices = trajectory_imm._trajectory_imm_mode_transition_matrices(config, base_stickiness, durations)
 
     assert len(matrices) == durations.size
     switch_fraction = momentum_switch / (1.0 - base_stickiness)
@@ -40,10 +36,10 @@ def test_trajectory_imm_tau_scales_explicit_momentum_switch_probability() -> Non
             np.full(matrix.shape[0], step_stickiness),
         )
         np.testing.assert_allclose(
-            matrix[:_FIRST_ORDER_MODE_COUNT, _MOMENTUM_MODE_INDEX],
+            matrix[: trajectory_imm._FIRST_ORDER_MODE_COUNT, trajectory_imm._MOMENTUM_MODE_INDEX],
             expected_momentum_switch,
         )
         np.testing.assert_allclose(
-            matrix[_MOMENTUM_MODE_INDEX, :_FIRST_ORDER_MODE_COUNT],
-            step_remaining / _FIRST_ORDER_MODE_COUNT,
+            matrix[trajectory_imm._MOMENTUM_MODE_INDEX, : trajectory_imm._FIRST_ORDER_MODE_COUNT],
+            step_remaining / trajectory_imm._FIRST_ORDER_MODE_COUNT,
         )

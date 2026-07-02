@@ -39,6 +39,7 @@ def apply_evidence_margin_distinct_model_patch() -> None:
             out["evidence_margin_to_second_best"] = np.nan
             out["evidence_margin_category"] = "missing"
             return out
+        margins = _align_margin_group_key_dtypes(scores, margins, groups)
         return scores.merge(margins, on=list(groups), how="left")
 
     setattr(evidence_margin_table, _MARGIN_FLAG, True)
@@ -65,6 +66,20 @@ def _collapse_duplicate_models(diagnostics, scores: pd.DataFrame, group_cols: tu
         if not group.empty:
             rows.append(group.drop_duplicates(model_col, keep="first"))
     return pd.concat(rows, ignore_index=False) if rows else ok.iloc[0:0].copy()
+
+
+def _align_margin_group_key_dtypes(
+    scores: pd.DataFrame,
+    margins: pd.DataFrame,
+    group_cols: tuple[str, ...],
+) -> pd.DataFrame:
+    """Match margin grouping-key dtypes before merging back into score rows."""
+
+    out = margins.copy()
+    for column in group_cols:
+        if column in scores.columns and column in out.columns:
+            out[column] = out[column].astype(scores[column].dtype)
+    return out
 
 
 def _normalize_group_cols(group_cols):

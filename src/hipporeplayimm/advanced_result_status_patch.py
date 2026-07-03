@@ -29,7 +29,9 @@ def apply_advanced_result_status_patch() -> None:
     """Patch advanced diagnostics status handling and count-input guards."""
 
     from . import advanced_result_diagnostics as diagnostics
+    from . import advanced_result_margin_duplicate_patch as margin_duplicate_patch
 
+    margin_duplicate_patch.apply_advanced_result_margin_duplicate_patch()
     if getattr(diagnostics, _PATCHED_FLAG, False) and _advanced_result_patch_current(diagnostics):
         return
 

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import operator
+
 import numpy as np
 from scipy.sparse import csr_matrix
 from scipy.special import logsumexp
@@ -30,6 +32,45 @@ def _is_boolean_scalar(value: object) -> bool:
 def _reject_boolean_count(name: str, value: object) -> None:
     if _is_boolean_scalar(value):
         raise TypeError(f"{name} must be an integer count, not boolean")
+
+
+def _coerce_integer_count(name: str, value: object) -> int:
+    """Return an integer scalar count without bool, float, or array coercion."""
+
+    _reject_boolean_count(name, value)
+    try:
+        arr = np.asarray(value)
+    except ValueError as exc:
+        raise TypeError(f"{name} must be an integer scalar") from exc
+    if arr.ndim != 0:
+        raise TypeError(f"{name} must be an integer scalar")
+    item = arr.item()
+    if isinstance(item, (bool, np.bool_)):
+        raise TypeError(f"{name} must be an integer count, not boolean")
+    try:
+        return int(operator.index(item))
+    except TypeError as exc:
+        raise TypeError(f"{name} must be an integer scalar") from exc
+
+
+def _coerce_unit_probability(name: str, value: object) -> float:
+    """Return a scalar probability in [0, 1] without accepting booleans."""
+
+    if _is_boolean_scalar(value):
+        raise TypeError(f"{name} must be numeric, not boolean")
+    try:
+        arr = np.asarray(value)
+    except ValueError as exc:
+        raise TypeError(f"{name} must be a numeric scalar") from exc
+    if arr.ndim != 0:
+        raise TypeError(f"{name} must be a numeric scalar")
+    try:
+        probability = float(arr.item())
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must be in [0, 1]") from exc
+    if not np.isfinite(probability) or not 0.0 <= probability <= 1.0:
+        raise ValueError(f"{name} must be in [0, 1]")
+    return probability
 
 
 def _per_bin_sigma(sigma_cm_sqrt_s: float, dt_s: float) -> float:
@@ -472,11 +513,10 @@ def _first_order_imm_content_diagnostics(
 
 
 def _mode_transition_matrix(n_modes: int, stickiness: float) -> np.ndarray:
-    n_modes = int(n_modes)
+    n_modes = _coerce_integer_count("n_modes", n_modes)
     if n_modes < 1:
         raise ValueError("n_modes must be positive")
-    if not 0.0 <= stickiness <= 1.0:
-        raise ValueError("mode_stickiness must be in [0, 1]")
+    stickiness = _coerce_unit_probability("mode_stickiness", stickiness)
     if n_modes == 1:
         return np.ones((1, 1), dtype=float)
     off_diag = (1.0 - stickiness) / (n_modes - 1)

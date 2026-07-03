@@ -7,6 +7,7 @@ import pandas as pd
 
 from hipporeplayimm.data import ReplaySession, SpikeMarkData
 from hipporeplayimm.result_improvements import (
+    _yaml_lines,
     add_candidate_support_quality_columns,
     circular_shift_spikes_session,
     hierarchical_bootstrap_ci,
@@ -128,6 +129,24 @@ def test_posterior_calibration_summary() -> None:
     summary = posterior_calibration_summary(samples)
     assert summary.loc[0, "rows"] == 2
     assert summary.loc[0, "mean_true_negative_log_probability"] > 0.0
+
+
+def test_yaml_lines_quotes_ambiguous_string_scalars() -> None:
+    text = _yaml_lines(
+        {
+            "cli_args": {
+                "bool_literal": "true",
+                "null_literal": "null",
+                "numeric_literal": "1e-4",
+                "plain_literal": "run",
+            }
+        }
+    )
+
+    assert 'bool_literal: "true"' in text
+    assert 'null_literal: "null"' in text
+    assert 'numeric_literal: "1e-4"' in text
+    assert "plain_literal: run" in text
 
 
 def test_shuffle_spike_times_keeps_clusterless_mark_times_aligned() -> None:

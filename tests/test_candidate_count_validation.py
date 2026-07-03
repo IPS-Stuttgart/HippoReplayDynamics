@@ -60,6 +60,23 @@ def test_candidate_count_helpers_accept_integer_valued_scalar_counts() -> None:
     assert selected.size >= 2
 
 
+def test_candidate_count_helpers_preserve_disabled_top_k_sentinel() -> None:
+    log_emission = np.array([0.0, 2.0, 1.0], dtype=float)
+
+    np.testing.assert_array_equal(
+        public_state_space._top_candidate_indices(log_emission, -1),
+        np.array([0, 1, 2]),
+    )
+    selected = public_state_space._mass_retaining_candidate_indices(
+        log_emission,
+        0.8,
+        top_k=-1,
+        min_k=1,
+        max_k=0,
+    )
+    assert selected.size >= 1
+
+
 def test_candidate_count_validation_refreshes_imported_aliases() -> None:
     apply_runtime_patches()
 

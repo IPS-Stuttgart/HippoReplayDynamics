@@ -21,11 +21,11 @@ def _validate_active_support_rows(values: np.ndarray) -> None:
         raise ValueError(f"row {row} must contain at least one finite value on the active support")
 
 
-def _coerce_nonnegative_integer_count(name: str, value: object) -> int:
-    """Return a safe count value for candidate-support helpers."""
+def _coerce_integer_count(name: str, value: object) -> int:
+    """Return a safe integer count while preserving existing sentinel values."""
 
     if isinstance(value, (bool, np.bool_)):
-        raise TypeError(f"{name} must be a nonnegative integer count, not boolean")
+        raise TypeError(f"{name} must be an integer count, not boolean")
     try:
         arr = np.asarray(value)
     except ValueError as exc:
@@ -33,18 +33,25 @@ def _coerce_nonnegative_integer_count(name: str, value: object) -> int:
     if arr.ndim != 0:
         raise TypeError(f"{name} must be a scalar integer count")
     if np.issubdtype(arr.dtype, np.bool_):
-        raise TypeError(f"{name} must be a nonnegative integer count, not boolean")
+        raise TypeError(f"{name} must be an integer count, not boolean")
     if arr.dtype == object:
         value = arr.item()
         if isinstance(value, (bool, np.bool_)):
-            raise TypeError(f"{name} must be a nonnegative integer count, not boolean")
+            raise TypeError(f"{name} must be an integer count, not boolean")
     try:
         numeric = float(value)
     except (TypeError, ValueError) as exc:
-        raise ValueError(f"{name} must be a finite nonnegative integer count") from exc
-    if not np.isfinite(numeric) or numeric < 0.0 or not numeric.is_integer():
-        raise ValueError(f"{name} must be a finite nonnegative integer count")
+        raise ValueError(f"{name} must be a finite integer count") from exc
+    if not np.isfinite(numeric) or not numeric.is_integer():
+        raise ValueError(f"{name} must be a finite integer count")
     return int(numeric)
+
+
+def _coerce_nonnegative_integer_count(name: str, value: object) -> int:
+    count = _coerce_integer_count(name, value)
+    if count < 0:
+        raise ValueError(f"{name} must be a finite nonnegative integer count")
+    return count
 
 
 def _refresh_helper_aliases(helper_name: str, original, patched) -> None:
@@ -74,7 +81,7 @@ def _apply_candidate_count_validation_patch() -> None:
         def top_candidate_indices(log_emission, top_k):
             return original_top(
                 log_emission,
-                _coerce_nonnegative_integer_count("top_k", top_k),
+                _coerce_integer_count("top_k", top_k),
             )
 
         setattr(top_candidate_indices, _COUNT_HELPERS_PATCHED_FLAG, True)
@@ -100,7 +107,7 @@ def _apply_candidate_count_validation_patch() -> None:
             return original_mass(
                 log_emission,
                 mass_threshold,
-                top_k=(None if top_k is None else _coerce_nonnegative_integer_count("top_k", top_k)),
+                top_k=(None if top_k is None else _coerce_integer_count("top_k", top_k)),
                 min_k=_coerce_nonnegative_integer_count("min_k", min_k),
                 max_k=_coerce_nonnegative_integer_count("max_k", max_k),
             )

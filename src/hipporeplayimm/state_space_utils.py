@@ -83,12 +83,35 @@ def _per_bin_sigma(sigma_cm_sqrt_s: float, dt_s: float) -> float:
     return max(sigma * np.sqrt(dt), np.finfo(float).eps)
 
 
+def _candidate_score_support(log_emission: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    values = np.asarray(log_emission, dtype=float)
+    if values.ndim != 1:
+        raise ValueError("log_emission must be one-dimensional")
+    if values.size == 0:
+        return values, np.empty(0, dtype=int)
+    if np.any(values == np.inf):
+        raise ValueError("log_emission must not contain +inf")
+    finite_indices = np.flatnonzero(np.isfinite(values))
+    if finite_indices.size == 0:
+        raise ValueError("log_emission must contain at least one finite value")
+    return values, finite_indices
+
+
+def _sort_candidate_indices(values: np.ndarray, candidates: np.ndarray) -> np.ndarray:
+    return candidates[np.argsort(values[candidates])[::-1]]
+
+
 def _top_candidate_indices(log_emission: np.ndarray, top_k: int) -> np.ndarray:
-    _reject_boolean_count("top_k", top_k)
-    if top_k <= 0 or top_k >= log_emission.shape[0]:
-        return np.arange(log_emission.shape[0], dtype=int)
-    selected = np.argpartition(log_emission, -top_k)[-top_k:]
-    return selected[np.argsort(log_emission[selected])[::-1]]
+    top_k = _coerce_integer_count("top_k", top_k)
+    values, finite_indices = _candidate_score_support(log_emission)
+    if finite_indices.size == 0:
+        return finite_indices
+    if top_k <= 0 or top_k >= finite_indices.size:
+        return _sort_candidate_indices(values, finite_indices)
+    candidate_scores = values[finite_indices]
+    selected_local = np.argpartition(candidate_scores, -top_k)[-top_k:]
+    selected = finite_indices[selected_local]
+    return _sort_candidate_indices(values, selected)
 
 
 def _mass_retaining_candidate_indices(
@@ -108,32 +131,26 @@ def _mass_retaining_candidate_indices(
     """
 
     if top_k is not None:
-        _reject_boolean_count("top_k", top_k)
-    _reject_boolean_count("min_k", min_k)
-    _reject_boolean_count("max_k", max_k)
+        top_k = _coerce_integer_count("top_k", top_k)
+    min_k = _coerce_integer_count("min_k", min_k)
+    max_k = _coerce_integer_count("max_k", max_k)
 
-    values = np.asarray(log_emission, dtype=float)
-    if values.ndim != 1:
-        raise ValueError("log_emission must be one-dimensional")
+    values, finite_indices = _candidate_score_support(log_emission)
     if values.size == 0:
         return np.empty(0, dtype=int)
     if mass_threshold is None or float(mass_threshold) <= 0.0:
-        return _top_candidate_indices(values, 0 if top_k is None else int(top_k))
+        return _top_candidate_indices(values, 0 if top_k is None else top_k)
     if not 0.0 < float(mass_threshold) <= 1.0:
         raise ValueError("mass_threshold must be in (0, 1]")
     if min_k < 0:
         raise ValueError("min_k must be non-negative")
     if max_k < 0:
         raise ValueError("max_k must be non-negative")
-    finite = np.isfinite(values)
-    if not np.any(finite):
-        raise ValueError("log_emission must contain at least one finite value")
-    order = np.argsort(np.where(finite, values, -np.inf))[::-1]
-    finite_order = order[finite[order]]
+    finite_order = _sort_candidate_indices(values, finite_indices)
     finite_count = int(finite_order.size)
-    top_k_minimum = 0 if top_k is None or int(top_k) <= 0 else int(top_k)
-    min_count = min(finite_count, max(1, top_k_minimum, int(min_k)))
-    max_count = finite_count if max_k <= 0 else min(finite_count, max(min_count, int(max_k)))
+    top_k_minimum = 0 if top_k is None or top_k <= 0 else top_k
+    min_count = min(finite_count, max(1, top_k_minimum, min_k))
+    max_count = finite_count if max_k <= 0 else min(finite_count, max(min_count, max_k))
     ordered_values = values[finite_order]
     cumulative_mass = np.cumsum(np.exp(ordered_values - logsumexp(ordered_values)))
     tolerance = 16.0 * np.finfo(float).eps

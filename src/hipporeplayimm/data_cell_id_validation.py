@@ -34,6 +34,7 @@ def apply_data_cell_id_validation_patch() -> None:
     original_load_spike_marks = data._load_spike_marks
     original_mark_group_ids = data._mark_group_ids_from_tetrode_cell_ids
     original_coerce_ripple_event = data._coerce_ripple_event
+    original_as_integer_vector = data._as_integer_vector
     original_spikes_and_cell_ids_for_encoding = encoding._spikes_and_cell_ids_for_encoding
 
     patch_targets = (
@@ -44,6 +45,7 @@ def apply_data_cell_id_validation_patch() -> None:
         original_load_spike_marks,
         original_mark_group_ids,
         original_coerce_ripple_event,
+        original_as_integer_vector,
         original_spikes_and_cell_ids_for_encoding,
     )
     if all(_is_patched(target) for target in patch_targets):
@@ -109,6 +111,9 @@ def apply_data_cell_id_validation_patch() -> None:
             return session.ripple(ripple)
         return original_coerce_ripple_event(session, ripple)
 
+    def as_integer_vector(value, name):
+        return _coerce_integral_ids(value, name).reshape(-1)
+
     def spikes_and_cell_ids_for_encoding(session, config):
         spikes = np.asarray(session.spikes)
         if spikes.size:
@@ -140,6 +145,8 @@ def apply_data_cell_id_validation_patch() -> None:
         original_coerce_ripple_event,
         active_coerce_ripple_event,
     )
+    if not _is_patched(original_as_integer_vector):
+        data._as_integer_vector = _mark_patched(as_integer_vector, original_as_integer_vector)
     if not _is_patched(original_spikes_and_cell_ids_for_encoding):
         encoding._spikes_and_cell_ids_for_encoding = _mark_patched(spikes_and_cell_ids_for_encoding, original_spikes_and_cell_ids_for_encoding)
 

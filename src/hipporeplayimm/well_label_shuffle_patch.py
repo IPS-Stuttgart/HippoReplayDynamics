@@ -23,6 +23,32 @@ def apply_well_label_shuffle_patch() -> None:
     setattr(result_improvements, _PATCHED_FLAG, True)
 
 
+def _nonnegative_integer_value(name: str, value: object) -> int:
+    """Return a nonnegative integer scalar without boolean or float truncation."""
+
+    try:
+        array = np.asarray(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must be an integer scalar") from exc
+    if array.ndim != 0:
+        raise ValueError(f"{name} must be an integer scalar")
+    scalar = array.item()
+    if isinstance(scalar, (bool, np.bool_)):
+        raise ValueError(f"{name} must be an integer, not boolean")
+    try:
+        numeric = float(scalar)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ValueError(f"{name} must be an integer") from exc
+    if not np.isfinite(numeric):
+        raise ValueError(f"{name} must be a finite integer")
+    integer = int(round(numeric))
+    if not np.isclose(numeric, integer, rtol=0.0, atol=0.0):
+        raise ValueError(f"{name} must be an integer")
+    if integer < 0:
+        raise ValueError(f"{name} must be a nonnegative integer")
+    return integer
+
+
 def shuffle_well_labels(frame: pd.DataFrame, random_seed: int = 1) -> pd.DataFrame:
     """Shuffle complete label rows without breaking ID/coordinate links.
 
@@ -33,6 +59,7 @@ def shuffle_well_labels(frame: pd.DataFrame, random_seed: int = 1) -> pd.DataFra
     control is not a silent no-op for coordinate-backed labels.
     """
 
+    seed = _nonnegative_integer_value("random_seed", random_seed)
     if frame.empty:
         return frame.copy()
     out = frame.copy()
@@ -48,7 +75,7 @@ def shuffle_well_labels(frame: pd.DataFrame, random_seed: int = 1) -> pd.DataFra
         return out
 
     label_values = out.loc[labelled_rows, label_columns].to_numpy(copy=True)
-    rng = np.random.default_rng(random_seed)
+    rng = np.random.default_rng(seed)
     out.loc[labelled_rows, label_columns] = label_values[
         rng.permutation(label_values.shape[0])
     ]

@@ -12,6 +12,9 @@ import pandas as pd
 _PATCHED_FLAG = "_evidence_status_coercion_patch_applied"
 _CORE_WRAPPER_FLAG = "_evidence_status_coercion_core_wrapper"
 _CERTIFIED_RECOVERY_PATCHED_FLAG = "_certified_recovery_status_coercion_patch_applied"
+_CERTIFIED_EVENT_WRAPPER_FLAG = "_certified_recovery_status_coercion_event_wrapper"
+_CERTIFIED_SUMMARY_WRAPPER_FLAG = "_certified_recovery_status_coercion_summary_wrapper"
+_CERTIFIED_ORIGINAL_ATTR = "_certified_recovery_status_coercion_original"
 _RECOVERY_DIAGNOSTICS_PATCHED_FLAG = "_recovery_diagnostics_status_coercion_patch_applied"
 _MISSING_STATUS_VALUES = {"", "nan", "na", "n/a", "none", "null", "<na>"}
 _EXPLICIT_FALSE_BOOL_VALUES = {"0", "0.0", "false", "f", "no", "n", "off"}
@@ -188,11 +191,11 @@ def _patch_optional_recovery_modules(reporting: Any) -> None:
 def _patch_certified_recovery(recovery: Any) -> None:
     """Normalize legacy status values before certified-vs-exact recovery views."""
 
-    if getattr(recovery, _CERTIFIED_RECOVERY_PATCHED_FLAG, False):
+    if getattr(recovery, _CERTIFIED_RECOVERY_PATCHED_FLAG, False) and _certified_recovery_patch_current(recovery):
         return
 
-    original_certified_events = recovery.certified_vs_exact_event_recovery
-    original_certified_summary = recovery.certified_vs_exact_recovery_summary
+    original_certified_events = _unwrap_certified_recovery(recovery.certified_vs_exact_event_recovery)
+    original_certified_summary = _unwrap_certified_recovery(recovery.certified_vs_exact_recovery_summary)
 
     @wraps(original_certified_events)
     def certified_vs_exact_event_recovery(event_scores: pd.DataFrame) -> pd.DataFrame:
@@ -202,9 +205,26 @@ def _patch_certified_recovery(recovery: Any) -> None:
     def certified_vs_exact_recovery_summary(event_scores: pd.DataFrame) -> pd.DataFrame:
         return original_certified_summary(_normalize_status_frame(event_scores))
 
+    setattr(certified_vs_exact_event_recovery, _CERTIFIED_EVENT_WRAPPER_FLAG, True)
+    setattr(certified_vs_exact_event_recovery, _CERTIFIED_ORIGINAL_ATTR, original_certified_events)
+    setattr(certified_vs_exact_recovery_summary, _CERTIFIED_SUMMARY_WRAPPER_FLAG, True)
+    setattr(certified_vs_exact_recovery_summary, _CERTIFIED_ORIGINAL_ATTR, original_certified_summary)
     recovery.certified_vs_exact_event_recovery = certified_vs_exact_event_recovery
     recovery.certified_vs_exact_recovery_summary = certified_vs_exact_recovery_summary
     setattr(recovery, _CERTIFIED_RECOVERY_PATCHED_FLAG, True)
+
+
+def _certified_recovery_patch_current(recovery: Any) -> bool:
+    """Return whether certified-recovery aliases still point to this patch."""
+
+    return bool(
+        getattr(getattr(recovery, "certified_vs_exact_event_recovery", None), _CERTIFIED_EVENT_WRAPPER_FLAG, False)
+        and getattr(getattr(recovery, "certified_vs_exact_recovery_summary", None), _CERTIFIED_SUMMARY_WRAPPER_FLAG, False)
+    )
+
+
+def _unwrap_certified_recovery(function: Any) -> Any:
+    return getattr(function, _CERTIFIED_ORIGINAL_ATTR, function)
 
 
 def _normalize_lower_bound_recovery_flags(frame: pd.DataFrame, reporting: Any) -> pd.DataFrame:

@@ -43,6 +43,8 @@ PYRECEST_DEFAULTS = {
     "pyrecest_imm_jump_velocity_decay": 0.25,
 }
 
+PYRECEST_FLOAT_METADATA_ATOL = 1e-12
+
 
 def pyrecest_metadata_for_config(config: object) -> dict[str, int | float]:
     out: dict[str, int | float] = {}
@@ -197,9 +199,13 @@ def _unique_float(frame: pd.DataFrame, columns: tuple[str, ...], default: float)
     values = _numeric_metadata_values(frame, columns)
     if not values:
         return float(default)
-    if any(not np.isclose(value, values[0]) for value in values[1:]):
+    if any(not _same_float_metadata(value, values[0]) for value in values[1:]):
         raise ValueError(f"{' / '.join(columns)} contains multiple values")
     return float(values[0])
+
+
+def _same_float_metadata(left: float, right: float) -> bool:
+    return bool(np.isclose(left, right, rtol=0.0, atol=PYRECEST_FLOAT_METADATA_ATOL))
 
 
 _MISSING_METADATA_STRINGS = {"", "nan", "na", "n/a", "none", "null", "<na>"}

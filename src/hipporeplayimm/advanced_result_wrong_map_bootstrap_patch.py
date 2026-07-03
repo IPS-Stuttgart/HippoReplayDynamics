@@ -192,9 +192,18 @@ def _apply_numeric_evidence_wrappers(diagnostics) -> None:
             key_cols: Sequence[str] = ("session", "event_index", "model"),
             evidence_col: str = "log_evidence",
         ) -> pd.DataFrame:
+            key_columns = tuple(key_cols)
             return original_delta(
-                _coerce_numeric_evidence(current_map_scores, evidence_col),
-                _coerce_numeric_evidence(wrong_map_scores, evidence_col),
+                _best_duplicate_key_evidence(
+                    _coerce_numeric_evidence(current_map_scores, evidence_col),
+                    key_columns,
+                    evidence_col,
+                ),
+                _best_duplicate_key_evidence(
+                    _coerce_numeric_evidence(wrong_map_scores, evidence_col),
+                    key_columns,
+                    evidence_col,
+                ),
                 key_cols=key_cols,
                 evidence_col=evidence_col,
             )
@@ -217,9 +226,18 @@ def _apply_numeric_evidence_wrappers(diagnostics) -> None:
             evidence_col: str = "log_evidence",
             model_col: str = "model",
         ) -> pd.DataFrame:
+            key_columns = tuple(group_cols) + (model_col,)
             return original_absolute(
-                _coerce_numeric_evidence(current_map_scores, evidence_col),
-                _coerce_numeric_evidence(wrong_map_scores, evidence_col),
+                _best_duplicate_key_evidence(
+                    _coerce_numeric_evidence(current_map_scores, evidence_col),
+                    key_columns,
+                    evidence_col,
+                ),
+                _best_duplicate_key_evidence(
+                    _coerce_numeric_evidence(wrong_map_scores, evidence_col),
+                    key_columns,
+                    evidence_col,
+                ),
                 group_cols=group_cols,
                 fixed_models=fixed_models,
                 exact_core_models=exact_core_models,
@@ -259,6 +277,34 @@ def _coerce_numeric_evidence(frame: pd.DataFrame, evidence_col: str) -> pd.DataF
     out[evidence_col] = pd.to_numeric(out[evidence_col], errors="coerce")
     finite = np.isfinite(out[evidence_col].to_numpy(dtype=float))
     return out.loc[finite].copy()
+
+
+def _best_duplicate_key_evidence(
+    frame: pd.DataFrame,
+    key_cols: Sequence[str],
+    evidence_col: str,
+) -> pd.DataFrame:
+    """Keep the highest finite evidence row for each wrong-map comparison key."""
+
+    if frame.empty or evidence_col not in frame.columns:
+        return frame
+    key_columns = tuple(key_cols)
+    if any(column not in frame.columns for column in key_columns):
+        return frame
+
+    out = frame.copy()
+    evidence_key = "__wrong_map_duplicate_numeric_evidence"
+    while evidence_key in out.columns:
+        evidence_key = f"_{evidence_key}"
+    out[evidence_key] = pd.to_numeric(out[evidence_col], errors="coerce")
+    out = out.sort_values(
+        evidence_key,
+        ascending=True,
+        kind="stable",
+        na_position="first",
+    )
+    out = out.drop_duplicates(list(key_columns), keep="last")
+    return out.drop(columns=[evidence_key])
 
 
 def _unwrap_numeric(function):

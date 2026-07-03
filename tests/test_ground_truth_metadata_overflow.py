@@ -16,6 +16,12 @@ def test_ground_truth_integer_metadata_overflow_is_value_error() -> None:
         _parse_integer_metadata_value("event_index", _OverflowingNumeric())
 
 
+def test_ground_truth_integer_metadata_preserves_large_integer_strings() -> None:
+    large_value = 2**53 + 1
+
+    assert _parse_integer_metadata_value("event_index", str(large_value)) == large_value
+
+
 def test_ground_truth_cell_id_metadata_overflow_is_value_error() -> None:
     with pytest.raises(ValueError, match="cell IDs.*integer values"):
         _parse_cell_id_value(_OverflowingNumeric())

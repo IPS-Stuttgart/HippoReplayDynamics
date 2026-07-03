@@ -138,6 +138,17 @@ def _normalize_group_cols(group_cols: Sequence[str] | str | None, scores: pd.Dat
     return tuple(group_cols)
 
 
+def _coerce_nonfinite_evidence_to_missing(scores: pd.DataFrame, evidence_col: str) -> pd.DataFrame:
+    """Ensure paired comparisons ignore NaN/+inf/-inf evidence rows uniformly."""
+
+    if scores.empty or evidence_col not in scores.columns:
+        return scores
+    out = scores.copy()
+    numeric = pd.to_numeric(out[evidence_col], errors="coerce")
+    out[evidence_col] = numeric.where(np.isfinite(numeric), np.nan)
+    return out
+
+
 def _sort_scores_for_duplicate_model_evidence(
     scores: pd.DataFrame,
     group_cols: Sequence[str],
@@ -149,7 +160,7 @@ def _sort_scores_for_duplicate_model_evidence(
     if scores.empty or evidence_col not in scores.columns or model_col not in scores.columns:
         return scores
 
-    out = scores.copy()
+    out = _coerce_nonfinite_evidence_to_missing(scores, evidence_col)
     evidence_key = "__paired_model_numeric_evidence"
     while evidence_key in out.columns:
         evidence_key = f"_{evidence_key}"

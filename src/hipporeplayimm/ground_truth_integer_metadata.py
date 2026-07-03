@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from decimal import Decimal, InvalidOperation
 from typing import Any
 
 import numpy as np
@@ -60,14 +61,24 @@ def apply_ground_truth_integer_metadata_patch() -> None:
 def _parse_integer_metadata_value(column: str, value: Any) -> int:
     if isinstance(value, (bool, np.bool_)):
         raise ValueError(f"{column} must contain integer values")
-    try:
+    if isinstance(value, (int, np.integer)):
+        return int(value)
+    if isinstance(value, (float, np.floating)):
         numeric = float(value)
-    except (TypeError, ValueError, OverflowError) as exc:
+        if not np.isfinite(numeric):
+            raise ValueError(f"{column} must contain finite integer values")
+        if not numeric.is_integer():
+            raise ValueError(f"{column} must contain integer values")
+        return int(numeric)
+
+    try:
+        numeric = Decimal(str(value).strip())
+    except (InvalidOperation, ValueError) as exc:
         raise ValueError(f"{column} must contain integer values") from exc
-    if not np.isfinite(numeric):
+    if not numeric.is_finite():
         raise ValueError(f"{column} must contain finite integer values")
-    integer = int(round(numeric))
-    if numeric != float(integer):
+    integer = numeric.to_integral_value()
+    if numeric != integer:
         raise ValueError(f"{column} must contain integer values")
     return int(integer)
 

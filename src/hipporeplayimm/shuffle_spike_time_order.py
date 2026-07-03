@@ -27,6 +27,9 @@ def apply_shuffle_spike_time_order_patch() -> None:
         def scope_label(value: object) -> str:
             if isinstance(value, Mapping):
                 return _mapping_scope_label(value, scope_label)
+            nonfinite_numeric = _nonfinite_numeric_scope_label(value)
+            if nonfinite_numeric is not None:
+                return repr(("scalar", nonfinite_numeric))
             numeric = _numeric_scope_label(value)
             if numeric is not None:
                 return repr(("numeric", numeric))
@@ -74,6 +77,15 @@ def _numeric_scope_label(value: object) -> str | None:
     if not np.isfinite(numeric):
         return None
     return str(int(numeric)) if numeric.is_integer() else format(numeric, ".17g")
+
+
+def _nonfinite_numeric_scope_label(value: object) -> str | None:
+    if isinstance(value, (bool, np.bool_)) or not isinstance(value, (int, float, np.integer, np.floating)):
+        return None
+    numeric = float(value)
+    if np.isfinite(numeric):
+        return None
+    return str(value).strip()
 
 
 def _nonnegative_integer_seed(value: object) -> int:

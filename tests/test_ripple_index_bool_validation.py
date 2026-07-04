@@ -53,16 +53,24 @@ def _single_bin_encoding() -> EncodingModel:
     )
 
 
-def test_boolean_ripple_indices_are_rejected_before_aliasing_to_events() -> None:
+@pytest.mark.parametrize(
+    "ripple_index",
+    [
+        True,
+        np.bool_(False),
+        np.array(True),
+        np.asarray(False, dtype=object),
+    ],
+)
+def test_boolean_ripple_indices_are_rejected_before_aliasing_to_events(ripple_index) -> None:
     session = _two_ripple_session()
 
     with pytest.raises(TypeError, match="ripple index"):
-        _coerce_ripple_event(session, True)
-    with pytest.raises(TypeError, match="ripple index"):
-        _coerce_ripple_event(session, np.bool_(False))
+        _coerce_ripple_event(session, ripple_index)
 
 
-def test_emission_builder_rejects_boolean_ripple_indices_through_imported_alias() -> None:
+@pytest.mark.parametrize("ripple_index", [True, np.array(True)])
+def test_emission_builder_rejects_boolean_ripple_indices_through_imported_alias(ripple_index) -> None:
     session = _two_ripple_session()
     encoding = _single_bin_encoding()
 
@@ -70,6 +78,6 @@ def test_emission_builder_rejects_boolean_ripple_indices_through_imported_alias(
         build_emissions(
             session,
             encoding,
-            True,
+            ripple_index,
             EmissionConfig(time_bin_s=0.05),
         )

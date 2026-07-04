@@ -24,3 +24,22 @@ def test_load_mat_v73_preserves_numeric_uint16_arrays(tmp_path: Path) -> None:
     assert isinstance(loaded, np.ndarray)
     np.testing.assert_array_equal(loaded, expected)
     assert load_mat_variable(path, "Session_Label") == "Open1"
+
+
+def test_load_mat_v73_decodes_2d_char_arrays_in_matlab_orientation(tmp_path: Path) -> None:
+    h5py = pytest.importorskip("h5py")
+    path = tmp_path / "Experiment_Information.mat"
+    expected = "Open1"
+    stored = np.array(
+        [
+            [ord("O"), ord("e"), ord("1")],
+            [ord("p"), ord("n"), 0],
+        ],
+        dtype=np.uint16,
+    )
+
+    with h5py.File(path, "w") as handle:
+        label = handle.create_dataset("Session_Label", data=stored)
+        label.attrs["MATLAB_class"] = np.bytes_("char")
+
+    assert load_mat_variable(path, "Session_Label") == expected

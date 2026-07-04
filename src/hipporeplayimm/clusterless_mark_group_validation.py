@@ -11,6 +11,7 @@ are used as boolean masks during clusterless encoding.
 
 from __future__ import annotations
 
+from decimal import Decimal, InvalidOperation
 from typing import Any
 
 import numpy as np
@@ -72,18 +73,82 @@ def _coerce_integral_group_ids(
         )
     if _contains_boolean_ids(raw):
         raise ValueError(f"{name} must not contain boolean identifiers")
-    numeric = np.asarray(raw, dtype=float)
-    if numeric.size == 0:
-        return np.asarray(numeric, dtype=int)
-    if not np.all(np.isfinite(numeric)):
-        raise ValueError(f"{name} must be finite integer identifiers")
-    rounded = np.rint(numeric)
-    if not np.all(numeric == rounded):
-        raise ValueError(f"{name} must be integer-valued")
     integer_info = np.iinfo(np.dtype(int))
-    if not np.all((rounded >= integer_info.min) & (rounded <= integer_info.max)):
+    coerced = [
+        _coerce_integral_group_id(value, name, integer_info)
+        for value in raw
+    ]
+    return np.asarray(coerced, dtype=int)
+
+
+def _coerce_integral_group_id(value: Any, name: str, integer_info: np.iinfo) -> int:
+    """Coerce one group identifier without sending integer inputs through float."""
+
+    if isinstance(value, np.ndarray):
+        arr = np.asarray(value, dtype=object)
+        if arr.ndim != 0:
+            raise ValueError(f"{name} must be one-dimensional")
+        value = arr.item()
+
+    if isinstance(value, (bool, np.bool_)):
+        raise ValueError(f"{name} must not contain boolean identifiers")
+
+    if isinstance(value, (int, np.integer)):
+        identifier = int(value)
+    elif isinstance(value, Decimal):
+        identifier = _coerce_decimal_group_id(value, name)
+    elif isinstance(value, (str, bytes)):
+        identifier = _coerce_text_group_id(value, name)
+    elif isinstance(value, (float, np.floating)):
+        identifier = _coerce_float_group_id(float(value), name)
+    else:
+        try:
+            numeric = float(value)
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise ValueError(f"{name} must be finite integer identifiers") from exc
+        identifier = _coerce_float_group_id(numeric, name)
+
+    if identifier < int(integer_info.min) or identifier > int(integer_info.max):
         raise ValueError(f"{name} must fit into integer identifier range")
-    return rounded.astype(int)
+    return identifier
+
+
+def _coerce_float_group_id(value: float, name: str) -> int:
+    if not np.isfinite(value):
+        raise ValueError(f"{name} must be finite integer identifiers")
+    if not value.is_integer():
+        raise ValueError(f"{name} must be integer-valued")
+    return int(value)
+
+
+def _coerce_decimal_group_id(value: Decimal, name: str) -> int:
+    if not value.is_finite():
+        raise ValueError(f"{name} must be finite integer identifiers")
+    integer = value.to_integral_value()
+    if value != integer:
+        raise ValueError(f"{name} must be integer-valued")
+    return int(integer)
+
+
+def _coerce_text_group_id(value: str | bytes, name: str) -> int:
+    if isinstance(value, bytes):
+        try:
+            text = value.decode("utf-8")
+        except UnicodeDecodeError as exc:
+            raise ValueError(f"{name} must be finite integer identifiers") from exc
+    else:
+        text = value
+    text = text.strip()
+    if not text:
+        raise ValueError(f"{name} must be finite integer identifiers")
+    try:
+        return int(text, 10)
+    except ValueError:
+        pass
+    try:
+        return _coerce_decimal_group_id(Decimal(text), name)
+    except InvalidOperation as exc:
+        raise ValueError(f"{name} must be finite integer identifiers") from exc
 
 
 def apply_clusterless_mark_group_validation_patch() -> None:

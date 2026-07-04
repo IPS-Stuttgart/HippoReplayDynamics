@@ -334,7 +334,7 @@ def _mark_group_ids_from_tetrode_cell_ids(cell_ids: np.ndarray | None, tetrode_c
         if arr.shape[0] == 2:
             arr = arr.reshape(1, 2)
         elif arr.shape[0] == np.asarray(cell_ids).shape[0]:
-            return np.asarray(arr, dtype=int)
+            return _as_integer_vector(arr, "tetrode/cell IDs")
         else:
             return None
     if arr.ndim != 2:
@@ -344,15 +344,19 @@ def _mark_group_ids_from_tetrode_cell_ids(cell_ids: np.ndarray | None, tetrode_c
     if arr.shape[1] < 2:
         return None
 
-    pairs = np.asarray(arr[:, :2], dtype=float)
-    finite = np.isfinite(pairs).all(axis=1)
+    raw_pairs = np.asarray(arr[:, :2])
+    try:
+        numeric_pairs = np.asarray(raw_pairs, dtype=float)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("tetrode/cell IDs must contain numeric integer IDs") from exc
+    finite = np.isfinite(numeric_pairs).all(axis=1)
     if not np.any(finite):
         return None
-    pairs = pairs[finite]
+    pairs = _as_integer_vector(raw_pairs[finite], "tetrode/cell IDs").reshape(-1, 2)
     spike_cell_ids = np.asarray(cell_ids, dtype=int)
     unique_spike_cells = np.unique(spike_cell_ids)
-    first_column = pairs[:, 0].astype(int)
-    second_column = pairs[:, 1].astype(int)
+    first_column = pairs[:, 0]
+    second_column = pairs[:, 1]
     second_matches_cells = int(np.isin(unique_spike_cells, second_column).sum())
     first_matches_cells = int(np.isin(unique_spike_cells, first_column).sum())
     if second_matches_cells == 0 and first_matches_cells == 0:

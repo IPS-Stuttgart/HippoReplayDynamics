@@ -9,6 +9,7 @@ import pandas as pd
 
 _PATCHED_FLAG = "_advanced_result_threshold_validation_patch_applied"
 _BASE_DECISIONS_ATTR = "_advanced_result_threshold_validation_base_decisions"
+_BASE_DECISIONS_DUPLICATE_WRAPPER_FLAG = "_advanced_result_threshold_validation_base_duplicate_wrapper"
 _PATCHED_DECISIONS_ATTR = "_advanced_result_threshold_validation_patched_decisions"
 _PATCHED_SWEEP_ATTR = "_advanced_result_threshold_validation_patched_sweep"
 _EVENT_WINDOW_WRAPPER_FLAG = "_advanced_result_event_window_validation_wrapper"
@@ -183,6 +184,50 @@ def _sort_scores_for_duplicate_model_evidence(
     return out.drop(columns=[evidence_key])
 
 
+def _wrap_base_decisions_for_duplicate_model_evidence(base_decisions):
+    """Ensure stored paired-decision bases also prefer best duplicate evidence."""
+
+    if getattr(base_decisions, _BASE_DECISIONS_DUPLICATE_WRAPPER_FLAG, False):
+        return base_decisions
+
+    def paired_model_margin_decisions(
+        scores: pd.DataFrame,
+        *,
+        positive_model: str,
+        reference_model: str,
+        margin_threshold: float = 0.0,
+        group_cols: Sequence[str] | str | None = ("session", "event_index"),
+        evidence_col: str = "log_evidence",
+        model_col: str = "model",
+        true_model_col: str | None = None,
+        positive_true_label: str | None = None,
+    ) -> pd.DataFrame:
+        paired_group_cols = _normalize_group_cols(group_cols, scores)
+        prepared_scores = _sort_scores_for_duplicate_model_evidence(
+            scores,
+            paired_group_cols,
+            evidence_col,
+            model_col,
+        )
+        return base_decisions(
+            prepared_scores,
+            positive_model=positive_model,
+            reference_model=reference_model,
+            margin_threshold=margin_threshold,
+            group_cols=paired_group_cols,
+            evidence_col=evidence_col,
+            model_col=model_col,
+            true_model_col=true_model_col,
+            positive_true_label=positive_true_label,
+        )
+
+    paired_model_margin_decisions.__name__ = getattr(base_decisions, "__name__", "paired_model_margin_decisions")
+    paired_model_margin_decisions.__doc__ = getattr(base_decisions, "__doc__", None)
+    setattr(paired_model_margin_decisions, _BASE_DECISIONS_DUPLICATE_WRAPPER_FLAG, True)
+    setattr(paired_model_margin_decisions, "__hipporeplayimm_original__", base_decisions)
+    return paired_model_margin_decisions
+
+
 def _ensure_true_model_summary_columns(summary: pd.DataFrame) -> pd.DataFrame:
     """Keep threshold-selection columns present even when no paired events exist."""
 
@@ -225,7 +270,8 @@ def apply_advanced_result_threshold_validation_patch() -> None:
         base_decisions = getattr(diagnostics, _BASE_DECISIONS_ATTR, None)
         if base_decisions is None:
             base_decisions = diagnostics.paired_model_margin_decisions
-            setattr(diagnostics, _BASE_DECISIONS_ATTR, base_decisions)
+        base_decisions = _wrap_base_decisions_for_duplicate_model_evidence(base_decisions)
+        setattr(diagnostics, _BASE_DECISIONS_ATTR, base_decisions)
 
         def paired_model_margin_decisions(
             scores: pd.DataFrame,

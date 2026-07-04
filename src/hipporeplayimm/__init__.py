@@ -79,6 +79,7 @@ from . import sparse_momentum_single_bin_diagnostics as _sparse_momentum_single_
 from . import spike_rate_metadata as _spike_rate_metadata
 from . import state_space_bin_center_validation as _state_space_bin_center_validation
 from . import state_space_bin_count_validation as _state_space_bin_count_validation
+from . import sweep_seed_validation as _sweep_seed_validation
 from . import time_order_patch as _time_order_patch
 from . import well_label_shuffle_patch as _well_label_shuffle_patch
 from . import wrapper_return_trajectory as _wrapper_return_trajectory
@@ -302,6 +303,7 @@ def apply_runtime_patches() -> None:
     _ground_truth_window_scope.apply_ground_truth_window_scope_patch()
     _improved_model_evidence_registry_patch.apply_improved_model_evidence_registry_patch()
     _observation_sweep_config_validation.apply_observation_sweep_config_validation_patch()
+    _sweep_seed_validation.apply_sweep_seed_validation_patch()
     _cli_float_values_validation.apply_cli_float_values_validation_patch()
     _bidirectional_infinite_evidence_patch.apply_bidirectional_infinite_evidence_patch()
 

@@ -1,0 +1,123 @@
+"""Runtime validation for PyRecEst sweep random seeds."""
+
+from __future__ import annotations
+
+from dataclasses import replace
+from functools import wraps
+from typing import Any, Iterable
+
+import numpy as np
+
+_PATCHED_FLAG = "_sweep_seed_validation_patch_applied"
+_GRID_FLAG = "_sweep_seed_validation_parameter_grid_wrapper"
+_BENCHMARK_FLAG = "_sweep_seed_validation_benchmark_config_wrapper"
+_SORTED_FLAG = "_sweep_seed_validation_sorted_seed_wrapper"
+_ORIGINAL_ATTR = "__hipporeplayimm_original__"
+
+
+def apply_sweep_seed_validation_patch() -> None:
+    """Install strict random-seed validation for PyRecEst sweep helpers."""
+
+    from . import sweeps
+
+    if getattr(sweeps, _PATCHED_FLAG, False) and _current(sweeps):
+        return
+
+    if not getattr(sweeps.pyrecest_parameter_grid, _GRID_FLAG, False):
+        original_grid = sweeps.pyrecest_parameter_grid
+
+        @wraps(original_grid)
+        def pyrecest_parameter_grid(config):
+            raw_seeds = (
+                (getattr(config, "random_seed"),)
+                if getattr(config, "random_seeds", None) is None
+                else getattr(config, "random_seeds")
+            )
+            seed_name = "random_seed" if getattr(config, "random_seeds", None) is None else "random_seeds"
+            seeds = _seed_sequence(raw_seeds, seed_name)
+            validated = (
+                replace(config, random_seed=seeds[0])
+                if getattr(config, "random_seeds", None) is None
+                else replace(config, random_seeds=seeds)
+            )
+            return original_grid(validated)
+
+        _mark(pyrecest_parameter_grid, original_grid, _GRID_FLAG)
+        sweeps.pyrecest_parameter_grid = pyrecest_parameter_grid
+
+    if not getattr(sweeps._benchmark_config, _BENCHMARK_FLAG, False):
+        original_benchmark = sweeps._benchmark_config
+
+        @wraps(original_benchmark)
+        def _benchmark_config(config, parameters: dict[str, object]):
+            validated = dict(parameters)
+            validated["random_seed"] = _seed_value(validated.get("random_seed"), "random_seed")
+            return original_benchmark(config, validated)
+
+        _mark(_benchmark_config, original_benchmark, _BENCHMARK_FLAG)
+        sweeps._benchmark_config = _benchmark_config
+
+    if not getattr(sweeps._sorted_numeric_values, _SORTED_FLAG, False):
+        original_sorted = sweeps._sorted_numeric_values
+
+        @wraps(original_sorted)
+        def _sorted_numeric_values(values):
+            return sorted({_seed_value(value, "random_seed") for value in values})
+
+        _mark(_sorted_numeric_values, original_sorted, _SORTED_FLAG)
+        sweeps._sorted_numeric_values = _sorted_numeric_values
+
+    setattr(sweeps, _PATCHED_FLAG, True)
+
+
+def _seed_sequence(values: Iterable[object], name: str) -> tuple[int, ...]:
+    if isinstance(values, (str, bytes)):
+        raise ValueError(f"{name} must contain at least one random seed")
+    try:
+        raw_values = list(values)
+    except TypeError as exc:
+        raise ValueError(f"{name} must contain at least one random seed") from exc
+    if not raw_values:
+        raise ValueError(f"{name} must contain at least one random seed")
+    return tuple(_seed_value(value, name) for value in raw_values)
+
+
+def _seed_value(value: object, name: str) -> int:
+    try:
+        raw = np.asarray(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must be a finite nonnegative integer") from exc
+    if raw.ndim != 0:
+        raise ValueError(f"{name} must be a finite nonnegative integer")
+    item: Any = raw.item()
+    if isinstance(item, (bool, np.bool_)):
+        raise TypeError(f"{name} must be an integer, not boolean")
+    if isinstance(item, (int, np.integer)):
+        seed = int(item)
+    else:
+        try:
+            numeric = float(item)
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise ValueError(f"{name} must be a finite nonnegative integer") from exc
+        if not np.isfinite(numeric) or not numeric.is_integer():
+            raise ValueError(f"{name} must be a finite nonnegative integer")
+        seed = int(numeric)
+    if seed < 0:
+        raise ValueError(f"{name} must be a finite nonnegative integer")
+    return seed
+
+
+def _current(sweeps) -> bool:
+    return (
+        getattr(sweeps.pyrecest_parameter_grid, _GRID_FLAG, False)
+        and getattr(sweeps._benchmark_config, _BENCHMARK_FLAG, False)
+        and getattr(sweeps._sorted_numeric_values, _SORTED_FLAG, False)
+    )
+
+
+def _mark(function: Any, original: Any, flag: str) -> None:
+    setattr(function, flag, True)
+    setattr(function, _ORIGINAL_ATTR, original)
+
+
+__all__ = ["apply_sweep_seed_validation_patch"]

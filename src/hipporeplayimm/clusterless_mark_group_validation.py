@@ -4,7 +4,9 @@ Clusterless grouping keys are identifiers, not boolean flags.  They are often
 stored as floating-point MATLAB values, so integral floats remain supported, but
 malformed boolean, fractional, non-finite, or out-of-range values must be rejected
 before NumPy integer casts can alias them to unrelated groups or force a silent
-fallback to the global mark likelihood.
+fallback to the global mark likelihood.  Row-count validation is part of the same
+contract: group/cell identifiers must stay aligned with the mark rows before they
+are used as boolean masks during clusterless encoding.
 """
 
 from __future__ import annotations
@@ -50,10 +52,24 @@ def _contains_boolean_ids(values: Any) -> bool:
     return False
 
 
-def _coerce_integral_group_ids(values: Any, name: str) -> np.ndarray:
+def _coerce_integral_group_ids(
+    values: Any,
+    name: str,
+    *,
+    expected_size: int | None = None,
+) -> np.ndarray:
     """Return integer group IDs without lossy bool/fraction/range coercion."""
 
     raw = np.asarray(values, dtype=object)
+    if raw.ndim == 0:
+        raw = raw.reshape(1)
+    else:
+        raw = raw.reshape(-1)
+    if expected_size is not None and raw.shape[0] != int(expected_size):
+        raise ValueError(
+            f"{name} must contain one value per spike mark row; "
+            f"expected {int(expected_size)}, got {raw.shape[0]}"
+        )
     if _contains_boolean_ids(raw):
         raise ValueError(f"{name} must not contain boolean identifiers")
     numeric = np.asarray(raw, dtype=float)
@@ -83,17 +99,30 @@ def apply_clusterless_mark_group_validation_patch() -> None:
         marks = session.spike_marks
         if marks is None:
             raise ValueError("Session does not contain spike marks.")
+        expected_size = int(marks.n_spikes)
         group_by = clusterless._normalize_mark_group_by(config.mark_group_by)
         if group_by == "none":
             return None
         if group_by == "cell":
-            return None if marks.cell_ids is None else _coerce_integral_group_ids(marks.cell_ids, "clusterless cell group IDs")
+            return None if marks.cell_ids is None else _coerce_integral_group_ids(
+                marks.cell_ids,
+                "clusterless cell group IDs",
+                expected_size=expected_size,
+            )
         if group_by == "tetrode":
             if marks.group_ids is None:
                 raise ValueError("clusterless mark grouping by tetrode requires spike-mark group IDs from Tetrode_Cell_IDs")
-            return _coerce_integral_group_ids(marks.group_ids, "clusterless tetrode group IDs")
+            return _coerce_integral_group_ids(
+                marks.group_ids,
+                "clusterless tetrode group IDs",
+                expected_size=expected_size,
+            )
         if marks.group_ids is not None:
-            return _coerce_integral_group_ids(marks.group_ids, "clusterless mark group IDs")
+            return _coerce_integral_group_ids(
+                marks.group_ids,
+                "clusterless mark group IDs",
+                expected_size=expected_size,
+            )
         return None
 
     @_mark_group_guard
@@ -104,9 +133,11 @@ def apply_clusterless_mark_group_validation_patch() -> None:
         if raw_group_ids.ndim == 0:
             raw_group_ids = np.full(int(n_marks), raw_group_ids.item(), dtype=object if raw_group_ids.dtype == object else raw_group_ids.dtype)
         raw_group_ids = raw_group_ids.reshape(-1)
-        if raw_group_ids.shape[0] != int(n_marks):
-            raise ValueError(f"Expected {n_marks} mark group IDs, got {raw_group_ids.shape[0]}")
-        coerced = _coerce_integral_group_ids(raw_group_ids, "mark group IDs")
+        coerced = _coerce_integral_group_ids(
+            raw_group_ids,
+            "mark group IDs",
+            expected_size=int(n_marks),
+        )
         encoding_group_ids = _coerce_integral_group_ids(self.group_ids, "encoding mark group IDs")
         sorted_order = np.argsort(encoding_group_ids)
         sorted_groups = encoding_group_ids[sorted_order]

@@ -31,6 +31,10 @@ def test_axona_header_int_does_not_round_fractional_metadata() -> None:
     assert _header_int({"num_pos_samples": "3.5"}, "num_pos_samples", 0) == 0
 
 
+def test_axona_header_int_rejects_near_integer_fractional_metadata() -> None:
+    assert _header_int({"num_pos_samples": "3.0000000001"}, "num_pos_samples", 7) == 7
+
+
 def test_axona_patch_refreshes_stale_flagged_functions(monkeypatch) -> None:
     def stale_strip(payload: bytes) -> bytes:
         return b"stale"

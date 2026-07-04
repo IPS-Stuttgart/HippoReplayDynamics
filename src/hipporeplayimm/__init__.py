@@ -78,6 +78,7 @@ from . import simulation_recovery_event_count as _simulation_recovery_event_coun
 from . import simulation_recovery_runtime_limits as _simulation_recovery_runtime_limits
 from . import sparse_momentum_duration_validation as _sparse_momentum_duration_validation
 from . import sparse_momentum_single_bin_diagnostics as _sparse_momentum_single_bin_diagnostics
+from . import spike_cell_id_emission_validation as _spike_cell_id_emission_validation
 from . import spike_rate_metadata as _spike_rate_metadata
 from . import state_space_bin_center_validation as _state_space_bin_center_validation
 from . import state_space_bin_count_validation as _state_space_bin_count_validation
@@ -114,6 +115,7 @@ _spike_rate_metadata.apply_spike_rate_metadata_patch()
 _time_order_patch.apply_reverse_emission_time_patch()
 _clusterless_config_validation.apply_clusterless_encoding_config_validation_patch()
 _data_cell_id_validation.apply_data_cell_id_validation_patch()
+_spike_cell_id_emission_validation.apply_spike_cell_id_emission_validation_patch()
 _mark_complex_validation.apply_mark_complex_validation_patch()
 _encoding_grid_extra_columns.apply_encoding_grid_extra_columns_patch()
 _position_decoding_config_validation.apply_position_decoding_config_validation_patch()
@@ -245,6 +247,7 @@ def apply_runtime_patches() -> None:
     _spike_rate_metadata.apply_spike_rate_metadata_patch()
     _clusterless_config_validation.apply_clusterless_encoding_config_validation_patch()
     _data_cell_id_validation.apply_data_cell_id_validation_patch()
+    _spike_cell_id_emission_validation.apply_spike_cell_id_emission_validation_patch()
     _mark_complex_validation.apply_mark_complex_validation_patch()
     _clusterless_mark_group_validation.apply_clusterless_mark_group_validation_patch()
     _encoding_select_cells_validation.apply_encoding_select_cells_validation_patch()

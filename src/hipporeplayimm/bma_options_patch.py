@@ -117,7 +117,9 @@ def _coerce_bool_option(value: object) -> bool:
         pass
     if isinstance(scalar, (int, float, np.integer, np.floating)):
         numeric = float(scalar)
-        return bool(np.isfinite(numeric) and numeric != 0.0)
+        if not np.isfinite(numeric) or numeric not in (0.0, 1.0):
+            raise ValueError(_BOOL_OPTION_ERROR)
+        return bool(numeric)
     text = str(scalar).strip().lower()
     if text in _TRUE_BOOL_STRINGS:
         return True

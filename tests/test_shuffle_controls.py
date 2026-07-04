@@ -84,6 +84,14 @@ def test_spatial_roll_keeps_single_bin_grid_unchanged() -> None:
     np.testing.assert_array_equal(rolled, rates)
 
 
+@pytest.mark.parametrize("grid_shape", [(2.5, 2), (True, 2), (2, np.nan), ([2], 2)])
+def test_spatial_roll_rejects_lossy_grid_shape_dimensions(grid_shape) -> None:
+    rates = np.arange(4.0, dtype=float).reshape(1, 4)
+
+    with pytest.raises(ValueError, match="grid_shape dimensions"):
+        _spatial_roll_rates(rates, grid_shape, np.random.default_rng(1))  # type: ignore[arg-type]
+
+
 def test_spatial_roll_validates_rate_grid_shape_consistency() -> None:
     rates = np.arange(6.0, dtype=float).reshape(1, 6)
 

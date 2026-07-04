@@ -106,6 +106,9 @@ def _evidence_only_mode_diagnostics(
     except (AttributeError, TypeError, ValueError):
         return diagnostics
 
+    if not np.any(mode_posterior[:, trajectory_imm._MOMENTUM_MODE_INDEX] > 0.0):
+        return diagnostics
+
     final_mode = mode_posterior[-1]
     event_mode = mode_posterior.mean(axis=0)
     trajectory_columns = [1, 2, 3]

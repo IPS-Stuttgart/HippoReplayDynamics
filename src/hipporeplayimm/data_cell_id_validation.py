@@ -7,7 +7,8 @@ installed for manually constructed sessions before place-field encoding selects
 spikes and cell IDs.  Replay-event selectors use the same integer-like MATLAB
 values.  Integral scalar-array wrappers are valid replay-event indices, but
 boolean flags and nonintegral scalar wrappers must not alias to event indices
-0 or 1.
+0 or 1.  The patch also keeps MATLAB v7.3 uint16 character datasets in the
+same MATLAB orientation as numeric arrays before string decoding.
 """
 
 from __future__ import annotations
@@ -21,6 +22,7 @@ import numpy as np
 
 _PATCHED_FLAG = "_cell_id_validation_patch_applied"
 _PATCH_MARK = "__hipporeplayimm_data_cell_id_validation_patch__"
+_HDF5_CHAR_PATCH_MARK = "__hipporeplayimm_hdf5_char_orientation_patch__"
 _ORIGINAL_ATTR = "__hipporeplayimm_original__"
 
 
@@ -38,6 +40,8 @@ def apply_data_cell_id_validation_patch() -> None:
     original_coerce_ripple_event = data._coerce_ripple_event
     original_as_integer_vector = data._as_integer_vector
     original_spikes_and_cell_ids_for_encoding = encoding._spikes_and_cell_ids_for_encoding
+
+    _patch_hdf5_char_decoder(data)
 
     patch_targets = (
         current_cell_ids,
@@ -176,6 +180,49 @@ def _synchronize_coerce_ripple_event_aliases(original: Any, active: Any) -> None
         current = getattr(module, "_coerce_ripple_event", None)
         if current is original:
             setattr(module, "_coerce_ripple_event", active)
+
+
+def _patch_hdf5_char_decoder(data: Any) -> None:
+    """Decode MATLAB v7.3 uint16 char datasets after HDF5 orientation repair."""
+
+    current = data._read_hdf5_value
+    if bool(getattr(current, _HDF5_CHAR_PATCH_MARK, False)):
+        return
+
+    @wraps(current)
+    def read_hdf5_value(obj: Any) -> Any:
+        decoded = _decode_hdf5_uint16_char_dataset(obj, data)
+        if decoded is not None:
+            return decoded
+        return current(obj)
+
+    setattr(read_hdf5_value, _HDF5_CHAR_PATCH_MARK, True)
+    setattr(read_hdf5_value, _ORIGINAL_ATTR, current)
+    data._read_hdf5_value = read_hdf5_value
+
+
+def _decode_hdf5_uint16_char_dataset(obj: Any, data: Any) -> str | None:
+    try:
+        import h5py
+    except ImportError:
+        return None
+    if not isinstance(obj, h5py.Dataset):
+        return None
+    arr = np.array(obj)
+    if arr.dtype != np.uint16 or arr.ndim < 1 or arr.size == 0:
+        return None
+    if data._hdf5_matlab_class(obj) != "char":
+        return None
+    aligned = arr.T if arr.ndim >= 2 else arr
+    try:
+        characters: list[str] = []
+        for value in aligned.reshape(-1):
+            codepoint = int(value)
+            if codepoint != 0:
+                characters.append(chr(codepoint))
+        return "".join(characters)
+    except (OverflowError, TypeError, ValueError):
+        return None
 
 
 def _validate_optional_neuron_ids(spike_data: dict[str, Any], variable_name: str, label: str) -> None:

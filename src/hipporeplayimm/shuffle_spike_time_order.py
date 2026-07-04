@@ -9,6 +9,7 @@ import numpy as np
 
 _PATCHED_FLAG = "_shuffle_spike_time_order_patch_applied"
 _SCOPE_KEY_PATCHED_FLAG = "_shuffle_scope_numeric_key_patch_applied"
+_GRID_SHAPE_PATCHED_FLAG = "_shuffle_grid_shape_validation_patch_applied"
 
 
 def apply_shuffle_spike_time_order_patch() -> None:
@@ -38,6 +39,15 @@ def apply_shuffle_spike_time_order_patch() -> None:
         shuffle_controls._scope_label = scope_label
         setattr(shuffle_controls, _SCOPE_KEY_PATCHED_FLAG, True)
 
+    if not getattr(shuffle_controls, _GRID_SHAPE_PATCHED_FLAG, False):
+        original_validate_grid_shape = shuffle_controls._validate_grid_shape
+
+        def validate_grid_shape(grid_shape: object) -> tuple[int, int]:
+            return _validated_grid_shape(grid_shape, original_validate_grid_shape)
+
+        shuffle_controls._validate_grid_shape = validate_grid_shape
+        setattr(shuffle_controls, _GRID_SHAPE_PATCHED_FLAG, True)
+
 
 def _mapping_scope_label(value: Mapping[object, object], scope_label) -> str:
     items = sorted(
@@ -45,6 +55,42 @@ def _mapping_scope_label(value: Mapping[object, object], scope_label) -> str:
         key=repr,
     )
     return repr(("mapping", items))
+
+
+def _validated_grid_shape(grid_shape: object, original_validate_grid_shape) -> tuple[int, int]:
+    try:
+        values = tuple(grid_shape)  # type: ignore[arg-type]
+    except TypeError as exc:
+        raise ValueError("grid_shape must contain exactly two integer dimensions") from exc
+    if len(values) != 2:
+        raise ValueError("grid_shape must contain exactly two integer dimensions")
+    return tuple(_positive_integer_grid_dimension(value) for value in values)  # type: ignore[return-value]
+
+
+def _positive_integer_grid_dimension(value: object) -> int:
+    if isinstance(value, (bool, np.bool_)):
+        raise ValueError("grid_shape dimensions must be positive integers")
+    try:
+        array = np.asarray(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("grid_shape dimensions must be positive integers") from exc
+    if array.ndim != 0:
+        raise ValueError("grid_shape dimensions must be positive integers")
+    scalar = array.item()
+    if isinstance(scalar, (bool, np.bool_)):
+        raise ValueError("grid_shape dimensions must be positive integers")
+    try:
+        numeric = float(scalar)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ValueError("grid_shape dimensions must be positive integers") from exc
+    if not np.isfinite(numeric):
+        raise ValueError("grid_shape dimensions must be finite positive integers")
+    integer = int(round(numeric))
+    if not np.isclose(numeric, integer, rtol=0.0, atol=0.0):
+        raise ValueError("grid_shape dimensions must be positive integers")
+    if integer <= 0:
+        raise ValueError("grid_shape dimensions must be positive integers")
+    return integer
 
 
 def _shuffle_spike_times_session_sorted(session, random_seed: int = 1):

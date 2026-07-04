@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from functools import wraps
+import operator
 from typing import Any
 
 import numpy as np
@@ -216,6 +217,10 @@ def _validate_positive_int(value: object, name: str, original_validate) -> None:
     value_array = _as_array(value)
     if value_array.shape != ():
         raise ValueError(f"{name} must be a positive integer")
+    try:
+        operator.index(value_array.item())
+    except TypeError as exc:
+        raise ValueError(f"{name} must be a positive integer") from exc
     try:
         original_validate(value, name)
     except (TypeError, ValueError) as exc:

@@ -49,31 +49,51 @@ def _is_mark_complex_validation_wrapper(func: object) -> bool:
 
 
 def apply_mark_complex_validation_patch() -> None:
-    """Install value-type validation for mark-matrix candidates."""
+    """Install value-type validation for mark-matrix candidates and direct mark likelihood calls."""
 
-    from . import data
+    from . import clusterless, data
 
     current_coerce_mark_matrix = data._coerce_mark_matrix
-    if _is_mark_complex_validation_wrapper(current_coerce_mark_matrix):
-        setattr(data, _PATCHED_FLAG, True)
-        return
+    if not _is_mark_complex_validation_wrapper(current_coerce_mark_matrix):
+        original_coerce_mark_matrix = current_coerce_mark_matrix
 
-    original_coerce_mark_matrix = current_coerce_mark_matrix
-
-    @wraps(original_coerce_mark_matrix)
-    def coerce_mark_matrix(value, *, spike_count: int, spike_times: np.ndarray):
-        if _contains_boolean_values(value):
-            return None
-        arr = np.asarray(value)
-        if arr.dtype.kind == "c":
-            if not _complex_has_zero_imaginary(arr):
+        @wraps(original_coerce_mark_matrix)
+        def coerce_mark_matrix(value, *, spike_count: int, spike_times: np.ndarray):
+            if _contains_boolean_values(value):
                 return None
-            value = np.real(arr)
-        return original_coerce_mark_matrix(value, spike_count=spike_count, spike_times=spike_times)
+            arr = np.asarray(value)
+            if arr.dtype.kind == "c":
+                if not _complex_has_zero_imaginary(arr):
+                    return None
+                value = np.real(arr)
+            return original_coerce_mark_matrix(value, spike_count=spike_count, spike_times=spike_times)
 
-    setattr(coerce_mark_matrix, _PATCH_WRAPPER_ATTR, True)
-    data._coerce_mark_matrix = coerce_mark_matrix
+        setattr(coerce_mark_matrix, _PATCH_WRAPPER_ATTR, True)
+        data._coerce_mark_matrix = coerce_mark_matrix
+
+    current_coerce_marks = clusterless.ClusterlessMarkEncoding._coerce_marks
+    if not _is_mark_complex_validation_wrapper(current_coerce_marks):
+        original_coerce_marks = current_coerce_marks
+
+        @wraps(original_coerce_marks)
+        def coerce_marks(self, marks):
+            if _contains_boolean_values(marks):
+                raise ValueError("marks must contain numeric mark features, not boolean values")
+            values = np.asarray(marks)
+            if values.dtype.kind == "c":
+                if not _complex_has_zero_imaginary(values):
+                    raise ValueError("marks must not contain complex values with nonzero imaginary components")
+                marks = np.real(values)
+            coerced = original_coerce_marks(self, marks)
+            if not np.all(np.isfinite(coerced)):
+                raise ValueError("marks must contain finite mark features")
+            return coerced
+
+        setattr(coerce_marks, _PATCH_WRAPPER_ATTR, True)
+        clusterless.ClusterlessMarkEncoding._coerce_marks = coerce_marks
+
     setattr(data, _PATCHED_FLAG, True)
+    setattr(clusterless, _PATCHED_FLAG, True)
 
 
 __all__ = ["apply_mark_complex_validation_patch"]

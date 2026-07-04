@@ -85,6 +85,8 @@ def apply_sweep_seed_validation_patch() -> None:
 
 
 def _validated_seed_sequence(values: Iterable[object], name: str) -> tuple[int, ...]:
+    if isinstance(values, (str, bytes)):
+        raise ValueError(f"{name} must contain at least one random seed")
     try:
         raw_values = list(values)
     except TypeError as exc:

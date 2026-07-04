@@ -12,3 +12,14 @@ def test_data_loader_integer_vector_preserves_large_native_integer_ids() -> None
     loaded = _as_integer_vector(ids, "neuron IDs")
 
     np.testing.assert_array_equal(loaded, ids)
+
+
+def test_data_loader_integer_vector_preserves_large_numeric_string_ids() -> None:
+    expected = np.array([2**53 + 1, 2**53 + 3], dtype=np.int64)
+    if np.iinfo(np.dtype(int)).max < int(expected[-1]):
+        pytest.skip("requires platform integers wide enough for large native IDs")
+    ids = np.asarray([str(identifier) for identifier in expected], dtype=object)
+
+    loaded = _as_integer_vector(ids, "neuron IDs")
+
+    np.testing.assert_array_equal(loaded, expected)

@@ -5,7 +5,8 @@ loader should accept integral floats such as ``1.0`` but must not silently trunc
 corrupted fractional identifiers such as ``1.5`` to ``1``.  The same guard is
 installed for manually constructed sessions before place-field encoding selects
 spikes and cell IDs.  Replay-event selectors use the same integer-like MATLAB
-values, but boolean flags must not alias to event indices 0 or 1.
+values, but boolean flags and scalar-array wrappers must not alias to event indices
+0 or 1.
 """
 
 from __future__ import annotations
@@ -105,7 +106,7 @@ def apply_data_cell_id_validation_patch() -> None:
         return out
 
     def coerce_ripple_event(session, ripple):
-        if isinstance(ripple, (bool, np.bool_)):
+        if _is_boolean_scalar(ripple):
             raise TypeError("ripple index must be an integer, not boolean")
         if isinstance(ripple, (int, np.integer)):
             return session.ripple(ripple)
@@ -234,7 +235,7 @@ def _as_numeric_ids(values: Any) -> np.ndarray:
 
 
 def _coerce_ripple_index(index: Any, ripple_count: int) -> int:
-    if isinstance(index, (bool, np.bool_)):
+    if _is_boolean_scalar(index):
         raise TypeError("ripple index must be an integer, not boolean")
     if not isinstance(index, (int, np.integer)):
         raise TypeError("ripple index must be an integer")
@@ -243,6 +244,27 @@ def _coerce_ripple_index(index: Any, ripple_count: int) -> int:
     if resolved < 0 or resolved >= count:
         raise IndexError(f"ripple index {resolved} out of range for {count} ripple events")
     return resolved
+
+
+def _is_boolean_scalar(value: Any) -> bool:
+    """Return True for Python, NumPy, and object-wrapped boolean scalars."""
+
+    if isinstance(value, (bool, np.bool_)):
+        return True
+    try:
+        raw = np.asarray(value)
+    except ValueError:
+        return False
+    if raw.ndim != 0:
+        return False
+    if np.issubdtype(raw.dtype, np.bool_):
+        return True
+    if raw.dtype == object:
+        try:
+            return isinstance(raw.item(), (bool, np.bool_))
+        except ValueError:
+            return False
+    return False
 
 
 def _contains_boolean_ids(values: np.ndarray) -> bool:

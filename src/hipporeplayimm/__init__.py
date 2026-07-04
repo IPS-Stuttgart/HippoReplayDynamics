@@ -64,6 +64,7 @@ from . import pyrecest_bin_center_validation as _pyrecest_bin_center_validation
 from . import pyrecest_numeric_metadata_guard as _pyrecest_numeric_metadata_guard
 from . import pyrecest_score_metadata as _pyrecest_score_metadata
 from . import recovery_diagnostics_bool_patch as _recovery_diagnostics_bool_patch
+from . import result_improvement_seed_validation as _result_improvement_seed_validation
 from . import result_quality_audit_scope_patch as _result_quality_audit_scope_patch
 from . import reverse_time_terminal_guard as _reverse_time_terminal_guard
 from . import score_metadata as _score_metadata
@@ -305,6 +306,7 @@ def apply_runtime_patches() -> None:
     _observation_sweep_config_validation.apply_observation_sweep_config_validation_patch()
     _sweep_seed_validation.apply_sweep_seed_validation_patch()
     _cli_float_values_validation.apply_cli_float_values_validation_patch()
+    _result_improvement_seed_validation.apply_result_improvement_seed_validation_patch()
     _bidirectional_infinite_evidence_patch.apply_bidirectional_infinite_evidence_patch()
 
 

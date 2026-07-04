@@ -49,7 +49,7 @@ def apply_advanced_result_margin_duplicate_patch() -> None:
         for key, group in ok.groupby(list(group_cols), sort=False):
             key_tuple = key if isinstance(key, tuple) else (key,)
             group = (
-                group.dropna(subset=[evidence_col])
+                _finite_numeric_evidence_rows(group, evidence_col)
                 .sort_values(evidence_col, ascending=False, kind="stable")
                 .drop_duplicates(model_col, keep="first")
             )
@@ -78,6 +78,17 @@ def apply_advanced_result_margin_duplicate_patch() -> None:
     setattr(evidence_margin_table, _WRAPPER_FLAG, True)
     diagnostics.evidence_margin_table = evidence_margin_table
     setattr(diagnostics, _PATCHED_FLAG, True)
+
+
+def _finite_numeric_evidence_rows(frame: pd.DataFrame, evidence_col: str) -> pd.DataFrame:
+    """Return rows whose evidence column is finite after numeric CSV coercion."""
+
+    out = frame.copy()
+    evidence = pd.to_numeric(out[evidence_col], errors="coerce")
+    finite = np.isfinite(evidence.to_numpy(dtype=float))
+    out = out.loc[finite].copy()
+    out[evidence_col] = evidence.loc[out.index].astype(float)
+    return out
 
 
 __all__ = ["apply_advanced_result_margin_duplicate_patch"]

@@ -33,6 +33,13 @@ def test_pyrecest_parameter_grid_rejects_fractional_random_seed_sequence() -> No
         pyrecest_parameter_grid(PyRecEstSweepConfig(random_seeds=(1, 2.5)))
 
 
+def test_pyrecest_parameter_grid_rejects_textual_random_seed_sequence() -> None:
+    hipporeplayimm.apply_runtime_patches()
+
+    with pytest.raises(ValueError, match="random_seeds"):
+        pyrecest_parameter_grid(PyRecEstSweepConfig(random_seeds="12"))
+
+
 def test_pyrecest_parameter_grid_canonicalizes_integer_like_random_seed() -> None:
     hipporeplayimm.apply_runtime_patches()
 

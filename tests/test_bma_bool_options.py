@@ -16,7 +16,7 @@ def test_bma_bool_option_accepts_false_values(value: object) -> None:
     assert _coerce_bool_option(value) is False
 
 
-@pytest.mark.parametrize("value", ["maybe", "truthy", "2", [True], np.array([True, False])])
+@pytest.mark.parametrize("value", ["maybe", "truthy", "2", 2, -1, 0.5, np.float64(0.5), [True], np.array([True, False])])
 def test_bma_bool_option_rejects_ambiguous_values(value: object) -> None:
     with pytest.raises(ValueError, match="boolean option"):
         _coerce_bool_option(value)

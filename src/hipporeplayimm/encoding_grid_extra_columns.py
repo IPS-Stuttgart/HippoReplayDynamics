@@ -59,6 +59,7 @@ def _apply_grid_extra_columns_patch(encoding) -> None:
 def _apply_encoding_bool_validation_patch(encoding) -> None:
     originals = _encoding_bool_originals(encoding)
     if getattr(encoding, "_encoding_bool_validation_patch_applied", False) and _encoding_bool_wrappers_are_current(encoding):
+        _synchronize_encoding_validation_aliases(encoding, originals)
         return
 
     original_validate_encoding_config = originals["validate_encoding_config"]
@@ -114,6 +115,7 @@ def _apply_encoding_bool_validation_patch(encoding) -> None:
     encoding._validate_encoding_config = validate_encoding_config
     encoding._time_bin_edges = time_bin_edges
     encoding._poisson_log_emissions = poisson_log_emissions
+    _synchronize_encoding_validation_aliases(encoding, originals)
     encoding._encoding_bool_validation_patch_applied = True
 
 
@@ -266,3 +268,23 @@ def _synchronize_make_grid_aliases(original_make_grid, replacement_make_grid) ->
             continue
         if getattr(module, "_make_grid", None) is original_make_grid:
             module._make_grid = replacement_make_grid
+
+
+def _synchronize_encoding_validation_aliases(encoding, originals: dict[str, Any]) -> None:
+    replacements = {
+        "_validate_encoding_config": encoding._validate_encoding_config,
+        "_time_bin_edges": encoding._time_bin_edges,
+        "_poisson_log_emissions": encoding._poisson_log_emissions,
+    }
+    original_by_attr = {
+        "_validate_encoding_config": originals["validate_encoding_config"],
+        "_time_bin_edges": originals["time_bin_edges"],
+        "_poisson_log_emissions": originals["poisson_log_emissions"],
+    }
+    for module in list(sys.modules.values()):
+        module_name = getattr(module, "__name__", "")
+        if not module_name.startswith("hipporeplayimm"):
+            continue
+        for attr, original in original_by_attr.items():
+            if getattr(module, attr, None) is original:
+                setattr(module, attr, replacements[attr])

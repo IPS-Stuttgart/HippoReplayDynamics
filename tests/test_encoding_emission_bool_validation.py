@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import types
+
 import numpy as np
 import pytest
 
@@ -273,3 +275,23 @@ def test_encoding_bool_patch_refreshes_stale_true_flag(monkeypatch):
     assert getattr(encoding._time_bin_edges, patch._TIME_BIN_EDGES_WRAPPER_MARKER, False)
     with pytest.raises(TypeError, match="time_bin_s"):
         encoding._time_bin_edges(0.0, 1.0, True)
+
+
+def test_encoding_bool_patch_refreshes_imported_validation_aliases(monkeypatch):
+    import hipporeplayimm
+    import hipporeplayimm.encoding as encoding
+    import hipporeplayimm.encoding_grid_extra_columns as patch
+
+    stale_module = types.ModuleType("hipporeplayimm._stale_encoding_alias_probe")
+    stale_module._validate_encoding_config = patch._encoding_bool_originals(encoding)["validate_encoding_config"]
+    stale_module._time_bin_edges = patch._encoding_bool_originals(encoding)["time_bin_edges"]
+    stale_module._poisson_log_emissions = patch._encoding_bool_originals(encoding)["poisson_log_emissions"]
+    monkeypatch.setitem(__import__("sys").modules, stale_module.__name__, stale_module)
+
+    hipporeplayimm.apply_runtime_patches()
+
+    assert stale_module._validate_encoding_config is encoding._validate_encoding_config
+    assert stale_module._time_bin_edges is encoding._time_bin_edges
+    assert stale_module._poisson_log_emissions is encoding._poisson_log_emissions
+    with pytest.raises(TypeError, match="time_bin_s"):
+        stale_module._time_bin_edges(0.0, 1.0, True)

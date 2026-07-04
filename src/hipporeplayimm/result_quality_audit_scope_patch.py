@@ -106,10 +106,15 @@ def _scoped_event_group_columns(scores: Any) -> list[str]:
 
 def _first_influence_value_column(scores: Any) -> str | None:
     frame_columns = getattr(scores, "columns", ())
+    present: list[str] = []
     for column in _INFLUENCE_VALUE_COLUMNS:
-        if column in frame_columns:
+        if column not in frame_columns:
+            continue
+        present.append(column)
+        values = pd.to_numeric(scores[column], errors="coerce")
+        if np.isfinite(values.to_numpy(dtype=float)).any():
             return column
-    return None
+    return present[0] if present else None
 
 
 def _heldout_aware_influence_summary(audit_module: Any, scores: pd.DataFrame) -> pd.DataFrame:

@@ -13,6 +13,9 @@ from .momentum_prediction_decay_validation import (
 from .sparse_momentum_bin_center_validation import (
     apply_sparse_momentum_bin_center_validation_patch as _apply_sparse_momentum_bin_center_validation_patch,
 )
+from .sparse_momentum_valid_bin_mask_validation import (
+    apply_sparse_momentum_valid_bin_mask_validation_patch as _apply_sparse_momentum_valid_bin_mask_validation_patch,
+)
 from .state_space_sigma_validation import (
     apply_state_space_sigma_validation_patch as _apply_state_space_sigma_validation_patch,
 )
@@ -87,6 +90,7 @@ from .state_space_utils import (
 StateSpaceReplayModel.score._native_duration_occupancy_aware = True
 _apply_candidate_active_support_validation_patch()
 _apply_sparse_momentum_bin_center_validation_patch()
+_apply_sparse_momentum_valid_bin_mask_validation_patch()
 _apply_state_space_sigma_validation_patch()
 _apply_trajectory_imm_single_bin_diagnostics_patch()
 _apply_momentum_prediction_decay_validation_patch()

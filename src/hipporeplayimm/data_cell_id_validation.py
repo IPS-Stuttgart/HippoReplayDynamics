@@ -5,7 +5,8 @@ loader should accept integral floats such as ``1.0`` but must not silently trunc
 corrupted fractional identifiers such as ``1.5`` to ``1``.  The same guard is
 installed for manually constructed sessions before place-field encoding selects
 spikes and cell IDs.  Replay-event selectors use the same integer-like MATLAB
-values, but boolean flags and scalar-array wrappers must not alias to event indices
+values.  Integral scalar-array wrappers are valid replay-event indices, but
+boolean flags and nonintegral scalar wrappers must not alias to event indices
 0 or 1.
 """
 
@@ -108,8 +109,8 @@ def apply_data_cell_id_validation_patch() -> None:
     def coerce_ripple_event(session, ripple):
         if _is_boolean_scalar(ripple):
             raise TypeError("ripple index must be an integer, not boolean")
-        if isinstance(ripple, (int, np.integer)):
-            return session.ripple(ripple)
+        if _is_ripple_index_scalar(ripple) or isinstance(ripple, np.ndarray):
+            return session.ripple(_coerce_ripple_index(ripple, session.ripple_count))
         return original_coerce_ripple_event(session, ripple)
 
     def as_integer_vector(value, name):
@@ -237,13 +238,59 @@ def _as_numeric_ids(values: Any) -> np.ndarray:
 def _coerce_ripple_index(index: Any, ripple_count: int) -> int:
     if _is_boolean_scalar(index):
         raise TypeError("ripple index must be an integer, not boolean")
-    if not isinstance(index, (int, np.integer)):
+    item = _ripple_index_scalar_item(index)
+    if item is None:
         raise TypeError("ripple index must be an integer")
-    resolved = int(index)
+    if isinstance(item, (int, np.integer)):
+        resolved = int(item)
+    else:
+        try:
+            numeric = float(item)
+        except (TypeError, ValueError) as exc:
+            raise TypeError("ripple index must be an integer") from exc
+        if not np.isfinite(numeric) or not numeric.is_integer():
+            raise TypeError("ripple index must be an integer")
+        resolved = int(numeric)
     count = int(ripple_count)
     if resolved < 0 or resolved >= count:
         raise IndexError(f"ripple index {resolved} out of range for {count} ripple events")
     return resolved
+
+
+def _is_ripple_index_scalar(value: Any) -> bool:
+    return _ripple_index_scalar_item(value) is not None
+
+
+def _ripple_index_scalar_item(value: Any) -> Any | None:
+    """Return a numeric scalar candidate for replay-event indexing, if present."""
+
+    if _is_boolean_scalar(value):
+        return None
+    if isinstance(value, (int, np.integer, float, np.floating)):
+        return value
+    try:
+        raw = np.asarray(value)
+    except (TypeError, ValueError):
+        return None
+    if raw.ndim != 0:
+        return None
+    if np.issubdtype(raw.dtype, np.bool_):
+        return None
+    if np.issubdtype(raw.dtype, np.number):
+        try:
+            return raw.item()
+        except (TypeError, ValueError):
+            return None
+    if raw.dtype == object:
+        try:
+            item = raw.item()
+        except (TypeError, ValueError):
+            return None
+        if isinstance(item, (bool, np.bool_)):
+            return None
+        if isinstance(item, (int, np.integer, float, np.floating)):
+            return item
+    return None
 
 
 def _is_boolean_scalar(value: Any) -> bool:
@@ -253,7 +300,7 @@ def _is_boolean_scalar(value: Any) -> bool:
         return True
     try:
         raw = np.asarray(value)
-    except ValueError:
+    except (TypeError, ValueError):
         return False
     if raw.ndim != 0:
         return False
@@ -262,7 +309,7 @@ def _is_boolean_scalar(value: Any) -> bool:
     if raw.dtype == object:
         try:
             return isinstance(raw.item(), (bool, np.bool_))
-        except ValueError:
+        except (TypeError, ValueError):
             return False
     return False
 

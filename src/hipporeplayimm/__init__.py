@@ -51,6 +51,7 @@ from . import kd_encoding_config_validation as _kd_encoding_config_validation
 from . import kd_impossible_emission_patch as _kd_impossible_emission_patch
 from . import kd_single_bin_momentum_patch2 as _kd_single_bin_momentum_patch2
 from . import latent_path_validation as _latent_path_validation
+from . import log_emission_n_spikes_validation as _log_emission_n_spikes_validation
 from . import mark_complex_validation as _mark_complex_validation
 from . import model_averaged_endpoint_scoping as _model_averaged_endpoint_scoping
 from . import model_parameter_validation as _model_parameter_validation
@@ -92,6 +93,7 @@ _state_space_bin_count_validation.apply_state_space_bin_count_validation_patch()
 _score_metadata.apply_model_hyperparam_patch()
 _score_metadata_bool_validation.apply_score_metadata_bool_validation_patch()
 _model_parameter_validation.apply_model_parameter_validation_patch()
+_log_emission_n_spikes_validation.apply_log_emission_n_spikes_validation_patch()
 _displacement_config_bool_validation.apply_displacement_config_bool_validation_patch()
 _displacement_imm_decay_validation.apply_displacement_imm_decay_validation_patch()
 _candidate_active_support_validation.apply_candidate_active_support_validation_patch()
@@ -224,6 +226,7 @@ def apply_runtime_patches() -> None:
     _score_metadata.apply_model_hyperparam_patch()
     _score_metadata_bool_validation.apply_score_metadata_bool_validation_patch()
     _model_parameter_validation.apply_model_parameter_validation_patch()
+    _log_emission_n_spikes_validation.apply_log_emission_n_spikes_validation_patch()
     _displacement_config_bool_validation.apply_displacement_config_bool_validation_patch()
     _displacement_imm_decay_validation.apply_displacement_imm_decay_validation_patch()
     _candidate_active_support_validation.apply_candidate_active_support_validation_patch()

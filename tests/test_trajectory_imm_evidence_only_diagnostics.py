@@ -5,12 +5,14 @@ from types import SimpleNamespace
 import numpy as np
 
 import hipporeplayimm
-from hipporeplayimm.encoding import LogEmissionTensor
 from hipporeplayimm import state_space_trajectory_imm as trajectory_imm
+from hipporeplayimm.encoding import LogEmissionTensor
+from hipporeplayimm.trajectory_imm_single_bin_diagnostics import apply_trajectory_imm_single_bin_diagnostics_patch
 
 
 def test_trajectory_imm_evidence_only_event_probability_uses_filtered_history() -> None:
     hipporeplayimm.apply_runtime_patches()
+    apply_trajectory_imm_single_bin_diagnostics_patch()
 
     emissions = LogEmissionTensor(
         log_likelihood=np.zeros((2, 2), dtype=float),

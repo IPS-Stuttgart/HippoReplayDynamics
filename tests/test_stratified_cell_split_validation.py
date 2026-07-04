@@ -10,7 +10,7 @@ def test_stratified_cell_split_rejects_invalid_n_strata() -> None:
     cells = np.arange(8)
     scores = np.linspace(0.0, 1.0, cells.size)
 
-    for invalid in (True, 0, -1, 1.5, np.nan):
+    for invalid in (True, np.array(True), 0, -1, 1.5, np.nan, np.array([4])):
         with pytest.raises(ValueError, match="n_strata must be a positive integer"):
             stratified_cell_split(cells, scores, 0.25, 1, n_strata=invalid)
 

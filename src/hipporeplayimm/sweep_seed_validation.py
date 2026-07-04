@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from decimal import Decimal, InvalidOperation
 from functools import wraps
 from typing import Any, Iterable
 
@@ -94,6 +95,8 @@ def _seed_value(value: object, name: str) -> int:
         raise TypeError(f"{name} must be an integer, not boolean")
     if isinstance(item, (int, np.integer)):
         seed = int(item)
+    elif isinstance(item, (str, bytes)):
+        seed = _seed_text_value(item, name)
     else:
         try:
             numeric = float(item)
@@ -105,6 +108,33 @@ def _seed_value(value: object, name: str) -> int:
     if seed < 0:
         raise ValueError(f"{name} must be a finite nonnegative integer")
     return seed
+
+
+def _seed_text_value(value: str | bytes, name: str) -> int:
+    if isinstance(value, bytes):
+        try:
+            text = value.decode("utf-8")
+        except UnicodeDecodeError as exc:
+            raise ValueError(f"{name} must be a finite nonnegative integer") from exc
+    else:
+        text = value
+    text = text.strip()
+    if not text:
+        raise ValueError(f"{name} must be a finite nonnegative integer")
+    try:
+        return int(text, 10)
+    except ValueError:
+        pass
+    try:
+        numeric = Decimal(text)
+    except InvalidOperation as exc:
+        raise ValueError(f"{name} must be a finite nonnegative integer") from exc
+    if not numeric.is_finite():
+        raise ValueError(f"{name} must be a finite nonnegative integer")
+    integer = numeric.to_integral_value()
+    if numeric != integer:
+        raise ValueError(f"{name} must be a finite nonnegative integer")
+    return int(integer)
 
 
 def _current(sweeps) -> bool:

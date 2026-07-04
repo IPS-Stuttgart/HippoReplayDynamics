@@ -12,8 +12,9 @@ _MISSING_WELL_LABELS = {"", "<na>", "na", "n/a", "nan", "none", "null", "missing
 def apply_well_label_shuffle_patch() -> None:
     """Install row-wise well-label shuffling."""
 
-    from . import result_improvements
+    from . import result_improvement_split_validation, result_improvements
 
+    result_improvement_split_validation.apply_result_improvement_split_validation_patch()
     if (
         getattr(result_improvements, _PATCHED_FLAG, False)
         and getattr(result_improvements, "shuffle_well_labels", None) is shuffle_well_labels

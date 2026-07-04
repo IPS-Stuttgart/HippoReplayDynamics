@@ -6,6 +6,8 @@ from functools import wraps
 import sys
 from typing import Any
 
+import numpy as np
+
 _PATCHED_FLAG = "_result_improvement_split_validation_patch_applied"
 _WRAPPER_FLAG = "_result_improvement_split_validation_wrapper"
 _ORIGINAL_ATTR = "_result_improvement_split_validation_original"
@@ -32,7 +34,7 @@ def apply_result_improvement_split_validation_patch() -> None:
         *,
         n_strata: int = 4,
     ):
-        validated_n_strata = result_improvements._positive_integer_count(n_strata, "n_strata")
+        validated_n_strata = _positive_integer_scalar(n_strata, "n_strata")
         return original(
             cell_ids,
             stratum_values,
@@ -46,6 +48,30 @@ def apply_result_improvement_split_validation_patch() -> None:
     result_improvements.stratified_cell_split = stratified_cell_split
     _synchronize_aliases(original, stratified_cell_split)
     setattr(result_improvements, _PATCHED_FLAG, True)
+
+
+def _positive_integer_scalar(value: object, name: str) -> int:
+    """Return a positive integer scalar without boolean or array coercion."""
+
+    try:
+        array = np.asarray(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must be a positive integer") from exc
+    if array.ndim != 0 or np.issubdtype(array.dtype, np.bool_):
+        raise ValueError(f"{name} must be a positive integer")
+    try:
+        item = array.item()
+    except ValueError as exc:
+        raise ValueError(f"{name} must be a positive integer") from exc
+    if isinstance(item, (bool, np.bool_)):
+        raise ValueError(f"{name} must be a positive integer")
+    try:
+        numeric = float(item)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ValueError(f"{name} must be a positive integer") from exc
+    if not np.isfinite(numeric) or numeric < 1.0 or numeric != np.floor(numeric):
+        raise ValueError(f"{name} must be a positive integer")
+    return int(numeric)
 
 
 def _synchronize_aliases(original: Any, patched: Any) -> None:

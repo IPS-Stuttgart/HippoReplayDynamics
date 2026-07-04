@@ -153,12 +153,34 @@ def _spatial_roll_rates(rates: np.ndarray, grid_shape: tuple[int, int], rng: np.
 
 
 def _validate_grid_shape(grid_shape: tuple[int, int]) -> tuple[int, int]:
-    if len(grid_shape) != 2:
+    try:
+        values = tuple(grid_shape)
+    except TypeError as exc:
+        raise ValueError("grid_shape must contain exactly two dimensions") from exc
+    if len(values) != 2:
         raise ValueError("grid_shape must contain exactly two dimensions")
-    n_x, n_y = (int(grid_shape[0]), int(grid_shape[1]))
-    if n_x <= 0 or n_y <= 0:
-        raise ValueError("grid_shape dimensions must be positive")
+    n_x, n_y = (_positive_grid_dimension(value) for value in values)
     return n_x, n_y
+
+
+def _positive_grid_dimension(value: object) -> int:
+    if isinstance(value, (bool, np.bool_)):
+        raise ValueError("grid_shape dimensions must be positive integers")
+    try:
+        integer = operator.index(value)
+    except TypeError:
+        try:
+            numeric = float(value)
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise ValueError("grid_shape dimensions must be positive integers") from exc
+        if not np.isfinite(numeric):
+            raise ValueError("grid_shape dimensions must be finite positive integers")
+        integer = int(round(numeric))
+        if not np.isclose(numeric, integer, rtol=0.0, atol=0.0):
+            raise ValueError("grid_shape dimensions must be integer-valued")
+    if integer <= 0:
+        raise ValueError("grid_shape dimensions must be positive")
+    return int(integer)
 
 
 def _nonidentity_roll_shift(grid_shape: tuple[int, int], rng: np.random.Generator) -> tuple[int, int]:

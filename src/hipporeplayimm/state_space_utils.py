@@ -84,7 +84,7 @@ def _per_bin_sigma(sigma_cm_sqrt_s: float, dt_s: float) -> float:
 
 
 def _top_candidate_indices(log_emission: np.ndarray, top_k: int) -> np.ndarray:
-    _reject_boolean_count("top_k", top_k)
+    top_k = _coerce_integer_count("top_k", top_k)
     if top_k <= 0 or top_k >= log_emission.shape[0]:
         return np.arange(log_emission.shape[0], dtype=int)
     selected = np.argpartition(log_emission, -top_k)[-top_k:]
@@ -107,10 +107,9 @@ def _mass_retaining_candidate_indices(
     matching ``_top_candidate_indices``.
     """
 
-    if top_k is not None:
-        _reject_boolean_count("top_k", top_k)
-    _reject_boolean_count("min_k", min_k)
-    _reject_boolean_count("max_k", max_k)
+    top_k_count = None if top_k is None else _coerce_integer_count("top_k", top_k)
+    min_k_count = _coerce_integer_count("min_k", min_k)
+    max_k_count = _coerce_integer_count("max_k", max_k)
 
     values = np.asarray(log_emission, dtype=float)
     if values.ndim != 1:
@@ -118,12 +117,12 @@ def _mass_retaining_candidate_indices(
     if values.size == 0:
         return np.empty(0, dtype=int)
     if mass_threshold is None or float(mass_threshold) <= 0.0:
-        return _top_candidate_indices(values, 0 if top_k is None else int(top_k))
+        return _top_candidate_indices(values, 0 if top_k_count is None else top_k_count)
     if not 0.0 < float(mass_threshold) <= 1.0:
         raise ValueError("mass_threshold must be in (0, 1]")
-    if min_k < 0:
+    if min_k_count < 0:
         raise ValueError("min_k must be non-negative")
-    if max_k < 0:
+    if max_k_count < 0:
         raise ValueError("max_k must be non-negative")
     finite = np.isfinite(values)
     if not np.any(finite):
@@ -131,9 +130,9 @@ def _mass_retaining_candidate_indices(
     order = np.argsort(np.where(finite, values, -np.inf))[::-1]
     finite_order = order[finite[order]]
     finite_count = int(finite_order.size)
-    top_k_minimum = 0 if top_k is None or int(top_k) <= 0 else int(top_k)
-    min_count = min(finite_count, max(1, top_k_minimum, int(min_k)))
-    max_count = finite_count if max_k <= 0 else min(finite_count, max(min_count, int(max_k)))
+    top_k_minimum = 0 if top_k_count is None or top_k_count <= 0 else top_k_count
+    min_count = min(finite_count, max(1, top_k_minimum, min_k_count))
+    max_count = finite_count if max_k_count <= 0 else min(finite_count, max(min_count, max_k_count))
     ordered_values = values[finite_order]
     cumulative_mass = np.cumsum(np.exp(ordered_values - logsumexp(ordered_values)))
     tolerance = 16.0 * np.finfo(float).eps
@@ -358,168 +357,3 @@ def _pairwise_gaussian_log_prob(predicted: np.ndarray, observed: np.ndarray, sig
     delta = predicted[:, None, :] - observed[None, :, :]
     dist2 = np.sum(delta * delta, axis=2)
     return -0.5 * dist2 / (sigma_cm * sigma_cm)
-
-
-def _scaled_emissions(
-    log_likelihood: np.ndarray,
-    valid_bin_mask: np.ndarray | None = None,
-) -> tuple[np.ndarray, np.ndarray]:
-    values = np.asarray(log_likelihood, dtype=float)
-    if values.ndim != 2:
-        raise ValueError("log_likelihood must be two-dimensional")
-    if np.any(np.isnan(values)) or np.any(values == np.inf):
-        raise ValueError("log_likelihood must not contain NaN or +inf")
-
-    finite = np.isfinite(values)
-    valid_mask = _coerce_valid_bin_mask(valid_bin_mask, values.shape[1])
-    if valid_mask is not None:
-        finite &= valid_mask[None, :]
-
-    finite_rows = np.any(finite, axis=1)
-    if not np.all(finite_rows):
-        row = int(np.flatnonzero(~finite_rows)[0])
-        raise ValueError(f"row {row} must contain at least one finite value on the active support")
-
-    offsets = np.max(np.where(finite, values, -np.inf), axis=1)
-    shifted = np.where(finite, values - offsets[:, None], -np.inf)
-    scaled = np.exp(np.clip(shifted, -745.0, 0.0))
-    scaled[~finite] = 0.0
-    return scaled, offsets
-
-
-def _as_log_probs(probabilities: np.ndarray) -> np.ndarray:
-    probs = np.asarray(probabilities, dtype=float)
-    if probs.ndim != 2:
-        raise ValueError("probabilities must be two-dimensional")
-    if not np.all(np.isfinite(probs)):
-        raise ValueError("probabilities must be finite")
-    if np.any(probs < 0.0):
-        raise ValueError("probabilities must be nonnegative")
-
-    row_mass = probs.sum(axis=1)
-    if not np.all(np.isfinite(row_mass)) or np.any(row_mass <= 0.0):
-        raise ValueError("every probability row must contain positive finite mass")
-
-    out = np.full(probs.shape, LOG_ZERO, dtype=float)
-    normalized = probs / row_mass[:, None]
-    positive = normalized > 0.0
-    out[positive] = np.log(normalized[positive])
-    return out
-
-
-def _mean_entropy(trajectory_log_posterior: np.ndarray) -> float:
-    log_posterior = np.asarray(trajectory_log_posterior, dtype=float)
-    posterior = np.exp(log_posterior)
-    with np.errstate(invalid="ignore"):
-        entropy_terms = np.where(posterior > 0.0, posterior * log_posterior, 0.0)
-    return float(np.mean(-np.sum(entropy_terms, axis=1)))
-
-
-def _diagnostic_transition_durations(
-    dt_s: float,
-    n_time: int,
-    fallback_dt_s: float,
-) -> np.ndarray:
-    n_transitions = max(int(n_time) - 1, 0)
-    transition_durations = getattr(dt_s, "transition_durations", None)
-    if transition_durations is None:
-        return np.full(n_transitions, float(fallback_dt_s), dtype=float)
-
-    durations = np.asarray(transition_durations, dtype=float)
-    if durations.shape != (n_transitions,):
-        raise ValueError("transition_durations must contain one value per adjacent time-bin pair")
-    if not np.all(np.isfinite(durations)) or np.any(durations <= 0.0):
-        raise ValueError("transition_durations must contain finite positive durations")
-    return durations
-
-
-def _longest_active_run_duration(
-    active: np.ndarray,
-    transition_durations: np.ndarray,
-    fallback_dt_s: float,
-) -> float:
-    active = np.asarray(active, dtype=bool)
-    if active.size == 0:
-        return 0.0
-    bin_duration = float(np.median(transition_durations)) if transition_durations.size else float(fallback_dt_s)
-    best = 0.0
-    start: int | None = None
-    for index, value in enumerate(active):
-        if value and start is None:
-            start = index
-        if start is None:
-            continue
-        if value and index != active.size - 1:
-            continue
-        stop = index if value else index - 1
-        duration = bin_duration
-        if stop > start:
-            duration += float(np.sum(transition_durations[start:stop]))
-        best = max(best, duration)
-        start = None
-    return best
-
-
-def _first_order_imm_content_diagnostics(
-    mode_posterior: np.ndarray,
-    trajectory_log_posterior: np.ndarray,
-    bin_centers: np.ndarray,
-    dt_s: float,
-) -> dict[str, float | int]:
-    mode = np.asarray(mode_posterior, dtype=float)
-    trajectory = np.asarray(trajectory_log_posterior, dtype=float)
-    centers = np.asarray(bin_centers, dtype=float)
-    if mode.ndim != 2 or mode.shape[1] != 3:
-        raise ValueError("first-order IMM mode posterior must have shape (time, 3)")
-    if trajectory.ndim != 2 or trajectory.shape[0] != mode.shape[0]:
-        raise ValueError("trajectory posterior must have one row per mode-posterior time bin")
-    if centers.ndim != 2 or centers.shape[0] != trajectory.shape[1] or centers.shape[1] < 1:
-        raise ValueError("bin_centers must contain one coordinate row per spatial bin")
-    dt = float(dt_s)
-    if not np.isfinite(dt) or dt <= 0.0:
-        raise ValueError("dt_s must be finite and positive")
-    transition_durations = _diagnostic_transition_durations(dt_s, mode.shape[0], dt)
-
-    map_mode = np.argmax(mode, axis=1)
-    nonstationary = map_mode != 0
-    starts = nonstationary & np.concatenate(([True], ~nonstationary[:-1]))
-    bout_count = int(starts.sum())
-    longest_duration = _longest_active_run_duration(nonstationary, transition_durations, dt)
-
-    posterior = np.exp(trajectory)
-    row_mass = posterior.sum(axis=1)
-    valid = row_mass > 0.0
-    posterior[valid] = posterior[valid] / row_mass[valid, None]
-    expected_position = posterior @ centers
-    if len(expected_position) > 1:
-        steps = np.linalg.norm(np.diff(expected_position, axis=0), axis=1)
-        path_length = float(np.nansum(steps))
-        net = float(np.linalg.norm(expected_position[-1] - expected_position[0]))
-        duration = max(float(np.sum(transition_durations)), np.finfo(float).tiny)
-    else:
-        path_length = 0.0
-        net = 0.0
-        duration = dt
-
-    return {
-        "state_space_imm_fraction_time_map_stationary": float(np.mean(~nonstationary)),
-        "state_space_imm_fraction_time_map_nonstationary": float(np.mean(nonstationary)),
-        "state_space_imm_nonstationary_bout_count": bout_count,
-        "state_space_imm_longest_nonstationary_bout_s": longest_duration,
-        "state_space_imm_posterior_expected_path_length_cm": path_length,
-        "state_space_imm_posterior_net_displacement_cm": net,
-        "state_space_imm_posterior_path_speed_cm_s": path_length / duration,
-    }
-
-
-def _mode_transition_matrix(n_modes: int, stickiness: float) -> np.ndarray:
-    n_modes = _coerce_integer_count("n_modes", n_modes)
-    if n_modes < 1:
-        raise ValueError("n_modes must be positive")
-    stickiness = _coerce_unit_probability("mode_stickiness", stickiness)
-    if n_modes == 1:
-        return np.ones((1, 1), dtype=float)
-    off_diag = (1.0 - stickiness) / (n_modes - 1)
-    matrix = np.full((n_modes, n_modes), off_diag, dtype=float)
-    np.fill_diagonal(matrix, stickiness)
-    return matrix

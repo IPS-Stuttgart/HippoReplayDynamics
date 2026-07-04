@@ -61,6 +61,7 @@ from . import olafsdottir_zip_safety as _olafsdottir_zip_safety
 from . import position_decoding_config_validation as _position_decoding_config_validation
 from . import posterior_calibration_summary_patch as _posterior_calibration_summary_patch
 from . import pyrecest_bin_center_validation as _pyrecest_bin_center_validation
+from . import pyrecest_goal_diagnostics_validation as _pyrecest_goal_diagnostics_validation
 from . import pyrecest_numeric_metadata_guard as _pyrecest_numeric_metadata_guard
 from . import pyrecest_score_metadata as _pyrecest_score_metadata
 from . import recovery_diagnostics_bool_patch as _recovery_diagnostics_bool_patch
@@ -107,6 +108,7 @@ _bma_options_patch.apply_bma_options_patch()
 _pyrecest_numeric_metadata_guard.apply_pyrecest_numeric_metadata_guard_patch()
 _pyrecest_score_metadata.apply_pyrecest_score_metadata_patch()
 _pyrecest_bin_center_validation.apply_pyrecest_bin_center_validation_patch()
+_pyrecest_goal_diagnostics_validation.apply_pyrecest_goal_diagnostics_validation_patch()
 _goal_state_space_integration.apply_goal_state_space_patch()
 _spike_rate_metadata.apply_spike_rate_metadata_patch()
 _time_order_patch.apply_reverse_emission_time_patch()
@@ -238,6 +240,7 @@ def apply_runtime_patches() -> None:
     _pyrecest_numeric_metadata_guard.apply_pyrecest_numeric_metadata_guard_patch()
     _pyrecest_score_metadata.apply_pyrecest_score_metadata_patch()
     _pyrecest_bin_center_validation.apply_pyrecest_bin_center_validation_patch()
+    _pyrecest_goal_diagnostics_validation.apply_pyrecest_goal_diagnostics_validation_patch()
     _goal_state_space_integration.apply_goal_state_space_patch()
     _spike_rate_metadata.apply_spike_rate_metadata_patch()
     _clusterless_config_validation.apply_clusterless_encoding_config_validation_patch()

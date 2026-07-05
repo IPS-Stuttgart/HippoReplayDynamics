@@ -157,16 +157,15 @@ def _coerce_integer_identifier(value: Any, name: str, integer_info: np.iinfo) ->
         raise ValueError(f"{name} must not contain boolean identifiers")
     if isinstance(item, (int, np.integer)):
         identifier = int(item)
-    else:
-        try:
-            numeric = float(item)
-        except (TypeError, ValueError) as exc:
-            raise ValueError(f"{name} must contain finite integer identifiers") from exc
+    elif isinstance(item, (float, np.floating)):
+        numeric = float(item)
         if not np.isfinite(numeric):
             raise ValueError(f"{name} must contain finite integer identifiers")
         if not numeric.is_integer():
             raise ValueError(f"{name} must be integer-valued")
         identifier = int(numeric)
+    else:
+        raise ValueError(f"{name} must contain numeric integer identifiers")
     if identifier < int(integer_info.min) or identifier > int(integer_info.max):
         raise ValueError(f"{name} must fit into integer identifier range")
     return identifier

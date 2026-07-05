@@ -30,8 +30,10 @@ def apply_advanced_result_status_patch() -> None:
 
     from . import advanced_result_diagnostics as diagnostics
     from . import advanced_result_margin_duplicate_patch as margin_duplicate_patch
+    from . import advanced_result_place_field_cell_id_validation as place_field_cell_id_validation
 
     margin_duplicate_patch.apply_advanced_result_margin_duplicate_patch()
+    place_field_cell_id_validation.apply_advanced_result_place_field_cell_id_validation_patch()
     if getattr(diagnostics, _PATCHED_FLAG, False) and _advanced_result_patch_current(diagnostics):
         return
 

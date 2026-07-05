@@ -163,12 +163,14 @@ def _apply_poisson_input_validation_patch(encoding_module: Any, kd_module: Any) 
 def apply_emission_cell_id_validation_patch() -> None:
     """Install integral-ID validation for emission row lookups."""
 
+    from . import emission_timing_validation as timing_validation
     from . import encoding as encoding_module
     from . import kd_reference as kd_module
     from . import log_emission_n_spikes_validation as n_spikes_validation
     from . import result_improvement_extensions as extensions_module
 
     _apply_poisson_input_validation_patch(encoding_module, kd_module)
+    timing_validation.apply_emission_timing_validation_patch()
     n_spikes_validation.apply_log_emission_n_spikes_validation_patch()
 
     if not _encoding_build_emissions_patch_current(encoding_module):

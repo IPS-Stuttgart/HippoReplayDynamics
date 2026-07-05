@@ -71,7 +71,6 @@ from .state_space_utils import (
     _first_order_imm_content_diagnostics,
     _full_grid_normalized_pairwise_gaussian_log_prob,
     _gaussian_transition_matrix,
-    _mass_retaining_candidate_indices,
     _mean_entropy,
     _mode_transition_matrix,
     _pairwise_gaussian_log_prob,
@@ -83,9 +82,7 @@ from .state_space_utils import (
     _valid_bin_mask_from_occupancy,
     _validate_candidate_indices,
 )
-from .mass_threshold_validation import validated_mass_retaining_candidate_indices as _validated_mass_retaining_candidate_indices
-
-_mass_retaining_candidate_indices = _validated_mass_retaining_candidate_indices
+from .mass_threshold_validation import validated_mass_retaining_candidate_indices as _mass_retaining_candidate_indices
 
 # The StateSpaceReplayModel.score implementation in state_space_model is already
 # duration- and occupancy-aware. Mark it before legacy runtime patch modules

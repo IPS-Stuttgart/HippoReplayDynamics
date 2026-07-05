@@ -1,4 +1,4 @@
-"""Runtime validation for clusterless nested encoding configuration."""
+"""Runtime validation for clusterless nested encoding and emission configuration."""
 
 from __future__ import annotations
 
@@ -10,8 +10,8 @@ import numpy as np
 from .encoding import EncodingConfig, _validate_encoding_config
 
 _PATCH_MARKER = "_clusterless_encoding_config_validation_patch"
+_EMISSION_CONFIG_PATCH_MARKER = "_clusterless_emission_config_validation_patch"
 _BENCHMARK_MARK_CONFIG_PATCH_MARKER = "_benchmark_clusterless_mark_config_validation_patch"
-
 
 _NUMERIC_MESSAGES = {
     "mark_smoothing_sigma_bins": "mark_smoothing_sigma_bins must be finite and nonnegative",
@@ -21,11 +21,14 @@ _NUMERIC_MESSAGES = {
     "mark_kde_bandwidth": "mark_kde_bandwidth must be finite and positive when provided",
     "mark_kde_spatial_sigma_bins": "mark_kde_spatial_sigma_bins must be finite and nonnegative when provided",
     "mark_kde_max_neighbors": "mark_kde_max_neighbors must be a positive integer",
+    "spike_rate_scale": "spike_rate_scale must be finite and positive",
+    "likelihood_temperature": "likelihood_temperature must be finite and positive",
+    "negative_binomial_overdispersion": "negative_binomial_overdispersion must be finite and nonnegative",
 }
 
 
 def apply_clusterless_encoding_config_validation_patch() -> None:
-    """Validate ClusterlessMarkConfig.encoding before fitting clusterless marks."""
+    """Validate clusterless encoding and emission configuration before use."""
 
     import hipporeplayimm.clusterless as clusterless
 
@@ -33,7 +36,7 @@ def apply_clusterless_encoding_config_validation_patch() -> None:
     if getattr(current, _PATCH_MARKER, False):
         previous = getattr(current, "__wrapped__", None)
         if previous is not None:
-            _synchronize_aliases(previous, current)
+            _synchronize_aliases(previous, current, "fit_clusterless_mark_encoding")
     else:
         previous = current
 
@@ -45,9 +48,32 @@ def apply_clusterless_encoding_config_validation_patch() -> None:
 
         setattr(fit_clusterless_mark_encoding, _PATCH_MARKER, True)
         clusterless.fit_clusterless_mark_encoding = fit_clusterless_mark_encoding
-        _synchronize_aliases(previous, fit_clusterless_mark_encoding)
+        _synchronize_aliases(previous, fit_clusterless_mark_encoding, "fit_clusterless_mark_encoding")
 
+    _patch_clusterless_emission_config(clusterless)
     _patch_benchmark_clusterless_mark_config()
+
+
+def _patch_clusterless_emission_config(clusterless) -> None:
+    """Reject lossy clusterless emission calibration values before scoring."""
+
+    current = clusterless.build_clusterless_mark_emissions
+    if getattr(current, _EMISSION_CONFIG_PATCH_MARKER, False):
+        previous = getattr(current, "__wrapped__", None)
+        if previous is not None:
+            _synchronize_aliases(previous, current, "build_clusterless_mark_emissions")
+        return
+
+    previous = current
+
+    @wraps(previous)
+    def build_clusterless_mark_emissions(session, encoding, ripple, config=None):
+        _validate_clusterless_emission_config(config)
+        return previous(session, encoding, ripple, config)
+
+    setattr(build_clusterless_mark_emissions, _EMISSION_CONFIG_PATCH_MARKER, True)
+    clusterless.build_clusterless_mark_emissions = build_clusterless_mark_emissions
+    _synchronize_aliases(previous, build_clusterless_mark_emissions, "build_clusterless_mark_emissions")
 
 
 def _patch_benchmark_clusterless_mark_config() -> None:
@@ -90,6 +116,14 @@ def _validate_clusterless_mark_config(config: object | None) -> None:
     _finite_config_value(config, "mark_kde_bandwidth", positive=True, optional=True)
     _finite_config_value(config, "mark_kde_spatial_sigma_bins", positive=False, optional=True)
     _positive_integer_config_value(config, "mark_kde_max_neighbors")
+
+
+def _validate_clusterless_emission_config(config: object | None) -> None:
+    if config is None:
+        return
+    _finite_config_value(config, "spike_rate_scale", positive=True)
+    _finite_config_value(config, "likelihood_temperature", positive=True)
+    _finite_config_value(config, "negative_binomial_overdispersion", positive=False)
 
 
 def _validate_benchmark_clusterless_mark_config(config: object | None) -> None:
@@ -195,13 +229,13 @@ def _scalar_config_item(value: object, message: str) -> object:
     return item
 
 
-def _synchronize_aliases(previous: object, patched: object) -> None:
+def _synchronize_aliases(previous: object, patched: object, name: str) -> None:
     for module in list(sys.modules.values()):
         module_name = getattr(module, "__name__", "")
         if not module_name.startswith("hipporeplayimm"):
             continue
-        if getattr(module, "fit_clusterless_mark_encoding", None) is previous:
-            module.fit_clusterless_mark_encoding = patched
+        if getattr(module, name, None) is previous:
+            setattr(module, name, patched)
 
 
 __all__ = ["apply_clusterless_encoding_config_validation_patch"]

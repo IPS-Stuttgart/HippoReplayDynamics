@@ -22,6 +22,9 @@ from .state_space_sigma_validation import (
 from .trajectory_imm_single_bin_diagnostics import (
     apply_trajectory_imm_single_bin_diagnostics_patch as _apply_trajectory_imm_single_bin_diagnostics_patch,
 )
+from .first_order_imm_duration_diagnostics import (
+    apply_first_order_imm_duration_diagnostics_patch as _apply_first_order_imm_duration_diagnostics_patch,
+)
 from .state_space_model import (
     StateSpaceDecoderConfig,
     StateSpaceReplayModel,
@@ -94,6 +97,7 @@ _apply_sparse_momentum_valid_bin_mask_validation_patch()
 _apply_state_space_sigma_validation_patch()
 _apply_trajectory_imm_single_bin_diagnostics_patch()
 _apply_momentum_prediction_decay_validation_patch()
+_apply_first_order_imm_duration_diagnostics_patch()
 
 __all__ = [
     "EventScore",

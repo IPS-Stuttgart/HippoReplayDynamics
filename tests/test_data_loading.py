@@ -4,7 +4,7 @@ import numpy as np
 import pytest
 import scipy.io as sio
 
-from hipporeplayimm.data import _mark_group_ids_from_tetrode_cell_ids, load_mat_variable, load_replay_session
+from hipporeplayimm.data import _load_spike_marks, _mark_group_ids_from_tetrode_cell_ids, load_mat_variable, load_replay_session
 
 
 def test_load_mat_v5_variable(tmp_path: Path):
@@ -110,6 +110,38 @@ def _write_minimal_session(path: Path, *, mark_variable: str | None = None) -> N
     sio.savemat(path / "Position_Data.mat", {"Position_Data": np.array([[0.0, 0.0, 0.0], [1.0, 1.0, 1.0]])})
     sio.savemat(path / "Ripple_Events.mat", {"Ripple_Events": np.array([[0.1, 0.2, 0.15, 1.0, 2.0, 3.0]])})
     sio.savemat(path / "Epochs.mat", {"Run_Times": np.array([[0.0, 1.0]])})
+
+
+def test_spike_mark_loader_prefers_embedded_marks_without_loading_optional_files(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    (tmp_path / "Amplitude_Marks.mat").touch()
+    spikes = np.array([[1.0, 11.0], [2.0, 12.0], [3.0, 11.0]])
+    embedded_marks = np.array(
+        [
+            [40.0, 42.0],
+            [50.0, 52.0],
+            [60.0, 62.0],
+        ]
+    )
+    spike_data = {
+        "Spike_Data": spikes,
+        "Tetrode_Cell_IDs": np.array([[1, 11], [1, 12]]),
+        "Spike_Amplitude_Marks": embedded_marks,
+    }
+
+    def fail_optional_load(path: Path):
+        raise AssertionError(f"optional mark file was loaded eagerly: {path}")
+
+    monkeypatch.setattr("hipporeplayimm.data._load_mat_file", fail_optional_load)
+
+    marks = _load_spike_marks(tmp_path, spike_data, spikes)
+
+    assert marks is not None
+    assert marks.source_file == "Spike_Data.mat"
+    assert marks.source_variable == "Spike_Amplitude_Marks"
+    np.testing.assert_allclose(marks.marks, embedded_marks)
 
 
 def test_load_replay_session_detects_row_aligned_spike_marks(tmp_path: Path):

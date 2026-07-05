@@ -68,7 +68,6 @@ from .state_space_first_order import (
 from .state_space_utils import (
     _as_log_probs,
     _candidate_log_masses,
-    _first_order_imm_content_diagnostics,
     _full_grid_normalized_pairwise_gaussian_log_prob,
     _gaussian_transition_matrix,
     _mean_entropy,

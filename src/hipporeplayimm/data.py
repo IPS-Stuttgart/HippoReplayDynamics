@@ -1,6 +1,7 @@
 """Dataset loading for Pfeiffer/Foster replay sessions."""
 from __future__ import annotations
 
+from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -298,7 +299,7 @@ def _load_spike_marks(session_path: Path, spike_data: dict[str, Any], spikes: np
         cell_ids,
         spike_data.get("Tetrode_Cell_IDs", np.empty((0, 2))),
     )
-    for source_file, data in [("Spike_Data.mat", spike_data), *[(p.name, _load_mat_file(p)) for p in _candidate_mark_files(session_path)]]:
+    for source_file, data in _iter_mark_sources(session_path, spike_data):
         for variable_name, value in _candidate_mark_variables(data):
             marks = _coerce_mark_matrix(value, spike_count=spike_count, spike_times=spike_times)
             if marks is not None:
@@ -312,6 +313,14 @@ def _load_spike_marks(session_path: Path, spike_data: dict[str, Any], spikes: np
                     group_ids=None if group_ids is None else np.asarray(group_ids, dtype=int).copy(),
                 )
     return None
+
+
+def _iter_mark_sources(session_path: Path, spike_data: dict[str, Any]) -> Iterator[tuple[str, dict[str, Any]]]:
+    """Yield spike-mark sources in priority order without eager optional loads."""
+
+    yield "Spike_Data.mat", spike_data
+    for path in _candidate_mark_files(session_path):
+        yield path.name, _load_mat_file(path)
 
 
 def _mark_group_ids_from_tetrode_cell_ids(cell_ids: np.ndarray | None, tetrode_cell_ids: Any) -> np.ndarray | None:

@@ -25,7 +25,8 @@ def _is_current_bin_center_guard(value: object) -> bool:
 def _wrappers_are_current(pyrecest_models) -> bool:
     try:
         return (
-            _is_current_bin_center_guard(pyrecest_models.PyRecEstGoalParticleModel.score)
+            _is_current_bin_center_guard(pyrecest_models.PyRecEstGoalParticleModel.__post_init__)
+            and _is_current_bin_center_guard(pyrecest_models.PyRecEstGoalParticleModel.score)
             and _is_current_bin_center_guard(pyrecest_models._initial_replay_priors)
             and _is_current_bin_center_guard(pyrecest_models._coerce_candidate_goals)
             and _is_current_bin_center_guard(pyrecest_models._farthest_point_subset)
@@ -42,6 +43,7 @@ def _originals(pyrecest_models) -> dict[str, object]:
     originals = getattr(pyrecest_models, _ORIGINALS_ATTR, None)
     if originals is None:
         originals = {
+            "post_init": pyrecest_models.PyRecEstGoalParticleModel.__post_init__,
             "score": pyrecest_models.PyRecEstGoalParticleModel.score,
             "initial_replay_priors": pyrecest_models._initial_replay_priors,
             "coerce_candidate_goals": pyrecest_models._coerce_candidate_goals,
@@ -69,6 +71,7 @@ def apply_pyrecest_bin_center_validation_patch() -> None:
     if getattr(pyrecest_models, _PATCHED_FLAG, False) and _wrappers_are_current(pyrecest_models):
         return
 
+    original_post_init = originals["post_init"]
     original_score = originals["score"]
     original_initial_replay_priors = originals["initial_replay_priors"]
     original_coerce_candidate_goals = originals["coerce_candidate_goals"]
@@ -77,6 +80,13 @@ def apply_pyrecest_bin_center_validation_patch() -> None:
     original_validate_positive_int = originals["validate_positive_int"]
     original_validate_positive_float = originals["validate_positive_float"]
     original_validate_nonnegative_float = originals["validate_nonnegative_float"]
+
+    @_mark_bin_center_guard
+    @wraps(original_post_init)
+    def __post_init__(self):
+        original_post_init(self)
+        _validate_positive_float(self.alpha, "alpha", original_validate_positive_float)
+        _validate_positive_float(self.beta, "beta", original_validate_positive_float)
 
     @_mark_bin_center_guard
     @wraps(original_score)
@@ -155,6 +165,7 @@ def apply_pyrecest_bin_center_validation_patch() -> None:
     def _patched_validate_nonnegative_float(value, name):
         _validate_nonnegative_float(value, name, original_validate_nonnegative_float)
 
+    pyrecest_models.PyRecEstGoalParticleModel.__post_init__ = __post_init__
     pyrecest_models.PyRecEstGoalParticleModel.score = score
     pyrecest_models._initial_replay_priors = _initial_replay_priors
     pyrecest_models._coerce_candidate_goals = _coerce_candidate_goals

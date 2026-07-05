@@ -18,10 +18,30 @@ import numpy as np
 
 _STATE_SPACE_UTILS_PATCHED_FLAG = "_state_space_per_bin_sigma_validation_patch_applied"
 _DURATION_OCCUPANCY_PATCHED_FLAG = "_duration_occupancy_per_bin_sigma_validation_patch_applied"
+_STRING_SCALAR_TYPES = (str, bytes, np.str_, np.bytes_)
+
+
+def _is_string_scalar(value: Any) -> bool:
+    if isinstance(value, _STRING_SCALAR_TYPES):
+        return True
+    try:
+        raw = np.asarray(value)
+    except (TypeError, ValueError):
+        return False
+    if raw.ndim != 0:
+        return False
+    if np.issubdtype(raw.dtype, np.str_) or np.issubdtype(raw.dtype, np.bytes_):
+        return True
+    if raw.dtype == object:
+        try:
+            return isinstance(raw.item(), _STRING_SCALAR_TYPES)
+        except ValueError:
+            return False
+    return False
 
 
 def _reject_boolean_or_array_scalar(name: str, value: Any) -> None:
-    """Reject booleans and non-scalar values before float coercion."""
+    """Reject booleans, strings, and non-scalar values before float coercion."""
 
     try:
         raw = np.asarray(value)
@@ -29,6 +49,8 @@ def _reject_boolean_or_array_scalar(name: str, value: Any) -> None:
         raise TypeError(f"{name} must be a numeric scalar") from exc
     if raw.ndim != 0:
         raise TypeError(f"{name} must be a numeric scalar")
+    if _is_string_scalar(value):
+        raise TypeError(f"{name} must be a numeric scalar, not string")
     if isinstance(value, (bool, np.bool_)) or np.issubdtype(raw.dtype, np.bool_):
         raise TypeError(f"{name} must be numeric, not boolean")
     if raw.dtype == object:

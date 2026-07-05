@@ -17,7 +17,27 @@ import numpy as np
 _PATCHED_FLAG = "_momentum_prediction_decay_validation_patch_applied"
 
 
+def _is_boolean_scalar(value: object) -> bool:
+    """Return True for Python, NumPy, and object-wrapped boolean scalars."""
+
+    if isinstance(value, (bool, np.bool_)):
+        return True
+    arr = np.asarray(value)
+    if arr.ndim != 0:
+        return False
+    if np.issubdtype(arr.dtype, np.bool_):
+        return True
+    if arr.dtype == object:
+        try:
+            return isinstance(arr.item(), (bool, np.bool_))
+        except ValueError:
+            return False
+    return False
+
+
 def _coerce_prediction_multiplier(name: str, value: object) -> float:
+    if _is_boolean_scalar(value):
+        raise ValueError(f"{name} must be a finite nonnegative scalar")
     arr = np.asarray(value)
     if arr.ndim != 0:
         raise ValueError(f"{name} must be a finite nonnegative scalar")

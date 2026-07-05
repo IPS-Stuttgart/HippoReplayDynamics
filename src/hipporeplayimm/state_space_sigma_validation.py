@@ -18,6 +18,7 @@ import numpy as np
 
 _STATE_SPACE_UTILS_PATCHED_FLAG = "_state_space_per_bin_sigma_validation_patch_applied"
 _DURATION_OCCUPANCY_PATCHED_FLAG = "_duration_occupancy_per_bin_sigma_validation_patch_applied"
+_MODE_TRANSITION_PATCHED_FLAG = "_state_space_mode_transition_string_validation_patch_applied"
 _STRING_SCALAR_TYPES = (str, bytes, np.str_, np.bytes_)
 
 
@@ -110,11 +111,36 @@ def _patch_duration_occupancy_sigma() -> None:
     setattr(duration_occupancy, _DURATION_OCCUPANCY_PATCHED_FLAG, True)
 
 
+def _patch_state_space_utils_mode_transition() -> None:
+    from . import state_space_utils
+
+    current = state_space_utils._mode_transition_matrix
+    if getattr(current, _MODE_TRANSITION_PATCHED_FLAG, False):
+        setattr(state_space_utils, _MODE_TRANSITION_PATCHED_FLAG, True)
+        return
+
+    @wraps(current)
+    def mode_transition_matrix(n_modes, stickiness):
+        _reject_boolean_or_array_scalar("mode_stickiness", stickiness)
+        return current(n_modes, stickiness)
+
+    setattr(mode_transition_matrix, _MODE_TRANSITION_PATCHED_FLAG, True)
+    setattr(mode_transition_matrix, "__hipporeplayimm_original__", current)
+    state_space_utils._mode_transition_matrix = mode_transition_matrix
+    setattr(state_space_utils, _MODE_TRANSITION_PATCHED_FLAG, True)
+
+    for module in list(sys.modules.values()):
+        module_name = getattr(module, "__name__", "")
+        if module_name.startswith("hipporeplayimm") and getattr(module, "_mode_transition_matrix", None) is current:
+            module._mode_transition_matrix = mode_transition_matrix
+
+
 def apply_state_space_sigma_validation_patch() -> None:
-    """Install idempotent validation for per-bin sigma conversion helpers."""
+    """Install idempotent validation for state-space scalar conversion helpers."""
 
     _patch_state_space_utils_sigma()
     _patch_duration_occupancy_sigma()
+    _patch_state_space_utils_mode_transition()
 
 
 __all__ = ["apply_state_space_sigma_validation_patch"]

@@ -129,7 +129,8 @@ def _metadata_group_key(value: object) -> str:
     if isinstance(missing, (bool, np.bool_)) and bool(missing):
         return repr(("missing", None))
     if isinstance(value, np.ndarray):
-        return repr(("array", np.asarray(value, dtype=object).reshape(-1).tolist()))
+        arr = np.asarray(value, dtype=object)
+        return repr(("array", tuple(arr.shape), arr.reshape(-1).tolist()))
     if isinstance(value, (list, tuple)):
         return repr(("sequence", list(value)))
     if isinstance(value, set):

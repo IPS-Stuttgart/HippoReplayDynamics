@@ -72,6 +72,7 @@ from . import reverse_time_terminal_guard as _reverse_time_terminal_guard
 from . import score_metadata as _score_metadata
 from . import score_metadata_bool_validation as _score_metadata_bool_validation
 from . import shuffle_spike_time_order as _shuffle_spike_time_order
+from . import simulation_best_row_flag_consistency as _simulation_best_row_flag_consistency
 from . import simulation_best_row_flags as _simulation_best_row_flags
 from . import simulation_recovery as _simulation_recovery
 from . import simulation_recovery_count_validation as _simulation_recovery_count_validation
@@ -292,6 +293,7 @@ def apply_runtime_patches() -> None:
     _synchronize_duration_patched_emission_builders()
     _patch_simulation_recovery_module(_simulation_recovery)
     _simulation_best_row_flags.apply_simulation_best_row_flags_patch()
+    _simulation_best_row_flag_consistency.apply_simulation_best_row_flag_consistency_patch()
     _evidence_status_coercion.apply_evidence_status_coercion_patch()
     _accuracy_model_probability_status_patch.apply_model_probability_status_patch()
     _accuracy_replay_gain_gamma_patch.apply_accuracy_replay_gain_gamma_patch()

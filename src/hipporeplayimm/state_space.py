@@ -7,6 +7,9 @@ from .models import EventScore, LOG_ZERO, _normalize_log_weights, _posterior_dia
 from .candidate_active_support_validation import (
     apply_candidate_active_support_validation_patch as _apply_candidate_active_support_validation_patch,
 )
+from .momentum_candidate_center_coercion import (
+    apply_momentum_candidate_center_coercion_patch as _apply_momentum_candidate_center_coercion_patch,
+)
 from .momentum_prediction_decay_validation import (
     apply_momentum_prediction_decay_validation_patch as _apply_momentum_prediction_decay_validation_patch,
 )
@@ -101,6 +104,7 @@ _apply_state_space_occupancy_threshold_validation_patch()
 _apply_state_space_sigma_validation_patch()
 _apply_trajectory_imm_single_bin_diagnostics_patch()
 _apply_momentum_prediction_decay_validation_patch()
+_apply_momentum_candidate_center_coercion_patch()
 _apply_first_order_imm_duration_diagnostics_patch()
 
 __all__ = [

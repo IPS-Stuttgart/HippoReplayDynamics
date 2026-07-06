@@ -10,6 +10,7 @@ import numpy as np
 from .encoding import EncodingConfig, _validate_encoding_config
 
 _PATCH_MARKER = "_clusterless_encoding_config_validation_patch"
+_MARK_VALUE_PATCH_MARKER = "_clusterless_mark_value_validation_patch"
 _BENCHMARK_MARK_CONFIG_PATCH_MARKER = "_benchmark_clusterless_mark_config_validation_patch"
 
 
@@ -28,6 +29,8 @@ def apply_clusterless_encoding_config_validation_patch() -> None:
     """Validate ClusterlessMarkConfig.encoding before fitting clusterless marks."""
 
     import hipporeplayimm.clusterless as clusterless
+
+    _patch_clusterless_mark_value_validation(clusterless)
 
     current = clusterless.fit_clusterless_mark_encoding
     if getattr(current, _PATCH_MARKER, False):
@@ -48,6 +51,27 @@ def apply_clusterless_encoding_config_validation_patch() -> None:
         _synchronize_aliases(previous, fit_clusterless_mark_encoding)
 
     _patch_benchmark_clusterless_mark_config()
+
+
+def _patch_clusterless_mark_value_validation(clusterless) -> None:
+    """Reject non-finite marks before evaluating clusterless likelihoods."""
+
+    current = clusterless.ClusterlessMarkEncoding._coerce_marks
+    if getattr(current, _MARK_VALUE_PATCH_MARKER, False):
+        return
+
+    previous = current
+
+    @wraps(previous)
+    def _coerce_marks(self, marks):
+        coerced = previous(self, marks)
+        if not np.all(np.isfinite(coerced)):
+            raise ValueError("marks must contain finite values")
+        return coerced
+
+    setattr(_coerce_marks, _MARK_VALUE_PATCH_MARKER, True)
+    setattr(_coerce_marks, "__hipporeplayimm_original__", previous)
+    clusterless.ClusterlessMarkEncoding._coerce_marks = _coerce_marks
 
 
 def _patch_benchmark_clusterless_mark_config() -> None:

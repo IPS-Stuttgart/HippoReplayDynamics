@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import types
+
 import numpy as np
 import pytest
 
@@ -84,6 +86,30 @@ def test_encoding_config_rejects_array_shaped_numeric_fields(
         fit_place_field_encoding(_minimal_session(tmp_path), config)
 
 
+@pytest.mark.parametrize(
+    ("field_name", "string_value"),
+    [
+        ("bin_size_cm", "4.0"),
+        ("smoothing_sigma_bins", "1.5"),
+        ("min_speed_cm_s", "0.0"),
+        ("min_occupancy_s", "0.02"),
+        ("rate_floor_hz", "1e-4"),
+        ("arena_padding_cm", "2.0"),
+    ],
+)
+def test_encoding_config_rejects_string_numeric_fields(
+    tmp_path,
+    field_name,
+    string_value,
+):
+    kwargs = {"min_speed_cm_s": 0.0}
+    kwargs[field_name] = string_value
+    config = EncodingConfig(**kwargs)
+
+    with pytest.raises(TypeError, match=field_name):
+        fit_place_field_encoding(_minimal_session(tmp_path), config)
+
+
 @pytest.mark.parametrize("field_name", ["use_excitatory", "exclude_ripple_intervals"])
 @pytest.mark.parametrize("value", ["False", 1, np.asarray([True])])
 def test_encoding_config_rejects_non_boolean_flag_fields(tmp_path, field_name, value):
@@ -114,6 +140,24 @@ def test_emission_time_bin_width_rejects_boolean_scalar():
     ],
 )
 def test_emission_time_bin_edges_reject_array_shaped_scalars(
+    start,
+    end,
+    time_bin_s,
+    message,
+):
+    with pytest.raises(TypeError, match=message):
+        _time_bin_edges(start, end, time_bin_s)
+
+
+@pytest.mark.parametrize(
+    ("start", "end", "time_bin_s", "message"),
+    [
+        ("0.0", 1.0, 0.02, "ripple start"),
+        (0.0, "1.0", 0.02, "ripple end"),
+        (0.0, 1.0, "0.02", "time_bin_s"),
+    ],
+)
+def test_emission_time_bin_edges_reject_string_scalars(
     start,
     end,
     time_bin_s,
@@ -174,6 +218,26 @@ def test_emission_scalar_parameters_reject_array_shapes(kwargs, message):
         _poisson_log_emissions(counts, rates, 0.02, **kwargs)
 
 
+@pytest.mark.parametrize(
+    ("kwargs", "message"),
+    [
+        ({"dt": "0.02"}, "dt"),
+        ({"spike_rate_scale": "1.0"}, "spike_rate_scale"),
+        ({"likelihood_temperature": "1.0"}, "likelihood_temperature"),
+        ({"negative_binomial_overdispersion": "0.0"}, "negative_binomial_overdispersion"),
+        ({"cell_weights": ["1.0"]}, "cell_weights"),
+    ],
+)
+def test_emission_numeric_parameters_reject_strings(kwargs, message):
+    counts = np.zeros((1, 1), dtype=int)
+    rates = np.ones((1, 2), dtype=float)
+    call_kwargs = dict(kwargs)
+    dt = call_kwargs.pop("dt", 0.02)
+
+    with pytest.raises(TypeError, match=message):
+        _poisson_log_emissions(counts, rates, dt, **call_kwargs)
+
+
 def test_encoding_grid_patch_refreshes_stale_true_flag(monkeypatch):
     import hipporeplayimm
     import hipporeplayimm.encoding as encoding
@@ -211,3 +275,23 @@ def test_encoding_bool_patch_refreshes_stale_true_flag(monkeypatch):
     assert getattr(encoding._time_bin_edges, patch._TIME_BIN_EDGES_WRAPPER_MARKER, False)
     with pytest.raises(TypeError, match="time_bin_s"):
         encoding._time_bin_edges(0.0, 1.0, True)
+
+
+def test_encoding_bool_patch_refreshes_imported_validation_aliases(monkeypatch):
+    import hipporeplayimm
+    import hipporeplayimm.encoding as encoding
+    import hipporeplayimm.encoding_grid_extra_columns as patch
+
+    stale_module = types.ModuleType("hipporeplayimm._stale_encoding_alias_probe")
+    stale_module._validate_encoding_config = patch._encoding_bool_originals(encoding)["validate_encoding_config"]
+    stale_module._time_bin_edges = patch._encoding_bool_originals(encoding)["time_bin_edges"]
+    stale_module._poisson_log_emissions = patch._encoding_bool_originals(encoding)["poisson_log_emissions"]
+    monkeypatch.setitem(__import__("sys").modules, stale_module.__name__, stale_module)
+
+    hipporeplayimm.apply_runtime_patches()
+
+    assert stale_module._validate_encoding_config is encoding._validate_encoding_config
+    assert stale_module._time_bin_edges is encoding._time_bin_edges
+    assert stale_module._poisson_log_emissions is encoding._poisson_log_emissions
+    with pytest.raises(TypeError, match="time_bin_s"):
+        stale_module._time_bin_edges(0.0, 1.0, True)

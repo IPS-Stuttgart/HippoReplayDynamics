@@ -61,7 +61,8 @@ def _numeric_evidence_rows(group: pd.DataFrame, evidence_col: str) -> pd.DataFra
 
     out = group.copy()
     out[evidence_col] = pd.to_numeric(out[evidence_col], errors="coerce")
-    return out.dropna(subset=[evidence_col]).sort_values(evidence_col, ascending=False, kind="stable")
+    finite = np.isfinite(out[evidence_col].to_numpy(dtype=float))
+    return out.loc[finite].sort_values(evidence_col, ascending=False, kind="stable")
 
 
 def apply_advanced_result_missing_group_patch() -> None:
@@ -241,7 +242,8 @@ def apply_advanced_result_missing_group_patch() -> None:
             paired = group[group[model_col].astype(str).isin([positive_model, reference_model])]
             pivot = paired.copy()
             pivot[evidence_col] = pd.to_numeric(pivot[evidence_col], errors="coerce")
-            pivot = pivot.dropna(subset=[evidence_col]).drop_duplicates(model_col, keep="last")
+            finite = np.isfinite(pivot[evidence_col].to_numpy(dtype=float))
+            pivot = pivot.loc[finite].drop_duplicates(model_col, keep="last")
             by_model = pivot.set_index(model_col)
             if positive_model not in by_model.index or reference_model not in by_model.index:
                 continue
@@ -374,3 +376,6 @@ def _paired_missing_group_patch_current(diagnostics) -> bool:
 
     base_decisions = getattr(diagnostics, _THRESHOLD_BASE_DECISIONS_ATTR, None)
     return bool(getattr(base_decisions, _PAIRED_DECISIONS_WRAPPER_FLAG, False))
+
+
+__all__ = ["apply_advanced_result_missing_group_patch"]

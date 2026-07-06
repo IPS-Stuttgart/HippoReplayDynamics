@@ -13,7 +13,7 @@ _ORIGINAL_ATTR = "__hipporeplayimm_seed_validation_original__"
 
 
 def _nonnegative_integer_seed(value: object, name: str = "random_seed") -> int:
-    """Return a finite nonnegative integer seed without bool/array coercion."""
+    """Return a finite nonnegative integer seed without bool/string/array coercion."""
 
     message = f"{name} must be a finite nonnegative integer"
     try:
@@ -24,6 +24,8 @@ def _nonnegative_integer_seed(value: object, name: str = "random_seed") -> int:
         raise ValueError(message)
     scalar = array.item()
     if isinstance(scalar, (bool, np.bool_)):
+        raise ValueError(message)
+    if isinstance(scalar, str):
         raise ValueError(message)
     try:
         numeric = float(scalar)

@@ -9,6 +9,28 @@ import numpy as np
 _PATCHED_FLAG = "_displacement_imm_velocity_decay_validation_patch_applied"
 _DURATION_SCALE_PATCHED_FLAG = "_displacement_duration_scale_validation_patch_applied"
 _TRAJECTORY_IMM_DECAY_PATCHED_FLAG = "_trajectory_imm_velocity_decay_validation_patch_applied"
+_CANDIDATE_KINEMATIC_DECAY_PATCHED_FLAG = "_candidate_kinematic_velocity_decay_validation_patch_applied"
+
+
+def _apply_candidate_kinematic_velocity_decay_validation_patch() -> None:
+    """Install an explicit CandidateKinematicModel velocity-decay guard."""
+
+    from . import models
+    from .model_parameter_validation import _validate_unit_interval_parameter
+
+    cls = models.CandidateKinematicModel
+    current = cls.__post_init__
+    if getattr(current, _CANDIDATE_KINEMATIC_DECAY_PATCHED_FLAG, False):
+        return
+
+    @wraps(current)
+    def post_init(self):
+        _validate_unit_interval_parameter("velocity_decay", self.velocity_decay)
+        return current(self)
+
+    setattr(post_init, _CANDIDATE_KINEMATIC_DECAY_PATCHED_FLAG, True)
+    setattr(post_init, "__hipporeplayimm_original__", current)
+    cls.__post_init__ = post_init
 
 
 def apply_displacement_imm_decay_validation_patch() -> None:
@@ -31,6 +53,8 @@ def apply_displacement_imm_decay_validation_patch() -> None:
         _SPARSE_MOMENTUM_DECAY_PATCHED_FLAG,
         _validate_config_momentum_velocity_decay,
     )
+
+    _apply_candidate_kinematic_velocity_decay_validation_patch()
 
     patched = state_space_displacement_momentum._duration_adjusted_decays
     if not getattr(state_space_displacement_momentum, _DISPLACEMENT_MOMENTUM_DECAY_PATCHED_FLAG, False):

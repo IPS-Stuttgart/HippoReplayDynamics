@@ -42,6 +42,21 @@ def test_momentum_prediction_rejects_nonfinite_fallback_decay() -> None:
         )
 
 
+def test_transition_decay_guard_rejects_boolean_decay_values() -> None:
+    hipporeplayimm.apply_runtime_patches()
+
+    bad_cases = (
+        (None, True),
+        (None, np.bool_(False)),
+        (np.array(True), 0.9),
+        (np.array([True], dtype=bool), 0.9),
+        (np.array([False], dtype=object), 0.9),
+    )
+    for values, fallback in bad_cases:
+        with pytest.raises(ValueError, match="finite nonnegative"):
+            _transition_decay_at(values, 0, fallback)
+
+
 def test_transition_decay_guard_preserves_valid_values_and_fallback() -> None:
     hipporeplayimm.apply_runtime_patches()
 

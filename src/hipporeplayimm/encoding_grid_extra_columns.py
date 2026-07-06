@@ -59,6 +59,7 @@ def _apply_grid_extra_columns_patch(encoding) -> None:
 def _apply_encoding_bool_validation_patch(encoding) -> None:
     originals = _encoding_bool_originals(encoding)
     if getattr(encoding, "_encoding_bool_validation_patch_applied", False) and _encoding_bool_wrappers_are_current(encoding):
+        _synchronize_encoding_validation_aliases(encoding, originals)
         return
 
     original_validate_encoding_config = originals["validate_encoding_config"]
@@ -89,12 +90,12 @@ def _apply_encoding_bool_validation_patch(encoding) -> None:
         negative_binomial_overdispersion=0.0,
     ):
         checked_cell_weights = _materialize_iterable_for_validation(cell_weights)
-        _reject_boolean_numeric(dt, "dt")
+        _require_numeric_values(dt, "dt")
         _require_numeric_scalar(spike_rate_scale, "spike_rate_scale")
         _require_numeric_scalar(likelihood_temperature, "likelihood_temperature")
         _require_numeric_scalar(negative_binomial_overdispersion, "negative_binomial_overdispersion")
         if checked_cell_weights is not None:
-            _reject_boolean_numeric(checked_cell_weights, "cell_weights")
+            _require_numeric_values(checked_cell_weights, "cell_weights")
         return original_poisson_log_emissions(
             spike_counts,
             rates_hz,
@@ -114,6 +115,7 @@ def _apply_encoding_bool_validation_patch(encoding) -> None:
     encoding._validate_encoding_config = validate_encoding_config
     encoding._time_bin_edges = time_bin_edges
     encoding._poisson_log_emissions = poisson_log_emissions
+    _synchronize_encoding_validation_aliases(encoding, originals)
     encoding._encoding_bool_validation_patch_applied = True
 
 
@@ -169,13 +171,37 @@ def _reject_boolean_numeric(value: Any, name: str) -> None:
 
 
 def _require_numeric_scalar(value: Any, name: str) -> None:
+    array = _as_real_numeric_array(value, name)
+    if array.ndim != 0:
+        raise TypeError(f"{name} must be a numeric scalar")
+
+
+def _require_numeric_values(value: Any, name: str) -> None:
+    _as_real_numeric_array(value, name)
+
+
+def _as_real_numeric_array(value: Any, name: str) -> np.ndarray:
     _reject_boolean_numeric(value, name)
     try:
         array = np.asarray(value)
     except (TypeError, ValueError) as exc:
-        raise TypeError(f"{name} must be a numeric scalar") from exc
-    if array.ndim != 0:
-        raise TypeError(f"{name} must be a numeric scalar")
+        raise TypeError(f"{name} must be numeric") from exc
+
+    if array.dtype == object:
+        if not all(_is_real_numeric_value(item) for item in array.flat):
+            raise TypeError(f"{name} must be numeric")
+        return array
+
+    if not (
+        np.issubdtype(array.dtype, np.integer)
+        or np.issubdtype(array.dtype, np.floating)
+    ):
+        raise TypeError(f"{name} must be numeric")
+    return array
+
+
+def _is_real_numeric_value(value: Any) -> bool:
+    return isinstance(value, (int, float, np.integer, np.floating)) and not isinstance(value, (bool, np.bool_))
 
 
 def _require_boolean_scalar(value: Any, name: str) -> None:
@@ -242,3 +268,23 @@ def _synchronize_make_grid_aliases(original_make_grid, replacement_make_grid) ->
             continue
         if getattr(module, "_make_grid", None) is original_make_grid:
             module._make_grid = replacement_make_grid
+
+
+def _synchronize_encoding_validation_aliases(encoding, originals: dict[str, Any]) -> None:
+    replacements = {
+        "_validate_encoding_config": encoding._validate_encoding_config,
+        "_time_bin_edges": encoding._time_bin_edges,
+        "_poisson_log_emissions": encoding._poisson_log_emissions,
+    }
+    original_by_attr = {
+        "_validate_encoding_config": originals["validate_encoding_config"],
+        "_time_bin_edges": originals["time_bin_edges"],
+        "_poisson_log_emissions": originals["poisson_log_emissions"],
+    }
+    for module in list(sys.modules.values()):
+        module_name = getattr(module, "__name__", "")
+        if not module_name.startswith("hipporeplayimm"):
+            continue
+        for attr, original in original_by_attr.items():
+            if getattr(module, attr, None) is original:
+                setattr(module, attr, replacements[attr])

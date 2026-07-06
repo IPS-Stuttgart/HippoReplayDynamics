@@ -28,6 +28,16 @@ def test_resampling_helpers_reject_boolean_seed() -> None:
         result_improvements.paired_sign_flip_p_value(_rows(), model="imm", n_permutations=2, random_seed=True)
 
 
+def test_resampling_helpers_reject_string_seed() -> None:
+    hipporeplayimm.apply_runtime_patches()
+
+    with pytest.raises(ValueError, match="random_seed"):
+        result_improvements.hierarchical_bootstrap_ci(_rows(), model="imm", n_bootstrap=2, random_seed="2")
+
+    with pytest.raises(ValueError, match="random_seed"):
+        result_improvements.paired_sign_flip_p_value(_rows(), model="imm", n_permutations=2, random_seed=np.array("2"))
+
+
 def test_resampling_helpers_reject_fractional_seed() -> None:
     hipporeplayimm.apply_runtime_patches()
 

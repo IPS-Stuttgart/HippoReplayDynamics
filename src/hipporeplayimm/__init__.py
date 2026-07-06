@@ -55,6 +55,7 @@ from . import log_emission_n_spikes_validation as _log_emission_n_spikes_validat
 from . import mark_complex_validation as _mark_complex_validation
 from . import model_averaged_endpoint_scoping as _model_averaged_endpoint_scoping
 from . import model_parameter_validation as _model_parameter_validation
+from . import model_numeric_string_validation as _model_numeric_string_validation
 from . import observation_sweep_config_validation as _observation_sweep_config_validation
 from . import occupancy_candidate_support as _occupancy_candidate_support
 from . import olafsdottir_header_float_patch as _olafsdottir_header_float_patch
@@ -79,6 +80,7 @@ from . import simulation_recovery_event_count as _simulation_recovery_event_coun
 from . import simulation_recovery_runtime_limits as _simulation_recovery_runtime_limits
 from . import sparse_momentum_duration_validation as _sparse_momentum_duration_validation
 from . import sparse_momentum_single_bin_diagnostics as _sparse_momentum_single_bin_diagnostics
+from . import spike_cell_id_emission_validation as _spike_cell_id_emission_validation
 from . import spike_rate_metadata as _spike_rate_metadata
 from . import state_space_bin_center_validation as _state_space_bin_center_validation
 from . import state_space_bin_count_validation as _state_space_bin_count_validation
@@ -94,6 +96,7 @@ _score_metadata.apply_model_hyperparam_patch()
 _score_metadata_bool_validation.apply_score_metadata_bool_validation_patch()
 _model_parameter_validation.apply_model_parameter_validation_patch()
 _log_emission_n_spikes_validation.apply_log_emission_n_spikes_validation_patch()
+_model_numeric_string_validation.apply_model_numeric_string_validation_patch()
 _displacement_config_bool_validation.apply_displacement_config_bool_validation_patch()
 _displacement_imm_decay_validation.apply_displacement_imm_decay_validation_patch()
 _candidate_active_support_validation.apply_candidate_active_support_validation_patch()
@@ -116,6 +119,7 @@ _spike_rate_metadata.apply_spike_rate_metadata_patch()
 _time_order_patch.apply_reverse_emission_time_patch()
 _clusterless_config_validation.apply_clusterless_encoding_config_validation_patch()
 _data_cell_id_validation.apply_data_cell_id_validation_patch()
+_spike_cell_id_emission_validation.apply_spike_cell_id_emission_validation_patch()
 _mark_complex_validation.apply_mark_complex_validation_patch()
 _encoding_grid_extra_columns.apply_encoding_grid_extra_columns_patch()
 _position_decoding_config_validation.apply_position_decoding_config_validation_patch()
@@ -226,7 +230,11 @@ def apply_runtime_patches() -> None:
     _score_metadata.apply_model_hyperparam_patch()
     _score_metadata_bool_validation.apply_score_metadata_bool_validation_patch()
     _model_parameter_validation.apply_model_parameter_validation_patch()
+<<<<<<< HEAD
     _log_emission_n_spikes_validation.apply_log_emission_n_spikes_validation_patch()
+=======
+    _model_numeric_string_validation.apply_model_numeric_string_validation_patch()
+>>>>>>> origin/main
     _displacement_config_bool_validation.apply_displacement_config_bool_validation_patch()
     _displacement_imm_decay_validation.apply_displacement_imm_decay_validation_patch()
     _candidate_active_support_validation.apply_candidate_active_support_validation_patch()
@@ -248,6 +256,7 @@ def apply_runtime_patches() -> None:
     _spike_rate_metadata.apply_spike_rate_metadata_patch()
     _clusterless_config_validation.apply_clusterless_encoding_config_validation_patch()
     _data_cell_id_validation.apply_data_cell_id_validation_patch()
+    _spike_cell_id_emission_validation.apply_spike_cell_id_emission_validation_patch()
     _mark_complex_validation.apply_mark_complex_validation_patch()
     _clusterless_mark_group_validation.apply_clusterless_mark_group_validation_patch()
     _encoding_select_cells_validation.apply_encoding_select_cells_validation_patch()

@@ -100,8 +100,9 @@ class BidirectionalReplayModel:
             candidate_indices=candidate_indices,
             return_trajectory=reverse_return_trajectory,
         )
-        weights = np.exp(np.array([forward.log_likelihood, reverse.log_likelihood]) - logsumexp([forward.log_likelihood, reverse.log_likelihood]))
-        logp = float(logsumexp([forward.log_likelihood, reverse.log_likelihood]) - np.log(2.0))
+        log_evidences = np.array([forward.log_likelihood, reverse.log_likelihood], dtype=float)
+        weights = _evidence_mixture_weights(log_evidences)
+        logp = float(logsumexp(log_evidences) - np.log(2.0))
         terminal = _mixture_log_posterior(forward.terminal_log_posterior, reverse.terminal_log_posterior, weights)
         trajectory = None
         if return_trajectory is not False:
@@ -280,6 +281,29 @@ def _looks_like_unexpected_keyword_type_error(exc: TypeError, keyword: str) -> b
         or "invalid keyword" in text
         or "takes no keyword" in text
     )
+
+
+def _evidence_mixture_weights(log_evidences: np.ndarray) -> np.ndarray:
+    """Return normalized model weights without NaNs for nonfinite evidences."""
+
+    values = np.asarray(log_evidences, dtype=float)
+    if values.size == 0:
+        return values.copy()
+
+    positive_infinite = np.isposinf(values)
+    if np.any(positive_infinite):
+        weights = np.zeros(values.shape, dtype=float)
+        weights[positive_infinite] = 1.0 / int(np.sum(positive_infinite))
+        return weights
+
+    finite = np.isfinite(values)
+    if not np.any(finite):
+        return np.full(values.shape, 1.0 / values.size, dtype=float)
+
+    weights = np.zeros(values.shape, dtype=float)
+    normalizer = logsumexp(values[finite])
+    weights[finite] = np.exp(values[finite] - normalizer)
+    return weights
 
 
 def _mixture_log_posterior(left: np.ndarray | None, right: np.ndarray | None, weights: np.ndarray) -> np.ndarray | None:

@@ -61,11 +61,20 @@ def _with_threshold_context(
     return out
 
 
+def _apply_distinct_model_margin_patch() -> None:
+    """Install the event-margin duplicate-model fix from package startup."""
+
+    from . import advanced_result_margin_duplicate_patch
+
+    advanced_result_margin_duplicate_patch.apply_advanced_result_margin_duplicate_patch()
+
+
 def apply_advanced_result_empty_threshold_patch() -> None:
     """Install empty-pair threshold-sweep schema preservation."""
 
     from . import advanced_result_diagnostics as diagnostics
 
+    _apply_distinct_model_margin_patch()
     if getattr(diagnostics, _PATCHED_FLAG, False):
         return
 

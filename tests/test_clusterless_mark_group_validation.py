@@ -4,8 +4,8 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from hipporeplayimm.clusterless import ClusterlessMarkConfig, ClusterlessMarkEncoding, _mark_group_ids_for_config
-from hipporeplayimm.data import ReplaySession, SpikeMarkData
+from hipporeplayimm.clusterless import ClusterlessMarkConfig, ClusterlessMarkEncoding, _mark_group_ids_for_config, build_clusterless_mark_emissions
+from hipporeplayimm.data import ReplaySession, RippleEvent, SpikeMarkData
 
 
 
@@ -151,3 +151,63 @@ def test_clusterless_mark_group_validation_patch_refreshes_stale_helpers(monkeyp
     encoding = _encoding_with_group_ids(np.array([0, 1]))
     with pytest.raises(ValueError, match="boolean"):
         encoding._coerce_group_indices([True], n_marks=1)
+
+
+
+def test_clusterless_mark_likelihood_preserves_large_integer_group_ids():
+    large_group_ids = np.array([9007199254740993, 9007199254740995], dtype=object)
+    encoding = _encoding_with_group_ids(large_group_ids)
+
+    group_indices = encoding._coerce_group_indices(
+        np.array([9007199254740995, 9007199254740993], dtype=object),
+        n_marks=2,
+    )
+
+    assert group_indices.tolist() == [1, 0]
+
+
+
+def test_clusterless_mark_likelihood_preserves_large_integer_string_group_ids():
+    large_group_ids = np.array(["9007199254740993", "9007199254740995"], dtype=object)
+    encoding = _encoding_with_group_ids(large_group_ids)
+
+    group_indices = encoding._coerce_group_indices(
+        np.array(["9007199254740995", "9007199254740993"], dtype=object),
+        n_marks=2,
+    )
+
+    assert group_indices.tolist() == [1, 0]
+
+
+
+def test_clusterless_tetrode_group_extraction_preserves_large_integer_ids():
+    large_group_ids = np.array([9007199254740993, 9007199254740995], dtype=object)
+    session = _session_with_mark_groups(large_group_ids)
+
+    extracted = _mark_group_ids_for_config(
+        session,
+        ClusterlessMarkConfig(mark_group_by="tetrode"),
+    )
+
+    assert extracted.tolist() == large_group_ids.tolist()
+
+
+
+def test_clusterless_emission_builder_rejects_fractional_group_ids_from_stale_helper(monkeypatch):
+    import hipporeplayimm.clusterless as clusterless
+
+    encoding = _encoding_with_group_ids(np.array([1, 2]))
+    session = _session_with_mark_groups(np.array([1, 2]))
+    assert session.spike_marks is not None
+
+    def stale_marks_for_config(session_, config):
+        return session_.spike_marks.times, session_.spike_marks.marks, np.array([1.0000000005, 2.0])
+
+    monkeypatch.setattr(clusterless, "_marks_for_config", stale_marks_for_config)
+
+    with pytest.raises(ValueError, match="integer-valued"):
+        build_clusterless_mark_emissions(
+            session,
+            encoding,
+            RippleEvent(start=0.0, end=1.1, peak=0.5, raw_power=0.0, z_power_session=0.0, z_power_epoch=0.0),
+        )

@@ -25,7 +25,8 @@ def _is_current_bin_center_guard(value: object) -> bool:
 def _wrappers_are_current(pyrecest_models) -> bool:
     try:
         return (
-            _is_current_bin_center_guard(pyrecest_models.PyRecEstGoalParticleModel.score)
+            _is_current_bin_center_guard(pyrecest_models.PyRecEstGoalParticleModel.__post_init__)
+            and _is_current_bin_center_guard(pyrecest_models.PyRecEstGoalParticleModel.score)
             and _is_current_bin_center_guard(pyrecest_models._initial_replay_priors)
             and _is_current_bin_center_guard(pyrecest_models._coerce_candidate_goals)
             and _is_current_bin_center_guard(pyrecest_models._farthest_point_subset)
@@ -42,6 +43,7 @@ def _originals(pyrecest_models) -> dict[str, object]:
     originals = getattr(pyrecest_models, _ORIGINALS_ATTR, None)
     if originals is None:
         originals = {
+            "post_init": pyrecest_models.PyRecEstGoalParticleModel.__post_init__,
             "score": pyrecest_models.PyRecEstGoalParticleModel.score,
             "initial_replay_priors": pyrecest_models._initial_replay_priors,
             "coerce_candidate_goals": pyrecest_models._coerce_candidate_goals,
@@ -69,6 +71,7 @@ def apply_pyrecest_bin_center_validation_patch() -> None:
     if getattr(pyrecest_models, _PATCHED_FLAG, False) and _wrappers_are_current(pyrecest_models):
         return
 
+    original_post_init = originals["post_init"]
     original_score = originals["score"]
     original_initial_replay_priors = originals["initial_replay_priors"]
     original_coerce_candidate_goals = originals["coerce_candidate_goals"]
@@ -77,6 +80,13 @@ def apply_pyrecest_bin_center_validation_patch() -> None:
     original_validate_positive_int = originals["validate_positive_int"]
     original_validate_positive_float = originals["validate_positive_float"]
     original_validate_nonnegative_float = originals["validate_nonnegative_float"]
+
+    @_mark_bin_center_guard
+    @wraps(original_post_init)
+    def __post_init__(self):
+        original_post_init(self)
+        _validate_positive_float(self.alpha, "alpha", original_validate_positive_float)
+        _validate_positive_float(self.beta, "beta", original_validate_positive_float)
 
     @_mark_bin_center_guard
     @wraps(original_score)
@@ -121,9 +131,7 @@ def apply_pyrecest_bin_center_validation_patch() -> None:
     @wraps(original_farthest_point_subset)
     def _farthest_point_subset(points: np.ndarray, max_points: int) -> np.ndarray:
         points = _as_2d_points(points, "bin_centers")
-        max_points = int(max_points)
-        if max_points <= 0:
-            raise ValueError("max_points must be positive")
+        max_points = _coerce_positive_integer_count(max_points, "max_points")
         if points.shape[0] <= max_points:
             return points.copy()
         selected = [int(np.argmin(np.sum(points, axis=1)))]
@@ -155,6 +163,7 @@ def apply_pyrecest_bin_center_validation_patch() -> None:
     def _patched_validate_nonnegative_float(value, name):
         _validate_nonnegative_float(value, name, original_validate_nonnegative_float)
 
+    pyrecest_models.PyRecEstGoalParticleModel.__post_init__ = __post_init__
     pyrecest_models.PyRecEstGoalParticleModel.score = score
     pyrecest_models._initial_replay_priors = _initial_replay_priors
     pyrecest_models._coerce_candidate_goals = _coerce_candidate_goals
@@ -202,6 +211,21 @@ def _is_scalar_value(value: object) -> bool:
     return _as_array(value).shape == ()
 
 
+def _coerce_positive_integer_count(value: object, name: str) -> int:
+    if _is_bool_scalar(value) or _is_bool_array(value):
+        raise ValueError(f"{name} must be a positive integer")
+    value_array = _as_array(value)
+    if value_array.shape != ():
+        raise ValueError(f"{name} must be a positive integer")
+    try:
+        integer_value = operator.index(value_array.item())
+    except TypeError as exc:
+        raise ValueError(f"{name} must be a positive integer") from exc
+    if integer_value <= 0:
+        raise ValueError(f"{name} must be a positive integer")
+    return int(integer_value)
+
+
 def _validate_probability(value: object, name: str, original_validate) -> None:
     if _is_bool_scalar(value) or _is_bool_array(value) or not _is_scalar_value(value):
         raise ValueError(f"{name} must lie in [0, 1]")
@@ -212,15 +236,7 @@ def _validate_probability(value: object, name: str, original_validate) -> None:
 
 
 def _validate_positive_int(value: object, name: str, original_validate) -> None:
-    if _is_bool_scalar(value) or _is_bool_array(value):
-        raise ValueError(f"{name} must be a positive integer")
-    value_array = _as_array(value)
-    if value_array.shape != ():
-        raise ValueError(f"{name} must be a positive integer")
-    try:
-        operator.index(value_array.item())
-    except TypeError as exc:
-        raise ValueError(f"{name} must be a positive integer") from exc
+    _coerce_positive_integer_count(value, name)
     try:
         original_validate(value, name)
     except (TypeError, ValueError) as exc:

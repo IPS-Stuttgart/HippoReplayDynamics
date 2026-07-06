@@ -97,6 +97,8 @@ def _unique_float_from_columns(
             if text.lower() in _MISSING_METADATA_STRINGS:
                 continue
             if text:
+                if isinstance(value, (bool, np.bool_)):
+                    raise ValueError(f"{column} must contain finite numeric metadata values")
                 numeric = float(value)
                 if not np.isfinite(numeric):
                     raise ValueError(f"{column} must be finite")
@@ -104,6 +106,6 @@ def _unique_float_from_columns(
     if not values:
         return float(default)
     first = values[0]
-    if any(not np.isclose(value, first) for value in values[1:]):
+    if any(value != first for value in values[1:]):
         raise ValueError(f"{' / '.join(columns)} contains multiple values")
     return float(first)

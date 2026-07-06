@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import numpy as np
 import pandas as pd
 import pytest
 
@@ -16,13 +17,19 @@ def _rows() -> pd.DataFrame:
     )
 
 
-@pytest.mark.parametrize("bad_count", [0, -1, 1.5, True, [2]])
+@pytest.mark.parametrize(
+    "bad_count",
+    [0, -1, 1.5, True, [2], "2", b"2", np.str_("2"), np.asarray("2")],
+)
 def test_hierarchical_bootstrap_ci_rejects_invalid_bootstrap_count(bad_count) -> None:
     with pytest.raises((TypeError, ValueError), match="n_bootstrap"):
         hierarchical_bootstrap_ci(_rows(), model="imm", n_bootstrap=bad_count)
 
 
-@pytest.mark.parametrize("bad_count", [0, -1, 1.5, False, [2]])
+@pytest.mark.parametrize(
+    "bad_count",
+    [0, -1, 1.5, False, [2], "2", b"2", np.str_("2"), np.asarray("2")],
+)
 def test_paired_sign_flip_rejects_invalid_permutation_count(bad_count) -> None:
     with pytest.raises((TypeError, ValueError), match="n_permutations"):
         paired_sign_flip_p_value(_rows(), model="imm", n_permutations=bad_count)

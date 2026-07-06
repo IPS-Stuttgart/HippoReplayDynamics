@@ -8,6 +8,7 @@ import math
 import numpy as np
 
 _MISSING_PREDICTED_CANDIDATE_OPTION = "--state-space-momentum-predicted-candidate-top-k"
+_STRING_TYPES = (str, bytes, np.str_, np.bytes_)
 
 
 def apply_cli_float_values_validation_patch() -> None:
@@ -101,6 +102,8 @@ def _positive_integer_count(name: str, value: object) -> int:
     item = raw.item()
     if isinstance(item, (bool, np.bool_)):
         raise ValueError(f"{name} must be a positive integer, not boolean")
+    if isinstance(item, _STRING_TYPES):
+        raise ValueError(f"{name} must be a positive integer, not string")
     try:
         numeric = float(item)
     except (TypeError, ValueError, OverflowError) as exc:

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from . import state_space_sparse_momentum as _state_space_sparse_momentum
+from . import state_space_trajectory_imm as _state_space_trajectory_imm
 from .goal_state_space import GoalStateSpaceReplayModel
 from .models import EventScore, LOG_ZERO, _normalize_log_weights, _posterior_diagnostics
 from .candidate_active_support_validation import (
@@ -18,6 +20,9 @@ from .momentum_prediction_decay_validation import (
 )
 from .sparse_momentum_bin_center_validation import (
     apply_sparse_momentum_bin_center_validation_patch as _apply_sparse_momentum_bin_center_validation_patch,
+)
+from .sparse_momentum_duration_validation import (
+    apply_sparse_momentum_duration_validation_patch as _apply_sparse_momentum_duration_validation_patch,
 )
 from .sparse_momentum_valid_bin_mask_validation import (
     apply_sparse_momentum_valid_bin_mask_validation_patch as _apply_sparse_momentum_valid_bin_mask_validation_patch,
@@ -62,12 +67,6 @@ from .state_space_displacement_momentum import (
 from .state_space_displacement_imm import (
     _score_displacement_imm_exact,
 )
-from .state_space_sparse_momentum import (
-    _score_sparse_momentum_exact,
-)
-from .state_space_trajectory_imm import (
-    _score_trajectory_imm_exact_sparse,
-)
 from .state_space_first_order import (
     _apply_transition,
     _apply_transition_backward,
@@ -104,12 +103,19 @@ _apply_candidate_active_support_validation_patch()
 _apply_state_space_candidate_bin_center_validation_patch()
 _apply_sparse_momentum_bin_center_validation_patch()
 _apply_sparse_momentum_valid_bin_mask_validation_patch()
+_apply_sparse_momentum_duration_validation_patch()
 _apply_state_space_occupancy_threshold_validation_patch()
 _apply_state_space_sigma_validation_patch()
 _apply_trajectory_imm_single_bin_diagnostics_patch()
 _apply_momentum_prediction_decay_validation_patch()
 _apply_momentum_candidate_center_coercion_patch()
 _apply_first_order_imm_duration_diagnostics_patch()
+
+# Refresh by-value aliases after patch modules wrap the lower-level scorer
+# functions; otherwise callers using hipporeplayimm.state_space can bypass the
+# sparse-momentum validation wrappers applied to the implementation modules.
+_score_sparse_momentum_exact = _state_space_sparse_momentum._score_sparse_momentum_exact
+_score_trajectory_imm_exact_sparse = _state_space_trajectory_imm._score_trajectory_imm_exact_sparse
 
 __all__ = [
     "EventScore",

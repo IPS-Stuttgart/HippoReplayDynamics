@@ -131,9 +131,7 @@ def apply_pyrecest_bin_center_validation_patch() -> None:
     @wraps(original_farthest_point_subset)
     def _farthest_point_subset(points: np.ndarray, max_points: int) -> np.ndarray:
         points = _as_2d_points(points, "bin_centers")
-        max_points = int(max_points)
-        if max_points <= 0:
-            raise ValueError("max_points must be positive")
+        max_points = _coerce_positive_integer_count(max_points, "max_points")
         if points.shape[0] <= max_points:
             return points.copy()
         selected = [int(np.argmin(np.sum(points, axis=1)))]
@@ -213,6 +211,21 @@ def _is_scalar_value(value: object) -> bool:
     return _as_array(value).shape == ()
 
 
+def _coerce_positive_integer_count(value: object, name: str) -> int:
+    if _is_bool_scalar(value) or _is_bool_array(value):
+        raise ValueError(f"{name} must be a positive integer")
+    value_array = _as_array(value)
+    if value_array.shape != ():
+        raise ValueError(f"{name} must be a positive integer")
+    try:
+        integer_value = operator.index(value_array.item())
+    except TypeError as exc:
+        raise ValueError(f"{name} must be a positive integer") from exc
+    if integer_value <= 0:
+        raise ValueError(f"{name} must be a positive integer")
+    return int(integer_value)
+
+
 def _validate_probability(value: object, name: str, original_validate) -> None:
     if _is_bool_scalar(value) or _is_bool_array(value) or not _is_scalar_value(value):
         raise ValueError(f"{name} must lie in [0, 1]")
@@ -223,15 +236,7 @@ def _validate_probability(value: object, name: str, original_validate) -> None:
 
 
 def _validate_positive_int(value: object, name: str, original_validate) -> None:
-    if _is_bool_scalar(value) or _is_bool_array(value):
-        raise ValueError(f"{name} must be a positive integer")
-    value_array = _as_array(value)
-    if value_array.shape != ():
-        raise ValueError(f"{name} must be a positive integer")
-    try:
-        operator.index(value_array.item())
-    except TypeError as exc:
-        raise ValueError(f"{name} must be a positive integer") from exc
+    _coerce_positive_integer_count(value, name)
     try:
         original_validate(value, name)
     except (TypeError, ValueError) as exc:

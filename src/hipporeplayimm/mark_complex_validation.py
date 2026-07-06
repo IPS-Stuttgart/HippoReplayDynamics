@@ -128,18 +128,18 @@ def _patch_spike_mark_shape_properties(data: Any) -> None:
     current_n_spikes = getattr(getattr(data.SpikeMarkData, "n_spikes", None), "fget", None)
     current_n_features = getattr(getattr(data.SpikeMarkData, "n_features", None), "fget", None)
 
-    if not _is_wrapper(current_n_spikes, _N_SPIKES_WRAPPER_ATTR):
-        def n_spikes(self):
-            return _spike_mark_spike_count(self.marks)
+    def n_spikes(self):
+        return _spike_mark_spike_count(self.marks)
 
+    def n_features(self):
+        return _spike_mark_feature_count(self.marks)
+
+    if not _is_wrapper(current_n_spikes, _N_SPIKES_WRAPPER_ATTR):
         data.SpikeMarkData.n_spikes = property(
             _mark_wrapper(n_spikes, current_n_spikes, _N_SPIKES_WRAPPER_ATTR)
         )
 
     if not _is_wrapper(current_n_features, _N_FEATURES_WRAPPER_ATTR):
-        def n_features(self):
-            return _spike_mark_feature_count(self.marks)
-
         data.SpikeMarkData.n_features = property(
             _mark_wrapper(n_features, current_n_features, _N_FEATURES_WRAPPER_ATTR)
         )

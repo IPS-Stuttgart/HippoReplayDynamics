@@ -20,6 +20,7 @@ _TRUNCATED_SUPPORT = "truncated_full_grid"
 _SUCCESS_STATUS_VALUES = {"", "success", "nan", "na", "n/a", "none", "null", "<na>"}
 _MIN_LOG_MASS_BOOL_PATCHED_FLAG = "_candidate_min_log_mass_bool_patch_applied"
 _RESTRICT_CANDIDATE_ORDER_PATCHED_FLAG = "_candidate_restriction_order_patch_applied"
+_CANDIDATE_EVIDENCE_MASK_PATCHED_FLAG = "_candidate_evidence_support_mask_validation_patch_applied"
 
 
 def apply_candidate_support_quality_patch() -> None:
@@ -67,6 +68,7 @@ def apply_candidate_support_quality_patch() -> None:
 
     _patch_boolean_candidate_log_mass(ri)
     _patch_restricted_candidate_order()
+    _patch_candidate_evidence_support_mask()
 
 
 def _patch_boolean_candidate_log_mass(ri: Any) -> None:
@@ -125,6 +127,36 @@ def _patch_restricted_candidate_order() -> None:
             module._restrict_candidates_to_valid_bins = restrict_candidates_to_valid_bins
 
     setattr(state_space_utils, _RESTRICT_CANDIDATE_ORDER_PATCHED_FLAG, True)
+
+
+def _patch_candidate_evidence_support_mask() -> None:
+    """Classify candidate support using the same strict mask coercion as scoring."""
+
+    import sys
+
+    from . import state_space_model, state_space_utils
+
+    current = state_space_model._full_candidate_index_set
+    if getattr(current, _CANDIDATE_EVIDENCE_MASK_PATCHED_FLAG, False):
+        return
+
+    @wraps(current)
+    def full_candidate_index_set(n_bins: int, valid_bin_mask):
+        valid_mask = state_space_utils._coerce_valid_bin_mask(valid_bin_mask, int(n_bins))
+        if valid_mask is None:
+            return np.arange(int(n_bins), dtype=int)
+        return np.flatnonzero(valid_mask).astype(int)
+
+    setattr(full_candidate_index_set, _CANDIDATE_EVIDENCE_MASK_PATCHED_FLAG, True)
+    setattr(full_candidate_index_set, "__hipporeplayimm_original__", current)
+    state_space_model._full_candidate_index_set = full_candidate_index_set
+
+    for module in list(sys.modules.values()):
+        module_name = getattr(module, "__name__", "")
+        if module_name.startswith("hipporeplayimm") and getattr(module, "_full_candidate_index_set", None) is current:
+            module._full_candidate_index_set = full_candidate_index_set
+
+    setattr(state_space_model, _CANDIDATE_EVIDENCE_MASK_PATCHED_FLAG, True)
 
 
 def _evidence_support_values(row: pd.Series) -> list[str]:

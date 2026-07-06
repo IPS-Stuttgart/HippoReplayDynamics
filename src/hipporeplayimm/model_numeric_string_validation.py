@@ -10,6 +10,7 @@ import numpy as np
 _PATCHED_FLAG = "_model_numeric_string_validation_patch_applied"
 _STATE_SPACE_UTILS_PATCHED_FLAG = "_state_space_numeric_string_validation_patch_applied"
 _STATE_SPACE_MODEL_PATCHED_FLAG = "_state_space_model_numeric_string_validation_patch_applied"
+_PYRECEST_MODELS_PATCHED_FLAG = "_pyrecest_numeric_string_validation_patch_applied"
 _STRING_TYPES = (str, bytes, np.str_, np.bytes_)
 _VALIDATOR_NAMES = (
     "_validate_positive_parameter",
@@ -165,6 +166,34 @@ def _patch_state_space_numeric_string_validation() -> None:
     state_space_model.StateSpaceReplayModel.candidate_indices = candidate_indices
 
 
+def _patch_pyrecest_numeric_string_validation() -> None:
+    from . import pyrecest_models
+
+    if getattr(pyrecest_models, _PYRECEST_MODELS_PATCHED_FLAG, False):
+        return
+
+    original_coerce_scalar_float = pyrecest_models._coerce_scalar_float
+    original_positive_int = pyrecest_models._validate_positive_int
+
+    @wraps(original_coerce_scalar_float)
+    def coerce_scalar_float(value: object, name: str, message: str) -> float:
+        _reject_string_scalar(name, value)
+        return original_coerce_scalar_float(value, name, message)
+
+    @wraps(original_positive_int)
+    def validate_positive_int(value: object, name: str) -> None:
+        _reject_string_count(name, value)
+        return original_positive_int(value, name)
+
+    setattr(coerce_scalar_float, _PYRECEST_MODELS_PATCHED_FLAG, True)
+    setattr(coerce_scalar_float, "__hipporeplayimm_original__", original_coerce_scalar_float)
+    setattr(validate_positive_int, _PYRECEST_MODELS_PATCHED_FLAG, True)
+    setattr(validate_positive_int, "__hipporeplayimm_original__", original_positive_int)
+    pyrecest_models._coerce_scalar_float = coerce_scalar_float
+    pyrecest_models._validate_positive_int = validate_positive_int
+    setattr(pyrecest_models, _PYRECEST_MODELS_PATCHED_FLAG, True)
+
+
 def apply_model_numeric_string_validation_patch() -> None:
     """Install string-scalar guards around model parameter validators."""
 
@@ -186,6 +215,7 @@ def apply_model_numeric_string_validation_patch() -> None:
         setattr(models, _PATCHED_FLAG, True)
 
     _patch_state_space_numeric_string_validation()
+    _patch_pyrecest_numeric_string_validation()
 
 
 __all__ = ["apply_model_numeric_string_validation_patch"]

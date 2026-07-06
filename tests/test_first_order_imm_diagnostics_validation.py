@@ -75,6 +75,19 @@ def test_first_order_imm_content_diagnostics_allows_impossible_log_bins() -> Non
     assert diagnostics["state_space_imm_posterior_expected_path_length_cm"] == pytest.approx(1.0)
 
 
+def test_first_order_imm_content_diagnostics_accepts_one_dimensional_bin_centers() -> None:
+    diagnostics = state_space_utils._first_order_imm_content_diagnostics(
+        _mode_posterior(),
+        _deterministic_step_log_posterior(),
+        np.array([0.0, 1.0], dtype=float),
+        0.02,
+    )
+
+    assert diagnostics["state_space_imm_posterior_expected_path_length_cm"] == pytest.approx(1.0)
+    assert diagnostics["state_space_imm_posterior_net_displacement_cm"] == pytest.approx(1.0)
+    assert diagnostics["state_space_imm_posterior_path_speed_cm_s"] == pytest.approx(50.0)
+
+
 def test_runtime_patch_repairs_duration_occupancy_diagnostics_alias(monkeypatch) -> None:
     original_helper = getattr(
         state_space_utils._first_order_imm_content_diagnostics,

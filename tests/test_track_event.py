@@ -37,6 +37,31 @@ def test_trajectory_rows_entropy_handles_zero_probability_bins():
     assert rows.loc[1, "posterior_entropy"] == pytest.approx(expected_entropy)
 
 
+def test_trajectory_rows_accept_one_dimensional_bin_centers():
+    emissions = LogEmissionTensor(
+        log_likelihood=np.array([[0.0, 0.0]]),
+        spike_counts=np.zeros((1, 1), dtype=int),
+        times=np.array([0.0]),
+        dt=0.02,
+        cell_ids=np.array([1]),
+        n_spikes=0,
+    )
+    score = EventScore("synthetic", 0.0, emissions.n_time, emissions.n_spikes)
+
+    rows = _trajectory_rows_from_log_posteriors(
+        log_posteriors=np.array([[np.log(0.25), np.log(0.75)]]),
+        emissions=emissions,
+        bin_centers=np.array([[0.0], [2.0]]),
+        score=score,
+        likelihood_column="event_log_likelihood",
+    )
+
+    assert rows.loc[0, "posterior_mean_x"] == pytest.approx(1.5)
+    assert rows.loc[0, "posterior_mean_y"] == pytest.approx(0.0)
+    assert rows.loc[0, "map_x"] == pytest.approx(2.0)
+    assert rows.loc[0, "map_y"] == pytest.approx(0.0)
+
+
 def test_full_trajectory_imm_export_preserves_mode_probability_columns():
     emissions = LogEmissionTensor(
         log_likelihood=np.zeros((2, 2), dtype=float),

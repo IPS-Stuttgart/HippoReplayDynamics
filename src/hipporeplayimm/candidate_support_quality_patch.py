@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from functools import wraps
 from typing import Any
 
 import numpy as np
@@ -18,6 +19,7 @@ _NONCOMPARABLE_SUPPORT_VALUES = {
 _TRUNCATED_SUPPORT = "truncated_full_grid"
 _SUCCESS_STATUS_VALUES = {"", "success", "nan", "na", "n/a", "none", "null", "<na>"}
 _MIN_LOG_MASS_BOOL_PATCHED_FLAG = "_candidate_min_log_mass_bool_patch_applied"
+_RESTRICT_CANDIDATE_ORDER_PATCHED_FLAG = "_candidate_restriction_order_patch_applied"
 
 
 def apply_candidate_support_quality_patch() -> None:
@@ -64,6 +66,7 @@ def apply_candidate_support_quality_patch() -> None:
         ri._candidate_support_quality_status_patch_applied = True
 
     _patch_boolean_candidate_log_mass(ri)
+    _patch_restricted_candidate_order()
 
 
 def _patch_boolean_candidate_log_mass(ri: Any) -> None:
@@ -80,6 +83,48 @@ def _patch_boolean_candidate_log_mass(ri: Any) -> None:
 
     ri._first_finite_numeric_value = _first_finite_numeric_value
     setattr(ri, _MIN_LOG_MASS_BOOL_PATCHED_FLAG, True)
+
+
+def _patch_restricted_candidate_order() -> None:
+    """Keep valid-bin restriction from sorting ranked candidate supports."""
+
+    import sys
+
+    from . import state_space_utils
+
+    current = state_space_utils._restrict_candidates_to_valid_bins
+    if getattr(current, _RESTRICT_CANDIDATE_ORDER_PATCHED_FLAG, False):
+        return
+
+    @wraps(current)
+    def restrict_candidates_to_valid_bins(candidates, log_likelihood, valid_bin_mask):
+        values = np.asarray(log_likelihood)
+        n_time, n_bins = values.shape
+        validated = state_space_utils._validate_candidate_indices(candidates, n_time, n_bins)
+        valid_mask = state_space_utils._coerce_valid_bin_mask(valid_bin_mask, n_bins)
+        if valid_mask is None:
+            return validated
+
+        valid_indices = np.flatnonzero(valid_mask)
+        restricted: list[np.ndarray] = []
+        for time_index, arr in enumerate(validated):
+            keep = arr[valid_mask[arr]]
+            if keep.size == 0:
+                valid_scores = values[time_index, valid_indices]
+                keep = np.asarray([valid_indices[int(np.argmax(valid_scores))]], dtype=int)
+            restricted.append(np.asarray(keep, dtype=int))
+        return restricted
+
+    setattr(restrict_candidates_to_valid_bins, _RESTRICT_CANDIDATE_ORDER_PATCHED_FLAG, True)
+    setattr(restrict_candidates_to_valid_bins, "__hipporeplayimm_original__", current)
+    state_space_utils._restrict_candidates_to_valid_bins = restrict_candidates_to_valid_bins
+
+    for module in list(sys.modules.values()):
+        module_name = getattr(module, "__name__", "")
+        if module_name.startswith("hipporeplayimm") and getattr(module, "_restrict_candidates_to_valid_bins", None) is current:
+            module._restrict_candidates_to_valid_bins = restrict_candidates_to_valid_bins
+
+    setattr(state_space_utils, _RESTRICT_CANDIDATE_ORDER_PATCHED_FLAG, True)
 
 
 def _evidence_support_values(row: pd.Series) -> list[str]:

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from decimal import Decimal, InvalidOperation
 from functools import wraps
 import operator
 from typing import Any
@@ -16,7 +17,7 @@ _CONTINUOUS_WRAPPER_FLAG = "_accuracy_replay_gain_gamma_continuous_wrapper"
 
 
 def _contains_boolean_ids(values: np.ndarray) -> bool:
-    raw = np.asarray(values)
+    raw = np.asarray(values, dtype=object)
     if raw.size == 0:
         return False
     if np.issubdtype(raw.dtype, np.bool_):
@@ -27,28 +28,86 @@ def _contains_boolean_ids(values: np.ndarray) -> bool:
 
 
 def _coerce_integral_ids(values: Any, name: str) -> np.ndarray:
-    ids = np.asarray(values)
-    if ids.ndim == 0:
-        ids = ids.reshape(1)
-    if ids.ndim != 1:
+    raw = np.asarray(values, dtype=object)
+    if raw.ndim == 0:
+        raw = raw.reshape(1)
+    if raw.ndim != 1:
         raise ValueError(f"{name} must be one-dimensional")
-    if ids.size == 0:
+    if raw.size == 0:
         return np.empty(0, dtype=int)
-    if _contains_boolean_ids(ids):
+    if _contains_boolean_ids(raw):
         raise ValueError(f"{name} must not contain boolean identifiers")
-    try:
-        numeric = np.asarray(ids, dtype=float)
-    except (TypeError, ValueError) as exc:
-        raise ValueError(f"{name} must contain finite integer identifiers") from exc
-    if not np.all(np.isfinite(numeric)):
-        raise ValueError(f"{name} must contain finite integer identifiers")
-    rounded = np.rint(numeric)
-    if not np.all(numeric == rounded):
-        raise ValueError(f"{name} must be integer-valued")
+
     integer_info = np.iinfo(np.dtype(int))
-    if not np.all((rounded >= integer_info.min) & (rounded <= integer_info.max)):
+    coerced = [_coerce_integral_id(value, name, integer_info) for value in raw]
+    return np.asarray(coerced, dtype=int)
+
+
+def _coerce_integral_id(value: Any, name: str, integer_info: np.iinfo) -> int:
+    if isinstance(value, np.ndarray):
+        array = np.asarray(value, dtype=object)
+        if array.ndim != 0:
+            raise ValueError(f"{name} must be one-dimensional")
+        value = array.item()
+
+    if isinstance(value, (bool, np.bool_)):
+        raise ValueError(f"{name} must not contain boolean identifiers")
+    if isinstance(value, (int, np.integer)):
+        identifier = int(value)
+    elif isinstance(value, Decimal):
+        identifier = _coerce_decimal_id(value, name)
+    elif isinstance(value, (str, bytes)):
+        identifier = _coerce_text_id(value, name)
+    elif isinstance(value, (float, np.floating)):
+        identifier = _coerce_float_id(float(value), name)
+    else:
+        try:
+            numeric = float(value)
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise ValueError(f"{name} must contain finite integer identifiers") from exc
+        identifier = _coerce_float_id(numeric, name)
+
+    if identifier < int(integer_info.min) or identifier > int(integer_info.max):
         raise ValueError(f"{name} must fit into integer identifier range")
-    return rounded.astype(int)
+    return identifier
+
+
+def _coerce_float_id(value: float, name: str) -> int:
+    if not np.isfinite(value):
+        raise ValueError(f"{name} must contain finite integer identifiers")
+    if not value.is_integer():
+        raise ValueError(f"{name} must be integer-valued")
+    return int(value)
+
+
+def _coerce_decimal_id(value: Decimal, name: str) -> int:
+    if not value.is_finite():
+        raise ValueError(f"{name} must contain finite integer identifiers")
+    integer = value.to_integral_value()
+    if value != integer:
+        raise ValueError(f"{name} must be integer-valued")
+    return int(integer)
+
+
+def _coerce_text_id(value: str | bytes, name: str) -> int:
+    if isinstance(value, bytes):
+        try:
+            text = value.decode("utf-8")
+        except UnicodeDecodeError as exc:
+            raise ValueError(f"{name} must contain finite integer identifiers") from exc
+    else:
+        text = value
+    text = text.strip()
+    if not text:
+        raise ValueError(f"{name} must contain finite integer identifiers")
+    try:
+        return int(text, 10)
+    except ValueError:
+        pass
+    try:
+        return _coerce_decimal_id(Decimal(text), name)
+    except InvalidOperation as exc:
+        raise ValueError(f"{name} must contain finite integer identifiers") from exc
 
 
 def _coerce_spike_counts(spike_counts: Any) -> np.ndarray:
@@ -198,24 +257,26 @@ def _event_spikes_for_continuous_time(session, encoding, ripple_event) -> np.nda
 
     spikes = np.asarray(session.spikes)
     if spikes.size == 0:
-        return np.empty((0, 2), dtype=float)
+        return np.empty((0, 2), dtype=object)
     if spikes.ndim != 2 or spikes.shape[1] < 2:
         raise ValueError("spikes must be two-dimensional with at least time and cell-id columns")
 
     spike_times = np.asarray(spikes[:, 0], dtype=float)
     in_window = (spike_times >= float(ripple_event.start)) & (spike_times < float(ripple_event.end))
     if not np.any(in_window):
-        return np.empty((0, 2), dtype=float)
+        return np.empty((0, 2), dtype=object)
 
     event_cell_ids = _coerce_integral_ids(spikes[in_window, 1], "spike cell IDs")
     keep = np.isin(event_cell_ids, cell_ids)
     if not np.any(keep):
-        return np.empty((0, 2), dtype=float)
+        return np.empty((0, 2), dtype=object)
 
     event_times = spike_times[in_window][keep]
-    event_ids = event_cell_ids[keep].astype(float)
-    event_spikes = np.column_stack((event_times, event_ids))
-    order = np.argsort(event_spikes[:, 0], kind="mergesort")
+    event_ids = event_cell_ids[keep]
+    event_spikes = np.empty((event_times.shape[0], 2), dtype=object)
+    event_spikes[:, 0] = event_times
+    event_spikes[:, 1] = event_ids
+    order = np.argsort(event_times, kind="mergesort")
     return event_spikes[order]
 
 
@@ -233,7 +294,8 @@ def _build_continuous_time_emissions_impl(accuracy_module, session, encoding, ri
         raise ValueError("ripple end must be greater than ripple start")
 
     event_spikes = _event_spikes_for_continuous_time(session, encoding, ripple_event)
-    cell_to_col = {int(cell_id): idx for idx, cell_id in enumerate(_coerce_integral_ids(encoding.cell_ids, "encoding.cell_ids"))}
+    cell_ids = _coerce_integral_ids(encoding.cell_ids, "encoding.cell_ids")
+    cell_to_col = {int(cell_id): idx for idx, cell_id in enumerate(cell_ids)}
     rows: list[np.ndarray] = []
     durations: list[float] = []
     times: list[float] = []
@@ -274,7 +336,7 @@ def _build_continuous_time_emissions_impl(accuracy_module, session, encoding, ri
         spike_counts=spike_counts,
         times=times_arr,
         dt=float(np.median(durations_arr)) if durations_arr.size else float(config.min_interval_s),
-        cell_ids=np.asarray(encoding.cell_ids, dtype=int).copy(),
+        cell_ids=cell_ids.copy(),
         n_spikes=int(spike_counts.sum()),
         bin_durations=durations_arr,
         transition_durations=transition_durations,

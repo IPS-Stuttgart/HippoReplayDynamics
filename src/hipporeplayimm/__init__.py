@@ -84,6 +84,7 @@ from . import spike_cell_id_emission_validation as _spike_cell_id_emission_valid
 from . import spike_rate_metadata as _spike_rate_metadata
 from . import state_space_bin_center_validation as _state_space_bin_center_validation
 from . import state_space_bin_count_validation as _state_space_bin_count_validation
+from . import state_space_transition_parameter_validation as _state_space_transition_parameter_validation
 from . import sweep_seed_validation as _sweep_seed_validation
 from . import time_order_patch as _time_order_patch
 from . import well_label_shuffle_patch as _well_label_shuffle_patch
@@ -97,6 +98,7 @@ _score_metadata_bool_validation.apply_score_metadata_bool_validation_patch()
 _model_parameter_validation.apply_model_parameter_validation_patch()
 _poisson_input_boolean_validation.apply_poisson_input_boolean_validation_patch()
 _model_numeric_string_validation.apply_model_numeric_string_validation_patch()
+_state_space_transition_parameter_validation.apply_state_space_transition_parameter_validation_patch()
 _displacement_config_bool_validation.apply_displacement_config_bool_validation_patch()
 _displacement_imm_decay_validation.apply_displacement_imm_decay_validation_patch()
 _candidate_active_support_validation.apply_candidate_active_support_validation_patch()
@@ -232,6 +234,7 @@ def apply_runtime_patches() -> None:
     _model_parameter_validation.apply_model_parameter_validation_patch()
     _poisson_input_boolean_validation.apply_poisson_input_boolean_validation_patch()
     _model_numeric_string_validation.apply_model_numeric_string_validation_patch()
+    _state_space_transition_parameter_validation.apply_state_space_transition_parameter_validation_patch()
     _displacement_config_bool_validation.apply_displacement_config_bool_validation_patch()
     _displacement_imm_decay_validation.apply_displacement_imm_decay_validation_patch()
     _candidate_active_support_validation.apply_candidate_active_support_validation_patch()

@@ -59,6 +59,7 @@ from . import observation_sweep_config_validation as _observation_sweep_config_v
 from . import occupancy_candidate_support as _occupancy_candidate_support
 from . import olafsdottir_header_float_patch as _olafsdottir_header_float_patch
 from . import olafsdottir_zip_safety as _olafsdottir_zip_safety
+from . import poisson_input_boolean_validation as _poisson_input_boolean_validation
 from . import position_decoding_config_validation as _position_decoding_config_validation
 from . import posterior_calibration_summary_patch as _posterior_calibration_summary_patch
 from . import pyrecest_bin_center_validation as _pyrecest_bin_center_validation
@@ -94,6 +95,7 @@ _state_space_bin_count_validation.apply_state_space_bin_count_validation_patch()
 _score_metadata.apply_model_hyperparam_patch()
 _score_metadata_bool_validation.apply_score_metadata_bool_validation_patch()
 _model_parameter_validation.apply_model_parameter_validation_patch()
+_poisson_input_boolean_validation.apply_poisson_input_boolean_validation_patch()
 _model_numeric_string_validation.apply_model_numeric_string_validation_patch()
 _displacement_config_bool_validation.apply_displacement_config_bool_validation_patch()
 _displacement_imm_decay_validation.apply_displacement_imm_decay_validation_patch()
@@ -228,6 +230,7 @@ def apply_runtime_patches() -> None:
     _score_metadata.apply_model_hyperparam_patch()
     _score_metadata_bool_validation.apply_score_metadata_bool_validation_patch()
     _model_parameter_validation.apply_model_parameter_validation_patch()
+    _poisson_input_boolean_validation.apply_poisson_input_boolean_validation_patch()
     _model_numeric_string_validation.apply_model_numeric_string_validation_patch()
     _displacement_config_bool_validation.apply_displacement_config_bool_validation_patch()
     _displacement_imm_decay_validation.apply_displacement_imm_decay_validation_patch()

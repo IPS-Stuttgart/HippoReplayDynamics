@@ -3,6 +3,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
+from hipporeplayimm import state_space as state_space_public
 from hipporeplayimm.encoding import LogEmissionTensor
 from hipporeplayimm.state_space_model import StateSpaceDecoderConfig
 from hipporeplayimm.state_space_sparse_momentum import _score_sparse_momentum_exact
@@ -68,6 +69,32 @@ def test_trajectory_imm_exact_sparse_rejects_boolean_numeric_config(field: str) 
 
     with pytest.raises(TypeError, match=f"{field}.*not boolean"):
         _score_trajectory_imm_exact_sparse(
+            emissions,
+            _tiny_centers(),
+            config,
+            emissions.transition_durations,
+        )
+
+
+def test_public_state_space_sparse_momentum_alias_keeps_config_validation() -> None:
+    emissions = _tiny_emissions()
+    config = StateSpaceDecoderConfig(max_step_sigma=np.bool_(True))
+
+    with pytest.raises(TypeError, match="max_step_sigma.*not boolean"):
+        state_space_public._score_sparse_momentum_exact(
+            emissions,
+            _tiny_centers(),
+            config,
+            emissions.transition_durations,
+        )
+
+
+def test_public_state_space_trajectory_imm_alias_keeps_config_validation() -> None:
+    emissions = _tiny_emissions()
+    config = StateSpaceDecoderConfig(diffusion_sigma_cm_sqrt_s=np.bool_(True))
+
+    with pytest.raises(TypeError, match="diffusion_sigma_cm_sqrt_s.*not boolean"):
+        state_space_public._score_trajectory_imm_exact_sparse(
             emissions,
             _tiny_centers(),
             config,

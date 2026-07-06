@@ -56,9 +56,16 @@ def smooth_positions(xy: np.ndarray, valid: np.ndarray, *, window_samples: int) 
     if window <= 1:
         return filled
     kernel = np.ones(window, dtype=float) / float(window)
+    # ``np.convolve(..., mode="same")`` implicitly zero-pads at the boundaries,
+    # which pulls the beginning and end of a position trace toward the origin.
+    # Edge padding preserves constant trajectories and avoids artificial endpoint
+    # displacement before centerline projection.
+    left_pad = window // 2
+    right_pad = window - 1 - left_pad
+    padded = np.pad(filled, ((left_pad, right_pad), (0, 0)), mode="edge")
     return np.column_stack(
         [
-            np.convolve(filled[:, dim], kernel, mode="same")
+            np.convolve(padded[:, dim], kernel, mode="valid")
             for dim in range(2)
         ]
     )

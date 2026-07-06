@@ -67,6 +67,8 @@ def _validate_log_likelihood(emissions: LogEmissionTensor) -> None:
     values = np.asarray(emissions.log_likelihood, dtype=float)
     if values.ndim != 2:
         raise ValueError("log_likelihood must be a two-dimensional array")
+    if values.shape[0] == 0:
+        raise ValueError("log_likelihood must include at least one time bin")
     if values.shape[1] == 0:
         raise ValueError("log_likelihood must include at least one spatial bin")
     if np.any(np.isnan(values)):

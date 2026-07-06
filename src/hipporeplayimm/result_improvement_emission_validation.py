@@ -45,6 +45,39 @@ def _is_boolean_array(value: object) -> bool:
     return False
 
 
+def _is_text_scalar(value: object) -> bool:
+    if isinstance(value, (str, bytes, np.str_, np.bytes_)):
+        return True
+    try:
+        array = np.asarray(value)
+    except (TypeError, ValueError):
+        return False
+    if array.ndim != 0:
+        return False
+    if np.issubdtype(array.dtype, np.str_) or np.issubdtype(array.dtype, np.bytes_):
+        return True
+    if array.dtype == object:
+        try:
+            return isinstance(array.item(), (str, bytes, np.str_, np.bytes_))
+        except ValueError:
+            return False
+    return False
+
+
+def _is_text_array(value: object) -> bool:
+    try:
+        array = np.asarray(value)
+    except (TypeError, ValueError):
+        return False
+    if array.ndim == 0:
+        return False
+    if np.issubdtype(array.dtype, np.str_) or np.issubdtype(array.dtype, np.bytes_):
+        return True
+    if array.dtype == object:
+        return any(isinstance(item, (str, bytes, np.str_, np.bytes_)) for item in array.flat)
+    return False
+
+
 def _reject_array_shaped_scalar(name: str, value: object) -> None:
     try:
         array = np.asarray(value)
@@ -52,6 +85,8 @@ def _reject_array_shaped_scalar(name: str, value: object) -> None:
         raise TypeError(f"{name} must be a numeric scalar") from exc
     if array.ndim != 0:
         raise TypeError(f"{name} must be a numeric scalar")
+    if _is_text_scalar(value):
+        raise TypeError(f"{name} must be a numeric scalar, not text")
 
 
 def _reject_boolean_scalar(name: str, value: object) -> None:
@@ -63,6 +98,8 @@ def _reject_boolean_scalar(name: str, value: object) -> None:
 def _reject_boolean_numeric(name: str, value: object) -> None:
     if _is_boolean_scalar(value) or _is_boolean_array(value):
         raise TypeError(f"{name} must be numeric, not boolean")
+    if _is_text_scalar(value) or _is_text_array(value):
+        raise TypeError(f"{name} must be numeric, not text")
 
 
 def _finite_positive_scalar(name: str, value: object) -> float:

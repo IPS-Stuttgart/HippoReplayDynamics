@@ -349,7 +349,6 @@ __all__ = [
     'EncodingConfig',
     'EncodingModel',
     'EventScore',
-    'GoalStateSpaceModel',
     'GoalStateSpaceReplayModel',
     'GroundTruthConfig',
     'PyRecEstGoalParticleIMMModel',

@@ -117,6 +117,51 @@ def test_simulation_recovery_rejects_invalid_max_runtime_s(limit_value):
         _validate_recovery_runtime_limits(SimulationRecoveryConfig(max_runtime_s=limit_value))
 
 
+@pytest.mark.parametrize(
+    "field_name",
+    [
+        "score_with_occupancy",
+        "oracle_candidate_support",
+        "continue_on_error",
+        "progress_log",
+    ],
+)
+@pytest.mark.parametrize(
+    "value",
+    [
+        None,
+        0,
+        1,
+        0.0,
+        1.0,
+        "False",
+        "True",
+        np.array([False]),
+        np.array([True]),
+    ],
+)
+def test_simulation_recovery_rejects_non_boolean_control_values(field_name, value):
+    with pytest.raises(ValueError, match=field_name):
+        _validate_recovery_runtime_limits(
+            SimulationRecoveryConfig(**{field_name: value})
+        )
+
+
+@pytest.mark.parametrize(
+    "value",
+    [True, False, np.bool_(True), np.bool_(False), np.array(True), np.array(False)],
+)
+def test_simulation_recovery_accepts_scalar_boolean_control_values(value):
+    _validate_recovery_runtime_limits(
+        SimulationRecoveryConfig(
+            score_with_occupancy=value,
+            oracle_candidate_support=value,
+            continue_on_error=value,
+            progress_log=value,
+        )
+    )
+
+
 def test_simulation_recovery_accepts_valid_runtime_limits():
     _validate_recovery_runtime_limits(
         SimulationRecoveryConfig(max_synthetic_events=3, max_runtime_s=1.25)

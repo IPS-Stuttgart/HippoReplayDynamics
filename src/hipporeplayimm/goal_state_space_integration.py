@@ -48,16 +48,27 @@ def apply_goal_state_space_parameter_validation_patch() -> None:
         _positive_parameter('transition_sigma_cm_sqrt_s', self.transition_sigma_cm_sqrt_s)
         _nonnegative_parameter('drift_speed_cm_s', self.drift_speed_cm_s)
         _positive_parameter('max_step_sigma', self.max_step_sigma)
-        return original_score(self, emissions, bin_centers)
+        centers = _coerce_position_matrix(bin_centers)
+        candidate_goals = _coerce_candidate_goals(self.candidate_goals, centers)
+        if candidate_goals is self.candidate_goals:
+            return original_score(self, emissions, centers)
+        old_candidate_goals = self.candidate_goals
+        try:
+            self.candidate_goals = candidate_goals
+            return original_score(self, emissions, centers)
+        finally:
+            self.candidate_goals = old_candidate_goals
 
     @wraps(original_goal_transition_matrix)
     def _goal_transition_matrix(bin_centers, goal, *, drift_step_cm, sigma_cm, max_step_sigma):
         _positive_parameter('sigma_cm', sigma_cm)
         _nonnegative_parameter('drift_step_cm', drift_step_cm)
         _positive_parameter('max_step_sigma', max_step_sigma)
+        centers = _coerce_position_matrix(bin_centers)
+        goal_vector = _coerce_goal_vector(goal, centers.shape[1] if centers.ndim == 2 else None)
         return original_goal_transition_matrix(
-            bin_centers,
-            goal,
+            centers,
+            goal_vector,
             drift_step_cm=drift_step_cm,
             sigma_cm=sigma_cm,
             max_step_sigma=max_step_sigma,
@@ -221,6 +232,29 @@ def _numeric_parameter(name: str, value: Any, *, positive: bool) -> float:
     elif not np.isfinite(numeric) or numeric < 0.0:
         raise ValueError(f'{name} must be finite and non-negative')
     return numeric
+
+
+def _coerce_position_matrix(value: Any) -> np.ndarray:
+    array = np.asarray(value, dtype=float)
+    if array.ndim == 1:
+        return array[:, None]
+    return array
+
+
+def _coerce_candidate_goals(value: Any, centers: np.ndarray) -> Any:
+    if value is None:
+        return value
+    array = np.asarray(value, dtype=float)
+    if array.ndim == 1 and centers.ndim == 2 and centers.shape[1] == 1:
+        return array[:, None]
+    return value
+
+
+def _coerce_goal_vector(value: Any, position_dim: int | None) -> np.ndarray:
+    array = np.asarray(value, dtype=float)
+    if array.ndim == 0 and position_dim == 1:
+        return array.reshape(1)
+    return array
 
 
 def _contains_bool(value: Any) -> bool:

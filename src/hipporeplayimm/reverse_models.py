@@ -284,13 +284,26 @@ def _looks_like_unexpected_keyword_type_error(exc: TypeError, keyword: str) -> b
 
 
 def _evidence_mixture_weights(log_evidences: np.ndarray) -> np.ndarray:
-    """Return normalized model weights without NaNs for impossible evidences."""
+    """Return normalized model weights without NaNs for nonfinite evidences."""
 
     values = np.asarray(log_evidences, dtype=float)
-    normalizer = logsumexp(values)
-    if np.isneginf(normalizer):
+    if values.size == 0:
+        return values.copy()
+
+    positive_infinite = np.isposinf(values)
+    if np.any(positive_infinite):
+        weights = np.zeros(values.shape, dtype=float)
+        weights[positive_infinite] = 1.0 / int(np.sum(positive_infinite))
+        return weights
+
+    finite = np.isfinite(values)
+    if not np.any(finite):
         return np.full(values.shape, 1.0 / values.size, dtype=float)
-    return np.exp(values - normalizer)
+
+    weights = np.zeros(values.shape, dtype=float)
+    normalizer = logsumexp(values[finite])
+    weights[finite] = np.exp(values[finite] - normalizer)
+    return weights
 
 
 def _mixture_log_posterior(left: np.ndarray | None, right: np.ndarray | None, weights: np.ndarray) -> np.ndarray | None:

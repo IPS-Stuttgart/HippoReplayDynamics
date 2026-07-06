@@ -144,6 +144,8 @@ def _nonnegative_integer_seed(value: object) -> int:
     scalar = array.item()
     if isinstance(scalar, (bool, np.bool_)):
         raise ValueError("random_seed must be an integer, not boolean")
+    if isinstance(scalar, (str, np.str_)):
+        raise ValueError("random_seed must be an integer, not string")
     try:
         numeric = float(scalar)
     except (TypeError, ValueError, OverflowError) as exc:

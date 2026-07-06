@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import sys
 from typing import Any
 
 import numpy as np
 
 _PATCHED_FLAG = "_state_space_bin_center_validation_patch_applied"
 _SPARSE_MOMENTUM_PATCHED_FLAG = "_sparse_momentum_bin_center_validation_patch_applied"
+_FIRST_ORDER_IMM_DIAGNOSTICS_PATCHED_FLAG = "_first_order_imm_bin_center_validation_patch_applied"
 
 
 def _validate_state_space_log_likelihood(emissions: Any) -> None:
@@ -88,6 +90,37 @@ def _patch_sparse_momentum_bin_center_validation() -> None:
         ss._score_sparse_momentum_exact = score_sparse_momentum_exact
 
 
+def _wrap_first_order_imm_content_diagnostics(previous_helper):
+    if getattr(previous_helper, _FIRST_ORDER_IMM_DIAGNOSTICS_PATCHED_FLAG, False):
+        return previous_helper
+
+    def first_order_imm_content_diagnostics(mode_posterior, trajectory_log_posterior, bin_centers, dt_s):
+        trajectory = np.asarray(trajectory_log_posterior, dtype=float)
+        n_bins = int(trajectory.shape[1]) if trajectory.ndim == 2 else -1
+        centers = _coerce_state_space_bin_centers(bin_centers, n_bins)
+        return previous_helper(mode_posterior, trajectory_log_posterior, centers, dt_s)
+
+    first_order_imm_content_diagnostics.__name__ = getattr(previous_helper, "__name__", "_first_order_imm_content_diagnostics")
+    first_order_imm_content_diagnostics.__doc__ = getattr(previous_helper, "__doc__", None)
+    first_order_imm_content_diagnostics.__module__ = getattr(previous_helper, "__module__", __name__)
+    setattr(first_order_imm_content_diagnostics, _FIRST_ORDER_IMM_DIAGNOSTICS_PATCHED_FLAG, True)
+    setattr(first_order_imm_content_diagnostics, "__hipporeplayimm_original__", previous_helper)
+    return first_order_imm_content_diagnostics
+
+
+def _patch_first_order_imm_diagnostics_bin_centers() -> None:
+    """Allow compact one-dimensional grids in first-order IMM content diagnostics."""
+
+    for module in list(sys.modules.values()):
+        module_name = getattr(module, "__name__", "")
+        if not module_name.startswith("hipporeplayimm"):
+            continue
+        helper = getattr(module, "_first_order_imm_content_diagnostics", None)
+        if helper is None or getattr(helper, _FIRST_ORDER_IMM_DIAGNOSTICS_PATCHED_FLAG, False):
+            continue
+        module._first_order_imm_content_diagnostics = _wrap_first_order_imm_content_diagnostics(helper)
+
+
 def apply_state_space_bin_center_validation_patch() -> None:
     """Install state-space score input validation for ``StateSpaceReplayModel.score``."""
 
@@ -111,6 +144,7 @@ def apply_state_space_bin_center_validation_patch() -> None:
         ss.StateSpaceReplayModel.score = score
 
     _patch_sparse_momentum_bin_center_validation()
+    _patch_first_order_imm_diagnostics_bin_centers()
 
 
 __all__ = ["apply_state_space_bin_center_validation_patch"]

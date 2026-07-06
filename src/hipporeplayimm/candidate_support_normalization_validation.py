@@ -10,9 +10,16 @@ orders NaN/+inf values as if they were valid high-likelihood spatial bins.
 Candidate evidence-support diagnostics also share the same valid-bin mask
 contract.  They must reject malformed textual, complex, or non-binary numeric
 masks instead of treating arbitrary truthy values as valid spatial bins.
+
+State-space adaptive candidate beams must validate the raw mass-threshold config
+before ``StateSpaceReplayModel.candidate_indices`` coerces it through ``float``;
+otherwise boolean values such as ``True`` are silently interpreted as a full-mass
+threshold of ``1.0``.
 """
 
 from __future__ import annotations
+
+from functools import wraps
 
 import numpy as np
 from scipy.special import logsumexp
@@ -20,7 +27,9 @@ from scipy.special import logsumexp
 _PATCHED_FLAG = "_candidate_support_normalization_validation_patch_applied"
 _SCORE_PATCHED_FLAG = "_candidate_support_score_validation_patch_applied"
 _EVIDENCE_MASK_PATCHED_FLAG = "_candidate_evidence_mask_validation_patch_applied"
+_CANDIDATE_INDICES_PATCHED_FLAG = "_candidate_mass_threshold_candidate_indices_validation_patch_applied"
 _EVIDENCE_MASK_WRAPPER_MARKER = "_candidate_evidence_mask_validation_wrapper"
+_CANDIDATE_INDICES_WRAPPER_MARKER = "_candidate_mass_threshold_candidate_indices_validation_wrapper"
 _ORIGINAL_ATTR = "__hipporeplayimm_original__"
 
 
@@ -100,6 +109,16 @@ def _candidate_evidence_mask_patch_current(state_space_model: object) -> bool:
     )
 
 
+def _candidate_indices_patch_current(state_space_model: object) -> bool:
+    return bool(
+        getattr(
+            getattr(state_space_model.StateSpaceReplayModel, "candidate_indices", None),
+            _CANDIDATE_INDICES_WRAPPER_MARKER,
+            False,
+        )
+    )
+
+
 def apply_candidate_support_normalization_validation_patch() -> None:
     """Install finite-mass validation for posterior and emission candidate supports."""
 
@@ -123,6 +142,28 @@ def apply_candidate_support_normalization_validation_patch() -> None:
         setattr(_full_candidate_index_set, _ORIGINAL_ATTR, original_full_candidate_index_set)
         state_space_model._full_candidate_index_set = _full_candidate_index_set
     setattr(state_space_model, _EVIDENCE_MASK_PATCHED_FLAG, True)
+
+    if not _candidate_indices_patch_current(state_space_model):
+        original_candidate_indices = state_space_model.StateSpaceReplayModel.candidate_indices
+
+        @wraps(original_candidate_indices)
+        def candidate_indices(self, emissions, bin_centers=None, valid_bin_mask=None):
+            config = getattr(self, "config", None)
+            if config is not None:
+                mass_threshold = getattr(config, "momentum_candidate_mass_threshold", None)
+                if mass_threshold is not None:
+                    _reject_boolean_mass_threshold(mass_threshold)
+            return original_candidate_indices(
+                self,
+                emissions,
+                bin_centers=bin_centers,
+                valid_bin_mask=valid_bin_mask,
+            )
+
+        setattr(candidate_indices, _CANDIDATE_INDICES_WRAPPER_MARKER, True)
+        setattr(candidate_indices, _ORIGINAL_ATTR, original_candidate_indices)
+        state_space_model.StateSpaceReplayModel.candidate_indices = candidate_indices
+    setattr(state_space_model, _CANDIDATE_INDICES_PATCHED_FLAG, True)
 
     if not getattr(state_space_utils, _SCORE_PATCHED_FLAG, False):
         original_top_candidate_indices = state_space_utils._top_candidate_indices

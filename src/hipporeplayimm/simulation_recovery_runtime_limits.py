@@ -1,4 +1,4 @@
-"""Strict validation for synthetic-recovery runtime limits."""
+"""Strict validation for synthetic-recovery runtime limits and boolean controls."""
 
 from __future__ import annotations
 
@@ -8,6 +8,12 @@ import numpy as np
 
 
 _PATCHED_FLAG = "_strict_simulation_recovery_runtime_limit_validation_applied"
+_BOOLEAN_CONTROL_FIELDS = (
+    "score_with_occupancy",
+    "oracle_candidate_support",
+    "continue_on_error",
+    "progress_log",
+)
 
 
 def apply_simulation_recovery_runtime_limit_validation_patch() -> None:
@@ -32,6 +38,9 @@ def apply_simulation_recovery_runtime_limit_validation_patch() -> None:
         max_runtime_s = getattr(config, "max_runtime_s", None)
         if max_runtime_s is not None:
             _positive_finite_scalar("max_runtime_s", max_runtime_s)
+
+        for field_name in _BOOLEAN_CONTROL_FIELDS:
+            _strict_bool_value(field_name, getattr(config, field_name, None))
 
     validate_recovery_runtime_limits.__name__ = recovery._validate_recovery_runtime_limits.__name__
     validate_recovery_runtime_limits.__doc__ = recovery._validate_recovery_runtime_limits.__doc__
@@ -74,6 +83,16 @@ def _scalar_non_boolean_value(name: str, value: Any, *, message: str) -> Any:
     if isinstance(scalar, (bool, np.bool_)):
         raise ValueError(f"{name} {message}")
     return scalar
+
+
+def _strict_bool_value(name: str, value: Any) -> bool:
+    raw = np.asarray(value)
+    if raw.ndim != 0:
+        raise ValueError(f"{name} must be a boolean")
+    scalar = raw.item()
+    if isinstance(scalar, (bool, np.bool_)):
+        return bool(scalar)
+    raise ValueError(f"{name} must be a boolean")
 
 
 __all__ = ["apply_simulation_recovery_runtime_limit_validation_patch"]

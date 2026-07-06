@@ -71,6 +71,8 @@ def _validate_log_likelihood(emissions: LogEmissionTensor) -> None:
         raise ValueError("log_likelihood must include at least one spatial bin")
     if np.any(np.isnan(values)):
         raise ValueError("log_likelihood must not contain NaN values")
+    if not np.all(np.any(np.isfinite(values), axis=1)):
+        raise ValueError("every log_likelihood row must contain at least one finite spatial-bin value")
 
 
 def _contains_boolean_values(values: Any) -> bool:

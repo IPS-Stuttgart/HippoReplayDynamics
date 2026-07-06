@@ -8,7 +8,7 @@ import numpy as np
 import pytest
 
 from hipporeplayimm.encoding import LogEmissionTensor
-from hipporeplayimm.pyrecest_models import PyRecEstGoalParticleModel
+from hipporeplayimm.pyrecest_models import PyRecEstGoalParticleIMMModel, PyRecEstGoalParticleModel
 
 
 def test_pyrecest_is_not_a_core_install_dependency() -> None:
@@ -26,6 +26,36 @@ def test_pyrecest_is_not_a_core_install_dependency() -> None:
 
     assert "pyrecest" not in core_dependency_names
     assert "pyrecest" in pyrecest_extra_names
+
+
+@pytest.mark.parametrize(
+    ("constructor", "kwargs", "match"),
+    [
+        (
+            PyRecEstGoalParticleModel,
+            {"initial_velocity_sigma_cm_s": "120.0"},
+            "initial_velocity_sigma_cm_s",
+        ),
+        (
+            PyRecEstGoalParticleModel,
+            {"jump_probability": np.array("0.03")},
+            "jump_probability",
+        ),
+        (
+            PyRecEstGoalParticleIMMModel,
+            {"mode_stickiness": "0.95"},
+            "mode_stickiness",
+        ),
+        (
+            PyRecEstGoalParticleIMMModel,
+            {"momentum_velocity_decay": np.array("0.95")},
+            "momentum_velocity_decay",
+        ),
+    ],
+)
+def test_pyrecest_models_reject_string_numeric_scalars(constructor, kwargs, match) -> None:
+    with pytest.raises(TypeError, match=match):
+        constructor(n_particles=8, **kwargs)
 
 
 def test_pyrecest_model_reports_install_hint_when_extra_is_missing() -> None:

@@ -12,6 +12,7 @@ from .encoding import EncodingConfig, _validate_encoding_config
 _PATCH_MARKER = "_clusterless_encoding_config_validation_patch"
 _MARK_VALUE_PATCH_MARKER = "_clusterless_mark_value_validation_patch"
 _BENCHMARK_MARK_CONFIG_PATCH_MARKER = "_benchmark_clusterless_mark_config_validation_patch"
+_STRING_TYPES = (str, bytes, np.str_, np.bytes_)
 
 
 _NUMERIC_MESSAGES = {
@@ -215,6 +216,8 @@ def _scalar_config_item(value: object, message: str) -> object:
     except ValueError as exc:
         raise ValueError(message) from exc
     if isinstance(item, (bool, np.bool_)):
+        raise ValueError(message)
+    if isinstance(item, _STRING_TYPES):
         raise ValueError(message)
     return item
 

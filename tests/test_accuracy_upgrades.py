@@ -7,6 +7,7 @@ from hipporeplayimm.accuracy_upgrades import (
     ValidStateGridReplayModel,
     bootstrap_model_win_probabilities,
     model_probability_diagnostics,
+    reverse_emissions,
 )
 from hipporeplayimm.encoding import LogEmissionTensor
 
@@ -102,3 +103,34 @@ def test_model_probability_diagnostics_accepts_legacy_success_status_values() ->
     assert out.loc["s1", "best_model"] == "legacy-success"
     assert out.loc["s2", "models"] == 1
     assert out.loc["s2", "best_model"] == "missing-nan"
+
+
+def test_accuracy_reverse_emissions_keeps_time_coordinates_increasing() -> None:
+    emissions = LogEmissionTensor(
+        log_likelihood=np.asarray(
+            [
+                [0.0, -1.0],
+                [-2.0, -0.5],
+                [-0.25, -3.0],
+            ],
+            dtype=float,
+        ),
+        spike_counts=np.asarray([[0], [2], [1]], dtype=int),
+        times=np.asarray([0.005, 0.020, 0.055], dtype=float),
+        dt=0.02,
+        cell_ids=np.asarray([7], dtype=int),
+        n_spikes=3,
+        bin_durations=np.asarray([0.010, 0.020, 0.030], dtype=float),
+        transition_durations=np.asarray([0.015, 0.035], dtype=float),
+        metadata={"source": "unit-test"},
+    )
+
+    reversed_emissions = reverse_emissions(emissions)
+
+    np.testing.assert_allclose(reversed_emissions.log_likelihood, emissions.log_likelihood[::-1])
+    np.testing.assert_allclose(reversed_emissions.bin_durations, emissions.bin_durations[::-1])
+    np.testing.assert_allclose(reversed_emissions.transition_durations, np.asarray([0.035, 0.015]))
+    np.testing.assert_allclose(reversed_emissions.times, np.asarray([0.005, 0.040, 0.055]))
+    assert np.all(np.diff(reversed_emissions.times) > 0.0)
+    assert reversed_emissions.metadata == emissions.metadata
+    assert reversed_emissions.metadata is not emissions.metadata

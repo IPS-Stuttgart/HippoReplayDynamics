@@ -20,6 +20,7 @@ from .data import ReplaySession, RippleEvent, _coerce_ripple_event
 from .encoding import (
     EncodingModel,
     LogEmissionTensor,
+    _cell_id_row_indices,
     _clean_position,
     _frame_durations,
     _interp_positions,
@@ -179,10 +180,8 @@ def build_kd_emissions(
         spike_times = session.spikes[keep, 0]
         spike_cell_ids = session.spikes[keep, 1].astype(int)
         time_bins = np.searchsorted(edges, spike_times, side="right") - 1
-        rows = np.searchsorted(encoding.cell_ids, spike_cell_ids)
-        valid = (time_bins >= 0) & (time_bins < counts.shape[0])
-        valid &= (rows >= 0) & (rows < encoding.cell_ids.shape[0])
-        valid[valid] &= encoding.cell_ids[rows[valid]] == spike_cell_ids[valid]
+        rows = _cell_id_row_indices(encoding.cell_ids, spike_cell_ids)
+        valid = (time_bins >= 0) & (time_bins < counts.shape[0]) & (rows >= 0)
         np.add.at(counts, (time_bins[valid].astype(int), rows[valid]), 1)
     log_likelihood = poisson_log_emissions(
         counts,

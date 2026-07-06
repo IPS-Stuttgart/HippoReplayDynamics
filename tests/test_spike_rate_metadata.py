@@ -7,6 +7,7 @@ from hipporeplayimm.ground_truth import _emission_config_for_scores
 from hipporeplayimm.score_metadata import emission_config_for_scores
 
 
+
 def test_emission_metadata_recovers_legacy_spike_rate_scale_column():
     scores = pd.DataFrame(
         {
@@ -22,6 +23,7 @@ def test_emission_metadata_recovers_legacy_spike_rate_scale_column():
 
     assert config.time_bin_s == pytest.approx(0.015)
     assert config.spike_rate_scale == pytest.approx(0.5)
+
 
 
 def test_ground_truth_emission_metadata_recovers_canonical_spike_rate_scale_column():
@@ -41,6 +43,7 @@ def test_ground_truth_emission_metadata_recovers_canonical_spike_rate_scale_colu
     assert config.spike_rate_scale == pytest.approx(2.5)
 
 
+
 def test_emission_metadata_rejects_conflicting_spike_rate_scale_aliases():
     scores = pd.DataFrame(
         {
@@ -51,6 +54,15 @@ def test_emission_metadata_rejects_conflicting_spike_rate_scale_aliases():
 
     with pytest.raises(ValueError, match="emission_spike_rate_scale"):
         emission_config_for_scores(scores, EmissionConfig())
+
+
+
+def test_emission_metadata_rejects_boolean_spike_rate_scale():
+    scores = pd.DataFrame({"emission_spike_rate_scale": [True]})
+
+    with pytest.raises(ValueError, match="finite numeric metadata"):
+        emission_config_for_scores(scores, EmissionConfig())
+
 
 
 def test_benchmark_metadata_writes_canonical_spike_rate_scale_column():

@@ -10,6 +10,8 @@ import numpy as np
 _PATCHED_FLAG = "_emission_cell_id_validation_patch_applied"
 _POISSON_INPUT_PATCHED_FLAG = "_poisson_boolean_input_validation_patch_applied"
 _POISSON_INPUT_WRAPPER_MARKER = "_poisson_boolean_input_validation_wrapper"
+_POISSON_CONFIG_PATCHED_FLAG = "_poisson_config_scalar_validation_patch_applied"
+_POISSON_CONFIG_WRAPPER_MARKER = "_poisson_config_scalar_validation_wrapper"
 _BUILD_EMISSIONS_WRAPPER_MARKER = "_emission_cell_id_build_emissions_wrapper"
 _KD_BUILD_EMISSIONS_WRAPPER_MARKER = "_emission_cell_id_kd_build_emissions_wrapper"
 _SORTED_SPIKE_COUNTS_WRAPPER_MARKER = "_emission_cell_id_sorted_spike_counts_wrapper"
@@ -43,6 +45,47 @@ def _reject_boolean_poisson_inputs(spike_counts: Any, rates_hz: Any) -> None:
         raise ValueError("spike_counts must contain numeric integer counts, not boolean values")
     if _contains_boolean_values(rates_hz):
         raise ValueError("rates_hz must contain numeric rates, not boolean values")
+
+
+def _real_scalar(value: Any, name: str) -> float:
+    if isinstance(value, (bool, np.bool_)):
+        raise ValueError(f"{name} must be numeric, not boolean")
+    if isinstance(value, (str, bytes)):
+        raise ValueError(f"{name} must be a numeric scalar, not text")
+    try:
+        arr = np.asarray(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must be a numeric scalar") from exc
+    if arr.ndim != 0:
+        raise ValueError(f"{name} must be a numeric scalar")
+    item = arr.item()
+    if isinstance(item, (bool, np.bool_)):
+        raise ValueError(f"{name} must be numeric, not boolean")
+    if isinstance(item, (str, bytes)):
+        raise ValueError(f"{name} must be a numeric scalar, not text")
+    if np.iscomplexobj(arr):
+        raise ValueError(f"{name} must be real-valued")
+    try:
+        numeric = float(item)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must be a numeric scalar") from exc
+    if not np.isfinite(numeric):
+        raise ValueError(f"{name} must be finite")
+    return numeric
+
+
+def _positive_real_scalar(value: Any, name: str) -> float:
+    numeric = _real_scalar(value, name)
+    if numeric <= 0.0:
+        raise ValueError(f"{name} must be finite and positive")
+    return numeric
+
+
+def _nonnegative_real_scalar(value: Any, name: str) -> float:
+    numeric = _real_scalar(value, name)
+    if numeric < 0.0:
+        raise ValueError(f"{name} must be finite and nonnegative")
+    return numeric
 
 
 def _coerce_integral_ids(values: Any, name: str) -> np.ndarray:
@@ -155,7 +198,42 @@ def _apply_poisson_input_validation_patch(encoding_module: Any, kd_module: Any) 
         setattr(validate_poisson_inputs, _POISSON_INPUT_PATCHED_FLAG, True)
         encoding_module._validate_poisson_inputs = validate_poisson_inputs
 
+    if not _is_marked_wrapper(getattr(encoding_module, "_poisson_log_emissions", None), _POISSON_CONFIG_WRAPPER_MARKER):
+        original_poisson_log_emissions = encoding_module._poisson_log_emissions
+
+        @wraps(original_poisson_log_emissions)
+        def poisson_log_emissions(
+            spike_counts,
+            rates_hz,
+            dt,
+            *,
+            spike_rate_scale=1.0,
+            likelihood_temperature=1.0,
+            cell_weights=None,
+            negative_binomial_overdispersion=0.0,
+        ):
+            spike_rate_scale = _positive_real_scalar(spike_rate_scale, "spike_rate_scale")
+            likelihood_temperature = _positive_real_scalar(likelihood_temperature, "likelihood_temperature")
+            negative_binomial_overdispersion = _nonnegative_real_scalar(
+                negative_binomial_overdispersion,
+                "negative_binomial_overdispersion",
+            )
+            return original_poisson_log_emissions(
+                spike_counts,
+                rates_hz,
+                dt,
+                spike_rate_scale=spike_rate_scale,
+                likelihood_temperature=likelihood_temperature,
+                cell_weights=cell_weights,
+                negative_binomial_overdispersion=negative_binomial_overdispersion,
+            )
+
+        _mark_wrapper(poisson_log_emissions, _POISSON_CONFIG_WRAPPER_MARKER)
+        setattr(poisson_log_emissions, _POISSON_CONFIG_PATCHED_FLAG, True)
+        encoding_module._poisson_log_emissions = poisson_log_emissions
+
     setattr(encoding_module, _POISSON_INPUT_PATCHED_FLAG, True)
+    setattr(encoding_module, _POISSON_CONFIG_PATCHED_FLAG, True)
     kd_module._validate_poisson_inputs = encoding_module._validate_poisson_inputs
     setattr(kd_module, _POISSON_INPUT_PATCHED_FLAG, True)
 

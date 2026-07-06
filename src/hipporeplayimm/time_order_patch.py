@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
+from functools import wraps
+
 import numpy as np
 
 from .encoding import LogEmissionTensor
 
 _PATCH_MARKER = "_time_order_patch_wrapped"
+_ACCURACY_REVERSE_PATCHED_FLAG = "_accuracy_reverse_duration_patch_applied"
+_ACCURACY_REVERSE_ORIGINAL_ATTR = "_accuracy_reverse_duration_original"
 
 
 def apply_reverse_emission_time_patch() -> None:
@@ -19,56 +23,92 @@ def apply_reverse_emission_time_patch() -> None:
     reverse_copy = getattr(reverse_models, "reverse_emissions", None)
     improved_patched = getattr(improved, "_time_order_patch_applied", False) and getattr(improved_copy, _PATCH_MARKER, False)
     reverse_models_patched = getattr(reverse_models, "_time_order_patch_applied", False) and getattr(reverse_copy, _PATCH_MARKER, False)
-    if improved_patched and reverse_models_patched:
+    if not (improved_patched and reverse_models_patched):
+
+        def copy_emissions_with_log_likelihood(
+            emissions: LogEmissionTensor,
+            log_likelihood: np.ndarray,
+            *,
+            reverse_time: bool = False,
+        ) -> LogEmissionTensor:
+            likelihood = np.asarray(log_likelihood, dtype=float)
+            counts = np.asarray(emissions.spike_counts)
+            if reverse_time:
+                likelihood = likelihood[::-1].copy()
+                counts = counts[::-1].copy()
+            return LogEmissionTensor(
+                log_likelihood=likelihood.copy(),
+                spike_counts=counts.copy(),
+                times=_time_vector(
+                    emissions,
+                    reverse_time=reverse_time,
+                ),
+                dt=emissions.dt,
+                cell_ids=np.asarray(emissions.cell_ids).copy(),
+                n_spikes=int(emissions.n_spikes),
+                bin_durations=_duration_vector(
+                    getattr(emissions, "bin_durations", None),
+                    reverse_time=reverse_time,
+                    expected_length=emissions.n_time,
+                    name="bin_durations",
+                ),
+                transition_durations=_transition_duration_vector(
+                    emissions,
+                    reverse_time=reverse_time,
+                ),
+                metadata=dict(getattr(emissions, "metadata", {}) or {}),
+            )
+
+        def reverse_emissions(emissions: LogEmissionTensor) -> LogEmissionTensor:
+            return copy_emissions_with_log_likelihood(
+                emissions,
+                np.asarray(emissions.log_likelihood, dtype=float),
+                reverse_time=True,
+            )
+
+        setattr(copy_emissions_with_log_likelihood, _PATCH_MARKER, True)
+        setattr(reverse_emissions, _PATCH_MARKER, True)
+        improved.copy_emissions_with_log_likelihood = copy_emissions_with_log_likelihood
+        reverse_models.reverse_emissions = reverse_emissions
+        improved._time_order_patch_applied = True
+        reverse_models._time_order_patch_applied = True
+
+    _patch_accuracy_upgrade_reverse_emissions()
+
+
+def _patch_accuracy_upgrade_reverse_emissions() -> None:
+    """Keep accuracy-upgrade reversed emissions on an increasing time axis."""
+
+    from . import accuracy_upgrades
+
+    current = accuracy_upgrades.reverse_emissions
+    if getattr(current, _ACCURACY_REVERSE_PATCHED_FLAG, False) and getattr(current, _PATCH_MARKER, False):
         return
 
-    def copy_emissions_with_log_likelihood(
-        emissions: LogEmissionTensor,
-        log_likelihood: np.ndarray,
-        *,
-        reverse_time: bool = False,
-    ) -> LogEmissionTensor:
-        likelihood = np.asarray(log_likelihood, dtype=float)
-        counts = np.asarray(emissions.spike_counts)
-        if reverse_time:
-            likelihood = likelihood[::-1].copy()
-            counts = counts[::-1].copy()
+    @wraps(current)
+    def reverse_emissions(emissions: LogEmissionTensor) -> LogEmissionTensor:
         return LogEmissionTensor(
-            log_likelihood=likelihood.copy(),
-            spike_counts=counts.copy(),
-            times=_time_vector(
-                emissions,
-                reverse_time=reverse_time,
-            ),
+            log_likelihood=np.asarray(emissions.log_likelihood, dtype=float)[::-1].copy(),
+            spike_counts=np.asarray(emissions.spike_counts)[::-1].copy(),
+            times=_time_vector(emissions, reverse_time=True),
             dt=emissions.dt,
             cell_ids=np.asarray(emissions.cell_ids).copy(),
             n_spikes=int(emissions.n_spikes),
             bin_durations=_duration_vector(
                 getattr(emissions, "bin_durations", None),
-                reverse_time=reverse_time,
+                reverse_time=True,
                 expected_length=emissions.n_time,
                 name="bin_durations",
             ),
-            transition_durations=_transition_duration_vector(
-                emissions,
-                reverse_time=reverse_time,
-            ),
+            transition_durations=_transition_duration_vector(emissions, reverse_time=True),
             metadata=dict(getattr(emissions, "metadata", {}) or {}),
         )
 
-    def reverse_emissions(emissions: LogEmissionTensor) -> LogEmissionTensor:
-        return copy_emissions_with_log_likelihood(
-            emissions,
-            np.asarray(emissions.log_likelihood, dtype=float),
-            reverse_time=True,
-        )
-
-    setattr(copy_emissions_with_log_likelihood, _PATCH_MARKER, True)
     setattr(reverse_emissions, _PATCH_MARKER, True)
-    improved.copy_emissions_with_log_likelihood = copy_emissions_with_log_likelihood
-    reverse_models.reverse_emissions = reverse_emissions
-    improved._time_order_patch_applied = True
-    reverse_models._time_order_patch_applied = True
+    setattr(reverse_emissions, _ACCURACY_REVERSE_PATCHED_FLAG, True)
+    setattr(reverse_emissions, _ACCURACY_REVERSE_ORIGINAL_ATTR, current)
+    accuracy_upgrades.reverse_emissions = reverse_emissions
+    setattr(accuracy_upgrades, "_time_order_patch_applied", True)
 
 
 def _time_vector(

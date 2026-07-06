@@ -37,9 +37,12 @@ def _nonnegative_integer_seed(value: object, name: str = "random_seed") -> int:
 
 
 def apply_result_improvement_seed_validation_patch() -> None:
-    """Install strict seed validation for result-improvement resampling helpers."""
+    """Install strict seed and replay-calibrated emission validation."""
 
+    from . import result_improvement_emission_validation
     from . import result_improvements
+
+    result_improvement_emission_validation.apply_result_improvement_emission_validation_patch()
 
     if _result_improvement_seed_validation_patch_current(result_improvements):
         setattr(result_improvements, _PATCHED_FLAG, True)

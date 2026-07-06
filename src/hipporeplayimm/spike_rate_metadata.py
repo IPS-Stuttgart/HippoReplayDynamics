@@ -97,6 +97,8 @@ def _unique_float_from_columns(
             if text.lower() in _MISSING_METADATA_STRINGS:
                 continue
             if text:
+                if isinstance(value, (bool, np.bool_)):
+                    raise ValueError(f"{column} must contain finite numeric metadata values")
                 numeric = float(value)
                 if not np.isfinite(numeric):
                     raise ValueError(f"{column} must be finite")

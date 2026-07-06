@@ -257,24 +257,26 @@ def _event_spikes_for_continuous_time(session, encoding, ripple_event) -> np.nda
 
     spikes = np.asarray(session.spikes)
     if spikes.size == 0:
-        return np.empty((0, 2), dtype=float)
+        return np.empty((0, 2), dtype=object)
     if spikes.ndim != 2 or spikes.shape[1] < 2:
         raise ValueError("spikes must be two-dimensional with at least time and cell-id columns")
 
     spike_times = np.asarray(spikes[:, 0], dtype=float)
     in_window = (spike_times >= float(ripple_event.start)) & (spike_times < float(ripple_event.end))
     if not np.any(in_window):
-        return np.empty((0, 2), dtype=float)
+        return np.empty((0, 2), dtype=object)
 
     event_cell_ids = _coerce_integral_ids(spikes[in_window, 1], "spike cell IDs")
     keep = np.isin(event_cell_ids, cell_ids)
     if not np.any(keep):
-        return np.empty((0, 2), dtype=float)
+        return np.empty((0, 2), dtype=object)
 
     event_times = spike_times[in_window][keep]
-    event_ids = event_cell_ids[keep].astype(float)
-    event_spikes = np.column_stack((event_times, event_ids))
-    order = np.argsort(event_spikes[:, 0], kind="mergesort")
+    event_ids = event_cell_ids[keep]
+    event_spikes = np.empty((event_times.shape[0], 2), dtype=object)
+    event_spikes[:, 0] = event_times
+    event_spikes[:, 1] = event_ids
+    order = np.argsort(event_times, kind="mergesort")
     return event_spikes[order]
 
 

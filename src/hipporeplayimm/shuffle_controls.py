@@ -119,6 +119,8 @@ def _nonnegative_integer_value(name: str, value: object) -> int:
     scalar = array.item()
     if isinstance(scalar, (bool, np.bool_)):
         raise ValueError(f"{name} must be an integer, not boolean")
+    if isinstance(scalar, (str, bytes, np.str_, np.bytes_)):
+        raise ValueError(f"{name} must be an integer, not string")
 
     try:
         integer = operator.index(scalar)

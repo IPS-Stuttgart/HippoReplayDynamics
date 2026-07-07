@@ -13,12 +13,16 @@ _MODEL_SCORE_PATCHED_FLAG = "_valid_state_grid_model_score_parameter_validation_
 
 
 def apply_accuracy_grid_parameter_validation_patch() -> None:
-    """Install strict parameter validation for valid-grid replay helpers."""
+    """Install strict parameter validation for valid-grid replay helpers.
+
+    The public runtime patch hook may be called after tests or interactive
+    notebooks have restored helper functions/classes to their original objects.
+    Do not trust the module-level sentinel alone: each helper wrapper is
+    idempotent, so re-check the actual callable state on every invocation and
+    re-wrap any stale replacement.
+    """
 
     from . import accuracy_upgrades
-
-    if getattr(accuracy_upgrades, _PATCHED_FLAG, False):
-        return
 
     _patch_valid_grid_graph_transition(accuracy_upgrades)
     _patch_valid_state_grid_model_init(accuracy_upgrades)

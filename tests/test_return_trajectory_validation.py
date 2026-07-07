@@ -3,6 +3,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
+from hipporeplayimm import result_improvement_extensions as compat
 from hipporeplayimm.encoding import LogEmissionTensor
 from hipporeplayimm.models import EventScore
 from hipporeplayimm.reverse_models import BidirectionalReplayModel, ReverseTimeReplayModel
@@ -20,15 +21,7 @@ class AlwaysTrajectoryModel:
         *,
         return_trajectory: bool | None = None,
     ) -> EventScore:
-        trajectory = np.log(
-            np.array(
-                [
-                    [0.65, 0.35],
-                    [0.25, 0.75],
-                ],
-                dtype=float,
-            )
-        )
+        trajectory = np.log(np.array([[0.65, 0.35], [0.25, 0.75]], dtype=float))
         return EventScore(
             self.name,
             -1.0,
@@ -42,15 +35,7 @@ class AlwaysTrajectoryModel:
 
 def _emissions() -> LogEmissionTensor:
     return LogEmissionTensor(
-        log_likelihood=np.log(
-            np.array(
-                [
-                    [0.6, 0.4],
-                    [0.7, 0.3],
-                ],
-                dtype=float,
-            )
-        ),
+        log_likelihood=np.log(np.array([[0.6, 0.4], [0.7, 0.3]], dtype=float)),
         spike_counts=np.zeros((2, 1), dtype=int),
         times=np.array([0.0, 1.0], dtype=float),
         dt=1.0,
@@ -69,6 +54,17 @@ def test_replay_wrappers_reject_non_boolean_return_trajectory(wrapper_cls, value
 
     with pytest.raises(TypeError, match="return_trajectory"):
         wrapper.score(_emissions(), BIN_CENTERS, return_trajectory=value)
+
+
+@pytest.mark.parametrize("value", ["False", "true", 0, 1])
+def test_score_replay_model_compat_rejects_non_boolean_return_trajectory(value):
+    with pytest.raises(TypeError, match="return_trajectory"):
+        compat.score_replay_model_compat(
+            AlwaysTrajectoryModel(),
+            _emissions(),
+            BIN_CENTERS,
+            return_trajectory=value,
+        )
 
 
 @pytest.mark.parametrize(

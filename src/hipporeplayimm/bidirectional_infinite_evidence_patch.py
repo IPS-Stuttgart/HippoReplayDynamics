@@ -71,7 +71,7 @@ def _terminal_log_posterior_from_score(score: object) -> np.ndarray | None:
 
 
 def _needs_evidence_only_terminal_retry(score: object, return_trajectory: object) -> bool:
-    return return_trajectory is False and _terminal_log_posterior_from_score(score) is None
+    return return_trajectory is not True and _terminal_log_posterior_from_score(score) is None
 
 
 def _score_patch_is_current(compat: object, direct: object) -> bool:

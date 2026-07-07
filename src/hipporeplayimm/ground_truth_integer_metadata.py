@@ -38,7 +38,7 @@ def apply_ground_truth_integer_metadata_patch() -> None:
         setattr(unique_int_from_column, _UNIQUE_INT_WRAPPER_MARKER, True)
         gt._unique_int_from_column = unique_int_from_column
 
-    if not getattr(gt, _CELL_ID_PATCHED_FLAG, False) and not _parse_cell_ids_patch_current(gt):
+    if not _parse_cell_ids_patch_current(gt) and not _cell_id_metadata_patch_current(gt):
 
         def parse_cell_ids(value: Any) -> np.ndarray | None:
             if value is None:
@@ -72,6 +72,12 @@ def _unique_int_patch_current(gt: object) -> bool:
 
 def _parse_cell_ids_patch_current(gt: object) -> bool:
     return bool(getattr(getattr(gt, "_parse_cell_ids", None), _PARSE_CELL_IDS_WRAPPER_MARKER, False))
+
+
+def _cell_id_metadata_patch_current(gt: object) -> bool:
+    from .ground_truth_cell_id_metadata import _ground_truth_cell_id_metadata_patch_current
+
+    return bool(_ground_truth_cell_id_metadata_patch_current(gt))
 
 
 def _parse_integer_metadata_value(column: str, value: Any) -> int:

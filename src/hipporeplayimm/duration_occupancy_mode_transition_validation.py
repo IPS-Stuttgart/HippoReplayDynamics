@@ -11,6 +11,7 @@ import numpy as np
 
 _PATCH_ATTR = "_duration_occupancy_mode_transition_validation_patch"
 _DECAY_PATCH_ATTR = "_duration_occupancy_decay_output_validation_patch"
+_MODE_PARAMETER_PATCH_ATTR = "_duration_occupancy_mode_parameter_validation_patch"
 _DISPLACEMENT_MOMENTUM_SINGLE_BIN_PATCH_ATTR = (
     "_displacement_momentum_single_bin_evidence_support_patch"
 )
@@ -48,6 +49,61 @@ def _coerce_integer_count(value: Any, name: str, *, minimum: int) -> int:
     if count < int(minimum):
         raise ValueError(f"{name} must be at least {int(minimum)}")
     return int(count)
+
+
+def _coerce_numeric_scalar(value: Any, name: str) -> float:
+    """Return a finite numeric scalar without boolean or array coercion."""
+
+    try:
+        arr = np.asarray(value)
+    except (TypeError, ValueError) as exc:
+        raise TypeError(f"{name} must be a numeric scalar") from exc
+    if arr.ndim != 0:
+        raise TypeError(f"{name} must be a numeric scalar")
+    item = arr.item()
+    if isinstance(item, (bool, np.bool_)):
+        raise TypeError(f"{name} must be a numeric scalar, not boolean")
+    try:
+        numeric = float(item)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ValueError(f"{name} must be finite") from exc
+    if not np.isfinite(numeric):
+        raise ValueError(f"{name} must be finite")
+    return numeric
+
+
+def _validate_probability_scalar(value: Any, name: str) -> float:
+    numeric = _coerce_numeric_scalar(value, name)
+    if numeric < 0.0 or numeric > 1.0:
+        raise ValueError(f"{name} must be finite and lie in [0, 1]")
+    return numeric
+
+
+def _validate_nonnegative_scalar(value: Any, name: str) -> float:
+    numeric = _coerce_numeric_scalar(value, name)
+    if numeric < 0.0:
+        raise ValueError(f"{name} must be finite and nonnegative")
+    return numeric
+
+
+def _validate_duration_decay_inputs(config_or_decay: Any) -> None:
+    if hasattr(config_or_decay, "momentum_velocity_decay"):
+        tau_s = _validate_nonnegative_scalar(
+            getattr(config_or_decay, "momentum_velocity_decay_tau_s", 0.0),
+            "momentum_velocity_decay_tau_s",
+        )
+        if tau_s == 0.0:
+            _validate_probability_scalar(
+                getattr(config_or_decay, "momentum_velocity_decay", 0.95),
+                "momentum_velocity_decay",
+            )
+        return
+    _validate_probability_scalar(config_or_decay, "momentum_velocity_decay")
+
+
+def _validate_mode_transition_parameters(mode_stickiness: Any, imm_switch_tau_s: Any) -> None:
+    _validate_probability_scalar(mode_stickiness, "imm_mode_stickiness")
+    _validate_nonnegative_scalar(imm_switch_tau_s, "imm_switch_tau_s")
 
 
 def _validate_mode_transition_sequence(
@@ -115,6 +171,7 @@ def _wrap_duration_adjusted_decays(helper: Callable[..., np.ndarray]) -> Callabl
 
     @wraps(helper)
     def duration_adjusted_decays(config_or_decay, durations, reference_dt):
+        _validate_duration_decay_inputs(config_or_decay)
         out = helper(config_or_decay, durations, reference_dt)
         return _validate_decay_probabilities(out, np.asarray(durations, dtype=float))
 
@@ -213,10 +270,25 @@ def _wrap_displacement_imm_single_bin_support(helper: Callable[..., Any]) -> Cal
     return score_displacement_imm_exact
 
 
+def _wrap_mode_transition_matrices(helper: Callable[..., list[np.ndarray]]) -> Callable[..., list[np.ndarray]]:
+    if getattr(helper, _MODE_PARAMETER_PATCH_ATTR, False):
+        return helper
+
+    @wraps(helper)
+    def mode_transition_matrices(ss, n_modes, mode_stickiness, imm_switch_tau_s, durations):
+        _validate_mode_transition_parameters(mode_stickiness, imm_switch_tau_s)
+        return helper(ss, n_modes, mode_stickiness, imm_switch_tau_s, durations)
+
+    setattr(mode_transition_matrices, _MODE_PARAMETER_PATCH_ATTR, True)
+    setattr(mode_transition_matrices, _ORIGINAL_ATTR, helper)
+    return mode_transition_matrices
+
+
 def _wrap_resolver(resolver: Callable[..., list[np.ndarray]]) -> Callable[..., list[np.ndarray]]:
     if getattr(resolver, _PATCH_ATTR, False):
         return resolver
 
+    @wraps(resolver)
     def _resolve_mode_transitions(
         ss,
         n_modes: int,
@@ -225,6 +297,7 @@ def _wrap_resolver(resolver: Callable[..., list[np.ndarray]]) -> Callable[..., l
         n_transitions: int,
     ) -> list[np.ndarray]:
         if mode_transitions is None:
+            _validate_probability_scalar(mode_stickiness, "imm_mode_stickiness")
             return resolver(ss, n_modes, mode_stickiness, mode_transitions, n_transitions)
         return _validate_mode_transition_sequence(
             mode_transitions,
@@ -232,8 +305,6 @@ def _wrap_resolver(resolver: Callable[..., list[np.ndarray]]) -> Callable[..., l
             n_transitions=n_transitions,
         )
 
-    _resolve_mode_transitions.__name__ = getattr(resolver, "__name__", "_resolve_mode_transitions")
-    _resolve_mode_transitions.__doc__ = getattr(resolver, "__doc__", None)
     setattr(_resolve_mode_transitions, _PATCH_ATTR, True)
     setattr(_resolve_mode_transitions, _ORIGINAL_ATTR, resolver)
     return _resolve_mode_transitions
@@ -259,6 +330,7 @@ def apply_duration_occupancy_mode_transition_validation_patch() -> None:
 
     from . import duration_occupancy
 
+    duration_occupancy._mode_transition_matrices = _wrap_mode_transition_matrices(duration_occupancy._mode_transition_matrices)
     duration_occupancy._resolve_mode_transitions = _wrap_resolver(duration_occupancy._resolve_mode_transitions)
     duration_occupancy._duration_adjusted_decays = _wrap_duration_adjusted_decays(duration_occupancy._duration_adjusted_decays)
     _patch_displacement_single_bin_evidence_support()

@@ -19,7 +19,7 @@ _PATCHED_FLAG = "_kd_encoding_config_validation_patch_applied"
 
 def _coerce_float_scalar(config: Any, name: str) -> float:
     value = getattr(config, name)
-    if isinstance(value, (bool, np.bool_)):
+    if isinstance(value, (bool, np.bool_, str, bytes, np.str_, np.bytes_)):
         raise TypeError(f"{name} must be a scalar float")
     try:
         array = np.asarray(value)
@@ -27,11 +27,13 @@ def _coerce_float_scalar(config: Any, name: str) -> float:
         raise TypeError(f"{name} must be a scalar float") from exc
     if array.shape != ():
         raise TypeError(f"{name} must be a scalar float")
+    if array.dtype.kind in {"U", "S"}:
+        raise TypeError(f"{name} must be a scalar float")
     try:
         value = array.item()
     except (AttributeError, IndexError, ValueError):
         pass
-    if isinstance(value, (bool, np.bool_)):
+    if isinstance(value, (bool, np.bool_, str, bytes, np.str_, np.bytes_)):
         raise TypeError(f"{name} must be a scalar float")
     try:
         return float(value)

@@ -69,6 +69,25 @@ def test_trajectory_quality_metrics_rejects_nonfinite_or_nonmonotone_times(times
         )
 
 
+@pytest.mark.parametrize(
+    ("trajectory_log_posterior", "bin_centers", "times", "message"),
+    [
+        (np.array([[0.0, "0.0"]], dtype=object), np.array([0.0, 1.0]), None, "trajectory_log_posterior.*boolean or text"),
+        (np.array([[False, True]]), np.array([0.0, 1.0]), None, "trajectory_log_posterior.*boolean or text"),
+        (np.log(np.array([[0.5, 0.5]])), np.array(["0.0", "1.0"]), None, "bin_centers.*boolean or text"),
+        (np.log(np.array([[0.5, 0.5], [0.4, 0.6]])), np.array([0.0, 1.0]), np.array(["0.0", "0.5"]), "times.*boolean or text"),
+        (np.log(np.array([[0.5, 0.5], [0.4, 0.6]])), np.array([0.0, 1.0]), np.array([False, True]), "times.*boolean or text"),
+    ],
+)
+def test_trajectory_quality_metrics_rejects_boolean_or_text_inputs_before_float_coercion(trajectory_log_posterior, bin_centers, times, message):
+    with pytest.raises(ValueError, match=message):
+        trajectory_quality_metrics(
+            trajectory_log_posterior,
+            bin_centers,
+            times=times,
+        )
+
+
 def test_trajectory_quality_metrics_validates_single_time_bin_timestamp():
     with pytest.raises(ValueError, match="finite"):
         trajectory_quality_metrics(
@@ -112,13 +131,13 @@ def test_trajectory_quality_metrics_rejects_nonfinite_bin_centers():
 def test_trajectory_quality_metrics_rejects_nan_or_positive_inf():
     centers = np.array([[0.0, 0.0], [1.0, 0.0]])
 
-    with pytest.raises(ValueError, match="cannot contain NaN or \+inf"):
+    with pytest.raises(ValueError, match=r"cannot contain NaN or \+inf"):
         trajectory_quality_metrics(
             np.array([[0.0, np.nan]]),
             centers,
         )
 
-    with pytest.raises(ValueError, match="cannot contain NaN or \+inf"):
+    with pytest.raises(ValueError, match=r"cannot contain NaN or \+inf"):
         trajectory_quality_metrics(
             np.array([[0.0, np.inf]]),
             centers,

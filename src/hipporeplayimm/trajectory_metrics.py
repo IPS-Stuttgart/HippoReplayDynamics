@@ -8,6 +8,7 @@ from scipy.special import logsumexp
 from .models import LOG_ZERO
 
 _LOG_ZERO_ROW_THRESHOLD = LOG_ZERO / 2.0
+_BOOL_OR_TEXT_DTYPE_KINDS = {"b", "S", "U"}
 
 
 def trajectory_quality_metrics(
@@ -24,8 +25,8 @@ def trajectory_quality_metrics(
     path.
     """
 
-    logp = np.asarray(trajectory_log_posterior, dtype=float)
-    centers = np.asarray(bin_centers, dtype=float)
+    logp = _as_numeric_real_array(trajectory_log_posterior, "trajectory_log_posterior")
+    centers = _as_numeric_real_array(bin_centers, "bin_centers")
     if logp.ndim != 2:
         raise ValueError("trajectory_log_posterior must have shape (time, bins)")
     if logp.shape[0] == 0 or logp.shape[1] == 0:
@@ -71,10 +72,28 @@ def trajectory_quality_metrics(
     }
 
 
+def _as_numeric_real_array(values: object, name: str) -> np.ndarray:
+    raw = np.asarray(values)
+    if raw.dtype.kind in _BOOL_OR_TEXT_DTYPE_KINDS:
+        raise ValueError(f"{name} must contain numeric real values, not boolean or text")
+    if raw.dtype.kind == "c":
+        raise ValueError(f"{name} must contain numeric real values, not complex values")
+    if raw.dtype.kind == "O":
+        for item in raw.ravel():
+            if isinstance(item, (bool, np.bool_, str, bytes, np.bytes_)):
+                raise ValueError(f"{name} must contain numeric real values, not boolean or text")
+            if isinstance(item, (complex, np.complexfloating)):
+                raise ValueError(f"{name} must contain numeric real values, not complex values")
+    try:
+        return np.asarray(values, dtype=float)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must contain numeric real values") from exc
+
+
 def _transition_durations(times: np.ndarray | None, n_time: int) -> np.ndarray:
     if times is None:
         return np.ones(n_time - 1, dtype=float) if n_time > 1 else np.empty(0, dtype=float)
-    arr = np.asarray(times, dtype=float)
+    arr = _as_numeric_real_array(times, "times")
     if arr.shape != (n_time,):
         raise ValueError("times must contain one timestamp per trajectory row")
     if not np.all(np.isfinite(arr)):

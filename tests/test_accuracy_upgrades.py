@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import numpy as np
 import pandas as pd
+import pytest
 
 from hipporeplayimm.accuracy_upgrades import (
     ValidStateGridReplayModel,
     bootstrap_model_win_probabilities,
     model_probability_diagnostics,
+    valid_grid_graph_transition,
 )
 from hipporeplayimm.encoding import LogEmissionTensor
 
@@ -42,6 +44,32 @@ def test_valid_state_grid_model_expands_posterior_to_full_grid() -> None:
     assert score.trajectory_log_posterior is not None
     assert score.trajectory_log_posterior.shape == (2, 4)
     assert np.exp(score.trajectory_log_posterior[:, ~valid_mask]).max() == 0.0
+
+
+def test_valid_grid_graph_transition_rejects_lossy_parameters() -> None:
+    valid_mask = np.ones(4, dtype=bool)
+
+    with pytest.raises(ValueError, match="grid_shape"):
+        valid_grid_graph_transition((2.5, 2), valid_mask)
+
+    with pytest.raises(TypeError, match="diagonal_neighbors must be boolean"):
+        valid_grid_graph_transition((2, 2), valid_mask, diagonal_neighbors="False")
+
+    with pytest.raises(ValueError, match="stay_probability"):
+        valid_grid_graph_transition((2, 2), valid_mask, stay_probability="0.25")
+
+
+def test_valid_state_grid_model_validates_parameters_at_construction() -> None:
+    valid_mask = np.ones(4, dtype=bool)
+
+    with pytest.raises(ValueError, match="grid_shape"):
+        ValidStateGridReplayModel(valid_mask, grid_shape=(2.5, 2))
+
+    with pytest.raises(TypeError, match="diagonal_neighbors must be boolean"):
+        ValidStateGridReplayModel(valid_mask, grid_shape=(2, 2), diagonal_neighbors="False")
+
+    with pytest.raises(TypeError, match="stay_probability must be numeric, not boolean"):
+        ValidStateGridReplayModel(valid_mask, grid_shape=(2, 2), stay_probability=False)
 
 
 def test_bootstrap_model_win_probabilities_accepts_window_groups() -> None:

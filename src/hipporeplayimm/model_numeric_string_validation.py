@@ -10,6 +10,8 @@ import numpy as np
 from .model_parameter_validation import _reject_boolean_scalar
 
 _PATCHED_FLAG = "_model_numeric_string_validation_patch_applied"
+_PATCH_VERSION_ATTR = "_model_numeric_string_validation_patch_version"
+_PATCH_VERSION = 2
 _STATE_SPACE_UTILS_PATCHED_FLAG = "_state_space_numeric_string_validation_patch_applied"
 _STATE_SPACE_MODEL_PATCHED_FLAG = "_state_space_model_numeric_string_validation_patch_applied"
 _STRING_TYPES = (str, bytes, np.str_, np.bytes_)
@@ -49,8 +51,14 @@ def _reject_string_count(name: str, value: object) -> None:
         raise TypeError(f"{name} must be an integer scalar, not string")
 
 
-def _wrapper_chain_has_marker(function: object, marker: str) -> bool:
-    """Return True when any wrapper in ``function``'s original chain is marked."""
+def _wrapper_chain_has_marker(function: object, marker: str, patch_version: int | None = None) -> bool:
+    """Return True when a wrapper in ``function``'s original chain has ``marker``.
+
+    When ``patch_version`` is supplied, only wrappers carrying the matching
+    patch-version attribute count as current.  This lets runtime patch refresh
+    stale wrappers that were marked by an earlier implementation but lack newer
+    guards.
+    """
 
     seen: set[int] = set()
     current = function
@@ -60,7 +68,8 @@ def _wrapper_chain_has_marker(function: object, marker: str) -> bool:
             return False
         seen.add(current_id)
         if getattr(current, marker, False):
-            return True
+            if patch_version is None or getattr(current, _PATCH_VERSION_ATTR, None) == patch_version:
+                return True
         current = getattr(current, "__hipporeplayimm_original__", None)
     return False
 
@@ -190,7 +199,7 @@ def apply_model_numeric_string_validation_patch() -> None:
 
     for validator_name in _VALIDATOR_NAMES:
         current = getattr(models, validator_name)
-        if _wrapper_chain_has_marker(current, _PATCHED_FLAG):
+        if _wrapper_chain_has_marker(current, _PATCHED_FLAG, _PATCH_VERSION):
             continue
 
         @wraps(current)
@@ -200,6 +209,7 @@ def apply_model_numeric_string_validation_patch() -> None:
             return _current(name, value)
 
         setattr(validator, _PATCHED_FLAG, True)
+        setattr(validator, _PATCH_VERSION_ATTR, _PATCH_VERSION)
         setattr(validator, "__hipporeplayimm_original__", current)
         setattr(models, validator_name, validator)
 

@@ -2,7 +2,7 @@
 
 The position-decoding validation helpers use public configuration fields in
 array slicing, fold construction, spike-count filtering, and explicit training
-frame masks.  Invalid integer knobs or non-boolean masks should be rejected
+frame masks.  Invalid, text-valued, or non-boolean masks should be rejected
 before those operations so callers do not get silent window truncation,
 accidental truthiness, or unrelated NumPy/type errors.
 """
@@ -241,6 +241,15 @@ def _reject_array_shaped_scalar(name: str, value: Any, message: str) -> Any:
         raise ValueError(message) from exc
     if array.shape != ():
         raise ValueError(message)
+    if array.dtype.kind in {"U", "S"}:
+        raise ValueError(message)
+    if array.dtype == object:
+        try:
+            scalar = array.item()
+        except ValueError as exc:
+            raise ValueError(message) from exc
+        if isinstance(scalar, (str, bytes)):
+            raise ValueError(message)
     return value
 
 

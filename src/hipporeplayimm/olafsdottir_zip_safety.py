@@ -12,6 +12,7 @@ _PATCHED_EXTRACT_ATTR = "_olafsdottir_zip_safety_extract_archive"
 def _safe_zip_member_path(root: Path, member_name: str) -> Path:
     """Return the resolved output path for a safe zip member name."""
 
+    root = Path(root).resolve()
     normalized = str(member_name).replace("\\", "/")
     if "\x00" in normalized:
         raise ValueError(f"Unsafe zip member path: {member_name!r}")

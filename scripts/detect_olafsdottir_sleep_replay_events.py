@@ -482,8 +482,12 @@ def _cut_path_for_tetrode(stem: Path, tetrode: int) -> Path | None:
 def _moving_average(values: np.ndarray, window: int) -> np.ndarray:
     if window <= 1:
         return values
-    kernel = np.ones(int(window), dtype=float) / float(window)
-    return np.convolve(values, kernel, mode="same")
+    window = int(window)
+    kernel = np.ones(window, dtype=float) / float(window)
+    left_pad = window // 2
+    right_pad = window - 1 - left_pad
+    padded = np.pad(np.asarray(values, dtype=float), (left_pad, right_pad), mode="edge")
+    return np.convolve(padded, kernel, mode="valid")
 
 
 def _robust_z(values: np.ndarray) -> np.ndarray:

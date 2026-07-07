@@ -16,6 +16,12 @@ _VALIDATOR_NAMES = (
     "_validate_nonnegative_parameter",
     "_validate_probability_parameter",
 )
+_STATE_SPACE_HELPER_NAMES = (
+    "_coerce_integer_count",
+    "_coerce_unit_probability",
+    "_top_candidate_indices",
+    "_mass_retaining_candidate_indices",
+)
 
 
 def _is_string_scalar(value: object) -> bool:
@@ -58,6 +64,15 @@ def _replace_imported_module_aliases(attribute_name: str, original: object, repl
             setattr(module, attribute_name, replacement)
 
 
+def _state_space_helpers_are_string_guarded(state_space_utils: object) -> bool:
+    """Return True only when every helper still carries the string guard wrapper."""
+
+    return all(
+        bool(getattr(getattr(state_space_utils, helper_name, None), _STATE_SPACE_UTILS_PATCHED_FLAG, False))
+        for helper_name in _STATE_SPACE_HELPER_NAMES
+    )
+
+
 def _validate_state_space_candidate_config(config: object) -> None:
     threshold = getattr(config, "momentum_candidate_mass_threshold", None)
     if threshold is not None:
@@ -77,7 +92,7 @@ def _patch_state_space_numeric_string_validation() -> None:
     from . import state_space_model
     from . import state_space_utils
 
-    if not getattr(state_space_utils, _STATE_SPACE_UTILS_PATCHED_FLAG, False):
+    if not _state_space_helpers_are_string_guarded(state_space_utils):
         original_integer_count = state_space_utils._coerce_integer_count
         original_unit_probability = state_space_utils._coerce_unit_probability
         original_top_candidates = state_space_utils._top_candidate_indices

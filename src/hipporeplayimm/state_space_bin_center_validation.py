@@ -8,6 +8,7 @@ import numpy as np
 
 _PATCHED_FLAG = "_state_space_bin_center_validation_patch_applied"
 _SPARSE_MOMENTUM_PATCHED_FLAG = "_sparse_momentum_bin_center_validation_patch_applied"
+_CORE_MODEL_PATCHED_FLAG = "_core_model_bin_center_validation_patch_applied"
 
 
 def _validate_state_space_log_likelihood(emissions: Any) -> None:
@@ -42,6 +43,27 @@ def _coerce_state_space_bin_centers(bin_centers: Any, n_bins: int) -> np.ndarray
     if not np.all(np.isfinite(centers)):
         raise ValueError("bin_centers must be finite")
     return centers
+
+
+def _patch_core_model_bin_center_validation() -> None:
+    """Allow public core replay models to score vector-shaped 1D grids."""
+
+    from . import models
+
+    previous_validate = models._validate_score_inputs
+    if getattr(previous_validate, _CORE_MODEL_PATCHED_FLAG, False):
+        return
+
+    def validate_score_inputs(emissions, bin_centers):
+        centers = _coerce_state_space_bin_centers(bin_centers, emissions.n_bins)
+        return previous_validate(emissions, centers)
+
+    validate_score_inputs.__name__ = getattr(previous_validate, "__name__", "_validate_score_inputs")
+    validate_score_inputs.__doc__ = getattr(previous_validate, "__doc__", None)
+    validate_score_inputs.__module__ = getattr(previous_validate, "__module__", __name__)
+    setattr(validate_score_inputs, _CORE_MODEL_PATCHED_FLAG, True)
+    setattr(validate_score_inputs, "__hipporeplayimm_original__", previous_validate)
+    models._validate_score_inputs = validate_score_inputs
 
 
 def _patch_sparse_momentum_bin_center_validation() -> None:
@@ -92,6 +114,8 @@ def apply_state_space_bin_center_validation_patch() -> None:
     """Install state-space score input validation for ``StateSpaceReplayModel.score``."""
 
     from . import state_space as ss
+
+    _patch_core_model_bin_center_validation()
 
     if not getattr(ss.StateSpaceReplayModel.score, _PATCHED_FLAG, False):
         previous_score = ss.StateSpaceReplayModel.score

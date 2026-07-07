@@ -1,3 +1,5 @@
+from functools import wraps
+
 import numpy as np
 import pytest
 
@@ -70,6 +72,18 @@ def _legacy_validate_probability_parameter(name: str, value: object) -> None:
         raise ValueError(f"{name} must be finite and lie in [0, 1]")
 
 
+def _stale_string_only_wrapper(original, marker: str):
+    @wraps(original)
+    def validator(name: str, value: object) -> None:
+        if isinstance(value, (str, bytes, np.str_, np.bytes_)):
+            raise TypeError(f"{name} must be a numeric scalar, not string")
+        return original(name, value)
+
+    setattr(validator, marker, True)
+    setattr(validator, "__hipporeplayimm_original__", original)
+    return validator
+
+
 def test_runtime_patches_refresh_stale_model_numeric_validators(monkeypatch):
     hipporeplayimm.apply_runtime_patches()
 
@@ -89,3 +103,27 @@ def test_runtime_patches_refresh_stale_model_numeric_validators(monkeypatch):
         CandidateKinematicModel(velocity_decay=True)
     with pytest.raises(TypeError, match="mode_stickiness"):
         CandidateKinematicModel(mode_stickiness="0.95")
+
+
+def test_runtime_patches_refresh_already_marked_stale_model_numeric_validators(monkeypatch):
+    hipporeplayimm.apply_runtime_patches()
+
+    from hipporeplayimm import model_numeric_string_validation, models
+
+    marker = model_numeric_string_validation._PATCHED_FLAG
+    monkeypatch.setattr(models, "_validate_positive_parameter", _stale_string_only_wrapper(_legacy_validate_positive_parameter, marker))
+    monkeypatch.setattr(models, "_validate_nonnegative_parameter", _stale_string_only_wrapper(_legacy_validate_nonnegative_parameter, marker))
+    monkeypatch.setattr(models, "_validate_probability_parameter", _stale_string_only_wrapper(_legacy_validate_probability_parameter, marker))
+
+    hipporeplayimm.apply_runtime_patches()
+
+    assert getattr(models._validate_positive_parameter, model_numeric_string_validation._PATCH_VERSION_ATTR) == model_numeric_string_validation._PATCH_VERSION
+
+    with pytest.raises(TypeError, match="sigma_cm"):
+        DiffusionModel(sigma_cm=True)
+    with pytest.raises(TypeError, match="velocity_decay"):
+        CandidateKinematicModel(velocity_decay=True)
+
+    current_positive_validator = models._validate_positive_parameter
+    hipporeplayimm.apply_runtime_patches()
+    assert models._validate_positive_parameter is current_positive_validator

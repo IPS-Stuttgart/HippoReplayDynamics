@@ -7,6 +7,8 @@ from functools import wraps
 
 import numpy as np
 
+from .model_parameter_validation import _reject_boolean_scalar
+
 _PATCHED_FLAG = "_model_numeric_string_validation_patch_applied"
 _STATE_SPACE_UTILS_PATCHED_FLAG = "_state_space_numeric_string_validation_patch_applied"
 _STATE_SPACE_MODEL_PATCHED_FLAG = "_state_space_model_numeric_string_validation_patch_applied"
@@ -45,6 +47,22 @@ def _reject_string_scalar(name: str, value: object) -> None:
 def _reject_string_count(name: str, value: object) -> None:
     if _is_string_scalar(value):
         raise TypeError(f"{name} must be an integer scalar, not string")
+
+
+def _wrapper_chain_has_marker(function: object, marker: str) -> bool:
+    """Return True when any wrapper in ``function``'s original chain is marked."""
+
+    seen: set[int] = set()
+    current = function
+    while current is not None:
+        current_id = id(current)
+        if current_id in seen:
+            return False
+        seen.add(current_id)
+        if getattr(current, marker, False):
+            return True
+        current = getattr(current, "__hipporeplayimm_original__", None)
+    return False
 
 
 def _replace_imported_module_aliases(attribute_name: str, original: object, replacement: object) -> None:
@@ -170,21 +188,22 @@ def apply_model_numeric_string_validation_patch() -> None:
 
     from . import models
 
-    if not getattr(models, _PATCHED_FLAG, False):
-        for validator_name in _VALIDATOR_NAMES:
-            current = getattr(models, validator_name)
+    for validator_name in _VALIDATOR_NAMES:
+        current = getattr(models, validator_name)
+        if _wrapper_chain_has_marker(current, _PATCHED_FLAG):
+            continue
 
-            @wraps(current)
-            def validator(name: str, value: object, *, _current=current):
-                _reject_string_scalar(name, value)
-                return _current(name, value)
+        @wraps(current)
+        def validator(name: str, value: object, *, _current=current):
+            _reject_string_scalar(name, value)
+            _reject_boolean_scalar(name, value)
+            return _current(name, value)
 
-            setattr(validator, _PATCHED_FLAG, True)
-            setattr(validator, "__hipporeplayimm_original__", current)
-            setattr(models, validator_name, validator)
+        setattr(validator, _PATCHED_FLAG, True)
+        setattr(validator, "__hipporeplayimm_original__", current)
+        setattr(models, validator_name, validator)
 
-        setattr(models, _PATCHED_FLAG, True)
-
+    setattr(models, _PATCHED_FLAG, True)
     _patch_state_space_numeric_string_validation()
 
 

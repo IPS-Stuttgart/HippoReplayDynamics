@@ -52,3 +52,19 @@ def test_integer_metadata_patch_refreshes_restored_unique_int_helper(monkeypatch
     frame = pd.DataFrame({"benchmark_random_seed": ["7.5"]})
     with pytest.raises(ValueError, match="benchmark_random_seed"):
         gt._unique_int_from_column(frame, "benchmark_random_seed", 1)
+
+
+def test_integer_metadata_patch_refreshes_stale_cell_id_flag(monkeypatch):
+    import hipporeplayimm.ground_truth as gt
+    from hipporeplayimm.ground_truth_integer_metadata import _CELL_ID_PATCHED_FLAG, apply_ground_truth_integer_metadata_patch
+
+    def lossy_parse_cell_ids(_value):
+        return pd.Series([0]).to_numpy(dtype=int)
+
+    monkeypatch.setattr(gt, "_parse_cell_ids", lossy_parse_cell_ids)
+    monkeypatch.setattr(gt, _CELL_ID_PATCHED_FLAG, True, raising=False)
+
+    apply_ground_truth_integer_metadata_patch()
+
+    with pytest.raises(ValueError, match="score-table cell IDs"):
+        gt._parse_cell_ids("[1.5 2]")

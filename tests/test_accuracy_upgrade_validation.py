@@ -10,6 +10,7 @@ from hipporeplayimm.accuracy_upgrades import (
     build_continuous_time_emissions,
     estimate_replay_cell_gains,
     gamma_poisson_predictive_log_emissions,
+    gamma_rate_prior_from_encoding,
     masked_gaussian_transition_matrix,
     negative_binomial_log_emissions,
 )
@@ -44,6 +45,18 @@ def _two_cell_encoding() -> EncodingModel:
         bin_centers=np.array([[0.5, 0.5]], dtype=float),
         rates_hz=np.ones((2, 1), dtype=float),
         occupancy_s=np.array([1.0], dtype=float),
+        cell_ids=np.array([1, 2], dtype=int),
+        config=EncodingConfig(),
+    )
+
+
+def _gamma_prior_encoding() -> EncodingModel:
+    return EncodingModel(
+        x_edges=np.array([0.0, 1.0, 2.0]),
+        y_edges=np.array([0.0, 1.0]),
+        bin_centers=np.array([[0.5, 0.5], [1.5, 0.5]], dtype=float),
+        rates_hz=np.array([[0.0, 2.0], [1.0, 0.0]], dtype=float),
+        occupancy_s=np.array([0.0, 0.5], dtype=float),
         cell_ids=np.array([1, 2], dtype=int),
         config=EncodingConfig(),
     )
@@ -123,8 +136,8 @@ def test_estimate_replay_cell_gains_counts_unsorted_encoding_cell_ids() -> None:
         ripple_events=np.array([[0.0, 0.35, 0.2, 0.0, 0.0, 0.0]], dtype=float),
         run_times=np.empty((0, 2), dtype=float),
         sleep_box_immobile_times=np.empty((0, 2), dtype=float),
-        sleep_times=np.empty((0, 2), dtype=float),
         rem_times=np.empty((0, 2), dtype=float),
+        sleep_times=np.empty((0, 2), dtype=float),
         well_sequence=None,
         metadata={},
     )
@@ -229,3 +242,29 @@ def test_gamma_poisson_predictive_log_emissions_rejects_invalid_inputs() -> None
             np.array([[1.0, -1.0, 1.0]], dtype=float),
             0.02,
         )
+
+
+def test_gamma_rate_prior_from_encoding_rejects_invalid_prior_scalars() -> None:
+    encoding = _gamma_prior_encoding()
+    invalid_values = (0.0, -1.0, np.nan, np.inf, True, "1.0", np.array([1.0]))
+
+    for field in ("prior_count", "prior_exposure_s"):
+        for value in invalid_values:
+            kwargs = {"prior_count": 1.0, "prior_exposure_s": 1.0, field: value}
+            with pytest.raises(ValueError, match=field):
+                gamma_rate_prior_from_encoding(encoding, **kwargs)
+
+
+def test_gamma_rate_prior_from_encoding_returns_positive_prior_arrays() -> None:
+    encoding = _gamma_prior_encoding()
+
+    shape, exposure = gamma_rate_prior_from_encoding(
+        encoding,
+        prior_count=np.float64(0.5),
+        prior_exposure_s=np.array(2.0),
+    )
+
+    assert shape.shape == encoding.rates_hz.shape
+    assert exposure.shape == encoding.rates_hz.shape
+    assert np.all(shape > 0.0)
+    assert np.all(exposure > 0.0)

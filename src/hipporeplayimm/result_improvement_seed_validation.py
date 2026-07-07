@@ -41,8 +41,10 @@ def apply_result_improvement_seed_validation_patch() -> None:
 
     from . import result_improvement_emission_validation
     from . import result_improvements
+    from . import return_trajectory_validation
 
     result_improvement_emission_validation.apply_result_improvement_emission_validation_patch()
+    return_trajectory_validation.apply_return_trajectory_validation_patch()
 
     if _result_improvement_seed_validation_patch_current(result_improvements):
         setattr(result_improvements, _PATCHED_FLAG, True)

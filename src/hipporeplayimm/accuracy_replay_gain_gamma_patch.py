@@ -13,6 +13,7 @@ from scipy.special import gammaln
 _PATCHED_FLAG = "_accuracy_replay_gain_gamma_patch_applied"
 _ESTIMATE_WRAPPER_FLAG = "_accuracy_replay_gain_gamma_estimate_wrapper"
 _GAMMA_WRAPPER_FLAG = "_accuracy_replay_gain_gamma_gamma_wrapper"
+_GAMMA_RATE_PRIOR_WRAPPER_FLAG = "_accuracy_replay_gain_gamma_rate_prior_wrapper"
 _CONTINUOUS_WRAPPER_FLAG = "_accuracy_replay_gain_gamma_continuous_wrapper"
 
 
@@ -131,6 +132,31 @@ def _coerce_positive_matrix(values: Any, name: str) -> np.ndarray:
     if not np.all(np.isfinite(matrix)) or np.any(matrix <= 0.0):
         raise ValueError(f"{name} must be finite and positive")
     return matrix
+
+
+def _coerce_positive_prior_scalar(name: str, value: Any) -> float:
+    if isinstance(value, (bool, np.bool_)):
+        raise ValueError(f"{name} must be numeric, not boolean")
+    if isinstance(value, (str, bytes, np.str_, np.bytes_)):
+        raise ValueError(f"{name} must be numeric, not text")
+    try:
+        scalar = np.asarray(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must be a scalar") from exc
+    if scalar.ndim != 0:
+        raise ValueError(f"{name} must be a scalar")
+    item = scalar.item()
+    if isinstance(item, (bool, np.bool_)):
+        raise ValueError(f"{name} must be numeric, not boolean")
+    if isinstance(item, (str, bytes, np.str_, np.bytes_)):
+        raise ValueError(f"{name} must be numeric, not text")
+    try:
+        numeric = float(item)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ValueError(f"{name} must be finite and positive") from exc
+    if not np.isfinite(numeric) or numeric <= 0.0:
+        raise ValueError(f"{name} must be finite and positive")
+    return numeric
 
 
 def _coerce_trial_exposure(dt: Any, n_time: int, spike_rate_scale: float) -> np.ndarray:
@@ -376,11 +402,13 @@ def apply_accuracy_replay_gain_gamma_patch() -> None:
 
     current_estimate_replay_cell_gains = accuracy_module.estimate_replay_cell_gains
     current_gamma_poisson_predictive_log_emissions = accuracy_module.gamma_poisson_predictive_log_emissions
+    current_gamma_rate_prior_from_encoding = accuracy_module.gamma_rate_prior_from_encoding
     current_build_continuous_time_emissions = accuracy_module.build_continuous_time_emissions
     estimate_is_current = bool(getattr(current_estimate_replay_cell_gains, _ESTIMATE_WRAPPER_FLAG, False))
     gamma_is_current = bool(getattr(current_gamma_poisson_predictive_log_emissions, _GAMMA_WRAPPER_FLAG, False))
+    gamma_prior_is_current = bool(getattr(current_gamma_rate_prior_from_encoding, _GAMMA_RATE_PRIOR_WRAPPER_FLAG, False))
     continuous_is_current = bool(getattr(current_build_continuous_time_emissions, _CONTINUOUS_WRAPPER_FLAG, False))
-    if getattr(accuracy_module, _PATCHED_FLAG, False) and estimate_is_current and gamma_is_current and continuous_is_current:
+    if getattr(accuracy_module, _PATCHED_FLAG, False) and estimate_is_current and gamma_is_current and gamma_prior_is_current and continuous_is_current:
         return
 
     if not estimate_is_current:
@@ -413,6 +441,24 @@ def apply_accuracy_replay_gain_gamma_patch() -> None:
 
         setattr(gamma_poisson_predictive_log_emissions, _GAMMA_WRAPPER_FLAG, True)
         accuracy_module.gamma_poisson_predictive_log_emissions = gamma_poisson_predictive_log_emissions
+
+    if not gamma_prior_is_current:
+
+        @wraps(current_gamma_rate_prior_from_encoding)
+        def gamma_rate_prior_from_encoding(
+            encoding,
+            *,
+            prior_count: float = 1.0,
+            prior_exposure_s: float = 1.0,
+        ):
+            return current_gamma_rate_prior_from_encoding(
+                encoding,
+                prior_count=_coerce_positive_prior_scalar("prior_count", prior_count),
+                prior_exposure_s=_coerce_positive_prior_scalar("prior_exposure_s", prior_exposure_s),
+            )
+
+        setattr(gamma_rate_prior_from_encoding, _GAMMA_RATE_PRIOR_WRAPPER_FLAG, True)
+        accuracy_module.gamma_rate_prior_from_encoding = gamma_rate_prior_from_encoding
 
     if not continuous_is_current:
 

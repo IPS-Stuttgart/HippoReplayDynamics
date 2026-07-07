@@ -34,3 +34,21 @@ def test_unique_int_from_column_rejects_boolean_metadata():
 def test_parse_cell_ids_rejects_near_integral_metadata():
     with pytest.raises(ValueError, match="score-table cell IDs"):
         _parse_cell_ids("[1.0000000005 2]")
+
+
+def test_integer_metadata_patch_refreshes_restored_unique_int_helper(monkeypatch):
+    import hipporeplayimm.ground_truth as gt
+    from hipporeplayimm.ground_truth_integer_metadata import _PATCHED_FLAG, apply_ground_truth_integer_metadata_patch
+
+    def lossy_unique_int_from_column(frame, column, default):
+        values = [int(float(value)) for value in gt._iter_present_column_values(frame, (column,))]
+        return int(default) if not values else values[0]
+
+    monkeypatch.setattr(gt, "_unique_int_from_column", lossy_unique_int_from_column)
+    monkeypatch.setattr(gt, _PATCHED_FLAG, True, raising=False)
+
+    apply_ground_truth_integer_metadata_patch()
+
+    frame = pd.DataFrame({"benchmark_random_seed": ["7.5"]})
+    with pytest.raises(ValueError, match="benchmark_random_seed"):
+        gt._unique_int_from_column(frame, "benchmark_random_seed", 1)

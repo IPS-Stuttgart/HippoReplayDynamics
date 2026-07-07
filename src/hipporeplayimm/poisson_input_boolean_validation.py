@@ -1,4 +1,4 @@
-"""Reject boolean Poisson emission count/rate inputs."""
+"""Reject invalid Poisson emission and emission-tensor inputs."""
 
 from __future__ import annotations
 
@@ -7,6 +7,7 @@ from functools import wraps
 import numpy as np
 
 _PATCHED_FLAG = "_poisson_input_boolean_validation_patch_applied"
+_LOG_EMISSION_NAN_FLAG = "_log_emission_tensor_nan_validation_patch_applied"
 
 
 def _contains_boolean_values(value: object) -> bool:
@@ -29,41 +30,58 @@ def _reject_boolean_array(name: str, value: object) -> None:
 
 
 def apply_poisson_input_boolean_validation_patch() -> None:
-    """Install a guard before Poisson emissions coerce arrays to floats."""
+    """Install guards before emission inputs can poison likelihood scoring."""
 
     from . import encoding
 
     current = encoding._poisson_log_emissions
-    if getattr(current, _PATCHED_FLAG, False):
-        return
+    if not getattr(current, _PATCHED_FLAG, False):
 
-    @wraps(current)
-    def poisson_log_emissions(
-        spike_counts,
-        rates_hz,
-        dt,
-        *,
-        spike_rate_scale=1.0,
-        likelihood_temperature=1.0,
-        cell_weights=None,
-        negative_binomial_overdispersion=0.0,
-    ):
-        _reject_boolean_array("spike_counts", spike_counts)
-        _reject_boolean_array("rates_hz", rates_hz)
-        return current(
+        @wraps(current)
+        def poisson_log_emissions(
             spike_counts,
             rates_hz,
             dt,
-            spike_rate_scale=spike_rate_scale,
-            likelihood_temperature=likelihood_temperature,
-            cell_weights=cell_weights,
-            negative_binomial_overdispersion=negative_binomial_overdispersion,
-        )
+            *,
+            spike_rate_scale=1.0,
+            likelihood_temperature=1.0,
+            cell_weights=None,
+            negative_binomial_overdispersion=0.0,
+        ):
+            _reject_boolean_array("spike_counts", spike_counts)
+            _reject_boolean_array("rates_hz", rates_hz)
+            return current(
+                spike_counts,
+                rates_hz,
+                dt,
+                spike_rate_scale=spike_rate_scale,
+                likelihood_temperature=likelihood_temperature,
+                cell_weights=cell_weights,
+                negative_binomial_overdispersion=negative_binomial_overdispersion,
+            )
 
-    setattr(poisson_log_emissions, _PATCHED_FLAG, True)
-    setattr(poisson_log_emissions, "__hipporeplayimm_original__", current)
-    encoding._poisson_log_emissions = poisson_log_emissions
+        setattr(poisson_log_emissions, _PATCHED_FLAG, True)
+        setattr(poisson_log_emissions, "__hipporeplayimm_original__", current)
+        encoding._poisson_log_emissions = poisson_log_emissions
+
+    _patch_log_emission_tensor_nan_validation(encoding)
     setattr(encoding, _PATCHED_FLAG, True)
+
+
+def _patch_log_emission_tensor_nan_validation(encoding) -> None:
+    current = encoding.LogEmissionTensor.__post_init__
+    if getattr(current, _LOG_EMISSION_NAN_FLAG, False):
+        return
+
+    @wraps(current)
+    def __post_init__(self) -> None:
+        current(self)
+        if np.any(np.isnan(self.log_likelihood)):
+            raise ValueError("log_likelihood must not contain NaN")
+
+    setattr(__post_init__, _LOG_EMISSION_NAN_FLAG, True)
+    setattr(__post_init__, "__hipporeplayimm_original__", current)
+    encoding.LogEmissionTensor.__post_init__ = __post_init__
 
 
 __all__ = ["apply_poisson_input_boolean_validation_patch"]

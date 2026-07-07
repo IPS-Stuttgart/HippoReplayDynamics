@@ -4,6 +4,7 @@
 from . import accuracy_model_probability_status_patch as _accuracy_model_probability_status_patch
 from . import accuracy_replay_gain_gamma_patch as _accuracy_replay_gain_gamma_patch
 from . import advanced_result_empty_threshold_patch as _advanced_result_empty_threshold_patch
+from . import advanced_result_evidence_margin_duplicates as _advanced_result_evidence_margin_duplicates
 from . import advanced_result_missing_group_patch as _advanced_result_missing_group_patch
 from . import advanced_result_quantile_array_patch as _advanced_result_quantile_array_patch
 from . import advanced_result_status_patch as _advanced_result_status_patch
@@ -308,6 +309,7 @@ def apply_runtime_patches() -> None:
     _advanced_result_wrong_map_bootstrap_patch.apply_wrong_map_rat_bootstrap_patch()
     _advanced_result_quantile_array_patch.apply_advanced_result_quantile_array_patch()
     _advanced_result_missing_group_patch.apply_advanced_result_missing_group_patch()
+    _advanced_result_evidence_margin_duplicates.apply_evidence_margin_distinct_model_patch()
     _posterior_calibration_summary_patch.apply_posterior_calibration_summary_patch()
     _result_quality_audit_scope_patch.apply_result_quality_audit_scope_patch()
     _latent_path_validation.apply_latent_path_validation_patch()

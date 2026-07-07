@@ -29,6 +29,7 @@ def apply_log_emission_n_spikes_validation_patch() -> None:
     @wraps(original_post_init)
     def _validated_post_init(self: LogEmissionTensor) -> None:
         _validate_duration_inputs(self)
+        _validate_log_likelihood_inputs(self)
         original_post_init(self)
         _validate_log_likelihood(self)
         _validate_n_spikes(self)
@@ -40,16 +41,22 @@ def apply_log_emission_n_spikes_validation_patch() -> None:
 
 
 def _validate_duration_inputs(emissions: LogEmissionTensor) -> None:
-    """Reject boolean or array-shaped duration inputs before dataclass coercion."""
+    """Reject boolean, text, or array-shaped duration inputs before dataclass coercion."""
 
     if _contains_boolean_values(emissions.dt):
         raise ValueError("dt must be a numeric duration, not boolean")
+    if _contains_text_values(emissions.dt):
+        raise ValueError("dt must be a numeric duration, not text")
     _require_scalar_duration(emissions.dt, "dt")
 
     if emissions.bin_durations is not None and _contains_boolean_values(emissions.bin_durations):
         raise ValueError("bin_durations must contain numeric durations, not boolean values")
+    if emissions.bin_durations is not None and _contains_text_values(emissions.bin_durations):
+        raise ValueError("bin_durations must contain numeric durations, not text values")
     if emissions.transition_durations is not None and _contains_boolean_values(emissions.transition_durations):
         raise ValueError("transition_durations must contain numeric durations, not boolean values")
+    if emissions.transition_durations is not None and _contains_text_values(emissions.transition_durations):
+        raise ValueError("transition_durations must contain numeric durations, not text values")
 
 
 def _require_scalar_duration(value: Any, name: str) -> None:
@@ -59,6 +66,13 @@ def _require_scalar_duration(value: Any, name: str) -> None:
         raise ValueError(f"{name} must be a scalar duration") from exc
     if raw.ndim != 0:
         raise ValueError(f"{name} must be a scalar duration")
+
+
+def _validate_log_likelihood_inputs(emissions: LogEmissionTensor) -> None:
+    """Reject text likelihood values before ``LogEmissionTensor`` coerces them to float."""
+
+    if _contains_text_values(emissions.log_likelihood):
+        raise ValueError("log_likelihood must contain numeric values, not text")
 
 
 def _validate_log_likelihood(emissions: LogEmissionTensor) -> None:
@@ -89,6 +103,20 @@ def _contains_boolean_values(values: Any) -> bool:
     return False
 
 
+def _contains_text_values(values: Any) -> bool:
+    try:
+        raw = np.asarray(values)
+    except (TypeError, ValueError):
+        raw = np.asarray(values, dtype=object)
+    if raw.size == 0:
+        return False
+    if raw.dtype.kind in {"U", "S"}:
+        return True
+    if raw.dtype == object:
+        return any(isinstance(value, (str, bytes, np.str_, np.bytes_)) for value in raw.reshape(-1))
+    return False
+
+
 def _require_scalar_count(value: Any, name: str) -> None:
     try:
         raw = np.asarray(value)
@@ -101,6 +129,8 @@ def _require_scalar_count(value: Any, name: str) -> None:
 def _validate_n_spikes(emissions: LogEmissionTensor) -> None:
     if _contains_boolean_values(emissions.spike_counts):
         raise ValueError("spike_counts must be numeric counts, not boolean values")
+    if _contains_text_values(emissions.spike_counts):
+        raise ValueError("spike_counts must be numeric counts, not text values")
     spike_counts = np.asarray(emissions.spike_counts, dtype=float)
     rounded_counts = np.rint(spike_counts)
     if not np.all(np.isclose(spike_counts, rounded_counts, rtol=0.0, atol=0.0)):
@@ -109,6 +139,8 @@ def _validate_n_spikes(emissions: LogEmissionTensor) -> None:
     _require_scalar_count(emissions.n_spikes, "n_spikes")
     if _contains_boolean_values(emissions.n_spikes):
         raise ValueError("n_spikes must be a numeric count, not boolean")
+    if _contains_text_values(emissions.n_spikes):
+        raise ValueError("n_spikes must be a numeric count, not text")
     try:
         n_spikes = float(emissions.n_spikes)
     except (TypeError, ValueError) as exc:

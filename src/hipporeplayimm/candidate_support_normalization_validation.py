@@ -30,6 +30,8 @@ _EVIDENCE_MASK_PATCHED_FLAG = "_candidate_evidence_mask_validation_patch_applied
 _CANDIDATE_INDICES_PATCHED_FLAG = "_candidate_mass_threshold_candidate_indices_validation_patch_applied"
 _EVIDENCE_MASK_WRAPPER_MARKER = "_candidate_evidence_mask_validation_wrapper"
 _CANDIDATE_INDICES_WRAPPER_MARKER = "_candidate_mass_threshold_candidate_indices_validation_wrapper"
+_TOP_CANDIDATE_WRAPPER_MARKER = "_candidate_support_top_candidate_scores_wrapper"
+_MASS_RETAINING_WRAPPER_MARKER = "_candidate_support_mass_retaining_scores_wrapper"
 _ORIGINAL_ATTR = "__hipporeplayimm_original__"
 
 
@@ -119,6 +121,69 @@ def _candidate_indices_patch_current(state_space_model: object) -> bool:
     )
 
 
+def _is_top_candidate_scores_wrapper(func: object) -> bool:
+    return bool(getattr(func, _TOP_CANDIDATE_WRAPPER_MARKER, False))
+
+
+def _is_mass_retaining_scores_wrapper(func: object) -> bool:
+    return bool(getattr(func, _MASS_RETAINING_WRAPPER_MARKER, False))
+
+
+def _wrap_top_candidate_indices(func):
+    @wraps(func)
+    def _top_candidate_indices(log_emission: np.ndarray, top_k: int) -> np.ndarray:
+        return func(_candidate_support_scores(log_emission), top_k)
+
+    setattr(_top_candidate_indices, _TOP_CANDIDATE_WRAPPER_MARKER, True)
+    setattr(_top_candidate_indices, _ORIGINAL_ATTR, func)
+    return _top_candidate_indices
+
+
+def _wrap_mass_retaining_candidate_indices(func):
+    @wraps(func)
+    def _mass_retaining_candidate_indices(
+        log_emission: np.ndarray,
+        mass_threshold: float | None = None,
+        *,
+        top_k: int | None = None,
+        min_k: int = 1,
+        max_k: int = 0,
+    ) -> np.ndarray:
+        if mass_threshold is not None:
+            _reject_boolean_mass_threshold(mass_threshold)
+        return func(
+            _candidate_support_scores(log_emission),
+            mass_threshold,
+            top_k=top_k,
+            min_k=min_k,
+            max_k=max_k,
+        )
+
+    setattr(_mass_retaining_candidate_indices, _MASS_RETAINING_WRAPPER_MARKER, True)
+    setattr(_mass_retaining_candidate_indices, _ORIGINAL_ATTR, func)
+    return _mass_retaining_candidate_indices
+
+
+def _refresh_candidate_score_helpers(*, state_space_utils, state_space, state_space_model, models) -> None:
+    """Install finite-score guards on every current candidate-helper alias."""
+
+    for module in (state_space_utils, state_space, state_space_model):
+        current_top_candidate_indices = getattr(module, "_top_candidate_indices", None)
+        if current_top_candidate_indices is not None and not _is_top_candidate_scores_wrapper(current_top_candidate_indices):
+            module._top_candidate_indices = _wrap_top_candidate_indices(current_top_candidate_indices)
+
+        current_mass_retaining_candidate_indices = getattr(module, "_mass_retaining_candidate_indices", None)
+        if current_mass_retaining_candidate_indices is not None and not _is_mass_retaining_scores_wrapper(current_mass_retaining_candidate_indices):
+            module._mass_retaining_candidate_indices = _wrap_mass_retaining_candidate_indices(current_mass_retaining_candidate_indices)
+
+    current_model_top_candidate_indices = getattr(models, "_top_candidate_indices", None)
+    if current_model_top_candidate_indices is not None and not _is_top_candidate_scores_wrapper(current_model_top_candidate_indices):
+        models._top_candidate_indices = _wrap_top_candidate_indices(current_model_top_candidate_indices)
+
+    setattr(state_space_utils, _SCORE_PATCHED_FLAG, True)
+    setattr(models, _SCORE_PATCHED_FLAG, True)
+
+
 def apply_candidate_support_normalization_validation_patch() -> None:
     """Install finite-mass validation for posterior and emission candidate supports."""
 
@@ -165,46 +230,12 @@ def apply_candidate_support_normalization_validation_patch() -> None:
         state_space_model.StateSpaceReplayModel.candidate_indices = candidate_indices
     setattr(state_space_model, _CANDIDATE_INDICES_PATCHED_FLAG, True)
 
-    if not getattr(state_space_utils, _SCORE_PATCHED_FLAG, False):
-        original_top_candidate_indices = state_space_utils._top_candidate_indices
-        original_mass_retaining_candidate_indices = state_space_utils._mass_retaining_candidate_indices
-
-        def _top_candidate_indices(log_emission: np.ndarray, top_k: int) -> np.ndarray:
-            return original_top_candidate_indices(_candidate_support_scores(log_emission), top_k)
-
-        def _mass_retaining_candidate_indices(
-            log_emission: np.ndarray,
-            mass_threshold: float | None = None,
-            *,
-            top_k: int | None = None,
-            min_k: int = 1,
-            max_k: int = 0,
-        ) -> np.ndarray:
-            if mass_threshold is not None:
-                _reject_boolean_mass_threshold(mass_threshold)
-            return original_mass_retaining_candidate_indices(
-                _candidate_support_scores(log_emission),
-                mass_threshold,
-                top_k=top_k,
-                min_k=min_k,
-                max_k=max_k,
-            )
-
-        for module in (state_space_utils, state_space, state_space_model):
-            if getattr(module, "_top_candidate_indices", None) is original_top_candidate_indices:
-                module._top_candidate_indices = _top_candidate_indices
-            if getattr(module, "_mass_retaining_candidate_indices", None) is original_mass_retaining_candidate_indices:
-                module._mass_retaining_candidate_indices = _mass_retaining_candidate_indices
-        setattr(state_space_utils, _SCORE_PATCHED_FLAG, True)
-
-    if not getattr(models, _SCORE_PATCHED_FLAG, False):
-        original_model_top_candidate_indices = models._top_candidate_indices
-
-        def _model_top_candidate_indices(log_emission: np.ndarray, top_k: int) -> np.ndarray:
-            return original_model_top_candidate_indices(_candidate_support_scores(log_emission), top_k)
-
-        models._top_candidate_indices = _model_top_candidate_indices
-        setattr(models, _SCORE_PATCHED_FLAG, True)
+    _refresh_candidate_score_helpers(
+        state_space_utils=state_space_utils,
+        state_space=state_space,
+        state_space_model=state_space_model,
+        models=models,
+    )
 
 
 __all__ = ["apply_candidate_support_normalization_validation_patch"]

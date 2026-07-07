@@ -14,6 +14,28 @@ _PATCHED_DECISIONS_ATTR = "_advanced_result_threshold_validation_patched_decisio
 _PATCHED_SWEEP_ATTR = "_advanced_result_threshold_validation_patched_sweep"
 _EVENT_WINDOW_WRAPPER_FLAG = "_advanced_result_event_window_validation_wrapper"
 _PATCHED_EVENT_WINDOW_ATTR = "_advanced_result_event_window_validation_patched_event_window_variants"
+_TEXT_SCALAR_TYPES = (str, bytes, np.str_, np.bytes_)
+
+
+def _is_text_scalar(value: object) -> bool:
+    """Return True for text-backed scalar values that float(...) would coerce."""
+
+    if isinstance(value, _TEXT_SCALAR_TYPES):
+        return True
+    try:
+        array = np.asarray(value)
+    except (TypeError, ValueError):
+        return False
+    if array.ndim != 0:
+        return False
+    if np.issubdtype(array.dtype, np.str_) or np.issubdtype(array.dtype, np.bytes_):
+        return True
+    if array.dtype == object:
+        try:
+            return isinstance(array.item(), _TEXT_SCALAR_TYPES)
+        except ValueError:
+            return False
+    return False
 
 
 def _validated_threshold(
@@ -29,7 +51,7 @@ def _validated_threshold(
         raise ValueError(message) from exc
     if scalar.ndim != 0:
         raise ValueError(message)
-    if np.issubdtype(scalar.dtype, np.bool_):
+    if np.issubdtype(scalar.dtype, np.bool_) or _is_text_scalar(threshold):
         raise ValueError(message)
     try:
         value = float(scalar.item())
@@ -51,7 +73,7 @@ def _validated_thresholds(thresholds: Sequence[float]) -> tuple[float, ...]:
 
 
 def _validated_finite_scalar(value: object, *, message: str) -> float:
-    """Return a finite scalar float while rejecting booleans and array values."""
+    """Return a finite scalar float while rejecting booleans, text, and arrays."""
 
     if isinstance(value, (bool, np.bool_)):
         raise ValueError(message)
@@ -61,8 +83,10 @@ def _validated_finite_scalar(value: object, *, message: str) -> float:
         raise ValueError(message) from exc
     if array.ndim != 0:
         raise ValueError(message)
+    if np.issubdtype(array.dtype, np.bool_) or _is_text_scalar(value):
+        raise ValueError(message)
     try:
-        numeric = float(value)
+        numeric = float(array.item())
     except (TypeError, ValueError, OverflowError) as exc:
         raise ValueError(message) from exc
     if not np.isfinite(numeric):

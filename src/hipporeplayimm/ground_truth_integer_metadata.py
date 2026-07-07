@@ -9,6 +9,9 @@ import numpy as np
 
 
 _PATCHED_FLAG = "_ground_truth_strict_integer_metadata_patch_applied"
+_UNIQUE_INT_WRAPPER_MARKER = "_hipporeplayimm_ground_truth_integer_metadata_unique_int"
+_PARSE_CELL_IDS_WRAPPER_MARKER = "_hipporeplayimm_ground_truth_integer_metadata_parse_cell_ids"
+_CELL_ID_PATCHED_FLAG = "_ground_truth_strict_cell_id_metadata_patch_applied"
 
 
 def apply_ground_truth_integer_metadata_patch() -> None:
@@ -16,46 +19,59 @@ def apply_ground_truth_integer_metadata_patch() -> None:
 
     from . import ground_truth as gt
 
-    if getattr(gt, _PATCHED_FLAG, False):
-        return
+    if not _unique_int_patch_current(gt):
 
-    def unique_int_from_column(frame: Any, column: str, default: int) -> int:
-        values = [
-            _parse_integer_metadata_value(column, value)
-            for value in gt._iter_present_column_values(frame, (column,))
-        ]
-        if not values:
-            return int(default)
-        first = values[0]
-        if any(value != first for value in values[1:]):
-            raise ValueError(f"{column} contains multiple values")
-        return int(first)
+        def unique_int_from_column(frame: Any, column: str, default: int) -> int:
+            values = [
+                _parse_integer_metadata_value(column, value)
+                for value in gt._iter_present_column_values(frame, (column,))
+            ]
+            if not values:
+                return int(default)
+            first = values[0]
+            if any(value != first for value in values[1:]):
+                raise ValueError(f"{column} contains multiple values")
+            return int(first)
 
-    def parse_cell_ids(value: Any) -> np.ndarray | None:
-        if value is None:
-            return None
-        if isinstance(value, np.ndarray):
-            return _parse_cell_id_values(value.reshape(-1))
-        if isinstance(value, (list, tuple, set)):
-            return _parse_cell_id_values(list(value))
-        if gt._is_missing_scalar(value):
-            return None
-        text = str(value).strip()
-        missing_values = getattr(gt, "_MISSING_TEXT_VALUES", frozenset({"", "nan"}))
-        if text.lower() in missing_values:
-            return None
-        text = text.strip("[]()").replace(",", " ")
-        if not text:
-            return np.array([], dtype=int)
-        return _parse_cell_id_values(text.split())
+        unique_int_from_column.__name__ = gt._unique_int_from_column.__name__
+        unique_int_from_column.__doc__ = gt._unique_int_from_column.__doc__
+        setattr(unique_int_from_column, _UNIQUE_INT_WRAPPER_MARKER, True)
+        gt._unique_int_from_column = unique_int_from_column
 
-    unique_int_from_column.__name__ = gt._unique_int_from_column.__name__
-    unique_int_from_column.__doc__ = gt._unique_int_from_column.__doc__
-    parse_cell_ids.__name__ = gt._parse_cell_ids.__name__
-    parse_cell_ids.__doc__ = gt._parse_cell_ids.__doc__
-    gt._unique_int_from_column = unique_int_from_column
-    gt._parse_cell_ids = parse_cell_ids
+    if not getattr(gt, _CELL_ID_PATCHED_FLAG, False) and not _parse_cell_ids_patch_current(gt):
+
+        def parse_cell_ids(value: Any) -> np.ndarray | None:
+            if value is None:
+                return None
+            if isinstance(value, np.ndarray):
+                return _parse_cell_id_values(value.reshape(-1))
+            if isinstance(value, (list, tuple, set)):
+                return _parse_cell_id_values(list(value))
+            if gt._is_missing_scalar(value):
+                return None
+            text = str(value).strip()
+            missing_values = getattr(gt, "_MISSING_TEXT_VALUES", frozenset({"", "nan"}))
+            if text.lower() in missing_values:
+                return None
+            text = text.strip("[]()").replace(",", " ")
+            if not text:
+                return np.array([], dtype=int)
+            return _parse_cell_id_values(text.split())
+
+        parse_cell_ids.__name__ = gt._parse_cell_ids.__name__
+        parse_cell_ids.__doc__ = gt._parse_cell_ids.__doc__
+        setattr(parse_cell_ids, _PARSE_CELL_IDS_WRAPPER_MARKER, True)
+        gt._parse_cell_ids = parse_cell_ids
+
     setattr(gt, _PATCHED_FLAG, True)
+
+
+def _unique_int_patch_current(gt: object) -> bool:
+    return bool(getattr(getattr(gt, "_unique_int_from_column", None), _UNIQUE_INT_WRAPPER_MARKER, False))
+
+
+def _parse_cell_ids_patch_current(gt: object) -> bool:
+    return bool(getattr(getattr(gt, "_parse_cell_ids", None), _PARSE_CELL_IDS_WRAPPER_MARKER, False))
 
 
 def _parse_integer_metadata_value(column: str, value: Any) -> int:

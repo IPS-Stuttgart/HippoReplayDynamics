@@ -13,6 +13,8 @@ _PATCHED_FLAG = "_model_numeric_string_validation_patch_applied"
 _PATCH_VERSION_ATTR = "_model_numeric_string_validation_patch_version"
 _PATCH_VERSION = 2
 _STATE_SPACE_UTILS_PATCHED_FLAG = "_state_space_numeric_string_validation_patch_applied"
+_STATE_SPACE_UTILS_PATCH_VERSION_ATTR = "_state_space_numeric_string_validation_patch_version"
+_STATE_SPACE_UTILS_PATCH_VERSION = 2
 _STATE_SPACE_MODEL_PATCHED_FLAG = "_state_space_model_numeric_string_validation_patch_applied"
 _STRING_TYPES = (str, bytes, np.str_, np.bytes_)
 _VALIDATOR_NAMES = (
@@ -91,11 +93,19 @@ def _replace_imported_module_aliases(attribute_name: str, original: object, repl
             setattr(module, attribute_name, replacement)
 
 
+def _state_space_helper_is_string_guarded(function: object) -> bool:
+    """Return True only for the current state-space string-guard wrapper."""
+
+    return bool(getattr(function, _STATE_SPACE_UTILS_PATCHED_FLAG, False)) and (
+        getattr(function, _STATE_SPACE_UTILS_PATCH_VERSION_ATTR, None) == _STATE_SPACE_UTILS_PATCH_VERSION
+    )
+
+
 def _state_space_helpers_are_string_guarded(state_space_utils: object) -> bool:
-    """Return True only when every helper still carries the string guard wrapper."""
+    """Return True only when every helper still carries the current string guard wrapper."""
 
     return all(
-        bool(getattr(getattr(state_space_utils, helper_name, None), _STATE_SPACE_UTILS_PATCHED_FLAG, False))
+        _state_space_helper_is_string_guarded(getattr(state_space_utils, helper_name, None))
         for helper_name in _STATE_SPACE_HELPER_NAMES
     )
 
@@ -163,10 +173,15 @@ def _patch_state_space_numeric_string_validation() -> None:
                 max_k=max_k,
             )
 
-        setattr(coerce_integer_count, _STATE_SPACE_UTILS_PATCHED_FLAG, True)
-        setattr(coerce_unit_probability, _STATE_SPACE_UTILS_PATCHED_FLAG, True)
-        setattr(top_candidate_indices, _STATE_SPACE_UTILS_PATCHED_FLAG, True)
-        setattr(mass_retaining_candidate_indices, _STATE_SPACE_UTILS_PATCHED_FLAG, True)
+        for helper in (
+            coerce_integer_count,
+            coerce_unit_probability,
+            top_candidate_indices,
+            mass_retaining_candidate_indices,
+        ):
+            setattr(helper, _STATE_SPACE_UTILS_PATCHED_FLAG, True)
+            setattr(helper, _STATE_SPACE_UTILS_PATCH_VERSION_ATTR, _STATE_SPACE_UTILS_PATCH_VERSION)
+
         setattr(coerce_integer_count, "__hipporeplayimm_original__", original_integer_count)
         setattr(coerce_unit_probability, "__hipporeplayimm_original__", original_unit_probability)
         setattr(top_candidate_indices, "__hipporeplayimm_original__", original_top_candidates)
@@ -185,6 +200,7 @@ def _patch_state_space_numeric_string_validation() -> None:
             mass_retaining_candidate_indices,
         )
         setattr(state_space_utils, _STATE_SPACE_UTILS_PATCHED_FLAG, True)
+        setattr(state_space_utils, _STATE_SPACE_UTILS_PATCH_VERSION_ATTR, _STATE_SPACE_UTILS_PATCH_VERSION)
 
     current_candidate_indices = state_space_model.StateSpaceReplayModel.candidate_indices
     if getattr(current_candidate_indices, _STATE_SPACE_MODEL_PATCHED_FLAG, False):

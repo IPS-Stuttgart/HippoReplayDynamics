@@ -18,3 +18,11 @@ def test_safe_zip_member_path_allows_nested_dataset_member(tmp_path: Path) -> No
     destination = _safe_zip_member_path(root, "Olafsdottir2016/R2142/track1.set")
 
     assert destination == root / "Olafsdottir2016" / "R2142" / "track1.set"
+
+
+def test_safe_zip_member_path_resolves_relative_roots(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.chdir(tmp_path)
+
+    destination = _safe_zip_member_path(Path("dataset"), "Olafsdottir2016/R2142/track1.set")
+
+    assert destination == (tmp_path / "dataset" / "Olafsdottir2016" / "R2142" / "track1.set").resolve()

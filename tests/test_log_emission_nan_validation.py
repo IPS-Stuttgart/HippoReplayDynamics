@@ -42,7 +42,10 @@ def test_log_emission_tensor_rejects_invalid_direct_spike_counts(
 ) -> None:
     kwargs = _valid_tensor_kwargs()
     kwargs["spike_counts"] = spike_counts
-    kwargs["n_spikes"] = int(np.sum(np.asarray(spike_counts, dtype=float))) if np.all(np.isfinite(np.asarray(spike_counts, dtype=float))) else 0
+    numeric_counts = np.asarray(spike_counts, dtype=float)
+    kwargs["n_spikes"] = (
+        int(np.sum(numeric_counts)) if np.all(np.isfinite(numeric_counts)) else 0
+    )
 
     with pytest.raises(ValueError, match=expected_error):
         LogEmissionTensor(**kwargs)

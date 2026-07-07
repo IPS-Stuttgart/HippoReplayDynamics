@@ -9,6 +9,7 @@ import numpy as np
 _PATCHED_FLAG = "_accuracy_grid_parameter_validation_patch_applied"
 _TRANSITION_PATCHED_FLAG = "_accuracy_grid_transition_parameter_validation_patch_applied"
 _MODEL_INIT_PATCHED_FLAG = "_valid_state_grid_model_parameter_validation_patch_applied"
+_MODEL_SCORE_PATCHED_FLAG = "_valid_state_grid_model_score_parameter_validation_patch_applied"
 
 
 def apply_accuracy_grid_parameter_validation_patch() -> None:
@@ -21,6 +22,7 @@ def apply_accuracy_grid_parameter_validation_patch() -> None:
 
     _patch_valid_grid_graph_transition(accuracy_upgrades)
     _patch_valid_state_grid_model_init(accuracy_upgrades)
+    _patch_valid_state_grid_model_score(accuracy_upgrades)
     setattr(accuracy_upgrades, _PATCHED_FLAG, True)
 
 
@@ -71,6 +73,27 @@ def _patch_valid_state_grid_model_init(accuracy_upgrades) -> None:
     setattr(__init__, _MODEL_INIT_PATCHED_FLAG, True)
     setattr(__init__, "__hipporeplayimm_original__", current)
     cls.__init__ = __init__
+
+
+def _patch_valid_state_grid_model_score(accuracy_upgrades) -> None:
+    cls = accuracy_upgrades.ValidStateGridReplayModel
+    current = cls.score
+    if getattr(current, _MODEL_SCORE_PATCHED_FLAG, False):
+        return
+
+    @wraps(current)
+    def score(self, emissions, bin_centers):
+        self.grid_shape = _coerce_grid_shape(self.grid_shape)
+        self.diagonal_neighbors = _coerce_boolean_parameter(
+            "diagonal_neighbors",
+            self.diagonal_neighbors,
+        )
+        self.stay_probability = _coerce_stay_probability(self.stay_probability)
+        return current(self, emissions, bin_centers)
+
+    setattr(score, _MODEL_SCORE_PATCHED_FLAG, True)
+    setattr(score, "__hipporeplayimm_original__", current)
+    cls.score = score
 
 
 def _coerce_grid_shape(grid_shape) -> tuple[int, int]:

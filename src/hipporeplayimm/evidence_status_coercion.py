@@ -83,7 +83,7 @@ def apply_evidence_status_coercion_patch() -> None:
 
         out = df.copy()
         if out.empty:
-            return out
+            return _empty_evidence_columns(out, reporting)
         if "status" in out.columns:
             out["status"] = out["status"].map(_normalize_status_value)
         inferred = out.apply(evidence_support_from_row, axis=1)
@@ -128,6 +128,8 @@ def apply_evidence_status_coercion_patch() -> None:
     @wraps(original_simulation_add_evidence_columns)
     def simulation_add_evidence_columns(df: pd.DataFrame) -> pd.DataFrame:
         scored = original_simulation_add_evidence_columns(_normalize_status_frame(df))
+        if scored.empty:
+            scored = _empty_evidence_columns(scored, reporting)
         return _normalize_lower_bound_recovery_flags(scored, reporting)
 
     @wraps(original_simulation_event_best_rows)
@@ -163,6 +165,21 @@ def _core_reporting_patch_current(reporting: Any) -> bool:
             "simulation_event_best_rows",
         )
     )
+
+
+def _empty_evidence_columns(frame: pd.DataFrame, reporting: Any) -> pd.DataFrame:
+    """Return an empty frame with the standard evidence-reporting columns present."""
+
+    out = frame.copy()
+    if "evidence_support" not in out.columns:
+        out["evidence_support"] = pd.Series(dtype=object)
+    if "evidence_comparison" not in out.columns:
+        out["evidence_comparison"] = pd.Series(dtype=object)
+    if "evidence_comparison_note" not in out.columns:
+        out["evidence_comparison_note"] = pd.Series(dtype=object)
+    if "evidence_comparable" not in out.columns:
+        out["evidence_comparable"] = pd.Series(dtype=bool)
+    return reporting.add_candidate_support_quality_columns(out)
 
 
 def _patch_optional_recovery_modules(reporting: Any) -> None:

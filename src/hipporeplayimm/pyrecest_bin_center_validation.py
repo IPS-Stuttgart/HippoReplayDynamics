@@ -11,6 +11,7 @@ import numpy as np
 _PATCHED_FLAG = "_pyrecest_bin_center_validation_patch_applied"
 _ORIGINALS_ATTR = "_pyrecest_bin_center_validation_originals"
 _WRAPPER_MARKER = "_pyrecest_bin_center_validation_wrapper"
+_STRING_TYPES = (str, bytes, np.str_, np.bytes_)
 
 
 def _mark_bin_center_guard(wrapper):
@@ -110,15 +111,8 @@ def apply_pyrecest_bin_center_validation_patch() -> None:
     def _coerce_candidate_goals(candidate_goals, bin_centers):
         centers = _as_2d_points(bin_centers, "bin_centers")
         if candidate_goals is not None:
-            goals = np.asarray(candidate_goals, dtype=float)
-            if centers.shape[1] == 1 and goals.ndim == 1:
-                goals = goals[:, None]
-            invalid_shape = (
-                goals.ndim != 2
-                or goals.shape[1] != centers.shape[1]
-                or goals.shape[0] == 0
-                or not np.all(np.isfinite(goals))
-            )
+            goals = _as_2d_points(candidate_goals, "candidate_goals")
+            invalid_shape = goals.shape[1] != centers.shape[1] or goals.shape[0] == 0
             if invalid_shape:
                 raise ValueError(
                     "candidate_goals must have shape (n_goals, position_dim), "
@@ -207,6 +201,33 @@ def _is_bool_array(value: object) -> bool:
     return False
 
 
+def _is_string_scalar(value: object) -> bool:
+    if isinstance(value, _STRING_TYPES):
+        return True
+    array = _as_array(value)
+    if array.shape != ():
+        return False
+    if np.issubdtype(array.dtype, np.str_) or np.issubdtype(array.dtype, np.bytes_):
+        return True
+    if array.dtype == object:
+        try:
+            return isinstance(array.item(), _STRING_TYPES)
+        except ValueError:
+            return False
+    return False
+
+
+def _is_string_array(value: object) -> bool:
+    array = _as_array(value)
+    if array.shape == ():
+        return False
+    if np.issubdtype(array.dtype, np.str_) or np.issubdtype(array.dtype, np.bytes_):
+        return True
+    if array.dtype == object:
+        return any(isinstance(item, _STRING_TYPES) for item in array.flat)
+    return False
+
+
 def _is_scalar_value(value: object) -> bool:
     return _as_array(value).shape == ()
 
@@ -264,7 +285,14 @@ def _validate_nonnegative_float(value: object, name: str, original_validate) -> 
 
 
 def _as_2d_points(values: Any, name: str) -> np.ndarray:
-    points = np.asarray(values, dtype=float)
+    if _is_bool_scalar(values) or _is_bool_array(values):
+        raise TypeError(f"{name} must be numeric coordinates, not boolean")
+    if _is_string_scalar(values) or _is_string_array(values):
+        raise TypeError(f"{name} must be numeric coordinates, not string")
+    try:
+        points = np.asarray(values, dtype=float)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must be numeric coordinates") from exc
     if points.ndim == 1:
         points = points[:, None]
     if points.ndim != 2 or points.shape[0] == 0 or points.shape[1] == 0:

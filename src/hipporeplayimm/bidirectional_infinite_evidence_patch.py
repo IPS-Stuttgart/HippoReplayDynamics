@@ -41,8 +41,9 @@ def _safe_mixture_log_posterior(log_posteriors: object, weights: np.ndarray) -> 
         if not np.isfinite(weight_value) or weight_value <= 0.0:
             continue
         current = np.asarray(posterior, dtype=float)
-        if current.size:
-            valid.append((current, weight_value))
+        if not _has_usable_log_posterior(current):
+            continue
+        valid.append((current, weight_value))
     if not valid:
         return None
     shape = valid[0][0].shape
@@ -57,6 +58,15 @@ def _safe_mixture_log_posterior(log_posteriors: object, weights: np.ndarray) -> 
     normalized = np.full(mixed.shape, -np.inf, dtype=float)
     np.subtract(mixed, normalizer, out=normalized, where=np.isfinite(normalizer))
     return normalized
+
+
+def _has_usable_log_posterior(values: np.ndarray) -> bool:
+    """Return whether log-posterior values can contribute to a mixture safely."""
+
+    if values.size == 0 or np.any(np.isnan(values)):
+        return False
+    normalizer = logsumexp(values, axis=-1)
+    return bool(np.all(np.isfinite(normalizer)))
 
 
 def _terminal_log_posterior_from_score(score: object) -> np.ndarray | None:

@@ -16,6 +16,7 @@ _CERTIFIED_EVENT_WRAPPER_FLAG = "_certified_recovery_status_coercion_event_wrapp
 _CERTIFIED_SUMMARY_WRAPPER_FLAG = "_certified_recovery_status_coercion_summary_wrapper"
 _CERTIFIED_ORIGINAL_ATTR = "_certified_recovery_status_coercion_original"
 _RECOVERY_DIAGNOSTICS_PATCHED_FLAG = "_recovery_diagnostics_status_coercion_patch_applied"
+_RECOVERY_DIAGNOSTICS_WRAPPER_FLAG = "_recovery_diagnostics_status_coercion_successful_finite_scores_wrapper"
 _MISSING_STATUS_VALUES = {"", "nan", "na", "n/a", "none", "null", "<na>"}
 _EXPLICIT_FALSE_BOOL_VALUES = {"0", "0.0", "false", "f", "no", "n", "off"}
 _SIMULATION_EVENT_GROUP_COLUMNS = (
@@ -290,7 +291,7 @@ def _patch_recovery_diagnostics(diagnostics: Any, recovery: Any | None = None) -
         diagnostics.certified_vs_exact_event_recovery = recovery.certified_vs_exact_event_recovery
         diagnostics.certified_vs_exact_recovery_summary = recovery.certified_vs_exact_recovery_summary
 
-    if getattr(diagnostics, _RECOVERY_DIAGNOSTICS_PATCHED_FLAG, False):
+    if getattr(diagnostics, _RECOVERY_DIAGNOSTICS_PATCHED_FLAG, False) and _recovery_diagnostics_patch_current(diagnostics):
         return
 
     original_successful_finite_scores = diagnostics._successful_finite_scores
@@ -301,8 +302,21 @@ def _patch_recovery_diagnostics(diagnostics: Any, recovery: Any | None = None) -
         finite = _finite_log_evidence_mask(group)
         return group[status_ok & finite].copy()
 
+    setattr(successful_finite_scores, _RECOVERY_DIAGNOSTICS_WRAPPER_FLAG, True)
     diagnostics._successful_finite_scores = successful_finite_scores
     setattr(diagnostics, _RECOVERY_DIAGNOSTICS_PATCHED_FLAG, True)
+
+
+def _recovery_diagnostics_patch_current(diagnostics: Any) -> bool:
+    """Return whether recovery diagnostics still use the status-coercion helper."""
+
+    return bool(
+        getattr(
+            getattr(diagnostics, "_successful_finite_scores", None),
+            _RECOVERY_DIAGNOSTICS_WRAPPER_FLAG,
+            False,
+        )
+    )
 
 
 def _normalize_status_value(value: object) -> object:

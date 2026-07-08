@@ -1,4 +1,4 @@
-"""Reject boolean Poisson emission count/rate inputs."""
+"""Reject boolean Poisson emission inputs."""
 
 from __future__ import annotations
 
@@ -10,11 +10,13 @@ _PATCHED_FLAG = "_poisson_input_boolean_validation_patch_applied"
 
 
 def _contains_boolean_values(value: object) -> bool:
-    """Return True for boolean arrays, including object arrays containing bools."""
+    """Return True for boolean scalars/arrays, including object arrays containing bools."""
 
+    if value is None:
+        return False
     try:
         array = np.asarray(value)
-    except ValueError:
+    except (TypeError, ValueError):
         return False
     if np.issubdtype(array.dtype, np.bool_):
         return True
@@ -29,7 +31,7 @@ def _reject_boolean_array(name: str, value: object) -> None:
 
 
 def apply_poisson_input_boolean_validation_patch() -> None:
-    """Install a guard before Poisson emissions coerce arrays to floats."""
+    """Install a guard before Poisson emissions coerce inputs to floats."""
 
     from . import encoding
 
@@ -50,6 +52,14 @@ def apply_poisson_input_boolean_validation_patch() -> None:
     ):
         _reject_boolean_array("spike_counts", spike_counts)
         _reject_boolean_array("rates_hz", rates_hz)
+        _reject_boolean_array("dt", dt)
+        _reject_boolean_array("spike_rate_scale", spike_rate_scale)
+        _reject_boolean_array("likelihood_temperature", likelihood_temperature)
+        _reject_boolean_array("cell_weights", cell_weights)
+        _reject_boolean_array(
+            "negative_binomial_overdispersion",
+            negative_binomial_overdispersion,
+        )
         return current(
             spike_counts,
             rates_hz,

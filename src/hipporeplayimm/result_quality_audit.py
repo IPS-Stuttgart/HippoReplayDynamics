@@ -143,9 +143,17 @@ def select_observation_calibration(
     """
 
     config = ObservationCalibrationSelectionConfig() if config is None else config
+    top_k = _coerce_positive_count("top_k", config.top_k)
+    max_behavior_error_cm = _coerce_optional_finite_scalar(
+        "max_behavior_error_cm",
+        config.max_behavior_error_cm,
+    )
+    min_recovery_accuracy = _coerce_optional_finite_scalar(
+        "min_recovery_accuracy",
+        config.min_recovery_accuracy,
+    )
     if summary.empty:
         return pd.DataFrame()
-    top_k = _coerce_positive_count("top_k", config.top_k)
     frame = summary.copy()
     behavior_col = _first_existing(
         frame,
@@ -169,10 +177,10 @@ def select_observation_calibration(
         ),
     )
     gate = pd.Series(True, index=frame.index)
-    if behavior_col is not None and config.max_behavior_error_cm is not None:
-        gate &= _numeric(frame[behavior_col]) <= float(config.max_behavior_error_cm)
-    if recovery_col is not None and config.min_recovery_accuracy is not None:
-        gate &= _numeric(frame[recovery_col]) >= float(config.min_recovery_accuracy)
+    if behavior_col is not None and max_behavior_error_cm is not None:
+        gate &= _numeric(frame[behavior_col]) <= max_behavior_error_cm
+    if recovery_col is not None and min_recovery_accuracy is not None:
+        gate &= _numeric(frame[recovery_col]) >= min_recovery_accuracy
     if config.forbid_real_evidence_selected:
         for column in ("selection_used_real_evidence", "used_real_evidence", "real_evidence_selected"):
             if column in frame.columns:
@@ -319,6 +327,20 @@ def _coerce_positive_count(name: str, value: object) -> int:
     if count < 1:
         raise ValueError(f"{name} must be positive")
     return count
+
+
+def _coerce_optional_finite_scalar(name: str, value: object) -> float | None:
+    if value is None:
+        return None
+    if isinstance(value, (bool, np.bool_)):
+        raise TypeError(f"{name} must be a finite real scalar, not boolean")
+    if isinstance(value, (int, float, np.integer, np.floating)):
+        scalar = float(value)
+    else:
+        raise TypeError(f"{name} must be a finite real scalar")
+    if not np.isfinite(scalar):
+        raise ValueError(f"{name} must be finite")
+    return scalar
 
 
 def _bool_value(value: object) -> bool:

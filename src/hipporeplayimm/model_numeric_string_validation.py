@@ -14,6 +14,7 @@ _PATCH_VERSION_ATTR = "_model_numeric_string_validation_patch_version"
 _PATCH_VERSION = 2
 _STATE_SPACE_UTILS_PATCHED_FLAG = "_state_space_numeric_string_validation_patch_applied"
 _STATE_SPACE_MODEL_PATCHED_FLAG = "_state_space_model_numeric_string_validation_patch_applied"
+_TRAJECTORY_IMM_PATCHED_FLAG = "_trajectory_imm_numeric_string_validation_patch_applied"
 _STRING_TYPES = (str, bytes, np.str_, np.bytes_)
 _VALIDATOR_NAMES = (
     "_validate_positive_parameter",
@@ -25,6 +26,12 @@ _STATE_SPACE_HELPER_NAMES = (
     "_coerce_unit_probability",
     "_top_candidate_indices",
     "_mass_retaining_candidate_indices",
+)
+_TRAJECTORY_IMM_HELPER_NAMES = (
+    "_trajectory_imm_mode_stickiness",
+    "_trajectory_imm_mode_prior",
+    "_trajectory_imm_mode_transition_matrix",
+    "_trajectory_imm_mode_transition_matrices",
 )
 
 
@@ -97,6 +104,15 @@ def _state_space_helpers_are_string_guarded(state_space_utils: object) -> bool:
     return all(
         bool(getattr(getattr(state_space_utils, helper_name, None), _STATE_SPACE_UTILS_PATCHED_FLAG, False))
         for helper_name in _STATE_SPACE_HELPER_NAMES
+    )
+
+
+def _trajectory_imm_helpers_are_string_guarded(state_space_trajectory_imm: object) -> bool:
+    """Return True only when every trajectory-IMM helper still rejects string scalars."""
+
+    return all(
+        bool(getattr(getattr(state_space_trajectory_imm, helper_name, None), _TRAJECTORY_IMM_PATCHED_FLAG, False))
+        for helper_name in _TRAJECTORY_IMM_HELPER_NAMES
     )
 
 
@@ -207,6 +223,65 @@ def _patch_state_space_numeric_string_validation() -> None:
     state_space_model.StateSpaceReplayModel.candidate_indices = candidate_indices
 
 
+def _patch_trajectory_imm_numeric_string_validation() -> None:
+    from . import state_space_trajectory_imm
+
+    if _trajectory_imm_helpers_are_string_guarded(state_space_trajectory_imm):
+        return
+
+    original_mode_stickiness = state_space_trajectory_imm._trajectory_imm_mode_stickiness
+    original_mode_prior = state_space_trajectory_imm._trajectory_imm_mode_prior
+    original_mode_transition_matrix = state_space_trajectory_imm._trajectory_imm_mode_transition_matrix
+    original_mode_transition_matrices = state_space_trajectory_imm._trajectory_imm_mode_transition_matrices
+
+    @wraps(original_mode_stickiness)
+    def trajectory_imm_mode_stickiness(config):
+        explicit_value = getattr(config, "trajectory_imm_mode_stickiness", None)
+        if explicit_value is None:
+            _reject_string_scalar("imm_mode_stickiness", getattr(config, "imm_mode_stickiness", 0.95))
+        else:
+            _reject_string_scalar("trajectory_imm_mode_stickiness", explicit_value)
+        return original_mode_stickiness(config)
+
+    @wraps(original_mode_prior)
+    def trajectory_imm_mode_prior(config):
+        value = getattr(config, "trajectory_imm_momentum_initial_probability", None)
+        if value is not None:
+            _reject_string_scalar("trajectory_imm_momentum_initial_probability", value)
+        return original_mode_prior(config)
+
+    @wraps(original_mode_transition_matrix)
+    def trajectory_imm_mode_transition_matrix(config, stickiness):
+        _reject_string_scalar("trajectory_imm_mode_stickiness", stickiness)
+        momentum_switch = getattr(config, "trajectory_imm_momentum_switch_probability", None)
+        if momentum_switch is not None:
+            _reject_string_scalar("trajectory_imm_momentum_switch_probability", momentum_switch)
+        return original_mode_transition_matrix(config, stickiness)
+
+    @wraps(original_mode_transition_matrices)
+    def trajectory_imm_mode_transition_matrices(config, stickiness, durations):
+        _reject_string_scalar("trajectory_imm_mode_stickiness", stickiness)
+        _reject_string_scalar("imm_switch_tau_s", getattr(config, "imm_switch_tau_s", 0.0))
+        momentum_switch = getattr(config, "trajectory_imm_momentum_switch_probability", None)
+        if momentum_switch is not None:
+            _reject_string_scalar("trajectory_imm_momentum_switch_probability", momentum_switch)
+        return original_mode_transition_matrices(config, stickiness, durations)
+
+    setattr(trajectory_imm_mode_stickiness, _TRAJECTORY_IMM_PATCHED_FLAG, True)
+    setattr(trajectory_imm_mode_prior, _TRAJECTORY_IMM_PATCHED_FLAG, True)
+    setattr(trajectory_imm_mode_transition_matrix, _TRAJECTORY_IMM_PATCHED_FLAG, True)
+    setattr(trajectory_imm_mode_transition_matrices, _TRAJECTORY_IMM_PATCHED_FLAG, True)
+    setattr(trajectory_imm_mode_stickiness, "__hipporeplayimm_original__", original_mode_stickiness)
+    setattr(trajectory_imm_mode_prior, "__hipporeplayimm_original__", original_mode_prior)
+    setattr(trajectory_imm_mode_transition_matrix, "__hipporeplayimm_original__", original_mode_transition_matrix)
+    setattr(trajectory_imm_mode_transition_matrices, "__hipporeplayimm_original__", original_mode_transition_matrices)
+    state_space_trajectory_imm._trajectory_imm_mode_stickiness = trajectory_imm_mode_stickiness
+    state_space_trajectory_imm._trajectory_imm_mode_prior = trajectory_imm_mode_prior
+    state_space_trajectory_imm._trajectory_imm_mode_transition_matrix = trajectory_imm_mode_transition_matrix
+    state_space_trajectory_imm._trajectory_imm_mode_transition_matrices = trajectory_imm_mode_transition_matrices
+    setattr(state_space_trajectory_imm, _TRAJECTORY_IMM_PATCHED_FLAG, True)
+
+
 def apply_model_numeric_string_validation_patch() -> None:
     """Install string-scalar guards around model parameter validators."""
 
@@ -233,6 +308,7 @@ def apply_model_numeric_string_validation_patch() -> None:
 
     setattr(models, _PATCHED_FLAG, True)
     _patch_state_space_numeric_string_validation()
+    _patch_trajectory_imm_numeric_string_validation()
 
 
 __all__ = ["apply_model_numeric_string_validation_patch"]

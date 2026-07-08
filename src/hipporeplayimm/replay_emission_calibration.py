@@ -62,6 +62,30 @@ def _is_boolean_scalar(value: object) -> bool:
     return False
 
 
+def _array_contains_boolean(value: object) -> bool:
+    try:
+        arr = np.asarray(value)
+    except (TypeError, ValueError):
+        return False
+    if np.issubdtype(arr.dtype, np.bool_):
+        return True
+    if arr.dtype == object:
+        return any(isinstance(item, (bool, np.bool_)) for item in arr.flat)
+    return False
+
+
+def _array_contains_text(value: object) -> bool:
+    try:
+        arr = np.asarray(value)
+    except (TypeError, ValueError):
+        return False
+    if np.issubdtype(arr.dtype, np.str_) or np.issubdtype(arr.dtype, np.bytes_):
+        return True
+    if arr.dtype == object:
+        return any(isinstance(item, (str, bytes, np.str_, np.bytes_)) for item in arr.flat)
+    return False
+
+
 def _finite_float(name: str, value: object) -> float:
     try:
         arr = np.asarray(value)
@@ -77,6 +101,20 @@ def _finite_float(name: str, value: object) -> float:
         raise ValueError(f"{name} must be finite") from exc
     if not np.isfinite(out):
         raise ValueError(f"{name} must be finite")
+    return out
+
+
+def _finite_gain_scalar(value: object) -> float:
+    if _is_boolean_scalar(value):
+        raise TypeError("replay gains must be numeric, not boolean")
+    if _array_contains_text(value):
+        raise TypeError("replay gains must be numeric, not text")
+    try:
+        out = float(np.asarray(value))
+    except (TypeError, ValueError) as exc:
+        raise ValueError("replay gains must be finite") from exc
+    if not np.isfinite(out):
+        raise ValueError("replay gains must be finite")
     return out
 
 
@@ -175,16 +213,20 @@ def _gain_vector_for_encoding(
     gains: ReplayEmissionCalibration | Mapping[int, float] | np.ndarray,
 ) -> np.ndarray:
     if isinstance(gains, ReplayEmissionCalibration):
-        mapping = {int(cell): float(gain) for cell, gain in zip(gains.cell_ids, gains.gains, strict=True)}
+        mapping = {int(cell): _finite_gain_scalar(gain) for cell, gain in zip(gains.cell_ids, gains.gains, strict=True)}
         gain_vector = np.asarray([mapping.get(int(cell), 1.0) for cell in encoding.cell_ids], dtype=float)
     elif isinstance(gains, Mapping):
-        gain_vector = np.asarray([float(gains.get(int(cell), 1.0)) for cell in encoding.cell_ids], dtype=float)
+        gain_vector = np.asarray([_finite_gain_scalar(gains.get(int(cell), 1.0)) for cell in encoding.cell_ids], dtype=float)
     else:
-        gain_vector = np.asarray(gains, dtype=float)
+        gain_vector = np.asarray(gains)
     return _validated_gain_vector(encoding, gain_vector)
 
 
 def _validated_gain_vector(encoding: EncodingModel, gain_vector: np.ndarray) -> np.ndarray:
+    if _array_contains_boolean(gain_vector):
+        raise TypeError("replay gains must be numeric, not boolean")
+    if _array_contains_text(gain_vector):
+        raise TypeError("replay gains must be numeric, not text")
     arr = np.asarray(gain_vector, dtype=float)
     if arr.shape != (encoding.n_cells,):
         raise ValueError(f"gain array must have shape {(encoding.n_cells,)}, got {arr.shape}")

@@ -78,6 +78,42 @@ def test_custom_duration_imm_mode_transition_rejects_object_boolean_masks() -> N
         _resolve([boolean_transition])
 
 
+@pytest.mark.parametrize(
+    "transition",
+    [
+        np.array(
+            [
+                ["0.8", "0.1", "0.1"],
+                ["0.2", "0.7", "0.1"],
+                ["0.25", "0.25", "0.5"],
+            ]
+        ),
+        np.array(
+            [
+                ["0.8", "0.1", "0.1"],
+                ["0.2", "0.7", "0.1"],
+                ["0.25", "0.25", "0.5"],
+            ],
+            dtype=object,
+        ),
+        np.array(
+            [
+                [b"0.8", b"0.1", b"0.1"],
+                [b"0.2", b"0.7", b"0.1"],
+                [b"0.25", b"0.25", b"0.5"],
+            ]
+        ),
+    ],
+)
+def test_custom_duration_imm_mode_transition_rejects_numeric_string_probabilities(transition: np.ndarray) -> None:
+    with pytest.raises(ValueError, match="not strings"):
+        _validate_mode_transition_sequence(
+            [transition],
+            n_modes=3,
+            n_transitions=1,
+        )
+
+
 def test_custom_duration_imm_mode_transition_accepts_valid_object_probability_matrix() -> None:
     transition = np.array(
         [
@@ -147,7 +183,7 @@ def test_custom_duration_imm_mode_transition_rejects_non_numeric_object_values()
         dtype=object,
     )
 
-    with pytest.raises(ValueError, match="numeric probabilities"):
+    with pytest.raises(ValueError, match="not strings"):
         _validate_mode_transition_sequence(
             [transition],
             n_modes=3,

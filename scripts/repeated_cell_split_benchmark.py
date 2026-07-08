@@ -18,17 +18,43 @@ from hipporeplayimm.position_validation import (
 
 
 def _parse_models(value: str) -> tuple[str, ...]:
-    models = tuple(model.strip() for model in value.replace(" ", ",").split(",") if model.strip())
+    """Parse a comma/whitespace model list without dropping empty entries."""
+
+    raw = str(value)
+    if not raw.strip():
+        raise ValueError("--models must contain at least one model")
+    comma_parts = raw.split(",")
+    if any(not part.strip() for part in comma_parts):
+        raise ValueError("--models must not contain empty comma-separated entries")
+    models: list[str] = []
+    for part in comma_parts:
+        models.extend(part.split())
     if not models:
         raise ValueError("--models must contain at least one model")
-    return models
+    return tuple(models)
 
 
 def _parse_seeds(value: str) -> tuple[int, ...]:
-    seeds = tuple(int(item.strip()) for item in value.split(",") if item.strip())
-    if not seeds:
+    """Parse comma-separated non-negative random seeds without dropping entries."""
+
+    raw = str(value)
+    if not raw.strip():
         raise ValueError("--random-seeds must contain at least one seed")
-    return seeds
+    parts = raw.split(",")
+    if any(not part.strip() for part in parts):
+        raise ValueError("--random-seeds must not contain empty comma-separated entries")
+
+    seeds: list[int] = []
+    for part in parts:
+        token = part.strip()
+        try:
+            seed = int(token)
+        except ValueError:
+            raise ValueError("--random-seeds entries must be integers") from None
+        if seed < 0:
+            raise ValueError("--random-seeds entries must be non-negative")
+        seeds.append(seed)
+    return tuple(seeds)
 
 
 def _aggregate_summary(rows: pd.DataFrame) -> pd.DataFrame:
@@ -75,12 +101,17 @@ def main() -> int:
     parser.add_argument("--smoothing-sigma-bins", type=float, default=VALIDATED_POSITION_SMOOTHING_SIGMA_BINS)
     parser.add_argument("--min-speed-cm-s", type=float, default=VALIDATED_POSITION_MIN_SPEED_CM_S)
     args = parser.parse_args()
+    try:
+        random_seeds = _parse_seeds(args.random_seeds)
+        models = _parse_models(args.models)
+    except ValueError as exc:
+        parser.error(str(exc))
 
     output = Path(args.output)
     output.mkdir(parents=True, exist_ok=True)
     all_rows: list[pd.DataFrame] = []
     all_summaries: list[pd.DataFrame] = []
-    for seed in _parse_seeds(args.random_seeds):
+    for seed in random_seeds:
         config = BenchmarkConfig(
             encoding=EncodingConfig(
                 bin_size_cm=args.bin_size_cm,
@@ -95,7 +126,7 @@ def main() -> int:
             max_events_per_session=args.max_events,
             candidate_top_k=args.candidate_top_k,
             random_seed=seed,
-            models=_parse_models(args.models),
+            models=models,
         )
         result: BenchmarkResult = run_open_field_benchmark(args.root, config)
         rows = result.rows.copy()

@@ -35,6 +35,8 @@ def _patch_positive_finite_scalar(simulation_recovery: Any) -> None:
     def positive_finite_scalar_with_boolean_guard(name: str, value: Any) -> float:
         if _is_boolean_scalar(value):
             raise TypeError(f"{name} must be numeric, not boolean")
+        if _contains_text_values(value):
+            raise TypeError(f"{name} must be numeric, not text")
         return original(name, value)
 
     setattr(positive_finite_scalar_with_boolean_guard, _FINITE_SCALAR_WRAPPER_ATTR, True)
@@ -165,6 +167,8 @@ def _patch_valid_bins_and_prior(simulation_recovery: Any) -> None:
 def _validated_count_matrix(counts: Any, *, n_cells: int) -> np.ndarray:
     if _contains_boolean_values(counts):
         raise ValueError("counts must contain numeric integer counts, not boolean values")
+    if _contains_text_values(counts):
+        raise ValueError("counts must contain numeric integer counts, not text values")
     try:
         values = np.asarray(counts, dtype=float)
     except (TypeError, ValueError) as exc:
@@ -199,6 +203,8 @@ def _validated_occupancy_vector(encoding: Any) -> np.ndarray:
         raise ValueError("encoding.occupancy_s is required") from exc
     if _contains_boolean_values(occupancy_raw):
         raise ValueError("occupancy_s must contain finite nonnegative values")
+    if _contains_text_values(occupancy_raw):
+        raise ValueError("occupancy_s must contain finite nonnegative values, not text values")
     try:
         occupancy = np.asarray(occupancy_raw, dtype=float)
     except (TypeError, ValueError) as exc:
@@ -223,9 +229,25 @@ def _contains_boolean_values(values: Any) -> bool:
     return any(isinstance(value, (bool, np.bool_)) for value in raw.reshape(-1))
 
 
+def _contains_text_values(values: Any) -> bool:
+    try:
+        raw = np.asarray(values)
+    except (TypeError, ValueError):
+        raw = np.asarray(values, dtype=object)
+    if raw.size == 0:
+        return False
+    if raw.dtype.kind in {"U", "S"}:
+        return True
+    if raw.dtype == object:
+        return any(isinstance(value, (str, bytes, np.str_, np.bytes_)) for value in raw.reshape(-1))
+    return False
+
+
 def _positive_integer_scalar(name: str, value: Any) -> int:
     if _is_boolean_scalar(value):
         raise TypeError(f"{name} must be an integer, not boolean")
+    if _contains_text_values(value):
+        raise ValueError(f"{name} must be a positive integer, not text")
     item = _strict_scalar_item(name, value)
     try:
         numeric = float(item)

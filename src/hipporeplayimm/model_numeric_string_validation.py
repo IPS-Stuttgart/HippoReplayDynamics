@@ -7,7 +7,7 @@ from functools import wraps
 
 import numpy as np
 
-from .model_parameter_validation import _reject_boolean_scalar
+from .model_parameter_validation import _reject_boolean_scalar, _validate_unit_interval_parameter
 
 _PATCHED_FLAG = "_model_numeric_string_validation_patch_applied"
 _PATCH_VERSION_ATTR = "_model_numeric_string_validation_patch_version"
@@ -218,9 +218,12 @@ def apply_model_numeric_string_validation_patch() -> None:
             continue
 
         @wraps(current)
-        def validator(name: str, value: object, *, _current=current):
+        def validator(name: str, value: object, *, _current=current, _validator_name=validator_name):
             _reject_string_scalar(name, value)
             _reject_boolean_scalar(name, value)
+            if _validator_name == "_validate_nonnegative_parameter" and name == "velocity_decay":
+                _validate_unit_interval_parameter(name, value)
+                return None
             return _current(name, value)
 
         setattr(validator, _PATCHED_FLAG, True)

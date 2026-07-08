@@ -13,6 +13,7 @@ from itertools import combinations
 from pathlib import Path
 from typing import Iterable
 
+import numpy as np
 import pandas as pd
 
 from hipporeplayimm.evidence_reporting import (
@@ -33,12 +34,17 @@ _AUDIT_FILENAMES = {
 
 
 def _successful_rows(scores: pd.DataFrame) -> pd.DataFrame:
-    """Return successful rows with evidence-support metadata attached."""
+    """Return successful rows with finite evidence-support metadata attached."""
 
     rows = ensure_evidence_support_columns(scores)
     if rows.empty:
         return rows
     rows = rows[_status_success_mask(rows)].copy()
+    if "log_evidence" in rows:
+        log_evidence = pd.to_numeric(rows["log_evidence"], errors="coerce")
+        finite = log_evidence.notna() & np.isfinite(log_evidence.astype(float))
+        rows = rows.loc[finite].copy()
+        rows["log_evidence"] = log_evidence.loc[rows.index].astype(float)
     rows["evidence_comparable"] = _coerce_bool_series(rows["evidence_comparable"])
     return rows
 

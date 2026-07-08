@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import numbers
 from pathlib import Path
 
 from benchmark_kd_model_evidence import _check_session, _events, _session_path
@@ -45,7 +46,9 @@ def _event_chunks(event_ids: list[int], requested_shards: int) -> list[list[int]
 def _validate_max_events(max_events: int | None) -> int | None:
     if max_events is None:
         return None
-    if isinstance(max_events, bool) or max_events < 0:
+    if isinstance(max_events, bool) or not isinstance(max_events, numbers.Integral):
+        raise ValueError("--max-events must be an integer")
+    if max_events < 0:
         raise ValueError("--max-events must be non-negative")
     return int(max_events)
 

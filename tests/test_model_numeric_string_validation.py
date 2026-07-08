@@ -101,6 +101,8 @@ def test_runtime_patches_refresh_stale_model_numeric_validators(monkeypatch):
         DiffusionModel(sigma_cm="12.0")
     with pytest.raises(TypeError, match="velocity_decay"):
         CandidateKinematicModel(velocity_decay=True)
+    with pytest.raises(ValueError, match="velocity_decay"):
+        CandidateKinematicModel(velocity_decay=1.1)
     with pytest.raises(TypeError, match="mode_stickiness"):
         CandidateKinematicModel(mode_stickiness="0.95")
 
@@ -123,6 +125,8 @@ def test_runtime_patches_refresh_already_marked_stale_model_numeric_validators(m
         DiffusionModel(sigma_cm=True)
     with pytest.raises(TypeError, match="velocity_decay"):
         CandidateKinematicModel(velocity_decay=True)
+    with pytest.raises(ValueError, match="velocity_decay"):
+        CandidateKinematicModel(velocity_decay=1.1)
 
     current_positive_validator = models._validate_positive_parameter
     hipporeplayimm.apply_runtime_patches()

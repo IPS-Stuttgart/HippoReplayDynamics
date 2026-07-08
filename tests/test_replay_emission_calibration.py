@@ -111,16 +111,22 @@ def test_apply_replay_cell_gains_aligns_manual_mapping_by_cell_id() -> None:
 
 
 @pytest.mark.parametrize(
-    ("gains", "message"),
+    ("gains", "error_type", "message"),
     [
-        (np.array([1.0, np.nan]), "finite"),
-        (np.array([1.0, np.inf]), "finite"),
-        (np.array([1.0, 0.0]), "positive"),
-        (np.array([1.0, -0.5]), "positive"),
-        ({1: np.nan}, "finite"),
-        ({2: 0.0}, "positive"),
+        (np.array([1.0, np.nan]), ValueError, "finite"),
+        (np.array([1.0, np.inf]), ValueError, "finite"),
+        (np.array([1.0, 0.0]), ValueError, "positive"),
+        (np.array([1.0, -0.5]), ValueError, "positive"),
+        ({1: np.nan}, ValueError, "finite"),
+        ({2: 0.0}, ValueError, "positive"),
+        (np.array([1.0, True], dtype=object), TypeError, "not boolean"),
+        (np.array([1.0, np.bool_(True)], dtype=object), TypeError, "not boolean"),
+        (np.array(["1.0", "2.0"]), TypeError, "not text"),
+        (np.array([1.0, b"2.0"], dtype=object), TypeError, "not text"),
+        ({1: True}, TypeError, "not boolean"),
+        ({2: "3.0"}, TypeError, "not text"),
     ],
 )
-def test_apply_replay_cell_gains_rejects_invalid_manual_gains(gains, message) -> None:
-    with pytest.raises(ValueError, match=message):
+def test_apply_replay_cell_gains_rejects_invalid_manual_gains(gains, error_type, message) -> None:
+    with pytest.raises(error_type, match=message):
         apply_replay_cell_gains(_two_cell_encoding(), gains)

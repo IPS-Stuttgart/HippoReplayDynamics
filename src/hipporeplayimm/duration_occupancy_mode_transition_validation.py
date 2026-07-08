@@ -17,6 +17,7 @@ _DISPLACEMENT_MOMENTUM_SINGLE_BIN_PATCH_ATTR = (
 _DISPLACEMENT_IMM_SINGLE_BIN_PATCH_ATTR = "_displacement_imm_single_bin_evidence_support_patch"
 _ORIGINAL_ATTR = "_duration_occupancy_mode_transition_validation_original"
 _DEGENERATE_SINGLE_BIN_EVIDENCE_SUPPORT = "degenerate_single_bin"
+_TEXT_SCALAR_TYPES = (str, bytes, np.str_, np.bytes_)
 
 
 def _contains_boolean_values(values: np.ndarray) -> bool:
@@ -26,6 +27,16 @@ def _contains_boolean_values(values: np.ndarray) -> bool:
         return True
     if values.dtype == object:
         return any(isinstance(item, (bool, np.bool_)) for item in values.flat)
+    return False
+
+
+def _contains_text_values(values: np.ndarray) -> bool:
+    """Return True when matrix entries are text scalars NumPy could parse."""
+
+    if values.dtype.kind in {"S", "U"}:
+        return True
+    if values.dtype == object:
+        return any(isinstance(item, _TEXT_SCALAR_TYPES) for item in values.flat)
     return False
 
 
@@ -75,6 +86,10 @@ def _validate_mode_transition_sequence(
         if _contains_boolean_values(raw_values):
             raise ValueError(
                 f"mode transition matrix {transition_index} must contain numeric probabilities, not booleans"
+            )
+        if _contains_text_values(raw_values):
+            raise ValueError(
+                f"mode transition matrix {transition_index} must contain numeric probabilities, not strings"
             )
         try:
             values = raw_values.astype(float, copy=False)

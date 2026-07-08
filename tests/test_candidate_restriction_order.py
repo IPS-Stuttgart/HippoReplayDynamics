@@ -1,4 +1,5 @@
 import numpy as np
+import pytest
 
 from hipporeplayimm.state_space_utils import _restrict_candidates_to_valid_bins
 
@@ -21,3 +22,15 @@ def test_restrict_candidates_to_valid_bins_fallback_keeps_best_valid_bin() -> No
     restricted = _restrict_candidates_to_valid_bins(candidates, log_likelihood, valid_mask)
 
     assert restricted[0].tolist() == [1]
+
+
+def test_restrict_candidates_to_valid_bins_rejects_empty_active_support() -> None:
+    log_likelihood = np.array([[0.0, -np.inf, -np.inf]])
+    candidates = [np.array([0])]
+    valid_mask = np.array([False, True, True])
+
+    with pytest.raises(
+        ValueError,
+        match="row 0 must contain at least one finite value on the active support",
+    ):
+        _restrict_candidates_to_valid_bins(candidates, log_likelihood, valid_mask)

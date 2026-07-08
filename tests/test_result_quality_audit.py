@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import numpy as np
 import pandas as pd
+import pytest
 
 from hipporeplayimm.evidence_reporting import TRUNCATED_EVIDENCE_SUPPORT
 from hipporeplayimm.result_quality_audit import (
@@ -147,6 +149,49 @@ def test_select_observation_calibration_parses_string_bool_gate_columns() -> Non
 
     assert selected["setting"].tolist() == ["accepted"]
     assert bool(selected["selection_gate_passed"].iloc[0])
+
+
+@pytest.mark.parametrize("top_k", [True, False, np.bool_(True), 1.5, np.float64(2.0), "2"])
+def test_select_observation_calibration_rejects_non_integer_top_k(top_k: object) -> None:
+    summary = pd.DataFrame(
+        [
+            {"setting": "a", "median_posterior_mean_error_cm": 10.0},
+            {"setting": "b", "median_posterior_mean_error_cm": 11.0},
+        ]
+    )
+
+    with pytest.raises(TypeError, match="top_k"):
+        select_observation_calibration(
+            summary,
+            ObservationCalibrationSelectionConfig(top_k=top_k),  # type: ignore[arg-type]
+        )
+
+
+def test_select_observation_calibration_rejects_non_positive_top_k() -> None:
+    summary = pd.DataFrame([{"setting": "a", "median_posterior_mean_error_cm": 10.0}])
+
+    with pytest.raises(ValueError, match="top_k"):
+        select_observation_calibration(
+            summary,
+            ObservationCalibrationSelectionConfig(top_k=0),
+        )
+
+
+def test_select_observation_calibration_keeps_integer_top_k_behavior() -> None:
+    summary = pd.DataFrame(
+        [
+            {"setting": "best", "median_posterior_mean_error_cm": 8.0},
+            {"setting": "second", "median_posterior_mean_error_cm": 9.0},
+            {"setting": "third", "median_posterior_mean_error_cm": 10.0},
+        ]
+    )
+
+    selected = select_observation_calibration(
+        summary,
+        ObservationCalibrationSelectionConfig(top_k=np.int64(2)),  # type: ignore[arg-type]
+    )
+
+    assert selected["setting"].tolist() == ["best", "second"]
 
 
 def test_null_control_catalog_lists_nonspatial_controls() -> None:

@@ -44,3 +44,31 @@ def test_log_emission_tensor_canonicalizes_integral_counts() -> None:
     assert isinstance(emissions.n_spikes, int)
     assert np.issubdtype(emissions.spike_counts.dtype, np.integer)
     np.testing.assert_array_equal(emissions.spike_counts, np.array([[1, 0], [0, 2]], dtype=int))
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "match"),
+    [
+        ("dt", "1.0", "dt"),
+        ("dt", np.asarray("1.0"), "dt"),
+        ("bin_durations", np.array(["1.0", "1.0"], dtype=object), "bin_durations"),
+        ("transition_durations", np.array(["1.0"], dtype=object), "transition_durations"),
+    ],
+)
+def test_log_emission_tensor_rejects_text_duration_inputs(
+    field: str,
+    value: object,
+    match: str,
+) -> None:
+    kwargs: dict[str, object] = {
+        "log_likelihood": np.zeros((2, 2), dtype=float),
+        "spike_counts": np.zeros((2, 1), dtype=int),
+        "times": np.arange(2, dtype=float),
+        "dt": 1.0,
+        "cell_ids": np.array([1], dtype=int),
+        "n_spikes": 0,
+    }
+    kwargs[field] = value
+
+    with pytest.raises(ValueError, match=match):
+        LogEmissionTensor(**kwargs)

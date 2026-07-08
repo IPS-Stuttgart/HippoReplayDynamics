@@ -128,3 +128,57 @@ def test_legacy_na_status_spellings_remain_good_support_quality() -> None:
         "exact_or_not_pruned",
     ]
     assert labelled["candidate_support_quality_good"].tolist() == [True, True]
+
+
+def test_candidate_support_quality_patch_refreshes_stale_status_flag(monkeypatch) -> None:
+    import hipporeplayimm.result_improvements as ri
+    from hipporeplayimm.candidate_support_quality_patch import apply_candidate_support_quality_patch
+
+    def legacy_candidate_support_quality(row, *, min_log_mass=None, good_threshold=None, warning_threshold=None):
+        return ri.CANDIDATE_SUPPORT_EXACT
+
+    monkeypatch.setattr(ri, "candidate_support_quality", legacy_candidate_support_quality)
+    monkeypatch.setattr(ri, "_candidate_support_quality_status_patch_applied", True, raising=False)
+
+    apply_candidate_support_quality_patch()
+
+    labelled = ri.add_candidate_support_quality_columns(
+        pd.DataFrame([{"model": "m", "status": "error", "evidence_support": "not_scored"}])
+    )
+    assert labelled.loc[0, "candidate_support_quality"] == "conservative_unknown"
+    assert not bool(labelled.loc[0, "candidate_support_quality_good"])
+
+
+def test_candidate_support_quality_patch_refreshes_stale_min_log_mass_bool_flag(monkeypatch) -> None:
+    import hipporeplayimm.result_improvements as ri
+    from hipporeplayimm.candidate_support_quality_patch import (
+        _MIN_LOG_MASS_BOOL_PATCHED_FLAG,
+        apply_candidate_support_quality_patch,
+    )
+
+    def legacy_first_finite_numeric_value(value):
+        try:
+            number = float(value)
+        except (TypeError, ValueError):
+            return None
+        return number if np.isfinite(number) else None
+
+    monkeypatch.setattr(ri, "_first_finite_numeric_value", legacy_first_finite_numeric_value)
+    monkeypatch.setattr(ri, _MIN_LOG_MASS_BOOL_PATCHED_FLAG, True, raising=False)
+
+    apply_candidate_support_quality_patch()
+
+    labelled = ri.add_candidate_support_quality_columns(
+        pd.DataFrame(
+            [
+                {
+                    "model": "state-space-imm",
+                    "status": "success",
+                    "diagnostic_state_space_imm_evidence_support": "truncated_full_grid",
+                    "diagnostic_state_space_imm_min_candidate_log_mass": True,
+                }
+            ]
+        )
+    )
+    assert pd.isna(labelled.loc[0, "candidate_min_log_mass"])
+    assert labelled.loc[0, "candidate_support_quality"] == "conservative_unknown"

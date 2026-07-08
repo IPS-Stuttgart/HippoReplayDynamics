@@ -18,7 +18,9 @@ _NONCOMPARABLE_SUPPORT_VALUES = {
 }
 _TRUNCATED_SUPPORT = "truncated_full_grid"
 _SUCCESS_STATUS_VALUES = {"", "success", "nan", "na", "n/a", "none", "null", "<na>"}
+_QUALITY_WRAPPER_ATTR = "_candidate_support_quality_status_wrapper"
 _MIN_LOG_MASS_BOOL_PATCHED_FLAG = "_candidate_min_log_mass_bool_patch_applied"
+_MIN_LOG_MASS_BOOL_WRAPPER_ATTR = "_candidate_min_log_mass_bool_wrapper"
 _RESTRICT_CANDIDATE_ORDER_PATCHED_FLAG = "_candidate_restriction_order_patch_applied"
 
 
@@ -27,7 +29,8 @@ def apply_candidate_support_quality_patch() -> None:
 
     from . import result_improvements as ri
 
-    if not getattr(ri, "_candidate_support_quality_status_patch_applied", False):
+    current_quality = getattr(ri, "candidate_support_quality", None)
+    if not getattr(current_quality, _QUALITY_WRAPPER_ATTR, False):
 
         def candidate_support_quality(
             row: pd.Series,
@@ -62,8 +65,9 @@ def apply_candidate_support_quality_patch() -> None:
                 return ri.CANDIDATE_SUPPORT_WARNING
             return ri.CANDIDATE_SUPPORT_POOR
 
+        setattr(candidate_support_quality, _QUALITY_WRAPPER_ATTR, True)
         ri.candidate_support_quality = candidate_support_quality
-        ri._candidate_support_quality_status_patch_applied = True
+    ri._candidate_support_quality_status_patch_applied = True
 
     _patch_boolean_candidate_log_mass(ri)
     _patch_restricted_candidate_order()
@@ -72,15 +76,21 @@ def apply_candidate_support_quality_patch() -> None:
 def _patch_boolean_candidate_log_mass(ri: Any) -> None:
     """Avoid interpreting boolean diagnostics as finite retained log mass."""
 
-    if getattr(ri, _MIN_LOG_MASS_BOOL_PATCHED_FLAG, False):
+    current = ri._first_finite_numeric_value
+    if getattr(current, _MIN_LOG_MASS_BOOL_WRAPPER_ATTR, False):
+        setattr(ri, _MIN_LOG_MASS_BOOL_PATCHED_FLAG, True)
         return
-    original_first_finite_numeric_value = ri._first_finite_numeric_value
 
+    original_first_finite_numeric_value = current
+
+    @wraps(original_first_finite_numeric_value)
     def _first_finite_numeric_value(value: object) -> float | None:
         if _contains_boolean(value):
             return None
         return original_first_finite_numeric_value(value)
 
+    setattr(_first_finite_numeric_value, _MIN_LOG_MASS_BOOL_WRAPPER_ATTR, True)
+    setattr(_first_finite_numeric_value, "__hipporeplayimm_original__", original_first_finite_numeric_value)
     ri._first_finite_numeric_value = _first_finite_numeric_value
     setattr(ri, _MIN_LOG_MASS_BOOL_PATCHED_FLAG, True)
 

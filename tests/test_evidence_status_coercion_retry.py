@@ -8,6 +8,14 @@ import hipporeplayimm.evidence_status_coercion as status_coercion
 import hipporeplayimm.recovery_diagnostics as diagnostics
 
 
+EXPECTED_EMPTY_EVIDENCE_COLUMNS = {
+    "evidence_support",
+    "evidence_comparison",
+    "evidence_comparison_note",
+    "evidence_comparable",
+}
+
+
 def test_status_coercion_retries_recovery_diagnostics_after_reporting_patch(monkeypatch) -> None:
     """A later idempotent patch call must still refresh recovery diagnostics."""
 
@@ -76,3 +84,23 @@ def test_status_coercion_reinstalls_unmarked_reporting_helpers(monkeypatch) -> N
     assert refreshed["status"].tolist()[0] == "success"
     assert bool(refreshed["evidence_comparable"].iloc[0])
     assert not bool(refreshed["evidence_comparable"].iloc[1])
+
+
+def test_empty_evidence_support_frames_keep_reporting_columns() -> None:
+    status_coercion.apply_evidence_status_coercion_patch()
+
+    scored = reporting.ensure_evidence_support_columns(pd.DataFrame())
+
+    assert scored.empty
+    assert EXPECTED_EMPTY_EVIDENCE_COLUMNS.issubset(scored.columns)
+    assert scored["evidence_comparable"].dtype == bool
+
+
+def test_empty_simulation_evidence_frames_keep_reporting_columns() -> None:
+    status_coercion.apply_evidence_status_coercion_patch()
+
+    scored = reporting.simulation_add_evidence_columns(pd.DataFrame())
+
+    assert scored.empty
+    assert EXPECTED_EMPTY_EVIDENCE_COLUMNS.issubset(scored.columns)
+    assert scored["evidence_comparable"].dtype == bool

@@ -145,6 +145,7 @@ def select_observation_calibration(
     config = ObservationCalibrationSelectionConfig() if config is None else config
     if summary.empty:
         return pd.DataFrame()
+    top_k = _coerce_positive_count("top_k", config.top_k)
     frame = summary.copy()
     behavior_col = _first_existing(
         frame,
@@ -205,7 +206,7 @@ def select_observation_calibration(
     candidates = candidates.reset_index(drop=True)
     candidates["selection_rank"] = np.arange(1, len(candidates) + 1, dtype=int)
     drop_private = [column for column in candidates.columns if column.startswith("_selection_")]
-    return candidates.drop(columns=drop_private).head(max(1, int(config.top_k)))
+    return candidates.drop(columns=drop_private).head(top_k)
 
 
 def write_result_quality_audit(
@@ -306,6 +307,18 @@ def _first_existing(frame: pd.DataFrame, names: Sequence[str]) -> str | None:
 
 def _numeric(values: pd.Series) -> pd.Series:
     return pd.to_numeric(values, errors="coerce")
+
+
+def _coerce_positive_count(name: str, value: object) -> int:
+    if isinstance(value, (bool, np.bool_)):
+        raise TypeError(f"{name} must be an integer count, not boolean")
+    if isinstance(value, (int, np.integer)):
+        count = int(value)
+    else:
+        raise TypeError(f"{name} must be an integer count")
+    if count < 1:
+        raise ValueError(f"{name} must be positive")
+    return count
 
 
 def _bool_value(value: object) -> bool:

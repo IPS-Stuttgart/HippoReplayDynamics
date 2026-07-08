@@ -34,6 +34,7 @@ def _equal_prior_logp_and_weights(log_likelihoods: object) -> tuple[float, np.nd
 
 def _safe_mixture_log_posterior(log_posteriors: object, weights: np.ndarray) -> np.ndarray | None:
     valid = []
+    impossible = []
     for posterior, weight in zip(log_posteriors, np.asarray(weights, dtype=float).reshape(-1), strict=False):
         if posterior is None:
             continue
@@ -42,9 +43,13 @@ def _safe_mixture_log_posterior(log_posteriors: object, weights: np.ndarray) -> 
             continue
         current = np.asarray(posterior, dtype=float)
         if not _has_usable_log_posterior(current):
+            if current.size and not np.any(np.isnan(current)) and np.all(np.isneginf(current)):
+                impossible.append(current)
             continue
         valid.append((current, weight_value))
     if not valid:
+        if impossible and not any(current.shape != impossible[0].shape for current in impossible):
+            return np.full(impossible[0].shape, -np.inf, dtype=float)
         return None
     shape = valid[0][0].shape
     if any(current.shape != shape for current, _ in valid):
@@ -66,7 +71,7 @@ def _has_usable_log_posterior(values: np.ndarray) -> bool:
     if values.size == 0 or np.any(np.isnan(values)):
         return False
     normalizer = logsumexp(values, axis=-1)
-    return bool(np.all(np.isfinite(normalizer)))
+    return bool(np.any(np.isfinite(normalizer)))
 
 
 def _terminal_log_posterior_from_score(score: object) -> np.ndarray | None:

@@ -11,6 +11,7 @@ import numpy as np
 
 _PATCH_ATTR = "_duration_occupancy_mode_transition_validation_patch"
 _DECAY_PATCH_ATTR = "_duration_occupancy_decay_output_validation_patch"
+_MODE_TRANSITION_PARAM_PATCH_ATTR = "_duration_occupancy_mode_transition_param_validation_patch"
 _DISPLACEMENT_MOMENTUM_SINGLE_BIN_PATCH_ATTR = (
     "_displacement_momentum_single_bin_evidence_support_patch"
 )
@@ -38,6 +39,40 @@ def _contains_text_values(values: np.ndarray) -> bool:
     if values.dtype == object:
         return any(isinstance(item, _TEXT_SCALAR_TYPES) for item in values.flat)
     return False
+
+
+def _is_boolean_scalar(value: Any) -> bool:
+    try:
+        arr = np.asarray(value)
+    except (TypeError, ValueError):
+        return False
+    if arr.ndim != 0:
+        return False
+    item = arr.item()
+    return isinstance(item, (bool, np.bool_))
+
+
+def _is_text_scalar(value: Any) -> bool:
+    if isinstance(value, _TEXT_SCALAR_TYPES):
+        return True
+    try:
+        arr = np.asarray(value)
+    except (TypeError, ValueError):
+        return False
+    if arr.ndim != 0:
+        return False
+    if arr.dtype.kind in {"S", "U"}:
+        return True
+    if arr.dtype == object:
+        return isinstance(arr.item(), _TEXT_SCALAR_TYPES)
+    return False
+
+
+def _reject_probability_scalar(name: str, value: Any) -> None:
+    if _is_boolean_scalar(value):
+        raise TypeError(f"{name} must be a numeric probability scalar, not boolean")
+    if _is_text_scalar(value):
+        raise TypeError(f"{name} must be a numeric probability scalar, not string")
 
 
 def _coerce_integer_count(value: Any, name: str, *, minimum: int) -> int:
@@ -136,6 +171,21 @@ def _wrap_duration_adjusted_decays(helper: Callable[..., np.ndarray]) -> Callabl
     setattr(duration_adjusted_decays, _DECAY_PATCH_ATTR, True)
     setattr(duration_adjusted_decays, _ORIGINAL_ATTR, helper)
     return duration_adjusted_decays
+
+
+def _wrap_mode_transition_matrices(helper: Callable[..., list[np.ndarray]]) -> Callable[..., list[np.ndarray]]:
+    if getattr(helper, _MODE_TRANSITION_PARAM_PATCH_ATTR, False):
+        return helper
+
+    @wraps(helper)
+    def mode_transition_matrices(ss, n_modes, mode_stickiness, imm_switch_tau_s, durations):
+        _reject_probability_scalar("mode_stickiness", mode_stickiness)
+        _reject_probability_scalar("imm_switch_tau_s", imm_switch_tau_s)
+        return helper(ss, n_modes, mode_stickiness, imm_switch_tau_s, durations)
+
+    setattr(mode_transition_matrices, _MODE_TRANSITION_PARAM_PATCH_ATTR, True)
+    setattr(mode_transition_matrices, _ORIGINAL_ATTR, helper)
+    return mode_transition_matrices
 
 
 def _is_single_bin_event(emissions: Any) -> bool:
@@ -275,6 +325,7 @@ def apply_duration_occupancy_mode_transition_validation_patch() -> None:
     from . import duration_occupancy
 
     duration_occupancy._resolve_mode_transitions = _wrap_resolver(duration_occupancy._resolve_mode_transitions)
+    duration_occupancy._mode_transition_matrices = _wrap_mode_transition_matrices(duration_occupancy._mode_transition_matrices)
     duration_occupancy._duration_adjusted_decays = _wrap_duration_adjusted_decays(duration_occupancy._duration_adjusted_decays)
     _patch_displacement_single_bin_evidence_support()
 

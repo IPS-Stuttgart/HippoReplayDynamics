@@ -7,6 +7,8 @@ from functools import wraps
 import numpy as np
 
 _CANDIDATE_METADATA_PATCHED_FLAG = "_candidate_emission_metadata_patch_applied"
+_CANDIDATE_METADATA_SELECTION_WRAPPED_FLAG = "_duration_candidate_metadata_selection_wrapped"
+_CANDIDATE_METADATA_ORIGINAL_SELECTION_ATTR = "_duration_candidate_metadata_original_selection"
 _MOMENTUM_DIAGNOSTICS_PATCHED_FLAG = "_duration_momentum_diagnostics_patch_applied"
 _MOMENTUM_DIAGNOSTICS_SCORE_WRAPPED_FLAG = "_duration_momentum_diagnostics_score_wrapped"
 _MOMENTUM_DIAGNOSTICS_ORIGINAL_SCORE_ATTR = "_duration_momentum_diagnostics_original_score"
@@ -17,29 +19,41 @@ def apply_duration_candidate_metadata_patch() -> None:
 
     from . import duration_occupancy
 
-    if not getattr(duration_occupancy, _CANDIDATE_METADATA_PATCHED_FLAG, False):
-        original_candidate_selection_emissions = duration_occupancy._candidate_selection_emissions
-
-        def _candidate_selection_emissions_with_metadata_copy(emissions, valid_bin_mask):
-            restricted = original_candidate_selection_emissions(emissions, valid_bin_mask)
-            if restricted is emissions:
-                return restricted
-            metadata = getattr(restricted, "metadata", None)
-            if metadata is None:
-                return restricted
-            restricted.metadata = dict(metadata)
-            return restricted
-
-        _candidate_selection_emissions_with_metadata_copy.__name__ = (
-            original_candidate_selection_emissions.__name__
-        )
-        _candidate_selection_emissions_with_metadata_copy.__doc__ = (
-            original_candidate_selection_emissions.__doc__
-        )
-        duration_occupancy._candidate_selection_emissions = _candidate_selection_emissions_with_metadata_copy
-        setattr(duration_occupancy, _CANDIDATE_METADATA_PATCHED_FLAG, True)
-
+    _patch_candidate_selection_metadata_copy(duration_occupancy)
     _patch_duration_momentum_diagnostics(duration_occupancy)
+
+
+def _patch_candidate_selection_metadata_copy(duration_occupancy) -> None:
+    """Ensure restricted candidate-emission metadata is isolated from callers."""
+
+    current = duration_occupancy._candidate_selection_emissions
+    if getattr(current, _CANDIDATE_METADATA_SELECTION_WRAPPED_FLAG, False):
+        setattr(duration_occupancy, _CANDIDATE_METADATA_PATCHED_FLAG, True)
+        return
+
+    @wraps(current)
+    def _candidate_selection_emissions_with_metadata_copy(emissions, valid_bin_mask):
+        restricted = current(emissions, valid_bin_mask)
+        if restricted is emissions:
+            return restricted
+        metadata = getattr(restricted, "metadata", None)
+        if metadata is None:
+            return restricted
+        restricted.metadata = dict(metadata)
+        return restricted
+
+    setattr(
+        _candidate_selection_emissions_with_metadata_copy,
+        _CANDIDATE_METADATA_SELECTION_WRAPPED_FLAG,
+        True,
+    )
+    setattr(
+        _candidate_selection_emissions_with_metadata_copy,
+        _CANDIDATE_METADATA_ORIGINAL_SELECTION_ATTR,
+        current,
+    )
+    duration_occupancy._candidate_selection_emissions = _candidate_selection_emissions_with_metadata_copy
+    setattr(duration_occupancy, _CANDIDATE_METADATA_PATCHED_FLAG, True)
 
 
 def _patch_duration_momentum_diagnostics(duration_occupancy) -> None:

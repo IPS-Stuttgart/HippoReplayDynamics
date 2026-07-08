@@ -11,6 +11,7 @@ from .encoding import LogEmissionTensor
 
 _PATCH_FLAG = "_n_spikes_validation_applied"
 _POST_INIT_WRAPPER_MARKER = "_n_spikes_validation_post_init_wrapper"
+_STRING_TYPES = (str, bytes, np.str_, np.bytes_)
 
 
 def _log_emission_n_spikes_patch_current() -> bool:
@@ -40,16 +41,24 @@ def apply_log_emission_n_spikes_validation_patch() -> None:
 
 
 def _validate_duration_inputs(emissions: LogEmissionTensor) -> None:
-    """Reject boolean or array-shaped duration inputs before dataclass coercion."""
+    """Reject invalid duration inputs before dataclass coercion."""
 
+    if _contains_text_values(emissions.dt):
+        raise ValueError("dt must be a numeric duration, not text")
     if _contains_boolean_values(emissions.dt):
         raise ValueError("dt must be a numeric duration, not boolean")
     _require_scalar_duration(emissions.dt, "dt")
 
-    if emissions.bin_durations is not None and _contains_boolean_values(emissions.bin_durations):
-        raise ValueError("bin_durations must contain numeric durations, not boolean values")
-    if emissions.transition_durations is not None and _contains_boolean_values(emissions.transition_durations):
-        raise ValueError("transition_durations must contain numeric durations, not boolean values")
+    if emissions.bin_durations is not None:
+        if _contains_text_values(emissions.bin_durations):
+            raise ValueError("bin_durations must contain numeric durations, not text values")
+        if _contains_boolean_values(emissions.bin_durations):
+            raise ValueError("bin_durations must contain numeric durations, not boolean values")
+    if emissions.transition_durations is not None:
+        if _contains_text_values(emissions.transition_durations):
+            raise ValueError("transition_durations must contain numeric durations, not text values")
+        if _contains_boolean_values(emissions.transition_durations):
+            raise ValueError("transition_durations must contain numeric durations, not boolean values")
 
 
 def _require_scalar_duration(value: Any, name: str) -> None:
@@ -86,6 +95,20 @@ def _contains_boolean_values(values: Any) -> bool:
         return True
     if raw.dtype == object:
         return any(isinstance(value, (bool, np.bool_)) for value in raw.reshape(-1))
+    return False
+
+
+def _contains_text_values(values: Any) -> bool:
+    try:
+        raw = np.asarray(values)
+    except (TypeError, ValueError):
+        raw = np.asarray(values, dtype=object)
+    if raw.size == 0:
+        return False
+    if np.issubdtype(raw.dtype, np.str_) or np.issubdtype(raw.dtype, np.bytes_):
+        return True
+    if raw.dtype == object:
+        return any(isinstance(value, _STRING_TYPES) for value in raw.reshape(-1))
     return False
 
 

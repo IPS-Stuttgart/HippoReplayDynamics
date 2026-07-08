@@ -38,6 +38,21 @@ def test_pyrecest_score_rejects_nonfinite_bin_centers_before_optional_import() -
         PyRecEstGoalParticleModel().score(emissions, bin_centers)
 
 
+@pytest.mark.parametrize(
+    ("bin_centers", "match"),
+    [
+        (np.array([[True, False], [False, True]]), "bin_centers.*boolean"),
+        (np.array([["0.0", "0.0"], ["1.0", "0.0"]]), "bin_centers.*string"),
+        (np.array([[0.0, "0.0"], [1.0, 0.0]], dtype=object), "bin_centers.*string"),
+    ],
+)
+def test_pyrecest_score_rejects_lossy_bin_center_coercions_before_optional_import(bin_centers: np.ndarray, match: str) -> None:
+    emissions = _single_bin_emissions(n_bins=2)
+
+    with pytest.raises(TypeError, match=match):
+        PyRecEstGoalParticleModel().score(emissions, bin_centers)
+
+
 def test_pyrecest_candidate_goals_reject_nonfinite_values() -> None:
     bin_centers = np.array([[0.0, 0.0], [1.0, 0.0]], dtype=float)
 
@@ -46,6 +61,21 @@ def test_pyrecest_candidate_goals_reject_nonfinite_values() -> None:
             np.array([[0.0, np.nan]], dtype=float),
             bin_centers,
         )
+
+
+@pytest.mark.parametrize(
+    ("candidate_goals", "match"),
+    [
+        (np.array([[True, False]]), "candidate_goals.*boolean"),
+        (np.array([["0.0", "1.0"]]), "candidate_goals.*string"),
+        (np.array([[0.0, "1.0"]], dtype=object), "candidate_goals.*string"),
+    ],
+)
+def test_pyrecest_candidate_goals_reject_lossy_coordinate_coercions(candidate_goals: np.ndarray, match: str) -> None:
+    bin_centers = np.array([[0.0, 0.0], [1.0, 0.0]], dtype=float)
+
+    with pytest.raises(TypeError, match=match):
+        _coerce_candidate_goals(candidate_goals, bin_centers)
 
 
 @pytest.mark.parametrize(

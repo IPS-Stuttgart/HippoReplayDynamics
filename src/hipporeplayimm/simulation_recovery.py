@@ -690,8 +690,7 @@ def simulate_replay_event(
     negative_binomial_overdispersion: float = 0.0,
     state_space: StateSpaceDecoderConfig | None = None,
 ) -> tuple[LogEmissionTensor, np.ndarray]:
-    if n_time <= 0:
-        raise ValueError("n_time must be positive")
+    n_time = _positive_integer_scalar("n_time", n_time)
     dt = _positive_finite_scalar("dt", dt)
     spike_rate_scale = _positive_finite_scalar("spike_rate_scale", spike_rate_scale)
     state_space = StateSpaceDecoderConfig() if state_space is None else state_space
@@ -723,6 +722,7 @@ def simulate_latent_path(
     rng: np.random.Generator,
     state_space: StateSpaceDecoderConfig | None = None,
 ) -> np.ndarray:
+    n_time = _positive_integer_scalar("n_time", n_time)
     state_space = StateSpaceDecoderConfig() if state_space is None else state_space
     dt = _positive_finite_scalar("dt", dt)
     true_model = true_model.lower()
@@ -770,13 +770,24 @@ def emissions_from_counts(
 ) -> LogEmissionTensor:
     if _contains_boolean_values(counts):
         raise ValueError("counts must contain numeric integer counts, not boolean values")
-    spike_counts = np.asarray(counts, dtype=int)
+    if _contains_text_values(counts):
+        raise ValueError("counts must contain numeric integer counts, not text values")
+    try:
+        count_values = np.asarray(counts, dtype=float)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("counts must contain numeric values") from exc
     dt = _positive_finite_scalar("dt", dt)
     spike_rate_scale = _positive_finite_scalar("spike_rate_scale", spike_rate_scale)
-    if spike_counts.ndim != 2:
+    if count_values.ndim != 2:
         raise ValueError("counts must be a two-dimensional array")
-    if spike_counts.shape[1] != encoding.n_cells:
+    if count_values.shape[1] != encoding.n_cells:
         raise ValueError("counts columns must match encoding.n_cells")
+    if not np.all(np.isfinite(count_values)) or np.any(count_values < 0.0):
+        raise ValueError("counts must contain finite nonnegative values")
+    rounded = np.rint(count_values)
+    if not np.all(np.isclose(count_values, rounded, rtol=0.0, atol=0.0)):
+        raise ValueError("counts must contain integer-valued counts")
+    spike_counts = np.asarray(rounded, dtype=int)
     log_likelihood = _poisson_log_emissions(
         spike_counts,
         encoding.rates_hz,
@@ -804,6 +815,43 @@ def _contains_boolean_values(values: object) -> bool:
     if raw.size == 0:
         return False
     return any(isinstance(value, (bool, np.bool_)) for value in raw.reshape(-1))
+
+
+def _contains_text_values(values: object) -> bool:
+    try:
+        raw = np.asarray(values)
+    except (TypeError, ValueError):
+        raw = np.asarray(values, dtype=object)
+    if raw.size == 0:
+        return False
+    if raw.dtype.kind in {"U", "S"}:
+        return True
+    if raw.dtype == object:
+        return any(isinstance(value, (str, bytes, np.str_, np.bytes_)) for value in raw.reshape(-1))
+    return False
+
+
+def _positive_integer_scalar(name: str, value: object) -> int:
+    if isinstance(value, (bool, np.bool_)):
+        raise TypeError(f"{name} must be an integer, not boolean")
+    if _contains_text_values(value):
+        raise ValueError(f"{name} must be a positive integer, not text")
+    try:
+        raw = np.asarray(value)
+    except (TypeError, ValueError):
+        raw = np.asarray(value, dtype=object)
+    if raw.ndim != 0:
+        raise ValueError(f"{name} must be a positive integer")
+    item = raw.item()
+    if isinstance(item, (bool, np.bool_)):
+        raise TypeError(f"{name} must be an integer, not boolean")
+    try:
+        numeric = float(item)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ValueError(f"{name} must be a positive integer") from exc
+    if not np.isfinite(numeric) or numeric <= 0.0 or not numeric.is_integer():
+        raise ValueError(f"{name} must be a positive integer")
+    return int(numeric)
 
 
 def add_evidence_columns(df: pd.DataFrame) -> pd.DataFrame:

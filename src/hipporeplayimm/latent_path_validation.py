@@ -113,6 +113,8 @@ def _integer_valued_scalar(name: str, value: Any) -> int:
     raw = np.asarray(value)
     if raw.ndim != 0:
         raise ValueError(f"{name} must be positive integer-valued")
+    if _contains_text_values(raw):
+        raise ValueError(f"{name} must be positive integer-valued, not text")
     if np.issubdtype(raw.dtype, np.bool_) or (
         raw.dtype == object and isinstance(raw.item(), (bool, np.bool_))
     ):
@@ -181,6 +183,8 @@ def _checked_count_array(counts: Any) -> np.ndarray:
         raise ValueError("counts must contain at least one time bin")
     if _contains_boolean_values(raw):
         raise ValueError("counts must contain numeric integer counts, not boolean values")
+    if _contains_text_values(raw):
+        raise ValueError("counts must contain numeric integer counts, not text values")
     try:
         numeric = np.asarray(raw, dtype=float)
     except (TypeError, ValueError) as exc:
@@ -200,3 +204,17 @@ def _contains_boolean_values(values: Any) -> bool:
     if raw.size == 0:
         return False
     return any(isinstance(value, (bool, np.bool_)) for value in raw.reshape(-1))
+
+
+def _contains_text_values(values: Any) -> bool:
+    try:
+        raw = np.asarray(values)
+    except (TypeError, ValueError):
+        raw = np.asarray(values, dtype=object)
+    if raw.size == 0:
+        return False
+    if raw.dtype.kind in {"U", "S"}:
+        return True
+    if raw.dtype == object:
+        return any(isinstance(value, (str, bytes, np.str_, np.bytes_)) for value in raw.reshape(-1))
+    return False

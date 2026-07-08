@@ -222,15 +222,17 @@ def _recovery_summary(event_scores: pd.DataFrame, recovery: Any) -> pd.DataFrame
                 "mean_n_spikes": float(group["n_spikes"].mean()),
             }
         )
+    overall_recovered = recovery._recovered_expected_series(best, "")
+    overall_surrogate_recovered = recovery._surrogate_recovered_series(best)
     rows.append(
         {
             "true_model": "overall",
             "expected_model": "",
             "simulated_events": _event_count(best),
-            "recovered_events": int(best["recovered_expected_model"].sum()),
-            "recovery_accuracy": float(best["recovered_expected_model"].mean()),
-            "exact_surrogate_recovered_events": int(recovery._surrogate_recovered_series(best).sum()),
-            "exact_surrogate_recovery_accuracy": float(recovery._surrogate_recovered_series(best).mean()),
+            "recovered_events": int(overall_recovered.sum()),
+            "recovery_accuracy": float(overall_recovered.mean()),
+            "exact_surrogate_recovered_events": int(overall_surrogate_recovered.sum()),
+            "exact_surrogate_recovery_accuracy": float(overall_surrogate_recovered.mean()),
             "most_common_best_model": str(best["best_model"].value_counts().index[0]),
             "most_common_best_model_events": int(best["best_model"].value_counts().iloc[0]),
             "mean_n_time": float(best["n_time"].mean()),

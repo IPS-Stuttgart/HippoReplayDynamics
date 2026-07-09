@@ -38,16 +38,50 @@ def _event_ids(spec: str, session) -> list[int]:
         return [int(x) for x in session.ripple_indices_in_run()]
     if text == "all":
         return list(range(session.ripple_count))
+    tokens = _event_tokens(text)
     out: list[int] = []
-    for item in text.replace(" ", ",").split(","):
-        if not item:
-            continue
-        if "-" in item:
-            lo, hi = [int(value) for value in item.split("-", 1)]
-            out.extend(range(lo, hi + 1))
-        else:
-            out.append(int(item))
+    for token in tokens:
+        out.extend(_event_id_token_values(token))
     return sorted(dict.fromkeys(out))
+
+
+def _event_tokens(text: str) -> list[str]:
+    if not text:
+        raise ValueError("--events must contain 'run', 'all', or at least one event id")
+    comma_parts = text.split(",")
+    if any(not part.strip() for part in comma_parts):
+        raise ValueError("--events must not contain empty comma-separated entries")
+    tokens: list[str] = []
+    for part in comma_parts:
+        tokens.extend(part.split())
+    if not tokens:
+        raise ValueError("--events must contain 'run', 'all', or at least one event id")
+    return tokens
+
+
+def _event_id_token_values(token: str) -> list[int]:
+    if "-" not in token:
+        return [_event_index(token)]
+    if token.count("-") != 1:
+        raise ValueError("--events ranges must have the form START-END")
+    lo_text, hi_text = token.split("-", 1)
+    if not lo_text or not hi_text:
+        raise ValueError("--events ranges must have the form START-END")
+    lo = _event_index(lo_text)
+    hi = _event_index(hi_text)
+    if hi < lo:
+        raise ValueError("--events ranges must be increasing")
+    return list(range(lo, hi + 1))
+
+
+def _event_index(token: str) -> int:
+    try:
+        value = int(token)
+    except ValueError as exc:
+        raise ValueError("--events entries must be non-negative integers or ranges") from exc
+    if value < 0:
+        raise ValueError("--events entries must be non-negative")
+    return value
 
 
 def main() -> int:
@@ -76,7 +110,10 @@ def main() -> int:
             min_speed_cm_s=args.min_speed_cm_s,
         ),
     )
-    event_ids = _event_ids(args.events, session)
+    try:
+        event_ids = _event_ids(args.events, session)
+    except ValueError as exc:
+        parser.error(str(exc))
     if args.max_events is not None:
         event_ids = event_ids[: args.max_events]
 

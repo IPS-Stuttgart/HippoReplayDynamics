@@ -26,7 +26,7 @@ class DurationFloat(float):
         obj.base=float(base)
         obj.transition_durations=tuple(float(v) for v in transition_durations)
         return obj
-    def __hash__(self): return hash((self.base,self.transition_durations))
+    def __hash__(self): return float.__hash__(self)
     def __mul__(self,o): return self.base*o
     def __rmul__(self,o): return o*self.base
     def first(self): return self.transition_durations[0] if self.transition_durations else self.base

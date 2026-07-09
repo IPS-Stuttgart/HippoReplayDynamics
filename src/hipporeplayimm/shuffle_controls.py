@@ -166,13 +166,22 @@ def _validate_grid_shape(grid_shape: tuple[int, int]) -> tuple[int, int]:
 
 
 def _positive_grid_dimension(value: object) -> int:
-    if isinstance(value, (bool, np.bool_)):
-        raise ValueError("grid_shape dimensions must be positive integers")
     try:
-        integer = operator.index(value)
+        array = np.asarray(value)
+    except ValueError as exc:
+        raise ValueError("grid_shape dimensions must be positive integer scalars") from exc
+    if array.ndim != 0:
+        raise ValueError("grid_shape dimensions must be positive integer scalars")
+    scalar = array.item()
+    if isinstance(scalar, (bool, np.bool_)):
+        raise ValueError("grid_shape dimensions must be positive integers")
+    if isinstance(scalar, (str, bytes, np.str_, np.bytes_)):
+        raise ValueError("grid_shape dimensions must be positive integers, not strings")
+    try:
+        integer = operator.index(scalar)
     except TypeError:
         try:
-            numeric = float(value)
+            numeric = float(scalar)
         except (TypeError, ValueError, OverflowError) as exc:
             raise ValueError("grid_shape dimensions must be positive integers") from exc
         if not np.isfinite(numeric):

@@ -3,7 +3,7 @@ import pytest
 
 from hipporeplayimm.encoding import LogEmissionTensor
 from hipporeplayimm.models import CandidateKinematicModel, EventScore
-from scripts.track_event import _TRACK_MODEL_CHOICES, _trajectory_from_prefix_scores, _trajectory_rows_from_log_posteriors
+from scripts.track_event import _TRACK_MODEL_CHOICES, _mode_probability_row, _trajectory_from_prefix_scores, _trajectory_rows_from_log_posteriors
 
 
 def test_trajectory_rows_entropy_handles_zero_probability_bins():
@@ -60,6 +60,30 @@ def test_trajectory_rows_accept_one_dimensional_bin_centers():
     assert rows.loc[0, "posterior_mean_y"] == pytest.approx(0.0)
     assert rows.loc[0, "map_x"] == pytest.approx(2.0)
     assert rows.loc[0, "map_y"] == pytest.approx(0.0)
+
+
+def test_mode_probability_row_normalizes_valid_probabilities():
+    row = _mode_probability_row(("stationary", "diffusion"), np.array([2.0, 6.0]))
+
+    assert row["mode_stationary_probability"] == pytest.approx(0.25)
+    assert row["mode_diffusion_probability"] == pytest.approx(0.75)
+    assert row["most_likely_mode"] == "diffusion"
+
+
+@pytest.mark.parametrize(
+    "probabilities",
+    [
+        np.array([np.nan, 1.0]),
+        np.array([np.inf, 1.0]),
+        np.array([1.0, -0.1]),
+        np.array([0.0, 0.0]),
+        np.ones((2, 1)),
+        np.ones(3),
+    ],
+)
+def test_mode_probability_row_rejects_invalid_probabilities(probabilities):
+    with pytest.raises(ValueError, match="mode probabilities"):
+        _mode_probability_row(("stationary", "diffusion"), probabilities)
 
 
 def test_full_trajectory_imm_export_preserves_mode_probability_columns():

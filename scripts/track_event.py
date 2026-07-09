@@ -68,6 +68,12 @@ def _prefix_emissions(emissions: LogEmissionTensor, stop: int) -> LogEmissionTen
 
 def _mode_probability_row(modes: tuple[str, ...], probabilities: np.ndarray) -> dict[str, float | str]:
     probabilities = np.asarray(probabilities, dtype=float)
+    if probabilities.ndim != 1 or probabilities.shape[0] != len(modes):
+        raise ValueError("mode probabilities must be a one-dimensional vector with one entry per mode")
+    if not np.all(np.isfinite(probabilities)):
+        raise ValueError("mode probabilities must be finite")
+    if np.any(probabilities < 0.0):
+        raise ValueError("mode probabilities must be nonnegative")
     total = float(probabilities.sum())
     if total <= 0.0:
         raise ValueError("mode probabilities must have positive total mass")

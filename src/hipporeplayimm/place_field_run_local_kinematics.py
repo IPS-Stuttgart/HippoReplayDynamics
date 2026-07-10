@@ -10,8 +10,8 @@ helpers independently for every run interval.
 
 from __future__ import annotations
 
-from functools import wraps
 import sys
+from functools import wraps
 from types import FunctionType
 from typing import Any, Callable
 

@@ -378,7 +378,11 @@ def _annotate_margin_scope(
     ordered_values = values[order]
     best_index = ordered_index[0]
     best_model = str(out.loc[best_index, "model"]) if "model" in out else ""
-    margin = float(ordered_values[0] - ordered_values[1]) if ordered_values.shape[0] > 1 else np.inf
+    margin = (
+        float(ordered_values[0] - ordered_values[1])
+        if ordered_values.shape[0] > 1
+        else float("nan")
+    )
     out.loc[group_index, f"{prefix}_best_model"] = best_model
     out.loc[group_index, f"{prefix}_log_evidence_margin"] = margin
     out.loc[group_index, f"{prefix}_margin_category"] = evidence_margin_label(margin)

@@ -86,6 +86,27 @@ def _adjacent_times_share_interval(times: np.ndarray, intervals: np.ndarray) -> 
     return shared
 
 
+def _speed_cm_s_within_intervals(
+    times: np.ndarray,
+    xy: np.ndarray,
+    intervals: np.ndarray,
+) -> np.ndarray:
+    """Estimate speed independently inside each interval.
+
+    A global finite difference lets samples from the next run bout influence the
+    speed at the end of the current bout (and vice versa). Long inter-bout gaps
+    can therefore make genuinely fast boundary samples look slow and remove
+    otherwise valid within-bout transition counts.
+    """
+
+    speed = np.zeros(times.shape, dtype=float)
+    for start, end in intervals:
+        in_interval = (times >= start) & (times <= end)
+        if np.any(in_interval):
+            speed[in_interval] = _speed_cm_s(times[in_interval], xy[in_interval])
+    return speed
+
+
 def fit_empirical_transition_matrix(
     session: ReplaySession,
     encoding: EncodingModel,
@@ -110,7 +131,7 @@ def fit_empirical_transition_matrix(
     position = _clean_position(session.position)
     times = position[:, 0]
     xy = position[:, 1:3]
-    speed = _speed_cm_s(times, xy)
+    speed = _speed_cm_s_within_intervals(times, xy, session.run_times)
     in_run = _times_in_intervals(times, session.run_times)
     same_run_interval = _adjacent_times_share_interval(times, session.run_times)
     bins = encoding.positions_to_flat_bins(xy)

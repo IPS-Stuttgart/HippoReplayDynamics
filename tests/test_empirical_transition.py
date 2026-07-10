@@ -48,6 +48,30 @@ def test_fit_empirical_transition_matrix_is_column_stochastic_for_valid_inputs()
     np.testing.assert_allclose(transition.sum(axis=0), np.ones(transition.shape[1]))
 
 
+def test_fit_empirical_transition_matrix_does_not_bridge_disjoint_run_intervals() -> None:
+    session = _minimal_session()
+    session.position = np.array(
+        [
+            [0.0, 0.0, 0.0],
+            [1.0, 1.0, 0.0],
+            [10.0, 2.0, 0.0],
+            [11.0, 1.0, 0.0],
+        ],
+        dtype=float,
+    )
+    session.run_times = np.array([[0.0, 1.0], [10.0, 11.0]], dtype=float)
+
+    transition = fit_empirical_transition_matrix(
+        session,
+        _minimal_encoding(),
+        add_self_loop_count=0.0,
+        teleport_probability=0.0,
+        min_speed_cm_s=0.0,
+    ).toarray()
+
+    np.testing.assert_allclose(transition[:, 1], np.array([0.0, 1.0, 0.0]))
+
+
 def test_empirical_transition_model_scores_valid_transition_matrix() -> None:
     result = EmpiricalTransitionStateSpaceReplayModel(csr_matrix(np.eye(2))).score(
         _minimal_emissions(),

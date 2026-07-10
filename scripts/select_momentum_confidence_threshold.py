@@ -387,7 +387,10 @@ def _constant_thresholds_for_strata(
 def _threshold_for_key(thresholds: pd.DataFrame, stratify_cols: Sequence[str], key: tuple[object, ...]) -> float:
     matches = thresholds
     for column, value in zip(stratify_cols, key, strict=True):
-        matches = matches[matches[column].eq(value)]
+        if pd.isna(value):
+            matches = matches[matches[column].isna()]
+        else:
+            matches = matches[matches[column].eq(value).fillna(False)]
     if matches.empty:
         values = ", ".join(f"{column}={value}" for column, value in zip(stratify_cols, key, strict=True))
         raise ValueError(f"no selected confidence threshold for stratum: {values}")

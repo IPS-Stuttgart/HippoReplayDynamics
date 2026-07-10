@@ -9,6 +9,7 @@ import numpy as np
 _PATCHED_FLAG = "_state_space_bin_center_validation_patch_applied"
 _SPARSE_MOMENTUM_PATCHED_FLAG = "_sparse_momentum_bin_center_validation_patch_applied"
 _CORE_MODEL_PATCHED_FLAG = "_core_model_bin_center_validation_patch_applied"
+_BOOL_OR_TEXT_DTYPE_KINDS = {"b", "S", "U"}
 
 
 def _validate_state_space_log_likelihood(emissions: Any) -> None:
@@ -30,10 +31,33 @@ def _validate_state_space_log_likelihood(emissions: Any) -> None:
         raise ValueError("every emission row must contain at least one finite spatial-bin log likelihood")
 
 
+def _as_numeric_real_coordinates(values: Any, name: str) -> np.ndarray:
+    """Coerce coordinates without silently changing boolean, text, or complex data."""
+
+    try:
+        raw = np.asarray(values)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must contain numeric real coordinates") from exc
+    if raw.dtype.kind in _BOOL_OR_TEXT_DTYPE_KINDS:
+        raise ValueError(f"{name} must contain numeric real coordinates, not boolean or text")
+    if raw.dtype.kind == "c":
+        raise ValueError(f"{name} must contain numeric real coordinates, not complex values")
+    if raw.dtype.kind == "O":
+        for item in raw.ravel():
+            if isinstance(item, (bool, np.bool_, str, bytes, np.str_, np.bytes_)):
+                raise ValueError(f"{name} must contain numeric real coordinates, not boolean or text")
+            if isinstance(item, (complex, np.complexfloating)):
+                raise ValueError(f"{name} must contain numeric real coordinates, not complex values")
+    try:
+        return np.asarray(values, dtype=float)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must contain numeric real coordinates") from exc
+
+
 def _coerce_state_space_bin_centers(bin_centers: Any, n_bins: int) -> np.ndarray:
     """Return finite 2D bin centers with one row per spatial bin."""
 
-    centers = np.asarray(bin_centers, dtype=float)
+    centers = _as_numeric_real_coordinates(bin_centers, "bin_centers")
     if centers.ndim == 1:
         centers = centers[:, None]
     if centers.ndim != 2 or centers.shape[1] == 0:

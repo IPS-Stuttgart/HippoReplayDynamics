@@ -6,6 +6,8 @@ from typing import Any
 
 import numpy as np
 
+from .simulation_recovery_empty_csv import apply_simulation_recovery_empty_csv_patch
+
 
 _PATCHED_FLAG = "_strict_simulation_recovery_runtime_limit_validation_applied"
 _BOOLEAN_CONTROL_FIELDS = (
@@ -21,6 +23,7 @@ def apply_simulation_recovery_runtime_limit_validation_patch() -> None:
 
     from . import simulation_recovery as recovery
 
+    apply_simulation_recovery_empty_csv_patch()
     if getattr(recovery, _PATCHED_FLAG, False):
         return
 

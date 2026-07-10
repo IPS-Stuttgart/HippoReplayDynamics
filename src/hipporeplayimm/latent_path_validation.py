@@ -33,14 +33,35 @@ def _patch_simulate_latent_path(recovery: Any) -> None:
             kwargs = dict(kwargs)
             kwargs["n_time"] = _positive_integer_value("n_time", kwargs["n_time"])
         if "state_space" in kwargs and kwargs["state_space"] is not None:
+            kwargs = dict(kwargs)
+            true_model = kwargs.get("true_model", "")
             _validate_latent_path_motion_sigmas(
-                kwargs.get("true_model", ""),
+                true_model,
+                kwargs["state_space"],
+            )
+            kwargs["state_space"] = _state_space_with_unused_sigmas_neutralized(
+                true_model,
                 kwargs["state_space"],
             )
         return original(*args, **kwargs)
 
     recovery.simulate_latent_path = checked_simulate_latent_path
     recovery._latent_path_n_time_validation_applied = True
+
+
+def _state_space_with_unused_sigmas_neutralized(true_model: Any, state_space: Any) -> Any:
+    """Prevent inactive model parameters from being evaluated by the legacy simulator."""
+
+    model = str(true_model).strip().lower()
+    if model == "diffusion":
+        return replace(
+            state_space,
+            momentum_sigma_cm_sqrt_s=0.0,
+            momentum_initial_sigma_cm_sqrt_s=0.0,
+        )
+    if model == "momentum":
+        return replace(state_space, diffusion_sigma_cm_sqrt_s=0.0)
+    return state_space
 
 
 def _patch_simulate_replay_event(recovery: Any) -> None:

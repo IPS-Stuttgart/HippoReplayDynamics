@@ -29,6 +29,20 @@ def _is_boolean_scalar(value: Any) -> bool:
     return False
 
 
+def _contains_complex_values(value: Any) -> bool:
+    """Return whether an array-like input contains complex numeric values."""
+
+    try:
+        raw = np.asarray(value)
+    except (TypeError, ValueError):
+        return False
+    if np.issubdtype(raw.dtype, np.complexfloating):
+        return True
+    if raw.dtype == object:
+        return any(isinstance(item, (complex, np.complexfloating)) for item in raw.flat)
+    return False
+
+
 def apply_kd_random_effects_validation_patch() -> None:
     """Install strict option validation on KD random-effects summaries."""
 
@@ -52,6 +66,8 @@ def apply_kd_random_effects_validation_patch() -> None:
 
 
 def _validate_model_evidence_inputs(log_evidence: Any, models: Any) -> tuple[np.ndarray, list[Any]]:
+    if _contains_complex_values(log_evidence):
+        raise ValueError("log_evidence must contain real values, not complex values")
     try:
         evidence_values = np.asarray(log_evidence, dtype=float)
     except (TypeError, ValueError) as exc:

@@ -56,6 +56,32 @@ def test_random_effects_rejects_invalid_evidence_shape() -> None:
         random_effects_model_probabilities(_log_evidence(), "ab")
 
 
+@pytest.mark.parametrize(
+    "log_evidence",
+    [
+        np.array(
+            [
+                [0.0 + 1.0j, -1.0],
+                [-0.5, 0.0],
+            ]
+        ),
+        np.array(
+            [
+                [np.complex128(0.0 + 1.0j), -1.0],
+                [-0.5, 0.0],
+            ],
+            dtype=object,
+        ),
+    ],
+    ids=["complex-dtype", "object-wrapped-complex"],
+)
+def test_random_effects_rejects_complex_evidence_before_float_coercion(
+    log_evidence: np.ndarray,
+) -> None:
+    with pytest.raises(ValueError, match="log_evidence.*complex"):
+        random_effects_model_probabilities(log_evidence, ["a", "b"])
+
+
 def test_random_effects_accepts_valid_sampler_options() -> None:
     rows = random_effects_model_probabilities(
         _log_evidence(),

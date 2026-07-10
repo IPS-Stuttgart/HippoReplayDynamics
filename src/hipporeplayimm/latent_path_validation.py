@@ -9,6 +9,10 @@ from typing import Any
 import numpy as np
 
 
+_MODEL_LIST_PATCHED_FLAG = "_simulation_recovery_model_list_validation_applied"
+_MODEL_LIST_WRAPPER_MARKER = "_simulation_recovery_model_list_validation_wrapper"
+
+
 def apply_latent_path_validation_patch() -> None:
     """Install synthetic-recovery input validation wrappers."""
 
@@ -22,6 +26,43 @@ def apply_latent_path_validation_patch() -> None:
         _patch_emissions_from_counts(recovery)
     if not getattr(recovery, "_recovery_event_count_validation_applied", False):
         _patch_run_session_simulation_recovery(recovery)
+    if not getattr(recovery, _MODEL_LIST_PATCHED_FLAG, False):
+        _patch_parse_model_list(recovery)
+
+
+def _patch_parse_model_list(recovery: Any) -> None:
+    current = recovery.parse_model_list
+    if getattr(current, _MODEL_LIST_WRAPPER_MARKER, False):
+        setattr(recovery, _MODEL_LIST_PATCHED_FLAG, True)
+        return
+
+    @wraps(current)
+    def checked_parse_model_list(spec: Any) -> tuple[str, ...]:
+        return current(_validated_model_list_spec(spec))
+
+    setattr(checked_parse_model_list, _MODEL_LIST_WRAPPER_MARKER, True)
+    setattr(checked_parse_model_list, "__hipporeplayimm_original__", current)
+    recovery.parse_model_list = checked_parse_model_list
+    setattr(recovery, _MODEL_LIST_PATCHED_FLAG, True)
+
+
+def _validated_model_list_spec(spec: Any) -> Any:
+    """Reject empty entries instead of silently changing the requested model set."""
+
+    if isinstance(spec, str):
+        if spec.strip() and "," in spec:
+            comma_parts = spec.split(",")
+            if any(not part.strip() for part in comma_parts):
+                raise ValueError("model list must not contain empty comma-separated entries")
+        return spec
+
+    try:
+        values = tuple(spec)
+    except TypeError:
+        return spec
+    if any(not str(value).strip() for value in values):
+        raise ValueError("model list must not contain empty entries")
+    return values
 
 
 def _patch_simulate_latent_path(recovery: Any) -> None:

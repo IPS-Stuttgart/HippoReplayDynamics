@@ -7,6 +7,8 @@ from typing import Any
 
 import numpy as np
 
+from .place_field_run_local_kinematics import apply_place_field_run_local_kinematics_patch
+
 
 _NUMERIC_ENCODING_CONFIG_FIELDS = (
     "bin_size_cm",
@@ -35,6 +37,7 @@ def apply_encoding_grid_extra_columns_patch() -> None:
 
     _apply_grid_extra_columns_patch(encoding)
     _apply_encoding_bool_validation_patch(encoding)
+    apply_place_field_run_local_kinematics_patch()
 
 
 def _apply_grid_extra_columns_patch(encoding) -> None:

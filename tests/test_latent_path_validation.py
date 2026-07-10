@@ -78,6 +78,39 @@ def test_simulate_latent_path_rejects_invalid_motion_sigmas(true_model, state_sp
 
 
 @pytest.mark.parametrize(
+    ("true_model", "state_space"),
+    [
+        (
+            "diffusion",
+            StateSpaceDecoderConfig(
+                momentum_sigma_cm_sqrt_s=np.nan,
+                momentum_initial_sigma_cm_sqrt_s=np.inf,
+            ),
+        ),
+        (
+            "momentum",
+            StateSpaceDecoderConfig(diffusion_sigma_cm_sqrt_s=np.nan),
+        ),
+    ],
+)
+def test_simulate_latent_path_ignores_invalid_unused_motion_sigmas(
+    true_model,
+    state_space,
+):
+    path = simulate_latent_path(
+        _small_encoding(),
+        true_model=true_model,
+        n_time=3,
+        dt=0.02,
+        rng=np.random.default_rng(1),
+        state_space=state_space,
+    )
+
+    assert path.shape == (3,)
+    assert np.all(path == 0)
+
+
+@pytest.mark.parametrize(
     ("raw_limit", "expected_limit"),
     [
         (None, None),

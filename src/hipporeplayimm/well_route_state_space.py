@@ -12,6 +12,8 @@ from .goal_state_space import _forward_backward_goal_mixture, _goal_transition_m
 from .models import EventScore, _posterior_diagnostics
 from .state_space_utils import _mean_entropy, _per_bin_sigma
 
+_BOOL_OR_TEXT_DTYPE_KINDS = {"b", "S", "U"}
+
 
 @dataclass
 class WellRouteStateSpaceReplayModel:
@@ -33,7 +35,7 @@ class WellRouteStateSpaceReplayModel:
     def score(self, emissions: LogEmissionTensor, bin_centers: np.ndarray) -> EventScore:
         if emissions.n_time == 0:
             raise ValueError("emissions must contain at least one time bin")
-        centers = np.asarray(bin_centers, dtype=float)
+        centers = _as_numeric_coordinates(bin_centers, "bin_centers")
         if centers.ndim != 2:
             raise ValueError("bin_centers must have shape (n_bins, position_dim)")
         if emissions.n_bins != centers.shape[0]:
@@ -100,7 +102,7 @@ class WellRouteStateSpaceReplayModel:
 
 
 def routes_from_wells(well_locations: np.ndarray, *, include_reverse: bool = True) -> np.ndarray:
-    wells = np.asarray(well_locations, dtype=float)
+    wells = _as_numeric_coordinates(well_locations, "well_locations")
     if wells.ndim != 2 or wells.shape[0] < 2:
         raise ValueError("well_locations must have shape (n_wells, position_dim) with at least two wells")
     if wells.shape[1] == 0:
@@ -120,7 +122,7 @@ def routes_from_wells(well_locations: np.ndarray, *, include_reverse: bool = Tru
 
 def _coerce_candidate_routes(routes: np.ndarray | None, centers: np.ndarray, max_default_points: int) -> np.ndarray:
     if routes is not None:
-        arr = np.asarray(routes, dtype=float)
+        arr = _as_numeric_coordinates(routes, "candidate_routes")
         if arr.ndim != 3 or arr.shape[0] == 0 or arr.shape[1] < 2 or arr.shape[2] != centers.shape[1]:
             raise ValueError("candidate_routes must have shape (n_routes, n_waypoints>=2, position_dim)")
         if not np.all(np.isfinite(arr)):
@@ -144,6 +146,29 @@ def _coerce_max_default_points(value: int) -> int:
     return max_points
 
 
+def _as_numeric_coordinates(values: object, name: str) -> np.ndarray:
+    """Coerce coordinate arrays without silently converting bool, text, or complex data."""
+
+    try:
+        raw = np.asarray(values)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must contain numeric real coordinates") from exc
+    if raw.dtype.kind in _BOOL_OR_TEXT_DTYPE_KINDS:
+        raise ValueError(f"{name} must contain numeric real coordinates, not boolean or text")
+    if raw.dtype.kind == "c":
+        raise ValueError(f"{name} must contain numeric real coordinates, not complex values")
+    if raw.dtype.kind == "O":
+        for item in raw.ravel():
+            if isinstance(item, (bool, np.bool_, str, bytes, np.str_, np.bytes_)):
+                raise ValueError(f"{name} must contain numeric real coordinates, not boolean or text")
+            if isinstance(item, (complex, np.complexfloating)):
+                raise ValueError(f"{name} must contain numeric real coordinates, not complex values")
+    try:
+        return np.asarray(values, dtype=float)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must contain numeric real coordinates") from exc
+
+
 def _route_target(route: np.ndarray, transition_number: int, n_transitions: int) -> np.ndarray:
     if n_transitions <= 0:
         return route[-1]
@@ -155,7 +180,7 @@ def _route_target(route: np.ndarray, transition_number: int, n_transitions: int)
 
 
 def _farthest_point_subset(points: np.ndarray, max_points: int) -> np.ndarray:
-    unique_points = _unique_points(np.asarray(points, dtype=float))
+    unique_points = _unique_points(_as_numeric_coordinates(points, "points"))
     if unique_points.shape[0] <= int(max_points):
         return unique_points.copy()
     selected = [int(np.argmin(np.sum(unique_points, axis=1)))]

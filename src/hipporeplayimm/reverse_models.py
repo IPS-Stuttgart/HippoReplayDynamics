@@ -310,12 +310,12 @@ def _mixture_log_posterior(left: np.ndarray | None, right: np.ndarray | None, we
     valid = [
         (np.asarray(post, dtype=float), float(weight))
         for post, weight in ((left, weights[0]), (right, weights[1]))
-        if post is not None
+        if post is not None and np.isfinite(weight) and weight > 0.0
     ]
     if not valid:
         return None
     stacked = np.stack(
-        [post + np.log(max(weight, np.finfo(float).tiny)) for post, weight in valid],
+        [post + np.log(weight) for post, weight in valid],
         axis=0,
     )
     out = logsumexp(stacked, axis=0)

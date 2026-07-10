@@ -31,6 +31,34 @@ def test_state_space_per_bin_sigma_rejects_string_dt(value):
         state_space._per_bin_sigma(85.0, value)
 
 
+@pytest.mark.parametrize(
+    "value",
+    [
+        85.0 + 1.0j,
+        np.complex128(85.0 + 1.0j),
+        np.asarray(85.0 + 1.0j),
+        np.array(85.0 + 1.0j, dtype=object),
+    ],
+)
+def test_state_space_per_bin_sigma_rejects_complex_sigma(value):
+    with pytest.raises(TypeError, match="sigma_cm_sqrt_s.*complex"):
+        state_space._per_bin_sigma(value, 0.003)
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        0.003 + 0.001j,
+        np.complex128(0.003 + 0.001j),
+        np.asarray(0.003 + 0.001j),
+        np.array(0.003 + 0.001j, dtype=object),
+    ],
+)
+def test_state_space_per_bin_sigma_rejects_complex_dt(value):
+    with pytest.raises(TypeError, match="dt_s.*complex"):
+        state_space._per_bin_sigma(85.0, value)
+
+
 def test_state_space_per_bin_sigma_keeps_valid_scalar_behavior():
     assert state_space._per_bin_sigma(85.0, 0.003) == pytest.approx(85.0 * np.sqrt(0.003))
 
@@ -43,3 +71,13 @@ def test_duration_occupancy_per_bin_sigma_uses_same_scalar_validation():
 def test_duration_occupancy_per_bin_sigma_rejects_string_values():
     with pytest.raises(TypeError, match="sigma_cm_sqrt_s"):
         duration_occupancy._per_bin_sigma("85.0", 0.003)
+
+
+def test_duration_occupancy_per_bin_sigma_rejects_complex_values():
+    with pytest.raises(TypeError, match="sigma_cm_sqrt_s.*complex"):
+        duration_occupancy._per_bin_sigma(np.complex128(85.0 + 1.0j), 0.003)
+
+
+def test_mode_transition_matrix_rejects_complex_stickiness():
+    with pytest.raises(TypeError, match="mode_stickiness.*complex"):
+        state_space._mode_transition_matrix(2, np.complex128(0.9 + 0.1j))

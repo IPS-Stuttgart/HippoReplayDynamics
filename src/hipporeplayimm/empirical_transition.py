@@ -130,6 +130,8 @@ def fit_empirical_transition_matrix(
         raise ValueError("min_speed_cm_s must be finite and nonnegative")
     position = _clean_position(session.position)
     times = position[:, 0]
+    if times.shape[0] > 1 and np.any(np.diff(times) <= 0.0):
+        raise ValueError("position times must be strictly increasing to fit empirical transitions")
     xy = position[:, 1:3]
     speed = _speed_cm_s_within_intervals(times, xy, session.run_times)
     in_run = _times_in_intervals(times, session.run_times)

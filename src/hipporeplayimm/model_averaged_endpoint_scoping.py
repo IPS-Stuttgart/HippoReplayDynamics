@@ -95,8 +95,6 @@ def _log_evidence_margin(exact: pd.DataFrame) -> float:
     logs = logs[np.isfinite(logs)]
     if logs.size > 1:
         return float(logs[0] - logs[1])
-    if logs.size == 1:
-        return np.inf
     return np.nan
 
 

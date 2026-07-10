@@ -3,10 +3,14 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
+from functools import wraps
 
 import numpy as np
 
 _PATCHED_FLAG = "_kd_impossible_emission_patch_applied"
+_KD_POISSON_WRAPPER_FLAG = "_kd_zero_rate_exact_support_wrapper"
+_KD_POISSON_ORIGINAL_ATTR = "__hipporeplayimm_kd_zero_rate_original__"
+_KD_POISSON_WRAPPER_VERSION = 1
 
 
 def apply_kd_impossible_emission_patch() -> None:
@@ -14,12 +18,59 @@ def apply_kd_impossible_emission_patch() -> None:
 
     from . import kd_reference as kd
 
+    _patch_kd_poisson_exact_support(kd)
     kd._scaled_emission = _scaled_emission
     kd._first_order_separable_log_evidence = _first_order_separable_log_evidence
     kd._second_order_separable_log_evidence = _second_order_separable_log_evidence
     kd.empirical_grid_prior = _empirical_grid_prior
     kd.best_grid_params = _best_grid_params
     setattr(kd, _PATCHED_FLAG, True)
+
+
+def _patch_kd_poisson_exact_support(kd) -> None:
+    """Preserve mathematically exact support in the KD Poisson likelihood."""
+
+    current = kd.poisson_log_emissions
+    if getattr(current, _KD_POISSON_WRAPPER_FLAG, None) == _KD_POISSON_WRAPPER_VERSION:
+        return
+    original = getattr(current, _KD_POISSON_ORIGINAL_ATTR, current)
+
+    @wraps(original)
+    def poisson_log_emissions(
+        spike_counts,
+        rates_hz,
+        dt,
+        *,
+        spike_rate_scale=1.0,
+    ):
+        from .poisson_input_boolean_validation import _restore_exact_zero_rate_support
+
+        log_likelihood = original(
+            spike_counts,
+            rates_hz,
+            dt,
+            spike_rate_scale=spike_rate_scale,
+        )
+        counts = np.asarray(spike_counts, dtype=float)
+        rates = np.asarray(rates_hz, dtype=float)
+        return _restore_exact_zero_rate_support(
+            log_likelihood,
+            spike_counts=counts,
+            rates_hz=rates,
+            dt=dt,
+            spike_rate_scale=float(spike_rate_scale),
+            cell_weights=np.ones(counts.shape[1], dtype=float),
+            likelihood_temperature=1.0,
+            negative_binomial_overdispersion=0.0,
+        )
+
+    setattr(
+        poisson_log_emissions,
+        _KD_POISSON_WRAPPER_FLAG,
+        _KD_POISSON_WRAPPER_VERSION,
+    )
+    setattr(poisson_log_emissions, _KD_POISSON_ORIGINAL_ATTR, original)
+    kd.poisson_log_emissions = poisson_log_emissions
 
 
 def _scaled_emission(log_emissions: np.ndarray, time_index: int) -> tuple[np.ndarray, float]:

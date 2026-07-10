@@ -2,10 +2,10 @@
 
 State-space diffusion and momentum models convert noise specified in
 ``cm/sqrt(s)`` to a per-bin standard deviation. Python booleans are numeric
-subclasses, so ``float(True)`` silently becomes ``1.0`` unless the helpers reject
-boolean values before coercion. Keep the guard at the shared helper boundary and
-at the duration-aware scorer's private duplicate so direct and public import
-surfaces enforce the same scalar contract.
+subclasses, and NumPy complex scalars can be coerced to floats by discarding the
+imaginary component, so validate scalar types before float conversion. Keep the
+guard at the shared helper boundary and at the duration-aware scorer's private
+duplicate so direct and public import surfaces enforce the same scalar contract.
 """
 
 from __future__ import annotations
@@ -42,7 +42,7 @@ def _is_string_scalar(value: Any) -> bool:
 
 
 def _reject_boolean_or_array_scalar(name: str, value: Any) -> None:
-    """Reject booleans, strings, and non-scalar values before float coercion."""
+    """Reject booleans, strings, complex values, and non-scalar inputs."""
 
     try:
         raw = np.asarray(value)
@@ -52,6 +52,8 @@ def _reject_boolean_or_array_scalar(name: str, value: Any) -> None:
         raise TypeError(f"{name} must be a numeric scalar")
     if _is_string_scalar(value):
         raise TypeError(f"{name} must be a numeric scalar, not string")
+    if np.issubdtype(raw.dtype, np.complexfloating):
+        raise TypeError(f"{name} must be real-valued, not complex")
     if isinstance(value, (bool, np.bool_)) or np.issubdtype(raw.dtype, np.bool_):
         raise TypeError(f"{name} must be numeric, not boolean")
     if raw.dtype == object:
@@ -59,6 +61,8 @@ def _reject_boolean_or_array_scalar(name: str, value: Any) -> None:
             item = raw.item()
         except ValueError as exc:
             raise TypeError(f"{name} must be a numeric scalar") from exc
+        if isinstance(item, (complex, np.complexfloating)):
+            raise TypeError(f"{name} must be real-valued, not complex")
         if isinstance(item, (bool, np.bool_)):
             raise TypeError(f"{name} must be numeric, not boolean")
 

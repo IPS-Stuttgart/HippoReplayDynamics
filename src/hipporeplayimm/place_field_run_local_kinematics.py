@@ -1,9 +1,9 @@
-"""Compute place-field kinematics independently inside each behavioral run bout.
+"""Compute encoder kinematics independently inside each behavioral run bout.
 
-The sorted-spike and KD reference encoders both derive movement speed and frame
-occupancy durations from the complete position time series before applying the
-``run_times`` mask.  Large gaps between separate run bouts therefore leak into
-``numpy.gradient`` and frame-duration estimates.  This runtime patch preserves
+The sorted-spike, KD reference, and clusterless encoders derive movement speed
+and frame occupancy durations from position samples before applying the
+``run_times`` mask. Large gaps between separate run bouts therefore leak into
+``numpy.gradient`` and frame-duration estimates. This runtime patch preserves
 the existing encoder implementations while evaluating their private kinematic
 helpers independently for every run interval.
 """
@@ -73,7 +73,7 @@ def _call_with_run_local_kinematics(
     base_speed = function_globals.get("_speed_cm_s")
     base_durations = function_globals.get("_frame_durations")
     if not callable(base_speed) or not callable(base_durations):
-        raise RuntimeError("place-field encoder no longer exposes its kinematic helpers")
+        raise RuntimeError("encoder no longer exposes its kinematic helpers")
 
     intervals = _run_intervals(session.run_times)
     patched_globals = dict(function_globals)
@@ -126,8 +126,16 @@ def _patch_encoder(module: Any, function_name: str) -> None:
     setattr(module, _PATCHED_FLAG, True)
 
 
+def apply_clusterless_run_local_kinematics_patch() -> None:
+    """Install run-local speed and occupancy durations on the clusterless encoder."""
+
+    from . import clusterless
+
+    _patch_encoder(clusterless, "fit_clusterless_mark_encoding")
+
+
 def apply_place_field_run_local_kinematics_patch() -> None:
-    """Install run-local speed and occupancy durations on both encoders."""
+    """Install run-local speed and occupancy durations on place-field encoders."""
 
     from . import encoding, kd_reference
 
@@ -135,4 +143,7 @@ def apply_place_field_run_local_kinematics_patch() -> None:
     _patch_encoder(kd_reference, "fit_kd_place_field_encoding")
 
 
-__all__ = ["apply_place_field_run_local_kinematics_patch"]
+__all__ = [
+    "apply_clusterless_run_local_kinematics_patch",
+    "apply_place_field_run_local_kinematics_patch",
+]

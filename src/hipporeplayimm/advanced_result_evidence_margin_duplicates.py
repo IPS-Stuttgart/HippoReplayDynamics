@@ -1,4 +1,4 @@
-"""Keep evidence-margin diagnostics from comparing duplicate rows of one model."""
+"""Keep evidence-margin diagnostics finite and distinct by model."""
 
 from __future__ import annotations
 
@@ -61,8 +61,11 @@ def _collapse_duplicate_models(diagnostics, scores: pd.DataFrame, group_cols: tu
     grouped = ok.groupby(list(group_cols), sort=False, dropna=False) if group_cols else (((), ok),)
     for _, group in grouped:
         group = group.copy()
-        group[evidence_col] = pd.to_numeric(group[evidence_col], errors="coerce")
-        group = group.dropna(subset=[evidence_col]).sort_values(evidence_col, ascending=False, kind="stable")
+        numeric_evidence = pd.to_numeric(group[evidence_col], errors="coerce")
+        finite_evidence = numeric_evidence.notna() & np.isfinite(numeric_evidence)
+        group = group.loc[finite_evidence].copy()
+        group[evidence_col] = numeric_evidence.loc[finite_evidence].astype(float)
+        group = group.sort_values(evidence_col, ascending=False, kind="stable")
         if not group.empty:
             rows.append(group.drop_duplicates(model_col, keep="first"))
     return pd.concat(rows, ignore_index=False) if rows else ok.iloc[0:0].copy()

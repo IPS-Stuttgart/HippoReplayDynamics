@@ -193,9 +193,16 @@ def _parse_nonnegative_config_value(name: str, value: Any) -> float:
 def _parse_config_scalar(name: str, value: Any) -> float:
     if isinstance(value, (bool, np.bool_)):
         raise TypeError(f"{name} must be numeric, not boolean")
-    raw = np.asarray(value)
+    try:
+        raw = np.asarray(value)
+    except (TypeError, ValueError) as exc:
+        raise TypeError(f"{name} must be a scalar") from exc
     if raw.ndim != 0:
         raise TypeError(f"{name} must be a scalar")
+    if raw.dtype.kind in {"S", "U"}:
+        raise TypeError(f"{name} must be numeric, not text")
+    if raw.dtype == object and isinstance(raw.item(), (str, bytes, np.str_, np.bytes_)):
+        raise TypeError(f"{name} must be numeric, not text")
     try:
         numeric = float(raw)
     except (TypeError, ValueError, OverflowError) as exc:

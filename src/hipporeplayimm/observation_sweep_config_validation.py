@@ -8,6 +8,7 @@ from typing import Any
 import numpy as np
 
 _PATCHED_FLAG = "_observation_sweep_finite_config_validation_patch_applied"
+_STRING_TYPES = (str, bytes, np.str_, np.bytes_)
 _POSITIVE_GRID_FIELDS = (
     "bin_sizes_cm",
     "min_occupancy_s",
@@ -82,8 +83,11 @@ def _validate_sessions(sessions: Any) -> None:
 
 
 def _grid_values(config: Any, name: str) -> tuple[Any, ...]:
+    raw = getattr(config, name)
+    if isinstance(raw, _STRING_TYPES):
+        raise ValueError(f"{name} must be a non-empty sequence of numeric values")
     try:
-        values = tuple(getattr(config, name))
+        values = tuple(raw)
     except TypeError as exc:
         raise ValueError(f"{name} must contain at least one value") from exc
     if not values:
@@ -100,8 +104,11 @@ def _finite_float(name: str, value: Any) -> float:
         raise ValueError(f"{name} values must be finite scalars") from exc
     if array.ndim != 0:
         raise ValueError(f"{name} values must be finite scalars")
+    item = array.item()
+    if isinstance(item, _STRING_TYPES):
+        raise ValueError(f"{name} values must be finite numeric scalars, not text")
     try:
-        numeric = float(array)
+        numeric = float(item)
     except (TypeError, ValueError) as exc:
         raise ValueError(f"{name} values must be finite scalars") from exc
     if not np.isfinite(numeric):
@@ -118,8 +125,11 @@ def _positive_integer(name: str, value: Any) -> int:
         raise ValueError(f"{name} must be a positive integer") from exc
     if array.ndim != 0:
         raise ValueError(f"{name} must be a positive integer")
+    item = array.item()
+    if isinstance(item, _STRING_TYPES):
+        raise ValueError(f"{name} must be a positive integer, not text")
     try:
-        numeric = float(array)
+        numeric = float(item)
     except (TypeError, ValueError) as exc:
         raise ValueError(f"{name} must be a positive integer") from exc
     if not np.isfinite(numeric) or numeric <= 0.0 or not numeric.is_integer():

@@ -114,6 +114,8 @@ def _as_float(value) -> tuple[float, bool]:
         return float("nan"), True
     if np.issubdtype(array.dtype, np.bool_):
         return float("nan"), True
+    if np.issubdtype(array.dtype, np.complexfloating):
+        return float("nan"), True
     if array.dtype == object:
         try:
             item = array.item()
@@ -123,6 +125,8 @@ def _as_float(value) -> tuple[float, bool]:
             return float("nan"), False
         if isinstance(item, (bool, np.bool_)):
             return float("nan"), True
+        if isinstance(item, (complex, np.complexfloating)):
+            return float("nan"), True
         return _coerced_metric_float(item)
     return _coerced_metric_float(array)
 
@@ -131,7 +135,7 @@ def _coerced_metric_float(value) -> tuple[float, bool]:
     try:
         numeric = float(value)
     except (TypeError, ValueError, OverflowError):
-        return float("nan"), False
+        return float("nan"), True
     if np.isnan(numeric):
         return float("nan"), False
     if not np.isfinite(numeric):

@@ -70,6 +70,22 @@ def _validated_transition_matrix(transition: csr_matrix, n_bins: int) -> csr_mat
     return matrix
 
 
+def _adjacent_times_share_interval(times: np.ndarray, intervals: np.ndarray) -> np.ndarray:
+    """Return whether each adjacent timestamp pair lies in one common interval."""
+
+    shared = np.zeros(max(times.shape[0] - 1, 0), dtype=bool)
+    if shared.size == 0:
+        return shared
+    for start, end in intervals:
+        shared |= (
+            (times[:-1] >= start)
+            & (times[:-1] <= end)
+            & (times[1:] >= start)
+            & (times[1:] <= end)
+        )
+    return shared
+
+
 def fit_empirical_transition_matrix(
     session: ReplaySession,
     encoding: EncodingModel,
@@ -96,6 +112,7 @@ def fit_empirical_transition_matrix(
     xy = position[:, 1:3]
     speed = _speed_cm_s(times, xy)
     in_run = _times_in_intervals(times, session.run_times)
+    same_run_interval = _adjacent_times_share_interval(times, session.run_times)
     bins = encoding.positions_to_flat_bins(xy)
     valid = in_run & (speed >= min_speed) & (bins >= 0)
     n_bins = encoding.n_bins
@@ -103,7 +120,7 @@ def fit_empirical_transition_matrix(
     if self_loop_count > 0.0:
         counts += np.eye(n_bins) * self_loop_count
     for idx in range(len(bins) - 1):
-        if valid[idx] and valid[idx + 1]:
+        if valid[idx] and valid[idx + 1] and same_run_interval[idx]:
             src = int(bins[idx])
             dst = int(bins[idx + 1])
             counts[dst, src] += 1.0

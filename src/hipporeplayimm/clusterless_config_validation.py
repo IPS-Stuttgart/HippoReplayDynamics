@@ -8,6 +8,9 @@ import sys
 import numpy as np
 
 from .encoding import EncodingConfig, _validate_encoding_config
+from .place_field_run_local_kinematics import (
+    apply_clusterless_run_local_kinematics_patch,
+)
 
 _PATCH_MARKER = "_clusterless_encoding_config_validation_patch"
 _MARK_VALUE_PATCH_MARKER = "_clusterless_mark_value_validation_patch"
@@ -30,6 +33,7 @@ def apply_clusterless_encoding_config_validation_patch() -> None:
 
     import hipporeplayimm.clusterless as clusterless
 
+    apply_clusterless_run_local_kinematics_patch()
     _patch_clusterless_mark_value_validation(clusterless)
 
     current = clusterless.fit_clusterless_mark_encoding

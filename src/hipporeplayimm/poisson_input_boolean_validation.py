@@ -5,6 +5,7 @@ from __future__ import annotations
 from functools import wraps
 
 import numpy as np
+from scipy.special import gammaln
 
 _PATCHED_FLAG = "_poisson_input_boolean_validation_patch_applied"
 _ORIGINAL_ATTR = "__hipporeplayimm_original__"
@@ -45,16 +46,22 @@ def _reusable_cell_weights(cell_weights):
         return cell_weights
 
 
-def _floored_zero_count_log_probability(overdispersion: float) -> float:
-    """Return the implementation's log PMF for zero count at its rate floor."""
+def _expected_counts(
+    rates_hz: np.ndarray,
+    dt: float | np.ndarray,
+    spike_rate_scale: float,
+    n_time: int,
+) -> np.ndarray:
+    """Return one expected-count tensor while retaining exact zero rates."""
 
-    tiny = np.finfo(float).tiny
-    if overdispersion == 0.0:
-        return -tiny
-    size = 1.0 / overdispersion
-    if not np.isfinite(size):
-        return 0.0
-    return float(size * (np.log(size) - np.log(size + tiny)))
+    durations = np.asarray(dt, dtype=float)
+    if durations.ndim == 0:
+        raw = rates_hz[None, :, :] * float(durations) * spike_rate_scale
+    else:
+        raw = durations[:, None, None] * rates_hz[None, :, :] * spike_rate_scale
+    if raw.shape[0] == 1 and n_time != 1:
+        raw = np.broadcast_to(raw, (n_time, rates_hz.shape[0], rates_hz.shape[1]))
+    return np.where(rates_hz[None, :, :] == 0.0, 0.0, np.maximum(raw, np.finfo(float).tiny))
 
 
 def _restore_exact_zero_rate_support(
@@ -62,35 +69,47 @@ def _restore_exact_zero_rate_support(
     *,
     spike_counts: np.ndarray,
     rates_hz: np.ndarray,
+    dt: float | np.ndarray,
+    spike_rate_scale: float,
     cell_weights: np.ndarray,
     likelihood_temperature: float,
     negative_binomial_overdispersion: float,
 ) -> np.ndarray:
-    """Undo the numeric rate floor wherever the configured rate is exactly zero."""
+    """Recompute bins whose active cells include an exactly zero rate."""
 
     zero_rate = rates_hz == 0.0
-    if not np.any(zero_rate):
+    active_zero_rate = zero_rate & (cell_weights[:, None] > 0.0)
+    affected_bins = np.any(active_zero_rate, axis=0)
+    if not np.any(affected_bins):
         return log_likelihood
 
-    active_zero_rate = zero_rate & (cell_weights[:, None] > 0.0)
+    counts = spike_counts[:, :, None]
+    expected = _expected_counts(rates_hz, dt, spike_rate_scale, spike_counts.shape[0])
+    safe_expected = np.where(zero_rate[None, :, :], 1.0, expected)
+
+    if negative_binomial_overdispersion == 0.0:
+        terms = counts * np.log(safe_expected) - safe_expected - gammaln(counts + 1.0)
+    else:
+        size = 1.0 / negative_binomial_overdispersion
+        terms = (
+            gammaln(counts + size)
+            - gammaln(size)
+            - gammaln(counts + 1.0)
+            + size * (np.log(size) - np.log(size + safe_expected))
+            + counts * (np.log(safe_expected) - np.log(size + safe_expected))
+        )
+    terms = np.where(zero_rate[None, :, :], 0.0, terms)
+    exact = np.einsum("tcb,c->tb", terms, cell_weights, optimize=True)
+    exact /= likelihood_temperature
+
     impossible = np.any(
-        (spike_counts[:, :, None] > 0.0) & active_zero_rate[None, :, :],
+        (counts > 0.0) & active_zero_rate[None, :, :],
         axis=1,
     )
+    exact[impossible] = -np.inf
 
     corrected = np.asarray(log_likelihood, dtype=float).copy()
-    zero_count_weight = np.einsum(
-        "tc,cb,c->tb",
-        spike_counts == 0.0,
-        zero_rate,
-        cell_weights,
-        optimize=True,
-    )
-    floored_log_probability = _floored_zero_count_log_probability(
-        negative_binomial_overdispersion
-    )
-    corrected -= floored_log_probability * zero_count_weight / likelihood_temperature
-    corrected[impossible] = -np.inf
+    corrected[:, affected_bins] = exact[:, affected_bins]
     return corrected
 
 
@@ -136,6 +155,8 @@ def apply_poisson_input_boolean_validation_patch() -> None:
             log_likelihood,
             spike_counts=counts,
             rates_hz=rates,
+            dt=dt,
+            spike_rate_scale=float(spike_rate_scale),
             cell_weights=weights,
             likelihood_temperature=float(likelihood_temperature),
             negative_binomial_overdispersion=float(negative_binomial_overdispersion),

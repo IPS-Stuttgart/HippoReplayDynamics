@@ -218,8 +218,10 @@ def paired_event_deltas(
     subset = frame[frame["model"].astype(str).isin([primary_model, baseline_model])].copy()
     if subset.empty:
         raise ValueError("none of the requested models were found in the score table")
-    subset[value_column] = pd.to_numeric(subset[value_column], errors="coerce")
-    subset = subset.dropna(subset=[value_column])
+    numeric_values = pd.to_numeric(subset[value_column], errors="coerce")
+    finite_values = numeric_values.notna() & np.isfinite(numeric_values)
+    subset = subset.loc[finite_values].copy()
+    subset[value_column] = numeric_values.loc[finite_values].astype(float)
     grouped = (
         subset.groupby([*ids, "model"], sort=False, dropna=False)
         .agg(

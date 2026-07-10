@@ -7,6 +7,7 @@ from typing import Any
 import numpy as np
 
 from .simulation_recovery_empty_csv import apply_simulation_recovery_empty_csv_patch
+from .simulation_recovery_overdispersion import apply_simulation_recovery_overdispersion_patch
 
 
 _PATCHED_FLAG = "_strict_simulation_recovery_runtime_limit_validation_applied"
@@ -24,6 +25,7 @@ def apply_simulation_recovery_runtime_limit_validation_patch() -> None:
     from . import simulation_recovery as recovery
 
     apply_simulation_recovery_empty_csv_patch()
+    apply_simulation_recovery_overdispersion_patch()
     if getattr(recovery, _PATCHED_FLAG, False):
         return
 

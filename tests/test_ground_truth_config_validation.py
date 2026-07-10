@@ -31,6 +31,40 @@ def test_ground_truth_config_rejects_boolean_window() -> None:
 
 
 @pytest.mark.parametrize(
+    "value",
+    [
+        "10.0",
+        b"10.0",
+        np.str_("10.0"),
+        np.bytes_(b"10.0"),
+        np.array("10.0"),
+        np.array("10.0", dtype=object),
+    ],
+)
+def test_ground_truth_config_rejects_text_numeric_values(value) -> None:
+    hipporeplayimm.apply_runtime_patches()
+
+    with pytest.raises(TypeError, match="visit_radius_cm"):
+        gt.GroundTruthConfig(visit_radius_cm=value)
+
+
+@pytest.mark.parametrize(
+    "values",
+    [
+        ("7.5", 10.0),
+        (b"7.5", 10.0),
+        np.array(["7.5", "10.0"]),
+        np.array(["7.5", 10.0], dtype=object),
+    ],
+)
+def test_ground_truth_sensitivity_config_rejects_text_numeric_grid_values(values) -> None:
+    hipporeplayimm.apply_runtime_patches()
+
+    with pytest.raises(TypeError, match="visit_radii_cm"):
+        gt.GroundTruthSensitivityConfig(visit_radii_cm=values)
+
+
+@pytest.mark.parametrize(
     ("kwargs", "match"),
     [
         ({"visit_radii_cm": ()}, "visit_radii_cm"),

@@ -10,6 +10,7 @@ from scipy.special import logsumexp
 _PATCHED_FLAG = "_candidate_active_support_validation_patch_applied"
 _PAIR_POSTERIOR_PATCHED_FLAG = "_candidate_pair_posterior_exact_support_patch_applied"
 _PAIR_POSTERIOR_WRAPPER_FLAG = "_candidate_pair_posterior_exact_support_wrapper"
+_SPARSE_MATVEC_WRAPPER_FLAG = "_sparse_diffusion_exact_support_wrapper"
 
 
 def _validate_active_support_rows(values: np.ndarray) -> None:
@@ -41,6 +42,7 @@ def apply_candidate_active_support_validation_patch() -> None:
         state_space_model._masked_candidate_support_log_values = masked_candidate_support_log_values
 
     _patch_candidate_pair_posteriors()
+    _patch_sparse_diffusion_exact_support()
 
 
 def _patch_candidate_pair_posteriors() -> None:
@@ -81,6 +83,34 @@ def _patch_candidate_pair_posteriors() -> None:
         models._pair_previous_posterior = pair_previous_posterior
 
     setattr(models, _PAIR_POSTERIOR_PATCHED_FLAG, True)
+
+
+def _patch_sparse_diffusion_exact_support() -> None:
+    """Keep unreachable sparse-diffusion states at exact zero probability."""
+
+    from . import models
+
+    current = models._log_sparse_matvec
+    if getattr(current, _SPARSE_MATVEC_WRAPPER_FLAG, False):
+        return
+
+    @wraps(current)
+    def log_sparse_matvec(log_alpha, transition):
+        log_alpha = np.asarray(log_alpha, dtype=float)
+        result = np.full(log_alpha.shape, -np.inf, dtype=float)
+        for src, (dst_indices, log_weights) in enumerate(transition):
+            values = log_alpha[src] + np.asarray(log_weights, dtype=float)
+            for dst, value in zip(
+                np.asarray(dst_indices, dtype=int),
+                values,
+                strict=True,
+            ):
+                result[int(dst)] = np.logaddexp(result[int(dst)], value)
+        return result
+
+    setattr(log_sparse_matvec, _SPARSE_MATVEC_WRAPPER_FLAG, True)
+    setattr(log_sparse_matvec, "__hipporeplayimm_original__", current)
+    models._log_sparse_matvec = log_sparse_matvec
 
 
 def _restrict_log_posterior_to_candidates(

@@ -301,10 +301,13 @@ def add_shuffle_p_values(real_scores: pd.DataFrame, control_scores: pd.DataFrame
         p_values.append(p_value)
 
     out = real_scores.copy()
-    out[_SHUFFLE_SCOPE_KEY_COLUMN] = real_keys
     out["shuffle_p_value"] = p_values
-    out = out.merge(summaries.reset_index(), on=_SHUFFLE_SCOPE_KEY_COLUMN, how="left")
-    return out.drop(columns=[_SHUFFLE_SCOPE_KEY_COLUMN])
+    # Map summaries through the index-aligned scope keys.  A DataFrame merge
+    # would replace the caller's index, which can silently misalign annotated
+    # score rows when downstream code assigns the result by index.
+    for column in summaries.columns:
+        out[column] = real_keys.map(summaries[column])
+    return out
 
 
 def _shuffle_p_value_group_columns(real_scores: pd.DataFrame, control_scores: pd.DataFrame) -> list[str]:

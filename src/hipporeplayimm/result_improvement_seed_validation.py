@@ -83,8 +83,7 @@ def apply_result_improvement_seed_validation_patch() -> None:
         _BOOTSTRAP_WRAPPER_FLAG,
         "original_bootstrap",
     ):
-        current_bootstrap = result_improvements.hierarchical_bootstrap_ci
-        original_bootstrap = getattr(current_bootstrap, _ORIGINAL_ATTR, current_bootstrap)
+        original_bootstrap = result_improvements.hierarchical_bootstrap_ci
 
         @wraps(original_bootstrap)
         def hierarchical_bootstrap_ci(
@@ -120,8 +119,7 @@ def apply_result_improvement_seed_validation_patch() -> None:
         _SIGN_FLIP_WRAPPER_FLAG,
         "original_sign_flip",
     ):
-        current_sign_flip = result_improvements.paired_sign_flip_p_value
-        original_sign_flip = getattr(current_sign_flip, _ORIGINAL_ATTR, current_sign_flip)
+        original_sign_flip = result_improvements.paired_sign_flip_p_value
 
         @wraps(original_sign_flip)
         def paired_sign_flip_p_value(

@@ -5,15 +5,13 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
+from .benchmark_relative_grouping import _BENCHMARK_RELATIVE_SCOPE_COLUMNS
+
 _MODEL_AVERAGE_BASE_COLUMNS = ("session", "event_index")
 _MODEL_AVERAGE_SCOPE_COLUMNS = (
     "benchmark_random_seed",
     "benchmark_cell_split_index",
-    "benchmark_cell_split_seed",
-    "benchmark_event_subset_seed",
-    "benchmark_test_cell_fraction",
-    "benchmark_cell_split_strategy",
-    "benchmark_cell_split_strata",
+    *_BENCHMARK_RELATIVE_SCOPE_COLUMNS,
     "train_cell_ids",
     "test_cell_ids",
     "window_role",

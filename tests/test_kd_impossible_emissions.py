@@ -33,6 +33,51 @@ def test_scaled_emission_rejects_nan_or_positive_infinity_rows():
             kd_reference._scaled_emission(log_emissions, 0)
 
 
+def test_stationary_gaussian_kd_preserves_disjoint_latent_support():
+    apply_runtime_patches()
+
+    transition = np.eye(2)
+    log_emissions = np.array(
+        [
+            [0.0, -np.inf, -np.inf, -np.inf],
+            [-np.inf, 0.0, -np.inf, -np.inf],
+        ],
+        dtype=float,
+    )
+
+    score = kd_reference.kd_stationary_gaussian_log_evidence_from_transitions(
+        log_emissions,
+        2,
+        2,
+        transition,
+    )
+
+    assert np.isneginf(score)
+    assert not np.isnan(score)
+
+
+def test_stationary_gaussian_kd_keeps_feasible_exact_support_score():
+    apply_runtime_patches()
+
+    transition = np.eye(2)
+    log_emissions = np.array(
+        [
+            [0.0, -np.inf, -np.inf, -np.inf],
+            [0.0, -np.inf, -np.inf, -np.inf],
+        ],
+        dtype=float,
+    )
+
+    score = kd_reference.kd_stationary_gaussian_log_evidence_from_transitions(
+        log_emissions,
+        2,
+        2,
+        transition,
+    )
+
+    assert score == pytest.approx(-np.log(4.0))
+
+
 def test_first_order_kd_returns_negative_infinity_for_impossible_emission_rows():
     transition = np.eye(2)
     impossible = [-np.inf, -np.inf, -np.inf, -np.inf]

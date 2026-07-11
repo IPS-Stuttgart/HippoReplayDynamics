@@ -22,6 +22,7 @@ def apply_kd_impossible_emission_patch() -> None:
     kd._scaled_emission = _scaled_emission
     kd._first_order_separable_log_evidence = _first_order_separable_log_evidence
     kd._second_order_separable_log_evidence = _second_order_separable_log_evidence
+    kd.kd_stationary_gaussian_log_evidence_from_transitions = _stationary_gaussian_log_evidence_from_transitions
     kd.empirical_grid_prior = _empirical_grid_prior
     kd.best_grid_params = _best_grid_params
     setattr(kd, _PATCHED_FLAG, True)
@@ -81,6 +82,36 @@ def _scaled_emission(log_emissions: np.ndarray, time_index: int) -> tuple[np.nda
     if np.isneginf(offset):
         return np.zeros_like(row, dtype=float), offset
     return np.exp(row - offset), offset
+
+
+def _stationary_gaussian_log_evidence_from_transitions(
+    log_emissions: np.ndarray,
+    n_bins_x: int,
+    n_bins_y: int,
+    transition_x: np.ndarray,
+    transition_y: np.ndarray | None = None,
+) -> float:
+    """Score the KD stationary-Gaussian model without inventing support.
+
+    Zero predictive mass is mathematically impossible for the corresponding
+    latent center.  Keeping those entries at ``-inf`` is essential when
+    different time bins have disjoint latent-center support.
+    """
+
+    from scipy.special import logsumexp
+
+    transition_y = transition_x if transition_y is None else transition_y
+    log_terms = np.zeros((n_bins_x, n_bins_y), dtype=float)
+    for time_index in range(log_emissions.shape[0]):
+        emission, offset = _scaled_emission(log_emissions, time_index)
+        weighted = transition_x.T @ emission.reshape(n_bins_x, n_bins_y) @ transition_y
+        positive = weighted > 0.0
+        if not np.any(positive):
+            return float("-inf")
+        log_weighted = np.full(weighted.shape, float("-inf"), dtype=float)
+        log_weighted[positive] = np.log(weighted[positive])
+        log_terms += log_weighted + offset
+    return float(logsumexp(log_terms.reshape(-1) - np.log(log_emissions.shape[1])))
 
 
 def _first_order_separable_log_evidence(log_emissions: np.ndarray, n_bins_x: int, n_bins_y: int, transition: np.ndarray) -> float:

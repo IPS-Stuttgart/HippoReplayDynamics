@@ -69,3 +69,10 @@ def test_posterior_predictive_poisson_log_score_rejects_invalid_inputs():
 
     with pytest.raises(ValueError, match="observed_counts must contain integer count values"):
         posterior_predictive_poisson_log_score(np.array([[0.5]]), np.array([[1.0]]))
+
+
+def test_posterior_predictive_poisson_log_score_preserves_zero_mean_support():
+    assert posterior_predictive_poisson_log_score(np.array([[0.0]]), np.array([[0.0]])) == 0.0
+    assert np.isneginf(
+        posterior_predictive_poisson_log_score(np.array([[1.0]]), np.array([[0.0]]))
+    )

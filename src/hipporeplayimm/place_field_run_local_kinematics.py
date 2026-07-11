@@ -242,14 +242,14 @@ def _synchronize_aliases(function_name: str, original: Any, replacement: Any) ->
             setattr(module, function_name, replacement)
 
 
-def _contains_run_local_wrapper(function: Any) -> bool:
-    """Return whether a wrapper chain already contains this patch."""
+def _find_run_local_wrapper(function: Any) -> Any | None:
+    """Return the installed run-local wrapper from a ``__wrapped__`` chain."""
 
     current = function
     seen: set[int] = set()
     while callable(current) and id(current) not in seen:
         if getattr(current, _WRAPPER_MARKER, False):
-            return True
+            return current
         seen.add(id(current))
         wrapped = getattr(current, "__wrapped__", None)
         if callable(wrapped):
@@ -260,12 +260,18 @@ def _contains_run_local_wrapper(function: Any) -> bool:
             current = original
             continue
         break
-    return False
+    return None
 
 
 def _patch_encoder(module: Any, function_name: str) -> None:
     current = getattr(module, function_name)
-    if _contains_run_local_wrapper(current):
+    installed = _find_run_local_wrapper(current)
+    if installed is not None:
+        original = getattr(installed, _ORIGINAL_ATTR, None)
+        if original is not None:
+            _synchronize_aliases(function_name, original, current)
+        if installed is not current:
+            _synchronize_aliases(function_name, installed, current)
         setattr(module, _PATCHED_FLAG, True)
         return
 

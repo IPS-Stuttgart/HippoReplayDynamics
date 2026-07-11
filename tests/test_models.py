@@ -400,12 +400,14 @@ def test_pyrecest_goal_particle_model_uses_position_proposal_when_available():
         jump_probability=0.0,
         goal_reset_probability=0.0,
         position_proposal_probability=1.0,
+        position_proposal_ess_threshold=None,
     )
 
     score = model.score(emissions, centers)
 
     assert np.isfinite(score.log_likelihood)
     assert score.diagnostics["pyrecest_position_proposal_probability"] == 1.0
+    assert score.diagnostics["pyrecest_position_proposal_ess_threshold"] == "none"
     assert score.diagnostics["pyrecest_last_position_proposal_fraction"] == 1.0
 
 

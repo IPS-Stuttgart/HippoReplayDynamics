@@ -35,6 +35,7 @@ _YAML_AMBIGUOUS_STRING_SCALARS = {
 }
 _YAML_QUOTE_TRIGGER_CHARS = ":#[]{}&*!|>'\"%@`\r\n"
 _YAML_SCALAR_PATCH_FLAG = "_benchmark_settings_yaml_scalar_patch_applied"
+_YAML_SCALAR_WRAPPER_FLAG = "_benchmark_settings_yaml_scalar_wrapper"
 
 
 def apply_benchmark_metadata_scope_patch() -> None:
@@ -66,11 +67,18 @@ def apply_benchmark_metadata_scope_patch() -> None:
 
 
 def _patch_benchmark_settings_yaml_scalars() -> None:
-    """Quote string scalars that YAML would otherwise load as non-strings."""
+    """Quote YAML-ambiguous strings in every settings writer."""
 
-    from . import result_improvements as ri
+    from . import observation_sweep
+    from . import result_improvements
+    from . import simulation_recovery
 
-    if getattr(ri, _YAML_SCALAR_PATCH_FLAG, False):
+    modules = (result_improvements, observation_sweep, simulation_recovery)
+    if all(
+        getattr(module, _YAML_SCALAR_PATCH_FLAG, False)
+        and getattr(getattr(module, "_yaml_scalar", None), _YAML_SCALAR_WRAPPER_FLAG, False)
+        for module in modules
+    ):
         return
 
     def yaml_scalar(value: object) -> str:
@@ -85,8 +93,10 @@ def _patch_benchmark_settings_yaml_scalars() -> None:
             return json.dumps(text)
         return text
 
-    ri._yaml_scalar = yaml_scalar
-    setattr(ri, _YAML_SCALAR_PATCH_FLAG, True)
+    setattr(yaml_scalar, _YAML_SCALAR_WRAPPER_FLAG, True)
+    for module in modules:
+        module._yaml_scalar = yaml_scalar
+        setattr(module, _YAML_SCALAR_PATCH_FLAG, True)
 
 
 def _yaml_string_needs_quotes(text: str) -> bool:

@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import numpy as np
 import pandas as pd
-from scipy.special import gammaln
+from scipy.special import gammaln, xlogy
 
 from .evidence_status_coercion import _status_is_success_or_missing
 
@@ -101,8 +101,7 @@ def apply_advanced_result_status_patch() -> None:
         expected = _validated_nonnegative_matrix(expected_counts, "expected_counts")
         if observed.shape != expected.shape:
             raise ValueError("observed_counts and expected_counts must have matching shapes")
-        expected = np.maximum(expected, np.finfo(float).tiny)
-        return float(np.sum(observed * np.log(expected) - expected - gammaln(observed + 1.0)))
+        return float(np.sum(xlogy(observed, expected) - expected - gammaln(observed + 1.0)))
 
     setattr(successful_rows, _SUCCESSFUL_ROWS_WRAPPER_FLAG, True)
     setattr(posterior_predictive_count_checks, _COUNT_CHECKS_WRAPPER_FLAG, True)

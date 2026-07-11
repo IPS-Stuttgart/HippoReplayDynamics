@@ -1,11 +1,9 @@
 """Compute encoder kinematics independently inside each behavioral run bout.
 
-The sorted-spike, KD reference, and clusterless encoders derive movement speed
-and frame occupancy durations from position samples before applying the
-``run_times`` mask. Large gaps between separate run bouts therefore leak into
-``numpy.gradient`` and frame-duration estimates. This runtime patch preserves
-the existing encoder implementations while evaluating their private kinematic
-helpers independently for every run interval.
+The sorted-spike, KD reference, clusterless, and behavioral position-validation
+paths derive movement speed and frame occupancy durations from position samples.
+Large gaps between separate run bouts must not leak into ``numpy.gradient``,
+occupancy durations, or training intervals.
 """
 
 from __future__ import annotations
@@ -63,6 +61,120 @@ def _durations_within_run_intervals(
     return durations
 
 
+def _durations_split_at_run_boundaries(
+    times: np.ndarray,
+    intervals: np.ndarray,
+    base_durations: Callable[[np.ndarray], np.ndarray],
+) -> np.ndarray:
+    """Compute frame durations per run bout while retaining out-of-run samples."""
+
+    times = np.asarray(times, dtype=float)
+    if times.size == 0 or intervals.size == 0:
+        return base_durations(times)
+
+    durations = np.zeros(times.shape, dtype=float)
+    covered = np.zeros(times.shape, dtype=bool)
+    for start, end in intervals:
+        in_interval = (times >= start) & (times <= end)
+        covered |= in_interval
+        if np.any(in_interval):
+            durations[in_interval] = base_durations(times[in_interval])
+
+    outside = ~covered
+    padded = np.concatenate(([False], outside, [False]))
+    changes = np.flatnonzero(padded[1:] != padded[:-1])
+    for start, stop in zip(changes[0::2], changes[1::2], strict=True):
+        durations[start:stop] = base_durations(times[start:stop])
+    return durations
+
+
+def _intervals_from_mask_and_durations(
+    times: np.ndarray,
+    mask: np.ndarray,
+    durations: np.ndarray,
+) -> np.ndarray:
+    """Convert a frame mask to intervals using already-local frame durations."""
+
+    times = np.asarray(times, dtype=float)
+    mask = np.asarray(mask, dtype=bool)
+    durations = np.asarray(durations, dtype=float)
+    if times.shape != mask.shape or times.shape != durations.shape:
+        raise ValueError("times, mask, and durations must have matching shapes")
+    if mask.size == 0 or not np.any(mask):
+        return np.empty((0, 2), dtype=float)
+
+    padded = np.concatenate(([False], mask, [False]))
+    changes = np.flatnonzero(padded[1:] != padded[:-1])
+    intervals = [
+        [float(times[start]), float(times[stop - 1] + durations[stop - 1])]
+        for start, stop in zip(changes[0::2], changes[1::2], strict=True)
+    ]
+    return np.asarray(intervals, dtype=float)
+
+
+def _mask_intervals_within_run_intervals(
+    times: np.ndarray,
+    mask: np.ndarray,
+    intervals: np.ndarray,
+    base_durations: Callable[[np.ndarray], np.ndarray],
+) -> np.ndarray:
+    """Split masked training frames at behavioral run boundaries."""
+
+    times = np.asarray(times, dtype=float)
+    mask = np.asarray(mask, dtype=bool)
+    if times.shape != mask.shape:
+        raise ValueError("times and mask must have matching shapes")
+    if mask.size == 0 or not np.any(mask):
+        return np.empty((0, 2), dtype=float)
+    if intervals.size == 0:
+        return _intervals_from_mask_and_durations(
+            times,
+            mask,
+            base_durations(times),
+        )
+
+    rows: list[np.ndarray] = []
+    covered = np.zeros(times.shape, dtype=bool)
+    for start, end in intervals:
+        in_interval = (times >= start) & (times <= end)
+        covered |= in_interval
+        if not np.any(mask & in_interval):
+            continue
+        local_times = times[in_interval]
+        local_mask = mask[in_interval]
+        local_rows = _intervals_from_mask_and_durations(
+            local_times,
+            local_mask,
+            base_durations(local_times),
+        )
+        if local_rows.size:
+            local_rows[:, 0] = np.maximum(local_rows[:, 0], float(start))
+            local_rows[:, 1] = np.minimum(local_rows[:, 1], float(end))
+            rows.append(local_rows)
+
+    outside = ~covered
+    padded = np.concatenate(([False], outside, [False]))
+    changes = np.flatnonzero(padded[1:] != padded[:-1])
+    for start, stop in zip(changes[0::2], changes[1::2], strict=True):
+        local_mask = mask[start:stop]
+        if not np.any(local_mask):
+            continue
+        local_times = times[start:stop]
+        rows.append(
+            _intervals_from_mask_and_durations(
+                local_times,
+                local_mask,
+                base_durations(local_times),
+            )
+        )
+
+    nonempty = [row for row in rows if row.size]
+    if not nonempty:
+        return np.empty((0, 2), dtype=float)
+    out = np.vstack(nonempty)
+    return out[np.argsort(out[:, 0], kind="stable")]
+
+
 def _call_with_run_local_kinematics(
     original: Callable[..., Any],
     session: Any,
@@ -73,7 +185,7 @@ def _call_with_run_local_kinematics(
     base_speed = function_globals.get("_speed_cm_s")
     base_durations = function_globals.get("_frame_durations")
     if not callable(base_speed) or not callable(base_durations):
-        raise RuntimeError("encoder no longer exposes its kinematic helpers")
+        raise RuntimeError("kinematics caller no longer exposes its helper functions")
 
     intervals = _run_intervals(session.run_times)
     patched_globals = dict(function_globals)
@@ -83,11 +195,32 @@ def _call_with_run_local_kinematics(
         intervals,
         base_speed,
     )
-    patched_globals["_frame_durations"] = lambda times: _durations_within_run_intervals(
-        times,
-        intervals,
-        base_durations,
-    )
+    has_mask_intervals = callable(function_globals.get("_mask_to_intervals"))
+    if has_mask_intervals:
+        patched_globals["_frame_durations"] = lambda times: (
+            _durations_split_at_run_boundaries(
+                times,
+                intervals,
+                base_durations,
+            )
+        )
+    else:
+        patched_globals["_frame_durations"] = lambda times: (
+            _durations_within_run_intervals(
+                times,
+                intervals,
+                base_durations,
+            )
+        )
+    if has_mask_intervals:
+        patched_globals["_mask_to_intervals"] = lambda times, mask: (
+            _mask_intervals_within_run_intervals(
+                times,
+                mask,
+                intervals,
+                base_durations,
+            )
+        )
 
     patched = FunctionType(
         original.__code__,
@@ -109,11 +242,34 @@ def _synchronize_aliases(function_name: str, original: Any, replacement: Any) ->
             setattr(module, function_name, replacement)
 
 
+def _contains_run_local_wrapper(function: Any) -> bool:
+    """Return whether a wrapper chain already contains this patch."""
+
+    current = function
+    seen: set[int] = set()
+    while callable(current) and id(current) not in seen:
+        if getattr(current, _WRAPPER_MARKER, False):
+            return True
+        seen.add(id(current))
+        wrapped = getattr(current, "__wrapped__", None)
+        if callable(wrapped):
+            current = wrapped
+            continue
+        original = getattr(current, _ORIGINAL_ATTR, None)
+        if callable(original):
+            current = original
+            continue
+        break
+    return False
+
+
 def _patch_encoder(module: Any, function_name: str) -> None:
-    if getattr(module, _PATCHED_FLAG, False):
+    current = getattr(module, function_name)
+    if _contains_run_local_wrapper(current):
+        setattr(module, _PATCHED_FLAG, True)
         return
 
-    original = getattr(module, function_name)
+    original = current
 
     @wraps(original)
     def run_local_fit(session: Any, *args: Any, **kwargs: Any) -> Any:
@@ -135,12 +291,17 @@ def apply_clusterless_run_local_kinematics_patch() -> None:
 
 
 def apply_place_field_run_local_kinematics_patch() -> None:
-    """Install run-local speed and occupancy durations on place-field encoders."""
+    """Install run-local kinematics on encoders and position validation."""
 
-    from . import encoding, kd_reference
+    from . import encoding, kd_reference, position_validation
 
     _patch_encoder(encoding, "fit_place_field_encoding")
     _patch_encoder(kd_reference, "fit_kd_place_field_encoding")
+    _patch_encoder(
+        position_validation,
+        "fit_place_field_encoding_for_position_mask",
+    )
+    _patch_encoder(position_validation, "validate_session_position_decoding")
 
 
 __all__ = [

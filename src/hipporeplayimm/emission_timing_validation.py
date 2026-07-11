@@ -1,9 +1,9 @@
 """Validate emission metadata before numeric coercion.
 
 ``LogEmissionTensor`` is a public data container used by tests, synthetic
-benchmarks, and downstream scripts. Its duration fields represent physical
-seconds; accepting Python/NumPy booleans is almost always accidental and would
-otherwise silently coerce ``True`` to ``1.0`` or ``False`` to ``0.0``.
+benchmarks, and downstream scripts. Its duration fields and log-likelihood
+entries are numeric; accepting Python/NumPy booleans is almost always accidental
+and would otherwise silently coerce ``True`` to ``1.0`` or ``False`` to ``0.0``.
 
 All numeric tensor fields are real-valued. NumPy's float coercion can silently
 discard imaginary components from complex arrays and NumPy complex scalars, so
@@ -58,6 +58,7 @@ def _reject_complex_numeric(name: str, value: object) -> None:
 
 
 def _validate_log_emission_fields(tensor: object) -> None:
+    _reject_boolean_numeric("log_likelihood", getattr(tensor, "log_likelihood"))
     _reject_boolean_numeric("times", getattr(tensor, "times"))
     _reject_boolean_numeric("dt", getattr(tensor, "dt"))
     bin_durations = getattr(tensor, "bin_durations")

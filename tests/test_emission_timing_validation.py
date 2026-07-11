@@ -22,13 +22,14 @@ def _tensor_kwargs(**overrides):
 @pytest.mark.parametrize(
     ("field", "value"),
     [
+        ("log_likelihood", np.array([[False], [True]])),
         ("times", np.array([False, True])),
         ("dt", True),
         ("bin_durations", np.array([True, True])),
         ("transition_durations", np.array([True])),
     ],
 )
-def test_log_emission_tensor_rejects_boolean_timing_metadata(field, value):
+def test_log_emission_tensor_rejects_boolean_numeric_fields(field, value):
     with pytest.raises(ValueError, match=field):
         LogEmissionTensor(**_tensor_kwargs(**{field: value}))
 

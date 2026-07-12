@@ -107,6 +107,46 @@ def _speed_cm_s_within_intervals(
     return speed
 
 
+def _finite_real_scalar(name: str, value: object) -> float:
+    """Return a finite real scalar without silently coercing booleans or text."""
+
+    if isinstance(value, (bool, np.bool_)):
+        raise TypeError(f"{name} must be a real numeric scalar, not boolean")
+    if isinstance(value, (str, bytes, bytearray)):
+        raise TypeError(f"{name} must be a real numeric scalar, not text")
+    if isinstance(value, (complex, np.complexfloating)):
+        raise TypeError(f"{name} must be a real numeric scalar, not complex")
+
+    try:
+        raw = np.asarray(value)
+    except (TypeError, ValueError) as exc:
+        raise TypeError(f"{name} must be a real numeric scalar") from exc
+    if raw.ndim != 0:
+        raise ValueError(f"{name} must be a real numeric scalar")
+    if raw.dtype.kind == "b":
+        raise TypeError(f"{name} must be a real numeric scalar, not boolean")
+    if raw.dtype.kind in {"S", "U"}:
+        raise TypeError(f"{name} must be a real numeric scalar, not text")
+    if raw.dtype.kind == "c":
+        raise TypeError(f"{name} must be a real numeric scalar, not complex")
+    if raw.dtype.kind == "O":
+        item = raw.item()
+        if isinstance(item, (bool, np.bool_)):
+            raise TypeError(f"{name} must be a real numeric scalar, not boolean")
+        if isinstance(item, (str, bytes, bytearray)):
+            raise TypeError(f"{name} must be a real numeric scalar, not text")
+        if isinstance(item, (complex, np.complexfloating)):
+            raise TypeError(f"{name} must be a real numeric scalar, not complex")
+
+    try:
+        numeric = float(raw)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise TypeError(f"{name} must be a real numeric scalar") from exc
+    if not np.isfinite(numeric):
+        raise ValueError(f"{name} must be finite")
+    return numeric
+
+
 def fit_empirical_transition_matrix(
     session: ReplaySession,
     encoding: EncodingModel,
@@ -117,16 +157,15 @@ def fit_empirical_transition_matrix(
 ) -> csr_matrix:
     """Fit a column-stochastic transition matrix from consecutive run frames."""
 
-    if not 0.0 <= teleport_probability < 1.0:
+    teleport = _finite_real_scalar("teleport_probability", teleport_probability)
+    if not 0.0 <= teleport < 1.0:
         raise ValueError("teleport_probability must lie in [0, 1)")
-    try:
-        self_loop_count = float(add_self_loop_count)
-    except (TypeError, ValueError) as exc:
-        raise ValueError("add_self_loop_count must be finite and nonnegative") from exc
-    if not np.isfinite(self_loop_count) or self_loop_count < 0.0:
+    self_loop_count = _finite_real_scalar("add_self_loop_count", add_self_loop_count)
+    if self_loop_count < 0.0:
         raise ValueError("add_self_loop_count must be finite and nonnegative")
-    min_speed = encoding.config.min_speed_cm_s if min_speed_cm_s is None else float(min_speed_cm_s)
-    if not np.isfinite(min_speed) or min_speed < 0.0:
+    min_speed_value = encoding.config.min_speed_cm_s if min_speed_cm_s is None else min_speed_cm_s
+    min_speed = _finite_real_scalar("min_speed_cm_s", min_speed_value)
+    if min_speed < 0.0:
         raise ValueError("min_speed_cm_s must be finite and nonnegative")
     position = _clean_position(session.position)
     times = position[:, 0]
@@ -150,8 +189,8 @@ def fit_empirical_transition_matrix(
     empty_cols = counts.sum(axis=0) <= 0.0
     counts[empty_cols, empty_cols] = 1.0
     probs = counts / np.maximum(counts.sum(axis=0, keepdims=True), np.finfo(float).tiny)
-    if teleport_probability > 0.0:
-        probs = (1.0 - teleport_probability) * probs + teleport_probability / n_bins
+    if teleport > 0.0:
+        probs = (1.0 - teleport) * probs + teleport / n_bins
     return csr_matrix(probs)
 
 

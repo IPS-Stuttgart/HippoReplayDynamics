@@ -126,13 +126,14 @@ def _stable_gaussian_weights(dist2: np.ndarray, sigma_cm: float) -> np.ndarray:
         raise ValueError("dist2 must be a nonempty one-dimensional array")
     minimum = float(np.min(distances))
     nearest = distances == minimum
-    variance = float(sigma_cm) * float(sigma_cm)
-    if not np.isfinite(minimum) or not np.isfinite(variance) or variance <= 0.0:
+    sigma = abs(float(sigma_cm))
+    if not np.isfinite(minimum) or not np.isfinite(sigma) or sigma <= 0.0:
         return nearest.astype(float) / float(np.sum(nearest))
 
     shifted = np.maximum(distances - minimum, 0.0)
     with np.errstate(over="ignore", under="ignore", invalid="ignore"):
-        weights = np.exp(-0.5 * shifted / variance)
+        standardized = np.sqrt(shifted) / sigma
+        weights = np.exp(-0.5 * standardized * standardized)
     total = float(weights.sum())
     if total <= 0.0 or not np.isfinite(total):
         return nearest.astype(float) / float(np.sum(nearest))

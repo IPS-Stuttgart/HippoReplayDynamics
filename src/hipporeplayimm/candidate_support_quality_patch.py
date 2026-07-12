@@ -209,6 +209,8 @@ def _contains_boolean(value: object) -> bool:
 
 
 def _text(value: Any) -> str:
+    if isinstance(value, (bytes, np.bytes_)):
+        return bytes(value).decode("utf-8", errors="replace").strip()
     try:
         if pd.isna(value):
             return ""

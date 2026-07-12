@@ -8,6 +8,7 @@ import pandas as pd
 _PATCHED_FLAG = "_evidence_margin_distinct_model_patch_applied"
 _MARGIN_FLAG = "_evidence_margin_distinct_model_wrapper"
 _ADD_FLAG = "_evidence_margin_distinct_model_add_columns_wrapper"
+_ADD_WRAPPER_VERSION = 2
 _DEFAULT_GROUP_COLUMNS = ("session", "event_index")
 
 
@@ -18,16 +19,24 @@ def apply_evidence_margin_distinct_model_patch() -> None:
 
     current_margin = diagnostics.evidence_margin_table
     current_add = diagnostics.add_evidence_margin_columns
-    if getattr(diagnostics, _PATCHED_FLAG, False) and getattr(current_margin, _MARGIN_FLAG, False) and getattr(current_add, _ADD_FLAG, False):
+    margin_is_current = bool(getattr(current_margin, _MARGIN_FLAG, False))
+    add_is_current = getattr(current_add, _ADD_FLAG, None) == _ADD_WRAPPER_VERSION
+    if getattr(diagnostics, _PATCHED_FLAG, False) and margin_is_current and add_is_current:
         return
-    original_margin = current_margin
 
-    def evidence_margin_table(scores, *, group_cols=_DEFAULT_GROUP_COLUMNS, evidence_col="log_evidence", model_col="model"):
-        groups = _normalize_group_cols(group_cols)
-        collapsed = _collapse_duplicate_models(diagnostics, scores, groups, evidence_col, model_col)
-        if collapsed is None:
-            return original_margin(scores, group_cols=groups, evidence_col=evidence_col, model_col=model_col)
-        return original_margin(collapsed, group_cols=groups, evidence_col=evidence_col, model_col=model_col)
+    if margin_is_current:
+        evidence_margin_table = current_margin
+    else:
+        original_margin = current_margin
+
+        def evidence_margin_table(scores, *, group_cols=_DEFAULT_GROUP_COLUMNS, evidence_col="log_evidence", model_col="model"):
+            groups = _normalize_group_cols(group_cols)
+            collapsed = _collapse_duplicate_models(diagnostics, scores, groups, evidence_col, model_col)
+            if collapsed is None:
+                return original_margin(scores, group_cols=groups, evidence_col=evidence_col, model_col=model_col)
+            return original_margin(collapsed, group_cols=groups, evidence_col=evidence_col, model_col=model_col)
+
+        setattr(evidence_margin_table, _MARGIN_FLAG, True)
 
     def add_evidence_margin_columns(scores, *, group_cols=_DEFAULT_GROUP_COLUMNS):
         groups = _normalize_group_cols(group_cols)
@@ -40,10 +49,17 @@ def apply_evidence_margin_distinct_model_patch() -> None:
             out["evidence_margin_category"] = "missing"
             return out
         margins = _align_margin_group_key_dtypes(scores, margins, groups)
-        return scores.merge(margins, on=list(groups), how="left")
+        out = scores.merge(
+            margins,
+            on=list(groups),
+            how="left",
+            sort=False,
+            validate="many_to_one",
+        )
+        out.index = scores.index.copy()
+        return out
 
-    setattr(evidence_margin_table, _MARGIN_FLAG, True)
-    setattr(add_evidence_margin_columns, _ADD_FLAG, True)
+    setattr(add_evidence_margin_columns, _ADD_FLAG, _ADD_WRAPPER_VERSION)
     diagnostics.evidence_margin_table = evidence_margin_table
     diagnostics.add_evidence_margin_columns = add_evidence_margin_columns
     setattr(diagnostics, _PATCHED_FLAG, True)

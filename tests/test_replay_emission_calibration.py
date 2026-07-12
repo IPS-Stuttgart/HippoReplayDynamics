@@ -163,6 +163,7 @@ def test_apply_replay_cell_gains_rejects_invalid_calibration_cell_ids(
     [
         ({True: 3.0}, TypeError, "not boolean"),
         ({1.5: 3.0}, ValueError, "finite integer"),
+        ({np.iinfo(np.int64).max + 1: 3.0}, ValueError, "integer identifier range"),
         ({"1": 2.0, 1: 3.0}, ValueError, "unique"),
     ],
 )

@@ -17,6 +17,8 @@ _PATCH_MARKER = "_clusterless_encoding_config_validation_patch"
 _MARK_VALUE_PATCH_MARKER = "_clusterless_mark_value_validation_patch"
 _MARK_VALUE_PATCH_VERSION = 2
 _BENCHMARK_MARK_CONFIG_PATCH_MARKER = "_benchmark_clusterless_mark_config_validation_patch"
+_SCALED_RATE_PATCH_MARKER = "_clusterless_scaled_rate_validation_patch"
+_SCALED_RATE_PATCH_VERSION = 1
 
 
 _NUMERIC_MESSAGES = {
@@ -37,6 +39,7 @@ def apply_clusterless_encoding_config_validation_patch() -> None:
 
     apply_clusterless_run_local_kinematics_patch()
     _patch_clusterless_mark_value_validation(clusterless)
+    _patch_clusterless_scaled_rate_validation()
 
     current = clusterless.fit_clusterless_mark_encoding
     if getattr(current, _PATCH_MARKER, False):
@@ -133,6 +136,30 @@ def _patch_clusterless_mark_value_validation(clusterless) -> None:
     setattr(_coerce_marks, _MARK_VALUE_PATCH_MARKER, _MARK_VALUE_PATCH_VERSION)
     setattr(_coerce_marks, "__hipporeplayimm_original__", previous)
     clusterless.ClusterlessMarkEncoding._coerce_marks = _coerce_marks
+
+
+def _patch_clusterless_scaled_rate_validation() -> None:
+    """Reject rate-scale products that overflow before likelihood evaluation."""
+
+    from . import clusterless_mark_group_validation
+
+    current = clusterless_mark_group_validation._scaled_log_rates
+    if getattr(current, _SCALED_RATE_PATCH_MARKER, None) == _SCALED_RATE_PATCH_VERSION:
+        return
+
+    previous = current
+
+    @wraps(previous)
+    def _scaled_log_rates(values, scale, name):
+        with np.errstate(over="ignore", invalid="ignore"):
+            scaled, log_rates = previous(values, scale, name)
+        if not np.all(np.isfinite(scaled)):
+            raise ValueError(f"{name} becomes non-finite after spike-rate scaling")
+        return scaled, log_rates
+
+    setattr(_scaled_log_rates, _SCALED_RATE_PATCH_MARKER, _SCALED_RATE_PATCH_VERSION)
+    setattr(_scaled_log_rates, "__hipporeplayimm_original__", previous)
+    clusterless_mark_group_validation._scaled_log_rates = _scaled_log_rates
 
 
 def _patch_benchmark_clusterless_mark_config() -> None:

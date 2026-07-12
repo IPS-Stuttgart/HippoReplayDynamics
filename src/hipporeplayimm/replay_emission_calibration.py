@@ -197,11 +197,15 @@ def apply_replay_cell_gains(
     """Return a copy of ``encoding`` with rates multiplied by replay gains."""
 
     gain_vector = _gain_vector_for_encoding(encoding, gains)
+    with np.errstate(over="ignore", invalid="ignore"):
+        scaled_rates_hz = encoding.rates_hz * gain_vector[:, None]
+    if not np.all(np.isfinite(scaled_rates_hz)):
+        raise ValueError("replay gain scaling must produce finite rates")
     return EncodingModel(
         x_edges=encoding.x_edges.copy(),
         y_edges=encoding.y_edges.copy(),
         bin_centers=encoding.bin_centers.copy(),
-        rates_hz=encoding.rates_hz * gain_vector[:, None],
+        rates_hz=scaled_rates_hz,
         occupancy_s=encoding.occupancy_s.copy(),
         cell_ids=encoding.cell_ids.copy(),
         config=encoding.config,

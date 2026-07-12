@@ -9,7 +9,7 @@ from scipy.special import gammaln
 
 _PATCHED_FLAG = "_poisson_input_boolean_validation_patch_applied"
 _ORIGINAL_ATTR = "__hipporeplayimm_original__"
-_WRAPPER_VERSION = 2
+_WRAPPER_VERSION = 3
 
 
 def _contains_boolean_values(value: object) -> bool:
@@ -44,6 +44,25 @@ def _reusable_cell_weights(cell_weights):
         return tuple(cell_weights)
     except TypeError:
         return cell_weights
+
+
+def _reject_nonfinite_expected_count_scaling(
+    rates_hz: object,
+    dt: object,
+    spike_rate_scale: float,
+) -> None:
+    """Reject finite inputs whose expected-count multiplication overflows."""
+
+    rates = np.asarray(rates_hz, dtype=float)
+    durations = np.asarray(dt, dtype=float)
+    if rates.size == 0 or durations.size == 0:
+        return
+    max_rate = float(np.max(rates))
+    max_duration = float(durations) if durations.ndim == 0 else float(np.max(durations))
+    with np.errstate(over="ignore", invalid="ignore"):
+        max_expected = max_rate * max_duration * spike_rate_scale
+    if not np.isfinite(max_expected):
+        raise ValueError("scaled expected spike counts must be finite")
 
 
 def _expected_counts(
@@ -138,14 +157,20 @@ def apply_poisson_input_boolean_validation_patch() -> None:
         _reject_boolean_array("spike_counts", spike_counts)
         _reject_boolean_array("rates_hz", rates_hz)
         reusable_weights = _reusable_cell_weights(cell_weights)
-        log_likelihood = original(
-            spike_counts,
+        with np.errstate(over="ignore", invalid="ignore"):
+            log_likelihood = original(
+                spike_counts,
+                rates_hz,
+                dt,
+                spike_rate_scale=spike_rate_scale,
+                likelihood_temperature=likelihood_temperature,
+                cell_weights=reusable_weights,
+                negative_binomial_overdispersion=negative_binomial_overdispersion,
+            )
+        _reject_nonfinite_expected_count_scaling(
             rates_hz,
             dt,
-            spike_rate_scale=spike_rate_scale,
-            likelihood_temperature=likelihood_temperature,
-            cell_weights=reusable_weights,
-            negative_binomial_overdispersion=negative_binomial_overdispersion,
+            float(spike_rate_scale),
         )
 
         counts = np.asarray(spike_counts, dtype=float)

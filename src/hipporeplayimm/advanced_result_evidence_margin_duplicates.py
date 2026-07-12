@@ -40,7 +40,7 @@ def apply_evidence_margin_distinct_model_patch() -> None:
             out["evidence_margin_category"] = "missing"
             return out
         margins = _align_margin_group_key_dtypes(scores, margins, groups)
-        return scores.merge(margins, on=list(groups), how="left")
+        return _merge_margin_columns_preserving_index(scores, margins, groups)
 
     setattr(evidence_margin_table, _MARGIN_FLAG, True)
     setattr(add_evidence_margin_columns, _ADD_FLAG, True)
@@ -83,6 +83,34 @@ def _align_margin_group_key_dtypes(
         if column in scores.columns and column in out.columns:
             out[column] = out[column].astype(scores[column].dtype)
     return out
+
+
+def _merge_margin_columns_preserving_index(
+    scores: pd.DataFrame,
+    margins: pd.DataFrame,
+    group_cols: tuple[str, ...],
+) -> pd.DataFrame:
+    """Attach one margin row per group without replacing the caller's index."""
+
+    row_position_column = "__hipporeplayimm_margin_row_position__"
+    while row_position_column in scores.columns or row_position_column in margins.columns:
+        row_position_column += "_"
+
+    original_index = scores.index.copy()
+    left = scores.reset_index(drop=True).copy()
+    left[row_position_column] = np.arange(len(left), dtype=np.int64)
+    merged = left.merge(
+        margins,
+        on=list(group_cols),
+        how="left",
+        sort=False,
+        validate="many_to_one",
+    )
+    merged = merged.sort_values(row_position_column, kind="stable").drop(
+        columns=[row_position_column]
+    )
+    merged.index = original_index
+    return merged
 
 
 def _normalize_group_cols(group_cols):

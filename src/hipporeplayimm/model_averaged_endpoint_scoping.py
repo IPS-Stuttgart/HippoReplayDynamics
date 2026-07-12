@@ -63,6 +63,7 @@ def add_model_averaged_endpoint_columns(df: pd.DataFrame) -> pd.DataFrame:
                 exact[column] = pd.to_numeric(exact[column], errors="coerce")
         exact = exact.dropna(subset=["model_probability", "diagnostic_decoded_endpoint_x", "diagnostic_decoded_endpoint_y"])
         exact = _finite_endpoint_average_rows(exact)
+        exact = _distinct_model_rows(exact)
         if exact.empty:
             continue
 
@@ -84,6 +85,20 @@ def add_model_averaged_endpoint_columns(df: pd.DataFrame) -> pd.DataFrame:
         out.iloc[positions, out.columns.get_loc("model_probability_entropy")] = entropy
         out.iloc[positions, out.columns.get_loc("model_log_evidence_margin")] = margin
     return out
+
+
+def _distinct_model_rows(frame: pd.DataFrame) -> pd.DataFrame:
+    """Keep the strongest finite-evidence row for each model identity."""
+
+    if frame.empty or "model" not in frame.columns:
+        return frame
+    if "log_evidence" not in frame.columns:
+        return frame.drop_duplicates("model", keep="first").copy()
+
+    evidence = pd.to_numeric(frame["log_evidence"], errors="coerce").to_numpy(dtype=float)
+    sort_key = np.where(np.isfinite(evidence), -evidence, np.inf)
+    order = np.argsort(sort_key, kind="stable")
+    return frame.iloc[order].drop_duplicates("model", keep="first").copy()
 
 
 def _log_evidence_margin(exact: pd.DataFrame) -> float:

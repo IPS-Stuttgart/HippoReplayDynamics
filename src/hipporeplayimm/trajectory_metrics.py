@@ -120,9 +120,29 @@ def _posterior_entropy(posterior: np.ndarray, log_posterior: np.ndarray) -> np.n
 
 
 def _posterior_spread(posterior: np.ndarray, centers: np.ndarray, mean_path: np.ndarray) -> np.ndarray:
+    """Return spread without evaluating zero posterior mass times overflowed distance."""
+
     delta = centers[None, :, :] - mean_path[:, None, :]
-    dist2 = np.sum(delta * delta, axis=2)
-    return np.sqrt(np.sum(posterior * dist2, axis=1))
+    positive_mass = posterior > 0.0
+    squared_delta = np.zeros_like(delta, dtype=float)
+    weighted_dist2 = np.zeros_like(posterior, dtype=float)
+    with np.errstate(over="ignore", invalid="ignore"):
+        np.square(
+            delta,
+            out=squared_delta,
+            where=positive_mass[:, :, None],
+        )
+        dist2 = np.sum(squared_delta, axis=2)
+        np.multiply(
+            posterior,
+            dist2,
+            out=weighted_dist2,
+            where=positive_mass,
+        )
+        spread2 = np.sum(weighted_dist2, axis=1)
+    if not np.all(np.isfinite(spread2)):
+        raise ValueError("posterior spread exceeds floating-point range")
+    return np.sqrt(spread2)
 
 
 def _direction_consistency(path: np.ndarray) -> float:

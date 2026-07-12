@@ -53,6 +53,27 @@ def test_model_averaged_endpoint_scopes_replay_window_variants() -> None:
     assert expanded["model_averaged_endpoint_models"].tolist() == [2, 2]
 
 
+def test_model_averaged_endpoint_scopes_stochastic_random_seeds() -> None:
+    rows = [
+        _row(variant="core", window_index=0, model="a", probability=0.75, endpoint_x=10.0, log_evidence=2.0),
+        _row(variant="core", window_index=0, model="b", probability=0.25, endpoint_x=20.0, log_evidence=0.0),
+        _row(variant="core", window_index=0, model="a", probability=0.25, endpoint_x=100.0, log_evidence=1.0),
+        _row(variant="core", window_index=0, model="b", probability=0.75, endpoint_x=200.0, log_evidence=3.0),
+    ]
+    for row, seed in zip(rows, (1, 1, 2, 2), strict=True):
+        row["random_seed"] = seed
+    frame = pd.DataFrame(rows)
+
+    out = add_model_averaged_endpoint_columns(frame)
+
+    seed_one = out[out["random_seed"].eq(1)]
+    seed_two = out[out["random_seed"].eq(2)]
+    np.testing.assert_allclose(seed_one["model_averaged_endpoint_x"], 12.5)
+    np.testing.assert_allclose(seed_two["model_averaged_endpoint_x"], 175.0)
+    assert seed_one["model_averaged_endpoint_models"].tolist() == [2, 2]
+    assert seed_two["model_averaged_endpoint_models"].tolist() == [2, 2]
+
+
 def test_model_averaged_endpoint_ignores_nonfinite_endpoint_rows() -> None:
     frame = pd.DataFrame(
         [

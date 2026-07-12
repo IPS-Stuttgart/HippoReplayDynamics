@@ -5,6 +5,8 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
+from .result_improvement_seed_validation import _nonnegative_integer_seed
+
 _PATCHED_FLAG = "_well_label_shuffle_patch_applied"
 _MISSING_WELL_LABELS = {"", "<na>", "na", "n/a", "nan", "none", "null", "missing"}
 
@@ -30,29 +32,9 @@ def apply_well_label_shuffle_patch() -> None:
 
 
 def _nonnegative_integer_value(name: str, value: object) -> int:
-    """Return a nonnegative integer scalar without boolean or float truncation."""
+    """Return an exact nonnegative integer seed under the shared seed policy."""
 
-    try:
-        array = np.asarray(value)
-    except (TypeError, ValueError) as exc:
-        raise ValueError(f"{name} must be an integer scalar") from exc
-    if array.ndim != 0:
-        raise ValueError(f"{name} must be an integer scalar")
-    scalar = array.item()
-    if isinstance(scalar, (bool, np.bool_)):
-        raise ValueError(f"{name} must be an integer, not boolean")
-    try:
-        numeric = float(scalar)
-    except (TypeError, ValueError, OverflowError) as exc:
-        raise ValueError(f"{name} must be an integer") from exc
-    if not np.isfinite(numeric):
-        raise ValueError(f"{name} must be a finite integer")
-    integer = int(round(numeric))
-    if not np.isclose(numeric, integer, rtol=0.0, atol=0.0):
-        raise ValueError(f"{name} must be an integer")
-    if integer < 0:
-        raise ValueError(f"{name} must be a nonnegative integer")
-    return integer
+    return _nonnegative_integer_seed(value, name)
 
 
 def shuffle_well_labels(frame: pd.DataFrame, random_seed: int = 1) -> pd.DataFrame:

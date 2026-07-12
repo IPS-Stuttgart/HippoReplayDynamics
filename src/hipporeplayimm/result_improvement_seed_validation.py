@@ -15,7 +15,7 @@ _WRAPPER_VERSION = 2
 
 
 def _nonnegative_integer_seed(value: object, name: str = "random_seed") -> int:
-    """Return a finite nonnegative integer seed without bool/string/array coercion."""
+    """Return an exact nonnegative integer seed without bool/text/array coercion."""
 
     message = f"{name} must be a finite nonnegative integer"
     try:
@@ -25,17 +25,19 @@ def _nonnegative_integer_seed(value: object, name: str = "random_seed") -> int:
     if array.ndim != 0:
         raise ValueError(message)
     scalar = array.item()
-    if isinstance(scalar, (bool, np.bool_)):
-        raise ValueError(message)
-    if isinstance(scalar, str):
+    if isinstance(scalar, (bool, np.bool_, str, bytes, np.str_, np.bytes_)):
         raise ValueError(message)
     try:
-        numeric = float(scalar)
+        integer = int(scalar)
     except (TypeError, ValueError, OverflowError) as exc:
         raise ValueError(message) from exc
-    if not np.isfinite(numeric) or numeric < 0.0 or numeric != np.floor(numeric):
+    try:
+        exact = bool(scalar == integer)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(message) from exc
+    if integer < 0 or not exact:
         raise ValueError(message)
-    return int(numeric)
+    return integer
 
 
 def _finite_model_metric_rows(

@@ -51,11 +51,12 @@ def test_clusterless_mark_likelihood_rejects_nonreal_marks(
     [
         np.array([[True]], dtype=bool),
         np.array([[np.bool_(False)]], dtype=object),
+        [[True, 1.0]],
     ],
-    ids=["boolean-dtype", "object-wrapped-boolean"],
+    ids=["boolean-dtype", "object-wrapped-boolean", "mixed-python-values"],
 )
 def test_clusterless_mark_likelihood_rejects_boolean_marks(
-    bad_marks: np.ndarray,
+    bad_marks: object,
 ) -> None:
     encoding = make_encoding()
 

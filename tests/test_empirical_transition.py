@@ -35,6 +35,37 @@ def test_fit_empirical_transition_matrix_rejects_invalid_min_speed_override() ->
             )
 
 
+@pytest.mark.parametrize(
+    ("parameter", "kwargs"),
+    [
+        ("add_self_loop_count", {"add_self_loop_count": True}),
+        ("add_self_loop_count", {"add_self_loop_count": "1.0"}),
+        ("min_speed_cm_s", {"min_speed_cm_s": False}),
+        ("min_speed_cm_s", {"min_speed_cm_s": "0.0"}),
+        ("teleport_probability", {"teleport_probability": False}),
+        ("teleport_probability", {"teleport_probability": "0.01"}),
+    ],
+    ids=[
+        "boolean-self-loop-count",
+        "text-self-loop-count",
+        "boolean-min-speed",
+        "text-min-speed",
+        "boolean-teleport-probability",
+        "text-teleport-probability",
+    ],
+)
+def test_fit_empirical_transition_matrix_rejects_ambiguous_scalar_coercion(
+    parameter: str,
+    kwargs: dict[str, object],
+) -> None:
+    with pytest.raises(TypeError, match=rf"{parameter} must be a real numeric scalar"):
+        fit_empirical_transition_matrix(
+            _minimal_session(),
+            _minimal_encoding(),
+            **kwargs,
+        )
+
+
 def test_fit_empirical_transition_matrix_is_column_stochastic_for_valid_inputs() -> None:
     transition = fit_empirical_transition_matrix(
         _minimal_session(),

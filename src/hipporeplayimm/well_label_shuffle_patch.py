@@ -89,11 +89,19 @@ def shuffle_well_labels(frame: pd.DataFrame, random_seed: int = 1) -> pd.DataFra
 
 
 def _labelled_well_rows(values: pd.Series) -> pd.Series:
-    """Return rows whose well-ID field is an actual label, not a text sentinel."""
+    """Return rows whose well-ID field is an actual finite label."""
 
     present = values.notna()
     normalized = values.astype("string").str.strip().str.lower()
-    return present & ~normalized.isin(_MISSING_WELL_LABELS)
+    numeric = pd.to_numeric(values, errors="coerce")
+    numeric_present = numeric.notna()
+    numeric_values = numeric.fillna(0.0).to_numpy(dtype=float)
+    finite_numeric = pd.Series(np.isfinite(numeric_values), index=values.index)
+    return (
+        present
+        & ~normalized.isin(_MISSING_WELL_LABELS)
+        & (~numeric_present | finite_numeric)
+    )
 
 
 def _coordinate_well_rows(frame: pd.DataFrame) -> pd.Series:

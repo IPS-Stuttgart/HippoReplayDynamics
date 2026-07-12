@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable, Mapping
 from functools import wraps
 import sys
 
@@ -14,6 +15,7 @@ from .place_field_run_local_kinematics import (
 
 _PATCH_MARKER = "_clusterless_encoding_config_validation_patch"
 _MARK_VALUE_PATCH_MARKER = "_clusterless_mark_value_validation_patch"
+_MARK_VALUE_PATCH_VERSION = 2
 _BENCHMARK_MARK_CONFIG_PATCH_MARKER = "_benchmark_clusterless_mark_config_validation_patch"
 
 
@@ -57,23 +59,78 @@ def apply_clusterless_encoding_config_validation_patch() -> None:
     _patch_benchmark_clusterless_mark_config()
 
 
+def _contains_boolean_mark_values(values) -> bool:
+    """Inspect the source representation before NumPy can promote booleans."""
+
+    if isinstance(values, (bool, np.bool_)):
+        return True
+    if isinstance(values, np.ndarray):
+        if values.size == 0:
+            return False
+        if np.issubdtype(values.dtype, np.bool_):
+            return True
+        if values.dtype == object:
+            return any(_contains_boolean_mark_values(value) for value in values.flat)
+        return False
+    if isinstance(values, Mapping):
+        return any(_contains_boolean_mark_values(value) for value in values.values())
+    if isinstance(values, (str, bytes, bytearray)):
+        return False
+    if isinstance(values, Iterable):
+        return any(_contains_boolean_mark_values(value) for value in values)
+    return False
+
+
+def _validated_real_mark_values(marks):
+    """Reject lossy mark coercions while accepting exactly real complex arrays."""
+
+    if _contains_boolean_mark_values(marks):
+        raise ValueError("marks must contain numeric values, not boolean values")
+
+    try:
+        raw = np.asarray(marks)
+    except (TypeError, ValueError):
+        return marks
+
+    if np.issubdtype(raw.dtype, np.complexfloating):
+        imaginary = np.imag(raw)
+        if not np.all(np.isfinite(imaginary)) or np.any(imaginary != 0.0):
+            raise ValueError("marks must contain real values")
+        return np.real(raw)
+
+    if raw.dtype != object:
+        return marks
+
+    converted = raw.copy()
+    changed = False
+    for index, value in np.ndenumerate(raw):
+        if isinstance(value, (complex, np.complexfloating)):
+            imaginary = float(np.imag(value))
+            if not np.isfinite(imaginary) or imaginary != 0.0:
+                raise ValueError("marks must contain real values")
+            converted[index] = float(np.real(value))
+            changed = True
+    return converted if changed else marks
+
+
 def _patch_clusterless_mark_value_validation(clusterless) -> None:
-    """Reject non-finite marks before evaluating clusterless likelihoods."""
+    """Reject malformed marks before evaluating clusterless likelihoods."""
 
     current = clusterless.ClusterlessMarkEncoding._coerce_marks
-    if getattr(current, _MARK_VALUE_PATCH_MARKER, False):
+    if getattr(current, _MARK_VALUE_PATCH_MARKER, None) == _MARK_VALUE_PATCH_VERSION:
         return
 
     previous = current
 
     @wraps(previous)
     def _coerce_marks(self, marks):
-        coerced = previous(self, marks)
+        validated = _validated_real_mark_values(marks)
+        coerced = previous(self, validated)
         if not np.all(np.isfinite(coerced)):
             raise ValueError("marks must contain finite values")
         return coerced
 
-    setattr(_coerce_marks, _MARK_VALUE_PATCH_MARKER, True)
+    setattr(_coerce_marks, _MARK_VALUE_PATCH_MARKER, _MARK_VALUE_PATCH_VERSION)
     setattr(_coerce_marks, "__hipporeplayimm_original__", previous)
     clusterless.ClusterlessMarkEncoding._coerce_marks = _coerce_marks
 

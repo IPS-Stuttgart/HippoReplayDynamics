@@ -17,14 +17,37 @@ _CONSTANT_SETTING_COLUMNS = (
     "replay_gain_prior_count",
     "replay_gain_max_gain",
     "negative_binomial_dispersion",
+    "candidate_top_k",
+    "candidate_stationary_sigma_cm",
+    "candidate_diffusion_sigma_cm",
+    "candidate_momentum_sigma_cm",
+    "candidate_velocity_decay",
+    "candidate_mode_stickiness",
+    "state_space_stationary_sigma_cm",
+    "state_space_diffusion_sigma_cm_sqrt_s",
+    "state_space_max_step_sigma",
+    "state_space_imm_mode_stickiness",
+    "state_space_imm_switch_tau_s",
+    "state_space_effective_imm_mode_stickiness",
+    "state_space_trajectory_imm_mode_stickiness",
+    "state_space_trajectory_imm_momentum_initial_probability",
+    "state_space_trajectory_imm_momentum_switch_probability",
+    "state_space_momentum_sigma_cm_sqrt_s",
+    "state_space_momentum_initial_sigma_cm_sqrt_s",
+    "state_space_momentum_velocity_decay",
+    "state_space_momentum_velocity_decay_tau_s",
+    "state_space_momentum_candidate_top_k",
     "state_space_momentum_predicted_candidate_top_k",
     "state_space_momentum_candidate_mass_threshold",
     "state_space_momentum_candidate_min_k",
     "state_space_momentum_candidate_max_k",
+    "state_space_momentum_candidate_source",
+    "state_space_common_support_top_k",
     "state_space_valid_occupancy_threshold_s",
-    "state_space_imm_switch_tau_s",
-    "state_space_effective_imm_mode_stickiness",
-    "state_space_imm_mode_stickiness_effective",
+    "state_space_displacement_radius_bins",
+    "state_space_displacement_position_sigma_cm",
+    "state_space_displacement_transition_sigma_cm_sqrt_s",
+    "state_space_displacement_prior_sigma_cm",
     "goal_state_space_transition_sigma_cm_sqrt_s",
     "goal_state_space_drift_speed_cm_s",
     "goal_state_space_max_step_sigma",
@@ -59,17 +82,98 @@ _CONSTANT_SETTING_COLUMNS = (
     "diagnostic_clusterless_mark_kde_max_neighbors",
 )
 
+# The session benchmark writes some model settings as top-level columns, while
+# the event-scoring script stores the same values in ``diagnostic_*`` columns.
+# Treat those schema variants as one setting so shards from different producers
+# cannot evade the consistency check.
+_CONSTANT_SETTING_ALIASES = {
+    "candidate_top_k": ("diagnostic_candidate_top_k",),
+    "candidate_stationary_sigma_cm": ("diagnostic_candidate_stationary_sigma_cm",),
+    "candidate_diffusion_sigma_cm": ("diagnostic_candidate_diffusion_sigma_cm",),
+    "candidate_momentum_sigma_cm": ("diagnostic_candidate_momentum_sigma_cm",),
+    "candidate_velocity_decay": ("diagnostic_candidate_velocity_decay",),
+    "candidate_mode_stickiness": ("diagnostic_candidate_mode_stickiness",),
+    "state_space_stationary_sigma_cm": ("diagnostic_state_space_stationary_sigma_cm",),
+    "state_space_diffusion_sigma_cm_sqrt_s": ("diagnostic_state_space_diffusion_sigma_cm_sqrt_s",),
+    "state_space_max_step_sigma": ("diagnostic_state_space_max_step_sigma",),
+    "state_space_effective_imm_mode_stickiness": (
+        "state_space_imm_mode_stickiness_effective",
+        "diagnostic_state_space_imm_mode_stickiness",
+    ),
+    "state_space_imm_switch_tau_s": ("diagnostic_state_space_imm_switch_tau_s",),
+    "state_space_momentum_sigma_cm_sqrt_s": ("diagnostic_state_space_momentum_sigma_cm_sqrt_s",),
+    "state_space_momentum_initial_sigma_cm_sqrt_s": (
+        "diagnostic_state_space_momentum_initial_sigma_cm_sqrt_s",
+    ),
+    "state_space_momentum_velocity_decay": ("diagnostic_state_space_momentum_velocity_decay",),
+    "state_space_momentum_velocity_decay_tau_s": (
+        "diagnostic_state_space_momentum_velocity_decay_tau_s",
+    ),
+    "state_space_momentum_candidate_top_k": (
+        "diagnostic_state_space_momentum_candidate_top_k",
+        "diagnostic_state_space_imm_candidate_top_k",
+    ),
+    "state_space_momentum_predicted_candidate_top_k": (
+        "diagnostic_state_space_momentum_predicted_candidate_top_k",
+        "diagnostic_state_space_imm_predicted_candidate_top_k",
+    ),
+    "state_space_momentum_candidate_mass_threshold": (
+        "diagnostic_state_space_momentum_candidate_mass_threshold",
+        "diagnostic_state_space_imm_candidate_mass_threshold",
+    ),
+    "state_space_momentum_candidate_min_k": (
+        "diagnostic_state_space_momentum_candidate_min_k",
+        "diagnostic_state_space_imm_candidate_min_k",
+    ),
+    "state_space_momentum_candidate_max_k": (
+        "diagnostic_state_space_momentum_candidate_max_k",
+        "diagnostic_state_space_imm_candidate_max_k",
+    ),
+    "state_space_momentum_candidate_source": (
+        "diagnostic_state_space_momentum_candidate_source",
+        "diagnostic_state_space_imm_candidate_source",
+    ),
+    "state_space_valid_occupancy_threshold_s": (
+        "diagnostic_state_space_valid_occupancy_threshold_s",
+    ),
+    "state_space_displacement_radius_bins": (
+        "diagnostic_state_space_displacement_radius_bins",
+    ),
+    "state_space_displacement_position_sigma_cm": (
+        "diagnostic_state_space_displacement_position_sigma_cm",
+    ),
+    "state_space_displacement_transition_sigma_cm_sqrt_s": (
+        "diagnostic_state_space_displacement_transition_sigma_cm_sqrt_s",
+    ),
+    "state_space_displacement_prior_sigma_cm": (
+        "diagnostic_state_space_displacement_prior_sigma_cm",
+    ),
+    "goal_state_space_transition_sigma_cm_sqrt_s": (
+        "diagnostic_goal_state_space_transition_sigma_cm_sqrt_s",
+    ),
+    "goal_state_space_drift_speed_cm_s": ("diagnostic_goal_state_space_drift_speed_cm_s",),
+    "goal_state_space_max_step_sigma": ("diagnostic_goal_state_space_max_step_sigma",),
+}
+
 
 def _validate_constant_settings(combined: pd.DataFrame) -> None:
     """Reject aggregates that silently mix incompatible benchmark settings."""
 
     inconsistent: dict[str, list[str]] = {}
-    for column in _CONSTANT_SETTING_COLUMNS:
-        if column not in combined.columns:
+    for setting in _CONSTANT_SETTING_COLUMNS:
+        columns = [
+            column
+            for column in (setting, *_CONSTANT_SETTING_ALIASES.get(setting, ()))
+            if column in combined.columns
+        ]
+        if not columns:
             continue
-        values = combined[column].dropna().unique()
+        values = pd.concat(
+            [combined[column] for column in columns],
+            ignore_index=True,
+        ).dropna().unique()
         if len(values) > 1:
-            inconsistent[column] = sorted(str(value) for value in values)
+            inconsistent[setting] = sorted(str(value) for value in values)
 
     if not inconsistent:
         return

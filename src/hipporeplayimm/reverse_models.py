@@ -102,7 +102,7 @@ class BidirectionalReplayModel:
         )
         log_evidences = np.array([forward.log_likelihood, reverse.log_likelihood], dtype=float)
         weights = _evidence_mixture_weights(log_evidences)
-        logp = float(logsumexp(log_evidences) - np.log(2.0))
+        logp = _evidence_mixture_log_likelihood(log_evidences)
         terminal = _mixture_log_posterior(forward.terminal_log_posterior, reverse.terminal_log_posterior, weights)
         trajectory = None
         if return_trajectory is not False:
@@ -304,6 +304,17 @@ def _evidence_mixture_weights(log_evidences: np.ndarray) -> np.ndarray:
     normalizer = logsumexp(values[finite])
     weights[finite] = np.exp(values[finite] - normalizer)
     return weights
+
+
+def _evidence_mixture_log_likelihood(log_evidences: np.ndarray) -> float:
+    """Return equal-prior mixture evidence under the weight helper's NaN policy."""
+
+    values = np.asarray(log_evidences, dtype=float).reshape(-1)
+    if values.size == 0:
+        return -np.inf
+    usable = values.copy()
+    usable[np.isnan(usable)] = -np.inf
+    return float(logsumexp(usable) - np.log(values.size))
 
 
 def _mixture_log_posterior(left: np.ndarray | None, right: np.ndarray | None, weights: np.ndarray) -> np.ndarray | None:

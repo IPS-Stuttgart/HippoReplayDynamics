@@ -7,7 +7,11 @@ import pytest
 
 from hipporeplayimm.data import ReplaySession
 from hipporeplayimm.encoding import EncodingConfig, EncodingModel
-from hipporeplayimm.replay_emission_calibration import apply_replay_cell_gains, fit_replay_cell_gains
+from hipporeplayimm.replay_emission_calibration import (
+    ReplayEmissionCalibration,
+    apply_replay_cell_gains,
+    fit_replay_cell_gains,
+)
 
 
 def _empty_spike_session() -> ReplaySession:
@@ -63,6 +67,21 @@ def _two_cell_encoding() -> EncodingModel:
     )
 
 
+def _calibration(cell_ids: object, gains: object) -> ReplayEmissionCalibration:
+    cell_ids_array = np.asarray(cell_ids)
+    gains_array = np.asarray(gains)
+    size = gains_array.size
+    return ReplayEmissionCalibration(
+        cell_ids=cell_ids_array,
+        gains=gains_array,
+        observed_spikes=np.zeros(size, dtype=float),
+        expected_spikes=np.zeros(size, dtype=float),
+        prior_count=1.0,
+        prior_gain=1.0,
+        event_count=1,
+    )
+
+
 @pytest.mark.parametrize(
     ("kwargs", "message"),
     [
@@ -108,6 +127,52 @@ def test_apply_replay_cell_gains_aligns_manual_mapping_by_cell_id() -> None:
 
     np.testing.assert_allclose(calibrated.rates_hz, np.array([[1.0], [3.0]]))
     np.testing.assert_allclose(encoding.rates_hz, np.ones((2, 1)))
+
+
+def test_apply_replay_cell_gains_aligns_integral_float_calibration_ids() -> None:
+    calibrated = apply_replay_cell_gains(
+        _two_cell_encoding(),
+        _calibration(np.array([2.0, 1.0]), np.array([3.0, 4.0])),
+    )
+
+    np.testing.assert_allclose(calibrated.rates_hz, np.array([[4.0], [3.0]]))
+
+
+@pytest.mark.parametrize(
+    ("cell_ids", "error_type", "message"),
+    [
+        (np.array([True, 2], dtype=object), TypeError, "not boolean"),
+        (np.array([1.5, 2.0]), ValueError, "finite integer"),
+        (np.array([np.nan, 2.0]), ValueError, "finite integer"),
+        (np.array([1, 1]), ValueError, "unique"),
+    ],
+)
+def test_apply_replay_cell_gains_rejects_invalid_calibration_cell_ids(
+    cell_ids,
+    error_type,
+    message,
+) -> None:
+    calibration = _calibration(cell_ids, np.array([2.0, 3.0]))
+
+    with pytest.raises(error_type, match=message):
+        apply_replay_cell_gains(_two_cell_encoding(), calibration)
+
+
+@pytest.mark.parametrize(
+    ("gains", "error_type", "message"),
+    [
+        ({True: 3.0}, TypeError, "not boolean"),
+        ({1.5: 3.0}, ValueError, "finite integer"),
+        ({"1": 2.0, 1: 3.0}, ValueError, "unique"),
+    ],
+)
+def test_apply_replay_cell_gains_rejects_ambiguous_mapping_cell_ids(
+    gains,
+    error_type,
+    message,
+) -> None:
+    with pytest.raises(error_type, match=message):
+        apply_replay_cell_gains(_two_cell_encoding(), gains)
 
 
 @pytest.mark.parametrize(

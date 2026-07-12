@@ -11,6 +11,7 @@ import pandas as pd
 _PATCHED_FLAG = "_result_quality_audit_scope_patch_applied"
 _EVENT_COUNT_PATCHED_FLAG = "_result_quality_audit_event_count_scope_patch_applied"
 _HELDOUT_INFLUENCE_PATCHED_FLAG = "_result_quality_audit_heldout_influence_patch_applied"
+_DISTINCT_MODEL_MARGIN_PATCHED_FLAG = "_result_quality_distinct_model_margin_patch_applied"
 _MISSING_TEXT_VALUES = {"", "nan", "na", "n/a", "none", "null", "<na>"}
 _EVENT_GROUP_SESSION_COLUMNS = ("session",)
 _EVENT_GROUP_EVENT_COLUMNS = ("event_index", "event_id")
@@ -128,7 +129,6 @@ def _heldout_aware_influence_summary(audit_module: Any, scores: pd.DataFrame) ->
     rat_scores = scores.copy()
     rat_scores["rat"] = rat_scores["session"].map(audit_module.rat_from_session)
     frames.append(audit_module.leave_one_group_influence(rat_scores, group_col="rat", value_col=value_col))
-
     nonempty = [frame for frame in frames if not frame.empty]
     if not nonempty:
         return pd.DataFrame(columns=list(_INFLUENCE_COLUMNS))
@@ -136,13 +136,78 @@ def _heldout_aware_influence_summary(audit_module: Any, scores: pd.DataFrame) ->
     return out if not out.empty else pd.DataFrame(columns=list(_INFLUENCE_COLUMNS))
 
 
+def _patch_distinct_model_result_quality_margins(gates_module: Any) -> None:
+    """Make result-quality margins compare the best finite row per model."""
+
+    current_annotate = gates_module._annotate_margin_scope
+    if getattr(current_annotate, _DISTINCT_MODEL_MARGIN_PATCHED_FLAG, False):
+        return
+
+    @wraps(current_annotate)
+    def annotate_distinct_model_margin_scope(
+        out: pd.DataFrame,
+        group_index: pd.Index,
+        rows: pd.DataFrame,
+        *,
+        prefix: str,
+    ) -> None:
+        if rows.empty or "model" not in rows.columns or "log_evidence" not in rows.columns:
+            current_annotate(out, group_index, rows, prefix=prefix)
+            return
+
+        numeric_evidence = pd.to_numeric(rows["log_evidence"], errors="coerce")
+        finite = pd.Series(
+            np.isfinite(numeric_evidence.to_numpy(dtype=float)),
+            index=numeric_evidence.index,
+        )
+        finite_rows = rows.loc[finite].copy()
+        if finite_rows.empty:
+            current_annotate(out, group_index, finite_rows, prefix=prefix)
+            return
+
+        finite_rows["_numeric_log_evidence"] = numeric_evidence.loc[finite_rows.index].astype(float)
+        distinct = (
+            finite_rows.sort_values("_numeric_log_evidence", ascending=False, kind="stable")
+            .drop_duplicates("model", keep="first")
+            .drop(columns="_numeric_log_evidence")
+        )
+        current_annotate(out, group_index, distinct, prefix=prefix)
+
+        distinct_values = pd.to_numeric(distinct["log_evidence"], errors="coerce")
+        best_value = float(distinct_values.max())
+        for rank, (_, model_row) in enumerate(
+            distinct.assign(_numeric_log_evidence=distinct_values)
+            .sort_values("_numeric_log_evidence", ascending=False, kind="stable")
+            .iterrows(),
+            start=1,
+        ):
+            model_value = model_row["model"]
+            if pd.isna(model_value):
+                same_model = finite_rows["model"].isna()
+            else:
+                same_model = finite_rows["model"].eq(model_value)
+            matching_index = finite_rows.index[same_model]
+            out.loc[matching_index, f"{prefix}_rank"] = float(rank)
+            row_values = numeric_evidence.loc[matching_index].to_numpy(dtype=float)
+            out.loc[matching_index, f"{prefix}_relative_log_evidence"] = row_values - best_value
+
+    setattr(
+        annotate_distinct_model_margin_scope,
+        _DISTINCT_MODEL_MARGIN_PATCHED_FLAG,
+        True,
+    )
+    gates_module._annotate_margin_scope = annotate_distinct_model_margin_scope
+
+
 def apply_result_quality_audit_scope_patch() -> None:
     """Install scoped grouping for result-quality audit summaries."""
 
     from . import advanced_result_evidence_margin_duplicates
     from . import result_quality_audit as audit_module
+    from . import result_quality_gates as gates_module
 
     advanced_result_evidence_margin_duplicates.apply_evidence_margin_distinct_model_patch()
+    _patch_distinct_model_result_quality_margins(gates_module)
 
     current_group_columns = audit_module.event_group_columns
     if not getattr(current_group_columns, _PATCHED_FLAG, False):

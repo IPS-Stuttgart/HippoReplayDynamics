@@ -2,15 +2,19 @@
 
 from __future__ import annotations
 
+import sys
 from functools import wraps
 
 import numpy as np
+from scipy.sparse import csr_matrix
 from scipy.special import logsumexp
 
 _PATCHED_FLAG = "_candidate_active_support_validation_patch_applied"
 _PAIR_POSTERIOR_PATCHED_FLAG = "_candidate_pair_posterior_exact_support_patch_applied"
 _PAIR_POSTERIOR_WRAPPER_FLAG = "_candidate_pair_posterior_exact_support_wrapper"
 _SPARSE_MATVEC_WRAPPER_FLAG = "_sparse_diffusion_exact_support_wrapper"
+_GAUSSIAN_TRANSITION_WRAPPER_FLAG = "_stable_gaussian_transition_weights_wrapper"
+_SPARSE_GAUSSIAN_ROW_WRAPPER_FLAG = "_stable_sparse_gaussian_row_weights_wrapper"
 
 
 def _validate_active_support_rows(values: np.ndarray) -> None:
@@ -43,6 +47,7 @@ def apply_candidate_active_support_validation_patch() -> None:
 
     _patch_candidate_pair_posteriors()
     _patch_sparse_diffusion_exact_support()
+    _patch_stable_gaussian_transition_weights()
 
 
 def _patch_candidate_pair_posteriors() -> None:
@@ -111,6 +116,129 @@ def _patch_sparse_diffusion_exact_support() -> None:
     setattr(log_sparse_matvec, _SPARSE_MATVEC_WRAPPER_FLAG, True)
     setattr(log_sparse_matvec, "__hipporeplayimm_original__", current)
     models._log_sparse_matvec = log_sparse_matvec
+
+
+def _stable_gaussian_weights(dist2: np.ndarray, sigma_cm: float) -> np.ndarray:
+    """Normalize Gaussian weights without underflowing every candidate to zero."""
+
+    distances = np.asarray(dist2, dtype=float)
+    if distances.ndim != 1 or distances.size == 0:
+        raise ValueError("dist2 must be a nonempty one-dimensional array")
+    minimum = float(np.min(distances))
+    nearest = distances == minimum
+    sigma = abs(float(sigma_cm))
+    if not np.isfinite(minimum) or not np.isfinite(sigma) or sigma <= 0.0:
+        return nearest.astype(float) / float(np.sum(nearest))
+
+    shifted = np.maximum(distances - minimum, 0.0)
+    with np.errstate(over="ignore", under="ignore", invalid="ignore"):
+        standardized = np.sqrt(shifted) / sigma
+        weights = np.exp(-0.5 * standardized * standardized)
+    total = float(weights.sum())
+    if total <= 0.0 or not np.isfinite(total):
+        return nearest.astype(float) / float(np.sum(nearest))
+    return weights / total
+
+
+def _patch_stable_gaussian_transition_weights() -> None:
+    """Preserve relative Gaussian transition mass when raw kernels underflow."""
+
+    from . import state_space_sparse_momentum, state_space_utils
+
+    current_dense = state_space_utils._gaussian_transition_matrix
+    if not getattr(current_dense, _GAUSSIAN_TRANSITION_WRAPPER_FLAG, False):
+
+        @wraps(current_dense)
+        def gaussian_transition_matrix(
+            bin_centers,
+            sigma_cm,
+            max_step_sigma,
+            valid_bin_mask=None,
+        ):
+            sigma = float(sigma_cm)
+            max_step = float(max_step_sigma)
+            if not np.isfinite(sigma) or sigma <= 0.0:
+                raise ValueError("sigma_cm must be finite and positive")
+            if not np.isfinite(max_step) or max_step <= 0.0:
+                raise ValueError("max_step_sigma must be finite and positive")
+            centers = state_space_utils._as_finite_2d_points(bin_centers, "bin_centers")
+            n_bins = centers.shape[0]
+            valid_mask = state_space_utils._coerce_valid_bin_mask(valid_bin_mask, n_bins)
+            allowed = np.arange(n_bins, dtype=int) if valid_mask is None else np.flatnonzero(valid_mask)
+            radius2 = (sigma * max_step) ** 2
+            rows: list[int] = []
+            cols: list[int] = []
+            data: list[float] = []
+            for src, center in enumerate(centers):
+                delta = centers - center[None, :]
+                dist2 = np.sum(delta * delta, axis=1)
+                keep = dist2 <= radius2
+                if valid_mask is not None:
+                    keep &= valid_mask
+                if not np.any(keep):
+                    keep[int(allowed[int(np.argmin(dist2[allowed]))])] = True
+                dst = np.flatnonzero(keep)
+                weights = _stable_gaussian_weights(dist2[dst], sigma)
+                rows.extend(int(index) for index in dst)
+                cols.extend([src] * len(dst))
+                data.extend(float(value) for value in weights)
+            return csr_matrix((data, (rows, cols)), shape=(n_bins, n_bins))
+
+        setattr(gaussian_transition_matrix, _GAUSSIAN_TRANSITION_WRAPPER_FLAG, True)
+        setattr(gaussian_transition_matrix, "__hipporeplayimm_original__", current_dense)
+        state_space_utils._gaussian_transition_matrix = gaussian_transition_matrix
+        _synchronize_transition_aliases(
+            "_gaussian_transition_matrix",
+            current_dense,
+            gaussian_transition_matrix,
+        )
+
+    current_sparse = state_space_sparse_momentum._finite_gaussian_row
+    if not getattr(current_sparse, _SPARSE_GAUSSIAN_ROW_WRAPPER_FLAG, False):
+
+        @wraps(current_sparse)
+        def finite_gaussian_row(
+            centers,
+            valid_indices,
+            tree,
+            predicted,
+            *,
+            sigma_cm,
+            max_step_sigma,
+        ):
+            sigma = float(sigma_cm)
+            if not np.isfinite(sigma) or sigma <= 0.0:
+                raise ValueError("sigma_cm must be finite and positive")
+            points = np.asarray(centers, dtype=float)
+            prediction = np.asarray(predicted, dtype=float).reshape(points.shape[1])
+            radius = max(sigma * float(max_step_sigma), np.finfo(float).eps)
+            local = tree.query_ball_point(prediction, radius)
+            if len(local) == 0:
+                _, nearest = tree.query(prediction, k=1)
+                local = [int(nearest)]
+            valid = np.asarray(valid_indices, dtype=int)
+            dst = valid[np.asarray(local, dtype=int)]
+            dist2 = np.sum((points[dst] - prediction[None, :]) ** 2, axis=1)
+            weights = _stable_gaussian_weights(dist2, sigma)
+            return dst.astype(int), weights
+
+        setattr(finite_gaussian_row, _SPARSE_GAUSSIAN_ROW_WRAPPER_FLAG, True)
+        setattr(finite_gaussian_row, "__hipporeplayimm_original__", current_sparse)
+        state_space_sparse_momentum._finite_gaussian_row = finite_gaussian_row
+        _synchronize_transition_aliases(
+            "_finite_gaussian_row",
+            current_sparse,
+            finite_gaussian_row,
+        )
+
+
+def _synchronize_transition_aliases(name: str, original: object, replacement: object) -> None:
+    """Refresh package-local imports of a patched transition helper."""
+
+    for module in list(sys.modules.values()):
+        module_name = getattr(module, "__name__", "")
+        if module_name.startswith("hipporeplayimm") and getattr(module, name, None) is original:
+            setattr(module, name, replacement)
 
 
 def _restrict_log_posterior_to_candidates(

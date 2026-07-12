@@ -445,20 +445,23 @@ def _best_log_evidence_row(frame: pd.DataFrame) -> pd.Series:
 
 
 def simulation_event_best_rows(event_scores: pd.DataFrame) -> pd.DataFrame:
-    """Return one exact-comparable best row per simulated event."""
+    """Return one exact-comparable best row per simulated event.
 
-    event_scores = _coerce_log_evidence_column(ensure_evidence_support_columns(event_scores))
+    Refresh the event-level evidence annotations before selecting winners.  Score
+    tables may be concatenated from checkpoints or partially annotated shards, so
+    trusting any pre-existing ``is_best_model`` value globally can drop events
+    whose rows do not yet carry a winner marker.  Recomputing also prevents stale
+    markers from overriding the current finite comparable evidence values.
+    """
+
+    if event_scores.empty:
+        return pd.DataFrame()
+    event_scores = simulation_add_evidence_columns(event_scores)
     comparable = _coerce_bool_series(event_scores["evidence_comparable"])
     status_ok = _status_success_series(event_scores)
-    ok = event_scores[status_ok & comparable]
-    if ok.empty:
-        return pd.DataFrame()
-    if "is_best_model" in ok:
-        best = ok[_coerce_bool_series(ok["is_best_model"])]
-        if not best.empty:
-            return best.reset_index(drop=True)
-    best = ok.sort_values(["session", "event_index", "log_evidence"], ascending=[True, True, False])
-    return best.drop_duplicates(["session", "event_index"], keep="first").reset_index(drop=True)
+    best_marked = _coerce_bool_series(event_scores["is_best_model"])
+    best = event_scores[status_ok & comparable & best_marked]
+    return best.reset_index(drop=True)
 
 
 def patch_simulation_recovery_module(module: object) -> None:

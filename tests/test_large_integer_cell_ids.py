@@ -37,6 +37,24 @@ def test_large_integer_emission_row_lookup_remains_distinct() -> None:
     assert rows.tolist() == [1]
 
 
+def test_large_text_integer_emission_row_lookup_remains_distinct() -> None:
+    first = 2**53
+    second = first + 1
+    cases = (
+        ([str(first), str(second)], [str(second)]),
+        ([f"{first}.0", f"{second}.0"], [f"{second}.0"]),
+        ([str(first).encode(), str(second).encode()], [str(second).encode()]),
+    )
+
+    for available, requested in cases:
+        rows = _cell_id_row_indices(
+            np.array(available, dtype=object),
+            np.array(requested, dtype=object),
+        )
+
+        assert rows.tolist() == [1]
+
+
 def test_large_integer_replay_session_cell_ids_remain_distinct() -> None:
     first = 2**53
     second = first + 1

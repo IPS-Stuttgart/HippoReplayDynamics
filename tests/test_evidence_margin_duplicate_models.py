@@ -43,3 +43,31 @@ def test_add_evidence_margin_columns_uses_distinct_model_margin() -> None:
 
     assert merged["second_best_model_by_evidence"].unique().tolist() == ["diffusion"]
     assert merged["evidence_margin_to_second_best"].unique().tolist() == [4.0]
+
+
+def test_add_evidence_margin_columns_preserves_named_duplicate_index() -> None:
+    scores = pd.DataFrame(
+        {
+            "session": ["Rat1/Open1"] * 4,
+            "event_index": [0, 0, 1, 1],
+            "model": ["stationary", "diffusion", "momentum", "stationary"],
+            "log_evidence": [5.0, 1.0, 8.0, 7.0],
+            "status": ["success"] * 4,
+            "evidence_comparable": [True] * 4,
+        },
+        index=pd.Index(
+            ["score-row", "score-row", "other-row", "other-row"],
+            name="score_index",
+        ),
+    )
+
+    annotated = add_evidence_margin_columns(scores)
+
+    pd.testing.assert_index_equal(annotated.index, scores.index)
+    assert annotated["best_model_by_evidence"].tolist() == [
+        "stationary",
+        "stationary",
+        "momentum",
+        "momentum",
+    ]
+    assert annotated["evidence_margin_to_second_best"].tolist() == [4.0, 4.0, 1.0, 1.0]

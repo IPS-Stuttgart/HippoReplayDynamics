@@ -133,29 +133,36 @@ def _posterior_entropy(posterior: np.ndarray, log_posterior: np.ndarray) -> np.n
 
 
 def _posterior_spread(posterior: np.ndarray, centers: np.ndarray, mean_path: np.ndarray) -> np.ndarray:
-    """Return spread without evaluating zero posterior mass times overflowed distance."""
+    """Return spread without zero-mass or intermediate-squaring overflow."""
 
-    delta = centers[None, :, :] - mean_path[:, None, :]
     positive_mass = posterior > 0.0
-    squared_delta = np.zeros_like(delta, dtype=float)
-    weighted_dist2 = np.zeros_like(posterior, dtype=float)
+    delta = np.zeros((posterior.shape[0], centers.shape[0], centers.shape[1]), dtype=float)
     with np.errstate(over="ignore", invalid="ignore"):
-        np.square(
-            delta,
-            out=squared_delta,
+        np.subtract(
+            centers[None, :, :],
+            mean_path[:, None, :],
+            out=delta,
             where=positive_mass[:, :, None],
         )
-        dist2 = np.sum(squared_delta, axis=2)
-        np.multiply(
-            posterior,
-            dist2,
-            out=weighted_dist2,
-            where=positive_mass,
-        )
-        spread2 = np.sum(weighted_dist2, axis=1)
-    if not np.all(np.isfinite(spread2)):
+    if not np.all(np.isfinite(delta)):
         raise ValueError("posterior spread exceeds floating-point range")
-    return np.sqrt(spread2)
+    scale = np.max(np.abs(delta), axis=(1, 2))
+    expanded_scale = scale[:, None, None]
+    scaled_delta = np.divide(
+        delta,
+        expanded_scale,
+        out=np.zeros_like(delta, dtype=float),
+        where=expanded_scale > 0.0,
+    )
+    with np.errstate(over="ignore", invalid="ignore"):
+        scaled_spread2 = np.sum(
+            posterior[:, :, None] * scaled_delta * scaled_delta,
+            axis=(1, 2),
+        )
+        spread = scale * np.sqrt(scaled_spread2)
+    if not np.all(np.isfinite(spread)):
+        raise ValueError("posterior spread exceeds floating-point range")
+    return spread
 
 
 def _path_steps(path: np.ndarray) -> tuple[np.ndarray, np.ndarray]:

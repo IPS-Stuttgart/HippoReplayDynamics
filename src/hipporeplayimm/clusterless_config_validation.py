@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable, Mapping
 from functools import wraps
 import sys
 
@@ -58,16 +59,38 @@ def apply_clusterless_encoding_config_validation_patch() -> None:
     _patch_benchmark_clusterless_mark_config()
 
 
+def _contains_boolean_mark_values(values) -> bool:
+    """Inspect the source representation before NumPy can promote booleans."""
+
+    if isinstance(values, (bool, np.bool_)):
+        return True
+    if isinstance(values, np.ndarray):
+        if values.size == 0:
+            return False
+        if np.issubdtype(values.dtype, np.bool_):
+            return True
+        if values.dtype == object:
+            return any(_contains_boolean_mark_values(value) for value in values.flat)
+        return False
+    if isinstance(values, Mapping):
+        return any(_contains_boolean_mark_values(value) for value in values.values())
+    if isinstance(values, (str, bytes, bytearray)):
+        return False
+    if isinstance(values, Iterable):
+        return any(_contains_boolean_mark_values(value) for value in values)
+    return False
+
+
 def _validated_real_mark_values(marks):
     """Reject lossy mark coercions while accepting exactly real complex arrays."""
+
+    if _contains_boolean_mark_values(marks):
+        raise ValueError("marks must contain numeric values, not boolean values")
 
     try:
         raw = np.asarray(marks)
     except (TypeError, ValueError):
         return marks
-
-    if np.issubdtype(raw.dtype, np.bool_):
-        raise ValueError("marks must contain numeric values, not boolean values")
 
     if np.issubdtype(raw.dtype, np.complexfloating):
         imaginary = np.imag(raw)
@@ -81,8 +104,6 @@ def _validated_real_mark_values(marks):
     converted = raw.copy()
     changed = False
     for index, value in np.ndenumerate(raw):
-        if isinstance(value, (bool, np.bool_)):
-            raise ValueError("marks must contain numeric values, not boolean values")
         if isinstance(value, (complex, np.complexfloating)):
             imaginary = float(np.imag(value))
             if not np.isfinite(imaginary) or imaginary != 0.0:

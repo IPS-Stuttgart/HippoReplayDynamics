@@ -317,7 +317,11 @@ def simulation_add_evidence_columns(df: pd.DataFrame) -> pd.DataFrame:
         return df
     df = _coerce_log_evidence_column(ensure_evidence_support_columns(df))
     groups = []
-    for _, group in df.groupby(["session", "event_index"], sort=False):
+    for _, group in df.groupby(
+        ["session", "event_index"],
+        sort=False,
+        dropna=False,
+    ):
         group = group.copy()
         status_ok = _status_success_series(group)
         scored = group[status_ok]

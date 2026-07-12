@@ -5,7 +5,7 @@ import pandas as pd
 import pytest
 
 import hipporeplayimm
-from hipporeplayimm import result_improvements
+from hipporeplayimm import result_improvement_seed_validation, result_improvements
 
 
 def _rows() -> pd.DataFrame:
@@ -38,6 +38,17 @@ def test_resampling_helpers_reject_string_seed() -> None:
         result_improvements.paired_sign_flip_p_value(_rows(), model="imm", n_permutations=2, random_seed=np.array("2"))
 
 
+@pytest.mark.parametrize("seed", [b"2", np.bytes_("2")])
+def test_resampling_helpers_reject_byte_seed(seed: object) -> None:
+    hipporeplayimm.apply_runtime_patches()
+
+    with pytest.raises(ValueError, match="random_seed"):
+        result_improvements.hierarchical_bootstrap_ci(_rows(), model="imm", n_bootstrap=2, random_seed=seed)
+
+    with pytest.raises(ValueError, match="random_seed"):
+        result_improvements.paired_sign_flip_p_value(_rows(), model="imm", n_permutations=2, random_seed=seed)
+
+
 def test_resampling_helpers_reject_fractional_seed() -> None:
     hipporeplayimm.apply_runtime_patches()
 
@@ -46,6 +57,13 @@ def test_resampling_helpers_reject_fractional_seed() -> None:
 
     with pytest.raises(ValueError, match="random_seed"):
         result_improvements.paired_sign_flip_p_value(_rows(), model="imm", n_permutations=2, random_seed=1.5)
+
+
+def test_resampling_seed_validation_preserves_large_integer_exactly() -> None:
+    seed = 2**53 + 1
+
+    assert result_improvement_seed_validation._nonnegative_integer_seed(seed) == seed
+    assert result_improvement_seed_validation._nonnegative_integer_seed(np.int64(seed)) == seed
 
 
 def test_resampling_helpers_accept_integer_like_seed() -> None:

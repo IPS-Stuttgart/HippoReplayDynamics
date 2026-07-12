@@ -20,12 +20,25 @@ def test_trajectory_spread_ignores_impossible_bins_with_extreme_coordinates() ->
     assert metrics["trajectory_terminal_spread_cm"] == pytest.approx(0.0)
 
 
-def test_trajectory_spread_rejects_positive_mass_beyond_float_range() -> None:
+def test_trajectory_spread_keeps_large_representable_variance_finite() -> None:
+    metrics = trajectory_quality_metrics(
+        np.log(np.array([[0.5, 0.5]], dtype=float)),
+        np.array([0.0, 1.0e308], dtype=float),
+    )
+
+    assert metrics["trajectory_mean_spread_cm"] == pytest.approx(5.0e307)
+    assert metrics["trajectory_terminal_spread_cm"] == pytest.approx(5.0e307)
+
+
+def test_trajectory_spread_rejects_genuinely_unrepresentable_geometry() -> None:
     with pytest.raises(ValueError, match="posterior spread exceeds floating-point range"):
         trajectory_quality_metrics(
             np.log(np.array([[0.5, 0.5]], dtype=float)),
             np.array(
-                [-np.finfo(float).max, np.finfo(float).max],
+                [
+                    [-np.finfo(float).max, -np.finfo(float).max],
+                    [np.finfo(float).max, np.finfo(float).max],
+                ],
                 dtype=float,
             ),
         )

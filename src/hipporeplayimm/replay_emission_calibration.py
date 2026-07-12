@@ -197,6 +197,9 @@ def _gain_mapping_from_mapping(gains: Mapping[object, object]) -> dict[int, floa
         cell_id = _integral_cell_id(raw_cell_id, "replay gain mapping cell IDs")
         if cell_id in mapping:
             raise ValueError("replay gain mapping cell IDs must contain unique identifiers")
+        integer_info = np.iinfo(np.dtype(int))
+        if cell_id < int(integer_info.min) or cell_id > int(integer_info.max):
+            raise ValueError("replay gain mapping cell IDs must fit into integer identifier range")
         mapping[cell_id] = _finite_gain_scalar(raw_gain)
     return mapping
 

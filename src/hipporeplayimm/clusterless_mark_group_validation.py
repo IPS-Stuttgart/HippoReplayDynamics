@@ -22,6 +22,7 @@ from scipy.special import gammaln
 _PATCHED_FLAG = "_clusterless_mark_group_validation_patch_applied"
 _WRAPPER_MARKER = "_clusterless_mark_group_validation_wrapper"
 _BUILD_EMISSIONS_WRAPPER_MARKER = "_clusterless_mark_group_build_emissions_wrapper"
+_BUILD_EMISSIONS_WRAPPER_VERSION = 2
 
 
 def _mark_group_guard(wrapper):
@@ -30,7 +31,11 @@ def _mark_group_guard(wrapper):
 
 
 def _mark_build_emissions_guard(wrapper):
-    setattr(wrapper, _BUILD_EMISSIONS_WRAPPER_MARKER, True)
+    setattr(
+        wrapper,
+        _BUILD_EMISSIONS_WRAPPER_MARKER,
+        _BUILD_EMISSIONS_WRAPPER_VERSION,
+    )
     return wrapper
 
 
@@ -39,7 +44,10 @@ def _is_current_group_guard(value: object) -> bool:
 
 
 def _is_current_build_emissions_guard(value: object) -> bool:
-    return bool(getattr(value, _BUILD_EMISSIONS_WRAPPER_MARKER, False))
+    return (
+        getattr(value, _BUILD_EMISSIONS_WRAPPER_MARKER, None)
+        == _BUILD_EMISSIONS_WRAPPER_VERSION
+    )
 
 
 def _wrappers_are_current(clusterless) -> bool:
@@ -174,6 +182,18 @@ def _preserve_group_ids(group_ids: Any, mask: np.ndarray) -> np.ndarray:
     return raw.reshape(-1)[mask]
 
 
+def _scaled_log_rates(values: Any, scale: float, name: str) -> tuple[np.ndarray, np.ndarray]:
+    """Validate rates and retain exact zero support in their logarithms."""
+
+    rates = np.asarray(values, dtype=float)
+    if not np.all(np.isfinite(rates)) or np.any(rates < 0.0):
+        raise ValueError(f"{name} must contain finite nonnegative rates")
+    scaled = rates * float(scale)
+    log_rates = np.full(scaled.shape, -np.inf, dtype=float)
+    np.log(scaled, out=log_rates, where=scaled > 0.0)
+    return scaled, log_rates
+
+
 def _synchronize_build_emission_aliases(previous: object, patched: object) -> None:
     for module in list(sys.modules.values()):
         module_name = getattr(module, "__name__", "")
@@ -274,9 +294,10 @@ def apply_clusterless_mark_group_validation_patch() -> None:
             times = edges[:-1] + 0.5 * bin_durations
             dt = float(np.median(bin_durations))
             counts = np.zeros(times.shape[0], dtype=int)
-            scaled_rate_hz = np.maximum(
-                encoding.rate_hz * float(config.spike_rate_scale),
-                np.finfo(float).tiny,
+            scaled_rate_hz, log_rate = _scaled_log_rates(
+                encoding.rate_hz,
+                config.spike_rate_scale,
+                "clusterless rate_hz",
             )
             log_likelihood = -scaled_rate_hz[None, :] * bin_durations[:, None]
 
@@ -297,15 +318,19 @@ def apply_clusterless_mark_group_validation_patch() -> None:
                 mark_values = mark_values[valid]
                 if mark_group_ids is not None:
                     mark_group_ids = _preserve_group_ids(mark_group_ids, valid)
-                log_rate = np.log(scaled_rate_hz)
                 mark_log_likelihood = encoding.log_mark_likelihood(mark_values, mark_group_ids)
                 group_indices = encoding._coerce_group_indices(mark_group_ids, mark_values.shape[0]) if mark_group_ids is not None else None
+                group_log_rate = None
+                if encoding.group_rate_hz is not None:
+                    _, group_log_rate = _scaled_log_rates(
+                        encoding.group_rate_hz,
+                        config.spike_rate_scale,
+                        "clusterless group_rate_hz",
+                    )
                 for local_index, time_bin in enumerate(time_bins):
                     local_log_rate = log_rate
-                    if group_indices is not None and encoding.group_rate_hz is not None and group_indices[local_index] >= 0:
-                        local_log_rate = np.log(
-                            np.maximum(encoding.group_rate_hz[int(group_indices[local_index])] * float(config.spike_rate_scale), np.finfo(float).tiny)
-                        )
+                    if group_indices is not None and group_log_rate is not None and group_indices[local_index] >= 0:
+                        local_log_rate = group_log_rate[int(group_indices[local_index])]
                     log_likelihood[time_bin] += local_log_rate + mark_log_likelihood[local_index]
                 np.add.at(counts, time_bins, 1)
             log_likelihood += (counts * np.log(bin_durations) - gammaln(counts + 1))[:, None]

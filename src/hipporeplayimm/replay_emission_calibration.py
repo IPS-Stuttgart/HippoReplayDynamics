@@ -221,11 +221,6 @@ def fit_replay_cell_gains(
     """
 
     config = EmissionConfig() if config is None else config
-    cell_ids = _coerce_integral_cell_ids(
-        encoding.cell_ids,
-        "encoding.cell_ids",
-        expected_size=encoding.n_cells,
-    )
     prior_count = _finite_float("prior_count", prior_count)
     prior_gain = _finite_float("prior_gain", prior_gain)
     min_gain = _finite_float("min_gain", min_gain)
@@ -236,6 +231,11 @@ def fit_replay_cell_gains(
         raise ValueError("prior_gain must be positive")
     if min_gain <= 0.0 or max_gain <= 0.0 or max_gain < min_gain:
         raise ValueError("gain bounds must be positive and ordered")
+    cell_ids = _coerce_integral_cell_ids(
+        encoding.cell_ids,
+        "encoding.cell_ids",
+        expected_size=encoding.n_cells,
+    )
 
     observed = np.zeros(encoding.n_cells, dtype=float)
     expected = np.zeros(encoding.n_cells, dtype=float)

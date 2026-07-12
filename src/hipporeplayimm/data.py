@@ -375,7 +375,17 @@ def _mark_group_ids_from_tetrode_cell_ids(cell_ids: np.ndarray | None, tetrode_c
         group_column, cell_column = 0, 1
     else:
         group_column, cell_column = 1, 0
-    mapping = {int(row[cell_column]): int(row[group_column]) for row in pairs}
+    mapping: dict[int, int] = {}
+    for row in pairs:
+        cell_id = int(row[cell_column])
+        group_id = int(row[group_column])
+        previous_group = mapping.get(cell_id)
+        if previous_group is not None and previous_group != group_id:
+            raise ValueError(
+                f"cell ID {cell_id} maps to multiple tetrode/group IDs: "
+                f"{previous_group} and {group_id}"
+            )
+        mapping[cell_id] = group_id
     return np.asarray([mapping.get(int(cell_id), int(cell_id)) for cell_id in spike_cell_ids], dtype=int)
 
 

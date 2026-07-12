@@ -65,6 +65,45 @@ def test_validate_constant_settings_rejects_mixed_clusterless_rate_floor():
         _validate_constant_settings(frame)
 
 
+@pytest.mark.parametrize(
+    "column",
+    [
+        "diagnostic_candidate_diffusion_sigma_cm",
+        "diagnostic_state_space_diffusion_sigma_cm_sqrt_s",
+        "diagnostic_state_space_momentum_velocity_decay",
+    ],
+)
+def test_validate_constant_settings_rejects_mixed_diagnostic_model_dynamics(column):
+    first = _row(event_index=0)
+    second = _row(event_index=1)
+    first[column] = 1.0
+    second[column] = 2.0
+
+    with pytest.raises(ValueError):
+        _validate_constant_settings(pd.DataFrame([first, second]))
+
+
+def test_validate_constant_settings_compares_canonical_and_diagnostic_aliases():
+    canonical = _row(event_index=0)
+    canonical["state_space_diffusion_sigma_cm_sqrt_s"] = 85.0
+    diagnostic = _row(event_index=1)
+    diagnostic["diagnostic_state_space_diffusion_sigma_cm_sqrt_s"] = 120.0
+
+    with pytest.raises(ValueError, match="state_space_diffusion_sigma_cm_sqrt_s"):
+        _validate_constant_settings(pd.DataFrame([canonical, diagnostic]))
+
+
+def test_validate_constant_settings_keeps_raw_and_effective_imm_stickiness_separate():
+    first = _row(event_index=0)
+    first["state_space_imm_mode_stickiness"] = 0.95
+    first["state_space_effective_imm_mode_stickiness"] = 0.90
+    second = _row(event_index=1)
+    second["state_space_imm_mode_stickiness"] = 0.95
+    second["diagnostic_state_space_imm_mode_stickiness"] = 0.90
+
+    _validate_constant_settings(pd.DataFrame([first, second]))
+
+
 def _row(
     *,
     event_index: int,

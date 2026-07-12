@@ -45,15 +45,21 @@ class WellRouteStateSpaceReplayModel:
         if not np.all(np.isfinite(centers)):
             raise ValueError("bin_centers must be finite")
 
-        transition_sigma_cm_sqrt_s = float(self.transition_sigma_cm_sqrt_s)
-        drift_speed_cm_s = float(self.drift_speed_cm_s)
-        max_step_sigma = float(self.max_step_sigma)
-        if not np.isfinite(transition_sigma_cm_sqrt_s) or transition_sigma_cm_sqrt_s <= 0.0:
-            raise ValueError("transition_sigma_cm_sqrt_s must be finite and positive")
-        if not np.isfinite(drift_speed_cm_s) or drift_speed_cm_s < 0.0:
-            raise ValueError("drift_speed_cm_s must be finite and non-negative")
-        if not np.isfinite(max_step_sigma) or max_step_sigma <= 0.0:
-            raise ValueError("max_step_sigma must be finite and positive")
+        transition_sigma_cm_sqrt_s = _coerce_dynamic_parameter(
+            self.transition_sigma_cm_sqrt_s,
+            "transition_sigma_cm_sqrt_s",
+            allow_zero=False,
+        )
+        drift_speed_cm_s = _coerce_dynamic_parameter(
+            self.drift_speed_cm_s,
+            "drift_speed_cm_s",
+            allow_zero=True,
+        )
+        max_step_sigma = _coerce_dynamic_parameter(
+            self.max_step_sigma,
+            "max_step_sigma",
+            allow_zero=False,
+        )
 
         routes = _coerce_candidate_routes(self.candidate_routes, centers, self.max_default_points)
         durations = transition_durations_s(emissions)
@@ -144,6 +150,32 @@ def _coerce_max_default_points(value: int) -> int:
     if max_points < 2:
         raise ValueError("max_default_points must be at least 2 when candidate_routes is not provided")
     return max_points
+
+
+def _coerce_dynamic_parameter(value: object, name: str, *, allow_zero: bool) -> float:
+    """Return a real scalar without accepting bool, text, complex, or arrays."""
+
+    constraint = "finite and non-negative" if allow_zero else "finite and positive"
+    try:
+        raw = np.asarray(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must be {constraint}") from exc
+    if raw.shape != ():
+        raise ValueError(f"{name} must be {constraint}")
+    scalar = raw.item()
+    if isinstance(
+        scalar,
+        (bool, np.bool_, str, bytes, np.str_, np.bytes_, complex, np.complexfloating),
+    ):
+        raise ValueError(f"{name} must be {constraint}")
+    try:
+        numeric = float(scalar)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ValueError(f"{name} must be {constraint}") from exc
+    invalid = numeric < 0.0 if allow_zero else numeric <= 0.0
+    if not np.isfinite(numeric) or invalid:
+        raise ValueError(f"{name} must be {constraint}")
+    return numeric
 
 
 def _as_numeric_coordinates(values: object, name: str) -> np.ndarray:

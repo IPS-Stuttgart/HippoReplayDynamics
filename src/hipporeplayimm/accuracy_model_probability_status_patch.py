@@ -15,6 +15,7 @@ _STATUS_PATCHED_FLAG = "_model_probability_status_patch_applied"
 _REVERSE_PATCHED_FLAG = "_accuracy_reverse_duration_patch_applied"
 _REVERSE_ORIGINAL_ATTR = "_accuracy_reverse_duration_original"
 _VALID_STATE_MASK_PATCHED_FLAG = "_accuracy_valid_state_mask_config_patch_applied"
+_VALID_STATE_MASK_PATCH_VERSION = 2
 _VALID_STATE_MASK_ORIGINAL_ATTR = "_accuracy_valid_state_mask_config_original"
 _ENSEMBLE_PATCHED_FLAG = "_weighted_ensemble_observation_metadata_patch_applied"
 _ENSEMBLE_ORIGINAL_ATTR = "_weighted_ensemble_observation_metadata_original"
@@ -230,15 +231,39 @@ def _validate_boolean_parameter(name: str, value: object) -> None:
         raise TypeError(f"{name} must be boolean")
 
 
+def _repair_valid_state_fallback(mask, encoding, config) -> np.ndarray:
+    """Keep emergency support fallback inside the configured hard constraints."""
+
+    repaired = np.asarray(mask, dtype=bool).copy()
+    occupancy = np.asarray(encoding.occupancy_s, dtype=float)
+    eligible = np.isfinite(occupancy)
+    require_finite_rates = bool(config.require_finite_rates)
+    rates = np.asarray(encoding.rates_hz, dtype=float)
+    if require_finite_rates and rates.size:
+        eligible &= np.all(np.isfinite(rates), axis=0)
+
+    if not np.any(repaired & ~eligible):
+        return repaired
+    if not np.any(eligible):
+        requirement = "finite occupancy and firing rates" if require_finite_rates and rates.size else "finite occupancy"
+        raise ValueError(f"cannot build a valid-state mask: no bins have {requirement}")
+
+    repaired &= eligible
+    if not np.any(repaired):
+        repaired[int(np.argmax(np.where(eligible, occupancy, -np.inf)))] = True
+    return repaired
+
+
 def _patch_valid_state_mask_from_encoding(accuracy_upgrades) -> None:
-    """Reject ambiguous valid-state mask parameters before support construction."""
+    """Reject ambiguous parameters and keep fallback support within hard constraints."""
 
     current = accuracy_upgrades.valid_state_mask_from_encoding
-    if getattr(current, _VALID_STATE_MASK_PATCHED_FLAG, False):
+    if getattr(current, _VALID_STATE_MASK_PATCHED_FLAG, None) == _VALID_STATE_MASK_PATCH_VERSION:
         return
 
     @wraps(current)
     def valid_state_mask_from_encoding(encoding, config=None):
+        effective_config = accuracy_upgrades.ValidStateConfig() if config is None else config
         if config is not None:
             _validate_finite_nonnegative_numeric_parameter("min_occupancy_s", getattr(config, "min_occupancy_s"))
             _validate_optional_fraction_parameter(
@@ -246,9 +271,14 @@ def _patch_valid_state_mask_from_encoding(accuracy_upgrades) -> None:
                 getattr(config, "keep_top_occupancy_fraction", None),
             )
             _validate_boolean_parameter("require_finite_rates", getattr(config, "require_finite_rates"))
-        return current(encoding, config)
+        mask = current(encoding, config)
+        return _repair_valid_state_fallback(mask, encoding, effective_config)
 
-    setattr(valid_state_mask_from_encoding, _VALID_STATE_MASK_PATCHED_FLAG, True)
+    setattr(
+        valid_state_mask_from_encoding,
+        _VALID_STATE_MASK_PATCHED_FLAG,
+        _VALID_STATE_MASK_PATCH_VERSION,
+    )
     setattr(valid_state_mask_from_encoding, _VALID_STATE_MASK_ORIGINAL_ATTR, current)
     accuracy_upgrades.valid_state_mask_from_encoding = valid_state_mask_from_encoding
 

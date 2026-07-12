@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from decimal import Decimal, InvalidOperation
 from functools import wraps
 from typing import Any
 
@@ -62,6 +63,33 @@ def _coerce_integral_ids(values: Any, name: str) -> np.ndarray:
     )
 
 
+def _coerce_integral_text_id(value: str | bytes, name: str) -> int:
+    if isinstance(value, bytes):
+        try:
+            text = value.decode("utf-8")
+        except UnicodeDecodeError as exc:
+            raise ValueError(f"{name} must contain numeric integer identifiers") from exc
+    else:
+        text = value
+    text = text.strip()
+    if not text:
+        raise ValueError(f"{name} must contain numeric integer identifiers")
+    try:
+        return int(text, 10)
+    except ValueError:
+        pass
+    try:
+        numeric = Decimal(text)
+    except InvalidOperation as exc:
+        raise ValueError(f"{name} must contain numeric integer identifiers") from exc
+    if not numeric.is_finite():
+        raise ValueError(f"{name} must contain finite integer identifiers")
+    integral = numeric.to_integral_value()
+    if numeric != integral:
+        raise ValueError(f"{name} must be integer-valued")
+    return int(integral)
+
+
 def _coerce_integral_id(value: Any, name: str, integer_info: np.iinfo) -> int:
     try:
         item = np.asarray(value).item()
@@ -71,6 +99,8 @@ def _coerce_integral_id(value: Any, name: str, integer_info: np.iinfo) -> int:
         raise ValueError(f"{name} must not contain boolean identifiers")
     if isinstance(item, (int, np.integer)):
         identifier = int(item)
+    elif isinstance(item, (str, bytes)):
+        identifier = _coerce_integral_text_id(item, name)
     else:
         try:
             numeric = float(item)

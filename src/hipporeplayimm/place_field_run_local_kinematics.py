@@ -3,7 +3,9 @@
 The sorted-spike, KD reference, clusterless, and behavioral position-validation
 paths derive movement speed and frame occupancy durations from position samples.
 Large gaps between separate run bouts must not leak into ``numpy.gradient``,
-occupancy durations, or training intervals.
+occupancy durations, or training intervals. Spike and mark positions are also
+interpolated only where position samples provide temporal support; NumPy's
+endpoint extrapolation must not assign unsupported observations to edge bins.
 """
 
 from __future__ import annotations
@@ -86,6 +88,33 @@ def _durations_split_at_run_boundaries(
     for start, stop in zip(changes[0::2], changes[1::2], strict=True):
         durations[start:stop] = base_durations(times[start:stop])
     return durations
+
+
+def _interpolate_positions_within_support(
+    times: np.ndarray,
+    xy: np.ndarray,
+    query_times: np.ndarray,
+    base_interpolate: Callable[[np.ndarray, np.ndarray, np.ndarray], np.ndarray],
+) -> np.ndarray:
+    """Interpolate positions without extrapolating past recorded samples."""
+
+    sample_times = np.asarray(times, dtype=float).reshape(-1)
+    queries = np.asarray(query_times, dtype=float).reshape(-1)
+    interpolated = np.asarray(base_interpolate(times, xy, query_times), dtype=float)
+    if sample_times.size == 0 or queries.size == 0:
+        return interpolated
+
+    supported = (
+        np.isfinite(queries)
+        & (queries >= sample_times[0])
+        & (queries <= sample_times[-1])
+    )
+    if np.all(supported):
+        return interpolated
+
+    output = interpolated.copy()
+    output[~supported] = np.nan
+    return output
 
 
 def _intervals_from_mask_and_durations(
@@ -195,6 +224,16 @@ def _call_with_run_local_kinematics(
         intervals,
         base_speed,
     )
+    base_interpolate = function_globals.get("_interp_positions")
+    if callable(base_interpolate):
+        patched_globals["_interp_positions"] = lambda times, xy, query_times: (
+            _interpolate_positions_within_support(
+                times,
+                xy,
+                query_times,
+                base_interpolate,
+            )
+        )
     has_mask_intervals = callable(function_globals.get("_mask_to_intervals"))
     if has_mask_intervals:
         patched_globals["_frame_durations"] = lambda times: (

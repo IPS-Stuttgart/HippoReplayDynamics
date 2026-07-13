@@ -1,9 +1,10 @@
 """Runtime guards for advanced result diagnostics.
 
 Older score-table artifacts can contain a ``status`` column whose successful rows
-round-trip through CSV as blanks or nulls.  The advanced diagnostics used a
-literal ``status == 'success'`` filter, which dropped those legacy rows before
-margin, wrong-map, and paired-model summaries were computed.
+round-trip through CSV as blanks or nulls, or through NumPy/HDF5-backed tables as
+byte strings.  The advanced diagnostics used a literal ``status == 'success'``
+filter, which dropped those legacy rows before margin, wrong-map, and paired-model
+summaries were computed.
 
 The same patch point also keeps posterior-predictive diagnostics from accepting
 impossible count tables.  Those helpers operate on observed counts, expected
@@ -17,12 +18,64 @@ import numpy as np
 import pandas as pd
 from scipy.special import gammaln, xlogy
 
-from .evidence_status_coercion import _status_is_success_or_missing
-
 _PATCHED_FLAG = "_advanced_result_status_patch_applied"
 _SUCCESSFUL_ROWS_WRAPPER_FLAG = "_advanced_result_successful_rows_wrapper"
 _COUNT_CHECKS_WRAPPER_FLAG = "_advanced_result_count_checks_wrapper"
 _POISSON_SCORE_WRAPPER_FLAG = "_advanced_result_poisson_score_wrapper"
+_MISSING_STATUS_VALUES = {"", "nan", "na", "n/a", "none", "null", "<na>"}
+
+
+def _status_text(value: object) -> str:
+    """Return normalized status text, decoding byte-valued table scalars."""
+
+    if isinstance(value, (bytes, bytearray, np.bytes_)):
+        return bytes(value).decode("utf-8", errors="replace").strip().lower()
+    return str(value).strip().lower()
+
+
+def _is_missing_status(value: object) -> bool:
+    try:
+        missing = pd.isna(value)
+    except (TypeError, ValueError):
+        missing = False
+    if isinstance(missing, (bool, np.bool_)) and bool(missing):
+        return True
+    return _status_text(value) in _MISSING_STATUS_VALUES
+
+
+def _status_is_success_or_missing(value: object) -> bool:
+    if _is_missing_status(value):
+        return True
+    return _status_text(value) == "success"
+
+
+def _normalize_status_value(value: object) -> object:
+    return "success" if _status_is_success_or_missing(value) else value
+
+
+def _patch_status_helpers() -> None:
+    """Keep all package-level score-table status aliases byte-aware."""
+
+    from . import accuracy_model_probability_status_patch as accuracy_status
+    from . import evidence_reliability
+    from . import evidence_reporting
+    from . import evidence_status_coercion
+    from . import recovery_diagnostics_bool_patch
+    from . import result_quality_gates
+    from . import simulation_best_row_flags
+
+    evidence_status_coercion._status_is_success_or_missing = _status_is_success_or_missing
+    evidence_status_coercion._normalize_status_value = _normalize_status_value
+    evidence_reporting._is_missing_status = _is_missing_status
+    evidence_reporting._status_is_success_or_missing = _status_is_success_or_missing
+    result_quality_gates._is_missing_status = _is_missing_status
+    result_quality_gates._status_is_success_or_missing = _status_is_success_or_missing
+    simulation_best_row_flags._status_is_success = _status_is_success_or_missing
+    recovery_diagnostics_bool_patch._status_is_success_or_missing = (
+        _status_is_success_or_missing
+    )
+    evidence_reliability._status_is_success_or_missing = _status_is_success_or_missing
+    accuracy_status._normalize_status_value = _normalize_status_value
 
 
 def apply_advanced_result_status_patch() -> None:
@@ -34,6 +87,7 @@ def apply_advanced_result_status_patch() -> None:
 
     margin_duplicate_patch.apply_advanced_result_margin_duplicate_patch()
     place_field_cell_id_validation.apply_advanced_result_place_field_cell_id_validation_patch()
+    _patch_status_helpers()
     if getattr(diagnostics, _PATCHED_FLAG, False) and _advanced_result_patch_current(diagnostics):
         return
 

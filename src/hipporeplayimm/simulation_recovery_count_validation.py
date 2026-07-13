@@ -5,6 +5,8 @@ from typing import Any
 
 import numpy as np
 
+from .result_improvement_seed_validation import _nonnegative_integer_seed
+
 _COUNT_WRAPPER_ATTR = "_simulation_recovery_count_validation_wrapper"
 _FINITE_SCALAR_WRAPPER_ATTR = "_simulation_recovery_positive_finite_scalar_validation_wrapper"
 _LATENT_PATH_WRAPPER_ATTR = "_simulation_recovery_latent_path_n_time_validation_wrapper"
@@ -250,12 +252,12 @@ def _positive_integer_scalar(name: str, value: Any) -> int:
         raise ValueError(f"{name} must be a positive integer, not text")
     item = _strict_scalar_item(name, value)
     try:
-        numeric = float(item)
-    except (TypeError, ValueError) as exc:
+        integer = _nonnegative_integer_seed(item, name)
+    except ValueError as exc:
         raise ValueError(f"{name} must be a positive integer") from exc
-    if not np.isfinite(numeric) or numeric <= 0.0 or not numeric.is_integer():
+    if integer <= 0:
         raise ValueError(f"{name} must be a positive integer")
-    return int(numeric)
+    return integer
 
 
 def _strict_scalar_item(name: str, value: Any) -> Any:

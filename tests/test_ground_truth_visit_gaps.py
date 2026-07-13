@@ -36,6 +36,24 @@ def test_first_post_ripple_visit_does_not_count_recording_gap_as_dwell() -> None
     assert visit is None
 
 
+def test_first_post_ripple_visit_does_not_infer_dwell_from_sparse_pair() -> None:
+    hipporeplayimm.apply_runtime_patches()
+    times = np.array([0.0, 2.0], dtype=float)
+    x = np.zeros_like(times)
+    position = np.column_stack([times, x, np.zeros_like(times), np.zeros_like(times)])
+
+    visit = ground_truth.first_post_ripple_well_visit(
+        position,
+        _single_well(),
+        ripple_peak=0.0,
+        visit_radius_cm=5.0,
+        min_dwell_s=0.5,
+        future_horizon_s=3.0,
+    )
+
+    assert visit is None
+
+
 def test_first_post_ripple_visit_keeps_continuously_sampled_dwell() -> None:
     hipporeplayimm.apply_runtime_patches()
     times = np.array(

@@ -15,6 +15,7 @@ _PAIR_POSTERIOR_WRAPPER_FLAG = "_candidate_pair_posterior_exact_support_wrapper"
 _SPARSE_MATVEC_WRAPPER_FLAG = "_sparse_diffusion_exact_support_wrapper"
 _GAUSSIAN_TRANSITION_WRAPPER_FLAG = "_stable_gaussian_transition_weights_wrapper"
 _SPARSE_GAUSSIAN_ROW_WRAPPER_FLAG = "_stable_sparse_gaussian_row_weights_wrapper"
+_KINEMATIC_GAUSSIAN_LOG_WRAPPER_FLAG = "_stable_kinematic_gaussian_log_prob_wrapper"
 
 
 def _validate_active_support_rows(values: np.ndarray) -> None:
@@ -140,10 +141,40 @@ def _stable_gaussian_weights(dist2: np.ndarray, sigma_cm: float) -> np.ndarray:
     return weights / total
 
 
+def _stable_full_grid_gaussian_log_prob(
+    predicted: np.ndarray,
+    observed: np.ndarray,
+    all_observed: np.ndarray,
+    sigma_cm: float,
+) -> np.ndarray:
+    """Normalize pairwise Gaussian log weights after subtracting each row minimum."""
+
+    sigma = float(sigma_cm)
+    if not np.isfinite(sigma) or sigma <= 0.0:
+        raise ValueError("sigma must be finite and positive")
+
+    predictions = np.asarray(predicted, dtype=float)
+    observations = np.asarray(observed, dtype=float)
+    full_grid = np.asarray(all_observed, dtype=float)
+    observed_delta = predictions[:, None, :] - observations[None, :, :]
+    full_delta = predictions[:, None, :] - full_grid[None, :, :]
+    observed_dist2 = np.sum(observed_delta * observed_delta, axis=2)
+    full_dist2 = np.sum(full_delta * full_delta, axis=2)
+    minimum = np.min(full_dist2, axis=1, keepdims=True)
+    observed_shifted = np.maximum(observed_dist2 - minimum, 0.0)
+    full_shifted = np.maximum(full_dist2 - minimum, 0.0)
+    with np.errstate(over="ignore", under="ignore", invalid="ignore"):
+        observed_standardized = np.sqrt(observed_shifted) / sigma
+        full_standardized = np.sqrt(full_shifted) / sigma
+        observed_log_weights = -0.5 * observed_standardized * observed_standardized
+        full_log_weights = -0.5 * full_standardized * full_standardized
+    return observed_log_weights - logsumexp(full_log_weights, axis=1, keepdims=True)
+
+
 def _patch_stable_gaussian_transition_weights() -> None:
     """Preserve relative Gaussian transition mass when raw kernels underflow."""
 
-    from . import state_space_sparse_momentum, state_space_utils
+    from . import models, state_space_sparse_momentum, state_space_utils
 
     current_dense = state_space_utils._gaussian_transition_matrix
     if not getattr(current_dense, _GAUSSIAN_TRANSITION_WRAPPER_FLAG, False):
@@ -229,6 +260,37 @@ def _patch_stable_gaussian_transition_weights() -> None:
             "_finite_gaussian_row",
             current_sparse,
             finite_gaussian_row,
+        )
+
+    current_kinematic = models._full_grid_normalized_pairwise_gaussian_log_prob
+    if not getattr(current_kinematic, _KINEMATIC_GAUSSIAN_LOG_WRAPPER_FLAG, False):
+
+        @wraps(current_kinematic)
+        def full_grid_normalized_pairwise_gaussian_log_prob(
+            predicted,
+            observed,
+            all_observed,
+            sigma,
+        ):
+            return _stable_full_grid_gaussian_log_prob(
+                predicted,
+                observed,
+                all_observed,
+                sigma,
+            )
+
+        setattr(
+            full_grid_normalized_pairwise_gaussian_log_prob,
+            _KINEMATIC_GAUSSIAN_LOG_WRAPPER_FLAG,
+            True,
+        )
+        setattr(
+            full_grid_normalized_pairwise_gaussian_log_prob,
+            "__hipporeplayimm_original__",
+            current_kinematic,
+        )
+        models._full_grid_normalized_pairwise_gaussian_log_prob = (
+            full_grid_normalized_pairwise_gaussian_log_prob
         )
 
 

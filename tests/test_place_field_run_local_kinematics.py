@@ -58,6 +58,43 @@ def _two_run_bout_session() -> ReplaySession:
     )
 
 
+def _out_of_position_support_session() -> ReplaySession:
+    observation_times = np.array([0.5, 1.0, 1.05, 1.5], dtype=float)
+    return ReplaySession(
+        rat="RatX",
+        name="UnsupportedEdgeSpikes",
+        path=Path("RatX/UnsupportedEdgeSpikes"),
+        position=np.array(
+            [
+                [1.0, 0.0, 0.0],
+                [1.1, 1.0, 0.0],
+            ],
+            dtype=float,
+        ),
+        spikes=np.column_stack(
+            [observation_times, np.ones(observation_times.shape[0], dtype=float)]
+        ),
+        tetrode_cell_ids=np.array([[1.0, 1.0]], dtype=float),
+        excitatory_neurons=np.array([1], dtype=int),
+        inhibitory_neurons=np.array([], dtype=int),
+        ripple_events=np.empty((0, 6), dtype=float),
+        run_times=np.array([[0.0, 2.0]], dtype=float),
+        sleep_box_immobile_times=np.empty((0, 2), dtype=float),
+        sleep_times=np.empty((0, 2), dtype=float),
+        rem_times=np.empty((0, 2), dtype=float),
+        well_sequence=None,
+        metadata={},
+        spike_marks=SpikeMarkData(
+            times=observation_times,
+            marks=np.arange(1.0, 5.0, dtype=float)[:, None],
+            source_file="synthetic.mat",
+            source_variable="marks",
+            feature_names=("amplitude",),
+            cell_ids=np.ones(observation_times.shape[0], dtype=int),
+        ),
+    )
+
+
 def _encoding_config() -> EncodingConfig:
     return EncodingConfig(
         bin_size_cm=10.0,
@@ -72,6 +109,14 @@ def _encoding_config() -> EncodingConfig:
 def _assert_run_local_encoding(occupancy_s: np.ndarray, rates_hz: np.ndarray) -> None:
     np.testing.assert_allclose(occupancy_s, np.array([0.4]), atol=1e-12)
     np.testing.assert_allclose(rates_hz, np.array([[5.0]]), atol=1e-12)
+
+
+def _assert_unsupported_edge_observations_dropped(
+    occupancy_s: np.ndarray,
+    rates_hz: np.ndarray,
+) -> None:
+    np.testing.assert_allclose(occupancy_s, np.array([0.2]), atol=1e-12)
+    np.testing.assert_allclose(rates_hz, np.array([[10.0]]), atol=1e-12)
 
 
 def test_standard_place_field_kinematics_are_local_to_each_run_bout() -> None:
@@ -114,6 +159,55 @@ def test_clusterless_place_field_kinematics_are_local_to_each_run_bout() -> None
 
     np.testing.assert_allclose(encoding.occupancy_s, np.array([0.4]), atol=1e-12)
     np.testing.assert_allclose(encoding.rate_hz, np.array([5.0]), atol=1e-12)
+
+
+def test_standard_encoding_drops_spikes_outside_position_support() -> None:
+    encoding = fit_place_field_encoding(
+        _out_of_position_support_session(),
+        _encoding_config(),
+    )
+
+    _assert_unsupported_edge_observations_dropped(
+        encoding.occupancy_s,
+        encoding.rates_hz,
+    )
+
+
+def test_kd_encoding_drops_spikes_outside_position_support() -> None:
+    encoding = fit_kd_place_field_encoding(
+        _out_of_position_support_session(),
+        KDEncodingConfig(
+            bin_size_cm=10.0,
+            n_bins_x=1,
+            n_bins_y=1,
+            smoothing_sigma_cm=0.0,
+            min_speed_cm_s=5.0,
+            min_occupancy_s=0.01,
+            min_peak_rate_hz=0.0,
+        ),
+    )
+
+    _assert_unsupported_edge_observations_dropped(
+        encoding.occupancy_s,
+        encoding.rates_hz,
+    )
+
+
+def test_clusterless_encoding_drops_marks_outside_position_support() -> None:
+    encoding = fit_clusterless_mark_encoding(
+        _out_of_position_support_session(),
+        ClusterlessMarkConfig(
+            encoding=_encoding_config(),
+            mark_smoothing_sigma_bins=0.0,
+            rate_floor_hz=1e-8,
+            mark_likelihood="diagonal-gaussian",
+            mark_group_by="none",
+        ),
+    )
+
+    np.testing.assert_allclose(encoding.occupancy_s, np.array([0.2]), atol=1e-12)
+    np.testing.assert_allclose(encoding.effective_spike_count, np.array([2.0]), atol=1e-12)
+    np.testing.assert_allclose(encoding.rate_hz, np.array([10.0]), atol=1e-12)
 
 
 def test_position_mask_encoding_splits_training_intervals_at_run_boundaries() -> None:

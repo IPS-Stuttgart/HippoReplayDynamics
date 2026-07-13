@@ -11,7 +11,7 @@ _PATCHED_FLAG = "_result_improvement_seed_validation_patch_applied"
 _BOOTSTRAP_WRAPPER_FLAG = "_hierarchical_bootstrap_seed_validation_wrapper"
 _SIGN_FLIP_WRAPPER_FLAG = "_paired_sign_flip_seed_validation_wrapper"
 _ORIGINAL_ATTR = "__hipporeplayimm_seed_validation_original__"
-_WRAPPER_VERSION = 2
+_WRAPPER_VERSION = 3
 
 
 def _nonnegative_integer_seed(value: object, name: str = "random_seed") -> int:
@@ -66,6 +66,33 @@ def _finite_model_metric_rows(
     return rows.iloc[np.flatnonzero(keep)].copy()
 
 
+def _retain_missing_group_keys(
+    rows: object,
+    group_columns: tuple[str, ...],
+):
+    """Keep missing grouping labels as explicit groups during hierarchical resampling."""
+
+    if not isinstance(rows, pd.DataFrame) or not group_columns:
+        return rows
+
+    missing_by_column: dict[str, pd.Series] = {}
+    for column in group_columns:
+        if column not in rows.columns:
+            continue
+        missing = rows[column].isna()
+        if bool(missing.any()):
+            missing_by_column[column] = missing
+    if not missing_by_column:
+        return rows
+
+    out = rows.copy()
+    for column, missing in missing_by_column.items():
+        sentinel = object()
+        out[column] = out[column].astype(object)
+        out.loc[missing, column] = sentinel
+    return out
+
+
 def apply_result_improvement_seed_validation_patch() -> None:
     """Install strict seed, metric-value, and replay-emission validation."""
 
@@ -85,7 +112,8 @@ def apply_result_improvement_seed_validation_patch() -> None:
         _BOOTSTRAP_WRAPPER_FLAG,
         "original_bootstrap",
     ):
-        original_bootstrap = result_improvements.hierarchical_bootstrap_ci
+        observed_bootstrap = result_improvements.hierarchical_bootstrap_ci
+        original_bootstrap = getattr(observed_bootstrap, _ORIGINAL_ATTR, observed_bootstrap)
 
         @wraps(original_bootstrap)
         def hierarchical_bootstrap_ci(
@@ -103,6 +131,7 @@ def apply_result_improvement_seed_validation_patch() -> None:
                 model=model,
                 value_column=value_column,
             )
+            validated_rows = _retain_missing_group_keys(validated_rows, group_columns)
             return original_bootstrap(
                 validated_rows,
                 model=model,
@@ -121,7 +150,8 @@ def apply_result_improvement_seed_validation_patch() -> None:
         _SIGN_FLIP_WRAPPER_FLAG,
         "original_sign_flip",
     ):
-        original_sign_flip = result_improvements.paired_sign_flip_p_value
+        observed_sign_flip = result_improvements.paired_sign_flip_p_value
+        original_sign_flip = getattr(observed_sign_flip, _ORIGINAL_ATTR, observed_sign_flip)
 
         @wraps(original_sign_flip)
         def paired_sign_flip_p_value(

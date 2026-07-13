@@ -1,3 +1,5 @@
+from decimal import Decimal
+
 import numpy as np
 import pytest
 
@@ -38,3 +40,21 @@ def test_position_decoding_config_accepts_zero_dimensional_numpy_scalars():
     assert normalized.random_seed == 7
     assert normalized.max_windows_per_session == 9
     assert normalized.min_spikes_per_window == 0
+
+
+@pytest.mark.parametrize(
+    "random_seed",
+    [
+        2**53 + 1,
+        np.int64(2**53 + 1),
+        np.array(2**53 + 1, dtype=np.int64),
+        Decimal(str(2**53 + 1)),
+        str(2**53 + 1),
+        f"{2**53 + 1}.0",
+    ],
+)
+def test_position_decoding_config_preserves_exact_large_random_seed(random_seed):
+    normalized = _validated_position_decoding_config(PositionDecodingConfig(random_seed=random_seed))
+
+    assert normalized.random_seed == 2**53 + 1
+    assert isinstance(normalized.random_seed, int)

@@ -105,12 +105,16 @@ def _positive_integer_count(name: str, value: object) -> int:
     if isinstance(item, _STRING_TYPES):
         raise ValueError(f"{name} must be a positive integer, not string")
     try:
-        numeric = float(item)
+        integer = int(item)
     except (TypeError, ValueError, OverflowError) as exc:
         raise ValueError(f"{name} must be a positive integer") from exc
-    if not math.isfinite(numeric) or numeric <= 0.0 or not np.isclose(numeric, np.rint(numeric), rtol=0.0, atol=0.0):
+    try:
+        exact = bool(item == integer)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must be a positive integer") from exc
+    if integer <= 0 or not exact:
         raise ValueError(f"{name} must be a positive integer")
-    return int(np.rint(numeric))
+    return integer
 
 
 def _parser_has_option(parser, option: str) -> bool:

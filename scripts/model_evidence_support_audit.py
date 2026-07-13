@@ -23,8 +23,9 @@ from hipporeplayimm.evidence_reporting import (
     ensure_evidence_support_columns,
 )
 from hipporeplayimm.evidence_status_coercion import _status_success_mask
+from hipporeplayimm.result_quality_audit_scope_patch import _scoped_event_group_columns
 
-_EVENT_COLUMNS = ("session", "event_index")
+_DEFAULT_EVENT_COLUMNS = ("session", "event_index")
 _AUDIT_FILENAMES = {
     "support_summary": "evidence_support_summary.csv",
     "event_support": "event_evidence_support_audit.csv",
@@ -49,10 +50,23 @@ def _successful_rows(scores: pd.DataFrame) -> pd.DataFrame:
     return rows
 
 
+def _event_columns(rows: pd.DataFrame) -> list[str]:
+    columns = _scoped_event_group_columns(rows)
+    if not columns:
+        raise ValueError("Model-evidence scores contain no event-scope columns.")
+    return columns
+
+
+def _event_key_record(columns: list[str], key: object) -> dict[str, object]:
+    values = key if isinstance(key, tuple) else (key,)
+    return dict(zip(columns, values, strict=True))
+
+
 def _event_count(rows: pd.DataFrame) -> int:
     if rows.empty:
         return 0
-    return int(rows.loc[:, _EVENT_COLUMNS].drop_duplicates().shape[0])
+    event_columns = _event_columns(rows)
+    return int(rows.loc[:, event_columns].drop_duplicates().shape[0])
 
 
 def _joined(values: Iterable[object]) -> str:
@@ -110,12 +124,12 @@ def evidence_support_summary(scores: pd.DataFrame) -> pd.DataFrame:
 
 
 def event_support_audit(scores: pd.DataFrame) -> pd.DataFrame:
-    """Return one row per event describing which support classes are present."""
+    """Return one row per independently scored event scope."""
 
     rows = _successful_rows(scores)
+    event_columns = _event_columns(rows) if not rows.empty else list(_DEFAULT_EVENT_COLUMNS)
     columns = [
-        "session",
-        "event_index",
+        *event_columns,
         "models",
         "exact_models",
         "truncated_models",
@@ -131,7 +145,7 @@ def event_support_audit(scores: pd.DataFrame) -> pd.DataFrame:
         return pd.DataFrame(columns=columns)
 
     records: list[dict[str, object]] = []
-    for (session, event_index), group in rows.groupby(list(_EVENT_COLUMNS), sort=True):
+    for key, group in rows.groupby(event_columns, dropna=False, sort=True):
         exact = group[group["evidence_support"].eq(EXACT_EVIDENCE_SUPPORT)]
         truncated = group[group["evidence_support"].eq(TRUNCATED_EVIDENCE_SUPPORT)]
         other = group[
@@ -140,10 +154,9 @@ def event_support_audit(scores: pd.DataFrame) -> pd.DataFrame:
             )
         ]
         comparable = group[_coerce_bool_series(group["evidence_comparable"])]
-        records.append(
+        record = _event_key_record(event_columns, key)
+        record.update(
             {
-                "session": session,
-                "event_index": int(event_index),
                 "models": _joined(group["model"]),
                 "exact_models": _joined(exact["model"]),
                 "truncated_models": _joined(truncated["model"]),
@@ -158,6 +171,7 @@ def event_support_audit(scores: pd.DataFrame) -> pd.DataFrame:
                 ),
             }
         )
+        records.append(record)
     return pd.DataFrame.from_records(records, columns=columns)
 
 
@@ -181,10 +195,12 @@ def pairwise_support_audit(scores: pd.DataFrame) -> pd.DataFrame:
     if rows.empty:
         return pd.DataFrame(columns=columns)
 
+    event_columns = _event_columns(rows)
     event_pair_rows: list[dict[str, object]] = []
-    for (session, event_index), group in rows.groupby(list(_EVENT_COLUMNS), sort=True):
+    for key, group in rows.groupby(event_columns, dropna=False, sort=True):
         per_model = group.sort_values("model").drop_duplicates("model", keep="first")
         model_rows = {str(row.model): row for row in per_model.itertuples(index=False)}
+        event_key = _event_key_record(event_columns, key)
         for model_a, model_b in combinations(sorted(model_rows), 2):
             row_a = model_rows[model_a]
             row_b = model_rows[model_b]
@@ -194,8 +210,7 @@ def pairwise_support_audit(scores: pd.DataFrame) -> pd.DataFrame:
             comparable_b = bool(row_b.evidence_comparable)
             event_pair_rows.append(
                 {
-                    "session": session,
-                    "event_index": int(event_index),
+                    **event_key,
                     "model_a": model_a,
                     "model_b": model_b,
                     "support_a": support_a,

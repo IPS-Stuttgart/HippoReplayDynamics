@@ -365,15 +365,18 @@ def _numeric_scope_label(value: object) -> str | None:
 
     if isinstance(value, (bool, np.bool_)):
         return None
-    if not isinstance(value, (int, float, np.integer, np.floating)):
-        return None
-    numeric = float(value)
-    if not np.isfinite(numeric):
-        return None
-    rounded = int(round(numeric))
-    if np.isclose(numeric, rounded, rtol=0.0, atol=0.0):
-        return str(rounded)
-    return repr(numeric)
+    try:
+        integer = operator.index(value)
+    except TypeError:
+        if not isinstance(value, (float, np.floating)):
+            return None
+        numeric = value.item() if isinstance(value, np.floating) else value
+        if not np.isfinite(numeric):
+            return None
+        if numeric == np.floor(numeric):
+            return str(int(numeric))
+        return repr(float(numeric))
+    return str(int(integer))
 
 
 def _is_missing_scalar(value: object) -> bool:

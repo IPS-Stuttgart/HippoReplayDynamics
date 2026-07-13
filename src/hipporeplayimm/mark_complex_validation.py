@@ -201,6 +201,19 @@ def apply_mark_complex_validation_patch() -> None:
             _TETRODE_ORIENTATION_WRAPPER_ATTR,
             True,
         )
+        # This wrapper extends the already-installed data-cell-ID guard.  Retain
+        # that guard's marker so repeated apply_runtime_patches() calls do not
+        # wrap the same function again before this patch is reapplied.
+        setattr(
+            mark_group_ids_from_tetrode_cell_ids,
+            data_cell_id_validation._PATCH_MARK,
+            True,
+        )
+        setattr(
+            mark_group_ids_from_tetrode_cell_ids,
+            data_cell_id_validation._ORIGINAL_ATTR,
+            original_mark_group_ids,
+        )
         data._mark_group_ids_from_tetrode_cell_ids = mark_group_ids_from_tetrode_cell_ids
 
     setattr(data, _PATCHED_FLAG, True)

@@ -23,6 +23,7 @@ _SUCCESSFUL_ROWS_WRAPPER_FLAG = "_advanced_result_successful_rows_wrapper"
 _COUNT_CHECKS_WRAPPER_FLAG = "_advanced_result_count_checks_wrapper"
 _POISSON_SCORE_WRAPPER_FLAG = "_advanced_result_poisson_score_wrapper"
 _MISSING_STATUS_VALUES = {"", "nan", "na", "n/a", "none", "null", "<na>"}
+_DERIVED_RANGE_ERROR = "posterior-predictive diagnostics exceed floating-point range"
 
 
 def _status_text(value: object) -> str:
@@ -118,19 +119,43 @@ def apply_advanced_result_status_patch() -> None:
             if variance.shape != observed.shape:
                 raise ValueError("variance_counts must match observed_counts")
 
-        residual = observed - expected
-        z = residual / np.sqrt(np.maximum(variance, np.finfo(float).eps))
+        with np.errstate(over="ignore", divide="ignore", invalid="ignore"):
+            residual = observed - expected
+            stabilized_variance = np.maximum(variance, np.finfo(float).eps)
+            z = residual / np.sqrt(stabilized_variance)
+            observed_total = np.sum(observed, dtype=float)
+            expected_total = np.sum(expected, dtype=float)
+            residual_total = np.sum(residual, dtype=float)
+            variance_total = np.sum(variance, dtype=float)
+            observed_by_time = np.sum(observed, axis=1, dtype=float)
+            expected_by_time = np.sum(expected, axis=1, dtype=float)
+            total_z = residual_total / np.sqrt(
+                np.maximum(variance_total, np.finfo(float).eps)
+            )
+            silent_expected = np.exp(-expected_by_time)
+
+        _require_finite_derived_diagnostics(
+            z,
+            observed_total,
+            expected_total,
+            residual_total,
+            variance_total,
+            observed_by_time,
+            expected_by_time,
+            total_z,
+            silent_expected,
+        )
         rows = [
             {
                 "predictive_check": "total_spike_count",
-                "observed": float(observed.sum()),
-                "expected": float(expected.sum()),
-                "z_score": float(residual.sum() / np.sqrt(np.maximum(variance.sum(), np.finfo(float).eps))),
+                "observed": float(observed_total),
+                "expected": float(expected_total),
+                "z_score": float(total_z),
             },
             {
                 "predictive_check": "silent_bin_fraction",
-                "observed": float(np.mean(observed.sum(axis=1) == 0.0)),
-                "expected": float(np.mean(np.exp(-expected.sum(axis=1)))),
+                "observed": float(np.mean(observed_by_time == 0.0)),
+                "expected": float(np.mean(silent_expected)),
                 "z_score": np.nan,
             },
             {
@@ -210,6 +235,11 @@ def _validated_nonnegative_matrix(values: np.ndarray, name: str, *, integral: bo
     if integral and not np.all(np.isclose(array, np.rint(array), rtol=0.0, atol=1.0e-12)):
         raise ValueError(f"{name} must contain integer count values")
     return array
+
+
+def _require_finite_derived_diagnostics(*values: object) -> None:
+    if any(not np.all(np.isfinite(value)) for value in values):
+        raise ValueError(_DERIVED_RANGE_ERROR)
 
 
 __all__ = ["apply_advanced_result_status_patch"]

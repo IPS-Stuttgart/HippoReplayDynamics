@@ -10,6 +10,7 @@ accidental truthiness, or unrelated NumPy/type errors.
 from __future__ import annotations
 
 from dataclasses import replace
+from decimal import Decimal, InvalidOperation
 from functools import wraps
 from typing import Any
 
@@ -222,14 +223,40 @@ def _integer_value(name: str, value: Any) -> int:
     if isinstance(value, (bool, np.bool_)):
         raise ValueError(f"{name} must be an integer")
     value = _reject_array_shaped_scalar(name, value, f"{name} must be an integer")
+    scalar = np.asarray(value).item()
+    if isinstance(scalar, (bool, np.bool_)):
+        raise ValueError(f"{name} must be an integer")
+
+    if isinstance(scalar, (str, bytes, np.str_, np.bytes_)):
+        if isinstance(scalar, (bytes, np.bytes_)):
+            try:
+                text = bytes(scalar).decode("utf-8")
+            except UnicodeDecodeError as exc:
+                raise ValueError(f"{name} must be an integer") from exc
+        else:
+            text = str(scalar)
+        try:
+            numeric = Decimal(text.strip())
+        except InvalidOperation as exc:
+            raise ValueError(f"{name} must be an integer") from exc
+        if not numeric.is_finite():
+            raise ValueError(f"{name} must be a finite integer")
+        integer = int(numeric)
+        if numeric != integer:
+            raise ValueError(f"{name} must be an integer")
+        return integer
+
     try:
-        numeric = float(value)
+        integer = int(scalar)
+    except OverflowError as exc:
+        raise ValueError(f"{name} must be a finite integer") from exc
     except (TypeError, ValueError) as exc:
         raise ValueError(f"{name} must be an integer") from exc
-    if not np.isfinite(numeric):
-        raise ValueError(f"{name} must be a finite integer")
-    integer = int(round(numeric))
-    if not np.isclose(numeric, integer, rtol=0.0, atol=0.0):
+    try:
+        exact = bool(scalar == integer)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must be an integer") from exc
+    if not exact:
         raise ValueError(f"{name} must be an integer")
     return integer
 

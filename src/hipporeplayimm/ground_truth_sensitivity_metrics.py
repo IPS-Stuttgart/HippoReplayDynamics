@@ -10,6 +10,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from .ground_truth_sparse_gap_guard import apply_ground_truth_sparse_gap_guard_patch
+
 
 _SENSITIVITY_METRIC_COLUMNS = frozenset(
     {
@@ -42,6 +44,7 @@ _SENSITIVITY_METRIC_COLUMNS = frozenset(
 def apply_ground_truth_sensitivity_metric_patch(ground_truth_module: Any) -> None:
     """Ensure sensitivity re-labeling drops all label-dependent metrics."""
 
+    apply_ground_truth_sparse_gap_guard_patch(ground_truth_module)
     existing = set(getattr(ground_truth_module, "_GROUND_TRUTH_COLUMNS_FOR_SENSITIVITY", ()))
     if _SENSITIVITY_METRIC_COLUMNS.issubset(existing):
         return

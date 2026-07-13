@@ -1,6 +1,8 @@
 import numpy as np
 import pytest
 
+import hipporeplayimm
+from hipporeplayimm import data as data_module
 from hipporeplayimm.data import _mark_group_ids_from_tetrode_cell_ids
 
 
@@ -66,3 +68,11 @@ def test_tetrode_mapping_rejects_unresolved_equal_overlap_orientation() -> None:
                 dtype=int,
             ),
         )
+
+
+def test_tetrode_mapping_orientation_patch_is_idempotent() -> None:
+    current = data_module._mark_group_ids_from_tetrode_cell_ids
+
+    hipporeplayimm.apply_runtime_patches()
+
+    assert data_module._mark_group_ids_from_tetrode_cell_ids is current

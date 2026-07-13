@@ -6,6 +6,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
+from hipporeplayimm import result_improvements
 from hipporeplayimm.cli_float_values_validation import _positive_integer_count
 from hipporeplayimm.result_improvements import hierarchical_bootstrap_ci, paired_sign_flip_p_value
 
@@ -48,4 +49,7 @@ def test_paired_sign_flip_rejects_invalid_permutation_count(bad_count) -> None:
     ],
 )
 def test_resampling_count_validation_preserves_exact_large_integers(count) -> None:
-    assert _positive_integer_count("n_bootstrap", count) == 2**53 + 1
+    expected = 2**53 + 1
+
+    assert _positive_integer_count("n_bootstrap", count) == expected
+    assert result_improvements._positive_integer_count(count, "n_bootstrap") == expected

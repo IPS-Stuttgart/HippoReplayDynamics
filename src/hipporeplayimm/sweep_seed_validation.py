@@ -9,6 +9,8 @@ from typing import Any, Iterable
 
 import numpy as np
 
+from .result_improvement_seed_validation import _nonnegative_integer_seed
+
 _PATCHED_FLAG = "_sweep_seed_validation_patch_applied"
 _GRID_FLAG = "_sweep_seed_validation_parameter_grid_wrapper"
 _BENCHMARK_FLAG = "_sweep_seed_validation_benchmark_config_wrapper"
@@ -98,13 +100,7 @@ def _seed_value(value: object, name: str) -> int:
     elif isinstance(item, (str, bytes)):
         seed = _seed_text_value(item, name)
     else:
-        try:
-            numeric = float(item)
-        except (TypeError, ValueError, OverflowError) as exc:
-            raise ValueError(f"{name} must be a finite nonnegative integer") from exc
-        if not np.isfinite(numeric) or not numeric.is_integer():
-            raise ValueError(f"{name} must be a finite nonnegative integer")
-        seed = int(numeric)
+        seed = _nonnegative_integer_seed(item, name)
     if seed < 0:
         raise ValueError(f"{name} must be a finite nonnegative integer")
     return seed

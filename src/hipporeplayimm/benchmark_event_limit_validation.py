@@ -1,12 +1,15 @@
-"""Validate benchmark count configuration before event and split selection.
+"""Validate benchmark and ground-truth count configuration before event selection.
 
 ``BenchmarkConfig.max_events_per_session`` and ``BenchmarkConfig.n_cell_splits``
 are counts, not flags. Python booleans are integers, so raw ``int(...)``
 coercion can silently turn ``True`` into a one-event benchmark or a one-split
 benchmark and ``False`` into an empty benchmark or an invalid zero-split
-benchmark. Validate the counts explicitly while still accepting integer-valued
-values such as ``1.0`` or ``"1"`` that can arise from notebooks or tabular
-configuration files.
+benchmark. The behavioral ground-truth generator likewise passed its event
+limit directly to :meth:`pandas.DataFrame.head`, where negative counts select
+all but the final rows instead of rejecting malformed configuration. Validate
+the counts explicitly while still accepting integer-valued values such as
+``1.0`` or ``"1"`` that can arise from notebooks or tabular configuration
+files.
 """
 
 from __future__ import annotations
@@ -21,6 +24,7 @@ _PATCHED_FLAG = "_benchmark_event_limit_validation_patch_applied"
 _CELL_SPLIT_COUNT_PATCHED_FLAG = "_benchmark_cell_split_count_validation_patch_applied"
 _CONFIG_METADATA_PATCHED_FLAG = "_benchmark_config_metadata_cell_split_count_validation_patch_applied"
 _SPLIT_METADATA_PATCHED_FLAG = "_benchmark_split_metadata_cell_split_count_validation_patch_applied"
+_GROUND_TRUTH_EVENT_LIMIT_PATCHED_FLAG = "_ground_truth_event_limit_validation_patch_applied"
 
 
 class _EventLimitConfigProxy:
@@ -35,13 +39,14 @@ class _EventLimitConfigProxy:
 
 
 def apply_benchmark_event_limit_validation_patch() -> None:
-    """Install strict validation for benchmark count fields."""
+    """Install strict validation for benchmark and ground-truth count fields."""
 
-    from . import benchmarks
+    from . import benchmarks, ground_truth
 
     _patch_event_indices(benchmarks)
     _patch_n_cell_splits(benchmarks)
     _patch_benchmark_metadata(benchmarks)
+    _patch_ground_truth_event_limit(ground_truth)
     setattr(benchmarks, _PATCHED_FLAG, True)
 
 
@@ -65,6 +70,38 @@ def _patch_event_indices(benchmarks: object) -> None:
     setattr(_event_indices, _PATCHED_FLAG, True)
     setattr(_event_indices, "__hipporeplayimm_original__", previous)
     benchmarks._event_indices = _event_indices
+
+
+def _patch_ground_truth_event_limit(ground_truth: object) -> None:
+    current = ground_truth.generate_behavioral_ground_truth
+    if getattr(current, _GROUND_TRUTH_EVENT_LIMIT_PATCHED_FLAG, False):
+        return
+
+    previous = current
+
+    @wraps(previous)
+    def generate_behavioral_ground_truth(
+        root,
+        config=None,
+        max_events_per_session=None,
+    ):
+        max_events = _coerce_optional_nonnegative_integer(
+            max_events_per_session,
+            "max_events_per_session",
+        )
+        return previous(
+            root,
+            config=config,
+            max_events_per_session=max_events,
+        )
+
+    setattr(
+        generate_behavioral_ground_truth,
+        _GROUND_TRUTH_EVENT_LIMIT_PATCHED_FLAG,
+        True,
+    )
+    setattr(generate_behavioral_ground_truth, "__hipporeplayimm_original__", previous)
+    ground_truth.generate_behavioral_ground_truth = generate_behavioral_ground_truth
 
 
 def _patch_n_cell_splits(benchmarks: object) -> None:

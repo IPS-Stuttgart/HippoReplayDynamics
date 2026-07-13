@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
+from functools import wraps
 from typing import Any
 
 import numpy as np
@@ -11,6 +13,8 @@ from .simulation_recovery_overdispersion import apply_simulation_recovery_overdi
 
 
 _PATCHED_FLAG = "_strict_simulation_recovery_runtime_limit_validation_applied"
+_RUN_WRAPPER_ATTR = "_strict_simulation_recovery_runtime_limit_preflight_wrapper"
+_ORIGINAL_ATTR = "__hipporeplayimm_original__"
 _BOOLEAN_CONTROL_FIELDS = (
     "score_with_occupancy",
     "oracle_candidate_support",
@@ -30,27 +34,70 @@ def apply_simulation_recovery_runtime_limit_validation_patch() -> None:
         return
 
     def validate_recovery_runtime_limits(config: Any) -> None:
-        events_per_model = getattr(config, "events_per_model", None)
-        _positive_integer_value("events_per_model", events_per_model)
-
-        max_template_events = getattr(config, "max_template_events", None)
-        if max_template_events is not None:
-            _positive_integer_value("max_template_events", max_template_events)
-
-        max_synthetic_events = getattr(config, "max_synthetic_events", None)
-        if max_synthetic_events is not None:
-            _positive_integer_value("max_synthetic_events", max_synthetic_events)
-        max_runtime_s = getattr(config, "max_runtime_s", None)
-        if max_runtime_s is not None:
-            _positive_finite_scalar("max_runtime_s", max_runtime_s)
-
-        for field_name in _BOOLEAN_CONTROL_FIELDS:
-            _strict_bool_value(field_name, getattr(config, field_name, None))
+        _normalized_runtime_config(config)
 
     validate_recovery_runtime_limits.__name__ = recovery._validate_recovery_runtime_limits.__name__
     validate_recovery_runtime_limits.__doc__ = recovery._validate_recovery_runtime_limits.__doc__
     recovery._validate_recovery_runtime_limits = validate_recovery_runtime_limits
+
+    current_run = recovery.run_session_simulation_recovery
+    if not getattr(current_run, _RUN_WRAPPER_ATTR, False):
+        original_run = current_run
+
+        @wraps(original_run)
+        def run_session_simulation_recovery_with_runtime_limit_preflight(
+            dataset_root: Any,
+            session_id: str,
+            config: Any,
+        ) -> Any:
+            normalized_config = _normalized_runtime_config(config)
+            return original_run(dataset_root, session_id, normalized_config)
+
+        setattr(
+            run_session_simulation_recovery_with_runtime_limit_preflight,
+            _RUN_WRAPPER_ATTR,
+            True,
+        )
+        setattr(
+            run_session_simulation_recovery_with_runtime_limit_preflight,
+            _ORIGINAL_ATTR,
+            original_run,
+        )
+        recovery.run_session_simulation_recovery = (
+            run_session_simulation_recovery_with_runtime_limit_preflight
+        )
+
     setattr(recovery, _PATCHED_FLAG, True)
+
+
+def _normalized_runtime_config(config: Any) -> Any:
+    updates: dict[str, Any] = {
+        "events_per_model": _positive_integer_value(
+            "events_per_model",
+            getattr(config, "events_per_model", None),
+        ),
+    }
+
+    for field_name in ("max_template_events", "max_synthetic_events"):
+        value = getattr(config, field_name, None)
+        updates[field_name] = (
+            None if value is None else _positive_integer_value(field_name, value)
+        )
+
+    max_runtime_s = getattr(config, "max_runtime_s", None)
+    updates["max_runtime_s"] = (
+        None
+        if max_runtime_s is None
+        else _positive_finite_scalar("max_runtime_s", max_runtime_s)
+    )
+
+    for field_name in _BOOLEAN_CONTROL_FIELDS:
+        updates[field_name] = _strict_bool_value(
+            field_name,
+            getattr(config, field_name, None),
+        )
+
+    return replace(config, **updates)
 
 
 def _positive_integer_value(name: str, value: Any) -> int:

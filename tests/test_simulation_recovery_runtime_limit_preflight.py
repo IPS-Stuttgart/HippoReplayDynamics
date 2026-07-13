@@ -40,14 +40,15 @@ def test_runtime_limit_preflight_canonicalizes_accepted_scalars():
         )
     )
 
-    assert normalized.events_per_model == 3
-    assert type(normalized.events_per_model) is int
-    assert normalized.max_template_events == 2
-    assert type(normalized.max_template_events) is int
-    assert normalized.max_synthetic_events == 4
-    assert type(normalized.max_synthetic_events) is int
+    integer_limits = (
+        normalized.events_per_model,
+        normalized.max_template_events,
+        normalized.max_synthetic_events,
+    )
+    assert integer_limits == (3, 2, 4)
+    assert all(isinstance(value, int) and not isinstance(value, bool) for value in integer_limits)
     assert normalized.max_runtime_s == 1.25
-    assert type(normalized.max_runtime_s) is float
+    assert isinstance(normalized.max_runtime_s, float)
     assert normalized.score_with_occupancy is True
     assert normalized.oracle_candidate_support is False
     assert normalized.continue_on_error is False

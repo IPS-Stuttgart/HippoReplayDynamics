@@ -47,6 +47,8 @@ def _parse_int_ranges(spec: str) -> list[int]:
             continue
         if "-" in item:
             lo, hi = [int(x) for x in item.split("-", 1)]
+            if lo > hi:
+                raise ValueError(f"event range must be ascending: {item!r}")
             out.extend(range(lo, hi + 1))
         else:
             out.append(int(item))

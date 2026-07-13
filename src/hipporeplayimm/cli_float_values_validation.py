@@ -6,9 +6,11 @@ from functools import wraps
 import math
 
 import numpy as np
+import pandas as pd
 
 _MISSING_PREDICTED_CANDIDATE_OPTION = "--state-space-momentum-predicted-candidate-top-k"
 _STRING_TYPES = (str, bytes, np.str_, np.bytes_)
+_POSTERIOR_CALIBRATION_GROUP_PATCH = "_hipporeplayimm_retains_missing_calibration_groups"
 
 
 def apply_cli_float_values_validation_patch() -> None:
@@ -19,6 +21,7 @@ def apply_cli_float_values_validation_patch() -> None:
     _patch_parse_float_values(_cli)
     _patch_state_space_predicted_candidate_argument(_cli)
     _patch_statistical_resampling_counts()
+    _patch_posterior_calibration_missing_groups()
 
 
 def _patch_parse_float_values(_cli) -> None:
@@ -75,6 +78,72 @@ def _patch_statistical_resampling_counts() -> None:
         "paired_sign_flip_p_value",
         "n_permutations",
     )
+
+
+def _patch_posterior_calibration_missing_groups() -> None:
+    """Retain valid calibration rows whose optional session/model key is missing."""
+
+    from . import result_improvements
+
+    current = result_improvements.posterior_calibration_summary
+    if getattr(current, _POSTERIOR_CALIBRATION_GROUP_PATCH, False):
+        return
+
+    @wraps(current)
+    def posterior_calibration_summary(
+        samples: pd.DataFrame,
+        *,
+        probability_column: str = "true_bin_probability",
+        rank_column: str = "true_bin_rank",
+        n_bins_column: str = "n_position_bins",
+    ) -> pd.DataFrame:
+        group_columns = [column for column in ("session", "model") if column in samples]
+        prepared = samples.copy()
+        sentinels: dict[str, str] = {}
+        for column in group_columns:
+            missing = prepared[column].isna()
+            if not bool(missing.any()):
+                continue
+            sentinel = _missing_group_sentinel(prepared[column], column)
+            prepared[column] = prepared[column].astype(object)
+            prepared.loc[missing, column] = sentinel
+            sentinels[column] = sentinel
+
+        summary = current(
+            prepared,
+            probability_column=probability_column,
+            rank_column=rank_column,
+            n_bins_column=n_bins_column,
+        )
+        if summary.empty or not sentinels:
+            return summary
+
+        restored = summary.copy()
+        for column, sentinel in sentinels.items():
+            if column not in restored:
+                continue
+            missing = restored[column].astype(object).eq(sentinel)
+            restored.loc[missing, column] = pd.NA
+        return restored
+
+    setattr(
+        posterior_calibration_summary,
+        _POSTERIOR_CALIBRATION_GROUP_PATCH,
+        True,
+    )
+    posterior_calibration_summary._hipporeplayimm_original = current  # type: ignore[attr-defined]
+    result_improvements.posterior_calibration_summary = posterior_calibration_summary
+
+
+def _missing_group_sentinel(values: pd.Series, column: str) -> str:
+    observed = set(values.astype(str).tolist())
+    base = f"__hipporeplayimm_missing_{column}__"
+    sentinel = base
+    suffix = 0
+    while sentinel in observed:
+        suffix += 1
+        sentinel = f"{base}_{suffix}"
+    return sentinel
 
 
 def _patch_positive_integer_kwarg(module, function_name: str, kwarg_name: str) -> None:

@@ -47,7 +47,7 @@ def _path_length(x: np.ndarray, y: np.ndarray) -> float:
         return 0.0
     dx = np.diff(x)
     dy = np.diff(y)
-    return float(np.sum(np.sqrt(dx * dx + dy * dy)))
+    return float(np.sum(np.hypot(dx, dy)))
 
 
 def _summary_row(

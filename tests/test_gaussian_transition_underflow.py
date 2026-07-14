@@ -23,6 +23,24 @@ def test_dense_gaussian_transition_preserves_nearest_mass_after_underflow() -> N
     )
 
 
+def test_dense_gaussian_transition_preserves_large_scale_weights() -> None:
+    centers = np.array([[0.0], [1.0e200]], dtype=float)
+    transition = state_space_utils._gaussian_transition_matrix(
+        centers,
+        sigma_cm=1.0e200,
+        max_step_sigma=2.0,
+    )
+
+    far_weight = np.exp(-0.5) / (1.0 + np.exp(-0.5))
+    expected = np.array(
+        [
+            [1.0 - far_weight, far_weight],
+            [far_weight, 1.0 - far_weight],
+        ]
+    )
+    np.testing.assert_allclose(transition.toarray(), expected, rtol=1.0e-12, atol=0.0)
+
+
 def test_sparse_gaussian_row_preserves_nearest_mass_after_underflow() -> None:
     centers = np.array([[0.9], [1.0]], dtype=float)
     valid_indices = np.arange(centers.shape[0], dtype=int)

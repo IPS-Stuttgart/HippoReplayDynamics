@@ -165,20 +165,22 @@ def _patch_stable_gaussian_transition_weights() -> None:
             n_bins = centers.shape[0]
             valid_mask = state_space_utils._coerce_valid_bin_mask(valid_bin_mask, n_bins)
             allowed = np.arange(n_bins, dtype=int) if valid_mask is None else np.flatnonzero(valid_mask)
-            radius2 = (sigma * max_step) ** 2
             rows: list[int] = []
             cols: list[int] = []
             data: list[float] = []
             for src, center in enumerate(centers):
-                delta = centers - center[None, :]
-                dist2 = np.sum(delta * delta, axis=1)
-                keep = dist2 <= radius2
+                with np.errstate(over="ignore", invalid="ignore"):
+                    standardized_delta = (centers - center[None, :]) / sigma
+                    standardized_distance = np.hypot.reduce(standardized_delta, axis=1)
+                keep = standardized_distance <= max_step
                 if valid_mask is not None:
                     keep &= valid_mask
                 if not np.any(keep):
-                    keep[int(allowed[int(np.argmin(dist2[allowed]))])] = True
+                    keep[int(allowed[int(np.argmin(standardized_distance[allowed]))])] = True
                 dst = np.flatnonzero(keep)
-                weights = _stable_gaussian_weights(dist2[dst], sigma)
+                with np.errstate(over="ignore", invalid="ignore"):
+                    standardized_dist2 = np.square(standardized_distance[dst])
+                weights = _stable_gaussian_weights(standardized_dist2, 1.0)
                 rows.extend(int(index) for index in dst)
                 cols.extend([src] * len(dst))
                 data.extend(float(value) for value in weights)

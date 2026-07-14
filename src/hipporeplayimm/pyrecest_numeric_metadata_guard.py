@@ -10,10 +10,11 @@ import numpy as np
 _PATCHED_FLAG = "_pyrecest_numeric_metadata_guard_applied"
 _PARAMETER_PATCHED_FLAG = "_pyrecest_numeric_parameter_guard_applied"
 _RAW_FLOAT_ERROR = "could not convert string to float"
+_TEXT_SCALAR_TYPES = (str, bytes, np.str_, np.bytes_)
 
 
 def _is_text_scalar(value: object) -> bool:
-    if isinstance(value, (str, np.str_)):
+    if isinstance(value, _TEXT_SCALAR_TYPES):
         return True
     try:
         array = np.asarray(value)
@@ -21,11 +22,11 @@ def _is_text_scalar(value: object) -> bool:
         array = np.asarray(value, dtype=object)
     if array.shape != ():
         return False
-    if np.issubdtype(array.dtype, np.str_):
+    if array.dtype.kind in {"S", "U"}:
         return True
     if array.dtype == object:
         try:
-            return isinstance(array.item(), (str, np.str_))
+            return isinstance(array.item(), _TEXT_SCALAR_TYPES)
         except ValueError:
             return False
     return False

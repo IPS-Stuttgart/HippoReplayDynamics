@@ -84,12 +84,24 @@ def _event_index(token: str) -> int:
     return value
 
 
+def _nonnegative_int(value: str) -> int:
+    """Return a nonnegative CLI integer instead of allowing negative slicing."""
+
+    try:
+        parsed = int(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("must be a non-negative integer") from exc
+    if parsed < 0:
+        raise argparse.ArgumentTypeError("must be a non-negative integer")
+    return parsed
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--dataset-root", required=True)
     parser.add_argument("--session", required=True)
     parser.add_argument("--events", default="run")
-    parser.add_argument("--max-events", type=int, default=25)
+    parser.add_argument("--max-events", type=_nonnegative_int, default=25)
     parser.add_argument("--output", default="results/accuracy-upgrade-report")
     parser.add_argument("--bin-size-cm", type=float, default=6.0)
     parser.add_argument("--smoothing-sigma-bins", type=float, default=2.0)

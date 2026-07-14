@@ -12,6 +12,8 @@ _PATCHED_FLAG = "_result_quality_audit_scope_patch_applied"
 _EVENT_COUNT_PATCHED_FLAG = "_result_quality_audit_event_count_scope_patch_applied"
 _HELDOUT_INFLUENCE_PATCHED_FLAG = "_result_quality_audit_heldout_influence_patch_applied"
 _DISTINCT_MODEL_MARGIN_PATCHED_FLAG = "_result_quality_distinct_model_margin_patch_applied"
+_MISSING_MODEL_SUMMARY_PATCHED_FLAG = "_result_quality_missing_model_summary_patch_applied"
+_MISSING_MODEL_SENTINEL_BASE = "__hipporeplayimm_missing_model__"
 _MISSING_TEXT_VALUES = {"", "nan", "na", "n/a", "none", "null", "<na>"}
 _EVENT_GROUP_SESSION_COLUMNS = ("session",)
 _EVENT_GROUP_EVENT_COLUMNS = ("event_index", "event_id")
@@ -199,6 +201,54 @@ def _patch_distinct_model_result_quality_margins(gates_module: Any) -> None:
     gates_module._annotate_margin_scope = annotate_distinct_model_margin_scope
 
 
+def _missing_model_sentinel(values: pd.Series) -> str:
+    """Return a private missing-model label that cannot collide with real labels."""
+
+    observed = {str(value) for value in values.dropna().tolist()}
+    sentinel = _MISSING_MODEL_SENTINEL_BASE
+    suffix = 1
+    while sentinel in observed:
+        sentinel = f"{_MISSING_MODEL_SENTINEL_BASE}_{suffix}"
+        suffix += 1
+    return sentinel
+
+
+def _patch_missing_model_quality_summary(gates_module: Any) -> None:
+    """Keep rows with missing model provenance in model-quality summaries."""
+
+    current_summary = gates_module.model_quality_summary
+    if getattr(current_summary, _MISSING_MODEL_SUMMARY_PATCHED_FLAG, False):
+        return
+
+    @wraps(current_summary)
+    def model_quality_summary_with_missing_models(frame: pd.DataFrame) -> pd.DataFrame:
+        if frame.empty or "model" not in frame.columns:
+            return current_summary(frame)
+
+        missing_model = frame["model"].isna()
+        if not bool(missing_model.any()):
+            return current_summary(frame)
+
+        sentinel = _missing_model_sentinel(frame["model"])
+        prepared = frame.copy()
+        prepared["model"] = prepared["model"].astype(object)
+        prepared.loc[missing_model, "model"] = sentinel
+        summary = current_summary(prepared)
+        if "model" not in summary.columns:
+            return summary
+
+        summary = summary.copy()
+        summary.loc[summary["model"].eq(sentinel), "model"] = np.nan
+        return summary
+
+    setattr(
+        model_quality_summary_with_missing_models,
+        _MISSING_MODEL_SUMMARY_PATCHED_FLAG,
+        True,
+    )
+    gates_module.model_quality_summary = model_quality_summary_with_missing_models
+
+
 def apply_result_quality_audit_scope_patch() -> None:
     """Install scoped grouping for result-quality audit summaries."""
 
@@ -208,6 +258,7 @@ def apply_result_quality_audit_scope_patch() -> None:
 
     advanced_result_evidence_margin_duplicates.apply_evidence_margin_distinct_model_patch()
     _patch_distinct_model_result_quality_margins(gates_module)
+    _patch_missing_model_quality_summary(gates_module)
 
     current_group_columns = audit_module.event_group_columns
     if not getattr(current_group_columns, _PATCHED_FLAG, False):

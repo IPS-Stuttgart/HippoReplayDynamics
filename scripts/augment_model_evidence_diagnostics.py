@@ -53,8 +53,8 @@ def write_outputs(scores: pd.DataFrame, output: Path) -> None:
     output.mkdir(parents=True, exist_ok=True)
     scores.to_csv(output / "event_model_evidence_augmented.csv", index=False)
     if not scores.empty:
-        reliability = scores.groupby("model", as_index=False).agg(
-            rows=("model", "count"),
+        reliability = scores.groupby("model", as_index=False, dropna=False).agg(
+            rows=("model", "size"),
             reliable_rows=("event_reliable", "sum"),
             low_spike_rows=("event_low_spike_count", "sum"),
             low_candidate_mass_rows=("event_low_candidate_mass", "sum"),
@@ -65,8 +65,8 @@ def write_outputs(scores: pd.DataFrame, output: Path) -> None:
     if "runtime_s" in scores:
         runtime_scores = scores.copy()
         runtime_scores["runtime_s"] = _numeric_series(runtime_scores["runtime_s"])
-        runtime = runtime_scores.groupby("model", as_index=False).agg(
-            rows=("model", "count"),
+        runtime = runtime_scores.groupby("model", as_index=False, dropna=False).agg(
+            rows=("model", "size"),
             mean_runtime_s=("runtime_s", "mean"),
             median_runtime_s=("runtime_s", "median"),
             p95_runtime_s=("runtime_s", lambda x: _finite_quantile(x, 0.95)),
@@ -74,7 +74,7 @@ def write_outputs(scores: pd.DataFrame, output: Path) -> None:
         if "relative_log_evidence_per_runtime_s" in runtime_scores:
             runtime_scores["relative_log_evidence_per_runtime_s"] = _numeric_series(runtime_scores["relative_log_evidence_per_runtime_s"])
             runtime = runtime.merge(
-                runtime_scores.groupby("model", as_index=False)["relative_log_evidence_per_runtime_s"].mean(),
+                runtime_scores.groupby("model", as_index=False, dropna=False)["relative_log_evidence_per_runtime_s"].mean(),
                 on="model",
                 how="left",
             )

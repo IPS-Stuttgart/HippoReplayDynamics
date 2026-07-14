@@ -156,7 +156,9 @@ def _scope_label(value: object) -> str:
         return "<missing>"
     if isinstance(value, (bool, np.bool_)):
         return repr(("scalar", str(bool(value))))
-    if isinstance(value, (int, float, np.integer, np.floating)):
+    if isinstance(value, (int, np.integer)):
+        return repr(("numeric", int(value)))
+    if isinstance(value, (float, np.floating)):
         numeric = float(value)
         if np.isfinite(numeric):
             return repr(("numeric", int(numeric) if numeric.is_integer() else numeric))

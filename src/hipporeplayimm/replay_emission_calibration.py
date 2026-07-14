@@ -127,6 +127,83 @@ def _event_index_int(event_index: object) -> int:
         raise TypeError("event index must be an integer") from exc
 
 
+def _integral_cell_id(value: object, name: str) -> int:
+    """Coerce one cell ID without truncating boolean or fractional values."""
+
+    if _is_boolean_scalar(value):
+        raise TypeError(f"{name} must contain integer identifiers, not boolean values")
+    try:
+        scalar = np.asarray(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must contain finite integer identifiers") from exc
+    if scalar.ndim != 0:
+        raise ValueError(f"{name} must be one-dimensional")
+    item = scalar.item()
+    if isinstance(item, (bool, np.bool_)):
+        raise TypeError(f"{name} must contain integer identifiers, not boolean values")
+    if isinstance(item, (str, bytes, np.str_, np.bytes_)):
+        if isinstance(item, (bytes, np.bytes_)):
+            try:
+                text = bytes(item).decode("utf-8")
+            except UnicodeDecodeError as exc:
+                raise ValueError(f"{name} must contain finite integer identifiers") from exc
+        else:
+            text = str(item)
+        try:
+            return int(text.strip(), 10)
+        except ValueError as exc:
+            raise ValueError(f"{name} must contain finite integer identifiers") from exc
+    if isinstance(item, (complex, np.complexfloating)):
+        raise TypeError(f"{name} must contain real integer identifiers")
+    try:
+        return int(operator.index(item))
+    except TypeError:
+        pass
+    try:
+        numeric = float(item)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ValueError(f"{name} must contain finite integer identifiers") from exc
+    if not np.isfinite(numeric) or not numeric.is_integer():
+        raise ValueError(f"{name} must contain finite integer identifiers")
+    return int(numeric)
+
+
+def _coerce_integral_cell_ids(
+    values: object,
+    name: str,
+    *,
+    expected_size: int | None = None,
+) -> np.ndarray:
+    try:
+        raw = np.asarray(values, dtype=object)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must be one-dimensional") from exc
+    if raw.ndim != 1:
+        raise ValueError(f"{name} must be one-dimensional")
+    if expected_size is not None and raw.shape != (int(expected_size),):
+        raise ValueError(f"{name} must contain one ID per encoding cell")
+    identifiers = [_integral_cell_id(value, name) for value in raw]
+    if len(set(identifiers)) != len(identifiers):
+        raise ValueError(f"{name} must contain unique identifiers")
+    integer_info = np.iinfo(np.dtype(int))
+    if any(identifier < int(integer_info.min) or identifier > int(integer_info.max) for identifier in identifiers):
+        raise ValueError(f"{name} must fit into integer identifier range")
+    return np.asarray(identifiers, dtype=int)
+
+
+def _gain_mapping_from_mapping(gains: Mapping[object, object]) -> dict[int, float]:
+    mapping: dict[int, float] = {}
+    for raw_cell_id, raw_gain in gains.items():
+        cell_id = _integral_cell_id(raw_cell_id, "replay gain mapping cell IDs")
+        if cell_id in mapping:
+            raise ValueError("replay gain mapping cell IDs must contain unique identifiers")
+        integer_info = np.iinfo(np.dtype(int))
+        if cell_id < int(integer_info.min) or cell_id > int(integer_info.max):
+            raise ValueError("replay gain mapping cell IDs must fit into integer identifier range")
+        mapping[cell_id] = _finite_gain_scalar(raw_gain)
+    return mapping
+
+
 def fit_replay_cell_gains(
     session: ReplaySession,
     encoding: EncodingModel,
@@ -157,6 +234,11 @@ def fit_replay_cell_gains(
         raise ValueError("prior_gain must be positive")
     if min_gain <= 0.0 or max_gain <= 0.0 or max_gain < min_gain:
         raise ValueError("gain bounds must be positive and ordered")
+    cell_ids = _coerce_integral_cell_ids(
+        encoding.cell_ids,
+        "encoding.cell_ids",
+        expected_size=encoding.n_cells,
+    )
 
     observed = np.zeros(encoding.n_cells, dtype=float)
     expected = np.zeros(encoding.n_cells, dtype=float)
@@ -180,7 +262,7 @@ def fit_replay_cell_gains(
         denominator = np.maximum(expected + prior_count, np.finfo(float).tiny)
         gains = np.clip(numerator / denominator, min_gain, max_gain)
     return ReplayEmissionCalibration(
-        cell_ids=np.asarray(encoding.cell_ids, dtype=int).copy(),
+        cell_ids=cell_ids.copy(),
         gains=np.asarray(gains, dtype=float),
         observed_spikes=observed,
         expected_spikes=expected,
@@ -216,11 +298,33 @@ def _gain_vector_for_encoding(
     encoding: EncodingModel,
     gains: ReplayEmissionCalibration | Mapping[int, float] | np.ndarray,
 ) -> np.ndarray:
+    encoding_cell_ids = _coerce_integral_cell_ids(
+        encoding.cell_ids,
+        "encoding.cell_ids",
+        expected_size=encoding.n_cells,
+    )
     if isinstance(gains, ReplayEmissionCalibration):
-        mapping = {int(cell): _finite_gain_scalar(gain) for cell, gain in zip(gains.cell_ids, gains.gains, strict=True)}
-        gain_vector = np.asarray([mapping.get(int(cell), 1.0) for cell in encoding.cell_ids], dtype=float)
+        calibration_cell_ids = _coerce_integral_cell_ids(
+            gains.cell_ids,
+            "calibration cell IDs",
+        )
+        calibration_gains = np.asarray(gains.gains, dtype=object)
+        if calibration_gains.ndim != 1 or calibration_gains.shape != calibration_cell_ids.shape:
+            raise ValueError("calibration gains must contain one value per calibration cell ID")
+        mapping = {
+            int(cell_id): _finite_gain_scalar(gain)
+            for cell_id, gain in zip(calibration_cell_ids, calibration_gains, strict=True)
+        }
+        gain_vector = np.asarray(
+            [mapping.get(int(cell_id), 1.0) for cell_id in encoding_cell_ids],
+            dtype=float,
+        )
     elif isinstance(gains, Mapping):
-        gain_vector = np.asarray([_finite_gain_scalar(gains.get(int(cell), 1.0)) for cell in encoding.cell_ids], dtype=float)
+        mapping = _gain_mapping_from_mapping(gains)
+        gain_vector = np.asarray(
+            [mapping.get(int(cell_id), 1.0) for cell_id in encoding_cell_ids],
+            dtype=float,
+        )
     else:
         gain_vector = np.asarray(gains)
     return _validated_gain_vector(encoding, gain_vector)

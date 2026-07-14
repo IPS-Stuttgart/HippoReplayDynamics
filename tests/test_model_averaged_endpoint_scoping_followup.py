@@ -89,7 +89,7 @@ def test_model_averaged_endpoint_accepts_scope_integers_beyond_float_range() -> 
     scores = pd.DataFrame(
         {
             "session": ["RatX/Open1", "RatX/Open1"],
-            "event_index": [event_index, event_index],
+            "event_index": pd.Series([event_index, event_index], dtype=object),
             "model": ["diffusion", "first-order-imm"],
             "evidence_comparable": [True, True],
             "model_probability": [0.25, 0.75],

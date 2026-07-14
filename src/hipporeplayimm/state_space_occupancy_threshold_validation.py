@@ -3,9 +3,9 @@
 State-space scoring derives an active-bin mask from per-bin occupancy seconds and
 ``valid_occupancy_threshold_s``.  The core helper previously delegated directly
 to ``float(min_occupancy_s)`` and ``np.asarray(..., dtype=float)``, so booleans,
-string numerals, and array-shaped threshold values could be silently coerced into
-valid numeric masks.  Reject those ambiguous inputs before active support is
-computed.
+string numerals, array-shaped threshold values, and negative occupancy durations
+could be silently coerced or treated as unsupported bins.  Reject those ambiguous
+inputs before active support is computed.
 """
 
 from __future__ import annotations
@@ -61,7 +61,7 @@ def _reject_numeric_scalar_type(name: str, value: Any) -> None:
             raise TypeError(f"{name} must be a numeric scalar, not string")
 
 
-def _reject_occupancy_seconds_type(occupancy_s: Any) -> None:
+def _validate_occupancy_seconds(occupancy_s: Any) -> None:
     if occupancy_s is None:
         return
     try:
@@ -80,6 +80,12 @@ def _reject_occupancy_seconds_type(occupancy_s: Any) -> None:
             raise TypeError("occupancy_s must contain numeric seconds, not boolean values")
         if any(isinstance(value, _STRING_TYPES) for value in flat):
             raise TypeError("occupancy_s must contain numeric seconds, not string values")
+    try:
+        numeric = np.asarray(occupancy_s, dtype=float)
+    except (TypeError, ValueError) as exc:
+        raise TypeError("occupancy_s must contain real numeric occupancy seconds") from exc
+    if np.any(numeric < 0.0):
+        raise ValueError("occupancy_s must contain nonnegative occupancy seconds")
 
 
 def _sync_aliases(previous: Any, replacement: Any) -> None:
@@ -104,7 +110,7 @@ def apply_state_space_occupancy_threshold_validation_patch() -> None:
 
     @wraps(current)
     def valid_bin_mask_from_occupancy(occupancy_s, min_occupancy_s, n_bins):
-        _reject_occupancy_seconds_type(occupancy_s)
+        _validate_occupancy_seconds(occupancy_s)
         _reject_numeric_scalar_type("min_occupancy_s", min_occupancy_s)
         return current(occupancy_s, min_occupancy_s, n_bins)
 

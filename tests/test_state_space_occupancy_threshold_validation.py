@@ -40,6 +40,19 @@ def test_valid_occupancy_rejects_boolean_or_string_values(occupancy_s: object) -
         state_space._valid_bin_mask_from_occupancy(occupancy_s, 0.1, 3)
 
 
+@pytest.mark.parametrize("threshold", [0.0, 0.1])
+@pytest.mark.parametrize(
+    "occupancy_s",
+    [
+        np.array([0.5, -0.1, 0.2], dtype=float),
+        np.array([0.5, -0.1, 0.2], dtype=object),
+    ],
+)
+def test_valid_occupancy_rejects_negative_seconds(occupancy_s: object, threshold: float) -> None:
+    with pytest.raises(ValueError, match="nonnegative"):
+        state_space._valid_bin_mask_from_occupancy(occupancy_s, threshold, 3)
+
+
 def test_state_space_model_occupancy_helper_alias_is_patched() -> None:
     hipporeplayimm.apply_runtime_patches()
 

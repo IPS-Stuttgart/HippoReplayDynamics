@@ -10,6 +10,8 @@ from .benchmark_relative_grouping import _BENCHMARK_RELATIVE_SCOPE_COLUMNS
 _MODEL_AVERAGE_BASE_COLUMNS = ("session", "event_index")
 _MODEL_AVERAGE_SCOPE_COLUMNS = (
     "benchmark_random_seed",
+    "random_seed",
+    "null_random_seed",
     "benchmark_cell_split_index",
     *_BENCHMARK_RELATIVE_SCOPE_COLUMNS,
     "train_cell_ids",

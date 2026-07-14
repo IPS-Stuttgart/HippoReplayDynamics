@@ -74,10 +74,11 @@ def _mode_probability_row(modes: tuple[str, ...], probabilities: np.ndarray) -> 
         raise ValueError("mode probabilities must be finite")
     if np.any(probabilities < 0.0):
         raise ValueError("mode probabilities must be nonnegative")
-    total = float(probabilities.sum())
-    if total <= 0.0:
+    scale = float(np.max(probabilities, initial=0.0))
+    if scale <= 0.0:
         raise ValueError("mode probabilities must have positive total mass")
-    probabilities = probabilities / total
+    probabilities = probabilities / scale
+    probabilities = probabilities / float(probabilities.sum())
     row: dict[str, float | str] = {f"mode_{mode}_probability": float(probability) for mode, probability in zip(modes, probabilities, strict=True)}
     row["most_likely_mode"] = modes[int(np.argmax(probabilities))]
     return row

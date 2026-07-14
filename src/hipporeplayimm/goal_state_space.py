@@ -236,40 +236,121 @@ def _goal_transition_matrix(
         raise ValueError('bin_centers must be finite')
     if goal.shape != (centers.shape[1],):
         raise ValueError('goal must have one coordinate per position dimension')
+    if not np.all(np.isfinite(goal)):
+        raise ValueError('goal must be finite')
 
     n_bins = centers.shape[0]
-    radius2 = (sigma_cm * max_step_sigma) ** 2
     rows: list[int] = []
     cols: list[int] = []
     data: list[float] = []
     for src, center in enumerate(centers):
         predicted = _goal_drift_prediction(center, goal, drift_step_cm)
-        delta = centers - predicted[None, :]
-        dist2 = np.sum(delta * delta, axis=1)
-        keep = dist2 <= radius2
-        if not np.any(keep):
-            keep[int(np.argmin(dist2))] = True
-        dst = np.flatnonzero(keep)
-        log_weights = -0.5 * dist2[dst] / (sigma_cm * sigma_cm)
-        max_log_weight = float(np.max(log_weights))
-        weights = np.exp(log_weights - max_log_weight)
-        total_weight = float(weights.sum())
-        if not np.isfinite(total_weight) or total_weight <= 0.0:
-            raise ValueError('goal transition weights have no finite mass')
-        weights /= total_weight
+        distances, log_distances = _scaled_euclidean_distances(
+            centers,
+            predicted,
+            sigma_cm,
+        )
+        keep = distances <= max_step_sigma
+        if np.any(keep):
+            dst = np.flatnonzero(keep)
+        else:
+            dst = np.asarray([int(np.argmin(log_distances))], dtype=int)
+        weights = _relative_gaussian_weights(distances[dst])
         rows.extend(int(idx) for idx in dst)
         cols.extend([src] * len(dst))
         data.extend(float(value) for value in weights)
     return csr_matrix((data, (rows, cols)), shape=(n_bins, n_bins))
 
 
+def _scaled_euclidean_distances(
+    points: np.ndarray,
+    reference: np.ndarray,
+    scale: float,
+) -> tuple[np.ndarray, np.ndarray]:
+    '''Return Euclidean distances in scale units without intermediate overflow.'''
+
+    values = np.asarray(points, dtype=float)
+    target = np.asarray(reference, dtype=float)
+    point_scales = np.max(np.abs(values), axis=1)
+    reference_scale = float(np.max(np.abs(target)))
+    coordinate_scales = np.maximum(point_scales, reference_scale)
+    scaled_points = np.divide(
+        values,
+        coordinate_scales[:, None],
+        out=np.zeros_like(values),
+        where=coordinate_scales[:, None] > 0.0,
+    )
+    scaled_reference = np.divide(
+        target[None, :],
+        coordinate_scales[:, None],
+        out=np.zeros_like(values),
+        where=coordinate_scales[:, None] > 0.0,
+    )
+    relative_distances = np.hypot.reduce(
+        np.abs(scaled_points - scaled_reference),
+        axis=1,
+    )
+
+    log_distances = np.full(values.shape[0], -np.inf, dtype=float)
+    positive = relative_distances > 0.0
+    log_distances[positive] = (
+        np.log(coordinate_scales[positive])
+        + np.log(relative_distances[positive])
+        - np.log(float(scale))
+    )
+    distances = np.zeros(values.shape[0], dtype=float)
+    finite_range = positive & (log_distances <= np.log(np.finfo(float).max))
+    distances[finite_range] = np.exp(log_distances[finite_range])
+    distances[positive & ~finite_range] = np.inf
+    return distances, log_distances
+
+
+def _relative_gaussian_weights(distances: np.ndarray) -> np.ndarray:
+    '''Normalize Gaussian weights after subtracting the nearest squared distance.'''
+
+    values = np.asarray(distances, dtype=float)
+    if values.ndim != 1 or values.size == 0:
+        raise ValueError('distances must contain at least one value')
+    nearest = float(np.min(values))
+    if not np.isfinite(nearest):
+        return np.full(values.shape, 1.0 / values.size, dtype=float)
+    gaps = values - nearest
+    with np.errstate(over='ignore', invalid='ignore'):
+        relative_squared = gaps * (values + nearest)
+    relative_squared[gaps == 0.0] = 0.0
+    relative_squared = np.where(
+        np.isnan(relative_squared),
+        np.inf,
+        np.maximum(relative_squared, 0.0),
+    )
+    weights = np.exp(-0.5 * relative_squared)
+    total_weight = float(weights.sum())
+    if not np.isfinite(total_weight) or total_weight <= 0.0:
+        raise ValueError('goal transition weights have no finite mass')
+    return weights / total_weight
+
+
 def _goal_drift_prediction(position: np.ndarray, goal: np.ndarray, drift_step_cm: float) -> np.ndarray:
-    vector = goal - position
-    distance = float(np.linalg.norm(vector))
-    if drift_step_cm <= 0.0 or distance <= np.finfo(float).eps:
-        return np.asarray(position, dtype=float)
-    step = min(float(drift_step_cm), distance)
-    return np.asarray(position, dtype=float) + (step / distance) * vector
+    current = np.asarray(position, dtype=float)
+    target = np.asarray(goal, dtype=float)
+    coordinate_scale = float(max(np.max(np.abs(current)), np.max(np.abs(target))))
+    if drift_step_cm <= 0.0 or coordinate_scale == 0.0:
+        return current.copy()
+    scaled_vector = target / coordinate_scale - current / coordinate_scale
+    scaled_distance = float(np.hypot.reduce(np.abs(scaled_vector)))
+    if scaled_distance == 0.0:
+        return current.copy()
+    with np.errstate(over='ignore', invalid='ignore'):
+        distance = coordinate_scale * scaled_distance
+    if np.isfinite(distance) and distance <= np.finfo(float).eps:
+        return current.copy()
+    if np.isfinite(distance) and float(drift_step_cm) >= distance:
+        return target.copy()
+    direction = scaled_vector / scaled_distance
+    predicted = current + float(drift_step_cm) * direction
+    if not np.all(np.isfinite(predicted)):
+        raise ValueError('goal drift prediction exceeds floating-point range')
+    return predicted
 
 
 def _goal_transition_sigmas_cm(

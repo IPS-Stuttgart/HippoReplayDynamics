@@ -43,6 +43,7 @@ _EVENT_KEY_COLUMNS = (
     "split_shard_index",
     "split_shard_count",
 )
+_REQUIRED_EVENT_KEY_COLUMNS = ("session", "event_index")
 
 
 def canonical_model_name(model: str) -> str:
@@ -408,10 +409,30 @@ def _event_group_columns(frame: pd.DataFrame) -> list[str]:
     return [column for column in _EVENT_KEY_COLUMNS if column in frame.columns]
 
 
-def _comparison_event_key_columns(left: pd.DataFrame, right: pd.DataFrame) -> list[str]:
-    """Return event-key columns that can be compared on both score tables."""
+def _is_missing_scalar(value: object) -> bool:
+    try:
+        missing = pd.isna(value)
+    except (TypeError, ValueError):
+        missing = False
+    if isinstance(missing, (bool, np.bool_)) and bool(missing):
+        return True
+    return str(value).strip().lower() in _MISSING_STATUS_VALUES
 
-    return [column for column in _EVENT_KEY_COLUMNS if column in left.columns and column in right.columns]
+
+def _column_has_nonmissing_values(frame: pd.DataFrame, column: str) -> bool:
+    return bool(frame[column].map(lambda value: not _is_missing_scalar(value)).any())
+
+
+def _comparison_event_key_columns(left: pd.DataFrame, right: pd.DataFrame) -> list[str]:
+    """Return event-key columns that are populated in both score tables."""
+
+    shared = [column for column in _EVENT_KEY_COLUMNS if column in left.columns and column in right.columns]
+    return [
+        column
+        for column in shared
+        if column in _REQUIRED_EVENT_KEY_COLUMNS
+        or (_column_has_nonmissing_values(left, column) and _column_has_nonmissing_values(right, column))
+    ]
 
 
 def _align_event_key_columns(

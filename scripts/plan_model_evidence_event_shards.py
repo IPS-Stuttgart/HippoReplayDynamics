@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import operator
 from pathlib import Path
 
 from benchmark_model_evidence import _check_session, _events, _session_path
@@ -42,6 +43,20 @@ def _event_chunks(event_ids: list[int], requested_shards: int) -> list[list[int]
     return chunks
 
 
+def _validate_max_events(max_events: int | None) -> int | None:
+    if max_events is None:
+        return None
+    if isinstance(max_events, bool):
+        raise ValueError("--max-events must be a non-negative integer")
+    try:
+        validated = operator.index(max_events)
+    except TypeError as exc:
+        raise ValueError("--max-events must be a non-negative integer") from exc
+    if validated < 0:
+        raise ValueError("--max-events must be a non-negative integer")
+    return int(validated)
+
+
 def plan_event_shards(
     dataset_root: Path,
     session_id: str,
@@ -50,12 +65,13 @@ def plan_event_shards(
     max_events: int | None,
     event_shard_count: int,
 ) -> dict[str, object]:
+    validated_max_events = _validate_max_events(max_events)
     session_dir = _session_path(dataset_root, session_id)
     _check_session(session_dir)
     session = load_replay_session(session_dir)
     event_ids = _events(events, session)
-    if max_events is not None:
-        event_ids = event_ids[:max_events]
+    if validated_max_events is not None:
+        event_ids = event_ids[:validated_max_events]
     chunks = _event_chunks(event_ids, event_shard_count)
     if len(chunks) > 256:
         raise ValueError(
@@ -75,7 +91,7 @@ def plan_event_shards(
     return {
         "session": session.session_id,
         "events": events,
-        "max_events": max_events,
+        "max_events": validated_max_events,
         "event_count": len(event_ids),
         "requested_event_shard_count": event_shard_count,
         "event_shard_count": len(event_matrix),

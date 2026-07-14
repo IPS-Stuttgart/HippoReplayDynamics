@@ -337,3 +337,6 @@ def _restrict_log_posterior_to_candidates(
     if np.isfinite(normalizer):
         out[active] -= normalizer
     return out
+
+
+__all__ = ["apply_candidate_active_support_validation_patch"]

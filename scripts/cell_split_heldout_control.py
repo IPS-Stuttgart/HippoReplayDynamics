@@ -8,7 +8,7 @@ import glob
 import json
 import math
 import time
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -204,6 +204,8 @@ def score_cell_split_heldout(args: argparse.Namespace) -> pd.DataFrame:
                         "heldout_log_likelihood": heldout,
                         "log_evidence": heldout,
                         "log_evidence_scope": "cell_split_heldout_conditional",
+                        "heldout_predictive_method": "joint_log_evidence_minus_train_log_evidence",
+                        "heldout_replay_spikes_used_for_latent_inference": False,
                         "heldout_log_likelihood_per_spike": _safe_ratio(heldout, test_spikes),
                         "heldout_bits_per_spike": _safe_ratio(heldout, test_spikes * np.log(2.0)),
                         "joint_log_likelihood": float(joint_score.log_likelihood),
@@ -219,6 +221,18 @@ def score_cell_split_heldout(args: argparse.Namespace) -> pd.DataFrame:
                     }
                     metadata = getattr(joint_emissions, "metadata", {}) or {}
                     row.update({f"emission_{key}": value for key, value in metadata.items()})
+                    row.update(
+                        {
+                            f"train_diagnostic_{key}": value
+                            for key, value in train_score.diagnostics.items()
+                        }
+                    )
+                    row.update(
+                        {
+                            f"joint_diagnostic_{key}": value
+                            for key, value in joint_score.diagnostics.items()
+                        }
+                    )
                     row.update({f"diagnostic_{key}": value for key, value in joint_score.diagnostics.items()})
                     rows.append(row)
                     print(
@@ -243,6 +257,8 @@ def score_cell_split_heldout(args: argparse.Namespace) -> pd.DataFrame:
                             "heldout_log_likelihood": np.nan,
                             "log_evidence": np.nan,
                             "log_evidence_scope": "cell_split_heldout_conditional",
+                            "heldout_predictive_method": "joint_log_evidence_minus_train_log_evidence",
+                            "heldout_replay_spikes_used_for_latent_inference": False,
                             "heldout_log_likelihood_per_spike": np.nan,
                             "heldout_bits_per_spike": np.nan,
                             "joint_log_likelihood": np.nan,
@@ -860,7 +876,7 @@ def _write_manifest(outdir: Path, manifest: dict[str, object]) -> None:
 
 
 def _utc_now_iso() -> str:
-    return datetime.now(tz=UTC).isoformat().replace("+00:00", "Z")
+    return datetime.now(tz=timezone.utc).isoformat().replace("+00:00", "Z")
 
 
 def _first_numeric_value(frame: pd.DataFrame, column: str) -> float:

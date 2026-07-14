@@ -30,6 +30,7 @@ def apply_log_emission_n_spikes_validation_patch() -> None:
     @wraps(original_post_init)
     def _validated_post_init(self: LogEmissionTensor) -> None:
         _validate_duration_inputs(self)
+        _validate_raw_log_likelihood(self.log_likelihood)
         original_post_init(self)
         _validate_log_likelihood(self)
         _validate_n_spikes(self)
@@ -68,6 +69,35 @@ def _require_scalar_duration(value: Any, name: str) -> None:
         raise ValueError(f"{name} must be a scalar duration") from exc
     if raw.ndim != 0:
         raise ValueError(f"{name} must be a scalar duration")
+
+
+def _validate_raw_log_likelihood(values: Any) -> None:
+    """Reject values that float coercion would silently reinterpret."""
+
+    try:
+        raw = np.asarray(values)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("log_likelihood must contain numeric real values") from exc
+
+    if raw.dtype.kind == "b":
+        raise ValueError("log_likelihood must contain numeric real values, not boolean values")
+    if raw.dtype.kind in {"S", "U"}:
+        raise ValueError("log_likelihood must contain numeric real values, not text values")
+    if raw.dtype.kind == "c":
+        raise ValueError("log_likelihood must contain numeric real values, not complex values")
+    if raw.dtype.kind == "O":
+        for item in raw.reshape(-1):
+            if isinstance(item, (bool, np.bool_)):
+                raise ValueError("log_likelihood must contain numeric real values, not boolean values")
+            if isinstance(item, _STRING_TYPES):
+                raise ValueError("log_likelihood must contain numeric real values, not text values")
+            if isinstance(item, (complex, np.complexfloating)):
+                raise ValueError("log_likelihood must contain numeric real values, not complex values")
+
+    try:
+        np.asarray(values, dtype=float)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ValueError("log_likelihood must contain numeric real values") from exc
 
 
 def _validate_log_likelihood(emissions: LogEmissionTensor) -> None:

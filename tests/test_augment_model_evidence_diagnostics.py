@@ -70,3 +70,35 @@ def test_write_outputs_ignores_bad_runtime_values_in_summary(tmp_path):
     assert np.isclose(runtime["median_runtime_s"], 2.0)
     assert np.isclose(runtime["p95_runtime_s"], np.quantile([1.0, 3.0], 0.95))
     assert np.isclose(runtime["relative_log_evidence_per_runtime_s"], 4.0)
+
+
+def test_write_outputs_preserves_missing_model_group(tmp_path):
+    scores = pd.DataFrame(
+        {
+            "model": ["stationary", np.nan, None],
+            "runtime_s": [1.0, 2.0, 4.0],
+            "relative_log_evidence_per_runtime_s": [2.0, 4.0, 8.0],
+            "event_reliable": [True, False, True],
+            "event_low_spike_count": [False, True, False],
+            "event_low_candidate_mass": [False, False, True],
+            "event_too_few_time_bins": [False, False, False],
+        }
+    )
+
+    write_outputs(scores, tmp_path)
+
+    reliability = pd.read_csv(tmp_path / "model_reliability_summary.csv")
+    missing_reliability = reliability.loc[reliability["model"].isna()].iloc[0]
+    assert int(missing_reliability["rows"]) == 2
+    assert int(missing_reliability["reliable_rows"]) == 1
+    assert int(missing_reliability["low_spike_rows"]) == 1
+    assert int(missing_reliability["low_candidate_mass_rows"]) == 1
+    assert np.isclose(missing_reliability["reliable_fraction"], 0.5)
+
+    runtime = pd.read_csv(tmp_path / "model_runtime_summary.csv")
+    missing_runtime = runtime.loc[runtime["model"].isna()].iloc[0]
+    assert int(missing_runtime["rows"]) == 2
+    assert np.isclose(missing_runtime["mean_runtime_s"], 3.0)
+    assert np.isclose(missing_runtime["median_runtime_s"], 3.0)
+    assert np.isclose(missing_runtime["p95_runtime_s"], np.quantile([2.0, 4.0], 0.95))
+    assert np.isclose(missing_runtime["relative_log_evidence_per_runtime_s"], 6.0)

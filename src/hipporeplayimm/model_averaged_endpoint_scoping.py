@@ -10,8 +10,6 @@ from .benchmark_relative_grouping import _BENCHMARK_RELATIVE_SCOPE_COLUMNS
 _MODEL_AVERAGE_BASE_COLUMNS = ("session", "event_index")
 _MODEL_AVERAGE_SCOPE_COLUMNS = (
     "benchmark_random_seed",
-    "random_seed",
-    "null_random_seed",
     "benchmark_cell_split_index",
     *_BENCHMARK_RELATIVE_SCOPE_COLUMNS,
     "train_cell_ids",
@@ -156,7 +154,9 @@ def _scope_label(value: object) -> str:
         return "<missing>"
     if isinstance(value, (bool, np.bool_)):
         return repr(("scalar", str(bool(value))))
-    if isinstance(value, (int, float, np.integer, np.floating)):
+    if isinstance(value, (int, np.integer)):
+        return repr(("numeric", int(value)))
+    if isinstance(value, (float, np.floating)):
         numeric = float(value)
         if np.isfinite(numeric):
             return repr(("numeric", int(numeric) if numeric.is_integer() else numeric))

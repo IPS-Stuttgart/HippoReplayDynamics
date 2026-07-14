@@ -93,12 +93,16 @@ def _unique_float_from_columns(
         if column not in frame.columns:
             continue
         for value in frame[column].dropna():
+            if isinstance(value, (bool, np.bool_)):
+                raise ValueError(f"{column} must contain finite numeric metadata values")
+            scalar = np.asarray(value)
+            if scalar.ndim != 0:
+                raise ValueError(f"{column} must contain scalar numeric metadata values")
+            value = scalar.item()
             text = str(value).strip()
             if text.lower() in _MISSING_METADATA_STRINGS:
                 continue
             if text:
-                if isinstance(value, (bool, np.bool_)):
-                    raise ValueError(f"{column} must contain finite numeric metadata values")
                 numeric = float(value)
                 if not np.isfinite(numeric):
                     raise ValueError(f"{column} must be finite")

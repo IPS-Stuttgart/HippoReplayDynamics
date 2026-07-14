@@ -19,6 +19,7 @@ _PATCHED_FLAG = "_position_decoding_config_validation_patch_applied"
 _VALIDATE_WRAPPER_FLAG = "_position_decoding_config_validation_validate_wrapper"
 _MASK_WRAPPER_FLAG = "_position_decoding_config_validation_mask_wrapper"
 _COUNTS_WRAPPER_FLAG = "_position_decoding_config_validation_counts_wrapper"
+_DISTANCE_WRAPPER_FLAG = "_position_decoding_distance_overflow_wrapper"
 
 
 def apply_position_decoding_config_validation_patch() -> None:
@@ -29,10 +30,18 @@ def apply_position_decoding_config_validation_patch() -> None:
     current_validate = validation.validate_session_position_decoding
     current_mask_encoder = validation.fit_place_field_encoding_for_position_mask
     current_spike_counts_for_window = validation._spike_counts_for_window
+    current_distance = validation._distance
     validate_is_current = bool(getattr(current_validate, _VALIDATE_WRAPPER_FLAG, False))
     mask_is_current = bool(getattr(current_mask_encoder, _MASK_WRAPPER_FLAG, False))
     counts_is_current = bool(getattr(current_spike_counts_for_window, _COUNTS_WRAPPER_FLAG, False))
-    if getattr(validation, _PATCHED_FLAG, False) and validate_is_current and mask_is_current and counts_is_current:
+    distance_is_current = bool(getattr(current_distance, _DISTANCE_WRAPPER_FLAG, False))
+    if (
+        getattr(validation, _PATCHED_FLAG, False)
+        and validate_is_current
+        and mask_is_current
+        and counts_is_current
+        and distance_is_current
+    ):
         return
 
     if not validate_is_current:
@@ -73,6 +82,17 @@ def apply_position_decoding_config_validation_patch() -> None:
 
         setattr(spike_counts_for_window_with_cell_id_validation, _COUNTS_WRAPPER_FLAG, True)
         validation._spike_counts_for_window = spike_counts_for_window_with_cell_id_validation
+
+    if not distance_is_current:
+        original_distance = current_distance
+
+        @wraps(original_distance)
+        def distance_with_overflow_safe_norm(left: Any, right: Any) -> float:
+            delta = np.asarray(left, dtype=float) - np.asarray(right, dtype=float)
+            return float(np.hypot.reduce(delta.reshape(-1), initial=0.0))
+
+        setattr(distance_with_overflow_safe_norm, _DISTANCE_WRAPPER_FLAG, True)
+        validation._distance = distance_with_overflow_safe_norm
 
     setattr(validation, _PATCHED_FLAG, True)
 

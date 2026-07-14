@@ -140,6 +140,53 @@ def _stable_gaussian_weights(dist2: np.ndarray, sigma_cm: float) -> np.ndarray:
     return weights / total
 
 
+def _standardized_euclidean_distances(
+    points: np.ndarray,
+    reference: np.ndarray,
+    sigma: float,
+) -> np.ndarray:
+    """Return ``||points-reference|| / sigma`` without overflowing first."""
+
+    values = np.asarray(points, dtype=float)
+    if values.ndim != 2:
+        raise ValueError("points must be a two-dimensional array")
+    center = np.asarray(reference, dtype=float).reshape(values.shape[1])
+    magnitudes = np.maximum(
+        np.maximum(np.abs(values), np.abs(center)[None, :]),
+        float(sigma),
+    )
+    with np.errstate(over="ignore", under="ignore", divide="ignore", invalid="ignore"):
+        normalized_delta = np.abs(
+            values / magnitudes - center[None, :] / magnitudes
+        )
+        normalized_sigma = float(sigma) / magnitudes
+        coordinate_distances = normalized_delta / normalized_sigma
+    coordinate_distances[values == center[None, :]] = 0.0
+    coordinate_distances[np.isnan(coordinate_distances)] = np.inf
+    return np.hypot.reduce(coordinate_distances, axis=1)
+
+
+def _stable_standardized_gaussian_weights(distances: np.ndarray) -> np.ndarray:
+    """Normalize Gaussian weights from already-standardized distances."""
+
+    standardized = np.asarray(distances, dtype=float)
+    if standardized.ndim != 1 or standardized.size == 0:
+        raise ValueError("distances must be a nonempty one-dimensional array")
+    minimum = float(np.min(standardized))
+    nearest = standardized == minimum
+    if not np.isfinite(minimum):
+        return nearest.astype(float) / float(np.sum(nearest))
+
+    with np.errstate(over="ignore", under="ignore", invalid="ignore"):
+        shifted_square = (standardized - minimum) * (standardized + minimum)
+        weights = np.exp(-0.5 * np.maximum(shifted_square, 0.0))
+    weights[nearest] = 1.0
+    total = float(weights.sum())
+    if total <= 0.0 or not np.isfinite(total):
+        return nearest.astype(float) / float(np.sum(nearest))
+    return weights / total
+
+
 def _patch_stable_gaussian_transition_weights() -> None:
     """Preserve relative Gaussian transition mass when raw kernels underflow."""
 
@@ -169,18 +216,20 @@ def _patch_stable_gaussian_transition_weights() -> None:
             cols: list[int] = []
             data: list[float] = []
             for src, center in enumerate(centers):
-                with np.errstate(over="ignore", invalid="ignore"):
-                    standardized_delta = (centers - center[None, :]) / sigma
-                    standardized_distance = np.hypot.reduce(standardized_delta, axis=1)
+                standardized_distance = _standardized_euclidean_distances(
+                    centers,
+                    center,
+                    sigma,
+                )
                 keep = standardized_distance <= max_step
                 if valid_mask is not None:
                     keep &= valid_mask
                 if not np.any(keep):
                     keep[int(allowed[int(np.argmin(standardized_distance[allowed]))])] = True
                 dst = np.flatnonzero(keep)
-                with np.errstate(over="ignore", invalid="ignore"):
-                    standardized_dist2 = np.square(standardized_distance[dst])
-                weights = _stable_gaussian_weights(standardized_dist2, 1.0)
+                weights = _stable_standardized_gaussian_weights(
+                    standardized_distance[dst]
+                )
                 rows.extend(int(index) for index in dst)
                 cols.extend([src] * len(dst))
                 data.extend(float(value) for value in weights)
@@ -209,19 +258,49 @@ def _patch_stable_gaussian_transition_weights() -> None:
             max_step_sigma,
         ):
             sigma = float(sigma_cm)
+            max_step = float(max_step_sigma)
             if not np.isfinite(sigma) or sigma <= 0.0:
                 raise ValueError("sigma_cm must be finite and positive")
+            if not np.isfinite(max_step) or max_step <= 0.0:
+                raise ValueError("max_step_sigma must be finite and positive")
             points = np.asarray(centers, dtype=float)
             prediction = np.asarray(predicted, dtype=float).reshape(points.shape[1])
-            radius = max(sigma * float(max_step_sigma), np.finfo(float).eps)
-            local = tree.query_ball_point(prediction, radius)
-            if len(local) == 0:
-                _, nearest = tree.query(prediction, k=1)
-                local = [int(nearest)]
             valid = np.asarray(valid_indices, dtype=int)
-            dst = valid[np.asarray(local, dtype=int)]
-            dist2 = np.sum((points[dst] - prediction[None, :]) ** 2, axis=1)
-            weights = _stable_gaussian_weights(dist2, sigma)
+            with np.errstate(over="ignore", invalid="ignore"):
+                radius = sigma * max_step
+            if np.isfinite(radius):
+                local = tree.query_ball_point(
+                    prediction,
+                    max(radius, np.finfo(float).eps),
+                    p=np.inf,
+                )
+                dst = valid[np.asarray(local, dtype=int)]
+            else:
+                dst = valid.copy()
+
+            if dst.size:
+                standardized_distance = _standardized_euclidean_distances(
+                    points[dst],
+                    prediction,
+                    sigma,
+                )
+                keep = standardized_distance <= max_step
+                dst = dst[keep]
+                standardized_distance = standardized_distance[keep]
+            else:
+                standardized_distance = np.empty(0, dtype=float)
+
+            if dst.size == 0:
+                all_distances = _standardized_euclidean_distances(
+                    points[valid],
+                    prediction,
+                    sigma,
+                )
+                nearest = int(np.argmin(all_distances))
+                dst = valid[[nearest]]
+                standardized_distance = all_distances[[nearest]]
+
+            weights = _stable_standardized_gaussian_weights(standardized_distance)
             return dst.astype(int), weights
 
         setattr(finite_gaussian_row, _SPARSE_GAUSSIAN_ROW_WRAPPER_FLAG, True)

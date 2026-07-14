@@ -170,24 +170,59 @@ def _validated_count_matrix(counts: Any, *, n_cells: int) -> np.ndarray:
     if _contains_text_values(counts):
         raise ValueError("counts must contain numeric integer counts, not text values")
     try:
-        values = np.asarray(counts, dtype=float)
+        raw = np.asarray(counts)
     except (TypeError, ValueError) as exc:
         raise ValueError("counts must contain numeric values") from exc
 
-    if values.ndim != 2:
+    if raw.ndim != 2:
         raise ValueError("counts must be a two-dimensional array")
-    if values.shape[1] != int(n_cells):
+    if raw.shape[1] != int(n_cells):
         raise ValueError("counts columns must match encoding.n_cells")
-    if not np.all(np.isfinite(values)) or np.any(values < 0.0):
-        raise ValueError("counts must contain finite nonnegative values")
-    rounded = np.rint(values)
-    if not np.all(np.isclose(values, rounded, rtol=0.0, atol=0.0)):
-        raise ValueError("counts must contain integer-valued counts")
+
     integer_info = np.iinfo(np.dtype(int))
-    max_safe_float = np.nextafter(float(integer_info.max), 0.0)
-    if np.any(rounded > max_safe_float):
+    canonical = np.empty(raw.shape, dtype=int)
+    flat = canonical.reshape(-1)
+    for index, value in enumerate(raw.reshape(-1)):
+        flat[index] = _coerce_count_value(value, integer_info)
+    return canonical
+
+
+def _coerce_count_value(value: Any, integer_info: np.iinfo) -> int:
+    """Return one exact count that downstream float likelihood math can represent."""
+
+    try:
+        item = np.asarray(value).item()
+    except (TypeError, ValueError) as exc:
+        raise ValueError("counts must contain numeric values") from exc
+    if isinstance(item, (bool, np.bool_)):
+        raise ValueError("counts must contain numeric integer counts, not boolean values")
+
+    if isinstance(item, (int, np.integer)):
+        count = int(item)
+        if count < 0:
+            raise ValueError("counts must contain finite nonnegative values")
+    else:
+        try:
+            numeric = float(item)
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise ValueError("counts must contain numeric values") from exc
+        if not np.isfinite(numeric) or numeric < 0.0:
+            raise ValueError("counts must contain finite nonnegative values")
+        if not numeric.is_integer():
+            raise ValueError("counts must contain integer-valued counts")
+        count = int(numeric)
+        try:
+            exact = bool(item == count)
+        except (TypeError, ValueError):
+            exact = True
+        if not exact:
+            raise ValueError("counts must be exactly representable for likelihood computation")
+
+    if count > int(integer_info.max):
         raise ValueError("counts must fit into integer count range")
-    return np.asarray(rounded, dtype=int)
+    if int(float(count)) != count:
+        raise ValueError("counts must be exactly representable for likelihood computation")
+    return count
 
 
 def _validated_occupancy_vector(encoding: Any) -> np.ndarray:

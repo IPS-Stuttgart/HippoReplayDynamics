@@ -13,6 +13,9 @@ from hipporeplayimm.score_metadata import (
     _unique_float_from_columns,
     _unique_int_from_columns,
 )
+from hipporeplayimm.spike_rate_metadata import (
+    _unique_float_from_columns as _spike_rate_unique_float_from_columns,
+)
 
 
 def test_score_metadata_ignores_missing_numeric_sentinel_values() -> None:
@@ -91,3 +94,38 @@ def test_pyrecest_metadata_rejects_boolean_numeric_metadata() -> None:
 
         with pytest.raises(ValueError, match=f"{column}.*finite numeric"):
             pyrecest_config_kwargs_for_scores(scores)
+
+
+def test_spike_rate_metadata_rejects_nonscalar_numeric_metadata() -> None:
+    scores = pd.DataFrame(
+        {
+            "emission_spike_rate_scale": pd.Series(
+                [np.array([1.25])],
+                dtype=object,
+            )
+        }
+    )
+
+    with pytest.raises(ValueError, match="emission_spike_rate_scale.*scalar numeric"):
+        _spike_rate_unique_float_from_columns(
+            scores,
+            ("emission_spike_rate_scale",),
+            default=1.0,
+        )
+
+
+def test_spike_rate_metadata_accepts_zero_dimensional_numeric_array() -> None:
+    scores = pd.DataFrame(
+        {
+            "emission_spike_rate_scale": pd.Series(
+                [np.array(1.25)],
+                dtype=object,
+            )
+        }
+    )
+
+    assert _spike_rate_unique_float_from_columns(
+        scores,
+        ("emission_spike_rate_scale",),
+        default=1.0,
+    ) == pytest.approx(1.25)

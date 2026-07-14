@@ -16,6 +16,7 @@ from typing import Mapping, Sequence
 import numpy as np
 
 from .data import ReplaySession
+from .data_cell_id_validation import _coerce_integral_ids
 from .encoding import EmissionConfig, EncodingModel, build_emissions
 
 
@@ -217,13 +218,45 @@ def _gain_vector_for_encoding(
     gains: ReplayEmissionCalibration | Mapping[int, float] | np.ndarray,
 ) -> np.ndarray:
     if isinstance(gains, ReplayEmissionCalibration):
-        mapping = {int(cell): _finite_gain_scalar(gain) for cell, gain in zip(gains.cell_ids, gains.gains, strict=True)}
-        gain_vector = np.asarray([mapping.get(int(cell), 1.0) for cell in encoding.cell_ids], dtype=float)
+        mapping = _calibration_gain_mapping(gains)
+        gain_vector = np.asarray(
+            [mapping.get(int(cell), 1.0) for cell in encoding.cell_ids],
+            dtype=float,
+        )
     elif isinstance(gains, Mapping):
-        gain_vector = np.asarray([_finite_gain_scalar(gains.get(int(cell), 1.0)) for cell in encoding.cell_ids], dtype=float)
+        gain_vector = np.asarray(
+            [_finite_gain_scalar(gains.get(int(cell), 1.0)) for cell in encoding.cell_ids],
+            dtype=float,
+        )
     else:
         gain_vector = np.asarray(gains)
     return _validated_gain_vector(encoding, gain_vector)
+
+
+def _calibration_gain_mapping(
+    calibration: ReplayEmissionCalibration,
+) -> dict[int, float]:
+    """Return a one-to-one mapping from validated calibration cell IDs to gains."""
+
+    cell_ids = _coerce_integral_ids(
+        calibration.cell_ids,
+        "replay calibration cell IDs",
+    )
+    if cell_ids.ndim != 1:
+        raise ValueError("replay calibration cell IDs must be one-dimensional")
+
+    gain_values = np.asarray(calibration.gains)
+    if gain_values.shape != cell_ids.shape:
+        raise ValueError(
+            "replay calibration gains must match cell_ids shape: "
+            f"{gain_values.shape} vs {cell_ids.shape}"
+        )
+    if np.unique(cell_ids).size != cell_ids.size:
+        raise ValueError("replay calibration cell IDs must be unique")
+    return {
+        int(cell): _finite_gain_scalar(gain)
+        for cell, gain in zip(cell_ids, gain_values, strict=True)
+    }
 
 
 def _validated_gain_vector(encoding: EncodingModel, gain_vector: np.ndarray) -> np.ndarray:

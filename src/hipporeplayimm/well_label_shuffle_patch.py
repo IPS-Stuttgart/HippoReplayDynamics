@@ -15,7 +15,6 @@ def apply_well_label_shuffle_patch() -> None:
     """Install row-wise well-label shuffling."""
 
     from . import (
-        grouped_model_metrics_missing_group_patch,
         result_improvement_seed_validation,
         result_improvement_split_validation,
         result_improvements,
@@ -23,7 +22,6 @@ def apply_well_label_shuffle_patch() -> None:
 
     result_improvement_seed_validation.apply_result_improvement_seed_validation_patch()
     result_improvement_split_validation.apply_result_improvement_split_validation_patch()
-    grouped_model_metrics_missing_group_patch.apply_grouped_model_metrics_missing_group_patch()
     if (
         getattr(result_improvements, _PATCHED_FLAG, False)
         and getattr(result_improvements, "shuffle_well_labels", None) is shuffle_well_labels

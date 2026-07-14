@@ -28,6 +28,21 @@ MODEL_COLUMNS = [
 ]
 
 
+def _coerce_event_indices(values: pd.Series) -> pd.Series:
+    """Return finite integer event identifiers without lossy truncation."""
+
+    numeric = pd.to_numeric(values, errors="raise")
+    numeric_array = numeric.to_numpy(dtype=float)
+    if not np.all(np.isfinite(numeric_array)):
+        raise ValueError("event_index must contain finite integer-valued identifiers")
+    if not np.all(numeric_array == np.floor(numeric_array)):
+        raise ValueError("event_index must contain finite integer-valued identifiers")
+    try:
+        return numeric.astype(int)
+    except (OverflowError, TypeError, ValueError) as exc:
+        raise ValueError("event_index must contain finite integer-valued identifiers within integer range") from exc
+
+
 def _read_audit_table(audit_dir: str | Path) -> pd.DataFrame:
     root = Path(audit_dir)
     for filename in [
@@ -38,7 +53,7 @@ def _read_audit_table(audit_dir: str | Path) -> pd.DataFrame:
         if path.is_file():
             table = pd.read_csv(path)
             table["session"] = table["session"].astype(str)
-            table["event_index"] = pd.to_numeric(table["event_index"], errors="raise").astype(int)
+            table["event_index"] = _coerce_event_indices(table["event_index"])
             return table
     raise FileNotFoundError(
         f"Could not find trajectory_taxonomy_event_table.csv or "

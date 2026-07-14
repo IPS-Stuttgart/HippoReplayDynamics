@@ -25,6 +25,8 @@ _BOOLEAN_ENCODING_CONFIG_FIELDS = (
 _GRID_ORIGINAL_ATTR = "_encoding_grid_extra_columns_original_make_grid"
 _GRID_WRAPPER_MARKER = "_encoding_grid_extra_columns_wrapper"
 _BOOL_ORIGINALS_ATTR = "_encoding_bool_validation_originals"
+_AS_XY_ARRAY_WRAPPER_MARKER = "_encoding_numeric_as_xy_array_wrapper"
+_AS_POSITION_ARRAY_WRAPPER_MARKER = "_encoding_numeric_as_position_array_wrapper"
 _VALIDATE_ENCODING_CONFIG_WRAPPER_MARKER = "_encoding_bool_validate_encoding_config_wrapper"
 _TIME_BIN_EDGES_WRAPPER_MARKER = "_encoding_bool_time_bin_edges_wrapper"
 _POISSON_LOG_EMISSIONS_WRAPPER_MARKER = "_encoding_bool_poisson_log_emissions_wrapper"
@@ -65,9 +67,19 @@ def _apply_encoding_bool_validation_patch(encoding) -> None:
         _synchronize_encoding_validation_aliases(encoding, originals)
         return
 
+    original_as_xy_array = originals["as_xy_array"]
+    original_as_position_array = originals["as_position_array"]
     original_validate_encoding_config = originals["validate_encoding_config"]
     original_time_bin_edges = originals["time_bin_edges"]
     original_poisson_log_emissions = originals["poisson_log_emissions"]
+
+    def as_xy_array(xy, *, name="xy"):
+        _require_numeric_values(xy, name)
+        return original_as_xy_array(xy, name=name)
+
+    def as_position_array(position):
+        _require_numeric_values(position, "position")
+        return original_as_position_array(position)
 
     def validate_encoding_config(config):
         for name in _NUMERIC_ENCODING_CONFIG_FIELDS:
@@ -109,12 +121,18 @@ def _apply_encoding_bool_validation_patch(encoding) -> None:
             negative_binomial_overdispersion=negative_binomial_overdispersion,
         )
 
+    _copy_function_metadata(original_as_xy_array, as_xy_array)
+    _copy_function_metadata(original_as_position_array, as_position_array)
     _copy_function_metadata(original_validate_encoding_config, validate_encoding_config)
     _copy_function_metadata(original_time_bin_edges, time_bin_edges)
     _copy_function_metadata(original_poisson_log_emissions, poisson_log_emissions)
+    _mark_wrapper(as_xy_array, _AS_XY_ARRAY_WRAPPER_MARKER)
+    _mark_wrapper(as_position_array, _AS_POSITION_ARRAY_WRAPPER_MARKER)
     _mark_wrapper(validate_encoding_config, _VALIDATE_ENCODING_CONFIG_WRAPPER_MARKER)
     _mark_wrapper(time_bin_edges, _TIME_BIN_EDGES_WRAPPER_MARKER)
     _mark_wrapper(poisson_log_emissions, _POISSON_LOG_EMISSIONS_WRAPPER_MARKER)
+    encoding._as_xy_array = as_xy_array
+    encoding._as_position_array = as_position_array
     encoding._validate_encoding_config = validate_encoding_config
     encoding._time_bin_edges = time_bin_edges
     encoding._poisson_log_emissions = poisson_log_emissions
@@ -134,6 +152,8 @@ def _encoding_bool_originals(encoding) -> dict[str, Any]:
     originals = getattr(encoding, _BOOL_ORIGINALS_ATTR, None)
     if originals is None:
         originals = {
+            "as_xy_array": encoding._as_xy_array,
+            "as_position_array": encoding._as_position_array,
             "validate_encoding_config": encoding._validate_encoding_config,
             "time_bin_edges": encoding._time_bin_edges,
             "poisson_log_emissions": encoding._poisson_log_emissions,
@@ -145,6 +165,14 @@ def _encoding_bool_originals(encoding) -> dict[str, Any]:
 def _encoding_bool_wrappers_are_current(encoding) -> bool:
     return (
         _is_marked_wrapper(
+            getattr(encoding, "_as_xy_array", None),
+            _AS_XY_ARRAY_WRAPPER_MARKER,
+        )
+        and _is_marked_wrapper(
+            getattr(encoding, "_as_position_array", None),
+            _AS_POSITION_ARRAY_WRAPPER_MARKER,
+        )
+        and _is_marked_wrapper(
             getattr(encoding, "_validate_encoding_config", None),
             _VALIDATE_ENCODING_CONFIG_WRAPPER_MARKER,
         )
@@ -275,11 +303,15 @@ def _synchronize_make_grid_aliases(original_make_grid, replacement_make_grid) ->
 
 def _synchronize_encoding_validation_aliases(encoding, originals: dict[str, Any]) -> None:
     replacements = {
+        "_as_xy_array": encoding._as_xy_array,
+        "_as_position_array": encoding._as_position_array,
         "_validate_encoding_config": encoding._validate_encoding_config,
         "_time_bin_edges": encoding._time_bin_edges,
         "_poisson_log_emissions": encoding._poisson_log_emissions,
     }
     original_by_attr = {
+        "_as_xy_array": originals["as_xy_array"],
+        "_as_position_array": originals["as_position_array"],
         "_validate_encoding_config": originals["validate_encoding_config"],
         "_time_bin_edges": originals["time_bin_edges"],
         "_poisson_log_emissions": originals["poisson_log_emissions"],

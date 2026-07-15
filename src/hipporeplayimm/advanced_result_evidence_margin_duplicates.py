@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+from functools import wraps
+
 import numpy as np
 import pandas as pd
 
 _PATCHED_FLAG = "_evidence_margin_distinct_model_patch_applied"
 _MARGIN_FLAG = "_evidence_margin_distinct_model_wrapper"
 _ADD_FLAG = "_evidence_margin_distinct_model_add_columns_wrapper"
+_BOOL_FLAG = "_evidence_margin_arbitrary_integer_bool_wrapper"
 _DEFAULT_GROUP_COLUMNS = ("session", "event_index")
 
 
@@ -18,9 +21,16 @@ def apply_evidence_margin_distinct_model_patch() -> None:
 
     current_margin = diagnostics.evidence_margin_table
     current_add = diagnostics.add_evidence_margin_columns
-    if getattr(diagnostics, _PATCHED_FLAG, False) and getattr(current_margin, _MARGIN_FLAG, False) and getattr(current_add, _ADD_FLAG, False):
+    current_bool = diagnostics._as_bool
+    if (
+        getattr(diagnostics, _PATCHED_FLAG, False)
+        and getattr(current_margin, _MARGIN_FLAG, False)
+        and getattr(current_add, _ADD_FLAG, False)
+        and getattr(current_bool, _BOOL_FLAG, False)
+    ):
         return
     original_margin = current_margin
+    original_bool = current_bool
 
     def evidence_margin_table(scores, *, group_cols=_DEFAULT_GROUP_COLUMNS, evidence_col="log_evidence", model_col="model"):
         groups = _normalize_group_cols(group_cols)
@@ -42,10 +52,18 @@ def apply_evidence_margin_distinct_model_patch() -> None:
         margins = _align_margin_group_key_dtypes(scores, margins, groups)
         return _merge_margin_columns_preserving_index(scores, margins, groups)
 
+    @wraps(original_bool)
+    def _as_bool(value: object, *, default: bool = False) -> bool:
+        if isinstance(value, (int, np.integer)) and not isinstance(value, (bool, np.bool_)):
+            return int(value) != 0
+        return original_bool(value, default=default)
+
     setattr(evidence_margin_table, _MARGIN_FLAG, True)
     setattr(add_evidence_margin_columns, _ADD_FLAG, True)
+    setattr(_as_bool, _BOOL_FLAG, True)
     diagnostics.evidence_margin_table = evidence_margin_table
     diagnostics.add_evidence_margin_columns = add_evidence_margin_columns
+    diagnostics._as_bool = _as_bool
     setattr(diagnostics, _PATCHED_FLAG, True)
 
 

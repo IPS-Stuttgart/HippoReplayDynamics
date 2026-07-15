@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from decimal import Decimal, InvalidOperation
 from typing import Any
 
 import numpy as np
@@ -59,14 +60,28 @@ def _integer_array_from_values(values: Any) -> np.ndarray:
 def _parse_cell_id_value(value: Any) -> int:
     if isinstance(value, (bool, np.bool_)):
         raise ValueError("score-table cell IDs cell ID metadata must not contain boolean identifiers")
+    if isinstance(value, (int, np.integer)):
+        return int(value)
+    if isinstance(value, (float, np.floating)):
+        if not np.isfinite(value):
+            raise ValueError("score-table cell IDs cell ID metadata must contain finite integer values")
+        integer = int(value)
+        if value != integer:
+            raise ValueError("score-table cell IDs cell ID metadata must contain integer values")
+        return integer
+
     try:
-        numeric = float(value)
-    except (TypeError, ValueError, OverflowError) as exc:
+        if isinstance(value, (bytes, np.bytes_)):
+            text = bytes(value).decode("utf-8")
+        else:
+            text = str(value)
+        numeric = Decimal(text.strip())
+    except (InvalidOperation, UnicodeDecodeError, ValueError) as exc:
         raise ValueError("score-table cell IDs cell ID metadata must contain integer values") from exc
-    if not np.isfinite(numeric):
+    if not numeric.is_finite():
         raise ValueError("score-table cell IDs cell ID metadata must contain finite integer values")
-    integer = int(round(numeric))
-    if numeric != float(integer):
+    integer = numeric.to_integral_value()
+    if numeric != integer:
         raise ValueError("score-table cell IDs cell ID metadata must contain integer values")
     return int(integer)
 

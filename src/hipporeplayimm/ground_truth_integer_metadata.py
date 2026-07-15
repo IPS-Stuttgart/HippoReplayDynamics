@@ -1,4 +1,4 @@
-"""Strict integer parsing for post-hoc ground-truth score metadata."""
+"""Strict scalar parsing for post-hoc ground-truth score metadata."""
 
 from __future__ import annotations
 
@@ -11,13 +11,16 @@ import numpy as np
 _PATCHED_FLAG = "_ground_truth_strict_integer_metadata_patch_applied"
 _UNIQUE_INT_WRAPPER_MARKER = "_hipporeplayimm_ground_truth_integer_metadata_unique_int"
 _PARSE_CELL_IDS_WRAPPER_MARKER = "_hipporeplayimm_ground_truth_integer_metadata_parse_cell_ids"
+_WINDOW_FLOAT_WRAPPER_MARKER = "_hipporeplayimm_ground_truth_window_unique_float"
 _CELL_ID_PATCHED_FLAG = "_ground_truth_strict_cell_id_metadata_patch_applied"
 
 
 def apply_ground_truth_integer_metadata_patch() -> None:
-    """Reject fractional integer metadata instead of silently truncating it."""
+    """Reject malformed scalar metadata instead of silently coercing it."""
 
     from . import ground_truth as gt
+
+    _patch_window_float_metadata()
 
     if not _unique_int_patch_current(gt):
 
@@ -66,6 +69,39 @@ def apply_ground_truth_integer_metadata_patch() -> None:
     setattr(gt, _PATCHED_FLAG, True)
 
 
+def _patch_window_float_metadata() -> None:
+    """Make saved replay-window floats strict without changing CSV numeric text support."""
+
+    from . import ground_truth_window_scope as window_scope
+
+    current = window_scope._unique_finite_float
+    if getattr(current, _WINDOW_FLOAT_WRAPPER_MARKER, False):
+        return
+
+    def unique_finite_float(frame: Any, column: str) -> float | None:
+        if column not in frame.columns:
+            return None
+        values: list[float] = []
+        for value in frame[column]:
+            if window_scope._is_missing_scalar(value):
+                continue
+            text = str(value).strip()
+            if text.lower() in window_scope._MISSING_TEXT_VALUES:
+                continue
+            values.append(_parse_finite_float_metadata_value(column, value))
+        if not values:
+            return None
+        first = values[0]
+        if any(not np.isclose(value, first, rtol=0.0, atol=1e-12) for value in values[1:]):
+            raise ValueError(f"{column} contains multiple values within one replay-window decode group")
+        return float(first)
+
+    unique_finite_float.__name__ = current.__name__
+    unique_finite_float.__doc__ = current.__doc__
+    setattr(unique_finite_float, _WINDOW_FLOAT_WRAPPER_MARKER, True)
+    window_scope._unique_finite_float = unique_finite_float
+
+
 def _unique_int_patch_current(gt: object) -> bool:
     return bool(getattr(getattr(gt, "_unique_int_from_column", None), _UNIQUE_INT_WRAPPER_MARKER, False))
 
@@ -103,6 +139,27 @@ def _parse_integer_metadata_value(column: str, value: Any) -> int:
     if numeric != integer:
         raise ValueError(f"{column} must contain integer values")
     return int(integer)
+
+
+def _parse_finite_float_metadata_value(column: str, value: Any) -> float:
+    if isinstance(value, (bool, np.bool_)):
+        raise ValueError(f"{column} must contain finite numeric scalar values")
+    try:
+        raw = np.asarray(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{column} must contain finite numeric scalar values") from exc
+    if raw.ndim != 0:
+        raise ValueError(f"{column} must contain finite numeric scalar values")
+    item = raw.item()
+    if isinstance(item, (bool, np.bool_, complex, np.complexfloating)):
+        raise ValueError(f"{column} must contain finite numeric scalar values")
+    try:
+        numeric = float(item)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ValueError(f"{column} must contain finite numeric scalar values") from exc
+    if not np.isfinite(numeric):
+        raise ValueError(f"{column} must contain finite numeric scalar values")
+    return float(numeric)
 
 
 def _parse_cell_id_values(values: Any) -> np.ndarray:

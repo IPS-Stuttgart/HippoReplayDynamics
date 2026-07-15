@@ -14,16 +14,15 @@ def test_large_nonzero_integer_evidence_flag_does_not_overflow() -> None:
                 "status": "success",
                 "model": "exact-row",
                 "log_evidence": 1.0,
-                "evidence_comparable": 10**400,
             },
             {
                 "status": "success",
                 "model": "legacy-noncomparable-row",
                 "log_evidence": 1.0,
-                "evidence_comparable": 0,
             },
         ]
     )
+    rows["evidence_comparable"] = pd.Series([10**400, 0], dtype=object)
 
     scored = evidence_reporting.ensure_evidence_support_columns(rows)
 

@@ -44,7 +44,7 @@ def test_shuffle_well_labels_accepts_arbitrary_precision_integer_ids() -> None:
     frame = pd.DataFrame(
         {
             "event": [0, 1, 2],
-            "true_well_id": [huge_id, "A", None],
+            "true_well_id": pd.Series([huge_id, "A", None], dtype=object),
         }
     )
 

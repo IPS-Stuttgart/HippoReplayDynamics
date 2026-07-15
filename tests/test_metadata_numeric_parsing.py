@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from decimal import Decimal
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -44,6 +46,35 @@ def test_score_metadata_rejects_fractional_integer_metadata() -> None:
             scores,
             ("state_space_momentum_candidate_top_k",),
             default=128,
+        )
+
+
+@pytest.mark.parametrize(
+    "value",
+    [2**53 + 1, np.uint64(2**53 + 1), Decimal(2**53 + 1), str(2**53 + 1)],
+)
+def test_score_metadata_preserves_exact_large_integer_metadata(value: object) -> None:
+    scores = pd.DataFrame(
+        {"benchmark_random_seed": pd.Series([value], dtype=object)}
+    )
+
+    assert _unique_int_from_columns(
+        scores,
+        ("benchmark_random_seed",),
+        default=1,
+    ) == 2**53 + 1
+
+
+def test_score_metadata_distinguishes_neighboring_large_integer_metadata() -> None:
+    scores = pd.DataFrame(
+        {"benchmark_random_seed": [str(2**53), str(2**53 + 1)]}
+    )
+
+    with pytest.raises(ValueError, match="contains multiple values"):
+        _unique_int_from_columns(
+            scores,
+            ("benchmark_random_seed",),
+            default=1,
         )
 
 

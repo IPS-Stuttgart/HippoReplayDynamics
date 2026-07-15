@@ -50,3 +50,11 @@ def test_state_space_score_rejects_nonfinite_bin_centers():
             _emissions(),
             np.array([[0.0, 0.0], [np.nan, 0.0]]),
         )
+
+
+def test_state_space_score_normalizes_bin_center_overflow():
+    with pytest.raises(ValueError, match="bin_centers must contain numeric real coordinates"):
+        StateSpaceReplayModel(mode="fragmented").score(
+            _emissions(),
+            [[0, 0], [10**1000, 0]],
+        )

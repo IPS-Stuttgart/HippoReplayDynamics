@@ -1,9 +1,13 @@
 from __future__ import annotations
 
+from decimal import Decimal
+
 import numpy as np
 import pandas as pd
 import pytest
 
+from hipporeplayimm import result_improvements
+from hipporeplayimm.cli_float_values_validation import _positive_integer_count
 from hipporeplayimm.result_improvements import hierarchical_bootstrap_ci, paired_sign_flip_p_value
 
 
@@ -33,3 +37,19 @@ def test_hierarchical_bootstrap_ci_rejects_invalid_bootstrap_count(bad_count) ->
 def test_paired_sign_flip_rejects_invalid_permutation_count(bad_count) -> None:
     with pytest.raises((TypeError, ValueError), match="n_permutations"):
         paired_sign_flip_p_value(_rows(), model="imm", n_permutations=bad_count)
+
+
+@pytest.mark.parametrize(
+    "count",
+    [
+        2**53 + 1,
+        np.int64(2**53 + 1),
+        np.asarray(2**53 + 1, dtype=np.int64),
+        Decimal(str(2**53 + 1)),
+    ],
+)
+def test_resampling_count_validation_preserves_exact_large_integers(count) -> None:
+    expected = 2**53 + 1
+
+    assert _positive_integer_count("n_bootstrap", count) == expected
+    assert result_improvements._positive_integer_count(count, "n_bootstrap") == expected

@@ -65,6 +65,7 @@ def _patch_state_space_predicted_candidate_argument(_cli) -> None:
 def _patch_statistical_resampling_counts() -> None:
     from . import result_improvements
 
+    result_improvements._positive_integer_count = _result_positive_integer_count
     _patch_positive_integer_kwarg(
         result_improvements,
         "hierarchical_bootstrap_ci",
@@ -75,6 +76,12 @@ def _patch_statistical_resampling_counts() -> None:
         "paired_sign_flip_p_value",
         "n_permutations",
     )
+
+
+def _result_positive_integer_count(value: object, name: str) -> int:
+    """Keep the result helper's historical argument order without float coercion."""
+
+    return _positive_integer_count(name, value)
 
 
 def _patch_positive_integer_kwarg(module, function_name: str, kwarg_name: str) -> None:
@@ -105,12 +112,16 @@ def _positive_integer_count(name: str, value: object) -> int:
     if isinstance(item, _STRING_TYPES):
         raise ValueError(f"{name} must be a positive integer, not string")
     try:
-        numeric = float(item)
+        integer = int(item)
     except (TypeError, ValueError, OverflowError) as exc:
         raise ValueError(f"{name} must be a positive integer") from exc
-    if not math.isfinite(numeric) or numeric <= 0.0 or not np.isclose(numeric, np.rint(numeric), rtol=0.0, atol=0.0):
+    try:
+        exact = bool(item == integer)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must be a positive integer") from exc
+    if integer <= 0 or not exact:
         raise ValueError(f"{name} must be a positive integer")
-    return int(np.rint(numeric))
+    return integer
 
 
 def _parser_has_option(parser, option: str) -> bool:

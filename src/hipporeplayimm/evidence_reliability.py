@@ -224,6 +224,14 @@ def _as_float(value) -> tuple[float, bool]:
 
 
 def _coerced_metric_float(value) -> tuple[float, bool]:
+    if isinstance(value, (int, np.integer)) and not isinstance(value, (bool, np.bool_)):
+        integer = int(value)
+        try:
+            numeric = float(integer)
+        except OverflowError:
+            finite_limit = np.finfo(float).max
+            numeric = finite_limit if integer > 0 else -finite_limit
+        return numeric, False
     try:
         numeric = float(value)
     except (TypeError, ValueError, OverflowError):

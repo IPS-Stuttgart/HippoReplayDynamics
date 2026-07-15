@@ -23,6 +23,7 @@ from .evidence_reporting import _coerce_bool_series
 
 _PATCHED_FLAG = "_simulation_recovery_session_event_count_patch_applied"
 _CERTIFIED_EVENT_PATCHED_FLAG = "_simulation_recovery_certified_event_duplicate_model_patch_applied"
+_DUPLICATE_INDEX_EVIDENCE_PATCHED_FLAG = "_simulation_recovery_duplicate_index_evidence_patch_applied"
 _SOURCE_SCORE_FILE_COLUMN = "source_recovery_score_file"
 _EVENT_ID_COLUMN = "event_id"
 _SUMMARY_BOOL_COLUMNS = (
@@ -53,6 +54,7 @@ def apply_simulation_recovery_event_count_patch() -> None:
     import hipporeplayimm.simulation_recovery as recovery
 
     _extend_best_row_event_scope(best_row_flags)
+    _patch_duplicate_index_evidence_annotation(best_row_flags)
     _patch_certified_event_recovery(reporting, recovery, best_row_flags)
 
     if getattr(recovery, _PATCHED_FLAG, False):
@@ -86,6 +88,40 @@ def apply_simulation_recovery_event_count_patch() -> None:
         certified_vs_exact_recovery_summary_with_session_event_counts
     )
     setattr(recovery, _PATCHED_FLAG, True)
+
+
+def _patch_duplicate_index_evidence_annotation(best_row_flags: Any) -> None:
+    """Make best-row annotation independent of caller-supplied index labels.
+
+    Event score tables are commonly concatenated without ``ignore_index=True``.
+    The resulting duplicate labels must not cause label-based winner assignment
+    to select and mark more than one model row.
+    """
+
+    original = best_row_flags._simulation_add_evidence_columns
+    if getattr(original, _DUPLICATE_INDEX_EVIDENCE_PATCHED_FLAG, False):
+        return
+
+    @wraps(original)
+    def simulation_add_evidence_columns_with_unique_positions(
+        event_scores: pd.DataFrame,
+        reporting: Any,
+    ) -> pd.DataFrame:
+        normalized_scores = (
+            event_scores.reset_index(drop=True)
+            if not event_scores.index.is_unique
+            else event_scores
+        )
+        return original(normalized_scores, reporting)
+
+    setattr(
+        simulation_add_evidence_columns_with_unique_positions,
+        _DUPLICATE_INDEX_EVIDENCE_PATCHED_FLAG,
+        True,
+    )
+    best_row_flags._simulation_add_evidence_columns = (
+        simulation_add_evidence_columns_with_unique_positions
+    )
 
 
 def _patch_certified_event_recovery(reporting: Any, recovery: Any, best_row_flags: Any) -> None:

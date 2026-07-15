@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from decimal import Decimal, InvalidOperation
+
 import numpy as np
 import pandas as pd
 
@@ -84,6 +86,55 @@ def _metadata_float_from_value(value: object, column: str) -> float | None:
     return float(numeric)
 
 
+def _metadata_int_from_value(value: object, column: str) -> int | None:
+    """Parse integer metadata without losing precision through binary64."""
+
+    try:
+        if pd.isna(value):
+            return None
+    except (TypeError, ValueError):
+        pass
+
+    if isinstance(value, (bool, np.bool_)):
+        raise _numeric_parse_error(column)
+    if isinstance(value, (int, np.integer)):
+        return int(value)
+
+    text = _metadata_text_or_none(value)
+    if text is None:
+        return None
+    try:
+        numeric = Decimal(text)
+    except (InvalidOperation, ValueError) as exc:
+        raise _numeric_parse_error(column) from exc
+    if not numeric.is_finite():
+        raise ValueError(f"{column} must be finite")
+
+    integer = numeric.to_integral_value()
+    if abs(numeric - integer) > Decimal("1e-9"):
+        raise ValueError(f"{column} must be an integer")
+    return int(integer)
+
+
+def _unique_int_from_columns(frame: pd.DataFrame, columns: tuple[str, ...], default: int) -> int:
+    """Return one exact integer shared by the requested metadata columns."""
+
+    values: list[int] = []
+    for column in columns:
+        if column not in frame.columns:
+            continue
+        for value in frame[column]:
+            parsed = _metadata_int_from_value(value, column)
+            if parsed is not None:
+                values.append(parsed)
+    if not values:
+        return int(default)
+    first = values[0]
+    if any(value != first for value in values[1:]):
+        raise ValueError(f"{' / '.join(columns)} contains multiple values")
+    return int(first)
+
+
 def _unique_string_from_columns(frame: pd.DataFrame, columns: tuple[str, ...], default: str) -> str:
     values: list[str] = []
     for column in columns:
@@ -134,6 +185,7 @@ def _score_metadata_patch_current(score_metadata_module: object) -> bool:
         and getattr(score_metadata_module, "_parse_bool", None) is _parse_strict_bool
         and getattr(score_metadata_module, "_unique_string_from_columns", None) is _unique_string_from_columns
         and getattr(score_metadata_module, "_metadata_float_from_value", None) is _metadata_float_from_value
+        and getattr(score_metadata_module, "_unique_int_from_columns", None) is _unique_int_from_columns
     )
 
 
@@ -154,6 +206,7 @@ def apply_score_metadata_bool_validation_patch() -> None:
         score_metadata_module._parse_bool = _parse_strict_bool
         score_metadata_module._unique_string_from_columns = _unique_string_from_columns
         score_metadata_module._metadata_float_from_value = _metadata_float_from_value
+        score_metadata_module._unique_int_from_columns = _unique_int_from_columns
         setattr(score_metadata_module, _SCORE_METADATA_BOOL_PATCH_FLAG, True)
 
     try:

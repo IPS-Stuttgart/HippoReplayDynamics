@@ -13,6 +13,8 @@ diagnostics must not collapse those rows back into one event.
 
 from __future__ import annotations
 
+from decimal import Decimal, InvalidOperation
+from operator import index as exact_index
 from typing import Any
 
 import numpy as np
@@ -25,6 +27,7 @@ _COERCE_BOOL_WRAPPER_FLAG = "_recovery_diagnostics_bool_coerce_bool_wrapper"
 _ROW_BOOL_WRAPPER_FLAG = "_recovery_diagnostics_bool_row_bool_wrapper"
 _COERCE_FLOAT_WRAPPER_FLAG = "_recovery_diagnostics_bool_coerce_float_wrapper"
 _ROW_FLOAT_WRAPPER_FLAG = "_recovery_diagnostics_bool_row_float_wrapper"
+_EVENT_INDEX_VALUE_WRAPPER_FLAG = "_recovery_diagnostics_exact_event_index_wrapper"
 _SUCCESSFUL_FINITE_SCORES_WRAPPER_FLAG = "_recovery_diagnostics_bool_successful_finite_scores_wrapper"
 _EVENT_DIAGNOSTICS_WRAPPER_FLAG = "_recovery_diagnostics_scoped_event_diagnostics_wrapper"
 _CERTIFIED_EVENT_WRAPPER_FLAG = "_recovery_diagnostics_scoped_certified_event_wrapper"
@@ -34,6 +37,7 @@ _HELPER_FLAGS = {
     "_row_bool": _ROW_BOOL_WRAPPER_FLAG,
     "_coerce_float": _COERCE_FLOAT_WRAPPER_FLAG,
     "_row_float": _ROW_FLOAT_WRAPPER_FLAG,
+    "_event_index_value": _EVENT_INDEX_VALUE_WRAPPER_FLAG,
     "_successful_finite_scores": _SUCCESSFUL_FINITE_SCORES_WRAPPER_FLAG,
 }
 _TRUE_FLOAT_STRINGS = {"true", "yes", "y"}
@@ -91,6 +95,9 @@ def apply_recovery_diagnostics_bool_patch() -> None:
             return float(default)
         return coerce_float(row[column], default)
 
+    def event_index_value(value: object) -> object:
+        return _exact_integral_value(value)
+
     def successful_finite_scores(group: pd.DataFrame) -> pd.DataFrame:
         if "status" in group:
             status_ok = group["status"].map(_status_is_success_or_missing).astype(bool)
@@ -104,10 +111,54 @@ def apply_recovery_diagnostics_bool_patch() -> None:
     _install_helper(diagnostics, "_row_bool", row_bool)
     _install_helper(diagnostics, "_coerce_float", coerce_float)
     _install_helper(diagnostics, "_row_float", row_float)
+    _install_helper(diagnostics, "_event_index_value", event_index_value)
     _install_helper(diagnostics, "_successful_finite_scores", successful_finite_scores)
     _install_scoped_certified_recovery(diagnostics, recovery)
     _install_scoped_event_diagnostics(diagnostics)
     setattr(diagnostics, _PATCHED_FLAG, True)
+
+
+def _exact_integral_value(value: object) -> object:
+    """Normalize integral event IDs without a lossy binary-float round trip."""
+
+    if isinstance(value, (bool, np.bool_)):
+        return int(value)
+    try:
+        return int(exact_index(value))
+    except (TypeError, ValueError, OverflowError):
+        pass
+
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return value
+        try:
+            decimal_value = Decimal(text)
+        except InvalidOperation:
+            return value
+        if decimal_value.is_finite() and decimal_value == decimal_value.to_integral_value():
+            return int(decimal_value)
+        return value
+
+    if isinstance(value, Decimal):
+        if value.is_finite() and value == value.to_integral_value():
+            return int(value)
+        return value
+
+    if isinstance(value, (float, np.floating)):
+        numeric = float(value)
+        if np.isfinite(numeric) and numeric.is_integer():
+            return int(numeric)
+        return value
+
+    try:
+        integer = int(value)
+    except (TypeError, ValueError, OverflowError):
+        return value
+    try:
+        return integer if value == integer else value
+    except (TypeError, ValueError):
+        return value
 
 
 def _helpers_are_patched(diagnostics: Any) -> bool:

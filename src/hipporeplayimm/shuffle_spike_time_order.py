@@ -117,7 +117,11 @@ def _shuffle_spike_times_session_sorted(session, random_seed: int = 1):
 
 
 def _numeric_scope_label(value: object) -> str | None:
-    if isinstance(value, (bool, np.bool_)) or not isinstance(value, (int, float, np.integer, np.floating)):
+    if isinstance(value, (bool, np.bool_)):
+        return None
+    if isinstance(value, (int, np.integer)):
+        return str(int(value))
+    if not isinstance(value, (float, np.floating)):
         return None
     numeric = float(value)
     if not np.isfinite(numeric):
@@ -126,7 +130,7 @@ def _numeric_scope_label(value: object) -> str | None:
 
 
 def _nonfinite_numeric_scope_label(value: object) -> str | None:
-    if isinstance(value, (bool, np.bool_)) or not isinstance(value, (int, float, np.integer, np.floating)):
+    if isinstance(value, (bool, np.bool_, int, np.integer)) or not isinstance(value, (float, np.floating)):
         return None
     numeric = float(value)
     if np.isfinite(numeric):

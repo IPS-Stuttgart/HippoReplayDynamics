@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from decimal import Decimal
+
 import numpy as np
 import pytest
 
@@ -30,3 +32,15 @@ def test_positive_integer_count_overflow_is_value_error() -> None:
 @pytest.mark.parametrize("value", [2**53 + 1, np.uint64(2**53 + 1)])
 def test_positive_integer_count_preserves_large_integers(value) -> None:
     assert _positive_integer_count("n_bootstrap", value) == 2**53 + 1
+
+
+def test_positive_integer_count_preserves_large_decimal_integer() -> None:
+    value = Decimal(2**53 + 1)
+
+    assert _positive_integer_count("n_bootstrap", value) == 2**53 + 1
+
+
+@pytest.mark.parametrize("name", ["n_bootstrap", "n_permutations"])
+def test_positive_integer_count_rejects_lossy_fractional_decimal(name: str) -> None:
+    with pytest.raises(ValueError, match=rf"{name} must be a positive integer"):
+        _positive_integer_count(name, Decimal("9007199254740992.5"))

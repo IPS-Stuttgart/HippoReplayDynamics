@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import warnings
+
 import numpy as np
 import pytest
 
@@ -76,6 +78,32 @@ def test_duration_occupancy_per_bin_sigma_rejects_string_values():
 def test_duration_occupancy_per_bin_sigma_rejects_complex_values():
     with pytest.raises(TypeError, match="sigma_cm_sqrt_s.*complex"):
         duration_occupancy._per_bin_sigma(np.complex128(85.0 + 1.0j), 0.003)
+
+
+@pytest.mark.parametrize(
+    "helper",
+    [state_space._per_bin_sigma, duration_occupancy._per_bin_sigma],
+    ids=["state-space", "duration-occupancy"],
+)
+def test_per_bin_sigma_rejects_derived_overflow_without_runtime_warning(helper):
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", RuntimeWarning)
+        with pytest.raises(ValueError, match="finite per-bin sigma"):
+            helper(np.finfo(float).max, 4.0)
+
+
+@pytest.mark.parametrize(
+    "helper",
+    [state_space._per_bin_sigma, duration_occupancy._per_bin_sigma],
+    ids=["state-space", "duration-occupancy"],
+)
+def test_per_bin_sigma_preserves_large_representable_result(helper):
+    sigma = np.finfo(float).max / 4.0
+
+    result = helper(sigma, 4.0)
+
+    assert np.isfinite(result)
+    assert result == pytest.approx(np.finfo(float).max / 2.0)
 
 
 def test_mode_transition_matrix_rejects_complex_stickiness():

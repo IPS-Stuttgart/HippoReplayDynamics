@@ -12,13 +12,14 @@ from __future__ import annotations
 
 import sys
 from functools import wraps
-from typing import Any
+from typing import Any, Callable
 
 import numpy as np
 
 _STATE_SPACE_UTILS_PATCHED_FLAG = "_state_space_per_bin_sigma_validation_patch_applied"
 _DURATION_OCCUPANCY_PATCHED_FLAG = "_duration_occupancy_per_bin_sigma_validation_patch_applied"
 _MODE_TRANSITION_PATCHED_FLAG = "_state_space_mode_transition_string_validation_patch_applied"
+_PER_BIN_SIGMA_WRAPPER_VERSION = 2
 _STRING_SCALAR_TYPES = (str, bytes, np.str_, np.bytes_)
 
 
@@ -72,45 +73,63 @@ def _validate_per_bin_sigma_inputs(sigma_cm_sqrt_s: Any, dt_s: Any) -> None:
     _reject_boolean_or_array_scalar("dt_s", dt_s)
 
 
+def _validated_per_bin_sigma(
+    base: Callable[[Any, Any], float],
+    sigma_cm_sqrt_s: Any,
+    dt_s: Any,
+) -> float:
+    """Call a per-bin sigma helper and reject derived floating-point overflow."""
+
+    _validate_per_bin_sigma_inputs(sigma_cm_sqrt_s, dt_s)
+    with np.errstate(over="ignore", invalid="ignore"):
+        process_sigma = base(sigma_cm_sqrt_s, dt_s)
+    if not np.isfinite(process_sigma):
+        raise ValueError(
+            "sigma_cm_sqrt_s and dt_s must produce a finite per-bin sigma"
+        )
+    return float(process_sigma)
+
+
 def _patch_state_space_utils_sigma() -> None:
     from . import state_space_utils
 
-    current = state_space_utils._per_bin_sigma
-    if getattr(current, _STATE_SPACE_UTILS_PATCHED_FLAG, False):
+    observed = state_space_utils._per_bin_sigma
+    if getattr(observed, _STATE_SPACE_UTILS_PATCHED_FLAG, None) == _PER_BIN_SIGMA_WRAPPER_VERSION:
         setattr(state_space_utils, _STATE_SPACE_UTILS_PATCHED_FLAG, True)
         return
+    base = getattr(observed, "__hipporeplayimm_original__", observed)
 
-    @wraps(current)
+    @wraps(base)
     def per_bin_sigma(sigma_cm_sqrt_s, dt_s):
-        _validate_per_bin_sigma_inputs(sigma_cm_sqrt_s, dt_s)
-        return current(sigma_cm_sqrt_s, dt_s)
+        return _validated_per_bin_sigma(base, sigma_cm_sqrt_s, dt_s)
 
-    setattr(per_bin_sigma, _STATE_SPACE_UTILS_PATCHED_FLAG, True)
-    setattr(per_bin_sigma, "__hipporeplayimm_original__", current)
+    setattr(per_bin_sigma, _STATE_SPACE_UTILS_PATCHED_FLAG, _PER_BIN_SIGMA_WRAPPER_VERSION)
+    setattr(per_bin_sigma, "__hipporeplayimm_original__", base)
     state_space_utils._per_bin_sigma = per_bin_sigma
     setattr(state_space_utils, _STATE_SPACE_UTILS_PATCHED_FLAG, True)
 
     for module in list(sys.modules.values()):
         module_name = getattr(module, "__name__", "")
-        if module_name.startswith("hipporeplayimm") and getattr(module, "_per_bin_sigma", None) is current:
+        alias = getattr(module, "_per_bin_sigma", None)
+        if module_name.startswith("hipporeplayimm") and (alias is observed or alias is base):
             module._per_bin_sigma = per_bin_sigma
 
 
 def _patch_duration_occupancy_sigma() -> None:
     from . import duration_occupancy
 
-    current = duration_occupancy._per_bin_sigma
-    if getattr(current, _DURATION_OCCUPANCY_PATCHED_FLAG, False):
+    observed = duration_occupancy._per_bin_sigma
+    if getattr(observed, _DURATION_OCCUPANCY_PATCHED_FLAG, None) == _PER_BIN_SIGMA_WRAPPER_VERSION:
         setattr(duration_occupancy, _DURATION_OCCUPANCY_PATCHED_FLAG, True)
         return
+    base = getattr(observed, "__hipporeplayimm_original__", observed)
 
-    @wraps(current)
+    @wraps(base)
     def per_bin_sigma(sigma_cm_sqrt_s, dt_s):
-        _validate_per_bin_sigma_inputs(sigma_cm_sqrt_s, dt_s)
-        return current(sigma_cm_sqrt_s, dt_s)
+        return _validated_per_bin_sigma(base, sigma_cm_sqrt_s, dt_s)
 
-    setattr(per_bin_sigma, _DURATION_OCCUPANCY_PATCHED_FLAG, True)
-    setattr(per_bin_sigma, "__hipporeplayimm_original__", current)
+    setattr(per_bin_sigma, _DURATION_OCCUPANCY_PATCHED_FLAG, _PER_BIN_SIGMA_WRAPPER_VERSION)
+    setattr(per_bin_sigma, "__hipporeplayimm_original__", base)
     duration_occupancy._per_bin_sigma = per_bin_sigma
     setattr(duration_occupancy, _DURATION_OCCUPANCY_PATCHED_FLAG, True)
 

@@ -29,6 +29,7 @@ _AS_XY_ARRAY_WRAPPER_MARKER = "_encoding_numeric_as_xy_array_wrapper"
 _AS_POSITION_ARRAY_WRAPPER_MARKER = "_encoding_numeric_as_position_array_wrapper"
 _VALIDATE_ENCODING_CONFIG_WRAPPER_MARKER = "_encoding_bool_validate_encoding_config_wrapper"
 _TIME_BIN_EDGES_WRAPPER_MARKER = "_encoding_bool_time_bin_edges_wrapper"
+_TIME_BIN_EDGES_WRAPPER_VERSION = 2
 _POISSON_LOG_EMISSIONS_WRAPPER_MARKER = "_encoding_bool_poisson_log_emissions_wrapper"
 
 
@@ -92,6 +93,7 @@ def _apply_encoding_bool_validation_patch(encoding) -> None:
         _require_numeric_scalar(start, "ripple start")
         _require_numeric_scalar(end, "ripple end")
         _require_numeric_scalar(time_bin_s, "time_bin_s")
+        _validate_time_bin_range(start, end, time_bin_s)
         return original_time_bin_edges(start, end, time_bin_s)
 
     def poisson_log_emissions(
@@ -129,7 +131,7 @@ def _apply_encoding_bool_validation_patch(encoding) -> None:
     _mark_wrapper(as_xy_array, _AS_XY_ARRAY_WRAPPER_MARKER)
     _mark_wrapper(as_position_array, _AS_POSITION_ARRAY_WRAPPER_MARKER)
     _mark_wrapper(validate_encoding_config, _VALIDATE_ENCODING_CONFIG_WRAPPER_MARKER)
-    _mark_wrapper(time_bin_edges, _TIME_BIN_EDGES_WRAPPER_MARKER)
+    setattr(time_bin_edges, _TIME_BIN_EDGES_WRAPPER_MARKER, _TIME_BIN_EDGES_WRAPPER_VERSION)
     _mark_wrapper(poisson_log_emissions, _POISSON_LOG_EMISSIONS_WRAPPER_MARKER)
     encoding._as_xy_array = as_xy_array
     encoding._as_position_array = as_position_array
@@ -176,10 +178,12 @@ def _encoding_bool_wrappers_are_current(encoding) -> bool:
             getattr(encoding, "_validate_encoding_config", None),
             _VALIDATE_ENCODING_CONFIG_WRAPPER_MARKER,
         )
-        and _is_marked_wrapper(
+        and getattr(
             getattr(encoding, "_time_bin_edges", None),
             _TIME_BIN_EDGES_WRAPPER_MARKER,
+            None,
         )
+        == _TIME_BIN_EDGES_WRAPPER_VERSION
         and _is_marked_wrapper(
             getattr(encoding, "_poisson_log_emissions", None),
             _POISSON_LOG_EMISSIONS_WRAPPER_MARKER,
@@ -209,6 +213,35 @@ def _require_numeric_scalar(value: Any, name: str) -> None:
 
 def _require_numeric_values(value: Any, name: str) -> None:
     _as_real_numeric_array(value, name)
+
+
+def _validate_time_bin_range(start: Any, end: Any, time_bin_s: Any) -> None:
+    """Reject otherwise-valid ripple spans that overflow bin arithmetic."""
+
+    start_value = float(np.asarray(start).item())
+    end_value = float(np.asarray(end).item())
+    bin_width = float(np.asarray(time_bin_s).item())
+    if (
+        not np.isfinite(start_value)
+        or not np.isfinite(end_value)
+        or not np.isfinite(bin_width)
+        or bin_width <= 0.0
+        or end_value <= start_value
+    ):
+        return
+
+    with np.errstate(over="ignore", invalid="ignore"):
+        duration = end_value - start_value
+    if not np.isfinite(duration):
+        raise ValueError("ripple duration exceeds floating-point range")
+
+    with np.errstate(over="ignore", divide="ignore", invalid="ignore"):
+        complete_bins = np.floor(duration / bin_width)
+    if (
+        not np.isfinite(complete_bins)
+        or complete_bins > np.iinfo(np.intp).max - 1
+    ):
+        raise ValueError("ripple time-bin count exceeds platform index range")
 
 
 def _as_real_numeric_array(value: Any, name: str) -> np.ndarray:

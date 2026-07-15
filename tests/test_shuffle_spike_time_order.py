@@ -3,10 +3,12 @@ from __future__ import annotations
 from pathlib import Path
 
 import numpy as np
+import pandas as pd
 import pytest
 
 from hipporeplayimm.data import ReplaySession, SpikeMarkData
 from hipporeplayimm.result_improvements import shuffle_spike_times_session
+from hipporeplayimm.shuffle_controls import add_shuffle_p_values
 
 
 def test_shuffle_spike_times_returns_time_sorted_mark_aligned_session() -> None:
@@ -25,6 +27,33 @@ def test_shuffle_spike_times_returns_time_sorted_mark_aligned_session() -> None:
 def test_shuffle_spike_times_rejects_invalid_random_seed(random_seed) -> None:
     with pytest.raises(ValueError, match="random_seed"):
         shuffle_spike_times_session(_marked_session(), random_seed=random_seed)
+
+
+def test_shuffle_p_values_keep_large_integer_event_scopes_separate() -> None:
+    first_event = 2**53
+    second_event = first_event + 1
+    real_scores = pd.DataFrame(
+        {
+            "session": ["RatX/OpenX", "RatX/OpenX"],
+            "event_index": [first_event, second_event],
+            "model": ["model", "model"],
+            "log_evidence": [50.0, 50.0],
+        }
+    )
+    control_scores = pd.DataFrame(
+        {
+            "session": ["RatX/OpenX", "RatX/OpenX"],
+            "event_index": [first_event, second_event],
+            "model": ["model", "model"],
+            "log_evidence": [10.0, 100.0],
+        }
+    )
+
+    out = add_shuffle_p_values(real_scores, control_scores)
+
+    assert out["shuffle_count"].tolist() == [1, 1]
+    assert out["shuffle_log_evidence_median"].tolist() == [10.0, 100.0]
+    np.testing.assert_allclose(out["shuffle_p_value"], [0.5, 1.0])
 
 
 def _marked_session() -> ReplaySession:

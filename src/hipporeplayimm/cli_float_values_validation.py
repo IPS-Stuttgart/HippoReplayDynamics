@@ -183,12 +183,16 @@ def _positive_integer_count(name: str, value: object) -> int:
             raise ValueError(f"{name} must be a positive integer")
         return int(exact_integer)
     try:
-        numeric = float(item)
+        integer = int(item)
     except (TypeError, ValueError, OverflowError) as exc:
         raise ValueError(f"{name} must be a positive integer") from exc
-    if not math.isfinite(numeric) or numeric <= 0.0 or not np.isclose(numeric, np.rint(numeric), rtol=0.0, atol=0.0):
+    try:
+        exactly_integral = bool(item == integer)
+    except (TypeError, ValueError):
+        exactly_integral = False
+    if not exactly_integral or integer <= 0:
         raise ValueError(f"{name} must be a positive integer")
-    return int(np.rint(numeric))
+    return integer
 
 
 def _parser_has_option(parser, option: str) -> bool:

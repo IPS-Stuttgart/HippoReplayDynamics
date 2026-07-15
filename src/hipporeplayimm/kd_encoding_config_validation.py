@@ -1,9 +1,11 @@
-"""Validate KD reference encoding configuration before fitting.
+"""Validate KD reference encoding and transition parameters.
 
 The KD reference encoder uses fixed grid dimensions and occupancy floors directly
 inside NumPy shape, edge, smoothing, and rate calculations. Invalid parameters
 can otherwise reach divide-by-zero, empty-grid, or Gaussian-filter failures that
-are harder to diagnose than a configuration error.
+are harder to diagnose than a configuration error. The transition builders also
+need explicit guards because nonpositive time steps are otherwise clamped to an
+identity transition and a zero bin size can silently produce a uniform matrix.
 """
 
 from __future__ import annotations
@@ -15,10 +17,10 @@ from typing import Any
 import numpy as np
 
 _PATCHED_FLAG = "_kd_encoding_config_validation_patch_applied"
+_TRANSITION_PATCHED_FLAG = "_kd_transition_parameter_validation_patch_applied"
 
 
-def _coerce_float_scalar(config: Any, name: str) -> float:
-    value = getattr(config, name)
+def _coerce_scalar_float_value(value: Any, name: str) -> float:
     if isinstance(value, (bool, np.bool_, str, bytes, np.str_, np.bytes_)):
         raise TypeError(f"{name} must be a scalar float")
     try:
@@ -37,8 +39,12 @@ def _coerce_float_scalar(config: Any, name: str) -> float:
         raise TypeError(f"{name} must be a scalar float")
     try:
         return float(value)
-    except (TypeError, ValueError) as exc:
+    except (TypeError, ValueError, OverflowError) as exc:
         raise TypeError(f"{name} must be a scalar float") from exc
+
+
+def _coerce_float_scalar(config: Any, name: str) -> float:
+    return _coerce_scalar_float_value(getattr(config, name), name)
 
 
 def _validate_positive_float(config: Any, name: str) -> None:
@@ -54,14 +60,34 @@ def _validate_nonnegative_float(config: Any, name: str) -> None:
 
 
 def _validate_positive_integer(config: Any, name: str) -> None:
-    value = getattr(config, name)
+    _coerce_positive_integer_value(getattr(config, name), name)
+
+
+def _coerce_positive_integer_value(value: Any, name: str) -> int:
     if isinstance(value, (bool, np.bool_)):
         raise TypeError(f"{name} must be a positive integer")
-    arr = np.asarray(value)
+    try:
+        arr = np.asarray(value)
+    except (TypeError, ValueError) as exc:
+        raise TypeError(f"{name} must be a positive integer") from exc
     if arr.ndim != 0 or not np.issubdtype(arr.dtype, np.integer):
         raise TypeError(f"{name} must be a positive integer")
-    if int(arr) <= 0:
+    result = int(arr.item())
+    if result <= 0:
         raise ValueError(f"{name} must be positive")
+    return result
+
+
+def _validate_positive_scalar_value(value: Any, name: str) -> None:
+    numeric = _coerce_scalar_float_value(value, name)
+    if not np.isfinite(numeric) or numeric <= 0.0:
+        raise ValueError(f"{name} must be finite and positive")
+
+
+def _validate_nonnegative_scalar_value(value: Any, name: str) -> None:
+    numeric = _coerce_scalar_float_value(value, name)
+    if not np.isfinite(numeric) or numeric < 0.0:
+        raise ValueError(f"{name} must be finite and nonnegative")
 
 
 def validate_kd_encoding_config(config: Any) -> None:
@@ -81,9 +107,9 @@ def _session_with_excitatory_fallback(session: Any, config: Any) -> Any:
     """Let the KD encoder match the standard encoder's no-label fallback.
 
     The reference encoder requests ``session.excitatory_spikes()`` whenever
-    ``use_excitatory`` is true.  For datasets without excitatory labels that
+    ``use_excitatory`` is true. For datasets without excitatory labels that
     method returns no spikes, so the KD encoder silently fits an empty cell set
-    even when spikes are available.  The main encoder falls back to all spikes in
+    even when spikes are available. The main encoder falls back to all spikes in
     this case; mirror that behavior by treating all observed cells as excitatory
     only when the label list is absent.
     """
@@ -102,12 +128,51 @@ def _session_with_excitatory_fallback(session: Any, config: Any) -> Any:
     return replace(session, excitatory_neurons=cell_ids)
 
 
+def _apply_kd_transition_parameter_validation_patch(kd_reference: Any) -> None:
+    if getattr(kd_reference, _TRANSITION_PATCHED_FLAG, False):
+        return
+
+    original_stationary = kd_reference.stationary_gaussian_transition_1d
+    original_diffusion = kd_reference.diffusion_transition_1d
+    original_momentum = kd_reference.momentum_transition_1d
+
+    @wraps(original_stationary)
+    def stationary_gaussian_transition_1d(n_bins, sd_meters, bin_size_cm):
+        n_bins = _coerce_positive_integer_value(n_bins, "n_bins")
+        _validate_nonnegative_scalar_value(sd_meters, "sd_meters")
+        _validate_positive_scalar_value(bin_size_cm, "bin_size_cm")
+        return original_stationary(n_bins, sd_meters, bin_size_cm)
+
+    @wraps(original_diffusion)
+    def diffusion_transition_1d(n_bins, sd_meters, bin_size_cm, dt):
+        n_bins = _coerce_positive_integer_value(n_bins, "n_bins")
+        _validate_nonnegative_scalar_value(sd_meters, "sd_meters")
+        _validate_positive_scalar_value(bin_size_cm, "bin_size_cm")
+        _validate_positive_scalar_value(dt, "dt")
+        return original_diffusion(n_bins, sd_meters, bin_size_cm, dt)
+
+    @wraps(original_momentum)
+    def momentum_transition_1d(n_bins, sd_meters, decay, bin_size_cm, dt):
+        n_bins = _coerce_positive_integer_value(n_bins, "n_bins")
+        _validate_nonnegative_scalar_value(sd_meters, "sd_meters")
+        _validate_positive_scalar_value(decay, "decay")
+        _validate_positive_scalar_value(bin_size_cm, "bin_size_cm")
+        _validate_positive_scalar_value(dt, "dt")
+        return original_momentum(n_bins, sd_meters, decay, bin_size_cm, dt)
+
+    kd_reference.stationary_gaussian_transition_1d = stationary_gaussian_transition_1d
+    kd_reference.diffusion_transition_1d = diffusion_transition_1d
+    kd_reference.momentum_transition_1d = momentum_transition_1d
+    setattr(kd_reference, _TRANSITION_PATCHED_FLAG, True)
+
+
 def apply_kd_encoding_config_validation_patch() -> None:
-    """Install KD encoding-config validation on the reference encoder."""
+    """Install KD encoding and transition-parameter validation."""
 
     from . import kd_random_effects_validation, kd_reference
 
     kd_random_effects_validation.apply_kd_random_effects_validation_patch()
+    _apply_kd_transition_parameter_validation_patch(kd_reference)
 
     if getattr(kd_reference, _PATCHED_FLAG, False):
         return

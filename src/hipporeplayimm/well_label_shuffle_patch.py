@@ -75,10 +75,18 @@ def _labelled_well_rows(values: pd.Series) -> pd.Series:
 
     present = values.notna()
     normalized = values.astype("string").str.strip().str.lower()
-    numeric = pd.to_numeric(values, errors="coerce")
-    numeric_present = numeric.notna()
+    exact_integer_ids = values.map(
+        lambda value: isinstance(value, (int, np.integer))
+    )
+    numeric = pd.Series(np.nan, index=values.index, dtype=float)
+    numeric.loc[~exact_integer_ids] = pd.to_numeric(
+        values.loc[~exact_integer_ids], errors="coerce"
+    )
+    numeric_present = exact_integer_ids | numeric.notna()
     numeric_values = numeric.fillna(0.0).to_numpy(dtype=float)
-    finite_numeric = pd.Series(np.isfinite(numeric_values), index=values.index)
+    finite_numeric = exact_integer_ids | pd.Series(
+        np.isfinite(numeric_values), index=values.index
+    )
     return (
         present
         & ~normalized.isin(_MISSING_WELL_LABELS)

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from functools import wraps
 import math
+import operator
 
 import numpy as np
 import pandas as pd
@@ -173,6 +174,14 @@ def _positive_integer_count(name: str, value: object) -> int:
         raise ValueError(f"{name} must be a positive integer, not boolean")
     if isinstance(item, _STRING_TYPES):
         raise ValueError(f"{name} must be a positive integer, not string")
+    try:
+        exact_integer = operator.index(item)
+    except TypeError:
+        pass
+    else:
+        if exact_integer <= 0:
+            raise ValueError(f"{name} must be a positive integer")
+        return int(exact_integer)
     try:
         numeric = float(item)
     except (TypeError, ValueError, OverflowError) as exc:

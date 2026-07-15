@@ -10,6 +10,7 @@ accidental truthiness, or unrelated NumPy/type errors.
 from __future__ import annotations
 
 from dataclasses import replace
+from decimal import Decimal, InvalidOperation
 from functools import wraps
 from typing import Any
 
@@ -239,19 +240,40 @@ def _nonnegative_integer(name: str, value: Any) -> int:
 
 
 def _integer_value(name: str, value: Any) -> int:
-    if isinstance(value, (bool, np.bool_)):
-        raise ValueError(f"{name} must be an integer")
-    value = _reject_array_shaped_scalar(name, value, f"{name} must be an integer")
+    message = f"{name} must be an integer"
+    value = _reject_array_shaped_scalar(name, value, message)
     try:
-        numeric = float(value)
+        item = np.asarray(value).item()
     except (TypeError, ValueError) as exc:
-        raise ValueError(f"{name} must be an integer") from exc
+        raise ValueError(message) from exc
+    if isinstance(item, (bool, np.bool_)):
+        raise ValueError(message)
+    if isinstance(item, (int, np.integer)):
+        return int(item)
+    if isinstance(item, (str, np.str_, bytes, np.bytes_)):
+        try:
+            text = bytes(item).decode("utf-8") if isinstance(item, (bytes, np.bytes_)) else str(item)
+        except UnicodeDecodeError as exc:
+            raise ValueError(message) from exc
+        try:
+            numeric = Decimal(text.strip())
+        except InvalidOperation as exc:
+            raise ValueError(message) from exc
+        if not numeric.is_finite():
+            raise ValueError(f"{name} must be a finite integer")
+        integral = numeric.to_integral_value()
+        if numeric != integral:
+            raise ValueError(message)
+        return int(integral)
+    try:
+        numeric = float(item)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ValueError(message) from exc
     if not np.isfinite(numeric):
         raise ValueError(f"{name} must be a finite integer")
-    integer = int(round(numeric))
-    if not np.isclose(numeric, integer, rtol=0.0, atol=0.0):
-        raise ValueError(f"{name} must be an integer")
-    return integer
+    if not numeric.is_integer():
+        raise ValueError(message)
+    return int(numeric)
 
 
 def _reject_array_shaped_scalar(name: str, value: Any, message: str) -> Any:

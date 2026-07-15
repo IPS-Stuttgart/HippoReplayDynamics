@@ -62,3 +62,35 @@ def test_compare_runs_matches_shared_event_keys_when_only_one_run_has_extra_meta
     assert tables["event_comparison"]["canonical_best_agree"].tolist() == [True]
     assert tables["event_comparison"]["left_canonical_best_model"].tolist() == ["momentum"]
     assert set(tables["relative"]["canonical_model"]) == {"diffusion", "momentum"}
+
+
+def test_compare_runs_ignores_optional_metadata_missing_from_one_run(tmp_path: Path) -> None:
+    left = tmp_path / "left"
+    right = tmp_path / "right"
+    _write_scores(
+        left,
+        [
+            _score_row("sorted-spike-state-space-diffusion", -10.0, benchmark_random_seed=7),
+            _score_row("sorted-spike-state-space-momentum-exact-sparse", -1.0, benchmark_random_seed=7),
+        ],
+    )
+    _write_scores(
+        right,
+        [
+            _score_row("sorted-spike-state-space-diffusion", -11.0, benchmark_random_seed=pd.NA),
+            _score_row("sorted-spike-state-space-momentum-exact-sparse", -2.0, benchmark_random_seed=pd.NA),
+        ],
+    )
+
+    tables = compare_model_evidence_runs.compare_runs(
+        left,
+        right,
+        left_label="left",
+        right_label="right",
+        output=tmp_path / "comparison",
+    )
+
+    assert int(tables["summary"].loc[0, "matched_events"]) == 1
+    assert tables["event_comparison"]["canonical_best_agree"].tolist() == [True]
+    assert tables["event_comparison"]["left_canonical_best_model"].tolist() == ["momentum"]
+    assert set(tables["relative"]["canonical_model"]) == {"diffusion", "momentum"}

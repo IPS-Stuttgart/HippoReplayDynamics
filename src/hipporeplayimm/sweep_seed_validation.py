@@ -97,6 +97,13 @@ def _seed_value(value: object, name: str) -> int:
         seed = int(item)
     elif isinstance(item, (str, bytes)):
         seed = _seed_text_value(item, name)
+    elif isinstance(item, Decimal):
+        if not item.is_finite():
+            raise ValueError(f"{name} must be a finite nonnegative integer")
+        integer = item.to_integral_value()
+        if item != integer:
+            raise ValueError(f"{name} must be a finite nonnegative integer")
+        seed = int(integer)
     else:
         try:
             numeric = float(item)

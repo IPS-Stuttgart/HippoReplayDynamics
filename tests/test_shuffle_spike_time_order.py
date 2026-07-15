@@ -6,6 +6,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
+import hipporeplayimm.shuffle_spike_time_order as shuffle_patch
 from hipporeplayimm.data import ReplaySession, SpikeMarkData
 from hipporeplayimm.result_improvements import shuffle_spike_times_session
 from hipporeplayimm.shuffle_controls import add_shuffle_p_values
@@ -27,6 +28,26 @@ def test_shuffle_spike_times_returns_time_sorted_mark_aligned_session() -> None:
 def test_shuffle_spike_times_rejects_invalid_random_seed(random_seed) -> None:
     with pytest.raises(ValueError, match="random_seed"):
         shuffle_spike_times_session(_marked_session(), random_seed=random_seed)
+
+
+@pytest.mark.parametrize("random_seed", [2**53 + 1, np.int64(2**53 + 1)])
+def test_shuffle_spike_times_preserves_exact_large_integer_seed(monkeypatch, random_seed) -> None:
+    captured_seeds: list[int] = []
+
+    class IdentityGenerator:
+        @staticmethod
+        def permutation(values):
+            return np.asarray(values).copy()
+
+    def capture_seed(seed: int) -> IdentityGenerator:
+        captured_seeds.append(seed)
+        return IdentityGenerator()
+
+    monkeypatch.setattr(shuffle_patch.np.random, "default_rng", capture_seed)
+
+    shuffle_spike_times_session(_marked_session(), random_seed=random_seed)
+
+    assert captured_seeds == [2**53 + 1]
 
 
 def test_shuffle_p_values_keep_large_integer_event_scopes_separate() -> None:

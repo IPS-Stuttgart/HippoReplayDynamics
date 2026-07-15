@@ -705,6 +705,7 @@ def _score_first_order_imm_variable(
     max_step_sigma,
     mode_stickiness,
     mode_transitions=None,
+    stationary_transitions=None,
     valid_bin_mask=None,
 ):
     modes = ("stationary", "diffusion", "fragmented")
@@ -717,13 +718,15 @@ def _score_first_order_imm_variable(
         mode_transitions,
         max(n_time - 1, 0),
     )
-    transitions = {
-        "stationary": ss._gaussian_transition_matrix(
+    if stationary_transitions is None:
+        stationary_transitions = ss._gaussian_transition_matrix(
             bin_centers,
             stationary_sigma_cm,
             max_step_sigma,
             valid_bin_mask=valid_bin_mask,
-        ),
+        )
+    transitions = {
+        "stationary": stationary_transitions,
         "diffusion": diffusion_transitions,
         "fragmented": None,
     }

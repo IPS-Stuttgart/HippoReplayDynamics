@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import re
 from collections.abc import Mapping
 
@@ -14,7 +15,10 @@ def _header_float(header: Mapping[str, str], key: str, default: float) -> float:
     if raw is None:
         return float(default)
     match = _FLOAT_TOKEN.search(str(raw))
-    return float(match.group(0)) if match else float(default)
+    if match is None:
+        return float(default)
+    value = float(match.group(0))
+    return value if math.isfinite(value) else float(default)
 
 
 def apply_olafsdottir_header_float_patch() -> None:

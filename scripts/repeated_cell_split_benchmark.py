@@ -73,7 +73,7 @@ def _aggregate_summary(rows: pd.DataFrame) -> pd.DataFrame:
     ]
     if not numeric:
         return pd.DataFrame()
-    grouped = rows.groupby("model", as_index=False)
+    grouped = rows.groupby("model")
     out = grouped[numeric].agg(["mean", "median", "std"]).reset_index()
     out.columns = ["_".join(str(part) for part in column if str(part)) for column in out.columns]
     if "split_seed" in rows:
@@ -83,7 +83,8 @@ def _aggregate_summary(rows: pd.DataFrame) -> pd.DataFrame:
             .rename(columns={"split_seed": "split_seeds"})
         )
         out = out.merge(seed_counts, on="model", how="left")
-    return out.sort_values(out.columns[1], ascending=False)
+    sort_column = f"{numeric[0]}_mean"
+    return out.sort_values(sort_column, ascending=False).reset_index(drop=True)
 
 
 def main() -> int:

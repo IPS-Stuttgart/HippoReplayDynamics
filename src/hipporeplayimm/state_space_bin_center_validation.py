@@ -15,7 +15,10 @@ _BOOL_OR_TEXT_DTYPE_KINDS = {"b", "S", "U"}
 def _validate_state_space_log_likelihood(emissions: Any) -> None:
     """Reject malformed state-space emissions before candidate selection."""
 
-    values = np.asarray(emissions.log_likelihood, dtype=float)
+    try:
+        values = np.asarray(emissions.log_likelihood, dtype=float)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ValueError("emissions.log_likelihood must contain numeric real values") from exc
     if values.ndim != 2:
         raise ValueError("emissions.log_likelihood must be two-dimensional")
     if values.shape[0] == 0:
@@ -36,7 +39,7 @@ def _as_numeric_real_coordinates(values: Any, name: str) -> np.ndarray:
 
     try:
         raw = np.asarray(values)
-    except (TypeError, ValueError) as exc:
+    except (TypeError, ValueError, OverflowError) as exc:
         raise ValueError(f"{name} must contain numeric real coordinates") from exc
     if raw.dtype.kind in _BOOL_OR_TEXT_DTYPE_KINDS:
         raise ValueError(f"{name} must contain numeric real coordinates, not boolean or text")
@@ -50,7 +53,7 @@ def _as_numeric_real_coordinates(values: Any, name: str) -> np.ndarray:
                 raise ValueError(f"{name} must contain numeric real coordinates, not complex values")
     try:
         return np.asarray(values, dtype=float)
-    except (TypeError, ValueError) as exc:
+    except (TypeError, ValueError, OverflowError) as exc:
         raise ValueError(f"{name} must contain numeric real coordinates") from exc
 
 

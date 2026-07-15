@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import replace
+import operator
 
 import numpy as np
 
@@ -148,17 +149,21 @@ def _nonnegative_integer_seed(value: object) -> int:
     scalar = array.item()
     if isinstance(scalar, (bool, np.bool_)):
         raise ValueError("random_seed must be an integer, not boolean")
-    if isinstance(scalar, (str, np.str_)):
+    if isinstance(scalar, (str, bytes, np.str_, np.bytes_)):
         raise ValueError("random_seed must be an integer, not string")
     try:
-        numeric = float(scalar)
-    except (TypeError, ValueError, OverflowError) as exc:
-        raise ValueError("random_seed must be an integer") from exc
-    if not np.isfinite(numeric):
-        raise ValueError("random_seed must be a finite integer")
-    integer = int(round(numeric))
-    if not np.isclose(numeric, integer, rtol=0.0, atol=0.0):
-        raise ValueError("random_seed must be an integer")
+        integer = operator.index(scalar)
+    except TypeError:
+        try:
+            integer = int(scalar)
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise ValueError("random_seed must be a finite integer") from exc
+        try:
+            is_exact = bool(scalar == integer)
+        except (TypeError, ValueError):
+            is_exact = False
+        if not is_exact:
+            raise ValueError("random_seed must be an integer")
     if integer < 0:
         raise ValueError("random_seed must be a nonnegative integer")
-    return integer
+    return int(integer)

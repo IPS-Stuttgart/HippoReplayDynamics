@@ -129,12 +129,16 @@ def _positive_integer(name: str, value: Any) -> int:
     if isinstance(item, _STRING_TYPES):
         raise ValueError(f"{name} must be a positive integer, not text")
     try:
-        numeric = float(item)
+        integer = int(item)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ValueError(f"{name} must be a positive integer") from exc
+    try:
+        exactly_integral = bool(item == integer)
     except (TypeError, ValueError) as exc:
         raise ValueError(f"{name} must be a positive integer") from exc
-    if not np.isfinite(numeric) or numeric <= 0.0 or not numeric.is_integer():
+    if not exactly_integral or integer <= 0:
         raise ValueError(f"{name} must be a positive integer")
-    return int(numeric)
+    return integer
 
 
 __all__ = ["apply_observation_sweep_config_validation_patch"]

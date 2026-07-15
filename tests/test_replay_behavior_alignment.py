@@ -88,6 +88,18 @@ def test_behavior_alignment_keeps_legacy_real_event_rows():
     assert bool(features.iloc[0]["exact_core_complete"])
 
 
+def test_behavior_alignment_accepts_arbitrary_precision_integer_evidence_flags():
+    evidence = pd.DataFrame(
+        _event_rows("Rat1/Open1", 0, trajectory=8.0, stationary=0.0, endpoint=(10.0, 0.0), momentum_bonus=0.0)
+    )
+    evidence["evidence_comparable"] = pd.Series([10**400] * len(evidence), dtype=object)
+
+    features = build_event_evidence_features(evidence)
+
+    assert len(features) == 1
+    assert bool(features.iloc[0]["exact_core_complete"])
+
+
 def _event_rows(
     session: str,
     event_index: int,

@@ -291,9 +291,13 @@ def _window_from_score_rows(scores_frame: pd.DataFrame) -> RippleEvent | None:
         return None
     if end <= start:
         raise ValueError("window_end_s must be greater than window_start_s")
+    with np.errstate(over="ignore", invalid="ignore"):
+        duration = float(end - start)
+    if not np.isfinite(duration):
+        raise ValueError("window_end_s - window_start_s must be finite")
     peak = _unique_finite_float(scores_frame, "ripple_peak")
     if peak is None or not start <= peak <= end:
-        peak = start + 0.5 * (end - start)
+        peak = start + 0.5 * duration
     return RippleEvent(float(start), float(end), float(peak), float("nan"), float("nan"), float("nan"))
 
 

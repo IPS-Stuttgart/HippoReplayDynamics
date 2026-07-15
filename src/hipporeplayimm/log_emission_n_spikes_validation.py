@@ -151,30 +151,76 @@ def _require_scalar_count(value: Any, name: str) -> None:
         raise ValueError(f"{name} must be a scalar count")
 
 
-def _validate_n_spikes(emissions: LogEmissionTensor) -> None:
-    if _contains_boolean_values(emissions.spike_counts):
+def _coerce_spike_counts(values: Any) -> np.ndarray:
+    """Return exact platform-integer counts without a binary-float round trip."""
+
+    if _contains_boolean_values(values):
         raise ValueError("spike_counts must be numeric counts, not boolean values")
-    spike_counts = np.asarray(emissions.spike_counts, dtype=float)
-    rounded_counts = np.rint(spike_counts)
-    if not np.all(np.isclose(spike_counts, rounded_counts, rtol=0.0, atol=0.0)):
-        raise ValueError("spike_counts must be integer-valued")
-    total_spikes = float(rounded_counts.sum())
-    _require_scalar_count(emissions.n_spikes, "n_spikes")
-    if _contains_boolean_values(emissions.n_spikes):
+    raw = np.asarray(values)
+    integer_info = np.iinfo(np.dtype(int))
+    canonical = np.empty(raw.shape, dtype=int)
+    flat = canonical.reshape(-1)
+    for index, value in enumerate(raw.reshape(-1)):
+        try:
+            item = np.asarray(value).item()
+        except (TypeError, ValueError) as exc:
+            raise ValueError("spike_counts must contain finite nonnegative values") from exc
+        if isinstance(item, (bool, np.bool_)):
+            raise ValueError("spike_counts must be numeric counts, not boolean values")
+        if isinstance(item, (int, np.integer)):
+            count = int(item)
+            if count < 0:
+                raise ValueError("spike_counts must contain finite nonnegative values")
+        else:
+            try:
+                numeric = float(item)
+            except (TypeError, ValueError, OverflowError) as exc:
+                raise ValueError("spike_counts must contain finite nonnegative values") from exc
+            if not np.isfinite(numeric) or numeric < 0.0:
+                raise ValueError("spike_counts must contain finite nonnegative values")
+            if not numeric.is_integer():
+                raise ValueError("spike_counts must be integer-valued")
+            count = int(numeric)
+        if count > int(integer_info.max):
+            raise ValueError("spike_counts must fit into integer count range")
+        flat[index] = count
+    return canonical
+
+
+def _coerce_n_spikes(value: Any) -> int:
+    """Return an exact nonnegative Python integer count."""
+
+    _require_scalar_count(value, "n_spikes")
+    if _contains_boolean_values(value):
         raise ValueError("n_spikes must be a numeric count, not boolean")
     try:
-        n_spikes = float(emissions.n_spikes)
+        item = np.asarray(value).item()
     except (TypeError, ValueError) as exc:
         raise ValueError("n_spikes must be numeric") from exc
-    if not np.isfinite(n_spikes) or n_spikes < 0.0:
+    if isinstance(item, (int, np.integer)):
+        count = int(item)
+        if count < 0:
+            raise ValueError("n_spikes must be finite and nonnegative")
+        return count
+    try:
+        numeric = float(item)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ValueError("n_spikes must be numeric") from exc
+    if not np.isfinite(numeric) or numeric < 0.0:
         raise ValueError("n_spikes must be finite and nonnegative")
-    rounded = float(np.rint(n_spikes))
-    if not np.isclose(n_spikes, rounded, rtol=0.0, atol=0.0):
+    if not numeric.is_integer():
         raise ValueError("n_spikes must be integer-valued")
-    if not np.isclose(rounded, total_spikes, rtol=0.0, atol=0.0):
+    return int(numeric)
+
+
+def _validate_n_spikes(emissions: LogEmissionTensor) -> None:
+    spike_counts = _coerce_spike_counts(emissions.spike_counts)
+    total_spikes = sum(int(value) for value in spike_counts.reshape(-1))
+    n_spikes = _coerce_n_spikes(emissions.n_spikes)
+    if n_spikes != total_spikes:
         raise ValueError("n_spikes must equal the total spike_counts sum")
-    emissions.spike_counts = rounded_counts.astype(int, copy=False)
-    emissions.n_spikes = int(rounded)
+    emissions.spike_counts = spike_counts
+    emissions.n_spikes = n_spikes
 
 
 def _validate_cell_ids(emissions: LogEmissionTensor) -> None:

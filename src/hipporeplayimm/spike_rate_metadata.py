@@ -103,7 +103,12 @@ def _unique_float_from_columns(
             if text.lower() in _MISSING_METADATA_STRINGS:
                 continue
             if text:
-                numeric = float(value)
+                try:
+                    numeric = float(value)
+                except (TypeError, ValueError, OverflowError) as exc:
+                    raise ValueError(
+                        f"{column} must contain finite numeric metadata values"
+                    ) from exc
                 if not np.isfinite(numeric):
                     raise ValueError(f"{column} must be finite")
                 values.append(numeric)

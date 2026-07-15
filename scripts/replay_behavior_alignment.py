@@ -67,7 +67,9 @@ def _as_bool(value: object) -> bool:
             return False
     except (TypeError, ValueError):
         pass
-    if isinstance(value, (int, float, np.integer, np.floating)):
+    if isinstance(value, (int, np.integer)):
+        return int(value) != 0
+    if isinstance(value, (float, np.floating)):
         numeric = float(value)
         return bool(np.isfinite(numeric) and numeric != 0.0)
     text = str(value).strip().lower()

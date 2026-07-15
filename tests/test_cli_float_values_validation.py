@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import numpy as np
 import pytest
 
 from hipporeplayimm import cli
@@ -24,3 +25,8 @@ def test_cli_float_value_grids_accept_finite_values() -> None:
 def test_positive_integer_count_overflow_is_value_error() -> None:
     with pytest.raises(ValueError, match="n_bootstrap.*positive integer"):
         _positive_integer_count("n_bootstrap", _OverflowingNumeric())
+
+
+@pytest.mark.parametrize("value", [2**53 + 1, np.uint64(2**53 + 1)])
+def test_positive_integer_count_preserves_large_integers(value) -> None:
+    assert _positive_integer_count("n_bootstrap", value) == 2**53 + 1

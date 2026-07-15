@@ -6,7 +6,6 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-
 from hipporeplayimm.candidate_pruning_calibration import score_pruning_gaps
 from hipporeplayimm.data import load_replay_session
 from hipporeplayimm.encoding import EmissionConfig, EncodingConfig, build_emissions, fit_place_field_encoding
@@ -17,6 +16,23 @@ from hipporeplayimm.state_space import StateSpaceDecoderConfig
 def _session_path(root: str | Path, session: str) -> Path:
     rat, open_field = session.replace("\\", "/").split("/", 1)
     return Path(root) / rat / open_field
+
+
+def _parse_models(value: str) -> tuple[str, ...]:
+    """Parse a comma/whitespace model list without dropping empty entries."""
+
+    raw = str(value)
+    if not raw.strip():
+        raise ValueError("--models must contain at least one model")
+    comma_parts = raw.split(",")
+    if any(not part.strip() for part in comma_parts):
+        raise ValueError("--models must not contain empty comma-separated entries")
+    models: list[str] = []
+    for part in comma_parts:
+        models.extend(part.split())
+    if not models:
+        raise ValueError("--models must contain at least one model")
+    return tuple(models)
 
 
 def main() -> int:
@@ -37,6 +53,10 @@ def main() -> int:
     parser.add_argument("--momentum-initial-sigma-cm-sqrt-s", type=float, default=85.0)
     parser.add_argument("--momentum-velocity-decay", type=float, default=0.95)
     args = parser.parse_args()
+    try:
+        model_names = _parse_models(args.models)
+    except ValueError as exc:
+        parser.error(str(exc))
 
     session = load_replay_session(_session_path(args.dataset_root, args.session))
     encoding = fit_place_field_encoding(
@@ -49,7 +69,7 @@ def main() -> int:
     )
     emissions = build_emissions(session, encoding, args.event_index, EmissionConfig(time_bin_s=args.time_bin_s))
     models = []
-    for mode in [item.strip() for item in args.models.replace(" ", ",").split(",") if item.strip()]:
+    for mode in model_names:
         config = StateSpaceDecoderConfig(
             mode=mode,
             diffusion_sigma_cm_sqrt_s=args.diffusion_sigma_cm_sqrt_s,

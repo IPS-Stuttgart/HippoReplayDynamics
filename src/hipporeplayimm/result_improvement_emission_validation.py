@@ -106,7 +106,7 @@ def _finite_positive_scalar(name: str, value: object) -> float:
     _reject_boolean_scalar(name, value)
     try:
         numeric = float(value)
-    except (TypeError, ValueError) as exc:
+    except (TypeError, ValueError, OverflowError) as exc:
         raise ValueError(f"{name} must be finite and positive") from exc
     if not np.isfinite(numeric) or numeric <= 0.0:
         raise ValueError(f"{name} must be finite and positive")
@@ -117,7 +117,7 @@ def _finite_nonnegative_scalar(name: str, value: object) -> float:
     _reject_boolean_scalar(name, value)
     try:
         numeric = float(value)
-    except (TypeError, ValueError) as exc:
+    except (TypeError, ValueError, OverflowError) as exc:
         raise ValueError(f"{name} must be finite and nonnegative") from exc
     if not np.isfinite(numeric) or numeric < 0.0:
         raise ValueError(f"{name} must be finite and nonnegative")
@@ -128,7 +128,7 @@ def _max_gain_scalar(value: object) -> float:
     _reject_boolean_scalar("max_gain", value)
     try:
         numeric = float(value)
-    except (TypeError, ValueError) as exc:
+    except (TypeError, ValueError, OverflowError) as exc:
         raise ValueError("max_gain must be finite and at least 1.0") from exc
     if not np.isfinite(numeric) or numeric < 1.0:
         raise ValueError("max_gain must be finite and at least 1.0")

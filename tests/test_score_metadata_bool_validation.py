@@ -16,6 +16,15 @@ def test_score_metadata_bool_rejects_nonbinary_numeric_values() -> None:
             )
 
 
+@pytest.mark.parametrize("raw", [10**400, -(10**400)])
+def test_score_metadata_bool_rejects_arbitrary_precision_nonbinary_integers(raw: int) -> None:
+    with pytest.raises(ValueError, match="cannot parse boolean value"):
+        encoding_config_for_scores(
+            pd.DataFrame({"encoding_use_excitatory": pd.Series([raw], dtype=object)}),
+            EncodingConfig(),
+        )
+
+
 def test_score_metadata_bool_accepts_binary_numeric_values() -> None:
     for raw in ("1", "1.0", 1, 1.0):
         config = encoding_config_for_scores(

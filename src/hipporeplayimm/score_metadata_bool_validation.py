@@ -23,7 +23,14 @@ def _parse_strict_bool(value: object) -> bool:
 
     if isinstance(value, (bool, np.bool_)):
         return bool(value)
-    if isinstance(value, (int, np.integer, float, np.floating)):
+    if isinstance(value, (int, np.integer)):
+        integer = int(value)
+        if integer == 0:
+            return False
+        if integer == 1:
+            return True
+        raise _bool_parse_error(value)
+    if isinstance(value, (float, np.floating)):
         return _parse_numeric_bool(float(value), value)
 
     text = str(value).strip().lower()

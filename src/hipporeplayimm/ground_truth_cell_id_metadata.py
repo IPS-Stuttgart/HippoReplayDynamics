@@ -54,6 +54,11 @@ _parse_cell_ids_strict.__name__ = "_parse_cell_ids"
 
 def _integer_array_from_values(values: Any) -> np.ndarray:
     parsed = [_parse_cell_id_value(value) for value in np.asarray(values, dtype=object).reshape(-1)]
+    integer_info = np.iinfo(int)
+    if any(value < integer_info.min or value > integer_info.max for value in parsed):
+        raise ValueError(
+            "score-table cell IDs cell ID metadata must fit the platform integer range"
+        )
     return np.asarray(parsed, dtype=int)
 
 

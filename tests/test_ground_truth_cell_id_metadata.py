@@ -24,6 +24,12 @@ def test_parse_cell_ids_rejects_boolean_metadata():
         _parse_cell_ids(np.array([False], dtype=bool))
 
 
+@pytest.mark.parametrize("value", [np.iinfo(int).max + 1, np.iinfo(int).min - 1])
+def test_parse_cell_ids_rejects_values_outside_platform_integer_range(value: int):
+    with pytest.raises(ValueError, match="platform integer range"):
+        _parse_cell_ids([value])
+
+
 def test_ground_truth_cell_id_patch_refreshes_stale_flag(monkeypatch: pytest.MonkeyPatch):
     def stale_parse_cell_ids(_value: object) -> np.ndarray:
         return np.array([0], dtype=int)

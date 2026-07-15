@@ -424,6 +424,13 @@ def _coerce_integral_id(value: Any, name: str, integer_info: np.iinfo) -> int:
         raise ValueError(f"{name} must not contain boolean identifiers")
     if isinstance(item, (int, np.integer)):
         identifier = int(item)
+    elif isinstance(item, Decimal):
+        if not item.is_finite():
+            raise ValueError(f"{name} must be finite integer identifiers")
+        integral = item.to_integral_value()
+        if item != integral:
+            raise ValueError(f"{name} must be integer-valued")
+        identifier = int(integral)
     elif isinstance(item, (str, bytes)):
         identifier = _coerce_integral_text_id(item, name)
     else:

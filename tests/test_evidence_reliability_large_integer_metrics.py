@@ -8,15 +8,13 @@ from hipporeplayimm.evidence_reliability import add_event_reliability_flags
 def test_reliability_flags_keep_arbitrary_size_integer_counts_valid() -> None:
     huge_count = 10**400
     scores = pd.DataFrame(
-        [
-            {
-                "model": "diffusion",
-                "status": "success",
-                "n_spikes": huge_count,
-                "n_time": huge_count,
-                "mean_candidate_log_mass": 0.0,
-            }
-        ]
+        {
+            "model": pd.Series(["diffusion"], dtype=object),
+            "status": pd.Series(["success"], dtype=object),
+            "n_spikes": pd.Series([huge_count], dtype=object),
+            "n_time": pd.Series([huge_count], dtype=object),
+            "mean_candidate_log_mass": pd.Series([0.0], dtype=object),
+        }
     )
 
     flagged = add_event_reliability_flags(scores)

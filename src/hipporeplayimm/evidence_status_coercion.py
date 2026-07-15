@@ -372,7 +372,9 @@ def _is_explicit_false_value(value: object) -> bool:
         return not bool(value)
     if _is_missing_scalar(value):
         return False
-    if isinstance(value, (int, float, np.integer, np.floating)):
+    if isinstance(value, (int, np.integer)):
+        return int(value) == 0
+    if isinstance(value, (float, np.floating)):
         numeric = float(value)
         return bool(np.isfinite(numeric) and numeric == 0.0)
     return str(value).strip().lower() in _EXPLICIT_FALSE_BOOL_VALUES

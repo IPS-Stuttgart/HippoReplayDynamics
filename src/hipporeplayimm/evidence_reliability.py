@@ -34,6 +34,17 @@ def event_reliability_flags(
 ) -> dict[str, object]:
     """Return interpretable reliability flags for one score row."""
 
+    min_spikes = _nonnegative_integer_threshold("min_spikes", min_spikes)
+    min_time_bins = _nonnegative_integer_threshold("min_time_bins", min_time_bins)
+    min_candidate_log_mass = _real_threshold(
+        "min_candidate_log_mass",
+        min_candidate_log_mass,
+    )
+    max_terminal_entropy = _nonnegative_real_threshold(
+        "max_terminal_entropy",
+        max_terminal_entropy,
+    )
+
     reasons: list[str] = []
     invalid_numeric_metric = False
     status = row.get("status", "success")
@@ -83,15 +94,96 @@ def event_reliability_flags(
     }
 
 
-def add_event_reliability_flags(df: pd.DataFrame, **kwargs) -> pd.DataFrame:
+def add_event_reliability_flags(
+    df: pd.DataFrame,
+    *,
+    min_spikes: int = DEFAULT_MIN_SPIKES,
+    min_time_bins: int = DEFAULT_MIN_TIME_BINS,
+    min_candidate_log_mass: float = DEFAULT_MIN_CANDIDATE_LOG_MASS,
+    max_terminal_entropy: float = DEFAULT_MAX_TERMINAL_ENTROPY,
+) -> pd.DataFrame:
+    validated_thresholds = {
+        "min_spikes": _nonnegative_integer_threshold("min_spikes", min_spikes),
+        "min_time_bins": _nonnegative_integer_threshold("min_time_bins", min_time_bins),
+        "min_candidate_log_mass": _real_threshold(
+            "min_candidate_log_mass",
+            min_candidate_log_mass,
+        ),
+        "max_terminal_entropy": _nonnegative_real_threshold(
+            "max_terminal_entropy",
+            max_terminal_entropy,
+        ),
+    }
     base = df.copy()
     existing_flag_columns = [column for column in RELIABILITY_FLAG_COLUMNS if column in base.columns]
     if existing_flag_columns:
         base = base.drop(columns=existing_flag_columns)
     if base.empty:
         return base
-    flags = pd.DataFrame([event_reliability_flags(row, **kwargs) for _, row in base.iterrows()], index=base.index)
+    flags = pd.DataFrame(
+        [
+            event_reliability_flags(row, **validated_thresholds)
+            for _, row in base.iterrows()
+        ],
+        index=base.index,
+    )
     return pd.concat([base, flags], axis=1)
+
+
+def _nonnegative_integer_threshold(name: str, value: object) -> int:
+    """Return a canonical nonnegative integer threshold."""
+
+    try:
+        raw = np.asarray(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must be a nonnegative integer") from exc
+    if raw.ndim != 0:
+        raise ValueError(f"{name} must be a nonnegative integer")
+    item = raw.item()
+    if isinstance(item, (bool, np.bool_, str, bytes, np.str_, np.bytes_)):
+        raise ValueError(f"{name} must be a nonnegative integer")
+    if isinstance(item, (complex, np.complexfloating)):
+        raise ValueError(f"{name} must be a nonnegative integer")
+    try:
+        integer = int(item)
+        exact = bool(item == integer)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ValueError(f"{name} must be a nonnegative integer") from exc
+    if not exact or integer < 0:
+        raise ValueError(f"{name} must be a nonnegative integer")
+    return integer
+
+
+def _real_threshold(name: str, value: object) -> float:
+    """Return a scalar real threshold while rejecting NaN and coercive types."""
+
+    try:
+        raw = np.asarray(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must be a real scalar and cannot be NaN") from exc
+    if raw.ndim != 0:
+        raise ValueError(f"{name} must be a real scalar and cannot be NaN")
+    item = raw.item()
+    if isinstance(item, (bool, np.bool_, str, bytes, np.str_, np.bytes_)):
+        raise ValueError(f"{name} must be a real scalar and cannot be NaN")
+    if isinstance(item, (complex, np.complexfloating)):
+        raise ValueError(f"{name} must be a real scalar and cannot be NaN")
+    try:
+        numeric = float(item)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ValueError(f"{name} must be a real scalar and cannot be NaN") from exc
+    if np.isnan(numeric):
+        raise ValueError(f"{name} must be a real scalar and cannot be NaN")
+    return numeric
+
+
+def _nonnegative_real_threshold(name: str, value: object) -> float:
+    """Return a nonnegative scalar real threshold, allowing positive infinity."""
+
+    numeric = _real_threshold(name, value)
+    if numeric < 0.0:
+        raise ValueError(f"{name} must be nonnegative")
+    return numeric
 
 
 def _evidence_support_labels_for_reliability(row: pd.Series) -> list[str]:

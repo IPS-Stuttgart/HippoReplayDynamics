@@ -12,6 +12,7 @@ _PATCHED_FLAG = "_result_quality_audit_scope_patch_applied"
 _EVENT_COUNT_PATCHED_FLAG = "_result_quality_audit_event_count_scope_patch_applied"
 _HELDOUT_INFLUENCE_PATCHED_FLAG = "_result_quality_audit_heldout_influence_patch_applied"
 _DISTINCT_MODEL_MARGIN_PATCHED_FLAG = "_result_quality_distinct_model_margin_patch_applied"
+_INTEGER_BOOL_PATCHED_FLAG = "_result_quality_audit_integer_bool_patch_applied"
 _MISSING_TEXT_VALUES = {"", "nan", "na", "n/a", "none", "null", "<na>"}
 _EVENT_GROUP_SESSION_COLUMNS = ("session",)
 _EVENT_GROUP_EVENT_COLUMNS = ("event_index", "event_id")
@@ -136,6 +137,23 @@ def _heldout_aware_influence_summary(audit_module: Any, scores: pd.DataFrame) ->
     return out if not out.empty else pd.DataFrame(columns=list(_INFLUENCE_COLUMNS))
 
 
+def _patch_exact_integer_boolean_values(audit_module: Any) -> None:
+    """Keep arbitrary-precision integer gate flags out of binary-float coercion."""
+
+    current_bool_value = audit_module._bool_value
+    if getattr(current_bool_value, _INTEGER_BOOL_PATCHED_FLAG, False):
+        return
+
+    @wraps(current_bool_value)
+    def exact_integer_bool_value(value: object) -> bool:
+        if isinstance(value, (int, np.integer)) and not isinstance(value, (bool, np.bool_)):
+            return int(value) != 0
+        return current_bool_value(value)
+
+    setattr(exact_integer_bool_value, _INTEGER_BOOL_PATCHED_FLAG, True)
+    audit_module._bool_value = exact_integer_bool_value
+
+
 def _patch_distinct_model_result_quality_margins(gates_module: Any) -> None:
     """Make result-quality margins compare the best finite row per model."""
 
@@ -200,7 +218,7 @@ def _patch_distinct_model_result_quality_margins(gates_module: Any) -> None:
 
 
 def apply_result_quality_audit_scope_patch() -> None:
-    """Install scoped grouping for result-quality audit summaries."""
+    """Install scoped grouping and scalar coercion for result-quality summaries."""
 
     from . import advanced_result_evidence_margin_duplicates
     from . import result_quality_audit as audit_module
@@ -208,6 +226,7 @@ def apply_result_quality_audit_scope_patch() -> None:
 
     advanced_result_evidence_margin_duplicates.apply_evidence_margin_distinct_model_patch()
     _patch_distinct_model_result_quality_margins(gates_module)
+    _patch_exact_integer_boolean_values(audit_module)
 
     current_group_columns = audit_module.event_group_columns
     if not getattr(current_group_columns, _PATCHED_FLAG, False):

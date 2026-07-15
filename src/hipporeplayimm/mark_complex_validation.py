@@ -17,6 +17,9 @@ import numpy as np
 
 _PATCHED_FLAG = "_mark_complex_validation_patch_applied"
 _DATA_WRAPPER_ATTR = "_mark_complex_validation_wrapper"
+# Backward-compatible private alias retained for runtime-patch regression tests
+# and any callers that still inspect the original wrapper marker name.
+_PATCH_WRAPPER_ATTR = _DATA_WRAPPER_ATTR
 _CLUSTERLESS_WRAPPER_ATTR = "_mark_complex_validation_clusterless_wrapper"
 
 

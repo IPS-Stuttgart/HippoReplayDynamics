@@ -1,8 +1,12 @@
 from __future__ import annotations
 
 
+from functools import wraps
+
 import numpy as np
 import pandas as pd
+
+from .result_improvement_seed_validation import _nonnegative_integer_seed
 
 PYRECEST_INT_COLUMNS = {
     "pyrecest_particles": ("pyrecest_particles", "diagnostic_pyrecest_particles"),
@@ -44,6 +48,8 @@ PYRECEST_DEFAULTS = {
 }
 
 PYRECEST_FLOAT_METADATA_ATOL = 1e-12
+_EVENT_SEED_WRAPPER_MARKER = "_pyrecest_event_seed_validation_wrapper"
+_EVENT_SEED_MODULUS = 2**32
 
 
 def pyrecest_metadata_for_config(config: object) -> dict[str, int | float]:
@@ -81,8 +87,10 @@ def pyrecest_config_kwargs_for_scores(scores: pd.DataFrame, defaults: dict[str, 
 def apply_pyrecest_score_metadata_patch() -> None:
     from . import benchmarks as bench
     from . import ground_truth as gt
+    from . import pyrecest_models
     from .pyrecest_models import PyRecEstGoalParticleIMMModel, PyRecEstGoalParticleModel
 
+    _patch_event_seed(pyrecest_models)
     if getattr(gt, "_pyrecest_score_metadata_patch_applied", False):
         return
 
@@ -116,6 +124,25 @@ def apply_pyrecest_score_metadata_patch() -> None:
     if not getattr(PyRecEstGoalParticleIMMModel.score, "_pyrecest_metadata_wrapped", False):
         PyRecEstGoalParticleIMMModel.score = _score_with_metadata(PyRecEstGoalParticleIMMModel.score)
     gt._pyrecest_score_metadata_patch_applied = True
+
+
+def _patch_event_seed(pyrecest_models: object) -> None:
+    current = pyrecest_models._event_seed
+    if getattr(current, _EVENT_SEED_WRAPPER_MARKER, False):
+        return
+    original = getattr(current, "__hipporeplayimm_original__", current)
+
+    @wraps(original)
+    def event_seed(random_seed, emissions) -> int:
+        seed = _nonnegative_integer_seed(random_seed, "random_seed")
+        event_offset = 0
+        if emissions.times.size:
+            event_offset = int(round(float(emissions.times[0]) * 1000.0))
+        return int((seed + event_offset + 1009 * emissions.n_time) % _EVENT_SEED_MODULUS)
+
+    setattr(event_seed, _EVENT_SEED_WRAPPER_MARKER, True)
+    setattr(event_seed, "__hipporeplayimm_original__", original)
+    pyrecest_models._event_seed = event_seed
 
 
 def _model_diagnostics(model: object) -> dict[str, int | float]:

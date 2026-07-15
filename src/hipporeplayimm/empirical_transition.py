@@ -55,6 +55,8 @@ def _validated_transition_matrix(transition: csr_matrix, n_bins: int) -> csr_mat
     matrix = csr_matrix(transition)
     if matrix.shape != (n_bins, n_bins):
         raise ValueError("transition matrix shape must match emissions.n_bins")
+    if matrix.dtype.kind == "c":
+        raise ValueError("transition matrix entries must be real")
 
     data = np.asarray(matrix.data, dtype=float)
     if not np.all(np.isfinite(data)):

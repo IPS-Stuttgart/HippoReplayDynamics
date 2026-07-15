@@ -24,7 +24,7 @@ def _contains_boolean_numeric(value: object) -> bool:
 
     try:
         values = np.asarray(value)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         return False
     if np.issubdtype(values.dtype, np.bool_):
         return True
@@ -38,7 +38,7 @@ def _contains_complex_numeric(value: object) -> bool:
 
     try:
         values = np.asarray(value)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         return False
     if np.issubdtype(values.dtype, np.complexfloating):
         return True
@@ -55,6 +55,15 @@ def _reject_boolean_numeric(name: str, value: object) -> None:
 def _reject_complex_numeric(name: str, value: object) -> None:
     if _contains_complex_numeric(value):
         raise ValueError(f"{name} must contain real values, not complex values")
+
+
+def _reject_float_overflow(name: str, value: object) -> None:
+    """Normalize oversized numeric values to the public validation contract."""
+
+    try:
+        np.asarray(value, dtype=float)
+    except OverflowError as exc:
+        raise ValueError(f"{name} must contain values representable as floating point") from exc
 
 
 def _validate_log_emission_fields(tensor: object) -> None:
@@ -81,6 +90,18 @@ def _validate_log_emission_fields(tensor: object) -> None:
         value = getattr(tensor, name)
         if value is not None:
             _reject_complex_numeric(name, value)
+
+    for name in (
+        "log_likelihood",
+        "spike_counts",
+        "times",
+        "dt",
+        "bin_durations",
+        "transition_durations",
+    ):
+        value = getattr(tensor, name)
+        if value is not None:
+            _reject_float_overflow(name, value)
 
 
 def apply_emission_timing_validation_patch() -> None:

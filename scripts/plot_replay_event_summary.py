@@ -14,6 +14,20 @@ from scipy.special import logsumexp
 from hipporeplayimm.trajectory_metrics import trajectory_quality_metrics
 
 
+def _select_event_scores(scores: pd.DataFrame, *, session: str, event_index: int) -> pd.DataFrame:
+    """Select one event without lossy integer coercion of other score rows."""
+
+    session_scores = scores.loc[scores["session"].astype(str) == session]
+    if session_scores.empty:
+        return session_scores
+    try:
+        numeric_event_indices = pd.to_numeric(session_scores["event_index"], errors="raise")
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"event_index values for session {session!r} must be numeric") from exc
+    exact_match = numeric_event_indices.eq(event_index).fillna(False)
+    return session_scores.loc[exact_match]
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--scores", required=True)
@@ -24,7 +38,7 @@ def main() -> int:
     args = parser.parse_args()
 
     scores = pd.read_csv(args.scores)
-    event_scores = scores[(scores["session"].astype(str) == args.session) & (scores["event_index"].astype(int) == args.event_index)]
+    event_scores = _select_event_scores(scores, session=args.session, event_index=args.event_index)
     if event_scores.empty:
         raise SystemExit("No score rows matched the requested event.")
 

@@ -37,3 +37,18 @@ def test_shuffle_well_labels_keeps_nonfinite_ids_out_of_permutation() -> None:
     assert np.isposinf(shuffled.loc[0, "true_well_id"])
     assert set(shuffled.loc[[1, 2], "true_well_id"]) == {"A", "B"}
     pd.testing.assert_series_equal(shuffled["event"], frame["event"])
+
+
+def test_shuffle_well_labels_accepts_arbitrary_precision_integer_ids() -> None:
+    huge_id = 10**400
+    frame = pd.DataFrame(
+        {
+            "event": [0, 1, 2],
+            "true_well_id": [huge_id, "A", None],
+        }
+    )
+
+    shuffled = shuffle_well_labels(frame, random_seed=3)
+
+    assert shuffled["true_well_id"].tolist() == ["A", huge_id, None]
+    pd.testing.assert_series_equal(shuffled["event"], frame["event"])

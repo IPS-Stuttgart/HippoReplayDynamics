@@ -246,7 +246,16 @@ def _parse_float_metadata_value(column: str, value: Any) -> float:
     if isinstance(value, (bool, np.bool_)):
         raise ValueError(f"{column} must contain finite numeric values")
     try:
-        numeric = float(value)
+        raw = np.asarray(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{column} must contain finite numeric values") from exc
+    if raw.ndim != 0:
+        raise ValueError(f"{column} must contain finite numeric values")
+    item = raw.item()
+    if isinstance(item, (bool, np.bool_)):
+        raise ValueError(f"{column} must contain finite numeric values")
+    try:
+        numeric = float(item)
     except (TypeError, ValueError, OverflowError) as exc:
         raise ValueError(f"{column} must contain finite numeric values") from exc
     if not np.isfinite(numeric):

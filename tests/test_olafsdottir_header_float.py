@@ -26,6 +26,22 @@ def test_axona_tetrode_timebase_accepts_scientific_notation(tmp_path: Path) -> N
     assert times.tolist() == pytest.approx([1.0])
 
 
+def test_axona_tetrode_timebase_falls_back_from_nonfinite_overflow(tmp_path: Path) -> None:
+    path = tmp_path / "session.1"
+    header = (
+        "num_spikes 1\n"
+        "timebase 1e309 hz\n"
+        "samples_per_spike 2\n"
+        "data_start"
+    ).encode("ascii")
+    payload = struct.pack(">I", 96000) + b"\x00" * 8
+    path.write_bytes(header + payload)
+
+    times = read_axona_tetrode_spike_times(path)
+
+    assert times.tolist() == pytest.approx([1.0])
+
+
 def test_header_float_patch_refreshes_stale_flag(monkeypatch: pytest.MonkeyPatch) -> None:
     def stale_header_float(header: dict[str, str], key: str, default: float) -> float:
         return float(default)

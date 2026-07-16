@@ -145,7 +145,11 @@ def _patch_state_space_utils_mode_transition() -> None:
     @wraps(current)
     def mode_transition_matrix(n_modes, stickiness):
         _reject_boolean_or_array_scalar("mode_stickiness", stickiness)
-        return current(n_modes, stickiness)
+        try:
+            numeric_stickiness = float(np.asarray(stickiness).item())
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise ValueError("mode_stickiness must be in [0, 1]") from exc
+        return current(n_modes, numeric_stickiness)
 
     setattr(mode_transition_matrix, _MODE_TRANSITION_PATCHED_FLAG, True)
     setattr(mode_transition_matrix, "__hipporeplayimm_original__", current)

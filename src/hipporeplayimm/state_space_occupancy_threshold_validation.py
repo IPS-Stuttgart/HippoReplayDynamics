@@ -61,6 +61,17 @@ def _reject_numeric_scalar_type(name: str, value: Any) -> None:
             raise TypeError(f"{name} must be a numeric scalar, not string")
 
 
+def _validated_occupancy_threshold(value: Any) -> float:
+    _reject_numeric_scalar_type("min_occupancy_s", value)
+    try:
+        threshold = float(np.asarray(value).item())
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ValueError("min_occupancy_s must be finite and nonnegative") from exc
+    if not np.isfinite(threshold) or threshold < 0.0:
+        raise ValueError("min_occupancy_s must be finite and nonnegative")
+    return threshold
+
+
 def _validate_occupancy_seconds(occupancy_s: Any) -> None:
     if occupancy_s is None:
         return
@@ -82,8 +93,12 @@ def _validate_occupancy_seconds(occupancy_s: Any) -> None:
             raise TypeError("occupancy_s must contain numeric seconds, not string values")
     try:
         numeric = np.asarray(occupancy_s, dtype=float)
+    except OverflowError as exc:
+        raise ValueError("occupancy_s must contain finite occupancy seconds") from exc
     except (TypeError, ValueError) as exc:
         raise TypeError("occupancy_s must contain real numeric occupancy seconds") from exc
+    if not np.all(np.isfinite(numeric)):
+        raise ValueError("occupancy_s must contain finite occupancy seconds")
     if np.any(numeric < 0.0):
         raise ValueError("occupancy_s must contain nonnegative occupancy seconds")
 
@@ -111,8 +126,8 @@ def apply_state_space_occupancy_threshold_validation_patch() -> None:
     @wraps(current)
     def valid_bin_mask_from_occupancy(occupancy_s, min_occupancy_s, n_bins):
         _validate_occupancy_seconds(occupancy_s)
-        _reject_numeric_scalar_type("min_occupancy_s", min_occupancy_s)
-        return current(occupancy_s, min_occupancy_s, n_bins)
+        threshold = _validated_occupancy_threshold(min_occupancy_s)
+        return current(occupancy_s, threshold, n_bins)
 
     setattr(valid_bin_mask_from_occupancy, _PATCHED_FLAG, True)
     setattr(valid_bin_mask_from_occupancy, "__hipporeplayimm_original__", current)

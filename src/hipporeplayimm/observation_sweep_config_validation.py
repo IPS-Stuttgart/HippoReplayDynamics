@@ -100,7 +100,7 @@ def _finite_float(name: str, value: Any) -> float:
         raise ValueError(f"{name} values must be finite scalars")
     try:
         array = np.asarray(value)
-    except (TypeError, ValueError) as exc:
+    except (TypeError, ValueError, OverflowError) as exc:
         raise ValueError(f"{name} values must be finite scalars") from exc
     if array.ndim != 0:
         raise ValueError(f"{name} values must be finite scalars")
@@ -109,7 +109,7 @@ def _finite_float(name: str, value: Any) -> float:
         raise ValueError(f"{name} values must be finite numeric scalars, not text")
     try:
         numeric = float(item)
-    except (TypeError, ValueError) as exc:
+    except (TypeError, ValueError, OverflowError) as exc:
         raise ValueError(f"{name} values must be finite scalars") from exc
     if not np.isfinite(numeric):
         raise ValueError(f"{name} values must be finite scalars")

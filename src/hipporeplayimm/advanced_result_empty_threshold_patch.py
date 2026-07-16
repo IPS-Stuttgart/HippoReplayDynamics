@@ -243,7 +243,19 @@ def apply_advanced_result_empty_threshold_patch() -> None:
             summary["group_cols"] = ",".join(paired_group_cols)
             rows.append(summary)
         if not rows:
-            return pd.DataFrame()
+            summary = diagnostics.paired_model_margin_summary(
+                pd.DataFrame(),
+                true_model_col=true_model_col,
+            )
+            summary = _with_threshold_context(
+                summary,
+                positive_model=positive_model,
+                reference_model=reference_model,
+                threshold=np.nan,
+                true_model_col=true_model_col,
+            )
+            summary["group_cols"] = ",".join(paired_group_cols)
+            return summary.iloc[0:0].copy()
         out = pd.concat(rows, ignore_index=True)
         return out.sort_values("margin_threshold", kind="stable").reset_index(drop=True)
 

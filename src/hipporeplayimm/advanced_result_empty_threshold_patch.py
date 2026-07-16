@@ -25,6 +25,8 @@ import numpy as np
 import pandas as pd
 
 _PATCHED_FLAG = "_advanced_result_empty_threshold_patch_applied"
+_THRESHOLD_SWEEP_WRAPPER_FLAG = "_empty_threshold_sweep_schema_wrapper"
+_THRESHOLD_APPLY_WRAPPER_FLAG = "_empty_threshold_sweep_apply_wrapper"
 _RELIABILITY_PATCHED_FLAG = "_empty_reliability_schema_patch_applied"
 _RELIABILITY_WRAPPER_FLAG = "_empty_reliability_schema_wrapper"
 _SIMULATION_PATCHED_FLAG = "_empty_simulation_evidence_schema_patch_applied"
@@ -49,7 +51,10 @@ _SIMULATION_EXPECTED_MODEL_COLUMNS = (
 )
 
 
-def _normalize_group_cols(group_cols: Sequence[str] | str | None, scores: pd.DataFrame) -> tuple[str, ...]:
+def _normalize_group_cols(
+    group_cols: Sequence[str] | str | None,
+    scores: pd.DataFrame,
+) -> tuple[str, ...]:
     if group_cols is None:
         from . import advanced_result_diagnostics as diagnostics
 
@@ -90,6 +95,109 @@ def _with_threshold_context(
             if column not in out:
                 out[column] = value
     return out
+
+
+def _empty_threshold_sweep_schema(
+    diagnostics,
+    scores: pd.DataFrame,
+    *,
+    positive_model: str,
+    reference_model: str,
+    group_cols: Sequence[str] | str | None,
+    true_model_col: str | None,
+) -> pd.DataFrame:
+    """Build the public zero-row schema for an empty threshold sequence."""
+
+    paired_group_cols = _normalize_group_cols(group_cols, scores)
+    summary = diagnostics.paired_model_margin_summary(
+        pd.DataFrame(),
+        true_model_col=true_model_col,
+    )
+    summary = _with_threshold_context(
+        summary,
+        positive_model=positive_model,
+        reference_model=reference_model,
+        threshold=np.nan,
+        true_model_col=true_model_col,
+    )
+    summary["group_cols"] = ",".join(paired_group_cols)
+    return summary.iloc[0:0].copy()
+
+
+def _wrap_threshold_sweep_with_empty_schema(diagnostics) -> None:
+    """Wrap the final sweep implementation without bypassing its validation."""
+
+    current = diagnostics.paired_model_margin_threshold_sweep
+    if getattr(current, _THRESHOLD_SWEEP_WRAPPER_FLAG, False):
+        return
+
+    @wraps(current)
+    def paired_model_margin_threshold_sweep(
+        scores: pd.DataFrame,
+        *,
+        positive_model: str,
+        reference_model: str,
+        thresholds: Sequence[float],
+        group_cols: Sequence[str] | str | None = None,
+        evidence_col: str = "log_evidence",
+        model_col: str = "model",
+        true_model_col: str | None = None,
+        positive_true_label: str | None = None,
+    ) -> pd.DataFrame:
+        out = current(
+            scores,
+            positive_model=positive_model,
+            reference_model=reference_model,
+            thresholds=thresholds,
+            group_cols=group_cols,
+            evidence_col=evidence_col,
+            model_col=model_col,
+            true_model_col=true_model_col,
+            positive_true_label=positive_true_label,
+        )
+        if not out.empty or len(out.columns) > 0:
+            return out
+        return _empty_threshold_sweep_schema(
+            diagnostics,
+            scores,
+            positive_model=positive_model,
+            reference_model=reference_model,
+            group_cols=group_cols,
+            true_model_col=true_model_col,
+        )
+
+    setattr(
+        paired_model_margin_threshold_sweep,
+        _THRESHOLD_SWEEP_WRAPPER_FLAG,
+        True,
+    )
+    diagnostics.paired_model_margin_threshold_sweep = (
+        paired_model_margin_threshold_sweep
+    )
+
+
+def _install_threshold_validation_after_hook(diagnostics) -> None:
+    """Reapply schema preservation after threshold validation replaces the sweep."""
+
+    from . import advanced_result_threshold_validation as threshold_validation
+
+    current_apply = threshold_validation.apply_advanced_result_threshold_validation_patch
+    if getattr(current_apply, _THRESHOLD_APPLY_WRAPPER_FLAG, False):
+        return
+
+    @wraps(current_apply)
+    def apply_advanced_result_threshold_validation_patch() -> None:
+        current_apply()
+        _wrap_threshold_sweep_with_empty_schema(diagnostics)
+
+    setattr(
+        apply_advanced_result_threshold_validation_patch,
+        _THRESHOLD_APPLY_WRAPPER_FLAG,
+        True,
+    )
+    threshold_validation.apply_advanced_result_threshold_validation_patch = (
+        apply_advanced_result_threshold_validation_patch
+    )
 
 
 def _with_empty_reliability_schema(frame: pd.DataFrame, reliability) -> pd.DataFrame:
@@ -197,57 +305,8 @@ def apply_advanced_result_empty_threshold_patch() -> None:
     _apply_distinct_model_margin_patch()
     _apply_event_reliability_empty_schema_patch()
     _apply_simulation_evidence_empty_schema_patch()
-    if getattr(diagnostics, _PATCHED_FLAG, False):
-        return
-
-    def paired_model_margin_threshold_sweep(
-        scores: pd.DataFrame,
-        *,
-        positive_model: str,
-        reference_model: str,
-        thresholds: Sequence[float],
-        group_cols: Sequence[str] | str | None = None,
-        evidence_col: str = "log_evidence",
-        model_col: str = "model",
-        true_model_col: str | None = None,
-        positive_true_label: str | None = None,
-    ) -> pd.DataFrame:
-        """Summarize paired margin decisions over candidate thresholds."""
-
-        paired_group_cols = _normalize_group_cols(group_cols, scores)
-        rows: list[pd.DataFrame] = []
-        for threshold in thresholds:
-            threshold_value = float(threshold)
-            decisions = diagnostics.paired_model_margin_decisions(
-                scores,
-                positive_model=positive_model,
-                reference_model=reference_model,
-                margin_threshold=threshold_value,
-                group_cols=paired_group_cols,
-                evidence_col=evidence_col,
-                model_col=model_col,
-                true_model_col=true_model_col,
-                positive_true_label=positive_true_label,
-            )
-            summary = diagnostics.paired_model_margin_summary(
-                decisions,
-                true_model_col=true_model_col,
-            )
-            summary = _with_threshold_context(
-                summary,
-                positive_model=positive_model,
-                reference_model=reference_model,
-                threshold=threshold_value,
-                true_model_col=true_model_col,
-            )
-            summary["group_cols"] = ",".join(paired_group_cols)
-            rows.append(summary)
-        if not rows:
-            return pd.DataFrame()
-        out = pd.concat(rows, ignore_index=True)
-        return out.sort_values("margin_threshold", kind="stable").reset_index(drop=True)
-
-    diagnostics.paired_model_margin_threshold_sweep = paired_model_margin_threshold_sweep
+    _wrap_threshold_sweep_with_empty_schema(diagnostics)
+    _install_threshold_validation_after_hook(diagnostics)
     setattr(diagnostics, _PATCHED_FLAG, True)
 
 

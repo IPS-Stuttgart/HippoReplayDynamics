@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from functools import wraps
 
 import numpy as np
@@ -11,6 +12,7 @@ _PATCHED_FLAG = "_evidence_margin_distinct_model_patch_applied"
 _MARGIN_FLAG = "_evidence_margin_distinct_model_wrapper"
 _ADD_FLAG = "_evidence_margin_distinct_model_add_columns_wrapper"
 _BOOL_FLAG = "_evidence_margin_arbitrary_integer_bool_wrapper"
+_EMPTY_SWEEP_FLAG = "_evidence_margin_empty_threshold_sweep_wrapper"
 _DEFAULT_GROUP_COLUMNS = ("session", "event_index")
 _MARGIN_COLUMNS = (
     "best_model_by_evidence",
@@ -31,22 +33,38 @@ def apply_evidence_margin_distinct_model_patch() -> None:
     current_margin = diagnostics.evidence_margin_table
     current_add = diagnostics.add_evidence_margin_columns
     current_bool = diagnostics._as_bool
+    current_sweep = diagnostics.paired_model_margin_threshold_sweep
     if (
         getattr(diagnostics, _PATCHED_FLAG, False)
         and getattr(current_margin, _MARGIN_FLAG, False)
         and getattr(current_add, _ADD_FLAG, False)
         and getattr(current_bool, _BOOL_FLAG, False)
+        and getattr(current_sweep, _EMPTY_SWEEP_FLAG, False)
     ):
         return
     original_margin = current_margin
     original_bool = current_bool
+    original_sweep = current_sweep
 
-    def evidence_margin_table(scores, *, group_cols=_DEFAULT_GROUP_COLUMNS, evidence_col="log_evidence", model_col="model"):
+    def evidence_margin_table(
+        scores,
+        *,
+        group_cols=_DEFAULT_GROUP_COLUMNS,
+        evidence_col="log_evidence",
+        model_col="model",
+    ):
         groups = _normalize_group_cols(group_cols)
-        collapsed = _collapse_duplicate_models(diagnostics, scores, groups, evidence_col, model_col)
+        collapsed = _collapse_duplicate_models(
+            diagnostics, scores, groups, evidence_col, model_col
+        )
         target = scores if collapsed is None else collapsed
         if groups:
-            return original_margin(target, group_cols=groups, evidence_col=evidence_col, model_col=model_col)
+            return original_margin(
+                target,
+                group_cols=groups,
+                evidence_col=evidence_col,
+                model_col=model_col,
+            )
         return _global_evidence_margin_table(
             original_margin,
             target,
@@ -71,29 +89,111 @@ def apply_evidence_margin_distinct_model_patch() -> None:
 
     @wraps(original_bool)
     def _as_bool(value: object, *, default: bool = False) -> bool:
-        if isinstance(value, (int, np.integer)) and not isinstance(value, (bool, np.bool_)):
+        if isinstance(value, (int, np.integer)) and not isinstance(
+            value, (bool, np.bool_)
+        ):
             return int(value) != 0
         return original_bool(value, default=default)
+
+    @wraps(original_sweep)
+    def paired_model_margin_threshold_sweep(
+        scores: pd.DataFrame,
+        *,
+        positive_model: str,
+        reference_model: str,
+        thresholds: Sequence[float],
+        group_cols: Sequence[str] | str | None = None,
+        evidence_col: str = "log_evidence",
+        model_col: str = "model",
+        true_model_col: str | None = None,
+        positive_true_label: str | None = None,
+    ) -> pd.DataFrame:
+        """Preserve the public threshold-sweep schema for zero thresholds."""
+
+        out = original_sweep(
+            scores,
+            positive_model=positive_model,
+            reference_model=reference_model,
+            thresholds=thresholds,
+            group_cols=group_cols,
+            evidence_col=evidence_col,
+            model_col=model_col,
+            true_model_col=true_model_col,
+            positive_true_label=positive_true_label,
+        )
+        if not out.empty or len(out.columns) > 0:
+            return out
+
+        if group_cols is None:
+            paired_group_cols = tuple(
+                diagnostics.infer_paired_model_group_cols(scores)
+            )
+        elif isinstance(group_cols, str):
+            paired_group_cols = (group_cols,)
+        else:
+            paired_group_cols = tuple(group_cols)
+
+        summary = diagnostics.paired_model_margin_summary(
+            pd.DataFrame(),
+            true_model_col=true_model_col,
+        ).copy()
+        summary["positive_model"] = str(positive_model)
+        summary["reference_model"] = str(reference_model)
+        summary["margin_threshold"] = np.nan
+        if true_model_col:
+            defaults: dict[str, float | int] = {
+                "thresholded_binary_accuracy": np.nan,
+                "positive_true_events": 0,
+                "reference_true_events": 0,
+                "positive_true_claimed_events": 0,
+                "reference_true_rejected_events": 0,
+                "positive_claim_recall": np.nan,
+                "reference_specificity": np.nan,
+                "false_positive_claims": 0,
+                "false_negative_claims": 0,
+            }
+            for column, value in defaults.items():
+                if column not in summary.columns:
+                    summary[column] = value
+        summary["group_cols"] = ",".join(paired_group_cols)
+        return summary.iloc[0:0].copy()
 
     setattr(evidence_margin_table, _MARGIN_FLAG, True)
     setattr(add_evidence_margin_columns, _ADD_FLAG, True)
     setattr(_as_bool, _BOOL_FLAG, True)
+    setattr(paired_model_margin_threshold_sweep, _EMPTY_SWEEP_FLAG, True)
     diagnostics.evidence_margin_table = evidence_margin_table
     diagnostics.add_evidence_margin_columns = add_evidence_margin_columns
     diagnostics._as_bool = _as_bool
+    diagnostics.paired_model_margin_threshold_sweep = (
+        paired_model_margin_threshold_sweep
+    )
     setattr(diagnostics, _PATCHED_FLAG, True)
 
 
-def _collapse_duplicate_models(diagnostics, scores: pd.DataFrame, group_cols: tuple[str, ...], evidence_col: str, model_col: str) -> pd.DataFrame | None:
+def _collapse_duplicate_models(
+    diagnostics,
+    scores: pd.DataFrame,
+    group_cols: tuple[str, ...],
+    evidence_col: str,
+    model_col: str,
+) -> pd.DataFrame | None:
     if scores.empty:
         return None
     ok = diagnostics._comparable_rows(scores)
     if ok.empty:
         return ok
-    if any(column not in ok.columns for column in (*group_cols, evidence_col, model_col)):
+    if any(
+        column not in ok.columns
+        for column in (*group_cols, evidence_col, model_col)
+    ):
         return None
     rows = []
-    grouped = ok.groupby(list(group_cols), sort=False, dropna=False) if group_cols else (((), ok),)
+    grouped = (
+        ok.groupby(list(group_cols), sort=False, dropna=False)
+        if group_cols
+        else (((), ok),)
+    )
     for _, group in grouped:
         group = group.copy()
         numeric_evidence = pd.to_numeric(group[evidence_col], errors="coerce")
@@ -158,9 +258,11 @@ def _merge_margin_columns_preserving_index(
         for column in margins.columns:
             out[column] = margin[column]
         return out
-
     row_position_column = "__hipporeplayimm_margin_row_position__"
-    while row_position_column in scores.columns or row_position_column in margins.columns:
+    while (
+        row_position_column in scores.columns
+        or row_position_column in margins.columns
+    ):
         row_position_column += "_"
 
     original_index = scores.index.copy()

@@ -1,4 +1,4 @@
-"""Preserve schemas for empty threshold sweeps and reliability annotations.
+"""Preserve schemas for empty threshold sweeps and result annotations.
 
 Advanced paired-model threshold sweeps may be run on filtered diagnostic tables
 where every group is missing either the positive or reference model.  The
@@ -10,6 +10,10 @@ error.
 Reliability annotation has the same schema obligation: an empty score table
 must retain the standard reliability columns so it can be concatenated with
 annotated nonempty tables and safely annotated again.
+
+Simulation evidence annotation also has a stable public schema.  Empty recovery
+tables must retain the probability, best-model, surrogate, and recovery columns
+that are emitted for nonempty simulations.
 """
 
 from __future__ import annotations
@@ -23,6 +27,26 @@ import pandas as pd
 _PATCHED_FLAG = "_advanced_result_empty_threshold_patch_applied"
 _RELIABILITY_PATCHED_FLAG = "_empty_reliability_schema_patch_applied"
 _RELIABILITY_WRAPPER_FLAG = "_empty_reliability_schema_wrapper"
+_SIMULATION_PATCHED_FLAG = "_empty_simulation_evidence_schema_patch_applied"
+_SIMULATION_WRAPPER_FLAG = "_empty_simulation_evidence_schema_wrapper"
+_EVIDENCE_STATUS_CORE_WRAPPER_FLAG = "_evidence_status_coercion_core_wrapper"
+_SIMULATION_EVIDENCE_COLUMNS = (
+    ("relative_log_evidence", float),
+    ("model_probability", float),
+    ("is_best_model", bool),
+    ("best_model", object),
+    ("truncated_relative_log_evidence", float),
+    ("is_best_truncated_lower_bound", bool),
+    ("best_truncated_lower_bound_model", object),
+    ("exact_surrogate_best_model", object),
+    ("exact_surrogate_recovered_expected_model", bool),
+    ("exact_surrogate_log_evidence", float),
+    ("exact_surrogate_minus_best_comparable_log_evidence", float),
+)
+_SIMULATION_EXPECTED_MODEL_COLUMNS = (
+    ("recovered_expected_model", bool),
+    ("lower_bound_recovered_expected_model", bool),
+)
 
 
 def _normalize_group_cols(group_cols: Sequence[str] | str | None, scores: pd.DataFrame) -> tuple[str, ...]:
@@ -82,6 +106,21 @@ def _with_empty_reliability_schema(frame: pd.DataFrame, reliability) -> pd.DataF
     return out
 
 
+def _with_empty_simulation_evidence_schema(frame: pd.DataFrame) -> pd.DataFrame:
+    """Return an empty simulation table with all derived evidence columns."""
+
+    if not frame.empty:
+        return frame
+    out = frame.copy()
+    columns = list(_SIMULATION_EVIDENCE_COLUMNS)
+    if "expected_model" in out.columns:
+        columns.extend(_SIMULATION_EXPECTED_MODEL_COLUMNS)
+    for column, dtype in columns:
+        if column not in out.columns:
+            out[column] = pd.Series(index=out.index, dtype=dtype)
+    return out
+
+
 def _apply_event_reliability_empty_schema_patch() -> None:
     """Keep empty reliability outputs schema-stable and idempotent."""
 
@@ -115,6 +154,33 @@ def _apply_event_reliability_empty_schema_patch() -> None:
     setattr(reliability, _RELIABILITY_PATCHED_FLAG, True)
 
 
+def _apply_simulation_evidence_empty_schema_patch() -> None:
+    """Keep empty simulation evidence outputs schema-stable and idempotent."""
+
+    from . import evidence_reporting as reporting
+    from . import simulation_recovery as recovery
+
+    current = reporting.simulation_add_evidence_columns
+    if getattr(current, _SIMULATION_WRAPPER_FLAG, False):
+        recovery.add_evidence_columns = current
+        setattr(reporting, _SIMULATION_PATCHED_FLAG, True)
+        setattr(recovery, _SIMULATION_PATCHED_FLAG, True)
+        return
+
+    @wraps(current)
+    def simulation_add_evidence_columns(df: pd.DataFrame) -> pd.DataFrame:
+        annotated = current(df)
+        return _with_empty_simulation_evidence_schema(annotated)
+
+    setattr(simulation_add_evidence_columns, _SIMULATION_WRAPPER_FLAG, True)
+    if getattr(current, _EVIDENCE_STATUS_CORE_WRAPPER_FLAG, False):
+        setattr(simulation_add_evidence_columns, _EVIDENCE_STATUS_CORE_WRAPPER_FLAG, True)
+    reporting.simulation_add_evidence_columns = simulation_add_evidence_columns
+    recovery.add_evidence_columns = simulation_add_evidence_columns
+    setattr(reporting, _SIMULATION_PATCHED_FLAG, True)
+    setattr(recovery, _SIMULATION_PATCHED_FLAG, True)
+
+
 def _apply_distinct_model_margin_patch() -> None:
     """Install the event-margin duplicate-model fix from package startup."""
 
@@ -130,6 +196,7 @@ def apply_advanced_result_empty_threshold_patch() -> None:
 
     _apply_distinct_model_margin_patch()
     _apply_event_reliability_empty_schema_patch()
+    _apply_simulation_evidence_empty_schema_patch()
     if getattr(diagnostics, _PATCHED_FLAG, False):
         return
 

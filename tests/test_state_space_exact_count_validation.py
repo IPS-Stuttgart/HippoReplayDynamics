@@ -35,3 +35,12 @@ def test_state_space_count_validation_rejects_fractional_large_decimals(fraction
         _top_candidate_indices(np.array([0.0, 1.0]), fractional_count)
     with pytest.raises(ValueError, match="n_bins must be a positive integer"):
         _positive_bin_count(fractional_count)
+
+
+def test_state_space_count_validation_rejects_fractional_extended_precision_float():
+    fractional_count = np.longdouble("9007199254740992.5")
+    if fractional_count.is_integer():
+        pytest.skip("platform longdouble does not exceed binary64 precision")
+
+    with pytest.raises(TypeError, match="top_k must be an integer"):
+        _integer_count("top_k", fractional_count)

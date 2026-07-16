@@ -173,14 +173,19 @@ def _coerce_scalar_nonnegative_integer(item: object, name: str) -> int:
     if isinstance(item, (str, bytes)):
         text = item.decode().strip() if isinstance(item, bytes) else item.strip()
         return _coerce_text_nonnegative_integer(text, name)
+    if isinstance(item, (float, np.floating)):
+        if not np.isfinite(item) or not item.is_integer() or item < 0:
+            _raise_invalid_nonnegative_integer(name)
+        return int(item)
 
     try:
-        numeric = float(item)
+        candidate = int(item)
+        exact = bool(item == candidate)
     except (TypeError, ValueError, OverflowError) as exc:
         _raise_invalid_nonnegative_integer(name, exc)
-    if not np.isfinite(numeric) or not numeric.is_integer() or numeric < 0.0:
+    if not exact or candidate < 0:
         _raise_invalid_nonnegative_integer(name)
-    return int(numeric)
+    return candidate
 
 
 def _coerce_text_nonnegative_integer(text: str, name: str) -> int:
@@ -212,31 +217,13 @@ def _coerce_positive_integer(value: object, name: str) -> int:
     if np.issubdtype(scalar.dtype, np.bool_):
         raise ValueError(f"{name} must be a positive integer")
 
-    item = scalar.item()
-    if isinstance(item, (bool, np.bool_)):
+    try:
+        candidate = _coerce_scalar_nonnegative_integer(scalar.item(), name)
+    except ValueError as exc:
+        raise ValueError(f"{name} must be a positive integer") from exc
+    if candidate < 1:
         raise ValueError(f"{name} must be a positive integer")
-    if isinstance(item, Decimal):
-        numeric = item
-    elif isinstance(item, (str, bytes)):
-        text = item.decode().strip() if isinstance(item, bytes) else item.strip()
-        try:
-            numeric = Decimal(text)
-        except (InvalidOperation, ValueError) as exc:
-            raise ValueError(f"{name} must be a positive integer") from exc
-        if not numeric.is_finite() or numeric < 1 or numeric != numeric.to_integral_value():
-            raise ValueError(f"{name} must be a positive integer")
-        return int(numeric)
-    else:
-        try:
-            numeric_float = float(item)
-        except (TypeError, ValueError, OverflowError) as exc:
-            raise ValueError(f"{name} must be a positive integer") from exc
-        if not np.isfinite(numeric_float) or not numeric_float.is_integer() or numeric_float < 1.0:
-            raise ValueError(f"{name} must be a positive integer")
-        return int(numeric_float)
-    if not numeric.is_finite() or numeric < 1 or numeric != numeric.to_integral_value():
-        raise ValueError(f"{name} must be a positive integer")
-    return int(numeric)
+    return candidate
 
 
 def _raise_invalid_nonnegative_integer(name: str, exc: Exception | None = None) -> None:

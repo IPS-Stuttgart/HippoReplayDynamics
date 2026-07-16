@@ -37,29 +37,27 @@ def apply_goal_state_space_farthest_point_patch() -> None:
         if values.shape[0] == 0:
             return current(points, max_points)
 
-        _, first_indices = np.unique(values, axis=0, return_index=True)
-        unique_values = values[np.sort(first_indices)]
-        if unique_values.shape[0] <= max_points:
-            return unique_values.copy()
+        if values.shape[0] <= max_points:
+            return values.copy()
 
-        coordinate_scale = float(np.max(np.abs(unique_values)))
+        coordinate_scale = float(np.max(np.abs(values)))
         if coordinate_scale > 0.0:
-            anchor_scores = np.sum(unique_values / coordinate_scale, axis=1)
+            anchor_scores = np.sum(values / coordinate_scale, axis=1)
         else:
-            anchor_scores = np.zeros(unique_values.shape[0], dtype=float)
+            anchor_scores = np.zeros(values.shape[0], dtype=float)
 
         selected = [int(np.argmin(anchor_scores))]
-        min_log_distances = np.full(unique_values.shape[0], np.inf, dtype=float)
+        min_log_distances = np.full(values.shape[0], np.inf, dtype=float)
         for _ in range(1, max_points):
             _, log_distances = _goal_state_space._scaled_euclidean_distances(
-                unique_values,
-                unique_values[selected[-1]],
+                values,
+                values[selected[-1]],
                 1.0,
             )
             min_log_distances = np.minimum(min_log_distances, log_distances)
             min_log_distances[np.asarray(selected, dtype=int)] = -np.inf
             selected.append(int(np.argmax(min_log_distances)))
-        return unique_values[np.asarray(selected, dtype=int)]
+        return values[np.asarray(selected, dtype=int)]
 
     setattr(farthest_point_subset, _FARTHEST_POINT_PATCH_ATTR, True)
     _goal_state_space._farthest_point_subset = farthest_point_subset

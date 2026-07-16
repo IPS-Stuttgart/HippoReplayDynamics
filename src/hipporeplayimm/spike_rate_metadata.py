@@ -115,6 +115,6 @@ def _unique_float_from_columns(
     if not values:
         return float(default)
     first = values[0]
-    if any(value != first for value in values[1:]):
+    if any(not np.isclose(value, first, rtol=1e-5, atol=1e-8) for value in values[1:]):
         raise ValueError(f"{' / '.join(columns)} contains multiple values")
     return float(first)

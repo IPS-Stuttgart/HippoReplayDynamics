@@ -124,17 +124,18 @@ def _numeric_scope_label(value: object) -> str | None:
         return str(int(value))
     if not isinstance(value, (float, np.floating)):
         return None
-    numeric = float(value)
-    if not np.isfinite(numeric):
+    if not bool(np.isfinite(value)):
         return None
-    return str(int(numeric)) if numeric.is_integer() else format(numeric, ".17g")
+    numerator, denominator = value.as_integer_ratio()
+    if denominator == 1:
+        return str(numerator)
+    return f"{numerator}/{denominator}"
 
 
 def _nonfinite_numeric_scope_label(value: object) -> str | None:
     if isinstance(value, (bool, np.bool_, int, np.integer)) or not isinstance(value, (float, np.floating)):
         return None
-    numeric = float(value)
-    if np.isfinite(numeric):
+    if bool(np.isfinite(value)):
         return None
     return str(value).strip()
 

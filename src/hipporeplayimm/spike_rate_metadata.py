@@ -16,6 +16,10 @@ from .encoding import EmissionConfig
 _MISSING_METADATA_STRINGS = {"", "nan", "na", "n/a", "none", "null", "<na>"}
 _EMISSION_CONFIG_MARKER = "_spike_rate_metadata_emission_config_wrapper"
 _BENCHMARK_METADATA_MARKER = "_spike_rate_metadata_wrapped"
+_SPIKE_RATE_SCALE_COLUMNS = (
+    "emission_spike_rate_scale",
+    "spike_rate_scale",
+)
 
 
 def apply_spike_rate_metadata_patch() -> None:
@@ -47,17 +51,23 @@ def apply_spike_rate_metadata_patch() -> None:
                 ),
                 spike_rate_scale=_unique_float_from_columns(
                     scores_frame,
-                    ("emission_spike_rate_scale", "spike_rate_scale"),
+                    _SPIKE_RATE_SCALE_COLUMNS,
                     fallback.spike_rate_scale,
                 ),
                 likelihood_temperature=_unique_float_from_columns(
                     scores_frame,
-                    ("emission_likelihood_temperature", "likelihood_temperature"),
+                    (
+                        "emission_likelihood_temperature",
+                        "likelihood_temperature",
+                    ),
                     fallback.likelihood_temperature,
                 ),
                 negative_binomial_overdispersion=_unique_float_from_columns(
                     scores_frame,
-                    ("emission_negative_binomial_overdispersion", "negative_binomial_overdispersion"),
+                    (
+                        "emission_negative_binomial_overdispersion",
+                        "negative_binomial_overdispersion",
+                    ),
                     fallback.negative_binomial_overdispersion,
                 ),
             )
@@ -72,9 +82,15 @@ def apply_spike_rate_metadata_patch() -> None:
 
         def benchmark_config_metadata(config) -> dict[str, object]:
             metadata = dict(base_metadata(config))
-            metadata["emission_spike_rate_scale"] = float(config.emissions.spike_rate_scale)
-            metadata["emission_likelihood_temperature"] = float(config.emissions.likelihood_temperature)
-            metadata["emission_negative_binomial_overdispersion"] = float(config.emissions.negative_binomial_overdispersion)
+            metadata["emission_spike_rate_scale"] = float(
+                config.emissions.spike_rate_scale
+            )
+            metadata["emission_likelihood_temperature"] = float(
+                config.emissions.likelihood_temperature
+            )
+            metadata["emission_negative_binomial_overdispersion"] = float(
+                config.emissions.negative_binomial_overdispersion
+            )
             return metadata
 
         setattr(benchmark_config_metadata, _BENCHMARK_METADATA_MARKER, True)
@@ -94,10 +110,14 @@ def _unique_float_from_columns(
             continue
         for value in frame[column].dropna():
             if isinstance(value, (bool, np.bool_)):
-                raise ValueError(f"{column} must contain finite numeric metadata values")
+                raise ValueError(
+                    f"{column} must contain finite numeric metadata values"
+                )
             scalar = np.asarray(value)
             if scalar.ndim != 0:
-                raise ValueError(f"{column} must contain scalar numeric metadata values")
+                raise ValueError(
+                    f"{column} must contain scalar numeric metadata values"
+                )
             value = scalar.item()
             text = str(value).strip()
             if text.lower() in _MISSING_METADATA_STRINGS:
@@ -115,6 +135,13 @@ def _unique_float_from_columns(
     if not values:
         return float(default)
     first = values[0]
-    if any(value != first for value in values[1:]):
+    if columns == _SPIKE_RATE_SCALE_COLUMNS:
+        conflicting = any(
+            not np.isclose(value, first, rtol=1e-5, atol=1e-8)
+            for value in values[1:]
+        )
+    else:
+        conflicting = any(value != first for value in values[1:])
+    if conflicting:
         raise ValueError(f"{' / '.join(columns)} contains multiple values")
     return float(first)

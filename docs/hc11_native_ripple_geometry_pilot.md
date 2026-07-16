@@ -9,6 +9,22 @@ This is not a direct 2D open-field replication. The public native-ripple cohort
 contains five sessions from two animals: three linear-maze sessions and two
 circular-maze sessions.
 
+## Claim-taxonomy correction
+
+The historical table below compared the best of diffusion, fragmented, and IMM
+against stationary. It is a broad nonstationary/reactivation comparison, not an
+ordered-trajectory count, because fragmented has no temporal path continuity.
+The current paper-facing split is:
+
+- ordered: diffusion and first-order IMM;
+- nonordered: stationary and fragmented.
+
+Under this stricter split, the native-envelope 10 ms tier has 1/100
+ordered-confident events (median ordered-minus-nonordered margin -0.37), the
+50 ms random tier has 4/100 (median -0.26), and the 50 ms spike-support tier has
+16/100 (median +0.20). The larger historical counts must not be described as
+ordered replay.
+
 ## Geometry and encoding controls
 
 `scripts/score_hc11_webshare_native_ripple_evidence.py` implements:
@@ -44,7 +60,7 @@ All five RUN decoders passed, with median cross-validated errors from about 6 to
 19 cm. Direction conditioning changed decoder error and evidence margins only
 modestly, so direction pooling is not the main explanation.
 
-| Tier | Trajectory-confident | Median trajectory - stationary | IMM confident over fragmented | Strict clean IMM |
+| Tier | Broad nonstationary-vs-stationary confident | Median broad margin | IMM confident over fragmented | Strict clean IMM |
 | --- | ---: | ---: | ---: | ---: |
 | Native envelope, 10 ms | 11/100 | +0.24 | 6/100 | 1/100 |
 | Native envelope, 5 ms | 12/100 | +0.32 | 9/100 | 1/100 |
@@ -60,8 +76,8 @@ Achilles_10252013; the fifth comes from Cicero_09102014.
 
 ## Interpretation
 
-hc-11 contains a replay-rich native-ripple subset. Wider windows and high
-spike/active-unit support improve trajectory-over-stationary evidence even after
+hc-11 contains a replay-rich native-ripple subset under the broad comparison.
+Wider windows and high spike/active-unit support improve broad evidence even after
 normalizing margins per time bin or spike. Ripple power itself does not predict
 the margins.
 

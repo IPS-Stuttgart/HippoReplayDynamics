@@ -31,7 +31,10 @@ from scipy.sparse import csr_matrix
 from scipy.special import gammaln, logsumexp
 
 ROOT = Path(__file__).resolve().parents[1]
+SRC_DIR = ROOT / "src"
 SCRIPT_DIR = ROOT / "scripts"
+if str(SRC_DIR) not in sys.path:
+    sys.path.insert(0, str(SRC_DIR))
 if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
 

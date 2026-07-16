@@ -218,7 +218,7 @@ def _positive_finite_scalar(name: str, value: Any) -> float:
     value = _reject_array_shaped_scalar(name, value, f"{name} must be finite and positive")
     try:
         numeric = float(value)
-    except (TypeError, ValueError) as exc:
+    except (TypeError, ValueError, OverflowError) as exc:
         raise ValueError(f"{name} must be finite and positive") from exc
     if not np.isfinite(numeric) or numeric <= 0.0:
         raise ValueError(f"{name} must be finite and positive")

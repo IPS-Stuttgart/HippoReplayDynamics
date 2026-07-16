@@ -20,11 +20,55 @@ GOAL_STATE_SPACE_MODEL_NAMES = frozenset(
 )
 GOAL_EVIDENCE_DIAGNOSTIC_COLUMN = 'diagnostic_goal_state_space_evidence_support'
 _PARAMETER_VALIDATION_PATCH_ATTR = '_hipporeplayimm_goal_state_space_parameter_validation_patch'
+_FARTHEST_POINT_PATCH_ATTR = '_hipporeplayimm_goal_state_space_farthest_point_patch'
 _ORIGINALS_ATTR = '_hipporeplayimm_goal_state_space_parameter_validation_originals'
+
+
+def apply_goal_state_space_farthest_point_patch() -> None:
+    '''Select default goals without overflowing finite coordinate distances.'''
+
+    current = _goal_state_space._farthest_point_subset
+    if getattr(current, _FARTHEST_POINT_PATCH_ATTR, False):
+        return
+
+    @wraps(current)
+    def farthest_point_subset(points, max_points):
+        values = np.asarray(points, dtype=float)
+        if values.shape[0] == 0:
+            return current(points, max_points)
+
+        _, first_indices = np.unique(values, axis=0, return_index=True)
+        unique_values = values[np.sort(first_indices)]
+        if unique_values.shape[0] <= max_points:
+            return unique_values.copy()
+
+        coordinate_scale = float(np.max(np.abs(unique_values)))
+        if coordinate_scale > 0.0:
+            anchor_scores = np.sum(unique_values / coordinate_scale, axis=1)
+        else:
+            anchor_scores = np.zeros(unique_values.shape[0], dtype=float)
+
+        selected = [int(np.argmin(anchor_scores))]
+        min_log_distances = np.full(unique_values.shape[0], np.inf, dtype=float)
+        for _ in range(1, max_points):
+            _, log_distances = _goal_state_space._scaled_euclidean_distances(
+                unique_values,
+                unique_values[selected[-1]],
+                1.0,
+            )
+            min_log_distances = np.minimum(min_log_distances, log_distances)
+            min_log_distances[np.asarray(selected, dtype=int)] = -np.inf
+            selected.append(int(np.argmax(min_log_distances)))
+        return unique_values[np.asarray(selected, dtype=int)]
+
+    setattr(farthest_point_subset, _FARTHEST_POINT_PATCH_ATTR, True)
+    _goal_state_space._farthest_point_subset = farthest_point_subset
 
 
 def apply_goal_state_space_parameter_validation_patch() -> None:
     '''Reject bool and array-like goal-state-space numeric parameters.'''
+
+    apply_goal_state_space_farthest_point_patch()
 
     originals = getattr(_goal_state_space, _ORIGINALS_ATTR, None)
     if originals is None:

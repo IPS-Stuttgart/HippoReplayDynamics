@@ -279,7 +279,7 @@ def _finite_complete_rows(values: Any) -> np.ndarray:
 def _as_numeric_ids(values: Any) -> np.ndarray:
     try:
         return np.asarray(values, dtype=float)
-    except (TypeError, ValueError) as exc:
+    except (OverflowError, TypeError, ValueError) as exc:
         raise ValueError("tetrode/cell IDs must contain numeric integer identifiers") from exc
 
 

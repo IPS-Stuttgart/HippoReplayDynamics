@@ -101,6 +101,23 @@ def test_observation_parameter_grid_rejects_nonfinite_values():
             raise AssertionError(f"expected ValueError for {field_name}")
 
 
+def test_observation_parameter_grid_normalizes_numeric_overflow():
+    cases = [
+        (ObservationSweepConfig(bin_sizes_cm=(10**400,)), "bin_sizes_cm"),
+        (ObservationSweepConfig(decode_bin_s=10**400), "decode_bin_s"),
+    ]
+
+    for config, field_name in cases:
+        try:
+            observation_parameter_grid(config)
+        except ValueError as exc:
+            message = str(exc)
+            assert field_name in message
+            assert "finite scalars" in message
+        else:
+            raise AssertionError(f"expected ValueError for {field_name}")
+
+
 def test_observation_parameter_grid_rejects_boolean_numeric_values():
     cases = [
         (ObservationSweepConfig(bin_sizes_cm=(True,)), "bin_sizes_cm"),

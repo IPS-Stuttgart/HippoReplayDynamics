@@ -71,3 +71,37 @@ def test_add_evidence_margin_columns_preserves_named_duplicate_index() -> None:
         "momentum",
     ]
     assert annotated["evidence_margin_to_second_best"].tolist() == [4.0, 4.0, 1.0, 1.0]
+
+
+def test_add_evidence_margin_columns_refreshes_existing_annotations() -> None:
+    scores = pd.DataFrame(
+        {
+            "session": ["Rat1/Open1", "Rat1/Open1"],
+            "event_index": [0, 0],
+            "model": ["stationary", "diffusion"],
+            "log_evidence": [5.0, 1.0],
+            "status": ["success", "success"],
+            "evidence_comparable": [True, True],
+        }
+    )
+    annotated = add_evidence_margin_columns(scores)
+    annotated.loc[annotated["model"] == "diffusion", "log_evidence"] = 4.0
+
+    refreshed = add_evidence_margin_columns(annotated)
+
+    assert refreshed["evidence_margin_to_second_best"].tolist() == [1.0, 1.0]
+    assert refreshed["second_best_model_by_evidence"].tolist() == [
+        "diffusion",
+        "diffusion",
+    ]
+    assert not any(column.endswith(("_x", "_y")) for column in refreshed.columns)
+    for column in (
+        "best_model_by_evidence",
+        "second_best_model_by_evidence",
+        "best_log_evidence",
+        "second_best_log_evidence",
+        "evidence_margin_to_second_best",
+        "evidence_margin_category",
+        "models_compared",
+    ):
+        assert refreshed.columns.tolist().count(column) == 1

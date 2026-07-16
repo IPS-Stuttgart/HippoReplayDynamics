@@ -12,6 +12,15 @@ _MARGIN_FLAG = "_evidence_margin_distinct_model_wrapper"
 _ADD_FLAG = "_evidence_margin_distinct_model_add_columns_wrapper"
 _BOOL_FLAG = "_evidence_margin_arbitrary_integer_bool_wrapper"
 _DEFAULT_GROUP_COLUMNS = ("session", "event_index")
+_MARGIN_COLUMNS = (
+    "best_model_by_evidence",
+    "second_best_model_by_evidence",
+    "best_log_evidence",
+    "second_best_log_evidence",
+    "evidence_margin_to_second_best",
+    "evidence_margin_category",
+    "models_compared",
+)
 
 
 def apply_evidence_margin_distinct_model_patch() -> None:
@@ -43,14 +52,16 @@ def apply_evidence_margin_distinct_model_patch() -> None:
         groups = _normalize_group_cols(group_cols)
         if scores.empty:
             return scores.copy()
-        margins = evidence_margin_table(scores, group_cols=groups)
+        base = scores.drop(
+            columns=[column for column in _MARGIN_COLUMNS if column in scores.columns]
+        ).copy()
+        margins = evidence_margin_table(base, group_cols=groups)
         if margins.empty:
-            out = scores.copy()
-            out["evidence_margin_to_second_best"] = np.nan
-            out["evidence_margin_category"] = "missing"
-            return out
-        margins = _align_margin_group_key_dtypes(scores, margins, groups)
-        return _merge_margin_columns_preserving_index(scores, margins, groups)
+            base["evidence_margin_to_second_best"] = np.nan
+            base["evidence_margin_category"] = "missing"
+            return base
+        margins = _align_margin_group_key_dtypes(base, margins, groups)
+        return _merge_margin_columns_preserving_index(base, margins, groups)
 
     @wraps(original_bool)
     def _as_bool(value: object, *, default: bool = False) -> bool:

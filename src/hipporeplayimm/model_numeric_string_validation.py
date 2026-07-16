@@ -14,6 +14,7 @@ _PATCH_VERSION_ATTR = "_model_numeric_string_validation_patch_version"
 _PATCH_VERSION = 2
 _STATE_SPACE_UTILS_PATCHED_FLAG = "_state_space_numeric_string_validation_patch_applied"
 _STATE_SPACE_MODEL_PATCHED_FLAG = "_state_space_model_numeric_string_validation_patch_applied"
+_UNIT_INTERVAL_OVERFLOW_PATCHED_FLAG = "_model_unit_interval_overflow_validation_patch_applied"
 _STRING_TYPES = (str, bytes, np.str_, np.bytes_)
 _VALIDATOR_NAMES = (
     "_validate_positive_parameter",
@@ -115,6 +116,35 @@ def _validate_state_space_candidate_config(config: object) -> None:
             _reject_string_count(name, value)
 
 
+def _patch_model_parameter_unit_interval_overflow() -> None:
+    """Normalize arbitrary-precision overflow at the active validator boundary."""
+
+    global _validate_unit_interval_parameter
+
+    from . import model_parameter_validation
+
+    current = model_parameter_validation._validate_unit_interval_parameter
+    if getattr(current, _UNIT_INTERVAL_OVERFLOW_PATCHED_FLAG, False):
+        _validate_unit_interval_parameter = current
+        return
+
+    @wraps(current)
+    def validate_unit_interval_parameter(name: str, value: object) -> float:
+        try:
+            return current(name, value)
+        except OverflowError as exc:
+            if name == "mode_stickiness":
+                message = f"{name} must be in [0, 1]"
+            else:
+                message = f"{name} must be finite and lie in [0, 1]"
+            raise ValueError(message) from exc
+
+    setattr(validate_unit_interval_parameter, _UNIT_INTERVAL_OVERFLOW_PATCHED_FLAG, True)
+    setattr(validate_unit_interval_parameter, "__hipporeplayimm_original__", current)
+    model_parameter_validation._validate_unit_interval_parameter = validate_unit_interval_parameter
+    _validate_unit_interval_parameter = validate_unit_interval_parameter
+
+
 def _patch_state_space_numeric_string_validation() -> None:
     from . import state_space_model
     from . import state_space_utils
@@ -133,7 +163,10 @@ def _patch_state_space_numeric_string_validation() -> None:
         @wraps(original_unit_probability)
         def coerce_unit_probability(name: str, value: object) -> float:
             _reject_string_scalar(name, value)
-            return original_unit_probability(name, value)
+            try:
+                return original_unit_probability(name, value)
+            except OverflowError as exc:
+                raise ValueError(f"{name} must be in [0, 1]") from exc
 
         @wraps(original_top_candidates)
         def top_candidate_indices(log_emission, top_k: int):
@@ -211,6 +244,8 @@ def apply_model_numeric_string_validation_patch() -> None:
     """Install string-scalar guards around model parameter validators."""
 
     from . import models
+
+    _patch_model_parameter_unit_interval_overflow()
 
     for validator_name in _VALIDATOR_NAMES:
         current = getattr(models, validator_name)

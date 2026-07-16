@@ -160,3 +160,34 @@ def test_spike_rate_metadata_accepts_zero_dimensional_numeric_array() -> None:
         ("emission_spike_rate_scale",),
         default=1.0,
     ) == pytest.approx(1.25)
+
+
+def test_spike_rate_metadata_accepts_equivalent_float32_and_float64_aliases() -> None:
+    scores = pd.DataFrame(
+        {
+            "emission_spike_rate_scale": pd.Series([np.float32(0.1)], dtype=object),
+            "spike_rate_scale": pd.Series([0.1], dtype=object),
+        }
+    )
+
+    assert _spike_rate_unique_float_from_columns(
+        scores,
+        ("emission_spike_rate_scale", "spike_rate_scale"),
+        default=1.0,
+    ) == pytest.approx(0.1)
+
+
+def test_spike_rate_metadata_rejects_materially_different_aliases() -> None:
+    scores = pd.DataFrame(
+        {
+            "emission_spike_rate_scale": [0.1],
+            "spike_rate_scale": [0.11],
+        }
+    )
+
+    with pytest.raises(ValueError, match="contains multiple values"):
+        _spike_rate_unique_float_from_columns(
+            scores,
+            ("emission_spike_rate_scale", "spike_rate_scale"),
+            default=1.0,
+        )

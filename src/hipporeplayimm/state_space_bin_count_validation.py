@@ -61,7 +61,7 @@ def _integer_count(name: str, value: Any) -> int:
     if isinstance(item, (float, np.floating)):
         if not np.isfinite(item):
             raise ValueError(f"{name} must be a finite integer")
-        if not float(item).is_integer():
+        if not item.is_integer():
             raise TypeError(f"{name} must be an integer")
         return int(item)
     try:

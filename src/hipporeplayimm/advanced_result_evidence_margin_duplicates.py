@@ -44,9 +44,15 @@ def apply_evidence_margin_distinct_model_patch() -> None:
     def evidence_margin_table(scores, *, group_cols=_DEFAULT_GROUP_COLUMNS, evidence_col="log_evidence", model_col="model"):
         groups = _normalize_group_cols(group_cols)
         collapsed = _collapse_duplicate_models(diagnostics, scores, groups, evidence_col, model_col)
-        if collapsed is None:
-            return original_margin(scores, group_cols=groups, evidence_col=evidence_col, model_col=model_col)
-        return original_margin(collapsed, group_cols=groups, evidence_col=evidence_col, model_col=model_col)
+        target = scores if collapsed is None else collapsed
+        if groups:
+            return original_margin(target, group_cols=groups, evidence_col=evidence_col, model_col=model_col)
+        return _global_evidence_margin_table(
+            original_margin,
+            target,
+            evidence_col=evidence_col,
+            model_col=model_col,
+        )
 
     def add_evidence_margin_columns(scores, *, group_cols=_DEFAULT_GROUP_COLUMNS):
         groups = _normalize_group_cols(group_cols)
@@ -100,6 +106,29 @@ def _collapse_duplicate_models(diagnostics, scores: pd.DataFrame, group_cols: tu
     return pd.concat(rows, ignore_index=False) if rows else ok.iloc[0:0].copy()
 
 
+def _global_evidence_margin_table(
+    original_margin,
+    scores: pd.DataFrame,
+    *,
+    evidence_col: str,
+    model_col: str,
+) -> pd.DataFrame:
+    """Evaluate one table-wide evidence margin without calling ``groupby([])``."""
+
+    group_column = "__hipporeplayimm_global_evidence_margin_group__"
+    while group_column in scores.columns:
+        group_column += "_"
+    global_scores = scores.copy()
+    global_scores[group_column] = 0
+    margins = original_margin(
+        global_scores,
+        group_cols=(group_column,),
+        evidence_col=evidence_col,
+        model_col=model_col,
+    )
+    return margins.drop(columns=[group_column], errors="ignore")
+
+
 def _align_margin_group_key_dtypes(
     scores: pd.DataFrame,
     margins: pd.DataFrame,
@@ -120,6 +149,15 @@ def _merge_margin_columns_preserving_index(
     group_cols: tuple[str, ...],
 ) -> pd.DataFrame:
     """Attach one margin row per group without replacing the caller's index."""
+
+    if not group_cols:
+        if len(margins) != 1:
+            raise ValueError("global evidence margins must contain exactly one row")
+        out = scores.copy()
+        margin = margins.iloc[0]
+        for column in margins.columns:
+            out[column] = margin[column]
+        return out
 
     row_position_column = "__hipporeplayimm_margin_row_position__"
     while row_position_column in scores.columns or row_position_column in margins.columns:

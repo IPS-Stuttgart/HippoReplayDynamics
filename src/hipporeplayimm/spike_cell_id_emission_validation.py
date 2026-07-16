@@ -23,7 +23,14 @@ _ORIGINAL_ATTR = "__hipporeplayimm_original__"
 def apply_spike_cell_id_emission_validation_patch() -> None:
     """Install integral-ID validation on emission cell-row mapping."""
 
+    from . import emission_cell_id_validation
     from . import encoding
+
+    # The later emission-cell-ID patch installs its own row mapper.  Synchronize
+    # the exact coercion helper into that active module before its wrapper is
+    # applied so extended-precision and object-backed identifiers never pass
+    # through binary64.
+    emission_cell_id_validation._coerce_integral_ids = _coerce_integral_ids
 
     current = encoding._cell_id_row_indices
     if bool(getattr(current, _PATCH_MARK, False)):

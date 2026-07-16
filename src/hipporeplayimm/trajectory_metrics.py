@@ -96,7 +96,7 @@ def _as_numeric_real_array(values: object, name: str) -> np.ndarray:
                 raise ValueError(f"{name} must contain numeric real values, not complex values")
     try:
         return np.asarray(values, dtype=float)
-    except (TypeError, ValueError) as exc:
+    except (TypeError, ValueError, OverflowError) as exc:
         raise ValueError(f"{name} must contain numeric real values") from exc
 
 

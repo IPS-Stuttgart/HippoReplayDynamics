@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import operator
 import sys
 from collections.abc import Callable
+from decimal import Decimal, InvalidOperation
 from functools import wraps
 from typing import Any
 
@@ -14,30 +16,63 @@ _ORIGINAL_ATTR = "__hipporeplayimm_original__"
 _STATE_SPACE_CANDIDATE_COUNT_PATCH_ATTR = "__hipporeplayimm_state_space_candidate_count_validation_patch__"
 
 
+def _decimal_integer_count(name: str, value: str | bytes | Decimal) -> int:
+    """Parse decimal-backed counts without routing through binary floating point."""
+
+    if isinstance(value, bytes):
+        try:
+            value = value.decode("ascii")
+        except UnicodeDecodeError as exc:
+            raise TypeError(f"{name} must be an integer") from exc
+    try:
+        numeric = value if isinstance(value, Decimal) else Decimal(value.strip())
+    except (InvalidOperation, ValueError) as exc:
+        raise TypeError(f"{name} must be an integer") from exc
+    if not numeric.is_finite():
+        raise ValueError(f"{name} must be a finite integer")
+    integral = numeric.to_integral_value()
+    if numeric != integral:
+        raise TypeError(f"{name} must be an integer")
+    return int(integral)
+
+
 def _integer_count(name: str, value: Any) -> int:
     """Return an integer-valued scalar count without silent truncation."""
 
     if isinstance(value, (bool, np.bool_)):
         raise TypeError(f"{name} must be an integer count, not boolean")
-    raw = np.asarray(value)
+    try:
+        raw = np.asarray(value)
+    except ValueError as exc:
+        raise TypeError(f"{name} must be an integer") from exc
     if raw.ndim != 0:
         raise TypeError(f"{name} must be an integer")
     if np.issubdtype(raw.dtype, np.bool_):
         raise TypeError(f"{name} must be an integer count, not boolean")
-    if raw.dtype == object:
-        try:
-            if isinstance(raw.item(), (bool, np.bool_)):
-                raise TypeError(f"{name} must be an integer count, not boolean")
-        except ValueError:
-            pass
+    item = raw.item()
+    if isinstance(item, (bool, np.bool_)):
+        raise TypeError(f"{name} must be an integer count, not boolean")
+    if isinstance(item, (str, bytes, Decimal)):
+        return _decimal_integer_count(name, item)
     try:
-        numeric = float(raw)
+        return int(operator.index(item))
+    except TypeError:
+        pass
+    if isinstance(item, (float, np.floating)):
+        if not np.isfinite(item):
+            raise ValueError(f"{name} must be a finite integer")
+        if not item.is_integer():
+            raise TypeError(f"{name} must be an integer")
+        return int(item)
+    try:
+        count = int(item)
     except (TypeError, ValueError, OverflowError) as exc:
         raise TypeError(f"{name} must be an integer") from exc
-    if not np.isfinite(numeric):
-        raise ValueError(f"{name} must be a finite integer")
-    count = int(round(numeric))
-    if not np.isclose(numeric, count, rtol=0.0, atol=0.0):
+    try:
+        exact = bool(item == count)
+    except (TypeError, ValueError):
+        exact = False
+    if not exact:
         raise TypeError(f"{name} must be an integer")
     return count
 
@@ -80,21 +115,11 @@ def _optional_mass_threshold(name: str, value: Any) -> float | None:
 
 
 def _positive_bin_count(n_bins: int) -> int:
-    if isinstance(n_bins, (bool, np.bool_)):
-        raise ValueError("n_bins must be a positive integer")
-    raw = np.asarray(n_bins)
-    if raw.ndim != 0:
-        raise ValueError("n_bins must be a positive integer")
-    if np.issubdtype(raw.dtype, np.bool_):
-        raise ValueError("n_bins must be a positive integer")
     try:
-        numeric = float(raw)
+        count = _integer_count("n_bins", n_bins)
     except (TypeError, ValueError, OverflowError) as exc:
         raise ValueError("n_bins must be a positive integer") from exc
-    if not np.isfinite(numeric) or numeric <= 0.0:
-        raise ValueError("n_bins must be a positive integer")
-    count = int(round(numeric))
-    if not np.isclose(numeric, count, rtol=0.0, atol=0.0):
+    if count <= 0:
         raise ValueError("n_bins must be a positive integer")
     return count
 

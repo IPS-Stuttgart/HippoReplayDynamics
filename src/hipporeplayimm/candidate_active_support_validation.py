@@ -15,6 +15,10 @@ _PAIR_POSTERIOR_WRAPPER_FLAG = "_candidate_pair_posterior_exact_support_wrapper"
 _SPARSE_MATVEC_WRAPPER_FLAG = "_sparse_diffusion_exact_support_wrapper"
 _GAUSSIAN_TRANSITION_WRAPPER_FLAG = "_stable_gaussian_transition_weights_wrapper"
 _SPARSE_GAUSSIAN_ROW_WRAPPER_FLAG = "_stable_sparse_gaussian_row_weights_wrapper"
+_PAIRWISE_GAUSSIAN_WRAPPER_FLAG = "_stable_pairwise_gaussian_log_prob_wrapper"
+_FULL_GRID_PAIRWISE_GAUSSIAN_WRAPPER_FLAG = (
+    "_stable_full_grid_pairwise_gaussian_log_prob_wrapper"
+)
 
 
 def _validate_active_support_rows(values: np.ndarray) -> None:
@@ -48,6 +52,7 @@ def apply_candidate_active_support_validation_patch() -> None:
     _patch_candidate_pair_posteriors()
     _patch_sparse_diffusion_exact_support()
     _patch_stable_gaussian_transition_weights()
+    _patch_stable_pairwise_gaussian_probabilities()
 
 
 def _patch_candidate_pair_posteriors() -> None:
@@ -187,6 +192,19 @@ def _stable_standardized_gaussian_weights(distances: np.ndarray) -> np.ndarray:
     return weights / total
 
 
+def _squared_distance_difference(distances: np.ndarray, minimum: float) -> np.ndarray:
+    """Return ``distances**2 - minimum**2`` without squaring first."""
+
+    standardized = np.asarray(distances, dtype=float)
+    if standardized.ndim != 1 or standardized.size == 0:
+        raise ValueError("distances must be a nonempty one-dimensional array")
+    with np.errstate(over="ignore", invalid="ignore"):
+        difference = (standardized - minimum) * (standardized + minimum)
+    difference[standardized == minimum] = 0.0
+    difference[np.isnan(difference)] = np.inf
+    return difference
+
+
 def _patch_stable_gaussian_transition_weights() -> None:
     """Preserve relative Gaussian transition mass when raw kernels underflow."""
 
@@ -311,6 +329,141 @@ def _patch_stable_gaussian_transition_weights() -> None:
             current_sparse,
             finite_gaussian_row,
         )
+
+
+def _patch_stable_pairwise_gaussian_probabilities() -> None:
+    """Stabilize state-space candidate Gaussian kernels and normalizers."""
+
+    from . import state_space_utils
+
+    current_pairwise = state_space_utils._pairwise_gaussian_log_prob
+    if not getattr(current_pairwise, _PAIRWISE_GAUSSIAN_WRAPPER_FLAG, False):
+
+        @wraps(current_pairwise)
+        def pairwise_gaussian_log_prob(predicted, observed, sigma_cm):
+            sigma = float(sigma_cm)
+            if not np.isfinite(sigma) or sigma <= 0.0:
+                raise ValueError("sigma_cm must be finite and positive")
+            predicted_points = state_space_utils._as_finite_2d_points(
+                predicted,
+                "predicted",
+            )
+            observed_points = state_space_utils._as_finite_2d_points(
+                observed,
+                "observed",
+            )
+            if predicted_points.shape[1] != observed_points.shape[1]:
+                raise ValueError("predicted and observed must have matching position dimensions")
+            distances = np.stack(
+                [
+                    _standardized_euclidean_distances(
+                        observed_points,
+                        prediction,
+                        sigma,
+                    )
+                    for prediction in predicted_points
+                ],
+                axis=0,
+            )
+            with np.errstate(over="ignore", invalid="ignore"):
+                return -0.5 * np.square(distances)
+
+        setattr(pairwise_gaussian_log_prob, _PAIRWISE_GAUSSIAN_WRAPPER_FLAG, True)
+        setattr(pairwise_gaussian_log_prob, "__hipporeplayimm_original__", current_pairwise)
+        state_space_utils._pairwise_gaussian_log_prob = pairwise_gaussian_log_prob
+        _synchronize_transition_aliases(
+            "_pairwise_gaussian_log_prob",
+            current_pairwise,
+            pairwise_gaussian_log_prob,
+        )
+
+    current_normalized = state_space_utils._full_grid_normalized_pairwise_gaussian_log_prob
+    if getattr(current_normalized, _FULL_GRID_PAIRWISE_GAUSSIAN_WRAPPER_FLAG, False):
+        return
+
+    @wraps(current_normalized)
+    def full_grid_normalized_pairwise_gaussian_log_prob(
+        predicted,
+        observed,
+        all_observed,
+        sigma_cm,
+        valid_bin_mask=None,
+    ):
+        sigma = float(sigma_cm)
+        if not np.isfinite(sigma) or sigma <= 0.0:
+            raise ValueError("sigma_cm must be finite and positive")
+        predicted_points = state_space_utils._as_finite_2d_points(
+            predicted,
+            "predicted",
+        )
+        observed_points = state_space_utils._as_finite_2d_points(
+            observed,
+            "observed",
+        )
+        all_observed_points = state_space_utils._as_finite_2d_points(
+            all_observed,
+            "all_observed",
+        )
+        if predicted_points.shape[1] != observed_points.shape[1]:
+            raise ValueError("predicted and observed must have matching position dimensions")
+        if predicted_points.shape[1] != all_observed_points.shape[1]:
+            raise ValueError("predicted and all_observed must have matching position dimensions")
+        normalizer_support = all_observed_points
+        if valid_bin_mask is not None:
+            valid_mask = state_space_utils._coerce_valid_bin_mask(
+                valid_bin_mask,
+                all_observed_points.shape[0],
+            )
+            assert valid_mask is not None
+            normalizer_support = all_observed_points[valid_mask]
+
+        output = np.empty(
+            (predicted_points.shape[0], observed_points.shape[0]),
+            dtype=float,
+        )
+        for row, prediction in enumerate(predicted_points):
+            observed_distances = _standardized_euclidean_distances(
+                observed_points,
+                prediction,
+                sigma,
+            )
+            support_distances = _standardized_euclidean_distances(
+                normalizer_support,
+                prediction,
+                sigma,
+            )
+            minimum = float(np.min(support_distances))
+            observed_difference = _squared_distance_difference(
+                observed_distances,
+                minimum,
+            )
+            support_difference = _squared_distance_difference(
+                support_distances,
+                minimum,
+            )
+            observed_log_weights = -0.5 * observed_difference
+            support_log_weights = -0.5 * support_difference
+            output[row] = observed_log_weights - logsumexp(support_log_weights)
+        return output
+
+    setattr(
+        full_grid_normalized_pairwise_gaussian_log_prob,
+        _FULL_GRID_PAIRWISE_GAUSSIAN_WRAPPER_FLAG,
+        True,
+    )
+    setattr(
+        full_grid_normalized_pairwise_gaussian_log_prob,
+        "__hipporeplayimm_original__",
+        current_normalized,
+    )
+    state_space_utils._full_grid_normalized_pairwise_gaussian_log_prob = (
+        full_grid_normalized_pairwise_gaussian_log_prob
+    )
+    _synchronize_transition_aliases(
+        "_full_grid_normalized_pairwise_gaussian_log_prob",
+        current_normalized,
+        full_grid_normalized_pairwise_gaussian_log_prob,
+    )
 
 
 def _synchronize_transition_aliases(name: str, original: object, replacement: object) -> None:

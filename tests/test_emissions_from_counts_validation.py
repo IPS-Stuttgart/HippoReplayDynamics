@@ -34,3 +34,23 @@ def test_emissions_from_counts_rejects_empty_time_axis() -> None:
 def test_emissions_from_counts_rejects_boolean_count_values(counts: np.ndarray) -> None:
     with pytest.raises(ValueError, match="boolean"):
         emissions_from_counts(_encoding(), counts, dt=0.02)
+
+
+def test_emissions_from_counts_normalizes_arbitrary_precision_overflow() -> None:
+    with pytest.raises(ValueError, match="counts must contain numeric values"):
+        emissions_from_counts(
+            _encoding(),
+            np.array([[10**400]], dtype=object),
+            dt=0.02,
+        )
+
+
+def test_emissions_from_counts_rejects_finite_values_outside_integer_range() -> None:
+    outside_integer_range = np.nextafter(float(np.iinfo(np.dtype(int)).max), np.inf)
+
+    with pytest.raises(ValueError, match="counts must fit into integer count range"):
+        emissions_from_counts(
+            _encoding(),
+            np.array([[outside_integer_range]], dtype=float),
+            dt=0.02,
+        )

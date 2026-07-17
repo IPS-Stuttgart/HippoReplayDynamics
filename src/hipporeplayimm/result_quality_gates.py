@@ -119,10 +119,10 @@ def add_evidence_margin_columns(frame: pd.DataFrame) -> pd.DataFrame:
 
     if frame.empty:
         return frame.copy()
+    out = _ensure_evidence_support_columns_overflow_safe(frame)
     if "log_evidence" not in frame.columns:
-        return ensure_evidence_support_columns(frame)
+        return out
 
-    out = ensure_evidence_support_columns(frame)
     original_index = out.index
     # Margin annotation writes through ``.loc``.  Normalize to a unique internal
     # index so concatenated score tables with duplicate labels cannot annotate
@@ -381,6 +381,21 @@ def _coerce_numeric_scalar(value: object) -> float:
         return float(value)
     except (TypeError, ValueError, OverflowError):
         return float("nan")
+
+
+def _ensure_evidence_support_columns_overflow_safe(frame: pd.DataFrame) -> pd.DataFrame:
+    numeric_columns = [
+        column
+        for column in ("log_evidence", "heldout_log_likelihood")
+        if column in frame.columns
+    ]
+    normalized = frame.copy()
+    for column in numeric_columns:
+        normalized[column] = _coerce_numeric_series(normalized[column])
+    out = ensure_evidence_support_columns(normalized)
+    for column in numeric_columns:
+        out[column] = frame[column]
+    return out
 
 
 def _annotate_margin_scope(

@@ -111,8 +111,14 @@ def _patch_core_diffusion_transition_scaling() -> None:
         max_step = float(max_step_sigma)
         output: list[tuple[np.ndarray, np.ndarray]] = []
         for center in centers:
+            same_sign = np.signbit(centers) == np.signbit(center[None, :])
             with np.errstate(over="ignore", invalid="ignore"):
-                standardized_delta = (centers - center[None, :]) / sigma
+                direct_delta = np.abs(centers - center[None, :]) / sigma
+                split_delta = (
+                    np.abs(centers) / sigma
+                    + np.abs(center[None, :]) / sigma
+                )
+                standardized_delta = np.where(same_sign, direct_delta, split_delta)
                 standardized_distance = np.hypot.reduce(standardized_delta, axis=1)
             keep = standardized_distance <= max_step
             if not np.any(keep):

@@ -249,7 +249,7 @@ def _checked_count_array(counts: Any) -> np.ndarray:
         raise ValueError("counts must contain numeric integer counts, not text values")
     try:
         numeric = np.asarray(raw, dtype=float)
-    except (TypeError, ValueError) as exc:
+    except (TypeError, ValueError, OverflowError) as exc:
         raise ValueError("counts must contain numeric values") from exc
     if not np.all(np.isfinite(numeric)) or np.any(numeric < 0.0):
         raise ValueError("counts must contain finite nonnegative values")

@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
+import sys
 from dataclasses import replace
 from decimal import Decimal, InvalidOperation
 from functools import wraps
 from pathlib import Path
-import sys
 from typing import Any, Iterable
 
 import numpy as np
@@ -134,7 +134,7 @@ def _synchronize_output_writer_aliases(active: Any) -> None:
         if not module_name.startswith("hipporeplayimm"):
             continue
         alias = getattr(module, "write_pyrecest_sweep_outputs", None)
-        if alias in lineage and alias is not active:
+        if callable(alias) and alias in lineage and alias is not active:
             setattr(module, "write_pyrecest_sweep_outputs", active)
 
 

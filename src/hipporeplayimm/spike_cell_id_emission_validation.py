@@ -12,16 +12,35 @@ from __future__ import annotations
 
 from decimal import Decimal, InvalidOperation
 from functools import wraps
+import sys
 from typing import Any
 
 import numpy as np
 
 _PATCH_MARK = "__hipporeplayimm_spike_cell_id_emission_validation_patch__"
+_SPIKE_SELECTION_PATCH_MARK = (
+    "__hipporeplayimm_spike_cell_id_encoding_selection_patch__"
+)
 _ORIGINAL_ATTR = "__hipporeplayimm_original__"
 
 
+class _ExactSpikeTable(np.ndarray):
+    """Spike table exposing times as floats and IDs as exact platform integers."""
+
+    def __array_finalize__(self, obj: Any) -> None:
+        del obj
+
+    def __getitem__(self, key: Any) -> Any:
+        result = super().__getitem__(key)
+        column = _selected_scalar_column(key, self.shape)
+        if column not in (0, 1):
+            return result
+        converted = np.asarray(result, dtype=float if column == 0 else int)
+        return converted.item() if converted.ndim == 0 else converted
+
+
 def apply_spike_cell_id_emission_validation_patch() -> None:
-    """Install integral-ID validation on emission cell-row mapping."""
+    """Install exact integral-ID handling for encoding and emission lookups."""
 
     from . import emission_cell_id_validation
     from . import encoding
@@ -31,6 +50,23 @@ def apply_spike_cell_id_emission_validation_patch() -> None:
     # applied so extended-precision and object-backed identifiers never pass
     # through binary64.
     emission_cell_id_validation._coerce_integral_ids = _coerce_integral_ids
+
+    current_selection = encoding._spikes_and_cell_ids_for_encoding
+    if bool(getattr(current_selection, _SPIKE_SELECTION_PATCH_MARK, False)):
+        active_selection = current_selection
+    else:
+        original_selection = current_selection
+
+        @wraps(original_selection)
+        def spikes_and_cell_ids_for_encoding(session: Any, config: Any) -> tuple[np.ndarray, np.ndarray]:
+            return _select_spikes_and_cell_ids_exactly(session, config)
+
+        setattr(spikes_and_cell_ids_for_encoding, _SPIKE_SELECTION_PATCH_MARK, True)
+        setattr(spikes_and_cell_ids_for_encoding, _ORIGINAL_ATTR, original_selection)
+        active_selection = spikes_and_cell_ids_for_encoding
+        encoding._spikes_and_cell_ids_for_encoding = active_selection
+
+    _synchronize_spike_selection_aliases(active_selection)
 
     current = encoding._cell_id_row_indices
     if bool(getattr(current, _PATCH_MARK, False)):
@@ -45,6 +81,81 @@ def apply_spike_cell_id_emission_validation_patch() -> None:
     setattr(cell_id_row_indices, _PATCH_MARK, True)
     setattr(cell_id_row_indices, _ORIGINAL_ATTR, current)
     encoding._cell_id_row_indices = cell_id_row_indices
+
+
+def _select_spikes_and_cell_ids_exactly(
+    session: Any,
+    config: Any,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Select encoding spikes without converting the ID column to binary64."""
+
+    spikes = np.asarray(session.spikes)
+    if spikes.size:
+        if spikes.ndim != 2 or spikes.shape[1] < 2:
+            raise ValueError("spikes must have at least two columns")
+        spike_ids = _coerce_integral_ids(spikes[:, 1], "spike cell IDs").reshape(-1)
+    else:
+        spike_ids = np.empty(0, dtype=int)
+
+    excitatory = np.asarray(session.excitatory_neurons)
+    if bool(config.use_excitatory) and excitatory.size:
+        cell_ids = _coerce_integral_ids(
+            excitatory.reshape(-1),
+            "excitatory neuron IDs",
+        ).reshape(-1)
+        selected_mask = np.isin(spike_ids, cell_ids)
+        selected_spikes = spikes[selected_mask]
+        selected_ids = spike_ids[selected_mask]
+    else:
+        cell_ids = np.unique(spike_ids)
+        selected_spikes = spikes
+        selected_ids = spike_ids
+
+    exact_spikes = _exact_spike_table(selected_spikes, selected_ids)
+    unique_cell_ids = np.asarray(sorted(np.unique(cell_ids)), dtype=int)
+    return exact_spikes, unique_cell_ids
+
+
+def _exact_spike_table(spikes: Any, spike_ids: Any) -> np.ndarray:
+    raw = np.asarray(spikes)
+    table = np.asarray(raw, dtype=object).copy()
+    if table.size:
+        if table.ndim != 2 or table.shape[1] < 2:
+            raise ValueError("spikes must have at least two columns")
+        ids = np.asarray(spike_ids, dtype=int).reshape(-1)
+        if ids.shape[0] != table.shape[0]:
+            raise ValueError("spike cell IDs must contain one ID per spike row")
+        table[:, 1] = ids
+    return table.view(_ExactSpikeTable)
+
+
+def _selected_scalar_column(key: Any, shape: tuple[int, ...]) -> int | None:
+    if len(shape) < 2 or not isinstance(key, tuple) or len(key) < 2:
+        return None
+    column = key[1]
+    if not isinstance(column, (int, np.integer)):
+        return None
+    resolved = int(column)
+    if resolved < 0:
+        resolved += int(shape[1])
+    return resolved
+
+
+def _synchronize_spike_selection_aliases(active: Any) -> None:
+    """Refresh modules that imported the encoding spike selector by value."""
+
+    lineage: set[Any] = set()
+    current = active
+    while callable(current) and current not in lineage:
+        lineage.add(current)
+        current = getattr(current, _ORIGINAL_ATTR, None)
+
+    for module in list(sys.modules.values()):
+        if not getattr(module, "__name__", "").startswith("hipporeplayimm"):
+            continue
+        alias = getattr(module, "_spikes_and_cell_ids_for_encoding", None)
+        if alias in lineage and alias is not active:
+            setattr(module, "_spikes_and_cell_ids_for_encoding", active)
 
 
 def _coerce_integral_ids(values: Any, name: str) -> np.ndarray:

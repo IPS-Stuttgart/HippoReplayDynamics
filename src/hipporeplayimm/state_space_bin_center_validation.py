@@ -9,6 +9,9 @@ import numpy as np
 _PATCHED_FLAG = "_state_space_bin_center_validation_patch_applied"
 _SPARSE_MOMENTUM_PATCHED_FLAG = "_sparse_momentum_bin_center_validation_patch_applied"
 _CORE_MODEL_PATCHED_FLAG = "_core_model_bin_center_validation_patch_applied"
+_CORE_DIFFUSION_TRANSITION_PATCHED_FLAG = (
+    "_core_diffusion_transition_scaling_patch_applied"
+)
 _BOOL_OR_TEXT_DTYPE_KINDS = {"b", "S", "U"}
 
 
@@ -93,6 +96,46 @@ def _patch_core_model_bin_center_validation() -> None:
     models._validate_score_inputs = validate_score_inputs
 
 
+def _patch_core_diffusion_transition_scaling() -> None:
+    """Compute core diffusion distances in sigma units to avoid overflow."""
+
+    from . import models
+
+    previous_transition = models._log_transition_matrix
+    if getattr(previous_transition, _CORE_DIFFUSION_TRANSITION_PATCHED_FLAG, False):
+        return
+
+    def log_transition_matrix(bin_centers, sigma_cm, max_step_sigma):
+        centers = np.asarray(bin_centers, dtype=float)
+        sigma = float(sigma_cm)
+        max_step = float(max_step_sigma)
+        output: list[tuple[np.ndarray, np.ndarray]] = []
+        for center in centers:
+            with np.errstate(over="ignore", invalid="ignore"):
+                standardized_delta = (centers - center[None, :]) / sigma
+                standardized_distance = np.hypot.reduce(standardized_delta, axis=1)
+            keep = standardized_distance <= max_step
+            if not np.any(keep):
+                keep[int(np.argmin(standardized_distance))] = True
+            indices = np.flatnonzero(keep)
+            with np.errstate(over="ignore", invalid="ignore"):
+                log_weights = -0.5 * np.square(standardized_distance[indices])
+            log_weights -= models.logsumexp(log_weights)
+            output.append((indices, log_weights))
+        return output
+
+    log_transition_matrix.__name__ = getattr(
+        previous_transition,
+        "__name__",
+        "_log_transition_matrix",
+    )
+    log_transition_matrix.__doc__ = getattr(previous_transition, "__doc__", None)
+    log_transition_matrix.__module__ = getattr(previous_transition, "__module__", __name__)
+    setattr(log_transition_matrix, _CORE_DIFFUSION_TRANSITION_PATCHED_FLAG, True)
+    setattr(log_transition_matrix, "__hipporeplayimm_original__", previous_transition)
+    models._log_transition_matrix = log_transition_matrix
+
+
 def _patch_sparse_momentum_bin_center_validation() -> None:
     """Install the same validation on the direct exact-sparse momentum helper."""
 
@@ -143,6 +186,7 @@ def apply_state_space_bin_center_validation_patch() -> None:
     from . import state_space as ss
 
     _patch_core_model_bin_center_validation()
+    _patch_core_diffusion_transition_scaling()
 
     if not getattr(ss.StateSpaceReplayModel.score, _PATCHED_FLAG, False):
         previous_score = ss.StateSpaceReplayModel.score

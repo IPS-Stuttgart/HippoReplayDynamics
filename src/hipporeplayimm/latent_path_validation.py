@@ -249,13 +249,18 @@ def _checked_count_array(counts: Any) -> np.ndarray:
         raise ValueError("counts must contain numeric integer counts, not text values")
     try:
         numeric = np.asarray(raw, dtype=float)
-    except (TypeError, ValueError) as exc:
+    except (TypeError, ValueError, OverflowError) as exc:
         raise ValueError("counts must contain numeric values") from exc
     if not np.all(np.isfinite(numeric)) or np.any(numeric < 0.0):
         raise ValueError("counts must contain finite nonnegative values")
-    if not np.all(np.isclose(numeric, np.rint(numeric), rtol=0.0, atol=0.0)):
+    rounded = np.rint(numeric)
+    if not np.all(np.isclose(numeric, rounded, rtol=0.0, atol=0.0)):
         raise ValueError("counts must contain integer-valued counts")
-    return numeric.astype(int)
+    integer_info = np.iinfo(np.dtype(int))
+    max_safe_float = np.nextafter(float(integer_info.max), 0.0)
+    if np.any(rounded > max_safe_float):
+        raise ValueError("counts must fit into integer count range")
+    return rounded.astype(int)
 
 
 def _contains_boolean_values(values: Any) -> bool:

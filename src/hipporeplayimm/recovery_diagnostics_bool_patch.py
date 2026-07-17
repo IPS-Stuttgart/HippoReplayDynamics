@@ -77,7 +77,7 @@ def apply_recovery_diagnostics_bool_patch() -> None:
     def coerce_float(value: object, default: float) -> float:
         try:
             return float(value)
-        except (TypeError, ValueError):
+        except (TypeError, ValueError, OverflowError):
             text = str(value).strip().lower()
             if text in _TRUE_FLOAT_STRINGS:
                 return 1.0
@@ -103,8 +103,19 @@ def apply_recovery_diagnostics_bool_patch() -> None:
             status_ok = group["status"].map(_status_is_success_or_missing).astype(bool)
         else:
             status_ok = pd.Series(True, index=group.index)
-        values = pd.to_numeric(group["log_evidence"], errors="coerce") if "log_evidence" in group else pd.Series(0.0, index=group.index)
-        finite = pd.Series(np.isfinite(values.to_numpy(dtype=float)), index=group.index)
+        if "log_evidence" in group:
+            try:
+                values = pd.to_numeric(group["log_evidence"], errors="coerce")
+                numeric_values = values.to_numpy(dtype=float)
+            except (TypeError, ValueError, OverflowError):
+                numeric_values = (
+                    group["log_evidence"]
+                    .map(lambda value: coerce_float(value, float("nan")))
+                    .to_numpy(dtype=float)
+                )
+        else:
+            numeric_values = np.zeros(len(group), dtype=float)
+        finite = pd.Series(np.isfinite(numeric_values), index=group.index)
         return group[status_ok & finite].copy()
 
     _install_helper(diagnostics, "_coerce_bool", coerce_bool)

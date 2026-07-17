@@ -12,6 +12,10 @@ _CORE_MODEL_PATCHED_FLAG = "_core_model_bin_center_validation_patch_applied"
 _CORE_DIFFUSION_TRANSITION_PATCHED_FLAG = (
     "_core_diffusion_transition_scaling_patch_applied"
 )
+_CORE_GAUSSIAN_LOG_PROB_PATCHED_FLAG = "_core_gaussian_log_prob_scaling_patch_applied"
+_CORE_PAIRWISE_GAUSSIAN_LOG_PROB_PATCHED_FLAG = (
+    "_core_pairwise_gaussian_log_prob_scaling_patch_applied"
+)
 _BOOL_OR_TEXT_DTYPE_KINDS = {"b", "S", "U"}
 
 
@@ -75,6 +79,34 @@ def _coerce_state_space_bin_centers(bin_centers: Any, n_bins: int) -> np.ndarray
     return centers
 
 
+def _standardized_coordinate_delta(
+    left: np.ndarray,
+    right: np.ndarray,
+    sigma: float,
+) -> np.ndarray:
+    """Compute ``abs(left - right) / sigma`` without finite subtraction overflow."""
+
+    same_sign = np.signbit(left) == np.signbit(right)
+    with np.errstate(over="ignore", invalid="ignore", divide="ignore"):
+        direct_delta = np.abs(left - right) / sigma
+        split_delta = np.abs(left) / sigma + np.abs(right) / sigma
+    return np.where(same_sign, direct_delta, split_delta)
+
+
+def _scaled_distance(
+    left: np.ndarray,
+    right: np.ndarray,
+    sigma: float,
+    *,
+    axis: int,
+) -> np.ndarray:
+    """Return Euclidean distance in sigma units without raw-square overflow."""
+
+    standardized_delta = _standardized_coordinate_delta(left, right, sigma)
+    with np.errstate(over="ignore", invalid="ignore"):
+        return np.hypot.reduce(standardized_delta, axis=axis)
+
+
 def _patch_core_model_bin_center_validation() -> None:
     """Allow public core replay models to score vector-shaped 1D grids."""
 
@@ -111,15 +143,12 @@ def _patch_core_diffusion_transition_scaling() -> None:
         max_step = float(max_step_sigma)
         output: list[tuple[np.ndarray, np.ndarray]] = []
         for center in centers:
-            same_sign = np.signbit(centers) == np.signbit(center[None, :])
-            with np.errstate(over="ignore", invalid="ignore"):
-                direct_delta = np.abs(centers - center[None, :]) / sigma
-                split_delta = (
-                    np.abs(centers) / sigma
-                    + np.abs(center[None, :]) / sigma
-                )
-                standardized_delta = np.where(same_sign, direct_delta, split_delta)
-                standardized_distance = np.hypot.reduce(standardized_delta, axis=1)
+            standardized_distance = _scaled_distance(
+                centers,
+                center[None, :],
+                sigma,
+                axis=1,
+            )
             keep = standardized_distance <= max_step
             if not np.any(keep):
                 keep[int(np.argmin(standardized_distance))] = True
@@ -140,6 +169,80 @@ def _patch_core_diffusion_transition_scaling() -> None:
     setattr(log_transition_matrix, _CORE_DIFFUSION_TRANSITION_PATCHED_FLAG, True)
     setattr(log_transition_matrix, "__hipporeplayimm_original__", previous_transition)
     models._log_transition_matrix = log_transition_matrix
+
+
+def _patch_core_gaussian_log_prob_scaling() -> None:
+    """Stabilize candidate-model Gaussian kernels at large coordinate scales."""
+
+    from . import models
+
+    previous_gaussian = models._gaussian_log_prob
+    if not getattr(previous_gaussian, _CORE_GAUSSIAN_LOG_PROB_PATCHED_FLAG, False):
+
+        def gaussian_log_prob(predicted, observed, sigma):
+            predicted_points = np.asarray(predicted, dtype=float)
+            observed_points = np.asarray(observed, dtype=float)
+            standardized_distance = _scaled_distance(
+                observed_points,
+                predicted_points,
+                float(sigma),
+                axis=1,
+            )
+            with np.errstate(over="ignore", invalid="ignore"):
+                return -0.5 * np.square(standardized_distance)
+
+        gaussian_log_prob.__name__ = getattr(
+            previous_gaussian,
+            "__name__",
+            "_gaussian_log_prob",
+        )
+        gaussian_log_prob.__doc__ = getattr(previous_gaussian, "__doc__", None)
+        gaussian_log_prob.__module__ = getattr(previous_gaussian, "__module__", __name__)
+        setattr(gaussian_log_prob, _CORE_GAUSSIAN_LOG_PROB_PATCHED_FLAG, True)
+        setattr(gaussian_log_prob, "__hipporeplayimm_original__", previous_gaussian)
+        models._gaussian_log_prob = gaussian_log_prob
+
+    previous_pairwise = models._pairwise_gaussian_log_prob
+    if not getattr(
+        previous_pairwise,
+        _CORE_PAIRWISE_GAUSSIAN_LOG_PROB_PATCHED_FLAG,
+        False,
+    ):
+
+        def pairwise_gaussian_log_prob(predicted, observed, sigma):
+            predicted_points = np.asarray(predicted, dtype=float)
+            observed_points = np.asarray(observed, dtype=float)
+            standardized_distance = _scaled_distance(
+                predicted_points[:, None, :],
+                observed_points[None, :, :],
+                float(sigma),
+                axis=2,
+            )
+            with np.errstate(over="ignore", invalid="ignore"):
+                return -0.5 * np.square(standardized_distance)
+
+        pairwise_gaussian_log_prob.__name__ = getattr(
+            previous_pairwise,
+            "__name__",
+            "_pairwise_gaussian_log_prob",
+        )
+        pairwise_gaussian_log_prob.__doc__ = getattr(previous_pairwise, "__doc__", None)
+        pairwise_gaussian_log_prob.__module__ = getattr(
+            previous_pairwise,
+            "__module__",
+            __name__,
+        )
+        setattr(
+            pairwise_gaussian_log_prob,
+            _CORE_PAIRWISE_GAUSSIAN_LOG_PROB_PATCHED_FLAG,
+            True,
+        )
+        setattr(
+            pairwise_gaussian_log_prob,
+            "__hipporeplayimm_original__",
+            previous_pairwise,
+        )
+        models._pairwise_gaussian_log_prob = pairwise_gaussian_log_prob
 
 
 def _patch_sparse_momentum_bin_center_validation() -> None:
@@ -193,6 +296,7 @@ def apply_state_space_bin_center_validation_patch() -> None:
 
     _patch_core_model_bin_center_validation()
     _patch_core_diffusion_transition_scaling()
+    _patch_core_gaussian_log_prob_scaling()
 
     if not getattr(ss.StateSpaceReplayModel.score, _PATCHED_FLAG, False):
         previous_score = ss.StateSpaceReplayModel.score

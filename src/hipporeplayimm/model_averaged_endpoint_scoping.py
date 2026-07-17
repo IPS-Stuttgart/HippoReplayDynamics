@@ -159,9 +159,11 @@ def _scope_label(value: object) -> str:
     if isinstance(value, (int, np.integer)):
         return repr(("numeric", int(value)))
     if isinstance(value, (float, np.floating)):
-        numeric = float(value)
-        if np.isfinite(numeric):
-            return repr(("numeric", int(numeric) if numeric.is_integer() else numeric))
+        if bool(np.isfinite(value)):
+            numerator, denominator = value.as_integer_ratio()
+            if denominator == 1:
+                return repr(("numeric", int(numerator)))
+            return repr(("numeric-ratio", int(numerator), int(denominator)))
     if isinstance(value, np.ndarray):
         return repr(("array", np.asarray(value, dtype=object).reshape(-1).tolist()))
     if isinstance(value, (list, tuple)):

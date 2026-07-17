@@ -61,9 +61,18 @@ _EVENT_GROUP_SCOPE_COLUMNS = (
 def evidence_margin_label(margin: object) -> str:
     """Return a readable evidence-margin category for a log-evidence gap."""
 
+    if isinstance(margin, (int, np.integer)) and not isinstance(margin, (bool, np.bool_)):
+        value = int(margin)
+        if value <= 1:
+            return MARGIN_TIE
+        if value <= 3:
+            return MARGIN_WEAK
+        if value <= 10:
+            return MARGIN_STRONG
+        return MARGIN_DECISIVE
     try:
         value = float(margin)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         return MARGIN_UNKNOWN
     if not np.isfinite(value):
         return MARGIN_DECISIVE if value > 0.0 else MARGIN_UNKNOWN
@@ -110,10 +119,10 @@ def add_evidence_margin_columns(frame: pd.DataFrame) -> pd.DataFrame:
 
     if frame.empty:
         return frame.copy()
+    out = _ensure_evidence_support_columns_overflow_safe(frame)
     if "log_evidence" not in frame.columns:
-        return ensure_evidence_support_columns(frame)
+        return out
 
-    out = ensure_evidence_support_columns(frame)
     original_index = out.index
     # Margin annotation writes through ``.loc``.  Normalize to a unique internal
     # index so concatenated score tables with duplicate labels cannot annotate
@@ -298,7 +307,7 @@ def quality_gate_summary(
         },
     ]
     if "spatial_shuffle_null_empirical_p_value" in rows:
-        null_p = pd.to_numeric(successful["spatial_shuffle_null_empirical_p_value"], errors="coerce")
+        null_p = _coerce_numeric_series(successful["spatial_shuffle_null_empirical_p_value"])
         tested = null_p.dropna()
         records.append(
             {
@@ -358,6 +367,37 @@ def _is_missing_status(value: object) -> bool:
     return str(value).strip().lower() in _MISSING_STATUS_VALUES
 
 
+def _coerce_numeric_series(values: pd.Series) -> pd.Series:
+    """Coerce numeric metadata without leaking scalar overflow errors."""
+
+    try:
+        return pd.to_numeric(values, errors="coerce")
+    except (TypeError, ValueError, OverflowError):
+        return values.map(_coerce_numeric_scalar).astype(float)
+
+
+def _coerce_numeric_scalar(value: object) -> float:
+    try:
+        return float(value)
+    except (TypeError, ValueError, OverflowError):
+        return float("nan")
+
+
+def _ensure_evidence_support_columns_overflow_safe(frame: pd.DataFrame) -> pd.DataFrame:
+    numeric_columns = [
+        column
+        for column in ("log_evidence", "heldout_log_likelihood")
+        if column in frame.columns
+    ]
+    normalized = frame.copy()
+    for column in numeric_columns:
+        normalized[column] = _coerce_numeric_series(normalized[column])
+    out = ensure_evidence_support_columns(normalized)
+    for column in numeric_columns:
+        out[column] = frame[column]
+    return out
+
+
 def _annotate_margin_scope(
     out: pd.DataFrame,
     group_index: pd.Index,
@@ -367,7 +407,7 @@ def _annotate_margin_scope(
 ) -> None:
     if rows.empty or "log_evidence" not in rows:
         return
-    values = pd.to_numeric(rows["log_evidence"], errors="coerce")
+    values = _coerce_numeric_series(rows["log_evidence"])
     finite = pd.Series(np.isfinite(values.to_numpy(dtype=float)), index=values.index)
     rows = rows.loc[finite].copy()
     values = values.loc[rows.index].to_numpy(dtype=float)
@@ -401,21 +441,21 @@ def _first_nonempty(frame: pd.DataFrame, column: str) -> str:
 def _first_numeric(frame: pd.DataFrame, column: str) -> float:
     if column not in frame:
         return float("nan")
-    values = pd.to_numeric(frame[column], errors="coerce").dropna()
+    values = _coerce_numeric_series(frame[column]).dropna()
     return float("nan") if values.empty else float(values.iloc[0])
 
 
 def _min_numeric(frame: pd.DataFrame, column: str) -> float:
     if column not in frame:
         return float("nan")
-    values = pd.to_numeric(frame[column], errors="coerce").dropna()
+    values = _coerce_numeric_series(frame[column]).dropna()
     return float("nan") if values.empty else float(values.min())
 
 
 def _mean_numeric(frame: pd.DataFrame, column: str) -> float:
     if column not in frame:
         return float("nan")
-    values = pd.to_numeric(frame[column], errors="coerce").dropna()
+    values = _coerce_numeric_series(frame[column]).dropna()
     return float("nan") if values.empty else float(values.mean())
 
 

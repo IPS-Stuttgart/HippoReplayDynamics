@@ -79,7 +79,7 @@ def _validate_mode_transition_sequence(
     for transition_index, matrix in enumerate(mode_transitions):
         try:
             raw_values = np.asarray(matrix)
-        except (TypeError, ValueError) as exc:
+        except (TypeError, ValueError, OverflowError) as exc:
             raise ValueError(
                 f"mode transition matrix {transition_index} must be a rectangular numeric probability matrix"
             ) from exc
@@ -93,7 +93,7 @@ def _validate_mode_transition_sequence(
             )
         try:
             values = raw_values.astype(float, copy=False)
-        except (TypeError, ValueError) as exc:
+        except (TypeError, ValueError, OverflowError) as exc:
             raise ValueError(
                 f"mode transition matrix {transition_index} must contain numeric probabilities"
             ) from exc

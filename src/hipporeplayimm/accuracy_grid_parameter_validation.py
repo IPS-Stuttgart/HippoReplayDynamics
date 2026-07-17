@@ -119,7 +119,7 @@ def _coerce_positive_integer_dimension(value) -> int:
         raise ValueError("grid_shape must contain positive integer dimensions")
     try:
         numeric = float(item)
-    except (TypeError, ValueError) as exc:
+    except (TypeError, ValueError, OverflowError) as exc:
         raise ValueError("grid_shape must contain positive integer dimensions") from exc
     if not np.isfinite(numeric) or numeric <= 0.0 or not numeric.is_integer():
         raise ValueError("grid_shape must contain positive integer dimensions")
@@ -141,7 +141,7 @@ def _coerce_stay_probability(value) -> float:
         raise ValueError("stay_probability must be numeric, not text")
     try:
         numeric = float(item)
-    except (TypeError, ValueError) as exc:
+    except (TypeError, ValueError, OverflowError) as exc:
         raise ValueError("stay_probability must lie in [0, 1)") from exc
     if not np.isfinite(numeric) or not 0.0 <= numeric < 1.0:
         raise ValueError("stay_probability must lie in [0, 1)")

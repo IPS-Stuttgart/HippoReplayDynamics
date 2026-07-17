@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-
 import numpy as np
 
 from .duration_dynamics import transition_durations_s
 from .encoding import LogEmissionTensor
-from .goal_state_space import _forward_backward_goal_mixture, _goal_transition_matrix
+from .goal_state_space import (
+    _forward_backward_goal_mixture,
+    _goal_transition_matrix,
+    _scaled_euclidean_distances,
+)
 from .models import EventScore, _posterior_diagnostics
 from .state_space_utils import _mean_entropy, _per_bin_sigma
 
@@ -215,14 +218,24 @@ def _farthest_point_subset(points: np.ndarray, max_points: int) -> np.ndarray:
     unique_points = _unique_points(_as_numeric_coordinates(points, "points"))
     if unique_points.shape[0] <= int(max_points):
         return unique_points.copy()
-    selected = [int(np.argmin(np.sum(unique_points, axis=1)))]
-    min_dist2 = np.full(unique_points.shape[0], np.inf, dtype=float)
+
+    coordinate_scale = float(np.max(np.abs(unique_points)))
+    if coordinate_scale > 0.0:
+        anchor_scores = np.sum(unique_points / coordinate_scale, axis=1)
+    else:
+        anchor_scores = np.zeros(unique_points.shape[0], dtype=float)
+
+    selected = [int(np.argmin(anchor_scores))]
+    min_log_distances = np.full(unique_points.shape[0], np.inf, dtype=float)
     for _ in range(1, int(max_points)):
-        last = unique_points[selected[-1]]
-        dist2 = np.sum((unique_points - last[None, :]) ** 2, axis=1)
-        min_dist2 = np.minimum(min_dist2, dist2)
-        min_dist2[np.asarray(selected, dtype=int)] = -np.inf
-        selected.append(int(np.argmax(min_dist2)))
+        _, log_distances = _scaled_euclidean_distances(
+            unique_points,
+            unique_points[selected[-1]],
+            1.0,
+        )
+        min_log_distances = np.minimum(min_log_distances, log_distances)
+        min_log_distances[np.asarray(selected, dtype=int)] = -np.inf
+        selected.append(int(np.argmax(min_log_distances)))
     return unique_points[np.asarray(selected, dtype=int)]
 
 

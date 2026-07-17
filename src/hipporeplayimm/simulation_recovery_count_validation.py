@@ -171,7 +171,7 @@ def _validated_count_matrix(counts: Any, *, n_cells: int) -> np.ndarray:
         raise ValueError("counts must contain numeric integer counts, not text values")
     try:
         values = np.asarray(counts, dtype=float)
-    except (TypeError, ValueError) as exc:
+    except (TypeError, ValueError, OverflowError) as exc:
         raise ValueError("counts must contain numeric values") from exc
 
     if values.ndim != 2:
@@ -207,7 +207,7 @@ def _validated_occupancy_vector(encoding: Any) -> np.ndarray:
         raise ValueError("occupancy_s must contain finite nonnegative values, not text values")
     try:
         occupancy = np.asarray(occupancy_raw, dtype=float)
-    except (TypeError, ValueError) as exc:
+    except (TypeError, ValueError, OverflowError) as exc:
         raise ValueError("occupancy_s must contain finite nonnegative values") from exc
 
     if occupancy.ndim != 1:
@@ -251,7 +251,7 @@ def _positive_integer_scalar(name: str, value: Any) -> int:
     item = _strict_scalar_item(name, value)
     try:
         numeric = float(item)
-    except (TypeError, ValueError) as exc:
+    except (TypeError, ValueError, OverflowError) as exc:
         raise ValueError(f"{name} must be a positive integer") from exc
     if not np.isfinite(numeric) or numeric <= 0.0 or not numeric.is_integer():
         raise ValueError(f"{name} must be a positive integer")

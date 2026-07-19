@@ -7,6 +7,9 @@ from .models import EventScore, LOG_ZERO, _normalize_log_weights, _posterior_dia
 from .candidate_active_support_validation import (
     apply_candidate_active_support_validation_patch as _apply_candidate_active_support_validation_patch,
 )
+from .state_space_gaussian_scalar_validation import (
+    apply_state_space_gaussian_scalar_validation_patch as _apply_state_space_gaussian_scalar_validation_patch,
+)
 from .state_space_candidate_bin_center_validation import (
     apply_state_space_candidate_bin_center_validation_patch as _apply_state_space_candidate_bin_center_validation_patch,
 )
@@ -101,6 +104,7 @@ from .state_space_utils import (
 # inspect the public import surface so they do not replace it with older scorers.
 StateSpaceReplayModel.score._native_duration_occupancy_aware = True
 _apply_candidate_active_support_validation_patch()
+_apply_state_space_gaussian_scalar_validation_patch()
 _apply_state_space_candidate_bin_center_validation_patch()
 _apply_sparse_momentum_bin_center_validation_patch()
 _apply_sparse_momentum_valid_bin_mask_validation_patch()

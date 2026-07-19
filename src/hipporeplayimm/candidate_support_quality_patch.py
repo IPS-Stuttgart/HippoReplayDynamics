@@ -22,6 +22,8 @@ _QUALITY_WRAPPER_ATTR = "_candidate_support_quality_status_wrapper"
 _MIN_LOG_MASS_BOOL_PATCHED_FLAG = "_candidate_min_log_mass_bool_patch_applied"
 _MIN_LOG_MASS_BOOL_WRAPPER_ATTR = "_candidate_min_log_mass_bool_wrapper"
 _RESTRICT_CANDIDATE_ORDER_PATCHED_FLAG = "_candidate_restriction_order_patch_applied"
+_PAIRWISE_OVERFLOW_PATCHED_FLAG = "_candidate_pairwise_overflow_nearest_support_patch_applied"
+_PAIRWISE_OVERFLOW_WRAPPER_ATTR = "_candidate_pairwise_overflow_nearest_support_wrapper"
 
 
 def apply_candidate_support_quality_patch() -> None:
@@ -71,6 +73,7 @@ def apply_candidate_support_quality_patch() -> None:
 
     _patch_boolean_candidate_log_mass(ri)
     _patch_restricted_candidate_order()
+    _patch_overflowed_pairwise_nearest_support()
 
 
 def _patch_boolean_candidate_log_mass(ri: Any) -> None:
@@ -135,6 +138,119 @@ def _patch_restricted_candidate_order() -> None:
             module._restrict_candidates_to_valid_bins = restrict_candidates_to_valid_bins
 
     setattr(state_space_utils, _RESTRICT_CANDIDATE_ORDER_PATCHED_FLAG, True)
+
+
+def _patch_overflowed_pairwise_nearest_support() -> None:
+    """Preserve nearest-support geometry when every standardized distance overflows."""
+
+    from . import candidate_active_support_validation as active_support
+    from . import state_space_utils
+
+    current = state_space_utils._full_grid_normalized_pairwise_gaussian_log_prob
+    if getattr(current, _PAIRWISE_OVERFLOW_WRAPPER_ATTR, False):
+        setattr(state_space_utils, _PAIRWISE_OVERFLOW_PATCHED_FLAG, True)
+        return
+
+    @wraps(current)
+    def full_grid_normalized_pairwise_gaussian_log_prob(
+        predicted,
+        observed,
+        all_observed,
+        sigma_cm,
+        valid_bin_mask=None,
+    ):
+        output = np.asarray(
+            current(
+                predicted,
+                observed,
+                all_observed,
+                sigma_cm,
+                valid_bin_mask=valid_bin_mask,
+            ),
+            dtype=float,
+        ).copy()
+        predicted_points = state_space_utils._as_finite_2d_points(predicted, "predicted")
+        observed_points = state_space_utils._as_finite_2d_points(observed, "observed")
+        all_observed_points = state_space_utils._as_finite_2d_points(all_observed, "all_observed")
+        valid_mask = state_space_utils._coerce_valid_bin_mask(
+            valid_bin_mask,
+            all_observed_points.shape[0],
+        )
+        normalizer_support = all_observed_points if valid_mask is None else all_observed_points[valid_mask]
+        sigma = float(sigma_cm)
+
+        membership = np.all(
+            observed_points[:, None, :] == normalizer_support[None, :, :],
+            axis=2,
+        )
+        if not np.all(np.any(membership, axis=1)):
+            return output
+
+        for row, prediction in enumerate(predicted_points):
+            standardized = active_support._standardized_euclidean_distances(
+                normalizer_support,
+                prediction,
+                sigma,
+            )
+            if not np.all(np.isinf(standardized)):
+                continue
+
+            log_distances = _stable_log_euclidean_distances(
+                normalizer_support,
+                prediction,
+            )
+            minimum = float(np.min(log_distances))
+            nearest = log_distances == minimum
+            nearest_count = int(np.sum(nearest))
+            if nearest_count < 1:
+                continue
+
+            nearest_observed = np.any(membership[:, nearest], axis=1)
+            fallback = np.full(observed_points.shape[0], -np.inf, dtype=float)
+            fallback[nearest_observed] = -np.log(float(nearest_count))
+            output[row] = fallback
+        return output
+
+    setattr(full_grid_normalized_pairwise_gaussian_log_prob, _PAIRWISE_OVERFLOW_WRAPPER_ATTR, True)
+    setattr(
+        full_grid_normalized_pairwise_gaussian_log_prob,
+        active_support._FULL_GRID_PAIRWISE_GAUSSIAN_WRAPPER_FLAG,
+        True,
+    )
+    setattr(full_grid_normalized_pairwise_gaussian_log_prob, "__hipporeplayimm_original__", current)
+    state_space_utils._full_grid_normalized_pairwise_gaussian_log_prob = (
+        full_grid_normalized_pairwise_gaussian_log_prob
+    )
+    active_support._synchronize_transition_aliases(
+        "_full_grid_normalized_pairwise_gaussian_log_prob",
+        current,
+        full_grid_normalized_pairwise_gaussian_log_prob,
+    )
+    setattr(state_space_utils, _PAIRWISE_OVERFLOW_PATCHED_FLAG, True)
+
+
+def _stable_log_euclidean_distances(
+    points: np.ndarray,
+    reference: np.ndarray,
+) -> np.ndarray:
+    """Return log Euclidean distances without overflowing coordinate subtraction."""
+
+    values = np.asarray(points, dtype=float)
+    if values.ndim != 2 or values.shape[0] == 0:
+        raise ValueError("points must be a nonempty two-dimensional array")
+    center = np.asarray(reference, dtype=float).reshape(values.shape[1])
+    scales = np.max(
+        np.maximum(np.abs(values), np.abs(center)[None, :]),
+        axis=1,
+    )
+    safe_scales = np.where(scales > 0.0, scales, 1.0)
+    with np.errstate(over="ignore", under="ignore", divide="ignore", invalid="ignore"):
+        normalized_delta = values / safe_scales[:, None] - center[None, :] / safe_scales[:, None]
+        normalized_distance = np.hypot.reduce(normalized_delta, axis=1)
+        log_distance = np.log(safe_scales) + np.log(normalized_distance)
+    log_distance[np.all(values == center[None, :], axis=1)] = -np.inf
+    log_distance[np.isnan(log_distance)] = np.inf
+    return log_distance
 
 
 def _evidence_support_values(row: pd.Series) -> list[str]:

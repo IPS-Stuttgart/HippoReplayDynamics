@@ -28,7 +28,7 @@ def _uniform_emissions() -> LogEmissionTensor:
         (np.array([1.0]), TypeError, "real numeric scalar"),
         ("1.0", TypeError, "not string"),
         (1.0 + 0.5j, TypeError, "real-valued, not complex"),
-        (10**10000, ValueError, "finite and positive"),
+        (10**400, ValueError, "finite and positive"),
     ],
 )
 def test_pairwise_gaussian_rejects_invalid_sigma_scalars(

@@ -220,7 +220,7 @@ def _patch_state_space_numeric_string_validation() -> None:
         setattr(state_space_utils, _STATE_SPACE_UTILS_PATCHED_FLAG, True)
 
     current_candidate_indices = state_space_model.StateSpaceReplayModel.candidate_indices
-    if getattr(current_candidate_indices, _STATE_SPACE_MODEL_PATCHED_FLAG, False):
+    if _wrapper_chain_has_marker(current_candidate_indices, _STATE_SPACE_MODEL_PATCHED_FLAG):
         return
 
     @wraps(current_candidate_indices)

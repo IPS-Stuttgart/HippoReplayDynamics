@@ -48,3 +48,39 @@ def test_first_order_imm_content_diagnostics_preserves_large_finite_distances() 
     assert diagnostics["state_space_imm_posterior_path_speed_cm_s"] == pytest.approx(
         expected_distance / 0.5
     )
+
+
+def test_first_order_imm_content_diagnostics_rejects_unrepresentable_distance() -> None:
+    mode_posterior = np.array(
+        [
+            [1.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0],
+        ],
+        dtype=float,
+    )
+    trajectory_log_posterior = np.array(
+        [
+            [0.0, -np.inf],
+            [-np.inf, 0.0],
+        ],
+        dtype=float,
+    )
+    float_max = np.finfo(float).max
+    bin_centers = np.array(
+        [
+            [-float_max, 0.0],
+            [float_max, 0.0],
+        ],
+        dtype=float,
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="first-order IMM path geometry exceeds floating-point range",
+    ):
+        state_space_utils._first_order_imm_content_diagnostics(
+            mode_posterior,
+            trajectory_log_posterior,
+            bin_centers,
+            0.5,
+        )

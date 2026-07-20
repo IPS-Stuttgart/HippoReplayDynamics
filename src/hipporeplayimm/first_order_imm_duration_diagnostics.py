@@ -12,6 +12,8 @@ from .duration_dynamics import DurationFloat, transition_durations_s
 _DIAGNOSTIC_PATCH_LOCK = RLock()
 _DISTANCE_PATCH_ATTR = "_first_order_imm_distance_overflow_safe"
 _DISTANCE_ORIGINAL_ATTR = "_first_order_imm_distance_overflow_original"
+_PATH_RANGE_ERROR = "first-order IMM path geometry exceeds floating-point range"
+_DURATION_RANGE_ERROR = "first-order IMM total duration exceeds floating-point range"
 
 
 def _install_overflow_safe_content_diagnostics() -> None:
@@ -42,41 +44,52 @@ def _install_overflow_safe_content_diagnostics() -> None:
 
         trajectory = np.asarray(trajectory_log_posterior, dtype=float)
         centers = np.asarray(bin_centers, dtype=float)
-        posterior = np.exp(trajectory)
-        row_mass = posterior.sum(axis=1)
-        posterior = posterior / row_mass[:, None]
-        expected_position = posterior @ centers
+        with np.errstate(over="ignore", invalid="ignore"):
+            posterior = np.exp(trajectory)
+            row_mass = posterior.sum(axis=1)
+            posterior = posterior / row_mass[:, None]
+            expected_position = posterior @ centers
+        if not np.all(np.isfinite(expected_position)):
+            raise ValueError(_PATH_RANGE_ERROR)
 
         if expected_position.shape[0] > 1:
-            steps = np.hypot.reduce(
-                np.diff(expected_position, axis=0),
-                axis=1,
-            )
-            path_length = float(np.sum(steps))
-            net = float(
-                np.hypot.reduce(expected_position[-1] - expected_position[0])
-            )
+            with np.errstate(over="ignore", invalid="ignore"):
+                step_deltas = np.diff(expected_position, axis=0)
+            if not np.all(np.isfinite(step_deltas)):
+                raise ValueError(_PATH_RANGE_ERROR)
+            with np.errstate(over="ignore", invalid="ignore"):
+                steps = np.hypot.reduce(step_deltas, axis=1)
+                path_length = float(np.sum(steps))
+                final_delta = expected_position[-1] - expected_position[0]
+            if not np.all(np.isfinite(steps)) or not np.all(np.isfinite(final_delta)):
+                raise ValueError(_PATH_RANGE_ERROR)
+            with np.errstate(over="ignore", invalid="ignore"):
+                net = float(np.hypot.reduce(final_delta))
             transition_durations = validation._diagnostic_transition_durations(
                 dt_s,
                 expected_position.shape[0],
                 float(dt_s),
             )
-            duration = max(
-                float(np.sum(transition_durations)),
-                np.finfo(float).tiny,
-            )
+            with np.errstate(over="ignore", invalid="ignore"):
+                duration = float(np.sum(transition_durations))
+            if not np.isfinite(duration):
+                raise ValueError(_DURATION_RANGE_ERROR)
+            duration = max(duration, np.finfo(float).tiny)
         else:
             path_length = 0.0
             net = 0.0
             duration = float(dt_s)
 
+        with np.errstate(over="ignore", invalid="ignore", divide="ignore"):
+            speed = path_length / duration
+        if not np.isfinite(path_length) or not np.isfinite(net) or not np.isfinite(speed):
+            raise ValueError(_PATH_RANGE_ERROR)
+
         diagnostics[
             "state_space_imm_posterior_expected_path_length_cm"
         ] = path_length
         diagnostics["state_space_imm_posterior_net_displacement_cm"] = net
-        diagnostics["state_space_imm_posterior_path_speed_cm_s"] = (
-            path_length / duration
-        )
+        diagnostics["state_space_imm_posterior_path_speed_cm_s"] = speed
         return diagnostics
 
     setattr(overflow_safe_content_diagnostics, _DISTANCE_PATCH_ATTR, True)

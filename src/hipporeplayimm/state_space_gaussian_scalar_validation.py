@@ -16,6 +16,7 @@ from .candidate_active_support_validation import (
 )
 
 _SCALAR_VALIDATION_FLAG = "_state_space_gaussian_scalar_validation_patch_applied"
+_RUNTIME_REFRESH_WRAPPER_FLAG = "_state_space_gaussian_scalar_runtime_refresh_wrapper"
 _STRING_TYPES = (str, bytes, np.str_, np.bytes_)
 
 
@@ -63,6 +64,19 @@ def _mark_wrapper(
     return wrapper
 
 
+def _has_scalar_validation(function: object) -> bool:
+    """Return whether a wrapper chain already contains scalar validation."""
+
+    current = function
+    seen: set[int] = set()
+    while callable(current) and id(current) not in seen:
+        seen.add(id(current))
+        if getattr(current, _SCALAR_VALIDATION_FLAG, False):
+            return True
+        current = getattr(current, "__hipporeplayimm_original__", None)
+    return False
+
+
 def _synchronize_aliases(name: str, original: object, replacement: object) -> None:
     """Refresh package-local by-value imports of a wrapped Gaussian helper."""
 
@@ -78,7 +92,7 @@ def apply_state_space_gaussian_scalar_validation_patch() -> None:
     from . import state_space_sparse_momentum, state_space_utils
 
     current_dense = state_space_utils._gaussian_transition_matrix
-    if not getattr(current_dense, _SCALAR_VALIDATION_FLAG, False):
+    if not _has_scalar_validation(current_dense):
 
         @wraps(current_dense)
         def gaussian_transition_matrix(
@@ -109,7 +123,7 @@ def apply_state_space_gaussian_scalar_validation_patch() -> None:
         )
 
     current_sparse = state_space_sparse_momentum._finite_gaussian_row
-    if not getattr(current_sparse, _SCALAR_VALIDATION_FLAG, False):
+    if not _has_scalar_validation(current_sparse):
 
         @wraps(current_sparse)
         def finite_gaussian_row(
@@ -145,7 +159,7 @@ def apply_state_space_gaussian_scalar_validation_patch() -> None:
         )
 
     current_pairwise = state_space_utils._pairwise_gaussian_log_prob
-    if not getattr(current_pairwise, _SCALAR_VALIDATION_FLAG, False):
+    if not _has_scalar_validation(current_pairwise):
 
         @wraps(current_pairwise)
         def pairwise_gaussian_log_prob(predicted, observed, sigma_cm):
@@ -165,7 +179,7 @@ def apply_state_space_gaussian_scalar_validation_patch() -> None:
         )
 
     current_normalized = state_space_utils._full_grid_normalized_pairwise_gaussian_log_prob
-    if not getattr(current_normalized, _SCALAR_VALIDATION_FLAG, False):
+    if not _has_scalar_validation(current_normalized):
 
         @wraps(current_normalized)
         def full_grid_normalized_pairwise_gaussian_log_prob(
@@ -198,5 +212,28 @@ def apply_state_space_gaussian_scalar_validation_patch() -> None:
             full_grid_normalized_pairwise_gaussian_log_prob,
         )
 
+
+def _install_runtime_refresh_hook() -> None:
+    """Reapply scalar validation when the public runtime patch hook refreshes support."""
+
+    from . import candidate_active_support_validation as active_support
+
+    current = active_support.apply_candidate_active_support_validation_patch
+    if getattr(current, _RUNTIME_REFRESH_WRAPPER_FLAG, False):
+        return
+
+    @wraps(current)
+    def apply_candidate_active_support_validation_patch() -> None:
+        current()
+        apply_state_space_gaussian_scalar_validation_patch()
+
+    setattr(apply_candidate_active_support_validation_patch, _RUNTIME_REFRESH_WRAPPER_FLAG, True)
+    setattr(apply_candidate_active_support_validation_patch, "__hipporeplayimm_original__", current)
+    active_support.apply_candidate_active_support_validation_patch = (
+        apply_candidate_active_support_validation_patch
+    )
+
+
+_install_runtime_refresh_hook()
 
 __all__ = ["apply_state_space_gaussian_scalar_validation_patch"]

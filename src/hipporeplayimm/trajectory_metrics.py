@@ -83,7 +83,10 @@ def trajectory_quality_metrics(
 
 
 def _as_numeric_real_array(values: object, name: str) -> np.ndarray:
-    raw = np.asarray(values)
+    try:
+        raw = np.asarray(values)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ValueError(f"{name} must contain numeric real values") from exc
     if raw.dtype.kind in _BOOL_OR_TEXT_DTYPE_KINDS:
         raise ValueError(f"{name} must contain numeric real values, not boolean or text")
     if raw.dtype.kind == "c":

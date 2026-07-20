@@ -40,6 +40,8 @@ def _coerce_nonnegative_integer_scalar(name: str, value: object) -> int:
         raise TypeError(f"{name} must be a nonnegative integer scalar")
     try:
         numeric = float(array)
+    except OverflowError as exc:
+        raise ValueError(f"{name} must fit into integer range") from exc
     except (TypeError, ValueError) as exc:
         raise TypeError(f"{name} must be a nonnegative integer scalar") from exc
     if not np.isfinite(numeric) or numeric < 0.0 or not numeric.is_integer():

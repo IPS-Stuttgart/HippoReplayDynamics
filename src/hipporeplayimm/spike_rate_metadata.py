@@ -99,6 +99,29 @@ def apply_spike_rate_metadata_patch() -> None:
     score_meta._spike_rate_metadata_patch_applied = True
 
 
+def _finite_numeric_metadata_value(value: object, name: str) -> float:
+    """Return one finite numeric metadata scalar without accepting booleans."""
+
+    if isinstance(value, (bool, np.bool_)):
+        raise ValueError(f"{name} must contain finite numeric metadata values")
+    try:
+        scalar = np.asarray(value)
+    except ValueError as exc:
+        raise ValueError(f"{name} must contain scalar numeric metadata values") from exc
+    if scalar.ndim != 0:
+        raise ValueError(f"{name} must contain scalar numeric metadata values")
+    item = scalar.item()
+    if isinstance(item, (bool, np.bool_)):
+        raise ValueError(f"{name} must contain finite numeric metadata values")
+    try:
+        numeric = float(item)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ValueError(f"{name} must contain finite numeric metadata values") from exc
+    if not np.isfinite(numeric):
+        raise ValueError(f"{name} must be finite")
+    return numeric
+
+
 def _unique_float_from_columns(
     frame: pd.DataFrame,
     columns: tuple[str, ...],
@@ -109,31 +132,19 @@ def _unique_float_from_columns(
         if column not in frame.columns:
             continue
         for value in frame[column].dropna():
-            if isinstance(value, (bool, np.bool_)):
-                raise ValueError(
-                    f"{column} must contain finite numeric metadata values"
-                )
             scalar = np.asarray(value)
             if scalar.ndim != 0:
                 raise ValueError(
                     f"{column} must contain scalar numeric metadata values"
                 )
-            value = scalar.item()
-            text = str(value).strip()
+            item = scalar.item()
+            text = str(item).strip()
             if text.lower() in _MISSING_METADATA_STRINGS:
                 continue
             if text:
-                try:
-                    numeric = float(value)
-                except (TypeError, ValueError, OverflowError) as exc:
-                    raise ValueError(
-                        f"{column} must contain finite numeric metadata values"
-                    ) from exc
-                if not np.isfinite(numeric):
-                    raise ValueError(f"{column} must be finite")
-                values.append(numeric)
+                values.append(_finite_numeric_metadata_value(item, column))
     if not values:
-        return float(default)
+        return _finite_numeric_metadata_value(default, "metadata fallback")
     first = values[0]
     if columns == _SPIKE_RATE_SCALE_COLUMNS:
         conflicting = any(

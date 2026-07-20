@@ -5,6 +5,7 @@ import pytest
 
 import hipporeplayimm
 import hipporeplayimm.state_space as state_space
+import hipporeplayimm.state_space_utils as state_space_utils
 from hipporeplayimm.encoding import LogEmissionTensor
 from hipporeplayimm.state_space_model import StateSpaceDecoderConfig, StateSpaceReplayModel
 
@@ -76,3 +77,35 @@ def test_state_space_imm_rejects_boolean_stationary_sigma_after_patch_refresh() 
 
     with pytest.raises(TypeError, match="sigma_cm.*not boolean"):
         model.score(_uniform_emissions(), centers)
+
+
+def test_runtime_patch_refresh_restores_direct_gaussian_helper_validation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    current = state_space_utils._pairwise_gaussian_log_prob
+    unvalidated = getattr(current, "__hipporeplayimm_original__")
+    assert not getattr(
+        unvalidated,
+        "_state_space_gaussian_scalar_validation_patch_applied",
+        False,
+    )
+    monkeypatch.setattr(
+        state_space_utils,
+        "_pairwise_gaussian_log_prob",
+        unvalidated,
+    )
+
+    hipporeplayimm.apply_runtime_patches()
+
+    centers = np.array([[0.0], [1.0]], dtype=float)
+    with pytest.raises(TypeError, match="sigma_cm.*not boolean"):
+        state_space_utils._pairwise_gaussian_log_prob(centers, centers, True)
+
+
+def test_runtime_patch_refresh_does_not_stack_gaussian_wrappers() -> None:
+    before = state_space_utils._full_grid_normalized_pairwise_gaussian_log_prob
+
+    hipporeplayimm.apply_runtime_patches()
+    hipporeplayimm.apply_runtime_patches()
+
+    assert state_space_utils._full_grid_normalized_pairwise_gaussian_log_prob is before

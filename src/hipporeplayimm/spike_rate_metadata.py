@@ -106,7 +106,7 @@ def _finite_numeric_metadata_value(value: object, name: str) -> float:
         raise ValueError(f"{name} must contain finite numeric metadata values")
     try:
         scalar = np.asarray(value)
-    except ValueError as exc:
+    except (TypeError, ValueError, OverflowError) as exc:
         raise ValueError(f"{name} must contain scalar numeric metadata values") from exc
     if scalar.ndim != 0:
         raise ValueError(f"{name} must contain scalar numeric metadata values")
@@ -132,7 +132,12 @@ def _unique_float_from_columns(
         if column not in frame.columns:
             continue
         for value in frame[column].dropna():
-            scalar = np.asarray(value)
+            try:
+                scalar = np.asarray(value)
+            except (TypeError, ValueError, OverflowError) as exc:
+                raise ValueError(
+                    f"{column} must contain scalar numeric metadata values"
+                ) from exc
             if scalar.ndim != 0:
                 raise ValueError(
                     f"{column} must contain scalar numeric metadata values"

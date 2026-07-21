@@ -66,11 +66,11 @@ def _ps(sig,dt):
     s=float(sig); d=float(dt)
     if not np.isfinite(s) or s<=0.0: raise ValueError('sigma_cm_sqrt_s must be finite and positive')
     if not np.isfinite(d) or d<=0.0: raise ValueError('dt must be finite and positive')
-    with np.errstate(over='ignore',invalid='ignore'):
+    with np.errstate(over='ignore',invalid='ignore',under='ignore'):
         process_sigma=s*np.sqrt(d)
-    if not np.isfinite(process_sigma):
+    if not np.isfinite(process_sigma) or process_sigma<=0.0:
         raise ValueError('sigma_cm_sqrt_s and dt must produce a finite process sigma')
-    return max(process_sigma,np.finfo(float).eps)
+    return process_sigma
 def _pss(sig,ds,dt): return np.asarray([_ps(sig,d) for d in ds],float) if len(ds) else np.empty(0)
 def _rep(sig,ds,dt): return _ps(sig,float(np.median(ds)) if len(ds) else dt)
 def _decays(v,ds,ref):

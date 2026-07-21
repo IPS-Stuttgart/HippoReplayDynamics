@@ -33,7 +33,7 @@ def apply_goal_state_space_farthest_point_patch() -> None:
 
     @wraps(current)
     def farthest_point_subset(points, max_points):
-        values = np.asarray(points, dtype=float)
+        values = _unique_rows_preserve_order(np.asarray(points, dtype=float))
         if values.shape[0] == 0:
             return current(points, max_points)
 
@@ -288,8 +288,22 @@ def _coerce_candidate_goals(value: Any, centers: np.ndarray) -> Any:
         return value
     array = np.asarray(value, dtype=float)
     if array.ndim == 1 and centers.ndim == 2 and centers.shape[1] == 1:
-        return array[:, None]
-    return value
+        array = array[:, None]
+    if array.ndim != 2:
+        return array
+    return _unique_rows_preserve_order(array)
+
+
+def _unique_rows_preserve_order(values: np.ndarray) -> np.ndarray:
+    '''Drop exact duplicate coordinate rows without reordering unique goals.'''
+
+    array = np.asarray(values)
+    if array.ndim != 2 or array.shape[0] <= 1:
+        return array
+    _, first_indices = np.unique(array, axis=0, return_index=True)
+    if first_indices.shape[0] == array.shape[0]:
+        return array
+    return array[np.sort(first_indices)]
 
 
 def _coerce_goal_vector(value: Any, position_dim: int | None) -> np.ndarray:

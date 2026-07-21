@@ -9,6 +9,7 @@ from .benchmark_relative_grouping import _BENCHMARK_RELATIVE_SCOPE_COLUMNS
 
 _MODEL_AVERAGE_BASE_COLUMNS = ("session", "event_index")
 _MODEL_AVERAGE_SCOPE_COLUMNS = (
+    "event_id",
     "benchmark_random_seed",
     "random_seed",
     "null_random_seed",

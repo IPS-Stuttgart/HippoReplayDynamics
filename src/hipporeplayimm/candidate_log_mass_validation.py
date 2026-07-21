@@ -16,6 +16,7 @@ from scipy.special import logsumexp
 
 _PATCHED_FLAG = "_candidate_log_mass_validation_patch_applied"
 _DURATION_OCCUPANCY_PATCHED_FLAG = "_duration_occupancy_candidate_log_mass_patch_applied"
+_REPORTED_MINIMUM_WRAPPER_ATTR = "_candidate_reported_log_mass_minimum_wrapper"
 
 
 def _candidate_log_masses(log_likelihood: np.ndarray, candidates: list[np.ndarray]) -> list[float]:
@@ -203,6 +204,34 @@ def _patch_duration_occupancy_candidate_masses() -> None:
     setattr(duration_occupancy, _DURATION_OCCUPANCY_PATCHED_FLAG, True)
 
 
+def _patch_reported_candidate_log_mass_minimum() -> None:
+    """Use the worst finite value from array-like minimum-mass diagnostics."""
+
+    from . import result_improvements
+
+    current = result_improvements._first_finite_numeric_value
+    if getattr(current, _REPORTED_MINIMUM_WRAPPER_ATTR, False):
+        return
+
+    @wraps(current)
+    def minimum_finite_numeric_value(value: object) -> float | None:
+        try:
+            values = np.asarray(value, dtype=object)
+        except (TypeError, ValueError):
+            return current(value)
+        if values.ndim == 0:
+            return current(values.item())
+        items = list(values.reshape(-1))
+        if any(isinstance(item, (bool, np.bool_)) for item in items):
+            return None
+        finite = [number for item in items if (number := current(item)) is not None]
+        return min(finite) if finite else None
+
+    setattr(minimum_finite_numeric_value, _REPORTED_MINIMUM_WRAPPER_ATTR, True)
+    setattr(minimum_finite_numeric_value, "__hipporeplayimm_original__", current)
+    result_improvements._first_finite_numeric_value = minimum_finite_numeric_value
+
+
 def apply_candidate_log_mass_validation_patch() -> None:
     """Install finite retained-mass validation on candidate-pruned scorers."""
 
@@ -227,6 +256,7 @@ def apply_candidate_log_mass_validation_patch() -> None:
         setattr(state_space, _PATCHED_FLAG, True)
 
     _patch_duration_occupancy_candidate_masses()
+    _patch_reported_candidate_log_mass_minimum()
 
 
 __all__ = [

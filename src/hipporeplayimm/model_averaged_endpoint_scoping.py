@@ -71,6 +71,10 @@ def add_model_averaged_endpoint_columns(df: pd.DataFrame) -> pd.DataFrame:
             continue
 
         weights = exact["model_probability"].to_numpy(dtype=float, copy=True)
+        scale = float(np.max(weights))
+        if scale <= 0.0 or not np.isfinite(scale):
+            continue
+        weights /= scale
         total = float(np.sum(weights))
         if total <= 0.0 or not np.isfinite(total):
             continue

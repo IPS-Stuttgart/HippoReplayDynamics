@@ -6,14 +6,66 @@ from functools import wraps
 from threading import RLock
 
 import numpy as np
+from scipy.special import logsumexp
 
 from .duration_dynamics import DurationFloat, transition_durations_s
 
 _DIAGNOSTIC_PATCH_LOCK = RLock()
 _DISTANCE_PATCH_ATTR = "_first_order_imm_distance_overflow_safe"
 _DISTANCE_ORIGINAL_ATTR = "_first_order_imm_distance_overflow_original"
+_LOG_OFFSET_VALIDATION_PATCH_ATTR = "_first_order_imm_log_offset_validation_safe"
+_LOG_OFFSET_VALIDATION_ORIGINAL_ATTR = (
+    "_first_order_imm_log_offset_validation_original"
+)
 _PATH_RANGE_ERROR = "first-order IMM path geometry exceeds floating-point range"
 _DURATION_RANGE_ERROR = "first-order IMM total duration exceeds floating-point range"
+
+
+def _install_log_offset_safe_validation() -> None:
+    """Validate finite log-posterior mass without raw exponential underflow."""
+
+    from . import first_order_imm_diagnostics_validation as validation
+
+    current = validation._validate_first_order_imm_content_inputs
+    if getattr(current, _LOG_OFFSET_VALIDATION_PATCH_ATTR, False):
+        return
+
+    @wraps(current)
+    def validate_log_offset_safe_inputs(
+        mode_posterior: np.ndarray,
+        trajectory_log_posterior: np.ndarray,
+        bin_centers: np.ndarray,
+        dt_s: float,
+    ) -> None:
+        trajectory = np.asarray(trajectory_log_posterior, dtype=float)
+        if trajectory.ndim == 2:
+            with np.errstate(invalid="ignore"):
+                row_log_mass = logsumexp(trajectory, axis=1)
+            finite_rows = np.isfinite(row_log_mass)
+            if np.any(finite_rows):
+                trajectory = trajectory.copy()
+                trajectory[finite_rows] -= row_log_mass[finite_rows, None]
+                trajectory_log_posterior = trajectory
+        current(
+            mode_posterior,
+            trajectory_log_posterior,
+            bin_centers,
+            dt_s,
+        )
+
+    setattr(
+        validate_log_offset_safe_inputs,
+        _LOG_OFFSET_VALIDATION_PATCH_ATTR,
+        True,
+    )
+    setattr(
+        validate_log_offset_safe_inputs,
+        _LOG_OFFSET_VALIDATION_ORIGINAL_ATTR,
+        current,
+    )
+    validation._validate_first_order_imm_content_inputs = (
+        validate_log_offset_safe_inputs
+    )
 
 
 def _install_overflow_safe_content_diagnostics() -> None:
@@ -45,9 +97,8 @@ def _install_overflow_safe_content_diagnostics() -> None:
         trajectory = np.asarray(trajectory_log_posterior, dtype=float)
         centers = np.asarray(bin_centers, dtype=float)
         with np.errstate(over="ignore", invalid="ignore"):
-            posterior = np.exp(trajectory)
-            row_mass = posterior.sum(axis=1)
-            posterior = posterior / row_mass[:, None]
+            row_log_mass = logsumexp(trajectory, axis=1)
+            posterior = np.exp(trajectory - row_log_mass[:, None])
             expected_position = posterior @ centers
         if not np.all(np.isfinite(expected_position)):
             raise ValueError(_PATH_RANGE_ERROR)
@@ -109,6 +160,7 @@ def apply_first_order_imm_duration_diagnostics_patch() -> None:
     per-transition durations.
     """
 
+    _install_log_offset_safe_validation()
     _install_overflow_safe_content_diagnostics()
 
     import hipporeplayimm.duration_occupancy as duration_occupancy

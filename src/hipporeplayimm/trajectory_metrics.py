@@ -10,6 +10,7 @@ from .models import LOG_ZERO
 _LOG_ZERO_ROW_THRESHOLD = LOG_ZERO / 2.0
 _BOOL_OR_TEXT_DTYPE_KINDS = {"b", "S", "U"}
 _PATH_RANGE_ERROR = "trajectory path geometry exceeds floating-point range"
+_RATIO_RANGE_ERROR = "trajectory metric ratio exceeds floating-point range"
 
 
 def trajectory_quality_metrics(
@@ -195,7 +196,7 @@ def _stable_euclidean_norm(values: np.ndarray, *, axis: int) -> np.ndarray:
 
 def _direction_consistency(path: np.ndarray) -> float:
     steps, lengths = _path_steps(path)
-    keep = lengths > np.finfo(float).eps
+    keep = lengths > 0.0
     if not np.any(keep):
         return 0.0
     unit = steps[keep] / lengths[keep, None]
@@ -214,4 +215,10 @@ def _distance(left: np.ndarray, right: np.ndarray) -> float:
 
 
 def _safe_ratio(num: float, denom: float) -> float:
-    return float(num / denom) if denom > np.finfo(float).eps else 0.0
+    if denom <= 0.0:
+        return 0.0
+    with np.errstate(divide="ignore", invalid="ignore", over="ignore"):
+        ratio = float(np.divide(num, denom))
+    if not np.isfinite(ratio):
+        raise ValueError(_RATIO_RANGE_ERROR)
+    return ratio

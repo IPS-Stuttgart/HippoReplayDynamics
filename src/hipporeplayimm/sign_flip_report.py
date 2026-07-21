@@ -262,7 +262,7 @@ def _count_monte_carlo_extremes(
 
 
 def _comparison_threshold(observed_abs_sum: float, values: np.ndarray) -> float:
-    scale = max(1.0, float(np.sum(np.abs(values), dtype=float)))
+    scale = float(np.sum(np.abs(values), dtype=float))
     tolerance = 8.0 * np.finfo(float).eps * scale
     return max(0.0, observed_abs_sum - tolerance)
 

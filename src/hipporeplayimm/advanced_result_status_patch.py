@@ -49,8 +49,13 @@ def _evidence_support_labels(value: object) -> list[str]:
 
     from . import evidence_reporting
 
+    items = (
+        [value]
+        if isinstance(value, (bytes, bytearray, np.bytes_))
+        else evidence_reporting._flatten_support_value(value)
+    )
     labels: list[str] = []
-    for item in evidence_reporting._flatten_support_value(value):
+    for item in items:
         if evidence_reporting._is_missing_scalar(item):
             continue
         text = _decoded_text(item)

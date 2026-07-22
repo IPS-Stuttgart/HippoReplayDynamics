@@ -1,4 +1,4 @@
-"""Runtime validation for PyRecEst sweep random seeds and output artifacts."""
+"""Runtime validation for PyRecEst sweep random seeds, metrics, and output artifacts."""
 
 from __future__ import annotations
 
@@ -10,11 +10,13 @@ from pathlib import Path
 from typing import Any, Iterable
 
 import numpy as np
+import pandas as pd
 
 _PATCHED_FLAG = "_sweep_seed_validation_patch_applied"
 _GRID_FLAG = "_sweep_seed_validation_parameter_grid_wrapper"
 _BENCHMARK_FLAG = "_sweep_seed_validation_benchmark_config_wrapper"
 _SORTED_FLAG = "_sweep_seed_validation_sorted_seed_wrapper"
+_AGGREGATE_FLAG = "_sweep_nonfinite_metric_filter_wrapper"
 _OUTPUT_FLAG = "_sweep_output_stale_cleanup_wrapper"
 _ORIGINAL_ATTR = "__hipporeplayimm_original__"
 _OPTIONAL_OUTPUT_FILENAMES = (
@@ -27,7 +29,7 @@ _OPTIONAL_OUTPUT_FILENAMES = (
 
 
 def apply_sweep_seed_validation_patch() -> None:
-    """Install strict random-seed validation and output cleanup for sweep helpers."""
+    """Install strict seed validation, finite aggregation, and output cleanup."""
 
     from . import sweeps
 
@@ -78,6 +80,18 @@ def apply_sweep_seed_validation_patch() -> None:
 
         _mark(_sorted_numeric_values, original_sorted, _SORTED_FLAG)
         sweeps._sorted_numeric_values = _sorted_numeric_values
+
+    if not getattr(sweeps._aggregate_metric, _AGGREGATE_FLAG, False):
+        original_aggregate_metric = sweeps._aggregate_metric
+
+        @wraps(original_aggregate_metric)
+        def _aggregate_metric(column, values):
+            numeric = pd.to_numeric(pd.Series(values, copy=False), errors="coerce")
+            finite = numeric[np.isfinite(numeric.to_numpy(dtype=float))]
+            return original_aggregate_metric(column, finite)
+
+        _mark(_aggregate_metric, original_aggregate_metric, _AGGREGATE_FLAG)
+        sweeps._aggregate_metric = _aggregate_metric
 
     if not getattr(sweeps.write_pyrecest_sweep_outputs, _OUTPUT_FLAG, False):
         original_writer = sweeps.write_pyrecest_sweep_outputs
@@ -216,6 +230,7 @@ def _current(sweeps) -> bool:
         getattr(sweeps.pyrecest_parameter_grid, _GRID_FLAG, False)
         and getattr(sweeps._benchmark_config, _BENCHMARK_FLAG, False)
         and getattr(sweeps._sorted_numeric_values, _SORTED_FLAG, False)
+        and getattr(sweeps._aggregate_metric, _AGGREGATE_FLAG, False)
         and getattr(sweeps.write_pyrecest_sweep_outputs, _OUTPUT_FLAG, False)
     )
 

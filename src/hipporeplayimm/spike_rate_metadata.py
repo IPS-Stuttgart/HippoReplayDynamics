@@ -20,6 +20,7 @@ _SPIKE_RATE_SCALE_COLUMNS = (
     "emission_spike_rate_scale",
     "spike_rate_scale",
 )
+_BYTE_BACKED_SCALARS = (bytes, bytearray, memoryview, np.bytes_)
 
 
 def apply_spike_rate_metadata_patch() -> None:
@@ -99,18 +100,26 @@ def apply_spike_rate_metadata_patch() -> None:
     score_meta._spike_rate_metadata_patch_applied = True
 
 
-def _finite_numeric_metadata_value(value: object, name: str) -> float:
-    """Return one finite numeric metadata scalar without accepting booleans."""
+def _metadata_scalar_item(value: object, name: str) -> object:
+    """Return one table scalar, decoding byte-backed scalar storage."""
 
-    if isinstance(value, (bool, np.bool_)):
-        raise ValueError(f"{name} must contain finite numeric metadata values")
+    if isinstance(value, _BYTE_BACKED_SCALARS):
+        return bytes(value).decode("utf-8", errors="replace").strip()
     try:
         scalar = np.asarray(value)
     except (TypeError, ValueError, OverflowError) as exc:
         raise ValueError(f"{name} must contain scalar numeric metadata values") from exc
     if scalar.ndim != 0:
         raise ValueError(f"{name} must contain scalar numeric metadata values")
-    item = scalar.item()
+    return scalar.item()
+
+
+def _finite_numeric_metadata_value(value: object, name: str) -> float:
+    """Return one finite numeric metadata scalar without accepting booleans."""
+
+    if isinstance(value, (bool, np.bool_)):
+        raise ValueError(f"{name} must contain finite numeric metadata values")
+    item = _metadata_scalar_item(value, name)
     if isinstance(item, (bool, np.bool_)):
         raise ValueError(f"{name} must contain finite numeric metadata values")
     try:
@@ -132,17 +141,7 @@ def _unique_float_from_columns(
         if column not in frame.columns:
             continue
         for value in frame[column].dropna():
-            try:
-                scalar = np.asarray(value)
-            except (TypeError, ValueError, OverflowError) as exc:
-                raise ValueError(
-                    f"{column} must contain scalar numeric metadata values"
-                ) from exc
-            if scalar.ndim != 0:
-                raise ValueError(
-                    f"{column} must contain scalar numeric metadata values"
-                )
-            item = scalar.item()
+            item = _metadata_scalar_item(value, column)
             text = str(item).strip()
             if text.lower() in _MISSING_METADATA_STRINGS:
                 continue

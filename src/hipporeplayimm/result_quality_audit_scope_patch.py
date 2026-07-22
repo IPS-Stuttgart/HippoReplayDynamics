@@ -106,6 +106,28 @@ def _scoped_event_group_columns(scores: Any) -> list[str]:
     return columns
 
 
+def _coerce_numeric_scalar(value: object) -> float:
+    """Coerce one numeric diagnostic value without treating booleans as numbers."""
+
+    if isinstance(value, (bool, np.bool_)):
+        return float("nan")
+    try:
+        return float(value)
+    except (TypeError, ValueError, OverflowError):
+        return float("nan")
+
+
+def _coerce_numeric_series(values: pd.Series) -> pd.Series:
+    """Coerce numeric diagnostics while masking booleans and scalar overflow."""
+
+    boolean_mask = values.map(lambda value: isinstance(value, (bool, np.bool_)))
+    sanitized = values.mask(boolean_mask)
+    try:
+        return pd.to_numeric(sanitized, errors="coerce")
+    except (TypeError, ValueError, OverflowError):
+        return sanitized.map(_coerce_numeric_scalar).astype(float)
+
+
 def _first_influence_value_column(scores: Any) -> str | None:
     frame_columns = getattr(scores, "columns", ())
     present: list[str] = []
@@ -113,7 +135,7 @@ def _first_influence_value_column(scores: Any) -> str | None:
         if column not in frame_columns:
             continue
         present.append(column)
-        values = pd.to_numeric(scores[column], errors="coerce")
+        values = _coerce_numeric_series(scores[column])
         if np.isfinite(values.to_numpy(dtype=float)).any():
             return column
     return present[0] if present else None
@@ -173,7 +195,7 @@ def _patch_distinct_model_result_quality_margins(gates_module: Any) -> None:
             current_annotate(out, group_index, rows, prefix=prefix)
             return
 
-        numeric_evidence = pd.to_numeric(rows["log_evidence"], errors="coerce")
+        numeric_evidence = _coerce_numeric_series(rows["log_evidence"])
         finite = pd.Series(
             np.isfinite(numeric_evidence.to_numpy(dtype=float)),
             index=numeric_evidence.index,
@@ -191,7 +213,7 @@ def _patch_distinct_model_result_quality_margins(gates_module: Any) -> None:
         )
         current_annotate(out, group_index, distinct, prefix=prefix)
 
-        distinct_values = pd.to_numeric(distinct["log_evidence"], errors="coerce")
+        distinct_values = _coerce_numeric_series(distinct["log_evidence"])
         best_value = float(distinct_values.max())
         for rank, (_, model_row) in enumerate(
             distinct.assign(_numeric_log_evidence=distinct_values)

@@ -70,17 +70,37 @@ def shuffle_well_labels(frame: pd.DataFrame, random_seed: int = 1) -> pd.DataFra
     return out
 
 
+def _is_boolean_scalar(value: object) -> bool:
+    """Return whether ``value`` is a scalar boolean, including 0-D arrays."""
+
+    if isinstance(value, (bool, np.bool_)):
+        return True
+    try:
+        array = np.asarray(value)
+    except (TypeError, ValueError):
+        return False
+    if array.ndim != 0:
+        return False
+    try:
+        item = array.item()
+    except ValueError:
+        return False
+    return isinstance(item, (bool, np.bool_))
+
+
 def _labelled_well_rows(values: pd.Series) -> pd.Series:
     """Return rows whose well-ID field is an actual finite label."""
 
     present = values.notna()
     normalized = values.astype("string").str.strip().str.lower()
+    boolean_ids = values.map(_is_boolean_scalar)
     exact_integer_ids = values.map(
         lambda value: isinstance(value, (int, np.integer))
+        and not isinstance(value, (bool, np.bool_))
     )
     numeric = pd.Series(np.nan, index=values.index, dtype=float)
-    numeric.loc[~exact_integer_ids] = pd.to_numeric(
-        values.loc[~exact_integer_ids], errors="coerce"
+    numeric.loc[~exact_integer_ids & ~boolean_ids] = pd.to_numeric(
+        values.loc[~exact_integer_ids & ~boolean_ids], errors="coerce"
     )
     numeric_present = exact_integer_ids | numeric.notna()
     numeric_values = numeric.fillna(0.0).to_numpy(dtype=float)
@@ -89,6 +109,7 @@ def _labelled_well_rows(values: pd.Series) -> pd.Series:
     )
     return (
         present
+        & ~boolean_ids
         & ~normalized.isin(_MISSING_WELL_LABELS)
         & (~numeric_present | finite_numeric)
     )
@@ -100,12 +121,17 @@ def _coordinate_well_rows(frame: pd.DataFrame) -> pd.Series:
     coordinate_columns = ["true_well_x", "true_well_y"]
     if not all(column in frame for column in coordinate_columns):
         return pd.Series(False, index=frame.index)
-    numeric = frame[coordinate_columns].apply(pd.to_numeric, errors="coerce")
+    boolean_coordinates = frame[coordinate_columns].apply(
+        lambda values: values.map(_is_boolean_scalar)
+    )
+    numeric_input = frame[coordinate_columns].mask(boolean_coordinates)
+    numeric = numeric_input.apply(pd.to_numeric, errors="coerce")
     finite = pd.DataFrame(
         np.isfinite(numeric.to_numpy(dtype=float)),
         index=frame.index,
         columns=coordinate_columns,
     )
+    finite &= ~boolean_coordinates
     return finite.all(axis=1)
 
 

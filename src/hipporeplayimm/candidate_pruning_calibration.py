@@ -11,6 +11,20 @@ import pandas as pd
 from .encoding import LogEmissionTensor
 from .result_improvement_extensions import _call_candidate_indices_compat
 
+_CANDIDATE_PRUNING_GAP_COLUMNS = (
+    "model",
+    "pruned_log_evidence",
+    "full_candidate_log_evidence",
+    "candidate_pruning_gap",
+    "candidate_pruned_runtime_s",
+    "candidate_full_runtime_s",
+    "candidate_runtime_ratio_full_over_pruned",
+    "n_time",
+    "n_bins",
+    "n_spikes",
+    "mean_candidate_count",
+)
+
 
 def full_grid_candidate_indices(emissions: LogEmissionTensor) -> list[np.ndarray]:
     return [np.arange(emissions.n_bins, dtype=int) for _ in range(emissions.n_time)]
@@ -49,4 +63,4 @@ def score_pruning_gaps(models: Iterable[object], emissions: LogEmissionTensor, b
             continue
         candidates = _call_candidate_indices_compat(model.candidate_indices, emissions, bin_centers)
         rows.append(score_pruning_gap(model, emissions, bin_centers, candidates))
-    return pd.DataFrame(rows)
+    return pd.DataFrame.from_records(rows, columns=_CANDIDATE_PRUNING_GAP_COLUMNS)

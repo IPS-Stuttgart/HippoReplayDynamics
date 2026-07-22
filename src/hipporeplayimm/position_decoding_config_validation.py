@@ -2,9 +2,10 @@
 
 The position-decoding validation helpers use public configuration fields in
 array slicing, fold construction, spike-count filtering, and explicit training
-frame masks.  Invalid integer knobs or non-boolean masks should be rejected
-before those operations so callers do not get silent window truncation,
-accidental truthiness, or unrelated NumPy/type errors.
+frame masks.  Invalid integer knobs, non-boolean masks, or nonmonotonic
+position timestamps should be rejected before those operations so callers do
+not get silent window truncation, accidental truthiness, or unrelated
+NumPy/type errors.
 """
 
 from __future__ import annotations
@@ -53,6 +54,7 @@ def apply_position_decoding_config_validation_patch() -> None:
             config = validation.PositionDecodingConfig() if config is None else config
             config = _validated_position_decoding_config(config)
             _validate_position_decoding_cell_ids(session, config.encoding)
+            _validate_position_decoding_times(validation, session)
             return original_validate_session_position_decoding(session, config)
 
         setattr(validate_session_position_decoding_with_config_validation, _VALIDATE_WRAPPER_FLAG, True)
@@ -155,6 +157,20 @@ def _validate_position_decoding_cell_ids(session: Any, encoding_config: Any) -> 
     if bool(getattr(encoding_config, "use_excitatory", True)):
         _validate_optional_integral_ids(getattr(session, "excitatory_neurons", np.empty(0)), "excitatory_neurons")
     _validate_optional_integral_ids(getattr(session, "inhibitory_neurons", np.empty(0)), "inhibitory_neurons")
+
+
+def _validate_position_decoding_times(validation: Any, session: Any) -> None:
+    """Reject timestamp sequences that would corrupt speed/window construction."""
+
+    position = validation._clean_position(getattr(session, "position"))
+    if position.shape[0] <= 1:
+        return
+    with np.errstate(over="ignore", invalid="ignore"):
+        differences = np.diff(np.asarray(position[:, 0], dtype=float))
+    if not np.all(np.isfinite(differences)):
+        raise ValueError("position timestamp differences exceed floating-point range")
+    if np.any(differences <= 0.0):
+        raise ValueError("position times must be strictly increasing for position decoding")
 
 
 def _validated_encoding_cell_ids(encoding: Any) -> np.ndarray:

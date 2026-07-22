@@ -46,10 +46,7 @@ def trajectory_quality_metrics(
         raise ValueError("trajectory_log_posterior rows must contain positive finite posterior mass")
     normalized = logp - row_log_norm[:, None]
     posterior = np.exp(normalized)
-    with np.errstate(over="ignore", invalid="ignore"):
-        mean_path = posterior @ centers
-    if not np.all(np.isfinite(mean_path)):
-        raise ValueError(_PATH_RANGE_ERROR)
+    mean_path = _posterior_mean_path(posterior, centers)
     map_bins = np.argmax(normalized, axis=1)
     map_path = centers[map_bins]
     durations = _transition_durations(times, logp.shape[0])
@@ -121,6 +118,37 @@ def _transition_durations(times: np.ndarray | None, n_time: int) -> np.ndarray:
     if np.any(diffs <= 0.0):
         raise ValueError("times must be strictly increasing")
     return diffs
+
+
+def _posterior_mean_path(posterior: np.ndarray, centers: np.ndarray) -> np.ndarray:
+    """Return posterior means without overflowing a representable convex hull."""
+
+    row_mass = np.sum(posterior, axis=1, keepdims=True)
+    weights = posterior / row_mass
+    coordinate_scale = np.max(np.abs(centers), axis=0)
+    scaled_centers = np.divide(
+        centers,
+        coordinate_scale,
+        out=np.zeros_like(centers, dtype=float),
+        where=coordinate_scale > 0.0,
+    )
+    with np.errstate(over="ignore", invalid="ignore"):
+        scaled_mean = weights @ scaled_centers
+    if not np.all(np.isfinite(scaled_mean)):
+        raise ValueError(_PATH_RANGE_ERROR)
+
+    # A convex combination must remain inside the coordinate-wise hull.  Clip
+    # only roundoff beyond those exact bounds before restoring the original scale.
+    scaled_mean = np.clip(
+        scaled_mean,
+        np.min(scaled_centers, axis=0),
+        np.max(scaled_centers, axis=0),
+    )
+    with np.errstate(over="ignore", invalid="ignore"):
+        mean_path = scaled_mean * coordinate_scale
+    if not np.all(np.isfinite(mean_path)):
+        raise ValueError(_PATH_RANGE_ERROR)
+    return mean_path
 
 
 def _posterior_entropy(posterior: np.ndarray, log_posterior: np.ndarray) -> np.ndarray:

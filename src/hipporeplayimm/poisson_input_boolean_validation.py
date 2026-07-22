@@ -5,11 +5,14 @@ from __future__ import annotations
 from functools import wraps
 
 import numpy as np
-from scipy.special import gammaln
+from scipy.special import betaln, gammaln
 
 _PATCHED_FLAG = "_poisson_input_boolean_validation_patch_applied"
+_NEGATIVE_BINOMIAL_PATCHED_FLAG = (
+    "_negative_binomial_poisson_limit_patch_applied"
+)
 _ORIGINAL_ATTR = "__hipporeplayimm_original__"
-_WRAPPER_VERSION = 3
+_WRAPPER_VERSION = 4
 
 
 def _contains_boolean_values(value: object) -> bool:
@@ -58,7 +61,9 @@ def _reject_nonfinite_expected_count_scaling(
     if rates.size == 0 or durations.size == 0:
         return
     max_rate = float(np.max(rates))
-    max_duration = float(durations) if durations.ndim == 0 else float(np.max(durations))
+    max_duration = (
+        float(durations) if durations.ndim == 0 else float(np.max(durations))
+    )
     with np.errstate(over="ignore", invalid="ignore"):
         max_expected = max_rate * max_duration * spike_rate_scale
     if not np.isfinite(max_expected):
@@ -77,10 +82,116 @@ def _expected_counts(
     if durations.ndim == 0:
         raw = rates_hz[None, :, :] * float(durations) * spike_rate_scale
     else:
-        raw = durations[:, None, None] * rates_hz[None, :, :] * spike_rate_scale
+        raw = (
+            durations[:, None, None]
+            * rates_hz[None, :, :]
+            * spike_rate_scale
+        )
     if raw.shape[0] == 1 and n_time != 1:
-        raw = np.broadcast_to(raw, (n_time, rates_hz.shape[0], rates_hz.shape[1]))
-    return np.where(rates_hz[None, :, :] == 0.0, 0.0, np.maximum(raw, np.finfo(float).tiny))
+        raw = np.broadcast_to(
+            raw,
+            (n_time, rates_hz.shape[0], rates_hz.shape[1]),
+        )
+    return np.where(
+        rates_hz[None, :, :] == 0.0,
+        0.0,
+        np.maximum(raw, np.finfo(float).tiny),
+    )
+
+
+def _poisson_log_terms(counts: np.ndarray, mean: np.ndarray) -> np.ndarray:
+    """Return elementwise Poisson log-PMF terms."""
+
+    return counts * np.log(mean) - mean - gammaln(counts + 1.0)
+
+
+def _stable_negative_binomial_log_terms(
+    counts: np.ndarray,
+    expected: np.ndarray,
+    negative_binomial_overdispersion: float,
+) -> np.ndarray:
+    """Evaluate the mean/overdispersion negative-binomial log PMF stably.
+
+    Writing the combinatorial coefficient as a difference of two ``gammaln``
+    values loses all significant digits when ``1 / overdispersion`` is much
+    larger than the observed count.  The beta-function identity
+
+    ``Gamma(r + k) / (Gamma(r) Gamma(k + 1)) = 1 / (k B(r, k))``
+
+    avoids that subtraction.  Log-add-exp forms keep the success and failure
+    probabilities stable at both very small and very large overdispersion.
+    When the reciprocal shape itself overflows, the distribution is
+    numerically indistinguishable from its Poisson limit.
+    """
+
+    count_values = np.asarray(counts, dtype=float)
+    mean_values = np.maximum(
+        np.asarray(expected, dtype=float),
+        np.finfo(float).tiny,
+    )
+    count_values, mean_values = np.broadcast_arrays(
+        count_values,
+        mean_values,
+    )
+    overdispersion = float(negative_binomial_overdispersion)
+    with np.errstate(over="ignore", divide="ignore", invalid="ignore"):
+        size = 1.0 / overdispersion
+    if not np.isfinite(size):
+        return _poisson_log_terms(count_values, mean_values)
+
+    combination = np.zeros_like(mean_values, dtype=float)
+    positive_counts = count_values > 0.0
+    combination[positive_counts] = (
+        -np.log(count_values[positive_counts])
+        - betaln(size, count_values[positive_counts])
+    )
+
+    log_scaled_mean = np.log(overdispersion) + np.log(mean_values)
+    log_success_probability = -np.logaddexp(0.0, log_scaled_mean)
+    log_failure_probability = -np.logaddexp(0.0, -log_scaled_mean)
+    return (
+        combination
+        + size * log_success_probability
+        + count_values * log_failure_probability
+    )
+
+
+def _patch_negative_binomial_poisson_limit(encoding) -> None:
+    """Install stable negative-binomial evaluation including its Poisson limit."""
+
+    current = encoding._negative_binomial_log_emissions
+    if getattr(current, _NEGATIVE_BINOMIAL_PATCHED_FLAG, False):
+        return
+    original = getattr(current, _ORIGINAL_ATTR, current)
+
+    @wraps(original)
+    def stable_negative_binomial_log_emissions(
+        counts,
+        expected,
+        negative_binomial_overdispersion,
+    ):
+        overdispersion = float(negative_binomial_overdispersion)
+        if not np.isfinite(overdispersion) or overdispersion <= 0.0:
+            return original(
+                counts,
+                expected,
+                negative_binomial_overdispersion,
+            )
+        return _stable_negative_binomial_log_terms(
+            counts,
+            expected,
+            overdispersion,
+        )
+
+    setattr(
+        stable_negative_binomial_log_emissions,
+        _NEGATIVE_BINOMIAL_PATCHED_FLAG,
+        True,
+    )
+    setattr(stable_negative_binomial_log_emissions, _ORIGINAL_ATTR, original)
+    encoding._negative_binomial_log_emissions = (
+        stable_negative_binomial_log_emissions
+    )
 
 
 def _restore_exact_zero_rate_support(
@@ -103,19 +214,21 @@ def _restore_exact_zero_rate_support(
         return log_likelihood
 
     counts = spike_counts[:, :, None]
-    expected = _expected_counts(rates_hz, dt, spike_rate_scale, spike_counts.shape[0])
+    expected = _expected_counts(
+        rates_hz,
+        dt,
+        spike_rate_scale,
+        spike_counts.shape[0],
+    )
     safe_expected = np.where(zero_rate[None, :, :], 1.0, expected)
 
     if negative_binomial_overdispersion == 0.0:
-        terms = counts * np.log(safe_expected) - safe_expected - gammaln(counts + 1.0)
+        terms = _poisson_log_terms(counts, safe_expected)
     else:
-        size = 1.0 / negative_binomial_overdispersion
-        terms = (
-            gammaln(counts + size)
-            - gammaln(size)
-            - gammaln(counts + 1.0)
-            + size * (np.log(size) - np.log(size + safe_expected))
-            + counts * (np.log(safe_expected) - np.log(size + safe_expected))
+        terms = _stable_negative_binomial_log_terms(
+            counts,
+            safe_expected,
+            negative_binomial_overdispersion,
         )
     terms = np.where(zero_rate[None, :, :], 0.0, terms)
     exact = np.einsum("tcb,c->tb", terms, cell_weights, optimize=True)
@@ -136,6 +249,8 @@ def apply_poisson_input_boolean_validation_patch() -> None:
     """Install input guards and exact support handling for count emissions."""
 
     from . import encoding
+
+    _patch_negative_binomial_poisson_limit(encoding)
 
     current = encoding._poisson_log_emissions
     if getattr(current, _PATCHED_FLAG, None) == _WRAPPER_VERSION:
@@ -165,7 +280,9 @@ def apply_poisson_input_boolean_validation_patch() -> None:
                 spike_rate_scale=spike_rate_scale,
                 likelihood_temperature=likelihood_temperature,
                 cell_weights=reusable_weights,
-                negative_binomial_overdispersion=negative_binomial_overdispersion,
+                negative_binomial_overdispersion=(
+                    negative_binomial_overdispersion
+                ),
             )
         _reject_nonfinite_expected_count_scaling(
             rates_hz,
@@ -175,7 +292,10 @@ def apply_poisson_input_boolean_validation_patch() -> None:
 
         counts = np.asarray(spike_counts, dtype=float)
         rates = np.asarray(rates_hz, dtype=float)
-        weights = encoding._emission_cell_weights(reusable_weights, counts.shape[1])
+        weights = encoding._emission_cell_weights(
+            reusable_weights,
+            counts.shape[1],
+        )
         return _restore_exact_zero_rate_support(
             log_likelihood,
             spike_counts=counts,
@@ -184,7 +304,9 @@ def apply_poisson_input_boolean_validation_patch() -> None:
             spike_rate_scale=float(spike_rate_scale),
             cell_weights=weights,
             likelihood_temperature=float(likelihood_temperature),
-            negative_binomial_overdispersion=float(negative_binomial_overdispersion),
+            negative_binomial_overdispersion=float(
+                negative_binomial_overdispersion
+            ),
         )
 
     setattr(poisson_log_emissions, _PATCHED_FLAG, _WRAPPER_VERSION)

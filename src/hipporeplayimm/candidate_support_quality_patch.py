@@ -76,11 +76,24 @@ def apply_candidate_support_quality_patch() -> None:
     _patch_overflowed_pairwise_nearest_support()
 
 
+def _wrapper_chain_has_marker(function: object, marker: str) -> bool:
+    """Return whether a runtime wrapper chain already contains ``marker``."""
+
+    current = function
+    seen: set[int] = set()
+    while callable(current) and id(current) not in seen:
+        seen.add(id(current))
+        if getattr(current, marker, False):
+            return True
+        current = getattr(current, "__hipporeplayimm_original__", None)
+    return False
+
+
 def _patch_boolean_candidate_log_mass(ri: Any) -> None:
     """Avoid interpreting boolean diagnostics as finite retained log mass."""
 
     current = ri._first_finite_numeric_value
-    if getattr(current, _MIN_LOG_MASS_BOOL_WRAPPER_ATTR, False):
+    if _wrapper_chain_has_marker(current, _MIN_LOG_MASS_BOOL_WRAPPER_ATTR):
         setattr(ri, _MIN_LOG_MASS_BOOL_PATCHED_FLAG, True)
         return
 

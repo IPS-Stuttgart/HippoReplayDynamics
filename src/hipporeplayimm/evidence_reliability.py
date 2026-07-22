@@ -61,13 +61,7 @@ def event_reliability_flags(
     support_labels = _evidence_support_labels_for_reliability(row)
     if evidence_reporting.DEGENERATE_SINGLE_BIN_EVIDENCE_SUPPORT in support_labels:
         reasons.append("degenerate_single_bin")
-    candidate_mass, invalid_metric = _first_finite(
-        row,
-        (
-            "diagnostic_mean_candidate_log_mass",
-            "mean_candidate_log_mass",
-        ),
-    )
+    candidate_mass, invalid_metric = _candidate_log_mass_for_reliability(row)
     invalid_numeric_metric |= invalid_metric
     if np.isfinite(candidate_mass) and candidate_mass < min_candidate_log_mass:
         reasons.append("low_candidate_mass")
@@ -193,6 +187,32 @@ def _evidence_support_labels_for_reliability(row: pd.Series) -> list[str]:
     if explicit_labels:
         return explicit_labels
     return evidence_reporting._evidence_support_labels(evidence_reporting.evidence_support_from_row(row))
+
+
+def _candidate_log_mass_for_reliability(row: pd.Series) -> tuple[float, bool]:
+    """Return the worst finite minimum candidate mass, with legacy mean fallback."""
+
+    minimum_masses: list[float] = []
+    invalid_numeric_metric = False
+    for column in row.index:
+        name = str(column)
+        if name != "min_candidate_log_mass" and not name.endswith("_min_candidate_log_mass"):
+            continue
+        value, invalid_metric = _as_float(row.get(column, np.nan))
+        invalid_numeric_metric |= invalid_metric
+        if np.isfinite(value):
+            minimum_masses.append(value)
+    if minimum_masses:
+        return float(min(minimum_masses)), invalid_numeric_metric
+
+    mean_mass, invalid_mean = _first_finite(
+        row,
+        (
+            "diagnostic_mean_candidate_log_mass",
+            "mean_candidate_log_mass",
+        ),
+    )
+    return mean_mass, invalid_numeric_metric or invalid_mean
 
 
 def _as_float(value) -> tuple[float, bool]:

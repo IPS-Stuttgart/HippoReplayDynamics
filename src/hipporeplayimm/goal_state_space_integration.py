@@ -21,6 +21,7 @@ GOAL_STATE_SPACE_MODEL_NAMES = frozenset(
 GOAL_EVIDENCE_DIAGNOSTIC_COLUMN = 'diagnostic_goal_state_space_evidence_support'
 _PARAMETER_VALIDATION_PATCH_ATTR = '_hipporeplayimm_goal_state_space_parameter_validation_patch'
 _FARTHEST_POINT_PATCH_ATTR = '_hipporeplayimm_goal_state_space_farthest_point_patch'
+_SMALL_DRIFT_PATCH_ATTR = '_hipporeplayimm_goal_state_space_small_drift_patch'
 _ORIGINALS_ATTR = '_hipporeplayimm_goal_state_space_parameter_validation_originals'
 
 
@@ -63,10 +64,53 @@ def apply_goal_state_space_farthest_point_patch() -> None:
     _goal_state_space._farthest_point_subset = farthest_point_subset
 
 
+def apply_goal_state_space_small_drift_patch() -> None:
+    '''Preserve representable sub-epsilon goal-directed motion.'''
+
+    current = _goal_state_space._goal_drift_prediction
+    if getattr(current, _SMALL_DRIFT_PATCH_ATTR, False):
+        return
+
+    @wraps(current)
+    def goal_drift_prediction(position, goal, drift_step_cm):
+        current_position = np.asarray(position, dtype=float)
+        target = np.asarray(goal, dtype=float)
+        coordinate_scale = float(
+            max(np.max(np.abs(current_position)), np.max(np.abs(target)))
+        )
+        step = float(drift_step_cm)
+        if step <= 0.0 or coordinate_scale == 0.0:
+            return current(position, goal, drift_step_cm)
+
+        scaled_vector = (
+            target / coordinate_scale - current_position / coordinate_scale
+        )
+        scaled_distance = float(np.hypot.reduce(np.abs(scaled_vector)))
+        if scaled_distance == 0.0:
+            return current(position, goal, drift_step_cm)
+
+        with np.errstate(over='ignore', invalid='ignore'):
+            distance = coordinate_scale * scaled_distance
+        if not np.isfinite(distance) or distance > np.finfo(float).eps:
+            return current(position, goal, drift_step_cm)
+
+        if step >= distance:
+            return target.copy()
+        predicted = current_position + step * (scaled_vector / scaled_distance)
+        if not np.all(np.isfinite(predicted)):
+            raise ValueError('goal drift prediction exceeds floating-point range')
+        return predicted
+
+    setattr(goal_drift_prediction, _SMALL_DRIFT_PATCH_ATTR, True)
+    setattr(goal_drift_prediction, '__hipporeplayimm_original__', current)
+    _goal_state_space._goal_drift_prediction = goal_drift_prediction
+
+
 def apply_goal_state_space_parameter_validation_patch() -> None:
     '''Reject bool and array-like goal-state-space numeric parameters.'''
 
     apply_goal_state_space_farthest_point_patch()
+    apply_goal_state_space_small_drift_patch()
 
     originals = getattr(_goal_state_space, _ORIGINALS_ATTR, None)
     if originals is None:

@@ -33,7 +33,7 @@ _DERIVED_RANGE_ERROR = "posterior-predictive diagnostics exceed floating-point r
 def _decoded_text(value: object) -> str:
     """Return table scalar text, decoding byte-valued values."""
 
-    if isinstance(value, (bytes, bytearray, np.bytes_)):
+    if isinstance(value, (bytes, bytearray, memoryview, np.bytes_)):
         return bytes(value).decode("utf-8", errors="replace").strip()
     return str(value).strip()
 
@@ -51,7 +51,7 @@ def _evidence_support_labels(value: object) -> list[str]:
 
     items = (
         [value]
-        if isinstance(value, (bytes, bytearray, np.bytes_))
+        if isinstance(value, (bytes, bytearray, memoryview, np.bytes_))
         else evidence_reporting._flatten_support_value(value)
     )
     labels: list[str] = []

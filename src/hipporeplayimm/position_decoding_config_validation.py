@@ -2,10 +2,10 @@
 
 The position-decoding validation helpers use public configuration fields in
 array slicing, fold construction, spike-count filtering, and explicit training
-frame masks.  Invalid integer knobs, non-boolean masks, or nonmonotonic
-position timestamps should be rejected before those operations so callers do
-not get silent window truncation, accidental truthiness, or unrelated
-NumPy/type errors.
+frame masks. Invalid integer knobs, non-boolean masks, nonmonotonic position
+timestamps, or empty result tables should be handled before callers encounter
+silent truncation, accidental truthiness, unrelated NumPy/type errors, or
+headerless CSV outputs.
 """
 
 from __future__ import annotations
@@ -16,12 +16,60 @@ from functools import wraps
 from typing import Any
 
 import numpy as np
+import pandas as pd
 
 _PATCHED_FLAG = "_position_decoding_config_validation_patch_applied"
 _VALIDATE_WRAPPER_FLAG = "_position_decoding_config_validation_validate_wrapper"
 _MASK_WRAPPER_FLAG = "_position_decoding_config_validation_mask_wrapper"
 _COUNTS_WRAPPER_FLAG = "_position_decoding_config_validation_counts_wrapper"
 _DISTANCE_WRAPPER_FLAG = "_position_decoding_distance_overflow_wrapper"
+_RUN_WRAPPER_FLAG = "_position_decoding_empty_schema_run_wrapper"
+_SUMMARY_WRAPPER_FLAG = "_position_decoding_empty_schema_summary_wrapper"
+_WRITE_WRAPPER_FLAG = "_position_decoding_empty_schema_write_wrapper"
+
+_POSITION_DECODING_SAMPLE_COLUMNS = (
+    "session",
+    "fold",
+    "window_index",
+    "start_time",
+    "end_time",
+    "center_time",
+    "true_x",
+    "true_y",
+    "posterior_mean_x",
+    "posterior_mean_y",
+    "map_x",
+    "map_y",
+    "map_bin",
+    "true_bin",
+    "posterior_mean_error_cm",
+    "map_error_cm",
+    "true_bin_probability",
+    "true_bin_rank",
+    "posterior_entropy",
+    "n_spikes",
+    "n_cells",
+    "n_position_bins",
+    "observation_model",
+    "spike_mark_features",
+    "spike_mark_source",
+    "clusterless_mark_likelihood",
+)
+
+_POSITION_DECODING_SUMMARY_COLUMNS = (
+    "session",
+    "decode_windows",
+    "folds",
+    "median_posterior_mean_error_cm",
+    "median_map_error_cm",
+    "mean_true_bin_probability",
+    "median_true_bin_rank",
+    "mean_spikes_per_window",
+    "cells",
+    "spatial_bins",
+    "spike_mark_features",
+    "clusterless_mark_likelihood",
+)
 
 
 def apply_position_decoding_config_validation_patch() -> None:
@@ -33,16 +81,25 @@ def apply_position_decoding_config_validation_patch() -> None:
     current_mask_encoder = validation.fit_place_field_encoding_for_position_mask
     current_spike_counts_for_window = validation._spike_counts_for_window
     current_distance = validation._distance
+    current_run = validation.run_position_decoding_validation
+    current_summary = validation.summarize_position_decoding
+    current_write = validation.PositionDecodingResult.write
     validate_is_current = bool(getattr(current_validate, _VALIDATE_WRAPPER_FLAG, False))
     mask_is_current = bool(getattr(current_mask_encoder, _MASK_WRAPPER_FLAG, False))
     counts_is_current = bool(getattr(current_spike_counts_for_window, _COUNTS_WRAPPER_FLAG, False))
     distance_is_current = bool(getattr(current_distance, _DISTANCE_WRAPPER_FLAG, False))
+    run_is_current = bool(getattr(current_run, _RUN_WRAPPER_FLAG, False))
+    summary_is_current = bool(getattr(current_summary, _SUMMARY_WRAPPER_FLAG, False))
+    write_is_current = bool(getattr(current_write, _WRITE_WRAPPER_FLAG, False))
     if (
         getattr(validation, _PATCHED_FLAG, False)
         and validate_is_current
         and mask_is_current
         and counts_is_current
         and distance_is_current
+        and run_is_current
+        and summary_is_current
+        and write_is_current
     ):
         return
 
@@ -55,7 +112,8 @@ def apply_position_decoding_config_validation_patch() -> None:
             config = _validated_position_decoding_config(config)
             _validate_position_decoding_cell_ids(session, config.encoding)
             _validate_position_decoding_times(validation, session)
-            return original_validate_session_position_decoding(session, config)
+            result = original_validate_session_position_decoding(session, config)
+            return _with_empty_schema(result, _POSITION_DECODING_SAMPLE_COLUMNS)
 
         setattr(validate_session_position_decoding_with_config_validation, _VALIDATE_WRAPPER_FLAG, True)
         validation.validate_session_position_decoding = validate_session_position_decoding_with_config_validation
@@ -97,7 +155,53 @@ def apply_position_decoding_config_validation_patch() -> None:
         setattr(distance_with_overflow_safe_norm, _DISTANCE_WRAPPER_FLAG, True)
         validation._distance = distance_with_overflow_safe_norm
 
+    if not summary_is_current:
+        original_summarize_position_decoding = current_summary
+
+        @wraps(original_summarize_position_decoding)
+        def summarize_position_decoding_with_empty_schema(samples: pd.DataFrame) -> pd.DataFrame:
+            summary = original_summarize_position_decoding(samples)
+            return _with_empty_schema(summary, _POSITION_DECODING_SUMMARY_COLUMNS)
+
+        setattr(summarize_position_decoding_with_empty_schema, _SUMMARY_WRAPPER_FLAG, True)
+        validation.summarize_position_decoding = summarize_position_decoding_with_empty_schema
+
+    if not run_is_current:
+        original_run_position_decoding_validation = current_run
+
+        @wraps(original_run_position_decoding_validation)
+        def run_position_decoding_validation_with_empty_schema(root: Any, config: Any = None) -> Any:
+            result = original_run_position_decoding_validation(root, config)
+            result.samples = _with_empty_schema(result.samples, _POSITION_DECODING_SAMPLE_COLUMNS)
+            result.summary = _with_empty_schema(result.summary, _POSITION_DECODING_SUMMARY_COLUMNS)
+            return result
+
+        setattr(run_position_decoding_validation_with_empty_schema, _RUN_WRAPPER_FLAG, True)
+        validation.run_position_decoding_validation = run_position_decoding_validation_with_empty_schema
+
+    if not write_is_current:
+        original_write = current_write
+
+        @wraps(original_write)
+        def write_with_empty_schema(result: Any, output_dir: Any) -> None:
+            normalized = validation.PositionDecodingResult(
+                samples=_with_empty_schema(result.samples, _POSITION_DECODING_SAMPLE_COLUMNS),
+                summary=_with_empty_schema(result.summary, _POSITION_DECODING_SUMMARY_COLUMNS),
+            )
+            original_write(normalized, output_dir)
+
+        setattr(write_with_empty_schema, _WRITE_WRAPPER_FLAG, True)
+        validation.PositionDecodingResult.write = write_with_empty_schema
+
     setattr(validation, _PATCHED_FLAG, True)
+
+
+def _with_empty_schema(frame: Any, columns: tuple[str, ...]) -> Any:
+    """Attach stable columns only to a completely columnless empty DataFrame."""
+
+    if not isinstance(frame, pd.DataFrame) or not frame.empty or len(frame.columns):
+        return frame
+    return pd.DataFrame(columns=columns)
 
 
 def _validated_position_decoding_config(config: Any) -> Any:

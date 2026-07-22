@@ -24,8 +24,14 @@ class _NegativeBinomialSamplingGenerator:
 
     def poisson(self, lam: Any, size: Any = None) -> Any:
         mean = np.asarray(lam, dtype=float)
-        dispersion_size = 1.0 / self._overdispersion
-        success_probability = dispersion_size / (dispersion_size + mean)
+        with np.errstate(over="ignore", divide="ignore", invalid="ignore"):
+            dispersion_size = 1.0 / self._overdispersion
+            scaled_mean = self._overdispersion * mean
+            success_probability = 1.0 / (1.0 + scaled_mean)
+        if not np.isfinite(dispersion_size) or np.all(
+            success_probability == 1.0
+        ):
+            return self._rng.poisson(lam, size=size)
         return self._rng.negative_binomial(
             dispersion_size,
             success_probability,

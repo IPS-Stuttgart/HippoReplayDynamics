@@ -1,4 +1,5 @@
 import numpy as np
+import pytest
 
 import hipporeplayimm.simulation_recovery as recovery
 from hipporeplayimm.encoding import EncodingConfig, EncodingModel
@@ -72,6 +73,40 @@ def test_simulated_counts_use_configured_negative_binomial_likelihood(monkeypatc
             actual_probability,
             dispersion_size / (dispersion_size + expected_mean),
         )
+
+
+@pytest.mark.parametrize(
+    "overdispersion",
+    (1.0e-20, np.nextafter(0.0, 1.0)),
+)
+def test_tiny_overdispersion_sampling_uses_poisson_limit(
+    monkeypatch,
+    overdispersion,
+):
+    path = np.array([0, 1], dtype=int)
+    monkeypatch.setattr(
+        recovery,
+        "simulate_latent_path",
+        lambda *args, **kwargs: path.copy(),
+    )
+    rng = _RecordingGenerator()
+
+    emissions, actual_path = recovery.simulate_replay_event(
+        _encoding(),
+        true_model="diffusion",
+        n_time=2,
+        dt=0.1,
+        rng=rng,
+        negative_binomial_overdispersion=overdispersion,
+    )
+
+    np.testing.assert_array_equal(actual_path, path)
+    np.testing.assert_array_equal(
+        emissions.spike_counts,
+        np.ones((2, 2), dtype=int),
+    )
+    assert len(rng.poisson_means) == 2
+    assert rng.negative_binomial_calls == []
 
 
 def test_zero_overdispersion_keeps_poisson_sampling(monkeypatch):

@@ -6,6 +6,10 @@ byte strings.  The advanced diagnostics used a literal ``status == 'success'``
 filter, which dropped those legacy rows before margin, wrong-map, and paired-model
 summaries were computed.
 
+Evidence-support diagnostics can arrive through the same byte-valued table
+scalars. Decode those labels before support classification so exact, truncated,
+degenerate, and particle-approximation provenance is not lost.
+
 The same patch point also keeps posterior-predictive diagnostics from accepting
 impossible count tables.  Those helpers operate on observed counts, expected
 Poisson means, and optional predictive variances, all of which must be finite and
@@ -26,12 +30,38 @@ _MISSING_STATUS_VALUES = {"", "nan", "na", "n/a", "none", "null", "<na>"}
 _DERIVED_RANGE_ERROR = "posterior-predictive diagnostics exceed floating-point range"
 
 
+def _decoded_text(value: object) -> str:
+    """Return table scalar text, decoding byte-valued values."""
+
+    if isinstance(value, (bytes, bytearray, np.bytes_)):
+        return bytes(value).decode("utf-8", errors="replace").strip()
+    return str(value).strip()
+
+
 def _status_text(value: object) -> str:
     """Return normalized status text, decoding byte-valued table scalars."""
 
-    if isinstance(value, (bytes, bytearray, np.bytes_)):
-        return bytes(value).decode("utf-8", errors="replace").strip().lower()
-    return str(value).strip().lower()
+    return _decoded_text(value).lower()
+
+
+def _evidence_support_labels(value: object) -> list[str]:
+    """Extract support labels while decoding byte-valued table scalars."""
+
+    from . import evidence_reporting
+
+    labels: list[str] = []
+    for item in evidence_reporting._flatten_support_value(value):
+        if evidence_reporting._is_missing_scalar(item):
+            continue
+        text = _decoded_text(item)
+        if (
+            not text
+            or text.lower()
+            in evidence_reporting._MISSING_EVIDENCE_SUPPORT_STRINGS
+        ):
+            continue
+        labels.append(text)
+    return labels
 
 
 def _is_missing_status(value: object) -> bool:
@@ -55,7 +85,7 @@ def _normalize_status_value(value: object) -> object:
 
 
 def _patch_status_helpers() -> None:
-    """Keep all package-level score-table status aliases byte-aware."""
+    """Keep package-level status and support aliases byte-aware."""
 
     from . import accuracy_model_probability_status_patch as accuracy_status
     from . import evidence_reliability
@@ -69,6 +99,7 @@ def _patch_status_helpers() -> None:
     evidence_status_coercion._normalize_status_value = _normalize_status_value
     evidence_reporting._is_missing_status = _is_missing_status
     evidence_reporting._status_is_success_or_missing = _status_is_success_or_missing
+    evidence_reporting._evidence_support_labels = _evidence_support_labels
     result_quality_gates._is_missing_status = _is_missing_status
     result_quality_gates._status_is_success_or_missing = _status_is_success_or_missing
     simulation_best_row_flags._status_is_success = _status_is_success_or_missing

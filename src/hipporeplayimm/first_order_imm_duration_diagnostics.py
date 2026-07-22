@@ -68,6 +68,40 @@ def _install_log_offset_safe_validation() -> None:
     )
 
 
+def _posterior_mean_positions(
+    posterior: np.ndarray,
+    centers: np.ndarray,
+) -> np.ndarray:
+    """Return posterior means without overflowing a representable convex hull."""
+
+    row_mass = np.sum(posterior, axis=1, keepdims=True)
+    weights = posterior / row_mass
+    coordinate_scale = np.max(np.abs(centers), axis=0)
+    scaled_centers = np.divide(
+        centers,
+        coordinate_scale,
+        out=np.zeros_like(centers, dtype=float),
+        where=coordinate_scale > 0.0,
+    )
+    with np.errstate(over="ignore", invalid="ignore"):
+        scaled_mean = weights @ scaled_centers
+    if not np.all(np.isfinite(scaled_mean)):
+        raise ValueError(_PATH_RANGE_ERROR)
+
+    # A convex combination must remain inside the coordinate-wise hull. Clip
+    # only roundoff beyond those exact bounds before restoring the original scale.
+    scaled_mean = np.clip(
+        scaled_mean,
+        np.min(scaled_centers, axis=0),
+        np.max(scaled_centers, axis=0),
+    )
+    with np.errstate(over="ignore", invalid="ignore"):
+        expected_position = scaled_mean * coordinate_scale
+    if not np.all(np.isfinite(expected_position)):
+        raise ValueError(_PATH_RANGE_ERROR)
+    return expected_position
+
+
 def _install_overflow_safe_content_diagnostics() -> None:
     """Keep representable path diagnostics finite for large coordinates."""
 
@@ -99,9 +133,7 @@ def _install_overflow_safe_content_diagnostics() -> None:
         with np.errstate(over="ignore", invalid="ignore"):
             row_log_mass = logsumexp(trajectory, axis=1)
             posterior = np.exp(trajectory - row_log_mass[:, None])
-            expected_position = posterior @ centers
-        if not np.all(np.isfinite(expected_position)):
-            raise ValueError(_PATH_RANGE_ERROR)
+        expected_position = _posterior_mean_positions(posterior, centers)
 
         if expected_position.shape[0] > 1:
             with np.errstate(over="ignore", invalid="ignore"):

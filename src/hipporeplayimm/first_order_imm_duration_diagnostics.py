@@ -133,7 +133,11 @@ def _install_overflow_safe_content_diagnostics() -> None:
 
         with np.errstate(over="ignore", invalid="ignore", divide="ignore"):
             speed = path_length / duration
-        if not np.isfinite(path_length) or not np.isfinite(net) or not np.isfinite(speed):
+        if (
+            not np.isfinite(path_length)
+            or not np.isfinite(net)
+            or not np.isfinite(speed)
+        ):
             raise ValueError(_PATH_RANGE_ERROR)
 
         diagnostics[
@@ -150,6 +154,47 @@ def _install_overflow_safe_content_diagnostics() -> None:
     )
 
 
+def _validated_bin_durations(emissions, n_time: int) -> np.ndarray | None:
+    """Return explicit emission-bin durations aligned with diagnostic rows."""
+
+    values = getattr(emissions, "bin_durations", None)
+    if values is None:
+        return None
+    try:
+        durations = np.asarray(values, dtype=float)
+    except (OverflowError, TypeError, ValueError) as exc:
+        raise ValueError(
+            "bin_durations must contain finite positive durations"
+        ) from exc
+    if durations.shape != (int(n_time),):
+        raise ValueError("bin_durations must contain one duration per emission row")
+    if not np.all(np.isfinite(durations)) or np.any(durations <= 0.0):
+        raise ValueError("bin_durations must contain finite positive durations")
+    return durations
+
+
+def _longest_active_bin_duration(
+    mode_posterior: np.ndarray,
+    bin_durations: np.ndarray,
+) -> float:
+    """Measure the longest nonstationary bout from exact emission-bin widths."""
+
+    mode = np.asarray(mode_posterior, dtype=float)
+    active = np.argmax(mode, axis=1) != 0
+    best = 0.0
+    current = 0.0
+    for is_active, duration in zip(active, bin_durations, strict=True):
+        if not is_active:
+            current = 0.0
+            continue
+        with np.errstate(over="ignore", invalid="ignore"):
+            current += float(duration)
+        if not np.isfinite(current):
+            raise ValueError(_DURATION_RANGE_ERROR)
+        best = max(best, current)
+    return best
+
+
 def apply_first_order_imm_duration_diagnostics_patch() -> None:
     """Install a compatibility wrapper around the duration-aware scorer.
 
@@ -157,7 +202,8 @@ def apply_first_order_imm_duration_diagnostics_patch() -> None:
     first-order IMM content diagnostics, but older call sites pass only scalar
     ``dt`` into the diagnostic helper. Wrap that helper during first-order IMM
     scoring so duration-dependent content diagnostics still see the explicit
-    per-transition durations.
+    per-transition durations. Bout occupancy is measured from the emission-bin
+    widths rather than approximated from center-to-center transition durations.
     """
 
     _install_log_offset_safe_validation()
@@ -207,12 +253,25 @@ def apply_first_order_imm_duration_diagnostics_patch() -> None:
                     durations = transition_durations_s(emissions)
                     if durations.size:
                         diagnostic_dt = DurationFloat(float(diagnostic_dt), durations)
-                return original_diagnostics(
+                diagnostics = original_diagnostics(
                     mode_post,
                     trajectory,
                     centers,
                     diagnostic_dt,
                 )
+                bin_durations = _validated_bin_durations(
+                    emissions,
+                    np.asarray(mode_post).shape[0],
+                )
+                if bin_durations is not None:
+                    diagnostics = dict(diagnostics)
+                    diagnostics[
+                        "state_space_imm_longest_nonstationary_bout_s"
+                    ] = _longest_active_bin_duration(
+                        mode_post,
+                        bin_durations,
+                    )
+                return diagnostics
 
             duration_occupancy._first_order_imm_content_diagnostics = (
                 diagnostics_with_transition_durations

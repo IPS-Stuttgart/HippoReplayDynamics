@@ -124,7 +124,8 @@ def _coordinate_well_rows(frame: pd.DataFrame) -> pd.Series:
     boolean_coordinates = frame[coordinate_columns].apply(
         lambda values: values.map(_is_boolean_scalar)
     )
-    numeric = frame[coordinate_columns].apply(pd.to_numeric, errors="coerce")
+    numeric_input = frame[coordinate_columns].mask(boolean_coordinates)
+    numeric = numeric_input.apply(pd.to_numeric, errors="coerce")
     finite = pd.DataFrame(
         np.isfinite(numeric.to_numpy(dtype=float)),
         index=frame.index,

@@ -59,10 +59,15 @@ def paired_sign_flip_test(
     if array.size == 0:
         raise ValueError("values must contain at least one finite observation")
 
-    observed_mean = float(np.mean(array))
+    scale = float(np.max(np.abs(array)))
+    if scale == 0.0:
+        observed_mean = 0.0
+    else:
+        observed_mean = float(scale * np.mean(array / scale))
+        if not np.isfinite(observed_mean):
+            raise ValueError("mean of values exceeds floating-point range")
     nonzero = array[array != 0.0]
     n_nonzero = int(nonzero.size)
-    observed_abs_sum = abs(float(np.sum(nonzero, dtype=float)))
 
     if n_nonzero == 0:
         return SignFlipResult(
@@ -75,11 +80,16 @@ def paired_sign_flip_test(
             random_seed=None,
         )
 
-    threshold = _comparison_threshold(observed_abs_sum, nonzero)
+    # Sign-flip p-values are invariant under positive rescaling. Normalizing by
+    # the largest magnitude prevents finite inputs near the floating-point limit
+    # from overflowing the observed and permuted sums.
+    statistic_values = nonzero / scale
+    observed_abs_sum = abs(float(np.sum(statistic_values, dtype=float)))
+    threshold = _comparison_threshold(observed_abs_sum, statistic_values)
     if n_nonzero <= max_exact_n:
         total = 1 << n_nonzero
         extreme = _count_exact_extremes(
-            nonzero,
+            statistic_values,
             threshold=threshold,
             total=total,
             chunk_size=chunk_size,
@@ -90,7 +100,7 @@ def paired_sign_flip_test(
         seed_used: int | None = None
     else:
         extreme = _count_monte_carlo_extremes(
-            nonzero,
+            statistic_values,
             threshold=threshold,
             n_permutations=n_permutations,
             random_seed=random_seed,

@@ -17,6 +17,7 @@ from scipy.special import logsumexp
 _PATCHED_FLAG = "_candidate_log_mass_validation_patch_applied"
 _DURATION_OCCUPANCY_PATCHED_FLAG = "_duration_occupancy_candidate_log_mass_patch_applied"
 _REPORTED_MINIMUM_WRAPPER_ATTR = "_candidate_reported_log_mass_minimum_wrapper"
+_REPORTED_COLUMN_MINIMUM_WRAPPER_ATTR = "_candidate_reported_log_mass_column_minimum_wrapper"
 
 
 def _candidate_log_masses(log_likelihood: np.ndarray, candidates: list[np.ndarray]) -> list[float]:
@@ -232,6 +233,38 @@ def _patch_reported_candidate_log_mass_minimum() -> None:
     result_improvements._first_finite_numeric_value = minimum_finite_numeric_value
 
 
+def _patch_reported_candidate_log_mass_across_columns() -> None:
+    """Use the worst finite minimum-mass diagnostic available on a row."""
+
+    from . import result_improvements
+
+    current = result_improvements._candidate_min_log_mass
+    if getattr(current, _REPORTED_COLUMN_MINIMUM_WRAPPER_ATTR, False):
+        return
+
+    @wraps(current)
+    def minimum_candidate_log_mass(row) -> float:
+        columns: list[object] = list(result_improvements._CANDIDATE_MIN_LOG_MASS_COLUMNS)
+        seen = {str(column) for column in columns}
+        for column in getattr(row, "index", ()):
+            name = str(column)
+            if name.endswith("_min_candidate_log_mass") and name not in seen:
+                columns.append(column)
+                seen.add(name)
+
+        finite: list[float] = []
+        for column in columns:
+            value = row.get(column)
+            scalar = result_improvements._first_finite_numeric_value(value)
+            if scalar is not None:
+                finite.append(scalar)
+        return min(finite) if finite else float("nan")
+
+    setattr(minimum_candidate_log_mass, _REPORTED_COLUMN_MINIMUM_WRAPPER_ATTR, True)
+    setattr(minimum_candidate_log_mass, "__hipporeplayimm_original__", current)
+    result_improvements._candidate_min_log_mass = minimum_candidate_log_mass
+
+
 def apply_candidate_log_mass_validation_patch() -> None:
     """Install finite retained-mass validation on candidate-pruned scorers."""
 
@@ -257,6 +290,7 @@ def apply_candidate_log_mass_validation_patch() -> None:
 
     _patch_duration_occupancy_candidate_masses()
     _patch_reported_candidate_log_mass_minimum()
+    _patch_reported_candidate_log_mass_across_columns()
 
 
 __all__ = [

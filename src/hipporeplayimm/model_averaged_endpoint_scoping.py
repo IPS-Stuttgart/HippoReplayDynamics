@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import math
+
 import numpy as np
 import pandas as pd
 
@@ -79,8 +81,8 @@ def add_model_averaged_endpoint_columns(df: pd.DataFrame) -> pd.DataFrame:
         if total <= 0.0 or not np.isfinite(total):
             continue
         weights /= total
-        x = float(np.sum(weights * exact["diagnostic_decoded_endpoint_x"].to_numpy(dtype=float)))
-        y = float(np.sum(weights * exact["diagnostic_decoded_endpoint_y"].to_numpy(dtype=float)))
+        x = _finite_weighted_mean(weights, exact["diagnostic_decoded_endpoint_x"].to_numpy(dtype=float))
+        y = _finite_weighted_mean(weights, exact["diagnostic_decoded_endpoint_y"].to_numpy(dtype=float))
         positive = weights > 0.0
         entropy = float(-np.sum(weights[positive] * np.log(weights[positive])))
         margin = _log_evidence_margin(exact)
@@ -92,6 +94,23 @@ def add_model_averaged_endpoint_columns(df: pd.DataFrame) -> pd.DataFrame:
         out.iloc[positions, out.columns.get_loc("model_probability_entropy")] = entropy
         out.iloc[positions, out.columns.get_loc("model_log_evidence_margin")] = margin
     return out
+
+
+def _finite_weighted_mean(weights: np.ndarray, values: np.ndarray) -> float:
+    """Return a finite weighted mean without overflowing valid coordinates."""
+
+    coordinate_scale = float(np.max(np.abs(values)))
+    if coordinate_scale == 0.0:
+        return 0.0
+
+    scaled_values = values / coordinate_scale
+    weight_total = math.fsum(float(weight) for weight in weights)
+    scaled_mean = math.fsum(
+        float(weight) * float(value)
+        for weight, value in zip(weights, scaled_values, strict=True)
+    ) / weight_total
+    scaled_mean = float(np.clip(scaled_mean, np.min(scaled_values), np.max(scaled_values)))
+    return float(scaled_mean * coordinate_scale)
 
 
 def _distinct_model_rows(frame: pd.DataFrame) -> pd.DataFrame:

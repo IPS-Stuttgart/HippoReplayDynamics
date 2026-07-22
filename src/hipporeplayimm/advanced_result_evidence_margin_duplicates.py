@@ -42,9 +42,13 @@ def apply_evidence_margin_distinct_model_patch() -> None:
         and getattr(current_sweep, _EMPTY_SWEEP_FLAG, False)
     ):
         return
-    original_margin = current_margin
-    original_bool = current_bool
-    original_sweep = current_sweep
+    # The threshold-validation patch replaces the sweep wrapper during a runtime
+    # refresh.  That makes this patch run again even though its margin and bool
+    # wrappers are still installed.  Reuse their stored bases instead of wrapping
+    # our own wrappers repeatedly.
+    original_margin = _original_before_refresh(current_margin, _MARGIN_FLAG)
+    original_bool = _original_before_refresh(current_bool, _BOOL_FLAG)
+    original_sweep = _original_before_refresh(current_sweep, _EMPTY_SWEEP_FLAG)
 
     def evidence_margin_table(
         scores,
@@ -159,9 +163,16 @@ def apply_evidence_margin_distinct_model_patch() -> None:
         return summary.iloc[0:0].copy()
 
     setattr(evidence_margin_table, _MARGIN_FLAG, True)
+    setattr(evidence_margin_table, "__hipporeplayimm_original__", original_margin)
     setattr(add_evidence_margin_columns, _ADD_FLAG, True)
     setattr(_as_bool, _BOOL_FLAG, True)
+    setattr(_as_bool, "__hipporeplayimm_original__", original_bool)
     setattr(paired_model_margin_threshold_sweep, _EMPTY_SWEEP_FLAG, True)
+    setattr(
+        paired_model_margin_threshold_sweep,
+        "__hipporeplayimm_original__",
+        original_sweep,
+    )
     diagnostics.evidence_margin_table = evidence_margin_table
     diagnostics.add_evidence_margin_columns = add_evidence_margin_columns
     diagnostics._as_bool = _as_bool
@@ -169,6 +180,14 @@ def apply_evidence_margin_distinct_model_patch() -> None:
         paired_model_margin_threshold_sweep
     )
     setattr(diagnostics, _PATCHED_FLAG, True)
+
+
+def _original_before_refresh(function, wrapper_flag: str):
+    """Return the base below this patch's current wrapper, when present."""
+
+    if not getattr(function, wrapper_flag, False):
+        return function
+    return getattr(function, "__hipporeplayimm_original__", function)
 
 
 def _collapse_duplicate_models(

@@ -56,6 +56,7 @@ def test_empty_session_position_decoding_keeps_sample_schema() -> None:
         spikes=np.empty((0, 2), dtype=float),
         excitatory_neurons=np.empty(0, dtype=int),
         inhibitory_neurons=np.empty(0, dtype=int),
+        run_times=np.empty((0, 2), dtype=float),
     )
 
     samples = validation.validate_session_position_decoding(session)

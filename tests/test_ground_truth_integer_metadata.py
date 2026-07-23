@@ -1,7 +1,11 @@
+import numpy as np
 import pandas as pd
 import pytest
 
 from hipporeplayimm.ground_truth import _parse_cell_ids, _unique_int_from_column
+
+
+_LONGDOUBLE_WIDER_THAN_FLOAT64 = np.finfo(np.longdouble).nmant > np.finfo(np.float64).nmant
 
 
 def test_unique_int_from_column_accepts_integer_valued_metadata():
@@ -26,6 +30,31 @@ def test_unique_int_from_column_rejects_near_integral_metadata():
 
 def test_unique_int_from_column_rejects_boolean_metadata():
     frame = pd.DataFrame({"benchmark_random_seed": [True]})
+
+    with pytest.raises(ValueError, match="benchmark_random_seed"):
+        _unique_int_from_column(frame, "benchmark_random_seed", 1)
+
+
+@pytest.mark.skipif(not _LONGDOUBLE_WIDER_THAN_FLOAT64, reason="longdouble has no extra integer precision")
+def test_unique_int_from_column_preserves_extended_precision_integer():
+    exact_seed = 9_007_199_254_740_993
+    frame = pd.DataFrame(
+        {"benchmark_random_seed": pd.Series([np.longdouble(str(exact_seed))], dtype=object)}
+    )
+
+    assert _unique_int_from_column(frame, "benchmark_random_seed", 1) == exact_seed
+
+
+@pytest.mark.skipif(not _LONGDOUBLE_WIDER_THAN_FLOAT64, reason="longdouble has no extra integer precision")
+def test_unique_int_from_column_rejects_extended_precision_fraction():
+    frame = pd.DataFrame(
+        {
+            "benchmark_random_seed": pd.Series(
+                [np.longdouble("9007199254740992.5")],
+                dtype=object,
+            )
+        }
+    )
 
     with pytest.raises(ValueError, match="benchmark_random_seed"):
         _unique_int_from_column(frame, "benchmark_random_seed", 1)

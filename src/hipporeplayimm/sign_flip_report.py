@@ -278,11 +278,13 @@ def _comparison_threshold(observed_abs_sum: float, values: np.ndarray) -> float:
 
 
 def _finite_values(values: Sequence[float] | np.ndarray) -> np.ndarray:
+    raw = np.asarray(values, dtype=object)
+    if any(isinstance(value, (bool, np.bool_)) for value in raw.flat):
+        raise ValueError("values must be numeric deltas, not booleans")
+
     array = np.asarray(values)
     if array.ndim != 1:
         raise ValueError("values must be one-dimensional")
-    if np.issubdtype(array.dtype, np.bool_):
-        raise ValueError("values must be numeric deltas, not booleans")
     try:
         numeric = array.astype(float, copy=False)
     except (TypeError, ValueError) as exc:
@@ -293,6 +295,10 @@ def _finite_values(values: Sequence[float] | np.ndarray) -> np.ndarray:
 
 
 def _numeric_series(series: pd.Series, name: str) -> np.ndarray:
+    boolean = series.map(lambda value: isinstance(value, (bool, np.bool_)))
+    if bool(boolean.any()):
+        raise ValueError(f"{name} contains boolean values")
+
     numeric = pd.to_numeric(series, errors="coerce")
     missing = series.isna()
     invalid = ~missing & numeric.isna()

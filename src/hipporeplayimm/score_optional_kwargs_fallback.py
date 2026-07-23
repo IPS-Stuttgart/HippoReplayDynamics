@@ -98,7 +98,11 @@ def _unexpected_optional_keywords(
     exc: TypeError,
     keywords: tuple[str, ...],
 ) -> tuple[str, ...]:
-    """Return only keywords identified by an interpreter-style call error."""
+    """Return only keywords identified by a direct call-binding error."""
+
+    traceback = exc.__traceback__
+    if traceback is None or traceback.tb_next is not None:
+        return ()
 
     text = str(exc)
     named = tuple(

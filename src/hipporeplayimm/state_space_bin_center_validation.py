@@ -16,7 +16,11 @@ _CORE_GAUSSIAN_LOG_PROB_PATCHED_FLAG = "_core_gaussian_log_prob_scaling_patch_ap
 _CORE_PAIRWISE_GAUSSIAN_LOG_PROB_PATCHED_FLAG = (
     "_core_pairwise_gaussian_log_prob_scaling_patch_applied"
 )
+_CORE_POSTERIOR_DIAGNOSTICS_PATCHED_FLAG = (
+    "_core_posterior_endpoint_scaling_patch_applied"
+)
 _BOOL_OR_TEXT_DTYPE_KINDS = {"b", "S", "U"}
+_ENDPOINT_RANGE_ERROR = "decoded endpoint exceeds floating-point range"
 
 
 def _validate_state_space_log_likelihood(emissions: Any) -> None:
@@ -107,6 +111,42 @@ def _scaled_distance(
         return np.hypot.reduce(standardized_delta, axis=axis)
 
 
+def _stable_posterior_endpoint(
+    terminal_log_posterior: np.ndarray,
+    bin_centers: np.ndarray,
+) -> np.ndarray:
+    """Return a posterior mean without overflowing a finite convex hull."""
+
+    posterior = np.exp(np.asarray(terminal_log_posterior, dtype=float))
+    posterior_mass = float(np.sum(posterior))
+    if not np.isfinite(posterior_mass) or posterior_mass <= 0.0:
+        raise ValueError("terminal posterior must contain positive finite mass")
+    weights = posterior / posterior_mass
+
+    coordinate_scale = np.max(np.abs(bin_centers), axis=0)
+    scaled_centers = np.divide(
+        bin_centers,
+        coordinate_scale,
+        out=np.zeros_like(bin_centers, dtype=float),
+        where=coordinate_scale > 0.0,
+    )
+    with np.errstate(over="ignore", invalid="ignore"):
+        scaled_endpoint = weights @ scaled_centers
+    if not np.all(np.isfinite(scaled_endpoint)):
+        raise ValueError(_ENDPOINT_RANGE_ERROR)
+
+    scaled_endpoint = np.clip(
+        scaled_endpoint,
+        np.min(scaled_centers, axis=0),
+        np.max(scaled_centers, axis=0),
+    )
+    with np.errstate(over="ignore", invalid="ignore"):
+        endpoint = scaled_endpoint * coordinate_scale
+    if not np.all(np.isfinite(endpoint)):
+        raise ValueError(_ENDPOINT_RANGE_ERROR)
+    return endpoint
+
+
 def _patch_core_model_bin_center_validation() -> None:
     """Allow public core replay models to score vector-shaped 1D grids."""
 
@@ -126,6 +166,72 @@ def _patch_core_model_bin_center_validation() -> None:
     setattr(validate_score_inputs, _CORE_MODEL_PATCHED_FLAG, True)
     setattr(validate_score_inputs, "__hipporeplayimm_original__", previous_validate)
     models._validate_score_inputs = validate_score_inputs
+
+
+def _patch_core_posterior_diagnostics_scaling() -> None:
+    """Keep core-model endpoint means finite inside a finite coordinate hull."""
+
+    from . import models
+
+    previous_diagnostics = models._posterior_diagnostics
+    if getattr(
+        previous_diagnostics,
+        _CORE_POSTERIOR_DIAGNOSTICS_PATCHED_FLAG,
+        False,
+    ):
+        return
+
+    def posterior_diagnostics(terminal_log_posterior, bin_centers):
+        centers = np.asarray(bin_centers, dtype=float)
+        if centers.ndim != 2 or centers.shape[1] < 1:
+            raise ValueError("bin_centers must have shape (n_bins, position_dim)")
+        log_posterior = np.asarray(terminal_log_posterior, dtype=float)
+        posterior = np.exp(log_posterior)
+        posterior_mass = float(np.sum(posterior))
+        if not np.isfinite(posterior_mass) or posterior_mass <= 0.0:
+            return previous_diagnostics(terminal_log_posterior, centers)
+        endpoint = _stable_posterior_endpoint(log_posterior, centers)
+        map_bin = int(np.argmax(log_posterior))
+        with np.errstate(invalid="ignore"):
+            entropy_terms = np.where(
+                posterior > 0.0,
+                posterior * terminal_log_posterior,
+                0.0,
+            )
+        entropy = float(-np.sum(entropy_terms))
+        endpoint_y = float(endpoint[1]) if centers.shape[1] > 1 else 0.0
+        map_y = float(centers[map_bin, 1]) if centers.shape[1] > 1 else 0.0
+        return {
+            "decoded_endpoint_x": float(endpoint[0]),
+            "decoded_endpoint_y": endpoint_y,
+            "decoded_map_x": float(centers[map_bin, 0]),
+            "decoded_map_y": map_y,
+            "decoded_map_bin": map_bin,
+            "terminal_posterior_entropy": entropy,
+        }
+
+    posterior_diagnostics.__name__ = getattr(
+        previous_diagnostics,
+        "__name__",
+        "_posterior_diagnostics",
+    )
+    posterior_diagnostics.__doc__ = getattr(previous_diagnostics, "__doc__", None)
+    posterior_diagnostics.__module__ = getattr(
+        previous_diagnostics,
+        "__module__",
+        __name__,
+    )
+    setattr(
+        posterior_diagnostics,
+        _CORE_POSTERIOR_DIAGNOSTICS_PATCHED_FLAG,
+        True,
+    )
+    setattr(
+        posterior_diagnostics,
+        "__hipporeplayimm_original__",
+        previous_diagnostics,
+    )
+    models._posterior_diagnostics = posterior_diagnostics
 
 
 def _patch_core_diffusion_transition_scaling() -> None:
@@ -295,6 +401,7 @@ def apply_state_space_bin_center_validation_patch() -> None:
     from . import state_space as ss
 
     _patch_core_model_bin_center_validation()
+    _patch_core_posterior_diagnostics_scaling()
     _patch_core_diffusion_transition_scaling()
     _patch_core_gaussian_log_prob_scaling()
 

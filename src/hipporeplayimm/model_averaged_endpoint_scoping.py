@@ -98,7 +98,6 @@ def add_model_averaged_endpoint_columns(df: pd.DataFrame) -> pd.DataFrame:
 
 def _finite_weighted_mean(weights: np.ndarray, values: np.ndarray) -> float:
     """Return a finite weighted mean without overflowing valid coordinates."""
-
     coordinate_scale = float(np.max(np.abs(values)))
     if coordinate_scale == 0.0:
         return 0.0
@@ -114,17 +113,42 @@ def _finite_weighted_mean(weights: np.ndarray, values: np.ndarray) -> float:
 
 
 def _distinct_model_rows(frame: pd.DataFrame) -> pd.DataFrame:
-    """Keep the strongest finite-evidence row for each model identity."""
-
+    """Keep the strongest finite-evidence row for each normalized model identity."""
     if frame.empty or "model" not in frame.columns:
         return frame
     if "log_evidence" not in frame.columns:
-        return frame.drop_duplicates("model", keep="first").copy()
+        identities = frame["model"].map(_model_identity)
+        return frame.loc[~identities.duplicated(keep="first")].copy()
 
     evidence = pd.to_numeric(frame["log_evidence"], errors="coerce").to_numpy(dtype=float)
     sort_key = np.where(np.isfinite(evidence), -evidence, np.inf)
     order = np.argsort(sort_key, kind="stable")
-    return frame.iloc[order].drop_duplicates("model", keep="first").copy()
+    ordered = frame.iloc[order]
+    identities = ordered["model"].map(_model_identity)
+    return ordered.loc[~identities.duplicated(keep="first")].copy()
+
+
+def _model_identity(value: object) -> object:
+    """Return a hashable model key, decoding byte-backed scalar identifiers."""
+    if isinstance(value, np.ndarray):
+        if value.size == 1:
+            return _model_identity(value.reshape(-1)[0])
+        return ("array", tuple(_model_identity(item) for item in value.reshape(-1)))
+    if isinstance(value, np.generic):
+        return _model_identity(value.item())
+    if isinstance(value, (bytes, bytearray, memoryview)):
+        raw = bytes(value)
+        try:
+            return raw.decode("utf-8")
+        except UnicodeDecodeError:
+            return ("bytes", raw)
+    if isinstance(value, (list, tuple)):
+        return ("sequence", tuple(_model_identity(item) for item in value))
+    try:
+        hash(value)
+    except TypeError:
+        return repr(value)
+    return value
 
 
 def _log_evidence_margin(exact: pd.DataFrame) -> float:

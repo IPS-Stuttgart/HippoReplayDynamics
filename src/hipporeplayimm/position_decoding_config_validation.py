@@ -370,6 +370,19 @@ def _integer_value(name: str, value: Any) -> int:
         raise ValueError(message)
     if isinstance(item, (int, np.integer)):
         return int(item)
+    if isinstance(item, Decimal):
+        if not item.is_finite():
+            raise ValueError(f"{name} must be a finite integer")
+        integral = item.to_integral_value()
+        if item != integral:
+            raise ValueError(message)
+        return int(integral)
+    if isinstance(item, np.floating):
+        if not np.isfinite(item):
+            raise ValueError(f"{name} must be a finite integer")
+        if not item.is_integer():
+            raise ValueError(message)
+        return int(item)
     if isinstance(item, (str, np.str_, bytes, np.bytes_)):
         try:
             text = bytes(item).decode("utf-8") if isinstance(item, (bytes, np.bytes_)) else str(item)

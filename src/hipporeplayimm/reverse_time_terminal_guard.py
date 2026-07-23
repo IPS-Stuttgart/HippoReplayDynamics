@@ -32,7 +32,11 @@ def apply_reverse_time_terminal_guard_patch() -> None:
     """Install the evidence-only terminal guard on compatibility wrappers."""
 
     from . import result_improvement_extensions as extensions
+    from .score_optional_kwargs_fallback import (
+        apply_score_optional_kwargs_fallback_patch,
+    )
 
+    apply_score_optional_kwargs_fallback_patch()
     score = extensions.ReverseTimeReplayModel.score
     if getattr(score, "_reverse_time_terminal_guard_applied", False):
         return

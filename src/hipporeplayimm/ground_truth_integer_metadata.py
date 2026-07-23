@@ -122,12 +122,12 @@ def _parse_integer_metadata_value(column: str, value: Any) -> int:
     if isinstance(value, (int, np.integer)):
         return int(value)
     if isinstance(value, (float, np.floating)):
-        numeric = float(value)
-        if not np.isfinite(numeric):
+        if not np.isfinite(value):
             raise ValueError(f"{column} must contain finite integer values")
-        if not numeric.is_integer():
+        integer = int(value)
+        if value != integer:
             raise ValueError(f"{column} must contain integer values")
-        return int(numeric)
+        return integer
 
     try:
         numeric = Decimal(str(value).strip())

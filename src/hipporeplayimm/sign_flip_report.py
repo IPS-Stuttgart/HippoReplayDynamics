@@ -142,10 +142,12 @@ def score_table_sign_flip_summary(
     selected = frame.copy()
     requested_models = _normalize_models(models)
     if requested_models is not None:
-        selected = selected.loc[selected[model_column].astype(str).isin(requested_models)]
+        normalized = selected[model_column].map(_model_filter_text)
+        selected = selected.loc[normalized.isin(requested_models)].copy()
 
     rows: list[dict[str, object]] = []
-    grouped = selected.groupby(model_column, sort=False, dropna=False)
+    normalized_models = selected[model_column].map(_normalize_model_label)
+    grouped = selected.groupby(normalized_models, sort=False, dropna=False)
     for group_index, (model, group) in enumerate(grouped):
         values = _numeric_series(group[value_column], value_column)
         if values.size == 0:
@@ -311,10 +313,32 @@ def _numeric_series(series: pd.Series, name: str) -> np.ndarray:
     return finite
 
 
+def _normalize_model_label(value: object) -> object:
+    """Return a stable scalar/grouping key for persisted model identifiers."""
+
+    if isinstance(value, np.ndarray):
+        if value.size == 1:
+            return _normalize_model_label(value.reshape(-1)[0])
+        return tuple(_normalize_model_label(item) for item in value.reshape(-1))
+    if isinstance(value, np.generic):
+        return _normalize_model_label(value.item())
+    if isinstance(value, (bytes, bytearray, memoryview)):
+        return bytes(value).decode("utf-8", errors="replace").strip()
+    if isinstance(value, list):
+        return tuple(_normalize_model_label(item) for item in value)
+    return value
+
+
+def _model_filter_text(value: object) -> str:
+    """Return normalized model text for the optional model filter."""
+
+    return str(_normalize_model_label(value)).strip()
+
+
 def _normalize_models(models: Iterable[str] | None) -> set[str] | None:
     if models is None:
         return None
-    normalized = {str(model).strip() for model in models if str(model).strip()}
+    normalized = {_model_filter_text(model) for model in models if _model_filter_text(model)}
     if not normalized:
         raise ValueError("models must contain at least one non-empty model name")
     return normalized

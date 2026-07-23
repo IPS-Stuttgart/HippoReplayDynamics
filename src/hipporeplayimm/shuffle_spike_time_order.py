@@ -1,4 +1,4 @@
-"""Runtime patches for shuffle-control ordering and scope keys."""
+"""Runtime patches for shuffle-control ordering, integer values, and scope keys."""
 
 from __future__ import annotations
 
@@ -11,15 +11,20 @@ import numpy as np
 _PATCHED_FLAG = "_shuffle_spike_time_order_patch_applied"
 _SCOPE_KEY_PATCHED_FLAG = "_shuffle_scope_numeric_key_patch_applied"
 _GRID_SHAPE_PATCHED_FLAG = "_shuffle_grid_shape_validation_patch_applied"
+_INTEGER_VALUE_PATCHED_FLAG = "_shuffle_integer_value_precision_patch_applied"
 
 
 def apply_shuffle_spike_time_order_patch() -> None:
-    """Install sorted spike-time shuffling and dtype-stable shuffle scope keys."""
+    """Install sorted spike-time shuffling and strict shuffle-control validation."""
 
     from . import result_improvements as ri
     from . import shuffle_controls
 
-    if not (getattr(ri, _PATCHED_FLAG, False) and getattr(ri, "shuffle_spike_times_session", None) is _shuffle_spike_times_session_sorted):
+    if not (
+        getattr(ri, _PATCHED_FLAG, False)
+        and getattr(ri, "shuffle_spike_times_session", None)
+        is _shuffle_spike_times_session_sorted
+    ):
         ri.shuffle_spike_times_session = _shuffle_spike_times_session_sorted
         setattr(ri, _PATCHED_FLAG, True)
 
@@ -49,6 +54,10 @@ def apply_shuffle_spike_time_order_patch() -> None:
         shuffle_controls._validate_grid_shape = validate_grid_shape
         setattr(shuffle_controls, _GRID_SHAPE_PATCHED_FLAG, True)
 
+    if not getattr(shuffle_controls, _INTEGER_VALUE_PATCHED_FLAG, False):
+        shuffle_controls._nonnegative_integer_value = _nonnegative_integer_value
+        setattr(shuffle_controls, _INTEGER_VALUE_PATCHED_FLAG, True)
+
 
 def _mapping_scope_label(value: Mapping[object, object], scope_label) -> str:
     items = sorted(
@@ -58,14 +67,21 @@ def _mapping_scope_label(value: Mapping[object, object], scope_label) -> str:
     return repr(("mapping", items))
 
 
-def _validated_grid_shape(grid_shape: object, original_validate_grid_shape) -> tuple[int, int]:
+def _validated_grid_shape(
+    grid_shape: object,
+    original_validate_grid_shape,
+) -> tuple[int, int]:
     try:
         values = tuple(grid_shape)  # type: ignore[arg-type]
     except TypeError as exc:
-        raise ValueError("grid_shape must contain exactly two integer dimensions") from exc
+        raise ValueError(
+            "grid_shape must contain exactly two integer dimensions"
+        ) from exc
     if len(values) != 2:
         raise ValueError("grid_shape must contain exactly two integer dimensions")
-    return tuple(_positive_integer_grid_dimension(value) for value in values)  # type: ignore[return-value]
+    return tuple(  # type: ignore[return-value]
+        _positive_integer_grid_dimension(value) for value in values
+    )
 
 
 def _positive_integer_grid_dimension(value: object) -> int:
@@ -102,7 +118,9 @@ def _shuffle_spike_times_session_sorted(session, random_seed: int = 1):
     if spikes.size == 0:
         return session
     if spikes.ndim != 2 or spikes.shape[1] < 1:
-        raise ValueError("session.spikes must be a two-dimensional array with a time column")
+        raise ValueError(
+            "session.spikes must be a two-dimensional array with a time column"
+        )
     spikes[:, 0] = rng.permutation(spikes[:, 0])
     order = np.argsort(spikes[:, 0], kind="mergesort")
     spikes = spikes[order]
@@ -133,38 +151,47 @@ def _numeric_scope_label(value: object) -> str | None:
 
 
 def _nonfinite_numeric_scope_label(value: object) -> str | None:
-    if isinstance(value, (bool, np.bool_, int, np.integer)) or not isinstance(value, (float, np.floating)):
+    if isinstance(value, (bool, np.bool_, int, np.integer)) or not isinstance(
+        value,
+        (float, np.floating),
+    ):
         return None
     if bool(np.isfinite(value)):
         return None
     return str(value).strip()
 
 
-def _nonnegative_integer_seed(value: object) -> int:
+def _nonnegative_integer_value(name: str, value: object) -> int:
+    """Return an exact nonnegative integer without binary64 coercion."""
+
     try:
         array = np.asarray(value)
-    except ValueError as exc:
-        raise ValueError("random_seed must be an integer scalar") from exc
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must be an integer scalar") from exc
     if array.ndim != 0:
-        raise ValueError("random_seed must be an integer scalar")
+        raise ValueError(f"{name} must be an integer scalar")
     scalar = array.item()
     if isinstance(scalar, (bool, np.bool_)):
-        raise ValueError("random_seed must be an integer, not boolean")
+        raise ValueError(f"{name} must be an integer, not boolean")
     if isinstance(scalar, (str, bytes, np.str_, np.bytes_)):
-        raise ValueError("random_seed must be an integer, not string")
+        raise ValueError(f"{name} must be an integer, not string")
     try:
         integer = operator.index(scalar)
     except TypeError:
         try:
             integer = int(scalar)
         except (TypeError, ValueError, OverflowError) as exc:
-            raise ValueError("random_seed must be a finite integer") from exc
+            raise ValueError(f"{name} must be a finite integer") from exc
         try:
             is_exact = bool(scalar == integer)
         except (TypeError, ValueError):
             is_exact = False
         if not is_exact:
-            raise ValueError("random_seed must be an integer")
+            raise ValueError(f"{name} must be an integer")
     if integer < 0:
-        raise ValueError("random_seed must be a nonnegative integer")
+        raise ValueError(f"{name} must be a nonnegative integer")
     return int(integer)
+
+
+def _nonnegative_integer_seed(value: object) -> int:
+    return _nonnegative_integer_value("random_seed", value)

@@ -150,13 +150,10 @@ def _unique_float_from_columns(
     if not values:
         return _finite_numeric_metadata_value(default, "metadata fallback")
     first = values[0]
-    if columns == _SPIKE_RATE_SCALE_COLUMNS:
-        conflicting = any(
-            not np.isclose(value, first, rtol=1e-5, atol=1e-8)
-            for value in values[1:]
-        )
-    else:
-        conflicting = any(value != first for value in values[1:])
+    conflicting = any(
+        not np.isclose(value, first, rtol=1e-5, atol=1e-8)
+        for value in values[1:]
+    )
     if conflicting:
         raise ValueError(f"{' / '.join(columns)} contains multiple values")
     return float(first)

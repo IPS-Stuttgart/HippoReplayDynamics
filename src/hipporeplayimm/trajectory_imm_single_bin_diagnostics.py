@@ -167,10 +167,14 @@ def _normalized_mode_row(trajectory_imm: Any, row: np.ndarray) -> np.ndarray:
         raise ValueError("mode posterior row has unexpected shape")
     if not np.all(np.isfinite(values)) or np.any(values < 0.0):
         raise ValueError("mode posterior row must contain finite nonnegative mass")
-    total = float(values.sum())
-    if total <= 0.0:
+    scale = float(np.max(values))
+    if scale <= 0.0:
         raise ValueError("mode posterior row must contain positive mass")
-    return values / total
+    scaled = values / scale
+    total = float(scaled.sum())
+    if not np.isfinite(total) or total <= 0.0:
+        raise ValueError("mode posterior row must contain positive finite mass")
+    return scaled / total
 
 
 def _refresh_public_alias(patched: Any) -> None:

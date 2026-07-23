@@ -131,12 +131,60 @@ def _finite_numeric_metadata_value(value: object, name: str) -> float:
     return numeric
 
 
+def _lower_precision_float_dtype(value: object) -> np.dtype | None:
+    """Return a scalar float dtype narrower than Python's native float, if any."""
+
+    if isinstance(value, _BYTE_BACKED_SCALARS):
+        return None
+    try:
+        scalar = np.asarray(value)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    if (
+        scalar.ndim == 0
+        and scalar.dtype.kind == "f"
+        and scalar.dtype.itemsize < np.dtype(float).itemsize
+    ):
+        return scalar.dtype
+    return None
+
+
+def _metadata_values_match(
+    first: tuple[float, np.dtype | None],
+    current: tuple[float, np.dtype | None],
+    columns: tuple[str, ...],
+) -> bool:
+    """Compare aliases without hiding real full-precision configuration changes."""
+
+    first_value, first_dtype = first
+    current_value, current_dtype = current
+    if columns == _SPIKE_RATE_SCALE_COLUMNS:
+        return bool(
+            np.isclose(
+                current_value,
+                first_value,
+                rtol=1e-5,
+                atol=1e-8,
+            )
+        )
+    lower_precision_dtypes = [
+        dtype for dtype in (first_dtype, current_dtype) if dtype is not None
+    ]
+    if not lower_precision_dtypes:
+        return current_value == first_value
+    comparison_dtype = min(lower_precision_dtypes, key=lambda dtype: dtype.itemsize)
+    return bool(
+        np.asarray(current_value, dtype=comparison_dtype)
+        == np.asarray(first_value, dtype=comparison_dtype)
+    )
+
+
 def _unique_float_from_columns(
     frame: pd.DataFrame,
     columns: tuple[str, ...],
     default: float,
 ) -> float:
-    values: list[float] = []
+    values: list[tuple[float, np.dtype | None]] = []
     for column in columns:
         if column not in frame.columns:
             continue
@@ -146,17 +194,18 @@ def _unique_float_from_columns(
             if text.lower() in _MISSING_METADATA_STRINGS:
                 continue
             if text:
-                values.append(_finite_numeric_metadata_value(item, column))
+                values.append(
+                    (
+                        _finite_numeric_metadata_value(item, column),
+                        _lower_precision_float_dtype(value),
+                    )
+                )
     if not values:
         return _finite_numeric_metadata_value(default, "metadata fallback")
     first = values[0]
-    if columns == _SPIKE_RATE_SCALE_COLUMNS:
-        conflicting = any(
-            not np.isclose(value, first, rtol=1e-5, atol=1e-8)
-            for value in values[1:]
-        )
-    else:
-        conflicting = any(value != first for value in values[1:])
-    if conflicting:
+    if any(
+        not _metadata_values_match(first, value, columns)
+        for value in values[1:]
+    ):
         raise ValueError(f"{' / '.join(columns)} contains multiple values")
-    return float(first)
+    return float(first[0])

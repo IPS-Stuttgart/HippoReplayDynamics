@@ -185,9 +185,13 @@ def _patch_core_posterior_diagnostics_scaling() -> None:
         centers = np.asarray(bin_centers, dtype=float)
         if centers.ndim != 2 or centers.shape[1] < 1:
             raise ValueError("bin_centers must have shape (n_bins, position_dim)")
-        endpoint = _stable_posterior_endpoint(terminal_log_posterior, centers)
-        posterior = np.exp(np.asarray(terminal_log_posterior, dtype=float))
-        map_bin = int(np.argmax(terminal_log_posterior))
+        log_posterior = np.asarray(terminal_log_posterior, dtype=float)
+        posterior = np.exp(log_posterior)
+        posterior_mass = float(np.sum(posterior))
+        if not np.isfinite(posterior_mass) or posterior_mass <= 0.0:
+            return previous_diagnostics(terminal_log_posterior, centers)
+        endpoint = _stable_posterior_endpoint(log_posterior, centers)
+        map_bin = int(np.argmax(log_posterior))
         with np.errstate(invalid="ignore"):
             entropy_terms = np.where(
                 posterior > 0.0,

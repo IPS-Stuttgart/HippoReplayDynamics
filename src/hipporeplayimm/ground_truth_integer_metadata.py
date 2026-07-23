@@ -121,13 +121,25 @@ def _parse_integer_metadata_value(column: str, value: Any) -> int:
         raise ValueError(f"{column} must contain integer values")
     if isinstance(value, (int, np.integer)):
         return int(value)
-    if isinstance(value, (float, np.floating)):
-        numeric = float(value)
-        if not np.isfinite(numeric):
+    if isinstance(value, Decimal):
+        if not value.is_finite():
             raise ValueError(f"{column} must contain finite integer values")
-        if not numeric.is_integer():
+        integer = value.to_integral_value()
+        if value != integer:
             raise ValueError(f"{column} must contain integer values")
-        return int(numeric)
+        return int(integer)
+    if isinstance(value, np.floating):
+        if not np.isfinite(value):
+            raise ValueError(f"{column} must contain finite integer values")
+        if not value.is_integer():
+            raise ValueError(f"{column} must contain integer values")
+        return int(value)
+    if isinstance(value, float):
+        if not np.isfinite(value):
+            raise ValueError(f"{column} must contain finite integer values")
+        if not value.is_integer():
+            raise ValueError(f"{column} must contain integer values")
+        return int(value)
 
     try:
         numeric = Decimal(str(value).strip())

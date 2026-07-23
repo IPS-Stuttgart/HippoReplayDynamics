@@ -9,6 +9,7 @@ from .result_improvement_seed_validation import _nonnegative_integer_seed
 
 _PATCHED_FLAG = "_well_label_shuffle_patch_applied"
 _MISSING_WELL_LABELS = {"", "<na>", "na", "n/a", "nan", "none", "null", "missing"}
+_BYTE_BACKED_SCALARS = (bytes, bytearray, memoryview, np.bytes_)
 
 
 def apply_well_label_shuffle_patch() -> None:
@@ -88,11 +89,23 @@ def _is_boolean_scalar(value: object) -> bool:
     return isinstance(item, (bool, np.bool_))
 
 
+def _normalized_well_label(value: object) -> str:
+    """Return normalized text, decoding byte-backed scalar containers first."""
+
+    if isinstance(value, np.ndarray) and value.ndim == 0:
+        return _normalized_well_label(value.item())
+    if isinstance(value, np.generic):
+        return _normalized_well_label(value.item())
+    if isinstance(value, _BYTE_BACKED_SCALARS):
+        value = bytes(value).decode("utf-8", errors="replace")
+    return str(value).strip().lower()
+
+
 def _labelled_well_rows(values: pd.Series) -> pd.Series:
     """Return rows whose well-ID field is an actual finite label."""
 
     present = values.notna()
-    normalized = values.astype("string").str.strip().str.lower()
+    normalized = values.map(_normalized_well_label)
     boolean_ids = values.map(_is_boolean_scalar)
     exact_integer_ids = values.map(
         lambda value: isinstance(value, (int, np.integer))

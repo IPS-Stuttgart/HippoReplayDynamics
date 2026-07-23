@@ -180,6 +180,12 @@ def _call_candidate_indices_with_optional_mask(
         if parameter.kind
         in (inspect.Parameter.POSITIONAL_ONLY, inspect.Parameter.POSITIONAL_OR_KEYWORD)
     )
+    if (
+        mask_parameter is not None
+        and mask_parameter.kind == inspect.Parameter.POSITIONAL_OR_KEYWORD
+        and positional.index(mask_parameter) == 1
+    ):
+        return candidate_indices(emissions, **kwargs)
     if any(
         parameter.kind == inspect.Parameter.VAR_POSITIONAL
         for parameter in parameters.values()

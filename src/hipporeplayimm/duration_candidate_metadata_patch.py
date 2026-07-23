@@ -143,6 +143,25 @@ def _call_candidate_indices_with_optional_mask(
 
     parameters = signature.parameters
     mask_parameter = parameters.get("valid_bin_mask")
+    if (
+        mask_parameter is not None
+        and mask_parameter.kind == inspect.Parameter.POSITIONAL_ONLY
+    ):
+        positional = tuple(
+            parameter
+            for parameter in parameters.values()
+            if parameter.kind
+            in (
+                inspect.Parameter.POSITIONAL_ONLY,
+                inspect.Parameter.POSITIONAL_OR_KEYWORD,
+            )
+        )
+        mask_position = positional.index(mask_parameter)
+        if mask_position == 1:
+            return candidate_indices(emissions, valid_bin_mask)
+        if mask_position == 2:
+            return candidate_indices(emissions, bin_centers, valid_bin_mask)
+
     supports_mask_keyword = (
         mask_parameter is not None
         and mask_parameter.kind

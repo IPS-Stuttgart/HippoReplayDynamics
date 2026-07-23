@@ -8,6 +8,7 @@ import numpy as np
 import pandas as pd
 
 _MISSING_METADATA_STRINGS = {"", "nan", "na", "n/a", "none", "null", "<na>"}
+_BYTE_BACKED_SCALARS = (bytes, bytearray, memoryview, np.bytes_)
 _SCORE_METADATA_BOOL_PATCH_FLAG = "_score_metadata_bool_validation_patch_applied"
 _CLUSTERLESS_STRING_PATCH_FLAG = "_score_metadata_string_missing_patch_applied"
 
@@ -35,7 +36,10 @@ def _parse_strict_bool(value: object) -> bool:
     if isinstance(value, (float, np.floating)):
         return _parse_numeric_bool(float(value), value)
 
-    text = str(value).strip().lower()
+    text = _metadata_text_or_none(value)
+    if text is None:
+        raise _bool_parse_error(value)
+    text = text.lower()
     if text in {"true", "yes", "on"}:
         return True
     if text in {"false", "no", "off"}:
@@ -58,7 +62,10 @@ def _parse_numeric_bool(numeric: float, original: object) -> bool:
 
 
 def _metadata_text_or_none(value: object) -> str | None:
-    text = str(value).strip()
+    if isinstance(value, _BYTE_BACKED_SCALARS):
+        text = bytes(value).decode("utf-8", errors="replace").strip()
+    else:
+        text = str(value).strip()
     if text.lower() in _MISSING_METADATA_STRINGS:
         return None
     return text or None
@@ -152,6 +159,21 @@ def _unique_string_from_columns(frame: pd.DataFrame, columns: tuple[str, ...], d
     return first
 
 
+def _unique_bool_from_column(frame: pd.DataFrame, column: str, default: bool) -> bool:
+    values: list[bool] = []
+    if column in frame.columns:
+        for value in frame[column].dropna():
+            if _metadata_text_or_none(value) is None:
+                continue
+            values.append(_parse_strict_bool(value))
+    if not values:
+        return bool(default)
+    first = values[0]
+    if any(value != first for value in values[1:]):
+        raise ValueError(f"{column} contains multiple values")
+    return bool(first)
+
+
 def _optional_float_from_columns(frame: pd.DataFrame, columns: tuple[str, ...], default: float | None) -> float | None:
     values: list[float] = []
     joined_columns = " / ".join(columns)
@@ -183,6 +205,7 @@ def _score_metadata_patch_current(score_metadata_module: object) -> bool:
     return bool(
         getattr(score_metadata_module, _SCORE_METADATA_BOOL_PATCH_FLAG, False)
         and getattr(score_metadata_module, "_parse_bool", None) is _parse_strict_bool
+        and getattr(score_metadata_module, "_unique_bool_from_column", None) is _unique_bool_from_column
         and getattr(score_metadata_module, "_unique_string_from_columns", None) is _unique_string_from_columns
         and getattr(score_metadata_module, "_metadata_float_from_value", None) is _metadata_float_from_value
         and getattr(score_metadata_module, "_unique_int_from_columns", None) is _unique_int_from_columns
@@ -204,6 +227,7 @@ def apply_score_metadata_bool_validation_patch() -> None:
 
     if not _score_metadata_patch_current(score_metadata_module):
         score_metadata_module._parse_bool = _parse_strict_bool
+        score_metadata_module._unique_bool_from_column = _unique_bool_from_column
         score_metadata_module._unique_string_from_columns = _unique_string_from_columns
         score_metadata_module._metadata_float_from_value = _metadata_float_from_value
         score_metadata_module._unique_int_from_columns = _unique_int_from_columns

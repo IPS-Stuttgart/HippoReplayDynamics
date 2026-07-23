@@ -98,6 +98,31 @@ def test_duration_candidates_pass_mask_to_modern_generator() -> None:
     np.testing.assert_array_equal(model.received_mask, valid_bin_mask)
 
 
+def test_duration_candidates_accept_mask_only_generator() -> None:
+    emissions, bin_centers, valid_bin_mask = _inputs()
+
+    class MaskOnlyModel:
+        received_mask = None
+
+        def candidate_indices(self, candidate_emissions, valid_bin_mask=None):
+            assert np.isneginf(candidate_emissions.log_likelihood[:, 1]).all()
+            self.received_mask = valid_bin_mask
+            return [np.arange(3), np.arange(3)]
+
+    model = MaskOnlyModel()
+    candidates = duration_occupancy._duration_candidates(
+        _StateSpaceHelpers,
+        model,
+        emissions,
+        bin_centers,
+        None,
+        valid_bin_mask,
+    )
+
+    np.testing.assert_array_equal(model.received_mask, valid_bin_mask)
+    assert [candidate.tolist() for candidate in candidates] == [[0, 2], [0, 2]]
+
+
 def test_duration_candidates_pass_positional_only_mask() -> None:
     emissions, bin_centers, valid_bin_mask = _inputs()
 

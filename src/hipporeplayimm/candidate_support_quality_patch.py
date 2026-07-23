@@ -291,7 +291,7 @@ def _support_value_labels(value: object) -> list[str]:
 
 
 def _flatten_support_value(value: object) -> list[object]:
-    if isinstance(value, (str, bytes)):
+    if isinstance(value, (str, bytes, bytearray, memoryview, np.bytes_)):
         return [value]
     try:
         if pd.isna(value):
@@ -338,7 +338,7 @@ def _contains_boolean(value: object) -> bool:
 
 
 def _text(value: Any) -> str:
-    if isinstance(value, (bytes, np.bytes_)):
+    if isinstance(value, (bytes, bytearray, memoryview, np.bytes_)):
         return bytes(value).decode("utf-8", errors="replace").strip()
     try:
         if pd.isna(value):

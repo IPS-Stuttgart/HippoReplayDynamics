@@ -49,3 +49,37 @@ def test_byte_encoded_success_and_exact_labels_remain_exact() -> None:
 
     assert labelled.loc[0, "candidate_support_quality"] == "exact_or_not_pruned"
     assert bool(labelled.loc[0, "candidate_support_quality_good"])
+
+
+def test_memoryview_success_and_exact_labels_remain_exact() -> None:
+    rows = pd.DataFrame(
+        [
+            {
+                "model": "exact",
+                "status": memoryview(b"success"),
+                "evidence_support": memoryview(b"exact_full_grid"),
+            }
+        ]
+    )
+
+    labelled = add_candidate_support_quality_columns(rows)
+
+    assert labelled.loc[0, "candidate_support_quality"] == "exact_or_not_pruned"
+    assert bool(labelled.loc[0, "candidate_support_quality_good"])
+
+
+def test_bytearray_noncomparable_support_remains_unknown() -> None:
+    rows = pd.DataFrame(
+        [
+            {
+                "model": "particle",
+                "status": bytearray(b"success"),
+                "evidence_support": bytearray(b"particle_approximation"),
+            }
+        ]
+    )
+
+    labelled = add_candidate_support_quality_columns(rows)
+
+    assert labelled.loc[0, "candidate_support_quality"] == "conservative_unknown"
+    assert not bool(labelled.loc[0, "candidate_support_quality_good"])

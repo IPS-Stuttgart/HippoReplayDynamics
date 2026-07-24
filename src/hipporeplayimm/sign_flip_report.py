@@ -21,6 +21,8 @@ from typing import Iterable, Sequence
 import numpy as np
 import pandas as pd
 
+_INVALID_UTF8_MODEL_LABEL_PREFIX = "<invalid-utf8-bytes:"
+
 
 @dataclass(frozen=True)
 class SignFlipResult:
@@ -323,7 +325,11 @@ def _normalize_model_label(value: object) -> object:
     if isinstance(value, np.generic):
         return _normalize_model_label(value.item())
     if isinstance(value, (bytes, bytearray, memoryview)):
-        return bytes(value).decode("utf-8", errors="replace").strip()
+        raw = bytes(value)
+        try:
+            return raw.decode("utf-8").strip()
+        except UnicodeDecodeError:
+            return f"{_INVALID_UTF8_MODEL_LABEL_PREFIX}{raw.hex()}>"
     if isinstance(value, list):
         return tuple(_normalize_model_label(item) for item in value)
     return value

@@ -11,6 +11,7 @@ import pandas as pd
 
 _PATCHED_FLAG = "_ground_truth_strict_cell_id_metadata_patch_applied"
 _MISSING_TEXT_VALUES = frozenset({"", "nan", "na", "n/a", "none", "null", "<na>"})
+_CELL_ID_METADATA_ERROR = "score-table cell IDs cell ID metadata must contain integer values"
 
 
 def apply_ground_truth_cell_id_metadata_patch() -> None:
@@ -40,7 +41,7 @@ def _parse_cell_ids_strict(value: object) -> np.ndarray | None:
         return _integer_array_from_values(list(value))
     if pd.isna(value):
         return None
-    text = str(value).strip()
+    text = _cell_id_text(value).strip()
     if text.lower() in _MISSING_TEXT_VALUES:
         return None
     text = text.strip("[]()").replace(",", " ")
@@ -53,6 +54,11 @@ _parse_cell_ids_strict.__name__ = "_parse_cell_ids"
 
 
 def _integer_array_from_values(values: Any) -> np.ndarray:
+    if isinstance(values, (list, tuple, set)):
+        values = [
+            bytes(value) if isinstance(value, (bytearray, memoryview)) else value
+            for value in values
+        ]
     parsed = [_parse_cell_id_value(value) for value in np.asarray(values, dtype=object).reshape(-1)]
     integer_info = np.iinfo(int)
     if any(value < integer_info.min or value > integer_info.max for value in parsed):
@@ -60,6 +66,15 @@ def _integer_array_from_values(values: Any) -> np.ndarray:
             "score-table cell IDs cell ID metadata must fit the platform integer range"
         )
     return np.asarray(parsed, dtype=int)
+
+
+def _cell_id_text(value: object) -> str:
+    if isinstance(value, (bytes, bytearray, memoryview, np.bytes_)):
+        try:
+            return bytes(value).decode("utf-8")
+        except UnicodeDecodeError as exc:
+            raise ValueError(_CELL_ID_METADATA_ERROR) from exc
+    return str(value)
 
 
 def _parse_cell_id_value(value: Any) -> int:
@@ -72,22 +87,18 @@ def _parse_cell_id_value(value: Any) -> int:
             raise ValueError("score-table cell IDs cell ID metadata must contain finite integer values")
         integer = int(value)
         if value != integer:
-            raise ValueError("score-table cell IDs cell ID metadata must contain integer values")
+            raise ValueError(_CELL_ID_METADATA_ERROR)
         return integer
 
     try:
-        if isinstance(value, (bytes, np.bytes_)):
-            text = bytes(value).decode("utf-8")
-        else:
-            text = str(value)
-        numeric = Decimal(text.strip())
-    except (InvalidOperation, UnicodeDecodeError, ValueError) as exc:
-        raise ValueError("score-table cell IDs cell ID metadata must contain integer values") from exc
+        numeric = Decimal(_cell_id_text(value).strip())
+    except (InvalidOperation, ValueError) as exc:
+        raise ValueError(_CELL_ID_METADATA_ERROR) from exc
     if not numeric.is_finite():
         raise ValueError("score-table cell IDs cell ID metadata must contain finite integer values")
     integer = numeric.to_integral_value()
     if numeric != integer:
-        raise ValueError("score-table cell IDs cell ID metadata must contain integer values")
+        raise ValueError(_CELL_ID_METADATA_ERROR)
     return int(integer)
 
 

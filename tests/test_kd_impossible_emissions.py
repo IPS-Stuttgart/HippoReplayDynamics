@@ -93,6 +93,27 @@ def test_first_order_kd_returns_negative_infinity_for_impossible_emission_rows()
         assert not np.isnan(score)
 
 
+def test_duration_aware_first_order_kd_rejects_impossible_first_row():
+    transition = np.eye(2)
+    log_emissions = np.array(
+        [
+            [-np.inf, -np.inf, -np.inf, -np.inf],
+            [0.0, -np.inf, -np.inf, -np.inf],
+        ],
+        dtype=float,
+    )
+
+    score = kd_diffusion_log_evidence_from_transition(
+        log_emissions,
+        2,
+        2,
+        [transition],
+    )
+
+    assert np.isneginf(score)
+    assert not np.isnan(score)
+
+
 def test_second_order_kd_scores_single_bin_emissions():
     apply_runtime_patches()
 
@@ -123,3 +144,29 @@ def test_second_order_kd_returns_negative_infinity_for_impossible_emission_rows(
 
         assert np.isneginf(score)
         assert not np.isnan(score)
+
+
+def test_duration_aware_second_order_kd_rejects_impossible_first_row():
+    initial = np.eye(2)
+    transition = np.zeros((2, 2, 2), dtype=float)
+    for prev_prev in range(2):
+        for prev in range(2):
+            transition[prev, prev, prev_prev] = 1.0
+    log_emissions = np.array(
+        [
+            [-np.inf, -np.inf, -np.inf, -np.inf],
+            [0.0, -np.inf, -np.inf, -np.inf],
+            [0.0, -np.inf, -np.inf, -np.inf],
+        ],
+        dtype=float,
+    )
+
+    score = kd_momentum_log_evidence_from_transitions(
+        log_emissions,
+        2,
+        initial,
+        [transition],
+    )
+
+    assert np.isneginf(score)
+    assert not np.isnan(score)

@@ -330,7 +330,9 @@ def _normalize_model_label(value: object) -> object:
             return raw.decode("utf-8").strip()
         except UnicodeDecodeError:
             return f"{_INVALID_UTF8_MODEL_LABEL_PREFIX}{raw.hex()}>"
-    if isinstance(value, list):
+    if isinstance(value, (list, tuple)):
+        if len(value) == 1:
+            return _normalize_model_label(value[0])
         return tuple(_normalize_model_label(item) for item in value)
     return value
 

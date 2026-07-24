@@ -23,15 +23,49 @@ _COMPARABLE_FLAG = "_recovery_diagnostics_bool_comparable_mask_wrapper"
 _EVENT_DIAGNOSTICS_FLAG = "_recovery_diagnostics_scoped_event_diagnostics_wrapper"
 _CERTIFIED_EVENT_FLAG = "_recovery_diagnostics_scoped_certified_event_wrapper"
 _CERTIFIED_SUMMARY_FLAG = "_recovery_diagnostics_scoped_certified_summary_wrapper"
+
+
+def _coerce_bool(value: object, default: bool = False) -> bool:
+    return _bool_value(value, default)
+
+
+def _row_bool(row: Any, column: str, default: bool) -> bool:
+    return _bool_value(row[column], default) if column in row.index else bool(default)
+
+
+def _bool_series(values: object, default: bool = False) -> pd.Series:
+    return _map_bool(values, default)
+
+
+def _coerce_float(value: object, default: float) -> float:
+    return _float_value(value, default)
+
+
+def _row_float(row: Any, column: str, default: float) -> float:
+    return _float_value(row[column], default) if column in row.index else float(default)
+
+
+def _event_index_value(value: object) -> object:
+    return _exact_integral_value(value)
+
+
+def _successful_finite_scores(group: pd.DataFrame) -> pd.DataFrame:
+    return _successful_scores(group)
+
+
+def _comparable_mask(frame: pd.DataFrame) -> pd.Series:
+    return _comparison_mask(frame)
+
+
 _HELPERS = {
-    "_coerce_bool": (_coerce_bool := lambda value, default=False: _bool_value(value, default), _BOOL_FLAG),
-    "_row_bool": (_row_bool := lambda row, column, default: _bool_value(row[column], default) if column in row.index else bool(default), _ROW_BOOL_FLAG),
-    "_coerce_bool_series": (_bool_series := lambda values, default=False: _map_bool(values, default), _BOOL_SERIES_FLAG),
-    "_coerce_float": (_coerce_float := lambda value, default: _float_value(value, default), _FLOAT_FLAG),
-    "_row_float": (_row_float := lambda row, column, default: _float_value(row[column], default) if column in row.index else float(default), _ROW_FLOAT_FLAG),
-    "_event_index_value": (_event_index_value := lambda value: _exact_integral_value(value), _EVENT_INDEX_FLAG),
-    "_successful_finite_scores": (_successful_finite_scores := lambda group: _successful_scores(group), _SUCCESS_FLAG),
-    "_comparable_mask": (_comparable_mask := lambda frame: _comparison_mask(frame), _COMPARABLE_FLAG),
+    "_coerce_bool": (_coerce_bool, _BOOL_FLAG),
+    "_row_bool": (_row_bool, _ROW_BOOL_FLAG),
+    "_coerce_bool_series": (_bool_series, _BOOL_SERIES_FLAG),
+    "_coerce_float": (_coerce_float, _FLOAT_FLAG),
+    "_row_float": (_row_float, _ROW_FLOAT_FLAG),
+    "_event_index_value": (_event_index_value, _EVENT_INDEX_FLAG),
+    "_successful_finite_scores": (_successful_finite_scores, _SUCCESS_FLAG),
+    "_comparable_mask": (_comparable_mask, _COMPARABLE_FLAG),
 }
 _TRUE_FLOAT = {"true", "yes", "y"}
 _FALSE_FLOAT = {"false", "no", "n"}
@@ -189,7 +223,18 @@ def _exact_integral_value(value: object) -> object:
 
 
 def _certified_current(diagnostics: Any) -> bool:
-    return bool(getattr(getattr(diagnostics, "certified_vs_exact_event_recovery", None), _CERTIFIED_EVENT_FLAG, False) and getattr(getattr(diagnostics, "certified_vs_exact_recovery_summary", None), _CERTIFIED_SUMMARY_FLAG, False))
+    return bool(
+        getattr(
+            getattr(diagnostics, "certified_vs_exact_event_recovery", None),
+            _CERTIFIED_EVENT_FLAG,
+            False,
+        )
+        and getattr(
+            getattr(diagnostics, "certified_vs_exact_recovery_summary", None),
+            _CERTIFIED_SUMMARY_FLAG,
+            False,
+        )
+    )
 
 
 def _install_certified_wrappers(diagnostics: Any, recovery: Any) -> None:
@@ -295,7 +340,17 @@ def _sort_events(frame: pd.DataFrame) -> pd.DataFrame:
     columns = [column for column in _group_columns(frame) if column in frame]
     if not columns:
         return frame.reset_index(drop=True)
-    keys = pd.DataFrame({column: frame[column].map(lambda value: "" if _normalize_key(value) is _MISSING_KEY else str(_normalize_key(value))) for column in columns}, index=frame.index)
+    keys = pd.DataFrame(
+        {
+            column: frame[column].map(
+                lambda value: ""
+                if _normalize_key(value) is _MISSING_KEY
+                else str(_normalize_key(value))
+            )
+            for column in columns
+        },
+        index=frame.index,
+    )
     return frame.loc[keys.sort_values(columns, kind="mergesort").index].reset_index(drop=True)
 
 

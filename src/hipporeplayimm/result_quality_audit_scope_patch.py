@@ -122,10 +122,15 @@ def _normalized_scope_value(value: object) -> object:
 
 
 def _normalized_scope_frame(scores: pd.DataFrame) -> pd.DataFrame:
-    """Copy a score table with hashable event-scope metadata values."""
+    """Copy a score table with hashable event-group metadata values."""
 
     normalized = scores.copy()
-    for column in _EVENT_GROUP_SCOPE_COLUMNS:
+    group_columns = (
+        *_EVENT_GROUP_SESSION_COLUMNS,
+        *_EVENT_GROUP_EVENT_COLUMNS,
+        *_EVENT_GROUP_SCOPE_COLUMNS,
+    )
+    for column in group_columns:
         if column in normalized.columns:
             normalized[column] = normalized[column].map(_normalized_scope_value)
     return normalized

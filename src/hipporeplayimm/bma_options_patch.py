@@ -12,6 +12,7 @@ _DEFAULT_BMA_EVIDENCE_COLUMN = "auto"
 _TRUE_BOOL_STRINGS = {"1", "1.0", "true", "t", "yes", "y", "on"}
 _FALSE_BOOL_STRINGS = {"", "0", "0.0", "false", "f", "no", "n", "off", "nan", "none", "null", "<na>"}
 _BOOL_OPTION_ERROR = "boolean option must be a scalar true/false value"
+_BYTE_BACKED_SCALARS = (bytes, bytearray, memoryview)
 
 
 def apply_bma_options_patch() -> None:
@@ -73,7 +74,7 @@ def _wrap_ground_truth_compare_for_bma_options() -> None:
         bayesian_model_average_evidence_column: str = _DEFAULT_BMA_EVIDENCE_COLUMN,
         **kwargs: Any,
     ) -> pd.DataFrame:
-        evidence_column = str(bayesian_model_average_evidence_column)
+        evidence_column = _option_text(bayesian_model_average_evidence_column)
         original_score_row_log_evidence = gt._score_row_log_evidence
         replace_evidence_column = evidence_column.lower() != _DEFAULT_BMA_EVIDENCE_COLUMN
         if replace_evidence_column:
@@ -82,7 +83,8 @@ def _wrap_ground_truth_compare_for_bma_options() -> None:
                 score_row: object,
                 selected_evidence_column: str = _DEFAULT_BMA_EVIDENCE_COLUMN,
             ):
-                column = evidence_column if selected_evidence_column.lower() == _DEFAULT_BMA_EVIDENCE_COLUMN else selected_evidence_column
+                selected_column = _option_text(selected_evidence_column)
+                column = evidence_column if selected_column.lower() == _DEFAULT_BMA_EVIDENCE_COLUMN else selected_column
                 return original_score_row_log_evidence(score_row, column)
 
             gt._score_row_log_evidence = score_row_log_evidence_with_bma_default
@@ -94,20 +96,35 @@ def _wrap_ground_truth_compare_for_bma_options() -> None:
         return _apply_bma_output_options(
             comparison,
             include_bma=_coerce_bool_option(include_bayesian_model_average),
-            model_name=str(bayesian_model_average_name),
+            model_name=_option_text(bayesian_model_average_name),
         )
 
     compare_scores_to_ground_truth_with_bma_options._bma_options_wrapped = True  # type: ignore[attr-defined]
     gt.compare_scores_to_ground_truth = compare_scores_to_ground_truth_with_bma_options
 
 
+def _option_text(value: object) -> str:
+    """Return scalar option text, decoding byte-backed storage values."""
+
+    if isinstance(value, np.ndarray) and value.ndim == 0:
+        return _option_text(value.item())
+    if isinstance(value, np.generic):
+        return _option_text(value.item())
+    if isinstance(value, _BYTE_BACKED_SCALARS):
+        return bytes(value).decode("utf-8", errors="replace")
+    return str(value)
+
+
 def _coerce_bool_option(value: object) -> bool:
     if isinstance(value, (bool, np.bool_)):
         return bool(value)
-    array = np.asarray(value)
-    if array.ndim != 0:
-        raise ValueError(_BOOL_OPTION_ERROR)
-    scalar = array.item()
+    if isinstance(value, _BYTE_BACKED_SCALARS):
+        scalar = value
+    else:
+        array = np.asarray(value)
+        if array.ndim != 0:
+            raise ValueError(_BOOL_OPTION_ERROR)
+        scalar = array.item()
     if isinstance(scalar, (bool, np.bool_)):
         return bool(scalar)
     try:
@@ -120,7 +137,7 @@ def _coerce_bool_option(value: object) -> bool:
         if not np.isfinite(numeric) or numeric not in (0.0, 1.0):
             raise ValueError(_BOOL_OPTION_ERROR)
         return bool(numeric)
-    text = str(scalar).strip().lower()
+    text = _option_text(scalar).strip().lower()
     if text in _TRUE_BOOL_STRINGS:
         return True
     if text in _FALSE_BOOL_STRINGS:
@@ -131,16 +148,17 @@ def _coerce_bool_option(value: object) -> bool:
 def _apply_bma_output_options(comparison, *, include_bma: bool, model_name: str):
     if not hasattr(comparison, "columns") or "model" not in comparison.columns:
         return comparison
-    bma_mask = comparison["model"].astype(str) == _DEFAULT_BMA_NAME
+    normalized_model_name = _option_text(model_name)
+    bma_mask = comparison["model"].map(_option_text) == _DEFAULT_BMA_NAME
     if not include_bma:
         if not bma_mask.any():
             return comparison
         return comparison.loc[~bma_mask].reset_index(drop=True)
-    if model_name == _DEFAULT_BMA_NAME or not bma_mask.any():
+    if normalized_model_name == _DEFAULT_BMA_NAME or not bma_mask.any():
         return comparison
     renamed = comparison.copy()
-    renamed.loc[bma_mask, "model"] = model_name
+    renamed.loc[bma_mask, "model"] = normalized_model_name
     if "requested_model" in renamed.columns:
-        requested_bma_mask = renamed["requested_model"].astype(str) == _DEFAULT_BMA_NAME
-        renamed.loc[requested_bma_mask, "requested_model"] = model_name
+        requested_bma_mask = renamed["requested_model"].map(_option_text) == _DEFAULT_BMA_NAME
+        renamed.loc[requested_bma_mask, "requested_model"] = normalized_model_name
     return renamed

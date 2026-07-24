@@ -201,7 +201,7 @@ def _heldout_aware_influence_summary(audit_module: Any, scores: pd.DataFrame) ->
 
 
 def _patch_exact_integer_boolean_values(audit_module: Any) -> None:
-    """Keep arbitrary-precision integer gate flags out of binary-float coercion."""
+    """Preserve exact integer and byte-backed result-quality gate flags."""
 
     current_bool_value = audit_module._bool_value
     if getattr(current_bool_value, _INTEGER_BOOL_PATCHED_FLAG, False):
@@ -209,6 +209,11 @@ def _patch_exact_integer_boolean_values(audit_module: Any) -> None:
 
     @wraps(current_bool_value)
     def exact_integer_bool_value(value: object) -> bool:
+        if isinstance(value, (bytes, bytearray, memoryview, np.bytes_)):
+            try:
+                value = bytes(value).decode("utf-8")
+            except UnicodeDecodeError:
+                return False
         if isinstance(value, (int, np.integer)) and not isinstance(value, (bool, np.bool_)):
             return int(value) != 0
         return current_bool_value(value)

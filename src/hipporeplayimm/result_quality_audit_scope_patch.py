@@ -15,6 +15,7 @@ _DISTINCT_MODEL_MARGIN_PATCHED_FLAG = "_result_quality_distinct_model_margin_pat
 _MODEL_LABEL_SUMMARY_PATCHED_FLAG = "_result_quality_model_label_summary_patch_applied"
 _INTEGER_BOOL_PATCHED_FLAG = "_result_quality_audit_integer_bool_patch_applied"
 _MISSING_TEXT_VALUES = {"", "nan", "na", "n/a", "none", "null", "<na>"}
+_INVALID_UTF8_MODEL_LABEL_PREFIX = "<invalid-utf8-bytes:"
 _EVENT_GROUP_SESSION_COLUMNS = ("session",)
 _EVENT_GROUP_EVENT_COLUMNS = ("event_index", "event_id")
 _EVENT_GROUP_SCOPE_COLUMNS = (
@@ -140,7 +141,12 @@ def _normalized_model_label(value: object) -> str | None:
     if isinstance(value, np.generic):
         return _normalized_model_label(value.item())
     if isinstance(value, (bytes, bytearray, memoryview)):
-        return bytes(value).decode("utf-8", errors="replace").strip()
+        raw = bytes(value)
+        try:
+            decoded = raw.decode("utf-8")
+        except UnicodeDecodeError:
+            return f"{_INVALID_UTF8_MODEL_LABEL_PREFIX}{raw.hex()}>"
+        return decoded.strip()
     if isinstance(value, (list, tuple)):
         normalized = tuple(_normalized_model_label(item) for item in value)
         return str(normalized)

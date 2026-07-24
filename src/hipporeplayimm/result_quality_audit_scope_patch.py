@@ -12,6 +12,7 @@ _PATCHED_FLAG = "_result_quality_audit_scope_patch_applied"
 _EVENT_COUNT_PATCHED_FLAG = "_result_quality_audit_event_count_scope_patch_applied"
 _HELDOUT_INFLUENCE_PATCHED_FLAG = "_result_quality_audit_heldout_influence_patch_applied"
 _DISTINCT_MODEL_MARGIN_PATCHED_FLAG = "_result_quality_distinct_model_margin_patch_applied"
+_MODEL_LABEL_SUMMARY_PATCHED_FLAG = "_result_quality_model_label_summary_patch_applied"
 _INTEGER_BOOL_PATCHED_FLAG = "_result_quality_audit_integer_bool_patch_applied"
 _MISSING_TEXT_VALUES = {"", "nan", "na", "n/a", "none", "null", "<na>"}
 _EVENT_GROUP_SESSION_COLUMNS = ("session",)
@@ -128,6 +129,40 @@ def _coerce_numeric_series(values: pd.Series) -> pd.Series:
         return sanitized.map(_coerce_numeric_scalar).astype(float)
 
 
+def _normalized_model_label(value: object) -> str | None:
+    """Return stable text for persisted model identifiers."""
+
+    if isinstance(value, np.ndarray):
+        if value.size == 1:
+            return _normalized_model_label(value.reshape(-1)[0])
+        normalized = tuple(_normalized_model_label(item) for item in value.reshape(-1))
+        return str(normalized)
+    if isinstance(value, np.generic):
+        return _normalized_model_label(value.item())
+    if isinstance(value, (bytes, bytearray, memoryview)):
+        return bytes(value).decode("utf-8", errors="replace").strip()
+    if isinstance(value, (list, tuple)):
+        normalized = tuple(_normalized_model_label(item) for item in value)
+        return str(normalized)
+    try:
+        missing = pd.isna(value)
+    except (TypeError, ValueError):
+        missing = False
+    if isinstance(missing, (bool, np.bool_)) and bool(missing):
+        return None
+    return str(value).strip()
+
+
+def _normalized_model_frame(scores: pd.DataFrame) -> pd.DataFrame:
+    """Copy a score table with hashable semantic model labels."""
+
+    if "model" not in scores.columns:
+        return scores
+    normalized = scores.copy()
+    normalized["model"] = normalized["model"].map(_normalized_model_label)
+    return normalized
+
+
 def _first_influence_value_column(scores: Any) -> str | None:
     frame_columns = getattr(scores, "columns", ())
     present: list[str] = []
@@ -206,26 +241,32 @@ def _patch_distinct_model_result_quality_margins(gates_module: Any) -> None:
             return
 
         finite_rows["_numeric_log_evidence"] = numeric_evidence.loc[finite_rows.index].astype(float)
+        finite_rows["_normalized_model_label"] = finite_rows["model"].map(
+            _normalized_model_label
+        )
         distinct = (
             finite_rows.sort_values("_numeric_log_evidence", ascending=False, kind="stable")
-            .drop_duplicates("model", keep="first")
-            .drop(columns="_numeric_log_evidence")
+            .drop_duplicates("_normalized_model_label", keep="first")
+            .drop(columns=["_numeric_log_evidence", "_normalized_model_label"])
         )
         current_annotate(out, group_index, distinct, prefix=prefix)
 
         distinct_values = _coerce_numeric_series(distinct["log_evidence"])
         best_value = float(distinct_values.max())
+        best_index = distinct_values.idxmax()
+        best_model = _normalized_model_label(distinct.loc[best_index, "model"])
+        out.loc[group_index, f"{prefix}_best_model"] = "" if best_model is None else best_model
         for rank, (_, model_row) in enumerate(
             distinct.assign(_numeric_log_evidence=distinct_values)
             .sort_values("_numeric_log_evidence", ascending=False, kind="stable")
             .iterrows(),
             start=1,
         ):
-            model_value = model_row["model"]
-            if pd.isna(model_value):
-                same_model = finite_rows["model"].isna()
+            model_label = _normalized_model_label(model_row["model"])
+            if model_label is None:
+                same_model = finite_rows["_normalized_model_label"].isna()
             else:
-                same_model = finite_rows["model"].eq(model_value)
+                same_model = finite_rows["_normalized_model_label"].eq(model_label)
             matching_index = finite_rows.index[same_model]
             out.loc[matching_index, f"{prefix}_rank"] = float(rank)
             row_values = numeric_evidence.loc[matching_index].to_numpy(dtype=float)
@@ -239,6 +280,30 @@ def _patch_distinct_model_result_quality_margins(gates_module: Any) -> None:
     gates_module._annotate_margin_scope = annotate_distinct_model_margin_scope
 
 
+def _patch_model_label_result_quality_summaries(gates_module: Any) -> None:
+    """Normalize model labels before result-quality counts and grouping."""
+
+    current_event_summary = gates_module.event_quality_summary
+    if not getattr(current_event_summary, _MODEL_LABEL_SUMMARY_PATCHED_FLAG, False):
+
+        @wraps(current_event_summary)
+        def event_quality_summary(scores: pd.DataFrame) -> pd.DataFrame:
+            return current_event_summary(_normalized_model_frame(scores))
+
+        setattr(event_quality_summary, _MODEL_LABEL_SUMMARY_PATCHED_FLAG, True)
+        gates_module.event_quality_summary = event_quality_summary
+
+    current_model_summary = gates_module.model_quality_summary
+    if not getattr(current_model_summary, _MODEL_LABEL_SUMMARY_PATCHED_FLAG, False):
+
+        @wraps(current_model_summary)
+        def model_quality_summary(scores: pd.DataFrame) -> pd.DataFrame:
+            return current_model_summary(_normalized_model_frame(scores))
+
+        setattr(model_quality_summary, _MODEL_LABEL_SUMMARY_PATCHED_FLAG, True)
+        gates_module.model_quality_summary = model_quality_summary
+
+
 def apply_result_quality_audit_scope_patch() -> None:
     """Install scoped grouping and scalar coercion for result-quality summaries."""
 
@@ -248,6 +313,7 @@ def apply_result_quality_audit_scope_patch() -> None:
 
     advanced_result_evidence_margin_duplicates.apply_evidence_margin_distinct_model_patch()
     _patch_distinct_model_result_quality_margins(gates_module)
+    _patch_model_label_result_quality_summaries(gates_module)
     _patch_exact_integer_boolean_values(audit_module)
 
     current_group_columns = audit_module.event_group_columns

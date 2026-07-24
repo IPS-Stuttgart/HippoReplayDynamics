@@ -227,11 +227,14 @@ def _scope_label(value: object) -> str:
                 return repr(("numeric", int(numerator)))
             return repr(("numeric-ratio", int(numerator), int(denominator)))
     if isinstance(value, np.ndarray):
-        return repr(("array", np.asarray(value, dtype=object).reshape(-1).tolist()))
+        array = np.asarray(value, dtype=object)
+        if array.ndim == 0:
+            return _scope_label(array.item())
+        value = array.tolist()
     if isinstance(value, (list, tuple)):
-        return repr(("sequence", list(value)))
-    if isinstance(value, set):
-        return repr(("set", sorted(value, key=repr)))
+        return repr(("sequence", tuple(_scope_label(item) for item in value)))
+    if isinstance(value, (set, frozenset)):
+        return repr(("set", tuple(sorted(_scope_label(item) for item in value))))
     text = _decoded_text(value)
     if text is not None:
         return repr(("scalar", text))

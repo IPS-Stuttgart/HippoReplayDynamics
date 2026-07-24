@@ -263,7 +263,10 @@ def _patch_distinct_model_result_quality_margins(gates_module: Any) -> None:
             start=1,
         ):
             model_label = _normalized_model_label(model_row["model"])
-            same_model = finite_rows["_normalized_model_label"].eq(model_label)
+            if model_label is None:
+                same_model = finite_rows["_normalized_model_label"].isna()
+            else:
+                same_model = finite_rows["_normalized_model_label"].eq(model_label)
             matching_index = finite_rows.index[same_model]
             out.loc[matching_index, f"{prefix}_rank"] = float(rank)
             row_values = numeric_evidence.loc[matching_index].to_numpy(dtype=float)

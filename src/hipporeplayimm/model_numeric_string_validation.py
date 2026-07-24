@@ -15,7 +15,7 @@ _PATCH_VERSION = 2
 _STATE_SPACE_UTILS_PATCHED_FLAG = "_state_space_numeric_string_validation_patch_applied"
 _STATE_SPACE_MODEL_PATCHED_FLAG = "_state_space_model_numeric_string_validation_patch_applied"
 _UNIT_INTERVAL_OVERFLOW_PATCHED_FLAG = "_model_unit_interval_overflow_validation_patch_applied"
-_STRING_TYPES = (str, bytes, np.str_, np.bytes_)
+_STRING_TYPES = (str, bytes, bytearray, memoryview, np.str_, np.bytes_)
 _VALIDATOR_NAMES = (
     "_validate_positive_parameter",
     "_validate_nonnegative_parameter",

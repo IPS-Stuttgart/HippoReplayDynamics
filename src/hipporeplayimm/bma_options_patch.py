@@ -12,6 +12,7 @@ _DEFAULT_BMA_EVIDENCE_COLUMN = "auto"
 _TRUE_BOOL_STRINGS = {"1", "1.0", "true", "t", "yes", "y", "on"}
 _FALSE_BOOL_STRINGS = {"", "0", "0.0", "false", "f", "no", "n", "off", "nan", "none", "null", "<na>"}
 _BOOL_OPTION_ERROR = "boolean option must be a scalar true/false value"
+_TEXT_OPTION_ERROR = "text option must be a scalar value"
 _BYTE_BACKED_SCALARS = (bytes, bytearray, memoryview)
 
 
@@ -74,7 +75,7 @@ def _wrap_ground_truth_compare_for_bma_options() -> None:
         bayesian_model_average_evidence_column: str = _DEFAULT_BMA_EVIDENCE_COLUMN,
         **kwargs: Any,
     ) -> pd.DataFrame:
-        evidence_column = _option_text(bayesian_model_average_evidence_column)
+        evidence_column = _coerce_text_option(bayesian_model_average_evidence_column)
         original_score_row_log_evidence = gt._score_row_log_evidence
         replace_evidence_column = evidence_column.lower() != _DEFAULT_BMA_EVIDENCE_COLUMN
         if replace_evidence_column:
@@ -83,7 +84,7 @@ def _wrap_ground_truth_compare_for_bma_options() -> None:
                 score_row: object,
                 selected_evidence_column: str = _DEFAULT_BMA_EVIDENCE_COLUMN,
             ):
-                selected_column = _option_text(selected_evidence_column)
+                selected_column = _coerce_text_option(selected_evidence_column)
                 column = evidence_column if selected_column.lower() == _DEFAULT_BMA_EVIDENCE_COLUMN else selected_column
                 return original_score_row_log_evidence(score_row, column)
 
@@ -96,7 +97,7 @@ def _wrap_ground_truth_compare_for_bma_options() -> None:
         return _apply_bma_output_options(
             comparison,
             include_bma=_coerce_bool_option(include_bayesian_model_average),
-            model_name=_option_text(bayesian_model_average_name),
+            model_name=_coerce_text_option(bayesian_model_average_name),
         )
 
     compare_scores_to_ground_truth_with_bma_options._bma_options_wrapped = True  # type: ignore[attr-defined]
@@ -113,6 +114,17 @@ def _option_text(value: object) -> str:
     if isinstance(value, _BYTE_BACKED_SCALARS):
         return bytes(value).decode("utf-8", errors="replace")
     return str(value)
+
+
+def _coerce_text_option(value: object) -> str:
+    """Return text from one scalar option and reject array-like ambiguity."""
+
+    if isinstance(value, _BYTE_BACKED_SCALARS):
+        return _option_text(value)
+    array = np.asarray(value)
+    if array.ndim != 0:
+        raise ValueError(_TEXT_OPTION_ERROR)
+    return _option_text(array.item())
 
 
 def _coerce_bool_option(value: object) -> bool:
@@ -148,7 +160,7 @@ def _coerce_bool_option(value: object) -> bool:
 def _apply_bma_output_options(comparison, *, include_bma: bool, model_name: str):
     if not hasattr(comparison, "columns") or "model" not in comparison.columns:
         return comparison
-    normalized_model_name = _option_text(model_name)
+    normalized_model_name = _coerce_text_option(model_name)
     bma_mask = comparison["model"].map(_option_text) == _DEFAULT_BMA_NAME
     if not include_bma:
         if not bma_mask.any():

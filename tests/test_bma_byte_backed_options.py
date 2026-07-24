@@ -7,6 +7,7 @@ import pytest
 from hipporeplayimm.bma_options_patch import (
     _apply_bma_output_options,
     _coerce_bool_option,
+    _coerce_text_option,
     _option_text,
 )
 
@@ -41,6 +42,23 @@ def test_bma_text_options_decode_byte_backed_scalars(
     expected: str,
 ) -> None:
     assert _option_text(value) == expected
+
+
+@pytest.mark.parametrize(
+    "value",
+    ["auto", np.str_("auto"), np.array("auto"), b"auto", bytearray(b"auto"), memoryview(b"auto"), np.bytes_(b"auto")],
+)
+def test_bma_text_option_accepts_scalar_values(value: object) -> None:
+    assert _coerce_text_option(value) == "auto"
+
+
+@pytest.mark.parametrize(
+    "value",
+    [["auto"], ("auto",), np.array(["auto"]), np.array([b"auto"])],
+)
+def test_bma_text_option_rejects_non_scalar_values(value: object) -> None:
+    with pytest.raises(ValueError, match="text option must be a scalar"):
+        _coerce_text_option(value)
 
 
 def test_bma_output_options_match_and_rename_byte_backed_model_labels() -> None:

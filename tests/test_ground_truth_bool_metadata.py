@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import numpy as np
 import pandas as pd
 import pytest
 
@@ -24,6 +25,18 @@ def test_parse_bool_metadata_keeps_binary_numeric_strings() -> None:
     assert _parse_bool_metadata_value("metadata_flag", "0.0") is False
 
 
+def test_parse_bool_metadata_decodes_byte_backed_values() -> None:
+    for raw in (b"true", bytearray(b"yes"), memoryview(b"1"), np.bytes_("on")):
+        assert _parse_bool_metadata_value("metadata_flag", raw) is True
+    for raw in (b"false", bytearray(b"no"), memoryview(b"0"), np.bytes_("off")):
+        assert _parse_bool_metadata_value("metadata_flag", raw) is False
+
+
+def test_parse_bool_metadata_rejects_invalid_utf8_bytes() -> None:
+    with pytest.raises(ValueError, match="boolean values"):
+        _parse_bool_metadata_value("metadata_flag", b"\xff")
+
+
 def test_score_metadata_bool_rejects_nonbinary_numeric_values() -> None:
     for raw in ("2", "2.0", -1, 0.5):
         with pytest.raises(ValueError, match="boolean values"):
@@ -35,6 +48,11 @@ def test_score_metadata_bool_keeps_binary_numeric_values() -> None:
     assert _parse_score_bool(1) is True
     assert _parse_score_bool("0") is False
     assert _parse_score_bool(0) is False
+
+
+def test_score_metadata_bool_decodes_byte_backed_values() -> None:
+    assert _parse_score_bool(b"true") is True
+    assert _parse_score_bool(np.bytes_("false")) is False
 
 
 def test_score_metadata_bool_patch_refreshes_stale_flag(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -66,6 +84,15 @@ def test_evidence_bool_series_keeps_binary_numeric_values() -> None:
     parsed = _coerce_bool_series(pd.Series(["1", "1.0", 1, "0", "0.0", 0]), default=False)
 
     assert parsed.tolist() == [True, True, True, False, False, False]
+
+
+def test_evidence_bool_series_decodes_byte_backed_values() -> None:
+    parsed = _coerce_bool_series(
+        pd.Series([b"true", bytearray(b"no"), memoryview(b"1"), np.bytes_("0")]),
+        default=False,
+    )
+
+    assert parsed.tolist() == [True, False, True, False]
 
 
 def test_preimported_benchmark_bool_series_alias_is_synchronized() -> None:

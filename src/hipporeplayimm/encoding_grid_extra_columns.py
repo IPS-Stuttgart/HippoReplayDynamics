@@ -1,4 +1,4 @@
-"""Encoding runtime patches for grid compatibility and numeric validation."""
+"""Encoding runtime patches for grid compatibility, kinematics, and validation."""
 
 from __future__ import annotations
 
@@ -24,6 +24,8 @@ _BOOLEAN_ENCODING_CONFIG_FIELDS = (
 )
 _GRID_ORIGINAL_ATTR = "_encoding_grid_extra_columns_original_make_grid"
 _GRID_WRAPPER_MARKER = "_encoding_grid_extra_columns_wrapper"
+_SPEED_ORIGINAL_ATTR = "_encoding_nonuniform_time_original_speed"
+_SPEED_WRAPPER_MARKER = "_encoding_nonuniform_time_speed_wrapper"
 _BOOL_ORIGINALS_ATTR = "_encoding_bool_validation_originals"
 _AS_XY_ARRAY_WRAPPER_MARKER = "_encoding_numeric_as_xy_array_wrapper"
 _AS_POSITION_ARRAY_WRAPPER_MARKER = "_encoding_numeric_as_position_array_wrapper"
@@ -39,6 +41,7 @@ def apply_encoding_grid_extra_columns_patch() -> None:
     from . import encoding
 
     _apply_grid_extra_columns_patch(encoding)
+    _apply_nonuniform_time_speed_patch(encoding)
     _apply_encoding_bool_validation_patch(encoding)
     apply_place_field_run_local_kinematics_patch()
 
@@ -60,6 +63,36 @@ def _apply_grid_extra_columns_patch(encoding) -> None:
     encoding._make_grid = make_grid
     _synchronize_make_grid_aliases(original_make_grid, make_grid)
     encoding._grid_extra_columns_patch_applied = True
+
+
+def _apply_nonuniform_time_speed_patch(encoding) -> None:
+    """Differentiate positions against timestamp coordinates, not sample indices."""
+
+    current_speed = encoding._speed_cm_s
+    original_speed = getattr(encoding, _SPEED_ORIGINAL_ATTR, None)
+    if original_speed is None:
+        original_speed = current_speed
+        setattr(encoding, _SPEED_ORIGINAL_ATTR, original_speed)
+
+    if _is_marked_wrapper(current_speed, _SPEED_WRAPPER_MARKER):
+        _synchronize_speed_aliases(original_speed, current_speed)
+        return
+
+    def speed_cm_s(times, xy):
+        time_values = np.asarray(times, dtype=float)
+        positions = np.asarray(xy, dtype=float)
+        if time_values.shape[0] < 2:
+            return np.zeros(time_values.shape, dtype=float)
+        with np.errstate(divide="ignore", invalid="ignore"):
+            dx_dt = np.gradient(positions[:, 0], time_values)
+            dy_dt = np.gradient(positions[:, 1], time_values)
+            speed = np.hypot(dx_dt, dy_dt)
+        return np.nan_to_num(speed, nan=0.0, posinf=0.0, neginf=0.0)
+
+    _copy_function_metadata(original_speed, speed_cm_s)
+    _mark_wrapper(speed_cm_s, _SPEED_WRAPPER_MARKER)
+    encoding._speed_cm_s = speed_cm_s
+    _synchronize_speed_aliases(original_speed, speed_cm_s)
 
 
 def _apply_encoding_bool_validation_patch(encoding) -> None:
@@ -332,6 +365,15 @@ def _synchronize_make_grid_aliases(original_make_grid, replacement_make_grid) ->
             continue
         if getattr(module, "_make_grid", None) is original_make_grid:
             module._make_grid = replacement_make_grid
+
+
+def _synchronize_speed_aliases(original_speed, replacement_speed) -> None:
+    for module in list(sys.modules.values()):
+        module_name = getattr(module, "__name__", "")
+        if not module_name.startswith("hipporeplayimm"):
+            continue
+        if getattr(module, "_speed_cm_s", None) is original_speed:
+            module._speed_cm_s = replacement_speed
 
 
 def _synchronize_encoding_validation_aliases(encoding, originals: dict[str, Any]) -> None:

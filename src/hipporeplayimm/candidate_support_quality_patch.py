@@ -16,9 +16,10 @@ _NONCOMPARABLE_SUPPORT_VALUES = {
     "unknown_noncomparable",
     "particle_approximation",
 }
+_EXACT_SUPPORT = "exact_full_grid"
 _TRUNCATED_SUPPORT = "truncated_full_grid"
 _SUCCESS_STATUS_VALUES = {"", "success", "nan", "na", "n/a", "none", "null", "<na>"}
-_QUALITY_WRAPPER_ATTR = "_candidate_support_quality_status_wrapper"
+_QUALITY_WRAPPER_ATTR = "_candidate_support_quality_known_support_wrapper"
 _MIN_LOG_MASS_BOOL_PATCHED_FLAG = "_candidate_min_log_mass_bool_patch_applied"
 _MIN_LOG_MASS_BOOL_WRAPPER_ATTR = "_candidate_min_log_mass_bool_wrapper"
 _RESTRICT_CANDIDATE_ORDER_PATCHED_FLAG = "_candidate_restriction_order_patch_applied"
@@ -44,9 +45,9 @@ def apply_candidate_support_quality_patch() -> None:
             """Return a conservative quality label for one score row.
 
             Candidate-support quality is meaningful only for successful exact rows or
-            candidate-pruned lower-bound rows.  Failed rows and non-comparable
-            evidence supports should not be counted as ``exact_or_not_pruned`` merely
-            because they are not truncated lower bounds.
+            candidate-pruned lower-bound rows.  Failed rows, non-comparable supports,
+            and unrecognized support labels must not be counted as
+            ``exact_or_not_pruned`` merely because they are not truncated lower bounds.
             """
 
             status = _text(row.get("status", "success")).lower()
@@ -55,6 +56,8 @@ def apply_candidate_support_quality_patch() -> None:
 
             support_values = _evidence_support_values(row)
             if any(value in _NONCOMPARABLE_SUPPORT_VALUES for value in support_values):
+                return ri.CANDIDATE_SUPPORT_UNKNOWN
+            if any(value not in {_EXACT_SUPPORT, _TRUNCATED_SUPPORT} for value in support_values):
                 return ri.CANDIDATE_SUPPORT_UNKNOWN
             if _TRUNCATED_SUPPORT not in support_values:
                 return ri.CANDIDATE_SUPPORT_EXACT

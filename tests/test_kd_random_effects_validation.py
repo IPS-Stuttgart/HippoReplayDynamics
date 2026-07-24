@@ -82,6 +82,31 @@ def test_random_effects_rejects_complex_evidence_before_float_coercion(
         random_effects_model_probabilities(log_evidence, ["a", "b"])
 
 
+def test_random_effects_preserves_exact_impossible_model_evidence() -> None:
+    log_evidence = np.vstack(
+        [
+            np.tile(np.array([[0.0, -np.inf]]), (20, 1)),
+            np.array([[-np.inf, -np.inf]]),
+        ]
+    )
+
+    rows = random_effects_model_probabilities(
+        log_evidence,
+        ["supported", "impossible"],
+        prior=1.0,
+        n_iterations=80,
+        burnin=10,
+    )
+    by_model = {row["model"]: row for row in rows}
+
+    assert all(np.isfinite(row["p_model"]) for row in rows)
+    assert all(np.isfinite(row["p_exceedance"]) for row in rows)
+    assert by_model["supported"]["p_model"] > 0.9
+    assert by_model["impossible"]["p_model"] < 0.1
+    assert by_model["supported"]["p_exceedance"] == 1.0
+    assert by_model["impossible"]["p_exceedance"] == 0.0
+
+
 def test_random_effects_accepts_valid_sampler_options() -> None:
     rows = random_effects_model_probabilities(
         _log_evidence(),

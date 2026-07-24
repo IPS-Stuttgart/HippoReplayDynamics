@@ -1,0 +1,48 @@
+"""Preserve exact support when marginalizing KD hyperparameter grids."""
+
+from __future__ import annotations
+
+import numpy as np
+from scipy.special import logsumexp
+
+_PATCHED_FLAG = "_kd_grid_prior_support_patch_applied"
+
+
+def apply_kd_grid_prior_support_patch() -> None:
+    """Install validated KD grid-prior marginalization with exact zero mass."""
+
+    from . import kd_reference as kd
+
+    current = kd.marginalize_grid_log_evidence
+    if getattr(current, _PATCHED_FLAG, False):
+        return
+
+    setattr(_marginalize_grid_log_evidence, _PATCHED_FLAG, True)
+    kd.marginalize_grid_log_evidence = _marginalize_grid_log_evidence
+
+
+def _marginalize_grid_log_evidence(grid: np.ndarray, prior: np.ndarray) -> np.ndarray:
+    """Marginalize a KD evidence grid without inventing excluded prior mass."""
+
+    values = np.asarray(grid, dtype=float)
+    weights = np.asarray(prior, dtype=float)
+    if values.ndim < 2:
+        raise ValueError("grid must have an event axis and at least one parameter axis")
+    if values.shape[1:] != weights.shape:
+        raise ValueError(f"grid shape {values.shape[1:]} does not match prior shape {weights.shape}")
+    if not np.all(np.isfinite(weights)):
+        raise ValueError("prior must contain only finite values")
+    if np.any(weights < 0.0):
+        raise ValueError("prior cannot contain negative values")
+
+    positive = weights > 0.0
+    if not np.any(positive):
+        raise ValueError("prior must assign positive mass to at least one grid point")
+
+    log_prior = np.full(weights.shape, float("-inf"), dtype=float)
+    log_prior[positive] = np.log(weights[positive])
+    axes = tuple(range(1, values.ndim))
+    return logsumexp(values + log_prior, axis=axes)
+
+
+__all__ = ["apply_kd_grid_prior_support_patch"]

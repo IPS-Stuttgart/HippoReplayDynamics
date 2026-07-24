@@ -1,15 +1,4 @@
-"""Use patched scalar parsing and event scoping in recovery diagnostics.
-
-Recovery diagnostic tables are often rebuilt from CSV score artifacts.  Pandas can
-round-trip boolean columns as strings such as ``"1.0"`` and ``"0.0"``.  The
-shared evidence-reporting parser already handles those values; this patch makes
-the diagnostic scalar helpers use the same semantics.
-
-The diagnostic event table must also use the same event identity as the recovery
-summary helpers.  Concatenated recovery artifacts can reuse ``session`` and
-``event_index`` across source files, random seeds, or rescoring windows, so
-diagnostics must not collapse those rows back into one event.
-"""
+"""Robust scalar parsing and event scoping for recovery diagnostics."""
 
 from __future__ import annotations
 
@@ -23,364 +12,299 @@ import pandas as pd
 from .evidence_reporting import _coerce_bool_series
 
 _PATCHED_FLAG = "_recovery_diagnostics_bool_scalar_patch_applied"
-_COERCE_BOOL_WRAPPER_FLAG = "_recovery_diagnostics_bool_coerce_bool_wrapper"
-_ROW_BOOL_WRAPPER_FLAG = "_recovery_diagnostics_bool_row_bool_wrapper"
-_COERCE_FLOAT_WRAPPER_FLAG = "_recovery_diagnostics_bool_coerce_float_wrapper"
-_ROW_FLOAT_WRAPPER_FLAG = "_recovery_diagnostics_bool_row_float_wrapper"
-_EVENT_INDEX_VALUE_WRAPPER_FLAG = "_recovery_diagnostics_exact_event_index_wrapper"
-_SUCCESSFUL_FINITE_SCORES_WRAPPER_FLAG = "_recovery_diagnostics_bool_successful_finite_scores_wrapper"
-_EVENT_DIAGNOSTICS_WRAPPER_FLAG = "_recovery_diagnostics_scoped_event_diagnostics_wrapper"
-_CERTIFIED_EVENT_WRAPPER_FLAG = "_recovery_diagnostics_scoped_certified_event_wrapper"
-_CERTIFIED_SUMMARY_WRAPPER_FLAG = "_recovery_diagnostics_scoped_certified_summary_wrapper"
-_HELPER_FLAGS = {
-    "_coerce_bool": _COERCE_BOOL_WRAPPER_FLAG,
-    "_row_bool": _ROW_BOOL_WRAPPER_FLAG,
-    "_coerce_float": _COERCE_FLOAT_WRAPPER_FLAG,
-    "_row_float": _ROW_FLOAT_WRAPPER_FLAG,
-    "_event_index_value": _EVENT_INDEX_VALUE_WRAPPER_FLAG,
-    "_successful_finite_scores": _SUCCESSFUL_FINITE_SCORES_WRAPPER_FLAG,
+_BOOL_FLAG = "_recovery_diagnostics_bool_coerce_bool_wrapper"
+_ROW_BOOL_FLAG = "_recovery_diagnostics_bool_row_bool_wrapper"
+_BOOL_SERIES_FLAG = "_recovery_diagnostics_bool_series_wrapper"
+_FLOAT_FLAG = "_recovery_diagnostics_bool_coerce_float_wrapper"
+_ROW_FLOAT_FLAG = "_recovery_diagnostics_bool_row_float_wrapper"
+_EVENT_INDEX_FLAG = "_recovery_diagnostics_exact_event_index_wrapper"
+_SUCCESS_FLAG = "_recovery_diagnostics_bool_successful_finite_scores_wrapper"
+_COMPARABLE_FLAG = "_recovery_diagnostics_bool_comparable_mask_wrapper"
+_EVENT_DIAGNOSTICS_FLAG = "_recovery_diagnostics_scoped_event_diagnostics_wrapper"
+_CERTIFIED_EVENT_FLAG = "_recovery_diagnostics_scoped_certified_event_wrapper"
+_CERTIFIED_SUMMARY_FLAG = "_recovery_diagnostics_scoped_certified_summary_wrapper"
+_HELPERS = {
+    "_coerce_bool": (_coerce_bool := lambda value, default=False: _bool_value(value, default), _BOOL_FLAG),
+    "_row_bool": (_row_bool := lambda row, column, default: _bool_value(row[column], default) if column in row.index else bool(default), _ROW_BOOL_FLAG),
+    "_coerce_bool_series": (_bool_series := lambda values, default=False: _map_bool(values, default), _BOOL_SERIES_FLAG),
+    "_coerce_float": (_coerce_float := lambda value, default: _float_value(value, default), _FLOAT_FLAG),
+    "_row_float": (_row_float := lambda row, column, default: _float_value(row[column], default) if column in row.index else float(default), _ROW_FLOAT_FLAG),
+    "_event_index_value": (_event_index_value := lambda value: _exact_integral_value(value), _EVENT_INDEX_FLAG),
+    "_successful_finite_scores": (_successful_finite_scores := lambda group: _successful_scores(group), _SUCCESS_FLAG),
+    "_comparable_mask": (_comparable_mask := lambda frame: _comparison_mask(frame), _COMPARABLE_FLAG),
 }
-_TRUE_FLOAT_STRINGS = {"true", "yes", "y"}
-_FALSE_FLOAT_STRINGS = {"false", "no", "n"}
-_MISSING_STATUS_VALUES = {"", "nan", "na", "n/a", "none", "null", "<na>"}
-_MISSING_KEY_VALUE = object()
-_SOURCE_GROUP_COLUMNS = ("source_recovery_score_file",)
+_TRUE_FLOAT = {"true", "yes", "y"}
+_FALSE_FLOAT = {"false", "no", "n"}
+_MISSING_STATUS = {"", "nan", "na", "n/a", "none", "null", "<na>"}
+_BYTES = (bytes, bytearray, memoryview)
+_MISSING_KEY = object()
+_NONSCALAR = object()
+_SOURCE_COLUMNS = ("source_recovery_score_file",)
 
 
 def apply_recovery_diagnostics_bool_patch() -> None:
-    """Install shared scalar bool coercion and scoped event diagnostics."""
-
+    """Install robust recovery-diagnostic scalar and event-scope helpers."""
     from . import recovery_diagnostics as diagnostics
     from . import simulation_recovery as recovery
 
-    if (
-        getattr(diagnostics, _PATCHED_FLAG, False)
-        and _helpers_are_patched(diagnostics)
-        and _event_diagnostics_is_patched(diagnostics)
-        and _certified_wrappers_are_patched(diagnostics)
-    ):
+    current = getattr(diagnostics, _PATCHED_FLAG, False) and all(getattr(getattr(diagnostics, name, None), flag, False) for name, (_, flag) in _HELPERS.items())
+    current &= getattr(getattr(recovery, "_coerce_bool_series", None), _BOOL_SERIES_FLAG, False)
+    current &= getattr(getattr(recovery, "_comparable_mask", None), _COMPARABLE_FLAG, False)
+    current &= getattr(getattr(diagnostics, "_event_diagnostics", None), _EVENT_DIAGNOSTICS_FLAG, False)
+    current &= _certified_current(diagnostics)
+    if current:
         return
 
-    def coerce_bool(value: object, default: bool = False) -> bool:
-        try:
-            if pd.isna(value):
-                return bool(default)
-        except (TypeError, ValueError):
-            return bool(default)
-        return bool(_coerce_bool_series(pd.Series([value]), default=bool(default)).iloc[0])
-
-    def row_bool(row: Any, column: str, default: bool) -> bool:
-        if column not in row.index:
-            return bool(default)
-        return coerce_bool(row[column], default)
-
-    def coerce_float(value: object, default: float) -> float:
-        try:
-            return float(value)
-        except (TypeError, ValueError, OverflowError):
-            text = str(value).strip().lower()
-            if text in _TRUE_FLOAT_STRINGS:
-                return 1.0
-            if text in _FALSE_FLOAT_STRINGS:
-                return 0.0
-            return float(default)
-
-    def row_float(row: Any, column: str, default: float) -> float:
-        if column not in row.index:
-            return float(default)
-        try:
-            if pd.isna(row[column]):
-                return float(default)
-        except (TypeError, ValueError):
-            return float(default)
-        return coerce_float(row[column], default)
-
-    def event_index_value(value: object) -> object:
-        return _exact_integral_value(value)
-
-    def successful_finite_scores(group: pd.DataFrame) -> pd.DataFrame:
-        if "status" in group:
-            status_ok = group["status"].map(_status_is_success_or_missing).astype(bool)
-        else:
-            status_ok = pd.Series(True, index=group.index)
-        if "log_evidence" in group:
-            try:
-                values = pd.to_numeric(group["log_evidence"], errors="coerce")
-                numeric_values = values.to_numpy(dtype=float)
-            except (TypeError, ValueError, OverflowError):
-                numeric_values = (
-                    group["log_evidence"]
-                    .map(lambda value: coerce_float(value, float("nan")))
-                    .to_numpy(dtype=float)
-                )
-        else:
-            numeric_values = np.zeros(len(group), dtype=float)
-        finite = pd.Series(np.isfinite(numeric_values), index=group.index)
-        return group[status_ok & finite].copy()
-
-    _install_helper(diagnostics, "_coerce_bool", coerce_bool)
-    _install_helper(diagnostics, "_row_bool", row_bool)
-    _install_helper(diagnostics, "_coerce_float", coerce_float)
-    _install_helper(diagnostics, "_row_float", row_float)
-    _install_helper(diagnostics, "_event_index_value", event_index_value)
-    _install_helper(diagnostics, "_successful_finite_scores", successful_finite_scores)
-    _install_scoped_certified_recovery(diagnostics, recovery)
-    _install_scoped_event_diagnostics(diagnostics)
+    for name, (helper, flag) in _HELPERS.items():
+        setattr(helper, flag, True)
+        setattr(diagnostics, name, helper)
+    recovery._coerce_bool_series = _bool_series
+    recovery._comparable_mask = _comparable_mask
+    _install_certified_wrappers(diagnostics, recovery)
+    _install_event_diagnostics(diagnostics)
     setattr(diagnostics, _PATCHED_FLAG, True)
 
 
-def _exact_integral_value(value: object) -> object:
-    """Normalize integral event IDs without a lossy binary-float round trip."""
+def _unwrap(value: object) -> object:
+    seen: set[int] = set()
+    while isinstance(value, (np.ndarray, list, tuple, np.generic)):
+        if isinstance(value, np.ndarray):
+            if value.size != 1 or id(value) in seen:
+                return _NONSCALAR
+            seen.add(id(value))
+            value = value.reshape(-1)[0]
+        elif isinstance(value, (list, tuple)):
+            if len(value) != 1 or id(value) in seen:
+                return _NONSCALAR
+            seen.add(id(value))
+            value = value[0]
+        else:
+            value = value.item()
+    return value
 
+
+def _decode(value: object) -> object:
+    value = _unwrap(value)
+    if value is _NONSCALAR or not isinstance(value, _BYTES):
+        return value
+    try:
+        return bytes(value).decode("utf-8")
+    except UnicodeDecodeError:
+        return _NONSCALAR
+
+
+def _is_missing(value: object) -> bool:
+    try:
+        result = pd.isna(value)
+    except (TypeError, ValueError):
+        return False
+    return isinstance(result, (bool, np.bool_)) and bool(result)
+
+
+def _bool_value(value: object, default: bool = False) -> bool:
+    value = _decode(value)
+    if value is _NONSCALAR:
+        return bool(default)
+    return bool(_coerce_bool_series(pd.Series([value]), default=bool(default)).iloc[0])
+
+
+def _map_bool(values: object, default: bool = False) -> pd.Series:
+    series = values.copy() if isinstance(values, pd.Series) else pd.Series(values)
+    return series.map(lambda value: _bool_value(value, default)).astype(bool)
+
+
+def _float_value(value: object, default: float) -> float:
+    value = _decode(value)
+    if value is _NONSCALAR or _is_missing(value):
+        return float(default)
+    try:
+        return float(value)
+    except (TypeError, ValueError, OverflowError):
+        text = str(value).strip().lower()
+        if text in _TRUE_FLOAT:
+            return 1.0
+        if text in _FALSE_FLOAT:
+            return 0.0
+        return float(default)
+
+
+def _text(value: object) -> str | None:
+    value = _decode(value)
+    return None if value is _NONSCALAR or _is_missing(value) else str(value).strip()
+
+
+def _status_ok(value: object) -> bool:
+    value = _decode(value)
+    if value is _NONSCALAR:
+        return False
+    if _is_missing(value):
+        return True
+    text = str(value).strip().lower()
+    return text == "success" or text in _MISSING_STATUS
+
+
+def _successful_scores(group: pd.DataFrame) -> pd.DataFrame:
+    status = group["status"].map(_status_ok).astype(bool) if "status" in group else pd.Series(True, index=group.index)
+    if "log_evidence" not in group:
+        numeric = np.zeros(len(group), dtype=float)
+    else:
+        try:
+            numeric = pd.to_numeric(group["log_evidence"], errors="coerce").to_numpy(dtype=float)
+        except (TypeError, ValueError, OverflowError):
+            numeric = group["log_evidence"].map(lambda value: _float_value(value, np.nan)).to_numpy(dtype=float)
+    return group[status & pd.Series(np.isfinite(numeric), index=group.index)].copy()
+
+
+def _comparison_mask(frame: pd.DataFrame) -> pd.Series:
+    if "evidence_comparable" in frame:
+        return _map_bool(frame["evidence_comparable"])
+    if "evidence_support" in frame:
+        return frame["evidence_support"].map(_text).fillna("").eq("exact_full_grid")
+    return pd.Series(True, index=frame.index)
+
+
+def _exact_integral_value(value: object) -> object:
     if isinstance(value, (bool, np.bool_)):
         return int(value)
     try:
         return int(exact_index(value))
     except (TypeError, ValueError, OverflowError):
         pass
-
     if isinstance(value, str):
-        text = value.strip()
-        if not text:
-            return value
         try:
-            decimal_value = Decimal(text)
+            numeric = Decimal(value.strip())
         except InvalidOperation:
             return value
-        if decimal_value.is_finite() and decimal_value == decimal_value.to_integral_value():
-            return int(decimal_value)
-        return value
-
+        return int(numeric) if numeric.is_finite() and numeric == numeric.to_integral_value() else value
     if isinstance(value, Decimal):
-        if value.is_finite() and value == value.to_integral_value():
-            return int(value)
-        return value
-
+        return int(value) if value.is_finite() and value == value.to_integral_value() else value
     if isinstance(value, (float, np.floating)):
         numeric = float(value)
-        if np.isfinite(numeric) and numeric.is_integer():
-            return int(numeric)
-        return value
-
+        return int(numeric) if np.isfinite(numeric) and numeric.is_integer() else value
     try:
         integer = int(value)
+        return integer if value == integer else value
     except (TypeError, ValueError, OverflowError):
         return value
-    try:
-        return integer if value == integer else value
-    except (TypeError, ValueError):
-        return value
 
 
-def _helpers_are_patched(diagnostics: Any) -> bool:
-    """Return whether all recovery-diagnostic scalar helpers are active wrappers."""
-
-    return all(
-        getattr(getattr(diagnostics, helper_name, None), wrapper_flag, False)
-        for helper_name, wrapper_flag in _HELPER_FLAGS.items()
-    )
+def _certified_current(diagnostics: Any) -> bool:
+    return bool(getattr(getattr(diagnostics, "certified_vs_exact_event_recovery", None), _CERTIFIED_EVENT_FLAG, False) and getattr(getattr(diagnostics, "certified_vs_exact_recovery_summary", None), _CERTIFIED_SUMMARY_FLAG, False))
 
 
-def _event_diagnostics_is_patched(diagnostics: Any) -> bool:
-    return bool(getattr(getattr(diagnostics, "_event_diagnostics", None), _EVENT_DIAGNOSTICS_WRAPPER_FLAG, False))
-
-
-def _certified_wrappers_are_patched(diagnostics: Any) -> bool:
-    return bool(
-        getattr(getattr(diagnostics, "certified_vs_exact_event_recovery", None), _CERTIFIED_EVENT_WRAPPER_FLAG, False)
-        and getattr(getattr(diagnostics, "certified_vs_exact_recovery_summary", None), _CERTIFIED_SUMMARY_WRAPPER_FLAG, False)
-    )
-
-
-def _install_helper(diagnostics: Any, helper_name: str, helper: Any) -> None:
-    setattr(helper, _HELPER_FLAGS[helper_name], True)
-    setattr(diagnostics, helper_name, helper)
-
-
-def _install_scoped_certified_recovery(diagnostics: Any, recovery: Any) -> None:
-    if _certified_wrappers_are_patched(diagnostics):
+def _install_certified_wrappers(diagnostics: Any, recovery: Any) -> None:
+    if _certified_current(diagnostics):
         return
 
-    def certified_vs_exact_event_recovery(event_scores: pd.DataFrame) -> pd.DataFrame:
-        return _certified_vs_exact_event_recovery_with_scoped_keys(event_scores, recovery)
+    def events(scores: pd.DataFrame) -> pd.DataFrame:
+        if scores.empty:
+            return recovery.certified_vs_exact_event_recovery(scores)
+        pieces = []
+        for _, group in _groups(scores):
+            normalized = group.copy()
+            if "status" in normalized:
+                normalized["status"] = normalized["status"].map(lambda value: "success" if _status_ok(value) else value)
+            piece = recovery.certified_vs_exact_event_recovery(normalized)
+            if piece.empty:
+                continue
+            for column in _group_columns(group):
+                if column not in piece:
+                    piece[column] = _event_scalar(group, column)
+            pieces.append(piece)
+        return pd.DataFrame() if not pieces else _sort_events(pd.concat(pieces, ignore_index=True, sort=False))
 
-    def certified_vs_exact_recovery_summary(event_scores: pd.DataFrame) -> pd.DataFrame:
-        events = certified_vs_exact_event_recovery(event_scores)
-        return _certified_vs_exact_summary_from_events(events)
+    def summary(scores: pd.DataFrame) -> pd.DataFrame:
+        event_rows = events(scores)
+        if event_rows.empty:
+            return pd.DataFrame()
+        rows = [_summary_row(str(label), group) for label, group in event_rows.groupby("true_model", sort=False)]
+        rows.append(_summary_row("overall", event_rows))
+        return pd.DataFrame(rows)
 
-    setattr(certified_vs_exact_event_recovery, _CERTIFIED_EVENT_WRAPPER_FLAG, True)
-    setattr(certified_vs_exact_recovery_summary, _CERTIFIED_SUMMARY_WRAPPER_FLAG, True)
-    diagnostics.certified_vs_exact_event_recovery = certified_vs_exact_event_recovery
-    diagnostics.certified_vs_exact_recovery_summary = certified_vs_exact_recovery_summary
-
-
-def _install_scoped_event_diagnostics(diagnostics: Any) -> None:
-    if _event_diagnostics_is_patched(diagnostics):
-        return
-
-    def event_diagnostics(scores: pd.DataFrame, certified_events: pd.DataFrame) -> pd.DataFrame:
-        return _event_diagnostics_with_scoped_keys(scores, certified_events, diagnostics)
-
-    setattr(event_diagnostics, _EVENT_DIAGNOSTICS_WRAPPER_FLAG, True)
-    diagnostics._event_diagnostics = event_diagnostics
-
-
-def _certified_vs_exact_event_recovery_with_scoped_keys(
-    event_scores: pd.DataFrame,
-    recovery: Any,
-) -> pd.DataFrame:
-    if event_scores.empty:
-        return recovery.certified_vs_exact_event_recovery(event_scores)
-
-    pieces: list[pd.DataFrame] = []
-    for _, group in _iter_event_groups(event_scores):
-        if group.empty:
-            continue
-        piece = recovery.certified_vs_exact_event_recovery(group)
-        if piece.empty:
-            continue
-        group_columns = _event_group_columns(group)
-        piece = piece.copy()
-        for column in group_columns:
-            if column not in piece.columns:
-                piece[column] = _event_scalar(group, column)
-        pieces.append(piece)
-
-    if not pieces:
-        return pd.DataFrame()
-    return _sort_by_event_group_columns(pd.concat(pieces, ignore_index=True, sort=False))
+    setattr(events, _CERTIFIED_EVENT_FLAG, True)
+    setattr(summary, _CERTIFIED_SUMMARY_FLAG, True)
+    diagnostics.certified_vs_exact_event_recovery = events
+    diagnostics.certified_vs_exact_recovery_summary = summary
 
 
-def _certified_vs_exact_summary_from_events(events: pd.DataFrame) -> pd.DataFrame:
-    if events.empty:
-        return pd.DataFrame()
-    rows = [_certified_vs_exact_summary_row(str(true_model), group) for true_model, group in events.groupby("true_model", sort=False)]
-    rows.append(_certified_vs_exact_summary_row("overall", events))
-    return pd.DataFrame(rows)
-
-
-def _certified_vs_exact_summary_row(label: str, group: pd.DataFrame) -> dict[str, object]:
-    recovered = _coerce_bool_series(group["certified_vs_exact_recovered_expected_model"])
+def _summary_row(label: str, group: pd.DataFrame) -> dict[str, object]:
+    recovered = _map_bool(group["certified_vs_exact_recovered_expected_model"])
     margins = pd.to_numeric(group["expected_minus_best_comparable_log_evidence"], errors="coerce")
-    expected_model = "" if label == "overall" else str(group["expected_model"].iloc[0])
-    n_events = int(len(group))
+    n = len(group)
     return {
         "true_model": label,
-        "expected_model": expected_model,
-        "simulated_events": n_events,
+        "expected_model": "" if label == "overall" else str(group["expected_model"].iloc[0]),
+        "simulated_events": n,
         "certified_vs_exact_recovered_events": int(recovered.sum()),
-        "certified_vs_exact_recovery_accuracy": _safe_fraction(int(recovered.sum()), n_events),
+        "certified_vs_exact_recovery_accuracy": _fraction(int(recovered.sum()), n),
         "mean_expected_minus_best_comparable_log_evidence": float(margins.mean()),
         "median_expected_minus_best_comparable_log_evidence": float(margins.median()),
         "events_without_comparable_exact_reference": int((group["certified_vs_exact_reason"] == "no_comparable_exact_reference").sum()),
     }
 
 
-def _event_diagnostics_with_scoped_keys(
-    scores: pd.DataFrame,
-    certified_events: pd.DataFrame,
-    diagnostics: Any,
-) -> pd.DataFrame:
-    group_columns = _event_group_columns(scores)
-    lookup_columns = [column for column in group_columns if column in certified_events.columns]
-    certified_lookup = {
-        _row_key(row, lookup_columns): row
-        for _, row in certified_events.iterrows()
-    }
+def _install_event_diagnostics(diagnostics: Any) -> None:
+    if getattr(getattr(diagnostics, "_event_diagnostics", None), _EVENT_DIAGNOSTICS_FLAG, False):
+        return
 
-    rows: list[dict[str, object]] = []
-    for _, group in _iter_event_groups(scores):
-        if group.empty:
-            continue
-        first = group.iloc[0]
-        session = first.get("session", "")
-        event_index = first.get("event_index", np.nan)
-        row = diagnostics._event_diagnostic_row(
-            str(session),
-            event_index,
-            group,
-            certified_lookup.get(_row_key(first, lookup_columns)),
-        )
-        for column in group_columns:
-            if column not in row:
-                row[column] = _event_scalar(group, column)
-        rows.append(row)
+    def event_diagnostics(scores: pd.DataFrame, certified: pd.DataFrame) -> pd.DataFrame:
+        columns = _group_columns(scores)
+        lookup_columns = [column for column in columns if column in certified]
+        lookup = {_row_key(row, lookup_columns): row for _, row in certified.iterrows()}
+        rows = []
+        for _, group in _groups(scores):
+            first = group.iloc[0]
+            row = diagnostics._event_diagnostic_row(str(first.get("session", "")), first.get("event_index", np.nan), group, lookup.get(_row_key(first, lookup_columns)))
+            for column in columns:
+                row.setdefault(column, _event_scalar(group, column))
+            rows.append(row)
+        return _sort_events(pd.DataFrame(rows))
 
-    result = pd.DataFrame(rows)
-    if result.empty:
-        return result
-    return _sort_by_event_group_columns(result)
+    setattr(event_diagnostics, _EVENT_DIAGNOSTICS_FLAG, True)
+    diagnostics._event_diagnostics = event_diagnostics
 
 
-def _iter_event_groups(frame: pd.DataFrame) -> Any:
-    group_columns = _event_group_columns(frame)
-    if group_columns:
-        return frame.groupby(group_columns, sort=False, dropna=False)
-    return [((), frame)]
+def _group_columns(frame: pd.DataFrame) -> list[str]:
+    from . import simulation_best_row_flags
+
+    columns = list(simulation_best_row_flags._event_group_columns(frame))
+    for column in reversed(_SOURCE_COLUMNS):
+        if column in frame and column not in columns:
+            columns.insert(0, column)
+    return columns or [column for column in ("session", "event_index") if column in frame]
 
 
-def _event_group_columns(frame: pd.DataFrame) -> list[str]:
-    from . import simulation_best_row_flags as best_row_flags
-
-    group_columns = list(best_row_flags._event_group_columns(frame))
-    for column in reversed(_SOURCE_GROUP_COLUMNS):
-        if column in frame.columns and column not in group_columns:
-            group_columns.insert(0, column)
-    if group_columns:
-        return group_columns
-    return [column for column in ("session", "event_index") if column in frame.columns]
+def _groups(frame: pd.DataFrame) -> Any:
+    columns = _group_columns(frame)
+    return frame.groupby(columns, sort=False, dropna=False) if columns else [((), frame)]
 
 
-def _sort_by_event_group_columns(frame: pd.DataFrame) -> pd.DataFrame:
-    if frame.empty:
-        return frame.reset_index(drop=True)
-    sort_columns = [column for column in _event_group_columns(frame) if column in frame.columns]
-    if not sort_columns:
-        return frame.reset_index(drop=True)
-    sort_keys = pd.DataFrame({column: frame[column].map(_sort_key_value) for column in sort_columns}, index=frame.index)
-    order = sort_keys.sort_values(sort_columns, kind="mergesort").index
-    return frame.loc[order].reset_index(drop=True)
-
-
-def _sort_key_value(value: object) -> str:
-    normalized = _normalize_key_value(value)
-    if normalized is _MISSING_KEY_VALUE:
-        return ""
-    return str(normalized)
+def _normalize_key(value: object) -> object:
+    if _is_missing(value):
+        return _MISSING_KEY
+    return value.item() if isinstance(value, np.generic) else value
 
 
 def _row_key(row: pd.Series, columns: list[str]) -> tuple[object, ...]:
-    return tuple(_normalize_key_value(row.get(column, np.nan)) for column in columns)
+    return tuple(_normalize_key(row.get(column, np.nan)) for column in columns)
 
 
-def _normalize_key_value(value: object) -> object:
-    try:
-        if pd.isna(value):
-            return _MISSING_KEY_VALUE
-    except (TypeError, ValueError):
-        pass
-    if isinstance(value, np.generic):
-        return value.item()
-    return value
+def _sort_events(frame: pd.DataFrame) -> pd.DataFrame:
+    if frame.empty:
+        return frame.reset_index(drop=True)
+    columns = [column for column in _group_columns(frame) if column in frame]
+    if not columns:
+        return frame.reset_index(drop=True)
+    keys = pd.DataFrame({column: frame[column].map(lambda value: "" if _normalize_key(value) is _MISSING_KEY else str(_normalize_key(value))) for column in columns}, index=frame.index)
+    return frame.loc[keys.sort_values(columns, kind="mergesort").index].reset_index(drop=True)
 
 
 def _event_scalar(group: pd.DataFrame, column: str) -> object:
-    return group[column].iloc[0] if column in group.columns and not group.empty else np.nan
+    return group[column].iloc[0] if column in group and not group.empty else np.nan
 
 
-def _safe_fraction(numerator: int, denominator: int) -> float:
-    return float("nan") if denominator <= 0 else float(numerator) / float(denominator)
-
-
-def _status_is_success_or_missing(value: object) -> bool:
-    try:
-        missing = pd.isna(value)
-    except (TypeError, ValueError):
-        missing = False
-    if isinstance(missing, (bool, np.bool_)) and bool(missing):
-        return True
-    text = str(value).strip().lower()
-    return text == "success" or text in _MISSING_STATUS_VALUES
+def _fraction(numerator: int, denominator: int) -> float:
+    return np.nan if denominator <= 0 else numerator / denominator
 
 
 __all__ = ["apply_recovery_diagnostics_bool_patch"]

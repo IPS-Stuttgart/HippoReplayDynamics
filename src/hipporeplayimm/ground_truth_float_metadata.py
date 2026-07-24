@@ -268,6 +268,11 @@ def _parse_bool_metadata_value(column: str, value: Any) -> bool:
         return bool(value)
     if value is None:
         raise ValueError(f"{column} must contain boolean values")
+    if isinstance(value, (bytes, bytearray, memoryview)):
+        try:
+            value = bytes(value).decode("utf-8")
+        except UnicodeDecodeError as exc:
+            raise ValueError(f"{column} must contain boolean values") from exc
     text = str(value).strip().lower()
     if text in {"1", "1.0", "true", "t", "yes", "y", "on"}:
         return True

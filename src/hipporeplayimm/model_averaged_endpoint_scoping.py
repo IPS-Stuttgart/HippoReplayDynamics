@@ -29,6 +29,7 @@ _MODEL_AVERAGE_SCOPE_COLUMNS = (
     "window_end_s",
     "window_duration_s",
 )
+_TRUE_BOOL_TEXT_VALUES = {"1", "1.0", "true", "t", "yes", "y", "on"}
 
 
 def apply_model_averaged_endpoint_scoping_patch() -> None:
@@ -199,6 +200,19 @@ def _model_average_group_columns(frame: pd.DataFrame) -> list[str]:
     return columns
 
 
+def _decoded_text(value: object) -> str | None:
+    """Return stripped scalar text, decoding valid byte-backed values."""
+
+    if isinstance(value, np.generic):
+        return _decoded_text(value.item())
+    if isinstance(value, (bytes, bytearray, memoryview)):
+        try:
+            return bytes(value).decode("utf-8").strip()
+        except UnicodeDecodeError:
+            return None
+    return str(value).strip()
+
+
 def _scope_label(value: object) -> str:
     if _is_missing_scalar(value):
         return "<missing>"
@@ -218,7 +232,13 @@ def _scope_label(value: object) -> str:
         return repr(("sequence", list(value)))
     if isinstance(value, set):
         return repr(("set", sorted(value, key=repr)))
-    return repr(("scalar", str(value).strip()))
+    text = _decoded_text(value)
+    if text is not None:
+        return repr(("scalar", text))
+    raw = value.item() if isinstance(value, np.generic) else value
+    if isinstance(raw, (bytes, bytearray, memoryview)):
+        return repr(("bytes", bytes(raw)))
+    return repr(("scalar", str(raw).strip()))
 
 
 def _is_missing_scalar(value: object) -> bool:
@@ -244,7 +264,8 @@ def _bool_value(value: object) -> bool:
     if isinstance(value, (float, np.floating)):
         numeric = float(value)
         return bool(np.isfinite(numeric) and numeric != 0.0)
-    return str(value).strip().lower() in {"1", "1.0", "true", "t", "yes", "y", "on"}
+    text = _decoded_text(value)
+    return bool(text is not None and text.lower() in _TRUE_BOOL_TEXT_VALUES)
 
 
 def _bool_series(values: pd.Series) -> pd.Series:

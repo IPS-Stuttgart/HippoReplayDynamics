@@ -14,8 +14,10 @@ _HELDOUT_INFLUENCE_PATCHED_FLAG = "_result_quality_audit_heldout_influence_patch
 _DISTINCT_MODEL_MARGIN_PATCHED_FLAG = "_result_quality_distinct_model_margin_patch_applied"
 _MODEL_LABEL_SUMMARY_PATCHED_FLAG = "_result_quality_model_label_summary_patch_applied"
 _INTEGER_BOOL_PATCHED_FLAG = "_result_quality_audit_integer_bool_patch_applied"
+_SCOPE_FRAME_PATCHED_FLAG = "_result_quality_audit_scope_frame_patch_applied"
 _MISSING_TEXT_VALUES = {"", "nan", "na", "n/a", "none", "null", "<na>"}
 _INVALID_UTF8_MODEL_LABEL_PREFIX = "<invalid-utf8-bytes:"
+_INVALID_UTF8_SCOPE_LABEL_PREFIX = "<invalid-utf8-scope-bytes:"
 _EVENT_GROUP_SESSION_COLUMNS = ("session",)
 _EVENT_GROUP_EVENT_COLUMNS = ("event_index", "event_id")
 _EVENT_GROUP_SCOPE_COLUMNS = (
@@ -67,18 +69,72 @@ _INFLUENCE_VALUE_COLUMNS = (
 )
 
 
-def _is_observed_metadata_value(value: object) -> bool:
-    """Return whether a metadata cell carries a real grouping value."""
+def _is_missing_scalar(value: object) -> bool:
+    """Return whether one scalar is missing without array truth coercion."""
 
     try:
         missing = pd.isna(value)
     except (TypeError, ValueError):
-        missing = False
-    if isinstance(missing, (bool, np.bool_)) and bool(missing):
         return False
+    return isinstance(missing, (bool, np.bool_)) and bool(missing)
+
+
+def _normalized_scope_value(value: object) -> object:
+    """Return a hashable semantic key for persisted event-scope metadata."""
+
+    if isinstance(value, np.ndarray):
+        array = np.asarray(value, dtype=object)
+        if array.ndim == 0 or array.size == 1:
+            return _normalized_scope_value(array.reshape(-1)[0])
+        normalized = tuple(_normalized_scope_value(item) for item in array.reshape(-1))
+        if array.ndim == 1:
+            return ("sequence", normalized)
+        return ("array", tuple(array.shape), normalized)
+    if isinstance(value, np.generic):
+        return _normalized_scope_value(value.item())
+    if isinstance(value, (bytes, bytearray, memoryview)):
+        raw = bytes(value)
+        try:
+            value = raw.decode("utf-8")
+        except UnicodeDecodeError:
+            return f"{_INVALID_UTF8_SCOPE_LABEL_PREFIX}{raw.hex()}>"
     if isinstance(value, str):
-        return value.strip().lower() not in _MISSING_TEXT_VALUES
-    return True
+        text = value.strip()
+        return None if text.lower() in _MISSING_TEXT_VALUES else text
+    if isinstance(value, (list, tuple)):
+        return ("sequence", tuple(_normalized_scope_value(item) for item in value))
+    if isinstance(value, (set, frozenset)):
+        normalized = (_normalized_scope_value(item) for item in value)
+        return ("set", tuple(sorted(normalized, key=repr)))
+    if isinstance(value, dict):
+        normalized = (
+            (_normalized_scope_value(key), _normalized_scope_value(item))
+            for key, item in value.items()
+        )
+        return ("mapping", tuple(sorted(normalized, key=repr)))
+    if _is_missing_scalar(value):
+        return None
+    try:
+        hash(value)
+    except TypeError:
+        return ("object", repr(value))
+    return value
+
+
+def _normalized_scope_frame(scores: pd.DataFrame) -> pd.DataFrame:
+    """Copy a score table with hashable event-scope metadata values."""
+
+    normalized = scores.copy()
+    for column in _EVENT_GROUP_SCOPE_COLUMNS:
+        if column in normalized.columns:
+            normalized[column] = normalized[column].map(_normalized_scope_value)
+    return normalized
+
+
+def _is_observed_metadata_value(value: object) -> bool:
+    """Return whether a metadata cell carries a real grouping value."""
+
+    return _normalized_scope_value(value) is not None
 
 
 def _column_has_observed_metadata(scores: Any, column: str) -> bool:
@@ -336,6 +392,21 @@ def _patch_model_label_result_quality_summaries(gates_module: Any) -> None:
         gates_module.model_quality_summary = model_quality_summary
 
 
+def _patch_scope_frame_normalization(audit_module: Any) -> None:
+    """Normalize persisted grouping values before the audit starts grouping rows."""
+
+    current_score_table = audit_module._score_table_with_log_evidence_alias
+    if getattr(current_score_table, _SCOPE_FRAME_PATCHED_FLAG, False):
+        return
+
+    @wraps(current_score_table)
+    def _score_table_with_log_evidence_alias(scores: pd.DataFrame) -> pd.DataFrame:
+        return _normalized_scope_frame(current_score_table(scores))
+
+    setattr(_score_table_with_log_evidence_alias, _SCOPE_FRAME_PATCHED_FLAG, True)
+    audit_module._score_table_with_log_evidence_alias = _score_table_with_log_evidence_alias
+
+
 def apply_result_quality_audit_scope_patch() -> None:
     """Install scoped grouping and scalar coercion for result-quality summaries."""
 
@@ -347,6 +418,7 @@ def apply_result_quality_audit_scope_patch() -> None:
     _patch_distinct_model_result_quality_margins(gates_module)
     _patch_model_label_result_quality_summaries(gates_module)
     _patch_exact_integer_boolean_values(audit_module)
+    _patch_scope_frame_normalization(audit_module)
 
     current_group_columns = audit_module.event_group_columns
     if not getattr(current_group_columns, _PATCHED_FLAG, False):
@@ -363,10 +435,11 @@ def apply_result_quality_audit_scope_patch() -> None:
 
         @wraps(current_event_count)
         def _event_count(scores):
-            group_columns = _scoped_event_group_columns(scores)
+            normalized = _normalized_scope_frame(scores)
+            group_columns = _scoped_event_group_columns(normalized)
             if not group_columns:
                 return "unknown"
-            return int(scores[group_columns].drop_duplicates().shape[0])
+            return int(normalized[group_columns].drop_duplicates().shape[0])
 
         setattr(_event_count, _EVENT_COUNT_PATCHED_FLAG, True)
         audit_module._event_count = _event_count

@@ -9,7 +9,7 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-from .evidence_reporting import _coerce_bool_series as _shared_coerce_bool_series
+from .evidence_reporting import _coerce_bool_series
 
 _PATCHED_FLAG = "_recovery_diagnostics_bool_scalar_patch_applied"
 _BOOL_FLAG = "_recovery_diagnostics_bool_coerce_bool_wrapper"
@@ -105,7 +105,7 @@ def _bool_value(value: object, default: bool = False) -> bool:
     value = _decode(value)
     if value is _NONSCALAR:
         return bool(default)
-    return bool(_shared_coerce_bool_series(pd.Series([value]), default=bool(default)).iloc[0])
+    return bool(_coerce_bool_series(pd.Series([value]), default=bool(default)).iloc[0])
 
 
 def _map_bool(values: object, default: bool = False) -> pd.Series:

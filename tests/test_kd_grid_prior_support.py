@@ -1,0 +1,38 @@
+import numpy as np
+import pytest
+from scipy.special import logsumexp
+
+from hipporeplayimm.kd_reference import marginalize_grid_log_evidence
+
+
+def test_grid_marginalization_preserves_exact_zero_prior_support():
+    grid = np.array([[0.0, 1000.0], [-3.0, -2.0]])
+    prior = np.array([1.0, 0.0])
+
+    marginalized = marginalize_grid_log_evidence(grid, prior)
+
+    np.testing.assert_allclose(marginalized, np.array([0.0, -3.0]))
+
+
+def test_grid_marginalization_matches_logsumexp_for_positive_prior():
+    grid = np.array([[-4.0, -2.0, -3.0], [-1.0, -5.0, -2.0]])
+    prior = np.array([0.2, 0.3, 0.5])
+
+    marginalized = marginalize_grid_log_evidence(grid, prior)
+
+    expected = logsumexp(grid + np.log(prior), axis=1)
+    np.testing.assert_allclose(marginalized, expected)
+
+
+@pytest.mark.parametrize(
+    "prior, message",
+    [
+        (np.array([0.0, 0.0]), "positive mass"),
+        (np.array([1.0, -0.1]), "negative"),
+        (np.array([1.0, np.nan]), "finite"),
+        (np.array([1.0, np.inf]), "finite"),
+    ],
+)
+def test_grid_marginalization_rejects_invalid_priors(prior, message):
+    with pytest.raises(ValueError, match=message):
+        marginalize_grid_log_evidence(np.zeros((2, 2)), prior)

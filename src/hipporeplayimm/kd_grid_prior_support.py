@@ -39,10 +39,12 @@ def _marginalize_grid_log_evidence(grid: np.ndarray, prior: np.ndarray) -> np.nd
     if not np.any(positive):
         raise ValueError("prior must assign positive mass to at least one grid point")
 
-    log_prior = np.full(weights.shape, float("-inf"), dtype=float)
-    log_prior[positive] = np.log(weights[positive])
-    axes = tuple(range(1, values.ndim))
-    return logsumexp(values + log_prior, axis=axes)
+    flat_values = values.reshape(values.shape[0], -1)
+    flat_weights = weights.reshape(-1)
+    support = positive.reshape(-1)
+    supported_values = flat_values[:, support]
+    supported_log_prior = np.log(flat_weights[support])
+    return logsumexp(supported_values + supported_log_prior[None, :], axis=1)
 
 
 __all__ = ["apply_kd_grid_prior_support_patch"]

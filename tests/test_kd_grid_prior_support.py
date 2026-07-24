@@ -14,6 +14,16 @@ def test_grid_marginalization_preserves_exact_zero_prior_support():
     np.testing.assert_allclose(marginalized, np.array([0.0, -3.0]))
 
 
+@pytest.mark.parametrize("excluded_value", [np.nan, np.inf])
+def test_grid_marginalization_ignores_nonfinite_values_outside_prior_support(excluded_value):
+    grid = np.array([[0.0, excluded_value], [-3.0, excluded_value]])
+    prior = np.array([1.0, 0.0])
+
+    marginalized = marginalize_grid_log_evidence(grid, prior)
+
+    np.testing.assert_allclose(marginalized, np.array([0.0, -3.0]))
+
+
 def test_grid_marginalization_matches_logsumexp_for_positive_prior():
     grid = np.array([[-4.0, -2.0, -3.0], [-1.0, -5.0, -2.0]])
     prior = np.array([0.2, 0.3, 0.5])

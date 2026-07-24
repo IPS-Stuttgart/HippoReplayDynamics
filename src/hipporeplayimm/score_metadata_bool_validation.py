@@ -21,9 +21,30 @@ def _numeric_parse_error(column: str) -> ValueError:
     return ValueError(f"{column} must contain finite numeric metadata")
 
 
+def _unwrap_scalar_metadata(value: object, label: str = "metadata value") -> object:
+    """Unwrap persisted singleton containers without accepting non-scalars."""
+
+    seen: set[int] = set()
+    while isinstance(value, (np.ndarray, list, tuple, np.generic)):
+        if isinstance(value, np.ndarray):
+            if value.size != 1 or id(value) in seen:
+                raise ValueError(f"{label} must be scalar")
+            seen.add(id(value))
+            value = value.reshape(-1)[0]
+        elif isinstance(value, (list, tuple)):
+            if len(value) != 1 or id(value) in seen:
+                raise ValueError(f"{label} must be scalar")
+            seen.add(id(value))
+            value = value[0]
+        else:
+            value = value.item()
+    return value
+
+
 def _parse_strict_bool(value: object) -> bool:
     """Parse boolean-like metadata without accepting arbitrary numerics."""
 
+    value = _unwrap_scalar_metadata(value, "boolean metadata")
     if isinstance(value, (bool, np.bool_)):
         return bool(value)
     if isinstance(value, (int, np.integer)):
@@ -62,6 +83,7 @@ def _parse_numeric_bool(numeric: float, original: object) -> bool:
 
 
 def _metadata_text_or_none(value: object) -> str | None:
+    value = _unwrap_scalar_metadata(value)
     if isinstance(value, _BYTE_BACKED_SCALARS):
         text = bytes(value).decode("utf-8", errors="replace").strip()
     else:
@@ -72,6 +94,7 @@ def _metadata_text_or_none(value: object) -> str | None:
 
 
 def _metadata_float_from_value(value: object, column: str) -> float | None:
+    value = _unwrap_scalar_metadata(value, column)
     try:
         if pd.isna(value):
             return None
@@ -96,6 +119,7 @@ def _metadata_float_from_value(value: object, column: str) -> float | None:
 def _metadata_int_from_value(value: object, column: str) -> int | None:
     """Parse integer metadata without losing precision through binary64."""
 
+    value = _unwrap_scalar_metadata(value, column)
     try:
         if pd.isna(value):
             return None
@@ -181,6 +205,7 @@ def _optional_float_from_columns(frame: pd.DataFrame, columns: tuple[str, ...], 
         if column not in frame.columns:
             continue
         for value in frame[column].dropna():
+            value = _unwrap_scalar_metadata(value, joined_columns)
             if isinstance(value, (bool, np.bool_)):
                 raise _numeric_parse_error(joined_columns)
             text = _metadata_text_or_none(value)

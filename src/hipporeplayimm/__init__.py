@@ -50,6 +50,7 @@ from . import ground_truth_sensitivity_metrics as _ground_truth_sensitivity_metr
 from . import ground_truth_window_scope as _ground_truth_window_scope
 from . import improved_model_evidence_registry_patch as _improved_model_evidence_registry_patch
 from . import kd_encoding_config_validation as _kd_encoding_config_validation
+from . import kd_grid_prior_support as _kd_grid_prior_support
 from . import kd_impossible_emission_patch as _kd_impossible_emission_patch
 from . import kd_single_bin_momentum_patch2 as _kd_single_bin_momentum_patch2
 from . import latent_path_validation as _latent_path_validation
@@ -277,6 +278,7 @@ def apply_runtime_patches() -> None:
     _emission_cell_id_validation.apply_emission_cell_id_validation_patch()
     _kd_encoding_config_validation.apply_kd_encoding_config_validation_patch()
     _kd_impossible_emission_patch.apply_kd_impossible_emission_patch()
+    _kd_grid_prior_support.apply_kd_grid_prior_support_patch()
     _kd_single_bin_momentum_patch2.apply_kd_single_bin_momentum_patch2()
     _apply_state_space_imm_duration_patch()
     _apply_duration_occupancy_patch()

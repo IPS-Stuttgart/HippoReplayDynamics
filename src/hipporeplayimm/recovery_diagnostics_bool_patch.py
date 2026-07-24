@@ -40,6 +40,7 @@ _BYTES = (bytes, bytearray, memoryview)
 _MISSING_KEY = object()
 _NONSCALAR = object()
 _SOURCE_COLUMNS = ("source_recovery_score_file",)
+_INVALID_UTF8_KEY_PREFIX = "<invalid-utf8-event-key:"
 
 
 def apply_recovery_diagnostics_bool_patch() -> None:
@@ -164,6 +165,13 @@ def _comparison_mask(frame: pd.DataFrame) -> pd.Series:
 
 
 def _exact_integral_value(value: object) -> object:
+    decoded = _decode(value)
+    if decoded is _NONSCALAR:
+        normalized = _normalize_key(value)
+        return np.nan if normalized is _MISSING_KEY else normalized
+    value = decoded
+    if isinstance(value, str) and value.strip().lower() in _MISSING_STATUS:
+        return np.nan
     if isinstance(value, (bool, np.bool_)):
         return int(value)
     try:
@@ -189,7 +197,17 @@ def _exact_integral_value(value: object) -> object:
 
 
 def _certified_current(diagnostics: Any) -> bool:
-    return bool(getattr(getattr(diagnostics, "certified_vs_exact_event_recovery", None), _CERTIFIED_EVENT_FLAG, False) and getattr(getattr(diagnostics, "certified_vs_exact_recovery_summary", None), _CERTIFIED_SUMMARY_FLAG, False))
+    event_current = getattr(
+        getattr(diagnostics, "certified_vs_exact_event_recovery", None),
+        _CERTIFIED_EVENT_FLAG,
+        False,
+    )
+    summary_current = getattr(
+        getattr(diagnostics, "certified_vs_exact_recovery_summary", None),
+        _CERTIFIED_SUMMARY_FLAG,
+        False,
+    )
+    return bool(event_current and summary_current)
 
 
 def _install_certified_wrappers(diagnostics: Any, recovery: Any) -> None:
@@ -275,14 +293,101 @@ def _group_columns(frame: pd.DataFrame) -> list[str]:
 
 
 def _groups(frame: pd.DataFrame) -> Any:
-    columns = _group_columns(frame)
-    return frame.groupby(columns, sort=False, dropna=False) if columns else [((), frame)]
+    normalized = _normalized_group_frame(frame)
+    columns = _group_columns(normalized)
+    return normalized.groupby(columns, sort=False, dropna=False) if columns else [((), normalized)]
 
 
-def _normalize_key(value: object) -> object:
+def _normalized_group_frame(frame: pd.DataFrame) -> pd.DataFrame:
+    """Copy a score table with hashable semantic event-identity values."""
+    normalized = frame.copy()
+    for column in _group_columns(normalized):
+        if column in normalized:
+            normalized[column] = normalized[column].map(_group_value)
+    return normalized
+
+
+def _group_value(value: object) -> object:
+    normalized = _normalize_key(value)
+    return np.nan if normalized is _MISSING_KEY else normalized
+
+
+def _nested_key(value: object, seen: set[int]) -> object:
+    normalized = _normalize_key(value, seen)
+    return ("missing",) if normalized is _MISSING_KEY else normalized
+
+
+def _normalize_key(value: object, seen: set[int] | None = None) -> object:
+    if seen is None:
+        seen = set()
+    if isinstance(value, np.generic):
+        return _normalize_key(value.item(), seen)
+    if isinstance(value, np.ndarray):
+        container_id = id(value)
+        if container_id in seen:
+            return ("object", "<cyclic-array>")
+        if value.size == 1:
+            seen.add(container_id)
+            try:
+                return _normalize_key(value.reshape(-1)[0], seen)
+            finally:
+                seen.remove(container_id)
+        seen.add(container_id)
+        try:
+            items = tuple(_nested_key(item, seen) for item in value.reshape(-1))
+        finally:
+            seen.remove(container_id)
+        return ("sequence", items) if value.ndim == 1 else ("array", tuple(value.shape), items)
+    if isinstance(value, _BYTES):
+        raw = bytes(value)
+        try:
+            value = raw.decode("utf-8")
+        except UnicodeDecodeError:
+            return f"{_INVALID_UTF8_KEY_PREFIX}{raw.hex()}>"
+    if isinstance(value, str):
+        text = value.strip()
+        return _MISSING_KEY if text.lower() in _MISSING_STATUS else text
+    if isinstance(value, (list, tuple)):
+        container_id = id(value)
+        if container_id in seen:
+            return ("object", "<cyclic-sequence>")
+        seen.add(container_id)
+        try:
+            if len(value) == 1:
+                return _normalize_key(value[0], seen)
+            return ("sequence", tuple(_nested_key(item, seen) for item in value))
+        finally:
+            seen.remove(container_id)
+    if isinstance(value, (set, frozenset)):
+        container_id = id(value)
+        if container_id in seen:
+            return ("object", "<cyclic-set>")
+        seen.add(container_id)
+        try:
+            items = (_nested_key(item, seen) for item in value)
+            return ("set", tuple(sorted(items, key=repr)))
+        finally:
+            seen.remove(container_id)
+    if isinstance(value, dict):
+        container_id = id(value)
+        if container_id in seen:
+            return ("object", "<cyclic-mapping>")
+        seen.add(container_id)
+        try:
+            items = (
+                (_nested_key(key, seen), _nested_key(item, seen))
+                for key, item in value.items()
+            )
+            return ("mapping", tuple(sorted(items, key=repr)))
+        finally:
+            seen.remove(container_id)
     if _is_missing(value):
         return _MISSING_KEY
-    return value.item() if isinstance(value, np.generic) else value
+    try:
+        hash(value)
+    except TypeError:
+        return ("object", repr(value))
+    return value
 
 
 def _row_key(row: pd.Series, columns: list[str]) -> tuple[object, ...]:
@@ -295,7 +400,15 @@ def _sort_events(frame: pd.DataFrame) -> pd.DataFrame:
     columns = [column for column in _group_columns(frame) if column in frame]
     if not columns:
         return frame.reset_index(drop=True)
-    keys = pd.DataFrame({column: frame[column].map(lambda value: "" if _normalize_key(value) is _MISSING_KEY else str(_normalize_key(value))) for column in columns}, index=frame.index)
+    keys = pd.DataFrame(
+        {
+            column: frame[column].map(
+                lambda value: "" if _normalize_key(value) is _MISSING_KEY else str(_normalize_key(value))
+            )
+            for column in columns
+        },
+        index=frame.index,
+    )
     return frame.loc[keys.sort_values(columns, kind="mergesort").index].reset_index(drop=True)
 
 

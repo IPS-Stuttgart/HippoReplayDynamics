@@ -11,6 +11,11 @@ _PATCHED_FLAG = "_kd_impossible_emission_patch_applied"
 _KD_POISSON_WRAPPER_FLAG = "_kd_zero_rate_exact_support_wrapper"
 _KD_POISSON_ORIGINAL_ATTR = "__hipporeplayimm_kd_zero_rate_original__"
 _KD_POISSON_WRAPPER_VERSION = 1
+_KD_DURATION_DIFFUSION_WRAPPER_FLAG = "_kd_duration_impossible_diffusion_wrapper"
+_KD_DURATION_DIFFUSION_ORIGINAL_ATTR = "__hipporeplayimm_kd_duration_diffusion_original__"
+_KD_DURATION_MOMENTUM_WRAPPER_FLAG = "_kd_duration_impossible_momentum_wrapper"
+_KD_DURATION_MOMENTUM_ORIGINAL_ATTR = "__hipporeplayimm_kd_duration_momentum_original__"
+_KD_DURATION_WRAPPER_VERSION = 1
 
 
 def apply_kd_impossible_emission_patch() -> None:
@@ -23,6 +28,7 @@ def apply_kd_impossible_emission_patch() -> None:
     kd._first_order_separable_log_evidence = _first_order_separable_log_evidence
     kd._second_order_separable_log_evidence = _second_order_separable_log_evidence
     kd.kd_stationary_gaussian_log_evidence_from_transitions = _stationary_gaussian_log_evidence_from_transitions
+    _patch_duration_aware_impossible_rows(kd)
     kd.empirical_grid_prior = _empirical_grid_prior
     kd.best_grid_params = _best_grid_params
     setattr(kd, _PATCHED_FLAG, True)
@@ -72,6 +78,132 @@ def _patch_kd_poisson_exact_support(kd) -> None:
     )
     setattr(poisson_log_emissions, _KD_POISSON_ORIGINAL_ATTR, original)
     kd.poisson_log_emissions = poisson_log_emissions
+
+
+def _patch_duration_aware_impossible_rows(kd) -> None:
+    """Guard the list-transition recursions installed by the duration patch."""
+
+    current_diffusion = kd.kd_diffusion_log_evidence_from_transition
+    if getattr(current_diffusion, _KD_DURATION_DIFFUSION_WRAPPER_FLAG, None) != _KD_DURATION_WRAPPER_VERSION:
+        original_diffusion = getattr(
+            current_diffusion,
+            _KD_DURATION_DIFFUSION_ORIGINAL_ATTR,
+            current_diffusion,
+        )
+
+        @wraps(original_diffusion)
+        def diffusion_log_evidence(log_emissions, n_bins_x, n_bins_y, transition):
+            if isinstance(transition, (list, tuple)):
+                return _first_order_duration_log_evidence(
+                    kd,
+                    log_emissions,
+                    n_bins_x,
+                    n_bins_y,
+                    transition,
+                )
+            return original_diffusion(log_emissions, n_bins_x, n_bins_y, transition)
+
+        setattr(
+            diffusion_log_evidence,
+            _KD_DURATION_DIFFUSION_WRAPPER_FLAG,
+            _KD_DURATION_WRAPPER_VERSION,
+        )
+        setattr(
+            diffusion_log_evidence,
+            _KD_DURATION_DIFFUSION_ORIGINAL_ATTR,
+            original_diffusion,
+        )
+        kd.kd_diffusion_log_evidence_from_transition = diffusion_log_evidence
+
+    current_momentum = kd.kd_momentum_log_evidence_from_transitions
+    if getattr(current_momentum, _KD_DURATION_MOMENTUM_WRAPPER_FLAG, None) != _KD_DURATION_WRAPPER_VERSION:
+        original_momentum = getattr(
+            current_momentum,
+            _KD_DURATION_MOMENTUM_ORIGINAL_ATTR,
+            current_momentum,
+        )
+
+        @wraps(original_momentum)
+        def momentum_log_evidence(log_emissions, n_bins, initial, transition):
+            if isinstance(transition, (list, tuple)):
+                return _second_order_duration_log_evidence(
+                    kd,
+                    log_emissions,
+                    n_bins,
+                    initial,
+                    transition,
+                )
+            return original_momentum(log_emissions, n_bins, initial, transition)
+
+        setattr(
+            momentum_log_evidence,
+            _KD_DURATION_MOMENTUM_WRAPPER_FLAG,
+            _KD_DURATION_WRAPPER_VERSION,
+        )
+        setattr(
+            momentum_log_evidence,
+            _KD_DURATION_MOMENTUM_ORIGINAL_ATTR,
+            original_momentum,
+        )
+        kd.kd_momentum_log_evidence_from_transitions = momentum_log_evidence
+
+
+def _first_order_duration_log_evidence(kd, log_emissions, n_bins_x, n_bins_y, transitions) -> float:
+    emission, offset = kd._scaled_emission(log_emissions, 0)
+    alpha = emission.reshape(n_bins_x, n_bins_y) / log_emissions.shape[1]
+    conditional = float(alpha.sum())
+    if conditional <= 0.0:
+        return float("-inf")
+    logp = np.log(conditional) + offset
+    alpha /= conditional
+
+    for time_index in range(1, log_emissions.shape[0]):
+        emission, offset = kd._scaled_emission(log_emissions, time_index)
+        transition = transitions[time_index - 1]
+        predicted = transition @ alpha @ transition.T
+        alpha = predicted * emission.reshape(n_bins_x, n_bins_y)
+        conditional = float(alpha.sum())
+        if conditional <= 0.0:
+            return float("-inf")
+        logp += np.log(conditional) + offset
+        alpha /= conditional
+    return float(logp)
+
+
+def _second_order_duration_log_evidence(kd, log_emissions, n_bins, initial, transitions) -> float:
+    if log_emissions.shape[0] == 1:
+        return kd.kd_random_log_evidence(log_emissions)
+
+    emission0, offset0 = kd._scaled_emission(log_emissions, 0)
+    alpha0 = emission0.reshape(n_bins, n_bins) / log_emissions.shape[1]
+    conditional0 = float(alpha0.sum())
+    if conditional0 <= 0.0:
+        return float("-inf")
+    logp = np.log(conditional0) + offset0
+    alpha0 /= conditional0
+
+    emission1, offset1 = kd._scaled_emission(log_emissions, 1)
+    emission1_grid = emission1.reshape(n_bins, n_bins)
+    alpha_t = np.einsum("ip,jq,pq,ij->ijpq", initial, initial, alpha0, emission1_grid, optimize=True)
+    conditional1 = float(alpha_t.sum())
+    if conditional1 <= 0.0:
+        return float("-inf")
+    logp += np.log(conditional1) + offset1
+    alpha_t /= conditional1
+
+    for time_index in range(2, log_emissions.shape[0]):
+        transition = transitions[time_index - 2]
+        emission, offset = kd._scaled_emission(log_emissions, time_index)
+        emission_grid = emission.reshape(n_bins, n_bins)
+        y_sum = np.einsum("jbq,abpq->abpj", transition, alpha_t, optimize=True)
+        predicted = np.einsum("iap,abpj->ijab", transition, y_sum, optimize=True)
+        alpha_t = predicted * emission_grid[:, :, None, None]
+        conditional = float(alpha_t.sum())
+        if conditional <= 0.0:
+            return float("-inf")
+        logp += np.log(conditional) + offset
+        alpha_t /= conditional
+    return float(logp)
 
 
 def _scaled_emission(log_emissions: np.ndarray, time_index: int) -> tuple[np.ndarray, float]:

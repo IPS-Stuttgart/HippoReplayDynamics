@@ -130,17 +130,19 @@ def _distinct_model_rows(frame: pd.DataFrame) -> pd.DataFrame:
 
 
 def _model_identity(value: object) -> object:
-    """Return a hashable model key, decoding byte-backed scalar identifiers."""
+    """Return a normalized, hashable model key for scalar and container labels."""
     if isinstance(value, np.ndarray):
         if value.size == 1:
             return _model_identity(value.reshape(-1)[0])
         return ("array", tuple(_model_identity(item) for item in value.reshape(-1)))
     if isinstance(value, np.generic):
         return _model_identity(value.item())
+    if isinstance(value, str):
+        return value.strip()
     if isinstance(value, (bytes, bytearray, memoryview)):
         raw = bytes(value)
         try:
-            return raw.decode("utf-8")
+            return raw.decode("utf-8").strip()
         except UnicodeDecodeError:
             return ("bytes", raw)
     if isinstance(value, (list, tuple)):

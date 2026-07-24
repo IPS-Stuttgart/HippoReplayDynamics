@@ -201,7 +201,7 @@ def _heldout_aware_influence_summary(audit_module: Any, scores: pd.DataFrame) ->
 
 
 def _patch_exact_integer_boolean_values(audit_module: Any) -> None:
-    """Preserve exact integer and byte-backed result-quality gate flags."""
+    """Preserve exact integer, byte-backed, and singleton result-quality gate flags."""
 
     current_bool_value = audit_module._bool_value
     if getattr(current_bool_value, _INTEGER_BOOL_PATCHED_FLAG, False):
@@ -209,13 +209,34 @@ def _patch_exact_integer_boolean_values(audit_module: Any) -> None:
 
     @wraps(current_bool_value)
     def exact_integer_bool_value(value: object) -> bool:
-        if isinstance(value, (bytes, bytearray, memoryview, np.bytes_)):
+        seen_container_ids: set[int] = set()
+        while isinstance(value, (np.ndarray, list, tuple, np.generic)):
+            if isinstance(value, np.ndarray):
+                if value.size != 1:
+                    return False
+                container_id = id(value)
+                if container_id in seen_container_ids:
+                    return False
+                seen_container_ids.add(container_id)
+                value = value.reshape(-1)[0]
+                continue
+            if isinstance(value, (list, tuple)):
+                if len(value) != 1:
+                    return False
+                container_id = id(value)
+                if container_id in seen_container_ids:
+                    return False
+                seen_container_ids.add(container_id)
+                value = value[0]
+                continue
+            value = value.item()
+        if isinstance(value, (bytes, bytearray, memoryview)):
             try:
                 value = bytes(value).decode("utf-8")
             except UnicodeDecodeError:
                 return False
-        if isinstance(value, (int, np.integer)) and not isinstance(value, (bool, np.bool_)):
-            return int(value) != 0
+        if isinstance(value, int) and not isinstance(value, bool):
+            return value != 0
         return current_bool_value(value)
 
     setattr(exact_integer_bool_value, _INTEGER_BOOL_PATCHED_FLAG, True)

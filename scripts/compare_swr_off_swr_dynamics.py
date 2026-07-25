@@ -546,7 +546,8 @@ def model_winner_summary(comparison: pd.DataFrame) -> pd.DataFrame:
         return pd.DataFrame(columns=list(MODEL_WINNER_COLUMNS))
     rows: list[dict[str, object]] = []
     for event_class, group in comparison.groupby("event_class", sort=True):
-        counts = group["best_exact_trajectory_model"].dropna().astype(str).value_counts()
+        best = group["best_exact_trajectory_model"].fillna("").astype(str).str.strip()
+        counts = best[best.ne("")].value_counts()
         total = int(len(group))
         for rank, (model, count) in enumerate(counts.items(), start=1):
             rows.append(
@@ -572,7 +573,8 @@ def family_margin_summary(comparison: pd.DataFrame) -> pd.DataFrame:
         complete = _bool_series(group, "required_models_complete")
         trajectory_claim = _bool_series(group, "trajectory_confident_claim")
         nontrajectory_claim = _bool_series(group, "nontrajectory_confident_claim")
-        best = group["best_exact_trajectory_model"].fillna("").astype(str)
+        best = group["best_exact_trajectory_model"].fillna("").astype(str).str.strip()
+        reported_best = best[best.ne("")]
         events = int(len(group))
         rows.append(
             {
@@ -596,7 +598,9 @@ def family_margin_summary(comparison: pd.DataFrame) -> pd.DataFrame:
                 "first_order_imm_best_fraction": _safe_fraction(int(best.eq(DEFAULT_FIRST_ORDER_IMM_MODEL).sum()), events),
                 "exact_sparse_momentum_best_events": int(best.eq(DEFAULT_MARGIN_POSITIVE_MODEL).sum()),
                 "exact_sparse_momentum_best_fraction": _safe_fraction(int(best.eq(DEFAULT_MARGIN_POSITIVE_MODEL).sum()), events),
-                "most_common_best_exact_trajectory_model": "" if best.empty else str(best.value_counts().index[0]),
+                "most_common_best_exact_trajectory_model": (
+                    "" if reported_best.empty else str(reported_best.value_counts().index[0])
+                ),
             }
         )
     return pd.DataFrame(rows, columns=list(FAMILY_MARGIN_COLUMNS))

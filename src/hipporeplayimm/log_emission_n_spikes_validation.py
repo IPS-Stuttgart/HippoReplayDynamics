@@ -156,6 +156,8 @@ def _coerce_spike_counts(values: Any) -> np.ndarray:
 
     if _contains_boolean_values(values):
         raise ValueError("spike_counts must be numeric counts, not boolean values")
+    if _contains_text_values(values):
+        raise ValueError("spike_counts must be numeric counts, not text values")
     raw = np.asarray(values)
     integer_info = np.iinfo(np.dtype(int))
     canonical = np.empty(raw.shape, dtype=int)
@@ -193,6 +195,8 @@ def _coerce_n_spikes(value: Any) -> int:
     _require_scalar_count(value, "n_spikes")
     if _contains_boolean_values(value):
         raise ValueError("n_spikes must be a numeric count, not boolean")
+    if _contains_text_values(value):
+        raise ValueError("n_spikes must be a numeric count, not text")
     try:
         item = np.asarray(value).item()
     except (TypeError, ValueError) as exc:

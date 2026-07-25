@@ -37,8 +37,16 @@ DEFAULT_TRAJECTORY_MODELS = (
 _MISSING_STATUS_VALUES = {"", "nan", "na", "n/a", "none", "null", "<na>"}
 
 
+def _decoded_text(value: object) -> str:
+    """Return text for scalar metadata, decoding byte-backed table values."""
+
+    if isinstance(value, (bytes, bytearray, memoryview, np.bytes_)):
+        return bytes(value).decode("utf-8", errors="replace")
+    return str(value)
+
+
 def _rat_from_session(session: object) -> str:
-    return str(session).split("/", 1)[0]
+    return _decoded_text(session).split("/", 1)[0]
 
 
 def _as_bool(value: object, *, default: bool = False) -> bool:
@@ -54,7 +62,7 @@ def _as_bool(value: object, *, default: bool = False) -> bool:
     if isinstance(value, (int, float, np.integer, np.floating)):
         numeric = float(value)
         return bool(np.isfinite(numeric) and numeric != 0.0)
-    normalized = str(value).strip().lower()
+    normalized = _decoded_text(value).strip().lower()
     if normalized in {"1", "1.0", "true", "t", "yes", "y", "on"}:
         return True
     if normalized in {"0", "0.0", "false", "f", "no", "n", "", "nan", "none", "null", "off"}:
@@ -71,7 +79,7 @@ def _bool_column(frame: pd.DataFrame, column: str, *, default: bool = False) -> 
 def _status_is_success_or_missing(value: object) -> bool:
     if _is_missing_status(value):
         return True
-    return str(value).strip().lower() == "success"
+    return _decoded_text(value).strip().lower() == "success"
 
 
 def _is_missing_status(value: object) -> bool:
@@ -81,15 +89,16 @@ def _is_missing_status(value: object) -> bool:
         missing = False
     if isinstance(missing, (bool, np.bool_)) and bool(missing):
         return True
-    return str(value).strip().lower() in _MISSING_STATUS_VALUES
+    return _decoded_text(value).strip().lower() in _MISSING_STATUS_VALUES
 
 
 def _success_rows(frame: pd.DataFrame) -> pd.DataFrame:
     out = frame.copy()
     if "status" in out:
         out = out[out["status"].map(_status_is_success_or_missing).astype(bool)].copy()
-    out["model"] = out["model"].astype(str)
-    out["session"] = out["session"].astype(str)
+    for column in ("model", "session", "map_session", "requested_model"):
+        if column in out:
+            out[column] = out[column].map(_decoded_text)
     out["event_index"] = out["event_index"].astype(int)
     out["log_evidence"] = pd.to_numeric(out["log_evidence"], errors="coerce")
     return out.dropna(subset=["log_evidence"])

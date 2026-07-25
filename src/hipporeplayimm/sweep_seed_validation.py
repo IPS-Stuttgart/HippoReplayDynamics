@@ -17,6 +17,7 @@ _GRID_FLAG = "_sweep_seed_validation_parameter_grid_wrapper"
 _BENCHMARK_FLAG = "_sweep_seed_validation_benchmark_config_wrapper"
 _SORTED_FLAG = "_sweep_seed_validation_sorted_seed_wrapper"
 _AGGREGATE_FLAG = "_sweep_nonfinite_metric_filter_wrapper"
+_PARETO_FLAG = "_sweep_complete_case_pareto_wrapper"
 _OUTPUT_FLAG = "_sweep_output_stale_cleanup_wrapper"
 _ORIGINAL_ATTR = "__hipporeplayimm_original__"
 _OPTIONAL_OUTPUT_FILENAMES = (
@@ -29,7 +30,7 @@ _OPTIONAL_OUTPUT_FILENAMES = (
 
 
 def apply_sweep_seed_validation_patch() -> None:
-    """Install strict seed validation, finite aggregation, and output cleanup."""
+    """Install strict seed validation, finite aggregation, Pareto filtering, and output cleanup."""
 
     from . import sweeps
 
@@ -92,6 +93,37 @@ def apply_sweep_seed_validation_patch() -> None:
 
         _mark(_aggregate_metric, original_aggregate_metric, _AGGREGATE_FLAG)
         sweeps._aggregate_metric = _aggregate_metric
+
+    if not getattr(sweeps.pareto_sweep_summary, _PARETO_FLAG, False):
+        original_pareto = sweeps.pareto_sweep_summary
+
+        @wraps(original_pareto)
+        def pareto_sweep_summary(summary, objectives=None):
+            active_objectives = (
+                sweeps.PYRECEST_SWEEP_PARETO_OBJECTIVES
+                if objectives is None
+                else objectives
+            )
+            objective_columns = [
+                column for column in active_objectives if column in summary.columns
+            ]
+            if summary.empty or not objective_columns:
+                return original_pareto(summary, objectives=objectives)
+
+            numeric = summary.loc[:, objective_columns].apply(
+                pd.to_numeric,
+                errors="coerce",
+            )
+            complete = np.all(
+                np.isfinite(numeric.to_numpy(dtype=float)),
+                axis=1,
+            )
+            if not np.any(complete):
+                return summary.iloc[0:0].copy()
+            return original_pareto(summary.loc[complete], objectives=objectives)
+
+        _mark(pareto_sweep_summary, original_pareto, _PARETO_FLAG)
+        sweeps.pareto_sweep_summary = pareto_sweep_summary
 
     if not getattr(sweeps.write_pyrecest_sweep_outputs, _OUTPUT_FLAG, False):
         original_writer = sweeps.write_pyrecest_sweep_outputs
@@ -231,6 +263,7 @@ def _current(sweeps) -> bool:
         and getattr(sweeps._benchmark_config, _BENCHMARK_FLAG, False)
         and getattr(sweeps._sorted_numeric_values, _SORTED_FLAG, False)
         and getattr(sweeps._aggregate_metric, _AGGREGATE_FLAG, False)
+        and getattr(sweeps.pareto_sweep_summary, _PARETO_FLAG, False)
         and getattr(sweeps.write_pyrecest_sweep_outputs, _OUTPUT_FLAG, False)
     )
 

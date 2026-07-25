@@ -1,9 +1,14 @@
 from __future__ import annotations
 
+from decimal import Decimal
+
 import numpy as np
 import pytest
 
 from hipporeplayimm.encoding import LogEmissionTensor
+
+
+_LARGE_EXACT_COUNT = 2**53 + 1
 
 
 def _make_emissions(*, spike_counts: object, n_spikes: object) -> LogEmissionTensor:
@@ -18,35 +23,63 @@ def _make_emissions(*, spike_counts: object, n_spikes: object) -> LogEmissionTen
 
 
 @pytest.mark.parametrize(
-    "spike_counts",
+    "text_count",
     [
-        np.array([["1"]]),
-        np.array([[b"1"]]),
-        np.array([["1"]], dtype=object),
-        np.array([[np.str_("1")]], dtype=object),
-        np.array([[np.bytes_("1")]], dtype=object),
+        str(_LARGE_EXACT_COUNT),
+        f"{_LARGE_EXACT_COUNT}.0",
+        str(_LARGE_EXACT_COUNT).encode("utf-8"),
+        np.str_(str(_LARGE_EXACT_COUNT)),
+        np.bytes_(str(_LARGE_EXACT_COUNT)),
     ],
 )
-def test_log_emission_rejects_text_backed_spike_counts(spike_counts: object) -> None:
-    with pytest.raises(ValueError, match="spike_counts.*not text"):
-        _make_emissions(spike_counts=spike_counts, n_spikes=1)
+def test_log_emission_preserves_large_text_counts_exactly(text_count: object) -> None:
+    emissions = _make_emissions(
+        spike_counts=np.array([[text_count]], dtype=object),
+        n_spikes=text_count,
+    )
+
+    np.testing.assert_array_equal(
+        emissions.spike_counts,
+        np.array([[_LARGE_EXACT_COUNT]], dtype=int),
+    )
+    assert emissions.n_spikes == _LARGE_EXACT_COUNT
+    assert isinstance(emissions.n_spikes, int)
 
 
-@pytest.mark.parametrize(
-    "n_spikes",
-    [
-        "1",
-        b"1",
-        np.str_("1"),
-        np.bytes_("1"),
-        np.asarray("1"),
-        np.asarray(b"1"),
-        np.asarray("1", dtype=object),
-    ],
-)
-def test_log_emission_rejects_text_backed_total_spike_count(n_spikes: object) -> None:
-    with pytest.raises(ValueError, match="n_spikes.*not text"):
-        _make_emissions(spike_counts=np.array([[1]]), n_spikes=n_spikes)
+def test_log_emission_preserves_decimal_counts_exactly() -> None:
+    count = Decimal(_LARGE_EXACT_COUNT)
+    emissions = _make_emissions(
+        spike_counts=np.array([[count]], dtype=object),
+        n_spikes=count,
+    )
+
+    assert int(emissions.spike_counts[0, 0]) == _LARGE_EXACT_COUNT
+    assert emissions.n_spikes == _LARGE_EXACT_COUNT
+
+
+@pytest.mark.parametrize("fractional", ["1.5", b"1.5", Decimal("1.5")])
+def test_log_emission_rejects_fractional_text_or_decimal_counts(fractional: object) -> None:
+    with pytest.raises(ValueError, match="spike_counts.*integer-valued"):
+        _make_emissions(
+            spike_counts=np.array([[fractional]], dtype=object),
+            n_spikes=1,
+        )
+
+    with pytest.raises(ValueError, match="n_spikes.*integer-valued"):
+        _make_emissions(
+            spike_counts=np.array([[1]], dtype=int),
+            n_spikes=fractional,
+        )
+
+
+def test_log_emission_rejects_text_count_outside_platform_integer_range() -> None:
+    oversized = str(int(np.iinfo(np.dtype(int)).max) + 1)
+
+    with pytest.raises(ValueError, match="fit into integer count range"):
+        _make_emissions(
+            spike_counts=np.array([[oversized]], dtype=object),
+            n_spikes=oversized,
+        )
 
 
 def test_log_emission_keeps_integral_numeric_count_coercion() -> None:

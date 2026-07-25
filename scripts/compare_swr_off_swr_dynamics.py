@@ -4,19 +4,21 @@
 from __future__ import annotations
 
 import argparse
-from collections.abc import Iterable
 from pathlib import Path
+from typing import Iterable
 
 import numpy as np
 import pandas as pd
+
 from aggregate_all_session_model_evidence import (
-    DEFAULT_FIRST_ORDER_IMM_MODEL,
     DEFAULT_MARGIN_POSITIVE_MODEL,
     DEFAULT_MARGIN_REFERENCE_MODEL,
     DEFAULT_MOMENTUM_CONFIDENCE_THRESHOLD,
     DEFAULT_PAPER_EXACT_TRAJECTORY_MODELS,
     DEFAULT_PAPER_REQUIRED_FULL_CORE_MODELS,
+    DEFAULT_FIRST_ORDER_IMM_MODEL,
 )
+
 
 STATIONARY_MODEL = "sorted-spike-state-space-stationary"
 FRAGMENTED_MODEL = "sorted-spike-state-space-fragmented"
@@ -218,7 +220,7 @@ def _first_present_value(group: pd.DataFrame, columns: Iterable[str], *, default
     return default
 
 
-def _safe_fraction(value: float, denominator: float) -> float:
+def _safe_fraction(value: int | float, denominator: int | float) -> float:
     if denominator is None or float(denominator) == 0.0:
         return np.nan
     return float(value) / float(denominator)
@@ -330,8 +332,8 @@ def _family_margin_decisions(
         row = {column: value for column, value in zip(group_cols, key_tuple, strict=True)}
         row.update(
             {
-                "required_models_present": len(present),
-                "required_models_total": len(required),
+                "required_models_present": int(len(present)),
+                "required_models_total": int(len(required)),
                 "required_models_complete": bool(not missing),
                 "missing_required_models": " ".join(missing),
                 "margin_threshold": float(margin_threshold),
@@ -460,7 +462,9 @@ def _normalize_decision_table(
     if "best_trajectory_model" in decisions and "best_exact_trajectory_model" not in decisions:
         decisions = decisions.rename(columns={"best_trajectory_model": "best_exact_trajectory_model"})
     if "trajectory_minus_nontrajectory_log_evidence" in decisions and "trajectory_minus_nontrajectory_margin" not in decisions:
-        decisions = decisions.rename(columns={"trajectory_minus_nontrajectory_log_evidence": "trajectory_minus_nontrajectory_margin"})
+        decisions = decisions.rename(
+            columns={"trajectory_minus_nontrajectory_log_evidence": "trajectory_minus_nontrajectory_margin"}
+        )
     if "trajectory_raw_win" not in decisions and "trajectory_minus_nontrajectory_margin" in decisions:
         decisions["trajectory_raw_win"] = pd.to_numeric(
             decisions["trajectory_minus_nontrajectory_margin"],
@@ -544,7 +548,7 @@ def model_winner_summary(comparison: pd.DataFrame) -> pd.DataFrame:
     for event_class, group in comparison.groupby("event_class", sort=True):
         best = group["best_exact_trajectory_model"].fillna("").astype(str).str.strip()
         counts = best[best.ne("")].value_counts()
-        total = len(group)
+        total = int(len(group))
         for rank, (model, count) in enumerate(counts.items(), start=1):
             rows.append(
                 {
@@ -571,7 +575,7 @@ def family_margin_summary(comparison: pd.DataFrame) -> pd.DataFrame:
         nontrajectory_claim = _bool_series(group, "nontrajectory_confident_claim")
         best = group["best_exact_trajectory_model"].fillna("").astype(str).str.strip()
         reported_best = best[best.ne("")]
-        events = len(group)
+        events = int(len(group))
         rows.append(
             {
                 "event_class": event_class,
@@ -594,7 +598,9 @@ def family_margin_summary(comparison: pd.DataFrame) -> pd.DataFrame:
                 "first_order_imm_best_fraction": _safe_fraction(int(best.eq(DEFAULT_FIRST_ORDER_IMM_MODEL).sum()), events),
                 "exact_sparse_momentum_best_events": int(best.eq(DEFAULT_MARGIN_POSITIVE_MODEL).sum()),
                 "exact_sparse_momentum_best_fraction": _safe_fraction(int(best.eq(DEFAULT_MARGIN_POSITIVE_MODEL).sum()), events),
-                "most_common_best_exact_trajectory_model": ("" if reported_best.empty else str(reported_best.value_counts().index[0])),
+                "most_common_best_exact_trajectory_model": (
+                    "" if reported_best.empty else str(reported_best.value_counts().index[0])
+                ),
             }
         )
     return pd.DataFrame(rows, columns=list(FAMILY_MARGIN_COLUMNS))
@@ -606,7 +612,7 @@ def rat_session_summary(comparison: pd.DataFrame) -> pd.DataFrame:
     rows: list[dict[str, object]] = []
     for key, group in comparison.groupby(["event_class", "rat", "session"], sort=True):
         event_class, rat, session = key
-        events = len(group)
+        events = int(len(group))
         best = group["best_exact_trajectory_model"].fillna("").astype(str)
         rows.append(
             {
@@ -620,7 +626,9 @@ def rat_session_summary(comparison: pd.DataFrame) -> pd.DataFrame:
                     int(_bool_series(group, "trajectory_confident_claim").sum()),
                     events,
                 ),
-                "median_trajectory_minus_nontrajectory_margin": _safe_median(group["trajectory_minus_nontrajectory_margin"]),
+                "median_trajectory_minus_nontrajectory_margin": _safe_median(
+                    group["trajectory_minus_nontrajectory_margin"]
+                ),
                 "min_trajectory_minus_nontrajectory_margin": _safe_min(group["trajectory_minus_nontrajectory_margin"]),
                 "first_order_imm_best_events": int(best.eq(DEFAULT_FIRST_ORDER_IMM_MODEL).sum()),
                 "exact_sparse_momentum_best_events": int(best.eq(DEFAULT_MARGIN_POSITIVE_MODEL).sum()),
@@ -633,7 +641,7 @@ def rat_session_summary(comparison: pd.DataFrame) -> pd.DataFrame:
 
 
 def _behavior_group_row(event_class: str, group: pd.DataFrame) -> dict[str, object]:
-    events = len(group)
+    events = int(len(group))
     state = group.get("run_or_immobility_state", pd.Series("", index=group.index)).astype(str)
     speed = _numeric(group, "mean_speed_cm_s")
     nearest = _numeric(group, "nearest_known_swr_distance_s")
@@ -685,7 +693,9 @@ def behavior_summary(comparison: pd.DataFrame, high_specificity_candidates: pd.D
     if not comparison.empty:
         for event_class, group in comparison.groupby("event_class", sort=True):
             rows.append(_behavior_group_row(str(event_class), group))
-    rejected = _rejected_high_specificity_rows(high_specificity_candidates if high_specificity_candidates is not None else pd.DataFrame())
+    rejected = _rejected_high_specificity_rows(
+        high_specificity_candidates if high_specificity_candidates is not None else pd.DataFrame()
+    )
     if not rejected.empty:
         rows.append(_behavior_group_row(REJECTED_HIGH_SPECIFICITY_CLASS, rejected))
     return pd.DataFrame(rows, columns=list(BEHAVIOR_COLUMNS))

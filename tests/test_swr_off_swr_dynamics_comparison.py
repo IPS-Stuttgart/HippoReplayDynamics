@@ -5,7 +5,7 @@ import pandas as pd
 
 sys.path.append(str(Path(__file__).resolve().parents[1] / "scripts"))
 
-from compare_swr_off_swr_dynamics import (
+from compare_swr_off_swr_dynamics import (  # noqa: E402
     DEFAULT_FIRST_ORDER_IMM_MODEL,
     DEFAULT_MARGIN_POSITIVE_MODEL,
     DEFAULT_MARGIN_REFERENCE_MODEL,
@@ -83,7 +83,10 @@ def test_swr_off_swr_comparison_keeps_promoted_windows_distinct(tmp_path):
     assert off["trajectory_confident_claim"].astype(bool).all()
 
     model = outputs["swr_off_swr_model_winner_summary.csv"]
-    swr_first_order = model[model["event_class"].eq("detected_replay_or_swr") & model["best_exact_trajectory_model"].eq(DEFAULT_FIRST_ORDER_IMM_MODEL)].iloc[0]
+    swr_first_order = model[
+        model["event_class"].eq("detected_replay_or_swr")
+        & model["best_exact_trajectory_model"].eq(DEFAULT_FIRST_ORDER_IMM_MODEL)
+    ].iloc[0]
     assert int(swr_first_order["events"]) == 2
 
     behavior = outputs["swr_off_swr_behavior_summary.csv"].set_index("event_class")
@@ -202,9 +205,14 @@ def test_swr_off_swr_summaries_ignore_missing_winner_labels():
     )
 
     winners = model_winner_summary(comparison)
-    assert winners["best_exact_trajectory_model"].tolist() == [DEFAULT_FIRST_ORDER_IMM_MODEL]
+    assert winners["best_exact_trajectory_model"].tolist() == [
+        DEFAULT_FIRST_ORDER_IMM_MODEL
+    ]
     assert winners["events"].tolist() == [1]
     assert winners["fraction_of_event_class"].tolist() == [0.5]
 
     family = family_margin_summary(comparison)
-    assert family.loc[0, "most_common_best_exact_trajectory_model"] == DEFAULT_FIRST_ORDER_IMM_MODEL
+    assert (
+        family.loc[0, "most_common_best_exact_trajectory_model"]
+        == DEFAULT_FIRST_ORDER_IMM_MODEL
+    )

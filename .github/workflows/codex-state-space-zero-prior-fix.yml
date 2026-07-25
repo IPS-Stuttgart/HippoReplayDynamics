@@ -30,6 +30,7 @@ jobs:
         shell: bash
         run: |
           python - <<'PY'
+          import base64
           from pathlib import Path
 
           source_path = Path("scripts/marginalize_state_space_sweep.py")
@@ -61,50 +62,29 @@ jobs:
           test_path = Path("tests/test_marginalize_state_space_sweep.py")
           tests = test_path.read_text(encoding="utf-8")
           test_name = "test_marginalize_state_space_sweep_preserves_zero_prior_support"
+          addition_b64 = (
+              "CgoKZGVmIHRlc3RfbWFyZ2luYWxpemVfc3RhdGVfc3BhY2Vfc3dlZXBfcHJlc2VydmVzX3plcm9fcHJpb3Jfc3VwcG9ydCgK"
+              "ICAgIHRtcF9wYXRoOiBQYXRoLAogICAgbW9ua2V5cGF0Y2gsCik6CiAgICByb3dzID0gW10KICAgIGZvciBkaWZmdXNpb25f"
+              "c2lnbWEsIGxvZ19ldmlkZW5jZSBpbiAoKDUwLjAsIDAuMCksICg2MC4wLCAxMDAwLjApKToKICAgICAgICByb3cgPSBfYmFz"
+              "ZV9yb3coCiAgICAgICAgICAgIDAsCiAgICAgICAgICAgICJzb3J0ZWQtc3Bpa2Utc3RhdGUtc3BhY2UtZGlmZnVzaW9uIiwK"
+              "ICAgICAgICAgICAgbG9nX2V2aWRlbmNlLAogICAgICAgICkKICAgICAgICByb3dbInN0YXRlX3NwYWNlX2RpZmZ1c2lvbl9z"
+              "aWdtYV9jbV9zcXJ0X3MiXSA9IGRpZmZ1c2lvbl9zaWdtYQogICAgICAgIHJvd3MuYXBwZW5kKHJvdykKCiAgICBpbnB1dF9j"
+              "c3YgPSB0bXBfcGF0aCAvICJzdGF0ZV9zcGFjZV9ldmlkZW5jZV9zd2VlcF9ldmVudF9zY29yZXMuY3N2IgogICAgcGQuRGF0"
+              "YUZyYW1lKHJvd3MpLnRvX2NzdihpbnB1dF9jc3YsIGluZGV4PUZhbHNlKQoKICAgIGRlZiB6ZXJvX3N1cHBvcnRfcHJpb3Io"
+              "Kl9hcmdzLCAqKl9rd2FyZ3MpOgogICAgICAgIHJldHVybiBucC5hc2FycmF5KFsxLjAsIDAuMF0pLCAidGVzdF96ZXJvX3N1"
+              "cHBvcnQiCgogICAgbW9ua2V5cGF0Y2guc2V0YXR0cigKICAgICAgICBtYXJnaW5hbGl6ZV9zdGF0ZV9zcGFjZV9zd2VlcCwK"
+              "ICAgICAgICAiX3ByaW9yX2Zvcl9ncmlkIiwKICAgICAgICB6ZXJvX3N1cHBvcnRfcHJpb3IsCiAgICApCiAgICB0YWJsZXMg"
+              "PSBtYXJnaW5hbGl6ZV9zdGF0ZV9zcGFjZV9zd2VlcC5tYXJnaW5hbGl6ZV9zd2VlcCgKICAgICAgICBpbnB1dF9jc3YsCiAg"
+              "ICAgICAgdG1wX3BhdGggLyAibWFyZ2luYWxpemVkIiwKICAgICAgICBtb2RlbHM9KCJkaWZmdXNpb24iLCksCiAgICAgICAg"
+              "cHJpb3I9ImVtcGlyaWNhbCIsCiAgICApCgogICAgbWFyZ2luYWxpemVkID0gdGFibGVzWyJldmVudF9tb2RlbF9ldmlkZW5j"
+              "ZSJdLmlsb2NbMF0KICAgIGFzc2VydCBucC5pc2Nsb3NlKG1hcmdpbmFsaXplZFsibG9nX2V2aWRlbmNlIl0sIDAuMCkKICAg"
+              "IHByaW9yX3dlaWdodHMgPSB0YWJsZXNbInByaW9yX3dlaWdodHMiXS5zb3J0X3ZhbHVlcygKICAgICAgICAic3RhdGVfc3Bh"
+              "Y2VfZGlmZnVzaW9uX3NpZ21hX2NtX3NxcnRfcyIKICAgICkKICAgIGFzc2VydCBucC5hbGxjbG9zZShwcmlvcl93ZWlnaHRz"
+              "WyJwcmlvcl93ZWlnaHQiXS50b19udW1weSgpLCBbMS4wLCAwLjBdKQo="
+          )
           if test_name not in tests:
-              tests += '''
-
-
-def test_marginalize_state_space_sweep_preserves_zero_prior_support(
-    tmp_path: Path,
-    monkeypatch,
-):
-    rows = []
-    for diffusion_sigma, log_evidence in ((50.0, 0.0), (60.0, 1000.0)):
-        row = _base_row(
-            0,
-            "sorted-spike-state-space-diffusion",
-            log_evidence,
-        )
-        row["state_space_diffusion_sigma_cm_sqrt_s"] = diffusion_sigma
-        rows.append(row)
-
-    input_csv = tmp_path / "state_space_evidence_sweep_event_scores.csv"
-    pd.DataFrame(rows).to_csv(input_csv, index=False)
-
-    def zero_support_prior(*_args, **_kwargs):
-        return np.asarray([1.0, 0.0]), "test_zero_support"
-
-    monkeypatch.setattr(
-        marginalize_state_space_sweep,
-        "_prior_for_grid",
-        zero_support_prior,
-    )
-    tables = marginalize_state_space_sweep.marginalize_sweep(
-        input_csv,
-        tmp_path / "marginalized",
-        models=("diffusion",),
-        prior="empirical",
-    )
-
-    marginalized = tables["event_model_evidence"].iloc[0]
-    assert np.isclose(marginalized["log_evidence"], 0.0)
-    prior_weights = tables["prior_weights"].sort_values(
-        "state_space_diffusion_sigma_cm_sqrt_s"
-    )
-    assert np.allclose(prior_weights["prior_weight"].to_numpy(), [1.0, 0.0])
-'''
-              test_path.write_text(tests, encoding="utf-8")
+              addition = base64.b64decode(addition_b64).decode("utf-8")
+              test_path.write_text(tests + addition, encoding="utf-8")
           PY
 
       - name: Install test dependencies

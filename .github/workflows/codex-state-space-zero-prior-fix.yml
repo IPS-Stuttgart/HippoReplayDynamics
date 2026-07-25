@@ -122,9 +122,13 @@ def test_marginalize_state_space_sweep_preserves_zero_prior_support(
       - name: Commit clean patch
         shell: bash
         run: |
-          rm .github/workflows/codex-state-space-zero-prior-fix.yml
+          rm -f .github/workflows/codex-state-space-zero-prior-fix.yml
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add scripts/marginalize_state_space_sweep.py tests/test_marginalize_state_space_sweep.py .github/workflows/codex-state-space-zero-prior-fix.yml
+          if git diff --cached --quiet; then
+            echo "Patch already applied; nothing to commit."
+            exit 0
+          fi
           git commit -m "Preserve zero prior support in state-space marginalization"
           git push origin HEAD:fix-state-space-zero-prior-support

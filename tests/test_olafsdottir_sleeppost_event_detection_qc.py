@@ -220,6 +220,29 @@ def test_sleeppost_event_detection_qc_rejects_missing_inputs(tmp_path: Path) -> 
         raise AssertionError("load_linearization_qc should reject incomplete QC tables")
 
 
+def test_load_sleep_speed_uses_irregular_timestamps(tmp_path: Path, monkeypatch) -> None:
+    module = _load_module()
+    times = np.asarray([0.0, 1.0, 3.0], dtype=float)
+    position = type(
+        "Position",
+        (),
+        {
+            "x_cm": times * times,
+            "y_cm": np.zeros_like(times),
+            "times_s": times,
+            "valid": np.ones(times.shape, dtype=bool),
+        },
+    )()
+    sleep_stem = tmp_path / "sleep"
+    sleep_stem.with_suffix(".pos").touch()
+    monkeypatch.setattr(module, "read_axona_pos", lambda _path: position)
+
+    speed = module.load_sleep_speed(sleep_stem)
+
+    assert speed is not None
+    np.testing.assert_allclose(speed.speed_cm_s, np.asarray([1.0, 2.0, 4.0]))
+
+
 def _write_sleep_session(day_dir: Path, stem: str, tetrode: int) -> None:
     day_dir.mkdir(parents=True)
     (day_dir / f"{stem}.set").write_text("duration 2.0\n", encoding="ascii")

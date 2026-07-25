@@ -482,10 +482,9 @@ def load_sleep_speed(sleep_stem: Path) -> SpeedTrace | None:
         filled = xy.copy()
         for dim in range(2):
             filled[~valid, dim] = np.interp(idx[~valid], idx[valid], xy[valid, dim])
-        dt = np.gradient(position.times_s)
         with np.errstate(divide="ignore", invalid="ignore"):
-            vx = np.gradient(filled[:, 0]) / dt
-            vy = np.gradient(filled[:, 1]) / dt
+            vx = np.gradient(filled[:, 0], position.times_s)
+            vy = np.gradient(filled[:, 1], position.times_s)
         speed[valid] = np.sqrt(vx[valid] * vx[valid] + vy[valid] * vy[valid])
     return SpeedTrace(times_s=position.times_s, speed_cm_s=speed)
 

@@ -37,6 +37,25 @@ def test_all_zero_deltas_return_unit_exact_p_value() -> None:
     assert result.p_value == 1.0
 
 
+def test_exact_enumeration_rejects_more_sign_bits_than_uint64_can_encode() -> None:
+    with pytest.raises(ValueError, match="at most 64 nonzero observations"):
+        paired_sign_flip_test(np.ones(65), max_exact_n=65)
+
+
+def test_oversized_sample_can_fall_back_to_monte_carlo() -> None:
+    result = paired_sign_flip_test(
+        np.ones(65),
+        max_exact_n=64,
+        n_permutations=20,
+        random_seed=7,
+        chunk_size=5,
+    )
+
+    assert result.method == "monte_carlo"
+    assert result.permutations_evaluated == 20
+    assert result.random_seed == 7
+
+
 def test_monte_carlo_path_is_reproducible() -> None:
     values = np.linspace(-2.0, 3.0, 12)
 

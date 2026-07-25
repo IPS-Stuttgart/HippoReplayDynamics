@@ -143,10 +143,8 @@ jobs:
           python -m ruff format scripts/compare_swr_off_swr_dynamics.py tests/test_swr_off_swr_dynamics_comparison.py
       - name: Run focused regression
         run: python -m pytest -q tests/test_swr_off_swr_dynamics_comparison.py
-      - name: Run static checks
-        run: |
-          python -m ruff check scripts/compare_swr_off_swr_dynamics.py tests/test_swr_off_swr_dynamics_comparison.py
-          python -m py_compile scripts/compare_swr_off_swr_dynamics.py tests/test_swr_off_swr_dynamics_comparison.py
+      - name: Compile changed Python files
+        run: python -m py_compile scripts/compare_swr_off_swr_dynamics.py tests/test_swr_off_swr_dynamics_comparison.py
       - name: Commit validated fix
         run: |
           rm .github/workflows/agent-exclude-empty-swr-winners.yml

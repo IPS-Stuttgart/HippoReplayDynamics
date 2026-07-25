@@ -26,6 +26,7 @@ from . import candidate_support_quality_patch as _candidate_support_quality_patc
 from . import cell_split_hashable_grouping as _cell_split_hashable_grouping
 from . import cli_float_values_validation as _cli_float_values_validation
 from . import clusterless_config_validation as _clusterless_config_validation
+from . import continuous_time_transition_duration_patch as _continuous_time_transition_duration_patch
 from . import clusterless_ground_truth as _clusterless_ground_truth
 from . import clusterless_mark_group_validation as _clusterless_mark_group_validation
 from . import clusterless_missing_decode_group as _clusterless_missing_decode_group
@@ -307,6 +308,7 @@ def apply_runtime_patches() -> None:
     _accuracy_model_probability_status_patch.apply_model_probability_status_patch()
     _accuracy_grid_parameter_validation.apply_accuracy_grid_parameter_validation_patch()
     _accuracy_replay_gain_gamma_patch.apply_accuracy_replay_gain_gamma_patch()
+    _continuous_time_transition_duration_patch.apply_continuous_time_transition_duration_patch()
     _advanced_result_status_patch.apply_advanced_result_status_patch()
     _advanced_result_empty_threshold_patch.apply_advanced_result_empty_threshold_patch()
     _advanced_result_threshold_validation.apply_advanced_result_threshold_validation_patch()

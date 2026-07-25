@@ -4,6 +4,9 @@ on:
   push:
     branches:
       - agent/fix-sleeppost-speed-irregular-time
+  pull_request:
+    branches:
+      - main
 
 permissions:
   contents: write

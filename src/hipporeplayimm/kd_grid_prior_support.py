@@ -48,6 +48,7 @@ def _marginalize_grid_log_evidence(grid: np.ndarray, prior: np.ndarray) -> np.nd
             "grid evidence with positive prior mass must contain only finite values or -inf"
         )
     supported_log_prior = np.log(flat_weights[support])
+    supported_log_prior -= logsumexp(supported_log_prior)
     return logsumexp(supported_values + supported_log_prior[None, :], axis=1)
 
 

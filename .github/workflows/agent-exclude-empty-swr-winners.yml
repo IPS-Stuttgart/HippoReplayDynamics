@@ -1,0 +1,137 @@
+name: Apply empty SWR winner fix
+
+on:
+  push:
+    branches:
+      - agent/exclude-empty-swr-model-winners
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/exclude-empty-swr-model-winners
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Apply focused source and regression changes
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          source_path = Path("scripts/compare_swr_off_swr_dynamics.py")
+          source = source_path.read_text(encoding="utf-8")
+
+          old_winner = '''    for event_class, group in comparison.groupby("event_class", sort=True):
+              counts = group["best_exact_trajectory_model"].dropna().astype(str).value_counts()
+              total = int(len(group))
+          '''
+          new_winner = '''    for event_class, group in comparison.groupby("event_class", sort=True):
+              best = group["best_exact_trajectory_model"].fillna("").astype(str).str.strip()
+              counts = best[best.ne("")].value_counts()
+              total = int(len(group))
+          '''
+          if source.count(old_winner) != 1:
+              raise RuntimeError("expected exactly one model-winner summary block")
+          source = source.replace(old_winner, new_winner, 1)
+
+          old_family = '''        best = group["best_exact_trajectory_model"].fillna("").astype(str)
+                  events = int(len(group))
+          '''
+          new_family = '''        best = group["best_exact_trajectory_model"].fillna("").astype(str).str.strip()
+                  reported_best = best[best.ne("")]
+                  events = int(len(group))
+          '''
+          if source.count(old_family) != 1:
+              raise RuntimeError("expected exactly one family-summary winner block")
+          source = source.replace(old_family, new_family, 1)
+
+          old_common = '''                "most_common_best_exact_trajectory_model": "" if best.empty else str(best.value_counts().index[0]),
+          '''
+          new_common = '''                "most_common_best_exact_trajectory_model": (
+                              "" if reported_best.empty else str(reported_best.value_counts().index[0])
+                          ),
+          '''
+          if source.count(old_common) != 1:
+              raise RuntimeError("expected exactly one most-common winner expression")
+          source_path.write_text(source.replace(old_common, new_common, 1), encoding="utf-8")
+
+          test_path = Path("tests/test_swr_off_swr_dynamics_comparison.py")
+          tests = test_path.read_text(encoding="utf-8")
+          old_import = '''    FRAGMENTED_MODEL,
+              STATIONARY_MODEL,
+              write_swr_off_swr_dynamics_outputs,
+          )
+          '''
+          new_import = '''    FRAGMENTED_MODEL,
+              STATIONARY_MODEL,
+              family_margin_summary,
+              model_winner_summary,
+              write_swr_off_swr_dynamics_outputs,
+          )
+          '''
+          if tests.count(old_import) != 1:
+              raise RuntimeError("expected exactly one comparison-helper import block")
+          tests = tests.replace(old_import, new_import, 1)
+
+          test_name = "test_swr_off_swr_summaries_ignore_missing_winner_labels"
+          if test_name in tests:
+              raise RuntimeError("regression test already exists")
+          tests += '''
+
+
+def test_swr_off_swr_summaries_ignore_missing_winner_labels():
+    comparison = pd.DataFrame(
+        [
+            {
+                "event_class": "detected_replay_or_swr",
+                "best_exact_trajectory_model": "",
+                "required_models_complete": False,
+                "margin_decision": "incomplete_core",
+                "trajectory_minus_nontrajectory_margin": float("nan"),
+                "trajectory_confident_claim": False,
+                "nontrajectory_confident_claim": False,
+            },
+            {
+                "event_class": "detected_replay_or_swr",
+                "best_exact_trajectory_model": DEFAULT_FIRST_ORDER_IMM_MODEL,
+                "required_models_complete": True,
+                "margin_decision": "trajectory",
+                "trajectory_minus_nontrajectory_margin": 12.0,
+                "trajectory_confident_claim": True,
+                "nontrajectory_confident_claim": False,
+            },
+        ]
+    )
+
+    winners = model_winner_summary(comparison)
+    assert winners["best_exact_trajectory_model"].tolist() == [DEFAULT_FIRST_ORDER_IMM_MODEL]
+    assert winners["events"].tolist() == [1]
+    assert winners["fraction_of_event_class"].tolist() == [0.5]
+
+    family = family_margin_summary(comparison)
+    assert family.loc[0, "most_common_best_exact_trajectory_model"] == DEFAULT_FIRST_ORDER_IMM_MODEL
+'''
+          test_path.write_text(tests, encoding="utf-8")
+          PY
+      - name: Install test dependencies
+        run: python -m pip install -e ".[dev]"
+      - name: Run focused regression
+        run: python -m pytest -q tests/test_swr_off_swr_dynamics_comparison.py
+      - name: Run static checks
+        run: |
+          python -m ruff check scripts/compare_swr_off_swr_dynamics.py tests/test_swr_off_swr_dynamics_comparison.py
+          python -m py_compile scripts/compare_swr_off_swr_dynamics.py tests/test_swr_off_swr_dynamics_comparison.py
+      - name: Commit validated fix
+        run: |
+          rm .github/workflows/agent-exclude-empty-swr-winners.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add scripts/compare_swr_off_swr_dynamics.py tests/test_swr_off_swr_dynamics_comparison.py .github/workflows/agent-exclude-empty-swr-winners.yml
+          git commit -m "Exclude empty SWR winner labels"
+          git push

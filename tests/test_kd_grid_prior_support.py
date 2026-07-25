@@ -24,6 +24,27 @@ def test_grid_marginalization_ignores_nonfinite_values_outside_prior_support(exc
     np.testing.assert_allclose(marginalized, np.array([0.0, -3.0]))
 
 
+@pytest.mark.parametrize("supported_value", [np.nan, np.inf])
+def test_grid_marginalization_rejects_invalid_values_inside_prior_support(supported_value):
+    grid = np.array([[0.0, supported_value], [-3.0, -2.0]])
+    prior = np.array([0.5, 0.5])
+
+    with pytest.raises(ValueError, match="positive prior mass"):
+        marginalize_grid_log_evidence(grid, prior)
+
+
+def test_grid_marginalization_preserves_impossible_supported_hypotheses():
+    grid = np.array([[0.0, -np.inf], [-np.inf, -3.0]])
+    prior = np.array([0.5, 0.5])
+
+    marginalized = marginalize_grid_log_evidence(grid, prior)
+
+    np.testing.assert_allclose(
+        marginalized,
+        np.array([np.log(0.5), -3.0 + np.log(0.5)]),
+    )
+
+
 def test_grid_marginalization_matches_logsumexp_for_positive_prior():
     grid = np.array([[-4.0, -2.0, -3.0], [-1.0, -5.0, -2.0]])
     prior = np.array([0.2, 0.3, 0.5])

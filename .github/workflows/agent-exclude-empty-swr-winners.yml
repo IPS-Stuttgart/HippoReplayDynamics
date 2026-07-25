@@ -26,21 +26,27 @@ jobs:
 
           def replace_once(text: str, old: str, new: str, label: str) -> str:
               if text.count(old) != 1:
-                  raise RuntimeError(f"expected exactly one {label}")
+                  raise RuntimeError(f"expected exactly one {label}; found {text.count(old)}")
               return text.replace(old, new, 1)
 
           source_path = Path("scripts/compare_swr_off_swr_dynamics.py")
           source = source_path.read_text(encoding="utf-8")
           source = replace_once(
               source,
-              '        best = group["best_exact_trajectory_model"].fillna("").astype(str)',
+              '\n'.join(
+                  [
+                      '        best = group["best_exact_trajectory_model"].fillna("").astype(str)',
+                      "        events = int(len(group))",
+                  ]
+              ),
               '\n'.join(
                   [
                       '        best = group["best_exact_trajectory_model"].fillna("").astype(str).str.strip()',
                       '        reported_best = best[best.ne("")]',
+                      "        events = int(len(group))",
                   ]
               ),
-              "family-summary winner expression",
+              "family-summary winner block",
           )
           source = replace_once(
               source,

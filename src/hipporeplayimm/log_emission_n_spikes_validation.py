@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from decimal import Decimal, InvalidOperation
 from functools import wraps
 from typing import Any
 
@@ -151,13 +152,43 @@ def _require_scalar_count(value: Any, name: str) -> None:
         raise ValueError(f"{name} must be a scalar count")
 
 
+def _coerce_integral_text_count(value: str | bytes, name: str) -> int:
+    """Parse an integral textual count without a lossy binary-float conversion."""
+
+    if isinstance(value, (bytes, np.bytes_)):
+        try:
+            text = bytes(value).decode("utf-8")
+        except UnicodeDecodeError as exc:
+            raise ValueError(f"{name} must be numeric") from exc
+    else:
+        text = str(value)
+    text = text.strip()
+    if not text:
+        raise ValueError(f"{name} must be numeric")
+
+    try:
+        count = int(text, 10)
+    except ValueError:
+        try:
+            numeric = Decimal(text)
+        except InvalidOperation as exc:
+            raise ValueError(f"{name} must be numeric") from exc
+        if not numeric.is_finite() or numeric < 0:
+            raise ValueError(f"{name} must be finite and nonnegative")
+        integral = numeric.to_integral_value()
+        if numeric != integral:
+            raise ValueError(f"{name} must be integer-valued")
+        count = int(integral)
+    if count < 0:
+        raise ValueError(f"{name} must be finite and nonnegative")
+    return count
+
+
 def _coerce_spike_counts(values: Any) -> np.ndarray:
     """Return exact platform-integer counts without a binary-float round trip."""
 
     if _contains_boolean_values(values):
         raise ValueError("spike_counts must be numeric counts, not boolean values")
-    if _contains_text_values(values):
-        raise ValueError("spike_counts must be numeric counts, not text values")
     raw = np.asarray(values)
     integer_info = np.iinfo(np.dtype(int))
     canonical = np.empty(raw.shape, dtype=int)
@@ -173,6 +204,15 @@ def _coerce_spike_counts(values: Any) -> np.ndarray:
             count = int(item)
             if count < 0:
                 raise ValueError("spike_counts must contain finite nonnegative values")
+        elif isinstance(item, Decimal):
+            if not item.is_finite() or item < 0:
+                raise ValueError("spike_counts must contain finite nonnegative values")
+            integral = item.to_integral_value()
+            if item != integral:
+                raise ValueError("spike_counts must be integer-valued")
+            count = int(integral)
+        elif isinstance(item, _STRING_TYPES):
+            count = _coerce_integral_text_count(item, "spike_counts")
         else:
             try:
                 numeric = float(item)
@@ -195,8 +235,6 @@ def _coerce_n_spikes(value: Any) -> int:
     _require_scalar_count(value, "n_spikes")
     if _contains_boolean_values(value):
         raise ValueError("n_spikes must be a numeric count, not boolean")
-    if _contains_text_values(value):
-        raise ValueError("n_spikes must be a numeric count, not text")
     try:
         item = np.asarray(value).item()
     except (TypeError, ValueError) as exc:
@@ -206,6 +244,15 @@ def _coerce_n_spikes(value: Any) -> int:
         if count < 0:
             raise ValueError("n_spikes must be finite and nonnegative")
         return count
+    if isinstance(item, Decimal):
+        if not item.is_finite() or item < 0:
+            raise ValueError("n_spikes must be finite and nonnegative")
+        integral = item.to_integral_value()
+        if item != integral:
+            raise ValueError("n_spikes must be integer-valued")
+        return int(integral)
+    if isinstance(item, _STRING_TYPES):
+        return _coerce_integral_text_count(item, "n_spikes")
     try:
         numeric = float(item)
     except (TypeError, ValueError, OverflowError) as exc:

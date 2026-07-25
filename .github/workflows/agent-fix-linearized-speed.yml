@@ -1,0 +1,67 @@
+name: Apply linearized speed fix
+
+on:
+  push:
+    branches:
+      - agent/fix-linearized-speed-nonuniform-time
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Apply source fix and regression test
+        shell: python
+        run: |
+          from pathlib import Path
+
+          source = Path("scripts/linearize_olafsdottir_ztrack.py")
+          text = source.read_text(encoding="utf-8")
+          old = '''    dt = np.gradient(times)
+              with np.errstate(divide="ignore", invalid="ignore"):
+                  speed_values = np.abs(np.gradient(filled) / dt)
+          '''
+          new = '''    with np.errstate(divide="ignore", invalid="ignore"):
+                  speed_values = np.abs(np.gradient(filled, times))
+          '''
+          if old not in text:
+              raise SystemExit("expected speed derivative block was not found")
+          source.write_text(text.replace(old, new, 1), encoding="utf-8")
+
+          test = Path("tests/test_linearize_nonuniform_speed.py")
+          test.write_text(
+              '''from __future__ import annotations
+
+          import numpy as np
+
+          from scripts.linearize_olafsdottir_ztrack import speed_from_linear_position
+
+
+          def test_linearized_speed_uses_nonuniform_timestamp_coordinates() -> None:
+              times = np.array([0.0, 1.0, 3.0])
+              linear = times**2
+              valid = np.ones(times.shape, dtype=bool)
+
+              speed = speed_from_linear_position(times, linear, valid)
+
+              np.testing.assert_allclose(speed, np.array([1.0, 2.0, 4.0]))
+          ''',
+              encoding="utf-8",
+          )
+
+          Path(".github/workflows/agent-fix-linearized-speed.yml").unlink()
+
+      - name: Commit patch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add scripts/linearize_olafsdottir_ztrack.py tests/test_linearize_nonuniform_speed.py .github/workflows/agent-fix-linearized-speed.yml
+          git commit -m "Fix Z-track speed for irregular timestamps"
+          git push

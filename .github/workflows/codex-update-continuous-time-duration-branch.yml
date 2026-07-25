@@ -1,0 +1,39 @@
+name: Codex update continuous-time duration branch
+
+on:
+  push:
+    branches:
+      - fix/continuous-time-transition-durations
+    paths:
+      - .github/workflows/codex-update-continuous-time-duration-branch.yml
+
+permissions:
+  contents: write
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - name: Merge latest main
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git fetch origin main
+          git merge --no-edit origin/main
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+      - name: Install package
+        run: python -m pip install -e .[dev]
+      - name: Run focused regression tests
+        run: >-
+          python -m pytest
+          tests/test_continuous_time_transition_durations.py
+          tests/test_accuracy_upgrade_validation.py
+          tests/test_sweep_pareto_complete_cases.py
+          -q
+      - name: Push updated branch
+        run: git push

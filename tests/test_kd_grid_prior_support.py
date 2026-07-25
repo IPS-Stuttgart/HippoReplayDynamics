@@ -55,6 +55,15 @@ def test_grid_marginalization_matches_logsumexp_for_positive_prior():
     np.testing.assert_allclose(marginalized, expected)
 
 
+def test_grid_marginalization_normalizes_unnormalized_prior_weights():
+    grid = np.array([[-4.0, -2.0, -3.0], [-1.0, -5.0, -2.0]])
+
+    normalized = marginalize_grid_log_evidence(grid, np.array([0.2, 0.3, 0.5]))
+    unnormalized = marginalize_grid_log_evidence(grid, np.array([2.0, 3.0, 5.0]))
+
+    np.testing.assert_allclose(unnormalized, normalized)
+
+
 @pytest.mark.parametrize(
     "prior, message",
     [

@@ -285,6 +285,8 @@ def _finite_values(values: Sequence[float] | np.ndarray) -> np.ndarray:
     raw = np.asarray(values, dtype=object)
     if any(isinstance(value, (bool, np.bool_)) for value in raw.flat):
         raise ValueError("values must be numeric deltas, not booleans")
+    if any(isinstance(value, (complex, np.complexfloating)) for value in raw.flat):
+        raise ValueError("values must contain real numeric deltas, not complex values")
 
     array = np.asarray(values)
     if array.ndim != 1:
@@ -302,6 +304,11 @@ def _numeric_series(series: pd.Series, name: str) -> np.ndarray:
     boolean = series.map(lambda value: isinstance(value, (bool, np.bool_)))
     if bool(boolean.any()):
         raise ValueError(f"{name} contains boolean values")
+    complex_values = series.map(
+        lambda value: isinstance(value, (complex, np.complexfloating))
+    )
+    if bool(complex_values.any()):
+        raise ValueError(f"{name} contains complex values")
 
     numeric = pd.to_numeric(series, errors="coerce")
     missing = series.isna()

@@ -168,9 +168,8 @@ def speed_from_linear_position(times_s: np.ndarray, linear_cm: np.ndarray, valid
     filled = linear.copy()
     idx = np.arange(linear.shape[0], dtype=float)
     filled[~valid] = np.interp(idx[~valid], idx[valid], linear[valid])
-    dt = np.gradient(times)
     with np.errstate(divide="ignore", invalid="ignore"):
-        speed_values = np.abs(np.gradient(filled) / dt)
+        speed_values = np.abs(np.gradient(filled, times))
     speed[valid] = speed_values[valid]
     return speed
 

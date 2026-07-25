@@ -1,0 +1,127 @@
+name: Apply state-space zero-prior support fix
+
+on:
+  push:
+    branches:
+      - fix-state-space-zero-prior-support
+
+permissions:
+  contents: write
+
+jobs:
+  patch-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out patch branch
+        uses: actions/checkout@v6
+        with:
+          ref: fix-state-space-zero-prior-support
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Apply source and regression-test patch
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          source_path = Path("scripts/marginalize_state_space_sweep.py")
+          source = source_path.read_text(encoding="utf-8")
+          old_import = "from hipporeplayimm.kd_reference import empirical_grid_prior\n"
+          new_import = (
+              "from hipporeplayimm.kd_grid_prior_support import "
+              "_marginalize_grid_log_evidence\n"
+              "from hipporeplayimm.kd_reference import empirical_grid_prior\n"
+          )
+          if new_import not in source:
+              if old_import not in source:
+                  raise SystemExit("expected empirical_grid_prior import not found")
+              source = source.replace(old_import, new_import, 1)
+
+          old_marginalization = (
+              "        marginalized = logsumexp(grid + np.log(np.maximum(weights, "
+              "np.finfo(float).tiny))[None, ...], axis=tuple(range(1, grid.ndim)))\n"
+          )
+          new_marginalization = (
+              "        marginalized = _marginalize_grid_log_evidence(grid, weights)\n"
+          )
+          if new_marginalization not in source:
+              if old_marginalization not in source:
+                  raise SystemExit("expected clipped-prior marginalization line not found")
+              source = source.replace(old_marginalization, new_marginalization, 1)
+          source_path.write_text(source, encoding="utf-8")
+
+          test_path = Path("tests/test_marginalize_state_space_sweep.py")
+          tests = test_path.read_text(encoding="utf-8")
+          test_name = "test_marginalize_state_space_sweep_preserves_zero_prior_support"
+          if test_name not in tests:
+              tests += '''
+
+
+def test_marginalize_state_space_sweep_preserves_zero_prior_support(
+    tmp_path: Path,
+    monkeypatch,
+):
+    rows = []
+    for diffusion_sigma, log_evidence in ((50.0, 0.0), (60.0, 1000.0)):
+        row = _base_row(
+            0,
+            "sorted-spike-state-space-diffusion",
+            log_evidence,
+        )
+        row["state_space_diffusion_sigma_cm_sqrt_s"] = diffusion_sigma
+        rows.append(row)
+
+    input_csv = tmp_path / "state_space_evidence_sweep_event_scores.csv"
+    pd.DataFrame(rows).to_csv(input_csv, index=False)
+
+    def zero_support_prior(*_args, **_kwargs):
+        return np.asarray([1.0, 0.0]), "test_zero_support"
+
+    monkeypatch.setattr(
+        marginalize_state_space_sweep,
+        "_prior_for_grid",
+        zero_support_prior,
+    )
+    tables = marginalize_state_space_sweep.marginalize_sweep(
+        input_csv,
+        tmp_path / "marginalized",
+        models=("diffusion",),
+        prior="empirical",
+    )
+
+    marginalized = tables["event_model_evidence"].iloc[0]
+    assert np.isclose(marginalized["log_evidence"], 0.0)
+    prior_weights = tables["prior_weights"].sort_values(
+        "state_space_diffusion_sigma_cm_sqrt_s"
+    )
+    assert np.allclose(prior_weights["prior_weight"].to_numpy(), [1.0, 0.0])
+'''
+              test_path.write_text(tests, encoding="utf-8")
+          PY
+
+      - name: Install test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+
+      - name: Run focused validation
+        env:
+          PYTHONPATH: ${{ github.workspace }}/src
+        run: |
+          python -m py_compile scripts/marginalize_state_space_sweep.py tests/test_marginalize_state_space_sweep.py
+          python -m pytest -q tests/test_marginalize_state_space_sweep.py
+
+      - name: Commit clean patch
+        shell: bash
+        run: |
+          rm .github/workflows/codex-state-space-zero-prior-fix.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add scripts/marginalize_state_space_sweep.py tests/test_marginalize_state_space_sweep.py .github/workflows/codex-state-space-zero-prior-fix.yml
+          git commit -m "Preserve zero prior support in state-space marginalization"
+          git push origin HEAD:fix-state-space-zero-prior-support

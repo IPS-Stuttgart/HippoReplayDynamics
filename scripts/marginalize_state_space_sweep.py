@@ -23,6 +23,7 @@ from scipy.special import logsumexp
 
 from benchmark_model_evidence import _add_evidence_columns, _counts, _summary
 from hipporeplayimm.evidence_reporting import EXACT_EVIDENCE_SUPPORT, TRUNCATED_EVIDENCE_SUPPORT
+from hipporeplayimm.kd_grid_prior_support import _marginalize_grid_log_evidence
 from hipporeplayimm.kd_reference import empirical_grid_prior
 
 _EVENT_KEY = ["session", "event_index"]
@@ -122,7 +123,7 @@ def marginalize_sweep(
         grid, event_table, param_values, source = _grid_for_model(scores, spec, observation_parameters=observation_parameters)
         source_model = _source_model_from_rows(source, spec)
         weights, prior_kind = _prior_for_grid(grid, spec, param_values, prior)
-        marginalized = logsumexp(grid + np.log(np.maximum(weights, np.finfo(float).tiny))[None, ...], axis=tuple(range(1, grid.ndim)))
+        marginalized = _marginalize_grid_log_evidence(grid, weights)
         rows.extend(_marginalized_rows(spec, event_table, source, param_values, marginalized, prior_kind, source_model))
         best_rows.extend(_best_parameter_rows(spec, event_table, grid, param_values, source_model))
         prior_rows.extend(_prior_rows(spec, param_values, weights, prior_kind, source_model))

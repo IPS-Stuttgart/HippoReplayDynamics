@@ -1,9 +1,6 @@
 name: Apply empty SWR winner fix
 
 on:
-  push:
-    branches:
-      - agent/exclude-empty-swr-model-winners
   pull_request:
     branches:
       - main
@@ -36,17 +33,6 @@ jobs:
           source = source_path.read_text(encoding="utf-8")
           source = replace_once(
               source,
-              '        counts = group["best_exact_trajectory_model"].dropna().astype(str).value_counts()',
-              '\n'.join(
-                  [
-                      '        best = group["best_exact_trajectory_model"].fillna("").astype(str).str.strip()',
-                      '        counts = best[best.ne("")].value_counts()',
-                  ]
-              ),
-              "model-winner count expression",
-          )
-          source = replace_once(
-              source,
               '        best = group["best_exact_trajectory_model"].fillna("").astype(str)',
               '\n'.join(
                   [
@@ -55,6 +41,17 @@ jobs:
                   ]
               ),
               "family-summary winner expression",
+          )
+          source = replace_once(
+              source,
+              '        counts = group["best_exact_trajectory_model"].dropna().astype(str).value_counts()',
+              '\n'.join(
+                  [
+                      '        best = group["best_exact_trajectory_model"].fillna("").astype(str).str.strip()',
+                      '        counts = best[best.ne("")].value_counts()',
+                  ]
+              ),
+              "model-winner count expression",
           )
           source = replace_once(
               source,

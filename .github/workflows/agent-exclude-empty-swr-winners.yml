@@ -137,6 +137,10 @@ jobs:
           PY
       - name: Install test dependencies
         run: python -m pip install -e ".[dev]"
+      - name: Normalize changed files
+        run: |
+          python -m ruff check --fix --exit-zero scripts/compare_swr_off_swr_dynamics.py tests/test_swr_off_swr_dynamics_comparison.py
+          python -m ruff format scripts/compare_swr_off_swr_dynamics.py tests/test_swr_off_swr_dynamics_comparison.py
       - name: Run focused regression
         run: python -m pytest -q tests/test_swr_off_swr_dynamics_comparison.py
       - name: Run static checks

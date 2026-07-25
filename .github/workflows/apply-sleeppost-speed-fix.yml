@@ -32,48 +32,54 @@ jobs:
 
           source_path = Path("scripts/summarize_olafsdottir_sleeppost_event_detection_qc.py")
           source = source_path.read_text(encoding="utf-8")
-          old = '''        dt = np.gradient(position.times_s)
-          with np.errstate(divide="ignore", invalid="ignore"):
-              vx = np.gradient(filled[:, 0]) / dt
-              vy = np.gradient(filled[:, 1]) / dt
-          '''
-          new = '''        with np.errstate(divide="ignore", invalid="ignore"):
-              vx = np.gradient(filled[:, 0], position.times_s)
-              vy = np.gradient(filled[:, 1], position.times_s)
-          '''
-          if source.count(old) != 1:
-              raise SystemExit("expected exactly one SleepPOST speed block")
-          source_path.write_text(source.replace(old, new), encoding="utf-8")
+          replacements = [
+              ("        dt = np.gradient(position.times_s)\n", ""),
+              (
+                  "            vx = np.gradient(filled[:, 0]) / dt\n",
+                  "            vx = np.gradient(filled[:, 0], position.times_s)\n",
+              ),
+              (
+                  "            vy = np.gradient(filled[:, 1]) / dt\n",
+                  "            vy = np.gradient(filled[:, 1], position.times_s)\n",
+              ),
+          ]
+          for old, new in replacements:
+              if source.count(old) != 1:
+                  raise SystemExit(f"expected exactly one source line: {old!r}")
+              source = source.replace(old, new)
+          source_path.write_text(source, encoding="utf-8")
 
           test_path = Path("tests/test_olafsdottir_sleeppost_event_detection_qc.py")
           tests = test_path.read_text(encoding="utf-8")
           test_name = "test_load_sleep_speed_uses_irregular_timestamps"
           if test_name not in tests:
               marker = "\n\ndef _write_sleep_session(day_dir: Path, stem: str, tetrode: int) -> None:\n"
-              regression = '''
-
-          def test_load_sleep_speed_uses_irregular_timestamps(tmp_path: Path, monkeypatch) -> None:
-              module = _load_module()
-              times = np.asarray([0.0, 1.0, 3.0], dtype=float)
-              position = type(
-                  "Position",
-                  (),
-                  {
-                      "x_cm": times * times,
-                      "y_cm": np.zeros_like(times),
-                      "times_s": times,
-                      "valid": np.ones(times.shape, dtype=bool),
-                  },
-              )()
-              sleep_stem = tmp_path / "sleep"
-              sleep_stem.with_suffix(".pos").touch()
-              monkeypatch.setattr(module, "read_axona_pos", lambda _path: position)
-
-              speed = module.load_sleep_speed(sleep_stem)
-
-              assert speed is not None
-              np.testing.assert_allclose(speed.speed_cm_s, np.asarray([1.0, 2.0, 4.0]))
-          '''
+              lines = [
+                  "",
+                  "",
+                  "def test_load_sleep_speed_uses_irregular_timestamps(tmp_path: Path, monkeypatch) -> None:",
+                  "    module = _load_module()",
+                  "    times = np.asarray([0.0, 1.0, 3.0], dtype=float)",
+                  "    position = type(",
+                  "        \"Position\",",
+                  "        (),",
+                  "        {",
+                  "            \"x_cm\": times * times,",
+                  "            \"y_cm\": np.zeros_like(times),",
+                  "            \"times_s\": times,",
+                  "            \"valid\": np.ones(times.shape, dtype=bool),",
+                  "        },",
+                  "    )()",
+                  "    sleep_stem = tmp_path / \"sleep\"",
+                  "    sleep_stem.with_suffix(\".pos\").touch()",
+                  "    monkeypatch.setattr(module, \"read_axona_pos\", lambda _path: position)",
+                  "",
+                  "    speed = module.load_sleep_speed(sleep_stem)",
+                  "",
+                  "    assert speed is not None",
+                  "    np.testing.assert_allclose(speed.speed_cm_s, np.asarray([1.0, 2.0, 4.0]))",
+              ]
+              regression = "\n".join(lines) + "\n"
               if marker not in tests:
                   raise SystemExit("test insertion marker not found")
               test_path.write_text(tests.replace(marker, regression + marker), encoding="utf-8")

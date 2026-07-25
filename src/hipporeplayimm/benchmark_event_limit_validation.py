@@ -1,4 +1,4 @@
-"""Validate benchmark count configuration before event and split selection.
+"""Validate benchmark selection configuration before event and split selection.
 
 ``BenchmarkConfig.max_events_per_session`` and ``BenchmarkConfig.n_cell_splits``
 are counts, not flags. Python booleans are integers, so raw ``int(...)``
@@ -7,6 +7,12 @@ benchmark and ``False`` into an empty benchmark or an invalid zero-split
 benchmark. Validate the counts explicitly while still accepting integer-valued
 values such as ``1.0`` or ``"1"`` that can arise from notebooks or tabular
 configuration files.
+
+``BenchmarkConfig.randomize_event_subset`` is a flag, not an arbitrary truthy
+value. In particular, ``bool("false")`` is ``True`` and previously enabled
+random event sampling while metadata also reported the flag as enabled. Require
+a genuine Python/NumPy boolean scalar and pass a canonical ``bool`` to the
+wrapped benchmark functions.
 """
 
 from __future__ import annotations
@@ -23,19 +29,21 @@ _CONFIG_METADATA_PATCHED_FLAG = "_benchmark_config_metadata_cell_split_count_val
 _SPLIT_METADATA_PATCHED_FLAG = "_benchmark_split_metadata_cell_split_count_validation_patch_applied"
 
 
-class _EventLimitConfigProxy:
-    """Delegate a config object while overriding the validated event limit."""
+class _BenchmarkSelectionConfigProxy:
+    """Delegate a config object while overriding validated selection fields."""
 
-    def __init__(self, config: object, max_events_per_session: int) -> None:
+    def __init__(self, config: object, overrides: dict[str, object]) -> None:
         self._config = config
-        self.max_events_per_session = int(max_events_per_session)
+        self._overrides = dict(overrides)
 
     def __getattr__(self, name: str) -> object:
+        if name in self._overrides:
+            return self._overrides[name]
         return getattr(self._config, name)
 
 
 def apply_benchmark_event_limit_validation_patch() -> None:
-    """Install strict validation for benchmark count fields."""
+    """Install strict validation for benchmark count and subset-selection fields."""
 
     from . import benchmarks
 
@@ -58,8 +66,16 @@ def _patch_event_indices(benchmarks: object) -> None:
             getattr(config, "max_events_per_session", None),
             "max_events_per_session",
         )
+        randomize_event_subset = _coerce_boolean_scalar(
+            getattr(config, "randomize_event_subset", False),
+            "randomize_event_subset",
+        )
+        overrides: dict[str, object] = {
+            "randomize_event_subset": randomize_event_subset,
+        }
         if max_events is not None:
-            config = _config_with_validated_event_limit(config, max_events)
+            overrides["max_events_per_session"] = max_events
+        config = _config_with_validated_selection(config, overrides)
         return previous(session, config, split_index=split_index)
 
     setattr(_event_indices, _PATCHED_FLAG, True)
@@ -104,8 +120,17 @@ def _patch_benchmark_config_metadata(benchmarks: object) -> None:
             getattr(config, "n_cell_splits", 1),
             "n_cell_splits",
         )
-        out = dict(previous(config))
+        randomize_event_subset = _coerce_boolean_scalar(
+            getattr(config, "randomize_event_subset", False),
+            "randomize_event_subset",
+        )
+        validated_config = _config_with_validated_selection(
+            config,
+            {"randomize_event_subset": randomize_event_subset},
+        )
+        out = dict(previous(validated_config))
         out["benchmark_n_cell_splits"] = n_cell_splits
+        out["benchmark_randomize_event_subset"] = randomize_event_subset
         return out
 
     setattr(_benchmark_config_metadata, _CONFIG_METADATA_PATCHED_FLAG, True)
@@ -126,8 +151,17 @@ def _patch_benchmark_split_metadata(benchmarks: object) -> None:
             getattr(config, "n_cell_splits", 1),
             "n_cell_splits",
         )
-        out = dict(previous(config, split_index))
+        randomize_event_subset = _coerce_boolean_scalar(
+            getattr(config, "randomize_event_subset", False),
+            "randomize_event_subset",
+        )
+        validated_config = _config_with_validated_selection(
+            config,
+            {"randomize_event_subset": randomize_event_subset},
+        )
+        out = dict(previous(validated_config, split_index))
         out["benchmark_cell_split_count"] = n_cell_splits
+        out["benchmark_randomize_event_subset"] = randomize_event_subset
         return out
 
     setattr(_benchmark_split_metadata, _SPLIT_METADATA_PATCHED_FLAG, True)
@@ -135,11 +169,34 @@ def _patch_benchmark_split_metadata(benchmarks: object) -> None:
     benchmarks._benchmark_split_metadata = _benchmark_split_metadata
 
 
-def _config_with_validated_event_limit(config: object, max_events: int) -> object:
+def _config_with_validated_selection(
+    config: object,
+    overrides: dict[str, object],
+) -> object:
     try:
-        return replace(config, max_events_per_session=int(max_events))
+        return replace(config, **overrides)
     except TypeError:
-        return _EventLimitConfigProxy(config, int(max_events))
+        return _BenchmarkSelectionConfigProxy(config, overrides)
+
+
+def _coerce_boolean_scalar(value: object, name: str) -> bool:
+    if isinstance(value, (bool, np.bool_)):
+        return bool(value)
+
+    try:
+        scalar = np.asarray(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must be a boolean scalar") from exc
+    if scalar.ndim != 0 or not np.issubdtype(scalar.dtype, np.bool_):
+        raise ValueError(f"{name} must be a boolean scalar")
+
+    try:
+        item = scalar.item()
+    except ValueError as exc:
+        raise ValueError(f"{name} must be a boolean scalar") from exc
+    if not isinstance(item, (bool, np.bool_)):
+        raise ValueError(f"{name} must be a boolean scalar")
+    return bool(item)
 
 
 def _coerce_optional_nonnegative_integer(value: object, name: str) -> int | None:
@@ -234,6 +291,7 @@ def _raise_invalid_nonnegative_integer(name: str, exc: Exception | None = None) 
 
 __all__ = [
     "apply_benchmark_event_limit_validation_patch",
+    "_coerce_boolean_scalar",
     "_coerce_optional_nonnegative_integer",
     "_coerce_positive_integer",
 ]

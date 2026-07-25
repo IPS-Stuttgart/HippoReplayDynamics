@@ -5,12 +5,14 @@ import pandas as pd
 
 sys.path.append(str(Path(__file__).resolve().parents[1] / "scripts"))
 
-from compare_swr_off_swr_dynamics import (  # noqa: E402
+from compare_swr_off_swr_dynamics import (
     DEFAULT_FIRST_ORDER_IMM_MODEL,
     DEFAULT_MARGIN_POSITIVE_MODEL,
     DEFAULT_MARGIN_REFERENCE_MODEL,
     FRAGMENTED_MODEL,
     STATIONARY_MODEL,
+    family_margin_summary,
+    model_winner_summary,
     write_swr_off_swr_dynamics_outputs,
 )
 
@@ -81,10 +83,7 @@ def test_swr_off_swr_comparison_keeps_promoted_windows_distinct(tmp_path):
     assert off["trajectory_confident_claim"].astype(bool).all()
 
     model = outputs["swr_off_swr_model_winner_summary.csv"]
-    swr_first_order = model[
-        model["event_class"].eq("detected_replay_or_swr")
-        & model["best_exact_trajectory_model"].eq(DEFAULT_FIRST_ORDER_IMM_MODEL)
-    ].iloc[0]
+    swr_first_order = model[model["event_class"].eq("detected_replay_or_swr") & model["best_exact_trajectory_model"].eq(DEFAULT_FIRST_ORDER_IMM_MODEL)].iloc[0]
     assert int(swr_first_order["events"]) == 2
 
     behavior = outputs["swr_off_swr_behavior_summary.csv"].set_index("event_class")
@@ -176,3 +175,36 @@ def _off_swr_candidate(
 
 def _model_rows(base: dict[str, object], values: dict[str, float]) -> list[dict[str, object]]:
     return [{**base, "model": model, "log_evidence": value} for model, value in values.items()]
+
+
+def test_swr_off_swr_summaries_ignore_missing_winner_labels():
+    comparison = pd.DataFrame(
+        [
+            {
+                "event_class": "detected_replay_or_swr",
+                "best_exact_trajectory_model": "",
+                "required_models_complete": False,
+                "margin_decision": "incomplete_core",
+                "trajectory_minus_nontrajectory_margin": float("nan"),
+                "trajectory_confident_claim": False,
+                "nontrajectory_confident_claim": False,
+            },
+            {
+                "event_class": "detected_replay_or_swr",
+                "best_exact_trajectory_model": DEFAULT_FIRST_ORDER_IMM_MODEL,
+                "required_models_complete": True,
+                "margin_decision": "trajectory",
+                "trajectory_minus_nontrajectory_margin": 12.0,
+                "trajectory_confident_claim": True,
+                "nontrajectory_confident_claim": False,
+            },
+        ]
+    )
+
+    winners = model_winner_summary(comparison)
+    assert winners["best_exact_trajectory_model"].tolist() == [DEFAULT_FIRST_ORDER_IMM_MODEL]
+    assert winners["events"].tolist() == [1]
+    assert winners["fraction_of_event_class"].tolist() == [0.5]
+
+    family = family_margin_summary(comparison)
+    assert family.loc[0, "most_common_best_exact_trajectory_model"] == DEFAULT_FIRST_ORDER_IMM_MODEL

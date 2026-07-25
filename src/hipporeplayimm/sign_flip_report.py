@@ -22,6 +22,7 @@ import numpy as np
 import pandas as pd
 
 _INVALID_UTF8_MODEL_LABEL_PREFIX = "<invalid-utf8-bytes:"
+_MAX_EXACT_SIGN_BITS = np.iinfo(np.uint64).bits
 
 
 @dataclass(frozen=True)
@@ -89,6 +90,11 @@ def paired_sign_flip_test(
     observed_abs_sum = abs(float(np.sum(statistic_values, dtype=float)))
     threshold = _comparison_threshold(observed_abs_sum, statistic_values)
     if n_nonzero <= max_exact_n:
+        if n_nonzero > _MAX_EXACT_SIGN_BITS:
+            raise ValueError(
+                f"exact sign-flip enumeration supports at most {_MAX_EXACT_SIGN_BITS} nonzero observations; "
+                "lower max_exact_n to use Monte Carlo inference"
+            )
         total = 1 << n_nonzero
         extreme = _count_exact_extremes(
             statistic_values,

@@ -1,4 +1,4 @@
-name: Capture zero-prior Ruff diagnostics
+name: Finalize state-space zero-prior support fix
 
 on:
   pull_request:
@@ -9,10 +9,10 @@ permissions:
   contents: write
 
 jobs:
-  capture:
+  finalize-and-validate:
     runs-on: ubuntu-latest
     steps:
-      - name: Check out patch branch
+      - name: Check out finalized patch branch
         uses: actions/checkout@v6
         with:
           ref: fix-state-space-zero-prior-support
@@ -23,22 +23,53 @@ jobs:
           python-version: "3.13"
           cache: pip
 
-      - name: Install Ruff
-        run: python -m pip install "ruff>=0.8"
-
-      - name: Capture targeted Ruff output
+      - name: Normalize regression-test spacing
         run: |
-          python -m ruff check scripts/marginalize_state_space_sweep.py tests/test_marginalize_state_space_sweep.py > .ruff-zero-prior-diagnostics.txt 2>&1 || true
-          cat .ruff-zero-prior-diagnostics.txt
+          python - <<'PY'
+          from pathlib import Path
 
-      - name: Publish diagnostic file
+          test_path = Path("tests/test_marginalize_state_space_sweep.py")
+          tests = test_path.read_text(encoding="utf-8")
+          tests = tests.replace(
+              "\n\n\ndef test_marginalize_state_space_sweep_preserves_zero_prior_support(",
+              "\n\ndef test_marginalize_state_space_sweep_preserves_zero_prior_support(",
+              1,
+          )
+          test_path.write_text(tests, encoding="utf-8")
+          Path(".ruff-zero-prior-diagnostics.txt").unlink(missing_ok=True)
+          PY
+
+      - name: Install test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+
+      - name: Remove unused imports safely
+        run: |
+          python -m ruff check --select F401 --fix scripts/marginalize_state_space_sweep.py tests/test_marginalize_state_space_sweep.py
+
+      - name: Verify no unused imports
+        run: |
+          python -m ruff check --select F401 scripts/marginalize_state_space_sweep.py tests/test_marginalize_state_space_sweep.py
+
+      - name: Compile repository Python sources
+        run: |
+          python -m compileall -q src scripts tests
+
+      - name: Run complete test suite
+        env:
+          PYTHONPATH: ${{ github.workspace }}/src
+        run: |
+          python -m pytest --rootdir . -q ./tests
+
+      - name: Commit final cleanup
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add .ruff-zero-prior-diagnostics.txt
+          git add -A scripts/marginalize_state_space_sweep.py tests/test_marginalize_state_space_sweep.py .ruff-zero-prior-diagnostics.txt
           if git diff --cached --quiet; then
-            echo "Diagnostic output unchanged."
+            echo "Patch already clean; nothing to commit."
             exit 0
           fi
-          git commit -m "Capture Ruff diagnostics for zero-prior patch"
+          git commit -m "Clean up state-space marginalization patch"
           git push origin HEAD:fix-state-space-zero-prior-support

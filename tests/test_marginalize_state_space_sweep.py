@@ -297,3 +297,43 @@ def test_marginalize_state_space_sweep_auto_marginalizes_valid_occupancy_thresho
     prior_weights = tables["prior_weights"]
     assert "state_space_valid_occupancy_threshold_s" in prior_weights.columns
     assert np.isclose(prior_weights["prior_weight"].sum(), 1.0)
+
+
+def test_marginalize_state_space_sweep_preserves_zero_prior_support(
+    tmp_path: Path,
+    monkeypatch,
+):
+    rows = []
+    for diffusion_sigma, log_evidence in ((50.0, 0.0), (60.0, 1000.0)):
+        row = _base_row(
+            0,
+            "sorted-spike-state-space-diffusion",
+            log_evidence,
+        )
+        row["state_space_diffusion_sigma_cm_sqrt_s"] = diffusion_sigma
+        rows.append(row)
+
+    input_csv = tmp_path / "state_space_evidence_sweep_event_scores.csv"
+    pd.DataFrame(rows).to_csv(input_csv, index=False)
+
+    def zero_support_prior(*_args, **_kwargs):
+        return np.asarray([1.0, 0.0]), "test_zero_support"
+
+    monkeypatch.setattr(
+        marginalize_state_space_sweep,
+        "_prior_for_grid",
+        zero_support_prior,
+    )
+    tables = marginalize_state_space_sweep.marginalize_sweep(
+        input_csv,
+        tmp_path / "marginalized",
+        models=("diffusion",),
+        prior="empirical",
+    )
+
+    marginalized = tables["event_model_evidence"].iloc[0]
+    assert np.isclose(marginalized["log_evidence"], 0.0)
+    prior_weights = tables["prior_weights"].sort_values(
+        "state_space_diffusion_sigma_cm_sqrt_s"
+    )
+    assert np.allclose(prior_weights["prior_weight"].to_numpy(), [1.0, 0.0])

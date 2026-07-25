@@ -30,6 +30,9 @@ _NUMERIC_MESSAGES = {
     "mark_kde_spatial_sigma_bins": "mark_kde_spatial_sigma_bins must be finite and nonnegative when provided",
     "mark_kde_max_neighbors": "mark_kde_max_neighbors must be a positive integer",
 }
+_BOOLEAN_MESSAGES = {
+    "use_excitatory": "use_excitatory must be a boolean scalar",
+}
 
 
 def apply_clusterless_encoding_config_validation_patch() -> None:
@@ -195,6 +198,7 @@ def _validate_nested_encoding_config(config: object | None) -> None:
 def _validate_clusterless_mark_config(config: object | None) -> None:
     if config is None:
         return
+    _boolean_config_value(config, "use_excitatory")
     _finite_config_value(config, "mark_smoothing_sigma_bins", positive=False)
     _finite_config_value(config, "mark_prior_count", positive=False)
     _finite_config_value(config, "mark_variance_floor", positive=True)
@@ -287,6 +291,26 @@ def _positive_integer_config_value(config: object, name: str, message_name: str 
     if not np.isfinite(numeric) or not numeric.is_integer() or numeric < 1.0:
         raise ValueError(message)
     return int(numeric)
+
+
+def _boolean_config_value(config: object, name: str) -> bool:
+    """Return a strict Python/NumPy boolean scalar without truthiness coercion."""
+
+    message = _BOOLEAN_MESSAGES[name]
+    value = getattr(config, name, None)
+    try:
+        array = np.asarray(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(message) from exc
+    if array.ndim != 0 or not np.issubdtype(array.dtype, np.bool_):
+        raise ValueError(message)
+    try:
+        item = array.item()
+    except ValueError as exc:
+        raise ValueError(message) from exc
+    if not isinstance(item, (bool, np.bool_)):
+        raise ValueError(message)
+    return bool(item)
 
 
 def _scalar_config_item(value: object, message: str) -> object:

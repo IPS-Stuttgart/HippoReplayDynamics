@@ -1,4 +1,4 @@
-"""Strict numeric and boolean parsing for score-table metadata."""
+"""Strict numeric, boolean, and well-ID parsing for ground-truth helpers."""
 
 from __future__ import annotations
 
@@ -9,11 +9,14 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
+from .data_cell_id_validation import _coerce_integral_ids
+
 _FLOAT_PATCHED_FLAG = "_ground_truth_strict_float_metadata_patch_applied"
 _BOOL_PATCHED_FLAG = "_ground_truth_strict_bool_metadata_patch_applied"
 _CONFIG_PATCHED_FLAG = "_ground_truth_config_numeric_validation_patch_applied"
 _DIRECT_VISIT_PATCHED_FLAG = "_ground_truth_direct_visit_numeric_validation_patch_applied"
 _DIRECT_WELL_WINDOW_PATCHED_FLAG = "_ground_truth_direct_well_window_numeric_validation_patch_applied"
+_DIRECT_ACTIVE_GOAL_PATCHED_FLAG = "_ground_truth_direct_active_goal_well_id_validation_patch_applied"
 _SCORE_BOOL_PATCHED_FLAG = "_score_metadata_strict_bool_metadata_patch_applied"
 _EVIDENCE_BOOL_PATCHED_FLAG = "_evidence_reporting_strict_bool_metadata_patch_applied"
 
@@ -186,6 +189,7 @@ def _patch_direct_ground_truth_numeric_helpers(gt: Any) -> None:
             radius = _parse_positive_config_value("visit_radius_cm", visit_radius_cm)
             dwell = _parse_nonnegative_config_value("min_dwell_s", min_dwell_s)
             horizon = _parse_positive_config_value("future_horizon_s", future_horizon_s)
+            _validate_well_table_ids(wells)
             return current_visit(
                 position,
                 wells,
@@ -211,6 +215,7 @@ def _patch_direct_ground_truth_numeric_helpers(gt: Any) -> None:
                 "well_arrival_window_s",
                 well_arrival_window_s,
             )
+            _validate_well_sequence_ids(well_sequence)
             return current_infer(
                 position,
                 well_sequence,
@@ -223,6 +228,32 @@ def _patch_direct_ground_truth_numeric_helpers(gt: Any) -> None:
             True,
         )
         gt.infer_well_locations_from_arrays = infer_well_locations_from_arrays
+
+    current_active_goal = gt.active_goal_at_time
+    if not getattr(current_active_goal, _DIRECT_ACTIVE_GOAL_PATCHED_FLAG, False):
+
+        @wraps(current_active_goal)
+        def active_goal_at_time(session: Any, time_s: float) -> int | None:
+            _validate_well_sequence_ids(session.well_sequence)
+            return current_active_goal(session, time_s)
+
+        setattr(active_goal_at_time, _DIRECT_ACTIVE_GOAL_PATCHED_FLAG, True)
+        gt.active_goal_at_time = active_goal_at_time
+
+
+def _validate_well_table_ids(wells: Any) -> None:
+    if not isinstance(wells, pd.DataFrame) or wells.empty or "well_id" not in wells.columns:
+        return
+    _coerce_integral_ids(wells["well_id"].to_numpy(), "well IDs")
+
+
+def _validate_well_sequence_ids(well_sequence: Any) -> None:
+    if well_sequence is None:
+        return
+    raw = np.asarray(well_sequence)
+    if raw.size == 0 or raw.ndim != 2 or raw.shape[1] < 2:
+        return
+    _coerce_integral_ids(raw[:, 1], "well IDs")
 
 
 def _validate_ground_truth_config(config: Any) -> None:

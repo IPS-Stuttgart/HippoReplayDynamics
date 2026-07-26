@@ -8,6 +8,7 @@ from typing import Any
 import numpy as np
 
 _PATCHED_FLAG = "_observation_sweep_finite_config_validation_patch_applied"
+_SELECTION_PATCHED_FLAG = "_observation_calibration_gate_selection_patch_applied"
 _STRING_TYPES = (str, bytes, np.str_, np.bytes_)
 _POSITIVE_GRID_FIELDS = (
     "bin_sizes_cm",
@@ -25,22 +26,43 @@ _NONNEGATIVE_GRID_FIELDS = (
 
 
 def apply_observation_sweep_config_validation_patch() -> None:
-    """Reject invalid observation-sweep parameters before grid expansion."""
+    """Reject invalid sweep parameters and failed calibration selections."""
 
     from . import observation_sweep as sweep
+    from . import result_quality_audit as audit
 
-    if getattr(sweep, _PATCHED_FLAG, False):
+    if not getattr(sweep, _PATCHED_FLAG, False):
+        original_validate_config = sweep._validate_config
+
+        @wraps(original_validate_config)
+        def validate_config_with_finite_grid_values(config: Any) -> None:
+            _validate_finite_observation_sweep_config(config)
+            original_validate_config(config)
+
+        sweep._validate_config = validate_config_with_finite_grid_values
+        setattr(sweep, _PATCHED_FLAG, True)
+
+    _patch_observation_calibration_selection(audit)
+
+
+def _patch_observation_calibration_selection(audit: Any) -> None:
+    """Do not return rows that failed every configured calibration gate."""
+
+    current_select = audit.select_observation_calibration
+    if getattr(current_select, _SELECTION_PATCHED_FLAG, False):
         return
 
-    original_validate_config = sweep._validate_config
+    @wraps(current_select)
+    def select_observation_calibration(summary, config=None):
+        selected = current_select(summary, config)
+        if selected.empty or "selection_gate_passed" not in selected.columns:
+            return selected
+        if bool(audit._bool_series(selected["selection_gate_passed"]).any()):
+            return selected
+        return selected.iloc[:0].copy()
 
-    @wraps(original_validate_config)
-    def validate_config_with_finite_grid_values(config: Any) -> None:
-        _validate_finite_observation_sweep_config(config)
-        original_validate_config(config)
-
-    sweep._validate_config = validate_config_with_finite_grid_values
-    setattr(sweep, _PATCHED_FLAG, True)
+    setattr(select_observation_calibration, _SELECTION_PATCHED_FLAG, True)
+    audit.select_observation_calibration = select_observation_calibration
 
 
 def _validate_finite_observation_sweep_config(config: Any) -> None:

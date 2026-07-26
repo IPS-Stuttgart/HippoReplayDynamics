@@ -149,6 +149,19 @@ def _lower_precision_float_dtype(value: object) -> np.dtype | None:
     return None
 
 
+def _lower_precision_float_column_dtype(series: pd.Series) -> np.dtype | None:
+    """Return a narrow floating dtype retained by a pandas metadata column."""
+
+    raw_dtype = getattr(series.dtype, "numpy_dtype", series.dtype)
+    try:
+        dtype = np.dtype(raw_dtype)
+    except (TypeError, ValueError):
+        return None
+    if dtype.kind == "f" and dtype.itemsize < np.dtype(float).itemsize:
+        return dtype
+    return None
+
+
 def _metadata_values_match(
     first: tuple[float, np.dtype | None],
     current: tuple[float, np.dtype | None],
@@ -188,16 +201,21 @@ def _unique_float_from_columns(
     for column in columns:
         if column not in frame.columns:
             continue
-        for value in frame[column].dropna():
+        series = frame[column]
+        column_dtype = _lower_precision_float_column_dtype(series)
+        for value in series.dropna():
             item = _metadata_scalar_item(value, column)
             text = str(item).strip()
             if text.lower() in _MISSING_METADATA_STRINGS:
                 continue
             if text:
+                value_dtype = _lower_precision_float_dtype(value)
+                if value_dtype is None:
+                    value_dtype = column_dtype
                 values.append(
                     (
                         _finite_numeric_metadata_value(item, column),
-                        _lower_precision_float_dtype(value),
+                        value_dtype,
                     )
                 )
     if not values:

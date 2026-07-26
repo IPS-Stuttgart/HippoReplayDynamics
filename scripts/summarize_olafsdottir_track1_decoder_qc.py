@@ -159,21 +159,18 @@ def decode_windows(linearized: pd.DataFrame, decode_window_s: float) -> pd.DataF
     tolerance = 16.0 * np.finfo(float).eps * max(
         abs(start), abs(end), abs(duration), 1.0
     )
+    closed_end = float(np.nextafter(end, np.inf))
     edges = np.arange(start, end, window, dtype=float)
     if edges.size == 0:
         edges = np.asarray([start], dtype=float)
     if edges[-1] < end - tolerance:
-        edges = np.append(edges, end)
+        edges = np.append(edges, closed_end)
     else:
-        edges[-1] = end
+        edges[-1] = closed_end
 
     rows: list[dict[str, float]] = []
-    last_window = edges.shape[0] - 2
-    for index, (left, right) in enumerate(
-        zip(edges[:-1], edges[1:], strict=True)
-    ):
-        upper = times <= right if index == last_window else times < right
-        keep = valid & (times >= left) & upper
+    for left, right in zip(edges[:-1], edges[1:], strict=True):
+        keep = valid & (times >= left) & (times < right)
         if np.any(keep):
             rows.append(
                 {

@@ -13,6 +13,7 @@ _SCOPE_KEY_PATCHED_FLAG = "_shuffle_scope_numeric_key_patch_applied"
 _GRID_SHAPE_PATCHED_FLAG = "_shuffle_grid_shape_validation_patch_applied"
 _INTEGER_VALUE_PATCHED_FLAG = "_shuffle_integer_value_precision_patch_applied"
 _PERMUTATION_PATCHED_FLAG = "_shuffle_nonidentity_permutation_patch_applied"
+_CELL_IDENTITY_PATCHED_FLAG = "_shuffle_nonidentity_cell_identity_patch_applied"
 
 
 def apply_shuffle_spike_time_order_patch() -> None:
@@ -62,6 +63,12 @@ def apply_shuffle_spike_time_order_patch() -> None:
     if not getattr(shuffle_controls, _PERMUTATION_PATCHED_FLAG, False):
         shuffle_controls.shuffled_encoding = _shuffled_encoding_nonidentity
         setattr(shuffle_controls, _PERMUTATION_PATCHED_FLAG, True)
+
+    if not getattr(ri, _CELL_IDENTITY_PATCHED_FLAG, False):
+        ri.shuffle_cell_identities_session = (
+            _shuffle_cell_identities_session_nonidentity
+        )
+        setattr(ri, _CELL_IDENTITY_PATCHED_FLAG, True)
 
 
 def _mapping_scope_label(value: Mapping[object, object], scope_label) -> str:
@@ -176,6 +183,30 @@ def _nonidentity_permutation(
     while np.array_equal(permutation, identity):
         permutation = rng.permutation(size)
     return permutation
+
+
+def _shuffle_cell_identities_session_nonidentity(session, random_seed: int = 1):
+    """Remap session cell identities without an avoidable identity draw."""
+
+    rng = np.random.default_rng(_nonnegative_integer_seed(random_seed))
+    spikes = np.asarray(session.spikes, dtype=float).copy()
+    if spikes.size == 0:
+        return session
+    cells = np.unique(spikes[:, 1].astype(int))
+    shuffled = cells[_nonidentity_permutation(cells.size, rng)]
+    mapping = {
+        int(source): int(target)
+        for source, target in zip(cells, shuffled, strict=True)
+    }
+    spikes[:, 1] = [mapping[int(cell)] for cell in spikes[:, 1].astype(int)]
+    marks = session.spike_marks
+    if marks is not None and marks.cell_ids is not None:
+        mark_cell_ids = np.asarray(
+            [mapping.get(int(cell), int(cell)) for cell in marks.cell_ids],
+            dtype=int,
+        )
+        marks = replace(marks, cell_ids=mark_cell_ids)
+    return replace(session, spikes=spikes, spike_marks=marks)
 
 
 def _shuffle_spike_times_session_sorted(session, random_seed: int = 1):

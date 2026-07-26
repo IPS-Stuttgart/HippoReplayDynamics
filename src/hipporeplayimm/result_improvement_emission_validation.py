@@ -9,6 +9,7 @@ import numpy as np
 
 _PATCHED_FLAG = "_result_improvement_emission_validation_patch_applied"
 _BUILD_SORTED_EMISSIONS_WRAPPER_FLAG = "_replay_calibrated_emission_parameter_validation_wrapper"
+_BUILD_SORTED_EMISSIONS_WRAPPER_VERSION = 2
 _ORIGINAL_ATTR = "__hipporeplayimm_emission_validation_original__"
 
 
@@ -166,22 +167,78 @@ def _validate_replay_calibrated_emission_parameters(config: object | None, calib
         )
 
 
+def _restore_exact_zero_rate_support(emissions: object, encoding: object, config: object | None) -> object:
+    """Make spikes at exactly unsupported place-field bins impossible again.
+
+    The replay-calibrated builder historically floors every rate to the smallest
+    positive float before applying gains.  That turns an exact zero-rate support
+    constraint into a merely tiny likelihood.  Positive replay gains cannot make
+    an exact zero rate positive, so the original encoding still defines the
+    correct impossible-bin mask.
+    """
+
+    rates = np.asarray(getattr(encoding, "rates_hz"), dtype=float)
+    counts = np.asarray(getattr(emissions, "spike_counts"), dtype=float)
+    log_likelihood = np.asarray(getattr(emissions, "log_likelihood"), dtype=float)
+    if rates.ndim != 2 or counts.ndim != 2 or log_likelihood.ndim != 2:
+        raise ValueError("replay-calibrated emissions and rates must be two-dimensional")
+    if rates.shape[0] != counts.shape[1] or rates.shape[1] != log_likelihood.shape[1]:
+        raise ValueError("encoding rates must match replay emission cell and spatial dimensions")
+    if counts.shape[0] != log_likelihood.shape[0]:
+        raise ValueError("spike counts must contain one row per replay emission row")
+
+    zero_rate = rates == 0.0
+    if not np.any(zero_rate) or counts.size == 0:
+        return emissions
+
+    metadata = dict(getattr(emissions, "metadata", {}) or {})
+    emission_model = str(metadata.get("sorted_spike_emission_model", "poisson")).strip().lower()
+    if emission_model == "poisson":
+        from . import encoding as encoding_module
+
+        effective_config = encoding_module.EmissionConfig() if config is None else config
+        cell_weights = encoding_module._emission_cell_weights(
+            getattr(effective_config, "cell_weights", None),
+            counts.shape[1],
+        )
+    else:
+        cell_weights = np.ones(counts.shape[1], dtype=float)
+
+    active_zero_rate = zero_rate & (np.asarray(cell_weights, dtype=float)[:, None] > 0.0)
+    impossible = np.any(
+        (counts[:, :, None] > 0.0) & active_zero_rate[None, :, :],
+        axis=1,
+    )
+    if not np.any(impossible):
+        return emissions
+
+    corrected = log_likelihood.copy()
+    corrected[impossible] = -np.inf
+    emissions.log_likelihood = corrected
+    return emissions
+
+
 def apply_result_improvement_emission_validation_patch() -> None:
-    """Install strict scalar guards for replay-calibrated sorted-spike emissions."""
+    """Install strict scalar guards and exact support for replay-calibrated emissions."""
 
     from . import result_improvement_extensions
 
     current = result_improvement_extensions.build_sorted_emissions_with_replay_calibration
-    if getattr(current, _BUILD_SORTED_EMISSIONS_WRAPPER_FLAG, False):
+    if getattr(current, _BUILD_SORTED_EMISSIONS_WRAPPER_FLAG, None) == _BUILD_SORTED_EMISSIONS_WRAPPER_VERSION:
         setattr(result_improvement_extensions, _PATCHED_FLAG, True)
         return
 
     @wraps(current)
     def build_sorted_emissions_with_replay_calibration(session, encoding, ripple, config=None, calibration=None):
         _validate_replay_calibrated_emission_parameters(config, calibration)
-        return current(session, encoding, ripple, config, calibration)
+        emissions = current(session, encoding, ripple, config, calibration)
+        return _restore_exact_zero_rate_support(emissions, encoding, config)
 
-    setattr(build_sorted_emissions_with_replay_calibration, _BUILD_SORTED_EMISSIONS_WRAPPER_FLAG, True)
+    setattr(
+        build_sorted_emissions_with_replay_calibration,
+        _BUILD_SORTED_EMISSIONS_WRAPPER_FLAG,
+        _BUILD_SORTED_EMISSIONS_WRAPPER_VERSION,
+    )
     setattr(build_sorted_emissions_with_replay_calibration, _ORIGINAL_ATTR, current)
     result_improvement_extensions.build_sorted_emissions_with_replay_calibration = build_sorted_emissions_with_replay_calibration
     setattr(result_improvement_extensions, _PATCHED_FLAG, True)

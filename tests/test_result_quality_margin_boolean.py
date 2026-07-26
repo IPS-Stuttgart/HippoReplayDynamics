@@ -18,4 +18,5 @@ from hipporeplayimm.result_quality_gates import MARGIN_UNKNOWN, evidence_margin_
     ],
 )
 def test_evidence_margin_label_rejects_boolean_margins(margin: object) -> None:
+    # Boolean arrays are pseudo-numeric inputs, not valid evidence margins.
     assert evidence_margin_label(margin) == MARGIN_UNKNOWN

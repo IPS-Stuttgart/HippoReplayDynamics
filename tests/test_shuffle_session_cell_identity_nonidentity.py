@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 import numpy as np
+import pytest
 
 from hipporeplayimm.result_improvements import shuffle_cell_identities_session
 
@@ -55,3 +56,22 @@ def test_cell_identity_shuffle_preserves_unavoidable_singleton() -> None:
     np.testing.assert_array_equal(shuffled.spikes, session.spikes)
     assert shuffled.spike_marks is not None
     np.testing.assert_array_equal(shuffled.spike_marks.cell_ids, np.array([10, 10]))
+
+
+def test_cell_identity_shuffle_rejects_fractional_spike_cell_ids() -> None:
+    session = _Session(
+        spikes=np.array([[0.1, 10.5], [0.2, 11.0]], dtype=float),
+    )
+
+    with pytest.raises(ValueError, match="spike cell IDs must be integer-valued"):
+        shuffle_cell_identities_session(session, random_seed=0)
+
+
+def test_cell_identity_shuffle_rejects_fractional_mark_cell_ids() -> None:
+    session = _Session(
+        spikes=np.array([[0.1, 10.0], [0.2, 11.0]], dtype=float),
+        spike_marks=_Marks(cell_ids=np.array([10.5, 11.0], dtype=float)),
+    )
+
+    with pytest.raises(ValueError, match="spike mark cell IDs must be integer-valued"):
+        shuffle_cell_identities_session(session, random_seed=0)

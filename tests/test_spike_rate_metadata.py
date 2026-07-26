@@ -1,3 +1,4 @@
+import numpy as np
 import pandas as pd
 import pytest
 
@@ -53,6 +54,33 @@ def test_emission_metadata_rejects_conflicting_spike_rate_scale_aliases():
     )
 
     with pytest.raises(ValueError, match="emission_spike_rate_scale"):
+        emission_config_for_scores(scores, EmissionConfig())
+
+
+
+def test_emission_metadata_accepts_float32_rounding_between_aliases():
+    scores = pd.DataFrame(
+        {
+            "emission_time_bin_s": pd.Series([0.1], dtype=np.float32),
+            "time_bin_s": pd.Series([0.1], dtype=np.float64),
+        }
+    )
+
+    config = emission_config_for_scores(scores, EmissionConfig())
+
+    assert config.time_bin_s == pytest.approx(0.1)
+
+
+
+def test_emission_metadata_still_rejects_full_precision_alias_conflicts():
+    scores = pd.DataFrame(
+        {
+            "emission_time_bin_s": [0.1],
+            "time_bin_s": [0.10000000149011612],
+        }
+    )
+
+    with pytest.raises(ValueError, match="emission_time_bin_s"):
         emission_config_for_scores(scores, EmissionConfig())
 
 

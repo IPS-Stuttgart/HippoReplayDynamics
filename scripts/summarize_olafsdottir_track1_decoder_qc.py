@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-"""Track1 decoder QC entry point with enforced unit gates and fold isolation."""
+"""Track1 decoder QC entry point with enforced unit gates and nested fold isolation."""
 
 from __future__ import annotations
 
+from contextvars import ContextVar
 import importlib
 
 import numpy as np
@@ -15,6 +16,11 @@ for _name, _value in vars(_impl).items():
         globals()[_name] = _value
 
 _original_unit_qc_table = _impl.unit_qc_table
+_original_summarize_pair = _impl.summarize_pair
+_crossval_unit_qc_context: ContextVar[dict[str, float | int] | None] = ContextVar(
+    "track1_crossval_unit_qc_context",
+    default=None,
+)
 
 
 def unit_qc_table(
@@ -61,6 +67,60 @@ def unit_qc_table(
     return table, place_fields
 
 
+def summarize_pair(
+    pair: pd.Series,
+    *,
+    dataset_root,
+    linearization: pd.DataFrame,
+    linearization_root,
+    output_dir,
+    min_encoding_units: int,
+    crossval_folds: int,
+    position_bin_size_cm: float,
+    decode_window_s: float,
+    min_unit_spikes: int,
+    min_unit_mean_rate_hz: float,
+    min_place_information_bits: float,
+    min_place_peak_rate_hz: float,
+    smoothing_bins: int,
+    max_posterior_median_error_cm: float,
+    max_map_median_error_cm: float,
+    min_posterior_coverage_fraction: float,
+):
+    """Run one session with fold-local unit selection thresholds."""
+
+    token = _crossval_unit_qc_context.set(
+        {
+            "min_unit_spikes": int(min_unit_spikes),
+            "min_unit_mean_rate_hz": float(min_unit_mean_rate_hz),
+            "min_place_information_bits": float(min_place_information_bits),
+            "min_place_peak_rate_hz": float(min_place_peak_rate_hz),
+        }
+    )
+    try:
+        return _original_summarize_pair(
+            pair,
+            dataset_root=dataset_root,
+            linearization=linearization,
+            linearization_root=linearization_root,
+            output_dir=output_dir,
+            min_encoding_units=min_encoding_units,
+            crossval_folds=crossval_folds,
+            position_bin_size_cm=position_bin_size_cm,
+            decode_window_s=decode_window_s,
+            min_unit_spikes=min_unit_spikes,
+            min_unit_mean_rate_hz=min_unit_mean_rate_hz,
+            min_place_information_bits=min_place_information_bits,
+            min_place_peak_rate_hz=min_place_peak_rate_hz,
+            smoothing_bins=smoothing_bins,
+            max_posterior_median_error_cm=max_posterior_median_error_cm,
+            max_map_median_error_cm=max_map_median_error_cm,
+            min_posterior_coverage_fraction=min_posterior_coverage_fraction,
+        )
+    finally:
+        _crossval_unit_qc_context.reset(token)
+
+
 def _spikes_in_intervals(spikes, intervals: list[tuple[float, float]]):
     """Return only spikes contained in the half-open training intervals."""
 
@@ -69,6 +129,60 @@ def _spikes_in_intervals(spikes, intervals: list[tuple[float, float]]):
         spike_times_s=spikes.spike_times_s[keep],
         unit_ids=spikes.unit_ids[keep],
         units=tuple(spikes.units),
+    )
+
+
+def _select_fold_units(
+    *,
+    candidate_unit_ids: tuple[int, ...],
+    rates: np.ndarray,
+    occupancy: np.ndarray,
+    training_spikes,
+    min_unit_spikes: int,
+    min_unit_mean_rate_hz: float,
+    min_place_information_bits: float,
+    min_place_peak_rate_hz: float,
+) -> tuple[tuple[int, ...], np.ndarray]:
+    """Apply every configured unit gate using training data only."""
+
+    training_duration_s = float(np.nansum(occupancy))
+    selected_indices: list[int] = []
+    selected_ids: list[int] = []
+    for index, unit_id in enumerate(candidate_unit_ids):
+        n_spikes = int(
+            np.count_nonzero(training_spikes.unit_ids == int(unit_id))
+        )
+        mean_rate_hz = (
+            float(n_spikes / training_duration_s)
+            if training_duration_s > 0.0
+            else np.nan
+        )
+        unit_rates = np.asarray(rates[index], dtype=float)
+        peak_rate_hz = (
+            float(np.nanmax(unit_rates))
+            if unit_rates.size and np.isfinite(unit_rates).any()
+            else np.nan
+        )
+        information = _impl.spatial_information(unit_rates, occupancy)
+        passed = (
+            n_spikes >= int(min_unit_spikes)
+            and np.isfinite(mean_rate_hz)
+            and mean_rate_hz >= float(min_unit_mean_rate_hz)
+            and np.isfinite(peak_rate_hz)
+            and peak_rate_hz > 0.0
+            and peak_rate_hz >= float(min_place_peak_rate_hz)
+            and np.isfinite(information)
+            and information >= float(min_place_information_bits)
+        )
+        if passed:
+            selected_indices.append(index)
+            selected_ids.append(int(unit_id))
+
+    if not selected_indices:
+        return (), np.empty((0, rates.shape[1]), dtype=float)
+    return (
+        tuple(selected_ids),
+        np.asarray(rates[np.asarray(selected_indices, dtype=int)], dtype=float),
     )
 
 
@@ -81,8 +195,22 @@ def crossval_decode(
     position_bin_size_cm: float,
     decode_window_s: float,
     smoothing_bins: int,
+    min_unit_spikes: int = 1,
+    min_unit_mean_rate_hz: float = 0.0,
+    min_place_information_bits: float = 0.0,
+    min_place_peak_rate_hz: float = 0.0,
 ) -> dict[str, object]:
-    """Cross-validate without exposing held-out spikes to place-field fitting."""
+    """Cross-validate place fields and unit selection within each training fold."""
+
+    context = _crossval_unit_qc_context.get()
+    if context is not None:
+        candidate_unit_ids = tuple(int(unit_id) for unit_id in spikes.units)
+        min_unit_spikes = int(context["min_unit_spikes"])
+        min_unit_mean_rate_hz = float(context["min_unit_mean_rate_hz"])
+        min_place_information_bits = float(context["min_place_information_bits"])
+        min_place_peak_rate_hz = float(context["min_place_peak_rate_hz"])
+    else:
+        candidate_unit_ids = tuple(int(unit_id) for unit_id in unit_ids)
 
     windows = _impl.decode_windows(linearized, decode_window_s)
     empty = {
@@ -98,7 +226,7 @@ def crossval_decode(
         "posterior_mean_position_cm": np.asarray([], dtype=float),
         "map_position_cm": np.asarray([], dtype=float),
     }
-    if windows.empty or not unit_ids:
+    if windows.empty or not candidate_unit_ids:
         return empty
 
     true_pos = pd.to_numeric(
@@ -147,21 +275,38 @@ def crossval_decode(
             _impl.sample_mask_in_intervals(times, train_intervals) & valid_position
         )
         training_spikes = _spikes_in_intervals(spikes, train_intervals)
-        rates = _impl.fit_place_fields(
+        occupancy = _impl.occupancy_seconds(
+            linear,
+            times,
+            train_sample_mask,
+            edges,
+        )
+        candidate_rates = _impl.fit_place_fields(
             linear=linear,
             times=times,
             valid=train_sample_mask,
             spikes=training_spikes,
-            unit_ids=unit_ids,
+            unit_ids=candidate_unit_ids,
             edges=edges,
             smoothing_bins=smoothing_bins,
         )
-        prior = _impl.occupancy_seconds(linear, times, train_sample_mask, edges)
-        prior = (prior + 1e-6) / float(np.nansum(prior + 1e-6))
+        fold_unit_ids, rates = _select_fold_units(
+            candidate_unit_ids=candidate_unit_ids,
+            rates=candidate_rates,
+            occupancy=occupancy,
+            training_spikes=training_spikes,
+            min_unit_spikes=min_unit_spikes,
+            min_unit_mean_rate_hz=min_unit_mean_rate_hz,
+            min_place_information_bits=min_place_information_bits,
+            min_place_peak_rate_hz=min_place_peak_rate_hz,
+        )
+        if not fold_unit_ids:
+            continue
+        prior = (occupancy + 1e-6) / float(np.nansum(occupancy + 1e-6))
         for row_index in fold:
             counts = _impl.spike_counts_for_window(
                 spikes,
-                unit_ids,
+                fold_unit_ids,
                 float(starts[row_index]),
                 float(ends[row_index]),
             )
@@ -213,6 +358,7 @@ def crossval_decode(
 
 
 _impl.unit_qc_table = unit_qc_table
+_impl.summarize_pair = summarize_pair
 _impl.crossval_decode = crossval_decode
 
 

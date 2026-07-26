@@ -171,15 +171,6 @@ def _metadata_values_match(
 
     first_value, first_dtype = first
     current_value, current_dtype = current
-    if columns == _SPIKE_RATE_SCALE_COLUMNS:
-        return bool(
-            np.isclose(
-                current_value,
-                first_value,
-                rtol=1e-5,
-                atol=1e-8,
-            )
-        )
     lower_precision_dtypes = [
         dtype for dtype in (first_dtype, current_dtype) if dtype is not None
     ]

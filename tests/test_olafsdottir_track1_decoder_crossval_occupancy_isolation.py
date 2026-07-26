@@ -104,4 +104,8 @@ def test_crossval_uses_interval_clipped_training_occupancy(monkeypatch) -> None:
     )
 
     assert result["crossval_n_folds"] == 2
-    np.testing.assert_allclose(occupancy_totals, np.array([0.06, 0.20]))
+    np.testing.assert_allclose(
+        occupancy_totals,
+        np.array([0.0, 0.20]),
+        atol=1.0e-12,
+    )

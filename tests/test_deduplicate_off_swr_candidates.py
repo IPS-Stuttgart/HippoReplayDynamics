@@ -2,6 +2,7 @@ import sys
 from pathlib import Path
 
 import pandas as pd
+import pytest
 
 sys.path.append(str(Path(__file__).resolve().parents[1] / "scripts"))
 
@@ -141,3 +142,24 @@ def _candidate(
         "nontrajectory_confident_claim": False,
         "margin_decision": "trajectory_confident",
     }
+
+
+
+def test_off_swr_candidate_dedup_rejects_fractional_event_index():
+    validation = pd.DataFrame(
+        [{"session": "Rat1/Open1", "event_index": 10.5, "null_index": 0}]
+    )
+
+    with pytest.raises(ValueError, match="event_index must contain integer identifiers"):
+        build_one_per_source_group_decisions(validation)
+
+
+def test_off_swr_candidate_dedup_accepts_integer_valued_float_event_index():
+    validation = pd.DataFrame(
+        [{"session": "Rat1/Open1", "event_index": 10.0, "null_index": 0}]
+    )
+
+    decisions = build_one_per_source_group_decisions(validation)
+
+    assert decisions["event_index"].eq(10).all()
+    assert decisions["source_event_group_id"].eq("Rat1/Open1|event=10").all()

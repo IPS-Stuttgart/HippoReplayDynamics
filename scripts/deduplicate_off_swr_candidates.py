@@ -153,12 +153,20 @@ def _rat_from_session(session: object) -> str:
     return str(session).split("/", 1)[0]
 
 
-def _source_group_id(session: object, event_index: object) -> str:
+def _integer_identifier_series(series: pd.Series, name: str) -> pd.Series:
+    if series.map(lambda value: isinstance(value, (bool, np.bool_))).any():
+        raise ValueError(f"{name} must contain integer identifiers")
     try:
-        event = int(float(event_index))
-    except (TypeError, ValueError):
-        event = event_index
-    return f"{session}|event={event}"
+        integer = pd.to_numeric(series, errors="raise").astype("Int64")
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ValueError(f"{name} must contain integer identifiers") from exc
+    if integer.isna().any():
+        raise ValueError(f"{name} must contain integer identifiers")
+    return integer.astype(int)
+
+
+def _source_group_id(session: object, event_index: object) -> str:
+    return f"{session}|event={int(event_index)}"
 
 
 def _prepare(frame: pd.DataFrame) -> pd.DataFrame:
@@ -172,7 +180,7 @@ def _prepare(frame: pd.DataFrame) -> pd.DataFrame:
     if "rat" not in out:
         out["rat"] = out["session"].map(_rat_from_session)
     out["rat"] = out["rat"].astype(str)
-    out["event_index"] = pd.to_numeric(out["event_index"], errors="raise").astype(int)
+    out["event_index"] = _integer_identifier_series(out["event_index"], "event_index")
     if "null_index" in out:
         out["null_index"] = pd.to_numeric(out["null_index"], errors="coerce").astype("Int64")
     out["source_event_index"] = out["event_index"].astype(int)
@@ -198,7 +206,10 @@ def _key_set(frame: pd.DataFrame) -> set[tuple[object, ...]]:
         return set()
     normalized = frame[list(KEY_COLUMNS)].copy()
     normalized["session"] = normalized["session"].astype(str)
-    normalized["event_index"] = pd.to_numeric(normalized["event_index"], errors="coerce").astype("Int64")
+    normalized["event_index"] = _integer_identifier_series(
+        normalized["event_index"],
+        "event_index",
+    )
     normalized["null_index"] = pd.to_numeric(normalized["null_index"], errors="coerce").astype("Int64")
     return set(map(tuple, normalized.astype(object).to_numpy()))
 
@@ -208,7 +219,10 @@ def _filter_keys(frame: pd.DataFrame, keys: set[tuple[object, ...]]) -> pd.DataF
         return frame.iloc[0:0].copy()
     normalized = frame[list(KEY_COLUMNS)].copy()
     normalized["session"] = normalized["session"].astype(str)
-    normalized["event_index"] = pd.to_numeric(normalized["event_index"], errors="coerce").astype("Int64")
+    normalized["event_index"] = _integer_identifier_series(
+        normalized["event_index"],
+        "event_index",
+    )
     normalized["null_index"] = pd.to_numeric(normalized["null_index"], errors="coerce").astype("Int64")
     mask = [tuple(row) in keys for row in normalized.astype(object).to_numpy()]
     return frame[pd.Series(mask, index=frame.index)].copy()

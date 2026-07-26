@@ -10,6 +10,7 @@ hiding unrelated ``TypeError`` exceptions from the implementation.
 from __future__ import annotations
 
 import inspect
+import re
 from typing import Any
 
 _PATCHED_FLAG = "_iterative_optional_score_kwarg_fallback_patch_applied"
@@ -105,21 +106,36 @@ def _unexpected_optional_keywords(
         return ()
 
     text = str(exc)
+    unexpected_keyword_error = any(
+        marker in text
+        for marker in (
+            "unexpected keyword",
+            "got an unexpected",
+            "invalid keyword",
+        )
+    )
     named = tuple(
         keyword
         for keyword in keywords
-        if keyword in text
-        and (
-            "unexpected keyword" in text
-            or "got an unexpected" in text
-            or "invalid keyword" in text
-        )
+        if unexpected_keyword_error and _mentions_exact_keyword(text, keyword)
     )
     if named:
         return named
     if keywords and "takes no keyword" in text:
         return keywords
     return ()
+
+
+def _mentions_exact_keyword(text: str, keyword: str) -> bool:
+    """Return whether an error message names ``keyword`` as one identifier."""
+
+    return (
+        re.search(
+            rf"(?<![0-9A-Za-z_]){re.escape(keyword)}(?![0-9A-Za-z_])",
+            text,
+        )
+        is not None
+    )
 
 
 __all__ = ["apply_score_optional_kwargs_fallback_patch"]

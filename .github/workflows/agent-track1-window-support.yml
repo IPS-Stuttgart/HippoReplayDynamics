@@ -4,6 +4,9 @@ on:
   push:
     branches:
       - agent/clip-track1-final-decode-window
+  pull_request:
+    branches:
+      - main
 
 permissions:
   contents: write
@@ -15,6 +18,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          ref: agent/clip-track1-final-decode-window
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
@@ -196,4 +200,4 @@ def test_decode_windows_reject_nonpositive_window_size() -> None:
             tests/test_olafsdottir_track1_decoder_window_support.py \
             .github/workflows/agent-track1-window-support.yml
           git commit -m "Clip Track1 decoding windows to position support"
-          git push origin HEAD:${GITHUB_REF_NAME}
+          git push origin HEAD:agent/clip-track1-final-decode-window

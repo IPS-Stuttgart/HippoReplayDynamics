@@ -132,6 +132,87 @@ def _spikes_in_intervals(spikes, intervals: list[tuple[float, float]]):
     )
 
 
+def _interval_sample_durations(
+    times: np.ndarray,
+    intervals: list[tuple[float, float]],
+) -> np.ndarray:
+    """Clip each sample's forward duration to the training intervals."""
+
+    times = np.asarray(times, dtype=float)
+    durations = np.zeros(times.shape, dtype=float)
+    if times.size == 0 or not intervals:
+        return durations
+
+    base_durations = _impl.sample_durations(times)
+    valid = (
+        np.isfinite(times)
+        & np.isfinite(base_durations)
+        & (base_durations > 0.0)
+    )
+    segment_ends = times + np.where(valid, base_durations, 0.0)
+    for start, end in intervals:
+        left = float(start)
+        right = float(end)
+        if not np.isfinite(left) or not np.isfinite(right) or right <= left:
+            continue
+        overlap = np.minimum(segment_ends, right) - np.maximum(times, left)
+        durations += np.where(valid, np.maximum(overlap, 0.0), 0.0)
+    return durations
+
+
+def _occupancy_seconds_in_intervals(
+    linear: np.ndarray,
+    times: np.ndarray,
+    valid: np.ndarray,
+    edges: np.ndarray,
+    intervals: list[tuple[float, float]],
+) -> np.ndarray:
+    """Accumulate occupancy without assigning held-out time to training samples."""
+
+    durations = _interval_sample_durations(times, intervals)
+    keep = (
+        np.asarray(valid, dtype=bool)
+        & np.isfinite(linear)
+        & np.isfinite(durations)
+        & (durations > 0.0)
+    )
+    bins = np.searchsorted(edges, linear[keep], side="right") - 1
+    bins = np.clip(bins, 0, edges.shape[0] - 2)
+    occupancy = np.zeros(edges.shape[0] - 1, dtype=float)
+    np.add.at(occupancy, bins, durations[keep])
+    return occupancy
+
+
+def _fit_place_fields_with_occupancy(
+    *,
+    linear: np.ndarray,
+    times: np.ndarray,
+    valid: np.ndarray,
+    spikes,
+    unit_ids: tuple[int, ...],
+    edges: np.ndarray,
+    smoothing_bins: int,
+    occupancy: np.ndarray,
+) -> np.ndarray:
+    """Fit rates using the same fold-isolated occupancy as the decoder prior."""
+
+    fields = np.zeros((len(unit_ids), edges.shape[0] - 1), dtype=float)
+    for unit_index, unit_id in enumerate(unit_ids):
+        unit_times = spikes.spike_times_s[spikes.unit_ids == int(unit_id)]
+        spike_pos = _impl.interpolate_position_at_times(
+            unit_times,
+            times,
+            linear,
+            valid,
+        )
+        counts, _ = np.histogram(spike_pos[np.isfinite(spike_pos)], bins=edges)
+        with np.errstate(divide="ignore", invalid="ignore"):
+            rates = counts / occupancy
+        rates[~np.isfinite(rates)] = 0.0
+        fields[unit_index, :] = _impl.smooth_1d(rates, smoothing_bins)
+    return fields
+
+
 def _select_fold_units(
     *,
     candidate_unit_ids: tuple[int, ...],
@@ -200,7 +281,7 @@ def crossval_decode(
     min_place_information_bits: float = 0.0,
     min_place_peak_rate_hz: float = 0.0,
 ) -> dict[str, object]:
-    """Cross-validate place fields and unit selection within each training fold."""
+    """Cross-validate place fields, occupancy, and unit selection by training fold."""
 
     context = _crossval_unit_qc_context.get()
     if context is not None:
@@ -275,13 +356,14 @@ def crossval_decode(
             _impl.sample_mask_in_intervals(times, train_intervals) & valid_position
         )
         training_spikes = _spikes_in_intervals(spikes, train_intervals)
-        occupancy = _impl.occupancy_seconds(
+        occupancy = _occupancy_seconds_in_intervals(
             linear,
             times,
             train_sample_mask,
             edges,
+            train_intervals,
         )
-        candidate_rates = _impl.fit_place_fields(
+        candidate_rates = _fit_place_fields_with_occupancy(
             linear=linear,
             times=times,
             valid=train_sample_mask,
@@ -289,6 +371,7 @@ def crossval_decode(
             unit_ids=candidate_unit_ids,
             edges=edges,
             smoothing_bins=smoothing_bins,
+            occupancy=occupancy,
         )
         fold_unit_ids, rates = _select_fold_units(
             candidate_unit_ids=candidate_unit_ids,

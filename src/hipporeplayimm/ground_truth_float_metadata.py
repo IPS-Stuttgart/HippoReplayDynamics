@@ -12,6 +12,8 @@ import pandas as pd
 _FLOAT_PATCHED_FLAG = "_ground_truth_strict_float_metadata_patch_applied"
 _BOOL_PATCHED_FLAG = "_ground_truth_strict_bool_metadata_patch_applied"
 _CONFIG_PATCHED_FLAG = "_ground_truth_config_numeric_validation_patch_applied"
+_DIRECT_VISIT_PATCHED_FLAG = "_ground_truth_direct_visit_numeric_validation_patch_applied"
+_DIRECT_WELL_WINDOW_PATCHED_FLAG = "_ground_truth_direct_well_window_numeric_validation_patch_applied"
 _SCORE_BOOL_PATCHED_FLAG = "_score_metadata_strict_bool_metadata_patch_applied"
 _EVIDENCE_BOOL_PATCHED_FLAG = "_evidence_reporting_strict_bool_metadata_patch_applied"
 
@@ -133,6 +135,8 @@ def apply_ground_truth_float_metadata_patch() -> None:
         gt.GroundTruthSensitivityConfig.ground_truth_configs = ground_truth_configs
         setattr(gt, _CONFIG_PATCHED_FLAG, True)
 
+    _patch_direct_ground_truth_numeric_helpers(gt)
+
     from . import score_metadata as score_meta
 
     if not getattr(score_meta, _SCORE_BOOL_PATCHED_FLAG, False):
@@ -160,6 +164,65 @@ def apply_ground_truth_float_metadata_patch() -> None:
         evidence._coerce_bool_series = coerce_bool_series
         _synchronize_coerce_bool_series_aliases(coerce_bool_series)
         setattr(evidence, _EVIDENCE_BOOL_PATCHED_FLAG, True)
+
+
+def _patch_direct_ground_truth_numeric_helpers(gt: Any) -> None:
+    """Validate direct helper arguments that bypass dataclass constructors."""
+
+    current_visit = gt.first_post_ripple_well_visit
+    if not getattr(current_visit, _DIRECT_VISIT_PATCHED_FLAG, False):
+
+        @wraps(current_visit)
+        def first_post_ripple_well_visit(
+            position: np.ndarray,
+            wells: pd.DataFrame,
+            ripple_peak: float,
+            *,
+            visit_radius_cm: float,
+            min_dwell_s: float,
+            future_horizon_s: float,
+        ):
+            peak = _parse_config_scalar("ripple_peak", ripple_peak)
+            radius = _parse_positive_config_value("visit_radius_cm", visit_radius_cm)
+            dwell = _parse_nonnegative_config_value("min_dwell_s", min_dwell_s)
+            horizon = _parse_positive_config_value("future_horizon_s", future_horizon_s)
+            return current_visit(
+                position,
+                wells,
+                peak,
+                visit_radius_cm=radius,
+                min_dwell_s=dwell,
+                future_horizon_s=horizon,
+            )
+
+        setattr(first_post_ripple_well_visit, _DIRECT_VISIT_PATCHED_FLAG, True)
+        gt.first_post_ripple_well_visit = first_post_ripple_well_visit
+
+    current_infer = gt.infer_well_locations_from_arrays
+    if not getattr(current_infer, _DIRECT_WELL_WINDOW_PATCHED_FLAG, False):
+
+        @wraps(current_infer)
+        def infer_well_locations_from_arrays(
+            position: np.ndarray,
+            well_sequence: np.ndarray | None,
+            well_arrival_window_s: float = 1.0,
+        ):
+            window = _parse_positive_config_value(
+                "well_arrival_window_s",
+                well_arrival_window_s,
+            )
+            return current_infer(
+                position,
+                well_sequence,
+                well_arrival_window_s=window,
+            )
+
+        setattr(
+            infer_well_locations_from_arrays,
+            _DIRECT_WELL_WINDOW_PATCHED_FLAG,
+            True,
+        )
+        gt.infer_well_locations_from_arrays = infer_well_locations_from_arrays
 
 
 def _validate_ground_truth_config(config: Any) -> None:

@@ -144,10 +144,10 @@ def _candidate(
     }
 
 
-
-def test_off_swr_candidate_dedup_rejects_fractional_event_index():
+@pytest.mark.parametrize("event_index", [10.5, True, None, "not-an-index"])
+def test_off_swr_candidate_dedup_rejects_invalid_event_index(event_index: object):
     validation = pd.DataFrame(
-        [{"session": "Rat1/Open1", "event_index": 10.5, "null_index": 0}]
+        [{"session": "Rat1/Open1", "event_index": event_index, "null_index": 0}]
     )
 
     with pytest.raises(ValueError, match="event_index must contain integer identifiers"):

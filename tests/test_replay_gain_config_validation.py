@@ -12,7 +12,7 @@ from hipporeplayimm.accuracy_upgrades import ReplayGainConfig
     [
         ("prior_observed_spikes", -1.0, "prior_observed_spikes must be nonnegative"),
         ("prior_observed_spikes", np.nan, "prior_observed_spikes must be finite"),
-        ("prior_expected_spikes", -1.0, "prior_expected_spikes must be nonnegative"),
+        ("prior_expected_spikes", 0.0, "prior_expected_spikes must be positive"),
         ("prior_expected_spikes", np.inf, "prior_expected_spikes must be finite"),
         ("min_gain", 0.0, "min_gain must be positive"),
         ("max_gain", -1.0, "max_gain must be positive"),
@@ -38,13 +38,13 @@ def test_replay_gain_config_rejects_reversed_bounds():
 def test_replay_gain_config_accepts_and_canonicalizes_scalar_wrappers():
     config = ReplayGainConfig(
         prior_observed_spikes=np.array(0.0),
-        prior_expected_spikes=np.float32(0.0),
+        prior_expected_spikes=np.float32(0.5),
         min_gain=np.float32(0.2),
         max_gain=np.array(0.3),
     )
 
     assert config.prior_observed_spikes == 0.0
-    assert config.prior_expected_spikes == 0.0
+    assert np.isclose(config.prior_expected_spikes, 0.5)
     assert np.isclose(config.min_gain, 0.2)
     assert config.max_gain == 0.3
     assert all(

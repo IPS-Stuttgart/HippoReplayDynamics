@@ -12,6 +12,7 @@ import pandas as pd
 _MISSING_PREDICTED_CANDIDATE_OPTION = "--state-space-momentum-predicted-candidate-top-k"
 _STRING_TYPES = (str, bytes, np.str_, np.bytes_)
 _POSTERIOR_CALIBRATION_GROUP_PATCH = "_hipporeplayimm_retains_missing_calibration_groups"
+_BOOTSTRAP_DELTA_VALIDATION_PATCH = "_hipporeplayimm_filters_nonfinite_bootstrap_delta"
 
 
 def apply_cli_float_values_validation_patch() -> None:
@@ -22,6 +23,7 @@ def apply_cli_float_values_validation_patch() -> None:
     _patch_parse_float_values(_cli)
     _patch_state_space_predicted_candidate_argument(_cli)
     _patch_statistical_resampling_counts()
+    _patch_legacy_bootstrap_delta_ci(_cli)
     _patch_posterior_calibration_missing_groups()
 
 
@@ -79,6 +81,47 @@ def _patch_statistical_resampling_counts() -> None:
         "paired_sign_flip_p_value",
         "n_permutations",
     )
+
+
+def _patch_legacy_bootstrap_delta_ci(_cli) -> None:
+    """Keep the legacy flat bootstrap on finite metrics and validated counts."""
+
+    from . import benchmarks
+
+    current = benchmarks.bootstrap_delta_ci
+    if getattr(current, _BOOTSTRAP_DELTA_VALIDATION_PATCH, False):
+        _cli.bootstrap_delta_ci = current
+        return
+
+    @wraps(current)
+    def bootstrap_delta_ci(
+        rows: pd.DataFrame,
+        model: str = "imm",
+        value_column: str = "delta_vs_best_static",
+        n_bootstrap: int = 1000,
+        random_seed: int = 1,
+    ) -> tuple[float, float]:
+        validated_n_bootstrap = _positive_integer_count("n_bootstrap", n_bootstrap)
+        target_mask = rows["model"] == model
+        target_values = pd.to_numeric(rows.loc[target_mask, value_column], errors="coerce")
+        finite_target = pd.Series(
+            np.isfinite(target_values.to_numpy(dtype=float)),
+            index=target_values.index,
+        )
+        invalid_target_indices = finite_target.index[~finite_target.to_numpy()]
+        filtered = rows.drop(index=invalid_target_indices)
+        return current(
+            filtered,
+            model=model,
+            value_column=value_column,
+            n_bootstrap=validated_n_bootstrap,
+            random_seed=random_seed,
+        )
+
+    setattr(bootstrap_delta_ci, _BOOTSTRAP_DELTA_VALIDATION_PATCH, True)
+    bootstrap_delta_ci._hipporeplayimm_original = current  # type: ignore[attr-defined]
+    benchmarks.bootstrap_delta_ci = bootstrap_delta_ci
+    _cli.bootstrap_delta_ci = bootstrap_delta_ci
 
 
 def _patch_posterior_calibration_missing_groups() -> None:

@@ -132,6 +132,58 @@ def _spikes_in_intervals(spikes, intervals: list[tuple[float, float]]):
     )
 
 
+def decode_windows(linearized: pd.DataFrame, decode_window_s: float) -> pd.DataFrame:
+    """Create decoding windows bounded by the valid position support."""
+
+    window = float(decode_window_s)
+    if not np.isfinite(window) or window <= 0.0:
+        raise ValueError("decode_window_s must be finite and positive")
+
+    times = pd.to_numeric(
+        linearized["time_s"], errors="coerce"
+    ).to_numpy(dtype=float)
+    linear = pd.to_numeric(
+        linearized["linear_position_cm"], errors="coerce"
+    ).to_numpy(dtype=float)
+    valid = _impl.valid_position_mask(linearized)
+    columns = ["start_time_s", "end_time_s", "true_position_cm"]
+    if not np.any(valid):
+        return pd.DataFrame(columns=columns)
+
+    start = float(np.nanmin(times[valid]))
+    end = float(np.nanmax(times[valid]))
+    if end <= start:
+        return pd.DataFrame(columns=columns)
+
+    duration = end - start
+    n_complete = int(np.floor(duration / window))
+    edges = start + np.arange(n_complete + 1, dtype=float) * window
+    tolerance = 16.0 * np.finfo(float).eps * max(
+        abs(start), abs(end), abs(duration), 1.0
+    )
+    if edges[-1] < end - tolerance:
+        edges = np.append(edges, end)
+    else:
+        edges[-1] = end
+
+    rows: list[dict[str, float]] = []
+    last_window = edges.shape[0] - 2
+    for index, (left, right) in enumerate(
+        zip(edges[:-1], edges[1:], strict=True)
+    ):
+        upper = times <= right if index == last_window else times < right
+        keep = valid & (times >= left) & upper
+        if np.any(keep):
+            rows.append(
+                {
+                    "start_time_s": float(left),
+                    "end_time_s": float(right),
+                    "true_position_cm": float(np.nanmedian(linear[keep])),
+                }
+            )
+    return pd.DataFrame(rows, columns=columns)
+
+
 def _select_fold_units(
     *,
     candidate_unit_ids: tuple[int, ...],
@@ -359,6 +411,7 @@ def crossval_decode(
 
 _impl.unit_qc_table = unit_qc_table
 _impl.summarize_pair = summarize_pair
+_impl.decode_windows = decode_windows
 _impl.crossval_decode = crossval_decode
 
 

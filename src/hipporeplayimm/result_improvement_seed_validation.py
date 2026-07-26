@@ -111,10 +111,12 @@ def _finite_model_metric_rows(
 def apply_result_improvement_seed_validation_patch() -> None:
     """Install strict seed, metric-value, and replay-emission validation."""
 
+    from . import replay_gain_bound_patch
     from . import result_improvement_emission_validation
     from . import result_improvements
     from . import return_trajectory_validation
 
+    replay_gain_bound_patch.apply_replay_gain_bound_patch()
     result_improvement_emission_validation.apply_result_improvement_emission_validation_patch()
     return_trajectory_validation.apply_return_trajectory_validation_patch()
 

@@ -44,13 +44,14 @@ def test_decode_windows_clip_final_bin_to_valid_position_support() -> None:
 
     windows = module.decode_windows(_linearized_position(), 0.10)
 
-    assert windows["end_time_s"].iloc[-1] == pytest.approx(0.26)
-    assert np.all(windows["end_time_s"].to_numpy(dtype=float) <= 0.26)
+    closed_end = np.nextafter(0.26, np.inf)
+    assert windows["end_time_s"].iloc[-1] == closed_end
+    assert np.all(windows["end_time_s"].to_numpy(dtype=float) <= closed_end)
     assert windows["true_position_cm"].iloc[-1] == pytest.approx(3.0)
 
     spikes = module.TrackSpikes(
-        spike_times_s=np.array([0.25, 0.28], dtype=float),
-        unit_ids=np.array([1, 1], dtype=int),
+        spike_times_s=np.array([0.25, 0.26, 0.28], dtype=float),
+        unit_ids=np.array([1, 1, 1], dtype=int),
         units=(1,),
     )
     last = windows.iloc[-1]
@@ -61,7 +62,7 @@ def test_decode_windows_clip_final_bin_to_valid_position_support() -> None:
         float(last["end_time_s"]),
     )
 
-    np.testing.assert_array_equal(counts, np.array([1.0]))
+    np.testing.assert_array_equal(counts, np.array([2.0]))
 
 
 def test_decode_windows_reject_nonpositive_window_size() -> None:

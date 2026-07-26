@@ -23,7 +23,7 @@ from hipporeplayimm.encoding import EncodingConfig, _validate_encoding_config, f
 def test_encoding_boolean_options_reject_non_boolean_values(name: str, value: object) -> None:
     config = EncodingConfig(**{name: value})
 
-    with pytest.raises(ValueError, match=rf"{name} must be a boolean scalar"):
+    with pytest.raises(TypeError, match=rf"{name} must be a boolean scalar"):
         _validate_encoding_config(config)
 
 
@@ -40,7 +40,7 @@ def test_encoding_boolean_options_accept_boolean_scalars(name: str, value: objec
 def test_place_field_fit_rejects_invalid_boolean_before_reading_session(name: str) -> None:
     config = EncodingConfig(**{name: "false"})
 
-    with pytest.raises(ValueError, match=rf"{name} must be a boolean scalar"):
+    with pytest.raises(TypeError, match=rf"{name} must be a boolean scalar"):
         fit_place_field_encoding(object(), config)
 
 
@@ -49,5 +49,5 @@ def test_clusterless_fit_uses_patched_nested_encoding_validator(name: str) -> No
     encoding = EncodingConfig(**{name: "false"})
     config = ClusterlessMarkConfig(encoding=encoding)
 
-    with pytest.raises(ValueError, match=rf"{name} must be a boolean scalar"):
+    with pytest.raises(TypeError, match=rf"{name} must be a boolean scalar"):
         fit_clusterless_mark_encoding(object(), config)

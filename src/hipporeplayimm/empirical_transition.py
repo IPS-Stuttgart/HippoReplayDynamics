@@ -8,7 +8,7 @@ import numpy as np
 from scipy.sparse import csr_matrix
 
 from .data import ReplaySession
-from .encoding import EncodingModel, LogEmissionTensor, _clean_position, _speed_cm_s, _times_in_intervals
+from .encoding import EncodingModel, LogEmissionTensor, _clean_position, _speed_cm_s
 from .models import EventScore, _posterior_diagnostics
 from .state_space_first_order import _forward_backward_first_order
 from .state_space_utils import _mean_entropy
@@ -72,41 +72,34 @@ def _validated_transition_matrix(transition: csr_matrix, n_bins: int) -> csr_mat
     return matrix
 
 
-def _adjacent_times_share_interval(times: np.ndarray, intervals: np.ndarray) -> np.ndarray:
-    """Return whether each adjacent timestamp pair lies in one common interval."""
-
-    shared = np.zeros(max(times.shape[0] - 1, 0), dtype=bool)
-    if shared.size == 0:
-        return shared
-    for start, end in intervals:
-        shared |= (
-            (times[:-1] >= start)
-            & (times[:-1] <= end)
-            & (times[1:] >= start)
-            & (times[1:] <= end)
-        )
-    return shared
-
-
-def _speed_cm_s_within_intervals(
+def _eligible_adjacent_run_transitions(
     times: np.ndarray,
     xy: np.ndarray,
+    bins: np.ndarray,
     intervals: np.ndarray,
+    min_speed_cm_s: float,
 ) -> np.ndarray:
-    """Estimate speed independently inside each interval.
+    """Return adjacent sample pairs valid in at least one common run interval.
 
-    A global finite difference lets samples from the next run bout influence the
-    speed at the end of the current bout (and vice versa). Long inter-bout gaps
-    can therefore make genuinely fast boundary samples look slow and remove
-    otherwise valid within-bout transition counts.
+    Speed is estimated independently inside each interval. Pair eligibility is
+    accumulated directly so overlapping or endpoint-sharing intervals cannot
+    overwrite one another and the result is independent of interval row order.
     """
 
-    speed = np.zeros(times.shape, dtype=float)
+    eligible = np.zeros(max(times.shape[0] - 1, 0), dtype=bool)
+    if eligible.size == 0:
+        return eligible
+
     for start, end in intervals:
-        in_interval = (times >= start) & (times <= end)
-        if np.any(in_interval):
-            speed[in_interval] = _speed_cm_s(times[in_interval], xy[in_interval])
-    return speed
+        indices = np.flatnonzero((times >= start) & (times <= end))
+        if indices.size < 2:
+            continue
+        local_speed = _speed_cm_s(times[indices], xy[indices])
+        local_valid = (local_speed >= min_speed_cm_s) & (bins[indices] >= 0)
+        adjacent = np.diff(indices) == 1
+        valid_pairs = adjacent & local_valid[:-1] & local_valid[1:]
+        eligible[indices[:-1][valid_pairs]] = True
+    return eligible
 
 
 def _finite_real_scalar(name: str, value: object) -> float:
@@ -174,20 +167,22 @@ def fit_empirical_transition_matrix(
     if times.shape[0] > 1 and np.any(np.diff(times) <= 0.0):
         raise ValueError("position times must be strictly increasing to fit empirical transitions")
     xy = position[:, 1:3]
-    speed = _speed_cm_s_within_intervals(times, xy, session.run_times)
-    in_run = _times_in_intervals(times, session.run_times)
-    same_run_interval = _adjacent_times_share_interval(times, session.run_times)
     bins = encoding.positions_to_flat_bins(xy)
-    valid = in_run & (speed >= min_speed) & (bins >= 0)
+    eligible_pairs = _eligible_adjacent_run_transitions(
+        times,
+        xy,
+        bins,
+        session.run_times,
+        min_speed,
+    )
     n_bins = encoding.n_bins
     counts = np.zeros((n_bins, n_bins), dtype=float)
     if self_loop_count > 0.0:
         counts += np.eye(n_bins) * self_loop_count
-    for idx in range(len(bins) - 1):
-        if valid[idx] and valid[idx + 1] and same_run_interval[idx]:
-            src = int(bins[idx])
-            dst = int(bins[idx + 1])
-            counts[dst, src] += 1.0
+    for idx in np.flatnonzero(eligible_pairs):
+        src = int(bins[idx])
+        dst = int(bins[idx + 1])
+        counts[dst, src] += 1.0
     empty_cols = counts.sum(axis=0) <= 0.0
     counts[empty_cols, empty_cols] = 1.0
     probs = counts / np.maximum(counts.sum(axis=0, keepdims=True), np.finfo(float).tiny)

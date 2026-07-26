@@ -3,8 +3,15 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
+from hipporeplayimm import duration_occupancy
 from hipporeplayimm.encoding import LogEmissionTensor
 from hipporeplayimm.sparse_momentum_duration_validation import _valid_transition_durations
+from hipporeplayimm.state_space_displacement_momentum import (
+    _duration_scale_at as displacement_duration_scale_at,
+)
+from hipporeplayimm.state_space_displacement_momentum import (
+    _time_scales as displacement_time_scales,
+)
 from hipporeplayimm.state_space_model import StateSpaceDecoderConfig
 from hipporeplayimm.state_space_sparse_momentum import (
     _duration_adjusted_decays,
@@ -44,6 +51,30 @@ def test_sparse_momentum_duration_helpers_preserve_valid_outputs() -> None:
 
     np.testing.assert_allclose(decays, np.array([0.9, 0.81, 0.9], dtype=float))
     np.testing.assert_allclose(scales, np.array([1.0, 2.0, 0.5], dtype=float))
+
+
+@pytest.mark.parametrize(
+    "time_scale_helper",
+    (
+        _time_scales,
+        displacement_time_scales,
+        duration_occupancy._time_scales,
+    ),
+)
+def test_momentum_time_scale_helpers_reject_unrepresentable_duration_ratios(time_scale_helper) -> None:
+    durations = np.array([np.finfo(float).tiny, np.finfo(float).max], dtype=float)
+
+    with pytest.raises(ValueError, match="momentum time scales must be finite and positive"):
+        time_scale_helper(durations)
+
+
+def test_displacement_duration_scale_rejects_unrepresentable_ratio() -> None:
+    with pytest.raises(ValueError, match="momentum duration scale must be finite and positive"):
+        displacement_duration_scale_at(
+            np.array([np.finfo(float).max], dtype=float),
+            0,
+            np.finfo(float).tiny,
+        )
 
 
 def test_sparse_momentum_exact_rejects_nonfinite_bin_centers() -> None:

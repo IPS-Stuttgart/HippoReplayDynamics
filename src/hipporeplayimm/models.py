@@ -104,9 +104,11 @@ class StationaryModel:
     def score(self, emissions: LogEmissionTensor, bin_centers: np.ndarray) -> EventScore:
         bin_centers = _validate_score_inputs(emissions, bin_centers)
         cumulative_log_likelihood = np.cumsum(emissions.log_likelihood, axis=0) - np.log(emissions.n_bins)
+        logp = float(logsumexp(cumulative_log_likelihood[-1]))
+        if not np.isfinite(logp):
+            raise ValueError("stationary model has no finite path mass")
         trajectory_log_posterior = _normalize_log_weights_by_row(cumulative_log_likelihood)
         terminal_log_posterior = trajectory_log_posterior[-1]
-        logp = float(logsumexp(cumulative_log_likelihood[-1]))
         return EventScore(
             self.name,
             logp,

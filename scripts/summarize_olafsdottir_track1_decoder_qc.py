@@ -132,6 +132,56 @@ def _spikes_in_intervals(spikes, intervals: list[tuple[float, float]]):
     )
 
 
+def decode_windows(linearized: pd.DataFrame, decode_window_s: float) -> pd.DataFrame:
+    """Create decoding windows bounded by the valid position support."""
+
+    window = float(decode_window_s)
+    if not np.isfinite(window) or window <= 0.0:
+        raise ValueError("decode_window_s must be finite and positive")
+
+    times = pd.to_numeric(
+        linearized["time_s"], errors="coerce"
+    ).to_numpy(dtype=float)
+    linear = pd.to_numeric(
+        linearized["linear_position_cm"], errors="coerce"
+    ).to_numpy(dtype=float)
+    valid = _impl.valid_position_mask(linearized)
+    columns = ["start_time_s", "end_time_s", "true_position_cm"]
+    if not np.any(valid):
+        return pd.DataFrame(columns=columns)
+
+    start = float(np.nanmin(times[valid]))
+    end = float(np.nanmax(times[valid]))
+    if end <= start:
+        return pd.DataFrame(columns=columns)
+
+    duration = end - start
+    tolerance = 16.0 * np.finfo(float).eps * max(
+        abs(start), abs(end), abs(duration), 1.0
+    )
+    closed_end = float(np.nextafter(end, np.inf))
+    edges = np.arange(start, end, window, dtype=float)
+    if edges.size == 0:
+        edges = np.asarray([start], dtype=float)
+    if edges[-1] < end - tolerance:
+        edges = np.append(edges, closed_end)
+    else:
+        edges[-1] = closed_end
+
+    rows: list[dict[str, float]] = []
+    for left, right in zip(edges[:-1], edges[1:], strict=True):
+        keep = valid & (times >= left) & (times < right)
+        if np.any(keep):
+            rows.append(
+                {
+                    "start_time_s": float(left),
+                    "end_time_s": float(right),
+                    "true_position_cm": float(np.nanmedian(linear[keep])),
+                }
+            )
+    return pd.DataFrame(rows, columns=columns)
+
+
 def _select_fold_units(
     *,
     candidate_unit_ids: tuple[int, ...],
@@ -359,6 +409,7 @@ def crossval_decode(
 
 _impl.unit_qc_table = unit_qc_table
 _impl.summarize_pair = summarize_pair
+_impl.decode_windows = decode_windows
 _impl.crossval_decode = crossval_decode
 
 

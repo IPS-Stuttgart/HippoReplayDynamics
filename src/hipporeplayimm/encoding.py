@@ -703,11 +703,10 @@ def _smooth_count_rows(
 def _speed_cm_s(times: np.ndarray, xy: np.ndarray) -> np.ndarray:
     if times.shape[0] < 2:
         return np.zeros(times.shape, dtype=float)
-    dt = np.gradient(times)
-    dx = np.gradient(xy[:, 0])
-    dy = np.gradient(xy[:, 1])
     with np.errstate(divide="ignore", invalid="ignore"):
-        speed = np.sqrt(dx * dx + dy * dy) / dt
+        dx = np.gradient(xy[:, 0], times)
+        dy = np.gradient(xy[:, 1], times)
+        speed = np.sqrt(dx * dx + dy * dy)
     return np.nan_to_num(speed, nan=0.0, posinf=0.0, neginf=0.0)
 
 

@@ -30,6 +30,7 @@ def test_bootstrap_delta_ci_filters_nonfinite_and_malformed_target_metrics():
         random_seed=7,
     )
 
+    # Filtering must preserve the target model's finite values and duplicate indices.
     assert actual == expected
     assert np.isfinite(actual).all()
 

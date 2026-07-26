@@ -121,7 +121,7 @@ def _patch_replay_gain_config_init(accuracy_upgrades) -> None:
             "prior_expected_spikes",
             self.prior_expected_spikes,
         )
-        min_gain = _coerce_positive_real("min_gain", self.min_gain)
+        min_gain = _coerce_nonnegative_real("min_gain", self.min_gain)
         max_gain = _coerce_positive_real("max_gain", self.max_gain)
         if min_gain > max_gain:
             raise ValueError("min_gain must be less than or equal to max_gain")

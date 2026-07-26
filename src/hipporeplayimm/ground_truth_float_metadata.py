@@ -14,10 +14,14 @@ from .data_cell_id_validation import _coerce_integral_ids
 _FLOAT_PATCHED_FLAG = "_ground_truth_strict_float_metadata_patch_applied"
 _BOOL_PATCHED_FLAG = "_ground_truth_strict_bool_metadata_patch_applied"
 _CONFIG_PATCHED_FLAG = "_ground_truth_config_numeric_validation_patch_applied"
-_DIRECT_ACTIVE_GOAL_PATCHED_FLAG = "_ground_truth_direct_active_goal_numeric_validation_patch_applied"
+_DIRECT_ACTIVE_GOAL_NUMERIC_PATCHED_FLAG = (
+    "_ground_truth_direct_active_goal_numeric_validation_patch_applied"
+)
 _DIRECT_VISIT_PATCHED_FLAG = "_ground_truth_direct_visit_numeric_validation_patch_applied"
 _DIRECT_WELL_WINDOW_PATCHED_FLAG = "_ground_truth_direct_well_window_numeric_validation_patch_applied"
-_DIRECT_ACTIVE_GOAL_PATCHED_FLAG = "_ground_truth_direct_active_goal_well_id_validation_patch_applied"
+_DIRECT_ACTIVE_GOAL_WELL_ID_PATCHED_FLAG = (
+    "_ground_truth_direct_active_goal_well_id_validation_patch_applied"
+)
 _SCORE_BOOL_PATCHED_FLAG = "_score_metadata_strict_bool_metadata_patch_applied"
 _EVIDENCE_BOOL_PATCHED_FLAG = "_evidence_reporting_strict_bool_metadata_patch_applied"
 
@@ -173,16 +177,24 @@ def apply_ground_truth_float_metadata_patch() -> None:
 def _patch_direct_ground_truth_numeric_helpers(gt: Any) -> None:
     """Validate direct helper arguments that bypass dataclass constructors."""
 
-    current_active_goal = gt.active_goal_at_time
-    if not getattr(current_active_goal, _DIRECT_ACTIVE_GOAL_PATCHED_FLAG, False):
+    current_active_goal_numeric = gt.active_goal_at_time
+    if not getattr(
+        current_active_goal_numeric,
+        _DIRECT_ACTIVE_GOAL_NUMERIC_PATCHED_FLAG,
+        False,
+    ):
 
-        @wraps(current_active_goal)
-        def active_goal_at_time(session: Any, time_s: float):
+        @wraps(current_active_goal_numeric)
+        def active_goal_at_time_numeric(session: Any, time_s: float):
             time_value = _parse_config_scalar("time_s", time_s)
-            return current_active_goal(session, time_value)
+            return current_active_goal_numeric(session, time_value)
 
-        setattr(active_goal_at_time, _DIRECT_ACTIVE_GOAL_PATCHED_FLAG, True)
-        gt.active_goal_at_time = active_goal_at_time
+        setattr(
+            active_goal_at_time_numeric,
+            _DIRECT_ACTIVE_GOAL_NUMERIC_PATCHED_FLAG,
+            True,
+        )
+        gt.active_goal_at_time = active_goal_at_time_numeric
 
     current_visit = gt.first_post_ripple_well_visit
     if not getattr(current_visit, _DIRECT_VISIT_PATCHED_FLAG, False):
@@ -241,16 +253,27 @@ def _patch_direct_ground_truth_numeric_helpers(gt: Any) -> None:
         )
         gt.infer_well_locations_from_arrays = infer_well_locations_from_arrays
 
-    current_active_goal = gt.active_goal_at_time
-    if not getattr(current_active_goal, _DIRECT_ACTIVE_GOAL_PATCHED_FLAG, False):
+    current_active_goal_well_id = gt.active_goal_at_time
+    if not getattr(
+        current_active_goal_well_id,
+        _DIRECT_ACTIVE_GOAL_WELL_ID_PATCHED_FLAG,
+        False,
+    ):
 
-        @wraps(current_active_goal)
-        def active_goal_at_time(session: Any, time_s: float) -> int | None:
+        @wraps(current_active_goal_well_id)
+        def active_goal_at_time_well_id(
+            session: Any,
+            time_s: float,
+        ) -> int | None:
             _validate_well_sequence_ids(session.well_sequence)
-            return current_active_goal(session, time_s)
+            return current_active_goal_well_id(session, time_s)
 
-        setattr(active_goal_at_time, _DIRECT_ACTIVE_GOAL_PATCHED_FLAG, True)
-        gt.active_goal_at_time = active_goal_at_time
+        setattr(
+            active_goal_at_time_well_id,
+            _DIRECT_ACTIVE_GOAL_WELL_ID_PATCHED_FLAG,
+            True,
+        )
+        gt.active_goal_at_time = active_goal_at_time_well_id
 
 
 def _validate_well_table_ids(wells: Any) -> None:

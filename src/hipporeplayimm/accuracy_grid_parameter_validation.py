@@ -117,7 +117,7 @@ def _patch_replay_gain_config_init(accuracy_upgrades) -> None:
             "prior_observed_spikes",
             self.prior_observed_spikes,
         )
-        prior_expected_spikes = _coerce_nonnegative_real(
+        prior_expected_spikes = _coerce_positive_real(
             "prior_expected_spikes",
             self.prior_expected_spikes,
         )

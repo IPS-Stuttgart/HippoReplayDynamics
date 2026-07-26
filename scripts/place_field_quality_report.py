@@ -4,11 +4,19 @@
 from __future__ import annotations
 
 import argparse
+from collections.abc import Iterable
 from pathlib import Path
 
 from hipporeplayimm.advanced_result_diagnostics import place_field_quality, stable_cell_ids
 from hipporeplayimm.data import load_replay_session
 from hipporeplayimm.encoding import EncodingConfig, fit_place_field_encoding
+
+
+def _format_stable_cell_ids(cell_ids: Iterable[object]) -> str:
+    """Return one integer cell ID per line without a phantom empty record."""
+
+    lines = [str(int(cell_id)) for cell_id in cell_ids]
+    return "\n".join(lines) + ("\n" if lines else "")
 
 
 def main() -> int:
@@ -42,7 +50,10 @@ def main() -> int:
     out = Path(args.output)
     out.mkdir(parents=True, exist_ok=True)
     quality.to_csv(out / "place_field_quality.csv", index=False)
-    (out / "stable_cell_ids.txt").write_text("\n".join(str(int(x)) for x in stable) + "\n", encoding="utf-8")
+    (out / "stable_cell_ids.txt").write_text(
+        _format_stable_cell_ids(stable),
+        encoding="utf-8",
+    )
     print(quality.sort_values("spatial_information_bits_per_spike", ascending=False).head(20).to_string(index=False))
     print(f"Stable cells: {len(stable)}")
     return 0

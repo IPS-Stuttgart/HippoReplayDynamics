@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from decimal import Decimal, InvalidOperation
+from functools import wraps
 from typing import Any
 
 import numpy as np
@@ -12,17 +13,94 @@ import pandas as pd
 _PATCHED_FLAG = "_ground_truth_strict_cell_id_metadata_patch_applied"
 _MISSING_TEXT_VALUES = frozenset({"", "nan", "na", "n/a", "none", "null", "<na>"})
 _CELL_ID_METADATA_ERROR = "score-table cell IDs cell ID metadata must contain integer values"
+_ACTIVE_GOAL_PATCHED_FLAG = "_ground_truth_active_goal_combined_validation_patch_applied"
+_FLOAT_HELPER_PATCHED_FLAG = "_ground_truth_active_goal_repair_wrapper"
+_LEGACY_ACTIVE_GOAL_MARKERS = (
+    "_ground_truth_direct_active_goal_numeric_validation_patch_applied",
+    "_ground_truth_direct_active_goal_well_id_validation_patch_applied",
+)
+_ACTIVE_GOAL_WRAPPER_CODE: Any | None = None
 
 
 def apply_ground_truth_cell_id_metadata_patch() -> None:
     """Reject malformed cell-ID metadata instead of silently truncating it."""
 
     from . import ground_truth as gt
+    from . import ground_truth_float_metadata as float_metadata
+
+    _patch_float_metadata_active_goal_helper(float_metadata)
+    _install_active_goal_validation(gt, float_metadata)
 
     if _ground_truth_cell_id_metadata_patch_current(gt):
         return
     gt._parse_cell_ids = _parse_cell_ids_strict
     setattr(gt, _PATCHED_FLAG, True)
+
+
+def _patch_float_metadata_active_goal_helper(float_metadata: Any) -> None:
+    """Repair active-goal validation after every legacy float-helper refresh."""
+
+    current = float_metadata._patch_direct_ground_truth_numeric_helpers
+    if getattr(current, _FLOAT_HELPER_PATCHED_FLAG, False):
+        return
+
+    @wraps(current)
+    def patch_direct_ground_truth_numeric_helpers(gt: Any) -> None:
+        current(gt)
+        _install_active_goal_validation(gt, float_metadata)
+
+    setattr(patch_direct_ground_truth_numeric_helpers, _FLOAT_HELPER_PATCHED_FLAG, True)
+    float_metadata._patch_direct_ground_truth_numeric_helpers = patch_direct_ground_truth_numeric_helpers
+
+
+def _install_active_goal_validation(gt: Any, float_metadata: Any) -> None:
+    """Install one non-recursive wrapper for timestamp and well-ID validation."""
+
+    current = gt.active_goal_at_time
+    if _active_goal_patch_current(current):
+        return
+
+    base = _unwrap_legacy_active_goal(current)
+    if _active_goal_patch_current(base):
+        gt.active_goal_at_time = base
+        return
+
+    @wraps(base)
+    def active_goal_at_time(session: Any, time_s: float) -> int | None:
+        time_value = float_metadata._parse_config_scalar("time_s", time_s)
+        float_metadata._validate_well_sequence_ids(session.well_sequence)
+        return base(session, time_value)
+
+    global _ACTIVE_GOAL_WRAPPER_CODE
+    _ACTIVE_GOAL_WRAPPER_CODE = active_goal_at_time.__code__
+    setattr(active_goal_at_time, _ACTIVE_GOAL_PATCHED_FLAG, True)
+    gt.active_goal_at_time = active_goal_at_time
+
+
+def _active_goal_patch_current(function: Any) -> bool:
+    """Reject legacy wrappers that copied this patch's marker via ``wraps``."""
+
+    return bool(
+        getattr(function, _ACTIVE_GOAL_PATCHED_FLAG, False)
+        and _ACTIVE_GOAL_WRAPPER_CODE is not None
+        and getattr(function, "__code__", None) is _ACTIVE_GOAL_WRAPPER_CODE
+    )
+
+
+def _unwrap_legacy_active_goal(function: Any) -> Any:
+    """Remove only the two legacy wrappers that were accidentally self-linked."""
+
+    current = function
+    seen: set[int] = set()
+    while id(current) not in seen and any(
+        getattr(current, marker, False) for marker in _LEGACY_ACTIVE_GOAL_MARKERS
+    ):
+        seen.add(id(current))
+        wrapped = getattr(current, "__wrapped__", None)
+        if wrapped is None or wrapped is current:
+            break
+        current = wrapped
+    return current
 
 
 def _ground_truth_cell_id_metadata_patch_current(gt: object) -> bool:

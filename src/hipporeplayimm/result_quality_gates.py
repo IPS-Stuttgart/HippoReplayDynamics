@@ -61,7 +61,11 @@ _EVENT_GROUP_SCOPE_COLUMNS = (
 def evidence_margin_label(margin: object) -> str:
     """Return a readable evidence-margin category for a log-evidence gap."""
 
-    if isinstance(margin, (int, np.integer)) and not isinstance(margin, (bool, np.bool_)):
+    if isinstance(margin, (bool, np.bool_)):
+        return MARGIN_UNKNOWN
+    if isinstance(margin, np.ndarray) and np.issubdtype(margin.dtype, np.bool_):
+        return MARGIN_UNKNOWN
+    if isinstance(margin, (int, np.integer)):
         value = int(margin)
         if value <= 1:
             return MARGIN_TIE

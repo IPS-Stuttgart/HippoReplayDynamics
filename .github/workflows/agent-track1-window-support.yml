@@ -1,0 +1,199 @@
+name: Apply Track1 window support fix
+
+on:
+  push:
+    branches:
+      - agent/clip-track1-final-decode-window
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Apply source fix and regression tests
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          source_path = Path("scripts/summarize_olafsdottir_track1_decoder_qc.py")
+          source = source_path.read_text(encoding="utf-8")
+          insertion_anchor = "\ndef _select_fold_units(\n"
+          if source.count(insertion_anchor) != 1:
+              raise RuntimeError("unexpected Track1 wrapper structure")
+          decode_windows = r'''
+
+def decode_windows(linearized: pd.DataFrame, decode_window_s: float) -> pd.DataFrame:
+    """Create decoding windows bounded by the valid position support."""
+
+    window = float(decode_window_s)
+    if not np.isfinite(window) or window <= 0.0:
+        raise ValueError("decode_window_s must be finite and positive")
+
+    times = pd.to_numeric(
+        linearized["time_s"], errors="coerce"
+    ).to_numpy(dtype=float)
+    linear = pd.to_numeric(
+        linearized["linear_position_cm"], errors="coerce"
+    ).to_numpy(dtype=float)
+    valid = _impl.valid_position_mask(linearized)
+    columns = ["start_time_s", "end_time_s", "true_position_cm"]
+    if not np.any(valid):
+        return pd.DataFrame(columns=columns)
+
+    start = float(np.nanmin(times[valid]))
+    end = float(np.nanmax(times[valid]))
+    if end <= start:
+        return pd.DataFrame(columns=columns)
+
+    duration = end - start
+    n_complete = int(np.floor(duration / window))
+    edges = start + np.arange(n_complete + 1, dtype=float) * window
+    tolerance = 16.0 * np.finfo(float).eps * max(
+        abs(start), abs(end), abs(duration), 1.0
+    )
+    if edges[-1] < end - tolerance:
+        edges = np.append(edges, end)
+    else:
+        edges[-1] = end
+
+    rows: list[dict[str, float]] = []
+    last_window = edges.shape[0] - 2
+    for index, (left, right) in enumerate(
+        zip(edges[:-1], edges[1:], strict=True)
+    ):
+        upper = times <= right if index == last_window else times < right
+        keep = valid & (times >= left) & upper
+        if np.any(keep):
+            rows.append(
+                {
+                    "start_time_s": float(left),
+                    "end_time_s": float(right),
+                    "true_position_cm": float(np.nanmedian(linear[keep])),
+                }
+            )
+    return pd.DataFrame(rows, columns=columns)
+'''
+          source = source.replace(insertion_anchor, decode_windows + insertion_anchor)
+
+          assignment_anchor = (
+              "_impl.unit_qc_table = unit_qc_table\n"
+              "_impl.summarize_pair = summarize_pair\n"
+              "_impl.crossval_decode = crossval_decode\n"
+          )
+          replacement = (
+              "_impl.unit_qc_table = unit_qc_table\n"
+              "_impl.summarize_pair = summarize_pair\n"
+              "_impl.decode_windows = decode_windows\n"
+              "_impl.crossval_decode = crossval_decode\n"
+          )
+          if source.count(assignment_anchor) != 1:
+              raise RuntimeError("unexpected Track1 assignment block")
+          source_path.write_text(
+              source.replace(assignment_anchor, replacement),
+              encoding="utf-8",
+          )
+
+          test_path = Path("tests/test_olafsdottir_track1_decoder_window_support.py")
+          test_path.write_text(
+              r'''from __future__ import annotations
+
+import importlib.util
+from pathlib import Path
+import sys
+
+import numpy as np
+import pandas as pd
+import pytest
+
+
+def _load_module():
+    repo_root = Path(__file__).resolve().parents[1]
+    src_path = repo_root / "src"
+    scripts_path = repo_root / "scripts"
+    for path in (src_path, scripts_path):
+        if str(path) not in sys.path:
+            sys.path.insert(0, str(path))
+    module_path = scripts_path / "summarize_olafsdottir_track1_decoder_qc.py"
+    spec = importlib.util.spec_from_file_location(
+        "summarize_olafsdottir_track1_window_support",
+        module_path,
+    )
+    assert spec is not None
+    assert spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+def _linearized_position() -> pd.DataFrame:
+    return pd.DataFrame(
+        {
+            "time_s": np.array([0.00, 0.09, 0.18, 0.26], dtype=float),
+            "linear_position_cm": np.array([0.0, 1.0, 2.0, 3.0], dtype=float),
+            "valid_position": True,
+        }
+    )
+
+
+def test_decode_windows_clip_final_bin_to_valid_position_support() -> None:
+    module = _load_module()
+
+    windows = module.decode_windows(_linearized_position(), 0.10)
+
+    assert windows["end_time_s"].iloc[-1] == pytest.approx(0.26)
+    assert np.all(windows["end_time_s"].to_numpy(dtype=float) <= 0.26)
+    assert windows["true_position_cm"].iloc[-1] == pytest.approx(3.0)
+
+    spikes = module.TrackSpikes(
+        spike_times_s=np.array([0.25, 0.28], dtype=float),
+        unit_ids=np.array([1, 1], dtype=int),
+        units=(1,),
+    )
+    last = windows.iloc[-1]
+    counts = module._impl.spike_counts_for_window(
+        spikes,
+        (1,),
+        float(last["start_time_s"]),
+        float(last["end_time_s"]),
+    )
+
+    np.testing.assert_array_equal(counts, np.array([1.0]))
+
+
+def test_decode_windows_reject_nonpositive_window_size() -> None:
+    module = _load_module()
+
+    with pytest.raises(ValueError, match="decode_window_s"):
+        module.decode_windows(_linearized_position(), 0.0)
+''',
+              encoding="utf-8",
+          )
+          PY
+      - name: Install test dependencies
+        run: python -m pip install -e '.[dev]'
+      - name: Run focused tests
+        run: >-
+          python -m pytest -q
+          tests/test_olafsdottir_track1_decoder_window_support.py
+          tests/test_olafsdottir_track1_decoder_nested_unit_qc.py
+      - name: Commit patched files
+        shell: bash
+        run: |
+          rm .github/workflows/agent-track1-window-support.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add scripts/summarize_olafsdottir_track1_decoder_qc.py \
+            tests/test_olafsdottir_track1_decoder_window_support.py \
+            .github/workflows/agent-track1-window-support.yml
+          git commit -m "Clip Track1 decoding windows to position support"
+          git push origin HEAD:${GITHUB_REF_NAME}

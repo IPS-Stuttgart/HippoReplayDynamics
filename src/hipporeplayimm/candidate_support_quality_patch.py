@@ -18,8 +18,15 @@ _NONCOMPARABLE_SUPPORT_VALUES = {
 }
 _EXACT_SUPPORT = "exact_full_grid"
 _TRUNCATED_SUPPORT = "truncated_full_grid"
+_KNOWN_SUPPORT_VALUES = {
+    _EXACT_SUPPORT,
+    _TRUNCATED_SUPPORT,
+    *_NONCOMPARABLE_SUPPORT_VALUES,
+}
 _SUCCESS_STATUS_VALUES = {"", "success", "nan", "na", "n/a", "none", "null", "<na>"}
 _QUALITY_WRAPPER_ATTR = "_candidate_support_quality_known_support_wrapper"
+_SERIALIZED_SUPPORT_PATCHED_FLAG = "_serialized_evidence_support_labels_patch_applied"
+_SERIALIZED_SUPPORT_WRAPPER_ATTR = "_serialized_evidence_support_labels_wrapper"
 _MIN_LOG_MASS_BOOL_PATCHED_FLAG = "_candidate_min_log_mass_bool_patch_applied"
 _MIN_LOG_MASS_BOOL_WRAPPER_ATTR = "_candidate_min_log_mass_bool_wrapper"
 _RESTRICT_CANDIDATE_ORDER_PATCHED_FLAG = "_candidate_restriction_order_patch_applied"
@@ -31,6 +38,8 @@ def apply_candidate_support_quality_patch() -> None:
     """Keep failed/non-comparable rows out of good candidate-support counts."""
 
     from . import result_improvements as ri
+
+    _patch_serialized_evidence_support_labels()
 
     current_quality = getattr(ri, "candidate_support_quality", None)
     if not getattr(current_quality, _QUALITY_WRAPPER_ATTR, False):
@@ -77,6 +86,26 @@ def apply_candidate_support_quality_patch() -> None:
     _patch_boolean_candidate_log_mass(ri)
     _patch_restricted_candidate_order()
     _patch_overflowed_pairwise_nearest_support()
+
+
+def _patch_serialized_evidence_support_labels() -> None:
+    """Recover known support labels from CSV-serialized array-like cells."""
+
+    from . import evidence_reporting as reporting
+
+    current = reporting._evidence_support_labels
+    if getattr(current, _SERIALIZED_SUPPORT_WRAPPER_ATTR, False):
+        setattr(reporting, _SERIALIZED_SUPPORT_PATCHED_FLAG, True)
+        return
+
+    @wraps(current)
+    def evidence_support_labels(value: object) -> list[str]:
+        return _support_value_labels(value)
+
+    setattr(evidence_support_labels, _SERIALIZED_SUPPORT_WRAPPER_ATTR, True)
+    setattr(evidence_support_labels, "__hipporeplayimm_original__", current)
+    reporting._evidence_support_labels = evidence_support_labels
+    setattr(reporting, _SERIALIZED_SUPPORT_PATCHED_FLAG, True)
 
 
 def _wrapper_chain_has_marker(function: object, marker: str) -> bool:
@@ -283,14 +312,31 @@ def _evidence_support_values(row: pd.Series) -> list[str]:
 
 
 def _support_value_labels(value: object) -> list[str]:
-    """Return normalized non-missing support labels from scalar or array-like cells."""
+    """Return normalized support labels, including serialized array-like cells."""
 
     labels: list[str] = []
     for item in _flatten_support_value(value):
         text = _text(item).lower()
-        if text and text not in _MISSING_SUPPORT_VALUES:
-            labels.append(text)
+        if not text or text in _MISSING_SUPPORT_VALUES:
+            continue
+        labels.extend(_serialized_support_labels(text))
     return labels
+
+
+def _serialized_support_labels(text: str) -> list[str]:
+    """Extract known labels without reinterpreting an unknown scalar label."""
+
+    if text in _KNOWN_SUPPORT_VALUES:
+        return [text]
+    normalized = text
+    for delimiter in "[](){}'\",;|":
+        normalized = normalized.replace(delimiter, " ")
+    recognized = [
+        token
+        for token in normalized.split()
+        if token in _KNOWN_SUPPORT_VALUES
+    ]
+    return recognized if recognized else [text]
 
 
 def _flatten_support_value(value: object) -> list[object]:

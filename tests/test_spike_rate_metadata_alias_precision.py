@@ -14,6 +14,7 @@ def test_spike_rate_metadata_rejects_distinct_float64_aliases_within_legacy_tole
         }
     )
 
+    # Full-precision aliases must agree exactly; only narrower-dtype round trips relax.
     with pytest.raises(ValueError, match="contains multiple values"):
         _unique_float_from_columns(
             scores,

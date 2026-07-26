@@ -19,6 +19,7 @@ _LEGACY_ACTIVE_GOAL_MARKERS = (
     "_ground_truth_direct_active_goal_numeric_validation_patch_applied",
     "_ground_truth_direct_active_goal_well_id_validation_patch_applied",
 )
+_ACTIVE_GOAL_WRAPPER_CODE: Any | None = None
 
 
 def apply_ground_truth_cell_id_metadata_patch() -> None:
@@ -56,11 +57,11 @@ def _install_active_goal_validation(gt: Any, float_metadata: Any) -> None:
     """Install one non-recursive wrapper for timestamp and well-ID validation."""
 
     current = gt.active_goal_at_time
-    if getattr(current, _ACTIVE_GOAL_PATCHED_FLAG, False):
+    if _active_goal_patch_current(current):
         return
 
     base = _unwrap_legacy_active_goal(current)
-    if getattr(base, _ACTIVE_GOAL_PATCHED_FLAG, False):
+    if _active_goal_patch_current(base):
         gt.active_goal_at_time = base
         return
 
@@ -70,8 +71,20 @@ def _install_active_goal_validation(gt: Any, float_metadata: Any) -> None:
         float_metadata._validate_well_sequence_ids(session.well_sequence)
         return base(session, time_value)
 
+    global _ACTIVE_GOAL_WRAPPER_CODE
+    _ACTIVE_GOAL_WRAPPER_CODE = active_goal_at_time.__code__
     setattr(active_goal_at_time, _ACTIVE_GOAL_PATCHED_FLAG, True)
     gt.active_goal_at_time = active_goal_at_time
+
+
+def _active_goal_patch_current(function: Any) -> bool:
+    """Reject legacy wrappers that copied this patch's marker via ``wraps``."""
+
+    return bool(
+        getattr(function, _ACTIVE_GOAL_PATCHED_FLAG, False)
+        and _ACTIVE_GOAL_WRAPPER_CODE is not None
+        and getattr(function, "__code__", None) is _ACTIVE_GOAL_WRAPPER_CODE
+    )
 
 
 def _unwrap_legacy_active_goal(function: Any) -> Any:

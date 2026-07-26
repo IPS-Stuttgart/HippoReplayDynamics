@@ -54,8 +54,9 @@ def test_crossval_selects_units_from_training_spikes_only(monkeypatch) -> None:
         unit_ids,
         edges,
         smoothing_bins,
+        occupancy,
     ):
-        del linear, times, valid, spikes, smoothing_bins
+        del linear, times, valid, spikes, smoothing_bins, occupancy
         return np.ones((len(unit_ids), len(edges) - 1), dtype=float)
 
     original_spike_counts = module._impl.spike_counts_for_window
@@ -64,7 +65,11 @@ def test_crossval_selects_units_from_training_spikes_only(monkeypatch) -> None:
         selected_by_test_window.append(tuple(int(unit_id) for unit_id in unit_ids))
         return original_spike_counts(spikes, unit_ids, start_s, end_s)
 
-    monkeypatch.setattr(module._impl, "fit_place_fields", constant_place_fields)
+    monkeypatch.setattr(
+        module,
+        "_fit_place_fields_with_occupancy",
+        constant_place_fields,
+    )
     monkeypatch.setattr(
         module._impl,
         "spike_counts_for_window",
@@ -115,8 +120,9 @@ def test_session_context_uses_all_units_as_fold_candidates(monkeypatch) -> None:
         unit_ids,
         edges,
         smoothing_bins,
+        occupancy,
     ):
-        del linear, times, valid, spikes, smoothing_bins
+        del linear, times, valid, spikes, smoothing_bins, occupancy
         return np.ones((len(unit_ids), len(edges) - 1), dtype=float)
 
     def record_selected_units(spikes, unit_ids, start_s, end_s):
@@ -124,7 +130,11 @@ def test_session_context_uses_all_units_as_fold_candidates(monkeypatch) -> None:
         selected_by_test_window.append(tuple(int(unit_id) for unit_id in unit_ids))
         return np.zeros(len(unit_ids), dtype=float)
 
-    monkeypatch.setattr(module._impl, "fit_place_fields", constant_place_fields)
+    monkeypatch.setattr(
+        module,
+        "_fit_place_fields_with_occupancy",
+        constant_place_fields,
+    )
     monkeypatch.setattr(
         module._impl,
         "spike_counts_for_window",

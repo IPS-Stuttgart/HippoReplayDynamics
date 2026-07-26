@@ -58,6 +58,26 @@ class _OpaqueMisleadingInternalScore:
         raise TypeError("got an unexpected keyword argument 'return_trajectory'")
 
 
+class _OpaquePartiallySupportedScore:
+    __signature__ = object()
+
+    def __init__(self) -> None:
+        self.calls = 0
+        self.received_trajectory: object | None = None
+
+    def __call__(
+        self,
+        emissions: Any,
+        bin_centers: Any,
+        *,
+        trajectory: object,
+    ) -> object:
+        del emissions, bin_centers
+        self.calls += 1
+        self.received_trajectory = trajectory
+        return trajectory
+
+
 @pytest.mark.parametrize("helper", _HELPERS)
 def test_opaque_score_fallback_removes_multiple_unsupported_keywords(helper) -> None:
     score = _OpaqueSequentialScore()
@@ -97,3 +117,23 @@ def test_opaque_score_fallback_preserves_misleading_internal_type_errors(helper)
             object(),
             {"return_trajectory": False},
         )
+
+
+@pytest.mark.parametrize("helper", _HELPERS)
+def test_opaque_score_fallback_preserves_supported_overlapping_keyword(helper) -> None:
+    trajectory = object()
+    score = _OpaquePartiallySupportedScore()
+
+    result = helper(
+        score,
+        object(),
+        object(),
+        {
+            "trajectory": trajectory,
+            "return_trajectory": False,
+        },
+    )
+
+    assert result is trajectory
+    assert score.received_trajectory is trajectory
+    assert score.calls == 1

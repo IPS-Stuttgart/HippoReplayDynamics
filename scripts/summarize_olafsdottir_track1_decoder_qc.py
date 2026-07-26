@@ -156,11 +156,12 @@ def decode_windows(linearized: pd.DataFrame, decode_window_s: float) -> pd.DataF
         return pd.DataFrame(columns=columns)
 
     duration = end - start
-    n_complete = int(np.floor(duration / window))
-    edges = start + np.arange(n_complete + 1, dtype=float) * window
     tolerance = 16.0 * np.finfo(float).eps * max(
         abs(start), abs(end), abs(duration), 1.0
     )
+    edges = np.arange(start, end, window, dtype=float)
+    if edges.size == 0:
+        edges = np.asarray([start], dtype=float)
     if edges[-1] < end - tolerance:
         edges = np.append(edges, end)
     else:

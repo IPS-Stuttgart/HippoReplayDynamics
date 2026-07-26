@@ -17,6 +17,7 @@ from .sparse_momentum_bin_center_validation import apply_sparse_momentum_bin_cen
 
 _SPARSE_SCORE_CONFIG_PATCHED_FLAG = "_sparse_momentum_config_validation_patch_applied"
 _TRAJECTORY_IMM_CONFIG_PATCHED_FLAG = "_trajectory_imm_sparse_config_validation_patch_applied"
+_TIME_SCALE_PATCHED_FLAG = "_momentum_time_scale_validation_patch_applied"
 
 
 def apply_sparse_momentum_duration_validation_patch() -> None:
@@ -29,6 +30,13 @@ def apply_sparse_momentum_duration_validation_patch() -> None:
 
     _patch_duration_helpers(sparse_momentum)
     _patch_duration_helpers(displacement_momentum)
+
+    # The candidate-pruned momentum and IMM scorers use a separate duration
+    # helper module.  Apply the same output guard there so every second-order
+    # path rejects unrepresentable adjacent-duration ratios consistently.
+    import hipporeplayimm.duration_occupancy as duration_occupancy
+
+    _patch_time_scale_helper(duration_occupancy)
 
     # These IMM modules import the helper functions by value.  Keep their module
     # aliases synchronized even if they were imported before this runtime patch.
@@ -92,24 +100,60 @@ def _patch_duration_helpers(module: Any) -> None:
 
     @wraps(original_time_scales)
     def time_scales(durations: Any) -> np.ndarray:
-        return original_time_scales(_valid_transition_durations(durations))
+        return _validated_time_scales(original_time_scales, durations)
 
     module._coerce_transition_durations = coerce_transition_durations
     module._duration_adjusted_decays = duration_adjusted_decays
     module._time_scales = time_scales
+    setattr(module, _TIME_SCALE_PATCHED_FLAG, True)
     if original_duration_scale_at is not None:
 
         @wraps(original_duration_scale_at)
         def duration_scale_at(durations: Any, transition_index: int, reference_dt: float) -> float:
             reference = _coerce_positive_float_scalar("reference dt", reference_dt, "reference dt must be finite and positive")
-            return original_duration_scale_at(
-                _valid_transition_durations(durations),
-                transition_index,
-                reference,
-            )
+            valid_durations = _valid_transition_durations(durations)
+            with np.errstate(divide="ignore", invalid="ignore", over="ignore"):
+                scale = float(
+                    original_duration_scale_at(
+                        valid_durations,
+                        transition_index,
+                        reference,
+                    )
+                )
+            if not np.isfinite(scale) or scale <= 0.0:
+                raise ValueError("momentum duration scale must be finite and positive")
+            return scale
 
         module._duration_scale_at = duration_scale_at
     module._duration_validation_patch_applied = True
+
+
+def _patch_time_scale_helper(module: Any) -> None:
+    """Install the output guard on modules that only expose ``_time_scales``."""
+
+    if getattr(module, _TIME_SCALE_PATCHED_FLAG, False):
+        return
+    original_time_scales = module._time_scales
+
+    @wraps(original_time_scales)
+    def time_scales(durations: Any) -> np.ndarray:
+        return _validated_time_scales(original_time_scales, durations)
+
+    module._time_scales = time_scales
+    setattr(module, _TIME_SCALE_PATCHED_FLAG, True)
+
+
+def _validated_time_scales(helper: Any, durations: Any) -> np.ndarray:
+    """Return finite positive relative time scales with the input shape."""
+
+    valid_durations = _valid_transition_durations(durations)
+    with np.errstate(divide="ignore", invalid="ignore", over="ignore"):
+        scales = np.asarray(helper(valid_durations), dtype=float)
+    if scales.shape != valid_durations.shape:
+        raise ValueError("momentum time scales must contain one value per transition duration")
+    if not np.all(np.isfinite(scales)) or np.any(scales <= 0.0):
+        raise ValueError("momentum time scales must be finite and positive")
+    return scales
 
 
 def _patch_exact_sparse_momentum_config(module: Any, score_name: str, patched_flag: str, *, include_diffusion: bool) -> None:

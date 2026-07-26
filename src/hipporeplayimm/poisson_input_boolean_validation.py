@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from functools import wraps
+import sys
 
 import numpy as np
 from scipy.special import betaln, gammaln
@@ -245,6 +246,19 @@ def _restore_exact_zero_rate_support(
     return corrected
 
 
+def _synchronize_poisson_log_emission_aliases(
+    original: object,
+    active: object,
+) -> None:
+    """Refresh package modules that imported the Poisson builder before patching."""
+
+    for module in list(sys.modules.values()):
+        if not getattr(module, "__name__", "").startswith("hipporeplayimm"):
+            continue
+        if getattr(module, "_poisson_log_emissions", None) is original:
+            setattr(module, "_poisson_log_emissions", active)
+
+
 def apply_poisson_input_boolean_validation_patch() -> None:
     """Install input guards and exact support handling for count emissions."""
 
@@ -254,6 +268,10 @@ def apply_poisson_input_boolean_validation_patch() -> None:
 
     current = encoding._poisson_log_emissions
     if getattr(current, _PATCHED_FLAG, None) == _WRAPPER_VERSION:
+        _synchronize_poisson_log_emission_aliases(
+            getattr(current, _ORIGINAL_ATTR, current),
+            current,
+        )
         setattr(encoding, _PATCHED_FLAG, True)
         return
     original = getattr(current, _ORIGINAL_ATTR, current)
@@ -312,6 +330,10 @@ def apply_poisson_input_boolean_validation_patch() -> None:
     setattr(poisson_log_emissions, _PATCHED_FLAG, _WRAPPER_VERSION)
     setattr(poisson_log_emissions, _ORIGINAL_ATTR, original)
     encoding._poisson_log_emissions = poisson_log_emissions
+    _synchronize_poisson_log_emission_aliases(
+        original,
+        poisson_log_emissions,
+    )
     setattr(encoding, _PATCHED_FLAG, True)
 
 

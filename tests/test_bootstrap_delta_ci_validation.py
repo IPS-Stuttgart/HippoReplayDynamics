@@ -12,7 +12,8 @@ def test_bootstrap_delta_ci_filters_nonfinite_and_malformed_target_metrics():
         {
             "model": ["imm", "imm", "imm", "imm", "imm", "diffusion"],
             "delta_vs_best_static": [1.0, np.inf, "2.0", -np.inf, "bad", np.inf],
-        }
+        },
+        index=[0, 0, 1, 1, 2, 2],
     )
     finite_rows = rows.iloc[[0, 2, 5]].copy()
 

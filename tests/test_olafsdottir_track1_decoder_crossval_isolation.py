@@ -55,12 +55,17 @@ def test_crossval_place_fields_use_training_spikes_only(monkeypatch) -> None:
         unit_ids,
         edges,
         smoothing_bins,
+        occupancy,
     ):
-        del linear, times, valid, smoothing_bins
+        del linear, times, valid, smoothing_bins, occupancy
         fold_spike_times.append(spikes.spike_times_s.copy())
         return np.ones((len(unit_ids), len(edges) - 1), dtype=float)
 
-    monkeypatch.setattr(module._impl, "fit_place_fields", record_training_spikes)
+    monkeypatch.setattr(
+        module,
+        "_fit_place_fields_with_occupancy",
+        record_training_spikes,
+    )
 
     result = module.crossval_decode(
         linearized=linearized,

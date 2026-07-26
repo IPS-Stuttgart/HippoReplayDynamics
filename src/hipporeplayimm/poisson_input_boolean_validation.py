@@ -246,16 +246,41 @@ def _restore_exact_zero_rate_support(
     return corrected
 
 
+def _wrapped_function_aliases(*functions: object) -> tuple[object, ...]:
+    """Return wrapper-chain members whose imported aliases may be stale."""
+
+    pending = list(functions)
+    aliases: list[object] = []
+    seen: set[int] = set()
+    while pending:
+        current = pending.pop()
+        if current is None or id(current) in seen:
+            continue
+        seen.add(id(current))
+        aliases.append(current)
+        wrapped = getattr(current, "__wrapped__", None)
+        if wrapped is not None:
+            pending.append(wrapped)
+        stored_original = getattr(current, _ORIGINAL_ATTR, None)
+        if stored_original is not None and stored_original is not current:
+            pending.append(stored_original)
+    return tuple(aliases)
+
+
 def _synchronize_poisson_log_emission_aliases(
     original: object,
     active: object,
 ) -> None:
-    """Refresh package modules that imported the Poisson builder before patching."""
+    """Refresh package modules that imported any earlier Poisson wrapper."""
 
+    stale_aliases = _wrapped_function_aliases(original, active)
     for module in list(sys.modules.values()):
         if not getattr(module, "__name__", "").startswith("hipporeplayimm"):
             continue
-        if getattr(module, "_poisson_log_emissions", None) is original:
+        current_alias = getattr(module, "_poisson_log_emissions", None)
+        if current_alias is active:
+            continue
+        if any(current_alias is stale for stale in stale_aliases):
             setattr(module, "_poisson_log_emissions", active)
 
 

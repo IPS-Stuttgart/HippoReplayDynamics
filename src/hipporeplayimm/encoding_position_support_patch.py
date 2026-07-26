@@ -2,9 +2,8 @@
 
 from __future__ import annotations
 
-from functools import wraps
 import sys
-from typing import Any
+from functools import wraps
 
 import numpy as np
 

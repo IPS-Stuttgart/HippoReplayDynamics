@@ -102,14 +102,10 @@ def _patch_legacy_bootstrap_delta_ci(_cli) -> None:
         random_seed: int = 1,
     ) -> tuple[float, float]:
         validated_n_bootstrap = _positive_integer_count("n_bootstrap", n_bootstrap)
-        target_mask = rows["model"] == model
-        target_values = pd.to_numeric(rows.loc[target_mask, value_column], errors="coerce")
-        finite_target = pd.Series(
-            np.isfinite(target_values.to_numpy(dtype=float)),
-            index=target_values.index,
-        )
-        invalid_target_indices = finite_target.index[~finite_target.to_numpy()]
-        filtered = rows.drop(index=invalid_target_indices)
+        target_mask = rows["model"].eq(model).to_numpy(dtype=bool)
+        numeric_values = pd.to_numeric(rows[value_column], errors="coerce").to_numpy(dtype=float)
+        keep_rows = ~target_mask | np.isfinite(numeric_values)
+        filtered = rows.loc[keep_rows]
         return current(
             filtered,
             model=model,

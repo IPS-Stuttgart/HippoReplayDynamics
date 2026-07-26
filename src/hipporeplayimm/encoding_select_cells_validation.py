@@ -19,6 +19,7 @@ import numpy as np
 from .encoding_config_boolean_validation import (
     apply_encoding_config_boolean_validation_patch,
 )
+from .encoding_position_support_patch import apply_encoding_position_support_patch
 
 _PATCHED_FLAG = "_encoding_select_cells_validation_patch_applied"
 
@@ -73,6 +74,7 @@ def _canonical_requested_cell_ids(cell_ids: Iterable[int | float]) -> np.ndarray
 def apply_encoding_select_cells_validation_patch() -> None:
     """Install strict request validation for ``EncodingModel.select_cells``."""
 
+    apply_encoding_position_support_patch()
     apply_encoding_config_boolean_validation_patch()
 
     from . import encoding

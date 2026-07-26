@@ -12,6 +12,8 @@ _PATCHED_FLAG = "_shuffle_spike_time_order_patch_applied"
 _SCOPE_KEY_PATCHED_FLAG = "_shuffle_scope_numeric_key_patch_applied"
 _GRID_SHAPE_PATCHED_FLAG = "_shuffle_grid_shape_validation_patch_applied"
 _INTEGER_VALUE_PATCHED_FLAG = "_shuffle_integer_value_precision_patch_applied"
+_PERMUTATION_PATCHED_FLAG = "_shuffle_nonidentity_permutation_patch_applied"
+_CELL_IDENTITY_PATCHED_FLAG = "_shuffle_nonidentity_cell_identity_patch_applied"
 
 
 def apply_shuffle_spike_time_order_patch() -> None:
@@ -57,6 +59,16 @@ def apply_shuffle_spike_time_order_patch() -> None:
     if not getattr(shuffle_controls, _INTEGER_VALUE_PATCHED_FLAG, False):
         shuffle_controls._nonnegative_integer_value = _nonnegative_integer_value
         setattr(shuffle_controls, _INTEGER_VALUE_PATCHED_FLAG, True)
+
+    if not getattr(shuffle_controls, _PERMUTATION_PATCHED_FLAG, False):
+        shuffle_controls.shuffled_encoding = _shuffled_encoding_nonidentity
+        setattr(shuffle_controls, _PERMUTATION_PATCHED_FLAG, True)
+
+    if not getattr(ri, _CELL_IDENTITY_PATCHED_FLAG, False):
+        ri.shuffle_cell_identities_session = (
+            _shuffle_cell_identities_session_nonidentity
+        )
+        setattr(ri, _CELL_IDENTITY_PATCHED_FLAG, True)
 
 
 def _mapping_scope_label(value: Mapping[object, object], scope_label) -> str:
@@ -108,6 +120,93 @@ def _positive_integer_grid_dimension(value: object) -> int:
     if integer <= 0:
         raise ValueError("grid_shape dimensions must be positive integers")
     return integer
+
+
+def _shuffled_encoding_nonidentity(
+    encoding,
+    *,
+    mode: str = "spatial-roll",
+    random_seed: int = 1,
+):
+    """Return a shuffled encoding without identity permutations when avoidable."""
+
+    from . import shuffle_controls
+
+    mode = shuffle_controls._validated_shuffle_mode(mode)
+    random_seed = shuffle_controls._nonnegative_integer_value(
+        "random_seed",
+        random_seed,
+    )
+    rng = np.random.default_rng(random_seed)
+    rates = np.asarray(encoding.rates_hz, dtype=float).copy()
+    if mode == "cell-permutation":
+        rates = rates[_nonidentity_permutation(rates.shape[0], rng)]
+    elif mode == "spatial-roll":
+        rates = shuffle_controls._spatial_roll_rates(
+            rates,
+            encoding.grid_shape,
+            rng,
+        )
+    elif mode == "spatial-permutation":
+        rates = rates[:, _nonidentity_permutation(encoding.n_bins, rng)]
+    elif mode == "independent-spatial-permutation":
+        if rates.shape[0] > 0:
+            rates = np.vstack(
+                [
+                    row[_nonidentity_permutation(encoding.n_bins, rng)]
+                    for row in rates
+                ]
+            )
+    else:  # pragma: no cover - guarded by _validated_shuffle_mode.
+        raise AssertionError(f"Unhandled shuffle mode: {mode!r}")
+    return shuffle_controls.EncodingModel(
+        x_edges=encoding.x_edges.copy(),
+        y_edges=encoding.y_edges.copy(),
+        bin_centers=encoding.bin_centers.copy(),
+        rates_hz=rates,
+        occupancy_s=encoding.occupancy_s.copy(),
+        cell_ids=encoding.cell_ids.copy(),
+        config=encoding.config,
+    )
+
+
+def _nonidentity_permutation(
+    size: int,
+    rng: np.random.Generator,
+) -> np.ndarray:
+    """Draw uniformly from nonidentity permutations when ``size`` exceeds one."""
+
+    identity = np.arange(size)
+    if size <= 1:
+        return identity
+    permutation = rng.permutation(size)
+    while np.array_equal(permutation, identity):
+        permutation = rng.permutation(size)
+    return permutation
+
+
+def _shuffle_cell_identities_session_nonidentity(session, random_seed: int = 1):
+    """Remap session cell identities without an avoidable identity draw."""
+
+    rng = np.random.default_rng(_nonnegative_integer_seed(random_seed))
+    spikes = np.asarray(session.spikes, dtype=float).copy()
+    if spikes.size == 0:
+        return session
+    cells = np.unique(spikes[:, 1].astype(int))
+    shuffled = cells[_nonidentity_permutation(cells.size, rng)]
+    mapping = {
+        int(source): int(target)
+        for source, target in zip(cells, shuffled, strict=True)
+    }
+    spikes[:, 1] = [mapping[int(cell)] for cell in spikes[:, 1].astype(int)]
+    marks = session.spike_marks
+    if marks is not None and marks.cell_ids is not None:
+        mark_cell_ids = np.asarray(
+            [mapping.get(int(cell), int(cell)) for cell in marks.cell_ids],
+            dtype=int,
+        )
+        marks = replace(marks, cell_ids=mark_cell_ids)
+    return replace(session, spikes=spikes, spike_marks=marks)
 
 
 def _shuffle_spike_times_session_sorted(session, random_seed: int = 1):

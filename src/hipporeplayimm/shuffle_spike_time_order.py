@@ -186,23 +186,39 @@ def _nonidentity_permutation(
 
 
 def _shuffle_cell_identities_session_nonidentity(session, random_seed: int = 1):
-    """Remap session cell identities without an avoidable identity draw."""
+    """Remap valid integral session cell identities without an avoidable identity draw."""
+
+    from .data_cell_id_validation import _coerce_integral_ids
 
     rng = np.random.default_rng(_nonnegative_integer_seed(random_seed))
-    spikes = np.asarray(session.spikes, dtype=float).copy()
-    if spikes.size == 0:
+    raw_spikes = np.asarray(session.spikes)
+    if raw_spikes.size == 0:
         return session
-    cells = np.unique(spikes[:, 1].astype(int))
+    if raw_spikes.ndim != 2 or raw_spikes.shape[1] < 2:
+        raise ValueError(
+            "session.spikes must be a two-dimensional array with time and cell-ID columns"
+        )
+    spike_cell_ids = _coerce_integral_ids(raw_spikes[:, 1], "spike cell IDs")
+    try:
+        spikes = np.asarray(session.spikes, dtype=float).copy()
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ValueError(
+            "session.spikes must contain numeric time and cell-ID values"
+        ) from exc
+    cells = np.unique(spike_cell_ids)
     shuffled = cells[_nonidentity_permutation(cells.size, rng)]
     mapping = {
         int(source): int(target)
         for source, target in zip(cells, shuffled, strict=True)
     }
-    spikes[:, 1] = [mapping[int(cell)] for cell in spikes[:, 1].astype(int)]
+    spikes[:, 1] = [mapping[int(cell)] for cell in spike_cell_ids]
     marks = session.spike_marks
     if marks is not None and marks.cell_ids is not None:
+        mark_ids = _coerce_integral_ids(marks.cell_ids, "spike mark cell IDs")
+        if mark_ids.ndim != 1:
+            raise ValueError("spike mark cell IDs must be one-dimensional")
         mark_cell_ids = np.asarray(
-            [mapping.get(int(cell), int(cell)) for cell in marks.cell_ids],
+            [mapping.get(int(cell), int(cell)) for cell in mark_ids],
             dtype=int,
         )
         marks = replace(marks, cell_ids=mark_cell_ids)

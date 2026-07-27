@@ -189,12 +189,12 @@ def _stable_gamma_poisson_log_emissions(
     if not np.all(np.isfinite(dt)) or np.any(dt <= 0.0):
         raise ValueError("all bin durations must be finite and positive")
 
-    mean = np.maximum(
-        dt[:, None, None] * np.asarray(rates_hz, dtype=float)[None, :, :],
-        np.finfo(float).tiny,
-    )
+    raw_mean = dt[:, None, None] * np.asarray(rates_hz, dtype=float)[None, :, :]
+    zero_mean = raw_mean == 0.0
+    mean = np.maximum(raw_mean, np.finfo(float).tiny)
     counts = np.asarray(spike_counts, dtype=float)[:, :, None]
     counts, mean = np.broadcast_arrays(counts, mean)
+    zero_mean = np.broadcast_to(zero_mean, mean.shape)
 
     combination = np.zeros_like(mean, dtype=float)
     positive_counts = counts > 0.0
@@ -205,12 +205,15 @@ def _stable_gamma_poisson_log_emissions(
     log_scaled_mean = np.log(mean) - np.log(r)
     log_success_probability = -np.logaddexp(0.0, log_scaled_mean)
     log_failure_probability = -np.logaddexp(0.0, -log_scaled_mean)
-    return np.sum(
+    log_emissions = np.sum(
         combination
         + r * log_success_probability
         + counts * log_failure_probability,
         axis=1,
     )
+    impossible = np.any(positive_counts & zero_mean, axis=1)
+    log_emissions[impossible] = -np.inf
+    return log_emissions
 
 
 def _patch_gamma_poisson_stability(result_improvement_extensions: Any) -> None:

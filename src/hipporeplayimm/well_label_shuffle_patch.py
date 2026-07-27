@@ -45,7 +45,9 @@ def shuffle_well_labels(frame: pd.DataFrame, random_seed: int = 1) -> pd.DataFra
     them missing when only the well identity is available.  Conversely, some
     coordinate-only rows may keep a missing or sentinel ``true_well_id`` column.
     Shuffle whichever label columns are present as row tuples so the null
-    control is not a silent no-op for coordinate-backed labels.
+    control is not a silent no-op for coordinate-backed labels.  When session
+    metadata are available, keep permutations within each session so labels and
+    coordinates from distinct environments cannot be mixed.
     """
 
     seed = _nonnegative_integer_value("random_seed", random_seed)
@@ -65,9 +67,21 @@ def shuffle_well_labels(frame: pd.DataFrame, random_seed: int = 1) -> pd.DataFra
 
     label_values = out.loc[labelled_rows, label_columns].to_numpy(copy=True)
     rng = np.random.default_rng(seed)
-    out.loc[labelled_rows, label_columns] = label_values[
-        rng.permutation(label_values.shape[0])
-    ]
+    if "session" not in out:
+        shuffled_values = label_values[rng.permutation(label_values.shape[0])]
+    else:
+        shuffled_values = label_values.copy()
+        session_values = pd.DataFrame(
+            {"session": out.loc[labelled_rows, "session"].to_numpy(copy=False)}
+        )
+        for positions in session_values.groupby(
+            "session", sort=False, dropna=False
+        ).indices.values():
+            positions = np.asarray(positions, dtype=int)
+            shuffled_values[positions] = label_values[positions][
+                rng.permutation(positions.size)
+            ]
+    out.loc[labelled_rows, label_columns] = shuffled_values
     return out
 
 

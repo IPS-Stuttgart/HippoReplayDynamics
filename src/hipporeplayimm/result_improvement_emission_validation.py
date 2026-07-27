@@ -6,11 +6,15 @@ from functools import wraps
 from typing import Any
 
 import numpy as np
+from scipy.special import betaln
 
 _PATCHED_FLAG = "_result_improvement_emission_validation_patch_applied"
 _BUILD_SORTED_EMISSIONS_WRAPPER_FLAG = "_replay_calibrated_emission_parameter_validation_wrapper"
 _BUILD_SORTED_EMISSIONS_WRAPPER_VERSION = 2
+_GAMMA_POISSON_WRAPPER_FLAG = "_replay_calibrated_gamma_poisson_stability_wrapper"
+_GAMMA_POISSON_WRAPPER_VERSION = 1
 _ORIGINAL_ATTR = "__hipporeplayimm_emission_validation_original__"
+_GAMMA_POISSON_ORIGINAL_ATTR = "__hipporeplayimm_gamma_poisson_original__"
 
 
 def _is_boolean_scalar(value: object) -> bool:
@@ -167,6 +171,79 @@ def _validate_replay_calibrated_emission_parameters(config: object | None, calib
         )
 
 
+def _stable_gamma_poisson_log_emissions(
+    spike_counts: np.ndarray,
+    rates_hz: np.ndarray,
+    bin_durations: np.ndarray,
+    *,
+    dispersion: float,
+) -> np.ndarray:
+    """Evaluate Gamma-Poisson emissions continuously at the Poisson limit."""
+
+    r = float(dispersion)
+    if not np.isfinite(r) or r <= 0.0:
+        raise ValueError("dispersion must be finite and positive")
+    dt = np.asarray(bin_durations, dtype=float)
+    if dt.ndim != 1 or dt.shape[0] != spike_counts.shape[0]:
+        raise ValueError("bin_durations must contain one duration per time bin")
+    if not np.all(np.isfinite(dt)) or np.any(dt <= 0.0):
+        raise ValueError("all bin durations must be finite and positive")
+
+    mean = np.maximum(
+        dt[:, None, None] * np.asarray(rates_hz, dtype=float)[None, :, :],
+        np.finfo(float).tiny,
+    )
+    counts = np.asarray(spike_counts, dtype=float)[:, :, None]
+    counts, mean = np.broadcast_arrays(counts, mean)
+
+    combination = np.zeros_like(mean, dtype=float)
+    positive_counts = counts > 0.0
+    combination[positive_counts] = (
+        -np.log(counts[positive_counts])
+        - betaln(r, counts[positive_counts])
+    )
+    log_scaled_mean = np.log(mean) - np.log(r)
+    log_success_probability = -np.logaddexp(0.0, log_scaled_mean)
+    log_failure_probability = -np.logaddexp(0.0, -log_scaled_mean)
+    return np.sum(
+        combination
+        + r * log_success_probability
+        + counts * log_failure_probability,
+        axis=1,
+    )
+
+
+def _patch_gamma_poisson_stability(result_improvement_extensions: Any) -> None:
+    """Replace cancellation-prone Gamma-Poisson evaluation idempotently."""
+
+    current = result_improvement_extensions._negative_binomial_log_emissions
+    if getattr(current, _GAMMA_POISSON_WRAPPER_FLAG, None) == _GAMMA_POISSON_WRAPPER_VERSION:
+        return
+
+    @wraps(current)
+    def stable_gamma_poisson_log_emissions(
+        spike_counts,
+        rates_hz,
+        bin_durations,
+        *,
+        dispersion,
+    ):
+        return _stable_gamma_poisson_log_emissions(
+            spike_counts,
+            rates_hz,
+            bin_durations,
+            dispersion=dispersion,
+        )
+
+    setattr(
+        stable_gamma_poisson_log_emissions,
+        _GAMMA_POISSON_WRAPPER_FLAG,
+        _GAMMA_POISSON_WRAPPER_VERSION,
+    )
+    setattr(stable_gamma_poisson_log_emissions, _GAMMA_POISSON_ORIGINAL_ATTR, current)
+    result_improvement_extensions._negative_binomial_log_emissions = stable_gamma_poisson_log_emissions
+
+
 def _restore_exact_zero_rate_support(emissions: object, encoding: object, config: object | None) -> object:
     """Make spikes at exactly unsupported place-field bins impossible again.
 
@@ -219,9 +296,11 @@ def _restore_exact_zero_rate_support(emissions: object, encoding: object, config
 
 
 def apply_result_improvement_emission_validation_patch() -> None:
-    """Install strict scalar guards and exact support for replay-calibrated emissions."""
+    """Install scalar guards, stable Gamma-Poisson numerics, and exact support."""
 
     from . import result_improvement_extensions
+
+    _patch_gamma_poisson_stability(result_improvement_extensions)
 
     current = result_improvement_extensions.build_sorted_emissions_with_replay_calibration
     if getattr(current, _BUILD_SORTED_EMISSIONS_WRAPPER_FLAG, None) == _BUILD_SORTED_EMISSIONS_WRAPPER_VERSION:

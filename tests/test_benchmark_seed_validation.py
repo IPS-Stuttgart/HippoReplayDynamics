@@ -66,6 +66,7 @@ def test_benchmark_metadata_preserves_large_integer_seeds_exactly() -> None:
     large = 2**53 + 1
     config = BenchmarkConfig(
         random_seed=Decimal(large),
+        randomize_event_subset=True,
         event_subset_seed=np.array(large + 1, dtype=object),
     )
 

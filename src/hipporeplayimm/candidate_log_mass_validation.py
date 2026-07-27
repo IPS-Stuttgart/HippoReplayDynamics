@@ -18,6 +18,7 @@ _PATCHED_FLAG = "_candidate_log_mass_validation_patch_applied"
 _DURATION_OCCUPANCY_PATCHED_FLAG = "_duration_occupancy_candidate_log_mass_patch_applied"
 _REPORTED_MINIMUM_WRAPPER_ATTR = "_candidate_reported_log_mass_minimum_wrapper"
 _REPORTED_COLUMN_MINIMUM_WRAPPER_ATTR = "_candidate_reported_log_mass_column_minimum_wrapper"
+_UNPRUNED_SUPPORT_WRAPPER_ATTR = "_candidate_unpruned_exact_support_wrapper"
 
 
 def _candidate_log_masses(log_likelihood: np.ndarray, candidates: list[np.ndarray]) -> list[float]:
@@ -98,6 +99,62 @@ def _candidate_log_masses_for_model(emissions, candidates: list[np.ndarray]) -> 
     """Compatibility wrapper for legacy CandidateKinematicModel helpers."""
 
     return _candidate_log_masses(emissions.log_likelihood, candidates)
+
+
+def _is_full_grid_candidate_support(candidates: list[np.ndarray], n_time: int, n_bins: int) -> bool:
+    """Return whether every time bin retains each spatial bin exactly once."""
+
+    if len(candidates) != int(n_time):
+        return False
+    expected = np.arange(int(n_bins), dtype=np.intp)
+    for current in candidates:
+        values = np.asarray(current)
+        if values.ndim != 1 or values.size != int(n_bins):
+            return False
+        if not np.issubdtype(values.dtype, np.integer):
+            return False
+        if not np.array_equal(np.sort(values.astype(np.intp, copy=False)), expected):
+            return False
+    return True
+
+
+def _patch_unpruned_candidate_evidence_support(models) -> None:
+    """Label the legacy ``top_k=0`` path as exact rather than truncated."""
+
+    current = models.CandidateKinematicModel.score
+    if getattr(current, _UNPRUNED_SUPPORT_WRAPPER_ATTR, False):
+        return
+
+    @wraps(current)
+    def score(self, emissions, bin_centers, candidate_indices=None):
+        result = current(
+            self,
+            emissions,
+            bin_centers,
+            candidate_indices=candidate_indices,
+        )
+        if candidate_indices is not None or int(getattr(self, "top_k", -1)) != 0:
+            return result
+        if int(getattr(emissions, "n_time", 0)) <= 1:
+            return result
+
+        candidates = self.candidate_indices(emissions)
+        if not _is_full_grid_candidate_support(
+            candidates,
+            emissions.n_time,
+            emissions.n_bins,
+        ):
+            return result
+
+        diagnostics = dict(getattr(result, "diagnostics", {}) or {})
+        if diagnostics.get("candidate_evidence_support") == "truncated_full_grid":
+            diagnostics["candidate_evidence_support"] = "exact_full_grid"
+            result.diagnostics = diagnostics
+        return result
+
+    setattr(score, _UNPRUNED_SUPPORT_WRAPPER_ATTR, True)
+    setattr(score, "__hipporeplayimm_original__", current)
+    models.CandidateKinematicModel.score = score
 
 
 def _current_patch_installed(
@@ -288,6 +345,7 @@ def apply_candidate_log_mass_validation_patch() -> None:
         models._candidate_log_masses = _candidate_log_masses_for_model
         setattr(state_space, _PATCHED_FLAG, True)
 
+    _patch_unpruned_candidate_evidence_support(models)
     _patch_duration_occupancy_candidate_masses()
     _patch_reported_candidate_log_mass_minimum()
     _patch_reported_candidate_log_mass_across_columns()

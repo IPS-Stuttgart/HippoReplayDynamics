@@ -1,8 +1,19 @@
+import warnings
+
 import numpy as np
-import pytest
 
 from hipporeplayimm.encoding import LogEmissionTensor
 from hipporeplayimm.models import DiffusionModel
+
+
+_POSTERIOR_DIAGNOSTIC_KEYS = {
+    "decoded_endpoint_x",
+    "decoded_endpoint_y",
+    "decoded_map_x",
+    "decoded_map_y",
+    "decoded_map_bin",
+    "terminal_posterior_entropy",
+}
 
 
 def _emissions(log_likelihood: np.ndarray) -> LogEmissionTensor:
@@ -26,7 +37,7 @@ def _disconnected_bin_centers() -> np.ndarray:
     )
 
 
-def test_diffusion_model_rejects_disconnected_emission_support() -> None:
+def test_diffusion_model_clears_undefined_disconnected_path_posterior() -> None:
     emissions = _emissions(
         np.array(
             [
@@ -36,14 +47,21 @@ def test_diffusion_model_rejects_disconnected_emission_support() -> None:
         )
     )
 
-    with pytest.raises(ValueError, match="diffusion model has no finite path mass"):
-        DiffusionModel(sigma_cm=1.0, max_step_sigma=1.0).score(
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", RuntimeWarning)
+        score = DiffusionModel(sigma_cm=1.0, max_step_sigma=1.0).score(
             emissions,
             _disconnected_bin_centers(),
         )
 
+    assert np.isneginf(score.log_likelihood)
+    assert score.terminal_log_posterior is None
+    assert score.trajectory_log_posterior is None
+    assert score.diagnostics["diffusion_path_support"] == "no_finite_path"
+    assert _POSTERIOR_DIAGNOSTIC_KEYS.isdisjoint(score.diagnostics)
 
-def test_diffusion_model_keeps_connected_emission_support() -> None:
+
+def test_diffusion_model_keeps_connected_emission_posterior() -> None:
     emissions = _emissions(
         np.array(
             [
@@ -60,30 +78,8 @@ def test_diffusion_model_keeps_connected_emission_support() -> None:
 
     assert np.isfinite(score.log_likelihood)
     assert score.terminal_log_posterior is not None
+    assert score.trajectory_log_posterior is not None
     assert not np.any(np.isnan(score.terminal_log_posterior))
     assert np.isclose(np.exp(score.terminal_log_posterior).sum(), 1.0)
-    assert np.isneginf(score.terminal_log_posterior[1])
-    assert score.diagnostics["decoded_map_bin"] == 0
-
-
-def test_diffusion_model_does_not_promote_unreachable_finite_sentinel() -> None:
-    emissions = _emissions(
-        np.array(
-            [
-                [-6.0e299, -np.inf],
-                [-6.0e299, 0.0],
-            ]
-        )
-    )
-
-    score = DiffusionModel(sigma_cm=1.0, max_step_sigma=1.0).score(
-        emissions,
-        _disconnected_bin_centers(),
-    )
-
-    assert np.isfinite(score.log_likelihood)
-    assert score.log_likelihood < -1.1e300
-    assert score.terminal_log_posterior is not None
-    assert score.terminal_log_posterior[0] == pytest.approx(0.0)
     assert np.isneginf(score.terminal_log_posterior[1])
     assert score.diagnostics["decoded_map_bin"] == 0

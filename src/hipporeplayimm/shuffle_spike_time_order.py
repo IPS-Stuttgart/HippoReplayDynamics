@@ -195,6 +195,21 @@ def _nonidentity_permutation(
     return permutation
 
 
+def _nonidentity_permuted_values(
+    values: np.ndarray,
+    rng: np.random.Generator,
+) -> np.ndarray:
+    """Permute values until their sequence changes when a change is possible."""
+
+    original = np.asarray(values)
+    if original.size <= 1 or np.unique(original).size <= 1:
+        return original.copy()
+    while True:
+        permuted = original[_nonidentity_permutation(original.size, rng)]
+        if not np.array_equal(permuted, original, equal_nan=True):
+            return permuted
+
+
 def _shuffle_cell_identities_session_nonidentity(session, random_seed: int = 1):
     """Remap valid integral session cell identities without an avoidable identity draw."""
 
@@ -246,7 +261,7 @@ def _shuffle_spike_times_session_sorted(session, random_seed: int = 1):
         raise ValueError(
             "session.spikes must be a two-dimensional array with a time column"
         )
-    spikes[:, 0] = rng.permutation(spikes[:, 0])
+    spikes[:, 0] = _nonidentity_permuted_values(spikes[:, 0], rng)
     order = np.argsort(spikes[:, 0], kind="mergesort")
     spikes = spikes[order]
     marks = session.spike_marks

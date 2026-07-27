@@ -43,7 +43,11 @@ def _speed_within_run_intervals(
     for start, end in intervals:
         in_interval = (times >= start) & (times <= end)
         if np.any(in_interval):
-            speed[in_interval] = base_speed(times[in_interval], xy[in_interval])
+            local_speed = base_speed(times[in_interval], xy[in_interval])
+            # A frame can belong to overlapping or endpoint-sharing bouts.
+            # Accumulate movement eligibility instead of letting interval order
+            # decide which local derivative survives.
+            speed[in_interval] = np.maximum(speed[in_interval], local_speed)
     return speed
 
 

@@ -9,6 +9,7 @@ scoping.
 from __future__ import annotations
 
 import json
+import re
 from typing import Any
 
 import numpy as np
@@ -34,6 +35,10 @@ _YAML_AMBIGUOUS_STRING_SCALARS = {
     "-.inf",
 }
 _YAML_QUOTE_TRIGGER_CHARS = ":#[]{}&*!|>'\"%@`\r\n"
+_YAML_DATE_SCALAR = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+_YAML_BASE_PREFIXED_INTEGER_SCALAR = re.compile(
+    r"^[+-]?0(?:[xX][0-9a-fA-F_]+|[bB][01_]+)$"
+)
 _YAML_SCALAR_PATCH_FLAG = "_benchmark_settings_yaml_scalar_patch_applied"
 _YAML_SCALAR_WRAPPER_FLAG = "_benchmark_settings_yaml_scalar_wrapper"
 
@@ -108,6 +113,10 @@ def _yaml_string_needs_quotes(text: str) -> bool:
     if any(char in text for char in _YAML_QUOTE_TRIGGER_CHARS):
         return True
     if text.lower() in _YAML_AMBIGUOUS_STRING_SCALARS:
+        return True
+    if _YAML_DATE_SCALAR.fullmatch(text):
+        return True
+    if _YAML_BASE_PREFIXED_INTEGER_SCALAR.fullmatch(text):
         return True
     try:
         float(text)

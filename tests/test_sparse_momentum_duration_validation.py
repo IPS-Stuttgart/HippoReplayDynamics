@@ -12,7 +12,10 @@ from hipporeplayimm.state_space_displacement_momentum import (
 from hipporeplayimm.state_space_displacement_momentum import (
     _time_scales as displacement_time_scales,
 )
-from hipporeplayimm.state_space_model import StateSpaceDecoderConfig
+from hipporeplayimm.state_space_model import (
+    StateSpaceDecoderConfig,
+    _momentum_prediction_multipliers,
+)
 from hipporeplayimm.state_space_sparse_momentum import (
     _duration_adjusted_decays,
     _score_sparse_momentum_exact,
@@ -66,6 +69,17 @@ def test_momentum_time_scale_helpers_reject_unrepresentable_duration_ratios(time
 
     with pytest.raises(ValueError, match="momentum time scales must be finite and positive"):
         time_scale_helper(durations)
+
+
+def test_candidate_prediction_multipliers_reject_unrepresentable_duration_ratios() -> None:
+    durations = np.array([np.finfo(float).tiny, np.finfo(float).max], dtype=float)
+    config = StateSpaceDecoderConfig(momentum_velocity_decay_tau_s=1.0)
+
+    with pytest.raises(
+        ValueError,
+        match="momentum prediction multipliers must be finite and nonnegative",
+    ):
+        _momentum_prediction_multipliers(config, durations, fallback_dt=0.01)
 
 
 def test_displacement_duration_scale_rejects_unrepresentable_ratio() -> None:

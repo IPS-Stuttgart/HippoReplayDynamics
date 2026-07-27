@@ -1,9 +1,10 @@
 """Runtime guards for duration-dependent momentum helpers.
 
-The exact sparse and finite-displacement momentum decoders derive both velocity
-decay and relative velocity scaling from transition durations.  Non-finite or
-non-positive values should fail at the helper boundary instead of producing
-NaN/inf transition parameters that later corrupt the dynamic program.
+The exact sparse, finite-displacement, and candidate-pruned momentum decoders
+derive both velocity decay and relative velocity scaling from transition
+durations.  Non-finite or non-positive values should fail at the helper
+boundary instead of producing NaN/inf transition parameters that later
+corrupt the dynamic program.
 """
 
 from __future__ import annotations
@@ -18,6 +19,7 @@ from .sparse_momentum_bin_center_validation import apply_sparse_momentum_bin_cen
 _SPARSE_SCORE_CONFIG_PATCHED_FLAG = "_sparse_momentum_config_validation_patch_applied"
 _TRAJECTORY_IMM_CONFIG_PATCHED_FLAG = "_trajectory_imm_sparse_config_validation_patch_applied"
 _TIME_SCALE_PATCHED_FLAG = "_momentum_time_scale_validation_patch_applied"
+_PREDICTION_MULTIPLIER_PATCHED_FLAG = "_momentum_prediction_multiplier_validation_patch_applied"
 
 
 def apply_sparse_momentum_duration_validation_patch() -> None:
@@ -35,8 +37,10 @@ def apply_sparse_momentum_duration_validation_patch() -> None:
     # helper module.  Apply the same output guard there so every second-order
     # path rejects unrepresentable adjacent-duration ratios consistently.
     import hipporeplayimm.duration_occupancy as duration_occupancy
+    import hipporeplayimm.state_space_model as state_space_model
 
     _patch_time_scale_helper(duration_occupancy)
+    _patch_prediction_multiplier_helper(state_space_model)
 
     # These IMM modules import the helper functions by value.  Keep their module
     # aliases synchronized even if they were imported before this runtime patch.
@@ -141,6 +145,54 @@ def _patch_time_scale_helper(module: Any) -> None:
 
     module._time_scales = time_scales
     setattr(module, _TIME_SCALE_PATCHED_FLAG, True)
+
+
+def _patch_prediction_multiplier_helper(module: Any) -> None:
+    """Reject undefined candidate-prediction multipliers before beam augmentation."""
+
+    if getattr(module, _PREDICTION_MULTIPLIER_PATCHED_FLAG, False):
+        return
+    original_multipliers = module._momentum_prediction_multipliers
+
+    @wraps(original_multipliers)
+    def momentum_prediction_multipliers(
+        config: object,
+        transition_durations: Any,
+        *,
+        fallback_dt: float,
+    ) -> np.ndarray:
+        valid_durations = _valid_transition_durations(transition_durations)
+        with np.errstate(divide="ignore", invalid="ignore", over="ignore", under="ignore"):
+            multipliers = np.asarray(
+                original_multipliers(
+                    config,
+                    valid_durations,
+                    fallback_dt=fallback_dt,
+                ),
+                dtype=float,
+            )
+        if multipliers.shape != valid_durations.shape:
+            raise ValueError(
+                "momentum prediction multipliers must contain one value per transition duration"
+            )
+        if not np.all(np.isfinite(multipliers)) or np.any(multipliers < 0.0):
+            raise ValueError(
+                "momentum prediction multipliers must be finite and nonnegative"
+            )
+        return multipliers
+
+    setattr(
+        momentum_prediction_multipliers,
+        _PREDICTION_MULTIPLIER_PATCHED_FLAG,
+        True,
+    )
+    setattr(
+        momentum_prediction_multipliers,
+        "__hipporeplayimm_original__",
+        original_multipliers,
+    )
+    module._momentum_prediction_multipliers = momentum_prediction_multipliers
+    setattr(module, _PREDICTION_MULTIPLIER_PATCHED_FLAG, True)
 
 
 def _validated_time_scales(helper: Any, durations: Any) -> np.ndarray:

@@ -97,8 +97,8 @@ def _validated_grid_shape(
 
 
 def _positive_integer_grid_dimension(value: object) -> int:
-    if isinstance(value, (bool, np.bool_)):
-        raise ValueError("grid_shape dimensions must be positive integers")
+    """Return one exact positive integer grid dimension."""
+
     try:
         array = np.asarray(value)
     except (TypeError, ValueError) as exc:
@@ -108,18 +108,28 @@ def _positive_integer_grid_dimension(value: object) -> int:
     scalar = array.item()
     if isinstance(scalar, (bool, np.bool_)):
         raise ValueError("grid_shape dimensions must be positive integers")
-    try:
-        numeric = float(scalar)
-    except (TypeError, ValueError, OverflowError) as exc:
-        raise ValueError("grid_shape dimensions must be positive integers") from exc
-    if not np.isfinite(numeric):
-        raise ValueError("grid_shape dimensions must be finite positive integers")
-    integer = int(round(numeric))
-    if not np.isclose(numeric, integer, rtol=0.0, atol=0.0):
+    if isinstance(scalar, (str, bytes, np.str_, np.bytes_)):
         raise ValueError("grid_shape dimensions must be positive integers")
+
+    try:
+        integer = operator.index(scalar)
+    except TypeError:
+        try:
+            integer = int(scalar)
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise ValueError(
+                "grid_shape dimensions must be finite positive integers"
+            ) from exc
+        try:
+            is_exact = bool(scalar == integer)
+        except (TypeError, ValueError):
+            is_exact = False
+        if not is_exact:
+            raise ValueError("grid_shape dimensions must be positive integers")
+
     if integer <= 0:
         raise ValueError("grid_shape dimensions must be positive integers")
-    return integer
+    return int(integer)
 
 
 def _shuffled_encoding_nonidentity(

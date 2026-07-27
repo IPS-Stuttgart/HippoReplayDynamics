@@ -44,12 +44,18 @@ def apply_spike_cell_id_emission_validation_patch() -> None:
 
     from . import emission_cell_id_validation
     from . import encoding
+    from . import log_emission_n_spikes_validation
 
     # The later emission-cell-ID patch installs its own row mapper.  Synchronize
     # the exact coercion helper into that active module before its wrapper is
     # applied so extended-precision and object-backed identifiers never pass
     # through binary64.
     emission_cell_id_validation._coerce_integral_ids = _coerce_integral_ids
+
+    # LogEmissionTensor construction has a separate scalar-ID coercion path.
+    # Keep it on the same exact parser so text and Decimal identifiers above
+    # binary64's exact-integer range remain distinct.
+    log_emission_n_spikes_validation._coerce_integer_identifier = _coerce_integral_id
 
     current_selection = encoding._spikes_and_cell_ids_for_encoding
     if bool(getattr(current_selection, _SPIKE_SELECTION_PATCH_MARK, False)):

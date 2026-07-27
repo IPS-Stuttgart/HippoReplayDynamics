@@ -1,7 +1,7 @@
 """Restore benchmark scope metadata after metadata compatibility patching.
 
 The score-table metadata compatibility layer replaces ``benchmarks._benchmark_config_metadata``
-so post-hoc decoding can reconstruct older score tables.  Keep that replacement
+so post-hoc decoding can reconstruct older score tables. Keep that replacement
 synchronized with canonical benchmark scope metadata used by relative-metric
 scoping.
 """
@@ -43,10 +43,12 @@ def apply_benchmark_metadata_scope_patch() -> None:
 
     _patch_benchmark_settings_yaml_scalars()
 
+    from . import benchmark_seed_validation
     from . import benchmarks as bench
 
     metadata = bench._benchmark_config_metadata
     if getattr(metadata, "_benchmark_scope_metadata_wrapped", False):
+        benchmark_seed_validation.apply_benchmark_seed_validation_patch()
         return
 
     def benchmark_config_metadata_with_scope_fields(config: Any) -> dict[str, object]:
@@ -64,6 +66,7 @@ def apply_benchmark_metadata_scope_patch() -> None:
 
     benchmark_config_metadata_with_scope_fields._benchmark_scope_metadata_wrapped = True  # type: ignore[attr-defined]
     bench._benchmark_config_metadata = benchmark_config_metadata_with_scope_fields
+    benchmark_seed_validation.apply_benchmark_seed_validation_patch()
 
 
 def _patch_benchmark_settings_yaml_scalars() -> None:

@@ -50,11 +50,11 @@ def event_reliability_flags(
     status = row.get("status", "success")
     if not _status_is_success_or_missing(status):
         reasons.append("score_failure")
-    n_spikes, invalid_metric = _first_finite(row, ("n_spikes", "test_spikes"))
+    n_spikes, invalid_metric = _first_count_metric(row, ("n_spikes", "test_spikes"))
     invalid_numeric_metric |= invalid_metric
     if np.isfinite(n_spikes) and n_spikes < min_spikes:
         reasons.append("low_spike_count")
-    n_time, invalid_metric = _as_float(row.get("n_time", np.nan))
+    n_time, invalid_metric = _as_count_metric(row.get("n_time", np.nan))
     invalid_numeric_metric |= invalid_metric
     if np.isfinite(n_time) and n_time < min_time_bins:
         reasons.append("too_few_time_bins")
@@ -243,6 +243,17 @@ def _as_float(value) -> tuple[float, bool]:
     return _coerced_metric_float(array)
 
 
+def _as_count_metric(value) -> tuple[float, bool]:
+    """Return a nonnegative integral count metric without accepting fractions."""
+
+    numeric, invalid_metric = _as_float(value)
+    if invalid_metric or not np.isfinite(numeric):
+        return numeric, invalid_metric
+    if numeric < 0.0 or not float(numeric).is_integer():
+        return float("nan"), True
+    return numeric, False
+
+
 def _coerced_metric_float(value) -> tuple[float, bool]:
     if isinstance(value, (int, np.integer)) and not isinstance(value, (bool, np.bool_)):
         integer = int(value)
@@ -282,6 +293,16 @@ def _first_finite(row: pd.Series, columns: tuple[str, ...]) -> tuple[float, bool
     invalid_numeric_metric = False
     for column in columns:
         value, invalid_metric = _as_float(row.get(column, np.nan))
+        invalid_numeric_metric |= invalid_metric
+        if np.isfinite(value):
+            return value, invalid_numeric_metric
+    return float("nan"), invalid_numeric_metric
+
+
+def _first_count_metric(row: pd.Series, columns: tuple[str, ...]) -> tuple[float, bool]:
+    invalid_numeric_metric = False
+    for column in columns:
+        value, invalid_metric = _as_count_metric(row.get(column, np.nan))
         invalid_numeric_metric |= invalid_metric
         if np.isfinite(value):
             return value, invalid_numeric_metric

@@ -1,4 +1,4 @@
-"""Hash-stable grouping for in-memory cell-split score metadata.
+"""Hash-stable grouping for in-memory cell-split and shuffle scope metadata.
 
 Benchmark score CSVs store explicit train/test cell IDs as strings, but unit tests
 and downstream scripts may pass score tables as pandas DataFrames whose
@@ -6,10 +6,13 @@ and downstream scripts may pass score tables as pandas DataFrames whose
 Pandas cannot use those objects directly in ``drop_duplicates`` or ``groupby``.
 This compatibility patch adds private hashable scope-key columns for grouping
 while preserving the original cell-ID columns for downstream held-out decoding.
+It also keeps integral shuffle-scope identifiers exact instead of routing them
+through binary64 and potentially merging distinct values above ``2**53``.
 """
 
 from __future__ import annotations
 
+import operator
 from pathlib import Path
 from typing import Any
 
@@ -17,10 +20,13 @@ import numpy as np
 import pandas as pd
 
 _GROUP_COLUMN_PREFIX = "__cell_split_scope_key__"
+_SHUFFLE_SCOPE_INTEGER_PATCH_FLAG = "_shuffle_scope_exact_integer_patch_applied"
 
 
 def apply_cell_split_hashable_grouping_patch() -> None:
-    """Make benchmark cell-split grouping robust to list/array metadata values."""
+    """Make grouping robust to unhashable metadata and large integer scope IDs."""
+
+    _apply_shuffle_scope_exact_integer_patch()
 
     from . import benchmark_cell_split_metadata as metadata
 
@@ -92,6 +98,29 @@ def apply_cell_split_hashable_grouping_patch() -> None:
     metadata._cell_split_decode_group_columns = cell_split_decode_group_columns
     metadata._compare_scores_with_cell_split_metadata = compare_scores_with_cell_split_metadata
     metadata._cell_split_hashable_grouping_patch_applied = True
+
+
+def _apply_shuffle_scope_exact_integer_patch() -> None:
+    """Preserve exact integer identifiers in shuffle-control grouping keys."""
+
+    from . import shuffle_controls
+
+    if getattr(shuffle_controls, _SHUFFLE_SCOPE_INTEGER_PATCH_FLAG, False):
+        return
+
+    original_numeric_scope_label = shuffle_controls._numeric_scope_label
+
+    def numeric_scope_label(value: object) -> str | None:
+        if isinstance(value, (bool, np.bool_)):
+            return None
+        try:
+            integer = operator.index(value)
+        except TypeError:
+            return original_numeric_scope_label(value)
+        return str(int(integer))
+
+    shuffle_controls._numeric_scope_label = numeric_scope_label
+    setattr(shuffle_controls, _SHUFFLE_SCOPE_INTEGER_PATCH_FLAG, True)
 
 
 def _with_hashable_scope_keys(frame: pd.DataFrame, metadata: Any) -> pd.DataFrame:

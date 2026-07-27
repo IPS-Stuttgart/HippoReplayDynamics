@@ -139,6 +139,9 @@ def _patch_posterior_calibration_missing_groups() -> None:
     ) -> pd.DataFrame:
         prepared = samples.copy()
         if probability_column in prepared:
+            prepared[probability_column] = prepared[probability_column].map(
+                _unwrap_zero_dimensional_scalar
+            )
             boolean_probability = prepared[probability_column].map(
                 _is_boolean_scalar
             )
@@ -147,6 +150,7 @@ def _patch_posterior_calibration_missing_groups() -> None:
         for column in (rank_column, n_bins_column):
             if column not in prepared:
                 continue
+            prepared[column] = prepared[column].map(_unwrap_zero_dimensional_scalar)
             boolean_values = prepared[column].map(_is_boolean_scalar)
             if bool(boolean_values.any()):
                 prepared[column] = prepared[column].astype(object)
@@ -169,6 +173,7 @@ def _patch_posterior_calibration_missing_groups() -> None:
             rank_column=rank_column,
             n_bins_column=n_bins_column,
         )
+        summary = _normalize_posterior_rank_metric_missing_values(summary)
         if summary.empty or not sentinels:
             return summary
 
@@ -189,22 +194,46 @@ def _patch_posterior_calibration_missing_groups() -> None:
     result_improvements.posterior_calibration_summary = posterior_calibration_summary
 
 
+def _unwrap_zero_dimensional_scalar(value: object) -> object:
+    """Extract scalar values from zero-dimensional NumPy-like containers."""
+
+    try:
+        array = np.asarray(value)
+    except (TypeError, ValueError):
+        return value
+    if array.shape != ():
+        return value
+    try:
+        return array.item()
+    except ValueError:
+        return value
+
+
 def _is_boolean_scalar(value: object) -> bool:
     """Return whether ``value`` is a scalar Boolean, including 0-D arrays."""
 
     if isinstance(value, (bool, np.bool_)):
         return True
-    try:
-        array = np.asarray(value)
-    except (TypeError, ValueError):
-        return False
-    if array.shape != ():
-        return False
-    try:
-        item = array.item()
-    except ValueError:
-        return False
+    item = _unwrap_zero_dimensional_scalar(value)
     return isinstance(item, (bool, np.bool_))
+
+
+def _normalize_posterior_rank_metric_missing_values(summary: pd.DataFrame) -> pd.DataFrame:
+    """Use floating NaN for missing numeric rank metrics."""
+
+    rank_metric_columns = (
+        "median_rank_fraction",
+        "coverage_50_rank",
+        "coverage_80_rank",
+        "coverage_95_rank",
+    )
+    normalized = summary.copy()
+    for column in rank_metric_columns:
+        if column in normalized:
+            normalized[column] = pd.to_numeric(
+                normalized[column], errors="coerce"
+            ).to_numpy(dtype=float)
+    return normalized
 
 
 def _missing_group_sentinel(values: pd.Series, column: str) -> str:

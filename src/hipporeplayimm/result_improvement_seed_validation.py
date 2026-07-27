@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from functools import wraps
 
 import numpy as np
@@ -10,9 +11,11 @@ import pandas as pd
 _PATCHED_FLAG = "_result_improvement_seed_validation_patch_applied"
 _BOOTSTRAP_WRAPPER_FLAG = "_hierarchical_bootstrap_seed_validation_wrapper"
 _SIGN_FLIP_WRAPPER_FLAG = "_paired_sign_flip_seed_validation_wrapper"
+_MARK_FEATURE_WRAPPER_FLAG = "_mark_feature_nonidentity_seed_wrapper"
 _ORIGINAL_ATTR = "__hipporeplayimm_seed_validation_original__"
 _INVALID_UTF8_MODEL_LABEL_PREFIX = "<invalid-utf8-model-bytes:"
 _WRAPPER_VERSION = 3
+_MARK_FEATURE_WRAPPER_VERSION = 1
 
 
 def _nonnegative_integer_seed(value: object, name: str = "random_seed") -> int:
@@ -108,6 +111,21 @@ def _finite_model_metric_rows(
     return normalized_rows.iloc[np.flatnonzero(keep)].copy()
 
 
+def _nonidentity_permuted_values(
+    values: np.ndarray,
+    rng: np.random.Generator,
+) -> np.ndarray:
+    """Permute a feature column until it changes when a change is possible."""
+
+    original = np.asarray(values)
+    if original.size <= 1 or np.unique(original).size <= 1:
+        return original.copy()
+    while True:
+        permuted = rng.permutation(original)
+        if not np.array_equal(permuted, original, equal_nan=True):
+            return permuted
+
+
 def apply_result_improvement_seed_validation_patch() -> None:
     """Install strict seed, metric-value, and replay-emission validation."""
 
@@ -198,6 +216,36 @@ def apply_result_improvement_seed_validation_patch() -> None:
         setattr(paired_sign_flip_p_value, _ORIGINAL_ATTR, original_sign_flip)
         result_improvements.paired_sign_flip_p_value = paired_sign_flip_p_value
 
+    if not _is_mark_feature_wrapper(result_improvements.shuffle_mark_features_session):
+        original_mark_feature_shuffle = result_improvements.shuffle_mark_features_session
+
+        @wraps(original_mark_feature_shuffle)
+        def shuffle_mark_features_session(session, random_seed: int = 1):
+            seed = _nonnegative_integer_seed(random_seed, "random_seed")
+            marks = session.spike_marks
+            if marks is None or marks.n_features == 0:
+                return session
+            rng = np.random.default_rng(seed)
+            values = np.asarray(marks.marks, dtype=float).copy()
+            for column in range(values.shape[1]):
+                values[:, column] = _nonidentity_permuted_values(
+                    values[:, column],
+                    rng,
+                )
+            return replace(session, spike_marks=replace(marks, marks=values))
+
+        setattr(
+            shuffle_mark_features_session,
+            _MARK_FEATURE_WRAPPER_FLAG,
+            _MARK_FEATURE_WRAPPER_VERSION,
+        )
+        setattr(
+            shuffle_mark_features_session,
+            _ORIGINAL_ATTR,
+            original_mark_feature_shuffle,
+        )
+        result_improvements.shuffle_mark_features_session = shuffle_mark_features_session
+
     setattr(result_improvements, _PATCHED_FLAG, True)
 
 
@@ -214,6 +262,9 @@ def _result_improvement_seed_validation_patch_current(result_improvements) -> bo
             _SIGN_FLIP_WRAPPER_FLAG,
             "original_sign_flip",
         )
+        and _is_mark_feature_wrapper(
+            result_improvements.shuffle_mark_features_session
+        )
     )
 
 
@@ -221,6 +272,13 @@ def _is_seed_validation_wrapper(function, flag: str, original_freevar: str) -> b
     return bool(
         getattr(function, flag, None) == _WRAPPER_VERSION
         and original_freevar in getattr(function, "__code__").co_freevars
+    )
+
+
+def _is_mark_feature_wrapper(function) -> bool:
+    return bool(
+        getattr(function, _MARK_FEATURE_WRAPPER_FLAG, None)
+        == _MARK_FEATURE_WRAPPER_VERSION
     )
 
 

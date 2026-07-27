@@ -121,7 +121,7 @@ def _patch_legacy_bootstrap_delta_ci(_cli) -> None:
 
 
 def _patch_posterior_calibration_missing_groups() -> None:
-    """Retain valid calibration rows whose optional session/model key is missing."""
+    """Retain missing groups and reject Boolean posterior probabilities."""
 
     from . import result_improvements
 
@@ -137,8 +137,14 @@ def _patch_posterior_calibration_missing_groups() -> None:
         rank_column: str = "true_bin_rank",
         n_bins_column: str = "n_position_bins",
     ) -> pd.DataFrame:
-        group_columns = [column for column in ("session", "model") if column in samples]
         prepared = samples.copy()
+        if probability_column in prepared:
+            boolean_probability = prepared[probability_column].map(
+                _is_boolean_scalar
+            )
+            prepared = prepared.loc[~boolean_probability].copy()
+
+        group_columns = [column for column in ("session", "model") if column in prepared]
         sentinels: dict[str, str] = {}
         for column in group_columns:
             missing = prepared[column].isna()
@@ -173,6 +179,24 @@ def _patch_posterior_calibration_missing_groups() -> None:
     )
     posterior_calibration_summary._hipporeplayimm_original = current  # type: ignore[attr-defined]
     result_improvements.posterior_calibration_summary = posterior_calibration_summary
+
+
+def _is_boolean_scalar(value: object) -> bool:
+    """Return whether ``value`` is a scalar Boolean, including 0-D arrays."""
+
+    if isinstance(value, (bool, np.bool_)):
+        return True
+    try:
+        array = np.asarray(value)
+    except (TypeError, ValueError):
+        return False
+    if array.shape != ():
+        return False
+    try:
+        item = array.item()
+    except ValueError:
+        return False
+    return isinstance(item, (bool, np.bool_))
 
 
 def _missing_group_sentinel(values: pd.Series, column: str) -> str:

@@ -30,8 +30,30 @@ def test_shuffle_well_labels_preserves_session_boundaries() -> None:
 
     for session in frame["session"].unique():
         assert _label_tuples(shuffled, session) == _label_tuples(frame, session)
-    assert shuffled["true_well_id"].tolist() != frame["true_well_id"].tolist()
+        assert shuffled.loc[
+            shuffled["session"].eq(session), _LABEL_COLUMNS
+        ].to_numpy().tolist() != frame.loc[
+            frame["session"].eq(session), _LABEL_COLUMNS
+        ].to_numpy().tolist()
     pd.testing.assert_frame_equal(
         shuffled[["session", "event"]],
         frame[["session", "event"]],
     )
+
+
+def test_shuffle_well_labels_rejects_identity_draw_without_session() -> None:
+    frame = pd.DataFrame(
+        {
+            "event": [0, 1],
+            "true_well_id": ["A1", "A2"],
+            "true_well_x": [1.0, 2.0],
+            "true_well_y": [10.0, 20.0],
+        }
+    )
+
+    shuffled = shuffle_well_labels(frame, random_seed=0)
+
+    assert shuffled[_LABEL_COLUMNS].to_numpy().tolist() == frame.loc[
+        [1, 0], _LABEL_COLUMNS
+    ].to_numpy().tolist()
+    pd.testing.assert_series_equal(shuffled["event"], frame["event"])

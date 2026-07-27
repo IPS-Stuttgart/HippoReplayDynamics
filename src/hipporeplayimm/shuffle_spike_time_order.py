@@ -204,10 +204,18 @@ def _nonidentity_permuted_axis(
     """Permute rows or columns until the numeric array changes when possible."""
 
     original = np.asarray(values)
-    if (
-        original.shape[axis] <= 1
-        or np.unique(original, axis=axis).shape[axis] <= 1
-    ):
+    if original.shape[axis] <= 1:
+        return original.copy()
+    reference = np.take(original, 0, axis=axis)
+    has_distinct_slice = any(
+        not np.array_equal(
+            np.take(original, index, axis=axis),
+            reference,
+            equal_nan=True,
+        )
+        for index in range(1, original.shape[axis])
+    )
+    if not has_distinct_slice:
         return original.copy()
     while True:
         permutation = _nonidentity_permutation(original.shape[axis], rng)

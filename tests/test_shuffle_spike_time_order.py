@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 
 import numpy as np
@@ -8,7 +9,10 @@ import pytest
 
 import hipporeplayimm.shuffle_spike_time_order as shuffle_patch
 from hipporeplayimm.data import ReplaySession, SpikeMarkData
-from hipporeplayimm.result_improvements import shuffle_spike_times_session
+from hipporeplayimm.result_improvements import (
+    shuffle_mark_features_session,
+    shuffle_spike_times_session,
+)
 from hipporeplayimm.shuffle_controls import add_shuffle_p_values
 
 
@@ -55,6 +59,45 @@ def test_shuffle_spike_times_retries_duplicate_time_noop_draw() -> None:
     np.testing.assert_allclose(shuffled.spike_marks.times, shuffled.spikes[:, 0])
     np.testing.assert_array_equal(shuffled.spike_marks.cell_ids, shuffled.spikes[:, 1].astype(int))
     np.testing.assert_allclose(shuffled.spike_marks.marks[:, 0], shuffled.spikes[:, 1])
+
+
+def test_shuffle_mark_features_retries_identity_draw_when_change_is_possible() -> None:
+    session = _marked_session()
+    assert session.spike_marks is not None
+    session.spike_marks = replace(
+        session.spike_marks,
+        marks=session.spike_marks.marks[:, :1].copy(),
+        feature_names=("cell_id_proxy",),
+    )
+
+    # NumPy's first four-element permutation for seed 1 is the identity.
+    shuffled = shuffle_mark_features_session(session, random_seed=1)
+
+    assert shuffled.spike_marks is not None
+    assert not np.array_equal(shuffled.spike_marks.marks, session.spike_marks.marks)
+
+
+def test_shuffle_mark_features_retries_duplicate_value_noop_draw() -> None:
+    session = _marked_session()
+    assert session.spike_marks is not None
+    session.spike_marks = replace(
+        session.spike_marks,
+        marks=np.array([[0.0], [0.0], [1.0], [2.0]]),
+        feature_names=("feature",),
+    )
+
+    # Seed 31 first swaps only the equal-valued rows, which is observationally
+    # unchanged and therefore must be retried.
+    shuffled = shuffle_mark_features_session(session, random_seed=31)
+
+    assert shuffled.spike_marks is not None
+    assert not np.array_equal(shuffled.spike_marks.marks, session.spike_marks.marks)
+
+
+@pytest.mark.parametrize("random_seed", [-1, 1.5, True, float("nan")])
+def test_shuffle_mark_features_rejects_invalid_random_seed(random_seed) -> None:
+    with pytest.raises(ValueError, match="random_seed"):
+        shuffle_mark_features_session(_marked_session(), random_seed=random_seed)
 
 
 @pytest.mark.parametrize("random_seed", [-1, 1.5, True, float("nan")])

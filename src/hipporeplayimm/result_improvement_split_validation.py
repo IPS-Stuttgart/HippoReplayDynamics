@@ -1,4 +1,4 @@
-"""Validate result-improvement split helper counts before lossy coercion."""
+"""Validate result-improvement split inputs before lossy coercion."""
 
 from __future__ import annotations
 
@@ -14,7 +14,7 @@ _ORIGINAL_ATTR = "_result_improvement_split_validation_original"
 
 
 def apply_result_improvement_split_validation_patch() -> None:
-    """Install strict validation for split helper count arguments."""
+    """Install strict validation for split cell IDs and count arguments."""
 
     from . import result_improvements
 
@@ -34,9 +34,10 @@ def apply_result_improvement_split_validation_patch() -> None:
         *,
         n_strata: int = 4,
     ):
+        validated_cell_ids = _validated_unique_cell_ids(cell_ids)
         validated_n_strata = _positive_integer_scalar(n_strata, "n_strata")
         return original(
-            cell_ids,
+            validated_cell_ids,
             stratum_values,
             test_fraction,
             random_seed,
@@ -48,6 +49,17 @@ def apply_result_improvement_split_validation_patch() -> None:
     result_improvements.stratified_cell_split = stratified_cell_split
     _synchronize_aliases(original, stratified_cell_split)
     setattr(result_improvements, _PATCHED_FLAG, True)
+
+
+def _validated_unique_cell_ids(values: object) -> np.ndarray:
+    """Return exact cell IDs and reject duplicate identities before splitting."""
+
+    from .data_cell_id_validation import _coerce_integral_ids
+
+    cell_ids = _coerce_integral_ids(values, "cell_ids")
+    if cell_ids.ndim == 1 and np.unique(cell_ids).size != cell_ids.size:
+        raise ValueError("cell_ids must contain unique identifiers")
+    return cell_ids
 
 
 def _positive_integer_scalar(value: object, name: str) -> int:

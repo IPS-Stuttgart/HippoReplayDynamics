@@ -15,5 +15,8 @@ def test_all_settings_writers_quote_yaml_ambiguous_strings(module) -> None:
     assert module._yaml_scalar("null") == '"null"'
     assert module._yaml_scalar("true") == '"true"'
     assert module._yaml_scalar("0123") == '"0123"'
+    assert module._yaml_scalar("2026-07-27") == '"2026-07-27"'
+    assert module._yaml_scalar("0x10") == '"0x10"'
+    assert module._yaml_scalar("0b101") == '"0b101"'
     assert module._yaml_scalar(" leading") == '" leading"'
     assert module._yaml_scalar("plain-value") == "plain-value"

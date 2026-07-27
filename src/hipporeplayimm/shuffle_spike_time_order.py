@@ -152,7 +152,7 @@ def _shuffled_encoding_nonidentity(
     if mode == "cell-permutation":
         rates = _nonidentity_permuted_axis(rates, axis=0, rng=rng)
     elif mode == "spatial-roll":
-        rates = shuffle_controls._spatial_roll_rates(
+        rates = _nonidentity_spatial_roll_rates(
             rates,
             encoding.grid_shape,
             rng,
@@ -237,6 +237,37 @@ def _nonidentity_permuted_values(
         permuted = original[_nonidentity_permutation(original.size, rng)]
         if not np.array_equal(permuted, original, equal_nan=True):
             return permuted
+
+
+def _nonidentity_spatial_roll_rates(
+    rates: np.ndarray,
+    grid_shape: object,
+    rng: np.random.Generator,
+) -> np.ndarray:
+    """Roll each rate map until its values change when a changed roll exists."""
+
+    from . import shuffle_controls
+
+    original = np.asarray(rates)
+    if original.size == 0:
+        return original.copy()
+    n_x, n_y = shuffle_controls._validate_grid_shape(grid_shape)
+    if original.shape[1] != n_x * n_y:
+        raise ValueError("rates must contain one column per spatial grid bin")
+
+    out = np.empty_like(original)
+    for cell_index, row in enumerate(original):
+        if row.size <= 1 or np.unique(row).size <= 1:
+            out[cell_index] = row
+            continue
+        grid = row.reshape((n_x, n_y))
+        while True:
+            dx, dy = shuffle_controls._nonidentity_roll_shift((n_x, n_y), rng)
+            rolled = np.roll(np.roll(grid, dx, axis=0), dy, axis=1)
+            if not np.array_equal(rolled, grid, equal_nan=True):
+                out[cell_index] = rolled.reshape(-1)
+                break
+    return out
 
 
 def _shuffle_cell_identities_session_nonidentity(session, random_seed: int = 1):

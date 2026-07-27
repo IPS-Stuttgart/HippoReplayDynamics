@@ -151,19 +151,45 @@ def _scope_key_column(column: str) -> str:
 
 
 def _metadata_group_key(value: object) -> str:
+    """Return a recursively canonical, hashable representation of metadata."""
+
+    return repr(_canonical_metadata_value(value))
+
+
+def _canonical_metadata_value(value: object) -> tuple[object, ...]:
+    """Normalize nested containers without losing array shape or scalar identity."""
+
     try:
         missing = pd.isna(value)
     except (TypeError, ValueError):
         missing = False
     if isinstance(missing, (bool, np.bool_)) and bool(missing):
-        return repr(("missing", None))
+        return ("missing", None)
     if isinstance(value, np.ndarray):
         arr = np.asarray(value, dtype=object)
-        return repr(("array", tuple(arr.shape), arr.reshape(-1).tolist()))
+        return (
+            "array",
+            tuple(arr.shape),
+            tuple(_canonical_metadata_value(item) for item in arr.reshape(-1)),
+        )
     if isinstance(value, (list, tuple)):
-        return repr(("sequence", list(value)))
-    if isinstance(value, set):
-        return repr(("set", sorted(value, key=repr)))
+        return (
+            "sequence",
+            tuple(_canonical_metadata_value(item) for item in value),
+        )
+    if isinstance(value, (set, frozenset)):
+        items = sorted(
+            (_canonical_metadata_value(item) for item in value),
+            key=repr,
+        )
+        return ("set", tuple(items))
     if isinstance(value, dict):
-        return repr(("mapping", sorted(value.items(), key=lambda item: repr(item[0]))))
-    return repr(("scalar", str(value).strip()))
+        items = sorted(
+            (
+                (_canonical_metadata_value(key), _canonical_metadata_value(item))
+                for key, item in value.items()
+            ),
+            key=lambda pair: repr(pair[0]),
+        )
+        return ("mapping", tuple(items))
+    return ("scalar", str(value).strip())

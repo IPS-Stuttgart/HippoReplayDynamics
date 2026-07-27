@@ -270,7 +270,7 @@ def _shuffle_spike_times_session_sorted(session, random_seed: int = 1):
         if mark_times.shape[0] == order.shape[0]:
             mark_times = spikes[:, 0].copy()
         elif mark_times.size:
-            mark_times = rng.permutation(mark_times)
+            mark_times = _nonidentity_permuted_values(mark_times, rng)
         marks = ri._replace_spike_mark_rows(marks, times=mark_times, order=order)
     return replace(session, spikes=spikes, spike_marks=marks)
 

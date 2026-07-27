@@ -14,6 +14,7 @@ _GRID_SHAPE_PATCHED_FLAG = "_shuffle_grid_shape_validation_patch_applied"
 _INTEGER_VALUE_PATCHED_FLAG = "_shuffle_integer_value_precision_patch_applied"
 _PERMUTATION_PATCHED_FLAG = "_shuffle_nonidentity_permutation_patch_applied"
 _CELL_IDENTITY_PATCHED_FLAG = "_shuffle_nonidentity_cell_identity_patch_applied"
+_MARK_FEATURE_PATCHED_FLAG = "_shuffle_nonidentity_mark_feature_patch_applied"
 
 
 def apply_shuffle_spike_time_order_patch() -> None:
@@ -69,6 +70,14 @@ def apply_shuffle_spike_time_order_patch() -> None:
             _shuffle_cell_identities_session_nonidentity
         )
         setattr(ri, _CELL_IDENTITY_PATCHED_FLAG, True)
+
+    if not (
+        getattr(ri, _MARK_FEATURE_PATCHED_FLAG, False)
+        and getattr(ri, "shuffle_mark_features_session", None)
+        is _shuffle_mark_features_session_nonidentity
+    ):
+        ri.shuffle_mark_features_session = _shuffle_mark_features_session_nonidentity
+        setattr(ri, _MARK_FEATURE_PATCHED_FLAG, True)
 
 
 def _mapping_scope_label(value: Mapping[object, object], scope_label) -> str:
@@ -273,6 +282,19 @@ def _shuffle_spike_times_session_sorted(session, random_seed: int = 1):
             mark_times = rng.permutation(mark_times)
         marks = ri._replace_spike_mark_rows(marks, times=mark_times, order=order)
     return replace(session, spikes=spikes, spike_marks=marks)
+
+
+def _shuffle_mark_features_session_nonidentity(session, random_seed: int = 1):
+    """Shuffle every variable mark feature without avoidable no-op draws."""
+
+    marks = session.spike_marks
+    if marks is None or marks.n_features == 0:
+        return session
+    rng = np.random.default_rng(_nonnegative_integer_seed(random_seed))
+    values = np.asarray(marks.marks, dtype=float).copy()
+    for column in range(values.shape[1]):
+        values[:, column] = _nonidentity_permuted_values(values[:, column], rng)
+    return replace(session, spike_marks=replace(marks, marks=values))
 
 
 def _numeric_scope_label(value: object) -> str | None:

@@ -121,7 +121,7 @@ def _patch_legacy_bootstrap_delta_ci(_cli) -> None:
 
 
 def _patch_posterior_calibration_missing_groups() -> None:
-    """Retain missing groups and reject Boolean posterior probabilities."""
+    """Retain missing groups and reject Boolean posterior calibration values."""
 
     from . import result_improvements
 
@@ -143,6 +143,14 @@ def _patch_posterior_calibration_missing_groups() -> None:
                 _is_boolean_scalar
             )
             prepared = prepared.loc[~boolean_probability].copy()
+
+        for column in (rank_column, n_bins_column):
+            if column not in prepared:
+                continue
+            boolean_values = prepared[column].map(_is_boolean_scalar)
+            if bool(boolean_values.any()):
+                prepared[column] = prepared[column].astype(object)
+                prepared.loc[boolean_values, column] = np.nan
 
         group_columns = [column for column in ("session", "model") if column in prepared]
         sentinels: dict[str, str] = {}

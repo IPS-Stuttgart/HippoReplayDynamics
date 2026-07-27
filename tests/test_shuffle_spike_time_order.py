@@ -24,6 +24,39 @@ def test_shuffle_spike_times_returns_time_sorted_mark_aligned_session() -> None:
     np.testing.assert_allclose(shuffled.spike_marks.marks[:, 0], shuffled.spikes[:, 1])
 
 
+def test_shuffle_spike_times_retries_identity_draw_when_change_is_possible() -> None:
+    session = _marked_session()
+
+    # NumPy's first four-element permutation for seed 1 is the identity.
+    shuffled = shuffle_spike_times_session(session, random_seed=1)
+
+    assert shuffled.spike_marks is not None
+    assert not np.array_equal(shuffled.spikes, session.spikes)
+    np.testing.assert_allclose(shuffled.spikes[:, 0], session.spikes[:, 0])
+    np.testing.assert_allclose(shuffled.spike_marks.times, shuffled.spikes[:, 0])
+    np.testing.assert_array_equal(shuffled.spike_marks.cell_ids, shuffled.spikes[:, 1].astype(int))
+    np.testing.assert_allclose(shuffled.spike_marks.marks[:, 0], shuffled.spikes[:, 1])
+
+
+def test_shuffle_spike_times_retries_duplicate_time_noop_draw() -> None:
+    session = _marked_session()
+    session.spikes[1, 0] = session.spikes[0, 0]
+    assert session.spike_marks is not None
+    session.spike_marks.times[1] = session.spike_marks.times[0]
+    original_cell_order = session.spikes[:, 1].copy()
+
+    # Seed 31 first swaps only the duplicate-time rows, which is observationally
+    # unchanged and therefore must be retried.
+    shuffled = shuffle_spike_times_session(session, random_seed=31)
+
+    assert shuffled.spike_marks is not None
+    assert not np.array_equal(shuffled.spikes[:, 1], original_cell_order)
+    assert np.all(np.diff(shuffled.spikes[:, 0]) >= 0.0)
+    np.testing.assert_allclose(shuffled.spike_marks.times, shuffled.spikes[:, 0])
+    np.testing.assert_array_equal(shuffled.spike_marks.cell_ids, shuffled.spikes[:, 1].astype(int))
+    np.testing.assert_allclose(shuffled.spike_marks.marks[:, 0], shuffled.spikes[:, 1])
+
+
 @pytest.mark.parametrize("random_seed", [-1, 1.5, True, float("nan")])
 def test_shuffle_spike_times_rejects_invalid_random_seed(random_seed) -> None:
     with pytest.raises(ValueError, match="random_seed"):
@@ -34,14 +67,16 @@ def test_shuffle_spike_times_rejects_invalid_random_seed(random_seed) -> None:
 def test_shuffle_spike_times_preserves_exact_large_integer_seed(monkeypatch, random_seed) -> None:
     captured_seeds: list[int] = []
 
-    class IdentityGenerator:
+    class SeedCaptureGenerator:
         @staticmethod
         def permutation(values):
+            if np.ndim(values) == 0:
+                return np.arange(int(values) - 1, -1, -1, dtype=int)
             return np.asarray(values).copy()
 
-    def capture_seed(seed: int) -> IdentityGenerator:
+    def capture_seed(seed: int) -> SeedCaptureGenerator:
         captured_seeds.append(seed)
-        return IdentityGenerator()
+        return SeedCaptureGenerator()
 
     monkeypatch.setattr(shuffle_patch.np.random, "default_rng", capture_seed)
 

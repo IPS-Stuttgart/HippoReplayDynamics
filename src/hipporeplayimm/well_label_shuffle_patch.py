@@ -38,6 +38,21 @@ def _nonnegative_integer_value(name: str, value: object) -> int:
     return _nonnegative_integer_seed(value, name)
 
 
+def _nonidentity_permutation(
+    size: int,
+    rng: np.random.Generator,
+) -> np.ndarray:
+    """Draw a nonidentity index permutation without importing startup patches."""
+
+    identity = np.arange(size)
+    if size <= 1:
+        return identity
+    permutation = rng.permutation(size)
+    while np.array_equal(permutation, identity):
+        permutation = rng.permutation(size)
+    return permutation
+
+
 def shuffle_well_labels(frame: pd.DataFrame, random_seed: int = 1) -> pd.DataFrame:
     """Shuffle complete label rows without breaking ID/coordinate links.
 
@@ -68,7 +83,9 @@ def shuffle_well_labels(frame: pd.DataFrame, random_seed: int = 1) -> pd.DataFra
     label_values = out.loc[labelled_rows, label_columns].to_numpy(copy=True)
     rng = np.random.default_rng(seed)
     if "session" not in out:
-        shuffled_values = label_values[rng.permutation(label_values.shape[0])]
+        shuffled_values = label_values[
+            _nonidentity_permutation(label_values.shape[0], rng)
+        ]
     else:
         shuffled_values = label_values.copy()
         session_values = pd.DataFrame(
@@ -79,7 +96,7 @@ def shuffle_well_labels(frame: pd.DataFrame, random_seed: int = 1) -> pd.DataFra
         ).indices.values():
             positions = np.asarray(positions, dtype=int)
             shuffled_values[positions] = label_values[positions][
-                rng.permutation(positions.size)
+                _nonidentity_permutation(positions.size, rng)
             ]
     out.loc[labelled_rows, label_columns] = shuffled_values
     return out

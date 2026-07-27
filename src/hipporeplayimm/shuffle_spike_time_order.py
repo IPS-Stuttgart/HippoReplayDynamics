@@ -138,7 +138,7 @@ def _shuffled_encoding_nonidentity(
     mode: str = "spatial-roll",
     random_seed: int = 1,
 ):
-    """Return a shuffled encoding without identity permutations when avoidable."""
+    """Return a shuffled encoding without avoidable observational no-op draws."""
 
     from . import shuffle_controls
 
@@ -150,7 +150,7 @@ def _shuffled_encoding_nonidentity(
     rng = np.random.default_rng(random_seed)
     rates = np.asarray(encoding.rates_hz, dtype=float).copy()
     if mode == "cell-permutation":
-        rates = rates[_nonidentity_permutation(rates.shape[0], rng)]
+        rates = _nonidentity_permuted_axis(rates, axis=0, rng=rng)
     elif mode == "spatial-roll":
         rates = shuffle_controls._spatial_roll_rates(
             rates,
@@ -158,12 +158,12 @@ def _shuffled_encoding_nonidentity(
             rng,
         )
     elif mode == "spatial-permutation":
-        rates = rates[:, _nonidentity_permutation(encoding.n_bins, rng)]
+        rates = _nonidentity_permuted_axis(rates, axis=1, rng=rng)
     elif mode == "independent-spatial-permutation":
         if rates.shape[0] > 0:
             rates = np.vstack(
                 [
-                    row[_nonidentity_permutation(encoding.n_bins, rng)]
+                    _nonidentity_permuted_values(row, rng)
                     for row in rates
                 ]
             )
@@ -193,6 +193,27 @@ def _nonidentity_permutation(
     while np.array_equal(permutation, identity):
         permutation = rng.permutation(size)
     return permutation
+
+
+def _nonidentity_permuted_axis(
+    values: np.ndarray,
+    *,
+    axis: int,
+    rng: np.random.Generator,
+) -> np.ndarray:
+    """Permute rows or columns until the numeric array changes when possible."""
+
+    original = np.asarray(values)
+    if (
+        original.shape[axis] <= 1
+        or np.unique(original, axis=axis).shape[axis] <= 1
+    ):
+        return original.copy()
+    while True:
+        permutation = _nonidentity_permutation(original.shape[axis], rng)
+        permuted = np.take(original, permutation, axis=axis)
+        if not np.array_equal(permuted, original, equal_nan=True):
+            return permuted
 
 
 def _nonidentity_permuted_values(

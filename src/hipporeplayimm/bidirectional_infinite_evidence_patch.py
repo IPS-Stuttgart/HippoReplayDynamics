@@ -194,6 +194,7 @@ def apply_bidirectional_infinite_evidence_patch() -> None:
             return_trajectory=reverse_return_trajectory,
         )
         logp, weights = _equal_prior_logp_and_weights([forward.log_likelihood, reverse.log_likelihood])
+        chosen = forward if weights[0] >= weights[1] else reverse
         terminal = _safe_mixture_log_posterior(
             [_terminal_log_posterior_from_score(forward), _terminal_log_posterior_from_score(reverse)],
             weights,
@@ -203,12 +204,15 @@ def apply_bidirectional_infinite_evidence_patch() -> None:
             trajectory = _safe_mixture_log_posterior([forward.trajectory_log_posterior, reverse.trajectory_log_posterior], weights)
         if trajectory is not None:
             terminal = np.asarray(trajectory[-1], dtype=float).copy()
-        diagnostics = {
-            "time_direction": "bidirectional-mixture",
-            "base_model": str(forward.model_name),
-            "forward_model_posterior_probability": float(weights[0]),
-            "reverse_model_posterior_probability": float(weights[1]),
-        }
+        diagnostics = dict(getattr(chosen, "diagnostics", {}) or {})
+        diagnostics.update(
+            {
+                "time_direction": "bidirectional-mixture",
+                "base_model": str(forward.model_name),
+                "forward_model_posterior_probability": float(weights[0]),
+                "reverse_model_posterior_probability": float(weights[1]),
+            }
+        )
         if terminal is not None:
             diagnostics.update(direct._posterior_diagnostics(terminal, bin_centers))
         return direct.EventScore(

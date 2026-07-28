@@ -84,14 +84,26 @@ def _time_vector(
 
     transition_durations = _transition_durations_for_time_vector(emissions)
     if transition_durations is None:
-        return (float(times[-1]) - times[::-1] + float(times[0])).copy()
+        with np.errstate(over="ignore", invalid="ignore"):
+            output = float(times[-1]) - times[::-1] + float(times[0])
+        return _validated_reversed_times(output)
 
     reversed_durations = transition_durations[::-1]
     output = np.empty_like(times, dtype=float)
     output[0] = float(times[0])
     if reversed_durations.size:
-        output[1:] = output[0] + np.cumsum(reversed_durations)
-    return output
+        with np.errstate(over="ignore", invalid="ignore"):
+            output[1:] = output[0] + np.cumsum(reversed_durations, dtype=float)
+    return _validated_reversed_times(output)
+
+
+def _validated_reversed_times(values: np.ndarray) -> np.ndarray:
+    output = np.asarray(values, dtype=float)
+    if not np.all(np.isfinite(output)):
+        raise ValueError("reversed times exceed floating-point range")
+    if output.size > 1 and np.any(output[1:] <= output[:-1]):
+        raise ValueError("reversed times must remain strictly increasing")
+    return output.copy()
 
 
 def _transition_durations_for_time_vector(emissions: LogEmissionTensor) -> np.ndarray | None:

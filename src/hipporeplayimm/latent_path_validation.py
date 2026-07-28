@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 from functools import wraps
+import operator
 from typing import Any
 
 import numpy as np
@@ -177,20 +178,26 @@ def _integer_valued_scalar(name: str, value: Any) -> int:
         raise ValueError(f"{name} must be positive integer-valued")
     if _contains_text_values(raw):
         raise ValueError(f"{name} must be positive integer-valued, not text")
+    item = raw.item()
     if np.issubdtype(raw.dtype, np.bool_) or (
-        raw.dtype == object and isinstance(raw.item(), (bool, np.bool_))
+        raw.dtype == object and isinstance(item, (bool, np.bool_))
     ):
         raise TypeError(f"{name} must be positive integer-valued")
+
     try:
-        numeric = float(raw)
-    except (TypeError, ValueError, OverflowError) as exc:
-        raise ValueError(f"{name} must be positive integer-valued") from exc
-    if not np.isfinite(numeric):
-        raise ValueError(f"{name} must be positive integer-valued")
-    integer_value = int(round(numeric))
-    if not np.isclose(numeric, integer_value, rtol=0.0, atol=0.0):
-        raise ValueError(f"{name} must be positive integer-valued")
-    return integer_value
+        integer_value = operator.index(item)
+    except TypeError:
+        try:
+            integer_value = int(item)
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise ValueError(f"{name} must be positive integer-valued") from exc
+        try:
+            is_exact = item == integer_value
+            if not isinstance(is_exact, (bool, np.bool_)) or not bool(is_exact):
+                raise ValueError(f"{name} must be positive integer-valued")
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"{name} must be positive integer-valued") from exc
+    return int(integer_value)
 
 
 def _validate_latent_path_motion_sigmas(true_model: Any, state_space: Any) -> None:

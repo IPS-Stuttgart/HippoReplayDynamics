@@ -38,19 +38,36 @@ def _nonnegative_integer_value(name: str, value: object) -> int:
     return _nonnegative_integer_seed(value, name)
 
 
-def _nonidentity_permutation(
-    size: int,
+def _row_sequences_equal(left: np.ndarray, right: np.ndarray) -> bool:
+    """Compare label-row sequences with pandas missing-value semantics."""
+
+    return pd.DataFrame(left).equals(pd.DataFrame(right))
+
+
+def _nonidentity_permuted_rows(
+    values: np.ndarray,
     rng: np.random.Generator,
 ) -> np.ndarray:
-    """Draw a nonidentity index permutation without importing startup patches."""
+    """Permute label rows until their observed sequence changes when possible."""
 
-    identity = np.arange(size)
-    if size <= 1:
-        return identity
-    permutation = rng.permutation(size)
-    while np.array_equal(permutation, identity):
-        permutation = rng.permutation(size)
-    return permutation
+    original = np.asarray(values)
+    if original.ndim != 2:
+        raise ValueError("well-label values must be two-dimensional")
+    if original.shape[0] <= 1:
+        return original.copy()
+
+    reference = original[:1]
+    has_distinct_row = any(
+        not _row_sequences_equal(original[index : index + 1], reference)
+        for index in range(1, original.shape[0])
+    )
+    if not has_distinct_row:
+        return original.copy()
+
+    while True:
+        permuted = original[rng.permutation(original.shape[0])]
+        if not _row_sequences_equal(permuted, original):
+            return permuted
 
 
 def shuffle_well_labels(frame: pd.DataFrame, random_seed: int = 1) -> pd.DataFrame:
@@ -83,9 +100,7 @@ def shuffle_well_labels(frame: pd.DataFrame, random_seed: int = 1) -> pd.DataFra
     label_values = out.loc[labelled_rows, label_columns].to_numpy(copy=True)
     rng = np.random.default_rng(seed)
     if "session" not in out:
-        shuffled_values = label_values[
-            _nonidentity_permutation(label_values.shape[0], rng)
-        ]
+        shuffled_values = _nonidentity_permuted_rows(label_values, rng)
     else:
         shuffled_values = label_values.copy()
         session_values = pd.DataFrame(
@@ -95,9 +110,10 @@ def shuffle_well_labels(frame: pd.DataFrame, random_seed: int = 1) -> pd.DataFra
             "session", sort=False, dropna=False
         ).indices.values():
             positions = np.asarray(positions, dtype=int)
-            shuffled_values[positions] = label_values[positions][
-                _nonidentity_permutation(positions.size, rng)
-            ]
+            shuffled_values[positions] = _nonidentity_permuted_rows(
+                label_values[positions],
+                rng,
+            )
     out.loc[labelled_rows, label_columns] = shuffled_values
     return out
 

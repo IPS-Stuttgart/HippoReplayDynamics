@@ -315,7 +315,7 @@ def _decode_window(
     posterior = np.exp(log_posterior)
     posterior_mean = posterior @ encoding.bin_centers
     map_bin = int(np.argmax(log_posterior))
-    true_xy = np.array([[float(window["true_x"]), float(window["true_y"])]] )
+    true_xy = np.array([[float(window["true_x"]), float(window["true_y"])]])
     true_bin = int(encoding.positions_to_flat_bins(true_xy)[0])
     if true_bin >= 0:
         true_prob = float(posterior[true_bin])

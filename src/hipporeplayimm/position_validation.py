@@ -184,12 +184,22 @@ def fit_place_field_encoding_for_position_mask(
     counts = np.zeros((cell_ids.shape[0], occupancy.shape[0]), dtype=float)
 
     if spikes.size and cell_ids.size:
-        train_intervals = _mask_to_intervals(times, train_frames)
         spike_times = spikes[:, 0]
         spike_cell_ids = spikes[:, 1].astype(int)
         spike_xy = _interp_positions(times, xy, spike_times)
         spike_bins = _positions_to_flat_bins(spike_xy, x_edges, y_edges)
-        keep_spikes = _times_in_intervals(spike_times, train_intervals) & (spike_bins >= 0)
+        frame_indices = np.searchsorted(times, spike_times, side="right") - 1
+        valid_frames = (frame_indices >= 0) & (frame_indices < times.shape[0])
+        spike_in_training = np.zeros(spike_times.shape, dtype=bool)
+        if np.any(valid_frames):
+            rows_for_spikes = frame_indices[valid_frames].astype(int)
+            offsets = spike_times[valid_frames] - times[rows_for_spikes]
+            spike_in_training[valid_frames] = (
+                train_frames[rows_for_spikes]
+                & (offsets >= 0.0)
+                & (offsets < dt[rows_for_spikes])
+            )
+        keep_spikes = spike_in_training & (spike_bins >= 0)
         kept_cell_ids = spike_cell_ids[keep_spikes]
         kept_bins = spike_bins[keep_spikes].astype(int)
         rows = np.searchsorted(cell_ids, kept_cell_ids)

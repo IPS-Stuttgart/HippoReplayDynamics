@@ -51,18 +51,47 @@ def _speed_within_run_intervals(
     return speed
 
 
+def _interval_local_durations(
+    times: np.ndarray,
+    intervals: np.ndarray,
+    base_durations: Callable[[np.ndarray], np.ndarray],
+) -> np.ndarray:
+    """Combine interval-local frame durations without row-order dependence.
+
+    A sample shared by multiple run intervals can be terminal in one interval
+    but have a real successor in another. Prefer the successor-derived duration
+    over terminal median fallbacks; among equivalent candidates, keep the
+    shortest duration so overlapping metadata cannot inflate occupancy.
+    """
+
+    exact = np.full(times.shape, np.inf, dtype=float)
+    fallback = np.full(times.shape, np.inf, dtype=float)
+    for start, end in intervals:
+        indices = np.flatnonzero((times >= start) & (times <= end))
+        if indices.size == 0:
+            continue
+        local = np.asarray(base_durations(times[indices]), dtype=float)
+        if local.shape != indices.shape:
+            raise ValueError("base_durations must return one value per input time")
+        if indices.size > 1:
+            np.minimum.at(exact, indices[:-1], local[:-1])
+        np.minimum.at(fallback, indices[-1:], local[-1:])
+
+    durations = np.zeros(times.shape, dtype=float)
+    has_exact = np.isfinite(exact)
+    durations[has_exact] = exact[has_exact]
+    has_fallback = ~has_exact & np.isfinite(fallback)
+    durations[has_fallback] = fallback[has_fallback]
+    return durations
+
+
 def _durations_within_run_intervals(
     times: np.ndarray,
     intervals: np.ndarray,
     base_durations: Callable[[np.ndarray], np.ndarray],
 ) -> np.ndarray:
     times = np.asarray(times, dtype=float)
-    durations = np.zeros(times.shape, dtype=float)
-    for start, end in intervals:
-        in_interval = (times >= start) & (times <= end)
-        if np.any(in_interval):
-            durations[in_interval] = base_durations(times[in_interval])
-    return durations
+    return _interval_local_durations(times, intervals, base_durations)
 
 
 def _durations_split_at_run_boundaries(
@@ -76,13 +105,10 @@ def _durations_split_at_run_boundaries(
     if times.size == 0 or intervals.size == 0:
         return base_durations(times)
 
-    durations = np.zeros(times.shape, dtype=float)
+    durations = _interval_local_durations(times, intervals, base_durations)
     covered = np.zeros(times.shape, dtype=bool)
     for start, end in intervals:
-        in_interval = (times >= start) & (times <= end)
-        covered |= in_interval
-        if np.any(in_interval):
-            durations[in_interval] = base_durations(times[in_interval])
+        covered |= (times >= start) & (times <= end)
 
     outside = ~covered
     padded = np.concatenate(([False], outside, [False]))

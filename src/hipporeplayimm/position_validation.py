@@ -106,12 +106,11 @@ def validate_session_position_decoding(
     in_run = _times_in_intervals(times, session.run_times)
     movement = in_run & (speed >= config.encoding.min_speed_cm_s)
     windows = _decode_windows(times, xy, movement, session.run_times, config.decode_bin_s)
-    if config.max_windows_per_session is not None:
-        windows = windows[: config.max_windows_per_session]
+    rng = np.random.default_rng(config.random_seed)
+    windows = _subsample_position_windows(windows, config.max_windows_per_session, rng)
     if not windows:
         return pd.DataFrame()
 
-    rng = np.random.default_rng(config.random_seed)
     shuffled = rng.permutation(len(windows))
     n_folds = min(config.n_folds, len(windows))
     folds = [fold for fold in np.array_split(shuffled, n_folds) if fold.size]
@@ -140,6 +139,19 @@ def validate_session_position_decoding(
             if row is not None:
                 rows.append(row)
     return pd.DataFrame(rows)
+
+
+def _subsample_position_windows(
+    windows: list[dict[str, float]],
+    max_windows: int | None,
+    rng: np.random.Generator,
+) -> list[dict[str, float]]:
+    """Return a seeded, chronologically ordered subset of decode windows."""
+
+    if max_windows is None or len(windows) <= max_windows:
+        return windows
+    keep = np.sort(rng.choice(len(windows), size=max_windows, replace=False))
+    return [windows[int(index)] for index in keep]
 
 
 def fit_place_field_encoding_for_position_mask(

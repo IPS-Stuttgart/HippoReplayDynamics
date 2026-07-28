@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from functools import wraps
+import operator
 from typing import Any
 
 import numpy as np
@@ -250,12 +251,21 @@ def _positive_integer_scalar(name: str, value: Any) -> int:
         raise ValueError(f"{name} must be a positive integer, not text")
     item = _strict_scalar_item(name, value)
     try:
-        numeric = float(item)
-    except (TypeError, ValueError) as exc:
-        raise ValueError(f"{name} must be a positive integer") from exc
-    if not np.isfinite(numeric) or numeric <= 0.0 or not numeric.is_integer():
+        integer_value = operator.index(item)
+    except TypeError:
+        try:
+            integer_value = int(item)
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise ValueError(f"{name} must be a positive integer") from exc
+        try:
+            is_exact = item == integer_value
+            if not isinstance(is_exact, (bool, np.bool_)) or not bool(is_exact):
+                raise ValueError(f"{name} must be a positive integer")
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"{name} must be a positive integer") from exc
+    if integer_value <= 0:
         raise ValueError(f"{name} must be a positive integer")
-    return int(numeric)
+    return int(integer_value)
 
 
 def _strict_scalar_item(name: str, value: Any) -> Any:

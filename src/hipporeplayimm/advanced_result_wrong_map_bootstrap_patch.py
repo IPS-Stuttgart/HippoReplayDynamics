@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import operator
 from collections.abc import Sequence
 from functools import wraps
 
@@ -13,6 +14,7 @@ _RAT_BOOTSTRAP_WRAPPER_FLAG = "_wrong_map_rat_bootstrap_wrapper"
 _NUMERIC_DELTA_WRAPPER_FLAG = "_wrong_map_numeric_delta_summary_wrapper"
 _NUMERIC_ABSOLUTE_WRAPPER_FLAG = "_wrong_map_numeric_absolute_deltas_wrapper"
 _NUMERIC_ORIGINAL_ATTR = "_wrong_map_numeric_evidence_original"
+_TEXT_SCALAR_TYPES = (str, bytes, np.str_, np.bytes_)
 
 
 def _bootstrap_summary_columns() -> list[str]:
@@ -38,9 +40,11 @@ def _bootstrap_summary_columns() -> list[str]:
     ]
 
 
-def _scalar_numeric_value(value: object, name: str, message: str) -> float:
-    """Return a numeric scalar value without accepting array-shaped containers."""
+def _integer_scalar(value: object, name: str, *, minimum: int) -> int:
+    """Return an exact integer scalar without bool, text, or array coercion."""
 
+    qualifier = "positive" if minimum == 1 else "finite nonnegative"
+    message = f"{name} must be a {qualifier} integer"
     try:
         array = np.asarray(value)
     except (TypeError, ValueError) as exc:
@@ -48,32 +52,38 @@ def _scalar_numeric_value(value: object, name: str, message: str) -> float:
     if array.ndim != 0:
         raise ValueError(message)
     scalar = array.item()
-    if isinstance(scalar, (bool, np.bool_)):
+    if isinstance(scalar, (bool, np.bool_, *_TEXT_SCALAR_TYPES)):
         raise ValueError(message)
+
     try:
-        return float(scalar)
-    except (TypeError, ValueError) as exc:
-        raise ValueError(message) from exc
+        integer = operator.index(scalar)
+    except TypeError:
+        try:
+            integer = int(scalar)
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise ValueError(message) from exc
+        try:
+            exact = scalar == integer
+            if not isinstance(exact, (bool, np.bool_)) or not bool(exact):
+                raise ValueError(message)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(message) from exc
+
+    if integer < minimum:
+        raise ValueError(message)
+    return int(integer)
 
 
 def _positive_integer(value: object, name: str) -> int:
     """Return a positive integer argument or raise a clear validation error."""
 
-    message = f"{name} must be a positive integer"
-    numeric = _scalar_numeric_value(value, name, message)
-    if not np.isfinite(numeric) or numeric <= 0.0 or not numeric.is_integer():
-        raise ValueError(message)
-    return int(numeric)
+    return _integer_scalar(value, name, minimum=1)
 
 
 def _nonnegative_integer(value: object, name: str) -> int:
     """Return a nonnegative integer argument without boolean or float truncation."""
 
-    message = f"{name} must be a finite nonnegative integer"
-    numeric = _scalar_numeric_value(value, name, message)
-    if not np.isfinite(numeric) or numeric < 0.0 or not numeric.is_integer():
-        raise ValueError(message)
-    return int(numeric)
+    return _integer_scalar(value, name, minimum=0)
 
 
 def apply_wrong_map_rat_bootstrap_patch() -> None:

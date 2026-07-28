@@ -92,6 +92,7 @@ def validate_session_position_decoding(
     """Return window-level cross-validated position-decoding rows for one session."""
 
     config = PositionDecodingConfig() if config is None else config
+    _validate_encoding_config(config.encoding)
     if config.decode_bin_s <= 0.0:
         raise ValueError("decode_bin_s must be positive")
     if config.n_folds <= 0:

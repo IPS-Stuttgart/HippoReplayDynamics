@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import operator
 from functools import wraps
 import operator
 from typing import Any
@@ -171,24 +172,66 @@ def _validated_count_matrix(counts: Any, *, n_cells: int) -> np.ndarray:
     if _contains_text_values(counts):
         raise ValueError("counts must contain numeric integer counts, not text values")
     try:
-        values = np.asarray(counts, dtype=float)
+        raw_values = np.asarray(counts)
     except (TypeError, ValueError) as exc:
         raise ValueError("counts must contain numeric values") from exc
 
-    if values.ndim != 2:
+    if raw_values.ndim != 2:
         raise ValueError("counts must be a two-dimensional array")
-    if values.shape[1] != int(n_cells):
+    if raw_values.shape[1] != int(n_cells):
         raise ValueError("counts columns must match encoding.n_cells")
+
+    integer_info = np.iinfo(np.dtype(int))
+    exact_counts = _exact_integer_count_array(raw_values, max_count=int(integer_info.max))
+    if exact_counts is not None:
+        return exact_counts
+
+    try:
+        values = raw_values.astype(float, copy=False)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ValueError("counts must contain numeric values") from exc
     if not np.all(np.isfinite(values)) or np.any(values < 0.0):
         raise ValueError("counts must contain finite nonnegative values")
     rounded = np.rint(values)
     if not np.all(np.isclose(values, rounded, rtol=0.0, atol=0.0)):
         raise ValueError("counts must contain integer-valued counts")
-    integer_info = np.iinfo(np.dtype(int))
     max_safe_float = np.nextafter(float(integer_info.max), 0.0)
     if np.any(rounded > max_safe_float):
         raise ValueError("counts must fit into integer count range")
     return np.asarray(rounded, dtype=int)
+
+
+def _exact_integer_count_array(values: np.ndarray, *, max_count: int) -> np.ndarray | None:
+    if np.issubdtype(values.dtype, np.integer):
+        if np.issubdtype(values.dtype, np.signedinteger) and np.any(values < 0):
+            raise ValueError("counts must contain finite nonnegative values")
+        if np.any(values > max_count):
+            raise ValueError("counts must fit into integer count range")
+        return values.astype(int, copy=False)
+    if values.dtype != object:
+        return None
+
+    exact = np.empty(values.shape, dtype=int)
+    for index, item in np.ndenumerate(values):
+        try:
+            integer_value = operator.index(item)
+        except TypeError:
+            try:
+                integer_value = int(item)
+            except (TypeError, ValueError, OverflowError):
+                return None
+            try:
+                is_exact = item == integer_value
+            except (TypeError, ValueError):
+                return None
+            if not isinstance(is_exact, (bool, np.bool_)) or not bool(is_exact):
+                raise ValueError("counts must contain integer-valued counts")
+        if integer_value < 0:
+            raise ValueError("counts must contain finite nonnegative values")
+        if integer_value > max_count:
+            return None
+        exact[index] = int(integer_value)
+    return exact
 
 
 def _validated_occupancy_vector(encoding: Any) -> np.ndarray:

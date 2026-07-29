@@ -16,6 +16,8 @@ from scipy.special import logsumexp
 
 _PATCHED_FLAG = "_candidate_log_mass_validation_patch_applied"
 _DURATION_OCCUPANCY_PATCHED_FLAG = "_duration_occupancy_candidate_log_mass_patch_applied"
+_DURATION_MOMENTUM_WRAPPER_ATTR = "_candidate_duration_occupancy_momentum_log_mass_wrapper"
+_DURATION_IMM_WRAPPER_ATTR = "_candidate_duration_occupancy_imm_log_mass_wrapper"
 _REPORTED_MINIMUM_WRAPPER_ATTR = "_candidate_reported_log_mass_minimum_wrapper"
 _REPORTED_COLUMN_MINIMUM_WRAPPER_ATTR = "_candidate_reported_log_mass_column_minimum_wrapper"
 _UNPRUNED_SUPPORT_WRAPPER_ATTR = "_candidate_unpruned_exact_support_wrapper"
@@ -179,86 +181,92 @@ def _patch_duration_occupancy_candidate_masses() -> None:
 
     from . import duration_occupancy
 
-    if getattr(duration_occupancy, _DURATION_OCCUPANCY_PATCHED_FLAG, False):
-        return
+    current_momentum = duration_occupancy._score_momentum_duration
+    if not getattr(current_momentum, _DURATION_MOMENTUM_WRAPPER_ATTR, False):
 
-    original_momentum = duration_occupancy._score_momentum_duration
-    original_imm = duration_occupancy._score_imm_duration
-
-    @wraps(original_momentum)
-    def score_momentum_duration(
-        ss,
-        emissions,
-        bin_centers,
-        candidates,
-        *,
-        sigmas_cm,
-        initial_sigma_cm,
-        velocity_decays,
-        time_scales,
-        valid_bin_mask=None,
-    ):
-        logp, trajectory, masses = original_momentum(
+        @wraps(current_momentum)
+        def score_momentum_duration(
             ss,
             emissions,
             bin_centers,
             candidates,
-            sigmas_cm=sigmas_cm,
-            initial_sigma_cm=initial_sigma_cm,
-            velocity_decays=velocity_decays,
-            time_scales=time_scales,
-            valid_bin_mask=valid_bin_mask,
-        )
-        if valid_bin_mask is not None and int(getattr(emissions, "n_time", 0)) > 1:
-            masses = _candidate_log_masses_on_active_support(
-                emissions.log_likelihood,
+            *,
+            sigmas_cm,
+            initial_sigma_cm,
+            velocity_decays,
+            time_scales,
+            valid_bin_mask=None,
+        ):
+            logp, trajectory, masses = current_momentum(
+                ss,
+                emissions,
+                bin_centers,
                 candidates,
-                valid_bin_mask,
+                sigmas_cm=sigmas_cm,
+                initial_sigma_cm=initial_sigma_cm,
+                velocity_decays=velocity_decays,
+                time_scales=time_scales,
+                valid_bin_mask=valid_bin_mask,
             )
-        return logp, trajectory, masses
+            if valid_bin_mask is not None and int(getattr(emissions, "n_time", 0)) > 1:
+                masses = _candidate_log_masses_on_active_support(
+                    emissions.log_likelihood,
+                    candidates,
+                    valid_bin_mask,
+                )
+            return logp, trajectory, masses
 
-    @wraps(original_imm)
-    def score_imm_duration(
-        ss,
-        emissions,
-        bin_centers,
-        candidates,
-        *,
-        stationary_sigma_cm,
-        diffusion_sigmas_cm,
-        momentum_sigmas_cm,
-        initial_momentum_sigma_cm,
-        velocity_decays,
-        time_scales,
-        mode_stickiness,
-        mode_transitions=None,
-        valid_bin_mask=None,
-    ):
-        logp, trajectory, mode_posterior, masses = original_imm(
+        setattr(score_momentum_duration, _DURATION_MOMENTUM_WRAPPER_ATTR, True)
+        setattr(score_momentum_duration, "__hipporeplayimm_original__", current_momentum)
+        duration_occupancy._score_momentum_duration = score_momentum_duration
+
+    current_imm = duration_occupancy._score_imm_duration
+    if not getattr(current_imm, _DURATION_IMM_WRAPPER_ATTR, False):
+
+        @wraps(current_imm)
+        def score_imm_duration(
             ss,
             emissions,
             bin_centers,
             candidates,
-            stationary_sigma_cm=stationary_sigma_cm,
-            diffusion_sigmas_cm=diffusion_sigmas_cm,
-            momentum_sigmas_cm=momentum_sigmas_cm,
-            initial_momentum_sigma_cm=initial_momentum_sigma_cm,
-            velocity_decays=velocity_decays,
-            time_scales=time_scales,
-            mode_stickiness=mode_stickiness,
-            mode_transitions=mode_transitions,
-            valid_bin_mask=valid_bin_mask,
-        )
-        if valid_bin_mask is not None and int(getattr(emissions, "n_time", 0)) > 1:
-            masses = _candidate_log_masses_on_active_support(
-                emissions.log_likelihood,
+            *,
+            stationary_sigma_cm,
+            diffusion_sigmas_cm,
+            momentum_sigmas_cm,
+            initial_momentum_sigma_cm,
+            velocity_decays,
+            time_scales,
+            mode_stickiness,
+            mode_transitions=None,
+            valid_bin_mask=None,
+        ):
+            logp, trajectory, mode_posterior, masses = current_imm(
+                ss,
+                emissions,
+                bin_centers,
                 candidates,
-                valid_bin_mask,
+                stationary_sigma_cm=stationary_sigma_cm,
+                diffusion_sigmas_cm=diffusion_sigmas_cm,
+                momentum_sigmas_cm=momentum_sigmas_cm,
+                initial_momentum_sigma_cm=initial_momentum_sigma_cm,
+                velocity_decays=velocity_decays,
+                time_scales=time_scales,
+                mode_stickiness=mode_stickiness,
+                mode_transitions=mode_transitions,
+                valid_bin_mask=valid_bin_mask,
             )
-        return logp, trajectory, mode_posterior, masses
+            if valid_bin_mask is not None and int(getattr(emissions, "n_time", 0)) > 1:
+                masses = _candidate_log_masses_on_active_support(
+                    emissions.log_likelihood,
+                    candidates,
+                    valid_bin_mask,
+                )
+            return logp, trajectory, mode_posterior, masses
 
-    duration_occupancy._score_momentum_duration = score_momentum_duration
-    duration_occupancy._score_imm_duration = score_imm_duration
+        setattr(score_imm_duration, _DURATION_IMM_WRAPPER_ATTR, True)
+        setattr(score_imm_duration, "__hipporeplayimm_original__", current_imm)
+        duration_occupancy._score_imm_duration = score_imm_duration
+
     setattr(duration_occupancy, _DURATION_OCCUPANCY_PATCHED_FLAG, True)
 
 

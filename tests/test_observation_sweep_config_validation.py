@@ -4,6 +4,7 @@ from decimal import Decimal
 
 import pytest
 
+from hipporeplayimm import apply_runtime_patches
 from hipporeplayimm import observation_sweep
 from hipporeplayimm import observation_sweep_config_validation
 
@@ -29,6 +30,32 @@ def test_observation_sweep_validation_patch_delegates_to_existing_validator(monk
         observation_sweep._validate_config(observation_sweep.ObservationSweepConfig())
 
     assert len(calls) == 1
+
+
+def test_runtime_patch_refreshes_restored_observation_validator(monkeypatch) -> None:
+    current_validator = observation_sweep._validate_config
+    original_validator = getattr(current_validator, "__wrapped__", None)
+    assert original_validator is not None
+
+    monkeypatch.setattr(observation_sweep, "_validate_config", original_validator)
+    monkeypatch.setattr(
+        observation_sweep,
+        observation_sweep_config_validation._PATCHED_FLAG,
+        True,
+        raising=False,
+    )
+
+    apply_runtime_patches()
+
+    refreshed_validator = observation_sweep._validate_config
+    assert refreshed_validator is not original_validator
+    assert getattr(
+        refreshed_validator,
+        observation_sweep_config_validation._VALIDATOR_PATCHED_FLAG,
+        False,
+    )
+    with pytest.raises(ValueError, match="n_folds must be a positive integer"):
+        refreshed_validator(observation_sweep.ObservationSweepConfig(n_folds=1.5))
 
 
 @pytest.mark.parametrize("field", ["n_folds", "simulation_events_per_model"])

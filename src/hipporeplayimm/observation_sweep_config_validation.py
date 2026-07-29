@@ -8,6 +8,7 @@ from typing import Any
 import numpy as np
 
 _PATCHED_FLAG = "_observation_sweep_finite_config_validation_patch_applied"
+_VALIDATOR_PATCHED_FLAG = "_observation_sweep_finite_config_validation_wrapper"
 _SELECTION_PATCHED_FLAG = "_observation_calibration_gate_selection_patch_applied"
 _STRING_TYPES = (str, bytes, np.str_, np.bytes_)
 _POSITIVE_GRID_FIELDS = (
@@ -31,16 +32,17 @@ def apply_observation_sweep_config_validation_patch() -> None:
     from . import observation_sweep as sweep
     from . import result_quality_audit as audit
 
-    if not getattr(sweep, _PATCHED_FLAG, False):
-        original_validate_config = sweep._validate_config
+    current_validate_config = sweep._validate_config
+    if not getattr(current_validate_config, _VALIDATOR_PATCHED_FLAG, False):
 
-        @wraps(original_validate_config)
+        @wraps(current_validate_config)
         def validate_config_with_finite_grid_values(config: Any) -> None:
             _validate_finite_observation_sweep_config(config)
-            original_validate_config(config)
+            current_validate_config(config)
 
+        setattr(validate_config_with_finite_grid_values, _VALIDATOR_PATCHED_FLAG, True)
         sweep._validate_config = validate_config_with_finite_grid_values
-        setattr(sweep, _PATCHED_FLAG, True)
+    setattr(sweep, _PATCHED_FLAG, True)
 
     _patch_observation_calibration_selection(audit)
 

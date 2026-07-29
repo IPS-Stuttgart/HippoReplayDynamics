@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
-import math
+from decimal import Decimal, InvalidOperation
 import re
+import sys
 
 _PATCHED_FLAG = "_axona_data_end_footer_patch_applied"
 _NUMERIC_TOKEN = re.compile(r"[-+]?(?:(?:\d+(?:\.\d*)?)|(?:\.\d+))(?:[eE][-+]?\d+)?")
@@ -44,15 +45,24 @@ def _header_float(header: dict[str, str], key: str, default: float) -> float:
 
 
 def _header_int(header: dict[str, str], key: str, default: int) -> int:
-    """Parse Axona integer-valued header fields without rounding fractions."""
+    """Parse Axona integer-valued header fields without float precision loss."""
 
-    value = _header_float(header, key, float(default))
-    if not math.isfinite(value):
+    raw = header.get(key)
+    if raw is None:
         return int(default)
-    rounded = round(value)
-    if not math.isclose(value, rounded, rel_tol=0.0, abs_tol=0.0):
+    match = _NUMERIC_TOKEN.search(str(raw))
+    if match is None:
         return int(default)
-    return int(rounded)
+    try:
+        value = Decimal(match.group(0))
+    except InvalidOperation:
+        return int(default)
+    if not value.is_finite() or value < -sys.maxsize - 1 or value > sys.maxsize:
+        return int(default)
+    integral = value.to_integral_value()
+    if value != integral:
+        return int(default)
+    return int(integral)
 
 
 def apply_axona_data_end_footer_patch() -> None:

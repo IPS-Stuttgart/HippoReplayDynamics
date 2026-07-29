@@ -45,10 +45,10 @@ def _parse_strict_bool(value: object) -> bool:
     if text in {"false", "no", "off"}:
         return False
     try:
-        numeric = float(text)
-    except ValueError as exc:
+        numeric = Decimal(text)
+    except (InvalidOperation, ValueError) as exc:
         raise _bool_parse_error(value) from exc
-    return _parse_numeric_bool(numeric, value)
+    return _parse_decimal_bool(numeric, value)
 
 
 def _parse_numeric_bool(numeric: float, original: object) -> bool:
@@ -57,6 +57,16 @@ def _parse_numeric_bool(numeric: float, original: object) -> bool:
     if np.isclose(numeric, 0.0, rtol=0.0, atol=0.0):
         return False
     if np.isclose(numeric, 1.0, rtol=0.0, atol=0.0):
+        return True
+    raise _bool_parse_error(original)
+
+
+def _parse_decimal_bool(numeric: Decimal, original: object) -> bool:
+    if not numeric.is_finite():
+        raise _bool_parse_error(original)
+    if numeric == Decimal(0):
+        return False
+    if numeric == Decimal(1):
         return True
     raise _bool_parse_error(original)
 

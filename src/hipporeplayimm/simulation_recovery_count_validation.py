@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import operator
 from functools import wraps
-import operator
 from typing import Any
 
 import numpy as np

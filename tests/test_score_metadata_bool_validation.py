@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from decimal import Decimal
+
 import pandas as pd
 import pytest
 
@@ -18,6 +20,23 @@ def test_score_metadata_bool_rejects_nonbinary_numeric_values() -> None:
 
 @pytest.mark.parametrize("raw", [10**400, -(10**400)])
 def test_score_metadata_bool_rejects_arbitrary_precision_nonbinary_integers(raw: int) -> None:
+    with pytest.raises(ValueError, match="cannot parse boolean value"):
+        encoding_config_for_scores(
+            pd.DataFrame({"encoding_use_excitatory": pd.Series([raw], dtype=object)}),
+            EncodingConfig(),
+        )
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        "1.0000000000000000000000000000000000000001",
+        "1e-400",
+        Decimal("1.0000000000000000000000000000000000000001"),
+        Decimal("1e-400"),
+    ],
+)
+def test_score_metadata_bool_rejects_values_rounded_to_binary_float(raw: object) -> None:
     with pytest.raises(ValueError, match="cannot parse boolean value"):
         encoding_config_for_scores(
             pd.DataFrame({"encoding_use_excitatory": pd.Series([raw], dtype=object)}),

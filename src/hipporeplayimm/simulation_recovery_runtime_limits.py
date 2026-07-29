@@ -13,6 +13,7 @@ from .simulation_recovery_overdispersion import apply_simulation_recovery_overdi
 
 
 _PATCHED_FLAG = "_strict_simulation_recovery_runtime_limit_validation_applied"
+_VALIDATOR_ATTR = "_strict_simulation_recovery_runtime_limit_validator"
 _RUN_WRAPPER_ATTR = "_strict_simulation_recovery_runtime_limit_preflight_wrapper"
 _ORIGINAL_ATTR = "__hipporeplayimm_original__"
 _BOOLEAN_CONTROL_FIELDS = (
@@ -30,15 +31,17 @@ def apply_simulation_recovery_runtime_limit_validation_patch() -> None:
 
     apply_simulation_recovery_empty_csv_patch()
     apply_simulation_recovery_overdispersion_patch()
-    if getattr(recovery, _PATCHED_FLAG, False):
-        return
 
-    def validate_recovery_runtime_limits(config: Any) -> None:
-        _normalized_runtime_config(config)
+    current_validator = recovery._validate_recovery_runtime_limits
+    if not getattr(current_validator, _VALIDATOR_ATTR, False):
 
-    validate_recovery_runtime_limits.__name__ = recovery._validate_recovery_runtime_limits.__name__
-    validate_recovery_runtime_limits.__doc__ = recovery._validate_recovery_runtime_limits.__doc__
-    recovery._validate_recovery_runtime_limits = validate_recovery_runtime_limits
+        @wraps(current_validator)
+        def validate_recovery_runtime_limits(config: Any) -> None:
+            _normalized_runtime_config(config)
+
+        setattr(validate_recovery_runtime_limits, _VALIDATOR_ATTR, True)
+        setattr(validate_recovery_runtime_limits, _ORIGINAL_ATTR, current_validator)
+        recovery._validate_recovery_runtime_limits = validate_recovery_runtime_limits
 
     current_run = recovery.run_session_simulation_recovery
     if not getattr(current_run, _RUN_WRAPPER_ATTR, False):

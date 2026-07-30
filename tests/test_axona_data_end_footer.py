@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import sys
+
 import hipporeplayimm.olafsdottir2016 as olafsdottir2016
 from hipporeplayimm.axona_data_end_footer import apply_axona_data_end_footer_patch
 from hipporeplayimm.olafsdottir2016 import _header_float, _header_int, _strip_axona_data_end
@@ -25,6 +27,11 @@ def test_axona_header_float_parses_scientific_notation() -> None:
 
 def test_axona_header_int_accepts_integer_scientific_notation() -> None:
     assert _header_int({"num_pos_samples": "3e0"}, "num_pos_samples", 0) == 3
+
+
+def test_axona_header_int_preserves_large_exact_metadata() -> None:
+    assert _header_int({"num_spikes": str(sys.maxsize)}, "num_spikes", 0) == sys.maxsize
+    assert _header_int({"num_spikes": f"{sys.maxsize}e0"}, "num_spikes", 0) == sys.maxsize
 
 
 def test_axona_header_int_does_not_round_fractional_metadata() -> None:

@@ -373,18 +373,32 @@ def _positive_integer(value: object, name: str) -> int:
 
 
 def _nonnegative_integer(value: object, name: str) -> int:
+    message = f"{name} must be a nonnegative integer"
     if isinstance(value, (bool, np.bool_)):
-        raise ValueError(f"{name} must be a nonnegative integer")
+        raise ValueError(message)
     try:
-        integer = int(value)
+        scalar = np.asarray(value)
     except (TypeError, ValueError, OverflowError) as exc:
-        raise ValueError(f"{name} must be a nonnegative integer") from exc
+        raise ValueError(message) from exc
+    if scalar.ndim != 0:
+        raise ValueError(message)
+    item = scalar.item()
+    if isinstance(item, (bool, np.bool_)):
+        raise ValueError(message)
     try:
-        is_exact = value == integer
+        integer = int(item)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ValueError(message) from exc
+    try:
+        is_exact = item == integer
     except Exception as exc:  # pragma: no cover - defensive for exotic scalars
-        raise ValueError(f"{name} must be a nonnegative integer") from exc
-    if not bool(is_exact) or integer < 0:
-        raise ValueError(f"{name} must be a nonnegative integer")
+        raise ValueError(message) from exc
+    try:
+        exact_scalar = np.asarray(is_exact)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ValueError(message) from exc
+    if exact_scalar.ndim != 0 or not bool(exact_scalar.item()) or integer < 0:
+        raise ValueError(message)
     return integer
 
 

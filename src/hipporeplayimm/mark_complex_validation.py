@@ -19,6 +19,7 @@ import numpy as np
 
 _PATCHED_FLAG = "_mark_complex_validation_patch_applied"
 _PATCH_WRAPPER_ATTR = "_mark_complex_validation_wrapper"
+_TIME_COLUMN_WRAPPER_ATTR = "_mark_time_column_finite_support_wrapper"
 _TETRODE_ORIENTATION_WRAPPER_ATTR = "_tetrode_cell_id_orientation_wrapper"
 
 
@@ -46,6 +47,14 @@ def _contains_boolean_values(values: Any) -> bool:
     if isinstance(values, Iterable):
         return any(_contains_boolean_values(value) for value in values)
     return False
+
+
+def _matching_finite_support(left: np.ndarray, right: np.ndarray) -> bool:
+    """Return whether equally shaped vectors are finite at exactly the same rows."""
+
+    if left.shape != right.shape:
+        return False
+    return bool(np.array_equal(np.isfinite(left), np.isfinite(right)))
 
 
 def _orient_mark_matrix_from_time_column(
@@ -143,6 +152,10 @@ def _is_mark_complex_validation_wrapper(func: object) -> bool:
     return bool(getattr(func, _PATCH_WRAPPER_ATTR, False))
 
 
+def _is_time_column_wrapper(func: object) -> bool:
+    return bool(getattr(func, _TIME_COLUMN_WRAPPER_ATTR, False))
+
+
 def _is_tetrode_orientation_wrapper(func: object) -> bool:
     return bool(getattr(func, _TETRODE_ORIENTATION_WRAPPER_ATTR, False))
 
@@ -153,13 +166,29 @@ def apply_mark_complex_validation_patch() -> None:
     from . import data, data_cell_id_validation
 
     current_coerce_mark_matrix = data._coerce_mark_matrix
+    current_looks_like_time_column = data._looks_like_time_column
     current_mark_group_ids = data._mark_group_ids_from_tetrode_cell_ids
     if (
         _is_mark_complex_validation_wrapper(current_coerce_mark_matrix)
+        and _is_time_column_wrapper(current_looks_like_time_column)
         and _is_tetrode_orientation_wrapper(current_mark_group_ids)
     ):
         setattr(data, _PATCHED_FLAG, True)
         return
+
+    if not _is_time_column_wrapper(current_looks_like_time_column):
+        original_looks_like_time_column = current_looks_like_time_column
+
+        @wraps(original_looks_like_time_column)
+        def looks_like_time_column(candidate: np.ndarray, spike_times: np.ndarray) -> bool:
+            candidate_array = np.asarray(candidate)
+            spike_time_array = np.asarray(spike_times)
+            if not _matching_finite_support(candidate_array, spike_time_array):
+                return False
+            return bool(original_looks_like_time_column(candidate_array, spike_time_array))
+
+        setattr(looks_like_time_column, _TIME_COLUMN_WRAPPER_ATTR, True)
+        data._looks_like_time_column = looks_like_time_column
 
     if not _is_mark_complex_validation_wrapper(current_coerce_mark_matrix):
         original_coerce_mark_matrix = current_coerce_mark_matrix

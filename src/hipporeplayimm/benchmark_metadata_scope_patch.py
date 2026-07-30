@@ -92,7 +92,7 @@ def _patch_benchmark_settings_yaml_scalars() -> None:
     def yaml_scalar(value: object) -> str:
         if value is None:
             return "null"
-        if isinstance(value, bool):
+        if isinstance(value, (bool, np.bool_)):
             return "true" if value else "false"
         if isinstance(value, (int, float, np.integer, np.floating)):
             return str(value)

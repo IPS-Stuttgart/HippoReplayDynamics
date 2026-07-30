@@ -21,8 +21,27 @@ def apply_kd_grid_prior_support_patch() -> None:
     kd.marginalize_grid_log_evidence = _marginalize_grid_log_evidence
 
 
+def _contains_complex_numeric(value: object) -> bool:
+    """Return whether a scalar or array-like value contains complex numerics."""
+
+    try:
+        values = np.asarray(value)
+    except (TypeError, ValueError, OverflowError):
+        return False
+    if np.issubdtype(values.dtype, np.complexfloating):
+        return True
+    if values.dtype == object:
+        return any(isinstance(item, (complex, np.complexfloating)) for item in values.flat)
+    return False
+
+
 def _marginalize_grid_log_evidence(grid: np.ndarray, prior: np.ndarray) -> np.ndarray:
     """Marginalize a KD evidence grid without inventing excluded prior mass."""
+
+    if _contains_complex_numeric(grid):
+        raise ValueError("grid must contain real values")
+    if _contains_complex_numeric(prior):
+        raise ValueError("prior must contain real values")
 
     values = np.asarray(grid, dtype=float)
     weights = np.asarray(prior, dtype=float)

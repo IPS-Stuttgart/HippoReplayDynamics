@@ -13,6 +13,7 @@ _MODEL_AVERAGE_BASE_COLUMNS = ("session", "event_index")
 _MODEL_AVERAGE_SCOPE_COLUMNS = (
     "event_id",
     "benchmark_random_seed",
+    "simulation_random_seed",
     "random_seed",
     "null_random_seed",
     "benchmark_cell_split_index",

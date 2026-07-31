@@ -118,7 +118,7 @@ def _metadata_int_from_value(value: object, column: str) -> int | None:
         raise ValueError(f"{column} must be finite")
 
     integer = numeric.to_integral_value()
-    if abs(numeric - integer) > Decimal("1e-9"):
+    if numeric != integer:
         raise ValueError(f"{column} must be an integer")
     return int(integer)
 

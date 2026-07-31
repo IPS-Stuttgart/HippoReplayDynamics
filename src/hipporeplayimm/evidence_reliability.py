@@ -7,6 +7,7 @@ import pandas as pd
 
 from . import evidence_reporting
 from .evidence_status_coercion import _status_is_success_or_missing
+from .state_space_bin_count_validation import _integer_count as _exact_integer_count
 
 
 DEFAULT_MIN_SPIKES = 3
@@ -244,14 +245,25 @@ def _as_float(value) -> tuple[float, bool]:
 
 
 def _as_count_metric(value) -> tuple[float, bool]:
-    """Return a nonnegative integral count metric without accepting fractions."""
+    """Return a nonnegative integral count metric without lossy float coercion."""
 
-    numeric, invalid_metric = _as_float(value)
-    if invalid_metric or not np.isfinite(numeric):
-        return numeric, invalid_metric
-    if numeric < 0.0 or not float(numeric).is_integer():
+    if _is_missing_scalar(value):
+        return float("nan"), False
+    try:
+        integer = _exact_integer_count("count metric", value)
+    except (TypeError, ValueError, OverflowError):
+        # Preserve the established treatment of NaN-like scalar metadata as
+        # missing, while rejecting every other value that is not exactly an
+        # integer before binary floating-point conversion.
+        numeric, invalid_metric = _as_float(value)
+        if not invalid_metric and np.isnan(numeric):
+            return numeric, False
+        if invalid_metric:
+            return numeric, True
         return float("nan"), True
-    return numeric, False
+    if integer < 0:
+        return float("nan"), True
+    return _coerced_metric_float(integer)
 
 
 def _coerced_metric_float(value) -> tuple[float, bool]:

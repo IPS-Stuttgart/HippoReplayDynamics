@@ -10,6 +10,7 @@ per-transition durations and valid-occupancy masks active at the same time.
 
 from __future__ import annotations
 
+import json
 from dataclasses import replace
 
 import numpy as np
@@ -114,7 +115,7 @@ def _score_state_space_duration_with_occupancy(
             )
             for sigma in diffusion_sigmas
         ]
-        logp, trajectory, mode_post = _score_first_order_imm_variable(
+        logp, trajectory, mode_post, mode_transition_post = _score_first_order_imm_variable(
             ss,
             emissions.log_likelihood,
             bin_centers,
@@ -150,6 +151,21 @@ def _score_state_space_duration_with_occupancy(
                 "state_space_imm_nonstationary_terminal_probability": float(mode_post[-1, 1:].sum()),
                 "state_space_imm_nonstationary_event_probability": float(event_mode_mass[1:].sum()),
                 "state_space_imm_mean_mode_entropy": ss._mean_entropy(ss._as_log_probs(mode_post)),
+                "state_space_imm_mode_posterior_over_time": json.dumps(
+                    mode_post.tolist(),
+                    separators=(",", ":"),
+                ),
+                "state_space_imm_mode_transition_posterior_over_time": json.dumps(
+                    mode_transition_post.tolist(),
+                    separators=(",", ":"),
+                ),
+                "state_space_imm_switch_probability_over_time": json.dumps(
+                    (
+                        mode_transition_post.sum(axis=(1, 2))
+                        - np.trace(mode_transition_post, axis1=1, axis2=2)
+                    ).tolist(),
+                    separators=(",", ":"),
+                ),
             }
         )
         extra.update(
@@ -761,6 +777,7 @@ def _score_first_order_imm_variable(
         logp += float(np.log(scales[time_index]) + offsets[time_index])
 
     smoothed = np.zeros_like(filtered)
+    mode_transition_post = np.zeros((max(n_time - 1, 0), n_modes, n_modes), dtype=float)
     beta = np.ones((n_modes, n_bins), dtype=float)
     smoothed[-1] = filtered[-1]
     for time_index in range(n_time - 1, 0, -1):
@@ -774,13 +791,25 @@ def _score_first_order_imm_variable(
                     value = _uniform_backward(values, valid_bin_mask)
                 else:
                     value = np.asarray(_transition_at(transition, time_index - 1).T @ values, dtype=float)
-                beta_prev[src_idx] += mode_transition[src_idx, dst_idx] * value
+                weighted = mode_transition[src_idx, dst_idx] * value
+                beta_prev[src_idx] += weighted
+                mode_transition_post[time_index - 1, src_idx, dst_idx] = float(
+                    np.dot(filtered[time_index - 1, src_idx], weighted)
+                )
+        transition_total = float(mode_transition_post[time_index - 1].sum())
+        if transition_total > 0.0:
+            mode_transition_post[time_index - 1] /= transition_total
         beta = beta_prev / scales[time_index]
         gamma = filtered[time_index - 1] * beta
         total = float(gamma.sum())
         smoothed[time_index - 1] = gamma / total if total > 0.0 else filtered[time_index - 1]
 
-    return logp, ss._as_log_probs(smoothed.sum(axis=1)), smoothed.sum(axis=2)
+    return (
+        logp,
+        ss._as_log_probs(smoothed.sum(axis=1)),
+        smoothed.sum(axis=2),
+        mode_transition_post,
+    )
 
 
 def _score_momentum_duration(

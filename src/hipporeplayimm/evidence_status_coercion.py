@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from decimal import Decimal, InvalidOperation
 from functools import wraps
 from typing import Any
 
@@ -378,7 +379,15 @@ def _is_explicit_false_value(value: object) -> bool:
     if isinstance(value, (float, np.floating)):
         numeric = float(value)
         return bool(np.isfinite(numeric) and numeric == 0.0)
-    return str(value).strip().lower() in _EXPLICIT_FALSE_BOOL_VALUES
+
+    text = str(value).strip().lower()
+    if text in _EXPLICIT_FALSE_BOOL_VALUES:
+        return True
+    try:
+        numeric = Decimal(text)
+    except (InvalidOperation, ValueError):
+        return False
+    return bool(numeric.is_finite() and numeric == 0)
 
 
 def _status_is_success_or_missing(value: object) -> bool:

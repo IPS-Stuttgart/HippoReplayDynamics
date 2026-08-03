@@ -1,11 +1,11 @@
 """Validate all state-space candidate-count configuration fields.
 
 The shared candidate helpers validate counts that are active for the selected
-support strategy.  ``momentum_candidate_min_k`` and
+support strategy. ``momentum_candidate_min_k`` and
 ``momentum_candidate_max_k`` are not routed through those helpers when fixed
 ``top_k`` support is used, yet they are still emitted in diagnostics via
-``int(...)``.  Validate every configured count before support construction so
-fractional or negative inactive bounds cannot be silently truncated.
+``int(...)``. Validate every configured count before support construction or
+scoring so fractional or negative inactive bounds cannot be silently truncated.
 """
 
 from __future__ import annotations
@@ -15,6 +15,7 @@ from functools import wraps
 from .state_space_bin_count_validation import _nonnegative_integer_count
 
 _PATCHED_FLAG = "_candidate_config_count_validation_patch_applied"
+_SCORE_PATCHED_FLAG = "_candidate_config_count_score_validation_patch_applied"
 _CONFIG_COUNT_NAMES = (
     "momentum_candidate_top_k",
     "momentum_candidate_min_k",
@@ -23,7 +24,7 @@ _CONFIG_COUNT_NAMES = (
 )
 
 
-def _wrapper_chain_has_marker(function: object) -> bool:
+def _wrapper_chain_has_marker(function: object, marker: str) -> bool:
     seen: set[int] = set()
     current = function
     while current is not None:
@@ -31,7 +32,7 @@ def _wrapper_chain_has_marker(function: object) -> bool:
         if current_id in seen:
             return False
         seen.add(current_id)
-        if getattr(current, _PATCHED_FLAG, False):
+        if getattr(current, marker, False):
             return True
         current = getattr(current, "__hipporeplayimm_original__", None)
     return False
@@ -42,13 +43,9 @@ def _validate_candidate_config(config: object) -> None:
         _nonnegative_integer_count(name, getattr(config, name))
 
 
-def apply_state_space_candidate_count_validation_patch() -> None:
-    """Install unconditional validation for candidate-count config fields."""
-
-    from . import state_space_model
-
+def _patch_candidate_indices(state_space_model: object) -> None:
     current = state_space_model.StateSpaceReplayModel.candidate_indices
-    if _wrapper_chain_has_marker(current):
+    if _wrapper_chain_has_marker(current, _PATCHED_FLAG):
         return
 
     @wraps(current)
@@ -66,6 +63,49 @@ def apply_state_space_candidate_count_validation_patch() -> None:
     setattr(candidate_indices, _PATCHED_FLAG, True)
     setattr(candidate_indices, "__hipporeplayimm_original__", current)
     state_space_model.StateSpaceReplayModel.candidate_indices = candidate_indices
+
+
+def _patch_score(state_space_model: object) -> None:
+    current = state_space_model.StateSpaceReplayModel.score
+    if _wrapper_chain_has_marker(current, _SCORE_PATCHED_FLAG):
+        return
+
+    @wraps(current)
+    def score(
+        self,
+        emissions,
+        bin_centers,
+        candidate_indices=None,
+        *,
+        occupancy_s=None,
+        return_trajectory: bool = True,
+    ):
+        config = getattr(self, "config", None)
+        if config is not None:
+            _validate_candidate_config(config)
+        return current(
+            self,
+            emissions,
+            bin_centers,
+            candidate_indices=candidate_indices,
+            occupancy_s=occupancy_s,
+            return_trajectory=return_trajectory,
+        )
+
+    setattr(score, _SCORE_PATCHED_FLAG, True)
+    setattr(score, "__hipporeplayimm_original__", current)
+    if getattr(current, "_native_duration_occupancy_aware", False):
+        setattr(score, "_native_duration_occupancy_aware", True)
+    state_space_model.StateSpaceReplayModel.score = score
+
+
+def apply_state_space_candidate_count_validation_patch() -> None:
+    """Install unconditional validation for candidate-count config fields."""
+
+    from . import state_space_model
+
+    _patch_candidate_indices(state_space_model)
+    _patch_score(state_space_model)
 
 
 __all__ = ["apply_state_space_candidate_count_validation_patch"]

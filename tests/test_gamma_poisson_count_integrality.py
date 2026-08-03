@@ -70,3 +70,24 @@ def test_gamma_poisson_count_coercion_rejects_platform_integer_overflow() -> Non
 
     with pytest.raises(ValueError, match="spike_counts.*integer count range"):
         _coerce_spike_counts(np.array([[value]], dtype=object))
+
+
+@pytest.mark.parametrize("value", [1.0 + 0.0j, 1.0 + 2.0j])
+def test_gamma_poisson_rejects_complex_spike_counts(value: complex) -> None:
+    shape, exposure = _gamma_prior()
+
+    with pytest.raises(ValueError, match="spike_counts.*real integer counts"):
+        gamma_poisson_predictive_log_emissions(
+            np.array([[value]], dtype=complex),
+            shape,
+            exposure,
+            0.02,
+        )
+
+
+@pytest.mark.parametrize("dtype", [int, float])
+def test_gamma_poisson_count_coercion_keeps_regular_numeric_arrays(dtype: type) -> None:
+    counts = _coerce_spike_counts(np.array([[0, 1], [2, 3]], dtype=dtype))
+
+    np.testing.assert_array_equal(counts, np.array([[0, 1], [2, 3]], dtype=int))
+    assert counts.dtype == np.dtype(int)

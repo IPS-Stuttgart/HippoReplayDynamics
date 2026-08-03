@@ -14,6 +14,7 @@ _ADD_FLAG = "_evidence_margin_distinct_model_add_columns_wrapper"
 _BOOL_FLAG = "_evidence_margin_arbitrary_integer_bool_wrapper"
 _EMPTY_SWEEP_FLAG = "_evidence_margin_empty_threshold_sweep_wrapper"
 _DEFAULT_GROUP_COLUMNS = ("session", "event_index")
+_EVIDENCE_MARGIN_AUTO_SCOPE_COLUMNS = ("matrix_id",)
 _MARGIN_COLUMNS = (
     "best_model_by_evidence",
     "second_best_model_by_evidence",
@@ -57,7 +58,7 @@ def apply_evidence_margin_distinct_model_patch() -> None:
         evidence_col="log_evidence",
         model_col="model",
     ):
-        groups = _normalize_group_cols(group_cols)
+        groups = _evidence_margin_group_cols(scores, group_cols)
         collapsed = _collapse_duplicate_models(
             diagnostics, scores, groups, evidence_col, model_col
         )
@@ -77,7 +78,7 @@ def apply_evidence_margin_distinct_model_patch() -> None:
         )
 
     def add_evidence_margin_columns(scores, *, group_cols=_DEFAULT_GROUP_COLUMNS):
-        groups = _normalize_group_cols(group_cols)
+        groups = _evidence_margin_group_cols(scores, group_cols)
         if scores.empty:
             return scores.copy()
         base = scores.drop(
@@ -299,6 +300,19 @@ def _merge_margin_columns_preserving_index(
     )
     merged.index = original_index
     return merged
+
+
+def _evidence_margin_group_cols(scores: pd.DataFrame, group_cols) -> tuple[str, ...]:
+    """Keep default event margins separate across available matrix cells."""
+
+    groups = _normalize_group_cols(group_cols)
+    if groups != _DEFAULT_GROUP_COLUMNS:
+        return groups
+    return groups + tuple(
+        column
+        for column in _EVIDENCE_MARGIN_AUTO_SCOPE_COLUMNS
+        if column in scores.columns and column not in groups
+    )
 
 
 def _normalize_group_cols(group_cols):

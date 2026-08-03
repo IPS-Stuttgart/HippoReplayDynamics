@@ -111,18 +111,102 @@ def _coerce_text_id(value: str | bytes, name: str) -> int:
         raise ValueError(f"{name} must contain finite integer identifiers") from exc
 
 
+def _coerce_text_count(value: str | bytes) -> int:
+    """Parse an integral textual spike count without binary-float rounding."""
+
+    if isinstance(value, bytes):
+        try:
+            text = value.decode("utf-8")
+        except UnicodeDecodeError as exc:
+            raise ValueError("spike_counts must contain numeric counts") from exc
+    else:
+        text = value
+    text = text.strip()
+    if not text:
+        raise ValueError("spike_counts must contain numeric counts")
+    try:
+        count = int(text, 10)
+    except ValueError:
+        try:
+            numeric = Decimal(text)
+        except InvalidOperation as exc:
+            raise ValueError("spike_counts must contain numeric counts") from exc
+        if not numeric.is_finite() or numeric < 0:
+            raise ValueError("spike_counts must be finite and nonnegative")
+        integral = numeric.to_integral_value()
+        if numeric != integral:
+            raise ValueError("spike_counts must contain integer counts")
+        count = int(integral)
+    return count
+
+
+def _coerce_nonnegative_spike_count(value: Any, integer_info: np.iinfo) -> int:
+    """Return one exact platform-integer spike count."""
+
+    try:
+        item = np.asarray(value).item()
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ValueError("spike_counts must contain numeric counts") from exc
+
+    if isinstance(item, (bool, np.bool_)):
+        raise ValueError("spike_counts must be numeric counts, not boolean values")
+    if isinstance(item, (int, np.integer)):
+        count = int(item)
+    elif isinstance(item, Decimal):
+        if not item.is_finite() or item < 0:
+            raise ValueError("spike_counts must be finite and nonnegative")
+        integral = item.to_integral_value()
+        if item != integral:
+            raise ValueError("spike_counts must contain integer counts")
+        count = int(integral)
+    elif isinstance(item, (str, bytes, np.str_, np.bytes_)):
+        text_value = bytes(item) if isinstance(item, (bytes, np.bytes_)) else str(item)
+        count = _coerce_text_count(text_value)
+    elif isinstance(item, (float, np.floating)):
+        if not bool(np.isfinite(item)) or item < 0:
+            raise ValueError("spike_counts must be finite and nonnegative")
+        if not bool(item.is_integer()):
+            raise ValueError("spike_counts must contain integer counts")
+        count = int(item)
+    else:
+        try:
+            count = int(operator.index(item))
+        except TypeError:
+            try:
+                count = int(item)
+            except (TypeError, ValueError, OverflowError) as exc:
+                raise ValueError("spike_counts must contain numeric counts") from exc
+            try:
+                exact = item == count
+            except (TypeError, ValueError, OverflowError):
+                exact = False
+            if not isinstance(exact, (bool, np.bool_)) or not bool(exact):
+                raise ValueError("spike_counts must contain integer counts")
+
+    if count < 0:
+        raise ValueError("spike_counts must be finite and nonnegative")
+    if count > int(integer_info.max):
+        raise ValueError("spike_counts must fit into integer count range")
+    return count
+
+
 def _coerce_spike_counts(spike_counts: Any) -> np.ndarray:
+    """Validate spike-count matrices exactly before any floating-point use."""
+
     if _contains_boolean_ids(spike_counts):
         raise ValueError("spike_counts must be numeric counts, not boolean values")
-    counts = np.asarray(spike_counts, dtype=float)
-    if counts.ndim != 2:
+    try:
+        raw_counts = np.asarray(spike_counts)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("spike_counts must contain numeric counts") from exc
+    if raw_counts.ndim != 2:
         raise ValueError("spike_counts must have shape (n_time, n_cells)")
-    if not np.all(np.isfinite(counts)) or np.any(counts < 0.0):
-        raise ValueError("spike_counts must be finite and nonnegative")
-    rounded = np.rint(counts)
-    if not np.all(np.isclose(counts, rounded, rtol=0.0, atol=1e-9)):
-        raise ValueError("spike_counts must contain integer counts")
-    return rounded
+
+    integer_info = np.iinfo(np.dtype(int))
+    counts = np.empty(raw_counts.shape, dtype=int)
+    for index, value in np.ndenumerate(raw_counts):
+        counts[index] = _coerce_nonnegative_spike_count(value, integer_info)
+    return counts
 
 
 def _coerce_positive_matrix(values: Any, name: str) -> np.ndarray:

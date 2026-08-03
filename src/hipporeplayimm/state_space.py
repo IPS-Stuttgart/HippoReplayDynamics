@@ -10,6 +10,9 @@ from .candidate_active_support_validation import (
 from .state_space_candidate_count_validation import (
     apply_state_space_candidate_count_validation_patch as _apply_state_space_candidate_count_validation_patch,
 )
+from .state_space_candidate_mass_threshold_validation import (
+    apply_state_space_candidate_mass_threshold_validation_patch as _apply_state_space_candidate_mass_threshold_validation_patch,
+)
 from .state_space_gaussian_scalar_validation import (
     apply_state_space_gaussian_scalar_validation_patch as _apply_state_space_gaussian_scalar_validation_patch,
 )
@@ -108,6 +111,7 @@ from .state_space_utils import (
 StateSpaceReplayModel.score._native_duration_occupancy_aware = True
 _apply_candidate_active_support_validation_patch()
 _apply_state_space_candidate_count_validation_patch()
+_apply_state_space_candidate_mass_threshold_validation_patch()
 _apply_state_space_gaussian_scalar_validation_patch()
 _apply_state_space_candidate_bin_center_validation_patch()
 _apply_sparse_momentum_bin_center_validation_patch()

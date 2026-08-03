@@ -48,6 +48,19 @@ def test_population_code_permutation_is_shared_and_deterministic() -> None:
     np.testing.assert_array_equal(original_order[:, ::-1], permuted_order)
 
 
+def test_python_source_tree_hash_covers_paths_and_bytes(tmp_path) -> None:
+    (tmp_path / "a.py").write_text("value = 1\n", encoding="utf-8")
+    nested = tmp_path / "nested"
+    nested.mkdir()
+    (nested / "b.py").write_text("value = 2\n", encoding="utf-8")
+    first_hash, first_count = analysis._python_tree_sha256(tmp_path)
+    (nested / "b.py").write_text("value = 3\n", encoding="utf-8")
+    second_hash, second_count = analysis._python_tree_sha256(tmp_path)
+
+    assert first_count == second_count == 2
+    assert first_hash != second_hash
+
+
 class _DummyModel:
     def __init__(self, name: str) -> None:
         self.name = name

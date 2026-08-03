@@ -91,6 +91,21 @@ def _stable_seed(seed: int, *parts: object) -> int:
     return int.from_bytes(hashlib.sha256(payload).digest()[:8], "little")
 
 
+def _python_tree_sha256(root: Path) -> tuple[str, int]:
+    """Hash Python source paths and bytes beneath a scoring package root."""
+
+    files = sorted(path for path in Path(root).rglob("*.py") if path.is_file())
+    digest = hashlib.sha256()
+    for path in files:
+        relative = path.relative_to(root).as_posix().encode()
+        digest.update(len(relative).to_bytes(8, "little"))
+        digest.update(relative)
+        with path.open("rb") as handle:
+            for block in iter(lambda: handle.read(1024 * 1024), b""):
+                digest.update(block)
+    return digest.hexdigest(), len(files)
+
+
 def _format_cell_ids(values: Iterable[int]) -> str:
     return ",".join(str(int(value)) for value in np.asarray(list(values), dtype=int))
 
@@ -986,6 +1001,8 @@ def run_analysis(args: argparse.Namespace) -> dict[str, Path]:
         },
         cwd=ROOT,
     )
+    scoring_package_root = Path(hipporeplayimm.__file__).resolve().parent
+    scoring_tree_hash, scoring_tree_files = _python_tree_sha256(scoring_package_root)
     manifest = {
         "analysis": "pfeiffer_train_only_map_specific_mode_prediction_v1",
         "created_at_utc": datetime.now(timezone.utc).isoformat(),
@@ -1012,6 +1029,8 @@ def run_analysis(args: argparse.Namespace) -> dict[str, Path]:
         "analysis_seed": int(args.analysis_seed),
         "scoring_package_file": str(Path(hipporeplayimm.__file__).resolve()),
         "scoring_source_git": git_metadata(Path(hipporeplayimm.__file__).resolve().parents[2]),
+        "scoring_package_python_tree_sha256": scoring_tree_hash,
+        "scoring_package_python_file_count": int(scoring_tree_files),
         "analysis_script_file": str(Path(__file__).resolve()),
         "analysis_script_sha256": file_sha256(Path(__file__).resolve()),
         "frozen_posterior_module_file": str(

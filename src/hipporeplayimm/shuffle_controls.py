@@ -51,6 +51,7 @@ _SHUFFLE_P_VALUE_SCOPE_COLUMNS = (
     "window_end_s",
     "window_duration_s",
     "simulation_random_seed",
+    "matrix_id",
 )
 _SHUFFLE_SCOPE_KEY_COLUMN = "__shuffle_scope_key"
 

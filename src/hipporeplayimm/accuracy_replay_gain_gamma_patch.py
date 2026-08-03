@@ -193,16 +193,36 @@ def _coerce_nonnegative_spike_count(value: Any, integer_info: np.iinfo) -> int:
 def _coerce_spike_counts(spike_counts: Any) -> np.ndarray:
     """Validate spike-count matrices exactly before any floating-point use."""
 
-    if _contains_boolean_ids(spike_counts):
-        raise ValueError("spike_counts must be numeric counts, not boolean values")
     try:
         raw_counts = np.asarray(spike_counts)
     except (TypeError, ValueError) as exc:
         raise ValueError("spike_counts must contain numeric counts") from exc
+    if np.issubdtype(raw_counts.dtype, np.bool_) or (
+        raw_counts.dtype == object and _contains_boolean_ids(raw_counts)
+    ):
+        raise ValueError("spike_counts must be numeric counts, not boolean values")
     if raw_counts.ndim != 2:
         raise ValueError("spike_counts must have shape (n_time, n_cells)")
 
     integer_info = np.iinfo(np.dtype(int))
+    if np.issubdtype(raw_counts.dtype, np.complexfloating):
+        raise ValueError("spike_counts must contain real integer counts")
+    if np.issubdtype(raw_counts.dtype, np.integer):
+        if np.issubdtype(raw_counts.dtype, np.signedinteger) and np.any(raw_counts < 0):
+            raise ValueError("spike_counts must be finite and nonnegative")
+        if raw_counts.size and int(np.max(raw_counts)) > int(integer_info.max):
+            raise ValueError("spike_counts must fit into integer count range")
+        return raw_counts.astype(int, copy=False)
+    if np.issubdtype(raw_counts.dtype, np.floating):
+        if not np.all(np.isfinite(raw_counts)) or np.any(raw_counts < 0):
+            raise ValueError("spike_counts must be finite and nonnegative")
+        rounded = np.rint(raw_counts)
+        if not np.array_equal(raw_counts, rounded):
+            raise ValueError("spike_counts must contain integer counts")
+        if rounded.size and int(np.max(rounded)) > int(integer_info.max):
+            raise ValueError("spike_counts must fit into integer count range")
+        return rounded.astype(int)
+
     counts = np.empty(raw_counts.shape, dtype=int)
     for index, value in np.ndenumerate(raw_counts):
         counts[index] = _coerce_nonnegative_spike_count(value, integer_info)

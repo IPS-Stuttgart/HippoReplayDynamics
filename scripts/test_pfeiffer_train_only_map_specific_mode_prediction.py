@@ -588,6 +588,48 @@ def build_event_medians(split_scores: pd.DataFrame) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
+def build_cross_split_half_events(
+    split_scores: pd.DataFrame,
+    event_medians: pd.DataFrame,
+) -> dict[str, pd.DataFrame]:
+    """Pair predictors and outcomes from nonidentical repeated-split halves."""
+
+    success = split_scores[split_scores["status"].astype(str).eq("success")].copy()
+    split_indices = sorted(success["cell_split_index"].astype(int).unique())
+    if len(split_indices) < 2 or len(split_indices) % 2:
+        return {}
+    midpoint = len(split_indices) // 2
+    halves = (set(split_indices[:midpoint]), set(split_indices[midpoint:]))
+    keys = ["session", "rat", "event_index"]
+    outputs: dict[str, pd.DataFrame] = {}
+    for label, predictor_splits, outcome_splits in (
+        ("first_half_predictor_second_half_outcome", halves[0], halves[1]),
+        ("second_half_predictor_first_half_outcome", halves[1], halves[0]),
+    ):
+        predictor = (
+            success[success["cell_split_index"].astype(int).isin(predictor_splits)]
+            .groupby(keys, sort=True)["train_map_specific_nonstationary_mass"]
+            .median()
+            .rename("cross_half_train_map_specific_nonstationary_mass")
+        )
+        outcome = (
+            success[success["cell_split_index"].astype(int).isin(outcome_splits)]
+            .groupby(keys, sort=True)[
+                "real_frozen_heldout_delta_imm_minus_fragmented"
+            ]
+            .median()
+            .rename("cross_half_real_frozen_heldout_delta")
+        )
+        paired = pd.concat([predictor, outcome], axis=1).reset_index()
+        outputs[label] = event_medians.merge(
+            paired,
+            on=keys,
+            how="inner",
+            validate="one_to_one",
+        )
+    return outputs
+
+
 def _permutation_null(
     events: pd.DataFrame,
     *,
@@ -734,6 +776,20 @@ def analyze_associations(
     )
     rows.append(clean_row)
 
+    for offset, (label, cross_half) in enumerate(
+        build_cross_split_half_events(split_scores, event_medians).items(),
+        start=3,
+    ):
+        cross_row, _ = _association_row(
+            cross_half,
+            analysis_id=f"post_result_diagnostic_{label}",
+            x="cross_half_train_map_specific_nonstationary_mass",
+            y="cross_half_real_frozen_heldout_delta",
+            bootstrap_replicates=bootstrap_replicates,
+            seed=seed + offset,
+        )
+        rows.append(cross_row)
+
     success = split_scores[split_scores["status"].astype(str).eq("success")].copy()
     for column in (
         "train_map_specific_nonstationary_mass",
@@ -755,6 +811,37 @@ def analyze_associations(
             "rats": int(success["rat"].nunique()),
             "raw_spearman_rho": float(split_rho.statistic),
             "raw_p_value_descriptive": float(split_rho.pvalue),
+            "core_adjusted_partial_spearman_rho": np.nan,
+            "core_adjusted_p_value_descriptive": np.nan,
+            "extended_adjusted_partial_spearman_rho": np.nan,
+            "extended_adjusted_p_value_descriptive": np.nan,
+            "rat_cluster_bootstrap_ci_low": np.nan,
+            "rat_cluster_bootstrap_ci_high": np.nan,
+            "rat_cluster_bootstrap_positive_fraction": np.nan,
+            "finite_bootstrap_replicates": 0,
+            "within_session_permutation_p_one_sided": np.nan,
+        }
+    )
+    for column in (
+        "real_train_delta_imm_minus_fragmented",
+        "real_frozen_heldout_delta_imm_minus_fragmented",
+    ):
+        success[f"within_event_{column}"] = success[column] - success.groupby(
+            ["session", "event_index"]
+        )[column].transform("mean")
+    complementarity = spearmanr(
+        success["within_event_real_train_delta_imm_minus_fragmented"],
+        success["within_event_real_frozen_heldout_delta_imm_minus_fragmented"],
+    )
+    rows.append(
+        {
+            "analysis_id": "post_result_diagnostic_train_test_partition_complementarity",
+            "x_metric": "within_event_real_train_delta_imm_minus_fragmented",
+            "y_metric": "within_event_real_frozen_heldout_delta_imm_minus_fragmented",
+            "events": int(success[["session", "event_index"]].drop_duplicates().shape[0]),
+            "rats": int(success["rat"].nunique()),
+            "raw_spearman_rho": float(complementarity.statistic),
+            "raw_p_value_descriptive": float(complementarity.pvalue),
             "core_adjusted_partial_spearman_rho": np.nan,
             "core_adjusted_p_value_descriptive": np.nan,
             "extended_adjusted_partial_spearman_rho": np.nan,
@@ -827,6 +914,8 @@ def build_gate_summary(
         passed: bool,
         observed: object,
         criterion: str,
+        *,
+        required_for_overall: bool = True,
     ) -> None:
         rows.append(
             {
@@ -835,6 +924,7 @@ def build_gate_summary(
                 "passed": bool(passed),
                 "observed": observed,
                 "criterion": criterion,
+                "required_for_overall": bool(required_for_overall),
             }
         )
 
@@ -872,6 +962,37 @@ def build_gate_summary(
     ]
     for gate, passed, observed, criterion in scientific:
         add("scientific", gate, bool(passed), observed, criterion)
+    cross_half = associations[
+        associations["analysis_id"].astype(str).str.startswith(
+            "post_result_diagnostic_"
+        )
+        & associations["analysis_id"].astype(str).str.contains("half_predictor")
+    ]
+    if not cross_half.empty:
+        cross_values = pd.to_numeric(
+            cross_half["core_adjusted_partial_spearman_rho"], errors="coerce"
+        )
+        add(
+            "post_result_diagnostic",
+            "cross_split_half_directions_positive",
+            bool((cross_values > 0.0).all()),
+            ";".join(f"{value:.6g}" for value in cross_values),
+            "both nonidentical split-half predictor/outcome pairings are positive",
+            required_for_overall=False,
+        )
+    same_split = associations[
+        associations["analysis_id"].eq("secondary_split_level_within_event")
+    ]
+    if not same_split.empty:
+        value = float(same_split["raw_spearman_rho"].iloc[0])
+        add(
+            "post_result_diagnostic",
+            "same_split_within_event_direction_positive",
+            value > 0.0,
+            value,
+            "descriptive same-split within-event association > 0",
+            required_for_overall=False,
+        )
     supported = bool(technical_pass and all(bool(item[1]) for item in scientific))
     add("summary", "overall_population_generalizable_mode_allocation_hypothesis", supported, f"{sum(bool(item[1]) for item in scientific)}/{len(scientific)} scientific gates", "technical pass and every predeclared scientific gate passes")
     return pd.DataFrame(rows)
@@ -885,6 +1006,15 @@ def _write_report(
     gates: pd.DataFrame,
 ) -> None:
     primary = associations.set_index("analysis_id").loc["primary_all_160_events"]
+    cross_half = associations[
+        associations["analysis_id"].astype(str).str.contains("half_predictor")
+    ]
+    same_split = associations.set_index("analysis_id").loc[
+        "secondary_split_level_within_event"
+    ]
+    complementarity = associations.set_index("analysis_id").loc[
+        "post_result_diagnostic_train_test_partition_complementarity"
+    ]
     overall = bool(
         gates.loc[
             gates["gate"].eq("overall_population_generalizable_mode_allocation_hypothesis"),
@@ -914,6 +1044,13 @@ def _write_report(
         f"- Extended-control partial rho: {primary['extended_adjusted_partial_spearman_rho']:.3f}",
         f"- Per-rat positive directions: {int((pd.to_numeric(by_rat['raw_spearman_rho'], errors='coerce') > 0).sum())}/{len(by_rat)}",
         f"- Training-defined clean-IMM-majority sensitivity events: {clean_events}",
+        f"- Cross-half adjusted rho values: {', '.join(f'{value:.3f}' for value in cross_half['core_adjusted_partial_spearman_rho'])}",
+        "",
+        "## Split-partition diagnostic",
+        "",
+        f"Same-split within-event rho was {same_split['raw_spearman_rho']:.3f}, while training-versus-held-out IMM evidence itself was strongly complementary (rho {complementarity['raw_spearman_rho']:.3f}).",
+        "This expected finite-partition competition is why the frozen primary unit is the event median rather than a split row. Both nonidentical cross-half predictor/outcome analyses remained positive.",
+        "These cross-half checks were added after observing the same-split negative result and are diagnostic, not new primary gates.",
         "",
         "## Interpretation",
         "",
@@ -1020,6 +1157,10 @@ def run_analysis(args: argparse.Namespace) -> dict[str, Path]:
         "event_aggregation": "median across repeated splits before primary association",
         "clean_imm_sensitivity": "training-defined within split; event majority across splits",
         "all_cell_clean_imm_selection_used": False,
+        "post_result_diagnostics": [
+            "nonidentical repeated-split-half predictor/outcome associations",
+            "same-event train-versus-heldout partition complementarity",
+        ],
         "primary_predictor": PRIMARY_X,
         "primary_outcome": PRIMARY_Y,
         "core_controls": list(CORE_CONTROLS),

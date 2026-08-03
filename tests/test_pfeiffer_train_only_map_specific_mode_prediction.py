@@ -179,6 +179,70 @@ def test_event_medians_and_clean_subset_use_training_split_values_only() -> None
     assert events["train_defined_clean_imm_majority"].tolist() == [True, True]
 
 
+def test_cross_split_half_events_keep_predictor_and_outcome_splits_separate() -> None:
+    rows = []
+    for event_index in (0, 1):
+        for split_index in range(4):
+            rows.append(
+                {
+                    "session": "Rat1/Open1",
+                    "rat": "Rat1",
+                    "event_index": event_index,
+                    "cell_split_index": split_index,
+                    "status": "success",
+                    "train_map_specific_nonstationary_mass": 10 * event_index
+                    + split_index,
+                    "real_frozen_heldout_delta_imm_minus_fragmented": 100
+                    + 10 * event_index
+                    + split_index,
+                }
+            )
+    split_scores = pd.DataFrame(rows)
+    event_medians = pd.DataFrame(
+        {
+            "session": ["Rat1/Open1", "Rat1/Open1"],
+            "rat": ["Rat1", "Rat1"],
+            "event_index": [0, 1],
+            "quality_covariate": [3.0, 4.0],
+        }
+    )
+
+    halves = analysis.build_cross_split_half_events(split_scores, event_medians)
+
+    forward = halves["first_half_predictor_second_half_outcome"]
+    reverse = halves["second_half_predictor_first_half_outcome"]
+    assert forward["cross_half_train_map_specific_nonstationary_mass"].tolist() == [
+        0.5,
+        10.5,
+    ]
+    assert forward["cross_half_real_frozen_heldout_delta"].tolist() == [102.5, 112.5]
+    assert reverse["cross_half_train_map_specific_nonstationary_mass"].tolist() == [
+        2.5,
+        12.5,
+    ]
+    assert reverse["cross_half_real_frozen_heldout_delta"].tolist() == [100.5, 110.5]
+    assert forward["quality_covariate"].tolist() == [3.0, 4.0]
+
+
+def test_cross_split_half_events_require_an_even_number_of_splits() -> None:
+    split_scores = pd.DataFrame(
+        {
+            "session": ["Rat1/Open1"] * 3,
+            "rat": ["Rat1"] * 3,
+            "event_index": [0] * 3,
+            "cell_split_index": [0, 1, 2],
+            "status": ["success"] * 3,
+            "train_map_specific_nonstationary_mass": [0.1, 0.2, 0.3],
+            "real_frozen_heldout_delta_imm_minus_fragmented": [1.0, 2.0, 3.0],
+        }
+    )
+    event_medians = pd.DataFrame(
+        {"session": ["Rat1/Open1"], "rat": ["Rat1"], "event_index": [0]}
+    )
+
+    assert analysis.build_cross_split_half_events(split_scores, event_medians) == {}
+
+
 def _passing_gate_inputs():
     hash_value = "a" * 64
     split_rows = []
@@ -264,3 +328,60 @@ def test_gate_requires_explicit_no_heldout_latent_inference() -> None:
     ).set_index("gate")
     assert not bool(gates.loc["heldout_spikes_never_used_for_latent_inference", "passed"])
     assert not bool(gates.loc["overall_technical", "passed"])
+
+
+def test_post_result_diagnostics_do_not_change_predeclared_overall_gate() -> None:
+    split_scores, event_medians, associations, by_rat, leave_one_out = (
+        _passing_gate_inputs()
+    )
+    associations = pd.concat(
+        [
+            associations,
+            pd.DataFrame(
+                [
+                    {
+                        "analysis_id": (
+                            "post_result_diagnostic_"
+                            "first_half_predictor_second_half_outcome"
+                        ),
+                        "core_adjusted_partial_spearman_rho": 0.3,
+                    },
+                    {
+                        "analysis_id": (
+                            "post_result_diagnostic_"
+                            "second_half_predictor_first_half_outcome"
+                        ),
+                        "core_adjusted_partial_spearman_rho": 0.2,
+                    },
+                    {
+                        "analysis_id": "secondary_split_level_within_event",
+                        "raw_spearman_rho": -0.4,
+                    },
+                ]
+            ),
+        ],
+        ignore_index=True,
+    )
+
+    gates = analysis.build_gate_summary(
+        split_scores,
+        event_medians,
+        associations,
+        by_rat,
+        leave_one_out,
+        expected_events=4,
+        expected_splits=1,
+        test_cell_fraction=0.3,
+    ).set_index("gate")
+
+    assert bool(
+        gates.loc[
+            "overall_population_generalizable_mode_allocation_hypothesis",
+            "passed",
+        ]
+    )
+    assert bool(gates.loc["cross_split_half_directions_positive", "passed"])
+    assert not bool(gates.loc["same_split_within_event_direction_positive", "passed"])
+    assert not bool(
+        gates.loc["same_split_within_event_direction_positive", "required_for_overall"]
+    )

@@ -29,6 +29,7 @@ _BENCHMARK_RELATIVE_SCOPE_COLUMNS = (
     "benchmark_randomize_event_subset",
     "benchmark_event_subset_seed",
     "benchmark_event_subset_base_seed",
+    "benchmark_event_epoch",
     "encoding_bin_size_cm",
     "encoding_smoothing_sigma_bins",
     "encoding_min_speed_cm_s",

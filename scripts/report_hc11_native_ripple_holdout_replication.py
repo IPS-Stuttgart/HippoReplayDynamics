@@ -73,6 +73,9 @@ def _summary(decisions: pd.DataFrame, group_columns: list[str]) -> pd.DataFrame:
                 "stationary_confident_count": int(group["stationary_confident_claim"].sum()),
                 "imm_confident_over_fragmented_count": int(group["imm_confident_over_fragmented"].sum()),
                 "fragmented_confident_over_imm_count": int(group["fragmented_confident_over_imm"].sum()),
+                "joint_family_and_imm_margin_positive_count": int(
+                    group["joint_family_and_imm_margin_positive"].sum()
+                ),
                 "strict_clean_imm_count": int(group["strict_clean_imm"].sum()),
                 "strict_clean_imm_fraction": float(group["strict_clean_imm"].mean()),
                 "median_trajectory_minus_stationary": float(group["delta_trajectory_minus_stationary"].median()),
@@ -146,9 +149,13 @@ def build_report(
     frozen_parameters_match = bool(len(manifests) == sessions and len(parameter_signatures) == 1)
 
     decisions = event_decisions(evidence, margin_threshold=margin_threshold)
-    decisions["strict_clean_imm"] = (
+    decisions["joint_family_and_imm_margin_positive"] = (
         decisions["trajectory_confident_claim"].astype(bool)
         & decisions["imm_confident_over_fragmented"].astype(bool)
+    )
+    decisions["strict_clean_imm"] = (
+        decisions["joint_family_and_imm_margin_positive"]
+        & decisions["best_model"].astype(str).eq("first_order_imm")
     )
     by_session = _summary(decisions, ["animal", "session", "geometry"])
     by_animal = _summary(decisions, ["animal"])
@@ -180,7 +187,13 @@ def build_report(
     ]
     technical_pass = all(bool(row["passed"]) for row in technical_rows)
     interpretation_rows = [
-        _gate_row("interpretation", "strict_clean_imm_events_present", strict_events > 0, strict_events, "trajectory-confident and IMM-confident over fragmented"),
+        _gate_row(
+            "interpretation",
+            "strict_clean_imm_events_present",
+            strict_events > 0,
+            strict_events,
+            "trajectory-confident, IMM-confident over fragmented, and first-order IMM exact-core best",
+        ),
         _gate_row("interpretation", "strict_clean_imm_spans_both_animals", strict_animals >= 2, strict_animals, "required before external IMM replication ladder"),
         _gate_row("interpretation", "strict_clean_imm_spans_multiple_sessions", strict_sessions >= 2, strict_sessions, "required before external IMM replication ladder"),
     ]
@@ -235,6 +248,7 @@ def build_report(
             f"- Events: {int(overall['events'])} across {sessions} sessions and {animals} animals.",
             f"- Trajectory-confident: {int(overall['trajectory_confident_count'])}/{int(overall['events'])}.",
             f"- IMM-confident over fragmented: {int(overall['imm_confident_over_fragmented_count'])}/{int(overall['events'])}.",
+            f"- Joint family/IMM margin-positive: {int(overall['joint_family_and_imm_margin_positive_count'])}/{int(overall['events'])}.",
             f"- Strict clean IMM: {strict_events}/{int(overall['events'])}, spanning {strict_sessions} session(s) and {strict_animals} animal(s).",
             f"- Median trajectory-minus-stationary: {float(overall['median_trajectory_minus_stationary']):+.3f} log evidence.",
             f"- Median IMM-minus-fragmented: {float(overall['median_imm_minus_fragmented']):+.3f} log evidence.",

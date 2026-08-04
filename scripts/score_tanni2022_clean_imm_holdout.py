@@ -156,8 +156,10 @@ def run(args: argparse.Namespace) -> dict[str, pd.DataFrame]:
             min_peak_rate_hz=args.min_peak_rate_hz,
             min_split_half_stability=args.min_split_half_stability,
         )
-        unit_qc.insert(0, "session", str(manifest_row.session))
-        unit_qc.insert(0, "animal", str(manifest_row.animal))
+        unit_qc = unit_qc.assign(
+            animal=str(manifest_row.animal),
+            session=str(manifest_row.session),
+        )
         unit_frames.append(unit_qc)
         replay_session.excitatory_neurons = encoding.cell_ids
         scorers = {

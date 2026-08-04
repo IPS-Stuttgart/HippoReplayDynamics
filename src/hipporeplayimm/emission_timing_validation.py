@@ -19,6 +19,19 @@ import numpy as np
 _PATCHED_FLAG = "_emission_timing_validation_patch_applied"
 
 
+def _unwrap_zero_dimensional_object_scalar(value: object) -> object:
+    """Unwrap nested zero-dimensional arrays before scalar-kind validation."""
+
+    seen: set[int] = set()
+    while isinstance(value, np.ndarray) and value.ndim == 0:
+        marker = id(value)
+        if marker in seen:
+            break
+        seen.add(marker)
+        value = value.item()
+    return value
+
+
 def _contains_boolean_numeric(value: object) -> bool:
     """Return whether a scalar or array-like value contains boolean numerics."""
 
@@ -29,7 +42,10 @@ def _contains_boolean_numeric(value: object) -> bool:
     if np.issubdtype(values.dtype, np.bool_):
         return True
     if values.dtype == object:
-        return any(isinstance(item, (bool, np.bool_)) for item in values.flat)
+        return any(
+            isinstance(_unwrap_zero_dimensional_object_scalar(item), (bool, np.bool_))
+            for item in values.flat
+        )
     return False
 
 
@@ -43,7 +59,13 @@ def _contains_complex_numeric(value: object) -> bool:
     if np.issubdtype(values.dtype, np.complexfloating):
         return True
     if values.dtype == object:
-        return any(isinstance(item, (complex, np.complexfloating)) for item in values.flat)
+        return any(
+            isinstance(
+                _unwrap_zero_dimensional_object_scalar(item),
+                (complex, np.complexfloating),
+            )
+            for item in values.flat
+        )
     return False
 
 

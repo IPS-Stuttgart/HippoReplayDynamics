@@ -128,19 +128,23 @@ jobs:
               test_path.write_text(tests.rstrip() + addition + "\n", encoding="utf-8")
           PY
 
-      - name: Install development dependencies
-        run: python3 -m pip install -e ".[dev]"
+      - name: Create validation environment
+        run: |
+          python3 -m venv .agent-venv
+          .agent-venv/bin/python -m pip install --upgrade pip
+          .agent-venv/bin/python -m pip install -e ".[dev]"
 
       - name: Run focused validation
         run: |
-          python3 -m py_compile \
+          .agent-venv/bin/python -m py_compile \
             src/hipporeplayimm/result_quality_audit_scope_patch.py \
             tests/test_result_quality_audit_mixed_evidence.py
-          python3 -W error -m pytest -q tests/test_result_quality_audit_mixed_evidence.py
+          .agent-venv/bin/python -W error -m pytest -q tests/test_result_quality_audit_mixed_evidence.py
 
       - name: Remove temporary workflow and commit
         shell: bash
         run: |
+          rm -rf .agent-venv
           rm .github/workflows/agent-reject-nonreal-mixed-evidence-values.yml
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"

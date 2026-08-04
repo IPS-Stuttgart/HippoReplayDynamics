@@ -1,0 +1,121 @@
+name: Apply ripple trace boundary fix
+
+on:
+  push:
+    branches:
+      - agent/clip-expanded-ripple-events-to-trace
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref_name }}
+          fetch-depth: 0
+
+      - name: Apply source patch and regression
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          source_path = Path("scripts/prepare_olafsdottir_ztrack_sessions.py")
+          source = source_path.read_text(encoding="utf-8")
+          old = '''        if config.expand_to_s > 0.0:
+              half_width = 0.5 * float(config.expand_to_s)
+              event_start = max(config.exclude_sleep_onset_s, peak_s - half_width)
+              event_end = peak_s + half_width
+          '''
+          new = '''        if config.expand_to_s > 0.0:
+              half_width = 0.5 * float(config.expand_to_s)
+              trace_end_s = score.shape[0] / float(sample_rate_hz)
+              event_start = max(config.exclude_sleep_onset_s, peak_s - half_width)
+              event_end = min(trace_end_s, peak_s + half_width)
+          '''
+          if source.count(old) != 1:
+              raise SystemExit("expected exactly one ripple expansion block")
+          source_path.write_text(source.replace(old, new), encoding="utf-8")
+
+          test_path = Path("tests/test_olafsdottir_ripple_trace_boundary.py")
+          test_path.write_text(
+              '''from __future__ import annotations
+
+          import importlib.util
+          from pathlib import Path
+          import sys
+
+          import numpy as np
+
+
+          def _load_adapter_module():
+              repo_root = Path(__file__).resolve().parents[1]
+              src_path = repo_root / "src"
+              if str(src_path) not in sys.path:
+                  sys.path.insert(0, str(src_path))
+              module_path = repo_root / "scripts" / "prepare_olafsdottir_ztrack_sessions.py"
+              spec = importlib.util.spec_from_file_location(
+                  "prepare_olafsdottir_ztrack_sessions_trace_boundary",
+                  module_path,
+              )
+              assert spec is not None
+              assert spec.loader is not None
+              module = importlib.util.module_from_spec(spec)
+              sys.modules[spec.name] = module
+              spec.loader.exec_module(module)
+              return module
+
+
+          def test_expanded_ripple_window_stops_at_trace_end() -> None:
+              module = _load_adapter_module()
+              traces = np.zeros((1, 10), dtype=float)
+              traces[0, -1] = 4.0
+              config = module.RippleDetectionConfig(
+                  channel_numbers=(1,),
+                  band_low_hz=150.0,
+                  band_high_hz=250.0,
+                  high_threshold_z=3.0,
+                  low_threshold_z=1.0,
+                  min_duration_s=0.01,
+                  max_duration_s=0.5,
+                  expand_to_s=0.4,
+                  exclude_sleep_onset_s=0.0,
+                  detector_mode="mean-envelope",
+                  consensus_min_channels=1,
+              )
+
+              events, event_table = module.detect_ripple_events_from_traces(
+                  traces,
+                  10.0,
+                  config,
+              )
+
+              assert events.shape == (1, 6)
+              np.testing.assert_allclose(events[0, :3], np.array([0.7, 1.0, 0.9]))
+              assert np.isclose(float(event_table.loc[0, "end_s"]), 1.0)
+
+              quality = module.event_spike_quality(
+                  events,
+                  np.array([[0.95, 1.0], [1.05, 2.0]], dtype=float),
+              )
+              assert int(quality.loc[0, "n_spikes"]) == 1
+          ''',
+              encoding="utf-8",
+          )
+
+          Path(".github/workflows/apply-ripple-trace-boundary-fix.yml").unlink()
+          PY
+
+      - name: Commit patch
+        shell: bash
+        run: |
+          git diff --check
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Clip expanded ripple events to trace support"
+          git push origin "HEAD:${GITHUB_REF_NAME}"

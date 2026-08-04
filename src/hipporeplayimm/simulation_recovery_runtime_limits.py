@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from decimal import Decimal, InvalidOperation
 from functools import wraps
 from typing import Any
 
@@ -104,15 +105,37 @@ def _normalized_runtime_config(config: Any) -> Any:
 
 
 def _positive_integer_value(name: str, value: Any) -> int:
-    scalar = _scalar_non_boolean_value(name, value, message="must be a finite positive integer")
-    try:
-        numeric = float(scalar)
-    except (TypeError, ValueError) as exc:
-        raise ValueError(f"{name} must be a finite positive integer") from exc
-    if not np.isfinite(numeric) or numeric <= 0.0:
-        raise ValueError(f"{name} must be a finite positive integer")
-    integer = int(round(numeric))
-    if not np.isclose(numeric, integer, rtol=0.0, atol=0.0):
+    """Return a mathematically integral limit without binary-float coercion."""
+
+    scalar = _scalar_non_boolean_value(
+        name,
+        value,
+        message="must be a finite positive integer",
+    )
+    if isinstance(scalar, (int, np.integer)):
+        integer = int(scalar)
+    else:
+        if isinstance(scalar, (bytes, np.bytes_)):
+            try:
+                text = bytes(scalar).decode("utf-8")
+            except UnicodeDecodeError as exc:
+                raise ValueError(
+                    f"{name} must be a finite positive integer"
+                ) from exc
+        else:
+            text = str(scalar)
+        try:
+            numeric = Decimal(text.strip())
+        except (InvalidOperation, ValueError) as exc:
+            raise ValueError(f"{name} must be a finite positive integer") from exc
+        if not numeric.is_finite() or numeric <= 0:
+            raise ValueError(f"{name} must be a finite positive integer")
+        integral = numeric.to_integral_value()
+        if numeric != integral:
+            raise ValueError(f"{name} must be a finite positive integer")
+        integer = int(integral)
+
+    if integer <= 0:
         raise ValueError(f"{name} must be a finite positive integer")
     return integer
 

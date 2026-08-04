@@ -359,14 +359,16 @@ def _numeric_scope_label(value: object) -> str | None:
     """Return a canonical label for numeric scalar scope keys.
 
     CSV round-trips can turn integer identifiers such as ``event_index`` or
-    ``window_index`` into floats in one table but not the other.  Treat numeric
-    scalars with the same exact value as the same shuffle-control scope, while
-    keeping booleans and textual labels on the normal string path.
+    ``window_index`` into floats in one table but not the other. Treat ordinary
+    integer-valued floats as the corresponding integer while preserving exact
+    Python and NumPy integer identity before any binary-float conversion.
     """
 
     if isinstance(value, (bool, np.bool_)):
         return None
-    if not isinstance(value, (int, float, np.integer, np.floating)):
+    if isinstance(value, (int, np.integer)):
+        return str(int(value))
+    if not isinstance(value, (float, np.floating)):
         return None
     numeric = float(value)
     if not np.isfinite(numeric):

@@ -104,9 +104,14 @@ def _coerce_integral_group_ids(
 
 
 def _coerce_integral_group_id(value: Any, name: str, integer_info: np.iinfo) -> int:
-    """Coerce one group identifier without sending integer inputs through float."""
+    """Coerce one group identifier without lossy real or complex conversion."""
 
-    if isinstance(value, np.ndarray):
+    seen_arrays: set[int] = set()
+    while isinstance(value, np.ndarray):
+        array_id = id(value)
+        if array_id in seen_arrays:
+            raise ValueError(f"{name} must contain scalar integer identifiers")
+        seen_arrays.add(array_id)
         arr = np.asarray(value, dtype=object)
         if arr.ndim != 0:
             raise ValueError(f"{name} must be one-dimensional")
@@ -114,6 +119,8 @@ def _coerce_integral_group_id(value: Any, name: str, integer_info: np.iinfo) -> 
 
     if isinstance(value, (bool, np.bool_)):
         raise ValueError(f"{name} must not contain boolean identifiers")
+    if isinstance(value, (complex, np.complexfloating)):
+        raise ValueError(f"{name} must contain real integer identifiers")
 
     if isinstance(value, (int, np.integer)):
         identifier = int(value)
@@ -122,7 +129,7 @@ def _coerce_integral_group_id(value: Any, name: str, integer_info: np.iinfo) -> 
     elif isinstance(value, (str, bytes)):
         identifier = _coerce_text_group_id(value, name)
     elif isinstance(value, (float, np.floating)):
-        identifier = _coerce_float_group_id(float(value), name)
+        identifier = _coerce_float_group_id(value, name)
     else:
         try:
             numeric = float(value)
@@ -135,10 +142,10 @@ def _coerce_integral_group_id(value: Any, name: str, integer_info: np.iinfo) -> 
     return identifier
 
 
-def _coerce_float_group_id(value: float, name: str) -> int:
-    if not np.isfinite(value):
+def _coerce_float_group_id(value: float | np.floating, name: str) -> int:
+    if not bool(np.isfinite(value)):
         raise ValueError(f"{name} must be finite integer identifiers")
-    if not value.is_integer():
+    if not bool(value.is_integer()):
         raise ValueError(f"{name} must be integer-valued")
     return int(value)
 

@@ -161,9 +161,39 @@ def test_heldout_assembly_turnover_uses_training_defined_boundary() -> None:
 
     assert result["assembly_turnover_evaluable"] is True
     assert result["assembly_boundary_transition_index"] == 5
+    assert result["assembly_boundary_candidate_count"] == 1
+    assert result["assembly_nonfragmented_window_count"] > 1
+    assert np.isclose(result["assembly_max_switch_probability_nonfragmented"], 0.8)
     assert np.isclose(result["assembly_boundary_heldout_turnover_hellinger"], 1.0)
     assert np.isclose(result["assembly_control_heldout_turnover_median"], 0.0)
     assert np.isclose(result["heldout_assembly_turnover_excess"], 1.0)
+
+
+def test_heldout_assembly_turnover_reports_boundary_availability_on_failure() -> None:
+    transition = np.zeros((9, 3, 3), dtype=float)
+    transition[:, 0, 0] = 0.45
+    transition[:, 1, 1] = 0.45
+    transition[:, 0, 1] = 0.10
+    score = SimpleNamespace(
+        diagnostics={
+            "state_space_imm_mode_transition_posterior_over_time": json.dumps(
+                transition.tolist()
+            )
+        }
+    )
+
+    result = analysis.heldout_assembly_turnover(
+        score,
+        np.ones((10, 3), dtype=int),
+        np.ones((10, 2), dtype=int),
+        window_bins=2,
+    )
+
+    assert result["assembly_turnover_evaluable"] is False
+    assert result["assembly_turnover_failure_reason"] == "no_training_defined_boundary"
+    assert result["assembly_boundary_candidate_count"] == 0
+    assert result["assembly_nonfragmented_window_count"] == 7
+    assert np.isclose(result["assembly_max_switch_probability_nonfragmented"], 0.10)
 
 
 def test_event_medians_and_clean_subset_use_training_split_values_only() -> None:

@@ -237,8 +237,38 @@ def heldout_assembly_turnover(
         & (nonfragmented >= float(minimum_nonfragmented_mass))
         & (conditional >= float(minimum_boundary_probability))
     )
+    nonfragmented_valid = window_valid & (
+        nonfragmented >= float(minimum_nonfragmented_mass)
+    )
+    finite_conditional = conditional[window_valid & np.isfinite(conditional)]
+    finite_nonfragmented_conditional = conditional[
+        nonfragmented_valid & np.isfinite(conditional)
+    ]
+    diagnostics_summary = {
+        "assembly_transition_count": int(len(conditional)),
+        "assembly_valid_window_count": int(window_valid.sum()),
+        "assembly_nonfragmented_window_count": int(nonfragmented_valid.sum()),
+        "assembly_boundary_candidate_count": int(eligible.sum()),
+        "assembly_max_switch_probability_valid": float(np.max(finite_conditional))
+        if finite_conditional.size
+        else np.nan,
+        "assembly_max_switch_probability_nonfragmented": float(
+            np.max(finite_nonfragmented_conditional)
+        )
+        if finite_nonfragmented_conditional.size
+        else np.nan,
+        "assembly_max_nonfragmented_mass_valid": float(
+            np.max(nonfragmented[window_valid])
+        )
+        if np.any(window_valid)
+        else np.nan,
+        "assembly_minimum_nonfragmented_mass": float(minimum_nonfragmented_mass),
+        "assembly_minimum_boundary_probability": float(minimum_boundary_probability),
+        "assembly_maximum_control_probability": float(maximum_control_probability),
+    }
     if not np.any(eligible):
         return {
+            **diagnostics_summary,
             "assembly_turnover_evaluable": False,
             "assembly_turnover_failure_reason": "no_training_defined_boundary",
         }
@@ -252,6 +282,7 @@ def heldout_assembly_turnover(
     candidates = indices[control_eligible]
     if not len(candidates):
         return {
+            **diagnostics_summary,
             "assembly_turnover_evaluable": False,
             "assembly_turnover_failure_reason": "no_training_defined_nonboundary",
             "assembly_boundary_transition_index": boundary,
@@ -289,6 +320,7 @@ def heldout_assembly_turnover(
     finite_controls = finite_controls[np.isfinite(finite_controls)]
     if not np.isfinite(boundary_turnover) or not len(finite_controls):
         return {
+            **diagnostics_summary,
             "assembly_turnover_evaluable": False,
             "assembly_turnover_failure_reason": "insufficient_heldout_spikes",
             "assembly_boundary_transition_index": boundary,
@@ -298,6 +330,7 @@ def heldout_assembly_turnover(
         }
     control_median = float(np.median(finite_controls))
     return {
+        **diagnostics_summary,
         "assembly_turnover_evaluable": True,
         "assembly_turnover_failure_reason": "",
         "assembly_boundary_transition_index": boundary,

@@ -43,6 +43,9 @@ from .trajectory_imm_single_bin_diagnostics import (
 from .first_order_imm_duration_diagnostics import (
     apply_first_order_imm_duration_diagnostics_patch as _apply_first_order_imm_duration_diagnostics_patch,
 )
+from .first_order_imm_time_weighting import (
+    apply_first_order_imm_time_weighting_patch as _apply_first_order_imm_time_weighting_patch,
+)
 from .state_space_model import (
     StateSpaceDecoderConfig,
     StateSpaceReplayModel,
@@ -122,6 +125,7 @@ _apply_trajectory_imm_single_bin_diagnostics_patch()
 _apply_momentum_prediction_decay_validation_patch()
 _apply_momentum_candidate_center_coercion_patch()
 _apply_first_order_imm_duration_diagnostics_patch()
+_apply_first_order_imm_time_weighting_patch()
 
 __all__ = [
     "EventScore",

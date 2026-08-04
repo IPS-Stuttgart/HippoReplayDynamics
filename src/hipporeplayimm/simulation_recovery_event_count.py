@@ -34,6 +34,7 @@ _SUMMARY_BOOL_COLUMNS = (
 _EVENT_SCOPE_COLUMNS = (
     "session",
     _SOURCE_SCORE_FILE_COLUMN,
+    "matrix_id",
     "simulation_random_seed",
     "random_seed",
     "benchmark_random_seed",
@@ -313,11 +314,11 @@ def _certified_vs_exact_event_recovery(
 
 
 def _extend_best_row_event_scope(best_row_flags: Any) -> None:
-    """Keep score-file provenance and explicit event IDs in event grouping helpers."""
+    """Keep run provenance and explicit event IDs in event grouping helpers."""
 
     columns = list(getattr(best_row_flags, "_GROUP_COLUMNS", ()))
     insert_after = "session"
-    for column in (_SOURCE_SCORE_FILE_COLUMN, _EVENT_ID_COLUMN):
+    for column in (_SOURCE_SCORE_FILE_COLUMN, "matrix_id", _EVENT_ID_COLUMN):
         if column in columns:
             insert_after = column
             continue

@@ -11,6 +11,7 @@ while destroying its order and are processed by the identical pipeline.
 from __future__ import annotations
 
 import argparse
+import concurrent.futures
 import hashlib
 import json
 import time
@@ -444,59 +445,124 @@ def score_local_windows(
     return pd.DataFrame(rows)
 
 
+def _score_selected_event(
+    event_record: dict[str, object],
+    *,
+    dataset_root: str,
+    encoding_cfg: EncodingConfig,
+    emission_cfg: EmissionConfig,
+    calibration: ReplayEmissionCalibration,
+    model_args: SimpleNamespace,
+    n_shuffles: int,
+    local_window_bins: int,
+    max_segments: int,
+    duration_prior_log_sd: float,
+    mode_switch_penalty: float,
+    seed: int,
+) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    """Score one event so event jobs can run in separate processes."""
+
+    session_id = str(event_record["session"])
+    event_index = int(event_record["event_index"])
+    rat = str(event_record["rat"])
+    session_dir = _session_path(dataset_root, session_id)
+    _check_session(session_dir)
+    session = load_replay_session(session_dir)
+    encoding = fit_place_field_encoding(session, encoding_cfg)
+    models = _grammar_models(model_args)
+    event = session.ripple(event_index)
+    original = build_sorted_emissions_with_replay_calibration(
+        session,
+        encoding,
+        event,
+        emission_cfg,
+        calibration=calibration,
+    )
+    conditions = [("original", -1, original)]
+    for shuffle_index in range(int(n_shuffles)):
+        event_seed = int(
+            hashlib.sha256(
+                f"{seed}|{session_id}|{event_index}|{shuffle_index}".encode()
+            ).hexdigest()[:16],
+            16,
+        )
+        permutation = np.random.default_rng(event_seed).permutation(original.n_time)
+        conditions.append(
+            ("shuffled", shuffle_index, permute_emission_bins(original, permutation))
+        )
+    local_parts: list[pd.DataFrame] = []
+    sequence_parts: list[pd.DataFrame] = []
+    motif_parts: list[pd.DataFrame] = []
+    for condition, shuffle_index, emissions in conditions:
+        local = score_local_windows(
+            emissions,
+            encoding,
+            models,
+            session=session_id,
+            rat=rat,
+            event_index=event_index,
+            condition=condition,
+            shuffle_index=int(shuffle_index),
+            local_window_bins=int(local_window_bins),
+        )
+        local_parts.append(local)
+        if local.empty or local["status"].ne("success").any():
+            continue
+        sequence, motifs = infer_local_grammar(
+            local,
+            max_segments=max_segments,
+            duration_prior_log_sd=duration_prior_log_sd,
+            mode_switch_penalty=mode_switch_penalty,
+        )
+        sequence_parts.append(sequence)
+        motif_parts.append(motifs)
+    local_scores = pd.concat(local_parts, ignore_index=True) if local_parts else pd.DataFrame()
+    sequences = pd.concat(sequence_parts, ignore_index=True) if sequence_parts else pd.DataFrame()
+    replicates = pd.concat(motif_parts, ignore_index=True) if motif_parts else pd.DataFrame()
+    print(f"H8 completed {session_id} event {event_index}", flush=True)
+    return local_scores, sequences, replicates
+
+
 def run(args: argparse.Namespace) -> dict[str, pd.DataFrame]:
     """Execute the balanced real-data H8 campaign."""
 
     evidence = pd.read_csv(args.event_evidence)
     selected = select_balanced_events(evidence, events_per_rat=args.events_per_rat, seed=args.seed)
     encoding_cfg, emission_cfg, calibration, model_args = scoring_configuration(evidence)
-    models = _grammar_models(model_args)
     local_parts: list[pd.DataFrame] = []
     sequence_parts: list[pd.DataFrame] = []
     motif_parts: list[pd.DataFrame] = []
-    for session_id, selected_session in selected.groupby("session", sort=True):
-        session_dir = _session_path(args.dataset_root, str(session_id))
-        _check_session(session_dir)
-        session = load_replay_session(session_dir)
-        encoding = fit_place_field_encoding(session, encoding_cfg)
-        for event_row in selected_session.itertuples(index=False):
-            event = session.ripple(int(event_row.event_index))
-            original = build_sorted_emissions_with_replay_calibration(
-                session,
-                encoding,
-                event,
-                emission_cfg,
-                calibration=calibration,
-            )
-            conditions = [("original", -1, original)]
-            for shuffle_index in range(int(args.n_shuffles)):
-                event_seed = int(hashlib.sha256(f"{args.seed}|{session_id}|{event_row.event_index}|{shuffle_index}".encode()).hexdigest()[:16], 16)
-                permutation = np.random.default_rng(event_seed).permutation(original.n_time)
-                conditions.append(("shuffled", shuffle_index, permute_emission_bins(original, permutation)))
-            for condition, shuffle_index, emissions in conditions:
-                local = score_local_windows(
-                    emissions,
-                    encoding,
-                    models,
-                    session=str(session_id),
-                    rat=str(event_row.rat),
-                    event_index=int(event_row.event_index),
-                    condition=condition,
-                    shuffle_index=int(shuffle_index),
-                    local_window_bins=int(args.local_window_bins),
-                )
-                local_parts.append(local)
-                if local.empty or local["status"].ne("success").any():
-                    continue
-                sequence, motifs = infer_local_grammar(
-                    local,
-                    max_segments=args.max_segments,
-                    duration_prior_log_sd=args.duration_prior_log_sd,
-                    mode_switch_penalty=args.mode_switch_penalty,
-                )
-                sequence_parts.append(sequence)
-                motif_parts.append(motifs)
-                print(f"H8 {session_id} event {event_row.event_index}: {condition} {shuffle_index}", flush=True)
+    task_kwargs = {
+        "dataset_root": str(args.dataset_root),
+        "encoding_cfg": encoding_cfg,
+        "emission_cfg": emission_cfg,
+        "calibration": calibration,
+        "model_args": model_args,
+        "n_shuffles": int(args.n_shuffles),
+        "local_window_bins": int(args.local_window_bins),
+        "max_segments": int(args.max_segments),
+        "duration_prior_log_sd": float(args.duration_prior_log_sd),
+        "mode_switch_penalty": float(args.mode_switch_penalty),
+        "seed": int(args.seed),
+    }
+    records = selected.to_dict("records")
+    if int(args.workers) <= 1:
+        event_outputs = [
+            _score_selected_event(record, **task_kwargs) for record in records
+        ]
+    else:
+        with concurrent.futures.ProcessPoolExecutor(
+            max_workers=int(args.workers)
+        ) as executor:
+            futures = [
+                executor.submit(_score_selected_event, record, **task_kwargs)
+                for record in records
+            ]
+            event_outputs = [future.result() for future in futures]
+    for local, sequence, motifs in event_outputs:
+        local_parts.append(local)
+        sequence_parts.append(sequence)
+        motif_parts.append(motifs)
     local_scores = pd.concat(local_parts, ignore_index=True) if local_parts else pd.DataFrame()
     sequences = pd.concat(sequence_parts, ignore_index=True) if sequence_parts else pd.DataFrame()
     replicates = pd.concat(motif_parts, ignore_index=True) if motif_parts else pd.DataFrame()
@@ -533,6 +599,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--duration-prior-log-sd", type=float, default=0.75)
     parser.add_argument("--mode-switch-penalty", type=float, default=5.5)
     parser.add_argument("--seed", type=int, default=20260804)
+    parser.add_argument("--workers", type=int, default=1)
     return parser
 
 

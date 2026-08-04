@@ -289,7 +289,13 @@ def _coerce_ripple_index(index: Any, ripple_count: int) -> int:
     item = _ripple_index_scalar_item(index)
     if item is None:
         raise TypeError("ripple index must be an integer")
+    if isinstance(item, (complex, np.complexfloating)):
+        raise TypeError("ripple index must be an integer")
     if isinstance(item, (int, np.integer)):
+        resolved = int(item)
+    elif isinstance(item, np.floating):
+        if not np.isfinite(item) or not bool(np.equal(item, np.trunc(item))):
+            raise TypeError("ripple index must be an integer")
         resolved = int(item)
     else:
         try:
@@ -422,6 +428,8 @@ def _coerce_integral_id(value: Any, name: str, integer_info: np.iinfo) -> int:
         raise ValueError(f"{name} must contain finite integer identifiers") from exc
     if isinstance(item, (bool, np.bool_)):
         raise ValueError(f"{name} must not contain boolean identifiers")
+    if isinstance(item, (complex, np.complexfloating)):
+        raise ValueError(f"{name} must contain real integer identifiers")
     if isinstance(item, (int, np.integer)):
         identifier = int(item)
     elif isinstance(item, Decimal):
@@ -433,6 +441,12 @@ def _coerce_integral_id(value: Any, name: str, integer_info: np.iinfo) -> int:
         identifier = int(integral)
     elif isinstance(item, (str, bytes)):
         identifier = _coerce_integral_text_id(item, name)
+    elif isinstance(item, np.floating):
+        if not np.isfinite(item):
+            raise ValueError(f"{name} must be finite integer identifiers")
+        if not bool(np.equal(item, np.trunc(item))):
+            raise ValueError(f"{name} must be integer-valued")
+        identifier = int(item)
     else:
         try:
             numeric = float(item)

@@ -20,6 +20,7 @@ import pandas as pd
 # legacy rows with absent metadata cannot be mixed with newer sweep rows that
 # carry concrete values for the same column.
 _BENCHMARK_RELATIVE_SCOPE_COLUMNS = (
+    "matrix_id",
     "benchmark_test_cell_fraction",
     "benchmark_n_cell_splits",
     "benchmark_cell_split_count",
@@ -77,6 +78,7 @@ _BENCHMARK_RELATIVE_SCOPE_COLUMNS = (
     "goal_state_space_drift_speed_cm_s",
     "goal_state_space_max_step_sigma",
 )
+_RESULT_QUALITY_SCOPE_COLUMNS = ("matrix_id", "benchmark_event_epoch")
 
 
 def apply_benchmark_relative_grouping_patch() -> None:
@@ -84,6 +86,7 @@ def apply_benchmark_relative_grouping_patch() -> None:
 
     from . import benchmarks as bench
 
+    _synchronize_result_quality_scope()
     group_columns = bench._benchmark_event_group_columns
     if not getattr(group_columns, "_benchmark_relative_grouping_scoped", False):
 
@@ -142,6 +145,17 @@ def apply_benchmark_relative_grouping_patch() -> None:
 
     add_relative_metrics_with_missing_scope._benchmark_relative_missing_scope_wrapped = True  # type: ignore[attr-defined]
     bench._add_relative_metrics = add_relative_metrics_with_missing_scope
+
+
+def _synchronize_result_quality_scope() -> None:
+    """Keep audit groups aligned with benchmark run identifiers."""
+
+    from . import result_quality_audit_scope_patch as audit_scope
+
+    current = audit_scope._EVENT_GROUP_SCOPE_COLUMNS
+    missing = tuple(column for column in _RESULT_QUALITY_SCOPE_COLUMNS if column not in current)
+    if missing:
+        audit_scope._EVENT_GROUP_SCOPE_COLUMNS = (*current, *missing)
 
 
 def _usable_group_column(frame: pd.DataFrame, column: str) -> bool:

@@ -11,7 +11,7 @@ from .model_parameter_validation import _reject_boolean_scalar, _validate_unit_i
 
 _PATCHED_FLAG = "_model_numeric_string_validation_patch_applied"
 _PATCH_VERSION_ATTR = "_model_numeric_string_validation_patch_version"
-_PATCH_VERSION = 2
+_PATCH_VERSION = 3
 _STATE_SPACE_UTILS_PATCHED_FLAG = "_state_space_numeric_string_validation_patch_applied"
 _STATE_SPACE_MODEL_PATCHED_FLAG = "_state_space_model_numeric_string_validation_patch_applied"
 _UNIT_INTERVAL_OVERFLOW_PATCHED_FLAG = "_model_unit_interval_overflow_validation_patch_applied"
@@ -46,6 +46,32 @@ def _is_string_scalar(value: object) -> bool:
         except ValueError:
             return False
     return False
+
+
+def _is_complex_scalar(value: object) -> bool:
+    """Return True for scalar complex values, including object wrappers."""
+
+    if isinstance(value, (complex, np.complexfloating)):
+        return True
+    try:
+        array = np.asarray(value)
+    except (TypeError, ValueError):
+        return False
+    if array.ndim != 0:
+        return False
+    if np.issubdtype(array.dtype, np.complexfloating):
+        return True
+    if array.dtype == object:
+        try:
+            return isinstance(array.item(), (complex, np.complexfloating))
+        except ValueError:
+            return False
+    return False
+
+
+def _reject_complex_scalar(name: str, value: object) -> None:
+    if _is_complex_scalar(value):
+        raise TypeError(f"{name} must be a real numeric scalar, not complex")
 
 
 def _reject_string_scalar(name: str, value: object) -> None:
@@ -97,6 +123,7 @@ def _state_space_helpers_are_string_guarded(state_space_utils: object) -> bool:
 
     return all(
         bool(getattr(getattr(state_space_utils, helper_name, None), _STATE_SPACE_UTILS_PATCHED_FLAG, False))
+        and getattr(getattr(state_space_utils, helper_name, None), _PATCH_VERSION_ATTR, None) == _PATCH_VERSION
         for helper_name in _STATE_SPACE_HELPER_NAMES
     )
 
@@ -124,12 +151,21 @@ def _patch_model_parameter_unit_interval_overflow() -> None:
     from . import model_parameter_validation
 
     current = model_parameter_validation._validate_unit_interval_parameter
-    if getattr(current, _UNIT_INTERVAL_OVERFLOW_PATCHED_FLAG, False):
+    if (
+        getattr(current, _UNIT_INTERVAL_OVERFLOW_PATCHED_FLAG, False)
+        and getattr(current, _PATCH_VERSION_ATTR, None) == _PATCH_VERSION
+    ):
         _validate_unit_interval_parameter = current
         return
 
     @wraps(current)
     def validate_unit_interval_parameter(name: str, value: object) -> float:
+        if _is_complex_scalar(value):
+            if name == "mode_stickiness":
+                message = f"{name} must be in [0, 1]"
+            else:
+                message = f"{name} must be finite and lie in [0, 1]"
+            raise ValueError(message)
         try:
             return current(name, value)
         except OverflowError as exc:
@@ -140,6 +176,7 @@ def _patch_model_parameter_unit_interval_overflow() -> None:
             raise ValueError(message) from exc
 
     setattr(validate_unit_interval_parameter, _UNIT_INTERVAL_OVERFLOW_PATCHED_FLAG, True)
+    setattr(validate_unit_interval_parameter, _PATCH_VERSION_ATTR, _PATCH_VERSION)
     setattr(validate_unit_interval_parameter, "__hipporeplayimm_original__", current)
     model_parameter_validation._validate_unit_interval_parameter = validate_unit_interval_parameter
     _validate_unit_interval_parameter = validate_unit_interval_parameter
@@ -163,6 +200,8 @@ def _patch_state_space_numeric_string_validation() -> None:
         @wraps(original_unit_probability)
         def coerce_unit_probability(name: str, value: object) -> float:
             _reject_string_scalar(name, value)
+            if _is_complex_scalar(value):
+                raise ValueError(f"{name} must be in [0, 1]")
             try:
                 return original_unit_probability(name, value)
             except OverflowError as exc:
@@ -200,6 +239,10 @@ def _patch_state_space_numeric_string_validation() -> None:
         setattr(coerce_unit_probability, _STATE_SPACE_UTILS_PATCHED_FLAG, True)
         setattr(top_candidate_indices, _STATE_SPACE_UTILS_PATCHED_FLAG, True)
         setattr(mass_retaining_candidate_indices, _STATE_SPACE_UTILS_PATCHED_FLAG, True)
+        setattr(coerce_integer_count, _PATCH_VERSION_ATTR, _PATCH_VERSION)
+        setattr(coerce_unit_probability, _PATCH_VERSION_ATTR, _PATCH_VERSION)
+        setattr(top_candidate_indices, _PATCH_VERSION_ATTR, _PATCH_VERSION)
+        setattr(mass_retaining_candidate_indices, _PATCH_VERSION_ATTR, _PATCH_VERSION)
         setattr(coerce_integer_count, "__hipporeplayimm_original__", original_integer_count)
         setattr(coerce_unit_probability, "__hipporeplayimm_original__", original_unit_probability)
         setattr(top_candidate_indices, "__hipporeplayimm_original__", original_top_candidates)
@@ -256,6 +299,7 @@ def apply_model_numeric_string_validation_patch() -> None:
         def validator(name: str, value: object, *, _current=current, _validator_name=validator_name):
             _reject_string_scalar(name, value)
             _reject_boolean_scalar(name, value)
+            _reject_complex_scalar(name, value)
             if _validator_name == "_validate_nonnegative_parameter" and name == "velocity_decay":
                 _validate_unit_interval_parameter(name, value)
                 return None

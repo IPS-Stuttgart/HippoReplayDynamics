@@ -503,8 +503,9 @@ def _events_from_crossing(
         event_end = right / float(sample_rate_hz)
         if config.expand_to_s > 0.0:
             half_width = 0.5 * float(config.expand_to_s)
+            trace_end_s = score.shape[0] / float(sample_rate_hz)
             event_start = max(config.exclude_sleep_onset_s, peak_s - half_width)
-            event_end = peak_s + half_width
+            event_end = min(trace_end_s, peak_s + half_width)
         duration = event_end - event_start
         if duration < config.min_duration_s or duration > config.max_duration_s:
             continue

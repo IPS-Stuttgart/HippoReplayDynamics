@@ -91,6 +91,7 @@ def _as_numeric_real_array(values: object, name: str) -> np.ndarray:
         raise ValueError(f"{name} must contain numeric real values, not complex values")
     if raw.dtype.kind == "O":
         for item in raw.ravel():
+            item = _unwrap_zero_dimensional_object_scalar(item, name)
             if isinstance(item, (bool, np.bool_, str, bytes, np.bytes_)):
                 raise ValueError(f"{name} must contain numeric real values, not boolean or text")
             if isinstance(item, (complex, np.complexfloating)):
@@ -99,6 +100,19 @@ def _as_numeric_real_array(values: object, name: str) -> np.ndarray:
         return np.asarray(values, dtype=float)
     except (TypeError, ValueError, OverflowError) as exc:
         raise ValueError(f"{name} must contain numeric real values") from exc
+
+
+def _unwrap_zero_dimensional_object_scalar(value: object, name: str) -> object:
+    """Unwrap nested 0-D arrays before validating object-backed scalars."""
+
+    seen: set[int] = set()
+    while isinstance(value, np.ndarray) and value.ndim == 0:
+        marker = id(value)
+        if marker in seen:
+            raise ValueError(f"{name} must contain numeric real values")
+        seen.add(marker)
+        value = value.item()
+    return value
 
 
 def _transition_durations(times: np.ndarray | None, n_time: int) -> np.ndarray:

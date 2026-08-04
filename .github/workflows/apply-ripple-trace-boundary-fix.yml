@@ -15,7 +15,7 @@ permissions:
 jobs:
   patch:
     if: github.actor != 'github-actions[bot]' && github.head_ref == 'agent/clip-expanded-ripple-events-to-trace'
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     steps:
       - uses: actions/checkout@v4
         with:

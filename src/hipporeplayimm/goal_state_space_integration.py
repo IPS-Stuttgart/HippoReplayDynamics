@@ -26,7 +26,7 @@ _ORIGINALS_ATTR = '_hipporeplayimm_goal_state_space_parameter_validation_origina
 
 
 def apply_goal_state_space_farthest_point_patch() -> None:
-    '''Select default goals without overflowing finite coordinate distances.'''
+    '''Select default goals without overflow or coordinate-axis dependence.'''
 
     current = _goal_state_space._farthest_point_subset
     if getattr(current, _FARTHEST_POINT_PATCH_ATTR, False):
@@ -43,11 +43,16 @@ def apply_goal_state_space_farthest_point_patch() -> None:
 
         coordinate_scale = float(np.max(np.abs(values)))
         if coordinate_scale > 0.0:
-            anchor_scores = np.sum(values / coordinate_scale, axis=1)
+            scaled_values = values / coordinate_scale
         else:
-            anchor_scores = np.zeros(values.shape[0], dtype=float)
+            scaled_values = np.zeros_like(values)
 
-        selected = [int(np.argmin(anchor_scores))]
+        centroid = np.mean(scaled_values, axis=0)
+        anchor_distances = np.hypot.reduce(
+            np.abs(scaled_values - centroid[None, :]),
+            axis=1,
+        )
+        selected = [int(np.argmax(anchor_distances))]
         min_log_distances = np.full(values.shape[0], np.inf, dtype=float)
         for _ in range(1, max_points):
             _, log_distances = _goal_state_space._scaled_euclidean_distances(

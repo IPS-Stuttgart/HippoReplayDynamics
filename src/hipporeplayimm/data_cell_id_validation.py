@@ -422,6 +422,8 @@ def _coerce_integral_id(value: Any, name: str, integer_info: np.iinfo) -> int:
         raise ValueError(f"{name} must contain finite integer identifiers") from exc
     if isinstance(item, (bool, np.bool_)):
         raise ValueError(f"{name} must not contain boolean identifiers")
+    if isinstance(item, (complex, np.complexfloating)):
+        raise ValueError(f"{name} must contain real integer identifiers")
     if isinstance(item, (int, np.integer)):
         identifier = int(item)
     elif isinstance(item, Decimal):

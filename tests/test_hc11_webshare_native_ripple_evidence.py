@@ -26,6 +26,13 @@ def load_module():
 hc11 = load_module()
 
 
+def test_scorer_imports_models_from_worktree_source() -> None:
+    expected_source = Path(__file__).resolve().parents[1] / "src"
+    imported = Path(hc11.state_space.__file__).resolve()
+
+    assert imported.is_relative_to(expected_source.resolve())
+
+
 def test_periodic_transition_wraps_across_coordinate_seam() -> None:
     centers = np.array([0.5, 1.5, 2.5, 3.5])
     linear = hc11.topology_gaussian_transition(

@@ -32,8 +32,11 @@ from scipy.special import gammaln, logsumexp
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT_DIR = ROOT / "scripts"
+SRC_DIR = ROOT / "src"
 if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
+if str(SRC_DIR) not in sys.path:
+    sys.path.insert(0, str(SRC_DIR))
 
 from _provenance import build_script_provenance  # noqa: E402
 import hipporeplayimm.state_space as state_space  # noqa: E402

@@ -465,7 +465,7 @@ def score_single_encoding(
             log_likelihood,
             diffusion_transitions,
         )
-        imm_logz, imm_posterior, mode_posterior = _score_first_order_imm_variable(
+        imm_logz, imm_posterior, mode_posterior, _mode_transition_posterior = _score_first_order_imm_variable(
             state_space,
             log_likelihood,
             centers,

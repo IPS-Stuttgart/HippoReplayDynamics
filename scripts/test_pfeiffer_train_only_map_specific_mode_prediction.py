@@ -165,6 +165,160 @@ def _mode_metrics(score: Any) -> dict[str, float]:
     }
 
 
+def _hellinger_turnover(
+    spike_counts: np.ndarray,
+    transition_index: int,
+    *,
+    window_bins: int,
+) -> tuple[float, int, int]:
+    counts = np.asarray(spike_counts, dtype=float)
+    boundary = int(transition_index)
+    width = int(window_bins)
+    if counts.ndim != 2 or width < 1:
+        raise ValueError("spike counts must be time-by-cell and window_bins positive")
+    if boundary - width + 1 < 0 or boundary + width >= counts.shape[0]:
+        return np.nan, 0, 0
+    before = counts[boundary - width + 1 : boundary + 1].sum(axis=0)
+    after = counts[boundary + 1 : boundary + 1 + width].sum(axis=0)
+    before_total = int(before.sum())
+    after_total = int(after.sum())
+    if before_total <= 0 or after_total <= 0:
+        return np.nan, before_total, after_total
+    before /= before_total
+    after /= after_total
+    distance = float(
+        np.linalg.norm(np.sqrt(before) - np.sqrt(after)) / np.sqrt(2.0)
+    )
+    return distance, before_total, after_total
+
+
+def heldout_assembly_turnover(
+    training_score: Any,
+    training_spike_counts: np.ndarray,
+    heldout_spike_counts: np.ndarray,
+    *,
+    window_bins: int = 3,
+    minimum_nonfragmented_mass: float = 0.5,
+    minimum_boundary_probability: float = 0.5,
+    maximum_control_probability: float = 0.25,
+    matched_controls: int = 3,
+) -> dict[str, object]:
+    """Measure held-out assembly change at a training-defined IMM boundary."""
+
+    diagnostics = training_score.diagnostics
+    key = "state_space_imm_mode_transition_posterior_over_time"
+    if key not in diagnostics:
+        return {
+            "assembly_turnover_evaluable": False,
+            "assembly_turnover_failure_reason": "transition_posterior_not_exported",
+        }
+    transition = np.asarray(json.loads(str(diagnostics[key])), dtype=float)
+    if transition.ndim != 3 or transition.shape[1:] != (3, 3):
+        raise ValueError(f"unexpected transition-posterior shape: {transition.shape}")
+    total = transition.sum(axis=(1, 2), keepdims=True)
+    if np.any(total <= 0.0) or not np.all(np.isfinite(total)):
+        raise ValueError("transition-posterior rows must contain finite positive mass")
+    transition = transition / total
+    nonfragmented = transition[:, :2, :2].sum(axis=(1, 2))
+    switch = transition[:, 0, 1] + transition[:, 1, 0]
+    conditional = np.divide(
+        switch,
+        nonfragmented,
+        out=np.full_like(switch, np.nan),
+        where=nonfragmented > 0.0,
+    )
+    width = int(window_bins)
+    indices = np.arange(len(conditional), dtype=int)
+    window_valid = (indices - width + 1 >= 0) & (
+        indices + width < np.asarray(training_spike_counts).shape[0]
+    )
+    eligible = (
+        window_valid
+        & (nonfragmented >= float(minimum_nonfragmented_mass))
+        & (conditional >= float(minimum_boundary_probability))
+    )
+    if not np.any(eligible):
+        return {
+            "assembly_turnover_evaluable": False,
+            "assembly_turnover_failure_reason": "no_training_defined_boundary",
+        }
+    boundary = int(indices[eligible][np.nanargmax(conditional[eligible])])
+    control_eligible = (
+        window_valid
+        & (nonfragmented >= float(minimum_nonfragmented_mass))
+        & (conditional <= float(maximum_control_probability))
+        & (np.abs(indices - boundary) >= width)
+    )
+    candidates = indices[control_eligible]
+    if not len(candidates):
+        return {
+            "assembly_turnover_evaluable": False,
+            "assembly_turnover_failure_reason": "no_training_defined_nonboundary",
+            "assembly_boundary_transition_index": boundary,
+        }
+
+    training_counts = np.asarray(training_spike_counts, dtype=float)
+
+    def support(index: int) -> float:
+        return float(
+            training_counts[index - width + 1 : index + 1 + width].sum()
+        )
+
+    boundary_support = support(boundary)
+    order = np.argsort(
+        np.array(
+            [
+                (abs(support(int(index)) - boundary_support), abs(int(index) - boundary))
+                for index in candidates
+            ],
+            dtype=[("support", float), ("distance", int)],
+        ),
+        order=("support", "distance"),
+    )
+    controls = candidates[order[: int(matched_controls)]]
+    boundary_turnover, before_spikes, after_spikes = _hellinger_turnover(
+        heldout_spike_counts,
+        boundary,
+        window_bins=width,
+    )
+    control_values = [
+        _hellinger_turnover(heldout_spike_counts, int(index), window_bins=width)[0]
+        for index in controls
+    ]
+    finite_controls = np.asarray(control_values, dtype=float)
+    finite_controls = finite_controls[np.isfinite(finite_controls)]
+    if not np.isfinite(boundary_turnover) or not len(finite_controls):
+        return {
+            "assembly_turnover_evaluable": False,
+            "assembly_turnover_failure_reason": "insufficient_heldout_spikes",
+            "assembly_boundary_transition_index": boundary,
+            "assembly_control_transition_indices": ",".join(
+                str(int(index)) for index in controls
+            ),
+        }
+    control_median = float(np.median(finite_controls))
+    return {
+        "assembly_turnover_evaluable": True,
+        "assembly_turnover_failure_reason": "",
+        "assembly_boundary_transition_index": boundary,
+        "assembly_boundary_switch_probability": float(conditional[boundary]),
+        "assembly_boundary_nonfragmented_mass": float(nonfragmented[boundary]),
+        "assembly_boundary_training_spike_support": boundary_support,
+        "assembly_boundary_heldout_before_spikes": before_spikes,
+        "assembly_boundary_heldout_after_spikes": after_spikes,
+        "assembly_boundary_heldout_turnover_hellinger": boundary_turnover,
+        "assembly_control_transition_indices": ",".join(
+            str(int(index)) for index in controls
+        ),
+        "assembly_control_heldout_turnovers_json": json.dumps(
+            finite_controls.tolist(), separators=(",", ":")
+        ),
+        "assembly_control_heldout_turnover_median": control_median,
+        "heldout_assembly_turnover_excess": float(boundary_turnover - control_median),
+        "assembly_turnover_window_bins": width,
+    }
+
+
 def infer_training_posteriors(
     models: dict[str, SortedSpikeStateSpaceReplayModel],
     train_emissions: Any,
@@ -324,6 +478,11 @@ def _score_event(
             ]
         )
         train_delta = float(real_imm.log_likelihood - real_frag.log_likelihood)
+        assembly_turnover = heldout_assembly_turnover(
+            real_imm,
+            training_emissions["real_map"].spike_counts,
+            heldout_emissions["real_map"].spike_counts,
+        )
         event = session.ripple(int(event_index))
         return {
             **common,
@@ -396,6 +555,7 @@ def _score_event(
             "wrong_fragmented_training_posterior_sha256": frozen_scores[
                 "population_code_permuted"
             ][FRAGMENTED]["training_posterior_sha256"],
+            **assembly_turnover,
         }
     except Exception as exc:
         return {

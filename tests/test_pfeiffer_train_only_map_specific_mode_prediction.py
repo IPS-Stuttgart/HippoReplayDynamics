@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from types import SimpleNamespace
 
 import numpy as np
@@ -128,6 +129,41 @@ def test_event_scoring_never_invokes_model_with_heldout_emissions(monkeypatch) -
     assert row["heldout_replay_spikes_used_for_latent_inference"] is False
     assert row["cell_sets_disjoint"] is True
     assert len(row["real_imm_training_posterior_sha256"]) == 64
+
+
+def test_heldout_assembly_turnover_uses_training_defined_boundary() -> None:
+    transition = np.zeros((11, 3, 3), dtype=float)
+    transition[:, 0, 0] = 0.5
+    transition[:, 1, 1] = 0.5
+    transition[5] = 0.0
+    transition[5, 0, 1] = 0.8
+    transition[5, 0, 0] = 0.1
+    transition[5, 1, 1] = 0.1
+    score = SimpleNamespace(
+        diagnostics={
+            "state_space_imm_mode_transition_posterior_over_time": json.dumps(
+                transition.tolist()
+            )
+        }
+    )
+    training_counts = np.ones((12, 3), dtype=int)
+    heldout_counts = np.zeros((12, 2), dtype=int)
+    heldout_counts[:6, 0] = 1
+    heldout_counts[6:, 1] = 1
+
+    result = analysis.heldout_assembly_turnover(
+        score,
+        training_counts,
+        heldout_counts,
+        window_bins=2,
+        matched_controls=2,
+    )
+
+    assert result["assembly_turnover_evaluable"] is True
+    assert result["assembly_boundary_transition_index"] == 5
+    assert np.isclose(result["assembly_boundary_heldout_turnover_hellinger"], 1.0)
+    assert np.isclose(result["assembly_control_heldout_turnover_median"], 0.0)
+    assert np.isclose(result["heldout_assembly_turnover_excess"], 1.0)
 
 
 def test_event_medians_and_clean_subset_use_training_split_values_only() -> None:

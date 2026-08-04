@@ -42,9 +42,17 @@ class _ExactSpikeTable(np.ndarray):
 def apply_spike_cell_id_emission_validation_patch() -> None:
     """Install exact integral-ID handling for encoding and emission lookups."""
 
+    from . import data_cell_id_validation
     from . import emission_cell_id_validation
     from . import encoding
     from . import log_emission_n_spikes_validation
+
+    # Keep loader/session validation on the same exact scalar parser as the
+    # encoding and emission paths.  The wrappers in data_cell_id_validation
+    # resolve these module globals at call time, so refreshing both helpers also
+    # closes nested object-array coercions for already-installed wrappers.
+    data_cell_id_validation._coerce_integral_id = _coerce_integral_id
+    data_cell_id_validation._coerce_integral_ids = _coerce_integral_ids
 
     # The later emission-cell-ID patch installs its own row mapper.  Synchronize
     # the exact coercion helper into that active module before its wrapper is
@@ -214,20 +222,47 @@ def _coerce_integral_text_id(value: str | bytes, name: str) -> int:
     return int(integral)
 
 
+def _unwrap_integral_id_scalar(value: Any, name: str) -> Any:
+    """Recursively unwrap zero-dimensional array containers around one ID."""
+
+    current = value
+    seen_arrays: set[int] = set()
+    while True:
+        try:
+            raw = np.asarray(current)
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise ValueError(
+                f"{name} must contain finite integer identifiers"
+            ) from exc
+        if raw.ndim != 0:
+            raise ValueError(f"{name} must contain scalar integer identifiers")
+        marker = id(raw)
+        if marker in seen_arrays:
+            raise ValueError(f"{name} must contain scalar integer identifiers")
+        seen_arrays.add(marker)
+        try:
+            item = raw.item()
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise ValueError(
+                f"{name} must contain finite integer identifiers"
+            ) from exc
+        if isinstance(item, np.ndarray):
+            current = item
+            continue
+        return item
+
+
 def _coerce_integral_id(
     value: Any,
     name: str,
     integer_info: np.iinfo,
 ) -> int:
-    try:
-        item = np.asarray(value).item()
-    except (TypeError, ValueError, OverflowError) as exc:
-        raise ValueError(
-            f"{name} must contain finite integer identifiers"
-        ) from exc
+    item = _unwrap_integral_id_scalar(value, name)
 
     if isinstance(item, (bool, np.bool_)):
         raise ValueError(f"{name} must not contain boolean identifiers")
+    if isinstance(item, (complex, np.complexfloating)):
+        raise ValueError(f"{name} must contain real integer identifiers")
     if isinstance(item, (int, np.integer)):
         identifier = int(item)
     elif isinstance(item, Decimal):

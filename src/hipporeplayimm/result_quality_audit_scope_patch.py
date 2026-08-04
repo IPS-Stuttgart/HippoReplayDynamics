@@ -198,8 +198,24 @@ def _coerce_numeric_series(values: pd.Series) -> pd.Series:
 
 
 def _coerce_evidence_numeric_scalar(value: object) -> float:
-    """Coerce one evidence value with the base helper's numeric semantics."""
+    """Coerce one real scalar evidence value without lossy NumPy conversion."""
 
+    seen_container_ids: set[int] = set()
+    while isinstance(value, np.ndarray):
+        if value.ndim != 0:
+            return float("nan")
+        container_id = id(value)
+        if container_id in seen_container_ids:
+            return float("nan")
+        seen_container_ids.add(container_id)
+        value = value.item()
+
+    if isinstance(value, (bool, np.bool_, complex, np.complexfloating)):
+        return float("nan")
+    if isinstance(value, np.generic):
+        value = value.item()
+        if isinstance(value, (bool, complex)):
+            return float("nan")
     try:
         return float(value)
     except (TypeError, ValueError, OverflowError):
@@ -207,12 +223,9 @@ def _coerce_evidence_numeric_scalar(value: object) -> float:
 
 
 def _coerce_evidence_numeric_series(values: pd.Series) -> pd.Series:
-    """Match legacy evidence coercion while tolerating pathological objects."""
+    """Coerce only scalar real evidence values, preserving malformed rows as NaN."""
 
-    try:
-        return pd.to_numeric(values, errors="coerce")
-    except (TypeError, ValueError, OverflowError):
-        return values.map(_coerce_evidence_numeric_scalar).astype(float)
+    return values.map(_coerce_evidence_numeric_scalar).astype(float)
 
 
 def _patch_row_specific_evidence_finiteness(reporting_module: Any) -> None:

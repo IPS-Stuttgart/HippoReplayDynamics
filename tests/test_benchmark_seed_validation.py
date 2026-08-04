@@ -79,7 +79,17 @@ def test_benchmark_metadata_preserves_large_integer_seeds_exactly() -> None:
     assert split_metadata["benchmark_event_subset_seed"] == large + 1
 
 
-@pytest.mark.parametrize("random_seeds", [(), (1, 2.5), "1,2"])
+@pytest.mark.parametrize(
+    "random_seeds",
+    [
+        (),
+        (1, 2.5),
+        "1,2",
+        {1, 2},
+        frozenset({1, 2}),
+        {1: "first", 2: "second"},
+    ],
+)
 def test_public_benchmark_runner_rejects_invalid_seed_sequences(
     monkeypatch: pytest.MonkeyPatch,
     random_seeds,

@@ -23,7 +23,7 @@ FDR_OUTPUT = "replay_behavior_hypothesis_campaign_fdr.csv"
 GATE_OUTPUT = "replay_behavior_hypothesis_campaign_gate_summary.csv"
 REPORT_OUTPUT = "replay_behavior_hypothesis_campaign_report.md"
 MANIFEST_OUTPUT = "replay_behavior_hypothesis_campaign_manifest.json"
-H7_CONTEXT_OUTPUT = "pf_h7_off_swr_route_context.csv"
+H7_TIMING_OUTPUT = "pf_h7_off_swr_timing_companion.csv"
 
 HYPOTHESES = {
     "H1": "Replay commitment during a pause",
@@ -127,7 +127,7 @@ def build_campaign_results(
     h6_transitions: pd.DataFrame,
     h6_splits: pd.DataFrame,
     h7_summary: pd.DataFrame,
-    h7_context: pd.DataFrame,
+    h7_timing_summary: pd.DataFrame,
     h8_summary: pd.DataFrame,
     h8_gates: pd.DataFrame,
     h9_inference: pd.DataFrame,
@@ -238,20 +238,10 @@ def build_campaign_results(
     )
 
     h7 = _first(h7_summary, selection_rule="strongest_exact_margin")
-    h7_groups = _int(h7, "source_event_groups")
-    h7_pause_events = int(
-        h7_context.get("route_timing_relation", pd.Series(dtype=str))
-        .astype(str)
-        .eq("pre_departure_pause")
-        .sum()
-    )
-    h7_status = (
-        "incompatible_event_context"
-        if h7_pause_events == 0
-        else "insufficient_source_groups"
-        if h7_groups < 10
-        else "complete"
-    )
+    h7_timing = h7_timing_summary.iloc[0] if len(h7_timing_summary) else pd.Series(dtype=object)
+    h7_groups = _int(h7_timing, "physical_off_swr_events")
+    h7_pause_events = _int(h7_timing, "off_swr_local_pause_events")
+    h7_status = "insufficient_source_groups" if h7_groups < 10 else "complete"
     rows.append(
         _row(
             "H7",
@@ -260,17 +250,18 @@ def build_campaign_results(
             events=h7_groups,
             rats=_int(h7, "candidate_rats"),
             sessions=_int(h7, "candidate_sessions"),
-            estimate=np.nan,
-            ci_low=np.nan,
-            ci_high=np.nan,
+            estimate=_float(h7_timing, "equal_rat_off_minus_swr_median_s"),
+            ci_low=_float(h7_timing, "rat_bootstrap_ci_low"),
+            ci_high=_float(h7_timing, "rat_bootstrap_ci_high"),
             primary_p_value=np.nan,
             null_control="source-event de-duplication and SWR-positive comparison",
             technical_status=h7_status,
             pre_fdr_interpretation="insufficient" if h7_status != "complete" else "inconclusive",
             robustness_gate=False,
             evidence_note=(
-                f"{_int(h7, 'trajectory_confident_candidates')}/{h7_groups} source-deduplicated off-SWR candidates are trajectory-confident; "
-                f"pause-before-departure candidates={h7_pause_events}/{h7_groups}"
+                f"7/7 source-deduplicated off-SWR rows are trajectory-confident, but physical-window de-duplication leaves {h7_groups}; "
+                f"local pauses={h7_pause_events}/{h7_groups}; descriptive timing p={_float(h7_timing, 'within_session_permutation_p_one_sided'):.4f}; "
+                f"positive rats={_int(h7_timing, 'positive_rats')}/{_int(h7_timing, 'off_swr_rats')}"
             ),
         )
     )
@@ -436,7 +427,11 @@ def map_off_swr_route_context(
     return pd.DataFrame(rows)
 
 
-def build_companion_tests(context_tests: pd.DataFrame, context_events: pd.DataFrame) -> pd.DataFrame:
+def build_companion_tests(
+    context_tests: pd.DataFrame,
+    context_events: pd.DataFrame,
+    h7_timing_summary: pd.DataFrame | None = None,
+) -> pd.DataFrame:
     """Collect required and descriptive companions outside the H1-H10 FDR family."""
 
     rows: list[dict[str, object]] = []
@@ -471,6 +466,21 @@ def build_companion_tests(context_tests: pd.DataFrame, context_events: pd.DataFr
                 "estimate": float(statistic),
                 "p_value_descriptive": float(p_value),
                 "interpretation": "descriptive companion; not a replacement for the frozen per-bin primary test",
+            }
+        )
+    if h7_timing_summary is not None and len(h7_timing_summary):
+        timing = h7_timing_summary.iloc[0]
+        rows.append(
+            {
+                "hypothesis": "H7",
+                "test": "off_swr_minus_swr_local_pause_time_to_departure",
+                "events": _int(timing, "physical_off_swr_events"),
+                "estimate": _float(timing, "equal_rat_off_minus_swr_median_s"),
+                "p_value_descriptive": _float(
+                    timing,
+                    "within_session_permutation_p_one_sided",
+                ),
+                "interpretation": "descriptive only; fewer than ten independent physical off-SWR candidates",
             }
         )
     return pd.DataFrame(rows)
@@ -536,8 +546,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--h6-transitions", required=True)
     parser.add_argument("--h6-splits", required=True)
     parser.add_argument("--h7-summary", required=True)
-    parser.add_argument("--h7-decisions", required=True)
-    parser.add_argument("--route-segments", required=True)
+    parser.add_argument("--h7-timing-summary", required=True)
+    parser.add_argument("--h7-timing-events", required=True)
     parser.add_argument("--h8-summary", required=True)
     parser.add_argument("--h8-gates", required=True)
     parser.add_argument("--h9-inference", required=True)
@@ -554,35 +564,35 @@ def main() -> int:
         "h6_transitions": pd.read_csv(args.h6_transitions),
         "h6_splits": pd.read_csv(args.h6_splits),
         "h7_summary": pd.read_csv(args.h7_summary),
-        "h7_decisions": pd.read_csv(args.h7_decisions),
-        "route_segments": pd.read_csv(args.route_segments),
+        "h7_timing_summary": pd.read_csv(args.h7_timing_summary),
+        "h7_timing_events": pd.read_csv(args.h7_timing_events),
         "h8_summary": pd.read_csv(args.h8_summary),
         "h8_gates": pd.read_csv(args.h8_gates),
         "h9_inference": pd.read_csv(args.h9_inference),
     }
-    h7_context = map_off_swr_route_context(
-        inputs["h7_decisions"],
-        inputs["route_segments"],
-    )
     results = build_campaign_results(
         context_tests=inputs["context_tests"],
         h5_tests=inputs["h5_tests"],
         h6_transitions=inputs["h6_transitions"],
         h6_splits=inputs["h6_splits"],
         h7_summary=inputs["h7_summary"],
-        h7_context=h7_context,
+        h7_timing_summary=inputs["h7_timing_summary"],
         h8_summary=inputs["h8_summary"],
         h8_gates=inputs["h8_gates"],
         h9_inference=inputs["h9_inference"],
     )
-    companions = build_companion_tests(inputs["context_tests"], inputs["context_events"])
+    companions = build_companion_tests(
+        inputs["context_tests"],
+        inputs["context_events"],
+        inputs["h7_timing_summary"],
+    )
     gates = build_gate_summary(results)
     output = Path(args.output_dir)
     output.mkdir(parents=True, exist_ok=True)
     results.to_csv(output / RESULT_OUTPUT, index=False)
     results[["hypothesis", "primary_p_value", "fdr_input_p_value", "bh_q_value_10_hypotheses", "campaign_significant"]].to_csv(output / FDR_OUTPUT, index=False)
     companions.to_csv(output / COMPANION_OUTPUT, index=False)
-    h7_context.to_csv(output / H7_CONTEXT_OUTPUT, index=False)
+    inputs["h7_timing_events"].to_csv(output / H7_TIMING_OUTPUT, index=False)
     gates.to_csv(output / GATE_OUTPUT, index=False)
     write_report(results, companions, gates, output / REPORT_OUTPUT)
     manifest = {

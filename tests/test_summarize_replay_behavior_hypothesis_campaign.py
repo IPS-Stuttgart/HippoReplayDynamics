@@ -124,8 +124,20 @@ def test_campaign_keeps_insufficient_tests_in_fdr_as_one() -> None:
         h6_transitions=transitions,
         h6_splits=h6,
         h7_summary=h7,
-        h7_context=pd.DataFrame(
-            {"route_timing_relation": ["during_segmented_movement"] * 7}
+        h7_timing_summary=pd.DataFrame(
+            [
+                {
+                    "physical_off_swr_events": 6,
+                    "off_swr_local_pause_events": 6,
+                    "off_swr_rats": 3,
+                    "off_swr_sessions": 5,
+                    "equal_rat_off_minus_swr_median_s": -1.0,
+                    "rat_bootstrap_ci_low": -2.0,
+                    "rat_bootstrap_ci_high": 1.0,
+                    "within_session_permutation_p_one_sided": 0.8,
+                    "positive_rats": 1,
+                }
+            ]
         ),
         h8_summary=h8,
         h8_gates=h8_gates,

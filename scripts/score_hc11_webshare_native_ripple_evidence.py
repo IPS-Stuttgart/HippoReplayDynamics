@@ -133,6 +133,40 @@ def discover_native_ripple_sessions(dataset_root: Path) -> list[Path]:
     return sorted(path for path in dataset_root.glob("*/*") if path.is_dir() and list(path.glob("*.ripplesNREM.event.mat")))
 
 
+def filter_session_dirs(session_dirs: list[Path], requested_sessions: list[str]) -> list[Path]:
+    if not requested_sessions:
+        return session_dirs
+    requested = set(requested_sessions)
+    selected = [path for path in session_dirs if path.name in requested]
+    missing = sorted(requested.difference(path.name for path in selected))
+    if missing:
+        raise ValueError(f"requested native-ripple sessions were not found: {missing}")
+    return selected
+
+
+def cached_decoder_row(
+    decoder_qc: pd.DataFrame,
+    *,
+    animal: str,
+    session: str,
+    expected_encoding_units: int,
+) -> dict[str, object]:
+    matches = decoder_qc[
+        decoder_qc["animal"].astype(str).eq(animal)
+        & decoder_qc["session"].astype(str).eq(session)
+    ]
+    if len(matches) != 1:
+        raise ValueError(f"decoder QC must contain exactly one row for {animal}/{session}; found {len(matches)}")
+    row = matches.iloc[0].to_dict()
+    if int(row["encoding_units"]) != int(expected_encoding_units):
+        raise ValueError(
+            f"cached decoder encoding-unit count differs for {animal}/{session}: "
+            f"{int(row['encoding_units'])} != {expected_encoding_units}"
+        )
+    row["decoder_qc_reused"] = True
+    return row
+
+
 def load_track_samples(session_dir: Path) -> TrackSamples:
     base = session_dir.name
     position = mat_struct(session_dir / f"{base}.position.behavior.mat", "position")
@@ -935,7 +969,11 @@ def run(args: argparse.Namespace) -> dict[str, pd.DataFrame]:
     dataset_root = Path(args.dataset_root).resolve()
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
-    session_dirs = discover_native_ripple_sessions(dataset_root)
+    session_dirs = filter_session_dirs(
+        discover_native_ripple_sessions(dataset_root),
+        list(args.session),
+    )
+    decoder_qc_input = pd.read_csv(args.decoder_qc_input) if args.decoder_qc_input else None
     excluded_event_keys, exclusion_audit = load_prior_event_exclusions(args.exclude_selection_csv)
     evidence_rows: list[dict[str, object]] = []
     decoder_rows: list[dict[str, object]] = []
@@ -962,29 +1000,40 @@ def run(args: argparse.Namespace) -> dict[str, pd.DataFrame]:
         unit_qc.insert(0, "session", session)
         unit_qc.insert(0, "animal", animal)
         unit_frames.append(unit_qc)
-        decoder_metrics = decode_crossvalidated(
-            track,
-            spikes,
-            selected_units,
-            position_bin_size_cm=args.position_bin_size_cm,
-            min_run_speed_cm_s=args.min_run_speed_cm_s,
-            smoothing_sigma_bins=args.smoothing_sigma_bins,
-            n_folds=args.decoder_folds,
-            decode_window_s=args.decoder_window_s,
-            max_decode_bins=args.decoder_max_bins,
-        )
-        decoder_rows.append(
-            {
-                "animal": animal,
-                "session": session,
-                "maze_type": track.maze_type,
-                "geometry": track.topology,
-                "track_length_cm": track.track_length_cm,
-                "total_ca1_units": len(spikes.unit_ids),
-                "encoding_units": len(selected_units),
-                **decoder_metrics,
-            }
-        )
+        if decoder_qc_input is None:
+            decoder_metrics = decode_crossvalidated(
+                track,
+                spikes,
+                selected_units,
+                position_bin_size_cm=args.position_bin_size_cm,
+                min_run_speed_cm_s=args.min_run_speed_cm_s,
+                smoothing_sigma_bins=args.smoothing_sigma_bins,
+                n_folds=args.decoder_folds,
+                decode_window_s=args.decoder_window_s,
+                max_decode_bins=args.decoder_max_bins,
+            )
+            decoder_rows.append(
+                {
+                    "animal": animal,
+                    "session": session,
+                    "maze_type": track.maze_type,
+                    "geometry": track.topology,
+                    "track_length_cm": track.track_length_cm,
+                    "total_ca1_units": len(spikes.unit_ids),
+                    "encoding_units": len(selected_units),
+                    "decoder_qc_reused": False,
+                    **decoder_metrics,
+                }
+            )
+        else:
+            decoder_rows.append(
+                cached_decoder_row(
+                    decoder_qc_input,
+                    animal=animal,
+                    session=session,
+                    expected_encoding_units=len(selected_units),
+                )
+            )
         events = load_native_post_nrem_events(
             session_dir,
             track,
@@ -1170,6 +1219,7 @@ def run(args: argparse.Namespace) -> dict[str, pd.DataFrame]:
         **build_script_provenance(
             input_paths={
                 "dataset_root": dataset_root,
+                "decoder_qc_input": args.decoder_qc_input,
                 **{
                     f"exclude_selection_csv_{index}": value
                     for index, value in enumerate(args.exclude_selection_csv)
@@ -1245,6 +1295,17 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--dataset-root", default=str(DEFAULT_DATASET_ROOT))
     parser.add_argument("--output-dir", default=str(DEFAULT_OUTPUT_DIR))
+    parser.add_argument(
+        "--session",
+        action="append",
+        default=[],
+        help="Restrict scoring to a named session; repeat for multiple sessions.",
+    )
+    parser.add_argument(
+        "--decoder-qc-input",
+        default="",
+        help="Reuse a prior decoder-QC CSV after verifying the selected encoding-unit count.",
+    )
     parser.add_argument("--max-events-per-session", type=int, default=20)
     parser.add_argument("--time-bin-s", type=float, default=0.010)
     parser.add_argument("--event-padding-s", type=float, default=0.0)

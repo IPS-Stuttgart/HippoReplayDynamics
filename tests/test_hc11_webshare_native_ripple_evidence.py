@@ -240,3 +240,38 @@ def test_prior_event_overlap_fails_gate() -> None:
     passed = dict(zip(gates["gate"], gates["passed"], strict=True))
 
     assert not bool(passed["selected_events_exclude_prior_pilots"])
+
+
+def test_filter_session_dirs_requires_every_requested_session(tmp_path: Path) -> None:
+    first = tmp_path / "RatA_day1"
+    second = tmp_path / "RatB_day2"
+
+    assert hc11.filter_session_dirs([first, second], ["RatB_day2"]) == [second]
+    with pytest.raises(ValueError, match="not found"):
+        hc11.filter_session_dirs([first, second], ["RatC_day3"])
+
+
+def test_cached_decoder_row_checks_encoding_unit_identity() -> None:
+    decoder = pd.DataFrame(
+        {
+            "animal": ["RatA"],
+            "session": ["RatA_day1"],
+            "encoding_units": [12],
+            "decoder_qc_passed": [True],
+        }
+    )
+
+    row = hc11.cached_decoder_row(
+        decoder,
+        animal="RatA",
+        session="RatA_day1",
+        expected_encoding_units=12,
+    )
+    assert bool(row["decoder_qc_reused"])
+    with pytest.raises(ValueError, match="encoding-unit count differs"):
+        hc11.cached_decoder_row(
+            decoder,
+            animal="RatA",
+            session="RatA_day1",
+            expected_encoding_units=11,
+        )

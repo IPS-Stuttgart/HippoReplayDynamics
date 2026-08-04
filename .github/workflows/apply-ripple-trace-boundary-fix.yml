@@ -25,7 +25,7 @@ jobs:
       - name: Apply source patch and regression
         shell: bash
         run: |
-          python - <<'PY'
+          python3 - <<'PY'
           from pathlib import Path
 
           source_path = Path("scripts/prepare_olafsdottir_ztrack_sessions.py")

@@ -2,18 +2,21 @@
 
 from __future__ import annotations
 
+from decimal import Decimal, InvalidOperation
 from functools import wraps
+import operator
 import sys
 
 import numpy as np
 from scipy.special import betaln, gammaln
+
 
 _PATCHED_FLAG = "_poisson_input_boolean_validation_patch_applied"
 _NEGATIVE_BINOMIAL_PATCHED_FLAG = (
     "_negative_binomial_poisson_limit_patch_applied"
 )
 _ORIGINAL_ATTR = "__hipporeplayimm_original__"
-_WRAPPER_VERSION = 4
+_WRAPPER_VERSION = 5
 
 
 def _contains_boolean_values(value: object) -> bool:
@@ -33,6 +36,134 @@ def _contains_boolean_values(value: object) -> bool:
 def _reject_boolean_array(name: str, value: object) -> None:
     if _contains_boolean_values(value):
         raise ValueError(f"{name} must contain numeric values, not boolean values")
+
+
+def _coerce_text_spike_count(value: str | bytes) -> int:
+    """Parse one integral textual spike count without binary-float rounding."""
+
+    if isinstance(value, bytes):
+        try:
+            text = value.decode("utf-8")
+        except UnicodeDecodeError as exc:
+            raise ValueError("spike_counts must contain numeric counts") from exc
+    else:
+        text = value
+    text = text.strip()
+    if not text:
+        raise ValueError("spike_counts must contain numeric counts")
+    try:
+        return int(text, 10)
+    except ValueError:
+        try:
+            numeric = Decimal(text)
+        except InvalidOperation as exc:
+            raise ValueError("spike_counts must contain numeric counts") from exc
+        if not numeric.is_finite() or numeric < 0:
+            raise ValueError("spike_counts must be finite and nonnegative")
+        integral = numeric.to_integral_value()
+        if numeric != integral:
+            raise ValueError("spike_counts must contain integer counts")
+        return int(integral)
+
+
+def _coerce_exact_spike_count(value: object, integer_info: np.iinfo) -> int:
+    """Return one exact nonnegative platform-integer spike count."""
+
+    try:
+        item = np.asarray(value).item()
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ValueError("spike_counts must contain numeric counts") from exc
+
+    if isinstance(item, (bool, np.bool_)):
+        raise ValueError(
+            "spike_counts must contain numeric counts, not boolean values"
+        )
+    if isinstance(item, (int, np.integer)):
+        count = int(item)
+    elif isinstance(item, Decimal):
+        if not item.is_finite() or item < 0:
+            raise ValueError("spike_counts must be finite and nonnegative")
+        integral = item.to_integral_value()
+        if item != integral:
+            raise ValueError("spike_counts must contain integer counts")
+        count = int(integral)
+    elif isinstance(item, (str, bytes, np.str_, np.bytes_)):
+        text_value = (
+            bytes(item) if isinstance(item, (bytes, np.bytes_)) else str(item)
+        )
+        count = _coerce_text_spike_count(text_value)
+    elif isinstance(item, (complex, np.complexfloating)):
+        raise ValueError("spike_counts must contain real integer counts")
+    elif isinstance(item, (float, np.floating)):
+        if not bool(np.isfinite(item)) or item < 0:
+            raise ValueError("spike_counts must be finite and nonnegative")
+        if not bool(item.is_integer()):
+            raise ValueError("spike_counts must contain integer counts")
+        count = int(item)
+    else:
+        try:
+            count = int(operator.index(item))
+        except TypeError:
+            try:
+                count = int(item)
+            except (TypeError, ValueError, OverflowError) as exc:
+                raise ValueError("spike_counts must contain numeric counts") from exc
+            try:
+                exact = item == count
+            except (TypeError, ValueError, OverflowError):
+                exact = False
+            if not isinstance(exact, (bool, np.bool_)) or not bool(exact):
+                raise ValueError("spike_counts must contain integer counts")
+
+    if count < 0:
+        raise ValueError("spike_counts must be finite and nonnegative")
+    if count > int(integer_info.max):
+        raise ValueError("spike_counts must fit into integer count range")
+    return count
+
+
+def _coerce_spike_counts_exact(spike_counts: object) -> np.ndarray:
+    """Validate spike-count matrices exactly before any binary-float conversion."""
+
+    try:
+        raw_counts = np.asarray(spike_counts)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("spike_counts must contain numeric counts") from exc
+    if raw_counts.ndim != 2:
+        raise ValueError("spike_counts must be two-dimensional")
+    if np.issubdtype(raw_counts.dtype, np.bool_) or (
+        raw_counts.dtype == object and _contains_boolean_values(raw_counts)
+    ):
+        raise ValueError(
+            "spike_counts must contain numeric counts, not boolean values"
+        )
+    if np.issubdtype(raw_counts.dtype, np.complexfloating):
+        raise ValueError("spike_counts must contain real integer counts")
+
+    integer_info = np.iinfo(np.dtype(int))
+    if np.issubdtype(raw_counts.dtype, np.integer):
+        if np.issubdtype(raw_counts.dtype, np.signedinteger) and np.any(
+            raw_counts < 0
+        ):
+            raise ValueError("spike_counts must be finite and nonnegative")
+        if raw_counts.size and int(np.max(raw_counts)) > int(integer_info.max):
+            raise ValueError("spike_counts must fit into integer count range")
+        return raw_counts.astype(int, copy=False)
+
+    if np.issubdtype(raw_counts.dtype, np.floating):
+        if not np.all(np.isfinite(raw_counts)) or np.any(raw_counts < 0):
+            raise ValueError("spike_counts must be finite and nonnegative")
+        rounded = np.rint(raw_counts)
+        if not np.array_equal(raw_counts, rounded):
+            raise ValueError("spike_counts must contain integer counts")
+        if rounded.size and int(np.max(rounded)) > int(integer_info.max):
+            raise ValueError("spike_counts must fit into integer count range")
+        return rounded.astype(int)
+
+    counts = np.empty(raw_counts.shape, dtype=int)
+    for index, value in np.ndenumerate(raw_counts):
+        counts[index] = _coerce_exact_spike_count(value, integer_info)
+    return counts
 
 
 def _reusable_cell_weights(cell_weights):
@@ -312,12 +443,12 @@ def apply_poisson_input_boolean_validation_patch() -> None:
         cell_weights=None,
         negative_binomial_overdispersion=0.0,
     ):
-        _reject_boolean_array("spike_counts", spike_counts)
+        exact_counts = _coerce_spike_counts_exact(spike_counts)
         _reject_boolean_array("rates_hz", rates_hz)
         reusable_weights = _reusable_cell_weights(cell_weights)
         with np.errstate(over="ignore", invalid="ignore"):
             log_likelihood = original(
-                spike_counts,
+                exact_counts,
                 rates_hz,
                 dt,
                 spike_rate_scale=spike_rate_scale,
@@ -333,7 +464,7 @@ def apply_poisson_input_boolean_validation_patch() -> None:
             float(spike_rate_scale),
         )
 
-        counts = np.asarray(spike_counts, dtype=float)
+        counts = np.asarray(exact_counts, dtype=float)
         rates = np.asarray(rates_hz, dtype=float)
         weights = encoding._emission_cell_weights(
             reusable_weights,

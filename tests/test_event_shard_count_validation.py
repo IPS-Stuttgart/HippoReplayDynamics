@@ -34,6 +34,22 @@ def test_event_shard_planners_reject_noninteger_max_events(planner, value: objec
         planner._validate_max_events(value)
 
 
+@pytest.mark.parametrize(
+    "value",
+    [True, np.bool_(True), 1.5, "2", np.array([2], dtype=int)],
+)
+def test_kd_planner_rejects_noninteger_momentum_shard_counts(tmp_path: Path, value: object) -> None:
+    with pytest.raises(TypeError, match="--momentum-shard-count.*integer scalar"):
+        kd_planner.plan_event_shards(
+            tmp_path,
+            "Rat1/Open1",
+            "run",
+            max_events=None,
+            event_shard_count=1,
+            momentum_shard_count=value,
+        )
+
+
 def _stub_session_loading(monkeypatch: pytest.MonkeyPatch, planner) -> None:
     monkeypatch.setattr(planner, "_session_path", lambda root, session_id: root / session_id)
     monkeypatch.setattr(planner, "_check_session", lambda session_dir: None)

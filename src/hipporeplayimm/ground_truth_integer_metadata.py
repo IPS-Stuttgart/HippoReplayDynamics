@@ -12,6 +12,9 @@ _PATCHED_FLAG = "_ground_truth_strict_integer_metadata_patch_applied"
 _UNIQUE_INT_WRAPPER_MARKER = "_hipporeplayimm_ground_truth_integer_metadata_unique_int"
 _PARSE_CELL_IDS_WRAPPER_MARKER = "_hipporeplayimm_ground_truth_integer_metadata_parse_cell_ids"
 _WINDOW_FLOAT_WRAPPER_MARKER = "_hipporeplayimm_ground_truth_window_unique_float"
+_CELL_SPLIT_STRATA_WRAPPER_MARKER = (
+    "_hipporeplayimm_ground_truth_integer_metadata_cell_split_strata"
+)
 _CELL_ID_PATCHED_FLAG = "_ground_truth_strict_cell_id_metadata_patch_applied"
 
 
@@ -21,6 +24,7 @@ def apply_ground_truth_integer_metadata_patch() -> None:
     from . import ground_truth as gt
 
     _patch_window_float_metadata()
+    _patch_cell_split_strata_metadata()
 
     if not _unique_int_patch_current(gt):
 
@@ -100,6 +104,38 @@ def _patch_window_float_metadata() -> None:
     unique_finite_float.__doc__ = current.__doc__
     setattr(unique_finite_float, _WINDOW_FLOAT_WRAPPER_MARKER, True)
     window_scope._unique_finite_float = unique_finite_float
+
+
+def _patch_cell_split_strata_metadata() -> None:
+    """Require mathematically integral saved cell-split strata metadata."""
+
+    from . import benchmark_cell_split_metadata as cell_split_metadata
+
+    current = cell_split_metadata._cell_split_strata_from_scores
+    if getattr(current, _CELL_SPLIT_STRATA_WRAPPER_MARKER, False):
+        return
+
+    def cell_split_strata_from_scores(frame: Any, default: int) -> int:
+        column = "benchmark_cell_split_strata"
+        values = [
+            _parse_integer_metadata_value(column, value)
+            for value in cell_split_metadata._string_metadata_values(frame, column)
+        ]
+        if not values:
+            return int(default)
+        first = values[0]
+        if any(value != first for value in values[1:]):
+            raise ValueError(f"{column} contains multiple values")
+        return int(first)
+
+    cell_split_strata_from_scores.__name__ = current.__name__
+    cell_split_strata_from_scores.__doc__ = current.__doc__
+    setattr(
+        cell_split_strata_from_scores,
+        _CELL_SPLIT_STRATA_WRAPPER_MARKER,
+        True,
+    )
+    cell_split_metadata._cell_split_strata_from_scores = cell_split_strata_from_scores
 
 
 def _unique_int_patch_current(gt: object) -> bool:

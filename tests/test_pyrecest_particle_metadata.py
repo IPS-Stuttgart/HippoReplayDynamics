@@ -68,3 +68,43 @@ def test_pyrecest_score_defaults_accept_numeric_strings() -> None:
 
     assert metadata["pyrecest_particles"] == 64
     assert metadata["pyrecest_alpha"] == 0.5
+
+
+@pytest.mark.parametrize("value", ["64.0000000001", "63.9999999999"])
+def test_pyrecest_particle_metadata_rejects_near_integral_values(value: str) -> None:
+    with pytest.raises(ValueError, match="pyrecest_particles.*must be an integer"):
+        pyrecest_metadata_for_config(SimpleNamespace(pyrecest_particles=value))
+
+    with pytest.raises(ValueError, match="pyrecest_particles.*must be an integer"):
+        pyrecest_config_kwargs_for_scores(pd.DataFrame({"pyrecest_particles": [value]}))
+
+    with pytest.raises(ValueError, match="pyrecest_particles.*must be an integer"):
+        pyrecest_config_kwargs_for_scores(pd.DataFrame(), defaults={"pyrecest_particles": value})
+
+
+@pytest.mark.parametrize("value", ["64.0", "6.4e1"])
+def test_pyrecest_particle_metadata_accepts_exact_integer_forms(value: str) -> None:
+    config_metadata = pyrecest_metadata_for_config(SimpleNamespace(pyrecest_particles=value))
+    score_metadata = pyrecest_config_kwargs_for_scores(pd.DataFrame({"pyrecest_particles": [value]}))
+
+    assert config_metadata["pyrecest_particles"] == 64
+    assert score_metadata["pyrecest_particles"] == 64
+
+
+def test_pyrecest_particle_metadata_preserves_large_integer_text() -> None:
+    value = str(2**53 + 1)
+
+    config_metadata = pyrecest_metadata_for_config(SimpleNamespace(pyrecest_particles=value))
+    score_metadata = pyrecest_config_kwargs_for_scores(pd.DataFrame({"pyrecest_particles": [value]}))
+
+    assert config_metadata["pyrecest_particles"] == 2**53 + 1
+    assert score_metadata["pyrecest_particles"] == 2**53 + 1
+
+
+def test_pyrecest_particle_metadata_distinguishes_neighboring_large_integers() -> None:
+    scores = pd.DataFrame(
+        {"pyrecest_particles": [str(2**53), str(2**53 + 1)]}
+    )
+
+    with pytest.raises(ValueError, match="contains multiple values"):
+        pyrecest_config_kwargs_for_scores(scores)

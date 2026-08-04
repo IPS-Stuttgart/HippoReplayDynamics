@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 
+from decimal import Decimal, InvalidOperation
 from functools import wraps
 
 import numpy as np
@@ -189,27 +190,18 @@ def _validated_pyrecest_defaults(defaults: dict[str, int | float] | None) -> dic
 
 
 def _metadata_positive_int_from_value(value: object, column: str) -> int:
-    parsed = _metadata_float_from_value(value, column)
-    if parsed is None:
+    integer = _metadata_integer_from_value(value, column)
+    if integer is None:
         raise ValueError(f"{column} must contain finite numeric metadata, got {value!r}")
-    integer = int(round(parsed))
-    if not np.isclose(parsed, integer, rtol=0.0, atol=1e-9):
-        raise ValueError(f"{column} must be an integer")
     if integer <= 0:
         raise ValueError(f"{column} must be positive")
     return integer
 
 
 def _unique_int(frame: pd.DataFrame, columns: tuple[str, ...], default: int) -> int:
-    numeric_values = _numeric_metadata_values(frame, columns)
-    if not numeric_values:
+    values = _integer_metadata_values(frame, columns)
+    if not values:
         return int(default)
-    values: list[int] = []
-    for value in numeric_values:
-        integer_value = int(round(value))
-        if not np.isclose(value, integer_value, rtol=0.0, atol=1e-9):
-            raise ValueError(f"{' / '.join(columns)} must be an integer")
-        values.append(integer_value)
     if any(value != values[0] for value in values[1:]):
         raise ValueError(f"{' / '.join(columns)} contains multiple values")
     return values[0]
@@ -238,6 +230,19 @@ def _same_float_metadata(left: float, right: float) -> bool:
 _MISSING_METADATA_STRINGS = {"", "nan", "na", "n/a", "none", "null", "<na>"}
 
 
+def _integer_metadata_values(frame: pd.DataFrame, columns: tuple[str, ...]) -> list[int]:
+    values: list[int] = []
+    label = " / ".join(columns)
+    for column in columns:
+        if column not in frame.columns:
+            continue
+        for value in frame[column]:
+            parsed = _metadata_integer_from_value(value, label)
+            if parsed is not None:
+                values.append(parsed)
+    return values
+
+
 def _numeric_metadata_values(frame: pd.DataFrame, columns: tuple[str, ...]) -> list[float]:
     values: list[float] = []
     for column in columns:
@@ -248,6 +253,32 @@ def _numeric_metadata_values(frame: pd.DataFrame, columns: tuple[str, ...]) -> l
             if parsed is not None:
                 values.append(parsed)
     return values
+
+
+def _metadata_integer_from_value(value: object, column: str) -> int | None:
+    try:
+        if pd.isna(value):
+            return None
+    except (TypeError, ValueError):
+        pass
+
+    if isinstance(value, (bool, np.bool_)):
+        raise _invalid_numeric_metadata(column, value)
+
+    text = str(value).strip()
+    if text.lower() in _MISSING_METADATA_STRINGS:
+        return None
+
+    try:
+        numeric = Decimal(text)
+    except (InvalidOperation, ValueError) as exc:
+        raise _invalid_numeric_metadata(column, value) from exc
+    if not numeric.is_finite():
+        raise ValueError(f"{column} must be finite")
+    integer = numeric.to_integral_value()
+    if numeric != integer:
+        raise ValueError(f"{column} must be an integer")
+    return int(integer)
 
 
 def _metadata_float_from_value(value: object, column: str) -> float | None:

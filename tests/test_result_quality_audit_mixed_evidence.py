@@ -62,6 +62,7 @@ def test_mixed_evidence_finiteness_stays_conservative() -> None:
         False,
     ]
 
+
 def test_mixed_evidence_rejects_boolean_and_complex_scalars() -> None:
     nested_complex = np.empty((), dtype=object)
     nested_complex[()] = np.clongdouble(5.0 + 0.25j)
@@ -91,4 +92,3 @@ def test_mixed_evidence_rejects_boolean_and_complex_scalars() -> None:
         False,
         True,
     ]
-

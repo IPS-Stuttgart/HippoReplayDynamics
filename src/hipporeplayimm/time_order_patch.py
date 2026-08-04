@@ -2,15 +2,20 @@
 
 from __future__ import annotations
 
+import sys
+
 import numpy as np
 
 from .encoding import LogEmissionTensor
 
 _PATCH_MARKER = "_time_order_patch_wrapped"
+_DURATION_TIMESTAMP_PATCH_MARKER = "_duration_timestamp_validation_patch_wrapped"
 
 
 def apply_reverse_emission_time_patch() -> None:
     """Keep copied time coordinates increasing while reversing observation rows."""
+
+    _apply_duration_timestamp_validation_patch()
 
     from . import result_improvement_extensions as improved
     from . import reverse_models
@@ -69,6 +74,56 @@ def apply_reverse_emission_time_patch() -> None:
     reverse_models.reverse_emissions = reverse_emissions
     improved._time_order_patch_applied = True
     reverse_models._time_order_patch_applied = True
+
+
+def _apply_duration_timestamp_validation_patch() -> None:
+    """Reject malformed present timestamps instead of silently using scalar ``dt``."""
+
+    from . import duration_dynamics
+
+    resolver = duration_dynamics.transition_durations_s
+    if getattr(resolver, _DURATION_TIMESTAMP_PATCH_MARKER, False):
+        original = getattr(resolver, "__hipporeplayimm_original__", None)
+        if original is not None:
+            _synchronize_duration_resolver_aliases(original, resolver)
+        return
+
+    original = resolver
+
+    def transition_durations_s(emissions) -> np.ndarray:
+        if getattr(emissions, "transition_durations", None) is not None:
+            return original(emissions)
+        if duration_dynamics._dur_from_dt(emissions.dt) is not None:
+            return original(emissions)
+
+        times = np.asarray(getattr(emissions, "times", []), dtype=float)
+        if times.shape == (0,):
+            return original(emissions)
+        if times.shape != (int(emissions.n_time),):
+            raise ValueError("times must contain one value per emission row")
+        if not np.all(np.isfinite(times)):
+            raise ValueError("times must be finite")
+        if times.size > 1 and np.any(times[1:] <= times[:-1]):
+            raise ValueError(
+                "times must be strictly increasing when transition_durations is missing"
+            )
+        return original(emissions)
+
+    setattr(transition_durations_s, _DURATION_TIMESTAMP_PATCH_MARKER, True)
+    setattr(transition_durations_s, "__hipporeplayimm_original__", original)
+    duration_dynamics.transition_durations_s = transition_durations_s
+    _synchronize_duration_resolver_aliases(original, transition_durations_s)
+
+
+def _synchronize_duration_resolver_aliases(original, replacement) -> None:
+    """Update package modules that imported the duration resolver by value."""
+
+    for module in list(sys.modules.values()):
+        module_name = getattr(module, "__name__", "")
+        if not module_name.startswith("hipporeplayimm"):
+            continue
+        if getattr(module, "transition_durations_s", None) is original:
+            module.transition_durations_s = replacement
 
 
 def _time_vector(

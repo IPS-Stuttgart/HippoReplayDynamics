@@ -49,7 +49,6 @@ jobs:
               except (TypeError, ValueError, OverflowError):
                   return values.map(_coerce_evidence_numeric_scalar).astype(float)
           '''
-          old = "\n".join(line[10:] if line.startswith("          ") else line for line in old.splitlines())
           new = '''def _coerce_evidence_numeric_scalar(value: object) -> float:
               """Coerce one real scalar evidence value without lossy NumPy conversion."""
 
@@ -80,7 +79,6 @@ jobs:
 
               return values.map(_coerce_evidence_numeric_scalar).astype(float)
           '''
-          new = "\n".join(line[10:] if line.startswith("          ") else line for line in new.splitlines())
           if old not in source:
               raise SystemExit("expected mixed-evidence coercion block not found")
           source_path.write_text(source.replace(old, new, 1), encoding="utf-8")
@@ -120,7 +118,6 @@ jobs:
                   True,
               ]
           '''
-          addition = "\n".join(line[10:] if line.startswith("          ") else line for line in addition.splitlines())
           if test_name not in tests:
               test_path.write_text(tests.rstrip() + addition + "\n", encoding="utf-8")
           PY

@@ -93,6 +93,15 @@ def _valid_path(frame: pd.DataFrame) -> np.ndarray:
     return path if len(path) >= 2 and path_length(path) > 1e-9 else np.empty((0, 2), dtype=float)
 
 
+def _path_json(path: np.ndarray) -> str:
+    return json.dumps(np.asarray(path, dtype=float).tolist(), separators=(",", ":"))
+
+
+def _path_from_json(value: object) -> np.ndarray:
+    path = np.asarray(json.loads(str(value)), dtype=float)
+    return path if path.ndim == 2 and path.shape[1:] == (2,) else np.empty((0, 2), dtype=float)
+
+
 def _event_templates(
     row: pd.Series,
     *,
@@ -268,6 +277,9 @@ def build_context_event_table(
                 **dict(zip(KEYS, key, strict=True)),
                 "emission_past_route_error_cm": past_error,
                 "emission_future_route_error_cm": future_error,
+                "emission_path_xy_json": _path_json(emission_path),
+                "past_template_xy_json": _path_json(past),
+                "future_template_xy_json": _path_json(future),
                 "emission_prospective_index_cm": (
                     past_error - future_error
                     if np.isfinite(past_error) and np.isfinite(future_error)
@@ -448,6 +460,93 @@ def _permutation_p(observed: float, null: np.ndarray, expected_sign: int) -> flo
     return float((1 + extreme) / (1 + len(null)))
 
 
+def _permuted_predictor(
+    frame: pd.DataFrame,
+    *,
+    predictor: str,
+    groups: Sequence[str],
+    rng: np.random.Generator,
+) -> pd.DataFrame:
+    permuted = frame.copy()
+    permuted[predictor] = permuted.groupby(
+        list(groups), sort=False, dropna=False
+    )[predictor].transform(lambda values: rng.permutation(values.to_numpy()))
+    return permuted
+
+
+def _h2_route_assignment_shift_null(
+    frame: pd.DataFrame,
+    *,
+    controls: Sequence[str],
+    permutations: int,
+    seed: int,
+) -> pd.DataFrame:
+    """Reassign behavior templates circularly while keeping each decoded path fixed."""
+
+    required = (
+        "emission_path_xy_json",
+        "past_template_xy_json",
+        "future_template_xy_json",
+    )
+    selected = frame[
+        np.isfinite(pd.to_numeric(frame["emission_prospective_index_cm"], errors="coerce"))
+        & np.isfinite(pd.to_numeric(frame["delta_momentum_minus_imm"], errors="coerce"))
+    ].copy()
+    if selected.empty or any(column not in selected for column in required):
+        return pd.DataFrame(columns=["hypothesis", "test", "replicate", "null_estimate"])
+    decoded = {
+        index: _path_from_json(value)
+        for index, value in selected["emission_path_xy_json"].items()
+    }
+    past = {
+        index: _path_from_json(value)
+        for index, value in selected["past_template_xy_json"].items()
+    }
+    future = {
+        index: _path_from_json(value)
+        for index, value in selected["future_template_xy_json"].items()
+    }
+    ordered_groups = [
+        group.sort_values(["event_peak_s", "event_index"]).index.to_numpy()
+        for _, group in selected.groupby("session", sort=True)
+        if len(group) >= 2
+    ]
+    rng = np.random.default_rng(seed)
+    rows: list[dict[str, object]] = []
+    for replicate in range(int(permutations)):
+        shifted = selected.copy()
+        shifted["emission_prospective_index_cm"] = np.nan
+        for indices in ordered_groups:
+            offset = int(rng.integers(1, len(indices)))
+            template_indices = np.roll(indices, offset)
+            for event_index, template_index in zip(indices, template_indices, strict=True):
+                try:
+                    past_error = path_fit_distance_cm(decoded[event_index], past[template_index])
+                    future_error = path_fit_distance_cm(
+                        decoded[event_index], future[template_index]
+                    )
+                except ValueError:
+                    continue
+                shifted.loc[event_index, "emission_prospective_index_cm"] = (
+                    past_error - future_error
+                )
+        rows.append(
+            {
+                "hypothesis": "H2",
+                "test": "clean_imm_is_more_prospective_than_momentum",
+                "replicate": replicate,
+                "null_estimate": _event_effect(
+                    shifted,
+                    outcome="emission_prospective_index_cm",
+                    predictor="delta_momentum_minus_imm",
+                    controls=controls,
+                ),
+                "null_control": "within_session_circular_behavior_template_shift",
+            }
+        )
+    return pd.DataFrame(rows)
+
+
 def _effect_status(
     estimate: float,
     low: float,
@@ -482,6 +581,9 @@ def _event_hypothesis(
     permutations: int,
     bootstraps: int,
     seed: int,
+    permutation_groups: Sequence[str] = ("session",),
+    precomputed_null: pd.DataFrame | None = None,
+    null_control: str = "within_session_predictor_permutation",
 ) -> tuple[dict[str, object], pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     selected = frame[
         np.isfinite(pd.to_numeric(frame[outcome], errors="coerce"))
@@ -498,22 +600,28 @@ def _event_hypothesis(
         replicates=int(bootstraps),
         seed=int(seed),
     )
-    rng = np.random.default_rng(seed + 1000)
-    null_rows: list[dict[str, object]] = []
-    for replicate in range(int(permutations)):
-        permuted = selected.copy()
-        permuted[predictor] = permuted.groupby("session", sort=False)[predictor].transform(
-            lambda values: rng.permutation(values.to_numpy())
-        )
-        null_rows.append(
-            {
-                "hypothesis": hypothesis,
-                "test": test,
-                "replicate": replicate,
-                "null_estimate": statistic(permuted),
-            }
-        )
-    null = pd.DataFrame(null_rows)
+    if precomputed_null is None:
+        rng = np.random.default_rng(seed + 1000)
+        null_rows: list[dict[str, object]] = []
+        for replicate in range(int(permutations)):
+            permuted = _permuted_predictor(
+                selected,
+                predictor=predictor,
+                groups=permutation_groups,
+                rng=rng,
+            )
+            null_rows.append(
+                {
+                    "hypothesis": hypothesis,
+                    "test": test,
+                    "replicate": replicate,
+                    "null_estimate": statistic(permuted),
+                    "null_control": null_control,
+                }
+            )
+        null = pd.DataFrame(null_rows)
+    else:
+        null = precomputed_null.copy()
     p_value = _permutation_p(estimate, null["null_estimate"].to_numpy(), expected_sign)
     by_rat_rows: list[dict[str, object]] = []
     for rat, group in selected.groupby("rat", sort=True):
@@ -575,6 +683,7 @@ def _event_hypothesis(
         "status_before_campaign_fdr": _effect_status(
             estimate, low, high, p_value, expected_sign
         ),
+        "null_control": str(null["null_control"].iloc[0]) if len(null) else null_control,
     }
     return result, pd.DataFrame(by_rat_rows), pd.DataFrame(loo_rows), null
 
@@ -638,6 +747,7 @@ def run_context_hypotheses(
                     "test": "momentum_axis_increases_toward_departure",
                     "replicate": replicate,
                     "null_estimate": float(shuffled_model_effects["rank_slope"].mean()),
+                    "null_control": "within_pause_event_order_permutation",
                 },
                 {
                     "hypothesis": "H1",
@@ -646,6 +756,7 @@ def run_context_hypotheses(
                     "null_estimate": float(
                         shuffled_commitment_effects["final_minus_earlier"].mean()
                     ),
+                    "null_control": "within_pause_event_order_permutation",
                 },
             ]
         )
@@ -684,6 +795,7 @@ def run_context_hypotheses(
                 "status_before_campaign_fdr": _effect_status(
                     model_estimate, model_low, model_high, model_p, 1
                 ),
+                "null_control": "within_pause_event_order_permutation",
             },
             {
                 "hypothesis": "H1",
@@ -709,6 +821,7 @@ def run_context_hypotheses(
                     commitment_p,
                     1,
                 ),
+                "null_control": "within_pause_event_order_permutation",
             },
         ]
     )
@@ -776,7 +889,31 @@ def run_context_hypotheses(
     )
     analysis = events.copy()
     analysis["home_bound"] = analysis["goal_context"].eq("home_bound").astype(float)
+    analysis["spike_count_quartile"] = analysis.groupby("session", sort=False)[
+        "n_spikes"
+    ].transform(
+        lambda values: pd.qcut(
+            values.rank(method="first"),
+            q=min(4, len(values)),
+            labels=False,
+            duplicates="drop",
+        )
+    )
     for index, specification in enumerate(specifications):
+        precomputed_null = None
+        permutation_groups: tuple[str, ...] = ("session",)
+        null_control = "within_session_predictor_permutation"
+        if specification[0] == "H2":
+            precomputed_null = _h2_route_assignment_shift_null(
+                analysis,
+                controls=specification[4],
+                permutations=permutations,
+                seed=seed + 101,
+            )
+            null_control = "within_session_circular_behavior_template_shift"
+        elif specification[0] == "H10":
+            permutation_groups = ("session", "spike_count_quartile")
+            null_control = "within_session_spike_quartile_duration_permutation"
         result, by_rat, loo, null = _event_hypothesis(
             analysis,
             hypothesis=specification[0],
@@ -788,6 +925,9 @@ def run_context_hypotheses(
             permutations=permutations,
             bootstraps=bootstraps,
             seed=seed + 10 + index,
+            permutation_groups=permutation_groups,
+            precomputed_null=precomputed_null,
+            null_control=null_control,
         )
         tests.append(result)
         by_rat_parts.append(by_rat)

@@ -27,6 +27,8 @@ _EVENT_KEY_COLUMNS = (
     "benchmark_random_seed",
     "null_random_seed",
     "benchmark_event_subset_seed",
+    "matrix_id",
+    "benchmark_event_epoch",
     "simulation_event_index",
     "event_index",
     "event_id",

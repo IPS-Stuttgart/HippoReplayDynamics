@@ -182,7 +182,7 @@ def _prepare(frame: pd.DataFrame) -> pd.DataFrame:
     out["rat"] = out["rat"].astype(str)
     out["event_index"] = _integer_identifier_series(out["event_index"], "event_index")
     if "null_index" in out:
-        out["null_index"] = pd.to_numeric(out["null_index"], errors="coerce").astype("Int64")
+        out["null_index"] = _integer_identifier_series(out["null_index"], "null_index")
     out["source_event_index"] = out["event_index"].astype(int)
     out["source_event_group_id"] = [
         _source_group_id(session, event_index)
@@ -210,7 +210,10 @@ def _key_set(frame: pd.DataFrame) -> set[tuple[object, ...]]:
         normalized["event_index"],
         "event_index",
     )
-    normalized["null_index"] = pd.to_numeric(normalized["null_index"], errors="coerce").astype("Int64")
+    normalized["null_index"] = _integer_identifier_series(
+        normalized["null_index"],
+        "null_index",
+    )
     return set(map(tuple, normalized.astype(object).to_numpy()))
 
 
@@ -223,7 +226,10 @@ def _filter_keys(frame: pd.DataFrame, keys: set[tuple[object, ...]]) -> pd.DataF
         normalized["event_index"],
         "event_index",
     )
-    normalized["null_index"] = pd.to_numeric(normalized["null_index"], errors="coerce").astype("Int64")
+    normalized["null_index"] = _integer_identifier_series(
+        normalized["null_index"],
+        "null_index",
+    )
     mask = [tuple(row) in keys for row in normalized.astype(object).to_numpy()]
     return frame[pd.Series(mask, index=frame.index)].copy()
 

@@ -36,6 +36,32 @@ _CANONICAL_MODELS = {
     "fragmented",
 }
 _MISSING_STATUS_VALUES = {"", "nan", "none", "null", "<na>"}
+_EVENT_KEY_COLUMNS = (
+    "session",
+    "simulation_random_seed",
+    "random_seed",
+    "benchmark_random_seed",
+    "null_random_seed",
+    "benchmark_event_subset_seed",
+    "matrix_id",
+    "benchmark_event_epoch",
+    "simulation_event_index",
+    "event_index",
+    "event_id",
+    "window_index",
+    "event_window_variant",
+    "window_role",
+    "benchmark_cell_split_index",
+    "cell_split_index",
+    "benchmark_cell_split_seed",
+    "cell_split_seed",
+    "cell_split_count",
+    "cell_split_shard_index",
+    "cell_split_shard_count",
+    "split_shard_index",
+    "split_shard_count",
+)
+_REQUIRED_EVENT_KEY_COLUMNS = ("session", "event_index")
 
 
 def canonical_model_name(model: object) -> str:
@@ -69,9 +95,11 @@ def compare_artifacts(
     out_dir = Path(output)
     out_dir.mkdir(parents=True, exist_ok=True)
 
+    event_key = _comparison_event_key_columns(left_scores, right_scores)
     left_best = event_best_models(left_scores, left_label)
     right_best = event_best_models(right_scores, right_label)
-    best_comparison = left_best.merge(right_best, on=["session", "event_index"], how="inner")
+    left_best, right_best = _align_event_key_columns(left_best, right_best, event_key)
+    best_comparison = left_best.merge(right_best, on=event_key, how="inner")
     if not best_comparison.empty:
         best_comparison["canonical_best_agree"] = (
             best_comparison[f"{left_label}_canonical_best_model"]
@@ -185,9 +213,10 @@ def add_relative_log_evidence(frame: pd.DataFrame, *, force: bool = False) -> pd
     if out.empty:
         out["relative_log_evidence"] = pd.Series(dtype=float)
         return out
+    event_key = _event_group_columns(out)
     out["relative_log_evidence"] = (
         out["log_evidence"]
-        - out.groupby(["session", "event_index"])["log_evidence"].transform("max")
+        - out.groupby(event_key, sort=False, dropna=False)["log_evidence"].transform("max")
     )
     return out
 
@@ -195,7 +224,8 @@ def add_relative_log_evidence(frame: pd.DataFrame, *, force: bool = False) -> pd
 def event_count(frame: pd.DataFrame) -> int:
     if frame.empty:
         return 0
-    return int(frame[["session", "event_index"]].drop_duplicates().shape[0])
+    event_key = _event_group_columns(frame)
+    return int(frame[event_key].drop_duplicates().shape[0])
 
 
 def source_file(frame: pd.DataFrame) -> str:
@@ -205,9 +235,9 @@ def source_file(frame: pd.DataFrame) -> str:
 
 
 def event_best_models(frame: pd.DataFrame, label: str) -> pd.DataFrame:
+    event_key = _event_group_columns(frame)
     columns = [
-        "session",
-        "event_index",
+        *event_key,
         f"{label}_best_model",
         f"{label}_canonical_best_model",
         f"{label}_best_log_evidence",
@@ -216,11 +246,11 @@ def event_best_models(frame: pd.DataFrame, label: str) -> pd.DataFrame:
     if frame.empty:
         return pd.DataFrame(columns=columns)
     best = frame.sort_values(
-        ["session", "event_index", "log_evidence"],
-        ascending=[True, True, False],
-    ).drop_duplicates(["session", "event_index"], keep="first")
+        [*event_key, "log_evidence"],
+        ascending=[True] * len(event_key) + [False],
+    ).drop_duplicates(event_key, keep="first")
     return best[
-        ["session", "event_index", "model", "canonical_model", "log_evidence", "relative_log_evidence"]
+        [*event_key, "model", "canonical_model", "log_evidence", "relative_log_evidence"]
     ].rename(
         columns={
             "model": f"{label}_best_model",
@@ -244,14 +274,18 @@ def evidence_support_counts(frame: pd.DataFrame, label: str) -> pd.DataFrame:
     if frame.empty:
         return pd.DataFrame(columns=columns)
     rows: list[dict[str, object]] = []
-    for (support, comparable), group in frame.groupby(["evidence_support", "evidence_comparable"], sort=True):
+    for (support, comparable), group in frame.groupby(
+        ["evidence_support", "evidence_comparable"],
+        dropna=False,
+        sort=True,
+    ):
         rows.append(
             {
                 "run_label": label,
                 "evidence_support": support,
                 "evidence_comparable": bool(comparable),
                 "rows": int(len(group)),
-                "session_events": int(group[["session", "event_index"]].drop_duplicates().shape[0]),
+                "session_events": event_count(group),
                 "models": int(group["model"].nunique()),
             }
         )
@@ -259,18 +293,25 @@ def evidence_support_counts(frame: pd.DataFrame, label: str) -> pd.DataFrame:
 
 
 def canonical_relative_table(frame: pd.DataFrame) -> pd.DataFrame:
-    columns = ["session", "event_index", "canonical_model", "model", "relative_log_evidence"]
+    event_key = _event_group_columns(frame)
+    columns = [*event_key, "canonical_model", "model", "relative_log_evidence"]
     if frame.empty:
         return pd.DataFrame(columns=columns)
     best_by_canonical = frame.sort_values(
-        ["session", "event_index", "canonical_model", "log_evidence"],
-        ascending=[True, True, True, False],
-    ).drop_duplicates(["session", "event_index", "canonical_model"], keep="first")
+        [*event_key, "canonical_model", "log_evidence"],
+        ascending=[True] * (len(event_key) + 1) + [False],
+    ).drop_duplicates([*event_key, "canonical_model"], keep="first")
     return best_by_canonical[columns]
 
 
-def shared_relative_evidence(left: pd.DataFrame, right: pd.DataFrame, left_label: str, right_label: str) -> pd.DataFrame:
-    key = ["session", "event_index", "canonical_model"]
+def shared_relative_evidence(
+    left: pd.DataFrame,
+    right: pd.DataFrame,
+    left_label: str,
+    right_label: str,
+) -> pd.DataFrame:
+    event_key = _comparison_event_key_columns(left, right)
+    key = [*event_key, "canonical_model"]
     delta_col = f"{right_label}_minus_{left_label}_relative_log_evidence"
     columns = [
         *key,
@@ -295,6 +336,7 @@ def shared_relative_evidence(left: pd.DataFrame, right: pd.DataFrame, left_label
             "relative_log_evidence": f"{right_label}_relative_log_evidence",
         }
     )
+    left_rel, right_rel = _align_event_key_columns(left_rel, right_rel, event_key)
     joined = left_rel.merge(right_rel, on=key, how="inner")
     joined[delta_col] = (
         joined[f"{right_label}_relative_log_evidence"]
@@ -310,7 +352,7 @@ def shared_relative_evidence_summary(relative: pd.DataFrame, left_label: str, ri
     return (
         relative.groupby("canonical_model", as_index=False)
         .agg(
-            matched_events=("event_index", "count"),
+            matched_events=("canonical_model", "count"),
             left_mean_relative_log_evidence=(f"{left_label}_relative_log_evidence", "mean"),
             right_mean_relative_log_evidence=(f"{right_label}_relative_log_evidence", "mean"),
             mean_right_minus_left_relative_log_evidence=(delta_col, "mean"),
@@ -362,7 +404,9 @@ def session_story_shift_summary(
         sessions = sessions.join(wins, how="left")
         sessions[f"{label}_momentum_wins"] = sessions[f"{label}_momentum_wins"].fillna(0).astype(int)
 
-    sessions["momentum_win_delta"] = sessions[f"{right_label}_momentum_wins"] - sessions[f"{left_label}_momentum_wins"]
+    sessions["momentum_win_delta"] = (
+        sessions[f"{right_label}_momentum_wins"] - sessions[f"{left_label}_momentum_wins"]
+    )
     delta_col = f"{right_label}_minus_{left_label}_relative_log_evidence"
     if delta_col in relative:
         momentum_delta = (
@@ -409,6 +453,59 @@ def run_comparison_summary(
             }
         ]
     )
+
+
+def _is_missing_scalar(value: object) -> bool:
+    try:
+        missing = pd.isna(value)
+    except (TypeError, ValueError):
+        missing = False
+    if isinstance(missing, (bool, np.bool_)) and bool(missing):
+        return True
+    return str(value).strip().lower() in _MISSING_STATUS_VALUES
+
+
+def _column_has_nonmissing_values(frame: pd.DataFrame, column: str) -> bool:
+    return bool(frame[column].map(lambda value: not _is_missing_scalar(value)).any())
+
+
+def _event_group_columns(frame: pd.DataFrame) -> list[str]:
+    """Return populated provenance columns that identify one event in a table."""
+
+    return [
+        column
+        for column in _EVENT_KEY_COLUMNS
+        if column in frame.columns
+        and (
+            column in _REQUIRED_EVENT_KEY_COLUMNS
+            or _column_has_nonmissing_values(frame, column)
+        )
+    ]
+
+
+def _comparison_event_key_columns(left: pd.DataFrame, right: pd.DataFrame) -> list[str]:
+    """Return event-key columns that are populated in both score tables."""
+
+    shared = [column for column in _EVENT_KEY_COLUMNS if column in left.columns and column in right.columns]
+    return [
+        column
+        for column in shared
+        if column in _REQUIRED_EVENT_KEY_COLUMNS
+        or (_column_has_nonmissing_values(left, column) and _column_has_nonmissing_values(right, column))
+    ]
+
+
+def _align_event_key_columns(
+    left: pd.DataFrame,
+    right: pd.DataFrame,
+    event_key: list[str],
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    left = left.copy()
+    right = right.copy()
+    for column in event_key:
+        left[column] = left[column].astype(object)
+        right[column] = right[column].astype(object)
+    return left, right
 
 
 def main() -> int:

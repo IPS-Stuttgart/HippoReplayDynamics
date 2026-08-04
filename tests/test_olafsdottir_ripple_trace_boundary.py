@@ -26,6 +26,8 @@ def _load_adapter_module():
 
 
 def test_expanded_ripple_window_stops_at_trace_end() -> None:
+    """An expanded event must not admit spikes beyond observed LFP support."""
+
     module = _load_adapter_module()
     traces = np.zeros((1, 10), dtype=float)
     traces[0, -1] = 4.0

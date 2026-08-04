@@ -21,8 +21,10 @@ import pandas as pd
 from hipporeplayimm.data import load_replay_session
 
 try:
+    from _provenance import build_script_provenance, file_sha256
     from build_replay_behavior_route_primitives import smooth_position_trace
 except ModuleNotFoundError:  # Imported as scripts.* by tests.
+    from scripts._provenance import build_script_provenance, file_sha256
     from scripts.build_replay_behavior_route_primitives import smooth_position_trace
 
 EVENT_OUTPUT = "pf_swr_commitment_timing_events.csv"
@@ -370,6 +372,14 @@ def main() -> int:
         "settings": vars(args),
         "off_swr_decisions_sha256": hashlib.sha256(Path(args.off_swr_decisions).read_bytes()).hexdigest(),
         "swr_context_sha256": hashlib.sha256(Path(args.swr_context).read_bytes()).hexdigest(),
+        "analysis_script_sha256": file_sha256(Path(__file__).resolve()),
+        "provenance": build_script_provenance(
+            input_paths={
+                "dataset_root": args.dataset_root,
+                "off_swr_decisions": args.off_swr_decisions,
+                "swr_context": args.swr_context,
+            }
+        ),
         "claim_boundary": "descriptive when fewer than ten independent physical off-SWR events",
     }
     (output / MANIFEST_OUTPUT).write_text(json.dumps(manifest, indent=2) + "\n")

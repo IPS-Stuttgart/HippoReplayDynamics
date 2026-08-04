@@ -22,6 +22,7 @@ from types import SimpleNamespace
 import numpy as np
 import pandas as pd
 
+import hipporeplayimm
 from hipporeplayimm.data import load_replay_session
 from hipporeplayimm.encoding import EmissionConfig, EncodingConfig, LogEmissionTensor, fit_place_field_encoding
 from hipporeplayimm.result_improvement_extensions import (
@@ -30,6 +31,7 @@ from hipporeplayimm.result_improvement_extensions import (
     score_replay_model_compat,
 )
 try:
+    from _provenance import build_script_provenance, file_sha256, git_metadata
     from benchmark_model_evidence import _check_session, _session_path
     from replay_grammar_analysis import (
         GRAMMAR_MODES,
@@ -40,6 +42,7 @@ try:
         replay_grammar_motifs,
     )
 except ModuleNotFoundError:  # Imported as scripts.* by tests.
+    from scripts._provenance import build_script_provenance, file_sha256, git_metadata
     from scripts.benchmark_model_evidence import _check_session, _session_path
     from scripts.replay_grammar_analysis import (
         GRAMMAR_MODES,
@@ -620,6 +623,17 @@ def main() -> int:
         "shuffle_preserves": ["population_spike_vector_per_bin", "event_duration", "event_spike_count"],
         "shuffle_destroys": "whole-bin_temporal_order",
         "primary_test": "original ordered-trajectory grammar fraction versus matched whole-bin shuffle fraction",
+        "analysis_script_sha256": file_sha256(Path(__file__).resolve()),
+        "scoring_package_file": str(Path(hipporeplayimm.__file__).resolve()),
+        "scoring_source_git": git_metadata(
+            Path(hipporeplayimm.__file__).resolve().parents[2]
+        ),
+        "provenance": build_script_provenance(
+            input_paths={
+                "dataset_root": args.dataset_root,
+                "event_evidence": args.event_evidence,
+            }
+        ),
     }
     (output / MANIFEST_OUTPUT).write_text(json.dumps(manifest, indent=2) + "\n")
     print(tables[SUMMARY_OUTPUT].to_string(index=False))

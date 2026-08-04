@@ -17,6 +17,11 @@ import numpy as np
 import pandas as pd
 from scipy.stats import spearmanr
 
+try:
+    from _provenance import build_script_provenance, file_sha256
+except ModuleNotFoundError:  # Imported as scripts.* by tests.
+    from scripts._provenance import build_script_provenance, file_sha256
+
 RESULT_OUTPUT = "replay_behavior_hypothesis_campaign_results.csv"
 COMPANION_OUTPUT = "replay_behavior_hypothesis_companion_tests.csv"
 FDR_OUTPUT = "replay_behavior_hypothesis_campaign_fdr.csv"
@@ -606,6 +611,14 @@ def main() -> int:
             for key, value in vars(args).items()
             if key != "output_dir"
         },
+        "analysis_script_sha256": file_sha256(Path(__file__).resolve()),
+        "provenance": build_script_provenance(
+            input_paths={
+                key: value
+                for key, value in vars(args).items()
+                if key != "output_dir"
+            }
+        ),
         "claim_boundary": "behavioral specialization only; standalone PF model/content gates remain separate",
     }
     (output / MANIFEST_OUTPUT).write_text(json.dumps(manifest, indent=2) + "\n")

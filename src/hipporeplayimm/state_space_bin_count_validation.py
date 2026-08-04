@@ -98,15 +98,23 @@ def _optional_mass_threshold(name: str, value: Any) -> float | None:
         raise TypeError(f"{name} must be a numeric probability")
     if np.issubdtype(raw.dtype, np.bool_):
         raise TypeError(f"{name} must be a numeric probability, not boolean")
-    if raw.dtype == object:
-        try:
-            item = raw.item()
-        except ValueError:
-            item = None
-        if isinstance(item, (bool, np.bool_)):
-            raise TypeError(f"{name} must be a numeric probability, not boolean")
     try:
-        numeric = float(raw)
+        item = raw.item()
+    except ValueError as exc:
+        raise TypeError(f"{name} must be a numeric probability") from exc
+    seen: set[int] = set()
+    while isinstance(item, np.ndarray) and item.ndim == 0:
+        identity = id(item)
+        if identity in seen:
+            raise TypeError(f"{name} must be a numeric probability")
+        seen.add(identity)
+        item = item.item()
+    if isinstance(item, (complex, np.complexfloating)):
+        raise TypeError(f"{name} must be a real numeric probability, not complex")
+    if isinstance(item, (bool, np.bool_)):
+        raise TypeError(f"{name} must be a numeric probability, not boolean")
+    try:
+        numeric = float(item)
     except (TypeError, ValueError, OverflowError) as exc:
         raise TypeError(f"{name} must be a numeric probability") from exc
     if not np.isfinite(numeric):

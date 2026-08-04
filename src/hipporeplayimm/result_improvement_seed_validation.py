@@ -15,6 +15,7 @@ _MARK_FEATURE_WRAPPER_FLAG = "_mark_feature_nonidentity_seed_wrapper"
 _ORIGINAL_ATTR = "__hipporeplayimm_seed_validation_original__"
 _INVALID_UTF8_MODEL_LABEL_PREFIX = "<invalid-utf8-model-bytes:"
 _WRAPPER_VERSION = 3
+_SIGN_FLIP_WRAPPER_VERSION = 4
 _MARK_FEATURE_WRAPPER_VERSION = 1
 
 
@@ -111,6 +112,46 @@ def _finite_model_metric_rows(
     return normalized_rows.iloc[np.flatnonzero(keep)].copy()
 
 
+def _scale_target_model_metrics_for_sign_flip(
+    rows: object,
+    *,
+    model: str,
+    value_column: str,
+):
+    """Rescale only when a float64 reduction could overflow.
+
+    A paired sign-flip p-value is invariant under multiplication by a positive
+    constant.  The legacy implementation computes ordinary ``np.mean`` values,
+    whose internal sum can overflow for finite inputs near the float64 limit.
+    Scale the selected model's deltas only in that unsafe regime and preserve
+    the exact existing path for ordinary magnitudes.
+    """
+
+    if not isinstance(rows, pd.DataFrame):
+        return rows
+    if "model" not in rows.columns or value_column not in rows.columns:
+        return rows
+
+    model_mask = rows["model"].eq(model).to_numpy(dtype=bool)
+    if not np.any(model_mask):
+        return rows
+
+    values = pd.to_numeric(rows.loc[model_mask, value_column], errors="coerce").to_numpy(
+        dtype=float
+    )
+    if values.size == 0:
+        return rows
+    scale = float(np.max(np.abs(values)))
+    if scale == 0.0 or scale <= np.finfo(float).max / values.size:
+        return rows
+
+    scaled = rows.copy()
+    column = scaled[value_column].astype(object).copy()
+    column.loc[model_mask] = list(values / scale)
+    scaled[value_column] = column
+    return scaled
+
+
 def _nonidentity_permuted_values(
     values: np.ndarray,
     rng: np.random.Generator,
@@ -146,6 +187,7 @@ def apply_result_improvement_seed_validation_patch() -> None:
         result_improvements.hierarchical_bootstrap_ci,
         _BOOTSTRAP_WRAPPER_FLAG,
         "original_bootstrap",
+        _WRAPPER_VERSION,
     ):
         original_bootstrap = result_improvements.hierarchical_bootstrap_ci
 
@@ -184,8 +226,10 @@ def apply_result_improvement_seed_validation_patch() -> None:
         result_improvements.paired_sign_flip_p_value,
         _SIGN_FLIP_WRAPPER_FLAG,
         "original_sign_flip",
+        _SIGN_FLIP_WRAPPER_VERSION,
     ):
-        original_sign_flip = result_improvements.paired_sign_flip_p_value
+        current_sign_flip = result_improvements.paired_sign_flip_p_value
+        original_sign_flip = getattr(current_sign_flip, _ORIGINAL_ATTR, current_sign_flip)
 
         @wraps(original_sign_flip)
         def paired_sign_flip_p_value(
@@ -204,15 +248,24 @@ def apply_result_improvement_seed_validation_patch() -> None:
                 model=selected_model,
                 value_column=value_column,
             )
-            return original_sign_flip(
+            scaled_rows = _scale_target_model_metrics_for_sign_flip(
                 validated_rows,
+                model=selected_model,
+                value_column=value_column,
+            )
+            return original_sign_flip(
+                scaled_rows,
                 model=selected_model,
                 value_column=value_column,
                 n_permutations=n_permutations,
                 random_seed=seed,
             )
 
-        setattr(paired_sign_flip_p_value, _SIGN_FLIP_WRAPPER_FLAG, _WRAPPER_VERSION)
+        setattr(
+            paired_sign_flip_p_value,
+            _SIGN_FLIP_WRAPPER_FLAG,
+            _SIGN_FLIP_WRAPPER_VERSION,
+        )
         setattr(paired_sign_flip_p_value, _ORIGINAL_ATTR, original_sign_flip)
         result_improvements.paired_sign_flip_p_value = paired_sign_flip_p_value
 
@@ -256,11 +309,13 @@ def _result_improvement_seed_validation_patch_current(result_improvements) -> bo
             result_improvements.hierarchical_bootstrap_ci,
             _BOOTSTRAP_WRAPPER_FLAG,
             "original_bootstrap",
+            _WRAPPER_VERSION,
         )
         and _is_seed_validation_wrapper(
             result_improvements.paired_sign_flip_p_value,
             _SIGN_FLIP_WRAPPER_FLAG,
             "original_sign_flip",
+            _SIGN_FLIP_WRAPPER_VERSION,
         )
         and _is_mark_feature_wrapper(
             result_improvements.shuffle_mark_features_session
@@ -268,9 +323,14 @@ def _result_improvement_seed_validation_patch_current(result_improvements) -> bo
     )
 
 
-def _is_seed_validation_wrapper(function, flag: str, original_freevar: str) -> bool:
+def _is_seed_validation_wrapper(
+    function,
+    flag: str,
+    original_freevar: str,
+    version: int,
+) -> bool:
     return bool(
-        getattr(function, flag, None) == _WRAPPER_VERSION
+        getattr(function, flag, None) == version
         and original_freevar in getattr(function, "__code__").co_freevars
     )
 

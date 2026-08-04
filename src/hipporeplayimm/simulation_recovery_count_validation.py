@@ -166,6 +166,8 @@ def _patch_valid_bins_and_prior(simulation_recovery: Any) -> None:
 
 
 def _validated_count_matrix(counts: Any, *, n_cells: int) -> np.ndarray:
+    if _contains_complex_values(counts):
+        raise ValueError("counts must contain real values, not complex values")
     if _contains_boolean_values(counts):
         raise ValueError("counts must contain numeric integer counts, not boolean values")
     if _contains_text_values(counts):
@@ -260,6 +262,23 @@ def _validated_occupancy_vector(encoding: Any) -> np.ndarray:
     if not np.all(np.isfinite(occupancy)) or np.any(occupancy < 0.0):
         raise ValueError("occupancy_s must contain finite nonnegative values")
     return occupancy
+
+
+def _contains_complex_values(values: Any) -> bool:
+    try:
+        raw = np.asarray(values)
+    except (TypeError, ValueError):
+        raw = np.asarray(values, dtype=object)
+    if raw.size == 0:
+        return False
+    if np.issubdtype(raw.dtype, np.complexfloating):
+        return True
+    if raw.dtype == object:
+        return any(
+            isinstance(value, (complex, np.complexfloating))
+            for value in raw.reshape(-1)
+        )
+    return False
 
 
 def _contains_boolean_values(values: Any) -> bool:

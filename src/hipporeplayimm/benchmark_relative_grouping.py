@@ -119,12 +119,14 @@ def apply_benchmark_relative_grouping_patch() -> None:
         with missing metadata to supply static baselines for newer rows carrying
         a concrete value.  Temporarily replacing missing scope values with a
         column-specific sentinel keeps each missing-value group intact without
-        leaking that sentinel into the returned score table.
+        leaking that sentinel or changing the column dtype in the returned score
+        table.
         """
 
         working = frame.copy()
         group_columns = bench._benchmark_event_group_columns(working)
         missing_sentinels: dict[str, str] = {}
+        original_dtypes: dict[str, object] = {}
         for column in group_columns:
             if column not in working.columns:
                 continue
@@ -132,6 +134,7 @@ def apply_benchmark_relative_grouping_patch() -> None:
             if not bool(missing_mask.any()):
                 continue
             sentinel = _missing_scope_sentinel(column, working[column])
+            original_dtypes[column] = frame[column].dtype
             working[column] = working[column].astype(object)
             working.loc[missing_mask, column] = sentinel
             missing_sentinels[column] = sentinel
@@ -141,6 +144,7 @@ def apply_benchmark_relative_grouping_patch() -> None:
             if column not in out.columns:
                 continue
             out.loc[out[column].eq(sentinel), column] = np.nan
+            out[column] = out[column].astype(original_dtypes[column])
         return out
 
     add_relative_metrics_with_missing_scope._benchmark_relative_missing_scope_wrapped = True  # type: ignore[attr-defined]

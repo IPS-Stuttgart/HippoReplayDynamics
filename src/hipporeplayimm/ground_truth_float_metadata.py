@@ -296,6 +296,35 @@ def _parse_nonnegative_config_value(name: str, value: Any) -> float:
     return numeric
 
 
+def _is_complex_scalar(value: Any) -> bool:
+    """Return whether a scalar or nested zero-dimensional wrapper is complex."""
+
+    current = value
+    seen: set[int] = set()
+    while True:
+        if isinstance(current, (complex, np.complexfloating)):
+            return True
+        try:
+            raw = np.asarray(current)
+        except (TypeError, ValueError):
+            return False
+        if raw.ndim != 0:
+            return False
+        if np.issubdtype(raw.dtype, np.complexfloating):
+            return True
+        if raw.dtype != object:
+            return False
+        try:
+            item = raw.item()
+        except ValueError:
+            return False
+        marker = id(item)
+        if item is current or marker in seen:
+            return False
+        seen.add(marker)
+        current = item
+
+
 def _parse_config_scalar(name: str, value: Any) -> float:
     if isinstance(value, (bool, np.bool_)):
         raise TypeError(f"{name} must be numeric, not boolean")
@@ -305,6 +334,8 @@ def _parse_config_scalar(name: str, value: Any) -> float:
         raise TypeError(f"{name} must be a scalar") from exc
     if raw.ndim != 0:
         raise TypeError(f"{name} must be a scalar")
+    if _is_complex_scalar(raw):
+        raise TypeError(f"{name} must be numeric, not complex")
     if raw.dtype.kind in {"S", "U"}:
         raise TypeError(f"{name} must be numeric, not text")
     if raw.dtype == object and isinstance(raw.item(), (str, bytes, np.str_, np.bytes_)):
@@ -357,6 +388,8 @@ def _parse_float_metadata_value(column: str, value: Any) -> float:
         raise ValueError(f"{column} must contain finite numeric values") from exc
     if raw.ndim != 0:
         raise ValueError(f"{column} must contain finite numeric values")
+    if _is_complex_scalar(raw):
+        raise ValueError(f"{column} must contain finite real numeric values")
     item = raw.item()
     if isinstance(item, (bool, np.bool_)):
         raise ValueError(f"{column} must contain finite numeric values")
@@ -374,6 +407,8 @@ def _parse_bool_metadata_value(column: str, value: Any) -> bool:
         return bool(value)
     if value is None:
         raise ValueError(f"{column} must contain boolean values")
+    if _is_complex_scalar(value):
+        raise ValueError(f"{column} must contain boolean values, not complex values")
     if isinstance(value, (bytes, bytearray, memoryview)):
         try:
             value = bytes(value).decode("utf-8")

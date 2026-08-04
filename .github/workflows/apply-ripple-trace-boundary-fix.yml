@@ -1,21 +1,25 @@
 name: Apply ripple trace boundary fix
 
 on:
-  push:
+  pull_request:
     branches:
-      - agent/clip-expanded-ripple-events-to-trace
+      - main
+    types:
+      - opened
+      - reopened
+      - synchronize
 
 permissions:
   contents: write
 
 jobs:
   patch:
-    if: github.actor != 'github-actions[bot]'
+    if: github.actor != 'github-actions[bot]' && github.head_ref == 'agent/clip-expanded-ripple-events-to-trace'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.ref_name }}
+          ref: ${{ github.head_ref }}
           fetch-depth: 0
 
       - name: Apply source patch and regression
@@ -26,17 +30,19 @@ jobs:
 
           source_path = Path("scripts/prepare_olafsdottir_ztrack_sessions.py")
           source = source_path.read_text(encoding="utf-8")
-          old = '''        if config.expand_to_s > 0.0:
-              half_width = 0.5 * float(config.expand_to_s)
-              event_start = max(config.exclude_sleep_onset_s, peak_s - half_width)
-              event_end = peak_s + half_width
-          '''
-          new = '''        if config.expand_to_s > 0.0:
-              half_width = 0.5 * float(config.expand_to_s)
-              trace_end_s = score.shape[0] / float(sample_rate_hz)
-              event_start = max(config.exclude_sleep_onset_s, peak_s - half_width)
-              event_end = min(trace_end_s, peak_s + half_width)
-          '''
+          old = (
+              "        if config.expand_to_s > 0.0:\n"
+              "            half_width = 0.5 * float(config.expand_to_s)\n"
+              "            event_start = max(config.exclude_sleep_onset_s, peak_s - half_width)\n"
+              "            event_end = peak_s + half_width\n"
+          )
+          new = (
+              "        if config.expand_to_s > 0.0:\n"
+              "            half_width = 0.5 * float(config.expand_to_s)\n"
+              "            trace_end_s = score.shape[0] / float(sample_rate_hz)\n"
+              "            event_start = max(config.exclude_sleep_onset_s, peak_s - half_width)\n"
+              "            event_end = min(trace_end_s, peak_s + half_width)\n"
+          )
           if source.count(old) != 1:
               raise SystemExit("expected exactly one ripple expansion block")
           source_path.write_text(source.replace(old, new), encoding="utf-8")
@@ -112,10 +118,12 @@ jobs:
 
       - name: Commit patch
         shell: bash
+        env:
+          TARGET_BRANCH: ${{ github.head_ref }}
         run: |
           git diff --check
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A
           git commit -m "Clip expanded ripple events to trace support"
-          git push origin "HEAD:${GITHUB_REF_NAME}"
+          git push origin "HEAD:${TARGET_BRANCH}"

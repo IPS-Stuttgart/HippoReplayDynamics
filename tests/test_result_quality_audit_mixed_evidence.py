@@ -61,3 +61,34 @@ def test_mixed_evidence_finiteness_stays_conservative() -> None:
         False,
         False,
     ]
+
+def test_mixed_evidence_rejects_boolean_and_complex_scalars() -> None:
+    nested_complex = np.empty((), dtype=object)
+    nested_complex[()] = np.clongdouble(5.0 + 0.25j)
+    scores = pd.DataFrame(
+        {
+            "log_evidence": [
+                True,
+                np.bool_(False),
+                2.0 + 0.0j,
+                np.complex128(3.0 + 0.5j),
+                np.clongdouble(4.0 + 0.0j),
+                nested_complex,
+                6.0,
+            ],
+            "heldout_log_likelihood": [np.nan] * 7,
+        }
+    )
+
+    scored = ensure_evidence_support_columns(scores)
+
+    assert scored["evidence_comparable"].tolist() == [
+        False,
+        False,
+        False,
+        False,
+        False,
+        False,
+        True,
+    ]
+

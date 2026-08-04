@@ -390,12 +390,15 @@ def _base_candidate_intervals(session: ReplaySession, *, restrict_to_run_times: 
 
 
 def _padded_intervals(intervals: np.ndarray, *, padding_s: float) -> np.ndarray:
+    padding = float(padding_s)
+    if not np.isfinite(padding) or padding < 0.0:
+        raise ValueError("padding_s must be finite and nonnegative")
     arr = np.asarray(intervals, dtype=float).reshape(-1, 2)
     if arr.size == 0:
         return np.empty((0, 2), dtype=float)
     out = arr.copy()
-    out[:, 0] -= float(padding_s)
-    out[:, 1] += float(padding_s)
+    out[:, 0] -= padding
+    out[:, 1] += padding
     return out
 
 

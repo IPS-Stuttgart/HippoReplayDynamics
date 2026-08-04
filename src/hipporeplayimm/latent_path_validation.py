@@ -170,19 +170,36 @@ def _positive_integer_or_uncapped_value(name: str, value: Any) -> int | None:
     return None if integer_value <= 0 else integer_value
 
 
+def _unwrap_zero_dimensional_scalar(name: str, value: Any, expectation: str) -> Any:
+    """Unwrap nested zero-dimensional arrays without lossy scalar coercion."""
+
+    seen_container_ids: set[int] = set()
+    current = value
+    while isinstance(current, np.ndarray):
+        if current.ndim != 0:
+            raise ValueError(f"{name} must be {expectation}")
+        container_id = id(current)
+        if container_id in seen_container_ids:
+            raise ValueError(f"{name} must be {expectation}")
+        seen_container_ids.add(container_id)
+        current = current.item()
+    return current
+
+
 def _integer_valued_scalar(name: str, value: Any) -> int:
+    expectation = "positive integer-valued"
     if isinstance(value, (bool, np.bool_)):
-        raise TypeError(f"{name} must be positive integer-valued")
+        raise TypeError(f"{name} must be {expectation}")
     raw = np.asarray(value)
     if raw.ndim != 0:
-        raise ValueError(f"{name} must be positive integer-valued")
+        raise ValueError(f"{name} must be {expectation}")
     if _contains_text_values(raw):
-        raise ValueError(f"{name} must be positive integer-valued, not text")
-    item = raw.item()
-    if np.issubdtype(raw.dtype, np.bool_) or (
-        raw.dtype == object and isinstance(item, (bool, np.bool_))
-    ):
-        raise TypeError(f"{name} must be positive integer-valued")
+        raise ValueError(f"{name} must be {expectation}, not text")
+    item = _unwrap_zero_dimensional_scalar(name, raw, expectation)
+    if isinstance(item, (bool, np.bool_)):
+        raise TypeError(f"{name} must be {expectation}")
+    if isinstance(item, (complex, np.complexfloating)):
+        raise ValueError(f"{name} must be {expectation}, not complex")
 
     try:
         integer_value = operator.index(item)
@@ -190,13 +207,13 @@ def _integer_valued_scalar(name: str, value: Any) -> int:
         try:
             integer_value = int(item)
         except (TypeError, ValueError, OverflowError) as exc:
-            raise ValueError(f"{name} must be positive integer-valued") from exc
+            raise ValueError(f"{name} must be {expectation}") from exc
         try:
             is_exact = item == integer_value
             if not isinstance(is_exact, (bool, np.bool_)) or not bool(is_exact):
-                raise ValueError(f"{name} must be positive integer-valued")
+                raise ValueError(f"{name} must be {expectation}")
         except (TypeError, ValueError) as exc:
-            raise ValueError(f"{name} must be positive integer-valued") from exc
+            raise ValueError(f"{name} must be {expectation}") from exc
     return int(integer_value)
 
 
@@ -219,17 +236,21 @@ def _validate_latent_path_motion_sigmas(true_model: Any, state_space: Any) -> No
 
 
 def _finite_nonnegative_value(name: str, value: Any) -> float:
+    expectation = "finite and nonnegative"
     if isinstance(value, (bool, np.bool_)):
-        raise ValueError(f"{name} must be finite and nonnegative")
+        raise ValueError(f"{name} must be {expectation}")
     raw = np.asarray(value)
-    if raw.ndim != 0 or np.issubdtype(raw.dtype, np.bool_):
-        raise ValueError(f"{name} must be finite and nonnegative")
+    if raw.ndim != 0:
+        raise ValueError(f"{name} must be {expectation}")
+    item = _unwrap_zero_dimensional_scalar(name, raw, expectation)
+    if isinstance(item, (bool, np.bool_, complex, np.complexfloating)):
+        raise ValueError(f"{name} must be {expectation}")
     try:
-        numeric = float(raw)
+        numeric = float(item)
     except (TypeError, ValueError, OverflowError) as exc:
-        raise ValueError(f"{name} must be finite and nonnegative") from exc
+        raise ValueError(f"{name} must be {expectation}") from exc
     if not np.isfinite(numeric) or numeric < 0.0:
-        raise ValueError(f"{name} must be finite and nonnegative")
+        raise ValueError(f"{name} must be {expectation}")
     return numeric
 
 

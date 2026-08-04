@@ -101,12 +101,29 @@ def apply_spike_rate_metadata_patch() -> None:
 
 
 def _metadata_scalar_item(value: object, name: str) -> object:
-    """Return one table scalar, decoding byte-backed scalar storage."""
+    """Return one table scalar, decoding byte-backed scalar storage.
 
-    if isinstance(value, _BYTE_BACKED_SCALARS):
-        return bytes(value).decode("utf-8", errors="replace").strip()
+    MATLAB/HDF5 loaders can retain a scalar inside one or more zero-dimensional
+    object arrays. Unwrap those containers before validating the scalar domain;
+    otherwise ``float(...)`` can silently coerce a nested Boolean or discard the
+    imaginary component of a nested NumPy complex scalar.
+    """
+
+    item = value
+    seen_arrays: set[int] = set()
+    while isinstance(item, np.ndarray):
+        if item.ndim != 0:
+            raise ValueError(f"{name} must contain scalar numeric metadata values")
+        identity = id(item)
+        if identity in seen_arrays:
+            raise ValueError(f"{name} must contain scalar numeric metadata values")
+        seen_arrays.add(identity)
+        item = item.item()
+
+    if isinstance(item, _BYTE_BACKED_SCALARS):
+        return bytes(item).decode("utf-8", errors="replace").strip()
     try:
-        scalar = np.asarray(value)
+        scalar = np.asarray(item)
     except (TypeError, ValueError, OverflowError) as exc:
         raise ValueError(f"{name} must contain scalar numeric metadata values") from exc
     if scalar.ndim != 0:
@@ -115,17 +132,17 @@ def _metadata_scalar_item(value: object, name: str) -> object:
 
 
 def _finite_numeric_metadata_value(value: object, name: str) -> float:
-    """Return one finite numeric metadata scalar without accepting booleans."""
+    """Return one finite real numeric metadata scalar without accepting booleans."""
 
-    if isinstance(value, (bool, np.bool_)):
-        raise ValueError(f"{name} must contain finite numeric metadata values")
+    if isinstance(value, (bool, np.bool_, complex, np.complexfloating)):
+        raise ValueError(f"{name} must contain finite real numeric metadata values")
     item = _metadata_scalar_item(value, name)
-    if isinstance(item, (bool, np.bool_)):
-        raise ValueError(f"{name} must contain finite numeric metadata values")
+    if isinstance(item, (bool, np.bool_, complex, np.complexfloating)):
+        raise ValueError(f"{name} must contain finite real numeric metadata values")
     try:
         numeric = float(item)
     except (TypeError, ValueError, OverflowError) as exc:
-        raise ValueError(f"{name} must contain finite numeric metadata values") from exc
+        raise ValueError(f"{name} must contain finite real numeric metadata values") from exc
     if not np.isfinite(numeric):
         raise ValueError(f"{name} must be finite")
     return numeric

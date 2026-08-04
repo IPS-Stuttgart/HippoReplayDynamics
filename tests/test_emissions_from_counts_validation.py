@@ -36,6 +36,18 @@ def test_emissions_from_counts_rejects_boolean_count_values(counts: np.ndarray) 
         emissions_from_counts(_encoding(), counts, dt=0.02)
 
 
+@pytest.mark.parametrize(
+    "counts",
+    [
+        np.array([[3.0 + 2.0j]], dtype=np.complex128),
+        np.array([[np.complex128(3.0 + 0.0j)]], dtype=object),
+    ],
+)
+def test_emissions_from_counts_rejects_complex_count_values(counts: np.ndarray) -> None:
+    with pytest.raises(ValueError, match="real values, not complex values"):
+        emissions_from_counts(_encoding(), counts, dt=0.02)
+
+
 def test_emissions_from_counts_normalizes_arbitrary_precision_overflow() -> None:
     with pytest.raises(ValueError, match="counts must contain numeric values"):
         emissions_from_counts(

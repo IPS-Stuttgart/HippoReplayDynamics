@@ -1,0 +1,155 @@
+name: Apply scoped model-evidence comparison fix
+
+on:
+  push:
+    branches:
+      - agent/scope-model-evidence-comparisons
+
+permissions:
+  contents: write
+
+jobs:
+  apply-fix:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install test dependencies
+        run: python -m pip install -e '.[dev]'
+
+      - name: Apply source fix and regression test
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          source_path = Path("scripts/compare_model_evidence_runs.py")
+          source = source_path.read_text(encoding="utf-8")
+          needle = '    "benchmark_event_subset_seed",\n    "simulation_event_index",'
+          replacement = (
+              '    "benchmark_event_subset_seed",\n'
+              '    "matrix_id",\n'
+              '    "benchmark_event_epoch",\n'
+              '    "simulation_event_index",'
+          )
+          if source.count(needle) != 1:
+              raise RuntimeError("model-evidence event-key insertion point changed")
+          source_path.write_text(source.replace(needle, replacement), encoding="utf-8")
+
+          test_path = Path("tests/test_compare_model_evidence_matrix_epoch_scope.py")
+          test_path.write_text(
+              '''from __future__ import annotations
+
+import sys
+from pathlib import Path
+
+import pandas as pd
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
+
+from compare_model_evidence_runs import compare_runs  # noqa: E402
+
+
+def _write_event_scores(path: Path, rows: list[dict[str, object]]) -> None:
+    path.mkdir(parents=True, exist_ok=True)
+    pd.DataFrame(rows).to_csv(path / "event_model_evidence.csv", index=False)
+
+
+def _rows() -> list[dict[str, object]]:
+    return [
+        {
+            "session": "Rat1/Open1",
+            "matrix_id": "matrix-a",
+            "benchmark_event_epoch": "run",
+            "event_index": 0,
+            "model": "momentum",
+            "log_evidence": 10.0,
+        },
+        {
+            "session": "Rat1/Open1",
+            "matrix_id": "matrix-a",
+            "benchmark_event_epoch": "run",
+            "event_index": 0,
+            "model": "diffusion",
+            "log_evidence": 0.0,
+        },
+        {
+            "session": "Rat1/Open1",
+            "matrix_id": "matrix-b",
+            "benchmark_event_epoch": "sleep",
+            "event_index": 0,
+            "model": "momentum",
+            "log_evidence": 0.0,
+        },
+        {
+            "session": "Rat1/Open1",
+            "matrix_id": "matrix-b",
+            "benchmark_event_epoch": "sleep",
+            "event_index": 0,
+            "model": "diffusion",
+            "log_evidence": 10.0,
+        },
+    ]
+
+
+def test_compare_runs_scopes_reused_events_by_matrix_and_epoch(tmp_path: Path) -> None:
+    left = tmp_path / "left"
+    right = tmp_path / "right"
+    _write_event_scores(left, _rows())
+    _write_event_scores(right, _rows())
+
+    tables = compare_runs(
+        left,
+        right,
+        left_label="left",
+        right_label="right",
+        output=tmp_path / "comparison",
+    )
+
+    summary = tables["summary"].iloc[0]
+    assert summary["left_events"] == 2
+    assert summary["right_events"] == 2
+    assert summary["matched_events"] == 2
+    assert summary["canonical_best_agreements"] == 2
+
+    events = tables["event_comparison"]
+    assert set(zip(events["matrix_id"], events["benchmark_event_epoch"], strict=True)) == {
+        ("matrix-a", "run"),
+        ("matrix-b", "sleep"),
+    }
+    assert set(events["left_canonical_best_model"]) == {"momentum", "diffusion"}
+    assert set(events["right_canonical_best_model"]) == {"momentum", "diffusion"}
+
+    counts = tables["counts"].set_index(["run_label", "canonical_model"])["events"].to_dict()
+    assert counts == {
+        ("left", "momentum"): 1,
+        ("left", "diffusion"): 1,
+        ("right", "momentum"): 1,
+        ("right", "diffusion"): 1,
+    }
+    assert len(tables["relative"]) == 4
+''',
+              encoding="utf-8",
+          )
+          PY
+
+      - name: Run focused tests
+        run: >-
+          python -m pytest -q
+          tests/test_compare_model_evidence_runs.py
+          tests/test_compare_model_evidence_runs_keys.py
+          tests/test_compare_model_evidence_run_scoping.py
+          tests/test_compare_model_evidence_matrix_epoch_scope.py
+
+      - name: Commit patch
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add scripts/compare_model_evidence_runs.py tests/test_compare_model_evidence_matrix_epoch_scope.py
+          git rm .github/workflows/apply-scope-model-evidence-comparisons.yml
+          git commit -m "Scope model-evidence comparisons by matrix and epoch"
+          git push origin "HEAD:${GITHUB_REF_NAME}"

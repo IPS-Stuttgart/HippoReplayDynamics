@@ -13,6 +13,7 @@ _MISSING_PREDICTED_CANDIDATE_OPTION = "--state-space-momentum-predicted-candidat
 _STRING_TYPES = (str, bytes, np.str_, np.bytes_)
 _POSTERIOR_CALIBRATION_GROUP_PATCH = "_hipporeplayimm_retains_missing_calibration_groups"
 _BOOTSTRAP_DELTA_VALIDATION_PATCH = "_hipporeplayimm_filters_nonfinite_bootstrap_delta"
+_RESAMPLING_COUNT_PRECISION_PATCH = "_hipporeplayimm_preserves_exact_resampling_counts"
 
 
 def apply_cli_float_values_validation_patch() -> None:
@@ -70,6 +71,17 @@ def _patch_state_space_predicted_candidate_argument(_cli) -> None:
 
 def _patch_statistical_resampling_counts() -> None:
     from . import result_improvements
+
+    current_count_validator = result_improvements._positive_integer_count
+    if not getattr(current_count_validator, _RESAMPLING_COUNT_PRECISION_PATCH, False):
+
+        @wraps(current_count_validator)
+        def positive_integer_count(value: object, name: str) -> int:
+            return _positive_integer_count(name, value)
+
+        setattr(positive_integer_count, _RESAMPLING_COUNT_PRECISION_PATCH, True)
+        positive_integer_count._hipporeplayimm_original = current_count_validator  # type: ignore[attr-defined]
+        result_improvements._positive_integer_count = positive_integer_count
 
     _patch_positive_integer_kwarg(
         result_improvements,

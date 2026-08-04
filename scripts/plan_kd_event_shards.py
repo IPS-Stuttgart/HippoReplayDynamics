@@ -8,6 +8,7 @@ import json
 from pathlib import Path
 
 from benchmark_kd_model_evidence import _check_session, _events, _session_path
+from event_shard_count_validation import optional_nonnegative_integer_count, positive_integer_count
 from hipporeplayimm.data import load_replay_session
 
 
@@ -29,9 +30,8 @@ def _event_spec(event_ids: list[int]) -> str:
 
 
 def _event_chunks(event_ids: list[int], requested_shards: int) -> list[list[int]]:
-    if requested_shards < 1:
-        raise ValueError("--event-shard-count must be positive")
-    shard_count = min(requested_shards, len(event_ids))
+    validated_requested_shards = positive_integer_count("--event-shard-count", requested_shards)
+    shard_count = min(validated_requested_shards, len(event_ids))
     if shard_count < 1:
         raise ValueError("No events selected.")
     chunks: list[list[int]] = []
@@ -43,11 +43,7 @@ def _event_chunks(event_ids: list[int], requested_shards: int) -> list[list[int]
 
 
 def _validate_max_events(max_events: int | None) -> int | None:
-    if max_events is None:
-        return None
-    if isinstance(max_events, bool) or max_events < 0:
-        raise ValueError("--max-events must be non-negative")
-    return int(max_events)
+    return optional_nonnegative_integer_count("--max-events", max_events)
 
 
 def plan_event_shards(
@@ -59,15 +55,15 @@ def plan_event_shards(
     event_shard_count: int,
     momentum_shard_count: int,
 ) -> dict[str, object]:
-    if momentum_shard_count < 1:
-        raise ValueError("--momentum-shard-count must be positive")
     validated_max_events = _validate_max_events(max_events)
+    validated_event_shard_count = positive_integer_count("--event-shard-count", event_shard_count)
+    validated_momentum_shard_count = positive_integer_count("--momentum-shard-count", momentum_shard_count)
     session_dir = _session_path(dataset_root, session_id)
     _check_session(session_dir)
     session = load_replay_session(session_dir)
     event_ids = _events(events, session, validated_max_events)
-    chunks = _event_chunks(event_ids, event_shard_count)
-    matrix_size = len(chunks) * momentum_shard_count
+    chunks = _event_chunks(event_ids, validated_event_shard_count)
+    matrix_size = len(chunks) * validated_momentum_shard_count
     if matrix_size > 256:
         raise ValueError(
             f"Requested event/grid shard matrix has {matrix_size} jobs, exceeding GitHub Actions' 256-job matrix limit. "
@@ -86,12 +82,12 @@ def plan_event_shards(
     return {
         "session": session.session_id,
         "events": events,
-        "max_events": max_events,
+        "max_events": validated_max_events,
         "event_count": len(event_ids),
-        "requested_event_shard_count": event_shard_count,
+        "requested_event_shard_count": validated_event_shard_count,
         "event_shard_count": len(event_matrix),
-        "momentum_shard_count": momentum_shard_count,
-        "grid_shard_indices": list(range(momentum_shard_count)),
+        "momentum_shard_count": validated_momentum_shard_count,
+        "grid_shard_indices": list(range(validated_momentum_shard_count)),
         "event_matrix": event_matrix,
     }
 

@@ -262,7 +262,7 @@ def run_tests(
         list(COMPANION_CONTROLS),
         rat_fixed_effects=True,
     )
-    companion_low, companion_high, companion_completed = (
+    companion_low, companion_high, companion_positive_fraction, companion_completed = (
         rat_cluster_bootstrap_partial(
             events,
             PRIMARY,
@@ -302,6 +302,7 @@ def run_tests(
                 "rat_bootstrap_ci_low": companion_low,
                 "rat_bootstrap_ci_high": companion_high,
                 "bootstrap_replicates_completed": companion_completed,
+                "bootstrap_positive_fraction": companion_positive_fraction,
                 "permutation_p_value": np.nan,
                 "positive_rats": np.nan,
                 "leave_one_rat_out_positive": np.nan,

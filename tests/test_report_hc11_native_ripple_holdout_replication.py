@@ -98,6 +98,7 @@ def test_report_stops_when_strict_subset_is_not_distributed(tmp_path: Path) -> N
     result = build_report(
         shard_root=shards,
         output_dir=tmp_path / "report",
+        expected_sessions=2,
         expected_events_per_session=1,
         margin_threshold=5.5,
     )

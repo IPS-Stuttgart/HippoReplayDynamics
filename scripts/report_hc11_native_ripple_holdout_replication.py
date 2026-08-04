@@ -101,6 +101,7 @@ def build_report(
     *,
     shard_root: str | Path,
     output_dir: str | Path,
+    expected_sessions: int,
     expected_events_per_session: int,
     margin_threshold: float,
 ) -> dict[str, pd.DataFrame | str]:
@@ -161,7 +162,13 @@ def build_report(
 
     technical_rows = [
         _gate_row("technical", "expected_event_count_complete", len(selection) == expected_events and expected_events > 0, f"{len(selection)}/{expected_events}", "balanced session target"),
-        _gate_row("technical", "all_five_sessions_present", sessions == 5, sessions, "five public native-ripple sessions"),
+        _gate_row(
+            "technical",
+            "expected_sessions_present",
+            sessions == expected_sessions and expected_sessions > 0,
+            f"{sessions}/{expected_sessions}",
+            "public native-ripple sessions",
+        ),
         _gate_row("technical", "both_animals_present", animals == 2, animals, "Achilles and Cicero"),
         _gate_row("technical", "selection_keys_unique", duplicate_selection == 0, duplicate_selection, "duplicate event keys"),
         _gate_row("technical", "evidence_keys_unique", duplicate_evidence == 0, duplicate_evidence, "duplicate event/model keys"),
@@ -259,6 +266,7 @@ def build_report(
         "primary_encoding_variant": PRIMARY_ENCODING_VARIANT,
         "models": list(MODELS),
         "expected_events_per_session": int(expected_events_per_session),
+        "expected_sessions": int(expected_sessions),
         "margin_threshold": float(margin_threshold),
         "verdict": verdict,
         "recommended_action": recommendation,
@@ -285,6 +293,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--shard-root", required=True)
     parser.add_argument("--output-dir", required=True)
     parser.add_argument("--expected-events-per-session", type=int, default=50)
+    parser.add_argument("--expected-sessions", type=int, default=5)
     parser.add_argument("--margin-threshold", type=float, default=5.5)
     return parser
 
@@ -294,6 +303,7 @@ def main() -> int:
     build_report(
         shard_root=args.shard_root,
         output_dir=args.output_dir,
+        expected_sessions=args.expected_sessions,
         expected_events_per_session=args.expected_events_per_session,
         margin_threshold=args.margin_threshold,
     )

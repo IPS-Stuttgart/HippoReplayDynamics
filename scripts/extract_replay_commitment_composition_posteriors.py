@@ -47,6 +47,39 @@ MANIFEST_OUTPUT = "replay_commitment_composition_posterior_manifest.json"
 SUMMARY_OUTPUT = "replay_commitment_composition_posterior_summary.md"
 
 
+def mode_transition_diagnostics(transition: np.ndarray) -> dict[str, float]:
+    """Summarize one normalized 3x3 IMM mode-transition posterior."""
+
+    matrix = np.asarray(transition, dtype=float)
+    if matrix.shape != (3, 3):
+        raise ValueError("IMM mode-transition posterior must have shape (3, 3)")
+    if not np.isfinite(matrix).all() or np.any(matrix < 0.0):
+        raise ValueError("IMM mode-transition posterior must be finite and nonnegative")
+    total = float(matrix.sum())
+    if total <= 0.0:
+        raise ValueError("IMM mode-transition posterior must have positive mass")
+    matrix = matrix / total
+    nonfragmented = float(matrix[:2, :2].sum())
+    stationary_continuous = float(matrix[0, 1] + matrix[1, 0])
+    output = {
+        f"posterior_{MODE_NAMES[source]}_to_{MODE_NAMES[destination]}": float(
+            matrix[source, destination]
+        )
+        for source in range(3)
+        for destination in range(3)
+    }
+    output.update(
+        {
+            "nonfragmented_transition_probability": nonfragmented,
+            "stationary_continuous_switch_probability": stationary_continuous,
+            "stationary_continuous_switch_probability_given_nonfragmented": (
+                stationary_continuous / nonfragmented if nonfragmented > 0.0 else np.nan
+            ),
+        }
+    )
+    return output
+
+
 def _successful_rows(evidence: pd.DataFrame) -> pd.DataFrame:
     out = evidence.copy()
     if "status" in out:
@@ -338,6 +371,9 @@ def extract_posteriors(
                     )
                 bin_rows.append(row)
             for transition_index in range(len(switch)):
+                transition_diagnostics = mode_transition_diagnostics(
+                    transition[transition_index]
+                )
                 dominant = np.unravel_index(
                     int(np.argmax(transition[transition_index])),
                     transition[transition_index].shape,
@@ -363,6 +399,7 @@ def extract_posteriors(
                         "destination_map_mode_index": int(map_mode[transition_index + 1]),
                         "dominant_source_mode_index": int(dominant[0]),
                         "dominant_destination_mode_index": int(dominant[1]),
+                        **transition_diagnostics,
                     }
                 )
             continuous_ids = np.unique(bout_id[bout_id >= 0])

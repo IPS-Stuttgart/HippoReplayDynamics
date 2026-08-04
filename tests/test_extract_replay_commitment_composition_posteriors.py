@@ -6,6 +6,7 @@ import pandas as pd
 from scripts.extract_replay_commitment_composition_posteriors import (
     build_gate_summary,
     continuous_bout_ids,
+    mode_transition_diagnostics,
     normalized_posterior,
     posterior_path_summary,
 )
@@ -30,6 +31,28 @@ def test_continuous_bouts_exclude_stationary_and_fragmented_phases() -> None:
     bouts = continuous_bout_ids(mode)
 
     assert bouts.tolist() == [-1, 0, 0, -1, 1, -1, -1, 2, 2]
+
+
+def test_mode_transition_diagnostics_condition_out_fragmented_mass() -> None:
+    transition = np.array(
+        [
+            [0.20, 0.10, 0.05],
+            [0.15, 0.25, 0.05],
+            [0.05, 0.05, 0.10],
+        ]
+    )
+
+    diagnostics = mode_transition_diagnostics(transition)
+
+    assert np.isclose(diagnostics["nonfragmented_transition_probability"], 0.70)
+    assert np.isclose(diagnostics["stationary_continuous_switch_probability"], 0.25)
+    assert np.isclose(
+        diagnostics["stationary_continuous_switch_probability_given_nonfragmented"],
+        0.25 / 0.70,
+    )
+    assert np.isclose(
+        diagnostics["posterior_stationary_to_continuous_diffusion"], 0.10
+    )
 
 
 def test_posterior_gate_fails_nonvacuously_when_no_events_are_scored() -> None:

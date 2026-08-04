@@ -32,7 +32,10 @@ def _score_row(
     }
 
 
-@pytest.mark.parametrize("seed_column", ["random_seed", "null_random_seed"])
+@pytest.mark.parametrize(
+    "seed_column",
+    ["random_seed", "null_random_seed", "simulation_random_seed"],
+)
 def test_model_averaged_endpoint_scopes_stochastic_seed_columns(seed_column: str) -> None:
     frame = pd.DataFrame(
         [

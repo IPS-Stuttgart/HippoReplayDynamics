@@ -56,6 +56,7 @@ DECISION_OUTPUT = "hc11_native_ripple_model_claim_decisions.csv"
 DECODER_OUTPUT = "hc11_native_ripple_decoder_qc.csv"
 UNIT_OUTPUT = "hc11_native_ripple_encoding_unit_qc.csv"
 SELECTION_OUTPUT = "hc11_native_ripple_event_selection.csv"
+EXCLUSION_OUTPUT = "hc11_native_ripple_prior_event_exclusions.csv"
 SESSION_OUTPUT = "hc11_native_ripple_by_session.csv"
 ANIMAL_OUTPUT = "hc11_native_ripple_by_animal.csv"
 GEOMETRY_OUTPUT = "hc11_native_ripple_by_geometry.csv"
@@ -556,6 +557,7 @@ def load_native_post_nrem_events(
     max_events: int,
     event_ranking: str,
     selection_seed: int,
+    excluded_event_ids: set[int] | None = None,
 ) -> pd.DataFrame:
     base = session_dir.name
     sleep_state = mat_struct(session_dir / f"{base}.SleepState.states.mat", "SleepState")
@@ -568,7 +570,10 @@ def load_native_post_nrem_events(
     if times.shape[0] != 2 and times.shape[-1] == 2:
         times = times.T
     rows: list[dict[str, object]] = []
+    excluded_event_ids = excluded_event_ids or set()
     for event_id, (start_s, end_s) in enumerate(zip(times[0], times[1], strict=True)):
+        if event_id in excluded_event_ids:
+            continue
         peak_s = float(peaks[event_id]) if event_id < len(peaks) and np.isfinite(peaks[event_id]) else 0.5 * (start_s + end_s)
         if not times_in_intervals(np.array([peak_s]), track.post_epoch)[0] or not times_in_intervals(np.array([peak_s]), nrem)[0]:
             continue
@@ -604,6 +609,41 @@ def load_native_post_nrem_events(
         selection_seed=selection_seed,
         session_name=session_dir.name,
     )
+
+
+def load_prior_event_exclusions(
+    paths: list[str | Path],
+) -> tuple[set[tuple[str, str, int]], pd.DataFrame]:
+    """Load and de-duplicate event keys selected by earlier pilot runs."""
+
+    required = {"animal", "session", "event_id"}
+    source_rows: list[pd.DataFrame] = []
+    for value in paths:
+        path = Path(value).resolve()
+        frame = pd.read_csv(path)
+        missing = required.difference(frame.columns)
+        if missing:
+            raise ValueError(f"{path} is missing exclusion columns: {sorted(missing)}")
+        selected = frame.loc[:, ["animal", "session", "event_id"]].copy()
+        selected["animal"] = selected["animal"].astype(str)
+        selected["session"] = selected["session"].astype(str)
+        selected["event_id"] = pd.to_numeric(selected["event_id"], errors="raise").astype(int)
+        selected["source_selection_csv"] = str(path)
+        source_rows.append(selected)
+    if not source_rows:
+        empty = pd.DataFrame(columns=["animal", "session", "event_id", "source_count", "source_selection_csvs"])
+        return set(), empty
+    combined = pd.concat(source_rows, ignore_index=True)
+    audit = (
+        combined.groupby(["animal", "session", "event_id"], sort=True)["source_selection_csv"]
+        .agg(source_count="nunique", source_selection_csvs=lambda values: "|".join(sorted(set(values))))
+        .reset_index()
+    )
+    keys = {
+        (str(row.animal), str(row.session), int(row.event_id))
+        for row in audit.itertuples(index=False)
+    }
+    return keys, audit
 
 
 def rank_native_events(
@@ -852,10 +892,16 @@ def gate_summary(
     decisions: pd.DataFrame,
     direction: pd.DataFrame,
     max_events_per_session: int,
+    excluded_event_keys: set[tuple[str, str, int]] | None = None,
 ) -> pd.DataFrame:
     expected_events = int(session_count * max_events_per_session)
     successful = evidence[evidence["status"] == "success"] if "status" in evidence.columns else pd.DataFrame()
     models_per_event = successful.groupby(["session", "event_id", "encoding_variant"])["model"].nunique() if not successful.empty else pd.Series(dtype=int)
+    excluded_event_keys = excluded_event_keys or set()
+    selected_keys = {
+        (str(row.animal), str(row.session), int(row.event_id))
+        for row in selection.itertuples(index=False)
+    } if not selection.empty else set()
     checks = [
         ("native_ripple_sessions_present", session_count > 0, f"sessions={session_count}"),
         ("multiple_animals_present", selection["animal"].nunique() >= 2 if not selection.empty else False, f"animals={selection['animal'].nunique() if not selection.empty else 0}"),
@@ -863,6 +909,11 @@ def gate_summary(
         ("all_sessions_have_decoder_output", len(decoder) == session_count and session_count > 0, f"decoder_rows={len(decoder)}/{session_count}"),
         ("at_least_one_decoder_pass_per_geometry", set(decoder.loc[decoder["decoder_qc_passed"].astype(bool), "geometry"]) == {"linear", "circular"} if not decoder.empty else False, "descriptive readiness gate"),
         ("balanced_event_target_complete", len(selection) == expected_events and expected_events > 0, f"selected={len(selection)}/{expected_events}"),
+        (
+            "selected_events_exclude_prior_pilots",
+            bool(not selected_keys.intersection(excluded_event_keys)),
+            f"overlap={len(selected_keys.intersection(excluded_event_keys))}; prior_exclusions={len(excluded_event_keys)}",
+        ),
         ("required_models_complete", bool(len(models_per_event) > 0 and (models_per_event == len(MODELS)).all()), f"complete_groups={int((models_per_event == len(MODELS)).sum())}/{len(models_per_event)}"),
         (
             "no_model_scoring_failures",
@@ -882,6 +933,7 @@ def run(args: argparse.Namespace) -> dict[str, pd.DataFrame]:
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     session_dirs = discover_native_ripple_sessions(dataset_root)
+    excluded_event_keys, exclusion_audit = load_prior_event_exclusions(args.exclude_selection_csv)
     evidence_rows: list[dict[str, object]] = []
     decoder_rows: list[dict[str, object]] = []
     unit_frames: list[pd.DataFrame] = []
@@ -940,6 +992,11 @@ def run(args: argparse.Namespace) -> dict[str, pd.DataFrame]:
             max_events=args.max_events_per_session,
             event_ranking=args.event_ranking,
             selection_seed=args.selection_seed,
+            excluded_event_ids={
+                event_id
+                for excluded_animal, excluded_session, event_id in excluded_event_keys
+                if excluded_animal == animal and excluded_session == session
+            },
         )
         if events.empty:
             continue
@@ -947,6 +1004,11 @@ def run(args: argparse.Namespace) -> dict[str, pd.DataFrame]:
         events.insert(0, "maze_type", track.maze_type)
         events.insert(0, "session", session)
         events.insert(0, "animal", animal)
+        events["confirmation_cohort"] = str(args.cohort_label)
+        events["prior_pilot_events_excluded_in_session"] = sum(
+            excluded_animal == animal and excluded_session == session
+            for excluded_animal, excluded_session, _ in excluded_event_keys
+        )
         selection_frames.append(events)
         for event in events.itertuples(index=False):
             score_start_s = max(0.0, float(event.start_time_s) - float(args.event_padding_s))
@@ -1062,7 +1124,16 @@ def run(args: argparse.Namespace) -> dict[str, pd.DataFrame]:
     by_animal = summarize_decisions(decisions, ["animal"]) if not decisions.empty else pd.DataFrame()
     by_geometry = summarize_decisions(decisions, ["geometry"]) if not decisions.empty else pd.DataFrame()
     direction = direction_sensitivity(evidence) if not evidence.empty else pd.DataFrame()
-    gates = gate_summary(len(session_dirs), decoder, selection, evidence, decisions, direction, args.max_events_per_session)
+    gates = gate_summary(
+        len(session_dirs),
+        decoder,
+        selection,
+        evidence,
+        decisions,
+        direction,
+        args.max_events_per_session,
+        excluded_event_keys,
+    )
 
     outputs = {
         EVIDENCE_OUTPUT: evidence,
@@ -1070,6 +1141,7 @@ def run(args: argparse.Namespace) -> dict[str, pd.DataFrame]:
         DECODER_OUTPUT: decoder,
         UNIT_OUTPUT: units,
         SELECTION_OUTPUT: selection,
+        EXCLUSION_OUTPUT: exclusion_audit,
         SESSION_OUTPUT: by_session,
         ANIMAL_OUTPUT: by_animal,
         GEOMETRY_OUTPUT: by_geometry,
@@ -1082,15 +1154,25 @@ def run(args: argparse.Namespace) -> dict[str, pd.DataFrame]:
     manifest = {
         "created_at_utc": datetime.now(timezone.utc).isoformat(),
         "dataset": "hc-11_Grosmark_Buzsaki_Webshare",
-        "event_definition": "native_ripplesNREM_intersect_POST_and_NREM_then_spike_support_ranked_by_peak_power",
+        "event_definition": f"native_ripplesNREM_intersect_POST_and_NREM_ranked_by_{args.event_ranking}",
+        "cohort_label": str(args.cohort_label),
         "primary_encoding_variant": PRIMARY_ENCODING_VARIANT,
         "models": list(MODELS),
         "claim_boundary": "native-ripple geometry pilot; no Gate 2/3/4 biological IMM claim",
         "parameters": {key: value for key, value in vars(args).items() if key not in {"dataset_root", "output_dir"}},
         "sessions": [path.name for path in session_dirs],
         "selected_events": int(len(selection)),
+        "prior_pilot_events_excluded": int(len(excluded_event_keys)),
         "evidence_rows": int(len(evidence)),
-        **build_script_provenance(input_paths={"dataset_root": dataset_root}),
+        **build_script_provenance(
+            input_paths={
+                "dataset_root": dataset_root,
+                **{
+                    f"exclude_selection_csv_{index}": value
+                    for index, value in enumerate(args.exclude_selection_csv)
+                },
+            }
+        ),
     }
     (output_dir / MANIFEST_OUTPUT).write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     (output_dir / SUMMARY_OUTPUT).write_text(build_markdown_summary(decisions, decoder, by_geometry, direction, gates), encoding="utf-8")
@@ -1178,6 +1260,13 @@ def build_parser() -> argparse.ArgumentParser:
         default="peak_ripple_power",
     )
     parser.add_argument("--selection-seed", type=int, default=0)
+    parser.add_argument(
+        "--exclude-selection-csv",
+        nargs="*",
+        default=[],
+        help="Prior pilot selection CSVs whose animal/session/event_id keys must be excluded.",
+    )
+    parser.add_argument("--cohort-label", default="native_ripple_geometry_pilot")
     parser.add_argument("--decoder-folds", type=int, default=5)
     parser.add_argument("--decoder-window-s", type=float, default=0.250)
     parser.add_argument("--decoder-max-bins", type=int, default=2000)

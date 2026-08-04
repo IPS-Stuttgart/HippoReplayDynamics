@@ -187,3 +187,49 @@ def test_event_ranking_is_pre_evidence_and_deterministic() -> None:
     assert support["selection_score_name"].eq("n_active_units_then_n_spikes").all()
     assert random_a["event_id"].tolist() == random_b["event_id"].tolist()
     assert not any("evidence" in column.lower() for column in support.columns)
+
+
+def test_prior_event_exclusions_are_deduplicated_and_auditable(tmp_path: Path) -> None:
+    first = tmp_path / "first.csv"
+    second = tmp_path / "second.csv"
+    pd.DataFrame(
+        {
+            "animal": ["RatA", "RatA"],
+            "session": ["RatA_day1", "RatA_day1"],
+            "event_id": [2, 3],
+        }
+    ).to_csv(first, index=False)
+    pd.DataFrame(
+        {
+            "animal": ["RatA", "RatB"],
+            "session": ["RatA_day1", "RatB_day2"],
+            "event_id": [2, 9],
+        }
+    ).to_csv(second, index=False)
+
+    keys, audit = hc11.load_prior_event_exclusions([first, second])
+
+    assert keys == {("RatA", "RatA_day1", 2), ("RatA", "RatA_day1", 3), ("RatB", "RatB_day2", 9)}
+    duplicate = audit[(audit["session"] == "RatA_day1") & (audit["event_id"] == 2)].iloc[0]
+    assert duplicate["source_count"] == 2
+    assert str(first.resolve()) in duplicate["source_selection_csvs"]
+    assert str(second.resolve()) in duplicate["source_selection_csvs"]
+
+
+def test_prior_event_overlap_fails_gate() -> None:
+    selection = pd.DataFrame(
+        {"animal": ["RatA"], "session": ["RatA_day1"], "event_id": [2], "geometry": ["linear"]}
+    )
+    gates = hc11.gate_summary(
+        1,
+        pd.DataFrame(),
+        selection,
+        pd.DataFrame(),
+        pd.DataFrame(),
+        pd.DataFrame(),
+        1,
+        {("RatA", "RatA_day1", 2)},
+    )
+    passed = dict(zip(gates["gate"], gates["passed"], strict=True))
+
+    assert not bool(passed["selected_events_exclude_prior_pilots"])

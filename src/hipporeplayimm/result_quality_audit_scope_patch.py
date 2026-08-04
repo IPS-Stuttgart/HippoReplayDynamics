@@ -15,6 +15,8 @@ _DISTINCT_MODEL_MARGIN_PATCHED_FLAG = "_result_quality_distinct_model_margin_pat
 _MODEL_LABEL_SUMMARY_PATCHED_FLAG = "_result_quality_model_label_summary_patch_applied"
 _INTEGER_BOOL_PATCHED_FLAG = "_result_quality_audit_integer_bool_patch_applied"
 _SCOPE_FRAME_PATCHED_FLAG = "_result_quality_audit_scope_frame_patch_applied"
+_SCOPE_FRAME_PATCH_VERSION = 2
+_EVIDENCE_FINITENESS_PATCHED_FLAG = "_result_quality_row_specific_evidence_finiteness_patch_applied"
 _MISSING_TEXT_VALUES = {"", "nan", "na", "n/a", "none", "null", "<na>"}
 _INVALID_UTF8_MODEL_LABEL_PREFIX = "<invalid-utf8-bytes:"
 _INVALID_UTF8_SCOPE_LABEL_PREFIX = "<invalid-utf8-scope-bytes:"
@@ -64,6 +66,10 @@ _INFLUENCE_COLUMNS = (
 )
 _INFLUENCE_VALUE_COLUMNS = (
     "relative_log_evidence",
+    "log_evidence",
+    "heldout_log_likelihood",
+)
+_EVIDENCE_VALUE_COLUMNS = (
     "log_evidence",
     "heldout_log_likelihood",
 )
@@ -189,6 +195,62 @@ def _coerce_numeric_series(values: pd.Series) -> pd.Series:
         return pd.to_numeric(sanitized, errors="coerce")
     except (TypeError, ValueError, OverflowError):
         return sanitized.map(_coerce_numeric_scalar).astype(float)
+
+
+def _coerce_evidence_numeric_scalar(value: object) -> float:
+    """Coerce one evidence value with the base helper's numeric semantics."""
+
+    try:
+        return float(value)
+    except (TypeError, ValueError, OverflowError):
+        return float("nan")
+
+
+def _coerce_evidence_numeric_series(values: pd.Series) -> pd.Series:
+    """Match legacy evidence coercion while tolerating pathological objects."""
+
+    try:
+        return pd.to_numeric(values, errors="coerce")
+    except (TypeError, ValueError, OverflowError):
+        return values.map(_coerce_evidence_numeric_scalar).astype(float)
+
+
+def _patch_row_specific_evidence_finiteness(reporting_module: Any) -> None:
+    """Ignore missing sibling evidence metrics without admitting invalid values.
+
+    Concatenating model-evidence and held-out score tables creates both canonical
+    score columns, with the non-applicable column missing on each row.  The base
+    helper requires every present dataframe column to be finite, so those valid
+    rows are all marked non-comparable.  Require at least one observed score per
+    row and reject any observed non-finite or malformed score instead.
+    """
+
+    current = reporting_module._finite_evidence_series
+    if getattr(current, _EVIDENCE_FINITENESS_PATCHED_FLAG, False):
+        return
+
+    @wraps(current)
+    def finite_evidence_series(frame: pd.DataFrame) -> pd.Series:
+        columns = [column for column in _EVIDENCE_VALUE_COLUMNS if column in frame.columns]
+        if not columns:
+            return current(frame)
+
+        observed = pd.Series(False, index=frame.index)
+        valid = pd.Series(True, index=frame.index)
+        for column in columns:
+            values = frame[column]
+            missing = values.map(_is_missing_scalar).astype(bool)
+            numeric = _coerce_evidence_numeric_series(values)
+            finite = pd.Series(
+                np.isfinite(numeric.to_numpy(dtype=float)),
+                index=frame.index,
+            )
+            observed |= ~missing
+            valid &= missing | finite
+        return observed & valid
+
+    setattr(finite_evidence_series, _EVIDENCE_FINITENESS_PATCHED_FLAG, True)
+    reporting_module._finite_evidence_series = finite_evidence_series
 
 
 def _normalized_model_label(value: object) -> str | None:
@@ -398,17 +460,30 @@ def _patch_model_label_result_quality_summaries(gates_module: Any) -> None:
 
 
 def _patch_scope_frame_normalization(audit_module: Any) -> None:
-    """Normalize persisted grouping values before the audit starts grouping rows."""
+    """Normalize grouping values and complete row-specific evidence aliases."""
 
     current_score_table = audit_module._score_table_with_log_evidence_alias
-    if getattr(current_score_table, _SCOPE_FRAME_PATCHED_FLAG, False):
+    if getattr(current_score_table, _SCOPE_FRAME_PATCHED_FLAG, None) == _SCOPE_FRAME_PATCH_VERSION:
         return
 
     @wraps(current_score_table)
     def _score_table_with_log_evidence_alias(scores: pd.DataFrame) -> pd.DataFrame:
-        return _normalized_scope_frame(current_score_table(scores))
+        aliased = current_score_table(scores)
+        if "log_evidence" in aliased.columns and "heldout_log_likelihood" in aliased.columns:
+            missing_log_evidence = aliased["log_evidence"].map(_is_missing_scalar).astype(bool)
+            if bool(missing_log_evidence.any()):
+                aliased = aliased.copy()
+                aliased["log_evidence"] = aliased["log_evidence"].astype(object).where(
+                    ~missing_log_evidence,
+                    aliased["heldout_log_likelihood"],
+                )
+        return _normalized_scope_frame(aliased)
 
-    setattr(_score_table_with_log_evidence_alias, _SCOPE_FRAME_PATCHED_FLAG, True)
+    setattr(
+        _score_table_with_log_evidence_alias,
+        _SCOPE_FRAME_PATCHED_FLAG,
+        _SCOPE_FRAME_PATCH_VERSION,
+    )
     audit_module._score_table_with_log_evidence_alias = _score_table_with_log_evidence_alias
 
 
@@ -416,10 +491,12 @@ def apply_result_quality_audit_scope_patch() -> None:
     """Install scoped grouping and scalar coercion for result-quality summaries."""
 
     from . import advanced_result_evidence_margin_duplicates
+    from . import evidence_reporting as reporting_module
     from . import result_quality_audit as audit_module
     from . import result_quality_gates as gates_module
 
     advanced_result_evidence_margin_duplicates.apply_evidence_margin_distinct_model_patch()
+    _patch_row_specific_evidence_finiteness(reporting_module)
     _patch_distinct_model_result_quality_margins(gates_module)
     _patch_model_label_result_quality_summaries(gates_module)
     _patch_exact_integer_boolean_values(audit_module)

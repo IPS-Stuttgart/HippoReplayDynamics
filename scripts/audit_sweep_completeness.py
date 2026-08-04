@@ -193,16 +193,25 @@ def _paths_by_matrix_id(root: Path, filenames: Sequence[str], artifact_prefix: s
 
 def _matrix_id_from_csv(path: Path) -> str | None:
     try:
-        frame = pd.read_csv(path, nrows=1)
+        frame = pd.read_csv(
+            path,
+            usecols=lambda column: column in {"matrix_id", "id"},
+        )
     except Exception:
         return None
     for column in ("matrix_id", "id"):
-        if column in frame.columns and not frame.empty:
-            value = frame[column].iloc[0]
-            if pd.notna(value):
-                text = str(value).strip()
-                if text:
-                    return text
+        if column not in frame.columns:
+            continue
+        matrix_ids = _matrix_id_series(frame[column])
+        if matrix_ids.empty:
+            continue
+        unique_ids = matrix_ids.drop_duplicates().astype(str)
+        if len(unique_ids) > 1:
+            examples = ", ".join(repr(value) for value in unique_ids.iloc[:5])
+            raise ValueError(
+                f"{path} contains multiple matrix IDs in {column}: {examples}"
+            )
+        return str(unique_ids.iloc[0])
     return None
 
 

@@ -67,7 +67,7 @@ def _fixtures() -> tuple[pd.DataFrame, ...]:
                     "future_commitment_index_cm": float(rank),
                     "emission_only_future_commitment_index_cm": float(rank * 5),
                     "event_duration_ms": 100.0 + rank * 10.0,
-                    "n_spikes": 30 + rank,
+                    "n_spikes": 30 + rat_index,
                     "active_cell_count": 12,
                     "posterior_entropy": 2.0,
                     "posterior_path_length_cm": 100.0,

@@ -287,18 +287,41 @@ def _comparison_threshold(observed_abs_sum: float, values: np.ndarray) -> float:
     return max(0.0, observed_abs_sum - tolerance)
 
 
+def _unwrap_zero_dimensional_array(value: object, error_message: str) -> object:
+    """Unwrap nested zero-dimensional arrays before scalar validation."""
+
+    seen: set[int] = set()
+    current = value
+    while isinstance(current, np.ndarray):
+        if current.ndim != 0:
+            raise ValueError(error_message)
+        marker = id(current)
+        if marker in seen:
+            raise ValueError(error_message)
+        seen.add(marker)
+        current = current.item()
+    return current
+
+
 def _finite_values(values: Sequence[float] | np.ndarray) -> np.ndarray:
     raw = np.asarray(values, dtype=object)
-    if any(isinstance(value, (bool, np.bool_)) for value in raw.flat):
-        raise ValueError("values must be numeric deltas, not booleans")
-    if any(isinstance(value, (complex, np.complexfloating)) for value in raw.flat):
-        raise ValueError("values must contain real numeric deltas, not complex values")
-
-    array = np.asarray(values)
-    if array.ndim != 1:
+    if raw.ndim != 1:
         raise ValueError("values must be one-dimensional")
+
+    normalized = np.empty(raw.shape, dtype=object)
+    for index, value in enumerate(raw):
+        scalar = _unwrap_zero_dimensional_array(
+            value,
+            "values must contain only numeric deltas",
+        )
+        if isinstance(scalar, (bool, np.bool_)):
+            raise ValueError("values must be numeric deltas, not booleans")
+        if isinstance(scalar, (complex, np.complexfloating)):
+            raise ValueError("values must contain real numeric deltas, not complex values")
+        normalized[index] = scalar
+
     try:
-        numeric = array.astype(float, copy=False)
+        numeric = normalized.astype(float, copy=False)
     except (TypeError, ValueError) as exc:
         raise ValueError("values must contain only numeric deltas") from exc
     if not np.all(np.isfinite(numeric)):
@@ -307,20 +330,22 @@ def _finite_values(values: Sequence[float] | np.ndarray) -> np.ndarray:
 
 
 def _numeric_series(series: pd.Series, name: str) -> np.ndarray:
-    boolean = series.map(lambda value: isinstance(value, (bool, np.bool_)))
-    if bool(boolean.any()):
-        raise ValueError(f"{name} contains boolean values")
-    complex_values = series.map(
-        lambda value: isinstance(value, (complex, np.complexfloating))
-    )
-    if bool(complex_values.any()):
-        raise ValueError(f"{name} contains complex values")
+    normalized_values: list[object] = []
+    error_message = f"{name} contains populated nonnumeric values"
+    for value in series:
+        scalar = _unwrap_zero_dimensional_array(value, error_message)
+        if isinstance(scalar, (bool, np.bool_)):
+            raise ValueError(f"{name} contains boolean values")
+        if isinstance(scalar, (complex, np.complexfloating)):
+            raise ValueError(f"{name} contains complex values")
+        normalized_values.append(scalar)
 
-    numeric = pd.to_numeric(series, errors="coerce")
-    missing = series.isna()
+    normalized = pd.Series(normalized_values, index=series.index, dtype=object)
+    numeric = pd.to_numeric(normalized, errors="coerce")
+    missing = normalized.isna()
     invalid = ~missing & numeric.isna()
     if bool(invalid.any()):
-        examples = series.loc[invalid].astype(str).head(3).tolist()
+        examples = normalized.loc[invalid].astype(str).head(3).tolist()
         raise ValueError(f"{name} contains populated nonnumeric values: {examples}")
     finite = numeric.loc[~numeric.isna()].to_numpy(dtype=float)
     if finite.size and not np.all(np.isfinite(finite)):

@@ -252,6 +252,7 @@ def summarize_grammar_test(replicates: pd.DataFrame, decisions: pd.DataFrame) ->
                 "hypothesis": "H8_within_event_replay_grammar",
                 "events": int(len(original)),
                 "rats": int(original["rat"].nunique()) if len(original) else 0,
+                "sessions": int(original["session"].nunique()) if len(original) else 0,
                 "original_ordered_trajectory_fraction": observed,
                 "median_shuffle_ordered_trajectory_fraction": null_median,
                 "ordered_trajectory_fraction_excess": observed - null_median,

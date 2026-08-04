@@ -281,7 +281,7 @@ def build_campaign_results(
             expected_direction="positive",
             events=_int(h8, "events"),
             rats=_int(h8, "rats"),
-            sessions=0,
+            sessions=_int(h8, "sessions"),
             estimate=_float(h8, "ordered_trajectory_fraction_excess"),
             ci_low=np.nan,
             ci_high=np.nan,

@@ -4,12 +4,20 @@ on:
   push:
     branches:
       - agent/reject-nonreal-mixed-evidence-values
+  pull_request:
+    branches:
+      - main
+    types:
+      - opened
+      - synchronize
+      - reopened
 
 permissions:
   contents: write
 
 jobs:
   patch-and-test:
+    if: github.event_name == 'push' || github.head_ref == 'agent/reject-nonreal-mixed-evidence-values'
     runs-on: [self-hosted, Linux, X64]
     timeout-minutes: 20
     steps:

@@ -234,22 +234,24 @@ def _call_score_with_supported_kwargs(
             return score(emissions, bin_centers, **supported_kwargs)  # type: ignore[operator]
         return score(emissions, bin_centers)  # type: ignore[operator]
 
-    try:
-        if optional_kwargs:
-            return score(emissions, bin_centers, **optional_kwargs)  # type: ignore[operator]
-        return score(emissions, bin_centers)  # type: ignore[operator]
-    except TypeError as exc:
-        unsupported = [
-            keyword
-            for keyword in optional_kwargs
-            if _looks_like_unexpected_keyword_type_error(exc, keyword)
-        ]
-        if not unsupported:
-            raise
-        reduced_kwargs = {key: value for key, value in optional_kwargs.items() if key not in unsupported}
-        if reduced_kwargs:
-            return score(emissions, bin_centers, **reduced_kwargs)  # type: ignore[operator]
-        return score(emissions, bin_centers)  # type: ignore[operator]
+    remaining_kwargs = dict(optional_kwargs)
+    while True:
+        try:
+            if remaining_kwargs:
+                return score(emissions, bin_centers, **remaining_kwargs)  # type: ignore[operator]
+            return score(emissions, bin_centers)  # type: ignore[operator]
+        except TypeError as exc:
+            if not _type_error_raised_at_call_boundary(exc):
+                raise
+            unsupported = [
+                keyword
+                for keyword in remaining_kwargs
+                if _looks_like_unexpected_keyword_type_error(exc, keyword)
+            ]
+            if not unsupported:
+                raise
+            for keyword in unsupported:
+                remaining_kwargs.pop(keyword, None)
 
 
 def _supported_score_kwargs(score: object, optional_kwargs: dict[str, object]) -> dict[str, object] | None:
@@ -273,13 +275,22 @@ def _supported_score_kwargs(score: object, optional_kwargs: dict[str, object]) -
     return supported
 
 
+def _type_error_raised_at_call_boundary(exc: TypeError) -> bool:
+    """Return whether argument binding failed before entering the score callable."""
+
+    traceback = exc.__traceback__
+    return traceback is not None and traceback.tb_next is None
+
+
 def _looks_like_unexpected_keyword_type_error(exc: TypeError, keyword: str) -> bool:
     text = str(exc)
+    if "takes no keyword" in text:
+        return True
     return keyword in text and (
         "unexpected keyword" in text
         or "got an unexpected" in text
         or "invalid keyword" in text
-        or "takes no keyword" in text
+        or "positional-only arguments passed as keyword" in text
     )
 
 

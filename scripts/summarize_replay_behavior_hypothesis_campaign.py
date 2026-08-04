@@ -23,6 +23,7 @@ FDR_OUTPUT = "replay_behavior_hypothesis_campaign_fdr.csv"
 GATE_OUTPUT = "replay_behavior_hypothesis_campaign_gate_summary.csv"
 REPORT_OUTPUT = "replay_behavior_hypothesis_campaign_report.md"
 MANIFEST_OUTPUT = "replay_behavior_hypothesis_campaign_manifest.json"
+H7_CONTEXT_OUTPUT = "pf_h7_off_swr_route_context.csv"
 
 HYPOTHESES = {
     "H1": "Replay commitment during a pause",
@@ -126,6 +127,7 @@ def build_campaign_results(
     h6_transitions: pd.DataFrame,
     h6_splits: pd.DataFrame,
     h7_summary: pd.DataFrame,
+    h7_context: pd.DataFrame,
     h8_summary: pd.DataFrame,
     h8_gates: pd.DataFrame,
     h9_inference: pd.DataFrame,
@@ -237,6 +239,19 @@ def build_campaign_results(
 
     h7 = _first(h7_summary, selection_rule="strongest_exact_margin")
     h7_groups = _int(h7, "source_event_groups")
+    h7_pause_events = int(
+        h7_context.get("route_timing_relation", pd.Series(dtype=str))
+        .astype(str)
+        .eq("pre_departure_pause")
+        .sum()
+    )
+    h7_status = (
+        "incompatible_event_context"
+        if h7_pause_events == 0
+        else "insufficient_source_groups"
+        if h7_groups < 10
+        else "complete"
+    )
     rows.append(
         _row(
             "H7",
@@ -250,12 +265,12 @@ def build_campaign_results(
             ci_high=np.nan,
             primary_p_value=np.nan,
             null_control="source-event de-duplication and SWR-positive comparison",
-            technical_status="insufficient_source_groups" if h7_groups < 10 else "complete",
-            pre_fdr_interpretation="insufficient" if h7_groups < 10 else "inconclusive",
+            technical_status=h7_status,
+            pre_fdr_interpretation="insufficient" if h7_status != "complete" else "inconclusive",
             robustness_gate=False,
             evidence_note=(
-                f"{_int(h7, 'trajectory_confident_candidates')}/{h7_groups} source-deduplicated off-SWR candidates are trajectory-confident, "
-                "but the artifact lacks matched pause/route-commitment outcomes"
+                f"{_int(h7, 'trajectory_confident_candidates')}/{h7_groups} source-deduplicated off-SWR candidates are trajectory-confident; "
+                f"pause-before-departure candidates={h7_pause_events}/{h7_groups}"
             ),
         )
     )
@@ -344,8 +359,11 @@ def build_campaign_results(
     )
 
     def final_status(row: pd.Series) -> str:
-        if str(row["technical_status"]).startswith("insufficient"):
+        technical = str(row["technical_status"])
+        if technical.startswith("insufficient") or technical == "incompatible_event_context":
             return "insufficient"
+        if technical == "missing":
+            return "technical_failure"
         if bool(row["campaign_significant"]):
             return "supported"
         if np.isfinite(row["primary_p_value"]) and float(row["primary_p_value"]) <= 0.05:
@@ -354,6 +372,68 @@ def build_campaign_results(
 
     result["final_status"] = result.apply(final_status, axis=1)
     return result
+
+
+def map_off_swr_route_context(
+    decisions: pd.DataFrame,
+    route_segments: pd.DataFrame,
+    *,
+    selection_rule: str = "strongest_exact_margin",
+) -> pd.DataFrame:
+    """Map selected off-SWR windows to independently segmented behavior routes."""
+
+    selected = decisions[
+        decisions["selection_rule"].astype(str).eq(selection_rule)
+    ].copy()
+    rows: list[dict[str, object]] = []
+    for candidate in selected.itertuples(index=False):
+        event_time = 0.5 * (
+            float(candidate.window_start_s) + float(candidate.window_end_s)
+        )
+        session_routes = route_segments[
+            route_segments["session"].astype(str).eq(str(candidate.session))
+        ]
+        containing = session_routes[
+            (session_routes["interval_start_time_s"].astype(float) <= event_time)
+            & (session_routes["interval_end_time_s"].astype(float) >= event_time)
+        ]
+        following = session_routes[
+            session_routes["movement_start_time_s"].astype(float) > event_time
+        ]
+        if len(containing):
+            route = containing.sort_values("duration_s").iloc[0]
+        elif len(following):
+            route = following.sort_values("movement_start_time_s").iloc[0]
+        else:
+            route = pd.Series(dtype=object)
+        if route.empty:
+            relation = "no_current_or_future_route"
+            time_to_departure = np.nan
+            route_id = ""
+        else:
+            movement_start = float(route["movement_start_time_s"])
+            movement_end = float(route["movement_end_time_s"])
+            time_to_departure = movement_start - event_time
+            route_id = str(route["route_id"])
+            if event_time < movement_start:
+                relation = "pre_departure_pause"
+            elif event_time <= movement_end:
+                relation = "during_segmented_movement"
+            else:
+                relation = "post_segmented_movement_within_interval"
+        rows.append(
+            {
+                "session": str(candidate.session),
+                "rat": str(candidate.rat),
+                "source_event_index": int(candidate.event_index),
+                "null_index": int(candidate.null_index),
+                "off_swr_window_midpoint_s": event_time,
+                "route_id": route_id,
+                "route_timing_relation": relation,
+                "time_to_route_movement_start_s": time_to_departure,
+            }
+        )
+    return pd.DataFrame(rows)
 
 
 def build_companion_tests(context_tests: pd.DataFrame, context_events: pd.DataFrame) -> pd.DataFrame:
@@ -456,6 +536,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--h6-transitions", required=True)
     parser.add_argument("--h6-splits", required=True)
     parser.add_argument("--h7-summary", required=True)
+    parser.add_argument("--h7-decisions", required=True)
+    parser.add_argument("--route-segments", required=True)
     parser.add_argument("--h8-summary", required=True)
     parser.add_argument("--h8-gates", required=True)
     parser.add_argument("--h9-inference", required=True)
@@ -472,16 +554,23 @@ def main() -> int:
         "h6_transitions": pd.read_csv(args.h6_transitions),
         "h6_splits": pd.read_csv(args.h6_splits),
         "h7_summary": pd.read_csv(args.h7_summary),
+        "h7_decisions": pd.read_csv(args.h7_decisions),
+        "route_segments": pd.read_csv(args.route_segments),
         "h8_summary": pd.read_csv(args.h8_summary),
         "h8_gates": pd.read_csv(args.h8_gates),
         "h9_inference": pd.read_csv(args.h9_inference),
     }
+    h7_context = map_off_swr_route_context(
+        inputs["h7_decisions"],
+        inputs["route_segments"],
+    )
     results = build_campaign_results(
         context_tests=inputs["context_tests"],
         h5_tests=inputs["h5_tests"],
         h6_transitions=inputs["h6_transitions"],
         h6_splits=inputs["h6_splits"],
         h7_summary=inputs["h7_summary"],
+        h7_context=h7_context,
         h8_summary=inputs["h8_summary"],
         h8_gates=inputs["h8_gates"],
         h9_inference=inputs["h9_inference"],
@@ -493,6 +582,7 @@ def main() -> int:
     results.to_csv(output / RESULT_OUTPUT, index=False)
     results[["hypothesis", "primary_p_value", "fdr_input_p_value", "bh_q_value_10_hypotheses", "campaign_significant"]].to_csv(output / FDR_OUTPUT, index=False)
     companions.to_csv(output / COMPANION_OUTPUT, index=False)
+    h7_context.to_csv(output / H7_CONTEXT_OUTPUT, index=False)
     gates.to_csv(output / GATE_OUTPUT, index=False)
     write_report(results, companions, gates, output / REPORT_OUTPUT)
     manifest = {

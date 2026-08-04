@@ -7,6 +7,7 @@ from scripts.summarize_replay_behavior_hypothesis_campaign import (
     benjamini_hochberg,
     build_campaign_results,
     build_gate_summary,
+    map_off_swr_route_context,
 )
 
 
@@ -123,6 +124,9 @@ def test_campaign_keeps_insufficient_tests_in_fdr_as_one() -> None:
         h6_transitions=transitions,
         h6_splits=h6,
         h7_summary=h7,
+        h7_context=pd.DataFrame(
+            {"route_timing_relation": ["during_segmented_movement"] * 7}
+        ),
         h8_summary=h8,
         h8_gates=h8_gates,
         h9_inference=h9,
@@ -134,3 +138,46 @@ def test_campaign_keeps_insufficient_tests_in_fdr_as_one() -> None:
     gates = build_gate_summary(results)
     assert bool(gates.set_index("gate").loc["overall", "passed"])
     assert np.isfinite(results["bh_q_value_10_hypotheses"]).all()
+
+
+def test_off_swr_route_context_distinguishes_pause_and_movement() -> None:
+    decisions = pd.DataFrame(
+        [
+            {
+                "selection_rule": "strongest_exact_margin",
+                "session": "Rat1/Open1",
+                "rat": "Rat1",
+                "event_index": 1,
+                "null_index": 0,
+                "window_start_s": 12.0,
+                "window_end_s": 12.2,
+            },
+            {
+                "selection_rule": "strongest_exact_margin",
+                "session": "Rat1/Open1",
+                "rat": "Rat1",
+                "event_index": 2,
+                "null_index": 1,
+                "window_start_s": 16.0,
+                "window_end_s": 16.2,
+            },
+        ]
+    )
+    routes = pd.DataFrame(
+        [
+            {
+                "session": "Rat1/Open1",
+                "route_id": "route_1",
+                "interval_start_time_s": 10.0,
+                "interval_end_time_s": 20.0,
+                "movement_start_time_s": 15.0,
+                "movement_end_time_s": 19.0,
+                "duration_s": 10.0,
+            }
+        ]
+    )
+    context = map_off_swr_route_context(decisions, routes)
+    assert context["route_timing_relation"].tolist() == [
+        "pre_departure_pause",
+        "during_segmented_movement",
+    ]

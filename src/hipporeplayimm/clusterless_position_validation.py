@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 import numpy as np
@@ -19,6 +19,7 @@ from .position_validation import _decode_windows, _distance
 class ClusterlessPositionValidationConfig:
     clusterless: ClusterlessMarkConfig = ClusterlessMarkConfig()
     decode_bin_s: float = 1.0
+    n_folds: int = 5
     max_windows_per_session: int | None = None
     random_seed: int = 1
     session: str | None = None
@@ -48,9 +49,14 @@ def validate_session_clusterless_position(
     session: ReplaySession,
     config: ClusterlessPositionValidationConfig | None = None,
 ) -> pd.DataFrame:
-    """Decode behavior windows with the clusterless marked-point-process encoder."""
+    """Decode held-out behavior windows with the clusterless mark encoder."""
 
     config = ClusterlessPositionValidationConfig() if config is None else config
+    n_folds = _positive_integer(config.n_folds, "n_folds")
+    decode_bin_s = float(config.decode_bin_s)
+    if not np.isfinite(decode_bin_s) or decode_bin_s <= 0.0:
+        raise ValueError("decode_bin_s must be positive and finite")
+
     position = _clean_position(session.position)
     if position.size == 0:
         return pd.DataFrame()
@@ -59,23 +65,54 @@ def validate_session_clusterless_position(
     speed = _speed_cm_s(times, xy)
     encoding_config = config.clusterless.encoding
     min_speed = 5.0 if encoding_config is None else encoding_config.min_speed_cm_s
-    movement = _times_in_intervals(times, session.run_times) & (speed >= min_speed)
-    windows = _decode_windows(times, xy, movement, session.run_times, config.decode_bin_s)
-    if config.max_windows_per_session is not None:
-        rng = np.random.default_rng(config.random_seed)
-        if len(windows) > config.max_windows_per_session:
-            keep = np.sort(rng.choice(len(windows), size=config.max_windows_per_session, replace=False))
-            windows = [windows[int(index)] for index in keep]
+    base_run_times = _base_run_intervals(session.run_times, times)
+    movement = _times_in_intervals(times, base_run_times) & (speed >= min_speed)
+    windows = _decode_windows(times, xy, movement, base_run_times, decode_bin_s)
+
+    rng = np.random.default_rng(config.random_seed)
+    if config.max_windows_per_session is not None and len(windows) > config.max_windows_per_session:
+        keep = np.sort(rng.choice(len(windows), size=config.max_windows_per_session, replace=False))
+        windows = [windows[int(index)] for index in keep]
     if not windows:
         return pd.DataFrame()
-    encoding = fit_clusterless_mark_encoding(session, config.clusterless)
-    rows = []
-    for window_index, window in enumerate(windows):
-        rows.append(_decode_clusterless_window(session, encoding, window, window_index))
+
+    shuffled = rng.permutation(len(windows))
+    folds = [fold for fold in np.array_split(shuffled, min(n_folds, len(windows))) if fold.size]
+    rows: list[dict[str, object]] = []
+    for fold_index, validation_indices in enumerate(folds):
+        held_out_intervals = np.asarray(
+            [
+                [windows[int(index)]["start_time"], windows[int(index)]["end_time"]]
+                for index in validation_indices
+            ],
+            dtype=float,
+        )
+        training_run_times = _subtract_half_open_intervals(base_run_times, held_out_intervals)
+        if training_run_times.size == 0:
+            continue
+        training_session = replace(session, run_times=training_run_times)
+        encoding = fit_clusterless_mark_encoding(training_session, config.clusterless)
+        for window_index in sorted(int(index) for index in validation_indices):
+            rows.append(
+                _decode_clusterless_window(
+                    session,
+                    encoding,
+                    windows[window_index],
+                    window_index,
+                    fold_index=fold_index,
+                )
+            )
     return pd.DataFrame(rows)
 
 
-def _decode_clusterless_window(session: ReplaySession, encoding, window: dict[str, float], window_index: int) -> dict[str, object]:
+def _decode_clusterless_window(
+    session: ReplaySession,
+    encoding,
+    window: dict[str, float],
+    window_index: int,
+    *,
+    fold_index: int,
+) -> dict[str, object]:
     event = _PseudoRipple(start=float(window["start_time"]), end=float(window["end_time"]))
     emissions = build_clusterless_mark_emissions(
         session,
@@ -94,9 +131,11 @@ def _decode_clusterless_window(session: ReplaySession, encoding, window: dict[st
     true_rank = 1 + int(np.sum(posterior > posterior[true_bin]))
     return {
         "session": session.session_id,
+        "fold": int(fold_index),
         "window_index": int(window_index),
         "start_time": float(window["start_time"]),
         "end_time": float(window["end_time"]),
+        "center_time": float(window["center_time"]),
         "true_x": float(true_xy[0]),
         "true_y": float(true_xy[1]),
         "posterior_mean_x": float(posterior_mean[0]),
@@ -122,17 +161,84 @@ def _decode_clusterless_window(session: ReplaySession, encoding, window: dict[st
 def summarize_clusterless_position_validation(samples: pd.DataFrame) -> pd.DataFrame:
     if samples.empty:
         return pd.DataFrame()
-    return samples.groupby("session", as_index=False).agg(
-        decode_windows=("window_index", "count"),
-        median_posterior_mean_error_cm=("posterior_mean_error_cm", "median"),
-        median_map_error_cm=("map_error_cm", "median"),
-        mean_true_bin_probability=("true_bin_probability", "mean"),
-        median_true_bin_rank=("true_bin_rank", "median"),
-        mean_spikes_per_window=("n_spikes", "mean"),
-        spatial_bins=("n_position_bins", "first"),
-        spike_mark_features=("spike_mark_features", "first"),
-        clusterless_mark_likelihood=("clusterless_mark_likelihood", "first"),
-    )
+    aggregations: dict[str, tuple[str, str]] = {
+        "decode_windows": ("window_index", "count"),
+        "median_posterior_mean_error_cm": ("posterior_mean_error_cm", "median"),
+        "median_map_error_cm": ("map_error_cm", "median"),
+        "mean_true_bin_probability": ("true_bin_probability", "mean"),
+        "median_true_bin_rank": ("true_bin_rank", "median"),
+        "mean_spikes_per_window": ("n_spikes", "mean"),
+        "spatial_bins": ("n_position_bins", "first"),
+        "spike_mark_features": ("spike_mark_features", "first"),
+        "clusterless_mark_likelihood": ("clusterless_mark_likelihood", "first"),
+    }
+    if "fold" in samples.columns:
+        aggregations["folds"] = ("fold", "nunique")
+    return samples.groupby("session", as_index=False).agg(**aggregations)
+
+
+def _base_run_intervals(run_times: np.ndarray, position_times: np.ndarray) -> np.ndarray:
+    intervals = np.asarray(run_times, dtype=float)
+    if intervals.size:
+        return np.atleast_2d(intervals)
+    return np.asarray([[float(position_times[0]), float(position_times[-1])]], dtype=float)
+
+
+def _subtract_half_open_intervals(base_intervals: np.ndarray, excluded_intervals: np.ndarray) -> np.ndarray:
+    """Subtract half-open validation windows from inclusive run intervals."""
+
+    excluded = _merge_half_open_intervals(excluded_intervals)
+    output: list[list[float]] = []
+    for raw_start, raw_end in np.asarray(base_intervals, dtype=float):
+        start = float(raw_start)
+        end = float(raw_end)
+        if not np.isfinite(start) or not np.isfinite(end) or end < start:
+            continue
+        cursor = start
+        for excluded_start, excluded_end in excluded:
+            if excluded_end <= cursor or excluded_start > end:
+                continue
+            if excluded_start > cursor:
+                training_end = float(np.nextafter(excluded_start, -np.inf))
+                if training_end >= cursor:
+                    output.append([cursor, min(training_end, end)])
+            cursor = max(cursor, float(excluded_end))
+            if cursor > end:
+                break
+        if cursor <= end:
+            output.append([cursor, end])
+    return np.asarray(output, dtype=float).reshape(-1, 2)
+
+
+def _merge_half_open_intervals(intervals: np.ndarray) -> list[tuple[float, float]]:
+    valid = [
+        (float(start), float(end))
+        for start, end in np.asarray(intervals, dtype=float).reshape(-1, 2)
+        if np.isfinite(start) and np.isfinite(end) and end > start
+    ]
+    if not valid:
+        return []
+    valid.sort()
+    merged = [valid[0]]
+    for start, end in valid[1:]:
+        previous_start, previous_end = merged[-1]
+        if start <= previous_end:
+            merged[-1] = (previous_start, max(previous_end, end))
+        else:
+            merged.append((start, end))
+    return merged
+
+
+def _positive_integer(value: object, name: str) -> int:
+    if isinstance(value, (bool, np.bool_)):
+        raise ValueError(f"{name} must be a positive integer")
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ValueError(f"{name} must be a positive integer") from exc
+    if not np.isfinite(numeric) or not numeric.is_integer() or numeric < 1.0:
+        raise ValueError(f"{name} must be a positive integer")
+    return int(numeric)
 
 
 def _nearest_bin(point: np.ndarray, centers: np.ndarray) -> int:

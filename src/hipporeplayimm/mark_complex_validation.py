@@ -6,7 +6,9 @@ rather than marks, must be rejected before the legacy coercion path can silently
 convert them to real-valued features.  Ambiguous square mark matrices are
 reoriented when an embedded spike-time column uniquely identifies the spike axis.
 Tetrode/cell mapping tables are likewise oriented only when the observed spike
-cell IDs identify one functional mapping direction unambiguously.
+cell IDs identify one functional mapping direction unambiguously.  Nested scalar
+array wrappers around identifier values are fully unwrapped before exact integer
+validation so complex components cannot be discarded by NumPy's float coercion.
 """
 
 from __future__ import annotations
@@ -21,6 +23,7 @@ _PATCHED_FLAG = "_mark_complex_validation_patch_applied"
 _PATCH_WRAPPER_ATTR = "_mark_complex_validation_wrapper"
 _TIME_COLUMN_WRAPPER_ATTR = "_mark_time_column_finite_support_wrapper"
 _TETRODE_ORIENTATION_WRAPPER_ATTR = "_tetrode_cell_id_orientation_wrapper"
+_INTEGRAL_ID_COMPLEX_WRAPPER_ATTR = "_integral_id_complex_validation_wrapper"
 
 
 def _complex_has_zero_imaginary(values: np.ndarray) -> bool:
@@ -47,6 +50,25 @@ def _contains_boolean_values(values: Any) -> bool:
     if isinstance(values, Iterable):
         return any(_contains_boolean_values(value) for value in values)
     return False
+
+
+def _unwrap_scalar_arrays(value: Any, name: str) -> Any:
+    """Recursively unwrap zero-dimensional arrays with cycle protection."""
+
+    current = value
+    seen_arrays: set[int] = set()
+    while isinstance(current, np.ndarray):
+        if current.ndim != 0:
+            return current
+        array_id = id(current)
+        if array_id in seen_arrays:
+            raise ValueError(f"{name} must contain scalar integer identifiers")
+        seen_arrays.add(array_id)
+        try:
+            current = current.item()
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"{name} must contain scalar integer identifiers") from exc
+    return current
 
 
 def _matching_finite_support(left: np.ndarray, right: np.ndarray) -> bool:
@@ -160,6 +182,10 @@ def _is_tetrode_orientation_wrapper(func: object) -> bool:
     return bool(getattr(func, _TETRODE_ORIENTATION_WRAPPER_ATTR, False))
 
 
+def _is_integral_id_complex_wrapper(func: object) -> bool:
+    return bool(getattr(func, _INTEGRAL_ID_COMPLEX_WRAPPER_ATTR, False))
+
+
 def apply_mark_complex_validation_patch() -> None:
     """Install mark-matrix and tetrode/cell orientation validation."""
 
@@ -168,13 +194,29 @@ def apply_mark_complex_validation_patch() -> None:
     current_coerce_mark_matrix = data._coerce_mark_matrix
     current_looks_like_time_column = data._looks_like_time_column
     current_mark_group_ids = data._mark_group_ids_from_tetrode_cell_ids
+    current_coerce_integral_id = data_cell_id_validation._coerce_integral_id
     if (
         _is_mark_complex_validation_wrapper(current_coerce_mark_matrix)
         and _is_time_column_wrapper(current_looks_like_time_column)
         and _is_tetrode_orientation_wrapper(current_mark_group_ids)
+        and _is_integral_id_complex_wrapper(current_coerce_integral_id)
     ):
         setattr(data, _PATCHED_FLAG, True)
         return
+
+    if not _is_integral_id_complex_wrapper(current_coerce_integral_id):
+        original_coerce_integral_id = current_coerce_integral_id
+
+        @wraps(original_coerce_integral_id)
+        def coerce_integral_id(value, name: str, integer_info: np.iinfo):
+            return original_coerce_integral_id(
+                _unwrap_scalar_arrays(value, name),
+                name,
+                integer_info,
+            )
+
+        setattr(coerce_integral_id, _INTEGRAL_ID_COMPLEX_WRAPPER_ATTR, True)
+        data_cell_id_validation._coerce_integral_id = coerce_integral_id
 
     if not _is_time_column_wrapper(current_looks_like_time_column):
         original_looks_like_time_column = current_looks_like_time_column

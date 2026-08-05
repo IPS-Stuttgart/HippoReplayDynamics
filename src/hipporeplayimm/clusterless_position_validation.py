@@ -2,14 +2,15 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
 from scipy.special import logsumexp
 
-from .clusterless import ClusterlessMarkConfig, build_clusterless_mark_emissions, fit_clusterless_mark_encoding
+from .clusterless import ClusterlessMarkConfig, build_clusterless_mark_emissions
+from .clusterless_cv_exclusion import fit_clusterless_mark_encoding_excluding_intervals
 from .data import ReplaySession, load_open_field_sessions
 from .encoding import EmissionConfig, _clean_position, _speed_cm_s, _times_in_intervals
 from .position_validation import _decode_windows, _distance
@@ -90,8 +91,11 @@ def validate_session_clusterless_position(
         training_run_times = _subtract_half_open_intervals(base_run_times, held_out_intervals)
         if training_run_times.size == 0:
             continue
-        training_session = replace(session, run_times=training_run_times)
-        encoding = fit_clusterless_mark_encoding(training_session, config.clusterless)
+        encoding = fit_clusterless_mark_encoding_excluding_intervals(
+            session,
+            config.clusterless,
+            held_out_intervals,
+        )
         for window_index in sorted(int(index) for index in validation_indices):
             rows.append(
                 _decode_clusterless_window(

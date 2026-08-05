@@ -155,8 +155,16 @@ def score_table_sign_flip_summary(
 
     rows: list[dict[str, object]] = []
     normalized_models = selected[model_column].map(_normalize_model_label)
-    grouped = selected.groupby(normalized_models, sort=False, dropna=False)
-    for group_index, (model, group) in enumerate(grouped):
+    groups = list(selected.groupby(normalized_models, sort=False, dropna=False))
+    seed_order = sorted(
+        range(len(groups)),
+        key=lambda index: _model_seed_sort_key(groups[index][0]),
+    )
+    seed_offsets = [0] * len(groups)
+    for offset, group_index in enumerate(seed_order):
+        seed_offsets[group_index] = offset
+
+    for group_index, (model, group) in enumerate(groups):
         values = _numeric_series(group[value_column], value_column)
         if values.size == 0:
             rows.append(
@@ -178,7 +186,7 @@ def score_table_sign_flip_summary(
             values,
             max_exact_n=max_exact_n,
             n_permutations=n_permutations,
-            random_seed=random_seed + group_index,
+            random_seed=random_seed + seed_offsets[group_index],
             chunk_size=chunk_size,
         )
         row = {model_column: model, "value_column": value_column, **asdict(result)}
@@ -379,6 +387,18 @@ def _model_filter_text(value: object) -> str:
     """Return normalized model text for the optional model filter."""
 
     return str(_normalize_model_label(value)).strip()
+
+
+def _model_seed_sort_key(value: object) -> tuple[str, str, str]:
+    """Return a deterministic ordering key for per-model Monte Carlo seeds."""
+
+    normalized = _normalize_model_label(value)
+    value_type = type(normalized)
+    return (
+        value_type.__module__,
+        value_type.__qualname__,
+        repr(normalized),
+    )
 
 
 def _normalize_models(models: Iterable[str] | None) -> set[str] | None:

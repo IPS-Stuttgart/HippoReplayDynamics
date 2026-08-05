@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from decimal import Decimal, InvalidOperation
 from functools import wraps
+from threading import RLock
 
 import numpy as np
 import pandas as pd
@@ -51,6 +52,12 @@ PYRECEST_DEFAULTS = {
 PYRECEST_FLOAT_METADATA_ATOL = 1e-12
 _EVENT_SEED_WRAPPER_MARKER = "_pyrecest_event_seed_validation_wrapper"
 _EVENT_SEED_MODULUS = 2**32
+
+# PyRecEst particle filters still consume NumPy's process-global legacy RNG.
+# The underlying scorer saves, seeds, and restores that state, so the complete
+# call must be atomic across threads.  A re-entrant lock also remains safe if a
+# downstream wrapper invokes another PyRecEst scorer from the same thread.
+_PYRECEST_SCORE_LOCK = RLock()
 
 
 def pyrecest_metadata_for_config(config: object) -> dict[str, int | float]:
@@ -110,10 +117,12 @@ def apply_pyrecest_score_metadata_patch() -> None:
         return base_compare(root, frame, **kwargs)
 
     def _score_with_metadata(base_score):
+        @wraps(base_score)
         def score_with_metadata(self, emissions, bin_centers):
-            result = base_score(self, emissions, bin_centers)
-            result.diagnostics.update(_model_diagnostics(self))
-            return result
+            with _PYRECEST_SCORE_LOCK:
+                result = base_score(self, emissions, bin_centers)
+                result.diagnostics.update(_model_diagnostics(self))
+                return result
 
         score_with_metadata._pyrecest_metadata_wrapped = True
         return score_with_metadata

@@ -27,6 +27,8 @@ def apply_diffusion_smoothed_trajectory_patch() -> None:
         bin_centers: Any,
     ):
         result = current(self, emissions, bin_centers)
+        if np.isneginf(float(result.log_likelihood)):
+            return result
         trajectory = result.trajectory_log_posterior
         terminal = result.terminal_log_posterior
         if trajectory is None or terminal is None or int(result.n_time) <= 1:

@@ -14,8 +14,11 @@ _ORIGINAL_ATTR = "_first_order_imm_diagnostics_validation_original"
 _DURATION_ALIAS_ATTR = "_first_order_imm_duration_diagnostics_alias_patch"
 _DURATION_SOURCE_ATTR = "_first_order_imm_duration_diagnostics_source_patch"
 _DURATION_SCORE_ATTR = "_first_order_imm_duration_diagnostics_score_patch"
-_RECORDING_ENABLED_ATTR = "_first_order_imm_duration_diagnostics_recording_enabled"
 _LAST_DURATIONS_ATTR = "_first_order_imm_diagnostic_transition_durations"
+_DURATION_RECORDING_ENABLED: ContextVar[bool] = ContextVar(
+    "first_order_imm_duration_diagnostics_recording_enabled",
+    default=False,
+)
 _DIAGNOSTIC_TRANSITION_DURATIONS: ContextVar[np.ndarray | None] = ContextVar(
     "first_order_imm_diagnostic_transition_durations",
     default=None,
@@ -292,7 +295,7 @@ def _record_duration_occupancy_transition_durations() -> None:
 
     def recording_transition_durations(emissions):
         durations = current(emissions)
-        if getattr(module, _RECORDING_ENABLED_ATTR, False):
+        if _DURATION_RECORDING_ENABLED.get():
             recorded = np.asarray(durations, dtype=float).copy()
             _DIAGNOSTIC_TRANSITION_DURATIONS.set(recorded)
             setattr(module, _LAST_DURATIONS_ATTR, recorded)
@@ -316,14 +319,16 @@ def _record_duration_occupancy_score_context() -> None:
 
     def score_with_first_order_duration_recording(*args, **kwargs):
         model = args[0] if args else kwargs.get("self")
-        previous = bool(getattr(module, _RECORDING_ENABLED_ATTR, False))
-        setattr(module, _RECORDING_ENABLED_ATTR, getattr(model, "mode", None) == "first-order-imm")
+        recording_token = _DURATION_RECORDING_ENABLED.set(
+            getattr(model, "mode", None) == "first-order-imm"
+        )
+        durations_token = _DIAGNOSTIC_TRANSITION_DURATIONS.set(None)
         try:
             return current(*args, **kwargs)
         finally:
-            setattr(module, _RECORDING_ENABLED_ATTR, previous)
-            if not previous:
-                _clear_duration_occupancy_transition_durations()
+            _DIAGNOSTIC_TRANSITION_DURATIONS.reset(durations_token)
+            _DURATION_RECORDING_ENABLED.reset(recording_token)
+            setattr(module, _LAST_DURATIONS_ATTR, None)
 
     setattr(score_with_first_order_duration_recording, _DURATION_SCORE_ATTR, True)
     setattr(score_with_first_order_duration_recording, _ORIGINAL_ATTR, current)

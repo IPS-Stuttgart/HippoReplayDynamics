@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sys
+from collections.abc import Mapping, Set
 from dataclasses import replace
 from decimal import Decimal, InvalidOperation
 from functools import wraps
@@ -185,8 +186,8 @@ def _synchronize_output_writer_aliases(active: Any) -> None:
 
 
 def _seed_sequence(values: Iterable[object], name: str) -> tuple[int, ...]:
-    if isinstance(values, (str, bytes)):
-        raise ValueError(f"{name} must contain at least one random seed")
+    if isinstance(values, (str, bytes, Mapping, Set)):
+        raise ValueError(f"{name} must be an ordered iterable of random seeds")
     try:
         raw_values = list(values)
     except TypeError as exc:

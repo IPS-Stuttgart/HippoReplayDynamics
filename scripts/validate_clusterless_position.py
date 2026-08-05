@@ -26,6 +26,7 @@ def main() -> int:
     parser.add_argument("--output", required=True)
     parser.add_argument("--session")
     parser.add_argument("--decode-bin-s", type=float, default=1.0)
+    parser.add_argument("--n-folds", type=int, default=5)
     parser.add_argument("--max-windows", type=int)
     parser.add_argument("--random-seed", type=int, default=1)
     parser.add_argument("--bin-size-cm", type=float, default=6.0)
@@ -58,6 +59,7 @@ def main() -> int:
             mark_kde_max_neighbors=args.mark_kde_max_neighbors,
         ),
         decode_bin_s=args.decode_bin_s,
+        n_folds=args.n_folds,
         max_windows_per_session=args.max_windows,
         random_seed=args.random_seed,
         session=args.session,

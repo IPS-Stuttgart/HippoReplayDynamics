@@ -9,8 +9,47 @@ _PATCHED_FLAG = "_bidirectional_infinite_evidence_patch_applied"
 _PATCHED_SCORE_FLAG = "_bidirectional_infinite_evidence_score_patch_applied"
 
 
+def _contains_complex_values(value: object, seen: set[int] | None = None) -> bool:
+    """Return whether nested scalar containers contain a complex value."""
+
+    if isinstance(value, (complex, np.complexfloating)):
+        return True
+    if isinstance(value, np.generic):
+        return _contains_complex_values(value.item(), seen)
+
+    if isinstance(value, np.ndarray):
+        if value.dtype.kind == "c":
+            return True
+        if value.dtype.kind != "O":
+            return False
+        seen = set() if seen is None else seen
+        container_id = id(value)
+        if container_id in seen:
+            return False
+        seen.add(container_id)
+        return any(_contains_complex_values(item, seen) for item in value.flat)
+
+    if isinstance(value, (list, tuple)):
+        seen = set() if seen is None else seen
+        container_id = id(value)
+        if container_id in seen:
+            return False
+        seen.add(container_id)
+        return any(_contains_complex_values(item, seen) for item in value)
+
+    return False
+
+
+def _as_real_float_array(value: object, *, name: str) -> np.ndarray:
+    """Convert numeric values to float without silently dropping imaginary parts."""
+
+    if _contains_complex_values(value):
+        raise ValueError(f"{name} must be real")
+    return np.asarray(value, dtype=float)
+
+
 def _equal_prior_logp_and_weights(log_likelihoods: object) -> tuple[float, np.ndarray]:
-    values = np.asarray(log_likelihoods, dtype=float).reshape(-1)
+    values = _as_real_float_array(log_likelihoods, name="log likelihoods").reshape(-1)
     if values.size == 0:
         return float("nan"), np.empty(0, dtype=float)
     positive_inf = np.isposinf(values)
@@ -41,7 +80,7 @@ def _safe_mixture_log_posterior(log_posteriors: object, weights: np.ndarray) -> 
         weight_value = float(weight)
         if not np.isfinite(weight_value) or weight_value <= 0.0:
             continue
-        current = np.asarray(posterior, dtype=float)
+        current = _as_real_float_array(posterior, name="posterior arrays")
         if not _has_usable_log_posterior(current):
             if current.size and not np.any(np.isnan(current)) and np.all(np.isneginf(current)):
                 impossible.append(current)
@@ -77,11 +116,11 @@ def _has_usable_log_posterior(values: np.ndarray) -> bool:
 def _terminal_log_posterior_from_score(score: object) -> np.ndarray | None:
     terminal = getattr(score, "terminal_log_posterior", None)
     if terminal is not None:
-        return np.asarray(terminal, dtype=float)
+        return _as_real_float_array(terminal, name="posterior arrays")
     trajectory = getattr(score, "trajectory_log_posterior", None)
     if trajectory is None:
         return None
-    values = np.asarray(trajectory, dtype=float)
+    values = _as_real_float_array(trajectory, name="posterior arrays")
     return None if values.ndim == 0 or values.shape[0] == 0 else values[-1].copy()
 
 

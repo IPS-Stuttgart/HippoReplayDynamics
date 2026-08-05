@@ -62,13 +62,115 @@ except ModuleNotFoundError:  # pragma: no cover - helpful when run before editab
 DEFAULT_PRIMARY_MODEL = "sorted-spike-state-space-momentum-exact-sparse"
 DEFAULT_BASELINE_MODEL = "sorted-spike-state-space-diffusion"
 DEFAULT_VALUE_COLUMN = "heldout_log_likelihood"
-OPTIONAL_IDENTITY_COLUMNS = (
+# Configuration fields must be constant within one paper-claim audit. Pooling
+# them would turn repeated hyperparameter settings into pseudo-replicated event
+# units and could change both effect estimates and significance calculations.
+PAPER_CLAIM_CONFIGURATION_COLUMNS = (
+    "matrix_id",
+    "benchmark_test_cell_fraction",
+    "benchmark_n_cell_splits",
+    "benchmark_cell_split_count",
+    "benchmark_cell_split_strategy",
+    "benchmark_cell_split_strata",
+    "benchmark_randomize_event_subset",
+    "benchmark_event_subset_base_seed",
+    "benchmark_event_epoch",
+    "encoding_bin_size_cm",
+    "encoding_smoothing_sigma_bins",
+    "encoding_min_speed_cm_s",
+    "encoding_min_occupancy_s",
+    "encoding_rate_floor_hz",
+    "encoding_arena_padding_cm",
+    "encoding_use_excitatory",
+    "emission_time_bin_s",
+    "emission_spike_rate_scale",
+    "emission_likelihood_temperature",
+    "emission_negative_binomial_overdispersion",
+    "candidate_top_k",
+    "stationary_sigma_cm",
+    "diffusion_sigma_cm",
+    "momentum_sigma_cm",
+    "velocity_decay",
+    "mode_stickiness",
+    "clusterless_mark_smoothing_sigma_bins",
+    "clusterless_mark_prior_count",
+    "clusterless_mark_variance_floor",
+    "clusterless_rate_floor_hz",
+    "clusterless_mark_likelihood",
+    "clusterless_mark_kde_bandwidth",
+    "clusterless_mark_kde_spatial_sigma_bins",
+    "clusterless_mark_kde_max_neighbors",
+    "clusterless_mark_group_by",
+    "state_space_valid_occupancy_threshold_s",
+    "state_space_stationary_sigma_cm",
+    "state_space_diffusion_sigma_cm_sqrt_s",
+    "state_space_max_step_sigma",
+    "state_space_imm_mode_stickiness",
+    "state_space_imm_switch_tau_s",
+    "state_space_imm_mode_stickiness_effective",
+    "state_space_trajectory_imm_mode_stickiness",
+    "state_space_trajectory_imm_momentum_initial_probability",
+    "state_space_trajectory_imm_momentum_switch_probability",
+    "state_space_momentum_sigma_cm_sqrt_s",
+    "state_space_momentum_initial_sigma_cm_sqrt_s",
+    "state_space_momentum_velocity_decay",
+    "state_space_momentum_velocity_decay_tau_s",
+    "state_space_momentum_candidate_source",
+    "state_space_momentum_candidate_top_k",
+    "state_space_momentum_candidate_mass_threshold",
+    "state_space_momentum_candidate_min_k",
+    "state_space_momentum_candidate_max_k",
+    "state_space_momentum_predicted_candidate_top_k",
+    "state_space_displacement_radius_bins",
+    "state_space_displacement_position_sigma_cm",
+    "state_space_displacement_transition_sigma_cm_sqrt_s",
+    "state_space_displacement_prior_sigma_cm",
+    "goal_state_space_transition_sigma_cm_sqrt_s",
+    "goal_state_space_drift_speed_cm_s",
+    "goal_state_space_max_step_sigma",
+    "pyrecest_particles",
+    "pyrecest_alpha",
+    "pyrecest_beta",
+    "pyrecest_process_noise_sigma_cm_s",
+    "pyrecest_position_jump_sigma_cm",
+    "pyrecest_jump_probability",
+    "pyrecest_goal_reset_probability",
+    "pyrecest_position_proposal_probability",
+    "pyrecest_initial_velocity_sigma_cm_s",
+    "pyrecest_imm_mode_stickiness",
+    "pyrecest_imm_stationary_velocity_decay",
+    "pyrecest_imm_diffusion_velocity_decay",
+    "pyrecest_imm_momentum_velocity_decay",
+    "pyrecest_imm_jump_fraction",
+    "pyrecest_imm_jump_velocity_decay",
+)
+# Replicate, split, event-window, and configuration fields all remain part of the
+# pairing key. The configuration guard below ensures settings are not pooled in
+# the one-row headline summary, while the full key still prevents pre-pairing
+# averaging when paired_event_deltas() is used directly.
+PAPER_CLAIM_SCOPE_COLUMNS = (
+    "event_id",
+    "benchmark_random_seed",
+    "simulation_random_seed",
+    "random_seed",
+    "null_random_seed",
     "benchmark_cell_split_index",
     "benchmark_cell_split_seed",
-    "benchmark_random_seed",
+    "benchmark_event_subset_seed",
     "requested_session",
     "cell_split_index",
-    "random_seed",
+    *PAPER_CLAIM_CONFIGURATION_COLUMNS,
+    "train_cell_ids",
+    "test_cell_ids",
+    "window_role",
+    "window_index",
+    "null_index",
+    "matched_null_rank",
+    "template_event_index",
+    "event_window_variant",
+    "window_start_s",
+    "window_end_s",
+    "window_duration_s",
 )
 SCORE_FILENAMES = (
     "event_scores.csv",
@@ -151,6 +253,7 @@ def build_paper_claim_tables(
         require_evidence_support_metadata(scores)
 
     frame = ensure_evidence_support_columns(scores)
+    require_single_claim_configuration(frame)
     primary_model = resolve_model_spec(frame["model"], config.primary_model)
     baseline_model = resolve_model_spec(frame["model"], config.baseline_model)
     event_deltas = paired_event_deltas(
@@ -500,10 +603,82 @@ def resolve_model_spec(models: Iterable[object], requested: str) -> str:
     raise ValueError(f"model {requested!r} not found; available models include: {sorted(available)[:20]}")
 
 
+def require_single_claim_configuration(frame: pd.DataFrame) -> None:
+    """Reject score tables that mix incompatible paper-claim configurations."""
+
+    varying_columns: list[str] = []
+    for column in PAPER_CLAIM_CONFIGURATION_COLUMNS:
+        if column not in frame.columns:
+            continue
+        keys = {_scope_value_key(value) for value in frame[column]}
+        if len(keys) > 1:
+            varying_columns.append(column)
+    if varying_columns:
+        formatted = ", ".join(f"`{column}`" for column in varying_columns)
+        raise ValueError(
+            "score table mixes incompatible paper-claim configurations in "
+            f"{formatted}; filter to one configuration or generate separate audits"
+        )
+
+
 def identity_columns(frame: pd.DataFrame) -> list[str]:
     columns = ["session", "event_index"]
-    columns.extend(col for col in OPTIONAL_IDENTITY_COLUMNS if col in frame.columns)
+    for column in PAPER_CLAIM_SCOPE_COLUMNS:
+        if column in frame.columns and column not in columns:
+            columns.append(column)
     return columns
+
+
+def _scope_value_key(value: object) -> object:
+    """Return a stable, hashable key for scalar and container metadata."""
+
+    if _is_missing_scalar(value):
+        return ("missing",)
+    if isinstance(value, np.ndarray):
+        array = np.asarray(value, dtype=object)
+        if array.ndim == 0:
+            return _scope_value_key(array.item())
+        return ("sequence", tuple(_scope_value_key(item) for item in array.reshape(-1)))
+    if isinstance(value, np.generic):
+        return _scope_value_key(value.item())
+    if isinstance(value, (list, tuple)):
+        return ("sequence", tuple(_scope_value_key(item) for item in value))
+    if isinstance(value, (set, frozenset)):
+        return ("set", tuple(sorted(repr(_scope_value_key(item)) for item in value)))
+    if isinstance(value, dict):
+        return (
+            "mapping",
+            tuple(sorted((str(key), _scope_value_key(item)) for key, item in value.items())),
+        )
+    if isinstance(value, (bool, np.bool_)):
+        return ("scalar", str(bool(value)))
+    if isinstance(value, (int, np.integer)):
+        return ("numeric", int(value))
+    if isinstance(value, (float, np.floating)):
+        numeric = float(value)
+        if math.isfinite(numeric):
+            numerator, denominator = numeric.as_integer_ratio()
+            if denominator == 1:
+                return ("numeric", int(numerator))
+            return ("numeric-ratio", int(numerator), int(denominator))
+        return ("float", repr(numeric))
+    if isinstance(value, (bytes, bytearray, memoryview)):
+        raw = bytes(value)
+        try:
+            return ("scalar", raw.decode("utf-8").strip())
+        except UnicodeDecodeError:
+            return ("bytes", raw)
+    return ("scalar", str(value).strip())
+
+
+def _is_missing_scalar(value: object) -> bool:
+    if value is None:
+        return True
+    try:
+        missing = pd.isna(value)
+    except (TypeError, ValueError):
+        return False
+    return isinstance(missing, (bool, np.bool_)) and bool(missing)
 
 
 def _summary_row(label: str, group: pd.DataFrame) -> dict[str, object]:

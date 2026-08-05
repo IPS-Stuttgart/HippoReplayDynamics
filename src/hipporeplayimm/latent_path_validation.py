@@ -275,6 +275,12 @@ def _checked_count_array(counts: Any) -> np.ndarray:
         raise ValueError("counts must contain numeric integer counts, not boolean values")
     if _contains_text_values(raw):
         raise ValueError("counts must contain numeric integer counts, not text values")
+
+    integer_info = np.iinfo(np.dtype(int))
+    exact_counts = _exact_integer_count_array(raw, max_count=int(integer_info.max))
+    if exact_counts is not None:
+        return exact_counts
+
     try:
         numeric = np.asarray(raw, dtype=float)
     except (TypeError, ValueError, OverflowError) as exc:
@@ -284,11 +290,36 @@ def _checked_count_array(counts: Any) -> np.ndarray:
     rounded = np.rint(numeric)
     if not np.all(np.isclose(numeric, rounded, rtol=0.0, atol=0.0)):
         raise ValueError("counts must contain integer-valued counts")
-    integer_info = np.iinfo(np.dtype(int))
     max_safe_float = np.nextafter(float(integer_info.max), 0.0)
     if np.any(rounded > max_safe_float):
         raise ValueError("counts must fit into integer count range")
     return rounded.astype(int)
+
+
+def _exact_integer_count_array(values: np.ndarray, *, max_count: int) -> np.ndarray | None:
+    """Preserve exact integer counts before any lossy floating-point conversion."""
+
+    if np.issubdtype(values.dtype, np.integer):
+        if np.issubdtype(values.dtype, np.signedinteger) and np.any(values < 0):
+            raise ValueError("counts must contain finite nonnegative values")
+        if np.any(values > max_count):
+            raise ValueError("counts must fit into integer count range")
+        return values.astype(int, copy=False)
+    if values.dtype != object:
+        return None
+
+    exact = np.empty(values.shape, dtype=int)
+    for index, item in np.ndenumerate(values):
+        try:
+            integer_value = operator.index(item)
+        except TypeError:
+            return None
+        if integer_value < 0:
+            raise ValueError("counts must contain finite nonnegative values")
+        if integer_value > max_count:
+            raise ValueError("counts must fit into integer count range")
+        exact[index] = int(integer_value)
+    return exact
 
 
 def _contains_boolean_values(values: Any) -> bool:

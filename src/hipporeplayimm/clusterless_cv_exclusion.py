@@ -9,16 +9,12 @@ from typing import Any
 
 import numpy as np
 
-from .encoding import _clean_position
-
 _FRAME_HELPER_MARKER = "_clusterless_cv_frame_exclusion_helper"
-_INTERVAL_HELPER_MARKER = "_clusterless_cv_interval_exclusion_helper"
+_MARK_HELPER_MARKER = "_clusterless_cv_mark_exclusion_helper"
 
 
 @dataclass(frozen=True)
 class _ExclusionContext:
-    position_times: np.ndarray
-    run_times: np.ndarray
     excluded_intervals: np.ndarray
 
 
@@ -38,8 +34,8 @@ def fit_clusterless_mark_encoding_excluding_intervals(
     Position samples represent frames whose exposure can straddle a validation
     boundary. The ordinary timestamp mask therefore cannot remove the exact
     held-out exposure. This helper subtracts overlap from frame durations and
-    excludes spike marks in ``[start, end)`` while preserving the session's
-    original run bouts for run-local speed estimation.
+    removes spike marks in ``[start, end)`` while preserving the original run
+    bouts for run-local speed estimation.
     """
 
     from . import clusterless
@@ -49,13 +45,7 @@ def fit_clusterless_mark_encoding_excluding_intervals(
         return clusterless.fit_clusterless_mark_encoding(session, config)
 
     _install_contextual_helpers(clusterless)
-    position = _clean_position(session.position)
-    context = _ExclusionContext(
-        position_times=np.asarray(position[:, 0], dtype=float),
-        run_times=np.asarray(session.run_times, dtype=float),
-        excluded_intervals=intervals,
-    )
-    token = _EXCLUSION_CONTEXT.set(context)
+    token = _EXCLUSION_CONTEXT.set(_ExclusionContext(excluded_intervals=intervals))
     try:
         return clusterless.fit_clusterless_mark_encoding(session, config)
     finally:
@@ -81,29 +71,36 @@ def _install_contextual_helpers(clusterless: Any) -> None:
         setattr(frame_durations_without_held_out_exposure, _FRAME_HELPER_MARKER, True)
         clusterless._frame_durations = frame_durations_without_held_out_exposure
 
-    current_membership = clusterless._times_in_intervals
-    if not getattr(current_membership, _INTERVAL_HELPER_MARKER, False):
+    current_training_marks = clusterless._training_marks
+    if not getattr(current_training_marks, _MARK_HELPER_MARKER, False):
 
-        @wraps(current_membership)
-        def interval_membership_without_held_out_marks(
-            times: np.ndarray,
-            intervals: np.ndarray,
-        ) -> np.ndarray:
-            membership = np.asarray(current_membership(times, intervals), dtype=bool)
+        @wraps(current_training_marks)
+        def training_marks_without_held_out_intervals(*args: Any, **kwargs: Any):
+            mark_times, mark_values, mark_group_ids = current_training_marks(
+                *args,
+                **kwargs,
+            )
             context = _EXCLUSION_CONTEXT.get()
-            if context is None or not _same_numeric_array(intervals, context.run_times):
-                return membership
+            if context is None:
+                return mark_times, mark_values, mark_group_ids
 
-            numeric_times = np.asarray(times, dtype=float)
-            if _same_numeric_array(numeric_times, context.position_times):
-                return membership
-            return membership & ~_times_in_half_open_intervals(
-                numeric_times,
+            keep = ~_times_in_half_open_intervals(
+                mark_times,
                 context.excluded_intervals,
             )
+            filtered_group_ids = (
+                None
+                if mark_group_ids is None
+                else np.asarray(mark_group_ids)[keep]
+            )
+            return (
+                np.asarray(mark_times)[keep],
+                np.asarray(mark_values)[keep],
+                filtered_group_ids,
+            )
 
-        setattr(interval_membership_without_held_out_marks, _INTERVAL_HELPER_MARKER, True)
-        clusterless._times_in_intervals = interval_membership_without_held_out_marks
+        setattr(training_marks_without_held_out_intervals, _MARK_HELPER_MARKER, True)
+        clusterless._training_marks = training_marks_without_held_out_intervals
 
 
 def _exclude_half_open_frame_durations(
@@ -158,19 +155,6 @@ def _merge_half_open_intervals(intervals: np.ndarray) -> np.ndarray:
         else:
             merged.append([float(start), float(end)])
     return np.asarray(merged, dtype=float)
-
-
-def _same_numeric_array(left: Any, right: Any) -> bool:
-    try:
-        left_array = np.asarray(left, dtype=float)
-        right_array = np.asarray(right, dtype=float)
-    except (TypeError, ValueError, OverflowError):
-        return False
-    return left_array.shape == right_array.shape and np.array_equal(
-        left_array,
-        right_array,
-        equal_nan=True,
-    )
 
 
 __all__ = ["fit_clusterless_mark_encoding_excluding_intervals"]

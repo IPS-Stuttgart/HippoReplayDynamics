@@ -1,0 +1,105 @@
+name: Apply deterministic IMM transition warning fix
+
+on:
+  push:
+    branches:
+      - agent/avoid-imm-zero-transition-log-warning
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: [self-hosted, Linux, X64]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Apply source fix and regression
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          source_path = Path("src/hipporeplayimm/models.py")
+          source = source_path.read_text(encoding="utf-8")
+          old_setup = """        transition_modes = _mode_transition_matrix(len(modes), self.mode_stickiness)\n        first = candidates[0]\n"""
+          new_setup = """        transition_modes = _mode_transition_matrix(len(modes), self.mode_stickiness)\n        with np.errstate(divide=\"ignore\"):\n            log_transition_modes = np.log(transition_modes)\n        first = candidates[0]\n"""
+          if source.count(old_setup) != 1:
+              raise SystemExit("expected one IMM transition setup block")
+          source = source.replace(old_setup, new_setup, 1)
+
+          old_mix = """                    log_alpha + np.log(transition_modes[:, dst_mode_index])[:, None, None],\n"""
+          new_mix = """                    log_alpha + log_transition_modes[:, dst_mode_index][:, None, None],\n"""
+          if source.count(old_mix) != 1:
+              raise SystemExit("expected one IMM transition log use")
+          source = source.replace(old_mix, new_mix, 1)
+          source_path.write_text(source, encoding="utf-8")
+
+          test_path = Path("tests/test_candidate_imm_boundary_stickiness.py")
+          test_path.write_text(
+              '''from __future__ import annotations
+
+import warnings
+
+import numpy as np
+import pytest
+
+from hipporeplayimm.encoding import LogEmissionTensor
+from hipporeplayimm.models import CandidateKinematicModel
+
+
+@pytest.mark.parametrize("stickiness", [0.0, 1.0])
+def test_candidate_imm_boundary_stickiness_scores_without_runtime_warnings(
+    stickiness: float,
+) -> None:
+    centers = np.array([[0.0, 0.0], [1.0, 0.0]])
+    emissions = LogEmissionTensor(
+        log_likelihood=np.log(
+            np.array(
+                [
+                    [0.8, 0.2],
+                    [0.3, 0.7],
+                    [0.6, 0.4],
+                ]
+            )
+        ),
+        spike_counts=np.zeros((3, 1), dtype=int),
+        times=np.array([0.0, 1.0, 2.0]),
+        dt=1.0,
+        cell_ids=np.array([1]),
+        n_spikes=0,
+    )
+    model = CandidateKinematicModel(
+        mode="imm",
+        top_k=2,
+        mode_stickiness=stickiness,
+    )
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", RuntimeWarning)
+        score = model.score(emissions, centers)
+
+    assert np.isfinite(score.log_likelihood)
+    assert score.trajectory_log_posterior is not None
+    assert np.all(np.isfinite(score.trajectory_log_posterior))
+''',
+              encoding="utf-8",
+          )
+
+          Path(".github/workflows/apply-imm-boundary-warning-fix.yml").unlink()
+          PY
+
+          python3 -m py_compile src/hipporeplayimm/models.py tests/test_candidate_imm_boundary_stickiness.py
+          git diff --check
+          PYTHONPATH=src python3 -m pytest -q tests/test_candidate_imm_boundary_stickiness.py
+
+      - name: Commit and push patch
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/hipporeplayimm/models.py tests/test_candidate_imm_boundary_stickiness.py .github/workflows/apply-imm-boundary-warning-fix.yml
+          git commit -m "Avoid warnings for deterministic IMM transitions"
+          git push origin HEAD

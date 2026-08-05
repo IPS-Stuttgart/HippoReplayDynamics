@@ -334,6 +334,8 @@ class CandidateKinematicModel:
         masses = _candidate_log_masses(emissions, candidates)
         modes = ("stationary", "diffusion", "momentum", "jump")
         transition_modes = _mode_transition_matrix(len(modes), self.mode_stickiness)
+        with np.errstate(divide="ignore"):
+            log_transition_modes = np.log(transition_modes)
         first = candidates[0]
         second = candidates[1]
         by_mode = []
@@ -363,7 +365,7 @@ class CandidateKinematicModel:
             next_alpha = []
             for dst_mode_index, dst_mode in enumerate(modes):
                 mixed_prev = logsumexp(
-                    log_alpha + np.log(transition_modes[:, dst_mode_index])[:, None, None],
+                    log_alpha + log_transition_modes[:, dst_mode_index][:, None, None],
                     axis=0,
                 )
                 next_alpha.append(

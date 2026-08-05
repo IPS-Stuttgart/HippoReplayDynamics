@@ -304,6 +304,36 @@ def _contains_boolean_values(values: np.ndarray) -> bool:
     return False
 
 
+def _contains_complex_values(
+    values: np.ndarray,
+    seen_arrays: set[int] | None = None,
+) -> bool:
+    """Return True when a count-like matrix contains complex-valued scalars."""
+
+    if np.issubdtype(values.dtype, np.complexfloating):
+        return True
+    if values.dtype != object:
+        return False
+    if seen_arrays is None:
+        seen_arrays = set()
+    array_id = id(values)
+    if array_id in seen_arrays:
+        return False
+    seen_arrays.add(array_id)
+    try:
+        for item in values.flat:
+            if isinstance(item, (complex, np.complexfloating)):
+                return True
+            if isinstance(item, np.ndarray) and _contains_complex_values(
+                item,
+                seen_arrays,
+            ):
+                return True
+        return False
+    finally:
+        seen_arrays.remove(array_id)
+
+
 def _validated_nonnegative_matrix(
     values: np.ndarray,
     name: str,
@@ -316,6 +346,8 @@ def _validated_nonnegative_matrix(
         raise ValueError(f"{name} must contain numeric values") from exc
     if _contains_boolean_values(raw_values):
         raise ValueError(f"{name} must contain numeric count values, not booleans")
+    if _contains_complex_values(raw_values):
+        raise ValueError(f"{name} must contain real numeric values")
     try:
         array = raw_values.astype(float, copy=False)
     except (TypeError, ValueError) as exc:

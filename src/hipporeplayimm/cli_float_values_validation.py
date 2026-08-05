@@ -13,6 +13,7 @@ _MISSING_PREDICTED_CANDIDATE_OPTION = "--state-space-momentum-predicted-candidat
 _STRING_TYPES = (str, bytes, np.str_, np.bytes_)
 _POSTERIOR_CALIBRATION_GROUP_PATCH = "_hipporeplayimm_retains_missing_calibration_groups"
 _BOOTSTRAP_DELTA_VALIDATION_PATCH = "_hipporeplayimm_filters_nonfinite_bootstrap_delta"
+_BOOTSTRAP_DELTA_VALIDATION_VERSION = 2
 _RESAMPLING_COUNT_PRECISION_PATCH = "_hipporeplayimm_preserves_exact_resampling_counts"
 
 
@@ -96,16 +97,20 @@ def _patch_statistical_resampling_counts() -> None:
 
 
 def _patch_legacy_bootstrap_delta_ci(_cli) -> None:
-    """Keep the legacy flat bootstrap on finite metrics and validated counts."""
+    """Keep the legacy flat bootstrap finite, validated, and overflow-safe."""
 
     from . import benchmarks
 
     current = benchmarks.bootstrap_delta_ci
-    if getattr(current, _BOOTSTRAP_DELTA_VALIDATION_PATCH, False):
+    if (
+        getattr(current, _BOOTSTRAP_DELTA_VALIDATION_PATCH, None)
+        == _BOOTSTRAP_DELTA_VALIDATION_VERSION
+    ):
         _cli.bootstrap_delta_ci = current
         return
+    original = getattr(current, "_hipporeplayimm_original", current)
 
-    @wraps(current)
+    @wraps(original)
     def bootstrap_delta_ci(
         rows: pd.DataFrame,
         model: str = "imm",
@@ -117,19 +122,57 @@ def _patch_legacy_bootstrap_delta_ci(_cli) -> None:
         target_mask = rows["model"].eq(model).to_numpy(dtype=bool)
         numeric_values = pd.to_numeric(rows[value_column], errors="coerce").to_numpy(dtype=float)
         keep_rows = ~target_mask | np.isfinite(numeric_values)
-        filtered = rows.loc[keep_rows]
-        return current(
+        filtered = rows.loc[keep_rows].copy()
+        scaled_rows, scale = _scale_flat_bootstrap_target_values(
             filtered,
+            model=model,
+            value_column=value_column,
+        )
+        lower, upper = original(
+            scaled_rows,
             model=model,
             value_column=value_column,
             n_bootstrap=validated_n_bootstrap,
             random_seed=random_seed,
         )
+        if scale == 1.0:
+            return lower, upper
+        return float(lower * scale), float(upper * scale)
 
-    setattr(bootstrap_delta_ci, _BOOTSTRAP_DELTA_VALIDATION_PATCH, True)
-    bootstrap_delta_ci._hipporeplayimm_original = current  # type: ignore[attr-defined]
+    setattr(
+        bootstrap_delta_ci,
+        _BOOTSTRAP_DELTA_VALIDATION_PATCH,
+        _BOOTSTRAP_DELTA_VALIDATION_VERSION,
+    )
+    bootstrap_delta_ci._hipporeplayimm_original = original  # type: ignore[attr-defined]
     benchmarks.bootstrap_delta_ci = bootstrap_delta_ci
     _cli.bootstrap_delta_ci = bootstrap_delta_ci
+
+
+def _scale_flat_bootstrap_target_values(
+    rows: pd.DataFrame,
+    *,
+    model: str,
+    value_column: str,
+) -> tuple[pd.DataFrame, float]:
+    """Scale target metrics only when their float64 bootstrap sums can overflow."""
+
+    target_mask = rows["model"].eq(model).to_numpy(dtype=bool)
+    values = pd.to_numeric(
+        rows.loc[target_mask, value_column],
+        errors="coerce",
+    ).to_numpy(dtype=float)
+    if values.size == 0:
+        return rows, 1.0
+    scale = float(np.max(np.abs(values)))
+    if scale == 0.0 or scale <= np.finfo(float).max / values.size:
+        return rows, 1.0
+
+    scaled = rows.copy()
+    column = scaled[value_column].to_numpy(dtype=object, copy=True)
+    column[target_mask] = values / scale
+    scaled[value_column] = column
+    return scaled, scale
 
 
 def _patch_posterior_calibration_missing_groups() -> None:

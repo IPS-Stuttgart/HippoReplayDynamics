@@ -68,10 +68,12 @@ def _duration_weighted_mode_summary(
         raise ValueError("first-order IMM mode posterior rows must contain positive finite mass")
     normalized = mode / row_mass[:, None]
 
-    total_duration = float(np.sum(durations))
-    if not np.isfinite(total_duration) or total_duration <= 0.0:
+    duration_scale = float(np.max(durations))
+    scaled_durations = durations / duration_scale
+    scaled_total_duration = float(np.sum(scaled_durations))
+    if not np.isfinite(scaled_total_duration) or scaled_total_duration <= 0.0:
         raise ValueError("total bin duration must be finite and positive")
-    weights = durations / total_duration
+    weights = scaled_durations / scaled_total_duration
     event_probability = weights @ normalized
 
     map_mode = np.argmax(normalized, axis=1)

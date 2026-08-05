@@ -270,6 +270,16 @@ def _nonidentity_spatial_roll_rates(
     return out
 
 
+def _integer_is_exactly_representable_as_float(value: int) -> bool:
+    """Return whether binary64 can preserve an integer identifier exactly."""
+
+    try:
+        numeric = float(value)
+    except OverflowError:
+        return False
+    return bool(np.isfinite(numeric)) and int(numeric) == int(value)
+
+
 def _shuffle_cell_identities_session_nonidentity(session, random_seed: int = 1):
     """Remap valid integral session cell identities without an avoidable identity draw."""
 
@@ -285,7 +295,7 @@ def _shuffle_cell_identities_session_nonidentity(session, random_seed: int = 1):
         )
     spike_cell_ids = _coerce_integral_ids(raw_spikes[:, 1], "spike cell IDs")
     try:
-        spikes = np.asarray(session.spikes, dtype=float).copy()
+        numeric_spikes = np.asarray(session.spikes, dtype=float)
     except (TypeError, ValueError, OverflowError) as exc:
         raise ValueError(
             "session.spikes must contain numeric time and cell-ID values"
@@ -296,7 +306,15 @@ def _shuffle_cell_identities_session_nonidentity(session, random_seed: int = 1):
         int(source): int(target)
         for source, target in zip(cells, shuffled, strict=True)
     }
-    spikes[:, 1] = [mapping[int(cell)] for cell in spike_cell_ids]
+    mapped_cell_ids = [mapping[int(cell)] for cell in spike_cell_ids]
+    if all(
+        _integer_is_exactly_representable_as_float(cell_id)
+        for cell_id in mapped_cell_ids
+    ):
+        spikes = numeric_spikes.copy()
+    else:
+        spikes = numeric_spikes.astype(object)
+    spikes[:, 1] = mapped_cell_ids
     marks = session.spike_marks
     if marks is not None and marks.cell_ids is not None:
         mark_ids = _coerce_integral_ids(marks.cell_ids, "spike mark cell IDs")

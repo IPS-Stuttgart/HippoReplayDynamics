@@ -11,7 +11,7 @@ from .model_parameter_validation import _reject_boolean_scalar, _validate_unit_i
 
 _PATCHED_FLAG = "_model_numeric_string_validation_patch_applied"
 _PATCH_VERSION_ATTR = "_model_numeric_string_validation_patch_version"
-_PATCH_VERSION = 3
+_PATCH_VERSION = 4
 _STATE_SPACE_UTILS_PATCHED_FLAG = "_state_space_numeric_string_validation_patch_applied"
 _STATE_SPACE_MODEL_PATCHED_FLAG = "_state_space_model_numeric_string_validation_patch_applied"
 _UNIT_INTERVAL_OVERFLOW_PATCHED_FLAG = "_model_unit_interval_overflow_validation_patch_applied"
@@ -49,24 +49,34 @@ def _is_string_scalar(value: object) -> bool:
 
 
 def _is_complex_scalar(value: object) -> bool:
-    """Return True for scalar complex values, including object wrappers."""
+    """Return True for scalar complex values, including nested object wrappers."""
 
-    if isinstance(value, (complex, np.complexfloating)):
-        return True
-    try:
-        array = np.asarray(value)
-    except (TypeError, ValueError):
-        return False
-    if array.ndim != 0:
-        return False
-    if np.issubdtype(array.dtype, np.complexfloating):
-        return True
-    if array.dtype == object:
+    current = value
+    seen: set[int] = set()
+    while True:
+        if isinstance(current, (complex, np.complexfloating)):
+            return True
+        current_id = id(current)
+        if current_id in seen:
+            return False
+        seen.add(current_id)
         try:
-            return isinstance(array.item(), (complex, np.complexfloating))
+            array = np.asarray(current)
+        except (TypeError, ValueError):
+            return False
+        if array.ndim != 0:
+            return False
+        if np.issubdtype(array.dtype, np.complexfloating):
+            return True
+        if array.dtype != object:
+            return False
+        try:
+            unwrapped = array.item()
         except ValueError:
             return False
-    return False
+        if unwrapped is current:
+            return False
+        current = unwrapped
 
 
 def _reject_complex_scalar(name: str, value: object) -> None:

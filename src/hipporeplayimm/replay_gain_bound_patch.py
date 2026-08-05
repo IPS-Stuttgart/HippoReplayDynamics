@@ -16,8 +16,17 @@ import numpy as np
 
 _PATCHED_FLAG = "_replay_gain_bound_patch_applied"
 _WRAPPER_FLAG = "_bounded_replay_gain_wrapper"
-_WRAPPER_VERSION = 1
+_WRAPPER_VERSION = 2
 _ORIGINAL_ATTR = "__hipporeplayimm_replay_gain_bound_original__"
+
+
+def _validated_max_gain(max_gain: float) -> float:
+    """Return a finite gain cap whose reciprocal interval contains one."""
+
+    bound = float(max_gain)
+    if not np.isfinite(bound) or bound < 1.0:
+        raise ValueError("max_gain must be finite and greater than or equal to 1")
+    return bound
 
 
 def _bounded_geometric_center(gains: Any, max_gain: float) -> np.ndarray:
@@ -29,10 +38,10 @@ def _bounded_geometric_center(gains: Any, max_gain: float) -> np.ndarray:
     """
 
     values = np.asarray(gains, dtype=float)
+    bound = _validated_max_gain(max_gain)
     if values.size == 0:
         return values.copy()
 
-    bound = float(max_gain)
     log_bound = float(np.log(bound))
     if log_bound == 0.0:
         return np.ones_like(values, dtype=float)
@@ -69,6 +78,7 @@ def _apply_replay_gains_with_bounds(
 ) -> tuple[np.ndarray, dict[str, float | str]]:
     """Apply event and cell gains without violating the cell-gain cap."""
 
+    bound = _validated_max_gain(max_gain)
     if mode == "none":
         return rates_hz, {
             "replay_event_gain": 1.0,
@@ -94,7 +104,7 @@ def _apply_replay_gains_with_bounds(
             raw_cell_gains = (observed_by_cell + prior_count) / (
                 expected_by_cell + prior_count
             )
-        cell_gains = _bounded_geometric_center(raw_cell_gains, max_gain)
+        cell_gains = _bounded_geometric_center(raw_cell_gains, bound)
         calibrated *= cell_gains[:, None]
 
     event_gain = 1.0
@@ -108,7 +118,7 @@ def _apply_replay_gains_with_bounds(
             expected_total + prior_count
         )
         event_gain = float(
-            np.clip(event_gain, 1.0 / max_gain, max_gain)
+            np.clip(event_gain, 1.0 / bound, bound)
         )
         calibrated *= event_gain
 

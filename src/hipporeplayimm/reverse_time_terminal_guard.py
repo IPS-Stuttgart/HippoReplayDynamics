@@ -31,6 +31,9 @@ _POSTERIOR_DIAGNOSTIC_KEYS = (
 def apply_reverse_time_terminal_guard_patch() -> None:
     """Install reverse-time and core dynamic-path guards."""
 
+    from .candidate_kinematic_smoothing import (
+        apply_candidate_kinematic_smoothing_patch,
+    )
     from .diffusion_impossible_path_guard import (
         apply_diffusion_impossible_path_guard_patch,
     )
@@ -39,6 +42,7 @@ def apply_reverse_time_terminal_guard_patch() -> None:
         apply_score_optional_kwargs_fallback_patch,
     )
 
+    apply_candidate_kinematic_smoothing_patch()
     apply_diffusion_impossible_path_guard_patch()
     apply_score_optional_kwargs_fallback_patch()
     score = extensions.ReverseTimeReplayModel.score

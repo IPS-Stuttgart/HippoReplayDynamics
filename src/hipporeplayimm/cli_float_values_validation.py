@@ -169,38 +169,37 @@ def _finite_real_metric_or_nan(value: object) -> float:
 
     item = value
     seen: set[int] = set()
-    while True:
-        if isinstance(item, (bool, np.bool_, complex, np.complexfloating)):
-            return float("nan")
-        try:
-            array = np.asarray(item)
-        except (TypeError, ValueError, OverflowError):
-            return float("nan")
-        if array.ndim != 0:
-            return float("nan")
-        if np.issubdtype(array.dtype, np.bool_) or np.issubdtype(
-            array.dtype,
-            np.complexfloating,
-        ):
-            return float("nan")
-        if array.dtype != object:
-            try:
-                numeric = float(array.item())
-            except (TypeError, ValueError, OverflowError):
-                return float("nan")
-            return numeric if np.isfinite(numeric) else float("nan")
-
-        identity = id(array)
-        if identity in seen:
+    while isinstance(item, np.ndarray):
+        identity = id(item)
+        if identity in seen or item.ndim != 0:
             return float("nan")
         seen.add(identity)
         try:
-            nested = array.item()
+            nested = item.item()
         except ValueError:
             return float("nan")
         if nested is item:
             return float("nan")
         item = nested
+
+    if isinstance(item, (bool, np.bool_, complex, np.complexfloating)):
+        return float("nan")
+    try:
+        array = np.asarray(item)
+    except (TypeError, ValueError, OverflowError):
+        return float("nan")
+    if array.ndim != 0:
+        return float("nan")
+    if np.issubdtype(array.dtype, np.bool_) or np.issubdtype(
+        array.dtype,
+        np.complexfloating,
+    ):
+        return float("nan")
+    try:
+        numeric = float(item)
+    except (TypeError, ValueError, OverflowError):
+        return float("nan")
+    return numeric if np.isfinite(numeric) else float("nan")
 
 
 def _scale_flat_bootstrap_target_values(

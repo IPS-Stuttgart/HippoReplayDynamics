@@ -96,23 +96,48 @@ def _apply_duration_timestamp_validation_patch() -> None:
         if duration_dynamics._dur_from_dt(emissions.dt) is not None:
             return original(emissions)
 
-        times = np.asarray(getattr(emissions, "times", []), dtype=float)
-        if times.shape == (0,):
+        raw_times = np.asarray(getattr(emissions, "times", []))
+        if raw_times.shape == (0,):
             return original(emissions)
-        if times.shape != (int(emissions.n_time),):
+        if raw_times.shape != (int(emissions.n_time),):
             raise ValueError("times must contain one value per emission row")
+        times = _timestamp_array_preserving_extended_precision(raw_times)
         if not np.all(np.isfinite(times)):
             raise ValueError("times must be finite")
-        if times.size > 1 and np.any(times[1:] <= times[:-1]):
-            raise ValueError(
-                "times must be strictly increasing when transition_durations is missing"
-            )
-        return original(emissions)
+        return _strictly_increasing_transition_durations(times)
 
     setattr(transition_durations_s, _DURATION_TIMESTAMP_PATCH_MARKER, True)
     setattr(transition_durations_s, "__hipporeplayimm_original__", original)
     duration_dynamics.transition_durations_s = transition_durations_s
     _synchronize_duration_resolver_aliases(original, transition_durations_s)
+
+
+def _timestamp_array_preserving_extended_precision(values: object) -> np.ndarray:
+    """Keep wider floating-point timestamps until adjacent differences are formed."""
+
+    raw = np.asarray(values)
+    if raw.dtype.kind == "f" and np.finfo(raw.dtype).nmant > np.finfo(float).nmant:
+        return raw
+    return np.asarray(values, dtype=float)
+
+
+def _strictly_increasing_transition_durations(times: np.ndarray) -> np.ndarray:
+    """Return representable positive differences without first narrowing timestamps."""
+
+    if times.size <= 1:
+        return np.empty(0, dtype=float)
+    if np.any(times[1:] <= times[:-1]):
+        raise ValueError(
+            "times must be strictly increasing when transition_durations is missing"
+        )
+    with np.errstate(over="ignore", invalid="ignore"):
+        native_durations = np.diff(times)
+    if not np.all(np.isfinite(native_durations)):
+        raise ValueError("timestamp differences exceed floating-point range")
+    durations = np.asarray(native_durations, dtype=float)
+    if not np.all(np.isfinite(durations)) or np.any(durations <= 0.0):
+        raise ValueError("timestamp differences exceed floating-point range")
+    return durations
 
 
 def _synchronize_duration_resolver_aliases(original, replacement) -> None:
@@ -208,12 +233,12 @@ def _transition_duration_vector(
 def _transition_durations_from_times(emissions: LogEmissionTensor) -> np.ndarray | None:
     if emissions.n_time <= 1:
         return np.empty(0, dtype=float)
-    times = np.asarray(emissions.times, dtype=float)
-    if times.shape == (0,):
+    raw_times = np.asarray(emissions.times)
+    if raw_times.shape == (0,):
         return np.full(emissions.n_time - 1, float(emissions.dt), dtype=float)
-    if times.shape != (emissions.n_time,):
+    if raw_times.shape != (emissions.n_time,):
         return None
-    durations = np.diff(times)
-    if not np.all(np.isfinite(durations)) or np.any(durations <= 0.0):
-        raise ValueError("times must be strictly increasing when transition_durations is missing")
-    return durations
+    times = _timestamp_array_preserving_extended_precision(raw_times)
+    if not np.all(np.isfinite(times)):
+        raise ValueError("times must be finite")
+    return _strictly_increasing_transition_durations(times)

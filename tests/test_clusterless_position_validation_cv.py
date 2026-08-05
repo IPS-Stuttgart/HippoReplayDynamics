@@ -99,21 +99,25 @@ def test_clusterless_cv_excludes_partial_frame_exposure_and_half_open_marks(monk
     )
     monkeypatch.setattr(
         clusterless,
-        "_times_in_intervals",
-        lambda values, intervals: np.ones(np.asarray(values).shape, dtype=bool),
+        "_training_marks",
+        lambda session, encoding_config, config: (
+            np.array([0.25, 0.75, 1.5], dtype=float),
+            np.arange(6, dtype=float).reshape(3, 2),
+            np.array([1, 2, 3], dtype=int),
+        ),
     )
 
     def fake_fit(training_session, config):
+        mark_times, mark_values, mark_group_ids = clusterless._training_marks(
+            training_session,
+            None,
+            config,
+        )
         return {
             "durations": clusterless._frame_durations(times),
-            "position_membership": clusterless._times_in_intervals(
-                times,
-                training_session.run_times,
-            ),
-            "mark_membership": clusterless._times_in_intervals(
-                np.array([0.25, 0.75, 1.5], dtype=float),
-                training_session.run_times,
-            ),
+            "mark_times": mark_times,
+            "mark_values": mark_values,
+            "mark_group_ids": mark_group_ids,
         }
 
     monkeypatch.setattr(clusterless, "fit_clusterless_mark_encoding", fake_fit)
@@ -125,14 +129,12 @@ def test_clusterless_cv_excludes_partial_frame_exposure_and_half_open_marks(monk
     )
 
     np.testing.assert_allclose(result["durations"], np.array([0.5, 0.5, 1.0]))
+    np.testing.assert_array_equal(result["mark_times"], np.array([0.25, 1.5]))
     np.testing.assert_array_equal(
-        result["position_membership"],
-        np.array([True, True, True]),
+        result["mark_values"],
+        np.array([[0.0, 1.0], [4.0, 5.0]]),
     )
-    np.testing.assert_array_equal(
-        result["mark_membership"],
-        np.array([True, False, True]),
-    )
+    np.testing.assert_array_equal(result["mark_group_ids"], np.array([1, 3]))
 
 
 def test_clusterless_training_interval_subtraction_preserves_half_open_endpoints():

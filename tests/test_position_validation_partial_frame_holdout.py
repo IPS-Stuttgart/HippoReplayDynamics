@@ -50,7 +50,7 @@ def _fit(tmp_path: Path, spike_time: float):
         _session_with_spike(tmp_path, spike_time),
         np.array([True, True, False]),
         _encoding_config(),
-        np.array([[0.5, 1.5]], dtype=float),
+        excluded_intervals=np.array([[0.5, 1.5]], dtype=float),
     )
 
 

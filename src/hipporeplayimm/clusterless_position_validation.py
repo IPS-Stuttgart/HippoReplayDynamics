@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 import numpy as np
@@ -91,8 +91,9 @@ def validate_session_clusterless_position(
         training_run_times = _subtract_half_open_intervals(base_run_times, held_out_intervals)
         if training_run_times.size == 0:
             continue
+        training_session = replace(session, run_times=base_run_times)
         encoding = fit_clusterless_mark_encoding_excluding_intervals(
-            session,
+            training_session,
             config.clusterless,
             held_out_intervals,
         )

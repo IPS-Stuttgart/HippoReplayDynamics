@@ -7,6 +7,9 @@ from .models import EventScore, LOG_ZERO, _normalize_log_weights, _posterior_dia
 from .candidate_active_support_validation import (
     apply_candidate_active_support_validation_patch as _apply_candidate_active_support_validation_patch,
 )
+from .diffusion_smoothed_trajectory import (
+    apply_diffusion_smoothed_trajectory_patch as _apply_diffusion_smoothed_trajectory_patch,
+)
 from .state_space_candidate_count_validation import (
     apply_state_space_candidate_count_validation_patch as _apply_state_space_candidate_count_validation_patch,
 )
@@ -112,6 +115,7 @@ from .state_space_utils import (
 # duration- and occupancy-aware. Mark it before legacy runtime patch modules
 # inspect the public import surface so they do not replace it with older scorers.
 StateSpaceReplayModel.score._native_duration_occupancy_aware = True
+_apply_diffusion_smoothed_trajectory_patch()
 _apply_candidate_active_support_validation_patch()
 _apply_state_space_candidate_count_validation_patch()
 _apply_state_space_candidate_mass_threshold_validation_patch()

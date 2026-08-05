@@ -7,9 +7,10 @@ from dataclasses import dataclass
 import numpy as np
 from scipy.sparse import csr_matrix
 
+from . import models as _models
 from .data import ReplaySession
 from .encoding import EncodingModel, LogEmissionTensor, _clean_position, _speed_cm_s
-from .models import EventScore, _posterior_diagnostics
+from .models import EventScore
 from .state_space_first_order import _forward_backward_first_order
 from .state_space_utils import _mean_entropy
 
@@ -22,8 +23,7 @@ class EmpiricalTransitionStateSpaceReplayModel:
     name: str = "sorted-spike-state-space-empirical-transition"
 
     def score(self, emissions: LogEmissionTensor, bin_centers: np.ndarray) -> EventScore:
-        if emissions.n_time == 0:
-            raise ValueError("emissions must contain at least one time bin")
+        bin_centers = _models._validate_score_inputs(emissions, bin_centers)
         transition = _validated_transition_matrix(self.transition, emissions.n_bins)
         logp, trajectory = _forward_backward_first_order(emissions.log_likelihood, transition)
         terminal = trajectory[-1]
@@ -37,7 +37,7 @@ class EmpiricalTransitionStateSpaceReplayModel:
             "state_space_empirical_evidence_support": "exact_full_grid",
             "mean_trajectory_posterior_entropy": _mean_entropy(trajectory),
         }
-        diagnostics.update(_posterior_diagnostics(terminal, bin_centers))
+        diagnostics.update(_models._posterior_diagnostics(terminal, bin_centers))
         return EventScore(
             self.name,
             float(logp),

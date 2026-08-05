@@ -80,7 +80,7 @@ def trajectory_quality_metrics(
     }
 
 
-def _as_numeric_real_array(values: object, name: str) -> np.ndarray:
+def _as_numeric_real_array(values: object, name: str, *, dtype: object = float) -> np.ndarray:
     try:
         raw = np.asarray(values)
     except (TypeError, ValueError, OverflowError) as exc:
@@ -97,7 +97,7 @@ def _as_numeric_real_array(values: object, name: str) -> np.ndarray:
             if isinstance(item, (complex, np.complexfloating)):
                 raise ValueError(f"{name} must contain numeric real values, not complex values")
     try:
-        return np.asarray(values, dtype=float)
+        return np.asarray(values, dtype=dtype)
     except (TypeError, ValueError, OverflowError) as exc:
         raise ValueError(f"{name} must contain numeric real values") from exc
 
@@ -118,7 +118,10 @@ def _unwrap_zero_dimensional_object_scalar(value: object, name: str) -> object:
 def _transition_durations(times: np.ndarray | None, n_time: int) -> np.ndarray:
     if times is None:
         return np.ones(n_time - 1, dtype=float) if n_time > 1 else np.empty(0, dtype=float)
-    arr = _as_numeric_real_array(times, "times")
+    # Difference timestamps before narrowing to binary64. Extended-precision or
+    # exact integer timestamps can otherwise collapse to equal float values even
+    # when their representable intervals are small and strictly positive.
+    arr = _as_numeric_real_array(times, "times", dtype=np.longdouble)
     if arr.shape != (n_time,):
         raise ValueError("times must contain one timestamp per trajectory row")
     if not np.all(np.isfinite(arr)):

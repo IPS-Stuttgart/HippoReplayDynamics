@@ -35,12 +35,13 @@ def apply_result_improvement_split_validation_patch() -> None:
         n_strata: int = 4,
     ):
         validated_cell_ids = _validated_unique_cell_ids(cell_ids)
+        validated_random_seed = _validated_random_seed(random_seed)
         validated_n_strata = _positive_integer_scalar(n_strata, "n_strata")
         return original(
             validated_cell_ids,
             stratum_values,
             test_fraction,
-            random_seed,
+            validated_random_seed,
             n_strata=validated_n_strata,
         )
 
@@ -60,6 +61,14 @@ def _validated_unique_cell_ids(values: object) -> np.ndarray:
     if cell_ids.ndim == 1 and np.unique(cell_ids).size != cell_ids.size:
         raise ValueError("cell_ids must contain unique identifiers")
     return cell_ids
+
+
+def _validated_random_seed(value: object) -> int:
+    """Return one exact nonnegative scalar seed under the shared seed policy."""
+
+    from .result_improvement_seed_validation import _nonnegative_integer_seed
+
+    return _nonnegative_integer_seed(value, "random_seed")
 
 
 def _positive_integer_scalar(value: object, name: str) -> int:

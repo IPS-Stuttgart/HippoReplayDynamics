@@ -45,6 +45,41 @@ def test_cell_identity_shuffle_rejects_identity_draw() -> None:
     )
 
 
+def test_cell_identity_shuffle_preserves_adjacent_ids_above_float_precision() -> None:
+    first = 2**53
+    second = first + 1
+    session = _Session(
+        spikes=np.array(
+            [
+                [0.1, first],
+                [0.2, second],
+                [0.3, first],
+            ],
+            dtype=object,
+        ),
+        spike_marks=_Marks(
+            cell_ids=np.array([first, second, first], dtype=np.int64)
+        ),
+    )
+
+    shuffled = shuffle_cell_identities_session(session, random_seed=0)
+
+    assert shuffled.spikes.dtype == object
+    np.testing.assert_array_equal(
+        shuffled.spikes[:, 0],
+        np.array([0.1, 0.2, 0.3], dtype=object),
+    )
+    np.testing.assert_array_equal(
+        shuffled.spikes[:, 1],
+        np.array([second, first, second], dtype=object),
+    )
+    assert shuffled.spike_marks is not None
+    np.testing.assert_array_equal(
+        shuffled.spike_marks.cell_ids,
+        np.array([second, first, second], dtype=np.int64),
+    )
+
+
 def test_cell_identity_shuffle_preserves_unavoidable_singleton() -> None:
     session = _Session(
         spikes=np.array([[0.1, 10.0], [0.2, 10.0]], dtype=float),

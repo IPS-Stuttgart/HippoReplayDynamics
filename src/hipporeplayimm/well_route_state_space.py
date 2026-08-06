@@ -66,16 +66,17 @@ class WellRouteStateSpaceReplayModel:
 
         routes = _coerce_candidate_routes(self.candidate_routes, centers, self.max_default_points)
         durations = transition_durations_s(emissions)
+        route_progress = _transition_progress_fractions(durations)
         transitions = tuple(
             tuple(
                 _goal_transition_matrix(
                     centers,
-                    _route_target(route, transition_index + 1, max(emissions.n_time - 1, 1)),
+                    _route_target(route, progress),
                     drift_step_cm=drift_speed_cm_s * float(duration),
                     sigma_cm=_per_bin_sigma(transition_sigma_cm_sqrt_s, float(duration)),
                     max_step_sigma=max_step_sigma,
                 )
-                for transition_index, duration in enumerate(durations)
+                for duration, progress in zip(durations, route_progress, strict=True)
             )
             for route in routes
         )
@@ -204,11 +205,27 @@ def _as_numeric_coordinates(values: object, name: str) -> np.ndarray:
         raise ValueError(f"{name} must contain numeric real coordinates") from exc
 
 
-def _route_target(route: np.ndarray, transition_number: int, n_transitions: int) -> np.ndarray:
-    if n_transitions <= 0:
-        return route[-1]
-    progress = min(max(float(transition_number) / float(n_transitions), 0.0), 1.0)
-    segment_float = progress * (route.shape[0] - 1)
+def _transition_progress_fractions(durations: np.ndarray) -> np.ndarray:
+    """Return cumulative elapsed-time fractions for route transitions."""
+
+    values = np.asarray(durations, dtype=float)
+    if values.ndim != 1:
+        raise ValueError("transition durations must be one-dimensional")
+    if values.size == 0:
+        return np.empty(0, dtype=float)
+    if not np.all(np.isfinite(values)) or np.any(values <= 0.0):
+        raise ValueError("transition durations must contain finite positive values")
+
+    scaled = values / float(np.max(values))
+    cumulative = np.cumsum(scaled, dtype=float)
+    progress = cumulative / float(cumulative[-1])
+    progress[-1] = 1.0
+    return progress
+
+
+def _route_target(route: np.ndarray, progress: float) -> np.ndarray:
+    bounded_progress = min(max(float(progress), 0.0), 1.0)
+    segment_float = bounded_progress * (route.shape[0] - 1)
     segment = min(int(np.floor(segment_float)), route.shape[0] - 2)
     local = segment_float - segment
     return (1.0 - local) * route[segment] + local * route[segment + 1]

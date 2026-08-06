@@ -29,9 +29,23 @@ def _load_score_files(shard_glob: str) -> list[Path]:
     return paths
 
 
+def _exclude_aggregate_output(paths: list[Path], outdir: Path) -> list[Path]:
+    """Exclude this aggregator's prior score table from recursive shard globs."""
+
+    aggregate_output = (outdir / "event_model_evidence.csv").resolve()
+    return [path for path in paths if path.resolve() != aggregate_output]
+
+
 def aggregate(shard_glob: str, outdir: Path) -> pd.DataFrame:
+    paths = _exclude_aggregate_output(_load_score_files(shard_glob), outdir)
+    if not paths:
+        raise FileNotFoundError(
+            "No model-evidence shard CSVs remained after excluding the aggregate output: "
+            f"{outdir / 'event_model_evidence.csv'}"
+        )
+
     frames = []
-    for path in _load_score_files(shard_glob):
+    for path in paths:
         frame = pd.read_csv(path)
         if frame.empty:
             continue

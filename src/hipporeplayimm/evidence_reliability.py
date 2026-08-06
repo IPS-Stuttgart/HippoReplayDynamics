@@ -129,13 +129,9 @@ def add_event_reliability_flags(
 def _nonnegative_integer_threshold(name: str, value: object) -> int:
     """Return a canonical nonnegative integer threshold."""
 
-    try:
-        raw = np.asarray(value)
-    except (TypeError, ValueError) as exc:
-        raise ValueError(f"{name} must be a nonnegative integer") from exc
-    if raw.ndim != 0:
+    item = _unwrap_metric_scalar(value)
+    if item is _INVALID_METRIC_SCALAR:
         raise ValueError(f"{name} must be a nonnegative integer")
-    item = raw.item()
     if isinstance(item, (bool, np.bool_, str, bytes, np.str_, np.bytes_)):
         raise ValueError(f"{name} must be a nonnegative integer")
     if isinstance(item, (complex, np.complexfloating)):
@@ -153,13 +149,9 @@ def _nonnegative_integer_threshold(name: str, value: object) -> int:
 def _real_threshold(name: str, value: object) -> float:
     """Return a scalar real threshold while rejecting NaN and coercive types."""
 
-    try:
-        raw = np.asarray(value)
-    except (TypeError, ValueError) as exc:
-        raise ValueError(f"{name} must be a real scalar and cannot be NaN") from exc
-    if raw.ndim != 0:
+    item = _unwrap_metric_scalar(value)
+    if item is _INVALID_METRIC_SCALAR:
         raise ValueError(f"{name} must be a real scalar and cannot be NaN")
-    item = raw.item()
     if isinstance(item, (bool, np.bool_, str, bytes, np.str_, np.bytes_)):
         raise ValueError(f"{name} must be a real scalar and cannot be NaN")
     if isinstance(item, (complex, np.complexfloating)):

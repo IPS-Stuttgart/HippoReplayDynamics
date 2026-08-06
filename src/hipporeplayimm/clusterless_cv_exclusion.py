@@ -135,21 +135,51 @@ def _times_in_half_open_intervals(
     return membership
 
 
-def _merge_half_open_intervals(intervals: np.ndarray) -> np.ndarray:
-    values = np.asarray(intervals, dtype=float)
-    if values.size == 0:
-        return np.empty((0, 2), dtype=float)
-    values = values.reshape(-1, 2)
-    valid = values[
-        np.isfinite(values).all(axis=1)
-        & (values[:, 1] > values[:, 0])
-    ]
-    if valid.size == 0:
-        return np.empty((0, 2), dtype=float)
+def _finite_real_interval_bound(value: Any) -> float:
+    """Return one finite real interval bound without lossy complex coercion."""
 
-    valid = valid[np.argsort(valid[:, 0], kind="stable")]
-    merged: list[list[float]] = [[float(valid[0, 0]), float(valid[0, 1])]]
-    for start, end in valid[1:]:
+    seen_arrays: set[int] = set()
+    while isinstance(value, np.ndarray):
+        array_id = id(value)
+        if array_id in seen_arrays:
+            raise ValueError("excluded_intervals must contain finite real bounds")
+        seen_arrays.add(array_id)
+        if value.ndim != 0:
+            raise ValueError("excluded_intervals must have shape (n, 2)")
+        value = value.item()
+
+    if isinstance(value, (bool, np.bool_)):
+        raise ValueError("excluded_intervals must contain finite real bounds")
+    if isinstance(value, (complex, np.complexfloating)):
+        raise ValueError("excluded_intervals must contain finite real bounds")
+
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ValueError("excluded_intervals must contain finite real bounds") from exc
+    if not np.isfinite(numeric):
+        raise ValueError("excluded_intervals must contain finite real bounds")
+    return numeric
+
+
+def _merge_half_open_intervals(intervals: np.ndarray) -> np.ndarray:
+    raw = np.asarray(intervals, dtype=object)
+    if raw.size == 0:
+        return np.empty((0, 2), dtype=float)
+    if raw.size % 2 != 0:
+        raise ValueError("excluded_intervals must contain start/end pairs")
+
+    values = np.fromiter(
+        (_finite_real_interval_bound(value) for value in raw.flat),
+        dtype=float,
+        count=raw.size,
+    ).reshape(-1, 2)
+    if np.any(values[:, 1] <= values[:, 0]):
+        raise ValueError("excluded_intervals must contain nonempty intervals with end > start")
+
+    values = values[np.argsort(values[:, 0], kind="stable")]
+    merged: list[list[float]] = [[float(values[0, 0]), float(values[0, 1])]]
+    for start, end in values[1:]:
         if start <= merged[-1][1]:
             merged[-1][1] = max(merged[-1][1], float(end))
         else:

@@ -71,3 +71,30 @@ def test_nested_real_metrics_remain_valid() -> None:
     assert bool(flagged.loc[0, "event_reliable"])
     assert not bool(flagged.loc[0, "event_invalid_numeric_metric"])
     assert flagged.loc[0, "event_reliability_reasons"] == ""
+
+
+@pytest.mark.parametrize(
+    ("keyword", "value", "message"),
+    [
+        ("min_spikes", np.bool_(True), "min_spikes"),
+        ("min_time_bins", np.complex128(2.0 + 1.0j), "min_time_bins"),
+        (
+            "min_candidate_log_mass",
+            np.complex128(-0.01 + 1.0j),
+            "min_candidate_log_mass",
+        ),
+        ("max_terminal_entropy", np.bool_(True), "max_terminal_entropy"),
+    ],
+)
+def test_nested_lossy_thresholds_are_rejected_without_cast_warnings(
+    keyword: str,
+    value: object,
+    message: str,
+) -> None:
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        with pytest.raises(ValueError, match=message):
+            add_event_reliability_flags(
+                pd.DataFrame([_valid_row()]),
+                **{keyword: _nested_scalar(value)},
+            )

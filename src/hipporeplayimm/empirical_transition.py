@@ -72,6 +72,47 @@ def _validated_transition_matrix(transition: csr_matrix, n_bins: int) -> csr_mat
     return matrix
 
 
+def _validated_run_intervals(intervals: np.ndarray) -> np.ndarray:
+    """Return canonical finite real run intervals or reject malformed metadata."""
+
+    message = "session.run_times must be a finite real array with shape (n_intervals, 2)"
+    try:
+        raw = np.asarray(intervals)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(message) from exc
+
+    if raw.size == 0:
+        return np.empty((0, 2), dtype=float)
+    if raw.ndim != 2 or raw.shape[1] != 2:
+        raise ValueError(message)
+    if raw.dtype.kind not in {"i", "u", "f", "O"}:
+        raise ValueError(message)
+    if raw.dtype == object:
+        for value in raw.flat:
+            item = value
+            while isinstance(item, np.ndarray):
+                if item.ndim != 0:
+                    raise ValueError(message)
+                item = item.item()
+            if isinstance(
+                item,
+                (bool, np.bool_, str, bytes, bytearray, complex, np.complexfloating),
+            ):
+                raise ValueError(message)
+
+    try:
+        validated = raw.astype(float, copy=False)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ValueError(message) from exc
+    if not np.all(np.isfinite(validated)):
+        raise ValueError("session.run_times must contain finite start and end times")
+    if np.any(validated[:, 1] < validated[:, 0]):
+        raise ValueError(
+            "session.run_times must have end times greater than or equal to start times"
+        )
+    return validated
+
+
 def _eligible_adjacent_run_transitions(
     times: np.ndarray,
     xy: np.ndarray,
@@ -86,6 +127,7 @@ def _eligible_adjacent_run_transitions(
     overwrite one another and the result is independent of interval row order.
     """
 
+    intervals = _validated_run_intervals(intervals)
     eligible = np.zeros(max(times.shape[0] - 1, 0), dtype=bool)
     if eligible.size == 0:
         return eligible

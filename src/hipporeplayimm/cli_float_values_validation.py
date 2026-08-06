@@ -13,7 +13,7 @@ _MISSING_PREDICTED_CANDIDATE_OPTION = "--state-space-momentum-predicted-candidat
 _STRING_TYPES = (str, bytes, np.str_, np.bytes_)
 _POSTERIOR_CALIBRATION_GROUP_PATCH = "_hipporeplayimm_retains_missing_calibration_groups"
 _BOOTSTRAP_DELTA_VALIDATION_PATCH = "_hipporeplayimm_filters_nonfinite_bootstrap_delta"
-_BOOTSTRAP_DELTA_VALIDATION_VERSION = 2
+_BOOTSTRAP_DELTA_VALIDATION_VERSION = 3
 _RESAMPLING_COUNT_PRECISION_PATCH = "_hipporeplayimm_preserves_exact_resampling_counts"
 
 
@@ -120,9 +120,14 @@ def _patch_legacy_bootstrap_delta_ci(_cli) -> None:
     ) -> tuple[float, float]:
         validated_n_bootstrap = _positive_integer_count("n_bootstrap", n_bootstrap)
         target_mask = rows["model"].eq(model).to_numpy(dtype=bool)
-        numeric_values = pd.to_numeric(rows[value_column], errors="coerce").to_numpy(dtype=float)
-        keep_rows = ~target_mask | np.isfinite(numeric_values)
+        target_values = _finite_real_metric_values(rows.loc[target_mask, value_column])
+        finite_target = np.isfinite(target_values)
+        keep_rows = np.ones(rows.shape[0], dtype=bool)
+        keep_rows[np.flatnonzero(target_mask)] = finite_target
         filtered = rows.loc[keep_rows].copy()
+        if bool(finite_target.any()):
+            filtered_target = filtered["model"].eq(model)
+            filtered.loc[filtered_target, value_column] = target_values[finite_target]
         scaled_rows, scale = _scale_flat_bootstrap_target_values(
             filtered,
             model=model,
@@ -149,6 +154,54 @@ def _patch_legacy_bootstrap_delta_ci(_cli) -> None:
     _cli.bootstrap_delta_ci = bootstrap_delta_ci
 
 
+def _finite_real_metric_values(values: pd.Series) -> np.ndarray:
+    """Coerce finite real scalar metrics without lossy Boolean/complex casts."""
+
+    return np.fromiter(
+        (_finite_real_metric_or_nan(value) for value in values.to_numpy(dtype=object)),
+        dtype=float,
+        count=len(values),
+    )
+
+
+def _finite_real_metric_or_nan(value: object) -> float:
+    """Return one finite real metric or NaN when the scalar is malformed."""
+
+    item = value
+    seen: set[int] = set()
+    while isinstance(item, np.ndarray):
+        identity = id(item)
+        if identity in seen or item.ndim != 0:
+            return float("nan")
+        seen.add(identity)
+        try:
+            nested = item.item()
+        except ValueError:
+            return float("nan")
+        if nested is item:
+            return float("nan")
+        item = nested
+
+    if isinstance(item, (bool, np.bool_, complex, np.complexfloating)):
+        return float("nan")
+    try:
+        array = np.asarray(item)
+    except (TypeError, ValueError, OverflowError):
+        return float("nan")
+    if array.ndim != 0:
+        return float("nan")
+    if np.issubdtype(array.dtype, np.bool_) or np.issubdtype(
+        array.dtype,
+        np.complexfloating,
+    ):
+        return float("nan")
+    try:
+        numeric = float(item)
+    except (TypeError, ValueError, OverflowError):
+        return float("nan")
+    return numeric if np.isfinite(numeric) else float("nan")
+
+
 def _scale_flat_bootstrap_target_values(
     rows: pd.DataFrame,
     *,
@@ -158,10 +211,7 @@ def _scale_flat_bootstrap_target_values(
     """Scale target metrics only when their float64 bootstrap sums can overflow."""
 
     target_mask = rows["model"].eq(model).to_numpy(dtype=bool)
-    values = pd.to_numeric(
-        rows.loc[target_mask, value_column],
-        errors="coerce",
-    ).to_numpy(dtype=float)
+    values = _finite_real_metric_values(rows.loc[target_mask, value_column])
     if values.size == 0:
         return rows, 1.0
     scale = float(np.max(np.abs(values)))

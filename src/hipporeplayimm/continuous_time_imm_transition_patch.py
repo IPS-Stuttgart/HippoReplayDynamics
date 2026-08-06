@@ -1,8 +1,8 @@
 """Make duration-aware IMM switching a continuous-time Markov semigroup.
 
 The historical duration-aware implementation used ``exp(-dt / tau)`` as the
-*final* same-mode probability.  That is only the probability that no switch
-occurred.  It omits paths that leave a mode and return within the interval,
+*final* same-mode probability. That is only the probability that no switch
+occurred. It omits paths that leave a mode and return within the interval,
 forces the diagonal toward zero for long bins, and makes ``P(t + s)`` differ
 from ``P(t) @ P(s)``.
 
@@ -91,41 +91,33 @@ def _positional_or_keyword(
 def _wrap_mode_transition_sequence(
     helper: Callable[..., list[np.ndarray]],
     *,
-    tau_position: int | None = None,
-    tau_from_config: bool = False,
+    tau_position: int,
 ) -> Callable[..., list[np.ndarray]]:
+    """Wrap a symmetric duration-aware transition-sequence helper."""
+
     if getattr(helper, _TRANSITION_WRAPPER_FLAG, False):
         return helper
 
     @wraps(helper)
     def mode_transition_matrices(*args, **kwargs):
         legacy = helper(*args, **kwargs)
-        if tau_from_config:
-            config = _positional_or_keyword(args, kwargs, 0, "config")
-            tau_s = float(getattr(config, "imm_switch_tau_s", 0.0))
-            durations = np.asarray(
-                _positional_or_keyword(args, kwargs, 2, "durations"),
-                dtype=float,
+        tau_s = float(
+            _positional_or_keyword(
+                args,
+                kwargs,
+                tau_position,
+                "imm_switch_tau_s",
             )
-        else:
-            assert tau_position is not None
-            tau_s = float(
-                _positional_or_keyword(
-                    args,
-                    kwargs,
-                    tau_position,
-                    "imm_switch_tau_s",
-                )
-            )
-            durations = np.asarray(
-                _positional_or_keyword(
-                    args,
-                    kwargs,
-                    tau_position + 1,
-                    "durations",
-                ),
-                dtype=float,
-            )
+        )
+        durations = np.asarray(
+            _positional_or_keyword(
+                args,
+                kwargs,
+                tau_position + 1,
+                "durations",
+            ),
+            dtype=float,
+        )
         if tau_s == 0.0:
             return legacy
         if len(legacy) != int(durations.size):
@@ -138,6 +130,56 @@ def _wrap_mode_transition_sequence(
     setattr(mode_transition_matrices, _TRANSITION_WRAPPER_FLAG, True)
     setattr(mode_transition_matrices, _ORIGINAL_ATTR, helper)
     return mode_transition_matrices
+
+
+def _wrap_trajectory_mode_transition_sequence(
+    helper: Callable[..., list[np.ndarray]],
+    base_helper: Callable[[Any, float], np.ndarray],
+) -> Callable[..., list[np.ndarray]]:
+    """Embed one duration-invariant trajectory-IMM routing pattern.
+
+    ``trajectory_imm_momentum_switch_probability`` is a legacy absolute
+    per-step probability defined together with the configured reference
+    stickiness. Its ratio to the other off-diagonal probabilities defines the
+    conditional destination distribution. Rebuilding that ratio from
+    ``exp(-duration / tau)`` would make the generator duration-dependent and
+    violate the semigroup property.
+    """
+
+    if getattr(helper, _TRANSITION_WRAPPER_FLAG, False):
+        return helper
+
+    @wraps(helper)
+    def trajectory_mode_transition_matrices(*args, **kwargs):
+        config = _positional_or_keyword(args, kwargs, 0, "config")
+        stickiness = float(_positional_or_keyword(args, kwargs, 1, "stickiness"))
+        durations = np.asarray(
+            _positional_or_keyword(args, kwargs, 2, "durations"),
+            dtype=float,
+        )
+        tau_s = float(getattr(config, "imm_switch_tau_s", 0.0))
+        if tau_s == 0.0:
+            return helper(*args, **kwargs)
+        if not np.isfinite(tau_s) or tau_s <= 0.0:
+            raise ValueError("imm_switch_tau_s must be finite and positive")
+        if durations.ndim != 1:
+            raise ValueError("durations must be one-dimensional")
+        if not np.all(np.isfinite(durations)) or np.any(durations <= 0.0):
+            raise ValueError("transition durations must be finite and positive")
+
+        reference_transition = base_helper(config, stickiness)
+        return [
+            _continuous_time_mode_transition_matrix(
+                reference_transition,
+                float(duration),
+                tau_s,
+            )
+            for duration in durations
+        ]
+
+    setattr(trajectory_mode_transition_matrices, _TRANSITION_WRAPPER_FLAG, True)
+    setattr(trajectory_mode_transition_matrices, _ORIGINAL_ATTR, helper)
+    return trajectory_mode_transition_matrices
 
 
 def _format_survival(module: Any, durations: np.ndarray, tau_s: float) -> str:
@@ -253,7 +295,10 @@ def apply_continuous_time_imm_transition_patch() -> None:
     _synchronize_aliases(previous_displacement, active_displacement)
 
     previous_trajectory = trajectory_imm._trajectory_imm_mode_transition_matrices
-    active_trajectory = _wrap_mode_transition_sequence(previous_trajectory, tau_from_config=True)
+    active_trajectory = _wrap_trajectory_mode_transition_sequence(
+        previous_trajectory,
+        trajectory_imm._trajectory_imm_mode_transition_matrix,
+    )
     trajectory_imm._trajectory_imm_mode_transition_matrices = active_trajectory
     _synchronize_aliases(previous_trajectory, active_trajectory)
 

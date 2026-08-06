@@ -153,7 +153,7 @@ def _decode_clusterless_window(
         "map_error_cm": _distance(encoding.bin_centers[map_bin], true_xy),
         "true_bin_probability": true_prob,
         "true_bin_rank": true_rank,
-        "posterior_entropy": float(-np.sum(posterior * log_posterior)),
+        "posterior_entropy": _posterior_entropy(log_posterior),
         "n_spikes": int(emissions.n_spikes),
         "n_position_bins": int(encoding.n_bins),
         "observation_model": "clusterless-marked-point-process",
@@ -161,6 +161,18 @@ def _decode_clusterless_window(
         "spike_mark_source": str(encoding.spike_mark_source),
         "spike_mark_features": int(encoding.n_features),
     }
+
+
+def _posterior_entropy(log_posterior: np.ndarray) -> float:
+    """Return entropy without evaluating the undefined product ``0 * -inf``."""
+
+    values = np.asarray(log_posterior, dtype=float)
+    if values.ndim != 1:
+        raise ValueError("log_posterior must be one-dimensional")
+    if np.any(np.isnan(values)) or np.any(values == np.inf):
+        raise ValueError("log_posterior must not contain NaN or +inf")
+    finite = np.isfinite(values)
+    return float(-np.sum(np.exp(values[finite]) * values[finite]))
 
 
 def summarize_clusterless_position_validation(samples: pd.DataFrame) -> pd.DataFrame:

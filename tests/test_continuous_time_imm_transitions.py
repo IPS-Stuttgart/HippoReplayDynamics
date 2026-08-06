@@ -16,6 +16,7 @@ from hipporeplayimm.state_space_displacement_imm import (
 )
 from hipporeplayimm.state_space_trajectory_imm import (
     _trajectory_imm_mode_transition_matrices,
+    _trajectory_imm_mode_transition_matrix,
 )
 from hipporeplayimm.state_space_utils import _mode_transition_matrix
 
@@ -113,3 +114,25 @@ def test_custom_trajectory_imm_switch_pattern_is_semigroup_consistent() -> None:
         )[0],
         half_duration_s=0.025,
     )
+
+
+def test_custom_trajectory_imm_uses_duration_invariant_reference_routing() -> None:
+    config = SimpleNamespace(
+        imm_switch_tau_s=0.1,
+        trajectory_imm_momentum_switch_probability=0.04,
+    )
+    duration_s = 0.001
+
+    observed = _trajectory_imm_mode_transition_matrices(
+        config,
+        0.9,
+        np.asarray([duration_s]),
+    )[0]
+    reference_transition = _trajectory_imm_mode_transition_matrix(config, 0.9)
+    expected = _continuous_time_mode_transition_matrix(
+        reference_transition,
+        duration_s,
+        config.imm_switch_tau_s,
+    )
+
+    np.testing.assert_allclose(observed, expected, rtol=1.0e-12, atol=1.0e-12)

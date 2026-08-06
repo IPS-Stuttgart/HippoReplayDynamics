@@ -10,6 +10,7 @@ import numpy as np
 _PATCHED_ATTR = "_diffusion_impossible_posterior_guard_applied"
 _CANDIDATE_PATCHED_ATTR = "_candidate_impossible_posterior_guard_applied"
 _STATIONARY_PATCHED_ATTR = "_stationary_smoothed_trajectory_posterior_applied"
+_SPARSE_MATVEC_PATCHED_ATTR = "_diffusion_exact_sparse_matvec_support_applied"
 _NO_FINITE_PATH = "no_finite_path"
 _POSTERIOR_DIAGNOSTIC_KEYS = (
     "decoded_endpoint_x",
@@ -22,10 +23,11 @@ _POSTERIOR_DIAGNOSTIC_KEYS = (
 
 
 def apply_diffusion_impossible_path_guard_patch() -> None:
-    """Install posterior guards for core stationary and dynamic replay models."""
+    """Install exact sparse support and posterior guards for core replay models."""
 
     from . import models
 
+    _patch_exact_sparse_log_matvec(models)
     _patch_stationary_trajectory_posterior(models.StationaryModel)
     _patch_impossible_posterior_guard(
         models.DiffusionModel,
@@ -37,6 +39,44 @@ def apply_diffusion_impossible_path_guard_patch() -> None:
         marker=_CANDIDATE_PATCHED_ATTR,
         diagnostic_key="candidate_path_support",
     )
+
+
+def _patch_exact_sparse_log_matvec(models: Any) -> None:
+    """Keep unreachable diffusion states at exact negative-infinite log mass.
+
+    The legacy sparse recursion initialized every destination with ``LOG_ZERO``
+    (``-1e300``).  A destination with no reachable incoming transition therefore
+    retained a finite sentinel.  If its emission was finite, that sentinel could
+    become the event's apparent evidence and prevent the impossible-path guard
+    from recognizing a disconnected trajectory.
+    """
+
+    current = models._log_sparse_matvec
+    if getattr(current, _SPARSE_MATVEC_PATCHED_ATTR, False):
+        return
+
+    @wraps(current)
+    def exact_sparse_log_matvec(
+        log_alpha: Any,
+        transition: Any,
+    ) -> np.ndarray:
+        alpha = np.asarray(log_alpha, dtype=float)
+        result = np.full(alpha.shape, -np.inf, dtype=float)
+        for source, (destination_indices, log_weights) in enumerate(transition):
+            destinations = np.asarray(destination_indices, dtype=int)
+            weights = np.asarray(log_weights, dtype=float)
+            contributions = alpha[source] + weights
+            for destination, contribution in zip(destinations, contributions):
+                destination_index = int(destination)
+                result[destination_index] = np.logaddexp(
+                    result[destination_index],
+                    contribution,
+                )
+        return result
+
+    setattr(exact_sparse_log_matvec, _SPARSE_MATVEC_PATCHED_ATTR, True)
+    setattr(exact_sparse_log_matvec, "__hipporeplayimm_original__", current)
+    models._log_sparse_matvec = exact_sparse_log_matvec
 
 
 def _patch_stationary_trajectory_posterior(model_type: type[Any]) -> None:

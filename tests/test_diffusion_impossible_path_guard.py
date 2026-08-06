@@ -3,7 +3,7 @@ import warnings
 import numpy as np
 
 from hipporeplayimm.encoding import LogEmissionTensor
-from hipporeplayimm.models import DiffusionModel
+from hipporeplayimm.models import DiffusionModel, _log_sparse_matvec
 
 
 _POSTERIOR_DIAGNOSTIC_KEYS = {
@@ -35,6 +35,21 @@ def _disconnected_bin_centers() -> np.ndarray:
             [100.0, 0.0],
         ]
     )
+
+
+def test_sparse_diffusion_matvec_preserves_exact_unreachable_support() -> None:
+    transition = [
+        (np.array([0], dtype=int), np.array([0.0])),
+        (np.array([1], dtype=int), np.array([0.0])),
+    ]
+
+    propagated = _log_sparse_matvec(
+        np.array([0.0, -np.inf]),
+        transition,
+    )
+
+    assert propagated[0] == 0.0
+    assert np.isneginf(propagated[1])
 
 
 def test_diffusion_model_clears_undefined_disconnected_path_posterior() -> None:

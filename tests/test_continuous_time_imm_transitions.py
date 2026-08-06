@@ -1,0 +1,115 @@
+from __future__ import annotations
+
+from types import SimpleNamespace
+
+import numpy as np
+
+import hipporeplayimm.state_space as state_space
+from hipporeplayimm.continuous_time_imm_transition_patch import (
+    _continuous_time_mode_transition_matrix,
+)
+from hipporeplayimm.duration_occupancy import (
+    _mode_transition_matrices as duration_mode_transition_matrices,
+)
+from hipporeplayimm.state_space_displacement_imm import (
+    _mode_transition_matrices as displacement_mode_transition_matrices,
+)
+from hipporeplayimm.state_space_trajectory_imm import (
+    _trajectory_imm_mode_transition_matrices,
+)
+from hipporeplayimm.state_space_utils import _mode_transition_matrix
+
+
+def _assert_semigroup(factory, *, half_duration_s: float) -> None:
+    half = factory(half_duration_s)
+    full = factory(2.0 * half_duration_s)
+    np.testing.assert_allclose(half @ half, full, rtol=1.0e-12, atol=1.0e-12)
+    np.testing.assert_allclose(full.sum(axis=1), 1.0, rtol=0.0, atol=1.0e-13)
+    assert np.all(full >= 0.0)
+
+
+def test_continuous_time_mode_embedding_has_semigroup_and_stationary_limit() -> None:
+    n_modes = 4
+    tau_s = 0.1
+    duration_s = 0.1
+    base = _mode_transition_matrix(n_modes, 0.95)
+
+    half = _continuous_time_mode_transition_matrix(base, duration_s / 2.0, tau_s)
+    full = _continuous_time_mode_transition_matrix(base, duration_s, tau_s)
+    np.testing.assert_allclose(half @ half, full, rtol=1.0e-12, atol=1.0e-12)
+
+    expected_diagonal = 1.0 / n_modes + (1.0 - 1.0 / n_modes) * np.exp(
+        -n_modes * duration_s / ((n_modes - 1) * tau_s)
+    )
+    np.testing.assert_allclose(
+        np.diag(full),
+        expected_diagonal,
+        rtol=1.0e-12,
+        atol=1.0e-12,
+    )
+
+    long_interval = _continuous_time_mode_transition_matrix(
+        base,
+        20.0 * tau_s,
+        tau_s,
+    )
+    np.testing.assert_allclose(
+        long_interval,
+        np.full((n_modes, n_modes), 1.0 / n_modes),
+        rtol=0.0,
+        atol=1.0e-10,
+    )
+
+
+def test_all_duration_aware_imm_families_are_semigroup_consistent() -> None:
+    tau_s = 0.1
+    half_duration_s = 0.025
+
+    _assert_semigroup(
+        lambda duration: duration_mode_transition_matrices(
+            state_space,
+            4,
+            0.95,
+            tau_s,
+            np.asarray([duration]),
+        )[0],
+        half_duration_s=half_duration_s,
+    )
+    _assert_semigroup(
+        lambda duration: displacement_mode_transition_matrices(
+            4,
+            0.95,
+            tau_s,
+            np.asarray([duration]),
+        )[0],
+        half_duration_s=half_duration_s,
+    )
+
+    trajectory_config = SimpleNamespace(
+        imm_switch_tau_s=tau_s,
+        trajectory_imm_momentum_switch_probability=None,
+    )
+    _assert_semigroup(
+        lambda duration: _trajectory_imm_mode_transition_matrices(
+            trajectory_config,
+            0.95,
+            np.asarray([duration]),
+        )[0],
+        half_duration_s=half_duration_s,
+    )
+
+
+def test_custom_trajectory_imm_switch_pattern_is_semigroup_consistent() -> None:
+    config = SimpleNamespace(
+        imm_switch_tau_s=0.1,
+        trajectory_imm_momentum_switch_probability=0.04,
+    )
+
+    _assert_semigroup(
+        lambda duration: _trajectory_imm_mode_transition_matrices(
+            config,
+            0.9,
+            np.asarray([duration]),
+        )[0],
+        half_duration_s=0.025,
+    )

@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import math
 
+import numpy as np
 import pandas as pd
-import pytest
 
 from hipporeplayimm.model_averaged_endpoint_scoping import (
     _model_identity,
@@ -34,9 +34,10 @@ def test_model_average_deduplicates_equivalent_mapping_labels() -> None:
     assert result["model_averaged_endpoint_y"].eq(12.0).all()
     assert result["model_log_evidence_margin"].eq(6.0).all()
     expected_entropy = -(0.6 * math.log(0.6) + 0.4 * math.log(0.4))
-    assert result["model_probability_entropy"].eq(
-        pytest.approx(expected_entropy)
-    ).all()
+    np.testing.assert_allclose(
+        result["model_probability_entropy"].to_numpy(dtype=float),
+        expected_entropy,
+    )
 
 
 def test_model_identity_canonicalizes_unordered_sets() -> None:

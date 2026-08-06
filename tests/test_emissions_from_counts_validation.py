@@ -66,3 +66,16 @@ def test_emissions_from_counts_rejects_finite_values_outside_integer_range() -> 
             np.array([[outside_integer_range]], dtype=float),
             dt=0.02,
         )
+
+
+def test_emissions_from_counts_preserves_exact_integers_above_float_precision() -> None:
+    count = 2**53 + 1
+
+    emissions = emissions_from_counts(
+        _encoding(),
+        np.array([[count]], dtype=np.int64),
+        dt=0.02,
+    )
+
+    assert int(emissions.spike_counts[0, 0]) == count
+    assert emissions.n_spikes == count

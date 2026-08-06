@@ -251,9 +251,36 @@ def _with_finite_log_evidence(scores: pd.DataFrame) -> pd.DataFrame:
     out = scores.copy()
     if "log_evidence" not in out.columns:
         return out
-    values = pd.to_numeric(out["log_evidence"], errors="coerce")
-    out["log_evidence"] = values.where(np.isfinite(values), np.nan)
+    out["log_evidence"] = pd.Series(
+        [_finite_real_log_evidence(value) for value in out["log_evidence"]],
+        index=out.index,
+        dtype=float,
+    )
     return out
+
+
+def _finite_real_log_evidence(value: object) -> float:
+    """Return finite real evidence, treating malformed scalar cells as missing."""
+
+    if _is_missing_scalar(value):
+        return float("nan")
+    try:
+        array = np.asarray(value)
+    except (TypeError, ValueError):
+        return float("nan")
+    if array.shape != ():
+        return float("nan")
+    try:
+        item = array.item()
+    except ValueError:
+        return float("nan")
+    if isinstance(item, (complex, np.complexfloating)):
+        return float("nan")
+    try:
+        numeric = float(item)
+    except (TypeError, ValueError, OverflowError):
+        return float("nan")
+    return numeric if np.isfinite(numeric) else float("nan")
 
 
 def add_shuffle_p_values(real_scores: pd.DataFrame, control_scores: pd.DataFrame) -> pd.DataFrame:

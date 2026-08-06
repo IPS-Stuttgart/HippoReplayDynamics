@@ -124,10 +124,15 @@ def validate_session_position_decoding(
             ],
             dtype=float,
         )
-        train_mask = movement & ~_times_in_intervals(times, intervals)
-        if not np.any(train_mask):
+        training_durations = _training_frame_durations(times, movement, intervals)
+        if not np.any(training_durations > 0.0):
             continue
-        encoding = fit_place_field_encoding_for_position_mask(session, train_mask, config.encoding)
+        encoding = _fit_place_field_encoding_excluding_intervals(
+            session,
+            movement,
+            config.encoding,
+            excluded_intervals=intervals,
+        )
         for window_index in sorted(int(index) for index in validation_indices):
             row = _decode_window(
                 session,
@@ -162,6 +167,23 @@ def fit_place_field_encoding_for_position_mask(
 ) -> EncodingModel:
     """Fit place fields from an explicit training mask over position frames."""
 
+    return _fit_place_field_encoding_excluding_intervals(
+        session,
+        train_frame_mask,
+        config,
+        excluded_intervals=None,
+    )
+
+
+def _fit_place_field_encoding_excluding_intervals(
+    session: ReplaySession,
+    train_frame_mask: np.ndarray,
+    config: EncodingConfig | None = None,
+    *,
+    excluded_intervals: np.ndarray | None,
+) -> EncodingModel:
+    """Fit place fields while excluding exact half-open time intervals."""
+
     config = EncodingConfig() if config is None else config
     _validate_encoding_config(config)
     position = _clean_position(session.position)
@@ -174,10 +196,15 @@ def fit_place_field_encoding_for_position_mask(
     grid_shape = (len(x_edges) - 1, len(y_edges) - 1)
     flat_bins = _positions_to_flat_bins(xy, x_edges, y_edges)
     dt = _frame_durations(times)
-    train_frames = np.asarray(train_frame_mask, dtype=bool) & (flat_bins >= 0)
+    training_durations = _training_frame_durations(times, train_frame_mask, excluded_intervals)
+    train_frames = (training_durations > 0.0) & (flat_bins >= 0)
 
     occupancy = np.zeros(grid_shape[0] * grid_shape[1], dtype=float)
-    np.add.at(occupancy, flat_bins[train_frames], dt[train_frames])
+    np.add.at(
+        occupancy,
+        flat_bins[train_frames],
+        training_durations[train_frames],
+    )
 
     spikes, cell_ids = _spikes_and_cell_ids_for_encoding(session, config)
     cell_ids = np.asarray(sorted(np.unique(cell_ids)), dtype=int)
@@ -194,34 +221,56 @@ def fit_place_field_encoding_for_position_mask(
         if np.any(valid_frames):
             rows_for_spikes = frame_indices[valid_frames].astype(int)
             offsets = spike_times[valid_frames] - times[rows_for_spikes]
+            base_train_frames = np.asarray(train_frame_mask, dtype=bool)
             spike_in_training[valid_frames] = (
-                train_frames[rows_for_spikes]
+                base_train_frames[rows_for_spikes]
                 & (offsets >= 0.0)
                 & (offsets < dt[rows_for_spikes])
             )
+        excluded = _merge_half_open_intervals(excluded_intervals)
+        if excluded.size:
+            spike_in_training &= ~_times_in_half_open_intervals(spike_times, excluded)
         keep_spikes = spike_in_training & (spike_bins >= 0)
         kept_cell_ids = spike_cell_ids[keep_spikes]
         kept_bins = spike_bins[keep_spikes].astype(int)
         rows = np.searchsorted(cell_ids, kept_cell_ids)
         valid_rows = (rows >= 0) & (rows < cell_ids.shape[0])
-        valid_rows[valid_rows] &= cell_ids[rows[valid_rows]] == kept_cell_ids[valid_rows]
+        valid_rows[valid_rows] &= (
+            cell_ids[rows[valid_rows]] == kept_cell_ids[valid_rows]
+        )
         np.add.at(counts, (rows[valid_rows], kept_bins[valid_rows]), 1.0)
 
     occupancy_grid = occupancy.reshape(grid_shape)
     if config.smoothing_sigma_bins > 0.0:
-        smooth_occupancy = gaussian_filter(occupancy_grid, sigma=config.smoothing_sigma_bins, mode="constant").reshape(-1)
-        smooth_counts = np.vstack(
-            [
-                gaussian_filter(row.reshape(grid_shape), sigma=config.smoothing_sigma_bins, mode="constant").reshape(-1)
-                for row in counts
-            ]
-        ) if counts.shape[0] else counts
+        smooth_occupancy = gaussian_filter(
+            occupancy_grid,
+            sigma=config.smoothing_sigma_bins,
+            mode="constant",
+        ).reshape(-1)
+        smooth_counts = (
+            np.vstack(
+                [
+                    gaussian_filter(
+                        row.reshape(grid_shape),
+                        sigma=config.smoothing_sigma_bins,
+                        mode="constant",
+                    ).reshape(-1)
+                    for row in counts
+                ]
+            )
+            if counts.shape[0]
+            else counts
+        )
     else:
         smooth_occupancy = occupancy
         smooth_counts = counts
 
     denominator = np.maximum(smooth_occupancy, config.min_occupancy_s)
-    rates = smooth_counts / denominator[None, :] if smooth_counts.shape[0] else smooth_counts
+    rates = (
+        smooth_counts / denominator[None, :]
+        if smooth_counts.shape[0]
+        else smooth_counts
+    )
     rates = np.maximum(rates, config.rate_floor_hz)
     return EncodingModel(
         x_edges=x_edges,
@@ -232,6 +281,78 @@ def fit_place_field_encoding_for_position_mask(
         cell_ids=cell_ids,
         config=config,
     )
+
+
+def _training_frame_durations(
+    times: np.ndarray,
+    train_frame_mask: np.ndarray,
+    excluded_intervals: np.ndarray | None,
+) -> np.ndarray:
+    """Return per-frame training exposure after exact interval subtraction."""
+
+    durations = np.asarray(_frame_durations(times), dtype=float)
+    mask = np.asarray(train_frame_mask, dtype=bool)
+    if mask.shape != durations.shape:
+        raise ValueError("train_frame_mask must have one value per cleaned position frame")
+    retained = np.where(mask, durations, 0.0)
+    excluded = _merge_half_open_intervals(excluded_intervals)
+    if excluded.size == 0:
+        return retained
+
+    frame_starts = np.asarray(times, dtype=float)
+    frame_ends = frame_starts + durations
+    for start, end in excluded:
+        overlap = np.maximum(
+            0.0,
+            np.minimum(frame_ends, end) - np.maximum(frame_starts, start),
+        )
+        retained = np.maximum(retained - overlap, 0.0)
+    return retained
+
+
+def _merge_half_open_intervals(intervals: np.ndarray | None) -> np.ndarray:
+    """Validate and merge half-open intervals without closing their right edge."""
+
+    if intervals is None:
+        return np.empty((0, 2), dtype=float)
+    array = np.asarray(intervals, dtype=float)
+    if array.size == 0:
+        return np.empty((0, 2), dtype=float)
+    if array.ndim == 1:
+        if array.shape[0] != 2:
+            raise ValueError("excluded_intervals must have two columns")
+        array = array.reshape(1, 2)
+    if array.ndim != 2 or array.shape[1] != 2:
+        raise ValueError("excluded_intervals must have two columns")
+    if not np.all(np.isfinite(array)):
+        raise ValueError("excluded_intervals must contain finite bounds")
+    if np.any(array[:, 1] < array[:, 0]):
+        raise ValueError("excluded_intervals must have end >= start")
+
+    nonempty = array[array[:, 1] > array[:, 0]]
+    if nonempty.size == 0:
+        return np.empty((0, 2), dtype=float)
+    ordered = nonempty[np.lexsort((nonempty[:, 1], nonempty[:, 0]))]
+    merged: list[list[float]] = [[float(ordered[0, 0]), float(ordered[0, 1])]]
+    for start, end in ordered[1:]:
+        previous = merged[-1]
+        if start <= previous[1]:
+            previous[1] = max(previous[1], float(end))
+        else:
+            merged.append([float(start), float(end)])
+    return np.asarray(merged, dtype=float)
+
+
+def _times_in_half_open_intervals(
+    times: np.ndarray,
+    intervals: np.ndarray,
+) -> np.ndarray:
+    """Return membership in a union of intervals of the form [start, end)."""
+
+    mask = np.zeros(np.asarray(times).shape, dtype=bool)
+    for start, end in intervals:
+        mask |= (times >= start) & (times < end)
+    return mask
 
 
 def summarize_position_decoding(samples: pd.DataFrame) -> pd.DataFrame:

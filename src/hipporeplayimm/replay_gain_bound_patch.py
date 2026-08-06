@@ -16,7 +16,7 @@ import numpy as np
 
 _PATCHED_FLAG = "_replay_gain_bound_patch_applied"
 _WRAPPER_FLAG = "_bounded_replay_gain_wrapper"
-_WRAPPER_VERSION = 2
+_WRAPPER_VERSION = 3
 _ORIGINAL_ATTR = "__hipporeplayimm_replay_gain_bound_original__"
 
 
@@ -88,14 +88,13 @@ def _apply_replay_gains_with_bounds(
         }
 
     calibrated = np.asarray(rates_hz, dtype=float).copy()
-    total_duration = float(np.sum(bin_durations))
-    mean_rate_by_cell = (
-        np.mean(calibrated, axis=1) if calibrated.size else np.zeros(0)
+    durations = np.asarray(bin_durations, dtype=float)
+    expected_by_cell = np.sum(
+        calibrated * durations[None, :],
+        axis=1,
+        dtype=float,
     )
-    expected_by_cell = np.maximum(
-        mean_rate_by_cell * total_duration,
-        np.finfo(float).tiny,
-    )
+    expected_by_cell = np.maximum(expected_by_cell, np.finfo(float).tiny)
     observed_by_cell = np.asarray(counts).sum(axis=0).astype(float)
 
     cell_gains = np.ones(calibrated.shape[0], dtype=float)
@@ -110,7 +109,12 @@ def _apply_replay_gains_with_bounds(
     event_gain = 1.0
     if mode in {"event", "event-cell"}:
         expected_total = max(
-            float(np.mean(np.sum(calibrated, axis=0)) * total_duration),
+            float(
+                np.sum(
+                    calibrated * durations[None, :],
+                    dtype=float,
+                )
+            ),
             np.finfo(float).tiny,
         )
         observed_total = float(observed_by_cell.sum())

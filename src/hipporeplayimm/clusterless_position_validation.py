@@ -153,7 +153,7 @@ def _decode_clusterless_window(
         "map_error_cm": _distance(encoding.bin_centers[map_bin], true_xy),
         "true_bin_probability": true_prob,
         "true_bin_rank": true_rank,
-        "posterior_entropy": float(-np.sum(posterior * log_posterior)),
+        "posterior_entropy": _posterior_entropy(posterior, log_posterior),
         "n_spikes": int(emissions.n_spikes),
         "n_position_bins": int(encoding.n_bins),
         "observation_model": "clusterless-marked-point-process",
@@ -161,6 +161,13 @@ def _decode_clusterless_window(
         "spike_mark_source": str(encoding.spike_mark_source),
         "spike_mark_features": int(encoding.n_features),
     }
+
+
+def _posterior_entropy(posterior: np.ndarray, log_posterior: np.ndarray) -> float:
+    """Return Shannon entropy without evaluating the indeterminate product 0 * -inf."""
+
+    positive = posterior > 0.0
+    return float(-np.sum(posterior[positive] * log_posterior[positive]))
 
 
 def summarize_clusterless_position_validation(samples: pd.DataFrame) -> pd.DataFrame:

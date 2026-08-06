@@ -213,7 +213,7 @@ def _refresh_candidate_score_helpers(*, state_space_utils, state_space, state_sp
             module._top_candidate_indices = _wrap_top_candidate_indices(current_top_candidate_indices)
 
         current_mass_retaining_candidate_indices = getattr(module, "_mass_retaining_candidate_indices", None)
-        if current_mass_retaining_candidate_indices is not None and not _is_mass_retaining_candidate_indices_wrapper(current_mass_retaining_candidate_indices):
+        if current_mass_retaining_candidate_indices is not None and not _is_mass_retaining_scores_wrapper(current_mass_retaining_candidate_indices):
             module._mass_retaining_candidate_indices = _wrap_mass_retaining_candidate_indices(current_mass_retaining_candidate_indices)
 
     current_model_top_candidate_indices = getattr(models, "_top_candidate_indices", None)
@@ -222,10 +222,6 @@ def _refresh_candidate_score_helpers(*, state_space_utils, state_space, state_sp
 
     setattr(state_space_utils, _SCORE_PATCHED_FLAG, True)
     setattr(models, _SCORE_PATCHED_FLAG, True)
-
-
-def _is_mass_retaining_candidate_indices_wrapper(func: object) -> bool:
-    return _is_mass_retaining_candidate_indices_wrapper(func)
 
 
 def _patch_complex_candidate_support_reporting() -> None:

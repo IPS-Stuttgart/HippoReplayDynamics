@@ -32,6 +32,7 @@ SHUFFLE_CONTROL_SCORE_COLUMNS = (
 )
 _SHUFFLE_P_VALUE_BASE_COLUMNS = ("session", "event_index", "model")
 _SHUFFLE_P_VALUE_SCOPE_COLUMNS = (
+    "control_type",
     "requested_model",
     "benchmark_random_seed",
     "benchmark_cell_split_index",
@@ -289,6 +290,9 @@ def add_shuffle_p_values(real_scores: pd.DataFrame, control_scores: pd.DataFrame
     Independent decode scopes that reuse the same ``session``/``event_index`` and
     ``model`` keys, such as window variants or cell-split repeats, keep separate
     control distributions when matching scope columns are present in both tables.
+    Different shuffle control types are never pooled silently: callers combining
+    multiple control families must identify the requested ``control_type`` on
+    each real-score row.
     """
 
     real_scores = _with_finite_log_evidence(real_scores)
@@ -346,6 +350,15 @@ def _shuffle_p_value_group_columns(real_scores: pd.DataFrame, control_scores: pd
     ]
     if missing:
         raise KeyError(f"shuffle score tables missing required columns: {missing}")
+
+    if "control_type" in control_scores.columns and "control_type" not in real_scores.columns:
+        control_types = control_scores["control_type"].map(_scope_label)
+        if int(control_types.nunique(dropna=False)) > 1:
+            raise ValueError(
+                "control_scores contains multiple control_type values; add control_type "
+                "to real_scores or compute each shuffle family separately"
+            )
+
     columns = list(_SHUFFLE_P_VALUE_BASE_COLUMNS)
     for column in _SHUFFLE_P_VALUE_SCOPE_COLUMNS:
         if column in real_scores.columns and column in control_scores.columns:

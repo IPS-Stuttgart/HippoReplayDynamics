@@ -3,8 +3,8 @@ from __future__ import annotations
 import numpy as np
 from scipy.sparse import eye
 
-from hipporeplayimm.encoding import LogEmissionTensor
 import hipporeplayimm.well_route_state_space as route_module
+from hipporeplayimm.encoding import LogEmissionTensor
 from hipporeplayimm.well_route_state_space import (
     WellRouteStateSpaceReplayModel,
     _transition_progress_fractions,

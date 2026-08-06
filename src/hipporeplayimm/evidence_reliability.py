@@ -23,6 +23,7 @@ RELIABILITY_FLAG_COLUMNS = (
     "event_high_terminal_entropy",
     "event_invalid_numeric_metric",
 )
+_INVALID_METRIC_SCALAR = object()
 
 
 def event_reliability_flags(
@@ -216,46 +217,57 @@ def _candidate_log_mass_for_reliability(row: pd.Series) -> tuple[float, bool]:
     return mean_mass, invalid_numeric_metric or invalid_mean
 
 
-def _as_float(value) -> tuple[float, bool]:
-    if _is_missing_scalar(value):
-        return float("nan"), False
-    try:
-        array = np.asarray(value)
-    except (TypeError, ValueError):
-        return _coerced_metric_float(value)
-    if array.shape != ():
-        return float("nan"), True
-    if np.issubdtype(array.dtype, np.bool_):
-        return float("nan"), True
-    if np.issubdtype(array.dtype, np.complexfloating):
-        return float("nan"), True
-    if array.dtype == object:
+def _unwrap_metric_scalar(value):
+    """Unwrap nested scalar containers without lossy numeric coercion."""
+
+    current = value
+    seen_arrays: set[int] = set()
+    while isinstance(current, (np.ndarray, np.generic)):
+        if isinstance(current, np.ndarray):
+            if current.shape != ():
+                return _INVALID_METRIC_SCALAR
+            identity = id(current)
+            if identity in seen_arrays:
+                return _INVALID_METRIC_SCALAR
+            seen_arrays.add(identity)
         try:
-            item = array.item()
-        except ValueError:
-            return float("nan"), True
-        if _is_missing_scalar(item):
-            return float("nan"), False
-        if isinstance(item, (bool, np.bool_)):
-            return float("nan"), True
-        if isinstance(item, (complex, np.complexfloating)):
-            return float("nan"), True
-        return _coerced_metric_float(item)
-    return _coerced_metric_float(array)
+            nested = current.item()
+        except (TypeError, ValueError):
+            return _INVALID_METRIC_SCALAR
+        if nested is current:
+            return _INVALID_METRIC_SCALAR
+        current = nested
+    return current
+
+
+def _as_float(value) -> tuple[float, bool]:
+    item = _unwrap_metric_scalar(value)
+    if item is _INVALID_METRIC_SCALAR:
+        return float("nan"), True
+    if _is_missing_scalar(item):
+        return float("nan"), False
+    if isinstance(item, (bool, np.bool_)):
+        return float("nan"), True
+    if isinstance(item, (complex, np.complexfloating)):
+        return float("nan"), True
+    return _coerced_metric_float(item)
 
 
 def _as_count_metric(value) -> tuple[float, bool]:
     """Return a nonnegative integral count metric without lossy float coercion."""
 
-    if _is_missing_scalar(value):
+    item = _unwrap_metric_scalar(value)
+    if item is _INVALID_METRIC_SCALAR:
+        return float("nan"), True
+    if _is_missing_scalar(item):
         return float("nan"), False
     try:
-        integer = _exact_integer_count("count metric", value)
+        integer = _exact_integer_count("count metric", item)
     except (TypeError, ValueError, OverflowError):
         # Preserve the established treatment of NaN-like scalar metadata as
         # missing, while rejecting every other value that is not exactly an
         # integer before binary floating-point conversion.
-        numeric, invalid_metric = _as_float(value)
+        numeric, invalid_metric = _as_float(item)
         if not invalid_metric and np.isnan(numeric):
             return numeric, False
         if invalid_metric:

@@ -75,7 +75,14 @@ def trajectory_quality_metrics(
         f"{prefix}_map_step_p95_cm": float(np.quantile(map_steps, 0.95)) if map_steps.size else 0.0,
         f"{prefix}_mean_entropy": float(np.mean(entropy)) if entropy.size else np.nan,
         f"{prefix}_terminal_entropy": float(entropy[-1]) if entropy.size else np.nan,
-        f"{prefix}_mean_spread_cm": float(np.mean(spread)) if spread.size else np.nan,
+        f"{prefix}_mean_spread_cm": (
+            _stable_mean(
+                spread,
+                error_message="posterior spread exceeds floating-point range",
+            )
+            if spread.size
+            else np.nan
+        ),
         f"{prefix}_terminal_spread_cm": float(spread[-1]) if spread.size else np.nan,
     }
 
@@ -234,6 +241,26 @@ def _stable_euclidean_norm(values: np.ndarray, *, axis: int) -> np.ndarray:
     )
     with np.errstate(over="ignore", invalid="ignore"):
         return scale * np.sqrt(np.sum(scaled * scaled, axis=axis))
+
+
+def _stable_mean(values: np.ndarray, *, error_message: str) -> float:
+    """Return the mean of finite values without overflowing the reduction sum."""
+
+    arr = np.asarray(values, dtype=float)
+    if arr.size == 0:
+        return np.nan
+    if not np.all(np.isfinite(arr)):
+        raise ValueError(error_message)
+    scale = float(np.max(np.abs(arr)))
+    if scale == 0.0:
+        return 0.0
+    scaled_mean = float(np.mean(arr / scale))
+    scaled_mean = float(np.clip(scaled_mean, -1.0, 1.0))
+    with np.errstate(over="ignore", invalid="ignore"):
+        mean = float(scale * scaled_mean)
+    if not np.isfinite(mean):
+        raise ValueError(error_message)
+    return mean
 
 
 def _direction_consistency(path: np.ndarray) -> float:

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+from collections.abc import Mapping
 
 import numpy as np
 import pandas as pd
@@ -146,8 +147,17 @@ def _model_identity(value: object) -> object:
             return raw.decode("utf-8").strip()
         except UnicodeDecodeError:
             return ("bytes", raw)
+    if isinstance(value, Mapping):
+        items = (
+            (_model_identity(key), _model_identity(item))
+            for key, item in value.items()
+        )
+        return ("mapping", tuple(sorted(items, key=repr)))
     if isinstance(value, (list, tuple)):
         return ("sequence", tuple(_model_identity(item) for item in value))
+    if isinstance(value, (set, frozenset)):
+        items = (_model_identity(item) for item in value)
+        return ("set", tuple(sorted(items, key=repr)))
     try:
         hash(value)
     except TypeError:

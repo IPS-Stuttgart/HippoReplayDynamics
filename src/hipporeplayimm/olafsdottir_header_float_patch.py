@@ -6,7 +6,9 @@ import math
 import re
 from collections.abc import Mapping
 
-_FLOAT_TOKEN = re.compile(r"[-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][-+]?\d+)?")
+_FLOAT_TOKEN = re.compile(
+    r"(?<![A-Za-z0-9_.])[-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][-+]?\d+)?(?![A-Za-z0-9_.])"
+)
 _PATCH_FLAG = "_olafsdottir_header_float_patch_applied"
 
 

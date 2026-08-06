@@ -12,6 +12,7 @@ from __future__ import annotations
 
 from functools import wraps
 from pathlib import Path
+from threading import RLock
 from typing import Any
 
 import numpy as np
@@ -35,6 +36,7 @@ _MISSING_TEXT_VALUES = frozenset({"", "na", "n/a", "nan", "none", "null", "<na>"
 _PATCHED_FLAG = "_ground_truth_window_scope_wrapped"
 _VISIT_GAP_PATCHED_FLAG = "_ground_truth_visit_gap_wrapped"
 _MAX_CONTIGUOUS_SAMPLE_GAP_MULTIPLIER = 5.0
+_WINDOW_BUILDER_PATCH_LOCK = RLock()
 
 
 def apply_ground_truth_window_scope_patch() -> None:
@@ -202,48 +204,52 @@ def _compare_scores_for_replay_window(
     args: tuple[Any, ...],
     kwargs: dict[str, Any],
 ) -> pd.DataFrame:
-    original_build_emissions = gt.build_emissions
-    original_build_clusterless_mark_emissions = gt.build_clusterless_mark_emissions
+    # The scoped decoder temporarily replaces module-level builders.  Serialize
+    # the complete mutation/call/restore region so concurrent decodes cannot see
+    # another call's wrappers or restore stale aliases over a live call.
+    with _WINDOW_BUILDER_PATCH_LOCK:
+        original_build_emissions = gt.build_emissions
+        original_build_clusterless_mark_emissions = gt.build_clusterless_mark_emissions
 
-    @wraps(original_build_emissions)
-    def build_emissions_in_saved_window(
-        session: Any,
-        encoding: Any,
-        ripple: Any,
-        *emission_args: Any,
-        **emission_kwargs: Any,
-    ):
-        return original_build_emissions(
-            session,
-            encoding,
-            _saved_window_for_ripple(session, ripple, replay_window),
-            *emission_args,
-            **emission_kwargs,
-        )
+        @wraps(original_build_emissions)
+        def build_emissions_in_saved_window(
+            session: Any,
+            encoding: Any,
+            ripple: Any,
+            *emission_args: Any,
+            **emission_kwargs: Any,
+        ):
+            return original_build_emissions(
+                session,
+                encoding,
+                _saved_window_for_ripple(session, ripple, replay_window),
+                *emission_args,
+                **emission_kwargs,
+            )
 
-    @wraps(original_build_clusterless_mark_emissions)
-    def build_clusterless_mark_emissions_in_saved_window(
-        session: Any,
-        encoding: Any,
-        ripple: Any,
-        *emission_args: Any,
-        **emission_kwargs: Any,
-    ):
-        return original_build_clusterless_mark_emissions(
-            session,
-            encoding,
-            _saved_window_for_ripple(session, ripple, replay_window),
-            *emission_args,
-            **emission_kwargs,
-        )
+        @wraps(original_build_clusterless_mark_emissions)
+        def build_clusterless_mark_emissions_in_saved_window(
+            session: Any,
+            encoding: Any,
+            ripple: Any,
+            *emission_args: Any,
+            **emission_kwargs: Any,
+        ):
+            return original_build_clusterless_mark_emissions(
+                session,
+                encoding,
+                _saved_window_for_ripple(session, ripple, replay_window),
+                *emission_args,
+                **emission_kwargs,
+            )
 
-    gt.build_emissions = build_emissions_in_saved_window
-    gt.build_clusterless_mark_emissions = build_clusterless_mark_emissions_in_saved_window
-    try:
-        return base_compare(root, scores, *args, **kwargs)
-    finally:
-        gt.build_emissions = original_build_emissions
-        gt.build_clusterless_mark_emissions = original_build_clusterless_mark_emissions
+        gt.build_emissions = build_emissions_in_saved_window
+        gt.build_clusterless_mark_emissions = build_clusterless_mark_emissions_in_saved_window
+        try:
+            return base_compare(root, scores, *args, **kwargs)
+        finally:
+            gt.build_emissions = original_build_emissions
+            gt.build_clusterless_mark_emissions = original_build_clusterless_mark_emissions
 
 
 def _score_table_needs_window_scoped_decode(scores_frame: pd.DataFrame) -> bool:

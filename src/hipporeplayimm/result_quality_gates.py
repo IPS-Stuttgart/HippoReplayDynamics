@@ -238,6 +238,79 @@ def model_quality_summary(frame: pd.DataFrame) -> pd.DataFrame:
     return pd.DataFrame(records)
 
 
+def _validated_min_exact_models_per_event(value: object) -> int:
+    """Return a positive integer model-count gate without lossy coercion."""
+
+    message = "min_exact_models_per_event must be a positive integer scalar"
+    if isinstance(value, (bool, np.bool_)):
+        raise ValueError(message)
+    try:
+        scalar = np.asarray(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(message) from exc
+    if scalar.ndim != 0 or np.issubdtype(scalar.dtype, np.bool_) or np.issubdtype(scalar.dtype, np.complexfloating):
+        raise ValueError(message)
+
+    item = scalar.item()
+    if isinstance(item, (bool, np.bool_, np.ndarray)):
+        raise ValueError(message)
+    if isinstance(item, (int, np.integer)) and not isinstance(item, (bool, np.bool_)):
+        candidate = int(item)
+    elif isinstance(item, (float, np.floating)):
+        if not np.isfinite(item) or not float(item).is_integer():
+            raise ValueError(message)
+        candidate = int(item)
+    elif isinstance(item, (str, bytes)):
+        try:
+            candidate = int(item)
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise ValueError(message) from exc
+    else:
+        try:
+            candidate = int(item)
+            exact = bool(item == candidate)
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise ValueError(message) from exc
+        if not exact:
+            raise ValueError(message)
+
+    if candidate < 1:
+        raise ValueError(message)
+    return candidate
+
+
+def _validated_min_candidate_good_fraction(value: object) -> float:
+    """Return a finite candidate-support threshold in the unit interval."""
+
+    message = "min_candidate_good_fraction must be a finite scalar in [0, 1]"
+    if isinstance(value, (bool, np.bool_, complex, np.complexfloating)):
+        raise ValueError(message)
+    try:
+        scalar = np.asarray(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(message) from exc
+    if scalar.ndim != 0:
+        raise ValueError(message)
+    if (
+        np.issubdtype(scalar.dtype, np.bool_)
+        or np.issubdtype(scalar.dtype, np.complexfloating)
+        or np.issubdtype(scalar.dtype, np.str_)
+        or np.issubdtype(scalar.dtype, np.bytes_)
+    ):
+        raise ValueError(message)
+
+    item = scalar.item()
+    if isinstance(item, (bool, np.bool_, complex, np.complexfloating, str, bytes, bytearray, memoryview, np.ndarray)):
+        raise ValueError(message)
+    try:
+        candidate = float(item)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ValueError(message) from exc
+    if not np.isfinite(candidate) or candidate < 0.0 or candidate > 1.0:
+        raise ValueError(message)
+    return candidate
+
+
 def quality_gate_summary(
     frame: pd.DataFrame,
     *,
@@ -246,6 +319,8 @@ def quality_gate_summary(
 ) -> pd.DataFrame:
     """Return compact pass/warn/fail style checks for a score table."""
 
+    min_exact_models_per_event = _validated_min_exact_models_per_event(min_exact_models_per_event)
+    min_candidate_good_fraction = _validated_min_candidate_good_fraction(min_candidate_good_fraction)
     if frame.empty:
         return pd.DataFrame(
             [{"gate": "nonempty_scores", "status": "fail", "value": 0, "note": "No score rows."}]

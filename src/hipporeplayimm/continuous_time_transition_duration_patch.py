@@ -24,7 +24,11 @@ def apply_continuous_time_transition_duration_patch() -> None:
     """Keep continuous-time transition durations equal to timestamp differences."""
 
     from . import accuracy_upgrades
+    from .continuous_time_imm_transition_patch import (
+        apply_continuous_time_imm_transition_patch,
+    )
 
+    apply_continuous_time_imm_transition_patch()
     current = accuracy_upgrades.build_continuous_time_emissions
     if getattr(current, _WRAPPER_FLAG, False):
         setattr(accuracy_upgrades, _PATCHED_FLAG, True)

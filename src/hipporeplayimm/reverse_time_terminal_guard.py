@@ -37,6 +37,9 @@ def apply_reverse_time_terminal_guard_patch() -> None:
     from .diffusion_impossible_path_guard import (
         apply_diffusion_impossible_path_guard_patch,
     )
+    from .exact_ripple_training_exclusion import (
+        apply_exact_ripple_training_exclusion_patch,
+    )
     from . import result_improvement_extensions as extensions
     from .score_optional_kwargs_fallback import (
         apply_score_optional_kwargs_fallback_patch,
@@ -44,6 +47,7 @@ def apply_reverse_time_terminal_guard_patch() -> None:
 
     apply_candidate_kinematic_smoothing_patch()
     apply_diffusion_impossible_path_guard_patch()
+    apply_exact_ripple_training_exclusion_patch()
     apply_score_optional_kwargs_fallback_patch()
     score = extensions.ReverseTimeReplayModel.score
     if getattr(score, "_reverse_time_terminal_guard_applied", False):

@@ -13,6 +13,7 @@ _MARGIN_FLAG = "_evidence_margin_distinct_model_wrapper"
 _ADD_FLAG = "_evidence_margin_distinct_model_add_columns_wrapper"
 _BOOL_FLAG = "_evidence_margin_arbitrary_integer_bool_wrapper"
 _EMPTY_SWEEP_FLAG = "_evidence_margin_empty_threshold_sweep_wrapper"
+_QUALITY_MARGIN_COMPLEX_FLAG = "_result_quality_margin_complex_wrapper"
 _DEFAULT_GROUP_COLUMNS = ("session", "event_index")
 _EVIDENCE_MARGIN_AUTO_SCOPE_COLUMNS = ("matrix_id",)
 _MARGIN_COLUMNS = (
@@ -30,17 +31,20 @@ def apply_evidence_margin_distinct_model_patch() -> None:
     """Install distinct-model evidence margin diagnostics."""
 
     from . import advanced_result_diagnostics as diagnostics
+    from . import result_quality_gates as quality_gates
 
     current_margin = diagnostics.evidence_margin_table
     current_add = diagnostics.add_evidence_margin_columns
     current_bool = diagnostics._as_bool
     current_sweep = diagnostics.paired_model_margin_threshold_sweep
+    current_quality_margin = quality_gates.evidence_margin_label
     if (
         getattr(diagnostics, _PATCHED_FLAG, False)
         and getattr(current_margin, _MARGIN_FLAG, False)
         and getattr(current_add, _ADD_FLAG, False)
         and getattr(current_bool, _BOOL_FLAG, False)
         and getattr(current_sweep, _EMPTY_SWEEP_FLAG, False)
+        and getattr(current_quality_margin, _QUALITY_MARGIN_COMPLEX_FLAG, False)
     ):
         return
     # The threshold-validation patch replaces the sweep wrapper during a runtime
@@ -50,6 +54,10 @@ def apply_evidence_margin_distinct_model_patch() -> None:
     original_margin = _original_before_refresh(current_margin, _MARGIN_FLAG)
     original_bool = _original_before_refresh(current_bool, _BOOL_FLAG)
     original_sweep = _original_before_refresh(current_sweep, _EMPTY_SWEEP_FLAG)
+    original_quality_margin = _original_before_refresh(
+        current_quality_margin,
+        _QUALITY_MARGIN_COMPLEX_FLAG,
+    )
 
     def evidence_margin_table(
         scores,
@@ -99,6 +107,12 @@ def apply_evidence_margin_distinct_model_patch() -> None:
         ):
             return int(value) != 0
         return original_bool(value, default=default)
+
+    @wraps(original_quality_margin)
+    def evidence_margin_label(margin: object) -> str:
+        if _contains_complex_value(margin):
+            return quality_gates.MARGIN_UNKNOWN
+        return original_quality_margin(margin)
 
     @wraps(original_sweep)
     def paired_model_margin_threshold_sweep(
@@ -168,6 +182,12 @@ def apply_evidence_margin_distinct_model_patch() -> None:
     setattr(add_evidence_margin_columns, _ADD_FLAG, True)
     setattr(_as_bool, _BOOL_FLAG, True)
     setattr(_as_bool, "__hipporeplayimm_original__", original_bool)
+    setattr(evidence_margin_label, _QUALITY_MARGIN_COMPLEX_FLAG, True)
+    setattr(
+        evidence_margin_label,
+        "__hipporeplayimm_original__",
+        original_quality_margin,
+    )
     setattr(paired_model_margin_threshold_sweep, _EMPTY_SWEEP_FLAG, True)
     setattr(
         paired_model_margin_threshold_sweep,
@@ -180,6 +200,7 @@ def apply_evidence_margin_distinct_model_patch() -> None:
     diagnostics.paired_model_margin_threshold_sweep = (
         paired_model_margin_threshold_sweep
     )
+    quality_gates.evidence_margin_label = evidence_margin_label
     setattr(diagnostics, _PATCHED_FLAG, True)
 
 
@@ -189,6 +210,37 @@ def _original_before_refresh(function, wrapper_flag: str):
     if not getattr(function, wrapper_flag, False):
         return function
     return getattr(function, "__hipporeplayimm_original__", function)
+
+
+def _contains_complex_value(value: object) -> bool:
+    """Return whether a scalar-like margin contains any complex value."""
+
+    pending = [value]
+    seen: set[int] = set()
+    while pending:
+        current = pending.pop()
+        if isinstance(current, (complex, np.complexfloating)):
+            return True
+        if isinstance(current, np.generic):
+            pending.append(current.item())
+            continue
+        try:
+            array = np.asarray(current)
+        except (TypeError, ValueError):
+            continue
+        if np.issubdtype(array.dtype, np.complexfloating):
+            return True
+        if array.dtype != object:
+            continue
+        current_id = id(current)
+        if current_id in seen:
+            continue
+        seen.add(current_id)
+        try:
+            pending.extend(array.reshape(-1).tolist())
+        except (TypeError, ValueError):
+            continue
+    return False
 
 
 def _collapse_duplicate_models(

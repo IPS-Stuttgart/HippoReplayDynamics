@@ -84,5 +84,11 @@ def test_terminal_frame_is_clipped_to_run_end_between_position_samples(
 
     durations = duration_helper(times, intervals, _frame_durations)
 
-    np.testing.assert_allclose(durations, np.array([0.1, 0.05, 0.1 if duration_helper is _durations_split_at_run_boundaries else 0.0]))
+    expected_outside = (
+        1.0 / 30.0 if duration_helper is _durations_split_at_run_boundaries else 0.0
+    )
+    np.testing.assert_allclose(
+        durations,
+        np.array([0.1, 0.05, expected_outside], dtype=float),
+    )
     np.testing.assert_allclose(durations[:2].sum(), 0.15)

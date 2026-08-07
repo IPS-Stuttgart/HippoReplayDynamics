@@ -7,6 +7,15 @@ import hipporeplayimm
 from hipporeplayimm.models import CandidateKinematicModel, DiffusionModel
 
 
+def _nested_object_scalar(value: object, *, depth: int = 2) -> np.ndarray:
+    current = value
+    for _ in range(depth):
+        wrapper = np.empty((), dtype=object)
+        wrapper[()] = current
+        current = wrapper
+    return current
+
+
 @pytest.mark.parametrize(
     ("kwargs", "message"),
     [
@@ -38,6 +47,24 @@ def test_candidate_kinematic_model_rejects_string_numeric_parameters(kwargs, mes
         CandidateKinematicModel(**kwargs)
 
 
+@pytest.mark.filterwarnings("error::DeprecationWarning")
+@pytest.mark.parametrize(
+    ("kwargs", "message"),
+    [
+        ({"sigma_cm": _nested_object_scalar("12.0")}, "sigma_cm"),
+        ({"max_step_sigma": _nested_object_scalar(np.array([3.0]))}, "max_step_sigma"),
+        ({"velocity_decay": _nested_object_scalar(True)}, "velocity_decay"),
+        ({"mode_stickiness": _nested_object_scalar(np.bool_(False))}, "mode_stickiness"),
+    ],
+)
+def test_model_numeric_parameters_reject_nested_lossy_scalar_wrappers(kwargs, message):
+    hipporeplayimm.apply_runtime_patches()
+
+    model = DiffusionModel if set(kwargs) <= {"sigma_cm", "max_step_sigma"} else CandidateKinematicModel
+    with pytest.raises(TypeError, match=message):
+        model(**kwargs)
+
+
 def test_model_numeric_parameters_still_accept_numeric_scalars():
     hipporeplayimm.apply_runtime_patches()
 
@@ -49,9 +76,14 @@ def test_model_numeric_parameters_still_accept_numeric_scalars():
         velocity_decay=0.95,
         mode_stickiness=np.float64(0.94),
     )
+    nested_diffusion = DiffusionModel(
+        sigma_cm=_nested_object_scalar(np.float64(12.0)),
+        max_step_sigma=3.0,
+    )
 
     assert diffusion.sigma_cm == np.float64(12.0)
     assert candidate.velocity_decay == 0.95
+    assert float(nested_diffusion.sigma_cm) == 12.0
 
 
 def _legacy_validate_positive_parameter(name: str, value: object) -> None:

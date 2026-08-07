@@ -17,11 +17,11 @@ from hipporeplayimm.place_field_run_local_kinematics import (
     [
         (
             np.array([0.0, 0.1, 0.6], dtype=float),
-            np.array([0.1, 0.5, 0.5], dtype=float),
+            np.array([0.1, 0.5, 0.0], dtype=float),
         ),
         (
             np.array([0.0, 0.5, 0.6], dtype=float),
-            np.array([0.5, 0.1, 0.1], dtype=float),
+            np.array([0.5, 0.1, 0.0], dtype=float),
         ),
     ],
 )
@@ -68,5 +68,21 @@ def test_overlapping_terminal_duration_fallback_is_order_independent(
     forward = duration_helper(times, intervals, _frame_durations)
     reverse = duration_helper(times, intervals[::-1], _frame_durations)
 
-    np.testing.assert_allclose(forward, np.array([0.1, 0.5, 0.3]))
+    np.testing.assert_allclose(forward, np.array([0.1, 0.5, 0.0]))
     np.testing.assert_allclose(reverse, forward)
+
+
+@pytest.mark.parametrize(
+    "duration_helper",
+    [_durations_within_run_intervals, _durations_split_at_run_boundaries],
+)
+def test_terminal_frame_is_clipped_to_run_end_between_position_samples(
+    duration_helper: Callable[..., np.ndarray],
+) -> None:
+    times = np.array([0.0, 0.1, 0.2], dtype=float)
+    intervals = np.array([[0.0, 0.15]], dtype=float)
+
+    durations = duration_helper(times, intervals, _frame_durations)
+
+    np.testing.assert_allclose(durations, np.array([0.1, 0.05, 0.1 if duration_helper is _durations_split_at_run_boundaries else 0.0]))
+    np.testing.assert_allclose(durations[:2].sum(), 0.15)

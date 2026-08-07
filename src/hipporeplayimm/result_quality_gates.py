@@ -253,6 +253,8 @@ def _validated_min_exact_models_per_event(value: object) -> int:
         raise ValueError(message)
 
     item = scalar.item()
+    if isinstance(item, (bool, np.bool_, np.ndarray)):
+        raise ValueError(message)
     if isinstance(item, (int, np.integer)) and not isinstance(item, (bool, np.bool_)):
         candidate = int(item)
     elif isinstance(item, (float, np.floating)):
@@ -303,7 +305,7 @@ def _validated_min_candidate_good_fraction(value: object) -> float:
         raise ValueError(message)
 
     item = scalar.item()
-    if isinstance(item, (bool, np.bool_, complex, np.complexfloating, str, bytes, bytearray, memoryview)):
+    if isinstance(item, (bool, np.bool_, complex, np.complexfloating, str, bytes, bytearray, memoryview, np.ndarray)):
         raise ValueError(message)
     try:
         candidate = float(item)

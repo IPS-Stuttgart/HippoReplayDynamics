@@ -110,7 +110,7 @@ def apply_evidence_margin_distinct_model_patch() -> None:
 
     @wraps(original_quality_margin)
     def evidence_margin_label(margin: object) -> str:
-        if _contains_complex_value(margin):
+        if _contains_boolean_or_complex_value(margin):
             return quality_gates.MARGIN_UNKNOWN
         return original_quality_margin(margin)
 
@@ -212,14 +212,14 @@ def _original_before_refresh(function, wrapper_flag: str):
     return getattr(function, "__hipporeplayimm_original__", function)
 
 
-def _contains_complex_value(value: object) -> bool:
-    """Return whether a scalar-like margin contains any complex value."""
+def _contains_boolean_or_complex_value(value: object) -> bool:
+    """Return whether a scalar-like margin contains Boolean or complex data."""
 
     pending = [value]
     seen: set[int] = set()
     while pending:
         current = pending.pop()
-        if isinstance(current, (complex, np.complexfloating)):
+        if isinstance(current, (bool, np.bool_, complex, np.complexfloating)):
             return True
         if isinstance(current, np.generic):
             pending.append(current.item())
@@ -228,7 +228,10 @@ def _contains_complex_value(value: object) -> bool:
             array = np.asarray(current)
         except (TypeError, ValueError):
             continue
-        if np.issubdtype(array.dtype, np.complexfloating):
+        if (
+            np.issubdtype(array.dtype, np.bool_)
+            or np.issubdtype(array.dtype, np.complexfloating)
+        ):
             return True
         if array.dtype != object:
             continue

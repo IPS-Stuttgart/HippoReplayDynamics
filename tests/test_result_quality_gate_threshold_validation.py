@@ -9,11 +9,19 @@ import pytest
 from hipporeplayimm.result_quality_gates import quality_gate_summary
 
 
+def _object_scalar(value: object) -> np.ndarray:
+    scalar = np.empty((), dtype=object)
+    scalar[()] = value
+    return scalar
+
+
 @pytest.mark.parametrize(
     "minimum",
     [
         True,
         np.bool_(False),
+        np.asarray(True, dtype=object),
+        _object_scalar(np.asarray(True)),
         0,
         -1,
         1.5,
@@ -36,7 +44,16 @@ def test_quality_gate_summary_rejects_invalid_exact_model_minimum_before_empty_r
 
 @pytest.mark.parametrize(
     "minimum",
-    [1, 2.0, "2", b"2", np.int64(2), np.asarray(2), Decimal("2")],
+    [
+        1,
+        2.0,
+        "2",
+        b"2",
+        np.int64(2),
+        np.asarray(2),
+        np.asarray(2, dtype=object),
+        Decimal("2"),
+    ],
 )
 def test_quality_gate_summary_accepts_positive_integer_like_minimum(
     minimum: object,
@@ -61,6 +78,8 @@ def test_quality_gate_summary_accepts_positive_integer_like_minimum(
     [
         True,
         np.bool_(False),
+        np.asarray(True, dtype=object),
+        _object_scalar(np.asarray(True)),
         -0.01,
         1.01,
         np.nan,
@@ -83,7 +102,16 @@ def test_quality_gate_summary_rejects_invalid_candidate_fraction_before_empty_re
 
 @pytest.mark.parametrize(
     "minimum",
-    [0, 1, 0.0, 1.0, np.float64(0.95), np.asarray(0.95), Decimal("0.95")],
+    [
+        0,
+        1,
+        0.0,
+        1.0,
+        np.float64(0.95),
+        np.asarray(0.95),
+        np.asarray(0.95, dtype=object),
+        Decimal("0.95"),
+    ],
 )
 def test_quality_gate_summary_accepts_unit_interval_candidate_fraction(
     minimum: object,

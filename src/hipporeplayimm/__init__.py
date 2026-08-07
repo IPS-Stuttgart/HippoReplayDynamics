@@ -39,6 +39,7 @@ from . import duration_occupancy_mode_transition_validation as _duration_occupan
 from . import emission_cell_id_validation as _emission_cell_id_validation
 from . import encoding_grid_extra_columns as _encoding_grid_extra_columns
 from . import encoding_select_cells_validation as _encoding_select_cells_validation
+from . import evidence_complex_validation as _evidence_complex_validation
 from . import evidence_status_coercion as _evidence_status_coercion
 from . import first_order_imm_diagnostics_validation as _first_order_imm_diagnostics_validation
 from . import goal_state_space_integration as _goal_state_space_integration
@@ -332,6 +333,7 @@ def apply_runtime_patches() -> None:
     _cli_float_values_validation.apply_cli_float_values_validation_patch()
     _result_improvement_seed_validation.apply_result_improvement_seed_validation_patch()
     _bidirectional_infinite_evidence_patch.apply_bidirectional_infinite_evidence_patch()
+    _evidence_complex_validation.apply_evidence_complex_validation_patch()
 
 
 # Ensure replay dynamics use center-to-center transition durations when replay

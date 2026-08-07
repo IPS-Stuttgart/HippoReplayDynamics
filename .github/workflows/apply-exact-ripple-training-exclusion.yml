@@ -1,0 +1,380 @@
+name: Apply exact ripple-training exclusion patch
+
+on:
+  push:
+    branches:
+      - agent/fix-exact-ripple-training-exclusion
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Apply focused source and regression patch
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          def replace_once(path: str, old: str, new: str) -> None:
+              file_path = Path(path)
+              text = file_path.read_text(encoding="utf-8")
+              count = text.count(old)
+              if count != 1:
+                  raise RuntimeError(
+                      f"expected one match in {path}, found {count}: {old!r}"
+                  )
+              file_path.write_text(text.replace(old, new, 1), encoding="utf-8")
+
+          replace_once(
+              "src/hipporeplayimm/encoding.py",
+              "from .data import ReplaySession, RippleEvent, _coerce_ripple_event\n",
+              """from .data import ReplaySession, RippleEvent, _coerce_ripple_event
+          from .training_interval_utils import (
+              retained_frame_durations,
+              times_in_half_open_intervals,
+          )
+          """,
+          )
+          replace_once(
+              "src/hipporeplayimm/encoding.py",
+              """    excluded_intervals = _encoding_exclusion_intervals(session, config)
+              in_excluded_interval = _times_in_intervals(times, excluded_intervals)
+              movement = in_run & ~in_excluded_interval & (speed >= config.min_speed_cm_s)
+          """,
+              """    excluded_intervals = _encoding_exclusion_intervals(session, config)
+              movement = in_run & (speed >= config.min_speed_cm_s)
+          """,
+          )
+          replace_once(
+              "src/hipporeplayimm/encoding.py",
+              """    dt = _frame_durations(times)
+
+              occupancy = np.zeros(grid_shape[0] * grid_shape[1], dtype=float)
+              valid_frames = movement & (flat_bins >= 0)
+              np.add.at(occupancy, flat_bins[valid_frames], dt[valid_frames])
+          """,
+              """    dt = _frame_durations(times)
+              training_durations = retained_frame_durations(
+                  times,
+                  dt,
+                  excluded_intervals,
+              )
+
+              occupancy = np.zeros(grid_shape[0] * grid_shape[1], dtype=float)
+              valid_frames = movement & (training_durations > 0.0) & (flat_bins >= 0)
+              np.add.at(
+                  occupancy,
+                  flat_bins[valid_frames],
+                  training_durations[valid_frames],
+              )
+          """,
+          )
+          replace_once(
+              "src/hipporeplayimm/encoding.py",
+              "        spike_in_excluded_interval = _times_in_intervals(spike_times, excluded_intervals)\n",
+              "        spike_in_excluded_interval = times_in_half_open_intervals(spike_times, excluded_intervals)\n",
+          )
+
+          replace_once(
+              "src/hipporeplayimm/clusterless.py",
+              "from .models import EventScore\n",
+              """from .models import EventScore
+          from .training_interval_utils import (
+              retained_frame_durations,
+              times_in_half_open_intervals,
+          )
+          """,
+          )
+          replace_once(
+              "src/hipporeplayimm/clusterless.py",
+              """    excluded_intervals = _encoding_exclusion_intervals(session, encoding_config)
+              in_excluded_interval = _times_in_intervals(times, excluded_intervals)
+              movement = in_run & ~in_excluded_interval & (speed >= encoding_config.min_speed_cm_s)
+          """,
+              """    excluded_intervals = _encoding_exclusion_intervals(session, encoding_config)
+              movement = in_run & (speed >= encoding_config.min_speed_cm_s)
+          """,
+          )
+          replace_once(
+              "src/hipporeplayimm/clusterless.py",
+              """    dt = _frame_durations(times)
+              occupancy = np.zeros(grid_shape[0] * grid_shape[1], dtype=float)
+              valid_frames = movement & (flat_bins >= 0)
+              np.add.at(occupancy, flat_bins[valid_frames], dt[valid_frames])
+          """,
+              """    dt = _frame_durations(times)
+              training_durations = retained_frame_durations(
+                  times,
+                  dt,
+                  excluded_intervals,
+              )
+              occupancy = np.zeros(grid_shape[0] * grid_shape[1], dtype=float)
+              valid_frames = movement & (training_durations > 0.0) & (flat_bins >= 0)
+              np.add.at(
+                  occupancy,
+                  flat_bins[valid_frames],
+                  training_durations[valid_frames],
+              )
+          """,
+          )
+          replace_once(
+              "src/hipporeplayimm/clusterless.py",
+              "    mark_in_excluded_interval = _times_in_intervals(mark_times, excluded_intervals)\n",
+              "    mark_in_excluded_interval = times_in_half_open_intervals(mark_times, excluded_intervals)\n",
+          )
+          PY
+
+          cat > src/hipporeplayimm/training_interval_utils.py <<'PY'
+          """Half-open interval utilities for replay-training exposure."""
+
+          from __future__ import annotations
+
+          from typing import Any
+
+          import numpy as np
+
+
+          def merge_half_open_intervals(intervals: Any) -> np.ndarray:
+              """Validate and merge a union of half-open ``[start, end)`` intervals."""
+
+              if intervals is None:
+                  return np.empty((0, 2), dtype=float)
+              values = np.asarray(intervals, dtype=float)
+              if values.size == 0:
+                  return np.empty((0, 2), dtype=float)
+              if values.ndim == 1:
+                  if values.shape[0] != 2:
+                      raise ValueError("intervals must contain start/end pairs")
+                  values = values.reshape(1, 2)
+              if values.ndim != 2 or values.shape[1] != 2:
+                  raise ValueError("intervals must contain start/end pairs")
+              if not np.all(np.isfinite(values)):
+                  raise ValueError("interval bounds must be finite")
+              if np.any(values[:, 1] < values[:, 0]):
+                  raise ValueError("interval ends must not precede starts")
+
+              nonempty = values[values[:, 1] > values[:, 0]]
+              if nonempty.size == 0:
+                  return np.empty((0, 2), dtype=float)
+
+              ordered = nonempty[np.lexsort((nonempty[:, 1], nonempty[:, 0]))]
+              merged: list[list[float]] = [
+                  [float(ordered[0, 0]), float(ordered[0, 1])]
+              ]
+              for start, end in ordered[1:]:
+                  current = merged[-1]
+                  if float(start) <= current[1]:
+                      current[1] = max(current[1], float(end))
+                  else:
+                      merged.append([float(start), float(end)])
+              return np.asarray(merged, dtype=float)
+
+
+          def retained_frame_durations(
+              times: np.ndarray,
+              durations: np.ndarray,
+              excluded_intervals: Any,
+          ) -> np.ndarray:
+              """Subtract exact excluded overlap from timestamp-anchored frame exposure."""
+
+              starts = np.asarray(times, dtype=float)
+              retained = np.asarray(durations, dtype=float).copy()
+              if starts.ndim != 1 or retained.shape != starts.shape:
+                  raise ValueError(
+                      "times and durations must be matching one-dimensional arrays"
+                  )
+              if not np.all(np.isfinite(starts)):
+                  raise ValueError("frame times must be finite")
+              if not np.all(np.isfinite(retained)) or np.any(retained < 0.0):
+                  raise ValueError("frame durations must be finite and nonnegative")
+
+              intervals = merge_half_open_intervals(excluded_intervals)
+              if intervals.size == 0 or retained.size == 0:
+                  return retained
+
+              ends = starts + retained
+              if not np.all(np.isfinite(ends)):
+                  raise ValueError("frame end times must be finite")
+              for start, end in intervals:
+                  overlap = np.maximum(
+                      0.0,
+                      np.minimum(ends, end) - np.maximum(starts, start),
+                  )
+                  retained = np.maximum(retained - overlap, 0.0)
+              return retained
+
+
+          def times_in_half_open_intervals(
+              times: np.ndarray,
+              intervals: Any,
+          ) -> np.ndarray:
+              """Return membership in a union of half-open ``[start, end)`` intervals."""
+
+              values = np.asarray(times, dtype=float)
+              merged = merge_half_open_intervals(intervals)
+              mask = np.zeros(values.shape, dtype=bool)
+              for start, end in merged:
+                  mask |= (values >= start) & (values < end)
+              return mask
+
+
+          __all__ = [
+              "merge_half_open_intervals",
+              "retained_frame_durations",
+              "times_in_half_open_intervals",
+          ]
+          PY
+
+          cat > tests/test_exact_ripple_training_exclusion.py <<'PY'
+          from pathlib import Path
+
+          import numpy as np
+
+          from hipporeplayimm.clusterless import (
+              ClusterlessMarkConfig,
+              fit_clusterless_mark_encoding,
+          )
+          from hipporeplayimm.data import ReplaySession, SpikeMarkData
+          from hipporeplayimm.encoding import EncodingConfig, fit_place_field_encoding
+          from hipporeplayimm.training_interval_utils import retained_frame_durations
+
+
+          _RATE_FLOOR = 1e-4
+
+
+          def _encoding_config() -> EncodingConfig:
+              return EncodingConfig(
+                  bin_size_cm=10.0,
+                  smoothing_sigma_bins=0.0,
+                  min_speed_cm_s=0.0,
+                  min_occupancy_s=1e-6,
+                  rate_floor_hz=_RATE_FLOOR,
+                  arena_padding_cm=0.0,
+                  use_excitatory=True,
+                  exclude_ripple_intervals=True,
+              )
+
+
+          def _session() -> ReplaySession:
+              mark_times = np.array([0.75, 1.5], dtype=float)
+              return ReplaySession(
+                  rat="RatX",
+                  name="OpenX",
+                  path=Path("RatX/OpenX"),
+                  position=np.array(
+                      [
+                          [0.0, 0.0, 0.0],
+                          [1.0, 10.0, 0.0],
+                          [2.0, 20.0, 0.0],
+                      ],
+                      dtype=float,
+                  ),
+                  spikes=np.column_stack(
+                      [
+                          mark_times,
+                          np.ones(mark_times.shape, dtype=float),
+                      ]
+                  ),
+                  tetrode_cell_ids=np.array([[1.0, 1.0]], dtype=float),
+                  excitatory_neurons=np.array([1], dtype=int),
+                  inhibitory_neurons=np.empty(0, dtype=int),
+                  ripple_events=np.array(
+                      [[0.5, 1.5, 1.0, 0.0, 0.0, 0.0]],
+                      dtype=float,
+                  ),
+                  run_times=np.array([[0.0, 1.9]], dtype=float),
+                  sleep_box_immobile_times=np.empty((0, 2), dtype=float),
+                  sleep_times=np.empty((0, 2), dtype=float),
+                  rem_times=np.empty((0, 2), dtype=float),
+                  well_sequence=None,
+                  metadata={},
+                  spike_marks=SpikeMarkData(
+                      times=mark_times,
+                      marks=np.array([[10.0], [20.0]], dtype=float),
+                      source_file="marks.mat",
+                      source_variable="marks",
+                      feature_names=("amplitude",),
+                      cell_ids=np.array([1, 1], dtype=int),
+                  ),
+              )
+
+
+          def test_sorted_spike_encoding_subtracts_partial_ripple_frames() -> None:
+              encoding = fit_place_field_encoding(_session(), _encoding_config())
+
+              np.testing.assert_allclose(
+                  encoding.occupancy_s,
+                  np.array([0.5, 0.5]),
+              )
+              np.testing.assert_allclose(
+                  encoding.rates_hz[0],
+                  np.array([_RATE_FLOOR, 2.0]),
+              )
+
+
+          def test_clusterless_encoding_uses_the_same_half_open_exclusion() -> None:
+              encoding = fit_clusterless_mark_encoding(
+                  _session(),
+                  ClusterlessMarkConfig(
+                      encoding=_encoding_config(),
+                      mark_smoothing_sigma_bins=0.0,
+                      mark_likelihood="diagonal-gaussian",
+                  ),
+              )
+
+              np.testing.assert_allclose(
+                  encoding.occupancy_s,
+                  np.array([0.5, 0.5]),
+              )
+              np.testing.assert_allclose(
+                  encoding.effective_spike_count,
+                  np.array([0.0, 1.0]),
+              )
+              np.testing.assert_allclose(
+                  encoding.rate_hz,
+                  np.array([_RATE_FLOOR, 2.0]),
+              )
+
+
+          def test_overlapping_exclusions_are_subtracted_as_a_union() -> None:
+              retained = retained_frame_durations(
+                  np.array([0.0]),
+                  np.array([2.0]),
+                  np.array([[0.25, 1.25], [0.75, 1.5]]),
+              )
+
+              np.testing.assert_allclose(retained, np.array([0.75]))
+          PY
+      - name: Install test dependencies
+        run: python -m pip install -e '.[dev]'
+      - name: Run focused regressions
+        run: python -m pytest -q tests/test_exact_ripple_training_exclusion.py
+      - name: Lint changed Python files
+        run: >-
+          python -m ruff check
+          src/hipporeplayimm/encoding.py
+          src/hipporeplayimm/clusterless.py
+          src/hipporeplayimm/training_interval_utils.py
+          tests/test_exact_ripple_training_exclusion.py
+      - name: Commit validated patch
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add \
+            src/hipporeplayimm/encoding.py \
+            src/hipporeplayimm/clusterless.py \
+            src/hipporeplayimm/training_interval_utils.py \
+            tests/test_exact_ripple_training_exclusion.py
+          git commit -m "Exclude ripple intervals at exact frame boundaries"
+          git push origin "HEAD:${GITHUB_REF_NAME}"

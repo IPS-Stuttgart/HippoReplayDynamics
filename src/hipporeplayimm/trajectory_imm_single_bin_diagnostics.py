@@ -48,19 +48,26 @@ def apply_trajectory_imm_single_bin_diagnostics_patch() -> None:
             if token is not None:
                 _RECORDED_FORWARD_STATES.reset(token)
 
-        if int(getattr(emissions, "n_time", 0)) == 1:
-            updated = dict(diagnostics)
-            updated.update(_single_bin_diagnostics())
-            diagnostics = updated
-        if not return_trajectory and recorded_states is not None:
+        if return_trajectory and mode_posterior is not None:
+            diagnostics = _mode_diagnostics_from_history(
+                trajectory_imm,
+                emissions,
+                mode_posterior,
+                diagnostics,
+            )
+        elif not return_trajectory and recorded_states is not None:
             config = args[2] if len(args) > 2 else kwargs.get("config")
             diagnostics = _evidence_only_mode_diagnostics(
                 trajectory_imm,
                 config,
-                int(getattr(emissions, "n_time", 0)),
+                emissions,
                 recorded_states,
                 diagnostics,
             )
+        if int(getattr(emissions, "n_time", 0)) == 1:
+            updated = dict(diagnostics)
+            updated.update(_single_bin_diagnostics())
+            diagnostics = updated
         return logp, trajectory, terminal, mode_posterior, diagnostics
 
     setattr(score_trajectory_imm_exact_sparse, _PATCHED_ATTR, True)
@@ -90,7 +97,7 @@ def _patch_forward_state_recording(trajectory_imm: Any) -> None:
 def _evidence_only_mode_diagnostics(
     trajectory_imm: Any,
     config: Any,
-    n_time: int,
+    emissions: Any,
     forward_states: list[Any],
     diagnostics: dict[str, float | int | str],
 ) -> dict[str, float | int | str]:
@@ -100,22 +107,45 @@ def _evidence_only_mode_diagnostics(
         mode_posterior = _filtered_mode_posterior_history(
             trajectory_imm,
             config,
-            n_time,
+            int(getattr(emissions, "n_time", 0)),
             forward_states,
+        )
+        return _mode_diagnostics_from_history(
+            trajectory_imm,
+            emissions,
+            mode_posterior,
+            diagnostics,
+            posterior_label="filtered_evidence_only_state",
         )
     except (AttributeError, TypeError, ValueError):
         return diagnostics
 
-    if not np.any(mode_posterior[:, trajectory_imm._MOMENTUM_MODE_INDEX] > 0.0):
-        return diagnostics
 
-    final_mode = mode_posterior[-1]
-    event_mode = mode_posterior.mean(axis=0)
-    trajectory_columns = [1, 2, 3]
+def _mode_diagnostics_from_history(
+    trajectory_imm: Any,
+    emissions: Any,
+    mode_posterior: np.ndarray,
+    diagnostics: dict[str, float | int | str],
+    *,
+    posterior_label: str | None = None,
+) -> dict[str, float | int | str]:
+    """Return trajectory-IMM diagnostics weighted by physical bin exposure."""
+
+    durations = _validated_bin_durations(
+        emissions,
+        np.asarray(mode_posterior).shape[0],
+    )
+    summary = _duration_weighted_mode_summary(mode_posterior, durations)
+    normalized = np.asarray(summary["normalized_mode_posterior"], dtype=float)
+    final_mode = normalized[-1]
+    event_mode = np.asarray(summary["event_probability"], dtype=float)
+    trajectory_columns = np.arange(1, len(trajectory_imm._TRAJECTORY_IMM_MODES), dtype=int)
+
     updated = dict(diagnostics)
-    updated["state_space_trajectory_imm_mode_posterior"] = "filtered_evidence_only_state"
-    updated["state_space_trajectory_imm_mean_mode_entropy"] = trajectory_imm._mean_entropy(
-        trajectory_imm._as_log_probs(mode_posterior)
+    if posterior_label is not None:
+        updated["state_space_trajectory_imm_mode_posterior"] = posterior_label
+    updated["state_space_trajectory_imm_mean_mode_entropy"] = float(
+        summary["mean_mode_entropy"]
     )
     updated["state_space_trajectory_family_terminal_probability"] = float(
         final_mode[trajectory_columns].sum()
@@ -123,11 +153,81 @@ def _evidence_only_mode_diagnostics(
     updated["state_space_trajectory_family_event_probability"] = float(
         event_mode[trajectory_columns].sum()
     )
+    updated["state_space_trajectory_imm_time_weighting"] = "bin_duration"
     for mode_index, mode_name in enumerate(trajectory_imm._TRAJECTORY_IMM_MODES):
         key = mode_name.replace("-", "_")
-        updated[f"state_space_mode_{key}_terminal_probability"] = float(final_mode[mode_index])
-        updated[f"state_space_mode_{key}_event_probability"] = float(event_mode[mode_index])
+        updated[f"state_space_mode_{key}_terminal_probability"] = float(
+            final_mode[mode_index]
+        )
+        updated[f"state_space_mode_{key}_event_probability"] = float(
+            event_mode[mode_index]
+        )
     return updated
+
+
+def _validated_bin_durations(emissions: Any, n_time: int) -> np.ndarray:
+    """Return one finite positive exposure duration per posterior row."""
+
+    values = getattr(emissions, "bin_durations", None)
+    if values is None:
+        fallback_dt = float(getattr(emissions, "dt"))
+        values = np.full(int(n_time), fallback_dt, dtype=float)
+    durations = np.asarray(values, dtype=float)
+    if durations.shape != (int(n_time),):
+        raise ValueError(
+            "bin_durations must contain one duration per trajectory-IMM posterior row"
+        )
+    if not np.all(np.isfinite(durations)) or np.any(durations <= 0.0):
+        raise ValueError("bin_durations must contain finite positive durations")
+    return durations
+
+
+def _duration_weighted_mode_summary(
+    mode_posterior: np.ndarray,
+    bin_durations: np.ndarray,
+) -> dict[str, float | np.ndarray]:
+    """Summarize trajectory-IMM mode occupancy by physical bin exposure."""
+
+    mode = np.asarray(mode_posterior, dtype=float)
+    durations = np.asarray(bin_durations, dtype=float)
+    if mode.ndim != 2 or mode.shape[0] == 0 or mode.shape[1] == 0:
+        raise ValueError(
+            "trajectory-IMM mode posterior must have shape (time, mode)"
+        )
+    if durations.shape != (mode.shape[0],):
+        raise ValueError(
+            "bin_durations must contain one duration per trajectory-IMM posterior row"
+        )
+    if not np.all(np.isfinite(mode)) or np.any(mode < 0.0):
+        raise ValueError(
+            "trajectory-IMM mode posterior must contain finite nonnegative values"
+        )
+    if not np.all(np.isfinite(durations)) or np.any(durations <= 0.0):
+        raise ValueError("bin_durations must contain finite positive durations")
+
+    row_mass = mode.sum(axis=1)
+    if np.any(row_mass <= 0.0) or not np.all(np.isfinite(row_mass)):
+        raise ValueError(
+            "trajectory-IMM mode posterior rows must contain positive finite mass"
+        )
+    normalized = mode / row_mass[:, None]
+
+    duration_scale = float(np.max(durations))
+    scaled_durations = durations / duration_scale
+    weights = scaled_durations / float(np.sum(scaled_durations))
+    event_probability = weights @ normalized
+
+    with np.errstate(divide="ignore", invalid="ignore"):
+        log_mode = np.where(normalized > 0.0, np.log(normalized), 0.0)
+    entropy_by_bin = -np.sum(
+        np.where(normalized > 0.0, normalized * log_mode, 0.0),
+        axis=1,
+    )
+    return {
+        "normalized_mode_posterior": normalized,
+        "event_probability": np.asarray(event_probability, dtype=float),
+        "mean_mode_entropy": float(weights @ entropy_by_bin),
+    }
 
 
 def _filtered_mode_posterior_history(

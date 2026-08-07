@@ -48,11 +48,13 @@ def apply_benchmark_metadata_scope_patch() -> None:
 
     _patch_benchmark_settings_yaml_scalars()
 
+    from . import benchmark_nested_integer_scalar_validation as nested_integer_validation
     from . import benchmark_seed_validation
     from . import benchmarks as bench
 
     metadata = bench._benchmark_config_metadata
     if getattr(metadata, "_benchmark_scope_metadata_wrapped", False):
+        nested_integer_validation.apply_benchmark_nested_integer_scalar_validation_patch()
         benchmark_seed_validation.apply_benchmark_seed_validation_patch()
         return
 
@@ -71,6 +73,7 @@ def apply_benchmark_metadata_scope_patch() -> None:
 
     benchmark_config_metadata_with_scope_fields._benchmark_scope_metadata_wrapped = True  # type: ignore[attr-defined]
     bench._benchmark_config_metadata = benchmark_config_metadata_with_scope_fields
+    nested_integer_validation.apply_benchmark_nested_integer_scalar_validation_patch()
     benchmark_seed_validation.apply_benchmark_seed_validation_patch()
 
 

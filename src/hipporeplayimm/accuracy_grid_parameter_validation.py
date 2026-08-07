@@ -11,6 +11,10 @@ _TRANSITION_PATCHED_FLAG = "_accuracy_grid_transition_parameter_validation_patch
 _MODEL_INIT_PATCHED_FLAG = "_valid_state_grid_model_parameter_validation_patch_applied"
 _MODEL_SCORE_PATCHED_FLAG = "_valid_state_grid_model_score_parameter_validation_patch_applied"
 _REPLAY_GAIN_CONFIG_PATCHED_FLAG = "_replay_gain_config_parameter_validation_patch_applied"
+_RESTRICT_ENCODING_PATCHED_FLAG = "_restrict_encoding_compact_mapping_patch_applied"
+_POSITION_MAPPING_PATCHED_FLAG = "_encoding_position_compact_mapping_patch_applied"
+_SELECT_CELLS_MAPPING_PATCHED_FLAG = "_encoding_select_cells_compact_mapping_patch_applied"
+_COMPACT_BIN_LOOKUP_ATTR = "_hipporeplayimm_compact_bin_lookup"
 
 
 def apply_accuracy_grid_parameter_validation_patch() -> None:
@@ -25,11 +29,110 @@ def apply_accuracy_grid_parameter_validation_patch() -> None:
 
     from . import accuracy_upgrades
 
+    _patch_encoding_position_mapping(accuracy_upgrades)
+    _patch_restrict_encoding_to_mask(accuracy_upgrades)
+    _patch_encoding_select_cells_mapping(accuracy_upgrades)
     _patch_valid_grid_graph_transition(accuracy_upgrades)
     _patch_valid_state_grid_model_init(accuracy_upgrades)
     _patch_valid_state_grid_model_score(accuracy_upgrades)
     _patch_replay_gain_config_init(accuracy_upgrades)
     setattr(accuracy_upgrades, _PATCHED_FLAG, True)
+
+
+def _patch_encoding_position_mapping(accuracy_upgrades) -> None:
+    """Map full-grid position bins into compact restricted-encoding indices."""
+
+    cls = accuracy_upgrades.EncodingModel
+    current = cls.positions_to_flat_bins
+    if getattr(current, _POSITION_MAPPING_PATCHED_FLAG, False):
+        return
+
+    @wraps(current)
+    def positions_to_flat_bins(self, xy):
+        full_grid_indices = np.asarray(current(self, xy), dtype=int)
+        if not hasattr(self, _COMPACT_BIN_LOOKUP_ATTR):
+            return full_grid_indices
+
+        lookup = _compact_bin_lookup(self)
+        compact_indices = np.full(full_grid_indices.shape, -1, dtype=int)
+        valid = (full_grid_indices >= 0) & (full_grid_indices < lookup.shape[0])
+        compact_indices[valid] = lookup[full_grid_indices[valid]]
+        return compact_indices
+
+    setattr(positions_to_flat_bins, _POSITION_MAPPING_PATCHED_FLAG, True)
+    setattr(positions_to_flat_bins, "__hipporeplayimm_original__", current)
+    cls.positions_to_flat_bins = positions_to_flat_bins
+
+
+def _patch_restrict_encoding_to_mask(accuracy_upgrades) -> None:
+    """Attach a composable full-grid-to-compact lookup to restricted encodings."""
+
+    current = accuracy_upgrades.restrict_encoding_to_mask
+    if getattr(current, _RESTRICT_ENCODING_PATCHED_FLAG, False):
+        return
+
+    @wraps(current)
+    def restrict_encoding_to_mask(encoding, valid_mask):
+        mask = accuracy_upgrades._coerce_mask(valid_mask, encoding.n_bins)
+        source_lookup = _compact_bin_lookup(encoding)
+        restricted = current(encoding, mask)
+
+        current_to_restricted = np.full(encoding.n_bins, -1, dtype=int)
+        current_to_restricted[mask] = np.arange(int(np.sum(mask)), dtype=int)
+        compact_lookup = np.full(source_lookup.shape, -1, dtype=int)
+        source_valid = source_lookup >= 0
+        compact_lookup[source_valid] = current_to_restricted[source_lookup[source_valid]]
+        setattr(restricted, _COMPACT_BIN_LOOKUP_ATTR, compact_lookup)
+        return restricted
+
+    setattr(restrict_encoding_to_mask, _RESTRICT_ENCODING_PATCHED_FLAG, True)
+    setattr(restrict_encoding_to_mask, "__hipporeplayimm_original__", current)
+    accuracy_upgrades.restrict_encoding_to_mask = restrict_encoding_to_mask
+
+
+def _patch_encoding_select_cells_mapping(accuracy_upgrades) -> None:
+    """Preserve compact spatial-bin mappings when selecting encoded cells."""
+
+    cls = accuracy_upgrades.EncodingModel
+    current = cls.select_cells
+    if getattr(current, _SELECT_CELLS_MAPPING_PATCHED_FLAG, False):
+        return
+
+    @wraps(current)
+    def select_cells(self, cell_ids):
+        selected = current(self, cell_ids)
+        if hasattr(self, _COMPACT_BIN_LOOKUP_ATTR):
+            setattr(selected, _COMPACT_BIN_LOOKUP_ATTR, _compact_bin_lookup(self).copy())
+        return selected
+
+    setattr(select_cells, _SELECT_CELLS_MAPPING_PATCHED_FLAG, True)
+    setattr(select_cells, "__hipporeplayimm_original__", current)
+    cls.select_cells = select_cells
+
+
+def _compact_bin_lookup(encoding) -> np.ndarray:
+    """Return a validated mapping from full-grid bins to current compact bins."""
+
+    full_grid_bin_count = int(encoding.grid_shape[0]) * int(encoding.grid_shape[1])
+    lookup = getattr(encoding, _COMPACT_BIN_LOOKUP_ATTR, None)
+    if lookup is None:
+        if int(encoding.n_bins) != full_grid_bin_count:
+            raise ValueError(
+                "encoding has compact spatial support but no full-grid bin mapping"
+            )
+        return np.arange(full_grid_bin_count, dtype=int)
+
+    values = np.asarray(lookup)
+    if values.shape != (full_grid_bin_count,) or not np.issubdtype(values.dtype, np.integer):
+        raise ValueError("encoding compact bin mapping is invalid")
+    values = values.astype(int, copy=False)
+    if np.any(values < -1) or np.any(values >= int(encoding.n_bins)):
+        raise ValueError("encoding compact bin mapping contains out-of-range indices")
+    active = values[values >= 0]
+    expected = np.arange(int(encoding.n_bins), dtype=int)
+    if active.shape != expected.shape or not np.array_equal(np.sort(active), expected):
+        raise ValueError("encoding compact bin mapping does not cover each compact bin exactly once")
+    return values
 
 
 def _patch_valid_grid_graph_transition(accuracy_upgrades) -> None:

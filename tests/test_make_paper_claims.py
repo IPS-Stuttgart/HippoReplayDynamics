@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import pandas as pd
+import pytest
 
 from scripts.make_paper_claims import (
     PaperClaimConfig,
@@ -169,6 +170,144 @@ def test_paired_event_deltas_preserves_missing_optional_identity_columns():
     assert len(deltas) == 1
     assert pd.isna(deltas.iloc[0]["benchmark_cell_split_index"])
     assert deltas.iloc[0]["delta_primary_minus_baseline"] == 1.5
+
+
+def test_paper_claim_tables_reject_mixed_state_space_parameter_scope():
+    primary = "sorted-spike-state-space-momentum-exact-sparse"
+    baseline = "sorted-spike-state-space-diffusion"
+    frame = pd.DataFrame(
+        [
+            {
+                **_row("Rat1/Open1", 0, baseline, 0.0),
+                "state_space_diffusion_sigma_cm_sqrt_s": 85.0,
+                "evidence_comparable": True,
+            },
+            {
+                **_row("Rat1/Open1", 0, primary, 4.0),
+                "state_space_diffusion_sigma_cm_sqrt_s": 85.0,
+                "evidence_comparable": True,
+            },
+            {
+                **_row("Rat1/Open1", 0, baseline, 10.0),
+                "state_space_diffusion_sigma_cm_sqrt_s": 120.0,
+                "evidence_comparable": True,
+            },
+            {
+                **_row("Rat1/Open1", 0, primary, 2.0),
+                "state_space_diffusion_sigma_cm_sqrt_s": 120.0,
+                "evidence_comparable": True,
+            },
+        ]
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="state_space_diffusion_sigma_cm_sqrt_s",
+    ):
+        build_paper_claim_tables(frame, PaperClaimConfig(n_bootstrap=20, random_seed=7))
+
+
+def test_paper_claim_tables_preserve_simulation_seed_replicates():
+    primary = "sorted-spike-state-space-momentum-exact-sparse"
+    baseline = "sorted-spike-state-space-diffusion"
+    frame = pd.DataFrame(
+        [
+            {
+                **_row("Rat1/Open1", 0, baseline, 1.0),
+                "simulation_random_seed": 11,
+                "evidence_comparable": True,
+            },
+            {
+                **_row("Rat1/Open1", 0, primary, 3.0),
+                "simulation_random_seed": 11,
+                "evidence_comparable": True,
+            },
+            {
+                **_row("Rat1/Open1", 0, baseline, 6.0),
+                "simulation_random_seed": 12,
+                "evidence_comparable": True,
+            },
+            {
+                **_row("Rat1/Open1", 0, primary, 2.0),
+                "simulation_random_seed": 12,
+                "evidence_comparable": True,
+            },
+        ]
+    )
+
+    tables = build_paper_claim_tables(
+        frame,
+        PaperClaimConfig(n_bootstrap=20, random_seed=8),
+    )
+    deltas = tables.event_deltas.sort_values("simulation_random_seed")
+
+    assert deltas["simulation_random_seed"].tolist() == [11, 12]
+    assert deltas["delta_primary_minus_baseline"].tolist() == [2.0, -4.0]
+    assert tables.summary.iloc[0]["paired_events"] == 2
+
+
+def test_paper_claim_tables_preserve_per_split_event_subset_seeds():
+    primary = "sorted-spike-state-space-momentum-exact-sparse"
+    baseline = "sorted-spike-state-space-diffusion"
+    rows: list[dict[str, object]] = []
+    for split_index, split_seed, subset_seed, primary_value in (
+        (0, 11, 11, 3.0),
+        (1, 12, 1_000_014, 4.0),
+    ):
+        common = {
+            "benchmark_n_cell_splits": 2,
+            "benchmark_cell_split_count": 2,
+            "benchmark_randomize_event_subset": True,
+            "benchmark_event_subset_base_seed": 11,
+            "benchmark_cell_split_index": split_index,
+            "benchmark_cell_split_seed": split_seed,
+            "benchmark_event_subset_seed": subset_seed,
+            "evidence_comparable": True,
+        }
+        rows.extend(
+            [
+                {**_row("Rat1/Open1", 0, baseline, 1.0), **common},
+                {**_row("Rat1/Open1", 0, primary, primary_value), **common},
+            ]
+        )
+
+    tables = build_paper_claim_tables(
+        pd.DataFrame(rows),
+        PaperClaimConfig(n_bootstrap=20, random_seed=9),
+    )
+    deltas = tables.event_deltas.sort_values("benchmark_cell_split_index")
+
+    assert deltas["benchmark_event_subset_seed"].tolist() == [11, 1_000_014]
+    assert deltas["delta_primary_minus_baseline"].tolist() == [2.0, 3.0]
+    assert tables.summary.iloc[0]["paired_events"] == 2
+
+
+def test_paper_claim_tables_treat_integer_and_float_config_values_as_equal():
+    primary = "sorted-spike-state-space-momentum-exact-sparse"
+    baseline = "sorted-spike-state-space-diffusion"
+    frame = pd.DataFrame(
+        [
+            {
+                **_row("Rat1/Open1", 0, baseline, 0.0),
+                "state_space_diffusion_sigma_cm_sqrt_s": 85,
+                "evidence_comparable": True,
+            },
+            {
+                **_row("Rat1/Open1", 0, primary, 1.5),
+                "state_space_diffusion_sigma_cm_sqrt_s": 85.0,
+                "evidence_comparable": True,
+            },
+        ],
+        dtype=object,
+    )
+
+    tables = build_paper_claim_tables(
+        frame,
+        PaperClaimConfig(n_bootstrap=20, random_seed=10),
+    )
+
+    assert tables.summary.iloc[0]["paired_events"] == 1
+    assert tables.event_deltas.iloc[0]["delta_primary_minus_baseline"] == 1.5
 
 
 def test_load_score_tables_accepts_directory_with_event_scores(tmp_path):

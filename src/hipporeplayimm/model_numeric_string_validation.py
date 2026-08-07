@@ -7,11 +7,11 @@ from functools import wraps
 
 import numpy as np
 
-from .model_parameter_validation import _reject_boolean_scalar, _validate_unit_interval_parameter
+from .model_parameter_validation import _validate_unit_interval_parameter
 
 _PATCHED_FLAG = "_model_numeric_string_validation_patch_applied"
 _PATCH_VERSION_ATTR = "_model_numeric_string_validation_patch_version"
-_PATCH_VERSION = 4
+_PATCH_VERSION = 5
 _STATE_SPACE_UTILS_PATCHED_FLAG = "_state_space_numeric_string_validation_patch_applied"
 _STATE_SPACE_MODEL_PATCHED_FLAG = "_state_space_model_numeric_string_validation_patch_applied"
 _UNIT_INTERVAL_OVERFLOW_PATCHED_FLAG = "_model_unit_interval_overflow_validation_patch_applied"
@@ -29,22 +29,53 @@ _STATE_SPACE_HELPER_NAMES = (
 )
 
 
+def _unwrap_zero_dimensional_scalar(value: object) -> tuple[object, bool]:
+    """Unwrap nested 0-D NumPy arrays and report cyclic wrappers."""
+
+    current = value
+    seen: set[int] = set()
+    while isinstance(current, np.ndarray) and current.ndim == 0:
+        marker = id(current)
+        if marker in seen:
+            return current, True
+        seen.add(marker)
+        try:
+            unwrapped = current.item()
+        except ValueError:
+            return current, False
+        if unwrapped is current:
+            return current, True
+        current = unwrapped
+    return current, False
+
+
 def _is_string_scalar(value: object) -> bool:
-    if isinstance(value, _STRING_TYPES):
-        return True
+    current, cyclic = _unwrap_zero_dimensional_scalar(value)
+    return not cyclic and isinstance(current, _STRING_TYPES)
+
+
+def _is_boolean_scalar(value: object) -> bool:
+    current, cyclic = _unwrap_zero_dimensional_scalar(value)
+    return not cyclic and isinstance(current, (bool, np.bool_))
+
+
+def _is_boolean_array(value: object) -> bool:
+    """Return True when an array-valued input contains Boolean leaves."""
+
     try:
         array = np.asarray(value)
     except (TypeError, ValueError):
         return False
-    if array.ndim != 0:
+    if array.ndim == 0:
         return False
-    if np.issubdtype(array.dtype, np.str_) or np.issubdtype(array.dtype, np.bytes_):
+    if np.issubdtype(array.dtype, np.bool_):
         return True
-    if array.dtype == object:
-        try:
-            return isinstance(array.item(), _STRING_TYPES)
-        except ValueError:
-            return False
+    if array.dtype != object:
+        return False
+    for item in array.flat:
+        current, cyclic = _unwrap_zero_dimensional_scalar(item)
+        if not cyclic and isinstance(current, (bool, np.bool_)):
+            return True
     return False
 
 
@@ -77,6 +108,29 @@ def _is_complex_scalar(value: object) -> bool:
         if unwrapped is current:
             return False
         current = unwrapped
+
+
+def _reject_boolean_scalar(name: str, value: object) -> None:
+    """Reject Boolean, cyclic, and nested array-shaped scalar surrogates."""
+
+    try:
+        array = np.asarray(value)
+    except ValueError as exc:
+        raise TypeError(f"{name} must be a numeric scalar") from exc
+    if array.ndim != 0:
+        raise TypeError(f"{name} must be a numeric scalar")
+
+    current, cyclic = _unwrap_zero_dimensional_scalar(value)
+    if cyclic:
+        raise TypeError(f"{name} must be a numeric scalar")
+    try:
+        current_array = np.asarray(current)
+    except ValueError as exc:
+        raise TypeError(f"{name} must be a numeric scalar") from exc
+    if current_array.ndim != 0:
+        raise TypeError(f"{name} must be a numeric scalar")
+    if isinstance(current, (bool, np.bool_)) or np.issubdtype(current_array.dtype, np.bool_):
+        raise TypeError(f"{name} must be a numeric scalar, not boolean")
 
 
 def _reject_complex_scalar(name: str, value: object) -> None:
@@ -296,7 +350,15 @@ def _patch_state_space_numeric_string_validation() -> None:
 def apply_model_numeric_string_validation_patch() -> None:
     """Install string-scalar guards around model parameter validators."""
 
+    from . import model_parameter_validation
     from . import models
+
+    # Model-parameter wrappers resolve these helpers through module globals at
+    # call time.  Refresh them here so nested MATLAB/HDF5-style object scalars
+    # cannot bypass the earlier Boolean preflight after package startup.
+    model_parameter_validation._is_boolean_scalar = _is_boolean_scalar
+    model_parameter_validation._is_boolean_array = _is_boolean_array
+    model_parameter_validation._reject_boolean_scalar = _reject_boolean_scalar
 
     _patch_model_parameter_unit_interval_overflow()
 

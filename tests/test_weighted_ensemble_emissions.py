@@ -83,3 +83,26 @@ def test_weighted_ensemble_rejects_misaligned_bin_durations() -> None:
 
     with pytest.raises(ValueError, match="matching bin_durations"):
         weighted_ensemble_emissions(left, right)
+
+
+@pytest.mark.parametrize(
+    ("field", "replacement", "message"),
+    [
+        ("cell_ids", np.array([12], dtype=int), "matching cell_ids"),
+        ("spike_counts", np.array([[0], [1], [2]], dtype=int), "matching spike_counts"),
+        ("n_spikes", 4, "matching n_spikes"),
+        ("dt", 0.025, "matching dt"),
+    ],
+)
+def test_weighted_ensemble_rejects_misaligned_observation_metadata(
+    field: str,
+    replacement: object,
+    message: str,
+) -> None:
+    hipporeplayimm.apply_runtime_patches()
+    left = _emissions(0.0)
+    right = _emissions(1.0)
+    setattr(right, field, replacement)
+
+    with pytest.raises(ValueError, match=message):
+        weighted_ensemble_emissions(left, right)

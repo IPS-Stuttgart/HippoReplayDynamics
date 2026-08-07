@@ -61,7 +61,9 @@ def _interval_local_durations(
     A sample shared by multiple run intervals can be terminal in one interval
     but have a real successor in another. Prefer the successor-derived duration
     over terminal median fallbacks; among equivalent candidates, keep the
-    shortest duration so overlapping metadata cannot inflate occupancy.
+    shortest duration so overlapping metadata cannot inflate occupancy. Clip
+    every candidate duration at its run end so a terminal frame cannot add
+    exposure after the declared behavioral bout.
     """
 
     exact = np.full(times.shape, np.inf, dtype=float)
@@ -73,6 +75,10 @@ def _interval_local_durations(
         local = np.asarray(base_durations(times[indices]), dtype=float)
         if local.shape != indices.shape:
             raise ValueError("base_durations must return one value per input time")
+        local = np.minimum(
+            local,
+            np.maximum(float(end) - times[indices], 0.0),
+        )
         if indices.size > 1:
             np.minimum.at(exact, indices[:-1], local[:-1])
         np.minimum.at(fallback, indices[-1:], local[-1:])

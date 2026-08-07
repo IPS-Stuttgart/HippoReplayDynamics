@@ -8,7 +8,6 @@ model-probability summaries.
 
 from __future__ import annotations
 
-from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
 import numpy as np
@@ -262,14 +261,10 @@ def _validated_min_exact_models_per_event(value: object) -> int:
             raise ValueError(message)
         candidate = int(item)
     elif isinstance(item, (str, bytes)):
-        text = item.decode().strip() if isinstance(item, bytes) else item.strip()
         try:
-            decimal = Decimal(text)
-        except (InvalidOperation, ValueError) as exc:
+            candidate = int(item)
+        except (TypeError, ValueError, OverflowError) as exc:
             raise ValueError(message) from exc
-        if not decimal.is_finite() or decimal != decimal.to_integral_value():
-            raise ValueError(message)
-        candidate = int(decimal)
     else:
         try:
             candidate = int(item)

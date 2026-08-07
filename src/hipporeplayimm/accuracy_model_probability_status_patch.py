@@ -362,6 +362,28 @@ def _patch_weighted_ensemble_emissions(accuracy_upgrades) -> None:
             getattr(right, "transition_durations", None),
             expected_length=max(n_time - 1, 0),
         )
+        _validate_aligned_scalar(
+            "dt",
+            getattr(left, "dt", None),
+            getattr(right, "dt", None),
+            numeric=True,
+        )
+        _validate_exact_aligned_array(
+            "cell_ids",
+            getattr(left, "cell_ids", None),
+            getattr(right, "cell_ids", None),
+        )
+        _validate_exact_aligned_array(
+            "spike_counts",
+            getattr(left, "spike_counts", None),
+            getattr(right, "spike_counts", None),
+        )
+        _validate_aligned_scalar(
+            "n_spikes",
+            getattr(left, "n_spikes", None),
+            getattr(right, "n_spikes", None),
+            numeric=False,
+        )
 
         spike_counts = np.asarray(left.spike_counts).copy()
         n_spikes = int(getattr(left, "n_spikes", np.asarray(spike_counts, dtype=float).sum()))
@@ -432,6 +454,63 @@ def _validate_optional_aligned_duration_vector(
         right_values,
         expected_length=expected_length,
     )
+
+
+def _validate_exact_aligned_array(
+    name: str,
+    left_values: object,
+    right_values: object,
+) -> None:
+    """Require exact observation-array alignment before combining likelihoods."""
+
+    try:
+        left_array = np.asarray(left_values)
+        right_array = np.asarray(right_values)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"emission tensors must have matching {name}") from exc
+    if left_array.shape != right_array.shape:
+        raise ValueError(f"emission tensors must have matching {name} shapes")
+    try:
+        matches = np.array_equal(left_array, right_array, equal_nan=True)
+    except TypeError:
+        matches = np.array_equal(left_array, right_array)
+    if not bool(matches):
+        raise ValueError(f"emission tensors must have matching {name}")
+
+
+def _validate_aligned_scalar(
+    name: str,
+    left_value: object,
+    right_value: object,
+    *,
+    numeric: bool,
+) -> None:
+    """Require scalar metadata to describe the same observation stream."""
+
+    try:
+        left_array = np.asarray(left_value)
+        right_array = np.asarray(right_value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"emission tensors must have matching {name}") from exc
+    if left_array.shape != () or right_array.shape != ():
+        raise ValueError(f"emission tensors must have scalar {name}")
+    if numeric:
+        try:
+            left_numeric = float(left_array)
+            right_numeric = float(right_array)
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise ValueError(f"emission tensors must have finite {name}") from exc
+        if not np.isfinite(left_numeric) or not np.isfinite(right_numeric):
+            raise ValueError(f"emission tensors must have finite {name}")
+        if not np.isclose(left_numeric, right_numeric, rtol=0.0, atol=1e-12):
+            raise ValueError(f"emission tensors must have matching {name}")
+        return
+    try:
+        matches = bool(left_array.item() == right_array.item())
+    except (TypeError, ValueError):
+        matches = False
+    if not matches:
+        raise ValueError(f"emission tensors must have matching {name}")
 
 
 def _reversed_transition_durations(emissions: LogEmissionTensor) -> np.ndarray:

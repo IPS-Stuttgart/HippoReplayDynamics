@@ -90,9 +90,14 @@ def _validated_run_intervals(intervals: np.ndarray) -> np.ndarray:
     if raw.dtype == object:
         for value in raw.flat:
             item = value
+            seen_wrapper_ids: set[int] = set()
             while isinstance(item, np.ndarray):
                 if item.ndim != 0:
                     raise ValueError(message)
+                wrapper_id = id(item)
+                if wrapper_id in seen_wrapper_ids:
+                    raise ValueError(message)
+                seen_wrapper_ids.add(wrapper_id)
                 item = item.item()
             if isinstance(
                 item,

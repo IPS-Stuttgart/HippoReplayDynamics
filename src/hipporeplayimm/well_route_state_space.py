@@ -156,6 +156,19 @@ def _coerce_max_default_points(value: int) -> int:
     return max_points
 
 
+def _unwrap_zero_dimensional_scalar(value: object, name: str) -> object:
+    """Unwrap nested 0-D NumPy containers without accepting cycles."""
+
+    seen: set[int] = set()
+    while isinstance(value, np.ndarray) and value.ndim == 0:
+        marker = id(value)
+        if marker in seen:
+            raise ValueError(f"{name} must contain scalar numeric values")
+        seen.add(marker)
+        value = value.item()
+    return value
+
+
 def _coerce_dynamic_parameter(value: object, name: str, *, allow_zero: bool) -> float:
     """Return a real scalar without accepting bool, text, complex, or arrays."""
 
@@ -166,7 +179,12 @@ def _coerce_dynamic_parameter(value: object, name: str, *, allow_zero: bool) -> 
         raise ValueError(f"{name} must be {constraint}") from exc
     if raw.shape != ():
         raise ValueError(f"{name} must be {constraint}")
-    scalar = raw.item()
+    try:
+        scalar = _unwrap_zero_dimensional_scalar(raw, name)
+    except ValueError as exc:
+        raise ValueError(f"{name} must be {constraint}") from exc
+    if isinstance(scalar, np.ndarray):
+        raise ValueError(f"{name} must be {constraint}")
     if isinstance(
         scalar,
         (bool, np.bool_, str, bytes, np.str_, np.bytes_, complex, np.complexfloating),
@@ -195,13 +213,19 @@ def _as_numeric_coordinates(values: object, name: str) -> np.ndarray:
         raise ValueError(f"{name} must contain numeric real coordinates, not complex values")
     if raw.dtype.kind == "O":
         for item in raw.ravel():
+            try:
+                item = _unwrap_zero_dimensional_scalar(item, name)
+            except ValueError as exc:
+                raise ValueError(f"{name} must contain numeric real coordinates") from exc
+            if isinstance(item, np.ndarray):
+                raise ValueError(f"{name} must contain numeric real coordinates")
             if isinstance(item, (bool, np.bool_, str, bytes, np.str_, np.bytes_)):
                 raise ValueError(f"{name} must contain numeric real coordinates, not boolean or text")
             if isinstance(item, (complex, np.complexfloating)):
                 raise ValueError(f"{name} must contain numeric real coordinates, not complex values")
     try:
         return np.asarray(values, dtype=float)
-    except (TypeError, ValueError) as exc:
+    except (TypeError, ValueError, OverflowError) as exc:
         raise ValueError(f"{name} must contain numeric real coordinates") from exc
 
 

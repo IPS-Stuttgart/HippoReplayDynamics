@@ -26,3 +26,34 @@ def test_place_field_quality_accepts_numpy_integer_cell_ids():
     )
 
     assert quality["cell_id"].tolist() == [21, 22]
+
+
+@pytest.mark.parametrize(
+    ("rates_hz", "occupancy_s", "message"),
+    [
+        (np.array([[1.0, -2.0, 3.0]]), np.ones(3), "rates_hz"),
+        (np.array([[1.0, np.nan, 3.0]]), np.ones(3), "rates_hz"),
+        (np.array([[1.0, np.inf, 3.0]]), np.ones(3), "rates_hz"),
+        (np.array([[1.0, 2.0, 3.0]]), np.array([1.0, -0.5, 1.0]), "occupancy_s"),
+        (np.array([[1.0, 2.0, 3.0]]), np.array([1.0, np.nan, 1.0]), "occupancy_s"),
+        (np.array([[1.0, 2.0, 3.0]]), np.array([1.0, np.inf, 1.0]), "occupancy_s"),
+    ],
+)
+def test_place_field_quality_rejects_invalid_numeric_inputs(
+    rates_hz,
+    occupancy_s,
+    message,
+):
+    with pytest.raises(ValueError, match=message):
+        place_field_quality_from_arrays(rates_hz, occupancy_s)
+
+
+def test_place_field_quality_preserves_zero_rate_and_zero_occupancy_support():
+    quality = place_field_quality_from_arrays(
+        np.array([[0.0, 1.0, 0.0]]),
+        np.zeros(3),
+        cell_ids=[7],
+    )
+
+    assert quality["cell_id"].tolist() == [7]
+    assert np.isfinite(quality.loc[0, "spatial_information_bits_per_spike"])

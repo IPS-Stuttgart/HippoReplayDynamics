@@ -1,4 +1,4 @@
-"""Validate place-field diagnostic cell identifiers before integer coercion."""
+"""Validate place-field diagnostic inputs before numeric coercion."""
 
 from __future__ import annotations
 
@@ -54,8 +54,34 @@ def _coerce_place_field_cell_ids(cell_ids: Any, *, n_cells: int) -> np.ndarray:
     return np.asarray([_coerce_integer_cell_id(value) for value in raw], dtype=int)
 
 
+def _coerce_place_field_numeric_arrays(
+    rates_hz: Any,
+    occupancy_s: Any,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Return finite nonnegative place-field rates and occupancies."""
+
+    try:
+        rates = np.asarray(rates_hz, dtype=float)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ValueError("rates_hz must contain finite nonnegative values") from exc
+    try:
+        occupancy = np.asarray(occupancy_s, dtype=float)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ValueError("occupancy_s must contain finite nonnegative values") from exc
+
+    if rates.ndim != 2:
+        raise ValueError("rates_hz must have shape (n_cells, n_bins)")
+    if occupancy.ndim != 1 or occupancy.shape[0] != rates.shape[1]:
+        raise ValueError("occupancy_s must have one value per spatial bin")
+    if not np.all(np.isfinite(rates)) or np.any(rates < 0.0):
+        raise ValueError("rates_hz must contain finite nonnegative values")
+    if not np.all(np.isfinite(occupancy)) or np.any(occupancy < 0.0):
+        raise ValueError("occupancy_s must contain finite nonnegative values")
+    return rates, occupancy
+
+
 def apply_advanced_result_place_field_cell_id_validation_patch() -> None:
-    """Install validation for place-field quality cell identifiers."""
+    """Install validation for place-field quality inputs."""
 
     from . import advanced_result_diagnostics as diagnostics
 
@@ -66,12 +92,10 @@ def apply_advanced_result_place_field_cell_id_validation_patch() -> None:
 
     @wraps(base)
     def place_field_quality_from_arrays(rates_hz, occupancy_s, cell_ids=None):
+        rates, occupancy = _coerce_place_field_numeric_arrays(rates_hz, occupancy_s)
         if cell_ids is not None:
-            rates = np.asarray(rates_hz, dtype=float)
-            if rates.ndim != 2:
-                return base(rates_hz, occupancy_s, cell_ids=cell_ids)
             cell_ids = _coerce_place_field_cell_ids(cell_ids, n_cells=rates.shape[0])
-        return base(rates_hz, occupancy_s, cell_ids=cell_ids)
+        return base(rates, occupancy, cell_ids=cell_ids)
 
     setattr(place_field_quality_from_arrays, _PATCHED_FLAG, True)
     setattr(diagnostics, _BASE_ATTR, base)

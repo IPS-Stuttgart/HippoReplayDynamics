@@ -269,7 +269,8 @@ def _direction_consistency(path: np.ndarray) -> float:
     if not np.any(keep):
         return 0.0
     unit = steps[keep] / lengths[keep, None]
-    return float(np.linalg.norm(np.sum(unit, axis=0)) / unit.shape[0])
+    consistency = float(np.linalg.norm(np.sum(unit, axis=0)) / unit.shape[0])
+    return float(np.clip(consistency, 0.0, 1.0))
 
 
 def _distance(left: np.ndarray, right: np.ndarray) -> float:

@@ -14,6 +14,7 @@ randomization test with the standard plus-one correction.
 from __future__ import annotations
 
 import argparse
+from collections.abc import Mapping
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Iterable, Sequence
@@ -376,10 +377,19 @@ def _normalize_model_label(value: object) -> object:
             return raw.decode("utf-8").strip()
         except UnicodeDecodeError:
             return f"{_INVALID_UTF8_MODEL_LABEL_PREFIX}{raw.hex()}>"
+    if isinstance(value, Mapping):
+        items = (
+            (_normalize_model_label(key), _normalize_model_label(item))
+            for key, item in value.items()
+        )
+        return ("mapping", tuple(sorted(items, key=repr)))
     if isinstance(value, (list, tuple)):
         if len(value) == 1:
             return _normalize_model_label(value[0])
         return tuple(_normalize_model_label(item) for item in value)
+    if isinstance(value, (set, frozenset)):
+        items = (_normalize_model_label(item) for item in value)
+        return ("set", tuple(sorted(items, key=repr)))
     return value
 
 

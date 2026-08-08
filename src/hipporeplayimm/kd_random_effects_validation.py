@@ -30,6 +30,29 @@ def _is_boolean_scalar(value: Any) -> bool:
     return False
 
 
+def _array_contains_complex_values(raw: np.ndarray, seen: set[int]) -> bool:
+    """Inspect nested object-backed arrays without coercing complex scalars."""
+
+    if np.issubdtype(raw.dtype, np.complexfloating):
+        return True
+    if raw.dtype != object:
+        return False
+
+    identity = id(raw)
+    if identity in seen:
+        return False
+    seen.add(identity)
+    try:
+        for item in raw.flat:
+            if isinstance(item, (complex, np.complexfloating)):
+                return True
+            if isinstance(item, np.ndarray) and _array_contains_complex_values(item, seen):
+                return True
+        return False
+    finally:
+        seen.remove(identity)
+
+
 def _contains_complex_values(value: Any) -> bool:
     """Return whether an array-like input contains complex numeric values."""
 
@@ -37,11 +60,7 @@ def _contains_complex_values(value: Any) -> bool:
         raw = np.asarray(value)
     except (TypeError, ValueError):
         return False
-    if np.issubdtype(raw.dtype, np.complexfloating):
-        return True
-    if raw.dtype == object:
-        return any(isinstance(item, (complex, np.complexfloating)) for item in raw.flat)
-    return False
+    return _array_contains_complex_values(raw, set())
 
 
 def apply_kd_random_effects_validation_patch() -> None:

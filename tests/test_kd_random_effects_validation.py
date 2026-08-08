@@ -15,6 +15,13 @@ def _log_evidence() -> np.ndarray:
     )
 
 
+def _nested_complex_evidence() -> np.ndarray:
+    evidence = np.empty((2, 2), dtype=object)
+    evidence[:] = 0.0
+    evidence[0, 0] = np.array(np.complex128(0.0 + 1.0j), dtype=object)
+    return evidence
+
+
 def test_random_effects_rejects_empty_posterior_burnin() -> None:
     with pytest.raises(ValueError, match="burnin"):
         random_effects_model_probabilities(_log_evidence(), ["a", "b"], n_iterations=5, burnin=5)
@@ -72,8 +79,9 @@ def test_random_effects_rejects_invalid_evidence_shape() -> None:
             ],
             dtype=object,
         ),
+        _nested_complex_evidence(),
     ],
-    ids=["complex-dtype", "object-wrapped-complex"],
+    ids=["complex-dtype", "object-wrapped-complex", "nested-object-wrapped-complex"],
 )
 def test_random_effects_rejects_complex_evidence_before_float_coercion(
     log_evidence: np.ndarray,

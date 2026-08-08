@@ -10,6 +10,7 @@ and reject malformed seed sequences before any benchmark work starts.
 from __future__ import annotations
 
 import sys
+from collections.abc import Mapping, Set
 from dataclasses import replace
 from functools import wraps
 from typing import Any, Iterable
@@ -183,7 +184,7 @@ def _config_with_validated_seeds(
 
 
 def _seed_sequence(values: Iterable[object], name: str) -> tuple[int, ...]:
-    if isinstance(values, (str, bytes)):
+    if isinstance(values, (str, bytes, Mapping, Set)):
         raise ValueError(f"{name} must contain at least one random seed")
     try:
         raw_values = list(values)

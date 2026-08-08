@@ -11,7 +11,7 @@ from .model_parameter_validation import _validate_unit_interval_parameter
 
 _PATCHED_FLAG = "_model_numeric_string_validation_patch_applied"
 _PATCH_VERSION_ATTR = "_model_numeric_string_validation_patch_version"
-_PATCH_VERSION = 5
+_PATCH_VERSION = 6
 _STATE_SPACE_UTILS_PATCHED_FLAG = "_state_space_numeric_string_validation_patch_applied"
 _STATE_SPACE_MODEL_PATCHED_FLAG = "_state_space_model_numeric_string_validation_patch_applied"
 _UNIT_INTERVAL_OVERFLOW_PATCHED_FLAG = "_model_unit_interval_overflow_validation_patch_applied"
@@ -196,6 +196,7 @@ def _validate_state_space_candidate_config(config: object) -> None:
     threshold = getattr(config, "momentum_candidate_mass_threshold", None)
     if threshold is not None:
         _reject_string_scalar("momentum_candidate_mass_threshold", threshold)
+        _reject_boolean_scalar("momentum_candidate_mass_threshold", threshold)
     for name in (
         "momentum_candidate_top_k",
         "momentum_candidate_min_k",
@@ -287,6 +288,7 @@ def _patch_state_space_numeric_string_validation() -> None:
         ):
             if mass_threshold is not None:
                 _reject_string_scalar("mass_threshold", mass_threshold)
+                _reject_boolean_scalar("mass_threshold", mass_threshold)
             if top_k is not None:
                 _reject_string_count("top_k", top_k)
             _reject_string_count("min_k", min_k)

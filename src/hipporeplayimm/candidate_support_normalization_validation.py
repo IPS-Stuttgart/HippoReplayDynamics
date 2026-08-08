@@ -15,6 +15,11 @@ State-space adaptive candidate beams must validate the raw mass-threshold config
 before ``StateSpaceReplayModel.candidate_indices`` coerces it through ``float``;
 otherwise boolean values such as ``True`` are silently interpreted as a full-mass
 threshold of ``1.0``.
+
+Candidate-support quality reporting must likewise reject complex retained-mass
+diagnostics before NumPy can cast them to their real component.  Otherwise an
+invalid complex value can be mislabeled as a conservative-good truncated-evidence
+row and enter claim-bearing summaries.
 """
 
 from __future__ import annotations
@@ -28,10 +33,13 @@ _PATCHED_FLAG = "_candidate_support_normalization_validation_patch_applied"
 _SCORE_PATCHED_FLAG = "_candidate_support_score_validation_patch_applied"
 _EVIDENCE_MASK_PATCHED_FLAG = "_candidate_evidence_mask_validation_patch_applied"
 _CANDIDATE_INDICES_PATCHED_FLAG = "_candidate_mass_threshold_candidate_indices_validation_patch_applied"
+_REPORT_COMPLEX_PATCHED_FLAG = "_candidate_support_report_complex_validation_patch_applied"
 _EVIDENCE_MASK_WRAPPER_MARKER = "_candidate_evidence_mask_validation_wrapper"
 _CANDIDATE_INDICES_WRAPPER_MARKER = "_candidate_mass_threshold_candidate_indices_validation_wrapper"
 _TOP_CANDIDATE_WRAPPER_MARKER = "_candidate_support_top_candidate_scores_wrapper"
 _MASS_RETAINING_WRAPPER_MARKER = "_candidate_support_mass_retaining_scores_wrapper"
+_REPORT_COMPLEX_WRAPPER_MARKER = "_candidate_support_report_complex_validation_wrapper"
+_QUALITY_COMPLEX_WRAPPER_MARKER = "_candidate_support_quality_complex_validation_wrapper"
 _ORIGINAL_ATTR = "__hipporeplayimm_original__"
 
 
@@ -51,6 +59,38 @@ def _is_boolean_scalar(value: object) -> bool:
         except ValueError:
             return False
     return False
+
+
+def _contains_complex(value: object) -> bool:
+    """Return whether a scalar/container contains any complex-valued leaf."""
+
+    seen: set[int] = set()
+
+    def visit(item: object) -> bool:
+        if isinstance(item, (complex, np.complexfloating)):
+            return True
+        if isinstance(item, (str, bytes, bytearray, memoryview, np.str_, np.bytes_)):
+            return False
+
+        item_id = id(item)
+        if item_id in seen:
+            return False
+        seen.add(item_id)
+        try:
+            array = np.asarray(item, dtype=object)
+        except (TypeError, ValueError):
+            return False
+        if array.ndim == 0:
+            try:
+                nested = array.item()
+            except (TypeError, ValueError):
+                return False
+            if nested is item:
+                return False
+            return visit(nested)
+        return any(visit(nested) for nested in array.reshape(-1))
+
+    return visit(value)
 
 
 def _reject_array_shaped_mass_threshold(mass_threshold: object) -> None:
@@ -184,6 +224,41 @@ def _refresh_candidate_score_helpers(*, state_space_utils, state_space, state_sp
     setattr(models, _SCORE_PATCHED_FLAG, True)
 
 
+def _patch_complex_candidate_support_reporting() -> None:
+    """Reject complex retained-mass diagnostics before float coercion."""
+
+    from . import candidate_support_quality_patch as quality_patch
+    from . import result_improvements
+
+    current_numeric = result_improvements._first_finite_numeric_value
+    if not getattr(current_numeric, _REPORT_COMPLEX_WRAPPER_MARKER, False):
+
+        @wraps(current_numeric)
+        def first_finite_real_numeric_value(value: object) -> float | None:
+            if _contains_complex(value):
+                return None
+            return current_numeric(value)
+
+        setattr(first_finite_real_numeric_value, _REPORT_COMPLEX_WRAPPER_MARKER, True)
+        setattr(first_finite_real_numeric_value, _ORIGINAL_ATTR, current_numeric)
+        result_improvements._first_finite_numeric_value = first_finite_real_numeric_value
+
+    current_mass = quality_patch._finite_candidate_log_mass
+    if not getattr(current_mass, _QUALITY_COMPLEX_WRAPPER_MARKER, False):
+
+        @wraps(current_mass)
+        def finite_real_candidate_log_mass(value: object) -> float | None:
+            if _contains_complex(value):
+                return None
+            return current_mass(value)
+
+        setattr(finite_real_candidate_log_mass, _QUALITY_COMPLEX_WRAPPER_MARKER, True)
+        setattr(finite_real_candidate_log_mass, _ORIGINAL_ATTR, current_mass)
+        quality_patch._finite_candidate_log_mass = finite_real_candidate_log_mass
+
+    setattr(result_improvements, _REPORT_COMPLEX_PATCHED_FLAG, True)
+
+
 def apply_candidate_support_normalization_validation_patch() -> None:
     """Install finite-mass validation for posterior and emission candidate supports."""
 
@@ -236,6 +311,7 @@ def apply_candidate_support_normalization_validation_patch() -> None:
         state_space_model=state_space_model,
         models=models,
     )
+    _patch_complex_candidate_support_reporting()
 
 
 __all__ = ["apply_candidate_support_normalization_validation_patch"]

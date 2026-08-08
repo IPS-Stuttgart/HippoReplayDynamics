@@ -132,6 +132,36 @@ def _positive_bin_count(n_bins: int) -> int:
     return count
 
 
+def _coerce_object_bool_mask_values(raw: np.ndarray) -> np.ndarray:
+    """Canonicalize object-backed mask entries without lossy scalar coercion."""
+
+    numeric = np.empty(raw.shape, dtype=float)
+    flat_numeric = numeric.reshape(-1)
+    for index, value in enumerate(raw.reshape(-1)):
+        item = value
+        seen_arrays: set[int] = set()
+        while isinstance(item, np.ndarray):
+            if item.ndim != 0:
+                raise ValueError("valid_bin_mask must contain scalar boolean or 0/1 values")
+            marker = id(item)
+            if marker in seen_arrays:
+                raise ValueError("valid_bin_mask must contain scalar boolean or 0/1 values")
+            seen_arrays.add(marker)
+            try:
+                item = item.item()
+            except (TypeError, ValueError, OverflowError) as exc:
+                raise ValueError("valid_bin_mask must contain boolean or 0/1 values") from exc
+        if isinstance(item, (bytes, str, np.bytes_, np.str_)):
+            raise ValueError("valid_bin_mask must contain boolean or 0/1 values")
+        if isinstance(item, (complex, np.complexfloating)):
+            raise ValueError("valid_bin_mask must contain real boolean or 0/1 values")
+        try:
+            flat_numeric[index] = float(item)
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise ValueError("valid_bin_mask must contain boolean or 0/1 values") from exc
+    return numeric
+
+
 def _coerce_bool_mask(valid_bin_mask: Any, n_bins: int) -> np.ndarray | None:
     """Return a boolean mask without treating arbitrary numeric values as truthy."""
 
@@ -139,7 +169,7 @@ def _coerce_bool_mask(valid_bin_mask: Any, n_bins: int) -> np.ndarray | None:
         return None
     try:
         raw = np.asarray(valid_bin_mask)
-    except ValueError as exc:
+    except (TypeError, ValueError, OverflowError) as exc:
         raise ValueError("valid_bin_mask must contain one boolean value per spatial bin") from exc
     if raw.shape != (n_bins,):
         raise ValueError("valid_bin_mask must contain one boolean value per spatial bin")
@@ -147,12 +177,13 @@ def _coerce_bool_mask(valid_bin_mask: Any, n_bins: int) -> np.ndarray | None:
         return raw.astype(bool, copy=False)
     if np.issubdtype(raw.dtype, np.complexfloating) or raw.dtype.kind in {"S", "U"}:
         raise ValueError("valid_bin_mask must contain boolean or 0/1 values")
-    if raw.dtype == object and any(isinstance(value, (bytes, str)) for value in raw.flat):
-        raise ValueError("valid_bin_mask must contain boolean or 0/1 values")
-    try:
-        numeric = np.asarray(raw, dtype=float)
-    except (TypeError, ValueError, OverflowError) as exc:
-        raise ValueError("valid_bin_mask must contain boolean or 0/1 values") from exc
+    if raw.dtype == object:
+        numeric = _coerce_object_bool_mask_values(raw)
+    else:
+        try:
+            numeric = np.asarray(raw, dtype=float)
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise ValueError("valid_bin_mask must contain boolean or 0/1 values") from exc
     if not np.all(np.isfinite(numeric)):
         raise ValueError("valid_bin_mask must contain finite boolean or 0/1 values")
     if not np.all((numeric == 0.0) | (numeric == 1.0)):

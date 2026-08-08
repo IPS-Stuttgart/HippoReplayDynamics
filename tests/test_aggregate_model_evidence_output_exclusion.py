@@ -1,15 +1,21 @@
 from __future__ import annotations
 
 import importlib.util
+import sys
 from pathlib import Path
 
 
 _SCRIPT = Path(__file__).resolve().parents[1] / "scripts" / "aggregate_model_evidence_shards.py"
+_SCRIPT_DIRECTORY = str(_SCRIPT.parent)
 _SPEC = importlib.util.spec_from_file_location("aggregate_model_evidence_shards_output_exclusion", _SCRIPT)
 assert _SPEC is not None
 aggregate_model_evidence_shards = importlib.util.module_from_spec(_SPEC)
 assert _SPEC.loader is not None
-_SPEC.loader.exec_module(aggregate_model_evidence_shards)
+sys.path.insert(0, _SCRIPT_DIRECTORY)
+try:
+    _SPEC.loader.exec_module(aggregate_model_evidence_shards)
+finally:
+    sys.path.remove(_SCRIPT_DIRECTORY)
 
 
 def test_recursive_glob_excludes_prior_aggregate_output(tmp_path):

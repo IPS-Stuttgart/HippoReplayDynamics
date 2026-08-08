@@ -1,4 +1,4 @@
-"""Runtime patch for copied emission time coordinates."""
+"""Runtime patches for copied emission time coordinates and epoch intervals."""
 
 from __future__ import annotations
 
@@ -15,6 +15,9 @@ _DURATION_TIMESTAMP_PATCH_MARKER = "_duration_timestamp_validation_patch_wrapped
 def apply_reverse_emission_time_patch() -> None:
     """Keep copied time coordinates increasing while reversing observation rows."""
 
+    from .data_interval_validation import apply_data_interval_validation_patch
+
+    apply_data_interval_validation_patch()
     _apply_duration_timestamp_validation_patch()
 
     from . import result_improvement_extensions as improved

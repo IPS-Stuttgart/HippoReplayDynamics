@@ -125,5 +125,11 @@ def apply_displacement_imm_decay_validation_patch() -> None:
     state_space_displacement_imm._duration_scale_at = scale_at
     setattr(state_space_displacement_imm, _DURATION_SCALE_PATCHED_FLAG, True)
 
+    # Keep the exact finite-displacement Gaussian helpers on the same stable
+    # standardized-distance path whenever runtime aliases are refreshed.
+    from .displacement_gaussian_stability import apply_displacement_gaussian_stability_patch
+
+    apply_displacement_gaussian_stability_patch()
+
 
 __all__ = ["apply_displacement_imm_decay_validation_patch"]

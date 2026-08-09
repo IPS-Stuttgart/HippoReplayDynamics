@@ -1,10 +1,14 @@
-"""Keep displacement/trajectory IMM velocity-decay validation synchronized."""
+"""Keep displacement/trajectory IMM runtime helpers synchronized."""
 
 from __future__ import annotations
 
 from functools import wraps
 
 import numpy as np
+
+from .displacement_gaussian_stability import (
+    apply_displacement_gaussian_stability_patch as _apply_displacement_gaussian_stability_patch,
+)
 
 _PATCHED_FLAG = "_displacement_imm_velocity_decay_validation_patch_applied"
 _DURATION_SCALE_PATCHED_FLAG = "_displacement_duration_scale_validation_patch_applied"
@@ -125,11 +129,9 @@ def apply_displacement_imm_decay_validation_patch() -> None:
     state_space_displacement_imm._duration_scale_at = scale_at
     setattr(state_space_displacement_imm, _DURATION_SCALE_PATCHED_FLAG, True)
 
-    # Keep the exact finite-displacement Gaussian helpers on the same stable
+    # Keep exact finite-displacement Gaussian helpers on the same stable
     # standardized-distance path whenever runtime aliases are refreshed.
-    from .displacement_gaussian_stability import apply_displacement_gaussian_stability_patch
-
-    apply_displacement_gaussian_stability_patch()
+    _apply_displacement_gaussian_stability_patch()
 
 
 __all__ = ["apply_displacement_imm_decay_validation_patch"]

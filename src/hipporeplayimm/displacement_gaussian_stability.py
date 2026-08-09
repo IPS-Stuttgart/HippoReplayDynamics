@@ -56,10 +56,12 @@ def _patch_shifted_gaussian_transition(displacement_module: Any) -> None:
         n_bins = centers.shape[0]
         valid_mask = displacement_module._coerce_valid_bin_mask(valid_bin_mask, n_bins)
         allowed = np.arange(n_bins, dtype=int) if valid_mask is None else np.flatnonzero(valid_mask)
-        shift = np.asarray(displacement, dtype=float)
-        if shift.shape not in {(centers.shape[1],), (1, centers.shape[1])}:
-            raise ValueError("displacement must contain one value per position dimension")
-        shift = shift.reshape(centers.shape[1])
+        try:
+            shift = np.asarray(displacement, dtype=float).reshape(centers.shape[1])
+        except (TypeError, ValueError) as exc:
+            raise ValueError(
+                "displacement must contain one value per position dimension"
+            ) from exc
         if not np.all(np.isfinite(shift)):
             raise ValueError("displacement must be finite")
 

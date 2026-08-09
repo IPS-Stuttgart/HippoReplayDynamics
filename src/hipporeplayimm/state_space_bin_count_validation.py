@@ -45,13 +45,26 @@ def _integer_count(name: str, value: Any) -> int:
         raw = np.asarray(value)
     except ValueError as exc:
         raise TypeError(f"{name} must be an integer") from exc
-    if raw.ndim != 0:
-        raise TypeError(f"{name} must be an integer")
-    if np.issubdtype(raw.dtype, np.bool_):
-        raise TypeError(f"{name} must be an integer count, not boolean")
-    item = raw.item()
-    if isinstance(item, (bool, np.bool_)):
-        raise TypeError(f"{name} must be an integer count, not boolean")
+
+    # MATLAB/HDF5-style object scalars can contain further zero-dimensional
+    # NumPy arrays. Unwrap only scalar containers, checking every layer before
+    # any integer conversion so nested booleans cannot become 0/1 and nested
+    # singleton arrays cannot take NumPy's deprecated scalar-conversion path.
+    seen: set[int] = set()
+    item: Any = raw
+    while isinstance(item, np.ndarray):
+        if item.ndim != 0:
+            raise TypeError(f"{name} must be an integer")
+        identity = id(item)
+        if identity in seen:
+            raise TypeError(f"{name} must be an integer")
+        seen.add(identity)
+        if np.issubdtype(item.dtype, np.bool_):
+            raise TypeError(f"{name} must be an integer count, not boolean")
+        item = item.item()
+        if isinstance(item, (bool, np.bool_)):
+            raise TypeError(f"{name} must be an integer count, not boolean")
+
     if isinstance(item, (str, bytes, Decimal)):
         return _decimal_integer_count(name, item)
     try:

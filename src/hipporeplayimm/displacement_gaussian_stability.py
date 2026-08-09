@@ -23,15 +23,15 @@ _ORIGINAL_ATTR = "__hipporeplayimm_original__"
 def apply_displacement_gaussian_stability_patch() -> None:
     """Patch Gaussian helpers used by the exact finite-displacement decoders."""
 
-    from . import state_space_displacement_momentum as displacement
+    from . import state_space_displacement_momentum as displacement_module
 
-    _patch_shifted_gaussian_transition(displacement)
-    _patch_displacement_transition(displacement)
-    _patch_displacement_prior(displacement)
+    _patch_shifted_gaussian_transition(displacement_module)
+    _patch_displacement_transition(displacement_module)
+    _patch_displacement_prior(displacement_module)
 
 
-def _patch_shifted_gaussian_transition(displacement: Any) -> None:
-    current = displacement._shifted_gaussian_transition_matrix
+def _patch_shifted_gaussian_transition(displacement_module: Any) -> None:
+    current = displacement_module._shifted_gaussian_transition_matrix
     if getattr(current, _SHIFTED_WRAPPER_FLAG, False):
         _synchronize_aliases("_shifted_gaussian_transition_matrix", current, current)
         return
@@ -52,9 +52,9 @@ def _patch_shifted_gaussian_transition(displacement: Any) -> None:
         if not np.isfinite(max_step) or max_step <= 0.0:
             raise ValueError("max_step_sigma must be finite and positive")
 
-        centers = displacement_module_centers(displacement, bin_centers)
+        centers = displacement_module._as_2d_centers(bin_centers)
         n_bins = centers.shape[0]
-        valid_mask = displacement._coerce_valid_bin_mask(valid_bin_mask, n_bins)
+        valid_mask = displacement_module._coerce_valid_bin_mask(valid_bin_mask, n_bins)
         allowed = np.arange(n_bins, dtype=int) if valid_mask is None else np.flatnonzero(valid_mask)
         shift = np.asarray(displacement, dtype=float)
         if shift.shape not in {(centers.shape[1],), (1, centers.shape[1])}:
@@ -92,7 +92,7 @@ def _patch_shifted_gaussian_transition(displacement: Any) -> None:
 
     setattr(shifted_gaussian_transition_matrix, _SHIFTED_WRAPPER_FLAG, True)
     setattr(shifted_gaussian_transition_matrix, _ORIGINAL_ATTR, current)
-    displacement._shifted_gaussian_transition_matrix = shifted_gaussian_transition_matrix
+    displacement_module._shifted_gaussian_transition_matrix = shifted_gaussian_transition_matrix
     _synchronize_aliases(
         "_shifted_gaussian_transition_matrix",
         current,
@@ -100,8 +100,8 @@ def _patch_shifted_gaussian_transition(displacement: Any) -> None:
     )
 
 
-def _patch_displacement_transition(displacement: Any) -> None:
-    current = displacement._displacement_transition_matrix
+def _patch_displacement_transition(displacement_module: Any) -> None:
+    current = displacement_module._displacement_transition_matrix
     if getattr(current, _DISPLACEMENT_WRAPPER_FLAG, False):
         _synchronize_aliases("_displacement_transition_matrix", current, current)
         return
@@ -137,7 +137,7 @@ def _patch_displacement_transition(displacement: Any) -> None:
 
     setattr(displacement_transition_matrix, _DISPLACEMENT_WRAPPER_FLAG, True)
     setattr(displacement_transition_matrix, _ORIGINAL_ATTR, current)
-    displacement._displacement_transition_matrix = displacement_transition_matrix
+    displacement_module._displacement_transition_matrix = displacement_transition_matrix
     _synchronize_aliases(
         "_displacement_transition_matrix",
         current,
@@ -145,8 +145,8 @@ def _patch_displacement_transition(displacement: Any) -> None:
     )
 
 
-def _patch_displacement_prior(displacement: Any) -> None:
-    current = displacement._zero_centered_displacement_prior
+def _patch_displacement_prior(displacement_module: Any) -> None:
+    current = displacement_module._zero_centered_displacement_prior
     if getattr(current, _PRIOR_WRAPPER_FLAG, False):
         _synchronize_aliases("_zero_centered_displacement_prior", current, current)
         return
@@ -170,18 +170,12 @@ def _patch_displacement_prior(displacement: Any) -> None:
 
     setattr(zero_centered_displacement_prior, _PRIOR_WRAPPER_FLAG, True)
     setattr(zero_centered_displacement_prior, _ORIGINAL_ATTR, current)
-    displacement._zero_centered_displacement_prior = zero_centered_displacement_prior
+    displacement_module._zero_centered_displacement_prior = zero_centered_displacement_prior
     _synchronize_aliases(
         "_zero_centered_displacement_prior",
         current,
         zero_centered_displacement_prior,
     )
-
-
-def displacement_module_centers(displacement_module: Any, bin_centers: np.ndarray) -> np.ndarray:
-    """Validate bin centers through the displacement decoder's active helper."""
-
-    return displacement_module._as_2d_centers(bin_centers)
 
 
 def _synchronize_aliases(name: str, original: object, replacement: object) -> None:

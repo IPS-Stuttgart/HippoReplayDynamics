@@ -100,7 +100,9 @@ def apply_duration_dynamics_patch():
     import hipporeplayimm.encoding as enc
     import hipporeplayimm.kd_reference as kd
     import hipporeplayimm.state_space as ss
+    from hipporeplayimm.nominal_emission_dt import apply_nominal_emission_dt_patch
     _patch_builders(enc,kd)
+    apply_nominal_emission_dt_patch()
     if getattr(ss,'_duration_dynamics_patch_applied',False): return
     _patch_state_space(ss); _patch_kd(kd)
     ss._duration_dynamics_patch_applied=True

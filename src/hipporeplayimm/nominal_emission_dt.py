@@ -10,6 +10,7 @@ interval.
 from __future__ import annotations
 
 from functools import wraps
+import sys
 from typing import Any, Callable
 
 _PATCHED_ATTR = "_nominal_emission_dt_wrapper"
@@ -62,6 +63,28 @@ def _kd_builder(builder: Callable[..., Any]) -> Callable[..., Any]:
     return wrapped
 
 
+def _synchronize_builder_aliases(
+    *,
+    build_emissions: Callable[..., Any],
+    build_kd_emissions: Callable[..., Any],
+    build_clusterless_mark_emissions: Callable[..., Any],
+) -> None:
+    """Refresh package modules that imported an emission builder by value."""
+
+    active = {
+        "build_emissions": build_emissions,
+        "build_kd_emissions": build_kd_emissions,
+        "build_clusterless_mark_emissions": build_clusterless_mark_emissions,
+    }
+    for module in list(sys.modules.values()):
+        module_name = getattr(module, "__name__", "")
+        if not module_name.startswith("hipporeplayimm"):
+            continue
+        for name, builder in active.items():
+            if hasattr(module, name):
+                setattr(module, name, builder)
+
+
 def apply_nominal_emission_dt_patch() -> None:
     """Keep scalar ``dt`` nominal across all replay emission builders."""
 
@@ -78,6 +101,11 @@ def apply_nominal_emission_dt_patch() -> None:
         default_config_factory=encoding.EmissionConfig,
     )
     kd_reference.build_kd_emissions = _kd_builder(kd_reference.build_kd_emissions)
+    _synchronize_builder_aliases(
+        build_emissions=encoding.build_emissions,
+        build_kd_emissions=kd_reference.build_kd_emissions,
+        build_clusterless_mark_emissions=clusterless.build_clusterless_mark_emissions,
+    )
 
 
 __all__ = ["apply_nominal_emission_dt_patch"]

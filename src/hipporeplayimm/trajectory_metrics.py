@@ -99,6 +99,8 @@ def _as_numeric_real_array(values: object, name: str) -> np.ndarray:
     if raw.dtype.kind == "O":
         for item in raw.ravel():
             item = _unwrap_zero_dimensional_object_scalar(item, name)
+            if isinstance(item, np.ndarray):
+                raise ValueError(f"{name} must contain scalar numeric real values")
             if isinstance(item, (bool, np.bool_, str, bytes, np.bytes_)):
                 raise ValueError(f"{name} must contain numeric real values, not boolean or text")
             if isinstance(item, (complex, np.complexfloating)):

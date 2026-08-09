@@ -55,7 +55,8 @@ def test_continuous_time_trajectory_imm_preserves_stickiness_validation() -> Non
         )
 
 
-def test_continuous_time_trajectory_imm_rejects_nonscalar_tau_without_deprecation() -> None:
+def test_continuous_time_trajectory_imm_rejects_nonscalar_tau_without_deprecation(
+) -> None:
     config = SimpleNamespace(
         imm_switch_tau_s=_object_scalar(np.array([0.1])),
         trajectory_imm_momentum_switch_probability=None,

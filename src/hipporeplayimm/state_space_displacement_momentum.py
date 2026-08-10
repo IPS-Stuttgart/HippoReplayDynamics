@@ -86,7 +86,7 @@ def _score_displacement_momentum_exact(
     if n_displacements <= 0:
         raise ValueError("displacement lattice must contain at least one state")
 
-    reference_dt = float(np.median(durations)) if durations.size else float(emissions.dt)
+    reference_dt = float(emissions.dt)
     transition_sigmas = _transition_sigmas_cm(config, durations)
     position_sigma = _positive_config_value(
         config,
@@ -102,7 +102,6 @@ def _score_displacement_momentum_exact(
         ),
     )
     decays = _duration_adjusted_decays(config, durations, float(emissions.dt))
-    time_scales = _time_scales(durations)
 
     position_prior = _uniform_position_prior(n_bins, valid_mask)
     displacement_prior = _zero_centered_displacement_prior(vectors, prior_sigma)
@@ -124,7 +123,7 @@ def _score_displacement_momentum_exact(
         displacement_transition = _displacement_transition_matrix(
             vectors,
             sigma_cm=float(transition_sigmas[transition_index]),
-            decay=float(decays[transition_index]) * float(time_scales[transition_index]),
+            decay=float(decays[transition_index]),
         )
         transitions = [
             _shifted_gaussian_transition_matrix(

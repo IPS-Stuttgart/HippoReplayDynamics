@@ -15,6 +15,9 @@ from .state_space_first_order import _forward_backward_first_order
 from .state_space_utils import _mean_entropy
 
 
+_MAX_CONTIGUOUS_SAMPLE_GAP_MULTIPLIER = 5.0
+
+
 @dataclass
 class EmpiricalTransitionStateSpaceReplayModel:
     """Exact first-order decoder using a transition matrix fit from behavior."""
@@ -118,6 +121,23 @@ def _validated_run_intervals(intervals: np.ndarray) -> np.ndarray:
     return validated
 
 
+def _max_contiguous_sample_gap_s(times: np.ndarray) -> float:
+    """Return a robust upper bound for position samples treated as adjacent."""
+
+    values = np.asarray(times, dtype=float).reshape(-1)
+    if values.size < 2:
+        return float("inf")
+    differences = np.diff(values)
+    valid = differences[np.isfinite(differences) & (differences > 0.0)]
+    if valid.size == 0:
+        return float("inf")
+    nominal_interval_s = float(np.median(valid))
+    return max(
+        _MAX_CONTIGUOUS_SAMPLE_GAP_MULTIPLIER * nominal_interval_s,
+        np.finfo(float).eps,
+    )
+
+
 def _eligible_adjacent_run_transitions(
     times: np.ndarray,
     xy: np.ndarray,
@@ -127,9 +147,11 @@ def _eligible_adjacent_run_transitions(
 ) -> np.ndarray:
     """Return adjacent sample pairs valid in at least one common run interval.
 
-    Speed is estimated independently inside each interval. Pair eligibility is
-    accumulated directly so overlapping or endpoint-sharing intervals cannot
-    overwrite one another and the result is independent of interval row order.
+    Speed is estimated independently inside each interval and each contiguous
+    position-sampling segment. Pair eligibility is accumulated directly so
+    overlapping or endpoint-sharing intervals cannot overwrite one another,
+    recording gaps cannot become behavioral transitions, and the result is
+    independent of interval row order.
     """
 
     intervals = _validated_run_intervals(intervals)
@@ -137,15 +159,32 @@ def _eligible_adjacent_run_transitions(
     if eligible.size == 0:
         return eligible
 
+    max_sample_gap_s = _max_contiguous_sample_gap_s(times)
     for start, end in intervals:
         indices = np.flatnonzero((times >= start) & (times <= end))
         if indices.size < 2:
             continue
-        local_speed = _speed_cm_s(times[indices], xy[indices])
-        local_valid = (local_speed >= min_speed_cm_s) & (bins[indices] >= 0)
-        adjacent = np.diff(indices) == 1
-        valid_pairs = adjacent & local_valid[:-1] & local_valid[1:]
-        eligible[indices[:-1][valid_pairs]] = True
+        time_differences = np.diff(times[indices])
+        breaks = np.flatnonzero(
+            (np.diff(indices) != 1)
+            | ~np.isfinite(time_differences)
+            | (time_differences <= 0.0)
+            | (time_differences > max_sample_gap_s)
+        ) + 1
+        segment_starts = np.concatenate(([0], breaks))
+        segment_ends = np.concatenate((breaks, [indices.size]))
+        for segment_start, segment_end in zip(
+            segment_starts,
+            segment_ends,
+            strict=True,
+        ):
+            segment = indices[int(segment_start) : int(segment_end)]
+            if segment.size < 2:
+                continue
+            local_speed = _speed_cm_s(times[segment], xy[segment])
+            local_valid = (local_speed >= min_speed_cm_s) & (bins[segment] >= 0)
+            valid_pairs = local_valid[:-1] & local_valid[1:]
+            eligible[segment[:-1][valid_pairs]] = True
     return eligible
 
 

@@ -1,4 +1,4 @@
-"""Runtime patches for shuffle-control ordering, integer values, and scope keys."""
+"""Runtime patches for shuffle-control ordering, integer values, time shifts, and scope keys."""
 
 from __future__ import annotations
 
@@ -9,6 +9,7 @@ import operator
 import numpy as np
 
 _PATCHED_FLAG = "_shuffle_spike_time_order_patch_applied"
+_CIRCULAR_SHIFT_PATCHED_FLAG = "_circular_shift_spike_time_patch_applied"
 _SCOPE_KEY_PATCHED_FLAG = "_shuffle_scope_numeric_key_patch_applied"
 _GRID_SHAPE_PATCHED_FLAG = "_shuffle_grid_shape_validation_patch_applied"
 _INTEGER_VALUE_PATCHED_FLAG = "_shuffle_integer_value_precision_patch_applied"
@@ -29,6 +30,14 @@ def apply_shuffle_spike_time_order_patch() -> None:
     ):
         ri.shuffle_spike_times_session = _shuffle_spike_times_session_sorted
         setattr(ri, _PATCHED_FLAG, True)
+
+    if not (
+        getattr(ri, _CIRCULAR_SHIFT_PATCHED_FLAG, False)
+        and getattr(ri, "circular_shift_spikes_session", None)
+        is _circular_shift_spikes_session_half_open
+    ):
+        ri.circular_shift_spikes_session = _circular_shift_spikes_session_half_open
+        setattr(ri, _CIRCULAR_SHIFT_PATCHED_FLAG, True)
 
     if not getattr(shuffle_controls, _SCOPE_KEY_PATCHED_FLAG, False):
         original_scope_label = shuffle_controls._scope_label
@@ -333,6 +342,168 @@ def _shuffle_spike_times_session_sorted(session, random_seed: int = 1):
             mark_times = _nonidentity_permuted_values(mark_times, rng)
         marks = ri._replace_spike_mark_rows(marks, times=mark_times, order=order)
     return replace(session, spikes=spikes, spike_marks=marks)
+
+
+def _circular_shift_spikes_session_half_open(
+    session,
+    shift_s: float | None = None,
+    random_seed: int = 1,
+):
+    """Circularly shift spikes over a half-open session interval.
+
+    The legacy helper used ``max(spike_time) - min(spike_time)`` as the period.
+    That makes the earliest and latest spike the same point on the circle, so
+    every nontrivial shift aliases those two distinct observations to one
+    timestamp. Prefer session-level temporal support when available, and always
+    choose a period strictly larger than the largest spike offset.
+    """
+
+    from . import result_improvements as ri
+
+    try:
+        spikes = np.asarray(session.spikes, dtype=float).copy()
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ValueError(
+            "session.spikes must contain numeric time and cell-ID values"
+        ) from exc
+    if spikes.size == 0:
+        return session
+    if spikes.ndim != 2 or spikes.shape[1] < 1:
+        raise ValueError(
+            "session.spikes must be a two-dimensional array with a time column"
+        )
+
+    spike_times = spikes[:, 0]
+    if not np.all(np.isfinite(spike_times)):
+        raise ValueError("session spike times must be finite")
+
+    start, support_end = _session_time_support_bounds(session, spike_times)
+    offsets = spike_times - start
+    if not np.all(np.isfinite(offsets)):
+        raise ValueError("session time support exceeds floating-point range")
+    max_offset = float(np.max(offsets))
+    support_span = float(support_end - start)
+    if not np.isfinite(support_span):
+        raise ValueError("session time support exceeds floating-point range")
+
+    duration = max(support_span, np.finfo(float).eps)
+    if duration <= max_offset:
+        duration = float(np.nextafter(max_offset, np.inf))
+    if not np.isfinite(duration) or duration <= 0.0:
+        raise ValueError("session time support must define a finite positive duration")
+
+    if shift_s is None:
+        rng = np.random.default_rng(_nonnegative_integer_seed(random_seed))
+        shift = float(rng.uniform(0.1 * duration, 0.9 * duration))
+    else:
+        shift = _finite_real_scalar(shift_s, "shift_s")
+
+    shifted_times = np.remainder(offsets + shift, duration) + start
+    if not np.all(np.isfinite(shifted_times)):
+        raise ValueError("circularly shifted spike times must remain finite")
+    order = np.argsort(shifted_times, kind="mergesort")
+    spikes[:, 0] = shifted_times
+    spikes = spikes[order]
+
+    marks = session.spike_marks
+    if marks is not None:
+        mark_times = np.asarray(marks.times, dtype=float).copy()
+        if mark_times.size:
+            mark_times = np.remainder(mark_times - start + shift, duration) + start
+        if mark_times.shape[0] == order.shape[0]:
+            marks = ri._replace_spike_mark_rows(
+                marks,
+                times=mark_times[order],
+                order=order,
+            )
+        else:
+            marks = ri._replace_spike_mark_rows(marks, times=mark_times)
+    return replace(session, spikes=spikes, spike_marks=marks)
+
+
+def _session_time_support_bounds(
+    session,
+    spike_times: np.ndarray,
+) -> tuple[float, float]:
+    """Return finite session bounds that contain all spike timestamps."""
+
+    lower = float(np.min(spike_times))
+    upper = float(np.max(spike_times))
+
+    sources: list[tuple[object, tuple[int, ...] | None]] = [
+        (getattr(session, "position", None), (0,)),
+        (getattr(session, "ripple_events", None), (0, 1)),
+        (getattr(session, "run_times", None), (0, 1)),
+        (getattr(session, "sleep_box_immobile_times", None), (0, 1)),
+        (getattr(session, "sleep_times", None), (0, 1)),
+        (getattr(session, "rem_times", None), (0, 1)),
+    ]
+    marks = getattr(session, "spike_marks", None)
+    if marks is not None:
+        sources.append((getattr(marks, "times", None), None))
+
+    for values, columns in sources:
+        bounds = _finite_time_bounds(values, columns=columns)
+        if bounds is None:
+            continue
+        source_lower, source_upper = bounds
+        lower = min(lower, source_lower)
+        upper = max(upper, source_upper)
+
+    return lower, upper
+
+
+def _finite_time_bounds(
+    values: object,
+    *,
+    columns: tuple[int, ...] | None,
+) -> tuple[float, float] | None:
+    """Return finite bounds from one optional session-time source."""
+
+    if values is None:
+        return None
+    try:
+        raw = np.asarray(values)
+    except (TypeError, ValueError):
+        return None
+    if raw.size == 0 or np.iscomplexobj(raw):
+        return None
+    if columns is not None:
+        if raw.ndim != 2 or not columns or raw.shape[1] <= max(columns):
+            return None
+        raw = raw[:, columns]
+    try:
+        numeric = np.asarray(raw, dtype=float)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    finite = numeric[np.isfinite(numeric)]
+    if finite.size == 0:
+        return None
+    return float(np.min(finite)), float(np.max(finite))
+
+
+def _finite_real_scalar(value: object, name: str) -> float:
+    """Return one finite real scalar without bool/text/complex coercion."""
+
+    try:
+        array = np.asarray(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must be a finite real scalar") from exc
+    if array.ndim != 0:
+        raise ValueError(f"{name} must be a finite real scalar")
+    scalar = array.item()
+    if isinstance(
+        scalar,
+        (bool, np.bool_, str, bytes, np.str_, np.bytes_, complex, np.complexfloating),
+    ):
+        raise ValueError(f"{name} must be a finite real scalar")
+    try:
+        number = float(scalar)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ValueError(f"{name} must be a finite real scalar") from exc
+    if not np.isfinite(number):
+        raise ValueError(f"{name} must be a finite real scalar")
+    return number
 
 
 def _numeric_scope_label(value: object) -> str | None:

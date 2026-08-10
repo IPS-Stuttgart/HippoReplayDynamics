@@ -1,9 +1,9 @@
-"""Compute encoder kinematics independently inside each behavioral run bout.
+"""Compute encoder kinematics independently inside contiguous run samples.
 
 The sorted-spike, KD reference, clusterless, and behavioral position-validation
 paths derive movement speed and frame occupancy durations from position samples.
-Large gaps between separate run bouts must not leak into ``numpy.gradient``,
-occupancy durations, or training intervals.
+Large gaps between separate run bouts or tracking dropouts inside one run must
+not leak into ``numpy.gradient``, occupancy durations, or training intervals.
 """
 
 from __future__ import annotations
@@ -19,6 +19,7 @@ import numpy as np
 _PATCHED_FLAG = "_place_field_run_local_kinematics_patch_applied"
 _WRAPPER_MARKER = "_place_field_run_local_kinematics_wrapper"
 _ORIGINAL_ATTR = "__hipporeplayimm_run_local_kinematics_original__"
+_MAX_CONTIGUOUS_SAMPLE_GAP_MULTIPLIER = 5.0
 
 
 def _run_intervals(run_times: Any) -> np.ndarray:
@@ -31,6 +32,52 @@ def _run_intervals(run_times: Any) -> np.ndarray:
     return intervals[:, :2]
 
 
+def _max_contiguous_sample_gap_s(times: np.ndarray) -> float:
+    """Return a robust upper bound for samples considered temporally adjacent."""
+
+    values = np.asarray(times, dtype=float).reshape(-1)
+    if values.size < 2:
+        return float("inf")
+    differences = np.diff(values)
+    valid = differences[np.isfinite(differences) & (differences > 0.0)]
+    if valid.size == 0:
+        return float("inf")
+    nominal_interval_s = float(np.median(valid))
+    return max(
+        _MAX_CONTIGUOUS_SAMPLE_GAP_MULTIPLIER * nominal_interval_s,
+        np.finfo(float).eps,
+    )
+
+
+def _split_indices_at_sample_gaps(
+    indices: np.ndarray,
+    times: np.ndarray,
+    max_sample_gap_s: float,
+) -> list[np.ndarray]:
+    """Split ordered sample indices at missing, reversed, or oversized time steps."""
+
+    sample_indices = np.asarray(indices, dtype=int).reshape(-1)
+    if sample_indices.size <= 1:
+        return [sample_indices] if sample_indices.size else []
+    values = np.asarray(times, dtype=float).reshape(-1)
+    local_times = values[sample_indices]
+    differences = np.diff(local_times)
+    breaks = np.flatnonzero(
+        ~np.isfinite(differences)
+        | (differences <= 0.0)
+        | (differences > max_sample_gap_s)
+    ) + 1
+    return [
+        sample_indices[start:stop]
+        for start, stop in zip(
+            np.r_[0, breaks],
+            np.r_[breaks, sample_indices.size],
+            strict=True,
+        )
+        if stop > start
+    ]
+
+
 def _speed_within_run_intervals(
     times: np.ndarray,
     xy: np.ndarray,
@@ -40,14 +87,19 @@ def _speed_within_run_intervals(
     times = np.asarray(times, dtype=float)
     xy = np.asarray(xy, dtype=float)
     speed = np.zeros(times.shape, dtype=float)
+    max_sample_gap_s = _max_contiguous_sample_gap_s(times)
     for start, end in intervals:
-        in_interval = (times >= start) & (times <= end)
-        if np.any(in_interval):
-            local_speed = base_speed(times[in_interval], xy[in_interval])
+        indices = np.flatnonzero((times >= start) & (times <= end))
+        for segment in _split_indices_at_sample_gaps(
+            indices,
+            times,
+            max_sample_gap_s,
+        ):
+            local_speed = base_speed(times[segment], xy[segment])
             # A frame can belong to overlapping or endpoint-sharing bouts.
             # Accumulate movement eligibility instead of letting interval order
             # decide which local derivative survives.
-            speed[in_interval] = np.maximum(speed[in_interval], local_speed)
+            speed[segment] = np.maximum(speed[segment], local_speed)
     return speed
 
 
@@ -56,7 +108,7 @@ def _interval_local_durations(
     intervals: np.ndarray,
     base_durations: Callable[[np.ndarray], np.ndarray],
 ) -> np.ndarray:
-    """Combine interval-local frame durations without row-order dependence.
+    """Combine contiguous interval-local durations without row-order dependence.
 
     A sample shared by multiple run intervals can be terminal in one interval
     but have a real successor in another. Prefer the successor-derived duration
@@ -66,16 +118,20 @@ def _interval_local_durations(
 
     exact = np.full(times.shape, np.inf, dtype=float)
     fallback = np.full(times.shape, np.inf, dtype=float)
+    max_sample_gap_s = _max_contiguous_sample_gap_s(times)
     for start, end in intervals:
         indices = np.flatnonzero((times >= start) & (times <= end))
-        if indices.size == 0:
-            continue
-        local = np.asarray(base_durations(times[indices]), dtype=float)
-        if local.shape != indices.shape:
-            raise ValueError("base_durations must return one value per input time")
-        if indices.size > 1:
-            np.minimum.at(exact, indices[:-1], local[:-1])
-        np.minimum.at(fallback, indices[-1:], local[-1:])
+        for segment in _split_indices_at_sample_gaps(
+            indices,
+            times,
+            max_sample_gap_s,
+        ):
+            local = np.asarray(base_durations(times[segment]), dtype=float)
+            if local.shape != segment.shape:
+                raise ValueError("base_durations must return one value per input time")
+            if segment.size > 1:
+                np.minimum.at(exact, segment[:-1], local[:-1])
+            np.minimum.at(fallback, segment[-1:], local[-1:])
 
     durations = np.zeros(times.shape, dtype=float)
     has_exact = np.isfinite(exact)
@@ -99,7 +155,7 @@ def _durations_split_at_run_boundaries(
     intervals: np.ndarray,
     base_durations: Callable[[np.ndarray], np.ndarray],
 ) -> np.ndarray:
-    """Compute frame durations per run bout while retaining out-of-run samples."""
+    """Compute frame durations per contiguous run data while retaining outside samples."""
 
     times = np.asarray(times, dtype=float)
     if times.size == 0 or intervals.size == 0:
@@ -148,7 +204,7 @@ def _mask_intervals_within_run_intervals(
     intervals: np.ndarray,
     base_durations: Callable[[np.ndarray], np.ndarray],
 ) -> np.ndarray:
-    """Split masked training frames at behavioral run boundaries."""
+    """Split masked training frames at run boundaries and tracking gaps."""
 
     times = np.asarray(times, dtype=float)
     mask = np.asarray(mask, dtype=bool)
@@ -165,22 +221,28 @@ def _mask_intervals_within_run_intervals(
 
     rows: list[np.ndarray] = []
     covered = np.zeros(times.shape, dtype=bool)
+    max_sample_gap_s = _max_contiguous_sample_gap_s(times)
     for start, end in intervals:
-        in_interval = (times >= start) & (times <= end)
-        covered |= in_interval
-        if not np.any(mask & in_interval):
-            continue
-        local_times = times[in_interval]
-        local_mask = mask[in_interval]
-        local_rows = _intervals_from_mask_and_durations(
-            local_times,
-            local_mask,
-            base_durations(local_times),
-        )
-        if local_rows.size:
-            local_rows[:, 0] = np.maximum(local_rows[:, 0], float(start))
-            local_rows[:, 1] = np.minimum(local_rows[:, 1], float(end))
-            rows.append(local_rows)
+        indices = np.flatnonzero((times >= start) & (times <= end))
+        covered[indices] = True
+        for segment in _split_indices_at_sample_gaps(
+            indices,
+            times,
+            max_sample_gap_s,
+        ):
+            local_mask = mask[segment]
+            if not np.any(local_mask):
+                continue
+            local_times = times[segment]
+            local_rows = _intervals_from_mask_and_durations(
+                local_times,
+                local_mask,
+                base_durations(local_times),
+            )
+            if local_rows.size:
+                local_rows[:, 0] = np.maximum(local_rows[:, 0], float(start))
+                local_rows[:, 1] = np.minimum(local_rows[:, 1], float(end))
+                rows.append(local_rows)
 
     outside = ~covered
     padded = np.concatenate(([False], outside, [False]))

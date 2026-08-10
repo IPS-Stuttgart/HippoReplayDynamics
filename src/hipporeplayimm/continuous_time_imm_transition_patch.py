@@ -151,6 +151,7 @@ def _wrap_trajectory_mode_transition_sequence(
 
     @wraps(helper)
     def trajectory_mode_transition_matrices(*args, **kwargs):
+        legacy = helper(*args, **kwargs)
         config = _positional_or_keyword(args, kwargs, 0, "config")
         stickiness = float(_positional_or_keyword(args, kwargs, 1, "stickiness"))
         durations = np.asarray(
@@ -159,7 +160,7 @@ def _wrap_trajectory_mode_transition_sequence(
         )
         tau_s = float(getattr(config, "imm_switch_tau_s", 0.0))
         if tau_s == 0.0:
-            return helper(*args, **kwargs)
+            return legacy
         if not np.isfinite(tau_s) or tau_s <= 0.0:
             raise ValueError("imm_switch_tau_s must be finite and positive")
         if durations.ndim != 1:

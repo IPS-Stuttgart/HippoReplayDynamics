@@ -41,7 +41,6 @@ from .state_space_displacement_momentum import (
     _per_bin_sigma,
     _positive_config_value,
     _shifted_gaussian_transition_matrix,
-    _time_scales,
     _transition_sigmas_cm,
     _uniform_position_prior,
     _valid_count,
@@ -96,7 +95,7 @@ def _score_displacement_imm_exact(
         n_time=emissions.n_time,
         fallback_dt=float(emissions.dt),
     )
-    reference_dt = float(np.median(durations)) if durations.size else float(emissions.dt)
+    reference_dt = float(emissions.dt)
     vectors = _displacement_lattice(
         centers,
         radius_bins=int(getattr(config, "displacement_radius_bins", 2)),
@@ -130,7 +129,6 @@ def _score_displacement_imm_exact(
         ),
     )
     decays = _duration_adjusted_decays(config, durations, float(emissions.dt))
-    time_scales = _time_scales(durations)
     mode_transitions = _mode_transition_matrices(
         n_modes,
         float(getattr(config, "imm_mode_stickiness", 0.95)),
@@ -178,7 +176,7 @@ def _score_displacement_imm_exact(
         displacement_transition = _displacement_transition_matrix(
             vectors,
             sigma_cm=float(displacement_transition_sigmas[transition_index]),
-            decay=float(decays[transition_index]) * float(time_scales[transition_index]),
+            decay=float(decays[transition_index]),
         )
         duration_scale = _duration_scale_at(durations, transition_index, reference_dt)
         momentum_spatial_transitions = [

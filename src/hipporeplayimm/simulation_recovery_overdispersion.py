@@ -72,7 +72,25 @@ def apply_simulation_recovery_overdispersion_patch() -> None:
 
 
 def _finite_nonnegative_scalar(name: str, value: Any) -> float:
-    raw = np.asarray(value)
+    current = value
+    seen: set[int] = set()
+    while isinstance(current, np.ndarray) and current.ndim == 0:
+        marker = id(current)
+        if marker in seen:
+            raise ValueError(f"{name} must be finite and nonnegative")
+        seen.add(marker)
+        try:
+            unwrapped = current.item()
+        except ValueError as exc:
+            raise ValueError(f"{name} must be finite and nonnegative") from exc
+        if unwrapped is current:
+            raise ValueError(f"{name} must be finite and nonnegative")
+        current = unwrapped
+
+    try:
+        raw = np.asarray(current)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must be finite and nonnegative") from exc
     if raw.ndim != 0 or np.issubdtype(raw.dtype, np.bool_):
         raise ValueError(f"{name} must be finite and nonnegative")
     scalar = raw.item()

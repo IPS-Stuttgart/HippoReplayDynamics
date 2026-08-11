@@ -20,27 +20,44 @@ _PATCHED_FLAG = "_kd_encoding_config_validation_patch_applied"
 _TRANSITION_PATCHED_FLAG = "_kd_transition_parameter_validation_patch_applied"
 
 
+def _unwrap_zero_dimensional_scalar(value: Any, name: str, expectation: str) -> Any:
+    """Recursively unwrap scalar NumPy containers without lossy coercion."""
+
+    current = value
+    seen: set[int] = set()
+    while isinstance(current, np.ndarray):
+        if current.shape != ():
+            raise TypeError(f"{name} must be {expectation}")
+        identity = id(current)
+        if identity in seen:
+            raise TypeError(f"{name} must be {expectation}")
+        seen.add(identity)
+        try:
+            current = current.item()
+        except (AttributeError, IndexError, TypeError, ValueError) as exc:
+            raise TypeError(f"{name} must be {expectation}") from exc
+    return current
+
+
 def _coerce_scalar_float_value(value: Any, name: str) -> float:
+    value = _unwrap_zero_dimensional_scalar(value, name, "a scalar float")
     if isinstance(value, (bool, np.bool_, str, bytes, np.str_, np.bytes_)):
         raise TypeError(f"{name} must be a scalar float")
-    try:
-        array = np.asarray(value)
-    except (TypeError, ValueError) as exc:
-        raise TypeError(f"{name} must be a scalar float") from exc
-    if array.shape != ():
-        raise TypeError(f"{name} must be a scalar float")
-    if array.dtype.kind in {"U", "S"}:
-        raise TypeError(f"{name} must be a scalar float")
-    try:
-        value = array.item()
-    except (AttributeError, IndexError, ValueError):
-        pass
-    if isinstance(value, (bool, np.bool_, str, bytes, np.str_, np.bytes_)):
+    if isinstance(value, (complex, np.complexfloating)):
         raise TypeError(f"{name} must be a scalar float")
     try:
         return float(value)
     except (TypeError, ValueError, OverflowError) as exc:
         raise TypeError(f"{name} must be a scalar float") from exc
+
+
+def _coerce_boolean_scalar_value(value: Any, name: str) -> bool:
+    """Return a strict Boolean scalar, including nested 0-D NumPy wrappers."""
+
+    value = _unwrap_zero_dimensional_scalar(value, name, "boolean")
+    if isinstance(value, (bool, np.bool_)):
+        return bool(value)
+    raise TypeError(f"{name} must be boolean")
 
 
 def _coerce_float_scalar(config: Any, name: str) -> float:
@@ -101,6 +118,7 @@ def validate_kd_encoding_config(config: Any) -> None:
     _validate_positive_float(config, "min_occupancy_s")
     _validate_positive_float(config, "rate_floor_hz")
     _validate_nonnegative_float(config, "min_peak_rate_hz")
+    _coerce_boolean_scalar_value(getattr(config, "use_excitatory"), "use_excitatory")
 
 
 def _session_with_excitatory_fallback(session: Any, config: Any) -> Any:
@@ -114,7 +132,11 @@ def _session_with_excitatory_fallback(session: Any, config: Any) -> Any:
     only when the label list is absent.
     """
 
-    if not bool(getattr(config, "use_excitatory", True)):
+    use_excitatory = _coerce_boolean_scalar_value(
+        getattr(config, "use_excitatory", True),
+        "use_excitatory",
+    )
+    if not use_excitatory:
         return session
     excitatory_neurons = np.asarray(getattr(session, "excitatory_neurons", np.array([])))
     if excitatory_neurons.size:

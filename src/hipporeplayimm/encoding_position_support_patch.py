@@ -34,7 +34,8 @@ def _max_contiguous_sample_gap_s(times: np.ndarray) -> float:
     valid = differences[np.isfinite(differences) & (differences > 0.0)]
     if valid.size == 0:
         return float("inf")
-    nominal_interval_s = float(np.median(valid))
+    ordered = np.sort(valid)
+    nominal_interval_s = float(ordered[(ordered.size - 1) // 2])
     return max(
         _MAX_CONTIGUOUS_SAMPLE_GAP_MULTIPLIER * nominal_interval_s,
         np.finfo(float).eps,

@@ -314,21 +314,37 @@ def _boolean_config_value(config: object, name: str) -> bool:
 
 
 def _scalar_config_item(value: object, message: str) -> object:
-    try:
-        array = np.asarray(value)
-    except (TypeError, ValueError) as exc:
-        raise ValueError(message) from exc
-    if array.ndim != 0:
-        raise ValueError(message)
-    if np.issubdtype(array.dtype, np.bool_):
-        raise ValueError(message)
-    try:
-        item = array.item()
-    except ValueError as exc:
-        raise ValueError(message) from exc
-    if isinstance(item, (bool, np.bool_)):
-        raise ValueError(message)
-    return item
+    """Return a real scalar without lossy nested-container coercion."""
+
+    current = value
+    seen_arrays: set[int] = set()
+    while True:
+        try:
+            array = np.asarray(current)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(message) from exc
+        if array.ndim != 0:
+            raise ValueError(message)
+        if array.dtype.kind in {"b", "S", "U", "c"}:
+            raise ValueError(message)
+        if isinstance(current, np.ndarray):
+            marker = id(current)
+            if marker in seen_arrays:
+                raise ValueError(message)
+            seen_arrays.add(marker)
+        try:
+            item = array.item()
+        except ValueError as exc:
+            raise ValueError(message) from exc
+        if isinstance(item, np.ndarray):
+            current = item
+            continue
+        if isinstance(
+            item,
+            (bool, np.bool_, str, bytes, np.str_, np.bytes_, complex, np.complexfloating),
+        ):
+            raise ValueError(message)
+        return item
 
 
 def _synchronize_aliases(previous: object, patched: object) -> None:

@@ -173,7 +173,7 @@ def apply_goal_state_space_parameter_validation_patch() -> None:
 
 
 def apply_goal_state_space_patch() -> None:
-    '''Register the exact goal-conditioned state-space model with benchmark entry points.'''
+    '''Register the exact goal-state-space model with benchmark entry points.'''
 
     from . import benchmarks as bench
     from . import evidence_reporting as evidence

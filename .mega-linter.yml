@@ -15,9 +15,12 @@ DISABLE_LINTERS:
   - REPOSITORY_DEVSKIM
   - REPOSITORY_TRIVY
   - JSON_JSONLINT
-  - MAKEFILE_CHECKMAKE
   - SPELL_LYCHEE
   - REPOSITORY_GRYPE
+  # MegaLinter v10's TruffleHog/Lob detector treats several ordinary pytest
+  # function names as verified Lob credentials. BetterLeaks and Secretlint
+  # remain enabled, so disable this false-positive-prone duplicate scanner.
+  - REPOSITORY_TRUFFLEHOG
   # MegaLinter regenerates megalinter-reports/* during the run. Some of those
   # generated SBOM files contain alignment whitespace, so git_diff can fail on
   # report artifacts even when source linters passed. Source-level diff checks

@@ -321,16 +321,30 @@ def _coerce_positive_real(name: str, value) -> float:
 
 
 def _scalar_item(name: str, value):
-    try:
-        array = np.asarray(value)
-    except (TypeError, ValueError) as exc:
-        raise ValueError(f"{name} must be a scalar") from exc
-    if array.ndim != 0:
-        raise ValueError(f"{name} must be a scalar")
-    try:
-        return array.item()
-    except (TypeError, ValueError) as exc:
-        raise ValueError(f"{name} must be a scalar") from exc
+    """Return a scalar leaf without lossy nested-array coercion."""
+
+    current = value
+    seen: set[int] = set()
+    while True:
+        if isinstance(current, np.ndarray):
+            marker = id(current)
+            if marker in seen:
+                raise ValueError(f"{name} must be a scalar")
+            seen.add(marker)
+        try:
+            array = np.asarray(current)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"{name} must be a scalar") from exc
+        if array.ndim != 0:
+            raise ValueError(f"{name} must be a scalar")
+        try:
+            item = array.item()
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"{name} must be a scalar") from exc
+        if isinstance(item, np.ndarray):
+            current = item
+            continue
+        return item
 
 
 __all__ = ["apply_accuracy_grid_parameter_validation_patch"]

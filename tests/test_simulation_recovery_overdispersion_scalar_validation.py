@@ -22,6 +22,18 @@ def test_overdispersion_rejects_nested_boolean_scalars(boolean: object) -> None:
         _finite_nonnegative_scalar("negative_binomial_overdispersion", value)
 
 
+@pytest.mark.parametrize("text", ["0.5", b"0.5", np.str_("0.5"), np.bytes_(b"0.5")])
+def test_overdispersion_rejects_text_scalars(text: object) -> None:
+    with pytest.raises(ValueError, match="finite and nonnegative"):
+        _finite_nonnegative_scalar("negative_binomial_overdispersion", text)
+
+    with pytest.raises(ValueError, match="finite and nonnegative"):
+        _finite_nonnegative_scalar(
+            "negative_binomial_overdispersion",
+            _nested_zero_dimensional(text),
+        )
+
+
 def test_public_simulator_rejects_nested_boolean_overdispersion() -> None:
     value = _nested_zero_dimensional(True)
 
@@ -33,6 +45,18 @@ def test_public_simulator_rejects_nested_boolean_overdispersion() -> None:
             dt=0.1,
             rng=np.random.default_rng(0),
             negative_binomial_overdispersion=value,
+        )
+
+
+def test_public_simulator_rejects_text_overdispersion() -> None:
+    with pytest.raises(ValueError, match="finite and nonnegative"):
+        recovery.simulate_replay_event(
+            None,
+            true_model="diffusion",
+            n_time=1,
+            dt=0.1,
+            rng=np.random.default_rng(0),
+            negative_binomial_overdispersion="0.5",
         )
 
 

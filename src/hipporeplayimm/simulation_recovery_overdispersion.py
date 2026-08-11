@@ -87,6 +87,8 @@ def _finite_nonnegative_scalar(name: str, value: Any) -> float:
             raise ValueError(f"{name} must be finite and nonnegative")
         current = unwrapped
 
+    if isinstance(current, (str, bytes, np.str_, np.bytes_)):
+        raise ValueError(f"{name} must be finite and nonnegative")
     try:
         raw = np.asarray(current)
     except (TypeError, ValueError) as exc:

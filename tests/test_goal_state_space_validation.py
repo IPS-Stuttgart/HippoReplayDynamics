@@ -17,6 +17,13 @@ def _minimal_emissions() -> LogEmissionTensor:
     )
 
 
+def _nested_zero_dimensional_wrapper(value: object) -> np.ndarray:
+    inner = np.asarray(value)
+    outer = np.empty((), dtype=object)
+    outer[()] = inner
+    return outer
+
+
 @pytest.mark.parametrize(
     ("kwargs", "message"),
     [
@@ -38,6 +45,14 @@ def test_goal_state_space_model_rejects_nonfinite_parameters(kwargs, message):
         ({"transition_sigma_cm_sqrt_s": True}, "transition_sigma_cm_sqrt_s"),
         ({"drift_speed_cm_s": np.array(False, dtype=object)}, "drift_speed_cm_s"),
         ({"max_step_sigma": np.array([4.0])}, "max_step_sigma"),
+        (
+            {"transition_sigma_cm_sqrt_s": _nested_zero_dimensional_wrapper(True)},
+            "transition_sigma_cm_sqrt_s",
+        ),
+        (
+            {"max_step_sigma": _nested_zero_dimensional_wrapper([4.0])},
+            "max_step_sigma",
+        ),
     ],
 )
 def test_goal_state_space_model_rejects_bool_and_array_parameters(kwargs, message):
@@ -73,6 +88,14 @@ def test_goal_transition_matrix_rejects_nonfinite_parameters(kwargs, message):
         ({"sigma_cm": True}, "sigma_cm"),
         ({"drift_step_cm": np.array(False, dtype=object)}, "drift_step_cm"),
         ({"max_step_sigma": np.array([10.0])}, "max_step_sigma"),
+        (
+            {"drift_step_cm": _nested_zero_dimensional_wrapper(False)},
+            "drift_step_cm",
+        ),
+        (
+            {"sigma_cm": _nested_zero_dimensional_wrapper([1.0])},
+            "sigma_cm",
+        ),
     ],
 )
 def test_goal_transition_matrix_rejects_bool_and_array_parameters(kwargs, message):
@@ -93,6 +116,22 @@ def test_goal_transition_matrix_rejects_bool_and_array_parameters(kwargs, messag
         ({"goal_state_space_transition_sigma_cm_sqrt_s": True}, "goal_state_space_transition_sigma_cm_sqrt_s"),
         ({"goal_state_space_drift_speed_cm_s": np.array(False, dtype=object)}, "goal_state_space_drift_speed_cm_s"),
         ({"goal_state_space_max_step_sigma": np.array([4.0])}, "goal_state_space_max_step_sigma"),
+        (
+            {
+                "goal_state_space_transition_sigma_cm_sqrt_s": _nested_zero_dimensional_wrapper(
+                    True
+                )
+            },
+            "goal_state_space_transition_sigma_cm_sqrt_s",
+        ),
+        (
+            {
+                "goal_state_space_max_step_sigma": _nested_zero_dimensional_wrapper(
+                    [4.0]
+                )
+            },
+            "goal_state_space_max_step_sigma",
+        ),
     ],
 )
 def test_benchmark_goal_state_space_rejects_bool_and_array_config(kwargs, message):

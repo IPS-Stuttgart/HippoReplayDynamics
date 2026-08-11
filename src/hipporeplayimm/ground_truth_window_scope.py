@@ -147,17 +147,32 @@ def _patch_first_post_ripple_well_visit(gt: Any) -> None:
     gt.first_post_ripple_well_visit = first_post_ripple_well_visit_without_gap_dwell
 
 
-def _max_contiguous_sample_gap_s(times: np.ndarray) -> float:
-    """Return a robust upper bound for samples considered temporally adjacent."""
+def _nominal_sample_interval_s(times: np.ndarray) -> float:
+    """Return a conservative nominal positive sampling interval.
+
+    Use the lower middle interval for an even number of observations rather than
+    averaging the two central values. A short trace with one normal step and one
+    tracking dropout would otherwise inflate the 5x continuity threshold enough
+    to classify the dropout as continuously tracked.
+    """
 
     values = np.asarray(times, dtype=float).reshape(-1)
     if values.size < 2:
-        return float("inf")
+        return 0.0
     differences = np.diff(values)
     valid = differences[np.isfinite(differences) & (differences > 0.0)]
     if valid.size == 0:
+        return 0.0
+    ordered = np.sort(valid)
+    return float(ordered[(ordered.size - 1) // 2])
+
+
+def _max_contiguous_sample_gap_s(times: np.ndarray) -> float:
+    """Return a robust upper bound for samples considered temporally adjacent."""
+
+    nominal_interval_s = _nominal_sample_interval_s(times)
+    if nominal_interval_s <= 0.0:
         return float("inf")
-    nominal_interval_s = float(np.median(valid))
     return max(
         _MAX_CONTIGUOUS_SAMPLE_GAP_MULTIPLIER * nominal_interval_s,
         np.finfo(float).eps,

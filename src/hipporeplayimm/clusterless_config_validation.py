@@ -19,6 +19,8 @@ _MARK_VALUE_PATCH_VERSION = 2
 _BENCHMARK_MARK_CONFIG_PATCH_MARKER = "_benchmark_clusterless_mark_config_validation_patch"
 _SCALED_RATE_PATCH_MARKER = "_clusterless_scaled_rate_validation_patch"
 _SCALED_RATE_PATCH_VERSION = 1
+_DIAGONAL_GAUSSIAN_PATCH_MARKER = "_clusterless_diagonal_gaussian_stability_patch"
+_DIAGONAL_GAUSSIAN_PATCH_VERSION = 1
 
 
 _NUMERIC_MESSAGES = {
@@ -43,6 +45,7 @@ def apply_clusterless_encoding_config_validation_patch() -> None:
     apply_clusterless_run_local_kinematics_patch()
     _patch_clusterless_mark_value_validation(clusterless)
     _patch_clusterless_scaled_rate_validation()
+    _patch_clusterless_diagonal_gaussian_stability(clusterless)
 
     current = clusterless.fit_clusterless_mark_encoding
     if getattr(current, _PATCH_MARKER, False):
@@ -139,6 +142,93 @@ def _patch_clusterless_mark_value_validation(clusterless) -> None:
     setattr(_coerce_marks, _MARK_VALUE_PATCH_MARKER, _MARK_VALUE_PATCH_VERSION)
     setattr(_coerce_marks, "__hipporeplayimm_original__", previous)
     clusterless.ClusterlessMarkEncoding._coerce_marks = _coerce_marks
+
+
+def _stable_diagonal_gaussian_log_likelihood(
+    marks: np.ndarray,
+    mean: np.ndarray,
+    variance: np.ndarray,
+) -> np.ndarray:
+    """Evaluate diagonal Gaussian logs without avoidable overflow intermediates."""
+
+    marks = np.asarray(marks, dtype=float)
+    mean = np.asarray(mean, dtype=float)
+    variance = np.asarray(variance, dtype=float)
+    if variance.shape != mean.shape:
+        raise ValueError("clusterless mark mean and variance shapes must match")
+    if not np.all(np.isfinite(variance)) or np.any(variance <= 0.0):
+        raise ValueError("clusterless mark variance must be finite and positive")
+
+    # ``log(2*pi*variance)`` can overflow although its logarithm is finite.
+    # Likewise, ``diff*diff/variance`` can overflow before the division even
+    # when the standardized squared distance is representable.  Work in log
+    # and standard-deviation space instead.
+    log_norm = np.sum(np.log(2.0 * np.pi) + np.log(variance), axis=1)
+    std = np.sqrt(variance)
+    with np.errstate(over="ignore", invalid="ignore"):
+        standardized = (marks[:, None, :] - mean[None, :, :]) / std[None, :, :]
+        quad = np.sum(np.square(standardized), axis=2)
+    return -0.5 * (quad + log_norm[None, :])
+
+
+def _patch_clusterless_diagonal_gaussian_stability(clusterless) -> None:
+    """Keep finite large-scale diagonal mark likelihoods representable."""
+
+    current = clusterless.ClusterlessMarkEncoding._log_mark_likelihood_diagonal_gaussian
+    if (
+        getattr(current, _DIAGONAL_GAUSSIAN_PATCH_MARKER, None)
+        == _DIAGONAL_GAUSSIAN_PATCH_VERSION
+    ):
+        return
+
+    @wraps(current)
+    def _log_mark_likelihood_diagonal_gaussian(
+        self,
+        marks,
+        group_indices=None,
+    ):
+        if (
+            group_indices is not None
+            and self.group_mark_mean is not None
+            and self.group_mark_variance is not None
+        ):
+            output = np.empty((marks.shape[0], self.n_bins), dtype=float)
+            global_likelihood = None
+            for row_index, group_index in enumerate(group_indices):
+                if group_index < 0:
+                    if global_likelihood is None:
+                        global_likelihood = _stable_diagonal_gaussian_log_likelihood(
+                            marks,
+                            self.mark_mean,
+                            self.mark_variance,
+                        )
+                    output[row_index] = global_likelihood[row_index]
+                    continue
+                output[row_index] = _stable_diagonal_gaussian_log_likelihood(
+                    marks[row_index : row_index + 1],
+                    self.group_mark_mean[int(group_index)],
+                    self.group_mark_variance[int(group_index)],
+                )[0]
+            return output
+        return _stable_diagonal_gaussian_log_likelihood(
+            marks,
+            self.mark_mean,
+            self.mark_variance,
+        )
+
+    setattr(
+        _log_mark_likelihood_diagonal_gaussian,
+        _DIAGONAL_GAUSSIAN_PATCH_MARKER,
+        _DIAGONAL_GAUSSIAN_PATCH_VERSION,
+    )
+    setattr(
+        _log_mark_likelihood_diagonal_gaussian,
+        "__hipporeplayimm_original__",
+        current,
+    )
+    clusterless.ClusterlessMarkEncoding._log_mark_likelihood_diagonal_gaussian = (
+        _log_mark_likelihood_diagonal_gaussian
+    )
 
 
 def _patch_clusterless_scaled_rate_validation() -> None:

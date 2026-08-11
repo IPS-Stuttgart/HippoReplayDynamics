@@ -25,3 +25,17 @@ def test_behavior_position_lookup_rejects_queries_inside_tracking_gaps():
         interpolated[[0, 1, 5, 6]],
         np.array([[1.5, 0.0], [2.0, 0.0], [100.0, 0.0], [100.5, 0.0]]),
     )
+
+
+def test_behavior_position_lookup_rejects_short_trace_dropout():
+    position = np.column_stack(
+        [
+            np.array([0.0, 0.1, 3.0], dtype=float),
+            np.array([0.0, 1.0, 100.0], dtype=float),
+            np.zeros(3, dtype=float),
+        ]
+    )
+
+    interpolated = _position_at_time(position, 1.0)
+
+    assert np.isnan(interpolated).all()

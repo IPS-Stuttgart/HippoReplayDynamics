@@ -14,6 +14,9 @@ import pandas as pd
 from hipporeplayimm.olafsdottir2016 import read_axona_pos
 
 
+_MAX_CONTIGUOUS_SAMPLE_GAP_MULTIPLIER = 5.0
+
+
 def load_centerline(path: str | Path) -> np.ndarray:
     payload = json.loads(Path(path).read_text(encoding="utf-8"))
     points = payload.get("points_cm", payload)
@@ -33,8 +36,63 @@ def validate_centerline(centerline: np.ndarray) -> np.ndarray:
     return arr
 
 
-def smooth_positions(xy: np.ndarray, valid: np.ndarray, *, window_samples: int) -> np.ndarray:
-    """Interpolate invalid samples and apply a short moving-average smoother."""
+def _max_contiguous_sample_gap_s(times_s: np.ndarray) -> float:
+    """Return the largest timestamp gap still treated as continuously tracked."""
+
+    times = np.asarray(times_s, dtype=float).reshape(-1)
+    if times.size < 2:
+        return float("inf")
+    diffs = np.diff(times)
+    finite_positive = diffs[np.isfinite(diffs) & (diffs > 0.0)]
+    if finite_positive.size == 0:
+        return float("inf")
+    nominal_interval_s = float(np.median(finite_positive))
+    return max(
+        _MAX_CONTIGUOUS_SAMPLE_GAP_MULTIPLIER * nominal_interval_s,
+        np.finfo(float).eps,
+    )
+
+
+def _contiguous_valid_segments(
+    valid: np.ndarray,
+    times_s: np.ndarray | None = None,
+) -> list[np.ndarray]:
+    """Split valid samples at long invalid/timestamp gaps."""
+
+    mask = np.asarray(valid, dtype=bool).reshape(-1)
+    if times_s is None:
+        times = np.arange(mask.size, dtype=float)
+    else:
+        times = np.asarray(times_s, dtype=float).reshape(-1)
+        if times.shape != mask.shape:
+            raise ValueError("times_s must contain one value per position sample")
+    indices = np.flatnonzero(mask & np.isfinite(times))
+    if indices.size == 0:
+        return []
+    if indices.size == 1:
+        return [indices]
+    max_gap = _max_contiguous_sample_gap_s(times)
+    gaps = times[indices[1:]] - times[indices[:-1]]
+    breaks = np.flatnonzero(
+        ~np.isfinite(gaps)
+        | (gaps <= 0.0)
+        | (gaps > max_gap)
+    ) + 1
+    return [
+        segment
+        for segment in np.split(indices, breaks)
+        if segment.size
+    ]
+
+
+def smooth_positions(
+    xy: np.ndarray,
+    valid: np.ndarray,
+    *,
+    window_samples: int,
+    times_s: np.ndarray | None = None,
+) -> np.ndarray:
+    """Interpolate/smooth only within contiguous measured tracking support."""
 
     xy = np.asarray(xy, dtype=float)
     valid = np.asarray(valid, dtype=bool)
@@ -44,31 +102,49 @@ def smooth_positions(xy: np.ndarray, valid: np.ndarray, *, window_samples: int) 
         raise ValueError("valid mask must contain one value per position sample")
     if xy.shape[0] == 0:
         return xy.copy()
+    valid = valid & np.isfinite(xy).all(axis=1)
     if not np.any(valid):
         return xy.copy()
 
-    sample_index = np.arange(xy.shape[0], dtype=float)
-    filled = xy.copy()
-    for dim in range(2):
-        values = xy[:, dim]
-        filled[:, dim] = np.interp(sample_index, sample_index[valid], values[valid])
-    window = min(max(int(window_samples), 1), xy.shape[0])
-    if window <= 1:
-        return filled
-    kernel = np.ones(window, dtype=float) / float(window)
-    # ``np.convolve(..., mode="same")`` implicitly zero-pads at the boundaries,
-    # which pulls the beginning and end of a position trace toward the origin.
-    # Edge padding preserves constant trajectories and avoids artificial endpoint
-    # displacement before centerline projection.
-    left_pad = window // 2
-    right_pad = window - 1 - left_pad
-    padded = np.pad(filled, ((left_pad, right_pad), (0, 0)), mode="edge")
-    return np.column_stack(
-        [
-            np.convolve(padded[:, dim], kernel, mode="valid")
-            for dim in range(2)
-        ]
-    )
+    if times_s is None:
+        times = np.arange(xy.shape[0], dtype=float)
+    else:
+        times = np.asarray(times_s, dtype=float)
+        if times.shape != (xy.shape[0],):
+            raise ValueError("times_s must contain one value per position sample")
+        valid &= np.isfinite(times)
+
+    output = np.full_like(xy, np.nan, dtype=float)
+    requested_window = max(int(window_samples), 1)
+    for valid_indices in _contiguous_valid_segments(valid, times):
+        start = int(valid_indices[0])
+        stop = int(valid_indices[-1]) + 1
+        sample_indices = np.arange(start, stop, dtype=int)
+        segment = np.empty((sample_indices.size, 2), dtype=float)
+        for dim in range(2):
+            segment[:, dim] = np.interp(
+                times[sample_indices],
+                times[valid_indices],
+                xy[valid_indices, dim],
+            )
+        window = min(requested_window, segment.shape[0])
+        if window <= 1:
+            output[sample_indices] = segment
+            continue
+        kernel = np.ones(window, dtype=float) / float(window)
+        # ``np.convolve(..., mode="same")`` implicitly zero-pads at the
+        # boundaries. Edge padding preserves constant trajectories without
+        # letting samples across a tracking dropout influence one another.
+        left_pad = window // 2
+        right_pad = window - 1 - left_pad
+        padded = np.pad(segment, ((left_pad, right_pad), (0, 0)), mode="edge")
+        output[sample_indices] = np.column_stack(
+            [
+                np.convolve(padded[:, dim], kernel, mode="valid")
+                for dim in range(2)
+            ]
+        )
+    return output
 
 
 def infer_centerline_from_positions(
@@ -163,14 +239,21 @@ def speed_from_linear_position(times_s: np.ndarray, linear_cm: np.ndarray, valid
     linear = np.asarray(linear_cm, dtype=float)
     valid = np.asarray(valid, dtype=bool) & np.isfinite(linear) & np.isfinite(times)
     speed = np.full(linear.shape, np.nan, dtype=float)
-    if valid.sum() < 2:
-        return speed
-    filled = linear.copy()
-    idx = np.arange(linear.shape[0], dtype=float)
-    filled[~valid] = np.interp(idx[~valid], idx[valid], linear[valid])
-    with np.errstate(divide="ignore", invalid="ignore"):
-        speed_values = np.abs(np.gradient(filled, times))
-    speed[valid] = speed_values[valid]
+    for valid_indices in _contiguous_valid_segments(valid, times):
+        if valid_indices.size < 2:
+            continue
+        start = int(valid_indices[0])
+        stop = int(valid_indices[-1]) + 1
+        sample_indices = np.arange(start, stop, dtype=int)
+        local_times = times[sample_indices]
+        local_linear = np.interp(
+            local_times,
+            times[valid_indices],
+            linear[valid_indices],
+        )
+        with np.errstate(divide="ignore", invalid="ignore"):
+            local_speed = np.abs(np.gradient(local_linear, local_times))
+        speed[valid_indices] = local_speed[valid_indices - start]
     return speed
 
 
@@ -215,7 +298,12 @@ def linearize_pos_file(
 ) -> dict[str, float | str]:
     position = read_axona_pos(pos_path)
     xy_raw = np.column_stack([position.x_cm, position.y_cm])
-    xy = smooth_positions(xy_raw, position.valid, window_samples=smoothing_window_samples)
+    xy = smooth_positions(
+        xy_raw,
+        position.valid,
+        window_samples=smoothing_window_samples,
+        times_s=position.times_s,
+    )
     if centerline_path is None:
         centerline = infer_centerline_from_positions(
             xy,
@@ -480,10 +568,12 @@ def _sample_durations(times_s: np.ndarray) -> np.ndarray:
     diffs = np.diff(times)
     finite_positive = diffs[np.isfinite(diffs) & (diffs > 0.0)]
     fallback = float(np.median(finite_positive)) if finite_positive.size else 1.0 / 50.0
+    max_gap = _max_contiguous_sample_gap_s(times)
+    contiguous = np.isfinite(diffs) & (diffs > 0.0) & (diffs <= max_gap)
     durations = np.empty(times.shape[0], dtype=float)
-    durations[:-1] = np.where(np.isfinite(diffs) & (diffs > 0.0), diffs, fallback)
+    durations[:-1] = np.where(contiguous, diffs, fallback)
     durations[-1] = fallback
-    return np.minimum(durations, 1.0)
+    return durations
 
 
 if __name__ == "__main__":

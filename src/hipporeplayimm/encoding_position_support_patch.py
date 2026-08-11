@@ -8,7 +8,7 @@ from functools import wraps
 import numpy as np
 
 _PATCH_MARKER = "_encoding_position_support_patch"
-_PATCH_VERSION = 2
+_PATCH_VERSION = 3
 _DECODE_WINDOWS_PATCH_MARKER = "_position_decoding_tracking_support_patch"
 _DECODE_WINDOWS_PATCH_VERSION = 1
 _ORIGINAL_ATTR = "__hipporeplayimm_original__"
@@ -37,20 +37,46 @@ def _synchronize_decode_window_aliases(previous: object, patched: object) -> Non
             module._decode_windows = patched
 
 
-def _max_contiguous_sample_gap_s(times: np.ndarray) -> float:
-    """Return the largest gap still treated as continuously tracked."""
+def _nominal_sample_interval_s(times: np.ndarray) -> float:
+    """Return a conservative nominal positive sampling interval.
+
+    Use the lower middle interval for an even number of observations rather than
+    averaging the two central values. With a short trace containing one normal
+    step and one tracking dropout, the usual arithmetic median would average the
+    normal step with the dropout and make the dropout look continuous under the
+    5x cadence guard.
+    """
 
     values = np.asarray(times, dtype=float).reshape(-1)
     if values.size < 2:
-        return float("inf")
+        return 0.0
     differences = np.diff(values)
     valid = differences[np.isfinite(differences) & (differences > 0.0)]
     if valid.size == 0:
+        return 0.0
+    ordered = np.sort(valid)
+    return float(ordered[(ordered.size - 1) // 2])
+
+
+def _max_contiguous_sample_gap_s(times: np.ndarray) -> float:
+    """Return the largest gap still treated as continuously tracked."""
+
+    nominal_interval_s = _nominal_sample_interval_s(times)
+    if nominal_interval_s <= 0.0:
         return float("inf")
-    nominal_interval_s = float(np.median(valid))
     return max(
         _MAX_CONTIGUOUS_SAMPLE_GAP_MULTIPLIER * nominal_interval_s,
         np.finfo(float).eps,
+    )
+
+
+def _synchronize_tracking_gap_threshold() -> None:
+    """Use the same short-trace-safe cadence rule in encoder kinematics."""
+
+    from . import place_field_run_local_kinematics
+
+    place_field_run_local_kinematics._max_contiguous_sample_gap_s = (
+        _max_contiguous_sample_gap_s
     )
 
 
@@ -95,15 +121,7 @@ def _tracking_support_intervals(
             raise ValueError("run_times must contain start/end interval pairs")
         intervals = intervals[:, :2]
 
-    differences = np.diff(time_values)
-    valid_differences = differences[
-        np.isfinite(differences) & (differences > 0.0)
-    ]
-    nominal_interval_s = (
-        float(np.median(valid_differences))
-        if valid_differences.size
-        else 0.0
-    )
+    nominal_interval_s = _nominal_sample_interval_s(time_values)
     max_sample_gap_s = _max_contiguous_sample_gap_s(time_values)
     rows: list[list[float]] = []
 
@@ -123,13 +141,10 @@ def _tracking_support_intervals(
             if segment.size == 0:
                 continue
             segment_times = time_values[segment]
-            segment_differences = np.diff(segment_times)
-            finite_positive = segment_differences[
-                np.isfinite(segment_differences) & (segment_differences > 0.0)
-            ]
+            segment_interval_s = _nominal_sample_interval_s(segment_times)
             terminal_interval_s = (
-                float(np.median(finite_positive))
-                if finite_positive.size
+                segment_interval_s
+                if segment_interval_s > 0.0
                 else nominal_interval_s
             )
             support_start = max(float(start), float(segment_times[0]))
@@ -195,6 +210,7 @@ def apply_encoding_position_support_patch() -> None:
 
     from . import encoding
 
+    _synchronize_tracking_gap_threshold()
     current = encoding._interp_positions
     if getattr(current, _PATCH_MARKER, None) == _PATCH_VERSION:
         previous = getattr(current, _ORIGINAL_ATTR, None)

@@ -1,11 +1,13 @@
 import numpy as np
 
-from hipporeplayimm import encoding
+from hipporeplayimm import (
+    encoding,
+    place_field_run_local_kinematics as run_local_kinematics,
+)
 from hipporeplayimm.encoding_position_support_patch import (
     _max_contiguous_sample_gap_s,
     _tracking_support_intervals,
 )
-import hipporeplayimm.place_field_run_local_kinematics as run_local_kinematics
 from hipporeplayimm.position_validation import _decode_windows
 
 

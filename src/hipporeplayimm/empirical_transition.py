@@ -191,38 +191,46 @@ def _eligible_adjacent_run_transitions(
 def _finite_real_scalar(name: str, value: object) -> float:
     """Return a finite real scalar without silently coercing booleans or text."""
 
-    if isinstance(value, (bool, np.bool_)):
-        raise TypeError(f"{name} must be a real numeric scalar, not boolean")
-    if isinstance(value, (str, bytes, bytearray)):
-        raise TypeError(f"{name} must be a real numeric scalar, not text")
-    if isinstance(value, (complex, np.complexfloating)):
-        raise TypeError(f"{name} must be a real numeric scalar, not complex")
+    message = f"{name} must be a real numeric scalar"
+    item = value
+    seen_wrapper_ids: set[int] = set()
+    while isinstance(item, np.ndarray):
+        if item.ndim != 0:
+            raise ValueError(message)
+        wrapper_id = id(item)
+        if wrapper_id in seen_wrapper_ids:
+            raise ValueError(message)
+        seen_wrapper_ids.add(wrapper_id)
+        item = item.item()
+
+    if isinstance(item, (bool, np.bool_)):
+        raise TypeError(f"{message}, not boolean")
+    if isinstance(item, (str, bytes, bytearray, np.bytes_)):
+        raise TypeError(f"{message}, not text")
+    if isinstance(item, (complex, np.complexfloating)):
+        raise TypeError(f"{message}, not complex")
 
     try:
-        raw = np.asarray(value)
+        raw = np.asarray(item)
     except (TypeError, ValueError) as exc:
-        raise TypeError(f"{name} must be a real numeric scalar") from exc
+        raise TypeError(message) from exc
     if raw.ndim != 0:
-        raise ValueError(f"{name} must be a real numeric scalar")
+        raise ValueError(message)
     if raw.dtype.kind == "b":
-        raise TypeError(f"{name} must be a real numeric scalar, not boolean")
+        raise TypeError(f"{message}, not boolean")
     if raw.dtype.kind in {"S", "U"}:
-        raise TypeError(f"{name} must be a real numeric scalar, not text")
+        raise TypeError(f"{message}, not text")
     if raw.dtype.kind == "c":
-        raise TypeError(f"{name} must be a real numeric scalar, not complex")
+        raise TypeError(f"{message}, not complex")
     if raw.dtype.kind == "O":
-        item = raw.item()
-        if isinstance(item, (bool, np.bool_)):
-            raise TypeError(f"{name} must be a real numeric scalar, not boolean")
-        if isinstance(item, (str, bytes, bytearray)):
-            raise TypeError(f"{name} must be a real numeric scalar, not text")
-        if isinstance(item, (complex, np.complexfloating)):
-            raise TypeError(f"{name} must be a real numeric scalar, not complex")
+        nested = raw.item()
+        if nested is not item:
+            return _finite_real_scalar(name, nested)
 
     try:
         numeric = float(raw)
     except (TypeError, ValueError, OverflowError) as exc:
-        raise TypeError(f"{name} must be a real numeric scalar") from exc
+        raise TypeError(message) from exc
     if not np.isfinite(numeric):
         raise ValueError(f"{name} must be finite")
     return numeric

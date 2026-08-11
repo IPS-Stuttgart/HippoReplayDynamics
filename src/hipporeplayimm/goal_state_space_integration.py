@@ -173,7 +173,7 @@ def apply_goal_state_space_parameter_validation_patch() -> None:
 
 
 def apply_goal_state_space_patch() -> None:
-    '''Register the exact goal-state-space model with benchmark entry points.'''
+    '''Register the exact goal-conditioned state-space model with benchmark entry points.'''
 
     from . import benchmarks as bench
     from . import evidence_reporting as evidence
@@ -308,9 +308,10 @@ def _nonnegative_parameter(name: str, value: Any) -> float:
 
 
 def _numeric_parameter(name: str, value: Any, *, positive: bool) -> float:
-    if _contains_bool(value):
+    scalar = _unwrap_zero_dimensional_parameter(value, name)
+    if _contains_bool(scalar):
         raise ValueError(f'{name} must be a scalar numeric value, not boolean')
-    array = _as_array(value)
+    array = _as_array(scalar)
     if array.shape != ():
         raise ValueError(f'{name} must be a scalar numeric value')
     try:
@@ -323,6 +324,20 @@ def _numeric_parameter(name: str, value: Any, *, positive: bool) -> float:
     elif not np.isfinite(numeric) or numeric < 0.0:
         raise ValueError(f'{name} must be finite and non-negative')
     return numeric
+
+
+def _unwrap_zero_dimensional_parameter(value: Any, name: str) -> Any:
+    current = value
+    seen: set[int] = set()
+    while isinstance(current, np.ndarray):
+        if current.ndim != 0:
+            raise ValueError(f'{name} must be a scalar numeric value')
+        marker = id(current)
+        if marker in seen:
+            raise ValueError(f'{name} must be a scalar numeric value')
+        seen.add(marker)
+        current = current.item()
+    return current
 
 
 def _coerce_position_matrix(value: Any) -> np.ndarray:

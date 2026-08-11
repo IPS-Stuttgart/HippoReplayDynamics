@@ -773,21 +773,35 @@ def emissions_from_counts(
     if _contains_text_values(counts):
         raise ValueError("counts must contain numeric integer counts, not text values")
     try:
-        count_values = np.asarray(counts, dtype=float)
+        raw_counts = np.asarray(counts)
     except (TypeError, ValueError) as exc:
         raise ValueError("counts must contain numeric values") from exc
     dt = _positive_finite_scalar("dt", dt)
     spike_rate_scale = _positive_finite_scalar("spike_rate_scale", spike_rate_scale)
-    if count_values.ndim != 2:
+    if raw_counts.ndim != 2:
         raise ValueError("counts must be a two-dimensional array")
-    if count_values.shape[1] != encoding.n_cells:
+    if raw_counts.shape[1] != encoding.n_cells:
         raise ValueError("counts columns must match encoding.n_cells")
-    if not np.all(np.isfinite(count_values)) or np.any(count_values < 0.0):
-        raise ValueError("counts must contain finite nonnegative values")
-    rounded = np.rint(count_values)
-    if not np.all(np.isclose(count_values, rounded, rtol=0.0, atol=0.0)):
-        raise ValueError("counts must contain integer-valued counts")
-    spike_counts = np.asarray(rounded, dtype=int)
+    if np.issubdtype(raw_counts.dtype, np.integer):
+        if np.issubdtype(raw_counts.dtype, np.signedinteger) and np.any(raw_counts < 0):
+            raise ValueError("counts must contain finite nonnegative values")
+        if np.any(raw_counts > np.iinfo(np.dtype(int)).max):
+            raise ValueError("counts must fit into integer count range")
+        spike_counts = raw_counts.astype(int, copy=False)
+    else:
+        try:
+            count_values = raw_counts.astype(float, copy=False)
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise ValueError("counts must contain numeric values") from exc
+        if not np.all(np.isfinite(count_values)) or np.any(count_values < 0.0):
+            raise ValueError("counts must contain finite nonnegative values")
+        rounded = np.rint(count_values)
+        if not np.all(np.isclose(count_values, rounded, rtol=0.0, atol=0.0)):
+            raise ValueError("counts must contain integer-valued counts")
+        max_safe_float = np.nextafter(float(np.iinfo(np.dtype(int)).max), 0.0)
+        if np.any(rounded > max_safe_float):
+            raise ValueError("counts must fit into integer count range")
+        spike_counts = np.asarray(rounded, dtype=int)
     log_likelihood = _poisson_log_emissions(
         spike_counts,
         encoding.rates_hz,
@@ -803,7 +817,7 @@ def emissions_from_counts(
         times=times,
         dt=float(dt),
         cell_ids=encoding.cell_ids,
-        n_spikes=int(spike_counts.sum()),
+        n_spikes=sum(int(value) for value in spike_counts.flat),
     )
 
 

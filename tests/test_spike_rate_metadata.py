@@ -88,7 +88,7 @@ def test_emission_metadata_still_rejects_full_precision_alias_conflicts():
 def test_emission_metadata_rejects_boolean_spike_rate_scale():
     scores = pd.DataFrame({"emission_spike_rate_scale": [True]})
 
-    with pytest.raises(ValueError, match="finite numeric metadata"):
+    with pytest.raises(ValueError, match="finite real numeric metadata"):
         emission_config_for_scores(scores, EmissionConfig())
 
 

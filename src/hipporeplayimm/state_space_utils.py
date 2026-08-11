@@ -128,7 +128,9 @@ def _mass_retaining_candidate_indices(
     finite = np.isfinite(values)
     if not np.any(finite):
         raise ValueError("log_emission must contain at least one finite value")
-    order = np.argsort(np.where(finite, values, -np.inf))[::-1]
+    # Sort the negated scores so equal-likelihood bins retain their original
+    # index order. Reversing an ascending sort also reverses every tie group.
+    order = np.argsort(-np.where(finite, values, -np.inf), kind="stable")
     finite_order = order[finite[order]]
     finite_count = int(finite_order.size)
     top_k_minimum = 0 if top_k is None or int(top_k) <= 0 else int(top_k)

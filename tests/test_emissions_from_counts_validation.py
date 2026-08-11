@@ -49,7 +49,7 @@ def test_emissions_from_counts_rejects_complex_count_values(counts: np.ndarray) 
 
 
 def test_emissions_from_counts_normalizes_arbitrary_precision_overflow() -> None:
-    with pytest.raises(ValueError, match="counts must contain numeric values"):
+    with pytest.raises(ValueError, match="counts must fit into integer count range"):
         emissions_from_counts(
             _encoding(),
             np.array([[10**400]], dtype=object),

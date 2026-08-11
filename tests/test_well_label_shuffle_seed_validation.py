@@ -65,6 +65,7 @@ def test_shuffle_well_labels_forwards_large_integer_seed_exactly(
         capture_seed,
     )
 
-    shuffle_well_labels(_label_frame(), random_seed=seed)  # type: ignore[arg-type]
+    shuffled = shuffle_well_labels(_label_frame(), random_seed=seed)  # type: ignore[arg-type]
 
     assert observed_seeds == [2**53 + 1]
+    assert shuffled.loc[:1, "true_well_id"].tolist() == ["B", "A"]

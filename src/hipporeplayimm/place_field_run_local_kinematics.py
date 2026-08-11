@@ -314,6 +314,28 @@ def _call_with_run_local_kinematics(
             )
         )
 
+    # The public position-mask encoder delegates its implementation to a
+    # module-level helper.  Cloning only the public function leaves that helper
+    # bound to the original module globals and silently bypasses every patched
+    # kinematics primitive above.  Clone the delegate into the same globals so
+    # run boundaries and tracking gaps remain local on this path as well.
+    for delegate_name in (
+        "_fit_place_field_encoding_excluding_intervals",
+        "_training_frame_durations",
+    ):
+        delegate = function_globals.get(delegate_name)
+        if not isinstance(delegate, FunctionType):
+            continue
+        patched_delegate = FunctionType(
+            delegate.__code__,
+            patched_globals,
+            delegate.__name__,
+            delegate.__defaults__,
+            delegate.__closure__,
+        )
+        patched_delegate.__kwdefaults__ = delegate.__kwdefaults__
+        patched_globals[delegate_name] = patched_delegate
+
     patched = FunctionType(
         original.__code__,
         patched_globals,

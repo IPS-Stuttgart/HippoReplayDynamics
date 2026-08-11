@@ -20,6 +20,9 @@ from hipporeplayimm.benchmarks import (
     _state_space_decoder_config,
 )
 from hipporeplayimm.candidate_pruning_calibration import score_pruning_gaps
+from hipporeplayimm.continuous_time_imm_transition_patch import (
+    _continuous_time_mode_transition_matrix,
+)
 from hipporeplayimm.data import ReplaySession, _coerce_mark_matrix, _load_mat_file
 from hipporeplayimm.duration_dynamics import attach_duration_metadata, transition_durations_s
 from hipporeplayimm.duration_occupancy import _duration_candidates, _mode_transition_matrices
@@ -645,10 +648,13 @@ def test_imm_switch_tau_builds_duration_specific_transition_matrices():
 
     assert len(matrices) == durations.shape[0]
     for matrix, duration in zip(matrices, durations, strict=True):
-        expected_stickiness = np.exp(-duration / 0.5)
-        np.testing.assert_allclose(np.diag(matrix), expected_stickiness)
-        off_diagonal = matrix[~np.eye(matrix.shape[0], dtype=bool)]
-        np.testing.assert_allclose(off_diagonal, (1.0 - expected_stickiness) / 3.0)
+        expected = _continuous_time_mode_transition_matrix(
+            ss._mode_transition_matrix(4, 0.90),
+            duration,
+            0.5,
+        )
+        np.testing.assert_allclose(matrix, expected)
+        np.testing.assert_allclose(matrix.sum(axis=1), 1.0)
 
     with pytest.raises(ValueError, match="imm_switch_tau_s"):
         _mode_transition_matrices(ss, 4, 0.90, float("inf"), durations)

@@ -282,8 +282,10 @@ def apply_continuous_time_imm_transition_patch() -> None:
     from . import state_space_displacement_imm as displacement_imm
     from . import state_space_trajectory_imm as trajectory_imm
 
-    if getattr(duration_occupancy, _PATCHED_FLAG, False):
-        return
+    # Individual wrappers are idempotent. Always revisit the modules because
+    # tests and downstream applications may reload one of them after this flag
+    # was set, leaving the fresh functions without continuous-time semantics or
+    # corrected diagnostics.
 
     previous_duration = duration_occupancy._mode_transition_matrices
     active_duration = _wrap_mode_transition_sequence(previous_duration, tau_position=3)

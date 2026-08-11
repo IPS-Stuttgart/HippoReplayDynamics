@@ -20,7 +20,10 @@ def test_event_gain_uses_physical_bin_durations() -> None:
         max_gain=10.0,
     )
 
-    np.testing.assert_allclose(calibrated, rates_hz)
+    np.testing.assert_allclose(
+        calibrated,
+        np.maximum(rates_hz, np.finfo(float).tiny),
+    )
     assert metadata["replay_event_gain"] == pytest.approx(1.0)
 
 
@@ -50,7 +53,10 @@ def test_cell_gains_use_physical_bin_durations() -> None:
         max_gain=10.0,
     )
 
-    np.testing.assert_allclose(calibrated, rates_hz)
+    np.testing.assert_allclose(
+        calibrated,
+        np.maximum(rates_hz, np.finfo(float).tiny),
+    )
     assert metadata["replay_cell_gain_min"] == pytest.approx(1.0)
     assert metadata["replay_cell_gain_max"] == pytest.approx(1.0)
     assert metadata["replay_cell_gain_geomean"] == pytest.approx(1.0)

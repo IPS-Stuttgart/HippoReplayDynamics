@@ -20,13 +20,20 @@ def _unwrap_scalar(value: object) -> object:
 
     seen: set[int] = set()
     while isinstance(value, (np.ndarray, np.generic)):
+        if isinstance(value, np.complexfloating):
+            return value
         if isinstance(value, np.ndarray):
             if value.size != 1 or id(value) in seen:
                 return _NONSCALAR
             seen.add(id(value))
             value = value.reshape(-1)[0]
         else:
-            value = value.item()
+            item = value.item()
+            # Extended-precision NumPy scalars may return another scalar of the
+            # same type from item(), which otherwise makes this loop permanent.
+            if isinstance(item, np.generic) and type(item) is type(value):
+                return item
+            value = item
     return value
 
 
@@ -34,7 +41,10 @@ def _real_numeric_value(value: object) -> float:
     """Return a real numeric scalar, or NaN for malformed/complex values."""
 
     value = _unwrap_scalar(value)
-    if value is _NONSCALAR or isinstance(value, (complex, np.complexfloating)):
+    if value is _NONSCALAR or isinstance(
+        value,
+        (bool, np.bool_, complex, np.complexfloating),
+    ):
         return float("nan")
     try:
         return float(value)
@@ -50,15 +60,40 @@ def _real_numeric_series(values: object) -> pd.Series:
 
 
 def _finite_evidence_series(frame: pd.DataFrame) -> pd.Series:
-    finite = pd.Series(True, index=frame.index)
-    found = False
-    for column in ("log_evidence", "heldout_log_likelihood"):
-        if column not in frame:
-            continue
-        found = True
-        values = _real_numeric_series(frame[column])
-        finite &= pd.Series(np.isfinite(values.to_numpy()), index=frame.index)
-    return finite if found else pd.Series(True, index=frame.index)
+    columns = [
+        column
+        for column in ("log_evidence", "heldout_log_likelihood")
+        if column in frame
+    ]
+    if not columns:
+        return pd.Series(True, index=frame.index)
+
+    observed = pd.Series(False, index=frame.index)
+    valid = pd.Series(True, index=frame.index)
+    for column in columns:
+        values = frame[column]
+        missing = values.map(_is_missing_real_scalar).astype(bool)
+        numeric = _real_numeric_series(values)
+        finite = pd.Series(
+            np.isfinite(numeric.to_numpy()),
+            index=frame.index,
+        )
+        observed |= ~missing
+        valid &= missing | finite
+    return observed & valid
+
+
+def _is_missing_real_scalar(value: object) -> bool:
+    """Treat genuine missing scalars as absent without hiding complex values."""
+
+    value = _unwrap_scalar(value)
+    if value is _NONSCALAR or isinstance(value, (complex, np.complexfloating)):
+        return False
+    try:
+        missing = pd.isna(value)
+    except (TypeError, ValueError):
+        return False
+    return isinstance(missing, (bool, np.bool_)) and bool(missing)
 
 
 def _coerce_log_evidence_column(frame: pd.DataFrame) -> pd.DataFrame:

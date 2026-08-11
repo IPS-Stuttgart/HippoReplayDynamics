@@ -19,6 +19,7 @@ import pandas as pd
 
 from benchmark_model_evidence import _check_session, _session_path
 from hipporeplayimm.data import load_replay_session
+from hipporeplayimm.encoding_position_support_patch import _queries_inside_tracking_gaps
 from hipporeplayimm.ground_truth import active_goal_at_time, infer_well_locations
 
 
@@ -315,8 +316,11 @@ def _position_at_time(position: np.ndarray, time_s: float) -> np.ndarray:
     order = np.argsort(arr[:, 0])
     arr = arr[order]
     times = arr[:, 0]
-    x = np.interp(float(time_s), times, arr[:, 1], left=np.nan, right=np.nan)
-    y = np.interp(float(time_s), times, arr[:, 2], left=np.nan, right=np.nan)
+    query_time = float(time_s)
+    if _queries_inside_tracking_gaps(times, np.array([query_time], dtype=float))[0]:
+        return np.array([np.nan, np.nan], dtype=float)
+    x = np.interp(query_time, times, arr[:, 1], left=np.nan, right=np.nan)
+    y = np.interp(query_time, times, arr[:, 2], left=np.nan, right=np.nan)
     return np.array([float(x), float(y)], dtype=float)
 
 

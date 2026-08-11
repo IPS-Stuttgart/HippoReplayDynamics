@@ -32,6 +32,9 @@ _MIN_LOG_MASS_BOOL_WRAPPER_ATTR = "_candidate_min_log_mass_bool_wrapper"
 _RESTRICT_CANDIDATE_ORDER_PATCHED_FLAG = "_candidate_restriction_order_patch_applied"
 _PAIRWISE_OVERFLOW_PATCHED_FLAG = "_candidate_pairwise_overflow_nearest_support_patch_applied"
 _PAIRWISE_OVERFLOW_WRAPPER_ATTR = "_candidate_pairwise_overflow_nearest_support_wrapper"
+_LEGACY_GAUSSIAN_PATCHED_FLAG = "_legacy_model_gaussian_stability_patch_applied"
+_LEGACY_DIFFUSION_WRAPPER_ATTR = "_legacy_diffusion_gaussian_stability_wrapper"
+_LEGACY_PAIRWISE_WRAPPER_ATTR = "_legacy_candidate_pairwise_gaussian_stability_wrapper"
 
 
 def apply_candidate_support_quality_patch() -> None:
@@ -86,6 +89,7 @@ def apply_candidate_support_quality_patch() -> None:
     _patch_boolean_candidate_log_mass(ri)
     _patch_restricted_candidate_order()
     _patch_overflowed_pairwise_nearest_support()
+    _patch_legacy_model_gaussian_stability()
 
 
 def _patch_serialized_evidence_support_labels() -> None:
@@ -272,6 +276,70 @@ def _patch_overflowed_pairwise_nearest_support() -> None:
         full_grid_normalized_pairwise_gaussian_log_prob,
     )
     setattr(state_space_utils, _PAIRWISE_OVERFLOW_PATCHED_FLAG, True)
+
+
+def _patch_legacy_model_gaussian_stability() -> None:
+    """Route legacy diffusion/candidate kernels through the stable state-space helpers."""
+
+    from . import models, state_space_utils
+
+    current_transition = models._log_transition_matrix
+    if not getattr(current_transition, _LEGACY_DIFFUSION_WRAPPER_ATTR, False):
+
+        @wraps(current_transition)
+        def log_transition_matrix(bin_centers, sigma_cm, max_step_sigma):
+            matrix = state_space_utils._gaussian_transition_matrix(
+                bin_centers,
+                sigma_cm,
+                max_step_sigma,
+            )
+            output: list[tuple[np.ndarray, np.ndarray]] = []
+            for source in range(matrix.shape[1]):
+                column = matrix.getcol(source).tocoo()
+                order = np.argsort(column.row)
+                indices = np.asarray(column.row[order], dtype=int)
+                probabilities = np.asarray(column.data[order], dtype=float)
+                with np.errstate(divide="ignore"):
+                    log_weights = np.log(probabilities)
+                output.append((indices, log_weights))
+            return output
+
+        setattr(log_transition_matrix, _LEGACY_DIFFUSION_WRAPPER_ATTR, True)
+        setattr(log_transition_matrix, "__hipporeplayimm_original__", current_transition)
+        models._log_transition_matrix = log_transition_matrix
+
+    current_pairwise = models._full_grid_normalized_pairwise_gaussian_log_prob
+    if not getattr(current_pairwise, _LEGACY_PAIRWISE_WRAPPER_ATTR, False):
+
+        @wraps(current_pairwise)
+        def full_grid_normalized_pairwise_gaussian_log_prob(
+            predicted,
+            observed,
+            all_observed,
+            sigma,
+        ):
+            return state_space_utils._full_grid_normalized_pairwise_gaussian_log_prob(
+                predicted,
+                observed,
+                all_observed,
+                sigma,
+            )
+
+        setattr(
+            full_grid_normalized_pairwise_gaussian_log_prob,
+            _LEGACY_PAIRWISE_WRAPPER_ATTR,
+            True,
+        )
+        setattr(
+            full_grid_normalized_pairwise_gaussian_log_prob,
+            "__hipporeplayimm_original__",
+            current_pairwise,
+        )
+        models._full_grid_normalized_pairwise_gaussian_log_prob = (
+            full_grid_normalized_pairwise_gaussian_log_prob
+        )
+
+    setattr(models, _LEGACY_GAUSSIAN_PATCHED_FLAG, True)
 
 
 def _stable_log_euclidean_distances(

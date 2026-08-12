@@ -86,12 +86,10 @@ def _patch_duration_helpers(module: Any) -> None:
         if len(raw_values) == 0:
             return np.full(expected, fallback, dtype=float)
 
-        durations = np.asarray(raw_values, dtype=float)
-        if durations.ndim != 1:
-            raise ValueError("transition durations must be one-dimensional")
+        durations = _valid_transition_durations(raw_values)
         if durations.shape != (expected,):
             raise ValueError(f"transition durations must have shape {(expected,)}, got {durations.shape}")
-        return _valid_transition_durations(durations)
+        return durations
 
     @wraps(original_duration_adjusted_decays)
     def duration_adjusted_decays(config: object, durations: Any, reference_dt: float) -> np.ndarray:
@@ -247,25 +245,35 @@ def _validate_exact_sparse_momentum_config(config: object, *, include_diffusion:
 
 
 def _validate_config_positive_scalar(config: object, name: str, default: float) -> None:
-    _coerce_positive_float_scalar(name, getattr(config, name, default), f"{name} must be finite and positive")
+    _coerce_positive_float_scalar(config, name, getattr(config, name, default), f"{name} must be finite and positive")
 
 
 def _is_boolean_scalar(value: object) -> bool:
-    """Return True for Python, NumPy, and object-wrapped boolean scalars."""
+    """Return True for Python, NumPy, and nested object-wrapped boolean scalars."""
 
-    if isinstance(value, (bool, np.bool_)):
-        return True
-    arr = np.asarray(value)
-    if arr.ndim != 0:
-        return False
-    if np.issubdtype(arr.dtype, np.bool_):
-        return True
-    if arr.dtype == object:
+    current = value
+    seen_arrays: set[int] = set()
+    while True:
+        if isinstance(current, (bool, np.bool_)):
+            return True
+        arr = np.asarray(current)
+        if arr.ndim != 0:
+            return False
+        if np.issubdtype(arr.dtype, np.bool_):
+            return True
+        if arr.dtype != object:
+            return False
+        array_id = id(arr)
+        if array_id in seen_arrays:
+            return False
+        seen_arrays.add(array_id)
         try:
-            return isinstance(arr.item(), (bool, np.bool_))
+            item = arr.item()
         except ValueError:
             return False
-    return False
+        if item is current:
+            return False
+        current = item
 
 
 def _reject_array_shaped_scalar(name: str, value: object) -> None:
@@ -306,9 +314,15 @@ def _coerce_positive_float_scalar(name: str, value: object, message: str) -> flo
 
 
 def _valid_transition_durations(durations: Any) -> np.ndarray:
-    values = np.asarray(durations, dtype=float)
-    if values.ndim != 1:
+    raw_values = np.asarray(durations, dtype=object)
+    if raw_values.ndim != 1:
         raise ValueError("transition durations must be one-dimensional")
+    if any(_is_boolean_scalar(value) for value in raw_values):
+        raise TypeError("transition durations must be numeric, not boolean")
+    try:
+        values = np.asarray(durations, dtype=float)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("transition durations must be finite and positive") from exc
     if values.size == 0:
         return values
     if not np.all(np.isfinite(values)) or np.any(values <= 0.0):

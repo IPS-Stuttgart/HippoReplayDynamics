@@ -108,10 +108,16 @@ def _coerce_integral_id(value: Any, name: str, integer_info: np.iinfo) -> int:
         identifier = int(integral)
     elif isinstance(item, (str, bytes)):
         identifier = _coerce_integral_text_id(item, name)
+    elif isinstance(item, (float, np.floating)):
+        if not np.isfinite(item):
+            raise ValueError(f"{name} must contain finite integer identifiers")
+        identifier = int(item)
+        if item != identifier:
+            raise ValueError(f"{name} must be integer-valued")
     else:
         try:
             numeric = float(item)
-        except (TypeError, ValueError) as exc:
+        except (TypeError, ValueError, OverflowError) as exc:
             raise ValueError(f"{name} must contain finite integer identifiers") from exc
         if not np.isfinite(numeric):
             raise ValueError(f"{name} must contain finite integer identifiers")

@@ -25,7 +25,12 @@ class RippleEvent:
 
     @classmethod
     def from_row(cls, row: np.ndarray) -> "RippleEvent":
-        return cls(*(float(x) for x in row[:6]))
+        values = np.asarray(row)
+        if values.ndim != 1 or values.shape[0] < 6:
+            raise ValueError("Ripple event rows must contain at least six values")
+        numeric = np.asarray(values[:6], dtype=float)
+        _validate_ripple_event_times(numeric.reshape(1, 6))
+        return cls(*(float(x) for x in numeric))
 
 
 @dataclass(frozen=True)
@@ -452,7 +457,7 @@ def _as_two_dimensional(value: Any, name: str) -> np.ndarray:
     if arr.ndim == 1:
         if name == "Ripple_Events":
             if arr.shape[0] == 6:
-                return arr.reshape(1, 6)
+                return _validate_ripple_event_times(arr.reshape(1, 6))
             raise ValueError(f"{name} must have six columns; got shape {arr.shape}")
         if name == "Well_Sequence":
             if arr.shape[0] == 2:
@@ -468,12 +473,30 @@ def _as_two_dimensional(value: Any, name: str) -> np.ndarray:
             arr = arr.T
         if arr.shape[1] != 6:
             raise ValueError(f"{name} must have six columns; got shape {arr.shape}")
+        return _validate_ripple_event_times(arr)
     if name == "Well_Sequence":
         if arr.shape[1] != 2 and arr.shape[0] == 2:
             arr = arr.T
         if arr.shape[1] != 2:
             raise ValueError(f"{name} must have two columns; got shape {arr.shape}")
     return arr
+
+
+def _validate_ripple_event_times(events: np.ndarray) -> np.ndarray:
+    """Validate temporal columns of the Ripple_Events schema."""
+
+    try:
+        numeric = np.asarray(events, dtype=float)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("Ripple_Events must contain numeric values") from exc
+    times = numeric[:, :3]
+    if not np.all(np.isfinite(times)):
+        raise ValueError("Ripple_Events must contain finite start, end, and peak times")
+    if np.any(times[:, 1] < times[:, 0]):
+        raise ValueError("Ripple_Events must have end times greater than or equal to start times")
+    if np.any((times[:, 2] < times[:, 0]) | (times[:, 2] > times[:, 1])):
+        raise ValueError("Ripple_Events peak times must lie within their start/end interval")
+    return numeric
 
 
 def _as_intervals(value: Any) -> np.ndarray:

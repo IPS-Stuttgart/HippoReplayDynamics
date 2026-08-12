@@ -26,6 +26,33 @@ def test_clusterless_cv_rejects_invalid_excluded_intervals(
         _merge_half_open_intervals(intervals)
 
 
+@pytest.mark.parametrize(
+    "bound",
+    [
+        "1.0",
+        b"1.0",
+        np.str_("1.0"),
+        np.bytes_(b"1.0"),
+    ],
+)
+def test_clusterless_cv_rejects_textual_excluded_interval_bounds(bound: object) -> None:
+    intervals = np.array([[0.0, bound]], dtype=object)
+
+    with pytest.raises(ValueError, match="finite real bounds"):
+        _merge_half_open_intervals(intervals)
+
+
+def test_clusterless_cv_rejects_nested_textual_excluded_interval_bound() -> None:
+    nested = np.empty((), dtype=object)
+    inner = np.empty((), dtype=object)
+    inner[()] = "1.0"
+    nested[()] = inner
+    intervals = np.array([[0.0, nested]], dtype=object)
+
+    with pytest.raises(ValueError, match="finite real bounds"):
+        _merge_half_open_intervals(intervals)
+
+
 def test_clusterless_cv_rejects_complex_excluded_intervals_without_warning() -> None:
     intervals = np.array([[0.0 + 1.0j, 1.0 + 0.0j]])
 

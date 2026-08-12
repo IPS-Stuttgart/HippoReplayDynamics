@@ -16,6 +16,10 @@ _VALIDATION_FLAG = "_trajectory_imm_parameter_validation_patch_applied"
 def _reload_trajectory_imm():
     from hipporeplayimm import state_space_trajectory_imm as trajectory_imm
 
+    # Reproduce the stale state deterministically. importlib.reload() executes
+    # in the existing module namespace, so patch-only names survive unless the
+    # module body explicitly replaces them.
+    setattr(trajectory_imm, _VALIDATION_FLAG, True)
     return importlib.reload(trajectory_imm)
 
 

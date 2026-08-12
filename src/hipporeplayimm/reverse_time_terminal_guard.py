@@ -123,7 +123,7 @@ def _score_reverse_with_supported_return_trajectory(
         trajectory = np.asarray(result.trajectory_log_posterior, dtype=float)[::-1].copy()
         result.trajectory_log_posterior = trajectory
         result.terminal_log_posterior = trajectory[-1].copy()
-    result.model_name = str(self.name)
+    result.model_name = str(self.name) if self.name else f"{result.model_name}-reverse"
     result.diagnostics = dict(result.diagnostics)
     if result.terminal_log_posterior is not None:
         result.diagnostics.update(extensions._posterior_diagnostics(result.terminal_log_posterior, bin_centers))

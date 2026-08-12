@@ -69,6 +69,26 @@ def _contains_complex_numeric(value: object) -> bool:
     return False
 
 
+def _contains_textual_numeric(value: object) -> bool:
+    """Return whether numeric metadata contains text that float coercion would parse."""
+
+    try:
+        values = np.asarray(value)
+    except (TypeError, ValueError, OverflowError):
+        return False
+    if values.dtype.kind in {"S", "U"}:
+        return True
+    if values.dtype == object:
+        return any(
+            isinstance(
+                _unwrap_zero_dimensional_object_scalar(item),
+                (str, bytes, np.str_, np.bytes_),
+            )
+            for item in values.flat
+        )
+    return False
+
+
 def _reject_boolean_numeric(name: str, value: object) -> None:
     if _contains_boolean_numeric(value):
         raise ValueError(f"{name} must be numeric, not boolean")
@@ -77,6 +97,11 @@ def _reject_boolean_numeric(name: str, value: object) -> None:
 def _reject_complex_numeric(name: str, value: object) -> None:
     if _contains_complex_numeric(value):
         raise ValueError(f"{name} must contain real values, not complex values")
+
+
+def _reject_textual_numeric(name: str, value: object) -> None:
+    if _contains_textual_numeric(value):
+        raise ValueError(f"{name} must contain numeric values, not text")
 
 
 def _reject_float_overflow(name: str, value: object) -> None:
@@ -112,6 +137,17 @@ def _validate_log_emission_fields(tensor: object) -> None:
         value = getattr(tensor, name)
         if value is not None:
             _reject_complex_numeric(name, value)
+
+    for name in (
+        "log_likelihood",
+        "times",
+        "dt",
+        "bin_durations",
+        "transition_durations",
+    ):
+        value = getattr(tensor, name)
+        if value is not None:
+            _reject_textual_numeric(name, value)
 
     for name in (
         "log_likelihood",

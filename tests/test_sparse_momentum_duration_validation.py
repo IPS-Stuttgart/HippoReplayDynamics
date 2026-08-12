@@ -38,6 +38,27 @@ def test_sparse_momentum_duration_helpers_reject_invalid_transition_durations() 
             _time_scales(durations)
 
 
+def test_sparse_momentum_duration_validator_rejects_boolean_values() -> None:
+    nested_true = np.empty((), dtype=object)
+    nested_true[()] = np.array(True, dtype=object)
+
+    for durations in (
+        [True, 0.02],
+        np.array([True, False], dtype=bool),
+        np.array([0.01, nested_true], dtype=object),
+    ):
+        with pytest.raises(TypeError, match="transition durations must be numeric, not boolean"):
+            _valid_transition_durations(durations)
+        with pytest.raises(TypeError, match="transition durations must be numeric, not boolean"):
+            _time_scales(durations)
+        with pytest.raises(TypeError, match="transition durations must be numeric, not boolean"):
+            _momentum_prediction_multipliers(
+                StateSpaceDecoderConfig(),
+                durations,
+                fallback_dt=0.01,
+            )
+
+
 def test_sparse_momentum_duration_validator_rejects_non_1d_arrays() -> None:
     with pytest.raises(ValueError, match="one-dimensional"):
         _valid_transition_durations(np.array([[0.01, 0.02]], dtype=float))

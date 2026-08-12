@@ -150,6 +150,8 @@ def _finite_real_interval_bound(value: Any) -> float:
 
     if isinstance(value, (bool, np.bool_)):
         raise ValueError("excluded_intervals must contain finite real bounds")
+    if isinstance(value, (str, bytes, np.str_, np.bytes_)):
+        raise ValueError("excluded_intervals must contain finite real bounds")
     if isinstance(value, (complex, np.complexfloating)):
         raise ValueError("excluded_intervals must contain finite real bounds")
 

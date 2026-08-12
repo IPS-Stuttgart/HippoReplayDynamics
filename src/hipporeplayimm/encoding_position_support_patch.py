@@ -64,10 +64,14 @@ def _max_contiguous_sample_gap_s(times: np.ndarray) -> float:
     nominal_interval_s = _nominal_sample_interval_s(times)
     if nominal_interval_s <= 0.0:
         return float("inf")
-    return max(
+    threshold = max(
         _MAX_CONTIGUOUS_SAMPLE_GAP_MULTIPLIER * nominal_interval_s,
         np.finfo(float).eps,
     )
+    # Keep an intended exact 5x cadence boundary continuous despite subtraction
+    # and multiplication roundoff (for example, 0.6 - 0.5 is slightly below 0.1).
+    tolerance = 16.0 * np.finfo(float).eps * max(1.0, abs(threshold))
+    return threshold + tolerance
 
 
 def _synchronize_tracking_gap_threshold() -> None:

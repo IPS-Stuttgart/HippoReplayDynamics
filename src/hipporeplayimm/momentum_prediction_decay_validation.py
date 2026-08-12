@@ -18,21 +18,31 @@ _PATCHED_FLAG = "_momentum_prediction_decay_validation_patch_applied"
 
 
 def _is_boolean_scalar(value: object) -> bool:
-    """Return True for Python, NumPy, and object-wrapped boolean scalars."""
+    """Return True for Python, NumPy, and nested object-wrapped boolean scalars."""
 
-    if isinstance(value, (bool, np.bool_)):
-        return True
-    arr = np.asarray(value)
-    if arr.ndim != 0:
-        return False
-    if np.issubdtype(arr.dtype, np.bool_):
-        return True
-    if arr.dtype == object:
+    current = value
+    seen: set[int] = set()
+    while True:
+        if isinstance(current, (bool, np.bool_)):
+            return True
+        arr = np.asarray(current)
+        if arr.ndim != 0:
+            return False
+        if np.issubdtype(arr.dtype, np.bool_):
+            return True
+        if arr.dtype != object:
+            return False
+        marker = id(arr)
+        if marker in seen:
+            return False
+        seen.add(marker)
         try:
-            return isinstance(arr.item(), (bool, np.bool_))
+            item = arr.item()
         except ValueError:
             return False
-    return False
+        if item is current:
+            return False
+        current = item
 
 
 def _coerce_prediction_multiplier(name: str, value: object) -> float:

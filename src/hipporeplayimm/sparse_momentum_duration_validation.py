@@ -34,7 +34,7 @@ def apply_sparse_momentum_duration_validation_patch() -> None:
     _patch_duration_helpers(displacement_momentum)
 
     # The candidate-pruned momentum and IMM scorers use a separate duration
-    # helper module.  Apply the same output guard there so every second-order
+    # helper module. Apply the same output guard there so every second-order
     # path rejects unrepresentable adjacent-duration ratios consistently.
     import hipporeplayimm.duration_occupancy as duration_occupancy
     import hipporeplayimm.state_space_model as state_space_model
@@ -42,7 +42,7 @@ def apply_sparse_momentum_duration_validation_patch() -> None:
     _patch_time_scale_helper(duration_occupancy)
     _patch_prediction_multiplier_helper(state_space_model)
 
-    # These IMM modules import the helper functions by value.  Keep their module
+    # These IMM modules import the helper functions by value. Keep their module
     # aliases synchronized even if they were imported before this runtime patch.
     import hipporeplayimm.state_space_displacement_imm as displacement_imm
     import hipporeplayimm.state_space_trajectory_imm as trajectory_imm
@@ -80,7 +80,11 @@ def _patch_duration_helpers(module: Any) -> None:
     @wraps(module._coerce_transition_durations)
     def coerce_transition_durations(values: Any, *, n_time: int, fallback_dt: float) -> np.ndarray:
         expected = max(_coerce_count_scalar("n_time", n_time) - 1, 0)
-        fallback = _coerce_positive_float_scalar("fallback dt", fallback_dt, "fallback dt must be finite and positive")
+        fallback = _coerce_positive_float_scalar(
+            "fallback dt",
+            fallback_dt,
+            "fallback dt must be finite and positive",
+        )
 
         raw_values = list(values)
         if len(raw_values) == 0:
@@ -93,7 +97,11 @@ def _patch_duration_helpers(module: Any) -> None:
 
     @wraps(original_duration_adjusted_decays)
     def duration_adjusted_decays(config: object, durations: Any, reference_dt: float) -> np.ndarray:
-        reference = _coerce_positive_float_scalar("reference dt", reference_dt, "reference dt must be finite and positive")
+        reference = _coerce_positive_float_scalar(
+            "reference dt",
+            reference_dt,
+            "reference dt must be finite and positive",
+        )
         return original_duration_adjusted_decays(
             config,
             _valid_transition_durations(durations),
@@ -112,7 +120,11 @@ def _patch_duration_helpers(module: Any) -> None:
 
         @wraps(original_duration_scale_at)
         def duration_scale_at(durations: Any, transition_index: int, reference_dt: float) -> float:
-            reference = _coerce_positive_float_scalar("reference dt", reference_dt, "reference dt must be finite and positive")
+            reference = _coerce_positive_float_scalar(
+                "reference dt",
+                reference_dt,
+                "reference dt must be finite and positive",
+            )
             valid_durations = _valid_transition_durations(durations)
             with np.errstate(divide="ignore", invalid="ignore", over="ignore"):
                 scale = float(
@@ -206,7 +218,13 @@ def _validated_time_scales(helper: Any, durations: Any) -> np.ndarray:
     return scales
 
 
-def _patch_exact_sparse_momentum_config(module: Any, score_name: str, patched_flag: str, *, include_diffusion: bool) -> None:
+def _patch_exact_sparse_momentum_config(
+    module: Any,
+    score_name: str,
+    patched_flag: str,
+    *,
+    include_diffusion: bool,
+) -> None:
     original_score = getattr(module, score_name)
     if getattr(original_score, patched_flag, False):
         return
@@ -245,7 +263,11 @@ def _validate_exact_sparse_momentum_config(config: object, *, include_diffusion:
 
 
 def _validate_config_positive_scalar(config: object, name: str, default: float) -> None:
-    _coerce_positive_float_scalar(config, name, getattr(config, name, default), f"{name} must be finite and positive")
+    _coerce_positive_float_scalar(
+        name,
+        getattr(config, name, default),
+        f"{name} must be finite and positive",
+    )
 
 
 def _is_boolean_scalar(value: object) -> bool:

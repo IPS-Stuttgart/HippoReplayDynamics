@@ -52,6 +52,22 @@ def test_log_emission_tensor_rejects_complex_metadata_before_float_coercion(fiel
         LogEmissionTensor(**_tensor_kwargs(**{field: value}))
 
 
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("log_likelihood", np.array([["0.0"], ["0.0"]])),
+        ("times", np.array(["0.0", "1.0"])),
+        ("dt", "1.0"),
+        ("bin_durations", np.array(["1.0", "1.0"])),
+        ("transition_durations", np.array(["1.0"])),
+        ("dt", np.array("1.0", dtype=object)),
+    ],
+)
+def test_log_emission_tensor_rejects_textual_numeric_metadata(field, value):
+    with pytest.raises(ValueError, match=rf"{field}.*text"):
+        LogEmissionTensor(**_tensor_kwargs(**{field: value}))
+
+
 def test_log_emission_tensor_accepts_numeric_timing_metadata():
     emissions = LogEmissionTensor(**_tensor_kwargs())
 

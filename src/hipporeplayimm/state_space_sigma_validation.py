@@ -21,51 +21,57 @@ _DURATION_OCCUPANCY_PATCHED_FLAG = "_duration_occupancy_per_bin_sigma_validation
 _MODE_TRANSITION_PATCHED_FLAG = "_state_space_mode_transition_string_validation_patch_applied"
 _PER_BIN_SIGMA_WRAPPER_VERSION = 2
 _STRING_SCALAR_TYPES = (str, bytes, np.str_, np.bytes_)
+_MAX_SCALAR_WRAPPER_DEPTH = 64
 
 
-def _is_string_scalar(value: Any) -> bool:
-    if isinstance(value, _STRING_SCALAR_TYPES):
-        return True
-    try:
-        raw = np.asarray(value)
-    except (TypeError, ValueError):
-        return False
-    if raw.ndim != 0:
-        return False
-    if np.issubdtype(raw.dtype, np.str_) or np.issubdtype(raw.dtype, np.bytes_):
-        return True
-    if raw.dtype == object:
+def _unwrap_scalar_for_validation(name: str, value: Any) -> np.ndarray:
+    """Return the innermost zero-dimensional scalar array for validation.
+
+    NumPy object scalars can recursively wrap other zero-dimensional arrays.
+    Inspect every layer so invalid values such as booleans or numeric strings
+    cannot hide inside object wrappers and later be accepted by ``float``.
+    """
+
+    current = value
+    seen: set[int] = set()
+    for _ in range(_MAX_SCALAR_WRAPPER_DEPTH):
         try:
-            return isinstance(raw.item(), _STRING_SCALAR_TYPES)
-        except ValueError:
-            return False
-    return False
+            raw = np.asarray(current)
+        except (TypeError, ValueError) as exc:
+            raise TypeError(f"{name} must be a numeric scalar") from exc
+        if raw.ndim != 0:
+            raise TypeError(f"{name} must be a numeric scalar")
+        if raw.dtype != object:
+            return raw
+
+        try:
+            item = raw.item()
+        except ValueError as exc:
+            raise TypeError(f"{name} must be a numeric scalar") from exc
+        item_id = id(item)
+        if item is current or item_id in seen:
+            raise TypeError(f"{name} must be a numeric scalar")
+        seen.add(id(current))
+        current = item
+
+    raise TypeError(f"{name} must be a numeric scalar")
 
 
 def _reject_boolean_or_array_scalar(name: str, value: Any) -> None:
     """Reject booleans, strings, complex values, and non-scalar inputs."""
 
-    try:
-        raw = np.asarray(value)
-    except (TypeError, ValueError) as exc:
-        raise TypeError(f"{name} must be a numeric scalar") from exc
-    if raw.ndim != 0:
-        raise TypeError(f"{name} must be a numeric scalar")
-    if _is_string_scalar(value):
+    raw = _unwrap_scalar_for_validation(name, value)
+    if np.issubdtype(raw.dtype, np.str_) or np.issubdtype(raw.dtype, np.bytes_):
         raise TypeError(f"{name} must be a numeric scalar, not string")
     if np.issubdtype(raw.dtype, np.complexfloating):
         raise TypeError(f"{name} must be real-valued, not complex")
-    if isinstance(value, (bool, np.bool_)) or np.issubdtype(raw.dtype, np.bool_):
+    if np.issubdtype(raw.dtype, np.bool_):
         raise TypeError(f"{name} must be numeric, not boolean")
-    if raw.dtype == object:
-        try:
-            item = raw.item()
-        except ValueError as exc:
-            raise TypeError(f"{name} must be a numeric scalar") from exc
-        if isinstance(item, (complex, np.complexfloating)):
-            raise TypeError(f"{name} must be real-valued, not complex")
-        if isinstance(item, (bool, np.bool_)):
-            raise TypeError(f"{name} must be numeric, not boolean")
+    if not (
+        np.issubdtype(raw.dtype, np.integer)
+        or np.issubdtype(raw.dtype, np.floating)
+    ):
+        raise TypeError(f"{name} must be a numeric scalar")
 
 
 def _validate_per_bin_sigma_inputs(sigma_cm_sqrt_s: Any, dt_s: Any) -> None:

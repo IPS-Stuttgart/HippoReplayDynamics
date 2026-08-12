@@ -15,6 +15,7 @@ _MISSING_TEXT_VALUES = frozenset({"", "nan", "na", "n/a", "none", "null", "<na>"
 _CELL_ID_METADATA_ERROR = "score-table cell IDs cell ID metadata must contain integer values"
 _ACTIVE_GOAL_PATCHED_FLAG = "_ground_truth_active_goal_combined_validation_patch_applied"
 _FLOAT_HELPER_PATCHED_FLAG = "_ground_truth_active_goal_repair_wrapper"
+_NUMERIC_SCALAR_PATCHED_FLAG = "_ground_truth_nested_numeric_scalar_validation_patch_applied"
 _LEGACY_ACTIVE_GOAL_MARKERS = (
     "_ground_truth_direct_active_goal_numeric_validation_patch_applied",
     "_ground_truth_direct_active_goal_well_id_validation_patch_applied",
@@ -28,6 +29,7 @@ def apply_ground_truth_cell_id_metadata_patch() -> None:
     from . import ground_truth as gt
     from . import ground_truth_float_metadata as float_metadata
 
+    _patch_float_metadata_numeric_scalar_helper(float_metadata)
     _patch_float_metadata_active_goal_helper(float_metadata)
     _install_active_goal_validation(gt, float_metadata)
 
@@ -35,6 +37,43 @@ def apply_ground_truth_cell_id_metadata_patch() -> None:
         return
     gt._parse_cell_ids = _parse_cell_ids_strict
     setattr(gt, _PATCHED_FLAG, True)
+
+
+def _patch_float_metadata_numeric_scalar_helper(float_metadata: Any) -> None:
+    """Reject malformed values hidden in nested zero-dimensional object wrappers."""
+
+    current = float_metadata._parse_config_scalar
+    if getattr(current, _NUMERIC_SCALAR_PATCHED_FLAG, False):
+        return
+
+    @wraps(current)
+    def parse_config_scalar(name: str, value: Any) -> float:
+        candidate = value
+        seen: set[int] = set()
+        while True:
+            if isinstance(candidate, (bool, np.bool_)):
+                raise TypeError(f"{name} must be numeric, not boolean")
+            try:
+                raw = np.asarray(candidate)
+            except (TypeError, ValueError):
+                return current(name, candidate)
+            if raw.ndim != 0:
+                return current(name, candidate)
+            if raw.dtype != object:
+                return current(name, candidate)
+            try:
+                item = raw.item()
+            except ValueError:
+                return current(name, candidate)
+            marker = id(item)
+            if item is candidate or marker in seen:
+                raise TypeError(f"{name} must be a scalar")
+            seen.add(marker)
+            candidate = item
+
+    setattr(parse_config_scalar, _NUMERIC_SCALAR_PATCHED_FLAG, True)
+    setattr(parse_config_scalar, "__hipporeplayimm_original__", current)
+    float_metadata._parse_config_scalar = parse_config_scalar
 
 
 def _patch_float_metadata_active_goal_helper(float_metadata: Any) -> None:

@@ -13,7 +13,48 @@ from functools import wraps
 import sys
 from typing import Any, Callable
 
+import numpy as np
+
 _PATCHED_ATTR = "_nominal_emission_dt_wrapper"
+
+
+def _positive_finite_dt(value: object, *, name: str) -> float:
+    """Return a positive finite scalar duration without Boolean coercion."""
+
+    current = value
+    seen: set[int] = set()
+    while True:
+        if isinstance(current, (bool, np.bool_)):
+            raise ValueError(f"{name} must be a finite positive duration, not boolean")
+        try:
+            scalar = np.asarray(current)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"{name} must be a finite positive scalar duration") from exc
+        if scalar.ndim != 0:
+            raise ValueError(f"{name} must be a finite positive scalar duration")
+        if np.issubdtype(scalar.dtype, np.bool_):
+            raise ValueError(f"{name} must be a finite positive duration, not boolean")
+        if scalar.dtype != object:
+            current = scalar.item()
+            break
+        marker = id(scalar)
+        if marker in seen:
+            raise ValueError(f"{name} must be a finite positive scalar duration")
+        seen.add(marker)
+        item = scalar.item()
+        if item is current:
+            break
+        current = item
+
+    if isinstance(current, (bool, np.bool_)):
+        raise ValueError(f"{name} must be a finite positive duration, not boolean")
+    try:
+        duration = float(current)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ValueError(f"{name} must be a finite positive scalar duration") from exc
+    if not np.isfinite(duration) or duration <= 0.0:
+        raise ValueError(f"{name} must be finite and positive")
+    return duration
 
 
 def _configured_builder(
@@ -34,7 +75,7 @@ def _configured_builder(
             config = args[3]
         if config is None:
             config = default_config_factory()
-        emissions.dt = float(config.time_bin_s)
+        emissions.dt = _positive_finite_dt(config.time_bin_s, name="config.time_bin_s")
         return emissions
 
     setattr(wrapped, _PATCHED_ATTR, True)
@@ -56,7 +97,7 @@ def _kd_builder(builder: Callable[..., Any]) -> Callable[..., Any]:
             time_bin_s = args[3]
         else:  # pragma: no cover - the wrapped builder raises before returning.
             raise TypeError("build_kd_emissions requires time_bin_s")
-        emissions.dt = float(time_bin_s)
+        emissions.dt = _positive_finite_dt(time_bin_s, name="time_bin_s")
         return emissions
 
     setattr(wrapped, _PATCHED_ATTR, True)

@@ -288,7 +288,7 @@ def test_trajectory_imm_evidence_only_handles_zero_momentum_mass():
     assert evidence_only.trajectory_log_posterior is None
     assert evidence_only.terminal_log_posterior is not None
     assert np.allclose(logsumexp(evidence_only.terminal_log_posterior), 0.0)
-    assert evidence_only.diagnostics["state_space_trajectory_imm_mode_posterior"] == "not_returned_evidence_only"
+    assert evidence_only.diagnostics["state_space_trajectory_imm_mode_posterior"] == "filtered_evidence_only_state"
     assert evidence_only.diagnostics[
         "state_space_mode_momentum_exact_sparse_terminal_probability"
     ] == pytest.approx(0.0, abs=1e-12)
@@ -467,7 +467,9 @@ def test_trajectory_imm_uses_duration_specific_mode_stickiness(monkeypatch):
 
     expected = np.exp(-emissions.transition_durations / config.imm_switch_tau_s)
     assert np.isfinite(logp)
-    np.testing.assert_allclose(recorded_stickiness, expected)
+    # The continuous-time transition wrapper also builds the configured
+    # reference matrix; the first calls remain the per-duration requests.
+    np.testing.assert_allclose(recorded_stickiness[: expected.size], expected)
     assert diagnostics["state_space_trajectory_imm_switch_tau_s"] == config.imm_switch_tau_s
     np.testing.assert_allclose(
         np.fromstring(

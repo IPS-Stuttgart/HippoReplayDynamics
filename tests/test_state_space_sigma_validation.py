@@ -107,5 +107,5 @@ def test_per_bin_sigma_preserves_large_representable_result(helper):
 
 
 def test_mode_transition_matrix_rejects_complex_stickiness():
-    with pytest.raises(TypeError, match="mode_stickiness.*complex"):
+    with pytest.raises(ValueError, match=r"mode_stickiness.*\[0, 1\]"):
         state_space._mode_transition_matrix(2, np.complex128(0.9 + 0.1j))

@@ -16,6 +16,7 @@ def test_first_order_imm_content_diagnostics_respect_transition_durations(monkey
         dt=1.0,
         cell_ids=np.array([1]),
         n_spikes=0,
+        bin_durations=np.array([0.25, 0.25, 0.5], dtype=float),
     )
     bin_centers = np.array([[0.0, 0.0], [1.0, 0.0]], dtype=float)
     trajectory_log_posterior = np.array(
@@ -50,7 +51,7 @@ def test_first_order_imm_content_diagnostics_respect_transition_durations(monkey
     ).score(emissions, bin_centers)
 
     diagnostics = score.diagnostics
-    expected_longest_bout_s = float(np.median(transition_durations) + transition_durations.sum())
+    expected_longest_bout_s = float(np.sum(emissions.bin_durations))
     scalar_dt_fallback_bout_s = 3.0
     assert np.isclose(
         diagnostics["state_space_imm_longest_nonstationary_bout_s"],

@@ -275,6 +275,8 @@ def _checked_count_array(counts: Any) -> np.ndarray:
         raise ValueError("counts must contain numeric integer counts, not boolean values")
     if _contains_text_values(raw):
         raise ValueError("counts must contain numeric integer counts, not text values")
+    if _contains_complex_values(raw):
+        raise ValueError("counts must contain real values, not complex values")
 
     integer_info = np.iinfo(np.dtype(int))
     exact_counts = _exact_integer_count_array(raw, max_count=int(integer_info.max))
@@ -344,3 +346,26 @@ def _contains_text_values(values: Any) -> bool:
     if raw.dtype == object:
         return any(isinstance(value, (str, bytes, np.str_, np.bytes_)) for value in raw.reshape(-1))
     return False
+
+
+def _contains_complex_values(values: Any) -> bool:
+    """Return whether an array contains complex scalars at any scalar wrapper depth."""
+
+    raw = np.asarray(values)
+    if np.issubdtype(raw.dtype, np.complexfloating):
+        return True
+    if raw.dtype != object:
+        return False
+
+    def is_complex_scalar(value: Any) -> bool:
+        seen: set[int] = set()
+        while isinstance(value, np.ndarray):
+            if value.ndim != 0 or id(value) in seen:
+                return False
+            seen.add(id(value))
+            value = value.item()
+        if isinstance(value, np.generic):
+            value = value.item()
+        return isinstance(value, complex)
+
+    return any(is_complex_scalar(value) for value in raw.reshape(-1))

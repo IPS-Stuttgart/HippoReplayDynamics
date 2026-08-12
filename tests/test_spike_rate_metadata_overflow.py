@@ -20,6 +20,6 @@ def test_spike_rate_metadata_normalizes_numeric_overflow(column: str) -> None:
 
     with pytest.raises(
         ValueError,
-        match=rf"{column} must contain finite numeric metadata values",
+        match=rf"{column} must contain finite real numeric metadata values",
     ):
         _unique_float_from_columns(frame, (column,), default=1.0)

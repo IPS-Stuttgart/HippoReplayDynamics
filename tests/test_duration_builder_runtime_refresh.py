@@ -37,7 +37,7 @@ def test_duration_patch_refreshes_stale_emission_builders(monkeypatch) -> None:
     assert getattr(kd_reference.build_kd_emissions, "_duration_wrapped", False)
 
     encoding_emissions = encoding.build_emissions()
-    kd_emissions = kd_reference.build_kd_emissions()
+    kd_emissions = kd_reference.build_kd_emissions(None, None, None, 0.02)
     np.testing.assert_allclose(encoding_emissions.transition_durations, np.array([0.015]))
     np.testing.assert_allclose(kd_emissions.transition_durations, np.array([0.015]))
     assert encoding_emissions.dt == 0.02

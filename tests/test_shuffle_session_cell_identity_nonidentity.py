@@ -63,7 +63,7 @@ def test_cell_identity_shuffle_rejects_fractional_spike_cell_ids() -> None:
         spikes=np.array([[0.1, 10.5], [0.2, 11.0]], dtype=float),
     )
 
-    with pytest.raises(ValueError, match="spike cell IDs must be integer-valued"):
+    with pytest.raises(ValueError, match="spike cell IDs must .*integer-valued"):
         shuffle_cell_identities_session(session, random_seed=0)
 
 
@@ -73,5 +73,5 @@ def test_cell_identity_shuffle_rejects_fractional_mark_cell_ids() -> None:
         spike_marks=_Marks(cell_ids=np.array([10.5, 11.0], dtype=float)),
     )
 
-    with pytest.raises(ValueError, match="spike mark cell IDs must be integer-valued"):
+    with pytest.raises(ValueError, match="spike mark cell IDs must .*integer-valued"):
         shuffle_cell_identities_session(session, random_seed=0)

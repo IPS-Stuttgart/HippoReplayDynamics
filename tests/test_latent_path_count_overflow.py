@@ -11,7 +11,7 @@ import hipporeplayimm.simulation_recovery as recovery
 def test_emissions_from_counts_normalizes_arbitrary_precision_overflow() -> None:
     encoding = SimpleNamespace(n_cells=1)
 
-    with pytest.raises(ValueError, match="counts must contain numeric values"):
+    with pytest.raises(ValueError, match="counts must fit into integer count range"):
         recovery.emissions_from_counts(
             encoding,
             np.array([[10**400]], dtype=object),

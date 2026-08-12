@@ -28,5 +28,5 @@ def test_validate_max_events_preserves_valid_limits():
 
 
 def test_validate_max_events_rejects_boolean_flags():
-    with pytest.raises(ValueError, match="--max-events must be non-negative"):
+    with pytest.raises(TypeError, match="--max-events must be an integer scalar, not boolean"):
         _validate_max_events(True)

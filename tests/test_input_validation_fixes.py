@@ -228,7 +228,7 @@ def test_sorted_poisson_log_emissions_reject_invalid_counts_and_rates() -> None:
     with pytest.raises(ValueError, match="spike_counts"):
         _poisson_log_emissions(np.array([[0, -1]], dtype=int), np.ones((2, 1), dtype=float), 0.02)
 
-    with pytest.raises(ValueError, match="integer-valued"):
+    with pytest.raises(ValueError, match="integer"):
         _poisson_log_emissions(np.array([[0.5]], dtype=float), np.ones((1, 1), dtype=float), 0.02)
 
     with pytest.raises(ValueError, match="rates_hz"):

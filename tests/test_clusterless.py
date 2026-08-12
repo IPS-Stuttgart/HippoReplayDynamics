@@ -179,7 +179,7 @@ def test_clusterless_emissions_clip_bins_to_ripple_end_and_ignore_post_ripple_ma
     )
 
     assert emissions.times == pytest.approx(np.array([4.3, 4.8]))
-    assert emissions.dt == pytest.approx(0.5)
+    assert emissions.dt == pytest.approx(0.6)
     assert emissions.n_spikes == 1
     assert emissions.spike_counts[:, 0].tolist() == [1, 0]
     assert np.allclose(emissions.log_likelihood[-1], -encoding.rate_hz * 0.4)

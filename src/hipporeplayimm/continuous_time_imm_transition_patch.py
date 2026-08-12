@@ -151,7 +151,6 @@ def _wrap_trajectory_mode_transition_sequence(
 
     @wraps(helper)
     def trajectory_mode_transition_matrices(*args, **kwargs):
-        legacy = helper(*args, **kwargs)
         config = _positional_or_keyword(args, kwargs, 0, "config")
         stickiness = float(_positional_or_keyword(args, kwargs, 1, "stickiness"))
         durations = np.asarray(
@@ -160,7 +159,7 @@ def _wrap_trajectory_mode_transition_sequence(
         )
         tau_s = float(getattr(config, "imm_switch_tau_s", 0.0))
         if tau_s == 0.0:
-            return legacy
+            return helper(*args, **kwargs)
         if not np.isfinite(tau_s) or tau_s <= 0.0:
             raise ValueError("imm_switch_tau_s must be finite and positive")
         if durations.ndim != 1:
@@ -168,6 +167,9 @@ def _wrap_trajectory_mode_transition_sequence(
         if not np.all(np.isfinite(durations)) or np.any(durations <= 0.0):
             raise ValueError("transition durations must be finite and positive")
 
+        # Do not evaluate the legacy duration-specific helper in continuous-time
+        # mode.  With custom momentum routing it can reject short durations
+        # before the CTMC embedding gets a chance to replace that legacy matrix.
         reference_transition = base_helper(config, stickiness)
         return [
             _continuous_time_mode_transition_matrix(

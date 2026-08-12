@@ -18,6 +18,7 @@ _PATCHED_FLAG = "_continuous_time_transition_duration_patch_applied"
 _WRAPPER_FLAG = "_continuous_time_transition_duration_wrapper"
 _ACCURACY_WRAPPER_FLAG = "_accuracy_replay_gain_gamma_continuous_wrapper"
 _ORIGINAL_ATTR = "__hipporeplayimm_original__"
+_TRAJECTORY_IMM_VALIDATION_FLAG = "_trajectory_imm_parameter_validation_patch_applied"
 
 
 def apply_continuous_time_transition_duration_patch() -> None:
@@ -28,6 +29,7 @@ def apply_continuous_time_transition_duration_patch() -> None:
         apply_continuous_time_imm_transition_patch,
     )
 
+    _restore_trajectory_imm_reload_patches()
     apply_continuous_time_imm_transition_patch()
     current = accuracy_upgrades.build_continuous_time_emissions
     if getattr(current, _WRAPPER_FLAG, False):
@@ -72,6 +74,37 @@ def apply_continuous_time_transition_duration_patch() -> None:
     accuracy_upgrades.build_continuous_time_emissions = build_continuous_time_emissions
     setattr(accuracy_upgrades, _PATCHED_FLAG, True)
     _synchronize_builder_aliases(build_continuous_time_emissions)
+
+
+def _restore_trajectory_imm_reload_patches() -> None:
+    """Restore trajectory-IMM wrappers that ``importlib.reload`` can discard.
+
+    Reload executes a module in its existing namespace. Module-level patch flags
+    therefore survive while freshly defined functions replace their validating
+    wrappers. Replaying the package runtime patches would previously trust the
+    stale flag, leaving strict trajectory-IMM parameter validation disabled.
+    The trajectory diagnostic wrapper has function-level idempotence instead,
+    so applying it on every refresh also restores evidence-only/single-bin
+    diagnostics after a reload without growing the wrapper stack.
+    """
+
+    from . import model_parameter_validation
+    from . import state_space_trajectory_imm as trajectory_imm
+    from .trajectory_imm_single_bin_diagnostics import (
+        apply_trajectory_imm_single_bin_diagnostics_patch,
+    )
+
+    validation_sentinel = trajectory_imm._trajectory_imm_mode_stickiness
+    stale_validation_flag = getattr(
+        trajectory_imm,
+        _TRAJECTORY_IMM_VALIDATION_FLAG,
+        False,
+    ) and getattr(validation_sentinel, "__wrapped__", None) is None
+    if stale_validation_flag:
+        setattr(trajectory_imm, _TRAJECTORY_IMM_VALIDATION_FLAG, False)
+        model_parameter_validation.apply_model_parameter_validation_patch()
+
+    apply_trajectory_imm_single_bin_diagnostics_patch()
 
 
 def _synchronize_builder_aliases(active: Any) -> None:

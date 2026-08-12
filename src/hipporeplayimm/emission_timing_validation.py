@@ -101,7 +101,7 @@ def _reject_complex_numeric(name: str, value: object) -> None:
 
 def _reject_textual_numeric(name: str, value: object) -> None:
     if _contains_textual_numeric(value):
-        raise ValueError(f"{name} must contain numeric values, not text")
+        raise ValueError(f"{name} must contain numeric values, not text values")
 
 
 def _reject_float_overflow(name: str, value: object) -> None:

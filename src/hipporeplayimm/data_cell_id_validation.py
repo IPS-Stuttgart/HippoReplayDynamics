@@ -5,10 +5,11 @@ loader should accept integral floats such as ``1.0`` but must not silently trunc
 corrupted fractional identifiers such as ``1.5`` to ``1``.  The same guard is
 installed for manually constructed sessions before place-field encoding selects
 spikes and cell IDs.  Replay-event selectors use the same integer-like MATLAB
-values.  Integral scalar-array wrappers are valid replay-event indices, but
-boolean flags and nonintegral scalar wrappers must not alias to event indices
-0 or 1.  The patch also keeps MATLAB v7.3 uint16 character datasets in the
-same MATLAB orientation as numeric arrays before string decoding.
+values.  Integral scalar-array wrappers, including nested zero-dimensional object
+wrappers, are valid replay-event indices, but boolean flags and nonintegral scalar
+wrappers must not alias to event indices 0 or 1.  The patch also keeps MATLAB v7.3
+uint16 character datasets in the same MATLAB orientation as numeric arrays before
+string decoding.
 """
 
 from __future__ import annotations
@@ -318,54 +319,70 @@ def _is_ripple_index_scalar(value: Any) -> bool:
 def _ripple_index_scalar_item(value: Any) -> Any | None:
     """Return a numeric scalar candidate for replay-event indexing, if present."""
 
-    if _is_boolean_scalar(value):
-        return None
-    if isinstance(value, (int, np.integer, float, np.floating)):
-        return value
-    try:
-        raw = np.asarray(value)
-    except (TypeError, ValueError):
-        return None
-    if raw.ndim != 0:
-        return None
-    if np.issubdtype(raw.dtype, np.bool_):
-        return None
-    if np.issubdtype(raw.dtype, np.number):
+    current = value
+    seen_object_arrays: set[int] = set()
+    while True:
+        if isinstance(current, (bool, np.bool_)):
+            return None
+        if isinstance(current, (int, np.integer, float, np.floating)):
+            return current
         try:
-            return raw.item()
+            raw = np.asarray(current)
         except (TypeError, ValueError):
             return None
-    if raw.dtype == object:
+        if raw.ndim != 0:
+            return None
+        if np.issubdtype(raw.dtype, np.bool_):
+            return None
+        if np.issubdtype(raw.dtype, np.number):
+            try:
+                return raw.item()
+            except (TypeError, ValueError):
+                return None
+        if raw.dtype != object:
+            return None
+        marker = id(raw)
+        if marker in seen_object_arrays:
+            return None
+        seen_object_arrays.add(marker)
         try:
             item = raw.item()
         except (TypeError, ValueError):
             return None
-        if isinstance(item, (bool, np.bool_)):
+        if item is raw:
             return None
-        if isinstance(item, (int, np.integer, float, np.floating)):
-            return item
-    return None
+        current = item
 
 
 def _is_boolean_scalar(value: Any) -> bool:
-    """Return True for Python, NumPy, and object-wrapped boolean scalars."""
+    """Return True for Python, NumPy, and recursively object-wrapped booleans."""
 
-    if isinstance(value, (bool, np.bool_)):
-        return True
-    try:
-        raw = np.asarray(value)
-    except (TypeError, ValueError):
-        return False
-    if raw.ndim != 0:
-        return False
-    if np.issubdtype(raw.dtype, np.bool_):
-        return True
-    if raw.dtype == object:
+    current = value
+    seen_object_arrays: set[int] = set()
+    while True:
+        if isinstance(current, (bool, np.bool_)):
+            return True
         try:
-            return isinstance(raw.item(), (bool, np.bool_))
+            raw = np.asarray(current)
         except (TypeError, ValueError):
             return False
-    return False
+        if raw.ndim != 0:
+            return False
+        if np.issubdtype(raw.dtype, np.bool_):
+            return True
+        if raw.dtype != object:
+            return False
+        marker = id(raw)
+        if marker in seen_object_arrays:
+            return False
+        seen_object_arrays.add(marker)
+        try:
+            item = raw.item()
+        except (TypeError, ValueError):
+            return False
+        if item is raw:
+            return False
+        current = item
 
 
 def _contains_boolean_ids(values: np.ndarray) -> bool:

@@ -52,6 +52,7 @@ MODE_ALIASES = {
 }
 
 _SUCCESS_STATUS_STRINGS = {"", "success", "nan", "na", "n/a", "none", "null", "<na>"}
+_MATRIX_ID_DTYPES = {"matrix_id": "string", "id": "string"}
 
 
 def audit_sweep_completeness(
@@ -156,7 +157,7 @@ def _load_plan_rows(root: Path) -> pd.DataFrame:
     frames: list[pd.DataFrame] = []
     for path in sorted(root.rglob("matrix.csv")):
         try:
-            frame = pd.read_csv(path)
+            frame = pd.read_csv(path, dtype=_MATRIX_ID_DTYPES)
         except pd.errors.EmptyDataError:
             continue
         if frame.empty:
@@ -196,6 +197,7 @@ def _matrix_id_from_csv(path: Path) -> str | None:
         frame = pd.read_csv(
             path,
             usecols=lambda column: column in {"matrix_id", "id"},
+            dtype=_MATRIX_ID_DTYPES,
         )
     except Exception:
         return None

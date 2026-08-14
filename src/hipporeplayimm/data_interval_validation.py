@@ -64,14 +64,13 @@ def _finite_real_interval_scalar(value: Any) -> float:
 
     current = value
     seen_arrays: set[int] = set()
-    while isinstance(current, (np.ndarray, np.generic)):
-        if isinstance(current, np.ndarray):
-            if current.ndim != 0:
-                raise ValueError(_MESSAGE)
-            identity = id(current)
-            if identity in seen_arrays:
-                raise ValueError(_MESSAGE)
-            seen_arrays.add(identity)
+    while isinstance(current, np.ndarray):
+        if current.ndim != 0:
+            raise ValueError(_MESSAGE)
+        identity = id(current)
+        if identity in seen_arrays:
+            raise ValueError(_MESSAGE)
+        seen_arrays.add(identity)
         try:
             nested = current.item()
         except (TypeError, ValueError) as exc:

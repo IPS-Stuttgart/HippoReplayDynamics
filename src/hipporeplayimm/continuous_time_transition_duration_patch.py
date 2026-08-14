@@ -17,6 +17,7 @@ import numpy as np
 _PATCHED_FLAG = "_continuous_time_transition_duration_patch_applied"
 _WRAPPER_FLAG = "_continuous_time_transition_duration_wrapper"
 _ACCURACY_WRAPPER_FLAG = "_accuracy_replay_gain_gamma_continuous_wrapper"
+_EMISSION_TIMESTAMP_WRAPPER_FLAG = "_explicit_transition_timestamp_validation_wrapper"
 _ORIGINAL_ATTR = "__hipporeplayimm_original__"
 
 
@@ -29,6 +30,7 @@ def apply_continuous_time_transition_duration_patch() -> None:
     )
 
     apply_continuous_time_imm_transition_patch()
+    _wrap_log_emission_timestamp_validation()
     current = accuracy_upgrades.build_continuous_time_emissions
     if getattr(current, _WRAPPER_FLAG, False):
         setattr(accuracy_upgrades, _PATCHED_FLAG, True)
@@ -72,6 +74,31 @@ def apply_continuous_time_transition_duration_patch() -> None:
     accuracy_upgrades.build_continuous_time_emissions = build_continuous_time_emissions
     setattr(accuracy_upgrades, _PATCHED_FLAG, True)
     _synchronize_builder_aliases(build_continuous_time_emissions)
+
+
+def _wrap_log_emission_timestamp_validation() -> None:
+    """Reject non-monotone timestamps even when durations are supplied explicitly."""
+
+    from . import encoding
+
+    current = encoding.LogEmissionTensor.__post_init__
+    if getattr(current, _EMISSION_TIMESTAMP_WRAPPER_FLAG, False):
+        return
+
+    @wraps(current)
+    def post_init(self) -> None:
+        current(self)
+        times = np.asarray(self.times, dtype=float)
+        if times.shape == (0,) or times.size <= 1:
+            return
+        if times.shape != (self.n_time,):
+            raise ValueError("times must contain one value per emission row")
+        if np.any(times[1:] <= times[:-1]):
+            raise ValueError("times must be strictly increasing")
+
+    setattr(post_init, _EMISSION_TIMESTAMP_WRAPPER_FLAG, True)
+    setattr(post_init, _ORIGINAL_ATTR, current)
+    encoding.LogEmissionTensor.__post_init__ = post_init
 
 
 def _synchronize_builder_aliases(active: Any) -> None:

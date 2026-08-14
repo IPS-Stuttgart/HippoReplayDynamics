@@ -82,10 +82,22 @@ def test_empty_ripple_events_keep_six_column_schema() -> None:
 
 
 def test_ripple_events_column_major_schema_is_transposed() -> None:
-    ripple_events = _as_two_dimensional(np.arange(12.0).reshape(6, 2), "Ripple_Events")
+    column_major = np.array(
+        [
+            [0.0, 1.0],
+            [0.2, 1.2],
+            [0.1, 1.1],
+            [6.0, 7.0],
+            [8.0, 9.0],
+            [10.0, 11.0],
+        ],
+        dtype=float,
+    )
+
+    ripple_events = _as_two_dimensional(column_major, "Ripple_Events")
 
     assert ripple_events.shape == (2, 6)
-    np.testing.assert_allclose(ripple_events[0], np.array([0.0, 2.0, 4.0, 6.0, 8.0, 10.0]))
+    np.testing.assert_allclose(ripple_events[0], np.array([0.0, 0.2, 0.1, 6.0, 8.0, 10.0]))
 
 
 def test_malformed_ripple_events_are_rejected() -> None:

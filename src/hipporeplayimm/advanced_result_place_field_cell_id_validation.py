@@ -32,10 +32,15 @@ def _coerce_integer_cell_id(value: object) -> int:
     if isinstance(value, (int, np.integer)):
         return int(value)
     if isinstance(value, (float, np.floating)):
-        numeric = float(value)
-        if np.isfinite(numeric) and numeric.is_integer():
-            return int(numeric)
-        raise ValueError(message)
+        if not np.isfinite(value):
+            raise ValueError(message)
+        try:
+            integer = int(value)
+        except (ValueError, OverflowError) as exc:
+            raise ValueError(message) from exc
+        if value != integer:
+            raise ValueError(message)
+        return integer
     if isinstance(value, str):
         text = value.strip()
         unsigned = text[1:] if text[:1] in {"+", "-"} else text

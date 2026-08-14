@@ -51,6 +51,11 @@ def test_runtime_patches_restore_duration_time_scale_guard_after_helper_replacem
 def test_runtime_patches_restore_prediction_multiplier_guard_after_helper_replacement() -> None:
     """Candidate augmentation must recover its finite-output guard after replacement."""
 
+    # Other reload-focused tests may intentionally leave state_space_model with
+    # its freshly defined source helper while module-level patch flags survive.
+    # Start through the supported public refresh path so this regression is
+    # independent of test order, then recreate only the stale-helper condition.
+    hipporeplayimm.apply_runtime_patches()
     wrapped = state_space_model._momentum_prediction_multipliers
     original = getattr(wrapped, "__hipporeplayimm_original__")
     state_space_model._momentum_prediction_multipliers = original

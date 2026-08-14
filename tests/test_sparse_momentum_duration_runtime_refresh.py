@@ -77,3 +77,58 @@ def test_runtime_patches_restore_prediction_multiplier_guard_after_helper_replac
     refreshed = state_space_model._momentum_prediction_multipliers
     hipporeplayimm.apply_runtime_patches()
     assert state_space_model._momentum_prediction_multipliers is refreshed
+
+
+def test_runtime_patches_restore_state_space_velocity_decay_guards_after_helper_replacement(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Stale state-space sentinels must not re-enable amplifying momentum decay."""
+
+    hipporeplayimm.apply_runtime_patches()
+    assert getattr(
+        state_space_model,
+        "_state_space_velocity_decay_validation_patch_applied",
+        False,
+    )
+
+    def permissive_decays(config, transition_durations):
+        durations = np.asarray(transition_durations, dtype=float)
+        return np.full(durations.shape, float(config.momentum_velocity_decay), dtype=float)
+
+    def permissive_multipliers(config, transition_durations, *, fallback_dt):
+        del fallback_dt
+        durations = np.asarray(transition_durations, dtype=float)
+        return np.full(durations.shape, float(config.momentum_velocity_decay), dtype=float)
+
+    monkeypatch.setattr(state_space_model, "_momentum_velocity_decays", permissive_decays)
+    monkeypatch.setattr(
+        state_space_model,
+        "_momentum_prediction_multipliers",
+        permissive_multipliers,
+    )
+
+    config = state_space_model.StateSpaceDecoderConfig(
+        momentum_velocity_decay=1.01,
+        momentum_velocity_decay_tau_s=0.0,
+    )
+    durations = np.array([0.01, 0.02], dtype=float)
+
+    # The replacement helpers themselves demonstrate the stale state: without
+    # a live wrapper, both accept an amplifying scalar decay despite the module
+    # sentinel still claiming validation is installed.
+    np.testing.assert_allclose(permissive_decays(config, durations), 1.01)
+    np.testing.assert_allclose(
+        permissive_multipliers(config, durations, fallback_dt=0.01),
+        1.01,
+    )
+
+    hipporeplayimm.apply_runtime_patches()
+
+    with pytest.raises(ValueError, match=r"momentum_velocity_decay.*\[0, 1\]"):
+        state_space_model._momentum_velocity_decays(config, durations)
+    with pytest.raises(ValueError, match=r"momentum_velocity_decay.*\[0, 1\]"):
+        state_space_model._momentum_prediction_multipliers(
+            config,
+            durations,
+            fallback_dt=0.01,
+        )

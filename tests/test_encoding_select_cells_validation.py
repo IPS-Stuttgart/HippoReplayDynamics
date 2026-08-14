@@ -65,3 +65,15 @@ def test_select_cells_preserves_large_integer_ids_without_float_rounding() -> No
 
     assert selected.cell_ids.tolist() == [large_cell_id]
     np.testing.assert_allclose(selected.rates_hz, np.array([[4.0]], dtype=float))
+
+
+def test_select_cells_preserves_extended_precision_float_ids() -> None:
+    model, large_cell_id = _large_id_encoding_model()
+    requested = np.longdouble(2**53) + np.longdouble(1)
+    if int(requested) != large_cell_id:
+        pytest.skip("np.longdouble does not provide precision beyond float64 on this platform")
+
+    selected = model.select_cells([requested])
+
+    assert selected.cell_ids.tolist() == [large_cell_id]
+    np.testing.assert_allclose(selected.rates_hz, np.array([[4.0]], dtype=float))

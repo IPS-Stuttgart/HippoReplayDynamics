@@ -28,6 +28,21 @@ def test_place_field_quality_accepts_numpy_integer_cell_ids():
     assert quality["cell_id"].tolist() == [21, 22]
 
 
+def test_place_field_quality_preserves_extended_precision_integer_cell_ids():
+    expected_cell_id = 2**53 + 1
+    cell_id = np.longdouble(2**53) + np.longdouble(1)
+    if int(cell_id) != expected_cell_id:
+        pytest.skip("np.longdouble does not exceed float64 integer precision on this platform")
+
+    quality = place_field_quality_from_arrays(
+        np.array([[1.0, 10.0, 1.0]]),
+        np.array([1.0, 1.0, 1.0]),
+        cell_ids=[cell_id],
+    )
+
+    assert quality["cell_id"].tolist() == [expected_cell_id]
+
+
 @pytest.mark.parametrize(
     ("rates_hz", "occupancy_s", "message"),
     [

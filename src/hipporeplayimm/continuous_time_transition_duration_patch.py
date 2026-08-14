@@ -77,7 +77,14 @@ def apply_continuous_time_transition_duration_patch() -> None:
 
 
 def _wrap_log_emission_timestamp_validation() -> None:
-    """Reject non-monotone timestamps even when durations are supplied explicitly."""
+    """Reject non-monotone timestamps even when durations are supplied explicitly.
+
+    ``LogEmissionTensor`` is also used internally for time-reversed inference,
+    where timestamps are intentionally strictly decreasing.  Therefore the
+    container-level invariant is strict monotonicity in either direction; the
+    forward continuous-time emission builder retains its stronger increasing-
+    time contract above.
+    """
 
     from . import encoding
 
@@ -93,8 +100,9 @@ def _wrap_log_emission_timestamp_validation() -> None:
             return
         if times.shape != (self.n_time,):
             raise ValueError("times must contain one value per emission row")
-        if np.any(times[1:] <= times[:-1]):
-            raise ValueError("times must be strictly increasing")
+        differences = np.diff(times)
+        if not (np.all(differences > 0.0) or np.all(differences < 0.0)):
+            raise ValueError("times must be strictly monotonic")
 
     setattr(post_init, _EMISSION_TIMESTAMP_WRAPPER_FLAG, True)
     setattr(post_init, _ORIGINAL_ATTR, current)

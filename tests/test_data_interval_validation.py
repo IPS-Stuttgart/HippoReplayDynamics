@@ -65,3 +65,15 @@ def test_epoch_interval_loader_accepts_nested_real_scalar_bounds() -> None:
     validated = data._as_intervals(intervals)
 
     np.testing.assert_array_equal(validated, np.array([[1.25, 3.0]]))
+
+
+def test_epoch_interval_loader_accepts_extended_precision_real_scalars() -> None:
+    hipporeplayimm.apply_runtime_patches()
+    intervals = _intervals(
+        np.longdouble("1.25"),
+        _nested_scalar(np.longdouble("3.5")),
+    )
+
+    validated = data._as_intervals(intervals)
+
+    np.testing.assert_array_equal(validated, np.array([[1.25, 3.5]]))

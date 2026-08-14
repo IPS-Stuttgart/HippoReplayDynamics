@@ -147,6 +147,8 @@ def _selected_scalar_column(key: Any, shape: tuple[int, ...]) -> int | None:
     if len(shape) < 2 or not isinstance(key, tuple) or len(key) < 2:
         return None
     column = key[1]
+    if isinstance(column, (bool, np.bool_)):
+        return None
     if not isinstance(column, (int, np.integer)):
         return None
     resolved = int(column)

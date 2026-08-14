@@ -18,6 +18,15 @@ def _rows() -> pd.DataFrame:
     )
 
 
+def _nested_object_scalar(value: object, *, depth: int = 1) -> np.ndarray:
+    current = value
+    for _ in range(depth):
+        wrapper = np.empty((), dtype=object)
+        wrapper[()] = current
+        current = wrapper
+    return current
+
+
 def test_resampling_helpers_reject_boolean_seed() -> None:
     hipporeplayimm.apply_runtime_patches()
 
@@ -59,11 +68,49 @@ def test_resampling_helpers_reject_fractional_seed() -> None:
         result_improvements.paired_sign_flip_p_value(_rows(), model="imm", n_permutations=2, random_seed=1.5)
 
 
+@pytest.mark.parametrize(
+    "seed",
+    [
+        _nested_object_scalar(True, depth=2),
+        _nested_object_scalar(np.bool_(False), depth=2),
+        _nested_object_scalar(np.array([1])),
+        _nested_object_scalar(np.array([True])),
+        _nested_object_scalar(np.array([[1]])),
+    ],
+)
+def test_resampling_helpers_reject_nested_array_wrapped_seed(seed: object) -> None:
+    """Hidden arrays/booleans must not be coerced through int(array)."""
+
+    hipporeplayimm.apply_runtime_patches()
+
+    with pytest.raises(ValueError, match="random_seed"):
+        result_improvements.hierarchical_bootstrap_ci(
+            _rows(),
+            model="imm",
+            n_bootstrap=2,
+            random_seed=seed,
+        )
+
+    with pytest.raises(ValueError, match="random_seed"):
+        result_improvements.paired_sign_flip_p_value(
+            _rows(),
+            model="imm",
+            n_permutations=2,
+            random_seed=seed,
+        )
+
+
 def test_resampling_seed_validation_preserves_large_integer_exactly() -> None:
     seed = 2**53 + 1
 
     assert result_improvement_seed_validation._nonnegative_integer_seed(seed) == seed
     assert result_improvement_seed_validation._nonnegative_integer_seed(np.int64(seed)) == seed
+
+
+def test_resampling_seed_validation_accepts_nested_zero_dimensional_numeric_scalar() -> None:
+    seed = _nested_object_scalar(np.int64(7), depth=3)
+
+    assert result_improvement_seed_validation._nonnegative_integer_seed(seed) == 7
 
 
 def test_resampling_helpers_accept_integer_like_seed() -> None:

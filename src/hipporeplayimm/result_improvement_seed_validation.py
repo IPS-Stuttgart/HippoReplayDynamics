@@ -23,13 +23,28 @@ def _nonnegative_integer_seed(value: object, name: str = "random_seed") -> int:
     """Return an exact nonnegative integer seed without bool/text/array coercion."""
 
     message = f"{name} must be a finite nonnegative integer"
+    current = value
+    seen_arrays: set[int] = set()
+    while isinstance(current, np.ndarray):
+        if current.ndim != 0:
+            raise ValueError(message)
+        marker = id(current)
+        if marker in seen_arrays:
+            raise ValueError(message)
+        seen_arrays.add(marker)
+        try:
+            current = current.item()
+        except (TypeError, ValueError) as exc:
+            raise ValueError(message) from exc
+
     try:
-        array = np.asarray(value)
+        array = np.asarray(current)
     except (TypeError, ValueError) as exc:
         raise ValueError(message) from exc
     if array.ndim != 0:
         raise ValueError(message)
-    scalar = array.item()
+
+    scalar = current.item() if isinstance(current, np.generic) else current
     if isinstance(scalar, (bool, np.bool_, str, bytes, np.str_, np.bytes_)):
         raise ValueError(message)
     try:

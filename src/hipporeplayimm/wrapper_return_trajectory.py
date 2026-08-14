@@ -20,6 +20,8 @@ from .models import EventScore, _posterior_diagnostics
 from .reverse_time_terminal_guard import _clear_unmappable_reverse_terminal
 
 _PATCHED_FLAG = "_wrapper_return_trajectory_patch_applied"
+_RESULT_WRAPPER_MARKER = "_wrapper_return_trajectory_result_wrapper"
+_DIRECT_WRAPPER_MARKER = "_wrapper_return_trajectory_direct_wrapper"
 _STATE_SPACE_DIAGNOSTIC_PATCH_ATTR = "_state_space_evidence_only_diagnostics_patch_applied"
 _STATE_SPACE_DIAGNOSTIC_ORIGINAL_ATTR = "_state_space_evidence_only_diagnostics_original"
 
@@ -30,13 +32,38 @@ def apply_wrapper_return_trajectory_patch() -> None:
     from . import result_improvement_extensions as extensions
     from . import reverse_models
 
-    if not getattr(extensions, _PATCHED_FLAG, False):
+    if not _result_improvement_wrappers_are_current(extensions):
         _patch_result_improvement_wrappers(extensions)
-        setattr(extensions, _PATCHED_FLAG, True)
-    if not getattr(reverse_models, _PATCHED_FLAG, False):
+    setattr(extensions, _PATCHED_FLAG, True)
+    if not _direct_reverse_wrappers_are_current(reverse_models):
         _patch_direct_reverse_wrappers(extensions, reverse_models)
-        setattr(reverse_models, _PATCHED_FLAG, True)
+    setattr(reverse_models, _PATCHED_FLAG, True)
     _patch_state_space_evidence_only_diagnostics()
+
+
+def _result_improvement_wrappers_are_current(extensions: Any) -> bool:
+    """Return whether the compatibility wrappers are still installed."""
+
+    return all(
+        bool(getattr(target, _RESULT_WRAPPER_MARKER, False))
+        for target in (
+            getattr(extensions, "score_replay_model_compat", None),
+            getattr(getattr(extensions, "ReverseTimeReplayModel", None), "score", None),
+            getattr(getattr(extensions, "BidirectionalReplayModel", None), "score", None),
+        )
+    )
+
+
+def _direct_reverse_wrappers_are_current(reverse_models: Any) -> bool:
+    """Return whether the direct reverse/bidirectional wrappers are installed."""
+
+    return all(
+        bool(getattr(target, _DIRECT_WRAPPER_MARKER, False))
+        for target in (
+            getattr(getattr(reverse_models, "ReverseTimeReplayModel", None), "score", None),
+            getattr(getattr(reverse_models, "BidirectionalReplayModel", None), "score", None),
+        )
+    )
 
 
 def _patch_state_space_evidence_only_diagnostics() -> None:
@@ -285,6 +312,9 @@ def _patch_result_improvement_wrappers(extensions: Any) -> None:
     bidirectional_score.__name__ = "score"
     bidirectional_score.__doc__ = extensions.BidirectionalReplayModel.score.__doc__
     bidirectional_score.__module__ = extensions.__name__
+    setattr(score_replay_model_compat, _RESULT_WRAPPER_MARKER, True)
+    setattr(reverse_score, _RESULT_WRAPPER_MARKER, True)
+    setattr(bidirectional_score, _RESULT_WRAPPER_MARKER, True)
 
     extensions.score_replay_model_compat = score_replay_model_compat
     extensions.ReverseTimeReplayModel.score = reverse_score
@@ -423,6 +453,8 @@ def _patch_direct_reverse_wrappers(extensions: Any, reverse_models: Any) -> None
     bidirectional_score.__name__ = "score"
     bidirectional_score.__doc__ = reverse_models.BidirectionalReplayModel.score.__doc__
     bidirectional_score.__module__ = reverse_models.__name__
+    setattr(reverse_score, _DIRECT_WRAPPER_MARKER, True)
+    setattr(bidirectional_score, _DIRECT_WRAPPER_MARKER, True)
 
     reverse_models.ReverseTimeReplayModel.score = reverse_score
     reverse_models.BidirectionalReplayModel.score = bidirectional_score

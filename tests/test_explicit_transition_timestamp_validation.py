@@ -27,7 +27,7 @@ def _emissions(*, times: np.ndarray, transition_durations: np.ndarray) -> LogEmi
     ],
 )
 def test_explicit_transition_durations_do_not_bypass_timestamp_order(times: np.ndarray) -> None:
-    with pytest.raises(ValueError, match="times must be strictly increasing"):
+    with pytest.raises(ValueError, match="times must be strictly monotonic"):
         _emissions(times=times, transition_durations=np.array([0.02, 0.02]))
 
 
@@ -39,3 +39,13 @@ def test_explicit_transition_durations_preserve_valid_increasing_timestamps() ->
 
     np.testing.assert_allclose(emissions.times, np.array([0.01, 0.03, 0.07]))
     np.testing.assert_allclose(emissions.transition_durations, np.array([0.02, 0.04]))
+
+
+def test_explicit_transition_durations_allow_internal_reverse_time_order() -> None:
+    emissions = _emissions(
+        times=np.array([0.07, 0.03, 0.01]),
+        transition_durations=np.array([0.04, 0.02]),
+    )
+
+    np.testing.assert_allclose(emissions.times, np.array([0.07, 0.03, 0.01]))
+    np.testing.assert_allclose(emissions.transition_durations, np.array([0.04, 0.02]))

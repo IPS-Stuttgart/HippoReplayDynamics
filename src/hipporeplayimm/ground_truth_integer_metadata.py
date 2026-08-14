@@ -177,16 +177,32 @@ def _parse_integer_metadata_value(column: str, value: Any) -> int:
     return int(integer)
 
 
+def _unwrap_finite_float_metadata_scalar(column: str, value: Any) -> Any:
+    """Unwrap nested zero-dimensional object arrays without scalar coercion."""
+
+    current = value
+    seen: set[int] = set()
+    while True:
+        if isinstance(current, (bool, np.bool_, complex, np.complexfloating)):
+            raise ValueError(f"{column} must contain finite numeric scalar values")
+        try:
+            raw = np.asarray(current)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"{column} must contain finite numeric scalar values") from exc
+        if raw.ndim != 0:
+            raise ValueError(f"{column} must contain finite numeric scalar values")
+        item = raw.item()
+        if raw.dtype != object or not isinstance(current, np.ndarray):
+            return item
+        marker = id(current)
+        if marker in seen or item is current:
+            raise ValueError(f"{column} must contain finite numeric scalar values")
+        seen.add(marker)
+        current = item
+
+
 def _parse_finite_float_metadata_value(column: str, value: Any) -> float:
-    if isinstance(value, (bool, np.bool_)):
-        raise ValueError(f"{column} must contain finite numeric scalar values")
-    try:
-        raw = np.asarray(value)
-    except (TypeError, ValueError) as exc:
-        raise ValueError(f"{column} must contain finite numeric scalar values") from exc
-    if raw.ndim != 0:
-        raise ValueError(f"{column} must contain finite numeric scalar values")
-    item = raw.item()
+    item = _unwrap_finite_float_metadata_scalar(column, value)
     if isinstance(item, (bool, np.bool_, complex, np.complexfloating)):
         raise ValueError(f"{column} must contain finite numeric scalar values")
     try:

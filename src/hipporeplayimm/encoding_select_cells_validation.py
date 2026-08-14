@@ -25,7 +25,7 @@ _PATCHED_FLAG = "_encoding_select_cells_validation_patch_applied"
 
 
 def _coerce_requested_cell_id(value: object, integer_info: np.iinfo) -> int:
-    """Coerce one requested cell ID without passing integer inputs through float."""
+    """Coerce one requested cell ID without narrowing numeric scalar precision."""
 
     try:
         scalar = np.asarray(value)
@@ -41,12 +41,14 @@ def _coerce_requested_cell_id(value: object, integer_info: np.iinfo) -> int:
     if isinstance(item, (int, np.integer)):
         cell_id = int(item)
     elif isinstance(item, (float, np.floating)):
-        numeric = float(item)
-        if not np.isfinite(numeric):
+        # Keep NumPy floating scalars in their native precision here.  In
+        # particular, converting np.longdouble to Python float first can round
+        # exact integer-valued IDs above 2**53 to a neighbouring identifier.
+        if not np.isfinite(item):
             raise ValueError("cell_ids must be finite")
-        if not numeric.is_integer():
+        if item != np.trunc(item):
             raise ValueError("cell_ids must contain integer-valued cell IDs")
-        cell_id = int(numeric)
+        cell_id = int(item)
     else:
         raise TypeError("cell_ids must contain integer-valued cell IDs")
 

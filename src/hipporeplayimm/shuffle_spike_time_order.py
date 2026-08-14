@@ -17,6 +17,12 @@ _PERMUTATION_PATCHED_FLAG = "_shuffle_nonidentity_permutation_patch_applied"
 _CELL_IDENTITY_PATCHED_FLAG = "_shuffle_nonidentity_cell_identity_patch_applied"
 
 
+def _function_is_from_this_patch(function: object) -> bool:
+    """Return whether ``function`` still belongs to this runtime patch module."""
+
+    return getattr(function, "__module__", None) == __name__
+
+
 def apply_shuffle_spike_time_order_patch() -> None:
     """Install sorted spike-time shuffling and strict shuffle-control validation."""
 
@@ -39,7 +45,10 @@ def apply_shuffle_spike_time_order_patch() -> None:
         ri.circular_shift_spikes_session = _circular_shift_spikes_session_half_open
         setattr(ri, _CIRCULAR_SHIFT_PATCHED_FLAG, True)
 
-    if not getattr(shuffle_controls, _SCOPE_KEY_PATCHED_FLAG, False):
+    if not (
+        getattr(shuffle_controls, _SCOPE_KEY_PATCHED_FLAG, False)
+        and _function_is_from_this_patch(getattr(shuffle_controls, "_scope_label", None))
+    ):
         original_scope_label = shuffle_controls._scope_label
 
         def scope_label(value: object) -> str:
@@ -56,7 +65,12 @@ def apply_shuffle_spike_time_order_patch() -> None:
         shuffle_controls._scope_label = scope_label
         setattr(shuffle_controls, _SCOPE_KEY_PATCHED_FLAG, True)
 
-    if not getattr(shuffle_controls, _GRID_SHAPE_PATCHED_FLAG, False):
+    if not (
+        getattr(shuffle_controls, _GRID_SHAPE_PATCHED_FLAG, False)
+        and _function_is_from_this_patch(
+            getattr(shuffle_controls, "_validate_grid_shape", None)
+        )
+    ):
         original_validate_grid_shape = shuffle_controls._validate_grid_shape
 
         def validate_grid_shape(grid_shape: object) -> tuple[int, int]:
@@ -65,15 +79,27 @@ def apply_shuffle_spike_time_order_patch() -> None:
         shuffle_controls._validate_grid_shape = validate_grid_shape
         setattr(shuffle_controls, _GRID_SHAPE_PATCHED_FLAG, True)
 
-    if not getattr(shuffle_controls, _INTEGER_VALUE_PATCHED_FLAG, False):
+    if not (
+        getattr(shuffle_controls, _INTEGER_VALUE_PATCHED_FLAG, False)
+        and getattr(shuffle_controls, "_nonnegative_integer_value", None)
+        is _nonnegative_integer_value
+    ):
         shuffle_controls._nonnegative_integer_value = _nonnegative_integer_value
         setattr(shuffle_controls, _INTEGER_VALUE_PATCHED_FLAG, True)
 
-    if not getattr(shuffle_controls, _PERMUTATION_PATCHED_FLAG, False):
+    if not (
+        getattr(shuffle_controls, _PERMUTATION_PATCHED_FLAG, False)
+        and getattr(shuffle_controls, "shuffled_encoding", None)
+        is _shuffled_encoding_nonidentity
+    ):
         shuffle_controls.shuffled_encoding = _shuffled_encoding_nonidentity
         setattr(shuffle_controls, _PERMUTATION_PATCHED_FLAG, True)
 
-    if not getattr(ri, _CELL_IDENTITY_PATCHED_FLAG, False):
+    if not (
+        getattr(ri, _CELL_IDENTITY_PATCHED_FLAG, False)
+        and getattr(ri, "shuffle_cell_identities_session", None)
+        is _shuffle_cell_identities_session_nonidentity
+    ):
         ri.shuffle_cell_identities_session = (
             _shuffle_cell_identities_session_nonidentity
         )

@@ -43,6 +43,11 @@ def apply_sparse_momentum_duration_validation_patch() -> None:
     import hipporeplayimm.duration_occupancy as duration_occupancy
     import hipporeplayimm.state_space_model as state_space_model
 
+    from .state_space_velocity_decay_runtime_refresh import (
+        apply_state_space_velocity_decay_runtime_refresh_patch,
+    )
+
+    apply_state_space_velocity_decay_runtime_refresh_patch()
     _patch_time_scale_helper(duration_occupancy)
     _patch_prediction_multiplier_helper(state_space_model)
 

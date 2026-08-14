@@ -113,6 +113,17 @@ def _reject_float_overflow(name: str, value: object) -> None:
         raise ValueError(f"{name} must contain values representable as floating point") from exc
 
 
+def _reject_nan_log_likelihood(value: object) -> None:
+    """Reject undefined log likelihoods while preserving valid ``-inf`` support masks."""
+
+    try:
+        values = np.asarray(value, dtype=float)
+    except (TypeError, ValueError, OverflowError):
+        return
+    if np.any(np.isnan(values)):
+        raise ValueError("log_likelihood must not contain NaN values")
+
+
 def _validate_log_emission_fields(tensor: object) -> None:
     _reject_boolean_numeric("log_likelihood", getattr(tensor, "log_likelihood"))
     _reject_boolean_numeric("times", getattr(tensor, "times"))
@@ -160,6 +171,8 @@ def _validate_log_emission_fields(tensor: object) -> None:
         value = getattr(tensor, name)
         if value is not None:
             _reject_float_overflow(name, value)
+
+    _reject_nan_log_likelihood(getattr(tensor, "log_likelihood"))
 
 
 def apply_emission_timing_validation_patch() -> None:

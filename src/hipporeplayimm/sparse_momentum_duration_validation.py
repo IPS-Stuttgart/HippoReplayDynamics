@@ -2,7 +2,7 @@
 
 The exact sparse, finite-displacement, and candidate-pruned momentum decoders
 derive both velocity decay and relative velocity scaling from transition
-durations.  Non-finite or non-positive values should fail at the helper
+durations. Non-finite or non-positive values should fail at the helper
 boundary instead of producing NaN/inf transition parameters that later
 corrupt the dynamic program.
 """
@@ -18,8 +18,12 @@ from .sparse_momentum_bin_center_validation import apply_sparse_momentum_bin_cen
 
 _SPARSE_SCORE_CONFIG_PATCHED_FLAG = "_sparse_momentum_config_validation_patch_applied"
 _TRAJECTORY_IMM_CONFIG_PATCHED_FLAG = "_trajectory_imm_sparse_config_validation_patch_applied"
+_COERCE_DURATIONS_PATCHED_FLAG = "_momentum_transition_duration_coercion_validation_patch_applied"
+_DURATION_DECAY_PATCHED_FLAG = "_momentum_duration_decay_validation_patch_applied"
 _TIME_SCALE_PATCHED_FLAG = "_momentum_time_scale_validation_patch_applied"
+_DURATION_SCALE_PATCHED_FLAG = "_momentum_duration_scale_validation_patch_applied"
 _PREDICTION_MULTIPLIER_PATCHED_FLAG = "_momentum_prediction_multiplier_validation_patch_applied"
+_ORIGINAL_ATTR = "__hipporeplayimm_original__"
 
 
 def apply_sparse_momentum_duration_validation_patch() -> None:
@@ -39,6 +43,11 @@ def apply_sparse_momentum_duration_validation_patch() -> None:
     import hipporeplayimm.duration_occupancy as duration_occupancy
     import hipporeplayimm.state_space_model as state_space_model
 
+    from .state_space_velocity_decay_runtime_refresh import (
+        apply_state_space_velocity_decay_runtime_refresh_patch,
+    )
+
+    apply_state_space_velocity_decay_runtime_refresh_patch()
     _patch_time_scale_helper(duration_occupancy)
     _patch_prediction_multiplier_helper(state_space_model)
 
@@ -70,53 +79,78 @@ def apply_sparse_momentum_duration_validation_patch() -> None:
 
 
 def _patch_duration_helpers(module: Any) -> None:
-    if getattr(module, "_duration_validation_patch_applied", False):
-        return
+    """Install refreshable guards on the duration helpers of one momentum module.
+
+    ``importlib.reload`` keeps dynamically added module attributes while replacing
+    functions defined by the module. A module-level ``*_patch_applied`` sentinel
+    can therefore remain true after every wrapper it described has disappeared.
+    Detect the live wrapper on each helper instead of trusting that stale flag.
+    """
+
+    original_coerce_transition_durations = module._coerce_transition_durations
+    if not getattr(original_coerce_transition_durations, _COERCE_DURATIONS_PATCHED_FLAG, False):
+
+        @wraps(original_coerce_transition_durations)
+        def coerce_transition_durations(values: Any, *, n_time: int, fallback_dt: float) -> np.ndarray:
+            expected = max(_coerce_count_scalar("n_time", n_time) - 1, 0)
+            fallback = _coerce_positive_float_scalar(
+                "fallback dt",
+                fallback_dt,
+                "fallback dt must be finite and positive",
+            )
+
+            raw_values = list(values)
+            if len(raw_values) == 0:
+                return np.full(expected, fallback, dtype=float)
+
+            durations = _valid_transition_durations(raw_values)
+            if durations.shape != (expected,):
+                raise ValueError(
+                    f"transition durations must have shape {(expected,)}, got {durations.shape}"
+                )
+            return durations
+
+        setattr(coerce_transition_durations, _COERCE_DURATIONS_PATCHED_FLAG, True)
+        setattr(coerce_transition_durations, _ORIGINAL_ATTR, original_coerce_transition_durations)
+        module._coerce_transition_durations = coerce_transition_durations
 
     original_duration_adjusted_decays = module._duration_adjusted_decays
+    if not getattr(original_duration_adjusted_decays, _DURATION_DECAY_PATCHED_FLAG, False):
+
+        @wraps(original_duration_adjusted_decays)
+        def duration_adjusted_decays(config: object, durations: Any, reference_dt: float) -> np.ndarray:
+            reference = _coerce_positive_float_scalar(
+                "reference dt",
+                reference_dt,
+                "reference dt must be finite and positive",
+            )
+            return original_duration_adjusted_decays(
+                config,
+                _valid_transition_durations(durations),
+                reference,
+            )
+
+        setattr(duration_adjusted_decays, _DURATION_DECAY_PATCHED_FLAG, True)
+        setattr(duration_adjusted_decays, _ORIGINAL_ATTR, original_duration_adjusted_decays)
+        module._duration_adjusted_decays = duration_adjusted_decays
+
     original_time_scales = module._time_scales
+    if not getattr(original_time_scales, _TIME_SCALE_PATCHED_FLAG, False):
+
+        @wraps(original_time_scales)
+        def time_scales(durations: Any) -> np.ndarray:
+            return _validated_time_scales(original_time_scales, durations)
+
+        setattr(time_scales, _TIME_SCALE_PATCHED_FLAG, True)
+        setattr(time_scales, _ORIGINAL_ATTR, original_time_scales)
+        module._time_scales = time_scales
+
     original_duration_scale_at = getattr(module, "_duration_scale_at", None)
-
-    @wraps(module._coerce_transition_durations)
-    def coerce_transition_durations(values: Any, *, n_time: int, fallback_dt: float) -> np.ndarray:
-        expected = max(_coerce_count_scalar("n_time", n_time) - 1, 0)
-        fallback = _coerce_positive_float_scalar(
-            "fallback dt",
-            fallback_dt,
-            "fallback dt must be finite and positive",
-        )
-
-        raw_values = list(values)
-        if len(raw_values) == 0:
-            return np.full(expected, fallback, dtype=float)
-
-        durations = _valid_transition_durations(raw_values)
-        if durations.shape != (expected,):
-            raise ValueError(f"transition durations must have shape {(expected,)}, got {durations.shape}")
-        return durations
-
-    @wraps(original_duration_adjusted_decays)
-    def duration_adjusted_decays(config: object, durations: Any, reference_dt: float) -> np.ndarray:
-        reference = _coerce_positive_float_scalar(
-            "reference dt",
-            reference_dt,
-            "reference dt must be finite and positive",
-        )
-        return original_duration_adjusted_decays(
-            config,
-            _valid_transition_durations(durations),
-            reference,
-        )
-
-    @wraps(original_time_scales)
-    def time_scales(durations: Any) -> np.ndarray:
-        return _validated_time_scales(original_time_scales, durations)
-
-    module._coerce_transition_durations = coerce_transition_durations
-    module._duration_adjusted_decays = duration_adjusted_decays
-    module._time_scales = time_scales
-    setattr(module, _TIME_SCALE_PATCHED_FLAG, True)
-    if original_duration_scale_at is not None:
+    if original_duration_scale_at is not None and not getattr(
+        original_duration_scale_at,
+        _DURATION_SCALE_PATCHED_FLAG,
+        False,
+    ):
 
         @wraps(original_duration_scale_at)
         def duration_scale_at(durations: Any, transition_index: int, reference_dt: float) -> float:
@@ -138,21 +172,28 @@ def _patch_duration_helpers(module: Any) -> None:
                 raise ValueError("momentum duration scale must be finite and positive")
             return scale
 
+        setattr(duration_scale_at, _DURATION_SCALE_PATCHED_FLAG, True)
+        setattr(duration_scale_at, _ORIGINAL_ATTR, original_duration_scale_at)
         module._duration_scale_at = duration_scale_at
+
+    setattr(module, _TIME_SCALE_PATCHED_FLAG, True)
     module._duration_validation_patch_applied = True
 
 
 def _patch_time_scale_helper(module: Any) -> None:
     """Install the output guard on modules that only expose ``_time_scales``."""
 
-    if getattr(module, _TIME_SCALE_PATCHED_FLAG, False):
-        return
     original_time_scales = module._time_scales
+    if getattr(original_time_scales, _TIME_SCALE_PATCHED_FLAG, False):
+        setattr(module, _TIME_SCALE_PATCHED_FLAG, True)
+        return
 
     @wraps(original_time_scales)
     def time_scales(durations: Any) -> np.ndarray:
         return _validated_time_scales(original_time_scales, durations)
 
+    setattr(time_scales, _TIME_SCALE_PATCHED_FLAG, True)
+    setattr(time_scales, _ORIGINAL_ATTR, original_time_scales)
     module._time_scales = time_scales
     setattr(module, _TIME_SCALE_PATCHED_FLAG, True)
 
@@ -160,9 +201,10 @@ def _patch_time_scale_helper(module: Any) -> None:
 def _patch_prediction_multiplier_helper(module: Any) -> None:
     """Reject undefined candidate-prediction multipliers before beam augmentation."""
 
-    if getattr(module, _PREDICTION_MULTIPLIER_PATCHED_FLAG, False):
-        return
     original_multipliers = module._momentum_prediction_multipliers
+    if getattr(original_multipliers, _PREDICTION_MULTIPLIER_PATCHED_FLAG, False):
+        setattr(module, _PREDICTION_MULTIPLIER_PATCHED_FLAG, True)
+        return
 
     @wraps(original_multipliers)
     def momentum_prediction_multipliers(
@@ -198,7 +240,7 @@ def _patch_prediction_multiplier_helper(module: Any) -> None:
     )
     setattr(
         momentum_prediction_multipliers,
-        "__hipporeplayimm_original__",
+        _ORIGINAL_ATTR,
         original_multipliers,
     )
     module._momentum_prediction_multipliers = momentum_prediction_multipliers
@@ -250,7 +292,7 @@ def _patch_exact_sparse_momentum_config(
         )
 
     setattr(score, patched_flag, True)
-    setattr(score, "__hipporeplayimm_original__", original_score)
+    setattr(score, _ORIGINAL_ATTR, original_score)
     setattr(module, score_name, score)
 
 

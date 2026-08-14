@@ -12,6 +12,26 @@ _PATCHED_ATTR = "_sparse_momentum_bin_center_validation_patch_applied"
 _ORIGINAL_ATTR = "__hipporeplayimm_original__"
 
 
+def _is_sparse_center_alias(candidate: object, reference: object) -> bool:
+    """Return whether candidate is an imported copy of the sparse center helper.
+
+    ``importlib.reload`` replaces the defining module's function object but does
+    not rewrite functions that other modules imported by value.  Those stale
+    aliases are no longer identical to the freshly reloaded helper, so identity
+    checks alone cannot find them.  ``functools.wraps`` preserves ``__module__``
+    and ``__name__``, which gives us a safe provenance check without touching
+    the displacement-momentum helper of the same local name.
+    """
+
+    if candidate is reference:
+        return True
+    return (
+        callable(candidate)
+        and getattr(candidate, "__module__", None) == getattr(reference, "__module__", None)
+        and getattr(candidate, "__name__", None) == getattr(reference, "__name__", None)
+    )
+
+
 def _synchronize_imported_aliases(stale: object, active: object) -> None:
     """Refresh package modules that imported the sparse helper before patching."""
 
@@ -19,7 +39,10 @@ def _synchronize_imported_aliases(stale: object, active: object) -> None:
         module_name = getattr(module, "__name__", "")
         if not module_name.startswith("hipporeplayimm"):
             continue
-        if getattr(module, "_as_2d_centers", None) is stale:
+        candidate = getattr(module, "_as_2d_centers", None)
+        if candidate is active:
+            continue
+        if _is_sparse_center_alias(candidate, stale):
             setattr(module, "_as_2d_centers", active)
 
 

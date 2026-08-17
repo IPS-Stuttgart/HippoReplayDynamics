@@ -198,12 +198,27 @@ def _seed_sequence(values: Iterable[object], name: str) -> tuple[int, ...]:
 
 
 def _seed_value(value: object, name: str) -> int:
+    message = f"{name} must be a finite nonnegative integer"
+    current = value
+    seen_arrays: set[int] = set()
+    while isinstance(current, np.ndarray):
+        if current.ndim != 0:
+            raise ValueError(message)
+        marker = id(current)
+        if marker in seen_arrays:
+            raise ValueError(message)
+        seen_arrays.add(marker)
+        try:
+            current = current.item()
+        except (TypeError, ValueError) as exc:
+            raise ValueError(message) from exc
+
     try:
-        raw = np.asarray(value)
+        raw = np.asarray(current)
     except (TypeError, ValueError) as exc:
-        raise ValueError(f"{name} must be a finite nonnegative integer") from exc
+        raise ValueError(message) from exc
     if raw.ndim != 0:
-        raise ValueError(f"{name} must be a finite nonnegative integer")
+        raise ValueError(message)
     item: Any = raw.item()
     if isinstance(item, (bool, np.bool_)):
         raise TypeError(f"{name} must be an integer, not boolean")
@@ -213,21 +228,21 @@ def _seed_value(value: object, name: str) -> int:
         seed = _seed_text_value(item, name)
     elif isinstance(item, Decimal):
         if not item.is_finite():
-            raise ValueError(f"{name} must be a finite nonnegative integer")
+            raise ValueError(message)
         integer = item.to_integral_value()
         if item != integer:
-            raise ValueError(f"{name} must be a finite nonnegative integer")
+            raise ValueError(message)
         seed = int(integer)
     else:
         try:
             numeric = float(item)
         except (TypeError, ValueError, OverflowError) as exc:
-            raise ValueError(f"{name} must be a finite nonnegative integer") from exc
+            raise ValueError(message) from exc
         if not np.isfinite(numeric) or not numeric.is_integer():
-            raise ValueError(f"{name} must be a finite nonnegative integer")
+            raise ValueError(message)
         seed = int(numeric)
     if seed < 0:
-        raise ValueError(f"{name} must be a finite nonnegative integer")
+        raise ValueError(message)
     return seed
 
 

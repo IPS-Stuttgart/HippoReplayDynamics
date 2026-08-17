@@ -16,6 +16,14 @@ def _tiny_centers() -> np.ndarray:
     return np.arange(3.0, dtype=float).reshape(-1, 1)
 
 
+def _nested_object_scalar(value: object) -> np.ndarray:
+    inner = np.empty((), dtype=object)
+    inner[()] = value
+    outer = np.empty((), dtype=object)
+    outer[()] = inner
+    return outer
+
+
 def test_momentum_prediction_rejects_nonfinite_velocity_decays() -> None:
     hipporeplayimm.apply_runtime_patches()
 
@@ -51,6 +59,9 @@ def test_transition_decay_guard_rejects_boolean_decay_values() -> None:
         (np.array(True), 0.9),
         (np.array([True], dtype=bool), 0.9),
         (np.array([False], dtype=object), 0.9),
+        (_nested_object_scalar(True), 0.9),
+        (_nested_object_scalar(np.bool_(False)), 0.9),
+        (None, _nested_object_scalar(True)),
     )
     for values, fallback in bad_cases:
         with pytest.raises(ValueError, match="finite nonnegative"):
@@ -62,6 +73,7 @@ def test_transition_decay_guard_preserves_valid_values_and_fallback() -> None:
 
     assert _transition_decay_at(np.array([0.25], dtype=float), 0, 0.9) == pytest.approx(0.25)
     assert _transition_decay_at(np.array([0.25], dtype=float), 1, 0.9) == pytest.approx(0.9)
+    assert _transition_decay_at(_nested_object_scalar(0.25), 0, 0.9) == pytest.approx(0.25)
     with pytest.raises(ValueError, match=r"velocity_decays.*finite nonnegative"):
         _transition_decay_at(np.array([-0.1], dtype=float), 0, 0.9)
 

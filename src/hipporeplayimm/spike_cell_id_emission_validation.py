@@ -134,10 +134,7 @@ def _coerce_spike_data_table_exactly(data: Any, value: Any, name: str) -> np.nda
     if _integer_ids_are_exact_float64(cell_ids, float_ids):
         return np.column_stack((times, float_ids))
 
-    table = np.empty((arr.shape[0], 2), dtype=object)
-    table[:, 0] = times
-    table[:, 1] = cell_ids
-    return table
+    return _exact_spike_table(arr, cell_ids)
 
 
 def _integer_ids_are_exact_float64(cell_ids: np.ndarray, float_ids: np.ndarray) -> bool:

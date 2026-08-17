@@ -49,8 +49,6 @@ def apply_simulation_best_row_flags_patch() -> None:
     recovery_patch_current = all(
         getattr(getattr(recovery, name, None), _PATCHED_FLAG, False)
         for name in (
-            "add_evidence_columns",
-            "_event_best_rows",
             "recovery_summary",
             "certified_vs_exact_event_recovery",
             "certified_vs_exact_recovery_summary",
@@ -58,6 +56,12 @@ def apply_simulation_best_row_flags_patch() -> None:
         )
     )
     if reporting_patch_current and recovery_patch_current:
+        # evidence_reporting.patch_simulation_recovery_module() intentionally
+        # refreshes these two aliases earlier in apply_runtime_patches().  Put
+        # the scoped versions back without rebuilding already-current wrappers.
+        reporting._simulation_event_group_columns = _event_group_columns
+        recovery.add_evidence_columns = reporting.simulation_add_evidence_columns
+        recovery._event_best_rows = reporting.simulation_event_best_rows
         setattr(reporting, _PATCHED_FLAG, True)
         setattr(recovery, _PATCHED_FLAG, True)
         return

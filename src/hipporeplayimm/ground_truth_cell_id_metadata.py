@@ -108,6 +108,7 @@ def _install_active_goal_validation(gt: Any, float_metadata: Any) -> None:
     def active_goal_at_time(session: Any, time_s: float) -> int | None:
         time_value = float_metadata._parse_config_scalar("time_s", time_s)
         float_metadata._validate_well_sequence_ids(session.well_sequence)
+        _validate_well_sequence_time_order(session.well_sequence)
         return base(session, time_value)
 
     global _ACTIVE_GOAL_WRAPPER_CODE
@@ -140,6 +141,24 @@ def _unwrap_legacy_active_goal(function: Any) -> Any:
             break
         current = wrapped
     return current
+
+
+def _validate_well_sequence_time_order(well_sequence: Any) -> None:
+    """Reject non-chronological fill times before ``searchsorted`` is used."""
+
+    if well_sequence is None:
+        return
+    raw = np.asarray(well_sequence)
+    if raw.size == 0 or raw.ndim != 2 or raw.shape[1] < 2:
+        return
+    try:
+        times = np.asarray(raw[:, 0], dtype=float)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ValueError("well sequence fill times must contain finite numeric values") from exc
+    if not np.all(np.isfinite(times)):
+        raise ValueError("well sequence fill times must contain finite numeric values")
+    if np.any(np.diff(times) < 0.0):
+        raise ValueError("well sequence fill times must be nondecreasing")
 
 
 def _ground_truth_cell_id_metadata_patch_current(gt: object) -> bool:

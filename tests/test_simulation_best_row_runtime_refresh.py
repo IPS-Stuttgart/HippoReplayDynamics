@@ -44,6 +44,8 @@ def test_runtime_patch_refresh_restores_simulation_event_scope_after_reporting_r
 
     assert getattr(evidence_reporting.simulation_add_evidence_columns, _PATCHED_FLAG, False)
     assert getattr(evidence_reporting.simulation_event_best_rows, _PATCHED_FLAG, False)
+    assert simulation_recovery.add_evidence_columns is evidence_reporting.simulation_add_evidence_columns
+    assert simulation_recovery._event_best_rows is evidence_reporting.simulation_event_best_rows
 
     rows = pd.DataFrame(
         [
@@ -71,3 +73,5 @@ def test_runtime_patch_refresh_restores_simulation_event_scope_after_reporting_r
     hipporeplayimm.apply_runtime_patches()
     assert evidence_reporting.simulation_add_evidence_columns is refreshed_add_evidence_columns
     assert evidence_reporting.simulation_event_best_rows is refreshed_best_rows
+    assert simulation_recovery.add_evidence_columns is refreshed_add_evidence_columns
+    assert simulation_recovery._event_best_rows is refreshed_best_rows

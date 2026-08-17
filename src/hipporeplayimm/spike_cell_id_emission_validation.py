@@ -21,6 +21,7 @@ _PATCH_MARK = "__hipporeplayimm_spike_cell_id_emission_validation_patch__"
 _SPIKE_SELECTION_PATCH_MARK = (
     "__hipporeplayimm_spike_cell_id_encoding_selection_patch__"
 )
+_SPIKE_TABLE_PATCH_MARK = "__hipporeplayimm_spike_cell_id_loader_table_patch__"
 _ORIGINAL_ATTR = "__hipporeplayimm_original__"
 
 
@@ -42,6 +43,7 @@ class _ExactSpikeTable(np.ndarray):
 def apply_spike_cell_id_emission_validation_patch() -> None:
     """Install exact integral-ID handling for encoding and emission lookups."""
 
+    from . import data
     from . import data_cell_id_validation
     from . import emission_cell_id_validation
     from . import encoding
@@ -53,6 +55,24 @@ def apply_spike_cell_id_emission_validation_patch() -> None:
     # closes nested object-array coercions for already-installed wrappers.
     data_cell_id_validation._coerce_integral_id = _coerce_integral_id
     data_cell_id_validation._coerce_integral_ids = _coerce_integral_ids
+
+    # The raw Spike_Data loader historically converted the entire two-column
+    # table to float64.  Validate and canonicalize the ID column before that
+    # lossy conversion so booleans cannot become 0/1 and exact large IDs remain
+    # distinct.  Ordinary binary64-exact IDs keep the legacy float table.
+    current_spike_table = data._as_two_column_array
+    if not bool(getattr(current_spike_table, _SPIKE_TABLE_PATCH_MARK, False)):
+        original_spike_table = current_spike_table
+
+        @wraps(original_spike_table)
+        def as_two_column_array(value: Any, name: str) -> np.ndarray:
+            if name != "Spike_Data":
+                return original_spike_table(value, name)
+            return _coerce_spike_data_table_exactly(data, value, name)
+
+        setattr(as_two_column_array, _SPIKE_TABLE_PATCH_MARK, True)
+        setattr(as_two_column_array, _ORIGINAL_ATTR, original_spike_table)
+        data._as_two_column_array = as_two_column_array
 
     # The later emission-cell-ID patch installs its own row mapper.  Synchronize
     # the exact coercion helper into that active module before its wrapper is
@@ -95,6 +115,35 @@ def apply_spike_cell_id_emission_validation_patch() -> None:
     setattr(cell_id_row_indices, _PATCH_MARK, True)
     setattr(cell_id_row_indices, _ORIGINAL_ATTR, current)
     encoding._cell_id_row_indices = cell_id_row_indices
+
+
+def _coerce_spike_data_table_exactly(data: Any, value: Any, name: str) -> np.ndarray:
+    """Normalize a Spike_Data table without narrowing its identifier column."""
+
+    arr = data._as_two_dimensional(value, name)
+    if arr.size == 0:
+        return np.empty((0, 2), dtype=float)
+    if arr.shape[1] != 2 and arr.shape[0] == 2:
+        arr = arr.T
+    if arr.shape[1] != 2:
+        raise ValueError(f"{name} must have two columns; got shape {arr.shape}")
+
+    times = np.asarray(arr[:, 0], dtype=float)
+    cell_ids = _coerce_integral_ids(arr[:, 1], "spike cell IDs").reshape(-1)
+    float_ids = np.asarray(cell_ids, dtype=float)
+    if _integer_ids_are_exact_float64(cell_ids, float_ids):
+        return np.column_stack((times, float_ids))
+
+    return _exact_spike_table(arr, cell_ids)
+
+
+def _integer_ids_are_exact_float64(cell_ids: np.ndarray, float_ids: np.ndarray) -> bool:
+    if not np.all(np.isfinite(float_ids)):
+        return False
+    return all(
+        int(float_value) == int(identifier)
+        for float_value, identifier in zip(float_ids.reshape(-1), cell_ids.reshape(-1), strict=True)
+    )
 
 
 def _select_spikes_and_cell_ids_exactly(

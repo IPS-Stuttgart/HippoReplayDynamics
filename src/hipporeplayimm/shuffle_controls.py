@@ -128,13 +128,14 @@ def _nonnegative_integer_value(name: str, value: object) -> int:
         integer = operator.index(scalar)
     except TypeError:
         try:
-            numeric = float(scalar)
+            integer = int(scalar)
         except (TypeError, ValueError, OverflowError) as exc:
             raise ValueError(f"{name} must be an integer") from exc
-        if not np.isfinite(numeric):
-            raise ValueError(f"{name} must be a finite integer")
-        integer = int(round(numeric))
-        if not np.isclose(numeric, integer, rtol=0.0, atol=0.0):
+        try:
+            exact_integer = scalar == integer
+        except (TypeError, ValueError):
+            exact_integer = False
+        if not isinstance(exact_integer, (bool, np.bool_)) or not bool(exact_integer):
             raise ValueError(f"{name} must be an integer")
 
     if integer < 0:

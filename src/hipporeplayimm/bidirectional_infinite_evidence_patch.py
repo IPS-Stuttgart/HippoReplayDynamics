@@ -140,6 +140,7 @@ def _score_patch_is_current(compat: object, direct: object) -> bool:
 def apply_bidirectional_infinite_evidence_patch() -> None:
     from . import result_improvement_extensions as compat
     from . import reverse_models as direct
+    from . import wrapper_return_trajectory
 
     if _score_patch_is_current(compat, direct):
         setattr(compat, _PATCHED_FLAG, True)
@@ -207,15 +208,19 @@ def apply_bidirectional_infinite_evidence_patch() -> None:
         )
 
     def direct_score(self, emissions, bin_centers, *, occupancy_s=None, candidate_indices=None, return_trajectory=None):
+        forward_return_trajectory = wrapper_return_trajectory._default_return_trajectory(
+            self.base_model,
+            return_trajectory,
+        )
         forward = direct._score_model_with_optional_kwargs(
             self.base_model,
             emissions,
             bin_centers,
             occupancy_s=occupancy_s,
             candidate_indices=candidate_indices,
-            return_trajectory=return_trajectory,
+            return_trajectory=forward_return_trajectory,
         )
-        if _needs_evidence_only_terminal_retry(forward, return_trajectory):
+        if _needs_evidence_only_terminal_retry(forward, forward_return_trajectory):
             forward = direct._score_model_with_optional_kwargs(
                 self.base_model,
                 emissions,

@@ -39,10 +39,34 @@ def apply_simulation_best_row_flags_patch() -> None:
     from . import evidence_reporting as reporting
     from . import simulation_recovery as recovery
 
-    if getattr(reporting, _PATCHED_FLAG, False) and getattr(recovery, _PATCHED_FLAG, False):
+    reporting_patch_current = all(
+        getattr(getattr(reporting, name, None), _PATCHED_FLAG, False)
+        for name in (
+            "simulation_add_evidence_columns",
+            "simulation_event_best_rows",
+        )
+    )
+    recovery_patch_current = all(
+        getattr(getattr(recovery, name, None), _PATCHED_FLAG, False)
+        for name in (
+            "add_evidence_columns",
+            "_event_best_rows",
+            "recovery_summary",
+            "certified_vs_exact_event_recovery",
+            "certified_vs_exact_recovery_summary",
+            "run_session_simulation_recovery",
+        )
+    )
+    if reporting_patch_current and recovery_patch_current:
+        setattr(reporting, _PATCHED_FLAG, True)
+        setattr(recovery, _PATCHED_FLAG, True)
         return
 
     original_run_session_simulation_recovery = recovery.run_session_simulation_recovery
+    if getattr(original_run_session_simulation_recovery, _PATCHED_FLAG, False):
+        wrapped = getattr(original_run_session_simulation_recovery, "__wrapped__", None)
+        if callable(wrapped):
+            original_run_session_simulation_recovery = wrapped
 
     @wraps(reporting.simulation_add_evidence_columns)
     def simulation_add_evidence_columns_with_scoped_events(df: pd.DataFrame) -> pd.DataFrame:

@@ -10,6 +10,7 @@ from typing import Any
 import numpy as np
 
 _PATCH_ATTR = "_duration_occupancy_mode_transition_validation_patch"
+_MODE_PARAMETER_PATCH_ATTR = "_duration_occupancy_mode_parameter_validation_patch"
 _DECAY_PATCH_ATTR = "_duration_occupancy_decay_output_validation_patch"
 _DISPLACEMENT_MOMENTUM_SINGLE_BIN_PATCH_ATTR = (
     "_displacement_momentum_single_bin_evidence_support_patch"
@@ -130,6 +131,13 @@ def _wrap_duration_adjusted_decays(helper: Callable[..., np.ndarray]) -> Callabl
 
     @wraps(helper)
     def duration_adjusted_decays(config_or_decay, durations, reference_dt):
+        # The earlier model-parameter patch rejects bools and other invalid
+        # scalar decays before float coercion. importlib.reload() can replace
+        # that wrapped helper while leaving its module-level sentinel behind,
+        # so repeat the input validation in this refreshable outer guard.
+        from .model_parameter_validation import _validate_config_or_scalar_momentum_velocity_decay
+
+        _validate_config_or_scalar_momentum_velocity_decay(config_or_decay)
         out = helper(config_or_decay, durations, reference_dt)
         return _validate_decay_probabilities(out, np.asarray(durations, dtype=float))
 
@@ -228,6 +236,35 @@ def _wrap_displacement_imm_single_bin_support(helper: Callable[..., Any]) -> Cal
     return score_displacement_imm_exact
 
 
+def _wrap_mode_transition_matrices(helper: Callable[..., list[np.ndarray]]) -> Callable[..., list[np.ndarray]]:
+    if getattr(helper, _MODE_PARAMETER_PATCH_ATTR, False):
+        return helper
+
+    @wraps(helper)
+    def mode_transition_matrices(
+        ss,
+        n_modes: int,
+        mode_stickiness: float,
+        imm_switch_tau_s: float,
+        durations: np.ndarray,
+    ) -> list[np.ndarray]:
+        # Keep the original scalar contract alive after duration_occupancy is
+        # reloaded. The native helper immediately applies float(...), which
+        # would otherwise turn True into a valid-looking probability/tau.
+        from .model_parameter_validation import (
+            _validate_finite_nonnegative_parameter,
+            _validate_unit_interval_parameter,
+        )
+
+        _validate_unit_interval_parameter("imm_mode_stickiness", mode_stickiness)
+        _validate_finite_nonnegative_parameter("imm_switch_tau_s", imm_switch_tau_s)
+        return helper(ss, n_modes, mode_stickiness, imm_switch_tau_s, durations)
+
+    setattr(mode_transition_matrices, _MODE_PARAMETER_PATCH_ATTR, True)
+    setattr(mode_transition_matrices, _ORIGINAL_ATTR, helper)
+    return mode_transition_matrices
+
+
 def _wrap_resolver(resolver: Callable[..., list[np.ndarray]]) -> Callable[..., list[np.ndarray]]:
     if getattr(resolver, _PATCH_ATTR, False):
         return resolver
@@ -240,6 +277,9 @@ def _wrap_resolver(resolver: Callable[..., list[np.ndarray]]) -> Callable[..., l
         n_transitions: int,
     ) -> list[np.ndarray]:
         if mode_transitions is None:
+            from .model_parameter_validation import _validate_unit_interval_parameter
+
+            _validate_unit_interval_parameter("imm_mode_stickiness", mode_stickiness)
             return resolver(ss, n_modes, mode_stickiness, mode_transitions, n_transitions)
         return _validate_mode_transition_sequence(
             mode_transitions,
@@ -274,6 +314,9 @@ def apply_duration_occupancy_mode_transition_validation_patch() -> None:
 
     from . import duration_occupancy
 
+    duration_occupancy._mode_transition_matrices = _wrap_mode_transition_matrices(
+        duration_occupancy._mode_transition_matrices
+    )
     duration_occupancy._resolve_mode_transitions = _wrap_resolver(duration_occupancy._resolve_mode_transitions)
     duration_occupancy._duration_adjusted_decays = _wrap_duration_adjusted_decays(duration_occupancy._duration_adjusted_decays)
     _patch_displacement_single_bin_evidence_support()

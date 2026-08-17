@@ -111,7 +111,10 @@ def shuffle_well_labels(frame: pd.DataFrame, random_seed: int = 1) -> pd.DataFra
     if not bool(labelled_rows.any()):
         return out
 
-    label_values = out.loc[labelled_rows, label_columns].to_numpy(copy=True)
+    label_values = out.loc[labelled_rows, label_columns].to_numpy(
+        dtype=object,
+        copy=True,
+    )
     rng = np.random.default_rng(seed)
     if "session" not in out:
         shuffled_values = _nonidentity_permuted_rows(label_values, rng)

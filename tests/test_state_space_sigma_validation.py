@@ -109,3 +109,41 @@ def test_per_bin_sigma_preserves_large_representable_result(helper):
 def test_mode_transition_matrix_rejects_complex_stickiness():
     with pytest.raises(ValueError, match=r"mode_stickiness.*\[0, 1\]"):
         state_space._mode_transition_matrix(2, np.complex128(0.9 + 0.1j))
+
+
+@pytest.mark.parametrize(
+    ("name", "mode_stickiness", "imm_switch_tau_s"),
+    [
+        ("mode_stickiness", "0.9", 0.0),
+        ("mode_stickiness", np.asarray("0.9"), 0.0),
+        ("imm_switch_tau_s", 0.9, "0.05"),
+        ("imm_switch_tau_s", 0.9, np.asarray("0.05")),
+    ],
+)
+def test_duration_occupancy_mode_transition_rejects_string_scalars(
+    name,
+    mode_stickiness,
+    imm_switch_tau_s,
+):
+    with pytest.raises(TypeError, match=name):
+        duration_occupancy._mode_transition_matrices(
+            state_space,
+            3,
+            mode_stickiness,
+            imm_switch_tau_s,
+            np.array([0.02, 0.03]),
+        )
+
+
+def test_duration_occupancy_mode_transition_keeps_numeric_scalar_behavior():
+    transitions = duration_occupancy._mode_transition_matrices(
+        state_space,
+        3,
+        np.float64(0.9),
+        np.asarray(0.0),
+        np.array([0.02, 0.03]),
+    )
+
+    assert len(transitions) == 2
+    for transition in transitions:
+        np.testing.assert_allclose(transition.sum(axis=1), np.ones(3))

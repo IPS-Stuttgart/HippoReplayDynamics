@@ -20,7 +20,30 @@ import numpy as np
 import pandas as pd
 
 _GROUP_COLUMN_PREFIX = "__cell_split_scope_key__"
+_HASHABLE_GROUPING_PATCH_FLAG = "_cell_split_hashable_grouping_patch_applied"
 _SHUFFLE_SCOPE_INTEGER_PATCH_FLAG = "_shuffle_scope_exact_integer_patch_applied"
+
+
+def _function_is_from_this_patch(function: object) -> bool:
+    """Return whether ``function`` is one of this module's live wrappers."""
+
+    return getattr(function, "__module__", None) == __name__
+
+
+def _metadata_grouping_patch_is_current(metadata: Any) -> bool:
+    """Return whether all hashable-grouping wrappers are still installed."""
+
+    if not getattr(metadata, _HASHABLE_GROUPING_PATCH_FLAG, False):
+        return False
+    return all(
+        _function_is_from_this_patch(getattr(metadata, name, None))
+        for name in (
+            "_scores_frame_for_cell_split_metadata",
+            "_score_table_needs_cell_split_scoped_decode",
+            "_cell_split_decode_group_columns",
+            "_compare_scores_with_cell_split_metadata",
+        )
+    )
 
 
 def apply_cell_split_hashable_grouping_patch() -> None:
@@ -30,7 +53,7 @@ def apply_cell_split_hashable_grouping_patch() -> None:
 
     from . import benchmark_cell_split_metadata as metadata
 
-    if getattr(metadata, "_cell_split_hashable_grouping_patch_applied", False):
+    if _metadata_grouping_patch_is_current(metadata):
         return
 
     original_scores_frame = metadata._scores_frame_for_cell_split_metadata
@@ -52,7 +75,7 @@ def apply_cell_split_hashable_grouping_patch() -> None:
         if group_count > session_count:
             return True
         return any(
-            len(metadata._metadata_group_values(frame[column], include_missing=True)) > 1
+            _scope_key_has_multiple_values(frame, column)
             for column in metadata._CELL_SPLIT_SCOPE_COLUMNS
             if column in frame.columns
         )
@@ -63,9 +86,7 @@ def apply_cell_split_hashable_grouping_patch() -> None:
         for column in metadata._CELL_SPLIT_SCOPE_COLUMNS:
             if column not in frame.columns:
                 continue
-            has_multiple_values = len(
-                metadata._metadata_group_values(frame[column], include_missing=True)
-            ) > 1
+            has_multiple_values = _scope_key_has_multiple_values(frame, column)
             if column == "benchmark_cell_split_index" or has_multiple_values:
                 columns.append(_scope_key_column(column))
         return columns
@@ -97,7 +118,7 @@ def apply_cell_split_hashable_grouping_patch() -> None:
     metadata._score_table_needs_cell_split_scoped_decode = score_table_needs_cell_split_scoped_decode
     metadata._cell_split_decode_group_columns = cell_split_decode_group_columns
     metadata._compare_scores_with_cell_split_metadata = compare_scores_with_cell_split_metadata
-    metadata._cell_split_hashable_grouping_patch_applied = True
+    setattr(metadata, _HASHABLE_GROUPING_PATCH_FLAG, True)
 
 
 def _apply_shuffle_scope_exact_integer_patch() -> None:
@@ -148,6 +169,13 @@ def _drop_cell_split_scope_key_columns(
 
 def _scope_key_column(column: str) -> str:
     return f"{_GROUP_COLUMN_PREFIX}{column}"
+
+
+def _scope_key_has_multiple_values(frame: pd.DataFrame, column: str) -> bool:
+    """Return whether a scope column has multiple canonical metadata identities."""
+
+    key_column = _scope_key_column(column)
+    return int(frame[key_column].nunique(dropna=False)) > 1
 
 
 def _metadata_group_key(value: object) -> str:

@@ -119,49 +119,71 @@ def _grid_values(config: Any, name: str) -> tuple[Any, ...]:
     return values
 
 
-def _finite_float(name: str, value: Any) -> float:
-    if isinstance(value, (bool, np.bool_)):
-        raise ValueError(f"{name} values must be finite scalars")
+def _scalar_item(value: Any, message: str) -> Any:
+    """Return a scalar leaf while rejecting nested non-scalar array wrappers."""
+
+    current = value
+    seen_array_ids: set[int] = set()
+    while isinstance(current, np.ndarray):
+        if current.ndim != 0:
+            raise ValueError(message)
+        marker = id(current)
+        if marker in seen_array_ids:
+            raise ValueError(message)
+        seen_array_ids.add(marker)
+        try:
+            nested = current.item()
+        except (TypeError, ValueError) as exc:
+            raise ValueError(message) from exc
+        if nested is current:
+            raise ValueError(message)
+        current = nested
+
     try:
-        array = np.asarray(value)
+        array = np.asarray(current)
     except (TypeError, ValueError, OverflowError) as exc:
-        raise ValueError(f"{name} values must be finite scalars") from exc
+        raise ValueError(message) from exc
     if array.ndim != 0:
-        raise ValueError(f"{name} values must be finite scalars")
-    item = array.item()
+        raise ValueError(message)
+    try:
+        return array.item()
+    except (TypeError, ValueError) as exc:
+        raise ValueError(message) from exc
+
+
+def _finite_float(name: str, value: Any) -> float:
+    message = f"{name} values must be finite scalars"
+    item = _scalar_item(value, message)
+    if isinstance(item, (bool, np.bool_)):
+        raise ValueError(message)
     if isinstance(item, _STRING_TYPES):
         raise ValueError(f"{name} values must be finite numeric scalars, not text")
     try:
         numeric = float(item)
     except (TypeError, ValueError, OverflowError) as exc:
-        raise ValueError(f"{name} values must be finite scalars") from exc
+        raise ValueError(message) from exc
     if not np.isfinite(numeric):
-        raise ValueError(f"{name} values must be finite scalars")
+        raise ValueError(message)
     return float(numeric)
 
 
 def _positive_integer(name: str, value: Any) -> int:
-    if isinstance(value, (bool, np.bool_)):
-        raise ValueError(f"{name} must be a positive integer")
-    try:
-        array = np.asarray(value)
-    except (TypeError, ValueError) as exc:
-        raise ValueError(f"{name} must be a positive integer") from exc
-    if array.ndim != 0:
-        raise ValueError(f"{name} must be a positive integer")
-    item = array.item()
+    message = f"{name} must be a positive integer"
+    item = _scalar_item(value, message)
+    if isinstance(item, (bool, np.bool_)):
+        raise ValueError(message)
     if isinstance(item, _STRING_TYPES):
         raise ValueError(f"{name} must be a positive integer, not text")
     try:
         integer = int(item)
     except (TypeError, ValueError, OverflowError) as exc:
-        raise ValueError(f"{name} must be a positive integer") from exc
+        raise ValueError(message) from exc
     try:
         exactly_integral = bool(item == integer)
     except (TypeError, ValueError) as exc:
-        raise ValueError(f"{name} must be a positive integer") from exc
+        raise ValueError(message) from exc
     if not exactly_integral or integer <= 0:
-        raise ValueError(f"{name} must be a positive integer")
+        raise ValueError(message)
     return integer
 
 

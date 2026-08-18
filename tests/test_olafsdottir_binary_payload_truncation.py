@@ -4,7 +4,11 @@ from pathlib import Path
 
 import pytest
 
-from hipporeplayimm.olafsdottir2016 import read_axona_pos, read_axona_tetrode_spike_times
+from hipporeplayimm.olafsdottir2016 import (
+    read_axona_egf,
+    read_axona_pos,
+    read_axona_tetrode_spike_times,
+)
 
 
 def _position_record(timestamp: int = 0) -> bytes:
@@ -66,3 +70,45 @@ def test_read_axona_pos_rejects_partial_binary_record(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError, match=r"1 trailing byte"):
         read_axona_pos(path)
+
+
+def test_read_axona_egf_rejects_truncated_declared_sample_count(tmp_path: Path) -> None:
+    path = tmp_path / "session.egf"
+    header = (
+        "sample_rate 4800 hz\n"
+        "num_EGF_samples 2\n"
+        "data_start"
+    ).encode("ascii")
+    payload = (123).to_bytes(2, "big", signed=True)
+    path.write_bytes(header + payload + b"\ndata_end\n")
+
+    with pytest.raises(ValueError, match=r"declares 2 records.*only 1 complete records"):
+        read_axona_egf(path)
+
+
+def test_read_axona_egf_rejects_partial_int16_sample(tmp_path: Path) -> None:
+    path = tmp_path / "session.egf"
+    header = (
+        "sample_rate 4800 hz\n"
+        "data_start"
+    ).encode("ascii")
+    path.write_bytes(header + b"\x00\x01\x02" + b"\ndata_end\n")
+
+    with pytest.raises(ValueError, match=r"1 trailing byte"):
+        read_axona_egf(path)
+
+
+def test_read_axona_egf_honors_declared_sample_count(tmp_path: Path) -> None:
+    path = tmp_path / "session.egf"
+    header = (
+        "sample_rate 4800 hz\n"
+        "num_EGF_samples 1\n"
+        "data_start"
+    ).encode("ascii")
+    payload = (123).to_bytes(2, "big", signed=True) + (456).to_bytes(2, "big", signed=True)
+    path.write_bytes(header + payload + b"\ndata_end\n")
+
+    result = read_axona_egf(path)
+
+    assert result.signal.tolist() == [123]
+    assert result.times_s.tolist() == [0.0]

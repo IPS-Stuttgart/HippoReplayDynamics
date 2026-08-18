@@ -12,7 +12,13 @@ _WRAPPER_FLAG = "_advanced_result_margin_distinct_models_wrapper"
 def apply_advanced_result_margin_duplicate_patch() -> None:
     """Install duplicate-model handling for event-level evidence margins."""
 
+    from . import advanced_result_common_support_tie_patch as common_support_tie_patch
     from . import advanced_result_diagnostics as diagnostics
+
+    # This patch is part of the advanced-diagnostics refresh path. Keep the
+    # independent common-support selector current even when this margin wrapper
+    # itself is already installed.
+    common_support_tie_patch.apply_advanced_result_common_support_tie_patch()
 
     current = diagnostics.evidence_margin_table
     if getattr(current, _WRAPPER_FLAG, False):

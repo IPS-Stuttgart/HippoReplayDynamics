@@ -11,6 +11,7 @@ _PATCHED_ATTR = "_diffusion_impossible_posterior_guard_applied"
 _CANDIDATE_PATCHED_ATTR = "_candidate_impossible_posterior_guard_applied"
 _STATIONARY_PATCHED_ATTR = "_stationary_smoothed_trajectory_posterior_applied"
 _SPARSE_MATVEC_PATCHED_ATTR = "_diffusion_exact_sparse_matvec_support_applied"
+_PAIR_POSTERIOR_PATCHED_ATTR = "_candidate_exact_pair_posterior_support_applied"
 _NO_FINITE_PATH = "no_finite_path"
 _POSTERIOR_DIAGNOSTIC_KEYS = (
     "decoded_endpoint_x",
@@ -28,6 +29,7 @@ def apply_diffusion_impossible_path_guard_patch() -> None:
     from . import models
 
     _patch_exact_sparse_log_matvec(models)
+    _patch_exact_pair_posteriors(models)
     _patch_stationary_trajectory_posterior(models.StationaryModel)
     _patch_impossible_posterior_guard(
         models.DiffusionModel,
@@ -77,6 +79,80 @@ def _patch_exact_sparse_log_matvec(models: Any) -> None:
     setattr(exact_sparse_log_matvec, _SPARSE_MATVEC_PATCHED_ATTR, True)
     setattr(exact_sparse_log_matvec, "__hipporeplayimm_original__", current)
     models._log_sparse_matvec = exact_sparse_log_matvec
+
+
+def _patch_exact_pair_posteriors(models: Any) -> None:
+    """Keep bins outside candidate support at exact zero posterior probability.
+
+    ``models.LOG_ZERO`` is a finite legacy sentinel.  Using it to prefill a
+    posterior vector is unsafe because the vector is subsequently normalized:
+    sufficiently small but valid candidate log mass can fall below the sentinel,
+    making an impossible non-candidate bin dominate the normalized posterior.
+    Restrict exact ``-inf`` to these structural posterior zeros instead of
+    changing the process-wide sentinel and its compatibility semantics.
+    """
+
+    current_terminal = models._pair_terminal_posterior
+    current_previous = models._pair_previous_posterior
+    if getattr(current_terminal, _PAIR_POSTERIOR_PATCHED_ATTR, False) and getattr(
+        current_previous,
+        _PAIR_POSTERIOR_PATCHED_ATTR,
+        False,
+    ):
+        return
+
+    @wraps(current_terminal)
+    def exact_pair_terminal_posterior(
+        log_pair_or_modes: Any,
+        current_indices: Any,
+        n_bins: int,
+    ) -> np.ndarray:
+        values = np.asarray(log_pair_or_modes, dtype=float)
+        if values.ndim == 3:
+            collapsed = models.logsumexp(values, axis=(0, 1))
+        else:
+            collapsed = models.logsumexp(values, axis=0)
+        log_posterior = np.full(int(n_bins), -np.inf, dtype=float)
+        log_posterior[np.asarray(current_indices, dtype=int)] = collapsed
+        return models._normalize_log_weights(log_posterior)
+
+    @wraps(current_previous)
+    def exact_pair_previous_posterior(
+        log_pair_or_modes: Any,
+        previous_indices: Any,
+        n_bins: int,
+    ) -> np.ndarray:
+        values = np.asarray(log_pair_or_modes, dtype=float)
+        if values.ndim == 3:
+            collapsed = models.logsumexp(values, axis=(0, 2))
+        else:
+            collapsed = models.logsumexp(values, axis=1)
+        log_posterior = np.full(int(n_bins), -np.inf, dtype=float)
+        log_posterior[np.asarray(previous_indices, dtype=int)] = collapsed
+        return models._normalize_log_weights(log_posterior)
+
+    setattr(
+        exact_pair_terminal_posterior,
+        _PAIR_POSTERIOR_PATCHED_ATTR,
+        True,
+    )
+    setattr(
+        exact_pair_terminal_posterior,
+        "__hipporeplayimm_original__",
+        current_terminal,
+    )
+    setattr(
+        exact_pair_previous_posterior,
+        _PAIR_POSTERIOR_PATCHED_ATTR,
+        True,
+    )
+    setattr(
+        exact_pair_previous_posterior,
+        "__hipporeplayimm_original__",
+        current_previous,
+    )
+    models._pair_terminal_posterior = exact_pair_terminal_posterior
+    models._pair_previous_posterior = exact_pair_previous_posterior
 
 
 def _patch_stationary_trajectory_posterior(model_type: type[Any]) -> None:

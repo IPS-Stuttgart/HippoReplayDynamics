@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from functools import wraps
+import sys
 from types import ModuleType
 from typing import Any, Callable
 
@@ -17,11 +18,22 @@ def _stable_descending_top_k(log_emission: Any, top_k: int) -> np.ndarray:
 
     values = np.asarray(log_emission)
     indices = np.arange(values.shape[0], dtype=int)
-    # lexsort uses the last key as the primary key.  Sorting by -score gives
+    # lexsort uses the last key as the primary key. Sorting by -score gives
     # descending likelihood while the index key keeps equal scores in their
     # original spatial-bin order.
     order = np.lexsort((indices, -values))
     return np.asarray(order[: int(top_k)], dtype=int)
+
+
+def _synchronize_imported_aliases(stale: object, active: object) -> None:
+    """Refresh package modules that imported the selector before patching."""
+
+    for loaded in list(sys.modules.values()):
+        module_name = getattr(loaded, "__name__", "")
+        if not module_name.startswith("hipporeplayimm"):
+            continue
+        if getattr(loaded, "_top_candidate_indices", None) is stale:
+            setattr(loaded, "_top_candidate_indices", active)
 
 
 def _patch_selector(
@@ -45,6 +57,7 @@ def _patch_selector(
     setattr(stable_top_candidate_indices, _PATCHED_ATTR, True)
     setattr(stable_top_candidate_indices, _ORIGINAL_ATTR, current)
     module._top_candidate_indices = stable_top_candidate_indices
+    _synchronize_imported_aliases(current, stable_top_candidate_indices)
 
 
 def apply_candidate_tie_order_patch() -> None:

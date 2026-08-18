@@ -1,4 +1,4 @@
-"""Axona reader runtime fixes for data_end footers and numeric headers."""
+"""Axona reader runtime fixes for binary framing, footers, and numeric headers."""
 
 from __future__ import annotations
 
@@ -11,6 +11,14 @@ import sys
 _PATCHED_FLAG = "_axona_data_end_footer_patch_applied"
 _NUMERIC_TOKEN = re.compile(r"[-+]?(?:(?:\d+(?:\.\d*)?)|(?:\.\d+))(?:[eE][-+]?\d+)?")
 _CUT_READER_WRAPPER_ATTR = "_axona_cut_label_count_validation_wrapper"
+_DATA_START_READER_WRAPPER_ATTR = "_axona_data_start_validation_wrapper"
+_DATA_START_LINE = re.compile(rb"(?:^|[\r\n])data_start(?:\r\n|\r|\n|$)")
+_AXONA_HEADER_SCAN_BYTES = 64 * 1024
+_BINARY_READER_NAMES = (
+    "read_axona_pos",
+    "read_axona_egf",
+    "read_axona_tetrode_spike_times",
+)
 _ORIGINAL_ATTR = "__hipporeplayimm_original__"
 
 
@@ -103,6 +111,33 @@ def _declared_cut_spike_count(path: str | Path) -> int | None:
     return None
 
 
+def _require_axona_data_start(path: str | Path) -> None:
+    """Reject binary Axona files without a standalone ``data_start`` header line."""
+
+    with Path(path).open("rb") as handle:
+        prefix = handle.read(_AXONA_HEADER_SCAN_BYTES)
+    if _DATA_START_LINE.search(prefix) is None:
+        raise ValueError(
+            f"Axona binary file {path} is missing a data_start marker in its header"
+        )
+
+
+def _wrap_binary_reader_data_start(current):
+    """Require binary Axona readers to see their mandatory payload delimiter."""
+
+    if getattr(current, _DATA_START_READER_WRAPPER_ATTR, False):
+        return current
+
+    @wraps(current)
+    def read_axona_binary(path, *args, **kwargs):
+        _require_axona_data_start(path)
+        return current(path, *args, **kwargs)
+
+    setattr(read_axona_binary, _DATA_START_READER_WRAPPER_ATTR, True)
+    setattr(read_axona_binary, _ORIGINAL_ATTR, current)
+    return read_axona_binary
+
+
 def _wrap_read_axona_cut(current):
     """Reject cut files whose declared labels are truncated."""
 
@@ -127,11 +162,15 @@ def _wrap_read_axona_cut(current):
 
 
 def apply_axona_data_end_footer_patch() -> None:
-    """Install strict Axona footer, header, binary-record, and cut-label validation."""
+    """Install strict Axona framing, footer, header, and record validation."""
 
     from . import olafsdottir2016
 
     current_cut_reader = getattr(olafsdottir2016, "read_axona_cut", None)
+    current_binary_readers = {
+        name: getattr(olafsdottir2016, name, None)
+        for name in _BINARY_READER_NAMES
+    }
     if (
         getattr(olafsdottir2016, _PATCHED_FLAG, False)
         and getattr(olafsdottir2016, "_strip_axona_data_end", None) is _strip_axona_data_end
@@ -139,6 +178,10 @@ def apply_axona_data_end_footer_patch() -> None:
         and getattr(olafsdottir2016, "_header_int", None) is _header_int
         and getattr(olafsdottir2016, "_payload_record_count", None) is _payload_record_count
         and getattr(current_cut_reader, _CUT_READER_WRAPPER_ATTR, False)
+        and all(
+            getattr(reader, _DATA_START_READER_WRAPPER_ATTR, False)
+            for reader in current_binary_readers.values()
+        )
     ):
         return
     olafsdottir2016._strip_axona_data_end = _strip_axona_data_end
@@ -146,6 +189,12 @@ def apply_axona_data_end_footer_patch() -> None:
     olafsdottir2016._header_int = _header_int
     olafsdottir2016._payload_record_count = _payload_record_count
     olafsdottir2016.read_axona_cut = _wrap_read_axona_cut(current_cut_reader)
+    for name, current_reader in current_binary_readers.items():
+        setattr(
+            olafsdottir2016,
+            name,
+            _wrap_binary_reader_data_start(current_reader),
+        )
     setattr(olafsdottir2016, _PATCHED_FLAG, True)
 
 

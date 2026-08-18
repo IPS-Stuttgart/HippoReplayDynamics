@@ -47,6 +47,7 @@ def apply_ground_truth_window_scope_patch() -> None:
     _patch_first_post_ripple_well_visit(gt)
     base_compare = gt.compare_scores_to_ground_truth
     if getattr(base_compare, _PATCHED_FLAG, False):
+        _synchronize_public_compare_alias(base_compare)
         return
 
     @wraps(base_compare)
@@ -83,6 +84,22 @@ def apply_ground_truth_window_scope_patch() -> None:
 
     setattr(compare_scores_to_ground_truth_with_window_scope, _PATCHED_FLAG, True)
     gt.compare_scores_to_ground_truth = compare_scores_to_ground_truth_with_window_scope
+    _synchronize_public_compare_alias(compare_scores_to_ground_truth_with_window_scope)
+
+
+def _synchronize_public_compare_alias(active: Any) -> None:
+    """Refresh the public package alias when it still points at an older wrapper."""
+
+    import sys
+
+    package = sys.modules.get("hipporeplayimm")
+    if package is None:
+        return
+    public = getattr(package, "compare_scores_to_ground_truth", None)
+    if public is active or public is None:
+        return
+    if getattr(public, _PATCHED_FLAG, False):
+        package.compare_scores_to_ground_truth = active
 
 
 def _patch_first_post_ripple_well_visit(gt: Any) -> None:

@@ -40,6 +40,16 @@ def _contains_text_values(values: np.ndarray) -> bool:
     return False
 
 
+def _contains_complex_values(values: np.ndarray) -> bool:
+    """Return True when matrix entries are complex-valued scalars."""
+
+    if np.issubdtype(values.dtype, np.complexfloating):
+        return True
+    if values.dtype == object:
+        return any(isinstance(item, (complex, np.complexfloating)) for item in values.flat)
+    return False
+
+
 def _coerce_integer_count(value: Any, name: str, *, minimum: int) -> int:
     """Return an integer count without bool or array-scalar coercion."""
 
@@ -90,6 +100,10 @@ def _validate_mode_transition_sequence(
         if _contains_text_values(raw_values):
             raise ValueError(
                 f"mode transition matrix {transition_index} must contain numeric probabilities, not strings"
+            )
+        if _contains_complex_values(raw_values):
+            raise ValueError(
+                f"mode transition matrix {transition_index} must contain real probabilities, not complex values"
             )
         try:
             values = raw_values.astype(float, copy=False)

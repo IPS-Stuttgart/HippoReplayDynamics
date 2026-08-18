@@ -5,6 +5,7 @@ import warnings
 import numpy as np
 import pytest
 
+import hipporeplayimm
 from hipporeplayimm.data import RippleEvent, _as_two_dimensional
 
 
@@ -85,3 +86,30 @@ def test_ripple_event_from_row_rejects_nested_complex_metadata_without_cast_warn
         warnings.simplefilter("error")
         with pytest.raises(ValueError, match="real numeric"):
             RippleEvent.from_row(row)
+
+
+@pytest.mark.parametrize("column", range(6))
+@pytest.mark.parametrize("boolean_value", [False, np.bool_(True)])
+def test_ripple_events_reject_boolean_metadata(
+    column: int,
+    boolean_value: object,
+) -> None:
+    hipporeplayimm.apply_runtime_patches()
+    row = _valid_row().astype(object)
+    row[column] = boolean_value
+
+    with pytest.raises(ValueError, match="must not contain boolean"):
+        _as_two_dimensional(row, "Ripple_Events")
+
+
+def test_ripple_event_from_row_rejects_nested_boolean_metadata() -> None:
+    hipporeplayimm.apply_runtime_patches()
+    inner = np.empty((), dtype=object)
+    inner[()] = np.bool_(True)
+    outer = np.empty((), dtype=object)
+    outer[()] = inner
+    row = _valid_row().astype(object)
+    row[4] = outer
+
+    with pytest.raises(ValueError, match="must not contain boolean"):
+        RippleEvent.from_row(row)

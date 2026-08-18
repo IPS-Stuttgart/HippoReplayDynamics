@@ -28,8 +28,7 @@ class RippleEvent:
         values = np.asarray(row)
         if values.ndim != 1 or values.shape[0] < 6:
             raise ValueError("Ripple event rows must contain at least six values")
-        numeric = np.asarray(values[:6], dtype=float)
-        _validate_ripple_event_times(numeric.reshape(1, 6))
+        numeric = _validate_ripple_event_times(values[:6].reshape(1, 6))[0]
         return cls(*(float(x) for x in numeric))
 
 
@@ -482,11 +481,37 @@ def _as_two_dimensional(value: Any, name: str) -> np.ndarray:
     return arr
 
 
+def _contains_complex_values(value: Any, seen_arrays: set[int] | None = None) -> bool:
+    """Return whether an array-like value contains a complex scalar."""
+
+    if isinstance(value, (complex, np.complexfloating)):
+        return True
+    if not isinstance(value, np.ndarray):
+        return False
+    if value.dtype.kind == "c":
+        return True
+    if value.dtype != object:
+        return False
+    if seen_arrays is None:
+        seen_arrays = set()
+    marker = id(value)
+    if marker in seen_arrays:
+        return False
+    seen_arrays.add(marker)
+    return any(
+        _contains_complex_values(item, seen_arrays)
+        for item in value.reshape(-1)
+    )
+
+
 def _validate_ripple_event_times(events: np.ndarray) -> np.ndarray:
     """Validate temporal columns of the Ripple_Events schema."""
 
+    raw = np.asarray(events)
+    if _contains_complex_values(raw):
+        raise ValueError("Ripple_Events must contain real numeric values")
     try:
-        numeric = np.asarray(events, dtype=float)
+        numeric = np.asarray(raw, dtype=float)
     except (TypeError, ValueError) as exc:
         raise ValueError("Ripple_Events must contain numeric values") from exc
     times = numeric[:, :3]

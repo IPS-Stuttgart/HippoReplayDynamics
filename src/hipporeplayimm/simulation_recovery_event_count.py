@@ -24,6 +24,10 @@ from .evidence_reporting import _coerce_bool_series
 _PATCHED_FLAG = "_simulation_recovery_session_event_count_patch_applied"
 _CERTIFIED_EVENT_PATCHED_FLAG = "_simulation_recovery_certified_event_duplicate_model_patch_applied"
 _DUPLICATE_INDEX_EVIDENCE_PATCHED_FLAG = "_simulation_recovery_duplicate_index_evidence_patch_applied"
+_RECOVERY_SUMMARY_WRAPPER_FLAG = "_simulation_recovery_session_event_count_summary_wrapper"
+_CERTIFIED_SUMMARY_WRAPPER_FLAG = "_simulation_recovery_session_event_count_certified_summary_wrapper"
+_CERTIFIED_EVENT_WRAPPER_FLAG = "_simulation_recovery_certified_event_duplicate_model_wrapper"
+_ORIGINAL_ATTR = "__hipporeplayimm_original__"
 _SOURCE_SCORE_FILE_COLUMN = "source_recovery_score_file"
 _EVENT_ID_COLUMN = "event_id"
 _SUMMARY_BOOL_COLUMNS = (
@@ -58,36 +62,70 @@ def apply_simulation_recovery_event_count_patch() -> None:
     _patch_duplicate_index_evidence_annotation(best_row_flags)
     _patch_certified_event_recovery(reporting, recovery, best_row_flags)
 
-    if getattr(recovery, _PATCHED_FLAG, False):
+    recovery_summary_current = _wrapper_chain_has_marker(
+        recovery.recovery_summary,
+        _RECOVERY_SUMMARY_WRAPPER_FLAG,
+    )
+    certified_summary_current = _wrapper_chain_has_marker(
+        recovery.certified_vs_exact_recovery_summary,
+        _CERTIFIED_SUMMARY_WRAPPER_FLAG,
+    )
+    if recovery_summary_current and certified_summary_current:
+        setattr(recovery, _PATCHED_FLAG, True)
         return
 
-    original_recovery_summary = recovery.recovery_summary
-    original_certified_summary = recovery.certified_vs_exact_recovery_summary
+    if not recovery_summary_current:
+        original_recovery_summary = recovery.recovery_summary
 
-    @wraps(original_recovery_summary)
-    def recovery_summary_with_session_event_counts(event_scores: pd.DataFrame) -> pd.DataFrame:
-        normalized_scores = _normalize_summary_bool_columns(event_scores)
-        summary = original_recovery_summary(normalized_scores)
-        if summary.empty or "simulated_events" not in summary.columns:
-            return summary
-        best = recovery._event_best_rows(normalized_scores)
-        return _replace_simulated_event_counts(summary, best)
+        @wraps(original_recovery_summary)
+        def recovery_summary_with_session_event_counts(event_scores: pd.DataFrame) -> pd.DataFrame:
+            normalized_scores = _normalize_summary_bool_columns(event_scores)
+            summary = original_recovery_summary(normalized_scores)
+            if summary.empty or "simulated_events" not in summary.columns:
+                return summary
+            best = recovery._event_best_rows(normalized_scores)
+            return _replace_simulated_event_counts(summary, best)
 
-    @wraps(original_certified_summary)
-    def certified_vs_exact_recovery_summary_with_session_event_counts(
-        event_scores: pd.DataFrame,
-    ) -> pd.DataFrame:
-        normalized_scores = _normalize_summary_bool_columns(event_scores)
-        summary = original_certified_summary(normalized_scores)
-        if summary.empty or "simulated_events" not in summary.columns:
-            return summary
-        events = recovery.certified_vs_exact_event_recovery(normalized_scores)
-        return _replace_simulated_event_counts(summary, events)
+        setattr(
+            recovery_summary_with_session_event_counts,
+            _RECOVERY_SUMMARY_WRAPPER_FLAG,
+            True,
+        )
+        setattr(
+            recovery_summary_with_session_event_counts,
+            _ORIGINAL_ATTR,
+            original_recovery_summary,
+        )
+        recovery.recovery_summary = recovery_summary_with_session_event_counts
 
-    recovery.recovery_summary = recovery_summary_with_session_event_counts
-    recovery.certified_vs_exact_recovery_summary = (
-        certified_vs_exact_recovery_summary_with_session_event_counts
-    )
+    if not certified_summary_current:
+        original_certified_summary = recovery.certified_vs_exact_recovery_summary
+
+        @wraps(original_certified_summary)
+        def certified_vs_exact_recovery_summary_with_session_event_counts(
+            event_scores: pd.DataFrame,
+        ) -> pd.DataFrame:
+            normalized_scores = _normalize_summary_bool_columns(event_scores)
+            summary = original_certified_summary(normalized_scores)
+            if summary.empty or "simulated_events" not in summary.columns:
+                return summary
+            events = recovery.certified_vs_exact_event_recovery(normalized_scores)
+            return _replace_simulated_event_counts(summary, events)
+
+        setattr(
+            certified_vs_exact_recovery_summary_with_session_event_counts,
+            _CERTIFIED_SUMMARY_WRAPPER_FLAG,
+            True,
+        )
+        setattr(
+            certified_vs_exact_recovery_summary_with_session_event_counts,
+            _ORIGINAL_ATTR,
+            original_certified_summary,
+        )
+        recovery.certified_vs_exact_recovery_summary = (
+            certified_vs_exact_recovery_summary_with_session_event_counts
+        )
+
     setattr(recovery, _PATCHED_FLAG, True)
 
 
@@ -134,10 +172,13 @@ def _patch_certified_event_recovery(reporting: Any, recovery: Any, best_row_flag
     row with the same model label.
     """
 
-    if getattr(recovery, _CERTIFIED_EVENT_PATCHED_FLAG, False):
+    current = recovery.certified_vs_exact_event_recovery
+    if _wrapper_chain_has_marker(current, _CERTIFIED_EVENT_WRAPPER_FLAG):
+        setattr(recovery, _CERTIFIED_EVENT_PATCHED_FLAG, True)
+        _sync_recovery_diagnostics(recovery)
         return
 
-    original_certified_events = recovery.certified_vs_exact_event_recovery
+    original_certified_events = current
 
     @wraps(original_certified_events)
     def certified_vs_exact_event_recovery(event_scores: pd.DataFrame) -> pd.DataFrame:
@@ -148,6 +189,16 @@ def _patch_certified_event_recovery(reporting: Any, recovery: Any, best_row_flag
             best_row_flags,
         )
 
+    setattr(
+        certified_vs_exact_event_recovery,
+        _CERTIFIED_EVENT_WRAPPER_FLAG,
+        True,
+    )
+    setattr(
+        certified_vs_exact_event_recovery,
+        _ORIGINAL_ATTR,
+        original_certified_events,
+    )
     recovery.certified_vs_exact_event_recovery = certified_vs_exact_event_recovery
     setattr(recovery, _CERTIFIED_EVENT_PATCHED_FLAG, True)
     _sync_recovery_diagnostics(recovery)
@@ -377,6 +428,22 @@ def _distinct_event_count(events: pd.DataFrame) -> int:
     if event_columns:
         return int(events[event_columns].drop_duplicates().shape[0])
     return int(len(events))
+
+
+def _wrapper_chain_has_marker(function: Any, marker: str) -> bool:
+    """Return whether a wrapper marker exists anywhere in a callable chain."""
+
+    current = function
+    seen: set[int] = set()
+    while callable(current):
+        current_id = id(current)
+        if current_id in seen:
+            return False
+        seen.add(current_id)
+        if getattr(current, marker, False):
+            return True
+        current = getattr(current, "__wrapped__", None)
+    return False
 
 
 __all__ = ["apply_simulation_recovery_event_count_patch"]

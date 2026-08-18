@@ -308,8 +308,12 @@ def _window_from_score_rows(scores_frame: pd.DataFrame) -> RippleEvent | None:
         return None
     start = _unique_finite_float(scores_frame, "window_start_s")
     end = _unique_finite_float(scores_frame, "window_end_s")
-    if start is None or end is None:
+    if start is None and end is None:
         return None
+    if start is None or end is None:
+        raise ValueError(
+            "window_start_s and window_end_s must either both be present or both be missing"
+        )
     if end <= start:
         raise ValueError("window_end_s must be greater than window_start_s")
     with np.errstate(over="ignore", invalid="ignore"):

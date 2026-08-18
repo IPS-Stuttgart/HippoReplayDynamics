@@ -218,16 +218,68 @@ def read_axona_egf(path: str | Path) -> AxonaEgf:
 
 
 def read_axona_tetrode_spike_times(path: str | Path) -> np.ndarray:
-    """Read spike timestamps from a raw Axona tetrode file."""
+    """Read spike timestamps from a raw Axona tetrode file.
+
+    Axona stores one timestamp-plus-waveform record per tetrode contact, so a
+    four-contact spike repeats its timestamp four times.  Older synthetic test
+    fixtures in this project omitted ``num_chans`` and used a single timestamp
+    followed by four waveforms; that legacy layout remains supported only when
+    the channel count is absent from the header.
+    """
 
     header, payload = _read_axona_header_and_payload(path)
     samples_per_spike = _header_int(header, "samples_per_spike", 50)
-    record_size = 4 + 4 * samples_per_spike
-    n_spikes = _payload_record_count(payload, record_size, _header_int(header, "num_spikes", 0))
-    if n_spikes == 0:
-        return np.empty(0, dtype=float)
-    records = np.frombuffer(payload[: n_spikes * record_size], dtype=np.uint8).reshape(n_spikes, record_size)
-    timestamps = np.ascontiguousarray(records[:, :4]).view(">u4").reshape(-1).astype(float)
+    timestamp_bytes = _header_int(header, "bytes_per_timestamp", 4)
+    sample_bytes = _header_int(header, "bytes_per_sample", 1)
+    if samples_per_spike <= 0:
+        raise ValueError("samples_per_spike must be positive")
+    if timestamp_bytes != 4 or sample_bytes != 1:
+        raise ValueError(
+            "Only Axona tetrode files with 4-byte timestamps and 1-byte waveform samples are supported"
+        )
+
+    header_count = _header_int(header, "num_spikes", 0)
+    if "num_chans" not in header:
+        # Backwards compatibility for the repository's historical minimal
+        # fixture.  Real Axona tetrode headers carry ``num_chans`` and use the
+        # per-contact layout handled below.
+        record_size = timestamp_bytes + 4 * samples_per_spike * sample_bytes
+        n_spikes = _payload_record_count(payload, record_size, header_count)
+        if n_spikes == 0:
+            return np.empty(0, dtype=float)
+        records = np.frombuffer(
+            payload[: n_spikes * record_size],
+            dtype=np.uint8,
+        ).reshape(n_spikes, record_size)
+        timestamps = (
+            np.ascontiguousarray(records[:, :timestamp_bytes])
+            .view(">u4")
+            .reshape(-1)
+            .astype(float)
+        )
+    else:
+        n_channels = _header_int(header, "num_chans", 4)
+        if n_channels <= 0:
+            raise ValueError("num_chans must be positive")
+        contact_record_size = timestamp_bytes + samples_per_spike * sample_bytes
+        record_size = n_channels * contact_record_size
+        n_spikes = _payload_record_count(payload, record_size, header_count)
+        if n_spikes == 0:
+            return np.empty(0, dtype=float)
+        records = np.frombuffer(
+            payload[: n_spikes * record_size],
+            dtype=np.uint8,
+        ).reshape(n_spikes, n_channels, contact_record_size)
+        timestamp_fields = np.ascontiguousarray(records[:, :, :timestamp_bytes])
+        timestamps_by_channel = (
+            timestamp_fields.reshape(-1, timestamp_bytes)
+            .view(">u4")
+            .reshape(n_spikes, n_channels)
+        )
+        if n_channels > 1 and not np.all(timestamps_by_channel == timestamps_by_channel[:, :1]):
+            raise ValueError("Axona tetrode contact timestamps disagree within a spike record")
+        timestamps = timestamps_by_channel[:, 0].astype(float)
+
     timebase_hz = _header_float(header, "timebase", 96000.0)
     return timestamps / float(timebase_hz)
 

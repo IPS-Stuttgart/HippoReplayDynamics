@@ -4,13 +4,11 @@ The MATLAB/HDF5 loader exposes run, sleep, immobility, and REM intervals through
 ``data._as_intervals``. NumPy converts booleans to ``0``/``1`` and can discard
 complex imaginary components while casting to float, allowing corrupted metadata
 to look like valid epoch boundaries. Ripple-event rows have the same boolean-cast
-hazard. This runtime guard validates interval scalars and rejects boolean ripple
-metadata before the legacy numeric coercion paths run.
+hazard, so they are guarded before their legacy numeric conversion as well.
 """
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping
 from functools import wraps
 import sys
 from typing import Any
@@ -26,7 +24,7 @@ _RIPPLE_MESSAGE = "Ripple_Events must not contain boolean values"
 
 
 def apply_data_interval_validation_patch() -> None:
-    """Install strict scalar validation on dataset timing metadata."""
+    """Install strict scalar validation on shared dataset timing metadata."""
 
     from . import data
 
@@ -49,18 +47,7 @@ def apply_data_interval_validation_patch() -> None:
         _synchronize_interval_aliases(original, as_intervals)
 
     current_ripple_validator = data._validate_ripple_event_times
-    if bool(getattr(current_ripple_validator, _RIPPLE_WRAPPER_MARK, False)):
-        original_ripple_validator = getattr(
-            current_ripple_validator,
-            _ORIGINAL_ATTR,
-            None,
-        )
-        if original_ripple_validator is not None:
-            _synchronize_ripple_validator_aliases(
-                original_ripple_validator,
-                current_ripple_validator,
-            )
-    else:
+    if not bool(getattr(current_ripple_validator, _RIPPLE_WRAPPER_MARK, False)):
         original_ripple_validator = current_ripple_validator
 
         @wraps(original_ripple_validator)
@@ -72,10 +59,6 @@ def apply_data_interval_validation_patch() -> None:
         setattr(validate_ripple_event_times, _RIPPLE_WRAPPER_MARK, True)
         setattr(validate_ripple_event_times, _ORIGINAL_ATTR, original_ripple_validator)
         data._validate_ripple_event_times = validate_ripple_event_times
-        _synchronize_ripple_validator_aliases(
-            original_ripple_validator,
-            validate_ripple_event_times,
-        )
 
     setattr(data, _PATCHED_FLAG, True)
 
@@ -137,43 +120,33 @@ def _finite_real_interval_scalar(value: Any) -> float:
     return numeric
 
 
-def _contains_boolean_values(
-    value: Any,
-    seen_arrays: set[int] | None = None,
-) -> bool:
+def _contains_boolean_values(values: Any) -> bool:
     """Return whether an array-like value contains a boolean scalar."""
 
-    if isinstance(value, (bool, np.bool_)):
-        return True
-    if isinstance(value, np.ndarray):
-        if value.size == 0:
-            return False
-        if np.issubdtype(value.dtype, np.bool_):
-            return True
-        if value.dtype != object:
-            return False
-        if seen_arrays is None:
-            seen_arrays = set()
-        marker = id(value)
-        if marker in seen_arrays:
-            return False
-        seen_arrays.add(marker)
-        try:
-            return any(
-                _contains_boolean_values(item, seen_arrays)
-                for item in value.reshape(-1)
-            )
-        finally:
-            seen_arrays.remove(marker)
-    if isinstance(value, Mapping):
-        return any(
-            _contains_boolean_values(item, seen_arrays)
-            for item in value.values()
-        )
-    if isinstance(value, (str, bytes, bytearray)):
+    try:
+        raw = np.asarray(values, dtype=object)
+    except (TypeError, ValueError, OverflowError):
         return False
-    if isinstance(value, Iterable):
-        return any(_contains_boolean_values(item, seen_arrays) for item in value)
+
+    for item in raw.reshape(-1):
+        current = item
+        seen_arrays: set[int] = set()
+        while isinstance(current, np.ndarray):
+            if current.ndim != 0:
+                break
+            identity = id(current)
+            if identity in seen_arrays:
+                break
+            seen_arrays.add(identity)
+            try:
+                nested = current.item()
+            except (TypeError, ValueError):
+                break
+            if nested is current:
+                break
+            current = nested
+        if isinstance(current, (bool, np.bool_)):
+            return True
     return False
 
 
@@ -186,17 +159,6 @@ def _synchronize_interval_aliases(original: Any, replacement: Any) -> None:
             continue
         if getattr(module, "_as_intervals", None) is original:
             module._as_intervals = replacement
-
-
-def _synchronize_ripple_validator_aliases(original: Any, replacement: Any) -> None:
-    """Refresh package modules that imported the ripple validator by value."""
-
-    for module in list(sys.modules.values()):
-        module_name = getattr(module, "__name__", "")
-        if not module_name.startswith("hipporeplayimm"):
-            continue
-        if getattr(module, "_validate_ripple_event_times", None) is original:
-            module._validate_ripple_event_times = replacement
 
 
 __all__ = ["apply_data_interval_validation_patch"]

@@ -69,6 +69,28 @@ def _header_int(header: dict[str, str], key: str, default: int) -> int:
     return int(integral)
 
 
+def _payload_record_count(payload: bytes, record_size: int, header_count: int) -> int:
+    """Return the usable Axona record count without hiding truncated payloads."""
+
+    record_size = int(record_size)
+    header_count = int(header_count)
+    if record_size <= 0:
+        raise ValueError("Axona record size must be positive")
+
+    available, remainder = divmod(len(payload), record_size)
+    if remainder:
+        raise ValueError(
+            f"Axona payload has {remainder} trailing byte(s); expected complete "
+            f"{record_size}-byte records"
+        )
+    if header_count > available:
+        raise ValueError(
+            f"Axona header declares {header_count} records but payload contains only "
+            f"{available} complete records"
+        )
+    return available if header_count <= 0 else header_count
+
+
 def _declared_cut_spike_count(path: str | Path) -> int | None:
     """Return the spike count declared by an Axona ``.cut`` header."""
 
@@ -105,7 +127,7 @@ def _wrap_read_axona_cut(current):
 
 
 def apply_axona_data_end_footer_patch() -> None:
-    """Install strict Axona footer, header, and cut-label validation."""
+    """Install strict Axona footer, header, binary-record, and cut-label validation."""
 
     from . import olafsdottir2016
 
@@ -115,12 +137,14 @@ def apply_axona_data_end_footer_patch() -> None:
         and getattr(olafsdottir2016, "_strip_axona_data_end", None) is _strip_axona_data_end
         and getattr(olafsdottir2016, "_header_float", None) is _header_float
         and getattr(olafsdottir2016, "_header_int", None) is _header_int
+        and getattr(olafsdottir2016, "_payload_record_count", None) is _payload_record_count
         and getattr(current_cut_reader, _CUT_READER_WRAPPER_ATTR, False)
     ):
         return
     olafsdottir2016._strip_axona_data_end = _strip_axona_data_end
     olafsdottir2016._header_float = _header_float
     olafsdottir2016._header_int = _header_int
+    olafsdottir2016._payload_record_count = _payload_record_count
     olafsdottir2016.read_axona_cut = _wrap_read_axona_cut(current_cut_reader)
     setattr(olafsdottir2016, _PATCHED_FLAG, True)
 

@@ -10,17 +10,26 @@ _FLOAT_TOKEN = re.compile(
     r"(?<![A-Za-z0-9_.])[-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][-+]?\d+)?(?![A-Za-z0-9_.])"
 )
 _PATCH_FLAG = "_olafsdottir_header_float_patch_applied"
+_STRICTLY_POSITIVE_KEYS = frozenset({"timebase", "sample_rate", "pixels_per_metre"})
+
+
+def _validated_header_float(key: str, value: float) -> float:
+    if key in _STRICTLY_POSITIVE_KEYS and value <= 0.0:
+        raise ValueError(f"Axona header {key} must be positive")
+    return value
 
 
 def _header_float(header: Mapping[str, str], key: str, default: float) -> float:
     raw = header.get(key)
     if raw is None:
-        return float(default)
+        return _validated_header_float(key, float(default))
     match = _FLOAT_TOKEN.search(str(raw))
     if match is None:
-        return float(default)
+        return _validated_header_float(key, float(default))
     value = float(match.group(0))
-    return value if math.isfinite(value) else float(default)
+    if not math.isfinite(value):
+        value = float(default)
+    return _validated_header_float(key, value)
 
 
 def apply_olafsdottir_header_float_patch() -> None:

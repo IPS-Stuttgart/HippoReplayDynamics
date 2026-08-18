@@ -5,6 +5,7 @@ import sys
 from pathlib import Path
 
 import pandas as pd
+import pytest
 
 _SCRIPT = Path(__file__).resolve().parents[1] / "scripts" / "compare_model_evidence_runs.py"
 sys.path.insert(0, str(_SCRIPT.parent))
@@ -94,3 +95,33 @@ def test_compare_runs_ignores_optional_metadata_missing_from_one_run(tmp_path: P
     assert tables["event_comparison"]["canonical_best_agree"].tolist() == [True]
     assert tables["event_comparison"]["left_canonical_best_model"].tolist() == ["momentum"]
     assert set(tables["relative"]["canonical_model"]) == {"diffusion", "momentum"}
+
+
+def test_compare_runs_rejects_ambiguous_alignment_when_discriminator_is_missing(tmp_path: Path) -> None:
+    left = tmp_path / "left"
+    right = tmp_path / "right"
+    _write_scores(
+        left,
+        [
+            _score_row("sorted-spike-state-space-diffusion", -10.0, null_random_seed=11),
+            _score_row("sorted-spike-state-space-momentum-exact-sparse", -1.0, null_random_seed=11),
+            _score_row("sorted-spike-state-space-diffusion", -2.0, null_random_seed=12),
+            _score_row("sorted-spike-state-space-momentum-exact-sparse", -9.0, null_random_seed=12),
+        ],
+    )
+    _write_scores(
+        right,
+        [
+            _score_row("sorted-spike-state-space-diffusion", -11.0),
+            _score_row("sorted-spike-state-space-momentum-exact-sparse", -2.0),
+        ],
+    )
+
+    with pytest.raises(ValueError, match="cannot be aligned uniquely"):
+        compare_model_evidence_runs.compare_runs(
+            left,
+            right,
+            left_label="left",
+            right_label="right",
+            output=tmp_path / "comparison",
+        )

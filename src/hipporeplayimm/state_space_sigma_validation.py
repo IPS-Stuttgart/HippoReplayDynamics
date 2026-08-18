@@ -19,6 +19,9 @@ import numpy as np
 _STATE_SPACE_UTILS_PATCHED_FLAG = "_state_space_per_bin_sigma_validation_patch_applied"
 _DURATION_OCCUPANCY_PATCHED_FLAG = "_duration_occupancy_per_bin_sigma_validation_patch_applied"
 _MODE_TRANSITION_PATCHED_FLAG = "_state_space_mode_transition_string_validation_patch_applied"
+_DURATION_MODE_TRANSITION_PATCHED_FLAG = (
+    "_duration_occupancy_mode_transition_scalar_validation_patch_applied"
+)
 _PER_BIN_SIGMA_WRAPPER_VERSION = 2
 _STRING_SCALAR_TYPES = (str, bytes, np.str_, np.bytes_)
 
@@ -162,12 +165,49 @@ def _patch_state_space_utils_mode_transition() -> None:
             module._mode_transition_matrix = mode_transition_matrix
 
 
+def _patch_duration_occupancy_mode_transition() -> None:
+    """Keep duration-aware IMM scalar validation aligned with shared helpers."""
+
+    from . import duration_occupancy
+
+    current = duration_occupancy._mode_transition_matrices
+    if getattr(current, _DURATION_MODE_TRANSITION_PATCHED_FLAG, False):
+        return
+
+    @wraps(current)
+    def mode_transition_matrices(
+        ss,
+        n_modes,
+        mode_stickiness,
+        imm_switch_tau_s,
+        durations,
+    ):
+        _reject_boolean_or_array_scalar("mode_stickiness", mode_stickiness)
+        _reject_boolean_or_array_scalar("imm_switch_tau_s", imm_switch_tau_s)
+        return current(
+            ss,
+            n_modes,
+            mode_stickiness,
+            imm_switch_tau_s,
+            durations,
+        )
+
+    setattr(
+        mode_transition_matrices,
+        _DURATION_MODE_TRANSITION_PATCHED_FLAG,
+        True,
+    )
+    setattr(mode_transition_matrices, "__hipporeplayimm_original__", current)
+    duration_occupancy._mode_transition_matrices = mode_transition_matrices
+
+
 def apply_state_space_sigma_validation_patch() -> None:
     """Install idempotent validation for state-space scalar conversion helpers."""
 
     _patch_state_space_utils_sigma()
     _patch_duration_occupancy_sigma()
     _patch_state_space_utils_mode_transition()
+    _patch_duration_occupancy_mode_transition()
 
 
 __all__ = ["apply_state_space_sigma_validation_patch"]

@@ -224,6 +224,14 @@ def _synchronize_duration_patched_emission_builders() -> None:
             module.build_kd_emissions = _kd_reference_module.build_kd_emissions
 
 
+def _synchronize_simulation_recovery_public_exports() -> None:
+    """Refresh package exports after ``simulation_recovery`` is reloaded."""
+
+    globals()["SimulationRecoveryConfig"] = _simulation_recovery.SimulationRecoveryConfig
+    globals()["SimulationRecoveryResult"] = _simulation_recovery.SimulationRecoveryResult
+    globals()["run_session_simulation_recovery"] = _simulation_recovery.run_session_simulation_recovery
+
+
 def apply_runtime_patches() -> None:
     """Install runtime compatibility patches in the package-defined order.
 
@@ -334,6 +342,7 @@ def apply_runtime_patches() -> None:
     _result_improvement_seed_validation.apply_result_improvement_seed_validation_patch()
     _bidirectional_infinite_evidence_patch.apply_bidirectional_infinite_evidence_patch()
     _evidence_complex_validation.apply_evidence_complex_validation_patch()
+    _synchronize_simulation_recovery_public_exports()
 
 
 # Ensure replay dynamics use center-to-center transition durations when replay

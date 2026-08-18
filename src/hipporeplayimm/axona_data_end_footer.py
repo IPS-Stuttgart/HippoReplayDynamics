@@ -8,9 +8,12 @@ from pathlib import Path
 import re
 import sys
 
+import numpy as np
+
 _PATCHED_FLAG = "_axona_data_end_footer_patch_applied"
 _NUMERIC_TOKEN = re.compile(r"[-+]?(?:(?:\d+(?:\.\d*)?)|(?:\.\d+))(?:[eE][-+]?\d+)?")
 _CUT_READER_WRAPPER_ATTR = "_axona_cut_label_count_validation_wrapper"
+_EGF_READER_WRAPPER_ATTR = "_axona_egf_payload_count_validation_wrapper"
 _ORIGINAL_ATTR = "__hipporeplayimm_original__"
 
 
@@ -126,12 +129,44 @@ def _wrap_read_axona_cut(current):
     return read_axona_cut
 
 
+def _wrap_read_axona_egf(current):
+    """Parse only complete EGF samples and honor the declared sample count."""
+
+    if getattr(current, _EGF_READER_WRAPPER_ATTR, False):
+        return current
+
+    @wraps(current)
+    def read_axona_egf(path):
+        from . import olafsdottir2016
+
+        header, payload = olafsdottir2016._read_axona_header_and_payload(path)
+        n_samples = _payload_record_count(
+            payload,
+            2,
+            _header_int(header, "num_EGF_samples", 0),
+        )
+        signal = np.frombuffer(payload[: n_samples * 2], dtype=">i2").astype(np.int16)
+        sample_rate_hz = _header_float(header, "sample_rate", 4800.0)
+        times_s = np.arange(signal.shape[0], dtype=float) / float(sample_rate_hz)
+        return olafsdottir2016.AxonaEgf(
+            header=header,
+            signal=signal,
+            sample_rate_hz=float(sample_rate_hz),
+            times_s=times_s,
+        )
+
+    setattr(read_axona_egf, _EGF_READER_WRAPPER_ATTR, True)
+    setattr(read_axona_egf, _ORIGINAL_ATTR, current)
+    return read_axona_egf
+
+
 def apply_axona_data_end_footer_patch() -> None:
     """Install strict Axona footer, header, binary-record, and cut-label validation."""
 
     from . import olafsdottir2016
 
     current_cut_reader = getattr(olafsdottir2016, "read_axona_cut", None)
+    current_egf_reader = getattr(olafsdottir2016, "read_axona_egf", None)
     if (
         getattr(olafsdottir2016, _PATCHED_FLAG, False)
         and getattr(olafsdottir2016, "_strip_axona_data_end", None) is _strip_axona_data_end
@@ -139,6 +174,7 @@ def apply_axona_data_end_footer_patch() -> None:
         and getattr(olafsdottir2016, "_header_int", None) is _header_int
         and getattr(olafsdottir2016, "_payload_record_count", None) is _payload_record_count
         and getattr(current_cut_reader, _CUT_READER_WRAPPER_ATTR, False)
+        and getattr(current_egf_reader, _EGF_READER_WRAPPER_ATTR, False)
     ):
         return
     olafsdottir2016._strip_axona_data_end = _strip_axona_data_end
@@ -146,6 +182,7 @@ def apply_axona_data_end_footer_patch() -> None:
     olafsdottir2016._header_int = _header_int
     olafsdottir2016._payload_record_count = _payload_record_count
     olafsdottir2016.read_axona_cut = _wrap_read_axona_cut(current_cut_reader)
+    olafsdottir2016.read_axona_egf = _wrap_read_axona_egf(current_egf_reader)
     setattr(olafsdottir2016, _PATCHED_FLAG, True)
 
 

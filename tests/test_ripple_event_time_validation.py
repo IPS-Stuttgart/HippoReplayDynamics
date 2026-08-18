@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import warnings
+
 import numpy as np
 import pytest
 
@@ -55,3 +57,31 @@ def test_ripple_event_from_row_rejects_malformed_temporal_metadata() -> None:
 def test_ripple_event_from_row_rejects_short_rows_cleanly() -> None:
     with pytest.raises(ValueError, match="at least six"):
         RippleEvent.from_row(np.array([1.0, 1.2, 1.1]))
+
+
+@pytest.mark.parametrize(
+    "imaginary_part",
+    [0.0, 2.0],
+)
+def test_ripple_events_reject_complex_dtype_without_cast_warning(
+    imaginary_part: float,
+) -> None:
+    row = _valid_row().astype(complex)
+    row[3] = complex(row[3].real, imaginary_part)
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        with pytest.raises(ValueError, match="real numeric"):
+            _as_two_dimensional(row, "Ripple_Events")
+
+
+def test_ripple_event_from_row_rejects_nested_complex_metadata_without_cast_warning() -> None:
+    nested = np.empty((), dtype=object)
+    nested[()] = np.complex128(2.0 + 1.0j)
+    row = _valid_row().astype(object)
+    row[4] = nested
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        with pytest.raises(ValueError, match="real numeric"):
+            RippleEvent.from_row(row)

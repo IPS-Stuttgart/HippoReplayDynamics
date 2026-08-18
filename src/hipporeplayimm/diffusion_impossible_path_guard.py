@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sys
 from functools import wraps
 from typing import Any
 
@@ -23,10 +24,11 @@ _POSTERIOR_DIAGNOSTIC_KEYS = (
 
 
 def apply_diffusion_impossible_path_guard_patch() -> None:
-    """Install exact sparse support and posterior guards for core replay models."""
+    """Install exact log-zero support and posterior guards for core replay models."""
 
     from . import models
 
+    _install_exact_log_zero(models)
     _patch_exact_sparse_log_matvec(models)
     _patch_stationary_trajectory_posterior(models.StationaryModel)
     _patch_impossible_posterior_guard(
@@ -39,6 +41,20 @@ def apply_diffusion_impossible_path_guard_patch() -> None:
         marker=_CANDIDATE_PATCHED_ATTR,
         diagnostic_key="candidate_path_support",
     )
+
+
+def _install_exact_log_zero(models: Any) -> None:
+    """Keep impossible and pruned states at true zero probability in log space."""
+
+    models.LOG_ZERO = -np.inf
+    for module in list(sys.modules.values()):
+        module_name = getattr(module, "__name__", "")
+        if not module_name.startswith("hipporeplayimm"):
+            continue
+        if hasattr(module, "LOG_ZERO"):
+            setattr(module, "LOG_ZERO", -np.inf)
+        if hasattr(module, "_LOG_ZERO_ROW_THRESHOLD"):
+            setattr(module, "_LOG_ZERO_ROW_THRESHOLD", -np.inf)
 
 
 def _patch_exact_sparse_log_matvec(models: Any) -> None:

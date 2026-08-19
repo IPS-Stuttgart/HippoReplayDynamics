@@ -369,8 +369,10 @@ def _sample_start_times(start_intervals: np.ndarray, *, n: int, random_seed: int
 
 
 def _base_candidate_intervals(session: ReplaySession, *, restrict_to_run_times: bool) -> np.ndarray:
-    if restrict_to_run_times and session.run_times.size:
-        return np.asarray(session.run_times, dtype=float).reshape(-1, 2)
+    if restrict_to_run_times:
+        if session.run_times.size:
+            return np.asarray(session.run_times, dtype=float).reshape(-1, 2)
+        return np.empty((0, 2), dtype=float)
     if session.position.size:
         position_times = np.asarray(session.position[:, 0], dtype=float)
         finite = position_times[np.isfinite(position_times)]

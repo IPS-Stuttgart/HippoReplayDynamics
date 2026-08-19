@@ -103,9 +103,17 @@ def apply_state_space_candidate_count_validation_patch() -> None:
     """Install unconditional validation for candidate-count config fields."""
 
     from . import state_space_model
+    from .state_space_candidate_bin_center_validation import (
+        apply_state_space_candidate_bin_center_validation_patch,
+    )
 
     _patch_candidate_indices(state_space_model)
     _patch_score(state_space_model)
+    # ``state_space_model`` can be reloaded independently.  Its fresh class loses
+    # the bin-center wrapper normally installed by importing ``state_space``;
+    # restore it after the count wrapper so repeated runtime refreshes remain
+    # idempotent and preserve the documented 1D-bin-center support.
+    apply_state_space_candidate_bin_center_validation_patch()
 
 
 __all__ = ["apply_state_space_candidate_count_validation_patch"]

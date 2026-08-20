@@ -222,6 +222,8 @@ def _seed_value(value: object, name: str) -> int:
     item: Any = raw.item()
     if isinstance(item, (bool, np.bool_)):
         raise TypeError(f"{name} must be an integer, not boolean")
+    if isinstance(item, (complex, np.complexfloating)):
+        raise TypeError(f"{name} must be a real integer, not complex")
     if isinstance(item, (int, np.integer)):
         seed = int(item)
     elif isinstance(item, (str, bytes)):
@@ -233,6 +235,10 @@ def _seed_value(value: object, name: str) -> int:
         if item != integer:
             raise ValueError(message)
         seed = int(integer)
+    elif isinstance(item, np.floating):
+        if not np.isfinite(item) or not bool(np.equal(item, np.trunc(item))):
+            raise ValueError(message)
+        seed = int(item)
     else:
         try:
             numeric = float(item)

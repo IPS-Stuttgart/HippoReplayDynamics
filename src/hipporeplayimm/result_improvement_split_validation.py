@@ -91,7 +91,9 @@ def _synchronize_aliases(original: Any, patched: Any) -> None:
 
     for module in list(sys.modules.values()):
         module_name = getattr(module, "__name__", "")
-        if not module_name.startswith("hipporeplayimm"):
+        if module_name != "hipporeplayimm" and not module_name.startswith(
+            "hipporeplayimm."
+        ):
             continue
         if getattr(module, "stratified_cell_split", None) is original:
             module.stratified_cell_split = patched

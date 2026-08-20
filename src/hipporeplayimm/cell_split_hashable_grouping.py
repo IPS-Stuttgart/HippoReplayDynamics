@@ -46,6 +46,16 @@ def _metadata_grouping_patch_is_current(metadata: Any) -> bool:
     )
 
 
+def _shuffle_scope_integer_patch_is_current(shuffle_controls: Any) -> bool:
+    """Return whether the exact-integer shuffle scope wrapper is still live."""
+
+    if not getattr(shuffle_controls, _SHUFFLE_SCOPE_INTEGER_PATCH_FLAG, False):
+        return False
+    return _function_is_from_this_patch(
+        getattr(shuffle_controls, "_numeric_scope_label", None)
+    )
+
+
 def apply_cell_split_hashable_grouping_patch() -> None:
     """Make grouping robust to unhashable metadata and large integer scope IDs."""
 
@@ -126,7 +136,7 @@ def _apply_shuffle_scope_exact_integer_patch() -> None:
 
     from . import shuffle_controls
 
-    if getattr(shuffle_controls, _SHUFFLE_SCOPE_INTEGER_PATCH_FLAG, False):
+    if _shuffle_scope_integer_patch_is_current(shuffle_controls):
         return
 
     original_numeric_scope_label = shuffle_controls._numeric_scope_label

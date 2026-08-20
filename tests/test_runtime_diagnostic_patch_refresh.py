@@ -109,7 +109,10 @@ def test_runtime_refresh_restores_trajectory_imm_evidence_only_history() -> None
         "_trajectory_imm_evidence_only_advance_recording_patch",
         False,
     )
-    assert state_space._score_trajectory_imm_exact_sparse is trajectory_imm._score_trajectory_imm_exact_sparse
+    assert (
+        state_space._score_trajectory_imm_exact_sparse
+        is trajectory_imm._score_trajectory_imm_exact_sparse
+    )
 
     config = SimpleNamespace(
         stationary_sigma_cm=1.0,
@@ -125,17 +128,21 @@ def test_runtime_refresh_restores_trajectory_imm_evidence_only_history() -> None
         trajectory_imm_momentum_switch_probability=None,
     )
     emissions = _two_bin_emissions()
-    _, trajectory, _, mode_posterior, diagnostics = trajectory_imm._score_trajectory_imm_exact_sparse(
-        emissions,
-        np.array([[0.0, 0.0], [1.0, 0.0]], dtype=float),
-        config,
-        emissions.transition_durations,
-        return_trajectory=False,
+    _, trajectory, _, mode_posterior, diagnostics = (
+        trajectory_imm._score_trajectory_imm_exact_sparse(
+            emissions,
+            np.array([[0.0, 0.0], [1.0, 0.0]], dtype=float),
+            config,
+            emissions.transition_durations,
+            return_trajectory=False,
+        )
     )
 
     assert trajectory is None
     assert mode_posterior is None
-    assert diagnostics["state_space_trajectory_imm_mode_posterior"] == "filtered_evidence_only_state"
+    assert diagnostics["state_space_trajectory_imm_mode_posterior"] == (
+        "filtered_evidence_only_state"
+    )
     np.testing.assert_allclose(
         diagnostics["state_space_trajectory_family_terminal_probability"],
         2.0 / 3.0,

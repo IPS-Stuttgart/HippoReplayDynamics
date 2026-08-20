@@ -1,4 +1,4 @@
-"""Validate KD reference encoding and transition parameters.
+"""Validate KD reference encoding, Poisson emissions, and transition parameters.
 
 The KD reference encoder uses fixed grid dimensions and occupancy floors directly
 inside NumPy shape, edge, smoothing, and rate calculations. Invalid parameters
@@ -6,6 +6,11 @@ can otherwise reach divide-by-zero, empty-grid, or Gaussian-filter failures that
 are harder to diagnose than a configuration error. The transition builders also
 need explicit guards because nonpositive time steps are otherwise clamped to an
 identity transition and a zero bin size can silently produce a uniform matrix.
+
+The KD Poisson helper is public and bypasses the package's patched main emission
+path. Keep its count/rate validation and exact-zero support aligned with the main
+path, and fail closed when finite rates, durations, and scale factors overflow
+while forming expected spike counts.
 """
 
 from __future__ import annotations
@@ -16,8 +21,18 @@ from typing import Any
 
 import numpy as np
 
+from .poisson_input_boolean_validation import (
+    _coerce_spike_counts_exact,
+    _reject_boolean_array,
+    _reject_nonfinite_expected_count_scaling,
+    _restore_exact_zero_rate_support,
+)
+
 _PATCHED_FLAG = "_kd_encoding_config_validation_patch_applied"
 _TRANSITION_PATCHED_FLAG = "_kd_transition_parameter_validation_patch_applied"
+_FIT_WRAPPER_ATTR = "_kd_encoding_config_validation_wrapper"
+_TRANSITION_WRAPPER_ATTR = "_kd_transition_parameter_validation_wrapper"
+_POISSON_WRAPPER_ATTR = "_kd_poisson_input_validation_wrapper"
 
 
 def _unwrap_zero_dimensional_scalar(value: Any, name: str, expectation: str) -> Any:
@@ -151,63 +166,115 @@ def _session_with_excitatory_fallback(session: Any, config: Any) -> Any:
 
 
 def _apply_kd_transition_parameter_validation_patch(kd_reference: Any) -> None:
-    if getattr(kd_reference, _TRANSITION_PATCHED_FLAG, False):
-        return
+    """Install transition guards based on live callables, not stale sentinels."""
 
-    original_stationary = kd_reference.stationary_gaussian_transition_1d
-    original_diffusion = kd_reference.diffusion_transition_1d
-    original_momentum = kd_reference.momentum_transition_1d
+    current_stationary = kd_reference.stationary_gaussian_transition_1d
+    if not getattr(current_stationary, _TRANSITION_WRAPPER_ATTR, False):
 
-    @wraps(original_stationary)
-    def stationary_gaussian_transition_1d(n_bins, sd_meters, bin_size_cm):
-        n_bins = _coerce_positive_integer_value(n_bins, "n_bins")
-        _validate_nonnegative_scalar_value(sd_meters, "sd_meters")
-        _validate_positive_scalar_value(bin_size_cm, "bin_size_cm")
-        return original_stationary(n_bins, sd_meters, bin_size_cm)
+        @wraps(current_stationary)
+        def stationary_gaussian_transition_1d(n_bins, sd_meters, bin_size_cm):
+            n_bins = _coerce_positive_integer_value(n_bins, "n_bins")
+            _validate_nonnegative_scalar_value(sd_meters, "sd_meters")
+            _validate_positive_scalar_value(bin_size_cm, "bin_size_cm")
+            return current_stationary(n_bins, sd_meters, bin_size_cm)
 
-    @wraps(original_diffusion)
-    def diffusion_transition_1d(n_bins, sd_meters, bin_size_cm, dt):
-        n_bins = _coerce_positive_integer_value(n_bins, "n_bins")
-        _validate_nonnegative_scalar_value(sd_meters, "sd_meters")
-        _validate_positive_scalar_value(bin_size_cm, "bin_size_cm")
-        _validate_positive_scalar_value(dt, "dt")
-        return original_diffusion(n_bins, sd_meters, bin_size_cm, dt)
+        setattr(stationary_gaussian_transition_1d, _TRANSITION_WRAPPER_ATTR, True)
+        kd_reference.stationary_gaussian_transition_1d = stationary_gaussian_transition_1d
 
-    @wraps(original_momentum)
-    def momentum_transition_1d(n_bins, sd_meters, decay, bin_size_cm, dt):
-        n_bins = _coerce_positive_integer_value(n_bins, "n_bins")
-        _validate_nonnegative_scalar_value(sd_meters, "sd_meters")
-        _validate_positive_scalar_value(decay, "decay")
-        _validate_positive_scalar_value(bin_size_cm, "bin_size_cm")
-        _validate_positive_scalar_value(dt, "dt")
-        return original_momentum(n_bins, sd_meters, decay, bin_size_cm, dt)
+    current_diffusion = kd_reference.diffusion_transition_1d
+    if not getattr(current_diffusion, _TRANSITION_WRAPPER_ATTR, False):
 
-    kd_reference.stationary_gaussian_transition_1d = stationary_gaussian_transition_1d
-    kd_reference.diffusion_transition_1d = diffusion_transition_1d
-    kd_reference.momentum_transition_1d = momentum_transition_1d
+        @wraps(current_diffusion)
+        def diffusion_transition_1d(n_bins, sd_meters, bin_size_cm, dt):
+            n_bins = _coerce_positive_integer_value(n_bins, "n_bins")
+            _validate_nonnegative_scalar_value(sd_meters, "sd_meters")
+            _validate_positive_scalar_value(bin_size_cm, "bin_size_cm")
+            _validate_positive_scalar_value(dt, "dt")
+            return current_diffusion(n_bins, sd_meters, bin_size_cm, dt)
+
+        setattr(diffusion_transition_1d, _TRANSITION_WRAPPER_ATTR, True)
+        kd_reference.diffusion_transition_1d = diffusion_transition_1d
+
+    current_momentum = kd_reference.momentum_transition_1d
+    if not getattr(current_momentum, _TRANSITION_WRAPPER_ATTR, False):
+
+        @wraps(current_momentum)
+        def momentum_transition_1d(n_bins, sd_meters, decay, bin_size_cm, dt):
+            n_bins = _coerce_positive_integer_value(n_bins, "n_bins")
+            _validate_nonnegative_scalar_value(sd_meters, "sd_meters")
+            _validate_positive_scalar_value(decay, "decay")
+            _validate_positive_scalar_value(bin_size_cm, "bin_size_cm")
+            _validate_positive_scalar_value(dt, "dt")
+            return current_momentum(n_bins, sd_meters, decay, bin_size_cm, dt)
+
+        setattr(momentum_transition_1d, _TRANSITION_WRAPPER_ATTR, True)
+        kd_reference.momentum_transition_1d = momentum_transition_1d
+
     setattr(kd_reference, _TRANSITION_PATCHED_FLAG, True)
 
 
+def _apply_kd_poisson_input_validation_patch(kd_reference: Any) -> None:
+    """Keep the KD Poisson helper numerically and semantically fail-closed."""
+
+    current = kd_reference.poisson_log_emissions
+    if getattr(current, _POISSON_WRAPPER_ATTR, False):
+        return
+
+    @wraps(current)
+    def poisson_log_emissions(spike_counts, rates_hz, dt, *, spike_rate_scale=1.0):
+        exact_counts = _coerce_spike_counts_exact(spike_counts)
+        _reject_boolean_array("rates_hz", rates_hz)
+        _reject_boolean_array("dt", dt)
+        _reject_boolean_array("spike_rate_scale", spike_rate_scale)
+
+        with np.errstate(over="ignore", invalid="ignore"):
+            log_likelihood = current(
+                exact_counts,
+                rates_hz,
+                dt,
+                spike_rate_scale=spike_rate_scale,
+            )
+
+        _reject_nonfinite_expected_count_scaling(rates_hz, dt, float(spike_rate_scale))
+
+        counts = np.asarray(exact_counts, dtype=float)
+        rates = np.asarray(rates_hz, dtype=float)
+        return _restore_exact_zero_rate_support(
+            log_likelihood,
+            spike_counts=counts,
+            rates_hz=rates,
+            dt=dt,
+            spike_rate_scale=float(spike_rate_scale),
+            cell_weights=np.ones(counts.shape[1], dtype=float),
+            likelihood_temperature=1.0,
+            negative_binomial_overdispersion=0.0,
+        )
+
+    setattr(poisson_log_emissions, _POISSON_WRAPPER_ATTR, True)
+    kd_reference.poisson_log_emissions = poisson_log_emissions
+
+
 def apply_kd_encoding_config_validation_patch() -> None:
-    """Install KD encoding and transition-parameter validation."""
+    """Install KD encoding, Poisson, and transition-parameter validation."""
 
     from . import kd_random_effects_validation, kd_reference
 
     kd_random_effects_validation.apply_kd_random_effects_validation_patch()
     _apply_kd_transition_parameter_validation_patch(kd_reference)
+    _apply_kd_poisson_input_validation_patch(kd_reference)
 
-    if getattr(kd_reference, _PATCHED_FLAG, False):
-        return
+    current_fit = kd_reference.fit_kd_place_field_encoding
+    if not getattr(current_fit, _FIT_WRAPPER_ATTR, False):
 
-    original_fit = kd_reference.fit_kd_place_field_encoding
+        @wraps(current_fit)
+        def fit_kd_place_field_encoding(session, config=None):
+            config = kd_reference.KDEncodingConfig() if config is None else config
+            validate_kd_encoding_config(config)
+            return current_fit(_session_with_excitatory_fallback(session, config), config)
 
-    @wraps(original_fit)
-    def fit_kd_place_field_encoding(session, config=None):
-        config = kd_reference.KDEncodingConfig() if config is None else config
-        validate_kd_encoding_config(config)
-        return original_fit(_session_with_excitatory_fallback(session, config), config)
+        setattr(fit_kd_place_field_encoding, _FIT_WRAPPER_ATTR, True)
+        kd_reference.fit_kd_place_field_encoding = fit_kd_place_field_encoding
 
-    kd_reference.fit_kd_place_field_encoding = fit_kd_place_field_encoding
     setattr(kd_reference, _PATCHED_FLAG, True)
 
 

@@ -192,6 +192,11 @@ def read_axona_cut(path: str | Path, tetrode_path: str | Path | None = None) -> 
         dtype=int,
     )
     if expected_spikes is not None:
+        if labels.shape[0] < expected_spikes:
+            raise ValueError(
+                f"Axona cut file {path} declares {expected_spikes} spikes "
+                f"but contains only {labels.shape[0]} cluster labels"
+            )
         labels = labels[:expected_spikes]
     spike_times_s = read_axona_tetrode_spike_times(tetrode_path) if tetrode_path is not None else None
     if spike_times_s is not None and spike_times_s.shape[0] != labels.shape[0]:

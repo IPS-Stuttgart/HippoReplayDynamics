@@ -23,6 +23,8 @@ _PARAMETER_VALIDATION_PATCH_ATTR = '_hipporeplayimm_goal_state_space_parameter_v
 _FARTHEST_POINT_PATCH_ATTR = '_hipporeplayimm_goal_state_space_farthest_point_patch'
 _SMALL_DRIFT_PATCH_ATTR = '_hipporeplayimm_goal_state_space_small_drift_patch'
 _ORIGINALS_ATTR = '_hipporeplayimm_goal_state_space_parameter_validation_originals'
+_STRING_TYPES = (str, bytes, np.str_, np.bytes_)
+_COMPLEX_TYPES = (complex, np.complexfloating)
 
 
 def apply_goal_state_space_farthest_point_patch() -> None:
@@ -340,8 +342,50 @@ def _unwrap_zero_dimensional_parameter(value: Any, name: str) -> Any:
     return current
 
 
+def _coerce_real_coordinate_array(value: Any, name: str) -> np.ndarray:
+    '''Return real numeric coordinates without lossy bool/text/complex coercion.'''
+
+    try:
+        raw = np.asarray(value)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ValueError(f'{name} must contain numeric real coordinates') from exc
+    if np.issubdtype(raw.dtype, np.bool_):
+        raise ValueError(f'{name} must contain numeric real coordinates, not boolean values')
+    if raw.dtype.kind in {'S', 'U'}:
+        raise ValueError(f'{name} must contain numeric real coordinates, not text values')
+    if np.issubdtype(raw.dtype, np.complexfloating):
+        raise ValueError(f'{name} must contain numeric real coordinates, not complex values')
+    if raw.dtype == object:
+        for item in raw.flat:
+            item = _unwrap_coordinate_scalar(item, name)
+            if isinstance(item, np.ndarray):
+                raise ValueError(f'{name} must contain scalar numeric real coordinates')
+            if isinstance(item, (bool, np.bool_)):
+                raise ValueError(f'{name} must contain numeric real coordinates, not boolean values')
+            if isinstance(item, _STRING_TYPES):
+                raise ValueError(f'{name} must contain numeric real coordinates, not text values')
+            if isinstance(item, _COMPLEX_TYPES):
+                raise ValueError(f'{name} must contain numeric real coordinates, not complex values')
+    try:
+        return np.asarray(value, dtype=float)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ValueError(f'{name} must contain numeric real coordinates') from exc
+
+
+def _unwrap_coordinate_scalar(value: Any, name: str) -> Any:
+    current = value
+    seen: set[int] = set()
+    while isinstance(current, np.ndarray) and current.ndim == 0:
+        marker = id(current)
+        if marker in seen:
+            raise ValueError(f'{name} must contain scalar numeric real coordinates')
+        seen.add(marker)
+        current = current.item()
+    return current
+
+
 def _coerce_position_matrix(value: Any) -> np.ndarray:
-    array = np.asarray(value, dtype=float)
+    array = _coerce_real_coordinate_array(value, 'bin_centers')
     if array.ndim == 1:
         return array[:, None]
     return array
@@ -350,7 +394,7 @@ def _coerce_position_matrix(value: Any) -> np.ndarray:
 def _coerce_candidate_goals(value: Any, centers: np.ndarray) -> Any:
     if value is None:
         return value
-    array = np.asarray(value, dtype=float)
+    array = _coerce_real_coordinate_array(value, 'candidate_goals')
     if array.ndim == 1 and centers.ndim == 2 and centers.shape[1] == 1:
         array = array[:, None]
     if array.ndim != 2:
@@ -371,7 +415,7 @@ def _unique_rows_preserve_order(values: np.ndarray) -> np.ndarray:
 
 
 def _coerce_goal_vector(value: Any, position_dim: int | None) -> np.ndarray:
-    array = np.asarray(value, dtype=float)
+    array = _coerce_real_coordinate_array(value, 'goal')
     if array.ndim == 0 and position_dim == 1:
         return array.reshape(1)
     return array

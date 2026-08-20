@@ -12,6 +12,36 @@ _PATCH_ATTR = "_first_order_imm_time_weighting_aware"
 _ORIGINAL_ATTR = "_first_order_imm_time_weighting_original"
 _PATCH_LOCK = RLock()
 _MODE_NAMES = ("stationary", "diffusion", "fragmented")
+_WRAPPER_ORIGINAL_ATTRS = (
+    "__wrapped__",
+    _ORIGINAL_ATTR,
+    "__hipporeplayimm_original__",
+    "__duration_occupancy_previous_score__",
+    "_duration_occupancy_evidence_only_diagnostics_original",
+    "_state_space_evidence_only_diagnostics_original",
+)
+
+
+def _has_time_weighting_patch(scorer: object) -> bool:
+    """Return whether the time-weighting patch exists anywhere in a wrapper chain."""
+
+    stack = [scorer]
+    seen: set[int] = set()
+    while stack:
+        current = stack.pop()
+        if current is None:
+            continue
+        marker = id(current)
+        if marker in seen:
+            continue
+        seen.add(marker)
+        if getattr(current, _PATCH_ATTR, False):
+            return True
+        for attr in _WRAPPER_ORIGINAL_ATTRS:
+            original = getattr(current, attr, None)
+            if original is not None:
+                stack.append(original)
+    return False
 
 
 def _validated_bin_durations(
@@ -139,7 +169,7 @@ def apply_first_order_imm_time_weighting_patch() -> None:
     import hipporeplayimm.duration_occupancy as duration_occupancy
 
     current = duration_occupancy._score_state_space_duration_with_occupancy
-    if getattr(current, _PATCH_ATTR, False):
+    if _has_time_weighting_patch(current):
         return
 
     original_score = current

@@ -268,7 +268,7 @@ def _wrap_trajectory_diagnostics(helper: Callable[..., Any], module: Any) -> Cal
 def _synchronize_aliases(previous: Any, active: Any) -> None:
     for module in list(sys.modules.values()):
         module_name = getattr(module, "__name__", "")
-        if not module_name.startswith("hipporeplayimm"):
+        if module_name != "hipporeplayimm" and not module_name.startswith("hipporeplayimm."):
             continue
         for name, value in list(vars(module).items()):
             if value is previous:

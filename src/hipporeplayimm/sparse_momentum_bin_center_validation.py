@@ -37,7 +37,7 @@ def _synchronize_imported_aliases(stale: object, active: object) -> None:
 
     for module in list(sys.modules.values()):
         module_name = getattr(module, "__name__", "")
-        if not module_name.startswith("hipporeplayimm"):
+        if module_name != "hipporeplayimm" and not module_name.startswith("hipporeplayimm."):
             continue
         candidate = getattr(module, "_as_2d_centers", None)
         if candidate is active:

@@ -155,7 +155,9 @@ def _synchronize_interval_aliases(original: Any, replacement: Any) -> None:
 
     for module in list(sys.modules.values()):
         module_name = getattr(module, "__name__", "")
-        if not module_name.startswith("hipporeplayimm"):
+        if module_name != "hipporeplayimm" and not module_name.startswith(
+            "hipporeplayimm."
+        ):
             continue
         if getattr(module, "_as_intervals", None) is original:
             module._as_intervals = replacement

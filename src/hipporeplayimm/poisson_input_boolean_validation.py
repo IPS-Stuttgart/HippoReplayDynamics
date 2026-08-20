@@ -16,7 +16,7 @@ _NEGATIVE_BINOMIAL_PATCHED_FLAG = (
     "_negative_binomial_poisson_limit_patch_applied"
 )
 _ORIGINAL_ATTR = "__hipporeplayimm_original__"
-_WRAPPER_VERSION = 5
+_WRAPPER_VERSION = 6
 
 
 def _contains_boolean_values(value: object) -> bool:
@@ -445,7 +445,16 @@ def apply_poisson_input_boolean_validation_patch() -> None:
     ):
         exact_counts = _coerce_spike_counts_exact(spike_counts)
         _reject_boolean_array("rates_hz", rates_hz)
+        _reject_boolean_array("dt", dt)
+        _reject_boolean_array("spike_rate_scale", spike_rate_scale)
+        _reject_boolean_array("likelihood_temperature", likelihood_temperature)
+        _reject_boolean_array(
+            "negative_binomial_overdispersion",
+            negative_binomial_overdispersion,
+        )
         reusable_weights = _reusable_cell_weights(cell_weights)
+        if reusable_weights is not None:
+            _reject_boolean_array("cell_weights", reusable_weights)
         with np.errstate(over="ignore", invalid="ignore"):
             log_likelihood = original(
                 exact_counts,

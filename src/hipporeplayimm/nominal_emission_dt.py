@@ -119,7 +119,7 @@ def _synchronize_builder_aliases(
     }
     for module in list(sys.modules.values()):
         module_name = getattr(module, "__name__", "")
-        if not module_name.startswith("hipporeplayimm"):
+        if module_name != "hipporeplayimm" and not module_name.startswith("hipporeplayimm."):
             continue
         for name, builder in active.items():
             if hasattr(module, name):

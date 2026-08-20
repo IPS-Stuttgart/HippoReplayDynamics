@@ -20,7 +20,7 @@ def _synchronize_interpolator_aliases(previous: object, patched: object) -> None
 
     for module in list(sys.modules.values()):
         module_name = getattr(module, "__name__", "")
-        if not module_name.startswith("hipporeplayimm"):
+        if module_name != "hipporeplayimm" and not module_name.startswith("hipporeplayimm."):
             continue
         if getattr(module, "_interp_positions", None) is previous:
             module._interp_positions = patched
@@ -31,7 +31,7 @@ def _synchronize_decode_window_aliases(previous: object, patched: object) -> Non
 
     for module in list(sys.modules.values()):
         module_name = getattr(module, "__name__", "")
-        if not module_name.startswith("hipporeplayimm"):
+        if module_name != "hipporeplayimm" and not module_name.startswith("hipporeplayimm."):
             continue
         if getattr(module, "_decode_windows", None) is previous:
             module._decode_windows = patched

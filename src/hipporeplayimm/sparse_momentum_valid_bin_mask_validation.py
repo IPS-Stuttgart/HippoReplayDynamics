@@ -10,7 +10,7 @@ def _synchronize_imported_aliases(active: object) -> None:
 
     for module in list(sys.modules.values()):
         module_name = getattr(module, "__name__", "")
-        if not module_name.startswith("hipporeplayimm"):
+        if module_name != "hipporeplayimm" and not module_name.startswith("hipporeplayimm."):
             continue
         if hasattr(module, "_coerce_valid_bin_mask"):
             setattr(module, "_coerce_valid_bin_mask", active)

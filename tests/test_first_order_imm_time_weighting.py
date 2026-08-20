@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from functools import wraps
-
 import numpy as np
 
 import hipporeplayimm.duration_occupancy as duration_occupancy
@@ -115,7 +113,7 @@ def test_public_first_order_imm_diagnostics_use_bin_exposure(
     assert diagnostics["state_space_imm_time_weighting"] == "bin_duration"
 
 
-def test_time_weighting_patch_detects_marker_below_outer_wrapper(monkeypatch) -> None:
+def test_time_weighting_patch_detects_diagnostics_wrapper_chain(monkeypatch) -> None:
     def already_patched_score(*args, **kwargs):
         return None
 
@@ -125,20 +123,24 @@ def test_time_weighting_patch_detects_marker_below_outer_wrapper(monkeypatch) ->
         True,
     )
 
-    @wraps(already_patched_score)
-    def unrelated_outer_wrapper(*args, **kwargs):
+    def diagnostics_validation_wrapper(*args, **kwargs):
         return already_patched_score(*args, **kwargs)
 
+    setattr(
+        diagnostics_validation_wrapper,
+        "_first_order_imm_diagnostics_validation_original",
+        already_patched_score,
+    )
     monkeypatch.setattr(
         duration_occupancy,
         "_score_state_space_duration_with_occupancy",
-        unrelated_outer_wrapper,
+        diagnostics_validation_wrapper,
     )
 
-    assert _has_time_weighting_patch(unrelated_outer_wrapper)
+    assert _has_time_weighting_patch(diagnostics_validation_wrapper)
     apply_first_order_imm_time_weighting_patch()
 
     assert (
         duration_occupancy._score_state_space_duration_with_occupancy
-        is unrelated_outer_wrapper
+        is diagnostics_validation_wrapper
     )

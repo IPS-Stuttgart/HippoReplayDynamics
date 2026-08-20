@@ -1,11 +1,18 @@
 from __future__ import annotations
 
+import sys
+import types
+
 import numpy as np
 
 import hipporeplayimm.clusterless as clusterless
 import hipporeplayimm.encoding as encoding
 import hipporeplayimm.kd_reference as kd_reference
 import hipporeplayimm.position_validation as position_validation
+from hipporeplayimm.encoding_position_support_patch import (
+    _synchronize_decode_window_aliases,
+    _synchronize_interpolator_aliases,
+)
 
 
 def test_position_interpolation_rejects_queries_outside_measured_support():
@@ -57,3 +64,28 @@ def test_position_interpolation_patch_refreshes_preimported_aliases():
     xy = np.column_stack([np.arange(6, dtype=float), np.zeros(6, dtype=float)])
     for module in (clusterless, kd_reference, position_validation):
         assert np.isnan(module._interp_positions(times, xy, np.array([1.0]))).all()
+
+
+def test_position_support_alias_sync_respects_package_namespace(monkeypatch):
+    external = types.ModuleType("hipporeplayimm_extension")
+    internal = types.ModuleType("hipporeplayimm._position_support_namespace_test")
+    monkeypatch.setitem(sys.modules, external.__name__, external)
+    monkeypatch.setitem(sys.modules, internal.__name__, internal)
+
+    stale_interp = object()
+    active_interp = object()
+    external._interp_positions = stale_interp
+    internal._interp_positions = stale_interp
+
+    stale_decode = object()
+    active_decode = object()
+    external._decode_windows = stale_decode
+    internal._decode_windows = stale_decode
+
+    _synchronize_interpolator_aliases(stale_interp, active_interp)
+    _synchronize_decode_window_aliases(stale_decode, active_decode)
+
+    assert external._interp_positions is stale_interp
+    assert external._decode_windows is stale_decode
+    assert internal._interp_positions is active_interp
+    assert internal._decode_windows is active_decode

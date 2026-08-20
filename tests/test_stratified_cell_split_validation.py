@@ -1,8 +1,12 @@
 from __future__ import annotations
 
+import sys
+import types
+
 import numpy as np
 import pytest
 
+from hipporeplayimm.result_improvement_split_validation import _synchronize_aliases
 from hipporeplayimm.result_improvements import stratified_cell_split
 
 
@@ -64,3 +68,21 @@ def test_stratified_cell_split_preserves_integral_float_cell_ids() -> None:
         np.array([10, 20, 30, 40]),
     )
     assert np.intersect1d(train, test).size == 0
+
+
+def test_split_alias_sync_ignores_similarly_named_top_level_module(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    original = object()
+    patched = object()
+    unrelated = types.ModuleType("hipporeplayimm_extension")
+    package_child = types.ModuleType("hipporeplayimm._split_alias_probe")
+    unrelated.stratified_cell_split = original
+    package_child.stratified_cell_split = original
+    monkeypatch.setitem(sys.modules, unrelated.__name__, unrelated)
+    monkeypatch.setitem(sys.modules, package_child.__name__, package_child)
+
+    _synchronize_aliases(original, patched)
+
+    assert unrelated.stratified_cell_split is original
+    assert package_child.stratified_cell_split is patched

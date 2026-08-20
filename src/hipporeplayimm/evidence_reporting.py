@@ -12,6 +12,14 @@ EXACT_EVIDENCE_SUPPORT = "exact_full_grid"
 TRUNCATED_EVIDENCE_SUPPORT = "truncated_full_grid"
 DEGENERATE_SINGLE_BIN_EVIDENCE_SUPPORT = "degenerate_single_bin"
 PYRECEST_PARTICLE_EVIDENCE_SUPPORT = "particle_approximation"
+_KNOWN_EVIDENCE_SUPPORTS = frozenset(
+    {
+        EXACT_EVIDENCE_SUPPORT,
+        TRUNCATED_EVIDENCE_SUPPORT,
+        DEGENERATE_SINGLE_BIN_EVIDENCE_SUPPORT,
+        PYRECEST_PARTICLE_EVIDENCE_SUPPORT,
+    }
+)
 EVIDENCE_SUPPORT_DIAGNOSTIC_COLUMNS = (
     "diagnostic_candidate_evidence_support",
     # Check specific state-space model labels before generic component labels.
@@ -191,6 +199,13 @@ def evidence_support_from_row(row: pd.Series) -> str:
         labels.extend(_evidence_support_labels(row.get(column)))
 
     support = _prioritized_known_evidence_support(labels)
+    if support and support != EXACT_EVIDENCE_SUPPORT:
+        return support
+    if any(label not in _KNOWN_EVIDENCE_SUPPORTS for label in labels):
+        # A diagnostic was supplied, but at least one label does not match a
+        # support class we know how to compare safely.  Treat it conservatively
+        # rather than silently upgrading a new/typoed approximation to exact.
+        return EVIDENCE_COMPARISON_UNKNOWN
     if support:
         return support
     return EXACT_EVIDENCE_SUPPORT

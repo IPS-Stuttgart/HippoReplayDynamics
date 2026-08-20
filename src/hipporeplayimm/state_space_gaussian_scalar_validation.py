@@ -82,7 +82,10 @@ def _synchronize_aliases(name: str, original: object, replacement: object) -> No
 
     for module in list(sys.modules.values()):
         module_name = getattr(module, "__name__", "")
-        if module_name.startswith("hipporeplayimm") and getattr(module, name, None) is original:
+        in_package = module_name == "hipporeplayimm" or module_name.startswith(
+            "hipporeplayimm."
+        )
+        if in_package and getattr(module, name, None) is original:
             setattr(module, name, replacement)
 
 

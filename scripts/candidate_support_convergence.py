@@ -148,6 +148,28 @@ def _alignment_columns(frames: pd.DataFrame | list[pd.DataFrame] | tuple[pd.Data
     return tuple(columns)
 
 
+def _validate_unique_model_rows(
+    frame: pd.DataFrame,
+    alignment_columns: tuple[str, ...],
+    run_label: str,
+) -> None:
+    """Reject ambiguous event/model rows before pairwise convergence comparisons."""
+
+    key_columns = [*alignment_columns, "model"]
+    duplicate_mask = frame.duplicated(subset=key_columns, keep=False)
+    if not bool(duplicate_mask.any()):
+        return
+    duplicate_keys = frame.loc[duplicate_mask, key_columns].drop_duplicates().head(5)
+    preview = "; ".join(
+        ", ".join(f"{column}={_format_alignment_value(row[column])}" for column in key_columns)
+        for _, row in duplicate_keys.iterrows()
+    )
+    raise ValueError(
+        f"Candidate-support run {run_label!r} contains duplicate rows for alignment/model keys "
+        f"{key_columns}: {preview}. Refusing to compare ambiguous rows."
+    )
+
+
 def _event_count(frame: pd.DataFrame, alignment_columns: tuple[str, ...] | None = None) -> int:
     if frame.empty:
         return 0
@@ -203,6 +225,8 @@ def load_candidate_support_run(path: str | Path, label: str | None = None) -> pd
     missing = sorted(required - set(frame.columns))
     if missing:
         raise ValueError(f"{score_file} is missing required columns: {missing}")
+    if frame.empty:
+        raise ValueError(f"{score_file} contains no successful rows after status filtering")
     frame["run_label"] = label or infer_run_label(frame, score_file.parent.name)
     frame["source_score_file"] = str(score_file)
     frame["log_evidence"] = pd.to_numeric(frame["log_evidence"], errors="coerce")
@@ -243,10 +267,13 @@ def evidence_delta_summary(runs: list[pd.DataFrame]) -> pd.DataFrame:
         run_a = str(left["run_label"].iloc[0])
         run_b = str(right["run_label"].iloc[0])
         alignment_columns = _alignment_columns((left, right))
+        _validate_unique_model_rows(left, alignment_columns, run_a)
+        _validate_unique_model_rows(right, alignment_columns, run_b)
         merged = left.merge(
             right,
             on=[*alignment_columns, "model"],
             suffixes=("_a", "_b"),
+            validate="one_to_one",
         )
         if merged.empty:
             continue
@@ -314,9 +341,16 @@ def best_model_agreement(runs: list[pd.DataFrame]) -> pd.DataFrame:
         if not common_models:
             continue
         alignment_columns = _alignment_columns((left, right))
+        _validate_unique_model_rows(left, alignment_columns, run_a)
+        _validate_unique_model_rows(right, alignment_columns, run_b)
         best_a = _best_model_by_event(left, common_models, alignment_columns)
         best_b = _best_model_by_event(right, common_models, alignment_columns)
-        merged = best_a.merge(best_b, on=list(alignment_columns), suffixes=("_a", "_b"))
+        merged = best_a.merge(
+            best_b,
+            on=list(alignment_columns),
+            suffixes=("_a", "_b"),
+            validate="one_to_one",
+        )
         if merged.empty:
             continue
         agree = merged["best_model_a"].eq(merged["best_model_b"])

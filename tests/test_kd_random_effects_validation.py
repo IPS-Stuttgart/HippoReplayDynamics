@@ -52,6 +52,11 @@ def test_random_effects_rejects_model_count_mismatches() -> None:
         random_effects_model_probabilities(_log_evidence()[:, :1], ["a", "b"])
 
 
+def test_random_effects_rejects_duplicate_model_names() -> None:
+    with pytest.raises(ValueError, match="unique model names"):
+        random_effects_model_probabilities(_log_evidence(), ["duplicate", "duplicate"])
+
+
 def test_random_effects_rejects_invalid_evidence_shape() -> None:
     with pytest.raises(ValueError, match="two-dimensional"):
         random_effects_model_probabilities(np.array([0.0, -1.0], dtype=float), ["a", "b"])

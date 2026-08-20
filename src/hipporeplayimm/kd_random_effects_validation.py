@@ -156,6 +156,18 @@ def _validate_model_evidence_inputs(log_evidence: Any, models: Any) -> tuple[np.
         raise ValueError("models must contain at least one model")
     if len(model_values) != evidence_values.shape[1]:
         raise ValueError("models length must match log_evidence columns")
+    model_labels = [str(model) for model in model_values]
+    seen: set[str] = set()
+    duplicate_labels: list[str] = []
+    for label in model_labels:
+        if label in seen and label not in duplicate_labels:
+            duplicate_labels.append(label)
+        seen.add(label)
+    if duplicate_labels:
+        raise ValueError(
+            "models must contain unique model names; duplicate names: "
+            + ", ".join(repr(label) for label in duplicate_labels)
+        )
     return evidence_values, model_values
 
 

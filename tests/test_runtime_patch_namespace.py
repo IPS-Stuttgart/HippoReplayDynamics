@@ -43,7 +43,7 @@ def test_sparse_alias_sync_respects_package_namespace(monkeypatch):
     monkeypatch.setitem(sys.modules, internal.__name__, internal)
 
     stale_mask = object()
-    active_mask = object()
+    active_mask = state_space_utils._coerce_valid_bin_mask
     external._coerce_valid_bin_mask = stale_mask
     internal._coerce_valid_bin_mask = stale_mask
 

@@ -114,7 +114,8 @@ def _patch_state_space_utils_sigma() -> None:
     for module in list(sys.modules.values()):
         module_name = getattr(module, "__name__", "")
         alias = getattr(module, "_per_bin_sigma", None)
-        if module_name.startswith("hipporeplayimm") and (alias is observed or alias is base):
+        in_package = module_name == "hipporeplayimm" or module_name.startswith("hipporeplayimm.")
+        if in_package and (alias is observed or alias is base):
             module._per_bin_sigma = per_bin_sigma
 
 
@@ -161,7 +162,8 @@ def _patch_state_space_utils_mode_transition() -> None:
 
     for module in list(sys.modules.values()):
         module_name = getattr(module, "__name__", "")
-        if module_name.startswith("hipporeplayimm") and getattr(module, "_mode_transition_matrix", None) is current:
+        in_package = module_name == "hipporeplayimm" or module_name.startswith("hipporeplayimm.")
+        if in_package and getattr(module, "_mode_transition_matrix", None) is current:
             module._mode_transition_matrix = mode_transition_matrix
 
 

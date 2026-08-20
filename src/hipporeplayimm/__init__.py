@@ -335,6 +335,16 @@ def apply_runtime_patches() -> None:
     _bidirectional_infinite_evidence_patch.apply_bidirectional_infinite_evidence_patch()
     _evidence_complex_validation.apply_evidence_complex_validation_patch()
 
+    # These diagnostic wrappers are installed from state_space during normal
+    # imports, but module reloads replace their wrapped scorer functions. Keep
+    # the public refresh hook complete by reinstalling them after all scorer-
+    # level runtime patches above have reached their final live callables.
+    from .first_order_imm_time_weighting import apply_first_order_imm_time_weighting_patch
+    from .trajectory_imm_single_bin_diagnostics import apply_trajectory_imm_single_bin_diagnostics_patch
+
+    apply_first_order_imm_time_weighting_patch()
+    apply_trajectory_imm_single_bin_diagnostics_patch()
+
 
 # Ensure replay dynamics use center-to-center transition durations when replay
 # emissions include a partial final bin.

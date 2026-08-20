@@ -26,6 +26,7 @@ _GRID_ORIGINAL_ATTR = "_encoding_grid_extra_columns_original_make_grid"
 _GRID_WRAPPER_MARKER = "_encoding_grid_extra_columns_wrapper"
 _SPEED_ORIGINAL_ATTR = "_encoding_nonuniform_time_original_speed"
 _SPEED_WRAPPER_MARKER = "_encoding_nonuniform_time_speed_wrapper"
+_INTERP_WRAPPER_MARKER = "_encoding_position_time_support_interp_wrapper"
 _BOOL_ORIGINALS_ATTR = "_encoding_bool_validation_originals"
 _AS_XY_ARRAY_WRAPPER_MARKER = "_encoding_numeric_as_xy_array_wrapper"
 _AS_POSITION_ARRAY_WRAPPER_MARKER = "_encoding_numeric_as_position_array_wrapper"
@@ -42,6 +43,7 @@ def apply_encoding_grid_extra_columns_patch() -> None:
 
     _apply_grid_extra_columns_patch(encoding)
     _apply_nonuniform_time_speed_patch(encoding)
+    _apply_position_time_support_patch(encoding)
     _apply_encoding_bool_validation_patch(encoding)
     apply_place_field_run_local_kinematics_patch()
 
@@ -93,6 +95,41 @@ def _apply_nonuniform_time_speed_patch(encoding) -> None:
     _mark_wrapper(speed_cm_s, _SPEED_WRAPPER_MARKER)
     encoding._speed_cm_s = speed_cm_s
     _synchronize_speed_aliases(original_speed, speed_cm_s)
+
+
+def _apply_position_time_support_patch(encoding) -> None:
+    """Prevent position interpolation from fabricating out-of-support locations."""
+
+    current_interp = encoding._interp_positions
+    if _is_marked_wrapper(current_interp, _INTERP_WRAPPER_MARKER):
+        original_interp = getattr(current_interp, "__hipporeplayimm_original__", None)
+        if original_interp is not None:
+            _synchronize_interp_position_aliases(original_interp, current_interp)
+        return
+
+    original_interp = current_interp
+
+    def interp_positions(times, xy, query_times):
+        positions = np.asarray(original_interp(times, xy, query_times), dtype=float)
+        time_values = np.asarray(times, dtype=float)
+        query_values = np.asarray(query_times, dtype=float).reshape(-1)
+        if time_values.ndim != 1 or time_values.size == 0:
+            return positions
+        outside_support = (
+            ~np.isfinite(query_values)
+            | (query_values < time_values[0])
+            | (query_values > time_values[-1])
+        )
+        if positions.ndim == 2 and outside_support.shape[0] == positions.shape[0] and np.any(outside_support):
+            positions = positions.copy()
+            positions[outside_support] = np.nan
+        return positions
+
+    _copy_function_metadata(original_interp, interp_positions)
+    _mark_wrapper(interp_positions, _INTERP_WRAPPER_MARKER)
+    interp_positions.__hipporeplayimm_original__ = original_interp
+    encoding._interp_positions = interp_positions
+    _synchronize_interp_position_aliases(original_interp, interp_positions)
 
 
 def _apply_encoding_bool_validation_patch(encoding) -> None:
@@ -374,6 +411,15 @@ def _synchronize_speed_aliases(original_speed, replacement_speed) -> None:
             continue
         if getattr(module, "_speed_cm_s", None) is original_speed:
             module._speed_cm_s = replacement_speed
+
+
+def _synchronize_interp_position_aliases(original_interp, replacement_interp) -> None:
+    for module in list(sys.modules.values()):
+        module_name = getattr(module, "__name__", "")
+        if not module_name.startswith("hipporeplayimm"):
+            continue
+        if getattr(module, "_interp_positions", None) is original_interp:
+            module._interp_positions = replacement_interp
 
 
 def _synchronize_encoding_validation_aliases(encoding, originals: dict[str, Any]) -> None:

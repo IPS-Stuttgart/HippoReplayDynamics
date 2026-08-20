@@ -8,6 +8,20 @@ from typing import Any
 import numpy as np
 
 _PATCHED_FLAG = "_state_space_candidate_bin_center_validation_patch_applied"
+_ORIGINAL_ATTR = "__hipporeplayimm_original__"
+
+
+def _wrapper_chain_has_marker(function: object) -> bool:
+    """Return whether the live wrapper chain already contains this patch."""
+
+    seen: set[int] = set()
+    current = function
+    while callable(current) and id(current) not in seen:
+        seen.add(id(current))
+        if getattr(current, _PATCHED_FLAG, False):
+            return True
+        current = getattr(current, _ORIGINAL_ATTR, None)
+    return False
 
 
 def apply_state_space_candidate_bin_center_validation_patch() -> None:
@@ -16,7 +30,7 @@ def apply_state_space_candidate_bin_center_validation_patch() -> None:
     from .state_space_model import StateSpaceReplayModel
 
     previous = StateSpaceReplayModel.candidate_indices
-    if getattr(previous, _PATCHED_FLAG, False):
+    if _wrapper_chain_has_marker(previous):
         return
 
     @wraps(previous)
@@ -27,7 +41,7 @@ def apply_state_space_candidate_bin_center_validation_patch() -> None:
         return previous(self, emissions, centers, valid_bin_mask)
 
     setattr(candidate_indices, _PATCHED_FLAG, True)
-    setattr(candidate_indices, "__hipporeplayimm_original__", previous)
+    setattr(candidate_indices, _ORIGINAL_ATTR, previous)
     StateSpaceReplayModel.candidate_indices = candidate_indices
 
 

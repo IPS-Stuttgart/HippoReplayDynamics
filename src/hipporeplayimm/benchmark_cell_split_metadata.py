@@ -187,7 +187,17 @@ def _compare_scores_with_cell_split_metadata(
         return _config_with_cell_split_metadata(config, strategy, strata)
 
     def build_models_with_cell_split(config: Any, *args: Any, **build_kwargs: Any) -> Any:
-        return original_build_models(with_cell_split_config(config), *args, **build_kwargs)
+        config_with_metadata = with_cell_split_config(config)
+        random_seed = gt._unique_int_from_column(
+            scores_frame,
+            "benchmark_cell_split_seed",
+            getattr(config_with_metadata, "random_seed", _DEFAULT_RANDOM_SEED),
+        )
+        return original_build_models(
+            _config_with_overrides(config_with_metadata, random_seed=int(random_seed)),
+            *args,
+            **build_kwargs,
+        )
 
     def cell_split_for_score_rows_with_metadata(session_scores: Any, encoding: Any, config: Any) -> Any:
         config_with_metadata = with_cell_split_config(config)

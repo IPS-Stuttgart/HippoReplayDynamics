@@ -211,7 +211,9 @@ def _apply_state_space_mode_transition_validation_patch() -> None:
     state_space_utils._mode_transition_matrix = mode_transition_matrix
     for module in list(sys.modules.values()):
         module_name = getattr(module, "__name__", "")
-        if module_name.startswith("hipporeplayimm") and getattr(module, "_mode_transition_matrix", None) is current:
+        if module_name != "hipporeplayimm" and not module_name.startswith("hipporeplayimm."):
+            continue
+        if getattr(module, "_mode_transition_matrix", None) is current:
             module._mode_transition_matrix = mode_transition_matrix
     setattr(state_space_utils, _STATE_SPACE_MODE_TRANSITION_PATCHED_FLAG, True)
 

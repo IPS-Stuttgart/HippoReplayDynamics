@@ -19,6 +19,7 @@ _WRAPPER_ORIGINAL_ATTRS = (
     "__duration_occupancy_previous_score__",
     "_duration_occupancy_evidence_only_diagnostics_original",
     "_state_space_evidence_only_diagnostics_original",
+    "_first_order_imm_diagnostics_validation_original",
 )
 
 

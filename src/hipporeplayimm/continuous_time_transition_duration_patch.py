@@ -19,6 +19,11 @@ _WRAPPER_FLAG = "_continuous_time_transition_duration_wrapper"
 _ACCURACY_WRAPPER_FLAG = "_accuracy_replay_gain_gamma_continuous_wrapper"
 _EMISSION_TIMESTAMP_WRAPPER_FLAG = "_explicit_transition_timestamp_validation_wrapper"
 _ORIGINAL_ATTR = "__hipporeplayimm_original__"
+_TRAJECTORY_IMM_VALIDATION_FLAG = "_trajectory_imm_parameter_validation_patch_applied"
+_TRAJECTORY_IMM_VALIDATION_WRAPPER_ATTR = (
+    "_trajectory_imm_parameter_validation_wrapper"
+)
+_TRAJECTORY_IMM_VALIDATION_SOURCE = "model_parameter_validation.py"
 
 
 def apply_continuous_time_transition_duration_patch() -> None:
@@ -29,6 +34,7 @@ def apply_continuous_time_transition_duration_patch() -> None:
         apply_continuous_time_imm_transition_patch,
     )
 
+    _restore_trajectory_imm_reload_patches()
     apply_continuous_time_imm_transition_patch()
     _wrap_log_emission_timestamp_validation()
     current = accuracy_upgrades.build_continuous_time_emissions
@@ -76,6 +82,86 @@ def apply_continuous_time_transition_duration_patch() -> None:
     _synchronize_builder_aliases(build_continuous_time_emissions)
 
 
+def _wrapper_chain(function: Any):
+    """Yield one wrapper lineage without trusting copied marker attributes."""
+
+    seen: set[int] = set()
+    current = function
+    while callable(current) and id(current) not in seen:
+        seen.add(id(current))
+        yield current
+        original = getattr(current, _ORIGINAL_ATTR, None)
+        wrapped = getattr(current, "__wrapped__", None)
+        if callable(original) and original is not current:
+            current = original
+        elif callable(wrapped) and wrapped is not current:
+            current = wrapped
+        else:
+            break
+
+
+def _adopt_trajectory_imm_validation_wrapper(function: Any) -> bool:
+    """Find and mark the live validation wrapper in a composed wrapper chain.
+
+    The validation wrapper predates function-level sentinels. Identify it once
+    by its defining source/code name and attach a self-owned marker. Later
+    ``functools.wraps`` layers may copy that attribute, but only the actual
+    validation wrapper owns a marker that points back to itself.
+    """
+
+    for wrapper in _wrapper_chain(function):
+        if (
+            getattr(wrapper, _TRAJECTORY_IMM_VALIDATION_WRAPPER_ATTR, None)
+            is wrapper
+        ):
+            return True
+        code = getattr(wrapper, "__code__", None)
+        if code is None:
+            continue
+        source_name = str(getattr(code, "co_filename", "")).replace("\\", "/").rsplit("/", 1)[-1]
+        if (
+            source_name == _TRAJECTORY_IMM_VALIDATION_SOURCE
+            and getattr(code, "co_name", "") == "trajectory_imm_mode_stickiness"
+        ):
+            setattr(
+                wrapper,
+                _TRAJECTORY_IMM_VALIDATION_WRAPPER_ATTR,
+                wrapper,
+            )
+            return True
+    return False
+
+
+def _restore_trajectory_imm_reload_patches() -> None:
+    """Restore trajectory-IMM validation and diagnostics discarded by reload.
+
+    ``importlib.reload`` executes a module in its existing namespace. Patch-only
+    module flags can therefore survive while freshly defined functions replace
+    their wrappers. Use the live wrapper chain as the source of truth, replay
+    validation only when its wrapper is absent, and replay the independently
+    idempotent diagnostic patch on every runtime refresh.
+    """
+
+    from . import model_parameter_validation
+    from . import state_space_trajectory_imm as trajectory_imm
+    from .trajectory_imm_single_bin_diagnostics import (
+        apply_trajectory_imm_single_bin_diagnostics_patch,
+    )
+
+    validation_sentinel = trajectory_imm._trajectory_imm_mode_stickiness
+    if not _adopt_trajectory_imm_validation_wrapper(validation_sentinel):
+        setattr(trajectory_imm, _TRAJECTORY_IMM_VALIDATION_FLAG, False)
+        model_parameter_validation.apply_model_parameter_validation_patch()
+        validation_sentinel = trajectory_imm._trajectory_imm_mode_stickiness
+        if not _adopt_trajectory_imm_validation_wrapper(validation_sentinel):
+            raise RuntimeError(
+                "failed to restore trajectory-IMM parameter validation after reload"
+            )
+    setattr(trajectory_imm, _TRAJECTORY_IMM_VALIDATION_FLAG, True)
+
+    apply_trajectory_imm_single_bin_diagnostics_patch()
+
+
 def _wrap_log_emission_timestamp_validation() -> None:
     """Reject non-monotone timestamps even when durations are supplied explicitly.
 
@@ -120,7 +206,9 @@ def _synchronize_builder_aliases(active: Any) -> None:
 
     for module in list(sys.modules.values()):
         module_name = getattr(module, "__name__", "")
-        if not module_name.startswith("hipporeplayimm"):
+        if module_name != "hipporeplayimm" and not module_name.startswith(
+            "hipporeplayimm."
+        ):
             continue
         alias = getattr(module, "build_continuous_time_emissions", None)
         if callable(alias) and alias in lineage and alias is not active:

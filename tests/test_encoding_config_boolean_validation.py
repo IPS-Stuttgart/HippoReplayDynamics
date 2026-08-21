@@ -1,10 +1,14 @@
 from __future__ import annotations
 
+import sys
+from types import ModuleType
+
 import numpy as np
 import pytest
 
 from hipporeplayimm.clusterless import ClusterlessMarkConfig, fit_clusterless_mark_encoding
 from hipporeplayimm.encoding import EncodingConfig, _validate_encoding_config, fit_place_field_encoding
+from hipporeplayimm.encoding_config_boolean_validation import _synchronize_validator_aliases
 
 
 @pytest.mark.parametrize("name", ["use_excitatory", "exclude_ripple_intervals"])
@@ -51,3 +55,24 @@ def test_clusterless_fit_uses_patched_nested_encoding_validator(name: str) -> No
 
     with pytest.raises(TypeError, match=rf"{name} must be a boolean scalar"):
         fit_clusterless_mark_encoding(object(), config)
+
+
+def test_encoding_validator_alias_sync_is_limited_to_package_namespace(monkeypatch) -> None:
+    external = ModuleType("hipporeplayimm_extension")
+    package_probe = ModuleType("hipporeplayimm._encoding_config_alias_probe")
+
+    def previous(config):
+        return config
+
+    def patched(config):
+        return config
+
+    external._validate_encoding_config = previous
+    package_probe._validate_encoding_config = previous
+    monkeypatch.setitem(sys.modules, external.__name__, external)
+    monkeypatch.setitem(sys.modules, package_probe.__name__, package_probe)
+
+    _synchronize_validator_aliases(previous, patched)
+
+    assert external._validate_encoding_config is previous
+    assert package_probe._validate_encoding_config is patched

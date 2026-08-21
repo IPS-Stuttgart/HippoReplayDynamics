@@ -41,7 +41,7 @@ def _synchronize_validator_aliases(previous: object, patched: object) -> None:
 
     for module in list(sys.modules.values()):
         module_name = getattr(module, "__name__", "")
-        if not module_name.startswith("hipporeplayimm"):
+        if module_name != "hipporeplayimm" and not module_name.startswith("hipporeplayimm."):
             continue
         if getattr(module, "_validate_encoding_config", None) is previous:
             module._validate_encoding_config = patched

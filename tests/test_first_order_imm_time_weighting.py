@@ -6,6 +6,8 @@ import hipporeplayimm.duration_occupancy as duration_occupancy
 from hipporeplayimm.encoding import LogEmissionTensor
 from hipporeplayimm.first_order_imm_time_weighting import (
     _duration_weighted_mode_summary,
+    _has_time_weighting_patch,
+    apply_first_order_imm_time_weighting_patch,
 )
 from hipporeplayimm.state_space import (
     StateSpaceDecoderConfig,
@@ -109,3 +111,36 @@ def test_public_first_order_imm_diagnostics_use_bin_exposure(
     np.testing.assert_allclose(diagnostics["state_space_imm_fraction_time_map_nonstationary"], 0.2)
     np.testing.assert_allclose(diagnostics["state_space_imm_longest_nonstationary_bout_s"], 0.005)
     assert diagnostics["state_space_imm_time_weighting"] == "bin_duration"
+
+
+def test_time_weighting_patch_detects_diagnostics_wrapper_chain(monkeypatch) -> None:
+    def already_patched_score(*args, **kwargs):
+        return None
+
+    setattr(
+        already_patched_score,
+        "_first_order_imm_time_weighting_aware",
+        True,
+    )
+
+    def diagnostics_validation_wrapper(*args, **kwargs):
+        return already_patched_score(*args, **kwargs)
+
+    setattr(
+        diagnostics_validation_wrapper,
+        "_first_order_imm_diagnostics_validation_original",
+        already_patched_score,
+    )
+    monkeypatch.setattr(
+        duration_occupancy,
+        "_score_state_space_duration_with_occupancy",
+        diagnostics_validation_wrapper,
+    )
+
+    assert _has_time_weighting_patch(diagnostics_validation_wrapper)
+    apply_first_order_imm_time_weighting_patch()
+
+    assert (
+        duration_occupancy._score_state_space_duration_with_occupancy
+        is diagnostics_validation_wrapper
+    )

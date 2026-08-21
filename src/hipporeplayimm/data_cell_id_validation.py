@@ -177,7 +177,8 @@ def _synchronize_coerce_ripple_event_aliases(original: Any, active: Any) -> None
     """Refresh modules that imported the ripple-event coercer by value."""
 
     for module in list(sys.modules.values()):
-        if not getattr(module, "__name__", "").startswith("hipporeplayimm"):
+        module_name = getattr(module, "__name__", "")
+        if module_name != "hipporeplayimm" and not module_name.startswith("hipporeplayimm."):
             continue
         current = getattr(module, "_coerce_ripple_event", None)
         if current is original:

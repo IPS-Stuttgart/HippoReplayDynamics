@@ -204,7 +204,10 @@ def _scaled_log_rates(values: Any, scale: float, name: str) -> tuple[np.ndarray,
 def _synchronize_build_emission_aliases(previous: object, patched: object) -> None:
     for module in list(sys.modules.values()):
         module_name = getattr(module, "__name__", "")
-        if module_name.startswith("hipporeplayimm") and getattr(module, "build_clusterless_mark_emissions", None) is previous:
+        if (
+            (module_name == "hipporeplayimm" or module_name.startswith("hipporeplayimm."))
+            and getattr(module, "build_clusterless_mark_emissions", None) is previous
+        ):
             module.build_clusterless_mark_emissions = patched
 
 

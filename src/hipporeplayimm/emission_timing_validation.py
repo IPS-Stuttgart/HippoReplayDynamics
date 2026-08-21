@@ -125,16 +125,6 @@ def _reject_nan_log_likelihood(value: object) -> None:
 
 
 def _validate_log_emission_fields(tensor: object) -> None:
-    _reject_boolean_numeric("log_likelihood", getattr(tensor, "log_likelihood"))
-    _reject_boolean_numeric("times", getattr(tensor, "times"))
-    _reject_boolean_numeric("dt", getattr(tensor, "dt"))
-    bin_durations = getattr(tensor, "bin_durations")
-    if bin_durations is not None:
-        _reject_boolean_numeric("bin_durations", bin_durations)
-    transition_durations = getattr(tensor, "transition_durations")
-    if transition_durations is not None:
-        _reject_boolean_numeric("transition_durations", transition_durations)
-
     for name in (
         "log_likelihood",
         "spike_counts",
@@ -147,6 +137,7 @@ def _validate_log_emission_fields(tensor: object) -> None:
     ):
         value = getattr(tensor, name)
         if value is not None:
+            _reject_boolean_numeric(name, value)
             _reject_complex_numeric(name, value)
 
     for name in (

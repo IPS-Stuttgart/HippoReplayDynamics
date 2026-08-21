@@ -440,7 +440,7 @@ def _scalar_config_item(value: object, message: str) -> object:
 def _synchronize_aliases(previous: object, patched: object) -> None:
     for module in list(sys.modules.values()):
         module_name = getattr(module, "__name__", "")
-        if not module_name.startswith("hipporeplayimm"):
+        if module_name != "hipporeplayimm" and not module_name.startswith("hipporeplayimm."):
             continue
         if getattr(module, "fit_clusterless_mark_encoding", None) is previous:
             module.fit_clusterless_mark_encoding = patched

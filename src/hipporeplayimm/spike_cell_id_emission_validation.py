@@ -216,7 +216,8 @@ def _synchronize_spike_selection_aliases(active: Any) -> None:
         current = getattr(current, _ORIGINAL_ATTR, None)
 
     for module in list(sys.modules.values()):
-        if not getattr(module, "__name__", "").startswith("hipporeplayimm"):
+        module_name = getattr(module, "__name__", "")
+        if module_name != "hipporeplayimm" and not module_name.startswith("hipporeplayimm."):
             continue
         alias = getattr(module, "_spikes_and_cell_ids_for_encoding", None)
         if alias in lineage and alias is not active:

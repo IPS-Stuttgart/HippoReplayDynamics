@@ -21,6 +21,13 @@ def _object_array(shape: tuple[int, ...], *values: object) -> np.ndarray:
     return array
 
 
+def _nested_object_array(shape: tuple[int, ...], *values: object) -> np.ndarray:
+    array = np.empty(shape, dtype=object)
+    for index, value in zip(np.ndindex(shape), values, strict=True):
+        array[index] = _nested_scalar(value)
+    return array
+
+
 def _tensor_kwargs(**overrides):
     kwargs = {
         "log_likelihood": np.zeros((2, 1), dtype=float),
@@ -73,8 +80,11 @@ def test_log_emission_tensor_rejects_nested_complex_scalars(field, value):
     ("field", "value"),
     [
         ("log_likelihood", _object_array((2, 1), np.bool_(False), np.bool_(True))),
+        ("spike_counts", _nested_object_array((2, 1), np.bool_(False), np.bool_(False))),
         ("times", _object_array((2,), np.bool_(False), np.bool_(True))),
         ("dt", _nested_scalar(np.bool_(True))),
+        ("cell_ids", _nested_object_array((1,), np.bool_(True))),
+        ("n_spikes", _nested_scalar(np.bool_(False))),
         ("bin_durations", _object_array((2,), np.bool_(True), np.bool_(True))),
         ("transition_durations", _object_array((1,), np.bool_(True))),
     ],

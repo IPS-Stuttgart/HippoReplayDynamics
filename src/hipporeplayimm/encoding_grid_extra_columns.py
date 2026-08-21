@@ -398,7 +398,7 @@ def _copy_function_metadata(original, replacement) -> None:
 def _synchronize_make_grid_aliases(original_make_grid, replacement_make_grid) -> None:
     for module in list(sys.modules.values()):
         module_name = getattr(module, "__name__", "")
-        if not module_name.startswith("hipporeplayimm"):
+        if module_name != "hipporeplayimm" and not module_name.startswith("hipporeplayimm."):
             continue
         if getattr(module, "_make_grid", None) is original_make_grid:
             module._make_grid = replacement_make_grid
@@ -407,7 +407,7 @@ def _synchronize_make_grid_aliases(original_make_grid, replacement_make_grid) ->
 def _synchronize_speed_aliases(original_speed, replacement_speed) -> None:
     for module in list(sys.modules.values()):
         module_name = getattr(module, "__name__", "")
-        if not module_name.startswith("hipporeplayimm"):
+        if module_name != "hipporeplayimm" and not module_name.startswith("hipporeplayimm."):
             continue
         if getattr(module, "_speed_cm_s", None) is original_speed:
             module._speed_cm_s = replacement_speed
@@ -416,7 +416,7 @@ def _synchronize_speed_aliases(original_speed, replacement_speed) -> None:
 def _synchronize_interp_position_aliases(original_interp, replacement_interp) -> None:
     for module in list(sys.modules.values()):
         module_name = getattr(module, "__name__", "")
-        if not module_name.startswith("hipporeplayimm"):
+        if module_name != "hipporeplayimm" and not module_name.startswith("hipporeplayimm."):
             continue
         if getattr(module, "_interp_positions", None) is original_interp:
             module._interp_positions = replacement_interp
@@ -439,7 +439,7 @@ def _synchronize_encoding_validation_aliases(encoding, originals: dict[str, Any]
     }
     for module in list(sys.modules.values()):
         module_name = getattr(module, "__name__", "")
-        if not module_name.startswith("hipporeplayimm"):
+        if module_name != "hipporeplayimm" and not module_name.startswith("hipporeplayimm."):
             continue
         for attr, original in original_by_attr.items():
             if getattr(module, attr, None) is original:

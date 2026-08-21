@@ -228,7 +228,9 @@ def _patch_mode_transition_count_validation() -> None:
 
     for module in list(sys.modules.values()):
         module_name = getattr(module, "__name__", "")
-        if module_name.startswith("hipporeplayimm") and getattr(module, "_mode_transition_matrix", None) is current:
+        if module_name != "hipporeplayimm" and not module_name.startswith("hipporeplayimm."):
+            continue
+        if getattr(module, "_mode_transition_matrix", None) is current:
             module._mode_transition_matrix = mode_transition_matrix
 
 

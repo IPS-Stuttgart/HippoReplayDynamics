@@ -1,12 +1,18 @@
 from __future__ import annotations
 
 from decimal import Decimal
+import sys
+import types
 
 import numpy as np
 import pytest
 
 import hipporeplayimm
 from hipporeplayimm import benchmarks
+from hipporeplayimm.benchmark_seed_validation import (
+    _ORIGINAL_ATTR,
+    _synchronize_benchmark_runner_aliases,
+)
 from hipporeplayimm.benchmarks import BenchmarkConfig
 
 
@@ -106,3 +112,26 @@ def test_public_benchmark_runner_rejects_invalid_seed_sequences(
 def test_direct_cell_split_rejects_fractional_seed() -> None:
     with pytest.raises(ValueError, match="random_seed"):
         benchmarks._split_cells(np.array([1, 2, 3]), 0.25, 2.75)
+
+
+def test_benchmark_runner_alias_sync_ignores_similarly_named_top_level_module(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def original() -> None:
+        return None
+
+    def active() -> None:
+        return None
+
+    setattr(active, _ORIGINAL_ATTR, original)
+    unrelated = types.ModuleType("hipporeplayimm_extension")
+    package_child = types.ModuleType("hipporeplayimm._benchmark_alias_probe")
+    unrelated.run_open_field_benchmark = original
+    package_child.run_open_field_benchmark = original
+    monkeypatch.setitem(sys.modules, unrelated.__name__, unrelated)
+    monkeypatch.setitem(sys.modules, package_child.__name__, package_child)
+
+    _synchronize_benchmark_runner_aliases(active)
+
+    assert unrelated.run_open_field_benchmark is original
+    assert package_child.run_open_field_benchmark is active

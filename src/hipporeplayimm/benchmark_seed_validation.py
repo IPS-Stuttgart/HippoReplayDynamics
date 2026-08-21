@@ -213,7 +213,9 @@ def _synchronize_benchmark_runner_aliases(active: Any) -> None:
 
     for module in list(sys.modules.values()):
         module_name = getattr(module, "__name__", "")
-        if not module_name.startswith("hipporeplayimm"):
+        if module_name != "hipporeplayimm" and not module_name.startswith(
+            "hipporeplayimm."
+        ):
             continue
         alias = getattr(module, "run_open_field_benchmark", None)
         if callable(alias) and alias in lineage and alias is not active:

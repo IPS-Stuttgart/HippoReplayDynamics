@@ -302,7 +302,8 @@ def apply_state_space_bin_count_validation_patch() -> None:
             continue
 
     for module in list(sys.modules.values()):
-        if not getattr(module, "__name__", "").startswith("hipporeplayimm"):
+        module_name = getattr(module, "__name__", "")
+        if module_name != "hipporeplayimm" and not module_name.startswith("hipporeplayimm."):
             continue
         for name, original in originals.items():
             current = getattr(module, name, None)

@@ -1,9 +1,15 @@
 from decimal import Decimal
+import sys
+from types import ModuleType
 
 import numpy as np
 import pytest
 
-from hipporeplayimm.state_space_bin_count_validation import _integer_count, _positive_bin_count
+from hipporeplayimm.state_space_bin_count_validation import (
+    _integer_count,
+    _positive_bin_count,
+    apply_state_space_bin_count_validation_patch,
+)
 from hipporeplayimm.state_space_utils import _top_candidate_indices
 
 
@@ -44,3 +50,21 @@ def test_state_space_count_validation_rejects_fractional_extended_precision_floa
 
     with pytest.raises(TypeError, match="top_k must be an integer"):
         _integer_count("top_k", fractional_count)
+
+
+def test_state_space_alias_sync_is_limited_to_package_namespace(monkeypatch) -> None:
+    external = ModuleType("hipporeplayimm_extension")
+    package_probe = ModuleType("hipporeplayimm._state_space_alias_probe")
+
+    def permissive_mask(valid_bin_mask, n_bins):
+        return valid_bin_mask
+
+    external._coerce_valid_bin_mask = permissive_mask
+    package_probe._coerce_valid_bin_mask = permissive_mask
+    monkeypatch.setitem(sys.modules, external.__name__, external)
+    monkeypatch.setitem(sys.modules, package_probe.__name__, package_probe)
+
+    apply_state_space_bin_count_validation_patch()
+
+    assert external._coerce_valid_bin_mask is permissive_mask
+    assert package_probe._coerce_valid_bin_mask is not permissive_mask

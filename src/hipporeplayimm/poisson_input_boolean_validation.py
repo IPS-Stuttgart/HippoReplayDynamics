@@ -406,7 +406,10 @@ def _synchronize_poisson_log_emission_aliases(
 
     stale_aliases = _wrapped_function_aliases(original, active)
     for module in list(sys.modules.values()):
-        if not getattr(module, "__name__", "").startswith("hipporeplayimm"):
+        module_name = getattr(module, "__name__", "")
+        if module_name != "hipporeplayimm" and not module_name.startswith(
+            "hipporeplayimm."
+        ):
             continue
         current_alias = getattr(module, "_poisson_log_emissions", None)
         if current_alias is active:

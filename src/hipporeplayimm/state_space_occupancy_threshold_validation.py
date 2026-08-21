@@ -106,7 +106,9 @@ def _validate_occupancy_seconds(occupancy_s: Any) -> None:
 def _sync_aliases(previous: Any, replacement: Any) -> None:
     for module in list(sys.modules.values()):
         module_name = getattr(module, "__name__", "")
-        if module_name.startswith("hipporeplayimm") and getattr(module, "_valid_bin_mask_from_occupancy", None) is previous:
+        if module_name != "hipporeplayimm" and not module_name.startswith("hipporeplayimm."):
+            continue
+        if getattr(module, "_valid_bin_mask_from_occupancy", None) is previous:
             module._valid_bin_mask_from_occupancy = replacement
 
 

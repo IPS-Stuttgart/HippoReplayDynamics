@@ -1,4 +1,6 @@
 from pathlib import Path
+import sys
+from types import ModuleType
 
 import numpy as np
 
@@ -8,7 +10,10 @@ from hipporeplayimm.clusterless import (
 )
 from hipporeplayimm.data import ReplaySession, SpikeMarkData
 from hipporeplayimm.encoding import EncodingConfig, fit_place_field_encoding
-from hipporeplayimm.exact_ripple_training_exclusion import retained_frame_durations
+from hipporeplayimm.exact_ripple_training_exclusion import (
+    _synchronize_aliases,
+    retained_frame_durations,
+)
 
 
 _RATE_FLOOR = 1e-4
@@ -116,3 +121,24 @@ def test_overlapping_exclusions_are_subtracted_as_a_union() -> None:
     )
 
     np.testing.assert_allclose(retained, np.array([0.75]))
+
+
+def test_exact_ripple_alias_sync_is_limited_to_package_namespace(monkeypatch) -> None:
+    external = ModuleType("hipporeplayimm_extension")
+    package_probe = ModuleType("hipporeplayimm._exact_ripple_alias_probe")
+
+    def previous():
+        return None
+
+    def replacement():
+        return None
+
+    external._frame_durations = previous
+    package_probe._frame_durations = previous
+    monkeypatch.setitem(sys.modules, external.__name__, external)
+    monkeypatch.setitem(sys.modules, package_probe.__name__, package_probe)
+
+    _synchronize_aliases("_frame_durations", previous, replacement)
+
+    assert external._frame_durations is previous
+    assert package_probe._frame_durations is replacement

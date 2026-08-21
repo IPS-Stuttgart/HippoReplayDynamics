@@ -338,7 +338,7 @@ def _synchronize_wrapper_chain(
 def _synchronize_aliases(name: str, original: Any, replacement: Any) -> None:
     for module in list(sys.modules.values()):
         module_name = getattr(module, "__name__", "")
-        if not module_name.startswith("hipporeplayimm"):
+        if module_name != "hipporeplayimm" and not module_name.startswith("hipporeplayimm."):
             continue
         if getattr(module, name, None) is original:
             setattr(module, name, replacement)

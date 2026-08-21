@@ -471,7 +471,12 @@ def _synchronize_transition_aliases(name: str, original: object, replacement: ob
 
     for module in list(sys.modules.values()):
         module_name = getattr(module, "__name__", "")
-        if module_name.startswith("hipporeplayimm") and getattr(module, name, None) is original:
+        if not (
+            module_name == "hipporeplayimm"
+            or module_name.startswith("hipporeplayimm.")
+        ):
+            continue
+        if getattr(module, name, None) is original:
             setattr(module, name, replacement)
 
 

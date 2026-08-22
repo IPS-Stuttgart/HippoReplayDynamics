@@ -2,6 +2,7 @@ import sys
 import types
 
 import hipporeplayimm
+import hipporeplayimm.candidate_support_quality_patch as candidate_support_patch
 from hipporeplayimm import encoding, kd_reference, state_space_utils
 from hipporeplayimm.sparse_momentum_bin_center_validation import (
     _synchronize_imported_aliases as _synchronize_sparse_center_aliases,
@@ -117,3 +118,35 @@ def test_model_numeric_alias_sync_respects_package_namespace(monkeypatch):
 
     assert external._coerce_integer_count is original
     assert internal._coerce_integer_count is replacement
+
+
+def test_candidate_restriction_alias_sync_respects_package_namespace(monkeypatch):
+    def stale_restriction(candidates, log_likelihood, valid_bin_mask):
+        return candidates
+
+    external = types.ModuleType("hipporeplayimm_extension")
+    external._restrict_candidates_to_valid_bins = stale_restriction
+    monkeypatch.setitem(sys.modules, external.__name__, external)
+
+    internal = types.ModuleType("hipporeplayimm._runtime_patch_test_candidate")
+    internal._restrict_candidates_to_valid_bins = stale_restriction
+    monkeypatch.setitem(sys.modules, internal.__name__, internal)
+
+    monkeypatch.setattr(
+        state_space_utils,
+        "_restrict_candidates_to_valid_bins",
+        stale_restriction,
+    )
+    monkeypatch.setattr(
+        state_space_utils,
+        candidate_support_patch._RESTRICT_CANDIDATE_ORDER_PATCHED_FLAG,
+        False,
+        raising=False,
+    )
+
+    candidate_support_patch._patch_restricted_candidate_order()
+    active_restriction = state_space_utils._restrict_candidates_to_valid_bins
+
+    assert active_restriction is not stale_restriction
+    assert external._restrict_candidates_to_valid_bins is stale_restriction
+    assert internal._restrict_candidates_to_valid_bins is active_restriction

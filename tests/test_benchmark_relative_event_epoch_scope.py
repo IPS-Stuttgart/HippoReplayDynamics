@@ -16,6 +16,7 @@ def test_relative_metrics_keep_event_epochs_separate() -> None:
                 "model": "stationary",
                 "heldout_log_likelihood": 100.0,
                 "test_spikes": 1,
+                "evidence_support": "exact_full_grid",
             },
             {
                 "session": "RatX/Open1",
@@ -24,6 +25,7 @@ def test_relative_metrics_keep_event_epochs_separate() -> None:
                 "model": "stationary",
                 "heldout_log_likelihood": 10.0,
                 "test_spikes": 1,
+                "evidence_support": "exact_full_grid",
             },
             {
                 "session": "RatX/Open1",
@@ -32,6 +34,7 @@ def test_relative_metrics_keep_event_epochs_separate() -> None:
                 "model": "imm",
                 "heldout_log_likelihood": 12.0,
                 "test_spikes": 1,
+                "evidence_support": "exact_full_grid",
             },
         ]
     )

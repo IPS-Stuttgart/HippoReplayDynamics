@@ -97,3 +97,23 @@ def test_state_space_scalar_alias_sync_respects_package_namespace(monkeypatch):
     assert active_mode_transition is not stale_mode_transition
     assert external._mode_transition_matrix is stale_mode_transition
     assert internal._mode_transition_matrix is active_mode_transition
+
+
+def test_model_numeric_alias_sync_respects_package_namespace(monkeypatch):
+    from hipporeplayimm.model_numeric_string_validation import _replace_imported_module_aliases
+
+    original = object()
+    replacement = object()
+
+    external = types.ModuleType("hipporeplayimm_extension")
+    external._coerce_integer_count = original
+    monkeypatch.setitem(sys.modules, external.__name__, external)
+
+    internal = types.ModuleType("hipporeplayimm._runtime_patch_test_numeric")
+    internal._coerce_integer_count = original
+    monkeypatch.setitem(sys.modules, internal.__name__, internal)
+
+    _replace_imported_module_aliases("_coerce_integer_count", original, replacement)
+
+    assert external._coerce_integer_count is original
+    assert internal._coerce_integer_count is replacement

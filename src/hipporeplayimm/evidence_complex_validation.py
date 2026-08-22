@@ -164,6 +164,11 @@ def _patch_support_provenance_compat(reporting, status) -> bool:
             legacy_raw_exact,
             "evidence_support",
         ] = reporting.EXACT_EVIDENCE_SUPPORT
+
+        # The support labels above already encode the legacy provenance. Replace
+        # arbitrary input scalars with safe booleans before delegating so the
+        # canonical compatibility check never converts huge integers to float.
+        sanitized["evidence_comparable"] = ~explicit_false
         return current(sanitized)
 
     setattr(ensure_evidence_support_columns, _REPORTING_SUPPORT_FLAG, True)

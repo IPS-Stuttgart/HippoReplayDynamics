@@ -121,7 +121,7 @@ def _is_full_grid_candidate_support(candidates: list[np.ndarray], n_time: int, n
 
 
 def _patch_unpruned_candidate_evidence_support(models) -> None:
-    """Label the legacy ``top_k=0`` path as exact rather than truncated."""
+    """Label any actually full-grid candidate path as exact rather than truncated."""
 
     current = models.CandidateKinematicModel.score
     if getattr(current, _UNPRUNED_SUPPORT_WRAPPER_ATTR, False):
@@ -135,12 +135,18 @@ def _patch_unpruned_candidate_evidence_support(models) -> None:
             bin_centers,
             candidate_indices=candidate_indices,
         )
-        if candidate_indices is not None or int(getattr(self, "top_k", -1)) != 0:
-            return result
         if int(getattr(emissions, "n_time", 0)) <= 1:
             return result
 
-        candidates = self.candidate_indices(emissions)
+        # Classify the support that was actually scored, not the top-k setting.
+        # Benchmark held-out scoring passes candidate_indices explicitly, and a
+        # finite top_k can also be >= n_bins. Both cases are exact whenever each
+        # time bin contains the complete spatial grid.
+        candidates = (
+            self.candidate_indices(emissions)
+            if candidate_indices is None
+            else candidate_indices
+        )
         if not _is_full_grid_candidate_support(
             candidates,
             emissions.n_time,

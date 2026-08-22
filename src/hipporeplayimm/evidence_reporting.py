@@ -10,6 +10,7 @@ from .result_improvements import add_candidate_support_quality_columns
 
 EXACT_EVIDENCE_SUPPORT = "exact_full_grid"
 TRUNCATED_EVIDENCE_SUPPORT = "truncated_full_grid"
+RESTRICTED_HELDOUT_EVIDENCE_SUPPORT = "restricted_support_difference"
 DEGENERATE_SINGLE_BIN_EVIDENCE_SUPPORT = "degenerate_single_bin"
 PYRECEST_PARTICLE_EVIDENCE_SUPPORT = "particle_approximation"
 EVIDENCE_SUPPORT_DIAGNOSTIC_COLUMNS = (
@@ -30,6 +31,7 @@ EVIDENCE_SUPPORT_DIAGNOSTIC_COLUMNS = (
 
 EVIDENCE_COMPARISON_EXACT = "exact_model_evidence"
 EVIDENCE_COMPARISON_LOWER_BOUND = "truncated_lower_bound"
+EVIDENCE_COMPARISON_RESTRICTED_DIFFERENCE = "restricted_support_difference"
 EVIDENCE_COMPARISON_DEGENERATE = "degenerate_single_bin"
 EVIDENCE_COMPARISON_PARTICLE_APPROXIMATION = "particle_approximation"
 EVIDENCE_COMPARISON_NOT_SCORED = "not_scored"
@@ -38,6 +40,7 @@ EVIDENCE_COMPARISON_UNKNOWN = "unknown_noncomparable"
 EVIDENCE_COMPARISON_DESCRIPTIONS = {
     EVIDENCE_COMPARISON_EXACT: "Exact full-grid model evidences: safe to normalize into posterior model probabilities within the event.",
     EVIDENCE_COMPARISON_LOWER_BOUND: "Truncated candidate-support evidences: lower-bound diagnostics only; do not rank directly against exact full-grid evidences.",
+    EVIDENCE_COMPARISON_RESTRICTED_DIFFERENCE: "Held-out joint-minus-train score on a restricted candidate support: an approximation with no one-sided bound; do not use it for lower-bound certification against exact held-out scores.",
     EVIDENCE_COMPARISON_DEGENERATE: "Degenerate single-bin evidence: exact for a collapsed state support, but not directly comparable to full-grid state supports.",
     EVIDENCE_COMPARISON_PARTICLE_APPROXIMATION: "Stochastic particle-approximation evidence: non-exact diagnostic support; do not rank directly against exact full-grid evidences.",
     EVIDENCE_COMPARISON_NOT_SCORED: "Model was not scored successfully for this event.",
@@ -55,6 +58,24 @@ _MOMENTUM_EXACT_SURROGATE_MODELS = (
     "clusterless-state-space-velocity-momentum",
 )
 
+# These are exact by construction even though the historical EventScore objects
+# predate explicit evidence-support diagnostics. Keep this whitelist deliberately
+# small; any unrecognized row without support metadata fails closed below.
+_KNOWN_EXACT_MODEL_NAMES = frozenset({"random", "stationary"})
+_KNOWN_EXACT_STATE_SPACE_MODES = frozenset(
+    {
+        "stationary",
+        "diffusion",
+        "fragmented",
+        "jump",
+        "first-order-imm",
+        "trajectory-imm-exact-sparse",
+        "momentum-exact-sparse",
+        "displacement-momentum",
+        "displacement-imm",
+        "goal",
+    }
+)
 
 _FALSE_BOOL_STRINGS = {"", "0", "0.0", "false", "f", "no", "n", "off", "nan", "none", "null"}
 _TRUE_BOOL_STRINGS = {"1", "1.0", "true", "t", "yes", "y", "on"}
@@ -111,6 +132,7 @@ def _prioritized_known_evidence_support(labels: list[str]) -> str:
     """Return the strongest known non-comparable label before exact support."""
 
     for non_exact_support in (
+        RESTRICTED_HELDOUT_EVIDENCE_SUPPORT,
         TRUNCATED_EVIDENCE_SUPPORT,
         DEGENERATE_SINGLE_BIN_EVIDENCE_SUPPORT,
         PYRECEST_PARTICLE_EVIDENCE_SUPPORT,
@@ -179,6 +201,37 @@ def _status_success_series(frame: pd.DataFrame) -> pd.Series:
     return frame["status"].map(_status_is_success_or_missing).astype(bool)
 
 
+def _row_is_heldout_difference(row: pd.Series) -> bool:
+    return "heldout_log_likelihood" in row.index
+
+
+def _known_exact_support_from_row(row: pd.Series) -> str:
+    """Return exact support only for built-in rows whose implementation is known."""
+
+    model = str(row.get("model", "")).strip().lower()
+    if model in _KNOWN_EXACT_MODEL_NAMES:
+        return EXACT_EVIDENCE_SUPPORT
+
+    state_space_mode = str(row.get("diagnostic_state_space_mode", "")).strip().lower()
+    if state_space_mode in _KNOWN_EXACT_STATE_SPACE_MODES:
+        return EXACT_EVIDENCE_SUPPORT
+    return ""
+
+
+def _heldout_support_from_raw_support(support: str) -> str:
+    """Convert a raw truncated-evidence label into held-out-difference semantics.
+
+    If Z_joint,S <= Z_joint and Z_train,S <= Z_train, the difference
+    log Z_joint,S - log Z_train,S is not bounded on either side relative to the
+    exact held-out log likelihood. Therefore a truncated raw evidence ceases to
+    be a lower bound after the train contribution is subtracted.
+    """
+
+    if support == TRUNCATED_EVIDENCE_SUPPORT:
+        return RESTRICTED_HELDOUT_EVIDENCE_SUPPORT
+    return support
+
+
 def evidence_support_from_row(row: pd.Series) -> str:
     """Infer whether a score is exact evidence, a lower bound, or non-comparable."""
 
@@ -192,8 +245,18 @@ def evidence_support_from_row(row: pd.Series) -> str:
 
     support = _prioritized_known_evidence_support(labels)
     if support:
+        if _row_is_heldout_difference(row):
+            return _heldout_support_from_raw_support(support)
         return support
-    return EXACT_EVIDENCE_SUPPORT
+
+    known_exact = _known_exact_support_from_row(row)
+    if known_exact:
+        return known_exact
+
+    # Missing support metadata must never silently become exact evidence. New
+    # model families and stripped/legacy tables are non-comparable until they
+    # carry an explicit support label or match the narrow exact whitelist above.
+    return EVIDENCE_COMPARISON_UNKNOWN
 
 
 def evidence_comparison_from_support(support: object) -> str:
@@ -209,6 +272,8 @@ def evidence_comparison_from_support(support: object) -> str:
         return EVIDENCE_COMPARISON_EXACT
     if label == TRUNCATED_EVIDENCE_SUPPORT:
         return EVIDENCE_COMPARISON_LOWER_BOUND
+    if label == RESTRICTED_HELDOUT_EVIDENCE_SUPPORT:
+        return EVIDENCE_COMPARISON_RESTRICTED_DIFFERENCE
     if label == DEGENERATE_SINGLE_BIN_EVIDENCE_SUPPORT:
         return EVIDENCE_COMPARISON_DEGENERATE
     if label == PYRECEST_PARTICLE_EVIDENCE_SUPPORT:
@@ -230,6 +295,16 @@ def ensure_evidence_support_columns(df: pd.DataFrame) -> pd.DataFrame:
     else:
         missing = pd.Series(True, index=out.index)
         out["evidence_support"] = inferred
+
+    # Correct legacy benchmark CSVs that persisted the raw candidate-path label
+    # on a held-out joint-minus-train score. The raw path sums are lower bounds;
+    # their difference is not.
+    if "heldout_log_likelihood" in out.columns:
+        truncated = out["evidence_support"].map(
+            lambda value: _prioritized_known_evidence_support(_evidence_support_labels(value))
+            == TRUNCATED_EVIDENCE_SUPPORT
+        )
+        out.loc[truncated, "evidence_support"] = RESTRICTED_HELDOUT_EVIDENCE_SUPPORT
 
     explicit_noncomparable_without_support = _explicit_noncomparable_without_support_mask(
         out,

@@ -21,6 +21,7 @@ def test_relative_metrics_scope_static_baseline_by_heldout_fraction() -> None:
             "benchmark_cell_split_seed": 7,
             "benchmark_cell_split_strategy": "random",
             "benchmark_cell_split_strata": 4,
+            "evidence_support": "exact_full_grid",
         },
         {
             "session": "RatX/Open1",
@@ -34,6 +35,7 @@ def test_relative_metrics_scope_static_baseline_by_heldout_fraction() -> None:
             "benchmark_cell_split_seed": 7,
             "benchmark_cell_split_strategy": "random",
             "benchmark_cell_split_strata": 4,
+            "evidence_support": "exact_full_grid",
         },
         {
             "session": "RatX/Open1",
@@ -47,6 +49,7 @@ def test_relative_metrics_scope_static_baseline_by_heldout_fraction() -> None:
             "benchmark_cell_split_seed": 7,
             "benchmark_cell_split_strategy": "random",
             "benchmark_cell_split_strata": 4,
+            "evidence_support": "exact_full_grid",
         },
     ]
 

@@ -10,6 +10,7 @@ import pandas as pd
 _PATCHED_FLAG = "_evidence_complex_validation_patch_applied"
 _REPORTING_FINITE_FLAG = "_evidence_complex_reporting_finite"
 _REPORTING_COERCE_FLAG = "_evidence_complex_reporting_coerce"
+_REPORTING_SUPPORT_FLAG = "_evidence_complex_reporting_support_provenance"
 _STATUS_FINITE_FLAG = "_evidence_complex_status_finite"
 _RECOVERY_FINITE_FLAG = "_evidence_complex_recovery_finite"
 _NONSCALAR = object()
@@ -103,6 +104,78 @@ def _coerce_log_evidence_column(frame: pd.DataFrame) -> pd.DataFrame:
     return out
 
 
+def _patch_support_provenance_compat(reporting, status) -> bool:
+    """Pre-classify legacy raw-evidence flags without unsafe numeric coercion.
+
+    Historical raw simulation tables may carry only ``evidence_comparable``.
+    Preserve that compatibility while keeping held-out evidence fail-closed.
+    Pre-populating support also prevents the canonical legacy helper from
+    converting arbitrarily large Python integers through ``float``.
+    """
+
+    current = reporting.ensure_evidence_support_columns
+    if getattr(current, _REPORTING_SUPPORT_FLAG, False):
+        return True
+
+    @wraps(current)
+    def ensure_evidence_support_columns(frame: pd.DataFrame) -> pd.DataFrame:
+        sanitized = frame.copy()
+        if sanitized.empty or "evidence_comparable" not in sanitized.columns:
+            return current(sanitized)
+
+        if "evidence_support" in sanitized.columns:
+            missing_support = sanitized["evidence_support"].map(
+                reporting._is_missing_evidence_support
+            ).astype(bool)
+        else:
+            sanitized["evidence_support"] = pd.NA
+            missing_support = pd.Series(True, index=sanitized.index)
+
+        explicit_false = sanitized["evidence_comparable"].map(
+            status._is_explicit_false_value
+        ).astype(bool)
+        sanitized.loc[
+            missing_support & explicit_false,
+            "evidence_support",
+        ] = reporting.EVIDENCE_COMPARISON_UNKNOWN
+
+        if "heldout_log_likelihood" in sanitized.columns:
+            has_heldout = ~sanitized["heldout_log_likelihood"].map(
+                status._is_missing_scalar
+            ).astype(bool)
+        else:
+            has_heldout = pd.Series(False, index=sanitized.index)
+
+        has_diagnostic = pd.Series(False, index=sanitized.index)
+        for column in reporting.EVIDENCE_SUPPORT_DIAGNOSTIC_COLUMNS:
+            if column not in sanitized.columns:
+                continue
+            has_diagnostic |= sanitized[column].map(
+                lambda value: bool(reporting._evidence_support_labels(value))
+            ).astype(bool)
+
+        legacy_raw_exact = (
+            missing_support
+            & ~explicit_false
+            & ~has_heldout
+            & ~has_diagnostic
+        )
+        sanitized.loc[
+            legacy_raw_exact,
+            "evidence_support",
+        ] = reporting.EXACT_EVIDENCE_SUPPORT
+
+        # The support labels above already encode the legacy provenance. Replace
+        # arbitrary input scalars with safe booleans before delegating so the
+        # canonical compatibility check never converts huge integers to float.
+        sanitized["evidence_comparable"] = ~explicit_false
+        return current(sanitized)
+
+    setattr(ensure_evidence_support_columns, _REPORTING_SUPPORT_FLAG, True)
+    reporting.ensure_evidence_support_columns = ensure_evidence_support_columns
+    return False
+
+
 def apply_evidence_complex_validation_patch() -> None:
     """Install complex-evidence rejection across reporting and recovery helpers."""
 
@@ -116,6 +189,7 @@ def apply_evidence_complex_validation_patch() -> None:
     status_current = bool(
         getattr(status._finite_log_evidence_mask, _STATUS_FINITE_FLAG, False)
     )
+    support_current = _patch_support_provenance_compat(reporting, status)
 
     setattr(_finite_evidence_series, _REPORTING_FINITE_FLAG, True)
     setattr(_coerce_log_evidence_column, _REPORTING_COERCE_FLAG, True)
@@ -155,7 +229,7 @@ def apply_evidence_complex_validation_patch() -> None:
             setattr(successful_finite_scores, _RECOVERY_FINITE_FLAG, True)
             diagnostics._successful_finite_scores = successful_finite_scores
 
-    if reporting_current and status_current and recovery_current:
+    if reporting_current and status_current and support_current and recovery_current:
         setattr(reporting, _PATCHED_FLAG, True)
         return
     setattr(reporting, _PATCHED_FLAG, True)

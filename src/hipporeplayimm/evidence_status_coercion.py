@@ -32,10 +32,37 @@ _SIMULATION_EVENT_GROUP_COLUMNS = (
     "benchmark_cell_split_index",
     "event_window_variant",
 )
+_EXACT_STATE_SPACE_MODEL_PREFIXES = (
+    "sorted-spike-state-space-",
+    "state-space-",
+    "clusterless-state-space-",
+)
+_EXACT_STATE_SPACE_MODEL_MODES = frozenset(
+    {
+        "stationary",
+        "diffusion",
+        "fragmented",
+        "jump",
+        "first-order-imm",
+        "momentum-exact-sparse",
+        "trajectory-imm-exact-sparse",
+        "displacement-momentum",
+        "velocity-momentum",
+        "displacement-imm",
+        "goal",
+    }
+)
 
 
 def apply_evidence_status_coercion_patch() -> None:
-    """Treat missing legacy status values as successful, but keep failures excluded."""
+    """Treat missing legacy status values as successful, but keep failures excluded.
+
+    Evidence-support semantics live in :mod:`evidence_reporting`. This patch
+    normalizes legacy status values and provides a narrow compatibility bridge
+    for old *raw* simulation-evidence tables, whose missing support metadata was
+    historically interpreted as exact. Held-out joint-minus-train evidence is
+    intentionally strict: unknown support remains non-comparable.
+    """
 
     from . import evidence_reporting as reporting
 
@@ -43,89 +70,54 @@ def apply_evidence_status_coercion_patch() -> None:
         _patch_optional_recovery_modules(reporting)
         return
 
+    original_evidence_support_from_row = reporting.evidence_support_from_row
+    original_ensure_evidence_support_columns = reporting.ensure_evidence_support_columns
     original_simulation_add_evidence_columns = reporting.simulation_add_evidence_columns
     original_simulation_event_best_rows = reporting.simulation_event_best_rows
 
+    @wraps(original_evidence_support_from_row)
     def evidence_support_from_row(row: pd.Series) -> str:
-        """Infer evidence support with legacy-missing statuses treated as success."""
+        normalized = row.copy()
+        if "status" in normalized.index:
+            normalized["status"] = _normalize_status_value(normalized["status"])
+        support = original_evidence_support_from_row(normalized)
+        if support != reporting.EVIDENCE_COMPARISON_UNKNOWN:
+            return support
 
-        status = row.get("status", "success")
-        if not _status_is_success_or_missing(status):
-            return "not_scored"
-
-        labels: list[str] = []
-        for column in reporting.EVIDENCE_SUPPORT_DIAGNOSTIC_COLUMNS:
-            value = row.get(column)
-            if _is_missing_scalar(value):
-                continue
-            labels.extend(reporting._evidence_support_labels(value))
-
-        for non_exact_support in (
-            reporting.TRUNCATED_EVIDENCE_SUPPORT,
-            reporting.DEGENERATE_SINGLE_BIN_EVIDENCE_SUPPORT,
-            reporting.PYRECEST_PARTICLE_EVIDENCE_SUPPORT,
-        ):
-            if non_exact_support in labels:
-                return non_exact_support
-        if reporting.EXACT_EVIDENCE_SUPPORT in labels:
+        # Exact state-space families can be identified from their canonical model
+        # names even in legacy held-out CSVs that predate explicit support fields.
+        # Candidate-pruned momentum/IMM names are deliberately excluded.
+        if _known_exact_state_space_model_name(normalized.get("model", "")):
             return reporting.EXACT_EVIDENCE_SUPPORT
-        if labels:
-            return reporting.EVIDENCE_COMPARISON_UNKNOWN
-        return reporting.EXACT_EVIDENCE_SUPPORT
 
+        # Preserve backward compatibility for old raw simulation-recovery tables.
+        # This compatibility path never applies to held-out joint-minus-train
+        # scores and never overrides an explicit/diagnostic support declaration.
+        if (
+            not _row_has_heldout_score(normalized)
+            and not _has_support_diagnostic(normalized, reporting)
+        ):
+            return reporting.EXACT_EVIDENCE_SUPPORT
+        return support
+
+    @wraps(original_ensure_evidence_support_columns)
     def ensure_evidence_support_columns(df: pd.DataFrame) -> pd.DataFrame:
-        """Add comparable-evidence flags with consistent legacy-status handling.
+        normalized = _normalize_status_frame(df)
+        if normalized.empty:
+            return _empty_evidence_columns(normalized, reporting)
+        out = original_ensure_evidence_support_columns(normalized)
 
-        Older score tables can contain an explicit ``evidence_comparable=False``
-        flag without the newer ``evidence_support`` label.  Do not infer exact
-        full-grid support for those rows: the explicit non-comparable flag is the
-        only trustworthy provenance, so keep the row out of exact-evidence model
-        normalization until a support label is supplied.
-        """
-
-        out = df.copy()
-        if out.empty:
-            return _empty_evidence_columns(out, reporting)
-        if "status" in out.columns:
-            out["status"] = out["status"].map(_normalize_status_value)
-        inferred = out.apply(evidence_support_from_row, axis=1)
-        if "evidence_support" in out:
-            existing = out["evidence_support"].astype(object)
-            missing_support = existing.map(reporting._is_missing_evidence_support)
-            out["evidence_support"] = existing.where(~missing_support, inferred)
-        else:
-            missing_support = pd.Series(True, index=out.index)
-            out["evidence_support"] = inferred
-
-        explicit_noncomparable_without_support = _explicit_noncomparable_without_support_mask(
-            out,
-            missing_support=missing_support,
-        )
-        if explicit_noncomparable_without_support.any():
-            out.loc[
-                explicit_noncomparable_without_support,
-                "evidence_support",
-            ] = reporting.EVIDENCE_COMPARISON_UNKNOWN
-
-        status_ok = _status_success_mask(out)
-        failed_status = ~status_ok
+        # Existing support labels must not survive a failed scoring status as if
+        # they represented a usable exact evidence row.
+        failed_status = ~_status_success_mask(normalized)
         if failed_status.any():
             out.loc[failed_status, "evidence_support"] = reporting.EVIDENCE_COMPARISON_NOT_SCORED
-        finite_evidence = reporting._finite_evidence_series(out)
-        out["evidence_comparison"] = out["evidence_support"].map(
-            reporting.evidence_comparison_from_support
-        )
-        out["evidence_comparison_note"] = out["evidence_comparison"].map(
-            reporting.EVIDENCE_COMPARISON_DESCRIPTIONS
-        ).fillna(
-            reporting.EVIDENCE_COMPARISON_DESCRIPTIONS[reporting.EVIDENCE_COMPARISON_UNKNOWN]
-        )
-        out["evidence_comparable"] = (
-            status_ok
-            & finite_evidence
-            & out["evidence_support"].eq(reporting.EXACT_EVIDENCE_SUPPORT)
-        )
-        return reporting.add_candidate_support_quality_columns(out)
+            out.loc[failed_status, "evidence_comparison"] = reporting.EVIDENCE_COMPARISON_NOT_SCORED
+            out.loc[failed_status, "evidence_comparison_note"] = reporting.EVIDENCE_COMPARISON_DESCRIPTIONS[
+                reporting.EVIDENCE_COMPARISON_NOT_SCORED
+            ]
+            out.loc[failed_status, "evidence_comparable"] = False
+        return out
 
     @wraps(original_simulation_add_evidence_columns)
     def simulation_add_evidence_columns(df: pd.DataFrame) -> pd.DataFrame:
@@ -153,6 +145,31 @@ def apply_evidence_status_coercion_patch() -> None:
     setattr(reporting, _PATCHED_FLAG, True)
 
     _patch_optional_recovery_modules(reporting)
+
+
+def _known_exact_state_space_model_name(value: object) -> bool:
+    model = str(value).strip().lower()
+    for prefix in _EXACT_STATE_SPACE_MODEL_PREFIXES:
+        if not model.startswith(prefix):
+            continue
+        mode = model.removeprefix(prefix)
+        if mode in _EXACT_STATE_SPACE_MODEL_MODES:
+            return True
+        return mode.startswith("trajectory-imm-") and mode.endswith("-exact-sparse")
+    return False
+
+
+def _row_has_heldout_score(row: pd.Series) -> bool:
+    if "heldout_log_likelihood" not in row.index:
+        return False
+    return not _is_missing_scalar(row.get("heldout_log_likelihood"))
+
+
+def _has_support_diagnostic(row: pd.Series, reporting: Any) -> bool:
+    for column in reporting.EVIDENCE_SUPPORT_DIAGNOSTIC_COLUMNS:
+        if reporting._evidence_support_labels(row.get(column)):
+            return True
+    return False
 
 
 def _core_reporting_patch_current(reporting: Any) -> bool:

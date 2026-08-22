@@ -49,6 +49,7 @@ def test_mixed_evidence_finiteness_stays_conservative() -> None:
         {
             "log_evidence": [2.0, np.nan, np.nan, np.inf, "broken"],
             "heldout_log_likelihood": [np.nan, 3.0, np.nan, np.nan, 4.0],
+            "evidence_support": ["exact_full_grid"] * 5,
         }
     )
 

@@ -13,6 +13,7 @@ those inputs must be rejected before the wrapped constructor normalizes them.
 from __future__ import annotations
 
 from functools import wraps
+from typing import Any, Callable
 
 import numpy as np
 
@@ -124,6 +125,56 @@ def _reject_nan_log_likelihood(value: object) -> None:
         raise ValueError("log_likelihood must not contain NaN values")
 
 
+def _wide_floating_time_array(value: object) -> np.ndarray | None:
+    """Return representable timestamps whose dtype is wider than binary64."""
+
+    try:
+        values = np.asarray(value)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    if values.dtype.kind != "f":
+        return None
+    try:
+        precision = np.finfo(values.dtype).nmant
+    except ValueError:
+        return None
+    if precision <= np.finfo(float).nmant:
+        return None
+    with np.errstate(over="ignore", invalid="ignore"):
+        narrowed = np.asarray(values, dtype=float)
+    if not np.all(np.isfinite(narrowed)):
+        return None
+    return values
+
+
+def _call_post_init_preserving_wide_times(
+    tensor: Any,
+    post_init: Callable[[Any], Any],
+) -> Any:
+    """Run legacy normalization without collapsing valid wide timestamps.
+
+    ``LogEmissionTensor.__post_init__`` historically coerces ``times`` to
+    binary64 before deriving transition durations.  On platforms where
+    ``np.longdouble`` is wider, distinct large timestamps can therefore collapse
+    to equal float64 values and be rejected as non-increasing.  Re-centering the
+    timestamps before the legacy normalization preserves their exact adjacent
+    differences while keeping all duration outputs on the established binary64
+    path.  The original wide absolute coordinates are restored afterwards.
+    """
+
+    times = _wide_floating_time_array(tensor.times)
+    if times is None or times.ndim != 1 or times.size == 0:
+        return post_init(tensor)
+
+    with np.errstate(over="ignore", invalid="ignore"):
+        relative_times = times - times[0]
+    tensor.times = relative_times
+    try:
+        return post_init(tensor)
+    finally:
+        tensor.times = times.copy()
+
+
 def _validate_log_emission_fields(tensor: object) -> None:
     for name in (
         "log_likelihood",
@@ -178,7 +229,7 @@ def apply_emission_timing_validation_patch() -> None:
     @wraps(current)
     def post_init(self):
         _validate_log_emission_fields(self)
-        return current(self)
+        return _call_post_init_preserving_wide_times(self, current)
 
     setattr(post_init, _PATCHED_FLAG, True)
     setattr(post_init, "__hipporeplayimm_original__", current)

@@ -151,7 +151,6 @@ def _wrap_trajectory_mode_transition_sequence(
 
     @wraps(helper)
     def trajectory_mode_transition_matrices(*args, **kwargs):
-        legacy = helper(*args, **kwargs)
         config = _positional_or_keyword(args, kwargs, 0, "config")
         stickiness = float(_positional_or_keyword(args, kwargs, 1, "stickiness"))
         durations = np.asarray(
@@ -160,7 +159,7 @@ def _wrap_trajectory_mode_transition_sequence(
         )
         tau_s = float(getattr(config, "imm_switch_tau_s", 0.0))
         if tau_s == 0.0:
-            return legacy
+            return helper(*args, **kwargs)
         if not np.isfinite(tau_s) or tau_s <= 0.0:
             raise ValueError("imm_switch_tau_s must be finite and positive")
         if durations.ndim != 1:
@@ -168,6 +167,9 @@ def _wrap_trajectory_mode_transition_sequence(
         if not np.all(np.isfinite(durations)) or np.any(durations <= 0.0):
             raise ValueError("transition durations must be finite and positive")
 
+        # Do not evaluate the legacy duration-specific helper in continuous-time
+        # mode.  With custom momentum routing it can reject short durations
+        # before the CTMC embedding gets a chance to replace that legacy matrix.
         reference_transition = base_helper(config, stickiness)
         return [
             _continuous_time_mode_transition_matrix(
@@ -191,6 +193,16 @@ def _format_survival(module: Any, durations: np.ndarray, tau_s: float) -> str:
     return ",".join(f"{float(value):.12g}" for value in values)
 
 
+def _materialize_transition_durations(emissions: Any, values: Any) -> np.ndarray:
+    """Materialize one-shot duration iterables and mirror decoder fallback semantics."""
+
+    raw = list(values)
+    if raw:
+        return np.asarray(raw, dtype=float)
+    expected = max(int(emissions.n_time) - 1, 0)
+    return np.full(expected, float(emissions.dt), dtype=float)
+
+
 def _wrap_displacement_diagnostics(helper: Callable[..., Any], module: Any) -> Callable[..., Any]:
     if getattr(helper, _DIAGNOSTIC_WRAPPER_FLAG, False):
         return helper
@@ -205,11 +217,12 @@ def _wrap_displacement_diagnostics(helper: Callable[..., Any], module: Any) -> C
         valid_bin_mask=None,
         return_trajectory: bool = True,
     ):
+        durations = _materialize_transition_durations(emissions, transition_durations_s)
         result = helper(
             emissions,
             bin_centers,
             config,
-            transition_durations_s,
+            durations,
             valid_bin_mask=valid_bin_mask,
             return_trajectory=return_trajectory,
         )
@@ -220,7 +233,7 @@ def _wrap_displacement_diagnostics(helper: Callable[..., Any], module: Any) -> C
         diagnostics = dict(diagnostics)
         key = "state_space_displacement_imm_mode_stickiness_per_step"
         diagnostics["state_space_displacement_imm_mode_self_transition_probability_per_step"] = diagnostics[key]
-        diagnostics[key] = _format_survival(module, np.asarray(transition_durations_s), tau_s)
+        diagnostics[key] = _format_survival(module, durations, tau_s)
         return logp, trajectory, terminal, mode_post, displacement_post, diagnostics
 
     setattr(score_displacement_imm_exact, _DIAGNOSTIC_WRAPPER_FLAG, True)
@@ -242,11 +255,12 @@ def _wrap_trajectory_diagnostics(helper: Callable[..., Any], module: Any) -> Cal
         valid_bin_mask=None,
         return_trajectory: bool = True,
     ):
+        durations = _materialize_transition_durations(emissions, transition_durations_s)
         result = helper(
             emissions,
             bin_centers,
             config,
-            transition_durations_s,
+            durations,
             valid_bin_mask=valid_bin_mask,
             return_trajectory=return_trajectory,
         )
@@ -257,7 +271,7 @@ def _wrap_trajectory_diagnostics(helper: Callable[..., Any], module: Any) -> Cal
         diagnostics = dict(diagnostics)
         key = "state_space_trajectory_imm_mode_stickiness_per_step"
         diagnostics["state_space_trajectory_imm_mode_self_transition_probability_per_step"] = diagnostics[key]
-        diagnostics[key] = _format_survival(module, np.asarray(transition_durations_s), tau_s)
+        diagnostics[key] = _format_survival(module, durations, tau_s)
         return logp, trajectory, terminal, mode_post, diagnostics
 
     setattr(score_trajectory_imm_exact_sparse, _DIAGNOSTIC_WRAPPER_FLAG, True)

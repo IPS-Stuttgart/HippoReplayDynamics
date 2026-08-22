@@ -124,6 +124,49 @@ def _reject_nan_log_likelihood(value: object) -> None:
         raise ValueError("log_likelihood must not contain NaN values")
 
 
+def _wide_floating_time_array(value: object) -> np.ndarray | None:
+    """Return timestamps whose floating dtype is wider than binary64."""
+
+    try:
+        values = np.asarray(value)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    if values.dtype.kind != "f":
+        return None
+    try:
+        precision = np.finfo(values.dtype).nmant
+    except ValueError:
+        return None
+    if precision <= np.finfo(float).nmant:
+        return None
+    return values
+
+
+def _call_post_init_preserving_wide_times(tensor: object, post_init: object) -> object:
+    """Run legacy normalization without collapsing valid wide timestamps.
+
+    ``LogEmissionTensor.__post_init__`` historically coerces ``times`` to
+    binary64 before deriving transition durations.  On platforms where
+    ``np.longdouble`` is wider, distinct large timestamps can therefore collapse
+    to equal float64 values and be rejected as non-increasing.  Re-centering the
+    timestamps before the legacy normalization preserves their exact adjacent
+    differences while keeping all duration outputs on the established binary64
+    path.  The original wide absolute coordinates are restored afterwards.
+    """
+
+    times = _wide_floating_time_array(getattr(tensor, "times"))
+    if times is None or times.ndim != 1 or times.size == 0:
+        return post_init(tensor)  # type: ignore[operator]
+
+    with np.errstate(over="ignore", invalid="ignore"):
+        relative_times = times - times[0]
+    tensor.times = relative_times  # type: ignore[attr-defined]
+    try:
+        return post_init(tensor)  # type: ignore[operator]
+    finally:
+        tensor.times = times.copy()  # type: ignore[attr-defined]
+
+
 def _validate_log_emission_fields(tensor: object) -> None:
     for name in (
         "log_likelihood",
@@ -178,7 +221,7 @@ def apply_emission_timing_validation_patch() -> None:
     @wraps(current)
     def post_init(self):
         _validate_log_emission_fields(self)
-        return current(self)
+        return _call_post_init_preserving_wide_times(self, current)
 
     setattr(post_init, _PATCHED_FLAG, True)
     setattr(post_init, "__hipporeplayimm_original__", current)

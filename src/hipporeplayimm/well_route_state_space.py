@@ -18,6 +18,18 @@ from .state_space_utils import _mean_entropy, _per_bin_sigma
 _BOOL_OR_TEXT_DTYPE_KINDS = {"b", "S", "U"}
 
 
+def _coerce_boolean_scalar(value: object, name: str) -> bool:
+    """Return a strict Python/NumPy boolean scalar without truthiness coercion."""
+
+    try:
+        scalar = np.asarray(value)
+    except (TypeError, ValueError) as exc:
+        raise TypeError(f"{name} must be a boolean scalar") from exc
+    if scalar.ndim != 0 or not np.issubdtype(scalar.dtype, np.bool_):
+        raise TypeError(f"{name} must be a boolean scalar")
+    return bool(scalar.item())
+
+
 @dataclass
 class WellRouteStateSpaceReplayModel:
     """Exact mixture over deterministic well-to-well route templates.
@@ -119,6 +131,7 @@ def routes_from_wells(well_locations: np.ndarray, *, include_reverse: bool = Tru
         raise ValueError("well_locations must contain at least one coordinate column")
     if not np.all(np.isfinite(wells)):
         raise ValueError("well_locations must be finite")
+    include_reverse = _coerce_boolean_scalar(include_reverse, "include_reverse")
     routes = []
     for start in range(wells.shape[0]):
         for end in range(wells.shape[0]):

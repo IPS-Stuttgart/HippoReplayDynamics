@@ -213,6 +213,12 @@ def _coerce_spike_counts(values: Any) -> np.ndarray:
             count = int(integral)
         elif isinstance(item, _STRING_TYPES):
             count = _coerce_integral_text_count(item, "spike_counts")
+        elif isinstance(item, (float, np.floating)):
+            if not np.isfinite(item) or item < 0:
+                raise ValueError("spike_counts must contain finite nonnegative values")
+            count = int(item)
+            if item != count:
+                raise ValueError("spike_counts must be integer-valued")
         else:
             try:
                 numeric = float(item)
@@ -253,6 +259,13 @@ def _coerce_n_spikes(value: Any) -> int:
         return int(integral)
     if isinstance(item, _STRING_TYPES):
         return _coerce_integral_text_count(item, "n_spikes")
+    if isinstance(item, (float, np.floating)):
+        if not np.isfinite(item) or item < 0:
+            raise ValueError("n_spikes must be finite and nonnegative")
+        count = int(item)
+        if item != count:
+            raise ValueError("n_spikes must be integer-valued")
+        return count
     try:
         numeric = float(item)
     except (TypeError, ValueError, OverflowError) as exc:
@@ -300,6 +313,36 @@ def _coerce_cell_ids(values: Any) -> np.ndarray:
     return canonical
 
 
+def _coerce_integral_text_identifier(value: str | bytes, name: str) -> int:
+    """Parse an integral textual identifier without narrowing through binary64."""
+
+    if isinstance(value, (bytes, np.bytes_)):
+        try:
+            text = bytes(value).decode("utf-8")
+        except UnicodeDecodeError as exc:
+            raise ValueError(f"{name} must contain finite integer identifiers") from exc
+    else:
+        text = str(value)
+    text = text.strip()
+    if not text:
+        raise ValueError(f"{name} must contain finite integer identifiers")
+
+    try:
+        return int(text, 10)
+    except ValueError:
+        pass
+    try:
+        numeric = Decimal(text)
+    except InvalidOperation as exc:
+        raise ValueError(f"{name} must contain finite integer identifiers") from exc
+    if not numeric.is_finite():
+        raise ValueError(f"{name} must contain finite integer identifiers")
+    integral = numeric.to_integral_value()
+    if numeric != integral:
+        raise ValueError(f"{name} must be integer-valued")
+    return int(integral)
+
+
 def _coerce_integer_identifier(value: Any, name: str, integer_info: np.iinfo) -> int:
     try:
         item = np.asarray(value).item()
@@ -309,10 +352,25 @@ def _coerce_integer_identifier(value: Any, name: str, integer_info: np.iinfo) ->
         raise ValueError(f"{name} must not contain boolean identifiers")
     if isinstance(item, (int, np.integer)):
         identifier = int(item)
+    elif isinstance(item, Decimal):
+        if not item.is_finite():
+            raise ValueError(f"{name} must contain finite integer identifiers")
+        integral = item.to_integral_value()
+        if item != integral:
+            raise ValueError(f"{name} must be integer-valued")
+        identifier = int(integral)
+    elif isinstance(item, _STRING_TYPES):
+        identifier = _coerce_integral_text_identifier(item, name)
+    elif isinstance(item, (float, np.floating)):
+        if not np.isfinite(item):
+            raise ValueError(f"{name} must contain finite integer identifiers")
+        identifier = int(item)
+        if item != identifier:
+            raise ValueError(f"{name} must be integer-valued")
     else:
         try:
             numeric = float(item)
-        except (TypeError, ValueError) as exc:
+        except (TypeError, ValueError, OverflowError) as exc:
             raise ValueError(f"{name} must contain finite integer identifiers") from exc
         if not np.isfinite(numeric):
             raise ValueError(f"{name} must contain finite integer identifiers")

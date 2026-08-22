@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from decimal import Decimal
 from pathlib import Path
 
 import numpy as np
@@ -23,6 +24,52 @@ def test_large_integer_log_emission_cell_ids_remain_distinct() -> None:
     )
 
     assert emissions.cell_ids.tolist() == [first, second]
+
+
+def test_large_text_log_emission_cell_ids_remain_distinct() -> None:
+    first = 2**53
+    second = first + 1
+    cases = (
+        np.array([str(first), str(second)]),
+        np.array([f"{first}.0", f"{second}.0"], dtype=object),
+        np.array([str(first).encode(), str(second).encode()], dtype=object),
+        np.array([Decimal(first), Decimal(second)], dtype=object),
+    )
+
+    for cell_ids in cases:
+        emissions = LogEmissionTensor(
+            log_likelihood=np.zeros((1, 2), dtype=float),
+            spike_counts=np.zeros((1, 2), dtype=int),
+            times=np.array([0.0], dtype=float),
+            dt=0.02,
+            cell_ids=cell_ids,
+            n_spikes=0,
+        )
+
+        assert emissions.cell_ids.tolist() == [first, second]
+
+
+def test_extended_precision_cell_ids_do_not_narrow_through_binary64() -> None:
+    first = 2**53
+    second = first + 1
+    first_extended = np.longdouble(str(first))
+    second_extended = np.longdouble(str(second))
+    if first_extended == second_extended:
+        return
+
+    cell_ids = np.array([first_extended, second_extended], dtype=np.longdouble)
+    emissions = LogEmissionTensor(
+        log_likelihood=np.zeros((1, 2), dtype=float),
+        spike_counts=np.zeros((1, 2), dtype=int),
+        times=np.array([0.0], dtype=float),
+        dt=0.02,
+        cell_ids=cell_ids,
+        n_spikes=0,
+    )
+    rows = _cell_id_row_indices(cell_ids, np.array([second_extended], dtype=np.longdouble))
+
+    assert emissions.cell_ids.tolist() == [first, second]
+    assert rows.tolist() == [1]
 
 
 def test_large_integer_emission_row_lookup_remains_distinct() -> None:

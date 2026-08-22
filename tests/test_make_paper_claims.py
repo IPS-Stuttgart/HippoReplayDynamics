@@ -60,7 +60,7 @@ def test_paper_claim_tables_report_paired_session_heterogeneity(tmp_path):
     assert "Lower-bound-safe claim" in (output / "paper_claims.md").read_text(encoding="utf-8")
 
 
-def test_lower_bound_primary_losses_are_nondecisive(tmp_path):
+def test_restricted_support_heldout_scores_are_nondecisive():
     scores = pd.DataFrame(
         [
             _row("Rat1/Open1", 0, "sorted-spike-state-space-diffusion", 0.0),
@@ -80,16 +80,21 @@ def test_lower_bound_primary_losses_are_nondecisive(tmp_path):
     )
     deltas = tables.event_deltas.sort_values("event_index")
 
-    assert bool(deltas.iloc[0]["certified_primary_win"])
-    assert deltas.iloc[0]["claim_category"] == "lower_bound_certified_primary_win"
+    assert deltas["primary_evidence_support"].tolist() == [
+        "restricted_support_difference",
+        "restricted_support_difference",
+    ]
+    assert not bool(deltas.iloc[0]["certified_primary_win"])
+    assert not bool(deltas.iloc[0]["primary_is_truncated_lower_bound"])
+    assert deltas.iloc[0]["claim_category"] == "nondecisive_or_noncomparable"
     assert not bool(deltas.iloc[1]["strict_baseline_win"])
-    assert bool(deltas.iloc[1]["nondecisive_due_to_primary_lower_bound"])
-    assert deltas.iloc[1]["claim_category"] == "nondecisive_primary_lower_bound"
+    assert not bool(deltas.iloc[1]["nondecisive_due_to_primary_lower_bound"])
+    assert deltas.iloc[1]["claim_category"] == "nondecisive_or_noncomparable"
 
     summary = tables.summary.iloc[0]
-    assert summary["certified_primary_wins"] == 1
+    assert summary["certified_primary_wins"] == 0
     assert summary["strict_baseline_wins"] == 0
-    assert summary["nondecisive_primary_lower_bound_events"] == 1
+    assert summary["nondecisive_primary_lower_bound_events"] == 0
 
 
 def test_paper_claim_tables_accept_sparse_momentum_support_diagnostic():

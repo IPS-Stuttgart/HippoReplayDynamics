@@ -183,7 +183,9 @@ def _patch_restricted_candidate_order() -> None:
 
     for module in list(sys.modules.values()):
         module_name = getattr(module, "__name__", "")
-        if module_name.startswith("hipporeplayimm") and getattr(module, "_restrict_candidates_to_valid_bins", None) is current:
+        if module_name != "hipporeplayimm" and not module_name.startswith("hipporeplayimm."):
+            continue
+        if getattr(module, "_restrict_candidates_to_valid_bins", None) is current:
             module._restrict_candidates_to_valid_bins = restrict_candidates_to_valid_bins
 
     setattr(state_space_utils, _RESTRICT_CANDIDATE_ORDER_PATCHED_FLAG, True)

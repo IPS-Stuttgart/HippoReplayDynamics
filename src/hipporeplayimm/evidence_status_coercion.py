@@ -32,17 +32,36 @@ _SIMULATION_EVENT_GROUP_COLUMNS = (
     "benchmark_cell_split_index",
     "event_window_variant",
 )
+_EXACT_STATE_SPACE_MODEL_PREFIXES = (
+    "sorted-spike-state-space-",
+    "state-space-",
+    "clusterless-state-space-",
+)
+_EXACT_STATE_SPACE_MODEL_MODES = frozenset(
+    {
+        "stationary",
+        "diffusion",
+        "fragmented",
+        "jump",
+        "first-order-imm",
+        "momentum-exact-sparse",
+        "trajectory-imm-exact-sparse",
+        "displacement-momentum",
+        "velocity-momentum",
+        "displacement-imm",
+        "goal",
+    }
+)
 
 
 def apply_evidence_status_coercion_patch() -> None:
     """Treat missing legacy status values as successful, but keep failures excluded.
 
-    Evidence-support semantics live in :mod:`evidence_reporting`.  This patch is
-    intentionally limited to normalizing legacy status values before delegating
-    to those canonical helpers.  Duplicating the support-classification logic
-    here previously caused runtime patching to resurrect stale semantics after
-    import (notably treating missing support as exact and held-out truncated
-    differences as lower bounds).
+    Evidence-support semantics live in :mod:`evidence_reporting`. This patch
+    normalizes legacy status values and provides a narrow compatibility bridge
+    for old *raw* simulation-evidence tables, whose missing support metadata was
+    historically interpreted as exact. Held-out joint-minus-train evidence is
+    intentionally strict: unknown support remains non-comparable.
     """
 
     from . import evidence_reporting as reporting
@@ -61,14 +80,44 @@ def apply_evidence_status_coercion_patch() -> None:
         normalized = row.copy()
         if "status" in normalized.index:
             normalized["status"] = _normalize_status_value(normalized["status"])
-        return original_evidence_support_from_row(normalized)
+        support = original_evidence_support_from_row(normalized)
+        if support != reporting.EVIDENCE_COMPARISON_UNKNOWN:
+            return support
+
+        # Exact state-space families can be identified from their canonical model
+        # names even in legacy held-out CSVs that predate explicit support fields.
+        # Candidate-pruned momentum/IMM names are deliberately excluded.
+        if _known_exact_state_space_model_name(normalized.get("model", "")):
+            return reporting.EXACT_EVIDENCE_SUPPORT
+
+        # Preserve backward compatibility for old raw simulation-recovery tables.
+        # This compatibility path never applies to held-out joint-minus-train
+        # scores and never overrides an explicit/diagnostic support declaration.
+        if (
+            not _row_has_heldout_score(normalized)
+            and not _has_support_diagnostic(normalized, reporting)
+        ):
+            return reporting.EXACT_EVIDENCE_SUPPORT
+        return support
 
     @wraps(original_ensure_evidence_support_columns)
     def ensure_evidence_support_columns(df: pd.DataFrame) -> pd.DataFrame:
         normalized = _normalize_status_frame(df)
         if normalized.empty:
             return _empty_evidence_columns(normalized, reporting)
-        return original_ensure_evidence_support_columns(normalized)
+        out = original_ensure_evidence_support_columns(normalized)
+
+        # Existing support labels must not survive a failed scoring status as if
+        # they represented a usable exact evidence row.
+        failed_status = ~_status_success_mask(normalized)
+        if failed_status.any():
+            out.loc[failed_status, "evidence_support"] = reporting.EVIDENCE_COMPARISON_NOT_SCORED
+            out.loc[failed_status, "evidence_comparison"] = reporting.EVIDENCE_COMPARISON_NOT_SCORED
+            out.loc[failed_status, "evidence_comparison_note"] = reporting.EVIDENCE_COMPARISON_DESCRIPTIONS[
+                reporting.EVIDENCE_COMPARISON_NOT_SCORED
+            ]
+            out.loc[failed_status, "evidence_comparable"] = False
+        return out
 
     @wraps(original_simulation_add_evidence_columns)
     def simulation_add_evidence_columns(df: pd.DataFrame) -> pd.DataFrame:
@@ -96,6 +145,31 @@ def apply_evidence_status_coercion_patch() -> None:
     setattr(reporting, _PATCHED_FLAG, True)
 
     _patch_optional_recovery_modules(reporting)
+
+
+def _known_exact_state_space_model_name(value: object) -> bool:
+    model = str(value).strip().lower()
+    for prefix in _EXACT_STATE_SPACE_MODEL_PREFIXES:
+        if not model.startswith(prefix):
+            continue
+        mode = model.removeprefix(prefix)
+        if mode in _EXACT_STATE_SPACE_MODEL_MODES:
+            return True
+        return mode.startswith("trajectory-imm-") and mode.endswith("-exact-sparse")
+    return False
+
+
+def _row_has_heldout_score(row: pd.Series) -> bool:
+    if "heldout_log_likelihood" not in row.index:
+        return False
+    return not _is_missing_scalar(row.get("heldout_log_likelihood"))
+
+
+def _has_support_diagnostic(row: pd.Series, reporting: Any) -> bool:
+    for column in reporting.EVIDENCE_SUPPORT_DIAGNOSTIC_COLUMNS:
+        if reporting._evidence_support_labels(row.get(column)):
+            return True
+    return False
 
 
 def _core_reporting_patch_current(reporting: Any) -> bool:

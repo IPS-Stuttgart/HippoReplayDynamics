@@ -13,6 +13,7 @@ those inputs must be rejected before the wrapped constructor normalizes them.
 from __future__ import annotations
 
 from functools import wraps
+from typing import Any, Callable
 
 import numpy as np
 
@@ -142,7 +143,10 @@ def _wide_floating_time_array(value: object) -> np.ndarray | None:
     return values
 
 
-def _call_post_init_preserving_wide_times(tensor: object, post_init: object) -> object:
+def _call_post_init_preserving_wide_times(
+    tensor: Any,
+    post_init: Callable[[Any], Any],
+) -> Any:
     """Run legacy normalization without collapsing valid wide timestamps.
 
     ``LogEmissionTensor.__post_init__`` historically coerces ``times`` to
@@ -154,17 +158,17 @@ def _call_post_init_preserving_wide_times(tensor: object, post_init: object) -> 
     path.  The original wide absolute coordinates are restored afterwards.
     """
 
-    times = _wide_floating_time_array(getattr(tensor, "times"))
+    times = _wide_floating_time_array(tensor.times)
     if times is None or times.ndim != 1 or times.size == 0:
-        return post_init(tensor)  # type: ignore[operator]
+        return post_init(tensor)
 
     with np.errstate(over="ignore", invalid="ignore"):
         relative_times = times - times[0]
-    tensor.times = relative_times  # type: ignore[attr-defined]
+    tensor.times = relative_times
     try:
-        return post_init(tensor)  # type: ignore[operator]
+        return post_init(tensor)
     finally:
-        tensor.times = times.copy()  # type: ignore[attr-defined]
+        tensor.times = times.copy()
 
 
 def _validate_log_emission_fields(tensor: object) -> None:

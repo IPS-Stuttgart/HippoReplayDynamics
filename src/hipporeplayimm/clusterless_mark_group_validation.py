@@ -195,7 +195,10 @@ def _scaled_log_rates(values: Any, scale: float, name: str) -> tuple[np.ndarray,
     rates = np.asarray(values, dtype=float)
     if not np.all(np.isfinite(rates)) or np.any(rates < 0.0):
         raise ValueError(f"{name} must contain finite nonnegative rates")
-    scaled = rates * float(scale)
+    with np.errstate(over="ignore", invalid="ignore"):
+        scaled = rates * float(scale)
+    if not np.all(np.isfinite(scaled)):
+        raise ValueError(f"{name} scaled by spike_rate_scale must remain finite")
     log_rates = np.full(scaled.shape, -np.inf, dtype=float)
     np.log(scaled, out=log_rates, where=scaled > 0.0)
     return scaled, log_rates

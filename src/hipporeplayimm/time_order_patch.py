@@ -41,7 +41,9 @@ def apply_reverse_emission_time_patch() -> None:
         if reverse_time:
             likelihood = likelihood[::-1].copy()
             counts = counts[::-1].copy()
-        return LogEmissionTensor(
+        from . import encoding
+
+        return encoding.LogEmissionTensor(
             log_likelihood=likelihood.copy(),
             spike_counts=counts.copy(),
             times=_time_vector(

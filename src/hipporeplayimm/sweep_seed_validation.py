@@ -178,7 +178,7 @@ def _synchronize_output_writer_aliases(active: Any) -> None:
 
     for module in list(sys.modules.values()):
         module_name = getattr(module, "__name__", "")
-        if not module_name.startswith("hipporeplayimm"):
+        if module_name != "hipporeplayimm" and not module_name.startswith("hipporeplayimm."):
             continue
         alias = getattr(module, "write_pyrecest_sweep_outputs", None)
         if callable(alias) and alias in lineage and alias is not active:

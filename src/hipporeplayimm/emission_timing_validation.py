@@ -126,7 +126,7 @@ def _reject_nan_log_likelihood(value: object) -> None:
 
 
 def _wide_floating_time_array(value: object) -> np.ndarray | None:
-    """Return timestamps whose floating dtype is wider than binary64."""
+    """Return representable timestamps whose dtype is wider than binary64."""
 
     try:
         values = np.asarray(value)
@@ -139,6 +139,10 @@ def _wide_floating_time_array(value: object) -> np.ndarray | None:
     except ValueError:
         return None
     if precision <= np.finfo(float).nmant:
+        return None
+    with np.errstate(over="ignore", invalid="ignore"):
+        narrowed = np.asarray(values, dtype=float)
+    if not np.all(np.isfinite(narrowed)):
         return None
     return values
 

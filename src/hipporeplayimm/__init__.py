@@ -91,6 +91,7 @@ from . import spike_cell_id_emission_validation as _spike_cell_id_emission_valid
 from . import spike_rate_metadata as _spike_rate_metadata
 from . import state_space_bin_center_validation as _state_space_bin_center_validation
 from . import state_space_bin_count_validation as _state_space_bin_count_validation
+from . import state_space_sigma_validation as _state_space_sigma_validation
 from . import sweep_seed_validation as _sweep_seed_validation
 from . import time_order_patch as _time_order_patch
 from . import well_label_shuffle_patch as _well_label_shuffle_patch
@@ -234,6 +235,7 @@ def apply_runtime_patches() -> None:
     """
 
     _state_space_bin_count_validation.apply_state_space_bin_count_validation_patch()
+    _state_space_sigma_validation.apply_state_space_sigma_validation_patch()
     _score_metadata.apply_model_hyperparam_patch()
     _score_metadata_bool_validation.apply_score_metadata_bool_validation_patch()
     _model_parameter_validation.apply_model_parameter_validation_patch()

@@ -15,6 +15,7 @@ def test_relative_metrics_preserve_missing_scope_column_dtypes() -> None:
             "model": ["stationary", "imm", "stationary", "imm"],
             "heldout_log_likelihood": [1.0, 2.0, 10.0, 12.0],
             "test_spikes": [1] * 4,
+            "evidence_support": ["exact_full_grid"] * 4,
             "benchmark_event_subset_seed": pd.Series(
                 [pd.NA, pd.NA, 7, 7],
                 dtype="Int64",

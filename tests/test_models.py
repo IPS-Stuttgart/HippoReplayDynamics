@@ -199,7 +199,7 @@ def test_candidate_diffusion_full_support_matches_exact_diffusion():
 
     assert np.allclose(candidate.log_likelihood, exact.log_likelihood)
     assert candidate.diagnostics["mean_candidate_log_mass"] == 0.0
-    assert candidate.diagnostics["candidate_evidence_support"] == "truncated_full_grid"
+    assert candidate.diagnostics["candidate_evidence_support"] == "exact_full_grid"
 
 
 def test_candidate_single_bin_is_marked_degenerate_and_not_comparable():

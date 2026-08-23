@@ -14,6 +14,22 @@ from hipporeplayimm.model_parameter_validation import (
 )
 
 
+def _package_alias_snapshot(attribute):
+    snapshot = []
+    for module in list(sys.modules.values()):
+        module_name = getattr(module, "__name__", "")
+        if module_name != "hipporeplayimm" and not module_name.startswith("hipporeplayimm."):
+            continue
+        if hasattr(module, attribute):
+            snapshot.append((module, getattr(module, attribute)))
+    return snapshot
+
+
+def _restore_package_aliases(attribute, snapshot):
+    for module, value in snapshot:
+        setattr(module, attribute, value)
+
+
 def test_ground_truth_bool_alias_sync_respects_package_namespace(monkeypatch):
     stale = object()
     active = object()
@@ -26,10 +42,14 @@ def test_ground_truth_bool_alias_sync_respects_package_namespace(monkeypatch):
     internal._coerce_bool_series = stale
     monkeypatch.setitem(sys.modules, internal.__name__, internal)
 
-    _synchronize_coerce_bool_series_aliases(active)
+    snapshot = _package_alias_snapshot("_coerce_bool_series")
+    try:
+        _synchronize_coerce_bool_series_aliases(active)
 
-    assert external._coerce_bool_series is stale
-    assert internal._coerce_bool_series is active
+        assert external._coerce_bool_series is stale
+        assert internal._coerce_bool_series is active
+    finally:
+        _restore_package_aliases("_coerce_bool_series", snapshot)
 
 
 def test_model_parameter_alias_sync_respects_package_namespace(monkeypatch):
@@ -44,18 +64,22 @@ def test_model_parameter_alias_sync_respects_package_namespace(monkeypatch):
     internal._mode_transition_matrix = stale_mode_transition
     monkeypatch.setitem(sys.modules, internal.__name__, internal)
 
-    monkeypatch.setattr(
-        state_space_utils,
-        "_mode_transition_matrix",
-        stale_mode_transition,
-    )
+    snapshot = _package_alias_snapshot("_mode_transition_matrix")
+    try:
+        monkeypatch.setattr(
+            state_space_utils,
+            "_mode_transition_matrix",
+            stale_mode_transition,
+        )
 
-    _apply_state_space_mode_transition_validation_patch()
-    active_mode_transition = state_space_utils._mode_transition_matrix
+        _apply_state_space_mode_transition_validation_patch()
+        active_mode_transition = state_space_utils._mode_transition_matrix
 
-    assert active_mode_transition is not stale_mode_transition
-    assert external._mode_transition_matrix is stale_mode_transition
-    assert internal._mode_transition_matrix is active_mode_transition
+        assert active_mode_transition is not stale_mode_transition
+        assert external._mode_transition_matrix is stale_mode_transition
+        assert internal._mode_transition_matrix is active_mode_transition
+    finally:
+        _restore_package_aliases("_mode_transition_matrix", snapshot)
 
 
 def test_active_goal_direct_helper_validates_well_ids():

@@ -111,9 +111,13 @@ def test_active_goal_direct_helper_validates_well_ids():
     )
     _patch_direct_ground_truth_numeric_helpers(ground_truth)
 
-    session = types.SimpleNamespace(
+    valid_session = types.SimpleNamespace(
+        well_sequence=np.array([[0.0, 1.0]], dtype=float),
+    )
+    assert ground_truth.active_goal_at_time(valid_session, 1.0) == 1
+
+    invalid_session = types.SimpleNamespace(
         well_sequence=np.array([[0.0, 1.5]], dtype=float),
     )
-
     with pytest.raises(ValueError, match="well IDs"):
-        ground_truth.active_goal_at_time(session, 1.0)
+        ground_truth.active_goal_at_time(invalid_session, 1.0)

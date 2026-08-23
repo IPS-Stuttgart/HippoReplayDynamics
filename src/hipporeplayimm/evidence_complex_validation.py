@@ -11,6 +11,7 @@ _PATCHED_FLAG = "_evidence_complex_validation_patch_applied"
 _REPORTING_FINITE_FLAG = "_evidence_complex_reporting_finite"
 _REPORTING_COERCE_FLAG = "_evidence_complex_reporting_coerce"
 _REPORTING_SUPPORT_FLAG = "_evidence_complex_reporting_support_provenance"
+_REPORTING_HELDOUT_ROW_FLAG = "_evidence_complex_reporting_heldout_row"
 _STATUS_FINITE_FLAG = "_evidence_complex_status_finite"
 _RECOVERY_FINITE_FLAG = "_evidence_complex_recovery_finite"
 _NONSCALAR = object()
@@ -111,16 +112,37 @@ def _patch_support_provenance_compat(reporting, status) -> bool:
     Preserve that compatibility while keeping held-out evidence fail-closed.
     Pre-populating support also prevents the canonical legacy helper from
     converting arbitrarily large Python integers through ``float``.
+
+    Mixed raw/held-out tables are rectangular, so raw rows inherit a
+    ``heldout_log_likelihood`` column whose value is missing. Held-out semantics
+    therefore have to be decided per row, not from column presence alone.
     """
+
+    row_helper_current = bool(
+        getattr(
+            reporting._row_is_heldout_difference,
+            _REPORTING_HELDOUT_ROW_FLAG,
+            False,
+        )
+    )
+    if not row_helper_current:
+
+        def row_is_heldout_difference(row: pd.Series) -> bool:
+            if "heldout_log_likelihood" not in row.index:
+                return False
+            return not status._is_missing_scalar(row.get("heldout_log_likelihood"))
+
+        setattr(row_is_heldout_difference, _REPORTING_HELDOUT_ROW_FLAG, True)
+        reporting._row_is_heldout_difference = row_is_heldout_difference
 
     current = reporting.ensure_evidence_support_columns
     if getattr(current, _REPORTING_SUPPORT_FLAG, False):
-        return True
+        return row_helper_current
 
     @wraps(current)
     def ensure_evidence_support_columns(frame: pd.DataFrame) -> pd.DataFrame:
         sanitized = frame.copy()
-        if sanitized.empty or "evidence_comparable" not in sanitized.columns:
+        if sanitized.empty:
             return current(sanitized)
 
         if "evidence_support" in sanitized.columns:
@@ -131,13 +153,17 @@ def _patch_support_provenance_compat(reporting, status) -> bool:
             sanitized["evidence_support"] = pd.NA
             missing_support = pd.Series(True, index=sanitized.index)
 
-        explicit_false = sanitized["evidence_comparable"].map(
-            status._is_explicit_false_value
-        ).astype(bool)
-        sanitized.loc[
-            missing_support & explicit_false,
-            "evidence_support",
-        ] = reporting.EVIDENCE_COMPARISON_UNKNOWN
+        has_comparable_flag = "evidence_comparable" in sanitized.columns
+        if has_comparable_flag:
+            explicit_false = sanitized["evidence_comparable"].map(
+                status._is_explicit_false_value
+            ).astype(bool)
+            sanitized.loc[
+                missing_support & explicit_false,
+                "evidence_support",
+            ] = reporting.EVIDENCE_COMPARISON_UNKNOWN
+        else:
+            explicit_false = pd.Series(False, index=sanitized.index)
 
         if "heldout_log_likelihood" in sanitized.columns:
             has_heldout = ~sanitized["heldout_log_likelihood"].map(
@@ -146,30 +172,54 @@ def _patch_support_provenance_compat(reporting, status) -> bool:
         else:
             has_heldout = pd.Series(False, index=sanitized.index)
 
-        has_diagnostic = pd.Series(False, index=sanitized.index)
-        for column in reporting.EVIDENCE_SUPPORT_DIAGNOSTIC_COLUMNS:
-            if column not in sanitized.columns:
-                continue
-            has_diagnostic |= sanitized[column].map(
-                lambda value: bool(reporting._evidence_support_labels(value))
-            ).astype(bool)
+        if has_comparable_flag:
+            has_diagnostic = pd.Series(False, index=sanitized.index)
+            for column in reporting.EVIDENCE_SUPPORT_DIAGNOSTIC_COLUMNS:
+                if column not in sanitized.columns:
+                    continue
+                has_diagnostic |= sanitized[column].map(
+                    lambda value: bool(reporting._evidence_support_labels(value))
+                ).astype(bool)
 
-        legacy_raw_exact = (
-            missing_support
-            & ~explicit_false
-            & ~has_heldout
-            & ~has_diagnostic
-        )
-        sanitized.loc[
-            legacy_raw_exact,
-            "evidence_support",
-        ] = reporting.EXACT_EVIDENCE_SUPPORT
+            legacy_raw_exact = (
+                missing_support
+                & ~explicit_false
+                & ~has_heldout
+                & ~has_diagnostic
+            )
+            sanitized.loc[
+                legacy_raw_exact,
+                "evidence_support",
+            ] = reporting.EXACT_EVIDENCE_SUPPORT
 
-        # The support labels above already encode the legacy provenance. Replace
-        # arbitrary input scalars with safe booleans before delegating so the
-        # canonical compatibility check never converts huge integers to float.
-        sanitized["evidence_comparable"] = ~explicit_false
-        return current(sanitized)
+            # The support labels above already encode the legacy provenance.
+            # Replace arbitrary input scalars with safe booleans before
+            # delegating so the canonical compatibility check never converts
+            # huge integers to float.
+            sanitized["evidence_comparable"] = ~explicit_false
+
+        result = current(sanitized)
+
+        # The canonical legacy correction is column-oriented: when a held-out
+        # column exists, it converts every truncated row to a restricted
+        # joint-minus-train difference. Re-evaluate rows whose held-out value is
+        # actually missing without that column, then copy only the derived
+        # evidence fields back. This preserves raw truncated lower bounds in a
+        # mixed table while leaving genuine held-out rows restricted.
+        raw_rows = ~has_heldout
+        if "heldout_log_likelihood" in sanitized.columns and raw_rows.any():
+            raw_input = sanitized.loc[raw_rows].drop(columns=["heldout_log_likelihood"])
+            raw_result = current(raw_input)
+            for column in (
+                "evidence_support",
+                "evidence_comparison",
+                "evidence_comparison_note",
+                "evidence_comparable",
+            ):
+                if column in raw_result.columns:
+                    result.loc[raw_rows, column] = raw_result[column].to_numpy()
+
+        return result
 
     setattr(ensure_evidence_support_columns, _REPORTING_SUPPORT_FLAG, True)
     reporting.ensure_evidence_support_columns = ensure_evidence_support_columns

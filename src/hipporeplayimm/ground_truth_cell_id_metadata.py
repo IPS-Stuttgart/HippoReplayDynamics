@@ -1,4 +1,4 @@
-"""Strict parsing for saved train/test cell-ID metadata."""
+"""Strict parsing for cell IDs and behavioral well-sequence metadata."""
 
 from __future__ import annotations
 
@@ -16,6 +16,8 @@ _CELL_ID_METADATA_ERROR = "score-table cell IDs cell ID metadata must contain in
 _ACTIVE_GOAL_PATCHED_FLAG = "_ground_truth_active_goal_combined_validation_patch_applied"
 _FLOAT_HELPER_PATCHED_FLAG = "_ground_truth_active_goal_repair_wrapper"
 _NUMERIC_SCALAR_PATCHED_FLAG = "_ground_truth_nested_numeric_scalar_validation_patch_applied"
+_WELL_SEQUENCE_HELPER_PATCHED_FLAG = "_ground_truth_well_sequence_time_validation_patch_applied"
+_WELL_SEQUENCE_TIME_ERROR = "well sequence fill times must contain finite numeric values"
 _LEGACY_ACTIVE_GOAL_MARKERS = (
     "_ground_truth_direct_active_goal_numeric_validation_patch_applied",
     "_ground_truth_direct_active_goal_well_id_validation_patch_applied",
@@ -24,12 +26,13 @@ _ACTIVE_GOAL_WRAPPER_CODE: Any | None = None
 
 
 def apply_ground_truth_cell_id_metadata_patch() -> None:
-    """Reject malformed cell-ID metadata instead of silently truncating it."""
+    """Reject malformed cell-ID and well-sequence metadata."""
 
     from . import ground_truth as gt
     from . import ground_truth_float_metadata as float_metadata
 
     _patch_float_metadata_numeric_scalar_helper(float_metadata)
+    _patch_float_metadata_well_sequence_helper(float_metadata)
     _patch_float_metadata_active_goal_helper(float_metadata)
     _install_active_goal_validation(gt, float_metadata)
 
@@ -76,6 +79,23 @@ def _patch_float_metadata_numeric_scalar_helper(float_metadata: Any) -> None:
     float_metadata._parse_config_scalar = parse_config_scalar
 
 
+def _patch_float_metadata_well_sequence_helper(float_metadata: Any) -> None:
+    """Share well-sequence time validation across all ground-truth helpers."""
+
+    current = float_metadata._validate_well_sequence_ids
+    if getattr(current, _WELL_SEQUENCE_HELPER_PATCHED_FLAG, False):
+        return
+
+    @wraps(current)
+    def validate_well_sequence(well_sequence: Any) -> None:
+        current(well_sequence)
+        _validate_well_sequence_time_order(well_sequence)
+
+    setattr(validate_well_sequence, _WELL_SEQUENCE_HELPER_PATCHED_FLAG, True)
+    setattr(validate_well_sequence, "__hipporeplayimm_original__", current)
+    float_metadata._validate_well_sequence_ids = validate_well_sequence
+
+
 def _patch_float_metadata_active_goal_helper(float_metadata: Any) -> None:
     """Repair active-goal validation after every legacy float-helper refresh."""
 
@@ -86,6 +106,7 @@ def _patch_float_metadata_active_goal_helper(float_metadata: Any) -> None:
     @wraps(current)
     def patch_direct_ground_truth_numeric_helpers(gt: Any) -> None:
         current(gt)
+        _patch_float_metadata_well_sequence_helper(float_metadata)
         _install_active_goal_validation(gt, float_metadata)
 
     setattr(patch_direct_ground_truth_numeric_helpers, _FLOAT_HELPER_PATCHED_FLAG, True)
@@ -93,7 +114,7 @@ def _patch_float_metadata_active_goal_helper(float_metadata: Any) -> None:
 
 
 def _install_active_goal_validation(gt: Any, float_metadata: Any) -> None:
-    """Install one non-recursive wrapper for timestamp and well-ID validation."""
+    """Install one non-recursive wrapper for timestamp and well-sequence validation."""
 
     current = gt.active_goal_at_time
     if _active_goal_patch_current(current):
@@ -108,7 +129,6 @@ def _install_active_goal_validation(gt: Any, float_metadata: Any) -> None:
     def active_goal_at_time(session: Any, time_s: float) -> int | None:
         time_value = float_metadata._parse_config_scalar("time_s", time_s)
         float_metadata._validate_well_sequence_ids(session.well_sequence)
-        _validate_well_sequence_time_order(session.well_sequence)
         return base(session, time_value)
 
     global _ACTIVE_GOAL_WRAPPER_CODE
@@ -144,21 +164,76 @@ def _unwrap_legacy_active_goal(function: Any) -> Any:
 
 
 def _validate_well_sequence_time_order(well_sequence: Any) -> None:
-    """Reject non-chronological fill times before ``searchsorted`` is used."""
+    """Reject malformed or non-chronological fill times before they are consumed."""
 
     if well_sequence is None:
         return
     raw = np.asarray(well_sequence)
     if raw.size == 0 or raw.ndim != 2 or raw.shape[1] < 2:
         return
-    try:
-        times = np.asarray(raw[:, 0], dtype=float)
-    except (TypeError, ValueError, OverflowError) as exc:
-        raise ValueError("well sequence fill times must contain finite numeric values") from exc
-    if not np.all(np.isfinite(times)):
-        raise ValueError("well sequence fill times must contain finite numeric values")
-    if np.any(np.diff(times) < 0.0):
+
+    if np.issubdtype(raw.dtype, np.bool_) or np.issubdtype(raw.dtype, np.complexfloating):
+        raise ValueError(_WELL_SEQUENCE_TIME_ERROR)
+
+    if np.issubdtype(raw.dtype, np.number):
+        times = raw[:, 0]
+        if not np.all(np.isfinite(times)):
+            raise ValueError(_WELL_SEQUENCE_TIME_ERROR)
+    else:
+        object_times = np.asarray(well_sequence, dtype=object)[:, 0]
+        times = np.asarray(
+            [_finite_real_well_fill_time(value) for value in object_times],
+            dtype=np.longdouble,
+        )
+
+    if np.any(times[1:] < times[:-1]):
         raise ValueError("well sequence fill times must be nondecreasing")
+
+
+def _finite_real_well_fill_time(value: Any) -> np.longdouble:
+    """Return one finite real fill timestamp without lossy complex coercion."""
+
+    current = value
+    seen_arrays: set[int] = set()
+    while isinstance(current, np.ndarray):
+        if current.ndim != 0:
+            raise ValueError(_WELL_SEQUENCE_TIME_ERROR)
+        marker = id(current)
+        if marker in seen_arrays:
+            raise ValueError(_WELL_SEQUENCE_TIME_ERROR)
+        seen_arrays.add(marker)
+        try:
+            item = current.item()
+        except (TypeError, ValueError) as exc:
+            raise ValueError(_WELL_SEQUENCE_TIME_ERROR) from exc
+        if item is current:
+            raise ValueError(_WELL_SEQUENCE_TIME_ERROR)
+        current = item
+
+    if isinstance(
+        current,
+        (
+            bool,
+            np.bool_,
+            complex,
+            np.complexfloating,
+            str,
+            bytes,
+            bytearray,
+            memoryview,
+            np.str_,
+            np.bytes_,
+        ),
+    ):
+        raise ValueError(_WELL_SEQUENCE_TIME_ERROR)
+
+    try:
+        numeric = np.longdouble(current)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ValueError(_WELL_SEQUENCE_TIME_ERROR) from exc
+    if not np.isfinite(numeric):
+        raise ValueError(_WELL_SEQUENCE_TIME_ERROR)
+    return numeric
 
 
 def _ground_truth_cell_id_metadata_patch_current(gt: object) -> bool:

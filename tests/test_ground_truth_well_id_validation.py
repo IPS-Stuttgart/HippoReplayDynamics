@@ -88,12 +88,41 @@ def test_active_goal_rejects_out_of_order_well_fill_times() -> None:
         active_goal_at_time(_session(sequence), 1.5)
 
 
+def test_infer_well_locations_rejects_out_of_order_well_fill_times() -> None:
+    sequence = np.array([[0.0, 1], [2.0, 2], [1.0, 3]], dtype=float)
+
+    with pytest.raises(ValueError, match="nondecreasing"):
+        infer_well_locations_from_arrays(
+            _position(),
+            sequence,
+            well_arrival_window_s=0.5,
+        )
+
+
 @pytest.mark.parametrize("invalid_time", [np.nan, np.inf, -np.inf])
 def test_active_goal_rejects_nonfinite_well_fill_times(invalid_time: float) -> None:
     sequence = np.array([[0.0, 1], [invalid_time, 2]], dtype=float)
 
     with pytest.raises(ValueError, match="finite numeric"):
         active_goal_at_time(_session(sequence), 0.5)
+
+
+def test_active_goal_rejects_complex_well_fill_times() -> None:
+    sequence = np.array([[0.0, 1], [0.5 + 0.25j, 2]], dtype=object)
+
+    with pytest.raises(ValueError, match="finite numeric"):
+        active_goal_at_time(_session(sequence), 0.25)
+
+
+def test_infer_well_locations_rejects_complex_well_fill_times() -> None:
+    sequence = np.array([[0.0, 1], [0.5 + 0.25j, 2]], dtype=object)
+
+    with pytest.raises(ValueError, match="finite numeric"):
+        infer_well_locations_from_arrays(
+            _position(),
+            sequence,
+            well_arrival_window_s=0.5,
+        )
 
 
 def test_ground_truth_helpers_accept_integral_well_id_wrappers() -> None:

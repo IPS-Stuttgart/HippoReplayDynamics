@@ -31,6 +31,7 @@ _POSTERIOR_DIAGNOSTIC_KEYS = (
 def apply_reverse_time_terminal_guard_patch() -> None:
     """Install reverse-time and core dynamic-path guards."""
 
+    from .candidate_tie_order_patch import apply_candidate_tie_order_patch
     from .candidate_kinematic_smoothing import (
         apply_candidate_kinematic_smoothing_patch,
     )
@@ -45,6 +46,10 @@ def apply_reverse_time_terminal_guard_patch() -> None:
         apply_score_optional_kwargs_fallback_patch,
     )
 
+    # Run this before the reverse-wrapper idempotence guard: lower-level modules
+    # can be reloaded independently and may need their imported selector aliases
+    # refreshed even when the reverse wrapper itself is already current.
+    apply_candidate_tie_order_patch()
     apply_candidate_kinematic_smoothing_patch()
     apply_diffusion_impossible_path_guard_patch()
     apply_exact_ripple_training_exclusion_patch()
@@ -119,16 +124,23 @@ def _score_reverse_with_supported_return_trajectory(
         candidate_indices=reversed_candidates,
         return_trajectory=return_trajectory,
     )
+    base_model_name = str(result.model_name)
     if result.trajectory_log_posterior is not None:
         trajectory = np.asarray(result.trajectory_log_posterior, dtype=float)[::-1].copy()
         result.trajectory_log_posterior = trajectory
         result.terminal_log_posterior = trajectory[-1].copy()
-    result.model_name = str(self.name)
+    result.model_name = (
+        str(self.name)
+        if self.name is not None
+        else f"{base_model_name}-reverse"
+    )
     result.diagnostics = dict(result.diagnostics)
     if result.terminal_log_posterior is not None:
         result.diagnostics.update(extensions._posterior_diagnostics(result.terminal_log_posterior, bin_centers))
     result.diagnostics["direction_model"] = "reverse"
-    result.diagnostics["reverse_time_base_model"] = str(getattr(self.base_model, "name", "model"))
+    result.diagnostics["reverse_time_base_model"] = str(
+        getattr(self.base_model, "name", base_model_name)
+    )
     return result
 
 

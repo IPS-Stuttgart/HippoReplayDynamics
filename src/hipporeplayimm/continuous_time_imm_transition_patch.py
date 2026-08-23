@@ -151,7 +151,6 @@ def _wrap_trajectory_mode_transition_sequence(
 
     @wraps(helper)
     def trajectory_mode_transition_matrices(*args, **kwargs):
-        legacy = helper(*args, **kwargs)
         config = _positional_or_keyword(args, kwargs, 0, "config")
         stickiness = float(_positional_or_keyword(args, kwargs, 1, "stickiness"))
         durations = np.asarray(
@@ -160,7 +159,7 @@ def _wrap_trajectory_mode_transition_sequence(
         )
         tau_s = float(getattr(config, "imm_switch_tau_s", 0.0))
         if tau_s == 0.0:
-            return legacy
+            return helper(*args, **kwargs)
         if not np.isfinite(tau_s) or tau_s <= 0.0:
             raise ValueError("imm_switch_tau_s must be finite and positive")
         if durations.ndim != 1:
@@ -205,22 +204,29 @@ def _wrap_displacement_diagnostics(helper: Callable[..., Any], module: Any) -> C
         valid_bin_mask=None,
         return_trajectory: bool = True,
     ):
+        transition_durations = np.asarray(tuple(transition_durations_s), dtype=float)
         result = helper(
             emissions,
             bin_centers,
             config,
-            transition_durations_s,
+            transition_durations,
             valid_bin_mask=valid_bin_mask,
             return_trajectory=return_trajectory,
         )
         tau_s = float(getattr(config, "imm_switch_tau_s", 0.0))
         if tau_s == 0.0:
             return result
+        if transition_durations.size == 0:
+            transition_durations = np.full(
+                max(emissions.n_time - 1, 0),
+                float(emissions.dt),
+                dtype=float,
+            )
         logp, trajectory, terminal, mode_post, displacement_post, diagnostics = result
         diagnostics = dict(diagnostics)
         key = "state_space_displacement_imm_mode_stickiness_per_step"
         diagnostics["state_space_displacement_imm_mode_self_transition_probability_per_step"] = diagnostics[key]
-        diagnostics[key] = _format_survival(module, np.asarray(transition_durations_s), tau_s)
+        diagnostics[key] = _format_survival(module, transition_durations, tau_s)
         return logp, trajectory, terminal, mode_post, displacement_post, diagnostics
 
     setattr(score_displacement_imm_exact, _DIAGNOSTIC_WRAPPER_FLAG, True)
@@ -242,22 +248,29 @@ def _wrap_trajectory_diagnostics(helper: Callable[..., Any], module: Any) -> Cal
         valid_bin_mask=None,
         return_trajectory: bool = True,
     ):
+        transition_durations = np.asarray(tuple(transition_durations_s), dtype=float)
         result = helper(
             emissions,
             bin_centers,
             config,
-            transition_durations_s,
+            transition_durations,
             valid_bin_mask=valid_bin_mask,
             return_trajectory=return_trajectory,
         )
         tau_s = float(getattr(config, "imm_switch_tau_s", 0.0))
         if tau_s == 0.0:
             return result
+        if transition_durations.size == 0:
+            transition_durations = np.full(
+                max(emissions.n_time - 1, 0),
+                float(emissions.dt),
+                dtype=float,
+            )
         logp, trajectory, terminal, mode_post, diagnostics = result
         diagnostics = dict(diagnostics)
         key = "state_space_trajectory_imm_mode_stickiness_per_step"
         diagnostics["state_space_trajectory_imm_mode_self_transition_probability_per_step"] = diagnostics[key]
-        diagnostics[key] = _format_survival(module, np.asarray(transition_durations_s), tau_s)
+        diagnostics[key] = _format_survival(module, transition_durations, tau_s)
         return logp, trajectory, terminal, mode_post, diagnostics
 
     setattr(score_trajectory_imm_exact_sparse, _DIAGNOSTIC_WRAPPER_FLAG, True)

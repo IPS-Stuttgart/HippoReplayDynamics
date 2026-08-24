@@ -43,47 +43,69 @@ class ReplayEmissionCalibration:
         }
 
 
+def _array_contains_scalar_type(
+    value: object,
+    scalar_types: tuple[type, ...],
+    dtype_kinds: frozenset[str],
+) -> bool:
+    """Return whether an array-like value contains a scalar of a forbidden type.
+
+    Object-backed data loaded from MATLAB/HDF5 can contain nested zero-dimensional
+    NumPy wrappers.  NumPy's numeric coercion recursively unwraps those wrappers,
+    so validation has to inspect them recursively as well or values such as a
+    nested ``True`` can silently become ``1.0``.
+    """
+
+    try:
+        root = np.asarray(value)
+    except (TypeError, ValueError):
+        return False
+
+    pending: list[object] = [root]
+    seen_arrays: set[int] = set()
+    while pending:
+        current = pending.pop()
+        if isinstance(current, scalar_types):
+            return True
+        if not isinstance(current, np.ndarray):
+            continue
+        marker = id(current)
+        if marker in seen_arrays:
+            continue
+        seen_arrays.add(marker)
+        if current.dtype.kind in dtype_kinds:
+            return True
+        if current.dtype == object:
+            pending.extend(current.flat)
+    return False
+
+
 def _is_boolean_scalar(value: object) -> bool:
-    if isinstance(value, (bool, np.bool_)):
-        return True
     try:
         arr = np.asarray(value)
     except (TypeError, ValueError):
         return False
-    if arr.ndim != 0:
-        return False
-    if np.issubdtype(arr.dtype, np.bool_):
-        return True
-    if arr.dtype == object:
-        try:
-            return isinstance(arr.item(), (bool, np.bool_))
-        except ValueError:
-            return False
-    return False
+    return arr.ndim == 0 and _array_contains_scalar_type(
+        arr,
+        (bool, np.bool_),
+        frozenset({"b"}),
+    )
 
 
 def _array_contains_boolean(value: object) -> bool:
-    try:
-        arr = np.asarray(value)
-    except (TypeError, ValueError):
-        return False
-    if np.issubdtype(arr.dtype, np.bool_):
-        return True
-    if arr.dtype == object:
-        return any(isinstance(item, (bool, np.bool_)) for item in arr.flat)
-    return False
+    return _array_contains_scalar_type(
+        value,
+        (bool, np.bool_),
+        frozenset({"b"}),
+    )
 
 
 def _array_contains_text(value: object) -> bool:
-    try:
-        arr = np.asarray(value)
-    except (TypeError, ValueError):
-        return False
-    if np.issubdtype(arr.dtype, np.str_) or np.issubdtype(arr.dtype, np.bytes_):
-        return True
-    if arr.dtype == object:
-        return any(isinstance(item, (str, bytes, np.str_, np.bytes_)) for item in arr.flat)
-    return False
+    return _array_contains_scalar_type(
+        value,
+        (str, bytes, np.str_, np.bytes_),
+        frozenset({"S", "U"}),
+    )
 
 
 def _finite_float(name: str, value: object) -> float:

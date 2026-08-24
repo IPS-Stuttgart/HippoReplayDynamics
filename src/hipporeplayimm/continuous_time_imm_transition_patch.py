@@ -25,6 +25,79 @@ _PATCHED_FLAG = "_continuous_time_imm_transition_patch_applied"
 _TRANSITION_WRAPPER_FLAG = "_continuous_time_imm_transition_wrapper"
 _DIAGNOSTIC_WRAPPER_FLAG = "_continuous_time_imm_diagnostic_wrapper"
 _ORIGINAL_ATTR = "__hipporeplayimm_original__"
+_TEXT_SCALAR_TYPES = (str, bytes, np.str_, np.bytes_)
+
+
+def _unwrap_scalar(value: Any, name: str) -> Any:
+    """Unwrap nested zero-dimensional NumPy scalars without flattening arrays."""
+
+    current = value
+    for _ in range(16):
+        try:
+            raw = np.asarray(current)
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise TypeError(f"{name} must be a real finite scalar") from exc
+        if raw.ndim != 0:
+            raise TypeError(f"{name} must be a real finite scalar")
+        item = raw.item()
+        if isinstance(item, np.ndarray):
+            current = item
+            continue
+        return item
+    raise TypeError(f"{name} must be a real finite scalar")
+
+
+def _is_disallowed_real_value(value: Any) -> bool:
+    """Return whether a scalar is semantically non-real numeric input."""
+
+    current = value
+    for _ in range(16):
+        if isinstance(current, np.ndarray):
+            if current.ndim != 0:
+                return True
+            current = current.item()
+            continue
+        return isinstance(
+            current,
+            (bool, np.bool_, complex, np.complexfloating, *_TEXT_SCALAR_TYPES),
+        )
+    return True
+
+
+def _coerce_real_numeric_array(value: Any, name: str) -> np.ndarray:
+    """Coerce numeric input without silently accepting bool, text, or complex values."""
+
+    try:
+        raw = np.asarray(value)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ValueError(f"{name} must contain real numeric values") from exc
+
+    if np.issubdtype(raw.dtype, np.bool_) or raw.dtype.kind in {"S", "U"}:
+        raise ValueError(f"{name} must contain real numeric values")
+    if np.issubdtype(raw.dtype, np.complexfloating):
+        raise ValueError(f"{name} must contain real numeric values")
+    if raw.dtype == object and any(_is_disallowed_real_value(item) for item in raw.flat):
+        raise ValueError(f"{name} must contain real numeric values")
+
+    try:
+        return raw.astype(float, copy=False)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ValueError(f"{name} must contain real numeric values") from exc
+
+
+def _coerce_real_scalar(value: Any, name: str) -> float:
+    """Return a finite real scalar without lossy or semantic type coercion."""
+
+    item = _unwrap_scalar(value, name)
+    if isinstance(item, (bool, np.bool_, complex, np.complexfloating, *_TEXT_SCALAR_TYPES)):
+        raise TypeError(f"{name} must be a real finite scalar")
+    try:
+        result = float(item)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise TypeError(f"{name} must be a real finite scalar") from exc
+    if not np.isfinite(result):
+        raise ValueError(f"{name} must be a real finite scalar")
+    return result
 
 
 def _continuous_time_mode_transition_matrix(
@@ -34,7 +107,7 @@ def _continuous_time_mode_transition_matrix(
 ) -> np.ndarray:
     """Embed conditional IMM switch destinations in continuous time."""
 
-    transition = np.asarray(base_transition, dtype=float)
+    transition = _coerce_real_numeric_array(base_transition, "base_transition")
     if transition.ndim != 2 or transition.shape[0] != transition.shape[1] or not transition.size:
         raise ValueError("base_transition must be a nonempty square matrix")
     if not np.all(np.isfinite(transition)) or np.any(transition < 0.0):
@@ -42,11 +115,11 @@ def _continuous_time_mode_transition_matrix(
     if not np.allclose(transition.sum(axis=1), 1.0, rtol=1.0e-12, atol=1.0e-12):
         raise ValueError("base_transition rows must sum to 1")
 
-    duration = float(duration_s)
-    dwell = float(mean_dwell_s)
-    if not np.isfinite(duration) or duration < 0.0:
+    duration = _coerce_real_scalar(duration_s, "duration_s")
+    dwell = _coerce_real_scalar(mean_dwell_s, "mean_dwell_s")
+    if duration < 0.0:
         raise ValueError("duration_s must be finite and nonnegative")
-    if not np.isfinite(dwell) or dwell <= 0.0:
+    if dwell <= 0.0:
         raise ValueError("mean_dwell_s must be finite and positive")
 
     n_modes = transition.shape[0]

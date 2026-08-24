@@ -3,6 +3,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 import numpy as np
+import pytest
 
 import hipporeplayimm.state_space as state_space
 from hipporeplayimm.continuous_time_imm_transition_patch import (
@@ -60,6 +61,30 @@ def test_continuous_time_mode_embedding_has_semigroup_and_stationary_limit() -> 
         rtol=0.0,
         atol=1.0e-10,
     )
+
+
+def test_continuous_time_mode_embedding_rejects_lossy_transition_coercions() -> None:
+    invalid_transitions = [
+        np.array([[0.9 + 0.1j, 0.1 - 0.1j], [0.2, 0.8]], dtype=complex),
+        np.array([[True, False], [False, True]], dtype=bool),
+        np.array([["0.9", "0.1"], ["0.2", "0.8"]], dtype=str),
+    ]
+
+    for transition in invalid_transitions:
+        with pytest.raises(ValueError, match="base_transition must contain real numeric values"):
+            _continuous_time_mode_transition_matrix(transition, 0.05, 0.1)
+
+
+def test_continuous_time_mode_embedding_rejects_nonreal_scalar_parameters() -> None:
+    base = np.array([[0.9, 0.1], [0.2, 0.8]], dtype=float)
+
+    for duration in (True, "0.05", 0.05 + 0.01j):
+        with pytest.raises(TypeError, match="duration_s must be a real finite scalar"):
+            _continuous_time_mode_transition_matrix(base, duration, 0.1)
+
+    for dwell in (True, "0.1", 0.1 + 0.01j):
+        with pytest.raises(TypeError, match="mean_dwell_s must be a real finite scalar"):
+            _continuous_time_mode_transition_matrix(base, 0.05, dwell)
 
 
 def test_all_duration_aware_imm_families_are_semigroup_consistent() -> None:

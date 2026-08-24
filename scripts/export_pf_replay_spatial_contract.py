@@ -46,6 +46,7 @@ MANIFEST_OUTPUT = "replay_spatial_manifest.json"
 EVENT_AUDIT_OUTPUT = "replay_spatial_event_audit.csv"
 SUMMARY_OUTPUT = "replay_spatial_export_summary.md"
 DATASET_VERIFIER_OUTPUT = "replay_spatial_dataset_verification.json"
+ROUTE_PROVENANCE_OUTPUT = "replay_spatial_route_manifest.json"
 SCHEMA_VERSION = "bayesian-ach.replay-spatial.v2"
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
 _COMMIT = re.compile(r"^[0-9a-f]{40}$")
@@ -836,6 +837,14 @@ def run_export(
     dataset_verifier_path = output / DATASET_VERIFIER_OUTPUT
     dataset_verifier_path.write_bytes(_canonical_json_bytes(dataset_verification))
     dataset_verifier_report_sha256 = _sha256_file(dataset_verifier_path)
+    route_provenance_path = output / ROUTE_PROVENANCE_OUTPUT
+    route_provenance_path.write_bytes(Path(route_manifest).read_bytes())
+    route_manifest_file_sha256 = _sha256_file(route_provenance_path)
+    if (
+        route_manifest_file_sha256
+        != route_provenance["route_manifest_file_sha256"]
+    ):
+        raise ValueError("copied route provenance manifest hash changed")
     audit_path = output / EVENT_AUDIT_OUTPUT
     pd.DataFrame([event.audit for event in events]).to_csv(audit_path, index=False)
     event_audit_sha256 = _sha256_file(audit_path)
@@ -865,9 +874,8 @@ def run_export(
         "dataset_verification_schedule": (
             "locked_full_tree_path_size_sha256_no_extra_files"
         ),
-        "route_manifest_file_sha256": route_provenance[
-            "route_manifest_file_sha256"
-        ],
+        "route_manifest_file": route_provenance_path.name,
+        "route_manifest_file_sha256": route_manifest_file_sha256,
         "route_producer_commit": route_provenance["route_producer_commit"],
         "route_producer_clean_worktree": True,
         "route_parameters_sha256": route_provenance["route_parameters_sha256"],
@@ -875,6 +883,7 @@ def run_export(
         "route_segments_sha256": route_segments_sha256,
         "route_points_sha256": route_points_sha256,
         "cohort_sha256": cohort_sha256,
+        "event_audit_file": audit_path.name,
         "event_audit_sha256": event_audit_sha256,
         "trace_schema_version": SMOOTHING_TRACE_SCHEMA_VERSION,
         "transition_convention": TRANSITION_CONVENTION,
@@ -952,6 +961,7 @@ def run_export(
         MANIFEST_OUTPUT: manifest_path,
         EVENT_AUDIT_OUTPUT: audit_path,
         DATASET_VERIFIER_OUTPUT: dataset_verifier_path,
+        ROUTE_PROVENANCE_OUTPUT: route_provenance_path,
         SUMMARY_OUTPUT: summary_path,
     }
 

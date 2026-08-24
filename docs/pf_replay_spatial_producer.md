@@ -77,6 +77,8 @@ unavailable; it is not silently replaced by a zero-effect biological result.
   producer/parameter provenance and route-table SHA-256s, ordered cohort and
   event-audit SHA-256s, trace/transition conventions, event-selection and
   hyperparameter digests, and predictor SHA-256.
+- `replay_spatial_route_manifest.json`: byte-identical copy of the clean route
+  provenance manifest consumed by the export.
 - `replay_spatial_event_audit.csv`: selection rank/power, all causal cutoffs,
   training maxima, calibration support, field availability, and revision
   identifiability per event.
@@ -86,7 +88,7 @@ Example:
 
 ```bash
 python scripts/export_pf_replay_spatial_contract.py \
-  --dataset-root /mnt/lexar4tb/datasets/pfeiffer-foster \
+  --dataset-root /mnt/lexar4tb/datasets/DataSetFromPfeifferFoster \
   --dataset-manifest /mnt/lexar4tb/datasets/pfeiffer-foster/dataset_manifest.json \
   --route-segments results/replay-behavior-route-primitives/replay_behavior_route_segments.csv \
   --route-points results/replay-behavior-route-primitives/replay_behavior_route_segment_points.csv \

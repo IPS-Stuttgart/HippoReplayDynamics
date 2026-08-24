@@ -14,6 +14,14 @@ def test_spike_data_loader_rejects_boolean_cell_ids_before_float_coercion() -> N
         data._as_two_column_array(raw, "Spike_Data")
 
 
+@pytest.mark.parametrize("bad_time", [np.nan, np.inf, -np.inf])
+def test_spike_data_loader_rejects_nonfinite_times(bad_time: float) -> None:
+    raw = np.array([[bad_time, 1.0]], dtype=float)
+
+    with pytest.raises(ValueError, match="spike times must contain finite values"):
+        data._as_two_column_array(raw, "Spike_Data")
+
+
 def test_spike_data_loader_preserves_distinct_large_cell_ids() -> None:
     expected_ids = np.array([2**53, 2**53 + 1], dtype=np.int64)
     if np.iinfo(np.dtype(int)).max < int(expected_ids[-1]):

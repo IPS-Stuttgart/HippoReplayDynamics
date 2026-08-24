@@ -225,14 +225,15 @@ def _wrap_trajectory_mode_transition_sequence(
     @wraps(helper)
     def trajectory_mode_transition_matrices(*args, **kwargs):
         config = _positional_or_keyword(args, kwargs, 0, "config")
+        tau_s = float(getattr(config, "imm_switch_tau_s", 0.0))
+        if tau_s == 0.0:
+            return helper(*args, **kwargs)
+
         stickiness = float(_positional_or_keyword(args, kwargs, 1, "stickiness"))
         durations = np.asarray(
             _positional_or_keyword(args, kwargs, 2, "durations"),
             dtype=float,
         )
-        tau_s = float(getattr(config, "imm_switch_tau_s", 0.0))
-        if tau_s == 0.0:
-            return helper(*args, **kwargs)
         if not np.isfinite(tau_s) or tau_s <= 0.0:
             raise ValueError("imm_switch_tau_s must be finite and positive")
         if durations.ndim != 1:
@@ -287,6 +288,17 @@ def _wrap_displacement_diagnostics(helper: Callable[..., Any], module: Any) -> C
         valid_bin_mask=None,
         return_trajectory: bool = True,
     ):
+        tau_s = float(getattr(config, "imm_switch_tau_s", 0.0))
+        if tau_s == 0.0:
+            return helper(
+                emissions,
+                bin_centers,
+                config,
+                transition_durations_s,
+                valid_bin_mask=valid_bin_mask,
+                return_trajectory=return_trajectory,
+            )
+
         durations = _materialize_transition_durations(emissions, transition_durations_s)
         result = helper(
             emissions,
@@ -296,9 +308,6 @@ def _wrap_displacement_diagnostics(helper: Callable[..., Any], module: Any) -> C
             valid_bin_mask=valid_bin_mask,
             return_trajectory=return_trajectory,
         )
-        tau_s = float(getattr(config, "imm_switch_tau_s", 0.0))
-        if tau_s == 0.0:
-            return result
         logp, trajectory, terminal, mode_post, displacement_post, diagnostics = result
         diagnostics = dict(diagnostics)
         key = "state_space_displacement_imm_mode_stickiness_per_step"
@@ -325,6 +334,17 @@ def _wrap_trajectory_diagnostics(helper: Callable[..., Any], module: Any) -> Cal
         valid_bin_mask=None,
         return_trajectory: bool = True,
     ):
+        tau_s = float(getattr(config, "imm_switch_tau_s", 0.0))
+        if tau_s == 0.0:
+            return helper(
+                emissions,
+                bin_centers,
+                config,
+                transition_durations_s,
+                valid_bin_mask=valid_bin_mask,
+                return_trajectory=return_trajectory,
+            )
+
         durations = _materialize_transition_durations(emissions, transition_durations_s)
         result = helper(
             emissions,
@@ -334,9 +354,6 @@ def _wrap_trajectory_diagnostics(helper: Callable[..., Any], module: Any) -> Cal
             valid_bin_mask=valid_bin_mask,
             return_trajectory=return_trajectory,
         )
-        tau_s = float(getattr(config, "imm_switch_tau_s", 0.0))
-        if tau_s == 0.0:
-            return result
         logp, trajectory, terminal, mode_post, diagnostics = result
         diagnostics = dict(diagnostics)
         key = "state_space_trajectory_imm_mode_stickiness_per_step"

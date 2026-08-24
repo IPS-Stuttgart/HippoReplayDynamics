@@ -17,23 +17,35 @@ _ORIGINAL_ATTR = "__hipporeplayimm_emission_validation_original__"
 _GAMMA_POISSON_ORIGINAL_ATTR = "__hipporeplayimm_gamma_poisson_original__"
 
 
-def _is_boolean_scalar(value: object) -> bool:
-    if isinstance(value, (bool, np.bool_)):
-        return True
-    try:
-        array = np.asarray(value)
-    except (TypeError, ValueError):
-        return False
-    if array.ndim != 0:
-        return False
-    if np.issubdtype(array.dtype, np.bool_):
-        return True
-    if array.dtype == object:
+def _nested_scalar_isinstance(value: object, types: tuple[type, ...]) -> bool:
+    """Return whether nested zero-dimensional array wrappers contain ``types``."""
+
+    current = value
+    seen_arrays: set[int] = set()
+    while True:
+        if isinstance(current, types):
+            return True
         try:
-            return isinstance(array.item(), (bool, np.bool_))
+            array = np.asarray(current)
+        except (TypeError, ValueError):
+            return False
+        if array.ndim != 0:
+            return False
+        marker = id(array)
+        if marker in seen_arrays:
+            return False
+        seen_arrays.add(marker)
+        try:
+            nested = array.item()
         except ValueError:
             return False
-    return False
+        if nested is current:
+            return False
+        current = nested
+
+
+def _is_boolean_scalar(value: object) -> bool:
+    return _nested_scalar_isinstance(value, (bool, np.bool_))
 
 
 def _is_boolean_array(value: object) -> bool:
@@ -46,27 +58,12 @@ def _is_boolean_array(value: object) -> bool:
     if np.issubdtype(array.dtype, np.bool_):
         return True
     if array.dtype == object:
-        return any(isinstance(item, (bool, np.bool_)) for item in array.flat)
+        return any(_is_boolean_scalar(item) for item in array.flat)
     return False
 
 
 def _is_text_scalar(value: object) -> bool:
-    if isinstance(value, (str, bytes, np.str_, np.bytes_)):
-        return True
-    try:
-        array = np.asarray(value)
-    except (TypeError, ValueError):
-        return False
-    if array.ndim != 0:
-        return False
-    if np.issubdtype(array.dtype, np.str_) or np.issubdtype(array.dtype, np.bytes_):
-        return True
-    if array.dtype == object:
-        try:
-            return isinstance(array.item(), (str, bytes, np.str_, np.bytes_))
-        except ValueError:
-            return False
-    return False
+    return _nested_scalar_isinstance(value, (str, bytes, np.str_, np.bytes_))
 
 
 def _is_text_array(value: object) -> bool:
@@ -79,7 +76,7 @@ def _is_text_array(value: object) -> bool:
     if np.issubdtype(array.dtype, np.str_) or np.issubdtype(array.dtype, np.bytes_):
         return True
     if array.dtype == object:
-        return any(isinstance(item, (str, bytes, np.str_, np.bytes_)) for item in array.flat)
+        return any(_is_text_scalar(item) for item in array.flat)
     return False
 
 

@@ -28,6 +28,14 @@ def _emissions(offset: float) -> LogEmissionTensor:
     )
 
 
+def _nested_object_scalar(value: object) -> np.ndarray:
+    inner = np.empty((), dtype=object)
+    inner[()] = value
+    outer = np.empty((), dtype=object)
+    outer[()] = inner
+    return outer
+
+
 def test_weighted_ensemble_preserves_observation_count_and_durations() -> None:
     hipporeplayimm.apply_runtime_patches()
     left = _emissions(0.0)
@@ -55,7 +63,10 @@ def test_weighted_ensemble_rejects_nonfinite_alpha(alpha: float) -> None:
         weighted_ensemble_emissions(left, right, alpha=alpha)
 
 
-@pytest.mark.parametrize("alpha", [True, np.bool_(False)])
+@pytest.mark.parametrize(
+    "alpha",
+    [True, np.bool_(False), _nested_object_scalar(np.bool_(True))],
+)
 def test_weighted_ensemble_rejects_boolean_alpha(alpha: object) -> None:
     hipporeplayimm.apply_runtime_patches()
     left = _emissions(0.0)
@@ -63,6 +74,37 @@ def test_weighted_ensemble_rejects_boolean_alpha(alpha: object) -> None:
 
     with pytest.raises(TypeError, match="alpha must be numeric, not boolean"):
         weighted_ensemble_emissions(left, right, alpha=alpha)
+
+
+@pytest.mark.parametrize(
+    "alpha",
+    ["0.5", np.str_("0.5"), _nested_object_scalar("0.5")],
+)
+def test_weighted_ensemble_rejects_text_alpha(alpha: object) -> None:
+    hipporeplayimm.apply_runtime_patches()
+    left = _emissions(0.0)
+    right = _emissions(1.0)
+
+    with pytest.raises(ValueError, match="alpha must be numeric, not text"):
+        weighted_ensemble_emissions(left, right, alpha=alpha)
+
+
+def test_weighted_ensemble_accepts_nested_real_alpha() -> None:
+    hipporeplayimm.apply_runtime_patches()
+    left = _emissions(0.0)
+    right = _emissions(1.0)
+
+    out = weighted_ensemble_emissions(
+        left,
+        right,
+        alpha=_nested_object_scalar(np.float32(0.25)),
+    )
+
+    np.testing.assert_allclose(
+        out.log_likelihood,
+        0.25 * left.log_likelihood + 0.75 * right.log_likelihood,
+    )
+    assert out.metadata["ensemble_alpha_left"] == 0.25
 
 
 def test_weighted_ensemble_rejects_misaligned_times() -> None:

@@ -12,7 +12,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field
 
 import numpy as np
-from scipy.sparse import csr_matrix, issparse
+from scipy.sparse import csr_matrix, diags, issparse
 
 from .state_space_utils import (
     _coerce_valid_bin_mask,
@@ -182,9 +182,9 @@ def _normalized_sparse_pair(
     *,
     label: str,
 ) -> csr_matrix:
-    pair = transition.T.tocsr()
-    pair = pair.multiply(np.asarray(source_factor, dtype=float)[:, None])
-    pair = pair.multiply(np.asarray(destination_factor, dtype=float)[None, :])
+    source_diagonal = diags(np.asarray(source_factor, dtype=float))
+    destination_diagonal = diags(np.asarray(destination_factor, dtype=float))
+    pair = (source_diagonal @ transition.T @ destination_diagonal).tocsr()
     total = float(pair.sum())
     if not np.isfinite(total) or total <= 0.0:
         raise FloatingPointError(f"{label} pair marginal has no finite positive mass")

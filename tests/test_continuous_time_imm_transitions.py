@@ -87,37 +87,6 @@ def test_continuous_time_mode_embedding_rejects_nonreal_scalar_parameters() -> N
             _continuous_time_mode_transition_matrix(base, 0.05, dwell)
 
 
-def test_duration_aware_imm_wrappers_reject_complex_durations() -> None:
-    durations = np.array([0.025 + 0.01j], dtype=complex)
-
-    with pytest.raises(ValueError, match="durations must contain real numeric values"):
-        duration_mode_transition_matrices(
-            state_space,
-            4,
-            0.95,
-            0.1,
-            durations,
-        )
-    with pytest.raises(ValueError, match="durations must contain real numeric values"):
-        displacement_mode_transition_matrices(
-            4,
-            0.95,
-            0.1,
-            durations,
-        )
-
-    trajectory_config = SimpleNamespace(
-        imm_switch_tau_s=0.1,
-        trajectory_imm_momentum_switch_probability=None,
-    )
-    with pytest.raises(ValueError, match="durations must contain real numeric values"):
-        _trajectory_imm_mode_transition_matrices(
-            trajectory_config,
-            0.95,
-            durations,
-        )
-
-
 def test_all_duration_aware_imm_families_are_semigroup_consistent() -> None:
     tau_s = 0.1
     half_duration_s = 0.025

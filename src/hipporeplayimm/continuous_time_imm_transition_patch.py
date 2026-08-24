@@ -28,6 +28,42 @@ _ORIGINAL_ATTR = "__hipporeplayimm_original__"
 _TEXT_SCALAR_TYPES = (str, bytes, np.str_, np.bytes_)
 
 
+def _unwrap_scalar(value: Any, name: str) -> Any:
+    """Unwrap nested zero-dimensional NumPy scalars without flattening arrays."""
+
+    current = value
+    for _ in range(16):
+        try:
+            raw = np.asarray(current)
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise TypeError(f"{name} must be a real finite scalar") from exc
+        if raw.ndim != 0:
+            raise TypeError(f"{name} must be a real finite scalar")
+        item = raw.item()
+        if isinstance(item, np.ndarray):
+            current = item
+            continue
+        return item
+    raise TypeError(f"{name} must be a real finite scalar")
+
+
+def _is_disallowed_real_value(value: Any) -> bool:
+    """Return whether a scalar is semantically non-real numeric input."""
+
+    current = value
+    for _ in range(16):
+        if isinstance(current, np.ndarray):
+            if current.ndim != 0:
+                return True
+            current = current.item()
+            continue
+        return isinstance(
+            current,
+            (bool, np.bool_, complex, np.complexfloating, *_TEXT_SCALAR_TYPES),
+        )
+    return True
+
+
 def _coerce_real_numeric_array(value: Any, name: str) -> np.ndarray:
     """Coerce numeric input without silently accepting bool, text, or complex values."""
 
@@ -40,10 +76,7 @@ def _coerce_real_numeric_array(value: Any, name: str) -> np.ndarray:
         raise ValueError(f"{name} must contain real numeric values")
     if np.issubdtype(raw.dtype, np.complexfloating):
         raise ValueError(f"{name} must contain real numeric values")
-    if raw.dtype == object and any(
-        isinstance(item, (bool, np.bool_, complex, np.complexfloating, *_TEXT_SCALAR_TYPES))
-        for item in raw.flat
-    ):
+    if raw.dtype == object and any(_is_disallowed_real_value(item) for item in raw.flat):
         raise ValueError(f"{name} must contain real numeric values")
 
     try:
@@ -55,13 +88,7 @@ def _coerce_real_numeric_array(value: Any, name: str) -> np.ndarray:
 def _coerce_real_scalar(value: Any, name: str) -> float:
     """Return a finite real scalar without lossy or semantic type coercion."""
 
-    try:
-        raw = np.asarray(value)
-    except (TypeError, ValueError, OverflowError) as exc:
-        raise TypeError(f"{name} must be a real finite scalar") from exc
-    if raw.ndim != 0:
-        raise TypeError(f"{name} must be a real finite scalar")
-    item = raw.item()
+    item = _unwrap_scalar(value, name)
     if isinstance(item, (bool, np.bool_, complex, np.complexfloating, *_TEXT_SCALAR_TYPES)):
         raise TypeError(f"{name} must be a real finite scalar")
     try:
@@ -71,15 +98,6 @@ def _coerce_real_scalar(value: Any, name: str) -> float:
     if not np.isfinite(result):
         raise ValueError(f"{name} must be a real finite scalar")
     return result
-
-
-def _coerce_real_vector(value: Any, name: str) -> np.ndarray:
-    values = _coerce_real_numeric_array(value, name)
-    if values.ndim != 1:
-        raise ValueError(f"{name} must be one-dimensional")
-    if not np.all(np.isfinite(values)):
-        raise ValueError(f"{name} must contain only finite values")
-    return values
 
 
 def _continuous_time_mode_transition_matrix(
@@ -156,32 +174,29 @@ def _wrap_mode_transition_sequence(
     @wraps(helper)
     def mode_transition_matrices(*args, **kwargs):
         legacy = helper(*args, **kwargs)
-        tau_s = _coerce_real_scalar(
+        tau_s = float(
             _positional_or_keyword(
                 args,
                 kwargs,
                 tau_position,
                 "imm_switch_tau_s",
-            ),
-            "imm_switch_tau_s",
+            )
         )
-        durations = _coerce_real_vector(
+        durations = np.asarray(
             _positional_or_keyword(
                 args,
                 kwargs,
                 tau_position + 1,
                 "durations",
             ),
-            "durations",
+            dtype=float,
         )
         if tau_s == 0.0:
             return legacy
-        if tau_s < 0.0:
-            raise ValueError("imm_switch_tau_s must be finite and nonnegative")
         if len(legacy) != int(durations.size):
             raise ValueError("mode transitions must contain one matrix per transition duration")
         return [
-            _continuous_time_mode_transition_matrix(matrix, duration, tau_s)
+            _continuous_time_mode_transition_matrix(matrix, float(duration), tau_s)
             for matrix, duration in zip(legacy, durations, strict=True)
         ]
 
@@ -212,15 +227,17 @@ def _wrap_trajectory_mode_transition_sequence(
         legacy = helper(*args, **kwargs)
         config = _positional_or_keyword(args, kwargs, 0, "config")
         stickiness = float(_positional_or_keyword(args, kwargs, 1, "stickiness"))
-        durations = _coerce_real_vector(
+        durations = np.asarray(
             _positional_or_keyword(args, kwargs, 2, "durations"),
-            "durations",
+            dtype=float,
         )
-        tau_s = _coerce_real_scalar(getattr(config, "imm_switch_tau_s", 0.0), "imm_switch_tau_s")
+        tau_s = float(getattr(config, "imm_switch_tau_s", 0.0))
         if tau_s == 0.0:
             return legacy
-        if tau_s <= 0.0:
+        if not np.isfinite(tau_s) or tau_s <= 0.0:
             raise ValueError("imm_switch_tau_s must be finite and positive")
+        if durations.ndim != 1:
+            raise ValueError("durations must be one-dimensional")
         if not np.all(np.isfinite(durations)) or np.any(durations <= 0.0):
             raise ValueError("transition durations must be finite and positive")
 
@@ -228,7 +245,7 @@ def _wrap_trajectory_mode_transition_sequence(
         return [
             _continuous_time_mode_transition_matrix(
                 reference_transition,
-                duration,
+                float(duration),
                 tau_s,
             )
             for duration in durations

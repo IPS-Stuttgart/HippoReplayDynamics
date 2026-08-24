@@ -47,6 +47,64 @@ def test_fit_place_field_encoding_recovers_peak_near_spike_location(tmp_path):
     assert 40.0 <= peak[0] <= 60.0
 
 
+def test_causal_place_field_fit_is_invariant_to_future_observations():
+    baseline_session = _linear_session_with_two_cells()
+    changed_session = _linear_session_with_two_cells()
+    future = changed_session.position[:, 0] > 3.0
+    changed_session.position[future, 1] += 1_000.0
+    changed_session.spikes = np.vstack(
+        [changed_session.spikes, np.array([[9.0, 99.0]])]
+    )
+    changed_session.excitatory_neurons = np.array([1, 2, 99])
+
+    config = EncodingConfig(
+        bin_size_cm=10.0,
+        smoothing_sigma_bins=0.0,
+        min_speed_cm_s=1.0,
+    )
+    baseline = fit_place_field_encoding(
+        baseline_session,
+        config,
+        training_end_s=3.0,
+    )
+    changed = fit_place_field_encoding(
+        changed_session,
+        config,
+        training_end_s=3.0,
+    )
+
+    assert baseline.training_end_s == 3.0
+    assert baseline.training_position_max_s <= 3.0
+    assert baseline.training_spike_max_s <= 3.0
+    assert baseline.cell_ids.tolist() == [1]
+    np.testing.assert_allclose(changed.x_edges, baseline.x_edges)
+    np.testing.assert_allclose(changed.y_edges, baseline.y_edges)
+    np.testing.assert_allclose(changed.occupancy_s, baseline.occupancy_s)
+    np.testing.assert_allclose(changed.rates_hz, baseline.rates_hz)
+    np.testing.assert_array_equal(changed.cell_ids, baseline.cell_ids)
+
+
+def test_causal_encoding_provenance_is_attached_to_replay_emissions(tmp_path):
+    session = _linear_session_with_ripple_spikes(tmp_path)
+    encoding = fit_place_field_encoding(
+        session,
+        EncodingConfig(
+            bin_size_cm=10.0,
+            smoothing_sigma_bins=0.0,
+            min_speed_cm_s=1.0,
+        ),
+        training_end_s=6.9,
+    )
+    emissions = build_emissions(session, encoding, 0, EmissionConfig())
+
+    assert emissions.metadata["decoder_training_schedule"] == (
+        "event_specific_prefix_refit"
+    )
+    assert emissions.metadata["decoder_training_cutoff_s"] == 6.9
+    assert emissions.metadata["decoder_training_position_max_s"] <= 6.9
+    assert emissions.metadata["decoder_training_spike_max_s"] <= 6.9
+
+
 def test_fit_place_field_encoding_falls_back_to_all_spikes_without_excitatory_labels(tmp_path):
     times = np.linspace(0.0, 10.0, 301)
     x = np.linspace(0.0, 100.0, times.size)

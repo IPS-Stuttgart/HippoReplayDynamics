@@ -98,6 +98,9 @@ class EncodingModel:
     occupancy_s: np.ndarray
     cell_ids: np.ndarray
     config: EncodingConfig
+    training_end_s: float | None = None
+    training_position_max_s: float | None = None
+    training_spike_max_s: float | None = None
 
     @property
     def n_bins(self) -> int:
@@ -136,6 +139,9 @@ class EncodingModel:
             occupancy_s=self.occupancy_s,
             cell_ids=requested,
             config=self.config,
+            training_end_s=self.training_end_s,
+            training_position_max_s=self.training_position_max_s,
+            training_spike_max_s=self.training_spike_max_s,
         )
 
     def positions_to_flat_bins(self, xy: np.ndarray) -> np.ndarray:
@@ -236,13 +242,37 @@ class LogEmissionTensor:
             raise ValueError("transition_durations must contain finite positive durations")
 
 
-def fit_place_field_encoding(session: ReplaySession, config: EncodingConfig | None = None) -> EncodingModel:
-    """Fit occupancy-normalized Poisson rates from non-replay movement periods."""
+def fit_place_field_encoding(
+    session: ReplaySession,
+    config: EncodingConfig | None = None,
+    *,
+    training_end_s: float | None = None,
+) -> EncodingModel:
+    """Fit place fields, optionally from observations ending at a causal cutoff."""
 
     config = EncodingConfig() if config is None else config
     _validate_encoding_config(config)
+    cutoff = None if training_end_s is None else float(training_end_s)
+    if cutoff is not None and not np.isfinite(cutoff):
+        raise ValueError("training_end_s must be finite when provided")
+
     position = _clean_position(session.position)
     selected_spikes, cell_ids = _spikes_and_cell_ids_for_encoding(session, config)
+    if cutoff is not None:
+        position = position[position[:, 0] <= cutoff]
+        selected_spikes = selected_spikes[selected_spikes[:, 0] <= cutoff]
+        prefix_cell_ids = (
+            np.unique(selected_spikes[:, 1].astype(int))
+            if selected_spikes.size
+            else np.empty(0, dtype=int)
+        )
+        cell_ids = np.intersect1d(cell_ids, prefix_cell_ids, assume_unique=True)
+        if selected_spikes.size:
+            selected_spikes = selected_spikes[
+                np.isin(selected_spikes[:, 1].astype(int), cell_ids)
+            ]
+    if cutoff is not None and position.shape[0] < 2:
+        raise ValueError("causal encoding requires at least two position samples")
     if not (position.shape[0] == 1 and np.asarray(selected_spikes).size == 0):
         _validate_position_samples(position)
     times = position[:, 0]
@@ -313,6 +343,13 @@ def fit_place_field_encoding(session: ReplaySession, config: EncodingConfig | No
         occupancy_s=occupancy,
         cell_ids=cell_ids,
         config=config,
+        training_end_s=cutoff,
+        training_position_max_s=(
+            None if position.size == 0 else float(np.max(position[:, 0]))
+        ),
+        training_spike_max_s=(
+            None if selected_spikes.size == 0 else float(np.max(selected_spikes[:, 0]))
+        ),
     )
 
 
@@ -359,6 +396,16 @@ def build_emissions(
         n_spikes=int(counts.sum()),
         bin_durations=bin_durations,
         transition_durations=np.diff(times) if times.shape[0] > 1 else np.empty(0, dtype=float),
+        metadata={
+            "decoder_training_schedule": (
+                "full_session"
+                if encoding.training_end_s is None
+                else "event_specific_prefix_refit"
+            ),
+            "decoder_training_cutoff_s": encoding.training_end_s,
+            "decoder_training_position_max_s": encoding.training_position_max_s,
+            "decoder_training_spike_max_s": encoding.training_spike_max_s,
+        },
     )
 
 

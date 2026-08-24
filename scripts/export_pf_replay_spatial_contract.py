@@ -856,6 +856,12 @@ def run_export(
         "dataset_verified_total_bytes": int(
             dataset_verification["verified_total_bytes"]
         ),
+        "dataset_verified_session_count": int(
+            dataset_verification["verified_session_count"]
+        ),
+        "dataset_verified_file_records_sha256": dataset_verification[
+            "verified_file_records_sha256"
+        ],
         "dataset_verification_schedule": (
             "locked_full_tree_path_size_sha256_no_extra_files"
         ),

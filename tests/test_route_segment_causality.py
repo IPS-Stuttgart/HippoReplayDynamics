@@ -43,15 +43,23 @@ def test_completed_route_smoothing_cannot_use_later_position_samples() -> None:
     )
 
     assert len(routes) >= 1
+    route_id = "RatX/OpenX:route_001"
+    completed = routes[routes["route_id"].eq(route_id)]
+    changed_completed = changed_routes[changed_routes["route_id"].eq(route_id)]
+    completed_points = points[points["route_id"].eq(route_id)]
+    changed_completed_points = changed_points[
+        changed_points["route_id"].eq(route_id)
+    ]
+    assert len(completed) == len(changed_completed) == 1
     np.testing.assert_allclose(
-        routes.select_dtypes(include=[np.number]).to_numpy(),
-        changed_routes.select_dtypes(include=[np.number]).to_numpy(),
+        completed.select_dtypes(include=[np.number]).to_numpy(),
+        changed_completed.select_dtypes(include=[np.number]).to_numpy(),
         atol=0.0,
         rtol=0.0,
     )
     np.testing.assert_allclose(
-        points[["time_s", "x_cm", "y_cm"]].to_numpy(),
-        changed_points[["time_s", "x_cm", "y_cm"]].to_numpy(),
+        completed_points[["time_s", "x_cm", "y_cm"]].to_numpy(),
+        changed_completed_points[["time_s", "x_cm", "y_cm"]].to_numpy(),
         atol=0.0,
         rtol=0.0,
     )

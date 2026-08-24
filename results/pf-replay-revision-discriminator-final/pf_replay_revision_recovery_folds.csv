@@ -1,0 +1,13 @@
+scheme,group_column,held_out_group,training_groups_json,pure_samples,mixture_samples,balanced_accuracy_including_abstention,retained_accuracy,pure_coverage,mixture_abstention,minimum_margin,maximum_distance,training_retained_accuracy,training_pure_coverage,training_mixture_abstention,calibration_feasible
+leave_one_animal_out,rat,Rat1,"[""Rat2"",""Rat3"",""Rat4""]",31200,7800,0.0,,0.0,1.0,inf,-inf,,0.0,1.0,0.0
+leave_one_animal_out,rat,Rat2,"[""Rat1"",""Rat3"",""Rat4""]",31200,7800,0.0,,0.0,1.0,inf,-inf,,0.0,1.0,0.0
+leave_one_animal_out,rat,Rat3,"[""Rat1"",""Rat2"",""Rat4""]",16000,4000,0.0,,0.0,1.0,inf,-inf,,0.0,1.0,0.0
+leave_one_animal_out,rat,Rat4,"[""Rat1"",""Rat2"",""Rat3""]",28000,7000,0.0,,0.0,1.0,inf,-inf,,0.0,1.0,0.0
+leave_one_session_out,session,Rat1/Open1,"[""Rat1/Open2"",""Rat2/Open1"",""Rat2/Open2"",""Rat3/Open1"",""Rat3/Open2"",""Rat4/Open1"",""Rat4/Open2""]",16000,4000,0.0,,0.0,1.0,inf,-inf,,0.0,1.0,0.0
+leave_one_session_out,session,Rat1/Open2,"[""Rat1/Open1"",""Rat2/Open1"",""Rat2/Open2"",""Rat3/Open1"",""Rat3/Open2"",""Rat4/Open1"",""Rat4/Open2""]",15200,3800,0.0,,0.0,1.0,inf,-inf,,0.0,1.0,0.0
+leave_one_session_out,session,Rat2/Open1,"[""Rat1/Open1"",""Rat1/Open2"",""Rat2/Open2"",""Rat3/Open1"",""Rat3/Open2"",""Rat4/Open1"",""Rat4/Open2""]",15200,3800,0.0,,0.0,1.0,inf,-inf,,0.0,1.0,0.0
+leave_one_session_out,session,Rat2/Open2,"[""Rat1/Open1"",""Rat1/Open2"",""Rat2/Open1"",""Rat3/Open1"",""Rat3/Open2"",""Rat4/Open1"",""Rat4/Open2""]",16000,4000,0.0,,0.0,1.0,inf,-inf,,0.0,1.0,0.0
+leave_one_session_out,session,Rat3/Open1,"[""Rat1/Open1"",""Rat1/Open2"",""Rat2/Open1"",""Rat2/Open2"",""Rat3/Open2"",""Rat4/Open1"",""Rat4/Open2""]",10400,2600,0.0,,0.0,1.0,inf,-inf,,0.0,1.0,0.0
+leave_one_session_out,session,Rat3/Open2,"[""Rat1/Open1"",""Rat1/Open2"",""Rat2/Open1"",""Rat2/Open2"",""Rat3/Open1"",""Rat4/Open1"",""Rat4/Open2""]",5600,1400,0.0,,0.0,1.0,inf,-inf,,0.0,1.0,0.0
+leave_one_session_out,session,Rat4/Open1,"[""Rat1/Open1"",""Rat1/Open2"",""Rat2/Open1"",""Rat2/Open2"",""Rat3/Open1"",""Rat3/Open2"",""Rat4/Open2""]",14400,3600,0.0,,0.0,1.0,inf,-inf,,0.0,1.0,0.0
+leave_one_session_out,session,Rat4/Open2,"[""Rat1/Open1"",""Rat1/Open2"",""Rat2/Open1"",""Rat2/Open2"",""Rat3/Open1"",""Rat3/Open2"",""Rat4/Open1""]",13600,3400,0.0,,0.0,1.0,inf,-inf,,0.0,1.0,0.0

@@ -1,0 +1,16 @@
+gate,passed,value,required
+paired_geometry_events,True,133,>=100
+paired_geometry_all_animals,True,4,4
+paired_geometry_all_sessions,True,8,8
+primary_finite,True,1,1
+pe_diagnostic_finite,True,160,>=100 finite
+loao_all_animals,True,4,4
+loso_all_sessions,True,8,8
+loao_equal_animal_balanced_accuracy,False,0.0,>=0.80
+loso_equal_session_balanced_accuracy,False,0.0,>=0.80
+loao_minimum_animal_balanced_accuracy,False,0.0,>=0.70
+mixture_abstention,True,1.0,>=0.50
+historical_pf2013_positive_control_exactly_reproducible,False,False,True
+overall_technical,True,7,7
+candidate_classifiability,False,1,4
+adjudication_ready,False,1,3

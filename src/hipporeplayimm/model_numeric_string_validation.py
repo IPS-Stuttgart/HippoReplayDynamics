@@ -59,6 +59,35 @@ def _is_boolean_scalar(value: object) -> bool:
     return not cyclic and isinstance(current, (bool, np.bool_))
 
 
+def _strict_finite_float_scalar(name: str, value: object, invalid_message: str) -> float:
+    """Coerce one real numeric scalar after exposing nested semantic leaves."""
+
+    current, cyclic = _unwrap_zero_dimensional_scalar(value)
+    if cyclic:
+        raise ValueError(invalid_message)
+    if isinstance(current, (bool, np.bool_)):
+        raise TypeError(f"{name} must be numeric, not boolean")
+    if isinstance(current, _STRING_TYPES):
+        raise ValueError(f"{name} must be numeric, not text")
+    try:
+        array = np.asarray(current)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(invalid_message) from exc
+    if array.ndim != 0:
+        raise ValueError(invalid_message)
+    if np.issubdtype(array.dtype, np.bool_):
+        raise TypeError(f"{name} must be numeric, not boolean")
+    if np.issubdtype(array.dtype, np.str_) or np.issubdtype(array.dtype, np.bytes_):
+        raise ValueError(f"{name} must be numeric, not text")
+    try:
+        numeric = float(array)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ValueError(invalid_message) from exc
+    if not np.isfinite(numeric):
+        raise ValueError(invalid_message)
+    return numeric
+
+
 def _is_boolean_array(value: object) -> bool:
     """Return True when an array-valued input contains Boolean leaves."""
 
@@ -350,8 +379,15 @@ def _patch_state_space_numeric_string_validation() -> None:
 def apply_model_numeric_string_validation_patch() -> None:
     """Install string-scalar guards around model parameter validators."""
 
+    from . import accuracy_model_probability_status_patch
     from . import model_parameter_validation
     from . import models
+
+    # The accuracy-upgrade scalar validator is installed before its runtime
+    # wrapper is refreshed below in the package patch order.  Replace the helper
+    # itself so nested object scalars are classified by their semantic leaf
+    # before float coercion can turn booleans or numeric text into weights.
+    accuracy_model_probability_status_patch._finite_float_scalar = _strict_finite_float_scalar
 
     # Model-parameter wrappers resolve these helpers through module globals at
     # call time.  Refresh them here so nested MATLAB/HDF5-style object scalars

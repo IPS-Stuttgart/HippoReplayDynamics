@@ -129,6 +129,8 @@ def _coerce_spike_data_table_exactly(data: Any, value: Any, name: str) -> np.nda
         raise ValueError(f"{name} must have two columns; got shape {arr.shape}")
 
     times = np.asarray(arr[:, 0], dtype=float)
+    if not np.all(np.isfinite(times)):
+        raise ValueError("spike times must contain finite values")
     cell_ids = _coerce_integral_ids(arr[:, 1], "spike cell IDs").reshape(-1)
     float_ids = np.asarray(cell_ids, dtype=float)
     if _integer_ids_are_exact_float64(cell_ids, float_ids):

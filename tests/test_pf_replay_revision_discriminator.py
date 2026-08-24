@@ -4,14 +4,19 @@ import json
 
 import numpy as np
 import pandas as pd
+import pytest
 
 from scripts.test_pf_replay_revision_discriminator import (
     FEATURES,
+    _centroid_predictions,
+    _fit_centroid_model,
     build_cross_validated_markov_models,
+    calibrate_abstention,
     correlated_noisy_path,
     cross_validated_recovery,
     equal_animal_mean,
     finite_transition_surprise,
+    PURE_LABELS,
     restricted_circular_template_null,
     retrospective_geometry_score,
 )
@@ -96,6 +101,17 @@ def test_finite_transition_surprise_handles_out_of_support_target() -> None:
     assert pairs == 1
     assert np.isfinite(surprise)
     assert surprise > 0.0
+
+
+def test_finite_transition_surprise_same_bin_is_finite_zero() -> None:
+    model = {
+        "origin": np.array([0.0, 0.0]), "bin_cm": 10.0, "alpha": 0.5,
+        "support": {(0, 0)}, "counts": {}, "outgoing": {}, "target_categories": 2,
+    }
+    surprise, pairs = finite_transition_surprise(
+        np.array([[0.1, 0.1], [0.2, 0.2], [0.3, 0.3]]), model
+    )
+    assert (surprise, pairs) == (0.0, 0)
 
 
 def test_markov_training_excludes_held_route_fold() -> None:
@@ -201,3 +217,48 @@ def test_recovery_calibration_never_contains_held_group() -> None:
     assert len(confusion) > 0
     for row in folds.itertuples(index=False):
         assert str(row.held_out_group) not in json.loads(row.training_groups_json)
+
+
+def test_infeasible_calibration_forces_abstention() -> None:
+    fixture = _recovery_fixture()
+    pure = fixture[fixture["sample_kind"].eq("pure")]
+    mixture = fixture[fixture["sample_kind"].eq("mixture")]
+    model = _fit_centroid_model(pure)
+    minimum_margin, maximum_distance, calibration = calibrate_abstention(
+        pure,
+        mixture,
+        model,
+        target_accuracy=1.1,
+        minimum_coverage=0.5,
+        minimum_mixture_abstention=0.5,
+    )
+    assert calibration["calibration_feasible"] == 0.0
+    assert minimum_margin == np.inf
+    assert maximum_distance == -np.inf
+
+
+def test_classifier_rejects_missing_nonfinite_and_all_degenerate_training() -> None:
+    fixture = _recovery_fixture()
+    pure = fixture[fixture["sample_kind"].eq("pure")]
+    with pytest.raises(ValueError, match="missing pure classes"):
+        _fit_centroid_model(pure[~pure["true_label"].eq(PURE_LABELS[-1])])
+
+    nonfinite = pure.copy()
+    nonfinite.loc[nonfinite.index[0], FEATURES[0]] = np.nan
+    with pytest.raises(ValueError, match="nonempty and finite"):
+        _fit_centroid_model(nonfinite)
+
+    degenerate = pure.copy()
+    degenerate.loc[:, FEATURES] = 1.0
+    with pytest.raises(ValueError, match="all classifier training features are degenerate"):
+        _fit_centroid_model(degenerate)
+
+
+def test_classifier_rejects_nonfinite_prediction_features() -> None:
+    fixture = _recovery_fixture()
+    pure = fixture[fixture["sample_kind"].eq("pure")]
+    model = _fit_centroid_model(pure)
+    bad = pure.iloc[:1].copy()
+    bad.loc[:, FEATURES[0]] = np.nan
+    with pytest.raises(ValueError, match="prediction features must be finite"):
+        _centroid_predictions(bad, model)

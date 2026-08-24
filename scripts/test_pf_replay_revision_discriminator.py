@@ -24,7 +24,7 @@ SCRIPT_DIR = ROOT / "scripts"
 if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
 
-from _provenance import build_script_provenance  # noqa: E402
+from _provenance import build_script_provenance, file_sha256  # noqa: E402
 from compute_replay_commitment_composition_metrics import (  # noqa: E402
     path_fit_distance_cm,
     path_length,
@@ -414,7 +414,11 @@ def finite_transition_surprise(
 
     states = _xy_state(path, model)
     if len(states) < 2:
-        return np.nan, 0
+        # A valid path can remain in one 10-cm state after consecutive-state
+        # collapse. It then contains zero evaluated transitions and therefore
+        # contributes zero mean transition surprise instead of poisoning
+        # classifier calibration with NaN.
+        return 0.0, 0
     support = model["support"]
     categories = max(1, int(model["target_categories"]))
     alpha = float(model["alpha"])
@@ -499,6 +503,7 @@ def compute_pe_diagnostic(
                 "ordered_minus_time_permuted_surprise_nats": ordered - null_mean,
                 "ordered_minus_reversed_surprise_nats": ordered - reversed_value,
                 "transition_pairs": pairs,
+                "no_transition_after_binning": pairs == 0,
                 "legacy_transition_surprise_nats": values.get("transition_surprise_nats", np.nan),
                 "legacy_transition_surprise_pairs": values.get("transition_surprise_pairs", 0),
             }
@@ -526,12 +531,18 @@ def compute_pe_diagnostic(
         if len(pe_null)
         else np.empty(0, dtype=float)
     )
+    null_aggregate = null_aggregate[np.isfinite(null_aggregate)]
     ordered_aggregate = equal_animal_mean(
         eligible.rename(columns={"ordered_transition_surprise_nats": "ordered"}),
         "ordered",
     )
     coherence_p = (
         float((1 + np.sum(null_aggregate <= ordered_aggregate)) / (1 + len(null_aggregate)))
+        if len(null_aggregate) and np.isfinite(ordered_aggregate)
+        else np.nan
+    )
+    high_surprise_p = (
+        float((1 + np.sum(null_aggregate >= ordered_aggregate)) / (1 + len(null_aggregate)))
         if len(null_aggregate) and np.isfinite(ordered_aggregate)
         else np.nan
     )
@@ -549,7 +560,12 @@ def compute_pe_diagnostic(
                 "bootstrap_replicates_completed": int(len(draws)),
                 "ordered_equal_animal_surprise": ordered_aggregate,
                 "time_permutation_p_lower": coherence_p,
+                "ordered_lower_than_permuted_coherence_p": coherence_p,
+                "ordered_higher_than_permuted_pe_surrogate_p": high_surprise_p,
                 "finite_markov_model": True,
+                "zero_transition_events": int(
+                    eligible.get("no_transition_after_binning", pd.Series(dtype=bool)).sum()
+                ),
                 "null_control": "within_event_nontrivial_time_permutation_fixed_point_set",
             }
         ]
@@ -617,11 +633,12 @@ def path_features(
     """Features used by the leakage-safe candidate classifier."""
 
     past_error, future_error, score = retrospective_geometry_score(path, past, future)
-    surprise, _ = finite_transition_surprise(path, markov_model)
+    surprise, transition_pairs = finite_transition_surprise(path, markov_model)
     return {
         "retrospective_geometry_score": score,
         "minimum_template_error_over_noise": min(past_error, future_error) / max(float(noise_cm), 1e-12),
         "transition_surprise_nats": surprise,
+        "transition_pairs": float(transition_pairs),
         "path_roughness": path_roughness(path),
     }
 
@@ -705,15 +722,25 @@ def generate_actual_geometry_injections(
 
 def _fit_centroid_model(train: pd.DataFrame) -> dict[str, Any]:
     values = train.loc[:, FEATURES].to_numpy(dtype=float)
-    center = np.nanmean(values, axis=0)
-    scale = np.nanstd(values, axis=0)
-    scale[~np.isfinite(scale) | (scale <= 1e-12)] = 1.0
-    standardized = (values - center) / scale
+    if values.ndim != 2 or len(values) == 0 or not np.isfinite(values).all():
+        raise ValueError("classifier training features must be nonempty and finite")
     labels = train["true_label"].astype(str).to_numpy()
+    missing_labels = sorted(set(PURE_LABELS).difference(labels))
+    if missing_labels:
+        raise ValueError(f"classifier training data are missing pure classes: {missing_labels}")
+    center = np.mean(values, axis=0)
+    raw_scale = np.std(values, axis=0)
+    if np.all(raw_scale <= 1e-12):
+        raise ValueError("all classifier training features are degenerate")
+    scale = raw_scale.copy()
+    scale[scale <= 1e-12] = 1.0
+    standardized = (values - center) / scale
     centroids = {
         label: np.mean(standardized[labels == label], axis=0)
         for label in PURE_LABELS
     }
+    if any(not np.isfinite(centroid).all() for centroid in centroids.values()):
+        raise ValueError("classifier centroids must be finite")
     return {"center": center, "scale": scale, "centroids": centroids}
 
 
@@ -722,6 +749,20 @@ def _centroid_predictions(
     model: dict[str, Any],
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     values = frame.loc[:, FEATURES].to_numpy(dtype=float)
+    if values.ndim != 2 or not np.isfinite(values).all():
+        raise ValueError("classifier prediction features must be finite")
+    if (
+        not np.isfinite(model["center"]).all()
+        or not np.isfinite(model["scale"]).all()
+        or np.any(np.asarray(model["scale"]) <= 0.0)
+    ):
+        raise ValueError("classifier standardization parameters must be finite and positive")
+    if any(
+        label not in model["centroids"]
+        or not np.isfinite(model["centroids"][label]).all()
+        for label in PURE_LABELS
+    ):
+        raise ValueError("classifier model is missing finite pure-class centroids")
     standardized = (values - model["center"]) / model["scale"]
     distances = np.column_stack(
         [
@@ -813,7 +854,9 @@ def calibrate_abstention(
                     )
                 )
     if not feasible:
-        return -np.inf, np.inf, {
+        # These inverse bounds force every candidate to abstain. The opposite
+        # infinities would accidentally retain every row after failed calibration.
+        return np.inf, -np.inf, {
             "training_retained_accuracy": np.nan,
             "training_pure_coverage": 0.0,
             "training_mixture_abstention": 1.0,
@@ -1189,6 +1232,12 @@ def run_analysis(
             f"hierarchical 95% CI [{pe_row['hierarchical_bootstrap_ci_low']:+.4f}, "
             f"{pe_row['hierarchical_bootstrap_ci_high']:+.4f}]."
         ),
+        (
+            "Lower-tail coherence-surrogate p="
+            f"{pe_row['ordered_lower_than_permuted_coherence_p']:.4f}; "
+            "upper-tail high-surprise/PE-surrogate p="
+            f"{pe_row['ordered_higher_than_permuted_pe_surrogate_p']:.4f}."
+        ),
         "",
         "## Claim boundary",
         "",
@@ -1196,6 +1245,13 @@ def run_analysis(
         "Path similarity is not a measurement of Bayesian smoothing, posterior revision, "
         "prediction-error signaling, acetylcholine, or causal replay function. A separate "
         "pre-replay filtering to post-replay smoothing bridge is required.",
+        "",
+        "The `pe_disordered` injection is only a high-transition-surprise time-disorder "
+        "surrogate. It is not a generator or measurement of neural prediction error.",
+        "",
+        "The primary estimand gives each rat equal weight and events equal weight within "
+        "rat. Its hierarchical bootstrap resamples rat, then session, then event while "
+        "preserving each sampled session's realized event count.",
     ]
     report_path = output / REPORT_OUTPUT
     report_path.write_text("\n".join(report_lines) + "\n", encoding="utf-8")
@@ -1226,6 +1282,19 @@ def run_analysis(
             "bin_cm": float(markov_bin_cm),
             "alpha": float(markov_alpha),
             "null": "within_event_nontrivial_time_permutation_fixed_point_set",
+            "pe_disordered_candidate": (
+                "high-transition-surprise time-disorder surrogate; not a neural "
+                "prediction-error generator or measurement"
+            ),
+            "ordered_lower_than_permuted_sign": "temporal coherence surrogate",
+            "ordered_higher_than_permuted_sign": "high-surprise/PE surrogate",
+        },
+        "estimand": {
+            "primary": "equal-rat mean with equal event weight within rat",
+            "bootstrap": (
+                "rat-to-session-to-event resampling preserving sampled sessions' "
+                "realized event counts"
+            ),
         },
         "parameters": {
             "permutations": int(permutations),
@@ -1239,6 +1308,7 @@ def run_analysis(
             "smoothing or acetylcholine. The filtering-to-smoothing bridge is separate."
         ),
         "outputs": {name: str(path) for name, path in paths.items()},
+        "output_file_sha256": {name: file_sha256(path) for name, path in paths.items()},
         "provenance": build_script_provenance(input_paths=inputs, cwd=ROOT),
     }
     manifest_path = output / MANIFEST_OUTPUT

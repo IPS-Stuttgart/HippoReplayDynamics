@@ -34,6 +34,26 @@ def test_ctmc_trajectory_wrapper_does_not_execute_legacy_duration_routing() -> N
     np.testing.assert_allclose(observed, expected, rtol=1.0e-12, atol=1.0e-12)
 
 
+def test_legacy_trajectory_wrapper_delegates_before_duration_coercion() -> None:
+    config = SimpleNamespace(imm_switch_tau_s=0.0)
+    durations = object()
+    sentinel = [np.eye(2, dtype=float)]
+
+    def legacy_helper(got_config, stickiness, got_durations):
+        assert got_config is config
+        assert stickiness == 0.9
+        assert got_durations is durations
+        return sentinel
+
+    def base_helper(*args, **kwargs):
+        del args, kwargs
+        raise AssertionError("CTMC base routing must not run in legacy mode")
+
+    wrapped = _wrap_trajectory_mode_transition_sequence(legacy_helper, base_helper)
+
+    assert wrapped(config, 0.9, durations) is sentinel
+
+
 def _trajectory_diagnostic_helper(seen: list[np.ndarray]):
     def helper(
         emissions,
@@ -96,6 +116,38 @@ def test_ctmc_diagnostics_match_decoder_fallback_durations() -> None:
     assert result[-1]["state_space_trajectory_imm_mode_stickiness_per_step"] == module._format_float_series(
         expected_survival
     )
+
+
+def test_legacy_diagnostics_forward_duration_object_unchanged() -> None:
+    emissions = SimpleNamespace(n_time=3, dt=0.02)
+    config = SimpleNamespace(imm_switch_tau_s=0.0)
+    durations = object()
+    sentinel = (
+        0.0,
+        None,
+        None,
+        None,
+        {"state_space_trajectory_imm_mode_stickiness_per_step": "legacy"},
+    )
+
+    def helper(
+        got_emissions,
+        bin_centers,
+        got_config,
+        transition_durations_s,
+        *,
+        valid_bin_mask=None,
+        return_trajectory=True,
+    ):
+        del bin_centers, valid_bin_mask, return_trajectory
+        assert got_emissions is emissions
+        assert got_config is config
+        assert transition_durations_s is durations
+        return sentinel
+
+    wrapped = _wrap_trajectory_diagnostics(helper, _diagnostic_module_stub())
+
+    assert wrapped(emissions, None, config, durations) is sentinel
 
 
 def _extensions_stub(result: EventScore) -> SimpleNamespace:

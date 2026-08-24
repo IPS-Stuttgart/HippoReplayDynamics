@@ -45,6 +45,7 @@ PREDICTOR_OUTPUT = "replay_spatial_predictors.npz"
 MANIFEST_OUTPUT = "replay_spatial_manifest.json"
 EVENT_AUDIT_OUTPUT = "replay_spatial_event_audit.csv"
 SUMMARY_OUTPUT = "replay_spatial_export_summary.md"
+DATASET_VERIFIER_OUTPUT = "replay_spatial_dataset_verification.json"
 SCHEMA_VERSION = "bayesian-ach.replay-spatial.v2"
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
 _COMMIT = re.compile(r"^[0-9a-f]{40}$")
@@ -144,26 +145,176 @@ def _require_clean_commit(metadata: dict[str, object]) -> str:
     return commit
 
 
-def verify_dataset_manifest(
-    path: str | Path,
-    expected_sha256: str,
-) -> str:
-    """Verify the canonical PF tree manifest and return its separate file hash."""
+def _canonical_json_bytes(payload: object) -> bytes:
+    return (json.dumps(payload, indent=2, sort_keys=True) + "\n").encode("utf-8")
 
-    manifest_path = Path(path)
+
+def verify_dataset_tree(
+    dataset_root: str | Path,
+    manifest: str | Path,
+    expected_sha256: str,
+) -> tuple[str, dict[str, object]]:
+    """Verify every locked PF file and return a deterministic PASS report."""
+
+    root = Path(dataset_root)
+    manifest_path = Path(manifest)
     payload = json.loads(manifest_path.read_text(encoding="utf-8"))
     key = "manifest_sha256_without_this_field"
-    claimed = str(payload.pop(key, ""))
-    canonical = (
-        json.dumps(payload, indent=2, sort_keys=True) + "\n"
-    ).encode("utf-8")
-    observed = hashlib.sha256(canonical).hexdigest()
+    claimed = str(payload.get(key, ""))
+    canonical_payload = dict(payload)
+    canonical_payload.pop(key, None)
+    observed = hashlib.sha256(_canonical_json_bytes(canonical_payload)).hexdigest()
     if claimed != expected_sha256 or observed != expected_sha256:
         raise ValueError(
             "dataset manifest canonical digest does not match dataset_sha256"
         )
-    return _sha256_file(manifest_path)
 
+    expected_files = payload.get("files")
+    if not isinstance(expected_files, list) or not expected_files:
+        raise ValueError("dataset manifest must contain a nonempty files list")
+    expected_by_path: dict[str, dict[str, object]] = {}
+    for record in expected_files:
+        if not isinstance(record, dict):
+            raise ValueError("dataset manifest file records must be objects")
+        relative = str(record.get("path", ""))
+        if (
+            not relative
+            or relative in expected_by_path
+            or Path(relative).is_absolute()
+            or ".." in Path(relative).parts
+        ):
+            raise ValueError("dataset manifest contains an invalid or duplicate path")
+        size = record.get("size_bytes")
+        sha256 = str(record.get("sha256", ""))
+        if not isinstance(size, int) or size < 0 or _SHA256.fullmatch(sha256) is None:
+            raise ValueError("dataset manifest contains an invalid file record")
+        expected_by_path[relative] = {
+            "path": relative,
+            "size_bytes": size,
+            "sha256": sha256,
+        }
+
+    ignored_names = {"MANIFEST.txt", "dataset_manifest.json"}
+    actual_paths = sorted(
+        (
+            path
+            for path in root.rglob("*")
+            if path.is_file() and path.name not in ignored_names
+        ),
+        key=lambda path: path.relative_to(root).as_posix(),
+    )
+    actual_relative = [path.relative_to(root).as_posix() for path in actual_paths]
+    expected_relative = sorted(expected_by_path)
+    missing = sorted(set(expected_relative) - set(actual_relative))
+    extra = sorted(set(actual_relative) - set(expected_relative))
+    if missing or extra:
+        raise ValueError(
+            f"dataset tree path mismatch: missing={missing}, extra={extra}"
+        )
+
+    verified_records: list[dict[str, object]] = []
+    for path, relative in zip(actual_paths, actual_relative, strict=True):
+        expected = expected_by_path[relative]
+        size = int(path.stat().st_size)
+        sha256 = _sha256_file(path)
+        if size != expected["size_bytes"] or sha256 != expected["sha256"]:
+            raise ValueError(f"dataset file does not match lock: {relative}")
+        verified_records.append(
+            {"path": relative, "sha256": sha256, "size_bytes": size}
+        )
+
+    total_bytes = sum(int(record["size_bytes"]) for record in verified_records)
+    sessions = payload.get("sessions")
+    if not isinstance(sessions, list):
+        raise ValueError("dataset manifest sessions must be a list")
+    if payload.get("session_count") != len(sessions):
+        raise ValueError("dataset manifest session_count is inconsistent")
+    if payload.get("total_bytes") != total_bytes:
+        raise ValueError("dataset manifest total_bytes is inconsistent")
+    session_names: list[str] = []
+    for session in sessions:
+        if not isinstance(session, dict):
+            raise ValueError("dataset session records must be objects")
+        session_name = str(session.get("session", ""))
+        session_names.append(session_name)
+        if session.get("missing_required_files") != []:
+            raise ValueError(f"dataset session is incomplete: {session_name}")
+        for category in ("required_files", "optional_files"):
+            records = session.get(category)
+            if not isinstance(records, list):
+                raise ValueError(f"dataset session {category} must be a list")
+            for record in records:
+                if not isinstance(record, dict):
+                    raise ValueError("dataset session file records must be objects")
+                relative = str(record.get("path", ""))
+                if expected_by_path.get(relative) != record:
+                    raise ValueError(
+                        f"dataset session record disagrees with files lock: {relative}"
+                    )
+    if len(session_names) != len(set(session_names)) or any(not name for name in session_names):
+        raise ValueError("dataset session identifiers must be nonempty and unique")
+    if payload.get("dataset_root_name") != root.name:
+        raise ValueError("dataset root name does not match the locked manifest")
+
+    manifest_file_sha256 = _sha256_file(manifest_path)
+    records_sha256 = hashlib.sha256(
+        _canonical_json_bytes(verified_records)
+    ).hexdigest()
+    report: dict[str, object] = {
+        "schema_version": "hipporeplayimm.pf-dataset-verification.v1",
+        "status": "pass",
+        "dataset_sha256": expected_sha256,
+        "dataset_manifest_file_sha256": manifest_file_sha256,
+        "verified_file_count": len(verified_records),
+        "verified_total_bytes": total_bytes,
+        "verified_session_count": len(sessions),
+        "verified_file_records_sha256": records_sha256,
+        "missing_files": [],
+        "extra_files": [],
+    }
+    return manifest_file_sha256, report
+
+
+
+def verify_route_artifacts(
+    manifest: str | Path,
+    route_segments: str | Path,
+    route_points: str | Path,
+) -> dict[str, object]:
+    """Verify clean, cutoff-safe route-table provenance and exact file hashes."""
+
+    manifest_path = Path(manifest)
+    payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+    if payload.get("analysis") != "replay_behavior_route_primitives":
+        raise ValueError("route manifest has the wrong analysis identifier")
+    commit = str(payload.get("producer_commit", ""))
+    if _COMMIT.fullmatch(commit) is None or payload.get("producer_clean_worktree") is not True:
+        raise ValueError("route artifacts must come from a clean committed producer")
+    if payload.get("route_smoothing_scope") != "within_completed_fill_interval":
+        raise ValueError("route smoothing must be isolated within each completed interval")
+    parameters = payload.get("parameters")
+    if not isinstance(parameters, dict):
+        raise ValueError("route manifest parameters must be an object")
+    parameters_sha256 = hashlib.sha256(
+        json.dumps(parameters, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+    if parameters_sha256 != payload.get("parameters_sha256"):
+        raise ValueError("route parameter digest does not match the manifest")
+    output_sha256 = payload.get("output_sha256")
+    if not isinstance(output_sha256, dict):
+        raise ValueError("route manifest output_sha256 must be an object")
+    for path in (Path(route_segments), Path(route_points)):
+        expected = output_sha256.get(path.name)
+        if not isinstance(expected, str) or _SHA256.fullmatch(expected) is None:
+            raise ValueError(f"route manifest does not lock {path.name}")
+        if _sha256_file(path) != expected:
+            raise ValueError(f"route artifact does not match manifest: {path.name}")
+    return {
+        "route_manifest_file_sha256": _sha256_file(manifest_path),
+        "route_producer_commit": commit,
+        "route_parameters_sha256": parameters_sha256,
+        "route_smoothing_scope": str(payload["route_smoothing_scope"]),
+    }
 
 def _configuration_digest(*objects: object) -> str:
     payload = json.dumps(
@@ -587,6 +738,7 @@ def run_export(
     dataset_root: str | Path,
     route_segments_csv: str | Path,
     route_points_csv: str | Path,
+    route_manifest: str | Path,
     output_dir: str | Path,
     dataset_id: str,
     dataset_sha256: str,
@@ -615,9 +767,15 @@ def run_export(
         raise ValueError("dataset_sha256 must be a lowercase SHA-256 digest")
     git = git_metadata(ROOT)
     producer_commit = _require_clean_commit(git)
-    dataset_manifest_file_sha256 = verify_dataset_manifest(
+    dataset_manifest_file_sha256, dataset_verification = verify_dataset_tree(
+        dataset_root,
         dataset_manifest,
         str(dataset_sha256),
+    )
+    route_provenance = verify_route_artifacts(
+        route_manifest,
+        route_segments_csv,
+        route_points_csv,
     )
     route_segments_sha256 = _sha256_file(Path(route_segments_csv))
     route_points_sha256 = _sha256_file(Path(route_points_csv))
@@ -675,6 +833,9 @@ def run_export(
 
     output = Path(output_dir)
     output.mkdir(parents=True, exist_ok=True)
+    dataset_verifier_path = output / DATASET_VERIFIER_OUTPUT
+    dataset_verifier_path.write_bytes(_canonical_json_bytes(dataset_verification))
+    dataset_verifier_report_sha256 = _sha256_file(dataset_verifier_path)
     audit_path = output / EVENT_AUDIT_OUTPUT
     pd.DataFrame([event.audit for event in events]).to_csv(audit_path, index=False)
     event_audit_sha256 = _sha256_file(audit_path)
@@ -687,6 +848,24 @@ def run_export(
         "dataset_id": str(dataset_id),
         "dataset_sha256": str(dataset_sha256),
         "dataset_manifest_file_sha256": dataset_manifest_file_sha256,
+        "dataset_verifier_report_file": dataset_verifier_path.name,
+        "dataset_verifier_report_sha256": dataset_verifier_report_sha256,
+        "dataset_verified_file_count": int(
+            dataset_verification["verified_file_count"]
+        ),
+        "dataset_verified_total_bytes": int(
+            dataset_verification["verified_total_bytes"]
+        ),
+        "dataset_verification_schedule": (
+            "locked_full_tree_path_size_sha256_no_extra_files"
+        ),
+        "route_manifest_file_sha256": route_provenance[
+            "route_manifest_file_sha256"
+        ],
+        "route_producer_commit": route_provenance["route_producer_commit"],
+        "route_producer_clean_worktree": True,
+        "route_parameters_sha256": route_provenance["route_parameters_sha256"],
+        "route_smoothing_scope": route_provenance["route_smoothing_scope"],
         "route_segments_sha256": route_segments_sha256,
         "route_points_sha256": route_points_sha256,
         "cohort_sha256": cohort_sha256,
@@ -730,6 +909,7 @@ def run_export(
             "dataset_manifest": dataset_manifest,
             "route_segments": route_segments_csv,
             "route_points": route_points_csv,
+            "route_manifest": route_manifest,
         },
         cwd=ROOT,
     )
@@ -745,6 +925,11 @@ def run_export(
                 f"- Sessions: {len(sessions)}",
                 f"- Rats: {len(set(arrays['rat_ids'].astype(str)))}",
                 f"- Complete-case events: {int(np.sum(common))}",
+                (
+                    "- Dataset verification: PASS "
+                    f"({dataset_verification['verified_file_count']} files, "
+                    f"{dataset_verification['verified_total_bytes']} bytes)."
+                ),
                 "- Event selection: raw LFP peak power only; decoded content was not inspected.",
                 "- Decoder training: event-specific strict prefix refit.",
                 "- Later outcomes/replay feedback: absent.",
@@ -760,6 +945,7 @@ def run_export(
         PREDICTOR_OUTPUT: predictor_path,
         MANIFEST_OUTPUT: manifest_path,
         EVENT_AUDIT_OUTPUT: audit_path,
+        DATASET_VERIFIER_OUTPUT: dataset_verifier_path,
         SUMMARY_OUTPUT: summary_path,
     }
 
@@ -769,6 +955,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--dataset-root", required=True)
     parser.add_argument("--route-segments", required=True)
     parser.add_argument("--route-points", required=True)
+    parser.add_argument("--route-manifest", required=True)
     parser.add_argument("--output-dir", required=True)
     parser.add_argument("--dataset-id", default="PfeifferFoster-open-field-2013")
     parser.add_argument("--dataset-sha256", required=True)
@@ -792,6 +979,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         dataset_root=args.dataset_root,
         route_segments_csv=args.route_segments,
         route_points_csv=args.route_points,
+        route_manifest=args.route_manifest,
         output_dir=args.output_dir,
         dataset_id=args.dataset_id,
         dataset_sha256=args.dataset_sha256,

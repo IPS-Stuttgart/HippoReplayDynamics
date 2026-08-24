@@ -11,10 +11,12 @@ out.
 from __future__ import annotations
 
 import argparse
+import hashlib
 from collections.abc import Callable, Sequence
 from datetime import datetime, timezone
 import json
 from pathlib import Path
+import re
 import sys
 
 import numpy as np
@@ -28,7 +30,7 @@ SCRIPT_DIR = ROOT / "scripts"
 if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
 
-from _provenance import build_script_provenance  # noqa: E402
+from _provenance import build_script_provenance, git_metadata  # noqa: E402
 from hipporeplayimm.data import load_replay_session  # noqa: E402
 
 
@@ -42,6 +44,7 @@ SESSION_OUTPUT = "replay_behavior_route_primitives_by_session.csv"
 GATE_OUTPUT = "replay_behavior_route_primitives_gate_summary.csv"
 MANIFEST_OUTPUT = "replay_behavior_route_primitives_manifest.json"
 SUMMARY_OUTPUT = "replay_behavior_route_primitives_summary.md"
+_COMMIT_PATTERN = re.compile(r"^[0-9a-f]{40}$")
 
 
 def _finite_position(position: np.ndarray) -> np.ndarray:
@@ -201,8 +204,10 @@ def segment_well_to_well_routes(
     minimum_route_displacement_cm: float = 10.0,
     minimum_route_samples: int = 10,
     route_resample_points: int = 41,
+    median_window_s: float = 0.167,
+    gaussian_sigma_s: float = 0.100,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """Segment target-fill intervals into directed behavior routes."""
+    """Segment and independently smooth each completed target-fill interval."""
 
     position = np.asarray(position, dtype=float)
     wells = np.asarray(well_sequence, dtype=float)
@@ -233,6 +238,11 @@ def segment_well_to_well_routes(
         if end <= start or not _inside_any_interval(np.array([0.5 * (start + end)]), run_times)[0]:
             continue
         segment = position[(position[:, 0] >= start) & (position[:, 0] <= end)]
+        segment = smooth_position_trace(
+            segment,
+            median_window_s=float(median_window_s),
+            gaussian_sigma_s=float(gaussian_sigma_s),
+        )
         segment = _movement_segment(
             segment,
             speed_threshold_cm_s=speed_threshold_cm_s,
@@ -709,6 +719,12 @@ def run_analysis(
     spatial_bin_cm: float = 10.0,
     transition_pseudocount: float = 0.5,
 ) -> dict[str, Path]:
+    git = git_metadata(ROOT)
+    producer_commit = str(git.get("code_commit", ""))
+    if _COMMIT_PATTERN.fullmatch(producer_commit) is None:
+        raise ValueError("route producer must run from a committed Git checkout")
+    if git.get("git_dirty") is not False:
+        raise ValueError("route producer must run from a clean committed worktree")
     output = Path(output_dir)
     output.mkdir(parents=True, exist_ok=True)
     frozen_events = pd.read_csv(frozen_events_csv)
@@ -720,14 +736,9 @@ def run_analysis(
     for session_id in sorted(frozen_events["session"].astype(str).unique()):
         session = load_replay_session(dataset / Path(session_id))
         sessions[session_id] = session
-        smoothed = smooth_position_trace(
-            np.asarray(session.position),
-            median_window_s=float(median_window_s),
-            gaussian_sigma_s=float(gaussian_sigma_s),
-        )
         routes, points = segment_well_to_well_routes(
             session_id=session_id,
-            position=smoothed,
+            position=np.asarray(session.position),
             run_times=np.asarray(session.run_times),
             well_sequence=np.asarray(session.well_sequence),
             n_folds=int(n_folds),
@@ -737,6 +748,8 @@ def run_analysis(
             minimum_arrival_dwell_s=float(minimum_arrival_dwell_s),
             destination_window_s=float(destination_window_s),
             minimum_route_displacement_cm=float(minimum_route_displacement_cm),
+            median_window_s=float(median_window_s),
+            gaussian_sigma_s=float(gaussian_sigma_s),
         )
         all_routes.append(routes)
         all_route_points.append(points)
@@ -799,28 +812,41 @@ def run_analysis(
         },
         cwd=ROOT,
     )
+    parameters = {
+        "n_folds": int(n_folds),
+        "median_window_s": float(median_window_s),
+        "gaussian_sigma_s": float(gaussian_sigma_s),
+        "movement_speed_cm_s": float(movement_speed_cm_s),
+        "minimum_departure_s": float(minimum_departure_s),
+        "arrival_radius_cm": float(arrival_radius_cm),
+        "minimum_arrival_dwell_s": float(minimum_arrival_dwell_s),
+        "destination_window_s": float(destination_window_s),
+        "minimum_route_displacement_cm": float(minimum_route_displacement_cm),
+        "primitive_length_cm": float(primitive_length_cm),
+        "primitive_stride_cm": float(primitive_stride_cm),
+        "cluster_threshold_cm": float(cluster_threshold_cm),
+        "minimum_cluster_routes": int(minimum_cluster_routes),
+        "spatial_bin_cm": float(spatial_bin_cm),
+        "transition_pseudocount": float(transition_pseudocount),
+    }
+    parameters_sha256 = hashlib.sha256(
+        json.dumps(parameters, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+    output_sha256 = {
+        name: hashlib.sha256(path.read_bytes()).hexdigest()
+        for name, path in paths.items()
+    }
     manifest = {
         "analysis": "replay_behavior_route_primitives",
         "created_at_utc": datetime.now(timezone.utc).isoformat(),
         "non_outcome_behavior_only": True,
         "cross_validation_unit": "well_to_well_route",
-        "parameters": {
-            "n_folds": int(n_folds),
-            "median_window_s": float(median_window_s),
-            "gaussian_sigma_s": float(gaussian_sigma_s),
-            "movement_speed_cm_s": float(movement_speed_cm_s),
-            "minimum_departure_s": float(minimum_departure_s),
-            "arrival_radius_cm": float(arrival_radius_cm),
-            "minimum_arrival_dwell_s": float(minimum_arrival_dwell_s),
-            "destination_window_s": float(destination_window_s),
-            "minimum_route_displacement_cm": float(minimum_route_displacement_cm),
-            "primitive_length_cm": float(primitive_length_cm),
-            "primitive_stride_cm": float(primitive_stride_cm),
-            "cluster_threshold_cm": float(cluster_threshold_cm),
-            "minimum_cluster_routes": int(minimum_cluster_routes),
-            "spatial_bin_cm": float(spatial_bin_cm),
-            "transition_pseudocount": float(transition_pseudocount),
-        },
+        "producer_commit": producer_commit,
+        "producer_clean_worktree": True,
+        "route_smoothing_scope": "within_completed_fill_interval",
+        "parameters": parameters,
+        "parameters_sha256": parameters_sha256,
+        "output_sha256": output_sha256,
         "counts": {
             "routes": int(len(routes)),
             "candidate_subpaths": int(len(candidate_meta)),

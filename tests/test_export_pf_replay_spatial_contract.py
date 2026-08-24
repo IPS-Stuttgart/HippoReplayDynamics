@@ -15,7 +15,8 @@ from scripts.export_pf_replay_spatial_contract import (
     _pack_events,
     _require_clean_commit,
     select_lfp_only_events,
-    verify_dataset_manifest,
+    verify_dataset_tree,
+    verify_route_artifacts,
 )
 
 
@@ -113,13 +114,37 @@ def test_packer_uses_nan_coordinates_and_log_zero_for_padding() -> None:
     np.testing.assert_allclose(arrays["well_masses"].sum(axis=1), 1.0)
 
 
-def test_dataset_manifest_digest_is_verified_and_tampering_fails(tmp_path) -> None:
-    payload = {"sessions": ["Rat1/Open1"], "total_bytes": 123}
+def test_dataset_tree_is_fully_verified_and_tampering_fails(tmp_path) -> None:
+    root = tmp_path / "pfeiffer-foster"
+    source = root / "Rat1" / "Open1" / "Position_Data.csv"
+    source.parent.mkdir(parents=True)
+    source.write_text("time,x,y\n0,1,2\n", encoding="utf-8")
+    relative = source.relative_to(root).as_posix()
+    record = {
+        "path": relative,
+        "sha256": hashlib.sha256(source.read_bytes()).hexdigest(),
+        "size_bytes": source.stat().st_size,
+    }
+    payload = {
+        "dataset_root_name": root.name,
+        "files": [record],
+        "generated_at_utc": "2026-01-01T00:00:00+00:00",
+        "session_count": 1,
+        "sessions": [
+            {
+                "session": "Rat1/Open1",
+                "missing_required_files": [],
+                "required_files": [record],
+                "optional_files": [],
+            }
+        ],
+        "total_bytes": source.stat().st_size,
+    }
     canonical = (
         json.dumps(payload, indent=2, sort_keys=True) + "\n"
     ).encode("utf-8")
     digest = hashlib.sha256(canonical).hexdigest()
-    path = tmp_path / "dataset_manifest.json"
+    path = root / "dataset_manifest.json"
     path.write_text(
         json.dumps(
             {
@@ -133,13 +158,97 @@ def test_dataset_manifest_digest_is_verified_and_tampering_fails(tmp_path) -> No
         encoding="utf-8",
     )
 
-    assert len(verify_dataset_manifest(path, digest)) == 64
+    manifest_sha, report = verify_dataset_tree(root, path, digest)
+    assert len(manifest_sha) == 64
+    assert report["status"] == "pass"
+    assert report["verified_file_count"] == 1
+    assert report["verified_total_bytes"] == source.stat().st_size
+
+    source.write_text("tampered", encoding="utf-8")
+    with pytest.raises(ValueError, match="does not match lock"):
+        verify_dataset_tree(root, path, digest)
+
+
+def test_dataset_tree_rejects_unlocked_extra_file(tmp_path) -> None:
+    root = tmp_path / "pfeiffer-foster"
+    root.mkdir()
+    locked = root / "locked.bin"
+    locked.write_bytes(b"locked")
+    record = {
+        "path": "locked.bin",
+        "sha256": hashlib.sha256(locked.read_bytes()).hexdigest(),
+        "size_bytes": locked.stat().st_size,
+    }
+    payload = {
+        "dataset_root_name": root.name,
+        "files": [record],
+        "generated_at_utc": "2026-01-01T00:00:00+00:00",
+        "session_count": 0,
+        "sessions": [],
+        "total_bytes": locked.stat().st_size,
+    }
+    canonical = (
+        json.dumps(payload, indent=2, sort_keys=True) + "\n"
+    ).encode("utf-8")
+    digest = hashlib.sha256(canonical).hexdigest()
+    path = root / "dataset_manifest.json"
     path.write_text(
-        path.read_text(encoding="utf-8").replace("123", "124"),
+        json.dumps(
+            {
+                **payload,
+                "manifest_sha256_without_this_field": digest,
+            },
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n",
         encoding="utf-8",
     )
-    with pytest.raises(ValueError, match="canonical digest"):
-        verify_dataset_manifest(path, digest)
+    (root / "unexpected.bin").write_bytes(b"x")
+
+    with pytest.raises(ValueError, match="path mismatch"):
+        verify_dataset_tree(root, path, digest)
+
+def test_route_artifacts_require_clean_cutoff_safe_manifest(tmp_path) -> None:
+    segments = tmp_path / "replay_behavior_route_segments.csv"
+    points = tmp_path / "replay_behavior_route_segment_points.csv"
+    segments.write_text("route_id\nr0\n", encoding="utf-8")
+    points.write_text("route_id,x_cm,y_cm\nr0,0,0\n", encoding="utf-8")
+    parameters = {"median_window_s": 0.167, "gaussian_sigma_s": 0.1}
+    manifest = {
+        "analysis": "replay_behavior_route_primitives",
+        "producer_commit": "a" * 40,
+        "producer_clean_worktree": True,
+        "route_smoothing_scope": "within_completed_fill_interval",
+        "parameters": parameters,
+        "parameters_sha256": hashlib.sha256(
+            json.dumps(
+                parameters,
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode("utf-8")
+        ).hexdigest(),
+        "output_sha256": {
+            segments.name: hashlib.sha256(segments.read_bytes()).hexdigest(),
+            points.name: hashlib.sha256(points.read_bytes()).hexdigest(),
+        },
+    }
+    manifest_path = tmp_path / "route_manifest.json"
+    manifest_path.write_text(
+        json.dumps(manifest, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+
+    verified = verify_route_artifacts(manifest_path, segments, points)
+    assert verified["route_producer_commit"] == "a" * 40
+
+    manifest["producer_clean_worktree"] = False
+    manifest_path.write_text(
+        json.dumps(manifest, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError, match="clean committed producer"):
+        verify_route_artifacts(manifest_path, segments, points)
 
 
 def test_claim_bearing_export_requires_clean_exact_commit() -> None:

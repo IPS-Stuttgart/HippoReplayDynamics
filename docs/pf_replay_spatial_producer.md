@@ -73,7 +73,8 @@ unavailable; it is not silently replaced by a zero-effect biological result.
   well masses, and identifiers.
 - `replay_spatial_manifest.json`: schema, exact producer commit from a clean
   worktree, verified canonical dataset-tree digest plus the dataset-manifest
-  file SHA-256, route-segment and route-point input SHA-256s, ordered cohort and
+  file SHA-256, a per-file full-tree verification PASS report, clean route
+  producer/parameter provenance and route-table SHA-256s, ordered cohort and
   event-audit SHA-256s, trace/transition conventions, event-selection and
   hyperparameter digests, and predictor SHA-256.
 - `replay_spatial_event_audit.csv`: selection rank/power, all causal cutoffs,
@@ -89,12 +90,16 @@ python scripts/export_pf_replay_spatial_contract.py \
   --dataset-manifest /mnt/lexar4tb/datasets/pfeiffer-foster/dataset_manifest.json \
   --route-segments results/replay-behavior-route-primitives/replay_behavior_route_segments.csv \
   --route-points results/replay-behavior-route-primitives/replay_behavior_route_segment_points.csv \
+  --route-manifest results/replay-behavior-route-primitives/replay_behavior_route_primitives_manifest.json \
   --dataset-sha256 LOCKED_DATASET_DIGEST \
   --output-dir results/pf-replay-spatial-contract
 ```
 
 `--dataset-sha256` is checked against the canonical digest embedded in the
-dataset manifest; supplying a label without the matching manifest is rejected.
+dataset manifest. Every locked relative path, byte size, and SHA-256 is then
+recomputed; missing, changed, and unlocked extra files are rejected. The
+deterministic PASS report is written beside the predictor and hash-bound in the
+manifest.
 The exporter also refuses a dirty or unavailable producer commit before writing
 any claim-bearing artifact.
 

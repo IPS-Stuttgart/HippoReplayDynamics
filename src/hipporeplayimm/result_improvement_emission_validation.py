@@ -31,14 +31,16 @@ def _nested_scalar_isinstance(value: object, types: tuple[type, ...]) -> bool:
             return False
         if array.ndim != 0:
             return False
-        marker = id(array)
-        if marker in seen_arrays:
-            return False
-        seen_arrays.add(marker)
         try:
             nested = array.item()
         except ValueError:
             return False
+        if array.dtype != object:
+            return isinstance(nested, types)
+        marker = id(array)
+        if marker in seen_arrays:
+            return False
+        seen_arrays.add(marker)
         if nested is current:
             return False
         current = nested

@@ -27,7 +27,6 @@ from hipporeplayimm.data import ReplaySession, RippleEvent, load_replay_session 
 from hipporeplayimm.encoding import (  # noqa: E402
     EmissionConfig,
     EncodingConfig,
-    EncodingModel,
     build_emissions,
     fit_place_field_encoding,
 )
@@ -134,6 +133,36 @@ def _sha256_file(path: Path) -> str:
         for chunk in iter(lambda: handle.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def _require_clean_commit(metadata: dict[str, object]) -> str:
+    commit = str(metadata.get("code_commit", ""))
+    if _COMMIT.fullmatch(commit) is None:
+        raise ValueError("producer must run from a committed Git checkout")
+    if metadata.get("git_dirty") is not False:
+        raise ValueError("producer must run from a clean committed worktree")
+    return commit
+
+
+def verify_dataset_manifest(
+    path: str | Path,
+    expected_sha256: str,
+) -> str:
+    """Verify the canonical PF tree manifest and return its separate file hash."""
+
+    manifest_path = Path(path)
+    payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+    key = "manifest_sha256_without_this_field"
+    claimed = str(payload.pop(key, ""))
+    canonical = (
+        json.dumps(payload, indent=2, sort_keys=True) + "\n"
+    ).encode("utf-8")
+    observed = hashlib.sha256(canonical).hexdigest()
+    if claimed != expected_sha256 or observed != expected_sha256:
+        raise ValueError(
+            "dataset manifest canonical digest does not match dataset_sha256"
+        )
+    return _sha256_file(manifest_path)
 
 
 def _configuration_digest(*objects: object) -> str:
@@ -561,6 +590,7 @@ def run_export(
     output_dir: str | Path,
     dataset_id: str,
     dataset_sha256: str,
+    dataset_manifest: str | Path,
     selection_config: EventSelectionConfig | None = None,
     encoding_config: EncodingConfig | None = None,
     emission_config: EmissionConfig | None = None,
@@ -583,6 +613,14 @@ def run_export(
     point_spread_config.validate()
     if _SHA256.fullmatch(str(dataset_sha256)) is None:
         raise ValueError("dataset_sha256 must be a lowercase SHA-256 digest")
+    git = git_metadata(ROOT)
+    producer_commit = _require_clean_commit(git)
+    dataset_manifest_file_sha256 = verify_dataset_manifest(
+        dataset_manifest,
+        str(dataset_sha256),
+    )
+    route_segments_sha256 = _sha256_file(Path(route_segments_csv))
+    route_points_sha256 = _sha256_file(Path(route_points_csv))
 
     routes = pd.read_csv(route_segments_csv)
     route_points = pd.read_csv(route_points_csv)
@@ -616,20 +654,43 @@ def run_export(
             )
 
     arrays = _pack_events(events)
+    cohort_payload = [
+        {
+            "event_id": event.event_id,
+            "session": event.session,
+            "event_index": event.event_index,
+        }
+        for event in events
+    ]
+    cohort_sha256 = hashlib.sha256(
+        (
+            json.dumps(
+                cohort_payload,
+                sort_keys=True,
+                separators=(",", ":"),
+            )
+            + "\n"
+        ).encode("utf-8")
+    ).hexdigest()
+
     output = Path(output_dir)
     output.mkdir(parents=True, exist_ok=True)
+    audit_path = output / EVENT_AUDIT_OUTPUT
+    pd.DataFrame([event.audit for event in events]).to_csv(audit_path, index=False)
+    event_audit_sha256 = _sha256_file(audit_path)
     predictor_path = output / PREDICTOR_OUTPUT
     np.savez_compressed(predictor_path, **arrays)
     predictor_sha256 = _sha256_file(predictor_path)
-    git = git_metadata(ROOT)
-    producer_commit = str(git.get("code_commit", ""))
-    if _COMMIT.fullmatch(producer_commit) is None:
-        raise ValueError("producer must run from a committed Git checkout")
     manifest = {
         "producer_repository": "IPS-Stuttgart/HippoReplayDynamics",
         "producer_commit": producer_commit,
         "dataset_id": str(dataset_id),
         "dataset_sha256": str(dataset_sha256),
+        "dataset_manifest_file_sha256": dataset_manifest_file_sha256,
+        "route_segments_sha256": route_segments_sha256,
+        "route_points_sha256": route_points_sha256,
+        "cohort_sha256": cohort_sha256,
+        "event_audit_sha256": event_audit_sha256,
         "trace_schema_version": SMOOTHING_TRACE_SCHEMA_VERSION,
         "transition_convention": TRANSITION_CONVENTION,
         "candidate_evidence_cutoff": "strict_pre_replay",
@@ -643,6 +704,7 @@ def run_export(
         ),
         "state_to_spatial_mapping": "pre_replay_route_kernel",
         "event_selection_schedule": "lfp_raw_peak_power_top_n_per_session",
+        "event_selection_time_scope": "full_session_offline_rank",
         "event_selection_parameters_sha256": selection_config.sha256(),
         "behavior_field_parameters_sha256": behavior_config.sha256(),
         "decoder_parameters_sha256": _configuration_digest(
@@ -653,6 +715,7 @@ def run_export(
         "spatial_coordinate_units": "cm",
         "replay_feedback_used": False,
         "outcomes_in_predictor": False,
+        "producer_clean_worktree": True,
         "schema_version": SCHEMA_VERSION,
         "predictor_file": predictor_path.name,
         "predictor_sha256": predictor_sha256,
@@ -662,10 +725,9 @@ def run_export(
         json.dumps(manifest, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
     )
-    audit_path = output / EVENT_AUDIT_OUTPUT
-    pd.DataFrame([event.audit for event in events]).to_csv(audit_path, index=False)
     provenance = build_script_provenance(
         input_paths={
+            "dataset_manifest": dataset_manifest,
             "route_segments": route_segments_csv,
             "route_points": route_points_csv,
         },
@@ -710,6 +772,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--output-dir", required=True)
     parser.add_argument("--dataset-id", default="PfeifferFoster-open-field-2013")
     parser.add_argument("--dataset-sha256", required=True)
+    parser.add_argument("--dataset-manifest", required=True)
     parser.add_argument("--events-per-session", type=int, default=20)
     parser.add_argument("--minimum-raw-power", type=float, default=0.0)
     parser.add_argument("--minimum-training-duration-s", type=float, default=300.0)
@@ -732,6 +795,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         output_dir=args.output_dir,
         dataset_id=args.dataset_id,
         dataset_sha256=args.dataset_sha256,
+        dataset_manifest=args.dataset_manifest,
         selection_config=EventSelectionConfig(
             events_per_session=args.events_per_session,
             minimum_raw_power=args.minimum_raw_power,

@@ -20,7 +20,10 @@ source session:
 
 No decoded trajectory, decoder evidence, next route, later well, or candidate
 field participates in selection. The schedule and its complete parameter digest
-are frozen in the manifest.
+are frozen in the manifest. Because top-N ranking is performed over the full
+session, this is an offline, decoded-content-independent sampling rule. It
+supports a conditional replay-content analysis; it does not support a causal
+claim about online event incidence.
 
 ## Causal decoder and resolution
 
@@ -68,9 +71,11 @@ unavailable; it is not silently replaced by a zero-effect biological result.
   masks, centimeter grid coordinates, empirical point spread, shared nuisance
   base, seven candidate fields, availability/cutoff arrays, posterior-derived
   well masses, and identifiers.
-- `replay_spatial_manifest.json`: schema, exact producer commit, locked data
-  digest, trace/transition conventions, event-selection and hyperparameter
-  digests, and predictor SHA-256.
+- `replay_spatial_manifest.json`: schema, exact producer commit from a clean
+  worktree, verified canonical dataset-tree digest plus the dataset-manifest
+  file SHA-256, route-segment and route-point input SHA-256s, ordered cohort and
+  event-audit SHA-256s, trace/transition conventions, event-selection and
+  hyperparameter digests, and predictor SHA-256.
 - `replay_spatial_event_audit.csv`: selection rank/power, all causal cutoffs,
   training maxima, calibration support, field availability, and revision
   identifiability per event.
@@ -81,11 +86,17 @@ Example:
 ```bash
 python scripts/export_pf_replay_spatial_contract.py \
   --dataset-root /mnt/lexar4tb/datasets/pfeiffer-foster \
+  --dataset-manifest /mnt/lexar4tb/datasets/pfeiffer-foster/dataset_manifest.json \
   --route-segments results/replay-behavior-route-primitives/replay_behavior_route_segments.csv \
   --route-points results/replay-behavior-route-primitives/replay_behavior_route_segment_points.csv \
   --dataset-sha256 LOCKED_DATASET_DIGEST \
   --output-dir results/pf-replay-spatial-contract
 ```
+
+`--dataset-sha256` is checked against the canonical digest embedded in the
+dataset manifest; supplying a label without the matching manifest is rejected.
+The exporter also refuses a dirty or unavailable producer commit before writing
+any claim-bearing artifact.
 
 The output is predictor evidence, not a biological conclusion. Bayesian-ACh
 must hash-check it, run LOAO/LOSO recovery, apply simultaneous

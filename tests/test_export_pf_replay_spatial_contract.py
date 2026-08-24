@@ -1,16 +1,21 @@
 from __future__ import annotations
 
+import hashlib
+import json
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
+import pytest
 
 from hipporeplayimm.data import ReplaySession
 from scripts.export_pf_replay_spatial_contract import (
     EventSelectionConfig,
     ExportedEvent,
     _pack_events,
+    _require_clean_commit,
     select_lfp_only_events,
+    verify_dataset_manifest,
 )
 
 
@@ -106,3 +111,43 @@ def test_packer_uses_nan_coordinates_and_log_zero_for_padding() -> None:
     assert not arrays["active_spatial_mask"][1, 2]
     assert np.isnan(arrays["spatial_coordinates"][1, 2]).all()
     np.testing.assert_allclose(arrays["well_masses"].sum(axis=1), 1.0)
+
+
+def test_dataset_manifest_digest_is_verified_and_tampering_fails(tmp_path) -> None:
+    payload = {"sessions": ["Rat1/Open1"], "total_bytes": 123}
+    canonical = (
+        json.dumps(payload, indent=2, sort_keys=True) + "\n"
+    ).encode("utf-8")
+    digest = hashlib.sha256(canonical).hexdigest()
+    path = tmp_path / "dataset_manifest.json"
+    path.write_text(
+        json.dumps(
+            {
+                **payload,
+                "manifest_sha256_without_this_field": digest,
+            },
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    assert len(verify_dataset_manifest(path, digest)) == 64
+    path.write_text(
+        path.read_text(encoding="utf-8").replace("123", "124"),
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError, match="canonical digest"):
+        verify_dataset_manifest(path, digest)
+
+
+def test_claim_bearing_export_requires_clean_exact_commit() -> None:
+    commit = "1" * 40
+    assert _require_clean_commit(
+        {"code_commit": commit, "git_dirty": False}
+    ) == commit
+    with pytest.raises(ValueError, match="clean committed worktree"):
+        _require_clean_commit({"code_commit": commit, "git_dirty": True})
+    with pytest.raises(ValueError, match="committed Git checkout"):
+        _require_clean_commit({"code_commit": "unavailable", "git_dirty": False})

@@ -119,16 +119,23 @@ def _score_reverse_with_supported_return_trajectory(
         candidate_indices=reversed_candidates,
         return_trajectory=return_trajectory,
     )
+    base_model_name = str(result.model_name)
     if result.trajectory_log_posterior is not None:
         trajectory = np.asarray(result.trajectory_log_posterior, dtype=float)[::-1].copy()
         result.trajectory_log_posterior = trajectory
         result.terminal_log_posterior = trajectory[-1].copy()
-    result.model_name = str(self.name)
+    result.model_name = (
+        str(self.name)
+        if self.name is not None
+        else f"{base_model_name}-reverse"
+    )
     result.diagnostics = dict(result.diagnostics)
     if result.terminal_log_posterior is not None:
         result.diagnostics.update(extensions._posterior_diagnostics(result.terminal_log_posterior, bin_centers))
     result.diagnostics["direction_model"] = "reverse"
-    result.diagnostics["reverse_time_base_model"] = str(getattr(self.base_model, "name", "model"))
+    result.diagnostics["reverse_time_base_model"] = str(
+        getattr(self.base_model, "name", base_model_name)
+    )
     return result
 
 

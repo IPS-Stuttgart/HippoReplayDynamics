@@ -25,6 +25,61 @@ _PATCHED_FLAG = "_continuous_time_imm_transition_patch_applied"
 _TRANSITION_WRAPPER_FLAG = "_continuous_time_imm_transition_wrapper"
 _DIAGNOSTIC_WRAPPER_FLAG = "_continuous_time_imm_diagnostic_wrapper"
 _ORIGINAL_ATTR = "__hipporeplayimm_original__"
+_TEXT_SCALAR_TYPES = (str, bytes, np.str_, np.bytes_)
+
+
+def _coerce_real_numeric_array(value: Any, name: str) -> np.ndarray:
+    """Coerce numeric input without silently accepting bool, text, or complex values."""
+
+    try:
+        raw = np.asarray(value)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ValueError(f"{name} must contain real numeric values") from exc
+
+    if np.issubdtype(raw.dtype, np.bool_) or raw.dtype.kind in {"S", "U"}:
+        raise ValueError(f"{name} must contain real numeric values")
+    if np.issubdtype(raw.dtype, np.complexfloating):
+        raise ValueError(f"{name} must contain real numeric values")
+    if raw.dtype == object and any(
+        isinstance(item, (bool, np.bool_, complex, np.complexfloating, *_TEXT_SCALAR_TYPES))
+        for item in raw.flat
+    ):
+        raise ValueError(f"{name} must contain real numeric values")
+
+    try:
+        return raw.astype(float, copy=False)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ValueError(f"{name} must contain real numeric values") from exc
+
+
+def _coerce_real_scalar(value: Any, name: str) -> float:
+    """Return a finite real scalar without lossy or semantic type coercion."""
+
+    try:
+        raw = np.asarray(value)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise TypeError(f"{name} must be a real finite scalar") from exc
+    if raw.ndim != 0:
+        raise TypeError(f"{name} must be a real finite scalar")
+    item = raw.item()
+    if isinstance(item, (bool, np.bool_, complex, np.complexfloating, *_TEXT_SCALAR_TYPES)):
+        raise TypeError(f"{name} must be a real finite scalar")
+    try:
+        result = float(item)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise TypeError(f"{name} must be a real finite scalar") from exc
+    if not np.isfinite(result):
+        raise ValueError(f"{name} must be a real finite scalar")
+    return result
+
+
+def _coerce_real_vector(value: Any, name: str) -> np.ndarray:
+    values = _coerce_real_numeric_array(value, name)
+    if values.ndim != 1:
+        raise ValueError(f"{name} must be one-dimensional")
+    if not np.all(np.isfinite(values)):
+        raise ValueError(f"{name} must contain only finite values")
+    return values
 
 
 def _continuous_time_mode_transition_matrix(
@@ -34,7 +89,7 @@ def _continuous_time_mode_transition_matrix(
 ) -> np.ndarray:
     """Embed conditional IMM switch destinations in continuous time."""
 
-    transition = np.asarray(base_transition, dtype=float)
+    transition = _coerce_real_numeric_array(base_transition, "base_transition")
     if transition.ndim != 2 or transition.shape[0] != transition.shape[1] or not transition.size:
         raise ValueError("base_transition must be a nonempty square matrix")
     if not np.all(np.isfinite(transition)) or np.any(transition < 0.0):
@@ -42,11 +97,11 @@ def _continuous_time_mode_transition_matrix(
     if not np.allclose(transition.sum(axis=1), 1.0, rtol=1.0e-12, atol=1.0e-12):
         raise ValueError("base_transition rows must sum to 1")
 
-    duration = float(duration_s)
-    dwell = float(mean_dwell_s)
-    if not np.isfinite(duration) or duration < 0.0:
+    duration = _coerce_real_scalar(duration_s, "duration_s")
+    dwell = _coerce_real_scalar(mean_dwell_s, "mean_dwell_s")
+    if duration < 0.0:
         raise ValueError("duration_s must be finite and nonnegative")
-    if not np.isfinite(dwell) or dwell <= 0.0:
+    if dwell <= 0.0:
         raise ValueError("mean_dwell_s must be finite and positive")
 
     n_modes = transition.shape[0]
@@ -101,29 +156,32 @@ def _wrap_mode_transition_sequence(
     @wraps(helper)
     def mode_transition_matrices(*args, **kwargs):
         legacy = helper(*args, **kwargs)
-        tau_s = float(
+        tau_s = _coerce_real_scalar(
             _positional_or_keyword(
                 args,
                 kwargs,
                 tau_position,
                 "imm_switch_tau_s",
-            )
+            ),
+            "imm_switch_tau_s",
         )
-        durations = np.asarray(
+        durations = _coerce_real_vector(
             _positional_or_keyword(
                 args,
                 kwargs,
                 tau_position + 1,
                 "durations",
             ),
-            dtype=float,
+            "durations",
         )
         if tau_s == 0.0:
             return legacy
+        if tau_s < 0.0:
+            raise ValueError("imm_switch_tau_s must be finite and nonnegative")
         if len(legacy) != int(durations.size):
             raise ValueError("mode transitions must contain one matrix per transition duration")
         return [
-            _continuous_time_mode_transition_matrix(matrix, float(duration), tau_s)
+            _continuous_time_mode_transition_matrix(matrix, duration, tau_s)
             for matrix, duration in zip(legacy, durations, strict=True)
         ]
 
@@ -154,17 +212,15 @@ def _wrap_trajectory_mode_transition_sequence(
         legacy = helper(*args, **kwargs)
         config = _positional_or_keyword(args, kwargs, 0, "config")
         stickiness = float(_positional_or_keyword(args, kwargs, 1, "stickiness"))
-        durations = np.asarray(
+        durations = _coerce_real_vector(
             _positional_or_keyword(args, kwargs, 2, "durations"),
-            dtype=float,
+            "durations",
         )
-        tau_s = float(getattr(config, "imm_switch_tau_s", 0.0))
+        tau_s = _coerce_real_scalar(getattr(config, "imm_switch_tau_s", 0.0), "imm_switch_tau_s")
         if tau_s == 0.0:
             return legacy
-        if not np.isfinite(tau_s) or tau_s <= 0.0:
+        if tau_s <= 0.0:
             raise ValueError("imm_switch_tau_s must be finite and positive")
-        if durations.ndim != 1:
-            raise ValueError("durations must be one-dimensional")
         if not np.all(np.isfinite(durations)) or np.any(durations <= 0.0):
             raise ValueError("transition durations must be finite and positive")
 
@@ -172,7 +228,7 @@ def _wrap_trajectory_mode_transition_sequence(
         return [
             _continuous_time_mode_transition_matrix(
                 reference_transition,
-                float(duration),
+                duration,
                 tau_s,
             )
             for duration in durations

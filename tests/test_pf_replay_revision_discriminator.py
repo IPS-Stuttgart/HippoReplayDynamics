@@ -10,6 +10,7 @@ from scripts.test_pf_replay_revision_discriminator import (
     FEATURES,
     _centroid_predictions,
     _fit_centroid_model,
+    adjudication_interpretation,
     build_cross_validated_markov_models,
     calibrate_abstention,
     correlated_noisy_path,
@@ -24,6 +25,18 @@ from scripts.test_pf_replay_revision_discriminator import (
 
 def _json_path(points: list[list[float]]) -> str:
     return json.dumps(points, separators=(",", ":"))
+
+
+def test_unavailable_historical_control_forces_nonadjudicative() -> None:
+    assert (
+        adjudication_interpretation(
+            technical_passed=True,
+            candidate_classifiable=True,
+            historical_positive_control_exactly_reproducible=False,
+            direction="retrospective_geometry",
+        )
+        == "technical_nonadjudicative"
+    )
 
 
 def test_retrospective_geometry_score_has_predeclared_sign() -> None:

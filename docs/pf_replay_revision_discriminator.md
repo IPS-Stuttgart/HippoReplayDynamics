@@ -37,6 +37,35 @@ future templates by a nonzero circular offset only within the same session and
 event-route relation. Singleton strata are excluded from both the observed
 primary statistic and the null.
 
+## Historical positive-control boundary
+
+The exact PF2013 away-reward-well future-path preference cannot be reproduced
+from the frozen top-20-per-session artifact. PF2013 selected hundreds of
+confirmed trajectory events using its own 20 ms decoder advanced by 5 ms,
+shuffle tests, event boundaries, and continuity truncation. The present event
+identities and 4 ms emission/IMM posteriors do not recover that historical
+cohort. The physical event position and behavior can support sensitivities, but
+not the exact positive control. The manifest therefore fixes
+`historical_pf2013_positive_control_exactly_reproducible=false`.
+
+This availability flag is separate from computation integrity: the technical
+gate can pass while `adjudication_ready` remains false. Candidate labels and
+mechanistic interpretations require both the candidate-classifiability gate and
+the historical positive control, so unavailable means
+`technical_nonadjudicative`.
+
+A post-hoc audit of the 43 paired next-movement/home-bound events (4 rats, 8
+sessions) is context, not a preregistered gate. Emission-mean Euclidean geometry
+was future-directed (-0.0866). A closer PF-style sensitivity used the physical
+animal position, radii 15 cm then +2 cm, first segment crossings, route paths
+truncated after both 10 s and 50 cm, and the longest decoded run with steps below
+20 cm. Comparable ring crossings existed for only 9 emission-MAP events (3
+rats/4 sessions) and 14 IMM-MAP events (3 rats/5 sessions); their equal-rat
+past-minus-future angular indices were +43.95 and +21.98 degrees. Applying the
+additional >=10-bin and >=40-cm displacement proxy left just 1 and 3 events.
+These directional values at inadequate coverage do not substitute for the
+unavailable exact control.
+
 ## Candidate recovery and abstention
 
 Recovery uses the actual past/future templates, decoded path length, and each
@@ -58,8 +87,10 @@ prediction error.
 Feature standardization, candidate centroids, and abstention thresholds are fit
 only outside the held-out group. Both leave-one-animal-out and
 leave-one-session-out confusion matrices are reported. Real events receive a
-candidate label only if the candidate-classifiability gate passes and the two
-cross-validation schemes agree; otherwise the output abstains.
+candidate label only if `adjudication_ready` passes, which requires technical
+validity, candidate classifiability, and the exact historical positive control;
+the two cross-validation schemes must also agree. Otherwise the output
+abstains.
 
 ## Finite prediction-error diagnostic
 

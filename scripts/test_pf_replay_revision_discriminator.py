@@ -1023,6 +1023,25 @@ def classify_real_events(
     return pd.DataFrame(rows)
 
 
+def adjudication_interpretation(
+    *,
+    technical_passed: bool,
+    candidate_classifiable: bool,
+    historical_positive_control_exactly_reproducible: bool,
+    direction: str,
+) -> str:
+    """Separate computational validity from scientific adjudication readiness."""
+
+    if not technical_passed:
+        return "technical_failure"
+    if not (
+        candidate_classifiable
+        and historical_positive_control_exactly_reproducible
+    ):
+        return "technical_nonadjudicative"
+    return str(direction)
+
+
 def build_gates(
     events: pd.DataFrame,
     primary: pd.DataFrame,
@@ -1061,6 +1080,12 @@ def build_gates(
         ("loso_equal_session_balanced_accuracy", np.isfinite(loso_ba) and loso_ba >= 0.80, loso_ba, ">=0.80"),
         ("loao_minimum_animal_balanced_accuracy", np.isfinite(loao_min) and loao_min >= 0.70, loao_min, ">=0.70"),
         ("mixture_abstention", np.isfinite(mixture) and mixture >= 0.50, mixture, ">=0.50"),
+        (
+            "historical_pf2013_positive_control_exactly_reproducible",
+            False,
+            False,
+            True,
+        ),
     ]
     gates = pd.DataFrame(
         {"gate": gate, "passed": bool(passed), "value": value, "required": required}
@@ -1092,6 +1117,24 @@ def build_gates(
         "passed": bool(gates[gates["gate"].isin(class_names)]["passed"].all()),
         "value": int(gates[gates["gate"].isin(class_names)]["passed"].sum()),
         "required": len(class_names),
+    }
+    technical_passed = bool(
+        gates.loc[gates["gate"].eq("overall_technical"), "passed"].iloc[0]
+    )
+    classifiable = bool(
+        gates.loc[gates["gate"].eq("candidate_classifiability"), "passed"].iloc[0]
+    )
+    historical_available = bool(
+        gates.loc[
+            gates["gate"].eq("historical_pf2013_positive_control_exactly_reproducible"),
+            "passed",
+        ].iloc[0]
+    )
+    gates.loc[len(gates)] = {
+        "gate": "adjudication_ready",
+        "passed": technical_passed and classifiable and historical_available,
+        "value": int(technical_passed) + int(classifiable) + int(historical_available),
+        "required": 3,
     }
     return gates
 
@@ -1158,8 +1201,14 @@ def run_analysis(
     real_labels = classify_real_events(events, pe_events, markov_models, fitted)
     gates = build_gates(events, primary, pe_events, recovery)
     classifiable = bool(gates.loc[gates["gate"].eq("candidate_classifiability"), "passed"].iloc[0])
+    technical = bool(
+        gates.loc[gates["gate"].eq("overall_technical"), "passed"].iloc[0]
+    )
+    adjudication_ready = bool(
+        gates.loc[gates["gate"].eq("adjudication_ready"), "passed"].iloc[0]
+    )
     real_labels["candidate_label"] = np.where(
-        classifiable,
+        adjudication_ready,
         np.where(
             real_labels["loao_raw_candidate_label"].eq(real_labels["loso_raw_candidate_label"]),
             real_labels["loao_raw_candidate_label"],
@@ -1175,10 +1224,13 @@ def run_analysis(
     )
     events["candidate_label"] = events["candidate_label"].fillna("abstain_ineligible")
     primary["candidate_classifiability_gate"] = classifiable
-    primary["interpretation"] = np.where(
-        classifiable,
-        primary["direction_before_recovery_gate"],
-        "nonidentified_candidate_geometry",
+    primary["historical_pf2013_positive_control_exactly_reproducible"] = False
+    primary["adjudication_ready"] = adjudication_ready
+    primary["interpretation"] = adjudication_interpretation(
+        technical_passed=technical,
+        candidate_classifiable=classifiable,
+        historical_positive_control_exactly_reproducible=False,
+        direction=str(primary["direction_before_recovery_gate"].iloc[0]),
     )
 
     output = Path(output_dir)
@@ -1205,12 +1257,12 @@ def run_analysis(
 
     primary_row = primary.iloc[0]
     pe_row = pe_summary.iloc[0]
-    technical = bool(gates.loc[gates["gate"].eq("overall_technical"), "passed"].iloc[0])
     report_lines = [
         "# Pfeiffer/Foster replay revision discriminator",
         "",
         f"Technical gate: **{'pass' if technical else 'fail'}**.",
         f"Candidate-classifiability gate: **{'pass' if classifiable else 'fail'}**.",
+        f"Adjudication-ready gate: **{'pass' if adjudication_ready else 'fail'}**.",
         "",
         "## Paired retrospective-content geometry",
         "",
@@ -1238,6 +1290,28 @@ def run_analysis(
             "upper-tail high-surprise/PE-surrogate p="
             f"{pe_row['ordered_higher_than_permuted_pe_surrogate_p']:.4f}."
         ),
+        "",
+        "## Historical positive-control boundary",
+        "",
+        "The exact PF2013 away-reward-well future-path positive control is unavailable "
+        "in this frozen top-20-per-session cohort. PF2013 selected hundreds of confirmed "
+        "trajectory events using its own 20 ms decoder advanced by 5 ms, shuffle tests, "
+        "and continuity truncation; the present 4 ms emission/IMM posteriors and selected "
+        "event boundaries do not recover those event identities. Physical position and "
+        "behavior permit a sensitivity analysis, but not the exact historical control. "
+        "The geometry result is therefore technical but nonadjudicative.",
+        "",
+        "Post-hoc audit context only (not a preregistered reproduction gate): for the 43 "
+        "paired next-movement/home-bound events (4 rats, 8 sessions), emission-mean "
+        "Euclidean geometry was future-directed (-0.0866). A closer PF-style sensitivity "
+        "used the physical animal position, radii 15 cm then +2 cm, first segment "
+        "crossings, route paths truncated after both 10 s and 50 cm, and longest decoded "
+        "runs with steps below 20 cm. Only 9 emission-MAP events (3 rats/4 sessions) and "
+        "14 IMM-MAP events (3 rats/5 sessions) crossed comparable rings; their equal-rat "
+        "past-minus-future angular indices were +43.95 and +21.98 degrees, respectively. "
+        "After the >=10-bin and >=40-cm displacement proxy, coverage fell to 1 and 3 "
+        "events. Directional values at this coverage cannot substitute for the unavailable "
+        "historical positive control.",
         "",
         "## Claim boundary",
         "",
@@ -1268,7 +1342,43 @@ def run_analysis(
             "minimum_pure_coverage": float(minimum_recovery_coverage),
             "minimum_mixture_abstention": float(minimum_mixture_abstention),
             "real_label_requires_loao_loso_agreement": True,
+            "real_label_requires_adjudication_ready": True,
         },
+        "historical_positive_control": {
+            "analysis": "PF2013 away-reward-well future-path preference",
+            "exactly_reproducible_from_frozen_inputs": False,
+            "reason": (
+                "The frozen top-20-per-session cohort uses 4 ms emission/IMM posteriors "
+                "and does not identify the hundreds of PF2013 confirmed trajectory events "
+                "selected by the original 20 ms decoder advanced by 5 ms, shuffle tests, "
+                "event boundaries, and continuity truncation."
+            ),
+            "role": "required for adjudication; unavailable means technical_nonadjudicative",
+            "exploratory_proxy_not_a_gate": {
+                "cohort": "next_movement and home_bound",
+                "events": 43,
+                "rats": 4,
+                "sessions": 8,
+                "emission_mean_euclidean_retrospective_score": -0.08660214362772249,
+                "physical_center_angular_proxy": {
+                    "method": (
+                        "radii 15 cm then +2 cm; first segment crossings; behavior until "
+                        "both 10 s and 50 cm; longest decoded run with steps below 20 cm"
+                    ),
+                    "emission_map": {
+                        "events": 9, "rats": 3, "sessions": 4,
+                        "equal_rat_past_minus_future_degrees": 43.954877115886276,
+                        "continuity_proxy_events": 1,
+                    },
+                    "imm_map": {
+                        "events": 14, "rats": 3, "sessions": 5,
+                        "equal_rat_past_minus_future_degrees": 21.984848834983424,
+                        "continuity_proxy_events": 3,
+                    },
+                },
+            },
+        },
+        "adjudication_ready": adjudication_ready,
         "geometry": {
             "positive_score": "closer_to_reversed_past_route",
             "negative_score": "closer_to_future_route",

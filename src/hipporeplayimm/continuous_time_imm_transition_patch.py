@@ -216,7 +216,11 @@ def _wrap_trajectory_mode_transition_sequence(
     stickiness. Its ratio to the other off-diagonal probabilities defines the
     conditional destination distribution. Rebuilding that ratio from
     ``exp(-duration / tau)`` would make the generator duration-dependent and
-    violate the semigroup property.
+    violate the semigroup property when an explicit momentum-switch probability
+    is configured. With symmetric legacy routing, the conditional destination
+    pattern is independent of stickiness, so evaluating the legacy helper at
+    each no-switch survival probability is equivalent and preserves existing
+    validation/diagnostic call semantics.
     """
 
     if getattr(helper, _TRANSITION_WRAPPER_FLAG, False):
@@ -224,22 +228,46 @@ def _wrap_trajectory_mode_transition_sequence(
 
     @wraps(helper)
     def trajectory_mode_transition_matrices(*args, **kwargs):
-        legacy = helper(*args, **kwargs)
+        from .model_parameter_validation import (
+            _validate_finite_nonnegative_parameter,
+            _validate_unit_interval_parameter,
+        )
+
         config = _positional_or_keyword(args, kwargs, 0, "config")
-        stickiness = float(_positional_or_keyword(args, kwargs, 1, "stickiness"))
+        tau_s = _validate_finite_nonnegative_parameter(
+            "imm_switch_tau_s",
+            getattr(config, "imm_switch_tau_s", 0.0),
+        )
+        if tau_s == 0.0:
+            return helper(*args, **kwargs)
+
+        stickiness = _validate_unit_interval_parameter(
+            "trajectory_imm_mode_stickiness",
+            _positional_or_keyword(args, kwargs, 1, "stickiness"),
+        )
         durations = np.asarray(
             _positional_or_keyword(args, kwargs, 2, "durations"),
             dtype=float,
         )
-        tau_s = float(getattr(config, "imm_switch_tau_s", 0.0))
-        if tau_s == 0.0:
-            return legacy
-        if not np.isfinite(tau_s) or tau_s <= 0.0:
-            raise ValueError("imm_switch_tau_s must be finite and positive")
         if durations.ndim != 1:
             raise ValueError("durations must be one-dimensional")
         if not np.all(np.isfinite(durations)) or np.any(durations <= 0.0):
             raise ValueError("transition durations must be finite and positive")
+
+        momentum_switch = getattr(
+            config,
+            "trajectory_imm_momentum_switch_probability",
+            None,
+        )
+        if momentum_switch is None:
+            return [
+                _continuous_time_mode_transition_matrix(
+                    base_helper(config, float(np.exp(-float(duration) / tau_s))),
+                    float(duration),
+                    tau_s,
+                )
+                for duration in durations
+            ]
 
         reference_transition = base_helper(config, stickiness)
         return [
@@ -264,6 +292,16 @@ def _format_survival(module: Any, durations: np.ndarray, tau_s: float) -> str:
     return ",".join(f"{float(value):.12g}" for value in values)
 
 
+def _materialize_transition_durations(emissions: Any, values: Any) -> np.ndarray:
+    """Materialize one-shot duration iterables and mirror decoder fallback semantics."""
+
+    raw = list(values)
+    if raw:
+        return np.asarray(raw, dtype=float)
+    expected = max(int(emissions.n_time) - 1, 0)
+    return np.full(expected, float(emissions.dt), dtype=float)
+
+
 def _wrap_displacement_diagnostics(helper: Callable[..., Any], module: Any) -> Callable[..., Any]:
     if getattr(helper, _DIAGNOSTIC_WRAPPER_FLAG, False):
         return helper
@@ -278,22 +316,31 @@ def _wrap_displacement_diagnostics(helper: Callable[..., Any], module: Any) -> C
         valid_bin_mask=None,
         return_trajectory: bool = True,
     ):
+        tau_s = float(getattr(config, "imm_switch_tau_s", 0.0))
+        if tau_s == 0.0:
+            return helper(
+                emissions,
+                bin_centers,
+                config,
+                transition_durations_s,
+                valid_bin_mask=valid_bin_mask,
+                return_trajectory=return_trajectory,
+            )
+
+        durations = _materialize_transition_durations(emissions, transition_durations_s)
         result = helper(
             emissions,
             bin_centers,
             config,
-            transition_durations_s,
+            durations,
             valid_bin_mask=valid_bin_mask,
             return_trajectory=return_trajectory,
         )
-        tau_s = float(getattr(config, "imm_switch_tau_s", 0.0))
-        if tau_s == 0.0:
-            return result
         logp, trajectory, terminal, mode_post, displacement_post, diagnostics = result
         diagnostics = dict(diagnostics)
         key = "state_space_displacement_imm_mode_stickiness_per_step"
         diagnostics["state_space_displacement_imm_mode_self_transition_probability_per_step"] = diagnostics[key]
-        diagnostics[key] = _format_survival(module, np.asarray(transition_durations_s), tau_s)
+        diagnostics[key] = _format_survival(module, durations, tau_s)
         return logp, trajectory, terminal, mode_post, displacement_post, diagnostics
 
     setattr(score_displacement_imm_exact, _DIAGNOSTIC_WRAPPER_FLAG, True)
@@ -315,22 +362,31 @@ def _wrap_trajectory_diagnostics(helper: Callable[..., Any], module: Any) -> Cal
         valid_bin_mask=None,
         return_trajectory: bool = True,
     ):
+        tau_s = float(getattr(config, "imm_switch_tau_s", 0.0))
+        if tau_s == 0.0:
+            return helper(
+                emissions,
+                bin_centers,
+                config,
+                transition_durations_s,
+                valid_bin_mask=valid_bin_mask,
+                return_trajectory=return_trajectory,
+            )
+
+        durations = _materialize_transition_durations(emissions, transition_durations_s)
         result = helper(
             emissions,
             bin_centers,
             config,
-            transition_durations_s,
+            durations,
             valid_bin_mask=valid_bin_mask,
             return_trajectory=return_trajectory,
         )
-        tau_s = float(getattr(config, "imm_switch_tau_s", 0.0))
-        if tau_s == 0.0:
-            return result
         logp, trajectory, terminal, mode_post, diagnostics = result
         diagnostics = dict(diagnostics)
         key = "state_space_trajectory_imm_mode_stickiness_per_step"
         diagnostics["state_space_trajectory_imm_mode_self_transition_probability_per_step"] = diagnostics[key]
-        diagnostics[key] = _format_survival(module, np.asarray(transition_durations_s), tau_s)
+        diagnostics[key] = _format_survival(module, durations, tau_s)
         return logp, trajectory, terminal, mode_post, diagnostics
 
     setattr(score_trajectory_imm_exact_sparse, _DIAGNOSTIC_WRAPPER_FLAG, True)

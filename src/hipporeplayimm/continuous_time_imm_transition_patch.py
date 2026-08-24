@@ -216,7 +216,11 @@ def _wrap_trajectory_mode_transition_sequence(
     stickiness. Its ratio to the other off-diagonal probabilities defines the
     conditional destination distribution. Rebuilding that ratio from
     ``exp(-duration / tau)`` would make the generator duration-dependent and
-    violate the semigroup property.
+    violate the semigroup property when an explicit momentum-switch probability
+    is configured. With symmetric legacy routing, the conditional destination
+    pattern is independent of stickiness, so evaluating the legacy helper at
+    each no-switch survival probability is equivalent and preserves existing
+    validation/diagnostic call semantics.
     """
 
     if getattr(helper, _TRANSITION_WRAPPER_FLAG, False):
@@ -224,22 +228,46 @@ def _wrap_trajectory_mode_transition_sequence(
 
     @wraps(helper)
     def trajectory_mode_transition_matrices(*args, **kwargs):
+        from .model_parameter_validation import (
+            _validate_finite_nonnegative_parameter,
+            _validate_unit_interval_parameter,
+        )
+
         config = _positional_or_keyword(args, kwargs, 0, "config")
-        tau_s = float(getattr(config, "imm_switch_tau_s", 0.0))
+        tau_s = _validate_finite_nonnegative_parameter(
+            "imm_switch_tau_s",
+            getattr(config, "imm_switch_tau_s", 0.0),
+        )
         if tau_s == 0.0:
             return helper(*args, **kwargs)
 
-        stickiness = float(_positional_or_keyword(args, kwargs, 1, "stickiness"))
+        stickiness = _validate_unit_interval_parameter(
+            "trajectory_imm_mode_stickiness",
+            _positional_or_keyword(args, kwargs, 1, "stickiness"),
+        )
         durations = np.asarray(
             _positional_or_keyword(args, kwargs, 2, "durations"),
             dtype=float,
         )
-        if not np.isfinite(tau_s) or tau_s <= 0.0:
-            raise ValueError("imm_switch_tau_s must be finite and positive")
         if durations.ndim != 1:
             raise ValueError("durations must be one-dimensional")
         if not np.all(np.isfinite(durations)) or np.any(durations <= 0.0):
             raise ValueError("transition durations must be finite and positive")
+
+        momentum_switch = getattr(
+            config,
+            "trajectory_imm_momentum_switch_probability",
+            None,
+        )
+        if momentum_switch is None:
+            return [
+                _continuous_time_mode_transition_matrix(
+                    base_helper(config, float(np.exp(-float(duration) / tau_s))),
+                    float(duration),
+                    tau_s,
+                )
+                for duration in durations
+            ]
 
         reference_transition = base_helper(config, stickiness)
         return [

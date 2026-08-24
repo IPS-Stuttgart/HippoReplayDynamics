@@ -16,6 +16,8 @@ from scipy.stats import spearmanr
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT_DIR = ROOT / "scripts"
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
 
@@ -24,7 +26,7 @@ from compute_replay_commitment_composition_metrics import (  # noqa: E402
     path_fit_distance_cm,
     path_length,
 )
-from test_replay_dynamics_behavior_hypotheses import (  # noqa: E402
+from scripts.test_replay_dynamics_behavior_hypotheses import (  # noqa: E402
     adjusted_coefficient,
     rat_cluster_bootstrap,
 )

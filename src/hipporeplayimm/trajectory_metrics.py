@@ -124,9 +124,32 @@ def _unwrap_zero_dimensional_object_scalar(value: object, name: str) -> object:
     return value
 
 
+def _wide_floating_time_array(values: object) -> np.ndarray | None:
+    """Return finite timestamps whose floating dtype is wider than binary64."""
+
+    try:
+        raw = np.asarray(values)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    if raw.dtype.kind != "f":
+        return None
+    try:
+        precision = np.finfo(raw.dtype).nmant
+    except ValueError:
+        return None
+    if precision <= np.finfo(float).nmant:
+        return None
+    with np.errstate(over="ignore", invalid="ignore"):
+        narrowed = np.asarray(raw, dtype=float)
+    if not np.all(np.isfinite(narrowed)):
+        return None
+    return raw
+
+
 def _transition_durations(times: np.ndarray | None, n_time: int) -> np.ndarray:
     if times is None:
         return np.ones(n_time - 1, dtype=float) if n_time > 1 else np.empty(0, dtype=float)
+    wide_times = _wide_floating_time_array(times)
     arr = _as_numeric_real_array(times, "times")
     if arr.shape != (n_time,):
         raise ValueError("times must contain one timestamp per trajectory row")
@@ -134,12 +157,17 @@ def _transition_durations(times: np.ndarray | None, n_time: int) -> np.ndarray:
         raise ValueError("times must contain finite values")
     if n_time <= 1:
         return np.empty(0, dtype=float)
+    duration_source = wide_times if wide_times is not None else arr
     with np.errstate(over="ignore", invalid="ignore"):
-        diffs = np.diff(arr)
+        diffs = np.diff(duration_source)
     if not np.all(np.isfinite(diffs)):
         raise ValueError("timestamp differences exceed floating-point range")
     if np.any(diffs <= 0.0):
         raise ValueError("times must be strictly increasing")
+    with np.errstate(over="ignore", invalid="ignore", under="ignore"):
+        diffs = np.asarray(diffs, dtype=float)
+    if not np.all(np.isfinite(diffs)) or np.any(diffs <= 0.0):
+        raise ValueError("timestamp differences exceed floating-point range")
     return diffs
 
 

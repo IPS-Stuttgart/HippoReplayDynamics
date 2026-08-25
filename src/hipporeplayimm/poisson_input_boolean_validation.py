@@ -13,7 +13,7 @@ _NEGATIVE_BINOMIAL_PATCHED_FLAG = (
     "_negative_binomial_poisson_limit_patch_applied"
 )
 _ORIGINAL_ATTR = "__hipporeplayimm_original__"
-_WRAPPER_VERSION = 4
+_WRAPPER_VERSION = 5
 
 
 def _contains_boolean_values(value: object) -> bool:
@@ -311,6 +311,7 @@ def apply_poisson_input_boolean_validation_patch() -> None:
         likelihood_temperature=1.0,
         cell_weights=None,
         negative_binomial_overdispersion=0.0,
+        time_chunk_size=None,
     ):
         _reject_boolean_array("spike_counts", spike_counts)
         _reject_boolean_array("rates_hz", rates_hz)
@@ -326,6 +327,7 @@ def apply_poisson_input_boolean_validation_patch() -> None:
                 negative_binomial_overdispersion=(
                     negative_binomial_overdispersion
                 ),
+                time_chunk_size=time_chunk_size,
             )
         _reject_nonfinite_expected_count_scaling(
             rates_hz,

@@ -129,6 +129,29 @@ def test_bounded_selected_emissions_match_dense_source_rows() -> None:
     assert bounded.metadata["emission_selected_time_bins"] == int(mask.sum())
 
 
+def test_import_installed_poisson_wrapper_forwards_chunk_size() -> None:
+    from hipporeplayimm import apply_runtime_patches
+    from hipporeplayimm import encoding as encoding_module
+
+    apply_runtime_patches()
+    counts = np.array([[0, 1], [2, 0], [1, 1]], dtype=int)
+    rates = np.array([[0.5, 1.5, 2.5], [1.0, 2.0, 3.0]])
+    durations = np.array([0.1, 0.2, 0.3])
+    dense = encoding_module._poisson_log_emissions(
+        counts,
+        rates,
+        durations,
+    )
+    bounded = encoding_module._poisson_log_emissions(
+        counts,
+        rates,
+        durations,
+        time_chunk_size=1,
+    )
+
+    np.testing.assert_allclose(bounded, dense, rtol=1e-13, atol=1e-13)
+
+
 def test_point_spread_defaults_to_fixed_120_second_holdout() -> None:
     config = PointSpreadConfig()
 

@@ -4,6 +4,12 @@ from __future__ import annotations
 
 from .goal_state_space import GoalStateSpaceReplayModel
 from .models import EventScore, LOG_ZERO, _normalize_log_weights, _posterior_diagnostics
+from .smoothing_trace import (
+    FirstOrderSmoothingTrace,
+    SMOOTHING_TRACE_SCHEMA_VERSION,
+    TRANSITION_CONVENTION,
+    first_order_smoothing_trace,
+)
 from .candidate_active_support_validation import (
     apply_candidate_active_support_validation_patch as _apply_candidate_active_support_validation_patch,
 )
@@ -133,10 +139,13 @@ _apply_first_order_imm_time_weighting_patch()
 
 __all__ = [
     "EventScore",
+    "FirstOrderSmoothingTrace",
     "GoalStateSpaceReplayModel",
     "LOG_ZERO",
+    "SMOOTHING_TRACE_SCHEMA_VERSION",
     "StateSpaceDecoderConfig",
     "StateSpaceReplayModel",
+    "TRANSITION_CONVENTION",
     "_advance_imm_pair_log_alpha",
     "_advance_momentum_pair",
     "_apply_transition",
@@ -153,6 +162,7 @@ __all__ = [
     "_first_order_imm_content_diagnostics",
     "_forward_backward_first_order",
     "_forward_backward_first_order_time_varying",
+    "first_order_smoothing_trace",
     "_full_grid_normalized_pairwise_gaussian_log_prob",
     "_displacement_lattice",
     "_gaussian_transition_matrix",

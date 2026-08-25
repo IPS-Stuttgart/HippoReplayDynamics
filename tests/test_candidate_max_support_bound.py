@@ -42,7 +42,7 @@ def test_mass_retaining_support_rejects_max_below_effective_lower_bound(
         ),
     )
 
-    with pytest.raises(ValueError, match="max_k.*effective candidate lower bound"):
+    with pytest.raises(ValueError, match="max_k.*candidate lower bound"):
         model.candidate_indices(_emissions())
 
 

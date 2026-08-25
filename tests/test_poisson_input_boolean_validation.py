@@ -8,6 +8,14 @@ import pytest
 from hipporeplayimm.encoding import _poisson_log_emissions
 
 
+def _nested_scalar(value: object) -> np.ndarray:
+    inner = np.empty((), dtype=object)
+    inner[()] = value
+    outer = np.empty((), dtype=object)
+    outer[()] = inner
+    return outer
+
+
 def test_poisson_log_emissions_rejects_boolean_spike_counts() -> None:
     with pytest.raises(ValueError, match="spike_counts.*boolean"):
         _poisson_log_emissions(
@@ -37,6 +45,30 @@ def test_poisson_log_emissions_rejects_object_boolean_inputs() -> None:
         _poisson_log_emissions(
             np.array([[True, 0]], dtype=object),
             np.ones((2, 3), dtype=float),
+            0.02,
+        )
+
+
+def test_poisson_log_emissions_rejects_nested_object_boolean_counts() -> None:
+    counts = np.array([[0, 1]], dtype=object)
+    counts[0, 0] = _nested_scalar(True)
+
+    with pytest.raises(ValueError, match="spike_counts.*boolean"):
+        _poisson_log_emissions(
+            counts,
+            np.ones((2, 3), dtype=float),
+            0.02,
+        )
+
+
+def test_poisson_log_emissions_rejects_nested_object_boolean_rates() -> None:
+    rates = np.ones((2, 3), dtype=object)
+    rates[0, 1] = _nested_scalar(np.bool_(True))
+
+    with pytest.raises(ValueError, match="rates_hz.*boolean"):
+        _poisson_log_emissions(
+            np.array([[0, 1]], dtype=int),
+            rates,
             0.02,
         )
 

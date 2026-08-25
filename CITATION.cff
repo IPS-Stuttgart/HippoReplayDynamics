@@ -7,8 +7,8 @@ authors:
     given-names: "Florian"
     affiliation: "Institute of Industrial Automation and Software Engineering (IAS), University of Stuttgart"
     email: "pfaff@ias.uni-stuttgart.de"
-repository-code: "https://github.com/IPS-Stuttgart/HippoReplayIMM"
-url: "https://github.com/IPS-Stuttgart/HippoReplayIMM"
+repository-code: "https://github.com/IPS-Stuttgart/HippoReplayDynamics"
+url: "https://github.com/IPS-Stuttgart/HippoReplayDynamics"
 version: "0.1.0"
 license: "MIT"
 abstract: >
@@ -28,5 +28,5 @@ preferred-citation:
     - family-names: "Pfaff"
       given-names: "Florian"
   year: 2026
-  url: "https://github.com/IPS-Stuttgart/HippoReplayIMM"
+  url: "https://github.com/IPS-Stuttgart/HippoReplayDynamics"
   license: "MIT"

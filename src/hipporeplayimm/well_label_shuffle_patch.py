@@ -41,7 +41,13 @@ def _nonnegative_integer_value(name: str, value: object) -> int:
 def _row_sequences_equal(left: np.ndarray, right: np.ndarray) -> bool:
     """Compare label-row sequences with pandas missing-value semantics."""
 
-    return pd.DataFrame(left).equals(pd.DataFrame(right))
+    left_array = np.asarray(left, dtype=object)
+    right_array = np.asarray(right, dtype=object)
+    if left_array.shape != right_array.shape:
+        return False
+    return pd.DataFrame(left_array, dtype=object).equals(
+        pd.DataFrame(right_array, dtype=object)
+    )
 
 
 def _nonidentity_permuted_rows(
@@ -64,10 +70,16 @@ def _nonidentity_permuted_rows(
     if not has_distinct_row:
         return original.copy()
 
-    while True:
+    # A custom or faulty generator can repeatedly return an identity/no-op
+    # permutation. Bound retries so label shuffling can never hang forever.
+    for _ in range(max(8, 2 * original.shape[0])):
         permuted = original[rng.permutation(original.shape[0])]
         if not _row_sequences_equal(permuted, original):
             return permuted
+
+    # A one-row cyclic shift differs whenever at least two rows are distinct,
+    # while preserving the exact multiset of row-aligned labels.
+    return np.roll(original, shift=1, axis=0)
 
 
 def shuffle_well_labels(frame: pd.DataFrame, random_seed: int = 1) -> pd.DataFrame:
@@ -97,7 +109,10 @@ def shuffle_well_labels(frame: pd.DataFrame, random_seed: int = 1) -> pd.DataFra
     if not bool(labelled_rows.any()):
         return out
 
-    label_values = out.loc[labelled_rows, label_columns].to_numpy(copy=True)
+    label_values = out.loc[labelled_rows, label_columns].to_numpy(
+        dtype=object,
+        copy=True,
+    )
     rng = np.random.default_rng(seed)
     if "session" not in out:
         shuffled_values = _nonidentity_permuted_rows(label_values, rng)

@@ -97,10 +97,11 @@ def _coerce_initial_probabilities(
         raise ValueError("initial_probabilities must contain one value per state")
     if not np.all(np.isfinite(initial)) or np.any(initial < 0.0):
         raise ValueError("initial_probabilities must be finite and nonnegative")
-    total = float(initial.sum())
-    if total <= 0.0:
+    scale = float(np.max(initial))
+    if scale <= 0.0:
         raise ValueError("initial_probabilities must contain positive mass")
-    normalized = initial / total
+    scaled_initial = initial / scale
+    normalized = scaled_initial / float(scaled_initial.sum())
     if valid_mask is not None and np.any(normalized[~valid_mask] > _TRANSITION_ATOL):
         raise ValueError("initial_probabilities must have zero mass outside valid_bin_mask")
     return normalized

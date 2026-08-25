@@ -1,0 +1,130 @@
+{
+  "adjudication_ready": false,
+  "analysis": "pf_replay_retrospective_geometry_discriminator",
+  "calibration": {
+    "minimum_mixture_abstention": 0.5,
+    "minimum_pure_coverage": 0.5,
+    "real_label_requires_adjudication_ready": true,
+    "real_label_requires_loao_loso_agreement": true,
+    "schemes": [
+      "leave_one_animal_out",
+      "leave_one_session_out"
+    ],
+    "target_retained_accuracy": 0.8
+  },
+  "candidate_labels": [
+    "past_reversed",
+    "future_plan",
+    "pe_disordered",
+    "null_mismatched"
+  ],
+  "claim_boundary": "Retrospective path similarity is a geometry gate, not evidence of Bayesian smoothing or acetylcholine. The filtering-to-smoothing bridge is separate.",
+  "claim_level": "retrospective_content_geometry_only",
+  "created_at_utc": "2026-08-24T23:06:02.607944+00:00",
+  "estimand": {
+    "bootstrap": "rat-to-session-to-event resampling preserving sampled sessions' realized event counts",
+    "primary": "equal-rat mean with equal event weight within rat"
+  },
+  "geometry": {
+    "negative_score": "closer_to_future_route",
+    "noise_model": "anchored_ar1_fixed_radial_rms",
+    "noise_source": "event_run_decoder_error_cm",
+    "null": "nonzero_circular_paired_template_shift_within_session_and_relation",
+    "positive_score": "closer_to_reversed_past_route"
+  },
+  "historical_positive_control": {
+    "analysis": "PF2013 away-reward-well future-path preference",
+    "exactly_reproducible_from_frozen_inputs": false,
+    "exploratory_proxy_not_a_gate": {
+      "cohort": "next_movement and home_bound",
+      "emission_mean_euclidean_retrospective_score": -0.08660214362772249,
+      "events": 43,
+      "physical_center_angular_proxy": {
+        "emission_map": {
+          "continuity_proxy_events": 1,
+          "equal_rat_past_minus_future_degrees": 43.954877115886276,
+          "events": 9,
+          "rats": 3,
+          "sessions": 4
+        },
+        "imm_map": {
+          "continuity_proxy_events": 3,
+          "equal_rat_past_minus_future_degrees": 21.984848834983424,
+          "events": 14,
+          "rats": 3,
+          "sessions": 5
+        },
+        "method": "radii 15 cm then +2 cm; first segment crossings; behavior until both 10 s and 50 cm; longest decoded run with steps below 20 cm"
+      },
+      "rats": 4,
+      "sessions": 8
+    },
+    "reason": "The frozen top-20-per-session cohort uses 4 ms emission/IMM posteriors and does not identify the hundreds of PF2013 confirmed trajectory events selected by the original 20 ms decoder advanced by 5 ms, shuffle tests, event boundaries, and continuity truncation.",
+    "role": "required for adjudication; unavailable means technical_nonadjudicative"
+  },
+  "output_file_sha256": {
+    "pf_replay_revision_by_rat.csv": "a3f4dcfb573c827ce7638f689d7c8577e3da0ea57ac69ea0043dc426ba5a8b89",
+    "pf_replay_revision_circular_null.csv": "e3a421851f7fffc5fa9a6790868260436e6d6f8fdd688dc647fd2c450e42aba5",
+    "pf_replay_revision_event_scores.csv": "3ada4a8295d7cdd2397627a5a393a44fbbeef31ad5797fd0a392e4b10927d0ca",
+    "pf_replay_revision_gates.csv": "fc7476bdd6d7ec25a5396bf412c381649acde8f88eda037cc853b5b789312610",
+    "pf_replay_revision_injections.csv": "a5b473d7f7af527f0fe5f15469218e30b18cd9814a167ae390aeb599f4be8281",
+    "pf_replay_revision_pe_events.csv": "24b3dee62b54a705a6aadc57053fb6ebc3d35f804c3bb7be1ed543b8152bd958",
+    "pf_replay_revision_pe_summary.csv": "f83b56620ec5f9cd683c61fd8d29789de7cd8bc9ea4d01012db30d2fbf31c8bc",
+    "pf_replay_revision_pe_time_order_null.csv": "61374bfc93dcb96532e4a5c74986377edb391be843b2ffb631f5e4a43ee9c9d0",
+    "pf_replay_revision_primary.csv": "f8c378bbe7893503c0452776c500b855e159a995f67f21f57f88451aa4942d33",
+    "pf_replay_revision_real_labels.csv": "765102ac27422a47019be373fd8f964c06577d6d7c1f246474e8be52bbd88071",
+    "pf_replay_revision_recovery_confusion.csv": "2205c2186aa713d5f77cc1f13c26f7b75eebeec37cc140059d5017288c0594d0",
+    "pf_replay_revision_recovery_folds.csv": "2b4ce2622be8d71b6b7aa2ece39fe6e7d605c2d4ed5cf5803bd4762c020e082c",
+    "pf_replay_revision_report.md": "142d17f0fb07e3088f05fc992a951ad3572b2ee988d225821140ee86ece4c42b"
+  },
+  "outputs": {
+    "pf_replay_revision_by_rat.csv": "results/pf-replay-revision-discriminator-final/pf_replay_revision_by_rat.csv",
+    "pf_replay_revision_circular_null.csv": "results/pf-replay-revision-discriminator-final/pf_replay_revision_circular_null.csv",
+    "pf_replay_revision_event_scores.csv": "results/pf-replay-revision-discriminator-final/pf_replay_revision_event_scores.csv",
+    "pf_replay_revision_gates.csv": "results/pf-replay-revision-discriminator-final/pf_replay_revision_gates.csv",
+    "pf_replay_revision_injections.csv": "results/pf-replay-revision-discriminator-final/pf_replay_revision_injections.csv",
+    "pf_replay_revision_pe_events.csv": "results/pf-replay-revision-discriminator-final/pf_replay_revision_pe_events.csv",
+    "pf_replay_revision_pe_summary.csv": "results/pf-replay-revision-discriminator-final/pf_replay_revision_pe_summary.csv",
+    "pf_replay_revision_pe_time_order_null.csv": "results/pf-replay-revision-discriminator-final/pf_replay_revision_pe_time_order_null.csv",
+    "pf_replay_revision_primary.csv": "results/pf-replay-revision-discriminator-final/pf_replay_revision_primary.csv",
+    "pf_replay_revision_real_labels.csv": "results/pf-replay-revision-discriminator-final/pf_replay_revision_real_labels.csv",
+    "pf_replay_revision_recovery_confusion.csv": "results/pf-replay-revision-discriminator-final/pf_replay_revision_recovery_confusion.csv",
+    "pf_replay_revision_recovery_folds.csv": "results/pf-replay-revision-discriminator-final/pf_replay_revision_recovery_folds.csv",
+    "pf_replay_revision_report.md": "results/pf-replay-revision-discriminator-final/pf_replay_revision_report.md"
+  },
+  "parameters": {
+    "bootstraps": 4000,
+    "injections_per_candidate": 200,
+    "pe_permutations": 500,
+    "permutations": 2000,
+    "seed": 20260825
+  },
+  "prediction_error_diagnostic": {
+    "alpha": 0.5,
+    "behavior_training": "run_routes_excluding_event_cv_fold",
+    "bin_cm": 10.0,
+    "finite_oos_category": true,
+    "null": "within_event_nontrivial_time_permutation_fixed_point_set",
+    "ordered_higher_than_permuted_sign": "high-surprise/PE surrogate",
+    "ordered_lower_than_permuted_sign": "temporal coherence surrogate",
+    "pe_disordered_candidate": "high-transition-surprise time-disorder surrogate; not a neural prediction-error generator or measurement"
+  },
+  "provenance": {
+    "code_commit": "c866e7af68419bddbffebe6c41cc8271507509a1",
+    "command_line": "scripts/test_pf_replay_revision_discriminator.py --events /home/florianpfaff/HippoReplayIMM-replay-behavior-hypotheses/results/pf-replay-context-hypotheses-final/pf_replay_context_hypothesis_events.csv --route-segments /home/florianpfaff/HippoReplayIMM-replay-commitment-composition/results/replay-behavior-route-primitives/replay_behavior_route_segments.csv --route-points /home/florianpfaff/HippoReplayIMM-replay-commitment-composition/results/replay-behavior-route-primitives/replay_behavior_route_segment_points.csv --output-dir results/pf-replay-revision-discriminator-final --permutations 2000 --bootstraps 4000 --pe-permutations 500 --injections-per-candidate 200 --seed 20260825",
+    "git_branch": "test/replay-revision-discriminator",
+    "git_dirty": false,
+    "git_error": "",
+    "input_file_paths": {
+      "events_csv": "/home/florianpfaff/HippoReplayIMM-replay-behavior-hypotheses/results/pf-replay-context-hypotheses-final/pf_replay_context_hypothesis_events.csv",
+      "route_points_csv": "/home/florianpfaff/HippoReplayIMM-replay-commitment-composition/results/replay-behavior-route-primitives/replay_behavior_route_segment_points.csv",
+      "route_segments_csv": "/home/florianpfaff/HippoReplayIMM-replay-commitment-composition/results/replay-behavior-route-primitives/replay_behavior_route_segments.csv"
+    },
+    "input_file_sha256": {
+      "events_csv": "4f4f652c192e4dfa15337ccd88bf45bd3561d8e61a1992960cc53313509fc588",
+      "route_points_csv": "cfcda99ea234a6d86b532eed67dd288988daa92c7884b388ffc486acd70907b0",
+      "route_segments_csv": "4c1a1dc13d93424223c37d62fb766333c44ee72b4b5ac00e0b7800857aa05ced"
+    },
+    "working_directory": "/home/florianpfaff/HippoReplayIMM-replay-revision-discriminator"
+  }
+}

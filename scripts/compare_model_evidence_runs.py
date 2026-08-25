@@ -9,6 +9,7 @@ evidence after mapping model names onto canonical dynamics labels.
 from __future__ import annotations
 
 import argparse
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
 import numpy as np
@@ -35,6 +36,25 @@ _EVENT_KEY_COLUMNS = (
     "window_index",
     "event_window_variant",
     "window_role",
+    "benchmark_cell_split_index",
+    "cell_split_index",
+    "benchmark_cell_split_seed",
+    "cell_split_seed",
+    "cell_split_count",
+    "cell_split_shard_index",
+    "cell_split_shard_count",
+    "split_shard_index",
+    "split_shard_count",
+)
+_INTEGER_EVENT_KEY_COLUMNS = (
+    "simulation_random_seed",
+    "random_seed",
+    "benchmark_random_seed",
+    "null_random_seed",
+    "benchmark_event_subset_seed",
+    "simulation_event_index",
+    "event_index",
+    "window_index",
     "benchmark_cell_split_index",
     "cell_split_index",
     "benchmark_cell_split_seed",
@@ -166,7 +186,7 @@ def _load_event_scores(root: str | Path, run_label: str, *, exact_only: bool = F
     path = Path(root) / "event_model_evidence.csv"
     if not path.exists():
         raise FileNotFoundError(f"{path} does not exist")
-    frame = pd.read_csv(path)
+    frame = _read_event_score_csv(path)
     required = {"session", "event_index", "model", "log_evidence"}
     missing = required - set(frame.columns)
     if missing:
@@ -184,6 +204,42 @@ def _load_event_scores(root: str | Path, run_label: str, *, exact_only: bool = F
     frame["canonical_model"] = frame["model"].map(canonical_model_name)
     frame = _add_relative_log_evidence(frame)
     return frame
+
+
+def _read_event_score_csv(path: Path) -> pd.DataFrame:
+    """Read score artifacts without rounding nullable integer scope identifiers."""
+
+    frame = pd.read_csv(
+        path,
+        dtype={column: "string" for column in _INTEGER_EVENT_KEY_COLUMNS},
+    )
+    for column in _INTEGER_EVENT_KEY_COLUMNS:
+        if column not in frame.columns:
+            continue
+        frame[column] = pd.Series(
+            [_exact_integer_event_key(value, column) for value in frame[column]],
+            index=frame.index,
+            dtype=object,
+        )
+    return frame
+
+
+def _exact_integer_event_key(value: object, column: str) -> object:
+    """Return one exact integer scope key, preserving missing values."""
+
+    if _is_missing_scalar(value):
+        return pd.NA
+    text = str(value).strip()
+    try:
+        numeric = Decimal(text)
+    except (InvalidOperation, ValueError) as exc:
+        raise ValueError(f"{column} must contain finite integer identifiers") from exc
+    if not numeric.is_finite():
+        raise ValueError(f"{column} must contain finite integer identifiers")
+    integral = numeric.to_integral_value()
+    if numeric != integral:
+        raise ValueError(f"{column} must contain integer-valued identifiers")
+    return int(integral)
 
 
 def _successful_score_rows(frame: pd.DataFrame) -> pd.DataFrame:

@@ -158,7 +158,10 @@ def _coerce_bool_mask(valid_bin_mask: Any, n_bins: int) -> np.ndarray | None:
         return raw.astype(bool, copy=False)
     if np.issubdtype(raw.dtype, np.complexfloating) or raw.dtype.kind in {"S", "U"}:
         raise ValueError("valid_bin_mask must contain boolean or 0/1 values")
-    if raw.dtype == object and any(isinstance(value, (bytes, str)) for value in raw.flat):
+    if raw.dtype == object and any(
+        isinstance(value, (bytes, str, np.ndarray)) or not np.isscalar(value)
+        for value in raw.flat
+    ):
         raise ValueError("valid_bin_mask must contain boolean or 0/1 values")
     try:
         numeric = np.asarray(raw, dtype=float)

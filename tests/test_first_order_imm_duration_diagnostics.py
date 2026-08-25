@@ -36,7 +36,13 @@ def test_first_order_imm_content_diagnostics_respect_transition_durations(monkey
     )
 
     def score_first_order_imm_variable(*args, **kwargs):
-        return 0.0, trajectory_log_posterior, mode_posterior
+        mode_transition_posterior = np.zeros((2, 3, 3), dtype=float)
+        return (
+            0.0,
+            trajectory_log_posterior,
+            mode_posterior,
+            mode_transition_posterior,
+        )
 
     monkeypatch.setattr(
         duration_occupancy,
@@ -50,7 +56,9 @@ def test_first_order_imm_content_diagnostics_respect_transition_durations(monkey
     ).score(emissions, bin_centers)
 
     diagnostics = score.diagnostics
-    expected_longest_bout_s = float(np.median(transition_durations) + transition_durations.sum())
+    expected_longest_bout_s = float(
+        np.median(transition_durations) + transition_durations.sum()
+    )
     scalar_dt_fallback_bout_s = 3.0
     assert np.isclose(
         diagnostics["state_space_imm_longest_nonstationary_bout_s"],

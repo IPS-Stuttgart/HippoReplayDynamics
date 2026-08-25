@@ -16,6 +16,8 @@ from scipy.stats import spearmanr
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT_DIR = ROOT / "scripts"
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
 
@@ -24,7 +26,7 @@ from compute_replay_commitment_composition_metrics import (  # noqa: E402
     path_fit_distance_cm,
     path_length,
 )
-from test_replay_dynamics_behavior_hypotheses import (  # noqa: E402
+from scripts.test_replay_dynamics_behavior_hypotheses import (  # noqa: E402
     adjusted_coefficient,
     rat_cluster_bootstrap,
 )
@@ -376,7 +378,10 @@ def _residualize(frame: pd.DataFrame, outcome: str, controls: Sequence[str]) -> 
         return pd.Series(dtype=float)
     columns = [np.ones(len(selected), dtype=float)]
     for control in controls:
-        values = pd.to_numeric(selected[control], errors="coerce").to_numpy(dtype=float)
+        values = pd.to_numeric(selected[control], errors="coerce").to_numpy(
+            dtype=float,
+            copy=True,
+        )
         median = float(np.nanmedian(values)) if np.isfinite(values).any() else 0.0
         values[~np.isfinite(values)] = median
         if np.std(values) > 0.0:

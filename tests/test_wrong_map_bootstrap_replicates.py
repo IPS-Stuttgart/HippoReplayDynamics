@@ -42,16 +42,13 @@ def test_wrong_map_bootstrap_rejects_invalid_random_seed(invalid: object) -> Non
         )
 
 
-def test_wrong_map_bootstrap_accepts_numeric_string_replicate_count() -> None:
-    summary = rat_bootstrap_wrong_map_absolute_evidence_summary(
-        _wrong_map_deltas(),
-        n_bootstrap="3",
-        random_seed=7,
-    )
-
-    assert summary.loc[0, "bootstrap_replicates"] == 3
-    assert summary.loc[0, "observed_events"] == 2
-    assert summary.loc[0, "observed_rats"] == 2
+def test_wrong_map_bootstrap_rejects_numeric_string_replicate_count() -> None:
+    with pytest.raises(ValueError, match="n_bootstrap must be a positive integer"):
+        rat_bootstrap_wrong_map_absolute_evidence_summary(
+            _wrong_map_deltas(),
+            n_bootstrap="3",
+            random_seed=7,
+        )
 
 
 def test_wrong_map_bootstrap_filters_nonfinite_delta_rows() -> None:

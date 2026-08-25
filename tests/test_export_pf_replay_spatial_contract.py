@@ -64,9 +64,11 @@ def _selection_session() -> ReplaySession:
 
 
 def test_event_selection_uses_raw_lfp_power_not_decoder_or_z_score() -> None:
+    route_ends = np.linspace(0.5, 3.0, 6)
     routes = pd.DataFrame(
         {
-            "movement_end_time_s": np.linspace(0.5, 3.0, 6),
+            "movement_end_time_s": route_ends,
+            "interval_end_time_s": route_ends,
         }
     )
     selected = select_lfp_only_events(
@@ -82,6 +84,27 @@ def test_event_selection_uses_raw_lfp_power_not_decoder_or_z_score() -> None:
     assert [row["event_index"] for row in selected] == [1, 2]
     assert [row["selection_rank"] for row in selected] == [1, 2]
     assert [row["selection_metric"] for row in selected] == [4.0, 3.0]
+
+
+def test_event_selection_counts_only_completed_fill_intervals() -> None:
+    routes = pd.DataFrame(
+        {
+            "movement_end_time_s": [2.0, 3.0],
+            "interval_end_time_s": [3.0, 4.5],
+        }
+    )
+    selected = select_lfp_only_events(
+        _selection_session(),
+        routes,
+        EventSelectionConfig(
+            events_per_session=1,
+            minimum_training_duration_s=1.0,
+            minimum_completed_routes=2,
+        ),
+    )
+
+    assert [row["event_index"] for row in selected] == [1]
+    assert selected[0]["completed_fill_intervals_at_selection"] == 2
 
 
 def test_bounded_selected_emissions_match_dense_source_rows() -> None:

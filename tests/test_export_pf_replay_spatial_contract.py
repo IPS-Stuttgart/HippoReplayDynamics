@@ -9,6 +9,8 @@ import pandas as pd
 import pytest
 
 from hipporeplayimm.data import ReplaySession, RippleEvent
+import scripts.export_pf_replay_spatial_contract as replay_spatial_producer
+
 from hipporeplayimm.encoding import (
     EmissionConfig,
     EncodingConfig,
@@ -157,6 +159,53 @@ def test_point_spread_defaults_to_fixed_120_second_holdout() -> None:
 
     assert config.holdout_window_s == 120.0
     assert config.likelihood_time_chunk_size == 32
+
+
+def test_point_spread_ignores_post_cutoff_position_trajectory(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    event_start_s = 5.0
+    baseline = _selection_session()
+    changed = _selection_session()
+    changed.position = np.asarray(changed.position, dtype=float).copy()
+    post_cutoff = changed.position[:, 0] >= event_start_s
+    changed.position[post_cutoff, 1] = 10_000.0 + changed.position[post_cutoff, 0]
+    changed.position[post_cutoff, 2] = -10_000.0
+
+    observed_position_maxima: list[float] = []
+    original_speed = replay_spatial_producer._speed
+
+    def guarded_speed(position: np.ndarray) -> np.ndarray:
+        observed_position_maxima.append(float(np.max(position[:, 0])))
+        assert observed_position_maxima[-1] < event_start_s
+        return original_speed(position)
+
+    monkeypatch.setattr(replay_spatial_producer, "_speed", guarded_speed)
+    kwargs = {
+        "event_start_s": event_start_s,
+        "encoding_config": EncodingConfig(min_speed_cm_s=0.0),
+        "emission_config": EmissionConfig(),
+        "config": PointSpreadConfig(
+            holdout_window_s=1.0,
+            minimum_valid_bins=2,
+            likelihood_time_chunk_size=2,
+        ),
+        "event_context": "RatX/OpenX:event-1 selection_rank=1",
+    }
+
+    baseline_spread, baseline_audit = estimate_prefix_decoder_point_spread_cm(
+        baseline,
+        **kwargs,
+    )
+    changed_spread, changed_audit = estimate_prefix_decoder_point_spread_cm(
+        changed,
+        **kwargs,
+    )
+
+    assert observed_position_maxima
+    assert max(observed_position_maxima) < event_start_s
+    assert changed_spread == baseline_spread
+    assert changed_audit == baseline_audit
 
 
 def test_point_spread_failure_reports_event_and_support() -> None:

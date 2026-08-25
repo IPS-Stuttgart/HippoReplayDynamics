@@ -10,10 +10,12 @@ scoring so fractional or negative inactive bounds cannot be silently truncated.
 
 from __future__ import annotations
 
-import math
 from functools import wraps
 
-from .state_space_bin_count_validation import _nonnegative_integer_count
+from .state_space_bin_count_validation import (
+    _nonnegative_integer_count,
+    _optional_mass_threshold,
+)
 
 _PATCHED_FLAG = "_candidate_config_count_validation_patch_applied"
 _SCORE_PATCHED_FLAG = "_candidate_config_count_score_validation_patch_applied"
@@ -44,14 +46,11 @@ def _validate_candidate_config(config: object) -> None:
         name: _nonnegative_integer_count(name, getattr(config, name))
         for name in _CONFIG_COUNT_NAMES
     }
-    mass_threshold = getattr(config, "momentum_candidate_mass_threshold", None)
-    if mass_threshold is None or isinstance(mass_threshold, (str, bytes, bool)):
-        return
-    try:
-        threshold = float(mass_threshold)
-    except (TypeError, ValueError, OverflowError):
-        return
-    if not math.isfinite(threshold) or threshold <= 0.0:
+    threshold = _optional_mass_threshold(
+        "momentum_candidate_mass_threshold",
+        getattr(config, "momentum_candidate_mass_threshold", None),
+    )
+    if threshold is None or threshold <= 0.0:
         return
 
     max_count = counts["momentum_candidate_max_k"]

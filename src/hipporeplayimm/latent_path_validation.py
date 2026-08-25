@@ -37,7 +37,7 @@ def _patch_parse_model_list(recovery: Any) -> None:
         setattr(recovery, _MODEL_LIST_PATCHED_FLAG, True)
         return
 
-    @wraps(current)
+    @wraps(current, updated=())
     def checked_parse_model_list(spec: Any) -> tuple[str, ...]:
         return current(_validated_model_list_spec(spec))
 
@@ -69,7 +69,7 @@ def _validated_model_list_spec(spec: Any) -> Any:
 def _patch_simulate_latent_path(recovery: Any) -> None:
     original = recovery.simulate_latent_path
 
-    @wraps(original)
+    @wraps(original, updated=())
     def checked_simulate_latent_path(*args: Any, **kwargs: Any) -> Any:
         if "n_time" in kwargs:
             kwargs = dict(kwargs)
@@ -109,7 +109,7 @@ def _state_space_with_unused_sigmas_neutralized(true_model: Any, state_space: An
 def _patch_simulate_replay_event(recovery: Any) -> None:
     original = recovery.simulate_replay_event
 
-    @wraps(original)
+    @wraps(original, updated=())
     def checked_simulate_replay_event(*args: Any, **kwargs: Any) -> Any:
         if "n_time" in kwargs:
             kwargs = dict(kwargs)
@@ -123,7 +123,7 @@ def _patch_simulate_replay_event(recovery: Any) -> None:
 def _patch_run_session_simulation_recovery(recovery: Any) -> None:
     original = recovery.run_session_simulation_recovery
 
-    @wraps(original)
+    @wraps(original, updated=())
     def checked_run_session_simulation_recovery(
         dataset_root: Any,
         session_id: Any,
@@ -257,7 +257,7 @@ def _finite_nonnegative_value(name: str, value: Any) -> float:
 def _patch_emissions_from_counts(recovery: Any) -> None:
     original = recovery.emissions_from_counts
 
-    @wraps(original)
+    @wraps(original, updated=())
     def checked_emissions_from_counts(encoding: Any, counts: Any, *args: Any, **kwargs: Any) -> Any:
         return original(encoding, _checked_count_array(counts), *args, **kwargs)
 

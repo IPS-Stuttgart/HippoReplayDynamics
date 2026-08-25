@@ -28,6 +28,18 @@ TRANSITION_CONVENTION = (
 _TRANSITION_ATOL = 1e-12
 
 
+def _has_complex_dtype(value: object) -> bool:
+    """Return whether an array-like input has an explicitly complex dtype."""
+
+    if issparse(value):
+        return bool(np.issubdtype(value.dtype, np.complexfloating))
+    try:
+        raw = np.asarray(value)
+    except (TypeError, ValueError):
+        return False
+    return bool(np.issubdtype(raw.dtype, np.complexfloating))
+
+
 @dataclass(frozen=True, slots=True)
 class FirstOrderSmoothingTrace:
     """Complete normalized forward/backward trace.
@@ -92,6 +104,8 @@ def _coerce_initial_probabilities(
     if initial_probabilities is None:
         return _uniform_probabilities(n_states, valid_mask)
 
+    if _has_complex_dtype(initial_probabilities):
+        raise ValueError("initial_probabilities must be real-valued")
     initial = np.asarray(initial_probabilities, dtype=float)
     if initial.shape != (n_states,):
         raise ValueError("initial_probabilities must contain one value per state")
@@ -112,6 +126,8 @@ def _coerce_transition(
     n_states: int,
     valid_bin_mask: np.ndarray | None,
 ) -> csr_matrix:
+    if _has_complex_dtype(value):
+        raise ValueError("each transition must be real-valued")
     try:
         matrix = csr_matrix(value, dtype=float).copy()
     except (TypeError, ValueError) as exc:
@@ -209,6 +225,8 @@ def first_order_smoothing_trace(
     and log_predictive_probabilities restore them exactly.
     """
 
+    if _has_complex_dtype(log_likelihood):
+        raise ValueError("log_likelihood must be real-valued")
     values = np.asarray(log_likelihood, dtype=float)
     if values.ndim != 2 or values.shape[0] < 1 or values.shape[1] < 1:
         raise ValueError("log_likelihood must have shape (positive time, positive state)")

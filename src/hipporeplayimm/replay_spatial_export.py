@@ -371,7 +371,6 @@ def build_pre_replay_candidate_fields(
 
     for route in completed.itertuples(index=False):
         route_start = float(route.movement_start_time_s)
-        route_end = float(route.movement_end_time_s)
         route_available = float(route.interval_end_time_s)
         history_cutoff = max(history_cutoff, route_available)
         training = completed[

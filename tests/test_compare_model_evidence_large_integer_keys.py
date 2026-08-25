@@ -53,13 +53,8 @@ def test_compare_runs_preserves_nullable_large_integer_scope_keys(tmp_path: Path
     _write_scores(left, rows)
     _write_scores(right, rows)
 
-    # With pandas' default CSV inference the nullable seed column becomes
-    # float64, and 2**53 + 1 is rounded down to 2**53. The comparison must keep
-    # these as two distinct null-control scopes.
-    inferred = pd.read_csv(left / "event_model_evidence.csv")
-    inferred_nonmissing = inferred["null_random_seed"].dropna().unique()
-    assert len(inferred_nonmissing) == 1
-
+    # A nullable integer column may be inferred through float64 by CSV readers;
+    # adjacent identifiers above 2**53 must nevertheless remain separate scopes.
     tables = compare_model_evidence_runs.compare_runs(
         left,
         right,

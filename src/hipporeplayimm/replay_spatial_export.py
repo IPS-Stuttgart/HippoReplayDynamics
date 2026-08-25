@@ -330,6 +330,7 @@ def build_pre_replay_candidate_fields(
         "destination_well_id",
         "movement_start_time_s",
         "movement_end_time_s",
+        "interval_end_time_s",
     }
     required_point_columns = {"route_id", "point_index", "x_cm", "y_cm"}
     if not required_route_columns.issubset(routes.columns):
@@ -337,12 +338,18 @@ def build_pre_replay_candidate_fields(
     if not required_point_columns.issubset(route_points.columns):
         raise ValueError("route-point table is missing required columns")
 
+    evidence_cutoff = float(np.nextafter(event_start, -np.inf))
     completed = routes[
-        pd.to_numeric(routes["movement_end_time_s"], errors="coerce")
-        <= event_start + _FLOAT_TOL
+        pd.to_numeric(routes["interval_end_time_s"], errors="coerce")
+        <= evidence_cutoff
     ].copy()
     completed = completed.sort_values(
-        ["movement_end_time_s", "movement_start_time_s", "route_id"]
+        [
+            "interval_end_time_s",
+            "movement_end_time_s",
+            "movement_start_time_s",
+            "route_id",
+        ]
     )
     n_bins = len(coordinates)
     fields = np.zeros((len(SPATIAL_CANDIDATE_NAMES), n_bins), dtype=float)
@@ -365,10 +372,11 @@ def build_pre_replay_candidate_fields(
     for route in completed.itertuples(index=False):
         route_start = float(route.movement_start_time_s)
         route_end = float(route.movement_end_time_s)
-        history_cutoff = max(history_cutoff, route_end)
+        route_available = float(route.interval_end_time_s)
+        history_cutoff = max(history_cutoff, route_available)
         training = completed[
             pd.to_numeric(
-                completed["movement_end_time_s"],
+                completed["interval_end_time_s"],
                 errors="coerce",
             )
             < route_start - _FLOAT_TOL
@@ -393,7 +401,8 @@ def build_pre_replay_candidate_fields(
             config.template_points,
         )
         age_weight = np.exp(
-            -max(event_start - route_end, 0.0) / config.candidate_recency_tau_s
+            -max(event_start - route_available, 0.0)
+            / config.candidate_recency_tau_s
         )
 
         actual_kernel = None
@@ -452,7 +461,8 @@ def build_pre_replay_candidate_fields(
         )
         kl = _categorical_kl(smoothed, filtered)
         revision_weight = kl * np.exp(
-            -max(event_start - route_end, 0.0) / config.revision_recency_tau_s
+            -max(event_start - route_available, 0.0)
+            / config.revision_recency_tau_s
         )
         revision += revision_weight * ((smoothed - filtered) @ mapping)
         surprise_field += age_weight * (-np.log(prior[states.index(actual_destination)])) * mapping[
@@ -463,7 +473,7 @@ def build_pre_replay_candidate_fields(
         revision_snippet_count += 1
         filtered_rows.append(filtered)
         smoothed_rows.append(smoothed)
-        snippet_ends.append(route_end)
+        snippet_ends.append(route_available)
 
     fields[0] = _unit_absolute_mass(revision)
     fields[1] = _unit_mass(surprise_field)
@@ -520,7 +530,7 @@ def build_pre_replay_candidate_fields(
     for index in range(1, len(SPATIAL_CANDIDATE_NAMES)):
         available[index] = _nonconstant(fields[index])
     if not completed.empty:
-        route_cutoff = float(completed["movement_end_time_s"].max())
+        route_cutoff = float(completed["interval_end_time_s"].max())
         available_s[[0, 1, 2, 4, 5, 6]] = route_cutoff
     available_s[3] = location_time
     if np.any(available_s > event_start + _FLOAT_TOL):

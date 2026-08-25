@@ -10,13 +10,13 @@ scoring so fractional or negative inactive bounds cannot be silently truncated.
 
 from __future__ import annotations
 
+import math
 from functools import wraps
 
 from .state_space_bin_count_validation import _nonnegative_integer_count
 
 _PATCHED_FLAG = "_candidate_config_count_validation_patch_applied"
 _SCORE_PATCHED_FLAG = "_candidate_config_count_score_validation_patch_applied"
-_MASS_BOUND_PATCHED_FLAG = "_candidate_config_mass_bound_validation_patch_applied"
 _CONFIG_COUNT_NAMES = (
     "momentum_candidate_top_k",
     "momentum_candidate_min_k",
@@ -40,44 +40,33 @@ def _wrapper_chain_has_marker(function: object, marker: str) -> bool:
 
 
 def _validate_candidate_config(config: object) -> None:
-    for name in _CONFIG_COUNT_NAMES:
-        _nonnegative_integer_count(name, getattr(config, name))
-
-
-def _patch_mass_retaining_candidate_bound(state_space_model: object) -> None:
-    """Make a positive configured ``max_k`` a true upper support bound."""
-
-    current = state_space_model._mass_retaining_candidate_indices
-    if _wrapper_chain_has_marker(current, _MASS_BOUND_PATCHED_FLAG):
+    counts = {
+        name: _nonnegative_integer_count(name, getattr(config, name))
+        for name in _CONFIG_COUNT_NAMES
+    }
+    mass_threshold = getattr(config, "momentum_candidate_mass_threshold", None)
+    if mass_threshold is None or isinstance(mass_threshold, (str, bytes, bool)):
+        return
+    try:
+        threshold = float(mass_threshold)
+    except (TypeError, ValueError, OverflowError):
+        return
+    if not math.isfinite(threshold) or threshold <= 0.0:
         return
 
-    @wraps(current)
-    def mass_retaining_candidate_indices(
-        log_emission,
-        mass_threshold=None,
-        *,
-        top_k=None,
-        min_k=1,
-        max_k=0,
-    ):
-        max_count = _nonnegative_integer_count("max_k", max_k)
-        candidates = current(
-            log_emission,
-            mass_threshold,
-            top_k=top_k,
-            min_k=min_k,
-            max_k=max_count,
+    max_count = counts["momentum_candidate_max_k"]
+    if max_count <= 0:
+        return
+    effective_lower_bound = max(
+        1,
+        counts["momentum_candidate_top_k"],
+        counts["momentum_candidate_min_k"],
+    )
+    if max_count < effective_lower_bound:
+        raise ValueError(
+            "momentum_candidate_max_k is smaller than the configured candidate "
+            "lower bound; increase max_k or reduce top_k/min_k"
         )
-        if max_count > 0 and len(candidates) > max_count:
-            raise ValueError(
-                "max_k is smaller than the effective candidate lower bound; "
-                "increase max_k or reduce top_k/min_k"
-            )
-        return candidates
-
-    setattr(mass_retaining_candidate_indices, _MASS_BOUND_PATCHED_FLAG, True)
-    setattr(mass_retaining_candidate_indices, "__hipporeplayimm_original__", current)
-    state_space_model._mass_retaining_candidate_indices = mass_retaining_candidate_indices
 
 
 def _patch_candidate_indices(state_space_model: object) -> None:
@@ -144,7 +133,6 @@ def apply_state_space_candidate_count_validation_patch() -> None:
         apply_state_space_candidate_bin_center_validation_patch,
     )
 
-    _patch_mass_retaining_candidate_bound(state_space_model)
     _patch_candidate_indices(state_space_model)
     _patch_score(state_space_model)
     # ``state_space_model`` can be reloaded independently.  Its fresh class loses

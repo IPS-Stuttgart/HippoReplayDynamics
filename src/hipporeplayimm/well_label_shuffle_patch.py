@@ -45,8 +45,6 @@ def _row_sequences_equal(left: np.ndarray, right: np.ndarray) -> bool:
     right_array = np.asarray(right, dtype=object)
     if left_array.shape != right_array.shape:
         return False
-    # Explicit object dtype prevents pandas 3 from trying to infer a float
-    # column for mixed labels containing integers larger than float64 can hold.
     return pd.DataFrame(left_array, dtype=object).equals(
         pd.DataFrame(right_array, dtype=object)
     )

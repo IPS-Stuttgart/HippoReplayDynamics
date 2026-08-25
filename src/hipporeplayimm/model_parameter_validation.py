@@ -485,11 +485,14 @@ def _apply_encoding_parameter_validation_patch() -> None:
         likelihood_temperature=1.0,
         cell_weights=None,
         negative_binomial_overdispersion=0.0,
+        time_chunk_size=None,
     ):
         _reject_boolean_numeric("dt", dt)
         _reject_boolean_scalar("spike_rate_scale", spike_rate_scale)
         _reject_boolean_scalar("likelihood_temperature", likelihood_temperature)
         _reject_boolean_scalar("negative_binomial_overdispersion", negative_binomial_overdispersion)
+        if time_chunk_size is not None:
+            _reject_boolean_scalar("time_chunk_size", time_chunk_size)
         if cell_weights is not None:
             _reject_boolean_numeric("cell_weights", cell_weights)
         return original_poisson_log_emissions(
@@ -500,6 +503,7 @@ def _apply_encoding_parameter_validation_patch() -> None:
             likelihood_temperature=likelihood_temperature,
             cell_weights=cell_weights,
             negative_binomial_overdispersion=negative_binomial_overdispersion,
+            time_chunk_size=time_chunk_size,
         )
 
     encoding._validate_encoding_config = validate_encoding_config

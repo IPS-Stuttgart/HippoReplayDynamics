@@ -1,0 +1,132 @@
+# Causal PF replay spatial producer
+
+This producer writes the predictor side of
+`bayesian-ach.replay-spatial.v2`. It contains raw replay log emissions and
+strictly pre-replay behavioral candidate fields. It never reads a later
+behavioral outcome.
+
+## Event schedule
+
+The prior 160-event table is not reused because it was assembled downstream of
+full-session decoder evidence. The claim-bearing cohort is reselected from the
+source session:
+
+1. enumerate ripple events whose peak is inside a RUN epoch;
+2. require the predeclared minimum elapsed training time and number of completed
+   historical fill intervals (`interval_end_time_s < s`);
+3. rank by the event's raw LFP ripple power only, with event index as the
+   deterministic tie breaker; and
+4. retain the fixed top N per session.
+
+No decoded trajectory, decoder evidence, next route, later well, or candidate
+field participates in selection. The schedule and its complete parameter digest
+are frozen in the manifest. Because top-N ranking is performed over the full
+session, this is an offline, decoded-content-independent sampling rule. It
+supports a conditional replay-content analysis; it does not support a causal
+claim about online event incidence.
+
+## Causal decoder and resolution
+
+For an event beginning at `s`, the place-field encoder is refitted from
+position samples and spikes at times no later than `nextafter(s, -inf)`.
+Cells with no spike in that prefix are not introduced from the future. The
+point-spread trajectory is truncated at that same cutoff before speed or actual
+position is computed, so centered differences cannot read the first at/after-
+event position sample.
+The exported event audit records the requested cutoff and the largest position
+and spike timestamps actually used.
+
+Raw Poisson/NB spatial log likelihoods are evaluated during the replay interval.
+Each row is max shifted and the removed offset is retained. Spatial coordinates
+and point-spread values use centimeters.
+
+Recovery resolution is empirical. A second prefix encoder is trained through
+`s - 120 s`, then decoded on moving RUN bins in the strictly pre-event
+holdout interval. The 120-second window is frozen globally: a counts-only design
+preflight tested 60, 120, and 180 seconds on the fixed LFP-selected cohort,
+without replay decoding, candidate scores, or later outcomes. Sixty seconds
+left two of 160 events below the prespecified 20-bin minimum; 120 seconds was
+the smallest candidate supporting all 160 (minimum 42 bins), so no event was
+dropped or backfilled. This is a documented, outcome-blind design amendment
+made before scoring; it was not preregistered. Ripple bins are removed and the
+68th percentile position
+error is frozen as `decoder_point_spread_cm`. Recovery later stresses 0.5, 1,
+and 2 times that value.
+
+Only eligible moving-RUN holdout bins enter the calibration likelihood. Their
+Poisson likelihoods are evaluated in deterministic chunks of at most 32 time
+bins; a golden test checks equality to selecting the same rows from the former
+dense likelihood. This bounds the temporary `time x cell x spatial-bin`
+allocation without changing the calibration observations or statistic. Runtime
+progress and failures name the session, event, selection rank, valid-bin count,
+cell count, phase timing, and cutoff.
+
+## Behavioral smoothing field
+
+The latent state is compact destination-well identity, never the PF grid. A
+route becomes available only when its source fill interval has ended. A trimmed
+`movement_end_time_s` before the ripple is insufficient because smoothing and the
+destination window use the complete source interval. Event eligibility, history
+cutoffs, recency ages, well locations, and route-specific training predicates all
+therefore use `interval_end_time_s`. For each available historical traversal:
+
+- the prior is a pseudocount-regularized destination transition distribution
+  learned only from still-earlier completed traversals;
+- state-conditioned route templates are learned only from still-earlier RUN
+  paths;
+- filtering uses the predeclared spatial prefix of that traversal;
+- the exact Hippo first-order trace uses identity well-state dynamics and
+  smooths that prefix with the remaining path plus terminal well observation;
+- the signed state difference is weighted by
+  `KL(smoothed || filtered)`, age weighted, and projected through the
+  pre-event route kernels.
+
+The same event-prefix history builds online-surprise, posterior-content,
+current-location, recency, prospective, and finite tabular TD-error fields.
+All hyperparameters and per-event candidate-availability flags are frozen.
+A negligible revision KL or constant candidate field makes that candidate
+unavailable; it is not silently replaced by a zero-effect biological result.
+
+## Files
+
+- `replay_spatial_predictors.npz`: padded raw shifted emissions, offsets,
+  masks, centimeter grid coordinates, empirical point spread, shared nuisance
+  base, seven candidate fields, availability/cutoff arrays, posterior-derived
+  well masses, and identifiers.
+- `replay_spatial_manifest.json`: schema, exact producer commit from a clean
+  worktree, verified canonical dataset-tree digest plus the dataset-manifest
+  file SHA-256, a per-file full-tree verification PASS report, clean route
+  producer/parameter provenance and route-table SHA-256s, ordered cohort and
+  event-audit SHA-256s, trace/transition conventions, event-selection and
+  hyperparameter digests, and predictor SHA-256.
+- `replay_spatial_route_manifest.json`: byte-identical copy of the clean route
+  provenance manifest consumed by the export.
+- `replay_spatial_event_audit.csv`: selection rank/power, completed-fill-
+  interval count, all causal cutoffs, training maxima, calibration support,
+  field availability, and revision identifiability per event.
+- `replay_spatial_export_summary.md`: compact run status.
+
+Example:
+
+```bash
+python scripts/export_pf_replay_spatial_contract.py \
+  --dataset-root /mnt/lexar4tb/datasets/DataSetFromPfeifferFoster \
+  --dataset-manifest /mnt/lexar4tb/datasets/pfeiffer-foster/dataset_manifest.json \
+  --route-segments results/replay-behavior-route-primitives/replay_behavior_route_segments.csv \
+  --route-points results/replay-behavior-route-primitives/replay_behavior_route_segment_points.csv \
+  --route-manifest results/replay-behavior-route-primitives/replay_behavior_route_primitives_manifest.json \
+  --dataset-sha256 LOCKED_DATASET_DIGEST \
+  --output-dir results/pf-replay-spatial-contract
+```
+
+`--dataset-sha256` is checked against the canonical digest embedded in the
+dataset manifest. Every locked relative path, byte size, and SHA-256 is then
+recomputed; missing, changed, and unlocked extra files are rejected. The
+deterministic PASS report is written beside the predictor and hash-bound in the
+manifest.
+The exporter also refuses a dirty or unavailable producer commit before writing
+any claim-bearing artifact.
+
+The output is predictor evidence, not a biological conclusion. Bayesian-ACh
+must hash-check it, run LOAO/LOSO recovery, apply simultaneous
+smoothing-versus-every-alternative rat contrasts, and abstain if any gate fails.

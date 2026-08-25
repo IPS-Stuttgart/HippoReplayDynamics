@@ -98,6 +98,9 @@ class EncodingModel:
     occupancy_s: np.ndarray
     cell_ids: np.ndarray
     config: EncodingConfig
+    training_end_s: float | None = None
+    training_position_max_s: float | None = None
+    training_spike_max_s: float | None = None
 
     @property
     def n_bins(self) -> int:
@@ -136,6 +139,9 @@ class EncodingModel:
             occupancy_s=self.occupancy_s,
             cell_ids=requested,
             config=self.config,
+            training_end_s=self.training_end_s,
+            training_position_max_s=self.training_position_max_s,
+            training_spike_max_s=self.training_spike_max_s,
         )
 
     def positions_to_flat_bins(self, xy: np.ndarray) -> np.ndarray:
@@ -236,13 +242,37 @@ class LogEmissionTensor:
             raise ValueError("transition_durations must contain finite positive durations")
 
 
-def fit_place_field_encoding(session: ReplaySession, config: EncodingConfig | None = None) -> EncodingModel:
-    """Fit occupancy-normalized Poisson rates from non-replay movement periods."""
+def fit_place_field_encoding(
+    session: ReplaySession,
+    config: EncodingConfig | None = None,
+    *,
+    training_end_s: float | None = None,
+) -> EncodingModel:
+    """Fit place fields, optionally from observations ending at a causal cutoff."""
 
     config = EncodingConfig() if config is None else config
     _validate_encoding_config(config)
+    cutoff = None if training_end_s is None else float(training_end_s)
+    if cutoff is not None and not np.isfinite(cutoff):
+        raise ValueError("training_end_s must be finite when provided")
+
     position = _clean_position(session.position)
     selected_spikes, cell_ids = _spikes_and_cell_ids_for_encoding(session, config)
+    if cutoff is not None:
+        position = position[position[:, 0] <= cutoff]
+        selected_spikes = selected_spikes[selected_spikes[:, 0] <= cutoff]
+        prefix_cell_ids = (
+            np.unique(selected_spikes[:, 1].astype(int))
+            if selected_spikes.size
+            else np.empty(0, dtype=int)
+        )
+        cell_ids = np.intersect1d(cell_ids, prefix_cell_ids, assume_unique=True)
+        if selected_spikes.size:
+            selected_spikes = selected_spikes[
+                np.isin(selected_spikes[:, 1].astype(int), cell_ids)
+            ]
+    if cutoff is not None and position.shape[0] < 2:
+        raise ValueError("causal encoding requires at least two position samples")
     if not (position.shape[0] == 1 and np.asarray(selected_spikes).size == 0):
         _validate_position_samples(position)
     times = position[:, 0]
@@ -313,6 +343,13 @@ def fit_place_field_encoding(session: ReplaySession, config: EncodingConfig | No
         occupancy_s=occupancy,
         cell_ids=cell_ids,
         config=config,
+        training_end_s=cutoff,
+        training_position_max_s=(
+            None if position.size == 0 else float(np.max(position[:, 0]))
+        ),
+        training_spike_max_s=(
+            None if selected_spikes.size == 0 else float(np.max(selected_spikes[:, 0]))
+        ),
     )
 
 
@@ -321,19 +358,25 @@ def build_emissions(
     encoding: EncodingModel,
     ripple: RippleEvent | int,
     config: EmissionConfig | None = None,
+    *,
+    time_bin_mask: np.ndarray | None = None,
+    likelihood_time_chunk_size: int | None = None,
 ) -> LogEmissionTensor:
-    """Build Poisson log-emission likelihoods for one ripple."""
+    """Build Poisson log emissions, optionally for selected source time bins."""
 
     config = EmissionConfig() if config is None else config
     ripple_event = _coerce_ripple_event(session, ripple)
-    edges = _time_bin_edges(ripple_event.start, ripple_event.end, config.time_bin_s)
-    bin_durations = np.diff(edges)
-    times = edges[:-1] + 0.5 * bin_durations
-    dt = float(np.median(bin_durations))
+    edges, times, bin_durations = emission_bin_schedule(
+        ripple_event.start,
+        ripple_event.end,
+        config.time_bin_s,
+    )
     spikes = session.spikes
     counts = np.zeros((times.shape[0], encoding.n_cells), dtype=int)
     if spikes.size and encoding.n_cells:
-        in_ripple = (spikes[:, 0] >= ripple_event.start) & (spikes[:, 0] < ripple_event.end)
+        in_ripple = (spikes[:, 0] >= ripple_event.start) & (
+            spikes[:, 0] < ripple_event.end
+        )
         spike_times = spikes[in_ripple, 0]
         spike_cell_ids = spikes[in_ripple, 1].astype(int)
         time_bins = np.searchsorted(edges, spike_times, side="right") - 1
@@ -341,6 +384,20 @@ def build_emissions(
         valid = (time_bins >= 0) & (time_bins < counts.shape[0]) & (rows >= 0)
         np.add.at(counts, (time_bins[valid].astype(int), rows[valid]), 1)
 
+    source_time_bins = int(times.shape[0])
+    if time_bin_mask is not None:
+        mask = np.asarray(time_bin_mask)
+        if mask.dtype != np.bool_ or mask.shape != (source_time_bins,):
+            raise ValueError(
+                "time_bin_mask must be boolean with one value per source time bin"
+            )
+        if not np.any(mask):
+            raise ValueError("time_bin_mask must select at least one source time bin")
+        counts = counts[mask]
+        times = times[mask]
+        bin_durations = bin_durations[mask]
+
+    dt = float(np.median(bin_durations))
     log_likelihood = _poisson_log_emissions(
         counts,
         encoding.rates_hz,
@@ -349,6 +406,7 @@ def build_emissions(
         likelihood_temperature=config.likelihood_temperature,
         cell_weights=config.cell_weights,
         negative_binomial_overdispersion=config.negative_binomial_overdispersion,
+        time_chunk_size=likelihood_time_chunk_size,
     )
     return LogEmissionTensor(
         log_likelihood=log_likelihood,
@@ -358,7 +416,23 @@ def build_emissions(
         cell_ids=encoding.cell_ids,
         n_spikes=int(counts.sum()),
         bin_durations=bin_durations,
-        transition_durations=np.diff(times) if times.shape[0] > 1 else np.empty(0, dtype=float),
+        transition_durations=(
+            np.diff(times)
+            if times.shape[0] > 1
+            else np.empty(0, dtype=float)
+        ),
+        metadata={
+            "decoder_training_schedule": (
+                "full_session"
+                if encoding.training_end_s is None
+                else "event_specific_prefix_refit"
+            ),
+            "decoder_training_cutoff_s": encoding.training_end_s,
+            "decoder_training_position_max_s": encoding.training_position_max_s,
+            "decoder_training_spike_max_s": encoding.training_spike_max_s,
+            "emission_source_time_bins": source_time_bins,
+            "emission_selected_time_bins": int(times.shape[0]),
+        },
     )
 
 
@@ -371,10 +445,13 @@ def _poisson_log_emissions(
     likelihood_temperature: float = 1.0,
     cell_weights: Iterable[float] | np.ndarray | None = None,
     negative_binomial_overdispersion: float = 0.0,
+    time_chunk_size: int | None = None,
 ) -> np.ndarray:
     spike_counts, rates_hz = _validate_poisson_inputs(spike_counts, rates_hz)
     if not np.isfinite(spike_rate_scale) or spike_rate_scale <= 0.0:
         raise ValueError("spike_rate_scale must be finite and positive")
+    if time_chunk_size is not None and time_chunk_size < 1:
+        raise ValueError("time_chunk_size must be positive when provided")
     _validate_emission_calibration(
         likelihood_temperature=likelihood_temperature,
         negative_binomial_overdispersion=negative_binomial_overdispersion,
@@ -384,30 +461,48 @@ def _poisson_log_emissions(
     if dt_array.ndim == 0:
         if not np.isfinite(float(dt_array)) or float(dt_array) <= 0.0:
             raise ValueError("dt must be finite and positive")
-        expected = np.maximum(rates_hz * float(dt_array) * spike_rate_scale, np.finfo(float).tiny)
+        expected = np.maximum(
+            rates_hz * float(dt_array) * spike_rate_scale,
+            np.finfo(float).tiny,
+        )
         log_likelihood = _count_log_emissions(
             spike_counts,
             expected,
             cell_weights=weights,
             negative_binomial_overdispersion=negative_binomial_overdispersion,
         )
-        return _apply_likelihood_temperature(log_likelihood, likelihood_temperature)
+        return _apply_likelihood_temperature(
+            log_likelihood,
+            likelihood_temperature,
+        )
 
     if dt_array.ndim != 1 or dt_array.shape[0] != spike_counts.shape[0]:
         raise ValueError("dt must be a scalar or one duration per time bin")
     if not np.all(np.isfinite(dt_array)) or np.any(dt_array <= 0.0):
         raise ValueError("all bin durations must be finite and positive")
 
-    expected = np.maximum(
-        dt_array[:, None, None] * rates_hz[None, :, :] * spike_rate_scale,
-        np.finfo(float).tiny,
-    )
-    log_likelihood = _count_log_emissions(
-        spike_counts,
-        expected,
-        cell_weights=weights,
-        negative_binomial_overdispersion=negative_binomial_overdispersion,
-    )
+    n_time = int(dt_array.shape[0])
+    log_likelihood = np.empty((n_time, rates_hz.shape[1]), dtype=float)
+    if n_time == 0:
+        return _apply_likelihood_temperature(
+            log_likelihood,
+            likelihood_temperature,
+        )
+    chunk_size = n_time if time_chunk_size is None else int(time_chunk_size)
+    for start in range(0, n_time, chunk_size):
+        stop = min(start + chunk_size, n_time)
+        expected = np.maximum(
+            dt_array[start:stop, None, None]
+            * rates_hz[None, :, :]
+            * spike_rate_scale,
+            np.finfo(float).tiny,
+        )
+        log_likelihood[start:stop] = _count_log_emissions(
+            spike_counts[start:stop],
+            expected,
+            cell_weights=weights,
+            negative_binomial_overdispersion=negative_binomial_overdispersion,
+        )
     return _apply_likelihood_temperature(log_likelihood, likelihood_temperature)
 
 
@@ -593,6 +688,19 @@ def _time_bin_edges(start: float, end: float, time_bin_s: float) -> np.ndarray:
     else:
         edges[-1] = end
     return edges
+
+
+def emission_bin_schedule(
+    start: float,
+    end: float,
+    time_bin_s: float,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Return exact edges, centers, and durations used by emission construction."""
+
+    edges = _time_bin_edges(start, end, time_bin_s)
+    durations = np.diff(edges)
+    times = edges[:-1] + 0.5 * durations
+    return edges, times, durations
 
 
 def _clean_position(position: np.ndarray) -> np.ndarray:

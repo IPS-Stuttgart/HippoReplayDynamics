@@ -214,10 +214,30 @@ def apply_emission_cell_id_validation_patch() -> None:
         original_build_emissions = encoding_module.build_emissions
 
         @wraps(original_build_emissions)
-        def build_emissions(session, encoding, ripple, config=None):
+        def build_emissions(
+            session,
+            encoding,
+            ripple,
+            config=None,
+            *,
+            time_bin_mask=None,
+            likelihood_time_chunk_size=None,
+        ):
             ripple_event = encoding_module._coerce_ripple_event(session, ripple)
-            _validate_session_cell_ids(session, encoding, ripple_event, source="spike cell IDs")
-            return original_build_emissions(session, encoding, ripple, config)
+            _validate_session_cell_ids(
+                session,
+                encoding,
+                ripple_event,
+                source="spike cell IDs",
+            )
+            return original_build_emissions(
+                session,
+                encoding,
+                ripple,
+                config,
+                time_bin_mask=time_bin_mask,
+                likelihood_time_chunk_size=likelihood_time_chunk_size,
+            )
 
         _mark_wrapper(build_emissions, _BUILD_EMISSIONS_WRAPPER_MARKER)
         setattr(build_emissions, _PATCHED_FLAG, True)

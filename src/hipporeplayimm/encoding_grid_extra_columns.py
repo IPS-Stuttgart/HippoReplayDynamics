@@ -33,6 +33,7 @@ _VALIDATE_ENCODING_CONFIG_WRAPPER_MARKER = "_encoding_bool_validate_encoding_con
 _TIME_BIN_EDGES_WRAPPER_MARKER = "_encoding_bool_time_bin_edges_wrapper"
 _TIME_BIN_EDGES_WRAPPER_VERSION = 2
 _POISSON_LOG_EMISSIONS_WRAPPER_MARKER = "_encoding_bool_poisson_log_emissions_wrapper"
+_POISSON_LOG_EMISSIONS_WRAPPER_VERSION = 2
 
 
 def apply_encoding_grid_extra_columns_patch() -> None:
@@ -138,12 +139,15 @@ def _apply_encoding_bool_validation_patch(encoding) -> None:
         likelihood_temperature=1.0,
         cell_weights=None,
         negative_binomial_overdispersion=0.0,
+        time_chunk_size=None,
     ):
         checked_cell_weights = _materialize_iterable_for_validation(cell_weights)
         _require_numeric_values(dt, "dt")
         _require_numeric_scalar(spike_rate_scale, "spike_rate_scale")
         _require_numeric_scalar(likelihood_temperature, "likelihood_temperature")
         _require_numeric_scalar(negative_binomial_overdispersion, "negative_binomial_overdispersion")
+        if time_chunk_size is not None:
+            _require_numeric_scalar(time_chunk_size, "time_chunk_size")
         if checked_cell_weights is not None:
             _require_numeric_values(checked_cell_weights, "cell_weights")
         return original_poisson_log_emissions(
@@ -154,6 +158,7 @@ def _apply_encoding_bool_validation_patch(encoding) -> None:
             likelihood_temperature=likelihood_temperature,
             cell_weights=checked_cell_weights,
             negative_binomial_overdispersion=negative_binomial_overdispersion,
+            time_chunk_size=time_chunk_size,
         )
 
     _copy_function_metadata(original_as_xy_array, as_xy_array)
@@ -165,7 +170,11 @@ def _apply_encoding_bool_validation_patch(encoding) -> None:
     _mark_wrapper(as_position_array, _AS_POSITION_ARRAY_WRAPPER_MARKER)
     _mark_wrapper(validate_encoding_config, _VALIDATE_ENCODING_CONFIG_WRAPPER_MARKER)
     setattr(time_bin_edges, _TIME_BIN_EDGES_WRAPPER_MARKER, _TIME_BIN_EDGES_WRAPPER_VERSION)
-    _mark_wrapper(poisson_log_emissions, _POISSON_LOG_EMISSIONS_WRAPPER_MARKER)
+    setattr(
+        poisson_log_emissions,
+        _POISSON_LOG_EMISSIONS_WRAPPER_MARKER,
+        _POISSON_LOG_EMISSIONS_WRAPPER_VERSION,
+    )
     encoding._as_xy_array = as_xy_array
     encoding._as_position_array = as_position_array
     encoding._validate_encoding_config = validate_encoding_config
@@ -217,10 +226,12 @@ def _encoding_bool_wrappers_are_current(encoding) -> bool:
             None,
         )
         == _TIME_BIN_EDGES_WRAPPER_VERSION
-        and _is_marked_wrapper(
+        and getattr(
             getattr(encoding, "_poisson_log_emissions", None),
             _POISSON_LOG_EMISSIONS_WRAPPER_MARKER,
+            None,
         )
+        == _POISSON_LOG_EMISSIONS_WRAPPER_VERSION
     )
 
 

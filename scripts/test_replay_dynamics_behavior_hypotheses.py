@@ -83,7 +83,10 @@ def _design_matrix(
     columns.append(_standardize(pd.to_numeric(frame[predictor], errors="raise").to_numpy()))
     names.append(predictor)
     for control in numeric_controls:
-        values = pd.to_numeric(frame[control], errors="coerce").to_numpy(dtype=float)
+        values = pd.to_numeric(frame[control], errors="coerce").to_numpy(
+            dtype=float,
+            copy=True,
+        )
         median = float(np.nanmedian(values)) if np.any(np.isfinite(values)) else 0.0
         missing = ~np.isfinite(values)
         values[missing] = median

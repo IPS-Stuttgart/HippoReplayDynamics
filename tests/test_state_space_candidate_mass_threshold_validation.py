@@ -37,7 +37,7 @@ def test_candidate_construction_rejects_boolean_mass_thresholds(
         ),
     )
 
-    with pytest.raises(TypeError, match="momentum_candidate_mass_threshold.*boolean"):
+    with pytest.raises(TypeError, match="mass_threshold.*boolean"):
         model.candidate_indices(_uniform_emissions())
 
 

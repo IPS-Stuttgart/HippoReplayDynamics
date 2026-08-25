@@ -33,7 +33,7 @@ dev-pyrecest = [
 hipporeplayimm = "hipporeplayimm.cli:main"
 
 [project.urls]
-Repository = "https://github.com/IPS-Stuttgart/HippoReplayIMM"
+Repository = "https://github.com/IPS-Stuttgart/HippoReplayDynamics"
 
 [tool.setuptools]
 package-dir = {"" = "src"}

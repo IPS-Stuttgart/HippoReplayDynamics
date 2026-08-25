@@ -189,7 +189,7 @@ def _unwrap_zero_dimensional_scalar(name: str, value: Any, expectation: str) -> 
 def _integer_valued_scalar(name: str, value: Any) -> int:
     expectation = "positive integer-valued"
     if isinstance(value, (bool, np.bool_)):
-        raise TypeError(f"{name} must be {expectation}")
+        raise TypeError(f"{name} must be {expectation}, not boolean")
     raw = np.asarray(value)
     if raw.ndim != 0:
         raise ValueError(f"{name} must be {expectation}")
@@ -197,7 +197,7 @@ def _integer_valued_scalar(name: str, value: Any) -> int:
         raise ValueError(f"{name} must be {expectation}, not text")
     item = _unwrap_zero_dimensional_scalar(name, raw, expectation)
     if isinstance(item, (bool, np.bool_)):
-        raise TypeError(f"{name} must be {expectation}")
+        raise TypeError(f"{name} must be {expectation}, not boolean")
     if isinstance(item, (complex, np.complexfloating)):
         raise ValueError(f"{name} must be {expectation}, not complex")
 
@@ -324,28 +324,58 @@ def _exact_integer_count_array(values: np.ndarray, *, max_count: int) -> np.ndar
     return exact
 
 
+def _contains_scalar_kind(
+    values: Any,
+    scalar_types: tuple[type, ...],
+    dtype_kinds: set[str],
+) -> bool:
+    """Inspect semantic scalar leaves through nested zero-dimensional wrappers."""
+
+    pending = [values]
+    seen_arrays: set[int] = set()
+    while pending:
+        value = pending.pop()
+        if isinstance(value, scalar_types):
+            return True
+        if isinstance(value, np.ndarray):
+            marker = id(value)
+            if marker in seen_arrays:
+                continue
+            seen_arrays.add(marker)
+        try:
+            raw = np.asarray(value)
+        except (TypeError, ValueError, OverflowError):
+            continue
+        if raw.dtype.kind in dtype_kinds:
+            return True
+        if raw.size == 0 or raw.dtype != object:
+            continue
+        if raw.ndim == 0:
+            try:
+                item = raw.item()
+            except (TypeError, ValueError):
+                continue
+            if item is not value:
+                pending.append(item)
+            continue
+        pending.extend(raw.reshape(-1))
+    return False
+
+
 def _contains_boolean_values(values: Any) -> bool:
-    try:
-        raw = np.asarray(values, dtype=object)
-    except (TypeError, ValueError):
-        raw = np.asarray(values, dtype=object)
-    if raw.size == 0:
-        return False
-    return any(isinstance(value, (bool, np.bool_)) for value in raw.reshape(-1))
+    return _contains_scalar_kind(
+        values,
+        (bool, np.bool_),
+        {"b"},
+    )
 
 
 def _contains_text_values(values: Any) -> bool:
-    try:
-        raw = np.asarray(values)
-    except (TypeError, ValueError):
-        raw = np.asarray(values, dtype=object)
-    if raw.size == 0:
-        return False
-    if raw.dtype.kind in {"U", "S"}:
-        return True
-    if raw.dtype == object:
-        return any(isinstance(value, (str, bytes, np.str_, np.bytes_)) for value in raw.reshape(-1))
-    return False
+    return _contains_scalar_kind(
+        values,
+        (str, bytes, np.str_, np.bytes_),
+        {"U", "S"},
+    )
 
 
 def _contains_complex_values(values: Any) -> bool:

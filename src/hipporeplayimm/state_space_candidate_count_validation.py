@@ -12,7 +12,10 @@ from __future__ import annotations
 
 from functools import wraps
 
-from .state_space_bin_count_validation import _nonnegative_integer_count
+from .state_space_bin_count_validation import (
+    _nonnegative_integer_count,
+    _optional_mass_threshold,
+)
 
 _PATCHED_FLAG = "_candidate_config_count_validation_patch_applied"
 _SCORE_PATCHED_FLAG = "_candidate_config_count_score_validation_patch_applied"
@@ -39,8 +42,30 @@ def _wrapper_chain_has_marker(function: object, marker: str) -> bool:
 
 
 def _validate_candidate_config(config: object) -> None:
-    for name in _CONFIG_COUNT_NAMES:
-        _nonnegative_integer_count(name, getattr(config, name))
+    counts = {
+        name: _nonnegative_integer_count(name, getattr(config, name))
+        for name in _CONFIG_COUNT_NAMES
+    }
+    threshold = _optional_mass_threshold(
+        "momentum_candidate_mass_threshold",
+        getattr(config, "momentum_candidate_mass_threshold", None),
+    )
+    if threshold is None or threshold <= 0.0:
+        return
+
+    max_count = counts["momentum_candidate_max_k"]
+    if max_count <= 0:
+        return
+    effective_lower_bound = max(
+        1,
+        counts["momentum_candidate_top_k"],
+        counts["momentum_candidate_min_k"],
+    )
+    if max_count < effective_lower_bound:
+        raise ValueError(
+            "momentum_candidate_max_k is smaller than the configured candidate "
+            "lower bound; increase max_k or reduce top_k/min_k"
+        )
 
 
 def _patch_candidate_indices(state_space_model: object) -> None:

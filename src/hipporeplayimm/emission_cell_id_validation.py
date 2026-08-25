@@ -26,16 +26,40 @@ def _is_marked_wrapper(value: Any, marker: str) -> bool:
 
 
 def _contains_boolean_values(values: Any) -> bool:
-    try:
-        raw = np.asarray(values)
-    except (TypeError, ValueError):
-        raw = np.asarray(values, dtype=object)
-    if raw.size == 0:
-        return False
-    if np.issubdtype(raw.dtype, np.bool_):
-        return True
-    if raw.dtype == object:
-        return any(isinstance(value, (bool, np.bool_)) for value in raw.reshape(-1))
+    """Return True for booleans nested inside object-array scalar wrappers."""
+
+    pending = [values]
+    seen_objects: set[int] = set()
+    while pending:
+        value = pending.pop()
+        if isinstance(value, (bool, np.bool_)):
+            return True
+        marker = id(value)
+        if marker in seen_objects:
+            continue
+        seen_objects.add(marker)
+        try:
+            raw = np.asarray(value)
+        except (TypeError, ValueError):
+            try:
+                raw = np.asarray(value, dtype=object)
+            except (TypeError, ValueError):
+                continue
+        if raw.size == 0:
+            continue
+        if np.issubdtype(raw.dtype, np.bool_):
+            return True
+        if raw.dtype != object:
+            continue
+        if raw.ndim == 0:
+            try:
+                item = raw.item()
+            except (TypeError, ValueError):
+                continue
+            if item is not value:
+                pending.append(item)
+            continue
+        pending.extend(raw.reshape(-1))
     return False
 
 
@@ -180,6 +204,13 @@ def _extensions_cell_id_patch_current(extensions_module: Any) -> bool:
 
 
 def _apply_poisson_input_validation_patch(encoding_module: Any, kd_module: Any) -> None:
+    from . import poisson_input_boolean_validation as poisson_validation
+
+    # The public Poisson wrapper resolves this helper from its module globals at
+    # call time.  Keep both validation layers on the same recursive guard so
+    # zero-dimensional object wrappers cannot turn booleans into 0.0/1.0 rates.
+    poisson_validation._contains_boolean_values = _contains_boolean_values
+
     if not _is_marked_wrapper(getattr(encoding_module, "_validate_poisson_inputs", None), _POISSON_INPUT_WRAPPER_MARKER):
         original_validate_poisson_inputs = encoding_module._validate_poisson_inputs
 

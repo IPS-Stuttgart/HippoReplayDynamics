@@ -192,7 +192,10 @@ def _coerce_valid_bin_mask(valid_bin_mask: np.ndarray | None, n_bins: int) -> np
     else:
         if np.issubdtype(raw_mask.dtype, np.complexfloating) or raw_mask.dtype.kind in {"S", "U"}:
             raise ValueError("valid_bin_mask entries must be boolean or 0/1")
-        if raw_mask.dtype == object and any(isinstance(value, (bytes, str)) for value in raw_mask.flat):
+        if raw_mask.dtype == object and any(
+            isinstance(value, (bytes, str, np.ndarray)) or not np.isscalar(value)
+            for value in raw_mask.flat
+        ):
             raise ValueError("valid_bin_mask entries must be boolean or 0/1")
         try:
             numeric_mask = raw_mask.astype(float, copy=False)

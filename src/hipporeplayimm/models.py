@@ -415,8 +415,8 @@ def _validate_candidate_support(
 def _top_candidate_indices(log_emission: np.ndarray, top_k: int) -> np.ndarray:
     if top_k <= 0 or top_k >= log_emission.shape[0]:
         return np.arange(log_emission.shape[0], dtype=int)
-    selected = np.argpartition(log_emission, -top_k)[-top_k:]
-    return selected[np.argsort(log_emission[selected])[::-1]]
+    indices = np.arange(log_emission.shape[0], dtype=int)
+    return np.asarray(np.lexsort((indices, -log_emission))[:top_k], dtype=int)
 
 
 def _candidate_log_masses(emissions: LogEmissionTensor, candidates: list[np.ndarray]) -> list[float]:

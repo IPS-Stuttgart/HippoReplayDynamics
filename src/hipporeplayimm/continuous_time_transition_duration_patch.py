@@ -181,7 +181,7 @@ def _wrap_log_emission_timestamp_validation() -> None:
     @wraps(current)
     def post_init(self) -> None:
         current(self)
-        times = np.asarray(self.times, dtype=float)
+        times = np.asarray(self.times)
         if times.shape == (0,) or times.size <= 1:
             return
         if times.shape != (self.n_time,):

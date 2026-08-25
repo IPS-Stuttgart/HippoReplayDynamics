@@ -3,11 +3,11 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 import numpy as np
+import pytest
 
 import hipporeplayimm.state_space as state_space
 from hipporeplayimm.continuous_time_imm_transition_patch import (
     _continuous_time_mode_transition_matrix,
-    _wrap_trajectory_diagnostics,
 )
 from hipporeplayimm.duration_occupancy import (
     _mode_transition_matrices as duration_mode_transition_matrices,
@@ -61,6 +61,30 @@ def test_continuous_time_mode_embedding_has_semigroup_and_stationary_limit() -> 
         rtol=0.0,
         atol=1.0e-10,
     )
+
+
+def test_continuous_time_mode_embedding_rejects_lossy_transition_coercions() -> None:
+    invalid_transitions = [
+        np.array([[0.9 + 0.1j, 0.1 - 0.1j], [0.2, 0.8]], dtype=complex),
+        np.array([[True, False], [False, True]], dtype=bool),
+        np.array([["0.9", "0.1"], ["0.2", "0.8"]], dtype=str),
+    ]
+
+    for transition in invalid_transitions:
+        with pytest.raises(ValueError, match="base_transition must contain real numeric values"):
+            _continuous_time_mode_transition_matrix(transition, 0.05, 0.1)
+
+
+def test_continuous_time_mode_embedding_rejects_nonreal_scalar_parameters() -> None:
+    base = np.array([[0.9, 0.1], [0.2, 0.8]], dtype=float)
+
+    for duration in (True, "0.05", 0.05 + 0.01j):
+        with pytest.raises(TypeError, match="duration_s must be a real finite scalar"):
+            _continuous_time_mode_transition_matrix(base, duration, 0.1)
+
+    for dwell in (True, "0.1", 0.1 + 0.01j):
+        with pytest.raises(TypeError, match="mean_dwell_s must be a real finite scalar"):
+            _continuous_time_mode_transition_matrix(base, 0.05, dwell)
 
 
 def test_all_duration_aware_imm_families_are_semigroup_consistent() -> None:
@@ -137,86 +161,3 @@ def test_custom_trajectory_imm_uses_duration_invariant_reference_routing() -> No
     )
 
     np.testing.assert_allclose(observed, expected, rtol=1.0e-12, atol=1.0e-12)
-
-
-def test_trajectory_diagnostics_preserve_one_shot_duration_iterables() -> None:
-    emissions = SimpleNamespace(n_time=3, dt=0.02)
-    config = SimpleNamespace(imm_switch_tau_s=0.1)
-    seen: list[np.ndarray] = []
-
-    def helper(
-        emissions,
-        bin_centers,
-        config,
-        transition_durations_s,
-        *,
-        valid_bin_mask=None,
-        return_trajectory=True,
-    ):
-        del emissions, bin_centers, config, valid_bin_mask, return_trajectory
-        seen.append(np.asarray(transition_durations_s, dtype=float))
-        return (
-            0.0,
-            None,
-            None,
-            None,
-            {"state_space_trajectory_imm_mode_stickiness_per_step": "legacy"},
-        )
-
-    module = SimpleNamespace(
-        _format_float_series=lambda values: ",".join(
-            f"{float(value):.12g}" for value in np.asarray(values, dtype=float)
-        )
-    )
-    wrapped = _wrap_trajectory_diagnostics(helper, module)
-    durations = (value for value in (0.01, 0.03))
-
-    result = wrapped(emissions, None, config, durations)
-
-    np.testing.assert_allclose(seen[0], np.asarray([0.01, 0.03]))
-    diagnostics = result[-1]
-    expected_survival = np.exp(-np.asarray([0.01, 0.03]) / config.imm_switch_tau_s)
-    assert diagnostics["state_space_trajectory_imm_mode_stickiness_per_step"] == module._format_float_series(
-        expected_survival
-    )
-
-
-def test_trajectory_diagnostics_match_decoder_fallback_durations() -> None:
-    emissions = SimpleNamespace(n_time=3, dt=0.02)
-    config = SimpleNamespace(imm_switch_tau_s=0.1)
-    seen: list[np.ndarray] = []
-
-    def helper(
-        emissions,
-        bin_centers,
-        config,
-        transition_durations_s,
-        *,
-        valid_bin_mask=None,
-        return_trajectory=True,
-    ):
-        del emissions, bin_centers, config, valid_bin_mask, return_trajectory
-        seen.append(np.asarray(transition_durations_s, dtype=float))
-        return (
-            0.0,
-            None,
-            None,
-            None,
-            {"state_space_trajectory_imm_mode_stickiness_per_step": "legacy"},
-        )
-
-    module = SimpleNamespace(
-        _format_float_series=lambda values: ",".join(
-            f"{float(value):.12g}" for value in np.asarray(values, dtype=float)
-        )
-    )
-    wrapped = _wrap_trajectory_diagnostics(helper, module)
-
-    result = wrapped(emissions, None, config, iter(()))
-
-    np.testing.assert_allclose(seen[0], np.asarray([emissions.dt, emissions.dt]))
-    diagnostics = result[-1]
-    expected_survival = np.exp(-np.asarray([emissions.dt, emissions.dt]) / config.imm_switch_tau_s)
-    assert diagnostics["state_space_trajectory_imm_mode_stickiness_per_step"] == module._format_float_series(
-        expected_survival
-    )

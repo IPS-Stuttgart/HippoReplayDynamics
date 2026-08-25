@@ -46,19 +46,54 @@ def apply_simulation_best_row_flags_patch() -> None:
             "simulation_event_best_rows",
         )
     )
-    recovery_patch_current = all(
-        getattr(getattr(recovery, name, None), _PATCHED_FLAG, False)
-        for name in (
-            "recovery_summary",
-            "certified_vs_exact_event_recovery",
-            "certified_vs_exact_recovery_summary",
-            "run_session_simulation_recovery",
-        )
+    module_patch_installed = bool(
+        getattr(reporting, _PATCHED_FLAG, False)
+        and getattr(recovery, _PATCHED_FLAG, False)
     )
-    if reporting_patch_current and recovery_patch_current:
+    if module_patch_installed:
+        if not reporting_patch_current:
+            @wraps(reporting.simulation_add_evidence_columns)
+            def simulation_add_evidence_columns_with_scoped_events(
+                df: pd.DataFrame,
+            ) -> pd.DataFrame:
+                return _simulation_add_evidence_columns(df, reporting)
+
+            @wraps(reporting.simulation_event_best_rows)
+            def simulation_event_best_rows_with_scoped_flags(
+                event_scores: pd.DataFrame,
+            ) -> pd.DataFrame:
+                scored = reporting.ensure_evidence_support_columns(event_scores)
+                if scored.empty:
+                    return _empty_like(scored)
+                comparable = reporting._coerce_bool_series(scored["evidence_comparable"])
+                status_ok = _status_success_mask(scored)
+                ok = scored[status_ok & comparable]
+                if ok.empty:
+                    return _empty_like(ok)
+                ok = _finite_log_evidence_rows(ok)
+                if ok.empty:
+                    return _empty_like(ok)
+                if "is_best_model" not in ok.columns:
+                    return _best_by_log_evidence(ok)
+                return _best_rows_with_guarded_flags(ok, reporting)
+
+            for function in (
+                simulation_add_evidence_columns_with_scoped_events,
+                simulation_event_best_rows_with_scoped_flags,
+            ):
+                setattr(function, _PATCHED_FLAG, True)
+
+            reporting.simulation_add_evidence_columns = (
+                simulation_add_evidence_columns_with_scoped_events
+            )
+            reporting.simulation_event_best_rows = (
+                simulation_event_best_rows_with_scoped_flags
+            )
+
         # evidence_reporting.patch_simulation_recovery_module() intentionally
         # refreshes these two aliases earlier in apply_runtime_patches().  Put
-        # the scoped versions back without rebuilding already-current wrappers.
+        # the scoped versions back without rebuilding the downstream recovery
+        # wrappers, which may now be owned by later runtime patches.
         reporting._simulation_event_group_columns = _event_group_columns
         recovery.add_evidence_columns = reporting.simulation_add_evidence_columns
         recovery._event_best_rows = reporting.simulation_event_best_rows
@@ -67,10 +102,6 @@ def apply_simulation_best_row_flags_patch() -> None:
         return
 
     original_run_session_simulation_recovery = recovery.run_session_simulation_recovery
-    if getattr(original_run_session_simulation_recovery, _PATCHED_FLAG, False):
-        wrapped = getattr(original_run_session_simulation_recovery, "__wrapped__", None)
-        if callable(wrapped):
-            original_run_session_simulation_recovery = wrapped
 
     @wraps(reporting.simulation_add_evidence_columns)
     def simulation_add_evidence_columns_with_scoped_events(df: pd.DataFrame) -> pd.DataFrame:

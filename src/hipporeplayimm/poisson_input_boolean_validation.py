@@ -16,7 +16,7 @@ _NEGATIVE_BINOMIAL_PATCHED_FLAG = (
     "_negative_binomial_poisson_limit_patch_applied"
 )
 _ORIGINAL_ATTR = "__hipporeplayimm_original__"
-_WRAPPER_VERSION = 5
+_WRAPPER_VERSION = 6
 
 
 def _contains_boolean_values(value: object) -> bool:
@@ -36,6 +36,44 @@ def _contains_boolean_values(value: object) -> bool:
 def _reject_boolean_array(name: str, value: object) -> None:
     if _contains_boolean_values(value):
         raise ValueError(f"{name} must contain numeric values, not boolean values")
+
+
+def _contains_complex_values(value: object) -> bool:
+    """Return True for complex arrays, including nested object scalar wrappers."""
+
+    pending = [value]
+    seen_objects: set[int] = set()
+    while pending:
+        current = pending.pop()
+        if isinstance(current, (complex, np.complexfloating)):
+            return True
+        marker = id(current)
+        if marker in seen_objects:
+            continue
+        seen_objects.add(marker)
+        try:
+            array = np.asarray(current)
+        except (TypeError, ValueError):
+            continue
+        if np.issubdtype(array.dtype, np.complexfloating):
+            return True
+        if array.dtype != object:
+            continue
+        if array.ndim == 0:
+            try:
+                item = array.item()
+            except (TypeError, ValueError):
+                continue
+            if item is not current:
+                pending.append(item)
+            continue
+        pending.extend(array.reshape(-1))
+    return False
+
+
+def _reject_complex_array(name: str, value: object) -> None:
+    if _contains_complex_values(value):
+        raise ValueError(f"{name} must contain real numeric values, not complex values")
 
 
 def _coerce_text_spike_count(value: str | bytes) -> int:
@@ -448,6 +486,7 @@ def apply_poisson_input_boolean_validation_patch() -> None:
     ):
         exact_counts = _coerce_spike_counts_exact(spike_counts)
         _reject_boolean_array("rates_hz", rates_hz)
+        _reject_complex_array("rates_hz", rates_hz)
         reusable_weights = _reusable_cell_weights(cell_weights)
         with np.errstate(over="ignore", invalid="ignore"):
             log_likelihood = original(

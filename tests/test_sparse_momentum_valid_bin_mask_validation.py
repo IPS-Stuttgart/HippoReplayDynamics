@@ -18,6 +18,15 @@ def test_sparse_momentum_valid_bin_mask_accepts_boolean_and_binary_numeric_value
     )
 
 
+def test_sparse_momentum_valid_bin_mask_accepts_object_scalar_values() -> None:
+    mask = np.empty(3, dtype=object)
+    mask[:] = [np.bool_(True), np.int64(0), np.float64(1.0)]
+    np.testing.assert_array_equal(
+        _coerce_valid_bin_mask(mask, 3),
+        np.array([True, False, True]),
+    )
+
+
 @pytest.mark.parametrize(
     ("mask", "message"),
     [
@@ -29,4 +38,24 @@ def test_sparse_momentum_valid_bin_mask_accepts_boolean_and_binary_numeric_value
 )
 def test_sparse_momentum_valid_bin_mask_rejects_silent_bool_coercions(mask: np.ndarray, message: str) -> None:
     with pytest.raises(ValueError, match=message):
+        _coerce_valid_bin_mask(mask, 3)
+
+
+@pytest.mark.parametrize(
+    "wrapped_value",
+    [
+        np.array("1", dtype=object),
+        np.array(True, dtype=object),
+        np.array(1, dtype=object),
+        np.array([1]),
+        [1],
+    ],
+)
+def test_sparse_momentum_valid_bin_mask_rejects_nested_object_wrappers(wrapped_value: object) -> None:
+    mask = np.empty(3, dtype=object)
+    mask[0] = wrapped_value
+    mask[1] = 0
+    mask[2] = 1
+
+    with pytest.raises(ValueError, match="boolean or 0/1"):
         _coerce_valid_bin_mask(mask, 3)

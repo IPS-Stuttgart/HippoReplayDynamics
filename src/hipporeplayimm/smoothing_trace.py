@@ -28,16 +28,84 @@ TRANSITION_CONVENTION = (
 _TRANSITION_ATOL = 1e-12
 
 
-def _has_complex_dtype(value: object) -> bool:
-    """Return whether an array-like input has an explicitly complex dtype."""
+def _contains_scalar_kind(
+    value: object,
+    scalar_types: tuple[type, ...],
+    dtype_kinds: set[str],
+) -> bool:
+    """Inspect semantic scalar leaves through nested object wrappers."""
 
     if issparse(value):
-        return bool(np.issubdtype(value.dtype, np.complexfloating))
-    try:
-        raw = np.asarray(value)
-    except (TypeError, ValueError):
-        return False
-    return bool(np.issubdtype(raw.dtype, np.complexfloating))
+        return value.dtype.kind in dtype_kinds
+
+    pending = [value]
+    seen_arrays: set[int] = set()
+    while pending:
+        current = pending.pop()
+        if isinstance(current, scalar_types):
+            return True
+        if isinstance(current, np.ndarray):
+            marker = id(current)
+            if marker in seen_arrays:
+                continue
+            seen_arrays.add(marker)
+        try:
+            raw = np.asarray(current)
+        except (TypeError, ValueError, OverflowError):
+            continue
+        if raw.dtype.kind in dtype_kinds:
+            return True
+        if raw.size == 0 or raw.dtype != object:
+            continue
+        if raw.ndim == 0:
+            try:
+                item = raw.item()
+            except (TypeError, ValueError):
+                continue
+            if item is not current:
+                pending.append(item)
+            continue
+        pending.extend(raw.reshape(-1))
+    return False
+
+
+def _has_complex_dtype(value: object) -> bool:
+    """Return whether an array-like input contains complex scalar values."""
+
+    return _contains_scalar_kind(
+        value,
+        (complex, np.complexfloating),
+        {"c"},
+    )
+
+
+def _contains_boolean_values(value: object) -> bool:
+    """Return whether an array-like input contains boolean scalar values."""
+
+    return _contains_scalar_kind(
+        value,
+        (bool, np.bool_),
+        {"b"},
+    )
+
+
+def _contains_text_values(value: object) -> bool:
+    """Return whether an array-like input contains text scalar values."""
+
+    return _contains_scalar_kind(
+        value,
+        (str, bytes, np.str_, np.bytes_),
+        {"U", "S"},
+    )
+
+
+def _reject_coercive_scalar_values(value: object, name: str) -> None:
+    """Reject semantic nonnumeric scalars before NumPy can coerce them."""
+
+    if _contains_boolean_values(value):
+        raise ValueError(f"{name} must be numeric, not boolean")
+    if _contains_text_values(value):
+        raise ValueError(f"{name} must be numeric, not text")
 
 
 @dataclass(frozen=True, slots=True)
@@ -106,6 +174,7 @@ def _coerce_initial_probabilities(
 
     if _has_complex_dtype(initial_probabilities):
         raise ValueError("initial_probabilities must be real-valued")
+    _reject_coercive_scalar_values(initial_probabilities, "initial_probabilities")
     initial = np.asarray(initial_probabilities, dtype=float)
     if initial.shape != (n_states,):
         raise ValueError("initial_probabilities must contain one value per state")
@@ -128,6 +197,7 @@ def _coerce_transition(
 ) -> csr_matrix:
     if _has_complex_dtype(value):
         raise ValueError("each transition must be real-valued")
+    _reject_coercive_scalar_values(value, "each transition")
     try:
         matrix = csr_matrix(value, dtype=float).copy()
     except (TypeError, ValueError) as exc:
@@ -227,6 +297,7 @@ def first_order_smoothing_trace(
 
     if _has_complex_dtype(log_likelihood):
         raise ValueError("log_likelihood must be real-valued")
+    _reject_coercive_scalar_values(log_likelihood, "log_likelihood")
     values = np.asarray(log_likelihood, dtype=float)
     if values.ndim != 2 or values.shape[0] < 1 or values.shape[1] < 1:
         raise ValueError("log_likelihood must have shape (positive time, positive state)")

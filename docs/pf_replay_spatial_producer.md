@@ -13,7 +13,7 @@ source session:
 
 1. enumerate ripple events whose peak is inside a RUN epoch;
 2. require the predeclared minimum elapsed training time and number of completed
-   historical routes;
+   historical fill intervals (`interval_end_time_s < s`);
 3. rank by the event's raw LFP ripple power only, with event index as the
    deterministic tie breaker; and
 4. retain the fixed top N per session.
@@ -29,7 +29,10 @@ claim about online event incidence.
 
 For an event beginning at `s`, the place-field encoder is refitted from
 position samples and spikes at times no later than `nextafter(s, -inf)`.
-Cells with no spike in that prefix are not introduced from the future.
+Cells with no spike in that prefix are not introduced from the future. The
+point-spread trajectory is truncated at that same cutoff before speed or actual
+position is computed, so centered differences cannot read the first at/after-
+event position sample.
 The exported event audit records the requested cutoff and the largest position
 and spike timestamps actually used.
 
@@ -60,8 +63,12 @@ cell count, phase timing, and cutoff.
 
 ## Behavioral smoothing field
 
-The latent state is compact destination-well identity, never the PF grid. For
-each completed historical traversal:
+The latent state is compact destination-well identity, never the PF grid. A
+route becomes available only when its source fill interval has ended. A trimmed
+`movement_end_time_s` before the ripple is insufficient because smoothing and the
+destination window use the complete source interval. Event eligibility, history
+cutoffs, recency ages, well locations, and route-specific training predicates all
+therefore use `interval_end_time_s`. For each available historical traversal:
 
 - the prior is a pseudocount-regularized destination transition distribution
   learned only from still-earlier completed traversals;
@@ -94,9 +101,9 @@ unavailable; it is not silently replaced by a zero-effect biological result.
   hyperparameter digests, and predictor SHA-256.
 - `replay_spatial_route_manifest.json`: byte-identical copy of the clean route
   provenance manifest consumed by the export.
-- `replay_spatial_event_audit.csv`: selection rank/power, all causal cutoffs,
-  training maxima, calibration support, field availability, and revision
-  identifiability per event.
+- `replay_spatial_event_audit.csv`: selection rank/power, completed-fill-
+  interval count, all causal cutoffs, training maxima, calibration support,
+  field availability, and revision identifiability per event.
 - `replay_spatial_export_summary.md`: compact run status.
 
 Example:

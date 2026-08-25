@@ -378,7 +378,10 @@ def _residualize(frame: pd.DataFrame, outcome: str, controls: Sequence[str]) -> 
         return pd.Series(dtype=float)
     columns = [np.ones(len(selected), dtype=float)]
     for control in controls:
-        values = pd.to_numeric(selected[control], errors="coerce").to_numpy(dtype=float)
+        values = pd.to_numeric(selected[control], errors="coerce").to_numpy(
+            dtype=float,
+            copy=True,
+        )
         median = float(np.nanmedian(values)) if np.isfinite(values).any() else 0.0
         values[~np.isfinite(values)] = median
         if np.std(values) > 0.0:

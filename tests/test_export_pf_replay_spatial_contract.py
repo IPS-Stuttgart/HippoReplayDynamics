@@ -11,6 +11,8 @@ import pytest
 from hipporeplayimm.data import ReplaySession, RippleEvent
 import scripts.export_pf_replay_spatial_contract as replay_spatial_producer
 
+from hipporeplayimm.replay_spatial_export import BehaviorFieldConfig
+
 from hipporeplayimm.encoding import (
     EmissionConfig,
     EncodingConfig,
@@ -25,6 +27,7 @@ from scripts.export_pf_replay_spatial_contract import (
     _pack_events,
     _require_clean_commit,
     estimate_prefix_decoder_point_spread_cm,
+    export_event,
     select_lfp_only_events,
     verify_dataset_tree,
     verify_route_artifacts,
@@ -248,6 +251,117 @@ def test_point_spread_failure_reports_event_and_support() -> None:
             ),
             event_context=context,
         )
+
+
+def test_export_event_is_invariant_to_all_post_cutoff_behavior(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    event_start_s = 5.0
+    baseline_session = _selection_session()
+    changed_session = _selection_session()
+    changed_session.position = np.asarray(changed_session.position, dtype=float).copy()
+    post_cutoff = changed_session.position[:, 0] >= event_start_s
+    changed_session.position[post_cutoff, 1] = (
+        50_000.0 + changed_session.position[post_cutoff, 0]
+    )
+    changed_session.position[post_cutoff, 2] = -50_000.0
+
+    route_specs = (
+        ("r0", 0, 1, 0.0, 0.8, 1.0),
+        ("r1", 0, 2, 1.0, 1.8, 2.0),
+        ("r2", 0, 1, 2.0, 2.8, 3.0),
+        ("r3", 0, 2, 3.0, 3.8, 4.0),
+        ("future", 0, 1, 6.0, 6.8, 7.0),
+    )
+    routes = pd.DataFrame(
+        [
+            {
+                "route_id": route_id,
+                "origin_well_id": origin,
+                "destination_well_id": destination,
+                "movement_start_time_s": start,
+                "movement_end_time_s": movement_end,
+                "interval_end_time_s": interval_end,
+            }
+            for route_id, origin, destination, start, movement_end, interval_end
+            in route_specs
+        ]
+    )
+    point_rows: list[dict[str, object]] = []
+    for route_id, _, destination, start, movement_end, _ in route_specs:
+        for point_index, fraction in enumerate(np.linspace(0.0, 1.0, 21)):
+            point_rows.append(
+                {
+                    "route_id": route_id,
+                    "point_index": point_index,
+                    "time_s": start + fraction * (movement_end - start),
+                    "x_cm": 4.0 * fraction,
+                    "y_cm": float(destination) * fraction,
+                    "arc_fraction": fraction,
+                }
+            )
+    baseline_points = pd.DataFrame(point_rows)
+    changed_points = baseline_points.copy()
+    future_points = changed_points["route_id"].eq("future")
+    changed_points.loc[future_points, "x_cm"] += 100_000.0
+    changed_points.loc[future_points, "y_cm"] -= 100_000.0
+
+    observed_position_maxima: list[float] = []
+    original_speed = replay_spatial_producer._speed
+
+    def guarded_speed(position: np.ndarray) -> np.ndarray:
+        observed_position_maxima.append(float(np.max(position[:, 0])))
+        assert observed_position_maxima[-1] < event_start_s
+        return original_speed(position)
+
+    monkeypatch.setattr(replay_spatial_producer, "_speed", guarded_speed)
+    selection = {
+        "event_index": 1,
+        "selection_rank": 1,
+        "selection_metric": 4.0,
+        "completed_fill_intervals_at_selection": 4,
+    }
+    args = (
+        selection,
+        EncodingConfig(bin_size_cm=1.0, min_speed_cm_s=0.0),
+        EmissionConfig(),
+        BehaviorFieldConfig(),
+        PointSpreadConfig(
+            holdout_window_s=1.0,
+            minimum_valid_bins=2,
+            likelihood_time_chunk_size=2,
+        ),
+    )
+    baseline = export_event(
+        baseline_session,
+        routes,
+        baseline_points,
+        *args,
+    )
+    changed = export_event(
+        changed_session,
+        routes,
+        changed_points,
+        *args,
+    )
+
+    for name in (
+        "field_available_s",
+        "log_emissions",
+        "log_emission_offsets",
+        "spatial_coordinates",
+        "nuisance_base",
+        "candidate_fields",
+        "candidate_available",
+    ):
+        np.testing.assert_array_equal(getattr(changed, name), getattr(baseline, name))
+    assert changed.history_cutoff_s == baseline.history_cutoff_s
+    assert changed.decoder_training_cutoff_s == baseline.decoder_training_cutoff_s
+    assert changed.decoder_point_spread_cm == baseline.decoder_point_spread_cm
+    assert changed.well_masses == baseline.well_masses
+    assert changed.audit == baseline.audit
+    assert observed_position_maxima
+    assert max(observed_position_maxima) < event_start_s
 
 
 def _event(event_id: str, n_time: int, n_bins: int, well: str) -> ExportedEvent:

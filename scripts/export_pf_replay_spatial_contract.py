@@ -470,6 +470,12 @@ def estimate_prefix_decoder_point_spread_cm(
         config.time_bin_s,
     )
     position = _finite_position(session)
+    position = position[position[:, 0] <= event_cutoff]
+    if len(position) < 2:
+        raise ValueError(
+            f"{context}: point-spread calibration has fewer than two tracked "
+            "position samples before the replay cutoff"
+        )
     speed = np.interp(holdout_times, position[:, 0], _speed(position))
     valid = _times_in_intervals(holdout_times, session.run_times)
     valid &= speed >= encoding_config.min_speed_cm_s

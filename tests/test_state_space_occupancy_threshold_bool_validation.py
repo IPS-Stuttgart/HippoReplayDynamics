@@ -13,6 +13,14 @@ from hipporeplayimm.state_space import (
 )
 
 
+def _nested_scalar(value: object) -> np.ndarray:
+    inner = np.empty((), dtype=object)
+    inner[()] = value
+    outer = np.empty((), dtype=object)
+    outer[()] = inner
+    return outer
+
+
 def _emissions() -> LogEmissionTensor:
     return LogEmissionTensor(
         log_likelihood=np.array(
@@ -34,12 +42,39 @@ def _bin_centers() -> np.ndarray:
     return np.column_stack((np.arange(3.0), np.zeros(3, dtype=float)))
 
 
-@pytest.mark.parametrize("value", [True, np.bool_(True), np.asarray(True, dtype=object)])
+@pytest.mark.parametrize(
+    "value",
+    [
+        True,
+        np.bool_(True),
+        np.asarray(True, dtype=object),
+        _nested_scalar(True),
+        _nested_scalar(np.bool_(False)),
+    ],
+)
 def test_valid_bin_mask_rejects_boolean_occupancy_threshold(value: object) -> None:
     hipporeplayimm.apply_runtime_patches()
 
     with pytest.raises(TypeError, match="min_occupancy_s"):
         _valid_bin_mask_from_occupancy(np.array([0.0, 0.5, 1.0], dtype=float), value, 3)
+
+
+def test_valid_bin_mask_rejects_nested_boolean_occupancy_seconds() -> None:
+    hipporeplayimm.apply_runtime_patches()
+    occupancy = np.array([0.0, 0.5, 1.0], dtype=object)
+    occupancy[1] = _nested_scalar(True)
+
+    with pytest.raises(TypeError, match="occupancy_s.*boolean"):
+        _valid_bin_mask_from_occupancy(occupancy, 0.5, 3)
+
+
+def test_valid_bin_mask_keeps_nested_numeric_occupancy_seconds() -> None:
+    occupancy = np.array([0.0, 0.5, 1.0], dtype=object)
+    occupancy[1] = _nested_scalar(np.float64(0.5))
+
+    mask = _valid_bin_mask_from_occupancy(occupancy, 0.5, 3)
+
+    np.testing.assert_array_equal(mask, np.array([False, True, True]))
 
 
 def test_valid_bin_mask_keeps_numeric_occupancy_threshold() -> None:
@@ -48,7 +83,16 @@ def test_valid_bin_mask_keeps_numeric_occupancy_threshold() -> None:
     np.testing.assert_array_equal(mask, np.array([False, True, True]))
 
 
-@pytest.mark.parametrize("value", [True, np.bool_(True), np.asarray(True, dtype=object)])
+@pytest.mark.parametrize(
+    "value",
+    [
+        True,
+        np.bool_(True),
+        np.asarray(True, dtype=object),
+        _nested_scalar(True),
+        _nested_scalar(np.bool_(False)),
+    ],
+)
 def test_candidate_support_rejects_boolean_valid_occupancy_threshold(value: object) -> None:
     hipporeplayimm.apply_runtime_patches()
     emissions = _emissions()

@@ -20,51 +20,64 @@ _PATCHED_FLAG = "_state_space_occupancy_threshold_validation_patch_applied"
 _STRING_TYPES = (str, bytes, np.str_, np.bytes_)
 
 
-def _is_string_scalar(value: Any) -> bool:
-    if isinstance(value, _STRING_TYPES):
-        return True
-    try:
-        raw = np.asarray(value)
-    except (TypeError, ValueError):
-        return False
-    if raw.ndim != 0:
-        return False
-    if np.issubdtype(raw.dtype, np.str_) or np.issubdtype(raw.dtype, np.bytes_):
-        return True
-    if raw.dtype == object:
+def _unwrap_scalar(value: Any, name: str) -> Any:
+    """Recursively unwrap zero-dimensional object containers around one scalar."""
+
+    current = value
+    seen_arrays: set[int] = set()
+    while True:
         try:
-            return isinstance(raw.item(), _STRING_TYPES)
-        except ValueError:
-            return False
-    return False
+            raw = np.asarray(current)
+        except (TypeError, ValueError) as exc:
+            raise TypeError(f"{name} must be a numeric scalar") from exc
+        if raw.ndim != 0:
+            raise TypeError(f"{name} must be a numeric scalar")
+        if raw.dtype != object:
+            try:
+                return raw.item()
+            except ValueError as exc:
+                raise TypeError(f"{name} must be a numeric scalar") from exc
 
-
-def _reject_numeric_scalar_type(name: str, value: Any) -> None:
-    try:
-        raw = np.asarray(value)
-    except (TypeError, ValueError) as exc:
-        raise TypeError(f"{name} must be a numeric scalar") from exc
-    if raw.ndim != 0:
-        raise TypeError(f"{name} must be a numeric scalar")
-    if _is_string_scalar(value):
-        raise TypeError(f"{name} must be a numeric scalar, not string")
-    if isinstance(value, (bool, np.bool_)) or np.issubdtype(raw.dtype, np.bool_):
-        raise TypeError(f"{name} must be numeric, not boolean")
-    if raw.dtype == object:
+        if isinstance(current, np.ndarray):
+            marker = id(current)
+            if marker in seen_arrays:
+                raise TypeError(f"{name} must be a numeric scalar")
+            seen_arrays.add(marker)
         try:
             item = raw.item()
         except ValueError as exc:
             raise TypeError(f"{name} must be a numeric scalar") from exc
-        if isinstance(item, (bool, np.bool_)):
-            raise TypeError(f"{name} must be numeric, not boolean")
-        if isinstance(item, _STRING_TYPES):
-            raise TypeError(f"{name} must be a numeric scalar, not string")
+        if item is current:
+            if isinstance(current, np.ndarray):
+                raise TypeError(f"{name} must be a numeric scalar")
+            return current
+        current = item
+
+
+def _validated_numeric_scalar(name: str, value: Any) -> Any:
+    item = _unwrap_scalar(value, name)
+    if isinstance(item, (bool, np.bool_)):
+        raise TypeError(f"{name} must be numeric, not boolean")
+    if isinstance(item, _STRING_TYPES):
+        raise TypeError(f"{name} must be a numeric scalar, not string")
+    return item
+
+
+def _is_string_scalar(value: Any) -> bool:
+    try:
+        return isinstance(_unwrap_scalar(value, "value"), _STRING_TYPES)
+    except TypeError:
+        return False
+
+
+def _reject_numeric_scalar_type(name: str, value: Any) -> None:
+    _validated_numeric_scalar(name, value)
 
 
 def _validated_occupancy_threshold(value: Any) -> float:
-    _reject_numeric_scalar_type("min_occupancy_s", value)
+    item = _validated_numeric_scalar("min_occupancy_s", value)
     try:
-        threshold = float(np.asarray(value).item())
+        threshold = float(item)
     except (TypeError, ValueError, OverflowError) as exc:
         raise ValueError("min_occupancy_s must be finite and nonnegative") from exc
     if not np.isfinite(threshold) or threshold < 0.0:
@@ -85,14 +98,26 @@ def _validate_occupancy_seconds(occupancy_s: Any) -> None:
         raise TypeError("occupancy_s must contain numeric seconds, not string values")
     if np.issubdtype(raw.dtype, np.complexfloating):
         raise TypeError("occupancy_s must contain real numeric seconds")
+
+    numeric_source: Any = occupancy_s
     if raw.dtype == object:
-        flat = raw.reshape(-1)
-        if any(isinstance(value, (bool, np.bool_)) for value in flat):
-            raise TypeError("occupancy_s must contain numeric seconds, not boolean values")
-        if any(isinstance(value, _STRING_TYPES) for value in flat):
-            raise TypeError("occupancy_s must contain numeric seconds, not string values")
+        unwrapped: list[Any] = []
+        for value in raw.reshape(-1):
+            try:
+                item = _unwrap_scalar(value, "occupancy_s")
+            except TypeError as exc:
+                raise TypeError("occupancy_s must contain numeric occupancy seconds") from exc
+            if isinstance(item, (bool, np.bool_)):
+                raise TypeError("occupancy_s must contain numeric seconds, not boolean values")
+            if isinstance(item, _STRING_TYPES):
+                raise TypeError("occupancy_s must contain numeric seconds, not string values")
+            if isinstance(item, (complex, np.complexfloating)):
+                raise TypeError("occupancy_s must contain real numeric seconds")
+            unwrapped.append(item)
+        numeric_source = np.asarray(unwrapped, dtype=object).reshape(raw.shape)
+
     try:
-        numeric = np.asarray(occupancy_s, dtype=float)
+        numeric = np.asarray(numeric_source, dtype=float)
     except OverflowError as exc:
         raise ValueError("occupancy_s must contain finite occupancy seconds") from exc
     except (TypeError, ValueError) as exc:

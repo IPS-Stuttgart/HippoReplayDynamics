@@ -250,9 +250,11 @@ def _validated_occupancy_vector(encoding: Any) -> np.ndarray:
         raise ValueError("occupancy_s must contain finite nonnegative values")
     if _contains_text_values(occupancy_raw):
         raise ValueError("occupancy_s must contain finite nonnegative values, not text values")
+    if _contains_complex_values(occupancy_raw):
+        raise ValueError("occupancy_s must contain finite nonnegative real values")
     try:
         occupancy = np.asarray(occupancy_raw, dtype=float)
-    except (TypeError, ValueError) as exc:
+    except (TypeError, ValueError, OverflowError) as exc:
         raise ValueError("occupancy_s must contain finite nonnegative values") from exc
 
     if occupancy.ndim != 1:
@@ -264,45 +266,66 @@ def _validated_occupancy_vector(encoding: Any) -> np.ndarray:
     return occupancy
 
 
-def _contains_complex_values(values: Any) -> bool:
-    try:
-        raw = np.asarray(values)
-    except (TypeError, ValueError):
-        raw = np.asarray(values, dtype=object)
-    if raw.size == 0:
-        return False
-    if np.issubdtype(raw.dtype, np.complexfloating):
-        return True
-    if raw.dtype == object:
-        return any(
-            isinstance(value, (complex, np.complexfloating))
-            for value in raw.reshape(-1)
-        )
+def _contains_scalar_kind(
+    values: Any,
+    scalar_types: tuple[type, ...],
+    dtype_kinds: set[str],
+) -> bool:
+    """Inspect semantic scalar leaves through nested zero-dimensional wrappers."""
+
+    pending = [values]
+    seen_arrays: set[int] = set()
+    while pending:
+        value = pending.pop()
+        if isinstance(value, scalar_types):
+            return True
+        if isinstance(value, np.ndarray):
+            marker = id(value)
+            if marker in seen_arrays:
+                continue
+            seen_arrays.add(marker)
+        try:
+            raw = np.asarray(value)
+        except (TypeError, ValueError, OverflowError):
+            continue
+        if raw.dtype.kind in dtype_kinds:
+            return True
+        if raw.size == 0 or raw.dtype != object:
+            continue
+        if raw.ndim == 0:
+            try:
+                item = raw.item()
+            except (TypeError, ValueError):
+                continue
+            if item is not value:
+                pending.append(item)
+            continue
+        pending.extend(raw.reshape(-1))
     return False
+
+
+def _contains_complex_values(values: Any) -> bool:
+    return _contains_scalar_kind(
+        values,
+        (complex, np.complexfloating),
+        {"c"},
+    )
 
 
 def _contains_boolean_values(values: Any) -> bool:
-    try:
-        raw = np.asarray(values, dtype=object)
-    except (TypeError, ValueError):
-        raw = np.asarray(values, dtype=object)
-    if raw.size == 0:
-        return False
-    return any(isinstance(value, (bool, np.bool_)) for value in raw.reshape(-1))
+    return _contains_scalar_kind(
+        values,
+        (bool, np.bool_),
+        {"b"},
+    )
 
 
 def _contains_text_values(values: Any) -> bool:
-    try:
-        raw = np.asarray(values)
-    except (TypeError, ValueError):
-        raw = np.asarray(values, dtype=object)
-    if raw.size == 0:
-        return False
-    if raw.dtype.kind in {"U", "S"}:
-        return True
-    if raw.dtype == object:
-        return any(isinstance(value, (str, bytes, np.str_, np.bytes_)) for value in raw.reshape(-1))
-    return False
+    return _contains_scalar_kind(
+        values,
+        (str, bytes, np.str_, np.bytes_),
+        {"U", "S"},
+    )
 
 
 def _positive_integer_scalar(name: str, value: Any) -> int:
@@ -330,33 +353,81 @@ def _positive_integer_scalar(name: str, value: Any) -> int:
 
 
 def _strict_scalar_item(name: str, value: Any) -> Any:
-    try:
-        array = np.asarray(value)
-    except (TypeError, ValueError):
-        return value
-    if array.shape != ():
-        raise ValueError(f"{name} must be a positive integer")
-    try:
-        return array.item()
-    except (AttributeError, IndexError, ValueError):
-        return value
+    current = value
+    seen_arrays: set[int] = set()
+    while True:
+        try:
+            array = np.asarray(current)
+        except (TypeError, ValueError, OverflowError):
+            return current
+        if array.shape != ():
+            raise ValueError(f"{name} must be a positive integer")
+        if isinstance(current, np.ndarray):
+            marker = id(current)
+            if marker in seen_arrays:
+                raise ValueError(f"{name} must be a positive integer")
+            seen_arrays.add(marker)
+        try:
+            item = array.item()
+        except (AttributeError, IndexError, TypeError, ValueError):
+            return current
+        if item is current:
+            return current
+        if isinstance(item, np.ndarray):
+            current = item
+            continue
+        return item
 
 
 def _is_boolean_scalar(value: Any) -> bool:
     if isinstance(value, (bool, np.bool_)):
         return True
-    item = _scalar_item(value)
-    return isinstance(item, (bool, np.bool_))
+    current = value
+    seen_arrays: set[int] = set()
+    while True:
+        try:
+            array = np.asarray(current)
+        except (TypeError, ValueError, OverflowError):
+            return False
+        if array.shape != ():
+            return False
+        if np.issubdtype(array.dtype, np.bool_):
+            return True
+        if isinstance(current, np.ndarray):
+            marker = id(current)
+            if marker in seen_arrays:
+                return False
+            seen_arrays.add(marker)
+        try:
+            item = array.item()
+        except (AttributeError, IndexError, TypeError, ValueError):
+            return False
+        if isinstance(item, (bool, np.bool_)):
+            return True
+        if item is current or not isinstance(item, np.ndarray):
+            return False
+        current = item
 
 
 def _scalar_item(value: Any) -> Any:
-    try:
-        array = np.asarray(value)
-    except (TypeError, ValueError):
-        return value
-    if array.size != 1:
-        return value
-    try:
-        return array.reshape(-1)[0].item()
-    except (AttributeError, IndexError, ValueError):
-        return value
+    current = value
+    seen_arrays: set[int] = set()
+    while True:
+        try:
+            array = np.asarray(current)
+        except (TypeError, ValueError, OverflowError):
+            return current
+        if array.size != 1:
+            return current
+        if isinstance(current, np.ndarray):
+            marker = id(current)
+            if marker in seen_arrays:
+                return current
+            seen_arrays.add(marker)
+        try:
+            item = array.reshape(-1)[0].item()
+        except (AttributeError, IndexError, TypeError, ValueError):
+            return current
+        if item is current or not isinstance(item, np.ndarray):
+            return item
+        current = item

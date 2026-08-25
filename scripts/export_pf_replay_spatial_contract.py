@@ -386,6 +386,10 @@ def select_lfp_only_events(
     """Select RUN ripples without inspecting decoded content or future outcomes."""
 
     config.validate()
+    if "interval_end_time_s" not in routes.columns:
+        raise ValueError(
+            f"{session.session_id}: route table lacks interval_end_time_s"
+        )
     position = _finite_position(session)
     if len(position) < 2:
         raise ValueError(f"{session.session_id}: insufficient position data")
@@ -393,13 +397,14 @@ def select_lfp_only_events(
     candidates: list[dict[str, object]] = []
     for event_index in session.ripple_indices_in_run():
         event = session.ripple(int(event_index))
+        evidence_cutoff = float(np.nextafter(event.start, -np.inf))
         completed_routes = int(
             np.sum(
                 pd.to_numeric(
-                    routes["movement_end_time_s"],
+                    routes["interval_end_time_s"],
                     errors="coerce",
                 )
-                <= event.start
+                <= evidence_cutoff
             )
         )
         if event.start - first_time < config.minimum_training_duration_s:
@@ -416,7 +421,7 @@ def select_lfp_only_events(
                 "event_start_s": float(event.start),
                 "event_end_s": float(event.end),
                 "selection_metric": float(event.raw_power),
-                "completed_routes_at_selection": completed_routes,
+                "completed_fill_intervals_at_selection": completed_routes,
             }
         )
     selected = sorted(
@@ -669,10 +674,10 @@ def export_event(
     )
     completed_routes = session_routes[
         pd.to_numeric(
-            session_routes["movement_end_time_s"],
+            session_routes["interval_end_time_s"],
             errors="coerce",
         )
-        <= event.start
+        <= cutoff
     ]
     completed_ids = set(completed_routes["route_id"].astype(str))
     completed_points = session_route_points[
@@ -993,7 +998,7 @@ def run_export(
         "well_mass_source": "raw_log_emission_posterior",
         "behavior_latent_state": "compact_destination_well",
         "behavior_observation_schedule": (
-            "tracked_position_and_well_visits_pre_replay"
+            "tracked_position_and_completed_fill_intervals_pre_replay"
         ),
         "state_to_spatial_mapping": "pre_replay_route_kernel",
         "event_selection_schedule": "lfp_raw_peak_power_top_n_per_session",

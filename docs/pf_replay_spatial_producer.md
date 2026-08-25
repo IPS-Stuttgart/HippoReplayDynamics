@@ -38,10 +38,25 @@ Each row is max shifted and the removed offset is retained. Spatial coordinates
 and point-spread values use centimeters.
 
 Recovery resolution is empirical. A second prefix encoder is trained through
-`s - holdout_window`, then decoded on moving RUN bins in the strictly
-pre-event holdout interval. Ripple bins are removed and the 68th percentile
-position error is frozen as `decoder_point_spread_cm`. Recovery later stresses
-0.5, 1, and 2 times that value.
+`s - 120 s`, then decoded on moving RUN bins in the strictly pre-event
+holdout interval. The 120-second window is frozen globally: a counts-only design
+preflight tested 60, 120, and 180 seconds on the fixed LFP-selected cohort,
+without replay decoding, candidate scores, or later outcomes. Sixty seconds
+left two of 160 events below the prespecified 20-bin minimum; 120 seconds was
+the smallest candidate supporting all 160 (minimum 42 bins), so no event was
+dropped or backfilled. This is a documented, outcome-blind design amendment
+made before scoring; it was not preregistered. Ripple bins are removed and the
+68th percentile position
+error is frozen as `decoder_point_spread_cm`. Recovery later stresses 0.5, 1,
+and 2 times that value.
+
+Only eligible moving-RUN holdout bins enter the calibration likelihood. Their
+Poisson likelihoods are evaluated in deterministic chunks of at most 32 time
+bins; a golden test checks equality to selecting the same rows from the former
+dense likelihood. This bounds the temporary `time x cell x spatial-bin`
+allocation without changing the calibration observations or statistic. Runtime
+progress and failures name the session, event, selection rank, valid-bin count,
+cell count, phase timing, and cutoff.
 
 ## Behavioral smoothing field
 

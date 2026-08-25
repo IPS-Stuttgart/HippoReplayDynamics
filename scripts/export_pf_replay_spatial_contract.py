@@ -8,6 +8,7 @@ import hashlib
 import json
 import re
 import sys
+import time
 from collections.abc import Sequence
 from dataclasses import asdict, dataclass, replace
 from datetime import datetime, timezone
@@ -28,6 +29,7 @@ from hipporeplayimm.encoding import (  # noqa: E402
     EmissionConfig,
     EncodingConfig,
     build_emissions,
+    emission_bin_schedule,
     fit_place_field_encoding,
 )
 from hipporeplayimm.replay_spatial_export import (  # noqa: E402
@@ -50,6 +52,10 @@ ROUTE_PROVENANCE_OUTPUT = "replay_spatial_route_manifest.json"
 SCHEMA_VERSION = "bayesian-ach.replay-spatial.v2"
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
 _COMMIT = re.compile(r"^[0-9a-f]{40}$")
+
+
+def _progress(message: str) -> None:
+    print(f"[pf-replay-spatial] {message}", file=sys.stderr, flush=True)
 
 
 @dataclass(frozen=True, slots=True)
@@ -86,11 +92,12 @@ class EventSelectionConfig:
 class PointSpreadConfig:
     """Strictly pre-event temporal holdout for empirical decoder resolution."""
 
-    holdout_window_s: float = 60.0
+    holdout_window_s: float = 120.0
     time_bin_s: float = 0.100
     quantile: float = 0.68
     minimum_valid_bins: int = 20
     minimum_cells: int = 1
+    likelihood_time_chunk_size: int = 32
 
     def validate(self) -> None:
         if not np.isfinite(self.holdout_window_s) or self.holdout_window_s <= 0.0:
@@ -101,6 +108,8 @@ class PointSpreadConfig:
             raise ValueError("quantile must lie in [0.5, 1)")
         if self.minimum_valid_bins < 2 or self.minimum_cells < 1:
             raise ValueError("point-spread minimum counts are invalid")
+        if self.likelihood_time_chunk_size < 1:
+            raise ValueError("likelihood_time_chunk_size must be positive")
 
     def sha256(self) -> str:
         payload = json.dumps(asdict(self), sort_keys=True, separators=(",", ":"))
@@ -433,19 +442,20 @@ def estimate_prefix_decoder_point_spread_cm(
     encoding_config: EncodingConfig,
     emission_config: EmissionConfig,
     config: PointSpreadConfig,
+    *,
+    event_context: str | None = None,
 ) -> tuple[float, dict[str, object]]:
-    """Estimate spatial resolution on a strictly pre-event temporal RUN holdout."""
+    """Estimate resolution from valid bins in a bounded pre-event likelihood."""
 
     config.validate()
+    started = time.perf_counter()
     event_cutoff = float(np.nextafter(float(event_start_s), -np.inf))
     training_cutoff = event_cutoff - config.holdout_window_s
-    encoding = fit_place_field_encoding(
-        session,
-        encoding_config,
-        training_end_s=training_cutoff,
+    context = (
+        f"{session.session_id} event_start_s={event_start_s:.9f}"
+        if event_context is None
+        else event_context
     )
-    if encoding.n_cells < config.minimum_cells:
-        raise ValueError("point-spread calibration has too few prefix-trained cells")
     holdout = RippleEvent(
         start=training_cutoff,
         end=event_cutoff,
@@ -454,36 +464,80 @@ def estimate_prefix_decoder_point_spread_cm(
         z_power_session=0.0,
         z_power_epoch=0.0,
     )
+    _, holdout_times, _ = emission_bin_schedule(
+        holdout.start,
+        holdout.end,
+        config.time_bin_s,
+    )
+    position = _finite_position(session)
+    speed = np.interp(holdout_times, position[:, 0], _speed(position))
+    valid = _times_in_intervals(holdout_times, session.run_times)
+    valid &= speed >= encoding_config.min_speed_cm_s
+    valid &= _outside_ripples(session, holdout_times)
+    valid_count = int(np.sum(valid))
+    _progress(
+        f"{context}: point-spread preflight window_s={config.holdout_window_s:g} "
+        f"valid_bins={valid_count} minimum={config.minimum_valid_bins}"
+    )
+    if valid_count < config.minimum_valid_bins:
+        raise ValueError(
+            f"{context}: point-spread calibration has {valid_count} valid held-out "
+            f"RUN bins in {config.holdout_window_s:g}s; "
+            f"minimum is {config.minimum_valid_bins}"
+        )
+
+    encoding = fit_place_field_encoding(
+        session,
+        encoding_config,
+        training_end_s=training_cutoff,
+    )
+    if encoding.n_cells < config.minimum_cells:
+        raise ValueError(
+            f"{context}: point-spread prefix encoding has {encoding.n_cells} cells; "
+            f"minimum is {config.minimum_cells}; "
+            f"training_cutoff_s={training_cutoff:.9f}"
+        )
     calibration_emissions = build_emissions(
         session,
         encoding,
         holdout,
         replace(emission_config, time_bin_s=config.time_bin_s),
+        time_bin_mask=valid,
+        likelihood_time_chunk_size=config.likelihood_time_chunk_size,
     )
     map_bins = np.argmax(calibration_emissions.log_likelihood, axis=1)
     decoded = encoding.bin_centers[map_bins]
-    position = _finite_position(session)
     actual = np.column_stack(
         [
-            np.interp(calibration_emissions.times, position[:, 0], position[:, axis])
+            np.interp(
+                calibration_emissions.times,
+                position[:, 0],
+                position[:, axis],
+            )
             for axis in (1, 2)
         ]
     )
-    speed = np.interp(calibration_emissions.times, position[:, 0], _speed(position))
-    valid = _times_in_intervals(calibration_emissions.times, session.run_times)
-    valid &= speed >= encoding_config.min_speed_cm_s
-    valid &= _outside_ripples(session, calibration_emissions.times)
-    if int(np.sum(valid)) < config.minimum_valid_bins:
-        raise ValueError("point-spread calibration has too few held-out RUN bins")
-    errors = np.linalg.norm(decoded[valid] - actual[valid], axis=1)
+    errors = np.linalg.norm(decoded - actual, axis=1)
     point_spread = float(np.quantile(errors, config.quantile))
     if not np.isfinite(point_spread) or point_spread <= 0.0:
-        raise ValueError("point-spread calibration did not produce a positive error")
+        raise ValueError(
+            f"{context}: point-spread calibration did not produce a positive "
+            f"error from {valid_count} valid bins"
+        )
+    elapsed = time.perf_counter() - started
+    _progress(
+        f"{context}: point-spread complete cells={encoding.n_cells} "
+        f"spread_cm={point_spread:.6g} elapsed_s={elapsed:.3f}"
+    )
     return point_spread, {
         "point_spread_training_cutoff_s": training_cutoff,
         "point_spread_holdout_end_s": event_cutoff,
-        "point_spread_valid_bins": int(np.sum(valid)),
+        "point_spread_holdout_window_s": config.holdout_window_s,
+        "point_spread_valid_bins": valid_count,
         "point_spread_quantile": config.quantile,
+        "point_spread_likelihood_time_chunk_size": (
+            config.likelihood_time_chunk_size
+        ),
     }
 
 
@@ -595,12 +649,17 @@ def export_event(
     nuisance = np.asarray(encoding.occupancy_s[active], dtype=float)
     nuisance += max(float(np.mean(nuisance)) * 1e-6, np.finfo(float).tiny)
     nuisance /= nuisance.sum()
+    event_context = (
+        f"{session.session_id}:event-{event_index} "
+        f"selection_rank={int(selection['selection_rank'])}"
+    )
     point_spread, point_spread_audit = estimate_prefix_decoder_point_spread_cm(
         session,
         event.start,
         encoding_config,
         emission_config,
         point_spread_config,
+        event_context=event_context,
     )
     completed_routes = session_routes[
         pd.to_numeric(
@@ -764,6 +823,10 @@ def run_export(
     selection_config.validate()
     behavior_config.validate()
     point_spread_config.validate()
+    if point_spread_config.holdout_window_s != 120.0:
+        raise ValueError(
+            "claim-bearing point-spread holdout_window_s is frozen at 120.0"
+        )
     if _SHA256.fullmatch(str(dataset_sha256)) is None:
         raise ValueError("dataset_sha256 must be a lowercase SHA-256 digest")
     git = git_metadata(ROOT)
@@ -786,7 +849,12 @@ def run_export(
     sessions = tuple(sorted(set(routes["session"].astype(str))))
     dataset = Path(dataset_root)
     events: list[ExportedEvent] = []
-    for session_id in sessions:
+    expected_events = len(sessions) * selection_config.events_per_session
+    for session_number, session_id in enumerate(sessions, start=1):
+        session_started = time.perf_counter()
+        _progress(
+            f"session {session_number}/{len(sessions)} {session_id}: load start"
+        )
         session = load_replay_session(dataset / Path(session_id))
         session_routes = routes[routes["session"].astype(str).eq(session_id)].copy()
         session_route_ids = set(session_routes["route_id"].astype(str))
@@ -798,9 +866,22 @@ def run_export(
             session_routes,
             selection_config,
         )
+        _progress(
+            f"session {session_number}/{len(sessions)} {session_id}: "
+            f"selected={len(selections)}"
+        )
         for selection in selections:
-            events.append(
-                export_event(
+            event_started = time.perf_counter()
+            event_index = int(selection["event_index"])
+            selection_rank = int(selection["selection_rank"])
+            ordinal = len(events) + 1
+            context = (
+                f"event {ordinal}/{expected_events} "
+                f"{session_id}:event-{event_index} selection_rank={selection_rank}"
+            )
+            _progress(f"{context}: export start")
+            try:
+                exported = export_event(
                     session,
                     session_routes,
                     session_points,
@@ -810,7 +891,19 @@ def run_export(
                     behavior_config,
                     point_spread_config,
                 )
-            )
+            except Exception as error:
+                elapsed = time.perf_counter() - event_started
+                raise RuntimeError(
+                    f"{context}: export failed after {elapsed:.3f}s: {error}"
+                ) from error
+            events.append(exported)
+            elapsed = time.perf_counter() - event_started
+            _progress(f"{context}: export complete elapsed_s={elapsed:.3f}")
+        session_elapsed = time.perf_counter() - session_started
+        _progress(
+            f"session {session_number}/{len(sessions)} {session_id}: "
+            f"complete elapsed_s={session_elapsed:.3f}"
+        )
 
     arrays = _pack_events(events)
     cohort_payload = [
@@ -980,7 +1073,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--minimum-raw-power", type=float, default=0.0)
     parser.add_argument("--minimum-training-duration-s", type=float, default=300.0)
     parser.add_argument("--minimum-completed-routes", type=int, default=6)
-    parser.add_argument("--point-spread-window-s", type=float, default=60.0)
+    parser.add_argument("--point-spread-window-s", type=float, default=120.0)
     parser.add_argument("--max-events", type=int, default=0)
     return parser.parse_args(argv)
 

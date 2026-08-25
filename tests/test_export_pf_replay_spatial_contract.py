@@ -8,12 +8,21 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from hipporeplayimm.data import ReplaySession
+from hipporeplayimm.data import ReplaySession, RippleEvent
+from hipporeplayimm.encoding import (
+    EmissionConfig,
+    EncodingConfig,
+    build_emissions,
+    emission_bin_schedule,
+    fit_place_field_encoding,
+)
 from scripts.export_pf_replay_spatial_contract import (
     EventSelectionConfig,
     ExportedEvent,
+    PointSpreadConfig,
     _pack_events,
     _require_clean_commit,
+    estimate_prefix_decoder_point_spread_cm,
     select_lfp_only_events,
     verify_dataset_tree,
     verify_route_artifacts,
@@ -71,6 +80,79 @@ def test_event_selection_uses_raw_lfp_power_not_decoder_or_z_score() -> None:
     assert [row["event_index"] for row in selected] == [1, 2]
     assert [row["selection_rank"] for row in selected] == [1, 2]
     assert [row["selection_metric"] for row in selected] == [4.0, 3.0]
+
+
+def test_bounded_selected_emissions_match_dense_source_rows() -> None:
+    session = _selection_session()
+    encoding = fit_place_field_encoding(
+        session,
+        EncodingConfig(min_speed_cm_s=0.0),
+        training_end_s=1.9,
+    )
+    holdout = RippleEvent(
+        start=2.0,
+        end=3.7,
+        peak=2.85,
+        raw_power=0.0,
+        z_power_session=0.0,
+        z_power_epoch=0.0,
+    )
+    config = EmissionConfig(time_bin_s=0.1)
+    dense = build_emissions(session, encoding, holdout, config)
+    _, source_times, _ = emission_bin_schedule(
+        holdout.start,
+        holdout.end,
+        config.time_bin_s,
+    )
+    mask = np.arange(source_times.shape[0]) % 3 != 1
+    bounded = build_emissions(
+        session,
+        encoding,
+        holdout,
+        config,
+        time_bin_mask=mask,
+        likelihood_time_chunk_size=2,
+    )
+
+    np.testing.assert_array_equal(bounded.times, dense.times[mask])
+    np.testing.assert_array_equal(
+        bounded.spike_counts,
+        dense.spike_counts[mask],
+    )
+    np.testing.assert_allclose(
+        bounded.log_likelihood,
+        dense.log_likelihood[mask],
+        rtol=1e-13,
+        atol=1e-13,
+    )
+    assert bounded.metadata["emission_source_time_bins"] == dense.n_time
+    assert bounded.metadata["emission_selected_time_bins"] == int(mask.sum())
+
+
+def test_point_spread_defaults_to_fixed_120_second_holdout() -> None:
+    config = PointSpreadConfig()
+
+    assert config.holdout_window_s == 120.0
+    assert config.likelihood_time_chunk_size == 32
+
+
+def test_point_spread_failure_reports_event_and_support() -> None:
+    context = "RatX/OpenX:event-7 selection_rank=3"
+    with pytest.raises(
+        ValueError,
+        match=r"RatX/OpenX:event-7.*0 valid held-out RUN bins.*minimum is 2",
+    ):
+        estimate_prefix_decoder_point_spread_cm(
+            _selection_session(),
+            event_start_s=5.0,
+            encoding_config=EncodingConfig(min_speed_cm_s=1e6),
+            emission_config=EmissionConfig(),
+            config=PointSpreadConfig(
+                holdout_window_s=1.0,
+                minimum_valid_bins=2,
+            ),
+            event_context=context,
+        )
 
 
 def _event(event_id: str, n_time: int, n_bins: int, well: str) -> ExportedEvent:

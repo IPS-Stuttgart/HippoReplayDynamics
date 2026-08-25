@@ -336,6 +336,10 @@ def apply_runtime_patches() -> None:
     _result_improvement_seed_validation.apply_result_improvement_seed_validation_patch()
     _bidirectional_infinite_evidence_patch.apply_bidirectional_infinite_evidence_patch()
     _evidence_complex_validation.apply_evidence_complex_validation_patch()
+    # Later patches import state-space modules that can retain an earlier helper
+    # alias. Replay the idempotent count patch after those imports so every local
+    # selector points at the active validated implementation.
+    _state_space_bin_count_validation.apply_state_space_bin_count_validation_patch()
 
 
 # Ensure replay dynamics use center-to-center transition durations when replay

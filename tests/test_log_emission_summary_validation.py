@@ -46,6 +46,25 @@ def test_log_emission_tensor_canonicalizes_integral_counts() -> None:
     np.testing.assert_array_equal(emissions.spike_counts, np.array([[1, 0], [0, 2]], dtype=int))
 
 
+def test_log_emission_tensor_preserves_extended_precision_integral_counts() -> None:
+    lower = np.longdouble(str(2**53))
+    exact_count = np.longdouble(str(2**53 + 1))
+    if lower == exact_count:
+        return
+
+    emissions = LogEmissionTensor(
+        log_likelihood=np.zeros((1, 1), dtype=float),
+        spike_counts=np.array([[exact_count]], dtype=np.longdouble),
+        times=np.array([0.0], dtype=float),
+        dt=1.0,
+        cell_ids=np.array([1], dtype=int),
+        n_spikes=exact_count,
+    )
+
+    assert emissions.n_spikes == 2**53 + 1
+    assert emissions.spike_counts.tolist() == [[2**53 + 1]]
+
+
 @pytest.mark.parametrize(
     ("field", "value", "match"),
     [

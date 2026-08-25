@@ -87,8 +87,8 @@ def _top_candidate_indices(log_emission: np.ndarray, top_k: int) -> np.ndarray:
     _reject_boolean_count("top_k", top_k)
     if top_k <= 0 or top_k >= log_emission.shape[0]:
         return np.arange(log_emission.shape[0], dtype=int)
-    selected = np.argpartition(log_emission, -top_k)[-top_k:]
-    return selected[np.argsort(log_emission[selected])[::-1]]
+    indices = np.arange(log_emission.shape[0], dtype=int)
+    return np.asarray(np.lexsort((indices, -log_emission))[:top_k], dtype=int)
 
 
 def _mass_retaining_candidate_indices(

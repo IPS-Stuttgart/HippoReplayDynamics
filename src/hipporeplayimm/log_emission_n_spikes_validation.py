@@ -213,6 +213,12 @@ def _coerce_spike_counts(values: Any) -> np.ndarray:
             count = int(integral)
         elif isinstance(item, _STRING_TYPES):
             count = _coerce_integral_text_count(item, "spike_counts")
+        elif isinstance(item, (float, np.floating)):
+            if not np.isfinite(item) or item < 0:
+                raise ValueError("spike_counts must contain finite nonnegative values")
+            count = int(item)
+            if item != count:
+                raise ValueError("spike_counts must be integer-valued")
         else:
             try:
                 numeric = float(item)
@@ -253,6 +259,13 @@ def _coerce_n_spikes(value: Any) -> int:
         return int(integral)
     if isinstance(item, _STRING_TYPES):
         return _coerce_integral_text_count(item, "n_spikes")
+    if isinstance(item, (float, np.floating)):
+        if not np.isfinite(item) or item < 0:
+            raise ValueError("n_spikes must be finite and nonnegative")
+        count = int(item)
+        if item != count:
+            raise ValueError("n_spikes must be integer-valued")
+        return count
     try:
         numeric = float(item)
     except (TypeError, ValueError, OverflowError) as exc:

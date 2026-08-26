@@ -142,7 +142,12 @@ def build_lower_bound_gap_tables(
         .agg(exact_log_evidence=(value_column, "max"), exact_source_rows=(value_column, "size"))
         .reset_index()
     )
-    keep_columns = [*match_columns, value_column, *_present_columns(truncated, TRUNCATED_DIAGNOSTIC_COLUMNS)]
+    diagnostic_columns = [
+        column
+        for column in _present_columns(truncated, TRUNCATED_DIAGNOSTIC_COLUMNS)
+        if column not in match_columns and column != value_column
+    ]
+    keep_columns = [*match_columns, value_column, *diagnostic_columns]
     truncated = truncated[keep_columns].rename(columns={value_column: "truncated_lower_bound_log_evidence"})
     event_gaps = truncated.merge(exact_summary, on=match_columns, how="inner")
     if event_gaps.empty:

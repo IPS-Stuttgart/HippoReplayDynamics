@@ -23,6 +23,24 @@ def _is_missing_scalar(value: object) -> bool:
     return isinstance(missing, (bool, np.bool_)) and bool(missing)
 
 
+def _contains_boolean(value: object) -> bool:
+    """Return whether an array-like input contains a boolean scalar."""
+
+    if isinstance(value, (bool, np.bool_)):
+        return True
+    if isinstance(value, np.ndarray):
+        if np.issubdtype(value.dtype, np.bool_):
+            return value.size > 0
+        if value.dtype == object:
+            return any(_contains_boolean(item) for item in value.flat)
+        return False
+    if isinstance(value, (pd.Series, pd.Index)):
+        return any(_contains_boolean(item) for item in value.to_numpy(dtype=object).flat)
+    if isinstance(value, (list, tuple)):
+        return any(_contains_boolean(item) for item in value)
+    return False
+
+
 def _coerce_integer_cell_id(value: object) -> int:
     """Return one validated integer cell identifier."""
 
@@ -64,6 +82,11 @@ def _coerce_place_field_numeric_arrays(
     occupancy_s: Any,
 ) -> tuple[np.ndarray, np.ndarray]:
     """Return finite nonnegative place-field rates and occupancies."""
+
+    if _contains_boolean(rates_hz):
+        raise ValueError("rates_hz must contain finite nonnegative values")
+    if _contains_boolean(occupancy_s):
+        raise ValueError("occupancy_s must contain finite nonnegative values")
 
     try:
         rates = np.asarray(rates_hz, dtype=float)

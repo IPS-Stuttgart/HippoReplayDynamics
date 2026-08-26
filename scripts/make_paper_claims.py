@@ -226,10 +226,15 @@ class PaperClaimTables:
 def load_score_tables(paths: Sequence[str | Path]) -> pd.DataFrame:
     """Load one or more score CSVs or directories containing score CSVs."""
 
+    try:
+        from scripts.compare_model_evidence_runs import _read_event_score_csv
+    except ModuleNotFoundError:  # pragma: no cover - direct script execution.
+        from compare_model_evidence_runs import _read_event_score_csv
+
     frames: list[pd.DataFrame] = []
     for raw_path in paths:
         path = _resolve_score_path(Path(raw_path))
-        frame = pd.read_csv(path)
+        frame = _read_event_score_csv(path)
         frame["source_score_file"] = str(path)
         frames.append(frame)
     if not frames:

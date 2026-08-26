@@ -16,6 +16,11 @@ from typing import Sequence
 import numpy as np
 import pandas as pd
 
+try:
+    from scripts.compare_model_evidence_runs import _EVENT_KEY_COLUMNS, _read_event_score_csv
+except ModuleNotFoundError:  # pragma: no cover - direct script execution.
+    from compare_model_evidence_runs import _EVENT_KEY_COLUMNS, _read_event_score_csv
+
 
 EXACT_SUPPORT = "exact_full_grid"
 TRUNCATED_SUPPORT = "truncated_full_grid"
@@ -32,15 +37,7 @@ SCORE_FILENAMES = (
     "simulation_recovery_sweep_event_scores.csv",
 )
 VALUE_COLUMN_CANDIDATES = ("log_evidence", "heldout_log_likelihood", "log_likelihood")
-EVENT_ID_COLUMNS = (
-    "session",
-    "requested_session",
-    "event_index",
-    "simulation_event_index",
-    "benchmark_cell_split_index",
-    "benchmark_cell_split_seed",
-    "random_seed",
-)
+EVENT_ID_COLUMNS = ("requested_session", *_EVENT_KEY_COLUMNS)
 MATCH_PARAMETER_COLUMNS = (
     "time_bin_ms",
     "time_bin_s",
@@ -102,7 +99,7 @@ def load_score_table(path: str | Path) -> pd.DataFrame:
             raise FileNotFoundError(f"{path} does not contain a known score CSV")
     if not path.exists():
         raise FileNotFoundError(f"{path} does not exist")
-    return pd.read_csv(path)
+    return _read_event_score_csv(path)
 
 
 def build_lower_bound_gap_tables(
@@ -145,7 +142,12 @@ def build_lower_bound_gap_tables(
         .agg(exact_log_evidence=(value_column, "max"), exact_source_rows=(value_column, "size"))
         .reset_index()
     )
-    keep_columns = [*match_columns, value_column, *_present_columns(truncated, TRUNCATED_DIAGNOSTIC_COLUMNS)]
+    diagnostic_columns = [
+        column
+        for column in _present_columns(truncated, TRUNCATED_DIAGNOSTIC_COLUMNS)
+        if column not in match_columns and column != value_column
+    ]
+    keep_columns = [*match_columns, value_column, *diagnostic_columns]
     truncated = truncated[keep_columns].rename(columns={value_column: "truncated_lower_bound_log_evidence"})
     event_gaps = truncated.merge(exact_summary, on=match_columns, how="inner")
     if event_gaps.empty:

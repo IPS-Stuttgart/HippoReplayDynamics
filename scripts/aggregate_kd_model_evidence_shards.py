@@ -76,6 +76,25 @@ def _integer_metadata(
     return values
 
 
+def _integer_scalar_metadata(
+    value,
+    *,
+    key: str,
+    path: Path,
+    min_value: int,
+) -> int:
+    """Validate scalar integer shard metadata without coercive truncation."""
+
+    scalar = _np_scalar(value, key=key, path=path)
+    validated = _integer_metadata(
+        np.asarray([scalar]),
+        key=key,
+        path=path,
+        min_value=min_value,
+    )
+    return int(validated[0])
+
+
 def _load_npz(path: Path) -> dict[str, object]:
     with np.load(path, allow_pickle=False) as shard:
         event_ids = _integer_metadata(
@@ -127,18 +146,17 @@ def _load_npz(path: Path) -> dict[str, object]:
             "kd_bin_size_cm": float(
                 _np_scalar(shard["kd_bin_size_cm"], key="kd_bin_size_cm", path=path)
             ),
-            "kd_n_bins": int(
-                _np_scalar(shard["kd_n_bins"], key="kd_n_bins", path=path)
+            "kd_n_bins": _integer_scalar_metadata(
+                shard["kd_n_bins"], key="kd_n_bins", path=path, min_value=1
             ),
-            "kd_n_jobs": int(
-                _np_scalar(shard["kd_n_jobs"], key="kd_n_jobs", path=path)
+            "kd_n_jobs": _integer_scalar_metadata(
+                shard["kd_n_jobs"], key="kd_n_jobs", path=path, min_value=1
             ),
-            "kd_event_chunk_size": int(
-                _np_scalar(
-                    shard["kd_event_chunk_size"],
-                    key="kd_event_chunk_size",
-                    path=path,
-                )
+            "kd_event_chunk_size": _integer_scalar_metadata(
+                shard["kd_event_chunk_size"],
+                key="kd_event_chunk_size",
+                path=path,
+                min_value=1,
             ),
             "kd_spike_rate_scale": float(
                 _np_scalar(

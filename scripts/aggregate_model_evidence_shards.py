@@ -17,6 +17,7 @@ from benchmark_model_evidence import (
     _support_counts,
     _write,
 )
+from compare_model_evidence_runs import _read_event_score_csv
 from hipporeplayimm.result_quality_gates import quality_gate_summary
 from model_evidence_settings import _validate_constant_settings
 from model_evidence_support_audit import write_evidence_support_audit
@@ -46,7 +47,7 @@ def aggregate(shard_glob: str, outdir: Path) -> pd.DataFrame:
 
     frames = []
     for path in paths:
-        frame = pd.read_csv(path)
+        frame = _read_event_score_csv(path)
         if frame.empty:
             continue
         frame["source_shard_file"] = str(path)

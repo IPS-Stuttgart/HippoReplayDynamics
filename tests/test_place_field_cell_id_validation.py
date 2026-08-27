@@ -49,9 +49,11 @@ def test_place_field_quality_preserves_extended_precision_integer_cell_ids():
         (np.array([[1.0, -2.0, 3.0]]), np.ones(3), "rates_hz"),
         (np.array([[1.0, np.nan, 3.0]]), np.ones(3), "rates_hz"),
         (np.array([[1.0, np.inf, 3.0]]), np.ones(3), "rates_hz"),
-        (np.array([[1.0, 2.0, 3.0]]), np.array([1.0, -0.5, 1.0]), "occupancy_s"),
+        (np.array([[1.0 + 0.0j, 2.0, 3.0]]), np.ones(3), "rates_hz"),
+        (np.array([[1.0, 2.0, 3.0]], dtype=object), np.array([1.0, -0.5, 1.0]), "occupancy_s"),
         (np.array([[1.0, 2.0, 3.0]]), np.array([1.0, np.nan, 1.0]), "occupancy_s"),
         (np.array([[1.0, 2.0, 3.0]]), np.array([1.0, np.inf, 1.0]), "occupancy_s"),
+        (np.array([[1.0, 2.0, 3.0]]), np.array([1.0 + 0.0j, 1.0, 1.0]), "occupancy_s"),
     ],
 )
 def test_place_field_quality_rejects_invalid_numeric_inputs(
@@ -61,6 +63,14 @@ def test_place_field_quality_rejects_invalid_numeric_inputs(
 ):
     with pytest.raises(ValueError, match=message):
         place_field_quality_from_arrays(rates_hz, occupancy_s)
+
+
+def test_place_field_quality_rejects_nested_complex_numeric_inputs():
+    rates = np.empty((1, 3), dtype=object)
+    rates[0] = [np.array(1.0 + 0.0j), 2.0, 3.0]
+
+    with pytest.raises(ValueError, match="rates_hz"):
+        place_field_quality_from_arrays(rates, np.ones(3))
 
 
 def test_place_field_quality_preserves_zero_rate_and_zero_occupancy_support():

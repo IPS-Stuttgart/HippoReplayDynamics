@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Iterable
 
@@ -492,6 +493,7 @@ def _normalize_decision_table(
         out["window_role"] = event_class
     if "null_index" not in out:
         out["null_index"] = np.nan
+    out["null_index"] = _nullable_integer_series(out["null_index"])
     out["candidate_id"] = out.apply(_candidate_id, axis=1)
     for column in COMPARISON_COLUMNS:
         if column not in out:
@@ -499,16 +501,53 @@ def _normalize_decision_table(
     return out[list(COMPARISON_COLUMNS)]
 
 
+def _exact_integer_text(value: object) -> str:
+    """Format integral identifiers without a lossy binary64 round-trip."""
+
+    text = str(value).strip()
+    try:
+        numeric = Decimal(text)
+    except InvalidOperation:
+        return str(value)
+    if not numeric.is_finite() or numeric != numeric.to_integral_value():
+        return str(value)
+    return str(int(numeric))
+
+
+def _nullable_integer_series(values: pd.Series) -> pd.Series:
+    """Preserve exact signed-64-bit integer identifiers while retaining missing values."""
+
+    minimum = -(1 << 63)
+    maximum = (1 << 63) - 1
+    parsed: list[int | pd._libs.missing.NAType] = []
+    for value in values:
+        if pd.isna(value):
+            parsed.append(pd.NA)
+            continue
+        text = str(value).strip()
+        try:
+            numeric = Decimal(text)
+        except InvalidOperation:
+            parsed.append(pd.NA)
+            continue
+        if not numeric.is_finite():
+            parsed.append(pd.NA)
+            continue
+        if numeric != numeric.to_integral_value():
+            raise TypeError("null_index must contain integer values")
+        integer = int(numeric)
+        if integer < minimum or integer > maximum:
+            raise TypeError("null_index must fit in signed 64-bit integer range")
+        parsed.append(integer)
+    return pd.Series(pd.array(parsed, dtype="Int64"), index=values.index, name=values.name)
+
+
 def _candidate_id(row: pd.Series) -> str:
     session = str(row.get("session", ""))
     event_index = row.get("event_index", "")
     null_index = row.get("null_index", np.nan)
     if pd.notna(null_index):
-        try:
-            null_text = str(int(float(null_index)))
-        except (TypeError, ValueError):
-            null_text = str(null_index)
-        return f"{session}|event={event_index}|null={null_text}"
+        return f"{session}|event={event_index}|null={_exact_integer_text(null_index)}"
     return f"{session}|event={event_index}"
 
 

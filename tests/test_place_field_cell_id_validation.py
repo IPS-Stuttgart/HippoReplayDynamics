@@ -50,7 +50,7 @@ def test_place_field_quality_preserves_extended_precision_integer_cell_ids():
         (np.array([[1.0, np.nan, 3.0]]), np.ones(3), "rates_hz"),
         (np.array([[1.0, np.inf, 3.0]]), np.ones(3), "rates_hz"),
         (np.array([[1.0 + 0.0j, 2.0, 3.0]]), np.ones(3), "rates_hz"),
-        (np.array([[1.0, 2.0, 3.0]], dtype=object), np.array([1.0, -0.5, 1.0]), "occupancy_s"),
+        (np.array([[1.0, 2.0, 3.0]]), np.array([1.0, -0.5, 1.0]), "occupancy_s"),
         (np.array([[1.0, 2.0, 3.0]]), np.array([1.0, np.nan, 1.0]), "occupancy_s"),
         (np.array([[1.0, 2.0, 3.0]]), np.array([1.0, np.inf, 1.0]), "occupancy_s"),
         (np.array([[1.0, 2.0, 3.0]]), np.array([1.0 + 0.0j, 1.0, 1.0]), "occupancy_s"),

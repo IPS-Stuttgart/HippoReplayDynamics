@@ -41,6 +41,24 @@ def _contains_boolean(value: object) -> bool:
     return False
 
 
+def _contains_complex(value: object) -> bool:
+    """Return whether an array-like input contains a complex scalar."""
+
+    if isinstance(value, (complex, np.complexfloating)):
+        return True
+    if isinstance(value, np.ndarray):
+        if np.issubdtype(value.dtype, np.complexfloating):
+            return value.size > 0
+        if value.dtype == object:
+            return any(_contains_complex(item) for item in value.flat)
+        return False
+    if isinstance(value, (pd.Series, pd.Index)):
+        return any(_contains_complex(item) for item in value.to_numpy(dtype=object).flat)
+    if isinstance(value, (list, tuple)):
+        return any(_contains_complex(item) for item in value)
+    return False
+
+
 def _coerce_integer_cell_id(value: object) -> int:
     """Return one validated integer cell identifier."""
 
@@ -83,9 +101,9 @@ def _coerce_place_field_numeric_arrays(
 ) -> tuple[np.ndarray, np.ndarray]:
     """Return finite nonnegative place-field rates and occupancies."""
 
-    if _contains_boolean(rates_hz):
+    if _contains_boolean(rates_hz) or _contains_complex(rates_hz):
         raise ValueError("rates_hz must contain finite nonnegative values")
-    if _contains_boolean(occupancy_s):
+    if _contains_boolean(occupancy_s) or _contains_complex(occupancy_s):
         raise ValueError("occupancy_s must contain finite nonnegative values")
 
     try:

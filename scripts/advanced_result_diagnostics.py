@@ -15,6 +15,7 @@ from hipporeplayimm.advanced_result_diagnostics import (
     evidence_margin_table,
     hierarchical_bootstrap,
     hierarchical_summary,
+    infer_paired_model_group_cols,
     leave_one_group_influence,
     model_disagreement_events,
     paired_model_margin_decisions,
@@ -30,6 +31,19 @@ from hipporeplayimm.advanced_result_diagnostics import (
     wrong_map_family_margin_difference_in_differences_summary,
     write_dashboard,
 )
+
+
+def _paired_group_cols_from_arg(value: str, scores: pd.DataFrame) -> tuple[str, ...]:
+    """Resolve explicit paired-event columns or infer the full available scope."""
+
+    normalized = str(value).strip()
+    if not normalized or normalized.lower() == "auto":
+        return infer_paired_model_group_cols(scores)
+    columns = tuple(column.strip() for column in normalized.split(",") if column.strip())
+    missing = [column for column in columns if column not in scores.columns]
+    if missing:
+        raise KeyError(f"scores is missing requested paired grouping columns: {missing}")
+    return columns
 
 
 def main() -> int:
@@ -52,8 +66,11 @@ def main() -> int:
     parser.add_argument("--paired-margin-threshold", type=float, default=0.0)
     parser.add_argument(
         "--paired-group-cols",
-        default="session,event_index",
-        help="Comma-separated columns defining one paired decision row.",
+        default="auto",
+        help=(
+            "Comma-separated columns defining one paired decision row. "
+            "The default 'auto' keeps available matrix/seed/event scope columns separate."
+        ),
     )
     parser.add_argument("--paired-true-model-column", default="")
     parser.add_argument("--paired-positive-true-label", default="")
@@ -84,7 +101,7 @@ def main() -> int:
     provenance_audit(scores, provenance).to_csv(out / "provenance_audit.csv", index=False)
 
     if args.paired_positive_model and args.paired_reference_model:
-        paired_group_cols = tuple(col.strip() for col in args.paired_group_cols.split(",") if col.strip())
+        paired_group_cols = _paired_group_cols_from_arg(args.paired_group_cols, scores)
         paired_decisions = paired_model_margin_decisions(
             scores,
             positive_model=args.paired_positive_model,

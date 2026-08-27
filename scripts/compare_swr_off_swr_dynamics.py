@@ -519,20 +519,22 @@ def _nullable_integer_series(values: pd.Series) -> pd.Series:
 
     minimum = -(1 << 63)
     maximum = (1 << 63) - 1
+    missing_text = {"", "nan", "na", "n/a", "none", "null", "<na>"}
     parsed: list[int | pd._libs.missing.NAType] = []
     for value in values:
         if pd.isna(value):
             parsed.append(pd.NA)
             continue
         text = str(value).strip()
+        if text.lower() in missing_text:
+            parsed.append(pd.NA)
+            continue
         try:
             numeric = Decimal(text)
-        except InvalidOperation:
-            parsed.append(pd.NA)
-            continue
+        except (InvalidOperation, ValueError) as exc:
+            raise TypeError("null_index must contain integer values") from exc
         if not numeric.is_finite():
-            parsed.append(pd.NA)
-            continue
+            raise TypeError("null_index must contain finite integer values")
         if numeric != numeric.to_integral_value():
             raise TypeError("null_index must contain integer values")
         integer = int(numeric)

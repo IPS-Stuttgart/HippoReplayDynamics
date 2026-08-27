@@ -165,7 +165,7 @@ def _parse_integer_identifier(value: object, *, name: str) -> int:
     if isinstance(current, (int, np.integer)):
         return int(current)
     if isinstance(current, (float, np.floating)):
-        if not np.isfinite(current) or not float(current).is_integer():
+        if not bool(np.isfinite(current)) or not bool(current.is_integer()):
             raise ValueError(f"{name} must contain finite integer identifiers")
         return int(current)
     if isinstance(current, (complex, np.complexfloating)):

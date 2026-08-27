@@ -2,6 +2,7 @@ import sys
 from pathlib import Path
 
 import pandas as pd
+import pytest
 
 sys.path.append(str(Path(__file__).resolve().parents[1] / "scripts"))
 
@@ -13,6 +14,7 @@ from compare_swr_off_swr_dynamics import (  # noqa: E402
     PROMOTED_OFF_SWR_CLASS,
     STATIONARY_MODEL,
     _candidate_id,
+    _nullable_integer_series,
     build_comparison_table,
 )
 
@@ -42,6 +44,18 @@ def test_candidate_id_preserves_adjacent_large_integer_null_indices():
     assert lower_id == f"Rat1/Open1|event=10|null={lower}"
     assert upper_id == f"Rat1/Open1|event=10|null={upper}"
     assert lower_id != upper_id
+
+
+def test_nullable_integer_series_rejects_nonmissing_invalid_identifier():
+    with pytest.raises(TypeError, match="null_index must contain integer values"):
+        _nullable_integer_series(pd.Series(["candidate-A"]))
+
+
+def test_nullable_integer_series_keeps_textual_missing_values_nullable():
+    values = _nullable_integer_series(pd.Series(["", "nan", "none", pd.NA]))
+
+    assert str(values.dtype) == "Int64"
+    assert values.isna().all()
 
 
 def test_comparison_preserves_large_null_indices_across_swr_concat():
@@ -94,3 +108,34 @@ def test_comparison_preserves_large_null_indices_across_swr_concat():
         f"Rat1/Open1|event=10|null={lower}",
         f"Rat1/Open1|event=10|null={upper}",
     ]
+
+
+def test_comparison_rejects_nonmissing_invalid_off_swr_null_index():
+    swr = pd.DataFrame(
+        _model_rows(
+            {
+                "status": "success",
+                "session": "Rat1/Open1",
+                "event_index": 1,
+                "evidence_comparable": True,
+            }
+        )
+    )
+    off = pd.DataFrame(
+        _model_rows(
+            {
+                "status": "success",
+                "session": "Rat1/Open1",
+                "event_index": 10,
+                "window_role": "promoted_off_swr_candidate",
+                "null_index": "candidate-A",
+                "evidence_comparable": True,
+            }
+        )
+    )
+
+    with pytest.raises(TypeError, match="null_index must contain integer values"):
+        build_comparison_table(
+            swr_event_model_evidence=swr,
+            off_swr_event_model_evidence=off,
+        )

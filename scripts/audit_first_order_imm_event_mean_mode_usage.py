@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 from collections.abc import Iterable
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
 import numpy as np
@@ -34,6 +35,7 @@ REQUIRED_EXACT_CORE_MODELS = (
 DEFAULT_GROUP_COLUMNS = ("session", "event_index")
 OFF_SWR_GROUP_COLUMNS = ("session", "event_index", "null_index")
 LEGACY_SUCCESS_STATUS_VALUES = {"", "nan", "none", "null", "na", "n/a", "<na>"}
+_IDENTIFIER_COLUMNS = ("event_index", "null_index", "source_event_index")
 
 EVENT_COLUMNS = (
     "event_class",
@@ -144,8 +146,63 @@ def _first_value(group: pd.DataFrame, column: str, default: object = "") -> obje
     return "" if pd.isna(value) else value
 
 
+def _parse_integer_identifier(value: object, *, name: str) -> int:
+    """Parse an integer identifier without truncation or float round-trips."""
+
+    current = value
+    seen: set[int] = set()
+    while isinstance(current, np.ndarray):
+        if current.ndim != 0:
+            raise ValueError(f"{name} must contain scalar integer identifiers")
+        marker = id(current)
+        if marker in seen:
+            raise ValueError(f"{name} must contain scalar integer identifiers")
+        seen.add(marker)
+        current = current.item()
+
+    if isinstance(current, (bool, np.bool_)):
+        raise ValueError(f"{name} must contain integer identifiers, not booleans")
+    if isinstance(current, (int, np.integer)):
+        return int(current)
+    if isinstance(current, (float, np.floating)):
+        if not np.isfinite(current) or not float(current).is_integer():
+            raise ValueError(f"{name} must contain finite integer identifiers")
+        return int(current)
+    if isinstance(current, (complex, np.complexfloating)):
+        raise ValueError(f"{name} must contain real integer identifiers")
+
+    text = str(current).strip()
+    if not text:
+        raise ValueError(f"{name} must contain integer identifiers")
+    try:
+        numeric = Decimal(text)
+    except (InvalidOperation, ValueError) as exc:
+        raise ValueError(f"{name} must contain integer identifiers") from exc
+    if not numeric.is_finite():
+        raise ValueError(f"{name} must contain finite integer identifiers")
+    integer = numeric.to_integral_value()
+    if numeric != integer:
+        raise ValueError(f"{name} must contain integer identifiers")
+    return int(integer)
+
+
+def _parse_optional_integer_identifier(value: object, *, name: str) -> object:
+    try:
+        if pd.isna(value):
+            return pd.NA
+    except (TypeError, ValueError):
+        pass
+    if isinstance(value, str) and not value.strip():
+        return pd.NA
+    return _parse_integer_identifier(value, name=name)
+
+
+def _read_identifier_preserving_csv(path: Path) -> pd.DataFrame:
+    return pd.read_csv(path, dtype={column: "string" for column in _IDENTIFIER_COLUMNS})
+
+
 def _read_event_model_evidence(path: Path) -> pd.DataFrame:
-    frame = pd.read_csv(path)
+    frame = _read_identifier_preserving_csv(path)
     required = {"session", "event_index", "model", "log_evidence"}
     missing = sorted(required.difference(frame.columns))
     if missing:
@@ -154,9 +211,13 @@ def _read_event_model_evidence(path: Path) -> pd.DataFrame:
         frame = frame[_successful_status_mask(frame["status"])].copy()
     frame["session"] = frame["session"].astype(str)
     frame["rat"] = frame["session"].map(_rat_from_session)
-    frame["event_index"] = pd.to_numeric(frame["event_index"], errors="raise").astype(int)
+    frame["event_index"] = frame["event_index"].map(lambda value: _parse_integer_identifier(value, name="event_index"))
     if "null_index" in frame:
-        frame["null_index"] = pd.to_numeric(frame["null_index"], errors="coerce")
+        frame["null_index"] = frame["null_index"].map(lambda value: _parse_optional_integer_identifier(value, name="null_index"))
+    if "source_event_index" in frame:
+        frame["source_event_index"] = frame["source_event_index"].map(
+            lambda value: _parse_optional_integer_identifier(value, name="source_event_index")
+        )
     frame["model"] = frame["model"].astype(str)
     frame["log_evidence"] = pd.to_numeric(frame["log_evidence"], errors="coerce")
     frame = frame.dropna(subset=["log_evidence"]).copy()
@@ -195,10 +256,7 @@ def _candidate_id(group: pd.DataFrame, session: str, event_index: int) -> str:
     null_index = _first_value(group, "null_index", "")
     if null_index == "":
         return f"{session}|event={event_index}"
-    try:
-        null_label = int(float(null_index))
-    except (TypeError, ValueError):
-        null_label = str(null_index)
+    null_label = _parse_integer_identifier(null_index, name="null_index")
     return f"{session}|event={event_index}|null={null_label}"
 
 
@@ -207,7 +265,8 @@ def _source_event_group(group: pd.DataFrame, session: str, event_index: int) -> 
     if explicit:
         return str(explicit)
     source_event = _first_value(group, "source_event_index", event_index)
-    return f"{session}|event={int(float(source_event))}"
+    source_event_index = _parse_integer_identifier(source_event, name="source_event_index")
+    return f"{session}|event={source_event_index}"
 
 
 def _row_status(row: dict[str, object]) -> str:
@@ -239,7 +298,7 @@ def build_event_mean_mode_usage_event_summary(
     rows: list[dict[str, object]] = []
     for _, group in evidence.groupby(list(group_columns), sort=True, dropna=False):
         session = str(group.iloc[0]["session"])
-        event_index = int(group.iloc[0]["event_index"])
+        event_index = _parse_integer_identifier(group.iloc[0]["event_index"], name="event_index")
         winner, margin = _best_exact_core(group)
         mean_stationary = _diag_value(group, FIRST_ORDER_IMM, "diagnostic_state_space_mode_stationary_event_probability")
         mean_diffusion = _diag_value(group, FIRST_ORDER_IMM, "diagnostic_state_space_mode_diffusion_event_probability")
@@ -270,12 +329,14 @@ def build_event_mean_mode_usage_event_summary(
             and np.isfinite(fraction_map_nonstationary)
             and fraction_map_nonstationary >= 0.5
         )
+        raw_null_index = _first_value(group, "null_index", "")
+        null_index = "" if raw_null_index == "" else _parse_integer_identifier(raw_null_index, name="null_index")
         row = {
             "event_class": event_class,
             "session": session,
             "rat": _rat_from_session(session),
             "event_index": event_index,
-            "null_index": _first_value(group, "null_index", ""),
+            "null_index": null_index,
             "candidate_id": _candidate_id(group, session, event_index),
             "source_event_group": _source_event_group(group, session, event_index),
             "selection_rule": selection_rule or str(_first_value(group, "selection_rule", "")),
@@ -423,8 +484,8 @@ def _selected_one_per_source_evidence(
     evidence = promoted_evidence.copy()
     for frame in (selected, evidence):
         frame["session"] = frame["session"].astype(str)
-        frame["event_index"] = pd.to_numeric(frame["event_index"], errors="raise").astype(int)
-        frame["null_index"] = pd.to_numeric(frame["null_index"], errors="raise").astype(int)
+        frame["event_index"] = frame["event_index"].map(lambda value: _parse_integer_identifier(value, name="event_index"))
+        frame["null_index"] = frame["null_index"].map(lambda value: _parse_integer_identifier(value, name="null_index"))
     selected_columns = [
         column
         for column in ("session", "event_index", "null_index", "source_event_group_id", "selection_rule")
@@ -516,7 +577,9 @@ def main(argv: list[str] | None = None) -> int:
         promoted_off_swr_event_model_evidence=_read_event_model_evidence(Path(args.promoted_off_swr_event_model_evidence))
         if args.promoted_off_swr_event_model_evidence
         else None,
-        one_per_source_decisions=pd.read_csv(args.one_per_source_decisions) if args.one_per_source_decisions else None,
+        one_per_source_decisions=_read_identifier_preserving_csv(Path(args.one_per_source_decisions))
+        if args.one_per_source_decisions
+        else None,
         one_per_source_selection_rule=args.one_per_source_selection_rule,
         output=Path(args.output),
         path_threshold_cm=args.path_threshold_cm,

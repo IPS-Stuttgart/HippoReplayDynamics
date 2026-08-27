@@ -2,6 +2,7 @@ import sys
 from pathlib import Path
 
 import pandas as pd
+import pytest
 
 sys.path.append(str(Path(__file__).resolve().parents[1] / "scripts"))
 
@@ -122,6 +123,36 @@ def test_event_mean_evidence_reader_keeps_blank_status_rows(tmp_path):
     assert set(loaded["model"]) == set(legacy_rows["model"])
 
 
+def test_event_mean_evidence_reader_rejects_fractional_event_index(tmp_path):
+    evidence = pd.DataFrame(_event("Rat1/Open1", 0, first_order=80.0))
+    evidence["event_index"] = "7.5"
+    path = tmp_path / "event_model_evidence.csv"
+    evidence.to_csv(path, index=False)
+
+    with pytest.raises(ValueError, match="event_index"):
+        _read_event_model_evidence(path)
+
+
+def test_event_mean_evidence_reader_preserves_large_integer_identifiers(tmp_path):
+    event_index = 9_007_199_254_740_993
+    source_event_index = 9_007_199_254_740_995
+    evidence = pd.DataFrame(_event("Rat1/Open1", 0, first_order=80.0))
+    evidence["event_index"] = str(event_index)
+    evidence["source_event_index"] = str(source_event_index)
+    path = tmp_path / "event_model_evidence.csv"
+    evidence.to_csv(path, index=False)
+
+    loaded = _read_event_model_evidence(path)
+    event_summary = build_event_mean_mode_usage_event_summary(
+        loaded,
+        event_class="detected_replay_or_swr",
+    )
+
+    assert int(loaded.iloc[0]["event_index"]) == event_index
+    assert event_summary.iloc[0]["candidate_id"] == f"Rat1/Open1|event={event_index}"
+    assert event_summary.iloc[0]["source_event_group"] == f"Rat1/Open1|event={source_event_index}"
+
+
 def test_event_mean_mode_usage_audit_keeps_off_swr_candidates_distinct(tmp_path):
     promoted = pd.DataFrame(
         [
@@ -164,6 +195,54 @@ def test_event_mean_mode_usage_audit_keeps_off_swr_candidates_distinct(tmp_path)
     assert set(promoted_rows["null_index"].astype(int)) == {2, 4}
     assert len(one_per_rows) == 1
     assert int(one_per_rows.iloc[0]["null_index"]) == 2
+
+
+def test_event_mean_mode_usage_audit_matches_large_null_ids_exactly(tmp_path):
+    event_index = 1093
+    first_null = 9_007_199_254_740_992
+    selected_null = 9_007_199_254_740_993
+    promoted = pd.DataFrame(
+        [
+            *_tag_candidate(
+                _event("Rat2/Open1", event_index, first_order=90.0),
+                null_index=first_null,
+            ),
+            *_tag_candidate(
+                _event("Rat2/Open1", event_index, first_order=85.0),
+                null_index=selected_null,
+            ),
+        ]
+    )
+    promoted["null_index"] = promoted["null_index"].astype(str)
+    detected = pd.DataFrame(_event("Rat1/Open1", 0, first_order=80.0))
+    decisions = pd.DataFrame(
+        [
+            {
+                "selection_rule": "strongest_exact_margin",
+                "source_event_group_id": f"Rat2/Open1|event={event_index}",
+                "session": "Rat2/Open1",
+                "event_index": str(event_index),
+                "null_index": str(selected_null),
+            }
+        ]
+    )
+
+    outputs = write_event_mean_mode_usage_audit(
+        event_model_evidence=detected,
+        promoted_off_swr_event_model_evidence=promoted,
+        one_per_source_decisions=decisions,
+        output=tmp_path,
+    )
+    event_summary = outputs["first_order_imm_mode_usage_event_summary.csv"]
+    promoted_rows = event_summary[event_summary["event_class"].eq("promoted_off_swr")]
+    one_per_rows = event_summary[event_summary["event_class"].eq("promoted_off_swr_one_per_source")]
+
+    assert set(promoted_rows["candidate_id"]) == {
+        f"Rat2/Open1|event={event_index}|null={first_null}",
+        f"Rat2/Open1|event={event_index}|null={selected_null}",
+    }
+    assert len(one_per_rows) == 1
+    assert one_per_rows.iloc[0]["candidate_id"] == f"Rat2/Open1|event={event_index}|null={selected_null}"
 
 
 def _event(

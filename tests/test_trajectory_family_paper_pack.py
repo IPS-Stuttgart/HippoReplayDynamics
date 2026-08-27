@@ -225,3 +225,40 @@ def test_require_controls_rejects_missing_control_paths(tmp_path):
             code_commit="test-commit",
             require_controls=True,
         )
+
+
+def test_full_core_reader_preserves_large_decimal_event_identifiers(tmp_path):
+    lower = 2**53
+    upper = lower + 1
+    values = {
+        STATIONARY: 0.0,
+        DIFFUSION: 15.0,
+        FRAGMENTED: 12.0,
+        FIRST_ORDER_IMM: 30.0,
+        MOMENTUM: 14.0,
+    }
+    rows: list[dict[str, object]] = []
+    for event_index in (lower, upper):
+        event_rows = _event_rows("Rat1/Open1", 0, values)
+        for row in event_rows:
+            # Decimal-style integer text forces plain pandas CSV inference through
+            # binary64, where adjacent identifiers above 2**53 collapse.
+            row["event_index"] = f"{event_index}.0"
+        rows.extend(event_rows)
+
+    full_core = tmp_path / "full-core"
+    _write_full_core_artifact(full_core, rows)
+    output = tmp_path / "paper-pack"
+
+    manifest = build_trajectory_family_paper_pack(
+        full_core_artifact=full_core,
+        output=output,
+        confidence_threshold=0.0,
+        n_bootstrap=5,
+        random_seed=1,
+        code_commit="test-commit",
+    )
+
+    assert int(manifest["event_count"]) == 2
+    summary = pd.read_csv(output / "main_trajectory_family_summary.csv")
+    assert int(summary.loc[0, "events"]) == 2

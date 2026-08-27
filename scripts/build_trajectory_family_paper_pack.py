@@ -55,6 +55,11 @@ except ModuleNotFoundError:  # pragma: no cover
         rat_exact_trajectory_nontrajectory_margin_summary,
     )
 
+try:
+    from scripts.compare_model_evidence_runs import _read_event_score_csv
+except ModuleNotFoundError:  # pragma: no cover
+    from compare_model_evidence_runs import _read_event_score_csv
+
 FULL_CORE_EVENT_TABLE_CANDIDATES = (
     "all_sessions_event_model_evidence.csv",
     "event_model_evidence.csv",
@@ -182,7 +187,7 @@ def build_trajectory_family_paper_pack(
 
     full_core_path = Path(full_core_artifact)
     full_core_csv = _resolve_csv(full_core_path, FULL_CORE_EVENT_TABLE_CANDIDATES)
-    scores = pd.read_csv(full_core_csv)
+    scores = _read_event_score_csv(full_core_csv)
     _validate_event_scores(scores, full_core_csv)
 
     trajectory_decisions = exact_trajectory_nontrajectory_margin_decisions(

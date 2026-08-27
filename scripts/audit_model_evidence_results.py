@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
 import pandas as pd
@@ -14,11 +15,75 @@ from hipporeplayimm.result_quality_audit import (
     write_result_quality_audit,
 )
 
+_MISSING_IDENTIFIER_TEXT = {"", "nan", "na", "n/a", "none", "null", "<na>"}
+_INTEGER_AUDIT_KEY_COLUMNS = (
+    "event_index",
+    "window_index",
+    "null_index",
+    "matched_null_rank",
+    "template_event_index",
+    "random_seed",
+    "null_random_seed",
+    "cell_split_index",
+    "cell_split_seed",
+    "cell_split_count",
+    "cell_split_shard_index",
+    "cell_split_shard_count",
+    "split_shard_index",
+    "split_shard_count",
+    "train_cell_count",
+    "test_cell_count",
+    "benchmark_random_seed",
+    "benchmark_cell_split_index",
+    "benchmark_cell_split_seed",
+    "benchmark_event_subset_seed",
+    "benchmark_event_subset_base_seed",
+    "benchmark_cell_split_strata",
+)
+
+
+def _exact_integer_identifier(value: object, column: str) -> object:
+    """Return one exact integer audit key while preserving missing values."""
+
+    if pd.isna(value):
+        return pd.NA
+    text = str(value).strip()
+    if text.lower() in _MISSING_IDENTIFIER_TEXT:
+        return pd.NA
+    try:
+        numeric = Decimal(text)
+    except (InvalidOperation, ValueError) as exc:
+        raise ValueError(f"{column} must contain finite integer identifiers") from exc
+    if not numeric.is_finite():
+        raise ValueError(f"{column} must contain finite integer identifiers")
+    integral = numeric.to_integral_value()
+    if numeric != integral:
+        raise ValueError(f"{column} must contain integer-valued identifiers")
+    return int(integral)
+
+
+def _read_audit_csv(path: str | Path) -> pd.DataFrame:
+    """Read audit inputs without rounding nullable integer scope identifiers."""
+
+    frame = pd.read_csv(
+        path,
+        dtype={column: "string" for column in _INTEGER_AUDIT_KEY_COLUMNS},
+    )
+    for column in _INTEGER_AUDIT_KEY_COLUMNS:
+        if column not in frame.columns:
+            continue
+        frame[column] = pd.Series(
+            [_exact_integer_identifier(value, column) for value in frame[column]],
+            index=frame.index,
+            dtype=object,
+        )
+    return frame
+
 
 def _optional_frame(path: str | None) -> pd.DataFrame | None:
     if path is None or not str(path).strip():
         return None
-    return pd.read_csv(path)
+    return _read_audit_csv(path)
 
 
 def _optional_json(path: str | None) -> dict[str, object] | None:
@@ -60,7 +125,7 @@ def main() -> int:
         top_k=args.top_calibrations,
     )
     dashboard = write_result_quality_audit(
-        pd.read_csv(args.scores),
+        _read_audit_csv(args.scores),
         args.output,
         common_support_scores=_optional_frame(args.common_support_scores),
         observation_sweep_summary=_optional_frame(args.observation_sweep_summary),

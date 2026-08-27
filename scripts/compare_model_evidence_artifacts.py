@@ -119,7 +119,14 @@ def compare_artifacts(
     left_best = event_best_models(left_scores, left_label)
     right_best = event_best_models(right_scores, right_label)
     left_best, right_best = _align_event_key_columns(left_best, right_best, event_key)
-    best_comparison = left_best.merge(right_best, on=event_key, how="inner")
+    _require_unique_alignment_rows(left_best, event_key, label=left_label)
+    _require_unique_alignment_rows(right_best, event_key, label=right_label)
+    best_comparison = left_best.merge(
+        right_best,
+        on=event_key,
+        how="inner",
+        validate="one_to_one",
+    )
     if not best_comparison.empty:
         best_comparison["canonical_best_agree"] = (
             best_comparison[f"{left_label}_canonical_best_model"]
@@ -393,7 +400,14 @@ def shared_relative_evidence(
         }
     )
     left_rel, right_rel = _align_event_key_columns(left_rel, right_rel, event_key)
-    joined = left_rel.merge(right_rel, on=key, how="inner")
+    _require_unique_alignment_rows(left_rel, key, label=f"{left_label} relative-evidence rows")
+    _require_unique_alignment_rows(right_rel, key, label=f"{right_label} relative-evidence rows")
+    joined = left_rel.merge(
+        right_rel,
+        on=key,
+        how="inner",
+        validate="one_to_one",
+    )
     joined[delta_col] = (
         joined[f"{right_label}_relative_log_evidence"]
         - joined[f"{left_label}_relative_log_evidence"]
@@ -562,6 +576,23 @@ def _align_event_key_columns(
         left[column] = left[column].astype(object)
         right[column] = right[column].astype(object)
     return left, right
+
+
+def _require_unique_alignment_rows(frame: pd.DataFrame, key: list[str], *, label: str) -> None:
+    """Reject comparisons where dropping unavailable metadata makes event alignment ambiguous."""
+
+    if frame.empty:
+        return
+    duplicate_mask = frame.duplicated(subset=key, keep=False)
+    if not bool(duplicate_mask.any()):
+        return
+    examples = frame.loc[duplicate_mask, key].drop_duplicates().head(5).to_dict(orient="records")
+    raise ValueError(
+        f"{label} cannot be aligned uniquely on shared comparison key {key}: "
+        "multiple rows collapse to the same key. This usually means a populated event "
+        "discriminator is missing from the other run. "
+        f"Example duplicate keys: {examples}"
+    )
 
 
 def main() -> int:

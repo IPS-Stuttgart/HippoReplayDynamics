@@ -56,3 +56,26 @@ def test_event_selection_rejects_malformed_indices_in_selected_session() -> None
 
     with pytest.raises(ValueError, match="event_index values for session 'Rat1/Open1' must be numeric"):
         module._select_event_scores(scores, session="Rat1/Open1", event_index=7)
+
+
+def test_csv_event_selection_preserves_adjacent_large_indices(tmp_path: Path) -> None:
+    module = _load_plot_module()
+    earlier = 2**53
+    target = earlier + 1
+    scores_path = tmp_path / "scores.csv"
+    scores_path.write_text(
+        "session,event_index,model,log_evidence\n"
+        f"Rat1/Open1,{earlier},earlier,1.0\n"
+        "Rat1/Open1,,missing,2.0\n"
+        f"Rat1/Open1,{target},exact,3.0\n",
+        encoding="utf-8",
+    )
+
+    scores = module._read_scores(scores_path)
+    selected = module._select_event_scores(
+        scores,
+        session="Rat1/Open1",
+        event_index=target,
+    )
+
+    assert selected["model"].tolist() == ["exact"]

@@ -7,7 +7,8 @@ Pandas cannot use those objects directly in ``drop_duplicates`` or ``groupby``.
 This compatibility patch adds private hashable scope-key columns for grouping
 while preserving the original cell-ID columns for downstream held-out decoding.
 It also keeps integral shuffle-scope identifiers exact instead of routing them
-through binary64 and potentially merging distinct values above ``2**53``.
+through binary64 and rejects ambiguous shuffle scopes when a discriminator is
+missing from one side of a real/control comparison.
 """
 
 from __future__ import annotations
@@ -22,6 +23,7 @@ import pandas as pd
 _GROUP_COLUMN_PREFIX = "__cell_split_scope_key__"
 _HASHABLE_GROUPING_PATCH_FLAG = "_cell_split_hashable_grouping_patch_applied"
 _SHUFFLE_SCOPE_INTEGER_PATCH_FLAG = "_shuffle_scope_exact_integer_patch_applied"
+_SHUFFLE_SCOPE_ALIGNMENT_PATCH_FLAG = "_shuffle_scope_alignment_patch_applied"
 
 
 def _function_is_from_this_patch(function: object) -> bool:
@@ -47,12 +49,15 @@ def _metadata_grouping_patch_is_current(metadata: Any) -> bool:
 
 
 def _shuffle_scope_integer_patch_is_current(shuffle_controls: Any) -> bool:
-    """Return whether the exact-integer shuffle scope wrapper is still live."""
+    """Return whether both shuffle-scope wrappers are still live."""
 
     if not getattr(shuffle_controls, _SHUFFLE_SCOPE_INTEGER_PATCH_FLAG, False):
         return False
-    return _function_is_from_this_patch(
-        getattr(shuffle_controls, "_numeric_scope_label", None)
+    if not getattr(shuffle_controls, _SHUFFLE_SCOPE_ALIGNMENT_PATCH_FLAG, False):
+        return False
+    return all(
+        _function_is_from_this_patch(getattr(shuffle_controls, name, None))
+        for name in ("_numeric_scope_label", "_shuffle_p_value_group_columns")
     )
 
 
@@ -132,26 +137,88 @@ def apply_cell_split_hashable_grouping_patch() -> None:
 
 
 def _apply_shuffle_scope_exact_integer_patch() -> None:
-    """Preserve exact integer identifiers in shuffle-control grouping keys."""
+    """Preserve exact shuffle identities and reject ambiguous scope alignment."""
 
     from . import shuffle_controls
 
     if _shuffle_scope_integer_patch_is_current(shuffle_controls):
         return
 
-    original_numeric_scope_label = shuffle_controls._numeric_scope_label
+    current_numeric_scope_label = shuffle_controls._numeric_scope_label
+    if _function_is_from_this_patch(current_numeric_scope_label):
+        numeric_scope_label = current_numeric_scope_label
+    else:
+        original_numeric_scope_label = current_numeric_scope_label
 
-    def numeric_scope_label(value: object) -> str | None:
-        if isinstance(value, (bool, np.bool_)):
-            return None
-        try:
-            integer = operator.index(value)
-        except TypeError:
-            return original_numeric_scope_label(value)
-        return str(int(integer))
+        def numeric_scope_label(value: object) -> str | None:
+            if isinstance(value, (bool, np.bool_)):
+                return None
+            try:
+                integer = operator.index(value)
+            except TypeError:
+                return original_numeric_scope_label(value)
+            return str(int(integer))
+
+    current_group_columns = shuffle_controls._shuffle_p_value_group_columns
+    if _function_is_from_this_patch(current_group_columns):
+        shuffle_p_value_group_columns = current_group_columns
+    else:
+        original_group_columns = current_group_columns
+
+        def shuffle_p_value_group_columns(
+            real_scores: pd.DataFrame,
+            control_scores: pd.DataFrame,
+        ) -> list[str]:
+            columns = original_group_columns(real_scores, control_scores)
+            for column in shuffle_controls._SHUFFLE_P_VALUE_SCOPE_COLUMNS:
+                in_real = column in real_scores.columns
+                in_control = column in control_scores.columns
+                if in_real == in_control:
+                    continue
+                source = real_scores if in_real else control_scores
+                source_name = "real_scores" if in_real else "control_scores"
+                missing_name = "control_scores" if in_real else "real_scores"
+                if _shuffle_scope_column_varies_within_groups(
+                    source,
+                    column,
+                    columns,
+                    shuffle_controls,
+                ):
+                    raise ValueError(
+                        f"{source_name} contains multiple {column} values within one "
+                        f"shared shuffle scope, but {missing_name} is missing {column}; "
+                        f"add {column} to both score tables or compute each scope separately"
+                    )
+            return columns
 
     shuffle_controls._numeric_scope_label = numeric_scope_label
+    shuffle_controls._shuffle_p_value_group_columns = shuffle_p_value_group_columns
     setattr(shuffle_controls, _SHUFFLE_SCOPE_INTEGER_PATCH_FLAG, True)
+    setattr(shuffle_controls, _SHUFFLE_SCOPE_ALIGNMENT_PATCH_FLAG, True)
+
+
+def _shuffle_scope_column_varies_within_groups(
+    frame: pd.DataFrame,
+    column: str,
+    group_columns: list[str],
+    shuffle_controls: Any,
+) -> bool:
+    """Return whether an omitted discriminator varies inside a shared scope."""
+
+    if frame.empty:
+        return False
+    shared_keys = shuffle_controls._scope_keys(frame, group_columns)
+    scope_labels = frame[column].map(shuffle_controls._scope_label)
+    probe = pd.DataFrame(
+        {
+            "shared_key": list(shared_keys),
+            "scope_label": list(scope_labels),
+        }
+    )
+    counts = probe.groupby("shared_key", sort=False, dropna=False)["scope_label"].nunique(
+        dropna=False
+    )
+    return bool((counts > 1).any())
 
 
 def _with_hashable_scope_keys(frame: pd.DataFrame, metadata: Any) -> pd.DataFrame:

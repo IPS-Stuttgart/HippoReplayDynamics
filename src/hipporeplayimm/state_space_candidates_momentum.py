@@ -88,7 +88,7 @@ def _score_momentum_candidates(
             valid_bin_mask=valid_bin_mask,
         )
 
-    trajectory = np.full((emissions.n_time, emissions.n_bins), LOG_ZERO, dtype=float)
+    trajectory = np.full((emissions.n_time, emissions.n_bins), -np.inf, dtype=float)
     for pair_index, (alpha, beta) in enumerate(zip(pair_alphas, pair_betas, strict=True)):
         pair_log_posterior = alpha + beta - logp
         if pair_index == 0:

@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 from decimal import Decimal, InvalidOperation
+from functools import wraps
+from pathlib import Path
 from typing import Any
 
 import numpy as np
+import pandas as pd
 
 
 _PATCHED_FLAG = "_ground_truth_strict_integer_metadata_patch_applied"
@@ -15,7 +18,34 @@ _WINDOW_FLOAT_WRAPPER_MARKER = "_hipporeplayimm_ground_truth_window_unique_float
 _CELL_SPLIT_STRATA_WRAPPER_MARKER = (
     "_hipporeplayimm_ground_truth_integer_metadata_cell_split_strata"
 )
+_COMPARE_SCORES_WRAPPER_MARKER = (
+    "_hipporeplayimm_ground_truth_integer_metadata_compare_scores_csv"
+)
 _CELL_ID_PATCHED_FLAG = "_ground_truth_strict_cell_id_metadata_patch_applied"
+_MISSING_TEXT_VALUES = frozenset({"", "na", "n/a", "nan", "none", "null", "<na>"})
+_GROUND_TRUTH_INTEGER_SCORE_COLUMNS = (
+    "simulation_random_seed",
+    "random_seed",
+    "benchmark_random_seed",
+    "null_random_seed",
+    "benchmark_event_subset_seed",
+    "simulation_event_index",
+    "event_index",
+    "window_index",
+    "null_index",
+    "matched_null_rank",
+    "template_event_index",
+    "benchmark_cell_split_index",
+    "cell_split_index",
+    "benchmark_cell_split_seed",
+    "cell_split_seed",
+    "benchmark_cell_split_strata",
+    "cell_split_count",
+    "cell_split_shard_index",
+    "cell_split_shard_count",
+    "split_shard_index",
+    "split_shard_count",
+)
 
 
 def apply_ground_truth_integer_metadata_patch() -> None:
@@ -23,6 +53,7 @@ def apply_ground_truth_integer_metadata_patch() -> None:
 
     from . import ground_truth as gt
 
+    _patch_compare_scores_csv_read(gt)
     _patch_window_float_metadata()
     _patch_cell_split_strata_metadata()
 
@@ -71,6 +102,69 @@ def apply_ground_truth_integer_metadata_patch() -> None:
         gt._parse_cell_ids = parse_cell_ids
 
     setattr(gt, _PATCHED_FLAG, True)
+
+
+def _patch_compare_scores_csv_read(gt: Any) -> None:
+    """Preserve exact integer identity columns before ground-truth decoding."""
+
+    current = gt.compare_scores_to_ground_truth
+    if getattr(current, _COMPARE_SCORES_WRAPPER_MARKER, False):
+        return
+
+    @wraps(current)
+    def compare_scores_to_ground_truth_exact_integer_csv(
+        root: str | Path,
+        scores: str | Path | pd.DataFrame,
+        *args: Any,
+        **kwargs: Any,
+    ) -> pd.DataFrame:
+        if not isinstance(scores, pd.DataFrame):
+            scores = _read_ground_truth_score_csv(scores)
+        return current(root, scores, *args, **kwargs)
+
+    setattr(
+        compare_scores_to_ground_truth_exact_integer_csv,
+        _COMPARE_SCORES_WRAPPER_MARKER,
+        True,
+    )
+    gt.compare_scores_to_ground_truth = compare_scores_to_ground_truth_exact_integer_csv
+
+
+def _read_ground_truth_score_csv(path: str | Path) -> pd.DataFrame:
+    """Read score CSVs without float-rounding integer event/scope identifiers."""
+
+    frame = pd.read_csv(
+        path,
+        dtype={column: "string" for column in _GROUND_TRUTH_INTEGER_SCORE_COLUMNS},
+    )
+    for column in _GROUND_TRUTH_INTEGER_SCORE_COLUMNS:
+        if column not in frame.columns:
+            continue
+        frame[column] = pd.Series(
+            [
+                (
+                    pd.NA
+                    if _is_missing_integer_metadata_value(value)
+                    else _parse_integer_metadata_value(column, value)
+                )
+                for value in frame[column]
+            ],
+            index=frame.index,
+            dtype=object,
+        )
+    return frame
+
+
+def _is_missing_integer_metadata_value(value: Any) -> bool:
+    if value is None or value is pd.NA:
+        return True
+    try:
+        missing = pd.isna(value)
+    except (TypeError, ValueError):
+        missing = False
+    if isinstance(missing, (bool, np.bool_)) and bool(missing):
+        return True
+    return isinstance(value, str) and value.strip().lower() in _MISSING_TEXT_VALUES
 
 
 def _patch_window_float_metadata() -> None:

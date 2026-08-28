@@ -103,6 +103,27 @@ def _candidate_log_masses_for_model(emissions, candidates: list[np.ndarray]) -> 
     return _candidate_log_masses(emissions.log_likelihood, candidates)
 
 
+def _exact_candidate_trajectory_support(
+    trajectory: np.ndarray,
+    candidates: list[np.ndarray],
+) -> np.ndarray:
+    """Return normalized log marginals with exact zero outside candidate support."""
+
+    values = np.asarray(trajectory, dtype=float).copy()
+    if values.ndim != 2 or values.shape[0] != len(candidates):
+        raise ValueError("candidate trajectory must contain one row per candidate support")
+
+    for time_index, current in enumerate(candidates):
+        support = np.zeros(values.shape[1], dtype=bool)
+        support[np.asarray(current, dtype=np.intp)] = True
+        values[time_index, ~support] = -np.inf
+        normalizer = logsumexp(values[time_index, support])
+        if not np.isfinite(normalizer):
+            raise ValueError(f"candidate trajectory row {time_index} has no finite posterior mass")
+        values[time_index, support] -= normalizer
+    return values
+
+
 def _is_full_grid_candidate_support(candidates: list[np.ndarray], n_time: int, n_bins: int) -> bool:
     """Return whether every time bin retains each spatial bin exactly once."""
 
@@ -214,12 +235,14 @@ def _patch_duration_occupancy_candidate_masses() -> None:
                 time_scales=time_scales,
                 valid_bin_mask=valid_bin_mask,
             )
-            if valid_bin_mask is not None and int(getattr(emissions, "n_time", 0)) > 1:
-                masses = _candidate_log_masses_on_active_support(
-                    emissions.log_likelihood,
-                    candidates,
-                    valid_bin_mask,
-                )
+            if int(getattr(emissions, "n_time", 0)) > 1:
+                trajectory = _exact_candidate_trajectory_support(trajectory, candidates)
+                if valid_bin_mask is not None:
+                    masses = _candidate_log_masses_on_active_support(
+                        emissions.log_likelihood,
+                        candidates,
+                        valid_bin_mask,
+                    )
             return logp, trajectory, masses
 
         setattr(score_momentum_duration, _DURATION_MOMENTUM_WRAPPER_ATTR, True)
@@ -261,12 +284,14 @@ def _patch_duration_occupancy_candidate_masses() -> None:
                 mode_transitions=mode_transitions,
                 valid_bin_mask=valid_bin_mask,
             )
-            if valid_bin_mask is not None and int(getattr(emissions, "n_time", 0)) > 1:
-                masses = _candidate_log_masses_on_active_support(
-                    emissions.log_likelihood,
-                    candidates,
-                    valid_bin_mask,
-                )
+            if int(getattr(emissions, "n_time", 0)) > 1:
+                trajectory = _exact_candidate_trajectory_support(trajectory, candidates)
+                if valid_bin_mask is not None:
+                    masses = _candidate_log_masses_on_active_support(
+                        emissions.log_likelihood,
+                        candidates,
+                        valid_bin_mask,
+                    )
             return logp, trajectory, mode_posterior, masses
 
         setattr(score_imm_duration, _DURATION_IMM_WRAPPER_ATTR, True)

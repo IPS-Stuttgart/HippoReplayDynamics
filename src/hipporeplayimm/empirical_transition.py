@@ -67,7 +67,9 @@ def _validated_transition_matrix(transition: csr_matrix, n_bins: int) -> csr_mat
     if np.any(data < 0.0):
         raise ValueError("transition matrix entries must be nonnegative")
 
-    column_sums = np.asarray(matrix.sum(axis=0)).ravel().astype(float)
+    # Sum after conversion to floating point. Sparse integer reductions otherwise
+    # keep the integer dtype and can wrap around before the stochasticity check.
+    column_sums = np.asarray(matrix.astype(float).sum(axis=0)).ravel()
     if not np.all(np.isfinite(column_sums)):
         raise ValueError("transition matrix column sums must be finite")
     if not np.allclose(column_sums, 1.0, rtol=1e-10, atol=1e-12):

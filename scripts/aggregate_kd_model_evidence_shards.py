@@ -42,6 +42,10 @@ def _integer_metadata(
         raise TypeError(
             f"Momentum shard {key} must contain integer values, not booleans: {path}"
         )
+    if np.issubdtype(raw.dtype, np.complexfloating):
+        raise TypeError(
+            f"Momentum shard {key} must contain real integer values, not complex values: {path}"
+        )
     if not np.issubdtype(raw.dtype, np.number):
         raise TypeError(
             f"Momentum shard {key} must contain numeric integer values: {path}"
@@ -181,6 +185,10 @@ def _coerce_grid_index_array(shard: dict[str, object], key: str) -> np.ndarray:
     if np.issubdtype(raw.dtype, np.bool_):
         raise TypeError(
             f"Momentum shard {key} must contain integer grid indices, not booleans: {shard['path']}"
+        )
+    if np.issubdtype(raw.dtype, np.complexfloating):
+        raise TypeError(
+            f"Momentum shard {key} must contain real integer grid indices, not complex values: {shard['path']}"
         )
     if not np.issubdtype(raw.dtype, np.number):
         raise TypeError(

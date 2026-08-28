@@ -295,6 +295,10 @@ def _coerce_ripple_index(index: Any, ripple_count: int) -> int:
         raise TypeError("ripple index must be an integer")
     if isinstance(item, (int, np.integer)):
         resolved = int(item)
+    elif isinstance(item, Decimal):
+        if not item.is_finite() or item != item.to_integral_value():
+            raise TypeError("ripple index must be an integer")
+        resolved = int(item)
     elif isinstance(item, np.floating):
         if not np.isfinite(item) or not bool(np.equal(item, np.trunc(item))):
             raise TypeError("ripple index must be an integer")
@@ -352,6 +356,8 @@ def _ripple_index_scalar_item(value: Any) -> Any | None:
             return None
         if item is raw:
             return None
+        if item is current:
+            return item if isinstance(item, Decimal) else None
         current = item
 
 
@@ -381,7 +387,7 @@ def _is_boolean_scalar(value: Any) -> bool:
             item = raw.item()
         except (TypeError, ValueError):
             return False
-        if item is raw:
+        if item is raw or item is current:
             return False
         current = item
 

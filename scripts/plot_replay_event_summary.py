@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
 import matplotlib.pyplot as plt
@@ -14,18 +15,36 @@ from scipy.special import logsumexp
 from hipporeplayimm.trajectory_metrics import trajectory_quality_metrics
 
 
+def _read_scores(path: str | Path) -> pd.DataFrame:
+    """Read score rows without float-rounding nullable event identifiers."""
+
+    return pd.read_csv(path, dtype={"event_index": "string"})
+
+
 def _select_event_scores(scores: pd.DataFrame, *, session: str, event_index: int) -> pd.DataFrame:
     """Select one event without lossy integer coercion of other score rows."""
 
     session_scores = scores.loc[scores["session"].astype(str) == session]
     if session_scores.empty:
         return session_scores
-    try:
-        numeric_event_indices = pd.to_numeric(session_scores["event_index"], errors="raise")
-    except (TypeError, ValueError) as exc:
-        raise ValueError(f"event_index values for session {session!r} must be numeric") from exc
-    exact_match = numeric_event_indices.eq(event_index).fillna(False)
-    return session_scores.loc[exact_match]
+
+    target = Decimal(event_index)
+    exact_match: list[bool] = []
+    for value in session_scores["event_index"]:
+        try:
+            missing = pd.isna(value)
+        except (TypeError, ValueError):
+            missing = False
+        if isinstance(missing, (bool, np.bool_)) and bool(missing):
+            exact_match.append(False)
+            continue
+        try:
+            numeric = Decimal(str(value).strip())
+        except (InvalidOperation, ValueError) as exc:
+            raise ValueError(f"event_index values for session {session!r} must be numeric") from exc
+        exact_match.append(bool(numeric.is_finite() and numeric == target))
+
+    return session_scores.loc[pd.Series(exact_match, index=session_scores.index, dtype=bool)]
 
 
 def main() -> int:
@@ -37,7 +56,7 @@ def main() -> int:
     parser.add_argument("--output", required=True)
     args = parser.parse_args()
 
-    scores = pd.read_csv(args.scores)
+    scores = _read_scores(args.scores)
     event_scores = _select_event_scores(scores, session=args.session, event_index=args.event_index)
     if event_scores.empty:
         raise SystemExit("No score rows matched the requested event.")

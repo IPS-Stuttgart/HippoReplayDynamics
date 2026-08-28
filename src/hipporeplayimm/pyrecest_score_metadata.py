@@ -136,6 +136,24 @@ def apply_pyrecest_score_metadata_patch() -> None:
     gt._pyrecest_score_metadata_patch_applied = True
 
 
+def _event_time_millisecond_offset(value: object) -> int:
+    """Round one event timestamp to milliseconds without narrowing wide floats."""
+
+    if isinstance(value, np.floating):
+        try:
+            wider_than_float64 = np.finfo(value.dtype).nmant > np.finfo(float).nmant
+        except ValueError:
+            wider_than_float64 = False
+        if wider_than_float64:
+            whole_seconds = int(np.trunc(value))
+            fractional_seconds = value - type(value)(whole_seconds)
+            fractional_milliseconds = int(
+                np.rint(fractional_seconds * type(value)(1000))
+            )
+            return whole_seconds * 1000 + fractional_milliseconds
+    return int(round(float(value) * 1000.0))
+
+
 def _patch_event_seed(pyrecest_models: object) -> None:
     current = pyrecest_models._event_seed
     if getattr(current, _EVENT_SEED_WRAPPER_MARKER, False):
@@ -147,7 +165,7 @@ def _patch_event_seed(pyrecest_models: object) -> None:
         seed = _nonnegative_integer_seed(random_seed, "random_seed")
         event_offset = 0
         if emissions.times.size:
-            event_offset = int(round(float(emissions.times[0]) * 1000.0))
+            event_offset = _event_time_millisecond_offset(emissions.times[0])
         return int((seed + event_offset + 1009 * emissions.n_time) % _EVENT_SEED_MODULUS)
 
     setattr(event_seed, _EVENT_SEED_WRAPPER_MARKER, True)

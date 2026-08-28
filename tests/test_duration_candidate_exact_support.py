@@ -53,7 +53,7 @@ def test_duration_aware_candidate_trajectory_uses_exact_support(mode: str) -> No
         return_trajectory=True,
     )
 
-    assert np.isfinite(score.log_evidence)
+    assert np.isfinite(score.log_likelihood)
     trajectory = score.trajectory_log_posterior
     assert trajectory is not None
     for time_index, candidate in enumerate(candidates):

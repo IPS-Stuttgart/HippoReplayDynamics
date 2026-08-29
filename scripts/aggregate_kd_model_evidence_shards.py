@@ -267,6 +267,7 @@ def _load_momentum_grid(
         raise ValueError("Momentum shard files did not contain any events.")
     event_row = {int(event_id): row_index for row_index, event_id in enumerate(event_ids)}
     grid = np.full((event_ids.shape[0], sd_meters.shape[0], decay.shape[0]), np.nan, dtype=float)
+    filled = np.zeros(grid.shape, dtype=bool)
     n_time = np.full(event_ids.shape[0], -1, dtype=int)
     n_spikes = np.full(event_ids.shape[0], -1, dtype=int)
     runtime_s_by_event = np.zeros(event_ids.shape[0], dtype=float)
@@ -320,15 +321,21 @@ def _load_momentum_grid(
             for column, (sd_index, decay_index) in enumerate(
                 zip(sd_indices, decay_indices, strict=True)
             ):
-                target = grid[row, int(sd_index), int(decay_index)]
-                value = float(values[local_row, column])
-                if np.isfinite(target):
+                grid_index = (row, int(sd_index), int(decay_index))
+                if filled[grid_index]:
                     raise ValueError(
                         f"Duplicate momentum score for event {int(event_id)}, "
                         f"grid ({sd_index}, {decay_index}) in {shard['path']}"
                     )
-                grid[row, int(sd_index), int(decay_index)] = value
-    missing = np.argwhere(~np.isfinite(grid))
+                value = float(values[local_row, column])
+                if np.isnan(value) or np.isposinf(value):
+                    raise ValueError(
+                        "Momentum shard values must be finite or -inf log evidence in "
+                        f"{shard['path']}"
+                    )
+                grid[grid_index] = value
+                filled[grid_index] = True
+    missing = np.argwhere(~filled)
     if missing.size:
         raise ValueError(f"Momentum shards did not cover {missing.shape[0]} event/grid entries.")
     metadata["n_time"] = n_time

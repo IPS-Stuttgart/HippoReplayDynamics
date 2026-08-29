@@ -15,6 +15,7 @@ from compare_swr_off_swr_dynamics import (  # noqa: E402
     STATIONARY_MODEL,
     _candidate_id,
     _nullable_integer_series,
+    _read_required_csv,
     build_comparison_table,
 )
 
@@ -44,6 +45,48 @@ def test_candidate_id_preserves_adjacent_large_integer_null_indices():
     assert lower_id == f"Rat1/Open1|event=10|null={lower}"
     assert upper_id == f"Rat1/Open1|event=10|null={upper}"
     assert lower_id != upper_id
+
+
+def test_required_csv_preserves_large_event_keys_when_column_has_missing_value(tmp_path):
+    lower = 2**53
+    upper = lower + 1
+    rows = [
+        *_model_rows(
+            {
+                "status": "success",
+                "session": "Rat1/Open1",
+                "event_index": str(lower),
+                "evidence_comparable": True,
+            }
+        ),
+        {
+            "status": "success",
+            "session": "Rat1/Open1",
+            "event_index": "",
+            "evidence_comparable": True,
+            "model": "ignored-missing-event-key",
+            "log_evidence": 0.0,
+        },
+        *_model_rows(
+            {
+                "status": "success",
+                "session": "Rat1/Open1",
+                "event_index": str(upper),
+                "evidence_comparable": True,
+            }
+        ),
+    ]
+    path = tmp_path / "swr.csv"
+    pd.DataFrame(rows).to_csv(path, index=False)
+
+    loaded = _read_required_csv(path)
+    comparison = build_comparison_table(
+        swr_event_model_evidence=loaded,
+        off_swr_event_model_evidence=pd.DataFrame(),
+    )
+
+    assert str(loaded["event_index"].dtype).startswith("string")
+    assert comparison["event_index"].tolist() == [lower, upper]
 
 
 def test_nullable_integer_series_rejects_nonmissing_invalid_identifier():

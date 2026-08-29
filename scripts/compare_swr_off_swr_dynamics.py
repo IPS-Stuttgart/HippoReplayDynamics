@@ -151,18 +151,19 @@ BEHAVIOR_COLUMNS = (
 )
 
 GATE_COLUMNS = ("gate", "passed", "observed", "criterion", "required_for_overall")
+_EXACT_INTEGER_KEY_DTYPES = {"event_index": "string", "null_index": "string"}
 
 
 def _read_required_csv(path: Path) -> pd.DataFrame:
     if not path.exists():
         raise FileNotFoundError(f"required input table is missing: {path}")
-    return pd.read_csv(path)
+    return pd.read_csv(path, dtype=_EXACT_INTEGER_KEY_DTYPES)
 
 
 def _read_optional_csv(path: Path | None) -> pd.DataFrame:
     if path is None or not path.exists():
         return pd.DataFrame()
-    return pd.read_csv(path)
+    return pd.read_csv(path, dtype=_EXACT_INTEGER_KEY_DTYPES)
 
 
 def _numeric(frame: pd.DataFrame, column: str) -> pd.Series:

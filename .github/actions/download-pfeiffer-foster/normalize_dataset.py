@@ -22,13 +22,32 @@ def looks_like_dataset(path: Path) -> bool:
     return False
 
 
+def find_dataset_roots(staging_dir: Path) -> list[Path]:
+    """Return valid dataset roots, including roots below archive/WebDAV wrappers."""
+
+    candidates = [staging_dir, staging_dir / "DataSetFromPfeifferFoster"]
+    candidates.extend(
+        session.parent.parent
+        for session in staging_dir.rglob("Rat*/Open*")
+        if session.is_dir()
+    )
+
+    matches: list[Path] = []
+    seen: set[Path] = set()
+    for candidate in candidates:
+        if candidate in seen:
+            continue
+        seen.add(candidate)
+        if looks_like_dataset(candidate):
+            matches.append(candidate)
+    return matches
+
+
 def main() -> None:
     dataset_root = Path(os.environ["DATASET_ROOT"])
     staging_dir = Path(os.environ["RUNNER_TEMP"]) / "pfeiffer-foster-webdav"
 
-    candidates = [staging_dir, staging_dir / "DataSetFromPfeifferFoster"]
-    candidates.extend(child for child in staging_dir.iterdir() if child.is_dir())
-    matches = [candidate for candidate in candidates if looks_like_dataset(candidate)]
+    matches = find_dataset_roots(staging_dir)
     if not matches:
         visible = sorted(
             str(path.relative_to(staging_dir))

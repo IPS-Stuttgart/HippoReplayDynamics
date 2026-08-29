@@ -151,18 +151,19 @@ BEHAVIOR_COLUMNS = (
 )
 
 GATE_COLUMNS = ("gate", "passed", "observed", "criterion", "required_for_overall")
+_EXACT_INTEGER_KEY_DTYPES = {"event_index": "string", "null_index": "string"}
 
 
 def _read_required_csv(path: Path) -> pd.DataFrame:
     if not path.exists():
         raise FileNotFoundError(f"required input table is missing: {path}")
-    return pd.read_csv(path)
+    return pd.read_csv(path, dtype=_EXACT_INTEGER_KEY_DTYPES)
 
 
 def _read_optional_csv(path: Path | None) -> pd.DataFrame:
     if path is None or not path.exists():
         return pd.DataFrame()
-    return pd.read_csv(path)
+    return pd.read_csv(path, dtype=_EXACT_INTEGER_KEY_DTYPES)
 
 
 def _numeric(frame: pd.DataFrame, column: str) -> pd.Series:
@@ -675,7 +676,7 @@ def rat_session_summary(comparison: pd.DataFrame) -> pd.DataFrame:
                 "exact_sparse_momentum_best_events": int(best.eq(DEFAULT_MARGIN_POSITIVE_MODEL).sum()),
                 "immobile_events": int(group["run_or_immobility_state"].astype(str).eq("immobile").sum()),
                 "running_events": int(group["run_or_immobility_state"].astype(str).eq("run").sum()),
-                "median_mean_speed_cm_s": _safe_median(group["mean_speed_cm_s"]),
+                "median_mean_speed_cm_s": _safe_median(group["mean_mean_speed_cm_s"] if "mean_mean_speed_cm_s" in group else group["mean_speed_cm_s"]),
             }
         )
     return pd.DataFrame(rows, columns=list(RAT_SESSION_COLUMNS))

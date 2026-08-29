@@ -244,11 +244,12 @@ def _diag_value(group: pd.DataFrame, model: str, column: str) -> float:
 
 def _best_exact_core(group: pd.DataFrame) -> tuple[str, float]:
     exact = group[group["model"].isin(REQUIRED_EXACT_CORE_MODELS) & _bool_column(group, "evidence_comparable")].copy()
-    if exact.empty:
+    present_models = set(exact["model"].astype(str))
+    if not set(REQUIRED_EXACT_CORE_MODELS).issubset(present_models):
         return "", float("nan")
     exact = exact.sort_values("log_evidence", ascending=False)
     winner = str(exact.iloc[0]["model"])
-    margin = float(exact.iloc[0]["log_evidence"] - exact.iloc[1]["log_evidence"]) if len(exact) > 1 else float("nan")
+    margin = float(exact.iloc[0]["log_evidence"] - exact.iloc[1]["log_evidence"])
     return winner, margin
 
 

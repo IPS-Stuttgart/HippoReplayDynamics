@@ -676,7 +676,7 @@ def rat_session_summary(comparison: pd.DataFrame) -> pd.DataFrame:
                 "exact_sparse_momentum_best_events": int(best.eq(DEFAULT_MARGIN_POSITIVE_MODEL).sum()),
                 "immobile_events": int(group["run_or_immobility_state"].astype(str).eq("immobile").sum()),
                 "running_events": int(group["run_or_immobility_state"].astype(str).eq("run").sum()),
-                "median_mean_speed_cm_s": _safe_median(group["mean_mean_speed_cm_s"] if "mean_mean_speed_cm_s" in group else group["mean_speed_cm_s"]),
+                "median_mean_speed_cm_s": _safe_median(group["mean_speed_cm_s"]),
             }
         )
     return pd.DataFrame(rows, columns=list(RAT_SESSION_COLUMNS))

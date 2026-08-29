@@ -16,6 +16,7 @@ from typing import Iterable
 import numpy as np
 import pandas as pd
 
+from compare_model_evidence_runs import _read_event_score_csv
 from hipporeplayimm.evidence_reporting import (
     EXACT_EVIDENCE_SUPPORT,
     TRUNCATED_EVIDENCE_SUPPORT,
@@ -35,7 +36,7 @@ _AUDIT_FILENAMES = {
 
 
 def _successful_rows(scores: pd.DataFrame) -> pd.DataFrame:
-    """Return successful rows with finite evidence-support metadata attached."""
+    """Return successful rows with valid evidence-support metadata attached."""
 
     rows = ensure_evidence_support_columns(scores)
     if rows.empty:
@@ -43,8 +44,8 @@ def _successful_rows(scores: pd.DataFrame) -> pd.DataFrame:
     rows = rows[_status_success_mask(rows)].copy()
     if "log_evidence" in rows:
         log_evidence = pd.to_numeric(rows["log_evidence"], errors="coerce")
-        finite = log_evidence.notna() & np.isfinite(log_evidence.astype(float))
-        rows = rows.loc[finite].copy()
+        valid = log_evidence.notna() & ~np.isposinf(log_evidence.astype(float))
+        rows = rows.loc[valid].copy()
         rows["log_evidence"] = log_evidence.loc[rows.index].astype(float)
     rows["evidence_comparable"] = _coerce_bool_series(rows["evidence_comparable"])
     return rows
@@ -355,7 +356,7 @@ def main() -> int:
     )
     args = parser.parse_args()
 
-    scores = pd.read_csv(args.scores_csv)
+    scores = _read_event_score_csv(Path(args.scores_csv))
     outputs = write_evidence_support_audit(scores, Path(args.output))
     print(outputs["warnings"])
     return 0

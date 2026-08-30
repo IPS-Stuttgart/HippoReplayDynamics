@@ -1,0 +1,52 @@
+name: Apply exact event ID comparison fix
+
+on:
+  push:
+    branches:
+      - fix/artifact-event-id-precision
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Apply parser fix
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path("scripts/compare_model_evidence_artifacts.py")
+          text = path.read_text(encoding="utf-8")
+          old = '''    frame = pd.read_csv(
+              path,
+              dtype={column: "string" for column in _INTEGER_EVENT_KEY_COLUMNS},
+          )'''
+          new = '''    exact_dtypes = {column: "string" for column in _INTEGER_EVENT_KEY_COLUMNS}
+              # ``event_id`` may be textual, but numeric-looking nullable IDs must not
+              # be inferred as float64 because that rounds adjacent values above 2**53.
+              exact_dtypes["event_id"] = "string"
+              frame = pd.read_csv(path, dtype=exact_dtypes)'''
+          if text.count(old) != 1:
+              raise SystemExit(f"expected one parser block, found {text.count(old)}")
+          path.write_text(text.replace(old, new), encoding="utf-8")
+
+          workflow = Path(".github/workflows/chatgpt-exact-event-id-patch.yml")
+          workflow.unlink()
+          PY
+          python -m py_compile scripts/compare_model_evidence_artifacts.py
+
+      - name: Commit fix
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add scripts/compare_model_evidence_artifacts.py .github/workflows/chatgpt-exact-event-id-patch.yml
+          git commit -m "Preserve exact event IDs in artifact comparison"
+          git push origin HEAD:fix/artifact-event-id-precision

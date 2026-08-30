@@ -1,0 +1,65 @@
+name: Format exact event ID comparison fix
+
+on:
+  push:
+    branches:
+      - fix/artifact-event-id-precision
+
+permissions:
+  contents: write
+
+jobs:
+  format-patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Format parser patch
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path("scripts/compare_model_evidence_artifacts.py")
+          text = path.read_text(encoding="utf-8")
+          old = '''        dtype={
+              column: "string"
+              for column in (*_INTEGER_EVENT_KEY_COLUMNS, "event_id")
+          },'''
+          # YAML strips the common block indentation from the heredoc, so match
+          # the actual source indentation explicitly after checkout.
+          if text.count(old) != 0:
+              pass
+          else:
+              old = '''        dtype={
+          column: "string"
+          for column in (*_INTEGER_EVENT_KEY_COLUMNS, "event_id")
+      },'''
+          if text.count(old) != 0:
+              pass
+          else:
+              old = '''        dtype={
+    column: "string"
+    for column in (*_INTEGER_EVENT_KEY_COLUMNS, "event_id")
+},'''
+          new = '''        dtype={
+            column: "string"
+            for column in (*_INTEGER_EVENT_KEY_COLUMNS, "event_id")
+        },'''
+          if text.count(old) != 1:
+              raise SystemExit(f"expected one patched dtype block, found {text.count(old)}")
+          path.write_text(text.replace(old, new), encoding="utf-8")
+          Path(".github/workflows/chatgpt-format-event-id-patch.yml").unlink()
+          PY
+          python -m py_compile scripts/compare_model_evidence_artifacts.py
+
+      - name: Commit formatting fix
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add scripts/compare_model_evidence_artifacts.py .github/workflows/chatgpt-format-event-id-patch.yml
+          git commit -m "Format exact event ID parser change"
+          git push origin HEAD:fix/artifact-event-id-precision

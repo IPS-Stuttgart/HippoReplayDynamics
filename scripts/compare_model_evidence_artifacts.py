@@ -220,7 +220,10 @@ def _read_score_csv(path: Path) -> pd.DataFrame:
 
     frame = pd.read_csv(
         path,
-        dtype={column: "string" for column in _INTEGER_EVENT_KEY_COLUMNS},
+        dtype={
+    column: "string"
+    for column in (*_INTEGER_EVENT_KEY_COLUMNS, "event_id")
+},
     )
     for column in _INTEGER_EVENT_KEY_COLUMNS:
         if column not in frame.columns:

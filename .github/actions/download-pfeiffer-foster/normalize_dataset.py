@@ -58,6 +58,13 @@ def main() -> None:
             "Could not find a Pfeiffer-Foster dataset root after WebDAV download. "
             f"Visible directories: {visible}"
         )
+    if len(matches) > 1:
+        relative_matches = sorted(str(path.relative_to(staging_dir)) for path in matches)
+        raise SystemExit(
+            "Found multiple Pfeiffer-Foster dataset roots after WebDAV download; "
+            "refusing to choose one based on filesystem traversal order. "
+            f"Matches: {relative_matches}"
+        )
 
     source = matches[0]
     dataset_root.parent.mkdir(parents=True, exist_ok=True)

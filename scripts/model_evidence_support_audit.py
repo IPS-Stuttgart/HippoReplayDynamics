@@ -355,7 +355,7 @@ def main() -> int:
     )
     args = parser.parse_args()
 
-    scores = pd.read_csv(args.scores_csv)
+    scores = pd.read_csv(args.scores_csv, dtype={"event_index": "Int64"})
     outputs = write_evidence_support_audit(scores, Path(args.output))
     print(outputs["warnings"])
     return 0

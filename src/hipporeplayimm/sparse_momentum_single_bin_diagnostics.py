@@ -16,7 +16,17 @@ _SINGLE_BIN_EVIDENCE_MODE = "single_bin_fragmented_fallback"
 
 
 def apply_sparse_momentum_single_bin_diagnostics_patch() -> None:
-    """Install single-bin diagnostic completion for sparse momentum scoring."""
+    """Install single-bin diagnostics and refresh related trajectory-IMM guards."""
+
+    # ``apply_runtime_patches`` already uses this refreshable single-bin hook.
+    # Reapply the trajectory-IMM wrapper here as well: reloading the lower-level
+    # trajectory module replaces its score callable without re-executing the
+    # public ``state_space`` import that originally installed the wrapper.
+    from .trajectory_imm_single_bin_diagnostics import (
+        apply_trajectory_imm_single_bin_diagnostics_patch,
+    )
+
+    apply_trajectory_imm_single_bin_diagnostics_patch()
 
     import hipporeplayimm.state_space as state_space
     import hipporeplayimm.state_space_sparse_momentum as sparse_momentum

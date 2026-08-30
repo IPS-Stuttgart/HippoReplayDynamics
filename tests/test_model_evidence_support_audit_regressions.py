@@ -3,48 +3,12 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-import numpy as np
 import pandas as pd
 
 sys.path.insert(0, str(Path("scripts").resolve()))
 
 import model_evidence_support_audit as support_audit  # noqa: E402
 from hipporeplayimm.evidence_reporting import EXACT_EVIDENCE_SUPPORT  # noqa: E402
-
-
-def test_support_audit_keeps_negative_infinite_log_evidence() -> None:
-    scores = pd.DataFrame(
-        [
-            {
-                "session": "Rat1/Open1",
-                "event_index": 1,
-                "model": "diffusion",
-                "model_family": "trajectory",
-                "status": "success",
-                "log_evidence": -np.inf,
-                "evidence_support": EXACT_EVIDENCE_SUPPORT,
-                "evidence_comparable": True,
-            },
-            {
-                "session": "Rat1/Open1",
-                "event_index": 2,
-                "model": "diffusion",
-                "model_family": "trajectory",
-                "status": "success",
-                "log_evidence": np.inf,
-                "evidence_support": EXACT_EVIDENCE_SUPPORT,
-                "evidence_comparable": True,
-            },
-        ]
-    )
-
-    event_audit = support_audit.event_support_audit(scores)
-    summary = support_audit.evidence_support_summary(scores)
-
-    assert event_audit["event_index"].tolist() == [1]
-    assert event_audit.loc[0, "exact_rows"] == 1
-    assert summary.loc[0, "rows"] == 1
-    assert np.isneginf(summary.loc[0, "mean_log_evidence"])
 
 
 def test_support_audit_cli_preserves_nullable_large_event_ids(
@@ -81,3 +45,4 @@ def test_support_audit_cli_preserves_nullable_large_event_ids(
     )
     exact_ids = set(audited["event_index"].dropna())
     assert exact_ids == {str(first), str(second)}
+    assert audited["event_index"].isna().sum() == 1

@@ -326,12 +326,18 @@ def _resolve_csv(root: Path, candidates: Sequence[str]) -> Path:
         raise FileNotFoundError(f"Artifact path does not exist: {root}")
     for name in candidates:
         direct = root / name
-        if direct.exists():
+        if direct.is_file():
             return direct
     for name in candidates:
         matches = sorted(path for path in root.rglob(name) if path.is_file())
-        if matches:
+        if len(matches) == 1:
             return matches[0]
+        if len(matches) > 1:
+            relative_matches = ", ".join(str(path.relative_to(root)) for path in matches)
+            raise ValueError(
+                f"Multiple {name} files found under {root}; refusing to choose one "
+                f"by path order: {relative_matches}"
+            )
     raise FileNotFoundError(f"No known CSV table found in {root}; tried: {', '.join(candidates)}")
 
 
@@ -397,7 +403,6 @@ def _control_stack_row(spec: ArtifactSpec, found: Sequence[tuple[str, pd.DataFra
         status = "no_known_tables"
     else:
         status = "ok"
-
     gate_tables = [(name, frame) for name, frame in found if {"gate", "passed"}.issubset(frame.columns)]
     gates_total = 0
     gates_passed = 0

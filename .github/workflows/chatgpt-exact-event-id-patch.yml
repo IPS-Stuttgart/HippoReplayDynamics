@@ -24,17 +24,13 @@ jobs:
 
           path = Path("scripts/compare_model_evidence_artifacts.py")
           text = path.read_text(encoding="utf-8")
-          old = '''    frame = pd.read_csv(
-              path,
-              dtype={column: "string" for column in _INTEGER_EVENT_KEY_COLUMNS},
-          )'''
-          new = '''    exact_dtypes = {column: "string" for column in _INTEGER_EVENT_KEY_COLUMNS}
-              # ``event_id`` may be textual, but numeric-looking nullable IDs must not
-              # be inferred as float64 because that rounds adjacent values above 2**53.
-              exact_dtypes["event_id"] = "string"
-              frame = pd.read_csv(path, dtype=exact_dtypes)'''
+          old = '        dtype={column: "string" for column in _INTEGER_EVENT_KEY_COLUMNS},'
+          new = '''        dtype={
+              column: "string"
+              for column in (*_INTEGER_EVENT_KEY_COLUMNS, "event_id")
+          },'''
           if text.count(old) != 1:
-              raise SystemExit(f"expected one parser block, found {text.count(old)}")
+              raise SystemExit(f"expected one dtype line, found {text.count(old)}")
           path.write_text(text.replace(old, new), encoding="utf-8")
 
           workflow = Path(".github/workflows/chatgpt-exact-event-id-patch.yml")

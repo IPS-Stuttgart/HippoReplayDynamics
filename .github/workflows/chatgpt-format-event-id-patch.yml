@@ -23,34 +23,21 @@ jobs:
           from pathlib import Path
 
           path = Path("scripts/compare_model_evidence_artifacts.py")
-          text = path.read_text(encoding="utf-8")
-          old = '''        dtype={
-              column: "string"
-              for column in (*_INTEGER_EVENT_KEY_COLUMNS, "event_id")
-          },'''
-          # YAML strips the common block indentation from the heredoc, so match
-          # the actual source indentation explicitly after checkout.
-          if text.count(old) != 0:
-              pass
-          else:
-              old = '''        dtype={
-          column: "string"
-          for column in (*_INTEGER_EVENT_KEY_COLUMNS, "event_id")
-      },'''
-          if text.count(old) != 0:
-              pass
-          else:
-              old = '''        dtype={
-    column: "string"
-    for column in (*_INTEGER_EVENT_KEY_COLUMNS, "event_id")
-},'''
-          new = '''        dtype={
-            column: "string"
-            for column in (*_INTEGER_EVENT_KEY_COLUMNS, "event_id")
-        },'''
-          if text.count(old) != 1:
-              raise SystemExit(f"expected one patched dtype block, found {text.count(old)}")
-          path.write_text(text.replace(old, new), encoding="utf-8")
+          lines = path.read_text(encoding="utf-8").splitlines()
+          marker = '    frame = pd.read_csv('
+          start = lines.index(marker)
+          assert lines[start + 1].strip() == "path,"
+          assert lines[start + 2].strip() == "dtype={"
+          assert lines[start + 3].strip() == 'column: "string"'
+          assert lines[start + 4].strip() == 'for column in (*_INTEGER_EVENT_KEY_COLUMNS, "event_id")'
+          assert lines[start + 5].strip() == "},"
+          lines[start + 2:start + 6] = [
+              '        dtype={',
+              '            column: "string"',
+              '            for column in (*_INTEGER_EVENT_KEY_COLUMNS, "event_id")',
+              '        },',
+          ]
+          path.write_text("\n".join(lines) + "\n", encoding="utf-8")
           Path(".github/workflows/chatgpt-format-event-id-patch.yml").unlink()
           PY
           python -m py_compile scripts/compare_model_evidence_artifacts.py

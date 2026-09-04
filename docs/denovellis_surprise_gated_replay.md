@@ -25,7 +25,9 @@ all-animal choice-surprise proxy.
 
 ## Neural endpoints
 
-The analysis keeps rate and content separate:
+The published analysis restricts these SWR samples to animal speed <=4 cm/s;
+the gate table independently audits that condition after event linking. The
+analysis keeps rate and content separate:
 
 - all-SWR rate per second of post-arrival dwell;
 - trajectory-component SWR rate per second of dwell;

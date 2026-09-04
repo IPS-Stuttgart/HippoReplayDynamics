@@ -5,6 +5,7 @@ import pandas as pd
 
 from scripts.analyze_denovellis_surprise_gated_replay import (
     _candidate_pump_times,
+    _linpos_day_epochs,
     assign_causal_binary_surprise,
     build_gate_summary,
     extract_outbound_trials_from_epoch,
@@ -30,6 +31,16 @@ def _synthetic_linpos_epoch():
             linearDistanceToWells=distance,
         ),
     )
+
+
+def test_linpos_day_epochs_accepts_direct_epoch_layout():
+    direct = np.empty(4, dtype=object)
+    direct[:] = [np.asarray([]), SimpleNamespace(statematrix=object()), np.asarray([]), SimpleNamespace(statematrix=object())]
+
+    epochs = _linpos_day_epochs(direct, day=1)
+
+    assert len(epochs) == 4
+    assert epochs[1] is direct[1]
 
 
 def test_extract_outbound_trials_uses_final_near_well_dwell_and_alternation():
@@ -156,7 +167,7 @@ def test_gate_summary_never_promotes_result_to_bayesian_smoothing():
             "choice_analysis_exposure_s": 1.0,
         }
     )
-    events = pd.DataFrame({"event": np.arange(500)})
+    events = pd.DataFrame({"event": np.arange(500), "actual_speed": 0.0})
     validation = pd.DataFrame(
         [
             {"scope": "animal", "animal": animal, "agreement_fraction": 0.9, "n_trials": 100}

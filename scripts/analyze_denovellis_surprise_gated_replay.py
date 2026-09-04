@@ -123,6 +123,15 @@ def _day_epochs(root: Any, day: int) -> np.ndarray:
     return np.asarray(day_value, dtype=object).reshape(-1)
 
 
+def _linpos_day_epochs(root: Any, day: int) -> np.ndarray:
+    """Return linpos epochs from either day-wrapped or direct-epoch files."""
+
+    flat = np.asarray(root, dtype=object).reshape(-1)
+    if any(_field(value, "statematrix") is not None for value in flat):
+        return flat
+    return _day_epochs(root, day)
+
+
 def _find_day_file(dataset_root: Path, animal: str, file_type: str, day: int) -> Path | None:
     directory = dataset_root / ANIMAL_DIRECTORIES.get(animal.lower(), animal)
     matches = sorted(directory.glob(f"*{file_type}{int(day):02d}.mat"))
@@ -245,7 +254,7 @@ def extract_all_outbound_trials(
             status, reason = "fail", "missing_linpos"
         else:
             try:
-                epochs = _day_epochs(loadmat(path, squeeze_me=True, struct_as_record=False)["linpos"], day)
+                epochs = _linpos_day_epochs(loadmat(path, squeeze_me=True, struct_as_record=False)["linpos"], day)
                 frame = extract_outbound_trials_from_epoch(
                     epochs[epoch - 1],
                     animal=animal,
@@ -271,7 +280,11 @@ def extract_all_outbound_trials(
                 "failure_reason": reason,
             }
         )
-    trials = pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
+    trials = (
+        pd.concat([frame.dropna(axis=1, how="all") for frame in frames], ignore_index=True)
+        if frames
+        else pd.DataFrame()
+    )
     return trials, pd.DataFrame(audit)
 
 
@@ -941,10 +954,25 @@ def build_gate_summary(
     dio_pooled = validation[validation["scope"].eq("pooled")] if not validation.empty else pd.DataFrame()
     dio_animals = int(validation[validation["scope"].eq("animal")]["animal"].nunique()) if not validation.empty else 0
     agreement = float(dio_pooled.iloc[0]["agreement_fraction"]) if len(dio_pooled) else np.nan
-    add("linpos_sessions_parse", bool(len(extraction_audit) and extraction_audit["status"].eq("pass").any()), f"{int(extraction_audit['status'].eq('pass').sum())}/{len(extraction_audit)}", "at least one represented run epoch yields outbound trials")
+    n_parsed = int(extraction_audit["status"].eq("pass").sum()) if len(extraction_audit) else 0
+    parse_fraction = n_parsed / len(extraction_audit) if len(extraction_audit) else 0.0
+    add(
+        "linpos_sessions_parse",
+        parse_fraction >= 0.90,
+        f"{n_parsed}/{len(extraction_audit)} ({parse_fraction:.1%})",
+        ">=90% of represented run epochs yield outbound trials",
+    )
     add("multiple_animals_represented", n_animals >= 5, n_animals, ">=5 animals with analyzable outbound trials")
     add("trial_count_adequate", len(usable) >= 1000, len(usable), ">=1000 outbound trials with >=0.5 s exposure")
     add("linked_replay_events_present", n_events >= 500, n_events, ">=500 published SWRs linked to post-arrival windows")
+    event_speed = pd.to_numeric(events.get("actual_speed", pd.Series(dtype=float)), errors="coerce")
+    immobile_fraction = float((event_speed <= 4.0).mean()) if len(event_speed) else np.nan
+    add(
+        "linked_events_are_immobile",
+        np.isfinite(immobile_fraction) and immobile_fraction >= 0.99,
+        immobile_fraction,
+        ">=99% of linked published SWRs have actual speed <=4 cm/s",
+    )
     add("dio_reward_validation_animals", dio_animals >= 3, dio_animals, ">=3 animals with complete reward-pump mapping")
     add("alternation_label_reward_agreement", np.isfinite(agreement) and agreement >= 0.80, agreement, "inferred alternation consistency agrees with observed reward on >=80% of mapped trials")
     technical = all(row["passed"] for row in rows)

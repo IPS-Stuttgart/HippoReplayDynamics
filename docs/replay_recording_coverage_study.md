@@ -68,7 +68,7 @@ coverage explains the observed difference in trajectory-event rates.
 ## Staged Work
 
 - [x] Locate the actual completed RatInABox runs and audit the generator/decoder.
-- [ ] Reproduce old inputs with conditional and unconditional likelihoods.
+- [x] Reproduce old inputs with conditional and unconditional likelihoods.
 - [ ] Run a matched mechanistic coverage and speed-recovery factorial.
 - [ ] Audit and subsample real populations/candidates from both datasets.
 - [ ] Validate calibration and gradient identifiability on held-out populations.
@@ -76,3 +76,10 @@ coverage explains the observed difference in trajectory-event rates.
 
 The first reanalysis is a diagnosis of an existing simulation, not completion
 of the full study.
+
+## Completed Likelihood Audit
+
+See `replay_recording_coverage_audit_20260905.md` for results and exact artifact
+locations. All 32,400 legacy events reproduced; the corrected 30 cm field-width
+effect is smaller and its interval crosses zero. The narrower-field effect
+persists. This is a mixed result, not a universal coverage explanation.

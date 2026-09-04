@@ -70,12 +70,25 @@ coverage explains the observed difference in trajectory-event rates.
 - [x] Locate the actual completed RatInABox runs and audit the generator/decoder.
 - [x] Reproduce old inputs with conditional and unconditional likelihoods.
 - [ ] Run a matched mechanistic coverage and speed-recovery factorial.
-- [ ] Audit and subsample real populations/candidates from both datasets.
+- [x] Audit and subsample real populations/candidates from both datasets.
 - [ ] Validate calibration and gradient identifiability on held-out populations.
 - [ ] Finish the paper-facing evidence and limitations pack.
 
 The first reanalysis is a diagnosis of an existing simulation, not completion
 of the full study.
+
+## Completed Real-Population Perturbation
+
+See `replay_coverage_real_input_protocol.md`,
+`replay_coverage_subsampling_protocol.md`, and
+`replay_coverage_real_subsampling_results_20260905.md`.
+All 12,141 candidates across 33 sessions were retained and cached. The paired
+population-subsampling experiment passed technical gates; continuity loss with
+half the cells is negative in every animal and remains without a per-bin spike
+support filter. Speed readouts change with sampling and selection, not uniformly
+across datasets. These observations establish real-data measurement sensitivity,
+not ground-truth bias or biological uniformity. Actual-map recovery and train-only
+RUN decoder validation remain necessary for completion.
 
 ## Completed Likelihood Audit
 

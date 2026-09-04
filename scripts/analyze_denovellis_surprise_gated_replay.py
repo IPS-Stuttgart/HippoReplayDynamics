@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
 """Test surprise-gated retrospective replay in the Denovellis W-track data.
 
-The analysis is deliberately downstream of the published Denovellis replay
-classification table. It does not decode or reclassify neural data. Behavioral
+The analysis is deliberately downstream of the published Denovellis replay classification table. It does not decode or reclassify neural data. Behavioral
 surprise is estimated causally from choices made before each outbound trial,
 never from replay. Where DIO reward-pump data can be identified, a separate
 reward-outcome surprise sensitivity is reported.
@@ -1069,7 +1068,7 @@ def _report_markdown(
         "",
         "## Design",
         "",
-        "Outbound W-track choices were reconstructed from `wellExitEnter`. Arrival was the start of the final <=10 cm visit to the destination well, and replay opportunity was measured during up to 10 s of the subsequent dwell. Choice surprise was a strictly causal discounted Beta-Bernoulli prediction of whether the animal would alternate, computed before the current outcome and never from replay. Published 80%-threshold Denovellis SWR classifications supplied replay endpoints; no neural data were re-decoded.",
+        "Outbound W-track choices were reconstructed from `wellExitEnter`. Arrival was the start of the final <=10 cm visit to the destination well, and replay opportunity was measured during up to 10 s of the subsequent dwell. Choice surprise was a strictly causal discounted Beta-Bernoulli prediction of whether the animal would alternate, computed before the current outcome and never from replay. Published Denovellis SWR classifications supplied replay endpoints; no neural data were re-decoded.",
         "",
         "## Coverage",
         "",
@@ -1250,7 +1249,7 @@ def run_analysis(
         "claim_boundary": {
             "tests": "surprise-gated retrospective replay rate and summary-content associations",
             "does_not_test": "formal Bayesian smoothing or unambiguous past-route versus future-route content",
-            "replay_source": "published Denovellis 80-percent state-classification summary; no rescoring",
+            "replay_source": "published Denovellis state-classification summary; no rescoring",
         },
         "provenance": build_script_provenance(
             input_paths={"replay_info": replay_info_path, "dataset_root": dataset_root},

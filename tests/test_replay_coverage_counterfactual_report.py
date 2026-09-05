@@ -2,7 +2,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from scripts.report_replay_coverage_counterfactual import METRICS, endpoint_summary, gradient_availability
+from scripts.report_replay_coverage_counterfactual import METRICS, endpoint_summary, gradient_availability, spike_budget_summary
 
 
 def common():
@@ -39,3 +39,16 @@ def test_gradient_missingness_stays_in_denominator():
     assert summary.animals.eq(2).all() and summary.animals_with_any_available_replicate.eq(1).all()
     with pytest.raises(ValueError):
         gradient_availability(table[table.gradient.lt(0)], 3., 1)
+
+
+def test_source_budget_uses_duration_normalization_and_keeps_zero_unknown():
+    identity = {"dataset": "d", "animal": "a", "session": "s", "source_event_index": 1,
+                "replicate": 0, "truth_kind": "continuous", "gradient": 0.}
+    trials = pd.DataFrame([{**identity, "source_spikes": 10, "source_duration_s": .1, "simulated_duration_s": .05}])
+    obs = pd.DataFrame([{**identity, "rate_scale": 3., "regime": "native", "cell_fraction": 1., "spikes": 10}])
+    summary = spike_budget_summary(trials, obs, 3., 1)
+    assert summary.simulated_to_source_rate_ratio.eq(2.).all()
+    zero = spike_budget_summary(trials.assign(source_spikes=0), obs, 3., 1)
+    assert zero.simulated_to_source_rate_ratio.isna().all()
+    with pytest.raises(ValueError):
+        spike_budget_summary(trials, obs.assign(source_event_index=2), 3., 1)

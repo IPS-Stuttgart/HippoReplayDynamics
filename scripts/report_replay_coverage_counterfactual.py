@@ -79,6 +79,30 @@ def require_completed_audit(out, manifest):
     return path
 
 
+def spike_budget_summary(trials, observations, primary_scale, dose_replicates):
+    keys = ["dataset", "animal", "session", "source_event_index", "replicate", "truth_kind", "gradient"]
+    specs = trials[trials.truth_kind.eq("continuous") & trials.gradient.eq(0)]
+    observed = observations[observations.truth_kind.eq("continuous") & observations.gradient.eq(0)
+                            & observations.regime.eq("native") & observations.cell_fraction.eq(1.)]
+    if specs.duplicated(keys).any() or observed.duplicated(keys + ["rate_scale"]).any():
+        raise ValueError("duplicate spike-budget keys")
+    merged = observed.merge(specs[keys + ["source_spikes", "source_duration_s", "simulated_duration_s"]],
+                            on=keys, how="left", validate="many_to_one", indicator=True)
+    if merged.empty or not merged._merge.eq("both").all():
+        raise ValueError("missing source spike budget")
+    merged["simulated_population_rate_hz"] = merged.spikes / merged.simulated_duration_s
+    merged["source_population_rate_hz"] = merged.source_spikes / merged.source_duration_s
+    merged["simulated_to_source_rate_ratio"] = merged.simulated_population_rate_hz / merged.source_population_rate_hz.replace(0, np.nan)
+    merged = analysis_sets(merged, primary_scale, dose_replicates)
+    group = ["analysis_set", "dataset", "rate_scale"]
+    values = ["simulated_population_rate_hz", "source_population_rate_hz", "simulated_to_source_rate_ratio"]
+    by_rep = merged.groupby(group + ["animal", "session", "replicate"], as_index=False)[values].median()
+    sessions = by_rep.groupby(group + ["animal", "session"], as_index=False)[values].mean()
+    animals = sessions.groupby(group + ["animal"], as_index=False)[values].mean()
+    result = animals.groupby(group, as_index=False).agg(**{key: (key, "mean") for key in values}, animals=("animal", "nunique"))
+    return result
+
+
 def markdown_table(table, columns):
     def cell(value):
         if pd.isna(value):
@@ -97,7 +121,7 @@ def run(args):
     audit_path = require_completed_audit(out, manifest)
     inputs = {"manifest": manifest_path, "audit": audit_path, "reporter": Path(__file__)}
     tables = {}
-    for name in ["session_summary", "session_gradients", "decomposition_summary", "gradient_response_summary", "gate_summary"]:
+    for name in ["session_summary", "session_gradients", "decomposition_summary", "gradient_response_summary", "gate_summary", "trials", "observations"]:
         path = out / f"coverage_counterfactual_{name}.csv"
         if file_sha256(path) != manifest["output_sha256"][path.name]:
             raise ValueError(f"input table changed: {name}")
@@ -110,9 +134,11 @@ def run(args):
     primary, dose = params["primary_rate_scale"], params["dose_replicates"]
     animals, endpoints = endpoint_summary(tables["session_summary"], primary, dose, args.seed, args.bootstraps)
     pairs, availability = gradient_availability(tables["session_gradients"], primary, dose)
+    budgets = spike_budget_summary(tables["trials"], tables["observations"], primary, dose)
     outputs = []
     for name, frame in [("animal_endpoints", animals), ("endpoint_summary", endpoints),
-                        ("gradient_pair_availability", pairs), ("gradient_availability_summary", availability)]:
+                        ("gradient_pair_availability", pairs), ("gradient_availability_summary", availability),
+                        ("spike_budget_summary", budgets)]:
         path = out / f"coverage_counterfactual_{name}.csv"
         frame.to_csv(path, index=False)
         outputs.append(path)
@@ -173,6 +199,19 @@ Selected-core gradient contrast requires BOTH opposite-gradient estimates.
 Keep unavailable session/randomization combinations in the denominator.
 
 {markdown_table(selected, ['dataset', 'session_replicate_pairs', 'available_session_replicate_pairs', 'sessions', 'sessions_with_any_available_replicate', 'animals', 'animals_with_any_available_replicate'])}
+
+## Simulated Versus Source Spike Budgets
+
+Full population, constant-speed synthetic paths. Population rates use each
+window's actual duration, including the source's possible partial tail. Source
+counts use the same RUN-QC cell set. Values average within-replicate session
+medians, randomizations, sessions within animal, and animals equally. Ratios
+are paired source-profile rate ratios, not ratios of these aggregate means.
+Source events are high-MUA candidates; synthetic paths were not selected by
+MUA strength. This is a representativeness check, not an inferred replay rate
+multiplier or a reason to choose a new dose after seeing recovery outcomes.
+
+{markdown_table(budgets, ['analysis_set', 'dataset', 'rate_scale', 'simulated_population_rate_hz', 'source_population_rate_hz', 'simulated_to_source_rate_ratio'])}
 
 ## Claim Boundary
 

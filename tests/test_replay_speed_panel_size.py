@@ -18,6 +18,7 @@ from scripts._provenance import file_sha256
 from scripts.audit_replay_speed_panel_size import audit, verify_moment_panels
 from scripts.calibrate_replay_speed_identifiability import decode_panel, draw_schedule, evaluate_panels, validate_panel_contract
 from scripts.calibrate_replay_speed_panel_size import ROOT, draw_observations, run, score_session, simulate_nested
+from scripts.report_replay_speed_panel_size import aggregate_events, directional_endpoints, paired_budgets, report
 
 
 def tiny_model():
@@ -230,6 +231,9 @@ def test_full_runner_audit_and_nonvacuous_source_contract(tmp_path):
     assert gates.overall_technical and not gates.full_33_session_scope
     checked = json.loads((out / "speed_panel_size_reconstruction_audit.json").read_text())
     assert checked["status"] == "pass" and checked["sessions"] == 2 and checked["transfer_intervals_verified"] == 1536
+    report(out, tmp_path / "report", bootstraps=20)
+    assert (tmp_path / "report/speed_panel_size_availability.png").stat().st_size > 1000
+    assert "CORRECT-SIGN" in (tmp_path / "report/speed_panel_size_report.md").read_text()
     target = out / "panels__synthetic__a.csv.gz"
     changed = pd.read_csv(target, float_precision="round_trip").iloc[:-1]
     changed.to_csv(target, index=False)
@@ -237,3 +241,31 @@ def test_full_runner_audit_and_nonvacuous_source_contract(tmp_path):
     (out / "speed_panel_size_manifest.json").write_text(json.dumps(meta))
     with pytest.raises((AssertionError, ValueError)):
         audit(out, workers=2)
+
+
+def test_paired_budget_means_are_equal_animal_not_event_or_session_weighted():
+    rows = []
+    for animal, sessions, larger in [("a", 3, .8), ("b", 1, .4)]:
+        for session in range(sessions):
+            for budget, value in [(30, .2), (100, larger)]:
+                rows.append({"dataset": "d", "animal": animal, "session": str(session), "candidate_budget": budget,
+                    "group": "test", "panels": 100, "coverage": value})
+    table = pd.DataFrame(rows)
+    paired = paired_budgets(table, ["group"], ["coverage"])
+    animals, summary = aggregate_events(paired, ["budget_comparison", "group"], ["coverage"], bootstraps=20)
+    assert len(animals) == 2 and summary.equal_animal_mean.item() == pytest.approx(.4)
+    table.loc[0, "panels"] = 99
+    with pytest.raises(ValueError, match="denominators"):
+        paired_budgets(table, ["group"], ["coverage"])
+
+
+def test_wrong_sign_confidence_is_not_successful_recovery():
+    rows = []
+    for g, lo, hi in [(.5, .1, .7), (.5, -.7, -.1), (-.5, -.7, -.1), (-.5, .1, .7), (.5, -np.inf, np.inf), (0., .1, .7)]:
+        rows.append({"dataset": "d", "animal": "a", "session": "s", "candidate_budget": 30,
+            "estimator": "posterior_mean", "bin_filter": "unfiltered", "selection": "all", "generator": "A",
+            "observation": "poisson", "stratum": "uniform", "method": "inverse_conformal", "calibration_scope": "within_session",
+            "gradient": g, "lower": lo, "upper": hi})
+    summary = directional_endpoints(pd.DataFrame(rows)).iloc[0]
+    assert summary.correct_sign_nonzero_fraction == pytest.approx(2 / 6)
+    assert summary.wrong_sign_nonzero_fraction == pytest.approx(2 / 6)

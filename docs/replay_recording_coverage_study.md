@@ -71,6 +71,7 @@ coverage explains the observed difference in trajectory-event rates.
 - [x] Reproduce old inputs with conditional and unconditional likelihoods.
 - [ ] Run a matched mechanistic coverage and speed-recovery factorial.
 - [x] Audit and subsample real populations/candidates from both datasets.
+- [x] Validate held-out RUN decoding with training-only unit/grid/map fitting.
 - [ ] Validate calibration and gradient identifiability on held-out populations.
 - [ ] Finish the paper-facing evidence and limitations pack.
 
@@ -87,8 +88,25 @@ population-subsampling experiment passed technical gates; continuity loss with
 half the cells is negative in every animal and remains without a per-bin spike
 support filter. Speed readouts change with sampling and selection, not uniformly
 across datasets. These observations establish real-data measurement sensitivity,
-not ground-truth bias or biological uniformity. Actual-map recovery and train-only
-RUN decoder validation remain necessary for completion.
+not ground-truth bias or biological uniformity. Actual-map recovery remains
+necessary; the subsequent training-only RUN validation is recorded below.
+
+## Completed Training-Only RUN Validation
+
+See `replay_coverage_run_validation_protocol.md` and
+`replay_coverage_run_validation_results.md`. All 165 folds across 33 sessions
+completed; the independent audit recounted observations and verified all
+165,000 prediction rows. Every Poisson session beats the wrong-cell-map control
+descriptively. However, nominal 95% regions cover tracked position only about
+51% (PF) and 61% (Tanni) in 250 ms windows. Good localization does not establish
+calibrated uncertainty. Short RUN bins have much lower spike support and cannot
+be treated as replay error ground truth. The next simulations must explicitly
+separate oracle decoding from observation/map mismatch and verify uncertainty
+and speed-gradient recovery before any adaptive continuity or equivalence claim.
+
+See `replay_coverage_novelty_scope.md` for direct prior work on calibration,
+sampling bias, and replay validation. The paper contribution must go beyond
+those established general observations.
 
 ## Completed Likelihood Audit
 

@@ -165,7 +165,7 @@ def plot_validation(summary, output):
         ax.set(xlim=(0, limit), ylim=(0, limit), xlabel="Cell-identity null error (cm)", ylabel="Held-out posterior-mean error (cm)", title=title)
         ax.legend(frameon=False)
         axes[1, column].plot([50, 95], [50, 95], color="0.6", linestyle="--", linewidth=1)
-        axes[1, column].set(xlabel="Nominal posterior mass (%)", ylabel="Empirical coverage (%)", ylim=(0, 100), title="Session-mean coverage, including unsupported truth")
+        axes[1, column].set(xlabel="Nominal posterior mass (%)", ylabel="Empirical coverage (%)", ylim=(0, 100), title="Posterior calibration\nAll behavior-selected windows")
         for row in range(2):
             axes[row, column].spines[["top", "right"]].set_visible(False)
     fig.suptitle("Training-only RUN decoder validation\nNo test spikes or positions used to select units or fit maps", fontsize=12)

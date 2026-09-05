@@ -1,6 +1,8 @@
 # Recording Coverage, Replay Speed, and Continuity
 
-Status: active investigation; no biological uniformity claim.
+Status: declared benchmark completed and integrated; no biological uniformity claim.
+The staged sections below retain their historical checkpoint wording. Current
+conclusions are in the manuscript, evidence matrix and completion note.
 
 ## Question
 
@@ -80,8 +82,8 @@ coverage explains the observed difference in trajectory-event rates.
 - [x] Inspect LFP/MUA examples and run detector/window paired coverage-effect decoding.
 - [x] Compare with a transferred PF-style published-budget two-shuffle baseline.
 - [x] Evaluate excluded-animal calibration transfer on frozen simulation panels.
-- [ ] Quantify panel-size dependence before generalizing selected-event abstention.
-- [ ] Finish the paper-facing evidence and limitations pack.
+- [x] Quantify panel-size dependence before generalizing selected-event abstention.
+- [x] Finish the paper-facing evidence and limitations pack.
 
 The first reanalysis is a diagnosis of an existing simulation, not completion
 of the full study.
@@ -248,6 +250,33 @@ See `replay_recording_coverage_audit_20260905.md` for results and exact artifact
 locations. All 32,400 legacy events reproduced; the corrected 30 cm field-width
 effect is smaller and its interval crosses zero. The narrower-field effect
 persists. This is a mixed result, not a universal coverage explanation.
+
+## Completed Nested Candidate-Budget Recovery
+
+See `replay_speed_panel_size_protocol.md` and
+`replay_speed_panel_size_results.md`. All 33 sessions completed nested
+30/100/300-candidate draws; 743,688 panel rows and 3,168,000 interval decisions
+independently reconstruct. More candidates substantially restore statistic
+availability, ruling out a universal interpretation of the earlier small-panel
+abstention. Matching local PF inference can detect imposed gradients and make
+some equivalence claims, but calibration degrades under map/gain stress.
+Tanni remains substantially less informative and its excluded-animal primary
+conformal output still abstains at 300. This completes the declared finite-
+budget test, not a proof that no larger budget or alternative method can help.
+
+## Completed Evidence Pack
+
+The integrated draft is `replay_recording_coverage_manuscript.md`; the final
+bounded answer is in `replay_coverage_completion.md`. The artifact registry
+checks 15 production stages, linked existing audits and recorded top-level
+output hashes, without pretending to reconstruct all raw data anew. It
+explicitly preserves early technical-only checks and Tanni LFP unavailability.
+The matched-event atlas includes 36 deterministic category-selected examples;
+representative panels and both nested-budget figures were visually inspected.
+All 215 relevant tests pass; the added code passes Ruff. The declared nine
+requirements are met within their stated simulation/recording limits. This
+is an evidence-backed methods-paper basis, not guaranteed novelty, a formatted
+submission or a biological constant-speed result.
 
 ## Prepared Real Event-Definition Sensitivity Inputs
 

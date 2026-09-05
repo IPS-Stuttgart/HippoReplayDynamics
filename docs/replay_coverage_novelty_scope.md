@@ -67,7 +67,7 @@ neither decoder bias nor uncertainty miscalibration is a new general observation
   assuming a trial-template comparison transfers unchanged. This targeted check
   was refreshed on 2026-09-05; no head-to-head benchmark has yet been run.
 
-## Candidate Contribution, Still To Be Demonstrated
+## Candidate Contribution and Priority Boundary
 
 Connect recording coverage, uncertainty, geometric continuity selection, and
 speed-gradient recovery in the SAME observed events and in ground-truth
@@ -82,8 +82,12 @@ meaningful speed gradient can be recovered, and refuse uniformity claims where
 it cannot. Such a procedure must outperform or materially clarify established
 baselines; simply producing another threshold is not enough.
 
-The real-cell subsampling result and RUN validation are prerequisites and
-supporting experiments. They do not yet demonstrate the complete contribution.
+The real-cell subsampling result and RUN validation alone are prerequisites
+and supporting experiments. The completed recovery/selection, calibration,
+independent-map, excluded-animal and nested-budget benchmarks now connect the
+full measurement chain, with conditional successes and explicit failure limits.
+This does not establish priority for the combined contribution or make the
+baseline calibration a new universally valid method.
 In particular, the 2015 degraded-decoder and 2023 real-unit-removal controls
 mean that paired perturbations alone cannot carry a priority claim. The present
 study must establish the additional quantitative connection to spatial-speed

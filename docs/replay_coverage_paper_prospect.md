@@ -58,8 +58,11 @@ original experimental papers were wrong.
    calibration, but its intervals are broad and its primary selected-event
    conformal output entirely abstains. All missing primary calibration
    statistics arise from fewer than five contributing events in small
-   11-30-candidate panels. Larger-panel validation is needed before treating
-   this as a general recording-population inference limit.
+   11-30-candidate panels. The completed nested-budget follow-up shows that
+   300 candidates substantially restore availability. Local PF calibration
+   can then recover some gradients/equivalence, but combined map/gain stress
+   reduces coverage from 94.50% to 67.50%; Tanni remains much less informative.
+   This is a conditional operating-range result, not universal impossibility.
 
 These statements combine controlled simulations and real recording
 perturbations. Simulated paths are not replay ground truth, and simulation
@@ -162,14 +165,14 @@ measurement chain: recording -> decoder -> selection -> kinematic inference.
   randomized observations also sometimes pass, especially relative to the low
   acceptance of original Tanni ripple candidates. Do not equate these accepted
   fractions with biological replay prevalence.
-- Resolve the source-panel-size limitation. Excluded-animal transfer is now
-  completed and audited, but missing primary statistics reflect too few
-  surviving events in small panels. Test larger nested candidate collections
-  before claiming an inference limit that additional candidates cannot solve.
+- Preserve the now-completed 30/100/300-candidate result: additional candidates
+  help, but do not guarantee robustness to map/noise mismatch. Do not promote
+  finite-budget Tanni abstention into a universal impossibility theorem.
   Retrospective transfer remains different from prospective validation.
-- Complete the integrated methods/results/limitations document, representative
-  event panels and a reproducible artifact index. Resolve any claim-to-table
-  mismatch before describing the package as paper-ready.
+- The integrated methods/results/limitations draft and 36 category-selected
+  matched event panels are now assembled, with a passing 15-stage integrity
+  index. Check final presentation with the collaborator; this is not a formatted
+  journal submission or exhaustive novelty certification.
 - Discuss the specific added contribution against the direct 2015/2023
   decoder-degradation/unit-removal and 2024 calibration literature with a
   domain collaborator. More figures alone will not establish novelty.
@@ -190,5 +193,6 @@ There is a credible methods-paper direction here, stronger than the current
 biological uniform-speed claim. The defensible contribution is to quantify
 when the recording and analysis can or cannot support a replay-kinematics
 inference. Acceptance and novelty are not guaranteed, and the complete study
-must meet the requirements in `replay_recording_coverage_study.md` before the
-goal is considered achieved.
+meets the declared benchmark requirements in `replay_recording_coverage_study.md`
+within their explicit scope. Further novelty judgment and submission decisions
+are for the authors, not consequences of technical gate completion.

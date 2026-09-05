@@ -1,9 +1,10 @@
 # Claim-by-Evidence and Completion Audit
 
-Current checkpoint: excluded-animal calibration transfer is completed and
-independently audited across all33, following the PF-style shuffle benchmark,
-detector/window decoding, trace inspection and known-path recovery studies. This is
-not a final paper-ready certification. Scientific computations used
+Current checkpoint: nested candidate-budget recovery and excluded-animal
+transfer are completed and independently audited across all33, following the
+PF-style shuffle benchmark, detector/window decoding and known-path studies.
+The integrated manuscript and matched-event atlas are assembled; the final
+artifact index passed across 15 production stages. Scientific computations used
 gpuserver6000; artifact paths and commit hashes are in the linked results notes.
 
 ## Claims
@@ -23,7 +24,7 @@ gpuserver6000; artifact paths and commit hashes are in the linked results notes.
 | Independent maps restore speed-gradient identifiability | Full-cell known-coordinate response is 0.321 PF/0.121 Tanni for injected contrast 1.0; selected Tanni estimates available in only 1/50 half directions | Not supported; still requires calibrated recovery/abstention, not uniformity inference |
 | Matching-simulation interval calibration guarantees transfer | Bin-supported all-data conformal coverage about 95% when matching, 76.75% PF/89.40% Tanni with disjoint maps plus shared gain | Not supported; all nine animals show lower combined-stress coverage |
 | High all-panel coverage establishes informative speed inference | Primary selected Tanni calibration has 100% coverage but 0% finite intervals; PF finite conformal results only in Rat1 | Not supported; report abstention, finite-only coverage, width and animal availability |
-| Current calibrated intervals establish meaningful uniform speed | No inverse Gaussian/conformal +/-0.25 equivalence claims in any tested condition, including constant-speed truth | Not supported at the declared panel budget and settings; not an impossibility theorem or biological null |
+| Current calibrated intervals establish biological uniform speed | Initial small-panel study makes no calibrated +/-0.25 equivalence claims. At 300 candidates, local PF matching calibration declares true-zero equivalence in 26.88% of panels, but results do not transfer as a universal calibrated procedure | Biological uniformity not tested; conditional synthetic equivalence is not a biological finding |
 | Recording coverage explains the biological PF/Tanni difference | Different populations/maps/arenas and event definitions; no ground truth for rejected candidates | Not established |
 | The coverage-causes-apparent-jumps hypothesis is new | Prior work explicitly states the hypothesis, including Ji et al. (2026) | Not novel by itself; target quantitative recovery/calibration rather than the generic caveat |
 | The primary real cell-removal continuity result survives ripple versus MUA event definition | 28,451 eligible core/fixed windows, 910,432 rows, all metrics reconstructed; negative primary half-cell effect in all nine animals for both definitions and windows | Supported for the frozen geometric criterion; not shuffle-significant replay, and not every likelihood/peak sensitivity interval excludes zero |
@@ -34,7 +35,9 @@ gpuserver6000; artifact paths and commit hashes are in the linked results notes.
 | Real-cell removal as a replay-quality control is itself new | Silva et al. (2015) degrade decoders; Liu et al. (2023) remove units and recompute replay | Not novel by itself; additional contribution must connect selection, spatial-speed recovery and limits of inference |
 | Calibration learned on other animals uniformly loses nominal coverage | Excluded-animal all-data conformal coverage 92.75% PF/95.60% Tanni when matching; combined-stress coverage improves over local calibration, significantly across Tanni animals descriptively | Not supported as a universal failure; pooled intervals remain broad and do not establish useful equivalence |
 | Excluded-animal calibration provides informative selected-event speed equivalence | All 72 fits and 422,400 intervals reconstructed; primary conformal output entirely abstains; no calibrated +/-0.25 equivalence claims in any tested readout | Not established at the frozen source budget; pooled conformal has no asserted new-animal coverage guarantee |
-| Primary abstention proves that more candidates cannot restore inference | Every missing primary calibration statistic is due to fewer than five contributing selected events in 11-30-event source panels; 37.75% PF/94.38% Tanni fail this gate | Not established; larger-panel recovery/availability sensitivity is required before a general inference-limit claim |
+| Primary abstention proves that more candidates cannot restore inference | Nested 30 to 300 candidate panels raise matching primary statistic availability from 62.38% to 100% PF and 4.88% to 77.68% Tanni | Contradicted within this finite-budget experiment; additional candidates help |
+| More candidates ensure calibrated speed inference under mismatch | At 300, local PF primary coverage is 94.50% matching but 67.50% with disjoint-map/shared-gain stress; Tanni excluded-animal primary intervals still abstain | Not supported; availability and robustness are different properties |
+| Known-gradient recovery is uniformly impossible | At 300, matching local PF correct-sign detection is 64.38%/58.13% for g=+/-0.5, versus 1.80%/1.40% Tanni | Not supported; report recording-specific operating ranges, not a universal impossibility |
 
 ## Full Objective Requirements
 
@@ -42,38 +45,27 @@ Requirement numbering follows `replay_recording_coverage_study.md`, unchanged.
 
 | Requirement | Evidence now | Remaining work / status |
 |---|---|---|
-| 1. Frozen provenance and inclusion | Clean scorer commits, input/cache/output hashes, snapshots, code archives, fixed sources and explicit smoke exclusions | Completed for runs so far; must also apply to remaining experiments |
+| 1. Frozen provenance and inclusion | Clean scorer commits, input/cache/output hashes, snapshots, code archives, fixed sources and explicit smoke exclusions | Completed for declared experiments; registry distinguishes historical hashes from retrospective indexing |
 | 2. Generator/likelihood validation | Fixed-total conditional audit; Poisson/conditional tests; independent RUN-half rate maps and shared-gain stress; reconstruction | Completed within these declared surrogate families; not a complete model of replay correlations |
 | 3. Isolate all named recording and analysis factors | Real nested cell removal; pooled-cell controls; rate sweep; paired RatInABox count/width/area/aspect factorial with targeted 4/8/16 cm, 10/20/40 ms, 5/10 ms decoder sweep | Controlled factorial complete within the frozen ranges; not a general decomposition of biological dataset differences |
 | 4. Estimators, support and selection | MAP/mean, unfiltered/filtered and selected-core metrics across the resolution sweep; independent no-gap-bridging and truth-eligibility recount; common-eligible path contrasts | Implemented for the frozen settings; no post-hoc optimal decoder promoted |
-| 5. Known-path and null recovery | Positive/negative/zero gradients, stationary/discontinuous/shuffled controls; independent maps/gain; independent panels and completed excluded-animal transfer | Completed at frozen settings; panel-size sensitivity remains needed to separate small-panel availability from broader identifiability |
+| 5. Known-path and null recovery | Positive/negative/zero gradients, stationary/discontinuous/shuffled controls; independent maps/gain; independent panels, excluded-animal transfer and 30/100/300 candidate budgets | Completed at frozen settings; no claim about unlimited data or every alternative decoder |
 | 6. Both real recording populations | All candidates cached; real perturbations; empirical maps and source durations; simulated/source spike budgets reported | Complete population groundwork; controlled maps are surrogates, not replay ground truth |
 | 7. Uncertainty and sensitivity | Equal-animal summaries; training-only RUN validation; independent half maps; completed detector/core/fixed-window paired decoding with explicit two-session LFP unavailability; 15 preselected traces inspected | Completed within the frozen sensitivity ranges; only nine animals, half-map drift is not pure estimation noise, traces do not prove detector specificity or hardware synchronization |
-| 8. Meaningful equivalence where identifiable | Frozen +/-0.25 band and 0.10/0.50 sensitivities; 633,600 local and 422,400 excluded-animal interval decisions verified; no calibrated primary-band claims | No biological equivalence or useful general procedure established; test larger panel budgets before generalizing abstention |
-| 9. Paper-ready artifacts and novelty | Tested scripts, audited tables, inspected figures, protocols/results; published-budget shuffle and standard calibration/transfer baselines; direct-prior checks and paper prospect | INCOMPLETE: panel-size validation and integrated final methods/limitations pack; no blanket novelty certification |
+| 8. Meaningful equivalence where identifiable | Frozen +/-0.25 band and 0.10/0.50 sensitivities; initial and transfer studies plus 3,168,000 nested-budget intervals verified; successful and false equivalence retained | Completed benchmark with conditional successes and failure limits; no biological equivalence or universal correction |
+| 9. Paper-ready artifacts and novelty | 215 passing tests, audited tables, inspected figures, protocols/results; integrated manuscript, 36 matched examples and passing 15-stage integrity index; direct-prior checks | Completed evidence pack within stated scope; publication priority and acceptance require domain/editorial judgment |
 
-## Next Required Decision
+## Scientific Decision
 
-The counterfactual resolves the earlier restoration ambiguity, and the new
-factorial separates field geometry from analysis resolution within a controlled
-simulation. Repeating either with more identical draws is not the next priority.
-Map-estimation/observation mismatch is now evaluated within a declared surrogate.
-The frozen calibration/abstention comparison is now complete on new simulation
-panels, with limited availability and failed transfer; do not hide that by
-retuning to test outcomes. Excluded-animal inverse-calibration transfer is now
-evaluated retrospectively; it is not prospective new-biological-data validation.
-Real detector/window paired decoding and selected trace inspection are now
-complete with explicit missingness. The PF-style published-budget two-shuffle
-comparison is now complete; the real-cell effect remains, but order-randomized
-acceptance limits interpretations of the low Tanni ripple yield. The transfer
-diagnosis identifies a specific next test: missing primary statistics are due
-to fewer than five contributing events in the small source panels. Quantify
-larger-panel recovery before claiming a broader population inference limit,
-then finish the integrated paper pack. An exact
-author-encoding reproduction or head-to-head with other sequence detectors
-would be additional, different comparisons. No
-thresholds should be chosen to make the current real data appear uniform or the
-simulations pass.
+The finite-budget follow-up answers the last experimental question: additional
+candidates substantially help availability and permit some calibrated local
+PF inference, but do not automatically repair mismatch or excluded-animal
+transfer. The credible paper target is the quantitative measurement chain
+from recordings to continuity selection and speed inference, with conditional
+successes and explicit abstention. It is not a biological uniformity paper.
+Exact author-encoding reproduction, alternative sequence detectors and
+prospective new data would be additional studies, not evidence already earned.
+No thresholds were chosen to make the real data appear uniform.
 
 References: `replay_coverage_real_subsampling_results_20260905.md`,
 `replay_coverage_run_validation_results.md`, `replay_coverage_recovery_results.md`,
@@ -85,3 +77,5 @@ References: `replay_coverage_real_subsampling_results_20260905.md`,
 `replay_coverage_shuffle_baseline_results.md`, `replay_coverage_paper_prospect.md`.
 
 New transfer evidence: `replay_speed_population_transfer_results.md`.
+Nested-budget evidence: `replay_speed_panel_size_results.md`.
+Integrated draft: `replay_recording_coverage_manuscript.md`.

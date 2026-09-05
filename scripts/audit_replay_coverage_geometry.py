@@ -46,6 +46,18 @@ def compare_tables(actual, expected, key):
                                   expected.sort_values(key).reset_index(drop=True), check_dtype=False, rtol=1e-9, atol=1e-9)
 
 
+def direct_truth_eligibility(path, window, stride, rule):
+    xy = path["midpoints_cm"]
+    means = np.stack([xy[k:k + window].mean(axis=0) for k in range(0, len(xy) - window + 1, stride)])
+    threshold = 20 if rule == "literal_20cm_10frames" else 4 * stride
+    frames = 10 if rule == "literal_20cm_10frames" else int(np.ceil(45 / stride)) + 1
+    splits = np.r_[0, np.flatnonzero(np.linalg.norm(np.diff(means, axis=0), axis=1) >= threshold) + 1, len(means)]
+    lengths = np.diff(splits)
+    best = int(np.argmax(lengths))
+    start, end = splits[best:best + 2]
+    return bool(lengths[best] >= frames and np.linalg.norm(means[end - 1] - means[start]) >= 40)
+
+
 def sampled_likelihood_check(frame, trial, obs, centers, bounds, config):
     """Independent analytic Gaussian likelihood and position error, first path."""
     sampled = frame[frame.path_id.eq(0) & frame.truth_kind.eq("continuous") & frame.gradient.eq(-.5)]
@@ -112,6 +124,12 @@ def audit(root):
         if frame.duplicated(KEY).any() or len(frame) != batch.rows:
             raise AssertionError("metric keys incomplete or duplicated")
         lookup = {(p["path_id"], p["truth_kind"], p["gradient"]): o for p, o in zip(paths, obs, strict=True)}
+        path_lookup = {(p["path_id"], p["truth_kind"], p["gradient"]): p["path"] for p in paths}
+        for key, rows in frame.groupby(["path_id", "truth_kind", "gradient", "window_ms", "stride_ms", "continuity_rule"], sort=False):
+            path_id, kind, grad, window, stride, rule = key
+            expected_eligible = direct_truth_eligibility(path_lookup[path_id, kind, grad], window, stride, rule)
+            if not rows.truth_geometric_eligible.eq(expected_eligible).all():
+                raise AssertionError("truth eligibility differs from direct geometric calculation")
         comparisons = 0
         for key, rows in frame.groupby(["path_id", "truth_kind", "gradient", "n_cells", "observation", "window_ms", "stride_ms", "bin_filter"], sort=False):
             path_id, kind, gradient, cells, family, window, stride, support = key

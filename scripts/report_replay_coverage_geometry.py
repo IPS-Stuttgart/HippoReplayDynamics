@@ -99,6 +99,43 @@ def paired_contrasts(endpoints, responses, rng, draws):
     return pd.DataFrame(out)
 
 
+def common_eligible_resolution_contrasts(events, rng, draws):
+    """Same truth paths in both denominators; no redecoding or retuning."""
+    local = events[events.truth_kind.eq("continuous") & events.gradient.eq(0)]
+    local = rule_alias(local)
+    population_rows = []
+    for factor, reference in {"grid_cm": 8, "window_ms": 20, "stride_ms": 5}.items():
+        index = [c for c in FACTORS if c != factor] + ["path_id"]
+        ref = local[local[factor].eq(reference)][index + ["truth_geometric_eligible", "continuity_pass"]]
+        ref = ref.rename(columns={"truth_geometric_eligible": "reference_eligible", "continuity_pass": "reference_pass"})
+        for level, changed in local[~local[factor].eq(reference)].groupby(factor, sort=True):
+            joined = changed.merge(ref, on=index, how="left", validate="one_to_one", indicator=True)
+            joined["common_eligible"] = joined.truth_geometric_eligible & joined.reference_eligible.eq(True)
+            group_cols = [c for c in index if c != "path_id"]
+            for key, part in joined.groupby(group_cols, sort=True):
+                ok = part[part.common_eligible]
+                diff = ok.continuity_pass.astype(float) - ok.reference_pass.astype(float)
+                population_rows.append({**dict(zip(group_cols, key, strict=True)), "varied_factor": factor,
+                    "reference_level": reference, "changed_level": level, "paths_requested": len(part),
+                    "paths_matched": int(part._merge.eq("both").sum()), "common_eligible_paths": len(ok),
+                    "reference_recovery": float(ok.reference_pass.astype(float).mean()) if len(ok) else np.nan,
+                    "changed_recovery": float(ok.continuity_pass.astype(float).mean()) if len(ok) else np.nan,
+                    "paired_recovery_difference": float(diff.mean()) if len(ok) else np.nan})
+    populations = pd.DataFrame(population_rows)
+    aggregate = []
+    if populations.empty:
+        return populations, pd.DataFrame()
+    factors = [c for c in GROUP if c not in {"grid_cm", "window_ms", "stride_ms"}]
+    # For each contrast, the other two resolution settings remain grouping keys.
+    for factor, frame in populations.groupby("varied_factor", sort=True):
+        grouping = factors + [c for c in ["grid_cm", "window_ms", "stride_ms"] if c != factor] + ["reference_level", "changed_level"]
+        for key, part in frame.groupby(grouping, sort=True):
+            aggregate.append({**dict(zip(grouping, key, strict=True)), "varied_factor": factor,
+                "populations_expected": len(part), "common_eligible_paths": int(part.common_eligible_paths.sum()),
+                **interval(part.paired_recovery_difference, rng, draws)})
+    return populations, pd.DataFrame(aggregate)
+
+
 def figures(endpoints, responses, out):
     base = endpoints[(endpoints.grid_cm.eq(8)) & endpoints.window_ms.eq(20) & endpoints.stride_ms.eq(5)
                      & endpoints.aspect.eq(1.4) & endpoints.estimator.eq("map") & endpoints.bin_filter.eq("unfiltered")
@@ -162,6 +199,12 @@ def main():
     for name, table in [("endpoint_summary", endpoints), ("gradient_response_by_population", gradient),
                         ("gradient_response_summary", responses), ("paired_factor_contrasts", contrasts)]:
         table.to_csv(args.output_dir / f"geometry_{name}.csv", index=False)
+    batches = pd.read_csv(args.input_dir / "geometry_batches.csv")
+    usecols = FACTORS + ["path_id", "truth_kind", "gradient", "truth_geometric_eligible", "continuity_pass"]
+    events = pd.concat([pd.read_csv(args.input_dir / filename, usecols=usecols) for filename in batches.file], ignore_index=True)
+    eligible_pop, eligible_summary = common_eligible_resolution_contrasts(events, rng, args.bootstraps)
+    eligible_pop.to_csv(args.output_dir / "geometry_common_eligible_resolution_by_population.csv", index=False)
+    eligible_summary.to_csv(args.output_dir / "geometry_common_eligible_resolution_summary.csv", index=False)
     figures(endpoints, responses, args.output_dir)
     (args.output_dir / "geometry_report.md").write_text(
         "# Controlled Geometry and Resolution Benchmark\n\n"
@@ -172,8 +215,10 @@ def main():
         "The common-count family assigns new labels using known position and must not be described as a count-only intervention on recordings. "
         "Common-core decoder support is an optimistic restriction. Grids/time windows use the same fine-bin counts. "
         "Time-scaled continuity comparisons reuse the identical 5 ms reference without increasing sample size.\n\n"
+        "The common-eligible resolution tables additionally restrict each paired contrast to the SAME truth paths that are geometrically eligible "
+        "under both settings. This avoids a changing truth-eligibility denominator in window/stride contrasts.\n\n"
         "No biological uniformity, cross-dataset replay-prevalence, or neural-mechanism claim is authorized by these results.\n")
-    provenance = build_script_provenance(input_paths={**paths, "reporter": __file__, "scoring_manifest": args.input_dir / "geometry_manifest.json"})
+    provenance = build_script_provenance(input_paths={**paths, "batches": args.input_dir / "geometry_batches.csv", "reporter": __file__, "scoring_manifest": args.input_dir / "geometry_manifest.json"})
     (args.output_dir / "geometry_report_manifest.json").write_text(json.dumps({**provenance,
         "output_sha256": {p.name: file_sha256(p) for p in args.output_dir.iterdir() if p.is_file() and p.name != "geometry_report_manifest.json"}}, indent=2) + "\n")
 

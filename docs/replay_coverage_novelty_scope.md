@@ -31,6 +31,14 @@ neither decoder bias nor uncertainty miscalibration is a new general observation
   count confounds decoded dynamics is new. Our controlled removal/pooling and
   injected-gradient recovery experiments are a different validation strategy;
   they do not refute that paper's mechanisms or results without matched tests.
+- Bakermans et al. (2025),
+  [Constructing future behavior in the hippocampal formation through composition and replay](https://doi.org/10.1038/s41593-025-01908-3),
+  uses memoryless Poisson decoding in 20 ms windows stepped by 5 ms and
+  leave-one-neuron-out decoding to avoid contaminating spike-localization
+  estimates with that neuron's own rate map. It validates first-half maps on
+  second-half running. Neither cell exclusion to prevent circularity nor RUN
+  validation is itself new here. This is a useful published pipeline comparator,
+  distinct from our population-removal recovery/selection experiment.
 
 ## Candidate Contribution, Still To Be Demonstrated
 

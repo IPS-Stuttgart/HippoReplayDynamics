@@ -5,10 +5,15 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from scripts.audit_replay_coverage_geometry import compare_tables, direct_support
-from scripts.report_replay_coverage_geometry import aggregate_responses, gradient_responses, paired_contrasts
+from scripts.audit_replay_coverage_geometry import compare_tables, direct_support, direct_truth_eligibility
+from scripts.report_replay_coverage_geometry import (
+    aggregate_responses,
+    common_eligible_resolution_contrasts,
+    gradient_responses,
+    paired_contrasts,
+)
 from scripts.simulate_replay_coverage_geometry import build_batch, score_batch, summarize_batch
-from tests.test_replay_coverage_geometry import args
+from tests.test_replay_coverage_geometry import args, straight_path
 
 
 def test_direct_support_has_no_gap_bridge():
@@ -17,6 +22,14 @@ def test_direct_support_has_no_gap_bridge():
     actual, _ = direct_support(fine, 20, 5, True)
     assert actual["valid_bins"] < actual["n_decoded_bins"]
     assert actual["all_steps"] < 9
+
+
+def test_independent_truth_eligibility():
+    assert direct_truth_eligibility(straight_path(), 20, 5, "literal_20cm_10frames")
+    assert direct_truth_eligibility(straight_path(), 40, 10, "time_scaled_4000cm_s_45ms")
+    path = straight_path()
+    path["midpoints_cm"][:] = 0
+    assert not direct_truth_eligibility(path, 20, 5, "literal_20cm_10frames")
 
 
 def test_missing_gradients_and_unpaired_contrasts_are_not_zero():
@@ -41,6 +54,21 @@ def test_table_comparison_rejects_duplicate_and_missing():
         compare_tables(pd.concat([frame, frame]), frame, ["id"])
     with pytest.raises(AssertionError):
         compare_tables(frame.iloc[:1], frame, ["id"])
+
+
+def test_common_eligible_denominator_excludes_different_truth_paths():
+    config = args()
+    paths, obs, evaluate, _, bounds = build_batch(config, 0, 0)
+    events, _ = score_batch(config, 0, 0, paths, obs, evaluate, bounds)
+    reference = events[events.truth_kind.eq("continuous") & events.gradient.eq(0)].copy()
+    reference["truth_geometric_eligible"] = True
+    reference["continuity_pass"] = False
+    changed = reference.assign(window_ms=40, truth_geometric_eligible=reference.path_id.eq(0), continuity_pass=True)
+    pop, summary = common_eligible_resolution_contrasts(pd.concat([reference, changed]), np.random.default_rng(0), 20)
+    assert pop.common_eligible_paths.eq(1).all()
+    assert pop.paths_matched.eq(2).all()
+    assert pop.paired_recovery_difference.eq(1).all()
+    assert summary["mean"].eq(1).all()
 
 
 def test_cli_smoke_and_reconstruction(tmp_path):

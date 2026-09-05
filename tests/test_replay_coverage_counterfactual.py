@@ -68,6 +68,21 @@ def test_missing_full_reference_rejected():
         paired_counts(np.ones((10, 4)), {.5: np.array([0, 1])}, [1], .001, 1)
 
 
+def test_pooling_does_not_increase_pairwise_position_information():
+    from scipy.special import rel_entr
+
+    rates = np.random.default_rng(15).lognormal(size=(12, 20))
+    pooled = pooled_rates(rates, np.array([0, 3, 7, 9]))
+    for a in range(20):
+        for b in range(20):
+            full_kl = np.sum(rel_entr(rates[:, a], rates[:, b]) - rates[:, a] + rates[:, b])
+            pooled_kl = np.sum(rel_entr(pooled[:, a], pooled[:, b]) - pooled[:, a] + pooled[:, b])
+            assert pooled_kl <= full_kl + 1e-12
+            p, q = rates[:, a] / rates[:, a].sum(), rates[:, b] / rates[:, b].sum()
+            pooled_p, pooled_q = pooled[:, a] / pooled[:, a].sum(), pooled[:, b] / pooled[:, b].sum()
+            assert np.sum(rel_entr(pooled_p, pooled_q)) <= np.sum(rel_entr(p, q)) + 1e-12
+
+
 def test_base_aggregation_and_zero_spike_restoration():
     obs = paired_counts(np.full((100, 4), 1e-20), subsets(), [1, 3], .001, 3)
     assert all(values.sum() == 0 for values in obs.values())

@@ -75,6 +75,7 @@ coverage explains the observed difference in trajectory-event rates.
 - [x] Run and reconstruct an empirical-map development recovery benchmark.
 - [x] Replicate with data-only pooled-cell controls and paired information doses.
 - [x] Test independent RUN-half maps and shared-gain observation mismatch.
+- [x] Evaluate frozen speed intervals on new A/B simulated panels and report abstention/transfer.
 - [ ] Validate calibration and gradient identifiability on held-out populations.
 - [ ] Finish the paper-facing evidence and limitations pack.
 
@@ -184,6 +185,25 @@ too sparsely available for cohort-wide interpretation. Shared gain is a
 declared stress model, not fitted replay covariance. This completes the planned
 map-estimation sensitivity within this surrogate, not calibration of real
 replay or the remaining event-definition/baseline/equivalence requirements.
+
+## Completed Speed-Interval Calibration and Transfer
+
+See `replay_speed_identifiability_protocol.md` and
+`replay_speed_identifiability_results.md`. All 33 sessions completed 247,896
+readout rows and 633,600 test interval decisions; all intervals reproduce,
+all training maps refit exactly and 6,864 sampled panel rows reconstruct.
+The frozen inverse Gaussian/conformal and raw-bootstrap baselines use disjoint
+fit/calibration/test simulation draws. B maps and shared gain never enter fitting.
+
+Matching-simulation conformal coverage is near nominal before continuity
+selection, but combined map/gain stress lowers coverage to 76.75% PF/89.40%
+Tanni in the bin-supported readout. Primary selected-event conformal results
+are finite only in Rat1; all Tanni primary calibrated results abstain. Neither
+calibrated method makes a +/-0.25 equivalence claim anywhere in the experiment.
+The result is an inference limit at the declared panel budget and settings,
+not biological uniformity or a universally calibrated method. Real
+event-definition sensitivity, published replay-detection comparisons and
+new-population validation remain distinct uncompleted requirements.
 
 ## Completed Likelihood Audit
 

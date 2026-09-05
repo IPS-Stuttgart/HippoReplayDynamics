@@ -1,8 +1,8 @@
 # Claim-by-Evidence and Completion Audit
 
-Current checkpoint: independent RUN-half maps and shared-gain observation
-benchmark completed and independently reconstructed, following the controlled
-field-geometry and decoder-resolution factorial. This is
+Current checkpoint: frozen speed-interval calibration/transfer benchmark
+completed, with all intervals reproduced and sampled decoding reconstructed,
+following independent RUN-half maps and the geometry/resolution factorial. This is
 not a final paper-ready certification. Scientific computations used
 gpuserver6000; artifact paths and commit hashes are in the linked results notes.
 
@@ -21,6 +21,9 @@ gpuserver6000; artifact paths and commit hashes are in the linked results notes.
 | Posterior credible mass provides a ready-made adaptive continuity threshold | Nominal 95% coverage is about 51% PF/61% Tanni for held-out 250 ms RUN positions | Not supported without calibration; RUN calibration need not transfer to replay |
 | Known generator maps adequately represent independently fitted RUN-map recovery | PF full-cell simulated recovery falls from 35.82% to 19.60%; Tanni changes from 7.94% to 6.80%, while localization worsens in both | Known maps can be optimistic; recovery effect is not uniformly large across datasets |
 | Independent maps restore speed-gradient identifiability | Full-cell known-coordinate response is 0.321 PF/0.121 Tanni for injected contrast 1.0; selected Tanni estimates available in only 1/50 half directions | Not supported; still requires calibrated recovery/abstention, not uniformity inference |
+| Matching-simulation interval calibration guarantees transfer | Bin-supported all-data conformal coverage about 95% when matching, 76.75% PF/89.40% Tanni with disjoint maps plus shared gain | Not supported; all nine animals show lower combined-stress coverage |
+| High all-panel coverage establishes informative speed inference | Primary selected Tanni calibration has 100% coverage but 0% finite intervals; PF finite conformal results only in Rat1 | Not supported; report abstention, finite-only coverage, width and animal availability |
+| Current calibrated intervals establish meaningful uniform speed | No inverse Gaussian/conformal +/-0.25 equivalence claims in any tested condition, including constant-speed truth | Not supported at the declared panel budget and settings; not an impossibility theorem or biological null |
 | Recording coverage explains the biological PF/Tanni difference | Different populations/maps/arenas and event definitions; no ground truth for rejected candidates | Not established |
 | The coverage-causes-apparent-jumps hypothesis is new | Prior work explicitly states the hypothesis, including Ji et al. (2026) | Not novel by itself; target quantitative recovery/calibration rather than the generic caveat |
 
@@ -34,10 +37,10 @@ Requirement numbering follows `replay_recording_coverage_study.md`, unchanged.
 | 2. Generator/likelihood validation | Fixed-total conditional audit; Poisson/conditional tests; independent RUN-half rate maps and shared-gain stress; reconstruction | Completed within these declared surrogate families; not a complete model of replay correlations |
 | 3. Isolate all named recording and analysis factors | Real nested cell removal; pooled-cell controls; rate sweep; paired RatInABox count/width/area/aspect factorial with targeted 4/8/16 cm, 10/20/40 ms, 5/10 ms decoder sweep | Controlled factorial complete within the frozen ranges; not a general decomposition of biological dataset differences |
 | 4. Estimators, support and selection | MAP/mean, unfiltered/filtered and selected-core metrics across the resolution sweep; independent no-gap-bridging and truth-eligibility recount; common-eligible path contrasts | Implemented for the frozen settings; no post-hoc optimal decoder promoted |
-| 5. Known-path and null recovery | Positive/negative/zero gradients, stationary, discontinuous and shuffled controls on empirical maps and eight RatInABox populations; now independent half maps/shared gain too | Current benchmarks complete; independently validated calibration/abstention remains |
+| 5. Known-path and null recovery | Positive/negative/zero gradients, stationary, discontinuous and shuffled controls; independent maps/gain; new fit/calibration/test panel splits | Current benchmarks complete, including conditional surrogate calibration/abstention; new-population transfer not established |
 | 6. Both real recording populations | All candidates cached; real perturbations; empirical maps and source durations; simulated/source spike budgets reported | Complete population groundwork; controlled maps are surrogates, not replay ground truth |
 | 7. Uncertainty and sensitivity | Equal-animal summaries; repeated synthetic draws; training-only RUN validation; independent half maps; explicit missingness | INCOMPLETE: real event-definition and broader decoder sensitivity; only nine animals; half-map drift is not pure estimation noise |
-| 8. Meaningful equivalence where identifiable | Large injected gradients often poorly recovered; selected estimates frequently unavailable | INCOMPLETE: prespecified equivalence range, calibrated procedure and independent evaluation; no biological equivalence claim |
+| 8. Meaningful equivalence where identifiable | Frozen +/-0.25 band and 0.10/0.50 sensitivities; Gaussian/conformal/raw comparison on independent panels; 633,600 decisions verified; no calibrated primary-band claims | Surrogate evaluation completed with an identifiability limit; biological equivalence and transferable calibrated procedure NOT established |
 | 9. Paper-ready artifacts and novelty | Tested scripts, audited tables, inspected figures, protocols/results and this claim matrix; targeted literature checks | INCOMPLETE: integrated final methods/limitations pack and comparison to established calibration/detection methods |
 
 ## Next Required Decision
@@ -46,9 +49,11 @@ The counterfactual resolves the earlier restoration ambiguity, and the new
 factorial separates field geometry from analysis resolution within a controlled
 simulation. Repeating either with more identical draws is not the next priority.
 Map-estimation/observation mismatch is now evaluated within a declared surrogate.
-Next evaluate a frozen calibration or abstention procedure on independent
-populations. Real event-definition
-sensitivity and comparison with published baselines remain necessary. No
+The frozen calibration/abstention comparison is now complete on new simulation
+panels, with limited availability and failed transfer; do not hide that by
+retuning to test outcomes. New biological populations were not held out.
+Real event-definition sensitivity and established replay-detection baseline
+comparisons are next, alongside the integrated methods/limitations pack. No
 thresholds should be chosen to make the current real data appear uniform or the
 simulations pass.
 
@@ -56,4 +61,4 @@ References: `replay_coverage_real_subsampling_results_20260905.md`,
 `replay_coverage_run_validation_results.md`, `replay_coverage_recovery_results.md`,
 `replay_coverage_counterfactual_results.md`,
 `replay_coverage_geometry_results.md`, `replay_coverage_map_mismatch_results.md`,
-`replay_coverage_novelty_scope.md`.
+`replay_coverage_novelty_scope.md`, `replay_speed_identifiability_results.md`.

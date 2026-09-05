@@ -53,7 +53,13 @@ original experimental papers were wrong.
    Matching-simulation interval coverage is near nominal before selection,
    but deteriorates with disjoint RUN maps and shared gain. Selected-event
    intervals frequently abstain. Neither calibrated baseline establishes the
-   declared speed-equivalence band, even on constant-speed test paths.
+   declared speed-equivalence band, even on constant-speed test paths. The
+   completed excluded-animal transfer is not uniformly worse than local
+   calibration, but its intervals are broad and its primary selected-event
+   conformal output entirely abstains. All missing primary calibration
+   statistics arise from fewer than five contributing events in small
+   11-30-candidate panels. Larger-panel validation is needed before treating
+   this as a general recording-population inference limit.
 
 These statements combine controlled simulations and real recording
 perturbations. Simulated paths are not replay ground truth, and simulation
@@ -122,8 +128,9 @@ connection through an exhaustive review.
    arena size or neuronal coverage alone.
 5. **When an inference is supportable.** Interval coverage, width, finite
    availability, false equivalence and abstention under matching and mismatched
-   maps/observations. Held-out-animal transfer is still required before a
-   generalizable calibration procedure can be claimed.
+   maps/observations. Include the completed retrospective excluded-animal
+   transfer and panel-size sensitivity. Pooled calibration has no asserted
+   finite-sample new-animal guarantee; broad coverage is not informativeness.
 
 The preferred narrative is not a chronology of failed hypotheses. It is a
 measurement chain: recording -> decoder -> selection -> kinematic inference.
@@ -155,9 +162,11 @@ measurement chain: recording -> decoder -> selection -> kinematic inference.
   randomized observations also sometimes pass, especially relative to the low
   acceptance of original Tanni ripple candidates. Do not equate these accepted
   fractions with biological replay prevalence.
-- Hold out biological populations during the surrogate calibration-transfer
-  evaluation. Existing new simulation draws within known populations are not
-  equivalent to this test. Retrospective transfer is not prospective validation.
+- Resolve the source-panel-size limitation. Excluded-animal transfer is now
+  completed and audited, but missing primary statistics reflect too few
+  surviving events in small panels. Test larger nested candidate collections
+  before claiming an inference limit that additional candidates cannot solve.
+  Retrospective transfer remains different from prospective validation.
 - Complete the integrated methods/results/limitations document, representative
   event panels and a reproducible artifact index. Resolve any claim-to-table
   mismatch before describing the package as paper-ready.

@@ -21,6 +21,37 @@ import pandas as pd
 from scripts._provenance import build_script_provenance, file_sha256
 
 
+def calibration_availability(meta):
+    """Post-inspection decomposition of missing primary calibration statistics."""
+    rows, paths = [], {}
+    columns = ["dataset", "animal", "session", "phase", "generator", "observation", "estimator", "bin_filter",
+        "selection", "statistic", "contributing_events", "source_events"]
+    for name, path in meta["input_file_paths"].items():
+        if not name.startswith("panels__"):
+            continue
+        if file_sha256(path) != meta["input_file_sha256"][name]:
+            raise ValueError("source panel hash changed")
+        paths[name] = Path(path)
+        data = pd.read_csv(path, usecols=columns, float_precision="round_trip")
+        data = data[data.phase.eq("calibration") & data.generator.eq("A") & data.observation.eq("poisson")
+            & data.estimator.eq("posterior_mean") & data.bin_filter.eq("at_least_2cells_3spikes") & data.selection.eq("selected")]
+        if data.empty or len(data[["dataset", "animal", "session"]].drop_duplicates()) != 1:
+            raise ValueError("one nonempty primary calibration session per source file required")
+        finite = np.isfinite(data.statistic)
+        below = data.contributing_events < 5
+        if (finite & below).any():
+            raise ValueError("finite statistic violates frozen five-event gate")
+        rows.append({**data.iloc[0][["dataset", "animal", "session"]].to_dict(),
+            "calibration_panels": len(data), "finite_statistic_fraction": float(finite.mean()),
+            "below_five_contributing_events_fraction": float(below.mean()),
+            "enough_events_but_statistic_missing_fraction": float((~finite & ~below).mean()),
+            "median_contributing_events": float(data.contributing_events.median()),
+            "source_events_min": int(data.source_events.min()), "source_events_max": int(data.source_events.max())})
+    if not rows:
+        raise ValueError("source panels required for availability diagnosis")
+    return pd.DataFrame(rows).sort_values(["dataset", "animal", "session"]), paths
+
+
 def report(input_dir, output_dir):
     paths = {"manifest": input_dir / "speed_population_transfer_manifest.json",
         "audit": input_dir / "speed_population_transfer_reconstruction_audit.json",
@@ -47,8 +78,11 @@ def report(input_dir, output_dir):
         row["animals_total"] = int(values.animals_total.iloc[0])
         rows.append(row)
     table = pd.DataFrame(rows)
+    availability, source_paths = calibration_availability(meta)
+    paths.update(source_paths)
     output_dir.mkdir(parents=True, exist_ok=False)
     table.to_csv(output_dir / "speed_population_transfer_primary_table.csv", index=False)
+    availability.to_csv(output_dir / "speed_population_transfer_calibration_availability.csv", index=False)
     datasets = sorted(selected.dataset.unique())
     fig, axes = plt.subplots(2, len(datasets), figsize=(6 * len(datasets), 8), squeeze=False, sharey=True, layout="constrained")
     conditions = [("A", "poisson"), ("A", "shared_gain"), ("B", "poisson"), ("B", "shared_gain")]
@@ -88,6 +122,15 @@ def report(input_dir, output_dir):
             continue
         lines.append(f"|{row.dataset}|{row.selection}|{row.generator}/{row.observation}|{row.calibration_scope}|{100 * row.coverage_equal_animal_mean:.2f}|{100 * row.finite_fraction_equal_animal_mean:.2f}|{100 * row.finite_coverage_equal_animal_mean:.2f}|{row.median_finite_width_equal_animal_mean:.3f}|{int(row.finite_coverage_animals_measurable)}/{row.animals_total}|")
     lines += ["", "NaN finite-only coverage/width means no measurable finite intervals, not zero error or perfect calibration. High all-panel coverage with zero finite output is abstention, not a useful solution.", "",
+        "## Why Primary Statistics Are Missing", "",
+        "Post-inspection diagnosis using the already-frozen five-contributing-event requirement. These are simulated calibration panels of up to 30 source duration profiles, not the total candidate count in the real recordings. No threshold or fit changes were made.", "",
+        "|Dataset|Finite statistic %|Fewer than five contributing events %|Missing despite at least five events %|",
+        "|---|---:|---:|---:|"]
+    fields = ["finite_statistic_fraction", "below_five_contributing_events_fraction", "enough_events_but_statistic_missing_fraction"]
+    means = availability.groupby(["dataset", "animal"])[fields].mean().groupby("dataset").mean()
+    for dataset, row in means.iterrows():
+        lines.append(f"|{dataset}|{100 * row.iloc[0]:.2f}|{100 * row.iloc[1]:.2f}|{100 * row.iloc[2]:.2f}|")
+    lines += ["", "Failure at this panel budget cannot establish that increasing the number of candidate events would not help. A larger-panel recovery check is needed before interpreting abstention as a general limit of a recording population.", "",
         "Gradient truth is v=1000*(1+g*q) cm/s over normalized horizontal coordinate q, NOT physical wall distance. The strict +/-0.25 equivalence band is a predeclared benchmark tolerance, not a biologically established uniformity criterion. No biological speed inference is authorized by this report.", "",
         "The paired comparison file gives transfer-minus-local differences on matched session test cohorts; finite-only rates and widths can condition on different surviving panel subsets. Do not call those matched-panel width effects.", "",
         f"Scoring commit: `{meta['code_commit']}`. Manifest SHA256: `{file_sha256(paths['manifest'])}`."]

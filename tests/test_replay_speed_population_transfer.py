@@ -21,7 +21,7 @@ from hipporeplayimm.replay_speed_population_transfer import (
 from scripts._provenance import file_sha256
 from scripts.audit_replay_speed_population_transfer import audit, independent_fit
 from scripts.calibrate_replay_speed_identifiability import draw_schedule, evaluate_panels, summarize_decisions
-from scripts.report_replay_speed_population_transfer import report
+from scripts.report_replay_speed_population_transfer import calibration_availability, report
 from scripts.validate_replay_speed_population_transfer import ROOT as REPO_ROOT
 from scripts.validate_replay_speed_population_transfer import load_source, run
 
@@ -189,6 +189,8 @@ def test_source_hash_and_full_cli_audit(tmp_path):
     report(out, tmp_path / "report")
     assert (tmp_path / "report/speed_population_transfer_coverage.png").stat().st_size > 1000
     assert "no asserted finite-sample" in (tmp_path / "report/speed_population_transfer_report.md").read_text()
+    availability = pd.read_csv(tmp_path / "report/speed_population_transfer_calibration_availability.csv")
+    assert availability.finite_statistic_fraction.eq(1).all()
     changed_path = out / "speed_population_transfer_decisions.csv.gz"
     changed = pd.read_csv(changed_path, float_precision="round_trip")
     index = changed[changed.finite_interval].index[0]
@@ -227,3 +229,16 @@ def test_missing_or_duplicated_fits_cannot_silently_drop_test_panels():
         evaluate_transfers(panels, fits.iloc[:-1])
     with pytest.raises(ValueError, match="unique"):
         evaluate_transfers(panels, pd.concat([fits, fits.iloc[:1]]))
+
+
+def test_availability_separates_event_count_and_remaining_statistic_gate(tmp_path):
+    panels, _ = synthetic_panels()
+    data = panels[panels.animal.eq("a") & panels.phase.eq("calibration") & panels.estimator.eq("posterior_mean")
+        & panels.bin_filter.eq("at_least_2cells_3spikes") & panels.selection.eq("selected")].head(3).copy()
+    data["contributing_events"], data["statistic"] = [4, 5, 8], [np.nan, np.nan, .2]
+    path = tmp_path / "panels__source.csv"
+    data.to_csv(path, index=False)
+    meta = {"input_file_paths": {path.name: str(path)}, "input_file_sha256": {path.name: file_sha256(path)}}
+    table, _ = calibration_availability(meta)
+    for column in ["finite_statistic_fraction", "below_five_contributing_events_fraction", "enough_events_but_statistic_missing_fraction"]:
+        assert table[column].item() == pytest.approx(1 / 3)

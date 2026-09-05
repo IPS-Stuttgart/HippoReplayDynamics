@@ -79,7 +79,8 @@ coverage explains the observed difference in trajectory-event rates.
 - [x] Freeze and audit native/LFP-ripple versus MUA inputs, with core/fixed windows and explicit missingness.
 - [x] Inspect LFP/MUA examples and run detector/window paired coverage-effect decoding.
 - [x] Compare with a transferred PF-style published-budget two-shuffle baseline.
-- [ ] Validate calibration and gradient identifiability on held-out populations.
+- [x] Evaluate excluded-animal calibration transfer on frozen simulation panels.
+- [ ] Quantify panel-size dependence before generalizing selected-event abstention.
 - [ ] Finish the paper-facing evidence and limitations pack.
 
 The first reanalysis is a diagnosis of an existing simulation, not completion
@@ -223,6 +224,23 @@ does not establish the same result. Acceptance is not replay ground truth.
 Held-out-population calibration transfer and the final integrated paper pack
 remain required. The current candidate contribution and direct prior work
 are recorded in `replay_coverage_paper_prospect.md` and the novelty scope.
+
+## Completed Excluded-Animal Calibration Transfer
+
+See `replay_speed_population_transfer_protocol.md` and
+`replay_speed_population_transfer_results.md`. All 33 sessions completed;
+72 excluded-animal/readout fits and all 422,400 test interval rows independently
+reconstruct. No excluded animal's simulation panels enter its inverse fit or
+calibration radius. This is retrospective pooled-baseline transfer, not a
+prospective biological replication or a new-animal conformal guarantee.
+
+All-data matching coverage is 92.75% PF/95.60% Tanni, with broad intervals.
+Primary selected-event conformal output is entirely abstention. Importantly,
+all missing primary calibration statistics arise from fewer than five
+contributing trajectories in the source 11-30-event panels. The next required
+test is panel-size sensitivity: do not mistake this small-panel availability
+limit for a general inability of larger event collections to recover gradients.
+The integrated paper pack remains unfinished.
 
 ## Completed Likelihood Audit
 

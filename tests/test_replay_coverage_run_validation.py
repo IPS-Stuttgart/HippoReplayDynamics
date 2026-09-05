@@ -20,6 +20,7 @@ from hipporeplayimm.replay_coverage_validation import (
     truth_state_indices,
     window_truth,
 )
+from scripts.audit_replay_coverage_run_outputs import direct_window_support
 from scripts.validate_replay_coverage_run_decoder import (
     score_fold,
     session_from_cache,
@@ -104,6 +105,18 @@ def test_half_open_windows_count_each_sorted_cell():
     spikes = np.array([[.5, 1], [1., 1], [1.5, 1], [2.5, 2]])
     counts = count_windows(index_spike_times(spikes, [1, 2]), [1, 2], np.array([1., 2.]), 1.)
     np.testing.assert_array_equal(counts, [[2, 0], [1, 0]])
+    count, active = direct_window_support(spikes, [1, 2], [1., 2.], 1.)
+    np.testing.assert_array_equal(count, counts.sum(axis=1))
+    np.testing.assert_array_equal(active, np.count_nonzero(counts, axis=1))
+
+
+def test_independent_recount_handles_silence_other_units_and_exact_boundaries():
+    spikes = np.array([[1.25, 1], [1.0, 2], [.875, 1], [1.125, 1], [.875, 99], [2., 2]])
+    count, active = direct_window_support(spikes, [1, 2], [1., 1.25, 3.], .25)
+    np.testing.assert_array_equal(count, [2, 2, 0])
+    np.testing.assert_array_equal(active, [2, 1, 0])
+    with pytest.raises(ValueError):
+        direct_window_support(spikes, [1, 2], [1., 1.1], .25)
 
 
 def test_truth_integrates_tracking_and_distinguishes_chord_from_path_length():

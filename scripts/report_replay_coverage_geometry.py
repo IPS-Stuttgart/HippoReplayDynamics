@@ -164,7 +164,9 @@ def figures(endpoints, responses, out):
         for name, value in common.items():
             top, bottom = top[top[name].eq(value)], bottom[bottom[name].eq(value)]
         top = top[top.estimator.eq("map") & top.truth_kind.eq("continuous") & top.gradient.eq(0) & top.metric.eq("eligible_recovery_fraction")]
-        bottom = bottom[bottom.estimator.eq("posterior_mean") & bottom.selection.eq("all") & bottom.coordinate.eq("true_coordinate") & bottom.readout.eq("decoded")]
+        bottom = bottom[bottom.estimator.eq("posterior_mean") & bottom.selection.eq("all") & bottom.coordinate.eq("true_coordinate")]
+        true_chord = bottom[bottom.readout.eq("true_chord") & bottom.grid_cm.eq(8)].sort_values("window_ms")
+        bottom = bottom[bottom.readout.eq("decoded")]
         for ax, table, scale in [(axes[0, col], top, 100), (axes[1, col], bottom, 1)]:
             for grid, group in table.groupby("grid_cm"):
                 group = group.sort_values("window_ms")
@@ -174,10 +176,31 @@ def figures(endpoints, responses, out):
             ax.legend(fontsize=8)
         axes[0, col].set(ylabel="MAP continuous-path recovery (%)", ylim=(0, 100))
         axes[1, col].axhline(0, color="black", lw=.7)
-        axes[1, col].axhline(1, color="gray", ls="--", label="injected response")
+        axes[1, col].axhline(1, color="gray", ls=":", label="injected arclength response")
+        axes[1, col].plot(true_chord.window_ms, true_chord["mean"], color="black", ls="--", label="window-mean truth")
+        axes[1, col].legend(fontsize=8)
         axes[1, col].set(ylabel="Posterior-mean gradient response")
     fig.suptitle("Same paths and counts across decoder resolutions\n128 cells; sigma30 cm; native Poisson; full support; no bin filter")
     fig.savefig(out / "geometry_resolution_factorial.png", dpi=160)
+    plt.close(fig)
+    fig, axes = plt.subplots(1, 2, figsize=(11, 4.8), constrained_layout=True, sharey=True)
+    for ax, area in zip(axes, [3.7, 8.75], strict=True):
+        local = endpoints[endpoints.area_m2.eq(area) & endpoints.n_cells.eq(128) & endpoints.sigma_cm.eq(30)
+                          & endpoints.aspect.eq(1.4) & endpoints.support_domain.eq("full_arena")
+                          & endpoints.observation.eq("native_poisson") & endpoints.stride_ms.eq(5)
+                          & endpoints.bin_filter.eq("unfiltered") & endpoints.estimator.eq("map") & endpoints.grid_cm.eq(8)
+                          & endpoints.gradient.eq(0)]
+        labels = {"continuous": "Eligible continuous: recovery", "stationary": "Stationary: false acceptance",
+                  "discontinuous": "Independent snapshots: false acceptance", "shuffled_continuous": "Shuffled: false acceptance"}
+        for kind, label in labels.items():
+            metric = "eligible_recovery_fraction" if kind == "continuous" else "acceptance_fraction"
+            group = local[local.truth_kind.eq(kind) & local.metric.eq(metric)].sort_values("window_ms")
+            ax.plot(group.window_ms, 100 * group["mean"], marker="o", label=label)
+            ax.fill_between(group.window_ms, 100 * group.ci95_low, 100 * group.ci95_high, alpha=.12)
+        ax.set(xlabel="Window duration (ms)", ylabel="Fraction (%)", xticks=[10, 20, 40], ylim=(0, 100), title=f"{area:g} m2")
+        ax.legend(fontsize=8)
+    fig.suptitle("Longer windows recover more paths, but also admit nulls\nSynthetic geometric acceptance, not biological replay significance")
+    fig.savefig(out / "geometry_recovery_null_tradeoff.png", dpi=160)
     plt.close(fig)
 
 

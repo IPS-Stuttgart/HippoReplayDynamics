@@ -4,6 +4,7 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+import pytest
 
 from scripts.audit_replay_coverage_geometry import compare_tables, direct_support, direct_truth_eligibility
 from scripts.report_replay_coverage_geometry import (
@@ -33,6 +34,7 @@ def test_independent_truth_eligibility():
 
 
 def test_missing_gradients_and_unpaired_contrasts_are_not_zero():
+    pytest.importorskip("ratinabox")
     config = args()
     paths, obs, evaluate, _, bounds = build_batch(config, 0, 0)
     events, _ = score_batch(config, 0, 0, paths, obs, evaluate, bounds)
@@ -48,7 +50,6 @@ def test_missing_gradients_and_unpaired_contrasts_are_not_zero():
 
 
 def test_table_comparison_rejects_duplicate_and_missing():
-    import pytest
     frame = pd.DataFrame({"id": [1, 2], "value": [3., 4.]})
     with pytest.raises(AssertionError):
         compare_tables(pd.concat([frame, frame]), frame, ["id"])
@@ -57,6 +58,7 @@ def test_table_comparison_rejects_duplicate_and_missing():
 
 
 def test_common_eligible_denominator_excludes_different_truth_paths():
+    pytest.importorskip("ratinabox")
     config = args()
     paths, obs, evaluate, _, bounds = build_batch(config, 0, 0)
     events, _ = score_batch(config, 0, 0, paths, obs, evaluate, bounds)
@@ -72,6 +74,7 @@ def test_common_eligible_denominator_excludes_different_truth_paths():
 
 
 def test_cli_smoke_and_reconstruction(tmp_path):
+    pytest.importorskip("ratinabox")
     root = Path(__file__).resolve().parents[1]
     output = tmp_path / "smoke"
     subprocess.run([sys.executable, str(root / "scripts/simulate_replay_coverage_geometry.py"), "--output-dir", str(output),

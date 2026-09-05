@@ -6,6 +6,21 @@ neither decoder bias nor uncertainty miscalibration is a new general observation
 
 ## Direct Prior Work
 
+- Silva, Feng, and Foster (2015),
+  [Trajectory events across hippocampal place cells require previous experience](https://pmc.ncbi.nlm.nih.gov/articles/PMC6095134/),
+  Figure 5, adds noise to saline place-field decoders to match or worsen RUN
+  reconstruction relative to a drug condition, then reassesses trajectory
+  events. Deliberately degrading a decoder to assess a replay conclusion is
+  therefore not new. This experiment differs from hiding recorded cells, but
+  is direct precedent for the measurement-control logic.
+- Liu, Todorova, Tang, Oliva, and Fernandez-Ruiz (2023),
+  [Associative and predictive hippocampal codes support memory-guided behaviors](https://pmc.ncbi.nlm.nih.gov/articles/PMC10894649/),
+  Methods replay analysis and Figure S7C, progressively removes units from
+  stimulation-OFF decoding until RUN errors exceed those in stimulation-ON
+  decoding, then recomputes replay. Real-unit removal followed by replay
+  reassessment is itself established practice, not a new intervention invented
+  here. This is a stronger novelty constraint than the generic observation
+  that fewer cells worsen localization.
 - Wei, Tajik Mansouri, Wang, and Stevenson (2024),
   [Calibrating Bayesian Decoders of Neural Spiking Activity](https://doi.org/10.1523/JNEUROSCI.2158-23.2024),
   demonstrates neural-decoder overconfidence, including hippocampal position
@@ -69,6 +84,10 @@ baselines; simply producing another threshold is not enough.
 
 The real-cell subsampling result and RUN validation are prerequisites and
 supporting experiments. They do not yet demonstrate the complete contribution.
+In particular, the 2015 degraded-decoder and 2023 real-unit-removal controls
+mean that paired perturbations alone cannot carry a priority claim. The present
+study must establish the additional quantitative connection to spatial-speed
+recovery, selection and calibrated inference limits.
 In particular, do not claim that a cell-count correlation or a population-size
 perturbation alone establishes a new explanation of replay. The stronger target
 is a tested operating range for recovery of continuity and spatial speed

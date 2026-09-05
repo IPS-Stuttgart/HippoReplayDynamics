@@ -21,6 +21,32 @@ import pandas as pd
 from scripts._provenance import build_script_provenance, file_sha256
 
 
+def order_contrast(animals, seed=20260906, bootstraps=5000):
+    """Describe paired order excess, not a corrected biological replay rate."""
+    keys = ["dataset", "detector", "animal"]
+    columns = keys + ["accepted_fraction_full", "accepted_fraction_half"]
+    primary = animals[animals.bin_filter.eq("edge_only") & animals.min_frames.eq(10) & animals.alpha.eq(.02)]
+    original = primary[primary.observation.eq("original_order")][columns]
+    randomized = primary[primary.observation.eq("order_randomized")][columns]
+    paired = original.merge(randomized, on=keys, how="outer", validate="one_to_one", indicator=True, suffixes=("_original", "_randomized"))
+    if not paired._merge.eq("both").all():
+        raise ValueError("order contrast requires both observations for each animal/cohort")
+    for population in ["full", "half"]:
+        paired[f"order_excess_{population}"] = paired[f"accepted_fraction_{population}_original"] - paired[f"accepted_fraction_{population}_randomized"]
+    paired["half_minus_full_order_excess"] = paired.order_excess_half - paired.order_excess_full
+    rng = np.random.default_rng(seed)
+    rows = []
+    for identity, group in paired.groupby(["dataset", "detector"], sort=True):
+        for metric in ["order_excess_full", "order_excess_half", "half_minus_full_order_excess"]:
+            values = group[metric].dropna().to_numpy()
+            ci = np.quantile(rng.choice(values, (bootstraps, len(values)), replace=True).mean(axis=1), [.025, .975]) if len(values) else [np.nan, np.nan]
+            rows.append({"dataset": identity[0], "detector": identity[1], "metric": metric,
+                "animals": len(values), "equal_animal_mean_pp": 100 * values.mean() if len(values) else np.nan,
+                "ci_low_pp": 100 * ci[0], "ci_high_pp": 100 * ci[1],
+                "animals_positive": int((values > 0).sum()), "animals_negative": int((values < 0).sum())})
+    return pd.DataFrame(rows)
+
+
 def report(input_dir, output_dir):
     manifest = input_dir / "coverage_shuffle_baseline_manifest.json"
     audit_path = input_dir / "coverage_shuffle_baseline_reconstruction_audit.json"
@@ -52,7 +78,9 @@ def report(input_dir, output_dir):
             "animals_negative": int(g.loc["accepted_fraction_delta", "animals_negative"])})
     table = pd.DataFrame(rows)
     table.to_csv(output_dir / "coverage_shuffle_baseline_primary_table.csv", index=False)
-    fig, axes = plt.subplots(2, 2, figsize=(12, 9), layout="constrained")
+    contrasts = order_contrast(animals, meta["seed"] + 1)
+    contrasts.to_csv(output_dir / "coverage_shuffle_baseline_order_contrast.csv", index=False)
+    fig, axes = plt.subplots(2, 2, figsize=(12, 9), sharey="col", layout="constrained")
     names = {"pfeiffer_foster": "Pfeiffer/Foster", "tanni2022": "Tanni"}
     for col, dataset in enumerate(["pfeiffer_foster", "tanni2022"]):
         for r, observation in enumerate(["original_order", "order_randomized"]):
@@ -91,6 +119,13 @@ def report(input_dir, output_dir):
         lines.append(f"|{row.dataset}|{row.detector}|{row.observation}|{row.eligible_events}|{row.geometric_full_percent:.2f}/{row.geometric_half_percent:.2f}|{row.significant_full_percent:.2f}/{row.significant_half_percent:.2f}|{row.half_minus_full_pp:.2f} [{row.delta_ci_low_pp:.2f}, {row.delta_ci_high_pp:.2f}]|{row.animals_negative}/{row.animals_with_events}|")
     lines += ["", "Rates average recording subsets within sessions, sessions within animals, then animals equally. Candidate counts are not independent animal replication. MUA/ripple windows may overlap; do not sum their denominators as distinct biological events.", "",
         "Order-randomized acceptance is a control readout, not an empirical false-positive rate for real replay. It preserves fine-bin population snapshots, not every local overlapping-window spike total. No speed-uniformity claim is tested.", "",
+        "## Descriptive Paired Order Contrast", "",
+        "Added after inspection of the frozen benchmark; no scoring or selection changes. Original-minus-randomized acceptance and its half-minus-full change are computed within animals. These are not bias-corrected replay prevalence or a new significance gate. There is only one observation-order surrogate per event, so the intervals do not integrate over repeated order surrogates.", "",
+        "|Dataset|Detector|Metric|Mean pp [animal-bootstrap 95% CI]|Animals|",
+        "|---|---|---|---:|---:|"]
+    for row in contrasts.itertuples(index=False):
+        lines.append(f"|{row.dataset}|{row.detector}|{row.metric}|{row.equal_animal_mean_pp:.2f} [{row.ci_low_pp:.2f}, {row.ci_high_pp:.2f}]|{row.animals}|")
+    lines += ["",
         "The support-filter, 11-frame, and alpha 0.01/0.05 sensitivities remain in the scoring tables; no setting was chosen to optimize these outcomes.", "",
         f"Scoring commit: `{meta['code_commit']}`. Scoring manifest SHA256: `{file_sha256(manifest)}`."]
     (output_dir / "coverage_shuffle_baseline_report.md").write_text("\n".join(lines) + "\n")

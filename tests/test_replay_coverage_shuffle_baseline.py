@@ -27,7 +27,7 @@ from scripts.analyze_replay_coverage_shuffle_baseline import (
 )
 from scripts.audit_replay_coverage_shuffle_baseline import audit_dense_map, audit_session
 from scripts.audit_replay_coverage_shuffle_baseline import main as run_audit
-from scripts.report_replay_coverage_shuffle_baseline import report
+from scripts.report_replay_coverage_shuffle_baseline import order_contrast, report
 
 
 def scalar_screen(path, grid, counts, filtered, min_frames):
@@ -256,6 +256,26 @@ def test_end_to_end_provenance_smoke_and_report(tmp_path):
     text = (tmp_path / "report/coverage_shuffle_baseline_report.md").read_text()
     assert "technical_smoke" in text and "not an empirical false-positive rate" in text
     assert (tmp_path / "report/coverage_shuffle_baseline_primary.png").stat().st_size > 1000
+    assert (tmp_path / "report/coverage_shuffle_baseline_order_contrast.csv").exists()
+
+
+def test_order_contrast_is_paired_and_does_not_confuse_acceptance_with_order_excess():
+    rows = []
+    for animal, original, shuffled in [("a", [.20, .10], [.18, .01]), ("b", [.40, .20], [.36, .02])]:
+        for order, rates in [("original_order", original), ("order_randomized", shuffled)]:
+            rows.append({"dataset": "d", "detector": "ripple", "animal": animal, "observation": order,
+                "bin_filter": "edge_only", "min_frames": 10, "alpha": .02,
+                "accepted_fraction_full": rates[0], "accepted_fraction_half": rates[1]})
+    animals = pd.DataFrame(rows)
+    result = order_contrast(animals, bootstraps=50).set_index("metric")
+    assert result.loc["order_excess_full", "equal_animal_mean_pp"] == pytest.approx(3)
+    assert result.loc["order_excess_half", "equal_animal_mean_pp"] == pytest.approx(13.5)
+    assert result.loc["half_minus_full_order_excess", "equal_animal_mean_pp"] == pytest.approx(10.5)
+    assert result.loc["half_minus_full_order_excess", "animals_positive"] == 2
+    with pytest.raises(ValueError, match="both observations"):
+        order_contrast(animals.iloc[:-1], bootstraps=50)
+    with pytest.raises(pd.errors.MergeError):
+        order_contrast(pd.concat([animals, animals.iloc[:1]]), bootstraps=50)
 
 
 def test_decision_status_keeps_zero_p_uncomputed_not_significant():

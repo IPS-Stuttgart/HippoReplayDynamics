@@ -1,8 +1,9 @@
 # Claim-by-Evidence and Completion Audit
 
-Current checkpoint: paired detector/window coverage decoding and selected
-LFP/MUA trace inspection completed across all33, after the frozen speed-interval
-calibration, independent RUN-half maps and geometry/resolution factorial. This is
+Current checkpoint: the transferred PF-style two-shuffle benchmark is completed
+and independently audited across all33, after detector/window coverage decoding,
+trace inspection, speed-interval calibration, independent RUN-half maps and the
+geometry/resolution factorial. This is
 not a final paper-ready certification. Scientific computations used
 gpuserver6000; artifact paths and commit hashes are in the linked results notes.
 
@@ -28,6 +29,10 @@ gpuserver6000; artifact paths and commit hashes are in the linked results notes.
 | The coverage-causes-apparent-jumps hypothesis is new | Prior work explicitly states the hypothesis, including Ji et al. (2026) | Not novel by itself; target quantitative recovery/calibration rather than the generic caveat |
 | The primary real cell-removal continuity result survives ripple versus MUA event definition | 28,451 eligible core/fixed windows, 910,432 rows, all metrics reconstructed; negative primary half-cell effect in all nine animals for both definitions and windows | Supported for the frozen geometric criterion; not shuffle-significant replay, and not every likelihood/peak sensitivity interval excludes zero |
 | Candidate-event speed changes under cell removal have a universal sign | Same-supported-step PF shifts about +143 to +146 cm/s across definitions; Tanni MUA positive, ripple core/fixed -93/+59 with intervals crossing zero | Not established; Tanni ripple estimates uncertain, strongly reduced measurability and no real latent-speed truth |
+| Cell removal changes acceptance under a transferred published-budget two-shuffle criterion | 14,441 eligible core windows, 33 sessions; K=5,000 per family; all 462,112 decision rows reconstructed. Primary MUA full/half acceptance PF 22.19%/8.53%, Tanni 5.77%/1.70%; negative in all nine animals, also for ripple cohorts | Supported at common 8 cm encoding and declared shuffle operators; not an exact author-pipeline reproduction or latent replay truth |
+| Both map-shuffle tests guarantee an accepted event contains intact original time order | Order-randomized primary acceptance PF MUA 2.44% and native ripple 3.39%; Tanni MUA 0.96% and LFP ripple 1.78%, versus original 5.77%/2.21% for Tanni | Not established; one order surrogate/event, with population snapshots preserved. These are control acceptance rates, not known biological false-positive rates |
+| Decreased acceptance under cell removal is always decreased original-order-specific acceptance | Paired original-minus-randomized excess decreases in all PF and Tanni MUA animals; Tanni ripple change +0.14 pp, CI [-1.47, 1.75], with no clear full-population order excess | Not established for every event class; do not equate the primary nine-animal acceptance result with universal loss of order-specific replay |
+| Real-cell removal as a replay-quality control is itself new | Silva et al. (2015) degrade decoders; Liu et al. (2023) remove units and recompute replay | Not novel by itself; additional contribution must connect selection, spatial-speed recovery and limits of inference |
 
 ## Full Objective Requirements
 
@@ -43,7 +48,7 @@ Requirement numbering follows `replay_recording_coverage_study.md`, unchanged.
 | 6. Both real recording populations | All candidates cached; real perturbations; empirical maps and source durations; simulated/source spike budgets reported | Complete population groundwork; controlled maps are surrogates, not replay ground truth |
 | 7. Uncertainty and sensitivity | Equal-animal summaries; training-only RUN validation; independent half maps; completed detector/core/fixed-window paired decoding with explicit two-session LFP unavailability; 15 preselected traces inspected | Completed within the frozen sensitivity ranges; only nine animals, half-map drift is not pure estimation noise, traces do not prove detector specificity or hardware synchronization |
 | 8. Meaningful equivalence where identifiable | Frozen +/-0.25 band and 0.10/0.50 sensitivities; Gaussian/conformal/raw comparison on independent panels; 633,600 decisions verified; no calibrated primary-band claims | Surrogate evaluation completed with an identifiability limit; biological equivalence and transferable calibrated procedure NOT established |
-| 9. Paper-ready artifacts and novelty | Tested scripts, audited tables, inspected figures, protocols/results and this claim matrix; targeted literature checks | INCOMPLETE: integrated final methods/limitations pack and comparison to established calibration/detection methods |
+| 9. Paper-ready artifacts and novelty | Tested scripts, audited tables, inspected figures, protocols/results and this claim matrix; transferred PF two-shuffle and standard calibration baselines; targeted direct-prior checks and a paper prospect | INCOMPLETE: held-out-population validation and integrated final methods/limitations pack; no blanket novelty certification |
 
 ## Next Required Decision
 
@@ -55,9 +60,12 @@ The frozen calibration/abstention comparison is now complete on new simulation
 panels, with limited availability and failed transfer; do not hide that by
 retuning to test outcomes. New biological populations were not held out.
 Real detector/window paired decoding and selected trace inspection are now
-complete with explicit missingness. Established replay-detection baseline
-comparisons and new-population validation are next, alongside the integrated
-methods/limitations pack. No
+complete with explicit missingness. The PF-style published-budget two-shuffle
+comparison is now complete; the real-cell effect remains, but order-randomized
+acceptance limits interpretations of the low Tanni ripple yield. New-population
+validation and the integrated methods/limitations pack are next. An exact
+author-encoding reproduction or head-to-head with other sequence detectors
+would be additional, different comparisons. No
 thresholds should be chosen to make the current real data appear uniform or the
 simulations pass.
 
@@ -67,4 +75,5 @@ References: `replay_coverage_real_subsampling_results_20260905.md`,
 `replay_coverage_geometry_results.md`, `replay_coverage_map_mismatch_results.md`,
 `replay_coverage_novelty_scope.md`, `replay_speed_identifiability_results.md`,
 `replay_coverage_event_definition_results.md`,
-`replay_coverage_detector_decoding_results.md`.
+`replay_coverage_detector_decoding_results.md`,
+`replay_coverage_shuffle_baseline_results.md`, `replay_coverage_paper_prospect.md`.

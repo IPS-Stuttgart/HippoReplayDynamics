@@ -78,7 +78,7 @@ coverage explains the observed difference in trajectory-event rates.
 - [x] Evaluate frozen speed intervals on new A/B simulated panels and report abstention/transfer.
 - [x] Freeze and audit native/LFP-ripple versus MUA inputs, with core/fixed windows and explicit missingness.
 - [x] Inspect LFP/MUA examples and run detector/window paired coverage-effect decoding.
-- [ ] Compare with established shuffle-significant replay baselines.
+- [x] Compare with a transferred PF-style published-budget two-shuffle baseline.
 - [ ] Validate calibration and gradient identifiability on held-out populations.
 - [ ] Finish the paper-facing evidence and limitations pack.
 
@@ -207,6 +207,22 @@ The result is an inference limit at the declared panel budget and settings,
 not biological uniformity or a universally calibrated method. Real
 event-definition sensitivity, published replay-detection comparisons and
 new-population validation remain distinct uncompleted requirements.
+
+## Completed Transferred Two-Shuffle Baseline
+
+See `replay_coverage_shuffle_baseline_protocol.md`, its numerical addendum,
+and `replay_coverage_shuffle_baseline_results.md`. All 33 sessions completed
+the K=5,000-per-family benchmark; all 462,112 decision rows reconstructed.
+The primary cell-removal acceptance effect remains negative in all nine
+animals for MUA and ripple cohorts after both map-shuffle tests. This uses
+the common 8 cm encoding, not an exact reproduction of the authors' pipeline.
+
+Order-randomized controls also sometimes pass. A descriptive paired order
+excess decreases in all PF/Tanni MUA animals, but the Tanni ripple cohort
+does not establish the same result. Acceptance is not replay ground truth.
+Held-out-population calibration transfer and the final integrated paper pack
+remain required. The current candidate contribution and direct prior work
+are recorded in `replay_coverage_paper_prospect.md` and the novelty scope.
 
 ## Completed Likelihood Audit
 

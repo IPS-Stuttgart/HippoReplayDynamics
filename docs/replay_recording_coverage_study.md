@@ -72,6 +72,7 @@ coverage explains the observed difference in trajectory-event rates.
 - [ ] Run a matched mechanistic coverage and speed-recovery factorial.
 - [x] Audit and subsample real populations/candidates from both datasets.
 - [x] Validate held-out RUN decoding with training-only unit/grid/map fitting.
+- [x] Run and reconstruct an empirical-map development recovery benchmark.
 - [ ] Validate calibration and gradient identifiability on held-out populations.
 - [ ] Finish the paper-facing evidence and limitations pack.
 
@@ -107,6 +108,20 @@ and speed-gradient recovery before any adaptive continuity or equivalence claim.
 See `replay_coverage_novelty_scope.md` for direct prior work on calibration,
 sampling bias, and replay validation. The paper contribution must go beyond
 those established general observations.
+
+## Completed Empirical-Map Development Recovery
+
+See `replay_coverage_recovery_protocol.md` and
+`replay_coverage_recovery_results.md`. The frozen 33-session run generated
+4,855 known paths using 971 source support profiles; all 349,560 metric rows
+passed technical checks, and path/count reconstruction plus direct support
+recount verified every row. No source event was selected on decoded success.
+Continuity loss under cell removal largely disappears when total counts are
+preserved and decoded conditionally. Strong injected spatial gradients are
+substantially attenuated, particularly in Tanni; selected cores are too sparse
+in most Tanni sessions for gradient inference. These are development results,
+not independent calibration or biological uniformity. The full factor-isolation
+and independent recovery/equivalence requirements above remain incomplete.
 
 ## Completed Likelihood Audit
 

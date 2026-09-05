@@ -77,7 +77,7 @@ coverage explains the observed difference in trajectory-event rates.
 - [x] Test independent RUN-half maps and shared-gain observation mismatch.
 - [x] Evaluate frozen speed intervals on new A/B simulated panels and report abstention/transfer.
 - [x] Freeze and audit native/LFP-ripple versus MUA inputs, with core/fixed windows and explicit missingness.
-- [ ] Inspect LFP/MUA examples and run detector/window paired coverage-effect decoding.
+- [x] Inspect LFP/MUA examples and run detector/window paired coverage-effect decoding.
 - [ ] Compare with established shuffle-significant replay baselines.
 - [ ] Validate calibration and gradient identifiability on held-out populations.
 - [ ] Finish the paper-facing evidence and limitations pack.
@@ -231,7 +231,27 @@ MUA windows remain available, and all nine animals have both-detector sessions.
 MUA/ripple overlaps differ strongly under these definitions; those are candidate
 assay differences, not replay precision/recall or biological differences.
 
-No new replay decoding occurred in preparation. Detector/window cell-removal
-effects, representative trace inspection and published replay baselines remain
-uncompleted requirements. Use all-intermediate-bin support for the new speed
-comparison, not the endpoint-only speed check in the older subsampling helper.
+No new replay decoding occurred in preparation. Its completed decoding
+follow-up is recorded below; published replay baselines remain separate.
+
+## Completed Detector/Window Recording Sensitivity
+
+See `replay_coverage_detector_decoding_protocol.md` and
+`replay_coverage_detector_decoding_results.md`. All 33 sessions completed
+28,451 eligible core/fixed windows and 910,432 condition rows. Every scoring
+frame was recounted and all path metrics independently reconstructed; 3,580
+analytic posterior checks and exact summary reconstruction passed. Fifteen
+preselected Tanni LFP/MUA examples were plotted and visually inspected without
+retuning detectors. Examples do not establish hardware synchronization or
+detector specificity.
+
+The primary MAP continuity loss under half-cell recording is negative in all
+nine animals for both candidate definitions and both window variants. PF loses
+about 18 percentage points under either definition; Tanni loses about 6.5 points
+for MUA and 2 points for ripple candidates, which start near the acceptance
+floor. PF paired speed shifts remain positive on identical supported steps;
+Tanni ripple speed shifts are uncertain and window-sensitive. All-intermediate
+support prevents gap bridging; this is not the old endpoint-only statistic.
+No biological uniformity or true-replay inference follows. Established shuffle
+baselines, new-population calibration/transfer and the final paper pack remain
+uncompleted requirements.

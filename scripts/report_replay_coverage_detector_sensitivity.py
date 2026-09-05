@@ -101,9 +101,10 @@ def run(root, out):
         s = s.assign(cohort=[label(r) for r in s.itertuples(index=False)]).set_index("cohort").reindex(LABELS)
         axes[i, 2].plot(range(4), s.equal_animal_mean, marker="o", color="#297b54")
         axes[i, 2].fill_between(range(4), s.ci95_low, s.ci95_high, alpha=.15, color="#297b54")
-        axes[i, 0].set_ylabel(f"{dataset}\nMAP continuity acceptance (%)")
+        dataset_label = "Pfeiffer/Foster" if dataset == "pfeiffer_foster" else "Tanni (all arenas)"
+        axes[i, 0].set_ylabel(f"{dataset_label}\nMAP continuity acceptance (%)")
         axes[i, 1].set_ylabel("Half minus full continuity (percentage points)")
-        axes[i, 2].set_ylabel("Half minus full mean-path speed (cm/s)")
+        axes[i, 2].set_ylabel("Half minus full posterior-mean speed (cm/s)")
         axes[i, 0].legend(fontsize=9)
         axes[i, 1].legend(fontsize=8, ncol=2)
         for ax in axes[i]:
@@ -113,7 +114,7 @@ def run(root, out):
     axes[0, 0].set_title("Geometric screening, not replay significance")
     axes[0, 1].set_title("Every animal's paired recording effect")
     axes[0, 2].set_title("Identical supported steps in both populations")
-    fig.suptitle("Frozen event-definition sensitivity: independent flat-prior decoding\nPoisson; >=2 cells and >=3 spikes per frame; equal-animal means and animal-bootstrap intervals", fontsize=13)
+    fig.suptitle("Frozen event-definition sensitivity: independent flat-prior decoding\nPoisson; >=2 cells and >=3 spikes per frame; equal-animal means and animal-bootstrap intervals\nPF: native ripple tables. Tanni: new LFP envelope z >= 3, available in 23/25 sessions.", fontsize=12)
     fig.savefig(out / "coverage_detector_sensitivity_overview.png", dpi=160)
     plt.close(fig)
     lines = ["# Detector/Window Recording-Coverage Sensitivity", "", "Non-rescoring report. Geometric screening is not shuffle-significant replay.", "",

@@ -1,7 +1,7 @@
 import numpy as np
 import pandas as pd
 import pytest
-from scripts.plot_replay_coverage_matched_events import choose_examples, pair_decisions, posterior_diagnostics
+from scripts.plot_replay_coverage_matched_events import choose_examples, continuous_core, pair_decisions, posterior_diagnostics
 
 
 def fixture():
@@ -39,3 +39,12 @@ def test_flat_prior_posterior_mean_radius_and_marginals():
         np.testing.assert_allclose(m, .5)
     p, _, _, _ = posterior_diagnostics(np.array([[10]]), np.array([[1., 100., 1., 1.]]), grid)
     assert p.argmax() == 1
+
+
+def test_core_does_not_label_the_whole_event_continuous():
+    grid = np.column_stack([np.arange(12) * 8, np.zeros(12)])
+    path = np.r_[11, np.arange(10)]
+    counts = np.full((11, 2), 2)
+    assert continuous_core(path, grid, counts) == (1, 10)
+    assert continuous_core(path, grid, np.zeros_like(counts)) is None
+    assert continuous_core(path, grid * 3, counts) is None

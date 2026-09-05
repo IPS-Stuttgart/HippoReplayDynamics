@@ -72,6 +72,20 @@ def posterior_diagnostics(counts, rates, grid):
     return posterior, mean, radius, marginals
 
 
+def continuous_core(path, grid, counts):
+    support = np.flatnonzero(counts.sum(axis=1) >= 2)
+    if not len(support):
+        return None
+    best, start = (int(support[0]), int(support[0])), int(support[0])
+    for t in range(start + 1, int(support[-1]) + 1):
+        if np.linalg.norm(grid[path[t]] - grid[path[t - 1]]) >= 20 - 1e-9:
+            start = t
+        if t - start > best[1] - best[0]:
+            best = (start, t)
+    a, b = best
+    return best if b - a + 1 >= 10 and np.linalg.norm(grid[path[b]] - grid[path[a]]) >= 40 - 1e-9 else None
+
+
 def draw_example(row, arrays, specs, raw, output):
     index = np.flatnonzero(arrays["window_uids"] == row.window_uid)
     if len(index) != 1:
@@ -109,6 +123,7 @@ def draw_example(row, arrays, specs, raw, output):
         if accepted is None:
             accepted = row.category in (["lost", "retained"] if r == 0 else ["gained", "retained"])
         ax = axes[r, 0]
+        core = continuous_core(path, grid, counts[:, subset])
         n_spikes = 0
         for cell in subset:
             t = 1000 * (spikes[spikes[:, 1] == arrays["cell_ids"][cell], 0] - start)
@@ -118,6 +133,8 @@ def draw_example(row, arrays, specs, raw, output):
             ax.axhspan(cell_rank[cell] - .5, cell_rank[cell] + .5, color=".92", linewidth=0)
         ax.set(xlim=(0, duration_ms), ylim=(-1, len(order)), ylabel="RUN-peak x/y sorted cell index",
             xlabel="Time from candidate start (ms)", title=f"{label.title()}: {len(subset)} cells, {n_spikes} spikes\nFrozen two-shuffle decision: {'pass' if accepted else 'fail'}")
+        if core is not None:
+            ax.axvspan(time_ms[core[0]], time_ms[core[1]], color="#287c80", alpha=.12, zorder=-1)
         for dim in range(2):
             ax = axes[r, dim + 1]
             coordinate, prob = marginal[dim]
@@ -127,6 +144,9 @@ def draw_example(row, arrays, specs, raw, output):
             mesh = ax.pcolormesh(times, edges, prob.T, cmap="viridis", vmin=0, vmax=vmax, rasterized=True)
             ax.plot(time_ms, grid[path, dim], color="#e76f51", lw=.8, label="MAP")
             ax.plot(time_ms, mean[:, dim], color="white", lw=.8, label="Mean")
+            if core is not None:
+                ix = slice(core[0], core[1] + 1)
+                ax.plot(time_ms[ix], grid[path[ix], dim], color="black", lw=2.2, label="Geometric core")
             ax.set(xlim=(0, duration_ms), xlabel="Time (ms)", ylabel=f"{'xy'[dim]} coordinate (cm)",
                 title=f"Marginal over {'xy'[dim]} (not a 1D path)")
             fig.colorbar(mesh, ax=ax, fraction=.04, label="Probability per 8 cm strip")
@@ -136,12 +156,17 @@ def draw_example(row, arrays, specs, raw, output):
         ax.scatter(grid[:, 0], grid[:, 1], s=3, c=".85", label="Decoded states")
         ax.plot(grid[path, 0], grid[path, 1], color="#e76f51", lw=.8, label="MAP")
         ax.plot(mean[:, 0], mean[:, 1], color="#277b7a", lw=1, label="Mean")
+        if core is not None:
+            core_path = grid[path[core[0]:core[1] + 1]]
+            ax.plot(core_path[:, 0], core_path[:, 1], color="black", lw=2.2, label="Geometric core")
         ax.scatter(*mean[0], marker="o", c="#277b7a", s=25)
         ax.scatter(*mean[-1], marker="x", c="#277b7a", s=25)
         ax.set(aspect="equal", xlabel="x (cm)", ylabel="y (cm)", title=f"2D decoded path, no temporal prior\nMedian posterior RMS radius: {np.median(radius):.1f} cm")
         ax.legend(fontsize=7)
         result[f"{label}_spikes"] = n_spikes
         result[f"{label}_median_posterior_radius_cm"] = np.median(radius)
+        result[f"{label}_core_start_ms"] = time_ms[core[0]] if core else np.nan
+        result[f"{label}_core_end_ms"] = time_ms[core[1]] if core else np.nan
     for ax in axes.flat:
         ax.spines[["top", "right"]].set_visible(False)
     fig.suptitle(f"{row.dataset} / {row.animal} / {row.session} / {row.category}\n{row.window_uid}\nSame fixed candidate, subset 0; category-selected illustration, not replay ground truth. Gray raster rows are hidden cells; state support is not a verified wall outline.", fontsize=10)
@@ -198,6 +223,7 @@ def run(root, output):
         "Independent 20 ms Poisson decoding advances by 5 ms under a uniform prior. The x/y heatmaps are marginals of a 2D posterior, not linearized tracks. "
         "The original saved MAP is checked against the reconstructed posterior maximum; ties need not choose the same bin. "
         "Mean paths, MAP paths and RMS posterior radii are diagnostic and do not alter the frozen 5,000-per-family shuffle decisions. "
+        "Black MAP segments mark the longest geometric core when it passes the edge-only continuity screen; the rest of an accepted event can still jump. "
         "Connecting adjacent coordinates is visualization, not temporal smoothing. State support is not a measured arena boundary.\n")
     provenance = build_script_provenance(input_paths=inputs, cwd=ROOT)
     provenance.update(status="complete", examples=len(examples), animals=examples[KEY[:2]].drop_duplicates().shape[0],

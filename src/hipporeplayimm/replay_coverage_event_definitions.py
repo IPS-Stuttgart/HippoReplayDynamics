@@ -31,6 +31,13 @@ class EventDefinitionConfig:
     maximum_channel_rail_fraction: float = 0.001
 
 
+class InsufficientBaselineError(ValueError):
+    def __init__(self, baseline, duration_s):
+        super().__init__(f"insufficient tracking-supported immobile LFP baseline: {duration_s:.6f} s")
+        self.baseline = baseline
+        self.duration_s = duration_s
+
+
 def runs(mask):
     value = np.asarray(mask, dtype=bool)
     if value.ndim != 1:
@@ -145,7 +152,7 @@ def standardize_envelope(envelope, times, sampling_rate, immobile, config):
     edge_valid = (times >= times[0] + config.filter_edge_guard_s) & (times < times[-1] - config.filter_edge_guard_s)
     baseline = edge_valid & interval_contains(times, times, immobile)
     if baseline.sum() / sampling_rate < config.minimum_baseline_s:
-        raise ValueError("insufficient tracking-supported immobile LFP baseline")
+        raise InsufficientBaselineError(baseline, float(baseline.sum() / sampling_rate))
     mean, sd = float(np.mean(envelope[baseline])), float(np.std(envelope[baseline]))
     if not np.isfinite(sd) or sd <= 0:
         raise ValueError("degenerate ripple baseline")
@@ -248,6 +255,10 @@ def annotate_overlap(windows, pairs):
     counts = pd.concat([pairs.mua_window_uid, pairs.ripple_window_uid]).value_counts()
     windows["other_detector_overlap_count"] = windows.window_uid.map(counts).fillna(0).astype(int)
     windows["overlap_class"] = np.where(~windows.eligible, "ineligible", np.where(windows.other_detector_overlap_count > 0, "both_detectors", np.where(windows.detector.eq("source_high_mua"), "mua_only", "ripple_only")))
+    if "ripple_status" in windows:
+        unavailable = ~windows.ripple_status.eq("available")
+        windows.loc[unavailable, "other_detector_overlap_count"] = np.nan
+        windows.loc[unavailable & windows.eligible, "overlap_class"] = "ripple_unavailable"
     return windows
 
 

@@ -6,6 +6,7 @@ import pytest
 
 from hipporeplayimm.replay_coverage_event_definitions import (
     EventDefinitionConfig,
+    InsufficientBaselineError,
     annotate_overlap,
     detect_ripple_episodes,
     immobile_intervals,
@@ -86,6 +87,9 @@ def test_standardization_uses_only_immobile_supported_baseline():
     assert np.nanmean(z[t > 6]) > 100
     with pytest.raises(ValueError, match="insufficient"):
         standardize_envelope(envelope, t, 1000, [[1, 1.2]], config)
+    with pytest.raises(InsufficientBaselineError) as exc:
+        standardize_envelope(envelope, t, 1000, [[1, 1.2]], config)
+    assert exc.value.duration_s == pytest.approx(.201)
 
 
 def test_bandpass_envelope_prefers_ripple_band():
@@ -163,6 +167,23 @@ def test_zero_eligible_denominators_preserved_in_summary():
     assert summary.n_spikes_qc_units_median.isna().all()
 
 
+def test_unavailable_ripple_is_not_zero_or_mua_only():
+    events = sources()
+    events = events[events.detector.eq("source_high_mua")]
+    w = make_windows(events, np.array([[0., 0, 0], [2., 0, 0]]), [[0, 2]], [[0, 2]], EventDefinitionConfig())
+    w["ripple_status"] = "unavailable_insufficient_baseline"
+    w = annotate_overlap(w, overlap_pairs(w))
+    assert w.overlap_class.eq("ripple_unavailable").all()
+    assert w.other_detector_overlap_count.isna().all()
+    w["n_spikes_qc_units"], w["n_active_qc_units"] = 1, 1
+    summary = summarize_windows(w)
+    ripple = summary[summary.detector.eq("lfp_ripple_detected")]
+    assert not ripple.detector_available.any()
+    assert ripple.eligible_windows.isna().all()
+    assert ripple.source_windows.isna().all()
+    assert summary.other_detector_overlap_at_primary_z3.isna().all()
+
+
 def test_native_tables_preserve_out_of_run_and_source_ids(tmp_path):
     from scipy.io import savemat
     a = np.array([[.1, .2, .15, 99, 77, 66], [10, 11, 10.5, 3, 4, 5]])
@@ -193,6 +214,24 @@ def test_nwb_channel_selection_uses_literal_ca1_ids(tmp_path):
     assert rate == fs and meta["channels_selected"] == 1
     assert [c["selected"] for c in channels] == [True, False, False, False]
     assert len(meta["consumed_datasets"]) == 5
+    from scripts._provenance import file_sha256
+    from scripts.audit_replay_coverage_event_definitions import verify_session
+    from scripts.prepare_replay_coverage_event_definitions import prepare_session
+
+    cache = tmp_path / "encoding.npz"
+    pt = np.arange(0, 3, .02)
+    np.savez(cache, position=np.column_stack([pt, np.zeros((len(pt), 2))]),
+        supported_run_intervals=np.array([[0., 2.98]]), spikes=np.array([[1.06, 1], [1.08, 2]]),
+        cell_ids=np.array([1, 2]), unit_qc_mask=np.array([True, True]))
+    output = tmp_path / "out"
+    (output / "sessions").mkdir(parents=True)
+    record = {"dataset": "tanni2022", "animal": "Rat", "session": "day", "artifact_path": str(cache), "artifact_sha256": file_sha256(cache), "source_path": str(path)}
+    mua = pd.DataFrame({"event_index": [1], "start_s": [1.], "end_s": [1.2], "peak_s": [1.1]})
+    metadata, summary, _ = prepare_session(record, mua, output, EventDefinitionConfig())
+    assert metadata["status"] == "complete" and metadata["ripple_status"] == "unavailable_insufficient_baseline"
+    assert metadata["source_high_mua_events"] == 1 and metadata["source_ripple_events"] is None
+    assert pd.DataFrame(summary).query("detector == 'lfp_ripple_detected'").eligible_windows.isna().all()
+    assert verify_session(metadata, EventDefinitionConfig(), mua, refilter=True)["window_rows_verified"] == 2
 
 
 @pytest.mark.parametrize("bad_hash", [False, True])
@@ -235,3 +274,7 @@ def test_cli_synthetic_session_manifest_and_failure_gates(tmp_path, bad_hash):
         assert manifest["code_commit"] != "unavailable"
         for name, expected in manifest["output_sha256"].items():
             assert file_sha256(out / name) == expected
+        auditor = script.with_name("audit_replay_coverage_event_definitions.py")
+        audited = subprocess.run([sys.executable, str(auditor), "--input-dir", str(out), "--workers", "1"], capture_output=True, text=True, check=False)
+        assert audited.returncode == 0, audited.stdout + audited.stderr
+        assert json.loads((out / "coverage_event_definition_reconstruction_audit.json").read_text())["window_rows_verified"] == 6

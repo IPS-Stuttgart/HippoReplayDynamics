@@ -23,6 +23,10 @@ counts. No evidence, speed, continuity or posterior outcome selects candidates.
   average with its mean and population SD during tracking-supported immobility.
   These are standard z-scores of amplitude envelopes, NOT power or robust-MAD z.
 - Guard one second at each LFP edge; require >=60 s valid immobile baseline.
+  If baseline duration is insufficient, retain the session's MUA windows, mark
+  ripple detection unavailable, and use missing rather than zero ripple counts.
+  Keep the >=60 s threshold unchanged. An all-session detector comparison is
+  unavailable in that case even if technical preparation succeeds.
 - Ripple-like episodes exceed the baseline mean. Merge gaps <=30 ms, require
   peak >=3 SD, and label duration 15-250 ms as passing. Retain amplitude-qualified
   episodes that fail duration, rather than hiding them. Fixed-window analyses

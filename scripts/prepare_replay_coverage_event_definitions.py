@@ -27,6 +27,7 @@ from scipy.io import loadmat
 from hipporeplayimm.replay_coverage_data import array_sha256, index_spike_times
 from hipporeplayimm.replay_coverage_event_definitions import (
     EventDefinitionConfig,
+    InsufficientBaselineError,
     annotate_overlap,
     detect_ripple_episodes,
     immobile_intervals,
@@ -117,21 +118,25 @@ def summarize_windows(windows):
             thresholds = [3.0, 4.0, 5.0] if detector == "lfp_ripple_detected" else [0.0]
             for variant in ["detected_core", "peak_centered_200ms"]:
                 all_rows = frame[frame.detector.eq(detector) & frame.window_variant.eq(variant)]
+                available = detector != "lfp_ripple_detected" or "ripple_status" not in frame or frame.ripple_status.eq("available").all()
+                overlap_available = "ripple_status" not in frame or frame.ripple_status.eq("available").all()
                 for threshold in thresholds:
                     subset = all_rows[all_rows.ripple_peak_z >= threshold] if threshold else all_rows
                     eligible = subset[subset.eligible]
                     rows.append({**dict(zip(IDENTITY, identity, strict=True)), "detector": detector, "window_variant": variant,
-                        "peak_threshold_z": threshold, "source_windows": len(subset), "duration_pass": int(subset.detector_duration_pass.sum()),
+                        "peak_threshold_z": threshold, "detector_available": bool(available),
+                        "source_windows": len(subset) if available else np.nan, "duration_pass": int(subset.detector_duration_pass.sum()) if available else np.nan,
                         "tracking_supported": int(subset.tracking_supported.sum()), "peak_immobile": int(subset.peak_immobile.sum()),
-                        "whole_window_immobile": int(subset.whole_window_immobile.sum()), "eligible_windows": len(eligible),
-                        "other_detector_overlap_at_primary_z3": int((eligible.other_detector_overlap_count > 0).sum()),
+                        "whole_window_immobile": int(subset.whole_window_immobile.sum()), "eligible_windows": len(eligible) if available else np.nan,
+                        "overlap_available": bool(overlap_available),
+                        "other_detector_overlap_at_primary_z3": int((eligible.other_detector_overlap_count > 0).sum()) if overlap_available else np.nan,
                         "n_spikes_qc_units_median": float(eligible.n_spikes_qc_units.median()) if len(eligible) else np.nan,
                         "n_active_qc_units_median": float(eligible.n_active_qc_units.median()) if len(eligible) else np.nan,
                         "duration_ms_median": float(1000 * eligible.window_duration_s.median()) if len(eligible) else np.nan})
     return pd.DataFrame(rows)
 
 
-def prepare_session(record, mua, out, config):
+def prepare_session(record, mua, out, config, reuse=None):
     started = time.monotonic()
     identity = {k: record[k] for k in IDENTITY}
     label = "__".join(str(identity[k]).replace("/", "_") for k in IDENTITY)
@@ -148,10 +153,30 @@ def prepare_session(record, mua, out, config):
         raise ValueError("no common tracking-supported immobility")
     source = Path(record["source_path"])
     times, z, baseline, channels = None, None, None, []
+    ripple_status = "available"
     if identity["dataset"] == "tanni2022":
-        print(f"filter LFP {label}", flush=True)
-        times, envelope, fs, channels, raw_meta = load_ripple_envelope(source, config)
-        z, baseline, baseline_meta = standardize_envelope(envelope, times, fs, immobile, config)
+        if reuse is None:
+            print(f"filter LFP {label}", flush=True)
+            times, envelope, fs, channels, raw_meta = load_ripple_envelope(source, config)
+        else:
+            raw_meta = dict(reuse["raw_ripple_source"])
+            cache_path = Path(raw_meta["envelope_cache_path"])
+            if file_sha256(cache_path) != raw_meta["envelope_cache_sha256"]:
+                raise ValueError("reused envelope hash mismatch")
+            stat = source.stat()
+            if str(source) != raw_meta["path"] or (stat.st_size, stat.st_mtime_ns) != (raw_meta["size_bytes"], raw_meta["mtime_ns"]):
+                raise ValueError("reused envelope raw input differs")
+            with np.load(cache_path, allow_pickle=False) as f:
+                times, envelope, fs = f["times_s"], f["envelope"], float(f["sampling_rate_hz"])
+            channels = reuse["channels"]
+            raw_meta["reused_raw_envelope_manifest"] = reuse["manifest_path"]
+            raw_meta["reused_raw_envelope_manifest_sha256"] = file_sha256(reuse["manifest_path"])
+        try:
+            z, baseline, baseline_meta = standardize_envelope(envelope, times, fs, immobile, config)
+        except InsufficientBaselineError as exc:
+            ripple_status = "unavailable_insufficient_baseline"
+            z, baseline = np.full(len(times), np.nan), exc.baseline
+            baseline_meta = {"baseline_duration_s": exc.duration_s, "ripple_unavailable_reason": str(exc)}
         raw_meta.update(baseline_meta)
         ripple = detect_ripple_episodes(times, z, fs, config)
         lfp_cache = out / "sessions" / f"{label}__ripple_envelope.npz"
@@ -163,6 +188,7 @@ def prepare_session(record, mua, out, config):
     mua = mua[["event_index", "start_s", "end_s", "peak_s"]]
     events = source_events(mua, ripple, **identity)
     windows = make_windows(events, position, supported, immobile, config, times)
+    windows["ripple_status"] = ripple_status
     pairs = overlap_pairs(windows)
     windows = annotate_overlap(windows, pairs)
     metrics = window_spike_support(windows, index_spike_times(spikes, ids), ids, mask)
@@ -183,7 +209,8 @@ def prepare_session(record, mua, out, config):
     for row in channels:
         row.update(identity)
     metadata = {**identity, "status": "complete", "source_cache_path": str(cache), "source_cache_sha256": record["artifact_sha256"],
-        "source_high_mua_events": len(mua), "source_ripple_events": len(ripple), "windows": len(windows), "overlap_edges": len(pairs),
+        "source_high_mua_events": len(mua), "source_ripple_events": len(ripple) if ripple_status == "available" else None,
+        "ripple_status": ripple_status, "windows": len(windows), "overlap_edges": len(pairs),
         "immobile_duration_s": float(np.sum(immobile[:, 1] - immobile[:, 0])), "raw_ripple_source": raw_meta,
         "windows_path": str(events_path), "windows_sha256": file_sha256(events_path),
         "overlaps_path": str(pairs_path), "overlaps_sha256": file_sha256(pairs_path),
@@ -203,6 +230,24 @@ def run(args):
         "data_library": ROOT / "src/hipporeplayimm/replay_coverage_data.py",
         "provenance_library": ROOT / "scripts/_provenance.py",
         "protocol": ROOT / "docs/replay_coverage_event_definition_protocol.md"}
+    reusable = {}
+    if args.reuse_envelope_dir is not None:
+        parent_path = args.reuse_envelope_dir / "coverage_event_definition_manifest.json"
+        parent = json.loads(parent_path.read_text())
+        if parent["status"] not in {"complete", "failed", "complete_with_ripple_unavailable"}:
+            raise ValueError("only terminal envelope preparation may be reused")
+        if parent["parameters"] != asdict(config):
+            raise ValueError("reused envelope parameters differ")
+        channel_path = args.reuse_envelope_dir / "coverage_event_definition_channel_qc.csv"
+        channel_frame = pd.read_csv(channel_path)
+        if file_sha256(channel_path) != parent["output_sha256"][channel_path.name]:
+            raise ValueError("reused channel metadata changed")
+        inputs["reused_envelope_manifest"] = parent_path
+        inputs["reused_channel_qc"] = channel_path
+        for record in parent["results"]:
+            if record["status"] == "complete" and record["dataset"] == "tanni2022":
+                local = channel_frame[np.logical_and.reduce([channel_frame[k].eq(record[k]) for k in IDENTITY])]
+                reusable[tuple(record[k] for k in IDENTITY)] = {**record, "channels": local.to_dict("records"), "manifest_path": str(parent_path)}
     sessions = pd.read_csv(sessions_path)
     events = pd.read_csv(candidates_path)
     if args.sessions:
@@ -237,7 +282,7 @@ def run(args):
             local = events[np.logical_and.reduce([events[k].eq(record[k]) for k in IDENTITY])].copy()
             if len(local) != int(record["candidates"]):
                 raise ValueError("source MUA count disagrees with session manifest")
-            jobs[pool.submit(prepare_session, record, local, out, config)] = record
+            jobs[pool.submit(prepare_session, record, local, out, config, reusable.get(tuple(record[k] for k in IDENTITY)))] = record
         for future in as_completed(jobs):
             record = jobs[future]
             try:
@@ -255,7 +300,10 @@ def run(args):
     overlap = pd.concat([pd.read_csv(r["overlaps_path"]) for r in complete], ignore_index=True) if complete else pd.DataFrame()
     ordered_results = sorted(results, key=lambda r: tuple(r[k] for k in IDENTITY))
     pd.DataFrame([{k: v for k, v in r.items() if not isinstance(v, (dict, list))} for r in ordered_results]).to_csv(out / "coverage_event_definition_sessions.csv", index=False)
-    pd.DataFrame(summaries).sort_values(IDENTITY + ["detector", "window_variant", "peak_threshold_z"]).to_csv(out / "coverage_event_definition_counts.csv", index=False) if summaries else pd.DataFrame().to_csv(out / "coverage_event_definition_counts.csv", index=False)
+    summary_table = pd.DataFrame(summaries)
+    if len(summary_table):
+        summary_table = summary_table.sort_values(IDENTITY + ["detector", "window_variant", "peak_threshold_z"])
+    summary_table.to_csv(out / "coverage_event_definition_counts.csv", index=False)
     pd.DataFrame(channel_rows).to_csv(out / "coverage_event_definition_channel_qc.csv", index=False)
     windows.to_csv(out / "coverage_event_definition_windows.csv", index=False)
     overlap.to_csv(out / "coverage_event_definition_overlaps.csv", index=False)
@@ -270,7 +318,9 @@ def run(args):
         "no_decoding_or_content_selection": nonempty and not windows.decode_performed.any(),
         "source_code_and_tables_unchanged": unchanged}
     gates["overall_preparation"] = all(bool(v) for v in gates.values())
-    pd.DataFrame([{"gate": k, "passed": bool(v)} for k, v in gates.items()]).to_csv(out / "coverage_event_definition_gate_summary.csv", index=False)
+    availability = len(complete) == len(sessions) and all(r["ripple_status"] == "available" for r in complete)
+    pd.DataFrame([{"gate": k, "passed": bool(v), "required_for_preparation": True} for k, v in gates.items()] +
+        [{"gate": "all_ripple_definitions_available", "passed": bool(availability), "required_for_preparation": False}]).to_csv(out / "coverage_event_definition_gate_summary.csv", index=False)
     lines = ["# Event-Definition Preparation", "", f"Completed sessions: {len(complete)}/{len(sessions)}.",
         f"Original MUA events retained: {retained}/{int(sessions.candidates.sum())}. Window rows: {len(windows)}.",
         "", "PF ripple events are native tables; Tanni ripple-like events are independently detected from CA1 LFP.",
@@ -279,8 +329,10 @@ def run(args):
         "Envelope amplitude z is not ripple power z. LFP artifacts and sharp waves are not independently validated.",
         "No replay was decoded. Candidate counts and overlap alone do not finish coverage sensitivity.", "", "## Gates", ""]
     lines.extend(f"- {k}: {'pass' if v else 'FAIL'}" for k, v in gates.items())
+    lines.extend(["", f"All ripple definitions available: {availability}. Unavailable detection is not zero events."])
+    lines.extend(f"- {r['animal']}/{r['session']}: {r['ripple_status']}" for r in complete if r["ripple_status"] != "available")
     (out / "coverage_event_definition_report.md").write_text("\n".join(lines) + "\n")
-    manifest.update(status="complete" if gates["overall_preparation"] else "failed", results=ordered_results,
+    manifest.update(status=("complete" if availability else "complete_with_ripple_unavailable") if gates["overall_preparation"] else "failed", results=ordered_results,
         sessions=len(sessions), source_mua_events=retained, windows=len(windows), inputs_unchanged=unchanged,
         output_sha256={p.name: file_sha256(p) for p in sorted(out.iterdir()) if p.is_file() and p != manifest_path})
     manifest_path.write_text(json.dumps(manifest, indent=2, allow_nan=False) + "\n")
@@ -294,6 +346,7 @@ if __name__ == "__main__":
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--sessions", nargs="*")
     parser.add_argument("--workers", type=int, default=4)
+    parser.add_argument("--reuse-envelope-dir", type=Path)
     args = parser.parse_args()
     if args.workers < 1:
         parser.error("workers must be positive")

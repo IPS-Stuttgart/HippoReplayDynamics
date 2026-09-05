@@ -26,6 +26,8 @@ def summarize(root):
     audit = json.loads((root / "coverage_event_definition_reconstruction_audit.json").read_text())
     if meta["status"] not in {"complete", "complete_with_ripple_unavailable"} or audit["status"] != "pass":
         raise ValueError("successful preparation and reconstruction audit required")
+    if audit["input_file_sha256"]["preparation_manifest"] != file_sha256(root / "coverage_event_definition_manifest.json") or audit["sessions"] != meta["sessions"] or audit["window_rows_verified"] != meta["windows"]:
+        raise ValueError("audit does not cover this preparation artifact")
     for name, digest in meta["output_sha256"].items():
         if file_sha256(root / name) != digest:
             raise ValueError(f"changed preparation output: {name}")
@@ -79,10 +81,11 @@ def run(root, out):
     ax.legend(frameon=False, fontsize=8)
     ax = axes[1, 1]
     mua = windows[windows.dataset.eq("tanni2022") & windows.detector.eq("source_high_mua") & windows.window_variant.eq("detected_core") & windows.eligible & windows.ripple_status.eq("available")]
+    common_bins = np.histogram_bin_edges(mua.mean_ripple_envelope_z.dropna(), bins=35) if len(mua) else np.linspace(-1, 1, 36)
     for name, local in mua.groupby("animal", sort=True):
         values = local.mean_ripple_envelope_z.dropna()
         if len(values):
-            ax.hist(values, bins=35, histtype="step", density=True, label=f"{name} (n={len(values)})")
+            ax.hist(values, bins=common_bins, histtype="step", density=True, label=f"{name} (n={len(values)})")
     ax.axvline(0, color="black", lw=.8)
     ax.set(xlabel="Within-MUA mean envelope z (amplitude, not power)", ylabel="Density", title="Tanni: event-average ripple expression")
     ax.legend(frameon=False, fontsize=8)

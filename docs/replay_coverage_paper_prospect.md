@@ -89,6 +89,11 @@ window-length recovery/null trade-off; speed-gradient attenuation; calibration
 transfer and abstention. All five now have results, with explicit scope limits.
 The integrated paper and event-definition/baseline comparisons remain incomplete.
 See `replay_speed_identifiability_results.md` for the last panel's evidence.
+The real detector comparison now has frozen, audited core/fixed-window inputs
+across all33, with ripple availability in 8/8 PF and 23/25 Tanni sessions.
+This is preparation, not a demonstrated detector-robust coverage effect; see
+`replay_coverage_event_definition_results.md`. Trace validation and paired
+decoding remain necessary, especially given low Tanni detector overlap.
 
 ## Claims Not Supported by This Study
 

@@ -1,8 +1,9 @@
 # Claim-by-Evidence and Completion Audit
 
-Current checkpoint: frozen speed-interval calibration/transfer benchmark
-completed, with all intervals reproduced and sampled decoding reconstructed,
-following independent RUN-half maps and the geometry/resolution factorial. This is
+Current checkpoint: native/LFP-ripple and MUA event-definition inputs prepared
+and reconstructed across all33, after the frozen speed-interval calibration,
+independent RUN-half maps and geometry/resolution factorial. Event-definition
+coverage-effect decoding is not yet run. This is
 not a final paper-ready certification. Scientific computations used
 gpuserver6000; artifact paths and commit hashes are in the linked results notes.
 
@@ -26,6 +27,7 @@ gpuserver6000; artifact paths and commit hashes are in the linked results notes.
 | Current calibrated intervals establish meaningful uniform speed | No inverse Gaussian/conformal +/-0.25 equivalence claims in any tested condition, including constant-speed truth | Not supported at the declared panel budget and settings; not an impossibility theorem or biological null |
 | Recording coverage explains the biological PF/Tanni difference | Different populations/maps/arenas and event definitions; no ground truth for rejected candidates | Not established |
 | The coverage-causes-apparent-jumps hypothesis is new | Prior work explicitly states the hypothesis, including Ji et al. (2026) | Not novel by itself; target quantitative recovery/calibration rather than the generic caveat |
+| The real cell-removal result is robust to ripple versus MUA event definition | Frozen inputs: 12,141 original MUA events retained; 90,132 core/fixed-window rows audited; native PF ripple available in 8/8 and new Tanni ripple-like detection in 23/25 sessions | NOT established yet; paired decoding and LFP/MUA trace inspection remain required |
 
 ## Full Objective Requirements
 
@@ -39,7 +41,7 @@ Requirement numbering follows `replay_recording_coverage_study.md`, unchanged.
 | 4. Estimators, support and selection | MAP/mean, unfiltered/filtered and selected-core metrics across the resolution sweep; independent no-gap-bridging and truth-eligibility recount; common-eligible path contrasts | Implemented for the frozen settings; no post-hoc optimal decoder promoted |
 | 5. Known-path and null recovery | Positive/negative/zero gradients, stationary, discontinuous and shuffled controls; independent maps/gain; new fit/calibration/test panel splits | Current benchmarks complete, including conditional surrogate calibration/abstention; new-population transfer not established |
 | 6. Both real recording populations | All candidates cached; real perturbations; empirical maps and source durations; simulated/source spike budgets reported | Complete population groundwork; controlled maps are surrogates, not replay ground truth |
-| 7. Uncertainty and sensitivity | Equal-animal summaries; repeated synthetic draws; training-only RUN validation; independent half maps; explicit missingness | INCOMPLETE: real event-definition and broader decoder sensitivity; only nine animals; half-map drift is not pure estimation noise |
+| 7. Uncertainty and sensitivity | Equal-animal summaries; repeated synthetic draws; training-only RUN validation; independent half maps; frozen detector/core/fixed-window inputs with explicit two-session LFP unavailability | INCOMPLETE: real detector/window coverage-effect decoding and LFP trace inspection; only nine animals; half-map drift is not pure estimation noise |
 | 8. Meaningful equivalence where identifiable | Frozen +/-0.25 band and 0.10/0.50 sensitivities; Gaussian/conformal/raw comparison on independent panels; 633,600 decisions verified; no calibrated primary-band claims | Surrogate evaluation completed with an identifiability limit; biological equivalence and transferable calibrated procedure NOT established |
 | 9. Paper-ready artifacts and novelty | Tested scripts, audited tables, inspected figures, protocols/results and this claim matrix; targeted literature checks | INCOMPLETE: integrated final methods/limitations pack and comparison to established calibration/detection methods |
 
@@ -52,8 +54,10 @@ Map-estimation/observation mismatch is now evaluated within a declared surrogate
 The frozen calibration/abstention comparison is now complete on new simulation
 panels, with limited availability and failed transfer; do not hide that by
 retuning to test outcomes. New biological populations were not held out.
-Real event-definition sensitivity and established replay-detection baseline
-comparisons are next, alongside the integrated methods/limitations pack. No
+The event-definition preparation is now complete with explicit missingness,
+not the sensitivity test itself. Real detector/window paired decoding and
+established replay-detection baseline comparisons are next, alongside the
+integrated methods/limitations pack. No
 thresholds should be chosen to make the current real data appear uniform or the
 simulations pass.
 
@@ -61,4 +65,5 @@ References: `replay_coverage_real_subsampling_results_20260905.md`,
 `replay_coverage_run_validation_results.md`, `replay_coverage_recovery_results.md`,
 `replay_coverage_counterfactual_results.md`,
 `replay_coverage_geometry_results.md`, `replay_coverage_map_mismatch_results.md`,
-`replay_coverage_novelty_scope.md`, `replay_speed_identifiability_results.md`.
+`replay_coverage_novelty_scope.md`, `replay_speed_identifiability_results.md`,
+`replay_coverage_event_definition_results.md`.

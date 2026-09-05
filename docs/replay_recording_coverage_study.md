@@ -76,6 +76,9 @@ coverage explains the observed difference in trajectory-event rates.
 - [x] Replicate with data-only pooled-cell controls and paired information doses.
 - [x] Test independent RUN-half maps and shared-gain observation mismatch.
 - [x] Evaluate frozen speed intervals on new A/B simulated panels and report abstention/transfer.
+- [x] Freeze and audit native/LFP-ripple versus MUA inputs, with core/fixed windows and explicit missingness.
+- [ ] Inspect LFP/MUA examples and run detector/window paired coverage-effect decoding.
+- [ ] Compare with established shuffle-significant replay baselines.
 - [ ] Validate calibration and gradient identifiability on held-out populations.
 - [ ] Finish the paper-facing evidence and limitations pack.
 
@@ -211,3 +214,24 @@ See `replay_recording_coverage_audit_20260905.md` for results and exact artifact
 locations. All 32,400 legacy events reproduced; the corrected 30 cm field-width
 effect is smaller and its interval crosses zero. The narrower-field effect
 persists. This is a mixed result, not a universal coverage explanation.
+
+## Prepared Real Event-Definition Sensitivity Inputs
+
+See `replay_coverage_event_definition_protocol.md` and
+`replay_coverage_event_definition_results.md`. All 12,141 source MUA events remain
+in the frozen 33-session artifact, with 90,132 core/fixed-window rows including
+native PF and newly detected Tanni ripple-like sources and explicit exclusions.
+The audit verified all source identities, window spike support and 5,665 overlap
+edges, rehashed 150 consumed native arrays and refiltered one Tanni recording.
+
+PF native ripple definition is available in all eight sessions; new Tanni LFP
+detection is available in 23/25 sessions. Two sessions below the frozen 60 s
+immobile-baseline requirement are labeled unavailable, not zero-ripple. Their
+MUA windows remain available, and all nine animals have both-detector sessions.
+MUA/ripple overlaps differ strongly under these definitions; those are candidate
+assay differences, not replay precision/recall or biological differences.
+
+No new replay decoding occurred in preparation. Detector/window cell-removal
+effects, representative trace inspection and published replay baselines remain
+uncompleted requirements. Use all-intermediate-bin support for the new speed
+comparison, not the endpoint-only speed check in the older subsampling helper.

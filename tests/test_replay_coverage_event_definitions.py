@@ -278,3 +278,15 @@ def test_cli_synthetic_session_manifest_and_failure_gates(tmp_path, bad_hash):
         audited = subprocess.run([sys.executable, str(auditor), "--input-dir", str(out), "--workers", "1"], capture_output=True, text=True, check=False)
         assert audited.returncode == 0, audited.stdout + audited.stderr
         assert json.loads((out / "coverage_event_definition_reconstruction_audit.json").read_text())["window_rows_verified"] == 6
+        reporter = script.with_name("report_replay_coverage_event_definitions.py")
+        reported = subprocess.run([sys.executable, str(reporter), "--input-dir", str(out), "--output-dir", str(tmp_path / "report")], capture_output=True, text=True, check=False)
+        assert reported.returncode == 0, reported.stdout + reported.stderr
+        assert (tmp_path / "report/coverage_event_definition_overview.png").stat().st_size > 1000
+        from scripts.report_replay_coverage_event_definitions import summarize
+
+        audit_path = out / "coverage_event_definition_reconstruction_audit.json"
+        wrong = json.loads(audit_path.read_text())
+        wrong["input_file_sha256"]["preparation_manifest"] = "other-run"
+        audit_path.write_text(json.dumps(wrong))
+        with pytest.raises(ValueError, match="does not cover"):
+            summarize(out)

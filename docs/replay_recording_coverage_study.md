@@ -69,7 +69,7 @@ coverage explains the observed difference in trajectory-event rates.
 
 - [x] Locate the actual completed RatInABox runs and audit the generator/decoder.
 - [x] Reproduce old inputs with conditional and unconditional likelihoods.
-- [ ] Run a matched mechanistic coverage and speed-recovery factorial.
+- [x] Run a matched mechanistic coverage and speed-recovery factorial.
 - [x] Audit and subsample real populations/candidates from both datasets.
 - [x] Validate held-out RUN decoding with training-only unit/grid/map fitting.
 - [x] Run and reconstruct an empirical-map development recovery benchmark.
@@ -140,6 +140,27 @@ spatial gradients remain attenuated at roughly source-comparable spike budgets;
 much higher exposures partly recover them. These are independent synthetic
 draws on the same empirical maps, not held-out-map calibration or biological
 replication. The full completion requirements remain active.
+
+## Completed Field-Geometry and Resolution Factorial
+
+See `replay_coverage_geometry_protocol.md` and
+`replay_coverage_geometry_results.md`. The frozen RatInABox Gaussian-field
+experiment crosses population count, field width, arena area and aspect, with
+a targeted spatial-grid/window/stride factorial on identical fine spikes.
+All 96 batches completed; all 55,296 observation arrays reconstructed and all
+1,400,832 metric rows passed independent support/truth-eligibility checks.
+An additional 9,728 rows passed analytic likelihood/position-error checks.
+The eight synthetic populations are not biological replication.
+
+Longer windows substantially increase known-path recovery but also null
+acceptance. In the illustrated 8.75 m2 slice, 20 to 40 ms changes recovery
+from 11.34% to 64.34% and shuffled-path acceptance from 0.52% to 18.23%.
+The recovery increase persists on a common truth-eligible path set. Finer
+spatial grids barely change gradient recovery; window averaging itself removes
+kinematic detail. Field-width/area effects depend on observation conditions.
+No setting is promoted as optimal, and no biological uniformity claim follows.
+Remaining priorities are map/observation mismatch, independent calibration,
+real event-definition sensitivity and established-method comparisons.
 
 ## Completed Likelihood Audit
 

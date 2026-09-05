@@ -73,6 +73,7 @@ coverage explains the observed difference in trajectory-event rates.
 - [x] Audit and subsample real populations/candidates from both datasets.
 - [x] Validate held-out RUN decoding with training-only unit/grid/map fitting.
 - [x] Run and reconstruct an empirical-map development recovery benchmark.
+- [x] Replicate with data-only pooled-cell controls and paired information doses.
 - [ ] Validate calibration and gradient identifiability on held-out populations.
 - [ ] Finish the paper-facing evidence and limitations pack.
 
@@ -117,11 +118,28 @@ See `replay_coverage_recovery_protocol.md` and
 passed technical checks, and path/count reconstruction plus direct support
 recount verified every row. No source event was selected on decoded success.
 Continuity loss under cell removal largely disappears when total counts are
-preserved and decoded conditionally. Strong injected spatial gradients are
+restored using true-position-dependent labels and decoded conditionally. That
+intervention can introduce information and does not isolate count loss.
+The later data-only pooled control below retains most continuity loss despite
+preserving all spikes. Strong injected spatial gradients are
 substantially attenuated, particularly in Tanni; selected cores are too sparse
 in most Tanni sessions for gradient inference. These are development results,
 not independent calibration or biological uniformity. The full factor-isolation
 and independent recovery/equivalence requirements above remain incomplete.
+
+## Completed Paired Information-Loss Counterfactual
+
+See `replay_coverage_counterfactual_protocol.md`,
+`replay_coverage_information_controls.md`, and
+`replay_coverage_counterfactual_results.md`. The 33-session production run uses
+three new randomizations and nested exposures, with 17,478 truth-trial records
+and 1,957,536 metric rows. Full reconstruction and independent support recount
+passed. Pooling removed cells preserves every spike but retains most continuity
+loss, correcting a count-only interpretation of oracle restoration. Strong
+spatial gradients remain attenuated at roughly source-comparable spike budgets;
+much higher exposures partly recover them. These are independent synthetic
+draws on the same empirical maps, not held-out-map calibration or biological
+replication. The full completion requirements remain active.
 
 ## Completed Likelihood Audit
 

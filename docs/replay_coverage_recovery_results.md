@@ -3,6 +3,12 @@
 Status: completed development experiment; full paper-ready study incomplete.
 No biological speed-uniformity or replay-prevalence conclusion.
 
+Interpretation update: `replay_coverage_counterfactual_results.md` contains the
+subsequent pooled-cell control. Preserving total spikes without individual
+identities leaves most continuity loss. The imposed-count restoration below
+uses true-position-dependent labels and must NOT be read as a pure isolation
+of spike-count loss; it can introduce information.
+
 ## Provenance and Verification
 
 All science ran on gpuserver6000 (`workstation2`). Authoritative artifact:

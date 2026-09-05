@@ -74,6 +74,7 @@ coverage explains the observed difference in trajectory-event rates.
 - [x] Validate held-out RUN decoding with training-only unit/grid/map fitting.
 - [x] Run and reconstruct an empirical-map development recovery benchmark.
 - [x] Replicate with data-only pooled-cell controls and paired information doses.
+- [x] Test independent RUN-half maps and shared-gain observation mismatch.
 - [ ] Validate calibration and gradient identifiability on held-out populations.
 - [ ] Finish the paper-facing evidence and limitations pack.
 
@@ -159,8 +160,30 @@ The recovery increase persists on a common truth-eligible path set. Finer
 spatial grids barely change gradient recovery; window averaging itself removes
 kinematic detail. Field-width/area effects depend on observation conditions.
 No setting is promoted as optimal, and no biological uniformity claim follows.
-Remaining priorities are map/observation mismatch, independent calibration,
-real event-definition sensitivity and established-method comparisons.
+The map/observation mismatch follow-up is recorded below. Independent
+calibration, real event-definition sensitivity and established-method
+comparisons remain necessary.
+
+## Completed Independent RUN-Map / Shared-Gain Benchmark
+
+See `replay_coverage_map_mismatch_protocol.md` and
+`replay_coverage_map_mismatch_results.md`. All 66 directions across 33 sessions
+scored 745,728 metric rows. Both decoder maps use the same observations, selected
+cells and state support; only the fitted rate values change. The generator uses
+the other chronological RUN half, and both directions are evaluated. The audit
+reconstructs half maps and observations, checks every row's support/eligibility,
+and independently checks 25,344 sampled decoding rows.
+
+Full-cell constant-speed MAP recovery changes from 35.82% to 19.60% for PF and
+7.94% to 6.80% for Tanni under independent rather than generator-known rates.
+The PF decrease is rat-uniform; the smaller Tanni contrast is not. Position
+error and posterior-inclusion loss worsen under independent rates in both.
+Known-coordinate speed-gradient response remains attenuated (0.321 PF, 0.121
+Tanni for an injected contrast of 1.0). Selected-only Tanni gradients remain
+too sparsely available for cohort-wide interpretation. Shared gain is a
+declared stress model, not fitted replay covariance. This completes the planned
+map-estimation sensitivity within this surrogate, not calibration of real
+replay or the remaining event-definition/baseline/equivalence requirements.
 
 ## Completed Likelihood Audit
 

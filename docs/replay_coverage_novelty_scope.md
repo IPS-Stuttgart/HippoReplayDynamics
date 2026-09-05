@@ -39,6 +39,18 @@ neither decoder bias nor uncertainty miscalibration is a new general observation
   second-half running. Neither cell exclusion to prevent circularity nor RUN
   validation is itself new here. This is a useful published pipeline comparator,
   distinct from our population-removal recovery/selection experiment.
+- Huh, Yun, Lee, and Jung (2026),
+  [A likelihood-based method for identifying replay from spike sequences](https://doi.org/10.1038/s41467-026-74822-2),
+  published 4 July 2026, scores pairwise firing-order statistics learned during
+  behavior and evaluates candidate sequences against cell-identity shuffles.
+  Its simulation and experimental comparisons include conventional decoded
+  time-position correlation. Thus neither a template-free likelihood detector
+  nor demonstrating parameter sensitivity would be a new claim here. This is
+  a potentially useful sequence-detection comparator, but it does not directly
+  estimate physical speed or supply a calibrated spatial-speed equivalence test.
+  Its applicability to freely varying 2D paths needs evaluation rather than
+  assuming a trial-template comparison transfers unchanged. This targeted check
+  was refreshed on 2026-09-05; no head-to-head benchmark has yet been run.
 
 ## Candidate Contribution, Still To Be Demonstrated
 

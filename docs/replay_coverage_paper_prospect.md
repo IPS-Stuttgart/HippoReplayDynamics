@@ -45,9 +45,15 @@ This is a candidate contribution, not an established priority claim.
 5. Uncertainty needs calibration: held-out RUN localization can be useful while
    nominal posterior coverage is poor. Neither a sharp posterior nor an
    uncalibrated uncertainty radius validates replay continuity by itself.
+6. Known-map recovery can be optimistic: the separately estimated RUN-map
+   benchmark changes PF true-path recovery from 35.82% to 19.60%, while the
+   smaller Tanni change (7.94% to 6.80%) is not rat-uniform. Strong gradient
+   attenuation survives independent maps and a declared shared-gain stress.
+   This extends the validation beyond exact generator-map decoding without
+   pretending the surrogate is real replay ground truth.
 
 Exact estimates, inclusion rules and provenance are in the real subsampling,
-RUN validation, counterfactual and geometry results documents. Synthetic
+RUN validation, counterfactual, geometry and map-mismatch results documents. Synthetic
 population intervals must not be presented as replication across animals.
 
 ## What Would Make the Paper More Useful
@@ -58,8 +64,8 @@ not support that inference. Merely cataloguing more decoder artifacts is weaker.
 
 Required work before that claim:
 
-- Test independently estimated maps and plausible observation-model mismatch,
-  rather than only known-map independent-Poisson surrogates.
+- The first independently estimated map/shared-gain check is completed; retain
+  its mixed outcome and test robustness beyond that declared stress family.
 - Freeze a calibration or abstention procedure and evaluate it on held-out
   populations without using the test results to select thresholds.
 - Compare with established replay detection/calibration baselines and carry

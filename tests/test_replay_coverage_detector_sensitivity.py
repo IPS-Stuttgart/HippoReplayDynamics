@@ -135,6 +135,19 @@ def test_zero_eligible_session_remains_explicit(tmp_path):
     assert audit_session(meta, 1, 1)["directly_counted_frames"] == 0
 
 
+def test_audit_accepts_frozen_subnanosecond_final_bin_tolerance(tmp_path):
+    record, windows, _ = fixture(tmp_path)
+    windows.start_s = 36884.77799996676
+    windows.end_s = 36884.89299996637
+    windows.to_csv(record["windows_path"], index=False)
+    record["windows_sha256"] = file_sha256(record["windows_path"])
+    out = tmp_path / "large_clock"
+    out.mkdir()
+    meta = process_session(record, out, 1, 1)
+    assert meta["decoding_frames"] == 4 * 20
+    assert audit_session(meta, 1, 1)["directly_counted_frames"] == 80
+
+
 def test_independent_metrics_cover_gaps_ties_and_both_estimators():
     rng = np.random.default_rng(8)
     for n in [0, 1, 4, 5, 10, 40]:

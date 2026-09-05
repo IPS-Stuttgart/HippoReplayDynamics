@@ -131,7 +131,9 @@ def audit_session(record, seed, replicates):
     assert arrays["frame_offsets"][-1] == len(arrays["frame_counts"])
     for i, w in enumerate(windows.itertuples(index=False)):
         a, b = arrays["frame_offsets"][i:i + 2]
-        expected_n = max(0, int(np.floor((w.end_s - w.start_s) / .005 + 1e-8)) - 3)
+        # The frozen helper accepts an almost-full final bin within 1 ns.
+        # Large absolute acquisition times expose this tolerance in real PF data.
+        expected_n = max(0, int(np.floor((w.end_s - w.start_s + 1e-9) / .005)) - 3)
         assert b - a == expected_n
         np.testing.assert_allclose(arrays["frame_start_s"][a:b], w.start_s + .005 * np.arange(expected_n), rtol=0, atol=1e-9)
         np.testing.assert_allclose(arrays["frame_end_s"][a:b] - arrays["frame_start_s"][a:b], .020, rtol=0, atol=1e-9)

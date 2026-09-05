@@ -81,6 +81,18 @@ def test_earliest_longest_tie_is_not_largest_displacement():
     assert not screen_maps(path[None], grid, np.ones((20, 3))).any()
 
 
+def test_forty_cm_diagonal_at_decimal_grid_offset_is_inclusive():
+    from scripts.audit_replay_coverage_shuffle_baseline import independent_screen
+
+    grid = np.column_stack([np.linspace(0, 32, 11), np.linspace(0, 23.999999999999993, 11)])
+    counts, path = np.ones((11, 3)), np.arange(11)
+    assert screen_maps(path[None], grid, counts).all()
+    for filtered, minimum in CRITERIA:
+        assert independent_screen(path, grid, counts, filtered, minimum)
+    grid[-1] -= .001
+    assert not screen_maps(path[None], grid, counts).any(), "tolerance must not admit scientifically shorter paths"
+
+
 def test_sparse_poisson_map_equals_dense_and_batches():
     rng = np.random.default_rng(8)
     counts = rng.poisson(.1, (83, 13))

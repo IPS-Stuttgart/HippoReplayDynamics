@@ -49,7 +49,8 @@ def screen_batch(map_indices, grid, plan):
     nonempty = np.flatnonzero(np.diff(offsets))
     boundaries = offsets[nonempty]
     adjacent = np.zeros(paths.shape, bool)
-    adjacent[:, 1:] = np.linalg.norm(grid[paths[:, 1:]] - grid[paths[:, :-1]], axis=-1) < 20
+    # Decimal-offset grids can put exact 20/40 cm separations one ULP either side.
+    adjacent[:, 1:] = np.linalg.norm(grid[paths[:, 1:]] - grid[paths[:, :-1]], axis=-1) < 20 - 1e-9
     adjacent[:, boundaries] = False
     frame = np.arange(paths.shape[1])
     for filtered, valid in enumerate(masks):
@@ -66,7 +67,7 @@ def screen_batch(map_indices, grid, plan):
         displacement = np.linalg.norm(grid[paths[row, ends]] - grid[paths[row, begins]], axis=-1)
         for c, (f, frames) in enumerate(CRITERIA):
             if f == bool(filtered):
-                output[:, nonempty, c] = (best >= frames) & (displacement >= 40)
+                output[:, nonempty, c] = (best >= frames) & (displacement >= 40 - 1e-9)
     return output
 
 

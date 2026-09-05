@@ -215,7 +215,8 @@ def run(args):
     inputs = {"event_manifest": source, "event_audit": audit_path, "script": Path(__file__),
         "library": ROOT / "src/hipporeplayimm/replay_coverage_shuffle_baseline.py",
         "counting": ROOT / "src/hipporeplayimm/replay_coverage_data.py", "helpers": ROOT / "scripts/analyze_replay_coverage_subsampling.py",
-        "provenance": ROOT / "scripts/_provenance.py", "protocol": ROOT / "docs/replay_coverage_shuffle_baseline_protocol.md"}
+        "provenance": ROOT / "scripts/_provenance.py", "protocol": ROOT / "docs/replay_coverage_shuffle_baseline_protocol.md",
+        "numerical_addendum": ROOT / "docs/replay_coverage_shuffle_baseline_numerical_addendum.md"}
     if getattr(args, "subsampling_manifest", None):
         inputs["frozen_subsets"] = args.subsampling_manifest
     meta = build_script_provenance(input_paths=inputs, cwd=ROOT)

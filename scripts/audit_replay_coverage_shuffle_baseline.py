@@ -29,12 +29,12 @@ def independent_screen(path, grid, counts, filtered, frames):
         if filtered and (counts[t].sum() < 3 or np.count_nonzero(counts[t]) < 2):
             start, previous = None, None
             continue
-        if previous is None or np.linalg.norm(grid[path[t]] - grid[path[previous]]) >= 20:
+        if previous is None or np.linalg.norm(grid[path[t]] - grid[path[previous]]) >= 20 - 1e-9:
             start = t
         if t - start > best_end - best_start:
             best_start, best_end = start, t
         previous = t
-    return bool(best_end - best_start + 1 >= frames and np.linalg.norm(grid[path[best_end]] - grid[path[best_start]]) >= 40)
+    return bool(best_end - best_start + 1 >= frames and np.linalg.norm(grid[path[best_end]] - grid[path[best_start]]) >= 40 - 1e-9)
 
 
 def explicit_rates(rates, support, shape, bank, family):

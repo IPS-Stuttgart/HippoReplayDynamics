@@ -18,6 +18,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+from scipy.stats import norm
 
 from scripts._provenance import build_script_provenance, file_sha256
 from scripts.calibrate_replay_speed_identifiability import READOUT
@@ -25,6 +26,39 @@ from scripts.report_replay_coverage_map_mismatch import aggregate
 
 METRICS = ["coverage", "finite_fraction", "finite_coverage", "median_finite_width", "nonzero_fraction",
            "equivalence_fraction"] + [f"{side}_equivalence_fraction_{bound:.2f}" for side in ["true", "false"] for bound in [.1, .25, .5]]
+
+
+def monte_carlo_intervals(table):
+    """Wilson intervals conditional on each fixed map and fitted calibration."""
+    denominators = {name: "panels" for name in ["coverage", "finite_fraction", "nonzero_fraction", "equivalence_fraction"]}
+    denominators["finite_coverage"] = "finite_panels"
+    for bound in [.1, .25, .5]:
+        denominators[f"true_equivalence_fraction_{bound:.2f}"] = f"inside_panels_{bound:.2f}"
+        denominators[f"false_equivalence_fraction_{bound:.2f}"] = f"outside_panels_{bound:.2f}"
+    keys = ["dataset", "animal", "session"]+READOUT+["generator", "observation", "stratum", "method"]
+    z = float(norm.ppf(.975))
+    frames = []
+    for metric, denominator in denominators.items():
+        frame = table[keys].copy()
+        n = table[denominator].to_numpy(float)
+        p = table[metric].to_numpy(float)
+        available = n > 0
+        if np.any((n < 0) | (n != np.floor(n))) or np.any(available & (~np.isfinite(p) | (p < 0) | (p > 1))):
+            raise ValueError("invalid Monte Carlo counts/proportions")
+        if np.any(~available & np.isfinite(p)):
+            raise ValueError("zero denominator cannot have a proportion")
+        count = np.rint(n*p)
+        if not np.allclose((n*p)[available], count[available], atol=1e-7, rtol=0):
+            raise ValueError("proportion does not represent integer Monte Carlo counts")
+        lo, hi = np.full(len(n), np.nan), np.full(len(n), np.nan)
+        nn, pp = n[available], p[available]
+        center = (pp+z*z/(2*nn))/(1+z*z/nn)
+        radius = z*np.sqrt(pp*(1-pp)/nn+z*z/(4*nn*nn))/(1+z*z/nn)
+        lo[available], hi[available] = np.maximum(0, center-radius), np.minimum(1, center+radius)
+        frame["metric"], frame["numerator"], frame["denominator"] = metric, count, n
+        frame["estimate"], frame["mc95_low"], frame["mc95_high"] = p, lo, hi
+        frames.append(frame)
+    return pd.concat(frames, ignore_index=True)
 
 
 def plot(summary, selection, support, output):
@@ -68,6 +102,7 @@ def run(root, out):
             raise ValueError("report input changed")
     out.mkdir(parents=True, exist_ok=False)
     table = pd.read_csv(files["summary"])
+    monte_carlo_intervals(table).to_csv(out/"speed_identifiability_session_monte_carlo.csv", index=False)
     groups = ["dataset"]+READOUT+["generator", "observation", "stratum", "method"]
     sessions, animals, summary = aggregate(table, groups, METRICS, seed=20260915)
     for name, frame in [("session_endpoints", sessions), ("animal_endpoints", animals), ("summary", summary)]:
@@ -87,6 +122,7 @@ def run(root, out):
         "Equivalence means an interval is strictly within +/-0.25 (plus 0.10/0.50 sensitivity), not merely that zero is included. "
         "Boundary truths count as outside equivalence. Intervals are never clipped to the training range.\n\n"
         f"Sessions average within animals and animals equally; animal counts: {animal_counts}. Monte Carlo draws condition on their maps and source durations. "
+        "The session Monte Carlo table gives Wilson 95% intervals with each metric's actual denominator; these condition on the learned inverse fit and calibration radius, and do not quantify uncertainty from refitting either. They are not biological or animal-level intervals. "
         "No new biological animals were held out and no real replay speed was used as known truth. "
         "This report cannot authorize biological equivalence; real event-definition sensitivity and baseline/transfer validation remain necessary.\n")
     (out/"speed_identifiability_report.md").write_text(text)

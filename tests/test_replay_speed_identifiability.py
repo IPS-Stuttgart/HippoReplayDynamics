@@ -176,3 +176,28 @@ def test_panel_contract_catches_missing_condition_and_wrong_draw_metadata():
     changed.loc[0, "generator"] = "C"
     with pytest.raises(ValueError, match="unexpected"):
         validate_panel_contract(changed, schedule, identity)
+
+
+def test_report_monte_carlo_intervals_keep_missing_and_conditional_denominators():
+    from scripts.report_replay_speed_identifiability import monte_carlo_intervals
+
+    panels = fixture_panels()
+    panels["statistic"] = np.nan
+    panels["naive_lower"], panels["naive_upper"] = -np.inf, np.inf
+    decisions, _ = evaluate_panels(panels)
+    table = summarize_decisions(decisions)
+    result = monte_carlo_intervals(table)
+    finite = result[result.metric.eq("finite_coverage")]
+    assert finite.denominator.eq(0).all()
+    assert finite[["estimate", "mc95_low", "mc95_high"]].isna().all().all()
+    coverage = result[result.metric.eq("coverage")]
+    assert coverage.numerator.eq(8).all() and coverage.denominator.eq(8).all()
+    np.testing.assert_allclose(coverage.mc95_low, .6755924, atol=1e-7)
+    np.testing.assert_allclose(coverage.mc95_high, 1)
+    outside = result[result.metric.eq("false_equivalence_fraction_0.25")]
+    assert outside.denominator.eq(6).all() and outside.numerator.eq(0).all()
+    assert outside.mc95_high.gt(0).all()
+    invalid = table.copy()
+    invalid.loc[0, "coverage"] = .123
+    with pytest.raises(ValueError, match="integer"):
+        monte_carlo_intervals(invalid)

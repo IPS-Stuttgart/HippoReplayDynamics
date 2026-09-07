@@ -102,12 +102,13 @@ def test_inference_never_sees_heldout_counts(monkeypatch):
 
     class FakeModel:
         def __init__(self, **kwargs):
-            pass
+            self.mode = kwargs["mode"]
 
         def score(self, emissions, centers):
             assert not phase["held_built"]
             assert 4 not in emissions.cell_ids
-            return SimpleNamespace(trajectory_log_posterior=audit.analytic_posterior(emissions.log_likelihood, "iid_position"))
+            model = "static_location" if self.mode == "stationary" else "iid_position"
+            return SimpleNamespace(trajectory_log_posterior=audit.analytic_posterior(emissions.log_likelihood, model))
 
     monkeypatch.setattr(audit, "load_replay_session", lambda _: SimpleNamespace(rat="Rat1"))
     monkeypatch.setattr(audit, "fit_place_field_encoding", lambda *_: FakeEncoding())

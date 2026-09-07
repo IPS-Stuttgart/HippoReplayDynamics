@@ -46,9 +46,12 @@ emissions are not normalized predictive probabilities and are not reproduced.
 ## Comparators and maps
 
 Models: iid_position (fragmented), static_location (one position per event),
-stationary (historical local small-step kernel), diffusion (historical fixed
+stationary (repository identity-transition baseline), diffusion (historical fixed
 diffusion), first_order_imm (historical three-mode model). Use no fitted replay
 hyperparameters. The iid and static models are computed analytically.
+Code inspection during the technical smoke confirmed standalone stationary is
+an identity transition, not IMM's small-step stationary component. Keep both
+static implementations as a correctness check, not two independent alternatives.
 
 Real maps versus the same seeded shared occupied-bin population-code permutation
 as the preceding map audit. This wrong map preserves neural population snapshots

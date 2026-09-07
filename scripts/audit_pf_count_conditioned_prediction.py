@@ -91,7 +91,7 @@ def _task(task):
     wrong, wrong_hash = population_code_permuted_encoding(enc, seed=_stable_seed(20260805, task["session"]))
     models = {name: SortedSpikeStateSpaceReplayModel(mode=name.replace("_", "-"), config=replace(state_cfg, mode=name.replace("_", "-"))) for name in MODELS[2:]}
     rows = []
-    for split in range(task["n_splits"]):
+    for split in task.get("split_indices", range(task["n_splits"])):
         train, held = _split_cells(enc.cell_ids, 0.30, 20260804 + split)
         if not len(train) or not len(held) or np.intersect1d(train, held).size:
             raise ValueError("invalid cell split")
@@ -264,6 +264,9 @@ def gates(scores, events, n_splits, temperatures):
     pivot = analytic.pivot(index=[c for c in key if c != "map"], columns="map", values="conditional_heldout_log_score")
     error = float(np.max(np.abs(pivot[MAPS[0]] - pivot[MAPS[1]]))) if len(pivot) else np.inf
     add("analytic_baselines_map_permutation_invariant", error < 1e-7, error)
+    static = scores[scores.model.isin(("static_location", "stationary"))].pivot(index=[c for c in key if c != "model"], columns="model", values="conditional_heldout_log_score")
+    static_error = float(np.max(np.abs(static.static_location - static.stationary)))
+    add("analytic_static_matches_repository_stationary", static_error < 1e-7, static_error)
     add("overall", all(row["passed"] for row in rows), "technical only")
     return pd.DataFrame(rows)
 
@@ -277,10 +280,11 @@ def main(argv=None):
     parser.add_argument("--max-events-per-session", type=int, default=0)
     parser.add_argument("--temperatures", type=float, nargs="+", default=[1.0, 0.3])
     parser.add_argument("--workers", type=int, default=8)
+    parser.add_argument("--events-per-task", type=int, default=2)
     parser.add_argument("--bootstrap-replicates", type=int, default=5000)
     parser.add_argument("--reuse-scores")
     args = parser.parse_args(argv)
-    if args.n_splits < 1 or args.workers < 1 or args.bootstrap_replicates < 1 or args.max_events_per_session < 0:
+    if args.n_splits < 1 or args.workers < 1 or args.events_per_task < 1 or args.bootstrap_replicates < 1 or args.max_events_per_session < 0:
         parser.error("counts must be positive (event cap may be zero)")
     if not all(np.isfinite(x) and x > 0 for x in args.temperatures) or len(set(args.temperatures)) != len(args.temperatures):
         parser.error("temperatures must be distinct finite positive values")
@@ -326,22 +330,32 @@ def main(argv=None):
     if args.reuse_scores:
         scores = pd.read_csv(args.reuse_scores)
     else:
-        tasks = [
-            {
-                "session": session,
-                "events": group.event_index.astype(int).tolist(),
-                "dataset_root": args.dataset_root,
-                "configs": configs,
-                "n_splits": args.n_splits,
-                "temperatures": args.temperatures,
-            }
-            for session, group in events.groupby("session")
-        ]
+        tasks = []
+        for session, group in events.groupby("session"):
+            indices = group.event_index.astype(int).tolist()
+            for split in range(args.n_splits):
+                for offset in range(0, len(indices), args.events_per_task):
+                    tasks.append(
+                        {
+                            "session": session,
+                            "events": indices[offset : offset + args.events_per_task],
+                            "dataset_root": args.dataset_root,
+                            "configs": configs,
+                            "n_splits": args.n_splits,
+                            "split_indices": [split],
+                            "temperatures": args.temperatures,
+                        }
+                    )
         rows = []
         with ProcessPoolExecutor(max_workers=args.workers) as pool:
             futures = {pool.submit(_task, task): task["session"] for task in tasks}
             for future in as_completed(futures):
-                rows.extend(future.result())
+                try:
+                    rows.extend(future.result())
+                except Exception as error:
+                    manifest.update(status="scoring_failed", error=repr(error), completed_rows=len(rows), runtime_s=time.monotonic() - started)
+                    manifest_path.write_text(json.dumps(manifest, indent=2, default=str) + "\n")
+                    raise
                 pd.DataFrame(rows).to_csv(output / "partial_scores.csv", index=False)
                 print(f"completed {futures[future]}: {len(rows)} rows", flush=True)
         scores = pd.DataFrame(rows)

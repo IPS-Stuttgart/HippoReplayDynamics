@@ -162,3 +162,43 @@ def test_event_medians_do_not_weight_more_split_rows():
     assert row.events == 8
     assert row.equal_animal_mean_event_median_delta == 2
     assert row.rat_signflip_one_sided_p == 0.0625
+
+
+@pytest.mark.parametrize("moving", [False, True])
+def test_real_decoder_distinguishes_stationary_from_moving_identity_sequences(moving):
+    """Known-map high-information control, not an empirical-rate simulation."""
+    from hipporeplayimm.sorted_spike_state_space import SortedSpikeStateSpaceReplayModel
+    from hipporeplayimm.state_space_utils import _gaussian_transition_matrix
+
+    centers = np.column_stack((6.0 * np.arange(21), np.zeros(21)))
+    fields = np.linspace(0, 120, 40)
+    rates = 0.2 + 50 * np.exp(-0.5 * ((fields[:, None] - centers[:, 0]) / 12) ** 2)
+    train_ids, held_ids = np.arange(0, 40, 2), np.arange(1, 40, 2)
+    transition = _gaussian_transition_matrix(centers, 60 * np.sqrt(0.004), 3.0)
+    transition = transition.toarray() if hasattr(transition, "toarray") else transition
+    differences = []
+    for seed in range(8):
+        rng = np.random.default_rng(seed + 20260908)
+        path = np.full(64, 10, dtype=int)
+        if moving:
+            for t in range(1, 64):
+                path[t] = rng.choice(21, p=transition[:, path[t - 1]])
+        # A common strongly varying count envelope is present for both truths.
+        totals = (8 + 24 * np.sin(np.linspace(0, 3 * np.pi, 64)) ** 2).astype(int)
+        emissions = []
+        for ids, fraction in ((train_ids, 1.0), (held_ids, 0.5)):
+            probabilities = rates[ids] / rates[ids].sum(axis=0)
+            counts = np.array([rng.multinomial(max(1, int(n * fraction)), probabilities[:, x]) for n, x in zip(totals, path, strict=True)])
+            ll = audit.likelihood_parts(counts, rates[ids], np.full(64, 0.004))["count_conditioned"]
+            emissions.append(LogEmissionTensor(ll, counts, 0.002 + 0.004 * np.arange(64), 0.004, ids, int(counts.sum())))
+        train, held = emissions
+        dynamic = (
+            SortedSpikeStateSpaceReplayModel(mode="diffusion", config=StateSpaceDecoderConfig(mode="diffusion", diffusion_sigma_cm_sqrt_s=60.0))
+            .score(train, centers)
+            .trajectory_log_posterior
+        )
+        static = audit.analytic_posterior(train.log_likelihood, "static_location")
+        dynamic_score = frozen_smoothed_marginal_log_score(dynamic, held.log_likelihood).total_log_score
+        static_score = frozen_smoothed_marginal_log_score(static, held.log_likelihood).total_log_score
+        differences.append(dynamic_score - static_score)
+    assert np.mean(differences) > 0 if moving else np.mean(differences) < 0

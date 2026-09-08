@@ -1,0 +1,17 @@
+{
+  "experiment": "hc11_conditional_cross_cell_prediction_320x5",
+  "date": "2026-09-08",
+  "technical_status": "passed",
+  "independent_audit_status": "passed_with_stated_scope",
+  "primary_post_imm_minus_iid_mean_nats": 0.027258,
+  "primary_post_imm_minus_iid_ci": [-0.177553, 0.316228],
+  "primary_post_imm_minus_iid_positive_animals": 1,
+  "primary_post_imm_minus_static_mean_nats": 1.509891,
+  "primary_post_real_minus_wrong_imm_mean_nats": -0.018924,
+  "external_pf_predictive_pattern_replicated": false,
+  "biological_absence_established": false,
+  "new_mechanism_established": false,
+  "recommended_action": "close_frozen_replication_without_posthoc_rescue",
+  "earlier_hc11_strict_ladder_changed": false,
+  "goal_of_high_importance_discovery_achieved": false
+}

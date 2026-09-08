@@ -182,7 +182,8 @@ def verify(root, out):
                 raw_windows += 1
             windows = observations["run_windows"]
             assert len(windows) == template.run_windows >= 50
-            assert (windows[:, 0] >= template.rate_map_cutoff_s + 1).all()
+            # CSV parsing can round the cutoff upward; selection used this exact JSON value.
+            assert (windows[:, 0] >= meta["rate_map_half_split_time_s"] + 1).all()
             assert (windows[1:, 0] >= windows[:-1, 1] - 1e-9).all()
             close(windows[:, 1] - windows[:, 0], 0.2)
             for j, (start, end) in enumerate(windows):

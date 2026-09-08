@@ -1,7 +1,7 @@
 """Known-assembly recovery, exact kernels and target-cell separation."""
 
 import itertools
-from dataclasses import replace
+from dataclasses import asdict, replace
 
 import numpy as np
 import pandas as pd
@@ -16,7 +16,8 @@ from hipporeplayimm.learned_assembly_prediction import (
     predict_learned_assembly,
     validate_sequences,
 )
-from scripts.audit_2d_learned_assembly import contrasts
+from scripts.audit_2d_learned_assembly import contrasts, load_fit
+from scripts.verify_2d_learned_assembly import forward_backward, reference_prediction
 
 
 def simulated(seed, events=120):
@@ -134,3 +135,26 @@ def test_missing_shuffles_or_spatial_pair_fail():
         contrasts(scores, spatial.assign(event_id=2), order)
     with pytest.raises(ValueError, match='duplicate'):
         contrasts(pd.concat([scores, scores.iloc[:1]]), spatial, order)
+
+
+def test_independent_predictor_and_fit_archive(tmp_path):
+    fit = fit_learned_assembly(simulated(3, 30), 3, 43)
+    path = tmp_path / 'fit.npz'
+    np.savez_compressed(path, **asdict(fit))
+    restored = load_fit(path)
+    x = simulated(61, 1)[0]
+    tr, he = np.arange(0, 12, 2), np.arange(1, 12, 2)
+    actual = predict_learned_assembly(x, tr, he, restored)[0]
+    expected = reference_prediction(x, tr, he, restored)
+    assert actual == pytest.approx(expected)
+    ll = multinomial_ll(x[:, tr], restored.probabilities[tr])
+    a, q = infer_states(ll, restored.initial, restored.transition)
+    b, r = forward_backward(ll, restored.initial, restored.transition)
+    assert a == pytest.approx(b)
+    assert np.allclose(q, r)
+    assert restored.restart_objectives[restored.restart] == max(restored.restart_objectives)
+
+
+def test_iteration_cap_is_not_convergence():
+    fit = fit_learned_assembly(simulated(9, 30), 3, 54, max_iter=2)
+    assert not fit.converged

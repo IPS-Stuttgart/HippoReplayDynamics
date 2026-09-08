@@ -24,7 +24,14 @@ ID = ["dataset", "animal", "session"]
 KEY = ID + ["event_id", "split"]
 VALUES = ["delta", "delta_per_heldout_spike"]
 MODELS = ["iid_position", "static_location", "diffusion", "first_order_imm"]
-PRIMARY = ["alpha100__imm_adaptation_gain", "alpha100__imm_minus_iid", "alpha100__imm_minus_event_global", "alpha100__imm_real_minus_wrong", "alpha100__first_order_imm__real_order_advantage", "alpha100__first_order_imm__order_map_interaction"]
+PRIMARY = [
+    "alpha100__imm_adaptation_gain",
+    "alpha100__imm_minus_iid",
+    "alpha100__imm_minus_event_global",
+    "alpha100__imm_real_minus_wrong",
+    "alpha100__first_order_imm__real_order_advantage",
+    "alpha100__first_order_imm__order_map_interaction",
+]
 
 
 def independent_contrasts(original, shuffled, parent, parent_order):
@@ -39,8 +46,10 @@ def independent_contrasts(original, shuffled, parent, parent_order):
         rows.append(frame.reset_index().assign(contrast=name))
 
     for alpha in (100, 1000):
-        def score(model, map_name="real"):
-            return wide[("score_" + model, alpha, map_name)]
+
+        def score(model, map_name="real", level=alpha):
+            return wide[("score_" + model, level, map_name)]
+
         nspikes = wide[("n_heldout_spikes", alpha, "real")]
         values = {
             "imm_adaptation_gain": score("first_order_imm") - old.score_first_order_imm,
@@ -86,9 +95,22 @@ def reference_interval(frame):
                 selected.append(np.nanmean(values[rng.integers(len(values), size=len(values))], axis=0))
             means.append(np.nanmean(selected, axis=0))
         boot.append(np.nanmean(means, axis=0))
-    interval = np.nanquantile(boot, [.025, .975], axis=0)
+    interval = np.nanquantile(boot, [0.025, 0.975], axis=0)
     mean_animals = frame.groupby(ID)[VALUES].mean().groupby(["dataset", "animal"]).mean()
-    return {"dataset": dataset, "contrast": contrast, "mean": mean_animals.delta.mean(), "ci_low": interval[0, 0], "ci_high": interval[1, 0], "mean_per_heldout_spike": mean_animals.delta_per_heldout_spike.mean(), "per_spike_ci_low": interval[0, 1], "per_spike_ci_high": interval[1, 1], "positive_animals": int(mean_animals.delta.gt(0).sum()), "animals": len(arrays), "sessions": frame.session.nunique(), "events": len(frame)}
+    return {
+        "dataset": dataset,
+        "contrast": contrast,
+        "mean": mean_animals.delta.mean(),
+        "ci_low": interval[0, 0],
+        "ci_high": interval[1, 0],
+        "mean_per_heldout_spike": mean_animals.delta_per_heldout_spike.mean(),
+        "per_spike_ci_low": interval[0, 1],
+        "per_spike_ci_high": interval[1, 1],
+        "positive_animals": int(mean_animals.delta.gt(0).sum()),
+        "animals": len(arrays),
+        "sessions": frame.session.nunique(),
+        "events": len(frame),
+    }
 
 
 def verify_session(job):
@@ -106,15 +128,26 @@ def verify_session(job):
     selection = pd.read_csv(parent_path / f"{tag}_selection.csv").sort_values(["start_s", "event_id"])
     parent_order = pd.read_csv(order_path / f"{tag}_split_contrasts.csv.gz")
     parent_permutations = pd.read_csv(order_path / f"{tag}_permutations.csv.gz", dtype={"permutation": str}).set_index(["event_id", "shuffle"])
-    if len(original) != len(parent) * 2 or len(shuffled) != len(parent) * 20 or original.duplicated(KEY + ["alpha", "map"]).any() or shuffled.duplicated(KEY + ["map", "shuffle"]).any():
+    if (
+        len(original) != len(parent) * 2
+        or len(shuffled) != len(parent) * 20
+        or original.duplicated(KEY + ["alpha", "map"]).any()
+        or shuffled.duplicated(KEY + ["map", "shuffle"]).any()
+    ):
         raise ValueError("incomplete score dimensions")
     for frame in (original, shuffled):
         cols = [c for c in frame if c.startswith("score_")]
         if not np.isfinite(frame[cols]).all().all() or not frame[cols].le(1e-8).all().all() or frame.heldout_used_for_inference.any() or not frame.posterior_unchanged.all():
             raise ValueError("invalid predictions")
-    if set(original[KEY + ["map"]].itertuples(index=False, name=None)) != set(parent[KEY + ["map"]].itertuples(index=False, name=None)) or not original.groupby(KEY + ["map"]).alpha.apply(lambda x: set(x) == {100, 1000}).all():
+    if (
+        set(original[KEY + ["map"]].itertuples(index=False, name=None)) != set(parent[KEY + ["map"]].itertuples(index=False, name=None))
+        or not original.groupby(KEY + ["map"]).alpha.apply(lambda x: set(x) == {100, 1000}).all()
+    ):
         raise ValueError("source/alpha keys differ")
-    if set(shuffled[KEY + ["map"]].itertuples(index=False, name=None)) != set(parent[KEY + ["map"]].itertuples(index=False, name=None)) or not shuffled.groupby(KEY + ["map"]).shuffle.apply(lambda x: set(x) == set(range(20))).all():
+    if (
+        set(shuffled[KEY + ["map"]].itertuples(index=False, name=None)) != set(parent[KEY + ["map"]].itertuples(index=False, name=None))
+        or not shuffled.groupby(KEY + ["map"]).shuffle.apply(lambda x: set(x) == set(range(20))).all()
+    ):
         raise ValueError("source/shuffle keys differ")
     fixed = original[original.alpha.eq(100)]
     joined = shuffled.merge(fixed, on=KEY + ["map"], suffixes=("", "_original"), validate="many_to_one")
@@ -159,7 +192,7 @@ def verify_session(job):
         same(group.score_run_global, group.score_event_global, "matched adapted global")
     checks = []
     ids = sorted(selection.event_id)
-    selected_ids = {ids[0], ids[len(ids)//2], ids[-1]}
+    selected_ids = {ids[0], ids[len(ids) // 2], ids[-1]}
     orig_lookup = original.set_index(["event_id", "split", "alpha", "map"])
     shuffled_lookup = shuffled.set_index(["event_id", "split", "shuffle", "map"])
     for eid in ids:
@@ -184,7 +217,7 @@ def verify_session(job):
                 if alpha == 100:
                     for k in (0, 19):
                         order = orders[k]
-                        new_edges = np.r_[0., np.cumsum(widths[order])]
+                        new_edges = np.r_[0.0, np.cumsum(widths[order])]
                         cases.append((k, order, (new_edges[:-1] + new_edges[1:]) / 2))
                 for k, temporal, times in cases:
                     for name, spatial in (("real", np.arange(rates.shape[1])), ("population_code_permuted", cache["permutation"])):
@@ -193,7 +226,18 @@ def verify_session(job):
                             post = reference_posterior(tll[temporal][:, spatial], cache["centers"], times, model == "first_order_imm")
                             value = float(logsumexp(post + hll[temporal][:, spatial], axis=1).sum())
                             same(value, record["score_" + model], "independent adapted prediction")
-                            checks.append(fields | {"event_id": eid, "split": split, "alpha": alpha, "shuffle": k, "map": name, "model": model, "absolute_error": abs(value - record["score_" + model])})
+                            checks.append(
+                                fields
+                                | {
+                                    "event_id": eid,
+                                    "split": split,
+                                    "alpha": alpha,
+                                    "shuffle": k,
+                                    "map": name,
+                                    "model": model,
+                                    "absolute_error": abs(value - record["score_" + model]),
+                                }
+                            )
     splits, events = independent_contrasts(original, shuffled, parent, parent_order)
     compare_table(splits, pd.read_csv(root / f"{tag}_split_contrasts.csv.gz"), KEY + ["contrast"], VALUES, "all split contrasts")
     compare_table(events, pd.read_csv(root / f"{tag}_event_contrasts.csv"), ID + ["event_id", "contrast"], VALUES, "all event contrasts")
@@ -230,7 +274,13 @@ def run(args):
     compare_table(animals, pd.read_csv(root / "mua_rate_transfer_by_animal.csv"), ["dataset", "animal", "contrast"], VALUES, "animal means")
     with ProcessPoolExecutor(max_workers=args.workers) as pool:
         rebuilt = pd.DataFrame(pool.map(reference_interval, [g for _, g in events.groupby(["dataset", "contrast"])]))
-    compare_table(rebuilt, pd.read_csv(root / "mua_rate_transfer_summary.csv"), ["dataset", "contrast"], [c for c in rebuilt if c not in ("dataset", "contrast")], "independent hierarchical intervals")
+    compare_table(
+        rebuilt,
+        pd.read_csv(root / "mua_rate_transfer_summary.csv"),
+        ["dataset", "contrast"],
+        [c for c in rebuilt if c not in ("dataset", "contrast")],
+        "independent hierarchical intervals",
+    )
     decisions = pd.read_csv(root / "mua_rate_transfer_decisions.csv", keep_default_na=False).set_index("dataset")
     for dataset, n in (("pfeiffer_foster", 4), ("tanni2022", 5)):
         primary = rebuilt[rebuilt.dataset.eq(dataset) & rebuilt.contrast.isin(PRIMARY)]
@@ -245,7 +295,19 @@ def run(args):
     checks.to_csv(out / "independent_predictions.csv", index=False)
     rebuilt.to_csv(out / "independent_hierarchical_intervals.csv", index=False)
     result = build_script_provenance(input_paths={"run_manifest": path})
-    result.update(status="pass", events=9225, sessions=33, original_global_scores=184500, shuffled_score_rows=1845000, independent_dynamic_predictions=len(checks), max_prediction_error=float(checks.absolute_error.max()), split_contrasts=sum(r[2]["split_contrasts"] for r in results), event_contrasts=len(events), hierarchical_interval_panels=len(rebuilt), scope="All source/output hashes, calibration folds/counts/gains, all analytic global scores, factors and invariants, parent whole-bin permutations, paired event/split summaries and exact hierarchical CIs; separate dense dynamic solver on three events/two splits, both original alphas plus two alpha100 shuffles, both maps/models per session. Native raw counts and RUN maps reuse the frozen audited parent.")
+    result.update(
+        status="pass",
+        events=9225,
+        sessions=33,
+        original_global_scores=184500,
+        shuffled_score_rows=1845000,
+        independent_dynamic_predictions=len(checks),
+        max_prediction_error=float(checks.absolute_error.max()),
+        split_contrasts=sum(r[2]["split_contrasts"] for r in results),
+        event_contrasts=len(events),
+        hierarchical_interval_panels=len(rebuilt),
+        scope="All source/output hashes, calibration folds/counts/gains, all analytic global scores, factors and invariants, parent whole-bin permutations, paired event/split summaries and exact hierarchical CIs; separate dense dynamic solver on three events/two splits, both original alphas plus two alpha100 shuffles, both maps/models per session. Native raw counts and RUN maps reuse the frozen audited parent.",
+    )
     (out / "mua_rate_transfer_audit.json").write_text(json.dumps(result, indent=2) + "\n")
     print(json.dumps(result), flush=True)
 

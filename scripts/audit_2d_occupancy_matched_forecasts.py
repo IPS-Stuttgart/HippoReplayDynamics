@@ -29,13 +29,13 @@ PARENT_SHA = "342d5670f77706ad784af7b1f98368f8eaa66e88247cfe78bb188d2daa79195a"
 
 
 def predict(ll, operator, null):
-    dynamic = forward_filter(ll, operator)
-    matched = dynamic.copy()
+    filtered = forward_filter(ll, operator)
+    dynamic, matched = filtered.copy(), filtered.copy()
     result = {}
     for h in range(1, 5):
         dynamic, matched = operator.step(dynamic), null.step(matched)
         if h in (1, 2, 4) and h < len(ll):
-            result[h] = {"dynamic": operator.collapse(dynamic[:-h]), "matched": operator.collapse(matched[:-h])}
+            result[h] = {"dynamic": operator.collapse(dynamic[:-h]).copy(), "matched": operator.collapse(matched[:-h]).copy()}
             for q in result[h].values():
                 if not np.isfinite(q).all() or (q < 0).any():
                     raise ValueError("invalid forecast probabilities")
@@ -43,9 +43,17 @@ def predict(ll, operator, null):
     return result
 
 
-def score_model(x, rates, train, held, operator, null):
-    predictions = predict(identity_likelihood(x[:, train], rates[train]), operator, null)
+def score_model(x, rates, train, held, operator, null, *, position_order=None):
+    ll = identity_likelihood(x[:, train], rates[train])
+    if position_order is not None:
+        if sorted(position_order) != list(range(rates.shape[1])):
+            raise ValueError("invalid frozen position permutation")
+        # Match the original scorer's reduction order and advanced-indexed layout.
+        ll = ll[:, position_order]
+    predictions = predict(ll, operator, null)
     target = identity_likelihood(x[:, held], rates[held])
+    if position_order is not None:
+        target = target[:, position_order]
     result = {}
     for h, p in predictions.items():
         record = {"dynamic_forecast_sha256": posterior_sha256(p["dynamic"])}
@@ -93,13 +101,15 @@ def task(job):
                 if not len(tr) or not len(he) or sorted([*tr, *he]) != list(range(x.shape[1])):
                     raise ValueError("invalid frozen cell partition")
                 for model in MODELS:
+                    order = None
                     if model == "learned_hmm":
                         op, null, maps = neural, neural_null, fit["probabilities"]
                     else:
                         kind = "imm" if model.startswith("spatial_imm") else "diffusion"
                         op, null = spatial[kind], nulls[kind]
-                        maps = rates[:, cache["permutation"]] if model.endswith("permuted") else rates
-                    predictions = score_model(x, maps, tr, he, op, null) if len(x) else {}
+                        maps = rates
+                        order = cache["permutation"] if model.endswith("permuted") else np.arange(rates.shape[1])
+                    predictions = score_model(x, maps, tr, he, op, null, position_order=order) if len(x) else {}
                     for h in (1, 2, 4):
                         key = (eid, split, h, model)
                         row = old.loc[key].to_dict() | dict(zip(("event_id", "split", "horizon", "model"), key, strict=True))
@@ -109,7 +119,7 @@ def task(job):
                         if h in predictions:
                             p = predictions[h]
                             if p["dynamic_forecast_sha256"] != row["forecast_sha256"]:
-                                raise ValueError("original forecast hash changed")
+                                raise ValueError(f"original forecast hash changed: {tag}, {key}")
                             error = abs(p["score_dynamic"] - row["score_dynamic"])
                             if error > 1e-8 or row["status"] != "scored":
                                 raise ValueError("original score reconstruction changed")

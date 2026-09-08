@@ -102,3 +102,20 @@ diffusion kernels remain symmetric. Learned neural states may encode space.
 The same original filter supplies both origin distributions; this does not
 compare two optimally refitted inference models. Broad exploratory selection
 and limited animal counts remain limitations even if numerical gates pass.
+
+## Numerical Reconstruction Amendment
+
+The first run, `occupancy-matched-forecasts-all9225-20260909`, failed its
+original-forecast hash check and is retained unchanged. No new null contrasts
+were interpreted. A targeted reconstruction of Rat1/Open2 event 1 found that
+permuting rate-map columns before likelihood evaluation changed likelihoods
+by 1.42e-14 and forecast probabilities by 6.66e-16. Computing likelihoods on
+the original maps and then permuting their columns, exactly as the source
+scorer did, reproduced the source forecast hash exactly. The real-map case
+also retains the original advanced-indexing operation. The new diffusion
+regression additionally required the original explicit copies of filtered
+and collapsed probabilities to preserve array layout and reduction order.
+This amendment fixes
+only numerical operation order, adds multi-cell permutation regression tests,
+and retains exact hash matching and every scientific parameter and decision
+rule. The full rerun uses a new v2 directory and a separately frozen commit.

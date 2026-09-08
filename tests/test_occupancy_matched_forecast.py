@@ -4,7 +4,8 @@ import pytest
 from scipy.special import entr
 
 from hipporeplayimm.conditional_spatial_prediction import identity_likelihood
-from hipporeplayimm.lagged_neural_prediction import NeuralOperator, SpatialOperator, forward_filter, mixture_scores
+from hipporeplayimm.frozen_posterior_prediction import posterior_sha256
+from hipporeplayimm.lagged_neural_prediction import NeuralOperator, SpatialOperator, forecasts, forward_filter, mixture_scores
 from hipporeplayimm.occupancy_matched_forecast import OccupancyMatchedNull, stationary_distribution
 from scripts.audit_2d_lagged_neural_prediction import MODELS, SCORES
 from scripts.audit_2d_lagged_neural_prediction import aggregate as original_aggregate
@@ -165,6 +166,30 @@ def test_producer_scores_match_independent_reference_and_hide_targets():
     broken["u"][0] *= 1.1
     with pytest.raises(AssertionError):
         verify_parameters(broken, Reference(fit=fit))
+
+
+@pytest.mark.parametrize("imm", [False, True])
+@pytest.mark.parametrize("permuted", [False, True])
+def test_spatial_forecasts_reproduce_original_likelihood_order(imm, permuted):
+    rng = np.random.default_rng(71)
+    points = np.array([(8 * x, 8 * y) for x in range(7) for y in range(5)], float)
+    rates = rng.lognormal(0, 2, (80, len(points)))
+    counts = rng.poisson(0.8, (13, 80))
+    train, held = np.arange(56), np.arange(56, 80)
+    order = rng.permutation(len(points)) if permuted else np.arange(len(points))
+    op = SpatialOperator(points, imm=imm)
+    null = OccupancyMatchedNull.from_operator(op)
+    expected = forecasts(identity_likelihood(counts[:, train], rates[train])[:, order], op)
+    target = identity_likelihood(counts[:, held], rates[held])
+    if permuted:
+        target = target[:, order]
+    actual = score_model(counts, rates, train, held, op, null, position_order=order)
+    for h, prediction in expected.items():
+        assert actual[h]["dynamic_forecast_sha256"] == posterior_sha256(prediction["dynamic"])
+        score = mixture_scores(prediction["dynamic"], target[h:]).sum()
+        assert actual[h]["score_dynamic"] == pytest.approx(score, abs=1e-12)
+    with pytest.raises(ValueError, match="position permutation"):
+        score_model(counts, rates, train, held, op, null, position_order=np.zeros(len(points), int))
 
 
 def score_rows():

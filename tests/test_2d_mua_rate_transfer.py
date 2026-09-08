@@ -94,3 +94,22 @@ def test_heldout_changes_cannot_update_training_posterior_after_gain_fit():
     b = score_event(counts, np.array([0.01, 0.03]), adapted, [0, 1], [2, 3], context, [1, 0], p)
     assert a[0]["training_imm_posterior_sha256"] == b[0]["training_imm_posterior_sha256"]
     assert a[0]["score_first_order_imm"] != b[0]["score_first_order_imm"]
+
+
+def test_independent_factorial_reconstruction_matches():
+    from scripts.verify_2d_mua_rate_transfer import independent_contrasts
+    original, shuffled, parent, old_order = fixture_scores()
+    actual, _ = contrasts(original, shuffled, parent, old_order)
+    expected, _ = independent_contrasts(original, shuffled, parent, old_order)
+    key = ["dataset", "animal", "session", "event_id", "split", "contrast"]
+    pd.testing.assert_frame_equal(actual.set_index(key).sort_index(), expected.set_index(key).sort_index(), atol=1e-10, rtol=1e-10)
+
+
+def test_independent_hierarchical_interval_matches_parent():
+    from scripts.audit_2d_count_conditioned_prediction import aggregate
+    from scripts.verify_2d_mua_rate_transfer import reference_interval
+    frame = pd.DataFrame([{"dataset": "x", "animal": str(a), "session": str(s), "event_id": e, "contrast": "c", "delta": float(a + e), "delta_per_heldout_spike": float(a + e) / (e + 1)} for a in range(3) for s in range(2) for e in range(2)])
+    actual = aggregate(frame)[0].iloc[0]
+    expected = reference_interval(frame)
+    for key in ("mean", "ci_low", "ci_high", "mean_per_heldout_spike", "per_spike_ci_low", "per_spike_ci_high"):
+        assert actual[key] == pytest.approx(expected[key])

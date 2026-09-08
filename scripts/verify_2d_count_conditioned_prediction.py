@@ -184,6 +184,11 @@ def parse_ids(value):
     return [] if pd.isna(value) else list(map(int, str(value).split(",")))
 
 
+def read_fold_table(path):
+    # A single ID mixed with empty cells otherwise becomes a float in pandas.
+    return pd.read_csv(path, dtype={k: "string" for k in ("test_ids", "calibration_ids", "excluded_ids")})
+
+
 def run(args):
     root, out = Path(args.run_dir).resolve(), Path(args.output_dir).resolve()
     mpath = root / "conditional_2d_manifest.json"
@@ -213,7 +218,7 @@ def run(args):
         selected = pd.read_csv(root / f"{tag}_selection.csv").sort_values(["start_s", "event_id"])
         compare_table(expected, selected, IDENTITY + ["event_id"], ["start_s", "end_s", "n_spikes_qc_units", "n_active_qc_units"], "frozen selection")
         scores = pd.read_csv(root / f"{tag}_scores.csv")
-        meta = pd.read_csv(root / f"{tag}_folds.csv")
+        meta = read_fold_table(root / f"{tag}_folds.csv")
         scores_all.append(scores)
         with np.load(root / f"{tag}_cache.npz") as z:
             cache = {k: z[k] for k in z.files}

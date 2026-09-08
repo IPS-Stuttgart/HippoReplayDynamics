@@ -3,7 +3,7 @@ import pytest
 from scipy.special import logsumexp
 
 from hipporeplayimm.conditional_spatial_prediction import SpatialPredictionContext
-from scripts.verify_2d_count_conditioned_prediction import reference_posterior
+from scripts.verify_2d_count_conditioned_prediction import parse_ids, read_fold_table, reference_posterior
 
 
 @pytest.mark.parametrize("n_time", [1, 3, 17])
@@ -29,3 +29,17 @@ def test_independent_reference_depends_on_training_input():
     strong[1, 0] = 10
     changed = reference_posterior(strong, centers, times, True)
     assert not np.allclose(flat, changed)
+
+
+def test_single_excluded_id_and_empty_csv_cells(tmp_path):
+    path = tmp_path / "folds.csv"
+    path.write_text("fold,test_ids,calibration_ids,excluded_ids\n0,1,2,116\n1,2,1,\n")
+    frame = read_fold_table(path)
+    assert parse_ids(frame.iloc[0].excluded_ids) == [116]
+    assert parse_ids(frame.iloc[1].excluded_ids) == []
+    assert parse_ids(frame.iloc[0].test_ids) == [1]
+
+
+def test_fractional_identifier_is_not_silently_rounded():
+    with pytest.raises(ValueError):
+        parse_ids("116.3")

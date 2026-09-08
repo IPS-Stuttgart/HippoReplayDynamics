@@ -37,7 +37,13 @@ def validate_audit(root, audit_path):
     scope = {"draws_checked": 64000, "regenerated_draws": 192, "independent_predictions": 1536, "independent_bootstrap_panels": 4800}
     if any(audit.get(key) != value for key, value in scope.items()):
         raise ValueError("incomplete independent audit")
-    for name in ("recovery_simulation_panels.csv", "recovery_positive_pattern_summary.csv", "recovery_predictive_rank_confusion.csv", "recovery_information_summary.csv"):
+    for name in (
+        "recovery_simulation_panels.csv",
+        "recovery_positive_pattern_summary.csv",
+        "recovery_predictive_rank_confusion.csv",
+        "recovery_information_summary.csv",
+        "recovery_event_contrasts.csv",
+    ):
         if file_sha256(root / name) != manifest["output_sha256"][name]:
             raise ValueError(f"changed summary: {name}")
     return manifest, audit
@@ -87,6 +93,17 @@ def build_readout(panels, patterns, real):
     if len(result) != len(expected) or set(actual) != set(expected):
         raise ValueError("incomplete readout factors")
     return result
+
+
+def verify_rank_table(events, confusion):
+    keys = ["generator", "phase", "encoding_variant", "raw_predictive_winner"]
+    counts = events.groupby(keys).size().rename("counted").reset_index()
+    merged = counts.merge(confusion, on=keys, how="outer", validate="one_to_one")
+    if merged.empty or not merged.counted.eq(merged["size"]).all():
+        raise ValueError("rank confusion counts do not match audited event ranks")
+    denominator = merged.groupby(keys[:-1])["counted"].transform("sum")
+    if not np.allclose(merged.fraction, merged.counted / denominator):
+        raise ValueError("rank confusion fractions do not match event ranks")
 
 
 def real_information(source, parent):
@@ -163,14 +180,15 @@ def make_figure(panels, readout, confusion, output):
     ax.set_xticks(positions, LABELS)
     ax.set_ylabel("IMM - independent predictive score\n(equal-animal mean; nats/event)")
     ax.set_title("A  Cohort effects", loc="left", fontsize=12)
+    ax.set_ylim(-0.25, 1.55)
     ax.legend(loc="upper left", frameon=False, fontsize=8)
     ax.text(0, -0.21, "Boxes: 50 simulated cohorts; whiskers: p05-p95", transform=ax.transAxes, fontsize=8)
     ax = axes[1]
     frac = primary.positive_pattern_fraction.to_numpy()
     ax.bar(positions, frac, color=COLORS, alpha=0.8)
     ax.errorbar(positions, frac, yerr=np.vstack([frac - primary.pattern_ci_low, primary.pattern_ci_high - frac]), fmt="none", color="black", capsize=4)
-    for x, value, count in zip(positions, frac, primary.positive_pattern_count, strict=True):
-        ax.text(x, value + 0.09, f"{count}/50", ha="center", fontsize=10)
+    for x, upper, count in zip(positions, primary.pattern_ci_high, primary.positive_pattern_count, strict=True):
+        ax.text(x, upper + 0.035, f"{count}/50", ha="center", fontsize=10)
     ax.set_ylim(0, 1.18)
     ax.set_yticks([0, 0.25, 0.5, 0.75, 1], ["0", "25", "50", "75", "100"])
     ax.set_ylabel("Simulated cohorts passing both contrasts (%)")
@@ -215,6 +233,7 @@ def run(args):
     panels = pd.read_csv(root / "recovery_simulation_panels.csv")
     patterns = pd.read_csv(root / "recovery_positive_pattern_summary.csv")
     confusion = pd.read_csv(root / "recovery_predictive_rank_confusion.csv")
+    verify_rank_table(pd.read_csv(root / "recovery_event_contrasts.csv"), confusion)
     readout = build_readout(panels, patterns, pd.read_csv(real_path))
     observed = real_information(source, parent)
     information = information_comparison(pd.read_csv(root / "recovery_information_summary.csv"), observed)

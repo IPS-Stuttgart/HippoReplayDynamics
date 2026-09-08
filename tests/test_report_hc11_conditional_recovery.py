@@ -61,3 +61,15 @@ def test_information_is_not_claimed_fully_matched():
     result = report.information_comparison(simulated, observed).set_index("metric")
     assert result.loc["n_spikes", "real_split_median"] == result.loc["n_spikes", "median_simulated_dataset_median"]
     assert result.loc["n_active_units", "real_split_median"] != result.loc["n_active_units", "median_simulated_dataset_median"]
+
+
+def test_independent_confusion_counts():
+    events = pd.DataFrame(
+        {"generator": ["diffusion"] * 3, "phase": ["POST"] * 3, "encoding_variant": ["pooled"] * 3, "raw_predictive_winner": ["diffusion", "diffusion", "iid_position"]}
+    )
+    confusion = events.groupby(list(events.columns)).size().reset_index(name="size")
+    confusion["fraction"] = confusion["size"] / 3
+    report.verify_rank_table(events, confusion)
+    confusion.loc[0, "size"] += 1
+    with pytest.raises(ValueError):
+        report.verify_rank_table(events, confusion)

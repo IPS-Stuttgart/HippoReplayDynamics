@@ -1,0 +1,17 @@
+{
+  "experiment": "hc11_count_coherent_conditional_recovery",
+  "status": "audited_capability_result",
+  "known_map_count_limited_temporal_detection_supported": true,
+  "single_event_imm_generator_identification_reliable": false,
+  "hc11_real_external_predictive_replication_supported": false,
+  "biological_absence_claim_supported": false,
+  "new_biological_mechanism_established": false,
+  "real_events_rescored": false,
+  "primary_post_simulated_imm_positive_patterns": 48,
+  "primary_post_simulated_diffusion_positive_patterns": 34,
+  "conditional_replicates_per_generator": 50,
+  "independent_animals": 4,
+  "next_action": "validate_native_observation_transfer_before_any_sleep_model_rescue",
+  "forbid_posthoc_positive_subset_or_prior_selection": true,
+  "goal_status": "high_importance_discovery_not_yet_established"
+}

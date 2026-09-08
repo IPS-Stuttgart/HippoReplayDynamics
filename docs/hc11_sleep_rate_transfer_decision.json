@@ -1,0 +1,14 @@
+{
+  "experiment": "hc11_cross_event_sleep_relative_rate_transfer",
+  "source_manifest_sha256": "149f6808080da85043b049a1a51ae10ab999de5355bd24de3c4d15eb41a751c3",
+  "technical_status": "independently_audited_pass",
+  "biological_status": "external_temporal_advantage_remains_unsupported",
+  "new_mechanism_established": false,
+  "recalibrated_nonspatial_prediction_improves": true,
+  "primary_post_imm_minus_iid": -0.034857925729384356,
+  "primary_post_imm_minus_global": -0.16312576356163228,
+  "primary_post_real_minus_wrong_imm": -0.05094169961030079,
+  "allow_positive_external_replay_claim": false,
+  "allow_posthoc_alpha_or_animal_selection": false,
+  "next_action": "close_simple_rate_recalibration_explanation; require_new_identifiable_hypothesis_and_new_event_confirmation"
+}

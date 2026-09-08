@@ -88,6 +88,9 @@ def check_task(job):
     if set(test.event_id) != set(result['test_ids']) or set(calibration[keep].event_id) != set(result['calibration_ids']) or set(calibration[~keep].event_id) != set(result['excluded_ids']):
         raise ValueError('test/calibration/guard separation differs')
     arrays = [cache[f'counts_{eid}'] for eid in result['calibration_ids']]
+    informative = sum(np.count_nonzero(x.sum(axis=1)) for x in arrays)
+    if bool(fit.initialization_with_replacement) != (informative < result['n_states']):
+        raise ValueError('initialization support reporting differs')
     pooled = np.concatenate(arrays).sum(axis=0) + 100 / len(cache['unit_ids'])
     reference = pooled / pooled.sum()
     same(fit.global_probability, reference, 1e-12)

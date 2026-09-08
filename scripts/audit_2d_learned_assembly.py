@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import shutil
 import sys
 import time
 from concurrent.futures import ProcessPoolExecutor, as_completed
@@ -53,6 +54,38 @@ def checked_file(root, manifest, name):
     if file_sha256(path) != manifest['output_sha256'][name]:
         raise ValueError(f'changed source output: {name}')
     return path
+
+
+def reuse_completed(previous, out, items, inputs):
+    """Recover completed fold artifacts from a terminal failed run, fail closed."""
+    path = previous / 'learned_assembly_manifest.json'
+    old = json.loads(path.read_text())
+    if old['status'] != 'failed' or old['selected_sessions'] != items:
+        raise ValueError('reuse requires matching terminal failed experiment')
+    for key in ('parent', 'rate', 'protocol', 'hmmlearn_hmm.py', 'hmmlearn_base.py', 'hmmlearn__emissions.py', 'hmmlearn_compiled_kernel'):
+        if old['input_file_sha256'][key] != file_sha256(inputs[key]):
+            raise ValueError(f'reused input changed: {key}')
+    completed = []
+    for item in items:
+        for fold in range(5):
+            for states in STATES:
+                name = f"{item['tag']}__fold{fold}__k{states}_manifest.json"
+                source = previous / name
+                if not source.exists():
+                    continue
+                if file_sha256(source) != old['output_sha256'].get(name):
+                    raise ValueError('unverified cached fold manifest')
+                result = json.loads(source.read_text())
+                if (result['tag'], result['fold'], result['n_states']) != (item['tag'], fold, states):
+                    raise ValueError('cached fold identity differs')
+                for filename, digest in result['output_sha256'].items():
+                    if filename != Path(filename).name or digest != old['output_sha256'].get(filename) or file_sha256(previous / filename) != digest:
+                        raise ValueError('cached fold output differs')
+                    shutil.copy2(previous / filename, out / filename)
+                result.update(reused_producer_manifest=str(path), reused_producer_sha256=file_sha256(path), reused_producer_commit=old['code_commit'])
+                (out / name).write_text(json.dumps(result, indent=2) + '\n')
+                completed.append(result)
+    return completed
 
 
 def task(job):
@@ -167,6 +200,7 @@ def run(args):
         'parent': parent / 'conditional_2d_manifest.json', 'rate': rate / 'mua_rate_transfer_manifest.json',
         'protocol': ROOT / 'docs/2d_learned_assembly_protocol.md', 'script': Path(__file__),
         'fitter': ROOT / 'src/hipporeplayimm/learned_assembly_prediction.py',
+        'initialization_addendum': ROOT / 'docs/2d_learned_assembly_initialization_addendum.md',
     }
     for item in items:
         tag = item['tag']
@@ -179,16 +213,21 @@ def run(args):
     for name in ('hmm.py', 'base.py', '_emissions.py'):
         inputs[f'hmmlearn_{name}'] = library / name
     inputs['hmmlearn_compiled_kernel'] = next(library.glob('_hmmc*.so'))
+    if args.reuse_dir:
+        inputs['reuse_manifest'] = Path(args.reuse_dir).resolve() / 'learned_assembly_manifest.json'
     manifest = build_script_provenance(input_paths=inputs)
     manifest.update(status='running', scope='integration_pilot' if args.pilot else 'all_9225',
                     hmmlearn_version=hmmlearn.__version__, n_states=STATES, k_shuffles=K,
                     selected_sessions=items, n_events=sum(i['events'] for i in items))
     mpath = out / 'learned_assembly_manifest.json'
     mpath.write_text(json.dumps(manifest, indent=2) + '\n')
-    completed, tick = [], time.monotonic()
+    completed = reuse_completed(Path(args.reuse_dir).resolve(), out, items, inputs) if args.reuse_dir else []
+    manifest['reused_fold_fits'] = len(completed)
+    done = {(r['tag'], r['fold'], r['n_states']) for r in completed}
+    tick = time.monotonic()
     try:
         with ProcessPoolExecutor(max_workers=args.workers) as pool:
-            jobs = [pool.submit(task, (i, fold, states, str(parent), str(out))) for i in items for fold in range(5) for states in STATES]
+            jobs = [pool.submit(task, (i, fold, states, str(parent), str(out))) for i in items for fold in range(5) for states in STATES if (i['tag'], fold, states) not in done]
             for future in as_completed(jobs):
                 completed.append(future.result())
                 manifest.update(completed=completed)
@@ -241,4 +280,5 @@ if __name__ == '__main__':
     parser.add_argument('--output-dir', required=True)
     parser.add_argument('--workers', type=int, default=8)
     parser.add_argument('--pilot', action='store_true')
+    parser.add_argument('--reuse-dir', help='Hash-checked completed folds from a matching terminal failed run')
     run(parser.parse_args())

@@ -26,6 +26,7 @@ class LearnedAssembly:
     n_calibration_events: int
     restart_objectives: tuple[float, ...] = ()
     restart_converged: tuple[bool, ...] = ()
+    initialization_with_replacement: bool = False
 
 
 def validate_sequences(sequences):
@@ -99,7 +100,7 @@ def fit_learned_assembly(sequences, n_states, seed, *, max_iter=500, restarts=2)
     informative = np.flatnonzero(counts.sum(axis=1) > 0)
     if (
         isinstance(n_states, bool) or not isinstance(n_states, int) or n_states < 1
-        or len(informative) < n_states or max_iter < 2 or restarts < 1
+        or len(informative) == 0 or max_iter < 2 or restarts < 1
     ):
         raise ValueError("insufficient informative calibration bins or invalid fit settings")
     reference = counts.sum(axis=0) + 100.0 / counts.shape[1]
@@ -121,7 +122,8 @@ def fit_learned_assembly(sequences, n_states, seed, *, max_iter=500, restarts=2)
         model.emission_pseudocount = 10.0
         model.startprob_ = np.full(n_states, 1 / n_states)
         model.transmat_ = 0.5 * np.eye(n_states) + 0.5 / n_states
-        initial = counts[rng.choice(informative, n_states, replace=False)] + 10 * reference
+        replacement = len(informative) < n_states
+        initial = counts[rng.choice(informative, n_states, replace=replacement)] + 10 * reference
         model.emissionprob_ = initial / initial.sum(axis=1, keepdims=True)
         model.fit(counts, lengths)
         scores, posterior = zip(*[
@@ -142,6 +144,7 @@ def fit_learned_assembly(sequences, n_states, seed, *, max_iter=500, restarts=2)
         max(fits, key=lambda f: f.objective_trace[-1]),
         restart_objectives=tuple(float(f.objective_trace[-1]) for f in fits),
         restart_converged=tuple(bool(f.converged) for f in fits),
+        initialization_with_replacement=bool(len(informative) < n_states),
     )
 
 

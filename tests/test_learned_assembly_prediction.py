@@ -1,6 +1,7 @@
 """Known-assembly recovery, exact kernels and target-cell separation."""
 
 import itertools
+import json
 from dataclasses import asdict, replace
 
 import numpy as np
@@ -16,7 +17,7 @@ from hipporeplayimm.learned_assembly_prediction import (
     predict_learned_assembly,
     validate_sequences,
 )
-from scripts.audit_2d_learned_assembly import contrasts, load_fit
+from scripts.audit_2d_learned_assembly import contrasts, file_sha256, load_fit, reuse_completed
 from scripts.report_2d_learned_assembly import ENDPOINTS, decisions
 from scripts.verify_2d_learned_assembly import forward_backward, reference_prediction
 
@@ -161,6 +162,17 @@ def test_iteration_cap_is_not_convergence():
     assert not fit.converged
 
 
+def test_declared_capacity_can_initialize_with_replacement():
+    x = np.zeros((4, 4), dtype=int)
+    x[0, 0] = 3
+    x[2, 2] = 4
+    fit = fit_learned_assembly([x], 5, 3)
+    assert fit.initialization_with_replacement
+    assert fit.probabilities.shape == (4, 5)
+    assert np.allclose(fit.probabilities.sum(axis=0), 1)
+    assert np.isfinite(fit.objective_trace).all()
+
+
 def decision_tables():
     summary = pd.DataFrame([
         {'dataset': d, 'contrast': f'k{k}__{axis}', 'mean': 2.0, 'ci_low': 1.0, 'ci_high': 3.0,
@@ -190,3 +202,34 @@ def test_uncertain_separation_is_not_equivalence():
     with pytest.raises(ValueError, match='missing'):
         decisions(summary.iloc[:-1], fits)
     assert not decisions(summary, fits.assign(fit_converged=False)).learned_comparator_beats_global.any()
+
+
+def test_reuse_checks_terminal_state_and_artifact_hashes(tmp_path):
+    previous, out = tmp_path / 'old', tmp_path / 'new'
+    previous.mkdir()
+    out.mkdir()
+    keys = ('parent', 'rate', 'protocol', 'hmmlearn_hmm.py', 'hmmlearn_base.py', 'hmmlearn__emissions.py', 'hmmlearn_compiled_kernel')
+    inputs = {key: tmp_path / key for key in keys}
+    for key, path in inputs.items():
+        path.write_text(key)
+    items = [{'tag': 'session'}]
+    output_name = 'session__fold0__k20_fit.npz'
+    (previous / output_name).write_bytes(b'fixture')
+    result = {'tag': 'session', 'fold': 0, 'n_states': 20, 'output_sha256': {output_name: file_sha256(previous / output_name)}}
+    name = 'session__fold0__k20_manifest.json'
+    (previous / name).write_text(json.dumps(result))
+    manifest = {'status': 'failed', 'selected_sessions': items, 'code_commit': 'fixture',
+                'input_file_sha256': {key: file_sha256(path) for key, path in inputs.items()},
+                'output_sha256': result['output_sha256'] | {name: file_sha256(previous / name)}}
+    (previous / 'learned_assembly_manifest.json').write_text(json.dumps(manifest))
+    reused = reuse_completed(previous, out, items, inputs)
+    assert len(reused) == 1
+    assert reused[0]['reused_producer_commit'] == 'fixture'
+    assert (out / output_name).read_bytes() == b'fixture'
+    (previous / output_name).write_bytes(b'tampered')
+    with pytest.raises(ValueError, match='differs'):
+        reuse_completed(previous, out, items, inputs)
+    manifest['status'] = 'running'
+    (previous / 'learned_assembly_manifest.json').write_text(json.dumps(manifest))
+    with pytest.raises(ValueError, match='terminal'):
+        reuse_completed(previous, out, items, inputs)

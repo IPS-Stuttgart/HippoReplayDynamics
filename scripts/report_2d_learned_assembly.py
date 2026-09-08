@@ -91,6 +91,7 @@ def run(args):
             'n_cells': n_cells, 'calibration_events': fit.n_calibration_events,
             'calibration_bins': fit.n_calibration_bins,
             'calibration_bins_per_state': fit.n_calibration_bins / states,
+            'initialization_with_replacement': bool(fit.initialization_with_replacement),
             'effective_occupied_states': float(np.exp(-np.sum(fit.occupancy * np.log(fit.occupancy)))),
             'occupancy_weighted_self_transition': float(fit.occupancy @ np.diag(fit.transition)),
             'free_parameters': states - 1 + states * (states - 1) + states * (n_cells - 1),

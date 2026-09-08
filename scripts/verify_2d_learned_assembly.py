@@ -156,16 +156,36 @@ def check_contrasts(result_items, out, rate):
         null = score[score.shuffle.ge(0)].groupby(KEYS + ['n_states']).score_learned_hmm.mean()
         source = pd.read_csv(rate / f'{tag}_original.csv.gz')
         source = source[source.alpha.eq(100) & source['map'].eq('real')].set_index(KEYS)
+        temporal = pd.read_csv(rate / f'{tag}_split_contrasts.csv.gz')
+        temporal = temporal[temporal.contrast.eq('alpha100__first_order_imm__real_order_advantage')].set_index(KEYS)
         delta = pd.read_csv(out / f'{tag}_split_contrasts.csv.gz')
-        for row in delta[delta.contrast.str.endswith('__spatial_imm_minus_learned_hmm')].itertuples(index=False):
-            key = tuple(getattr(row, k) for k in KEYS)
-            expected = source.loc[key].score_first_order_imm - original.loc[(*key, row.n_states)].score_learned_hmm
-            same(row.delta, expected)
-            checked += 1
-        for row in delta[delta.contrast.str.endswith('__learned_hmm_order_advantage')].itertuples(index=False):
-            key = tuple(getattr(row, k) for k in KEYS + ['n_states'])
-            same(row.delta, original.loc[key].score_learned_hmm - null.loc[key])
-            checked += 1
+        expected_parts = []
+        for n_states in (20, 50, 100):
+            neural = original.xs(n_states, level='n_states').sort_index()
+            baseline = source.reindex(neural.index)
+            order_gain = neural.score_learned_hmm - null.xs(n_states, level='n_states').reindex(neural.index)
+            expected = {
+                'spatial_imm_minus_learned_hmm': baseline.score_first_order_imm - neural.score_learned_hmm,
+                'spatial_iid_minus_learned_hmm': baseline.score_iid_position - neural.score_learned_hmm,
+                'learned_hmm_minus_nonspatial_global': neural.score_learned_hmm - neural.score_nonspatial_global,
+                'learned_hmm_minus_run_shrinkage_global': neural.score_learned_hmm - baseline.score_event_global,
+                'learned_hmm_minus_same_emissions_iid': neural.score_learned_hmm - neural.score_same_emissions_iid,
+                'learned_hmm_order_advantage': order_gain,
+                'spatial_minus_assembly_order_advantage': temporal.delta.reindex(neural.index) - order_gain,
+            }
+            for axis, difference in expected.items():
+                if not np.isfinite(difference).all():
+                    raise ValueError('incomplete paired source')
+                part = difference.rename('delta').to_frame()
+                part['delta_per_heldout_spike'] = difference / neural.n_heldout_spikes.replace(0, np.nan)
+                expected_parts.append(part.reset_index().assign(contrast=f'k{n_states}__{axis}'))
+        index = KEYS + ['contrast']
+        expected_splits = pd.concat(expected_parts).set_index(index).sort_index()
+        actual_splits = delta.set_index(index).sort_index()
+        if not expected_splits.index.equals(actual_splits.index):
+            raise ValueError('split contrast coverage differs')
+        same(actual_splits[expected_splits.columns], expected_splits)
+        checked += len(expected_splits)
         expected = delta.groupby(IDENTITY + ['event_id', 'contrast'])[['delta', 'delta_per_heldout_spike']].median().sort_index()
         actual = pd.read_csv(out / f'{tag}_event_contrasts.csv').set_index(IDENTITY + ['event_id', 'contrast']).sort_index()
         if not expected.index.equals(actual.index):
@@ -192,7 +212,7 @@ def run(args):
     parent = Path(manifest['input_file_paths']['parent']).parent
     rate = Path(manifest['input_file_paths']['rate']).parent
     report = build_script_provenance(input_paths={'scoring_manifest': mpath, 'verifier': Path(__file__)})
-    report.update(status='running', scope='all calibration objectives; all original and two null predictions per event/split/capacity; all coverage/invariance rows; primary split differences and event medians')
+    report.update(status='running', scope='all calibration objectives; all original and two null predictions per event/split/capacity; all coverage/invariance rows; all split differences, normalizations and event medians')
     completed = []
     try:
         with ProcessPoolExecutor(max_workers=args.workers) as pool:

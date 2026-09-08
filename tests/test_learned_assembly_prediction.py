@@ -17,6 +17,7 @@ from hipporeplayimm.learned_assembly_prediction import (
     validate_sequences,
 )
 from scripts.audit_2d_learned_assembly import contrasts, load_fit
+from scripts.report_2d_learned_assembly import ENDPOINTS, decisions
 from scripts.verify_2d_learned_assembly import forward_backward, reference_prediction
 
 
@@ -158,3 +159,34 @@ def test_independent_predictor_and_fit_archive(tmp_path):
 def test_iteration_cap_is_not_convergence():
     fit = fit_learned_assembly(simulated(9, 30), 3, 54, max_iter=2)
     assert not fit.converged
+
+
+def decision_tables():
+    summary = pd.DataFrame([
+        {'dataset': d, 'contrast': f'k{k}__{axis}', 'mean': 2.0, 'ci_low': 1.0, 'ci_high': 3.0,
+         'positive_animals': n, 'animals': n}
+        for d, n in (('pfeiffer_foster', 4), ('tanni2022', 5))
+        for k in (20, 50, 100) for axis in ENDPOINTS
+    ])
+    fits = pd.DataFrame([{'dataset': d, 'n_states': 50, 'fit_converged': True} for d in ('pfeiffer_foster', 'tanni2022')])
+    return summary, fits
+
+
+def test_weak_comparator_cannot_validate_spatial_claim():
+    summary, fits = decision_tables()
+    assert decisions(summary, fits).spatial_advantage_over_tested_assembly_supported.all()
+    mask = summary.contrast.eq('k50__learned_hmm_minus_nonspatial_global')
+    summary.loc[mask, 'ci_low'] = -1
+    result = decisions(summary, fits)
+    assert not result.spatial_advantage_over_tested_assembly_supported.any()
+    assert result.verdict.eq('comparator_adequacy_not_established').all()
+
+
+def test_uncertain_separation_is_not_equivalence():
+    summary, fits = decision_tables()
+    summary.loc[summary.contrast.eq('k50__spatial_imm_minus_learned_hmm'), 'ci_low'] = -1
+    result = decisions(summary, fits)
+    assert result.verdict.eq('no_rat_uniform_separation').all()
+    with pytest.raises(ValueError, match='missing'):
+        decisions(summary.iloc[:-1], fits)
+    assert not decisions(summary, fits.assign(fit_converged=False)).learned_comparator_beats_global.any()

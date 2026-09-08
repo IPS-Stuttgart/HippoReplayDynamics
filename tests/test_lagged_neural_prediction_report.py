@@ -66,6 +66,13 @@ def fixture(tmp_path):
     s.assign(animal="A").to_csv(run / "lagged_prediction_animals.csv.gz", index=False)
     pd.DataFrame(coverage).to_csv(run / "lagged_prediction_coverage.csv", index=False)
     decisions().to_csv(run / "lagged_prediction_decisions.csv", index=False)
+    event_rows = [
+        {"dataset": d, "horizon": h, "contrast": "learned_hmm__dynamic_minus_global", "event_id": e, "valid_neural_splits": 0 if e == 4 else 5}
+        for d in DATASETS
+        for h in (1, 2, 4)
+        for e in range(5)
+    ]
+    pd.DataFrame(event_rows).to_csv(run / "lagged_prediction_events.csv.gz", index=False)
     m = {"status": "complete", "code_commit": "synthetic-fixture", "output_sha256": {p.name: file_sha256(p) for p in run.iterdir()}}
     mp = run / "lagged_prediction_manifest.json"
     mp.write_text(json.dumps(m))
@@ -94,6 +101,7 @@ def test_non_rescoring_report_outputs_and_figures(tmp_path):
     text = (out / "lagged_prediction_report.md").read_text()
     assert "not all validated continuous replay" in text
     assert "No model met" in text
+    assert pd.read_csv(out / "lagged_prediction_coverage.csv").per_spike_supported_events.eq(4).all()
     for path in out.glob("*.png"):
         with Image.open(path) as image:
             pixels = np.asarray(image.convert("RGB"))

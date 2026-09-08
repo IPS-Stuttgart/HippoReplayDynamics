@@ -107,6 +107,12 @@ def report(run, audit_path, out):
         sessions=("session", "size"),
         animals=("animal", "nunique"),
     )
+    events = pd.read_csv(run / "lagged_prediction_events.csv.gz")
+    representative = events[events.contrast.eq("learned_hmm__dynamic_minus_global")]
+    support = representative.groupby(["dataset", "horizon"]).valid_neural_splits.agg(lambda v: int(v.gt(0).sum())).rename("per_spike_supported_events").reset_index()
+    counts = counts.merge(support, on=["dataset", "horizon"], validate="one_to_one")
+    if not counts.per_spike_supported_events.le(counts.eligible_events).all():
+        raise ValueError("per-spike support exceeds temporally eligible events")
     out.mkdir(parents=True, exist_ok=False)
     primary.to_csv(out / "lagged_prediction_primary_table.csv", index=False)
     summary.to_csv(out / "lagged_prediction_all_contrasts.csv", index=False)

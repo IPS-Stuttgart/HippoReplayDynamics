@@ -89,6 +89,19 @@ def raw_binned(times, edges, end):
     return np.diff(np.searchsorted(times, boundaries, side="left"))
 
 
+def read_pf_spikes(path):
+    import h5py
+
+    if h5py.is_hdf5(path):
+        with h5py.File(path) as handle:
+            raw = np.asarray(handle["Spike_Data"]).T
+    else:
+        raw = np.asarray(loadmat(path, squeeze_me=True)["Spike_Data"])
+    if raw.ndim != 2 or raw.shape[1] != 2 or not np.isfinite(raw).all():
+        raise ValueError("invalid native PF time/unit matrix")
+    return raw
+
+
 def audit_fit(training, p, w, global_p, trace, row, parts):
     reference = training.sum(axis=0) + 100 / training.shape[1]
     reference /= reference.sum()
@@ -229,7 +242,7 @@ def run(args):
             rawpath = Path(pf_parent["arguments"]["dataset_root"]) / session / "Spike_Data.mat"
             if file_sha256(rawpath) != pf_parent["source_mat_sha256"][str(rawpath)]:
                 raise ValueError("PF raw spikes changed")
-            raw = np.asarray(loadmat(rawpath, squeeze_me=True)["Spike_Data"])
+            raw = read_pf_spikes(rawpath)
             by_unit = {int(u): raw[raw[:, 1] == u, 0] for u in z["unit_ids"]}
         else:
             parent_session = next(v for v in hc_parent["sessions"] if v["session"] == session)

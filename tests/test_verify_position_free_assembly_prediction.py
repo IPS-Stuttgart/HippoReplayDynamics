@@ -12,6 +12,7 @@ from scripts.verify_position_free_assembly_prediction import (
     dense_posterior,
     direct_scores,
     raw_binned,
+    read_pf_spikes,
     verify_outputs,
 )
 
@@ -36,6 +37,16 @@ def test_dense_posterior_exact_enumeration():
 def test_spike_endpoint_and_padded_last_bin():
     times = [-1, 0, 0.01, 0.02, 0.025, 0.027, 0.03]
     np.testing.assert_array_equal(raw_binned(times, np.array([0, 0.01, 0.02, 0.03]), 0.027), [1, 1, 2])
+
+
+def test_native_pf_hdf5_orientation(tmp_path):
+    import h5py
+
+    raw = np.array([[0.01, 3], [0.02, 2], [0.1, 3]])
+    path = tmp_path / "Spike_Data.mat"
+    with h5py.File(path, "w") as handle:
+        handle.create_dataset("Spike_Data", data=raw.T)
+    np.testing.assert_array_equal(read_pf_spikes(path), raw)
 
 
 def test_zero_heldout_and_no_inference_leakage():

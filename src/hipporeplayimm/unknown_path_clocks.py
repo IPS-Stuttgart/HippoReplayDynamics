@@ -91,9 +91,9 @@ def generate_counts(totals, model, physical, neural, stationary, generator):
     return counts, latent
 
 
-def summarize(fits, repeats=REPEATS, supports=SUPPORTS):
+def summarize(fits, repeats=REPEATS, supports=SUPPORTS, teachers=TEACHERS):
     keys = ["dataset", "scenario", "repeat", "teacher", "support"]
-    expected = set(product(("pfeiffer_foster", "tanni2022"), SCENARIOS, range(repeats), TEACHERS, supports))
+    expected = set(product(("pfeiffer_foster", "tanni2022"), SCENARIOS, range(repeats), teachers, supports))
     if fits.empty or fits.duplicated(keys).any() or set(fits[keys].itertuples(index=False, name=None)) != expected:
         raise ValueError("all distinct frozen population fits required")
     x = fits.copy()

@@ -221,3 +221,22 @@ def test_hierarchical_interval_and_equal_event_weights():
     group.loc[group.event_id == 0, "qualifying_splits"] = 1
     _, _, summary = aggregate_points(group)
     assert summary["mean"].iloc[0] == 7
+
+
+def test_independent_report_reconstruction_and_corruption():
+    from scripts.report_training_continuity_prediction import hierarchical_interval
+    from scripts.verify_training_continuity_report import compare, reference_event_values, reference_interval
+
+    labels, scores, shuffled = fixture()
+    predictions = predictive_contrasts(scores, shuffled)
+    actual = grouped_event_values(labels, predictions)
+    rebuilt = reference_event_values(labels, predictions)
+    keys = IDENTITY + ["event_id", "support", "bin_filter", "min_frames", "group", "contrast"]
+    values = ["delta", "delta_per_heldout_spike", "qualifying_splits"]
+    compare(actual, rebuilt, keys, values)
+    broken = actual.copy()
+    broken.loc[0, "delta"] += 0.1
+    with pytest.raises(ValueError):
+        compare(broken, rebuilt, keys, values)
+    group = actual[(actual.group == "all") & (actual.contrast == "imm_minus_iid") & (actual.support == "parent") & (actual.bin_filter == "edge_only") & (actual.min_frames == 10)]
+    assert np.allclose(hierarchical_interval(group, draws=30), reference_interval(group, draws=30), equal_nan=True)

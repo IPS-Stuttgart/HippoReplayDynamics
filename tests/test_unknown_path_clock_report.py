@@ -54,7 +54,7 @@ def test_report_is_audited_nonrescorer_and_rejects_mismatched_audit(tmp_path):
     ap.write_text(json.dumps(a))
     output = tmp_path / "report"
     verdict = report(run, audit, output)
-    assert verdict == "population_clock_recovery_not_ready_even_with_matched_path_library"
+    assert verdict == "independent_geometry_recovery_failed"
     assert (output / "unknown_path_clock_recovery.png").stat().st_size > 10000
     assert "No real replay events were rescored" in (output / "unknown_path_clock_population_report.md").read_text()
     a["input_file_sha256"]["run_manifest"] = "wrong"

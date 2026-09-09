@@ -70,10 +70,10 @@ def report(run, audit_dir, output):
     primary = gates[gates.support.eq(256)]
     matched_pass = bool(primary[primary.teacher.eq("matched")].practical_pass.all())
     independent_pass = bool(primary[primary.teacher.eq("independent")].practical_pass.all())
-    if not matched_pass:
-        verdict = "population_clock_recovery_not_ready_even_with_matched_path_library"
-    elif not independent_pass:
-        verdict = "matched_library_recovery_only_not_robust_to_unknown_geometry"
+    if not independent_pass:
+        verdict = "independent_geometry_recovery_failed"
+    elif not matched_pass:
+        verdict = "matched_geometry_calibration_gate_unmet"
     else:
         verdict = "simulation_recovery_pass_restricted_path_prior_only"
     lines = [

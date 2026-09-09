@@ -12,6 +12,15 @@ from scripts.run_2d_metric_finite_recovery import aggregate, reduce_trials
 from scripts.verify_2d_metric_finite_recovery import KEYS, MODELS, assert_table, reference_reductions, reference_scores
 
 
+def test_csv_loses_axis_name_but_not_column_labels():
+    expected = pd.DataFrame({"event": [1, 2], "winner_fraction_physical": [0.5, 1.0]})
+    actual = expected.copy()
+    expected.columns.name = "winner"
+    assert_table(actual, expected, ["event"])
+    with pytest.raises(AssertionError):
+        assert_table(actual.rename(columns={"winner_fraction_physical": "wrong"}), expected, ["event"])
+
+
 def test_independent_score_reconstruction_and_corruption():
     rng = np.random.default_rng(717)
     rates = rng.gamma(2, 3, (8, 6)) + 0.01

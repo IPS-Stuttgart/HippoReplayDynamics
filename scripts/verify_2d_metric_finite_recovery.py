@@ -197,6 +197,8 @@ def assert_table(actual, expected, keys):
     assert len(actual) == len(expected) and set(actual.columns) == set(expected.columns)
     assert not actual.duplicated(keys).any()
     a, b = [x.sort_values(keys).reset_index(drop=True) for x in (actual, expected)]
+    # CSV preserves labels, but not the pandas column-axis name from a pivot.
+    a.columns.name = b.columns.name = None
     pd.testing.assert_frame_equal(a[expected.columns], b, check_dtype=False, atol=1e-10, rtol=1e-10)
 
 

@@ -7,6 +7,7 @@ import pandas as pd
 import pytest
 
 from scripts.report_replay_measurement_paper_evidence import checked, collect_panels, one
+from scripts.verify_replay_measurement_paper_evidence import verify_values
 
 
 def sources():
@@ -135,3 +136,14 @@ def test_changed_source_hash_fails(tmp_path):
     source.write_text("changed\n")
     with pytest.raises(ValueError, match="checksum"):
         checked(source, "0" * 64)
+
+
+def test_independent_csv_audit_handles_null_intervals_and_detects_changes(tmp_path):
+    tables = sources()
+    path = tmp_path / "overview.csv"
+    collect_panels(tables).to_csv(path, index=False)
+    values = pd.read_csv(path, keep_default_na=False)
+    assert verify_values(values, tables) == 28
+    values.loc[0, "value"] += 1
+    with pytest.raises(ValueError, match="point estimate"):
+        verify_values(values, tables)

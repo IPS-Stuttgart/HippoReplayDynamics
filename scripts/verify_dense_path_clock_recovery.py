@@ -15,13 +15,27 @@ sys.path[:0] = [str(ROOT), str(ROOT / "src")]
 
 import numpy as np
 import pandas as pd
+from scipy.sparse import csr_matrix
 from scipy.spatial import Delaunay
 from scipy.special import logsumexp
 
 from scripts._provenance import build_script_provenance, file_sha256
-from scripts.verify_unknown_path_clock_populations import certify, close, integral_bins
+from scripts.verify_unknown_path_clock_populations import certify, close
 
 MODELS = ("physical", "neural", "stationary", "physical_reset", "neural_reset")
+
+
+def integral_bins(clock, values, n):
+    """Split at every bin edge and directly sum trapezoids, without a prefix cache."""
+    knots = np.unique(np.r_[clock, np.linspace(0, 1, n + 1)])
+    midpoint = (knots[:-1] + knots[1:]) / 2
+    left = np.searchsorted(clock, midpoint, side="right") - 1
+    alpha = (midpoint - clock[left]) / (clock[left + 1] - clock[left])
+    bins = np.minimum(np.floor(midpoint * n).astype(int), n - 1)
+    # On a split linear segment, the endpoint average equals its midpoint value.
+    weights = np.diff(knots)[:, None] * np.column_stack([1 - alpha, alpha])
+    matrix = csr_matrix((weights.ravel(), (np.repeat(bins, 2), np.column_stack([left, left + 1]).ravel())), shape=(n, len(clock)))
+    return (matrix @ values) * n
 
 
 def random(*parts):

@@ -87,6 +87,18 @@ def test_nested_subsets_are_train_only_and_stable():
     assert classification_group(True, False) == "lost_with_thinning"
 
 
+def test_missing_bounds_are_explicit_noop_not_imputed():
+    from hipporeplayimm.training_continuity import spatial_supports
+
+    grid = np.array([[0.0, 0.0], [5.0, 5.0], [11.0, 5.0]])
+    masks, available = spatial_supports(grid, np.full((2, 2), np.nan))
+    assert not available and masks["arena_clipped"].all()
+    masks, available = spatial_supports(grid, [[0, 0], [10, 10]])
+    assert available and np.array_equal(masks["arena_clipped"], [True, True, False])
+    with pytest.raises(ValueError):
+        spatial_supports(grid, [[0, np.nan], [10, 10]])
+
+
 def fixture():
     rows, scores, shuffled = [], [], []
     identity = dict(zip(IDENTITY, ("dataset", "animal", "session"), strict=True))

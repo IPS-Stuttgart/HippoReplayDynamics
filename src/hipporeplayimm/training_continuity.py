@@ -22,6 +22,21 @@ PRIMARY_CONTRASTS = [
 PRIMARY_GROUPS = ["rejected_with_opportunity", "lost_with_thinning"]
 
 
+def spatial_supports(centers, bounds):
+    centers, bounds = np.asarray(centers, float), np.asarray(bounds, float)
+    if centers.ndim != 2 or centers.shape[1] != 2 or bounds.shape != (2, 2):
+        raise ValueError("2D centers and lower/upper bounds required")
+    parent = np.ones(len(centers), bool)
+    if np.isnan(bounds).all():
+        return {"parent": parent, "arena_clipped": parent.copy()}, False
+    if not np.isfinite(bounds).all() or (bounds[1] <= bounds[0]).any():
+        raise ValueError("bounds must be fully known or explicitly unavailable")
+    clipped = ((centers >= bounds[0]) & (centers <= bounds[1])).all(axis=1)
+    if clipped.sum() < 2:
+        raise ValueError("clipping leaves insufficient support")
+    return {"parent": parent, "arena_clipped": clipped}, True
+
+
 def nested_half(training, identity, split):
     training = np.asarray(training, int)
     if training.ndim != 1 or len(training) < 2 or len(np.unique(training)) != len(training) or (training < 0).any():

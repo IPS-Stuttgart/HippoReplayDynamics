@@ -119,6 +119,16 @@ def audit_record(record, root, parent, order, reference_path):
         "parent": np.ones(len(cache["centers"]), bool),
         "arena_clipped": ((cache["centers"] >= cache["arena_bounds_cm"][0]) & (cache["centers"] <= cache["arena_bounds_cm"][1])).all(axis=1),
     }
+    bounds_available = not np.isnan(cache["arena_bounds_cm"]).all()
+    if not bounds_available:
+        masks["arena_clipped"] = masks["parent"].copy()
+    elif not np.isfinite(cache["arena_bounds_cm"]).all():
+        raise ValueError("partially missing bounds")
+    if not labels.arena_bounds_available.eq(bounds_available).all() or record["arena_bounds_available"] != bounds_available:
+        raise ValueError("incorrect clipping-availability flag")
+    expected_outside = int((~masks["arena_clipped"]).sum()) if bounds_available else None
+    if record["outside_arena_centres"] != expected_outside:
+        raise ValueError("incorrect out-of-arena denominator")
     for name, mask in masks.items():
         if not np.array_equal(mask, paths["mask_" + name]):
             raise ValueError("changed spatial support")

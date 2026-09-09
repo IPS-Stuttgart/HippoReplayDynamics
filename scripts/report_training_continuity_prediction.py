@@ -197,7 +197,21 @@ def run(args):
     )
     count_sessions = count_events.groupby(IDENTITY + SETTINGS, as_index=False)[["full_training_pass_fraction", "nested_half_pass_fraction"]].mean()
     counts = count_sessions.groupby(["dataset", "animal", *SETTINGS], as_index=False)[["full_training_pass_fraction", "nested_half_pass_fraction"]].mean()
+    paired = labels.pivot(index=IDENTITY + ["event_id", "split", "bin_filter", "min_frames"], columns="support", values=["full_training_pass", "nested_half_pass"])
+    changes = pd.DataFrame(
+        {
+            "full_decision_changed": paired["full_training_pass"]["parent"] != paired["full_training_pass"]["arena_clipped"],
+            "half_decision_changed": paired["nested_half_pass"]["parent"] != paired["nested_half_pass"]["arena_clipped"],
+        }
+    ).reset_index()
+    changes = changes.groupby(IDENTITY + ["event_id", "bin_filter", "min_frames"], as_index=False)[["full_decision_changed", "half_decision_changed"]].mean()
+    changes = changes.groupby(IDENTITY + ["bin_filter", "min_frames"], as_index=False).agg(
+        full_decision_changed=("full_decision_changed", "mean"), half_decision_changed=("half_decision_changed", "mean"), events=("event_id", "size")
+    )
+    availability = pd.DataFrame(m["completed"])[IDENTITY + ["arena_bounds_available", "outside_arena_centres", "total_centres"]]
+    changes = changes.merge(availability, on=IDENTITY, validate="many_to_one")
     outputs = {
+        "training_continuity_support_sensitivity.csv": changes,
         "training_continuity_primary_event_contrasts.csv.gz": event_primary,
         "training_continuity_by_session.csv": sessions,
         "training_continuity_by_animal.csv": animals,
@@ -234,7 +248,7 @@ def run(args):
         "- Events receive one median per group across their qualifying splits. An event may enter multiple groups in different splits; these are not independent group samples. Group differences were not tested.",
         "- Primary CIs condition on the fixed maps, candidate ascertainment, neuron partitions and order permutations. Four PF and five Tanni animals remain the biological sample size.",
         "- Other grid masks, frame/support rules, diffusion contrasts and split 0 are descriptive sensitivities, not ways to replace a failed primary result.",
-        "- The parent prediction grid contains some edge-bin centres outside arena bounds. Arena clipping changes only the classifier in the sensitivity. Neither support convention is asserted to be biological truth.",
+        "- Some Tanni edge-bin centres lie outside recorded arena bounds. Clipping changes only the classifier. PF bounds are explicitly unavailable: its clipping rows are tagged no-op aliases, not independent corroboration. Neither support convention is asserted to be biological truth.",
         "- These endpoints do not prove latent replay truth, accurate physical kinematics, uniform speed or a new mechanism. Whole-cohort replication failures remain unchanged.",
         "",
         "![Independent prediction](training_continuity_prediction.png)",

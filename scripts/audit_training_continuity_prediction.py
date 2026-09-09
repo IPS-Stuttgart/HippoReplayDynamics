@@ -26,6 +26,7 @@ from hipporeplayimm.training_continuity import (
     classify_training,
     nested_half,
     predictive_contrasts,
+    spatial_supports,
     validate_labels,
 )
 
@@ -83,9 +84,7 @@ def process(record, parent, order, output):
     qc = raw["unit_qc_mask"].astype(bool)
     lookup = {int(e): j for j, e in enumerate(raw["candidate_event_indices"])}
     bounds, grid = cache["arena_bounds_cm"], cache["centers"]
-    if not np.isfinite(bounds).all():
-        raise ValueError("finite 2D arena bounds required")
-    supports = {"parent": np.ones(len(grid), bool), "arena_clipped": ((grid >= bounds[0]) & (grid <= bounds[1])).all(axis=1)}
+    supports, bounds_available = spatial_supports(grid, bounds)
     archive = {"event_ids": selected.event_id.to_numpy(int), "unit_ids": cache["unit_ids"], **{f"mask_{k}": v for k, v in supports.items()}}
     offsets, rows, path_parts, splits = [0], [], {}, []
     for split in range(5):
@@ -131,6 +130,7 @@ def process(record, parent, order, output):
                             "nested_half_pass": reduced["geometric_pass"],
                             "group": classification_group(full["geometric_pass"], reduced["geometric_pass"]),
                             "n_train_cells": len(tr),
+                            "arena_bounds_available": bounds_available,
                             "n_nested_cells": len(half),
                             "n_heldout_cells": len(held),
                             "heldout_used_for_classification": False,
@@ -154,7 +154,8 @@ def process(record, parent, order, output):
         "events": len(selected),
         "label_rows": len(labels),
         "prediction_rows": len(predictions),
-        "outside_arena_centres": int((~supports["arena_clipped"]).sum()),
+        "outside_arena_centres": int((~supports["arena_clipped"]).sum()) if bounds_available else None,
+        "arena_bounds_available": bounds_available,
         "total_centres": len(grid),
         "raw_cache_path": selected.iloc[0].source_cache_path,
         "raw_cache_sha256": selected.iloc[0].source_cache_sha256,
@@ -171,6 +172,7 @@ def run(args):
         "order_audit": args.order_audit,
         "geometric_reference": checked(args.geometric_reference, REFERENCE_HASH),
         "protocol": ROOT / "docs/training_continuity_prediction_protocol.md",
+        "bounds_addendum": ROOT / "docs/training_continuity_missing_bounds_addendum.md",
         "producer": Path(__file__),
         "library": ROOT / "src/hipporeplayimm/training_continuity.py",
         "provenance_helper": ROOT / "scripts/_provenance.py",

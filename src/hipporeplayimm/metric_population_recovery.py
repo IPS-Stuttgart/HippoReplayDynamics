@@ -52,10 +52,12 @@ def simplex_fit(log_scores, initial=None):
     return w, float(np.log(x @ w).sum() + shift.sum()), certificate
 
 
-def population_fit(log_scores):
+def population_fit(log_scores, models=MODELS, focus_name="moving"):
     ll = np.asarray(log_scores, float)
-    if ll.ndim != 2 or ll.shape[1] != 4 or len(ll) < 2 or not np.isfinite(ll).all():
-        raise ValueError("four finite log likelihoods per event required")
+    if len(models) < 3 or len(set(models)) != len(models) or focus_name in models:
+        raise ValueError("distinct model names and separate mixture focus name required")
+    if ll.ndim != 2 or ll.shape[1] != len(models) or len(ll) < 2 or not np.isfinite(ll).all():
+        raise ValueError("one finite log likelihood per event and model required")
     ll = ll - ll.max(axis=1, keepdims=True)
     weights, maximum, certificate = simplex_fit(ll)
     moving = weights[0] + weights[1]
@@ -67,7 +69,7 @@ def population_fit(log_scores):
         if phi not in profiles:
             with np.errstate(divide="ignore"):
                 dynamic = np.logaddexp(ll[:, 0] + np.log1p(-phi), ll[:, 1] + np.log(phi))
-            w, value, error = simplex_fit(np.column_stack([dynamic, ll[:, 2:]]), [moving, weights[2], weights[3]])
+            w, value, error = simplex_fit(np.column_stack([dynamic, ll[:, 2:]]), np.r_[moving, weights[2:]])
             if value > maximum + 1e-5:
                 raise RuntimeError("profile exceeds unconstrained optimum")
             profiles[phi] = w, value, error
@@ -85,15 +87,15 @@ def population_fit(log_scores):
         "phi_high": high,
         "relative_log_likelihood": maximum,
         "null_lr": max(0.0, 2 * (maximum - half[1])),
-        "moving_weight": moving,
+        focus_name + "_weight": moving,
         "kkt_error": certificate,
     }
-    out.update({"weight_" + m: float(w) for m, w in zip(MODELS, weights, strict=True)})
+    out.update({"weight_" + m: float(w) for m, w in zip(models, weights, strict=True)})
     for label, point in (("low", low), ("high", high), ("null", 0.5)):
         w, value, error = profile(point)
         out[label + "_profile_log_likelihood"] = value
         out[label + "_kkt_error"] = error
-        out.update({label + "_weight_" + m: float(v) for m, v in zip(("moving", "stationary", "iid"), w, strict=True)})
+        out.update({label + "_weight_" + m: float(v) for m, v in zip((focus_name, *models[2:]), w, strict=True)})
     out["direction"] = "neural" if low > 0.5 else "physical" if high < 0.5 else "undetermined"
     return out
 

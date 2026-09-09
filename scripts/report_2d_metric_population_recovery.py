@@ -45,15 +45,14 @@ def figures(fits, summary, output):
             ax.set_xlabel("True neural fraction among moving events")
             if j == 0:
                 ax.set_ylabel("Estimated neural fraction")
-            ax.legend(fontsize=7, loc="upper left")
-    fig.suptitle("Population mixture recovery: 50 independent simulation replicates; diamonds = means", fontsize=12)
+    fig.suptitle("Population mixture recovery: 50 independent simulation replicates\nGray: 32 events/recording; color: 128 events/recording; diamonds: means", fontsize=12)
     fig.savefig(output / "metric_population_recovery.png", dpi=180)
     plt.close(fig)
 
     fig, axes = plt.subplots(2, 2, figsize=(11, 7), constrained_layout=True)
     primary = summary[summary.events_per_recording.eq(128)]
     for i, dataset in enumerate(DATASETS):
-        for j, (metric, title) in enumerate((("covered", "Nominal 95% interval coverage"), ("claim", "Directional claims: correct when enriched, false when equal"))):
+        for j, (metric, title) in enumerate((("covered", "Nominal 95% interval coverage"), ("claim", "Directional claims\nCorrect if enriched; false if equal"))):
             ax = axes[i, j]
             for c, condition in enumerate(CONDITIONS):
                 group = primary[(primary.dataset == dataset) & (primary.condition == condition)].sort_values("scenario")

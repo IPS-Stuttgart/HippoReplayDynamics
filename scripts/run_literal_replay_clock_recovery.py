@@ -123,7 +123,7 @@ def record_task(item, source, output, n_paths=PATHS, repeats=REPEATS):
         np.savez_compressed(output / f"{tag}_p{path_id:03d}.npz", **arrays)
     pd.DataFrame(rows).to_csv(output / f"{tag}_scores.csv.gz", index=False)
     pd.DataFrame(path_rows).to_csv(output / f"{tag}_paths.csv", index=False)
-    return {**item, "n_paths": n_paths, "n_rows": len(rows), "n_observations": n_paths * repeats * 4}
+    return {**{k: item[k] for k in IDS}, "tag": tag, "source_events": item.get("events"), "n_paths": n_paths, "n_rows": len(rows), "n_observations": n_paths * repeats * 4}
 
 
 def summarize(table):

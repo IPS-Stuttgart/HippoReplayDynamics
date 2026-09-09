@@ -140,6 +140,7 @@ def test_end_to_end_independent_audit(tmp_path):
     np.savez_compressed(source / f"{tag}_cache.npz", rates=rates, centers=centers, counts_0=np.array([[1, 2, 3, 4], [3, 1, 2, 4], [5, 1, 1, 3]]), edges_0=np.arange(4) * 0.02)
     item = {"tag": tag, "dataset": "test", "animal": "one", "session": "run"}
     result = record_task(item, source, output, n_paths=2, repeats=1)
+    assert "runtime_s" not in result and "rows" not in result
     audit = record_audit(item, source, output, n_paths=2, repeats=1)
     assert audit["score_rows_checked"] == result["n_rows"] == 16
     assert audit["quadrature_max_probability_error"] < 1e-4
@@ -149,3 +150,62 @@ def test_end_to_end_independent_audit(tmp_path):
     np.savez_compressed(output / f"{tag}_p000.npz", **arrays)
     with pytest.raises(AssertionError):
         record_audit(item, source, output, n_paths=2, repeats=1)
+
+
+def test_report_synthetic_files_and_tamper_guard(tmp_path):
+    import json
+
+    from scripts._provenance import file_sha256
+    from scripts.report_literal_replay_clock_recovery import report
+    from scripts.run_literal_replay_clock_recovery import record_task
+    from scripts.verify_literal_replay_clock_recovery import record_audit
+
+    centers, rates = fixture()
+    source = tmp_path / "source"
+    source.mkdir()
+    run = tmp_path / "run"
+    run.mkdir()
+    completed = []
+    checks = []
+    for dataset in ["pfeiffer_foster", "tanni2022"]:
+        tag = dataset
+        np.savez_compressed(source / f"{tag}_cache.npz", rates=rates, centers=centers, counts_0=np.array([[1, 2, 3, 4], [3, 1, 2, 4], [5, 1, 1, 3]]), edges_0=np.arange(4) * 0.02)
+        item = {"tag": tag, "dataset": dataset, "animal": dataset, "session": "run"}
+        completed.append(record_task(item, source, run, n_paths=1, repeats=1))
+        checks.append(record_audit(item, source, run, n_paths=1, repeats=1))
+    table = pd.concat([pd.read_csv(run / f"{x['tag']}_scores.csv.gz") for x in completed])
+    for name, frame in zip(["paths", "recordings", "animals", "summary"], summarize(table), strict=True):
+        frame.to_csv(run / f"literal_clock_{name}.csv", index=False)
+    mp = run / "literal_clock_manifest.json"
+    mp.write_text(
+        json.dumps(
+            {
+                "status": "complete",
+                "completed": completed,
+                "code_commit": "synthetic_fixture",
+                "n_observations": 8,
+                "output_sha256": {p.name: file_sha256(p) for p in run.iterdir()},
+            }
+        )
+    )
+    ap = tmp_path / "audit.json"
+    ap.write_text(
+        json.dumps(
+            {
+                "status": "pass",
+                "input_file_sha256": {"run_manifest": file_sha256(mp)},
+                "score_rows_checked": 16,
+                "quadrature_label_flips": 0,
+                "numerical_readiness_pass": True,
+                "quadrature_max_probability_error": max(x["quadrature_max_probability_error"] for x in checks),
+            }
+        )
+    )
+    out = tmp_path / "report"
+    report(run, ap, out)
+    assert (out / "literal_clock_recovery.png").stat().st_size > 10000
+    assert "scorer knows the true geometric path" in (out / "literal_clock_report.md").read_text()
+    assert not json.loads((out / "literal_clock_report_manifest.json").read_text())["biological_mechanism_established"]
+    (run / "literal_clock_summary.csv").write_text("altered")
+    with pytest.raises(ValueError, match="changed"):
+        report(run, ap, tmp_path / "invalid")

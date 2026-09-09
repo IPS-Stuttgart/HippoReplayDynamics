@@ -151,6 +151,12 @@ def audit_setting(setting, run, report, records):
         )
         selected = events[events.group.isin(["rejected_with_opportunity", "lost_with_thinning"]) & events.contrast.str.startswith("imm_")]
         actual = pd.read_csv(report / "training_continuity_primary_summary.csv").set_index(["dataset", "group", "contrast"])
+        expected_primary = summary[
+            summary.group.isin(["rejected_with_opportunity", "lost_with_thinning"])
+            & summary.contrast.str.startswith("imm_")
+        ]
+        primary_keys = ["dataset", *AGG]
+        compare(actual.reset_index(), expected_primary, primary_keys, [c for c in summary if c not in primary_keys])
         for key, group in selected.groupby(["dataset", "group", "contrast"]):
             ci = reference_interval(group)
             values = [ci[0, 0], ci[1, 0], ci[0, 1], ci[1, 1]]

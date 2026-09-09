@@ -81,6 +81,9 @@ every animal in both datasets at 40 ms, with no missing fits or scores.
 Passing is necessary, not sufficient: unknown origins, finite spike counts,
 unrecorded neurons and encoding mismatch remain for subsequent recovery.
 No new real-event scoring is authorized by this screen alone.
+"Necessary" refers to this chosen readiness rule, not a theorem that a
+negative oracle-origin comparison makes all other inference impossible.
+Conditioning on different origins/support can change model comparisons.
 
 ## Validation And Limits
 

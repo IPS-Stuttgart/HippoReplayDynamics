@@ -109,6 +109,7 @@ def test_equal_mixture_false_claims_fail_readiness():
 def test_fresh_record_simulation_preserves_native_group_counts(tmp_path):
     from hipporeplayimm.physical_neural_metric import matched_kernel, neural_cost, physical_cost
     from scripts.run_2d_metric_population_recovery import record_task
+    from scripts.verify_2d_metric_population_recovery import audit_record
 
     source, metric, out = [tmp_path / p for p in ("source", "metric", "output")]
     for p in (source, metric, out):
@@ -139,3 +140,6 @@ def test_fresh_record_simulation_preserves_native_group_counts(tmp_path):
     estimated = scores[scores.condition.eq("train_geometry")].sort_values("simulation_index")
     for m in ("physical", "stationary", "iid"):
         np.testing.assert_allclose(original["score_" + m], estimated["score_" + m], atol=1e-9)
+    audit = audit_record(item, source, metric, out, repeats=1, size=3)
+    assert audit["scores"] == 108 and audit["paths"] == 9 and audit["count_arrays"] == 4
+    assert audit["max_error"] < 1e-8

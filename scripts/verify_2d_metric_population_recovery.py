@@ -35,7 +35,7 @@ def independent_rng(*parts):
     return np.random.default_rng(int.from_bytes(hashlib.sha256(b).digest()[:16], "little"))
 
 
-def audit_record(item, source, metric, run):
+def audit_record(item, source, metric, run, repeats=50, size=128):
     from hmmlearn import _hmmc
 
     tag = item["tag"]
@@ -60,29 +60,30 @@ def audit_record(item, source, metric, run):
         gains = z["gains"]
     np.testing.assert_array_equal(gains, np.exp(0.35 * independent_rng(tag, "gains").standard_normal(len(rates)) - 0.35**2 / 2))
     maximum, n_scores, n_arrays, n_paths, n_library = 0.0, 0, 0, 0, 0
-    for repeat in range(50):
+    n_events = len(SCENARIOS) * size
+    for repeat in range(repeats):
         prefix = run / f"{tag}_r{repeat:03d}"
         meta = pd.read_csv(str(prefix) + "_events.csv")
         scores = pd.read_csv(str(prefix) + "_scores.csv.gz")
-        assert len(meta) == 384 and len(scores) == 1152
+        assert len(meta) == n_events and len(scores) == n_events * len(CONDITIONS)
         assert not scores.duplicated(["simulation_index", "condition"]).any()
-        assert meta.simulation_index.tolist() == list(range(384))
+        assert meta.simulation_index.tolist() == list(range(n_events))
         assert set(scores.condition) == set(CONDITIONS)
         for key in IDS:
             assert meta[key].eq(item[key]).all() and scores[key].eq(item[key]).all()
         for key in meta.columns:
-            np.testing.assert_array_equal(scores[key], scores.simulation_index.map(meta.set_index("simulation_index")[key]))
-        chosen = independent_rng(tag, repeat, "profiles").choice(sorted(profiles), 128, replace=True)
+            np.testing.assert_array_equal(scores[key], scores.simulation_index.map(meta.set_index("simulation_index", drop=False)[key]))
+        chosen = independent_rng(tag, repeat, "profiles").choice(sorted(profiles), size, replace=True)
         with np.load(str(prefix) + "_observations.npz") as z:
             states, offsets = z["states"], z["offsets"]
-            assert len(offsets) == 385 and offsets[0] == 0 and offsets[-1] == len(states)
+            assert len(offsets) == n_events + 1 and offsets[0] == 0 and offsets[-1] == len(states)
             expected_totals = []
             for index, phi in enumerate(SCENARIOS):
-                sub = meta.iloc[index * 128 : (index + 1) * 128]
+                sub = meta.iloc[index * size : (index + 1) * size]
                 assert sub.scenario.eq(phi).all() and sub.repeat.eq(repeat).all()
-                assert sub.event_in_recording.tolist() == list(range(128))
+                assert sub.event_in_recording.tolist() == list(range(size))
                 np.testing.assert_array_equal(sub.template_event, chosen)
-                labels = independent_rng(tag, repeat, phi, "labels").choice(MODELS, 128, p=[0.6 * (1 - phi), 0.6 * phi, 0.2, 0.2])
+                labels = independent_rng(tag, repeat, phi, "labels").choice(MODELS, size, p=[0.6 * (1 - phi), 0.6 * phi, 0.2, 0.2])
                 np.testing.assert_array_equal(sub.generator, labels)
                 for i, row in enumerate(sub.itertuples()):
                     profile = profiles[row.template_event]
@@ -115,7 +116,7 @@ def audit_record(item, source, metric, run):
                     n_arrays += 1
                 ll = multinomial_log(arrays[0], rates[train]) + multinomial_log(arrays[1], rates[held])
                 references = {"physical": backward_evidence(ll, offsets, physical), "neural": backward_evidence(ll, offsets, neural), "stationary": [], "iid": []}
-                for i in range(384):
+                for i in range(n_events):
                     block = ll[offsets[i] : offsets[i + 1]]
                     references["stationary"].append(logsumexp(block.sum(axis=0)) - np.log(len(neural)))
                     references["iid"].append((logsumexp(block, axis=1) - np.log(len(neural))).sum())
@@ -124,14 +125,14 @@ def audit_record(item, source, metric, run):
                     candidates.append(("train_geometry", references | {"neural": backward_evidence(ll, offsets, estimated)}))
                 for condition, reference in candidates:
                     actual = scores[scores.condition.eq(condition)].sort_values("simulation_index")
-                    assert actual.simulation_index.tolist() == list(range(384))
+                    assert actual.simulation_index.tolist() == list(range(n_events))
                     for m in MODELS:
                         difference = np.max(abs(actual["score_" + m].to_numpy() - np.asarray(reference[m])))
                         maximum = max(maximum, float(difference))
                         np.testing.assert_allclose(actual["score_" + m], reference[m], atol=1e-8, rtol=0)
-                        n_scores += 384
-                    if repeat in (0, 49):
-                        for index in (0, 128, 256):
+                        n_scores += n_events
+                    if repeat in (0, repeats - 1):
+                        for index in (0, size, 2 * size):
                             a = estimated if condition == "train_geometry" else neural
                             value, _ = _hmmc.forward_log(np.ones(len(neural)) / len(neural), a, ll[offsets[index] : offsets[index + 1]])
                             assert abs(value - reference["neural"][index]) < 1e-8

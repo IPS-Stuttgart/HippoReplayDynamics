@@ -126,6 +126,15 @@ positive descriptive contrasts in the PF rejected group, so these data do not
 identify a uniquely IMM mechanism. Results and all five primary intervals
 are in `training_continuity_prediction_results.md`.
 
+A retrospective animal-deletion sensitivity retains the PF direction in
+every predictive contrast, both in nats and after the existing held-out-spike
+normalization. For example, the rejected-group composition advantage remains
+between +9.62 and +13.34 nats after deleting any one PF animal; its order-by-map
+interaction remains between +0.404 and +0.504. Tanni's positive group mean must
+not obscure its two negative animal-level composition effects. These deletion
+ranges are neither confidence intervals nor new independently trained fits.
+Detailed values are in `replay_measurement_animal_sensitivity_results.md`.
+
 ### Spatially informative identities matter beyond aggregate spike counts
 
 In the empirical-map surrogate, pooling removed cells preserves every
@@ -265,6 +274,15 @@ bootstraps are conditional and descriptive, not uncertainty from all pipeline
 choices or overlapping transfer-fit refits. Simulation draws and overlapping
 time bins are not biological replicates. Code commits, input/output hashes,
 frozen protocols, unit tests and reconstruction audits accompany each stage.
+
+**Small-animal-count sensitivity.** We additionally report deletion means and
+exact directional/two-sided sign tests on the frozen animal estimates. With
+four nonzero animals, even unanimous direction gives one-sided p=0.0625;
+with five, p=0.03125. Two-sided minima are 0.125 and 0.0625. These retrospective,
+unadjusted sign tests concern sign consistency under independent animal signs,
+not the magnitude estimand of the conditional hierarchical bootstrap. They
+neither replace the original intervals nor establish equivalence when p is
+not small. More events do not increase the number of independent animals.
 
 **Separate-neuron validation.** The additional predictive experiment uses
 count-conditioned multinomial observations and fixed temporal models, unlike

@@ -156,6 +156,14 @@ would stay in the paper.
 
 ## Recommendation
 
+The 2026-09-11 animal-deletion follow-up supports stability of the main
+measurement effects within the recorded animals. It does not upgrade the
+evidence to population-wide biological replication. Exact sign tests expose
+the limited inferential resolution of four/five animals; the Tanni composition
+failure and nonuniform additional map-estimation penalty remain explicit.
+See `replay_measurement_animal_sensitivity_results.md`. The earlier review
+bundles remain frozen snapshots; the 2026-09-11 bundle includes this follow-up.
+
 Develop this bounded methods manuscript with the collaborator. This answers
 the search for a publication-worthy direction without manufacturing a positive
 uniform-speed or novel-mechanism claim. Journal-specific formatting, author

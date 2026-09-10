@@ -302,6 +302,36 @@ Neither held-out validation nor another replay metric is claimed as new in
 isolation. The added evidence concerns recording-sensitive rejection and
 its relation to neural information, without treating either as replay truth.
 
+The closest methodological comparison is not simply another decoder.
+Takigawa et al. compare detection yield and track discriminability after
+matching an empirical randomized-data acceptance rate. Their work already
+shows why more detections or a nominal significance threshold do not alone
+validate replay. Our incremental question is whether recording perturbations
+change continuity decisions, whether rejected groups retain separate-neuron
+predictive structure, and whether a pipeline can recover prescribed physical
+speed variation. These are different endpoints, not a head-to-head demonstration
+that our classifier is better. The lack of biological replay ground truth
+applies to both approaches.
+
+Likewise, [van der Meer, Kemere and Diba, 2020](https://pmc.ncbi.nlm.nih.gov/articles/PMC7209917/)
+already distinguish detecting nonrandom activity from comparing its content
+between conditions, and identify sampling and tuning-curve differences as
+confounds. We do not claim this distinction as new. The present experiments
+provide quantitative operating limits for an explicit continuity-to-speed
+measurement procedure in two 2D recording populations. In particular, a
+nominally calibrated result under matching simulations can lose coverage
+under observation/map mismatch even after additional candidates resolve
+statistic availability. This limits biological interpretation, rather than
+proving any existing biological speed result wrong.
+
+The practical implication is to report three separate checks: stability of
+classification under recording perturbation; independent neural evidence
+conditional on candidate ascertainment; and recovery plus uncertainty coverage
+for the kinematic effect of interest under plausible observation models.
+Passing one does not substitute for the others. A fuzzy or adaptive continuity
+rule would need its own recovery/null-acceptance and held-out validation before
+being recommended; this study has not established such a rule.
+
 In particular, these experiments do not establish: constant biological replay
 speed; a neural mechanism maintaining physical speed; recording coverage as
 the sole cause of dataset differences; the true replay prevalence of rejected

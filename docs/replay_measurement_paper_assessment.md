@@ -62,7 +62,8 @@ animals; simulations and repeated splits do not increase it.
 | [Silva et al., 2015](https://pmc.ncbi.nlm.nih.gov/articles/PMC6095134/) | Degraded behavioral decoding and reassessment of trajectory events | Quantitative coupling to selection, known speed gradients and inference limits in two 2D recording populations |
 | [Liu et al., 2023](https://pmc.ncbi.nlm.nih.gov/articles/PMC10894649/) | Unit-removal controls followed by replay reassessment | Same-event loss linked to independent neural support and controlled kinematic recovery; removal alone is not novel |
 | [Wei et al., 2024](https://pmc.ncbi.nlm.nih.gov/articles/PMC11063820/) | Neural-decoder overconfidence and post-hoc/conformal calibration | Replay-specific selection, map-transfer and candidate-budget effects on calibrated speed-gradient inference |
-| [Takigawa et al., 2024](https://elifesciences.org/articles/85635) | Replay validation using a distinct track-discriminability measure without ground truth | Separate-neuron validation inside continuity-screening splits, linked to recorded-cell perturbation in 2D |
+| [Takigawa et al., 2024](https://elifesciences.org/articles/85635) | Joint evaluation of detection yield, track discriminability and randomized-data acceptance, including matched false-positive-rate comparisons | Separate-neuron validation inside continuity-screening splits, linked to recorded-cell perturbation and known-speed recovery in 2D; no new claim that more detections alone validate replay |
+| [van der Meer, Kemere and Diba, 2020](https://pmc.ncbi.nlm.nih.gov/articles/PMC7209917/) | Sampling/tuning-curve confounds in comparisons of replay content between conditions | Numerical recovery and calibration limits for a particular continuity-to-speed procedure; the general need for second-order validation is established |
 | [Denovellis et al., 2021](https://elifesciences.org/articles/64505) | Temporal resolution, uncertainty and selection assumptions matter for replay dynamics | Controlled observation-to-selection-to-speed benchmark; no claim to invent switching models |
 | [Ji et al., 2026](https://doi.org/10.1038/s41467-025-68042-3) | Uneven limited place-field coverage can create apparent jumps | Quantified recovery/null trade-offs and independent-map kinematic recovery, not invention of the coverage hypothesis or refutation of their mechanism |
 | [Huh et al., 2026](https://doi.org/10.1038/s41467-026-74822-2) | A firing-order likelihood alternative to conventional replay metrics | A measurement-validation study, not a newly invented likelihood detector |
@@ -72,6 +73,35 @@ is the linked quantitative evidence and reusable benchmark, not each component
 in isolation. An exact author-encoding reproduction or a head-to-head claim
 that a new detector outperforms these methods has not been established and
 must not be implied by the manuscript.
+
+The 2026-09-10 continuation rechecked the closest primary experiments and the
+methodological review directly. This strengthens the prior-work boundary,
+not the numerical effects or a publication-priority claim. In particular,
+Takigawa's study already evaluates detection trade-offs; merely reproducing
+that observation would be insufficient. The more substantive addition here
+is linking real recording-dependent rejection, separate-neuron evidence, and
+known-kinematics recovery/calibration in a single auditable study. These are
+complementary experiments, not a proven event-by-event causal chain.
+
+## Completion Audit Of The Research Objective
+
+The objective is to find a publication-worthy insight, not to obtain journal
+acceptance, force a biological positive or discover a universally valid replay
+detector. Publication-worthiness remains an evidence-based scientific judgment.
+The following supports that judgment for the bounded methods contribution:
+
+| Question | Current evidence | Conclusion |
+| --- | --- | --- |
+| Is there a concrete finding rather than an untested hypothesis? | Fixed-event cell removal changes the full continuity-and-shuffle outcome in nine animals; the separate predictive and prescribed-speed experiments have numerical endpoints | Yes, within their stated distinct populations and assumptions |
+| Does it add more than the familiar loss of decoding quality with fewer cells? | PF geometric failures retain independent predictive structure, while the kinematic simulations quantify attenuation, conditional recovery and calibration failure | A defensible combined measurement result; generic sampling bias is not new |
+| Were the strongest counterexamples retained? | Tanni fails the nonspatial-composition comparator; temporal enlargement admits randomized paths; matching PF calibration sometimes succeeds; mismatch and transfer can fail | Yes; no universal failure or universal biological replication is claimed |
+| Are the displayed numbers supported by current artifacts? | Fresh server audit `replay-measurement-paper-evidence-20260910-completion-reaudit.json` checks all 28 source-cell estimates/intervals and used input/output hashes | Pass; not a new scientific rescore or a test of absolute novelty |
+| Does a usable output exist? | Integrated manuscript, source-linked overview, detailed protocols/results and verified reviewer bundle | Yes; author review and journal preparation remain later publication steps |
+| Is a required experiment missing for the bounded claim? | No new mechanism, validated adaptive classifier, replay ground-truth prevalence, or biological uniformity is asserted | None identified for this evidence-backed methods assessment; those broader claims would require additional experiments |
+
+Recommendation: take this methods-paper finding to the collaborator now.
+Do not continue an open-ended search for favorable biological correlations
+merely because publication priority and editorial acceptance cannot be guaranteed.
 
 ## What Is Demonstrated And What Is Not
 

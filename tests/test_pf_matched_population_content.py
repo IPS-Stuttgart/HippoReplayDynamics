@@ -9,6 +9,9 @@ ROOT = Path(__file__).resolve().parents[1]
 spec = importlib.util.spec_from_file_location("matched", ROOT / "scripts/analyze_pf_matched_population_content.py")
 m = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(m)
+audit_spec=importlib.util.spec_from_file_location("audit_matched",ROOT/"scripts/audit_pf_matched_population_content.py")
+audit=importlib.util.module_from_spec(audit_spec)
+audit_spec.loader.exec_module(audit)
 
 
 def row(idx, kind="random", coverage=1., count=40):
@@ -51,6 +54,14 @@ def test_confirmation_can_fail_without_reselecting():
     assert not m.quality_match(a,b,"confirm")
 
 
+def test_confirmation_outcome_cannot_change_chosen_pair():
+    f=pd.DataFrame([row(0,"home_high",3.),row(1,"home_low",1.),row(2,"home_high",4.)])
+    f.loc[2,"confirm_median_cm"]=100
+    pair,_=m.choose_pair(f,"targeted")
+    assert pair[0]["candidate_id"]==2
+    assert not m.quality_match(*pair,"confirm")
+
+
 def test_finite_good_quality_required():
     a,b=row(0),row(1)
     a["match_median_cm"]=np.nan
@@ -91,6 +102,14 @@ def test_replay_posterior_has_no_temporal_prior():
     c,r=rng.poisson(1,(30,10)),rng.uniform(.1,10,(10,20))
     order=rng.permutation(30)
     assert np.allclose(m.posterior(c,r)[order],m.posterior(c[order],r))
+    assert np.allclose(m.posterior(c,r),audit.dense_posterior(c,r,.02))
+
+
+def test_independent_run_gate_agrees_at_boundaries():
+    a,b=row(0),row(1)
+    for med,p75 in [(12.,25.),(12.01,25.),(11.,25.1),(9.,22.)]:
+        b["confirm_median_cm"],b["confirm_p75_cm"]=med,p75
+        assert m.quality_match(a,b,"confirm")==audit.run_gate([10.,20.],[med,p75])
 
 
 def test_empty_matching_frame():

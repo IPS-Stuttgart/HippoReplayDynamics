@@ -10,6 +10,9 @@ ROOT = Path(__file__).resolve().parents[1]
 spec = importlib.util.spec_from_file_location("goal_content", ROOT / "scripts/analyze_pf_recording_goal_content.py")
 m = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(m)
+audit_spec = importlib.util.spec_from_file_location("goal_audit", ROOT / "scripts/audit_pf_recording_goal_content.py")
+audit = importlib.util.module_from_spec(audit_spec)
+audit_spec.loader.exec_module(audit)
 
 
 def test_flat_poisson_matches_dense_and_cell_order_invariant():
@@ -19,6 +22,7 @@ def test_flat_poisson_matches_dense_and_cell_order_invariant():
     assert np.allclose(m.decode(c, r), expected)
     order = rng.permutation(7)
     assert np.allclose(m.decode(c[:, order], r[order]), expected)
+    assert np.allclose(audit.posterior(c[-1], r), expected[-1])
 
 
 def test_zero_spikes_not_flat_when_rates_differ():
@@ -67,6 +71,16 @@ def test_longest_earliest_and_support_edges():
 def test_twenty_cm_jump_not_continuous():
     grid = np.array([[0., 0], [20, 0], [28, 0]])
     assert m.longest_segment(np.arange(3), grid, np.ones((3, 2))).tolist() == [1, 2]
+
+
+def test_independent_segment_anchor_reconstruction():
+    rng = np.random.default_rng(772)
+    grid = rng.uniform(0, 200, (100, 2))
+    for _ in range(50):
+        path, counts = rng.integers(0, 100, 25), rng.poisson(.1, (25, 10))
+        segment = m.longest_segment(path, grid, counts)
+        expected = int(segment[-1]) if len(segment) else None
+        assert audit.segment_endpoint(path, counts, grid) == expected
 
 
 def test_decomposition_is_exact_and_selection_is_separate():

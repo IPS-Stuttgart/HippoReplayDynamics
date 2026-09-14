@@ -180,11 +180,21 @@ def test_artifact_roundtrip_and_rehashed_tamper_rejected(tmp_path):
     result = a.audit(output, tmp_path / "audit.json")
     assert result["status"] == "pass"
     assert not result["gates"]["development_numerical_screen"]  # Miniature event denominators.
+    from scripts.report_reserve_cell_content import report
+
+    tables = report(output, tmp_path / "audit.json", tmp_path / "report")
+    assert len(tables["acquisition_summary"]) == 4
+    assert (tmp_path / "report/reserve_cell_content.png").stat().st_size > 1000
+    report_text = (tmp_path / "report/report.md").read_text()
+    assert "Development screen fails" in report_text
+    assert "240 candidate endpoints" in report_text
     summary = pd.read_csv(output / "summary.csv")
     summary.loc[0, "home_gap"] += 0.01
     summary.to_csv(output / "summary.csv", index=False)
     manifest = json.loads((output / "manifest.json").read_text())
     manifest["output_sha256"]["summary.csv"] = hashlib.sha256((output / "summary.csv").read_bytes()).hexdigest()
     (output / "manifest.json").write_text(json.dumps(manifest))
+    with pytest.raises(ValueError, match="manifest"):
+        report(output, tmp_path / "audit.json", tmp_path / "tampered_report")
     with pytest.raises(AssertionError):
         a.audit(output, tmp_path / "tampered_audit.json")

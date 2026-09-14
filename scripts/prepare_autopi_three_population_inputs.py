@@ -75,6 +75,7 @@ def detect_rest_candidates(spikes, cell_ids, interval):
     if not np.isfinite(spikes).all() or not np.isin(spikes[:, 1], cell_ids).all():
         raise ValueError("invalid spike clock or unmapped cluster")
     local = spikes[(spikes[:, 0] >= start) & (spikes[:, 0] < end)]
+    local = local[np.argsort(local[:, 0], kind="stable")]
     # Only full 1-ms bins define the detection clock; no final partial-bin inflation.
     n_bins = int(np.floor((end-start) / .001 + 1e-8))
     if n_bins < 2:
@@ -105,7 +106,8 @@ def detect_rest_candidates(spikes, cell_ids, interval):
         a, b = start + left*.001, start + right*.001
         if b-a < .05 - 1e-9 or b-a > 2 + 1e-9:
             continue
-        event = local[(local[:, 0] >= a) & (local[:, 0] < b)]
+        left_spike, right_spike = np.searchsorted(local[:, 0], [a, b], side="left")
+        event = local[left_spike:right_spike]
         active = len(np.unique(event[:, 1]))
         if len(event) < 5 or active < max(3, int(np.ceil(.1*len(cell_ids)))):
             continue

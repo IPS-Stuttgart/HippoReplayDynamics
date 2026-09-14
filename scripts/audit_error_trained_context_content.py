@@ -208,6 +208,7 @@ def verify_session(row, states):
         diagonal = np.linalg.norm(grid.max(axis=0) - grid.min(axis=0))
         matrix = dense_gaussian(grid)
         events, truth, starts, context = [], [], [], []
+        native_left, native_right = [], []
         for i, (lo, hi) in enumerate(zip(arrays["offsets"][:-1], arrays["offsets"][1:], strict=True)):
             n = min(10, int((hi - lo) // 4))
             if n < 1:
@@ -218,8 +219,13 @@ def verify_session(row, states):
             context.append(20 * n)
             if source in ("real", "run_q4"):
                 left, right = native_context_intervals(arrays, i, native, source)
-                np.testing.assert_array_equal(events[-1], recount(native["spikes"], ids, left, right))
+                native_left.append(left)
+                native_right.append(right)
                 native_blocks += n
+        if native_left:
+            # Recount every native interval while sorting each cell only once per source.
+            reconstructed = recount(native["spikes"], ids, np.concatenate(native_left), np.concatenate(native_right))
+            np.testing.assert_array_equal(np.concatenate(events, axis=0), reconstructed)
         truth = np.asarray(truth)
         for part in freeze["groups"]:
             split = part["split"]

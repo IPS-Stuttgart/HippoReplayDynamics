@@ -145,7 +145,7 @@ def constant_state(value):
     return dict(initial=value, learning_rate=0.05, trees=[])
 
 
-def test_choices_own_features_dense_audit_and_resealed_tamper(tmp_path):
+def test_choices_own_features_dense_audit_and_resealed_tamper(tmp_path, monkeypatch):
     row = make_base(tmp_path)
     path = Path(row["artifact_dir"]) / "event_readouts.csv.gz"
     frame = pd.read_csv(path)
@@ -170,8 +170,18 @@ def test_choices_own_features_dense_audit_and_resealed_tamper(tmp_path):
     output = tmp_path / "new"
     output.mkdir()
     measured = evaluate_session(row, states, output)
+    from scripts import audit_error_trained_context_content as auditor
+
+    original_recount, calls = auditor.recount, []
+
+    def counted_recount(spikes, ids, starts, ends):
+        calls.append(len(starts))
+        return original_recount(spikes, ids, starts, ends)
+
+    monkeypatch.setattr(auditor, "recount", counted_recount)
     audited = verify_session(measured, states)
     assert audited["rows"] == 144 and audited["posterior_rows"] == 288
+    assert calls == [4, 4]
     folder = Path(measured["artifact_dir"])
     path = folder / "event_readouts.csv.gz"
     frame = pd.read_csv(path, float_precision="round_trip")
@@ -182,6 +192,18 @@ def test_choices_own_features_dense_audit_and_resealed_tamper(tmp_path):
     (folder / "outputs.json").write_text(json.dumps(hashes))
     with pytest.raises(AssertionError):
         verify_session(measured, states)
+
+
+def test_batched_native_recount_exact_at_boundaries_and_duplicate_times():
+    from scripts.audit_edge_support_content import recount
+
+    spikes = np.array([[1.0, 7], [0.02, 3], [0.02, 3], [0.0, 3], [0.04, 7], [0.019999, 3], [1.02, 7], [0.04, 3]])
+    ids = np.array([3, 7, 99])
+    windows = [(np.array([0.0, 0.02]), np.array([0.02, 0.04])), (np.array([0.04, 1.0]), np.array([0.06, 1.02]))]
+    separate = np.concatenate([recount(spikes, ids, left, right) for left, right in windows])
+    batched = recount(spikes, ids, np.concatenate([w[0] for w in windows]), np.concatenate([w[1] for w in windows]))
+    np.testing.assert_array_equal(batched, separate)
+    np.testing.assert_array_equal(batched, [[2, 0, 0], [2, 0, 0], [1, 1, 0], [0, 1, 0]])
 
 
 def test_full_training_reconstruction_and_refit(tmp_path):

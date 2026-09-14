@@ -78,7 +78,7 @@ def verify_one(row):
     for source in SOURCES:
         src = load_npz(prior / f"{source}_audit.npz")
         rates, grid, ids = (src[k] for k in ("rates_hz", "grid_cm", "cell_ids"))
-        blocks, truth, starts, context_ms = [], [], [], []
+        blocks, truth, starts, context_ms, raw_starts = [], [], [], [], []
         for j, (lo, hi) in enumerate(zip(src["offsets"][:-1], src["offsets"][1:], strict=True)):
             n = min(10, (hi - lo) // 4)
             if n < 1:
@@ -89,8 +89,11 @@ def verify_one(row):
             context_ms.append(20 * n)
             if source in ("real", "run_q4"):
                 left = src["starts_s"][j] + 0.005 * (hi - lo - n * 4) + np.arange(n) * 0.02
-                np.testing.assert_array_equal(blocks[-1], recount(native["spikes"], ids, left, left + 0.02))
+                raw_starts.append(left)
                 native_blocks += n
+        if raw_starts:
+            left = np.concatenate(raw_starts)
+            np.testing.assert_array_equal(np.concatenate(blocks), recount(native["spikes"], ids, left, left + 0.02))
         counts, truth, starts = np.stack([x[-1] for x in blocks]), np.asarray(truth), np.asarray(starts)
         for part in freeze["groups"]:
             split = part["split"]

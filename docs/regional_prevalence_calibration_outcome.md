@@ -74,7 +74,7 @@ user goal remains unachieved.
 Server artifacts:
 - /mnt/seagate10tb/florianpfaff/regional-prevalence-calibration-v2-20260914
 - /mnt/seagate10tb/florianpfaff/regional-prevalence-calibration-audit-v2-20260914
-- /mnt/seagate10tb/florianpfaff/regional-prevalence-calibration-report-v3-20260914
+- /mnt/seagate10tb/florianpfaff/regional-prevalence-calibration-report-v4-20260914
 
 Local compact copy:
 /mnt/c/Users/emper/Documents/codex/2026-09-14/regional-prevalence-calibration

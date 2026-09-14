@@ -87,6 +87,7 @@ def figure(frame, output):
                 if not np.isfinite(value):
                     ax.text(xpos, .04, 'NA', transform=ax.get_xaxis_transform(), color=colors[j], ha='center', fontsize=8)
         ax.set_xticks(x, candidates.session, rotation=20)
+        ax.set_xlim(-.6, len(candidates) - .4)
         ax.set_ylabel('Percent'); ax.set_title(title); ax.axhline(0, color='black', lw=.6); ax.legend(fontsize=8)
     native = primary.loc[primary.source.eq('run_q4') & primary.panel.str.startswith('prevalence_')]
     ax = axes[1, 0]
@@ -106,6 +107,7 @@ def figure(frame, output):
             if not np.isfinite(value):
                 ax.text(xpos, .04, 'NA', transform=ax.get_xaxis_transform(), color=colors[j], ha='center', fontsize=8)
     ax.set_xticks(x, ('RUN', 'Poisson', 'Gain 4', 'Fixed totals', 'Map drift', 'Assembly'), rotation=30)
+    ax.set_xlim(-.6, len(sources) - .4)
     ax.set_ylabel('Mean absolute prevalence error (pp)'); ax.set_title('Transfer checks; native RUN calibration'); ax.legend(fontsize=8)
     fig.suptitle('Original matched-population content: calibration must improve truth recovery, not only agreement', fontsize=12)
     fig.savefig(output / 'regional_prevalence_calibration.png', dpi=170)

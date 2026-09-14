@@ -65,7 +65,10 @@ def policies(base, groups):
 
 def dense_metrics(counts, rates, grid, groups, selected_truth, original_truth):
     out, decoded = {}, []
-    tile_xy = np.clip(np.floor(3*(grid-grid.min(axis=0))/np.maximum(np.ptp(grid, axis=0), 1)).astype(int), 0, 2)
+    # Normalize before multiplying: reassociation can move exact thirds across
+    # tile boundaries on decimal-origin grids. Preserve the frozen convention.
+    normalized = (grid-grid.min(axis=0))/np.maximum(np.ptp(grid, axis=0), 1)
+    tile_xy = np.clip(np.floor(3*normalized).astype(int), 0, 2)
     tile = 3*tile_xy[:, 0]+tile_xy[:, 1]
     for side, group in zip(("a", "b"), groups, strict=True):
         n, r = counts[:, group], rates[group]

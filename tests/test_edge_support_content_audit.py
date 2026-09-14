@@ -63,6 +63,17 @@ def test_recount_exact_half_open_boundaries():
     np.testing.assert_array_equal(recount(spikes, [1, 2], [0, .005], [.005, .010]), expected)
 
 
+def test_decimal_grid_regional_boundaries_keep_frozen_normalization_order():
+    data = fixture_arrays()
+    data["grid_cm"] = np.array([[x, y] for x in (4.001+8*np.arange(25)) for y in (4.001+8*np.arange(25))])
+    data["rates_hz"] = np.random.default_rng(88).uniform(.1, 5, (10, len(data["grid_cm"])))
+    groups = [np.arange(5), np.arange(5, 10)]
+    expected = reconstruct(data, groups)
+    actual = pd.DataFrame(read_event(data["counts"], data["rates_hz"], data["grid_cm"], groups,
+                                    data["starts_s"][0], 22, data["truth_base_cm"]))
+    compare_rows(actual, expected)
+
+
 def report_fixture():
     data = fixture_arrays()
     rows = []

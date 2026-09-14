@@ -159,8 +159,8 @@ def verify_one(row):
                 log_t = reference[f"{side}_matched_log_temperature"].to_numpy()
                 if not ((log_t >= -20) & (log_t <= 20)).all():
                     raise ValueError("temperature outside frozen search bracket")
-                l = (lp-lp.max(axis=1, keepdims=True))/np.exp(log_t)[:, None]
-                bank["poisson_entropy_matched"] = np.exp(l-logsumexp(l, axis=1)[:, None])
+                tempered = (lp-lp.max(axis=1, keepdims=True))/np.exp(log_t)[:, None]
+                bank["poisson_entropy_matched"] = np.exp(tempered-logsumexp(tempered, axis=1)[:, None])
                 success = np.abs(h(bank["poisson_entropy_matched"])-target) <= 1e-7
                 np.testing.assert_array_equal(reference[f"{side}_entropy_control_available"], success)
                 if not success.all():

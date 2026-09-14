@@ -5,6 +5,7 @@ from scipy.special import softmax
 from hipporeplayimm.replay_coverage import decode_independent
 from scripts.measure_count_conditioned_content import poisson_sources, readout
 from scripts.measure_encoding_uncertainty_content import entropy
+from scripts.audit_count_conditioned_content import conditional_posterior, raw_endpoints
 
 
 def fixture():
@@ -22,6 +23,7 @@ def test_conditional_decoder_matches_independent_scipy_multinomial():
     logits = np.array([[multinomial.logpmf(counts, counts.sum(), p[:, i]) for i in range(len(grid))] for counts in n])
     actual = decode_independent(n, rates, grid, .02, likelihood='conditional_multinomial')['posterior']
     np.testing.assert_allclose(actual, softmax(logits, axis=1), atol=1e-11)
+    np.testing.assert_allclose(conditional_posterior(n, rates), actual, atol=1e-11)
 
 
 def test_poisson_factorizes_into_conditional_identities_and_total_count():
@@ -72,6 +74,10 @@ def test_unconditional_generators_preserve_truth_not_imposed_real_counts():
         event_ids=np.array([3, 40, 2]), grid_cm=grid, rates_hz=rates)
     first = poisson_sources(source, 'test', 's1')
     second = poisson_sources(source, 'test', 's1')
+    base, truth, start = raw_endpoints(source)
+    np.testing.assert_array_equal(base, 0)
+    np.testing.assert_array_equal(truth, grid[[0, 12, 24]])
+    np.testing.assert_array_equal(start, source['starts_s'])
     for k, a in first.items():
         for field in a: np.testing.assert_array_equal(a[field], second[k][field])
         np.testing.assert_allclose(a['expected_counts'], .02*float(a['gain'])*rates[:, [0, 12, 24]].T)

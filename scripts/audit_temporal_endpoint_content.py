@@ -23,8 +23,16 @@ METHODS = ("independent", "diffusion_reset", "diffusion_no_reset", "pooled_stati
 
 
 def dense_gaussian(grid):
-    distance2 = np.sum((grid[:, None] - grid[None, :]) ** 2, axis=2)
-    kernel = np.exp(-distance2 / 800.0) * (distance2 <= 6400.0)
+    points = np.asarray(grid, dtype=float)
+    if points.ndim != 2 or not len(points) or not np.isfinite(points).all():
+        raise ValueError("finite nonempty grid required")
+    left, right = points[:, None, :], points[None, :, :]
+    scale = np.maximum(np.maximum(np.abs(left), np.abs(right)), 20.0)
+    # The runtime wrapper scales coordinates before subtracting. Preserve that
+    # cutoff convention: raw squared distance differs at some radius boundaries.
+    standardized = np.abs(left / scale - right / scale) / (20.0 / scale)
+    distance = np.hypot.reduce(standardized, axis=2)
+    kernel = np.exp(-0.5 * distance * distance) * (distance <= 4.0)
     return kernel / kernel.sum(axis=0)
 
 
@@ -198,6 +206,9 @@ def main():
         sessions=args.measurement_dir / "measurement_sessions.csv",
         auditor=Path(__file__),
         metric_auditor=ROOT / "scripts/audit_encoding_uncertainty_content.py",
+        runtime_gaussian_wrapper=ROOT / "src/hipporeplayimm/candidate_active_support_validation.py",
+        runtime_scalar_wrapper=ROOT / "src/hipporeplayimm/state_space_gaussian_scalar_validation.py",
+        runtime_transition_base=ROOT / "src/hipporeplayimm/state_space_utils.py",
     )
     manifest = build_script_provenance(input_paths=inputs, cwd=ROOT)
     args.output_dir.mkdir(parents=True, exist_ok=False)

@@ -9,6 +9,7 @@ from scipy.special import softmax
 
 from hipporeplayimm.state_space_first_order import _forward_backward_first_order
 from hipporeplayimm.state_space_utils import _gaussian_transition_matrix
+from scripts.audit_temporal_endpoint_content import dense_gaussian
 from scripts.measure_temporal_endpoint_content import context_blocks, endpoint_bank, reset_transition
 
 
@@ -79,3 +80,14 @@ def test_one_bin_methods_equal_and_other_population_not_used():
 def test_reset_validation():
     with pytest.raises(ValueError):
         reset_transition(csr_matrix(np.eye(2)), np.nan)
+
+
+@pytest.mark.parametrize("offset", [0.0, 0.001, 0.123, 1000.001])
+def test_independent_transition_matches_runtime_radius_boundary(offset):
+    x, y = np.meshgrid(np.arange(4.0, 197.0, 8.0), np.arange(4.0, 197.0, 8.0))
+    grid = np.column_stack([x.ravel(), y.ravel()]) + offset
+    dense = dense_gaussian(grid)
+    wrapped = _gaussian_transition_matrix(grid, 20.0, 4.0).toarray()
+    np.testing.assert_array_equal(dense > 0, wrapped > 0)
+    np.testing.assert_allclose(dense, wrapped, atol=1e-15, rtol=1e-13)
+    np.testing.assert_allclose(dense.sum(axis=0), 1.0)

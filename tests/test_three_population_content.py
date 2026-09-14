@@ -207,3 +207,29 @@ def test_independent_dense_reconstruction_and_prediction_tamper_detection():
     predicted.loc[0, "prediction_full"] += .1
     with pytest.raises(AssertionError):
         verify_external_predictions(data, {"models": models}, predicted)
+
+
+def test_report_independent_aggregation_and_gate_tamper_detection(tmp_path):
+    from scripts.report_three_population_content import verify_aggregates, verify_gates
+    frame, _ = synthetic()
+    models = {name: train_model(frame, features) for name, features in
+              dict(constant=[], pooled=POOLED_FEATURES, full=FULL_FEATURES).items()}
+    cases = [frame.assign(source=name) for name in ("real", "run_test", "sim_matched", "sim_drift")]
+    predicted = apply_models(pd.concat(cases, ignore_index=True), models)
+    sessions, animal, summary = summary_tables(predicted)
+    for name, table in (("by_session", sessions), ("by_animal", animal), ("summary", summary)):
+        table.to_csv(tmp_path/f"external_{name}.csv", index=False)
+    checked_animal, checked_summary = verify_aggregates(predicted, tmp_path)
+    catalog = pd.DataFrame(dict(candidates=[40, 40]))
+    gates = external_gates(sessions, animal, summary, catalog, catalog, True)
+    gates.to_csv(tmp_path/"external_gate_summary.csv", index=False)
+    audited = verify_gates(tmp_path, checked_animal, checked_summary, catalog, catalog, True)
+    assert audited.set_index("gate").loc["independent_reconstruction_audit", "passed"]
+    gates.loc[gates.gate.eq("external_animals"), "observed"] = 400
+    gates.to_csv(tmp_path/"external_gate_summary.csv", index=False)
+    with pytest.raises(AssertionError):
+        verify_gates(tmp_path, checked_animal, checked_summary, catalog, catalog, True)
+    summary.loc[0, "ac_separation_cm"] += 10
+    summary.to_csv(tmp_path/"external_summary.csv", index=False)
+    with pytest.raises(AssertionError):
+        verify_aggregates(predicted, tmp_path)

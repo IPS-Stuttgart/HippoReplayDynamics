@@ -187,6 +187,13 @@ def test_full_measurement_fixture(tmp_path):
 
     checked = audit(output)
     assert checked["status"] == "pass"
+    from scripts.report_spatial_predictive_content import report
+
+    audit_path = tmp_path / "independent_audit.json"
+    audit_path.write_text(json.dumps(checked))
+    report(output, audit_path, tmp_path / "report")
+    assert (tmp_path / "report/spatial_predictive_screen.png").stat().st_size > 1000
+    assert "External validation: NOT RUN" in (tmp_path / "report/report.md").read_text()
     table = pd.read_csv(output / "summary.csv")
     table.loc[0, "home_gap"] += 0.1
     table.to_csv(output / "summary.csv", index=False)

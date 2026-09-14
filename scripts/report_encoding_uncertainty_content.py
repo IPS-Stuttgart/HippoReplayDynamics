@@ -25,7 +25,7 @@ METRICS = ('separation_cm', 'regional_tv', 'a_error', 'b_error', 'mean_error',
            'a_entropy', 'b_entropy', 'a_width', 'b_width')
 
 
-def paired_sessions(frame):
+def paired_sessions(frame, methods=METHODS, diagnostic_column='a_encoding_sensitivity_tv'):
     if frame.empty or frame.duplicated(KEYS+['method']).any():
         raise ValueError('empty or duplicated readouts')
     frame = frame.copy()
@@ -34,7 +34,7 @@ def paired_sessions(frame):
     rows, diagnostics = [], []
     for metadata, g in frame.groupby(['dataset', 'animal', 'session', 'source', 'split']):
         info = dict(zip(['dataset', 'animal', 'session', 'source', 'split'], metadata, strict=True))
-        if set(g.method) != set(METHODS):
+        if set(g.method) != set(methods):
             raise ValueError('missing method')
         bank = {method: p.set_index('event_index').sort_index() for method, p in g.groupby('method')}
         base = bank['poisson']
@@ -65,14 +65,14 @@ def paired_sessions(frame):
                         before=b.mean(), after=a.mean(), delta=(a-b).mean(),
                         control_available=bool(p.a_entropy_control_available.all() and p.b_entropy_control_available.all())))
         targets = ('separation_cm', 'regional_tv') if info['source'] == 'real' else ('b_error', 'b_brier')
-        x = base.a_encoding_sensitivity_tv
+        x = base[diagnostic_column]
         for target in targets:
             y = base[target]
             finite = np.isfinite(x) & np.isfinite(y)
             defined = finite.sum() >= 10 and x[finite].nunique() > 1 and y[finite].nunique() > 1
             rho = float(spearmanr(x[finite], y[finite]).statistic) if defined else np.nan
             diagnostics.append(dict(info, target=target, events=int(finite.sum()), spearman_rho=rho,
-                diagnostic_scope='A_only_training_quarter_sensitivity; association_not_validated_certificate'))
+                diagnostic_scope=diagnostic_column+'; association_not_validated_certificate'))
     return pd.DataFrame(rows), pd.DataFrame(diagnostics)
 
 

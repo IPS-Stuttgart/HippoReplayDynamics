@@ -21,7 +21,7 @@ from scripts.measure_predictive_context_content import METHODS, PRIMARY
 from scripts.report_temporal_endpoint_content import gates, plot_summary, summaries
 
 
-def diagnostic_summary(frame):
+def diagnostic_summary(frame, prediction_suffix="_median_predictive_delta"):
     rows = []
     keys = ["dataset", "animal", "session", "split", "source"]
     for identity, local in frame.groupby(keys):
@@ -31,7 +31,7 @@ def diagnostic_summary(frame):
             raise ValueError("unmatched diagnostic endpoints")
         for side in ("a", "b"):
             eligible = (baseline[side + "_spikes"] >= 3) & (baseline[side + "_active"] >= 2)
-            prediction = baseline[side + "_median_predictive_delta"]
+            prediction = baseline[side + prediction_suffix]
             use = baseline[side + "_use_context"]
             if not np.isfinite(prediction).all() or use.isna().any() or not use.isin([True, False]).all():
                 raise ValueError("invalid diagnostic values")
@@ -78,8 +78,8 @@ def diagnostic_summary(frame):
     return sessions, pd.DataFrame(animals)
 
 
-def combined_gates(summary, frame, diagnostics, audited):
-    base = gates(summary, frame, audited, primary=PRIMARY)
+def combined_gates(summary, frame, diagnostics, audited, primary=PRIMARY):
+    base = gates(summary, frame, audited, primary=primary)
     rows = base.loc[base.gate.ne("advance_external_validation")].to_dict("records")
     for source in ("run_q4", "sim_late_jump"):
         for side in ("a", "b"):

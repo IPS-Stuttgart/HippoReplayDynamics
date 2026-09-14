@@ -93,3 +93,13 @@ calibration settings and test on independent recordings before calling this a
 validated remedy. A fail does not justify threshold tuning or overwriting this
 run. Never interpret global agreement or a correct simulated prevalence alone
 as known biological replay content.
+
+## Numerical correction before outcome inspection
+
+The first independent audit found one duplicated native RUN spike: at
+28579.1 s, independently calculating `end = start + 0.02` created a 3.64e-12 s
+overlap with the next start. Version 2 uses one shared 13-edge array per original
+RUN block, guaranteeing adjacent half-open windows meet exactly. The original
+producer and failed audit are retained. The simulation, endpoint, cohort,
+calibration and success rules are unchanged. A real-timestamp regression test
+and the independent raw-spike assignment both verify this correction.

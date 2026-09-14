@@ -105,10 +105,11 @@ def audit_session(row, record, matched):
         elif name.startswith('run_'):
             windows = validation['match_windows' if name == 'run_q3' else 'confirm_windows']
             starts = np.array([w[0] + j * .02 for w in windows for j in range(12)])
+            ends = np.array([w[0] + j * .02 for w in windows for j in range(1, 13)])
             np.testing.assert_array_equal(bank['starts_s'], starts)
-            np.testing.assert_allclose(bank['ends_s'], starts + .02, atol=1e-12, rtol=0)
+            np.testing.assert_array_equal(bank['ends_s'], ends)
             np.testing.assert_array_equal(bank['parent_ids'], np.repeat(np.arange(len(windows)), 12))
-            np.testing.assert_array_equal(count, raw_counts_by_assignment(raw['spikes'], starts, starts + .02, e['cell_ids']))
+            np.testing.assert_array_equal(count, raw_counts_by_assignment(raw['spikes'], starts, ends, e['cell_ids']))
             xy = np.column_stack([np.interp(starts + .01, raw['position'][:, 0], raw['position'][:, d]) for d in (1, 2)])
             np.testing.assert_allclose(bank['truth_cm'], xy, atol=1e-10, rtol=0)
             np.testing.assert_array_equal(bank['labels'], np.linalg.norm(xy - e['home_xy'], axis=1) <= 20)

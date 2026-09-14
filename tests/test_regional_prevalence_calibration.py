@@ -47,6 +47,15 @@ def test_native_half_open_counts_and_frozen_times():
     np.testing.assert_allclose(bank['truth_cm'][:, 0], 1 + 2 * np.arange(12))
 
 
+def test_large_timestamp_shared_edge_not_double_counted():
+    cache = dict(position=np.array([[28579., 0, 0], [28579.25, 25, 0]]),
+                 spikes=np.array([[28579.096989, 17], [28579.1, 17]]))
+    bank = native_bank(cache, np.array([[28579., 28579.25, 0, 0]]), np.array([17]))
+    assert bank['counts'].sum() == 2
+    assert bank['counts'][4:6, 0].tolist() == [1, 1]
+    np.testing.assert_array_equal(bank['ends_s'][:-1], bank['starts_s'][1:])
+
+
 def test_shared_cells_counts_and_generator_reproducibility():
     rates = np.array([[2., 10., 1.], [4., 1., 2.], [3., 2., 8.]])
     grid = np.array([[0., 0.], [1., 0.], [2., 0.]])

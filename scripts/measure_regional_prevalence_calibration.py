@@ -64,8 +64,8 @@ def adjust(mean_score, response):
 
 
 def native_bank(cache, windows, cell_ids):
-    starts = (windows[:, 0, None] + np.arange(12)[None, :] * DT).ravel()
-    ends = starts + DT
+    edges = windows[:, 0, None] + np.arange(13)[None, :] * DT
+    starts, ends = edges[:, :-1].ravel(), edges[:, 1:].ravel()
     position, spikes = cache['position'], cache['spikes']
     xy = np.column_stack([np.interp(starts + DT / 2, position[:, 0], position[:, d]) for d in (1, 2)])
     counts = np.empty((len(starts), len(cell_ids)), dtype=np.int64)

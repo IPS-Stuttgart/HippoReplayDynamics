@@ -6,6 +6,8 @@ import pandas as pd
 import pytest
 
 from scripts import evaluate_spatially_balanced_content_remedy as remedy
+from scripts import audit_spatially_balanced_content_remedy as audit
+from scripts import report_spatially_balanced_content_remedy as reporter
 
 
 def fixture(n=21):
@@ -133,3 +135,59 @@ def test_population_freeze_precedes_test_and_replay_access(tmp_path, monkeypatch
     with pytest.raises(ValueError, match="deliberately unavailable"):
         remedy.measure(row, out, 11)
     assert not (out/"event_readouts.csv.gz").exists()
+
+
+def test_independent_selection_and_decode_reconstruction():
+    rates, grid, counts, truth = fixture()
+    chosen, _ = remedy.choose_partitions(len(rates), rates, grid, counts, truth, 11)
+    random, balanced, universe = audit.reconstruct_selection(rates, grid, counts, truth, 11)
+    assert chosen["random"] == random
+    assert chosen["universe"] == universe
+    assert chosen["balanced"]["a"] == balanced["a"]
+    assert chosen["balanced"]["b"] == balanced["b"]
+    np.testing.assert_allclose(chosen["balanced"]["run_loss"], balanced["run_loss"])
+    direct = audit.posterior(counts, rates, grid)
+    original = remedy.decode(counts, rates, grid)
+    for key in ("mean", "width", "entropy", "map_region"):
+        np.testing.assert_allclose(direct[key], original[key], atol=1e-7)
+    for source in ("sim_matched", "sim_drift"):
+        x, y = remedy.simulated_case(counts, rates, rates, universe, grid, 13, source)
+        xx, yy = audit.reconstruct_generator(counts, rates, rates, universe, grid, 13, source)
+        assert np.array_equal(x, xx) and np.array_equal(y, yy)
+
+
+def test_report_requires_current_audit_and_retains_failed_verdict(tmp_path):
+    results = results_fixture(tmp_path, inaccurate=True)
+    for record in results:
+        record["readouts_sha256"] = reporter.digest(f"{record['artifact_dir']}/event_readouts.csv.gz")
+    remedy.summarize(results, tmp_path)
+    (tmp_path/"manifest.json").write_text(json.dumps(dict(results=results)))
+    details = dict(passed=True, producer_manifest_sha256=reporter.digest(tmp_path/"manifest.json"),
+                   reconstructed_readouts=100, sessions=5,
+                   verified_table_sha256={name: reporter.digest(tmp_path/f"{name}.csv") for name in ("summary", "by_animal", "by_session", "gates")})
+    (tmp_path/"independent_audit.json").write_text(json.dumps(details))
+    information, _ = reporter.report(tmp_path)
+    assert information.both_silent_fraction.eq(0).all()
+    assert "**FAIL**" in (tmp_path/"audited_outcome.md").read_text()
+    assert (tmp_path/"external_sampling_validation.png").stat().st_size > 10000
+    (tmp_path/"manifest.json").write_text(json.dumps(dict(results=results, changed=True)))
+    with pytest.raises(ValueError, match="stale"):
+        reporter.report(tmp_path)
+
+
+def test_independent_summary_and_gate_checks_reject_table_changes(tmp_path):
+    results = results_fixture(tmp_path, inaccurate=True)
+    remedy.summarize(results, tmp_path)
+    data = pd.concat([pd.read_csv(f"{r['artifact_dir']}/event_readouts.csv.gz") for r in results])
+    audit.check_aggregate_tables(data, tmp_path)
+    audit.check_gates(tmp_path, dict(results=results, inputs_unchanged=True))
+    gates = pd.read_csv(tmp_path/"gates.csv")
+    gates.loc[gates.gate.eq("statistical_validation"), "passed"] = True
+    gates.to_csv(tmp_path/"gates.csv", index=False)
+    with pytest.raises(AssertionError):
+        audit.check_gates(tmp_path, dict(results=results, inputs_unchanged=True))
+    summary = pd.read_csv(tmp_path/"by_animal.csv")
+    summary.loc[0, "endpoint_separation_cm"] += 1
+    summary.to_csv(tmp_path/"by_animal.csv", index=False)
+    with pytest.raises(AssertionError):
+        audit.check_aggregate_tables(data, tmp_path)

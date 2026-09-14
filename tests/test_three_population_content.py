@@ -191,3 +191,19 @@ def test_native_cache_uses_foraging_maps_and_untouched_rest_clock(tmp_path):
     assert arrays["candidate_base_counts"].sum() == 4
     unit_qc = pd.read_csv(Path(result["artifact_path"]).with_suffix(".units.csv"))
     assert unit_qc.source_cell_type_allowed.all()
+
+
+def test_independent_dense_reconstruction_and_prediction_tamper_detection():
+    from scripts.audit_three_population_content import reconstructed_columns, verify_external_predictions
+    data, (grid, rates, counts, a, b, c) = synthetic()
+    expected = reconstructed_columns(counts, rates, grid, [a, b, c], np.full((len(data), 2), 30))
+    for column, value in expected.items():
+        if column != "c_support":
+            np.testing.assert_allclose(data[column], value, rtol=1e-10, atol=1e-10)
+    models = {name: train_model(data, features) for name, features in
+              dict(constant=[], pooled=POOLED_FEATURES, full=FULL_FEATURES).items()}
+    predicted = apply_models(data, models)
+    assert verify_external_predictions(data, {"models": models}, predicted) == len(data)
+    predicted.loc[0, "prediction_full"] += .1
+    with pytest.raises(AssertionError):
+        verify_external_predictions(data, {"models": models}, predicted)

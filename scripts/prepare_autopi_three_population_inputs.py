@@ -5,7 +5,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 import numpy as np
@@ -14,6 +14,7 @@ from scipy.ndimage import gaussian_filter1d
 
 
 EVENT_COLUMNS = ["event_index", "start_s", "end_s", "peak_s", "n_spikes", "n_active_units", "peak_mua_z"]
+UTC = timezone.utc
 
 
 def sha256(path):

@@ -152,6 +152,30 @@ def test_class_balancing_does_not_hide_rare_region_error():
     assert row["balanced_high_error"] == 50
 
 
+def test_error_decomposition_retains_shared_bias_and_known_geometry():
+    from scripts.report_reserve_cell_content import error_decomposition
+
+    frame = pd.DataFrame(
+        dict(
+            session=["Rat1/Open1"] * 2,
+            source=["run_q4"] * 2,
+            encoding=["early_run"] * 2,
+            method=["baseline"] * 2,
+            true_home=[0, 1],
+            high_error=[3.0, 3.0],
+            low_error=[1.0, 1.0],
+            separation=[2.0, 2.0],
+        )
+    )
+    _, summary = error_decomposition(frame)
+    assert summary.sum_position_mse_cm2.item() == 10
+    assert summary.pair_separation_mse_cm2.item() == 4
+    assert summary.twice_error_dot_cm2.item() == 6
+    frame["separation"] = 9
+    with pytest.raises(ValueError, match="geometric"):
+        error_decomposition(frame)
+
+
 def test_artifact_roundtrip_and_rehashed_tamper_rejected(tmp_path):
     src = tmp_path / "source"
     src.mkdir()

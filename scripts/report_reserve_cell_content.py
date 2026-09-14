@@ -39,6 +39,33 @@ def markdown(table):
     return "\n".join("| " + " | ".join(row) + " |" for row in rows)
 
 
+def error_decomposition(events):
+    known = events[events.true_home.isin((0, 1))].copy()
+    required = ["high_error", "low_error", "separation"]
+    if known.empty or not np.isfinite(known[required]).all().all():
+        raise ValueError("complete known-position errors required")
+    if (
+        (known[required] < 0).any().any()
+        or (known.separation > known.high_error + known.low_error + 1e-8).any()
+        or (known.separation + 1e-8 < (known.high_error - known.low_error).abs()).any()
+    ):
+        raise ValueError("inconsistent geometric errors")
+    known["sum_position_mse_cm2"] = known.high_error**2 + known.low_error**2
+    known["pair_separation_mse_cm2"] = known.separation**2
+    known["twice_error_dot_cm2"] = known.sum_position_mse_cm2 - known.pair_separation_mse_cm2
+    metrics = ["sum_position_mse_cm2", "pair_separation_mse_cm2", "twice_error_dot_cm2"]
+    keys = ["session", "source", "encoding", "method"]
+    class_means = known.groupby(keys + ["true_home"], as_index=False)[metrics].mean()
+    if not class_means.groupby(keys).size().eq(2).all():
+        raise ValueError("both truth classes required")
+    session = class_means.groupby(keys, as_index=False)[metrics].mean()
+    session["animal"] = session.session.str.split("/").str[0]
+    animal = session.groupby(["animal", "source", "encoding", "method"], as_index=False)[metrics].mean()
+    summary = animal.groupby(["source", "encoding", "method"], as_index=False)[metrics].mean()
+    np.testing.assert_allclose(summary.sum_position_mse_cm2 - summary.twice_error_dot_cm2, summary.pair_separation_mse_cm2, atol=1e-8)
+    return animal, summary
+
+
 def report(result_dir, audit_path, output_dir):
     manifest_path = result_dir / "manifest.json"
     manifest = json.loads(manifest_path.read_text())
@@ -82,6 +109,8 @@ def report(result_dir, audit_path, output_dir):
     truth["mean_population_balanced_error_cm"] = (truth.balanced_high_error + truth.balanced_low_error) / 2
     truth["mean_population_balanced_brier"] = (truth.balanced_high_brier + truth.balanced_low_brier) / 2
     truth = truth[["source", "method", "mean_population_balanced_error_cm", "mean_population_balanced_brier"]]
+    primary_events = pd.concat([pd.read_csv(result_dir / name) for name in manifest["output_sha256"] if name.endswith("_events.csv.gz")], ignore_index=True)
+    alignment_animal, alignment_summary = error_decomposition(primary_events)
     output_dir.mkdir(parents=True, exist_ok=False)
     tables = dict(
         real_summary=real,
@@ -91,6 +120,8 @@ def report(result_dir, audit_path, output_dir):
         random_draw_summary=draws[draws.method.str.startswith("random_")],
         acquisition_summary=acquisitions,
         gates=gates,
+        error_decomposition_by_animal=alignment_animal,
+        error_decomposition_summary=alignment_summary,
     )
     for name, frame in tables.items():
         frame.to_csv(output_dir / f"{name}.csv", index=False)
@@ -183,6 +214,23 @@ averages population sides; animal_summary.csv retains every side and rat used
 by the stricter no-harm gates. The synthetic conditions share fixed whole-universe
 spike draws across assignments. They are model checks, not true biological replay.
 A failed point-estimate no-harm gate is not proof of statistically certain harm.
+
+## Exploratory error-alignment decomposition
+
+This post-outcome diagnostic uses the already audited known-position errors;
+it does not rescore spikes, change the allocation or replace the frozen gates.
+For errors eA = decodedA - truth and eB = decodedB - truth, exactly:
+
+    ||decodedA - decodedB||^2 = ||eA||^2 + ||eB||^2 - 2 eA dot eB
+
+{markdown(alignment_summary[alignment_summary.source.eq("run_q4")])}
+
+Both truth classes, sessions and rats receive the same balanced weights as above.
+The dot-product term is error alignment INCLUDING systematic bias, not a
+mean-centered covariance or proof of shared neuronal noise. Localization error
+and between-decoder separation can change in opposite directions when error
+alignment changes. This identity has known truth here; its decomposition is not
+observable as true error on real replay and does not solve content instability.
 
 ## Failed gates
 

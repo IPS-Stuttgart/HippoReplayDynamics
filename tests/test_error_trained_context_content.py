@@ -326,3 +326,37 @@ def test_external_cannot_use_wrong_model_or_truncated_passing_gates(tmp_path):
     target.write_text(json.dumps(manifest))
     with pytest.raises(ValueError, match="incomplete development"):
         validate_development(tmp_path, models)
+
+
+def test_report_independent_statistics_and_resealed_summary_tamper(tmp_path, monkeypatch):
+    from scripts.audit_error_trained_context_report import check
+    from scripts.report_error_trained_context_content import main
+
+    frame = report_fixture()
+    source, audit_dir, output = tmp_path / "source", tmp_path / "audit", tmp_path / "report"
+    source.mkdir()
+    audit_dir.mkdir()
+    results, audited = [], []
+    for (animal, session), group in frame.groupby(["animal", "session"]):
+        folder = source / session.replace("/", "_")
+        folder.mkdir()
+        path = folder / "event_readouts.csv.gz"
+        group.to_csv(path, index=False)
+        results.append(dict(dataset="pfeiffer_foster", animal=animal, session=session, artifact_dir=str(folder)))
+        audited.append(dict(animal=animal, session=session, readout_sha256=file_sha256(path)))
+    producer = source / "manifest.json"
+    producer.write_text(json.dumps(dict(status="complete", primary_method=PRIMARY, results=results)))
+    (audit_dir / "independent_audit.json").write_text(json.dumps(dict(status="passed", input_file_sha256=dict(producer=file_sha256(producer)), results=audited)))
+    monkeypatch.setattr("sys.argv", ["report", "--measurement-dir", str(source), "--audit-dir", str(audit_dir), "--output-dir", str(output)])
+    main()
+    checked = check(output)
+    assert checked["gates"] == 43 and checked["summary_rows"] == 768
+    path = output / "summary.csv"
+    summary = pd.read_csv(path)
+    summary.loc[0, "value"] += 0.5
+    summary.to_csv(path, index=False)
+    manifest = json.loads((output / "manifest.json").read_text())
+    manifest["output_sha256"][path.name] = file_sha256(path)
+    (output / "manifest.json").write_text(json.dumps(manifest))
+    with pytest.raises(AssertionError):
+        check(output)

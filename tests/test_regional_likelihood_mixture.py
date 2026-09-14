@@ -236,7 +236,15 @@ def test_full_artifact_roundtrip_and_rehashed_tampering(tmp_path):
         json.dumps({"status": "pass", "input_file_sha256": {"source": digest(source / "manifest.json")}, "results": [dict(session=s, status="pass") for s in SESSIONS]})
     )
     measure(SimpleNamespace(source_dir=source, source_audit=source_audit, output_dir=output))
-    assert audit(output)["status"] == "pass"
+    result = audit(output)
+    assert result["status"] == "pass"
+    from scripts.report_regional_likelihood_mixture import report
+
+    audit_path = tmp_path / "independent_audit.json"
+    audit_path.write_text(json.dumps(result))
+    report(output, audit_path, tmp_path / "report")
+    assert "Independent-recording validation: NOT RUN" in (tmp_path / "report/report.md").read_text()
+    assert (tmp_path / "report/regional_mixture_screen.png").stat().st_size > 1000
     table = pd.read_csv(output / "truth_summary.csv")
     table.loc[0, "mixture_error"] += 0.1
     table.to_csv(output / "truth_summary.csv", index=False)

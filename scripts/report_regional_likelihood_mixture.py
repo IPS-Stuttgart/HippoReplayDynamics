@@ -18,6 +18,16 @@ def sha(path):
     return hashlib.sha256(Path(path).read_bytes()).hexdigest()
 
 
+def markdown_table(frame):
+    def cell(value):
+        text = f"{value:.6f}" if isinstance(value, (float, np.floating)) else str(value)
+        return text.replace("|", "\\|").replace("\n", " ")
+
+    lines = ["| " + " | ".join(map(str, frame.columns)) + " |", "| " + " | ".join("---" for _ in frame.columns) + " |"]
+    lines.extend("| " + " | ".join(map(cell, row)) + " |" for row in frame.itertuples(index=False, name=None))
+    return "\n".join(lines)
+
+
 def report(result_dir, audit_path, output):
     manifest = json.loads((result_dir / "manifest.json").read_text())
     audit = json.loads(audit_path.read_text())
@@ -52,19 +62,19 @@ def report(result_dir, audit_path, output):
         "Errors are absolute prevalence errors (fractions, not percentage points). Equal rat weights; "
         "panels and populations averaged within session. Synthetic panels reuse observations.",
         "",
-        truth_view.to_markdown(index=False, floatfmt=".6f"),
+        markdown_table(truth_view),
         "",
         "## Original-content discrepancy",
         "",
         "Absolute high/low discrepancy averaged within rat and then across rats. Both populations are fit separately; no agreement target enters fitting.",
         "",
-        gap_view.to_markdown(index=False, floatfmt=".6f"),
+        markdown_table(gap_view),
         "",
         "## Boundary and failure accounting",
         "",
         real.fit_status.value_counts().to_string(),
         "",
-        gates[["gate", "passed"]].to_markdown(index=False),
+        markdown_table(gates[["gate", "passed"]]),
         "",
         "## Claim boundary",
         "",

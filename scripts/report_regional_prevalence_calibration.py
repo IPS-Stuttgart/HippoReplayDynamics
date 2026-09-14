@@ -81,7 +81,11 @@ def figure(frame, output):
     for ax, prefix, title in zip(axes[0], ('raw', 'corrected'), ('Original endpoint mass', 'Native-calibrated prevalence (unclipped)'), strict=True):
         x = np.arange(len(candidates))
         for j, side in enumerate(('high', 'low')):
-            ax.bar(x + (j - .5) * .35, 100 * candidates[prefix + '_' + side], .35, color=colors[j], label=side + ' Home coverage')
+            values = 100 * candidates[prefix + '_' + side]
+            ax.bar(x + (j - .5) * .35, values, .35, color=colors[j], label=side + ' Home coverage')
+            for xpos, value in zip(x + (j - .5) * .35, values, strict=True):
+                if not np.isfinite(value):
+                    ax.text(xpos, .04, 'NA', transform=ax.get_xaxis_transform(), color=colors[j], ha='center', fontsize=8)
         ax.set_xticks(x, candidates.session, rotation=20)
         ax.set_ylabel('Percent'); ax.set_title(title); ax.axhline(0, color='black', lw=.6); ax.legend(fontsize=8)
     native = primary.loc[primary.source.eq('run_q4') & primary.panel.str.startswith('prevalence_')]
@@ -91,13 +95,16 @@ def figure(frame, output):
             ax.scatter(100 * native.true_prevalence, 100 * native[prefix + '_' + side], s=18, marker=marker, alpha=.65, color=color,
                        label=prefix + ' ' + side)
     ax.plot([0, 100], [0, 100], color='black', ls=':'); ax.set_xlabel('Known regional proportion (%)')
-    ax.set_ylabel('Estimated proportion (%)'); ax.set_title('Held-out RUN recovery'); ax.legend(fontsize=8, ncol=2)
+    ax.set_ylabel('Estimated proportion (%)'); ax.set_title('Held-out RUN recovery (missing fits omitted)'); ax.legend(fontsize=8, ncol=2)
     ax = axes[1, 1]
     sources = ('run_q4', 'test_poisson_gain1', 'test_poisson_gain4', 'test_conditional', 'test_conditional_map_drift', 'test_conditional_shared_assembly')
     x = np.arange(len(sources))
     for j, prefix in enumerate(('raw', 'corrected')):
         values = [100 * rat_mean(primary.loc[primary.source.eq(s) & primary.panel.str.startswith('prevalence_')], prefix + '_mean_absolute_error') for s in sources]
         ax.bar(x + (j - .5) * .35, values, .35, color=colors[j], label=prefix)
+        for xpos, value in zip(x + (j - .5) * .35, values, strict=True):
+            if not np.isfinite(value):
+                ax.text(xpos, .04, 'NA', transform=ax.get_xaxis_transform(), color=colors[j], ha='center', fontsize=8)
     ax.set_xticks(x, ('RUN', 'Poisson', 'Gain 4', 'Fixed totals', 'Map drift', 'Assembly'), rotation=30)
     ax.set_ylabel('Mean absolute prevalence error (pp)'); ax.set_title('Transfer checks; native RUN calibration'); ax.legend(fontsize=8)
     fig.suptitle('Original matched-population content: calibration must improve truth recovery, not only agreement', fontsize=12)
@@ -140,6 +147,9 @@ def main():
             'Full-RUN map sensitivity is NOT held-out decoder validation. Original full-RUN unit eligibility remains a limitation.', '',
             '## Frozen screen', '', f'- PF development screen: {"pass" if passed else "fail"}.',
             '- Independent dataset validation: not run; validated remedy: NOT established.', '']
+    text += ['Native error below averages the five frozen prevalence stress panels (5-75%),',
+             'not the natural RUN occupancy distribution. Natural-prevalence rows remain in the CSVs.',
+             'A missing aggregate is retained as unavailable whenever any required population is missing.', '']
     for key, value in metrics.items(): text.append(f'- {key}: {100 * value:.4f} percentage points.')
     text += ['', '## Interpretation limits', '',
              '- Adjusted prevalence is an aggregate estimator, not a new event posterior or trajectory label.',

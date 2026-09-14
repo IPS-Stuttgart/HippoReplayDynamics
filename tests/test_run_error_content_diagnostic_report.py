@@ -7,9 +7,10 @@ import pandas as pd
 import pytest
 
 from scripts._provenance import file_sha256
+from scripts.audit_run_error_diagnostic_report import independent_metrics
 from scripts.report_run_error_content_diagnostic import (
     CASES, POLICIES, build_gates, forecast_tables, load_verified, location_reference,
-    main, selected_indices, selection_tables, summarize_selection, validate_frame,
+    main, selected_indices, selection_tables, summarize_selection, validate_frame, weighted_corr,
 )
 
 
@@ -83,6 +84,9 @@ def test_unequal_event_and_draw_counts_cannot_dominate_animals():
     assert result.animals == 2
     assert len(animals.query("source == 'sim_matched' and split == 0 and policy == 'diagnostic_full' and metric == 'endpoint_separation_cm'")) == 2
     assert set(selected.policy) == set(POLICIES)
+    audit = independent_metrics(frame.loc[frame.split.eq(0)], 'endpoint_separation_cm')
+    assert audit.loc['real', 'baseline'] == pytest.approx(result.baseline)
+    assert audit.loc['real', 'selected'] == pytest.approx(result.selected)
 
 
 def test_all_frozen_gates_pass_on_known_success_case():
@@ -111,6 +115,11 @@ def test_missing_summary_animal_or_baseline_never_passes():
     forecast.loc[forecast.model.eq('full'), 'animals'] = 4
     with pytest.raises(ValueError, match='forecast cohort'):
         build_gates(summary, forecast, technical_pass=True)
+
+
+def test_constant_predictor_has_undefined_not_roundoff_correlation():
+    assert np.isnan(weighted_corr(np.repeat(.123456789, 13), np.arange(13), np.arange(1, 14)))
+    assert np.isnan(weighted_corr(np.arange(13), np.repeat(.123456789, 13), np.arange(1, 14)))
 
 
 def create_root(tmp_path):

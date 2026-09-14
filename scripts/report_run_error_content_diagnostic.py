@@ -144,6 +144,8 @@ def summarize_selection(metrics, seed=20260914, n_bootstrap=2000):
 def weighted_corr(x, y, w):
     x, y, w = np.asarray(x), np.asarray(y), np.asarray(w)
     require(np.isfinite(np.c_[x, y, w]).all() and np.all(w > 0), 'invalid correlation observations')
+    if np.ptp(x) == 0 or np.ptp(y) == 0:
+        return np.nan
     w = w / w.sum()
     xc, yc = x - w @ x, y - w @ y
     denominator = np.sqrt((w @ (xc * xc)) * (w @ (yc * yc)))

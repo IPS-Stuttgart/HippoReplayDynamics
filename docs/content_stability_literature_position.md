@@ -13,7 +13,21 @@ Checked2026-09-14. Priority/novelty is not proven by this targeted literature ch
    decoding error is new. They do NOT promise that one global error statistic
    certifies the content of replay.
 
-2. van der Meer, Kemere and Diba(2020), *Progress and issues in second-order
+2. Ciliberti, Michon and Kloosterman(2018), *Real-time classification of
+   experience-related ensemble spiking patterns for closed-loop applications*,
+   https://doi.org/10.7554/eLife.36275,
+   https://elifesciences.org/articles/36275.
+   Figure6 progressively removes tetrodes and evaluates replay identification
+   against a fixed full-data reference, alongside cross-validated RUN accuracy.
+   RUN accuracy and replay identification change differently; the Results and
+   Discussion explicitly state that low RUN error is not sufficient for good
+   replay-content identification. This is an empirical precedent, not merely a
+   theoretical warning. Our distinction is equally sized populations matched on
+   global RUN descriptors/accuracy, with a regional posterior-content contrast
+   at unchanged event times. Neither the broad insufficiency of RUN QC nor
+   neuronal-subsampling sensitivity is new.
+
+3. van der Meer, Kemere and Diba(2020), *Progress and issues in second-order
    analysis of hippocampal replay*, https://doi.org/10.1098/rstb.2019.0238,
    https://pmc.ncbi.nlm.nih.gov/articles/PMC7209917/.
    They explicitly identify unequal place-cell and behavioral sampling as causes
@@ -22,7 +36,7 @@ Checked2026-09-14. Priority/novelty is not proven by this targeted literature ch
    firing rates instead of only plugging in their means. Thus the general bias
    concern, simulations and uncertainty-aware likelihood idea already exist.
 
-3. Takigawa et al.(2024), *Evaluating hippocampal replay without a ground truth*,
+4. Takigawa et al.(2024), *Evaluating hippocampal replay without a ground truth*,
    https://doi.org/10.7554/eLife.85635,
    https://pubmed.ncbi.nlm.nih.gov/39606951/.
    Sequence-based detection is evaluated using independently formulated track
@@ -30,6 +44,16 @@ Checked2026-09-14. Priority/novelty is not proven by this targeted literature ch
    the need to validate detectors are not new. Our question is different: how
    stable is a spatial-content readout of the SAME event under a changed recorded
    population? Neither measure automatically supplies true replay destinations.
+
+5. Pfeiffer and Foster(2013), *Hippocampal place cell sequences depict future
+   paths to remembered goals*, https://pmc.ncbi.nlm.nih.gov/articles/PMC3990408/.
+   Their Home-overrepresentation analysis explicitly includes occupancy and
+   place-field-distribution controls (Supplementary Figures14-15), as well as
+   vectorized-trajectory and behavioral-path comparisons. Our candidate endpoint
+   statistic is not a reproduction of that full inferential chain. Changing a
+   population changes its observations; without internal replay ground truth,
+   disagreement does not establish which readout is wrong or overturn their
+   published planning interpretation.
 
 ## Narrow empirically demonstrated addition
 
@@ -48,6 +72,8 @@ that any particular decoder has recovered the animal's true internal destination
 not a refutation of published goal-directed replay, and not proof of a new
 biological mechanism. Local Home accuracy and replay spike support were not
 matched; population contrasts were deliberately maximized and Home was inferred.
+In particular, the2018 result means the contribution cannot be framed as the
+first demonstration that good behavioral decoding fails to certify replay.
 
 Call this a rigorously audited, bounded demonstration, not proof of universal
 novelty. Establishing first-in-literature priority would need a broader review of

@@ -90,7 +90,7 @@ def verify_one(row):
             if source in ("real", "run_q4"):
                 left = src["starts_s"][j] + 0.005 * (hi - lo - n * 4) + np.arange(n) * 0.02
                 raw_starts.append(left)
-                native_blocks += n
+                native_blocks += int(n)
         if raw_starts:
             left = np.concatenate(raw_starts)
             np.testing.assert_array_equal(np.concatenate(blocks), recount(native["spikes"], ids, left, left + 0.02))

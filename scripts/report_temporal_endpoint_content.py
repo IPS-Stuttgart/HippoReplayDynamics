@@ -110,6 +110,45 @@ def gates(summary, frame, audited):
     return pd.DataFrame(rows)
 
 
+def plot_summary(animals, summary, output):
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    fig, axes = plt.subplots(2, 2, figsize=(11, 8), constrained_layout=True)
+    colors = {"independent": "#555555", PRIMARY: "#197c87"}
+    labels = {"independent": "Independent final 20 ms", PRIMARY: "Up to 200 ms, diffusion + reset"}
+    primary = animals.loc[animals.split.eq(0)]
+    for axis, metric, title, ylabel in (
+        (axes[0, 0], "separation_cm", "A. Real population separation", "A/B endpoint distance (cm)"),
+        (axes[0, 1], "regional_tv", "B. Real regional disagreement", "Regional total variation"),
+        (axes[1, 1], "a_entropy", "D. Real posterior concentration", "Mean A/B normalized entropy"),
+    ):
+        for method in ("independent", PRIMARY):
+            local = primary.loc[primary.source.eq("real") & primary.method.eq(method)]
+            if metric == "a_entropy":
+                values = local.loc[local.metric.isin(["a_entropy", "b_entropy"])].groupby("animal").value.mean()
+            else:
+                values = local.loc[local.metric.eq(metric)].set_index("animal").value.sort_index()
+            axis.plot(values.index, values, "o-", color=colors[method], label=labels[method])
+        axis.set(title=title, ylabel=ylabel)
+        axis.grid(axis="y", alpha=0.2)
+    known = ["run_q4", "sim_stationary", "sim_moving", "sim_moving_gain", "sim_late_jump"]
+    axis = axes[1, 0]
+    for method in ("independent", PRIMARY):
+        local = summary.loc[summary.split.eq(0) & summary.method.eq(method) & summary.metric.isin(["a_error", "b_error"])]
+        values = local.groupby("source").value.mean().reindex(known)
+        axis.plot(np.arange(5), values, "o-", color=colors[method], label=labels[method])
+    axis.set(title="C. Known-position falsification", ylabel="Mean physical error, A/B (cm)")
+    axis.set_xticks(np.arange(5), ["RUN", "Static", "Moving", "Moving\n+ gains", "Late jump"])
+    axis.grid(axis="y", alpha=0.2)
+    axes[0, 0].legend(fontsize=8)
+    fig.suptitle("Fixed endpoint: agreement gains must survive known-truth controls\nPF development; split 0; equal animal weights", fontsize=13)
+    fig.savefig(output / "temporal_endpoint_falsification.png", dpi=170)
+    plt.close(fig)
+
+
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--measurement-dir", type=Path, required=True)
@@ -145,6 +184,7 @@ def main():
     animals.to_csv(args.output_dir / "by_animal.csv", index=False)
     summary.to_csv(args.output_dir / "summary.csv", index=False)
     checks.to_csv(args.output_dir / "gate_summary.csv", index=False)
+    plot_summary(animals, summary, args.output_dir)
     primary = summary.loc[summary.split.eq(0) & summary.method.eq(PRIMARY)]
     selected = frame.loc[frame.split.eq(0) & frame.method.eq(PRIMARY)]
     denominator = selected.groupby(["source", "animal", "session"], as_index=False).agg(events=("event_index", "size"), mean_context_ms=("context_ms", "mean"))

@@ -1,4 +1,5 @@
 import json
+from pathlib import Path
 from types import SimpleNamespace
 
 import numpy as np
@@ -161,3 +162,32 @@ def test_measure_smoke_preserves_whole_population_simulation_counts(tmp_path, mo
     for key in archive.files:
         if key.startswith("split") and key.endswith("_counts"):
             np.testing.assert_equal(archive[key].sum(axis=1), [72, 72])
+
+
+def test_native_cache_uses_foraging_maps_and_untouched_rest_clock(tmp_path):
+    from scripts.cache_autopi_three_population_encoding import cache_session
+    folder = tmp_path/"native"/"mouse"/"mouse-1"
+    folder.mkdir(parents=True)
+    times = np.arange(0, 200, .02)
+    position = np.column_stack([times, 30*np.cos(times), 30*np.sin(times)])
+    ids = np.array([0, 7, 20])
+    spikes = np.concatenate([np.column_stack([np.arange(.1+offset, 199, .5),
+        np.full(len(np.arange(.1+offset, 199, .5)), cell)]) for offset, cell in zip([0, .1, .2], ids, strict=True)])
+    rest = np.array([[210.0, 0], [210.004, 7], [210.009, 20], [210.02, 0]])
+    np.savez_compressed(folder/"native_inputs.npz", position=position, spikes=np.vstack([spikes, rest]),
+                        cell_ids=ids, shank_ids=[1, 1, 2], run_interval=[0, 200], rest_interval=[200, 220])
+    pd.DataFrame(dict(event_index=[2], start_s=[210], end_s=[210.05])).to_csv(folder/"candidates.csv", index=False)
+    (folder/"native_manifest.json").write_text("{}")
+    out = tmp_path/"cache"
+    (out/"sessions").mkdir(parents=True)
+    row = SimpleNamespace(animal="mouse", session="mouse-1", candidates=1,
+        artifact_sha256=file_sha256(folder/"native_inputs.npz"), candidate_sha256=file_sha256(folder/"candidates.csv"),
+        native_manifest_sha256=file_sha256(folder/"native_manifest.json"))
+    result = cache_session(row, tmp_path/"native", out)
+    arrays = np.load(result["artifact_path"], allow_pickle=False)
+    np.testing.assert_equal(arrays["cell_ids"], ids)
+    assert arrays["supported_run_intervals"].max() < 200
+    assert arrays["candidate_base_starts_s"].min() == 210
+    assert arrays["candidate_base_counts"].sum() == 4
+    unit_qc = pd.read_csv(Path(result["artifact_path"]).with_suffix(".units.csv"))
+    assert unit_qc.source_cell_type_allowed.all()

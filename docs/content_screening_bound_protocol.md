@@ -53,7 +53,9 @@ Maximize progress t in [0,5] subject to weighted retained metrics satisfying:
 
 t=1 meets the 20% Home-gap and 10% separation/TV numerical reduction targets.
 t=0 is always feasible by giving every observation probability q. Report that
-zero-improvement solution correctly, never as a successful screen. Home gap is
+zero-improvement solution correctly, never as a successful screen. Baseline Home
+gap, separation and regional TV must all be nonzero before a case is labeled
+target-attainable; zero-baseline cases are not successful remedies. Home gap is
 the absolute signed MEAN difference, not mean absolute eventwise difference.
 Constraints refer to the weighted population, not the expected absolute gap of
 a finite random draw. Fractional solutions may require randomization in practice.

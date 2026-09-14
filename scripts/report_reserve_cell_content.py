@@ -109,7 +109,7 @@ def report(result_dir, audit_path, output_dir):
     truth["mean_population_balanced_error_cm"] = (truth.balanced_high_error + truth.balanced_low_error) / 2
     truth["mean_population_balanced_brier"] = (truth.balanced_high_brier + truth.balanced_low_brier) / 2
     truth = truth[["source", "method", "mean_population_balanced_error_cm", "mean_population_balanced_brier"]]
-    primary_events = pd.concat([pd.read_csv(result_dir / name) for name in manifest["output_sha256"] if name.endswith("_events.csv.gz")], ignore_index=True)
+    primary_events = pd.concat([pd.read_csv(result_dir / name, dtype={"event_id": str}) for name in manifest["output_sha256"] if name.endswith("_events.csv.gz")], ignore_index=True)
     alignment_animal, alignment_summary = error_decomposition(primary_events)
     output_dir.mkdir(parents=True, exist_ok=False)
     tables = dict(

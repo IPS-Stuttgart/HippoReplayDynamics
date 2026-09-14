@@ -37,7 +37,9 @@ remaining reserve cell to each non-full side. Choose the cell/side giving the
 largest reduction of that side's class-balanced Home Brier loss. Loss concerns
 the unmodified flat-prior Poisson posterior. Ties use side order high/low then
 global integer cell index. Continue until each quota is filled, even if the
-best remaining gain is negative; report the full gain trace. This does not fit
+best remaining gain is negative; report the full gain trace. Gains within
+1e-12 of the best are treated as numerical ties (specified before allocation).
+This does not fit
 the A/B disagreement, compare replay results or force Home probabilities equal.
 
 Comparator: 20 frozen random allocations of the same reserve, equal quotas and

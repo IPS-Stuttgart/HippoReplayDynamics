@@ -8,6 +8,7 @@ import sys
 from bisect import bisect_left
 from datetime import UTC, datetime
 from pathlib import Path
+from xml.etree import ElementTree
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path[:0] = [str(ROOT), str(ROOT / "src")]
@@ -105,6 +106,30 @@ def count_windows(times, windows):
     return np.searchsorted(times, windows[:, 1], side="left") - np.searchsorted(times, windows[:, 0], side="left")
 
 
+def acquisition_clock_limit(root, animal, session, expected_end, spike_end):
+    """An analysis epoch need not span acquisition; verify any tail with EEG/XML."""
+    if spike_end <= expected_end + 1e-8:
+        return expected_end, dict(status="all_spikes_within_declared_epochs")
+    folder = root.parent / "raw_eeg" / animal / session
+    xml_path, eeg_path = folder / f"{session}.xml", folder / f"{session}.eeg"
+    tree = ElementTree.parse(xml_path)
+    n = int(tree.findtext(".//acquisitionSystem/nChannels"))
+    bits = int(tree.findtext(".//acquisitionSystem/nBits"))
+    fs = float(tree.findtext(".//fieldPotentials/lfpSamplingRate"))
+    spike_fs = float(tree.findtext(".//acquisitionSystem/samplingRate"))
+    stat = eeg_path.stat()
+    if n <= 0 or bits <= 0 or bits % 8 or fs <= 0 or spike_fs <= 0 or stat.st_size % (n * bits // 8):
+        raise ValueError("invalid acquisition XML/EEG length")
+    end = stat.st_size / (n * bits // 8 * fs)
+    if spike_end > end + 1/spike_fs or expected_end > end + 1/spike_fs:
+        raise ValueError("native spikes/epoch outside independently verified acquisition")
+    return end + 1/spike_fs, dict(status="tail_verified_against_native_EEG_XML_not_analyzed",
+        analysis_post_end_s=float(expected_end), native_spike_end_s=float(spike_end), acquisition_duration_s=end,
+        xml_path=str(xml_path), xml_sha256=file_sha256(xml_path), eeg_path=str(eeg_path),
+        eeg_bytes=stat.st_size, eeg_mtime_ns=stat.st_mtime_ns,
+        eeg_verification="length_and_XML_only_not_payload_checksum")
+
+
 def partition(n, k, seed):
     if k not in (2, 3) or n // k < 5:
         raise ValueError("fewer than five activity-screened cells/group")
@@ -175,9 +200,11 @@ def extract_one(root, session, output, seed):
     for uid, raw in zip(vector(spikes["UID"], "UID", integer=True), times, strict=True):
         t = np.asarray(raw, float).reshape(-1)
         if (not np.isfinite(t).all() or (np.diff(t) < 0).any()
-                or (len(t) and (t[0] < epochs[0, 0]-1e-8 or t[-1] > epochs[-1, 1]+1e-8))):
+                or (len(t) and t[0] < epochs[0, 0]-1e-8)):
             raise ValueError(f"invalid native spike clock for UID {uid}")
         by_id[int(uid)] = t
+    _, clock = acquisition_clock_limit(root, animal, session, epochs[-1, 1],
+                                      max((t[-1] for t in by_id.values() if len(t)), default=0))
     ids = units.loc[units.native_included, "unit_id"].to_numpy(int)
     if not len(ids):
         raise ValueError("no explicit native CA1 excitatory units")
@@ -213,6 +240,11 @@ def extract_one(root, session, output, seed):
             checked += 1
     if any(file_sha256(paths[k]) != h for k, h in hashes.items()):
         raise ValueError("native input changed")
+    if "xml_path" in clock:
+        stat = Path(clock["eeg_path"]).stat()
+        if (file_sha256(clock["xml_path"]) != clock["xml_sha256"]
+                or stat.st_size != clock["eeg_bytes"] or stat.st_mtime_ns != clock["eeg_mtime_ns"]):
+            raise ValueError("acquisition clock evidence changed")
     target = output / session
     target.mkdir(exist_ok=False)
     units.to_csv(target / "native_unit_audit.csv", index=False)
@@ -225,7 +257,7 @@ def extract_one(root, session, output, seed):
     meta = dict(source_paths={k: str(p) for k, p in paths.items()}, source_sha256=hashes,
                 population_assignments=frozen, population_failures=failures, detector=detector,
                 position_conversion="native_m_times_100_to_cm", timestamps="native_seconds_no_shift",
-                independently_recounted_cells_windows=checked, status="count_audited",
+                independently_recounted_cells_windows=checked, status="count_audited", acquisition_clock=clock,
                 count_arrays_sha256=file_sha256(target / "count_arrays.npz"),
                 output_sha256={p.name: file_sha256(p) for p in target.iterdir() if p.is_file()})
     (target / "manifest.json").write_text(json.dumps(meta, indent=2)+"\n")

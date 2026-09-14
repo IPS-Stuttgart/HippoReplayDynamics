@@ -75,3 +75,18 @@ from native spike timestamps. Unit tests cover UID reordering/missing labels,
 native units/clocks, first-half screening, endpoint timing, disjoint partitions,
 empty/failing denominators and scalar recount agreement. Use detached systemd
 services on gpuserver6000. Do not score replay or fit a predictive model here.
+
+## Input-clock resolution after first extraction
+
+The first run completed seven recordings and rejected Gatsby_08022013 because
+spikes extended beyond the declared POSTEpoch end of 30413.628 s. Independent
+native XML plus EEG byte length establishes acquisition duration 32002.4 s,
+consistent with the sorted spikes. The POSTEpoch is an analysis interval, not
+the complete acquisition. For a source with such a tail, require this independent
+clock evidence and preserve the original POST endpoint exactly: do not include
+the extra tail, shift timestamps or expand the candidate epoch. Record XML hash,
+EEG size/mtime and the clock check. Without evidence, fail that source.
+
+This input-reader correction follows the seven-recording counts-only results;
+it changes no spike-support criterion, population assignment or analysis window.
+The original run remains intact; write a versioned second output directory.

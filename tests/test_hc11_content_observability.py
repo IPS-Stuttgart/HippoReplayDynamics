@@ -7,6 +7,7 @@ from scipy.io import savemat
 
 from scripts.audit_hc11_content_observability import (
     COHORT,
+    acquisition_clock_limit,
     count_windows,
     extract_one,
     group_readouts,
@@ -72,6 +73,26 @@ def test_half_open_window_counts_duplicates_and_zero():
     np.testing.assert_array_equal(count_windows(times, windows), [3, 3, 0])
     with pytest.raises(ValueError, match="clock"):
         count_windows(times[::-1], windows)
+
+
+def test_acquisition_tail_needs_independent_clock_evidence(tmp_path):
+    root = tmp_path / "webshare_processed"
+    limit, info = acquisition_clock_limit(root, "a", "s", 10., 9.5)
+    assert limit == 10 and info["status"] == "all_spikes_within_declared_epochs"
+    with pytest.raises(FileNotFoundError):
+        acquisition_clock_limit(root, "a", "s", 10., 11.)
+    folder = tmp_path / "raw_eeg" / "a" / "s"
+    folder.mkdir(parents=True)
+    (folder / "s.xml").write_text("<parameters><acquisitionSystem><nChannels>2</nChannels>"
+        "<nBits>16</nBits><samplingRate>20000</samplingRate></acquisitionSystem>"
+        "<fieldPotentials><lfpSamplingRate>10</lfpSamplingRate></fieldPotentials></parameters>")
+    (folder / "s.eeg").write_bytes(bytes(480))
+    limit, info = acquisition_clock_limit(root, "a", "s", 10., 11.5)
+    assert limit == pytest.approx(12.00005)
+    assert info["analysis_post_end_s"] == 10
+    assert info["acquisition_duration_s"] == 12
+    with pytest.raises(ValueError, match="outside"):
+        acquisition_clock_limit(root, "a", "s", 10., 13.)
 
 
 def test_endpoint_grid_not_peak_or_recency_selection():

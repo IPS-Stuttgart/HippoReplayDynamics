@@ -23,7 +23,7 @@ TRUTH = ("a_error", "b_error", "a_brier", "b_brier", "a_nll", "b_nll")
 GROUP = ("dataset", "animal", "session", "split", "source", "method")
 
 
-def summaries(frame):
+def summaries(frame, methods=METHODS):
     if frame.empty or frame.duplicated([*GROUP, "event_index"]).any():
         raise ValueError("empty or duplicate observations")
     if frame.dataset.nunique() != 1 or frame.animal.nunique() != 4 or frame.session.nunique() != 8:
@@ -33,7 +33,7 @@ def summaries(frame):
         if set(sub.source) != set(SOURCES):
             raise ValueError("missing source")
         for source, local in sub.groupby("source"):
-            if set(local.method) != set(METHODS):
+            if set(local.method) != set(methods):
                 raise ValueError("missing method")
             reference = local.loc[local.method.eq("independent")].set_index("event_index").sort_index()
             for method, view in local.groupby("method"):
@@ -61,7 +61,7 @@ def summaries(frame):
         if len(pivot) != 4 or pivot.isna().any().any():
             raise ValueError("missing animal/method outcome")
         baseline = pivot["independent"]
-        for method in METHODS:
+        for method in methods:
             reduction = baseline - pivot[method]
             rng = np.random.default_rng(20260914)
             interval = np.quantile(rng.choice(reduction.to_numpy(), (5000, 4), replace=True).mean(axis=1), [0.025, 0.975])
@@ -82,10 +82,10 @@ def summaries(frame):
     return sessions, animals, pd.DataFrame(output)
 
 
-def gates(summary, frame, audited):
+def gates(summary, frame, audited, primary=PRIMARY):
     if set(frame.split) != {0, 1, 2}:
         raise ValueError("all frozen splits required")
-    table = summary.loc[summary.split.eq(0) & summary.method.eq(PRIMARY)].set_index(["source", "metric"])
+    table = summary.loc[summary.split.eq(0) & summary.method.eq(primary)].set_index(["source", "metric"])
     control = summary.loc[summary.split.eq(0) & summary.method.eq("entropy_matched")].set_index(["source", "metric"])
     rows = [dict(gate="independently_verified", passed=bool(audited))]
     for metric in ("separation_cm", "regional_tv"):
@@ -102,30 +102,30 @@ def gates(summary, frame, audited):
         for source in set(SOURCES) - {"real"}:
             for metric in (side + "_error", side + "_error_p90", side + "_brier"):
                 rows.append(dict(gate=source + "_no_worse_" + metric, passed=bool(table.loc[(source, metric), "reduction"] >= -1e-8)))
-    primary = frame.loc[frame.split.eq(0) & frame.method.eq(PRIMARY)]
-    matches = primary[["a_entropy_control_available", "b_entropy_control_available"]]
+    primary_rows = frame.loc[frame.split.eq(0) & frame.method.eq(primary)]
+    matches = primary_rows[["a_entropy_control_available", "b_entropy_control_available"]]
     complete = not matches.empty and matches.notna().all().all() and matches.eq(True).all().all()
     rows.append(dict(gate="all_primary_entropy_controls_available", passed=bool(complete)))
     rows.append(dict(gate="advance_external_validation", passed=all(row["passed"] for row in rows)))
     return pd.DataFrame(rows)
 
 
-def plot_summary(animals, summary, output):
+def plot_summary(animals, summary, output, primary_method=PRIMARY, primary_label="Up to 200 ms, diffusion + reset", cohort_label="PF development"):
     import matplotlib
 
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
     fig, axes = plt.subplots(2, 2, figsize=(11, 8), constrained_layout=True)
-    colors = {"independent": "#555555", PRIMARY: "#197c87"}
-    labels = {"independent": "Independent final 20 ms", PRIMARY: "Up to 200 ms, diffusion + reset"}
+    colors = {"independent": "#555555", primary_method: "#197c87"}
+    labels = {"independent": "Independent final 20 ms", primary_method: primary_label}
     primary = animals.loc[animals.split.eq(0)]
     for axis, metric, title, ylabel in (
         (axes[0, 0], "separation_cm", "A. Real population separation", "A/B endpoint distance (cm)"),
         (axes[0, 1], "regional_tv", "B. Real regional disagreement", "Regional total variation"),
         (axes[1, 1], "a_entropy", "D. Real posterior concentration", "Mean A/B normalized entropy"),
     ):
-        for method in ("independent", PRIMARY):
+        for method in ("independent", primary_method):
             local = primary.loc[primary.source.eq("real") & primary.method.eq(method)]
             if metric == "a_entropy":
                 values = local.loc[local.metric.isin(["a_entropy", "b_entropy"])].groupby("animal").value.mean()
@@ -136,7 +136,7 @@ def plot_summary(animals, summary, output):
         axis.grid(axis="y", alpha=0.2)
     known = ["run_q4", "sim_stationary", "sim_moving", "sim_moving_gain", "sim_late_jump"]
     axis = axes[1, 0]
-    for method in ("independent", PRIMARY):
+    for method in ("independent", primary_method):
         local = summary.loc[summary.split.eq(0) & summary.method.eq(method) & summary.metric.isin(["a_error", "b_error"])]
         values = local.groupby("source").value.mean().reindex(known)
         axis.plot(np.arange(5), values, "o-", color=colors[method], label=labels[method])
@@ -144,7 +144,7 @@ def plot_summary(animals, summary, output):
     axis.set_xticks(np.arange(5), ["RUN", "Static", "Moving", "Moving\n+ gains", "Late jump"])
     axis.grid(axis="y", alpha=0.2)
     axes[0, 0].legend(fontsize=8)
-    fig.suptitle("Fixed endpoint: agreement gains must survive known-truth controls\nPF development; split 0; equal animal weights", fontsize=13)
+    fig.suptitle(f"Fixed endpoint: agreement gains must survive known-truth controls\n{cohort_label}; split 0; equal animal weights", fontsize=13)
     fig.savefig(output / "temporal_endpoint_falsification.png", dpi=170)
     plt.close(fig)
 

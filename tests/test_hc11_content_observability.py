@@ -1,4 +1,5 @@
 from pathlib import Path
+import json
 
 import numpy as np
 import pandas as pd
@@ -18,6 +19,8 @@ from scripts.audit_hc11_content_observability import (
     summarize,
     windows_for,
 )
+from scripts._provenance import file_sha256
+from scripts.report_hc11_content_observability import audit_session, histogram_recount
 
 
 def test_uid_join_not_row_order_and_missing_class_excluded():
@@ -71,6 +74,7 @@ def test_half_open_window_counts_duplicates_and_zero():
     times = np.array([0, .01, .01, .02, .03])
     windows = np.array([[0, .02], [.01, .03], [.04, .05]])
     np.testing.assert_array_equal(count_windows(times, windows), [3, 3, 0])
+    np.testing.assert_array_equal(histogram_recount(times, windows), [3, 3, 0])
     with pytest.raises(ValueError, match="clock"):
         count_windows(times[::-1], windows)
 
@@ -173,3 +177,14 @@ def test_native_fixture_complete_uid_clock_counts_and_first_half(tmp_path):
     with np.load(Path(row["artifact_dir"]) / "count_arrays.npz", allow_pickle=False) as arrays:
         assert arrays["epochs_s"][1, 0] == 10
         assert arrays["position_cm"][-1, 1] > 390
+    audit, _ = audit_session(next(pd.DataFrame([row]).itertuples(index=False)), 42)
+    assert audit["status"] == "passed"
+    assert audit["window_cell_counts"] == 108
+    target = Path(row["artifact_dir"])
+    frame.loc[0, "group0_spikes"] += 1
+    frame.to_csv(target / "population_counts.csv.gz", index=False)
+    meta = json.loads((target / "manifest.json").read_text())
+    meta["output_sha256"]["population_counts.csv.gz"] = file_sha256(target / "population_counts.csv.gz")
+    (target / "manifest.json").write_text(json.dumps(meta))
+    with pytest.raises(AssertionError):
+        audit_session(next(pd.DataFrame([row]).itertuples(index=False)), 42)

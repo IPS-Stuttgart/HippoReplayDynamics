@@ -325,7 +325,8 @@ def fit_coverage_population(session: ReplaySession, config: CoverageInputConfig)
         peak_rate = float(full.rates_hz[index, valid].max())
         a, b = first.rates_hz[index, common], second.rates_hz[index, common]
         stability = float(np.corrcoef(a, b)[0, 1]) if len(a) > 2 and np.std(a) > 0 and np.std(b) > 0 else np.nan
-        source_allowed = bool(cell in session.excitatory_neurons) if session.metadata.get("source_dataset") != "tanni2022" else True
+        untyped_sorted_source = session.metadata.get("source_dataset") in {"tanni2022", "blackstad_moser"}
+        source_allowed = untyped_sorted_source or bool(cell in session.excitatory_neurons)
         unit_pass = bool(source_allowed and n >= config.min_running_spikes and mean_rate <= config.max_running_rate_hz and peak_rate >= config.min_peak_rate_hz and np.isfinite(stability) and stability >= config.min_split_half_stability)
         rows.append({
             "cell_id": int(cell), "source_cell_type_allowed": source_allowed,

@@ -42,15 +42,25 @@ def test_author_good_and_ca1_not_kslabel_or_layer():
     assert units.cell_type.str.startswith("unknown").all()
 
 
-def test_inconsistent_identity_rejected():
+def test_inconsistent_curation_excluded_and_explicit_electrode_used():
     info, groups, shanks = metadata()
     groups.loc[0, "group"] = "noise"
-    with pytest.raises(ValueError, match="inconsistent"):
-        select_ca1_units(info, groups, shanks, ["ca1", "ca1"], "r-1")
+    units = select_ca1_units(info, groups, shanks, ["ca1", "ca1"], "r-1")
+    assert units.included_ca1.tolist() == [False, True]
     info, groups, shanks = metadata()
     info.loc[0, "sh"] = 1
-    with pytest.raises(ValueError, match="assignments"):
-        select_ca1_units(info, groups, shanks, ["ca1", "ca1"], "r-1")
+    units = select_ca1_units(info, groups, shanks, ["ca1", "ca1"], "r-1")
+    assert units.included_ca1.tolist() == [True, True]
+
+
+def test_missing_legacy_entry_and_unmapped_region_are_explicit():
+    info, groups, shanks = metadata()
+    info = info.rename(columns={"cluster_id": "id"})
+    groups = groups.loc[groups.cluster_id.ne(0)]
+    units = select_ca1_units(info, groups, shanks, ["ca1"], "r-1")
+    assert units.included_ca1.tolist() == [True, False]
+    assert units.curation_status.iloc[0] == "missing_legacy_group_entry"
+    assert units.brain_region.iloc[1] == "unknown_unmapped_exclude"
 
 
 def test_mua_fixed_clock_support_and_no_boundary_event():

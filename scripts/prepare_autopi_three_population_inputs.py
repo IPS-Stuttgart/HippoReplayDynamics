@@ -41,29 +41,28 @@ def foraging_rest_pair(names, intervals):
 
 
 def select_ca1_units(info, groups, shanks, regions, session):
+    info = info.rename(columns={"id": "cluster_id"}) if "cluster_id" not in info else info.copy()
+    # cluster_info is the detailed author-curated table; older group exports may
+    # lack later clusters. A direct disagreement is excluded, never overridden.
+    info = info.loc[info.group.eq("good")].copy()
     for frame, key in ((info, "cluster_id"), (groups, "cluster_id"), (shanks, "id")):
         if frame[key].isna().any() or frame[key].duplicated().any():
             raise ValueError(f"missing/duplicate native unit identity: {key}")
-    merged = info.merge(groups[["cluster_id", "group"]], on="cluster_id", how="outer",
+    merged = info.merge(groups[["cluster_id", "group"]], on="cluster_id", how="left",
                         suffixes=("_info", "_curated"), validate="one_to_one", indicator=True)
-    good = merged.group_curated.eq("good") | merged.group_info.eq("good")
-    if (merged.loc[good, "_merge"].ne("both").any()
-            or merged.loc[good, "group_info"].ne(merged.loc[good, "group_curated"]).any()):
-        raise ValueError("inconsistent author-good cluster metadata")
-    merged = merged.loc[good].drop(columns="_merge").copy()
+    merged["curation_status"] = np.where(merged.group_curated.isna(), "missing_legacy_group_entry",
+        np.where(merged.group_curated.eq("good"), "agree", "conflicting_exclude"))
+    merged = merged.drop(columns="_merge")
     if (merged.cluster_id < 0).any() or (merged.cluster_id != np.floor(merged.cluster_id)).any():
         raise ValueError("invalid native cluster IDs")
     merged["id"] = [f"{session}_{int(i)}" for i in merged.cluster_id]
     merged = merged.merge(shanks, on="id", how="left", validate="one_to_one")
-    if merged.shank.isna().any() or (merged.shank != np.floor(merged.shank)).any():
-        raise ValueError("missing/noninteger native shank identity")
-    shank = merged.shank.to_numpy(int)
-    if (shank < 1).any() or (shank > len(regions)).any():
-        raise ValueError("native shank outside desel regions")
-    if "sh" in merged and not np.array_equal(merged.sh.to_numpy(float) + 1, shank):
-        raise ValueError("cluster_info and shank_neuron electrode assignments differ")
-    merged["brain_region"] = [regions[i-1].strip().lower() for i in shank]
-    merged["included_ca1"] = merged.brain_region.eq("ca1")
+    shank = merged.shank.to_numpy(float)
+    valid = np.isfinite(shank) & (shank == np.floor(shank)) & (shank >= 1) & (shank <= len(regions))
+    merged["brain_region"] = [regions[int(i)-1].strip().lower() if ok else "unknown_unmapped_exclude"
+                              for i, ok in zip(shank, valid, strict=True)]
+    merged["included_ca1"] = merged.brain_region.eq("ca1") & merged.curation_status.ne("conflicting_exclude")
+    merged["electrode_source"] = "explicit_shank_neuron_not_constant_generic_sh"
     merged["cell_type"] = "unknown_author_good_sorted_unit"
     return merged.sort_values("cluster_id").reset_index(drop=True)
 

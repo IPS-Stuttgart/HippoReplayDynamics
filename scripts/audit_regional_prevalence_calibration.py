@@ -85,7 +85,11 @@ def audit_session(row, record, matched):
     np.testing.assert_array_equal(e['cell_ids'], original['cell_ids'])
     np.testing.assert_array_equal(e['early_run'], validation['early_rates'])
     np.testing.assert_array_equal(e['full_run'], original['rates_hz'][:, original['support']])
+    np.testing.assert_array_equal(e['late_rates'], raw['rates_second_half_hz'][raw['unit_qc_mask'].astype(bool)][:, original['support']])
     np.testing.assert_array_equal(e['grid_cm'], original['grid_cm'])
+    original_manifest = json.loads((matched / 'manifest.json').read_text())
+    home = pd.read_csv(original_manifest['input_file_paths']['home']).set_index('session').loc[row.session]
+    np.testing.assert_array_equal(e['home_xy'], home[['home_x_cm', 'home_y_cm']].to_numpy(float))
     np.testing.assert_array_equal(e['near'], np.linalg.norm(e['grid_cm'] - e['home_xy'], axis=1) <= 20)
     banks = {p.stem: load(p) for p in folder.glob('*.npz') if p.stem != 'encoding'}
     score_count, spike_count = 0, 0

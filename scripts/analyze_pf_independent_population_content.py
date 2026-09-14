@@ -321,6 +321,7 @@ def support_stratum(frame):
 def summarize_disagreement(events, status, output):
     primary=events[events.split.eq(0) & events.cohort.eq(COHORT)].copy()
     primary["stratum"]=support_stratum(primary)
+    primary["calibration_stratum"]=np.digitize(np.minimum(primary.a_spikes,primary.b_spikes),[3,6])
     results,calibration,paired=[],[],[]
     for session,g in primary.groupby("session"):
         animal=g.animal.iloc[0]
@@ -335,13 +336,14 @@ def summarize_disagreement(events, status, output):
                 test=eligible(sims[sims.source.eq("sim_test")])
                 conflict=eligible(sims[sims.source.eq("sim_conflict") & sims.truth_separation_cm.ge(40)])
                 threshold={}
-                for stratum,c in cal.groupby("stratum"):
+                for stratum,c in cal.groupby("calibration_stratum"):
                     if len(c)>=20:
                         threshold[stratum]=float(np.quantile(c.endpoint_separation_cm,.95,method="higher"))
                 for f,tag in [(r,"real"),(test,"null_test"),(conflict,"injected_conflict")]:
-                    valid=f[f.stratum.isin(threshold)].copy()
-                    valid["tail"]=valid.endpoint_separation_cm > valid.stratum.map(threshold)
+                    valid=f[f.calibration_stratum.isin(threshold)].copy()
+                    valid["tail"]=valid.endpoint_separation_cm > valid.calibration_stratum.map(threshold)
                     calibration.append(dict(animal=animal,session=session,generator=gen,subset=subset,source=tag,
+                        calibration_stratification="minimum_spike_count_only",
                         events=len(f),calibrated_events=len(valid),coverage=len(valid)/len(f) if len(f) else np.nan,
                         tail_fraction=valid["tail"].mean() if len(valid) else np.nan))
                 overlap=set(r.stratum)&set(test.stratum)
@@ -355,8 +357,14 @@ def summarize_disagreement(events, status, output):
                 active_sim=np.minimum(test.a_active,test.b_active)
                 ks=ks_2samp(active_real,active_sim).statistic if len(r) and len(test) else np.nan
                 error=np.median(np.r_[test.a_truth_error_cm,test.b_truth_error_cm]) if len(test) else np.nan
+                ka=ks_2samp(r.a_active,test.a_active).statistic if len(r) and len(test) else np.nan
+                kb=ks_2samp(r.b_active,test.b_active).statistic if len(r) and len(test) else np.nan
+                error_a=test.a_truth_error_cm.median()
+                error_b=test.b_truth_error_cm.median()
                 results.append(dict(animal=animal,session=session,generator=gen,subset=subset,real_events=len(r),
                     null_events=len(test),known_path_median_error_cm=error,active_support_ks=ks,
+                    a_known_path_median_error_cm=error_a,b_known_path_median_error_cm=error_b,
+                    a_active_support_ks=ka,b_active_support_ks=kb,
                     real_endpoint_separation_median_cm=r.endpoint_separation_cm.median(),
                     null_endpoint_separation_median_cm=test.endpoint_separation_cm.median(),
                     real_persistent_conflict_fraction=(r.persistent_conflict_ms>=20).mean() if len(r) else np.nan,
@@ -364,7 +372,8 @@ def summarize_disagreement(events, status, output):
                     matched_support_coverage=coverage,matched_real_mean_separation_cm=real_mean if len(weights) else np.nan,
                     matched_null_mean_separation_cm=sim_mean if len(weights) else np.nan,
                     matched_excess_cm=real_mean-sim_mean if len(weights) else np.nan,
-                    calibration_resolution_pass=bool(np.isfinite(error) and error<=20 and ks<=.1)))
+                    calibration_resolution_pass=bool(np.isfinite([error_a,error_b,ka,kb]).all()
+                        and max(error_a,error_b)<=20 and max(ka,kb)<=.1)))
             same=real[["window_uid","endpoint_separation_cm"]].merge(
                 sims[sims.source.eq("sim_test")][["window_uid","endpoint_separation_cm"]],on="window_uid",suffixes=("_real","_null"),validate="one_to_many")
             same["session"],same["animal"],same["generator"]=session,animal,gen
@@ -382,22 +391,31 @@ def summarize_disagreement(events, status, output):
         c=cal[cal.generator.eq(gen)&cal.subset.eq("spike_active_supported")]
         null=c[c.source.eq("null_test")]
         injected=c[c.source.eq("injected_conflict")]
+        represented=c.groupby("session").source.nunique()
+        coverage_pass=bool(len(c) and len(represented)==len(r) and (represented==3).all()
+            and c.coverage.notna().all() and (c.coverage>=.8).all() and (c.calibrated_events>=40).all())
         checks=dict(nonempty=bool(len(r) and r.real_events.sum()>0),
+            calibration_coverage_and_denominators=coverage_pass,
             known_path_recovery=bool(len(r) and r.calibration_resolution_pass.all()),
             null_fpr=bool(len(null) and null.tail_fraction.notna().all() and (null.tail_fraction<=.075).all()),
             conflict_sensitivity=bool(len(injected) and injected.tail_fraction.notna().all() and (injected.tail_fraction>=.8).all()),
             local_run_matched=bool(len(status[status.split.eq(0)&status.confirmed]) and status[status.split.eq(0)&status.confirmed].local_match_all.all()))
         checks["biological_conflict_interpretable"]=all(checks.values())
         gate.extend(dict(generator=gen,gate=k,passed=v) for k,v in checks.items())
+    gate.append(dict(generator="overall",gate="biological_conflict_interpretable",
+        passed=all(row["passed"] for row in gate if row["gate"]=="biological_conflict_interpretable")
+        and sum(row["gate"]=="biological_conflict_interpretable" for row in gate)==len(GENERATORS)))
     pd.DataFrame(gate).to_csv(output/"disagreement_gate_summary.csv",index=False)
     lines=["# Independent Population Content Pilot","","Disagreement is not by itself evidence for multiplexed replay.",
         "",f"Primary real events: {len(primary[primary.source.eq('real')])}; sessions: {primary.session.nunique()}; rats: {primary.animal.nunique()}.",
         "", "## Calibration", ""]
     for row in result[result.subset.eq("spike_active_supported")].itertuples():
-        lines.append(f"- {row.session}, {row.generator}: known-path median error {row.known_path_median_error_cm:.1f} cm; active-support KS {row.active_support_ks:.3f}; support-matched mean disagreement excess {row.matched_excess_cm:+.1f} cm.")
+        lines.append(f"- {row.session}, {row.generator}: A/B known-path median errors {row.a_known_path_median_error_cm:.1f}/{row.b_known_path_median_error_cm:.1f} cm; A/B active-support KS {row.a_active_support_ks:.3f}/{row.b_active_support_ks:.3f}; support-stratified mean disagreement excess {row.matched_excess_cm:+.1f} cm.")
     lines.extend(["", "## Interpretation", "",
         "Biological conflicts require local RUN matching, simulator recovery, active-support calibration, controlled false positives AND power to detect injected conflicts. Failed gates prohibit that claim.",
         "Conditional simulations preserve observed 5-ms total counts exactly but not cell correlations or exact active-unit counts. Drift/gain sensitivity is not an exhaustive biological null.",
+        "Primary null thresholds use minimum-spike strata only. Joint minimum-spike/active strata are a separate reweighting sensitivity, not exact joint population support matching.",
+        "Post-review technical hardening requires >=80% calibrated coverage and >=40 calibrated events per real/null/conflict session case, per-population error/active-count gates, and BOTH generators to pass. These stricter guards cannot rescue a failed scientific gate.",
         "Population selection uses early RUN and a later matching block. Confirmation failures are not replaced. Original full-RUN cell eligibility and pooled-event ascertainment remain conditioning boundaries.",
         "Fine/coarse support predictions are in the separate reliability report; held-out population agreement must not be equated with ground-truth correctness."])
     (output/"disagreement_report.md").write_text("\n".join(lines)+"\n")

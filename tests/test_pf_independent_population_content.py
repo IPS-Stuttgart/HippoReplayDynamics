@@ -10,7 +10,7 @@ from scipy.spatial import cKDTree
 from scripts.analyze_pf_independent_population_content import (
     balanced_partitions, decode, endpoint_readout, event_windows, longest_run,
     profile, profile_gap, reflected_path, regions, simulate_counts, support_stratum,
-    truth_frames,
+    truth_frames, summarize_disagreement,
 )
 
 
@@ -101,3 +101,46 @@ def test_temporal_conflict_and_strata():
     assert longest_run([0,0])==0
     df=pd.DataFrame(dict(a_spikes=[0,3,6],b_spikes=[1,4,7],a_active=[0,2,4],b_active=[1,3,5]))
     assert support_stratum(df).tolist()==[0,4,8]
+
+
+def summary_fixture(real_spikes=4):
+    rows=[]
+    for source,gen in [('real','observed')]+[(s,g) for g in ['matched_map','drift_gain']
+            for s in ['sim_calibration','sim_test','sim_conflict']]:
+        for i in range(40):
+            sep=i/40 if source=='sim_calibration' else (100 if source=='sim_conflict' and gen=='matched_map' else 0)
+            rows.append(dict(animal='RatA',session='RatA/Open1',window_uid=str(i),split=0,
+                cohort='all_fixed_candidates',source=source,generator=gen,a_spikes=real_spikes if source=='real' else 4,
+                b_spikes=real_spikes if source=='real' else 4,a_active=2,b_active=2,endpoint_separation_cm=sep,
+                a_truth_error_cm=1,b_truth_error_cm=1,truth_separation_cm=80,persistent_conflict_ms=0))
+    status=pd.DataFrame([dict(split=0,confirmed=True,local_match_all=True)])
+    return pd.DataFrame(rows),status
+
+
+def test_summary_requires_real_calibration_coverage(tmp_path):
+    events,status=summary_fixture(real_spikes=8)
+    summarize_disagreement(events,status,tmp_path)
+    g=pd.read_csv(tmp_path/'disagreement_gate_summary.csv')
+    assert not g[g.gate.eq('calibration_coverage_and_denominators')].passed.any()
+    assert not g[g.generator.eq('overall')].passed.any()
+
+
+def test_summary_cross_generator_and_primary_spike_strata(tmp_path):
+    events,status=summary_fixture()
+    summarize_disagreement(events,status,tmp_path)
+    g=pd.read_csv(tmp_path/'disagreement_gate_summary.csv')
+    axis=g[g.gate.eq('biological_conflict_interpretable')].set_index('generator').passed
+    assert axis['matched_map']
+    assert not axis['drift_gain'] and not axis['overall']
+    c=pd.read_csv(tmp_path/'null_calibration_by_session.csv')
+    assert c.calibration_stratification.eq('minimum_spike_count_only').all()
+
+
+def test_summary_checks_both_population_recovery(tmp_path):
+    events,status=summary_fixture()
+    mask=events.source.eq('sim_test')
+    events.loc[mask,'a_truth_error_cm']=39
+    summarize_disagreement(events,status,tmp_path)
+    d=pd.read_csv(tmp_path/'disagreement_by_session.csv')
+    assert not d.calibration_resolution_pass.any()
+    assert d.a_known_path_median_error_cm.eq(39).all()

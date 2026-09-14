@@ -28,6 +28,27 @@ def dense_gaussian(grid):
     return kernel / kernel.sum(axis=0)
 
 
+def native_context_intervals(src, event, native, source):
+    lo, hi = src["offsets"][event : event + 2]
+    n_base = int(hi - lo)
+    if source == "real":
+        found = np.flatnonzero(native["candidate_event_indices"] == src["event_ids"][event])
+        if len(found) != 1:
+            raise ValueError("native event identity missing or duplicated")
+        begin = int(native["candidate_offsets"][found[0]])
+        left = native["candidate_base_starts_s"][begin : begin + n_base]
+        end = left[-1] + native["candidate_base_durations_s"][begin + n_base - 1]
+        edges = np.r_[left, end]
+    elif source == "run_q4":
+        edges = src["starts_s"][event] + np.arange(n_base + 1) * 0.005
+        edges[-1] = src["starts_s"][event] + n_base * 0.005
+    else:
+        raise ValueError("no native spike intervals for simulations")
+    index = np.arange(n_base - 4 * min(10, n_base // 4), n_base, 4)
+    # Read both edges from the source clock; left+20ms can include an edge spike.
+    return edges[index], edges[index + 4]
+
+
 def dense_bank(events, rates, grid):
     """Batch independent SciPy PMFs and probability prediction/log Bayes updates."""
     matrix = dense_gaussian(grid)
@@ -78,7 +99,7 @@ def verify_one(row):
     for source in SOURCES:
         src = load_npz(prior / f"{source}_audit.npz")
         rates, grid, ids = (src[k] for k in ("rates_hz", "grid_cm", "cell_ids"))
-        blocks, truth, starts, context_ms, raw_starts = [], [], [], [], []
+        blocks, truth, starts, context_ms, raw_starts, raw_ends = [], [], [], [], [], []
         for j, (lo, hi) in enumerate(zip(src["offsets"][:-1], src["offsets"][1:], strict=True)):
             n = min(10, (hi - lo) // 4)
             if n < 1:
@@ -88,12 +109,12 @@ def verify_one(row):
             truth.append(src["truth_base_cm"][hi - 4 : hi].mean(axis=0))
             context_ms.append(20 * n)
             if source in ("real", "run_q4"):
-                left = src["starts_s"][j] + 0.005 * (hi - lo - n * 4) + np.arange(n) * 0.02
+                left, right = native_context_intervals(src, j, native, source)
                 raw_starts.append(left)
+                raw_ends.append(right)
                 native_blocks += int(n)
         if raw_starts:
-            left = np.concatenate(raw_starts)
-            np.testing.assert_array_equal(np.concatenate(blocks), recount(native["spikes"], ids, left, left + 0.02))
+            np.testing.assert_array_equal(np.concatenate(blocks), recount(native["spikes"], ids, np.concatenate(raw_starts), np.concatenate(raw_ends)))
         counts, truth, starts = np.stack([x[-1] for x in blocks]), np.asarray(truth), np.asarray(starts)
         for part in freeze["groups"]:
             split = part["split"]

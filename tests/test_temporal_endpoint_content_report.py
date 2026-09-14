@@ -7,7 +7,8 @@ import pytest
 from scipy.sparse import csr_matrix
 
 from scripts._provenance import file_sha256
-from scripts.audit_temporal_endpoint_content import dense_bank, verify_one
+from scripts.audit_edge_support_content import recount
+from scripts.audit_temporal_endpoint_content import dense_bank, native_context_intervals, verify_one
 from scripts.measure_edge_support_content import read_event
 from scripts.measure_temporal_endpoint_content import METHODS, endpoint_bank, measure_session
 from scripts.report_temporal_endpoint_content import SOURCES, TRUTH, gates, summaries
@@ -119,7 +120,15 @@ def test_full_session_roundtrip_and_json_serialization(tmp_path):
             for u, cell in enumerate(ids):
                 spikes.extend([[starts[e] + (b - lo + 0.5) * 0.005, cell]] * int(base[b, u]))
     native = tmp_path / "encoding.npz"
-    np.savez_compressed(native, spikes=np.array(spikes))
+    native_starts = np.r_[starts[0] + np.arange(5) * 0.005, starts[1] + np.arange(8) * 0.005]
+    np.savez_compressed(
+        native,
+        spikes=np.array(spikes),
+        candidate_event_indices=event_ids,
+        candidate_offsets=offsets,
+        candidate_base_starts_s=native_starts,
+        candidate_base_durations_s=np.full(13, 0.005),
+    )
     (tmp_path / "encoding_manifest.json").write_text(json.dumps(dict(training_only=True, holdout_spikes_used_for_rate_or_unit_selection=False)))
     groups = [dict(split=i, a_ids=[10, 20], b_ids=[30, 40]) for i in range(3)]
     freeze = dict(seed=20260914, groups=groups, encoding_path=str(native), encoding_sha256=file_sha256(native))
@@ -142,3 +151,13 @@ def test_full_session_roundtrip_and_json_serialization(tmp_path):
     assert checked["rows"] == 6 * 3 * 5 * 2
     assert checked["native_context_blocks"] == 6
     json.dumps(checked)
+
+
+def test_source_clock_excludes_exact_right_edge_spike():
+    src = dict(offsets=np.array([0, 40]), starts_s=np.array([28579.0]))
+    left, right = native_context_intervals(src, 0, {}, "run_q4")
+    spikes = np.array([[28579.1, 17]])
+    expected = recount(spikes, np.array([17]), left, right)
+    assert expected[4, 0] == 0
+    assert expected[5, 0] == 1
+    assert (left[4] + 0.02) > right[4]

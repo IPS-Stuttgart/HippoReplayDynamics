@@ -285,6 +285,9 @@ def measure(args):
         slug = session.replace("/", "_")
         enc, diagonal = encodings[session]
         old = pd.read_csv(args.result_dir / f"{slug}_events.csv.gz", dtype={"event_id": str})
+        if not old.session.eq(session).all():
+            raise ValueError("source session identity mismatch")
+        old["animal"] = old.session.str.split("/").str[0]
         old = old[old.method.eq("baseline")]
         for src in base.REAL + base.TRUTH:
             bank = base.read_npz(source / slug / f"{src}.npz")

@@ -9,6 +9,7 @@ import pytest
 from scripts import learned_content_screen as m
 from scripts.audit_content_screening_bound import verify_certificate
 from scripts import audit_learned_content_screen as a
+from scripts import report_learned_content_screen as r
 
 
 def calibration():
@@ -157,7 +158,7 @@ def test_full_artifact_reconstruction_and_rehashed_selection_tamper(tmp_path):
                         )
                     )
         path = previous / f"{slug}_events.csv.gz"
-        pd.concat(events, ignore_index=True).to_csv(path, index=False)
+        pd.concat(events, ignore_index=True).drop(columns="animal").to_csv(path, index=False)
         outputs[path.name] = a.sha(path)
         inputs.update({str(p): a.sha(p) for p in folder.iterdir()})
     (previous / "manifest.json").write_text(json.dumps(dict(source_dir=str(source), input_file_sha256=inputs, output_sha256=outputs, synthetic_fixture=True)))
@@ -168,6 +169,12 @@ def test_full_artifact_reconstruction_and_rehashed_selection_tamper(tmp_path):
     verified = a.audit(root, tmp_path / "audit.json")
     assert verified["models_refitted"] == 3 and verified["status"] == "pass"
     assert not verified["validated_remedy"] and not verified["external_validation"]
+    report_dir = tmp_path / "report"
+    r.report(root, tmp_path / "audit.json", report_dir)
+    assert (report_dir / "learned_content_screen.png").stat().st_size > 1000
+    report_manifest = json.loads((report_dir / "report_manifest.json").read_text())
+    assert not report_manifest["validated_remedy"] and not report_manifest["external_validation"]
+    assert "NOT ESTABLISHED" in (report_dir / "report.md").read_text()
     frame = pd.read_csv(root / "event_selection.csv.gz")
     frame.loc[0, "predictive_half"] = not frame.loc[0, "predictive_half"]
     frame.to_csv(root / "event_selection.csv.gz", index=False)

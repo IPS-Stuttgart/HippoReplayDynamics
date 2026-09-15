@@ -26,6 +26,19 @@ METHODS = ("all", "learned_half", "spike_half", "entropy_half")
 COLORS = ("#777777", "#15796d", "#bd7631", "#94658c")
 
 
+def classwise_truth(events):
+    metrics = ["high_home", "low_home", "high_error", "low_error", "high_brier", "low_brier"]
+    rows = []
+    for method, column in [("all", "all"), ("learned_half", "predictive_half")]:
+        selected = events[events.true_home.isin((0, 1)) & events[column]]
+        table = selected.groupby(["animal", "session", "source", "true_home"], as_index=False)[metrics].mean()
+        table["method"] = method
+        rows.append(table)
+    session = pd.concat(rows, ignore_index=True)
+    animal = session.groupby(["animal", "source", "true_home", "method"], as_index=False)[metrics].mean()
+    return session, animal
+
+
 def report(root, audit_path, output):
     manifest = json.loads((root / "manifest.json").read_text())
     audit = json.loads(audit_path.read_text())
@@ -64,6 +77,11 @@ def report(root, audit_path, output):
     truth["mean_population_home_brier"] = (truth.balanced_high_brier + truth.balanced_low_brier) / 2
     truth = truth[["source", "method", "mean_population_error_cm", "mean_population_home_brier", "class0_retention", "class1_retention"]]
     events = pd.read_csv(root / "event_selection.csv.gz", dtype={"event_id": str})
+    class_session, class_animal = classwise_truth(events)
+    recomposed = class_animal.groupby(["animal", "source", "method"])[["high_error", "low_error", "high_brier", "low_brier"]].mean()
+    expected = animal[~animal.source.isin(REAL) & animal.method.isin(("all", "learned_half"))].set_index(["animal", "source", "method"])
+    for metric in recomposed.columns:
+        np.testing.assert_allclose(recomposed[metric], expected.loc[recomposed.index, f"balanced_{metric}"], atol=1e-10)
     score_rows = []
     for key, group in events.groupby(["session", "source", "encoding"]):
         cutoff = group.loc[group.predictive_half, "pair_score"].min()
@@ -80,7 +98,15 @@ def report(root, audit_path, output):
         )
     output.mkdir(parents=True, exist_ok=False)
     for name, frame in dict(
-        training=training, real_summary=real, truth_summary=truth, animal_summary=animal, session_summary=session, gates=gates, selection_scores=pd.DataFrame(score_rows)
+        training=training,
+        real_summary=real,
+        truth_summary=truth,
+        animal_summary=animal,
+        session_summary=session,
+        gates=gates,
+        selection_scores=pd.DataFrame(score_rows),
+        truth_by_class_by_session=class_session,
+        truth_by_class_by_animal=class_animal,
     ).items():
         frame.to_csv(output / f"{name}.csv", index=False)
     fig, axes = plt.subplots(2, 2, figsize=(12, 8), layout="constrained")
@@ -96,14 +122,19 @@ def report(root, audit_path, output):
     axes[1, 0].set_xticks(range(len(rat)), rat.index)
     axes[1, 0].set_ylabel("Home-content gap (percentage points)")
     axes[1, 0].legend(frameon=False)
-    delta = truth.pivot(index="source", columns="method", values="mean_population_error_cm")
-    labels = ["Native Q4" if s == "run_q4" else s.removeprefix("test_").replace("_", " ") for s in delta.index]
-    change = delta.learned_half - delta["all"]
-    axes[1, 1].barh(range(len(delta)), change, color=np.where(change <= 0, COLORS[1], "#b64a44"))
-    axes[1, 1].set_yticks(range(len(delta)), labels, fontsize=9)
+    native_home = class_animal[class_animal.source.eq("run_q4") & class_animal.true_home.eq(1)]
+    change, labels = [], []
+    for name, group in native_home.groupby("animal"):
+        group = group.set_index("method")
+        for side in ("high", "low"):
+            change.append(group.loc["learned_half", f"{side}_brier"] - group.loc["all", f"{side}_brier"])
+            labels.append(f"{name} / {side}")
+    change = np.asarray(change)
+    axes[1, 1].barh(range(len(change)), change, color=np.where(change <= 0, COLORS[1], "#b64a44"))
+    axes[1, 1].set_yticks(range(len(change)), labels, fontsize=9)
     axes[1, 1].axvline(0, color="black", linewidth=0.8)
-    axes[1, 1].set_xlabel("Known-position error change (cm; lower is better)")
-    axes[1, 1].set_title("Pooled description; gates also check each rat/Brier", fontsize=10)
+    axes[1, 1].set_xlabel("Home Brier loss change (lower is better)")
+    axes[1, 1].set_title("True Home positions, native RUN\nBy held-out rat and population", fontsize=10)
     passed = audit["gates"]["development_numerical_screen"]
     fig.suptitle(f"Learned paired-population screen: development {'PASS' if passed else 'FAIL'}\nNo external validation; no validated-remedy claim", fontsize=14)
     fig.savefig(output / "learned_content_screen.png", dpi=170)
@@ -135,6 +166,12 @@ def report(root, audit_path, output):
         markdown(truth),
         "",
         "These summaries equally weight rats after averaging sessions within rat. The gates additionally forbid worsening either population's class-balanced position error and Home Brier within any rat/source. True replay content remains unknown.",
+        "",
+        "## Native RUN, split by true region",
+        "",
+        markdown(class_animal[class_animal.source.eq("run_q4")].drop(columns="source")),
+        "",
+        "Classwise tables are a post-hoc diagnostic decomposition of audited losses, not a new selection rule or a changed gate. Each class contributes equally when reconstructing the original class-balanced losses.",
         "",
         "## Failed gates",
         "",

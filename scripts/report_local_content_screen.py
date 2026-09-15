@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import sys
 from pathlib import Path
@@ -20,6 +21,56 @@ import pandas as pd
 
 from scripts._provenance import build_script_provenance, file_sha256
 from scripts.report_content_screening_bound import markdown
+from scripts.audit_learned_content_screen import route
+
+
+def retention_transport(calibration, events, models):
+    """Diagnose hardening versus transfer without fitting or changing any rule."""
+    rows = []
+    calibration = calibration.assign(encoding="early_run")
+    truth = events[events.true_home.isin((0, 1))]
+    for phase, data in (("calibration", calibration), ("held_out", truth)):
+        for (session, source), frame in data.groupby(["session", "source"]):
+            model = models[session]
+            lookup = dict(zip(model["leaf_nodes"], model["probabilities"], strict=True))
+            probability = np.array([lookup[node] for node in route(model["tree"], frame)])
+            tie = [int.from_bytes(hashlib.sha256(f"20260915|local-content-screen|{session}|{source}|{j}".encode()).digest()[:8], "little") for j in frame.observation_index]
+            order = sorted(range(len(frame)), key=lambda j: (-probability[j], tie[j]))
+            hard = np.zeros(len(frame))
+            hard[order[: (len(frame) + 1) // 2]] = 1
+            if phase == "held_out":
+                np.testing.assert_array_equal(hard.astype(bool), frame.predictive_half)
+                np.testing.assert_allclose(probability, frame.pair_score, atol=1e-12)
+            for label in (0, 1):
+                ix = frame.true_home.eq(label).to_numpy()
+                for method, weights in (("fractional_diagnostic", probability), ("hard_half", hard)):
+                    w = weights[ix]
+                    for metric in ("high_error", "low_error", "high_brier", "low_brier"):
+                        values = frame.loc[ix, metric].to_numpy()
+                        before = values.mean()
+                        after = np.average(values, weights=w) if w.sum() > 0 else np.nan
+                        rows.append(
+                            dict(
+                                phase=phase,
+                                session=session,
+                                source=source,
+                                true_home=label,
+                                method=method,
+                                metric=metric,
+                                observations=int(ix.sum()),
+                                retention=float(w.mean()),
+                                before=before,
+                                after=after,
+                                change=after - before,
+                                nonworsening=bool(np.isfinite(after) and after <= before + 1e-8),
+                            )
+                        )
+    detail = pd.DataFrame(rows)
+    summary = detail.groupby(["phase", "source", "method"], as_index=False).agg(
+        comparisons=("nonworsening", "size"), nonworsening=("nonworsening", "sum"), min_class_retention=("retention", "min"), max_class_retention=("retention", "max")
+    )
+    summary["worsening"] = summary.comparisons - summary.nonworsening
+    return detail, summary
 
 
 def report(root, audit_path, output):
@@ -50,6 +101,12 @@ def report(root, audit_path, output):
     animals = pd.read_csv(root / "animal_summary.csv")
     sessions = pd.read_csv(root / "session_summary.csv")
     classes = pd.read_csv(root / "truth_by_class.csv")
+    calibration_path = Path(manifest["source_result_dir"]) / "calibration.csv.gz"
+    if file_sha256(calibration_path) != manifest["input_file_sha256"][str(calibration_path)]:
+        raise ValueError("calibration source changed")
+    calibration = pd.read_csv(calibration_path, float_precision="round_trip")
+    events = pd.read_csv(root / "event_selection.csv.gz", dtype={"event_id": str}, float_precision="round_trip")
+    transport, transport_summary = retention_transport(calibration, events, models)
     real = summary[summary.source.isin(("all_fixed_candidates", "full_accepted_segment"))].copy()
     real["home_gap_pp"] = real.home_gap * 100
     real = real[["source", "encoding", "method", "home_gap_pp", "separation", "regional_tv", "high_entropy", "low_entropy"]]
@@ -74,7 +131,16 @@ def report(root, audit_path, output):
     )
     output.mkdir(parents=True, exist_ok=False)
     for name, table in dict(
-        training=training, real_summary=real, animal_summary=animals, session_summary=sessions, truth_by_class=classes, truth_class_changes=differences, gates=gates, counts=counts
+        training=training,
+        real_summary=real,
+        animal_summary=animals,
+        session_summary=sessions,
+        truth_by_class=classes,
+        truth_class_changes=differences,
+        gates=gates,
+        counts=counts,
+        retention_transport=transport,
+        retention_transport_summary=transport_summary,
     ).items():
         table.to_csv(output / f"{name}.csv", index=False)
     primary = real[real.source.eq("all_fixed_candidates") & real.encoding.eq("early_run")].set_index("method")
@@ -128,6 +194,12 @@ def report(root, audit_path, output):
         "",
         "All six truth sources, both classes and both populations are included in truth_class_changes.csv. Pooled gains cannot override local accuracy failures.",
         "",
+        "## Where protection is lost",
+        "",
+        markdown(transport_summary),
+        "",
+        "Post-hoc non-rescoring diagnostic: apply the SAME frozen probabilities as fractional weights, and compare with the original hard-half rule, on calibration versus held-out controls. This does not define an alternative remedy or override any gate. The 1e-8 diagnostic tolerance only accommodates numerical LP residuals; the predeclared scientific gates remain unchanged.",
+        "",
         "## Failed gates",
         "",
         markdown(gates[~gates.passed]),
@@ -141,6 +213,7 @@ def report(root, audit_path, output):
         "measurement_manifest_sha256": file_sha256(root / "manifest.json"),
         "audit_sha256": file_sha256(audit_path),
         "reporter_sha256": file_sha256(__file__),
+        "calibration_sha256": file_sha256(calibration_path),
         "external_validation": False,
         "validated_remedy": False,
         "output_sha256": {p.name: file_sha256(p) for p in output.iterdir() if p.is_file()},

@@ -150,6 +150,15 @@ def test_complete_pipeline_and_rehashed_selection_tamper(tmp_path):
     r.report(root, tmp_path / "audit.json", tmp_path / "report")
     assert (tmp_path / "report/local_content_screen.png").stat().st_size > 1000
     assert "NOT ESTABLISHED" in (tmp_path / "report/report.md").read_text()
+    transport = pd.read_csv(tmp_path / "report/retention_transport.csv")
+    cal_soft = transport[transport.phase.eq("calibration") & transport.method.eq("fractional_diagnostic")]
+    assert cal_soft.nonworsening.all()
+    np.testing.assert_allclose(cal_soft.retention, 0.5, atol=1e-8)
+    hard = transport[transport.phase.eq("held_out") & transport.method.eq("hard_half")]
+    classes = pd.read_csv(root / "truth_by_class.csv")
+    for row in hard.itertuples():
+        value = classes[classes.session.eq(row.session) & classes.source.eq(row.source) & classes.true_home.eq(row.true_home) & classes.method.eq("local_half")][row.metric].iloc[0]
+        assert row.after == pytest.approx(value, abs=1e-10)
     events = pd.read_csv(root / "event_selection.csv.gz")
     events.loc[0, "predictive_half"] = not events.loc[0, "predictive_half"]
     events.to_csv(root / "event_selection.csv.gz", index=False)

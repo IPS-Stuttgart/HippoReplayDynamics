@@ -247,6 +247,9 @@ def run(result_dir, output_dir):
         if file_sha256(path) != sha:
             raise ValueError(f"source changed: {path}")
     sources = source["input_file_sha256"]
+    inputs = {str(p): file_sha256(p) for p in (manifest_path, result_dir / "independent_audit.json", Path(__file__), ROOT / "docs/joint_exchange_protocol.md")}
+    inputs.update(source["input_file_sha256"])
+    inputs.update({str(result_dir / name): sha for name, sha in source["output_sha256"].items()})
     output_dir.mkdir(parents=True, exist_ok=False)
     choices, summaries, candidate_rows, checks = {}, [], [], {}
     for session in exact.base.SESSIONS:
@@ -284,15 +287,13 @@ def run(result_dir, output_dir):
     (output_dir / "selection.json").write_text(json.dumps(choices, indent=2) + "\n")
     summary = pd.DataFrame(summaries)
     summary.to_csv(output_dir / "summary.csv", index=False)
-    pd.DataFrame(candidate_rows).to_csv(output_dir / "proposals.csv", index=False)
+    columns = ["session", "name", "cells_exchanged", "objective", "admissible"] + [f"risk_change_{key}" for key in coverage.RISK_NAMES]
+    pd.DataFrame(candidate_rows, columns=columns).to_csv(output_dir / "proposals.csv", index=False)
     report = "# Joint exchange RUN-calibration experiment\n\n" + markdown(summary)
     report += "\n\nSelection only. No replay or held-out test observations were scored. Approximate MILP feasibility does not imply exact accuracy safety. "
     report += "Every admitted candidate passed the exact full-likelihood classwise guards. No global optimality or independent-data remedy claim. "
     report += "All original pairs remain in the experiment; unchanged pairs are not dropped.\n"
     (output_dir / "report.md").write_text(report)
-    inputs = {str(p): file_sha256(p) for p in (manifest_path, result_dir / "independent_audit.json", Path(__file__), ROOT / "docs/joint_exchange_protocol.md")}
-    inputs.update(source["input_file_sha256"])
-    inputs.update({str(result_dir / name): sha for name, sha in source["output_sha256"].items()})
     for path, sha in inputs.items():
         if file_sha256(path) != sha:
             raise ValueError(f"changed input: {path}")

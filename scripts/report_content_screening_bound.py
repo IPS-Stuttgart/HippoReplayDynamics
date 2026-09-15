@@ -93,7 +93,7 @@ def plot_primary(frame, path):
         ax.set_yticks(range(len(values)), [f"{LABELS[s]} / {e.removesuffix('_run')} / {session}" for s, e, session in values.index], fontsize=8)
         ax.set_xticks(
             range(len(columns)),
-            [f"{'Free' if o == 'free_event' else 'Same-count'}\n{'accuracy guarded' if g == 'truth_guarded' else 'agreement only'}" for o, g in columns],
+            [f"{'Free' if o == 'free_event' else 'Same-count'}\n" + ("accuracy\nguarded" if g == "truth_guarded" else "agreement\nonly") for o, g in columns],
             fontsize=9,
         )
         ax.set_title(title, fontsize=11)

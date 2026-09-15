@@ -82,3 +82,8 @@ SSH loss. Technical success or calibration improvement cannot complete the goal.
 
 Any failed development safeguard blocks independent promotion. A stopped bounded
 search is evidence about THIS rule, not a proof that no fixed-budget remedy exists.
+
+Pre-run numerical clarification from synthetic zero-swap tests: beating the
+random-control mean requires an excess>1e-10 in each metric. Identical assignments
+cannot count as an improvement due to rounding when averaging20 identical draws.
+This is an arithmetic tie tolerance, not a relaxed scientific threshold.

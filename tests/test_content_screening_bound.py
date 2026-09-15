@@ -8,6 +8,7 @@ import pytest
 
 from scripts import bound_content_screening as m
 from scripts import audit_content_screening_bound as a
+from scripts import report_content_screening_bound as r
 
 
 def example(known=True):
@@ -167,6 +168,22 @@ def test_full_artifact_certificates_and_rehashed_summary_tamper(tmp_path):
     m.measure(Namespace(result_dir=result, audit=source_audit, output_dir=dest))
     verified = a.audit(dest, tmp_path / "audit.json")
     assert verified["status"] == "pass" and verified["cases"] == 384
+    report_dir = tmp_path / "report"
+    summary, comparison = r.report(dest, tmp_path / "audit.json", report_dir)
+    assert len(summary) == 96 and len(comparison) == 120
+    assert (report_dir / "screening_bound.png").stat().st_size > 1000
+    report_manifest = json.loads((report_dir / "report_manifest.json").read_text())
+    assert not report_manifest["validated_remedy"] and not report_manifest["external_validation"]
+    assert report_manifest["oracle_not_deployable"]
+    assert "NO validated remedy" in (report_dir / "report.md").read_text()
+    broken = pd.read_csv(dest / "bounds.csv")
+    broken.loc[(broken.oracle == "count_pattern") & (broken.guard == "truth_guarded"), "max_progress"] = 5.1
+    with pytest.raises(ValueError, match="nested"):
+        r.tables(broken)
+    bad_audit = tmp_path / "bad_status.json"
+    bad_audit.write_text(json.dumps(dict(status="failed")))
+    with pytest.raises(ValueError, match="certified"):
+        r.report(dest, bad_audit, tmp_path / "bad_report")
     table = pd.read_csv(dest / "bounds.csv")
     table.loc[0, "max_progress"] += 0.05
     table.to_csv(dest / "bounds.csv", index=False)

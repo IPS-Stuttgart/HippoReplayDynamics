@@ -121,18 +121,28 @@ def metrics(data, weights):
     return row
 
 
-def solve_case(data, counts, coverage, oracle, guard, path):
-    problem, names, unique = build_problem(data, counts, coverage, oracle, guard)
+def solve_program(problem):
+    # Preserve collectively material small Brier coefficients in HiGHS's matrix.
+    row_scale = 1e4
     result = linprog(
         problem["c"],
-        A_ub=problem["A"],
-        b_ub=problem["b"],
-        A_eq=problem["E"],
-        b_eq=problem["f"],
+        A_ub=row_scale * problem["A"],
+        b_ub=row_scale * problem["b"],
+        A_eq=row_scale * problem["E"],
+        b_eq=row_scale * problem["f"],
         bounds=list(zip(problem["lo"], problem["hi"], strict=True)),
         method="highs",
-        options=dict(time_limit=120, primal_feasibility_tolerance=1e-8, dual_feasibility_tolerance=1e-8),
+        options=dict(time_limit=120, primal_feasibility_tolerance=1e-9, dual_feasibility_tolerance=1e-9),
     )
+    if result.status == 0:
+        result.ineqlin.marginals *= row_scale
+        result.eqlin.marginals *= row_scale
+    return result
+
+
+def solve_case(data, counts, coverage, oracle, guard, path):
+    problem, names, unique = build_problem(data, counts, coverage, oracle, guard)
+    result = solve_program(problem)
     status = dict(solver_status=int(result.status), message=result.message)
     path.with_suffix(".json").write_text(json.dumps(status, indent=2) + "\n")
     if result.status != 0:

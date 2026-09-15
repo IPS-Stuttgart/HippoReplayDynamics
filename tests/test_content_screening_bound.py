@@ -111,6 +111,32 @@ def test_nonvacuous_weighted_metrics():
         m.metrics(example()[0], np.zeros(8))
 
 
+def test_collectively_material_tiny_coefficients_are_not_dropped():
+    n = 2000
+    problem = dict(
+        c=np.r_[np.zeros(n), -1.0],
+        A=np.array([np.r_[np.full(n, 1e-10), 1.0]]),
+        b=np.array([1.0]),
+        E=np.array([np.r_[np.ones(n), 0.0]]),
+        f=np.array([float(n)]),
+        lo=np.zeros(n + 1),
+        hi=np.r_[np.ones(n), 5.0],
+        group=np.arange(n),
+    )
+    solved = m.solve_program(problem)
+    assert solved.status == 0
+    assert solved.x[-1] == pytest.approx(1 - n * 1e-10, abs=1e-10)
+    certificate = dict(
+        x=solved.x,
+        inequality_dual=solved.ineqlin.marginals,
+        equality_dual=solved.eqlin.marginals,
+        lower_dual=solved.lower.marginals,
+        upper_dual=solved.upper.marginals,
+        group=problem["group"],
+    )
+    assert a.verify_certificate(problem, certificate)["primal_residual"] < 1e-10
+
+
 def test_full_artifact_certificates_and_rehashed_summary_tamper(tmp_path):
     source, result = tmp_path / "source", tmp_path / "existing_result"
     source.mkdir()

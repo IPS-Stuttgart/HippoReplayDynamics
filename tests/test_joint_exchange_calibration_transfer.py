@@ -76,6 +76,8 @@ def test_calibration_pass_can_coexist_with_unselected_phase_failure():
 def test_full_fixed_choice_native_diagnostic_and_hashes(tmp_path):
     source, selected = tmp_path / "source", tmp_path / "selected"
     selected.mkdir()
+    truth_dir = tmp_path / "truth"
+    truth_dir.mkdir()
     inputs, choices = {}, {}
     for session in m.truth.exact.base.SESSIONS:
         enc, bank, choice = fixture()
@@ -87,13 +89,23 @@ def test_full_fixed_choice_native_diagnostic_and_hashes(tmp_path):
         inputs.update({str(p): m.file_sha256(p) for p in folder.iterdir()})
         choices[session] = choice
     (selected / "selection.json").write_text(json.dumps(choices))
-    (selected / "manifest.json").write_text(json.dumps(dict(input_file_sha256=inputs, output_sha256={"selection.json": m.file_sha256(selected / "selection.json")})))
+    selection_inputs = {p: h for p, h in inputs.items() if not p.endswith("/run_q4.npz")}
+    (selected / "manifest.json").write_text(json.dumps(dict(input_file_sha256=selection_inputs, output_sha256={"selection.json": m.file_sha256(selected / "selection.json")})))
     (selected / "independent_audit.json").write_text(json.dumps(dict(status="pass", manifest_sha256=m.file_sha256(selected / "manifest.json"))))
+    inputs[str(selected / "manifest.json")] = m.file_sha256(selected / "manifest.json")
+    (truth_dir / "manifest.json").write_text(json.dumps(dict(input_file_sha256=inputs, output_sha256={})))
+    (truth_dir / "independent_audit.json").write_text(json.dumps(dict(status="pass", manifest_sha256=m.file_sha256(truth_dir / "manifest.json"))))
     output = tmp_path / "output"
-    m.run(selected, source, output)
+    m.run(selected, source, output, truth_dir)
     assert len(pd.read_csv(output / "classwise_native_transfer.csv")) == 96
     assert len(pd.read_csv(output / "native_transfer_summary.csv")) == 24
     record = json.loads((output / "manifest.json").read_text())
     assert record["posthoc_diagnostic"] and not record["replay_scored"] and not record["validated_remedy"] and not record["external_validation"]
     for name, sha in record["output_sha256"].items():
         assert m.file_sha256(output / name) == sha
+    # A valid audit of a different selection is not a valid handoff.
+    inputs.pop(str(selected / "manifest.json"))
+    (truth_dir / "manifest.json").write_text(json.dumps(dict(input_file_sha256=inputs, output_sha256={})))
+    (truth_dir / "independent_audit.json").write_text(json.dumps(dict(status="pass", manifest_sha256=m.file_sha256(truth_dir / "manifest.json"))))
+    with pytest.raises(ValueError, match="another selection"):
+        m.run(selected, source, tmp_path / "bad", truth_dir)

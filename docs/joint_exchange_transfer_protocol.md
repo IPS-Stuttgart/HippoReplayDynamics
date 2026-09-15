@@ -10,7 +10,9 @@ nativeQ3 andQ4 with early maps at20ms, through the existing two independently
 implemented likelihood calculations. Separate first20ms per250ms parent (the
 Q3 calibration sample), remaining20ms bins in those same parents, and all bins.
 Reconstruct the original Q3-first objective and8classwise risks from selection.
-No replay observations or alternative assignments are evaluated.
+No replay observations or alternative assignments are evaluated. NativeQ4 is
+verified through the completed held-out truth audit linked to this exact
+selection, because the RUN-only selection manifest deliberately has noQ4 bank.
 
 Report both classwise physical error/Home Brier and the squared class-conditional
 Home-mass-gap objective. No class or pair is omitted if it fails. Preserve native

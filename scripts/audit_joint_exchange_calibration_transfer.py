@@ -87,19 +87,28 @@ def inspect_bank(enc, bank, choice, session, source):
     return rows, summaries
 
 
-def run(selection_dir, source_dir, output_dir):
+def run(selection_dir, source_dir, output_dir, truth_dir):
     manifest = truth.checked_manifest(selection_dir, selection_dir / "independent_audit.json")
+    evaluation = truth.checked_manifest(truth_dir, truth_dir / "independent_audit.json")
+    if evaluation["input_file_sha256"].get(str(selection_dir / "manifest.json")) != file_sha256(selection_dir / "manifest.json"):
+        raise ValueError("held-out audit belongs to another selection")
+    for path in manifest["input_file_sha256"].keys() & evaluation["input_file_sha256"].keys():
+        if manifest["input_file_sha256"][path] != evaluation["input_file_sha256"][path]:
+            raise ValueError("conflicting selection and held-out inputs")
     choices = json.loads((selection_dir / "selection.json").read_text())
     if set(choices) != set(truth.exact.base.SESSIONS):
         raise ValueError("missing original pair")
     inputs = {
         **manifest["input_file_sha256"],
+        **evaluation["input_file_sha256"],
         **{
             str(p): file_sha256(p)
             for p in (
                 selection_dir / "manifest.json",
                 selection_dir / "selection.json",
                 selection_dir / "independent_audit.json",
+                truth_dir / "manifest.json",
+                truth_dir / "independent_audit.json",
                 Path(__file__),
                 ROOT / "scripts/audit_joint_exchange_truth.py",
                 ROOT / "docs/joint_exchange_transfer_protocol.md",
@@ -114,7 +123,8 @@ def run(selection_dir, source_dir, output_dir):
         for source in ("run_q3", "run_q4"):
             bank_path = folder / f"{source}.npz"
             for path in (folder / "encoding.npz", bank_path):
-                if file_sha256(path) != manifest["input_file_sha256"].get(str(path)):
+                expected = evaluation if path.name == "run_q4.npz" else manifest
+                if file_sha256(path) != expected["input_file_sha256"].get(str(path)):
                     raise ValueError("changed native input")
             r, s = inspect_bank(enc, truth.exact.base.read_npz(bank_path), choices[session], session, source)
             rows.extend(r)
@@ -149,7 +159,7 @@ def run(selection_dir, source_dir, output_dir):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
-    for flag in ("selection-dir", "source-dir", "output-dir"):
+    for flag in ("selection-dir", "source-dir", "output-dir", "truth-dir"):
         parser.add_argument(f"--{flag}", type=Path, required=True)
     args = parser.parse_args()
-    run(args.selection_dir, args.source_dir, args.output_dir)
+    run(args.selection_dir, args.source_dir, args.output_dir, args.truth_dir)

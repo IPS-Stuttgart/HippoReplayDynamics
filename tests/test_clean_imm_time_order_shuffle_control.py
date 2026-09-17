@@ -7,6 +7,7 @@ from hipporeplayimm.encoding import LogEmissionTensor
 from scripts.clean_imm_time_order_shuffle_control import (
     FIRST_ORDER_IMM,
     FRAGMENTED,
+    _read_event_model_evidence,
     permute_emission_time_bins,
     read_precomputed_scores,
     select_event_groups,
@@ -99,6 +100,62 @@ def test_precomputed_score_reader_fills_optional_columns(tmp_path: Path) -> None
     assert "n_active_units" in loaded.columns
 
 
+def test_event_evidence_reader_preserves_adjacent_decimal_ids_above_2_to_53(tmp_path: Path) -> None:
+    lower = 2**53
+    upper = lower + 1
+    path = tmp_path / "event_model_evidence.csv"
+    pd.DataFrame(
+        [
+            *_exact_core("Rat1/Open1", f"{lower}.0", fragmented=20.0, first_order=50.0, momentum=30.0),
+            *_exact_core("Rat1/Open1", f"{upper}.0", fragmented=20.0, first_order=55.0, momentum=30.0),
+        ]
+    ).to_csv(path, index=False)
+
+    loaded = _read_event_model_evidence(path)
+    selected = select_event_groups(
+        loaded,
+        margin_threshold=5.5,
+        max_clean_imm=2,
+        max_ambiguous=0,
+        max_momentum_like=0,
+        seed=4,
+    )
+
+    assert sorted(loaded["event_index"].unique().tolist()) == [lower, upper]
+    assert sorted(selected["event_index"].tolist()) == [lower, upper]
+
+
+def test_precomputed_score_reader_preserves_adjacent_decimal_ids_above_2_to_53(tmp_path: Path) -> None:
+    lower = 2**53
+    upper = lower + 1
+    path = tmp_path / "scores.csv"
+    pd.DataFrame(
+        [
+            *_event_scores(
+                "Rat1/Open1",
+                f"{lower}.0",
+                "clean_imm",
+                original_delta=30.0,
+                shuffle_deltas=[1.0],
+            ),
+            *_event_scores(
+                "Rat1/Open1",
+                f"{upper}.0",
+                "clean_imm",
+                original_delta=20.0,
+                shuffle_deltas=[2.0],
+            ),
+        ]
+    ).to_csv(path, index=False)
+
+    loaded = read_precomputed_scores(path)
+    outputs = write_outputs(loaded, tmp_path / "out", expected_n_shuffles=1)
+    decisions = outputs["clean_imm_time_order_shuffle_decisions.csv"]
+
+    assert sorted(loaded["event_index"].unique().tolist()) == [lower, upper]
+    assert sorted(decisions["event_index"].tolist()) == [lower, upper]
+
+
 def test_select_event_groups_balances_clean_ambiguous_and_momentum() -> None:
     evidence = pd.DataFrame(
         [
@@ -144,7 +201,7 @@ def test_permute_emission_time_bins_reorders_observations_not_time_grid() -> Non
     assert shuffled.metadata["time_order_control"] == "whole_bin_shuffle"
 
 
-def _event_scores(session: str, event_index: int, event_group: str, *, original_delta: float, shuffle_deltas: list[float]) -> list[dict[str, object]]:
+def _event_scores(session: str, event_index: object, event_group: str, *, original_delta: float, shuffle_deltas: list[float]) -> list[dict[str, object]]:
     rows = [
         _score(session, event_index, event_group, "original", -1, FIRST_ORDER_IMM, original_delta),
         _score(session, event_index, event_group, "original", -1, FRAGMENTED, 0.0),
@@ -157,7 +214,7 @@ def _event_scores(session: str, event_index: int, event_group: str, *, original_
 
 def _score(
     session: str,
-    event_index: int,
+    event_index: object,
     event_group: str,
     score_kind: str,
     shuffle_index: int,
@@ -183,7 +240,7 @@ def _score(
     }
 
 
-def _exact_core(session: str, event_index: int, *, fragmented: float, first_order: float, momentum: float) -> list[dict[str, object]]:
+def _exact_core(session: str, event_index: object, *, fragmented: float, first_order: float, momentum: float) -> list[dict[str, object]]:
     return [
         _evidence(session, event_index, STATIONARY, 0.0),
         _evidence(session, event_index, DIFFUSION, 10.0),
@@ -193,7 +250,7 @@ def _exact_core(session: str, event_index: int, *, fragmented: float, first_orde
     ]
 
 
-def _evidence(session: str, event_index: int, model: str, log_evidence: float) -> dict[str, object]:
+def _evidence(session: str, event_index: object, model: str, log_evidence: float) -> dict[str, object]:
     return {
         "status": "success",
         "session": session,

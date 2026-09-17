@@ -19,6 +19,7 @@ import sys
 import time
 from collections.abc import Iterable
 from dataclasses import dataclass
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -67,6 +68,7 @@ from scripts.benchmark_model_evidence_improved import (  # noqa: E402
 )
 
 MODEL_ORDER = [FIRST_ORDER_IMM, FRAGMENTED]
+_SAFE_FLOAT_INTEGER_LIMIT = 2**53
 EVENT_SCORE_COLUMNS = [
     "status",
     "failure_reason",
@@ -140,8 +142,37 @@ def _safe_int(value: object, default: int = 0) -> int:
         return default
 
 
+def _exact_event_index(value: object) -> int:
+    """Parse an event identifier without silently accepting lossy binary floats."""
+
+    if isinstance(value, (bool, np.bool_)):
+        raise ValueError("event_index must contain integer identifiers, not booleans")
+    if isinstance(value, (float, np.floating)):
+        numeric_float = float(value)
+        if not np.isfinite(numeric_float):
+            raise ValueError("event_index must contain finite integer identifiers")
+        if not numeric_float.is_integer():
+            raise ValueError("event_index must contain integer-valued identifiers")
+        if abs(numeric_float) >= _SAFE_FLOAT_INTEGER_LIMIT:
+            raise ValueError(
+                "floating-point event_index at or above 2**53 is unsafe; "
+                "load identifiers as strings or integers"
+            )
+    text = str(value).strip()
+    try:
+        numeric = Decimal(text)
+    except (InvalidOperation, ValueError) as exc:
+        raise ValueError("event_index must contain finite integer identifiers") from exc
+    if not numeric.is_finite():
+        raise ValueError("event_index must contain finite integer identifiers")
+    integral = numeric.to_integral_value()
+    if numeric != integral:
+        raise ValueError("event_index must contain integer-valued identifiers")
+    return int(integral)
+
+
 def _read_event_model_evidence(path: str | Path) -> pd.DataFrame:
-    frame = pd.read_csv(path)
+    frame = pd.read_csv(path, dtype={"event_index": "string"})
     required = {"session", "event_index", "model", "log_evidence"}
     missing = sorted(required.difference(frame.columns))
     if missing:
@@ -152,7 +183,7 @@ def _read_event_model_evidence(path: str | Path) -> pd.DataFrame:
         frame["evidence_comparable"] = True
     frame["session"] = frame["session"].astype(str)
     frame["rat"] = frame["session"].map(_rat)
-    frame["event_index"] = pd.to_numeric(frame["event_index"], errors="raise").astype(int)
+    frame["event_index"] = frame["event_index"].map(_exact_event_index)
     frame["model"] = frame["model"].astype(str)
     frame["log_evidence"] = pd.to_numeric(frame["log_evidence"], errors="coerce")
     return frame.dropna(subset=["log_evidence"]).copy()
@@ -433,7 +464,7 @@ def _score_emissions(
 
 
 def read_precomputed_scores(path: str | Path) -> pd.DataFrame:
-    frame = pd.read_csv(path)
+    frame = pd.read_csv(path, dtype={"event_index": "string"})
     missing = sorted({"session", "event_index", "event_group", "score_kind", "shuffle_index", "model", "log_evidence"}.difference(frame.columns))
     if missing:
         raise ValueError(f"precomputed event scores are missing required columns: {missing}")
@@ -449,7 +480,7 @@ def read_precomputed_scores(path: str | Path) -> pd.DataFrame:
             frame[column] = np.nan
     frame["session"] = frame["session"].astype(str)
     frame["rat"] = frame["rat"].astype(str)
-    frame["event_index"] = pd.to_numeric(frame["event_index"], errors="raise").astype(int)
+    frame["event_index"] = frame["event_index"].map(_exact_event_index)
     frame["shuffle_index"] = pd.to_numeric(frame["shuffle_index"], errors="raise").astype(int)
     frame["model"] = frame["model"].astype(str)
     frame["log_evidence"] = pd.to_numeric(frame["log_evidence"], errors="coerce")

@@ -3,10 +3,20 @@ name: Replay behavior alignment self-hosted
 
 on:
   workflow_dispatch:
+    inputs:
+      evidence_run_id:
+        description: "Optional model-evidence run ID; blank selects the newest unexpired artifact"
+        required: false
+        default: ""
+      evidence_artifact_name:
+        description: "Optional model-evidence artifact name"
+        required: false
+        default: ""
   push:
+    branches:
+      - main
     paths:
       - "docs/replay_behavior_alignment_trigger.txt"
-      - ".github/workflows/replay-behavior-alignment-selfhosted.yml"
 
 permissions:
   contents: read
@@ -18,8 +28,8 @@ jobs:
     timeout-minutes: 120
     env:
       DATASET_ROOT: /home/github-runner/.cache/datasets/hipporeplayimm/pfeiffer-foster
-      EVIDENCE_RUN_ID: "27011374643"
-      EVIDENCE_ARTIFACT_NAME: model-evidence-all-sessions-27011374643
+      EVIDENCE_RUN_ID: ${{ github.event_name == 'workflow_dispatch' && inputs.evidence_run_id || '' }}
+      EVIDENCE_ARTIFACT_NAME: ${{ github.event_name == 'workflow_dispatch' && inputs.evidence_artifact_name || '' }}
       FUTURE_HORIZON_S: "2.0"
       PREVIOUS_HORIZON_S: "2.0"
       OMP_NUM_THREADS: "1"
@@ -47,11 +57,22 @@ jobs:
             --write-manifest \
             --manifest-output results/replay-behavior-alignment/dataset_manifest.json
 
+      - name: Resolve model-evidence artifact
+        id: evidence
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          python scripts/resolve_model_evidence_artifact.py \
+            --repository "${GITHUB_REPOSITORY}" \
+            --run-id "${EVIDENCE_RUN_ID}" \
+            --artifact-name "${EVIDENCE_ARTIFACT_NAME}" \
+            --github-output "${GITHUB_OUTPUT}"
+
       - name: Download model-evidence artifact
         uses: actions/download-artifact@v7
         with:
-          run-id: 27011374643
-          name: model-evidence-all-sessions-27011374643
+          run-id: ${{ steps.evidence.outputs.run_id }}
+          name: ${{ steps.evidence.outputs.artifact_name }}
           path: artifacts/model-evidence
           github-token: ${{ github.token }}
           repository: ${{ github.repository }}

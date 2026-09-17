@@ -41,6 +41,27 @@ def _wrapper_chain_has_marker(function: object, marker: str) -> bool:
     return False
 
 
+def _validate_active_candidate_bounds(
+    *,
+    top_k: object | None,
+    min_k: object,
+    max_k: object,
+) -> None:
+    """Reject contradictory active lower and upper candidate-count bounds."""
+
+    top_count = 0 if top_k is None else _nonnegative_integer_count("top_k", top_k)
+    min_count = _nonnegative_integer_count("min_k", min_k)
+    max_count = _nonnegative_integer_count("max_k", max_k)
+    if max_count <= 0:
+        return
+    effective_lower_bound = max(1, top_count, min_count)
+    if max_count < effective_lower_bound:
+        raise ValueError(
+            "max_k is smaller than the configured candidate lower bound; "
+            "increase max_k or reduce top_k/min_k"
+        )
+
+
 def _validate_candidate_config(config: object) -> None:
     counts = {
         name: _nonnegative_integer_count(name, getattr(config, name))
@@ -53,19 +74,11 @@ def _validate_candidate_config(config: object) -> None:
     if threshold is None or threshold <= 0.0:
         return
 
-    max_count = counts["momentum_candidate_max_k"]
-    if max_count <= 0:
-        return
-    effective_lower_bound = max(
-        1,
-        counts["momentum_candidate_top_k"],
-        counts["momentum_candidate_min_k"],
+    _validate_active_candidate_bounds(
+        top_k=counts["momentum_candidate_top_k"],
+        min_k=counts["momentum_candidate_min_k"],
+        max_k=counts["momentum_candidate_max_k"],
     )
-    if max_count < effective_lower_bound:
-        raise ValueError(
-            "momentum_candidate_max_k is smaller than the configured candidate "
-            "lower bound; increase max_k or reduce top_k/min_k"
-        )
 
 
 def _patch_candidate_indices(state_space_model: object) -> None:

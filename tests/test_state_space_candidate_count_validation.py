@@ -50,6 +50,40 @@ def test_mass_retaining_candidate_support_accepts_integer_valued_count_bounds():
     assert list(selected) == [0, 1, 2]
 
 
+def test_mass_retaining_candidate_support_rejects_contradictory_active_bounds():
+    log_emission = np.log(np.array([0.50, 0.30, 0.15, 0.05], dtype=float))
+
+    with pytest.raises(ValueError, match="max_k.*lower bound"):
+        _mass_retaining_candidate_indices(
+            log_emission,
+            0.95,
+            min_k=3,
+            max_k=2,
+        )
+
+    with pytest.raises(ValueError, match="max_k.*lower bound"):
+        _mass_retaining_candidate_indices(
+            log_emission,
+            0.95,
+            top_k=3,
+            max_k=2,
+        )
+
+
+def test_mass_retaining_candidate_support_ignores_inactive_bounds_without_mass_threshold():
+    log_emission = np.log(np.array([0.50, 0.30, 0.15, 0.05], dtype=float))
+
+    selected = _mass_retaining_candidate_indices(
+        log_emission,
+        None,
+        top_k=2,
+        min_k=4,
+        max_k=1,
+    )
+
+    assert list(selected) == [0, 1]
+
+
 def test_bin_count_patch_recovers_candidate_count_validator_after_partial_patch(monkeypatch):
     import hipporeplayimm.state_space as state_space
     import hipporeplayimm.state_space_utils as utils

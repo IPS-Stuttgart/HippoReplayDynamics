@@ -5,13 +5,13 @@ on:
   workflow_dispatch:
     inputs:
       evidence_run_id:
-        description: "Model-evidence run ID with all_sessions_event_model_evidence.csv"
-        required: true
-        default: "27011374643"
+        description: "Optional model-evidence run ID; blank selects the newest unexpired artifact"
+        required: false
+        default: ""
       evidence_artifact_name:
-        description: "Model-evidence artifact name"
-        required: true
-        default: "model-evidence-all-sessions-27011374643"
+        description: "Optional model-evidence artifact name; blank selects model-evidence-all-sessions-*"
+        required: false
+        default: ""
       dataset_root:
         description: "Dataset path after download or cache restore"
         required: true
@@ -25,19 +25,19 @@ on:
         required: true
         default: "2.0"
   push:
+    branches:
+      - main
     paths:
-      - ".github/workflows/replay-behavior-alignment.yml"
       - "docs/replay_behavior_alignment_trigger.txt"
       - "scripts/replay_behavior_alignment.py"
-      - "tests/test_replay_behavior_alignment_workflow.py"
 
 permissions:
   contents: read
   actions: read
 
 env:
-  EVIDENCE_RUN_ID: ${{ github.event_name == 'workflow_dispatch' && inputs.evidence_run_id || '27011374643' }}
-  EVIDENCE_ARTIFACT_NAME: ${{ github.event_name == 'workflow_dispatch' && inputs.evidence_artifact_name || 'model-evidence-all-sessions-27011374643' }}
+  EVIDENCE_RUN_ID: ${{ github.event_name == 'workflow_dispatch' && inputs.evidence_run_id || '' }}
+  EVIDENCE_ARTIFACT_NAME: ${{ github.event_name == 'workflow_dispatch' && inputs.evidence_artifact_name || '' }}
   DATASET_ROOT: ${{ github.event_name == 'workflow_dispatch' && inputs.dataset_root || 'data/DataSetFromPfeifferFoster' }}
   FUTURE_HORIZON_S: ${{ github.event_name == 'workflow_dispatch' && inputs.future_horizon_s || '2.0' }}
   PREVIOUS_HORIZON_S: ${{ github.event_name == 'workflow_dispatch' && inputs.previous_horizon_s || '2.0' }}
@@ -79,16 +79,29 @@ jobs:
           webdav-key: ${{ secrets.PFEIFFERFOSTER_DATA_KEY }}
           webdav-password: ${{ secrets.PFEIFFERFOSTER_DATA_PASSWORD }}
 
+      - name: Resolve model-evidence artifact
+        id: evidence
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          python scripts/resolve_model_evidence_artifact.py \
+            --repository "${GITHUB_REPOSITORY}" \
+            --run-id "${EVIDENCE_RUN_ID}" \
+            --artifact-name "${EVIDENCE_ARTIFACT_NAME}" \
+            --github-output "${GITHUB_OUTPUT}"
+
       - name: Download model-evidence artifact
         uses: actions/download-artifact@v7
         with:
-          run-id: ${{ env.EVIDENCE_RUN_ID }}
-          name: ${{ env.EVIDENCE_ARTIFACT_NAME }}
+          run-id: ${{ steps.evidence.outputs.run_id }}
+          name: ${{ steps.evidence.outputs.artifact_name }}
           path: artifacts/model-evidence
           github-token: ${{ github.token }}
           repository: ${{ github.repository }}
 
       - name: Run replay behavior alignment
+        env:
+          RESOLVED_EVIDENCE_ARTIFACT_NAME: ${{ steps.evidence.outputs.artifact_name }}
         run: |
           set -euo pipefail
           event_csv="$(find artifacts/model-evidence -name all_sessions_event_model_evidence.csv -print -quit)"
@@ -96,7 +109,7 @@ jobs:
             event_csv="$(find artifacts/model-evidence -name event_model_evidence.csv -print -quit)"
           fi
           if [ -z "${event_csv}" ]; then
-            echo "Could not find event evidence CSV in ${EVIDENCE_ARTIFACT_NAME}" >&2
+            echo "Could not find event evidence CSV in ${RESOLVED_EVIDENCE_ARTIFACT_NAME}" >&2
             find artifacts/model-evidence -maxdepth 3 -type f | sort >&2 || true
             exit 1
           fi

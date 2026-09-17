@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import argparse
 from collections.abc import Iterable, Sequence
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
 import numpy as np
@@ -87,6 +88,63 @@ def _as_bool(value: object) -> bool:
 
 def _rat_from_session(session: object) -> str:
     return str(session).split("/", 1)[0]
+
+
+def _exact_event_index(value: object) -> int:
+    """Return one exact finite integer event identifier.
+
+    Decimal-form CSV identifiers such as ``9007199254740993.0`` must not pass
+    through binary64 before integer conversion: adjacent events above 2**53 can
+    otherwise collapse onto the same key.
+    """
+
+    if isinstance(value, (bool, np.bool_)):
+        raise ValueError("event_index must contain finite integer identifiers")
+    if isinstance(value, np.ndarray):
+        if value.ndim != 0:
+            raise ValueError("event_index must contain scalar integer identifiers")
+        value = value.item()
+    elif isinstance(value, np.generic):
+        value = value.item()
+    try:
+        missing = pd.isna(value)
+    except (TypeError, ValueError):
+        missing = False
+    if isinstance(missing, (bool, np.bool_)) and bool(missing):
+        raise ValueError("event_index must contain finite integer identifiers")
+    text = str(value).strip()
+    try:
+        numeric = Decimal(text)
+    except (InvalidOperation, ValueError) as exc:
+        raise ValueError("event_index must contain finite integer identifiers") from exc
+    if not numeric.is_finite():
+        raise ValueError("event_index must contain finite integer identifiers")
+    integral = numeric.to_integral_value()
+    if numeric != integral:
+        raise ValueError("event_index must contain integer-valued identifiers")
+    return int(integral)
+
+
+def _normalize_event_keys(frame: pd.DataFrame, *, table_name: str) -> pd.DataFrame:
+    """Return a copy with exact ``session``/``event_index`` merge keys."""
+
+    missing = sorted({"session", "event_index"}.difference(frame.columns))
+    if missing:
+        raise ValueError(f"{table_name} is missing required key columns: {missing}")
+    out = frame.copy()
+    out["session"] = out["session"].astype(str)
+    out["event_index"] = pd.Series(
+        [_exact_event_index(value) for value in out["event_index"]],
+        index=out.index,
+        dtype=object,
+    )
+    return out
+
+
+def _read_event_key_csv(path: str | Path) -> pd.DataFrame:
+    """Read a CSV without rounding decimal-form event identifiers."""
+
+    return pd.read_csv(path, dtype={"event_index": "string"})
 
 
 def _parse_names(value: str | Iterable[str] | None, default: Sequence[str]) -> tuple[str, ...]:
@@ -178,9 +236,8 @@ def _success_rows(frame: pd.DataFrame) -> pd.DataFrame:
         out = out[out["evidence_comparable"].map(_as_bool)].copy()
     if "window_role" in out.columns:
         out = out[_real_window_role_mask(out["window_role"])].copy()
-    out["session"] = out["session"].astype(str)
+    out = _normalize_event_keys(out, table_name="event-model evidence table")
     out["rat"] = out["session"].map(_rat_from_session)
-    out["event_index"] = pd.to_numeric(out["event_index"], errors="raise").astype(int)
     out["model"] = out["model"].astype(str)
     out["log_evidence"] = pd.to_numeric(out["log_evidence"], errors="coerce")
     return out.dropna(subset=["log_evidence"]).copy()
@@ -269,8 +326,9 @@ def build_behavior_context_from_dataset(
         _check_session(session_dir)
         session = load_replay_session(session_dir)
         wells = infer_well_locations(session)
-        for event_index in sorted(group["event_index"].astype(int).unique()):
-            event = session.ripple(int(event_index))
+        event_indices = sorted({_exact_event_index(value) for value in group["event_index"]})
+        for event_index in event_indices:
+            event = session.ripple(event_index)
             anchor_time = float(event.peak)
             current = _position_at_time(session.position, anchor_time)
             previous = _position_at_time(session.position, anchor_time - float(previous_horizon_s))
@@ -281,7 +339,7 @@ def build_behavior_context_from_dataset(
             rows.append(
                 {
                     "session": session.session_id,
-                    "event_index": int(event_index),
+                    "event_index": event_index,
                     "event_start_s": float(event.start),
                     "event_end_s": float(event.end),
                     "event_peak_s": float(event.peak),
@@ -354,10 +412,11 @@ def build_replay_behavior_alignment(event_features: pd.DataFrame, behavior_conte
 
     if event_features.empty:
         return pd.DataFrame()
-    context = behavior_context.copy()
-    if context.empty:
+    if behavior_context.empty:
         raise ValueError("behavior context is empty")
-    out = event_features.merge(context, on=["session", "event_index"], how="left")
+    features = _normalize_event_keys(event_features, table_name="event features")
+    context = _normalize_event_keys(behavior_context, table_name="behavior context")
+    out = features.merge(context, on=["session", "event_index"], how="left")
     rows: list[dict[str, object]] = []
     for _, row in out.iterrows():
         current = np.array([row.get("current_x", np.nan), row.get("current_y", np.nan)], dtype=float)
@@ -568,12 +627,12 @@ def main() -> int:
     parser.add_argument("--previous-horizon-s", type=float, default=2.0)
     args = parser.parse_args()
 
-    evidence = pd.read_csv(args.event_model_evidence)
+    evidence = _read_event_key_csv(args.event_model_evidence)
     required_models = _parse_names(args.required_models, REQUIRED_EXACT_CORE_MODELS)
     features = build_event_evidence_features(evidence, required_models=required_models)
     contexts: list[pd.DataFrame] = []
     if str(args.behavior_context).strip():
-        contexts.append(pd.read_csv(args.behavior_context))
+        contexts.append(_read_event_key_csv(args.behavior_context))
     if str(args.dataset_root).strip():
         contexts.append(
             build_behavior_context_from_dataset(
@@ -585,7 +644,10 @@ def main() -> int:
         )
     if not contexts:
         raise ValueError("provide --dataset-root or --behavior-context to compute behavioral alignment")
-    behavior_context = pd.concat(contexts, ignore_index=True).drop_duplicates(["session", "event_index"], keep="first")
+    behavior_context = _normalize_event_keys(
+        pd.concat(contexts, ignore_index=True),
+        table_name="behavior context",
+    ).drop_duplicates(["session", "event_index"], keep="first")
 
     out = Path(args.output)
     out.mkdir(parents=True, exist_ok=True)

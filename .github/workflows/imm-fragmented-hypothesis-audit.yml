@@ -114,17 +114,27 @@ jobs:
           PY
 
       - name: Download model-evidence artifact
+        id: download_evidence
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           mkdir -p artifacts/model-evidence
-          gh run download "${EVIDENCE_RUN_ID}" \
+          if gh run download "${EVIDENCE_RUN_ID}" \
             -R "${GITHUB_REPOSITORY}" \
             -n "${EVIDENCE_ARTIFACT_NAME}" \
-            -D artifacts/model-evidence
+            -D artifacts/model-evidence; then
+            echo "available=true" >> "${GITHUB_OUTPUT}"
+          elif [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then
+            echo "Requested model-evidence artifact is unavailable." >&2
+            exit 1
+          else
+            echo "available=false" >> "${GITHUB_OUTPUT}"
+            echo "::warning::Configured model-evidence artifact is unavailable; skipping the data-dependent audit for this ${GITHUB_EVENT_NAME} run. Use workflow_dispatch with a live artifact for a strict audit."
+          fi
 
       - name: Download original-label artifact
+        if: steps.download_evidence.outputs.available == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -140,6 +150,7 @@ jobs:
           fi
 
       - name: Run IMM/fragmented audit
+        if: steps.download_evidence.outputs.available == 'true'
         run: |
           set -euo pipefail
           evidence_csv="$(find artifacts/model-evidence -name all_sessions_event_model_evidence.csv -print -quit)"
@@ -176,6 +187,7 @@ jobs:
             "${label_args[@]}"
 
       - name: Validate audit outputs
+        if: steps.download_evidence.outputs.available == 'true'
         run: |
           set -euo pipefail
           for required_file in \
@@ -203,6 +215,7 @@ jobs:
           PY
 
       - name: Upload IMM/fragmented hypothesis audit
+        if: steps.download_evidence.outputs.available == 'true'
         uses: actions/upload-artifact@v7
         with:
           name: imm-fragmented-hypothesis-audit-${{ github.run_id }}

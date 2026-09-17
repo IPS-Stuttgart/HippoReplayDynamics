@@ -4,6 +4,7 @@ import pandas as pd
 
 from scripts.report_hc11_paper_grade_robustness import (
     build_event_table,
+    build_posterior_content_audit,
     read_event_model_evidence,
     write_outputs,
 )
@@ -177,6 +178,42 @@ def test_hc11_reader_canonicalizes_short_and_long_model_names(tmp_path: Path) ->
     assert row["best_model"] == "first_order_imm"
     assert row["trajectory_confident_claim"]
     assert row["momentum_raw_win_vs_diffusion"]
+
+
+def test_hc11_reader_preserves_large_integer_like_event_ids(tmp_path: Path) -> None:
+    first = 2**53
+    second = first + 1
+    rows = [
+        *_event("Achilles/day1", first, stationary=0.0, diffusion=10.0, fragmented=15.0, first_order=40.0, momentum=22.0),
+        *_event("Achilles/day1", second, stationary=0.0, diffusion=11.0, fragmented=16.0, first_order=41.0, momentum=23.0),
+    ]
+    for row in rows:
+        row["event_index"] = f"{row['event_index']}.0"
+    path = tmp_path / "event_model_evidence.csv"
+    pd.DataFrame(rows).to_csv(path, index=False)
+
+    evidence = read_event_model_evidence(path)
+    events = build_event_table(evidence, margin_threshold=5.5)
+
+    assert evidence["event_index"].dtype == "int64"
+    assert events["event_index"].tolist() == [first, second]
+
+
+def test_hc11_posterior_content_preserves_large_integer_like_event_ids(tmp_path: Path) -> None:
+    first = 2**53
+    second = first + 1
+    rows = [
+        _posterior("Achilles/day1", first, mean_nonstationary=0.8, map_nonstationary=0.7, path=24.0),
+        _posterior("Achilles/day1", second, mean_nonstationary=0.7, map_nonstationary=0.6, path=18.0),
+    ]
+    for row in rows:
+        row["event_index"] = f"{row['event_index']}.0"
+    path = tmp_path / "first_order_imm_mode_usage_event_summary.csv"
+    pd.DataFrame(rows).to_csv(path, index=False)
+
+    audit = build_posterior_content_audit(path)
+
+    assert audit["event_index"].tolist() == [first, second]
 
 
 def _event(

@@ -210,7 +210,7 @@ def _certified_vs_exact_event_recovery(
             .to_numpy(bool)
             & np.isneginf(log_values)
         )
-        comparable_mask |= exact_negative_infinite
+        comparable_mask = comparable_mask | exact_negative_infinite
         comparable_rows = scored.loc[comparable_mask].copy()
         best_comparable_row: pd.Series | None = None
         best_comparable_model = ""

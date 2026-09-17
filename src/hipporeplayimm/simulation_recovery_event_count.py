@@ -15,46 +15,43 @@ _CERTIFIED_EVENT_PATCHED_FLAG = (
 
 
 def apply_simulation_recovery_event_count_patch() -> None:
-    """Install event-count patches, repairing stale reload sentinels first.
+    """Install event-count patches and repair stale sentinels after reload.
 
     ``importlib.reload(simulation_recovery)`` reuses the module dictionary, so
     dynamically added module-level sentinels survive while source functions are
-    replaced.  Detect that state from markers on the live wrappers and clear
-    only stale sentinels before delegating to the established implementation.
+    replaced.  The standard recovery-summary wrapper is the stable canary for a
+    full module reload: unlike the certified helpers, it is not intentionally
+    replaced by the later status-coercion compatibility layer.
     """
 
-    summary_flag = bool(getattr(_recovery, _PATCHED_FLAG, False))
-    summary_wrappers_live = bool(
+    summary_wrapper_live = bool(
         getattr(_recovery.recovery_summary, _PATCHED_FLAG, False)
-    ) and bool(
-        getattr(_recovery.certified_vs_exact_recovery_summary, _PATCHED_FLAG, False)
     )
-    if summary_flag and not summary_wrappers_live:
-        delattr(_recovery, _PATCHED_FLAG)
+    repairing_reload = not summary_wrapper_live
 
-    certified_flag = bool(getattr(_recovery, _CERTIFIED_EVENT_PATCHED_FLAG, False))
-    certified_wrapper_live = bool(
-        getattr(
-            _recovery.certified_vs_exact_event_recovery,
-            _CERTIFIED_EVENT_PATCHED_FLAG,
-            False,
-        )
-    )
-    if certified_flag and not certified_wrapper_live:
-        delattr(_recovery, _CERTIFIED_EVENT_PATCHED_FLAG)
+    if repairing_reload:
+        # A full recovery-module reload restores ``recovery_summary`` from source
+        # but leaves arbitrary dynamic attributes behind.  Clear the stale
+        # sentinels together so the established implementation can reinstall its
+        # complete wrapper set.  Do not key this decision off the certified
+        # helpers: other runtime patches legitimately replace those functions.
+        for flag in (_PATCHED_FLAG, _CERTIFIED_EVENT_PATCHED_FLAG):
+            if getattr(_recovery, flag, False):
+                delattr(_recovery, flag)
 
     _apply_impl()
 
-    # Mark the actual installed callables.  These markers disappear naturally
-    # when importlib.reload() restores the source definitions, unlike dynamic
-    # module attributes retained in the reused module dictionary.
-    setattr(_recovery.recovery_summary, _PATCHED_FLAG, True)
-    setattr(_recovery.certified_vs_exact_recovery_summary, _PATCHED_FLAG, True)
-    setattr(
-        _recovery.certified_vs_exact_event_recovery,
-        _CERTIFIED_EVENT_PATCHED_FLAG,
-        True,
-    )
+    if repairing_reload:
+        # These markers disappear naturally when importlib.reload() restores the
+        # source definitions.  Keeping them on the live callables avoids treating
+        # a later certified-helper compatibility wrapper as a module reload.
+        setattr(_recovery.recovery_summary, _PATCHED_FLAG, True)
+        setattr(_recovery.certified_vs_exact_recovery_summary, _PATCHED_FLAG, True)
+        setattr(
+            _recovery.certified_vs_exact_event_recovery,
+            _CERTIFIED_EVENT_PATCHED_FLAG,
+            True,
+        )
 
 
 __all__ = ["apply_simulation_recovery_event_count_patch"]

@@ -9,6 +9,7 @@ events should or should not be used as examples.
 from __future__ import annotations
 
 import argparse
+from decimal import Decimal, InvalidOperation
 import json
 from pathlib import Path
 
@@ -27,20 +28,44 @@ MODEL_COLUMNS = [
     ("momentum", "logZ_momentum_exact_sparse"),
 ]
 
+_SAFE_FLOAT_INTEGER_LIMIT = 2**53
+
+
+def _exact_event_index(value: object) -> int:
+    """Parse one event identifier without silently accepting lossy floats."""
+
+    if isinstance(value, (float, np.floating)):
+        numeric_float = float(value)
+        if not np.isfinite(numeric_float):
+            raise ValueError("event_index must contain finite integer-valued identifiers")
+        if abs(numeric_float) >= _SAFE_FLOAT_INTEGER_LIMIT:
+            raise ValueError(
+                "floating-point event_index at or above 2**53 is unsafe; "
+                "load identifiers as strings or integers"
+            )
+
+    text = str(value).strip()
+    try:
+        numeric = Decimal(text)
+    except (InvalidOperation, ValueError) as exc:
+        raise ValueError("event_index must contain finite integer-valued identifiers") from exc
+    if not numeric.is_finite():
+        raise ValueError("event_index must contain finite integer-valued identifiers")
+    integral = numeric.to_integral_value()
+    if numeric != integral:
+        raise ValueError("event_index must contain finite integer-valued identifiers")
+    return int(integral)
+
 
 def _coerce_event_indices(values: pd.Series) -> pd.Series:
-    """Return finite integer event identifiers without lossy truncation."""
+    """Return exact finite integer event identifiers without float coercion."""
 
-    numeric = pd.to_numeric(values, errors="raise")
-    numeric_array = numeric.to_numpy(dtype=float)
-    if not np.all(np.isfinite(numeric_array)):
-        raise ValueError("event_index must contain finite integer-valued identifiers")
-    if not np.all(numeric_array == np.floor(numeric_array)):
-        raise ValueError("event_index must contain finite integer-valued identifiers")
     try:
-        return numeric.astype(int)
+        return values.map(_exact_event_index)
     except (OverflowError, TypeError, ValueError) as exc:
-        raise ValueError("event_index must contain finite integer-valued identifiers within integer range") from exc
+        raise ValueError(
+            "event_index must contain finite integer-valued identifiers within integer range"
+        ) from exc
 
 
 def _read_audit_table(audit_dir: str | Path) -> pd.DataFrame:
@@ -51,7 +76,7 @@ def _read_audit_table(audit_dir: str | Path) -> pd.DataFrame:
     ]:
         path = root / filename
         if path.is_file():
-            table = pd.read_csv(path)
+            table = pd.read_csv(path, dtype={"event_index": "string"})
             table["session"] = table["session"].astype(str)
             table["event_index"] = _coerce_event_indices(table["event_index"])
             return table

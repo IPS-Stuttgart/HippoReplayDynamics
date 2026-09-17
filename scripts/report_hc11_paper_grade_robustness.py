@@ -11,6 +11,8 @@ hc-11 can move beyond external smoke status.
 from __future__ import annotations
 
 import argparse
+from decimal import Decimal, InvalidOperation
+from numbers import Integral, Real
 from pathlib import Path
 
 import numpy as np
@@ -98,6 +100,49 @@ def _canonical_model(model: object) -> str:
     return norm
 
 
+def _normalize_event_index(values: pd.Series) -> pd.Series:
+    """Parse event identifiers without a lossy float64 round trip."""
+    parsed: list[int] = []
+    bad: list[str] = []
+    int64 = np.iinfo(np.int64)
+    for value in values.tolist():
+        try:
+            if value is None or pd.isna(value):
+                raise ValueError("event identifier is missing")
+            if isinstance(value, (bool, np.bool_)):
+                raise ValueError("booleans are not valid event identifiers")
+            if isinstance(value, Integral):
+                item = int(value)
+            elif isinstance(value, Real):
+                numeric = float(value)
+                if not np.isfinite(numeric) or not numeric.is_integer():
+                    raise ValueError("event identifier is not integer-like")
+                item = int(numeric)
+            else:
+                text = str(value).strip()
+                if not text:
+                    raise ValueError("event identifier is empty")
+                try:
+                    item = int(text, 10)
+                except ValueError:
+                    numeric = Decimal(text)
+                    if not numeric.is_finite() or numeric != numeric.to_integral_value():
+                        raise ValueError("event identifier is not integer-like")
+                    item = int(numeric)
+            if item < int64.min or item > int64.max:
+                raise ValueError("event identifier is outside int64 bounds")
+        except (InvalidOperation, TypeError, ValueError):
+            bad.append(str(value))
+            continue
+        parsed.append(item)
+    if bad:
+        raise ValueError(
+            "event_index must contain finite integer-like values within int64 bounds; "
+            "invalid values: " + ", ".join(bad[:5])
+        )
+    return pd.Series(parsed, index=values.index, dtype="int64")
+
+
 def _animal_from_row(row: pd.Series) -> str:
     for column in ("animal", "rat", "subject"):
         if column in row and pd.notna(row[column]) and str(row[column]).strip():
@@ -140,7 +185,7 @@ def _finite_max(values: list[object]) -> tuple[str, float]:
 
 
 def read_event_model_evidence(path: str | Path) -> pd.DataFrame:
-    return normalize_event_model_evidence(pd.read_csv(path))
+    return normalize_event_model_evidence(pd.read_csv(path, dtype={"event_index": "string"}))
 
 
 def normalize_event_model_evidence(frame: pd.DataFrame) -> pd.DataFrame:
@@ -154,7 +199,7 @@ def normalize_event_model_evidence(frame: pd.DataFrame) -> pd.DataFrame:
     if "evidence_comparable" in frame.columns:
         frame = frame[frame["evidence_comparable"].map(_as_bool)].copy()
     frame["session"] = frame["session"].astype(str)
-    frame["event_index"] = pd.to_numeric(frame["event_index"], errors="raise").astype(int)
+    frame["event_index"] = _normalize_event_index(frame["event_index"])
     frame["model"] = frame["model"].astype(str)
     frame["canonical_model"] = frame["model"].map(_canonical_model)
     frame["log_evidence"] = pd.to_numeric(frame["log_evidence"], errors="coerce")
@@ -563,11 +608,12 @@ def build_posterior_content_audit(
             ],
             columns=POSTERIOR_CONTENT_COLUMNS,
         )
-    frame = pd.read_csv(path)
+    frame = pd.read_csv(path, dtype={"event_index": "string"})
     required = {"session", "event_index"}
     missing = sorted(required.difference(frame.columns))
     if missing:
         raise ValueError(f"posterior-content summary is missing required columns: {missing}")
+    frame["event_index"] = _normalize_event_index(frame["event_index"])
     rows: list[dict[str, object]] = []
     for _, row in frame.iterrows():
         session = str(row["session"])

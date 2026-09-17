@@ -8,6 +8,7 @@ from hipporeplayimm.simulation_recovery_trajectory_imm import (
     _BUILD_WRAPPER_MARKER,
     _SCORE_WRAPPER_MARKER,
     _TRAJECTORY_IMM_ALIASES,
+    apply_trajectory_imm_recovery_patch,
 )
 
 
@@ -33,9 +34,16 @@ def test_runtime_patches_restore_trajectory_imm_recovery_after_reload() -> None:
         assert getattr(recovery._score_recovery_model, _SCORE_WRAPPER_MARKER, False)
 
         build_wrapper = recovery.build_scoring_models
-        score_wrapper = recovery._score_recovery_model
         hipporeplayimm.apply_runtime_patches()
         assert recovery.build_scoring_models is build_wrapper
+        assert getattr(recovery._score_recovery_model, _SCORE_WRAPPER_MARKER, False)
+
+        # The occupancy-support runtime patch intentionally reinstalls its
+        # canonical recovery scorer before the trajectory-IMM layer is applied,
+        # so a full package refresh may replace the trajectory wrapper object.
+        # Direct reapplication of this patch itself must remain idempotent.
+        score_wrapper = recovery._score_recovery_model
+        apply_trajectory_imm_recovery_patch()
         assert recovery._score_recovery_model is score_wrapper
     finally:
         hipporeplayimm.apply_runtime_patches()

@@ -25,12 +25,11 @@ on:
         required: true
         default: "2.0"
   push:
+    branches:
+      - main
     paths:
-      - ".github/workflows/replay-behavior-alignment.yml"
       - "docs/replay_behavior_alignment_trigger.txt"
       - "scripts/replay_behavior_alignment.py"
-      - "scripts/resolve_model_evidence_artifact.py"
-      - "tests/test_resolve_model_evidence_artifact.py"
 
 permissions:
   contents: read

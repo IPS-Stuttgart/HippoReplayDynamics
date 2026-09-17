@@ -281,7 +281,7 @@ def audit(root, output):
                     np.testing.assert_array_equal(path, paths[f"{level}_{e.event_id}_{split}"])
                     lab = labels.loc[(e.event_id, split)]
                     for key, value in metrics.items():
-                        assert abs(lab[level + "_" + key] - value) < 1e-8, (rec["tag"], e.event_id, key)
+                        assert abs(float(lab[level + "_" + key]) - float(value)) < 1e-8, (rec["tag"], e.event_id, key)
                     geometry_checks += 1
                 lab = labels.loc[(e.event_id, split)]
                 assert lab.rejected_with_opportunity == (not lab.full_geometric_pass and lab.full_valid_frames >= 10)

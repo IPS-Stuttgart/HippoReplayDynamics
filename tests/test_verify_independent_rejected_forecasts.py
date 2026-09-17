@@ -1,6 +1,7 @@
 """Checks for the separately implemented result verifier."""
 
 import numpy as np
+import pandas as pd
 import pytest
 
 from hipporeplayimm.independent_rejected_forecast import (
@@ -52,3 +53,5 @@ def test_reference_geometry_matches_labels():
     np.testing.assert_array_equal(path, refpath)
     for key, value in reference.items():
         assert labels["full_" + key] == pytest.approx(value)
+        saved = pd.DataFrame([labels]).iloc[0]
+        assert abs(float(saved["full_" + key]) - float(value)) < 1e-8

@@ -15,18 +15,29 @@ _POST_INIT_WRAPPER_MARKER = "_n_spikes_validation_post_init_wrapper"
 _STRING_TYPES = (str, bytes, np.str_, np.bytes_)
 
 
-def _log_emission_n_spikes_patch_current() -> bool:
-    return bool(getattr(LogEmissionTensor.__post_init__, _POST_INIT_WRAPPER_MARKER, False))
+def _log_emission_n_spikes_patch_current(log_emission_tensor_cls: type[Any] | None = None) -> bool:
+    tensor_cls = LogEmissionTensor if log_emission_tensor_cls is None else log_emission_tensor_cls
+    return bool(getattr(tensor_cls.__post_init__, _POST_INIT_WRAPPER_MARKER, False))
 
 
 def apply_log_emission_n_spikes_validation_patch() -> None:
-    """Install idempotent ``LogEmissionTensor`` post-construction guards."""
+    """Install idempotent ``LogEmissionTensor`` post-construction guards.
 
-    if _log_emission_n_spikes_patch_current():
-        setattr(LogEmissionTensor, _PATCH_FLAG, True)
+    Resolve the class from the live ``encoding`` module on every application.
+    ``importlib.reload(hipporeplayimm.encoding)`` replaces ``LogEmissionTensor``
+    while this patch module can retain its earlier imported class object. Using
+    that stale class would make ``apply_runtime_patches()`` silently leave the
+    refreshed public class without count and cell-ID validation.
+    """
+
+    from . import encoding
+
+    tensor_cls = encoding.LogEmissionTensor
+    if _log_emission_n_spikes_patch_current(tensor_cls):
+        setattr(tensor_cls, _PATCH_FLAG, True)
         return
 
-    original_post_init = LogEmissionTensor.__post_init__
+    original_post_init = tensor_cls.__post_init__
 
     @wraps(original_post_init)
     def _validated_post_init(self: LogEmissionTensor) -> None:
@@ -38,8 +49,8 @@ def apply_log_emission_n_spikes_validation_patch() -> None:
         _validate_cell_ids(self)
 
     setattr(_validated_post_init, _POST_INIT_WRAPPER_MARKER, True)
-    LogEmissionTensor.__post_init__ = _validated_post_init  # type: ignore[method-assign]
-    setattr(LogEmissionTensor, _PATCH_FLAG, True)
+    tensor_cls.__post_init__ = _validated_post_init  # type: ignore[method-assign]
+    setattr(tensor_cls, _PATCH_FLAG, True)
 
 
 def _validate_duration_inputs(emissions: LogEmissionTensor) -> None:

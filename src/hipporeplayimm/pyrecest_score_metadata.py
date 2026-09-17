@@ -50,6 +50,9 @@ PYRECEST_DEFAULTS = {
 }
 
 PYRECEST_FLOAT_METADATA_ATOL = 1e-12
+_BENCHMARK_METADATA_WRAPPER_MARKER = "_pyrecest_benchmark_metadata_wrapper"
+_COMPARE_WRAPPER_MARKER = "_pyrecest_compare_scores_metadata_wrapper"
+_MODEL_SCORE_WRAPPER_MARKER = "_pyrecest_metadata_wrapped"
 _EVENT_SEED_WRAPPER_MARKER = "_pyrecest_event_seed_validation_wrapper"
 _EVENT_SEED_MODULUS = 2**32
 
@@ -99,22 +102,33 @@ def apply_pyrecest_score_metadata_patch() -> None:
     from .pyrecest_models import PyRecEstGoalParticleIMMModel, PyRecEstGoalParticleModel
 
     _patch_event_seed(pyrecest_models)
-    if getattr(gt, "_pyrecest_score_metadata_patch_applied", False):
-        return
 
-    base_metadata = bench._benchmark_config_metadata
-    base_compare = gt.compare_scores_to_ground_truth
+    current_metadata = bench._benchmark_config_metadata
+    if not getattr(current_metadata, _BENCHMARK_METADATA_WRAPPER_MARKER, False):
+        base_metadata = current_metadata
 
-    def benchmark_config_metadata(config) -> dict[str, object]:
-        metadata = dict(base_metadata(config))
-        metadata.update(pyrecest_metadata_for_config(config))
-        return metadata
+        @wraps(base_metadata)
+        def benchmark_config_metadata(config) -> dict[str, object]:
+            metadata = dict(base_metadata(config))
+            metadata.update(pyrecest_metadata_for_config(config))
+            return metadata
 
-    def compare_scores_to_ground_truth(root, scores, **kwargs) -> pd.DataFrame:
-        frame = scores.copy() if isinstance(scores, pd.DataFrame) else pd.read_csv(scores)
-        defaults = {k: v for k, v in kwargs.items() if k in PYRECEST_DEFAULTS}
-        kwargs.update(pyrecest_config_kwargs_for_scores(frame, defaults))
-        return base_compare(root, frame, **kwargs)
+        setattr(benchmark_config_metadata, _BENCHMARK_METADATA_WRAPPER_MARKER, True)
+        bench._benchmark_config_metadata = benchmark_config_metadata
+
+    current_compare = gt.compare_scores_to_ground_truth
+    if not getattr(current_compare, _COMPARE_WRAPPER_MARKER, False):
+        base_compare = current_compare
+
+        @wraps(base_compare)
+        def compare_scores_to_ground_truth(root, scores, **kwargs) -> pd.DataFrame:
+            frame = scores.copy() if isinstance(scores, pd.DataFrame) else pd.read_csv(scores)
+            defaults = {k: v for k, v in kwargs.items() if k in PYRECEST_DEFAULTS}
+            kwargs.update(pyrecest_config_kwargs_for_scores(frame, defaults))
+            return base_compare(root, frame, **kwargs)
+
+        setattr(compare_scores_to_ground_truth, _COMPARE_WRAPPER_MARKER, True)
+        gt.compare_scores_to_ground_truth = compare_scores_to_ground_truth
 
     def _score_with_metadata(base_score):
         @wraps(base_score)
@@ -124,14 +138,12 @@ def apply_pyrecest_score_metadata_patch() -> None:
                 result.diagnostics.update(_model_diagnostics(self))
                 return result
 
-        score_with_metadata._pyrecest_metadata_wrapped = True
+        setattr(score_with_metadata, _MODEL_SCORE_WRAPPER_MARKER, True)
         return score_with_metadata
 
-    bench._benchmark_config_metadata = benchmark_config_metadata
-    gt.compare_scores_to_ground_truth = compare_scores_to_ground_truth
-    if not getattr(PyRecEstGoalParticleModel.score, "_pyrecest_metadata_wrapped", False):
+    if not getattr(PyRecEstGoalParticleModel.score, _MODEL_SCORE_WRAPPER_MARKER, False):
         PyRecEstGoalParticleModel.score = _score_with_metadata(PyRecEstGoalParticleModel.score)
-    if not getattr(PyRecEstGoalParticleIMMModel.score, "_pyrecest_metadata_wrapped", False):
+    if not getattr(PyRecEstGoalParticleIMMModel.score, _MODEL_SCORE_WRAPPER_MARKER, False):
         PyRecEstGoalParticleIMMModel.score = _score_with_metadata(PyRecEstGoalParticleIMMModel.score)
     gt._pyrecest_score_metadata_patch_applied = True
 

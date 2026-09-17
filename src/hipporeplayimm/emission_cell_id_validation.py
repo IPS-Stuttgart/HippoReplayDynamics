@@ -14,6 +14,7 @@ _POISSON_INPUT_WRAPPER_MARKER = "_poisson_boolean_input_validation_wrapper"
 _BUILD_EMISSIONS_WRAPPER_MARKER = "_emission_cell_id_build_emissions_wrapper"
 _KD_BUILD_EMISSIONS_WRAPPER_MARKER = "_emission_cell_id_kd_build_emissions_wrapper"
 _SORTED_SPIKE_COUNTS_WRAPPER_MARKER = "_emission_cell_id_sorted_spike_counts_wrapper"
+_SAFE_FLOAT_INTEGER_LIMIT = float(2**53)
 
 
 def _mark_wrapper(wrapper: Any, marker: str) -> Any:
@@ -132,10 +133,25 @@ def _coerce_integral_id(value: Any, name: str, integer_info: np.iinfo) -> int:
         identifier = int(integral)
     elif isinstance(item, (str, bytes)):
         identifier = _coerce_integral_text_id(item, name)
+    elif isinstance(item, (float, np.floating)):
+        try:
+            numeric = float(item)
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise ValueError(f"{name} must contain finite integer identifiers") from exc
+        if not np.isfinite(numeric):
+            raise ValueError(f"{name} must contain finite integer identifiers")
+        if abs(numeric) >= _SAFE_FLOAT_INTEGER_LIMIT:
+            raise ValueError(
+                f"{name} floating-point identifiers at or above 2**53 are unsafe; "
+                "use integer or string identifiers instead"
+            )
+        if not numeric.is_integer():
+            raise ValueError(f"{name} must be integer-valued")
+        identifier = int(numeric)
     else:
         try:
             numeric = float(item)
-        except (TypeError, ValueError) as exc:
+        except (TypeError, ValueError, OverflowError) as exc:
             raise ValueError(f"{name} must contain finite integer identifiers") from exc
         if not np.isfinite(numeric):
             raise ValueError(f"{name} must contain finite integer identifiers")

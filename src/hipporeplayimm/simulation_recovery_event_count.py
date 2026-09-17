@@ -6,7 +6,7 @@ from . import negative_infinite_evidence_validity as _negative_infinite_validity
 from . import simulation_recovery as _recovery
 from . import simulation_recovery_negative_infinity as _negative_infinity
 from .simulation_recovery_event_count_impl import (
-    _distinct_event_count,
+    _distinct_event_count as _distinct_event_count,  # explicit compatibility re-export
     apply_simulation_recovery_event_count_patch as _apply_impl,
 )
 

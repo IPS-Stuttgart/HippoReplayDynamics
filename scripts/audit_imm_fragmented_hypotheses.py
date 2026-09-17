@@ -93,7 +93,7 @@ def _empty_event_table() -> pd.DataFrame:
 
 
 def _read_evidence(path: str | Path) -> pd.DataFrame:
-    frame = pd.read_csv(path)
+    frame = pd.read_csv(path, dtype={"event_index": "string"})
     required = {"session", "event_index", "model", "log_evidence"}
     missing = sorted(required.difference(frame.columns))
     if missing:

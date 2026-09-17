@@ -20,6 +20,7 @@ _TRAJECTORY_IMM_ALIASES = frozenset({_SORTED_SPIKE_TRAJECTORY_IMM, _TRAJECTORY_I
 _TRAJECTORY_MODEL_ALIASES = frozenset({"state-space-velocity-momentum"})
 _BUILD_WRAPPER_MARKER = "_trajectory_imm_recovery_build_wrapper"
 _SCORE_WRAPPER_MARKER = "_trajectory_imm_recovery_score_wrapper"
+_score_wrapper_cache: object | None = None
 
 
 def apply_trajectory_imm_recovery_patch() -> None:
@@ -79,8 +80,24 @@ def apply_trajectory_imm_recovery_patch() -> None:
 def _patch_trajectory_imm_recovery_scoring(recovery: Any) -> None:
     """Avoid trajectory-posterior materialization in evidence-only recovery scoring."""
 
+    global _score_wrapper_cache
+
     current_score_recovery_model = recovery._score_recovery_model
     if getattr(current_score_recovery_model, _SCORE_WRAPPER_MARKER, False):
+        _score_wrapper_cache = current_score_recovery_model
+        recovery._trajectory_imm_recovery_evidence_only_patch_applied = True
+        return
+
+    # Earlier runtime patches deliberately restore their own recovery scorer on
+    # every apply_runtime_patches() call.  Reuse our wrapper when it still wraps
+    # that exact scorer so the public patch hook remains genuinely idempotent.
+    cached_wrapper = _score_wrapper_cache
+    if (
+        cached_wrapper is not None
+        and getattr(cached_wrapper, _SCORE_WRAPPER_MARKER, False)
+        and getattr(cached_wrapper, "__wrapped__", None) is current_score_recovery_model
+    ):
+        recovery._score_recovery_model = cached_wrapper
         recovery._trajectory_imm_recovery_evidence_only_patch_applied = True
         return
 
@@ -115,5 +132,6 @@ def _patch_trajectory_imm_recovery_scoring(recovery: Any) -> None:
         )
 
     setattr(score_recovery_model_evidence_only_trajectory_imm, _SCORE_WRAPPER_MARKER, True)
+    _score_wrapper_cache = score_recovery_model_evidence_only_trajectory_imm
     recovery._score_recovery_model = score_recovery_model_evidence_only_trajectory_imm
     recovery._trajectory_imm_recovery_evidence_only_patch_applied = True

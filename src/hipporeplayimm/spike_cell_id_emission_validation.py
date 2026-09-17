@@ -295,7 +295,10 @@ def _unwrap_integral_id_scalar(value: Any, name: str) -> Any:
             raise ValueError(f"{name} must contain scalar integer identifiers")
         seen_arrays.add(marker)
         try:
-            item = raw.item()
+            # Preserve NumPy floating dtypes so the exact-integer boundary can
+            # be derived from their actual mantissa width instead of silently
+            # promoting float16/32/64 values to Python binary64.
+            item = raw[()] if np.issubdtype(raw.dtype, np.floating) else raw.item()
         except (TypeError, ValueError, OverflowError) as exc:
             raise ValueError(
                 f"{name} must contain finite integer identifiers"
@@ -333,6 +336,13 @@ def _coerce_integral_id(
             raise ValueError(f"{name} must contain finite integer identifiers")
         if not bool(item.is_integer()):
             raise ValueError(f"{name} must contain integer-valued identifiers")
+        precision_bits = 53 if isinstance(item, float) else int(np.finfo(item.dtype).nmant) + 1
+        unsafe_magnitude = 1 << precision_bits
+        if abs(item) >= unsafe_magnitude:
+            raise ValueError(
+                f"{name} floating-point identifiers at or above 2**{precision_bits} are unsafe; "
+                "use integer or string identifiers instead"
+            )
         identifier = int(item)
     else:
         try:

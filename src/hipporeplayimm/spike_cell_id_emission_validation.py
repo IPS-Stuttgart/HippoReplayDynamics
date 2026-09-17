@@ -341,7 +341,7 @@ def _coerce_integral_id(
         if abs(item) >= unsafe_magnitude:
             raise ValueError(
                 f"{name} floating-point identifiers at or above 2**{precision_bits} are unsafe; "
-                "use integer or string identifiers instead"
+                "outside the reliable integer identifier range; use integer or string identifiers instead"
             )
         identifier = int(item)
     else:

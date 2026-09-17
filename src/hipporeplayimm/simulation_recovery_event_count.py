@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from . import simulation_recovery as _recovery
 from .simulation_recovery_event_count_impl import (
-    _distinct_event_count,
+    _distinct_event_count as _distinct_event_count,  # explicit compatibility re-export
     apply_simulation_recovery_event_count_patch as _apply_impl,
 )
 

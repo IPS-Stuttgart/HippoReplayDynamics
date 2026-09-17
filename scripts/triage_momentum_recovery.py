@@ -20,6 +20,7 @@ from __future__ import annotations
 import argparse
 import math
 from dataclasses import dataclass
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Sequence
 
@@ -36,6 +37,8 @@ _MISSING_STATUS_VALUES = {"", "nan", "na", "n/a", "none", "null", "<na>"}
 _MISSING_SUPPORT_VALUES = {"", "nan", "na", "n/a", "none", "null", "<na>"}
 _TRUE_BOOL_VALUES = {"1", "1.0", "true", "t", "yes", "y", "on"}
 _FALSE_BOOL_VALUES = {"0", "0.0", "false", "f", "no", "n", "off"}
+_EXACT_INTEGER_ID_COLUMNS = ("simulation_event_index", "event_index")
+_FLOAT_EXACT_INTEGER_LIMIT = 2**53
 
 EVIDENCE_SUPPORT_DIAGNOSTIC_COLUMNS = (
     "diagnostic_candidate_evidence_support",
@@ -124,7 +127,11 @@ def load_scores(path: str | Path) -> pd.DataFrame:
             )
     if not path.exists():
         raise FileNotFoundError(f"{path} does not exist")
-    return pd.read_csv(path)
+    frame = pd.read_csv(
+        path,
+        dtype={column: "string" for column in _EXACT_INTEGER_ID_COLUMNS},
+    )
+    return _normalize_integer_id_columns(frame)
 
 
 def build_momentum_recovery_triage(
@@ -142,7 +149,7 @@ def build_momentum_recovery_triage(
     if missing:
         raise KeyError(f"score table is missing required columns: {missing}")
 
-    frame = _with_support_columns(scores)
+    frame = _with_support_columns(_normalize_integer_id_columns(scores))
     if "true_model" in frame.columns:
         frame = frame[frame["true_model"].astype(str).str.lower().eq("momentum")].copy()
     elif "expected_model" in frame.columns:
@@ -160,12 +167,15 @@ def build_momentum_recovery_triage(
 
     groupby_keys: Sequence[str] | None = identity_columns or None
     groups = frame.groupby(list(groupby_keys), sort=False, dropna=False) if groupby_keys else [((), frame)]
-    for key, group in groups:
+    for _, group in groups:
         rows.append(_triage_event_group(group, expected_model=expected_model))
 
     event_table = pd.DataFrame(rows)
     if not event_table.empty:
-        sort_columns = _present_columns(event_table, [*CONFIG_COLUMN_CANDIDATES, *IDENTITY_COLUMN_CANDIDATES])
+        sort_columns = _present_columns(
+            event_table,
+            [*CONFIG_COLUMN_CANDIDATES, *IDENTITY_COLUMN_CANDIDATES],
+        )
         if sort_columns:
             event_table = event_table.sort_values(sort_columns, kind="stable").reset_index(drop=True)
 
@@ -241,7 +251,10 @@ def summarize_triage_events(event_table: pd.DataFrame) -> pd.DataFrame:
 def _triage_event_group(group: pd.DataFrame, *, expected_model: str) -> dict[str, object]:
     first = group.iloc[0]
     row: dict[str, object] = {}
-    for column in _present_columns(group, [*CONFIG_COLUMN_CANDIDATES, *IDENTITY_COLUMN_CANDIDATES]):
+    for column in _present_columns(
+        group,
+        [*CONFIG_COLUMN_CANDIDATES, *IDENTITY_COLUMN_CANDIDATES],
+    ):
         row[column] = first[column]
 
     row["true_model"] = str(first.get("true_model", "momentum"))
@@ -284,14 +297,16 @@ def _triage_event_group(group: pd.DataFrame, *, expected_model: str) -> dict[str
     lower_bound_certified_recovery = bool(
         (not expected_comparable)
         and expected_support == TRUNCATED_SUPPORT
-        and math.isfinite(best_comparable_log_evidence)
+        and _is_valid_log_evidence(best_comparable_log_evidence)
         and margin > 0.0
     )
     certified_or_strict = strict_exact_recovery or lower_bound_certified_recovery
 
     support_values = _support_diagnostics(expected)
     support_loss = _candidate_support_loss(support_values)
-    oracle_support = _as_bool(expected.get("oracle_candidate_support", first.get("oracle_candidate_support", False)))
+    oracle_support = _as_bool(
+        expected.get("oracle_candidate_support", first.get("oracle_candidate_support", False))
+    )
 
     if oracle_support and certified_or_strict:
         category = "oracle_support_recovers"
@@ -303,7 +318,7 @@ def _triage_event_group(group: pd.DataFrame, *, expected_model: str) -> dict[str
         category = "lower_bound_certified_recovery"
     elif expected_comparable:
         category = "exact_nonrecovery"
-    elif not math.isfinite(best_comparable_log_evidence):
+    elif not _is_valid_log_evidence(best_comparable_log_evidence):
         category = "no_comparable_exact_reference"
     elif support_loss:
         category = "candidate_support_loss"
@@ -343,6 +358,56 @@ def _empty_decision(category: str) -> dict[str, object]:
         "best_comparable_log_evidence": float("nan"),
         "expected_minus_best_comparable_log_evidence": float("nan"),
     }
+
+
+def _normalize_integer_id_columns(frame: pd.DataFrame) -> pd.DataFrame:
+    out = frame.copy()
+    for column in _EXACT_INTEGER_ID_COLUMNS:
+        if column not in out.columns:
+            continue
+        out[column] = pd.Series(
+            [_exact_integer_id(value, column) for value in out[column]],
+            index=out.index,
+            dtype=object,
+        )
+    return out
+
+
+def _exact_integer_id(value: object, column: str) -> object:
+    try:
+        missing = pd.isna(value)
+    except (TypeError, ValueError):
+        missing = False
+    if isinstance(missing, (bool, np.bool_)) and bool(missing):
+        return pd.NA
+    if isinstance(value, (bool, np.bool_)):
+        raise ValueError(f"{column} must contain finite integer identifiers")
+    if isinstance(value, (float, np.floating)):
+        numeric_float = float(value)
+        if not math.isfinite(numeric_float) or not numeric_float.is_integer():
+            raise ValueError(f"{column} must contain finite integer identifiers")
+        if abs(numeric_float) >= _FLOAT_EXACT_INTEGER_LIMIT:
+            raise ValueError(
+                f"{column} contains an unsafe floating-point identifier; "
+                "use an integer or decimal string for values at or above 2**53"
+            )
+        return int(numeric_float)
+    if isinstance(value, (int, np.integer)):
+        return int(value)
+
+    text = str(value).strip()
+    if text.lower() in _MISSING_STATUS_VALUES:
+        return pd.NA
+    try:
+        numeric = Decimal(text)
+    except (InvalidOperation, ValueError) as exc:
+        raise ValueError(f"{column} must contain finite integer identifiers") from exc
+    if not numeric.is_finite():
+        raise ValueError(f"{column} must contain finite integer identifiers")
+    integral = numeric.to_integral_value()
+    if numeric != integral:
+        raise ValueError(f"{column} must contain integer-valued identifiers")
+    return int(integral)
 
 
 def _with_support_columns(scores: pd.DataFrame) -> pd.DataFrame:
@@ -400,8 +465,13 @@ def _is_missing_support_value(value: object) -> bool:
 
 def _success_mask(frame: pd.DataFrame) -> pd.Series:
     status_ok = _status_success_mask(frame)
-    values = pd.to_numeric(frame["log_evidence"], errors="coerce")
-    return status_ok & np.isfinite(values)
+    values = pd.to_numeric(frame["log_evidence"], errors="coerce").to_numpy(dtype=float)
+    valid_log_evidence = ~np.isnan(values) & ~np.isposinf(values)
+    return status_ok & pd.Series(valid_log_evidence, index=frame.index)
+
+
+def _is_valid_log_evidence(value: float) -> bool:
+    return not math.isnan(value) and value != math.inf
 
 
 def _status_success_mask(frame: pd.DataFrame) -> pd.Series:
@@ -454,7 +524,11 @@ def _candidate_support_loss(values: dict[str, object]) -> bool:
     fully_supported = _numeric(values.get("candidate_true_path_fully_supported"))
     if math.isfinite(fully_supported) and fully_supported < 1:
         return True
-    for column in ("candidate_true_bin_coverage", "candidate_true_pair_coverage", "candidate_true_triplet_coverage"):
+    for column in (
+        "candidate_true_bin_coverage",
+        "candidate_true_pair_coverage",
+        "candidate_true_triplet_coverage",
+    ):
         coverage = _numeric(values.get(column))
         if math.isfinite(coverage) and coverage < 1.0:
             return True
@@ -480,15 +554,29 @@ def _failure_examples(event_table: pd.DataFrame, *, max_examples: int) -> pd.Dat
     }
     failures["_priority"] = failures["triage_category"].map(priority).fillna(99).astype(int)
     failures["_missing"] = pd.to_numeric(
-        failures.get("candidate_true_path_missing_bins", pd.Series(0, index=failures.index)),
+        failures.get(
+            "candidate_true_path_missing_bins",
+            pd.Series(0, index=failures.index),
+        ),
         errors="coerce",
     ).fillna(0)
     failures["_margin"] = pd.to_numeric(
-        failures.get("expected_minus_best_comparable_log_evidence", pd.Series(float("nan"), index=failures.index)),
+        failures.get(
+            "expected_minus_best_comparable_log_evidence",
+            pd.Series(float("nan"), index=failures.index),
+        ),
         errors="coerce",
     ).fillna(float("-inf"))
-    out = failures.sort_values(["_priority", "_missing", "_margin"], ascending=[True, False, True], kind="stable")
-    return out.drop(columns=["_priority", "_missing", "_margin"]).head(max_examples).reset_index(drop=True)
+    out = failures.sort_values(
+        ["_priority", "_missing", "_margin"],
+        ascending=[True, False, True],
+        kind="stable",
+    )
+    return (
+        out.drop(columns=["_priority", "_missing", "_margin"])
+        .head(max_examples)
+        .reset_index(drop=True)
+    )
 
 
 def _present_columns(frame: pd.DataFrame, candidates: Sequence[str]) -> list[str]:
@@ -543,7 +631,11 @@ def _median(values: pd.Series) -> float:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Triage synthetic momentum-recovery failures.")
-    parser.add_argument("--scores", required=True, help="Simulation-recovery event-score CSV or result directory.")
+    parser.add_argument(
+        "--scores",
+        required=True,
+        help="Simulation-recovery event-score CSV or result directory.",
+    )
     parser.add_argument("--output", required=True, help="Output directory for triage CSVs.")
     parser.add_argument("--expected-model", default=DEFAULT_EXPECTED_MOMENTUM_MODEL)
     parser.add_argument("--max-examples", type=int, default=50)

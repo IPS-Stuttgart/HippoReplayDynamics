@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from . import simulation_recovery as _recovery
+from . import simulation_recovery_negative_infinity as _negative_infinity
 from .simulation_recovery_event_count_impl import (
     _distinct_event_count as _distinct_event_count,  # explicit compatibility re-export
     apply_simulation_recovery_event_count_patch as _apply_impl,
@@ -40,6 +41,7 @@ def apply_simulation_recovery_event_count_patch() -> None:
                 delattr(_recovery, flag)
 
     _apply_impl()
+    _negative_infinity.apply_simulation_recovery_negative_infinity_patch()
 
     if repairing_reload:
         # These markers disappear naturally when importlib.reload() restores the

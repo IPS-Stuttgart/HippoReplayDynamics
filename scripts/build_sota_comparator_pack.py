@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import argparse
 from collections.abc import Iterable
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
 import numpy as np
@@ -54,6 +55,7 @@ LOWER_BOUND_AUDIT_MODELS: tuple[str, ...] = (
     MOMENTUM_CANDIDATE,
     IMM_CANDIDATE,
 )
+_SAFE_FLOAT_INTEGER_LIMIT = 2**53
 
 
 _MODEL_SHORT_NAMES = {
@@ -129,6 +131,33 @@ def _bool_column(frame: pd.DataFrame, column: str) -> pd.Series:
     return frame[column].map(_as_bool).astype(bool)
 
 
+def _exact_event_index(value: object) -> int:
+    """Parse an event identifier without silently accepting lossy binary floats."""
+
+    if isinstance(value, (bool, np.bool_)):
+        raise ValueError("event_index must contain integer identifiers, not booleans")
+    if isinstance(value, (float, np.floating)):
+        numeric_float = float(value)
+        if not np.isfinite(numeric_float):
+            raise ValueError("event_index must contain finite integer identifiers")
+        if abs(numeric_float) >= _SAFE_FLOAT_INTEGER_LIMIT:
+            raise ValueError(
+                "floating-point event_index at or above 2**53 is unsafe; "
+                "load identifiers as strings or integers"
+            )
+    text = str(value).strip()
+    try:
+        numeric = Decimal(text)
+    except (InvalidOperation, ValueError) as exc:
+        raise ValueError("event_index must contain finite integer identifiers") from exc
+    if not numeric.is_finite():
+        raise ValueError("event_index must contain finite integer identifiers")
+    integral = numeric.to_integral_value()
+    if numeric != integral:
+        raise ValueError("event_index must contain integer-valued identifiers")
+    return int(integral)
+
+
 def _success_rows(frame: pd.DataFrame) -> pd.DataFrame:
     required = {"session", "event_index", "model", "log_evidence"}
     missing = sorted(required.difference(frame.columns))
@@ -140,7 +169,7 @@ def _success_rows(frame: pd.DataFrame) -> pd.DataFrame:
         out = out[out["status"].astype(str).eq("success")].copy()
     out["session"] = out["session"].astype(str)
     out["rat"] = out["session"].map(_rat_from_session)
-    out["event_index"] = pd.to_numeric(out["event_index"], errors="raise").astype(int)
+    out["event_index"] = out["event_index"].map(_exact_event_index)
     out["model"] = out["model"].astype(str)
     out["log_evidence"] = pd.to_numeric(out["log_evidence"], errors="coerce")
     out = out.dropna(subset=["log_evidence"]).copy()
@@ -159,7 +188,7 @@ def _success_rows(frame: pd.DataFrame) -> pd.DataFrame:
 def read_event_model_evidence(path: str | Path) -> pd.DataFrame:
     """Read an all-session or event-sharded evidence CSV."""
 
-    return _success_rows(pd.read_csv(path))
+    return _success_rows(pd.read_csv(path, dtype={"event_index": "string"}))
 
 
 def _model_value(group: pd.DataFrame, model: str) -> float:

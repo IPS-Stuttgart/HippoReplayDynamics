@@ -19,6 +19,7 @@ from .state_space_bin_count_validation import (
 
 _PATCHED_FLAG = "_candidate_config_count_validation_patch_applied"
 _SCORE_PATCHED_FLAG = "_candidate_config_count_score_validation_patch_applied"
+_HELPER_PATCHED_FLAG = "_candidate_count_bounds_validation_patch_applied"
 _CONFIG_COUNT_NAMES = (
     "momentum_candidate_top_k",
     "momentum_candidate_min_k",
@@ -41,6 +42,27 @@ def _wrapper_chain_has_marker(function: object, marker: str) -> bool:
     return False
 
 
+def _validate_active_candidate_bounds(
+    *,
+    top_k: object | None,
+    min_k: object,
+    max_k: object,
+) -> None:
+    """Reject contradictory active lower and upper candidate-count bounds."""
+
+    top_count = 0 if top_k is None else _nonnegative_integer_count("top_k", top_k)
+    min_count = _nonnegative_integer_count("min_k", min_k)
+    max_count = _nonnegative_integer_count("max_k", max_k)
+    if max_count <= 0:
+        return
+    effective_lower_bound = max(1, top_count, min_count)
+    if max_count < effective_lower_bound:
+        raise ValueError(
+            "max_k is smaller than the configured candidate lower bound; "
+            "increase max_k or reduce top_k/min_k"
+        )
+
+
 def _validate_candidate_config(config: object) -> None:
     counts = {
         name: _nonnegative_integer_count(name, getattr(config, name))
@@ -53,19 +75,49 @@ def _validate_candidate_config(config: object) -> None:
     if threshold is None or threshold <= 0.0:
         return
 
-    max_count = counts["momentum_candidate_max_k"]
-    if max_count <= 0:
-        return
-    effective_lower_bound = max(
-        1,
-        counts["momentum_candidate_top_k"],
-        counts["momentum_candidate_min_k"],
+    _validate_active_candidate_bounds(
+        top_k=counts["momentum_candidate_top_k"],
+        min_k=counts["momentum_candidate_min_k"],
+        max_k=counts["momentum_candidate_max_k"],
     )
-    if max_count < effective_lower_bound:
-        raise ValueError(
-            "momentum_candidate_max_k is smaller than the configured candidate "
-            "lower bound; increase max_k or reduce top_k/min_k"
+
+
+def _patch_mass_retaining_candidate_indices() -> None:
+    """Make ``max_k`` a real upper bound whenever mass retention is active."""
+
+    from . import state_space_utils
+
+    current = state_space_utils._mass_retaining_candidate_indices
+    if _wrapper_chain_has_marker(current, _HELPER_PATCHED_FLAG):
+        return
+
+    @wraps(current)
+    def _mass_retaining_candidate_indices(
+        log_emission,
+        mass_threshold=None,
+        *,
+        top_k=None,
+        min_k=1,
+        max_k=0,
+    ):
+        threshold = _optional_mass_threshold("mass_threshold", mass_threshold)
+        if threshold is not None and threshold > 0.0:
+            _validate_active_candidate_bounds(
+                top_k=top_k,
+                min_k=min_k,
+                max_k=max_k,
+            )
+        return current(
+            log_emission,
+            mass_threshold,
+            top_k=top_k,
+            min_k=min_k,
+            max_k=max_k,
         )
+
+    setattr(_mass_retaining_candidate_indices, _HELPER_PATCHED_FLAG, True)
+    setattr(_mass_retaining_candidate_indices, "__hipporeplayimm_original__", current)
+    state_space_utils._mass_retaining_candidate_indices = _mass_retaining_candidate_indices
 
 
 def _patch_candidate_indices(state_space_model: object) -> None:
@@ -126,6 +178,8 @@ def _patch_score(state_space_model: object) -> None:
 
 def apply_state_space_candidate_count_validation_patch() -> None:
     """Install unconditional validation for candidate-count config fields."""
+
+    _patch_mass_retaining_candidate_indices()
 
     from . import state_space_model
     from .state_space_candidate_bin_center_validation import (

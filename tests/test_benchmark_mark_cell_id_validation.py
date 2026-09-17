@@ -1,10 +1,14 @@
 from __future__ import annotations
 
+import importlib
 from pathlib import Path
 
 import numpy as np
 import pytest
 
+import hipporeplayimm
+import hipporeplayimm.benchmarks as benchmarks
+import hipporeplayimm.ground_truth as ground_truth
 from hipporeplayimm.benchmarks import _session_with_mark_cell_subset
 from hipporeplayimm.data import ReplaySession, SpikeMarkData
 
@@ -73,3 +77,19 @@ def test_clusterless_mark_subset_accepts_integral_float_ids_and_preserves_groups
     np.testing.assert_array_equal(subset.spike_marks.marks, np.array([[2.0]], dtype=float))
     np.testing.assert_array_equal(subset.spike_marks.cell_ids, np.array([2], dtype=int))
     np.testing.assert_array_equal(subset.spike_marks.group_ids, np.array([20], dtype=int))
+
+
+def test_clusterless_mark_subset_validation_is_restored_after_benchmarks_reload() -> None:
+    importlib.reload(benchmarks)
+    reloaded_subset = benchmarks._session_with_mark_cell_subset
+    assert not getattr(reloaded_subset, "_benchmark_mark_cell_id_validation_wrapper", False)
+
+    hipporeplayimm.apply_runtime_patches()
+
+    patched_subset = benchmarks._session_with_mark_cell_subset
+    assert getattr(patched_subset, "_benchmark_mark_cell_id_validation_wrapper", False)
+    assert ground_truth._session_with_mark_cell_subset is patched_subset
+
+    session = _marked_session([1, 2])
+    with pytest.raises(ValueError, match="train cell IDs.*integer-valued"):
+        patched_subset(session, np.array([1.9], dtype=float), role="train")

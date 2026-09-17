@@ -15,6 +15,11 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+try:
+    from scripts.compare_model_evidence_runs import _read_event_score_csv
+except ModuleNotFoundError:  # pragma: no cover - direct script execution.
+    from compare_model_evidence_runs import _read_event_score_csv
+
 STATIONARY = "sorted-spike-state-space-stationary"
 DIFFUSION = "sorted-spike-state-space-diffusion"
 FRAGMENTED = "sorted-spike-state-space-fragmented"
@@ -92,20 +97,27 @@ def _empty_event_table() -> pd.DataFrame:
     return pd.DataFrame(columns=EVENT_TABLE_COLUMNS)
 
 
+def _require_complete_event_indices(frame: pd.DataFrame, *, context: str) -> None:
+    """Reject missing identifiers after rows outside the requested scope are filtered."""
+
+    if frame["event_index"].isna().any():
+        raise ValueError(f"{context} event_index must contain finite integer identifiers")
+
+
 def _read_evidence(path: str | Path) -> pd.DataFrame:
-    frame = pd.read_csv(path)
+    frame = _read_event_score_csv(Path(path))
     required = {"session", "event_index", "model", "log_evidence"}
     missing = sorted(required.difference(frame.columns))
     if missing:
         raise ValueError(f"event evidence is missing required columns: {missing}")
     if "status" in frame:
         frame = frame[_successful_status_mask(frame["status"])].copy()
+    _require_complete_event_indices(frame, context="event evidence")
     if "evidence_comparable" not in frame:
         frame["evidence_comparable"] = True
     frame["evidence_comparable"] = frame["evidence_comparable"].map(_as_bool)
     frame["session"] = frame["session"].astype(str)
     frame["rat"] = frame["session"].map(_rat)
-    frame["event_index"] = pd.to_numeric(frame["event_index"], errors="raise").astype(int)
     frame["model"] = frame["model"].astype(str)
     frame["log_evidence"] = pd.to_numeric(frame["log_evidence"], errors="coerce")
     return frame.dropna(subset=["log_evidence"]).copy()
@@ -242,7 +254,12 @@ def _reassignment_summary(reassignment: pd.DataFrame) -> list[dict[str, object]]
 def _load_labels(path: str | Path | None) -> pd.DataFrame:
     if not path:
         return pd.DataFrame()
-    labels = pd.read_csv(path)
+    labels = _read_event_score_csv(Path(path))
+    required = {"session", "event_index"}
+    missing = sorted(required.difference(labels.columns))
+    if missing:
+        raise ValueError(f"original labels are missing required columns: {missing}")
+    _require_complete_event_indices(labels, context="original labels")
     for column in LABEL_COLUMNS:
         if column in labels.columns:
             label_column = column
@@ -251,7 +268,6 @@ def _load_labels(path: str | Path | None) -> pd.DataFrame:
         raise ValueError(f"original labels need one of: {', '.join(LABEL_COLUMNS)}")
     labels = labels.copy()
     labels["session"] = labels["session"].astype(str)
-    labels["event_index"] = pd.to_numeric(labels["event_index"], errors="raise").astype(int)
     labels["original_algorithm_label"] = labels[label_column].fillna("").astype(str)
     return labels[["session", "event_index", "original_algorithm_label"]]
 

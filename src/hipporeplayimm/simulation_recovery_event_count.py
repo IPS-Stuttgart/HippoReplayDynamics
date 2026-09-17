@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from . import negative_infinite_evidence_validity as _negative_infinite_validity
 from . import simulation_recovery as _recovery
 from . import simulation_recovery_negative_infinity as _negative_infinity
 from .simulation_recovery_event_count_impl import (
@@ -41,6 +42,11 @@ def apply_simulation_recovery_event_count_patch() -> None:
                 delattr(_recovery, flag)
 
     _apply_impl()
+    # This has to precede the recovery annotation patch: the latter asks the
+    # shared evidence-reporting layer whether a successful ``-inf`` exact score
+    # is comparable.  It also wraps the later complex-validation patch so a
+    # repeated package patch cycle cannot reinstate ``np.isfinite`` semantics.
+    _negative_infinite_validity.apply_negative_infinite_evidence_validity_patch()
     _negative_infinity.apply_simulation_recovery_negative_infinity_patch()
 
     if repairing_reload:

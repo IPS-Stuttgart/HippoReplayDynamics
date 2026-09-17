@@ -254,12 +254,38 @@ def _successful_score_rows(frame: pd.DataFrame) -> pd.DataFrame:
 
 
 def _finite_log_evidence_rows(frame: pd.DataFrame) -> pd.DataFrame:
+    """Keep scoreable evidence rows without discarding valid zero probability.
+
+    ``-inf`` is a valid log evidence (zero probability) and must remain when an
+    event also has at least one finite model evidence to compare against. NaN
+    and ``+inf`` are invalid numeric results. Events whose surviving model
+    evidences are all ``-inf`` are excluded because within-event relative
+    evidence and a best model are undefined there.
+    """
+
     out = frame.copy()
     out["log_evidence"] = pd.to_numeric(out["log_evidence"], errors="coerce")
     if out.empty:
         return out
-    finite = np.isfinite(out["log_evidence"].to_numpy(dtype=float))
-    return out.loc[finite].copy()
+
+    values = out["log_evidence"].to_numpy(dtype=float)
+    valid_numeric = ~np.isnan(values) & ~np.isposinf(values)
+    out = out.loc[valid_numeric].copy()
+    if out.empty:
+        return out
+
+    out["_finite_log_evidence"] = np.isfinite(out["log_evidence"].to_numpy(dtype=float))
+    group_columns = _event_group_columns(out)
+    if group_columns:
+        has_finite_reference = out.groupby(
+            group_columns,
+            sort=False,
+            dropna=False,
+        )["_finite_log_evidence"].transform("any")
+        out = out.loc[has_finite_reference].copy()
+    elif not bool(out["_finite_log_evidence"].any()):
+        out = out.iloc[0:0].copy()
+    return out.drop(columns="_finite_log_evidence")
 
 
 def _evidence_support_counts(frame: pd.DataFrame, label: str) -> pd.DataFrame:

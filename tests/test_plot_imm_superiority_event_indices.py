@@ -22,7 +22,7 @@ def test_coerce_event_indices_rejects_fractional_and_unsafe_float_ids():
     with pytest.raises(ValueError, match="integer-valued"):
         _coerce_event_indices(pd.Series(["12.5"], dtype="string"))
 
-    with pytest.raises(ValueError, match="2\*\*53"):
+    with pytest.raises(ValueError, match="integer-valued"):
         _coerce_event_indices(pd.Series([float(2**53)]))
 
 

@@ -59,3 +59,47 @@ def test_compare_runs_retains_negative_infinite_model_evidence_with_finite_refer
     assert relative.loc["diffusion", "right_relative_log_evidence"] == float("-inf")
     assert relative.loc["momentum", "left_relative_log_evidence"] == 0.0
     assert relative.loc["momentum", "right_relative_log_evidence"] == 0.0
+
+
+def test_compare_runs_exact_only_drops_event_without_finite_exact_reference(tmp_path):
+    left = tmp_path / "left"
+    right = tmp_path / "right"
+    output = tmp_path / "comparison"
+    rows = [
+        {
+            "session": "Rat1/Open1",
+            "event_index": 0,
+            "model": "momentum",
+            "log_evidence": -2.0,
+            "status": "success",
+            "evidence_support": "truncated_full_grid",
+            "evidence_comparable": False,
+        },
+        {
+            "session": "Rat1/Open1",
+            "event_index": 0,
+            "model": "diffusion",
+            "log_evidence": float("-inf"),
+            "status": "success",
+            "evidence_support": "exact_full_grid",
+            "evidence_comparable": True,
+        },
+    ]
+    _write_event_scores(left, rows)
+    _write_event_scores(right, rows)
+
+    tables = compare_runs(
+        left,
+        right,
+        left_label="left",
+        right_label="right",
+        output=output,
+        exact_only=True,
+    )
+
+    summary = tables["summary"].iloc[0]
+    assert summary["left_events"] == 0
+    assert summary["right_events"] == 0
+    assert summary["matched_events"] == 0
+    assert tables["event_comparison"].empty
+    assert tables["relative"].empty

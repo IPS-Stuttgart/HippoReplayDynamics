@@ -13,6 +13,7 @@ from dataclasses import dataclass, field
 
 import numpy as np
 from scipy.sparse import csr_matrix, diags, issparse
+from scipy.special import logsumexp
 
 from .state_space_utils import (
     _coerce_valid_bin_mask,
@@ -281,6 +282,71 @@ def _normalized_sparse_pair(
     return pair
 
 
+def _log_probabilities(probabilities: np.ndarray) -> np.ndarray:
+    """Return exact log probabilities, preserving zero mass as ``-inf``."""
+
+    values = np.asarray(probabilities, dtype=float)
+    output = np.full(values.shape, -np.inf, dtype=float)
+    positive = values > 0.0
+    output[positive] = np.log(values[positive])
+    return output
+
+
+def _log_sparse_matrix(matrix: csr_matrix) -> csr_matrix:
+    """Return a CSR matrix whose stored positive probabilities are logged."""
+
+    output = matrix.tocsr(copy=True)
+    output.sum_duplicates()
+    output.eliminate_zeros()
+    output.data = np.log(output.data)
+    return output
+
+
+def _log_sparse_matvec(log_matrix: csr_matrix, values: np.ndarray) -> np.ndarray:
+    """Compute ``log(exp(log_matrix) @ exp(values))`` without underflow."""
+
+    vector = np.asarray(values, dtype=float)
+    output = np.full(log_matrix.shape[0], -np.inf, dtype=float)
+    nonempty = np.diff(log_matrix.indptr) > 0
+    if np.any(nonempty):
+        terms = log_matrix.data + vector[log_matrix.indices]
+        output[nonempty] = np.logaddexp.reduceat(
+            terms,
+            log_matrix.indptr[:-1][nonempty],
+        )
+    return output
+
+
+def _normalized_sparse_log_pair(
+    transition: csr_matrix,
+    source_log_factor: np.ndarray,
+    destination_log_factor: np.ndarray,
+    *,
+    label: str,
+) -> csr_matrix:
+    """Return a normalized sparse [source, destination] pair marginal."""
+
+    matrix = transition.tocoo(copy=False)
+    if matrix.nnz == 0:
+        raise FloatingPointError(f"{label} pair marginal has no finite positive mass")
+    log_weights = (
+        np.log(matrix.data)
+        + np.asarray(source_log_factor, dtype=float)[matrix.col]
+        + np.asarray(destination_log_factor, dtype=float)[matrix.row]
+    )
+    log_total = float(logsumexp(log_weights))
+    if not np.isfinite(log_total):
+        raise FloatingPointError(f"{label} pair marginal has no finite positive mass")
+    probabilities = np.exp(log_weights - log_total)
+    pair = csr_matrix(
+        (probabilities, (matrix.col, matrix.row)),
+        shape=transition.shape,
+    )
+    pair.sum_duplicates()
+    pair.eliminate_zeros()
+    return pair
+
+
 def first_order_smoothing_trace(
     log_likelihood: np.ndarray,
     transitions: csr_matrix | np.ndarray | Sequence[csr_matrix | np.ndarray],
@@ -293,6 +359,11 @@ def first_order_smoothing_trace(
     Emission rows may include arbitrary additive log offsets. The returned
     categorical quantities are invariant to those offsets, while log_evidence
     and log_predictive_probabilities restore them exactly.
+
+    The dynamic program is evaluated in log space.  This is required for the
+    trace to retain the same exact finite-log-likelihood semantics as the core
+    first-order scorer when emission likelihood ratios fall below binary64's
+    probability-space range.
     """
 
     if _has_complex_dtype(log_likelihood):
@@ -303,7 +374,15 @@ def first_order_smoothing_trace(
         raise ValueError("log_likelihood must have shape (positive time, positive state)")
     n_time, n_states = values.shape
     valid_mask = _coerce_valid_bin_mask(valid_bin_mask, n_states)
-    scaled, offsets = _scaled_emissions(values, valid_bin_mask=valid_mask)
+
+    # Reuse the shared validation and offsets, but never use its clipped
+    # probability representation for inference.  Clipping a finite shifted
+    # log-likelihood below -745 changes exact evidence and posterior odds.
+    _, offsets = _scaled_emissions(values, valid_bin_mask=valid_mask)
+    active_log_likelihood = values.copy()
+    if valid_mask is not None:
+        active_log_likelihood[:, ~valid_mask] = -np.inf
+
     transition_sequence = _coerce_transitions(
         transitions,
         n_time,
@@ -316,66 +395,88 @@ def first_order_smoothing_trace(
         valid_mask,
     )
 
-    predicted = np.empty((n_time, n_states), dtype=float)
-    filtered = np.empty_like(predicted)
-    scales = np.empty(n_time, dtype=float)
+    forward_log_transitions = tuple(
+        _log_sparse_matrix(transition) for transition in transition_sequence
+    )
+    backward_log_transitions = tuple(
+        _log_sparse_matrix(transition.T.tocsr()) for transition in transition_sequence
+    )
 
-    predicted[0] = initial
-    unnormalized = predicted[0] * scaled[0]
-    scales[0] = float(unnormalized.sum())
-    if not np.isfinite(scales[0]) or scales[0] <= 0.0:
-        raise FloatingPointError("the first emission has no finite predictive mass")
-    filtered[0] = unnormalized / scales[0]
+    log_predicted = np.full((n_time, n_states), -np.inf, dtype=float)
+    log_filtered = np.full_like(log_predicted, -np.inf)
+    log_predictive = np.empty(n_time, dtype=float)
 
-    for time_index, transition in enumerate(transition_sequence, start=1):
-        predicted[time_index] = np.asarray(
-            transition @ filtered[time_index - 1],
-            dtype=float,
-        )
-        unnormalized = predicted[time_index] * scaled[time_index]
-        scales[time_index] = float(unnormalized.sum())
-        if not np.isfinite(scales[time_index]) or scales[time_index] <= 0.0:
-            raise FloatingPointError(
-                f"emission row {time_index} has no finite predicted mass"
+    log_predicted[0] = _log_probabilities(initial)
+    for time_index in range(n_time):
+        if time_index:
+            log_predicted[time_index] = _log_sparse_matvec(
+                forward_log_transitions[time_index - 1],
+                log_filtered[time_index - 1],
             )
-        filtered[time_index] = unnormalized / scales[time_index]
+            predicted_mass = float(logsumexp(log_predicted[time_index]))
+            if not np.isfinite(predicted_mass):
+                raise FloatingPointError(
+                    f"prediction at row {time_index} has no finite mass"
+                )
+            # The transition is stochastic, so this is mathematically zero;
+            # normalizing removes only accumulated floating-point roundoff.
+            log_predicted[time_index] -= predicted_mass
 
-    backward = np.ones_like(filtered)
+        joint = log_predicted[time_index] + active_log_likelihood[time_index]
+        log_predictive[time_index] = float(logsumexp(joint))
+        if not np.isfinite(log_predictive[time_index]):
+            label = "the first emission" if time_index == 0 else f"emission row {time_index}"
+            raise FloatingPointError(f"{label} has no finite predicted mass")
+        log_filtered[time_index] = joint - log_predictive[time_index]
+
+    log_backward = np.zeros_like(log_filtered)
     for time_index in range(n_time - 2, -1, -1):
-        backward[time_index] = np.asarray(
-            transition_sequence[time_index].T
-            @ (scaled[time_index + 1] * backward[time_index + 1]),
-            dtype=float,
+        continuation = (
+            active_log_likelihood[time_index + 1]
+            + log_backward[time_index + 1]
         )
-        backward[time_index] /= scales[time_index + 1]
+        log_backward[time_index] = _log_sparse_matvec(
+            backward_log_transitions[time_index],
+            continuation,
+        ) - log_predictive[time_index + 1]
 
-    smoothed = filtered * backward
-    smoothed_mass = smoothed.sum(axis=1)
-    if not np.all(np.isfinite(smoothed_mass)) or np.any(smoothed_mass <= 0.0):
+    log_smoothed = log_filtered + log_backward
+    smoothed_norm = logsumexp(log_smoothed, axis=1)
+    if not np.all(np.isfinite(smoothed_norm)):
         raise FloatingPointError("at least one smoothed marginal has no finite mass")
-    smoothed /= smoothed_mass[:, None]
+    log_smoothed -= smoothed_norm[:, None]
+
+    with np.errstate(over="ignore", under="ignore"):
+        predicted = np.exp(log_predicted)
+        filtered = np.exp(log_filtered)
+        smoothed = np.exp(log_smoothed)
+        backward = np.exp(log_backward)
 
     filtering_pairs: list[csr_matrix] = []
     smoothed_pairs: list[csr_matrix] = []
     for time_index, transition in enumerate(transition_sequence):
         filtering_pairs.append(
-            _normalized_sparse_pair(
+            _normalized_sparse_log_pair(
                 transition,
-                filtered[time_index],
-                scaled[time_index + 1],
+                log_filtered[time_index],
+                active_log_likelihood[time_index + 1],
                 label=f"filtering step {time_index}",
             )
         )
         smoothed_pairs.append(
-            _normalized_sparse_pair(
+            _normalized_sparse_log_pair(
                 transition,
-                filtered[time_index],
-                scaled[time_index + 1] * backward[time_index + 1],
+                log_filtered[time_index],
+                active_log_likelihood[time_index + 1]
+                + log_backward[time_index + 1],
                 label=f"smoothing step {time_index}",
             )
         )
 
-    log_predictive = np.log(scales) + offsets
+    log_forward_scales = log_predictive - offsets
+    with np.errstate(under="ignore"):
+        forward_scales = np.exp(log_forward_scales)
+
     return FirstOrderSmoothingTrace(
         log_evidence=float(log_predictive.sum()),
         predicted_probabilities=predicted,
@@ -385,7 +486,7 @@ def first_order_smoothing_trace(
         filtering_pair_probabilities=tuple(filtering_pairs),
         smoothed_pair_probabilities=tuple(smoothed_pairs),
         emission_offsets=offsets,
-        forward_scales=scales,
+        forward_scales=forward_scales,
         log_predictive_probabilities=log_predictive,
         online_surprise=-log_predictive,
     )

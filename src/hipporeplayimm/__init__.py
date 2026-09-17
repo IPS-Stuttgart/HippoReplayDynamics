@@ -225,6 +225,18 @@ def _synchronize_duration_patched_emission_builders() -> None:
             module.build_kd_emissions = _kd_reference_module.build_kd_emissions
 
 
+def _synchronize_simulation_recovery_public_exports() -> None:
+    """Refresh package-level recovery exports after lower-level reloads."""
+
+    global SimulationRecoveryConfig
+    global SimulationRecoveryResult
+    global run_session_simulation_recovery
+
+    SimulationRecoveryConfig = _simulation_recovery.SimulationRecoveryConfig
+    SimulationRecoveryResult = _simulation_recovery.SimulationRecoveryResult
+    run_session_simulation_recovery = _simulation_recovery.run_session_simulation_recovery
+
+
 def apply_runtime_patches() -> None:
     """Install runtime compatibility patches in the package-defined order.
 
@@ -340,6 +352,7 @@ def apply_runtime_patches() -> None:
     # alias. Replay the idempotent count patch after those imports so every local
     # selector points at the active validated implementation.
     _state_space_bin_count_validation.apply_state_space_bin_count_validation_patch()
+    _synchronize_simulation_recovery_public_exports()
 
 
 # Ensure replay dynamics use center-to-center transition durations when replay
@@ -350,9 +363,7 @@ from .ground_truth import compare_scores_to_ground_truth as compare_scores_to_gr
 
 # Keep synthetic recovery summaries from mixing exact evidences with truncated
 # candidate lower bounds.
-SimulationRecoveryConfig = _simulation_recovery.SimulationRecoveryConfig
-SimulationRecoveryResult = _simulation_recovery.SimulationRecoveryResult
-run_session_simulation_recovery = _simulation_recovery.run_session_simulation_recovery
+_synchronize_simulation_recovery_public_exports()
 
 __all__ = [
     'BenchmarkConfig',

@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 from collections.abc import Iterable
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
 import numpy as np
@@ -13,6 +14,9 @@ import pandas as pd
 
 KEY_COLUMNS = ("session", "event_index", "null_index")
 DEFAULT_RIPPLE_Z_THRESHOLD = 3.0
+_FLOAT_EXACT_INTEGER_LIMIT = 2**53
+_INT64_MIN = -(2**63)
+_INT64_MAX = 2**63 - 1
 
 PEAK_RIPPLE_POWER_ALIASES = (
     "peak_ripple_band_power_z",
@@ -128,13 +132,21 @@ JOINT_COMPARISON_COLUMNS = (
 def _read_required_csv(path: Path) -> pd.DataFrame:
     if not path.exists():
         raise FileNotFoundError(f"required input table is missing: {path}")
-    return pd.read_csv(path)
+    return pd.read_csv(
+        path,
+        dtype={"event_index": "string", "null_index": "string"},
+        low_memory=False,
+    )
 
 
 def _read_optional_csv(path: Path | None) -> pd.DataFrame:
     if path is None or not path.exists():
         return pd.DataFrame()
-    return pd.read_csv(path)
+    return pd.read_csv(
+        path,
+        dtype={"event_index": "string", "null_index": "string"},
+        low_memory=False,
+    )
 
 
 def _numeric(frame: pd.DataFrame, column: str) -> pd.Series:
@@ -210,14 +222,86 @@ def _copy_first_bool(frame: pd.DataFrame, aliases: Iterable[str]) -> pd.Series:
     return _bool_series(frame, column)
 
 
+def _identifier_is_missing(value: object) -> bool:
+    if value is None:
+        return True
+    if isinstance(value, str) and not value.strip():
+        return True
+    try:
+        return bool(pd.isna(value))
+    except (TypeError, ValueError):
+        return False
+
+
+def _exact_integer_identifier(
+    value: object,
+    column: str,
+    *,
+    allow_missing: bool,
+) -> object:
+    """Parse one key identifier without silently routing it through binary64."""
+
+    if _identifier_is_missing(value):
+        if allow_missing:
+            return pd.NA
+        raise ValueError(f"{column} must contain finite integer identifiers")
+    if isinstance(value, (bool, np.bool_)):
+        raise ValueError(f"{column} must contain integer identifiers, not booleans")
+
+    if isinstance(value, (int, np.integer)):
+        result = int(value)
+    elif isinstance(value, (float, np.floating)):
+        numeric_float = float(value)
+        if not np.isfinite(numeric_float):
+            raise ValueError(f"{column} must contain finite integer identifiers")
+        if not numeric_float.is_integer():
+            raise ValueError(f"{column} must contain integer-valued identifiers")
+        if abs(numeric_float) >= _FLOAT_EXACT_INTEGER_LIMIT:
+            raise ValueError(
+                f"{column} contains a floating-point identifier outside the exact integer range; "
+                "load identifiers as strings or integers"
+            )
+        result = int(numeric_float)
+    else:
+        text = str(value).strip()
+        try:
+            numeric = Decimal(text)
+        except (InvalidOperation, TypeError, ValueError) as exc:
+            raise ValueError(f"{column} must contain finite integer identifiers") from exc
+        if not numeric.is_finite():
+            raise ValueError(f"{column} must contain finite integer identifiers")
+        integral = numeric.to_integral_value()
+        if numeric != integral:
+            raise ValueError(f"{column} must contain integer-valued identifiers")
+        result = int(integral)
+
+    if result < _INT64_MIN or result > _INT64_MAX:
+        raise ValueError(f"{column} must fit in signed 64-bit integer range")
+    return result
+
+
 def _normalize_key_columns(frame: pd.DataFrame) -> pd.DataFrame:
     out = frame.copy()
     if "session" in out:
         out["session"] = out["session"].astype(str)
     if "event_index" in out:
-        out["event_index"] = pd.to_numeric(out["event_index"], errors="coerce").astype("Int64")
+        out["event_index"] = pd.Series(
+            [
+                _exact_integer_identifier(value, "event_index", allow_missing=False)
+                for value in out["event_index"]
+            ],
+            index=out.index,
+            dtype="Int64",
+        )
     if "null_index" in out:
-        out["null_index"] = pd.to_numeric(out["null_index"], errors="coerce").astype("Int64")
+        out["null_index"] = pd.Series(
+            [
+                _exact_integer_identifier(value, "null_index", allow_missing=True)
+                for value in out["null_index"]
+            ],
+            index=out.index,
+            dtype="Int64",
+        )
     return out
 
 
@@ -273,8 +357,8 @@ def promoted_candidate_lfp_table(
     out = pd.DataFrame(index=frame.index)
     out["session"] = frame["session"].astype(str)
     out["rat"] = frame["rat"].astype(str) if "rat" in frame else out["session"].map(_rat_from_session)
-    out["event_index"] = pd.to_numeric(frame["event_index"], errors="coerce").astype("Int64")
-    out["null_index"] = pd.to_numeric(frame["null_index"], errors="coerce").astype("Int64")
+    out["event_index"] = frame["event_index"].astype("Int64")
+    out["null_index"] = frame["null_index"].astype("Int64")
     out["candidate_id"] = out.apply(_candidate_id, axis=1)
     out["window_start_s"] = _copy_first_numeric(frame, ("window_start_s",))
     out["window_end_s"] = _copy_first_numeric(frame, ("window_end_s",))

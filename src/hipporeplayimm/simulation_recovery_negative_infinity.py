@@ -1,9 +1,12 @@
 """Preserve valid negative-infinite evidence in simulation recovery reports.
 
 A log evidence of ``-inf`` represents zero path probability.  It is still a
-valid model-evidence value for ranking: any finite evidence beats it, and a
-finite truncated lower bound is certified against an exact ``-inf`` reference.
-NaN and ``+inf`` remain invalid for these reporting comparisons.
+valid model-evidence value for recovery ranking: any finite evidence beats it,
+and a finite truncated lower bound is certified against an exact ``-inf``
+reference. NaN and ``+inf`` remain invalid for these recovery comparisons.
+
+Generic evidence-support reporting intentionally keeps its stricter finiteness
+contract. The exception in this module is scoped to simulation recovery only.
 """
 
 from __future__ import annotations
@@ -25,6 +28,14 @@ def _temporary_row_id_column(frame: pd.DataFrame) -> str:
     return column
 
 
+def _real_log_evidence_values(values: pd.Series) -> np.ndarray:
+    """Coerce real scalar evidence without warning on nested complex objects."""
+
+    from . import evidence_complex_validation as complex_validation
+
+    return complex_validation._real_numeric_series(values).to_numpy(float)
+
+
 def _usable_log_evidence_mask(values: object) -> np.ndarray:
     numeric = np.asarray(values, dtype=float)
     return ~(np.isnan(numeric) | np.isposinf(numeric))
@@ -39,7 +50,7 @@ def _log_evidence_margin(left: float, right: float) -> float:
 
 
 def _patch_evidence_annotation(best_row_flags: Any, reporting: Any) -> None:
-    """Restore exact-support metadata for successful ``-inf`` score rows."""
+    """Restore recovery comparability for successful exact ``-inf`` rows."""
 
     current = best_row_flags._simulation_add_evidence_columns
     if getattr(current, _ANNOTATION_WRAPPER_FLAG, False):
@@ -57,35 +68,38 @@ def _patch_evidence_annotation(best_row_flags: Any, reporting: Any) -> None:
         row_id_column = _temporary_row_id_column(prepared)
         prepared[row_id_column] = np.arange(len(prepared), dtype=np.int64)
         classified = reporting_module.ensure_evidence_support_columns(prepared)
-        source_values = pd.to_numeric(classified["log_evidence"], errors="coerce")
-        source_negative_infinite = np.isneginf(source_values.to_numpy(float))
-        source_comparable = reporting_module._coerce_bool_series(
-            classified["evidence_comparable"]
+        source_values = _real_log_evidence_values(classified["log_evidence"])
+        source_negative_infinite = np.isneginf(source_values)
+        source_success = reporting_module._status_success_series(classified).to_numpy(
+            bool
         )
-        comparable_by_row_id = dict(
-            zip(
-                classified.loc[source_negative_infinite, row_id_column].tolist(),
-                source_comparable.loc[source_negative_infinite].tolist(),
-                strict=False,
-            )
+        source_exact = (
+            classified["evidence_support"]
+            .astype(str)
+            .eq(reporting_module.EXACT_EVIDENCE_SUPPORT)
+            .to_numpy(bool)
         )
+        recoverable_negative_infinite = (
+            source_negative_infinite & source_success & source_exact
+        )
+        comparable_row_ids = classified.loc[
+            recoverable_negative_infinite, row_id_column
+        ].tolist()
 
         annotated = current(prepared, reporting_module)
         if row_id_column not in annotated.columns:
             return annotated
 
-        if comparable_by_row_id:
-            negative_ids = annotated[row_id_column].isin(comparable_by_row_id)
-            annotated.loc[negative_ids, "evidence_comparable"] = annotated.loc[
-                negative_ids, row_id_column
-            ].map(comparable_by_row_id).astype(bool)
+        if comparable_row_ids:
+            negative_ids = annotated[row_id_column].isin(comparable_row_ids)
+            annotated.loc[negative_ids, "evidence_comparable"] = True
 
             # When at least one exact model has finite evidence, ``-inf`` exact
             # rows have exactly zero posterior model probability and ``-inf``
-            # relative evidence.  The finite-model probabilities already sum to
+            # relative evidence. The finite-model probabilities already sum to
             # one because zero-mass models contribute nothing to the normalizer.
             for _, group in best_row_flags._iter_event_groups(annotated):
-                log_values = pd.to_numeric(group["log_evidence"], errors="coerce").to_numpy(float)
+                log_values = _real_log_evidence_values(group["log_evidence"])
                 comparable = reporting_module._coerce_bool_series(
                     group["evidence_comparable"]
                 ).to_numpy(bool)
@@ -126,7 +140,7 @@ def _certified_vs_exact_event_recovery(
     recovery: Any,
     best_row_flags: Any,
 ) -> pd.DataFrame:
-    """Certified recovery that treats ``-inf`` as valid zero evidence."""
+    """Certified recovery that treats exact ``-inf`` as valid zero evidence."""
 
     if event_scores.empty:
         return pd.DataFrame()
@@ -168,8 +182,10 @@ def _certified_vs_exact_event_recovery(
             )
             continue
 
-        log_values = scored["log_evidence"].to_numpy(float)
-        scored = scored.loc[_usable_log_evidence_mask(log_values)].copy()
+        log_values = _real_log_evidence_values(scored["log_evidence"])
+        usable_scores = _usable_log_evidence_mask(log_values)
+        scored = scored.loc[usable_scores].copy()
+        log_values = log_values[usable_scores]
         if scored.empty:
             rows.append(
                 {
@@ -186,7 +202,15 @@ def _certified_vs_exact_event_recovery(
             )
             continue
 
-        comparable_mask = recovery._comparable_mask(scored)
+        comparable_mask = np.asarray(recovery._comparable_mask(scored), dtype=bool)
+        exact_negative_infinite = (
+            scored["evidence_support"]
+            .astype(str)
+            .eq(reporting.EXACT_EVIDENCE_SUPPORT)
+            .to_numpy(bool)
+            & np.isneginf(log_values)
+        )
+        comparable_mask |= exact_negative_infinite
         comparable_rows = scored.loc[comparable_mask].copy()
         best_comparable_row: pd.Series | None = None
         best_comparable_model = ""
@@ -248,6 +272,11 @@ def _certified_vs_exact_event_recovery(
                 ).iloc[0]
             )
         )
+        if (
+            expected_support == reporting.EXACT_EVIDENCE_SUPPORT
+            and np.isneginf(expected_log_evidence)
+        ):
+            expected_comparable = True
         margin = _log_evidence_margin(
             expected_log_evidence,
             best_comparable_log_evidence,

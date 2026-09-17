@@ -9,6 +9,7 @@ family model in recovery summaries.
 from __future__ import annotations
 
 from dataclasses import replace
+from functools import wraps
 from typing import Any
 
 from .sorted_spike_state_space import SortedSpikeStateSpaceReplayModel
@@ -46,6 +47,7 @@ def apply_trajectory_imm_recovery_patch() -> None:
 
     previous_build_scoring_models = current_build_scoring_models
 
+    @wraps(previous_build_scoring_models)
     def build_scoring_models_with_trajectory_imm(config: Any) -> dict[str, object]:
         names = recovery.parse_model_list(config.scoring_models)
         requested_trajectory_names = tuple(name for name in names if name in _TRAJECTORY_IMM_ALIASES)
@@ -84,6 +86,7 @@ def _patch_trajectory_imm_recovery_scoring(recovery: Any) -> None:
 
     previous_score_recovery_model = current_score_recovery_model
 
+    @wraps(previous_score_recovery_model)
     def score_recovery_model_evidence_only_trajectory_imm(
         model: object,
         emissions: object,

@@ -10,6 +10,7 @@ or tetrode group.
 
 from __future__ import annotations
 
+import sys
 from dataclasses import replace
 
 import numpy as np
@@ -31,6 +32,17 @@ def _refresh_ground_truth_alias(wrapper: object) -> None:
     ground_truth._session_with_mark_cell_subset = wrapper
 
 
+def _refresh_package_public_exports(benchmarks: object) -> None:
+    """Keep public benchmark exports synchronized after a module reload."""
+
+    package = sys.modules.get("hipporeplayimm")
+    if package is None:
+        return
+    package.BenchmarkConfig = benchmarks.BenchmarkConfig
+    package.BenchmarkResult = benchmarks.BenchmarkResult
+    package.run_open_field_benchmark = benchmarks.run_open_field_benchmark
+
+
 def apply_benchmark_mark_cell_id_validation_patch() -> None:
     """Install strict ID validation for clusterless held-out mark subsets."""
 
@@ -40,6 +52,7 @@ def apply_benchmark_mark_cell_id_validation_patch() -> None:
     if getattr(current_subset, _WRAPPER_FLAG, False):
         setattr(benchmarks, _PATCHED_FLAG, True)
         _refresh_ground_truth_alias(current_subset)
+        _refresh_package_public_exports(benchmarks)
         return
 
     original_subset = current_subset
@@ -82,6 +95,7 @@ def apply_benchmark_mark_cell_id_validation_patch() -> None:
     setattr(session_with_validated_mark_cell_subset, _WRAPPER_FLAG, True)
     benchmarks._session_with_mark_cell_subset = session_with_validated_mark_cell_subset
     _refresh_ground_truth_alias(session_with_validated_mark_cell_subset)
+    _refresh_package_public_exports(benchmarks)
     setattr(benchmarks, _PATCHED_FLAG, True)
 
 

@@ -18,6 +18,17 @@ from .data import SpikeMarkData
 from .data_cell_id_validation import _coerce_integral_ids
 
 _PATCHED_FLAG = "_benchmark_mark_cell_id_validation_patch_applied"
+_WRAPPER_MARKER = "_benchmark_mark_cell_id_validation_wrapper"
+
+
+def _synchronize_ground_truth_alias(patched_subset) -> None:
+    """Keep the ground-truth helper alias aligned with the active benchmark wrapper."""
+
+    try:
+        from . import ground_truth
+    except Exception:
+        return
+    ground_truth._session_with_mark_cell_subset = patched_subset
 
 
 def apply_benchmark_mark_cell_id_validation_patch() -> None:
@@ -25,10 +36,13 @@ def apply_benchmark_mark_cell_id_validation_patch() -> None:
 
     from . import benchmarks
 
-    if getattr(benchmarks, _PATCHED_FLAG, False):
+    current_subset = benchmarks._session_with_mark_cell_subset
+    if getattr(current_subset, _WRAPPER_MARKER, False):
+        _synchronize_ground_truth_alias(current_subset)
+        setattr(benchmarks, _PATCHED_FLAG, True)
         return
 
-    original_subset = benchmarks._session_with_mark_cell_subset
+    original_subset = current_subset
 
     def session_with_validated_mark_cell_subset(session, cell_ids, *, role: str):
         marks = session.spike_marks
@@ -65,13 +79,10 @@ def apply_benchmark_mark_cell_id_validation_patch() -> None:
         )
         return replace(session, spike_marks=filtered_marks)
 
+    setattr(session_with_validated_mark_cell_subset, _WRAPPER_MARKER, True)
+    setattr(session_with_validated_mark_cell_subset, "__hipporeplayimm_original__", original_subset)
     benchmarks._session_with_mark_cell_subset = session_with_validated_mark_cell_subset
-    try:
-        from . import ground_truth
-    except Exception:
-        ground_truth = None
-    if ground_truth is not None:
-        ground_truth._session_with_mark_cell_subset = session_with_validated_mark_cell_subset
+    _synchronize_ground_truth_alias(session_with_validated_mark_cell_subset)
     setattr(benchmarks, _PATCHED_FLAG, True)
 
 

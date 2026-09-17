@@ -200,6 +200,7 @@ def _load_event_scores(root: str | Path, run_label: str, *, exact_only: bool = F
         frame["evidence_comparable"] = pd.Series(True, index=frame.index, dtype=bool)
     if exact_only:
         frame = frame[frame["evidence_comparable"]].copy()
+        frame = _finite_log_evidence_rows(frame)
     frame["run_label"] = run_label
     frame["canonical_model"] = frame["model"].map(canonical_model_name)
     frame = _add_relative_log_evidence(frame)

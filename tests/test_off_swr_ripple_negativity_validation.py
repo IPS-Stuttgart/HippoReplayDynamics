@@ -2,12 +2,14 @@ import sys
 from pathlib import Path
 
 import pandas as pd
+import pytest
 
 sys.path.append(str(Path(__file__).resolve().parents[1] / "scripts"))
 
 from off_swr_ripple_negativity_validation import (  # noqa: E402
     _as_bool_series,
     _bool_series,
+    promoted_candidate_lfp_table,
     write_outputs,
 )
 
@@ -147,6 +149,60 @@ def test_ripple_negativity_boolean_helpers_parse_numeric_csv_flags():
 
     assert _bool_series(frame, "flag").fillna(False).astype(bool).tolist() == expected
     assert _as_bool_series(frame["flag"]).tolist() == expected
+
+
+def test_ripple_negativity_preserves_large_decimal_candidate_ids(tmp_path):
+    promoted = tmp_path / "promoted.csv"
+    windows = tmp_path / "windows.csv"
+    output = tmp_path / "out"
+    first_id = "9007199254740992.0"
+    second_id = "9007199254740993.0"
+
+    promoted_rows = [
+        _promoted("Rat1/Open1", 1, 0, exact_margin=50.0),
+        _promoted("Rat1/Open1", 2, 0, exact_margin=60.0),
+    ]
+    promoted_rows[0]["event_index"] = first_id
+    promoted_rows[1]["event_index"] = second_id
+    pd.DataFrame(promoted_rows).to_csv(promoted, index=False)
+
+    window_rows = [
+        _lfp_window("Rat1/Open1", 1, 0, peak=1.2, mean=0.4, promoted=True),
+        _lfp_window("Rat1/Open1", 2, 0, peak=4.2, mean=1.4, promoted=True),
+    ]
+    window_rows[0]["event_index"] = first_id
+    window_rows[1]["event_index"] = second_id
+    pd.DataFrame(window_rows).to_csv(windows, index=False)
+
+    outputs = write_outputs(
+        promoted_decisions=promoted,
+        off_swr_window_table=windows,
+        output=output,
+    )
+
+    promoted_lfp = outputs["off_swr_candidate_lfp_ripple_power.csv"]
+    assert promoted_lfp["event_index"].tolist() == [9007199254740992, 9007199254740993]
+    assert promoted_lfp["peak_ripple_band_power_z"].tolist() == [1.2, 4.2]
+    assert promoted_lfp["candidate_id"].tolist() == [
+        "Rat1/Open1|event=9007199254740992|null=0",
+        "Rat1/Open1|event=9007199254740993|null=0",
+    ]
+
+
+def test_ripple_negativity_rejects_unsafe_preparsed_float_candidate_id():
+    frame = pd.DataFrame(
+        [
+            {
+                "session": "Rat1/Open1",
+                "event_index": float(2**53),
+                "null_index": 0,
+                "trajectory_confident_claim": True,
+            }
+        ]
+    )
+
+    with pytest.raises(ValueError, match="event_index.*outside the exact integer range"):
+        promoted_candidate_lfp_table(frame)
 
 
 def _promoted(session: str, event_index: int, null_index: int, *, exact_margin: float) -> dict[str, object]:

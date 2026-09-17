@@ -10,6 +10,7 @@ first-order IMM beats fragmented by the calibrated margin.
 from __future__ import annotations
 
 import argparse
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
 import numpy as np
@@ -92,8 +93,24 @@ def _empty_event_table() -> pd.DataFrame:
     return pd.DataFrame(columns=EVENT_TABLE_COLUMNS)
 
 
+def _exact_event_index(value: object) -> int:
+    """Parse one event identifier without routing it through binary floating point."""
+
+    text = str(value).strip()
+    try:
+        numeric = Decimal(text)
+    except (InvalidOperation, ValueError) as exc:
+        raise ValueError("event_index must contain finite integer identifiers") from exc
+    if not numeric.is_finite():
+        raise ValueError("event_index must contain finite integer identifiers")
+    integral = numeric.to_integral_value()
+    if numeric != integral:
+        raise ValueError("event_index must contain integer-valued identifiers")
+    return int(integral)
+
+
 def _read_evidence(path: str | Path) -> pd.DataFrame:
-    frame = pd.read_csv(path)
+    frame = pd.read_csv(path, dtype={"event_index": "string"})
     required = {"session", "event_index", "model", "log_evidence"}
     missing = sorted(required.difference(frame.columns))
     if missing:
@@ -105,7 +122,7 @@ def _read_evidence(path: str | Path) -> pd.DataFrame:
     frame["evidence_comparable"] = frame["evidence_comparable"].map(_as_bool)
     frame["session"] = frame["session"].astype(str)
     frame["rat"] = frame["session"].map(_rat)
-    frame["event_index"] = pd.to_numeric(frame["event_index"], errors="raise").astype(int)
+    frame["event_index"] = frame["event_index"].map(_exact_event_index)
     frame["model"] = frame["model"].astype(str)
     frame["log_evidence"] = pd.to_numeric(frame["log_evidence"], errors="coerce")
     return frame.dropna(subset=["log_evidence"]).copy()
@@ -124,7 +141,11 @@ def _finite_difference(left: object, right: object) -> float:
         right_value = float(right)
     except (TypeError, ValueError):
         return float("nan")
-    if not np.isfinite(left_value) or not np.isfinite(right_value):
+    if np.isnan(left_value) or np.isnan(right_value):
+        return float("nan")
+    if np.isposinf(left_value) or np.isposinf(right_value):
+        return float("nan")
+    if np.isneginf(left_value) and np.isneginf(right_value):
         return float("nan")
     return left_value - right_value
 
@@ -242,7 +263,7 @@ def _reassignment_summary(reassignment: pd.DataFrame) -> list[dict[str, object]]
 def _load_labels(path: str | Path | None) -> pd.DataFrame:
     if not path:
         return pd.DataFrame()
-    labels = pd.read_csv(path)
+    labels = pd.read_csv(path, dtype={"event_index": "string"})
     for column in LABEL_COLUMNS:
         if column in labels.columns:
             label_column = column
@@ -251,7 +272,7 @@ def _load_labels(path: str | Path | None) -> pd.DataFrame:
         raise ValueError(f"original labels need one of: {', '.join(LABEL_COLUMNS)}")
     labels = labels.copy()
     labels["session"] = labels["session"].astype(str)
-    labels["event_index"] = pd.to_numeric(labels["event_index"], errors="raise").astype(int)
+    labels["event_index"] = labels["event_index"].map(_exact_event_index)
     labels["original_algorithm_label"] = labels[label_column].fillna("").astype(str)
     return labels[["session", "event_index", "original_algorithm_label"]]
 

@@ -17,6 +17,8 @@ _SORTED_SPIKE_TRAJECTORY_IMM = "sorted-spike-state-space-trajectory-imm-exact-sp
 _TRAJECTORY_IMM_MODE = "trajectory-imm-exact-sparse"
 _TRAJECTORY_IMM_ALIASES = frozenset({_SORTED_SPIKE_TRAJECTORY_IMM, _TRAJECTORY_IMM_MODE})
 _TRAJECTORY_MODEL_ALIASES = frozenset({"state-space-velocity-momentum"})
+_BUILD_WRAPPER_MARKER = "_trajectory_imm_recovery_build_wrapper"
+_SCORE_WRAPPER_MARKER = "_trajectory_imm_recovery_score_wrapper"
 
 
 def apply_trajectory_imm_recovery_patch() -> None:
@@ -29,14 +31,20 @@ def apply_trajectory_imm_recovery_patch() -> None:
     gt_split_strategy.apply_ground_truth_cell_split_strategy_patch()
     _patch_trajectory_imm_recovery_scoring(recovery)
 
-    if getattr(recovery, "_trajectory_imm_recovery_patch_applied", False):
-        return
-
+    # ``importlib.reload(recovery)`` replaces functions and module-assigned
+    # registries but retains arbitrary attributes in the module dictionary.
+    # Refresh the registry before checking the actual wrapper so stale legacy
+    # sentinels cannot suppress installation after a reload.
     recovery._TRAJECTORY = set(getattr(recovery, "_TRAJECTORY", set())) | set(
         _TRAJECTORY_IMM_ALIASES | _TRAJECTORY_MODEL_ALIASES
     )
 
-    previous_build_scoring_models = recovery.build_scoring_models
+    current_build_scoring_models = recovery.build_scoring_models
+    if getattr(current_build_scoring_models, _BUILD_WRAPPER_MARKER, False):
+        recovery._trajectory_imm_recovery_patch_applied = True
+        return
+
+    previous_build_scoring_models = current_build_scoring_models
 
     def build_scoring_models_with_trajectory_imm(config: Any) -> dict[str, object]:
         names = recovery.parse_model_list(config.scoring_models)
@@ -61,6 +69,7 @@ def apply_trajectory_imm_recovery_patch() -> None:
             )
         return {name: models[name] for name in dict.fromkeys(names)}
 
+    setattr(build_scoring_models_with_trajectory_imm, _BUILD_WRAPPER_MARKER, True)
     recovery.build_scoring_models = build_scoring_models_with_trajectory_imm
     recovery._trajectory_imm_recovery_patch_applied = True
 
@@ -68,10 +77,12 @@ def apply_trajectory_imm_recovery_patch() -> None:
 def _patch_trajectory_imm_recovery_scoring(recovery: Any) -> None:
     """Avoid trajectory-posterior materialization in evidence-only recovery scoring."""
 
-    if getattr(recovery, "_trajectory_imm_recovery_evidence_only_patch_applied", False):
+    current_score_recovery_model = recovery._score_recovery_model
+    if getattr(current_score_recovery_model, _SCORE_WRAPPER_MARKER, False):
+        recovery._trajectory_imm_recovery_evidence_only_patch_applied = True
         return
 
-    previous_score_recovery_model = recovery._score_recovery_model
+    previous_score_recovery_model = current_score_recovery_model
 
     def score_recovery_model_evidence_only_trajectory_imm(
         model: object,
@@ -100,5 +111,6 @@ def _patch_trajectory_imm_recovery_scoring(recovery: Any) -> None:
             score_with_occupancy=score_with_occupancy,
         )
 
+    setattr(score_recovery_model_evidence_only_trajectory_imm, _SCORE_WRAPPER_MARKER, True)
     recovery._score_recovery_model = score_recovery_model_evidence_only_trajectory_imm
     recovery._trajectory_imm_recovery_evidence_only_patch_applied = True

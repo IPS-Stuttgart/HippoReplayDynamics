@@ -254,6 +254,13 @@ def apply_state_space_bin_count_validation_patch() -> None:
         threshold = _optional_mass_threshold("mass_threshold", mass_threshold)
         min_count = _nonnegative_integer_count("min_k", min_k)
         max_count = _nonnegative_integer_count("max_k", max_k)
+        if threshold is not None and threshold > 0.0 and max_count > 0:
+            effective_lower_bound = max(1, top_k_count or 0, min_count)
+            if max_count < effective_lower_bound:
+                raise ValueError(
+                    "max_k is smaller than the configured candidate lower bound; "
+                    "increase max_k or reduce top_k/min_k"
+                )
         return original_mass_retaining_candidate_indices(
             log_emission,
             threshold,

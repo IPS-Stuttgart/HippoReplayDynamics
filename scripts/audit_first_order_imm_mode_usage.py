@@ -70,7 +70,10 @@ def _exact_integer_identifier(value: object, column: str) -> int:
 
 def _coerce_exact_integer_column(frame: pd.DataFrame, column: str) -> None:
     frame[column] = pd.Series(
-        [_exact_integer_identifier(value, column) for value in frame[column]],
+        [
+            _exact_integer_identifier(value, column)
+            for value in frame[column].to_numpy(copy=False)
+        ],
         index=frame.index,
         dtype=object,
     )

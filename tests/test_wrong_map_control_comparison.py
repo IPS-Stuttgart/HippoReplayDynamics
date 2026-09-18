@@ -2,9 +2,11 @@ from pathlib import Path
 import sys
 
 import pandas as pd
+import pytest
 
 sys.path.insert(0, str(Path("scripts").resolve()))
 from compare_wrong_map_evidence_controls import (
+    _read_evidence,
     rat_bootstrap_wrong_map_family_evidence_attenuation,
     wrong_map_control_gate_summary,
     wrong_map_family_evidence_attenuation,
@@ -118,6 +120,33 @@ def test_wrong_map_comparison_keeps_legacy_missing_status_rows():
     assert bool(family.loc[0, "required_models_complete_both_maps"])
     assert summary["complete_family_events"] == 1
     assert summary["mean_best_trajectory_delta_real_minus_wrong"] > 0.0
+
+
+def test_wrong_map_reader_preserves_decimal_form_event_ids_above_binary64_range(tmp_path: Path):
+    first = 2**53
+    second = first + 1
+    path = tmp_path / "event_model_evidence.csv"
+    pd.DataFrame(
+        [
+            _score("Rat1/Open1", f"{first}.0", "model-a", 1.0),
+            _score("Rat1/Open1", f"{second}.0", "model-a", 2.0),
+        ]
+    ).to_csv(path, index=False)
+
+    loaded = _read_evidence(path)
+
+    assert loaded["event_index"].tolist() == [first, second]
+
+
+def test_wrong_map_comparison_rejects_preparsed_lossy_event_float():
+    unsafe = float(2**53 + 1)
+    real = pd.DataFrame([_score("Rat1/Open1", unsafe, "model-a", 2.0)])
+    wrong = pd.DataFrame(
+        [_wrong_score("Rat1/Open1", "Rat1/Open2", unsafe, "model-a", 1.0)]
+    )
+
+    with pytest.raises(ValueError, match="exact integer range"):
+        wrong_map_model_evidence_attenuation(real, wrong)
 
 
 def test_wrong_map_summary_treats_string_false_complete_flag_as_false():

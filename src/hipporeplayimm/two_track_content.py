@@ -44,9 +44,10 @@ def event_bin_counts(session, start, end, bin_s=0.02):
     if n < 1:
         return np.zeros((0, len(session.unit_ids)), int)
     # No short final bin gets a full-duration likelihood.
-    actual_end = start + n * bin_s
+    edges = start + np.arange(n + 1) * bin_s
+    actual_end = edges[-1]
     a, b = np.searchsorted(session.spike_times, [start, actual_end], side="left")
-    bins = np.floor((session.spike_times[a:b] - start) / bin_s).astype(int)
+    bins = np.searchsorted(edges, session.spike_times[a:b], side="right") - 1
     good = (bins >= 0) & (bins < n)
     return np.bincount(bins[good] * len(session.unit_ids) + session.spike_units[a:b][good], minlength=n * len(session.unit_ids)).reshape(n, -1)
 

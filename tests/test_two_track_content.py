@@ -107,3 +107,12 @@ def test_counts_no_short_last_bin_and_end_exclusive():
     counts = event_bin_counts(s, 1.0, 1.065)
     assert counts.shape == (3, 30)
     assert counts.sum() == 5
+
+
+def test_counts_exact_boundaries_at_large_recording_timestamps():
+    s = synthetic_session()
+    start = 436982.738098
+    edges = start + np.arange(5) * 0.02
+    s = replace(s, spike_times=edges, spike_units=np.zeros(5, int))
+    counts = event_bin_counts(s, start, start + 0.085)
+    np.testing.assert_equal(counts[:, 0], [1, 1, 1, 1])

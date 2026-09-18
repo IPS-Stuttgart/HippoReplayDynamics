@@ -9,6 +9,7 @@ import json
 import math
 import time
 from datetime import UTC, datetime
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -72,6 +73,39 @@ PARTIAL_SCORE_COLUMNS = (
 )
 MANIFEST_NAME = "cell_split_heldout_manifest.json"
 SCORES_NAME = "cell_split_heldout_model_evidence.csv"
+
+
+def _exact_event_index(value: object) -> int:
+    """Parse an event identifier without routing decimal text through binary64."""
+
+    if pd.isna(value):
+        raise ValueError("event_index must contain finite integer identifiers")
+    text = str(value).strip()
+    try:
+        numeric = Decimal(text)
+    except (InvalidOperation, TypeError, ValueError) as exc:
+        raise ValueError("event_index must contain finite integer identifiers") from exc
+    if not numeric.is_finite():
+        raise ValueError("event_index must contain finite integer identifiers")
+    integral = numeric.to_integral_value()
+    if numeric != integral:
+        raise ValueError("event_index must contain integer-valued identifiers")
+    return int(integral)
+
+
+def _read_cell_split_score(path: str | Path) -> pd.DataFrame:
+    """Read one shard while preserving exact event identities."""
+
+    frame = pd.read_csv(path, dtype={"event_index": "string"})
+    if "event_index" not in frame:
+        raise ValueError(f"cell-split score file is missing event_index: {path}")
+    frame = frame.copy()
+    frame["event_index"] = pd.Series(
+        [_exact_event_index(value) for value in frame["event_index"]],
+        index=frame.index,
+        dtype=object,
+    )
+    return frame
 
 
 def score_cell_split_heldout(args: argparse.Namespace) -> pd.DataFrame:
@@ -727,7 +761,7 @@ def aggregate_cell_split_heldout_scores(
     paths = [Path(path) for path in sorted(glob.glob(str(score_glob), recursive=True))]
     if not paths:
         raise FileNotFoundError(f"no cell-split held-out score files found for {score_glob!r}")
-    scores = ensure_evidence_support_columns(pd.concat([pd.read_csv(path) for path in paths], ignore_index=True))
+    scores = ensure_evidence_support_columns(pd.concat([_read_cell_split_score(path) for path in paths], ignore_index=True))
     outdir.mkdir(parents=True, exist_ok=True)
     scores.to_csv(outdir / "cell_split_heldout_model_evidence.csv", index=False)
     decisions = cell_split_family_margin_decisions(scores, margin_threshold=margin_threshold)

@@ -162,6 +162,29 @@ def test_cell_split_heldout_aggregate_writes_primary_outputs(tmp_path):
         assert (out / expected).exists()
 
 
+def test_cell_split_heldout_aggregate_preserves_adjacent_decimal_event_ids_above_float_precision(tmp_path):
+    base = 2**53
+    score_path = tmp_path / "scores.csv"
+    pd.DataFrame(
+        [
+            *_event_split_rows("Rat1/Open1", f"{base}.0", 0, stationary=0.0, trajectory=10.0),
+            *_event_split_rows("Rat1/Open1", f"{base + 1}.0", 0, stationary=1.0, trajectory=11.0),
+        ]
+    ).to_csv(score_path, index=False)
+    out = tmp_path / "out"
+
+    aggregate_cell_split_heldout_scores(str(score_path), out)
+
+    scores = pd.read_csv(
+        out / "cell_split_heldout_model_evidence.csv",
+        dtype={"event_index": "string"},
+    )
+    summary = pd.read_csv(out / "cell_split_heldout_family_margin_summary.csv")
+
+    assert scores["event_index"].drop_duplicates().tolist() == [str(base), str(base + 1)]
+    assert int(summary.iloc[0]["events"]) == 2
+
+
 def test_cell_split_heldout_workflow_exposes_control_outputs():
     workflow = Path(".github/workflows/cell-split-heldout-control.yml").read_text(encoding="utf-8")
 

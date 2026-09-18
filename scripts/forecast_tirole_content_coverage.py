@@ -1,6 +1,7 @@
 """Cross-fitted future-neuron prediction for the frozen two-track coverage experiment."""
 
 import argparse
+import importlib
 import json
 import subprocess
 import sys
@@ -51,6 +52,10 @@ def run(bank, campaigns, output):
     commit = git("rev-parse", "HEAD")
     if git("status", "--porcelain"):
         raise ValueError("commit forecast protocol before scoring")
+    runtime = {"python_executable": sys.executable, "python_version": sys.version, "numpy_version": np.__version__}
+    for module in ["hmmlearn", "hmmlearn._hmmc"]:
+        loaded = importlib.import_module(module)
+        runtime[module] = {"version": getattr(loaded, "__version__", None), "path": loaded.__file__, "sha256": file_sha256(Path(loaded.__file__))}
     info, parts, events, counts, offsets, maps = validate_bank(bank)
     data, sources = load_campaigns(campaigns)
     session = info["session"]
@@ -189,6 +194,7 @@ def run(bank, campaigns, output):
         "git_dirty": False,
         "command_line": sys.argv,
         "session": session,
+        "runtime": runtime,
         "bank_manifest_sha256": file_sha256(bank / "manifest.json"),
         "source_score_manifests": relevant,
         "n_states": N_STATES,

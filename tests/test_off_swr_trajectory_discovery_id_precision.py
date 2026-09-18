@@ -3,6 +3,7 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 import pytest
 
@@ -31,6 +32,7 @@ def _event_rows(event_index: object, *, start: float) -> list[dict[str, object]]
             "status": "success",
             "session": "Rat1/Open1",
             "event_index": event_index,
+            "template_event_index": event_index,
             "window_role": "matched_null",
             "null_index": "0.0",
             "model": model,
@@ -67,6 +69,7 @@ def test_off_swr_discovery_preserves_adjacent_decimal_event_ids_from_csv(
     clusters = cluster_off_swr_candidates(candidates, cluster_gap_s=0.5)
 
     assert scores["event_index"].drop_duplicates().tolist() == [first, second]
+    assert scores["template_event_index"].drop_duplicates().tolist() == [first, second]
     assert decisions["event_index"].tolist() == [first, second]
     assert len(candidates) == 2
     assert len(clusters) == 1
@@ -75,6 +78,14 @@ def test_off_swr_discovery_preserves_adjacent_decimal_event_ids_from_csv(
 
 def test_off_swr_discovery_rejects_ambiguous_large_float_event_id() -> None:
     scores = pd.DataFrame(_event_rows(float(2**53), start=10.0))
+
+    with pytest.raises(ValueError, match="outside the exact integer range"):
+        off_swr_trajectory_decisions(scores)
+
+
+
+def test_off_swr_discovery_rejects_ambiguous_float32_event_id() -> None:
+    scores = pd.DataFrame(_event_rows(np.float32(2**24), start=10.0))
 
     with pytest.raises(ValueError, match="outside the exact integer range"):
         off_swr_trajectory_decisions(scores)

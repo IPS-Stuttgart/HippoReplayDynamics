@@ -2,6 +2,7 @@ from pathlib import Path
 import sys
 
 import pandas as pd
+import pytest
 
 sys.path.insert(0, str(Path("scripts").resolve()))
 from trajectory_imm_mode_superiority import (
@@ -256,6 +257,41 @@ def test_rat_bootstrap_reports_positive_intervals_for_strong_rows():
     assert float(boot.iloc[0]["mean_delta_vs_first_order_imm_ci95_low"]) > 0.0
     assert float(boot.iloc[0]["median_delta_vs_first_order_imm_ci95_low"]) > 0.0
 
+
+
+def test_trajectory_imm_rejects_unsafe_float_event_index():
+    unsafe = float(2**53)
+    scores = pd.DataFrame(
+        [
+            row("Rat1/Open1", unsafe, DEFAULT_STATIONARY_MODEL, 0.0),
+            row("Rat1/Open1", unsafe, DEFAULT_DIFFUSION_MODEL, 1.0),
+            row("Rat1/Open1", unsafe, DEFAULT_FRAGMENTED_MODEL, 2.0),
+            row("Rat1/Open1", unsafe, DEFAULT_MOMENTUM_MODEL, 3.0),
+            row("Rat1/Open1", unsafe, DEFAULT_FIRST_ORDER_IMM_MODEL, 4.0),
+            row("Rat1/Open1", unsafe, DEFAULT_TRAJECTORY_IMM_MODEL, 5.0),
+        ]
+    )
+
+    with pytest.raises(ValueError, match=r"floating-point event_index.*2\*\*53"):
+        trajectory_imm_event_pairs(scores)
+
+
+def test_trajectory_imm_preserves_large_string_event_index():
+    exact = str(2**53 + 1)
+    scores = pd.DataFrame(
+        [
+            row("Rat1/Open1", exact, DEFAULT_STATIONARY_MODEL, 0.0),
+            row("Rat1/Open1", exact, DEFAULT_DIFFUSION_MODEL, 1.0),
+            row("Rat1/Open1", exact, DEFAULT_FRAGMENTED_MODEL, 2.0),
+            row("Rat1/Open1", exact, DEFAULT_MOMENTUM_MODEL, 3.0),
+            row("Rat1/Open1", exact, DEFAULT_FIRST_ORDER_IMM_MODEL, 4.0),
+            row("Rat1/Open1", exact, DEFAULT_TRAJECTORY_IMM_MODEL, 5.0),
+        ]
+    )
+
+    pairs = trajectory_imm_event_pairs(scores)
+
+    assert pairs.loc[0, "event_index"] == 2**53 + 1
 
 def row(
     session: str,

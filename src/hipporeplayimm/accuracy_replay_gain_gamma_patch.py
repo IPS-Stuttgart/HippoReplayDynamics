@@ -29,7 +29,20 @@ def _contains_boolean_ids(values: np.ndarray) -> bool:
 
 
 def _coerce_integral_ids(values: Any, name: str) -> np.ndarray:
-    raw = np.asarray(values, dtype=object)
+    declared_dtype = getattr(values, "dtype", None)
+    try:
+        declared_dtype = None if declared_dtype is None else np.dtype(declared_dtype)
+    except TypeError:
+        declared_dtype = None
+
+    if declared_dtype is not None and np.issubdtype(declared_dtype, np.floating):
+        # Preserve NumPy floating scalar dtypes so the exact-integer guard can
+        # use their real mantissa precision. Casting a float32 array to object
+        # first would turn its elements into Python floats and hide that an ID
+        # may already have aliased above 2**24.
+        raw = np.asarray(values)
+    else:
+        raw = np.asarray(values, dtype=object)
     if raw.ndim == 0:
         raw = raw.reshape(1)
     if raw.ndim != 1:
@@ -60,7 +73,7 @@ def _coerce_integral_id(value: Any, name: str, integer_info: np.iinfo) -> int:
     elif isinstance(value, (str, bytes)):
         identifier = _coerce_text_id(value, name)
     elif isinstance(value, (float, np.floating)):
-        identifier = _coerce_float_id(float(value), name)
+        identifier = _coerce_float_id(value, name)
     else:
         try:
             numeric = float(value)
@@ -73,11 +86,21 @@ def _coerce_integral_id(value: Any, name: str, integer_info: np.iinfo) -> int:
     return identifier
 
 
-def _coerce_float_id(value: float, name: str) -> int:
-    if not np.isfinite(value):
+def _coerce_float_id(value: float | np.floating, name: str) -> int:
+    if not bool(np.isfinite(value)):
         raise ValueError(f"{name} must contain finite integer identifiers")
-    if not value.is_integer():
+    if not bool(value.is_integer()):
         raise ValueError(f"{name} must be integer-valued")
+    precision_bits = (
+        int(np.finfo(value.dtype).nmant) + 1
+        if isinstance(value, np.floating)
+        else 53
+    )
+    if abs(value) >= 1 << precision_bits:
+        raise ValueError(
+            f"{name} contains a floating-point identifier outside the exact integer range; "
+            "use integer or string IDs"
+        )
     return int(value)
 
 

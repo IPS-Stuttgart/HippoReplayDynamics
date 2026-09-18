@@ -18,6 +18,13 @@ GROUPS = ["all", "full", "half", "retained", "lost", "gained", "lost_support", "
 READOUTS = ["evaluation_true_probability", "evaluation_true_z", "evaluation_correct"]
 
 
+def compare_map_arrays(expected, saved):
+    if np.asarray(expected).dtype.kind == "b":
+        np.testing.assert_array_equal(expected, saved)
+        return 0.0
+    return close(expected, saved)
+
+
 def reference_cube(frame, content, ids, order, likelihood):
     keys = ["window_id", "split", "repeat"]
     ix = pd.MultiIndex.from_product([ids, range(5), range(-1, 5)], names=keys)
@@ -158,7 +165,7 @@ def run(source, report, output):
         np.testing.assert_array_equal(train, saved["training_samples"])
         fitted = fit_maps(session, train)
         for key, value in fitted.items():
-            error = max(error, close(value, saved[key]))
+            error = max(error, compare_map_arrays(value, saved[key]))
         detector = parts[fold]["reserved_detector_units"]
         common = set(saved["common_units"])
         for part in parts[fold]["splits"]:

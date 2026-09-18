@@ -1,8 +1,15 @@
 import numpy as np
 import pandas as pd
+import pytest
 
 from scripts.report_tirole_heldout_run_selection import block_weights
-from scripts.verify_tirole_heldout_run_selection import reference_cube, reference_metrics, reference_weights
+from scripts.verify_tirole_heldout_run_selection import compare_map_arrays, reference_cube, reference_metrics, reference_weights
+
+
+def test_boolean_map_masks_checked_without_numeric_subtraction():
+    assert compare_map_arrays(np.array([True, False]), np.array([True, False])) == 0
+    with pytest.raises(AssertionError):
+        compare_map_arrays(np.array([True, False]), np.array([False, False]))
 
 
 def test_tensor_verifier_detects_true_label_shift_and_no_vacuous_fraction():

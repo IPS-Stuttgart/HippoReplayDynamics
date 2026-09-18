@@ -1,10 +1,13 @@
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
+import pytest
 
 from scripts.report_hc11_paper_grade_robustness import (
     build_event_table,
     build_posterior_content_audit,
+    normalize_event_model_evidence,
     read_event_model_evidence,
     write_outputs,
 )
@@ -197,6 +200,36 @@ def test_hc11_reader_preserves_large_integer_like_event_ids(tmp_path: Path) -> N
 
     assert evidence["event_index"].dtype == "int64"
     assert events["event_index"].tolist() == [first, second]
+
+
+def test_hc11_normalizer_rejects_ambiguous_preparsed_python_float_event_id() -> None:
+    frame = pd.DataFrame([_score("Achilles/day1", 0, "stationary", 0.0)])
+    frame.loc[0, "event_index"] = float(2**53 + 1)
+
+    with pytest.raises(ValueError, match="event_index must contain finite integer-like values"):
+        normalize_event_model_evidence(frame)
+
+
+def test_hc11_normalizer_rejects_ambiguous_preparsed_numpy_float_event_id() -> None:
+    frame = pd.DataFrame([_score("Achilles/day1", 0, "stationary", 0.0)])
+    frame["event_index"] = pd.Series([np.float32(2**24 + 1)], dtype=np.float32)
+
+    with pytest.raises(ValueError, match="event_index must contain finite integer-like values"):
+        normalize_event_model_evidence(frame)
+
+
+@pytest.mark.skipif(
+    np.finfo(np.longdouble).nmant <= np.finfo(np.float64).nmant,
+    reason="platform longdouble has no wider integer precision than float64",
+)
+def test_hc11_normalizer_accepts_exact_extended_precision_numpy_float_event_id() -> None:
+    expected = 2**53 + 1
+    frame = pd.DataFrame([_score("Achilles/day1", 0, "stationary", 0.0)])
+    frame["event_index"] = pd.Series(np.array([np.longdouble(str(expected))], dtype=np.longdouble))
+
+    normalized = normalize_event_model_evidence(frame)
+
+    assert normalized["event_index"].tolist() == [expected]
 
 
 def test_hc11_posterior_content_preserves_large_integer_like_event_ids(tmp_path: Path) -> None:

@@ -184,3 +184,97 @@ def test_aggregate_accepts_distinct_event_and_grid_shards(tmp_path):
     assert set(scores["event_index"]) == {10, 12}
     assert set(scores["model"]) == {"random", "stationary", "stationary-gaussian", "diffusion", "momentum"}
     assert pivot["momentum"].notna().all()
+
+
+
+def test_aggregate_preserves_adjacent_decimal_event_ids_above_binary64_precision(
+    tmp_path,
+):
+    first = 2**53
+    second = first + 1
+    if np.iinfo(np.intp).max < second:
+        pytest.skip("platform integer type cannot represent the regression identifiers")
+
+    base_dir = tmp_path / "base"
+    shards_dir = tmp_path / "shards"
+    out_dir = tmp_path / "out"
+    base_dir.mkdir()
+    shards_dir.mkdir()
+
+    events = [first, second]
+    base_rows = []
+    for event_id in events:
+        event_text = f"{event_id}.0"
+        for model, family, log_evidence in (
+            ("random", "nontrajectory", -10.0),
+            ("stationary", "nontrajectory", -11.0),
+            ("stationary-gaussian", "nontrajectory", -9.0),
+            ("diffusion", "trajectory", -8.0),
+        ):
+            base_rows.append(
+                {
+                    "status": "success",
+                    "session": "RatX/OpenY",
+                    "event_index": event_text,
+                    "model": model,
+                    "model_family": family,
+                    "log_evidence": log_evidence,
+                    "n_time": 3,
+                    "n_spikes": 7,
+                    "runtime_s": 0.1,
+                    "error": "",
+                    "kd_grid_preset": "smoke",
+                    "kd_time_bin_ms": 3.0,
+                    "kd_bin_size_cm": 4.0,
+                    "kd_n_bins": 2,
+                    "kd_n_jobs": 1,
+                    "kd_event_chunk_size": 1,
+                }
+            )
+    pd.DataFrame(base_rows).to_csv(
+        base_dir / "event_model_evidence.csv",
+        index=False,
+    )
+    pd.DataFrame(
+        [
+            {
+                "event_index": f"{event_id}.0",
+                "model": "diffusion",
+                "best_sd_meters": 0.1,
+                "best_log_evidence": -8.0,
+            }
+            for event_id in events
+        ]
+    ).to_csv(base_dir / "gridsearch_best_params.csv", index=False)
+    pd.DataFrame(
+        [
+            {
+                "session": "RatX/OpenY",
+                "event_index": f"{event_id}.0",
+                "model": "diffusion",
+                "log_evidence": -8.0,
+            }
+            for event_id in events
+        ]
+    ).to_csv(base_dir / "marginalized_model_evidence.csv", index=False)
+
+    for shard_index, event_id in enumerate(events):
+        _write_momentum_shard(
+            shards_dir / f"event{shard_index}.npz",
+            event_ids=[event_id],
+            sd_indices=[0, 1, 0, 1],
+            decay_indices=[0, 0, 1, 1],
+            values=np.asarray([[-7.0, -8.0, -9.0, -10.0]]),
+        )
+
+    aggregate(base_dir, str(shards_dir / "*.npz"), out_dir)
+
+    scores = pd.read_csv(
+        out_dir / "event_model_evidence.csv",
+        dtype={"event_index": "string"},
+    )
+    observed = {
+        int(value)
+        for value in scores["event_index"].drop_duplicates().tolist()
+    }
+    assert observed == {first, second}

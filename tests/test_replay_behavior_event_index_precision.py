@@ -1,6 +1,7 @@
 import sys
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 import pytest
 
@@ -84,3 +85,19 @@ def test_behavior_alignment_rejects_preparsed_large_float_event_ids() -> None:
 
     with pytest.raises(ValueError, match=r"floating-point event_index at or above 2\*\*53 is unsafe"):
         build_event_evidence_features(evidence)
+
+
+def test_behavior_alignment_rejects_preparsed_float32_ids_at_precision_limit() -> None:
+    evidence = pd.DataFrame(_evidence_rows(np.float32(2**24), 10.0))
+
+    with pytest.raises(ValueError, match=r"floating-point event_index at or above 2\*\*24 is unsafe"):
+        build_event_evidence_features(evidence)
+
+
+def test_behavior_alignment_accepts_exact_float32_ids_below_precision_limit() -> None:
+    event_index = 2**24 - 1
+    evidence = pd.DataFrame(_evidence_rows(np.float32(event_index), 10.0))
+
+    features = build_event_evidence_features(evidence)
+
+    assert features["event_index"].tolist() == [event_index]

@@ -1,6 +1,21 @@
 import numpy as np
+import pytest
 
-from scripts.verify_tirole_selection_transport import reference_ratios, reference_statistics
+from scripts.verify_tirole_selection_transport import reference_ratios, reference_statistics, validate_stage_manifest
+
+
+def test_original_bank_schema_has_no_status_but_requires_readiness():
+    bank = {
+        "strict_RUN_preflight_passed": True,
+        "git_dirty": False,
+        "n_candidates": 517,
+        "outputs_sha256": {key: "hash" for key in ["candidate_events.csv", "partitions.json", "RUN_maps.npz", "event_counts.npz"]},
+    }
+    validate_stage_manifest(bank, is_bank=True)
+    with pytest.raises(ValueError, match="invalid primary"):
+        validate_stage_manifest({**bank, "strict_RUN_preflight_passed": False}, is_bank=True)
+    with pytest.raises(ValueError, match="incomplete"):
+        validate_stage_manifest(bank)
 
 
 def test_tensor_reference_separates_true_selection_and_labels():

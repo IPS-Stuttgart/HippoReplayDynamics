@@ -17,6 +17,20 @@ GENERATORS = ("ordered", "whole_bin_shuffled")
 STATISTICS = ("group_mass", "label2_mass", "correct_label_mass", "poisson_z_numerator", "poisson_z_denominator", "conditional_count_z_numerator", "conditional_count_z_denominator")
 
 
+def validate_stage_manifest(meta, is_bank=False):
+    if is_bank:
+        required = {"candidate_events.csv", "partitions.json", "RUN_maps.npz", "event_counts.npz"}
+        if (
+            meta.get("strict_RUN_preflight_passed") is not True
+            or meta.get("git_dirty") is not False
+            or meta.get("n_candidates", 0) <= 0
+            or set(meta.get("outputs_sha256", {})) != required
+        ):
+            raise ValueError("invalid primary input bank")
+    elif meta.get("status") != "complete":
+        raise ValueError("incomplete input")
+
+
 def reference_statistics(accepted, labels, z, draw_ids):
     """Inputs anchor x split x draw x truth x generator x coverage-condition."""
     accepted = accepted[:, :, draw_ids]
@@ -73,8 +87,7 @@ def run(experiment, report, output):
     original_calibration = Path(m["calibration_dir"])
     for base, key in [(experiment, "output_sha256"), (report, "output_sha256"), (bank, "outputs_sha256"), (original_calibration, "output_sha256")]:
         meta = json.loads((base / "manifest.json").read_text())
-        if meta["status"] != "complete":
-            raise ValueError("incomplete input")
+        validate_stage_manifest(meta, is_bank=base == bank)
         for name, h in meta[key].items():
             if digest(base / name) != h:
                 raise ValueError("changed hashed input")

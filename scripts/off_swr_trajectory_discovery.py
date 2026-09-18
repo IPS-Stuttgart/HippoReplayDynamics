@@ -693,7 +693,12 @@ def _finite_or_nan(value: object) -> float:
 
 def _safe_softmax(values: Sequence[float]) -> np.ndarray:
     arr = np.asarray(values, dtype=float)
-    if arr.size == 0 or not np.all(np.isfinite(arr)):
+    if (
+        arr.size == 0
+        or np.any(np.isnan(arr))
+        or np.any(np.isposinf(arr))
+        or np.all(np.isneginf(arr))
+    ):
         return np.full(arr.shape, np.nan, dtype=float)
     shifted = arr - np.max(arr)
     weights = np.exp(shifted)

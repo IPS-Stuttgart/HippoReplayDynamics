@@ -167,6 +167,16 @@ def _parse_integer_identifier(value: object, *, name: str) -> int:
     if isinstance(current, (float, np.floating)):
         if not bool(np.isfinite(current)) or not bool(current.is_integer()):
             raise ValueError(f"{name} must contain finite integer identifiers")
+        precision_bits = (
+            int(np.finfo(current.dtype).nmant) + 1
+            if isinstance(current, np.floating)
+            else 53
+        )
+        if abs(current) >= 1 << precision_bits:
+            raise ValueError(
+                f"{name} contains an unsafe floating-point identifier at or above "
+                f"2**{precision_bits}; use integer or string IDs"
+            )
         return int(current)
     if isinstance(current, (complex, np.complexfloating)):
         raise ValueError(f"{name} must contain real integer identifiers")

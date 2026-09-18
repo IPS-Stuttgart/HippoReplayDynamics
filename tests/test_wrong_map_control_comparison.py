@@ -164,7 +164,6 @@ def test_wrong_map_summary_treats_string_false_complete_flag_as_false():
     assert bootstrap["observed_mean_best_trajectory_delta_real_minus_wrong"] == 10.0
 
 
-
 def test_wrong_map_control_preserves_large_decimal_event_ids(tmp_path: Path):
     first = 2**53
     second = first + 1
@@ -205,6 +204,7 @@ def test_wrong_map_control_rejects_already_lossy_large_float_event_id():
 
     with pytest.raises(ValueError, match=r"floating-point event_index at or above 2\*\*53 is unsafe"):
         wrong_map_model_evidence_attenuation(real, wrong)
+
 
 def _score(
     session: str,

@@ -143,7 +143,12 @@ def _parse_names(value: str | Iterable[str] | None, default: Sequence[str]) -> t
 
 def _safe_softmax(values: Sequence[float]) -> np.ndarray:
     arr = np.asarray(values, dtype=float)
-    if arr.size == 0 or not np.all(np.isfinite(arr)):
+    if (
+        arr.size == 0
+        or np.any(np.isnan(arr))
+        or np.any(np.isposinf(arr))
+        or np.all(np.isneginf(arr))
+    ):
         return np.full(arr.shape, np.nan, dtype=float)
     shifted = arr - np.max(arr)
     exp_values = np.exp(shifted)
@@ -256,7 +261,17 @@ def build_event_evidence_features(
         best_nontrajectory = nontrajectory.sort_values(["log_evidence", "model"], ascending=[False, True]).iloc[0] if not nontrajectory.empty else None
         best_trajectory_logz = float(best_trajectory["log_evidence"]) if best_trajectory is not None else np.nan
         best_nontrajectory_logz = float(best_nontrajectory["log_evidence"]) if best_nontrajectory is not None else np.nan
-        margin = best_trajectory_logz - best_nontrajectory_logz if np.isfinite(best_trajectory_logz) and np.isfinite(best_nontrajectory_logz) else np.nan
+        margin = (
+            float(best_trajectory_logz - best_nontrajectory_logz)
+            if (
+                not np.isnan(best_trajectory_logz)
+                and not np.isnan(best_nontrajectory_logz)
+                and not np.isposinf(best_trajectory_logz)
+                and not np.isposinf(best_nontrajectory_logz)
+                and not (np.isneginf(best_trajectory_logz) and np.isneginf(best_nontrajectory_logz))
+            )
+            else np.nan
+        )
 
         row = {
             "rat": _rat_from_session(session),

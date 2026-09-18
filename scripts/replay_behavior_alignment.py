@@ -103,7 +103,7 @@ def _exact_event_index(value: object) -> int:
         if marker in seen_arrays:
             raise ValueError("event_index must contain scalar integer identifiers")
         seen_arrays.add(marker)
-        current = current.item()
+        current = current[()]
 
     if isinstance(current, (bool, np.bool_)):
         raise ValueError("event_index must contain integer identifiers, not booleans")

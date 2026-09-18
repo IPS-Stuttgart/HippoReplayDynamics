@@ -74,7 +74,7 @@ def _exact_grouping_event_keys(
         if column not in integer_columns:
             continue
         exact_values = []
-        for value in out[column]:
+        for value in out[column].to_numpy(copy=False):
             if isinstance(value, (float, np.floating)):
                 precision_bits = (
                     int(np.finfo(value.dtype).nmant) + 1

@@ -126,15 +126,19 @@ def run_event_diagnostics(
                     smoothing_bins=int(first_non_none(smoothing_bins, event.get("smoothing_bins"), 1)),
                 )
                 dt = float(first_non_none(time_bin_s, event.get("time_bin_s"), 0.02))
+                event_start = float(event["start_time_s"])
+                event_end = float(event["end_time_s"])
+                edges = scorer._event_time_bin_edges(event_start, event_end, dt)
+                bin_durations = np.diff(edges)
                 counts = scorer.event_count_matrix(
                     sleep_spikes,
                     unit_ids=place_fields.unit_ids,
-                    start_s=float(event["start_time_s"]),
-                    end_s=float(event["end_time_s"]),
+                    start_s=event_start,
+                    end_s=event_end,
                     time_bin_s=dt,
                 )
                 write_raster_panel(event, place_fields, sleep_spikes, raster_path)
-                write_posterior_heatmap(event, place_fields, counts, dt, posterior_path)
+                write_posterior_heatmap(event, place_fields, counts, bin_durations, posterior_path)
             except Exception as exc:  # noqa: BLE001 - diagnostic artifact records rendering failures.
                 render_error = f"{type(exc).__name__}: {exc}"
                 write_placeholder_figure(raster_path, "Raster unavailable", render_error)
@@ -363,7 +367,7 @@ def write_raster_panel(event: pd.Series, place_fields: scorer.PlaceFieldModel, s
     order = np.argsort(peaks)
     sorted_units = unit_ids[order]
     y_by_unit = {int(unit): idx for idx, unit in enumerate(sorted_units)}
-    keep = (sleep_spikes.spike_times_s >= start) & (sleep_spikes.spike_times_s <= end) & np.isin(sleep_spikes.unit_ids, sorted_units)
+    keep = (sleep_spikes.spike_times_s >= start) & (sleep_spikes.spike_times_s < end) & np.isin(sleep_spikes.unit_ids, sorted_units)
     times_ms = (sleep_spikes.spike_times_s[keep] - start) * 1000.0
     ys = np.asarray([y_by_unit.get(int(unit), -1) for unit in sleep_spikes.unit_ids[keep]], dtype=float)
     valid = ys >= 0
@@ -378,20 +382,30 @@ def write_raster_panel(event: pd.Series, place_fields: scorer.PlaceFieldModel, s
     plt.close(fig)
 
 
-def write_posterior_heatmap(event: pd.Series, place_fields: scorer.PlaceFieldModel, counts: np.ndarray, dt_s: float, path: Path) -> None:
+def write_posterior_heatmap(
+    event: pd.Series,
+    place_fields: scorer.PlaceFieldModel,
+    counts: np.ndarray,
+    dt_s: float | np.ndarray,
+    path: Path,
+) -> None:
     if counts is None or counts.shape[0] == 0:
         write_placeholder_figure(path, "Posterior unavailable", "event has no time bins")
         return
-    emissions = scorer.poisson_log_emissions(counts, place_fields.rates_hz, dt_s)
+    durations = np.asarray(dt_s, dtype=float)
+    if durations.ndim == 0:
+        durations = np.full(counts.shape[0], float(durations), dtype=float)
+    emissions = scorer.poisson_log_emissions(counts, place_fields.rates_hz, durations)
     log_post = emissions + np.log(np.maximum(place_fields.prior[None, :], 1e-12))
     log_post = log_post - scorer.logsumexp_matrix(log_post, axis=1)[:, None]
     posterior = np.exp(log_post)
     centers = np.asarray(place_fields.bin_centers_cm, dtype=float)
     map_path = centers[np.argmax(posterior, axis=1)]
     mean_path = posterior @ centers
-    time_ms = (np.arange(posterior.shape[0]) + 0.5) * float(dt_s) * 1000.0
+    time_edges_ms = np.concatenate(([0.0], np.cumsum(durations))) * 1000.0
+    time_ms = 0.5 * (time_edges_ms[:-1] + time_edges_ms[1:])
     fig, ax = plt.subplots(figsize=(7.5, 4.5), constrained_layout=True)
-    extent = [0, posterior.shape[0] * float(dt_s) * 1000.0, float(np.nanmin(centers)), float(np.nanmax(centers))]
+    extent = [0, float(time_edges_ms[-1]), float(np.nanmin(centers)), float(np.nanmax(centers))]
     image = ax.imshow(posterior.T, aspect="auto", origin="lower", extent=extent, cmap="magma")
     ax.plot(time_ms, map_path, color="cyan", linewidth=1.3, label="MAP")
     ax.plot(time_ms, mean_path, color="white", linewidth=1.1, label="posterior mean")

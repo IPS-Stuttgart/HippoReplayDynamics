@@ -335,11 +335,15 @@ def score_selected_event(
             )
             cache[cache_key] = (place_fields, sleep_spikes)
         place_fields, sleep_spikes = cache[cache_key]
+        start_s = float(meta["start_time_s"])
+        end_s = float(meta["end_time_s"])
+        edges = _event_time_bin_edges(start_s, end_s, time_bin_s)
+        bin_durations = np.diff(edges)
         counts = event_count_matrix(
             sleep_spikes,
             unit_ids=place_fields.unit_ids,
-            start_s=float(meta["start_time_s"]),
-            end_s=float(meta["end_time_s"]),
+            start_s=start_s,
+            end_s=end_s,
             time_bin_s=time_bin_s,
         )
         if counts.shape[0] == 0:
@@ -347,7 +351,7 @@ def score_selected_event(
         scores = score_models(
             counts,
             place_fields,
-            time_bin_s=time_bin_s,
+            time_bin_s=bin_durations,
             diffusion_sigma_cm=diffusion_sigma_cm,
             stationary_self_transition=stationary_self_transition,
             imm_mode_persistence=imm_mode_persistence,
@@ -413,7 +417,7 @@ def score_models(
     counts: np.ndarray,
     place_fields: PlaceFieldModel,
     *,
-    time_bin_s: float,
+    time_bin_s: float | np.ndarray,
     diffusion_sigma_cm: float,
     stationary_self_transition: float,
     imm_mode_persistence: float,
@@ -436,13 +440,30 @@ def score_models(
     }
 
 
-def poisson_log_emissions(counts: np.ndarray, rates_hz: np.ndarray, dt_s: float) -> np.ndarray:
+def poisson_log_emissions(
+    counts: np.ndarray,
+    rates_hz: np.ndarray,
+    dt_s: float | np.ndarray,
+) -> np.ndarray:
     safe_rates = np.maximum(np.asarray(rates_hz, dtype=float), 1e-8)
     counts = np.asarray(counts, dtype=float)
-    log_rate_dt = np.log(safe_rates * float(dt_s) + 1e-12)
-    logp = counts @ log_rate_dt
-    logp = logp - float(dt_s) * np.sum(safe_rates, axis=0)
-    return logp
+    durations = np.asarray(dt_s, dtype=float)
+    if durations.ndim == 0:
+        duration = float(durations)
+        if not np.isfinite(duration) or duration <= 0.0:
+            raise ValueError("dt_s must be finite and positive")
+        log_rate_dt = np.log(safe_rates * duration + 1e-12)
+        logp = counts @ log_rate_dt
+        return logp - duration * np.sum(safe_rates, axis=0)
+    if durations.ndim != 1 or durations.shape[0] != counts.shape[0]:
+        raise ValueError("dt_s must be scalar or contain one duration per time bin")
+    if not np.all(np.isfinite(durations)) or np.any(durations <= 0.0):
+        raise ValueError("all time-bin durations must be finite and positive")
+    expected = durations[:, None, None] * safe_rates[None, :, :]
+    return np.sum(
+        counts[:, :, None] * np.log(expected + 1e-12) - expected,
+        axis=1,
+    )
 
 
 def stationary_model_log_evidence(emissions: np.ndarray, prior: np.ndarray) -> float:
@@ -525,6 +546,31 @@ def row_log_normalise(logp: np.ndarray) -> np.ndarray:
     return logp - norm[:, None]
 
 
+def _event_time_bin_edges(start_s: float, end_s: float, time_bin_s: float) -> np.ndarray:
+    """Return event-local bin edges with the final edge clamped to the event end."""
+
+    start = float(start_s)
+    end = float(end_s)
+    width = float(time_bin_s)
+    if not np.isfinite(width) or width <= 0.0:
+        raise ValueError("time_bin_s must be finite and positive")
+    if not np.isfinite(start) or not np.isfinite(end) or end <= start:
+        return np.asarray([start], dtype=float)
+
+    duration = end - start
+    n_full_bins = int(np.floor(duration / width))
+    edges = start + np.arange(n_full_bins + 1, dtype=float) * width
+    tolerance = max(
+        16.0 * np.finfo(float).eps * max(abs(start), abs(end), abs(duration), 1.0),
+        width * 1e-12,
+    )
+    if edges[-1] < end - tolerance:
+        edges = np.append(edges, end)
+    else:
+        edges[-1] = end
+    return edges
+
+
 def event_count_matrix(
     spikes: SessionSpikes,
     *,
@@ -533,15 +579,14 @@ def event_count_matrix(
     end_s: float,
     time_bin_s: float,
 ) -> np.ndarray:
-    if not np.isfinite(start_s) or not np.isfinite(end_s) or end_s <= start_s:
-        return np.zeros((0, len(unit_ids)), dtype=float)
-    edges = np.arange(float(start_s), float(end_s) + float(time_bin_s), float(time_bin_s))
+    edges = _event_time_bin_edges(start_s, end_s, time_bin_s)
     if edges.size < 2:
-        edges = np.asarray([float(start_s), float(end_s)], dtype=float)
+        return np.zeros((0, len(unit_ids)), dtype=float)
     counts = np.zeros((edges.size - 1, len(unit_ids)), dtype=float)
     for unit_index, unit_id in enumerate(unit_ids):
         unit_times = spikes.spike_times_s[spikes.unit_ids == int(unit_id)]
-        counts[:, unit_index], _ = np.histogram(unit_times, bins=edges)
+        in_event = (unit_times >= float(start_s)) & (unit_times < float(end_s))
+        counts[:, unit_index], _ = np.histogram(unit_times[in_event], bins=edges)
     return counts
 
 

@@ -402,6 +402,49 @@ def test_sleeppost_evidence_smoke_marks_decoder_failures(tmp_path: Path) -> None
     assert not bool(gates.loc["overall", "passed"])
 
 
+def test_event_count_matrix_excludes_spikes_at_and_after_event_end() -> None:
+    module = _load_module()
+    spikes = module.SessionSpikes(
+        spike_times_s=np.asarray([0.005, 0.025, 0.044, 0.045, 0.049], dtype=float),
+        unit_ids=np.ones(5, dtype=int),
+        units=(1,),
+    )
+
+    counts = module.event_count_matrix(
+        spikes,
+        unit_ids=(1,),
+        start_s=0.0,
+        end_s=0.045,
+        time_bin_s=0.02,
+    )
+
+    assert counts.shape == (3, 1)
+    assert counts[:, 0].tolist() == [1.0, 1.0, 1.0]
+
+
+def test_event_time_bin_edges_clamps_partial_final_bin() -> None:
+    module = _load_module()
+
+    edges = module._event_time_bin_edges(0.0, 0.045, 0.02)
+
+    np.testing.assert_allclose(edges, [0.0, 0.02, 0.04, 0.045], rtol=0.0, atol=1e-15)
+    np.testing.assert_allclose(np.diff(edges), [0.02, 0.02, 0.005], rtol=0.0, atol=1e-15)
+
+
+def test_poisson_log_emissions_uses_partial_bin_duration() -> None:
+    module = _load_module()
+    counts = np.zeros((2, 1), dtype=float)
+    rates = np.asarray([[10.0]], dtype=float)
+
+    emissions = module.poisson_log_emissions(
+        counts,
+        rates,
+        np.asarray([0.02, 0.005], dtype=float),
+    )
+
+    np.testing.assert_allclose(emissions[:, 0], [-0.2, -0.05], rtol=0.0, atol=1e-12)
+
+
 def _write_linearized_position(path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     times = np.arange(0.0, 20.0, 0.05)

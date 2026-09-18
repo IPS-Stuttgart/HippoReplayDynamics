@@ -204,7 +204,10 @@ def _integer_identifier(value: object, name: str) -> int:
 
 def _integer_identifier_series(series: pd.Series, name: str) -> pd.Series:
     try:
-        values = [_integer_identifier(value, name) for value in series]
+        values = [
+            _integer_identifier(value, name)
+            for value in series.to_numpy(copy=False)
+        ]
     except (TypeError, ValueError, OverflowError) as exc:
         if isinstance(exc, ValueError) and str(exc).startswith(
             f"{name} must contain integer identifiers"

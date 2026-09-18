@@ -719,6 +719,21 @@ def _normalize_key_identifiers(frame: pd.DataFrame) -> pd.DataFrame:
     return out
 
 
+def _frame_from_records_preserving_identifiers(
+    records: list[dict[str, object]],
+) -> pd.DataFrame:
+    frame = pd.DataFrame.from_records(records)
+    for column in (*_INTEGER_KEY_COLUMNS, *_OPTIONAL_INTEGER_IDENTIFIER_COLUMNS):
+        if column not in frame.columns:
+            continue
+        frame[column] = pd.Series(
+            [record.get(column, np.nan) for record in records],
+            index=frame.index,
+            dtype=object,
+        )
+    return frame
+
+
 def _read_score_files(score_glob: str | Path) -> pd.DataFrame:
     paths = [Path(path) for path in sorted(glob.glob(str(score_glob), recursive=True))]
     if not paths:
@@ -1002,7 +1017,7 @@ def _window_metadata(scores: pd.DataFrame, *, optional_columns: Sequence[str]) -
         for column in present:
             row[column] = _first_value(group, column)
         rows.append(row)
-    return pd.DataFrame(rows)
+    return _frame_from_records_preserving_identifiers(rows)
 
 
 def off_swr_trajectory_decisions(
@@ -1369,8 +1384,11 @@ def off_swr_candidate_table(
             }
         )
 
-    table = pd.DataFrame(rows)
-    table["candidate_cluster_id"] = _assign_candidate_cluster_ids(table, cluster_gap_s=cluster_gap_s)
+    table = _frame_from_records_preserving_identifiers(rows)
+    table["candidate_cluster_id"] = _assign_candidate_cluster_ids(
+        table,
+        cluster_gap_s=cluster_gap_s,
+    )
     table = table.sort_values(
         ["candidate_priority_score", "trajectory_family_margin", "window_start_s"],
         ascending=[False, False, True],

@@ -2,9 +2,11 @@ from pathlib import Path
 import sys
 
 import pandas as pd
+import pytest
 
 sys.path.insert(0, str(Path("scripts").resolve()))
 from compare_wrong_map_evidence_controls import (
+    _read_evidence,
     rat_bootstrap_wrong_map_family_evidence_attenuation,
     wrong_map_control_gate_summary,
     wrong_map_family_evidence_attenuation,
@@ -161,6 +163,48 @@ def test_wrong_map_summary_treats_string_false_complete_flag_as_false():
     assert summary["mean_family_margin_difference_in_differences"] == 5.0
     assert bootstrap["observed_mean_best_trajectory_delta_real_minus_wrong"] == 10.0
 
+
+
+def test_wrong_map_control_preserves_large_decimal_event_ids(tmp_path: Path):
+    first = 2**53
+    second = first + 1
+    model = "sorted-spike-state-space-diffusion"
+    real = pd.DataFrame(
+        [
+            _score("Rat1/Open1", f"{first}.0", model, 10.0),
+            _score("Rat1/Open1", f"{second}.0", model, 11.0),
+        ]
+    )
+    wrong = pd.DataFrame(
+        [
+            _wrong_score("Rat1/Open1", "Rat1/Open2", f"{first}.0", model, 4.0),
+            _wrong_score("Rat1/Open1", "Rat1/Open2", f"{second}.0", model, 3.0),
+        ]
+    )
+
+    attenuation = wrong_map_model_evidence_attenuation(real, wrong)
+
+    assert attenuation["event_index"].tolist() == [first, second]
+    assert attenuation["real_minus_wrong_log_evidence"].tolist() == [6.0, 8.0]
+
+    csv_path = tmp_path / "event_model_evidence.csv"
+    csv_path.write_text(
+        "session,event_index,model,log_evidence\n"
+        f"Rat1/Open1,{first}.0,{model},10.0\n"
+        f"Rat1/Open1,{second}.0,{model},11.0\n",
+        encoding="utf-8",
+    )
+    loaded = _read_evidence(csv_path)
+    assert loaded["event_index"].tolist() == [first, second]
+
+
+def test_wrong_map_control_rejects_already_lossy_large_float_event_id():
+    model = "sorted-spike-state-space-diffusion"
+    real = pd.DataFrame([_score("Rat1/Open1", float(2**53), model, 10.0)])
+    wrong = pd.DataFrame([_wrong_score("Rat1/Open1", "Rat1/Open2", 2**53, model, 4.0)])
+
+    with pytest.raises(ValueError, match=r"floating-point event_index at or above 2\*\*53 is unsafe"):
+        wrong_map_model_evidence_attenuation(real, wrong)
 
 def _score(
     session: str,

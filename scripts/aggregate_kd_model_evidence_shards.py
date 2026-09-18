@@ -29,7 +29,6 @@ def _np_scalar(value, *, key: str, path: Path) -> object:
     return array.item()
 
 
-
 def _exact_integer_text(
     value: object,
     *,

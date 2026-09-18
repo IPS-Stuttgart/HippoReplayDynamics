@@ -16,7 +16,11 @@ from typing import Iterable
 import numpy as np
 import pandas as pd
 
-from compare_model_evidence_runs import _read_event_score_csv
+from compare_model_evidence_runs import (
+    _INTEGER_EVENT_KEY_COLUMNS,
+    _exact_integer_event_key,
+    _read_event_score_csv,
+)
 from hipporeplayimm.evidence_reporting import (
     EXACT_EVIDENCE_SUPPORT,
     TRUNCATED_EVIDENCE_SUPPORT,
@@ -56,6 +60,31 @@ def _event_columns(rows: pd.DataFrame) -> list[str]:
     if not columns:
         raise ValueError("Model-evidence scores contain no event-scope columns.")
     return columns
+
+
+def _exact_grouping_event_keys(
+    rows: pd.DataFrame,
+    event_columns: list[str],
+) -> pd.DataFrame:
+    """Keep nullable integer scope keys exact through pandas groupby."""
+
+    out = rows.copy()
+    integer_columns = set(_INTEGER_EVENT_KEY_COLUMNS)
+    for column in event_columns:
+        if column not in integer_columns:
+            continue
+        exact_values = []
+        for value in out[column]:
+            if isinstance(value, (float, np.floating)):
+                numeric = float(value)
+                if np.isfinite(numeric) and abs(numeric) >= 2**53:
+                    raise ValueError(
+                        f"{column} contains an ambiguous floating-point identifier "
+                        "with magnitude >= 2**53; use integer or string IDs"
+                    )
+            exact_values.append(_exact_integer_event_key(value, column))
+        out[column] = pd.array(exact_values, dtype="Int64")
+    return out
 
 
 def _event_key_record(columns: list[str], key: object) -> dict[str, object]:
@@ -129,6 +158,8 @@ def event_support_audit(scores: pd.DataFrame) -> pd.DataFrame:
 
     rows = _successful_rows(scores)
     event_columns = _event_columns(rows) if not rows.empty else list(_DEFAULT_EVENT_COLUMNS)
+    if not rows.empty:
+        rows = _exact_grouping_event_keys(rows, event_columns)
     columns = [
         *event_columns,
         "models",
@@ -207,6 +238,7 @@ def pairwise_support_audit(scores: pd.DataFrame) -> pd.DataFrame:
         return pd.DataFrame(columns=columns)
 
     event_columns = _event_columns(rows)
+    rows = _exact_grouping_event_keys(rows, event_columns)
     event_pair_rows: list[dict[str, object]] = []
     for key, group in rows.groupby(event_columns, dropna=False, sort=True):
         per_model = group.sort_values("model").drop_duplicates("model", keep="first")

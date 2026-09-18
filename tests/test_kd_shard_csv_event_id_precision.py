@@ -35,3 +35,15 @@ def test_base_csv_reader_rejects_fractional_event_ids(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError, match="finite integer values"):
         _read_csv_with_exact_event_index(path)
+
+
+@pytest.mark.parametrize("value", ["NaN", "Infinity", "-Infinity"])
+def test_base_csv_reader_rejects_nonfinite_event_ids(
+    tmp_path: Path,
+    value: str,
+) -> None:
+    path = tmp_path / "event_model_evidence.csv"
+    pd.DataFrame({"event_index": [value]}).to_csv(path, index=False)
+
+    with pytest.raises(ValueError, match="finite integer values"):
+        _read_csv_with_exact_event_index(path)

@@ -204,7 +204,7 @@ def test_hc11_reader_preserves_large_integer_like_event_ids(tmp_path: Path) -> N
 
 def test_hc11_normalizer_rejects_ambiguous_preparsed_python_float_event_id() -> None:
     frame = pd.DataFrame([_score("Achilles/day1", 0, "stationary", 0.0)])
-    frame.loc[0, "event_index"] = float(2**53 + 1)
+    frame["event_index"] = pd.Series([float(2**53 + 1)], dtype="float64")
 
     with pytest.raises(ValueError, match="event_index must contain finite integer-like values"):
         normalize_event_model_evidence(frame)

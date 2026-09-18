@@ -25,6 +25,20 @@ def compare_map_arrays(expected, saved):
     return close(expected, saved)
 
 
+def direct_identity_readout(counts, rates, valid, permutations, sign):
+    cc = counts[counts.sum(axis=1) > 0]
+    if not len(cc):
+        return np.full(3, np.nan)
+    odds = []
+    for per in np.vstack([np.arange(counts.shape[1]), permutations]):
+        p = direct_posterior(cc, rates[:, per], valid, True)
+        mass = p.sum(axis=(0, 2))
+        odds.append(np.log(max(mass[0], 1e-300)) - np.log(max(mass[1], 1e-300)))
+    sd = np.std(odds[1:], ddof=1)
+    z = sign * (odds[0] - np.mean(odds[1:])) / sd if sd > 1e-12 else np.nan
+    return np.array([expit(sign * odds[0]), z, float(sign * odds[0] > 0)])
+
+
 def reference_cube(frame, content, ids, order, likelihood):
     keys = ["window_id", "split", "repeat"]
     ix = pd.MultiIndex.from_product([ids, range(5), range(-1, 5)], names=keys)
@@ -297,16 +311,9 @@ def run(source, report, output):
             for group in groups:
                 for per in perms:
                     per[group] = rng.permutation(group)
-            odds = []
-            for per in np.vstack([np.arange(len(use)), perms]):
-                p = direct_posterior(cc, lam[:, per], saved["valid_bins"], True)
-                mass = p.sum(axis=(0, 2))
-                odds.append(np.log(max(mass[0], 1e-300)) - np.log(max(mass[1], 1e-300)))
             sign = 1 if first.truth_track == 1 else -1
-            sd = np.std(odds[1:], ddof=1)
-            z = sign * (odds[0] - np.mean(odds[1:])) / sd if sd > 1e-12 else np.nan
             target = bindex.loc[first.window_id, split]
-            expected = [expit(sign * odds[0]), z, float(sign * odds[0] > 0)] if len(cc) else [np.nan] * 3
+            expected = direct_identity_readout(cc, lam, saved["valid_bins"], perms, sign)
             error = max(error, close(expected, target[READOUTS].to_numpy(float)))
             checks["direct_B_readouts"] += 1
     result = {

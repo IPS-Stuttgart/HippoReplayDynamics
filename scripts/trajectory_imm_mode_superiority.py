@@ -36,6 +36,7 @@ DEFAULT_MARGIN_THRESHOLD = 5.5
 DEFAULT_RAT_BOOTSTRAP_REPLICATES = 2000
 DEFAULT_RAT_BOOTSTRAP_RANDOM_SEED = 1
 EXACT_EVIDENCE_SUPPORT = "exact_full_grid"
+_SAFE_FLOAT_INTEGER_LIMIT = 2**53
 DEFAULT_REQUIRED_AUGMENTED_CORE_MODELS = (
     DEFAULT_STATIONARY_MODEL,
     DEFAULT_DIFFUSION_MODEL,
@@ -48,6 +49,30 @@ DEFAULT_REQUIRED_AUGMENTED_CORE_MODELS = (
 
 def _rat_from_session(session: object) -> str:
     return str(session).split("/", 1)[0]
+
+
+def _exact_event_index(value: object) -> int:
+    """Parse an event identifier without silently accepting lossy binary floats."""
+
+    if isinstance(value, (bool, np.bool_)):
+        raise ValueError("event_index must be an integer identifier, not boolean")
+    if isinstance(value, (int, np.integer)):
+        return int(value)
+    if isinstance(value, (float, np.floating)):
+        numeric = float(value)
+        if not np.isfinite(numeric) or not numeric.is_integer():
+            raise ValueError(f"event_index must be a finite integer, got {value!r}")
+        if abs(numeric) >= _SAFE_FLOAT_INTEGER_LIMIT:
+            raise ValueError(
+                "floating-point event_index at or above 2**53 is unsafe; "
+                "load identifiers as strings or integers"
+            )
+        return int(numeric)
+    text = str(value).strip()
+    try:
+        return int(text, 10)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"event_index must be an integer identifier, got {value!r}") from exc
 
 
 def _as_models(value: str | Iterable[str] | None) -> tuple[str, ...]:
@@ -98,7 +123,7 @@ def _success_rows(frame: pd.DataFrame) -> pd.DataFrame:
         out = out[out["status"].astype(str).eq("success")].copy()
     out["session"] = out["session"].astype(str)
     out["rat"] = out["session"].map(_rat_from_session)
-    out["event_index"] = out["event_index"].astype(int)
+    out["event_index"] = out["event_index"].map(_exact_event_index)
     out["model"] = out["model"].astype(str)
     out["log_evidence"] = pd.to_numeric(out["log_evidence"], errors="coerce")
     out = out.dropna(subset=["log_evidence"]).copy()
@@ -726,7 +751,7 @@ def main() -> int:
     parser.add_argument("--rat-bootstrap-random-seed", type=int, default=DEFAULT_RAT_BOOTSTRAP_RANDOM_SEED)
     args = parser.parse_args()
 
-    scores = pd.read_csv(args.event_model_evidence)
+    scores = pd.read_csv(args.event_model_evidence, dtype={"event_index": "string"})
     write_trajectory_imm_superiority_outputs(
         scores,
         args.output,

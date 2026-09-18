@@ -62,7 +62,7 @@ def run(report, output):
         paired = []
         for split in range(5):
             s = g[g.split == split].pivot(index="anchor_event", columns="truth_track", values=r0.readout).reindex(anchors)
-            pair = s.to_numpy()
+            pair = s.to_numpy(copy=True)
             pair[~np.isfinite(pair).all(axis=1)] = np.nan
             good = np.isfinite(pair).all(axis=1)
             split_means.append(pair[good].mean(axis=0) if good.any() else np.full(2, np.nan))

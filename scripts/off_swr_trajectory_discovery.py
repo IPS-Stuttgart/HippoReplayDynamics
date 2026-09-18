@@ -14,6 +14,7 @@ from __future__ import annotations
 import argparse
 import glob
 from collections.abc import Iterable, Sequence
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
 import numpy as np
@@ -103,6 +104,9 @@ TRIAGE_ANIMAL_X_COLUMNS = ("animal_x", "position_x", "current_x", "window_mean_x
 TRIAGE_ANIMAL_Y_COLUMNS = ("animal_y", "position_y", "current_y", "window_mean_y", "mean_y")
 
 KEY_COLUMNS = ("session", "event_index", "window_role", "null_index")
+_INTEGER_KEY_COLUMNS = ("event_index", "null_index")
+_FLOAT_EXACT_INTEGER_LIMIT = 2**53
+_INTEGER_KEY_DTYPES = {column: "string" for column in _INTEGER_KEY_COLUMNS}
 TRAJECTORY_CANDIDATE_CLASS = "off_swr_trajectory_family_candidate"
 STATIC_NONTRAJECTORY_CLASS = "off_swr_static_nontrajectory"
 AMBIGUOUS_CLASS = "ambiguous"
@@ -638,11 +642,70 @@ def _parse_names(value: str | Iterable[str] | None, default: Sequence[str] = ())
     return names or tuple(default)
 
 
+def _exact_integer_identifier(value: object, name: str) -> int:
+    """Return an integer key without routing decimal text through binary64."""
+
+    if isinstance(value, (bool, np.bool_)):
+        raise ValueError(f"{name} must contain integer identifiers, not booleans")
+    if isinstance(value, (int, np.integer)):
+        return int(value)
+    if isinstance(value, (float, np.floating)):
+        numeric = float(value)
+        if not np.isfinite(numeric):
+            raise ValueError(f"{name} must contain finite integer identifiers")
+        if not numeric.is_integer():
+            raise ValueError(f"{name} must contain integer-valued identifiers")
+        if abs(numeric) >= _FLOAT_EXACT_INTEGER_LIMIT:
+            raise ValueError(
+                f"{name} contains a floating-point identifier outside the exact integer range; "
+                "use integer or string IDs"
+            )
+        return int(numeric)
+
+    text = str(value).strip()
+    try:
+        numeric = Decimal(text)
+    except (InvalidOperation, TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must contain finite integer identifiers") from exc
+    if not numeric.is_finite():
+        raise ValueError(f"{name} must contain finite integer identifiers")
+    integral = numeric.to_integral_value()
+    if numeric != integral:
+        raise ValueError(f"{name} must contain integer-valued identifiers")
+    return int(integral)
+
+
+def _optional_exact_integer_identifier(value: object, name: str) -> object:
+    try:
+        if pd.isna(value):
+            return np.nan
+    except (TypeError, ValueError):
+        pass
+    return _exact_integer_identifier(value, name)
+
+
+def _normalize_key_identifiers(frame: pd.DataFrame) -> pd.DataFrame:
+    out = frame.copy()
+    for column in _INTEGER_KEY_COLUMNS:
+        if column not in out.columns:
+            continue
+        out[column] = pd.Series(
+            [_exact_integer_identifier(value, column) for value in out[column]],
+            index=out.index,
+            dtype=object,
+        )
+    return out
+
+
 def _read_score_files(score_glob: str | Path) -> pd.DataFrame:
     paths = [Path(path) for path in sorted(glob.glob(str(score_glob), recursive=True))]
     if not paths:
         raise FileNotFoundError(f"no off-SWR score files found for {score_glob!r}")
-    return pd.concat([pd.read_csv(path) for path in paths], ignore_index=True)
+    frame = pd.concat(
+        [pd.read_csv(path, dtype=_INTEGER_KEY_DTYPES) for path in paths],
+        ignore_index=True,
+    )
+    return _normalize_key_identifiers(frame)
 
 
 def _empty_frame(columns: Sequence[str]) -> pd.DataFrame:
@@ -753,9 +816,17 @@ def _score_lookup(scores: pd.DataFrame) -> dict[tuple[str, int, str, int], pd.Da
     out: dict[tuple[str, int, str, int], pd.DataFrame] = {}
     if scores.empty or not set(KEY_COLUMNS).issubset(scores.columns):
         return out
-    for key, group in _success_comparable_scores(scores).groupby(list(KEY_COLUMNS), sort=False, dropna=False):
+    normalized = _normalize_key_identifiers(_success_comparable_scores(scores))
+    for key, group in normalized.groupby(list(KEY_COLUMNS), sort=False, dropna=False):
         session, event_index, window_role, null_index = key if isinstance(key, tuple) else (key,)
-        out[(str(session), int(event_index), str(window_role), int(null_index))] = group.copy()
+        out[
+            (
+                str(session),
+                _exact_integer_identifier(event_index, "event_index"),
+                str(window_role),
+                _exact_integer_identifier(null_index, "null_index"),
+            )
+        ] = group.copy()
     return out
 
 
@@ -885,6 +956,7 @@ def _tier_candidate_mask(frame: pd.DataFrame, threshold: float) -> pd.Series:
 def _window_metadata(scores: pd.DataFrame, *, optional_columns: Sequence[str]) -> pd.DataFrame:
     if scores.empty:
         return _empty_frame(KEY_COLUMNS)
+    scores = _normalize_key_identifiers(scores)
     metadata_columns = (
         "off_swr",
         "template_event_index",
@@ -924,6 +996,7 @@ def off_swr_trajectory_decisions(
     if scores.empty:
         return _empty_frame(DECISION_OUTPUT_COLUMNS)
 
+    scores = _normalize_key_identifiers(scores)
     decisions = matched_null_family_margin_decisions(
         scores,
         comparison_scope=comparison_scope,
@@ -1049,7 +1122,7 @@ def cluster_off_swr_candidates(candidates: pd.DataFrame, *, cluster_gap_s: float
         best = cluster.assign(_margin=margins).sort_values(["_margin", "window_start_s"], ascending=[False, True]).iloc[0]
         time_start = float(starts.min()) if not starts.dropna().empty else np.nan
         time_end = float(ends.max()) if not ends.dropna().empty else np.nan
-        template_events = tuple(sorted(set(pd.to_numeric(cluster["event_index"], errors="coerce").dropna().astype(int))))
+        template_events = tuple(sorted({_exact_integer_identifier(value, "event_index") for value in cluster["event_index"].dropna()}))
         rows.append(
             {
                 "rat": str(best["rat"]),
@@ -1065,8 +1138,8 @@ def cluster_off_swr_candidates(candidates: pd.DataFrame, *, cluster_gap_s: float
                 "median_family_margin": float(margins.median()) if not margins.dropna().empty else np.nan,
                 "max_family_margin": float(margins.max()) if not margins.dropna().empty else np.nan,
                 "best_trajectory_model": str(best["best_trajectory_model"]),
-                "best_candidate_event_index": int(best["event_index"]),
-                "best_candidate_null_index": int(best["null_index"]),
+                "best_candidate_event_index": _exact_integer_identifier(best["event_index"], "event_index"),
+                "best_candidate_null_index": _exact_integer_identifier(best["null_index"], "null_index"),
                 "median_n_spikes": float(_numeric_series(cluster, "n_spikes").median()),
                 "median_active_cell_count": float(_numeric_series(cluster, "active_cell_count").median()),
             }
@@ -1155,9 +1228,9 @@ def off_swr_candidate_table(
     for _, row in candidates.iterrows():
         key = (
             str(row["session"]),
-            int(row["event_index"]),
+            _exact_integer_identifier(row["event_index"], "event_index"),
             str(row["window_role"]),
-            int(row["null_index"]),
+            _exact_integer_identifier(row["null_index"], "null_index"),
         )
         group = lookup.get(key, pd.DataFrame())
         best_trajectory = _best_model_row(group, row.get("best_trajectory_model"))
@@ -1224,8 +1297,8 @@ def off_swr_candidate_table(
                 "ordinary_movement_spiking_score": ordinary_score,
                 "session": str(row["session"]),
                 "rat": str(row["rat"]),
-                "event_index": int(row["event_index"]),
-                "null_index": int(row["null_index"]),
+                "event_index": _exact_integer_identifier(row["event_index"], "event_index"),
+                "null_index": _exact_integer_identifier(row["null_index"], "null_index"),
                 "window_start_s": start,
                 "window_end_s": end,
                 "duration_s": duration,
@@ -1254,7 +1327,7 @@ def off_swr_candidate_table(
                 "trajectory_margin_per_spike": _finite_or_nan(row.get("trajectory_minus_nontrajectory_log_evidence_per_spike")),
                 "trajectory_margin_per_time_bin": _finite_or_nan(row.get("trajectory_minus_nontrajectory_log_evidence_per_time_bin")),
                 "matched_null_rank": _finite_or_nan(row.get("matched_null_rank")),
-                "template_event_index": _finite_or_nan(row.get("template_event_index")),
+                "template_event_index": _optional_exact_integer_identifier(row.get("template_event_index"), "template_event_index"),
             }
         )
 
@@ -1279,7 +1352,7 @@ def off_swr_candidate_cluster_table(candidate_table: pd.DataFrame) -> pd.DataFra
         best = group.sort_values(["candidate_priority_score", "trajectory_family_margin"], ascending=[False, False]).iloc[0]
         time_start = float(starts.min()) if not starts.dropna().empty else np.nan
         time_end = float(ends.max()) if not ends.dropna().empty else np.nan
-        template_events = tuple(sorted(set(pd.to_numeric(group["event_index"], errors="coerce").dropna().astype(int))))
+        template_events = tuple(sorted({_exact_integer_identifier(value, "event_index") for value in group["event_index"].dropna()}))
         rows.append(
             {
                 "rat": str(best["rat"]),
@@ -1299,8 +1372,8 @@ def off_swr_candidate_cluster_table(candidate_table: pd.DataFrame) -> pd.DataFra
                 "movement_spiking_like_windows": int(group["candidate_specificity_label"].astype(str).eq(MOVEMENT_SPIKING_LIKE_LABEL).sum()),
                 "interesting_candidate_windows": int(group["candidate_specificity_label"].astype(str).eq(INTERESTING_CANDIDATE_LABEL).sum()),
                 "best_trajectory_model": str(best["best_trajectory_model"]),
-                "best_candidate_event_index": int(best["event_index"]),
-                "best_candidate_null_index": int(best["null_index"]),
+                "best_candidate_event_index": _exact_integer_identifier(best["event_index"], "event_index"),
+                "best_candidate_null_index": _exact_integer_identifier(best["null_index"], "null_index"),
                 "median_n_spikes": _safe_median(group, "n_spikes"),
                 "median_active_cell_count": _safe_median(group, "active_cell_count"),
                 "median_animal_speed_mean": _safe_median(group, "animal_speed_mean"),
@@ -1368,9 +1441,9 @@ def off_swr_candidate_vs_swr_window_table(
                 "window_set": "off_swr_candidate",
                 "session": str(row.get("session", "")),
                 "rat": str(row.get("rat", "")),
-                "event_index": _finite_or_nan(row.get("event_index")),
+                "event_index": _exact_integer_identifier(row.get("event_index"), "event_index"),
                 "window_role": "matched_null",
-                "null_index": _finite_or_nan(row.get("null_index")),
+                "null_index": _exact_integer_identifier(row.get("null_index"), "null_index"),
                 "candidate_rank": _finite_or_nan(row.get("candidate_rank")),
                 "candidate_specificity_label": str(row.get("candidate_specificity_label", "")),
                 "candidate_cluster_id": str(row.get("candidate_cluster_id", "")),
@@ -1411,9 +1484,9 @@ def off_swr_candidate_vs_swr_window_table(
         swr_intervals = _real_swr_intervals(scores)
         for _, row in swr_decisions.iterrows():
             session = str(row["session"])
-            event_index = int(row["event_index"])
+            event_index = _exact_integer_identifier(row["event_index"], "event_index")
             window_role = str(row["window_role"])
-            null_index = int(row["null_index"])
+            null_index = _exact_integer_identifier(row["null_index"], "null_index")
             group = lookup.get((session, event_index, window_role, null_index), pd.DataFrame())
             best_trajectory = _best_model_row(group, row.get("best_trajectory_model"))
             start = _finite_or_nan(row.get("window_start_s"))
@@ -1615,9 +1688,9 @@ def _off_swr_run_state_window_table(
     rows: list[dict[str, object]] = []
     for _, row in off_swr.iterrows():
         session = str(row["session"])
-        event_index = int(row["event_index"])
+        event_index = _exact_integer_identifier(row["event_index"], "event_index")
         window_role = str(row["window_role"])
-        null_index = int(row["null_index"])
+        null_index = _exact_integer_identifier(row["null_index"], "null_index")
         group = lookup.get((session, event_index, window_role, null_index), pd.DataFrame())
         best_trajectory = _best_model_row(group, row.get("best_trajectory_model"))
 
@@ -2864,6 +2937,7 @@ def write_off_swr_trajectory_discovery_outputs(
 ) -> dict[str, pd.DataFrame]:
     out = Path(output)
     out.mkdir(parents=True, exist_ok=True)
+    scores = _normalize_key_identifiers(scores)
 
     scored_models = tuple(scores["model"].dropna().astype(str).unique()) if "model" in scores.columns else tuple()
     resolved_required_models, resolved_trajectory_models = resolve_family_model_sets(

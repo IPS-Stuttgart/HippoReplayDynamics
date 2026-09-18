@@ -57,6 +57,7 @@ RAT_SUMMARY_OUTPUT = "rat_behavior_alignment_summary.csv"
 LOO_OUTPUT = "leave_one_rat_out_behavior_prediction.csv"
 _LEGACY_MISSING_TEXT = {"", "nan", "none", "null", "na", "n/a", "<na>"}
 _REAL_WINDOW_ROLES = {"real", *_LEGACY_MISSING_TEXT}
+_SAFE_FLOAT_INTEGER_LIMIT = 2**53
 
 
 def _as_bool(value: object) -> bool:
@@ -93,21 +94,40 @@ def _rat_from_session(session: object) -> str:
 def _exact_event_index(value: object) -> int:
     """Parse an event identifier without silently accepting lossy binary floats."""
 
-    if isinstance(value, (float, np.floating)):
-        numeric_float = float(value)
-        if not np.isfinite(numeric_float):
+    current = value
+    seen_arrays: set[int] = set()
+    while isinstance(current, np.ndarray):
+        if current.ndim != 0:
+            raise ValueError("event_index must contain scalar integer identifiers")
+        marker = id(current)
+        if marker in seen_arrays:
+            raise ValueError("event_index must contain scalar integer identifiers")
+        seen_arrays.add(marker)
+        current = current[()]
+
+    if isinstance(current, (bool, np.bool_)):
+        raise ValueError("event_index must contain integer identifiers, not booleans")
+    if isinstance(current, (int, np.integer)):
+        return int(current)
+    if isinstance(current, (float, np.floating)):
+        if not bool(np.isfinite(current)) or not bool(current.is_integer()):
             raise ValueError("event_index must contain finite integer identifiers")
-        precision_bits = (
-            int(np.finfo(value.dtype).nmant) + 1
-            if isinstance(value, np.floating)
-            else 53
+        exact_integer_limit = (
+            1 << (int(np.finfo(current.dtype).nmant) + 1)
+            if isinstance(current, np.floating)
+            else _SAFE_FLOAT_INTEGER_LIMIT
         )
-        if abs(value) >= 1 << precision_bits:
+        if abs(current) >= exact_integer_limit:
+            precision_bits = exact_integer_limit.bit_length() - 1
             raise ValueError(
-                f"floating-point event_index at or above 2**{precision_bits} is unsafe; "
-                "load identifiers as strings or integers"
+                "floating-point event_index at or above "
+                f"2**{precision_bits} is unsafe; load identifiers as strings or integers"
             )
-    text = str(value).strip()
+        return int(current)
+    if isinstance(current, (complex, np.complexfloating)):
+        raise ValueError("event_index must contain real integer identifiers")
+
+    text = str(current).strip()
     try:
         numeric = Decimal(text)
     except (InvalidOperation, ValueError) as exc:
@@ -127,7 +147,12 @@ def _normalize_event_keys(frame: pd.DataFrame, *, context: str) -> pd.DataFrame:
         raise ValueError(f"{context} is missing required columns: {missing}")
     out = frame.copy()
     out["session"] = out["session"].astype(str)
-    out["event_index"] = out["event_index"].map(_exact_event_index)
+    raw_event_indices = out["event_index"].to_numpy(copy=False)
+    out["event_index"] = pd.Series(
+        [_exact_event_index(value) for value in raw_event_indices],
+        index=out.index,
+        dtype=object,
+    )
     return out
 
 
@@ -329,8 +354,9 @@ def build_behavior_context_from_dataset(
         _check_session(session_dir)
         session = load_replay_session(session_dir)
         wells = infer_well_locations(session)
-        for event_index in sorted(group["event_index"].astype(int).unique()):
-            event = session.ripple(int(event_index))
+        event_indices = sorted({_exact_event_index(value) for value in group["event_index"]})
+        for event_index in event_indices:
+            event = session.ripple(event_index)
             anchor_time = float(event.peak)
             current = _position_at_time(session.position, anchor_time)
             previous = _position_at_time(session.position, anchor_time - float(previous_horizon_s))
@@ -341,7 +367,7 @@ def build_behavior_context_from_dataset(
             rows.append(
                 {
                     "session": session.session_id,
-                    "event_index": int(event_index),
+                    "event_index": event_index,
                     "event_start_s": float(event.start),
                     "event_end_s": float(event.end),
                     "event_peak_s": float(event.peak),

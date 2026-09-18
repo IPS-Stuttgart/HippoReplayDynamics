@@ -246,7 +246,7 @@ def run(source, report, output):
     # Verify one direct 499+499-null example in each available condition/status.
     sample = scores[scores.sequence_eligible & scores.repeat.isin([-1, 2])]
     for _, r in sample.groupby(["order", "likelihood", "repeat", "sequence_accepted"]).first().reset_index().iterrows():
-        fold, split, eid, repeat = map(int, [r.fold, r["split"], r.window_id, r.repeat])
+        fold, split, eid, repeat = map(int, [r["fold"], r["split"], r["window_id"], r["repeat"]])
         i = ids.index(eid)
         saved = maps[fold]
         c = arrays["counts"][i]

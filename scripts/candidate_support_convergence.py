@@ -11,6 +11,7 @@ values, and writes convergence-audit tables.
 from __future__ import annotations
 
 import argparse
+from decimal import Decimal, InvalidOperation
 from itertools import combinations
 from pathlib import Path
 
@@ -45,6 +46,7 @@ CANDIDATE_PREDICTED_TOP_K_COLUMNS = (
     "predicted_candidate_top_k",
 )
 _MISSING_STATUS_VALUES = {"", "nan", "na", "n/a", "none", "null", "<na>"}
+_SAFE_FLOAT_INTEGER_LIMIT = 2**53
 
 
 def _score_file(path: str | Path) -> Path:
@@ -217,9 +219,36 @@ def parse_labels(spec: str | None, n_expected: int) -> list[str] | None:
     return labels
 
 
+def _exact_event_index(value: object) -> int:
+    """Parse an event identifier without silently accepting lossy binary floats."""
+
+    if isinstance(value, (bool, np.bool_)):
+        raise ValueError("event_index must contain integer identifiers, not booleans")
+    if isinstance(value, (float, np.floating)):
+        numeric_float = float(value)
+        if not np.isfinite(numeric_float):
+            raise ValueError("event_index must contain finite integer identifiers")
+        if abs(numeric_float) >= _SAFE_FLOAT_INTEGER_LIMIT:
+            raise ValueError(
+                "floating-point event_index at or above 2**53 is unsafe; "
+                "load identifiers as strings or integers"
+            )
+    text_value = str(value).strip()
+    try:
+        numeric = Decimal(text_value)
+    except (InvalidOperation, ValueError) as exc:
+        raise ValueError("event_index must contain finite integer identifiers") from exc
+    if not numeric.is_finite():
+        raise ValueError("event_index must contain finite integer identifiers")
+    integral = numeric.to_integral_value()
+    if numeric != integral:
+        raise ValueError("event_index must contain integer-valued identifiers")
+    return int(integral)
+
+
 def load_candidate_support_run(path: str | Path, label: str | None = None) -> pd.DataFrame:
     score_file = _score_file(path)
-    frame = ensure_evidence_support_columns(pd.read_csv(score_file))
+    frame = ensure_evidence_support_columns(pd.read_csv(score_file, dtype={"event_index": "string"}))
     frame = frame[_status_success_mask(frame)].copy()
     required = {"session", "event_index", "model", "log_evidence"}
     missing = sorted(required - set(frame.columns))
@@ -227,6 +256,7 @@ def load_candidate_support_run(path: str | Path, label: str | None = None) -> pd
         raise ValueError(f"{score_file} is missing required columns: {missing}")
     if frame.empty:
         raise ValueError(f"{score_file} contains no successful rows after status filtering")
+    frame["event_index"] = frame["event_index"].map(_exact_event_index)
     frame["run_label"] = label or infer_run_label(frame, score_file.parent.name)
     frame["source_score_file"] = str(score_file)
     frame["log_evidence"] = pd.to_numeric(frame["log_evidence"], errors="coerce")

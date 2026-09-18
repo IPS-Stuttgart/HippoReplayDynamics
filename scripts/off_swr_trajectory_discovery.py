@@ -105,8 +105,11 @@ TRIAGE_ANIMAL_Y_COLUMNS = ("animal_y", "position_y", "current_y", "window_mean_y
 
 KEY_COLUMNS = ("session", "event_index", "window_role", "null_index")
 _INTEGER_KEY_COLUMNS = ("event_index", "null_index")
-_FLOAT_EXACT_INTEGER_LIMIT = 2**53
-_INTEGER_KEY_DTYPES = {column: "string" for column in _INTEGER_KEY_COLUMNS}
+_OPTIONAL_INTEGER_IDENTIFIER_COLUMNS = ("template_event_index",)
+_INTEGER_IDENTIFIER_DTYPES = {
+    column: "string"
+    for column in (*_INTEGER_KEY_COLUMNS, *_OPTIONAL_INTEGER_IDENTIFIER_COLUMNS)
+}
 TRAJECTORY_CANDIDATE_CLASS = "off_swr_trajectory_family_candidate"
 STATIC_NONTRAJECTORY_CLASS = "off_swr_static_nontrajectory"
 AMBIGUOUS_CLASS = "ambiguous"
@@ -649,18 +652,29 @@ def _exact_integer_identifier(value: object, name: str) -> int:
         raise ValueError(f"{name} must contain integer identifiers, not booleans")
     if isinstance(value, (int, np.integer)):
         return int(value)
-    if isinstance(value, (float, np.floating)):
-        numeric = float(value)
-        if not np.isfinite(numeric):
+    if isinstance(value, np.floating):
+        if not np.isfinite(value):
             raise ValueError(f"{name} must contain finite integer identifiers")
-        if not numeric.is_integer():
+        if not value.is_integer():
             raise ValueError(f"{name} must contain integer-valued identifiers")
-        if abs(numeric) >= _FLOAT_EXACT_INTEGER_LIMIT:
+        exact_limit = 2 ** (np.finfo(value.dtype).nmant + 1)
+        if abs(value) >= exact_limit:
             raise ValueError(
                 f"{name} contains a floating-point identifier outside the exact integer range; "
                 "use integer or string IDs"
             )
-        return int(numeric)
+        return int(value)
+    if isinstance(value, float):
+        if not np.isfinite(value):
+            raise ValueError(f"{name} must contain finite integer identifiers")
+        if not value.is_integer():
+            raise ValueError(f"{name} must contain integer-valued identifiers")
+        if abs(value) >= 2**53:
+            raise ValueError(
+                f"{name} contains a floating-point identifier outside the exact integer range; "
+                "use integer or string IDs"
+            )
+        return int(value)
 
     text = str(value).strip()
     try:
@@ -694,6 +708,14 @@ def _normalize_key_identifiers(frame: pd.DataFrame) -> pd.DataFrame:
             index=out.index,
             dtype=object,
         )
+    for column in _OPTIONAL_INTEGER_IDENTIFIER_COLUMNS:
+        if column not in out.columns:
+            continue
+        out[column] = pd.Series(
+            [_optional_exact_integer_identifier(value, column) for value in out[column]],
+            index=out.index,
+            dtype=object,
+        )
     return out
 
 
@@ -702,7 +724,7 @@ def _read_score_files(score_glob: str | Path) -> pd.DataFrame:
     if not paths:
         raise FileNotFoundError(f"no off-SWR score files found for {score_glob!r}")
     frame = pd.concat(
-        [pd.read_csv(path, dtype=_INTEGER_KEY_DTYPES) for path in paths],
+        [pd.read_csv(path, dtype=_INTEGER_IDENTIFIER_DTYPES) for path in paths],
         ignore_index=True,
     )
     return _normalize_key_identifiers(frame)
@@ -1122,7 +1144,14 @@ def cluster_off_swr_candidates(candidates: pd.DataFrame, *, cluster_gap_s: float
         best = cluster.assign(_margin=margins).sort_values(["_margin", "window_start_s"], ascending=[False, True]).iloc[0]
         time_start = float(starts.min()) if not starts.dropna().empty else np.nan
         time_end = float(ends.max()) if not ends.dropna().empty else np.nan
-        template_events = tuple(sorted({_exact_integer_identifier(value, "event_index") for value in cluster["event_index"].dropna()}))
+        template_events = tuple(
+            sorted(
+                {
+                    _exact_integer_identifier(value, "event_index")
+                    for value in cluster["event_index"].dropna()
+                }
+            )
+        )
         rows.append(
             {
                 "rat": str(best["rat"]),
@@ -1138,8 +1167,14 @@ def cluster_off_swr_candidates(candidates: pd.DataFrame, *, cluster_gap_s: float
                 "median_family_margin": float(margins.median()) if not margins.dropna().empty else np.nan,
                 "max_family_margin": float(margins.max()) if not margins.dropna().empty else np.nan,
                 "best_trajectory_model": str(best["best_trajectory_model"]),
-                "best_candidate_event_index": _exact_integer_identifier(best["event_index"], "event_index"),
-                "best_candidate_null_index": _exact_integer_identifier(best["null_index"], "null_index"),
+                "best_candidate_event_index": _exact_integer_identifier(
+                    best["event_index"],
+                    "event_index",
+                ),
+                "best_candidate_null_index": _exact_integer_identifier(
+                    best["null_index"],
+                    "null_index",
+                ),
                 "median_n_spikes": float(_numeric_series(cluster, "n_spikes").median()),
                 "median_active_cell_count": float(_numeric_series(cluster, "active_cell_count").median()),
             }
@@ -1327,7 +1362,10 @@ def off_swr_candidate_table(
                 "trajectory_margin_per_spike": _finite_or_nan(row.get("trajectory_minus_nontrajectory_log_evidence_per_spike")),
                 "trajectory_margin_per_time_bin": _finite_or_nan(row.get("trajectory_minus_nontrajectory_log_evidence_per_time_bin")),
                 "matched_null_rank": _finite_or_nan(row.get("matched_null_rank")),
-                "template_event_index": _optional_exact_integer_identifier(row.get("template_event_index"), "template_event_index"),
+                "template_event_index": _optional_exact_integer_identifier(
+                    row.get("template_event_index"),
+                    "template_event_index",
+                ),
             }
         )
 
@@ -1352,7 +1390,14 @@ def off_swr_candidate_cluster_table(candidate_table: pd.DataFrame) -> pd.DataFra
         best = group.sort_values(["candidate_priority_score", "trajectory_family_margin"], ascending=[False, False]).iloc[0]
         time_start = float(starts.min()) if not starts.dropna().empty else np.nan
         time_end = float(ends.max()) if not ends.dropna().empty else np.nan
-        template_events = tuple(sorted({_exact_integer_identifier(value, "event_index") for value in group["event_index"].dropna()}))
+        template_events = tuple(
+            sorted(
+                {
+                    _exact_integer_identifier(value, "event_index")
+                    for value in group["event_index"].dropna()
+                }
+            )
+        )
         rows.append(
             {
                 "rat": str(best["rat"]),
@@ -1372,8 +1417,14 @@ def off_swr_candidate_cluster_table(candidate_table: pd.DataFrame) -> pd.DataFra
                 "movement_spiking_like_windows": int(group["candidate_specificity_label"].astype(str).eq(MOVEMENT_SPIKING_LIKE_LABEL).sum()),
                 "interesting_candidate_windows": int(group["candidate_specificity_label"].astype(str).eq(INTERESTING_CANDIDATE_LABEL).sum()),
                 "best_trajectory_model": str(best["best_trajectory_model"]),
-                "best_candidate_event_index": _exact_integer_identifier(best["event_index"], "event_index"),
-                "best_candidate_null_index": _exact_integer_identifier(best["null_index"], "null_index"),
+                "best_candidate_event_index": _exact_integer_identifier(
+                    best["event_index"],
+                    "event_index",
+                ),
+                "best_candidate_null_index": _exact_integer_identifier(
+                    best["null_index"],
+                    "null_index",
+                ),
                 "median_n_spikes": _safe_median(group, "n_spikes"),
                 "median_active_cell_count": _safe_median(group, "active_cell_count"),
                 "median_animal_speed_mean": _safe_median(group, "animal_speed_mean"),

@@ -259,7 +259,6 @@ def test_rat_bootstrap_reports_positive_intervals_for_strong_rows():
     assert float(boot.iloc[0]["median_delta_vs_first_order_imm_ci95_low"]) > 0.0
 
 
-
 def test_trajectory_imm_preserves_large_decimal_event_ids(tmp_path: Path):
     first = 2**53
     second = first + 1
@@ -296,6 +295,7 @@ def test_trajectory_imm_rejects_already_lossy_large_float_event_id():
             scores,
             required_core_models=(DEFAULT_FIRST_ORDER_IMM_MODEL, DEFAULT_TRAJECTORY_IMM_MODEL),
         )
+
 
 def row(
     session: str,

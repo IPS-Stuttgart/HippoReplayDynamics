@@ -113,6 +113,26 @@ def _normalize_event_index(values: pd.Series) -> pd.Series:
                 raise ValueError("booleans are not valid event identifiers")
             if isinstance(value, Integral):
                 item = int(value)
+            elif isinstance(value, np.floating):
+                if not bool(np.isfinite(value)) or not bool(value.is_integer()):
+                    raise ValueError("event identifier is not integer-like")
+                precision_bits = int(np.finfo(value.dtype).nmant) + 1
+                unsafe_magnitude = 1 << precision_bits
+                if abs(value) >= unsafe_magnitude:
+                    raise ValueError(
+                        f"floating-point event identifier at or above 2**{precision_bits} is unsafe; "
+                        "load identifiers as strings or integers"
+                    )
+                item = int(value)
+            elif isinstance(value, float):
+                if not np.isfinite(value) or not value.is_integer():
+                    raise ValueError("event identifier is not integer-like")
+                if abs(value) >= 2**53:
+                    raise ValueError(
+                        "floating-point event identifier at or above 2**53 is unsafe; "
+                        "load identifiers as strings or integers"
+                    )
+                item = int(value)
             elif isinstance(value, Real):
                 numeric = float(value)
                 if not np.isfinite(numeric) or not numeric.is_integer():
@@ -131,8 +151,8 @@ def _normalize_event_index(values: pd.Series) -> pd.Series:
                     item = int(numeric)
             if item < int64.min or item > int64.max:
                 raise ValueError("event identifier is outside int64 bounds")
-        except (InvalidOperation, TypeError, ValueError):
-            bad.append(str(value))
+        except (InvalidOperation, TypeError, ValueError) as exc:
+            bad.append(f"{value}: {exc}")
             continue
         parsed.append(item)
     if bad:

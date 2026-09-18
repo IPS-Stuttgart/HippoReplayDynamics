@@ -523,7 +523,7 @@ def _integer_identifier_series(values: pd.Series, *, name: str, nullable: bool) 
     maximum = (1 << 63) - 1
     missing_text = {"", "nan", "na", "n/a", "none", "null", "<na>"}
     parsed: list[int | pd._libs.missing.NAType] = []
-    for value in values:
+    for value in values.array:
         try:
             missing = value is None or bool(pd.isna(value))
         except (TypeError, ValueError):

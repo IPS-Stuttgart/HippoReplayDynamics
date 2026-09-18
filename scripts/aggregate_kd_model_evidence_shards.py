@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+from decimal import Decimal, InvalidOperation
 import glob
 from pathlib import Path
 
@@ -26,6 +27,69 @@ def _np_scalar(value, *, key: str, path: Path) -> object:
             f"Momentum shard {key} must be scalar metadata in {path}: got shape {array.shape}"
         )
     return array.item()
+
+
+def _exact_integer_text(
+    value: object,
+    *,
+    key: str,
+    path: Path,
+    min_value: int,
+) -> int:
+    """Parse an integer identifier from text without routing through binary64."""
+
+    if isinstance(value, bytes):
+        try:
+            text = value.decode("utf-8")
+        except UnicodeDecodeError as exc:
+            raise ValueError(
+                f"CSV {key} must contain finite integer values: {path}"
+            ) from exc
+    else:
+        text = str(value)
+    text = text.strip()
+    try:
+        numeric = Decimal(text)
+    except (InvalidOperation, ValueError) as exc:
+        raise ValueError(
+            f"CSV {key} must contain finite integer values: {path}"
+        ) from exc
+    if not numeric.is_finite():
+        raise ValueError(f"CSV {key} must contain finite integer values: {path}")
+    integer = numeric.to_integral_value()
+    if numeric != integer:
+        raise ValueError(f"CSV {key} must contain finite integer values: {path}")
+
+    parsed = int(integer)
+    intp_info = np.iinfo(np.dtype(np.intp))
+    if parsed < intp_info.min or parsed > intp_info.max:
+        raise ValueError(f"CSV {key} must fit into NumPy integer range: {path}")
+    if parsed < int(min_value):
+        qualifier = "nonnegative" if int(min_value) == 0 else "positive"
+        raise ValueError(f"CSV {key} must contain {qualifier} integer values: {path}")
+    return parsed
+
+
+def _read_csv_with_exact_event_index(path: Path) -> pd.DataFrame:
+    """Read one KD table while preserving exact decimal-form event identifiers."""
+
+    frame = pd.read_csv(path, dtype={"event_index": "string"})
+    if "event_index" not in frame.columns:
+        return frame
+    frame = frame.copy()
+    frame["event_index"] = np.asarray(
+        [
+            _exact_integer_text(
+                value,
+                key="event_index",
+                path=path,
+                min_value=0,
+            )
+            for value in frame["event_index"]
+        ],
+        dtype=np.intp,
+    )
+    return frame
 
 
 def _integer_metadata(
@@ -394,9 +458,15 @@ def _momentum_rows(log_evidence: np.ndarray, metadata: dict[str, object]) -> lis
 
 
 def aggregate(base_dir: Path, shard_glob: str, outdir: Path) -> None:
-    base_scores = pd.read_csv(base_dir / "event_model_evidence.csv")
-    base_grid_params = pd.read_csv(base_dir / "gridsearch_best_params.csv")
-    base_marginalized = pd.read_csv(base_dir / "marginalized_model_evidence.csv")
+    base_scores = _read_csv_with_exact_event_index(
+        base_dir / "event_model_evidence.csv"
+    )
+    base_grid_params = _read_csv_with_exact_event_index(
+        base_dir / "gridsearch_best_params.csv"
+    )
+    base_marginalized = _read_csv_with_exact_event_index(
+        base_dir / "marginalized_model_evidence.csv"
+    )
     shard_paths = sorted(Path(path) for path in glob.glob(shard_glob))
     momentum_grid, momentum_params, metadata = _load_momentum_grid(shard_paths)
     base_event_ids = set(base_scores["event_index"].astype(int).unique())

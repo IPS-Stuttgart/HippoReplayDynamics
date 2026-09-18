@@ -35,6 +35,7 @@ DEFAULT_TRAJECTORY_MODELS = (
     "sorted-spike-state-space-momentum-exact-sparse",
 )
 _MISSING_STATUS_VALUES = {"", "nan", "na", "n/a", "none", "null", "<na>"}
+_SAFE_FLOAT_INTEGER_LIMIT = 2**53
 
 
 def _decoded_text(value: object) -> str:
@@ -47,6 +48,30 @@ def _decoded_text(value: object) -> str:
 
 def _rat_from_session(session: object) -> str:
     return _decoded_text(session).split("/", 1)[0]
+
+
+def _exact_event_index(value: object) -> int:
+    """Parse an event identifier without silently accepting lossy binary floats."""
+
+    if isinstance(value, (bool, np.bool_)):
+        raise ValueError("event_index must be an integer identifier, not boolean")
+    if isinstance(value, (int, np.integer)):
+        return int(value)
+    if isinstance(value, (float, np.floating)):
+        numeric = float(value)
+        if not np.isfinite(numeric) or not numeric.is_integer():
+            raise ValueError(f"event_index must be a finite integer, got {value!r}")
+        if abs(numeric) >= _SAFE_FLOAT_INTEGER_LIMIT:
+            raise ValueError(
+                "floating-point event_index at or above 2**53 is unsafe; "
+                "load identifiers as strings or integers"
+            )
+        return int(numeric)
+    text = _decoded_text(value).strip()
+    try:
+        return int(text, 10)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"event_index must be an integer identifier, got {value!r}") from exc
 
 
 def _as_bool(value: object, *, default: bool = False) -> bool:
@@ -99,13 +124,13 @@ def _success_rows(frame: pd.DataFrame) -> pd.DataFrame:
     for column in ("model", "session", "map_session", "requested_model"):
         if column in out:
             out[column] = out[column].map(_decoded_text)
-    out["event_index"] = out["event_index"].astype(int)
+    out["event_index"] = out["event_index"].map(_exact_event_index)
     out["log_evidence"] = pd.to_numeric(out["log_evidence"], errors="coerce")
     return out.dropna(subset=["log_evidence"])
 
 
 def _read_evidence(path: str | Path) -> pd.DataFrame:
-    frame = pd.read_csv(path)
+    frame = pd.read_csv(path, dtype={"event_index": "string"})
     required = {"session", "event_index", "model", "log_evidence"}
     missing = sorted(required.difference(frame.columns))
     if missing:

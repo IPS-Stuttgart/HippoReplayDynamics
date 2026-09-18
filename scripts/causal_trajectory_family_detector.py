@@ -129,7 +129,12 @@ def _parse_names(value: str | Iterable[str] | None, default: Sequence[str]) -> t
 
 def _safe_softmax(log_values: Sequence[float]) -> np.ndarray:
     values = np.asarray(log_values, dtype=float)
-    if values.size == 0 or not np.all(np.isfinite(values)):
+    if (
+        values.size == 0
+        or np.any(np.isnan(values))
+        or np.any(np.isposinf(values))
+        or np.all(np.isneginf(values))
+    ):
         return np.full(values.shape, np.nan, dtype=float)
     denominator = logsumexp(values)
     if not np.isfinite(denominator):
@@ -531,7 +536,16 @@ def causal_replay_detection_time_bin_table(
             best_nontrajectory = nontrajectory.sort_values(["log_evidence", "model"], ascending=[False, True]).iloc[0]
             best_nontrajectory_model = str(best_nontrajectory["model"])
             best_nontrajectory_log_evidence = float(best_nontrajectory["log_evidence"])
-        if np.isfinite(best_trajectory_log_evidence) and np.isfinite(best_nontrajectory_log_evidence):
+        if (
+            not np.isnan(best_trajectory_log_evidence)
+            and not np.isnan(best_nontrajectory_log_evidence)
+            and not np.isposinf(best_trajectory_log_evidence)
+            and not np.isposinf(best_nontrajectory_log_evidence)
+            and not (
+                np.isneginf(best_trajectory_log_evidence)
+                and np.isneginf(best_nontrajectory_log_evidence)
+            )
+        ):
             trajectory_margin = float(best_trajectory_log_evidence - best_nontrajectory_log_evidence)
 
         if missing:

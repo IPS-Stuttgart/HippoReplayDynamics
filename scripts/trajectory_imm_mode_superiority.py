@@ -18,6 +18,7 @@ evidence while giving model-development PRs a stable target to optimize.
 from __future__ import annotations
 
 import argparse
+from decimal import Decimal, InvalidOperation
 import re
 from pathlib import Path
 from typing import Iterable
@@ -44,10 +45,70 @@ DEFAULT_REQUIRED_AUGMENTED_CORE_MODELS = (
     DEFAULT_MOMENTUM_MODEL,
     DEFAULT_TRAJECTORY_IMM_MODEL,
 )
+_FLOAT64_EXACT_INTEGER_LIMIT = 2**53
+_INT64_INFO = np.iinfo(np.int64)
 
 
 def _rat_from_session(session: object) -> str:
     return str(session).split("/", 1)[0]
+
+
+def _exact_event_index(value: object) -> int:
+    """Parse an event identifier without losing integer identity."""
+
+    try:
+        missing = value is None or pd.isna(value)
+    except (TypeError, ValueError):
+        missing = False
+    if isinstance(missing, (bool, np.bool_)) and bool(missing):
+        raise ValueError("event_index must contain finite integer identifiers")
+    if isinstance(value, (bool, np.bool_)):
+        raise ValueError("event_index must contain integer identifiers, not booleans")
+
+    if isinstance(value, (int, np.integer)):
+        item = int(value)
+    elif isinstance(value, np.floating):
+        if not np.isfinite(value) or value != np.trunc(value):
+            raise ValueError("event_index must contain integer-valued identifiers")
+        finfo = np.finfo(type(value))
+        exact_integer_limit = np.ldexp(type(value)(1.0), finfo.nmant + 1)
+        if np.abs(value) >= exact_integer_limit:
+            raise ValueError(
+                "event_index contains a floating-point identifier outside its exact integer range; "
+                "use integer or string IDs"
+            )
+        item = int(value)
+    elif isinstance(value, float):
+        if not np.isfinite(value) or not value.is_integer():
+            raise ValueError("event_index must contain integer-valued identifiers")
+        if abs(value) >= _FLOAT64_EXACT_INTEGER_LIMIT:
+            raise ValueError(
+                "event_index contains a floating-point identifier outside its exact integer range; "
+                "use integer or string IDs"
+            )
+        item = int(value)
+    else:
+        if isinstance(value, (bytes, bytearray, memoryview, np.bytes_)):
+            text = bytes(value).decode("utf-8", errors="strict").strip()
+        else:
+            text = str(value).strip()
+        try:
+            numeric = Decimal(text)
+        except (InvalidOperation, TypeError, ValueError) as exc:
+            raise ValueError("event_index must contain finite integer identifiers") from exc
+        if not numeric.is_finite() or numeric != numeric.to_integral_value():
+            raise ValueError("event_index must contain integer-valued identifiers")
+        item = int(numeric)
+
+    if item < _INT64_INFO.min or item > _INT64_INFO.max:
+        raise ValueError("event_index must be within signed int64 bounds")
+    return item
+
+
+def _read_event_model_evidence(path: str | Path) -> pd.DataFrame:
+    """Read event evidence without routing identifiers through binary64."""
+
+    return pd.read_csv(path, dtype={"event_index": "string"})
 
 
 def _as_models(value: str | Iterable[str] | None) -> tuple[str, ...]:
@@ -98,7 +159,7 @@ def _success_rows(frame: pd.DataFrame) -> pd.DataFrame:
         out = out[out["status"].astype(str).eq("success")].copy()
     out["session"] = out["session"].astype(str)
     out["rat"] = out["session"].map(_rat_from_session)
-    out["event_index"] = out["event_index"].astype(int)
+    out["event_index"] = out["event_index"].map(_exact_event_index)
     out["model"] = out["model"].astype(str)
     out["log_evidence"] = pd.to_numeric(out["log_evidence"], errors="coerce")
     out = out.dropna(subset=["log_evidence"]).copy()
@@ -726,7 +787,7 @@ def main() -> int:
     parser.add_argument("--rat-bootstrap-random-seed", type=int, default=DEFAULT_RAT_BOOTSTRAP_RANDOM_SEED)
     args = parser.parse_args()
 
-    scores = pd.read_csv(args.event_model_evidence)
+    scores = _read_event_model_evidence(args.event_model_evidence)
     write_trajectory_imm_superiority_outputs(
         scores,
         args.output,

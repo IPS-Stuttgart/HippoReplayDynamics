@@ -18,8 +18,8 @@ evidence while giving model-development PRs a stable target to optimize.
 from __future__ import annotations
 
 import argparse
-from decimal import Decimal, InvalidOperation
 import re
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Iterable
 

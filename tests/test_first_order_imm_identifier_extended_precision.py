@@ -33,6 +33,7 @@ def test_identifier_parser_accepts_integral_extended_precision_value() -> None:
 
     assert _parse_integer_identifier(value, name="event_index") == expected
 
+
 def test_identifier_parser_rejects_unsafe_python_float_value() -> None:
     value = float(2**53 + 1)
 

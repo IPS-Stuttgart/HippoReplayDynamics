@@ -160,6 +160,49 @@ def test_sleeppost_event_detection_qc_excludes_artifact_rows_from_counts() -> No
     assert row["immobile_event_count"] == 1
 
 
+def test_sleeppost_event_detection_clamps_partial_final_bin_and_recording_boundary() -> None:
+    module = _load_module()
+    spikes = module.SleepSpikes(
+        spike_times_s=np.asarray([0.021, 0.022, 0.023, 0.025, 0.026], dtype=float),
+        unit_ids=np.asarray([1, 2, 3, 4, 5], dtype=int),
+        unit_count=5,
+    )
+
+    events = module.detect_mua_candidate_events(
+        animal="R2142",
+        date="2014-08-06",
+        sleep_session="20140806_R2142_sleepPOST",
+        spikes=spikes,
+        speed=None,
+        sleep_duration_s=0.025,
+        bin_size_s=0.010,
+        smooth_window_s=0.010,
+        mua_z_threshold=1.0,
+        merge_gap_s=0.0,
+        min_duration_ms=1.0,
+        max_duration_ms=500.0,
+        min_event_spikes=1,
+        min_event_active_units=1,
+        start_artifact_exclusion_s=0.0,
+        max_event_spikes_per_active_unit=100.0,
+        immobility_speed_threshold_cm_s=5.0,
+        moderate_event_spikes=10,
+        strong_event_spikes=25,
+        extreme_event_spikes=50,
+    )
+
+    assert len(events) == 1
+    event = events.iloc[0]
+    np.testing.assert_allclose(
+        [event["start_time_s"], event["end_time_s"], event["duration_ms"], event["mean_mua_rate_hz"]],
+        [0.020, 0.025, 5.0, 600.0],
+        rtol=0.0,
+        atol=1e-12,
+    )
+    assert int(event["n_spikes"]) == 3
+    assert int(event["n_active_units"]) == 3
+
+
 def test_sleeppost_event_detection_qc_marks_missing_spikes_failure(tmp_path: Path) -> None:
     module = _load_module()
     dataset_root = tmp_path / "data"

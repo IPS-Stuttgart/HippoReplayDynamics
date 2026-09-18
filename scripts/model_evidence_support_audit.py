@@ -74,7 +74,12 @@ def _exact_grouping_event_keys(
         if column not in integer_columns:
             continue
         exact_values = []
-        for value in out[column]:
+        # Iterating a pandas Series boxes NumPy float32 scalars as Python
+        # float and can therefore erase the source dtype's smaller exact
+        # integer range. Iterate the backing NumPy array instead so the
+        # dtype-specific ambiguity guard sees np.float32/longdouble.
+        values = out[column].to_numpy(copy=False)
+        for value in values:
             if isinstance(value, (float, np.floating)):
                 precision_bits = (
                     int(np.finfo(value.dtype).nmant) + 1

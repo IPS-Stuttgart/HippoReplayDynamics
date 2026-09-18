@@ -219,7 +219,6 @@ def test_hc11_posterior_content_preserves_large_integer_like_event_ids(tmp_path:
     assert audit["event_index"].tolist() == [first, second]
 
 
-
 @pytest.mark.parametrize(
     "value",
     [float(2**53), -float(2**53), np.float64(2**53), np.float32(2**24)],

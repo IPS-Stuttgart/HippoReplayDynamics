@@ -366,7 +366,10 @@ def _normalize_integer_id_columns(frame: pd.DataFrame) -> pd.DataFrame:
         if column not in out.columns:
             continue
         out[column] = pd.Series(
-            [_exact_integer_id(value, column) for value in out[column]],
+            [
+                _exact_integer_id(value, column)
+                for value in out[column].to_numpy(copy=False)
+            ],
             index=out.index,
             dtype=object,
         )

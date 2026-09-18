@@ -186,7 +186,6 @@ def test_aggregate_accepts_distinct_event_and_grid_shards(tmp_path):
     assert pivot["momentum"].notna().all()
 
 
-
 def test_aggregate_preserves_adjacent_decimal_event_ids_above_binary64_precision(
     tmp_path,
 ):

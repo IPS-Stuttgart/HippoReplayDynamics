@@ -57,7 +57,6 @@ RAT_SUMMARY_OUTPUT = "rat_behavior_alignment_summary.csv"
 LOO_OUTPUT = "leave_one_rat_out_behavior_prediction.csv"
 _LEGACY_MISSING_TEXT = {"", "nan", "none", "null", "na", "n/a", "<na>"}
 _REAL_WINDOW_ROLES = {"real", *_LEGACY_MISSING_TEXT}
-_SAFE_FLOAT_INTEGER_LIMIT = 2**53
 
 
 def _as_bool(value: object) -> bool:
@@ -98,9 +97,14 @@ def _exact_event_index(value: object) -> int:
         numeric_float = float(value)
         if not np.isfinite(numeric_float):
             raise ValueError("event_index must contain finite integer identifiers")
-        if abs(numeric_float) >= _SAFE_FLOAT_INTEGER_LIMIT:
+        precision_bits = (
+            int(np.finfo(value.dtype).nmant) + 1
+            if isinstance(value, np.floating)
+            else 53
+        )
+        if abs(value) >= 1 << precision_bits:
             raise ValueError(
-                "floating-point event_index at or above 2**53 is unsafe; "
+                f"floating-point event_index at or above 2**{precision_bits} is unsafe; "
                 "load identifiers as strings or integers"
             )
     text = str(value).strip()

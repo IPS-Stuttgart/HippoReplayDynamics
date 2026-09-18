@@ -76,11 +76,15 @@ def _exact_grouping_event_keys(
         exact_values = []
         for value in out[column]:
             if isinstance(value, (float, np.floating)):
-                numeric = float(value)
-                if np.isfinite(numeric) and abs(numeric) >= 2**53:
+                precision_bits = (
+                    int(np.finfo(value.dtype).nmant) + 1
+                    if isinstance(value, np.floating)
+                    else 53
+                )
+                if bool(np.isfinite(value)) and abs(value) >= 1 << precision_bits:
                     raise ValueError(
                         f"{column} contains an ambiguous floating-point identifier "
-                        "with magnitude >= 2**53; use integer or string IDs"
+                        f"with magnitude >= 2**{precision_bits}; use integer or string IDs"
                     )
             exact_values.append(_exact_integer_event_key(value, column))
         out[column] = pd.array(exact_values, dtype="Int64")

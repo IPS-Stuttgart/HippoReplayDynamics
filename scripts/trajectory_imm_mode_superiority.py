@@ -37,7 +37,6 @@ DEFAULT_MARGIN_THRESHOLD = 5.5
 DEFAULT_RAT_BOOTSTRAP_REPLICATES = 2000
 DEFAULT_RAT_BOOTSTRAP_RANDOM_SEED = 1
 EXACT_EVIDENCE_SUPPORT = "exact_full_grid"
-_SAFE_FLOAT_INTEGER_LIMIT = 2**53
 DEFAULT_REQUIRED_AUGMENTED_CORE_MODELS = (
     DEFAULT_STATIONARY_MODEL,
     DEFAULT_DIFFUSION_MODEL,
@@ -96,9 +95,14 @@ def _exact_event_index(value: object) -> int:
         numeric_float = float(value)
         if not np.isfinite(numeric_float):
             raise ValueError("event_index must contain finite integer identifiers")
-        if abs(numeric_float) >= _SAFE_FLOAT_INTEGER_LIMIT:
+        precision_bits = (
+            int(np.finfo(value.dtype).nmant) + 1
+            if isinstance(value, np.floating)
+            else 53
+        )
+        if abs(value) >= 1 << precision_bits:
             raise ValueError(
-                "floating-point event_index at or above 2**53 is unsafe; "
+                f"floating-point event_index at or above 2**{precision_bits} is unsafe; "
                 "load identifiers as strings or integers"
             )
     text = str(value).strip()

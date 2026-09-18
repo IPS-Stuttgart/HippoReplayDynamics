@@ -250,7 +250,19 @@ def _exact_integer_identifier(
 
     if isinstance(value, (int, np.integer)):
         result = int(value)
-    elif isinstance(value, (float, np.floating)):
+    elif isinstance(value, np.floating):
+        if not bool(np.isfinite(value)):
+            raise ValueError(f"{column} must contain finite integer identifiers")
+        if not bool(value.is_integer()):
+            raise ValueError(f"{column} must contain integer-valued identifiers")
+        precision_bits = int(np.finfo(value.dtype).nmant) + 1
+        if abs(value) >= 1 << precision_bits:
+            raise ValueError(
+                f"{column} contains a floating-point identifier outside the exact integer range; "
+                "load identifiers as strings or integers"
+            )
+        result = int(value)
+    elif isinstance(value, float):
         numeric_float = float(value)
         if not np.isfinite(numeric_float):
             raise ValueError(f"{column} must contain finite integer identifiers")

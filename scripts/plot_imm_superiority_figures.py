@@ -28,7 +28,6 @@ MODEL_COLUMNS = [
     ("momentum", "logZ_momentum_exact_sparse"),
 ]
 
-_SAFE_FLOAT_INTEGER_LIMIT = 2**53
 
 
 def _exact_event_index(value: object) -> int:
@@ -38,9 +37,14 @@ def _exact_event_index(value: object) -> int:
         numeric_float = float(value)
         if not np.isfinite(numeric_float):
             raise ValueError("event_index must contain finite integer-valued identifiers")
-        if abs(numeric_float) >= _SAFE_FLOAT_INTEGER_LIMIT:
+        precision_bits = (
+            int(np.finfo(value.dtype).nmant) + 1
+            if isinstance(value, np.floating)
+            else 53
+        )
+        if abs(value) >= 1 << precision_bits:
             raise ValueError(
-                "floating-point event_index at or above 2**53 is unsafe; "
+                f"floating-point event_index at or above 2**{precision_bits} is unsafe; "
                 "load identifiers as strings or integers"
             )
 

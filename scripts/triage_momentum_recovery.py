@@ -382,7 +382,17 @@ def _exact_integer_id(value: object, column: str) -> object:
         return pd.NA
     if isinstance(value, (bool, np.bool_)):
         raise ValueError(f"{column} must contain finite integer identifiers")
-    if isinstance(value, (float, np.floating)):
+    if isinstance(value, np.floating):
+        if not bool(np.isfinite(value)) or not bool(value.is_integer()):
+            raise ValueError(f"{column} must contain finite integer identifiers")
+        precision_bits = int(np.finfo(value.dtype).nmant) + 1
+        if abs(value) >= 1 << precision_bits:
+            raise ValueError(
+                f"{column} contains an unsafe floating-point identifier; "
+                f"use an integer or decimal string for values at or above 2**{precision_bits}"
+            )
+        return int(value)
+    if isinstance(value, float):
         numeric_float = float(value)
         if not math.isfinite(numeric_float) or not numeric_float.is_integer():
             raise ValueError(f"{column} must contain finite integer identifiers")

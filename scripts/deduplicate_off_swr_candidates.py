@@ -164,7 +164,17 @@ def _integer_identifier(value: object, name: str) -> int:
 
     if isinstance(value, (int, np.integer)):
         integer = int(value)
-    elif isinstance(value, (float, np.floating)):
+    elif isinstance(value, np.floating):
+        if not bool(np.isfinite(value)) or not bool(value.is_integer()):
+            raise ValueError(message)
+        precision_bits = int(np.finfo(value.dtype).nmant) + 1
+        if abs(value) >= 1 << precision_bits:
+            raise ValueError(
+                f"{message}; floating-point values with magnitude >= 2**{precision_bits} are ambiguous, "
+                "use integer or string IDs"
+            )
+        integer = int(value)
+    elif isinstance(value, float):
         numeric = float(value)
         if not np.isfinite(numeric) or not numeric.is_integer():
             raise ValueError(message)

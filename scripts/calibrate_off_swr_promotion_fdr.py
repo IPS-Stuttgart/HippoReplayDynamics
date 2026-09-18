@@ -10,6 +10,7 @@ promotion-ready rows than the real alignment.
 from __future__ import annotations
 
 import argparse
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
 import numpy as np
@@ -17,6 +18,8 @@ import pandas as pd
 
 
 KEY_COLUMNS = ("session", "event_index", "null_index")
+_INTEGER_KEY_COLUMNS = ("event_index", "null_index")
+_FLOAT_EXACT_INTEGER_LIMIT = 2**53
 DISCOVERY_MARGIN_COLUMN = "trajectory_family_margin"
 EXACT_MARGIN_COLUMN = "trajectory_minus_nontrajectory_log_evidence"
 PROMOTION_READY_LABEL = "promotion_ready_high_specificity_candidate"
@@ -92,14 +95,80 @@ THRESHOLD_COLUMNS = (
 GATE_COLUMNS = ("gate", "passed", "observed", "criterion", "required_for_overall")
 
 
+def _exact_integer_identifier(value: object, column: str) -> int:
+    """Parse an integer identity key without silently rounding binary floats."""
+
+    if isinstance(value, (bool, np.bool_)):
+        raise ValueError(f"{column} must contain integer identifiers, not booleans")
+    if isinstance(value, (int, np.integer)):
+        return int(value)
+    if isinstance(value, np.floating):
+        if not np.isfinite(value):
+            raise ValueError(f"{column} must contain finite integer identifiers")
+        if not value.is_integer():
+            raise ValueError(f"{column} must contain integer-valued identifiers")
+        exact_limit = 2 ** (np.finfo(value.dtype).nmant + 1)
+        if abs(value) >= exact_limit:
+            raise ValueError(
+                f"{column} contains a floating-point identifier outside the exact integer range; "
+                "use integer or string IDs"
+            )
+        return int(value)
+    if isinstance(value, float):
+        if not np.isfinite(value):
+            raise ValueError(f"{column} must contain finite integer identifiers")
+        if not value.is_integer():
+            raise ValueError(f"{column} must contain integer-valued identifiers")
+        if abs(value) >= _FLOAT_EXACT_INTEGER_LIMIT:
+            raise ValueError(
+                f"{column} contains a floating-point identifier outside the exact integer range; "
+                "use integer or string IDs"
+            )
+        return int(value)
+
+    text = str(value).strip()
+    try:
+        numeric = Decimal(text)
+    except (InvalidOperation, TypeError, ValueError) as exc:
+        raise ValueError(f"{column} must contain finite integer identifiers") from exc
+    if not numeric.is_finite():
+        raise ValueError(f"{column} must contain finite integer identifiers")
+    integral = numeric.to_integral_value()
+    if numeric != integral:
+        raise ValueError(f"{column} must contain integer-valued identifiers")
+    return int(integral)
+
+
+def _normalize_key_identifiers(frame: pd.DataFrame) -> pd.DataFrame:
+    out = frame.copy()
+    for column in _INTEGER_KEY_COLUMNS:
+        if column not in out.columns:
+            continue
+        normalized: list[object] = []
+        for value in out[column].to_numpy(copy=False):
+            try:
+                missing = bool(pd.isna(value))
+            except (TypeError, ValueError):
+                missing = False
+            normalized.append(pd.NA if missing else _exact_integer_identifier(value, column))
+        out[column] = pd.Series(normalized, index=out.index, dtype=object)
+    return out
+
+
+def _read_csv_preserving_key_identifiers(path: Path) -> pd.DataFrame:
+    header = pd.read_csv(path, nrows=0)
+    dtype = {column: "string" for column in _INTEGER_KEY_COLUMNS if column in header.columns}
+    return _normalize_key_identifiers(pd.read_csv(path, dtype=dtype, low_memory=False))
+
+
 def _read_required_csv(path: Path) -> pd.DataFrame:
     if not path.exists():
         raise FileNotFoundError(f"required artifact table is missing: {path}")
-    return pd.read_csv(path)
+    return _read_csv_preserving_key_identifiers(path)
 
 
 def _read_optional_csv(path: Path) -> pd.DataFrame:
-    return pd.read_csv(path) if path.exists() else pd.DataFrame()
+    return _read_csv_preserving_key_identifiers(path) if path.exists() else pd.DataFrame()
 
 
 def _numeric(frame: pd.DataFrame, column: str) -> pd.Series:
@@ -152,17 +221,56 @@ def _screened_count(candidate_table: pd.DataFrame, tier_summary: pd.DataFrame) -
     return int(len(candidate_table))
 
 
-def _key_set(frame: pd.DataFrame) -> set[tuple[object, ...]]:
+def _key_tuples(frame: pd.DataFrame) -> list[tuple[object, ...]]:
     if frame.empty or not set(KEY_COLUMNS).issubset(frame.columns):
-        return set()
-    return set(map(tuple, frame[list(KEY_COLUMNS)].astype(object).to_numpy()))
+        return []
+    normalized = _normalize_key_identifiers(frame)
+    key_frame = normalized[list(KEY_COLUMNS)].astype(object).where(
+        pd.notna(normalized[list(KEY_COLUMNS)]),
+        None,
+    )
+    return list(map(tuple, key_frame.to_numpy()))
+
+
+def _key_set(frame: pd.DataFrame) -> set[tuple[object, ...]]:
+    return set(_key_tuples(frame))
 
 
 def _mask_keys(frame: pd.DataFrame, keys: set[tuple[object, ...]]) -> pd.Series:
     if frame.empty or not keys or not set(KEY_COLUMNS).issubset(frame.columns):
         return pd.Series(False, index=frame.index)
-    values = list(map(tuple, frame[list(KEY_COLUMNS)].astype(object).to_numpy()))
+    values = _key_tuples(frame)
     return pd.Series([value in keys for value in values], index=frame.index)
+
+
+def _validation_key_match_observation(
+    validation_decisions: pd.DataFrame,
+    promotion_ready: pd.DataFrame,
+) -> tuple[bool, str]:
+    if set(KEY_COLUMNS).issubset(validation_decisions.columns) and set(KEY_COLUMNS).issubset(
+        promotion_ready.columns
+    ):
+        validation_keys = _key_tuples(validation_decisions)
+        ready_keys = _key_tuples(promotion_ready)
+        validation_key_set = set(validation_keys)
+        ready_key_set = set(ready_keys)
+        duplicate_keys = (len(validation_keys) - len(validation_key_set)) + (
+            len(ready_keys) - len(ready_key_set)
+        )
+        matched_keys = len(validation_key_set & ready_key_set)
+        return (
+            validation_key_set == ready_key_set and duplicate_keys == 0,
+            (
+                f"matched_keys={matched_keys}/{len(ready_key_set)}; "
+                f"validation_rows={len(validation_keys)}; "
+                f"promotion_ready_rows={len(ready_keys)}; "
+                f"duplicate_keys={duplicate_keys}"
+            ),
+        )
+    return (
+        len(validation_decisions) == len(promotion_ready),
+        f"{len(validation_decisions)}/{len(promotion_ready)}",
+    )
 
 
 def promotion_ready_mask(high_specificity: pd.DataFrame) -> pd.Series:
@@ -516,14 +624,28 @@ def build_gate_summary(
     direct_promotions = _safe_int(row.get("direct_control_promotion_ready_windows", 0))
     direct_controls = _safe_int(row.get("direct_control_windows", 0))
     ready = _safe_int(row.get("promotion_ready_windows", 0))
-    exact_validated = _safe_int(row.get("exact_validated_windows", 0))
     exact_trajectory = _safe_int(row.get("exact_trajectory_confident_windows", 0))
     p95_bound = pd.to_numeric(row.get("p95_permutation_fdr_bound", np.nan), errors="coerce")
     min_p = pd.to_numeric(row.get("min_permutation_empirical_p_value", np.nan), errors="coerce")
+    promotion_ready = high_specificity[promotion_ready_mask(high_specificity)].copy()
+    complete_validation = (
+        validation_decisions[validation_decisions["required_models_complete"].map(_as_bool)].copy()
+        if "required_models_complete" in validation_decisions
+        else validation_decisions.copy()
+    )
+    validation_matches, validation_observed = _validation_key_match_observation(
+        complete_validation,
+        promotion_ready,
+    )
 
     add("screened_denominator_present", _safe_int(row.get("screened_off_swr_windows", 0)) > 0, row.get("screened_off_swr_windows", 0), "screened off-SWR denominator is present")
     add("promotion_ready_candidates_present", ready > 0, ready, "promotion-ready candidates are present")
-    add("exact_validation_matches_promotion_ready", exact_validated == ready, f"{exact_validated}/{ready}", "exact validation rows match promotion-ready candidates")
+    add(
+        "exact_validation_matches_promotion_ready",
+        validation_matches,
+        validation_observed,
+        "complete exact-validation candidate keys match promotion-ready candidate keys",
+    )
     add("exact_trajectory_supports_promoted_candidates", exact_trajectory == ready and ready > 0, f"{exact_trajectory}/{ready}", "all promotion-ready rows validate as trajectory-confident exact-core candidates")
     add("direct_control_pools_present", direct_controls > 0, direct_controls, "running or ordinary movement/spiking control windows are present")
     add("direct_control_promotions_zero", direct_promotions == 0, direct_promotions, "observed running/ordinary controls have zero promotion-ready rows")

@@ -89,6 +89,61 @@ def test_required_csv_preserves_large_event_keys_when_column_has_missing_value(t
     assert comparison["event_index"].tolist() == [lower, upper]
 
 
+def test_comparison_preserves_adjacent_decimal_form_large_event_indices():
+    lower = 2**53
+    upper = lower + 1
+    swr = pd.DataFrame(
+        [
+            *_model_rows(
+                {
+                    "status": "success",
+                    "session": "Rat1/Open1",
+                    "event_index": f"{lower}.0",
+                    "evidence_comparable": True,
+                }
+            ),
+            *_model_rows(
+                {
+                    "status": "success",
+                    "session": "Rat1/Open1",
+                    "event_index": f"{upper}.0",
+                    "evidence_comparable": True,
+                }
+            ),
+        ]
+    )
+
+    comparison = build_comparison_table(
+        swr_event_model_evidence=swr,
+        off_swr_event_model_evidence=pd.DataFrame(),
+    )
+
+    assert comparison["event_index"].tolist() == [lower, upper]
+    assert comparison["candidate_id"].tolist() == [
+        f"Rat1/Open1|event={lower}",
+        f"Rat1/Open1|event={upper}",
+    ]
+
+
+def test_comparison_rejects_ambiguous_preparsed_float_event_index():
+    swr = pd.DataFrame(
+        _model_rows(
+            {
+                "status": "success",
+                "session": "Rat1/Open1",
+                "event_index": float(2**53 + 1),
+                "evidence_comparable": True,
+            }
+        )
+    )
+
+    with pytest.raises(TypeError, match="event_index contains a floating value at or beyond its exact-integer boundary"):
+        build_comparison_table(
+            swr_event_model_evidence=swr,
+            off_swr_event_model_evidence=pd.DataFrame(),
+        )
+
+
 def test_nullable_integer_series_rejects_nonmissing_invalid_identifier():
     with pytest.raises(TypeError, match="null_index must contain integer values"):
         _nullable_integer_series(pd.Series(["candidate-A"]))

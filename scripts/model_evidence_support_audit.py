@@ -16,6 +16,7 @@ from typing import Iterable
 import numpy as np
 import pandas as pd
 
+from compare_model_evidence_runs import _read_event_score_csv
 from hipporeplayimm.evidence_reporting import (
     EXACT_EVIDENCE_SUPPORT,
     TRUNCATED_EVIDENCE_SUPPORT,
@@ -172,7 +173,17 @@ def event_support_audit(scores: pd.DataFrame) -> pd.DataFrame:
             }
         )
         records.append(record)
-    return pd.DataFrame.from_records(records, columns=columns)
+    result = pd.DataFrame.from_records(records, columns=columns)
+    # Missing group keys can make pandas infer float64 for otherwise-integer
+    # identifier columns, which rounds exact IDs above 2**53. Reassign the
+    # original Python key objects explicitly.
+    for column in event_columns:
+        result[column] = pd.Series(
+            [record[column] for record in records],
+            index=result.index,
+            dtype=object,
+        )
+    return result
 
 
 def pairwise_support_audit(scores: pd.DataFrame) -> pd.DataFrame:
@@ -224,6 +235,13 @@ def pairwise_support_audit(scores: pd.DataFrame) -> pd.DataFrame:
         return pd.DataFrame(columns=columns)
 
     pair_rows = pd.DataFrame.from_records(event_pair_rows)
+    # Preserve nullable exact integer event keys before pairwise aggregation.
+    for column in event_columns:
+        pair_rows[column] = pd.Series(
+            [record[column] for record in event_pair_rows],
+            index=pair_rows.index,
+            dtype=object,
+        )
     records: list[dict[str, object]] = []
     group_cols = [
         "model_a",
@@ -355,7 +373,7 @@ def main() -> int:
     )
     args = parser.parse_args()
 
-    scores = pd.read_csv(args.scores_csv, dtype={"event_index": "Int64"})
+    scores = _read_event_score_csv(Path(args.scores_csv))
     outputs = write_evidence_support_audit(scores, Path(args.output))
     print(outputs["warnings"])
     return 0

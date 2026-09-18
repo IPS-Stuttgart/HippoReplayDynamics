@@ -10,6 +10,7 @@ claim.
 from __future__ import annotations
 
 import argparse
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
 import numpy as np
@@ -23,6 +24,9 @@ DISCOVERY_MARGIN = "trajectory_family_margin"
 FIRST_ORDER_IMM = "sorted-spike-state-space-first-order-imm"
 MOMENTUM_EXACT = "sorted-spike-state-space-momentum-exact-sparse"
 PROMOTION_READY_LABEL = "promotion_ready_high_specificity_candidate"
+_FLOAT_EXACT_INTEGER_LIMIT = 2**53
+_IDENTIFIER_DTYPES = {"event_index": "string", "null_index": "string"}
+_INT64_INFO = np.iinfo(np.int64)
 
 SOURCE_GROUP_COLUMNS = (
     "source_event_group_id",
@@ -103,13 +107,13 @@ GATE_COLUMNS = ("gate", "passed", "observed", "criterion", "required_for_overall
 def _read_required_csv(path: Path) -> pd.DataFrame:
     if not path.exists():
         raise FileNotFoundError(f"required input table is missing: {path}")
-    return pd.read_csv(path)
+    return pd.read_csv(path, dtype=_IDENTIFIER_DTYPES)
 
 
 def _read_optional_csv(path: Path | None) -> pd.DataFrame:
     if path is None or not path.exists():
         return pd.DataFrame()
-    return pd.read_csv(path)
+    return pd.read_csv(path, dtype=_IDENTIFIER_DTYPES)
 
 
 def _numeric(frame: pd.DataFrame, column: str) -> pd.Series:
@@ -153,16 +157,51 @@ def _rat_from_session(session: object) -> str:
     return str(session).split("/", 1)[0]
 
 
+def _integer_identifier(value: object, name: str) -> int:
+    message = f"{name} must contain integer identifiers"
+    if isinstance(value, (bool, np.bool_)):
+        raise ValueError(message)
+
+    if isinstance(value, (int, np.integer)):
+        integer = int(value)
+    elif isinstance(value, (float, np.floating)):
+        numeric = float(value)
+        if not np.isfinite(numeric) or not numeric.is_integer():
+            raise ValueError(message)
+        if abs(numeric) >= _FLOAT_EXACT_INTEGER_LIMIT:
+            raise ValueError(
+                f"{message}; floating-point values with magnitude >= 2**53 are ambiguous, "
+                "use integer or string IDs"
+            )
+        integer = int(numeric)
+    else:
+        text = str(value).strip()
+        try:
+            numeric = Decimal(text)
+        except (InvalidOperation, TypeError, ValueError) as exc:
+            raise ValueError(message) from exc
+        if not numeric.is_finite():
+            raise ValueError(message)
+        integral = numeric.to_integral_value()
+        if numeric != integral:
+            raise ValueError(message)
+        integer = int(integral)
+
+    if integer < _INT64_INFO.min or integer > _INT64_INFO.max:
+        raise ValueError(f"{message}; values must fit in signed 64-bit integer range")
+    return integer
+
+
 def _integer_identifier_series(series: pd.Series, name: str) -> pd.Series:
-    if series.map(lambda value: isinstance(value, (bool, np.bool_))).any():
-        raise ValueError(f"{name} must contain integer identifiers")
     try:
-        integer = pd.to_numeric(series, errors="raise").astype("Int64")
+        values = [_integer_identifier(value, name) for value in series]
     except (TypeError, ValueError, OverflowError) as exc:
+        if isinstance(exc, ValueError) and str(exc).startswith(
+            f"{name} must contain integer identifiers"
+        ):
+            raise
         raise ValueError(f"{name} must contain integer identifiers") from exc
-    if integer.isna().any():
-        raise ValueError(f"{name} must contain integer identifiers")
-    return integer.astype(int)
+    return pd.Series(values, index=series.index, dtype=np.int64)
 
 
 def _source_group_id(session: object, event_index: object) -> str:

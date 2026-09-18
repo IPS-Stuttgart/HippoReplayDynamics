@@ -147,7 +147,12 @@ def _normalize_event_keys(frame: pd.DataFrame, *, context: str) -> pd.DataFrame:
         raise ValueError(f"{context} is missing required columns: {missing}")
     out = frame.copy()
     out["session"] = out["session"].astype(str)
-    out["event_index"] = out["event_index"].map(_exact_event_index)
+    raw_event_indices = out["event_index"].to_numpy(copy=False)
+    out["event_index"] = pd.Series(
+        [_exact_event_index(value) for value in raw_event_indices],
+        index=out.index,
+        dtype=object,
+    )
     return out
 
 

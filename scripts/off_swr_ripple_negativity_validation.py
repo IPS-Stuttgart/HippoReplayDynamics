@@ -300,7 +300,7 @@ def _normalize_key_columns(frame: pd.DataFrame) -> pd.DataFrame:
         out["event_index"] = pd.Series(
             [
                 _exact_integer_identifier(value, "event_index", allow_missing=False)
-                for value in out["event_index"]
+                for value in out["event_index"].to_numpy(copy=False)
             ],
             index=out.index,
             dtype="Int64",
@@ -309,7 +309,7 @@ def _normalize_key_columns(frame: pd.DataFrame) -> pd.DataFrame:
         out["null_index"] = pd.Series(
             [
                 _exact_integer_identifier(value, "null_index", allow_missing=True)
-                for value in out["null_index"]
+                for value in out["null_index"].to_numpy(copy=False)
             ],
             index=out.index,
             dtype="Int64",

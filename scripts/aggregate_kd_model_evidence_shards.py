@@ -71,16 +71,16 @@ def _integer_metadata(
             raise ValueError(
                 f"Momentum shard {key} must contain finite integer values: {path}"
             )
+        if not np.all((numeric >= intp_info.min) & (numeric <= intp_info.max)):
+            raise ValueError(
+                f"Momentum shard {key} must fit into NumPy integer range: {path}"
+            )
         precision_bits = int(np.finfo(raw.dtype).nmant) + 1
         exact_limit = 1 << precision_bits
         if np.any(np.abs(numeric) >= exact_limit):
             raise ValueError(
                 f"Momentum shard {key} contains floating integer values outside "
                 f"the exact-integer range of {raw.dtype}: {path}"
-            )
-        if not np.all((numeric >= intp_info.min) & (numeric <= intp_info.max)):
-            raise ValueError(
-                f"Momentum shard {key} must fit into NumPy integer range: {path}"
             )
         values = numeric.astype(np.intp, copy=True)
     if np.any(values < int(min_value)):
@@ -221,16 +221,16 @@ def _coerce_grid_index_array(shard: dict[str, object], key: str) -> np.ndarray:
         raise ValueError(
             f"Momentum shard {key} must contain finite integer grid indices: {shard['path']}"
         )
+    if not np.all((values >= intp_info.min) & (values <= intp_info.max)):
+        raise ValueError(
+            f"Momentum shard {key} must fit into NumPy integer index range: {shard['path']}"
+        )
     precision_bits = int(np.finfo(raw.dtype).nmant) + 1
     exact_limit = 1 << precision_bits
     if np.any(np.abs(values) >= exact_limit):
         raise ValueError(
             f"Momentum shard {key} contains floating grid indices outside "
             f"the exact-integer range of {raw.dtype}: {shard['path']}"
-        )
-    if not np.all((values >= intp_info.min) & (values <= intp_info.max)):
-        raise ValueError(
-            f"Momentum shard {key} must fit into NumPy integer index range: {shard['path']}"
         )
     return values.astype(np.intp, copy=False)
 

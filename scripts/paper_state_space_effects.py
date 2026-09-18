@@ -16,6 +16,7 @@ CSV with the same columns.
 from __future__ import annotations
 
 import argparse
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Callable
 
@@ -52,6 +53,8 @@ _TRAJECTORY_MODELS = {
     "goal-bidirectional",
 }
 _NONTRAJECTORY_MODELS = {"random", "stationary", "stationary-gaussian"}
+_SAFE_FLOAT_INTEGER_LIMIT = 2**53
+
 _DEFAULT_INPUT_NAMES = (
     "event_model_evidence.csv",
     "state_space_marginalized_event_model_evidence.csv",
@@ -100,7 +103,7 @@ def load_event_scores(input_path: str | Path, *, exact_only: bool = False) -> pd
     """Load and normalize an event-model-evidence table."""
 
     path = _resolve_input_path(input_path)
-    frame = pd.read_csv(path)
+    frame = pd.read_csv(path, dtype={"event_index": "string"})
     required = {"session", "event_index", "model", "log_evidence"}
     missing = required - set(frame.columns)
     if missing:
@@ -108,6 +111,7 @@ def load_event_scores(input_path: str | Path, *, exact_only: bool = False) -> pd
 
     if "status" not in frame.columns:
         frame["status"] = "success"
+    frame["event_index"] = frame["event_index"].map(_exact_event_index)
     frame = ensure_evidence_support_columns(frame)
     frame = frame[frame["status"].astype(str).eq("success")].copy()
     frame["log_evidence"] = pd.to_numeric(frame["log_evidence"], errors="coerce")
@@ -117,6 +121,33 @@ def load_event_scores(input_path: str | Path, *, exact_only: bool = False) -> pd
     frame["canonical_model"] = frame["model"].map(canonical_model_name)
     frame["canonical_model_family"] = frame["canonical_model"].map(model_family)
     return frame.reset_index(drop=True)
+
+
+def _exact_event_index(value: object) -> int:
+    """Parse an event identifier without silently accepting lossy binary floats."""
+
+    if isinstance(value, (bool, np.bool_)):
+        raise ValueError("event_index must contain integer identifiers, not booleans")
+    if isinstance(value, (float, np.floating)):
+        numeric_float = float(value)
+        if not np.isfinite(numeric_float):
+            raise ValueError("event_index must contain finite integer identifiers")
+        if abs(numeric_float) >= _SAFE_FLOAT_INTEGER_LIMIT:
+            raise ValueError(
+                "floating-point event_index at or above 2**53 is unsafe; "
+                "load identifiers as strings or integers"
+            )
+    text_value = str(value).strip()
+    try:
+        numeric = Decimal(text_value)
+    except (InvalidOperation, ValueError) as exc:
+        raise ValueError("event_index must contain finite integer identifiers") from exc
+    if not numeric.is_finite():
+        raise ValueError("event_index must contain finite integer identifiers")
+    integral = numeric.to_integral_value()
+    if numeric != integral:
+        raise ValueError("event_index must contain integer-valued identifiers")
+    return int(integral)
 
 
 def event_effect_table(scores: pd.DataFrame) -> pd.DataFrame:

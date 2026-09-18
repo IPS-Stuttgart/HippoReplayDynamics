@@ -12,6 +12,7 @@ while keeping the family-margin difference-in-differences as a diagnostic.
 from __future__ import annotations
 
 import argparse
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
 import numpy as np
@@ -35,6 +36,7 @@ DEFAULT_TRAJECTORY_MODELS = (
     "sorted-spike-state-space-momentum-exact-sparse",
 )
 _MISSING_STATUS_VALUES = {"", "nan", "na", "n/a", "none", "null", "<na>"}
+_SAFE_FLOAT_INTEGER_LIMIT = 2**53
 
 
 def _decoded_text(value: object) -> str:
@@ -92,6 +94,33 @@ def _is_missing_status(value: object) -> bool:
     return _decoded_text(value).strip().lower() in _MISSING_STATUS_VALUES
 
 
+def _exact_event_index(value: object) -> int:
+    """Parse an event identifier without silently accepting lossy binary floats."""
+
+    if isinstance(value, (bool, np.bool_)):
+        raise ValueError("event_index must contain integer identifiers, not booleans")
+    if isinstance(value, (float, np.floating)):
+        numeric_float = float(value)
+        if not np.isfinite(numeric_float):
+            raise ValueError("event_index must contain finite integer identifiers")
+        if abs(numeric_float) >= _SAFE_FLOAT_INTEGER_LIMIT:
+            raise ValueError(
+                "floating-point event_index at or above 2**53 is unsafe; "
+                "load identifiers as strings or integers"
+            )
+    text = str(value).strip()
+    try:
+        numeric = Decimal(text)
+    except (InvalidOperation, ValueError) as exc:
+        raise ValueError("event_index must contain finite integer identifiers") from exc
+    if not numeric.is_finite():
+        raise ValueError("event_index must contain finite integer identifiers")
+    integral = numeric.to_integral_value()
+    if numeric != integral:
+        raise ValueError("event_index must contain integer-valued identifiers")
+    return int(integral)
+
+
 def _success_rows(frame: pd.DataFrame) -> pd.DataFrame:
     out = frame.copy()
     if "status" in out:
@@ -99,13 +128,13 @@ def _success_rows(frame: pd.DataFrame) -> pd.DataFrame:
     for column in ("model", "session", "map_session", "requested_model"):
         if column in out:
             out[column] = out[column].map(_decoded_text)
-    out["event_index"] = out["event_index"].astype(int)
+    out["event_index"] = out["event_index"].map(_exact_event_index)
     out["log_evidence"] = pd.to_numeric(out["log_evidence"], errors="coerce")
     return out.dropna(subset=["log_evidence"])
 
 
 def _read_evidence(path: str | Path) -> pd.DataFrame:
-    frame = pd.read_csv(path)
+    frame = pd.read_csv(path, dtype={"event_index": "string"})
     required = {"session", "event_index", "model", "log_evidence"}
     missing = sorted(required.difference(frame.columns))
     if missing:

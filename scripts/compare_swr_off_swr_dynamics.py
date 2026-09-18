@@ -454,6 +454,18 @@ def _normalize_decision_table(
     margin_threshold: float,
     precomputed_decisions: pd.DataFrame | None = None,
 ) -> pd.DataFrame:
+    frame = frame.copy()
+    if "event_index" in frame:
+        frame = frame[frame["event_index"].notna()].copy()
+        frame["event_index"] = _event_integer_series(frame["event_index"])
+    if "null_index" in frame:
+        frame["null_index"] = _nullable_integer_series(frame["null_index"])
+    if precomputed_decisions is not None:
+        precomputed_decisions = precomputed_decisions.copy()
+        if "event_index" in precomputed_decisions:
+            precomputed_decisions["event_index"] = _event_integer_series(precomputed_decisions["event_index"])
+        if "null_index" in precomputed_decisions:
+            precomputed_decisions["null_index"] = _nullable_integer_series(precomputed_decisions["null_index"])
     decisions = (
         precomputed_decisions.copy()
         if precomputed_decisions is not None and not precomputed_decisions.empty
@@ -494,6 +506,7 @@ def _normalize_decision_table(
         out["window_role"] = event_class
     if "null_index" not in out:
         out["null_index"] = np.nan
+    out["event_index"] = _event_integer_series(out["event_index"])
     out["null_index"] = _nullable_integer_series(out["null_index"])
     out["candidate_id"] = out.apply(_candidate_id, axis=1)
     for column in COMPARISON_COLUMNS:
@@ -515,6 +528,45 @@ def _exact_integer_text(value: object) -> str:
     return str(int(numeric))
 
 
+def _event_integer_series(values: pd.Series) -> pd.Series:
+    """Preserve exact signed-64-bit event identifiers and reject lossy floats."""
+
+    minimum = -(1 << 63)
+    maximum = (1 << 63) - 1
+    parsed: list[int] = []
+    for value in values.array:
+        try:
+            missing = value is None or bool(pd.isna(value))
+        except (TypeError, ValueError):
+            missing = False
+        if missing or isinstance(value, (bool, np.bool_)):
+            raise TypeError("event_index must contain integer values")
+        if isinstance(value, (int, np.integer)):
+            integer = int(value)
+        elif isinstance(value, (float, np.floating)):
+            dtype = np.dtype(type(value)) if isinstance(value, np.floating) else np.dtype(np.float64)
+            numeric = dtype.type(value)
+            if not np.isfinite(numeric) or numeric != np.trunc(numeric):
+                raise TypeError("event_index must contain finite integer values")
+            precision_bits = int(np.finfo(dtype).nmant) + 1
+            if np.abs(numeric) >= 1 << precision_bits:
+                raise TypeError("event_index contains an unsafe floating-point identifier")
+            integer = int(numeric)
+        else:
+            text = str(value).strip()
+            try:
+                numeric = Decimal(text)
+            except (InvalidOperation, ValueError) as exc:
+                raise TypeError("event_index must contain integer values") from exc
+            if not numeric.is_finite() or numeric != numeric.to_integral_value():
+                raise TypeError("event_index must contain finite integer values")
+            integer = int(numeric)
+        if integer < minimum or integer > maximum:
+            raise TypeError("event_index must fit in signed 64-bit integer range")
+        parsed.append(integer)
+    return pd.Series(pd.array(parsed, dtype="Int64"), index=values.index, name=values.name)
+
+
 def _nullable_integer_series(values: pd.Series) -> pd.Series:
     """Preserve exact signed-64-bit integer identifiers while retaining missing values."""
 
@@ -522,7 +574,7 @@ def _nullable_integer_series(values: pd.Series) -> pd.Series:
     maximum = (1 << 63) - 1
     missing_text = {"", "nan", "na", "n/a", "none", "null", "<na>"}
     parsed: list[int | pd._libs.missing.NAType] = []
-    for value in values:
+    for value in values.array:
         if pd.isna(value):
             parsed.append(pd.NA)
             continue
@@ -530,15 +582,27 @@ def _nullable_integer_series(values: pd.Series) -> pd.Series:
         if text.lower() in missing_text:
             parsed.append(pd.NA)
             continue
-        try:
-            numeric = Decimal(text)
-        except (InvalidOperation, ValueError) as exc:
-            raise TypeError("null_index must contain integer values") from exc
-        if not numeric.is_finite():
-            raise TypeError("null_index must contain finite integer values")
-        if numeric != numeric.to_integral_value():
+        if isinstance(value, (bool, np.bool_)):
             raise TypeError("null_index must contain integer values")
-        integer = int(numeric)
+        if isinstance(value, (float, np.floating)):
+            dtype = np.dtype(type(value)) if isinstance(value, np.floating) else np.dtype(np.float64)
+            numeric = dtype.type(value)
+            if not np.isfinite(numeric) or numeric != np.trunc(numeric):
+                raise TypeError("null_index must contain finite integer values")
+            precision_bits = int(np.finfo(dtype).nmant) + 1
+            if np.abs(numeric) >= 1 << precision_bits:
+                raise TypeError("null_index contains an unsafe floating-point identifier")
+            integer = int(numeric)
+        else:
+            try:
+                numeric = Decimal(text)
+            except (InvalidOperation, ValueError) as exc:
+                raise TypeError("null_index must contain integer values") from exc
+            if not numeric.is_finite():
+                raise TypeError("null_index must contain finite integer values")
+            if numeric != numeric.to_integral_value():
+                raise TypeError("null_index must contain integer values")
+            integer = int(numeric)
         if integer < minimum or integer > maximum:
             raise TypeError("null_index must fit in signed 64-bit integer range")
         parsed.append(integer)
@@ -577,8 +641,8 @@ def build_comparison_table(
     comparison = pd.concat([swr, off], ignore_index=True)
     if comparison.empty:
         return pd.DataFrame(columns=list(COMPARISON_COLUMNS))
-    comparison["event_index"] = pd.to_numeric(comparison["event_index"], errors="coerce").astype("Int64")
-    comparison["null_index"] = pd.to_numeric(comparison["null_index"], errors="coerce").astype("Int64")
+    comparison["event_index"] = _event_integer_series(comparison["event_index"])
+    comparison["null_index"] = _nullable_integer_series(comparison["null_index"])
     comparison = comparison.sort_values(["event_class", "session", "event_index", "null_index"], kind="mergesort")
     return comparison.reset_index(drop=True)
 

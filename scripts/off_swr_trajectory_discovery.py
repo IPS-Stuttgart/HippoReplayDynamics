@@ -703,16 +703,18 @@ def _normalize_key_identifiers(frame: pd.DataFrame) -> pd.DataFrame:
     for column in _INTEGER_KEY_COLUMNS:
         if column not in out.columns:
             continue
+        values = out[column].to_numpy(copy=False)
         out[column] = pd.Series(
-            [_exact_integer_identifier(value, column) for value in out[column]],
+            [_exact_integer_identifier(value, column) for value in values],
             index=out.index,
             dtype=object,
         )
     for column in _OPTIONAL_INTEGER_IDENTIFIER_COLUMNS:
         if column not in out.columns:
             continue
+        values = out[column].to_numpy(copy=False)
         out[column] = pd.Series(
-            [_optional_exact_integer_identifier(value, column) for value in out[column]],
+            [_optional_exact_integer_identifier(value, column) for value in values],
             index=out.index,
             dtype=object,
         )

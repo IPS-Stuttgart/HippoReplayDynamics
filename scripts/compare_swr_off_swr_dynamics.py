@@ -456,6 +456,7 @@ def _normalize_decision_table(
 ) -> pd.DataFrame:
     frame = frame.copy()
     if "event_index" in frame:
+        frame = frame[frame["event_index"].notna()].copy()
         frame["event_index"] = _event_integer_series(frame["event_index"])
     if "null_index" in frame:
         frame["null_index"] = _nullable_integer_series(frame["null_index"])

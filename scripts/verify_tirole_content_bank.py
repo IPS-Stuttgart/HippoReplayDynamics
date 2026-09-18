@@ -86,6 +86,7 @@ def run(root, bank, output, scores=None):
         max_error = max(max_error, int(err.max(initial=0)))
         verified += expect.size
     statistics = []
+    content_checks = []
     if scores is not None:
         table = pd.read_csv(scores / "event_content_coverage_scores.csv")
         meta = json.loads((scores / "manifest.json").read_text())
@@ -95,7 +96,7 @@ def run(root, bank, output, scores=None):
         split = meta["split"]
         repeat = meta["repeat"]
         train = np.array(parts["splits"][split]["inference"])
-        np.array(parts["splits"][split]["evaluation"])
+        evaluation = np.array(parts["splits"][split]["evaluation"])
         perm = np.random.default_rng(seed(20260918, session, split, repeat, "coverage")).permutation(train)
         for row in table.to_dict("records"):
             eid = int(row["event_id"])
@@ -143,6 +144,33 @@ def run(root, bank, output, scores=None):
         for _, group in table.groupby("event_id"):
             if any(group[col].nunique(dropna=False) != 1 for col in eval_columns):
                 raise ValueError("evaluation readout changes across inference conditions")
+        evaluation = np.array(parts["splits"][split]["evaluation"])
+        for eid, group in table.groupby("event_id"):
+            obs = counts[offsets[eid] : offsets[eid + 1], :][:, evaluation]
+            obs = obs[obs.sum(axis=1) > 0]
+            if not len(obs):
+                continue
+            swaps = np.random.default_rng(seed(20260918, session, int(eid), split, "evaluation-context")).integers(0, 2, (199, len(evaluation))).astype(bool)
+            base = maps["rates"][:, evaluation]
+            row = group.iloc[0]
+            for conditional, prefix in [(False, "evaluation_"), (True, "conditional_evaluation_")]:
+                odds = []
+                true_q = np.nan
+                for i, swap in enumerate(np.vstack([np.zeros(len(evaluation), bool), swaps])):
+                    rate = base.copy()
+                    rate[:, swap] = base[::-1, swap]
+                    p = direct_posterior(obs, rate, maps["valid_bins"], conditional)
+                    mass = p.sum(axis=(0, 2))
+                    odds.append(float(np.log(max(mass[0], 1e-300)) - np.log(max(mass[1], 1e-300))))
+                    if i == 0:
+                        true_q = float(mass[1] / sum(mass))
+                sd = np.std(odds[1:], ddof=1)
+                z = (odds[0] - np.mean(odds[1:])) / sd if sd > 1e-12 else np.nan
+                expected = np.array([odds[0], z, true_q])
+                observed = np.array([row[prefix + "log_odds"], row[prefix + "z_log_odds"], row[prefix + "track2_probability"]])
+                if not np.allclose(expected, observed, atol=1e-10, equal_nan=True):
+                    raise ValueError("independent evaluation content reconstruction mismatch")
+                content_checks.append({"event_id": int(eid), "conditional_count": conditional, "max_abs_error": float(np.nanmax(np.abs(expected - observed)))})
     result = {
         "status": "pass" if mismatch == 0 and (scores is None or len(statistics) > 0) and all(r["max_correlation_error"] < 1e-10 for r in statistics) else "fail",
         "session": session,
@@ -153,8 +181,9 @@ def run(root, bank, output, scores=None):
         "count_mismatch_entries": mismatch,
         "max_count_error": max_error,
         "independent_sequence_null_checks": statistics,
+        "independent_content_null_checks": content_checks,
         "created_at_utc": datetime.now(UTC).isoformat(),
-        "scope": "all raw spike histograms; all eligibility and fixed-evaluation invariants; first eight eligible score rows direct Poisson/correlation/null reconstruction; not a biological validation",
+        "scope": "all raw spike histograms; all eligibility and fixed-evaluation invariants; first eight eligible score rows direct Poisson/correlation/null reconstruction; all score events direct held-out content/null reconstruction; not a biological validation",
     }
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(json.dumps(result, indent=2) + "\n")

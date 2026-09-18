@@ -68,8 +68,9 @@ def run(root, preflight, session_name, output, seed=20260918):
     detector, splits = split_populations(maps["common_units"], session_name, seed)
     events, detector_meta = detector_candidates(data, detector)
     ripple = load_supplied_ripple(lfp, float(data.times[0]) - 1, float(data.times[-1]) + 1)
-    if ripple["full_start_s"] > data.times[0] or ripple["full_end_s"] < data.times[-1]:
-        raise ValueError("LFP does not span the spike/position analysis epoch")
+    overlap = max(0.0, min(ripple["full_end_s"], data.times[-1]) - max(ripple["full_start_s"], data.times[0])) / (data.times[-1] - data.times[0])
+    if overlap < 0.99:
+        raise ValueError("LFP clock overlaps less than 99% of the spike/position epoch; no offset correction is permitted")
     counts = []
     offset = [0]
     for event in events:
@@ -108,6 +109,7 @@ def run(root, preflight, session_name, output, seed=20260918):
         "n_common_units": len(maps["common_units"]),
         "detector": detector_meta,
         "ripple_metadata": {k: v for k, v in ripple.items() if k not in {"times", "zscore"}},
+        "LFP_epoch_overlap_fraction": float(overlap),
         "code_commit": git("rev-parse", "HEAD"),
         "git_dirty": bool(git("status", "--porcelain")),
         "command_line": sys.argv,

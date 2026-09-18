@@ -134,3 +134,17 @@ timestamps alone is not proof of correct acquisition alignment.
 Two primary animals cannot support a strong dataset-wide claim. Any successful
 content result must retain that limitation. More units or relaxed gates cannot
 be selected after looking at the replay-content effect to manufacture replication.
+
+## Timestamp audit amendment, before replay scoring
+
+The first candidate-bank attempt stopped at the timestamp check, before writing
+or scoring any events. The check demanded exact global LFP/position coverage and
+was too strict for asynchronous acquisition start/stop edges (30-42 ms in three
+checked sessions). It is replaced by >=99% global clock-range overlap plus the
+existing per-event >=98% sample coverage/no-gap check; no extrapolation or offset
+fitting is permitted. Retain the failed log as provenance.
+
+RAT1_SESS1 has a substantive unresolved mismatch: position 1317.71-12957.11 s
+versus the supplied CSC clock 415157.29-431995.41 s. It is excluded from ripple-
+conditioned analysis until externally resolved, not realigned by guessed offset.
+This is a release/preprocessing identity question, not evidence against replay.

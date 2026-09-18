@@ -43,6 +43,8 @@ def load_supplied_ripple(path, start_s=None, end_s=None):
         z = get("ripple_zscore")
         if z.size != len(times):
             raise ValueError("ripple/timestamp length mismatch")
+        if (start_s is not None and start_s > times[-1]) or (end_s is not None and end_s < times[0]):
+            raise ValueError("requested interval does not overlap the supplied LFP clock")
         left = 0 if start_s is None else max(0, int(np.searchsorted(times, start_s)) - 1)
         right = len(times) if end_s is None else min(len(times), int(np.searchsorted(times, end_s)) + 1)
         values = _vector(z, left, right)

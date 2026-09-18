@@ -58,3 +58,10 @@ def test_no_interpolation_over_lfp_gaps():
 def test_no_extrapolation_outside_lfp():
     r = {"times": np.arange(0.1, 0.2, 0.001), "zscore": np.ones(100), "sample_rate_hz": 1000}
     assert not window_ripple_stats(r, 0.0, 0.2)["ripple_supported"]
+
+
+def test_mismatched_recording_clock_is_not_silently_cropped(tmp_path):
+    p = tmp_path / "ripple.mat"
+    make_file(p)
+    with pytest.raises(ValueError, match="does not overlap"):
+        load_supplied_ripple(p, 100.0, 110.0)

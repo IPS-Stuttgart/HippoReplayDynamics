@@ -568,6 +568,7 @@ def _event_integer_series(values: pd.Series) -> pd.Series:
 def _nullable_integer_series(values: pd.Series) -> pd.Series:
     return _integer_identifier_series(values, name="null_index", nullable=True)
 
+
 def _candidate_id(row: pd.Series) -> str:
     session = str(row.get("session", ""))
     event_index = row.get("event_index", "")

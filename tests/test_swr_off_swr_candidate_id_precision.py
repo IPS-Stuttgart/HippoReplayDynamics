@@ -1,6 +1,7 @@
 import sys
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 import pytest
 
@@ -135,6 +136,29 @@ def test_comparison_rejects_ambiguous_preparsed_float_event_index():
                 "evidence_comparable": True,
             }
         )
+    )
+
+    with pytest.raises(TypeError, match="event_index contains a floating value at or beyond its exact-integer boundary"):
+        build_comparison_table(
+            swr_event_model_evidence=swr,
+            off_swr_event_model_evidence=pd.DataFrame(),
+        )
+
+
+def test_comparison_rejects_ambiguous_preparsed_float32_event_index():
+    swr = pd.DataFrame(
+        _model_rows(
+            {
+                "status": "success",
+                "session": "Rat1/Open1",
+                "event_index": 1,
+                "evidence_comparable": True,
+            }
+        )
+    )
+    swr["event_index"] = pd.Series(
+        np.full(len(swr), np.float32(2**24 + 1), dtype=np.float32),
+        dtype=np.float32,
     )
 
     with pytest.raises(TypeError, match="event_index contains a floating value at or beyond its exact-integer boundary"):

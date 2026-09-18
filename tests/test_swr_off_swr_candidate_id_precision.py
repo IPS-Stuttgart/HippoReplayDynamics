@@ -1,6 +1,7 @@
 import sys
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 import pytest
 
@@ -87,6 +88,70 @@ def test_required_csv_preserves_large_event_keys_when_column_has_missing_value(t
 
     assert str(loaded["event_index"].dtype).startswith("string")
     assert comparison["event_index"].tolist() == [lower, upper]
+
+
+def test_comparison_preserves_adjacent_decimal_form_large_event_indices():
+    lower = 2**53
+    upper = lower + 1
+    swr = pd.DataFrame(
+        [
+            *_model_rows(
+                {
+                    "status": "success",
+                    "session": "Rat1/Open1",
+                    "event_index": f"{lower}.0",
+                    "evidence_comparable": True,
+                }
+            ),
+            *_model_rows(
+                {
+                    "status": "success",
+                    "session": "Rat1/Open1",
+                    "event_index": f"{upper}.0",
+                    "evidence_comparable": True,
+                }
+            ),
+        ]
+    )
+
+    comparison = build_comparison_table(
+        swr_event_model_evidence=swr,
+        off_swr_event_model_evidence=pd.DataFrame(),
+    )
+
+    assert comparison["event_index"].tolist() == [lower, upper]
+    assert comparison["candidate_id"].tolist() == [
+        f"Rat1/Open1|event={lower}",
+        f"Rat1/Open1|event={upper}",
+    ]
+
+
+def test_comparison_rejects_unsafe_float32_event_ids_before_grouping():
+    swr = pd.DataFrame(
+        _model_rows(
+            {
+                "status": "success",
+                "session": "Rat1/Open1",
+                "event_index": 1,
+                "evidence_comparable": True,
+            }
+        )
+    )
+    swr["event_index"] = pd.Series(
+        np.full(len(swr), np.float32(2**24), dtype=np.float32),
+        dtype=np.float32,
+    )
+
+    with pytest.raises(TypeError, match="unsafe floating-point identifier"):
+        build_comparison_table(
+            swr_event_model_evidence=swr,
+            off_swr_event_model_evidence=pd.DataFrame(),
+        )
+
+
+def test_nullable_integer_series_rejects_unsafe_float32_identifier():
+    with pytest.raises(TypeError, match="unsafe floating-point identifier"):
+        _nullable_integer_series(pd.Series([np.float32(2**24)], dtype=np.float32))
 
 
 def test_nullable_integer_series_rejects_nonmissing_invalid_identifier():

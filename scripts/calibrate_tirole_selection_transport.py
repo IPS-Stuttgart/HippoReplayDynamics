@@ -24,9 +24,10 @@ N_COVERAGE_REPEATS = 5
 N_NULLS = 499
 
 
-def simulate_anchor(info, parts, event, original, maps, n_draws=N_DRAWS, n_repeats=N_COVERAGE_REPEATS):
+def simulate_anchor(info, parts, event, original, maps, n_draws=N_DRAWS, n_repeats=N_COVERAGE_REPEATS, sequence_classifier=None):
     """Full scores are reused across coverage repeats; evaluation never selects an event."""
     session = info["session"]
+    sequence_classifier = classify_sequence if sequence_classifier is None else sequence_classifier
     eid = int(event["event_id"])
     rates, valid, centers = maps["rates"], maps["valid_bins"], maps["bin_centers_cm"]
     scores, contents = [], []
@@ -56,7 +57,7 @@ def simulate_anchor(info, parts, event, original, maps, n_draws=N_DRAWS, n_repea
                     shifts = nrng.integers(0, len(centers), (N_NULLS, 2, original.shape[1]))
                     null_permutations = np.argsort(nrng.random((N_NULLS, len(counts))), axis=1)
                     for repeat, ids in [(-1, train), *enumerate(halves)]:
-                        result = classify_sequence(counts[:, ids], rates[:, ids], valid, centers, shifts[:, :, ids], null_permutations)
+                        result = sequence_classifier(counts[:, ids], rates[:, ids], valid, centers, shifts[:, :, ids], null_permutations)
                         scores.append(
                             {
                                 **base,

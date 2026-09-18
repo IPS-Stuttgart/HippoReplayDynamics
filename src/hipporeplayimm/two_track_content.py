@@ -71,7 +71,7 @@ def weighted_correlation(posterior, centers):
     return np.clip(value, 0, 1)
 
 
-def field_shift_posteriors(counts, rates, valid, shifts, bin_s=0.02):
+def field_shift_posteriors(counts, rates, valid, shifts, bin_s=0.02, conditional_count=False):
     """Null shifts are indexed by full session unit identity, then subset upstream."""
     shifts = np.asarray(shifts, int)
     if shifts.ndim != 3 or shifts.shape[1:] != rates.shape[:2]:
@@ -80,13 +80,17 @@ def field_shift_posteriors(counts, rates, valid, shifts, bin_s=0.02):
     index = (np.arange(p)[None, None, None, :] - shifts[:, :, :, None]) % p
     lam = np.take_along_axis(np.broadcast_to(rates, (len(shifts), *rates.shape)), index, axis=-1)
     lam = np.maximum(lam, 1e-4)
-    ll = np.einsum("tu,skup->stkp", counts, np.log(lam)) - bin_s * lam.sum(axis=2)[:, None, :, :]
+    if conditional_count:
+        lam = lam / lam.sum(axis=2, keepdims=True)
+        ll = np.einsum("tu,skup->stkp", counts, np.log(lam))
+    else:
+        ll = np.einsum("tu,skup->stkp", counts, np.log(lam)) - bin_s * lam.sum(axis=2)[:, None, :, :]
     ll -= np.log(valid.sum(axis=1))[None, None, :, None]
     ll[:, :, ~valid] = -np.inf
     return np.exp(ll - logsumexp(ll, axis=(-2, -1), keepdims=True))
 
 
-def classify_sequence(counts, rates, valid, centers, shifts, time_permutations, alpha=0.025):
+def classify_sequence(counts, rates, valid, centers, shifts, time_permutations, alpha=0.025, conditional_count=False):
     """Two established shuffle families; Bonferroni two-track eventwise alpha .05."""
     counts = np.asarray(counts)
     n_active = int((counts.sum(axis=0) > 0).sum())
@@ -110,11 +114,14 @@ def classify_sequence(counts, rates, valid, centers, shifts, time_permutations, 
     expected = np.arange(len(counts))
     if not np.all(np.sort(time_permutations, axis=1) == expected):
         raise ValueError("each temporal null must permute whole population time bins")
-    posterior = decode_counts(counts, rates, 0.02, valid)
+    if conditional_count:
+        posterior = field_shift_posteriors(counts, rates, valid, np.zeros((1, *rates.shape[:2]), int), conditional_count=True)[0]
+    else:
+        posterior = decode_counts(counts, rates, 0.02, valid)
     posterior[counts.sum(axis=1) == 0] = 0
     real = weighted_correlation(posterior, centers)
     time_scores = weighted_correlation(posterior[time_permutations], centers)
-    field_post = field_shift_posteriors(counts, rates, valid, shifts)
+    field_post = field_shift_posteriors(counts, rates, valid, shifts, conditional_count=conditional_count)
     field_post[:, counts.sum(axis=1) == 0] = 0
     field_scores = weighted_correlation(field_post, centers)
     p_time = (1 + (time_scores >= real[None, :] - 1e-12).sum(axis=0)) / (1 + len(shifts))

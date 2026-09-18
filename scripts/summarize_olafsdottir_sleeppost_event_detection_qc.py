@@ -307,13 +307,16 @@ def detect_mua_candidate_events(
 ) -> pd.DataFrame:
     if not np.isfinite(sleep_duration_s) or sleep_duration_s <= 0.0:
         return pd.DataFrame(columns=EVENT_COLUMNS)
-    edges = np.arange(0.0, float(sleep_duration_s) + float(bin_size_s), float(bin_size_s))
+    edges = _recording_time_bin_edges(sleep_duration_s, bin_size_s)
     if edges.shape[0] < 2:
         return pd.DataFrame(columns=EVENT_COLUMNS)
-    counts, _ = np.histogram(spikes.spike_times_s, bins=edges)
+    spike_times = np.asarray(spikes.spike_times_s, dtype=float)
+    in_recording = np.isfinite(spike_times) & (spike_times >= 0.0) & (spike_times < float(sleep_duration_s))
+    counts, _ = np.histogram(spike_times[in_recording], bins=edges)
+    bin_durations = np.diff(edges)
     window_bins = max(1, int(round(float(smooth_window_s) / float(bin_size_s))))
-    smoothed_counts = _moving_average(counts.astype(float), window_bins)
-    mua_rate = smoothed_counts / float(bin_size_s)
+    per_bin_rate = counts.astype(float) / bin_durations
+    mua_rate = _moving_average(per_bin_rate, window_bins)
     score = _robust_z(mua_rate)
     windows = _threshold_windows(
         score,
@@ -328,7 +331,7 @@ def detect_mua_candidate_events(
         duration_ms = 1000.0 * (end - start)
         if duration_ms < float(min_duration_ms) or duration_ms > float(max_duration_ms):
             continue
-        in_event = (spikes.spike_times_s >= start) & (spikes.spike_times_s <= end)
+        in_event = (spikes.spike_times_s >= start) & (spikes.spike_times_s < end)
         n_spikes = int(np.count_nonzero(in_event))
         n_active = int(np.unique(spikes.unit_ids[in_event]).shape[0]) if n_spikes else 0
         if n_spikes < int(min_event_spikes) or n_active < int(min_event_active_units):
@@ -780,6 +783,31 @@ def _header_float(header: dict[str, str], key: str, *, default: float) -> float:
         return float(default)
     match = re.search(r"[-+]?\d+(?:\.\d+)?", str(raw))
     return float(match.group(0)) if match else float(default)
+
+
+def _recording_time_bin_edges(duration_s: float, bin_size_s: float) -> np.ndarray:
+    """Return recording-local bin edges with the final edge clamped to duration."""
+
+    duration = float(duration_s)
+    width = float(bin_size_s)
+    if not np.isfinite(width) or width <= 0.0:
+        raise ValueError("bin_size_s must be finite and positive")
+    if not np.isfinite(duration) or duration <= 0.0:
+        return np.asarray([0.0], dtype=float)
+
+    n_full_bins = int(np.floor(duration / width))
+    edges = np.arange(n_full_bins + 1, dtype=float) * width
+    tolerance = max(
+        16.0 * np.finfo(float).eps * max(abs(duration), 1.0),
+        width * 1e-12,
+    )
+    if edges[-1] < duration - tolerance:
+        edges = np.append(edges, duration)
+    else:
+        edges[-1] = duration
+    if edges.shape[0] < 2:
+        return np.asarray([0.0, duration], dtype=float)
+    return edges
 
 
 def _moving_average(values: np.ndarray, window: int) -> np.ndarray:

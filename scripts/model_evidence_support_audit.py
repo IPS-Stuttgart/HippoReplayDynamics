@@ -16,6 +16,7 @@ from typing import Iterable
 import numpy as np
 import pandas as pd
 
+from compare_model_evidence_runs import _read_event_score_csv
 from hipporeplayimm.evidence_reporting import (
     EXACT_EVIDENCE_SUPPORT,
     TRUNCATED_EVIDENCE_SUPPORT,
@@ -60,6 +61,22 @@ def _event_columns(rows: pd.DataFrame) -> list[str]:
 def _event_key_record(columns: list[str], key: object) -> dict[str, object]:
     values = key if isinstance(key, tuple) else (key,)
     return dict(zip(columns, values, strict=True))
+
+
+def _preserve_record_columns(
+    frame: pd.DataFrame,
+    records: list[dict[str, object]],
+    columns: list[str],
+) -> pd.DataFrame:
+    """Restore exact Python objects after pandas record-construction inference."""
+
+    for column in columns:
+        frame[column] = pd.Series(
+            [record.get(column, pd.NA) for record in records],
+            index=frame.index,
+            dtype=object,
+        )
+    return frame
 
 
 def _event_count(rows: pd.DataFrame) -> int:
@@ -172,7 +189,8 @@ def event_support_audit(scores: pd.DataFrame) -> pd.DataFrame:
             }
         )
         records.append(record)
-    return pd.DataFrame.from_records(records, columns=columns)
+    audit = pd.DataFrame.from_records(records, columns=columns)
+    return _preserve_record_columns(audit, records, event_columns)
 
 
 def pairwise_support_audit(scores: pd.DataFrame) -> pd.DataFrame:
@@ -224,6 +242,7 @@ def pairwise_support_audit(scores: pd.DataFrame) -> pd.DataFrame:
         return pd.DataFrame(columns=columns)
 
     pair_rows = pd.DataFrame.from_records(event_pair_rows)
+    pair_rows = _preserve_record_columns(pair_rows, event_pair_rows, event_columns)
     records: list[dict[str, object]] = []
     group_cols = [
         "model_a",
@@ -355,7 +374,7 @@ def main() -> int:
     )
     args = parser.parse_args()
 
-    scores = pd.read_csv(args.scores_csv, dtype={"event_index": "Int64"})
+    scores = _read_event_score_csv(Path(args.scores_csv))
     outputs = write_evidence_support_audit(scores, Path(args.output))
     print(outputs["warnings"])
     return 0

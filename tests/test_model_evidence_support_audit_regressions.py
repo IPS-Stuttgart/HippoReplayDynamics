@@ -46,3 +46,63 @@ def test_support_audit_cli_preserves_nullable_large_event_ids(
     exact_ids = set(audited["event_index"].dropna())
     assert exact_ids == {str(first), str(second)}
     assert audited["event_index"].isna().sum() == 1
+
+
+def test_support_audit_cli_preserves_decimal_form_large_event_ids(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    first = 2**53
+    second = first + 1
+    scores_csv = tmp_path / "scores_decimal.csv"
+    output_dir = tmp_path / "audit_decimal"
+    scores_csv.write_text(
+        "session,event_index,model,model_family,status,log_evidence,evidence_support,evidence_comparable\n"
+        f"Rat1/Open1,{first}.0,diffusion,trajectory,success,-1.0,{EXACT_EVIDENCE_SUPPORT},True\n"
+        f"Rat1/Open1,{second}.0,diffusion,trajectory,success,-2.0,{EXACT_EVIDENCE_SUPPORT},True\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "model_evidence_support_audit.py",
+            str(scores_csv),
+            "--output",
+            str(output_dir),
+        ],
+    )
+
+    assert support_audit.main() == 0
+
+    audited = pd.read_csv(
+        output_dir / "event_evidence_support_audit.csv",
+        dtype={"event_index": "string"},
+    )
+    assert set(audited["event_index"].dropna()) == {str(first), str(second)}
+
+
+def test_support_audit_pairwise_count_preserves_nullable_large_event_ids() -> None:
+    first = 2**53
+    second = first + 1
+    rows: list[dict[str, object]] = []
+    for event_index in (first, second, pd.NA):
+        for model, log_evidence in (("diffusion", -1.0), ("stationary", -2.0)):
+            rows.append(
+                {
+                    "session": "Rat1/Open1",
+                    "event_index": event_index,
+                    "model": model,
+                    "model_family": "trajectory",
+                    "status": "success",
+                    "log_evidence": log_evidence,
+                    "evidence_support": EXACT_EVIDENCE_SUPPORT,
+                    "evidence_comparable": True,
+                }
+            )
+
+    pairwise = support_audit.pairwise_support_audit(pd.DataFrame(rows))
+
+    assert len(pairwise) == 1
+    assert int(pairwise.iloc[0]["events"]) == 3
+

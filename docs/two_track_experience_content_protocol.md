@@ -108,3 +108,29 @@ replay truth, memory consolidation, planning, uniform speed, or IMM novelty.
 - Prior PF Home-content, independent-population and predictive-context attempts
   had poor calibration or failed advancement gates. No known replay destination
   or goal truth is inferred from those attempts.
+
+## RUN-only preflight result and cohort freeze
+
+Commit c8c403b1 was frozen before RUN calibration. All seven uniquely identified
+two-track sessions have finite held-out RUN decoding and 28-50 common units.
+Only RAT3_SESS2 and RAT5_SESS2 meet the strict every-track/every-fold 0.8 context
+accuracy threshold. Several other sessions miss it in a subset of folds despite
+good conditional position errors. Do not silently loosen the original gate.
+Use the two passing sessions as the strict primary cohort; the remaining five
+are an explicitly labelled RUN-quality diagnostic cohort, not confirmatory
+replication. No replay sequence or content outcomes informed this split.
+
+The executable analysis settings are frozen in
+`two_track_content_configuration.json`. Detector windows use the existing
+independent-detector PF-style MUA implementation, restricted to PRE/POST remote
+immobility and then 100-750 ms/three detector-cell support. This is not an exact
+reproduction of the original whole-population candidate detector (including its
+gap merge and all-unit support). Established weighted-correlation and two-shuffle
+sequence tests are reused with explicit two-track multiplicity correction.
+The primary ripple gate uses the supplied envelope (the pinned author code is
+125-300 Hz, not a generic 150-250 Hz reimplementation). Presence of synchronized
+timestamps alone is not proof of correct acquisition alignment.
+
+Two primary animals cannot support a strong dataset-wide claim. Any successful
+content result must retain that limitation. More units or relaxed gates cannot
+be selected after looking at the replay-content effect to manufacture replication.

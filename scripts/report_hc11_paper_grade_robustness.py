@@ -105,7 +105,7 @@ def _normalize_event_index(values: pd.Series) -> pd.Series:
     parsed: list[int] = []
     bad: list[str] = []
     int64 = np.iinfo(np.int64)
-    for value in values.tolist():
+    for value in values.array:
         try:
             if value is None or pd.isna(value):
                 raise ValueError("event identifier is missing")

@@ -3,7 +3,9 @@ from __future__ import annotations
 from pathlib import Path
 
 import numpy as np
+import pytest
 
+from hipporeplayimm.accuracy_replay_gain_gamma_patch import _coerce_integral_ids
 from hipporeplayimm.accuracy_upgrades import (
     ContinuousTimeEmissionConfig,
     ReplayGainConfig,
@@ -83,3 +85,38 @@ def test_continuous_time_emissions_preserves_large_integer_cell_ids() -> None:
 
     assert emissions.cell_ids.tolist() == [LARGE_B, LARGE_A]
     np.testing.assert_array_equal(emissions.spike_counts.sum(axis=0), np.array([1, 2]))
+
+
+def test_accuracy_cell_id_validation_rejects_float32_alias() -> None:
+    value = np.float32(2**24 + 1)
+
+    assert value == np.float32(2**24)
+    with pytest.raises(ValueError, match="outside the exact integer range"):
+        _coerce_integral_ids(
+            np.array([value], dtype=np.float32),
+            "spike cell IDs",
+        )
+
+
+def test_accuracy_cell_id_validation_rejects_ambiguous_python_float() -> None:
+    value = float(2**53 + 1)
+
+    assert value == float(2**53)
+    with pytest.raises(ValueError, match="outside the exact integer range"):
+        _coerce_integral_ids([value], "spike cell IDs")
+
+
+def test_accuracy_cell_id_validation_preserves_extended_precision() -> None:
+    precision_bits = int(np.finfo(np.longdouble).nmant) + 1
+    if precision_bits <= 53:
+        pytest.skip("platform longdouble has no extra integer precision")
+
+    expected = 2**53 + 1
+    value = np.longdouble(str(expected))
+
+    result = _coerce_integral_ids(
+        np.array([value], dtype=np.longdouble),
+        "spike cell IDs",
+    )
+
+    assert result.tolist() == [expected]

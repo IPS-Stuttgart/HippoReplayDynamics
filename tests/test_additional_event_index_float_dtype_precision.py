@@ -36,8 +36,16 @@ def _parse_event_index(module_name: str, value: object) -> int:
     if module_name == "triage_momentum_recovery":
         return int(module._exact_integer_id(value, "event_index"))
     if module_name == "model_evidence_support_audit":
+        # Preserve NumPy floating dtype/precision in the DataFrame. Building
+        # directly from a Python list can round np.longdouble through a Python
+        # float before the function under test gets a chance to validate it.
+        values = (
+            np.asarray([value], dtype=value.dtype)
+            if isinstance(value, np.floating)
+            else np.asarray([value], dtype=object)
+        )
         frame = module._exact_grouping_event_keys(
-            pd.DataFrame({"event_index": [value]}),
+            pd.DataFrame({"event_index": values}),
             ["event_index"],
         )
         return int(frame.loc[0, "event_index"])

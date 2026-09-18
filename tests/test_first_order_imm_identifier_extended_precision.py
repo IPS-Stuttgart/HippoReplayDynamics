@@ -32,3 +32,17 @@ def test_identifier_parser_accepts_integral_extended_precision_value() -> None:
     value = np.longdouble(str(expected))
 
     assert _parse_integer_identifier(value, name="event_index") == expected
+
+def test_identifier_parser_rejects_unsafe_python_float_value() -> None:
+    value = float(2**53 + 1)
+
+    assert value == float(2**53)
+    with pytest.raises(ValueError, match="unsafe floating-point identifier"):
+        _parse_integer_identifier(value, name="event_index")
+
+
+def test_identifier_parser_rejects_unsafe_float32_value() -> None:
+    value = np.float32(2**24)
+
+    with pytest.raises(ValueError, match="unsafe floating-point identifier"):
+        _parse_integer_identifier(value, name="event_index")

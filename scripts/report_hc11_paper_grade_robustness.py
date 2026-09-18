@@ -113,6 +113,15 @@ def _normalize_event_index(values: pd.Series) -> pd.Series:
                 raise ValueError("booleans are not valid event identifiers")
             if isinstance(value, Integral):
                 item = int(value)
+            elif isinstance(value, (float, np.floating)):
+                dtype = np.dtype(type(value)) if isinstance(value, np.floating) else np.dtype(np.float64)
+                numeric = dtype.type(value)
+                if not np.isfinite(numeric) or numeric != np.trunc(numeric):
+                    raise ValueError("event identifier is not integer-like")
+                exact_integer_boundary = np.ldexp(dtype.type(1.0), np.finfo(dtype).nmant + 1)
+                if np.abs(numeric) >= exact_integer_boundary:
+                    raise ValueError("floating event identifier is at or beyond its exact-integer boundary")
+                item = int(numeric)
             elif isinstance(value, Real):
                 numeric = float(value)
                 if not np.isfinite(numeric) or not numeric.is_integer():

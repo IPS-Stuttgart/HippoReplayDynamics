@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Iterable
 
@@ -76,19 +77,87 @@ TIER_THRESHOLDS = (
 )
 
 KEY_COLUMNS = ("session", "event_index", "null_index")
+_INTEGER_KEY_COLUMNS = ("event_index", "null_index")
+_FLOAT_EXACT_INTEGER_LIMIT = 2**53
 EXACT_MARGIN_COLUMN = "trajectory_minus_nontrajectory_log_evidence"
 DISCOVERY_MARGIN_COLUMN = "trajectory_family_margin"
 PROMOTION_READY_LABEL = "promotion_ready_high_specificity_candidate"
 
 
+def _exact_integer_identifier(value: object, column: str) -> int:
+    """Parse an integer identity key without silently rounding binary floats."""
+
+    if isinstance(value, (bool, np.bool_)):
+        raise ValueError(f"{column} must contain integer identifiers, not booleans")
+    if isinstance(value, (int, np.integer)):
+        return int(value)
+    if isinstance(value, np.floating):
+        if not np.isfinite(value):
+            raise ValueError(f"{column} must contain finite integer identifiers")
+        if not value.is_integer():
+            raise ValueError(f"{column} must contain integer-valued identifiers")
+        exact_limit = 2 ** (np.finfo(value.dtype).nmant + 1)
+        if abs(value) >= exact_limit:
+            raise ValueError(
+                f"{column} contains a floating-point identifier outside the exact integer range; "
+                "use integer or string IDs"
+            )
+        return int(value)
+    if isinstance(value, float):
+        if not np.isfinite(value):
+            raise ValueError(f"{column} must contain finite integer identifiers")
+        if not value.is_integer():
+            raise ValueError(f"{column} must contain integer-valued identifiers")
+        if abs(value) >= _FLOAT_EXACT_INTEGER_LIMIT:
+            raise ValueError(
+                f"{column} contains a floating-point identifier outside the exact integer range; "
+                "use integer or string IDs"
+            )
+        return int(value)
+
+    text = str(value).strip()
+    try:
+        numeric = Decimal(text)
+    except (InvalidOperation, TypeError, ValueError) as exc:
+        raise ValueError(f"{column} must contain finite integer identifiers") from exc
+    if not numeric.is_finite():
+        raise ValueError(f"{column} must contain finite integer identifiers")
+    integral = numeric.to_integral_value()
+    if numeric != integral:
+        raise ValueError(f"{column} must contain integer-valued identifiers")
+    return int(integral)
+
+
+def _normalize_key_identifiers(frame: pd.DataFrame) -> pd.DataFrame:
+    out = frame.copy()
+    for column in _INTEGER_KEY_COLUMNS:
+        if column not in out.columns:
+            continue
+        normalized: list[object] = []
+        for value in out[column].to_numpy(copy=False):
+            try:
+                missing = bool(pd.isna(value))
+            except (TypeError, ValueError):
+                missing = False
+            normalized.append(pd.NA if missing else _exact_integer_identifier(value, column))
+        out[column] = pd.Series(normalized, index=out.index, dtype=object)
+    return out
+
+
+def _read_csv_preserving_key_identifiers(path: Path) -> pd.DataFrame:
+    header = pd.read_csv(path, nrows=0)
+    dtype = {column: "string" for column in _INTEGER_KEY_COLUMNS if column in header.columns}
+    return _normalize_key_identifiers(pd.read_csv(path, dtype=dtype, low_memory=False))
+
+
 def _read_required_csv(path: Path) -> pd.DataFrame:
     if not path.exists():
         raise FileNotFoundError(f"required artifact table is missing: {path}")
-    return pd.read_csv(path)
+    return _read_csv_preserving_key_identifiers(path)
 
 
 def _read_optional_csv(path: Path) -> pd.DataFrame:
-    return pd.read_csv(path) if path.exists() else pd.DataFrame()
+    return _read_csv_preserving_key_identifiers(path) if path.exists() else pd.DataFrame()
 
 
 def _numeric(frame: pd.DataFrame, column: str) -> pd.Series:
@@ -178,7 +247,11 @@ def _has_key_columns(frame: pd.DataFrame) -> bool:
 def _key_tuples(frame: pd.DataFrame) -> list[tuple[object, ...]]:
     if frame.empty or not _has_key_columns(frame):
         return []
-    key_frame = frame[list(KEY_COLUMNS)].astype(object).where(pd.notna(frame[list(KEY_COLUMNS)]), None)
+    normalized = _normalize_key_identifiers(frame)
+    key_frame = normalized[list(KEY_COLUMNS)].astype(object).where(
+        pd.notna(normalized[list(KEY_COLUMNS)]),
+        None,
+    )
     return list(map(tuple, key_frame.to_numpy()))
 
 
@@ -276,7 +349,8 @@ def _complete_validation_rows(validation_decisions: pd.DataFrame) -> pd.DataFram
 
 
 def _attach_reference_columns(frame: pd.DataFrame, reference: pd.DataFrame, columns: tuple[str, ...]) -> pd.DataFrame:
-    output = frame.copy()
+    output = _normalize_key_identifiers(frame)
+    reference = _normalize_key_identifiers(reference)
     if "rat" in columns and "rat" not in output and "session" in output:
         output["rat"] = output["session"].astype(str).str.split("/", n=1).str[0]
     missing = [column for column in columns if column not in output.columns and column in reference.columns]

@@ -62,7 +62,11 @@ def _integer_metadata(
             )
         values = raw.astype(np.intp, copy=True)
     else:
-        numeric = np.asarray(raw, dtype=float)
+        # Preserve the source floating dtype until after validation.  Narrowing
+        # longdouble metadata to binary64 can silently change exact identifiers
+        # above 2**53, while already-ambiguous float32/float64 values at their
+        # exact-integer boundary must not be accepted as trustworthy IDs.
+        numeric = raw
         if not np.all(np.isfinite(numeric)) or not np.all(numeric == np.floor(numeric)):
             raise ValueError(
                 f"Momentum shard {key} must contain finite integer values: {path}"
@@ -70,6 +74,13 @@ def _integer_metadata(
         if not np.all((numeric >= intp_info.min) & (numeric <= intp_info.max)):
             raise ValueError(
                 f"Momentum shard {key} must fit into NumPy integer range: {path}"
+            )
+        precision_bits = int(np.finfo(raw.dtype).nmant) + 1
+        exact_limit = 1 << precision_bits
+        if np.any(np.abs(numeric) >= exact_limit):
+            raise ValueError(
+                f"Momentum shard {key} contains floating integer values outside "
+                f"the exact-integer range of {raw.dtype}: {path}"
             )
         values = numeric.astype(np.intp, copy=True)
     if np.any(values < int(min_value)):
@@ -205,7 +216,7 @@ def _coerce_grid_index_array(shard: dict[str, object], key: str) -> np.ndarray:
                 f"Momentum shard {key} must fit into NumPy integer index range: {shard['path']}"
             )
         return raw.astype(np.intp, copy=False)
-    values = np.asarray(raw, dtype=float)
+    values = raw
     if not np.all(np.isfinite(values)) or not np.all(values == np.floor(values)):
         raise ValueError(
             f"Momentum shard {key} must contain finite integer grid indices: {shard['path']}"
@@ -213,6 +224,13 @@ def _coerce_grid_index_array(shard: dict[str, object], key: str) -> np.ndarray:
     if not np.all((values >= intp_info.min) & (values <= intp_info.max)):
         raise ValueError(
             f"Momentum shard {key} must fit into NumPy integer index range: {shard['path']}"
+        )
+    precision_bits = int(np.finfo(raw.dtype).nmant) + 1
+    exact_limit = 1 << precision_bits
+    if np.any(np.abs(values) >= exact_limit):
+        raise ValueError(
+            f"Momentum shard {key} contains floating grid indices outside "
+            f"the exact-integer range of {raw.dtype}: {shard['path']}"
         )
     return values.astype(np.intp, copy=False)
 

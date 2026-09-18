@@ -18,6 +18,7 @@ evidence while giving model-development PRs a stable target to optimize.
 from __future__ import annotations
 
 import argparse
+from decimal import Decimal, InvalidOperation
 import re
 from pathlib import Path
 from typing import Iterable
@@ -36,6 +37,7 @@ DEFAULT_MARGIN_THRESHOLD = 5.5
 DEFAULT_RAT_BOOTSTRAP_REPLICATES = 2000
 DEFAULT_RAT_BOOTSTRAP_RANDOM_SEED = 1
 EXACT_EVIDENCE_SUPPORT = "exact_full_grid"
+_SAFE_FLOAT_INTEGER_LIMIT = 2**53
 DEFAULT_REQUIRED_AUGMENTED_CORE_MODELS = (
     DEFAULT_STATIONARY_MODEL,
     DEFAULT_DIFFUSION_MODEL,
@@ -85,6 +87,33 @@ def _bool_column(frame: pd.DataFrame, column: str, *, default: bool = False) -> 
     return frame[column].map(lambda value: _as_bool(value, default=default)).astype(bool)
 
 
+def _exact_event_index(value: object) -> int:
+    """Parse an event identifier without silently accepting lossy binary floats."""
+
+    if isinstance(value, (bool, np.bool_)):
+        raise ValueError("event_index must contain integer identifiers, not booleans")
+    if isinstance(value, (float, np.floating)):
+        numeric_float = float(value)
+        if not np.isfinite(numeric_float):
+            raise ValueError("event_index must contain finite integer identifiers")
+        if abs(numeric_float) >= _SAFE_FLOAT_INTEGER_LIMIT:
+            raise ValueError(
+                "floating-point event_index at or above 2**53 is unsafe; "
+                "load identifiers as strings or integers"
+            )
+    text = str(value).strip()
+    try:
+        numeric = Decimal(text)
+    except (InvalidOperation, ValueError) as exc:
+        raise ValueError("event_index must contain finite integer identifiers") from exc
+    if not numeric.is_finite():
+        raise ValueError("event_index must contain finite integer identifiers")
+    integral = numeric.to_integral_value()
+    if numeric != integral:
+        raise ValueError("event_index must contain integer-valued identifiers")
+    return int(integral)
+
+
 def _success_rows(frame: pd.DataFrame) -> pd.DataFrame:
     """Return successful model-evidence rows with normalized core columns."""
 
@@ -98,7 +127,7 @@ def _success_rows(frame: pd.DataFrame) -> pd.DataFrame:
         out = out[out["status"].astype(str).eq("success")].copy()
     out["session"] = out["session"].astype(str)
     out["rat"] = out["session"].map(_rat_from_session)
-    out["event_index"] = out["event_index"].astype(int)
+    out["event_index"] = out["event_index"].map(_exact_event_index)
     out["model"] = out["model"].astype(str)
     out["log_evidence"] = pd.to_numeric(out["log_evidence"], errors="coerce")
     out = out.dropna(subset=["log_evidence"]).copy()
@@ -709,6 +738,12 @@ def write_trajectory_imm_superiority_outputs(
         frame.to_csv(out / name, index=False)
 
 
+def _read_event_model_evidence(path: str | Path) -> pd.DataFrame:
+    """Read event evidence without allowing pandas to round identifier text."""
+
+    return pd.read_csv(path, dtype={"event_index": "string"})
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--event-model-evidence", required=True, help="all_sessions_event_model_evidence.csv")
@@ -726,7 +761,7 @@ def main() -> int:
     parser.add_argument("--rat-bootstrap-random-seed", type=int, default=DEFAULT_RAT_BOOTSTRAP_RANDOM_SEED)
     args = parser.parse_args()
 
-    scores = pd.read_csv(args.event_model_evidence)
+    scores = _read_event_model_evidence(args.event_model_evidence)
     write_trajectory_imm_superiority_outputs(
         scores,
         args.output,

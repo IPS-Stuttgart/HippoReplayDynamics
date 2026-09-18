@@ -202,3 +202,24 @@ def test_best_model_agreement_aligns_repeated_events_by_cell_split():
     assert int(row["best_model_agreements"]) == 2
     assert int(row["best_model_disagreements"]) == 0
     assert float(row["best_model_agreement_fraction"]) == pytest.approx(1.0)
+
+
+def test_candidate_support_convergence_preserves_decimal_form_large_event_ids(tmp_path):
+    run64 = tmp_path / "run64"
+    run128 = tmp_path / "run128"
+    for root, top_k, offset in ((run64, 64, 0.0), (run128, 128, 0.5)):
+        root.mkdir(parents=True)
+        (root / "event_model_evidence.csv").write_text(
+            "status,session,event_index,model,log_evidence,diagnostic_state_space_momentum_candidate_top_k\n"
+            f"success,RatX/OpenY,9007199254740992.0,sorted-spike-state-space-momentum,{-8.0 + offset},{top_k}\n"
+            f"success,RatX/OpenY,9007199254740993.0,sorted-spike-state-space-momentum,{-6.0 + offset},{top_k}\n",
+            encoding="utf-8",
+        )
+
+    out = tmp_path / "out"
+    write_candidate_support_convergence([run64, run128], out, labels=["k64", "k128"])
+
+    delta = pd.read_csv(out / "candidate_support_delta_summary.csv")
+    agreement = pd.read_csv(out / "candidate_support_best_model_agreement.csv")
+    assert int(delta.loc[0, "events"]) == 2
+    assert int(agreement.loc[0, "events"]) == 2

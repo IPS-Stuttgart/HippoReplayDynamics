@@ -2,9 +2,11 @@ from pathlib import Path
 import sys
 
 import pandas as pd
+import pytest
 
 sys.path.insert(0, str(Path("scripts").resolve()))
 from trajectory_imm_mode_superiority import (
+    _read_event_model_evidence,
     DEFAULT_DIFFUSION_MODEL,
     DEFAULT_FIRST_ORDER_IMM_MODEL,
     DEFAULT_FRAGMENTED_MODEL,
@@ -100,6 +102,41 @@ def test_trajectory_imm_gate_blocks_model_that_does_not_beat_first_order_imm():
     assert not gate.loc[gate["gate"] == "trajectory_imm_raw_win_majority_vs_first_order_imm", "passed"].iloc[0]
     assert not gate.loc[gate["gate"] == "trajectory_imm_median_delta_vs_first_order_imm_positive", "passed"].iloc[0]
     assert not gate.loc[gate["gate"] == "overall", "passed"].iloc[0]
+
+
+def test_trajectory_imm_reader_preserves_decimal_form_event_ids_above_binary64_range(tmp_path: Path):
+    first = 2**53
+    second = first + 1
+    rows = []
+    for event_index in (first, second):
+        for model, log_evidence in (
+            (DEFAULT_STATIONARY_MODEL, 0.0),
+            (DEFAULT_DIFFUSION_MODEL, 1.0),
+            (DEFAULT_FRAGMENTED_MODEL, 2.0),
+            (DEFAULT_MOMENTUM_MODEL, 3.0),
+            (DEFAULT_FIRST_ORDER_IMM_MODEL, 4.0),
+            (DEFAULT_TRAJECTORY_IMM_MODEL, 5.0),
+        ):
+            item = row("Rat1/Open1", event_index, model, log_evidence)
+            item["event_index"] = f"{event_index}.0"
+            rows.append(item)
+    path = tmp_path / "event_model_evidence.csv"
+    pd.DataFrame(rows).to_csv(path, index=False)
+
+    scores = _read_event_model_evidence(path)
+    pairs = trajectory_imm_event_pairs(scores)
+
+    assert pairs["event_index"].tolist() == [first, second]
+
+
+def test_trajectory_imm_rejects_preparsed_lossy_event_float():
+    unsafe = float(2**53 + 1)
+    scores = pd.DataFrame(
+        [row("Rat1/Open1", unsafe, DEFAULT_STATIONARY_MODEL, 0.0)]
+    )
+
+    with pytest.raises(ValueError, match="exact integer range"):
+        trajectory_imm_event_pairs(scores)
 
 
 def test_mode_readiness_requires_mode_diagnostic_columns():

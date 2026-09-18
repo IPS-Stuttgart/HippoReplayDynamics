@@ -237,6 +237,20 @@ def test_hc11_normalization_rejects_unsafe_preparsed_float_event_ids(value: obje
         normalize_event_model_evidence(frame)
 
 
+def test_hc11_normalization_rejects_unsafe_float32_series_event_id() -> None:
+    frame = pd.DataFrame(
+        {
+            "session": ["Achilles/day1"],
+            "event_index": pd.Series([np.float32(2**24)], dtype=np.float32),
+            "model": ["stationary"],
+            "log_evidence": [0.0],
+        }
+    )
+
+    with pytest.raises(ValueError, match="unsafe"):
+        normalize_event_model_evidence(frame)
+
+
 def test_hc11_normalization_accepts_extended_precision_event_id_when_safe() -> None:
     if np.finfo(np.longdouble).nmant <= np.finfo(float).nmant:
         pytest.skip("platform longdouble does not exceed float64 precision")

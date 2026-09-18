@@ -217,3 +217,27 @@ def test_event_effect_table_treats_string_false_comparable_as_false():
     assert bool(event["trajectory_strict_win"]) is False
     assert bool(event["momentum_evidence_comparable"]) is False
     assert event["momentum_vs_diffusion_certification"] == "noncomparable_pair"
+
+
+def test_summarize_paper_effects_preserves_decimal_form_large_event_ids(tmp_path):
+    scores = tmp_path / "event_model_evidence.csv"
+    output = tmp_path / "paper-large-event-ids"
+    scores.write_text(
+        "session,event_index,model,log_evidence,evidence_support\n"
+        "Rat1/Open1,9007199254740992.0,stationary,0.0,exact_full_grid\n"
+        "Rat1/Open1,9007199254740993.0,stationary,1.0,exact_full_grid\n",
+        encoding="utf-8",
+    )
+
+    tables = summarize_paper_effects(
+        scores,
+        output,
+        bootstrap_replicates=0,
+    )
+
+    event_effects = tables["event_effects"].sort_values("event_index").reset_index(drop=True)
+    assert tables["summary"].iloc[0]["events"] == 2
+    assert event_effects["event_index"].tolist() == [
+        9_007_199_254_740_992,
+        9_007_199_254_740_993,
+    ]

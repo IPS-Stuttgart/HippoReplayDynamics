@@ -1,10 +1,13 @@
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
+import pytest
 
 from scripts.report_hc11_paper_grade_robustness import (
     build_event_table,
     build_posterior_content_audit,
+    normalize_event_model_evidence,
     read_event_model_evidence,
     write_outputs,
 )
@@ -215,6 +218,43 @@ def test_hc11_posterior_content_preserves_large_integer_like_event_ids(tmp_path:
 
     assert audit["event_index"].tolist() == [first, second]
 
+
+
+@pytest.mark.parametrize(
+    "value",
+    [float(2**53), -float(2**53), np.float64(2**53), np.float32(2**24)],
+)
+def test_hc11_normalization_rejects_unsafe_preparsed_float_event_ids(value: object) -> None:
+    frame = pd.DataFrame(
+        {
+            "session": ["Achilles/day1"],
+            "event_index": pd.Series([value], dtype=object),
+            "model": ["stationary"],
+            "log_evidence": [0.0],
+        }
+    )
+
+    with pytest.raises(ValueError, match="unsafe"):
+        normalize_event_model_evidence(frame)
+
+
+def test_hc11_normalization_accepts_extended_precision_event_id_when_safe() -> None:
+    if np.finfo(np.longdouble).nmant <= np.finfo(float).nmant:
+        pytest.skip("platform longdouble does not exceed float64 precision")
+
+    value = np.longdouble(2**53 + 1)
+    frame = pd.DataFrame(
+        {
+            "session": ["Achilles/day1"],
+            "event_index": pd.Series([value], dtype=object),
+            "model": ["stationary"],
+            "log_evidence": [0.0],
+        }
+    )
+
+    normalized = normalize_event_model_evidence(frame)
+
+    assert normalized["event_index"].tolist() == [2**53 + 1]
 
 def _event(
     session: str,

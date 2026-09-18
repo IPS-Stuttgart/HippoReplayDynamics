@@ -2,9 +2,11 @@ from pathlib import Path
 import sys
 
 import pandas as pd
+import pytest
 
 sys.path.insert(0, str(Path("scripts").resolve()))
 from trajectory_imm_mode_superiority import (
+    _read_event_model_evidence,
     DEFAULT_DIFFUSION_MODEL,
     DEFAULT_FIRST_ORDER_IMM_MODEL,
     DEFAULT_FRAGMENTED_MODEL,
@@ -255,6 +257,44 @@ def test_rat_bootstrap_reports_positive_intervals_for_strong_rows():
 
     assert float(boot.iloc[0]["mean_delta_vs_first_order_imm_ci95_low"]) > 0.0
     assert float(boot.iloc[0]["median_delta_vs_first_order_imm_ci95_low"]) > 0.0
+
+
+def test_trajectory_imm_preserves_large_decimal_event_ids(tmp_path: Path):
+    first = 2**53
+    second = first + 1
+    required = (DEFAULT_FIRST_ORDER_IMM_MODEL, DEFAULT_TRAJECTORY_IMM_MODEL)
+    scores = pd.DataFrame(
+        [
+            row("Rat1/Open1", f"{first}.0", DEFAULT_FIRST_ORDER_IMM_MODEL, 10.0),
+            row("Rat1/Open1", f"{first}.0", DEFAULT_TRAJECTORY_IMM_MODEL, 12.0),
+            row("Rat1/Open1", f"{second}.0", DEFAULT_FIRST_ORDER_IMM_MODEL, 11.0),
+            row("Rat1/Open1", f"{second}.0", DEFAULT_TRAJECTORY_IMM_MODEL, 13.0),
+        ]
+    )
+
+    pairs = trajectory_imm_event_pairs(scores, required_core_models=required)
+    assert pairs["event_index"].tolist() == [first, second]
+
+    csv_path = tmp_path / "event_model_evidence.csv"
+    scores.to_csv(csv_path, index=False)
+    loaded = _read_event_model_evidence(csv_path)
+    loaded_pairs = trajectory_imm_event_pairs(loaded, required_core_models=required)
+    assert loaded_pairs["event_index"].tolist() == [first, second]
+
+
+def test_trajectory_imm_rejects_already_lossy_large_float_event_id():
+    scores = pd.DataFrame(
+        [
+            row("Rat1/Open1", float(2**53), DEFAULT_FIRST_ORDER_IMM_MODEL, 10.0),
+            row("Rat1/Open1", 2**53, DEFAULT_TRAJECTORY_IMM_MODEL, 12.0),
+        ]
+    )
+
+    with pytest.raises(ValueError, match=r"floating-point event_index at or above 2\*\*53 is unsafe"):
+        trajectory_imm_event_pairs(
+            scores,
+            required_core_models=(DEFAULT_FIRST_ORDER_IMM_MODEL, DEFAULT_TRAJECTORY_IMM_MODEL),
+        )
 
 
 def row(

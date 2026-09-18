@@ -11,6 +11,7 @@ sys.path.append(str(Path(__file__).resolve().parents[1] / "scripts"))
 
 from off_swr_trajectory_discovery import (  # noqa: E402
     _read_score_files,
+    _window_metadata,
     cluster_off_swr_candidates,
     off_swr_trajectory_candidates,
     off_swr_trajectory_decisions,
@@ -89,3 +90,35 @@ def test_off_swr_discovery_rejects_ambiguous_float32_event_id() -> None:
 
     with pytest.raises(ValueError, match="outside the exact integer range"):
         off_swr_trajectory_decisions(scores)
+
+
+
+def test_off_swr_window_metadata_preserves_nullable_large_template_id(
+    tmp_path: Path,
+) -> None:
+    first = 2**53
+    second = first + 1
+    rows = [
+        *_event_rows("0.0", start=10.0),
+        *_event_rows("1.0", start=10.2),
+    ]
+    for row in rows[: len(MODELS)]:
+        row["template_event_index"] = f"{second}.0"
+    for row in rows[len(MODELS) :]:
+        row["template_event_index"] = ""
+    path = tmp_path / "nullable_template_ids.csv"
+    pd.DataFrame(rows).to_csv(path, index=False)
+
+    scores = _read_score_files(path)
+    metadata = _window_metadata(scores, optional_columns=())
+
+    first_template = metadata.loc[
+        metadata["event_index"].eq(0),
+        "template_event_index",
+    ].iloc[0]
+    missing_template = metadata.loc[
+        metadata["event_index"].eq(1),
+        "template_event_index",
+    ].iloc[0]
+    assert first_template == second
+    assert pd.isna(missing_template)

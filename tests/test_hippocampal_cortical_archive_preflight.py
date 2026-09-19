@@ -148,3 +148,41 @@ def test_download_and_checksum(tmp_path, monkeypatch):
     p = fetch_asset(asset, metadata, tmp_path, download=True)
     verify_file(p, 3, hashlib.sha256(data).hexdigest())
     assert p.read_bytes() == data
+
+
+def test_complete_runner_uses_real_provenance_contract(tmp_path, monkeypatch):
+    from argparse import Namespace
+
+    from scripts import preflight_hippocampal_cortical_archive as module
+
+    catalog = tmp_path / "catalog.json"
+    assets = [{"asset_id": f"id-{i}", "path": f"sub/behavior+ecephys-{i}.nwb", "size": 3} for i in range(15)]
+    assets += [{"asset_id": f"other-{i}", "path": f"other-{i}.nwb", "size": 3} for i in range(7)]
+    catalog.write_text(json.dumps({"count": 22, "next": None, "results": assets}))
+    monkeypatch.setattr(module, "CATALOG_SHA256", module.sha256(catalog))
+    real_provenance = module.build_script_provenance
+
+    def provenance(**kwargs):
+        assert isinstance(kwargs["input_paths"], dict)
+        result = real_provenance(**kwargs)
+        assert result["input_file_sha256"]["published_catalog"] == module.sha256(catalog)
+        result.update(git_dirty=False, code_commit="1" * 40)
+        return result
+
+    monkeypatch.setattr(module, "build_script_provenance", provenance)
+    metadata = {"digest": {"dandi:sha2-256": "2" * 64}}
+    monkeypatch.setattr("urllib.request.urlopen", lambda *a, **kw: io.BytesIO(json.dumps(metadata).encode()))
+    payload = tmp_path / "payload"
+    payload.write_bytes(b"yes")
+    monkeypatch.setattr(module, "fetch_asset", lambda *a, **kw: payload)
+    monkeypatch.setattr(module, "inventory", lambda *a: (
+        {"animal": "fixture", "basic_clock_checks_passed": True},
+        {"unit_counts": [], "schema": [], "interval_tables": []},
+    ))
+    out = tmp_path / "output"
+    args = Namespace(catalog_json=catalog, dataset_root=tmp_path / "data", output_dir=out, download=False)
+    assert module.run(args) == 0
+    assert json.loads((out / "terminal_status.json").read_text())["returncode"] == 0
+    gates = module.pd.read_csv(out / "gate_summary.csv").set_index("gate")
+    assert not gates.loc["context_decoder_ready", "passed"]
+    assert len(module.pd.read_csv(out / "session_inventory.csv")) == 15

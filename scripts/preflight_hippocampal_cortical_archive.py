@@ -224,7 +224,7 @@ def run(args):
     assets = sorted((a for a in catalog["results"] if "behavior+ecephys" in a["path"]), key=lambda a: a["path"])
     if len(assets) != 15 or len({a["asset_id"] for a in assets}) != 15:
         raise ValueError("navigation catalog coverage changed")
-    provenance = build_script_provenance(input_paths=[args.catalog_json], cwd=ROOT)
+    provenance = build_script_provenance(input_paths={"published_catalog": args.catalog_json}, cwd=ROOT)
     if provenance["git_dirty"] or not re.fullmatch(r"[0-9a-f]{40}", provenance["code_commit"]):
         raise ValueError("a clean committed producer is required")
     args.output_dir.mkdir(parents=True, exist_ok=False)

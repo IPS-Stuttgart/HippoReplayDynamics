@@ -1,6 +1,7 @@
 import h5py
 import numpy as np
 import pytest
+from scipy.io import savemat
 
 from hipporeplayimm.tirole_ripple import load_supplied_ripple, window_ripple_stats
 
@@ -65,3 +66,53 @@ def test_mismatched_recording_clock_is_not_silently_cropped(tmp_path):
     make_file(p)
     with pytest.raises(ValueError, match="does not overlap"):
         load_supplied_ripple(p, 100.0, 110.0)
+
+
+def classic_file(path, mutate=None):
+    channel = {
+        "channel_label": "best_ripple",
+        "time_scale": "seconds",
+        "SR": 1000.0,
+        "channel": 58.0,
+        "filename": "CSC58.ncs",
+        "CSCtime": np.arange(1000) * 0.001 + 10,
+        "ripple_zscore": np.linspace(-1, 5, 1000),
+    }
+    if mutate:
+        mutate(channel)
+    other = {**channel, "channel_label": "best_theta"}
+    savemat(path, {"CSC": np.array([other, channel], dtype=object)})
+
+
+def test_classic_and_hdf5_are_identical(tmp_path):
+    classic, hdf = tmp_path / "classic.mat", tmp_path / "hdf.mat"
+    classic_file(classic)
+    make_file(hdf)
+    a, b = load_supplied_ripple(classic, 10.2, 10.5), load_supplied_ripple(hdf, 10.2, 10.5)
+    assert a.keys() == b.keys()
+    for key in a:
+        if isinstance(a[key], np.ndarray):
+            np.testing.assert_array_equal(a[key], b[key])
+        else:
+            assert a[key] == b[key]
+    assert window_ripple_stats(a, 10.25, 10.4) == window_ripple_stats(b, 10.25, 10.4)
+
+
+@pytest.mark.parametrize("kind", ["clock", "units", "length", "nonfinite", "no_best"])
+def test_classic_fails_closed(tmp_path, kind):
+    def mutate(c):
+        if kind == "clock":
+            c["CSCtime"] *= 2
+        elif kind == "units":
+            c["time_scale"] = "milliseconds"
+        elif kind == "length":
+            c["ripple_zscore"] = c["ripple_zscore"][:-1]
+        elif kind == "nonfinite":
+            c["ripple_zscore"][100] = np.nan
+        else:
+            c["channel_label"] = "best_theta"
+
+    p = tmp_path / "bad.mat"
+    classic_file(p, mutate)
+    with pytest.raises(ValueError):
+        load_supplied_ripple(p)

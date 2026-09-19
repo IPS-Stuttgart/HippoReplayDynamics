@@ -4,10 +4,12 @@ Pinned author code uses 125-300 Hz and a 15-sample envelope smoother.
 These files do not independently establish spike/LFP synchronization.
 """
 
+from contextlib import contextmanager
 from pathlib import Path
 
 import h5py
 import numpy as np
+from scipy.io import loadmat
 
 
 def _vector(dataset, start=None, stop=None):
@@ -21,17 +23,33 @@ def _vector(dataset, start=None, stop=None):
 
 
 def _text(dataset):
+    if isinstance(dataset, str):
+        return dataset
     return "".join(chr(int(x)) for x in _vector(dataset))
 
 
-def load_supplied_ripple(path, start_s=None, end_s=None):
-    with h5py.File(Path(path), "r") as f:
-        c = f["CSC"]
-        labels = [_text(f[r]) for r in c["channel_label"][:].ravel()]
-        if labels.count("best_ripple") != 1:
+@contextmanager
+def _best_ripple_fields(path):
+    if h5py.is_hdf5(path):
+        with h5py.File(Path(path), "r") as f:
+            c = f["CSC"]
+            labels = [_text(f[r]) for r in c["channel_label"][:].ravel()]
+            if labels.count("best_ripple") != 1:
+                raise ValueError("exactly one author-selected best_ripple channel required")
+            k = labels.index("best_ripple")
+            yield lambda name: f[c[name][:].ravel()[k]]
+    else:
+        c = loadmat(path, variable_names=["CSC"], simplify_cells=True)["CSC"]
+        channels = c if isinstance(c, list) else [c]
+        selected = [v for v in channels if v["channel_label"] == "best_ripple"]
+        if len(selected) != 1:
             raise ValueError("exactly one author-selected best_ripple channel required")
-        k = labels.index("best_ripple")
-        get = lambda name: f[c[name][:].ravel()[k]]
+        channel = selected[0]
+        yield lambda name: channel[name] if isinstance(channel[name], str) else np.atleast_1d(channel[name])
+
+
+def load_supplied_ripple(path, start_s=None, end_s=None):
+    with _best_ripple_fields(path) as get:
         if _text(get("time_scale")) != "seconds":
             raise ValueError("LFP timestamps must be explicitly labelled seconds")
         sr = float(_vector(get("SR"))[0])
@@ -55,7 +73,7 @@ def load_supplied_ripple(path, start_s=None, end_s=None):
             "zscore": values,
             "sample_rate_hz": sr,
             "channel": int(_vector(get("channel"))[0]),
-            "channel_label": labels[k],
+            "channel_label": "best_ripple",
             "full_start_s": float(times[0]),
             "full_end_s": float(times[-1]),
             "full_samples": len(times),

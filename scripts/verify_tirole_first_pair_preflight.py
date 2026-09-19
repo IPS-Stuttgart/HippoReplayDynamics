@@ -11,6 +11,7 @@ from pathlib import Path
 import h5py
 import numpy as np
 import pandas as pd
+from scipy.io import loadmat
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -46,6 +47,40 @@ def clock_check(times, sr, required_start, required_end):
         "clock_offset_applied_s": 0,
         "independent_spike_lfp_synchronization_established": False,
     }
+
+
+def read_clock(path, required_start, required_end):
+    """Read time/channel metadata from either MATLAB storage format."""
+    if h5py.is_hdf5(path):
+        with h5py.File(path, "r") as f:
+            c = f["CSC"]
+            labels = [_text(f[r]) for r in c["channel_label"][:].ravel()]
+            if labels.count("best_ripple") != 1:
+                raise ValueError("exactly one best_ripple channel required")
+            k = labels.index("best_ripple")
+            get = lambda name: f[c[name][:].ravel()[k]]
+            if _text(get("time_scale")) != "seconds":
+                raise ValueError("clock must be labelled seconds")
+            times = _vector(get("CSCtime"))
+            if get("ripple_zscore").size != len(times):
+                raise ValueError("clock/signal length mismatch")
+            result = clock_check(times, float(_vector(get("SR"))[0]), required_start, required_end)
+            result.update(channel=int(_vector(get("channel"))[0]), channel_label=labels[k], filename=_text(get("filename")), storage_format="MATLAB_HDF5")
+            return result
+    c = loadmat(path, variable_names=["CSC"], simplify_cells=True)["CSC"]
+    channels = c if isinstance(c, list) else [c]
+    chosen = [x for x in channels if x["channel_label"] == "best_ripple"]
+    if len(chosen) != 1:
+        raise ValueError("exactly one best_ripple channel required")
+    channel = chosen[0]
+    if channel["time_scale"] != "seconds":
+        raise ValueError("clock must be labelled seconds")
+    times = np.asarray(channel["CSCtime"]).reshape(-1)
+    if np.asarray(channel["ripple_zscore"]).size != len(times):
+        raise ValueError("clock/signal length mismatch")
+    result = clock_check(times, float(channel["SR"]), required_start, required_end)
+    result.update(channel=int(channel["channel"]), channel_label=channel["channel_label"], filename=str(channel["filename"]), storage_format="MATLAB_classic")
+    return result
 
 
 def verify(source, dataset, output):
@@ -106,17 +141,7 @@ def verify(source, dataset, output):
     release_row = next(r for page in pages for r in page["_embedded"]["stash:files"] if r["path"] == lfp_path.name)
     lfp_sha = file_sha256(lfp_path)
     assert lfp_sha == release_row["digest"] and lfp_path.stat().st_size == release_row["size"]
-    with h5py.File(lfp_path, "r") as f:
-        c = f["CSC"]
-        labels = [_text(f[r]) for r in c["channel_label"][:].ravel()]
-        assert labels.count("best_ripple") == 1
-        k = labels.index("best_ripple")
-        get = lambda name: f[c[name][:].ravel()[k]]
-        assert _text(get("time_scale")) == "seconds"
-        times = _vector(get("CSCtime"))
-        assert get("ripple_zscore").size == len(times)
-        clock = clock_check(times, float(_vector(get("SR"))[0]), float(data.times[0]), cutoff)
-        clock.update(channel=int(_vector(get("channel"))[0]), channel_label=labels[k], filename=_text(get("filename")))
+    clock = read_clock(lfp_path, float(data.times[0]), cutoff)
     result = {
         "status": "pass",
         "created_at_utc": datetime.now(UTC).isoformat(),

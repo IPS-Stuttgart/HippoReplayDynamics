@@ -60,6 +60,7 @@ def test_parse_cell_ids_accepts_exact_longdouble_beyond_float64_when_supported()
 
     np.testing.assert_array_equal(_parse_cell_ids(np.asarray([value], dtype=np.longdouble)), np.array([2**53 + 1]))
 
+
 def test_parse_cell_ids_rejects_fractional_metadata():
     fractional_cell = 2 + 0.5
     with pytest.raises(ValueError, match="cell ID metadata"):

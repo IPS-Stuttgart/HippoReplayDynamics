@@ -177,6 +177,54 @@ def test_all_session_summary_helpers_group_by_session():
     assert random_effects["random_effects_probability"].sum() == 1.0
 
 
+def test_random_effects_uses_only_events_with_paired_model_support():
+    frame = pd.DataFrame(
+        [
+            {
+                "session": "Rat1/Open1",
+                "event_index": 0,
+                "model": "complete",
+                "status": "success",
+                "log_evidence": 0.0,
+                "evidence_support": "exact_full_grid",
+                "evidence_comparable": True,
+                "is_best_model": True,
+            },
+            {
+                "session": "Rat1/Open1",
+                "event_index": 0,
+                "model": "missing-hard-event",
+                "status": "success",
+                "log_evidence": -1.0,
+                "evidence_support": "exact_full_grid",
+                "evidence_comparable": True,
+                "is_best_model": False,
+            },
+            {
+                "session": "Rat1/Open1",
+                "event_index": 1,
+                "model": "complete",
+                "status": "success",
+                "log_evidence": -100.0,
+                "evidence_support": "exact_full_grid",
+                "evidence_comparable": True,
+                "is_best_model": True,
+            },
+        ]
+    )
+
+    summary = random_effects_model_probabilities(frame).set_index("model")
+
+    assert summary.loc["complete", "session_win_count"] == 1
+    assert summary.loc["missing-hard-event", "session_win_count"] == 0
+    assert summary.loc["complete", "fixed_effects_log_evidence"] == pytest.approx(0.0)
+    assert summary.loc["missing-hard-event", "fixed_effects_log_evidence"] == pytest.approx(-1.0)
+    assert (
+        summary.loc["complete", "fixed_effects_probability"]
+        > summary.loc["missing-hard-event", "fixed_effects_probability"]
+    )
+
+
 def test_all_session_boolean_string_false_rows_are_not_exact_comparable():
     frame = pd.DataFrame(
         [

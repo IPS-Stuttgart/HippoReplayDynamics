@@ -124,8 +124,19 @@ def _distinct_model_rows(frame: pd.DataFrame) -> pd.DataFrame:
         return frame.loc[~identities.duplicated(keep="first")].copy()
 
     evidence = pd.to_numeric(frame["log_evidence"], errors="coerce").to_numpy(dtype=float)
-    sort_key = np.where(np.isfinite(evidence), -evidence, np.inf)
-    order = np.argsort(sort_key, kind="stable")
+    finite = np.isfinite(evidence)
+    negative_infinite = np.isneginf(evidence)
+    finite_indices = np.flatnonzero(finite)
+    finite_order = finite_indices[
+        np.argsort(-evidence[finite_indices], kind="stable")
+    ]
+    order = np.concatenate(
+        [
+            finite_order,
+            np.flatnonzero(negative_infinite),
+            np.flatnonzero(~finite & ~negative_infinite),
+        ]
+    )
     ordered = frame.iloc[order]
     identities = ordered["model"].map(_model_identity)
     return ordered.loc[~identities.duplicated(keep="first")].copy()
@@ -168,11 +179,14 @@ def _model_identity(value: object) -> object:
 def _log_evidence_margin(exact: pd.DataFrame) -> float:
     if "log_evidence" not in exact:
         return np.nan
-    logs = np.sort(exact["log_evidence"].to_numpy(dtype=float))[::-1]
-    logs = logs[np.isfinite(logs)]
-    if logs.size > 1:
-        return float(logs[0] - logs[1])
-    return np.nan
+    logs = exact["log_evidence"].to_numpy(dtype=float)
+    logs = logs[~(np.isnan(logs) | np.isposinf(logs))]
+    if logs.size <= 1:
+        return np.nan
+    logs = np.sort(logs)[::-1]
+    if np.isneginf(logs[0]) and np.isneginf(logs[1]):
+        return np.nan
+    return float(logs[0] - logs[1])
 
 
 def _finite_endpoint_average_rows(frame: pd.DataFrame) -> pd.DataFrame:

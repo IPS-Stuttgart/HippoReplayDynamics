@@ -10,7 +10,7 @@ from hipporeplayimm.advanced_result_diagnostics import (
 )
 
 
-def test_evidence_margin_table_ignores_nonfinite_evidence_rows() -> None:
+def test_evidence_margin_table_keeps_negative_infinite_evidence_rows() -> None:
     scores = pd.DataFrame(
         {
             "session": ["Rat1/Open1", "Rat1/Open1", "Rat1/Open1", "Rat1/Open1"],
@@ -30,7 +30,7 @@ def test_evidence_margin_table_ignores_nonfinite_evidence_rows() -> None:
     assert np.isclose(margins.loc[0, "best_log_evidence"], 7.0)
     assert np.isclose(margins.loc[0, "second_best_log_evidence"], 2.0)
     assert np.isclose(margins.loc[0, "evidence_margin_to_second_best"], 5.0)
-    assert margins.loc[0, "models_compared"] == 2
+    assert margins.loc[0, "models_compared"] == 3
 
 
 def test_evidence_margin_columns_mark_all_nonfinite_groups_missing() -> None:
@@ -51,15 +51,15 @@ def test_evidence_margin_columns_mark_all_nonfinite_groups_missing() -> None:
     assert annotated["evidence_margin_to_second_best"].isna().all()
 
 
-def test_paired_margin_decisions_skip_nonfinite_evidence_pairs() -> None:
+def test_paired_margin_decisions_skip_positive_infinity_but_keep_negative_infinity() -> None:
     scores = pd.DataFrame(
         {
-            "session": ["Rat1/Open1", "Rat1/Open1", "Rat1/Open1", "Rat1/Open1"],
-            "event_index": [0, 0, 1, 1],
-            "model": ["stationary", "diffusion", "stationary", "diffusion"],
-            "log_evidence": [1.0, np.inf, 1.0, "4.0"],
-            "status": ["success", "success", "success", "success"],
-            "evidence_comparable": [True, True, True, True],
+            "session": ["Rat1/Open1"] * 6,
+            "event_index": [0, 0, 1, 1, 2, 2],
+            "model": ["stationary", "diffusion"] * 3,
+            "log_evidence": [1.0, np.inf, 1.0, "4.0", -np.inf, 2.0],
+            "status": ["success"] * 6,
+            "evidence_comparable": [True] * 6,
         }
     )
 
@@ -69,8 +69,12 @@ def test_paired_margin_decisions_skip_nonfinite_evidence_pairs() -> None:
         reference_model="stationary",
     )
 
-    assert decisions["event_index"].tolist() == [1]
+    assert decisions["event_index"].tolist() == [1, 2]
     assert np.isclose(decisions.loc[0, "positive_log_evidence"], 4.0)
     assert np.isclose(decisions.loc[0, "reference_log_evidence"], 1.0)
     assert np.isclose(decisions.loc[0, "positive_minus_reference_log_evidence"], 3.0)
     assert decisions.loc[0, "margin_decision"] == "diffusion"
+    assert decisions.loc[1, "positive_log_evidence"] == 2.0
+    assert np.isneginf(decisions.loc[1, "reference_log_evidence"])
+    assert np.isposinf(decisions.loc[1, "positive_minus_reference_log_evidence"])
+    assert decisions.loc[1, "margin_decision"] == "diffusion"

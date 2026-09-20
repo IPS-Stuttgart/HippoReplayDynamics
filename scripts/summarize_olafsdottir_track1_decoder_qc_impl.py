@@ -1088,8 +1088,17 @@ def interpolate_position_at_times(spike_times: np.ndarray, times: np.ndarray, li
     keep = np.asarray(valid, dtype=bool) & np.isfinite(times) & np.isfinite(linear)
     if np.count_nonzero(keep) < 2 or spike_times.size == 0:
         return np.full(spike_times.shape, np.nan, dtype=float)
-    values = np.interp(spike_times, times[keep], linear[keep], left=np.nan, right=np.nan)
-    return values
+
+    valid_times = np.asarray(times[keep], dtype=float)
+    interpolated = np.interp(
+        spike_times,
+        valid_times,
+        np.asarray(linear[keep], dtype=float),
+        left=np.nan,
+        right=np.nan,
+    )
+    interpolated[_queries_inside_tracking_gaps(valid_times, spike_times)] = np.nan
+    return interpolated
 
 
 def position_edges(values: np.ndarray, bin_size_cm: float) -> np.ndarray:
@@ -1102,6 +1111,50 @@ def position_edges(values: np.ndarray, bin_size_cm: float) -> np.ndarray:
     return np.arange(lo, hi + float(bin_size_cm), float(bin_size_cm))
 
 
+def _nominal_sample_interval_s(times: np.ndarray) -> float:
+    """Return a conservative nominal positive sampling interval."""
+
+    arr = np.asarray(times, dtype=float).reshape(-1)
+    if arr.size < 2:
+        return 0.0
+    diffs = np.diff(arr)
+    positive = diffs[np.isfinite(diffs) & (diffs > 0.0)]
+    if positive.size == 0:
+        return 0.0
+    ordered = np.sort(positive)
+    return float(ordered[(ordered.size - 1) // 2])
+
+
+def _max_contiguous_sample_gap_s(times: np.ndarray) -> float:
+    """Return the largest timestamp gap still treated as continuously tracked."""
+
+    nominal = _nominal_sample_interval_s(times)
+    if nominal <= 0.0:
+        return float("inf")
+    threshold = max(5.0 * nominal, np.finfo(float).eps)
+    tolerance = 16.0 * np.finfo(float).eps * max(1.0, abs(threshold))
+    return threshold + tolerance
+
+
+def _queries_inside_tracking_gaps(times: np.ndarray, query_times: np.ndarray) -> np.ndarray:
+    """Return queries lying strictly inside oversized timestamp gaps."""
+
+    time_values = np.asarray(times, dtype=float).reshape(-1)
+    query_values = np.asarray(query_times, dtype=float).reshape(-1)
+    inside_gap = np.zeros(query_values.shape, dtype=bool)
+    if time_values.size < 2 or query_values.size == 0:
+        return inside_gap
+
+    diffs = np.diff(time_values)
+    max_gap = _max_contiguous_sample_gap_s(time_values)
+    for left_index in np.flatnonzero(diffs > max_gap):
+        inside_gap |= (
+            (query_values > time_values[left_index])
+            & (query_values < time_values[left_index + 1])
+        )
+    return inside_gap
+
+
 def sample_durations(times: np.ndarray) -> np.ndarray:
     """Return per-sample occupancy durations without spanning tracking dropouts."""
 
@@ -1112,14 +1165,8 @@ def sample_durations(times: np.ndarray) -> np.ndarray:
         return np.asarray([0.0], dtype=float)
 
     diffs = np.diff(arr)
-    positive = diffs[np.isfinite(diffs) & (diffs > 0.0)]
-    ordered_positive = np.sort(positive)
-    nominal = (
-        float(ordered_positive[(ordered_positive.size - 1) // 2])
-        if ordered_positive.size
-        else 0.0
-    )
-    max_contiguous_gap = max(5.0 * nominal, np.finfo(float).eps)
+    nominal = _nominal_sample_interval_s(arr)
+    max_contiguous_gap = _max_contiguous_sample_gap_s(arr)
 
     dt = np.empty(arr.shape, dtype=float)
     contiguous = (

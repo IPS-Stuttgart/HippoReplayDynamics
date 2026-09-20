@@ -313,3 +313,15 @@ def _write_cut(path: Path, labels: list[int]) -> None:
         + "\n",
         encoding="ascii",
     )
+
+
+def test_moving_average_preserves_bin_count_for_oversized_window() -> None:
+    module = _load_module()
+    values = np.asarray([1.0, 2.0, 3.0], dtype=float)
+    expected = np.convolve(values, np.ones(3, dtype=float) / 3.0, mode="same")
+
+    actual = module._moving_average(values, window=8)
+
+    assert actual.shape == values.shape
+    np.testing.assert_allclose(actual, expected, rtol=0.0, atol=1e-12)
+    assert module._moving_average(np.asarray([], dtype=float), window=8).shape == (0,)

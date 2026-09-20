@@ -116,7 +116,7 @@ def _finite_weighted_mean(weights: np.ndarray, values: np.ndarray) -> float:
 
 
 def _distinct_model_rows(frame: pd.DataFrame) -> pd.DataFrame:
-    """Keep the strongest finite-evidence row for each normalized model identity."""
+    """Keep the strongest usable-evidence row for each normalized model identity."""
     if frame.empty or "model" not in frame.columns:
         return frame
     if "log_evidence" not in frame.columns:
@@ -124,8 +124,11 @@ def _distinct_model_rows(frame: pd.DataFrame) -> pd.DataFrame:
         return frame.loc[~identities.duplicated(keep="first")].copy()
 
     evidence = pd.to_numeric(frame["log_evidence"], errors="coerce").to_numpy(dtype=float)
-    sort_key = np.where(np.isfinite(evidence), -evidence, np.inf)
-    order = np.argsort(sort_key, kind="stable")
+    usable = ~(np.isnan(evidence) | np.isposinf(evidence))
+    evidence_rank = np.where(usable, -evidence, 0.0)
+    invalid_rank = (~usable).astype(np.int8)
+    original_rank = np.arange(evidence.size, dtype=np.int64)
+    order = np.lexsort((original_rank, evidence_rank, invalid_rank))
     ordered = frame.iloc[order]
     identities = ordered["model"].map(_model_identity)
     return ordered.loc[~identities.duplicated(keep="first")].copy()
@@ -168,11 +171,14 @@ def _model_identity(value: object) -> object:
 def _log_evidence_margin(exact: pd.DataFrame) -> float:
     if "log_evidence" not in exact:
         return np.nan
-    logs = np.sort(exact["log_evidence"].to_numpy(dtype=float))[::-1]
-    logs = logs[np.isfinite(logs)]
-    if logs.size > 1:
-        return float(logs[0] - logs[1])
-    return np.nan
+    logs = exact["log_evidence"].to_numpy(dtype=float)
+    usable = ~(np.isnan(logs) | np.isposinf(logs))
+    logs = np.sort(logs[usable])[::-1]
+    if logs.size <= 1:
+        return np.nan
+    if np.isneginf(logs[0]) and np.isneginf(logs[1]):
+        return np.nan
+    return float(logs[0] - logs[1])
 
 
 def _finite_endpoint_average_rows(frame: pd.DataFrame) -> pd.DataFrame:

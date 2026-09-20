@@ -47,6 +47,8 @@ def test_evidence_margin_columns_mark_all_nonfinite_groups_missing() -> None:
 
     annotated = add_evidence_margin_columns(scores)
 
+    assert annotated["best_model_by_evidence"].fillna("").eq("").all()
+    assert annotated["second_best_model_by_evidence"].fillna("").eq("").all()
     assert annotated["evidence_margin_category"].tolist() == ["missing", "missing"]
     assert annotated["evidence_margin_to_second_best"].isna().all()
 

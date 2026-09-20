@@ -56,10 +56,12 @@ def _max_contiguous_sample_gap_s(times_s: np.ndarray) -> float:
     nominal_interval_s = _nominal_sample_interval_s(times_s)
     if nominal_interval_s <= 0.0:
         return float("inf")
-    return max(
+    threshold = max(
         _MAX_CONTIGUOUS_SAMPLE_GAP_MULTIPLIER * nominal_interval_s,
         np.finfo(float).eps,
     )
+    tolerance = 16.0 * np.finfo(float).eps * max(1.0, abs(threshold))
+    return threshold + tolerance
 
 
 def _contiguous_valid_segments(

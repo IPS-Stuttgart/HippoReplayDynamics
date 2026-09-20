@@ -83,7 +83,12 @@ def _coerce_integral_group_ids(
 ) -> np.ndarray:
     """Return integer group IDs without lossy bool/fraction/range coercion."""
 
-    raw = np.asarray(values, dtype=object)
+    native = np.asarray(values)
+    preserve_native_float_dtype = (
+        isinstance(values, (np.ndarray, np.generic))
+        and np.issubdtype(native.dtype, np.floating)
+    )
+    raw = native if preserve_native_float_dtype else np.asarray(values, dtype=object)
     if raw.ndim == 0:
         raw = raw.reshape(1)
     else:
@@ -147,6 +152,17 @@ def _coerce_float_group_id(value: float | np.floating, name: str) -> int:
         raise ValueError(f"{name} must be finite integer identifiers")
     if not bool(value.is_integer()):
         raise ValueError(f"{name} must be integer-valued")
+    precision_bits = (
+        53
+        if isinstance(value, float)
+        else int(np.finfo(value.dtype).nmant) + 1
+    )
+    unsafe_magnitude = 1 << precision_bits
+    if abs(value) >= unsafe_magnitude:
+        raise ValueError(
+            f"{name} floating-point identifiers at or above 2**{precision_bits} are unsafe; "
+            "outside the reliable integer identifier range; use integer or string identifiers instead"
+        )
     return int(value)
 
 
@@ -254,10 +270,20 @@ def apply_clusterless_mark_group_validation_patch() -> None:
     def coerce_group_indices(self, group_ids, n_marks: int):
         if group_ids is None or self.group_ids is None:
             return None
-        raw_group_ids = np.asarray(group_ids, dtype=object)
+        raw_group_ids = np.asarray(group_ids)
         if raw_group_ids.ndim == 0:
-            raw_group_ids = np.full(int(n_marks), raw_group_ids.item(), dtype=object if raw_group_ids.dtype == object else raw_group_ids.dtype)
-        raw_group_ids = raw_group_ids.reshape(-1)
+            scalar = (
+                raw_group_ids[()]
+                if np.issubdtype(raw_group_ids.dtype, np.floating)
+                else raw_group_ids.item()
+            )
+            raw_group_ids = np.full(
+                int(n_marks),
+                scalar,
+                dtype=raw_group_ids.dtype if np.issubdtype(raw_group_ids.dtype, np.floating) else object,
+            )
+        else:
+            raw_group_ids = group_ids
         coerced = _coerce_integral_group_ids(
             raw_group_ids,
             "mark group IDs",

@@ -464,11 +464,14 @@ def _empty_status(
 def _exact_event_index(value: object) -> int:
     """Parse an event identifier without a lossy floating-point round trip."""
 
+    if value is None:
+        raise ValueError("event_index must contain finite integer identifiers")
     try:
-        if value is None or pd.isna(value):
-            raise ValueError("event_index must contain finite integer identifiers")
+        missing = pd.isna(value)
     except (TypeError, ValueError):
-        pass
+        missing = False
+    if isinstance(missing, (bool, np.bool_)) and bool(missing):
+        raise ValueError("event_index must contain finite integer identifiers")
     if isinstance(value, (bool, np.bool_)):
         raise ValueError("event_index must contain integer identifiers, not booleans")
     if isinstance(value, (int, np.integer)):
@@ -619,7 +622,7 @@ def _valid_log_evidence(value: object) -> float:
         numeric = float(value)
     except (TypeError, ValueError, OverflowError):
         return float("nan")
-    if math.isnan(numeric) or math.isinf(numeric) and numeric > 0.0:
+    if math.isnan(numeric) or (math.isinf(numeric) and numeric > 0.0):
         return float("nan")
     return numeric
 

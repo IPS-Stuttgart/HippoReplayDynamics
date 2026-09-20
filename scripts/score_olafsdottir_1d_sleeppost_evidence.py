@@ -371,7 +371,7 @@ def score_selected_event(
         )
         if counts.shape[0] == 0:
             return failure_rows(meta, "event_has_no_time_bins")
-        scores = score_models(
+        scores, model_runtimes = score_models_with_runtimes(
             counts,
             place_fields,
             time_bin_s=bin_durations,
@@ -384,9 +384,8 @@ def score_selected_event(
 
     rows: list[dict[str, object]] = []
     for model in REQUIRED_MODELS:
-        start = time.perf_counter()
         value = float(scores.get(model, np.nan))
-        runtime_s = max(time.perf_counter() - start, 0.0)
+        runtime_s = float(model_runtimes.get(model, 0.0))
         status = "success" if _is_valid_log_evidence(value) else "fail"
         rows.append(
             {
@@ -445,22 +444,83 @@ def score_models(
     stationary_self_transition: float,
     imm_mode_persistence: float,
 ) -> dict[str, float]:
+    """Score all required models while preserving the historical return type."""
+
+    scores, _ = score_models_with_runtimes(
+        counts,
+        place_fields,
+        time_bin_s=time_bin_s,
+        diffusion_sigma_cm=diffusion_sigma_cm,
+        stationary_self_transition=stationary_self_transition,
+        imm_mode_persistence=imm_mode_persistence,
+    )
+    return scores
+
+
+def score_models_with_runtimes(
+    counts: np.ndarray,
+    place_fields: PlaceFieldModel,
+    *,
+    time_bin_s: float | np.ndarray,
+    diffusion_sigma_cm: float,
+    stationary_self_transition: float,
+    imm_mode_persistence: float,
+) -> tuple[dict[str, float], dict[str, float]]:
+    """Return model evidences and actual model-inference runtimes.
+
+    Shared Poisson-emission construction is excluded from the per-model timings.
+    Model-specific transition construction is included so the recorded runtime
+    measures the work needed by that model rather than a later dictionary lookup.
+    """
+
     emissions = poisson_log_emissions(counts, place_fields.rates_hz, time_bin_s)
     prior = place_fields.prior
-    diffusion = diffusion_log_transition(place_fields.bin_centers_cm, diffusion_sigma_cm)
-    stationary = stationary_log_transition(prior, stationary_self_transition)
-    fragmented = reset_log_transition(prior)
-    return {
-        STATIONARY_MODEL: stationary_model_log_evidence(emissions, prior),
-        DIFFUSION_MODEL: transition_model_log_evidence(emissions, prior, diffusion),
-        FRAGMENTED_MODEL: fragmented_model_log_evidence(emissions, prior),
-        FIRST_ORDER_IMM_MODEL: imm_log_evidence(
-            emissions,
-            prior,
-            (stationary, diffusion, fragmented),
-            mode_persistence=imm_mode_persistence,
+    scores: dict[str, float] = {}
+    runtimes: dict[str, float] = {}
+
+    start = time.perf_counter()
+    scores[STATIONARY_MODEL] = stationary_model_log_evidence(emissions, prior)
+    runtimes[STATIONARY_MODEL] = max(time.perf_counter() - start, 0.0)
+
+    start = time.perf_counter()
+    diffusion_transition = diffusion_log_transition(
+        place_fields.bin_centers_cm,
+        diffusion_sigma_cm,
+    )
+    scores[DIFFUSION_MODEL] = transition_model_log_evidence(
+        emissions,
+        prior,
+        diffusion_transition,
+    )
+    runtimes[DIFFUSION_MODEL] = max(time.perf_counter() - start, 0.0)
+
+    start = time.perf_counter()
+    scores[FRAGMENTED_MODEL] = fragmented_model_log_evidence(emissions, prior)
+    runtimes[FRAGMENTED_MODEL] = max(time.perf_counter() - start, 0.0)
+
+    start = time.perf_counter()
+    stationary_transition = stationary_log_transition(
+        prior,
+        stationary_self_transition,
+    )
+    diffusion_transition = diffusion_log_transition(
+        place_fields.bin_centers_cm,
+        diffusion_sigma_cm,
+    )
+    fragmented_transition = reset_log_transition(prior)
+    scores[FIRST_ORDER_IMM_MODEL] = imm_log_evidence(
+        emissions,
+        prior,
+        (
+            stationary_transition,
+            diffusion_transition,
+            fragmented_transition,
         ),
-    }
+        mode_persistence=imm_mode_persistence,
+    )
+    runtimes[FIRST_ORDER_IMM_MODEL] = max(time.perf_counter() - start, 0.0)
+
+    return scores, runtimes
 
 
 def poisson_log_emissions(
@@ -1245,8 +1305,12 @@ def interpolate_position_at_times(spike_times: np.ndarray, times: np.ndarray, li
 
 
 def smooth_1d(values: np.ndarray, smoothing_bins: int) -> np.ndarray:
-    window = max(int(smoothing_bins), 1)
+    """Smooth without changing the number of spatial bins."""
+
     arr = np.asarray(values, dtype=float)
+    if arr.size == 0:
+        return arr
+    window = min(max(int(smoothing_bins), 1), arr.size)
     if window <= 1:
         return arr
     kernel = np.ones(window, dtype=float) / float(window)

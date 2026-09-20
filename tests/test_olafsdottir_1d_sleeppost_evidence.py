@@ -602,15 +602,22 @@ def test_score_selected_event_treats_negative_infinity_as_success(
             ),
         )
     }
+    fake_scores = {
+        module.STATIONARY_MODEL: -np.inf,
+        module.DIFFUSION_MODEL: 0.0,
+        module.FRAGMENTED_MODEL: np.nan,
+        module.FIRST_ORDER_IMM_MODEL: np.inf,
+    }
+    fake_runtimes = {
+        module.STATIONARY_MODEL: 0.11,
+        module.DIFFUSION_MODEL: 0.22,
+        module.FRAGMENTED_MODEL: 0.33,
+        module.FIRST_ORDER_IMM_MODEL: 0.44,
+    }
     monkeypatch.setattr(
         module,
-        "score_models",
-        lambda *args, **kwargs: {
-            module.STATIONARY_MODEL: -np.inf,
-            module.DIFFUSION_MODEL: 0.0,
-            module.FRAGMENTED_MODEL: np.nan,
-            module.FIRST_ORDER_IMM_MODEL: np.inf,
-        },
+        "score_models_with_runtimes",
+        lambda *args, **kwargs: (fake_scores, fake_runtimes),
     )
 
     rows = module.score_selected_event(
@@ -638,6 +645,53 @@ def test_score_selected_event_treats_negative_infinity_as_success(
     assert by_model[module.DIFFUSION_MODEL]["status"] == "success"
     assert by_model[module.FRAGMENTED_MODEL]["status"] == "fail"
     assert by_model[module.FIRST_ORDER_IMM_MODEL]["status"] == "fail"
+    assert by_model[module.STATIONARY_MODEL]["runtime_s"] == 0.11
+    assert by_model[module.DIFFUSION_MODEL]["runtime_s"] == 0.22
+    assert by_model[module.FRAGMENTED_MODEL]["runtime_s"] == 0.33
+    assert by_model[module.FIRST_ORDER_IMM_MODEL]["runtime_s"] == 0.44
+
+
+def test_score_models_with_runtimes_measures_each_model(monkeypatch) -> None:
+    module = _load_module()
+    ticks = iter([0.0, 0.11, 1.0, 1.22, 2.0, 2.33, 3.0, 3.44])
+    monkeypatch.setattr(module.time, "perf_counter", lambda: next(ticks))
+    place_fields = module.PlaceFieldModel(
+        unit_ids=(1,),
+        bin_centers_cm=np.asarray([0.0, 10.0]),
+        occupancy_s=np.asarray([1.0, 1.0]),
+        prior=np.asarray([0.5, 0.5]),
+        rates_hz=np.asarray([[1.0, 2.0]]),
+    )
+
+    scores, runtimes = module.score_models_with_runtimes(
+        np.asarray([[0.0], [1.0]], dtype=float),
+        place_fields,
+        time_bin_s=0.02,
+        diffusion_sigma_cm=12.5,
+        stationary_self_transition=0.98,
+        imm_mode_persistence=0.92,
+    )
+
+    assert set(scores) == set(module.REQUIRED_MODELS)
+    np.testing.assert_allclose(
+        [runtimes[model] for model in module.REQUIRED_MODELS],
+        [0.11, 0.22, 0.33, 0.44],
+        rtol=0.0,
+        atol=1e-12,
+    )
+
+
+def test_olafsdottir_smoothing_keeps_support_length_for_large_window() -> None:
+    module = _load_module()
+    decoder_impl = importlib.import_module("summarize_olafsdottir_track1_decoder_qc_impl")
+    values = np.asarray([1.0, 2.0, 3.0], dtype=float)
+    expected = np.convolve(values, np.ones(3, dtype=float) / 3.0, mode="same")
+
+    for smooth in (module.smooth_1d, decoder_impl.smooth_1d):
+        actual = smooth(values, smoothing_bins=8)
+        assert actual.shape == values.shape
+        np.testing.assert_allclose(actual, expected, rtol=0.0, atol=1e-12)
+        assert smooth(np.asarray([], dtype=float), smoothing_bins=8).shape == (0,)
 
 
 def _write_linearized_position(path: Path) -> None:

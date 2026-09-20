@@ -187,6 +187,17 @@ def random_effects_model_probabilities(df: pd.DataFrame) -> pd.DataFrame:
     if ok.empty:
         return pd.DataFrame()
 
+    # Support classification accepts numeric-looking object/string columns from
+    # CSV artifacts, but pandas groupby reductions do not reliably treat those
+    # objects as numbers.  Normalize here before any sums or means.  Keep -inf
+    # as valid zero evidence while dropping NaN/+inf rows; the pairing step below
+    # then removes any event whose model coverage became incomplete.
+    ok["log_evidence"] = pd.to_numeric(ok["log_evidence"], errors="coerce")
+    log_values = ok["log_evidence"].to_numpy(dtype=float)
+    ok = ok.loc[~np.isnan(log_values) & ~np.isposinf(log_values)].copy()
+    if ok.empty:
+        return pd.DataFrame()
+
     # Log evidences are additive only when every compared model is evaluated on
     # the same observations.  Restrict the cross-session table to models
     # available in every session, then use only events with complete paired

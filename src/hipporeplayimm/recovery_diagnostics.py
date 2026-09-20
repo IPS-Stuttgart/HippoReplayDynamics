@@ -376,8 +376,12 @@ def _rows_with_model_suffix(frame: pd.DataFrame, suffix: str) -> pd.DataFrame:
 
 def _successful_finite_scores(group: pd.DataFrame) -> pd.DataFrame:
     status_ok = group["status"].astype(str).eq("success") if "status" in group else pd.Series(True, index=group.index)
-    finite = pd.Series(np.isfinite(pd.to_numeric(group["log_evidence"], errors="coerce")), index=group.index)
-    return group[status_ok & finite].copy()
+    values = pd.to_numeric(group["log_evidence"], errors="coerce")
+    usable = pd.Series(
+        ~(values.isna().to_numpy() | np.isposinf(values.to_numpy(dtype=float))),
+        index=group.index,
+    )
+    return group[status_ok & usable].copy()
 
 
 def _comparable_mask(frame: pd.DataFrame) -> pd.Series:
@@ -392,11 +396,12 @@ def _best_log_evidence_row(frame: pd.DataFrame) -> pd.Series | None:
     if frame.empty:
         return None
     values = pd.to_numeric(frame["log_evidence"], errors="coerce")
-    finite = values.notna() & np.isfinite(values)
-    if not finite.any():
+    numeric = values.to_numpy(dtype=float)
+    usable = ~(values.isna().to_numpy() | np.isposinf(numeric))
+    if not np.any(usable):
         return None
-    valid = frame.loc[finite].copy()
-    valid_values = values.loc[valid.index].to_numpy(float)
+    valid = frame.loc[usable].copy()
+    valid_values = numeric[usable]
     return valid.iloc[int(np.argmax(valid_values))]
 
 

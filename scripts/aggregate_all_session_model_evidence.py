@@ -186,6 +186,41 @@ def random_effects_model_probabilities(df: pd.DataFrame) -> pd.DataFrame:
     ok = df[(df["status"] == "success") & _bool_column(df, "evidence_comparable")].copy()
     if ok.empty:
         return pd.DataFrame()
+
+    # Log evidences are additive only when every compared model is evaluated on
+    # the same observations.  Restrict the cross-session table to models
+    # available in every session, then use only events with complete paired
+    # support for that common model set.  Otherwise a model that failed to score
+    # a difficult event would receive an artificial advantage by simply missing
+    # that negative log-evidence contribution.
+    session_model_sets = [
+        set(group["model"].astype(str))
+        for _, group in ok.groupby("session", sort=False)
+    ]
+    common_models = set.intersection(*session_model_sets)
+    if not common_models:
+        return pd.DataFrame()
+    ok = ok[ok["model"].astype(str).isin(common_models)].copy()
+
+    complete_event_counts = ok.groupby(
+        ["session", "event_index"],
+        sort=False,
+        dropna=False,
+    )["model"].nunique()
+    complete_events = (
+        complete_event_counts[complete_event_counts == len(common_models)]
+        .rename("_paired_model_count")
+        .reset_index()[["session", "event_index"]]
+    )
+    ok = ok.merge(
+        complete_events,
+        on=["session", "event_index"],
+        how="inner",
+        validate="many_to_one",
+    )
+    if ok.empty:
+        return pd.DataFrame()
+
     per_session = ok.groupby(["session", "model"], as_index=False).agg(
         session_events=("event_index", "nunique"),
         session_log_evidence=("log_evidence", "sum"),

@@ -678,7 +678,22 @@ def test_score_models_with_runtimes_measures_each_model(monkeypatch) -> None:
         imm_mode_persistence=0.92,
     )
 
+    expected_scores = module.score_models(
+        np.asarray([[0.0], [1.0]], dtype=float),
+        place_fields,
+        time_bin_s=0.02,
+        diffusion_sigma_cm=12.5,
+        stationary_self_transition=0.98,
+        imm_mode_persistence=0.92,
+    )
+
     assert set(scores) == set(module.REQUIRED_MODELS)
+    np.testing.assert_allclose(
+        [scores[model] for model in module.REQUIRED_MODELS],
+        [expected_scores[model] for model in module.REQUIRED_MODELS],
+        rtol=0.0,
+        atol=1e-12,
+    )
     np.testing.assert_allclose(
         [runtimes[model] for model in module.REQUIRED_MODELS],
         [0.11, 0.22, 0.33, 0.44],

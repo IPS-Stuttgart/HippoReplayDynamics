@@ -2,7 +2,9 @@ from __future__ import annotations
 
 from argparse import Namespace
 
+import numpy as np
 import pandas as pd
+import pytest
 
 from scripts.run_exact_sparse_momentum_gate import (
     DIFFUSION_MODEL,
@@ -12,6 +14,7 @@ from scripts.run_exact_sparse_momentum_gate import (
     build_event_summary,
     build_simulation_command,
     parse_sessions,
+    read_gate_event_scores,
     safe_session_id,
 )
 
@@ -160,6 +163,82 @@ def test_build_event_summary_excludes_string_false_comparable_rows():
 
     assert summary.loc[0, "best_model"] == DIFFUSION_MODEL
     assert bool(summary.loc[0, "exact_surrogate_recovered"]) is False
+
+
+def test_read_gate_event_scores_preserves_decimal_event_ids_beyond_binary64(tmp_path):
+    lower = 2**53
+    upper = lower + 1
+    output = tmp_path / "Rat1_Open1"
+    output.mkdir()
+    pd.DataFrame(
+        [
+            {
+                "status": "success",
+                "session": "Rat1/Open1",
+                "event_index": f"{lower}.0",
+                "model": DIFFUSION_MODEL,
+                "requested_model": DIFFUSION_MODEL,
+                "log_evidence": 1.0,
+            },
+            {
+                "status": "success",
+                "session": "Rat1/Open1",
+                "event_index": f"{upper}.0",
+                "model": DIFFUSION_MODEL,
+                "requested_model": DIFFUSION_MODEL,
+                "log_evidence": 2.0,
+            },
+        ]
+    ).to_csv(output / "simulation_recovery_event_scores.csv", index=False)
+
+    scores = read_gate_event_scores(tmp_path)
+
+    assert scores["event_index"].tolist() == [lower, upper]
+
+
+def test_build_event_summary_rejects_ambiguous_floating_event_ids():
+    with pytest.raises(ValueError, match="floating-point event_index"):
+        build_event_summary(pd.DataFrame({"event_index": [float(2**53 + 1)]}))
+
+
+def test_aggregate_gate_rejects_positive_infinite_required_evidence(tmp_path):
+    event = _fake_event(
+        "Rat1/Open1",
+        0,
+        "momentum",
+        EXACT_SPARSE_MOMENTUM_MODEL,
+    )
+    for row in event:
+        if row["model"] == EXACT_SPARSE_MOMENTUM_MODEL:
+            row["log_evidence"] = float("inf")
+    _write_fake_scores(tmp_path, "Rat1_Open1", [event])
+
+    status = aggregate_gate_results(
+        tmp_path,
+        min_momentum_recovery=0.0,
+        min_diffusion_recovery=0.0,
+        max_first_order_imm_best_fraction=1.0,
+    )
+
+    assert status["gate_passed"] is False
+    assert status["required_exact_model_failures"] == 1
+
+
+def test_build_event_summary_preserves_negative_infinite_required_evidence():
+    event = _fake_event(
+        "Rat1/Open1",
+        0,
+        "diffusion",
+        DIFFUSION_MODEL,
+    )
+    for row in event:
+        if row["model"] == EXACT_SPARSE_MOMENTUM_MODEL:
+            row["log_evidence"] = float("-inf")
+
+    summary = build_event_summary(pd.DataFrame(event))
+
+    assert np.isneginf(summary.loc[0, "exact_sparse_momentum_log_evidence"])
+    assert summary.loc[0, "required_exact_model_failures"] == 0
 
 
 def _write_fake_scores(tmp_path, session_dir: str, events: list[list[dict[str, object]]]) -> None:

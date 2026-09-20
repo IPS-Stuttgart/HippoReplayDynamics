@@ -268,6 +268,29 @@ def run_sleep_evidence(
     }
 
 
+def _is_valid_log_evidence(value: float) -> bool:
+    """Return whether a log evidence is a valid probability-space outcome.
+
+    Negative infinity is valid: it represents exactly zero evidence.  NaN and
+    positive infinity are invalid score outputs.
+    """
+
+    numeric = float(value)
+    return bool(not np.isnan(numeric) and numeric != np.inf)
+
+
+def _log_evidence_difference(left: float, right: float) -> float:
+    """Subtract valid log evidences without turning -inf - -inf into a claim."""
+
+    left_value = float(left)
+    right_value = float(right)
+    if not _is_valid_log_evidence(left_value) or not _is_valid_log_evidence(right_value):
+        return np.nan
+    if np.isneginf(left_value) and np.isneginf(right_value):
+        return np.nan
+    return float(left_value - right_value)
+
+
 def score_selected_event(
     event: pd.Series,
     *,
@@ -364,7 +387,7 @@ def score_selected_event(
         start = time.perf_counter()
         value = float(scores.get(model, np.nan))
         runtime_s = max(time.perf_counter() - start, 0.0)
-        status = "success" if np.isfinite(value) else "fail"
+        status = "success" if _is_valid_log_evidence(value) else "fail"
         rows.append(
             {
                 **meta,
@@ -626,34 +649,63 @@ def claim_decisions(evidence: pd.DataFrame, *, margin_threshold: float) -> pd.Da
     group_cols = ["animal", "date", "track1_session", "sleeppost_session", "pilot_tier", "event_index", "event_id"]
     for _, group in evidence.groupby(group_cols, sort=True, dropna=False):
         base = event_base_from_group(group)
-        by_model = {str(row.model): float(row.log_evidence) for row in group.itertuples(index=False) if str(row.status) == "success"}
+        by_model = {
+            str(row.model): float(row.log_evidence)
+            for row in group.itertuples(index=False)
+            if str(row.status) == "success" and _is_valid_log_evidence(float(row.log_evidence))
+        }
         logz = {model: by_model.get(model, np.nan) for model in REQUIRED_MODELS}
-        finite_items = [(model, value) for model, value in logz.items() if np.isfinite(value)]
-        finite_items.sort(key=lambda item: item[1], reverse=True)
-        best_model = finite_items[0][0] if finite_items else ""
-        runner_up = finite_items[1][0] if len(finite_items) > 1 else ""
-        best_margin = finite_items[0][1] - finite_items[1][1] if len(finite_items) > 1 else np.nan
-        best_traj = max((logz[model] for model in TRAJECTORY_MODELS if np.isfinite(logz[model])), default=np.nan)
-        delta_traj_stationary = best_traj - logz[STATIONARY_MODEL] if np.isfinite(best_traj) and np.isfinite(logz[STATIONARY_MODEL]) else np.nan
-        delta_imm_frag = logz[FIRST_ORDER_IMM_MODEL] - logz[FRAGMENTED_MODEL] if np.isfinite(logz[FIRST_ORDER_IMM_MODEL]) and np.isfinite(logz[FRAGMENTED_MODEL]) else np.nan
-        if np.isfinite(delta_traj_stationary) and delta_traj_stationary >= margin_threshold:
+        valid_items = [(model, value) for model, value in logz.items() if _is_valid_log_evidence(value)]
+        has_finite_reference = any(np.isfinite(value) for _, value in valid_items)
+        if has_finite_reference:
+            valid_items.sort(key=lambda item: item[1], reverse=True)
+            best_model = valid_items[0][0]
+            runner_up = valid_items[1][0] if len(valid_items) > 1 else ""
+            best_margin = (
+                _log_evidence_difference(valid_items[0][1], valid_items[1][1])
+                if len(valid_items) > 1
+                else np.nan
+            )
+        else:
+            best_model = ""
+            runner_up = ""
+            best_margin = np.nan
+
+        trajectory_values = [
+            logz[model]
+            for model in TRAJECTORY_MODELS
+            if _is_valid_log_evidence(logz[model])
+        ]
+        best_traj = max(trajectory_values, default=np.nan)
+        delta_traj_stationary = _log_evidence_difference(best_traj, logz[STATIONARY_MODEL])
+        delta_imm_frag = _log_evidence_difference(logz[FIRST_ORDER_IMM_MODEL], logz[FRAGMENTED_MODEL])
+
+        if not np.isnan(delta_traj_stationary) and delta_traj_stationary >= margin_threshold:
             family_claim = "trajectory_confident"
-        elif np.isfinite(delta_traj_stationary) and delta_traj_stationary <= -margin_threshold:
+        elif not np.isnan(delta_traj_stationary) and delta_traj_stationary <= -margin_threshold:
             family_claim = "nontrajectory_confident"
         else:
             family_claim = "ambiguous"
         fragmented_conf = bool(
             best_model == FRAGMENTED_MODEL
-            and np.isfinite(best_margin)
+            and not np.isnan(best_margin)
             and best_margin >= float(margin_threshold)
         )
         diffusion_conf = bool(
             best_model == DIFFUSION_MODEL
-            and np.isfinite(best_margin)
+            and not np.isnan(best_margin)
             and best_margin >= float(margin_threshold)
         )
-        imm_conf = bool(np.isfinite(delta_imm_frag) and delta_imm_frag >= float(margin_threshold))
-        ambiguous = bool(family_claim == "ambiguous" and not imm_conf and not fragmented_conf and not diffusion_conf)
+        imm_conf = bool(
+            not np.isnan(delta_imm_frag)
+            and delta_imm_frag >= float(margin_threshold)
+        )
+        ambiguous = bool(
+            family_claim == "ambiguous"
+            and not imm_conf
+            and not fragmented_conf
+            and not diffusion_conf
+        )
         rows.append(
             {
                 **base,
@@ -1221,10 +1273,11 @@ def logsumexp(values: np.ndarray) -> float:
 
 def logsumexp_matrix(values: np.ndarray, axis: int) -> np.ndarray:
     arr = np.asarray(values, dtype=float)
-    max_value = np.nanmax(arr, axis=axis, keepdims=True)
+    max_value = np.max(arr, axis=axis, keepdims=True)
     safe = np.where(np.isfinite(max_value), max_value, 0.0)
-    summed = np.nansum(np.exp(arr - safe), axis=axis, keepdims=True)
-    out = safe + np.log(np.maximum(summed, 1e-300))
+    with np.errstate(over="ignore", invalid="ignore", divide="ignore"):
+        summed = np.sum(np.exp(arr - safe), axis=axis, keepdims=True)
+        out = safe + np.log(summed)
     return np.squeeze(out, axis=axis)
 
 

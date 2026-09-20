@@ -62,7 +62,7 @@ def apply_ground_truth_integer_metadata_patch() -> None:
         def unique_int_from_column(frame: Any, column: str, default: int) -> int:
             values = [
                 _parse_integer_metadata_value(column, value)
-                for value in gt._iter_present_column_values(frame, (column,))
+                for value in _iter_present_integer_metadata_values(gt, frame, column)
             ]
             if not values:
                 return int(default)
@@ -246,6 +246,38 @@ def _cell_id_metadata_patch_current(gt: object) -> bool:
     return bool(_ground_truth_cell_id_metadata_patch_current(gt))
 
 
+def _iter_present_integer_metadata_values(gt: Any, frame: Any, column: str):
+    """Yield integer metadata while preserving a floating column's source dtype."""
+
+    if column not in frame.columns:
+        return
+    series = frame[column]
+    try:
+        raw = series.to_numpy(copy=False)
+    except (AttributeError, TypeError, ValueError):
+        raw = np.asarray(series)
+    values = raw if getattr(raw.dtype, "kind", "") == "f" else series
+    missing_values = getattr(gt, "_MISSING_TEXT_VALUES", _MISSING_TEXT_VALUES)
+    for value in values:
+        if gt._is_missing_scalar(value):
+            continue
+        text = str(value).strip()
+        if text.lower() in missing_values:
+            continue
+        yield value
+
+
+def _floating_integer_precision_bits(value: float | np.floating) -> int:
+    """Return the contiguous-integer precision of one floating scalar."""
+
+    if isinstance(value, np.floating):
+        try:
+            return int(np.finfo(value.dtype).nmant) + 1
+        except ValueError:
+            pass
+    return int(np.finfo(float).nmant) + 1
+
+
 def _parse_integer_metadata_value(column: str, value: Any) -> int:
     if isinstance(value, (bool, np.bool_)):
         raise ValueError(f"{column} must contain integer values")
@@ -254,10 +286,15 @@ def _parse_integer_metadata_value(column: str, value: Any) -> int:
     if isinstance(value, (float, np.floating)):
         if not np.isfinite(value):
             raise ValueError(f"{column} must contain finite integer values")
-        integer = int(value)
-        if value != integer:
+        if value != np.trunc(value):
             raise ValueError(f"{column} must contain integer values")
-        return integer
+        precision_bits = _floating_integer_precision_bits(value)
+        if abs(value) >= 1 << precision_bits:
+            raise ValueError(
+                f"{column} contains an ambiguous floating-point identifier "
+                f"with magnitude >= 2**{precision_bits}; use integer or string IDs"
+            )
+        return int(value)
 
     try:
         numeric = Decimal(str(value).strip())

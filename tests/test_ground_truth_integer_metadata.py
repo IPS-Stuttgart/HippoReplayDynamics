@@ -39,6 +39,7 @@ def test_integer_metadata_parser_accepts_exact_longdouble_beyond_float64_when_su
 
     assert _parse_integer_metadata_value("event_index", value) == 2**53 + 1
 
+
 def test_unique_int_from_column_accepts_integer_valued_metadata():
     frame = pd.DataFrame({"benchmark_random_seed": ["7", "7.0"]})
 

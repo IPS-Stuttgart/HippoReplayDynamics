@@ -798,10 +798,19 @@ def _write_cut(path: Path, labels: list[int]) -> None:
 def test_sample_durations_do_not_charge_long_tracking_dropout_as_occupancy() -> None:
     module = _load_module()
     decoder_impl = importlib.import_module("summarize_olafsdottir_track1_decoder_qc_impl")
-    times = np.asarray([0.0, 0.02, 0.04, 2.0, 2.02, 2.04], dtype=float)
-    expected = np.full(times.shape, 0.02, dtype=float)
+    linearizer = importlib.import_module("linearize_olafsdottir_ztrack")
+    cases = (
+        np.asarray([0.0, 0.02, 0.04, 2.0, 2.02, 2.04], dtype=float),
+        np.asarray([0.0, 0.02, 2.0], dtype=float),
+    )
 
-    for durations in (module.sample_durations, decoder_impl.sample_durations):
-        actual = durations(times)
-        np.testing.assert_allclose(actual, expected, rtol=0.0, atol=1e-12)
+    for times in cases:
+        expected = np.full(times.shape, 0.02, dtype=float)
+        for durations in (
+            module.sample_durations,
+            decoder_impl.sample_durations,
+            linearizer._sample_durations,
+        ):
+            actual = durations(times)
+            np.testing.assert_allclose(actual, expected, rtol=0.0, atol=1e-12)
 

@@ -8,7 +8,7 @@ from hipporeplayimm.evidence_reporting import (
 )
 
 
-def test_generic_evidence_support_marks_nonfinite_exact_rows_noncomparable():
+def test_generic_evidence_support_preserves_negative_infinite_exact_rows():
     rows = pd.DataFrame(
         [
             {
@@ -44,7 +44,7 @@ def test_generic_evidence_support_marks_nonfinite_exact_rows_noncomparable():
     assert bool(comparable.loc["finite"])
     assert not bool(comparable.loc["nan"])
     assert not bool(comparable.loc["positive-inf"])
-    assert not bool(comparable.loc["negative-inf"])
+    assert bool(comparable.loc["negative-inf"])
 
 
 def test_simulation_event_best_rows_ignores_nonfinite_exact_rows_with_stale_best_flags():

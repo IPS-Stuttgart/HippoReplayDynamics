@@ -811,10 +811,16 @@ def _recording_time_bin_edges(duration_s: float, bin_size_s: float) -> np.ndarra
 
 
 def _moving_average(values: np.ndarray, window: int) -> np.ndarray:
-    if int(window) <= 1:
-        return np.asarray(values, dtype=float)
-    kernel = np.ones(int(window), dtype=float) / float(window)
-    return np.convolve(np.asarray(values, dtype=float), kernel, mode="same")
+    """Return a length-preserving moving average over the available bins."""
+
+    arr = np.asarray(values, dtype=float)
+    if arr.size == 0:
+        return arr
+    window = min(max(int(window), 1), arr.size)
+    if window <= 1:
+        return arr
+    kernel = np.ones(window, dtype=float) / float(window)
+    return np.convolve(arr, kernel, mode="same")
 
 
 def _robust_z(values: np.ndarray) -> np.ndarray:

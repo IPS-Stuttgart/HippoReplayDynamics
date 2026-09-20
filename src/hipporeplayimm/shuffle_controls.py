@@ -262,7 +262,12 @@ def _with_finite_log_evidence(scores: pd.DataFrame) -> pd.DataFrame:
 
 
 def _finite_real_log_evidence(value: object) -> float:
-    """Return finite real evidence, treating malformed scalar cells as missing."""
+    """Return usable real evidence while preserving valid negative infinity.
+
+    Successful negative-infinite log evidence represents an impossible
+    observation under a model and is therefore a valid zero-probability
+    result. NaN and positive infinity remain invalid numeric results.
+    """
 
     if _is_missing_scalar(value):
         return float("nan")
@@ -282,7 +287,9 @@ def _finite_real_log_evidence(value: object) -> float:
         numeric = float(item)
     except (TypeError, ValueError, OverflowError):
         return float("nan")
-    return numeric if np.isfinite(numeric) else float("nan")
+    if np.isnan(numeric) or np.isposinf(numeric):
+        return float("nan")
+    return numeric
 
 
 def add_shuffle_p_values(real_scores: pd.DataFrame, control_scores: pd.DataFrame) -> pd.DataFrame:
@@ -326,10 +333,15 @@ def add_shuffle_p_values(real_scores: pd.DataFrame, control_scores: pd.DataFrame
     real_keys = _scope_keys(real_scores, group_columns)
     for key, (_, row) in zip(real_keys.to_numpy(dtype=object), real_scores.iterrows()):
         control = control_by_key.get(key, np.array([], dtype=float))
-        control = control[np.isfinite(control)]
+        control = control[~np.isnan(control) & ~np.isposinf(control)]
         real_log_evidence = row.get("log_evidence")
         p_value = np.nan
-        if control.size and np.isfinite(real_log_evidence):
+        real_is_valid = (
+            real_log_evidence is not None
+            and not np.isnan(real_log_evidence)
+            and not np.isposinf(real_log_evidence)
+        )
+        if control.size and real_is_valid:
             p_value = float((1.0 + np.sum(control >= float(real_log_evidence))) / (control.size + 1.0))
         p_values.append(p_value)
 

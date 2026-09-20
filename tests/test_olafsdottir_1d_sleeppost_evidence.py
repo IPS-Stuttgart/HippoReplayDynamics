@@ -654,7 +654,13 @@ def test_score_selected_event_treats_negative_infinity_as_success(
 def test_score_models_with_runtimes_measures_each_model(monkeypatch) -> None:
     module = _load_module()
     ticks = iter([0.0, 0.11, 1.0, 1.22, 2.0, 2.33, 3.0, 3.44])
-    monkeypatch.setattr(module.time, "perf_counter", lambda: next(ticks))
+
+    class FakeTime:
+        @staticmethod
+        def perf_counter() -> float:
+            return next(ticks)
+
+    monkeypatch.setattr(module, "time", FakeTime())
     place_fields = module.PlaceFieldModel(
         unit_ids=(1,),
         bin_centers_cm=np.asarray([0.0, 10.0]),

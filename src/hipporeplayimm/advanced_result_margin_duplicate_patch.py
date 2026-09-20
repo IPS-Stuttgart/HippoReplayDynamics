@@ -66,12 +66,19 @@ def apply_advanced_result_margin_duplicate_patch() -> None:
                 second = group.iloc[1] if len(group) > 1 else None
                 best_value = float(best[evidence_col])
                 second_value = float(second[evidence_col]) if second is not None else np.nan
-                margin = best_value - second_value if second is not None else np.inf
+                all_impossible = np.isneginf(best_value)
+                margin = (
+                    np.nan
+                    if second is None or (all_impossible and np.isneginf(second_value))
+                    else best_value - second_value
+                )
                 row = {column: value for column, value in zip(group_cols, key_tuple, strict=True)}
                 row.update(
                     {
-                        "best_model_by_evidence": str(best[model_col]),
-                        "second_best_model_by_evidence": "" if second is None else str(second[model_col]),
+                        "best_model_by_evidence": "" if all_impossible else str(best[model_col]),
+                        "second_best_model_by_evidence": (
+                            "" if second is None or all_impossible else str(second[model_col])
+                        ),
                         "best_log_evidence": best_value,
                         "second_best_log_evidence": second_value,
                         "evidence_margin_to_second_best": float(margin),
@@ -124,8 +131,9 @@ def _finite_numeric_evidence_rows(frame: pd.DataFrame, evidence_col: str) -> pd.
 
     out = frame.copy()
     evidence = pd.to_numeric(out[evidence_col], errors="coerce")
-    finite = np.isfinite(evidence.to_numpy(dtype=float))
-    out = out.loc[finite].copy()
+    evidence_values = evidence.to_numpy(dtype=float)
+    usable = ~(np.isnan(evidence_values) | np.isposinf(evidence_values))
+    out = out.loc[usable].copy()
     out[evidence_col] = evidence.loc[out.index].astype(float)
     return out
 

@@ -272,9 +272,11 @@ def _collapse_duplicate_models(
     for _, group in grouped:
         group = group.copy()
         numeric_evidence = pd.to_numeric(group[evidence_col], errors="coerce")
-        finite_evidence = numeric_evidence.notna() & np.isfinite(numeric_evidence)
-        group = group.loc[finite_evidence].copy()
-        group[evidence_col] = numeric_evidence.loc[finite_evidence].astype(float)
+        evidence_values = numeric_evidence.to_numpy(dtype=float)
+        usable_evidence = ~(np.isnan(evidence_values) | np.isposinf(evidence_values))
+        usable_evidence = pd.Series(usable_evidence, index=numeric_evidence.index)
+        group = group.loc[usable_evidence].copy()
+        group[evidence_col] = numeric_evidence.loc[usable_evidence].astype(float)
         group = group.sort_values(evidence_col, ascending=False, kind="stable")
         if not group.empty:
             rows.append(group.drop_duplicates(model_col, keep="first"))

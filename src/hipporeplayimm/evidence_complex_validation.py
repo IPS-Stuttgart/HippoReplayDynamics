@@ -76,12 +76,13 @@ def _finite_evidence_series(frame: pd.DataFrame) -> pd.Series:
         values = frame[column]
         missing = values.map(_is_missing_real_scalar).astype(bool)
         numeric = _real_numeric_series(values)
-        finite = pd.Series(
-            np.isfinite(numeric.to_numpy()),
+        numeric_values = numeric.to_numpy()
+        usable = pd.Series(
+            ~(np.isnan(numeric_values) | np.isposinf(numeric_values)),
             index=frame.index,
         )
         observed |= ~missing
-        valid &= missing | finite
+        valid &= missing | usable
     return observed & valid
 
 

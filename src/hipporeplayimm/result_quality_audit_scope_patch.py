@@ -254,12 +254,13 @@ def _patch_row_specific_evidence_finiteness(reporting_module: Any) -> None:
             values = frame[column]
             missing = values.map(_is_missing_scalar).astype(bool)
             numeric = _coerce_evidence_numeric_series(values)
-            finite = pd.Series(
-                np.isfinite(numeric.to_numpy(dtype=float)),
+            numeric_values = numeric.to_numpy(dtype=float)
+            usable = pd.Series(
+                ~(np.isnan(numeric_values) | np.isposinf(numeric_values)),
                 index=frame.index,
             )
             observed |= ~missing
-            valid &= missing | finite
+            valid &= missing | usable
         return observed & valid
 
     setattr(finite_evidence_series, _EVIDENCE_FINITENESS_PATCHED_FLAG, True)
@@ -399,11 +400,12 @@ def _patch_distinct_model_result_quality_margins(gates_module: Any) -> None:
             return
 
         numeric_evidence = _coerce_numeric_series(rows["log_evidence"])
-        finite = pd.Series(
-            np.isfinite(numeric_evidence.to_numpy(dtype=float)),
+        evidence_values = numeric_evidence.to_numpy(dtype=float)
+        usable = pd.Series(
+            ~(np.isnan(evidence_values) | np.isposinf(evidence_values)),
             index=numeric_evidence.index,
         )
-        finite_rows = rows.loc[finite].copy()
+        finite_rows = rows.loc[usable].copy()
         if finite_rows.empty:
             current_annotate(out, group_index, finite_rows, prefix=prefix)
             return
@@ -421,6 +423,8 @@ def _patch_distinct_model_result_quality_margins(gates_module: Any) -> None:
 
         distinct_values = _coerce_numeric_series(distinct["log_evidence"])
         best_value = float(distinct_values.max())
+        if np.isneginf(best_value):
+            return
         best_index = distinct_values.idxmax()
         best_model = _normalized_model_label(distinct.loc[best_index, "model"])
         out.loc[group_index, f"{prefix}_best_model"] = "" if best_model is None else best_model

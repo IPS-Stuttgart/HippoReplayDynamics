@@ -68,3 +68,36 @@ def test_single_model_event_does_not_inflate_strong_margin_fraction() -> None:
 
     gates = quality_gate_summary(scores).set_index("gate")
     assert gates.loc["strong_exact_margin_fraction", "value"] == 0.5
+
+
+def test_all_impossible_exact_models_do_not_manufacture_a_winner() -> None:
+    scores = pd.DataFrame(
+        [
+            {
+                "status": "success",
+                "session": "Rat1/Open1",
+                "event_index": 2,
+                "model": "a",
+                "log_evidence": -np.inf,
+                "evidence_support": EXACT_EVIDENCE_SUPPORT,
+                "evidence_comparable": True,
+            },
+            {
+                "status": "success",
+                "session": "Rat1/Open1",
+                "event_index": 2,
+                "model": "b",
+                "log_evidence": -np.inf,
+                "evidence_support": EXACT_EVIDENCE_SUPPORT,
+                "evidence_comparable": True,
+            },
+        ]
+    )
+
+    annotated = add_evidence_margin_columns(scores)
+
+    assert annotated["exact_model_best_model"].eq("").all()
+    assert annotated["exact_model_rank"].isna().all()
+    assert annotated["exact_model_relative_log_evidence"].isna().all()
+    assert annotated["exact_model_log_evidence_margin"].isna().all()
+    assert annotated["exact_model_margin_category"].eq("").all()

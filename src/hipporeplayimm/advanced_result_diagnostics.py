@@ -128,8 +128,10 @@ def classify_evidence_margin(delta_log_evidence: float) -> str:
     """Classify an evidence margin into tie/weak/strong/decisive buckets."""
 
     value = float(delta_log_evidence)
-    if not np.isfinite(value):
+    if np.isnan(value) or np.isneginf(value):
         return "missing"
+    if np.isposinf(value):
+        return "decisive"
     for label, upper in EVIDENCE_MARGIN_CATEGORIES:
         if value <= upper:
             return label
@@ -172,19 +174,30 @@ def evidence_margin_table(
     rows: list[dict[str, object]] = []
     for key, group in ok.groupby(list(group_cols), sort=False):
         key_tuple = key if isinstance(key, tuple) else (key,)
-        group = group.dropna(subset=[evidence_col]).sort_values(evidence_col, ascending=False)
+        group = group.copy()
+        group[evidence_col] = pd.to_numeric(group[evidence_col], errors="coerce")
+        evidence = group[evidence_col].to_numpy(dtype=float)
+        usable = ~(np.isnan(evidence) | np.isposinf(evidence))
+        group = group.loc[usable].sort_values(evidence_col, ascending=False, kind="stable")
         if group.empty:
             continue
         best = group.iloc[0]
         second = group.iloc[1] if len(group) > 1 else None
         best_value = float(best[evidence_col])
         second_value = float(second[evidence_col]) if second is not None else np.nan
-        margin = best_value - second_value if second is not None else np.inf
+        all_impossible = np.isneginf(best_value)
+        margin = (
+            np.nan
+            if second is None or (all_impossible and np.isneginf(second_value))
+            else best_value - second_value
+        )
         row = {column: value for column, value in zip(group_cols, key_tuple, strict=True)}
         row.update(
             {
-                "best_model_by_evidence": str(best[model_col]),
-                "second_best_model_by_evidence": "" if second is None else str(second[model_col]),
+                "best_model_by_evidence": "" if all_impossible else str(best[model_col]),
+                "second_best_model_by_evidence": (
+                    "" if second is None or all_impossible else str(second[model_col])
+                ),
                 "best_log_evidence": best_value,
                 "second_best_log_evidence": second_value,
                 "evidence_margin_to_second_best": float(margin),

@@ -113,8 +113,11 @@ def load_event_scores(input_path: str | Path, *, exact_only: bool = False) -> pd
     frame["event_index"] = frame["event_index"].map(_exact_event_index)
     frame = ensure_evidence_support_columns(frame)
     frame = frame[frame["status"].astype(str).eq("success")].copy()
-    frame["log_evidence"] = pd.to_numeric(frame["log_evidence"], errors="coerce")
-    frame = frame[np.isfinite(frame["log_evidence"].to_numpy(float))].copy()
+    log_evidence = pd.to_numeric(frame["log_evidence"], errors="coerce").astype(float)
+    values = log_evidence.to_numpy()
+    valid = ~(np.isnan(values) | np.isposinf(values))
+    frame = frame.loc[valid].copy()
+    frame["log_evidence"] = log_evidence.loc[frame.index]
     if exact_only:
         frame = frame[_bool_mask(frame, "evidence_comparable")].copy()
     frame["canonical_model"] = frame["model"].map(canonical_model_name)

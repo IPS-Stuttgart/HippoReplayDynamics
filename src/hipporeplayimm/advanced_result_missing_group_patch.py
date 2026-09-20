@@ -61,8 +61,17 @@ def _numeric_evidence_rows(group: pd.DataFrame, evidence_col: str) -> pd.DataFra
 
     out = group.copy()
     out[evidence_col] = pd.to_numeric(out[evidence_col], errors="coerce")
-    finite = np.isfinite(out[evidence_col].to_numpy(dtype=float))
-    return out.loc[finite].sort_values(evidence_col, ascending=False, kind="stable")
+    evidence = out[evidence_col].to_numpy(dtype=float)
+    usable = ~(np.isnan(evidence) | np.isposinf(evidence))
+    return out.loc[usable].sort_values(evidence_col, ascending=False, kind="stable")
+
+
+def _log_evidence_difference(left: float, right: float) -> float:
+    """Subtract usable log evidences without turning two impossible models into a winner."""
+
+    if np.isneginf(left) and np.isneginf(right):
+        return float("nan")
+    return float(left - right)
 
 
 def apply_advanced_result_missing_group_patch() -> None:
@@ -105,12 +114,19 @@ def apply_advanced_result_missing_group_patch() -> None:
             second = group.iloc[1] if len(group) > 1 else None
             best_value = float(best[evidence_col])
             second_value = float(second[evidence_col]) if second is not None else np.nan
-            margin = best_value - second_value if second is not None else np.inf
+            all_impossible = np.isneginf(best_value)
+            margin = (
+                np.nan
+                if second is None or (all_impossible and np.isneginf(second_value))
+                else best_value - second_value
+            )
             row = {column: value for column, value in zip(group_cols, key_tuple, strict=True)}
             row.update(
                 {
-                    "best_model_by_evidence": str(best[model_col]),
-                    "second_best_model_by_evidence": "" if second is None else str(second[model_col]),
+                    "best_model_by_evidence": "" if all_impossible else str(best[model_col]),
+                    "second_best_model_by_evidence": (
+                        "" if second is None or all_impossible else str(second[model_col])
+                    ),
                     "best_log_evidence": best_value,
                     "second_best_log_evidence": second_value,
                     "evidence_margin_to_second_best": float(margin),
@@ -242,14 +258,15 @@ def apply_advanced_result_missing_group_patch() -> None:
             paired = group[group[model_col].astype(str).isin([positive_model, reference_model])]
             pivot = paired.copy()
             pivot[evidence_col] = pd.to_numeric(pivot[evidence_col], errors="coerce")
-            finite = np.isfinite(pivot[evidence_col].to_numpy(dtype=float))
-            pivot = pivot.loc[finite].drop_duplicates(model_col, keep="last")
+            evidence = pivot[evidence_col].to_numpy(dtype=float)
+            usable = ~(np.isnan(evidence) | np.isposinf(evidence))
+            pivot = pivot.loc[usable].drop_duplicates(model_col, keep="last")
             by_model = pivot.set_index(model_col)
             if positive_model not in by_model.index or reference_model not in by_model.index:
                 continue
             positive_value = float(by_model.loc[positive_model, evidence_col])
             reference_value = float(by_model.loc[reference_model, evidence_col])
-            delta = positive_value - reference_value
+            delta = _log_evidence_difference(positive_value, reference_value)
             if np.isclose(threshold, 0.0) and np.isclose(delta, 0.0):
                 decision = "ambiguous"
                 positive_claimed = False

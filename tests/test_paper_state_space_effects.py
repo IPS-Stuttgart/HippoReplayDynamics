@@ -3,13 +3,14 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 sys.path.insert(0, str(ROOT / "src"))
 
-from paper_state_space_effects import event_effect_table, summarize_paper_effects  # noqa: E402
+from paper_state_space_effects import event_effect_table, load_event_scores, summarize_paper_effects  # noqa: E402
 
 
 def _write_scores(path: Path) -> None:
@@ -241,3 +242,56 @@ def test_summarize_paper_effects_preserves_decimal_form_large_event_ids(tmp_path
         9_007_199_254_740_992,
         9_007_199_254_740_993,
     ]
+
+
+def test_load_event_scores_preserves_negative_infinite_exact_evidence(tmp_path):
+    scores = tmp_path / "event_model_evidence.csv"
+    pd.DataFrame(
+        [
+            {
+                "session": "Rat1/Open1",
+                "event_index": 0,
+                "model": "stationary",
+                "model_family": "nontrajectory",
+                "log_evidence": -np.inf,
+                "status": "success",
+                "evidence_support": "exact_full_grid",
+                "evidence_comparable": True,
+            },
+            {
+                "session": "Rat1/Open1",
+                "event_index": 0,
+                "model": "sorted-spike-state-space-diffusion",
+                "model_family": "trajectory",
+                "log_evidence": 0.0,
+                "status": "success",
+                "evidence_support": "exact_full_grid",
+                "evidence_comparable": True,
+            },
+            {
+                "session": "Rat1/Open1",
+                "event_index": 0,
+                "model": "sorted-spike-state-space-momentum",
+                "model_family": "trajectory",
+                "log_evidence": np.inf,
+                "status": "success",
+                "evidence_support": "exact_full_grid",
+                "evidence_comparable": True,
+            },
+        ]
+    ).to_csv(scores, index=False)
+
+    loaded = load_event_scores(scores)
+    event = event_effect_table(loaded).iloc[0]
+
+    assert set(loaded["model"]) == {
+        "stationary",
+        "sorted-spike-state-space-diffusion",
+    }
+    stationary = loaded[loaded["model"].eq("stationary")].iloc[0]
+    assert np.isneginf(stationary["log_evidence"])
+    assert event["best_exact_nontrajectory_model"] == "stationary"
+    assert event["best_exact_trajectory_model"] == "sorted-spike-state-space-diffusion"
+    assert np.isposinf(event["trajectory_minus_nontrajectory_exact_log_evidence"])
+    assert bool(event["trajectory_strict_win"])
+

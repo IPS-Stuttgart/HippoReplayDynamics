@@ -254,7 +254,7 @@ def test_add_shuffle_p_values_returns_nan_for_nonfinite_real_log_evidence() -> N
     assert out.loc[0, "shuffle_count"] == 2
 
 
-def test_add_shuffle_p_values_ignores_nonfinite_control_log_evidence() -> None:
+def test_add_shuffle_p_values_ignores_invalid_but_keeps_impossible_control_log_evidence() -> None:
     real_scores = pd.DataFrame(
         {
             "session": ["Rat1/Open1"],
@@ -274,6 +274,6 @@ def test_add_shuffle_p_values_ignores_nonfinite_control_log_evidence() -> None:
 
     out = add_shuffle_p_values(real_scores, control_scores)
 
-    assert np.isclose(out.loc[0, "shuffle_p_value"], 2.0 / 3.0)
-    assert out.loc[0, "shuffle_count"] == 2
-    assert out.loc[0, "shuffle_log_evidence_median"] == 10.0
+    assert np.isclose(out.loc[0, "shuffle_p_value"], 0.5)
+    assert out.loc[0, "shuffle_count"] == 3
+    assert out.loc[0, "shuffle_log_evidence_median"] == 8.0

@@ -153,7 +153,8 @@ def _successful_scores(group: pd.DataFrame) -> pd.DataFrame:
             numeric = pd.to_numeric(group["log_evidence"], errors="coerce").to_numpy(dtype=float)
         except (TypeError, ValueError, OverflowError):
             numeric = group["log_evidence"].map(lambda value: _float_value(value, np.nan)).to_numpy(dtype=float)
-    return group[status & pd.Series(np.isfinite(numeric), index=group.index)].copy()
+    usable = ~(np.isnan(numeric) | np.isposinf(numeric))
+    return group[status & pd.Series(usable, index=group.index)].copy()
 
 
 def _comparison_mask(frame: pd.DataFrame) -> pd.Series:

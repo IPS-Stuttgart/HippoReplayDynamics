@@ -40,17 +40,23 @@ _AUDIT_FILENAMES = {
 
 
 def _successful_rows(scores: pd.DataFrame) -> pd.DataFrame:
-    """Return successful rows with finite evidence-support metadata attached."""
+    """Return successful rows with valid evidence-support metadata attached.
+
+    Negative-infinite log evidence is a valid result: it represents zero
+    evidence for a model.  NaN and positive infinity remain invalid and are
+    excluded from the support audit.
+    """
 
     rows = ensure_evidence_support_columns(scores)
     if rows.empty:
         return rows
     rows = rows[_status_success_mask(rows)].copy()
     if "log_evidence" in rows:
-        log_evidence = pd.to_numeric(rows["log_evidence"], errors="coerce")
-        finite = log_evidence.notna() & np.isfinite(log_evidence.astype(float))
-        rows = rows.loc[finite].copy()
-        rows["log_evidence"] = log_evidence.loc[rows.index].astype(float)
+        log_evidence = pd.to_numeric(rows["log_evidence"], errors="coerce").astype(float)
+        values = log_evidence.to_numpy()
+        valid = ~(np.isnan(values) | np.isposinf(values))
+        rows = rows.loc[valid].copy()
+        rows["log_evidence"] = log_evidence.loc[rows.index]
     rows["evidence_comparable"] = _coerce_bool_series(rows["evidence_comparable"])
     return rows
 

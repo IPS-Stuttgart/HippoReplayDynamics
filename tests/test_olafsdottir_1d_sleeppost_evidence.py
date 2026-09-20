@@ -794,6 +794,7 @@ def _write_cut(path: Path, labels: list[int]) -> None:
         encoding="ascii",
     )
 
+
 def test_sample_durations_do_not_charge_long_tracking_dropout_as_occupancy() -> None:
     module = _load_module()
     decoder_impl = importlib.import_module("summarize_olafsdottir_track1_decoder_qc_impl")

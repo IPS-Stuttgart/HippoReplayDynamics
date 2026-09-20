@@ -8,6 +8,7 @@ import sys
 
 import numpy as np
 import pandas as pd
+import pytest
 
 
 def _load_module():
@@ -804,13 +805,38 @@ def test_sample_durations_do_not_charge_long_tracking_dropout_as_occupancy() -> 
         np.asarray([0.0, 0.02, 2.0], dtype=float),
     )
 
+    duration_functions = (
+        module.sample_durations,
+        decoder_impl.sample_durations,
+        linearizer._sample_durations,
+    )
     for times in cases:
         expected = np.full(times.shape, 0.02, dtype=float)
-        for durations in (
-            module.sample_durations,
-            decoder_impl.sample_durations,
-            linearizer._sample_durations,
-        ):
+        for durations in duration_functions:
             actual = durations(times)
             np.testing.assert_allclose(actual, expected, rtol=0.0, atol=1e-12)
+
+    exact_boundary = np.asarray([0.4, 0.5, 1.0], dtype=float)
+    expected_boundary = np.asarray([0.1, 0.5, 0.1], dtype=float)
+    for durations in duration_functions:
+        actual = durations(exact_boundary)
+        np.testing.assert_allclose(actual, expected_boundary, rtol=0.0, atol=1e-12)
+
+
+def test_spike_position_interpolation_rejects_tracking_dropout_queries() -> None:
+    module = _load_module()
+    decoder_impl = importlib.import_module("summarize_olafsdottir_track1_decoder_qc_impl")
+    times = np.asarray([0.0, 0.02, 2.0], dtype=float)
+    linear = np.asarray([0.0, 1.0, 100.0], dtype=float)
+    valid = np.ones(times.shape, dtype=bool)
+    query_times = np.asarray([0.01, 1.0, 2.0], dtype=float)
+
+    for interpolate in (
+        module.interpolate_position_at_times,
+        decoder_impl.interpolate_position_at_times,
+    ):
+        actual = interpolate(query_times, times, linear, valid)
+        assert actual[0] == pytest.approx(0.5)
+        assert np.isnan(actual[1])
+        assert actual[2] == pytest.approx(100.0)
 

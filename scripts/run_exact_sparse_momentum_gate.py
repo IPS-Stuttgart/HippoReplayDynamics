@@ -14,6 +14,7 @@ python scripts/run_exact_sparse_momentum_gate.py data/DataSetFromPfeifferFoster 
 from __future__ import annotations
 
 import argparse
+from decimal import Decimal, InvalidOperation
 import json
 import math
 import os
@@ -23,6 +24,7 @@ import subprocess
 import sys
 import time
 
+import numpy as np
 import pandas as pd
 
 
@@ -459,11 +461,57 @@ def _empty_status(
     }
 
 
+def _exact_event_index(value: object) -> int:
+    """Parse an event identifier without a lossy floating-point round trip."""
+
+    try:
+        if value is None or pd.isna(value):
+            raise ValueError("event_index must contain finite integer identifiers")
+    except (TypeError, ValueError):
+        pass
+    if isinstance(value, (bool, np.bool_)):
+        raise ValueError("event_index must contain integer identifiers, not booleans")
+    if isinstance(value, (int, np.integer)):
+        return int(value)
+    if isinstance(value, (float, np.floating)):
+        if not bool(np.isfinite(value)) or not bool(value.is_integer()):
+            raise ValueError("event_index must contain finite integer identifiers")
+        precision_bits = (
+            int(np.finfo(value.dtype).nmant) + 1
+            if isinstance(value, np.floating)
+            else 53
+        )
+        if abs(value) >= 1 << precision_bits:
+            raise ValueError(
+                f"floating-point event_index at or above 2**{precision_bits} is unsafe; "
+                "load identifiers as strings or integers"
+            )
+        return int(value)
+
+    text = str(value).strip()
+    try:
+        numeric = Decimal(text)
+    except (InvalidOperation, ValueError) as exc:
+        raise ValueError("event_index must contain finite integer identifiers") from exc
+    if not numeric.is_finite():
+        raise ValueError("event_index must contain finite integer identifiers")
+    integral = numeric.to_integral_value()
+    if numeric != integral:
+        raise ValueError("event_index must contain integer-valued identifiers")
+    return int(integral)
+
+
 def read_gate_event_scores(output_dir: Path) -> pd.DataFrame:
     paths = sorted(output_dir.glob("*/simulation_recovery_event_scores.csv"))
     frames = []
     for path in paths:
-        frame = pd.read_csv(path)
+        frame = pd.read_csv(path, dtype={"event_index": "string"})
+        if "event_index" in frame:
+            frame["event_index"] = pd.Series(
+                [_exact_event_index(value) for value in frame["event_index"]],
+                index=frame.index,
+                dtype=object,
+            )
         frame["gate_output_session_dir"] = path.parent.name
         frames.append(frame)
     if not frames:
@@ -472,6 +520,13 @@ def read_gate_event_scores(output_dir: Path) -> pd.DataFrame:
 
 
 def build_event_summary(scores: pd.DataFrame) -> pd.DataFrame:
+    scores = scores.copy()
+    if "event_index" in scores:
+        scores["event_index"] = pd.Series(
+            [_exact_event_index(value) for value in scores["event_index"]],
+            index=scores.index,
+            dtype=object,
+        )
     rows: list[dict[str, object]] = []
     for (session, event_index), group in scores.groupby(
         ["session", "event_index"],
@@ -555,12 +610,30 @@ def _event_best_model(group: pd.DataFrame) -> str:
     return str(scored.iloc[int(values.argmax())]["model"])
 
 
+def _valid_log_evidence(value: object) -> float:
+    """Return a usable real log evidence, preserving valid negative infinity."""
+
+    if isinstance(value, (bool, np.bool_)):
+        return float("nan")
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError, OverflowError):
+        return float("nan")
+    if math.isnan(numeric) or math.isinf(numeric) and numeric > 0.0:
+        return float("nan")
+    return numeric
+
+
 def _successful_finite_rows(group: pd.DataFrame) -> pd.DataFrame:
+    """Keep successful rows with finite or negative-infinite log evidence."""
+
     scored = group.copy()
     if "status" in scored:
         scored = scored[scored["status"].eq("success")]
     if "log_evidence" in scored:
-        scored = scored[pd.to_numeric(scored["log_evidence"], errors="coerce").notna()]
+        numeric = scored["log_evidence"].map(_valid_log_evidence)
+        scored = scored.loc[numeric.notna()].copy()
+        scored["log_evidence"] = numeric.loc[scored.index].astype(float)
     return scored
 
 
@@ -684,7 +757,7 @@ def _mode_or_empty(values: pd.Series) -> str:
 
 
 def _required_failure_count(frame: pd.DataFrame) -> int:
-    if frame.empty or "status" not in frame:
+    if frame.empty:
         return 0
     model_values = (
         frame["model"].astype(str)
@@ -699,7 +772,17 @@ def _required_failure_count(frame: pd.DataFrame) -> int:
     required = model_values.isin(REQUIRED_EXACT_MODELS) | requested_values.isin(
         REQUIRED_EXACT_MODELS
     )
-    return int((required & frame["status"].ne("success")).sum())
+    status_success = (
+        frame["status"].eq("success")
+        if "status" in frame
+        else pd.Series(True, index=frame.index)
+    )
+    valid_evidence = (
+        frame["log_evidence"].map(_valid_log_evidence).notna()
+        if "log_evidence" in frame
+        else pd.Series(False, index=frame.index)
+    )
+    return int((required & (~status_success | ~valid_evidence)).sum())
 
 
 def _missing_required_score_count(scores: pd.DataFrame) -> int:

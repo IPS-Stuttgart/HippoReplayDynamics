@@ -1291,16 +1291,27 @@ def occupancy_seconds(linear: np.ndarray, times: np.ndarray, valid: np.ndarray, 
 
 
 def sample_durations(times: np.ndarray) -> np.ndarray:
+    """Return per-sample occupancy durations without spanning tracking dropouts."""
+
     arr = np.asarray(times, dtype=float)
     if arr.size == 0:
         return arr
     if arr.size == 1:
         return np.asarray([0.0], dtype=float)
+
     diffs = np.diff(arr)
     positive = diffs[np.isfinite(diffs) & (diffs > 0.0)]
-    default = float(np.nanmedian(positive)) if positive.size else 0.0
-    dt = np.diff(arr, append=arr[-1] + default)
-    dt[~np.isfinite(dt) | (dt <= 0.0)] = default
+    nominal = float(np.median(positive)) if positive.size else 0.0
+    max_contiguous_gap = max(5.0 * nominal, np.finfo(float).eps)
+
+    dt = np.empty(arr.shape, dtype=float)
+    contiguous = (
+        np.isfinite(diffs)
+        & (diffs > 0.0)
+        & (diffs <= max_contiguous_gap)
+    )
+    dt[:-1] = np.where(contiguous, diffs, nominal)
+    dt[-1] = nominal
     return dt
 
 

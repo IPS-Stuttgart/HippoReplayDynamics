@@ -463,6 +463,7 @@ def score_models(
         ),
     }
 
+
 def score_models_with_runtimes(
     counts: np.ndarray,
     place_fields: PlaceFieldModel,

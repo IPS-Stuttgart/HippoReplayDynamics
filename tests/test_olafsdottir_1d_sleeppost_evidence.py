@@ -445,6 +445,201 @@ def test_poisson_log_emissions_uses_partial_bin_duration() -> None:
     np.testing.assert_allclose(emissions[:, 0], [-0.2, -0.05], rtol=0.0, atol=1e-12)
 
 
+def test_logsumexp_matrix_preserves_impossible_and_invalid_slices() -> None:
+    module = _load_module()
+    values = np.asarray(
+        [
+            [-np.inf, -np.inf],
+            [0.0, -np.inf],
+            [np.nan, 0.0],
+        ],
+        dtype=float,
+    )
+
+    reduced = module.logsumexp_matrix(values, axis=1)
+
+    assert np.isneginf(reduced[0])
+    assert reduced[1] == 0.0
+    assert np.isnan(reduced[2])
+
+
+def test_claim_decisions_keeps_negative_infinite_model_evidence() -> None:
+    module = _load_module()
+    base = {
+        "animal": "R2142",
+        "date": "2014-08-06",
+        "track1_session": "track1",
+        "sleeppost_session": "sleepPOST",
+        "pilot_tier": "pilot_20_balanced",
+        "decoder_filter": "paper_ready",
+        "event_index": 0,
+        "event_id": 0,
+        "start_time_s": 0.0,
+        "end_time_s": 0.02,
+        "duration_ms": 20.0,
+        "n_spikes": 1,
+        "n_active_units": 1,
+        "mean_speed_cm_s": 0.0,
+        "decoder_qc_passed": True,
+        "linearization_qc_passed": True,
+    }
+
+    def decision_for(logz: dict[str, float]) -> pd.Series:
+        evidence = pd.DataFrame(
+            [
+                {
+                    **base,
+                    "model": model,
+                    "model_family": module.model_family(model),
+                    "log_evidence": logz[model],
+                    "status": "success",
+                    "failure_reason": "",
+                    "runtime_s": 0.0,
+                }
+                for model in module.REQUIRED_MODELS
+            ]
+        )
+        return module.claim_decisions(evidence, margin_threshold=5.5).iloc[0]
+
+    stationary_only = decision_for(
+        {
+            module.STATIONARY_MODEL: 0.0,
+            module.DIFFUSION_MODEL: -np.inf,
+            module.FRAGMENTED_MODEL: -np.inf,
+            module.FIRST_ORDER_IMM_MODEL: -np.inf,
+        }
+    )
+    assert stationary_only["best_model"] == module.STATIONARY_MODEL
+    assert np.isposinf(stationary_only["best_minus_runner_up_log_evidence"])
+    assert np.isneginf(stationary_only["delta_best_trajectory_minus_stationary"])
+    assert stationary_only["trajectory_family_claim"] == "nontrajectory_confident"
+
+    diffusion_only = decision_for(
+        {
+            module.STATIONARY_MODEL: -np.inf,
+            module.DIFFUSION_MODEL: 0.0,
+            module.FRAGMENTED_MODEL: -np.inf,
+            module.FIRST_ORDER_IMM_MODEL: -np.inf,
+        }
+    )
+    assert diffusion_only["best_model"] == module.DIFFUSION_MODEL
+    assert np.isposinf(diffusion_only["best_minus_runner_up_log_evidence"])
+    assert np.isposinf(diffusion_only["delta_best_trajectory_minus_stationary"])
+    assert diffusion_only["trajectory_family_claim"] == "trajectory_confident"
+    assert bool(diffusion_only["brownian_diffusion_claim"])
+
+
+def test_score_selected_event_treats_negative_infinity_as_success(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    module = _load_module()
+    event = pd.Series(
+        {
+            "animal": "R2142",
+            "date": "2014-08-06",
+            "track1_session": "track1",
+            "sleeppost_session": "sleepPOST",
+            "selection_tier": "pilot_20_balanced",
+            "decoder_filter": "paper_ready",
+            "event_index": 0,
+            "event_id": 0,
+            "start_time_s": 0.0,
+            "end_time_s": 0.02,
+            "duration_ms": 20.0,
+            "n_spikes": 1,
+            "n_active_units": 1,
+            "mean_speed_cm_s": 0.0,
+        }
+    )
+    pairs = pd.DataFrame(
+        [
+            {
+                "animal": "R2142",
+                "date": "2014-08-06",
+                "track_session": "track1",
+                "sleepPOST_session": "sleepPOST",
+                "hippocampal_tetrodes": "1",
+                "usable_pair": True,
+            }
+        ]
+    )
+    linearization = pd.DataFrame(
+        [
+            {
+                "animal": "R2142",
+                "date": "2014-08-06",
+                "track_session": "track1",
+                "sleeppost_session": "sleepPOST",
+                "linearization_status": "pass",
+            }
+        ]
+    )
+    decoder = pd.DataFrame(
+        [
+            {
+                "animal": "R2142",
+                "date": "2014-08-06",
+                "track1_session": "track1",
+                "sleeppost_session": "sleepPOST",
+                "decoder_status": "pass",
+            }
+        ]
+    )
+    cache = {
+        ("R2142", "2014-08-06", "track1", "sleepPOST"): (
+            module.PlaceFieldModel(
+                unit_ids=(1,),
+                bin_centers_cm=np.asarray([0.0]),
+                occupancy_s=np.asarray([1.0]),
+                prior=np.asarray([1.0]),
+                rates_hz=np.asarray([[1.0]]),
+            ),
+            module.SessionSpikes(
+                spike_times_s=np.asarray([0.01]),
+                unit_ids=np.asarray([1]),
+                units=(1,),
+            ),
+        )
+    }
+    monkeypatch.setattr(
+        module,
+        "score_models",
+        lambda *args, **kwargs: {
+            module.STATIONARY_MODEL: -np.inf,
+            module.DIFFUSION_MODEL: 0.0,
+            module.FRAGMENTED_MODEL: np.nan,
+            module.FIRST_ORDER_IMM_MODEL: np.inf,
+        },
+    )
+
+    rows = module.score_selected_event(
+        event,
+        dataset_root=tmp_path,
+        pairs=pairs,
+        linearization=linearization,
+        decoder=decoder,
+        linearization_root=tmp_path,
+        cache=cache,
+        margin_threshold=5.5,
+        position_bin_size_cm=5.0,
+        time_bin_s=0.02,
+        min_unit_spikes=1,
+        min_encoding_units=1,
+        smoothing_bins=1,
+        diffusion_sigma_cm=12.5,
+        stationary_self_transition=0.98,
+        imm_mode_persistence=0.92,
+    )
+
+    by_model = {row["model"]: row for row in rows}
+    assert by_model[module.STATIONARY_MODEL]["status"] == "success"
+    assert by_model[module.STATIONARY_MODEL]["failure_reason"] == ""
+    assert by_model[module.DIFFUSION_MODEL]["status"] == "success"
+    assert by_model[module.FRAGMENTED_MODEL]["status"] == "fail"
+    assert by_model[module.FIRST_ORDER_IMM_MODEL]["status"] == "fail"
+
+
 def _write_linearized_position(path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     times = np.arange(0.0, 20.0, 0.05)

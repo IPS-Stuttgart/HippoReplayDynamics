@@ -1,8 +1,43 @@
+import numpy as np
 import pandas as pd
 import pytest
 
 from hipporeplayimm.ground_truth import _parse_cell_ids, _unique_int_from_column
-from hipporeplayimm.ground_truth_integer_metadata import _read_ground_truth_score_csv
+from hipporeplayimm.ground_truth_integer_metadata import (
+    _parse_integer_metadata_value,
+    _read_ground_truth_score_csv,
+)
+
+
+
+def test_integer_metadata_parser_rejects_float32_alias_at_precision_limit():
+    value = np.float32(2**24 + 1)
+
+    assert value == np.float32(2**24)
+    with pytest.raises(ValueError, match=r"2\*\*24"):
+        _parse_integer_metadata_value("event_index", value)
+
+
+def test_integer_metadata_parser_rejects_float64_at_precision_limit():
+    with pytest.raises(ValueError, match=r"2\*\*53"):
+        _parse_integer_metadata_value("event_index", float(2**53))
+
+
+def test_unique_int_from_column_preserves_float32_dtype_for_precision_guard():
+    frame = pd.DataFrame(
+        {"benchmark_random_seed": pd.Series([np.float32(2**24)], dtype=np.float32)}
+    )
+
+    with pytest.raises(ValueError, match=r"2\*\*24"):
+        _unique_int_from_column(frame, "benchmark_random_seed", 1)
+
+
+def test_integer_metadata_parser_accepts_exact_longdouble_beyond_float64_when_supported():
+    if np.finfo(np.longdouble).nmant <= np.finfo(float).nmant:
+        pytest.skip("longdouble does not provide precision beyond float64")
+    value = np.longdouble(str(2**53 + 1))
+
+    assert _parse_integer_metadata_value("event_index", value) == 2**53 + 1
 
 
 def test_unique_int_from_column_accepts_integer_valued_metadata():

@@ -37,6 +37,30 @@ def test_parse_cell_ids_rejects_invalid_utf8_buffer_metadata(value: object):
         _parse_cell_ids(value)
 
 
+
+def test_parse_cell_ids_rejects_float32_array_alias_at_precision_limit():
+    value = np.float32(2**24 + 1)
+
+    assert value == np.float32(2**24)
+    with pytest.raises(ValueError, match=r"2\*\*24"):
+        _parse_cell_ids(np.asarray([value], dtype=np.float32))
+
+
+def test_parse_cell_ids_rejects_float64_at_precision_limit():
+    with pytest.raises(ValueError, match=r"2\*\*53"):
+        _parse_cell_ids([float(2**53)])
+
+
+def test_parse_cell_ids_accepts_exact_longdouble_beyond_float64_when_supported():
+    if np.finfo(np.longdouble).nmant <= np.finfo(float).nmant:
+        pytest.skip("longdouble does not provide precision beyond float64")
+    if np.iinfo(int).max < 2**53 + 1:
+        pytest.skip("platform integer dtype cannot represent the test identifier")
+    value = np.longdouble(str(2**53 + 1))
+
+    np.testing.assert_array_equal(_parse_cell_ids(np.asarray([value], dtype=np.longdouble)), np.array([2**53 + 1]))
+
+
 def test_parse_cell_ids_rejects_fractional_metadata():
     fractional_cell = 2 + 0.5
     with pytest.raises(ValueError, match="cell ID metadata"):

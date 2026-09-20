@@ -270,7 +270,12 @@ def _integer_array_from_values(values: Any) -> np.ndarray:
             bytes(value) if isinstance(value, (bytearray, memoryview)) else value
             for value in values
         ]
-    parsed = [_parse_cell_id_value(value) for value in np.asarray(values, dtype=object).reshape(-1)]
+    flat_values = (
+        values.reshape(-1)
+        if isinstance(values, np.ndarray) and values.dtype.kind == "f"
+        else np.asarray(values, dtype=object).reshape(-1)
+    )
+    parsed = [_parse_cell_id_value(value) for value in flat_values]
     integer_info = np.iinfo(int)
     if any(value < integer_info.min or value > integer_info.max for value in parsed):
         raise ValueError(
@@ -288,6 +293,17 @@ def _cell_id_text(value: object) -> str:
     return str(value)
 
 
+def _floating_integer_precision_bits(value: float | np.floating) -> int:
+    """Return the contiguous-integer precision of one floating scalar."""
+
+    if isinstance(value, np.floating):
+        try:
+            return int(np.finfo(value.dtype).nmant) + 1
+        except ValueError:
+            pass
+    return int(np.finfo(float).nmant) + 1
+
+
 def _parse_cell_id_value(value: Any) -> int:
     if isinstance(value, (bool, np.bool_)):
         raise ValueError("score-table cell IDs cell ID metadata must not contain boolean identifiers")
@@ -296,10 +312,15 @@ def _parse_cell_id_value(value: Any) -> int:
     if isinstance(value, (float, np.floating)):
         if not np.isfinite(value):
             raise ValueError("score-table cell IDs cell ID metadata must contain finite integer values")
-        integer = int(value)
-        if value != integer:
+        if value != np.trunc(value):
             raise ValueError(_CELL_ID_METADATA_ERROR)
-        return integer
+        precision_bits = _floating_integer_precision_bits(value)
+        if abs(value) >= 1 << precision_bits:
+            raise ValueError(
+                "score-table cell IDs contain an ambiguous floating-point identifier "
+                f"with magnitude >= 2**{precision_bits}; use integer or string IDs"
+            )
+        return int(value)
 
     try:
         numeric = Decimal(_cell_id_text(value).strip())

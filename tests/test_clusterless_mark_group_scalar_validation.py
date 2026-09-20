@@ -82,6 +82,51 @@ def test_clusterless_mark_likelihood_rejects_fractional_extended_precision_group
         )
 
 
+@pytest.mark.parametrize(
+    ("dtype", "precision_bits"),
+    [
+        (np.float32, 24),
+        (np.float64, 53),
+    ],
+)
+def test_clusterless_mark_likelihood_rejects_ambiguous_native_float_group_ids(
+    dtype,
+    precision_bits: int,
+) -> None:
+    value = dtype(1 << precision_bits)
+    encoding = _encoding_with_group_ids(np.array([1], dtype=object))
+
+    with pytest.raises(ValueError, match="outside the reliable integer identifier range"):
+        encoding._coerce_group_indices(
+            np.array([value], dtype=dtype),
+            n_marks=1,
+        )
+
+
+@pytest.mark.parametrize(
+    ("dtype", "precision_bits"),
+    [
+        (np.float32, 24),
+        (np.float64, 53),
+    ],
+)
+def test_clusterless_mark_likelihood_accepts_largest_reliable_native_float_group_id(
+    dtype,
+    precision_bits: int,
+) -> None:
+    expected = (1 << precision_bits) - 1
+    value = dtype(expected)
+    encoding = _encoding_with_group_ids(np.array([expected], dtype=object))
+
+    group_indices = encoding._coerce_group_indices(
+        np.array([value], dtype=dtype),
+        n_marks=1,
+    )
+
+    np.testing.assert_array_equal(group_indices, np.array([0]))
+
+
+
 def test_clusterless_mark_likelihood_preserves_integral_extended_precision_group_ids() -> None:
     if np.finfo(np.longdouble).nmant <= np.finfo(float).nmant:
         pytest.skip("long double does not provide extended precision on this platform")

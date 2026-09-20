@@ -18,8 +18,8 @@ def test_model_averaged_endpoint_margin_preserves_negative_infinite_comparator()
             "evidence_comparable": [True, True],
             "model_probability": [1.0, 0.0],
             "log_evidence": [5.0, -np.inf],
-            "diagnostic_decoded_endpoint_x": [3.0, 100.0],
-            "diagnostic_decoded_endpoint_y": [4.0, 200.0],
+            "diagnostic_decoded_endpoint_x": [3.0, np.nan],
+            "diagnostic_decoded_endpoint_y": [4.0, np.nan],
         }
     )
 
@@ -27,7 +27,7 @@ def test_model_averaged_endpoint_margin_preserves_negative_infinite_comparator()
 
     np.testing.assert_allclose(out["model_averaged_endpoint_x"], 3.0)
     np.testing.assert_allclose(out["model_averaged_endpoint_y"], 4.0)
-    assert out["model_averaged_endpoint_models"].tolist() == [2, 2]
+    assert out["model_averaged_endpoint_models"].tolist() == [1, 1]
     assert np.isposinf(out["model_log_evidence_margin"]).all()
 
 

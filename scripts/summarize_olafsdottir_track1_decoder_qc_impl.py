@@ -1157,11 +1157,16 @@ def valid_position_mask(linearized: pd.DataFrame) -> np.ndarray:
 
 
 def smooth_1d(values: np.ndarray, smoothing_bins: int) -> np.ndarray:
-    window = max(int(smoothing_bins), 1)
+    """Smooth without changing the number of spatial bins."""
+
+    arr = np.asarray(values, dtype=float)
+    if arr.size == 0:
+        return arr
+    window = min(max(int(smoothing_bins), 1), arr.size)
     if window <= 1:
-        return np.asarray(values, dtype=float)
+        return arr
     kernel = np.ones(window, dtype=float) / float(window)
-    return np.convolve(np.asarray(values, dtype=float), kernel, mode="same")
+    return np.convolve(arr, kernel, mode="same")
 
 
 def matching_linearization_row(linearization: pd.DataFrame, animal: str, date: str, track_session: str) -> pd.Series | None:

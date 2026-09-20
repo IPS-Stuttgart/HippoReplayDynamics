@@ -487,14 +487,22 @@ def _annotate_margin_scope(
     if rows.empty or "log_evidence" not in rows:
         return
     values = _coerce_numeric_series(rows["log_evidence"])
-    finite = pd.Series(np.isfinite(values.to_numpy(dtype=float)), index=values.index)
-    rows = rows.loc[finite].copy()
+    numeric = values.to_numpy(dtype=float)
+    usable = pd.Series(
+        ~(np.isnan(numeric) | np.isposinf(numeric)),
+        index=values.index,
+    )
+    rows = rows.loc[usable].copy()
     values = values.loc[rows.index].to_numpy(dtype=float)
     if rows.empty:
         return
     order = np.argsort(-values, kind="mergesort")
     ordered_index = rows.index.to_numpy()[order]
     ordered_values = values[order]
+    if np.isneginf(ordered_values[0]):
+        # All usable models assign exactly zero evidence. There is no defined
+        # winner or evidence margin because -inf - -inf is indeterminate.
+        return
     best_index = ordered_index[0]
     best_model = str(out.loc[best_index, "model"]) if "model" in out else ""
     margin = (

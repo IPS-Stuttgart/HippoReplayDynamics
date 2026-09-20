@@ -270,10 +270,9 @@ def _integer_array_from_values(values: Any) -> np.ndarray:
             bytes(value) if isinstance(value, (bytearray, memoryview)) else value
             for value in values
         ]
-    raw_values = np.asarray(values)
     flat_values = (
-        raw_values.reshape(-1)
-        if raw_values.dtype.kind == "f"
+        values.reshape(-1)
+        if isinstance(values, np.ndarray) and values.dtype.kind == "f"
         else np.asarray(values, dtype=object).reshape(-1)
     )
     parsed = [_parse_cell_id_value(value) for value in flat_values]

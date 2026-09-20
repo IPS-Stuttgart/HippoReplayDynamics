@@ -164,13 +164,15 @@ def _normalize_group_cols(group_cols: Sequence[str] | str | None, scores: pd.Dat
 
 
 def _coerce_nonfinite_evidence_to_missing(scores: pd.DataFrame, evidence_col: str) -> pd.DataFrame:
-    """Ensure paired comparisons ignore NaN/+inf/-inf evidence rows uniformly."""
+    """Reject malformed/+inf evidence while preserving valid zero-mass -inf rows."""
 
     if scores.empty or evidence_col not in scores.columns:
         return scores
     out = scores.copy()
     numeric = pd.to_numeric(out[evidence_col], errors="coerce")
-    out[evidence_col] = numeric.where(np.isfinite(numeric), np.nan)
+    values = numeric.to_numpy(dtype=float)
+    usable = ~(np.isnan(values) | np.isposinf(values))
+    out[evidence_col] = numeric.where(usable, np.nan)
     return out
 
 
@@ -180,7 +182,7 @@ def _sort_scores_for_duplicate_model_evidence(
     evidence_col: str,
     model_col: str,
 ) -> pd.DataFrame:
-    """Order duplicate model rows so keep-last reducers use the best finite evidence."""
+    """Order duplicate model rows so keep-last reducers use the best usable evidence."""
 
     if scores.empty or evidence_col not in scores.columns or model_col not in scores.columns:
         return scores

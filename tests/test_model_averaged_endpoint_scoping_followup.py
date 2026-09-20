@@ -104,3 +104,47 @@ def test_model_averaged_endpoint_accepts_scope_integers_beyond_float_range() -> 
     assert out["model_averaged_endpoint_x"].tolist() == pytest.approx([3.0, 3.0])
     assert out["model_averaged_endpoint_y"].tolist() == pytest.approx([13.0, 13.0])
     assert out["model_averaged_endpoint_models"].tolist() == [2, 2]
+
+def test_model_averaged_endpoint_margin_preserves_negative_infinite_runner_up() -> None:
+    scores = pd.DataFrame(
+        {
+            "session": ["RatX/Open1", "RatX/Open1"],
+            "event_index": [0, 0],
+            "model": ["state-space-first-order-imm", "state-space-diffusion"],
+            "evidence_comparable": [True, True],
+            "model_probability": [1.0, 0.0],
+            "log_evidence": [0.0, -np.inf],
+            "diagnostic_decoded_endpoint_x": [2.0, 99.0],
+            "diagnostic_decoded_endpoint_y": [3.0, 99.0],
+        }
+    )
+
+    out = add_model_averaged_endpoint_columns(scores)
+
+    assert out["model_averaged_endpoint_x"].tolist() == pytest.approx([2.0, 2.0])
+    assert out["model_averaged_endpoint_y"].tolist() == pytest.approx([3.0, 3.0])
+    assert out["model_averaged_endpoint_models"].tolist() == [2, 2]
+    assert np.isposinf(out["model_log_evidence_margin"]).all()
+
+
+def test_model_averaged_endpoint_duplicate_model_prefers_negative_infinity_over_missing_evidence() -> None:
+    scores = pd.DataFrame(
+        {
+            "session": ["RatX/Open1"] * 3,
+            "event_index": [0, 0, 0],
+            "model": ["state-space-diffusion", "state-space-diffusion", "state-space-first-order-imm"],
+            "evidence_comparable": [True, True, True],
+            "model_probability": [0.4, 0.0, 1.0],
+            "log_evidence": [np.nan, -np.inf, 0.0],
+            "diagnostic_decoded_endpoint_x": [100.0, 200.0, 10.0],
+            "diagnostic_decoded_endpoint_y": [100.0, 200.0, 20.0],
+        }
+    )
+
+    out = add_model_averaged_endpoint_columns(scores)
+
+    assert out["model_averaged_endpoint_x"].tolist() == pytest.approx([10.0] * 3)
+    assert out["model_averaged_endpoint_y"].tolist() == pytest.approx([20.0] * 3)
+    assert out["model_averaged_endpoint_models"].tolist() == [2, 2, 2]
+    assert np.isposinf(out["model_log_evidence_margin"]).all()
+

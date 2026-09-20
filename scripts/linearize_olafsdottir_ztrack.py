@@ -36,17 +36,26 @@ def validate_centerline(centerline: np.ndarray) -> np.ndarray:
     return arr
 
 
-def _max_contiguous_sample_gap_s(times_s: np.ndarray) -> float:
-    """Return the largest timestamp gap still treated as continuously tracked."""
+def _nominal_sample_interval_s(times_s: np.ndarray) -> float:
+    """Return a conservative nominal positive sampling interval."""
 
     times = np.asarray(times_s, dtype=float).reshape(-1)
     if times.size < 2:
-        return float("inf")
+        return 0.0
     diffs = np.diff(times)
     finite_positive = diffs[np.isfinite(diffs) & (diffs > 0.0)]
     if finite_positive.size == 0:
+        return 0.0
+    ordered = np.sort(finite_positive)
+    return float(ordered[(ordered.size - 1) // 2])
+
+
+def _max_contiguous_sample_gap_s(times_s: np.ndarray) -> float:
+    """Return the largest timestamp gap still treated as continuously tracked."""
+
+    nominal_interval_s = _nominal_sample_interval_s(times_s)
+    if nominal_interval_s <= 0.0:
         return float("inf")
-    nominal_interval_s = float(np.median(finite_positive))
     return max(
         _MAX_CONTIGUOUS_SAMPLE_GAP_MULTIPLIER * nominal_interval_s,
         np.finfo(float).eps,
@@ -566,8 +575,8 @@ def _sample_durations(times_s: np.ndarray) -> np.ndarray:
     if times.shape[0] == 1:
         return np.ones(1, dtype=float)
     diffs = np.diff(times)
-    finite_positive = diffs[np.isfinite(diffs) & (diffs > 0.0)]
-    fallback = float(np.median(finite_positive)) if finite_positive.size else 1.0 / 50.0
+    nominal_interval_s = _nominal_sample_interval_s(times)
+    fallback = nominal_interval_s if nominal_interval_s > 0.0 else 1.0 / 50.0
     max_gap = _max_contiguous_sample_gap_s(times)
     contiguous = np.isfinite(diffs) & (diffs > 0.0) & (diffs <= max_gap)
     durations = np.empty(times.shape[0], dtype=float)

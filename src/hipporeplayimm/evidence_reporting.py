@@ -331,7 +331,9 @@ def _finite_evidence_series(frame: pd.DataFrame) -> pd.Series:
         if column in frame:
             found = True
             values = pd.to_numeric(frame[column], errors="coerce")
-            finite &= pd.Series(np.isfinite(values.to_numpy(dtype=float)), index=frame.index)
+            numeric = values.to_numpy(dtype=float)
+            usable = ~(np.isnan(numeric) | np.isposinf(numeric))
+            finite &= pd.Series(usable, index=frame.index)
     if found:
         return finite
     return pd.Series(True, index=frame.index)

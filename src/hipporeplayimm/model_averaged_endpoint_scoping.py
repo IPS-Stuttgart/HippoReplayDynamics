@@ -69,13 +69,28 @@ def add_model_averaged_endpoint_columns(df: pd.DataFrame) -> pd.DataFrame:
         ):
             if column in exact.columns:
                 exact[column] = pd.to_numeric(exact[column], errors="coerce")
-        exact = exact.dropna(subset=["model_probability", "diagnostic_decoded_endpoint_x", "diagnostic_decoded_endpoint_y"])
-        exact = _finite_endpoint_average_rows(exact)
-        exact = _distinct_model_rows(exact)
-        if exact.empty:
+
+        # Evidence ranking is independent of whether a model exposes a usable
+        # decoded endpoint.  Do not silently remove a valid comparator merely
+        # because its endpoint diagnostic is missing or non-finite.
+        evidence_rows = _distinct_model_rows(exact)
+        margin = _log_evidence_margin(evidence_rows)
+        positions = np.asarray(row_positions, dtype=int)
+        out.iloc[positions, out.columns.get_loc("model_log_evidence_margin")] = margin
+
+        endpoint_rows = exact.dropna(
+            subset=[
+                "model_probability",
+                "diagnostic_decoded_endpoint_x",
+                "diagnostic_decoded_endpoint_y",
+            ]
+        )
+        endpoint_rows = _finite_endpoint_average_rows(endpoint_rows)
+        endpoint_rows = _distinct_model_rows(endpoint_rows)
+        if endpoint_rows.empty:
             continue
 
-        weights = exact["model_probability"].to_numpy(dtype=float, copy=True)
+        weights = endpoint_rows["model_probability"].to_numpy(dtype=float, copy=True)
         scale = float(np.max(weights))
         if scale <= 0.0 or not np.isfinite(scale):
             continue
@@ -84,18 +99,21 @@ def add_model_averaged_endpoint_columns(df: pd.DataFrame) -> pd.DataFrame:
         if total <= 0.0 or not np.isfinite(total):
             continue
         weights /= total
-        x = _finite_weighted_mean(weights, exact["diagnostic_decoded_endpoint_x"].to_numpy(dtype=float))
-        y = _finite_weighted_mean(weights, exact["diagnostic_decoded_endpoint_y"].to_numpy(dtype=float))
+        x = _finite_weighted_mean(
+            weights,
+            endpoint_rows["diagnostic_decoded_endpoint_x"].to_numpy(dtype=float),
+        )
+        y = _finite_weighted_mean(
+            weights,
+            endpoint_rows["diagnostic_decoded_endpoint_y"].to_numpy(dtype=float),
+        )
         positive = weights > 0.0
         entropy = float(-np.sum(weights[positive] * np.log(weights[positive])))
-        margin = _log_evidence_margin(exact)
 
-        positions = np.asarray(row_positions, dtype=int)
         out.iloc[positions, out.columns.get_loc("model_averaged_endpoint_x")] = x
         out.iloc[positions, out.columns.get_loc("model_averaged_endpoint_y")] = y
-        out.iloc[positions, out.columns.get_loc("model_averaged_endpoint_models")] = int(exact.shape[0])
+        out.iloc[positions, out.columns.get_loc("model_averaged_endpoint_models")] = int(endpoint_rows.shape[0])
         out.iloc[positions, out.columns.get_loc("model_probability_entropy")] = entropy
-        out.iloc[positions, out.columns.get_loc("model_log_evidence_margin")] = margin
     return out
 
 

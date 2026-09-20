@@ -22,7 +22,7 @@ def _scores_with_invalid_evidence() -> pd.DataFrame:
     )
 
 
-def test_evidence_margin_ignores_nonfinite_and_nonnumeric_rows() -> None:
+def test_evidence_margin_keeps_negative_infinity_but_rejects_invalid_rows() -> None:
     margins = evidence_margin_table(_scores_with_invalid_evidence())
 
     assert len(margins) == 1
@@ -33,7 +33,7 @@ def test_evidence_margin_ignores_nonfinite_and_nonnumeric_rows() -> None:
     assert margin["second_best_log_evidence"] == 3.0
     assert margin["evidence_margin_to_second_best"] == 2.0
     assert margin["evidence_margin_category"] == "weak"
-    assert margin["models_compared"] == 2
+    assert margin["models_compared"] == 3
 
 
 def test_evidence_margin_columns_use_only_finite_model_scores() -> None:

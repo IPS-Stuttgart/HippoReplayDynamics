@@ -1301,7 +1301,12 @@ def sample_durations(times: np.ndarray) -> np.ndarray:
 
     diffs = np.diff(arr)
     positive = diffs[np.isfinite(diffs) & (diffs > 0.0)]
-    nominal = float(np.median(positive)) if positive.size else 0.0
+    ordered_positive = np.sort(positive)
+    nominal = (
+        float(ordered_positive[(ordered_positive.size - 1) // 2])
+        if ordered_positive.size
+        else 0.0
+    )
     max_contiguous_gap = max(5.0 * nominal, np.finfo(float).eps)
 
     dt = np.empty(arr.shape, dtype=float)

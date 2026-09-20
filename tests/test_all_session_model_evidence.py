@@ -177,6 +177,39 @@ def test_all_session_summary_helpers_group_by_session():
     assert random_effects["random_effects_probability"].sum() == 1.0
 
 
+def test_random_effects_accepts_numeric_string_evidence():
+    frame = pd.DataFrame(
+        [
+            {
+                "session": "Rat1/Open1",
+                "event_index": 0,
+                "model": "a",
+                "status": "success",
+                "log_evidence": "0.0",
+                "evidence_support": "exact_full_grid",
+                "evidence_comparable": True,
+                "is_best_model": True,
+            },
+            {
+                "session": "Rat1/Open1",
+                "event_index": 0,
+                "model": "b",
+                "status": "success",
+                "log_evidence": "-1.0",
+                "evidence_support": "exact_full_grid",
+                "evidence_comparable": True,
+                "is_best_model": False,
+            },
+        ]
+    )
+
+    summary = random_effects_model_probabilities(frame).set_index("model")
+
+    assert summary.loc["a", "fixed_effects_log_evidence"] == pytest.approx(0.0)
+    assert summary.loc["b", "fixed_effects_log_evidence"] == pytest.approx(-1.0)
+    assert summary.loc["a", "fixed_effects_probability"] > summary.loc["b", "fixed_effects_probability"]
+
+
 def test_random_effects_uses_only_events_with_paired_model_support():
     frame = pd.DataFrame(
         [

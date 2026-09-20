@@ -89,6 +89,33 @@ def test_recovery_diagnostics_separates_strict_and_certified_recovery():
     assert overall["failure_mode_candidate_support_misses_true_path_events"] == 1
 
 
+def test_recovery_diagnostics_preserves_negative_infinite_log_evidence():
+    scores = pd.DataFrame(
+        [
+            _row(
+                0,
+                "sorted-spike-state-space-momentum",
+                float("-inf"),
+            ),
+            _row(
+                0,
+                "sorted-spike-state-space-diffusion",
+                float("inf"),
+            ),
+        ]
+    )
+
+    tables = build_recovery_diagnostic_tables(scores)
+    event = tables.event_diagnostics.iloc[0]
+
+    assert event["successful_scores"] == 1
+    assert event["comparable_scores"] == 1
+    assert bool(event["expected_model_scored"])
+    assert event["strict_best_model"] == "sorted-spike-state-space-momentum"
+    assert event["strict_best_log_evidence"] == float("-inf")
+    assert bool(event["strict_recovered_expected_model"])
+
+
 def test_recovery_diagnostics_respects_string_false_comparable_flags():
     scores = pd.DataFrame(
         [

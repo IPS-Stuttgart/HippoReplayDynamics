@@ -444,18 +444,24 @@ def score_models(
     stationary_self_transition: float,
     imm_mode_persistence: float,
 ) -> dict[str, float]:
-    """Score all required models while preserving the historical return type."""
+    """Score all required models using shared transition construction."""
 
-    scores, _ = score_models_with_runtimes(
-        counts,
-        place_fields,
-        time_bin_s=time_bin_s,
-        diffusion_sigma_cm=diffusion_sigma_cm,
-        stationary_self_transition=stationary_self_transition,
-        imm_mode_persistence=imm_mode_persistence,
-    )
-    return scores
-
+    emissions = poisson_log_emissions(counts, place_fields.rates_hz, time_bin_s)
+    prior = place_fields.prior
+    diffusion = diffusion_log_transition(place_fields.bin_centers_cm, diffusion_sigma_cm)
+    stationary = stationary_log_transition(prior, stationary_self_transition)
+    fragmented = reset_log_transition(prior)
+    return {
+        STATIONARY_MODEL: stationary_model_log_evidence(emissions, prior),
+        DIFFUSION_MODEL: transition_model_log_evidence(emissions, prior, diffusion),
+        FRAGMENTED_MODEL: fragmented_model_log_evidence(emissions, prior),
+        FIRST_ORDER_IMM_MODEL: imm_log_evidence(
+            emissions,
+            prior,
+            (stationary, diffusion, fragmented),
+            mode_persistence=imm_mode_persistence,
+        ),
+    }
 
 def score_models_with_runtimes(
     counts: np.ndarray,

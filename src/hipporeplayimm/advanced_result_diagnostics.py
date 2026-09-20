@@ -128,8 +128,10 @@ def classify_evidence_margin(delta_log_evidence: float) -> str:
     """Classify an evidence margin into tie/weak/strong/decisive buckets."""
 
     value = float(delta_log_evidence)
-    if not np.isfinite(value):
+    if np.isnan(value) or np.isneginf(value):
         return "missing"
+    if np.isposinf(value):
+        return "decisive"
     for label, upper in EVIDENCE_MARGIN_CATEGORIES:
         if value <= upper:
             return label
@@ -172,14 +174,18 @@ def evidence_margin_table(
     rows: list[dict[str, object]] = []
     for key, group in ok.groupby(list(group_cols), sort=False):
         key_tuple = key if isinstance(key, tuple) else (key,)
-        group = group.dropna(subset=[evidence_col]).sort_values(evidence_col, ascending=False)
+        group = group.copy()
+        group[evidence_col] = pd.to_numeric(group[evidence_col], errors="coerce")
+        evidence = group[evidence_col].to_numpy(dtype=float)
+        usable = ~(np.isnan(evidence) | np.isposinf(evidence))
+        group = group.loc[usable].sort_values(evidence_col, ascending=False, kind="stable")
         if group.empty:
             continue
         best = group.iloc[0]
         second = group.iloc[1] if len(group) > 1 else None
         best_value = float(best[evidence_col])
         second_value = float(second[evidence_col]) if second is not None else np.nan
-        margin = best_value - second_value if second is not None else np.inf
+        margin = best_value - second_value if second is not None else np.nan
         row = {column: value for column, value in zip(group_cols, key_tuple, strict=True)}
         row.update(
             {

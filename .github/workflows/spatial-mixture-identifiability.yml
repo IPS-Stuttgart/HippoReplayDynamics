@@ -23,7 +23,7 @@ permissions:
 
 concurrency:
   group: spatial-mixture-identifiability-${{ github.ref }}
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   calibrate:
@@ -55,36 +55,78 @@ jobs:
         run: '"$PILOT_PY" scripts/spatial_mixture_identifiability.py --output out/mixture/toy --repeats 256'
       - name: Resolve only the existing Pfeiffer-Foster dataset
         shell: bash
+        timeout-minutes: 2
         run: |
           "$PILOT_PY" - <<'PY'
-          import json, os
+          import json, os, shlex, signal, time
+          from collections import deque
           from pathlib import Path
           explicit = os.environ.get('PF_DATASET_ROOT', '').strip()
           found = set()
+          sources = []
+          def consider(value, source):
+              if not isinstance(value, str) or not value.startswith('/') or '\n' in value:
+                  return
+              p = Path(value)
+              if (p / 'Rat1/Open1/Spike_Data.mat').is_file():
+                  found.add(p.resolve())
+                  sources.append(source)
           if explicit:
-              root = Path(explicit).expanduser()
-              if not (root / 'Rat1/Open1/Spike_Data.mat').is_file():
-                  raise RuntimeError('Explicit PF root is invalid; refusing to guess')
-              found.add(root.resolve())
+              consider(explicit, 'workflow_input')
+              if not found:
+                  raise RuntimeError('Explicit PF root invalid; refusing to guess')
           else:
-              # Limited to the user's documented dataset storage. Never inspect
-              # credentials, home directories, or unrelated mounted accounts.
-              for base in (Path('/mnt/seagate10tb/florianpfaff/datasets'),
-                           Path('/mnt/seagate10tb/florianpfaff/DataSetFromPfeifferFoster')):
-                  if not base.is_dir():
-                      continue
-                  for current, dirs, files in os.walk(base):
-                      rel = Path(current).relative_to(base)
-                      dirs[:] = [d for d in dirs if d not in {'.git', '.venv', 'node_modules'}]
-                      if len(rel.parts) >= 6:
-                          dirs[:] = []
-                      p = Path(current)
-                      if p.name == 'Open1' and p.parent.name == 'Rat1' and 'Spike_Data.mat' in files:
-                          found.add(p.parent.parent.resolve())
-          status = {'candidate_roots': [str(p) for p in sorted(found)],
+              base = Path('/mnt/seagate10tb/florianpfaff')
+              for p in (base / 'DataSetFromPfeifferFoster', base / 'datasets/DataSetFromPfeifferFoster'):
+                  consider(str(p), 'named_existing_dataset_candidate')
+              # This exact manifest is recorded in the paper's 17 September
+              # report_manifest.json. Read paths, never execute its command.
+              manifest = base / 'independent-rejected-forecasts-all33-20260917/independent_rejected_forecast_manifest.json'
+              def inspect(value):
+                  if isinstance(value, dict):
+                      for v in value.values():
+                          inspect(v)
+                  elif isinstance(value, list):
+                      for v in value:
+                          inspect(v)
+                  elif isinstance(value, str):
+                      consider(value, str(manifest))
+                      if ' --' in value:
+                          try:
+                              for token in shlex.split(value):
+                                  consider(token, str(manifest))
+                          except ValueError:
+                              pass
+              if manifest.is_file():
+                  inspect(json.loads(manifest.read_text()))
+              # A strict directory-count/time bound avoids walking large image
+              # collections. Never inspect home directories or credentials.
+              if not found:
+                  def stop(signum, frame):
+                      raise TimeoutError('bounded dataset lookup reached its time limit')
+                  signal.signal(signal.SIGALRM, stop)
+                  signal.alarm(45)
+                  queue = deque([(base / 'datasets', 0)])
+                  visited = 0
+                  try:
+                      while queue and visited < 200:
+                          current, depth = queue.popleft()
+                          visited += 1
+                          consider(str(current), 'bounded_dataset_directory_lookup')
+                          if found:
+                              break
+                          if depth < 4 and current.is_dir():
+                              for p in sorted(current.iterdir()):
+                                  if p.is_dir() and not p.is_symlink() and p.name not in {'.git', '.venv', 'node_modules'}:
+                                      queue.append((p, depth + 1))
+                  except (TimeoutError, PermissionError, OSError) as exc:
+                      print(type(exc).__name__ + ': ' + str(exc), flush=True)
+                  finally:
+                      signal.alarm(0)
+          status = {'candidate_roots': [str(p) for p in sorted(found)], 'sources': sources,
                     'empirical_calibration': 'ready' if len(found) == 1 else 'not_run_missing_or_ambiguous_root'}
           Path('out/mixture/dataset_status.json').write_text(json.dumps(status, indent=2) + '\n')
-          print(json.dumps(status))
+          print(json.dumps(status), flush=True)
           if len(found) == 1:
               with open(os.environ['GITHUB_ENV'], 'a') as f:
                   f.write('RESOLVED_PF_ROOT=' + str(next(iter(found))) + '\n')

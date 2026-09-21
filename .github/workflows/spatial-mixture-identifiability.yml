@@ -1,0 +1,127 @@
+name: Spatial mixture identifiability pilot
+
+on:
+  push:
+    branches: [research/spatial-mixture-identifiability-20260921]
+    paths:
+      - scripts/spatial_mixture_identifiability.py
+      - .github/workflows/spatial-mixture-identifiability.yml
+  workflow_dispatch:
+    inputs:
+      runner_label:
+        description: Self-hosted runner label
+        type: choice
+        options: [gpuserver6000, gpuserver4090]
+        default: gpuserver6000
+      dataset_root:
+        description: Optional verified Pfeiffer/Foster root containing Rat1
+        type: string
+        default: ''
+
+permissions:
+  contents: read
+
+concurrency:
+  group: spatial-mixture-identifiability-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  calibrate:
+    runs-on: [self-hosted, '${{ inputs.runner_label || ''gpuserver6000'' }}']
+    timeout-minutes: 20
+    env:
+      OMP_NUM_THREADS: '2'
+      OPENBLAS_NUM_THREADS: '2'
+      MKL_NUM_THREADS: '2'
+      PF_DATASET_ROOT: ${{ inputs.dataset_root }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Install in an isolated job environment
+        shell: bash
+        run: |
+          python -m venv "$RUNNER_TEMP/mixture-venv-${GITHUB_RUN_ID}"
+          PY="$RUNNER_TEMP/mixture-venv-${GITHUB_RUN_ID}/bin/python"
+          "$PY" -m pip install -e .
+          echo "PILOT_PY=$PY" >> "$GITHUB_ENV"
+          mkdir -p out/mixture
+          "$PY" -m pip freeze > out/mixture/environment.txt
+          git rev-parse HEAD > out/mixture/source_commit.txt
+      - name: Toy calibration and exact-likelihood tests
+        run: '"$PILOT_PY" scripts/spatial_mixture_identifiability.py --output out/mixture/toy --repeats 256'
+      - name: Resolve only the existing Pfeiffer-Foster dataset
+        shell: bash
+        run: |
+          "$PILOT_PY" - <<'PY'
+          import json, os
+          from pathlib import Path
+          explicit = os.environ.get('PF_DATASET_ROOT', '').strip()
+          found = set()
+          if explicit:
+              root = Path(explicit).expanduser()
+              if not (root / 'Rat1/Open1/Spike_Data.mat').is_file():
+                  raise RuntimeError('Explicit PF root is invalid; refusing to guess')
+              found.add(root.resolve())
+          else:
+              # Limited to the user's documented dataset storage. Never inspect
+              # credentials, home directories, or unrelated mounted accounts.
+              for base in (Path('/mnt/seagate10tb/florianpfaff/datasets'),
+                           Path('/mnt/seagate10tb/florianpfaff/DataSetFromPfeifferFoster')):
+                  if not base.is_dir():
+                      continue
+                  for current, dirs, files in os.walk(base):
+                      rel = Path(current).relative_to(base)
+                      dirs[:] = [d for d in dirs if d not in {'.git', '.venv', 'node_modules'}]
+                      if len(rel.parts) >= 6:
+                          dirs[:] = []
+                      p = Path(current)
+                      if p.name == 'Open1' and p.parent.name == 'Rat1' and 'Spike_Data.mat' in files:
+                          found.add(p.parent.parent.resolve())
+          status = {'candidate_roots': [str(p) for p in sorted(found)],
+                    'empirical_calibration': 'ready' if len(found) == 1 else 'not_run_missing_or_ambiguous_root'}
+          Path('out/mixture/dataset_status.json').write_text(json.dumps(status, indent=2) + '\n')
+          print(json.dumps(status))
+          if len(found) == 1:
+              with open(os.environ['GITHUB_ENV'], 'a') as f:
+                  f.write('RESOLVED_PF_ROOT=' + str(next(iter(found))) + '\n')
+          PY
+      - name: Simulation calibration with four existing RUN encoders
+        if: env.RESOLVED_PF_ROOT != ''
+        run: '"$PILOT_PY" scripts/spatial_mixture_identifiability.py --dataset-root "$RESOLVED_PF_ROOT" --output out/mixture/empirical_encoders --repeats 256'
+      - name: Report numerical results without biological relabeling
+        if: always()
+        shell: bash
+        run: |
+          "$PILOT_PY" - <<'PY'
+          import csv, json, os
+          from pathlib import Path
+          lines = ['# Spatial-mixture calibration', '',
+                   '**Simulation only. No real replay content was scored.**', '']
+          for p in sorted(Path('out/mixture').glob('*/simulation_summary.csv')):
+              rows = list(csv.DictReader(p.open()))
+              lines += ['## ' + p.parent.name, '',
+                        '| Encoder | Generator | Spikes A / B | Evaluated | Coarse positives | Fine positives |',
+                        '|---|---|---:|---:|---:|---:|']
+              for r in rows:
+                  lines.append('| {encoder} | {generator} | {count_per_half_population} / {count_per_half_population} | {evaluation_windows} | {c:.3f} | {f:.3f} |'.format(
+                      **r, c=float(r['coarse_positive_fraction']), f=float(r['fine_positive_fraction'])))
+                  print(json.dumps(r))
+              lines.append('')
+          lines += ['Unresolved within-subwindow switching is observationally identical to mixture.',
+                    'Unit-specific gain drift is a misspecified single-source sensitivity, not a second location.']
+          text = '\n'.join(lines) + '\n'
+          Path('out/mixture/README.md').write_text(text)
+          with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as f:
+              f.write(text)
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: spatial-mixture-calibration-${{ github.run_id }}
+          path: out/mixture/
+          if-no-files-found: error
+          retention-days: 30

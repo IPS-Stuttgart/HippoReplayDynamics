@@ -97,3 +97,25 @@ def test_animal_summary_equal_session_weights_and_missing_animals_fail():
     assert q.screen_pass.all()
     assert not summary[summary.animal != "Quirinius"].screen_pass.any()
     pd.testing.assert_frame_equal(summary, summarize_animals(pd.DataFrame(rows)))
+
+
+def test_independent_fold_formula_agrees():
+    from scripts.verify_roscow_task_arm_readout import independent_probabilities
+
+    labels = np.random.default_rng(2).permutation(np.repeat(np.arange(3), 4))
+    counts = synthetic(labels)
+    expected = leave_one_out(counts, labels, 1.75)
+    actual = independent_probabilities(counts, labels, 1.75, 1.0, 1e-10)
+    for kind in READOUTS:
+        np.testing.assert_allclose(expected[kind], actual[kind], rtol=1e-10, atol=1e-12)
+
+
+def test_accuracy_does_not_imply_good_probability_score():
+    labels = np.repeat(np.arange(3), 3)
+    probabilities = np.full((9, 3), 0.0005)
+    for i, label in enumerate(labels):
+        winner = (label + 1) % 3 if i % 3 == 0 else label
+        probabilities[i, winner] = 0.999
+    result = scores(probabilities, labels)
+    assert result["balanced_accuracy"] == pytest.approx(2 / 3)
+    assert result["mean_log_score_above_chance"] < 0

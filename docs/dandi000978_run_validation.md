@@ -62,3 +62,18 @@ Outputs contain fold/trial predictions, eligibility, anatomy provenance, nulls,
 file/animal summaries and a run manifest with a clean producer commit and hashes.
 Raw files are read-only; acquisition hashes are reused with size checks, explicitly
 not represented as a fresh 323 GB rehash. Long runs execute under server tmux.
+
+
+## Brief-window feasibility extension (2026-09-23)
+
+After the first whole-trial RUN validation, a separate route readout is evaluated
+on individual 250 ms held-out RUN windows. Whole-trial success cannot establish
+that brief candidate windows are readable. This extension changes no encoder,
+unit-selection threshold, seed, map, anatomy or test-epoch assignment. It reuses
+the same training route rates and whole-trial training-label permutation scheme.
+Accuracy and log loss first average windows within trial, then trials within
+route, then the four routes. The whole-trial and brief-window tasks are reported
+separately. Zero-spike windows remain included (uniform composition posterior).
+Within-trial spatial nulls act on compressed eligible RUN windows, not uninterrupted
+physical time. Both validation runs are preserved under distinct output paths.
+This remains exploratory RUN feasibility, not a claim about sleep-event content.

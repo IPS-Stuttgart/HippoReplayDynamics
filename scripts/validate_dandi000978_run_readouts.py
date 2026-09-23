@@ -279,7 +279,7 @@ def permute_training_routes(labels, epochs, rng):
     return permuted
 
 
-def route_scores(bins, counts, epoch, key):
+def route_scores(bins, counts, epoch, key, window_level=False):
     labels, totals, exposures = aggregate_trials(bins, counts)
     train, test = epoch_masks(labels, epoch)
     use = totals[train].sum(axis=0) >= PARAMETERS["min_training_spikes"]
@@ -294,22 +294,40 @@ def route_scores(bins, counts, epoch, key):
     rates = fit_routes(training, exposures[train], ytrain)
     rng = np.random.default_rng(seed_for(PARAMETERS["seed"], *key, "route_null"))
     null_rates = [fit_routes(training, exposures[train], permute_training_routes(ytrain, labels.epoch.to_numpy()[train], rng)) for _ in range(PARAMETERS["shuffles"])]
+    eval_labels = labels.loc[test].copy()
+    test_exposure = exposures[test]
+    if window_level:
+        mask = (bins.epoch.to_numpy() == epoch) & (bins.route.to_numpy() >= 0)
+        eval_labels = bins.loc[mask].copy()
+        testing = counts[mask][:, use]
+        test_exposure = np.full(mask.sum(), PARAMETERS["bin_s"])
+        ytest = eval_labels.route.to_numpy()
+
+    def weighted_mean(values):
+        per_trial = pd.DataFrame({"trial_id": eval_labels.trial_id.to_numpy(), "route": ytest, "value": values}).groupby(["route", "trial_id"]).value.mean()
+        return float(per_trial.groupby("route").mean().mean())
+
+    def accuracy_score(prediction):
+        return weighted_mean(prediction == ytest)
+
+    task = "route_window" if window_level else "route"
     rows, frames, null_rows = [], [], []
     for kind in READOUTS:
-        prob = posterior(testing, rates, exposures[test], kind)
+        prob = posterior(testing, rates, test_exposure, kind)
         pred = prob.argmax(axis=1)
-        accuracy = balanced_accuracy(ytest, pred)
-        null = np.array([balanced_accuracy(ytest, posterior(testing, r, exposures[test], kind).argmax(axis=1)) for r in null_rates])
+        accuracy = accuracy_score(pred)
+        null = np.array([accuracy_score(posterior(testing, r, test_exposure, kind).argmax(axis=1)) for r in null_rates])
         log_loss = -np.log(prob[np.arange(len(ytest)), ytest].clip(1e-300))
         rows.append(
             {
-                "task": "route",
+                "task": task,
                 "readout": kind,
                 "n_encoding_units": int(use.sum()),
                 "n_training_trials": int(train.sum()),
                 "n_test_trials": int(test.sum()),
+                "n_test_windows": len(testing) if window_level else None,
                 "balanced_accuracy": accuracy,
-                "class_balanced_log_loss": float(np.mean([log_loss[ytest == k].mean() for k in range(4)])),
+                "class_balanced_log_loss": weighted_mean(log_loss),
                 "null_median_balanced_accuracy": float(np.median(null)),
                 "null_p95_balanced_accuracy": float(np.quantile(null, 0.95)),
                 "gain_over_null_balanced_accuracy": float(accuracy - np.median(null)),
@@ -318,9 +336,9 @@ def route_scores(bins, counts, epoch, key):
                 "test_nonzero_spike_fraction": float((testing.sum(axis=1) > 0).mean()),
             }
         )
-        frame = labels.loc[test].copy()
+        frame = eval_labels.copy()
         frame["readout"], frame["predicted_route"] = kind, pred
-        frame["n_spikes"], frame["movement_exposure_s"] = testing.sum(axis=1), exposures[test]
+        frame["n_spikes"], frame["movement_exposure_s"] = testing.sum(axis=1), test_exposure
         for k in range(4):
             frame[f"posterior_route_{k}"] = prob[:, k]
         frames.append(frame)
@@ -353,8 +371,8 @@ def summarize(out, rows, eligibility):
     animal = file_summary.reset_index().groupby(["animal", "region", "task", "readout"])[metrics].median()
     animal.to_csv(out / "animal_summary.csv")
     readiness = []
-    for (who, filename, region), group in scores.groupby(["animal", "file", "region"]):
-        r = group[(group.task == "route") & (group.readout == "composition")]
+    for (who, filename, region, task), group in scores[scores.task.isin(["route", "route_window"])].groupby(["animal", "file", "region", "task"]):
+        r = group[group.readout == "composition"]
         n = len(r)
         supported = (r.status == "scored") & r.get("above_null_p95", pd.Series(False, index=r.index)).fillna(False).astype(bool)
         gain = pd.to_numeric(r.get("gain_over_null_balanced_accuracy", pd.Series(np.nan, index=r.index)))
@@ -363,6 +381,7 @@ def summarize(out, rows, eligibility):
                 "animal": who,
                 "file": filename,
                 "region": region,
+                "task": task,
                 "expected_route_folds": n,
                 "successful_route_folds": int((r.status == "scored").sum()),
                 "route_folds_above_null_p95": int(supported.sum()),
@@ -373,7 +392,7 @@ def summarize(out, rows, eligibility):
     pd.DataFrame(readiness).to_csv(out / "readiness_by_file_region.csv", index=False)
     gates = [
         {"gate": "supported_files_present", "passed": bool((status.status == "processed").sum() == 3)},
-        {"gate": "all_expected_readouts_scored", "passed": bool(len(scores) == 160 and (scores.status == "scored").all())},
+        {"gate": "all_expected_readouts_scored", "passed": bool(len(scores) == 256 and (scores.status == "scored").all())},
         {"gate": "all_supported_animals_represented", "passed": set(ok.animal) == {"JS14", "ZT2"}},
         {"gate": "both_regions_present", "passed": set(ok.region) == {"CA1", "PFC"}},
         {"gate": "no_replay_scoring", "passed": True},
@@ -400,6 +419,7 @@ def summarize(out, rows, eligibility):
         "These are RUN readouts, not replay results. Source mapping was not chosen from decoding performance.",
         "Count-conditioned route decoding cannot use total spike rate alone, but can use position/direction covariates.",
         "Passing this check does not prove abstract cortical content or independent replay ground truth.",
+        "Whole-trial and independent 250 ms route-window results are separate; only the latter tests brief-window feasibility.",
         "Sparse held-out route counts, learning across epochs and two-animal coverage limit generalization.",
         "All eligible windows, including zero-spike windows, remain in testing; technical failures remain visible.",
         "Private crosswalks and source correspondence must not be redistributed with these outputs.",
@@ -487,14 +507,14 @@ def run(args):
                     }
                     dest = out / asset["asset_id"] / region / f"epoch_{epoch}"
                     dest.mkdir(parents=True)
-                    for task, kinds in (("position", ("poisson", "composition")), ("route", READOUTS)):
+                    for task, kinds in (("position", ("poisson", "composition")), ("route", READOUTS), ("route_window", READOUTS)):
                         try:
                             if task == "position":
                                 metrics, predictions, audit = spatial_scores(bins, regional, train, test, key)
                                 np.savez_compressed(dest / "position_audit.npz", **audit, source_unit_ids=arrays["unit_ids"][unit_mask])
                             else:
-                                metrics, predictions, nulls = route_scores(bins, regional, epoch, key)
-                                nulls.to_csv(dest / "route_nulls.csv", index=False)
+                                metrics, predictions, nulls = route_scores(bins, regional, epoch, key, window_level=task == "route_window")
+                                nulls.to_csv(dest / f"{task}_nulls.csv", index=False)
                             predictions.to_csv(dest / f"{task}_predictions.csv", index=False)
                             rows.extend({**base, **m, "status": "scored"} for m in metrics)
                         except ValueError as exc:

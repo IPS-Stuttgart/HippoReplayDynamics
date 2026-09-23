@@ -180,3 +180,23 @@ def test_summary_keeps_failed_folds_and_pending_animals(tmp_path):
     readiness = pd.read_csv(tmp_path / "readiness_by_file_region.csv")
     assert readiness.expected_route_folds.iloc[0] == 1
     assert not readiness.RUN_route_content_supported.iloc[0]
+
+
+def test_short_window_route_readout_is_independent_and_trial_weighted(monkeypatch):
+    monkeypatch.setitem(run.PARAMETERS, "shuffles", 9)
+    bins, counts = synthetic()
+    rows, prediction, _ = run.route_scores(bins, counts, 1, ("short",), window_level=True)
+    assert all(r["task"] == "route_window" for r in rows)
+    scores = {r["readout"]: r for r in rows}
+    assert scores["composition"]["balanced_accuracy"] == 1
+    assert scores["count_only"]["balanced_accuracy"] == 0.25
+    assert scores["composition"]["n_test_windows"] == 240
+    changed = counts.copy()
+    first = np.flatnonzero(bins.epoch.to_numpy() == 1)[0]
+    changed[first] = 0
+    _, altered, _ = run.route_scores(bins, changed, 1, ("short",), window_level=True)
+    cols = [f"posterior_route_{k}" for k in range(4)]
+    original = prediction[prediction.readout == "composition"][cols].to_numpy()
+    after = altered[altered.readout == "composition"][cols].to_numpy()
+    np.testing.assert_allclose(after[0], 0.25)
+    np.testing.assert_array_equal(original[1:], after[1:])

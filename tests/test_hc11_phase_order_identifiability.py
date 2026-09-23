@@ -114,3 +114,14 @@ def test_preflight_native_schema(monkeypatch, tmp_path, invalid):
         assert result["pre_nrem_spikes"] == result["post_nrem_spikes"] == 2
         assert result["pre_nrem_seconds"] == pytest.approx(1.9)
         assert not result["unit_drift_validated"]
+
+
+def test_regularized_transition_fit_convergence():
+    pytest.importorskip("hmmlearn")
+    from scripts.simulate_hc11_phase_order_identifiability import fit_transition
+
+    pre, _ = make_world(19, "unchanged")
+    sequences = generate(np.random.default_rng(21), pre, 30, 20)
+    fitted, converged, iterations = fit_transition(sequences, pre[1])
+    assert converged and 1 < iterations <= 100
+    np.testing.assert_allclose(fitted.sum(axis=1), 1, atol=1e-12)

@@ -8,6 +8,7 @@ import json
 import logging
 import sys
 from concurrent.futures import ProcessPoolExecutor
+from datetime import UTC, datetime
 from pathlib import Path
 
 import numpy as np
@@ -123,7 +124,11 @@ def fit_transition(sequences, emission):
     logging.getLogger("hmmlearn.hmm").setLevel(logging.ERROR)
     e = validate_emission(emission, len(emission))
     k = len(e)
-    model = MultinomialHMM(
+    class FixedEmissionHMM(MultinomialHMM):
+        def _compute_lower_bound(self, log_probability):
+            return float(log_probability + (np.log(self.startprob_).sum() + np.log(self.transmat_).sum()) / self.n_components)
+
+    model = FixedEmissionHMM(
         n_components=k, params="st", init_params="", implementation="log",
         n_iter=100, tol=1e-4, startprob_prior=1 + 1 / k, transmat_prior=1 + 1 / k,
     )
@@ -134,7 +139,8 @@ def fit_transition(sequences, emission):
     history = np.asarray(model.monitor_.history, float)
     # monitor_.converged includes reaching the iteration cap; record actual tolerance.
     converged = len(history) > 1 and 0 <= history[-1] - history[-2] < model.tol
-    if not np.isfinite(history).all() or not np.array_equal(model.emissionprob_, e):
+    if (not np.isfinite(history).all() or (np.diff(history) < -1e-8).any()
+            or not np.array_equal(model.emissionprob_, e)):
         raise ValueError("invalid EM result or supposedly fixed emission map changed")
     return stochastic(model.transmat_).copy(), bool(converged), len(history)
 
@@ -246,7 +252,8 @@ def main():
     output.mkdir(parents=True, exist_ok=False)
     protocol = ROOT / "docs/hc11_phase_order_protocol.md"
     manifest = build_script_provenance(input_paths={"protocol": protocol})
-    manifest.update(status="running", simulation_only=True, latent_trajectory_supplied=False,
+    manifest.update(status="running", created_at_utc=datetime.now(UTC).isoformat(),
+                    simulation_only=True, latent_trajectory_supplied=False,
                     emission_maps_supplied=True, parameters=vars(args) | {"output_dir": str(output)},
                     seed_start=20260924, n_bins=20, bin_width_ms=20, forecast_ms=40)
     path = output / "manifest.json"
@@ -279,7 +286,8 @@ def main():
         {"gate": "occupancy_and_dwell_matched", "passed": bool((table.target_equilibrium_error < 1e-10).all() and (table.target_dwell_error < 1e-12).all())},
     ])
     pd.DataFrame(gates).to_csv(output / "calibration_gate_summary.csv", index=False)
-    manifest.update(status="complete", calibration_screen_passed=all(g["passed"] for g in gates),
+    manifest.update(status="complete", completed_at_utc=datetime.now(UTC).isoformat(),
+                    calibration_screen_passed=all(g["passed"] for g in gates),
                     real_data_analysis_authorized=False,
                     output_sha256={p.name: file_sha256(p) for p in output.glob("*.csv")})
     path.write_text(json.dumps(manifest, indent=2) + "\n")

@@ -178,6 +178,23 @@ def test_recruitment_predictor_does_not_use_future_run_spikes(monkeypatch, tmp_p
     original = coupling.recruitment(tmp_path, row, keys)
     assert original["ripple_counts"].sum() == row.ripple_encoding_spikes
     assert original["background_counts"].sum() == row.background_encoding_spikes
+
+    from scripts import verify_kleinman_conditional_coupling as checker
+
+    monkeypatch.setattr(checker, "loadmat", audit.loadmat)
+    table = pd.DataFrame(
+        {
+            "unit_id": ["_".join(map(str, k)) for k in keys],
+            "ripple_spikes": original["ripple_counts"],
+            "background_spikes": original["background_counts"],
+            "ripple_s": original["ripple_seconds"],
+            "background_s": original["background_seconds"],
+            "log_rate_enrichment": original["predictor"],
+        }
+    )
+    eligible, ripples = checker.raw_predictors(tmp_path, row, table)
+    np.testing.assert_allclose(eligible, original["eligible_intervals"])
+    np.testing.assert_allclose(ripples, original["ripple_intervals"])
     times = np.linspace(row.target_start_s + 0.2, row.target_end_s - 0.2, 200)
     changed = np.vstack([spike, np.column_stack([times, np.ones(200), np.ones(200)])])
     patch_source(monkeypatch, info, changed, [[80.5, 81.2, 80.7, 0], [81.0, 81.5, 81.1, 0]])

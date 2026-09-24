@@ -119,3 +119,13 @@ def test_complete_synthetic_replica_preserves_all_cases_and_animals(monkeypatch)
     assert len(estimates) == 7
     assert all(r["status"] == "scored" and r["n_animals"] == 6 for r in estimates)
     assert {r["case"] for r in estimates} == set(calibration.CASES)
+
+
+def test_log_partition_verifier_matches_exact_enumeration_score():
+    from scripts.verify_kleinman_conditional_coupling import independent_score
+
+    b, y = np.array([2, 4, 1]), np.array([3, 1, 2])
+    t0, t1, a = np.array([0.2, 1, 0.5]), np.array([1, 0.3, 2]), np.array([-2, 1, 3.0])
+    actual = independent_score(b, y, t0, t1, a)
+    expected = spatial_score(b, y, t0, t1, a)
+    np.testing.assert_allclose([actual["score"], actual["information"]], [expected["score"], expected["information"]], atol=2e-6, rtol=1e-6)

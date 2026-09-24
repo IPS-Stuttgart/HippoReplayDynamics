@@ -162,3 +162,26 @@ def test_independent_full_run_generating_bank(monkeypatch, tmp_path):
     independent = checker.reference_bank(tmp_path, row.opportunity_id, row.direction)
     for key in bank:
         np.testing.assert_allclose(bank[key], independent[key], atol=1e-10, rtol=1e-10)
+
+
+def test_recruitment_predictor_does_not_use_future_run_spikes(monkeypatch, tmp_path):
+    import pandas as pd
+
+    from scripts import calibrate_kleinman_conditional_coupling as coupling
+
+    info, spike = fixture_source()
+    patch_source(monkeypatch, info, spike, [[80.5, 81.2, 80.7, 0], [81.0, 81.5, 81.1, 0]])
+    monkeypatch.setattr(coupling, "loadmat", audit.loadmat)
+    _, rows = audit.session_audit(tmp_path)
+    row = pd.Series(next(r for r in rows if r["status"] == "audited" and r["eligible_ripple_s"] > 0))
+    keys = np.column_stack([np.ones(6, dtype=int), np.arange(1, 7)])
+    original = coupling.recruitment(tmp_path, row, keys)
+    assert original["ripple_counts"].sum() == row.ripple_encoding_spikes
+    assert original["background_counts"].sum() == row.background_encoding_spikes
+    times = np.linspace(row.target_start_s + 0.2, row.target_end_s - 0.2, 200)
+    changed = np.vstack([spike, np.column_stack([times, np.ones(200), np.ones(200)])])
+    patch_source(monkeypatch, info, changed, [[80.5, 81.2, 80.7, 0], [81.0, 81.5, 81.1, 0]])
+    monkeypatch.setattr(coupling, "loadmat", audit.loadmat)
+    repeat = coupling.recruitment(tmp_path, row, keys)
+    for key in ("ripple_counts", "background_counts", "predictor"):
+        np.testing.assert_array_equal(original[key], repeat[key])

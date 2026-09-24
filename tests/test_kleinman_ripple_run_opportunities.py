@@ -221,6 +221,14 @@ def test_native_pilot_keeps_reference_selection_before_future_outcomes(monkeypat
     row = next(pd.DataFrame([row]).itertuples(index=False))
     cells, summary = pilot.score_anchor(tmp_path, row)
     assert summary["n_reference_units"] == 6 and len(cells) == 6
+    from scripts import verify_kleinman_conditional_coupling as conditional_check
+    from scripts import verify_kleinman_native_coupling_pilot as native_check
+
+    monkeypatch.setattr(native_check, "loadmat", audit.loadmat)
+    monkeypatch.setattr(conditional_check, "loadmat", audit.loadmat)
+    monkeypatch.setattr(native_check, "raw_predictors", conditional_check.raw_predictors)
+    checked, discrepancy = native_check.check_anchor(tmp_path, row, cells, pd.Series(summary))
+    assert checked == 6 and discrepancy < 1e-5
     times = np.linspace(row.target_start_s + 0.2, row.target_end_s - 0.2, 200)
     changed = np.vstack([spike, np.column_stack([times, np.full(len(times), 99), np.ones(len(times))])])
     patch_source(monkeypatch, info, changed, events)

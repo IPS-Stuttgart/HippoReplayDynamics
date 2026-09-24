@@ -99,8 +99,8 @@ def decode_metrics(counts, rates, supported, centers, truth, direction, edges, a
 def compare_session(folder, animal, session):
     info = loadmat(folder / "session_info.mat", simplify_cells=True)["session_info"]
     t, x, speed, ends, visits, epochs = align_behavior(info)
-    if len(epochs) != 3:
-        raise ValueError("expected_three_reward_epochs")
+    if len(epochs) not in [2, 3]:
+        raise ValueError("expected_two_or_three_reward_epochs")
     runs = epoch_groups(make_traversals(visits, epochs))
     _, trains, _ = split_units(loadmat(folder / "spike_data.mat", simplify_cells=True)["spike_data"])
     step = PARAMETERS["bin_cm"]
@@ -111,7 +111,10 @@ def compare_session(folder, animal, session):
     splits, windows = [], []
     for source, target in permutations([1, 2, 3], 2):
         for split in range(SPLITS):
-            base = {"animal": animal, "session": session, "source_epoch": source, "target_epoch": target, "split": split}
+            base = {"animal": animal, "session": session, "source_epoch": source, "target_epoch": target, "split": split, "n_native_epochs": len(epochs)}
+            if source > len(epochs) or target > len(epochs):
+                splits.append(dict(**base, status="epoch_not_present", n_windows=0))
+                continue
             try:
                 src, tgt, test = group_split(runs, animal, session, source, target, split)
             except ValueError as exc:

@@ -99,3 +99,19 @@ def test_summary_pairs_same_windows_and_retains_failed_qc():
     assert len(summary) == 2 and summary.n_windows.eq(25).all()
     assert summary.within_qc.all() and not summary.cross_qc.any()
     assert summary.error_increase_cm.eq(30).all()
+
+
+def test_two_epoch_source_is_accounted_without_inventing_epoch_three(monkeypatch, tmp_path):
+    import scripts.audit_kleinman_epoch_maps as mod
+
+    t = np.linspace(0, 400, 40001)
+    runs = [dict(**r, direction=i % 2, fold=0, lap_group=i // 2) for i, r in enumerate(runs_fixture()) if r["epoch"] < 3]
+    monkeypatch.setattr(mod, "loadmat", lambda *a, **k: {"session_info": {}, "spike_data": []})
+    monkeypatch.setattr(mod, "align_behavior", lambda info: (t, t / 4, np.ones(len(t)) * 30, [5, 95], [], [(0, 180), (180, 400)]))
+    monkeypatch.setattr(mod, "make_traversals", lambda *a: runs)
+    monkeypatch.setattr(mod, "split_units", lambda *a: (np.array([[1, 1]]), [np.arange(0, 400, 0.1)], 0))
+    splits, _ = mod.compare_session(tmp_path, "a", "s")
+    assert len(splits) == 30
+    assert splits.status.eq("epoch_not_present").sum() == 20
+    assert splits.loc[splits.status.eq("epoch_not_present"), ["source_epoch", "target_epoch"]].eq(3).any(axis=1).all()
+    assert splits.n_native_epochs.eq(2).all()

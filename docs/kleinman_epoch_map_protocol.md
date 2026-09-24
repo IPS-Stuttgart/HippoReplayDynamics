@@ -60,3 +60,15 @@ Technical checks: all source sessions accounted; all 127 RUN-pass attempted;
 source hashes frozen; train/test groups disjoint; matched training group counts;
 both likelihood arms compare identical observations/support/cells. Technical
 completion and scientific map adequacy must remain distinct.
+
+## Source-schema amendment, before fitting the affected session
+
+The initial run at 4902aa18 failed on Con_3/20220527_run1 because it has one
+native epoch_change row, hence two epochs, rather than three. This is legitimate
+partial source coverage per the release README, not a decoder failure. Preserve
+the initial failed audit. The amended run emits 20 explicit epoch_not_present
+split records involving absent Epoch 3 and fits the ten available Epoch 1/2
+records unchanged. No epoch is invented or transition imputed. Verify all 126
+previously completed sessions' numeric results match the original run. No
+threshold, map, seed, or scientific comparison is changed. Summaries must show
+which epoch pairs are absent; the affected session cannot test return to baseline.

@@ -95,3 +95,22 @@ def test_constant_recruitment_is_missing_information(monkeypatch, tmp_path):
     _, result = native.score_packet(tmp_path, row)
     assert result["status"] == "missing_paired_information"
     assert result["preceding_information"] == result["prospective_information"] == 0
+
+
+def test_independent_histograms_and_reference_fit(monkeypatch, tmp_path):
+    from scripts import verify_kleinman_native_joint_temporal_pilot as checker
+
+    patched(monkeypatch)
+    monkeypatch.setattr(checker, "loadmat", native.loadmat)
+    monkeypatch.setattr(checker.producer, "recruitment", native.recruitment)
+    row = SimpleNamespace(**next(r for r in audit.packet_coverage(tmp_path) if r["selected"]))
+    keys, occ, hist, _ = native.packet_data(tmp_path, row)
+    other_keys, other_occ, other_hist, _ = checker.independent_data(tmp_path, row)
+    np.testing.assert_array_equal(keys, other_keys)
+    np.testing.assert_array_equal(hist, other_hist)
+    np.testing.assert_allclose(occ, other_occ, atol=1e-12)
+    for h in hist[0]:
+        model, keep = native.estimate_reference(h, occ[0])
+        independent, included = checker.independent_reference(h, occ[0])
+        np.testing.assert_allclose(model, independent, atol=1e-10)
+        assert keep == included

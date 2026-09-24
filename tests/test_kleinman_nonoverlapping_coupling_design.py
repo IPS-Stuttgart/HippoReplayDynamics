@@ -135,3 +135,16 @@ def test_zero_condition_cells_retained():
     assert len(result) == 4
     assert result.available_packets.sum() == 0
     assert result.source_sessions.sum() == 1
+
+
+def test_independent_raw_count_check_detects_tampering(monkeypatch, tmp_path):
+    from scripts import verify_kleinman_nonoverlapping_coupling_design as checker
+
+    info, spike = fixture()
+    patch(monkeypatch, info, spike, [[90.5, 91.5, 91.0, 0]])
+    monkeypatch.setattr(checker, "loadmat", audit.loadmat)
+    row = pd.Series(next(r for r in audit.packet_coverage(tmp_path) if r["selected"]))
+    checker.raw_count_check(tmp_path, row)
+    row["target_spikes"] += 1
+    with pytest.raises(AssertionError):
+        checker.raw_count_check(tmp_path, row)

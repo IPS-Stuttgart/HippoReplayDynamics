@@ -139,3 +139,16 @@ def test_missing_anchor_stratum_is_not_vacuous_completeness():
                 ]
             )
         )
+
+
+def test_independent_scalar_moments_and_smoothing():
+    from scipy.ndimage import gaussian_filter1d
+
+    from scripts.verify_kleinman_spatial_expression import scalar_moment, smooth
+
+    rng = np.random.default_rng(9)
+    r = np.exp(rng.normal(size=40))
+    fitted = np.exp(rng.normal(size=40))
+    t = rng.uniform(size=40)
+    assert scalar_moment(r, fitted, t) == pytest.approx(conditional_moments(r, fitted, t))
+    np.testing.assert_allclose(smooth(r), gaussian_filter1d(r, 2, mode="constant", truncate=4))

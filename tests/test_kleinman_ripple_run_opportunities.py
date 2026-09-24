@@ -142,3 +142,23 @@ def test_independent_raw_counts_and_reference_maps(monkeypatch, tmp_path):
     row["ripple_encoding_spikes"] += 1
     with pytest.raises(AssertionError):
         check.raw_count_check(tmp_path, row)
+
+
+def test_independent_full_run_generating_bank(monkeypatch, tmp_path):
+    import pandas as pd
+
+    from scripts import calibrate_kleinman_replay_content as maps
+    from scripts import calibrate_kleinman_spatial_expression as producer
+    from scripts import verify_kleinman_spatial_expression as checker
+
+    info, spike = fixture_source()
+    patch_source(monkeypatch, info, spike, [])
+    for module in (maps, producer, checker):
+        monkeypatch.setattr(module, "loadmat", audit.loadmat)
+    monkeypatch.setattr(producer, "full_map", maps.full_map)
+    _, rows = audit.session_audit(tmp_path)
+    row = pd.Series(next(r for r in rows if r["status"] == "audited"))
+    bank = producer.build_bank(tmp_path, row)
+    independent = checker.reference_bank(tmp_path, row.opportunity_id, row.direction)
+    for key in bank:
+        np.testing.assert_allclose(bank[key], independent[key], atol=1e-10, rtol=1e-10)

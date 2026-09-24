@@ -202,3 +202,31 @@ def test_recruitment_predictor_does_not_use_future_run_spikes(monkeypatch, tmp_p
     repeat = coupling.recruitment(tmp_path, row, keys)
     for key in ("ripple_counts", "background_counts", "predictor"):
         np.testing.assert_array_equal(original[key], repeat[key])
+
+
+def test_native_pilot_keeps_reference_selection_before_future_outcomes(monkeypatch, tmp_path):
+    import pandas as pd
+
+    from scripts import calibrate_kleinman_conditional_coupling as coupling
+    from scripts import score_kleinman_native_coupling_pilot as pilot
+
+    info, spike = fixture_source()
+    events = [[80.5, 81.2, 80.7, 0], [81.0, 81.5, 81.1, 0]]
+    patch_source(monkeypatch, info, spike, events)
+    monkeypatch.setattr(pilot, "loadmat", audit.loadmat)
+    monkeypatch.setattr(coupling, "loadmat", audit.loadmat)
+    monkeypatch.setattr(pilot, "recruitment", coupling.recruitment)
+    _, rows = audit.session_audit(tmp_path)
+    row = pd.Series(next(r for r in rows if r["status"] == "audited" and r["eligible_ripple_s"] > 0))
+    cells, summary = pilot.score_anchor(tmp_path, row)
+    assert summary["n_reference_units"] == 6 and len(cells) == 6
+    times = np.linspace(row.target_start_s + 0.2, row.target_end_s - 0.2, 200)
+    changed = np.vstack([spike, np.column_stack([times, np.full(len(times), 99), np.ones(len(times))])])
+    patch_source(monkeypatch, info, changed, events)
+    monkeypatch.setattr(pilot, "loadmat", audit.loadmat)
+    monkeypatch.setattr(coupling, "loadmat", audit.loadmat)
+    new, new_summary = pilot.score_anchor(tmp_path, row)
+    assert new_summary["n_reference_units"] == 6 and len(new) == 7
+    assert not new.set_index("unit_id").loc["1_99", "reference_included"]
+    for key in ("reference_spikes", "reference_peak_hz", "log_rate_enrichment"):
+        np.testing.assert_allclose(cells[key], new.loc[new.unit_id.isin(cells.unit_id), key], equal_nan=True)

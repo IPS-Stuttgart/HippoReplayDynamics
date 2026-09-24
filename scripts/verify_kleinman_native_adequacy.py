@@ -20,6 +20,11 @@ from validate_kleinman_run_decoder import matrix, split_units
 from verify_kleinman_integrated_extent import reference_fit, reference_library
 
 
+def read_csv(path):
+    # Exact boundary timestamps must survive the CSV round trip.
+    return pd.read_csv(path, float_precision="round_trip")
+
+
 def independent_counts(trains, start, end, n_bins):
     edges = start + np.arange(n_bins + 1) * 0.01
     results = []
@@ -105,9 +110,9 @@ def run(args):
         assert file_sha256(out / name) == digest, name
     for key, path in manifest["input_file_paths"].items():
         assert file_sha256(Path(path)) == manifest["input_file_sha256"][key], key
-    inventory = pd.read_csv(out / "kleinman_native_inventory.csv")
-    fitted = pd.read_csv(out / "kleinman_native_event_adequacy.csv")
-    cal = pd.read_csv(out / "kleinman_native_controls.csv")
+    inventory = read_csv(out / "kleinman_native_inventory.csv")
+    fitted = read_csv(out / "kleinman_native_event_adequacy.csv")
+    cal = read_csv(out / "kleinman_native_controls.csv")
     assert len(cal) == 1120 and cal.groupby(["animal", "session", "condition"]).size().eq(40).all()
     assert not fitted.duplicated(["animal", "session", "event_id"]).any()
     assert inventory.groupby(["animal", "session"]).ngroups == 127
@@ -154,7 +159,7 @@ def run(args):
             flush=True,
         )
     summary = summarize(fitted)
-    pd.testing.assert_frame_equal(summary, pd.read_csv(out / "kleinman_native_session_summary.csv"), check_dtype=False, atol=1e-9, rtol=1e-9)
+    pd.testing.assert_frame_equal(summary, read_csv(out / "kleinman_native_session_summary.csv"), check_dtype=False, atol=1e-9, rtol=1e-9)
     grouped = (
         cal.groupby(["animal", "condition"])
         .agg(
@@ -165,8 +170,8 @@ def run(args):
         )
         .reset_index()
     )
-    pd.testing.assert_frame_equal(grouped, pd.read_csv(out / "kleinman_native_control_summary.csv"), check_dtype=False, atol=1e-9, rtol=1e-9)
-    assert pd.read_csv(out / "kleinman_native_gates.csv").passed.all()
+    pd.testing.assert_frame_equal(grouped, read_csv(out / "kleinman_native_control_summary.csv"), check_dtype=False, atol=1e-9, rtol=1e-9)
+    assert read_csv(out / "kleinman_native_gates.csv").passed.all()
     result = {
         "status": "passed",
         "producer_commit": manifest["code_commit"],

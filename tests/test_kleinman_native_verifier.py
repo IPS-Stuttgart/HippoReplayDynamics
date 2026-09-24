@@ -38,3 +38,16 @@ def test_checker_detects_changed_heldout_score():
     row.crossfit_template_minus_free += 1
     with pytest.raises(AssertionError):
         compare_scores(row, counts, logq, templates, np.random.default_rng(17))
+
+
+def test_csv_time_round_trip_preserves_spikes_on_bin_edges():
+    import io
+
+    from scripts.verify_kleinman_native_adequacy import read_csv
+
+    start = np.float64("402.80513333333334")
+    csv = pd.DataFrame({"start_s": [start]}).to_csv(index=False)
+    restored = read_csv(io.StringIO(csv)).start_s.iloc[0]
+    assert restored == start
+    spikes = [start + np.arange(10) * 0.01]
+    np.testing.assert_array_equal(independent_counts(spikes, restored, restored + 0.1, 10), independent_counts(spikes, start, start + 0.1, 10))

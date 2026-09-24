@@ -74,7 +74,7 @@ def score_anchor(folder, anchor):
     included = c.loc[c.reference_included]
     assert len(included) == anchor.n_encoding_units
     for name, source in (("reference", "reference"), ("baseline", "baseline"), ("target", "target"), ("ripple", "ripple"), ("background", "background")):
-        assert included[source + "_spikes"].sum() == anchor[name + "_encoding_spikes"]
+        assert included[source + "_spikes"].sum() == getattr(anchor, name + "_encoding_spikes")
     ready = len(included) >= 2 and np.isfinite(included.log_rate_enrichment).all() and included.log_rate_enrichment.std(ddof=0) > 1e-10
     u, v = 0.0, 0.0
     if ready:

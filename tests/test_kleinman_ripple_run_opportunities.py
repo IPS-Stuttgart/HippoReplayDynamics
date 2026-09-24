@@ -218,6 +218,7 @@ def test_native_pilot_keeps_reference_selection_before_future_outcomes(monkeypat
     monkeypatch.setattr(pilot, "recruitment", coupling.recruitment)
     _, rows = audit.session_audit(tmp_path)
     row = pd.Series(next(r for r in rows if r["status"] == "audited" and r["eligible_ripple_s"] > 0))
+    row = next(pd.DataFrame([row]).itertuples(index=False))
     cells, summary = pilot.score_anchor(tmp_path, row)
     assert summary["n_reference_units"] == 6 and len(cells) == 6
     times = np.linspace(row.target_start_s + 0.2, row.target_end_s - 0.2, 200)

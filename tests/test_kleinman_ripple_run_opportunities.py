@@ -1,0 +1,117 @@
+import numpy as np
+import pytest
+
+from scripts import audit_kleinman_ripple_run_opportunities as audit
+
+
+def test_interval_union_intersection_and_half_open_counts():
+    union = audit.merge_intervals([[2, 4], [0, 2], [3, 5], [7, 9]])
+    np.testing.assert_array_equal(union, [[0, 5], [7, 9]])
+    result = audit.intersect_intervals(union, [[1, 3], [4, 8]])
+    np.testing.assert_array_equal(result, [[1, 3], [4, 5], [7, 8]])
+    assert audit.duration(result) == 4
+    assert audit.counts_in_intervals([np.arange(10)], result).tolist() == [4]
+    assert audit.counts_in_intervals([np.arange(10)], []).tolist() == [0]
+
+
+@pytest.mark.parametrize("bad", [[[1, 1]], [[2, 1]], [[0, np.nan]]])
+def test_invalid_intervals_rejected(bad):
+    with pytest.raises(ValueError, match="invalid_intervals"):
+        audit.merge_intervals(bad)
+
+
+def runs():
+    return [{"traversal": i, "start_s": 10 * i + 2, "end_s": 10 * i + 10, "epoch": 1 if i < 14 else 2, "direction": (i + 1) % 2, "fold": 0} for i in range(28)]
+
+
+def test_chronology_has_no_baseline_or_future_reference_leakage():
+    pairs = audit.opportunity_pairs(runs())
+    assert len(pairs) == 24
+    ready = [p for p in pairs if p["status"] == "audited"]
+    assert len(ready) == 12
+    for p in ready:
+        ref = p["reference"]
+        assert len(ref) == 3
+        assert max(r["end_s"] for r in ref) < p["baseline"]["start_s"]
+        assert p["baseline"]["end_s"] < p["target"]["start_s"]
+        assert len({r["epoch"] for r in [*ref, p["baseline"], p["target"]]}) == 1
+        assert len({r["direction"] for r in [*ref, p["baseline"], p["target"]]}) == 1
+    assert {p["epoch"] for p in pairs if p["status"] != "audited"} == {1, 2}
+
+
+def test_overlapping_runs_rejected():
+    r = runs()
+    r[2]["start_s"] = r[0]["end_s"] - 0.1
+    with pytest.raises(ValueError, match="overlapping"):
+        audit.opportunity_pairs(r)
+
+
+def fixture_source():
+    t = np.arange(3841) / 20
+    visit_index = np.minimum((t // 10).astype(int), 19)
+    phase = t - visit_index * 10
+    side = visit_index % 2
+    x = np.where(phase <= 2, side * 200, np.where(side == 0, (phase - 2) * 25, 200 - (phase - 2) * 25))
+    x = np.clip(x, 0, 200)
+    speed = np.where((phase > 2) & (phase < 10), 25, 0)
+    left, right = [], []
+    for i in range(20):
+        a, b = 10 * i, 10 * i + 2
+        (left if i % 2 == 0 else right).append([round(a * 20) + 2, round(b * 20) + 2])
+    info = {
+        "position": np.r_[x[0], x],
+        "velocity": np.column_stack([t, speed]),
+        "reward_ends": [5, 195],
+        "left_visit": left,
+        "right_visit": right,
+        "epoch_change": np.empty((0, 2)),
+    }
+    trains = [np.arange(0.01 + i * 0.01, 192, 0.2) for i in range(6)]
+    spike = np.concatenate([np.column_stack([s, np.full(len(s), i + 1), np.ones(len(s))]) for i, s in enumerate(trains)])
+    return info, spike
+
+
+def patch_source(monkeypatch, info, spike, ripples):
+    payload = {"session_info.mat": {"session_info": info}, "spike_data.mat": {"spike_data": spike}, "ripple_events.mat": {"ripple_events": np.asarray(ripples).reshape(-1, 4)}}
+    monkeypatch.setattr(audit, "loadmat", lambda path, **kwargs: payload[path.name])
+
+
+def test_zero_ripple_opportunities_not_removed(monkeypatch, tmp_path):
+    info, spike = fixture_source()
+    patch_source(monkeypatch, info, spike, [])
+    summary, rows = audit.session_audit(tmp_path)
+    assert summary["n_opportunities"] > summary["n_prior_reference_available"] > 0
+    assert summary["n_reference_min_units_without_ripple"] > 0
+    assert summary["n_reference_min_units_with_ripple"] == 0
+    assert all(r["eligible_ripple_s"] == 0 for r in rows)
+    ready = [r for r in rows if r["status"] == "audited"]
+    assert all(r["n_encoding_units"] == 6 for r in ready)
+    assert all(r["baseline_encoding_spikes"] > 0 and r["target_encoding_spikes"] > 0 for r in ready)
+    assert all(r["reference_end_s"] < r["baseline_start_s"] for r in ready)
+
+
+def test_eligible_ripple_segments_do_not_double_count(monkeypatch, tmp_path):
+    info, spike = fixture_source()
+    patch_source(monkeypatch, info, spike, [[80.5, 81.2, 80.7, 0], [81.0, 81.5, 81.1, 0]])
+    _, rows = audit.session_audit(tmp_path)
+    intersecting = [r for r in rows if r["eligible_ripple_s"] > 0]
+    assert intersecting
+    assert all(r["eligible_ripple_s"] == pytest.approx(1) for r in intersecting)
+    assert all(r["n_native_ripples_intersecting"] == 2 for r in intersecting)
+    for r in rows:
+        assert r["eligible_immobile_s"] == pytest.approx(r["eligible_ripple_s"] + r["eligible_background_s"])
+
+
+def test_future_only_cell_cannot_enter_reference_encoding(monkeypatch, tmp_path):
+    info, spike = fixture_source()
+    patch_source(monkeypatch, info, spike, [])
+    _, original = audit.session_audit(tmp_path)
+    p = next(r for r in original if r["status"] == "audited")
+    s = np.linspace(p["target_start_s"] + 0.2, p["target_end_s"] - 0.2, 200)
+    changed = np.vstack([spike, np.column_stack([s, np.full(len(s), 99), np.ones(len(s))])])
+    patch_source(monkeypatch, info, changed, [])
+    _, rerun = audit.session_audit(tmp_path)
+    q = next(r for r in rerun if r["opportunity_id"] == p["opportunity_id"])
+    assert q["n_units_raw"] == p["n_units_raw"] + 1
+    for column in ("n_encoding_units", "reference_encoding_spikes", "baseline_encoding_spikes", "target_encoding_spikes"):
+        assert q[column] == p[column]

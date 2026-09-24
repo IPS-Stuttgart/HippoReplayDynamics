@@ -146,3 +146,17 @@ def test_failed_null_or_missing_animals_cannot_pass():
     for r in rows:
         r.update(n_animals=5, status="missing_information", positive_flag=False, flag=False)
     assert not joint.summarize(pd.DataFrame(rows)).iloc[0].engineering_screen_passed
+
+
+def test_independent_conditional_moments_match_joint_pair(monkeypatch):
+    from scripts.verify_kleinman_conditional_coupling import independent_anchor, independent_score
+
+    b = synthetic_bank()
+    counts = np.random.default_rng(12).poisson(b["readout_exposure"][None, :, :] * b["generating_rates"][:, None, :])
+    original = joint.paired_scores(counts, b["readout_exposure"], b["generating_rates"], b["predictor"])
+    monkeypatch.setattr(joint, "spatial_score", independent_score)
+    monkeypatch.setattr(joint, "anchor_score", independent_anchor)
+    other = joint.paired_scores(counts, b["readout_exposure"], b["generating_rates"], b["predictor"])
+    for lag in ("preceding", "prospective"):
+        for what in ("score", "information"):
+            assert original[lag + "_" + what] == pytest.approx(other[lag + "_" + what], abs=2e-4)

@@ -115,3 +115,30 @@ def test_future_only_cell_cannot_enter_reference_encoding(monkeypatch, tmp_path)
     assert q["n_units_raw"] == p["n_units_raw"] + 1
     for column in ("n_encoding_units", "reference_encoding_spikes", "baseline_encoding_spikes", "target_encoding_spikes"):
         assert q[column] == p[column]
+
+
+def test_independent_chronology_matches_source_fixture():
+    from scripts.validate_kleinman_run_decoder import align_behavior, make_traversals
+    from scripts.verify_kleinman_ripple_run_opportunities import expected_pairs, raw_runs
+
+    info, _ = fixture_source()
+    _, _, _, native_runs = raw_runs(info)
+    _, _, _, _, visits, epochs = align_behavior(info)
+    implemented = audit.opportunity_pairs(make_traversals(visits, epochs))
+    assert {r["opportunity_id"] for r in implemented} == set(expected_pairs(native_runs))
+
+
+def test_independent_raw_counts_and_reference_maps(monkeypatch, tmp_path):
+    import pandas as pd
+
+    from scripts import verify_kleinman_ripple_run_opportunities as check
+
+    info, spike = fixture_source()
+    patch_source(monkeypatch, info, spike, [[80.5, 81.2, 80.7, 0], [81.0, 81.5, 81.1, 0]])
+    monkeypatch.setattr(check, "loadmat", audit.loadmat)
+    _, rows = audit.session_audit(tmp_path)
+    row = pd.Series(next(r for r in rows if r["status"] == "audited" and r["eligible_ripple_s"] > 0))
+    check.raw_count_check(tmp_path, row)
+    row["ripple_encoding_spikes"] += 1
+    with pytest.raises(AssertionError):
+        check.raw_count_check(tmp_path, row)

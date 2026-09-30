@@ -168,3 +168,87 @@ def _synthetic_scores(module) -> pd.DataFrame:
                 }
             )
     return pd.DataFrame(rows)
+
+
+def _all_impossible_scores(module, *, stationary_log_evidence: float = float("-inf")) -> pd.DataFrame:
+    rows = []
+    for model in module.DEFAULT_MODELS:
+        rows.append(
+            {
+                "session": "R2142/ZTrack20140806",
+                "event_index": 0,
+                "model": model,
+                "requested_model": model,
+                "model_family": module.model_family(model),
+                "status": "success",
+                "log_evidence": (
+                    stationary_log_evidence
+                    if model == module.STATIONARY_MODEL
+                    else float("-inf")
+                ),
+                "n_spikes": 8,
+                "duration_s": 0.08,
+                "runtime_s": 0.0,
+                "diagnostic_evidence_support": "exact_full_grid",
+                "diagnostic_evidence_comparable": True,
+                "diagnostic_evidence_comparison": "exact_full_grid",
+            }
+        )
+    return pd.DataFrame(rows)
+
+
+def test_olafsdottir_all_impossible_event_stays_unresolved() -> None:
+    module = _load_workflow_module()
+    scores = _all_impossible_scores(module)
+
+    decisions = module.family_margin_decisions(scores, margin_threshold=5.5)
+    assert decisions.shape[0] == 1
+    decision = decisions.iloc[0]
+    assert decision["best_trajectory_model"] == ""
+    assert decision["best_nontrajectory_model"] == ""
+    assert decision["best_trajectory_log_evidence"] == float("-inf")
+    assert decision["best_nontrajectory_log_evidence"] == float("-inf")
+    assert pd.isna(decision["trajectory_minus_nontrajectory_margin"])
+    assert decision["trajectory_family_claim"] == "unresolved"
+    assert bool(decision["unresolved_claim"])
+    assert not bool(decision["ambiguous_claim"])
+
+    family = module.family_margin_summary(decisions, margin_threshold=5.5)
+    assert int(family.loc[0, "events"]) == 1
+    assert int(family.loc[0, "unresolved_events"]) == 1
+    assert int(family.loc[0, "trajectory_confident_claims"]) == 0
+    assert int(family.loc[0, "nontrajectory_confident_claims"]) == 0
+    assert int(family.loc[0, "ambiguous_events"]) == 0
+
+    claims = module.exact_core_model_claim_summary(scores, margin_threshold=5.5)
+    assert int(claims["raw_best_events"].sum()) == 0
+    assert int(claims["confident_best_events"].sum()) == 0
+
+    paired = module.paired_momentum_diffusion_summary(scores, margin_threshold=5.5)
+    assert int(paired.loc[0, "paired_events"]) == 1
+    assert int(paired.loc[0, "unresolved_events"]) == 1
+    assert int(paired.loc[0, "momentum_raw_wins"]) == 0
+    assert int(paired.loc[0, "diffusion_raw_wins"]) == 0
+
+
+def test_olafsdottir_impossible_trajectory_family_has_no_fake_member_winner() -> None:
+    module = _load_workflow_module()
+    scores = _all_impossible_scores(module, stationary_log_evidence=0.0)
+
+    decisions = module.family_margin_decisions(scores, margin_threshold=5.5)
+    assert decisions.shape[0] == 1
+    decision = decisions.iloc[0]
+    assert decision["best_trajectory_model"] == ""
+    assert decision["best_nontrajectory_model"] == module.STATIONARY_MODEL
+    assert decision["trajectory_minus_nontrajectory_margin"] == float("-inf")
+    assert decision["trajectory_family_claim"] == "nontrajectory_confident"
+    assert not bool(decision["unresolved_claim"])
+
+    claims = module.exact_core_model_claim_summary(scores, margin_threshold=5.5).set_index("model")
+    assert int(claims.loc[module.STATIONARY_MODEL, "raw_best_events"]) == 1
+    assert int(claims.loc[module.STATIONARY_MODEL, "confident_best_events"]) == 1
+    assert int(claims.drop(index=module.STATIONARY_MODEL)["raw_best_events"].sum()) == 0
+
+    paired = module.paired_momentum_diffusion_summary(scores, margin_threshold=5.5)
+    assert int(paired.loc[0, "paired_events"]) == 1
+    assert int(paired.loc[0, "unresolved_events"]) == 1

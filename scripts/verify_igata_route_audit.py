@@ -58,7 +58,9 @@ def verify(output, dataset):
     safe = all(not Path(r["relative_path"]).is_absolute() and ".." not in Path(r["relative_path"]).parts for r in rows)
     check("input_paths_safe", safe, "Release-relative paths only")
     check("input_raw_hashes", safe and all(sha(dataset / r["relative_path"]) == r["file_sha256"] for r in rows), "Independent hash pass over every NPZ")
-    key = lambda r: (r["animal"], r["date"], r["recording_block"], int(r["trial_number"]), r["record_kind"])
+    def key(r):
+        return (r["animal"], r["date"], r["recording_block"], int(r["trial_number"]), r["record_kind"])
+
     check("unique_trial_identity", len({key(r) for r in rows}) == len(rows), "Animal/block/trial/kind unique")
     check("route_label_accounting", {r["relative_path"] for r in labels} == {r["relative_path"] for r in rows if r["record_kind"] == "trial_data"}, "Every task trial retained including unclassifiable")
     check("allowed_route_categories", all(r["route_label"] in {"new", "obsolete", "other", "unclassifiable"} for r in labels), "No implicit missing-to-other conversion")

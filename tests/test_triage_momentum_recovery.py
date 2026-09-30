@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import numpy as np
 import pandas as pd
 
 from scripts.triage_momentum_recovery import (
@@ -254,3 +255,29 @@ def test_triage_parses_string_false_comparable_and_recovery_flags():
 
     assert summary["certified_or_strict_recovery_events"] == 0
     assert summary["strict_exact_recovery_events"] == 0
+
+
+def test_triage_keeps_all_impossible_exact_comparison_unresolved_independent_of_row_order():
+    for rows in (
+        [
+            _row(0, "sorted-spike-state-space-diffusion", float("-inf")),
+            _row(0, DEFAULT_EXPECTED_MOMENTUM_MODEL, float("-inf")),
+        ],
+        [
+            _row(0, DEFAULT_EXPECTED_MOMENTUM_MODEL, float("-inf")),
+            _row(0, "sorted-spike-state-space-diffusion", float("-inf")),
+        ],
+    ):
+        tables = build_momentum_recovery_triage(pd.DataFrame(rows))
+        event = tables.event_table.iloc[0]
+        summary = tables.summary.iloc[0]
+
+        assert event["triage_category"] == "unresolved_all_impossible"
+        assert event["best_comparable_model"] == ""
+        assert np.isneginf(event["best_comparable_log_evidence"])
+        assert np.isneginf(event["expected_model_log_evidence"])
+        assert np.isnan(event["expected_minus_best_comparable_log_evidence"])
+        assert bool(event["strict_exact_recovery"]) is False
+        assert bool(event["certified_or_strict_recovery"]) is False
+        assert int(summary["unresolved_all_impossible_events"]) == 1
+        assert int(summary["strict_exact_recovery_events"]) == 0

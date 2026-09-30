@@ -1,0 +1,9 @@
+{
+  "status": "draft_not_sent",
+  "sent_at_utc": null,
+  "clarification_rounds": 0,
+  "feasibility_working_days_used": 1,
+  "working_day_ledger": [
+    {"date": "2026-09-30", "activity": "Implementation and feasibility preparation; no drug contrast opened"}
+  ]
+}

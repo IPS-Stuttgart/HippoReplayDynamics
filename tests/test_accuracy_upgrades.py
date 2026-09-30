@@ -94,6 +94,42 @@ def test_bootstrap_model_win_probabilities_accepts_window_groups() -> None:
     assert np.isclose(out["bootstrap_win_probability"].sum(), 1.0)
 
 
+def test_bootstrap_model_win_probabilities_excludes_noncomparable_evidence() -> None:
+    scores = pd.DataFrame(
+        {
+            "session": ["s1", "s1", "s2", "s2"],
+            "event_index": [0, 0, 0, 0],
+            "model": ["exact", "lower-bound", "exact", "lower-bound"],
+            "log_evidence": [0.0, 100.0, 0.0, 100.0],
+            "evidence_comparable": ["True", "False", "True", "False"],
+        }
+    )
+
+    out = bootstrap_model_win_probabilities(
+        scores,
+        n_bootstrap=25,
+        random_seed=0,
+    )
+
+    assert out["model"].tolist() == ["exact"]
+    assert out["bootstrap_win_probability"].tolist() == [1.0]
+
+
+@pytest.mark.parametrize("n_bootstrap", [0, -1, 1.5, True, "2"])
+def test_bootstrap_model_win_probabilities_rejects_invalid_counts(n_bootstrap) -> None:
+    scores = pd.DataFrame(
+        {
+            "session": ["s1"],
+            "event_index": [0],
+            "model": ["exact"],
+            "log_evidence": [0.0],
+        }
+    )
+
+    with pytest.raises(ValueError, match="n_bootstrap.*positive integer"):
+        bootstrap_model_win_probabilities(scores, n_bootstrap=n_bootstrap)
+
+
 def test_model_probability_diagnostics_excludes_string_false_comparable_rows() -> None:
     scores = pd.DataFrame(
         {

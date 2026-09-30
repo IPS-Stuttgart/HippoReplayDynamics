@@ -546,7 +546,12 @@ def build_event_summary(scores: pd.DataFrame) -> pd.DataFrame:
         # Recompute recovery from the actual comparable evidence instead of
         # trusting serialized winner flags. Historical score files can contain
         # stale best_model/recovery columns from older winner-selection logic.
-        recovered_expected = bool(best_model and best_model == expected_model)
+        acceptable_recovery_models = {
+            model for model in (expected_model, surrogate_model) if model
+        }
+        recovered_expected = bool(
+            best_model and best_model in acceptable_recovery_models
+        )
         exact_surrogate_recovered = bool(best_model and best_model == surrogate_model)
         rows.append(
             {

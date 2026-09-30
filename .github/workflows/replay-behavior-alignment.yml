@@ -24,6 +24,11 @@ on:
         description: "Seconds before event peak for previous movement vector"
         required: true
         default: "2.0"
+  workflow_run:
+    workflows:
+      - Benchmark replay model evidence all sessions
+    types:
+      - completed
   push:
     branches:
       - main
@@ -36,7 +41,7 @@ permissions:
   actions: read
 
 env:
-  EVIDENCE_RUN_ID: ${{ github.event_name == 'workflow_dispatch' && inputs.evidence_run_id || '' }}
+  EVIDENCE_RUN_ID: ${{ github.event_name == 'workflow_dispatch' && inputs.evidence_run_id || github.event_name == 'workflow_run' && github.event.workflow_run.id || '' }}
   EVIDENCE_ARTIFACT_NAME: ${{ github.event_name == 'workflow_dispatch' && inputs.evidence_artifact_name || '' }}
   DATASET_ROOT: ${{ github.event_name == 'workflow_dispatch' && inputs.dataset_root || 'data/DataSetFromPfeifferFoster' }}
   FUTURE_HORIZON_S: ${{ github.event_name == 'workflow_dispatch' && inputs.future_horizon_s || '2.0' }}
@@ -49,6 +54,7 @@ env:
 jobs:
   replay-behavior-alignment:
     name: Replay behavior alignment
+    if: ${{ github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-latest
     timeout-minutes: 120
 
@@ -81,6 +87,7 @@ jobs:
 
       - name: Resolve model-evidence artifact
         id: evidence
+        continue-on-error: ${{ github.event_name == 'push' }}
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: |
@@ -90,7 +97,13 @@ jobs:
             --artifact-name "${EVIDENCE_ARTIFACT_NAME}" \
             --github-output "${GITHUB_OUTPUT}"
 
+      - name: Report unavailable model-evidence artifact
+        if: ${{ github.event_name == 'push' && steps.evidence.outcome != 'success' }}
+        run: |
+          echo "::warning::No unexpired all-session model-evidence artifact is available. Refresh it by updating docs/model_evidence_refresh_trigger.txt or by running the producer workflow manually."
+
       - name: Download model-evidence artifact
+        if: ${{ steps.evidence.outcome == 'success' }}
         uses: actions/download-artifact@v7
         with:
           run-id: ${{ steps.evidence.outputs.run_id }}
@@ -100,6 +113,7 @@ jobs:
           repository: ${{ github.repository }}
 
       - name: Run replay behavior alignment
+        if: ${{ steps.evidence.outcome == 'success' }}
         env:
           RESOLVED_EVIDENCE_ARTIFACT_NAME: ${{ steps.evidence.outputs.artifact_name }}
         run: |
@@ -128,6 +142,7 @@ jobs:
           test -s results/replay-behavior-alignment/leave_one_rat_out_behavior_prediction.csv
 
       - name: Print behavior alignment summaries
+        if: ${{ steps.evidence.outcome == 'success' }}
         run: |
           set -euo pipefail
           python - <<'PY'
@@ -146,6 +161,7 @@ jobs:
           PY
 
       - name: Upload replay behavior alignment results
+        if: ${{ steps.evidence.outcome == 'success' }}
         uses: actions/upload-artifact@v7
         with:
           name: replay-behavior-alignment-${{ github.run_id }}

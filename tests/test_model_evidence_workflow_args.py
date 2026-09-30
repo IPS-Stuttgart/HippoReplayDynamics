@@ -74,10 +74,17 @@ def test_reproducible_evidence_workflows_expose_momentum_initial_sigma_input(
     text = (ROOT / ".github" / "workflows" / workflow_name).read_text(encoding="utf-8")
 
     assert "state_space_momentum_initial_sigma_cm_sqrt_s:" in text
-    assert (
-        "STATE_SPACE_MOMENTUM_INITIAL_SIGMA_CM_SQRT_S: "
-        "${{ inputs.state_space_momentum_initial_sigma_cm_sqrt_s }}"
-    ) in text
+    if workflow_name == "model-evidence-all-sessions.yml":
+        assert (
+            "STATE_SPACE_MOMENTUM_INITIAL_SIGMA_CM_SQRT_S: "
+            "${{ github.event_name == 'workflow_dispatch' && "
+            "inputs.state_space_momentum_initial_sigma_cm_sqrt_s || '85.0' }}"
+        ) in text
+    else:
+        assert (
+            "STATE_SPACE_MOMENTUM_INITIAL_SIGMA_CM_SQRT_S: "
+            "${{ inputs.state_space_momentum_initial_sigma_cm_sqrt_s }}"
+        ) in text
     assert "inputs.state_space_momentum_initial_sigma_cm_sqrt_s" in _workflow_concurrency_group(
         text
     )

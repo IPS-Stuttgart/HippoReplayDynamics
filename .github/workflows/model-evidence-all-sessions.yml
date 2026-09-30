@@ -616,3 +616,4 @@ jobs:
           name: model-evidence-all-sessions-${{ github.run_id }}
           path: results/all-session-model-evidence/
           if-no-files-found: error
+          retention-days: 90

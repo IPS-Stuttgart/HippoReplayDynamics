@@ -55,3 +55,21 @@ def test_complex_evidence_is_excluded_without_cast_warnings():
     assert by_model.loc["real", "model_probability"] == 1.0
     assert bool(by_model.loc["real", "is_best_model"])
     assert scored["best_model"].eq("real").all()
+
+def test_complex_validation_keeps_negative_infinite_recovery_evidence():
+    frame = pd.DataFrame(
+        {
+            "model": ["negative-infinite", "positive-infinite", "complex"],
+            "log_evidence": pd.Series(
+                [float("-inf"), float("inf"), 2.0 + 1.0j],
+                dtype=object,
+            ),
+            "status": ["success", "success", "success"],
+        }
+    )
+
+    successful = _successful_finite_scores(frame)
+
+    assert successful["model"].tolist() == ["negative-infinite"]
+    assert successful["log_evidence"].iloc[0] == float("-inf")
+

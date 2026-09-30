@@ -1,0 +1,109 @@
+name: DANDI000978 agreement-subset RUN pilot (self-hosted)
+
+on:
+  workflow_dispatch:
+    inputs:
+      subjects:
+        description: "Space-separated subjects; ZT2 is deliberately excluded"
+        default: "ER1 JS34"
+        required: true
+        type: string
+      n_null:
+        description: "Replicates per within-epoch label control (1-999)"
+        default: "199"
+        required: true
+        type: string
+  push:
+    branches:
+      - research/dandi000978-agreement-run-20260921
+    paths:
+      - .github/workflows/dandi000978-agreement-run-selfhosted.yml
+      - .github/triggers/dandi000978-agreement-run.txt
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dandi000978-agreement-run-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  agreement-run:
+    runs-on: [self-hosted, hipporeplay-datasets]
+    timeout-minutes: 90
+    env:
+      DATASET_ROOT: /mnt/seagate10tb/florianpfaff/datasets/dandi-000978/0.240511.0307
+      SUBJECTS: ${{ inputs.subjects || 'ER1 JS34' }}
+      N_NULL: ${{ inputs.n_null || '199' }}
+      OMP_NUM_THREADS: "1"
+      OPENBLAS_NUM_THREADS: "1"
+      MKL_NUM_THREADS: "1"
+      NUMEXPR_NUM_THREADS: "1"
+      PYTHONUNBUFFERED: "1"
+      CODE_DIR: ${{ github.workspace }}/dandi-agreement-${{ github.run_id }}-${{ github.run_attempt }}
+    steps:
+      - name: Initialize per-run output paths
+        shell: bash
+        run: |
+          set -euo pipefail
+          work="$RUNNER_TEMP/dandi-agreement-results-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          mkdir -p "$work"
+          echo "DANDI_WORK=$work" >> "$GITHUB_ENV"
+          echo "VENV=$RUNNER_TEMP/dandi-agreement-venv-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" >> "$GITHUB_ENV"
+      - name: Isolated checkout; do not touch server research worktrees
+        uses: actions/checkout@v6
+        with:
+          path: dandi-agreement-${{ github.run_id }}-${{ github.run_attempt }}
+          persist-credentials: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Prepare isolated environment and validate dataset presence
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$DANDI_WORK"
+          test -r "$DATASET_ROOT/metadata/asset_manifest.json"
+          test -r "$DATASET_ROOT/download_status.json"
+          python -m venv "$VENV"
+          "$VENV/bin/python" -m pip install numpy==2.3.5 pandas==2.2.3 h5py==3.15.1 pytest==9.0.2
+          "$VENV/bin/python" -m pip freeze > "$DANDI_WORK/environment.txt"
+          printf 'runner=%s\ncommit=%s\n' "$RUNNER_NAME" "$GITHUB_SHA" > "$DANDI_WORK/runner.txt"
+      - name: Numerical, metadata and train-test isolation tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$CODE_DIR"
+          "$VENV/bin/python" -m pytest tests/test_dandi000978_agreement_run.py -q | tee "$DANDI_WORK/tests.log"
+      - name: Frozen ER1 and JS34 RUN pilot; no sleep/replay scoring
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$CODE_DIR"
+          read -r -a requested <<< "$SUBJECTS"
+          "$VENV/bin/python" scripts/dandi000978_agreement_run.py \
+            --dataset-root "$DATASET_ROOT" \
+            --output-dir "$DANDI_WORK/pilot" \
+            --subjects "${requested[@]}" --n-null "$N_NULL" --seed 20260921 \
+            2>&1 | tee "$DANDI_WORK/analysis.log"
+      - name: Publish summaries without changing manuscript claims
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          for report in "$DANDI_WORK"/pilot/*/report.md; do
+            cat "$report" >> "$GITHUB_STEP_SUMMARY"
+          done
+          for summary in "$DANDI_WORK"/pilot/*/run_cv_summary.csv; do
+            printf '\n%s\n' "$summary"
+            cat "$summary"
+          done
+      - name: Preserve results, nulls, fold membership and provenance
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: dandi000978-agreement-run-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ env.DANDI_WORK }}
+          if-no-files-found: warn
+          retention-days: 30

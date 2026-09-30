@@ -116,6 +116,24 @@ def test_first_order_imm_event_mean_audit_workflow_wires_artifact_audit():
     assert "first-order-imm-event-mean-mode-usage-audit-${{ github.run_id }}" in text
 
 
+
+def test_all_session_evidence_refresh_keeps_behavior_alignment_artifact_live():
+    refresh = Path(".github/workflows/refresh-model-evidence-all-sessions.yml").read_text(
+        encoding="utf-8"
+    )
+    producer = Path(".github/workflows/model-evidence-all-sessions.yml").read_text(
+        encoding="utf-8"
+    )
+
+    assert 'cron: "17 3 1 */2 *"' in refresh
+    assert "actions: write" in refresh
+    assert "gh run list" in refresh
+    assert "--workflow model-evidence-all-sessions.yml" in refresh
+    assert "gh workflow run model-evidence-all-sessions.yml" in refresh
+    assert 'paths:\n      - ".github/workflows/refresh-model-evidence-all-sessions.yml"' in refresh
+    assert "retention-days: 90" in producer
+
+
 def _workflow_dispatch_input_count(workflow: str) -> int:
     """Count first-level workflow_dispatch inputs in a GitHub Actions file."""
 

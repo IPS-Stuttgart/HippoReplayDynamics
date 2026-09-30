@@ -89,7 +89,7 @@ def test_recovery_diagnostics_separates_strict_and_certified_recovery():
     assert overall["failure_mode_candidate_support_misses_true_path_events"] == 1
 
 
-def test_recovery_diagnostics_preserves_negative_infinite_log_evidence():
+def test_recovery_diagnostics_keeps_sole_impossible_exact_score_unresolved():
     scores = pd.DataFrame(
         [
             _row(
@@ -111,9 +111,24 @@ def test_recovery_diagnostics_preserves_negative_infinite_log_evidence():
     assert event["successful_scores"] == 1
     assert event["comparable_scores"] == 1
     assert bool(event["expected_model_scored"])
-    assert event["strict_best_model"] == "sorted-spike-state-space-momentum"
-    assert event["strict_best_log_evidence"] == float("-inf")
-    assert bool(event["strict_recovered_expected_model"])
+    assert event["strict_best_model"] == ""
+    assert pd.isna(event["strict_best_log_evidence"])
+    assert not bool(event["strict_recovered_expected_model"])
+
+
+def test_recovery_diagnostics_all_impossible_winner_is_row_order_independent():
+    rows = [
+        _row(0, "sorted-spike-state-space-momentum", float("-inf")),
+        _row(0, "sorted-spike-state-space-diffusion", float("-inf")),
+    ]
+
+    forward = build_recovery_diagnostic_tables(pd.DataFrame(rows)).event_diagnostics.iloc[0]
+    reverse = build_recovery_diagnostic_tables(pd.DataFrame(list(reversed(rows)))).event_diagnostics.iloc[0]
+
+    for event in (forward, reverse):
+        assert event["strict_best_model"] == ""
+        assert pd.isna(event["strict_best_log_evidence"])
+        assert not bool(event["strict_recovered_expected_model"])
 
 
 def test_recovery_diagnostics_respects_string_false_comparable_flags():

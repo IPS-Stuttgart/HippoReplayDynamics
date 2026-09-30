@@ -199,6 +199,10 @@ def _event_diagnostic_row(
     strict_best = _best_log_evidence_row(comparable)
     expected_rows = scored[scored["model"].astype(str).eq(expected_model)] if not scored.empty else scored
     expected = _best_log_evidence_row(expected_rows)
+    if expected is None and not expected_rows.empty:
+        # The expected model was still scored even when its evidence is exactly
+        # zero (-inf). Keep its metadata while leaving the event winner unresolved.
+        expected = expected_rows.iloc[0]
     strict_best_model = "" if strict_best is None else str(strict_best["model"])
     strict_best_log_evidence = np.nan if strict_best is None else float(strict_best["log_evidence"])
     expected_log_evidence = np.nan if expected is None else float(expected["log_evidence"])
@@ -402,7 +406,15 @@ def _best_log_evidence_row(frame: pd.DataFrame) -> pd.Series | None:
         return None
     valid = frame.loc[usable].copy()
     valid_values = numeric[usable]
-    return valid.iloc[int(np.argmax(valid_values))]
+    finite = np.isfinite(valid_values)
+    if not np.any(finite):
+        # -inf is valid zero evidence, but an all-impossible set has no
+        # evidence-defined winner. Returning the first row would make strict
+        # recovery depend on input/model ordering.
+        return None
+    finite_positions = np.flatnonzero(finite)
+    best_position = int(finite_positions[np.argmax(valid_values[finite])])
+    return valid.iloc[best_position]
 
 
 def _row_float(row: pd.Series, column: str, default: float) -> float:

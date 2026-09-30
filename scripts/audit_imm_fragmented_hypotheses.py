@@ -189,9 +189,18 @@ def build_event_table(evidence: pd.DataFrame, threshold: float = 5.5) -> pd.Data
         best_model = ""
         best_logz = float("nan")
         if not core.empty:
-            best = core.sort_values("log_evidence", ascending=False).iloc[0]
-            best_model = str(best["model"])
-            best_logz = float(best["log_evidence"])
+            log_values = pd.to_numeric(
+                core["log_evidence"],
+                errors="coerce",
+            ).to_numpy(dtype=float)
+            finite_positions = np.flatnonzero(np.isfinite(log_values))
+            if finite_positions.size:
+                best_position = int(
+                    finite_positions[np.argmax(log_values[finite_positions])]
+                )
+                best = core.iloc[best_position]
+                best_model = str(best["model"])
+                best_logz = float(best["log_evidence"])
         row = {
             "session": session,
             "rat": _rat(session),

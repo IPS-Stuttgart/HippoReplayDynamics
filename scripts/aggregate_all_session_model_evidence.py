@@ -177,9 +177,10 @@ def session_best_model_counts(df: pd.DataFrame) -> pd.DataFrame:
 def random_effects_model_probabilities(df: pd.DataFrame) -> pd.DataFrame:
     """Return a compact random-effects-style model probability table by session.
 
-    Each session contributes one vote across the exact-comparable model(s) with
-    the largest summed log evidence across successfully scored events; exact ties
-    split that vote equally. Truncated lower-bound rows are excluded from the
+    Each session with at least one nonzero exact-comparable model evidence
+    contributes one vote across the model(s) with the largest summed log evidence;
+    exact ties split that vote equally. Sessions where every model has zero
+    evidence remain unresolved. Truncated lower-bound rows are excluded from the
     random-effects and fixed-effects probability columns.
     """
 
@@ -246,6 +247,11 @@ def random_effects_model_probabilities(df: pd.DataFrame) -> pd.DataFrame:
     win_counts = {model: 0.0 for model in models}
     for _, group in per_session.groupby("session", sort=True):
         best_log_evidence = group["session_log_evidence"].max()
+        # If every model assigns zero evidence to a session, there is no
+        # model-comparison information to distribute.  Treat that session as
+        # unresolved rather than adding an artificial uniform fractional vote.
+        if np.isneginf(best_log_evidence):
+            continue
         winners = group.loc[
             group["session_log_evidence"] == best_log_evidence,
             "model",
@@ -254,9 +260,13 @@ def random_effects_model_probabilities(df: pd.DataFrame) -> pd.DataFrame:
         for winner in winners:
             win_counts[winner] += shared_vote
     fixed_log_evidence = per_session.groupby("model")["session_log_evidence"].sum().reindex(models).to_numpy(dtype=float)
-    fixed_probs = np.exp(fixed_log_evidence - logsumexp(fixed_log_evidence))
-    n_sessions = len(sessions)
     n_models = len(models)
+    if np.all(np.isneginf(fixed_log_evidence)):
+        fixed_probs = np.full(n_models, np.nan, dtype=float)
+    else:
+        fixed_probs = np.exp(fixed_log_evidence - logsumexp(fixed_log_evidence))
+    n_sessions = len(sessions)
+    session_vote_mass = float(sum(win_counts.values()))
     rows = []
     for idx, model in enumerate(models):
         rows.append(
@@ -264,7 +274,9 @@ def random_effects_model_probabilities(df: pd.DataFrame) -> pd.DataFrame:
                 "model": model,
                 "sessions": n_sessions,
                 "session_win_count": float(win_counts[model]),
-                "random_effects_probability": float((1.0 + win_counts[model]) / (n_models + n_sessions)),
+                "random_effects_probability": float(
+                    (1.0 + win_counts[model]) / (n_models + session_vote_mass)
+                ),
                 "fixed_effects_log_evidence": float(fixed_log_evidence[idx]),
                 "fixed_effects_probability": float(fixed_probs[idx]),
             }

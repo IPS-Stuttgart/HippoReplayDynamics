@@ -206,6 +206,68 @@ def test_wrong_map_control_rejects_already_lossy_large_float_event_id():
         wrong_map_model_evidence_attenuation(real, wrong)
 
 
+def test_wrong_map_model_attenuation_collapses_duplicate_rows_to_best_evidence():
+    model = "sorted-spike-state-space-diffusion"
+    real = pd.DataFrame(
+        [
+            _score("Rat1/Open1", 0, model, 10.0),
+            _score("Rat1/Open1", 0, model, 2.0),
+        ]
+    )
+    wrong = pd.DataFrame(
+        [
+            _wrong_score("Rat1/Open1", "Rat1/Open2", 0, model, 1.0),
+            _wrong_score("Rat1/Open1", "Rat1/Open2", 0, model, 8.0),
+        ]
+    )
+
+    attenuation = wrong_map_model_evidence_attenuation(real, wrong)
+
+    assert len(attenuation) == 1
+    assert attenuation.loc[0, "log_evidence_real_map"] == 10.0
+    assert attenuation.loc[0, "log_evidence_wrong_map"] == 8.0
+    assert attenuation.loc[0, "real_minus_wrong_log_evidence"] == 2.0
+
+
+def test_wrong_map_all_impossible_family_has_no_fabricated_winner():
+    models = (
+        "sorted-spike-state-space-stationary",
+        "sorted-spike-state-space-diffusion",
+        "sorted-spike-state-space-fragmented",
+        "sorted-spike-state-space-first-order-imm",
+        "sorted-spike-state-space-momentum-exact-sparse",
+    )
+    real = pd.DataFrame(
+        [_score("Rat1/Open1", 0, model, float("-inf")) for model in models]
+    )
+    wrong = pd.DataFrame(
+        [
+            _wrong_score("Rat1/Open1", "Rat1/Open2", 0, model, float("-inf"))
+            for model in models
+        ]
+    )
+
+    attenuation = wrong_map_model_evidence_attenuation(real, wrong)
+    family = wrong_map_family_evidence_attenuation(real, wrong)
+
+    assert (attenuation["real_minus_wrong_log_evidence"] == 0.0).all()
+    assert family.loc[0, "best_trajectory_model_real_map"] == ""
+    assert family.loc[0, "best_trajectory_model_wrong_map"] == ""
+    assert family.loc[0, "best_core_model_real_map"] == ""
+    assert pd.isna(family.loc[0, "best_trajectory_log_evidence_real_map"])
+
+
+def test_wrong_map_rejects_positive_infinite_evidence():
+    model = "sorted-spike-state-space-diffusion"
+    real = pd.DataFrame([_score("Rat1/Open1", 0, model, float("inf"))])
+    wrong = pd.DataFrame(
+        [_wrong_score("Rat1/Open1", "Rat1/Open2", 0, model, 0.0)]
+    )
+
+    with pytest.raises(ValueError, match="finite or -inf"):
+        wrong_map_model_evidence_attenuation(real, wrong)
+
+
 def _score(
     session: str,
     event_index: int,

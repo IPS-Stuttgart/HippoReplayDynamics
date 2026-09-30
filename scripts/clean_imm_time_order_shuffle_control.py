@@ -56,6 +56,8 @@ from scripts.audit_imm_fragmented_hypotheses import (  # noqa: E402
     FIRST_ORDER_IMM,
     FRAGMENTED,
     MOMENTUM_EXACT,
+    _as_bool,
+    _successful_status_mask,
     build_event_table,
 )
 from scripts.benchmark_model_evidence import _check_session, _session_path  # noqa: E402
@@ -182,9 +184,10 @@ def _read_event_model_evidence(path: str | Path) -> pd.DataFrame:
     if missing:
         raise ValueError(f"event-model evidence is missing required columns: {missing}")
     if "status" in frame.columns:
-        frame = frame[frame["status"].fillna("success").astype(str).eq("success")].copy()
+        frame = frame[_successful_status_mask(frame["status"])].copy()
     if "evidence_comparable" not in frame.columns:
         frame["evidence_comparable"] = True
+    frame["evidence_comparable"] = frame["evidence_comparable"].map(_as_bool)
     frame["session"] = frame["session"].astype(str)
     frame["rat"] = frame["session"].map(_rat)
     frame["event_index"] = frame["event_index"].map(_exact_event_index)

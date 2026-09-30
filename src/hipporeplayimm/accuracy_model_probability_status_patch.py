@@ -92,9 +92,27 @@ def _model_probability_diagnostics_with_nonfinite_evidence(
             continue
 
         ordered = np.sort(values)[::-1]
+        row = accuracy_upgrades._group_key_dict(group_columns, key)
+
+        # An all-impossible event has no evidence-defined winner.  Keep the
+        # diagnostic row, but do not turn table order into a model choice or
+        # invent a uniform posterior over zero-evidence models.
+        if np.all(np.isneginf(values)):
+            row.update(
+                {
+                    "models": int(values.size),
+                    "best_model": "",
+                    "best_log_evidence": -np.inf,
+                    "evidence_margin_to_second_best": np.nan,
+                    "model_probability_entropy": np.nan,
+                    "best_model_probability": np.nan,
+                }
+            )
+            rows.append(row)
+            continue
+
         probs = _stable_log_evidence_probabilities(values)
         best_idx = _best_evidence_index(values)
-        row = accuracy_upgrades._group_key_dict(group_columns, key)
         row.update(
             {
                 "models": int(values.size),

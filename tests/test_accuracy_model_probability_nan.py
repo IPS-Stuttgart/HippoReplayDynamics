@@ -49,7 +49,7 @@ def test_model_probability_diagnostics_handles_positive_infinite_evidence() -> N
     assert np.isclose(diagnostics.loc[0, "model_probability_entropy"], np.log(2.0))
 
 
-def test_model_probability_diagnostics_handles_all_negative_infinite_evidence() -> None:
+def test_model_probability_diagnostics_keeps_all_negative_infinite_evidence_unresolved() -> None:
     scores = pd.DataFrame(
         {
             "session": ["Rat1/Open1", "Rat1/Open1"],
@@ -65,8 +65,8 @@ def test_model_probability_diagnostics_handles_all_negative_infinite_evidence() 
 
     assert diagnostics.shape[0] == 1
     assert diagnostics.loc[0, "models"] == 2
-    assert diagnostics.loc[0, "best_model"] == "left"
+    assert diagnostics.loc[0, "best_model"] == ""
     assert diagnostics.loc[0, "best_log_evidence"] == -np.inf
-    assert diagnostics.loc[0, "evidence_margin_to_second_best"] == 0.0
-    assert diagnostics.loc[0, "best_model_probability"] == 0.5
-    assert np.isclose(diagnostics.loc[0, "model_probability_entropy"], np.log(2.0))
+    assert np.isnan(diagnostics.loc[0, "evidence_margin_to_second_best"])
+    assert np.isnan(diagnostics.loc[0, "best_model_probability"])
+    assert np.isnan(diagnostics.loc[0, "model_probability_entropy"])

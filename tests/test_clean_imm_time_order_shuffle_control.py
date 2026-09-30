@@ -100,6 +100,44 @@ def test_precomputed_score_reader_fills_optional_columns(tmp_path: Path) -> None
     assert "n_active_units" in loaded.columns
 
 
+def test_event_evidence_reader_normalizes_status_and_comparability_flags(tmp_path: Path) -> None:
+    path = tmp_path / "event_model_evidence.csv"
+    pd.DataFrame(
+        [
+            {
+                "status": " SUCCESS ",
+                "session": "Rat1/Open1",
+                "event_index": "0",
+                "model": STATIONARY,
+                "log_evidence": 10.0,
+                "evidence_comparable": "1",
+            },
+            {
+                "status": "success",
+                "session": "Rat1/Open1",
+                "event_index": "0",
+                "model": DIFFUSION,
+                "log_evidence": 9.0,
+                "evidence_comparable": "0",
+            },
+            {
+                "status": "failure",
+                "session": "Rat1/Open1",
+                "event_index": "0",
+                "model": FRAGMENTED,
+                "log_evidence": 8.0,
+                "evidence_comparable": "1",
+            },
+        ]
+    ).to_csv(path, index=False)
+
+    loaded = _read_event_model_evidence(path)
+
+    assert loaded["model"].tolist() == [STATIONARY, DIFFUSION]
+    assert loaded["evidence_comparable"].tolist() == [True, False]
+    assert loaded["evidence_comparable"].dtype == bool
+
+
 def test_event_evidence_reader_preserves_adjacent_decimal_ids_above_2_to_53(tmp_path: Path) -> None:
     lower = 2**53
     upper = lower + 1

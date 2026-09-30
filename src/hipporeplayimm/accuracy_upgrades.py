@@ -622,25 +622,47 @@ def bootstrap_model_win_probabilities(
     evidence_column: str = "log_evidence",
     group_columns: Sequence[str] = ("session", "event_index"),
 ) -> pd.DataFrame:
-    """Bootstrap session/event rows to estimate model win uncertainty."""
+    """Bootstrap comparable session/event evidences to estimate model win uncertainty.
+
+    Rows explicitly marked as non-comparable are excluded before pivoting so
+    exact evidences are never ranked against candidate-pruned lower bounds.
+    """
 
     if scores.empty:
         return pd.DataFrame()
+
+    # Reuse the repository's exact positive-integer guard.  The historical
+    # int(...) loop conversion silently truncated fractional counts while the
+    # final denominator still used the original value.
+    from .cli_float_values_validation import _positive_integer_count
+
+    bootstrap_count = _positive_integer_count("n_bootstrap", n_bootstrap)
+    frame = scores.copy()
+    if "evidence_comparable" in frame:
+        frame = frame[_coerce_bool_series(frame["evidence_comparable"])]
+    if frame.empty:
+        return pd.DataFrame()
+
     rng = np.random.default_rng(random_seed)
-    pivot = scores.pivot_table(index=list(group_columns), columns="model", values=evidence_column, aggfunc="first")
+    pivot = frame.pivot_table(
+        index=list(group_columns),
+        columns="model",
+        values=evidence_column,
+        aggfunc="first",
+    )
     pivot = pivot.dropna(axis=0, how="all")
     if pivot.empty:
         return pd.DataFrame()
     models = list(pivot.columns)
     win_counts = dict.fromkeys(models, 0)
     values = pivot.to_numpy(dtype=float)
-    for _ in range(int(n_bootstrap)):
+    for _ in range(bootstrap_count):
         sample_indices = rng.integers(0, values.shape[0], size=values.shape[0])
         sample = values[sample_indices]
         means = np.nanmean(sample, axis=0)
         win_counts[models[int(np.nanargmax(means))]] += 1
     return pd.DataFrame(
-        {"model": model, "bootstrap_win_probability": count / float(n_bootstrap)}
+        {"model": model, "bootstrap_win_probability": count / float(bootstrap_count)}
         for model, count in win_counts.items()
     ).sort_values("bootstrap_win_probability", ascending=False)
 

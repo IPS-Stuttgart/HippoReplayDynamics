@@ -273,6 +273,30 @@ def _event_group_columns(frame: pd.DataFrame) -> list[str]:
     return [column for column in ("session", "event_index", "event_id", "candidate_id") if column in frame.columns]
 
 
+def _validated_log_evidence(frame: pd.DataFrame) -> pd.Series:
+    """Return exact-comparable evidence as numeric finite-or-impossible values."""
+
+    numeric = pd.to_numeric(frame["log_evidence"], errors="coerce")
+    values = numeric.to_numpy(dtype=float)
+    if np.any(np.isnan(values)) or np.any(np.isposinf(values)):
+        raise ValueError("exact-comparable log_evidence must be finite or -inf")
+    return numeric
+
+
+def _resolved_best_evidence_row(frame: pd.DataFrame) -> tuple[pd.Series | None, float]:
+    """Return a best row only when at least one model has nonzero evidence."""
+
+    if frame.empty:
+        return None, np.nan
+    numeric = _validated_log_evidence(frame)
+    values = numeric.to_numpy(dtype=float)
+    best_value = float(np.max(values))
+    if not np.any(np.isfinite(values)):
+        return None, best_value
+    best_position = int(np.argmax(values))
+    return frame.iloc[best_position], best_value
+
+
 def family_margin_decisions(scores: pd.DataFrame, *, margin_threshold: float) -> pd.DataFrame:
     exact = _exact_success_rows(scores)
     columns = [
@@ -287,6 +311,7 @@ def family_margin_decisions(scores: pd.DataFrame, *, margin_threshold: float) ->
         "trajectory_confident_claim",
         "nontrajectory_confident_claim",
         "ambiguous_claim",
+        "unresolved_claim",
         "complete_exact_core",
         "n_models_compared",
         "n_spikes",
@@ -306,10 +331,15 @@ def family_margin_decisions(scores: pd.DataFrame, *, margin_threshold: float) ->
         nontrajectory = group[group["model"].eq(STATIONARY_MODEL)]
         if trajectory.empty or nontrajectory.empty:
             continue
-        best_traj = trajectory.loc[trajectory["log_evidence"].astype(float).idxmax()]
-        best_nontraj = nontrajectory.loc[nontrajectory["log_evidence"].astype(float).idxmax()]
-        margin = float(best_traj["log_evidence"]) - float(best_nontraj["log_evidence"])
-        if margin >= margin_threshold:
+        best_traj, best_traj_log_evidence = _resolved_best_evidence_row(trajectory)
+        best_nontraj, best_nontraj_log_evidence = _resolved_best_evidence_row(nontrajectory)
+        with np.errstate(invalid="ignore"):
+            margin = best_traj_log_evidence - best_nontraj_log_evidence
+        if np.isnan(margin):
+            # Both families assign exactly zero evidence. There is no
+            # evidence-defined family winner or member winner.
+            claim = "unresolved"
+        elif margin >= margin_threshold:
             claim = "trajectory_confident"
         elif margin <= -margin_threshold:
             claim = "nontrajectory_confident"
@@ -319,15 +349,16 @@ def family_margin_decisions(scores: pd.DataFrame, *, margin_threshold: float) ->
         rows.append(
             {
                 **base,
-                "best_trajectory_model": str(best_traj["model"]),
-                "best_trajectory_log_evidence": float(best_traj["log_evidence"]),
-                "best_nontrajectory_model": str(best_nontraj["model"]),
-                "best_nontrajectory_log_evidence": float(best_nontraj["log_evidence"]),
+                "best_trajectory_model": "" if best_traj is None else str(best_traj["model"]),
+                "best_trajectory_log_evidence": best_traj_log_evidence,
+                "best_nontrajectory_model": "" if best_nontraj is None else str(best_nontraj["model"]),
+                "best_nontrajectory_log_evidence": best_nontraj_log_evidence,
                 "trajectory_minus_nontrajectory_margin": margin,
                 "trajectory_family_claim": claim,
                 "trajectory_confident_claim": claim == "trajectory_confident",
                 "nontrajectory_confident_claim": claim == "nontrajectory_confident",
                 "ambiguous_claim": claim == "ambiguous",
+                "unresolved_claim": claim == "unresolved",
                 "complete_exact_core": set(DEFAULT_MODELS).issubset(models_present),
                 "n_models_compared": int(group["model"].nunique()),
                 "n_spikes": _event_first(group, "n_spikes"),
@@ -345,6 +376,7 @@ def family_margin_summary(decisions: pd.DataFrame, *, margin_threshold: float) -
         "trajectory_confident_claims",
         "nontrajectory_confident_claims",
         "ambiguous_events",
+        "unresolved_events",
         "mean_trajectory_minus_nontrajectory_margin",
         "median_trajectory_minus_nontrajectory_margin",
         "min_trajectory_minus_nontrajectory_margin",
@@ -361,6 +393,7 @@ def family_margin_summary(decisions: pd.DataFrame, *, margin_threshold: float) -
                     "trajectory_confident_claims": 0,
                     "nontrajectory_confident_claims": 0,
                     "ambiguous_events": 0,
+                    "unresolved_events": 0,
                     "mean_trajectory_minus_nontrajectory_margin": np.nan,
                     "median_trajectory_minus_nontrajectory_margin": np.nan,
                     "min_trajectory_minus_nontrajectory_margin": np.nan,
@@ -378,6 +411,7 @@ def family_margin_summary(decisions: pd.DataFrame, *, margin_threshold: float) -
         "trajectory_confident_claims": int(decisions["trajectory_confident_claim"].map(bool).sum()),
         "nontrajectory_confident_claims": int(decisions["nontrajectory_confident_claim"].map(bool).sum()),
         "ambiguous_events": int(decisions["ambiguous_claim"].map(bool).sum()),
+        "unresolved_events": int(decisions["unresolved_claim"].map(bool).sum()),
         "mean_trajectory_minus_nontrajectory_margin": float(margins.mean()),
         "median_trajectory_minus_nontrajectory_margin": float(margins.median()),
         "min_trajectory_minus_nontrajectory_margin": float(margins.min()),
@@ -421,6 +455,11 @@ def exact_core_model_claim_summary(scores: pd.DataFrame, *, margin_threshold: fl
     for _keys, group in exact.groupby(group_columns, dropna=False, sort=True):
         exact_core = group[group["model"].isin(DEFAULT_MODELS)].copy()
         if exact_core.empty:
+            continue
+        exact_core["log_evidence"] = _validated_log_evidence(exact_core)
+        if not np.any(np.isfinite(exact_core["log_evidence"].to_numpy(dtype=float))):
+            # All models assign exactly zero evidence, so row order must not
+            # manufacture either a raw or a confident best-model count.
             continue
         exact_core = exact_core.sort_values("log_evidence", ascending=False)
         best = str(exact_core.iloc[0]["model"])
@@ -473,6 +512,7 @@ def paired_momentum_diffusion_summary(scores: pd.DataFrame, *, margin_threshold:
         "momentum_confident_wins",
         "diffusion_confident_wins",
         "ambiguous_events",
+        "unresolved_events",
         "mean_delta_momentum_minus_diffusion",
         "median_delta_momentum_minus_diffusion",
         "min_delta_momentum_minus_diffusion",
@@ -480,22 +520,31 @@ def paired_momentum_diffusion_summary(scores: pd.DataFrame, *, margin_threshold:
         "margin_threshold",
     ]
     deltas: list[float] = []
+    unresolved_events = 0
     group_columns = _event_group_columns(exact)
     for _keys, group in exact.groupby(group_columns, dropna=False, sort=True):
-        by_model = group.set_index("model")["log_evidence"]
-        if MOMENTUM_MODEL not in by_model.index or DIFFUSION_MODEL not in by_model.index:
+        pair = group[group["model"].isin((MOMENTUM_MODEL, DIFFUSION_MODEL))].copy()
+        if set(pair["model"].astype(str)) != {MOMENTUM_MODEL, DIFFUSION_MODEL}:
             continue
-        deltas.append(float(by_model[MOMENTUM_MODEL]) - float(by_model[DIFFUSION_MODEL]))
+        pair["log_evidence"] = _validated_log_evidence(pair)
+        by_model = pair.set_index("model")["log_evidence"]
+        momentum = float(by_model[MOMENTUM_MODEL])
+        diffusion = float(by_model[DIFFUSION_MODEL])
+        if np.isneginf(momentum) and np.isneginf(diffusion):
+            unresolved_events += 1
+            continue
+        deltas.append(momentum - diffusion)
     if not deltas:
         return pd.DataFrame(
             [
                 {
-                    "paired_events": 0,
+                    "paired_events": int(unresolved_events),
                     "momentum_raw_wins": 0,
                     "diffusion_raw_wins": 0,
                     "momentum_confident_wins": 0,
                     "diffusion_confident_wins": 0,
                     "ambiguous_events": 0,
+                    "unresolved_events": int(unresolved_events),
                     "mean_delta_momentum_minus_diffusion": np.nan,
                     "median_delta_momentum_minus_diffusion": np.nan,
                     "min_delta_momentum_minus_diffusion": np.nan,
@@ -507,12 +556,13 @@ def paired_momentum_diffusion_summary(scores: pd.DataFrame, *, margin_threshold:
         )
     arr = np.asarray(deltas, dtype=float)
     row = {
-        "paired_events": int(arr.size),
+        "paired_events": int(arr.size + unresolved_events),
         "momentum_raw_wins": int((arr > 0).sum()),
         "diffusion_raw_wins": int((arr < 0).sum()),
         "momentum_confident_wins": int((arr >= margin_threshold).sum()),
         "diffusion_confident_wins": int((arr <= -margin_threshold).sum()),
         "ambiguous_events": int((np.abs(arr) < margin_threshold).sum()),
+        "unresolved_events": int(unresolved_events),
         "mean_delta_momentum_minus_diffusion": float(arr.mean()),
         "median_delta_momentum_minus_diffusion": float(np.median(arr)),
         "min_delta_momentum_minus_diffusion": float(arr.min()),

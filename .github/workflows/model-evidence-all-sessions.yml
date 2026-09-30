@@ -104,6 +104,12 @@ on:
         description: "Minimum speed for place-field training in cm/s"
         required: true
         default: "5.0"
+  push:
+    branches:
+      - main
+    paths:
+      - "docs/model_evidence_refresh_trigger.txt"
+
 permissions:
   contents: read
 
@@ -112,40 +118,40 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  DATASET_ROOT: ${{ inputs.dataset_root }}
-  SESSIONS: ${{ inputs.sessions }}
-  EVENTS: ${{ inputs.events }}
-  MAX_EVENTS: ${{ inputs.max_events }}
-  MODELS: ${{ inputs.models }}
-  EVENT_SHARD_COUNT: ${{ inputs.event_shard_count }}
-  CANDIDATE_TOP_K: ${{ inputs.candidate_top_k }}
-  STATE_SPACE_STATIONARY_SIGMA_CM: ${{ inputs.state_space_stationary_sigma_cm }}
-  STATE_SPACE_DIFFUSION_SIGMA_CM_SQRT_S: ${{ inputs.state_space_diffusion_sigma_cm_sqrt_s }}
-  STATE_SPACE_MAX_STEP_SIGMA: ${{ inputs.state_space_max_step_sigma }}
-  STATE_SPACE_VALID_OCCUPANCY_THRESHOLD_S: ${{ inputs.state_space_valid_occupancy_threshold_s }}
-  STATE_SPACE_IMM_MODE_STICKINESS: ${{ inputs.state_space_imm_mode_stickiness }}
-  STATE_SPACE_MOMENTUM_SIGMA_CM_SQRT_S: ${{ inputs.state_space_momentum_sigma_cm_sqrt_s }}
-  STATE_SPACE_MOMENTUM_INITIAL_SIGMA_CM_SQRT_S: ${{ inputs.state_space_momentum_initial_sigma_cm_sqrt_s }}
-  STATE_SPACE_MOMENTUM_VELOCITY_DECAY: ${{ inputs.state_space_momentum_velocity_decay }}
+  DATASET_ROOT: ${{ github.event_name == 'workflow_dispatch' && inputs.dataset_root || 'data/DataSetFromPfeifferFoster' }}
+  SESSIONS: ${{ github.event_name == 'workflow_dispatch' && inputs.sessions || 'Rat1/Open1 Rat1/Open2 Rat2/Open1 Rat2/Open2 Rat3/Open1 Rat3/Open2 Rat4/Open1 Rat4/Open2' }}
+  EVENTS: ${{ github.event_name == 'workflow_dispatch' && inputs.events || 'run' }}
+  MAX_EVENTS: ${{ github.event_name == 'workflow_dispatch' && inputs.max_events || '' }}
+  MODELS: ${{ github.event_name == 'workflow_dispatch' && inputs.models || 'sorted-spike-state-space-stationary sorted-spike-state-space-diffusion sorted-spike-state-space-fragmented sorted-spike-state-space-first-order-imm sorted-spike-state-space-momentum-exact-sparse sorted-spike-state-space-momentum sorted-spike-state-space-imm' }}
+  EVENT_SHARD_COUNT: ${{ github.event_name == 'workflow_dispatch' && inputs.event_shard_count || '16' }}
+  CANDIDATE_TOP_K: ${{ github.event_name == 'workflow_dispatch' && inputs.candidate_top_k || '64' }}
+  STATE_SPACE_STATIONARY_SIGMA_CM: ${{ github.event_name == 'workflow_dispatch' && inputs.state_space_stationary_sigma_cm || '2.0' }}
+  STATE_SPACE_DIFFUSION_SIGMA_CM_SQRT_S: ${{ github.event_name == 'workflow_dispatch' && inputs.state_space_diffusion_sigma_cm_sqrt_s || '85.0' }}
+  STATE_SPACE_MAX_STEP_SIGMA: ${{ github.event_name == 'workflow_dispatch' && inputs.state_space_max_step_sigma || '4.0' }}
+  STATE_SPACE_VALID_OCCUPANCY_THRESHOLD_S: ${{ github.event_name == 'workflow_dispatch' && inputs.state_space_valid_occupancy_threshold_s || '0.0' }}
+  STATE_SPACE_IMM_MODE_STICKINESS: ${{ github.event_name == 'workflow_dispatch' && inputs.state_space_imm_mode_stickiness || '0.95' }}
+  STATE_SPACE_MOMENTUM_SIGMA_CM_SQRT_S: ${{ github.event_name == 'workflow_dispatch' && inputs.state_space_momentum_sigma_cm_sqrt_s || '85.0' }}
+  STATE_SPACE_MOMENTUM_INITIAL_SIGMA_CM_SQRT_S: ${{ github.event_name == 'workflow_dispatch' && inputs.state_space_momentum_initial_sigma_cm_sqrt_s || '85.0' }}
+  STATE_SPACE_MOMENTUM_VELOCITY_DECAY: ${{ github.event_name == 'workflow_dispatch' && inputs.state_space_momentum_velocity_decay || '0.95' }}
   STATE_SPACE_MOMENTUM_CANDIDATE_TOP_K: "128"
   GOAL_STATE_SPACE_TRANSITION_SIGMA_CM_SQRT_S: "85.0"
   GOAL_STATE_SPACE_DRIFT_SPEED_CM_S: "400.0"
   GOAL_STATE_SPACE_MAX_STEP_SIGMA: "4.0"
   CLUSTERLESS_MARK_SMOOTHING_SIGMA_BINS: "1.0"
   CLUSTERLESS_MARK_PRIOR_COUNT: "1.0"
-  CLUSTERLESS_MARK_VARIANCE_FLOOR: ${{ inputs.clusterless_mark_variance_floor }}
-  CLUSTERLESS_RATE_FLOOR_HZ: ${{ inputs.clusterless_rate_floor_hz }}
-  CLUSTERLESS_MARK_LIKELIHOOD: ${{ inputs.clusterless_mark_likelihood }}
+  CLUSTERLESS_MARK_VARIANCE_FLOOR: ${{ github.event_name == 'workflow_dispatch' && inputs.clusterless_mark_variance_floor || '1.0' }}
+  CLUSTERLESS_RATE_FLOOR_HZ: ${{ github.event_name == 'workflow_dispatch' && inputs.clusterless_rate_floor_hz || '0.0001' }}
+  CLUSTERLESS_MARK_LIKELIHOOD: ${{ github.event_name == 'workflow_dispatch' && inputs.clusterless_mark_likelihood || 'local-kde' }}
   CLUSTERLESS_MARK_KDE_BANDWIDTH: ""
   CLUSTERLESS_MARK_KDE_SPATIAL_SIGMA_BINS: ""
   CLUSTERLESS_MARK_KDE_MAX_NEIGHBORS: "256"
-  TIME_BIN_S: ${{ inputs.time_bin_s }}
-  SPIKE_RATE_SCALE: ${{ inputs.spike_rate_scale }}
-  EMISSION_LIKELIHOOD_TEMPERATURE: ${{ inputs.emission_likelihood_temperature }}
-  EMISSION_NEGATIVE_BINOMIAL_OVERDISPERSION: ${{ inputs.emission_negative_binomial_overdispersion }}
-  BIN_SIZE_CM: ${{ inputs.bin_size_cm }}
-  SMOOTHING_SIGMA_BINS: ${{ inputs.smoothing_sigma_bins }}
-  MIN_SPEED_CM_S: ${{ inputs.min_speed_cm_s }}
+  TIME_BIN_S: ${{ github.event_name == 'workflow_dispatch' && inputs.time_bin_s || '0.003' }}
+  SPIKE_RATE_SCALE: ${{ github.event_name == 'workflow_dispatch' && inputs.spike_rate_scale || '1.0' }}
+  EMISSION_LIKELIHOOD_TEMPERATURE: ${{ github.event_name == 'workflow_dispatch' && inputs.emission_likelihood_temperature || '1.0' }}
+  EMISSION_NEGATIVE_BINOMIAL_OVERDISPERSION: ${{ github.event_name == 'workflow_dispatch' && inputs.emission_negative_binomial_overdispersion || '0.0' }}
+  BIN_SIZE_CM: ${{ github.event_name == 'workflow_dispatch' && inputs.bin_size_cm || '6.0' }}
+  SMOOTHING_SIGMA_BINS: ${{ github.event_name == 'workflow_dispatch' && inputs.smoothing_sigma_bins || '2.0' }}
+  MIN_SPEED_CM_S: ${{ github.event_name == 'workflow_dispatch' && inputs.min_speed_cm_s || '5.0' }}
   LOCAL_CACHE_ROOT: ${{ vars.PFEIFFERFOSTER_LOCAL_CACHE_ROOT }}
   OMP_NUM_THREADS: "1"
   OPENBLAS_NUM_THREADS: "1"
@@ -616,3 +622,4 @@ jobs:
           name: model-evidence-all-sessions-${{ github.run_id }}
           path: results/all-session-model-evidence/
           if-no-files-found: error
+          retention-days: 90

@@ -233,18 +233,63 @@ def _best_in(group: pd.DataFrame, models: Iterable[str]) -> tuple[str, float]:
     subset = group[group["model"].isin(tuple(models))].copy()
     if subset.empty:
         return "", float("nan")
-    row = subset.sort_values("log_evidence", ascending=False).iloc[0]
+    values = pd.to_numeric(subset["log_evidence"], errors="coerce").to_numpy(
+        dtype=float
+    )
+    finite_positions = np.flatnonzero(np.isfinite(values))
+    if finite_positions.size == 0:
+        return "", float("nan")
+    best_position = int(finite_positions[np.argmax(values[finite_positions])])
+    row = subset.iloc[best_position]
     return str(row["model"]), float(row["log_evidence"])
 
 
-def _winner_margin_to_runner_up(group: pd.DataFrame, winner: str, models: Iterable[str]) -> float:
+def _winner_margin_to_runner_up(
+    group: pd.DataFrame,
+    winner: str,
+    models: Iterable[str],
+) -> float:
+    if not winner:
+        return float("nan")
     subset = group[group["model"].isin(tuple(models))].copy()
-    subset = subset.sort_values("log_evidence", ascending=False)
-    if len(subset) < 2 or not winner:
+    winner_rows = subset[subset["model"].astype(str).eq(str(winner))]
+    if winner_rows.empty:
         return float("nan")
-    if str(subset.iloc[0]["model"]) != winner:
+    winner_value = float(
+        pd.to_numeric(winner_rows.iloc[-1]["log_evidence"], errors="coerce")
+    )
+    if not np.isfinite(winner_value):
         return float("nan")
-    return float(subset.iloc[0]["log_evidence"] - subset.iloc[1]["log_evidence"])
+
+    competitors = subset[~subset["model"].astype(str).eq(str(winner))].copy()
+    if competitors.empty:
+        return float("nan")
+    competitor_values = pd.to_numeric(
+        competitors["log_evidence"],
+        errors="coerce",
+    ).to_numpy(dtype=float)
+    usable = ~(np.isnan(competitor_values) | np.isposinf(competitor_values))
+    if not np.any(usable):
+        return float("nan")
+    runner_up = float(np.max(competitor_values[usable]))
+    return float(winner_value - runner_up)
+
+
+def _evidence_difference(left: object, right: object) -> float:
+    try:
+        left_value = float(left)
+        right_value = float(right)
+    except (TypeError, ValueError):
+        return float("nan")
+    if (
+        np.isnan(left_value)
+        or np.isnan(right_value)
+        or np.isposinf(left_value)
+        or np.isposinf(right_value)
+        or (np.isneginf(left_value) and np.isneginf(right_value))
+    ):
+        return float("nan")
+    return float(left_value - right_value)
 
 
 def _dominant_mode(mode_values: dict[str, float]) -> str:
@@ -302,10 +347,9 @@ def build_first_order_imm_mode_usage_event_table(
         )
         stationary_logz = _model_value(exact_group, STATIONARY)
         first_order_logz = _model_value(exact_group, FIRST_ORDER_IMM)
-        trajectory_margin = (
-            float(best_trajectory_logz - stationary_logz)
-            if np.isfinite(best_trajectory_logz) and np.isfinite(stationary_logz)
-            else float("nan")
+        trajectory_margin = _evidence_difference(
+            best_trajectory_logz,
+            stationary_logz,
         )
         terminal = {
             mode: _model_diag_value(group, FIRST_ORDER_IMM, column)
@@ -348,11 +392,14 @@ def build_first_order_imm_mode_usage_event_table(
             "best_exact_core_margin_to_runner_up": best_exact_margin,
             "best_trajectory_capable_model": best_trajectory_model,
             "trajectory_capable_minus_stationary": trajectory_margin,
-            "trajectory_capable_confident_vs_stationary": bool(trajectory_margin >= margin_threshold),
+            "trajectory_capable_confident_vs_stationary": bool(
+                not np.isnan(trajectory_margin)
+                and trajectory_margin >= margin_threshold
+            ),
             "first_order_imm_is_best_exact_core": best_exact_model == FIRST_ORDER_IMM,
             "first_order_imm_confident_exact_core_best": bool(
                 best_exact_model == FIRST_ORDER_IMM
-                and np.isfinite(best_exact_margin)
+                and not np.isnan(best_exact_margin)
                 and best_exact_margin >= margin_threshold
             ),
             "logZ_stationary": stationary_logz,

@@ -251,8 +251,9 @@ def apply_evidence_complex_validation_patch() -> None:
     def finite_log_evidence_mask(frame: pd.DataFrame) -> pd.Series:
         if "log_evidence" not in frame:
             return pd.Series(True, index=frame.index)
-        values = _real_numeric_series(frame["log_evidence"])
-        return pd.Series(np.isfinite(values.to_numpy()), index=frame.index)
+        values = _real_numeric_series(frame["log_evidence"]).to_numpy()
+        usable = ~(np.isnan(values) | np.isposinf(values))
+        return pd.Series(usable, index=frame.index)
 
     setattr(finite_log_evidence_mask, _STATUS_FINITE_FLAG, True)
     status._finite_log_evidence_mask = finite_log_evidence_mask

@@ -134,7 +134,9 @@ def _success_rows(frame: pd.DataFrame) -> pd.DataFrame:
     out["event_index"] = out["event_index"].map(_exact_event_index)
     out["model"] = out["model"].astype(str)
     out["log_evidence"] = pd.to_numeric(out["log_evidence"], errors="coerce")
-    out = out.dropna(subset=["log_evidence"]).copy()
+    evidence = out["log_evidence"].to_numpy(dtype=float)
+    usable_evidence = ~(np.isnan(evidence) | np.isposinf(evidence))
+    out = out.loc[usable_evidence].copy()
     if "evidence_comparable" in out.columns:
         out["evidence_comparable"] = _bool_column(out, "evidence_comparable")
     elif "evidence_support" in out.columns:
@@ -151,20 +153,46 @@ def _value_for_model(group: pd.DataFrame, model: str) -> float:
     return float(row.sort_index().iloc[-1]["log_evidence"])
 
 
-def _best_model(group: pd.DataFrame, models: set[str]) -> tuple[str, float]:
-    subset = group[group["model"].isin(models)].dropna(subset=["log_evidence"])
+def _usable_model_rows(group: pd.DataFrame, models: set[str]) -> pd.DataFrame:
+    """Return rows whose evidence can participate in a model comparison.
+
+    Negative-infinite log evidence is valid: it represents exactly zero model
+    evidence. NaN and positive infinity are invalid. Keeping this rule local to
+    the comparison helpers also protects callers that bypass _success_rows.
+    """
+
+    subset = group[group["model"].isin(models)].copy()
     if subset.empty:
+        return subset
+    evidence = pd.to_numeric(subset["log_evidence"], errors="coerce").to_numpy(dtype=float)
+    usable = ~(np.isnan(evidence) | np.isposinf(evidence))
+    subset = subset.loc[usable].copy()
+    subset["log_evidence"] = evidence[usable]
+    return subset
+
+
+def _best_model(group: pd.DataFrame, models: set[str]) -> tuple[str, float]:
+    subset = _usable_model_rows(group, models)
+    if subset.empty:
+        return "", float("nan")
+    evidence = subset["log_evidence"].to_numpy(dtype=float)
+    if not np.any(np.isfinite(evidence)):
+        # All usable models assign exactly zero evidence. There is no defined
+        # winner because -inf - -inf is indeterminate.
         return "", float("nan")
     row = subset.sort_values(["log_evidence", "model"], ascending=[False, True]).iloc[0]
     return str(row["model"]), float(row["log_evidence"])
 
 
 def _rank_among_models(group: pd.DataFrame, model: str, models: set[str]) -> int | float:
-    subset = group[group["model"].isin(models)].dropna(subset=["log_evidence"]).copy()
+    subset = _usable_model_rows(group, models)
     if subset.empty or model not in set(subset["model"]):
         return np.nan
+    evidence = subset["log_evidence"].to_numpy(dtype=float)
+    if not np.any(np.isfinite(evidence)):
+        return np.nan
     target = float(subset.loc[subset["model"].eq(model), "log_evidence"].iloc[-1])
-    return int(1 + (subset["log_evidence"].astype(float) > target).sum())
+    return int(1 + (evidence > target).sum())
 
 
 def trajectory_imm_event_pairs(
@@ -280,8 +308,11 @@ def trajectory_imm_event_pairs(
 
 
 def _second_best_gap(group: pd.DataFrame, model: str, models: set[str]) -> float:
-    subset = group[group["model"].isin(models)].dropna(subset=["log_evidence"]).copy()
+    subset = _usable_model_rows(group, models)
     if subset.empty or model not in set(subset["model"]):
+        return float("nan")
+    evidence = subset["log_evidence"].to_numpy(dtype=float)
+    if not np.any(np.isfinite(evidence)):
         return float("nan")
     target = float(subset.loc[subset["model"].eq(model), "log_evidence"].iloc[-1])
     others = subset[~subset["model"].eq(model)]["log_evidence"].astype(float)

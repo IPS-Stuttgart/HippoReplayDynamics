@@ -1,0 +1,7 @@
+Model-evidence artifact refresh marker.
+
+Updating this file on main triggers the all-session model-evidence producer.
+The replay behavior alignment workflow then runs from the producer's completed workflow run,
+so it no longer depends on a permanently pinned artifact.
+
+Refresh requested: 2026-09-30

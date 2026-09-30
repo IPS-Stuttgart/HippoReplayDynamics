@@ -80,8 +80,10 @@ def test_all_session_model_evidence_workflow_exports_expected_outputs():
     assert "state_space_momentum_initial_sigma_cm_sqrt_s:" in workflow
     assert (
         "STATE_SPACE_MOMENTUM_INITIAL_SIGMA_CM_SQRT_S: "
-        "${{ inputs.state_space_momentum_initial_sigma_cm_sqrt_s }}"
+        "${{ github.event_name == 'workflow_dispatch' && "
+        "inputs.state_space_momentum_initial_sigma_cm_sqrt_s || '85.0' }}"
     ) in workflow
+    assert '"docs/model_evidence_refresh_trigger.txt"' in workflow
     assert "--state-space-momentum-initial-sigma-cm-sqrt-s" in workflow
     assert 'CLUSTERLESS_MARK_SMOOTHING_SIGMA_BINS: "1.0"' in workflow
     assert "--clusterless-mark-smoothing-sigma-bins" in workflow
@@ -256,6 +258,114 @@ def test_random_effects_uses_only_events_with_paired_model_support():
         summary.loc["complete", "fixed_effects_probability"]
         > summary.loc["missing-hard-event", "fixed_effects_probability"]
     )
+
+
+def test_random_effects_splits_exact_session_ties_without_model_order_bias():
+    frame = pd.DataFrame(
+        [
+            {
+                "session": "Rat1/Open1",
+                "event_index": 0,
+                "model": model,
+                "status": "success",
+                "log_evidence": 0.0,
+                "evidence_support": "exact_full_grid",
+                "evidence_comparable": True,
+                "is_best_model": False,
+            }
+            for model in ("z-model", "a-model")
+        ]
+    )
+
+    summary = random_effects_model_probabilities(frame).set_index("model")
+
+    assert summary.loc["a-model", "session_win_count"] == pytest.approx(0.5)
+    assert summary.loc["z-model", "session_win_count"] == pytest.approx(0.5)
+    assert summary.loc["a-model", "random_effects_probability"] == pytest.approx(0.5)
+    assert summary.loc["z-model", "random_effects_probability"] == pytest.approx(0.5)
+    assert summary["random_effects_probability"].sum() == pytest.approx(1.0)
+
+
+def test_random_effects_all_impossible_session_does_not_dilute_resolved_votes():
+    frame = pd.DataFrame(
+        [
+            {
+                "session": "Rat1/Open1",
+                "event_index": 0,
+                "model": "a",
+                "status": "success",
+                "log_evidence": 0.0,
+                "evidence_support": "exact_full_grid",
+                "evidence_comparable": True,
+                "is_best_model": True,
+            },
+            {
+                "session": "Rat1/Open1",
+                "event_index": 0,
+                "model": "b",
+                "status": "success",
+                "log_evidence": -1.0,
+                "evidence_support": "exact_full_grid",
+                "evidence_comparable": True,
+                "is_best_model": False,
+            },
+            {
+                "session": "Rat1/Open2",
+                "event_index": 0,
+                "model": "a",
+                "status": "success",
+                "log_evidence": float("-inf"),
+                "evidence_support": "exact_full_grid",
+                "evidence_comparable": True,
+                "is_best_model": False,
+            },
+            {
+                "session": "Rat1/Open2",
+                "event_index": 0,
+                "model": "b",
+                "status": "success",
+                "log_evidence": float("-inf"),
+                "evidence_support": "exact_full_grid",
+                "evidence_comparable": True,
+                "is_best_model": False,
+            },
+        ]
+    )
+
+    summary = random_effects_model_probabilities(frame).set_index("model")
+
+    assert summary["sessions"].eq(2).all()
+    assert summary.loc["a", "session_win_count"] == pytest.approx(1.0)
+    assert summary.loc["b", "session_win_count"] == pytest.approx(0.0)
+    assert summary.loc["a", "random_effects_probability"] == pytest.approx(2.0 / 3.0)
+    assert summary.loc["b", "random_effects_probability"] == pytest.approx(1.0 / 3.0)
+    assert summary["random_effects_probability"].sum() == pytest.approx(1.0)
+    assert summary["fixed_effects_log_evidence"].eq(float("-inf")).all()
+    assert summary["fixed_effects_probability"].isna().all()
+
+
+def test_random_effects_all_impossible_only_returns_prior_probabilities():
+    frame = pd.DataFrame(
+        [
+            {
+                "session": "Rat1/Open1",
+                "event_index": 0,
+                "model": model,
+                "status": "success",
+                "log_evidence": float("-inf"),
+                "evidence_support": "exact_full_grid",
+                "evidence_comparable": True,
+                "is_best_model": False,
+            }
+            for model in ("a", "b")
+        ]
+    )
+
+    summary = random_effects_model_probabilities(frame).set_index("model")
+
+    assert summary["session_win_count"].eq(0.0).all()
+    assert summary["random_effects_probability"].tolist() == pytest.approx([0.5, 0.5])
+    assert summary["fixed_effects_probability"].isna().all()
 
 
 def test_all_session_boolean_string_false_rows_are_not_exact_comparable():
